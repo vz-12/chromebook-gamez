@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#05060a">
+<title>VOIDRUNNER · deployment check</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#05060a;color:#cbd5e1;min-height:100vh;padding:28px 18px 60px;
+    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:26px;font-weight:800;letter-spacing:.02em;color:#e0f2fe;
+    text-shadow:0 0 26px rgba(103,232,249,.45)}
+  .sub{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#475569;margin-top:6px}
+  .verdict{margin:22px 0;padding:16px 18px;border-radius:12px;border:1px solid #1e293b;
+    background:#0b1220;font-weight:700;font-size:15px;display:flex;align-items:center;gap:12px}
+  .verdict.good{border-color:#34d399;color:#6ee7b7;box-shadow:0 0 30px rgba(52,211,153,.12)}
+  .verdict.bad{border-color:#ef4444;color:#fca5a5;box-shadow:0 0 30px rgba(239,68,68,.12)}
+  .verdict.warn{border-color:#fbbf24;color:#fcd34d}
+  .verdict.busy{border-color:#334155;color:#64748b}
+  .row{display:flex;gap:14px;padding:13px 16px;border:1px solid #16202f;border-radius:10px;
+    background:#080d16;margin-bottom:9px;align-items:flex-start}
+  .chip{flex:none;font-size:10px;font-weight:800;letter-spacing:.1em;padding:4px 8px;
+    border-radius:5px;min-width:64px;text-align:center;margin-top:1px}
+  .PASS{background:rgba(52,211,153,.14);color:#6ee7b7;border:1px solid rgba(52,211,153,.4)}
+  .FAIL{background:rgba(239,68,68,.14);color:#fca5a5;border:1px solid rgba(239,68,68,.45)}
+  .WARN{background:rgba(251,191,36,.13);color:#fcd34d;border:1px solid rgba(251,191,36,.4)}
+  .RUN{background:rgba(100,116,139,.13);color:#64748b;border:1px solid rgba(100,116,139,.35)}
+  .body{flex:1;min-width:0}
+  .name{font-weight:600;font-size:14px;color:#e2e8f0}
+  .detail{font-size:12.5px;color:#94a3b8;margin-top:4px;line-height:1.5;word-wrap:break-word}
+  .fix{font-size:12.5px;color:#fcd34d;margin-top:6px;line-height:1.5;
+    border-left:2px solid rgba(251,191,36,.4);padding-left:10px}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:#0f172a;
+    padding:1px 5px;border-radius:4px;color:#a5f3fc}
+  h2{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#475569;
+    margin:26px 0 10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:6px 8px;border-bottom:1px solid #131c2b}
+  td.r{text-align:right;color:#fbbf24;font-weight:700;white-space:nowrap}
+  td.n{color:#e2e8f0}
+  td.m{color:#64748b;font-size:12px}
+  button{background:#0b1220;color:#67e8f9;border:1px solid rgba(103,232,249,.45);
+    padding:11px 22px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;
+    font-family:inherit;letter-spacing:.06em}
+  button:hover{background:rgba(103,232,249,.1)}
+  a{color:#67e8f9}
+  .foot{margin-top:26px;font-size:11.5px;color:#334155;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>VOIDRUNNER</h1>
+  <div class="sub">deployment check</div>
+
+  <div id="verdict" class="verdict busy">Running checks…</div>
+  <div id="rows"></div>
+
+  <div id="boardWrap" style="display:none">
+    <h2>Leaderboard contents</h2>
+    <table id="board"></table>
+  </div>
+
+  <h2>Actions</h2>
+  <button onclick="runAll()">Run checks again</button>
+  <button onclick="location.href='/'">Open the game</button>
+
+  <div class="foot">
+    This page only reads. The write test deliberately submits an
+    <em>impossible</em> score and confirms the server rejects it, so nothing is
+    ever added to the real leaderboard.
+  </div>
+</div>
+
+<script>
+const rowsEl = document.getElementById('rows');
+const verdictEl = document.getElementById('verdict');
+
+const PASS = (detail) => ({ s: 'PASS', detail });
+const FAIL = (detail, fix) => ({ s: 'FAIL', detail, fix });
+const WARN = (detail, fix) => ({ s: 'WARN', detail, fix });
+
+let boardData = null;
+
+const CHECKS = [
+  {
+    name: 'Served from a real URL',
+    run: async () => {
+      if (location.protocol === 'file:')
+        return FAIL('Opened as a local file (file://).',
+          'Network features are switched off by design here. Open your Netlify URL instead — this page cannot test a deploy from disk.');
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost')
+        return WARN('Served over ' + location.protocol,
+          'Fireproof and the leaderboard both want HTTPS. Netlify provides it automatically.');
+      return PASS(location.origin);
+    }
+  },
+  {
+    name: 'Game file is deployed',
+    run: async () => {
+      const r = await fetch('index.html', { cache: 'no-store' });
+      if (!r.ok) return FAIL('HTTP ' + r.status + ' fetching index.html',
+        'The publish directory may be wrong. netlify.toml should say publish = "."');
+      const t = await r.text();
+      if (!/VOIDRUNNER/.test(t) || !/requestAnimationFrame/.test(t))
+        return FAIL('index.html exists but does not look like the game.',
+          'Something else is being served at the site root.');
+      return PASS(Math.round(t.length / 1024) + ' KB, looks correct');
+    }
+  },
+  {
+    name: 'Leaderboard function is live',
+    run: async () => {
+      let r;
+      try { r = await fetch('/api/leaderboard', { cache: 'no-store' }); }
+      catch (e) { return FAIL('Request failed: ' + e.message, 'Network blocked, or the site is offline.'); }
+
+      if (r.status === 404) return FAIL('404 — no function at /api/leaderboard.',
+        'Netlify did not deploy the function. Confirm netlify/functions/leaderboard.mjs is in the repo and that this was a Git build, not a drag-and-drop upload (drag-and-drop cannot install dependencies).');
+      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — the function crashed.',
+        'Almost always a missing dependency. Check package.json is in the repo root with @netlify/blobs, and look for the npm install step in the Netlify deploy log.');
+      if (!r.ok) return FAIL('HTTP ' + r.status);
+
+      let d;
+      try { d = await r.json(); }
+      catch (e) { return FAIL('Responded, but not with JSON.',
+        'You are probably seeing the 404 page. The /api/leaderboard route is not active.'); }
+
+      if (!d || !Array.isArray(d.top)) return FAIL('JSON had no "top" array.',
+        'The function replied but not in the expected shape — is leaderboard.mjs the current version?');
+
+      boardData = d.top;
+      return PASS(d.top.length + ' entr' + (d.top.length === 1 ? 'y' : 'ies') +
+                  ' — blob storage read OK');
+    }
+  },
+  {
+    name: 'Score validation is working',
+    run: async () => {
+      // An impossible claim: huge score on wave 1 with no kills. A correct
+      // server rejects this with 422 and stores nothing.
+      let r;
+      try {
+        r = await fetch('/api/leaderboard', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'diagnostic', score: 999999999, wave: 1,
+            sector: 'CHECK', level: 1, kills: 0, time: 30 })
+        });
+      } catch (e) { return FAIL('Request failed: ' + e.message); }
+
+      if (r.status === 422) return PASS('Impossible score rejected (422) — nothing written');
+      if (r.status === 404) return FAIL('404 — function not deployed.', 'See the check above.');
+      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — function crashed on write.',
+        'The read path may work while the write path fails. Check the function log in Netlify.');
+      if (r.ok) return WARN('The server ACCEPTED an impossible score.',
+        'Validation is not running. leaderboard.mjs may be an older version. Your board can be filled with fake scores.');
+      return WARN('Unexpected status ' + r.status);
+    }
+  },
+  {
+    name: 'Malformed requests are rejected',
+    run: async () => {
+      let r;
+      try {
+        r = await fetch('/api/leaderboard', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: '{ this is not json'
+        });
+      } catch (e) { return FAIL('Request failed: ' + e.message); }
+      if (r.status === 400) return PASS('Bad JSON rejected (400)');
+      if (r.status === 404) return FAIL('404 — function not deployed.');
+      return WARN('Expected 400, got ' + r.status);
+    }
+  },
+  {
+    name: 'Fireproof loads (cloud-style saves)',
+    run: async () => {
+      if (location.protocol === 'file:')
+        return WARN('Skipped on file:// — modules cannot load from disk.');
+      try {
+        const m = await import('https://esm.sh/@fireproof/core@0.24.19');
+        if (typeof m.fireproof !== 'function')
+          return WARN('Module loaded but has no fireproof export.',
+            'Saves fall back to localStorage. The game still works.');
+        return PASS('@fireproof/core 0.24.19 loaded');
+      } catch (e) {
+        return WARN('Could not load: ' + String(e.message || e).slice(0, 90),
+          'Saves fall back to localStorage, so the game still works — players just lose the richer run history. Usually a network block or a Content-Security-Policy that forbids esm.sh.');
+      }
+    }
+  },
+  {
+    name: 'Browser storage is available',
+    run: async () => {
+      let ls = false, err = '';
+      try { localStorage.setItem('__vr_probe', '1'); localStorage.removeItem('__vr_probe'); ls = true; }
+      catch (e) { err = e.name || 'blocked'; }
+      const idb = typeof indexedDB !== 'undefined';
+      if (!ls) return FAIL('localStorage is blocked (' + err + ').',
+        'Private browsing or a site-data block. Progress cannot be saved at all.');
+      if (!idb) return WARN('IndexedDB unavailable — Fireproof cannot persist.',
+        'localStorage still holds the basic profile.');
+      return PASS('localStorage + IndexedDB both available');
+    }
+  },
+  {
+    name: 'Browser can run the game',
+    run: async () => {
+      const c = document.createElement('canvas');
+      const ctx2d = !!(c.getContext && c.getContext('2d'));
+      const audio = !!(window.AudioContext || window.webkitAudioContext);
+      if (!ctx2d) return FAIL('No 2D canvas support.', 'This browser cannot run the game.');
+      if (!audio) return WARN('No Web Audio support — the game will be silent.');
+      return PASS('Canvas 2D and Web Audio present');
+    }
+  }
+];
+
+function render(results) {
+  rowsEl.innerHTML = '';
+  results.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'row';
+    const chip = document.createElement('div');
+    chip.className = 'chip ' + r.s;
+    chip.textContent = r.s;
+    const body = document.createElement('div');
+    body.className = 'body';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = r.name;
+    body.appendChild(name);
+    if (r.detail) {
+      const d = document.createElement('div');
+      d.className = 'detail';
+      d.textContent = r.detail;
+      body.appendChild(d);
+    }
+    if (r.fix) {
+      const f = document.createElement('div');
+      f.className = 'fix';
+      f.textContent = r.fix;
+      body.appendChild(f);
+    }
+    div.appendChild(chip); div.appendChild(body);
+    rowsEl.appendChild(div);
+  });
+}
+
+function renderBoard() {
+  const wrap = document.getElementById('boardWrap');
+  const tbl = document.getElementById('board');
+  if (!boardData || !boardData.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  tbl.innerHTML = '';
+  boardData.slice(0, 10).forEach((e, i) => {
+    const tr = document.createElement('tr');
+    const c = (cls, txt) => { const td = document.createElement('td'); td.className = cls; td.textContent = txt; return td; };
+    tr.appendChild(c('m', '#' + (i + 1)));
+    tr.appendChild(c('n', e.name || '—'));
+    tr.appendChild(c('r', (e.score || 0).toLocaleString()));
+    tr.appendChild(c('m', (e.sector || '—') + '  ·  wave ' + (e.wave || 0)));
+    tbl.appendChild(tr);
+  });
+}
+
+async function runAll() {
+  boardData = null;
+  verdictEl.className = 'verdict busy';
+  verdictEl.textContent = 'Running checks…';
+  const results = CHECKS.map(c => ({ name: c.name, s: 'RUN', detail: '' }));
+  render(results);
+
+  for (let i = 0; i < CHECKS.length; i++) {
+    let out;
+    try { out = await CHECKS[i].run(); }
+    catch (e) { out = FAIL('Check threw: ' + String(e.message || e).slice(0, 120)); }
+    results[i] = Object.assign({ name: CHECKS[i].name }, out);
+    render(results);
+  }
+
+  const fails = results.filter(r => r.s === 'FAIL').length;
+  const warns = results.filter(r => r.s === 'WARN').length;
+  if (fails) {
+    verdictEl.className = 'verdict bad';
+    verdictEl.textContent = fails + ' problem' + (fails > 1 ? 's' : '') +
+      ' found — the highlighted lines below say how to fix it.';
+  } else if (warns) {
+    verdictEl.className = 'verdict warn';
+    verdictEl.textContent = 'Playable, with ' + warns + ' thing' + (warns > 1 ? 's' : '') +
+      ' degraded. Details below.';
+  } else {
+    verdictEl.className = 'verdict good';
+    verdictEl.textContent = 'All systems go — game, saves and global leaderboard are live.';
+  }
+  renderBoard();
+}
+
+runAll();
+</script>
+</body>
+</html>
