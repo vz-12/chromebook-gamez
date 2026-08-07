@@ -1,0 +1,29 @@
+# VOIDRUNNER — static single-file deploy.
+# There is no build step: index.html is the entire game.
+
+[build]
+  publish = "."
+  command = ""
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Always revalidate the game itself so players pick up new builds immediately.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Cross-origin isolation is deliberately NOT enabled here, and no
+# Content-Security-Policy is set. Fireproof is loaded as an ES module from
+# https://esm.sh at runtime; a restrictive script-src or COEP policy would
+# block it and silently drop the game back to localStorage saves.
+# If you add a CSP later, it must allow:
+#   script-src  'self' 'unsafe-inline' https://esm.sh
+#   connect-src 'self' https://esm.sh
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
