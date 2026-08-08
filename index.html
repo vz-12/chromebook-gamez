@@ -301,7 +301,11 @@ function newPlayer() {
     bloodlust: 0, tempo: 0, revive: 0, credMul: 1, luck: 0,
     vortex: 0, napalm: 0, cryonova: 0, ghost: 0, overcharge: 0,
     sentryUp: 0, bullettime: 0, execute: 0, siphon: 0, overkill: 0,
-    heavy: 0,
+    heavy: 0, frailty: 1,        // frailty > 1 means you take extra damage
+    // --- zodiac readings (see SIGNS) ---
+    ram: 0, twin: 0, sun: 0, venom: 0, arrow: 0, current: 0,
+    rooted: 0, molt: 0, exacting: 0, scales: 0, deepwater: 0, climb: 0,
+    sunT: 0, currentT: 0, scalesDebt: 0, scalesT: 0, twinAng: 0,
     // runtime
     fireT: 0, iframe: 0, dashMax: 1, dashCh: 1, dashCd: 1.5, dashRe: 0,
     dashT: 0, dashDX: 0, dashDY: 0, hurtFlash: 0,
@@ -531,7 +535,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   const w = wave;
   const bKey = type === 'boss' ? (opts.boss || stage.boss) : null;
   const bd = bKey ? BOSSES[bKey] : null;
-  const hpScale = type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w);
+  const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w)) * curseHpMul;
   const canElite = type !== 'boss' && type !== 'egg';
   const eliteChance = Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45);
   const elite = opts.elite ?? (canElite && w > 3 && Math.random() < eliteChance);
@@ -547,7 +551,7 @@ function spawnEnemy(type, x, y, opts = {}) {
     t: 0, cd: rnd(1.2, 0.4), state: 0, gen: opts.gen || 0,
     phase: 0, atk: 0, atkT: 0, hitCd: 0, wob: rnd(TAU),
     // expansion state: phasing, armour plates, healing beams, blink timers
-    phased: false, phaseT: rnd(2, 0.5), plateAng: 0, healT: 0,
+    phased: false, phaseT: rnd(2, 0.5), plateAng: 0, healT: 0, ramCd: 0, psn: 0, psnT: 0,
     blinkT: rnd(1.6, 0.7), invuln: 0, tether: null
   };
   e.hp = e.maxHp;
@@ -594,7 +598,10 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
     dmg: P.dmg * dmgMul * stanceMul() * (isCrit ? P.critMult : 1),
     crit: isCrit, pierce: P.pierce + (opts.pierce || 0), ric: P.ricochet,
     life: P.blife * (opts.lm || 1), hits: null, frag: opts.noFrag ? 0 : P.frag,
-    px: x, py: y, dist: 0
+    px: x, py: y, dist: 0,
+    // zodiac projectile types
+    arrow: P.arrow, venom: P.venom, solar: P.sun, deep: P.deepwater,
+    wob: rnd(TAU), hit: false, mine: !opts.foreign
   });
 }
 
@@ -611,6 +618,8 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   const a = Math.atan2(e.y - srcY, e.x - srcX);
   burst(e.x - Math.cos(a) * e.r * 0.6, e.y - Math.sin(a) * e.r * 0.6,
         crit ? 8 : 4, e.col, 190, 2.6, 0.32, 1.5, a);
+  // LIBRA: the scales record every wound you inflict and collect later
+  if (P.scales) P.scalesDebt += dmg * 0.055 * P.scales;
   if (P.cryo && !opts.noStatus) { e.slow = Math.min(0.62, 0.22 * P.cryo); e.slowT = 1.4; }
   if (P.chain && !opts.noChain) chainFrom(e, dmg * (0.34 + 0.1 * P.chain), P.chain);
   // Executioner's Mark: anything left hanging on a sliver just dies
@@ -753,8 +762,20 @@ function mkDrop(x, y, kind) {
   };
 }
 
-function hurtPlayer(dmg) {
-  if (P.iframe > 0 || state !== 'play') return;
+/* opts.pure — unavoidable self-inflicted damage (Virgo, Libra). It ignores
+   i-frames, shields and armour, and never grants mercy invulnerability,
+   but still routes through Second Wind so revives behave consistently. */
+function hurtPlayer(dmg, opts) {
+  if (state !== 'play') return;
+  if (opts && opts.pure) {
+    P.hp -= Math.max(0.5, dmg);
+    P.hurtFlash = Math.max(P.hurtFlash, 0.5);
+    if (P.hp <= 0) reviveOrDie();
+    return;
+  }
+  if (P.iframe > 0) return;
+  // CANCER: outside your shell, movement is what gets you hurt
+  if (P.molt && len(P.vx, P.vy) > 60) dmg *= 2.2;
   if (P.shield > 0) {
     P.shield--; P.shieldT = 0; P.iframe = 0.7;
     ringFx(P.x, P.y, P.r, 74, COL.shield, 0.4, 4);
@@ -763,13 +784,16 @@ function hurtPlayer(dmg) {
     floatText(P.x, P.y - 30, 'BLOCKED', COL.shield, 14);
     return;
   }
-  const d = Math.max(1, dmg - P.armor);
+  const d = Math.max(1, dmg * P.frailty - P.armor);
   P.hp -= d;
   P.iframe = 0.62; P.hurtFlash = 1;
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
   floatText(P.x, P.y - 26, '-' + Math.round(d), '#fca5a5', 16);
-  if (P.hp <= 0) {
+  if (P.hp <= 0) reviveOrDie();
+}
+
+function reviveOrDie() {
     if (P.revive > 0) {
       // Second Wind: clear the immediate threat too, or the revive is wasted
       P.revive--;
@@ -788,7 +812,6 @@ function hurtPlayer(dmg) {
       return;
     }
     P.hp = 0; gameOver();
-  }
 }
 
 /* ------------------------------ wave manager -----------------------------
@@ -861,7 +884,11 @@ function updateWaves(dt) {
     const bonus = 50 * wave;
     const cr = Math.round((12 + wave * 2.4) * P.credMul);
     score += bonus; credits += cr;
-    if (shopPending) { openShop(); return; }
+    if (P.climb) {
+      P.dmg *= 1 + 0.20 * P.climb;
+      floatText(P.x, P.y - 44, 'THE CLIMB  +' + Math.round(20 * P.climb) + '%', '#fbbf24', 15);
+    }
+    if (shopPending) { openReward(); return; }
     banner('WAVE CLEAR   +' + bonus + '   ◈' + cr, COL.hp);
     betweenWaves = 2.4;
   }
@@ -938,12 +965,14 @@ function openShop() {
   shopItems = makeShopStock();
   shopRerolls = 0;
   shopMsg = ''; shopMsgT = 0;
+  shopTouched = false;                   // tracks the planetarium unlock
   state = 'shop';
   uiArm = 0.4;
   Audio_.levelup();
 }
 
 function closeShop() {
+  noteShopExit();
   state = 'play';
   betweenWaves = 2.0;
   Audio_.select();
@@ -960,6 +989,7 @@ function buyShop(i) {
   }
   credits -= it.cost;
   it.sold = true;
+  shopTouched = true;
   if (it.kind === 'up') applyUpgrade(it.up);
   else { it.run(); Audio_.select(); }
   shopMsg = it.name.toUpperCase() + '  ACQUIRED';
@@ -975,8 +1005,146 @@ function rerollShop() {
   }
   credits -= cost;
   shopRerolls++;
+  shopTouched = true;
   shopItems = makeShopStock();
   Audio_.select();
+}
+
+/* ------------------------------ planetarium -------------------------------
+   Hidden unlock: leave two shops in a row without spending a single credit —
+   no purchase, no reroll — and the planetariums open up permanently.
+
+   Once unlocked, half of all shops are replaced by one instead. A planetarium
+   stocks exactly one item, it costs nothing, and its effect stays hidden
+   until you accept it. Every reading is either run-defining or run-ending;
+   there is nothing moderate in the pool. You may always walk away.
+--------------------------------------------------------------------------- */
+let curseHpMul = 1;
+let shopTouched = false;
+let planetSign = null, planetRevealed = false, planetMsg = '';
+
+const SIGNS = [
+  /* ---------------- blessings ---------------- */
+  { id: 'aries', n: 'ARIES', t: 'The Ram', good: true, seed: 37,
+    flavour: 'Mars is close tonight, and it has never once considered stopping.',
+    effect: 'THE CHARGE — your dash gores everything it touches',
+    f: p => { p.ram += 1; p.dashMax += 1; p.dashCh = p.dashMax; p.dashCd *= 0.45; } },
+
+  { id: 'gemini', n: 'GEMINI', t: 'The Twins', good: true, seed: 23,
+    flavour: 'You were always two. The other one has been waiting across the room.',
+    effect: 'THE TWIN — a mirrored double fires whenever you do',
+    f: p => { p.twin += 1; } },
+
+  { id: 'leo', n: 'LEO', t: 'The Lion', good: true, seed: 11,
+    flavour: 'The Sun does not aim. It does not need to.',
+    effect: 'THE CORONA — you burn everything near you, and your rounds set the ground alight',
+    f: p => { p.sun += 1; } },
+
+  { id: 'scorpio', n: 'SCORPIO', t: 'The Scorpion', good: true, seed: 71,
+    flavour: 'The sting is a formality. The venom does the work.',
+    effect: 'VENOM — hits stack a poison that worsens with every sting',
+    f: p => { p.venom += 1; } },
+
+  { id: 'sagittarius', n: 'SAGITTARIUS', t: 'The Archer', good: true, seed: 41,
+    flavour: 'The arrow was loosed long ago. It has not yet stopped.',
+    effect: 'THE ARROW — shots never stop, and gather force the farther they fly',
+    f: p => { p.arrow += 1; p.blife *= 2.2; p.bspeed *= 1.25; } },
+
+  { id: 'aquarius', n: 'AQUARIUS', t: 'The Water Bearer', good: true, seed: 53,
+    flavour: 'What you pour out does not stay poured out.',
+    effect: 'THE CURRENT — you leave charged water behind you that electrocutes pursuers',
+    f: p => { p.current += 1; p.speed *= 1.12; } },
+
+  /* ----------------- curses ----------------- */
+  { id: 'taurus', n: 'TAURUS', t: 'The Bull', good: false, seed: 97,
+    flavour: 'You are earth now. Earth does not hurry, and earth does not dodge.',
+    effect: 'EARTHBOUND — barely able to move, and the dash is gone entirely',
+    f: p => { p.rooted = 1; p.speed *= 0.45; p.dashMax = 0; p.dashCh = 0; p.armor += 2; } },
+
+  { id: 'cancer', n: 'CANCER', t: 'The Crab', good: false, seed: 103,
+    flavour: 'You have outgrown the shell, and nothing has replaced it yet.',
+    effect: 'THE MOLT — while you are moving you take more than double damage',
+    f: p => { p.molt = 1; p.shieldMax = 0; p.shield = 0; } },
+
+  { id: 'virgo', n: 'VIRGO', t: 'The Maiden', good: false, seed: 67,
+    flavour: 'She is counting. She has always been counting.',
+    effect: 'EXACTING — every shot that hits nothing costs you health',
+    f: p => { p.exacting += 1; } },
+
+  { id: 'libra', n: 'LIBRA', t: 'The Scales', good: false, seed: 127,
+    flavour: 'Every wound you deal is written down, and the ledger settles itself.',
+    effect: 'THE SCALES — a share of all damage you inflict returns to you',
+    f: p => { p.scales += 1; } },
+
+  { id: 'pisces', n: 'PISCES', t: 'The Fish', good: false, seed: 113,
+    flavour: 'Neptune has flooded the room. Nobody else seems to have noticed.',
+    effect: 'DEEP WATER — your shots drag, drift and sink',
+    f: p => { p.deepwater = 1; p.bspeed *= 0.8; } },
+
+  { id: 'capricorn', n: 'CAPRICORN', t: 'The Goat', good: false, seed: 83,
+    flavour: 'Saturn takes it all up front. The summit is a long way from here.',
+    effect: 'THE LONG CLIMB — your damage collapses, then grows with every wave you survive',
+    f: p => { p.climb += 1; p.dmg *= 0.45; } }
+];
+
+function openPlanetarium() {
+  shopPending = false;
+  planetSign = pick(SIGNS);
+  planetRevealed = false;
+  planetMsg = '';
+  state = 'planet';
+  uiArm = 0.4;
+  Audio_.tone(220, 0.9, 'sine', 0.12, 660);
+  Audio_.tone(330, 0.9, 'triangle', 0.08, 990, 0.1);
+}
+
+function acceptSign() {
+  if (planetRevealed || !planetSign) return;
+  planetRevealed = true;
+  planetSign.f(P);
+  planetMsg = planetSign.effect;
+  if (planetSign.good) {
+    Audio_.levelup();
+    ringFx(P.x, P.y, 10, 260, '#fbbf24', 0.9, 5);
+    burst(P.x, P.y, 50, '#fbbf24', 340, 4, 1.0);
+    banner(planetSign.n + '  —  BLESSED', '#fbbf24');
+  } else {
+    Audio_.hurt(); Audio_.boom();
+    ringFx(P.x, P.y, 10, 260, '#a855f7', 0.9, 5);
+    burst(P.x, P.y, 50, '#a855f7', 340, 4, 1.0);
+    banner(planetSign.n + '  —  CURSED', '#a855f7');
+    shake(0.7);
+  }
+}
+
+function leavePlanetarium() {
+  state = 'play';
+  betweenWaves = 2.0;
+  planetSign = null;
+  Audio_.select();
+  checkLevel();
+}
+
+/* Which room opens after a boss: once unlocked, half are planetariums. */
+function openReward() {
+  if (Save.profile.planetarium && Math.random() < 0.5) openPlanetarium();
+  else openShop();
+}
+
+/* Two consecutive no-spend shop exits earn the unlock. */
+function noteShopExit() {
+  if (Save.profile.planetarium) return;
+  const p = Save.profile;
+  p.skipStreak = shopTouched ? 0 : (p.skipStreak || 0) + 1;
+  if (p.skipStreak >= 2) {
+    p.planetarium = true;
+    p.skipStreak = 0;
+    banner('THE PLANETARIUMS OPEN', '#fbbf24');
+    Audio_.levelup();
+    drawFlashT = 0.15;
+  }
+  Save.writeLocal();
+  Save.flush();
 }
 
 /* ------------------------------- banners --------------------------------- */
@@ -1015,7 +1183,8 @@ const Save = {
   top: [],                // best runs, for the menu leaderboard
 
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
-                  time: 0, muted: false, autofire: false }),
+                  time: 0, muted: false, autofire: false,
+                  planetarium: false, skipStreak: 0 }),
 
   readLocal() {
     try {
@@ -1042,6 +1211,9 @@ const Save = {
     out.name = b.name || a.name || '';
     out.muted = b.muted !== undefined ? b.muted : a.muted;
     out.autofire = b.autofire !== undefined ? b.autofire : a.autofire;
+    // an unlock is permanent: if either store has it, it stays earned
+    out.planetarium = !!(a.planetarium || b.planetarium);
+    out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
     return out;
   },
 
@@ -1222,7 +1394,8 @@ function resetGame() {
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
-  shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0;
+  shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
+  curseHpMul = 1; planetSign = null; planetRevealed = false;
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   hitStop = 0; drawFlashT = 0; bannerT = 0;
   Audio_.intensity = 0;
@@ -1268,6 +1441,13 @@ function handleKey(k) {
     else if (k === 'enter' || k === ' ' || k === 'escape') closeShop();
     return;
   }
+  if (state === 'planet') {
+    if (uiArm > 0) return;
+    if (!planetRevealed && (k === 'a' || k === 'y')) acceptSign();
+    else if (k === 'enter' || k === ' ' || k === 'escape' || k === 'd' || k === 'n')
+      leavePlanetarium();
+    return;
+  }
   if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
@@ -1290,6 +1470,12 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, b.leave))  { closeShop(); return; }
     const i = shopIndexAt(mouse.x, mouse.y);
     if (i >= 0) buyShop(i);
+    return;
+  }
+  if (state === 'planet') {
+    const b = planetButtons();
+    if (!planetRevealed && inRect(mouse.x, mouse.y, b.accept)) { acceptSign(); return; }
+    if (inRect(mouse.x, mouse.y, b.leave)) leavePlanetarium();
   }
 }
 function chooseOffer(i) {
@@ -1339,7 +1525,7 @@ function update(dt) {
 
   // cosmetic layers keep running during level-up / shop / death for smoothness
   updateParticles(dt);
-  if (state === 'levelup' || state === 'shop' || state === 'dead') {
+  if (state === 'levelup' || state === 'shop' || state === 'planet' || state === 'dead') {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
     updateCamera(dt, state === 'dead');
@@ -1429,7 +1615,7 @@ function updatePlayer(dt) {
     P.dashRe += dt;
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = keys[' '] || keys['shift'];
+  const wantDash = (keys[' '] || keys['shift']) && !P.rooted;
   if (wantDash && P.dashCh > 0 && P.dashT <= 0) {
     keys[' '] = false; keys['shift'] = false;
     P.dashCh--;
@@ -1512,6 +1698,7 @@ function updatePlayer(dt) {
         fireBullet(P.x - Math.cos(P.ang) * muzzle, P.y - Math.sin(P.ang) * muzzle, a, 0.8);
       }
     }
+    if (P.twin) twinFire();
     if (slug) { Audio_.tone(190, 0.16, 'square', 0.13, 70); shake(0.09); }
     else Audio_.shoot();
     P.vx -= Math.cos(P.ang) * 26; P.vy -= Math.sin(P.ang) * 26;
@@ -1550,11 +1737,92 @@ function updatePlayer(dt) {
         Audio_.tone(700, 0.14, 'sine', 0.09, 1200); }
     }
   }
+  /* ---------------------- zodiac mechanics ---------------------- */
+
+  // LEO: you are a small sun. Everything close enough simply burns.
+  if (P.sun) {
+    P.sunT -= dt;
+    if (P.sunT <= 0) {
+      P.sunT = 0.25;
+      const R = 130 + 40 * P.sun;
+      for (const e of enemies) {
+        if (e.dead || e.phased || e.invuln) continue;
+        const d2 = len(e.x - P.x, e.y - P.y);
+        if (d2 < R + e.r) {
+          const falloff = 1 - clamp(d2 / R, 0, 1) * 0.5;
+          damageEnemy(e, (6 + P.dmg * 0.45) * P.sun * falloff, false, P.x, P.y,
+                      { silent: true, noChain: true });
+        }
+      }
+    }
+    if (Math.random() < 0.5) {
+      const a = rnd(TAU), R = 130 + 40 * P.sun;
+      spawnPart(P.x + Math.cos(a) * R * 0.9, P.y + Math.sin(a) * R * 0.9,
+        Math.cos(a) * 40, Math.sin(a) * 40, rnd(4, 2), '#fbbf24', rnd(0.5, 0.25), 0.94);
+    }
+  }
+
+  // AQUARIUS: you leave charged water in your wake
+  if (P.current) {
+    P.currentT -= dt;
+    if (P.currentT <= 0 && len(P.vx, P.vy) > 50) {
+      P.currentT = 0.13;
+      addHazard('current', P.x, P.y, 2.6 + P.current * 0.6, {
+        r: 42 + P.current * 8, dmg: 3 + P.dmg * 0.22, friendly: true, col: '#67e8f9' });
+    }
+  }
+
+  // ARIES: the dash is a goring charge
+  if (P.ram && P.dashT > 0) {
+    for (const e of enemies) {
+      if (e.dead || e.phased || e.invuln || e.ramCd > 0) continue;
+      if (len(e.x - P.x, e.y - P.y) < e.r + P.r + 16) {
+        e.ramCd = 0.4;
+        damageEnemy(e, (25 + P.dmg * 3.2) * P.ram, true, P.x, P.y);
+        const a = Math.atan2(e.y - P.y, e.x - P.x);
+        e.vx += Math.cos(a) * 700; e.vy += Math.sin(a) * 700;
+        burst(e.x, e.y, 12, '#fb7185', 300, 3.4, 0.4);
+        shake(0.25);
+      }
+    }
+  }
+
+  // LIBRA: the scales collect on their own schedule
+  if (P.scales && P.scalesDebt > 0) {
+    P.scalesT -= dt;
+    if (P.scalesT <= 0) {
+      P.scalesT = 0.5;
+      const owed = Math.min(P.scalesDebt, P.maxHp * 0.08);
+      P.scalesDebt -= owed;
+      if (owed > 0.5) {
+        hurtPlayer(owed, { pure: true });
+        floatText(P.x, P.y - 34, '-' + Math.round(owed), '#f0abfc', 12);
+      }
+    }
+  }
+
   P.iframe = Math.max(0, P.iframe - dt);
   P.hurtFlash = Math.max(0, P.hurtFlash - dt * 2.6);
   if (P.blT > 0) { P.blT -= dt; if (P.blT <= 0) P.blStacks = 0; }
   if (P.tempoT > 0) P.tempoT -= dt;
   playerChill = Math.max(0, playerChill - dt * 2);
+}
+
+/* GEMINI: a mirrored twin stands opposite you and fires when you fire. */
+function twinPos() {
+  return { x: WORLD.w - P.x, y: WORLD.h - P.y };
+}
+function twinFire() {
+  const t = twinPos();
+  const target = nearestEnemy(t.x, t.y, 1200);
+  const ang = target ? Math.atan2(target.y - t.y, target.x - t.x) : P.ang + Math.PI;
+  P.twinAng = ang;
+  for (let i = 0; i < P.count; i++) {
+    const off = P.count === 1 ? 0 : (i - (P.count - 1) / 2) * (P.spread * 1.9);
+    fireBullet(t.x + Math.cos(ang) * 18, t.y + Math.sin(ang) * 18,
+               ang + off + rnd(P.spread, -P.spread) * 0.5, 1, { foreign: true });
+  }
+  burst(t.x + Math.cos(ang) * 18, t.y + Math.sin(ang) * 18, 3, '#c4b5fd', 150, 2.2, 0.16, 0.9, ang);
 }
 
 function nearestEnemy(x, y, maxD) {
@@ -1596,7 +1864,22 @@ function updateEnemies(dt) {
     e.t += dt;
     e.flash = Math.max(0, e.flash - dt * 7);
     e.hitCd = Math.max(0, e.hitCd - dt);
+    if (e.ramCd > 0) e.ramCd -= dt;
     if (e.slowT > 0) { e.slowT -= dt; if (e.slowT <= 0) e.slow = 0; }
+    // SCORPIO venom: ticks harder the more stings have landed
+    if (e.psn > 0) {
+      e.psnT -= dt;
+      e.psnTick = (e.psnTick || 0) - dt;
+      if (e.psnTick <= 0) {
+        e.psnTick = 0.5;
+        damageEnemy(e, (1.5 + P.dmg * 0.09) * e.psn, false, e.x, e.y - 20,
+                    { silent: true, noChain: true, noStatus: true });
+        if (e.dead) { cull.push(i); continue; }
+        if (Math.random() < 0.6)
+          spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, -30, 2.4, '#a3e635', 0.5, 0.95);
+      }
+      if (e.psnT <= 0) e.psn = 0;
+    }
     const sp = e.spd * (1 - e.slow);
     const dx = P.x - e.x, dy = P.y - e.y;
     const d = len(dx, dy) || 1;
@@ -2154,7 +2437,12 @@ let playerChill = 0;
 const LASER_HALF = 30;
 
 function addHazard(kind, x, y, life = 8, opts = {}) {
-  if (hazards.length > 46) hazards.shift();
+  // Evict the oldest *temporary* hazard. Plain shift() would happily delete a
+  // stage's permanent vents or gravity wells once a trail starts spamming.
+  if (hazards.length > 46) {
+    const i = hazards.findIndex(h => h.life < 1e8);
+    hazards.splice(i >= 0 ? i : 0, 1);
+  }
   hazards.push({
     kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly,
     r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74 : 76),
@@ -2162,7 +2450,7 @@ function addHazard(kind, x, y, life = 8, opts = {}) {
     state: 0, cd: opts.cd !== undefined ? opts.cd : rnd(3.2, 1.2),
     dmg: opts.dmg || 9,
     col: opts.col || (kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
-       : kind === 'laser' ? '#a78bfa' : '#f97316')
+       : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9' : '#f97316')
   });
 }
 
@@ -2234,6 +2522,23 @@ function updateHazards(dt) {
             if (Math.abs(r2) < LASER_HALF + en.r * 0.5 && en.hitCd <= 0) {
               en.hitCd = 0.3;
               damageEnemy(en, h.dmg * 0.6, false, h.x, h.y, { silent: true });
+            }
+          }
+        }
+        break;
+      }
+      case 'current': {
+        // AQUARIUS: charged water you leave behind — always friendly
+        h.tick -= dt;
+        if (h.tick <= 0) {
+          h.tick = 0.22;
+          for (const en of enemies) {
+            if (en.dead || en.phased || en.invuln) continue;
+            if (len(en.x - h.x, en.y - h.y) < h.r + en.r) {
+              damageEnemy(en, h.dmg, false, h.x, h.y, { silent: true, noChain: true });
+              if (Math.random() < 0.4)
+                arcs.push({ x1: h.x, y1: h.y, x2: en.x, y2: en.y,
+                            life: 0.12, max: 0.12, col: '#a5f3fc' });
             }
           }
         }
@@ -2351,7 +2656,14 @@ function updateBullets(dt) {
     const b = bullets[i];
     b.px = b.x; b.py = b.y;
     b.life -= dt;
-    if (b.life <= 0) { bullets.splice(i, 1); continue; }
+    if (b.life <= 0) {
+      // VIRGO: a shot that hits nothing is an imperfection, and it costs you
+      if (P.exacting && b.mine && !b.hit) {
+        hurtPlayer(P.exacting, { pure: true });
+        floatText(b.x, b.y, 'MISS', '#f0abfc', 11, -30);
+      }
+      bullets.splice(i, 1); continue;
+    }
 
     if (P.homing) {
       const t = nearestEnemy(b.x, b.y, 420);
@@ -2364,6 +2676,14 @@ function updateBullets(dt) {
       }
     }
 
+    // PISCES: everything you fire is underwater — it drags, drifts and sinks
+    if (b.deep) {
+      const drag = Math.pow(0.28, dt);
+      b.vx *= drag; b.vy *= drag;
+      b.wob += dt * 5;
+      b.vx += Math.cos(b.wob) * 70 * dt;
+      b.vy += 300 * dt + Math.sin(b.wob) * 70 * dt;
+    }
     b.x += b.vx * dt; b.y += b.vy * dt;
     b.dist += len(b.x - b.px, b.y - b.py);
 
@@ -2415,7 +2735,19 @@ function updateBullets(dt) {
       let dmg = b.dmg;
       if (P.longshot)   dmg *= 1 + P.longshot * 0.14 * clamp(b.dist / 620, 0, 1);
       if (P.pointblank) dmg *= 1 + P.pointblank * 0.30 * clamp(1 - b.dist / 300, 0, 1);
+      // SAGITTARIUS: an arrow gathers force the longer it has been flying
+      if (b.arrow) dmg *= 1 + b.arrow * 1.1 * clamp(b.dist / 700, 0, 1);
+      b.hit = true;
       damageEnemy(e, dmg, b.crit, b.px, b.py);
+      // SCORPIO: inject venom that builds with every sting
+      if (b.venom && !e.dead) {
+        e.psn = Math.min(12, (e.psn || 0) + b.venom);
+        e.psnT = 4.5;
+      }
+      // LEO: solar rounds set the ground alight where they land
+      if (b.solar && Math.random() < 0.5)
+        addHazard('fire', b.x, b.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
+                                           friendly: true, col: '#fbbf24' });
       if (!e.dead) {
         const s = len(b.vx, b.vy) || 1;
         e.vx += b.vx / s * P.knock * (e.type === 'boss' ? 0.06 : e.type === 'brute' ? 0.35 : 1);
@@ -2429,7 +2761,10 @@ function updateBullets(dt) {
           fireBullet(b.x, b.y, a, 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
         }
       }
-      if (b.pierce > 0) {
+      if (b.arrow) {
+        // an arrow does not stop for anything
+        (b.hits || (b.hits = new Set())).add(e.id);
+      } else if (b.pierce > 0) {
         b.pierce--;
         (b.hits || (b.hits = new Set())).add(e.id);
         b.dmg *= 0.86;
@@ -2617,9 +2952,10 @@ function render() {
   if (isTouch && state === 'play') drawTouchSticks();
   if (state === 'levelup') drawLevelUp();
   if (state === 'shop') drawShop();
+  if (state === 'planet') drawPlanetarium();
   if (state === 'pause') drawPause();
   if (state === 'dead') drawDead();
-  if (!isTouch && (state === 'play' || state === 'shop')) drawCrosshair();
+  if (!isTouch && (state === 'play' || state === 'shop' || state === 'planet')) drawCrosshair();
 }
 
 /* ------------------------- terrain & deployables -------------------------- */
@@ -2682,6 +3018,21 @@ function drawHazards() {
           ctx.globalAlpha = a;
           ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 14;
           beam();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'current': {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        drawGlow(h.x, h.y, h.r * 1.1, h.col, 0.22 * fade);
+        ctx.globalAlpha = 0.5 * fade;
+        ctx.strokeStyle = '#a5f3fc'; ctx.lineWidth = 1.4;
+        for (let k = 0; k < 3; k++) {
+          const a0 = uiTime * 3 + k * 2.1;
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, h.r * (0.4 + k * 0.28), a0, a0 + 2.2);
+          ctx.stroke();
         }
         ctx.restore();
         break;
@@ -2844,6 +3195,14 @@ function drawEnemies() {
       poly(e.x, e.y, e.r + 6, e.sides, -e.ang * 0.6);
       ctx.stroke();
     }
+    if (e.psn > 0) {
+      ctx.strokeStyle = 'rgba(163,230,53,0.95)'; ctx.lineWidth = 2;
+      poly(e.x, e.y, e.r * 0.78, 3, -e.t * 3); ctx.stroke();
+      ctx.fillStyle = '#a3e635';
+      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(e.psn), e.x, e.y - e.r - 18);
+    }
     if (e.slow > 0) {
       ctx.strokeStyle = 'rgba(147,197,253,0.9)'; ctx.lineWidth = 2;
       poly(e.x, e.y, e.r * 0.6, 6, e.t * 2);
@@ -2941,6 +3300,45 @@ function drawPlayer() {
   ctx.beginPath(); ctx.arc(P.x, P.y, P.pickupR, 0, TAU); ctx.stroke();
   ctx.restore();
 
+  // LEO: the corona, drawn at exactly the radius that burns
+  if (P.sun) {
+    const R = 130 + 40 * P.sun;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(P.x, P.y, R * 0.95, '#fbbf24', 0.2);
+    ctx.globalAlpha = 0.45 + Math.sin(uiTime * 3) * 0.12;
+    ctx.strokeStyle = '#fde047'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 12; i++) {
+      const a = uiTime * 0.5 + i * TAU / 12;
+      const r0 = R * 0.86, r1 = R * (1.02 + Math.sin(uiTime * 4 + i) * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(P.x + Math.cos(a) * r0, P.y + Math.sin(a) * r0);
+      ctx.lineTo(P.x + Math.cos(a) * r1, P.y + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // GEMINI: the twin, mirrored through the centre of the arena
+  if (P.twin) {
+    const t = twinPos();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(t.x, t.y, 44, '#c4b5fd', 0.4);
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.translate(t.x, t.y); ctx.rotate(P.twinAng);
+    ctx.strokeStyle = '#c4b5fd'; ctx.fillStyle = 'rgba(196,181,253,0.18)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.lineTo(-9, 10); ctx.lineTo(-5, 0); ctx.lineTo(-9, -10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
   ctx.globalCompositeOperation = 'lighter';
   drawGlow(P.x, P.y, 46, P.hurtFlash > 0 ? '#ef4444' : COL.player, 0.5);
   ctx.globalCompositeOperation = 'source-over';
@@ -2994,17 +3392,29 @@ function drawPlayer() {
 
 function drawBullets() {
   for (const b of bullets) {
-    const c = b.crit ? COL.crit : COL.bullet;
-    drawGlow(b.x, b.y, b.r * 4.6, c, 0.72);
-    // motion streak
+    // zodiac rounds read differently at a glance
+    const c = b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
+            : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
     const s = len(b.vx, b.vy) || 1;
+    const tail = b.arrow ? 46 : b.deep ? 8 : 15;
+    drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
     ctx.strokeStyle = rgba(c, 0.55);
-    ctx.lineWidth = b.r * 1.5;
+    ctx.lineWidth = b.r * (b.arrow ? 1.1 : 1.5);
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(b.x, b.y);
-    ctx.lineTo(b.x - b.vx / s * 15, b.y - b.vy / s * 15);
+    ctx.lineTo(b.x - b.vx / s * tail, b.y - b.vy / s * tail);
     ctx.stroke();
+    if (b.arrow) {                       // a barbed head, pointing where it flies
+      const a = Math.atan2(b.vy, b.vx);
+      ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(b.x + Math.cos(a) * 9, b.y + Math.sin(a) * 9);
+      ctx.lineTo(b.x + Math.cos(a + 2.5) * 8, b.y + Math.sin(a + 2.5) * 8);
+      ctx.moveTo(b.x + Math.cos(a) * 9, b.y + Math.sin(a) * 9);
+      ctx.lineTo(b.x + Math.cos(a - 2.5) * 8, b.y + Math.sin(a - 2.5) * 8);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.62, 0, TAU); ctx.fill();
   }
@@ -3686,6 +4096,12 @@ function renderMenu() {
     ctx.textAlign = 'center';
   }
 
+  if (Save.profile.planetarium) {
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText('✦ PLANETARIUMS UNLOCKED', cxp, H - 112);
+  }
+
   // who you are on the board
   if (Save.profile.name) {
     ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
@@ -3722,6 +4138,132 @@ function renderMenu() {
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
 
   drawVignette();
+}
+
+/* ------------------------------ planetarium UI ----------------------------- */
+function planetButtons() {
+  const bw = Math.min(180, W * 0.32), bh = 38;
+  const y = H / 2 + 142;
+  return planetRevealed
+    ? { accept: { x: -999, y: -999, w: 0, h: 0 },
+        leave:  { x: W / 2 - bw / 2, y, w: bw, h: bh } }
+    : { accept: { x: W / 2 - bw - 8, y, w: bw, h: bh },
+        leave:  { x: W / 2 + 8,      y, w: bw, h: bh } };
+}
+
+// deterministic star field per sign, so a constellation always looks the same
+function constellation(seed, n) {
+  let s = seed >>> 0;
+  const rnd_ = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    pts.push([ (0.12 + t * 0.76) + (rnd_() - 0.5) * 0.16,
+               0.5 + Math.sin(t * Math.PI * (1 + rnd_())) * 0.32 + (rnd_() - 0.5) * 0.12,
+               0.5 + rnd_() * 0.9 ]);
+  }
+  return pts;
+}
+
+function drawPlanetarium() {
+  const sign = planetSign;
+  if (!sign) return;
+  const gold = '#fbbf24', purple = '#a855f7';
+  const accent = planetRevealed ? (sign.good ? gold : purple) : '#c4b5fd';
+
+  ctx.fillStyle = 'rgba(2,3,8,0.93)';
+  ctx.fillRect(0, 0, W, H);
+
+  // drifting starfield backdrop
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 70; i++) {
+    const a = i * 2.399 + uiTime * 0.04;
+    const r = ((i * 37) % 100) / 100;
+    const x = W / 2 + Math.cos(a) * r * W * 0.62;
+    const y = H / 2 + Math.sin(a) * r * H * 0.58;
+    const tw = 0.25 + 0.75 * Math.abs(Math.sin(uiTime * 1.1 + i));
+    drawGlow(x, y, 2 + (i % 3), '#93c5fd', 0.1 + tw * 0.14);
+  }
+  ctx.restore();
+
+  const cx = W / 2, cy = H / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('P L A N E T A R I U M', cx, cy - 176);
+
+  // constellation panel
+  const pw = Math.min(400, W - 70), ph = 116;
+  const px = cx - pw / 2, py = cy - 158;
+  const pts = constellation(sign.seed, 7);
+  ctx.save();
+  ctx.strokeStyle = rgba(accent, 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const x = px + p[0] * pw, y = py + p[1] * ph;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  pts.forEach((p, i) => {
+    const x = px + p[0] * pw, y = py + p[1] * ph;
+    const tw = 0.6 + 0.4 * Math.sin(uiTime * 2 + i * 1.7);
+    drawGlow(x, y, (6 + p[2] * 9) * tw, accent, 0.75);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(x, y, 1.4 + p[2], 0, TAU); ctx.fill();
+  });
+  ctx.restore();
+
+  ctx.font = '800 38px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.shadowColor = accent; ctx.shadowBlur = 26;
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText(sign.n, cx, cy - 6);
+  ctx.restore();
+
+  ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = accent;
+  ctx.fillText(sign.t.toUpperCase(), cx, cy + 22);
+
+  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  wrapText(sign.flavour, cx, cy + 50, Math.min(430, W - 60), 18);
+
+  if (!planetRevealed) {
+    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#475569';
+    ctx.fillText('the reading is free — but it is not shown until it is taken',
+      cx, cy + 92);
+  } else {
+    // effect strings read "NAME — what it does"; split so the long half wraps
+    const half = planetMsg.split(' — ');
+    ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = sign.good ? gold : purple;
+    ctx.fillText((sign.good ? 'BLESSING   ·   ' : 'CURSE   ·   ') + half[0], cx, cy + 86);
+    if (half[1]) {
+      ctx.font = '400 12px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      wrapText(half[1], cx, cy + 107, Math.min(420, W - 70), 15);
+    }
+  }
+
+  const b = planetButtons();
+  if (!planetRevealed) {
+    drawButton(b.accept, 'ACCEPT  [A]', true, COL.hp);
+    drawButton(b.leave, 'WALK AWAY  [D]', true, '#64748b');
+  } else {
+    drawButton(b.leave, 'CONTINUE  ▸', true, COL.hp);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.fillText('every reading is either extraordinary or ruinous — never both, never neither',
+    cx, H - 26);
 }
 
 function drawNameEntry() {
