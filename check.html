@@ -67,9 +67,9 @@
   <button onclick="location.href='/'">Open the game</button>
 
   <div class="foot">
-    This page only reads. The write test deliberately submits an
-    <em>impossible</em> score and confirms the server rejects it, so nothing is
-    ever added to the real leaderboard.
+    Nothing here touches the real leaderboard. The validation test submits an
+    <em>impossible</em> score and confirms the server rejects it; the write test
+    runs against a separate throwaway key.
   </div>
 </div>
 
@@ -156,6 +156,37 @@ const CHECKS = [
       if (r.ok) return WARN('The server ACCEPTED an impossible score.',
         'Validation is not running. leaderboard.mjs may be an older version. Your board can be filled with fake scores.');
       return WARN('Unexpected status ' + r.status);
+    }
+  },
+  {
+    name: 'Leaderboard can actually be written to',
+    run: async () => {
+      // Runs the real conditional-write path against a throwaway key, so it
+      // proves writes land without touching the real board.
+      let r, d;
+      try {
+        r = await fetch('/api/leaderboard', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ selftest: true })
+        });
+        d = await r.json();
+      } catch (e) { return FAIL('Request failed: ' + e.message); }
+
+      if (r.status === 404) return FAIL('404 — function not deployed.');
+      const s = d && d.selftest;
+      if (!s) return WARN('No self-test in the response.',
+        'The deployed leaderboard.mjs predates this check. Redeploy the current version.');
+      if (s.error) return FAIL('Blob storage threw: ' + s.error,
+        'Netlify Blobs is not working for this site.');
+      if (!s.canWrite) return FAIL('Could not write to blob storage at all.',
+        'Scores can never be saved. Check the function log in Netlify.');
+      if (!s.casAccepted) return FAIL(
+        'Conditional writes always fail (' + s.verdict + ').',
+        'This is the bug where only the very first score ever lands and the board then freezes. The current function falls back to an unconditional write, so scores will still save — but redeploy to get that fallback.');
+      if (!s.staleRefused) return WARN(
+        'Writes work, but onlyIfMatch is ignored by this Blobs version.',
+        'Scores save fine. Two players finishing at the exact same moment could rarely overwrite one another.');
+      return PASS(s.verdict + (s.reReadEtag ? ' (etag ' + s.reReadEtag + ')' : ''));
     }
   },
   {
