@@ -1186,7 +1186,9 @@ const Save = {
 
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
                   time: 0, muted: false, autofire: false,
-                  planetarium: false, skipStreak: 0 }),
+                  planetarium: false, skipStreak: 0,
+                  // full stats of the best run, so it can be re-submitted later
+                  bestRun: null }),
 
   readLocal() {
     try {
@@ -1216,6 +1218,8 @@ const Save = {
     // an unlock is permanent: if either store has it, it stays earned
     out.planetarium = !!(a.planetarium || b.planetarium);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
+    const ar = a.bestRun, br = b.bestRun;
+    out.bestRun = (br && br.score || 0) >= (ar && ar.score || 0) ? (br || ar) : (ar || br);
     return out;
   },
 
@@ -1244,6 +1248,7 @@ const Save = {
       if (remote) { Save.profile = Save.merge(Save.profile, remote); Save.writeLocal(); }
       await Save.flush();
       await Save.refreshTop();
+      Board.backfill();
     } catch (e) {
       Save.status = 'error';
       Save.db = null;
@@ -1272,6 +1277,10 @@ const Save = {
     p.runs++;
     p.kills += s.kills;
     p.time += s.time;
+    if (s.score > ((p.bestRun && p.bestRun.score) || 0)) {
+      p.bestRun = { score: s.score, wave: s.wave, sector: s.sector, loop: s.loop || 0,
+                    level: s.level, kills: s.kills, time: Math.round(s.time) };
+    }
     if (s.score > p.best) p.best = s.score;
     if (s.wave > p.bestWave) { p.bestWave = s.wave; p.bestSector = s.sector; }
     Save.writeLocal();
@@ -1317,14 +1326,39 @@ const Board = {
       const d = await r.json();
       Board.top = Array.isArray(d.top) ? d.top : [];
       Board.status = 'ok';
+      Board.backfill();
     } catch (e) {
       Board.status = 'offline';
     }
   },
 
-  submit(s) {
+  /* Reconcile: if your stored personal best is better than whatever the board
+     has under your name, push it. Without this, a best set while the function
+     was unreachable — or before you had a name — is stranded locally forever,
+     because scores are only ever posted at the moment of death. */
+  synced: false,
+  async backfill() {
+    if (Board.synced || location.protocol === 'file:' || !Save.profile.name) return;
+    if (Board.status !== 'ok') return;
+    let run = Save.profile.bestRun;
+    // profiles from before bestRun existed: recover it from the run history
+    if ((!run || !run.score) && Save.db) {
+      try {
+        const q = await Save.db.query('score', { descending: true, limit: 1 });
+        const doc = q.rows && q.rows[0] && q.rows[0].doc;
+        if (doc && doc.type === 'run' && doc.score > 0) run = doc;
+      } catch (e) {}
+    }
+    if (!run || !run.score) return;
+    const mine = Board.top.find(e => e.name === Save.profile.name);
+    if (mine && mine.score >= run.score) { Board.synced = true; return; }
+    Board.synced = true;
+    Board.submit(run, true);
+  },
+
+  submit(s, quiet) {
     if (location.protocol === 'file:' || !Save.profile.name) return;
-    Board.rank = null; Board.note = '';
+    if (!quiet) { Board.rank = null; Board.note = ''; }
     (async () => {
       try {
         const r = await fetch(Board.url, {
@@ -1338,9 +1372,9 @@ const Board = {
         const d = await r.json().catch(() => null);
         if (r.ok && d && d.ok) {
           Board.top = Array.isArray(d.top) ? d.top : Board.top;
-          Board.rank = d.rank;
           Board.status = 'ok';
-        } else {
+          if (!quiet) Board.rank = d.rank;   // a backfill must not fake a run's rank
+        } else if (!quiet) {
           Board.note = (d && d.error) || 'not submitted';
         }
       } catch (e) { Board.status = 'offline'; }
@@ -1376,6 +1410,7 @@ function commitName() {
   nameBuf = '';
   state = 'menu';
   Audio_.select();
+  Board.synced = false;
   Board.load();
 }
 // touch devices have no physical keyboard — fall back to the native prompt
