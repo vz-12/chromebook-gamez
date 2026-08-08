@@ -188,10 +188,41 @@ const COL = {
   elite: '#fbbf24'
 };
 
+/* --------------------------------- arena ----------------------------------
+   The playable box. Normally the whole world, but it can be driven inward —
+   THE OTHER's finale closes the walls in around itself. Everything that
+   collides with a wall reads these instead of WORLD, so the boundary can move
+   without anything else needing to know.
+--------------------------------------------------------------------------- */
+const arena = { x0: 0, y0: 0, x1: WORLD.w, y1: WORLD.h,
+                tx0: 0, ty0: 0, tx1: WORLD.w, ty1: WORLD.h };
+
+function arenaReset(instant) {
+  arena.tx0 = 0; arena.ty0 = 0; arena.tx1 = WORLD.w; arena.ty1 = WORLD.h;
+  if (instant) { arena.x0 = 0; arena.y0 = 0; arena.x1 = WORLD.w; arena.y1 = WORLD.h; }
+}
+function arenaShrinkTo(cx, cy, w, h) {
+  arena.tx0 = clamp(cx - w / 2, 0, WORLD.w - w);
+  arena.ty0 = clamp(cy - h / 2, 0, WORLD.h - h);
+  arena.tx1 = arena.tx0 + w;
+  arena.ty1 = arena.ty0 + h;
+}
+function updateArena(dt) {
+  const k = 1 - Math.exp(-2.4 * dt);
+  arena.x0 = lerp(arena.x0, arena.tx0, k);
+  arena.y0 = lerp(arena.y0, arena.ty0, k);
+  arena.x1 = lerp(arena.x1, arena.tx1, k);
+  arena.y1 = lerp(arena.y1, arena.ty1, k);
+}
+let lastBossDeath = null;
+
 /* ------------------------------ entity pools ------------------------------ */
 let enemies = [], bullets = [], ebullets = [], gems = [], drops = [],
     parts = [], floats = [], arcs = [], rings = [], corpses = [],
-    hazards = [], mortars = [], sentries = [], beams = [];
+    hazards = [], mortars = [], sentries = [], beams = [],
+    portals = [], cages = [];
+// Rolling record of where the player has been — MIMIC replays it back at you.
+let replay = [];
 
 const partPool = [];
 function spawnPart(x, y, vx, vy, r, color, life, drag = 0.94, glow = true) {
@@ -220,6 +251,17 @@ function ringFx(x, y, r0, r1, color, life = 0.35, lw = 3) {
 /* --------------------------------- camera -------------------------------- */
 const cam = { x: WORLD.w / 2, y: WORLD.h / 2, trauma: 0, sx: 0, sy: 0 };
 function shake(t) { cam.trauma = Math.min(1, cam.trauma + t); }
+
+/* How much a world-space event should register on screen. 1 while it is in
+   view, tapering to 0 once it is well outside the frame. Without this, a vent
+   erupting on the far side of the arena whites out a screen it isn't even on. */
+function onScreen(x, y, pad = 90) {
+  const dx = Math.abs(x - cam.x) - (W / 2 + pad);
+  const dy = Math.abs(y - cam.y) - (H / 2 + pad);
+  if (dx <= 0 && dy <= 0) return 1;
+  const d = Math.hypot(Math.max(0, dx), Math.max(0, dy));
+  return clamp(1 - d / 400, 0, 1);
+}
 
 /* --------------------------------- input --------------------------------- */
 const keys = Object.create(null);
@@ -469,6 +511,11 @@ const ETYPE = {
   artillery:{r: 21, hp: 46,  spd: 42,  dmg: 20, col: '#fb923c', xp: 5, score: 46, sides: 7 },
   wraith:  { r: 16, hp: 32,  spd: 112, dmg: 15, col: '#c4b5fd', xp: 4, score: 44, sides: 4 },
   egg:     { r: 14, hp: 15,  spd: 0,   dmg: 0,  col: '#86efac', xp: 1, score: 6,  sides: 5 },
+  // --- THE FRACTURE: alt-path natives, each built around one idea ---
+  revenant:{ r: 16, hp: 40,  spd: 118, dmg: 14, col: '#e2e8f0', xp: 5, score: 55, sides: 5 },
+  redactor:{ r: 20, hp: 74,  spd: 46,  dmg: 12, col: '#f87171', xp: 6, score: 62, sides: 4 },
+  mimic:   { r: 14, hp: 52,  spd: 0,   dmg: 14, col: '#5eead4', xp: 6, score: 70, sides: 3 },
+  prism:   { r: 19, hp: 86,  spd: 38,  dmg: 12, col: '#a5f3fc', xp: 6, score: 66, sides: 6 },
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
@@ -488,7 +535,10 @@ const BOSSES = {
   forgeheart:  { name: 'FORGEHEART',   col: '#f97316', r: 68, sides: 6,  hpMul: 1.30, spd: 38, ai: bossForge },
   broodmother: { name: 'BROODMOTHER',  col: '#4ade80', r: 62, sides: 7,  hpMul: 1.15, spd: 56, ai: bossBrood },
   archivist:   { name: 'THE ARCHIVIST',col: '#a78bfa', r: 54, sides: 5,  hpMul: 1.10, spd: 44, ai: bossArchivist },
-  nullcore:    { name: 'NULL',         col: '#f0abfc', r: 74, sides: 12, hpMul: 1.75, spd: 50, ai: bossNull }
+  nullcore:    { name: 'NULL',         col: '#f0abfc', r: 74, sides: 12, hpMul: 1.75, spd: 50, ai: bossNull },
+  // --- THE FRACTURE ---
+  curator:     { name: 'THE CURATOR',  col: '#e2e8f0', r: 58, sides: 5,  hpMul: 1.45, spd: 34, ai: bossCurator },
+  theother:    { name: 'THE OTHER',    col: '#5eead4', r: 38, sides: 3,  hpMul: 1.25, spd: 210, ai: bossOther }
 };
 
 /* -------------------------------- stages ---------------------------------
@@ -527,7 +577,28 @@ const STAGES = [
            ['brute', 34], ['artillery', 30], ['healer', 22], ['dasher', 34]],
     boss: 'nullcore' }
 ];
+/* ------------------------------ THE FRACTURE ------------------------------
+   Unlocked by clearing the full rotation twice. From then on every stage
+   transition is a portal room: one gateway continues the normal rotation, the
+   other drops into these. They are shorter, meaner, and each one is built
+   around a rule the rest of the game does not use.
+-------------------------------------------------------------------------- */
+const ALT_STAGES = [
+  { name: 'THE ARCHIVE', tag: 'fracture i', alt: true,
+    bg: '#0a0a0c', grid: '#1c1c22', grid2: '#2e2e38', wall: '#57534e',
+    glow: 'rgba(226,232,240,0.14)', accent: '#e2e8f0', hazard: 'delete',
+    pool: [['revenant', 70], ['redactor', 24], ['sentinel', 20], ['grunt', 46], ['phaser', 28]],
+    boss: 'curator' },
+
+  { name: 'THE MIRROR', tag: 'fracture ii', alt: true,
+    bg: '#04090c', grid: '#0d2129', grid2: '#153742', wall: '#0e7490',
+    glow: 'rgba(94,234,212,0.15)', accent: '#5eead4', hazard: 'mirror',
+    pool: [['mimic', 60], ['prism', 52], ['swarmer', 44], ['phaser', 34], ['dasher', 26]],
+    boss: 'theother' }
+];
+
 let stage = STAGES[0], stageIdx = 0, loopNum = 0;
+let normalIdx = 0, altIdx = -1;
 
 let eid = 0;
 function spawnEnemy(type, x, y, opts = {}) {
@@ -555,6 +626,9 @@ function spawnEnemy(type, x, y, opts = {}) {
     blinkT: rnd(1.6, 0.7), invuln: 0, tether: null
   };
   e.hp = e.maxHp;
+  // Set at spawn, not lazily in the AI: the floor has to exist before the
+  // first point of damage can land, whatever order things tick in.
+  if (bKey === 'theother') e.floor = 10;
   enemies.push(e);
   return e;
 }
@@ -607,7 +681,19 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
 
 function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.dead) return;
+  // Enforce invulnerability here rather than only at bullet collision —
+  // drones, chain lightning, static field, blasts and poison all arrive
+  // through this function and would otherwise ignore it entirely.
+  if (e.invuln) {
+    if (Math.random() < 0.25) {
+      burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 3, '#cbd5e1', 130, 2, 0.22);
+    }
+    return;
+  }
+  dmg *= (e.vuln || 1);        // stunned enemies take extra
   e.hp -= dmg;
+  // a floor holds a boss alive for a scripted finale instead of dying to it
+  if (e.floor !== undefined && e.hp < e.floor) e.hp = e.floor;
   e.flash = Math.min(1, e.flash + 0.65);
   // secondary hits (chain / drones / blasts) only show numbers sometimes,
   // otherwise a dense crowd turns into an unreadable pile of digits
@@ -656,8 +742,13 @@ function chainFrom(src, dmg, jumps) {
 function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false) {
   ringFx(x, y, radius * 0.18, radius, color, 0.34, 5);
   burst(x, y, 24, color, 320, 4, 0.55);
-  drawFlashT = Math.max(drawFlashT, 0.05);
-  shake(0.22); Audio_.boom();
+  // only blooms you can actually see are allowed to flash or shake the camera
+  const vis = onScreen(x, y, radius);
+  if (vis > 0) {
+    drawFlashT = Math.max(drawFlashT, 0.05 * vis);
+    shake(0.22 * vis);
+  }
+  Audio_.boom();
   for (const e of enemies) {
     if (e.dead) continue;
     const d = len(e.x - x, e.y - y);
@@ -686,6 +777,10 @@ function killEnemy(e, ang = 0) {
   if (e.dead) return;
   e.dead = true;
   P.kills++;
+  for (const b of enemies) {
+    if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
+        && b.ledger.length < 8 && b.ledger.indexOf(e.type) < 0) b.ledger.push(e.type);
+  }
   score += Math.round(e.score * (1 + wave * 0.05));
   burst(e.x, e.y, e.type === 'boss' ? 90 : (12 + e.r), e.col, e.type === 'boss' ? 520 : 260, e.r * 0.22 + 2, 0.7);
   ringFx(e.x, e.y, e.r * 0.4, e.r * 3.2, e.col, 0.4, 3);
@@ -749,8 +844,25 @@ function killEnemy(e, ang = 0) {
       c.vx = rnd(160, -160); c.vy = rnd(160, -160);
     }
   }
+  // REVENANT: refuses the first death and stands back up as its own ghost
+  if (e.type === 'revenant' && e.gen < 1) {
+    const g = spawnEnemy('revenant', e.x, e.y, { gen: 1, hs: 0.5, rs: 0.85, elite: false });
+    g.phased = false;
+    g.iframeT = 0.5;
+    ringFx(e.x, e.y, 6, 90, '#f1f5f9', 0.5, 3);
+    burst(e.x, e.y, 20, '#f1f5f9', 240, 3, 0.6);
+    floatText(e.x, e.y - 26, 'RETURNS', '#e2e8f0', 13);
+    Audio_.tone(320, 0.35, 'sine', 0.09, 120);
+  }
   if (e.type === 'bomber') explode(e.x, e.y, 92, e.dmg * 1.4, '#f97316', true);
-  if (e.type === 'boss') { bossAlive = false; onBossDefeat(); }
+  if (e.boss === 'theother') {          // release any mirrors it had captured
+    for (const h of hazards) h.orbit = false;
+    finaleBeams.length = 0;
+  }
+  if (e.type === 'boss') {
+    lastBossDeath = { x: e.x, y: e.y };
+    bossAlive = false; onBossDefeat();
+  }
 }
 
 function mkDrop(x, y, kind) {
@@ -830,22 +942,58 @@ function pickEnemyType() {
   return pool[0][0];
 }
 
-function applyStage(abs) {
-  stageIdx = abs % STAGES.length;
-  loopNum = Math.floor(abs / STAGES.length);
-  stage = STAGES[stageIdx];
+/* Enter a specific stage definition. Which stage comes next is decided by the
+   portal room once the alt path is unlocked, and by the normal rotation
+   before that — so this no longer derives anything from the wave number. */
+function enterStage(def) {
+  stage = def;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   P.revive = P.reviveMax || 0;          // Second Wind recharges each sector
   seedStageHazards();
-  mortars.length = 0;
+  arenaReset(true);
+  mortars.length = 0; portals.length = 0; cages.length = 0;
+}
+
+// Kept for the pre-portal path: walk the normal rotation by absolute index.
+function applyStage(abs) {
+  normalIdx = abs;
+  stageIdx = abs % STAGES.length;
+  loopNum = Math.floor(abs / STAGES.length);
+  enterStage(STAGES[stageIdx]);
+}
+
+function advanceNormal() {
+  normalIdx++;
+  stageIdx = normalIdx % STAGES.length;
+  const newLoop = Math.floor(normalIdx / STAGES.length);
+  if (newLoop > loopNum) {               // the rotation wrapped: a full clear
+    loopNum = newLoop;
+    const p = Save.profile;
+    p.clears = (p.clears || 0) + 1;
+    if (p.clears >= 2 && !p.altPath) {
+      p.altPath = true;
+      banner('THE FRACTURE OPENS', '#e2e8f0', 3.6);
+      drawFlashT = 0.2; shake(0.6);
+    }
+    Save.writeLocal(); Save.flush();
+  }
+  enterStage(STAGES[stageIdx]);
+}
+
+function advanceAlt() {
+  altIdx = (altIdx + 1) % ALT_STAGES.length;
+  enterStage(ALT_STAGES[altIdx]);
 }
 
 function startWave() {
   wave++;
   betweenWaves = 0;
   const abs = Math.floor((wave - 1) / 5);
-  const fresh = abs !== stageAbs;
+  // Before the portals exist, stages advance on the wave clock as they always
+  // did. Afterwards the portal room owns transitions and this stays put.
+  const fresh = !Save.profile.altPath && abs !== stageAbs;
   if (fresh) { stageAbs = abs; applyStage(abs); }
+  else if (abs !== stageAbs) stageAbs = abs;
 
   if (wave % 5 === 0) {
     bossAlive = true;
@@ -865,6 +1013,7 @@ function startWave() {
 }
 
 function updateWaves(dt) {
+  if (awaitingPortal) return;
   waveTimer += dt;
   if (betweenWaves > 0) {
     betweenWaves -= dt;
@@ -974,7 +1123,7 @@ function openShop() {
 function closeShop() {
   noteShopExit();
   state = 'play';
-  betweenWaves = 2.0;
+  afterReward();
   Audio_.select();
   checkLevel();                          // Data Injection may owe a level-up
 }
@@ -1008,6 +1157,93 @@ function rerollShop() {
   shopTouched = true;
   shopItems = makeShopStock();
   Audio_.select();
+}
+
+/* ------------------------------ portal room -------------------------------
+   Once THE FRACTURE is open, stages no longer advance on a timer. Two gates
+   are placed on opposite sides of you and you walk into the one you want.
+--------------------------------------------------------------------------- */
+let awaitingPortal = false;
+
+function afterReward() {
+  if (Save.profile.altPath) openPortalRoom();
+  else betweenWaves = 2.0;
+}
+
+function openPortalRoom() {
+  awaitingPortal = true;
+  portals.length = 0;
+  enemies.length = 0; ebullets.length = 0;
+  const nDef = STAGES[(normalIdx + 1) % STAGES.length];
+  const aDef = ALT_STAGES[(altIdx + 1) % ALT_STAGES.length];
+  // Gates open around the spot the boss died on. The origin is pulled inside
+  // the safe box *before* placement — clamping the gates themselves would let
+  // a death near the edge squash both of them into the same corner.
+  const R = Math.min(230, Math.min(arena.x1 - arena.x0, arena.y1 - arena.y0) * 0.28);
+  const pad = R + 90;
+  const ox = clamp(lastBossDeath ? lastBossDeath.x : P.x, arena.x0 + pad, arena.x1 - pad);
+  const oy = clamp(lastBossDeath ? lastBossDeath.y : P.y, arena.y0 + pad, arena.y1 - pad);
+  lastBossDeath = null;
+  const a = rnd(TAU);
+  const place = (ang, kind, def) => portals.push({
+    kind, def, t: 0, arm: 0.9, r: 44,
+    x: ox + Math.cos(ang) * R,
+    y: oy + Math.sin(ang) * R
+  });
+  place(a, 'normal', nDef);
+  place(a + Math.PI, 'alt', aDef);
+
+  /* A gate buried in an embedded shard cannot be entered at all: the shard
+     holds you r+P.r away while the gate only opens within p.r+P.r, and that
+     gap is on the wrong side. Anything overlapping gets moved to the dead
+     centre of the room, which is always clear of the walls the shards are in. */
+  const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
+  const buried = p => hazards.some(h =>
+    h.kind === 'mirror' && len(p.x - h.x, p.y - h.y) < h.r + p.r + 8);
+  for (const p of portals) if (buried(p)) { p.x = cx; p.y = cy; }
+  // if both were relocated they would now be stacked — split along the long axis
+  if (portals.length === 2) {
+    const sep = len(portals[0].x - portals[1].x, portals[0].y - portals[1].y);
+    if (sep < portals[0].r * 2 + 60) {
+      const wide = (arena.x1 - arena.x0) >= (arena.y1 - arena.y0);
+      const off = portals[0].r + 80;
+      portals[0].x = cx - (wide ? off : 0); portals[0].y = cy - (wide ? 0 : off);
+      portals[1].x = cx + (wide ? off : 0); portals[1].y = cy + (wide ? 0 : off);
+    }
+  }
+  banner('CHOOSE A GATE', '#e2e8f0', 3.0);
+  Audio_.tone(180, 1.1, 'sine', 0.12, 520);
+}
+
+function updatePortals(dt) {
+  for (const p of portals) {
+    p.t += dt;
+    p.arm -= dt;                         // brief arming delay: no instant entry
+    if (Math.random() < 0.7) {
+      const a = rnd(TAU), rr = p.r * rnd(1.5, 0.7);
+      spawnPart(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr,
+        -Math.cos(a) * 90, -Math.sin(a) * 90, rnd(3.4, 1.6),
+        p.kind === 'alt' ? p.def.accent : COL.player, rnd(0.6, 0.3), 0.95);
+    }
+    if (p.arm <= 0 && len(P.x - p.x, P.y - p.y) < p.r + P.r) { takePortal(p); return; }
+  }
+}
+
+function takePortal(p) {
+  const col = p.def.accent;
+  ringFx(p.x, p.y, 12, 340, col, 0.85, 6);
+  burst(p.x, p.y, 70, col, 400, 4.2, 1.0);
+  drawFlashT = 0.2; shake(0.7);
+  Audio_.levelup(); Audio_.boom();
+  portals.length = 0;
+  awaitingPortal = false;
+  if (p.kind === 'alt') advanceAlt(); else advanceNormal();
+  // step through: recentre in the new arena so you arrive somewhere safe
+  P.x = WORLD.w / 2; P.y = WORLD.h / 2; P.vx = P.vy = 0;
+  cam.x = P.x; cam.y = P.y;
+  enemies.length = 0; ebullets.length = 0; replay.length = 0;
+  banner(stage.name, stage.accent, 2.6);
+  betweenWaves = 1.8;
 }
 
 /* ------------------------------ planetarium -------------------------------
@@ -1119,14 +1355,69 @@ function acceptSign() {
 
 function leavePlanetarium() {
   state = 'play';
-  betweenWaves = 2.0;
+  afterReward();
   planetSign = null;
   Audio_.select();
   checkLevel();
 }
 
 /* Which room opens after a boss: once unlocked, half are planetariums. */
+/* A shard biting into the wall. Records which face it hit and pre-generates
+   its fracture pattern once, so the tear is stable instead of shimmering
+   with new random lines every frame. */
+function embedShard(h, quiet) {
+  const m = h.r * 0.55;
+  h.x = clamp(h.x, arena.x0 + m, arena.x1 - m);
+  h.y = clamp(h.y, arena.y0 + m, arena.y1 - m);
+  h.impactAng = Math.atan2(h.vy || 0, h.vx || 1);
+  // inward-facing normal of whichever wall it struck
+  h.wallNx = h.x <= arena.x0 + m + 1 ? 1 : h.x >= arena.x1 - m - 1 ? -1 : 0;
+  h.wallNy = h.y <= arena.y0 + m + 1 ? 1 : h.y >= arena.y1 - m - 1 ? -1 : 0;
+  if (!h.wallNx && !h.wallNy) h.wallNy = -1;
+  // fracture lines run along the wall face, away from the puncture
+  const along = Math.atan2(-h.wallNx, h.wallNy);
+  h.cracks = [];
+  for (let i = 0; i < 7; i++) {
+    const pts = [];
+    let x = 0, y = 0;
+    let a = along + (i % 2 ? Math.PI : 0) + rnd(0.7, -0.7);
+    const n = 3 + rndi(3), total = rnd(105, 45);
+    for (let k = 0; k < n; k++) {
+      a += rnd(0.55, -0.55);
+      const L = total / n * rnd(1.5, 0.5);
+      x += Math.cos(a) * L; y += Math.sin(a) * L;
+      pts.push([x, y]);
+    }
+    h.cracks.push(pts);
+  }
+  h.embT = 0;
+  h.flying = false; h.embedded = true; h.vx = 0; h.vy = 0;
+  if (!quiet) { shake(0.3); Audio_.hit(); }
+  burst(h.x, h.y, 26, '#5eead4', 300, 3.4, 0.6);
+  burst(h.x, h.y, 12, '#ffffff', 190, 2.4, 0.4);
+  ringFx(h.x, h.y, 6, h.r * 2.4, '#99f6e4', 0.5, 4);
+}
+
+/* Gameplay stops while a reward overlay is up, so anything still in the air
+   would freeze there and resume — lethal — the instant you closed it. Drive
+   any remaining shards into the nearest wall first. */
+function settleShards() {
+  for (const h of hazards) {
+    if (h.kind !== 'mirror' || !h.flying) continue;
+    const m = h.r * 0.55;
+    const dl = h.x - arena.x0, dr = arena.x1 - h.x;
+    const dt_ = h.y - arena.y0, db = arena.y1 - h.y;
+    const nearest = Math.min(dl, dr, dt_, db);
+    if (nearest === dl) h.x = arena.x0 + m;
+    else if (nearest === dr) h.x = arena.x1 - m;
+    else if (nearest === dt_) h.y = arena.y0 + m;
+    else h.y = arena.y1 - m;
+    embedShard(h, true);
+  }
+}
+
 function openReward() {
+  settleShards();
   if (Save.profile.planetarium && Math.random() < 0.5) openPlanetarium();
   else openShop();
 }
@@ -1186,7 +1477,7 @@ const Save = {
 
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
                   time: 0, muted: false, autofire: false,
-                  planetarium: false, skipStreak: 0,
+                  planetarium: false, skipStreak: 0, clears: 0, altPath: false,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -1217,6 +1508,8 @@ const Save = {
     out.autofire = b.autofire !== undefined ? b.autofire : a.autofire;
     // an unlock is permanent: if either store has it, it stays earned
     out.planetarium = !!(a.planetarium || b.planetarium);
+    out.altPath = !!(a.altPath || b.altPath);
+    out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
     const ar = a.bestRun, br = b.bestRun;
     out.bestRun = (br && br.score || 0) >= (ar && ar.score || 0) ? (br || ar) : (ar || br);
@@ -1427,6 +1720,9 @@ function resetGame() {
   enemies = []; bullets = []; ebullets = []; gems = []; drops = [];
   parts = []; floats = []; arcs = []; rings = []; corpses = [];
   hazards = []; mortars = []; sentries = []; beams = [];
+  portals = []; cages = []; replay = []; finaleBeams = [];
+  arenaReset(true); lastBossDeath = null;
+  awaitingPortal = false; normalIdx = 0; altIdx = -1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
@@ -1583,10 +1879,15 @@ function update(dt) {
   updatePlayer(dt);
   updateDrones(dt);
   updateSentries(dt);
+  updateArena(dt);
+  updatePortals(dt);
+  replay.push({ x: P.x, y: P.y, ang: P.ang });
+  if (replay.length > 260) replay.shift();
   updateEnemies(wdt);
   updateStageAmbient(dt);
   updateHazards(wdt);
   updateMortars(wdt);
+  updateCages(dt);
   updateBullets(dt);
   updateEBullets(wdt);
   updateBeams(dt);
@@ -1696,8 +1997,11 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  P.x = clamp(P.x + P.vx * dt, P.r, WORLD.w - P.r);
-  P.y = clamp(P.y + P.vy * dt, P.r, WORLD.h - P.r);
+  P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
+  P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
+  collideMirrors(P, P.r);
+  P.x = clamp(P.x, arena.x0 + P.r, arena.x1 - P.r);
+  P.y = clamp(P.y, arena.y0 + P.r, arena.y1 - P.r);
 
   // engine trail
   if (len(P.vx, P.vy) > 40 && Math.random() < 0.6) {
@@ -2014,9 +2318,12 @@ function updateEnemies(dt) {
         break;
 
       case 'sentinel':
-        // walks straight at you behind a frontal shield — has to be flanked
+        // Walks straight at you behind a frontal shield. It must turn SLOWLY:
+        // the shield always faces where you were, so a shot fired at it lands
+        // in the arc every time unless you can out-rotate it. Closing the gap
+        // raises your angular speed, so flanking means getting in close.
         steer(e, ux * sp, uy * sp, 2.2, dt);
-        e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-3.5 * dt));
+        e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-0.9 * dt));
         break;
 
       case 'phaser': {
@@ -2110,6 +2417,74 @@ function updateEnemies(dt) {
         break;
       }
 
+      /* ---------------- THE ARCHIVE ---------------- */
+
+      case 'revenant': {
+        // Killing it is not the end — it comes back once as its own ghost.
+        // The ghost is faster, weaker, and cannot be re-killed into a third.
+        const gh = e.gen > 0;
+        e.wob += dt * 4;
+        steer(e, (ux + Math.cos(e.wob) * 0.3) * sp * (gh ? 1.5 : 1),
+                 (uy + Math.sin(e.wob) * 0.3) * sp * (gh ? 1.5 : 1), gh ? 6 : 3.6, dt);
+        e.ang = Math.atan2(e.vy, e.vx);
+        if (gh && Math.random() < 0.3)
+          spawnPart(e.x, e.y, rnd(20, -20), rnd(20, -20), 3, '#f1f5f9', 0.4, 0.94);
+        break;
+      }
+
+      case 'redactor': {
+        // Projects a cone that erases your shots outright. It tracks you, so
+        // flanking alone is a slog — instead the cone blinks on a visible
+        // rhythm and you fire in the gaps. Slow turning also lets a committed
+        // orbit get behind it.
+        const wantR = 300;
+        const pushR = d < wantR ? -0.7 : (d > wantR + 130 ? 0.8 : 0);
+        steer(e, (ux * pushR - uy * 0.35) * sp, (uy * pushR + ux * 0.35) * sp, 2, dt);
+        e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-0.75 * dt));
+        e.redactT = (e.redactT || 0) + dt;
+        e.redacting = (e.redactT % 2.5) < 1.45;   // ~1.45s on, ~1.05s off
+        e.cd -= dt;
+        if (e.cd <= 0 && d < 620) {
+          e.cd = Math.max(1.4, 3.0 - wave * 0.04);
+          for (let k = -1; k <= 1; k++) eshoot(e, e.ang + k * 0.2, 250, e.dmg, 7);
+        }
+        break;
+      }
+
+      /* ---------------- THE MIRROR ---------------- */
+
+      case 'mimic': {
+        // Replays your own movement from a few seconds ago and shoots the gun
+        // you were holding. You are dodging your past self.
+        e.vx = 0; e.vy = 0;
+        const lag = 110 + (e.id % 40);
+        const rec = replay[Math.max(0, replay.length - lag)];
+        if (rec) {
+          // mirrored through the arena centre so it reads as a reflection
+          const tx = WORLD.w - rec.x, ty = WORLD.h - rec.y;
+          e.x = lerp(e.x, tx, 1 - Math.exp(-6 * dt));
+          e.y = lerp(e.y, ty, 1 - Math.exp(-6 * dt));
+          e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+        }
+        e.cd -= dt;
+        if (e.cd <= 0 && d < 700) {
+          e.cd = clamp(1 / Math.max(0.8, P.fireRate * 0.35), 0.22, 1.6);
+          eshoot(e, e.ang + rnd(0.1, -0.1), 340, e.dmg, 5);
+        }
+        break;
+      }
+
+      case 'prism': {
+        // One face is mirrored and refracts your shots straight back at you;
+        // the other is open. It rotates, so you shoot on the beat.
+        e.plateAng += dt * (1.1 + wave * 0.01);
+        e.ang = e.plateAng;
+        const wantP = 340;
+        const pushP = d < wantP ? -0.5 : 0.6;
+        steer(e, ux * pushP * sp, uy * pushP * sp, 1.6, dt);
+        break;
+      }
+
       case 'boss': updateBoss(e, dt, ux, uy, d); break;
     }
 
@@ -2129,12 +2504,14 @@ function updateEnemies(dt) {
       }
     }
 
-    e.x = clamp(e.x + e.vx * dt, e.r, WORLD.w - e.r);
-    e.y = clamp(e.y + e.vy * dt, e.r, WORLD.h - e.r);
+    e.x = clamp(e.x + e.vx * dt, arena.x0 + e.r, arena.x1 - e.r);
+    e.y = clamp(e.y + e.vy * dt, arena.y0 + e.r, arena.y1 - e.r);
+    if (e.type !== 'boss') collideMirrors(e, e.r);
 
     // contact damage — intangible enemies and Ghost Step dashes pass through
     if (d < e.r + P.r + 2 && !e.phased && e.dmg > 0 && !(P.ghost && P.dashT > 0)) {
-      hurtPlayer(e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1));
+      hurtPlayer(e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
+                       * (e.rage === 1 ? 2.2 : 1));
       if (P.thorns && e.hitCd <= 0) {
         e.hitCd = 0.3;
         damageEnemy(e, (16 + P.dmg * 1.2) * P.thorns, false, P.x, P.y, { silent: true });
@@ -2169,12 +2546,17 @@ function eshoot(e, ang, spd, dmg, r = 6) {
 -------------------------------------------------------------------------- */
 function updateBoss(e, dt, ux, uy, d) {
   const frac = e.hp / e.maxHp;
-  const ph = frac > 0.66 ? 0 : frac > 0.33 ? 1 : 2;
+  // lockPhase pins a boss past the HP gates — used when one heals itself and
+  // would otherwise fall back through its own phase transitions.
+  const ph = e.lockPhase !== undefined ? e.lockPhase
+           : frac > 0.66 ? 0 : frac > 0.33 ? 1 : 2;
   if (ph !== e.phase) {
     e.phase = ph;
     e.atk = -1; e.atkT = 1.0;
     ringFx(e.x, e.y, e.r, 340, e.col, 0.7, 6);
-    shake(0.65); Audio_.boom(); drawFlashT = Math.max(drawFlashT, 0.08);
+    const pv = onScreen(e.x, e.y, e.r * 2);
+    shake(0.65 * pv); Audio_.boom();
+    if (pv > 0) drawFlashT = Math.max(drawFlashT, 0.08 * pv);
     for (let i = 0; i < 26; i++) eshoot(e, i * TAU / 26, 190, e.dmg * 0.5);
     banner('PHASE ' + (ph + 1), e.col);
   }
@@ -2452,6 +2834,338 @@ function bossNull(e, dt, ux, uy, d, ph) {
   }
 }
 
+/* --- fracture i: THE CURATOR — it files things away, including you. ---
+   Three ideas, none of which the other bosses use: it keeps a record of what
+   you have killed and puts it back; it seals you inside a closing ring you
+   have to shoot your way out of; and it erases bands of the arena. */
+function bossCurator(e, dt, ux, uy, d, ph) {
+  e.ang += dt * 0.35;
+  e.plateAng += dt * 0.9;
+  // it drifts to the arena centre and rules from there
+  const cxw = WORLD.w / 2, cyw = WORLD.h / 2;
+  steer(e, (cxw - e.x) * 0.5, (cyw - e.y) * 0.5, 0.9, dt);
+
+  // keep a ledger of everything killed in this fight
+  if (!e.ledger) e.ledger = [];
+  if (e.atkT > 0) return;
+
+  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2, 3]);
+  e.atk = a;
+  switch (a) {
+    case 0: {                            // RESTORE — undo your work
+      const roster = e.ledger.length ? e.ledger : ['revenant', 'redactor', 'grunt'];
+      const n = 3 + ph;
+      for (let k = 0; k < n; k++) {
+        const ang = rnd(TAU), dist = rnd(320, 160);
+        const s = spawnEnemy(pick(roster),
+          clamp(e.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
+          clamp(e.y + Math.sin(ang) * dist, 60, WORLD.h - 60), { elite: false });
+        ringFx(s.x, s.y, 4, 60, '#e2e8f0', 0.5, 2);
+      }
+      banner('RESTORED', '#e2e8f0', 1.2);
+      Audio_.tone(260, 0.5, 'sine', 0.12, 700);
+      e.atkT = 2.2; break;
+    }
+    case 1: {                            // catalogue sweep — radial index marks
+      const n = 18 + ph * 6, off = rnd(TAU);
+      for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 200 + ph * 25, e.dmg * 0.4, 6);
+      e.atkT = 1.5 - ph * 0.15; break;
+    }
+    case 2: {                            // THE FILING — sealed in a closing ring
+      cages.push({ x: P.x, y: P.y, r: 300, min: 62, hp: 60 + wave * 9,
+                   maxHp: 60 + wave * 9, dmg: e.dmg * 1.6, t: 0 });
+      banner('FILED', '#e2e8f0', 1.4);
+      Audio_.tone(140, 0.7, 'square', 0.14, 90);
+      shake(0.4);
+      e.atkT = 2.6; break;
+    }
+    case 3: {                            // redaction bands across the arena
+      for (let k = 0; k < 3; k++)
+        addHazard('delete', rnd(WORLD.w - 200, 200), rnd(WORLD.h - 200, 200), 3.4,
+                  { r: 120, dmg: e.dmg * 0.9 });
+      e.atkT = 1.9; break;
+    }
+  }
+}
+
+/* --- fracture ii: THE OTHER — it is you, and it has your build. ---
+   Its damage, rate and shot count are read off your own stats every frame, so
+   the fight scales with whatever you spent the run assembling. */
+/* ----------------------- THE OTHER: the last ten seconds -----------------
+   Damage cannot take it below 10 HP. At that floor it stops being a target
+   entirely: it drags every mirror in the sector into orbit, opens one
+   enormous beam locked to its own facing, and bleeds out at 1 HP a second.
+   The beam refracts through each mirror it crosses, so the safe ground is
+   whatever the prism fan is not currently covering — and the mirrors counter-
+   rotate against the sweep, so that geometry never repeats.
+-------------------------------------------------------------------------- */
+let finaleBeams = [];
+const PRISM_COLS = ['#ffffff', '#a5f3fc', '#c4b5fd', '#5eead4', '#fca5a5', '#fcd34d'];
+const BOSS_SPIN = 0.5;      // rad/s — the boss front, and the beam with it
+const MIRROR_SPIN = -0.85;  // rad/s — deliberately opposite, and independent
+
+// nearest positive ray/circle hit, or null
+function rayCircle(x, y, dx, dy, cx, cy, r) {
+  const fx = x - cx, fy = y - cy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - r * r;
+  const disc = b * b - 4 * c;
+  if (disc < 0) return null;
+  const s = Math.sqrt(disc);
+  const t1 = (-b - s) / 2, t2 = (-b + s) / 2;
+  if (t1 > 0) return t1;
+  if (t2 > 0) return t2;
+  return null;
+}
+
+function castFinale(x, y, ang, depth, colIdx) {
+  if (depth > 2 || finaleBeams.length > 40) return;
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  let hit = null, bestT = 1e9;
+  for (const h of hazards) {
+    if (h.kind !== 'mirror') continue;
+    const t = rayCircle(x, y, dx, dy, h.x, h.y, h.r);
+    if (t !== null && t > 4 && t < bestT) { bestT = t; hit = h; }
+  }
+  const L = hit ? bestT : 3200;
+  finaleBeams.push({
+    x1: x, y1: y, x2: x + dx * L, y2: y + dy * L,
+    col: PRISM_COLS[((colIdx % PRISM_COLS.length) + PRISM_COLS.length) % PRISM_COLS.length],
+    w: depth === 0 ? 46 : Math.max(9, 22 - depth * 6)
+  });
+  if (!hit) return;
+  // prism: the beam enters the glass and leaves as a fan
+  const hx = x + dx * bestT, hy = y + dy * bestT;
+  for (let k = -1; k <= 1; k++)
+    castFinale(hx + dx * 3, hy + dy * 3, ang + k * 0.27, depth + 1, colIdx + k + 2);
+}
+
+function startFinale(e) {
+  e.finale = true;
+  e.invuln = 1;
+  e.floor = undefined;
+  finaleBeams.length = 0;
+  const mirrors = hazards.filter(h => h.kind === 'mirror');
+  mirrors.forEach((h, i) => {
+    h.orbit = true;
+    h.oAng = (i / Math.max(1, mirrors.length)) * TAU;
+    h.oR = 250 + (i % 2) * 95;
+    h.life = 1e9;
+  });
+  // the room closes in around it — nowhere left to kite to
+  arenaShrinkTo(e.x, e.y, 1180, 880);
+  banner('IT TAKES THE MIRRORS', '#5eead4', 3.4);
+  drawFlashT = 0.3; shake(1.2);
+  Audio_.boss(); Audio_.boom();
+  ringFx(e.x, e.y, e.r, 620, '#5eead4', 1.2, 8);
+}
+
+function bossOtherFinale(e, dt) {
+  e.invuln = 1;                                  // nothing you do lands now
+  e.vuln = 1;
+  steer(e, (WORLD.w / 2 - e.x) * 0.9, (WORLD.h / 2 - e.y) * 0.9, 1.3, dt);
+  e.ang += dt * BOSS_SPIN;
+
+  for (const h of hazards) {
+    if (h.kind !== 'mirror' || !h.orbit) continue;
+    h.oAng += dt * MIRROR_SPIN;                  // counter-rotating, fixed rate
+    h.x = e.x + Math.cos(h.oAng) * h.oR;
+    h.y = e.y + Math.sin(h.oAng) * h.oR;
+  }
+
+  e.hp -= dt;                                    // one per second, ten to live
+  if (e.hp <= 0) {
+    e.hp = 0; e.invuln = 0;
+    finaleBeams.length = 0;
+    // it lets go: every mirror is flung outward and buries itself in a wall.
+    // In flight they are lethal outright; once embedded they are just scenery.
+    for (const h of hazards) {
+      if (h.kind !== 'mirror' || !h.orbit) continue;
+      h.orbit = false;
+      h.flying = true;
+      const a = Math.atan2(h.y - e.y, h.x - e.x) + rnd(0.12, -0.12);
+      h.vx = Math.cos(a) * 1550;
+      h.vy = Math.sin(a) * 1550;
+      h.rot = 0; h.spin = rnd(7, -7);
+      ringFx(h.x, h.y, 6, h.r * 2.2, '#99f6e4', 0.4, 3);
+    }
+    drawFlashT = 0.24; shake(1.2);
+    Audio_.boom(); Audio_.crit();
+    banner('LET GO', '#5eead4', 2.0);
+    killEnemy(e);
+    return;
+  }
+
+  finaleBeams.length = 0;
+  castFinale(e.x, e.y, e.ang, 0, 0);
+
+  e.beamTick = (e.beamTick || 0) - dt;
+  if (e.beamTick <= 0) {
+    for (const bm of finaleBeams) {
+      if (segCircle(bm.x1, bm.y1, bm.x2, bm.y2, P.x, P.y, bm.w * 0.5 + P.r)) {
+        e.beamTick = 0.34;
+        hurtPlayer(e.dmg * 0.85);
+        break;
+      }
+    }
+  }
+  if (Math.random() < 0.6) {
+    const a = rnd(TAU);
+    spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+      Math.cos(a) * 120, Math.sin(a) * 120, rnd(4, 2), '#5eead4', rnd(0.5, 0.25), 0.94);
+  }
+  if (Math.random() < 0.25) shake(0.05);
+}
+
+function bossOther(e, dt, ux, uy, d, ph) {
+  if (e.finale) return bossOtherFinale(e, dt);
+  if (e.hp <= 10) { startFinale(e); return; }
+
+  /* Phase 3: it stops imitating. It knits itself back to full, grows legs,
+     and abandons the mirror act for a straight blind charge that only ends
+     against a wall — where the impact stuns it and hands you the window. */
+  if (!e.awakened && e.hp / e.maxHp <= 0.33) {
+    e.awakened = true;
+    e.lockPhase = 2;            // never fall back through the HP gates again
+    e.hp = e.maxHp;
+    e.legs = 0; e.rage = -1; e.atkT = 2.4; e.invuln = 1;
+    banner('IT STOPS PRETENDING', '#5eead4', 3.2);
+    drawFlashT = 0.28; shake(1);
+    Audio_.boss(); Audio_.hurt();
+    ringFx(e.x, e.y, e.r, 440, '#5eead4', 1.0, 7);
+    burst(e.x, e.y, 70, '#5eead4', 380, 4.4, 1.1);
+    return;
+  }
+  if (e.awakened) return bossOtherRage(e, dt);
+
+  e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+
+  // mirror your position through the arena centre, then close in
+  const mx = WORLD.w - P.x, my = WORLD.h - P.y;
+  const toMirror = ph === 0 ? 1 : 0.55;
+  const tx = lerp(P.x - ux * 260, mx, toMirror);
+  const ty = lerp(P.y - uy * 260, my, toMirror);
+  steer(e, (tx - e.x) * 1.6, (ty - e.y) * 1.6, 1.6 + ph * 0.5, dt);
+
+  // it shoots your gun back at you
+  e.cd -= dt;
+  const rate = clamp(P.fireRate * (0.30 + ph * 0.07), 0.7, 7);
+  if (e.cd <= 0 && d < 900) {
+    e.cd = 1 / rate;
+    const n = clamp(P.count, 1, 5);
+    const dmg = clamp(P.dmg * 0.16, e.dmg * 0.28, e.dmg * 1.1);
+    for (let k = 0; k < n; k++)
+      eshoot(e, e.ang + (k - (n - 1) / 2) * 0.13 + rnd(0.05, -0.05), 400, dmg, 6);
+    if (P.sun) addHazard('fire', e.x, e.y, 2.2, { r: 60, dmg: e.dmg * 0.5 });
+  }
+
+  if (e.atkT > 0) return;
+  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
+  e.atk = a;
+  switch (a) {
+    case 0: {                            // your dash, used against you
+      const ang = Math.atan2(P.y - e.y, P.x - e.x);
+      e.vx = Math.cos(ang) * 1100; e.vy = Math.sin(ang) * 1100;
+      burst(e.x, e.y, 20, '#5eead4', 280, 3.4, 0.45);
+      Audio_.dash();
+      e.atkT = 1.1; break;
+    }
+    case 1: {                            // reflected volley
+      const n = 9 + ph * 3, off = rnd(TAU);
+      for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 260, e.dmg * 0.42, 6);
+      e.atkT = 1.3; break;
+    }
+    case 2: {                            // it makes copies of itself
+      for (let k = 0; k < 2; k++) {
+        const ang = rnd(TAU);
+        const s = spawnEnemy('mimic', e.x + Math.cos(ang) * 90, e.y + Math.sin(ang) * 90,
+                             { elite: false });
+        s.col = '#5eead4';
+        ringFx(s.x, s.y, 4, 50, '#5eead4', 0.4, 2);
+      }
+      Audio_.tone(520, 0.3, 'square', 0.1, 1100);
+      e.atkT = 1.6; break;
+    }
+    case 3: {                            // mirror prison: ring with one gap
+      const gap = rnd(TAU), n = 34;
+      for (let k = 0; k < n; k++) {
+        const ang = k * TAU / n;
+        const dA = Math.abs(((ang - gap + Math.PI) % TAU + TAU) % TAU - Math.PI);
+        if (dA < 0.45) continue;
+        eshoot(e, ang, 210, e.dmg * 0.4, 6);
+      }
+      e.atkT = 1.7; break;
+    }
+  }
+}
+
+/* THE OTHER, awakened. Four states on a loop:
+     -1 growing legs (untouchable)   0 locking on
+      1 blind charge (uncorrectable) 2 stunned against the wall (vulnerable)
+   The charge angle is committed at the moment it launches and never updated,
+   so it can be baited — step aside and it commits to the wall instead. */
+function bossOtherRage(e, dt) {
+  e.legs = Math.min(1, (e.legs || 0) + dt * 0.65);
+  const scuttle = () => {
+    if (Math.random() < 0.7)
+      spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r),
+        rnd(70, -70), rnd(70, -70), rnd(3.4, 1.6), '#5eead4', rnd(0.45, 0.2), 0.93);
+  };
+
+  if (e.rage === -1) {                       // transforming
+    e.invuln = 1; e.vuln = 1;
+    e.vx *= Math.pow(0.02, dt); e.vy *= Math.pow(0.02, dt);
+    e.ang += dt * 6;
+    scuttle();
+    if (Math.random() < 0.25) shake(0.08);
+    e.atkT -= dt;
+    if (e.atkT <= 0) { e.rage = 0; e.invuln = 0; e.atkT = 0.55; }
+    return;
+  }
+
+  if (e.rage === 0) {                        // winding up, still trackable
+    e.invuln = 0; e.vuln = 1;
+    e.vx *= Math.pow(0.08, dt); e.vy *= Math.pow(0.08, dt);
+    e.ang = angLerp(e.ang, Math.atan2(P.y - e.y, P.x - e.x), 1 - Math.exp(-9 * dt));
+    e.atkT -= dt;
+    if (e.atkT <= 0) {
+      e.rage = 1;
+      e.chargeAng = e.ang;                   // committed here and never again
+      Audio_.noise(0.5, 0.24, 3800, 300, 3);
+      shake(0.35);
+    }
+    return;
+  }
+
+  if (e.rage === 1) {                        // blind charge
+    e.vuln = 1;
+    e.vx = Math.cos(e.chargeAng) * 1450;
+    e.vy = Math.sin(e.chargeAng) * 1450;
+    scuttle(); scuttle();
+    const m = e.r + 3;
+    if (e.x <= arena.x0 + m || e.x >= arena.x1 - m ||
+        e.y <= arena.y0 + m || e.y >= arena.y1 - m) {
+      e.rage = 2; e.atkT = 1.8;
+      e.vx = -Math.cos(e.chargeAng) * 240;
+      e.vy = -Math.sin(e.chargeAng) * 240;
+      explode(e.x, e.y, 165, e.dmg * 0.85, '#5eead4', true);
+      shake(1); drawFlashT = 0.18;
+      for (let k = 0; k < 16; k++) eshoot(e, rnd(TAU), rnd(270, 150), e.dmg * 0.28, 6);
+    }
+    return;
+  }
+
+  // rage 2 — face-first into the wall, and open
+  e.vuln = 2.2;                              // the reward for baiting it
+  e.vx *= Math.pow(0.02, dt); e.vy *= Math.pow(0.02, dt);
+  e.ang += dt * 1.2;
+  if (Math.random() < 0.3)
+    spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, rnd(-40, -80),
+      3, '#fde047', 0.5, 0.94);
+  e.atkT -= dt;
+  if (e.atkT <= 0) { e.vuln = 1; e.rage = 0; e.atkT = 0.55; }
+}
+
 /* Shared timed-salvo action (atk 6): drip-feeds a rotating spiral without
    setTimeout, so it stays in lockstep with pause and the fixed timestep. */
 function bossSalvo(e, dt) {
@@ -2482,13 +3196,35 @@ function addHazard(kind, x, y, life = 8, opts = {}) {
   }
   hazards.push({
     kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly,
-    r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74 : 76),
+    r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74
+       : kind === 'mirror' ? 58 : kind === 'delete' ? 105 : 76),
     ang: opts.ang !== undefined ? opts.ang : rnd(TAU),
     state: 0, cd: opts.cd !== undefined ? opts.cd : rnd(3.2, 1.2),
     dmg: opts.dmg || 9,
     col: opts.col || (kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
-       : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9' : '#f97316')
+       : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9'
+       : kind === 'delete' ? '#f87171' : kind === 'mirror' ? '#5eead4' : '#f97316')
   });
+}
+
+/* Mirrors are solid objects, not fields. Without this you could stand inside
+   one and be untouchable: incoming fire reflects off the shell while your own
+   shots spawn inside it and leave unobstructed. Circle-vs-circle resolve with
+   the inward velocity cancelled, so you slide along the surface. */
+function collideMirrors(o, r) {
+  for (const h of hazards) {
+    if (h.kind !== 'mirror' || h.flying) continue;
+    const dx = o.x - h.x, dy = o.y - h.y;
+    const min = h.r + r;
+    const d = Math.hypot(dx, dy);
+    if (d >= min) continue;
+    if (d < 0.001) { o.x = h.x + min; continue; }
+    const nx = dx / d, ny = dy / d;
+    o.x = h.x + nx * min;
+    o.y = h.y + ny * min;
+    const dot = o.vx * nx + o.vy * ny;
+    if (dot < 0) { o.vx -= dot * nx; o.vy -= dot * ny; }
+  }
 }
 
 function updateHazards(dt) {
@@ -2581,6 +3317,54 @@ function updateHazards(dt) {
         }
         break;
       }
+      case 'mirror': {
+        // Inert terrain, except while it is shrapnel. A mirror in flight goes
+        // straight through a full set of shields; once it buries itself in a
+        // wall it is safe to stand next to again.
+        if (!h.flying) {
+          if (h.embedded) {
+            h.embT = (h.embT || 0) + dt;
+            // the puncture keeps bleeding material into the room
+            if (Math.random() < 0.45) {
+              const a = rnd(TAU);
+              spawnPart(h.x + Math.cos(a) * h.r * 0.75, h.y + Math.sin(a) * h.r * 0.75,
+                (h.wallNx || 0) * rnd(75, 20) + rnd(36, -36),
+                (h.wallNy || 0) * rnd(75, 20) + rnd(36, -36),
+                rnd(3.2, 1.3), Math.random() < 0.45 ? '#ffffff' : '#99f6e4',
+                rnd(0.85, 0.35), 0.95);
+            }
+          }
+          break;
+        }
+        h.x += h.vx * dt; h.y += h.vy * dt;
+        h.rot = (h.rot || 0) + (h.spin || 0) * dt;
+        if (Math.random() < 0.8)
+          spawnPart(h.x + rnd(h.r, -h.r) * 0.6, h.y + rnd(h.r, -h.r) * 0.6,
+            rnd(60, -60), rnd(60, -60), rnd(4, 2), '#99f6e4', rnd(0.4, 0.2), 0.92);
+        if (len(P.x - h.x, P.y - h.y) < h.r + P.r) {
+          floatText(P.x, P.y - 34, 'SHATTERED', '#5eead4', 17);
+          burst(P.x, P.y, 40, '#5eead4', 380, 4, 0.8);
+          drawFlashT = 0.2; shake(0.9);
+          hurtPlayer(1e9, { pure: true });     // bypasses shields entirely
+        }
+        const m = h.r * 0.55;
+        if (h.x <= arena.x0 + m || h.x >= arena.x1 - m ||
+            h.y <= arena.y0 + m || h.y >= arena.y1 - m) embedShard(h);
+        break;
+      }
+      case 'delete': {
+        // THE ARCHIVE: a band that blinks out of existence, taking you with it
+        const on = (h.t % 2.2) > 1.2;
+        h.state = on ? 1 : 0;
+        if (on) {
+          h.tick -= dt;
+          if (h.tick <= 0 && pd < h.r) { h.tick = 0.4; hurtPlayer(h.dmg); }
+          if (Math.random() < 0.5)
+            spawnPart(h.x + rnd(h.r, -h.r) * 0.9, h.y + rnd(h.r, -h.r) * 0.9,
+              0, rnd(20, -20), rnd(3, 1.5), '#f87171', 0.4, 0.94);
+        }
+        break;
+      }
       case 'well': {
         // constant inward pull — fights your positioning rather than your HP
         if (pd < h.r && pd > 1) {
@@ -2607,12 +3391,13 @@ function seedStageHazards() {
   ambientT = 3;
   const k = stage.hazard;
   if (!k) return;
-  const n = k === 'vent' ? 7 : k === 'well' ? 4 : 0;
+  const n = k === 'vent' ? 7 : k === 'well' ? 4 : k === 'delete' ? 6 : k === 'mirror' ? 5 : 0;
   for (let i = 0; i < n; i++) {
     let x, y, tries = 0;
     do {
       x = rnd(WORLD.w - 200, 200); y = rnd(WORLD.h - 200, 200);
-    } while (len(x - P.x, y - P.y) < 340 && ++tries < 20);
+    } while ((len(x - P.x, y - P.y) < 340 ||
+              len(x - WORLD.w / 2, y - WORLD.h / 2) < 260) && ++tries < 24);
     addHazard(k, x, y, 1e9, { dmg: 10 + wave * 0.6 });
   }
 }
@@ -2647,7 +3432,11 @@ function updateMortars(dt) {
     if (m.t <= 0) {
       explode(m.x, m.y, m.r, m.dmg, m.col, false);
       if (len(P.x - m.x, P.y - m.y) < m.r + P.r) hurtPlayer(m.dmg);
-      if (m.big) { shake(0.7); drawFlashT = Math.max(drawFlashT, 0.1); }
+      if (m.big) {
+        const v = onScreen(m.x, m.y, m.r);
+        shake(0.7 * v);
+        if (v > 0) drawFlashT = Math.max(drawFlashT, 0.1 * v);
+      }
       mortars.splice(i, 1);
     }
   }
@@ -2675,6 +3464,51 @@ function updateSentries(dt) {
         hits: null, frag: 0, px: s.x, py: s.y, dist: 0
       });
       Audio_.tone(540, 0.05, 'square', 0.04, 250);
+    }
+  }
+}
+
+/* ------------------------------- the filing --------------------------------
+   A ring that closes on the player and has to be shot open. If it reaches its
+   minimum radius it detonates. Bullets crossing the ring damage it, which
+   means firing outward is the escape — the opposite of the usual instinct. */
+function updateCages(dt) {
+  for (let i = cages.length - 1; i >= 0; i--) {
+    const c = cages[i];
+    c.t += dt;
+    c.r = Math.max(c.min, c.r - 46 * dt);
+
+    // bullets crossing the ring chew through it
+    for (let b = bullets.length - 1; b >= 0; b--) {
+      const bu = bullets[b];
+      if (!bu.mine) continue;
+      const dNow = len(bu.x - c.x, bu.y - c.y);
+      const dPrev = len(bu.px - c.x, bu.py - c.y);
+      if ((dPrev < c.r) !== (dNow < c.r)) {          // crossed the boundary
+        c.hp -= bu.dmg;
+        burst(bu.x, bu.y, 5, '#e2e8f0', 200, 2.4, 0.3);
+        floatText(bu.x, bu.y, Math.round(bu.dmg), '#e2e8f0', 11);
+        bullets.splice(b, 1);
+      }
+    }
+    if (c.hp <= 0) {
+      ringFx(c.x, c.y, c.r, c.r + 120, '#e2e8f0', 0.5, 4);
+      burst(c.x, c.y, 40, '#e2e8f0', 320, 3.4, 0.7);
+      Audio_.kill(); shake(0.3);
+      floatText(P.x, P.y - 40, 'RELEASED', COL.hp, 16);
+      cages.splice(i, 1); continue;
+    }
+    // it holds you in: crossing outward is blocked while it stands
+    const pd = len(P.x - c.x, P.y - c.y);
+    if (pd > c.r - P.r) {
+      const a = Math.atan2(P.y - c.y, P.x - c.x);
+      P.x = c.x + Math.cos(a) * (c.r - P.r);
+      P.y = c.y + Math.sin(a) * (c.r - P.r);
+      P.vx *= 0.4; P.vy *= 0.4;
+    }
+    if (c.r <= c.min + 0.5) {
+      explode(c.x, c.y, c.min + 40, c.dmg, '#e2e8f0', true);
+      cages.splice(i, 1);
     }
   }
 }
@@ -2726,15 +3560,49 @@ function updateBullets(dt) {
 
     // walls
     let bounced = false;
-    if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx); bounced = true; }
-    else if (b.x > WORLD.w - b.r) { b.x = WORLD.w - b.r; b.vx = -Math.abs(b.vx); bounced = true; }
-    if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); bounced = true; }
-    else if (b.y > WORLD.h - b.r) { b.y = WORLD.h - b.r; b.vy = -Math.abs(b.vy); bounced = true; }
+    if (b.x < arena.x0 + b.r) { b.x = arena.x0 + b.r; b.vx = Math.abs(b.vx); bounced = true; }
+    else if (b.x > arena.x1 - b.r) { b.x = arena.x1 - b.r; b.vx = -Math.abs(b.vx); bounced = true; }
+    if (b.y < arena.y0 + b.r) { b.y = arena.y0 + b.r; b.vy = Math.abs(b.vy); bounced = true; }
+    else if (b.y > arena.y1 - b.r) { b.y = arena.y1 - b.r; b.vy = -Math.abs(b.vy); bounced = true; }
     if (bounced) {
       if (b.ric > 0) {
         b.ric--; b.hits = null;
         burst(b.x, b.y, 4, b.crit ? COL.crit : COL.bullet, 130, 2, 0.2);
       } else { bullets.splice(i, 1); continue; }
+    }
+
+    // THE MIRROR: your rounds bank off the pucks - and so do theirs, so the
+    // room cuts both ways.
+    for (const h of hazards) {
+      if (h.kind !== 'mirror') continue;
+      const dm = len(b.x - h.x, b.y - h.y);
+      if (dm >= h.r || dm < 0.001) continue;
+      const nx = (b.x - h.x) / dm, ny = (b.y - h.y) / dm;
+      const dot = b.vx * nx + b.vy * ny;
+      if (dot >= 0) continue;
+      b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
+      b.x = h.x + nx * (h.r + 2); b.y = h.y + ny * (h.r + 2);
+      b.hits = null;
+      burst(b.x, b.y, 4, '#5eead4', 170, 2.2, 0.22);
+      break;
+    }
+
+    // REDACTOR: anything inside its cone is simply erased, before it can hit
+    if (b.mine) {
+      let erased = false;
+      for (const e of enemies) {
+        if (e.dead || e.type !== 'redactor' || !e.redacting) continue;
+        const dxr = b.x - e.x, dyr = b.y - e.y;
+        const dr = len(dxr, dyr);
+        if (dr > 330) continue;
+        const off = Math.abs(((Math.atan2(dyr, dxr) - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+        if (off < 0.55) {
+          burst(b.x, b.y, 4, '#f87171', 130, 2.2, 0.25);
+          if (Math.random() < 0.25) floatText(b.x, b.y, 'REDACTED', '#f87171', 10, -24);
+          erased = true; break;
+        }
+      }
+      if (erased) { bullets.splice(i, 1); continue; }
     }
 
     // enemy collision (swept against previous position for fast bullets)
@@ -2752,6 +3620,21 @@ function updateBullets(dt) {
         if (dA < 1.15) {
           burst(b.x, b.y, 5, '#bae6fd', 200, 2.4, 0.28);
           Audio_.tone(1100, 0.05, 'square', 0.05, 1600);
+          removed = true; break;
+        }
+      }
+
+      // PRISM: the mirrored half throws your own shot back at you
+      if (e.type === 'prism') {
+        const inc = Math.atan2(b.py - e.y, b.px - e.x);
+        const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
+        if (off < 1.3) {
+          const back = Math.atan2(P.y - e.y, P.x - e.x) + rnd(0.25, -0.25);
+          ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
+            vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
+            r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
+          burst(b.x, b.y, 5, '#a5f3fc', 220, 2.4, 0.28);
+          Audio_.tone(1250, 0.05, 'sine', 0.05, 700);
           removed = true; break;
         }
       }
@@ -2834,6 +3717,18 @@ function updateEBullets(dt) {
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0 || b.x < -20 || b.y < -20 || b.x > WORLD.w + 20 || b.y > WORLD.h + 20) {
       ebullets.splice(i, 1); continue;
+    }
+    for (const h of hazards) {
+      if (h.kind !== 'mirror') continue;
+      const dm = len(b.x - h.x, b.y - h.y);
+      if (dm >= h.r || dm < 0.001) continue;
+      const nx = (b.x - h.x) / dm, ny = (b.y - h.y) / dm;
+      const dot = b.vx * nx + b.vy * ny;
+      if (dot >= 0) continue;
+      b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
+      b.x = h.x + nx * (h.r + 2); b.y = h.y + ny * (h.r + 2);
+      burst(b.x, b.y, 4, '#5eead4', 170, 2.2, 0.22);
+      break;
     }
     if (Math.random() < 0.3)
       spawnPart(b.x, b.y, 0, 0, b.r * 0.7, b.col, 0.2, 0.9);
@@ -2964,6 +3859,8 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
 
   drawMortars();
+  drawCages();
+  drawPortals();
   drawCorpses();
   drawEnemies();
   drawSentries();
@@ -2974,6 +3871,7 @@ function render() {
   drawBullets();
   drawArcs();
   drawBeams();
+  drawFinaleBeams();
   drawParticles();
   ctx.globalCompositeOperation = 'source-over';
 
@@ -3074,6 +3972,146 @@ function drawHazards() {
         ctx.restore();
         break;
       }
+      case 'delete': {
+        // a band that blinks out of reality on a fixed rhythm
+        const on = h.state === 1;
+        ctx.save();
+        ctx.globalAlpha = on ? 0.85 : 0.28 + Math.sin(uiTime * 18) * 0.1;
+        ctx.strokeStyle = on ? '#fca5a5' : '#7f1d1d';
+        ctx.lineWidth = on ? 3 : 1.6;
+        ctx.setLineDash(on ? [] : [10, 8]);
+        ctx.strokeRect(h.x - h.r, h.y - h.r * 0.55, h.r * 2, h.r * 1.1);
+        if (on) {
+          ctx.globalAlpha = 0.16;
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(h.x - h.r, h.y - h.r * 0.55, h.r * 2, h.r * 1.1);
+          for (let k = 0; k < 5; k++) {
+            const yy = h.y - h.r * 0.55 + Math.random() * h.r * 1.1;
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = '#fecaca';
+            ctx.fillRect(h.x - h.r, yy, h.r * 2, 1.2);
+          }
+        }
+        ctx.restore();
+        break;
+      }
+      case 'mirror': {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        drawGlow(h.x, h.y, h.r * (h.flying ? 1.7 : 1.2), '#5eead4', h.flying ? 0.4 : 0.16);
+        ctx.restore();
+        if (h.embedded) {
+          const fresh = clamp(1 - (h.embT || 0) / 0.7, 0, 1);
+          const pulse = 0.72 + Math.sin(uiTime * 3.4 + h.x * 0.01) * 0.28;
+          const nx = h.wallNx || 0, ny = h.wallNy || 0;
+          // torn hole punched through the wall behind it
+          ctx.save();
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = '#02100f';
+          ctx.beginPath();
+          for (let k = 0; k < 9; k++) {
+            const a = k / 9 * TAU;
+            const rr = h.r * (0.95 + Math.sin(k * 2.7 + h.y * 0.02) * 0.3);
+            const px = h.x + Math.cos(a) * rr, py = h.y + Math.sin(a) * rr;
+            k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath(); ctx.fill();
+          ctx.restore();
+          // fractures crawling away across the wall face
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.globalCompositeOperation = 'lighter';
+          for (let ci = 0; ci < h.cracks.length; ci++) {
+            const c = h.cracks[ci];
+            const fade = 1 - ci / (h.cracks.length + 2);
+            const trace = () => {
+              ctx.beginPath(); ctx.moveTo(h.x, h.y);
+              for (const pt of c) ctx.lineTo(h.x + pt[0], h.y + pt[1]);
+              ctx.stroke();
+            };
+            ctx.globalAlpha = (0.30 + fresh * 0.45) * fade;
+            ctx.strokeStyle = '#5eead4';
+            ctx.lineWidth = 5.5 - ci * 0.4;
+            trace();                                   // bloom around the split
+            ctx.globalAlpha = (0.55 + fresh * 0.45) * fade;
+            ctx.strokeStyle = '#ccfbf1';
+            ctx.lineWidth = 1.8 - ci * 0.14;
+            trace();                                   // hot filament inside it
+          }
+          ctx.restore();
+          // heat bleeding out of the wound, hottest right after impact
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          drawGlow(h.x, h.y, h.r * (2.3 + fresh * 2.2) * pulse, '#5eead4', 0.3 + fresh * 0.4);
+          drawGlow(h.x, h.y, h.r * (0.85 + fresh * 0.9), '#ffffff', 0.45 * pulse + fresh * 0.4);
+          drawGlow(h.x - nx * h.r * 0.5, h.y - ny * h.r * 0.5,
+                   h.r * 1.5 * pulse, '#ffffff', 0.22);
+          ctx.restore();
+          // the shard itself, buried at the angle it arrived on
+          ctx.save();
+          ctx.translate(h.x, h.y); ctx.rotate(h.impactAng || 0);
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = '#0f3d3d';
+          poly(0, 0, h.r, 6, 0); ctx.fill();
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+          poly(0, 0, h.r, 6, 0); ctx.stroke();
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 1.6;
+          for (let k = -2; k <= 2; k++) {
+            const o = k * h.r * 0.36;
+            ctx.beginPath();
+            ctx.moveTo(o - h.r * 0.45, h.r * 0.45);
+            ctx.lineTo(o + h.r * 0.45, -h.r * 0.45);
+            ctx.stroke();
+          }
+          ctx.restore();
+          break;
+        }
+        if (h.flying) {
+          // lethal in flight: a hard white rim and a motion streak
+          const sp = Math.hypot(h.vx, h.vy) || 1;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.strokeStyle = 'rgba(153,246,228,0.5)';
+          ctx.lineWidth = h.r * 1.5; ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(h.x, h.y);
+          ctx.lineTo(h.x - h.vx / sp * 90, h.y - h.vy / sp * 90);
+          ctx.stroke();
+          ctx.restore();
+          ctx.save();
+          ctx.translate(h.x, h.y); ctx.rotate(h.rot || 0);
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4;
+          ctx.fillStyle = 'rgba(94,234,212,0.35)';
+          poly(0, 0, h.r, 6, 0); ctx.fill(); ctx.stroke();
+          ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2;
+          poly(0, 0, h.r * 0.55, 6, 0.5); ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        ctx.save();
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 0.24;
+        ctx.fillStyle = '#0f3d3d';
+        ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#99f6e4'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 1.2;
+        for (let k = -2; k <= 2; k++) {
+          const o = k * h.r * 0.36;
+          ctx.beginPath();
+          ctx.moveTo(h.x + o - h.r * 0.5, h.y + h.r * 0.5);
+          ctx.lineTo(h.x + o + h.r * 0.5, h.y - h.r * 0.5);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
       case 'well': {
         ctx.save();
         ctx.globalAlpha = 0.18;
@@ -3089,6 +4127,72 @@ function drawHazards() {
         break;
       }
     }
+  }
+}
+
+function drawPortals() {
+  for (const p of portals) {
+    const col = p.def.accent;
+    const alt = p.kind === 'alt';
+    const armed = p.arm <= 0;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(p.x, p.y, p.r * 2.4, col, armed ? 0.5 : 0.22);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = armed ? 1 : 0.45;
+    // a stack of counter-rotating rings; the alt gate is jagged and unstable
+    for (let k = 0; k < 4; k++) {
+      const rr = p.r * (1 - k * 0.19);
+      const spin = p.t * (k % 2 ? -1.1 : 1.4) + k;
+      ctx.strokeStyle = rgba(col, 0.85 - k * 0.15);
+      ctx.lineWidth = 2.4 - k * 0.4;
+      if (alt) { poly(p.x, p.y, rr, 3 + k * 2, spin); ctx.stroke(); }
+      else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, spin, spin + 4.4);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = rgba(col, 0.14);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.62, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    // label the destination so the choice is informed
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = alt ? '#f87171' : '#64748b';
+    ctx.fillText(alt ? 'THE FRACTURE' : 'ONWARD', p.x, p.y - p.r - 30);
+    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = col;
+    ctx.fillText(p.def.name, p.x, p.y - p.r - 14);
+    ctx.restore();
+  }
+}
+
+function drawCages() {
+  for (const c of cages) {
+    const hpf = clamp(c.hp / c.maxHp, 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(c.x, c.y, c.r * 0.28, '#e2e8f0', 0.10);
+    ctx.restore();
+    ctx.save();
+    // the ring itself, thinning as you break it down
+    ctx.strokeStyle = rgba('#e2e8f0', 0.45 + hpf * 0.5);
+    ctx.lineWidth = 3 + hpf * 7;
+    ctx.setLineDash([18, 10]);
+    ctx.lineDashOffset = -uiTime * 26;
+    ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    // integrity readout on the ring
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText('SHOOT THE RING   ' + Math.max(0, Math.ceil(c.hp)), c.x, c.y - c.r - 14);
+    ctx.restore();
   }
 }
 
@@ -3123,6 +4227,29 @@ function drawSentries() {
     ctx.lineTo(s.x + Math.cos(s.ang) * 18, s.y + Math.sin(s.ang) * 18); ctx.stroke();
     ctx.restore();
   }
+}
+
+function drawFinaleBeams() {
+  if (!finaleBeams.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  // haze, then the coloured body, then a hot white core
+  for (const b of finaleBeams) {
+    ctx.globalAlpha = 0.16;
+    ctx.strokeStyle = b.col; ctx.lineWidth = b.w * 1.9;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+  }
+  for (const b of finaleBeams) {
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = b.col; ctx.lineWidth = b.w;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, b.w * 0.26);
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+  }
+  // flare at every refraction point
+  for (const b of finaleBeams) drawGlow(b.x1, b.y1, b.w * 1.1, b.col, 0.6);
+  ctx.restore();
 }
 
 function drawBeams() {
@@ -3160,11 +4287,13 @@ function drawArena() {
   ctx.save();
   ctx.strokeStyle = COL.wall;
   ctx.lineWidth = 4;
-  ctx.strokeRect(0, 0, WORLD.w, WORLD.h);
+  const aw = arena.x1 - arena.x0, ah = arena.y1 - arena.y0;
+  const closing = aw < WORLD.w - 4 || ah < WORLD.h - 4;
+  ctx.strokeRect(arena.x0, arena.y0, aw, ah);
   ctx.globalCompositeOperation = 'lighter';
-  ctx.strokeStyle = stage.glow;
-  ctx.lineWidth = 12;
-  ctx.strokeRect(0, 0, WORLD.w, WORLD.h);
+  ctx.strokeStyle = closing ? 'rgba(94,234,212,0.4)' : stage.glow;
+  ctx.lineWidth = closing ? 20 : 12;
+  ctx.strokeRect(arena.x0, arena.y0, aw, ah);
   ctx.restore();
 }
 
@@ -3199,6 +4328,51 @@ function drawEnemies() {
     ctx.strokeStyle = e.flash > 0.5 ? '#ffffff' : e.col;
     poly(e.x, e.y, e.r, e.sides, e.ang);
     ctx.fill(); ctx.stroke();
+
+    // THE OTHER, awakened: eight jointed legs that grow in during the
+    // transition and scuttle faster the angrier it gets
+    if (e.boss === 'theother' && e.legs > 0) {
+      const grow = e.legs;
+      const charging = e.rage === 1;
+      const stunned = e.rage === 2;
+      const beat = uiTime * (charging ? 22 : stunned ? 2 : 7);
+      ctx.save();
+      ctx.strokeStyle = stunned ? '#fde047' : '#5eead4';
+      ctx.lineCap = 'round';
+      for (let k = 0; k < 8; k++) {
+        const side = k < 4 ? 1 : -1;
+        const spread = ((k % 4) - 1.5) * 0.42;
+        const base = e.ang + Math.PI / 2 * side + spread * side;
+        const sw = Math.sin(beat + k * 1.1);
+        const L1 = (30 + sw * 5) * grow, L2 = (34 + sw * 7) * grow;
+        const hipX = e.x + Math.cos(base) * e.r * 0.8;
+        const hipY = e.y + Math.sin(base) * e.r * 0.8;
+        // knee kicks outward and up; the foot then reaches back down
+        const kneeA = base + (stunned ? 0.5 : 0.75) + sw * 0.22;
+        const kx = hipX + Math.cos(kneeA) * L1;
+        const ky = hipY + Math.sin(kneeA) * L1 - (charging ? 10 : 16) * grow;
+        const footA = kneeA + (stunned ? 0.4 : 1.05) + Math.cos(beat + k) * 0.28;
+        const fx = kx + Math.cos(footA) * L2;
+        const fy = ky + Math.sin(footA) * L2;
+        ctx.globalAlpha = ea * 0.9;
+        ctx.lineWidth = 4.5 * grow;
+        ctx.beginPath(); ctx.moveTo(hipX, hipY); ctx.lineTo(kx, ky); ctx.stroke();
+        ctx.lineWidth = 3 * grow;
+        ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+        ctx.globalAlpha = ea;
+      }
+      ctx.restore();
+      if (charging) {           // a hard line showing exactly where it committed
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2;
+        ctx.setLineDash([14, 10]);
+        ctx.beginPath(); ctx.moveTo(e.x, e.y);
+        ctx.lineTo(e.x + Math.cos(e.chargeAng) * 900, e.y + Math.sin(e.chargeAng) * 900);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
     // sentinel: the frontal shield that deflects shots, drawn where it blocks
     if (e.type === 'sentinel') {
@@ -3274,6 +4448,55 @@ function drawEnemies() {
     } else if (e.type === 'wraith') {
       ctx.strokeStyle = rgba('#ddd6fe', 0.8); ctx.lineWidth = 1.6;
       poly(e.x, e.y, e.r * 0.55, 4, e.ang + 0.8); ctx.stroke();
+    } else if (e.type === 'revenant') {
+      // a ghost wears its second life openly
+      ctx.strokeStyle = rgba('#f8fafc', e.gen > 0 ? 0.95 : 0.6);
+      ctx.lineWidth = e.gen > 0 ? 2.4 : 1.6;
+      poly(e.x, e.y, e.r * 0.55, 5, -e.ang * 1.4); ctx.stroke();
+      if (e.gen > 0) {
+        ctx.globalAlpha = ea * (0.3 + Math.sin(uiTime * 6) * 0.15);
+        poly(e.x, e.y, e.r * 1.35, 5, e.ang); ctx.stroke();
+        ctx.globalAlpha = ea;
+      }
+    } else if (e.type === 'redactor') {
+      // the erasure cone, drawn exactly where it eats your shots
+      ctx.save();
+      ctx.globalAlpha = ea * (e.redacting ? 0.2 : 0.05);
+      ctx.fillStyle = e.redacting ? '#ef4444' : '#64748b';
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.arc(e.x, e.y, 330, e.ang - 0.55, e.ang + 0.55);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = ea * (e.redacting ? 0.6 : 0.25);
+      ctx.strokeStyle = e.redacting ? '#f87171' : '#475569';
+      ctx.lineWidth = e.redacting ? 2.2 : 1.2;
+      ctx.setLineDash(e.redacting ? [] : [12, 9]); ctx.lineDashOffset = -uiTime * 20;
+      ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = rgba('#fecaca', 0.9); ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(e.x - e.r * 0.5, e.y); ctx.lineTo(e.x + e.r * 0.5, e.y);
+      ctx.stroke();
+    } else if (e.type === 'mimic') {
+      // it wears your silhouette
+      ctx.save();
+      ctx.translate(e.x, e.y); ctx.rotate(e.ang);
+      ctx.strokeStyle = '#99f6e4'; ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(13, 0); ctx.lineTo(-7, 8); ctx.lineTo(-4, 0); ctx.lineTo(-7, -8);
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+    } else if (e.type === 'prism') {
+      // the mirrored half is drawn solid; the open half is the way in
+      ctx.strokeStyle = '#cffafe'; ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r + 7, e.plateAng - 1.3, e.plateAng + 1.3);
+      ctx.stroke();
+      ctx.globalAlpha = ea * 0.35; ctx.lineWidth = 11;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r + 7, e.plateAng - 1.3, e.plateAng + 1.3);
+      ctx.stroke();
+      ctx.globalAlpha = ea;
     } else if (e.type === 'egg') {
       const pulse = 0.5 + Math.sin(e.atkT * 7) * 0.5;
       ctx.strokeStyle = rgba('#bbf7d0', 0.5 + pulse * 0.5); ctx.lineWidth = 2;
@@ -3661,7 +4884,10 @@ function drawHUD() {
     roundRect(x2, y2, w2, 14, 7); ctx.stroke();
     ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = bd.col;
-    ctx.fillText(bd.name + (boss.invuln ? '   — SUBMERGED' : ''), W / 2, y2 + 28);
+    ctx.fillText(bd.name + (boss.invuln
+      ? (boss.finale ? '   — OVERLOAD'
+         : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : ''),
+      W / 2, y2 + 28);
     // offscreen indicator
     const sx = boss.x - cam.x + W / 2, sy = boss.y - cam.y + H / 2;
     if (sx < 0 || sy < 0 || sx > W || sy > H) {
@@ -4133,10 +5359,25 @@ function renderMenu() {
     ctx.textAlign = 'center';
   }
 
-  if (Save.profile.planetarium) {
+  const unlocks = [];
+  if (Save.profile.planetarium) unlocks.push(['✦ PLANETARIUMS', '#fbbf24']);
+  if (Save.profile.altPath) unlocks.push(['◈ THE FRACTURE', '#e2e8f0']);
+  else if (Save.profile.clears > 0)
+    unlocks.push([`◈ ${Save.profile.clears} / 2 CLEARS`, '#475569']);
+  if (unlocks.length) {
     ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#fbbf24';
-    ctx.fillText('✦ PLANETARIUMS UNLOCKED', cxp, H - 112);
+    const gap = 22;
+    let tw = 0;
+    unlocks.forEach(u => { tw += ctx.measureText(u[0]).width; });
+    tw += gap * (unlocks.length - 1);
+    let ux2 = cxp - tw / 2;
+    ctx.textAlign = 'left';
+    unlocks.forEach(u => {
+      ctx.fillStyle = u[1];
+      ctx.fillText(u[0], ux2, H - 112);
+      ux2 += ctx.measureText(u[0]).width + gap;
+    });
+    ctx.textAlign = 'center';
   }
 
   // who you are on the board
@@ -4369,7 +5610,27 @@ function drawTouchSticks() {
   drawStick(touchUI.aim, '#f472b6');
 }
 
+/* Build every glow sprite up front. Each new colour costs a canvas plus a
+   radial gradient on first use, and doing that lazily produced a visible
+   hitch the first time a sector introduced unfamiliar colours. */
+function prewarmGlow() {
+  const cols = new Set();
+  const add = c => { if (typeof c === 'string' && c[0] === '#') cols.add(c); };
+  for (const k in COL) add(COL[k]);
+  for (const k in RARITY) add(RARITY[k]);
+  for (const k in ETYPE) add(ETYPE[k].col);
+  for (const k in BOSSES) add(BOSSES[k].col);
+  for (const s of STAGES.concat(ALT_STAGES)) { add(s.accent); add(s.wall); }
+  ('#fbbf24 #a855f7 #fb923c #a3e635 #38bdf8 #5eead4 #a5f3fc #c4b5fd #e2e8f0 #f87171 ' +
+   '#93c5fd #7dd3fc #a78bfa #fcd34d #f0abfc #6ee7b7 #fde047 #ef4444 #cffafe #99f6e4 ' +
+   '#bae6fd #f5d0fe #ddd6fe #fed7aa #fecdd3 #bfdbfe #f1f5f9 #f8fafc #fecaca #fef08a')
+    .split(' ').forEach(add);
+  cols.forEach(glowSprite);
+  return cols.size;
+}
+
 /* --------------------------------- start ---------------------------------- */
+prewarmGlow();
 Save.init();
 cam.x = P.x; cam.y = P.y;
 requestAnimationFrame(frame);
