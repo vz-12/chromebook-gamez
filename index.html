@@ -956,27 +956,34 @@ function enterStage(def) {
 
 // Kept for the pre-portal path: walk the normal rotation by absolute index.
 function applyStage(abs) {
+  const prevLoop = loopNum;
   normalIdx = abs;
   stageIdx = abs % STAGES.length;
   loopNum = Math.floor(abs / STAGES.length);
+  if (loopNum > prevLoop) noteClear();   // the pre-portal path counts too
   enterStage(STAGES[stageIdx]);
+}
+
+/* Credit a full trip through the rotation. This has to be reachable from
+   BOTH stage-advance paths: portals only exist after the alt path is
+   unlocked, so counting clears only there made the unlock impossible to
+   ever earn — you needed portals to get clears and clears to get portals. */
+function noteClear() {
+  const p = Save.profile;
+  p.clears = (p.clears || 0) + 1;
+  if (p.clears >= 2 && !p.altPath) {
+    p.altPath = true;
+    banner('THE FRACTURE OPENS', '#e2e8f0', 3.6);
+    drawFlashT = 0.2; shake(0.6);
+  }
+  Save.writeLocal(); Save.flush();
 }
 
 function advanceNormal() {
   normalIdx++;
   stageIdx = normalIdx % STAGES.length;
   const newLoop = Math.floor(normalIdx / STAGES.length);
-  if (newLoop > loopNum) {               // the rotation wrapped: a full clear
-    loopNum = newLoop;
-    const p = Save.profile;
-    p.clears = (p.clears || 0) + 1;
-    if (p.clears >= 2 && !p.altPath) {
-      p.altPath = true;
-      banner('THE FRACTURE OPENS', '#e2e8f0', 3.6);
-      drawFlashT = 0.2; shake(0.6);
-    }
-    Save.writeLocal(); Save.flush();
-  }
+  if (newLoop > loopNum) { loopNum = newLoop; noteClear(); }
   enterStage(STAGES[stageIdx]);
 }
 
@@ -1516,8 +1523,26 @@ const Save = {
     return out;
   },
 
+  /* Clears used to only ever be counted when stepping through a portal — but
+     portals require the unlock that clears gate, so the counter could never
+     advance and the alt path was unreachable no matter how far you got.
+     Recover what a profile actually earned from how deep it has been. */
+  reconcileClears() {
+    const p = Save.profile;
+    const perLoop = STAGES.length * 5;                 // 5 sectors, 5 waves each
+    const earned = Math.floor(Math.max(0, (p.bestWave || 0) - 1) / perLoop);
+    if (earned > (p.clears || 0)) {
+      p.clears = earned;
+      if (p.clears >= 2) p.altPath = true;
+      Save.writeLocal();
+      return true;
+    }
+    return false;
+  },
+
   init() {
     Save.profile = Save.readLocal();
+    Save.reconcileClears();
     Save.writeLocal();
     Audio_.muted = !!Save.profile.muted;
     autoFire = !!Save.profile.autofire;
@@ -1539,6 +1564,7 @@ const Save = {
       Save.db = db;
       Save.status = 'cloud';
       if (remote) { Save.profile = Save.merge(Save.profile, remote); Save.writeLocal(); }
+      Save.reconcileClears();   // the merged profile may predate clear tracking
       await Save.flush();
       await Save.refreshTop();
       Board.backfill();
@@ -1734,6 +1760,7 @@ function resetGame() {
   Audio_.intensity = 0;
 }
 function gameOver() {
+  if (state === 'dead') return;          // never record a run twice
   state = 'dead';
   const build = Object.keys(P.up).map(id => {
     const u = UPGRADES.find(z => z.id === id);
@@ -1832,14 +1859,24 @@ function checkLevel() {
 let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
 
+let frameErrors = 0;
 function frame(now) {
   const dt = Math.min(0.2, (now - last) / 1000);
   last = now;
   acc += dt;
   let guard = 0;
-  while (acc >= STEP && guard++ < 5) { update(STEP); acc -= STEP; }
-  if (acc > STEP) acc = 0;
-  render();
+  try {
+    while (acc >= STEP && guard++ < 5) { update(STEP); acc -= STEP; }
+    if (acc > STEP) acc = 0;
+    render();
+  } catch (err) {
+    // A thrown frame used to kill the rAF loop outright and freeze the
+    // game mid-run. Drop the frame, keep the loop alive; losing a
+    // 40-minute run to one exception is never the right trade.
+    frameErrors++;
+    if (frameErrors <= 5) console.error('VOIDRUNNER frame error:', err);
+    acc = 0;
+  }
   requestAnimationFrame(frame);
 }
 
@@ -3229,7 +3266,10 @@ function collideMirrors(o, r) {
 
 function updateHazards(dt) {
   for (let i = hazards.length - 1; i >= 0; i--) {
+    // addHazard() can evict an entry while we are iterating
+    if (i >= hazards.length) { i = hazards.length; continue; }
     const h = hazards[i];
+    if (!h) continue;
     h.t += dt;
     if (h.kind !== 'vent' && h.kind !== 'well') {
       h.life -= dt;
@@ -3712,7 +3752,11 @@ function segCircle(x1, y1, x2, y2, cx, cy, r) {
 
 function updateEBullets(dt) {
   for (let i = ebullets.length - 1; i >= 0; i--) {
+    // hurtPlayer() below can empty this array outright — Second Wind
+    // clears the screen — so re-anchor rather than read past the end.
+    if (i >= ebullets.length) { i = ebullets.length; continue; }
     const b = ebullets[i];
+    if (!b) continue;
     b.life -= dt;
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0 || b.x < -20 || b.y < -20 || b.x > WORLD.w + 20 || b.y > WORLD.h + 20) {
