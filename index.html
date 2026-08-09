@@ -1044,8 +1044,19 @@ function updateWaves(dt) {
       P.dmg *= 1 + 0.20 * P.climb;
       floatText(P.x, P.y - 44, 'THE CLIMB  +' + Math.round(20 * P.climb) + '%', '#fbbf24', 15);
     }
+    // THE FRACTURE runs hot enough to be worth a hazard bonus: every wave
+    // cleared in an alt sector pays half a level on top of the usual bounty.
+    // Boss waves count too, so this sits ahead of the reward hand-off.
+    let halfLevel = false;
+    if (stage.alt) {
+      P.xp += P.xpNext * 0.5;
+      halfLevel = true;
+      floatText(P.x, P.y - 52, '+½ LEVEL', '#e2e8f0', 16);
+      Audio_.tone(660, 0.18, 'sine', 0.08, 990);
+    }
     if (shopPending) { openReward(); return; }
-    banner('WAVE CLEAR   +' + bonus + '   ◈' + cr, COL.hp);
+    banner('WAVE CLEAR   +' + bonus + '   ◈' + cr + (halfLevel ? '   +½ LVL' : ''),
+           halfLevel ? '#e2e8f0' : COL.hp);
     betweenWaves = 2.4;
   }
 }
@@ -1846,6 +1857,11 @@ function chooseOffer(i) {
   if (P.xp >= P.xpNext) checkLevel();
 }
 function checkLevel() {
+  // Never open over a shop, planetarium or gate. updatePickups() runs after
+  // updateWaves() in the same tick, so a wave-clear XP payout could otherwise
+  // replace the reward room that just opened. Every overlay calls back into
+  // this after restoring 'play', so nothing is lost — only deferred.
+  if (state !== 'play') return;
   if (P.xp >= P.xpNext) {
     P.xp -= P.xpNext;
     P.level++;
