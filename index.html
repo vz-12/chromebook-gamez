@@ -352,6 +352,10 @@ function newPlayer() {
     fireT: 0, iframe: 0, dashMax: 1, dashCh: 1, dashCd: 1.5, dashRe: 0,
     dashT: 0, dashDX: 0, dashDY: 0, hurtFlash: 0,
     blStacks: 0, blT: 0, tempoT: 0, ocCount: 0, staticT: 0, ghostT: 0,
+    // library book: one active item, charged a wave at a time
+    book: null, bookCharge: 0,
+    plateT: 0, plateAng: 0, burrowT: 0, stopT: 0, twinT: 0,
+    diaryT: 0, diaryAng: 0, diaryTick: 0,
     level: 1, xp: 0, xpNext: 8, kills: 0, up: {}
   };
 }
@@ -1047,6 +1051,11 @@ function updateWaves(dt) {
     // THE FRACTURE runs hot enough to be worth a hazard bonus: every wave
     // cleared in an alt sector pays half a level on top of the usual bounty.
     // Boss waves count too, so this sits ahead of the reward hand-off.
+    if (P.book && P.bookCharge < P.book.cost) {
+      P.bookCharge++;
+      floatText(P.x, P.y - 66, P.bookCharge + ' / ' + P.book.cost,
+                P.bookCharge >= P.book.cost ? P.book.col : '#64748b', 13);
+    }
     let halfLevel = false;
     if (stage.alt) {
       P.xp += P.xpNext * 0.5;
@@ -1066,6 +1075,7 @@ function onBossDefeat() {
   banner(bd.name + '   DESTROYED', COL.crit);
   drawFlashT = 0.2;
   shopPending = true;
+  maybeSpawnLibrary(stage.boss);
   const cr = Math.round((70 + wave * 6) * P.credMul);
   credits += cr;
   score += 500 * (stageAbs + 1);
@@ -1262,6 +1272,194 @@ function takePortal(p) {
   enemies.length = 0; ebullets.length = 0; replay.length = 0;
   banner(stage.name, stage.accent, 2.6);
   betweenWaves = 1.8;
+}
+
+/* -------------------------------- libraries -------------------------------
+   With THE FRACTURE open, felling any boss may tear a library into the room.
+   Inside is a single book written from that boss's own technique — an active
+   item bound to Q. Books do not fire on a timer: they take on one charge per
+   wave cleared, and the stronger the page the more waves it wants.
+--------------------------------------------------------------------------- */
+let libraryPortal = null, libraryBook = null;
+const LIBRARY_CHANCE = 0.4;
+
+const BOOKS = {
+  warden: {
+    id: 'warden', n: 'THE WARDEN\'S CODEX', from: 'THE WARDEN',
+    col: '#ef4444', cost: 2,
+    d: 'Erupt in a full ring of piercing fire, the way it used to zone you out.',
+    f: () => {
+      const n = 52;
+      for (let k = 0; k < n; k++)
+        fireBullet(P.x, P.y, k * TAU / n, 2.4, { pierce: 8, lm: 2.4, rm: 1.6 });
+      ringFx(P.x, P.y, 12, 460, '#ef4444', 0.7, 6);
+      burst(P.x, P.y, 40, '#fca5a5', 340, 4, 0.7);
+      shake(0.55); Audio_.boom();
+    }
+  },
+  forgeheart: {
+    id: 'forgeheart', n: 'THE FORGE LEDGER', from: 'FORGEHEART',
+    col: '#f97316', cost: 3,
+    d: 'Four armour plates orbit you and eat incoming fire. The gaps still let it through.',
+    f: () => {
+      P.plateT = 9;
+      ringFx(P.x, P.y, 10, 120, '#fbbf24', 0.5, 4);
+      Audio_.tone(150, 0.5, 'square', 0.14, 80);
+    }
+  },
+  broodmother: {
+    id: 'broodmother', n: 'THE BROOD FOLIO', from: 'BROODMOTHER',
+    col: '#4ade80', cost: 2,
+    d: 'Go under. Untouchable and fast, and you erupt where you surface.',
+    f: () => {
+      P.burrowT = 3.2;
+      P.iframe = Math.max(P.iframe, 3.2);
+      ringFx(P.x, P.y, 10, 180, '#4ade80', 0.5, 4);
+      burst(P.x, P.y, 30, '#4ade80', 300, 3.6, 0.6);
+      Audio_.noise(0.6, 0.2, 900, 90, 2);
+    }
+  },
+  archivist: {
+    id: 'archivist', n: 'THE ARCHIVIST\'S INDEX', from: 'THE ARCHIVIST',
+    col: '#a78bfa', cost: 2,
+    d: 'Blink to your cursor. Both the place you left and the place you arrive detonate.',
+    f: () => {
+      const ox = P.x, oy = P.y;
+      const tx = clamp(mouse.wx, arena.x0 + P.r, arena.x1 - P.r);
+      const ty = clamp(mouse.wy, arena.y0 + P.r, arena.y1 - P.r);
+      playerBlast(ox, oy, 200, 45 + P.dmg * 2.6, '#a78bfa');
+      P.x = tx; P.y = ty; P.vx = 0; P.vy = 0;
+      P.iframe = Math.max(P.iframe, 0.7);
+      playerBlast(tx, ty, 200, 45 + P.dmg * 2.6, '#a78bfa');
+      ringFx(ox, oy, 10, 240, '#a78bfa', 0.5, 4);
+      ringFx(tx, ty, 10, 240, '#a78bfa', 0.5, 4);
+      Audio_.tone(760, 0.22, 'sine', 0.12, 220);
+    }
+  },
+  nullcore: {
+    id: 'nullcore', n: 'THE NULL FOLIO', from: 'NULL',
+    col: '#f0abfc', cost: 4,
+    d: 'Everything but you stops. Bullets hang in the air until it wears off.',
+    f: () => {
+      P.stopT = 3.2;
+      drawFlashT = 0.16; shake(0.4);
+      ringFx(P.x, P.y, 10, 900, '#f0abfc', 0.9, 6);
+      Audio_.tone(90, 1.1, 'sine', 0.16, 40);
+    }
+  },
+  curator: {
+    id: 'curator', n: 'THE CURATOR\'S LEDGER', from: 'THE CURATOR',
+    col: '#e2e8f0', cost: 2,
+    d: 'Strike every enemy shot from the record. The screen is simply cleared.',
+    f: () => {
+      const n = ebullets.length;
+      for (const b of ebullets) burst(b.x, b.y, 2, '#f87171', 110, 1.9, 0.22);
+      ebullets.length = 0;
+      for (const m of mortars) burst(m.x, m.y, 4, '#f87171', 130, 2.2, 0.25);
+      mortars.length = 0;
+      floatText(P.x, P.y - 44, 'REDACTED ×' + n, '#f87171', 17);
+      ringFx(P.x, P.y, 10, 900, '#e2e8f0', 0.6, 5);
+      Audio_.noise(0.4, 0.2, 5000, 700, 3);
+    }
+  },
+  theother: {
+    id: 'theother', n: 'THE OTHER\'S DIARY', from: 'THE OTHER',
+    col: '#5eead4', cost: 3,
+    d: 'Its last page. Mirrors take orbit around you and your fire becomes one ' +
+       'beam, splitting into a fan through every pane it crosses.',
+    f: () => {
+      P.diaryT = 10;
+      P.diaryAng = rnd(TAU);
+      P.diaryTick = 0;
+      ringFx(P.x, P.y, 12, 320, '#5eead4', 0.8, 6);
+      burst(P.x, P.y, 44, '#5eead4', 350, 3.8, 0.75);
+      drawFlashT = Math.max(drawFlashT, 0.1);
+      Audio_.boss();
+    }
+  }
+};
+
+const twinActive = () => P.twin > 0 || P.twinT > 0;
+
+/* THE OTHER'S DIARY: the finale, in your hands. Panes orbit you counter to
+   your own facing and your weapon becomes a single beam that fans out
+   through each one it enters. Purely optical — unlike the boss's mirrors
+   these are not solid, or they would fence you in. */
+let diaryBeams = [], diaryMirrors = [];
+const DIARY_MIRRORS = 5;
+
+function diaryMirrorList() {
+  diaryMirrors.length = 0;
+  for (let i = 0; i < DIARY_MIRRORS; i++) {
+    const a = P.diaryAng + i * TAU / DIARY_MIRRORS;
+    const r = 152 + (i % 2) * 64;
+    diaryMirrors.push({ x: P.x + Math.cos(a) * r, y: P.y + Math.sin(a) * r, r: 44 });
+  }
+  return diaryMirrors;
+}
+
+function maybeSpawnLibrary(bossKey) {
+  if (!Save.profile.altPath || !BOOKS[bossKey]) return;
+  if (Math.random() >= LIBRARY_CHANCE) return;
+  const ox = lastBossDeath ? lastBossDeath.x : P.x;
+  const oy = lastBossDeath ? lastBossDeath.y : P.y;
+  const a = rnd(TAU), R = 190;
+  libraryPortal = {
+    boss: bossKey, t: 0, arm: 0.8, r: 46,
+    x: clamp(ox + Math.cos(a) * R, arena.x0 + 120, arena.x1 - 120),
+    y: clamp(oy + Math.sin(a) * R, arena.y0 + 120, arena.y1 - 120)
+  };
+  banner('A LIBRARY OPENS', '#fcd34d', 3.0);
+  ringFx(libraryPortal.x, libraryPortal.y, 10, 300, '#fcd34d', 0.9, 5);
+  Audio_.tone(300, 0.9, 'sine', 0.1, 900);
+}
+
+function updateLibrary(dt) {
+  const L = libraryPortal;
+  if (!L) return;
+  L.t += dt;
+  L.arm -= dt;
+  if (Math.random() < 0.6) {
+    const a = rnd(TAU), rr = L.r * rnd(1.6, 0.7);
+    spawnPart(L.x + Math.cos(a) * rr, L.y + Math.sin(a) * rr,
+      -Math.cos(a) * 70, -Math.sin(a) * 70, rnd(3.4, 1.5), '#fcd34d', rnd(0.7, 0.3), 0.95);
+  }
+  if (L.arm <= 0 && len(P.x - L.x, P.y - L.y) < L.r + P.r) {
+    libraryBook = BOOKS[L.boss];
+    libraryPortal = null;
+    state = 'library';
+    uiArm = 0.4;
+    Audio_.levelup();
+  }
+}
+
+function takeBook() {
+  if (!libraryBook) return;
+  P.book = libraryBook;
+  P.bookCharge = 0;
+  banner(libraryBook.n, libraryBook.col, 2.6);
+  ringFx(P.x, P.y, 10, 260, libraryBook.col, 0.7, 5);
+  burst(P.x, P.y, 40, libraryBook.col, 320, 3.6, 0.7);
+  leaveLibrary();
+}
+
+function leaveLibrary() {
+  libraryBook = null;
+  state = 'play';
+  Audio_.select();
+  checkLevel();
+}
+
+function useBook() {
+  if (state !== 'play' || !P.book) return;
+  if (P.bookCharge < P.book.cost) {
+    floatText(P.x, P.y - 42, 'NOT CHARGED', '#94a3b8', 13);
+    Audio_.tone(160, 0.14, 'square', 0.07, 90);
+    return;
+  }
+  P.bookCharge = 0;
+  P.book.f();
+  banner(P.book.n, P.book.col, 1.6);
 }
 
 /* ------------------------------ planetarium -------------------------------
@@ -1759,6 +1957,8 @@ function resetGame() {
   hazards = []; mortars = []; sentries = []; beams = [];
   portals = []; cages = []; replay = []; finaleBeams = [];
   arenaReset(true); lastBossDeath = null;
+  libraryPortal = null; libraryBook = null;
+  diaryBeams = []; diaryMirrors = [];
   awaitingPortal = false; normalIdx = 0; altIdx = -1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
@@ -1819,6 +2019,13 @@ function handleKey(k) {
       leavePlanetarium();
     return;
   }
+  if (state === 'library') {
+    if (uiArm > 0) return;
+    if (k === 'e' || k === 'enter' || k === ' ') takeBook();
+    else if (k === 'escape' || k === 'q') leaveLibrary();
+    return;
+  }
+  if (k === 'q') { useBook(); return; }
   if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
@@ -1841,6 +2048,12 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, b.leave))  { closeShop(); return; }
     const i = shopIndexAt(mouse.x, mouse.y);
     if (i >= 0) buyShop(i);
+    return;
+  }
+  if (state === 'library') {
+    const b = libraryButtons();
+    if (inRect(mouse.x, mouse.y, b.take)) { takeBook(); return; }
+    if (inRect(mouse.x, mouse.y, b.leave)) leaveLibrary();
     return;
   }
   if (state === 'planet') {
@@ -1911,7 +2124,8 @@ function update(dt) {
 
   // cosmetic layers keep running during level-up / shop / death for smoothness
   updateParticles(dt);
-  if (state === 'levelup' || state === 'shop' || state === 'planet' || state === 'dead') {
+  if (state === 'levelup' || state === 'shop' || state === 'planet' ||
+      state === 'library' || state === 'dead') {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
     updateCamera(dt, state === 'dead');
@@ -1925,7 +2139,8 @@ function update(dt) {
   Audio_.update(clamp(enemies.length / 26 + wave / 22, 0, 1));
 
   // Bullet Time slows the world but never the player
-  slowmo = (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
+  slowmo = P.stopT > 0 ? 0
+         : (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
   const wdt = dt * slowmo;
 
   updateWaves(dt);
@@ -1934,6 +2149,7 @@ function update(dt) {
   updateSentries(dt);
   updateArena(dt);
   updatePortals(dt);
+  updateLibrary(dt);
   replay.push({ x: P.x, y: P.y, ang: P.ang });
   if (replay.length > 260) replay.shift();
   updateEnemies(wdt);
@@ -2044,7 +2260,8 @@ function updatePlayer(dt) {
       spawnPart(P.x, P.y, rnd(50, -50), rnd(50, -50), rnd(6, 3), COL.player, 0.3, 0.9);
   } else {
     // acid chills you, Tempo kicks in after a kill
-    const spdMul = (1 - playerChill) * (P.tempoT > 0 ? 1.35 : 1);
+    const spdMul = (1 - playerChill) * (P.tempoT > 0 ? 1.35 : 1)
+                 * (P.burrowT > 0 ? 1.8 : 1);
     const tvx = ix * P.speed * spdMul, tvy = iy * P.speed * spdMul;
     const k = 1 - Math.exp(-16 * dt);
     P.vx = lerp(P.vx, tvx, k);
@@ -2067,7 +2284,7 @@ function updatePlayer(dt) {
   // shooting
   P.fireT -= dt;
   const rateMul = 1 + (P.bloodlust ? 0.07 * P.bloodlust * P.blStacks : 0);
-  if (firing && P.fireT <= 0) {
+  if (firing && P.fireT <= 0 && P.diaryT <= 0) {
     P.fireT = 1 / (P.fireRate * rateMul);
     const muzzle = P.r + 6;
     const spread = P.spread;
@@ -2092,7 +2309,7 @@ function updatePlayer(dt) {
         fireBullet(P.x - Math.cos(P.ang) * muzzle, P.y - Math.sin(P.ang) * muzzle, a, 0.8);
       }
     }
-    if (P.twin) twinFire();
+    if (twinActive()) twinFire();
     if (slug) { Audio_.tone(190, 0.16, 'square', 0.13, 70); shake(0.09); }
     else Audio_.shoot();
     P.vx -= Math.cos(P.ang) * 26; P.vy -= Math.sin(P.ang) * 26;
@@ -2197,6 +2414,47 @@ function updatePlayer(dt) {
 
   P.iframe = Math.max(0, P.iframe - dt);
   P.hurtFlash = Math.max(0, P.hurtFlash - dt * 2.6);
+  // --- library book effects ---
+  if (P.diaryT > 0) {
+    P.diaryT -= dt;
+    P.diaryAng += dt * MIRROR_SPIN;      // counter-rotating, as the boss does
+    diaryBeams.length = 0;
+    if (firing) {
+      castPrism(P.x, P.y, P.ang, 0, 0, diaryMirrorList(), diaryBeams, 26);
+      P.diaryTick -= dt;
+      if (P.diaryTick <= 0) {
+        P.diaryTick = 0.09;
+        // snapshot: a kill here can push splitters into the live array
+        const list = enemies.slice();
+        const struck = new Set();
+        for (const bm of diaryBeams) {
+          for (const e of list) {
+            if (e.dead || e.phased || e.invuln || struck.has(e.id)) continue;
+            if (segCircle(bm.x1, bm.y1, bm.x2, bm.y2, e.x, e.y, bm.w * 0.5 + e.r)) {
+              struck.add(e.id);
+              damageEnemy(e, P.dmg * 0.5, false, P.x, P.y,
+                          { silent: true, noChain: true });
+            }
+          }
+        }
+      }
+    } else diaryMirrorList();
+    if (P.diaryT <= 0) { diaryBeams.length = 0; diaryMirrors.length = 0; }
+  }
+  if (P.plateT > 0) { P.plateT -= dt; P.plateAng += dt * 1.3; }
+  if (P.twinT > 0) P.twinT -= dt;
+  if (P.stopT > 0) P.stopT -= dt;
+  if (P.burrowT > 0) {
+    P.burrowT -= dt;
+    P.iframe = Math.max(P.iframe, 0.12);
+    if (Math.random() < 0.7)
+      spawnPart(P.x + rnd(18, -18), P.y + rnd(18, -18), 0, 0, rnd(6, 3),
+                '#4ade80', 0.5, 0.94);
+    if (P.burrowT <= 0) {                 // surface, the way she does
+      playerBlast(P.x, P.y, 210, 40 + P.dmg * 2.2, '#4ade80');
+      ringFx(P.x, P.y, 10, 240, '#4ade80', 0.6, 5);
+    }
+  }
   if (P.blT > 0) { P.blT -= dt; if (P.blT <= 0) P.blStacks = 0; }
   if (P.tempoT > 0) P.tempoT -= dt;
   playerChill = Math.max(0, playerChill - dt * 2);
@@ -2971,26 +3229,33 @@ function rayCircle(x, y, dx, dy, cx, cy, r) {
   return null;
 }
 
-function castFinale(x, y, ang, depth, colIdx) {
-  if (depth > 2 || finaleBeams.length > 40) return;
+/* Trace a beam through a set of mirrors, splitting into a fan at every one it
+   enters. Shared by THE OTHER's finale and by its Diary in the player's hands,
+   so both refract by exactly the same rule. */
+function castPrism(x, y, ang, depth, colIdx, mirrors, out, mainW) {
+  if (depth > 2 || out.length > 40) return;
   const dx = Math.cos(ang), dy = Math.sin(ang);
   let hit = null, bestT = 1e9;
-  for (const h of hazards) {
-    if (h.kind !== 'mirror') continue;
+  for (const h of mirrors) {
     const t = rayCircle(x, y, dx, dy, h.x, h.y, h.r);
     if (t !== null && t > 4 && t < bestT) { bestT = t; hit = h; }
   }
   const L = hit ? bestT : 3200;
-  finaleBeams.push({
+  out.push({
     x1: x, y1: y, x2: x + dx * L, y2: y + dy * L,
     col: PRISM_COLS[((colIdx % PRISM_COLS.length) + PRISM_COLS.length) % PRISM_COLS.length],
-    w: depth === 0 ? 46 : Math.max(9, 22 - depth * 6)
+    w: depth === 0 ? mainW : Math.max(7, mainW * 0.44 - depth * 4)
   });
   if (!hit) return;
-  // prism: the beam enters the glass and leaves as a fan
   const hx = x + dx * bestT, hy = y + dy * bestT;
   for (let k = -1; k <= 1; k++)
-    castFinale(hx + dx * 3, hy + dy * 3, ang + k * 0.27, depth + 1, colIdx + k + 2);
+    castPrism(hx + dx * 3, hy + dy * 3, ang + k * 0.27, depth + 1, colIdx + k + 2,
+              mirrors, out, mainW);
+}
+
+function castFinale(x, y, ang, depth, colIdx) {
+  castPrism(x, y, ang, depth, colIdx,
+            hazards.filter(h => h.kind === 'mirror'), finaleBeams, 46);
 }
 
 function startFinale(e) {
@@ -3792,6 +4057,19 @@ function updateEBullets(dt) {
     }
     if (Math.random() < 0.3)
       spawnPart(b.x, b.y, 0, 0, b.r * 0.7, b.col, 0.2, 0.9);
+    if (P.plateT > 0) {
+      const pd = len(b.x - P.x, b.y - P.y);
+      if (pd < 84 && pd > 34) {
+        const rel = ((Math.atan2(b.y - P.y, b.x - P.x) - P.plateAng) % TAU + TAU) % TAU;
+        const seg = TAU / 4;
+        if (rel % seg < seg * 0.62) {
+          burst(b.x, b.y, 4, '#fbbf24', 190, 2.2, 0.26);
+          Audio_.tone(900, 0.05, 'square', 0.045, 1300);
+          ebullets.splice(i, 1);
+          continue;
+        }
+      }
+    }
     if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
       hurtPlayer(b.dmg);
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
@@ -3921,6 +4199,7 @@ function render() {
   drawMortars();
   drawCages();
   drawPortals();
+  drawLibraryPortal();
   drawCorpses();
   drawEnemies();
   drawSentries();
@@ -3932,12 +4211,26 @@ function render() {
   drawArcs();
   drawBeams();
   drawFinaleBeams();
+  drawDiary();
   drawParticles();
   ctx.globalCompositeOperation = 'source-over';
 
   drawFloats();
   ctx.restore();
 
+  if (P.stopT > 0) {
+    // everything but you is held still; say so without hiding the room
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(88,28,135,0.16)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(uiTime * 9) * 0.2;
+    ctx.strokeStyle = '#f0abfc'; ctx.lineWidth = 2;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+    ctx.restore();
+  }
   drawVignette();
   if (drawFlashT > 0) {
     ctx.fillStyle = `rgba(255,255,255,${drawFlashT * 2.4})`;
@@ -3948,9 +4241,11 @@ function render() {
   if (state === 'levelup') drawLevelUp();
   if (state === 'shop') drawShop();
   if (state === 'planet') drawPlanetarium();
+  if (state === 'library') drawLibrary();
   if (state === 'pause') drawPause();
   if (state === 'dead') drawDead();
-  if (!isTouch && (state === 'play' || state === 'shop' || state === 'planet')) drawCrosshair();
+  if (!isTouch && (state === 'play' || state === 'shop' || state === 'planet' ||
+      state === 'library')) drawCrosshair();
 }
 
 /* ------------------------- terrain & deployables -------------------------- */
@@ -4232,6 +4527,48 @@ function drawPortals() {
   }
 }
 
+function drawLibraryPortal() {
+  const L = libraryPortal;
+  if (!L) return;
+  const bk = BOOKS[L.boss];
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(L.x, L.y, L.r * 2.6, '#fcd34d', L.arm <= 0 ? 0.5 : 0.25);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = L.arm <= 0 ? 1 : 0.5;
+  // a doorway of stacked shelves, turning slowly
+  for (let k = 0; k < 3; k++) {
+    const rr = L.r * (1 - k * 0.22);
+    ctx.strokeStyle = rgba('#fcd34d', 0.85 - k * 0.2);
+    ctx.lineWidth = 2.6 - k * 0.5;
+    poly(L.x, L.y, rr, 4, L.t * (k % 2 ? -0.6 : 0.8) + k * 0.4);
+    ctx.stroke();
+  }
+  // an open book at the centre
+  ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2.4;
+  ctx.fillStyle = 'rgba(252,211,77,0.18)';
+  ctx.beginPath();
+  ctx.moveTo(L.x - 18, L.y + 10);
+  ctx.quadraticCurveTo(L.x, L.y + 2, L.x, L.y + 8);
+  ctx.quadraticCurveTo(L.x, L.y + 2, L.x + 18, L.y + 10);
+  ctx.lineTo(L.x + 18, L.y - 8);
+  ctx.quadraticCurveTo(L.x, L.y - 16, L.x, L.y - 10);
+  ctx.quadraticCurveTo(L.x, L.y - 16, L.x - 18, L.y - 8);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#a16207';
+  ctx.fillText('LIBRARY', L.x, L.y - L.r - 30);
+  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = bk ? bk.col : '#fcd34d';
+  ctx.fillText(bk ? bk.n : 'A BOOK', L.x, L.y - L.r - 14);
+  ctx.restore();
+}
+
 function drawCages() {
   for (const c of cages) {
     const hpf = clamp(c.hp / c.maxHp, 0, 1);
@@ -4287,6 +4624,52 @@ function drawSentries() {
     ctx.lineTo(s.x + Math.cos(s.ang) * 18, s.y + Math.sin(s.ang) * 18); ctx.stroke();
     ctx.restore();
   }
+}
+
+function drawDiary() {
+  if (P.diaryT <= 0) return;
+  const fade = clamp(P.diaryT / 1.2, 0, 1);
+
+  for (const m of diaryMirrors) {
+    drawGlow(m.x, m.y, m.r * 1.35, '#5eead4', 0.22 * fade);
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.2 * fade;
+    ctx.fillStyle = '#0f3d3d';
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.9 * fade;
+    ctx.strokeStyle = '#99f6e4'; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 0.45 * fade;
+    ctx.lineWidth = 1.2;
+    for (let k = -1; k <= 1; k++) {
+      const o = k * m.r * 0.45;
+      ctx.beginPath();
+      ctx.moveTo(m.x + o - m.r * 0.45, m.y + m.r * 0.45);
+      ctx.lineTo(m.x + o + m.r * 0.45, m.y - m.r * 0.45);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (!diaryBeams.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const b of diaryBeams) {
+    ctx.globalAlpha = 0.15 * fade;
+    ctx.strokeStyle = b.col; ctx.lineWidth = b.w * 1.9;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+  }
+  for (const b of diaryBeams) {
+    ctx.globalAlpha = 0.5 * fade;
+    ctx.strokeStyle = b.col; ctx.lineWidth = b.w;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.globalAlpha = 0.95 * fade;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, b.w * 0.26);
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+  }
+  for (const b of diaryBeams) drawGlow(b.x1, b.y1, b.w * 1.15, b.col, 0.55 * fade);
+  ctx.restore();
 }
 
 function drawFinaleBeams() {
@@ -4620,6 +5003,31 @@ function drawPlayer() {
   ctx.beginPath(); ctx.arc(P.x, P.y, P.pickupR, 0, TAU); ctx.stroke();
   ctx.restore();
 
+  // FORGE LEDGER: the borrowed plates, drawn where they actually block
+  if (P.plateT > 0) {
+    const fade = clamp(P.plateT / 1.2, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = fade * 0.9;
+    ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 9;
+    const seg = TAU / 4;
+    for (let k = 0; k < 4; k++) {
+      const a0 = P.plateAng + k * seg;
+      ctx.beginPath();
+      ctx.arc(P.x, P.y, 62, a0, a0 + seg * 0.62);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // BROOD FOLIO: under the floor, barely there
+  if (P.burrowT > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 2;
+    ctx.setLineDash([9, 7]); ctx.lineDashOffset = -uiTime * 24;
+    ctx.beginPath(); ctx.arc(P.x, P.y, 30 + Math.sin(uiTime * 8) * 4, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  }
   // LEO: the corona, drawn at exactly the radius that burns
   if (P.sun) {
     const R = 130 + 40 * P.sun;
@@ -4642,7 +5050,7 @@ function drawPlayer() {
   }
 
   // GEMINI: the twin, mirrored through the centre of the arena
-  if (P.twin) {
+  if (twinActive()) {
     const t = twinPos();
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -4908,6 +5316,29 @@ function drawHUD() {
       ctx.fillStyle = i < P.shield ? COL.shield : 'rgba(129,140,248,0.2)';
       ctx.beginPath(); ctx.arc(dx + 6, yb + 23, 4.5, 0, TAU); ctx.fill();
       dx += 14;
+    }
+  }
+
+  /* --- carried book --- */
+  if (P.book) {
+    const ready = P.bookCharge >= P.book.cost;
+    const by = yb + 40;
+    ctx.textAlign = 'left';
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = ready ? P.book.col : '#475569';
+    ctx.fillText('[Q] ' + P.book.n, pad, by);
+    let qx = pad;
+    for (let i = 0; i < P.book.cost; i++) {
+      ctx.fillStyle = i < P.bookCharge ? P.book.col : 'rgba(148,163,184,0.22)';
+      roundRect(qx, by + 8, 16, 5, 3); ctx.fill();
+      qx += 20;
+    }
+    if (ready) {
+      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = P.book.col;
+      ctx.globalAlpha = 0.6 + Math.sin(uiTime * 5) * 0.4;
+      ctx.fillText('READY', qx + 6, by + 11);
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -5476,6 +5907,99 @@ function renderMenu() {
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
 
   drawVignette();
+}
+
+/* -------------------------------- library UI ------------------------------- */
+function libraryButtons() {
+  const bw = Math.min(180, W * 0.32), bh = 38, y = H / 2 + 136;
+  return { take:  { x: W / 2 - bw - 8, y, w: bw, h: bh },
+           leave: { x: W / 2 + 8,      y, w: bw, h: bh } };
+}
+
+function drawLibrary() {
+  const bk = libraryBook;
+  if (!bk) return;
+  ctx.fillStyle = 'rgba(6,4,2,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  // shelves receding into the dark
+  ctx.save();
+  ctx.globalAlpha = 0.16;
+  ctx.strokeStyle = '#a16207'; ctx.lineWidth = 2;
+  for (let r = 0; r < 5; r++) {
+    const yy = cy - 190 + r * 96;
+    ctx.beginPath(); ctx.moveTo(40, yy); ctx.lineTo(W - 40, yy); ctx.stroke();
+    for (let c = 0; c < 26; c++) {
+      const bx = 46 + c * ((W - 92) / 26) + Math.sin(c * 3.1 + r) * 3;
+      const bh2 = 26 + ((c * 7 + r * 13) % 22);
+      ctx.strokeRect(bx, yy - bh2, 7, bh2);
+    }
+  }
+  ctx.restore();
+
+  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#a16207';
+  ctx.fillText('L I B R A R Y', cx, cy - 168);
+  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('WRITTEN FROM ' + bk.from, cx, cy - 148);
+
+  // the book itself
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(cx, cy - 62, 92, bk.col, 0.4 + Math.sin(uiTime * 2.4) * 0.1);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(cx, cy - 62);
+  ctx.rotate(Math.sin(uiTime * 1.1) * 0.05);
+  ctx.strokeStyle = bk.col; ctx.lineWidth = 3;
+  ctx.fillStyle = rgba(bk.col, 0.16);
+  ctx.beginPath();
+  ctx.moveTo(-46, 30); ctx.quadraticCurveTo(0, 14, 0, 24);
+  ctx.quadraticCurveTo(0, 14, 46, 30);
+  ctx.lineTo(46, -24); ctx.quadraticCurveTo(0, -40, 0, -30);
+  ctx.quadraticCurveTo(0, -40, -46, -24);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = rgba(bk.col, 0.5); ctx.lineWidth = 1.2;
+  for (let k = 1; k <= 4; k++) {
+    const yy = -18 + k * 9;
+    ctx.beginPath(); ctx.moveTo(-36, yy); ctx.lineTo(-8, yy - 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, yy - 3); ctx.lineTo(36, yy); ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.shadowColor = bk.col; ctx.shadowBlur = 22;
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText(bk.n, cx, cy + 22);
+  ctx.restore();
+
+  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  wrapText(bk.d, cx, cy + 52, Math.min(460, W - 70), 18);
+
+  ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = bk.col;
+  ctx.fillText('BOUND TO  [ Q ]   ·   CHARGES OVER ' + bk.cost + ' WAVE' +
+               (bk.cost === 1 ? '' : 'S'), cx, cy + 100);
+
+  if (P.book && P.book.id !== bk.id) {
+    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#f87171';
+    ctx.fillText('replaces ' + P.book.n, cx, cy + 118);
+  }
+
+  const b = libraryButtons();
+  drawButton(b.take, 'TAKE IT  [E]', true, bk.col);
+  drawButton(b.leave, 'LEAVE  [ESC]', true, '#64748b');
+
+  ctx.textAlign = 'center';
+  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#3f3f46';
+  ctx.fillText('you may only carry one book at a time', cx, H - 26);
 }
 
 /* ------------------------------ planetarium UI ----------------------------- */
