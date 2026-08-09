@@ -324,13 +324,77 @@ function touchEnd(e) {
 cv.addEventListener('touchend', touchEnd, { passive: false });
 cv.addEventListener('touchcancel', touchEnd, { passive: false });
 
+/* ------------------------------- characters -------------------------------
+   Two pilots with genuinely different weapons. VOIDRUNNER throws bullets;
+   EMBER charges a short lance. Fire-rate upgrades shorten EMBER's charge
+   instead of adding shots, and at 250% of base rate the charge collapses to
+   nothing and the lance becomes continuous.
+--------------------------------------------------------------------------- */
+const CHARS = [
+  { id: 'runner', n: 'VOIDRUNNER', weapon: 'bullet',
+    col: '#67e8f9', bullet: '#a5f3fc',
+    tag: 'rapid bullets · even footing',
+    d: 'Fast, forgiving, and effective at any range.',
+    hp: 100, speed: 258, dmg: 11, rate: 4.6 },
+  { id: 'ember', n: 'EMBER', weapon: 'laser',
+    col: '#f87171', bullet: '#fca5a5',
+    tag: 'charged lance · short reach',
+    d: 'A charged lance that pierces everything in line. Hits far harder than ' +
+       'a bullet but barely reaches. Fire rate shortens the charge rather than ' +
+       'adding shots — at 250% it stops charging at all.',
+    hp: 88, speed: 276, dmg: 11, rate: 4.6 }
+];
+let selectedChar = 0;
+const CHAR = () => CHARS[selectedChar];
+
+// EMBER's lance: how long a full charge takes at a given rate multiplier.
+// 1.0x -> 0.55s, 2.5x -> the floor, i.e. continuous fire.
+const CHARGE_BASE = 0.55, CHARGE_FLOOR = 0.15;
+function chargeTime() {
+  const mul = P.fireRate / (P.rate0 || 4.6);
+  const t = CHARGE_BASE * clamp((2.5 - mul) / 1.5, 0, 1);
+  return Math.max(CHARGE_FLOOR, t);
+}
+function laserRange() {
+  // the lance already cuts through everything it touches, so Railshot's pierce
+  // count has nothing to do on a beam — it buys reach instead
+  return 250 + P.pierce * 110 + P.arrow * 130
+       + (P.bspeed / 700 - 1) * 150 - (P.deepwater ? 90 : 0);
+}
+
+/* Upgrade cards read as bullet text by default. On a beam some of that is
+   simply wrong, so each of these carries a lance-side name and blurb. */
+const LANCE_TEXT = {
+  pierce: { n: 'Focusing Lens', d: '+110 lance range' },
+  ric:    { d: 'Lance bounces off walls' },
+  multi:  { d: '+1 beam, −9% damage' },
+  home:   { d: 'Lance snaps onto nearby enemies' },
+  vel:    { d: 'Slightly longer reach, +7% damage' },
+  para:   { d: 'Adds a parallel beam emitter' },
+  back:   { d: 'Fires a beam behind you' },
+  frag:   { d: 'Struck enemies burst into fragments' }
+};
+const lanceText = u => (P && P.weapon === 'laser' && LANCE_TEXT[u.id]) || null;
+const upName = u => { const a = lanceText(u); return (a && a.n) || u.n; };
+const upDesc = u => { const a = lanceText(u); return (a && a.d) || u.d; };
+
+function applyChar(i) {
+  selectedChar = clamp(i, 0, CHARS.length - 1);
+  const C = CHAR();
+  COL.player = C.col;
+  COL.bullet = C.bullet;
+}
+
 /* --------------------------------- player -------------------------------- */
 function newPlayer() {
+  const C = CHAR();
   return {
+    weapon: C.weapon, charId: C.id, rate0: C.rate,
+    charge: 0, laserT: 0, laserSegs: [], laserHeavy: false,
     x: WORLD.w / 2, y: WORLD.h / 2, vx: 0, vy: 0, r: 13, ang: 0,
-    hp: 100, maxHp: 100, armor: 0, regen: 0, speed: 258,
+    hp: C.hp, maxHp: C.hp, armor: 0, regen: 0, speed: C.speed,
     // weapon
-    dmg: 11, fireRate: 4.6, bspeed: 700, count: 1, spread: 0.055,
+    dmg: C.dmg, fireRate: C.rate, bspeed: 700, count: 1, spread: 0.055,
     pierce: 0, ricochet: 0, homing: 0, blife: 0.85, br: 4.2,
     crit: 0.05, critMult: 2.0, knock: 90,
     // specials
@@ -681,6 +745,129 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
     arrow: P.arrow, venom: P.venom, solar: P.sun, deep: P.deepwater,
     wob: rnd(TAU), hit: false, mine: !opts.foreign
   });
+}
+
+/* ------------------------------ EMBER's lance ------------------------------
+   A ray rather than a projectile, so it routes through damageEnemy() and picks
+   up chain, volatile, execute, overkill, cryo and lifesteal for free. The
+   projectile-shaped upgrades are mapped on deliberately: Split Barrel fans it,
+   Twin Link adds emitters, Railshot and Seeker Rounds extend and steer it,
+   Ricochet bounces it off walls, Overcharge makes every seventh one a spear.
+   Redactors cannot erase it — it is not a bullet.
+--------------------------------------------------------------------------- */
+function castLance(x, y, ang, range, bounces, out) {
+  let cx = x, cy = y, ca = ang, left = range;
+  for (let b = 0; b <= bounces && left > 1; b++) {
+    const dx = Math.cos(ca), dy = Math.sin(ca);
+    let t = left, wall = null;
+    if (dx > 1e-6)       { const q = (arena.x1 - cx) / dx; if (q >= 0 && q < t) { t = q; wall = 'x'; } }
+    else if (dx < -1e-6) { const q = (arena.x0 - cx) / dx; if (q >= 0 && q < t) { t = q; wall = 'x'; } }
+    if (dy > 1e-6)       { const q = (arena.y1 - cy) / dy; if (q >= 0 && q < t) { t = q; wall = 'y'; } }
+    else if (dy < -1e-6) { const q = (arena.y0 - cy) / dy; if (q >= 0 && q < t) { t = q; wall = 'y'; } }
+    out.push({ x1: cx, y1: cy, x2: cx + dx * t, y2: cy + dy * t });
+    left -= t;
+    if (!wall || b >= bounces) break;
+    if (wall === 'x') ca = Math.PI - ca; else ca = -ca;
+    cx = cx + dx * t + Math.cos(ca) * 2;
+    cy = cy + dy * t + Math.sin(ca) * 2;
+  }
+}
+
+// Frontal defences still hold against a beam, same arcs as against bullets.
+function beamBlocked(e) {
+  const inc = Math.atan2(P.y - e.y, P.x - e.x);
+  const off = a => Math.abs(((inc - a + Math.PI) % TAU + TAU) % TAU - Math.PI);
+  if (e.type === 'sentinel' && off(e.ang) < 1.15) return 'shield';
+  if (e.type === 'prism' && off(e.plateAng) < 1.3) return 'prism';
+  if (e.boss === 'forgeheart') {
+    const rel = ((inc - e.plateAng) % TAU + TAU) % TAU, seg = TAU / 4;
+    if (rel % seg < seg * 0.62) return 'plate';
+  }
+  return null;
+}
+
+function lanceDamage(segs, dmg, struck) {
+  const list = enemies.slice();            // kills can push splitters mid-loop
+  for (const s of segs) {
+    for (const e of list) {
+      if (e.dead || e.phased || e.invuln || struck.has(e.id)) continue;
+      if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + 11)) continue;
+      struck.add(e.id);
+      const block = beamBlocked(e);
+      if (block) {
+        burst(e.x, e.y, 5, block === 'prism' ? '#a5f3fc' : '#bae6fd', 200, 2.4, 0.28);
+        if (block === 'prism') {
+          const back = Math.atan2(P.y - e.y, P.x - e.x) + rnd(0.25, -0.25);
+          ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
+            vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
+            r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
+        }
+        continue;
+      }
+      const d = len(e.x - P.x, e.y - P.y);
+      let dd = dmg;
+      if (P.longshot)   dd *= 1 + P.longshot * 0.14 * clamp(d / 620, 0, 1);
+      if (P.pointblank) dd *= 1 + P.pointblank * 0.30 * clamp(1 - d / 300, 0, 1);
+      const crit = Math.random() < P.crit;
+      if (crit) dd *= P.critMult;
+      damageEnemy(e, dd, crit, P.x, P.y);
+      if (P.venom && !e.dead) { e.psn = Math.min(12, (e.psn || 0) + P.venom); e.psnT = 4.5; }
+      if (P.sun && Math.random() < 0.5)
+        addHazard('fire', e.x, e.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
+                                           friendly: true, col: '#fbbf24' });
+      if (P.frag > 0) {
+        const n = 2 + P.frag;
+        for (let k = 0; k < n; k++)
+          fireBullet(e.x, e.y, rnd(TAU), 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
+      }
+    }
+  }
+}
+
+function fireLance() {
+  P.ocCount++;
+  const heavy = P.overcharge > 0 && P.ocCount % 7 === 0;
+  const range = laserRange() * (heavy ? 1.5 : 1);
+  const base = P.dmg * 2.4 * stanceMul() * (heavy ? 1.6 + 0.5 * P.overcharge : 1);
+
+  let aim = P.ang;
+  if (P.homing) {                          // Seeker Rounds snaps the lance on
+    const t = nearestEnemy(P.x, P.y, range * 1.1);
+    if (t) {
+      const want = Math.atan2(t.y - P.y, t.x - P.x);
+      const off = Math.abs(((want - P.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (off < 0.3 + 0.22 * P.homing) aim = want;
+    }
+  }
+
+  const lanes = [];
+  for (let i = 0; i < P.count; i++)        // Split Barrel fans it
+    lanes.push({ a: aim + (P.count === 1 ? 0 : (i - (P.count - 1) / 2) * 0.17), off: 0 });
+  for (let k = 1; k <= P.parallel; k++)    // Twin Link adds emitters
+    lanes.push({ a: aim, off: (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 20 });
+  for (let k = 0; k < P.back; k++)         // Backdraft fires behind
+    lanes.push({ a: aim + Math.PI + (k - (P.back - 1) / 2) * 0.2, off: 0, mul: 0.8 });
+
+  const nx = -Math.sin(aim), ny = Math.cos(aim);
+  const struck = new Set();
+  const beams = [];
+  for (const L of lanes) {
+    const segs = [];
+    castLance(P.x + nx * L.off, P.y + ny * L.off, L.a, range, P.ricochet, segs);
+    for (const s of segs) beams.push(s);
+    lanceDamage(segs, base * (L.mul || 1), struck);
+  }
+  P.laserSegs = beams;
+  P.laserT = 0.15;
+  P.laserHeavy = heavy;
+
+  P.vx -= Math.cos(aim) * (heavy ? 95 : 42);
+  P.vy -= Math.sin(aim) * (heavy ? 95 : 42);
+  shake(heavy ? 0.18 : 0.05);
+  burst(P.x + Math.cos(aim) * 20, P.y + Math.sin(aim) * 20,
+        heavy ? 12 : 4, heavy ? COL.crit : COL.bullet, 220, 2.8, 0.2, 0.9, aim);
+  if (heavy) { Audio_.tone(190, 0.24, 'square', 0.15, 70); Audio_.crit(); }
+  else Audio_.tone(920, 0.08, 'sawtooth', 0.085, 300);
 }
 
 function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
@@ -1122,7 +1309,7 @@ function makeShopStock() {
     let r = Math.random() * tot, ch = pool[0];
     for (const u of pool) { r -= RAR_W[u.rar]; if (r <= 0) { ch = u; break; } }
     pool.splice(pool.indexOf(ch), 1);
-    items.push({ kind: 'up', up: ch, name: ch.n, desc: ch.d, rar: ch.rar,
+    items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
       cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15)) });
   }
   const svc = shopServices();
@@ -1239,8 +1426,44 @@ function openPortalRoom() {
       portals[1].x = cx + (wide ? off : 0); portals[1].y = cy + (wide ? 0 : off);
     }
   }
-  banner('CHOOSE A GATE', '#e2e8f0', 3.0);
+  /* A library opened by the boss that just died has been sitting in the room
+     unseen — its banner was spent while the shop was covering the screen, and
+     the gates can land right on top of it. Move it clear of both gates and
+     announce it now, when the player is actually holding the stick again. */
+  placeLibraryClear(ox, oy, R, a);
+  if (libraryPortal) {
+    banner('A LIBRARY OPENS   ·   CHOOSE A GATE', '#fcd34d', 3.6);
+    ringFx(libraryPortal.x, libraryPortal.y, 10, 300, '#fcd34d', 0.9, 5);
+    Audio_.tone(300, 0.9, 'sine', 0.1, 900);
+  } else {
+    banner('CHOOSE A GATE', '#e2e8f0', 3.0);
+  }
   Audio_.tone(180, 1.1, 'sine', 0.12, 520);
+}
+
+/* Keeps the library door out from under the gates and out of the walls. */
+function placeLibraryClear(ox, oy, R, a) {
+  const L = libraryPortal;
+  if (!L) return;
+  const pad = L.r + 100;
+  const tryAt = (x, y) => {
+    const px = clamp(x, arena.x0 + pad, arena.x1 - pad);
+    const py = clamp(y, arena.y0 + pad, arena.y1 - pad);
+    if (!portals.every(p => len(px - p.x, py - p.y) > p.r + L.r + 70)) return null;
+    if (hazards.some(h => h.kind === 'mirror' && len(px - h.x, py - h.y) < h.r + L.r + 10)) return null;
+    return { x: px, y: py };
+  };
+  // square to the gate axis first — that is always the roomiest direction
+  for (const side of [1, -1]) {
+    const ang = a + side * Math.PI / 2;
+    const hit = tryAt(ox + Math.cos(ang) * R * 1.15, oy + Math.sin(ang) * R * 1.15);
+    if (hit) { L.x = hit.x; L.y = hit.y; return; }
+  }
+  for (let k = 0; k < 16; k++) {
+    const ang = a + k * TAU / 16;
+    const hit = tryAt(ox + Math.cos(ang) * R * 1.6, oy + Math.sin(ang) * R * 1.6);
+    if (hit) { L.x = hit.x; L.y = hit.y; return; }
+  }
 }
 
 function updatePortals(dt) {
@@ -1265,6 +1488,7 @@ function takePortal(p) {
   Audio_.levelup(); Audio_.boom();
   portals.length = 0;
   awaitingPortal = false;
+  libraryPortal = null;            // the door belonged to the room you just left
   if (p.kind === 'alt') advanceAlt(); else advanceNormal();
   // step through: recentre in the new arena so you arrive somewhere safe
   P.x = WORLD.w / 2; P.y = WORLD.h / 2; P.vx = P.vy = 0;
@@ -1281,7 +1505,7 @@ function takePortal(p) {
    wave cleared, and the stronger the page the more waves it wants.
 --------------------------------------------------------------------------- */
 let libraryPortal = null, libraryBook = null;
-const LIBRARY_CHANCE = 0.4;
+const LIBRARY_CHANCE = 0.5;
 
 const BOOKS = {
   warden: {
@@ -1409,9 +1633,9 @@ function maybeSpawnLibrary(bossKey) {
     x: clamp(ox + Math.cos(a) * R, arena.x0 + 120, arena.x1 - 120),
     y: clamp(oy + Math.sin(a) * R, arena.y0 + 120, arena.y1 - 120)
   };
-  banner('A LIBRARY OPENS', '#fcd34d', 3.0);
-  ringFx(libraryPortal.x, libraryPortal.y, 10, 300, '#fcd34d', 0.9, 5);
-  Audio_.tone(300, 0.9, 'sine', 0.1, 900);
+  // No banner or ring here — the shop is about to cover the screen and eat
+  // them, and the door still has to be moved clear of the gates. The portal
+  // room announces it instead, once the player can act on it.
 }
 
 function updateLibrary(dt) {
@@ -1694,6 +1918,7 @@ const Save = {
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
                   time: 0, muted: false, autofire: false,
                   planetarium: false, skipStreak: 0, clears: 0, altPath: false,
+                  charIdx: 0,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -1726,6 +1951,7 @@ const Save = {
     out.planetarium = !!(a.planetarium || b.planetarium);
     out.altPath = !!(a.altPath || b.altPath);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
+    out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
     const ar = a.bestRun, br = b.bestRun;
     out.bestRun = (br && br.score || 0) >= (ar && ar.score || 0) ? (br || ar) : (ar || br);
@@ -1755,6 +1981,7 @@ const Save = {
     Save.writeLocal();
     Audio_.muted = !!Save.profile.muted;
     autoFire = !!Save.profile.autofire;
+    applyChar(Save.profile.charIdx || 0);
     Save.connect();
     Board.load();
     // first launch: ask who they are before anything else
@@ -1951,6 +2178,7 @@ function promptName() {
 }
 
 function resetGame() {
+  applyChar(selectedChar);
   P = newPlayer();
   enemies = []; bullets = []; ebullets = []; gems = []; drops = [];
   parts = []; floats = []; arcs = []; rings = []; corpses = [];
@@ -1975,7 +2203,7 @@ function gameOver() {
   state = 'dead';
   const build = Object.keys(P.up).map(id => {
     const u = UPGRADES.find(z => z.id === id);
-    return u ? u.n + (P.up[id] > 1 ? ' ×' + P.up[id] : '') : id;
+    return u ? upName(u) + (P.up[id] > 1 ? ' ×' + P.up[id] : '') : id;
   });
   lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                 sector: stage.name, loop: loopNum,
@@ -1995,6 +2223,13 @@ function handleKey(k) {
     return;
   }
   if (state === 'menu') {
+    if (k === 'c') {
+      applyChar((selectedChar + 1) % CHARS.length);
+      Save.profile.charIdx = selectedChar;
+      Save.writeLocal(); Save.flush();
+      Audio_.select();
+      return;
+    }
     if (k === 'n') { nameBuf = Save.profile.name || ''; state = 'name'; return; }
     if (k === ' ' || k === 'enter') { resetGame(); state = 'play'; }
     return;
@@ -2284,7 +2519,18 @@ function updatePlayer(dt) {
   // shooting
   P.fireT -= dt;
   const rateMul = 1 + (P.bloodlust ? 0.07 * P.bloodlust * P.blStacks : 0);
-  if (firing && P.fireT <= 0 && P.diaryT <= 0) {
+  if (P.laserT > 0) P.laserT -= dt;
+
+  if (P.weapon === 'laser' && P.diaryT <= 0) {
+    // hold to charge; it lets go the instant it fills, so at 250% rate
+    // (charge time at its floor) this reads as continuous fire
+    if (firing) {
+      P.charge += dt * rateMul / chargeTime();
+      if (P.charge >= 1) { P.charge = 0; fireLance(); }
+    } else {
+      P.charge = Math.max(0, P.charge - dt * 1.6);   // bleeds off if released
+    }
+  } else if (firing && P.fireT <= 0 && P.diaryT <= 0) {
     P.fireT = 1 / (P.fireRate * rateMul);
     const muzzle = P.r + 6;
     const spread = P.spread;
@@ -4212,6 +4458,7 @@ function render() {
   drawBeams();
   drawFinaleBeams();
   drawDiary();
+  drawLance();
   drawParticles();
   ctx.globalCompositeOperation = 'source-over';
 
@@ -4237,6 +4484,7 @@ function render() {
     ctx.fillRect(0, 0, W, H);
   }
   drawHUD();
+  drawLibraryPointer();
   if (isTouch && state === 'play') drawTouchSticks();
   if (state === 'levelup') drawLevelUp();
   if (state === 'shop') drawShop();
@@ -4525,6 +4773,46 @@ function drawPortals() {
     ctx.fillText(p.def.name, p.x, p.y - p.r - 14);
     ctx.restore();
   }
+}
+
+/* A screen-space marker so an open library can never be walked past. It sits
+   on the door when the door is visible, and pins to the screen edge pointing
+   at it when it is not. */
+function drawLibraryPointer() {
+  const L = libraryPortal;
+  if (!L || (state !== 'play' && state !== 'pause')) return;
+  const sx = L.x - cam.x + W / 2 + cam.sx;
+  const sy = L.y - cam.y + H / 2 + cam.sy;
+  const m = 54;
+  const onScreenNow = sx > m && sx < W - m && sy > m && sy < H - m;
+  const pulse = 0.62 + Math.sin(uiTime * 4.2) * 0.38;
+  ctx.save();
+  ctx.textAlign = 'center';
+  if (onScreenNow) {
+    ctx.globalAlpha = pulse * 0.9;
+    ctx.fillStyle = '#fcd34d';
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('LIBRARY', sx, sy - L.r - 16);
+  } else {
+    const px = clamp(sx, m, W - m), py = clamp(sy, m, H - m);
+    // a zero delta on one axis is correct here — the marker is pinned to that
+    // edge and should point straight along it, so don't ||-fallback it away
+    let dx = sx - px, dy = sy - py;
+    if (!dx && !dy) { dx = sx - W / 2; dy = sy - H / 2; }
+    const a = Math.atan2(dy, dx);
+    ctx.globalAlpha = pulse;
+    ctx.translate(px, py);
+    ctx.rotate(a);
+    ctx.fillStyle = '#fcd34d';
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.lineTo(-10, 9); ctx.lineTo(-5, 0); ctx.lineTo(-10, -9);
+    ctx.closePath(); ctx.fill();
+    ctx.rotate(-a);
+    ctx.globalAlpha = pulse * 0.85;
+    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('LIBRARY', 0, 26);
+  }
+  ctx.restore();
 }
 
 function drawLibraryPortal() {
@@ -4990,6 +5278,70 @@ function drawCorpses() {
   }
 }
 
+function drawLance() {
+  if (P.weapon !== 'laser') return;
+  // the charge, wound around the ship
+  if (P.charge > 0.01 && P.laserT <= 0) {
+    const c = clamp(P.charge, 0, 1);
+    drawGlow(P.x + Math.cos(P.ang) * 20, P.y + Math.sin(P.ang) * 20,
+             10 + c * 26, c > 0.85 ? '#fecaca' : COL.player, 0.3 + c * 0.5);
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = rgba(c > 0.85 ? '#fecaca' : COL.player, 0.35 + c * 0.55);
+    ctx.lineWidth = 2 + c * 2.4;
+    ctx.beginPath();
+    ctx.arc(P.x, P.y, 26, P.ang - Math.PI * c, P.ang + Math.PI * c);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (P.laserT <= 0 || !P.laserSegs.length) return;
+  const t = clamp(P.laserT / 0.15, 0, 1);
+  const w = (P.laserHeavy ? 34 : 19) * (0.45 + t * 0.55);
+  const col = P.laserHeavy ? COL.crit : COL.player;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const s of P.laserSegs) {
+    ctx.globalAlpha = 0.2 * t;
+    ctx.strokeStyle = col; ctx.lineWidth = w * 2.1;
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+  }
+  for (const s of P.laserSegs) {
+    ctx.globalAlpha = 0.62 * t;
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    ctx.globalAlpha = t;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, w * 0.3);
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+  }
+  const last = P.laserSegs[P.laserSegs.length - 1];
+  drawGlow(last.x2, last.y2, w * 1.5, col, 0.7 * t);
+  drawGlow(P.laserSegs[0].x1, P.laserSegs[0].y1, w * 1.2, col, 0.6 * t);
+  ctx.restore();
+}
+
+function drawShipHull(colStroke, colFill) {
+  ctx.beginPath();
+  if (P.charId === 'ember') {
+    // a blunt hammerhead built around a forward lance prong
+    ctx.moveTo(21, 0);
+    ctx.lineTo(7, 4);
+    ctx.lineTo(3, 13);
+    ctx.lineTo(-11, 10);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-11, -10);
+    ctx.lineTo(3, -13);
+    ctx.lineTo(7, -4);
+  } else {
+    ctx.moveTo(16, 0);
+    ctx.lineTo(-9, 10);
+    ctx.lineTo(-5, 0);
+    ctx.lineTo(-9, -10);
+  }
+  ctx.closePath();
+  ctx.fillStyle = colFill; ctx.strokeStyle = colStroke;
+  ctx.fill(); ctx.stroke();
+}
+
 function drawPlayer() {
   const blink = P.iframe > 0 && Math.floor(P.iframe * 22) % 2 === 0;
 
@@ -5105,13 +5457,8 @@ function drawPlayer() {
   ctx.lineWidth = 2.4;
   ctx.strokeStyle = P.hurtFlash > 0 ? '#fecaca' : COL.player;
   ctx.fillStyle = P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : 'rgba(103,232,249,0.18)';
-  ctx.beginPath();
-  ctx.moveTo(16, 0);
-  ctx.lineTo(-9, 10);
-  ctx.lineTo(-5, 0);
-  ctx.lineTo(-9, -10);
-  ctx.closePath();
-  ctx.fill(); ctx.stroke();
+  drawShipHull(P.hurtFlash > 0 ? '#fecaca' : COL.player,
+               P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : rgba(COL.player, 0.18));
   // cockpit
   ctx.fillStyle = '#e0f2fe';
   ctx.beginPath(); ctx.arc(2, 0, 2.6, 0, TAU); ctx.fill();
@@ -5416,7 +5763,7 @@ function drawHUD() {
     for (const id of owned) {
       const u = UPGRADES.find(z => z.id === id);
       if (!u) continue;
-      const label = u.n + (P.up[id] > 1 ? ' ×' + P.up[id] : '');
+      const label = upName(u) + (P.up[id] > 1 ? ' ×' + P.up[id] : '');
       const w3 = ctx.measureText(label).width + 14;
       if (cx + w3 > W - pad) { cx = pad; cy -= 20; }
       ctx.fillStyle = 'rgba(15,23,42,0.7)';
@@ -5513,11 +5860,11 @@ function drawLevelUp() {
 
     ctx.font = '800 19px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(u.n, cxp, y + 140);
+    ctx.fillText(upName(u), cxp, y + 140);
 
     ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#94a3b8';
-    wrapText(u.d, cxp, y + 168, r.w - 36, 17);
+    wrapText(upDesc(u), cxp, y + 168, r.w - 36, 17);
 
     // stack pips
     const have = P.up[u.id] || 0;
@@ -5805,22 +6152,62 @@ function renderMenu() {
   ctx.fillStyle = '#475569';
   ctx.fillText('S U R V I V E   T H E   A R E N A', cxp, cyp + 26);
 
+  // --- pilot select ---
+  const C = CHAR();
+  const selY = cyp + 88;
+  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.fillText('PILOT   —   PRESS C', cxp, selY - 30);
+  // both hulls, the chosen one lit
+  CHARS.forEach((ch, i) => {
+    const on = i === selectedChar;
+    const hx = cxp + (i - (CHARS.length - 1) / 2) * 116;
+    ctx.save();
+    ctx.translate(hx, selY);
+    if (on) {
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, 42, ch.col, 0.45);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.rotate(-Math.PI / 2);
+    ctx.globalAlpha = on ? 1 : 0.32;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    if (ch.weapon === 'laser') {
+      ctx.moveTo(21, 0); ctx.lineTo(7, 4); ctx.lineTo(3, 13); ctx.lineTo(-11, 10);
+      ctx.lineTo(-6, 0); ctx.lineTo(-11, -10); ctx.lineTo(3, -13); ctx.lineTo(7, -4);
+    } else {
+      ctx.moveTo(16, 0); ctx.lineTo(-9, 10); ctx.lineTo(-5, 0); ctx.lineTo(-9, -10);
+    }
+    ctx.closePath();
+    ctx.fillStyle = rgba(ch.col, on ? 0.22 : 0.1);
+    ctx.strokeStyle = ch.col;
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  });
+  ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = C.col;
+  ctx.fillText(C.n, cxp, selY + 38);
+  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText(C.tag, cxp, selY + 54);
+
   const pulse = 0.55 + Math.sin(uiTime * 3.4) * 0.45;
   ctx.font = '700 16px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = rgba(COL.player, pulse);
-  ctx.fillText(isTouch ? 'TAP TO START' : 'PRESS SPACE TO START', cxp, cyp + 74);
+  ctx.fillText(isTouch ? 'TAP TO START' : 'PRESS SPACE TO START', cxp, cyp + 174);
 
   const pr = Save.profile;
   if (pr.best > 0) {
     ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = COL.crit;
-    ctx.fillText('BEST  ' + pr.best.toLocaleString(), cxp, cyp + 104);
+    ctx.fillText('BEST  ' + pr.best.toLocaleString(), cxp, cyp + 204);
   }
   if (pr.runs > 0) {
     ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#475569';
     ctx.fillText(`${pr.runs} RUN${pr.runs === 1 ? '' : 'S'}   ·   ${pr.kills.toLocaleString()} KILLS   ·   ` +
-                 `FURTHEST ${pr.bestSector} W${pr.bestWave}   ·   ${fmtTime(pr.time)}`, cxp, cyp + 126);
+                 `FURTHEST ${pr.bestSector} W${pr.bestWave}   ·   ${fmtTime(pr.time)}`, cxp, cyp + 224);
   }
 
   // leaderboard — the global board when it's reachable, your own runs otherwise
@@ -5828,9 +6215,9 @@ function renderMenu() {
   const rows = (global ? Board.top : Save.top).slice(0, 5);
   // show it whenever the last row genuinely clears the footer text, rather
   // than guessing at a screen-height threshold
-  const lastRowY = cyp + 158 + 18 + (rows.length - 1) * 15;
+  const lastRowY = cyp + 252 + 18 + (rows.length - 1) * 15;
   if (rows.length && lastRowY < H - 112) {
-    const ly = cyp + 158;
+    const ly = cyp + 252;
     ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#334155';
     ctx.fillText(global ? 'GLOBAL TOP 5' : 'YOUR BEST RUNS', cxp, ly);
