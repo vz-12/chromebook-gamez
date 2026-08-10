@@ -83,13 +83,20 @@ function drawGlow(x, y, r, color, a = 1) {
 --------------------------------------------------------------------------- */
 const Audio_ = {
   ac: null, master: null, musicGain: null, sfxGain: null,
-  muted: false, noiseBuf: null, ready: false,
+  // vol is the slider, 0..1. muted is kept in sync so the cheap early-outs
+  // scattered through the sound calls keep working unchanged.
+  muted: false, vol: 1, noiseBuf: null, ready: false,
+  setVol(v) {
+    this.vol = clamp(v, 0, 1);
+    this.muted = this.vol <= 0.005;
+    if (this.ready) this.master.gain.value = this.vol * 0.9;
+  },
   init() {
     if (this.ready) return;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ac = new AC();
-    this.master = this.ac.createGain(); this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master = this.ac.createGain(); this.master.gain.value = this.vol * 0.9;
     this.master.connect(this.ac.destination);
     this.sfxGain = this.ac.createGain(); this.sfxGain.gain.value = 0.34;
     this.sfxGain.connect(this.master);
@@ -284,13 +291,21 @@ addEventListener('blur', () => {
   if (state === 'play') { state = 'pause'; }
 });
 
-cv.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+cv.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (volDrag) volFromMouse();
+});
 cv.addEventListener('mousedown', e => {
   Audio_.init(); Audio_.resume();
   mouse.x = e.clientX; mouse.y = e.clientY; mouse.down = true;
+  // the slider claims the click before any overlay button sees it
+  if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return; }
   handleClick();
 });
-addEventListener('mouseup', () => { mouse.down = false; });
+addEventListener('mouseup', () => {
+  mouse.down = false;
+  if (volDrag) { volDrag = false; Save.savePrefs(); }
+});
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ----- touch: dual virtual sticks ----- */
@@ -362,17 +377,35 @@ function laserRange() {
        + (P.bspeed / 700 - 1) * 150 - (P.deepwater ? 90 : 0);
 }
 
+/* The released beam stands for a full second: it flares open from half width,
+   peaks, and closes back to half, damaging everything it covers on every tick.
+   Charging only resumes once it has gone out, so fire rate buys uptime rather
+   than shots — which is what keeps Overclock alive past the charge floor. */
+const LANCE_DUR  = 1.0;    // lifetime of one beam
+const LANCE_PROC = 0.18;   // cadence for chain/venom/frag and damage numbers
+const LANCE_DPS  = 6.7;    // damage per second, in multiples of P.dmg
+const LANCE_HALF = 11;     // hitbox half-width at full flare, before Heavy Rounds
+// 50% -> 100% -> 50% across the beam's life
+const lanceEnv = prog => 0.5 + 0.5 * Math.sin(Math.PI * clamp(prog, 0, 1));
+const lanceDur = () => LANCE_DUR * (P.blife / 0.85);   // Ricochet's extra life
+const lanceHalf = () => LANCE_HALF * (P.br / 4.2);     // Heavy Rounds' extra calibre
+
 /* Upgrade cards read as bullet text by default. On a beam some of that is
    simply wrong, so each of these carries a lance-side name and blurb. */
 const LANCE_TEXT = {
   pierce: { n: 'Focusing Lens', d: '+110 lance range' },
-  ric:    { d: 'Lance bounces off walls' },
+  ric:    { d: 'Beam bounces off walls and lasts longer' },
   multi:  { d: '+1 beam, −9% damage' },
   home:   { d: 'Lance snaps onto nearby enemies' },
-  vel:    { d: 'Slightly longer reach, +7% damage' },
+  vel:    { d: 'Longer reach, +7% damage, stronger shove' },
   para:   { d: 'Adds a parallel beam emitter' },
   back:   { d: 'Fires a beam behind you' },
-  frag:   { d: 'Struck enemies burst into fragments' }
+  frag:   { d: 'Burned enemies shed fragments' },
+  heavy:  { d: '+34% damage, wider beam, slower charge' },
+  long:   { n: 'Longshot', d: '+damage at the far end of the beam' },
+  oc:     { d: 'Every 7th beam is a heavy spear' },
+  pblank: { d: '+30% damage at close range' },
+  crit:   { d: '+8% critical chance (rolled per pulse)' }
 };
 const lanceText = u => (P && P.weapon === 'laser' && LANCE_TEXT[u.id]) || null;
 const upName = u => { const a = lanceText(u); return (a && a.n) || u.n; };
@@ -391,6 +424,8 @@ function newPlayer() {
   return {
     weapon: C.weapon, charId: C.id, rate0: C.rate,
     charge: 0, laserT: 0, laserSegs: [], laserHeavy: false,
+    laserDps: 0, laserEnv: 0, laserProcT: 0, laserCrit: false, laserAim: 0,
+    twinSegs: [],
     x: WORLD.w / 2, y: WORLD.h / 2, vx: 0, vy: 0, r: 13, ang: 0,
     hp: C.hp, maxHp: C.hp, armor: 0, regen: 0, speed: C.speed,
     // weapon
@@ -418,6 +453,8 @@ function newPlayer() {
     blStacks: 0, blT: 0, tempoT: 0, ocCount: 0, staticT: 0, ghostT: 0,
     // library book: one active item, charged a wave at a time
     book: null, bookCharge: 0,
+    // malware overwrites the dash entirely, and acts on the room rather than you
+    malware: null,
     plateT: 0, plateAng: 0, burrowT: 0, stopT: 0, twinT: 0,
     diaryT: 0, diaryAng: 0, diaryTick: 0,
     level: 1, xp: 0, xpNext: 8, kills: 0, up: {}
@@ -752,8 +789,9 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
    up chain, volatile, execute, overkill, cryo and lifesteal for free. The
    projectile-shaped upgrades are mapped on deliberately: Split Barrel fans it,
    Twin Link adds emitters, Railshot and Seeker Rounds extend and steer it,
-   Ricochet bounces it off walls, Overcharge makes every seventh one a spear.
-   Redactors cannot erase it — it is not a bullet.
+   Ricochet bounces it off walls and holds it open longer, Heavy Rounds widens
+   it, Kinetic Coil shoves what it touches, Overcharge makes every seventh one a
+   spear. Redactors cut it short exactly as they erase bullets.
 --------------------------------------------------------------------------- */
 function castLance(x, y, ang, range, bounces, out) {
   let cx = x, cy = y, ca = ang, left = range;
@@ -786,60 +824,40 @@ function beamBlocked(e) {
   return null;
 }
 
-function lanceDamage(segs, dmg, struck) {
-  const list = enemies.slice();            // kills can push splitters mid-loop
-  for (const s of segs) {
-    for (const e of list) {
-      if (e.dead || e.phased || e.invuln || struck.has(e.id)) continue;
-      if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + 11)) continue;
-      struck.add(e.id);
-      const block = beamBlocked(e);
-      if (block) {
-        burst(e.x, e.y, 5, block === 'prism' ? '#a5f3fc' : '#bae6fd', 200, 2.4, 0.28);
-        if (block === 'prism') {
-          const back = Math.atan2(P.y - e.y, P.x - e.x) + rnd(0.25, -0.25);
-          ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
-            vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
-            r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
-        }
-        continue;
-      }
-      const d = len(e.x - P.x, e.y - P.y);
-      let dd = dmg;
-      if (P.longshot)   dd *= 1 + P.longshot * 0.14 * clamp(d / 620, 0, 1);
-      if (P.pointblank) dd *= 1 + P.pointblank * 0.30 * clamp(1 - d / 300, 0, 1);
-      const crit = Math.random() < P.crit;
-      if (crit) dd *= P.critMult;
-      damageEnemy(e, dd, crit, P.x, P.y);
-      if (P.venom && !e.dead) { e.psn = Math.min(12, (e.psn || 0) + P.venom); e.psnT = 4.5; }
-      if (P.sun && Math.random() < 0.5)
-        addHazard('fire', e.x, e.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
-                                           friendly: true, col: '#fbbf24' });
-      if (P.frag > 0) {
-        const n = 2 + P.frag;
-        for (let k = 0; k < n; k++)
-          fireBullet(e.x, e.y, rnd(TAU), 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
-      }
+/* A redactor's cone erases the beam exactly as it erases bullets: the lance is
+   cut where it crosses the cone and nothing past the cut is touched. Marched in
+   short steps rather than solved analytically — the cone is cheap to test and
+   the beam is never longer than a screen. */
+function clipRedactors(segs) {
+  const rs = [];
+  for (const e of enemies)
+    if (!e.dead && e.type === 'redactor' && e.redacting) rs.push(e);
+  if (!rs.length) return null;
+  const inCone = (x, y) => {
+    for (const e of rs) {
+      const dx = x - e.x, dy = y - e.y;
+      if (len(dx, dy) > 330) continue;
+      const off = Math.abs(((Math.atan2(dy, dx) - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (off < 0.55) return true;
+    }
+    return false;
+  };
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const dx = s.x2 - s.x1, dy = s.y2 - s.y1, L = len(dx, dy);
+    const steps = Math.max(1, Math.ceil(L / 10));
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps, x = s.x1 + dx * t, y = s.y1 + dy * t;
+      if (!inCone(x, y)) continue;
+      s.x2 = x; s.y2 = y; s.cut = true;
+      segs.length = i + 1;             // nothing survives past the cut
+      return { x, y };
     }
   }
+  return null;
 }
 
-function fireLance() {
-  P.ocCount++;
-  const heavy = P.overcharge > 0 && P.ocCount % 7 === 0;
-  const range = laserRange() * (heavy ? 1.5 : 1);
-  const base = P.dmg * 2.4 * stanceMul() * (heavy ? 1.6 + 0.5 * P.overcharge : 1);
-
-  let aim = P.ang;
-  if (P.homing) {                          // Seeker Rounds snaps the lance on
-    const t = nearestEnemy(P.x, P.y, range * 1.1);
-    if (t) {
-      const want = Math.atan2(t.y - P.y, t.x - P.x);
-      const off = Math.abs(((want - P.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
-      if (off < 0.3 + 0.22 * P.homing) aim = want;
-    }
-  }
-
+function lanceLanes(aim) {
   const lanes = [];
   for (let i = 0; i < P.count; i++)        // Split Barrel fans it
     lanes.push({ a: aim + (P.count === 1 ? 0 : (i - (P.count - 1) / 2) * 0.17), off: 0 });
@@ -847,20 +865,136 @@ function fireLance() {
     lanes.push({ a: aim, off: (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 20 });
   for (let k = 0; k < P.back; k++)         // Backdraft fires behind
     lanes.push({ a: aim + Math.PI + (k - (P.back - 1) / 2) * 0.2, off: 0, mul: 0.8 });
+  return lanes;
+}
 
+// Re-cast every tick so the beam stays anchored to the ship and follows the aim.
+// ox/oy default to the player; GEMINI's twin passes its own origin.
+function castLanceBeams(aim, ox, oy) {
+  if (ox === undefined) { ox = P.x; oy = P.y; }
+  const range = laserRange() * (P.laserHeavy ? 1.5 : 1);
   const nx = -Math.sin(aim), ny = Math.cos(aim);
-  const struck = new Set();
   const beams = [];
-  for (const L of lanes) {
+  for (const L of lanceLanes(aim)) {
     const segs = [];
-    castLance(P.x + nx * L.off, P.y + ny * L.off, L.a, range, P.ricochet, segs);
-    for (const s of segs) beams.push(s);
-    lanceDamage(segs, base * (L.mul || 1), struck);
+    castLance(ox + nx * L.off, oy + ny * L.off, L.a, range, P.ricochet, segs);
+    const cut = clipRedactors(segs);       // each lane is cut on its own
+    for (const s of segs) { s.mul = L.mul || 1; s.cutEnd = cut ? s.cut : false; beams.push(s); }
   }
-  P.laserSegs = beams;
-  P.laserT = 0.15;
-  P.laserHeavy = heavy;
+  return beams;
+}
 
+function lanceAim() {
+  let aim = P.ang;
+  if (P.homing) {                          // Seeker Rounds snaps the lance on
+    const t = nearestEnemy(P.x, P.y, laserRange() * 1.1);
+    if (t) {
+      const want = Math.atan2(t.y - P.y, t.x - P.x);
+      const off = Math.abs(((want - P.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (off < 0.3 + 0.22 * P.homing) aim = want;
+    }
+  }
+  return aim;
+}
+
+// segs/ox/oy default to the player's own beam; the twin passes its own
+function lanceTick(dt, proc, segs, ox, oy) {
+  if (!segs) { segs = P.laserSegs; ox = P.x; oy = P.y; }
+  const half = lanceHalf() * P.laserEnv;
+  const list = enemies.slice();            // kills can push splitters mid-loop
+  const struck = new Set();
+  for (const s of segs) {
+    for (const e of list) {
+      if (e.dead || e.phased || e.invuln || struck.has(e.id)) continue;
+      if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + half)) continue;
+      struck.add(e.id);
+      const block = beamBlocked(e);
+      if (block) {
+        if (proc) {
+          burst(e.x, e.y, 5, block === 'prism' ? '#a5f3fc' : '#bae6fd', 200, 2.4, 0.28);
+          if (block === 'prism') {
+            const back = Math.atan2(oy - e.y, ox - e.x) + rnd(0.25, -0.25);
+            ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
+              vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
+              r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
+          }
+        }
+        continue;
+      }
+      const d = len(e.x - ox, e.y - oy);
+      let dps = P.laserDps * (s.mul || 1);
+      if (P.longshot)   dps *= 1 + P.longshot * 0.14 * clamp(d / 620, 0, 1);
+      if (P.pointblank) dps *= 1 + P.pointblank * 0.30 * clamp(1 - d / 300, 0, 1);
+      if (P.laserCrit)  dps *= P.critMult;
+      // silent: a number every frame is unreadable, so they come on the proc beat
+      damageEnemy(e, dps * dt, false, ox, oy, { silent: true, noChain: true });
+      if (P.knock && !e.dead) {             // Kinetic Coil shoves along the beam
+        const push = P.knock * dt * (e.type === 'boss' ? 0.06 : e.type === 'brute' ? 0.35 : 1);
+        const a = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+        e.vx += Math.cos(a) * push; e.vy += Math.sin(a) * push;
+      }
+      if (!proc || e.dead) continue;
+      const pulse = dps * LANCE_PROC;
+      if (P.chain) chainFrom(e, pulse * (0.34 + 0.1 * P.chain), P.chain);
+      if (P.venom) { e.psn = Math.min(12, (e.psn || 0) + P.venom); e.psnT = 4.5; }
+      if (P.sun && Math.random() < 0.5)
+        addHazard('fire', e.x, e.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
+                                           friendly: true, col: '#fbbf24' });
+      if (P.frag > 0) {
+        const n = 1 + P.frag;
+        for (let k = 0; k < n; k++)
+          fireBullet(e.x, e.y, rnd(TAU), 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
+      }
+      if (struck.size === 1 || Math.random() < 0.34)
+        floatText(e.x, e.y - e.r - 6, Math.round(pulse),
+                  P.laserCrit ? COL.crit : '#fca5a5', P.laserCrit ? 15 : 12);
+    }
+  }
+}
+
+function updateLance(dt) {
+  if (P.laserT <= 0) return;
+  P.laserT -= dt;
+  const dur = lanceDur();
+  P.laserEnv = lanceEnv(1 - clamp(P.laserT / dur, 0, 1));
+  if (P.laserT <= 0) {
+    P.laserSegs.length = 0; P.twinSegs.length = 0; P.laserEnv = 0; return;
+  }
+  P.laserAim = lanceAim();
+  P.laserSegs = castLanceBeams(P.laserAim);
+  P.laserProcT -= dt;
+  const proc = P.laserProcT <= 0;
+  if (proc) {
+    P.laserProcT += LANCE_PROC;
+    P.laserCrit = Math.random() < P.crit;
+    Audio_.tone(760, 0.05, 'sawtooth', 0.03, 520);
+  }
+  lanceTick(dt, proc);
+
+  /* GEMINI fires whenever you do, and a beam is no exception — the twin holds
+     its own lance for the same second, aimed from the far side of the room. */
+  if (twinActive()) {
+    const t = twinPos();
+    const tgt = nearestEnemy(t.x, t.y, laserRange() * 1.15);
+    P.twinAng = tgt ? Math.atan2(tgt.y - t.y, tgt.x - t.x) : P.laserAim + Math.PI;
+    P.twinSegs = castLanceBeams(P.twinAng, t.x, t.y);
+    lanceTick(dt, proc, P.twinSegs, t.x, t.y);
+  } else if (P.twinSegs.length) P.twinSegs.length = 0;
+}
+
+function fireLance() {
+  P.ocCount++;
+  const heavy = P.overcharge > 0 && P.ocCount % 7 === 0;
+  P.laserHeavy = heavy;
+  P.laserDps = P.dmg * LANCE_DPS * stanceMul() * (heavy ? 1.6 + 0.5 * P.overcharge : 1);
+  P.laserT = lanceDur();
+  P.laserEnv = lanceEnv(0);
+  P.laserProcT = 0;                        // first pulse lands immediately
+  P.laserCrit = Math.random() < P.crit;
+  P.laserAim = lanceAim();
+  P.laserSegs = castLanceBeams(P.laserAim);
+
+  const aim = P.laserAim;
   P.vx -= Math.cos(aim) * (heavy ? 95 : 42);
   P.vy -= Math.sin(aim) * (heavy ? 95 : 42);
   shake(heavy ? 0.18 : 0.05);
@@ -882,6 +1016,13 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     return;
   }
   dmg *= (e.vuln || 1);        // stunned enemies take extra
+  // boss armour: no single hit may exceed the cap, however it was delivered.
+  // Applied after vuln so baiting the stun still pays, just not unboundedly.
+  if (e.dmgCap !== undefined && dmg > e.dmgCap) {
+    dmg = e.dmgCap;
+    if (Math.random() < 0.3)
+      burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 3, '#fca5a5', 150, 2, 0.2);
+  }
   e.hp -= dmg;
   // a floor holds a boss alive for a scripted finale instead of dying to it
   if (e.floor !== undefined && e.hp < e.floor) e.hp = e.floor;
@@ -1050,9 +1191,10 @@ function killEnemy(e, ang = 0) {
     for (const h of hazards) h.orbit = false;
     finaleBeams.length = 0;
   }
-  if (e.type === 'boss') {
+  // a shadow is not the stage boss — killing one must not end the wave
+  if (e.type === 'boss' && !e.shadow) {
     lastBossDeath = { x: e.x, y: e.y };
-    bossAlive = false; onBossDefeat();
+    bossAlive = false; onBossDefeat(e);
   }
 }
 
@@ -1257,15 +1399,29 @@ function updateWaves(dt) {
   }
 }
 
-function onBossDefeat() {
+function onBossDefeat(e) {
   const bd = BOSSES[stage.boss];
-  banner(bd.name + '   DESTROYED', COL.crit);
+  const wasVirus = !!(e && e.virus);
+  banner(wasVirus ? 'THE INFECTION IS CLEARED' : bd.name + '   DESTROYED',
+         wasVirus ? VIRUS_COL : COL.crit);
   drawFlashT = 0.2;
   shopPending = true;
+
+  if (e && e.boss === 'theother') {
+    Save.profile.otherKills = (Save.profile.otherKills || 0) + 1;
+    Save.writeLocal(); Save.flush();
+  }
+  if (wasVirus && !Save.profile.malware) {
+    Save.profile.malware = true;
+    Save.writeLocal(); Save.flush();
+    banner('MALWARE UNLOCKED', VIRUS_COL, 4.0);
+  }
+  maybeSpawnMalware(wasVirus);
   maybeSpawnLibrary(stage.boss);
-  const cr = Math.round((70 + wave * 6) * P.credMul);
+
+  const cr = Math.round((70 + wave * 6) * (wasVirus ? 2.2 : 1) * P.credMul);
   credits += cr;
-  score += 500 * (stageAbs + 1);
+  score += 500 * (stageAbs + 1) * (wasVirus ? 3 : 1);
   for (let i = 0; i < 5; i++)
     setTimeout(() => { if (state === 'play') shake(0.5); }, i * 90);
 }
@@ -1504,7 +1660,7 @@ function takePortal(p) {
    item bound to Q. Books do not fire on a timer: they take on one charge per
    wave cleared, and the stronger the page the more waves it wants.
 --------------------------------------------------------------------------- */
-let libraryPortal = null, libraryBook = null;
+let libraryPortal = null, libraryBook = null, malwareOffer = null;
 const LIBRARY_CHANCE = 0.5;
 
 const BOOKS = {
@@ -1622,17 +1778,31 @@ function diaryMirrorList() {
   return diaryMirrors;
 }
 
-function maybeSpawnLibrary(bossKey) {
-  if (!Save.profile.altPath || !BOOKS[bossKey]) return;
-  if (Math.random() >= LIBRARY_CHANCE) return;
+// one door per room: a forced malware drop always outranks a library roll
+function placePortal(extra) {
   const ox = lastBossDeath ? lastBossDeath.x : P.x;
   const oy = lastBossDeath ? lastBossDeath.y : P.y;
   const a = rnd(TAU), R = 190;
-  libraryPortal = {
-    boss: bossKey, t: 0, arm: 0.8, r: 46,
+  libraryPortal = Object.assign({
+    kind: 'library', t: 0, arm: 0.8, r: 46,
     x: clamp(ox + Math.cos(a) * R, arena.x0 + 120, arena.x1 - 120),
     y: clamp(oy + Math.sin(a) * R, arena.y0 + 120, arena.y1 - 120)
-  };
+  }, extra);
+}
+
+const MALWARE_CHANCE = 0.05;
+
+function maybeSpawnMalware(force) {
+  if (!Save.profile.malware && !force) return;
+  if (!force && Math.random() >= MALWARE_CHANCE) return;
+  placePortal({ kind: 'malware', mal: pick(MALWARE) });
+}
+
+function maybeSpawnLibrary(bossKey) {
+  if (libraryPortal) return;                 // a malware door already claimed it
+  if (!Save.profile.altPath || !BOOKS[bossKey]) return;
+  if (Math.random() >= LIBRARY_CHANCE) return;
+  placePortal({ kind: 'library', boss: bossKey });
   // No banner or ring here — the shop is about to cover the screen and eat
   // them, and the door still has to be moved clear of the gates. The portal
   // room announces it instead, once the player can act on it.
@@ -1643,13 +1813,15 @@ function updateLibrary(dt) {
   if (!L) return;
   L.t += dt;
   L.arm -= dt;
+  const col = L.kind === 'malware' ? MAL_COL : '#fcd34d';
   if (Math.random() < 0.6) {
     const a = rnd(TAU), rr = L.r * rnd(1.6, 0.7);
     spawnPart(L.x + Math.cos(a) * rr, L.y + Math.sin(a) * rr,
-      -Math.cos(a) * 70, -Math.sin(a) * 70, rnd(3.4, 1.5), '#fcd34d', rnd(0.7, 0.3), 0.95);
+      -Math.cos(a) * 70, -Math.sin(a) * 70, rnd(3.4, 1.5), col, rnd(0.7, 0.3), 0.95);
   }
   if (L.arm <= 0 && len(P.x - L.x, P.y - L.y) < L.r + P.r) {
-    libraryBook = BOOKS[L.boss];
+    if (L.kind === 'malware') malwareOffer = L.mal;
+    else libraryBook = BOOKS[L.boss];
     libraryPortal = null;
     state = 'library';
     uiArm = 0.4;
@@ -1658,6 +1830,15 @@ function updateLibrary(dt) {
 }
 
 function takeBook() {
+  const m = malwareOffer;
+  if (m) {                                   // installing overwrites the dash
+    P.malware = m;
+    banner(m.n + '   INSTALLED', m.col, 2.8);
+    ringFx(P.x, P.y, 10, 260, m.col, 0.7, 5);
+    burst(P.x, P.y, 40, m.col, 320, 3.6, 0.7);
+    leaveLibrary();
+    return;
+  }
   if (!libraryBook) return;
   P.book = libraryBook;
   P.bookCharge = 0;
@@ -1669,6 +1850,7 @@ function takeBook() {
 
 function leaveLibrary() {
   libraryBook = null;
+  malwareOffer = null;
   state = 'play';
   Audio_.select();
   checkLevel();
@@ -1684,6 +1866,176 @@ function useBook() {
   P.bookCharge = 0;
   P.book.f();
   banner(P.book.n, P.book.col, 1.6);
+}
+
+/* -------------------------------- malware ---------------------------------
+   Dropped by the corrupted OTHER. Each one overwrites the dash outright — you
+   never get the blink back while it is installed, and only one can be resident
+   at a time. They are deliberately not upgrades: every one is a different verb.
+--------------------------------------------------------------------------- */
+const MAL_COL = '#ef4444';
+
+const MALWARE = [
+  { id: 'fork', n: 'FORK BOMB', col: '#f87171',
+    d: 'Forces the nearest enemy to spawn processes it cannot kill. It bursts — and everything caught in the burst bursts in turn, all the way through the crowd.',
+    f: () => {
+      const seed = nearestEnemy(P.x, P.y, 520);
+      if (!seed) return malMiss('NO PROCESS');
+      const queue = [seed], seen = new Set([seed.id]);
+      let depth = 0;
+      while (queue.length && depth < 40) {
+        const e = queue.shift(); depth++;
+        const R = 150;
+        playerBlast(e.x, e.y, R, 18 + P.dmg * 1.7, '#f87171');
+        ringFx(e.x, e.y, 8, R, '#f87171', 0.4, 3);
+        for (const o of enemies) {
+          if (o.dead || seen.has(o.id) || o.invuln) continue;
+          if (len(o.x - e.x, o.y - e.y) > R + o.r) continue;
+          seen.add(o.id); queue.push(o);
+        }
+      }
+      floatText(seed.x, seed.y - 40, 'FORKED ×' + depth, '#f87171', 15);
+      P.iframe = Math.max(P.iframe, 0.35);
+      shake(0.2 + Math.min(0.6, depth * 0.06));
+      Audio_.tone(320, 0.18, 'square', 0.1, 90);
+    } },
+
+  { id: 'seg', n: 'SEGFAULT', col: '#fb7185',
+    d: 'Two enemies read each other\'s memory. They are swapped where they stand, and neither survives the correction intact.',
+    f: () => {
+      const live = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < 760);
+      if (live.length < 2) return malMiss('NO ADDRESS');
+      const a = pick(live);
+      const b = pick(live.filter(e => e !== a));
+      const ax = a.x, ay = a.y;
+      malTrail(a.x, a.y, b.x, b.y, '#fb7185');
+      a.x = clamp(b.x, arena.x0 + a.r, arena.x1 - a.r);
+      a.y = clamp(b.y, arena.y0 + a.r, arena.y1 - a.r);
+      b.x = clamp(ax, arena.x0 + b.r, arena.x1 - b.r);
+      b.y = clamp(ay, arena.y0 + b.r, arena.y1 - b.r);
+      a.vx = a.vy = b.vx = b.vy = 0;
+      for (const e of [a, b]) {
+        e.slow = 0.9; e.slowT = 2;
+        damageEnemy(e, 40 + P.dmg * 3.4, true, P.x, P.y);
+        ringFx(e.x, e.y, 6, 120, '#fb7185', 0.45, 3);
+      }
+      P.iframe = Math.max(P.iframe, 0.4);
+      Audio_.tone(180, 0.2, 'sawtooth', 0.1, 900);
+    } },
+
+  { id: 'stack', n: 'STACK OVERFLOW', col: '#f97316',
+    d: 'Every enemy near you recurses into every other one. The damage scales on how many are packed together — a lone target barely notices.',
+    f: () => {
+      const R = 400;
+      const near = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < R);
+      if (!near.length) return malMiss('EMPTY STACK');
+      ringFx(P.x, P.y, 12, R, '#f97316', 0.6, 4);
+      const per = (10 + P.dmg * 0.9) * near.length;
+      for (const e of near) {
+        damageEnemy(e, per, near.length >= 5, P.x, P.y);
+        for (const o of near) {
+          if (o === e) continue;
+          arcs.push({ x1: e.x, y1: e.y, x2: o.x, y2: o.y,
+                      life: 0.28, max: 0.28, col: '#f97316' });
+          break;                              // one visible link each, not n²
+        }
+      }
+      floatText(P.x, P.y - 50, 'DEPTH ' + near.length, '#f97316', 15);
+      P.iframe = Math.max(P.iframe, 0.4);
+      shake(0.3); Audio_.noise(0.35, 0.2, 2600, 400, 3);
+    } },
+
+  { id: 'leak', n: 'MEMORY LEAK', col: '#a3e635',
+    d: 'Allocates into everything nearby and never frees it. Infected enemies bleed a share of their maximum health every second, and pass it to anything that touches them.',
+    f: () => {
+      const R = 360;
+      const near = enemies.filter(e => !e.dead && len(e.x - P.x, e.y - P.y) < R);
+      if (!near.length) return malMiss('NOTHING TO ALLOCATE');
+      ringFx(P.x, P.y, 12, R, '#a3e635', 0.55, 4);
+      for (const e of near) {
+        e.leak = 0.05 + P.dmg * 0.0016;       // fraction of max HP per second
+        e.leakT = 7;
+        floatText(e.x, e.y - e.r - 8, 'LEAKING', '#a3e635', 11);
+      }
+      P.iframe = Math.max(P.iframe, 0.4);
+      Audio_.tone(240, 0.26, 'triangle', 0.08, 520);
+    } },
+
+  { id: 'nullref', n: 'NULL DEREFERENCE', col: '#38bdf8',
+    d: 'Points every enemy near you at an address that does not exist. Anything already below a third simply stops existing; the rest lose their armour permanently.',
+    f: () => {
+      const R = 420;
+      const near = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < R);
+      if (!near.length) return malMiss('NULL');
+      ringFx(P.x, P.y, 12, R, '#38bdf8', 0.6, 4);
+      let deleted = 0;
+      for (const e of near) {
+        if (e.type !== 'boss' && e.hp / e.maxHp < 0.34) {
+          deleted++;
+          burst(e.x, e.y, 18, '#38bdf8', 240, 3, 0.5);
+          damageEnemy(e, e.hp + 1, true, P.x, P.y);
+        } else {
+          e.armor = 0;                        // dereferenced, and it stays gone
+          damageEnemy(e, 14 + P.dmg * 1.4, false, P.x, P.y);
+          floatText(e.x, e.y - e.r - 8, 'NULL', '#38bdf8', 12);
+        }
+      }
+      if (deleted) floatText(P.x, P.y - 50, 'DELETED ×' + deleted, '#38bdf8', 16);
+      P.iframe = Math.max(P.iframe, 0.45);
+      Audio_.tone(880, 0.24, 'sine', 0.09, 200);
+    } },
+
+  { id: 'packet', n: 'PACKET LOSS', col: '#fbbf24',
+    d: 'Drops every hostile round in flight, and bills the loss back to whoever is standing closest to where it died.',
+    f: () => {
+      if (!ebullets.length) return malMiss('NO TRAFFIC');
+      let dropped = 0;
+      for (const b of ebullets) {
+        const near = nearestEnemy(b.x, b.y, 900);
+        burst(b.x, b.y, 3, '#fbbf24', 140, 2.2, 0.22);
+        if (near) damageEnemy(near, 6 + P.dmg * 0.8, false, b.x, b.y, { silent: true });
+        dropped++;
+      }
+      ebullets.length = 0;
+      floatText(P.x, P.y - 50, 'DROPPED ×' + dropped, '#fbbf24', 16);
+      P.iframe = Math.max(P.iframe, 0.4);
+      shake(0.25); Audio_.noise(0.3, 0.18, 4200, 600, 3);
+    } },
+
+  { id: 'deadlock', n: 'DEADLOCK', col: '#c084fc',
+    d: 'Halts every other thread in the room. Enemies and their rounds freeze solid in a wide radius; yours keep running.',
+    f: () => {
+      const R = 460;
+      ringFx(P.x, P.y, 14, R, '#c084fc', 0.7, 5);
+      for (const e of enemies) {
+        if (e.dead || len(e.x - P.x, e.y - P.y) > R) continue;
+        e.slow = 0.97; e.slowT = 1.6;      // 3% speed reads as stopped
+        e.vx *= 0.05; e.vy *= 0.05;
+        spawnPart(e.x, e.y, 0, 0, 5, '#c084fc', 0.5, 0.94);
+      }
+      for (const b of ebullets) {
+        if (len(b.x - P.x, b.y - P.y) > R) continue;
+        if (b.frozen === undefined) { b.svx = b.vx; b.svy = b.vy; }
+        b.frozen = 1.6; b.vx = 0; b.vy = 0;
+      }
+      P.iframe = Math.max(P.iframe, 0.5);
+      shake(0.3); Audio_.tone(120, 0.4, 'sine', 0.1, 60);
+    } }
+];
+
+// a payload with nothing to act on still costs the charge — say why
+function malMiss(why) {
+  floatText(P.x, P.y - 42, why, '#94a3b8', 12);
+  Audio_.tone(150, 0.12, 'square', 0.06, 90);
+}
+
+function malTrail(x1, y1, x2, y2, col) {
+  const n = Math.max(4, Math.round(len(x2 - x1, y2 - y1) / 18));
+  for (let k = 0; k <= n; k++) {
+    const u = k / n;
+    spawnPart(lerp(x1, x2, u), lerp(y1, y2, u), rnd(60, -60), rnd(60, -60),
+              rnd(5, 2.5), col, rnd(0.5, 0.25), 0.92);
+  }
 }
 
 /* ------------------------------ planetarium -------------------------------
@@ -1916,9 +2268,9 @@ const Save = {
   top: [],                // best runs, for the menu leaderboard
 
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
-                  time: 0, muted: false, autofire: false,
+                  time: 0, muted: false, vol: 1, autofire: false,
                   planetarium: false, skipStreak: 0, clears: 0, altPath: false,
-                  charIdx: 0,
+                  charIdx: 0, otherKills: 0, malware: false,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -1946,10 +2298,13 @@ const Save = {
       ? (b.bestSector || a.bestSector) : (a.bestSector || b.bestSector);
     out.name = b.name || a.name || '';
     out.muted = b.muted !== undefined ? b.muted : a.muted;
+    out.vol = b.vol !== undefined ? b.vol : (a.vol !== undefined ? a.vol : 1);
     out.autofire = b.autofire !== undefined ? b.autofire : a.autofire;
     // an unlock is permanent: if either store has it, it stays earned
     out.planetarium = !!(a.planetarium || b.planetarium);
     out.altPath = !!(a.altPath || b.altPath);
+    out.malware = !!(a.malware || b.malware);
+    out.otherKills = Math.max(a.otherKills || 0, b.otherKills || 0);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
@@ -1979,7 +2334,9 @@ const Save = {
     Save.profile = Save.readLocal();
     Save.reconcileClears();
     Save.writeLocal();
-    Audio_.muted = !!Save.profile.muted;
+    // older saves only knew mute; treat that as a volume of zero
+    Audio_.setVol(Save.profile.vol !== undefined ? Save.profile.vol
+                                                 : (Save.profile.muted ? 0 : 1));
     autoFire = !!Save.profile.autofire;
     applyChar(Save.profile.charIdx || 0);
     Save.connect();
@@ -2055,6 +2412,7 @@ const Save = {
 
   savePrefs() {
     Save.profile.muted = Audio_.muted;
+    Save.profile.vol = Audio_.vol;
     Save.profile.autofire = autoFire;
     Save.writeLocal();
     Save.flush();
@@ -2185,7 +2543,7 @@ function resetGame() {
   hazards = []; mortars = []; sentries = []; beams = [];
   portals = []; cages = []; replay = []; finaleBeams = [];
   arenaReset(true); lastBossDeath = null;
-  libraryPortal = null; libraryBook = null;
+  libraryPortal = null; libraryBook = null; malwareOffer = null;
   diaryBeams = []; diaryMirrors = [];
   awaitingPortal = false; normalIdx = 0; altIdx = -1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
@@ -2198,7 +2556,7 @@ function resetGame() {
   hitStop = 0; drawFlashT = 0; bannerT = 0;
   Audio_.intensity = 0;
 }
-function gameOver() {
+function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
   state = 'dead';
   const build = Object.keys(P.up).map(id => {
@@ -2210,18 +2568,15 @@ function gameOver() {
                 isRecord: score > Save.profile.best };
   Save.recordRun(Object.assign({ build }, lastStats));
   Board.submit(lastStats);
+  if (quiet) return;                     // quitting records, but does not detonate
   explode(P.x, P.y, 180, 0, COL.player);
   burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
   shake(1); Audio_.over();
 }
 
 function handleKey(k) {
-  if (k === 'm') {
-    Audio_.muted = !Audio_.muted;
-    if (Audio_.ready) Audio_.master.gain.value = Audio_.muted ? 0 : 0.9;
-    Save.savePrefs();
-    return;
-  }
+  // volume lives on the slider now, so M is free for the way out
+  if (k === 'm' && (state === 'pause' || state === 'dead')) { quitToMenu(); return; }
   if (state === 'menu') {
     if (k === 'c') {
       applyChar((selectedChar + 1) % CHARS.length);
@@ -2265,6 +2620,58 @@ function handleKey(k) {
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
 function inRect(mx, my, r) { return mx > r.x && mx < r.x + r.w && my > r.y && my < r.y + r.h; }
+
+/* ------------------------------ volume slider -----------------------------
+   Replaces the old mute toggle. The rect is published by whichever overlay
+   drew it this frame, so the hit test never has to duplicate the layout. */
+let volRect = null, volDrag = false;
+
+function drawVolSlider(cx, cy, w) {
+  const h = 5, x = cx - w / 2;
+  volRect = { x, y: cy - 13, w, h: 26 };          // generous grab area
+  const v = Audio_.vol;
+  const hot = volDrag || inRect(mouse.x, mouse.y, volRect);
+  const col = Audio_.muted ? '#475569' : (hot ? COL.player : '#64748b');
+
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText(Audio_.muted ? 'MUTED' : 'VOLUME', x - 14, cy + 3);
+
+  ctx.fillStyle = 'rgba(148,163,184,0.18)';
+  roundRect(x, cy - h / 2, w, h, h / 2); ctx.fill();
+  if (v > 0) {
+    ctx.fillStyle = col;
+    roundRect(x, cy - h / 2, Math.max(h, w * v), h, h / 2); ctx.fill();
+  }
+  const kx = x + w * v;
+  if (hot) drawGlow(kx, cy, 16, col, 0.4);
+  ctx.fillStyle = hot ? '#f8fafc' : '#cbd5e1';
+  ctx.beginPath(); ctx.arc(kx, cy, hot ? 7 : 6, 0, TAU); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(kx, cy, hot ? 7 : 6, 0, TAU); ctx.stroke();
+
+  ctx.textAlign = 'left';
+  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText(Math.round(v * 100) + '%', x + w + 14, cy + 3);
+  ctx.restore();
+}
+
+function volFromMouse() {
+  if (!volRect) return;
+  Audio_.setVol((mouse.x - volRect.x) / volRect.w);
+}
+
+/* Leaving mid-run is deliberate, so the run still counts — abandoning a good
+   score by accident is exactly the failure the freeze bug already caused. */
+function quitToMenu() {
+  if (state !== 'dead' && wave > 0 && score > 0) gameOver(true);
+  state = 'menu';
+  uiArm = 0.4;
+  Audio_.select();
+}
 
 function handleClick() {
   if (state === 'name') { if (isTouch) promptName(); return; }
@@ -2458,7 +2865,15 @@ function updatePlayer(dt) {
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
   const wantDash = (keys[' '] || keys['shift']) && !P.rooted;
-  if (wantDash && P.dashCh > 0 && P.dashT <= 0) {
+
+  /* Malware overwrites the dash: same charge economy, entirely different verb.
+     It never falls through to the blink or to the dash-triggered upgrades. */
+  if (P.malware && wantDash && P.dashCh > 0 && P.dashT <= 0) {
+    keys[' '] = false; keys['shift'] = false;
+    P.dashCh--;
+    burst(P.x, P.y, 16, P.malware.col, 240, 3, 0.4);
+    P.malware.f();
+  } else if (wantDash && P.dashCh > 0 && P.dashT <= 0) {
     keys[' '] = false; keys['shift'] = false;
     P.dashCh--;
     P.dashT = 0.17; P.iframe = Math.max(P.iframe, 0.28);
@@ -2519,16 +2934,20 @@ function updatePlayer(dt) {
   // shooting
   P.fireT -= dt;
   const rateMul = 1 + (P.bloodlust ? 0.07 * P.bloodlust * P.blStacks : 0);
-  if (P.laserT > 0) P.laserT -= dt;
+  // the diary replaces the weapon outright — drop any beam still standing
+  if (P.diaryT > 0 && P.laserT > 0) { P.laserT = 0; P.laserSegs.length = 0; P.laserEnv = 0; }
 
   if (P.weapon === 'laser' && P.diaryT <= 0) {
-    // hold to charge; it lets go the instant it fills, so at 250% rate
-    // (charge time at its floor) this reads as continuous fire
-    if (firing) {
-      P.charge += dt * rateMul / chargeTime();
-      if (P.charge >= 1) { P.charge = 0; fireLance(); }
-    } else {
-      P.charge = Math.max(0, P.charge - dt * 1.6);   // bleeds off if released
+    updateLance(dt);
+    // The beam has to go out before the next charge starts, so fire rate buys
+    // uptime: at the 250% floor the gap is short enough to read as autofire.
+    if (P.laserT <= 0) {
+      if (firing) {
+        P.charge += dt * rateMul / chargeTime();
+        if (P.charge >= 1) { P.charge = 0; fireLance(); }
+      } else {
+        P.charge = Math.max(0, P.charge - dt * 1.6);   // bleeds off if released
+      }
     }
   } else if (firing && P.fireT <= 0 && P.diaryT <= 0) {
     P.fireT = 1 / (P.fireRate * rateMul);
@@ -2760,6 +3179,16 @@ function updateEnemies(dt) {
     const e = enemies[i];
     if (e.dead) { cull.push(i); continue; }
     e.t += dt;
+    // a shadow boss is on loan: five seconds, then it is pulled back under
+    if (e.shadow > 0) {
+      e.shadow -= dt;
+      if (e.shadow <= 0) {
+        e.dead = true;
+        ringFx(e.x, e.y, e.r * 1.4, 8, VIRUS_COL, 0.5, 3);
+        burst(e.x, e.y, 22, VIRUS_COL, 200, 3, 0.5);
+        cull.push(i); continue;
+      }
+    }
     e.flash = Math.max(0, e.flash - dt * 7);
     e.hitCd = Math.max(0, e.hitCd - dt);
     if (e.ramCd > 0) e.ramCd -= dt;
@@ -2778,6 +3207,29 @@ function updateEnemies(dt) {
       }
       if (e.psnT <= 0) e.psn = 0;
     }
+
+    /* MEMORY LEAK: a share of maximum health per second, and it propagates on
+       contact — a packed crowd infects itself faster than you ever could. */
+    if (e.leakT > 0) {
+      e.leakT -= dt;
+      damageEnemy(e, e.maxHp * e.leak * dt, false, e.x, e.y,
+                  { silent: true, noChain: true, noStatus: true });
+      if (e.dead) { cull.push(i); continue; }
+      if (Math.random() < 0.4)
+        spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(30, -30), -34,
+                  2.6, '#a3e635', 0.5, 0.95);
+      if (Math.random() < 0.25) {
+        for (const o of enemies) {
+          if (o.dead || o === e || o.leakT > 0) continue;
+          if (len(o.x - e.x, o.y - e.y) > e.r + o.r + 14) continue;
+          o.leak = e.leak; o.leakT = Math.max(o.leakT || 0, e.leakT * 0.8);
+          floatText(o.x, o.y - o.r - 8, 'LEAKING', '#a3e635', 10);
+          break;
+        }
+      }
+      if (e.leakT <= 0) e.leak = 0;
+    }
+
     const sp = e.spd * (1 - e.slow);
     const dx = P.x - e.x, dy = P.y - e.y;
     const d = len(dx, dy) || 1;
@@ -3524,6 +3976,72 @@ function startFinale(e) {
   ringFx(e.x, e.y, e.r, 620, '#5eead4', 1.2, 8);
 }
 
+/* ---------------------------- the corrupted OTHER --------------------------
+   Instead of taking the mirrors, something takes it. Full heal, armour that
+   caps every single hit, and the rage sequence run at speed — plus shadows of
+   every boss you have ever fought, surfacing for five seconds at a time.
+--------------------------------------------------------------------------- */
+const VIRUS_COL = '#ef4444';
+const SHADOW_LIFE = 5;
+
+function startVirus(e) {
+  e.virus = true;
+  e.finale = false;
+  e.floor = undefined;
+  e.hp = e.maxHp;                       // knitted back together by something else
+  e.col = VIRUS_COL;
+  e.dmgCap = 26 + wave * 0.9;           // boss armour: no single hit exceeds this
+  e.awakened = true; e.lockPhase = 2;
+  e.legs = 1; e.rage = -1; e.atkT = 1.1; e.invuln = 1;
+  e.shadowT = 2.2;
+  e.virusT = 0;
+  arenaShrinkTo(e.x, e.y, 1320, 980);
+  banner('SOMETHING ELSE GETS IN', VIRUS_COL, 3.6);
+  drawFlashT = 0.34; shake(1.4);
+  Audio_.boss(); Audio_.noise(0.7, 0.4, 2200, 200, 4);
+  ringFx(e.x, e.y, e.r, 700, VIRUS_COL, 1.3, 9);
+  burst(e.x, e.y, 90, VIRUS_COL, 420, 4.6, 1.2);
+}
+
+function spawnShadowBoss(e) {
+  const keys = Object.keys(BOSSES).filter(k => k !== 'theother');
+  const key = pick(keys);
+  const a = rnd(TAU), R = rnd(430, 260);
+  const s = spawnEnemy('boss',
+    clamp(e.x + Math.cos(a) * R, arena.x0 + 90, arena.x1 - 90),
+    clamp(e.y + Math.sin(a) * R, arena.y0 + 90, arena.y1 - 90), { boss: key });
+  if (!s) return;
+  s.shadow = SHADOW_LIFE;
+  s.col = VIRUS_COL;
+  s.xp = 0; s.score = 0;                // they expire; they are not a payday
+  s.hp = s.maxHp = Math.max(60, s.maxHp * 0.18);
+  s.r *= 0.72;
+  ringFx(s.x, s.y, 8, s.r * 4, VIRUS_COL, 0.6, 4);
+  Audio_.tone(140, 0.3, 'sawtooth', 0.09, 60);
+}
+
+function bossOtherVirus(e, dt) {
+  e.virusT = (e.virusT || 0) + dt;
+  e.col = VIRUS_COL;
+
+  // shadows keep surfacing for as long as it stands
+  e.shadowT -= dt;
+  if (e.shadowT <= 0) {
+    e.shadowT = rnd(3.4, 2.0);
+    const live = enemies.filter(z => !z.dead && z.shadow > 0).length;
+    if (live < 4) spawnShadowBoss(e);
+  }
+
+  if (Math.random() < 0.5) {
+    const a = rnd(TAU);
+    spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+      Math.cos(a) * 150, Math.sin(a) * 150, rnd(5, 2), VIRUS_COL, rnd(0.5, 0.25), 0.93);
+  }
+
+  // the rage sequence, run fast — same shape, no time to breathe
+  bossOtherRage(e, dt * 1.85);
+}
+
 function bossOtherFinale(e, dt) {
   e.invuln = 1;                                  // nothing you do lands now
   e.vuln = 1;
@@ -3582,8 +4100,14 @@ function bossOtherFinale(e, dt) {
 }
 
 function bossOther(e, dt, ux, uy, d, ph) {
+  if (e.virus) return bossOtherVirus(e, dt);
   if (e.finale) return bossOtherFinale(e, dt);
-  if (e.hp <= 10) { startFinale(e); return; }
+  if (e.hp <= 10) {
+    // Something else gets to it first, more often the more times you have won.
+    const odds = 0.05 * (1 + (Save.profile.otherKills || 0));
+    if (Math.random() < odds) startVirus(e); else startFinale(e);
+    return;
+  }
 
   /* Phase 3: it stops imitating. It knits itself back to full, grows legs,
      and abandons the mirror act for a straight blind charge that only ends
@@ -4284,6 +4808,12 @@ function updateEBullets(dt) {
     if (i >= ebullets.length) { i = ebullets.length; continue; }
     const b = ebullets[i];
     if (!b) continue;
+    // DEADLOCK holds a bullet mid-air; it must not age out while suspended
+    if (b.frozen > 0) {
+      b.frozen -= dt;
+      if (b.frozen <= 0) { b.vx = b.svx; b.vy = b.svy; }
+      continue;
+    }
     b.life -= dt;
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0 || b.x < -20 || b.y < -20 || b.x > WORLD.w + 20 || b.y > WORLD.h + 20) {
@@ -4418,6 +4948,8 @@ function render() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = COL.bg;
   ctx.fillRect(0, 0, W, H);
+  // whichever overlay draws the slider re-publishes it; otherwise it is gone
+  if (!volDrag) volRect = null;
 
   if (state === 'menu' || state === 'name') {
     renderMenu();
@@ -4784,15 +5316,18 @@ function drawLibraryPointer() {
   const sx = L.x - cam.x + W / 2 + cam.sx;
   const sy = L.y - cam.y + H / 2 + cam.sy;
   const m = 54;
+  const mal = L.kind === 'malware';
+  const pcol = mal ? MAL_COL : '#fcd34d';
+  const label = mal ? 'MALWARE' : 'LIBRARY';
   const onScreenNow = sx > m && sx < W - m && sy > m && sy < H - m;
   const pulse = 0.62 + Math.sin(uiTime * 4.2) * 0.38;
   ctx.save();
   ctx.textAlign = 'center';
   if (onScreenNow) {
     ctx.globalAlpha = pulse * 0.9;
-    ctx.fillStyle = '#fcd34d';
+    ctx.fillStyle = pcol;
     ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillText('LIBRARY', sx, sy - L.r - 16);
+    ctx.fillText(label, sx, sy - L.r - 16);
   } else {
     const px = clamp(sx, m, W - m), py = clamp(sy, m, H - m);
     // a zero delta on one axis is correct here — the marker is pinned to that
@@ -4803,14 +5338,14 @@ function drawLibraryPointer() {
     ctx.globalAlpha = pulse;
     ctx.translate(px, py);
     ctx.rotate(a);
-    ctx.fillStyle = '#fcd34d';
+    ctx.fillStyle = pcol;
     ctx.beginPath();
     ctx.moveTo(16, 0); ctx.lineTo(-10, 9); ctx.lineTo(-5, 0); ctx.lineTo(-10, -9);
     ctx.closePath(); ctx.fill();
     ctx.rotate(-a);
     ctx.globalAlpha = pulse * 0.85;
     ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillText('LIBRARY', 0, 26);
+    ctx.fillText(label, 0, 26);
   }
   ctx.restore();
 }
@@ -4818,42 +5353,64 @@ function drawLibraryPointer() {
 function drawLibraryPortal() {
   const L = libraryPortal;
   if (!L) return;
-  const bk = BOOKS[L.boss];
+  const mal = L.kind === 'malware';
+  const pcol = mal ? MAL_COL : '#fcd34d';
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  drawGlow(L.x, L.y, L.r * 2.6, '#fcd34d', L.arm <= 0 ? 0.5 : 0.25);
+  drawGlow(L.x, L.y, L.r * 2.6, pcol, L.arm <= 0 ? 0.5 : 0.25);
   ctx.restore();
   ctx.save();
   ctx.globalAlpha = L.arm <= 0 ? 1 : 0.5;
-  // a doorway of stacked shelves, turning slowly
+  // a doorway of stacked frames, turning slowly — jagged when it is infected
   for (let k = 0; k < 3; k++) {
     const rr = L.r * (1 - k * 0.22);
-    ctx.strokeStyle = rgba('#fcd34d', 0.85 - k * 0.2);
+    ctx.strokeStyle = rgba(pcol, 0.85 - k * 0.2);
     ctx.lineWidth = 2.6 - k * 0.5;
-    poly(L.x, L.y, rr, 4, L.t * (k % 2 ? -0.6 : 0.8) + k * 0.4);
+    poly(L.x, L.y, rr, mal ? 3 + k : 4, L.t * (k % 2 ? -0.6 : 0.8) * (mal ? 2.2 : 1) + k * 0.4);
     ctx.stroke();
   }
-  // an open book at the centre
-  ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2.4;
-  ctx.fillStyle = 'rgba(252,211,77,0.18)';
-  ctx.beginPath();
-  ctx.moveTo(L.x - 18, L.y + 10);
-  ctx.quadraticCurveTo(L.x, L.y + 2, L.x, L.y + 8);
-  ctx.quadraticCurveTo(L.x, L.y + 2, L.x + 18, L.y + 10);
-  ctx.lineTo(L.x + 18, L.y - 8);
-  ctx.quadraticCurveTo(L.x, L.y - 16, L.x, L.y - 10);
-  ctx.quadraticCurveTo(L.x, L.y - 16, L.x - 18, L.y - 8);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
+  if (mal) {
+    // a broken glyph where the book would be
+    ctx.strokeStyle = '#fecaca'; ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    for (let k = 0; k < 5; k++) {
+      const a = L.t * 1.4 + k * TAU / 5;
+      ctx.moveTo(L.x, L.y);
+      ctx.lineTo(L.x + Math.cos(a) * 17, L.y + Math.sin(a) * 17);
+    }
+    ctx.stroke();
+    if (Math.random() < 0.4)
+      spawnPart(L.x + rnd(L.r, -L.r), L.y + rnd(L.r, -L.r), rnd(90, -90), rnd(90, -90),
+                rnd(4, 2), MAL_COL, rnd(0.4, 0.2), 0.92);
+  } else {
+    // an open book at the centre
+    ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2.4;
+    ctx.fillStyle = 'rgba(252,211,77,0.18)';
+    ctx.beginPath();
+    ctx.moveTo(L.x - 18, L.y + 10);
+    ctx.quadraticCurveTo(L.x, L.y + 2, L.x, L.y + 8);
+    ctx.quadraticCurveTo(L.x, L.y + 2, L.x + 18, L.y + 10);
+    ctx.lineTo(L.x + 18, L.y - 8);
+    ctx.quadraticCurveTo(L.x, L.y - 16, L.x, L.y - 10);
+    ctx.quadraticCurveTo(L.x, L.y - 16, L.x - 18, L.y - 8);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
   ctx.restore();
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#a16207';
-  ctx.fillText('LIBRARY', L.x, L.y - L.r - 30);
+  ctx.fillStyle = mal ? '#7f1d1d' : '#a16207';
+  ctx.fillText(mal ? 'MALWARE' : 'LIBRARY', L.x, L.y - L.r - 30);
   ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = bk ? bk.col : '#fcd34d';
-  ctx.fillText(bk ? bk.n : 'A BOOK', L.x, L.y - L.r - 14);
+  if (mal) {
+    ctx.fillStyle = L.mal ? L.mal.col : MAL_COL;
+    ctx.fillText(L.mal ? L.mal.n : 'A PAYLOAD', L.x, L.y - L.r - 14);
+  } else {
+    const bk = BOOKS[L.boss];
+    ctx.fillStyle = bk ? bk.col : '#fcd34d';
+    ctx.fillText(bk ? bk.n : 'A BOOK', L.x, L.y - L.r - 14);
+  }
   ctx.restore();
 }
 
@@ -5048,7 +5605,27 @@ function drawEnemies() {
     ctx.globalCompositeOperation = 'lighter';
     drawGlow(e.x, e.y, e.r * (e.type === 'boss' ? 3.4 : 2.3), e.col, (0.34 + e.flash * 0.3) * ea);
     if (e.elite) drawGlow(e.x, e.y, e.r * 3, COL.elite, 0.22 * ea);
+    if (e.virus) drawGlow(e.x, e.y, e.r * 5.2, VIRUS_COL, 0.3 + Math.sin(uiTime * 9) * 0.12);
+    if (e.shadow > 0) drawGlow(e.x, e.y, e.r * 3.6, VIRUS_COL, 0.24);
     ctx.globalCompositeOperation = 'source-over';
+
+    // a shadow is a silhouette on loan — draw it as an outline and skip the body
+    if (e.shadow > 0) {
+      const fade = clamp(e.shadow / 0.6, 0, 1) * clamp((SHADOW_LIFE - e.shadow) / 0.35, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = 0.55 * fade;
+      ctx.strokeStyle = VIRUS_COL; ctx.lineWidth = 3;
+      ctx.setLineDash([7, 5]); ctx.lineDashOffset = -uiTime * 26;
+      poly(e.x, e.y, e.r, e.sides || 6, e.ang || 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.14 * fade;
+      ctx.fillStyle = VIRUS_COL;
+      poly(e.x, e.y, e.r * 0.82, e.sides || 6, -(e.ang || 0));
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
 
     ctx.save();
     ctx.globalAlpha = ea;
@@ -5295,27 +5872,58 @@ function drawLance() {
     ctx.restore();
   }
   if (P.laserT <= 0 || !P.laserSegs.length) return;
-  const t = clamp(P.laserT / 0.15, 0, 1);
-  const w = (P.laserHeavy ? 34 : 19) * (0.45 + t * 0.55);
+  // width tracks the hitbox envelope exactly, so what you see is what damages
+  const env = P.laserEnv;
+  const w = (P.laserHeavy ? 34 : 19) * (P.br / 4.2) * env;
+  const a = 0.35 + 0.65 * env;
   const col = P.laserHeavy ? COL.crit : COL.player;
+
+  // GEMINI's twin holds the same beam, in its own colour
+  if (P.twinSegs.length) {
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const s of P.twinSegs) {
+      ctx.globalAlpha = 0.18 * a;
+      ctx.strokeStyle = '#c4b5fd'; ctx.lineWidth = w * 2.0;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.globalAlpha = 0.55 * a;
+      ctx.lineWidth = w * 0.92;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.globalAlpha = a * 0.9;
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, w * 0.26);
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    }
+    const tl = P.twinSegs[P.twinSegs.length - 1];
+    drawGlow(tl.x2, tl.y2, w * 1.4, '#c4b5fd', 0.6 * a);
+    drawGlow(P.twinSegs[0].x1, P.twinSegs[0].y1, w * 1.1, '#c4b5fd', 0.55 * a);
+    ctx.restore();
+  }
+
   ctx.save();
   ctx.lineCap = 'round';
   for (const s of P.laserSegs) {
-    ctx.globalAlpha = 0.2 * t;
+    ctx.globalAlpha = 0.2 * a;
     ctx.strokeStyle = col; ctx.lineWidth = w * 2.1;
     ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
   }
   for (const s of P.laserSegs) {
-    ctx.globalAlpha = 0.62 * t;
+    ctx.globalAlpha = 0.62 * a;
     ctx.strokeStyle = col; ctx.lineWidth = w;
     ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
-    ctx.globalAlpha = t;
+    ctx.globalAlpha = a;
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, w * 0.3);
     ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
   }
+  for (const s of P.laserSegs) {
+    if (!s.cut) continue;                  // a redactor ate the rest of this lane
+    drawGlow(s.x2, s.y2, w * 1.8, '#f87171', 0.75 * a);
+    if (Math.random() < 0.5)
+      spawnPart(s.x2 + rnd(7, -7), s.y2 + rnd(7, -7), rnd(50, -50), rnd(50, -50),
+                rnd(3.2, 1.4), '#f87171', rnd(0.4, 0.2), 0.9);
+  }
   const last = P.laserSegs[P.laserSegs.length - 1];
-  drawGlow(last.x2, last.y2, w * 1.5, col, 0.7 * t);
-  drawGlow(P.laserSegs[0].x1, P.laserSegs[0].y1, w * 1.2, col, 0.6 * t);
+  drawGlow(last.x2, last.y2, w * 1.5, col, 0.7 * a);
+  drawGlow(P.laserSegs[0].x1, P.laserSegs[0].y1, w * 1.2, col, 0.6 * a);
   ctx.restore();
 }
 
@@ -5411,11 +6019,9 @@ function drawPlayer() {
     ctx.save();
     ctx.globalAlpha = 0.72;
     ctx.translate(t.x, t.y); ctx.rotate(P.twinAng);
-    ctx.strokeStyle = '#c4b5fd'; ctx.fillStyle = 'rgba(196,181,253,0.18)';
     ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.moveTo(16, 0); ctx.lineTo(-9, 10); ctx.lineTo(-5, 0); ctx.lineTo(-9, -10);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // it is your double, so it wears whichever hull you are flying
+    drawShipHull('#c4b5fd', 'rgba(196,181,253,0.18)');
     ctx.restore();
   }
 
@@ -5689,6 +6295,17 @@ function drawHUD() {
     }
   }
 
+  /* --- installed malware: it owns the dash, so it says so where dash lives --- */
+  if (P.malware) {
+    const my = yb + (P.book ? 66 : 40);
+    ctx.textAlign = 'left';
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = P.malware.col;
+    ctx.globalAlpha = 0.55 + Math.sin(uiTime * 2.4) * 0.2;
+    ctx.fillText('[SPACE] ' + P.malware.n, pad, my);
+    ctx.globalAlpha = 1;
+  }
+
   /* --- score / wave --- */
   ctx.textAlign = 'right';
   ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
@@ -5709,20 +6326,23 @@ function drawHUD() {
   ctx.fillText('◈ ' + credits, W - pad, pad + 92);
 
   /* --- boss bar --- */
-  const boss = enemies.find(e => e.type === 'boss' && !e.dead);
+  // a shadow is on loan and must never take the real boss's bar
+  const boss = enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow);
   if (boss) {
     const w2 = Math.min(560, W * 0.62), x2 = (W - w2) / 2, y2 = 22;
     ctx.textAlign = 'center';
     const bd = BOSSES[boss.boss] || BOSSES.warden;
+    const bcol = boss.virus ? VIRUS_COL : bd.col;
+    const bname = boss.virus ? '!! ' + bd.name + ' — CORRUPTED !!' : bd.name;
     ctx.fillStyle = 'rgba(8,12,20,0.75)';
     roundRect(x2, y2, w2, 14, 7); ctx.fill();
-    ctx.fillStyle = bd.col;
+    ctx.fillStyle = bcol;
     roundRect(x2 + 2, y2 + 2, Math.max(0, (w2 - 4) * clamp(boss.hp / boss.maxHp, 0, 1)), 10, 5); ctx.fill();
-    ctx.strokeStyle = rgba(bd.col, 0.5); ctx.lineWidth = 1;
+    ctx.strokeStyle = rgba(bcol, 0.5); ctx.lineWidth = 1;
     roundRect(x2, y2, w2, 14, 7); ctx.stroke();
     ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = bd.col;
-    ctx.fillText(bd.name + (boss.invuln
+    ctx.fillStyle = bcol;
+    ctx.fillText(bname + (boss.invuln
       ? (boss.finale ? '   — OVERLOAD'
          : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : ''),
       W / 2, y2 + 28);
@@ -6042,13 +6662,25 @@ function drawPause() {
   ctx.textAlign = 'center';
   ctx.font = '800 44px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('PAUSED', W / 2, H / 2 - 24);
+  ctx.fillText('PAUSED', W / 2, H / 2 - 56);
   ctx.font = '500 13px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('P or ESC to resume  ·  M to mute  ·  T toggles autofire', W / 2, H / 2 + 14);
+  ctx.fillText('P or ESC to resume   ·   T toggles autofire', W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
+  ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
-    W / 2, H / 2 + 40);
+    W / 2, H / 2 + 4);
+
+  drawVolSlider(W / 2, H / 2 + 44, 200);
+
+  const pulse = 0.6 + Math.sin(uiTime * 3) * 0.4;
+  ctx.textAlign = 'center';
+  ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = rgba('#f87171', pulse);
+  ctx.fillText('M   —   MAIN MENU', W / 2, H / 2 + 92);
+  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText('this run is saved to your record before you leave', W / 2, H / 2 + 110);
 }
 
 function drawDead() {
@@ -6212,15 +6844,18 @@ function renderMenu() {
 
   // leaderboard — the global board when it's reachable, your own runs otherwise
   const global = Board.top.length > 0;
-  const rows = (global ? Board.top : Save.top).slice(0, 5);
-  // show it whenever the last row genuinely clears the footer text, rather
-  // than guessing at a screen-height threshold
-  const lastRowY = cyp + 252 + 18 + (rows.length - 1) * 15;
-  if (rows.length && lastRowY < H - 112) {
-    const ly = cyp + 252;
+  const all = (global ? Board.top : Save.top).slice(0, 5);
+  /* Fit as many rows as clear the unlocks row, rather than dropping the whole
+     board the moment the fifth one would collide. */
+  const ly = cyp + 252;
+  const fits = Math.max(0, Math.min(all.length,
+                        Math.floor(((H - 112) - (ly + 18)) / 15) + 1));
+  const rows = all.slice(0, fits);
+  if (rows.length) {
     ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#334155';
-    ctx.fillText(global ? 'GLOBAL TOP 5' : 'YOUR BEST RUNS', cxp, ly);
+    ctx.fillText(global ? (rows.length < all.length ? 'GLOBAL TOP ' + rows.length : 'GLOBAL TOP 5')
+                        : 'YOUR BEST RUNS', cxp, ly);
     ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
     rows.forEach((r, i) => {
       const y = ly + 18 + i * 15;
@@ -6288,10 +6923,13 @@ function renderMenu() {
   const lines = isTouch
     ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & fire']
     : ['WASD move   ·   MOUSE aim   ·   HOLD to fire',
-       'SPACE dash (i-frames)   ·   T autofire   ·   P pause   ·   M mute'];
+       'SPACE dash (i-frames)   ·   T autofire   ·   P pause'];
   ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#334155';
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
+
+  // below every other footer line, so it competes with nothing
+  drawVolSlider(cxp, H - 28, 150);
 
   drawVignette();
 }
@@ -6303,7 +6941,86 @@ function libraryButtons() {
            leave: { x: W / 2 + 8,      y, w: bw, h: bh } };
 }
 
+function drawMalware() {
+  const m = malwareOffer;
+  if (!m) return;
+  ctx.fillStyle = 'rgba(10,2,3,0.94)';
+  ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  // scan lines and drifting hex, like something running where it shouldn't
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  ctx.strokeStyle = MAL_COL; ctx.lineWidth = 1;
+  for (let y = (uiTime * 40) % 6; y < H; y += 6) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  ctx.globalAlpha = 0.13;
+  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = MAL_COL;
+  for (let r = 0; r < 14; r++) {
+    const yy = ((r * 47 + uiTime * 26) % (H + 40)) - 20;
+    let s = '';
+    for (let c = 0; c < 46; c++) s += ((r * 7 + c * 13 + (r ^ c)) % 16).toString(16);
+    ctx.fillText(s, cx, yy);
+  }
+  ctx.restore();
+
+  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#7f1d1d';
+  ctx.fillText('M A L W A R E', cx, cy - 168);
+  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('OVERWRITES YOUR DASH', cx, cy - 148);
+
+  // the payload glyph
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(cx, cy - 74, 66, m.col, 0.5);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(cx, cy - 74);
+  ctx.strokeStyle = m.col; ctx.lineWidth = 2.6;
+  ctx.fillStyle = rgba(m.col, 0.14);
+  poly(0, 0, 32, 6, uiTime * 0.7); ctx.fill(); ctx.stroke();
+  ctx.lineWidth = 1.6;
+  poly(0, 0, 20, 3, -uiTime * 1.1); ctx.stroke();
+  ctx.restore();
+
+  ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = m.col;
+  ctx.fillText(m.n, cx, cy - 8);
+
+  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  wrapText(m.d, cx, cy + 26, Math.min(520, W - 70), 19);
+
+  if (P.malware) {
+    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#7f1d1d';
+    ctx.fillText('replaces ' + P.malware.n, cx, cy + 104);
+  }
+
+  const b = libraryButtons();
+  const drawBtn = (r, label, col, on) => {
+    ctx.save();
+    ctx.globalAlpha = on ? 1 : 0.72;
+    ctx.fillStyle = rgba(col, on ? 0.2 : 0.08);
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+    ctx.restore();
+  };
+  drawBtn(b.take, 'INSTALL   [E]', m.col, inRect(mouse.x, mouse.y, b.take));
+  drawBtn(b.leave, 'LEAVE IT   [Q]', '#64748b', inRect(mouse.x, mouse.y, b.leave));
+  ctx.textBaseline = 'alphabetic';
+}
+
 function drawLibrary() {
+  if (malwareOffer) return drawMalware();
   const bk = libraryBook;
   if (!bk) return;
   ctx.fillStyle = 'rgba(6,4,2,0.93)';
