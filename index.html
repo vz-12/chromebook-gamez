@@ -279,6 +279,7 @@ addEventListener('keydown', e => {
   if (state === 'name') { nameKey(e); return; }
   const k = e.key.toLowerCase();
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if (k === 'tab' && state === 'codex') e.preventDefault();   // don't move focus
   if (keys[k]) return;
   keys[k] = true;
   Audio_.init(); Audio_.resume();
@@ -307,6 +308,11 @@ addEventListener('mouseup', () => {
   if (volDrag) { volDrag = false; Save.savePrefs(); }
 });
 cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => {
+  if (state !== 'codex') return;
+  e.preventDefault();
+  codexScroll = clamp(codexScroll + Math.sign(e.deltaY) * 56, 0, codexMaxScroll());
+}, { passive: false });
 
 /* ----- touch: dual virtual sticks ----- */
 const touchUI = { active: false, move: null, aim: null };
@@ -455,8 +461,9 @@ function newPlayer() {
     book: null, bookCharge: 0,
     // malware overwrites the dash entirely, and acts on the room rather than you
     malware: null,
+    chip: false,                 // THE RECORD CHIP: curated offers, flat rarity
     plateT: 0, plateAng: 0, burrowT: 0, stopT: 0, twinT: 0,
-    diaryT: 0, diaryAng: 0, diaryTick: 0,
+    diaryT: 0, diaryAng: 0, diaryTick: 0, annotT: 0,
     level: 1, xp: 0, xpNext: 8, kills: 0, up: {}
   };
 }
@@ -576,20 +583,20 @@ const UPGRADES = [
 const RAR_W = { common: 100, rare: 58, epic: 30, legend: 13 };
 
 function offerUpgrades() {
-  const avail = UPGRADES.filter(u => (P.up[u.id] || 0) < u.max);
   const out = [];
-  const pool = avail.slice();
-  for (let k = 0; k < 3 && pool.length; k++) {
-    let total = 0;
-    for (const u of pool) total += RAR_W[u.rar];
-    let r = Math.random() * total, chosen = pool[0];
-    for (const u of pool) { r -= RAR_W[u.rar]; if (r <= 0) { chosen = u; break; } }
+  const { pool, flat } = offerPool();
+  // THE ANNOTATED CODEX: his notes are in it now, so you see one more option
+  const n = Save.profile.keeperDone ? 4 : 3;
+  for (let k = 0; k < n && pool.length; k++) {
+    const chosen = pickFromPool(pool, flat);
     out.push(chosen);
+    Codex.seeUpgrade(chosen.id);         // being offered it counts as meeting it
     pool.splice(pool.indexOf(chosen), 1);
   }
   return out;
 }
 function applyUpgrade(u) {
+  Codex.seeUpgrade(u.id);
   P.up[u.id] = (P.up[u.id] || 0) + 1;
   u.f(P);
   Audio_.levelup();
@@ -624,6 +631,42 @@ const ETYPE = {
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
+/* ---------------------------------- codex ---------------------------------
+   Names and plain descriptions of what a thing actually does, for the log.
+   Every entry stays hidden until you have met it at least once.
+--------------------------------------------------------------------------- */
+const CODEX_E = {
+  grunt:    { n: 'SHARD',       d: 'Runs straight at you and does nothing else. At base damage it dies to a single shot — everything in the roster is priced against this one.' },
+  brute:    { n: 'HULK',        d: 'Armoured. It subtracts a flat amount from every hit it takes, so a fast trickle of small shots barely marks it. Bring damage, not rate.' },
+  spitter:  { n: 'SPITTER',     d: 'Holds its distance and coughs out volleys. It will not close, so it happily plinks at you from outside your comfortable range.' },
+  dasher:   { n: 'LANCER',      d: 'Winds up in place, then lunges the whole distance at once. The wind-up is the tell, and it commits — step aside and it goes past.' },
+  splitter: { n: 'SPLITTER',    d: 'Dying is a phase change: it breaks into smaller pieces that keep coming. Killing it in a crowd makes the crowd worse.' },
+  turret:   { n: 'EMPLACEMENT', d: 'Barely moves. It exists to make one part of the room expensive to stand in, and it is patient about it.' },
+  bomber:   { n: 'BOMBER',      d: 'Sprints at you and detonates when it dies — including when you kill it. Shoot it early or shoot it from somewhere else.' },
+  swarmer:  { n: 'MITE',        d: 'Tiny, extremely fast, and never alone. Individually trivial; the problem is always the count.' },
+  sentinel: { n: 'SENTINEL',    d: 'Carries a shield across its face that stops shots and beams outright. It turns slowly on purpose — get around the side and it has nothing.' },
+  phaser:   { n: 'PHASER',      d: 'Rooted in place and only half here. It blinks out of tangibility on its own rhythm; damage spent while it is faint is wasted.' },
+  healer:   { n: 'MENDER',      d: 'Ignores you and repairs everything else. Any fight that feels like it is not ending has one of these at the back of it.' },
+  artillery:{ n: 'ARTILLERY',   d: 'Lobs shells onto wherever you are standing, marked before they land. It punishes holding still, never dodging.' },
+  wraith:   { n: 'WRAITH',      d: 'Walks through terrain and through anything else in the way. Cover is not cover against it.' },
+  egg:      { n: 'CLUTCH',      d: 'Does not move, does not attack, and is not the threat. What it becomes is the threat.' },
+  revenant: { n: 'REVENANT',    d: 'Refuses the first death and stands back up as its own ghost — faster, weaker, and only once. The second kill is permanent.' },
+  redactor: { n: 'REDACTOR',    d: 'Projects a cone that erases whatever enters it — bullets and beams alike, before they ever reach the far side. The cone blinks off on a cycle; that gap is the whole answer.' },
+  mimic:    { n: 'MIMIC',       d: 'Copies you. It fires your gun back at you with your own upgrades attached, and the better your build gets the worse this becomes.' },
+  prism:    { n: 'PRISM',       d: 'Wears a plate that does not absorb your fire but returns it. Shooting the front is worse than not shooting at all.' }
+};
+
+const CODEX_B = {
+  warden:     { d: 'The first thing that was built to stop you rather than to inconvenience you. Straightforward, and much harder than what came before it.' },
+  forgeheart: { d: 'Turns four armour plates around itself, sealing every approach but the gaps between them. The gaps rotate.' },
+  broodmother:{ d: 'Submerges where nothing can reach her and lays while she is under. Everything you do to the floor she is beneath is wasted.' },
+  archivist:  { d: 'Fights out of a ledger of everything you have already killed, and calls it back in against you.' },
+  nullcore:   { d: 'Redraws the room. Its bands sweep the arena on a schedule and it does not care where you were standing when they started.' },
+  curator:    { d: 'A native of THE FRACTURE. It arranges the encounter rather than fighting it, and treats you as the exhibit.' },
+  theother:   { d: 'Mirrors you through the centre of the room, then stops pretending: it heals to full, grows legs, and charges blind until it hits a wall. Reduce it far enough and it takes the mirrors — unless something else gets to it first.' },
+  keeper:     { d: 'He was in every library, behind the desk, saying very little. He wanted the finished record and he was patient about getting it. Given it, he reads: he writes your own upgrades onto himself, calls out anything you ever logged, and works through the ledger one section at a time.' }
+};
+
 /* HP scaling. Because the floor is now a one-shot grunt, the ramp is properly
    exponential rather than near-linear — early waves are a warm-up, and later
    sectors still bite once damage upgrades start compounding. Bosses ride a
@@ -643,7 +686,12 @@ const BOSSES = {
   nullcore:    { name: 'NULL',         col: '#f0abfc', r: 74, sides: 12, hpMul: 1.75, spd: 50, ai: bossNull },
   // --- THE FRACTURE ---
   curator:     { name: 'THE CURATOR',  col: '#e2e8f0', r: 58, sides: 5,  hpMul: 1.45, spd: 34, ai: bossCurator },
-  theother:    { name: 'THE OTHER',    col: '#5eead4', r: 38, sides: 3,  hpMul: 1.25, spd: 210, ai: bossOther }
+  theother:    { name: 'THE OTHER',    col: '#5eead4', r: 38, sides: 3,  hpMul: 1.25, spd: 210, ai: bossOther },
+  // --- not in any stage rotation: handed the completed codex, in a library ---
+  // Tuned against a mid-run build for roughly a 45-second fight; his escort
+  // still soaks a share of incoming fire, so raw HP is only half the pacing.
+  keeper:      { name: 'THE BOOKKEEPER', col: '#fcd34d', r: 46, sides: 7, hpMul: 2.6, spd: 62,
+                 ai: bossKeeper, secret: true }
 };
 
 /* -------------------------------- stages ---------------------------------
@@ -710,6 +758,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   const t = ETYPE[type];
   const w = wave;
   const bKey = type === 'boss' ? (opts.boss || stage.boss) : null;
+  Codex.seeEnemy(bKey || type);          // met once is enough to log it
   const bd = bKey ? BOSSES[bKey] : null;
   const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w)) * curseHpMul;
   const canElite = type !== 'boss' && type !== 'egg';
@@ -813,6 +862,7 @@ function castLance(x, y, ang, range, bounces, out) {
 
 // Frontal defences still hold against a beam, same arcs as against bullets.
 function beamBlocked(e) {
+  if (annotated() && e.type !== 'boss') return null;   // the book reads past it
   const inc = Math.atan2(P.y - e.y, P.x - e.x);
   const off = a => Math.abs(((inc - a + Math.PI) % TAU + TAU) % TAU - Math.PI);
   if (e.type === 'sentinel' && off(e.ang) < 1.15) return 'shield';
@@ -829,6 +879,7 @@ function beamBlocked(e) {
    short steps rather than solved analytically — the cone is cheap to test and
    the beam is never longer than a screen. */
 function clipRedactors(segs) {
+  if (annotated()) return null;              // the cones are dark for now
   const rs = [];
   for (const e of enemies)
     if (!e.dead && e.type === 'redactor' && e.redacting) rs.push(e);
@@ -1015,7 +1066,17 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     }
     return;
   }
+  // Bulwark, when something has written it onto itself: one hit, wholly eaten
+  if (e.kShield > 0) {
+    e.kShield--;
+    burst(e.x, e.y, 10, '#fef3c7', 220, 2.8, 0.3);
+    ringFx(e.x, e.y, e.r, e.r * 2, '#fef3c7', 0.3, 3);
+    floatText(e.x, e.y - e.r - 10, 'BLOCKED', '#fef3c7', 13);
+    Audio_.tone(1100, 0.08, 'square', 0.06, 1500);
+    return;
+  }
   dmg *= (e.vuln || 1);        // stunned enemies take extra
+  if (annotated()) dmg *= 1.5; // you know exactly where to put it
   // boss armour: no single hit may exceed the cap, however it was delivered.
   // Applied after vuln so baiting the stun still pays, just not unboundedly.
   if (e.dmgCap !== undefined && dmg > e.dmgCap) {
@@ -1177,7 +1238,7 @@ function killEnemy(e, ang = 0) {
     }
   }
   // REVENANT: refuses the first death and stands back up as its own ghost
-  if (e.type === 'revenant' && e.gen < 1) {
+  if (e.type === 'revenant' && e.gen < 1 && !annotated()) {
     const g = spawnEnemy('revenant', e.x, e.y, { gen: 1, hs: 0.5, rs: 0.85, elite: false });
     g.phased = false;
     g.iframeT = 0.5;
@@ -1392,6 +1453,9 @@ function updateWaves(dt) {
       floatText(P.x, P.y - 52, '+½ LEVEL', '#e2e8f0', 16);
       Audio_.tone(660, 0.18, 'sine', 0.08, 990);
     }
+    // bank codex finds every wave — flush is a no-op unless something is new,
+    // so a tab closed mid-run loses at most the current wave's discoveries
+    Codex.flush();
     if (shopPending) { openReward(); return; }
     banner('WAVE CLEAR   +' + bonus + '   ◈' + cr + (halfLevel ? '   +½ LVL' : ''),
            halfLevel ? '#e2e8f0' : COL.hp);
@@ -1400,8 +1464,35 @@ function updateWaves(dt) {
 }
 
 function onBossDefeat(e) {
-  const bd = BOSSES[stage.boss];
+  const wasKeeper = !!(e && e.boss === 'keeper');
+  const bd = BOSSES[wasKeeper ? 'keeper' : stage.boss];
   const wasVirus = !!(e && e.virus);
+  Codex.flush();                         // a sector's worth of new entries
+
+  /* THE BOOKKEEPER is not a stage boss: he opens no shop and no gate, he just
+     gives the record back with his notes in it. */
+  if (wasKeeper) {
+    banner('HE GIVES IT BACK   ·   ANNOTATED', KEEPER_COL, 4.2);
+    drawFlashT = 0.3; shake(1.2);
+    Audio_.boss(); Audio_.levelup();
+    ringFx(e.x, e.y, e.r, 720, KEEPER_COL, 1.3, 9);
+    credits += Math.round(600 * P.credMul);
+    score += 25000;
+    // he hands the record back, and it is an item now — no library needed,
+    // since he is not a stage boss and never seeds one
+    P.book = BOOKS.keeper;
+    P.bookCharge = BOOKS.keeper.cost;        // charged, once
+    setTimeout(() => { if (state === 'play') banner('THE ANNOTATED CODEX', KEEPER_COL, 3.6); }, 2400);
+    if (!Save.profile.keeperDone) {
+      Save.profile.keeperDone = true;
+      Save.writeLocal(); Save.flush();
+      setTimeout(() => { if (state === 'play') banner('HIS MARGINALIA   ·   +1 CHOICE', KEEPER_COL, 3.6); }, 5000);
+    }
+    arenaReset();
+    betweenWaves = 3.0;                  // the run continues where it left off
+    bossAlive = false;
+    return;
+  }
   banner(wasVirus ? 'THE INFECTION IS CLEARED' : bd.name + '   DESTROYED',
          wasVirus ? VIRUS_COL : COL.crit);
   drawFlashT = 0.2;
@@ -1457,17 +1548,83 @@ function shopServices() {
   ].filter(s => s.ok());
 }
 
+/* ------------------------------ THE RECORD CHIP ----------------------------
+   Unlocked by beating THE BOOKKEEPER, and stocked only by shops. Once it is
+   in you, every upgrade the run offers is drawn from a list written for the
+   hull you are flying — and rarity stops mattering, so legendaries turn up as
+   often as commons.
+
+   The roll happens once, when the shop opens. Rerolling cannot conjure it and
+   cannot lose it: spamming rerolls is not a strategy for finding this.
+-------------------------------------------------------------------------- */
+const CHIP_CHANCE = 0.04;
+const CHIP_COL = '#fde047';
+let shopChipOffered = false;
+
+// Curated per weapon. EMBER's list deliberately omits Split Barrel and Twin
+// Link: extra beams are dead weight against a single target, so they would
+// break the promise that everything the chip offers is worth taking.
+const CHIP_POOL = {
+  bullet: ['multi','rate','dmg','vel','crit','critm','pierce','para','oc','home',
+           'frag','chain','vol','heavy','exec','okill','long','pblank','ric','back',
+           'zerk','glass','drone','shld','wind','btime','stat'],
+  laser:  ['dmg','rate','pierce','heavy','ric','crit','critm','pblank','long','vel',
+           'oc','chain','vol','frag','exec','okill','zerk','glass','mom','stdy',
+           'drone','shld','wind','btime','stat','cryo']
+};
+
+function chipPool() {
+  const ids = CHIP_POOL[P.weapon] || CHIP_POOL.bullet;
+  return UPGRADES.filter(u => ids.includes(u.id) && (P.up[u.id] || 0) < u.max);
+}
+
+// the pool an offer should draw from, and whether rarity still weights it
+function offerPool() {
+  if (P.chip) {
+    const p = chipPool();
+    if (p.length) return { pool: p, flat: true };
+  }
+  return { pool: UPGRADES.filter(u => (P.up[u.id] || 0) < u.max), flat: false };
+}
+
+function pickFromPool(pool, flat) {
+  if (flat) return pool[rndi(pool.length)];
+  let tot = 0; for (const u of pool) tot += RAR_W[u.rar];
+  let r = Math.random() * tot, ch = pool[0];
+  for (const u of pool) { r -= RAR_W[u.rar]; if (r <= 0) { ch = u; break; } }
+  return ch;
+}
+
+function recordChipItem() {
+  return {
+    kind: 'chip', name: 'The Record Chip', rar: 'legend', cost: 100,
+    // kept to two lines: the shop card has room for that and no more
+    desc: 'All later upgrades suit your hull. Rarity stops applying.',
+    ok: () => true,
+    run: () => {
+      P.chip = true;
+      banner('THE RECORD CHIP', CHIP_COL, 4.0);
+      drawFlashT = 0.28; shake(0.7);
+      ringFx(P.x, P.y, 10, 420, CHIP_COL, 0.9, 7);
+      burst(P.x, P.y, 60, CHIP_COL, 360, 4, 1.0);
+      Audio_.levelup(); Audio_.crit();
+    }
+  };
+}
+
 function makeShopStock() {
   const items = [];
-  const pool = UPGRADES.filter(u => (P.up[u.id] || 0) < u.max);
-  for (let i = 0; i < 4 && pool.length; i++) {
-    let tot = 0; for (const u of pool) tot += RAR_W[u.rar];
-    let r = Math.random() * tot, ch = pool[0];
-    for (const u of pool) { r -= RAR_W[u.rar]; if (r <= 0) { ch = u; break; } }
+  const chip = shopChipOffered && !P.chip;
+  const { pool, flat } = offerPool();
+  const nUp = chip ? 3 : 4;
+  for (let i = 0; i < nUp && pool.length; i++) {
+    const ch = pickFromPool(pool, flat);
     pool.splice(pool.indexOf(ch), 1);
+    Codex.seeUpgrade(ch.id);             // shop stock counts too
     items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
       cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15)) });
   }
+  if (chip) items.push(recordChipItem());
   const svc = shopServices();
   for (let i = 0; i < 2 && svc.length; i++) {
     const s = svc.splice(rndi(svc.length), 1)[0];
@@ -1482,6 +1639,10 @@ function makeShopStock() {
 
 function openShop() {
   shopPending = false;
+  // rolled once, here — makeShopStock only reads it, so rerolls neither
+  // create the chip nor destroy it
+  shopChipOffered = !!Save.profile.keeperDone && !P.chip &&
+                    Math.random() < CHIP_CHANCE;
   shopItems = makeShopStock();
   shopRerolls = 0;
   shopMsg = ''; shopMsgT = 0;
@@ -1756,6 +1917,91 @@ const BOOKS = {
       drawFlashT = Math.max(drawFlashT, 0.1);
       Audio_.boss();
     }
+  },
+  /* His own copy, handed back with his notes in the margins. He read the codex
+     to call things out of it; you read it to know what every one of them is
+     hiding behind. For its duration no ordinary trick in the room works. */
+  keeper: {
+    id: 'keeper', n: 'THE ANNOTATED CODEX', from: 'THE BOOKKEEPER',
+    col: '#fcd34d', cost: 3,
+    d: 'Read the room out of your own record. Shields, plates, phasing, ' +
+       'redaction and second lives all stop working, and everything takes more.',
+    f: () => {
+      P.annotT = 7;
+      drawFlashT = 0.2; shake(0.4);
+      ringFx(P.x, P.y, 12, 900, '#fcd34d', 0.8, 6);
+      burst(P.x, P.y, 46, '#fde68a', 340, 3.8, 0.75);
+      Audio_.boss(); Audio_.levelup();
+    }
+  }
+};
+
+// while the annotated codex is open, nothing in the room gets to hide
+const annotated = () => P.annotT > 0;
+
+/* Codex bookkeeping. Marking happens on every spawn and every offer, so it is
+   kept in memory and only written out when something new actually appears —
+   a save flush per grunt would be absurd. */
+const Codex = {
+  e: new Set(), u: new Set(), dirty: false,
+  load() {
+    Codex.e = new Set(Save.profile.codexE || []);
+    Codex.u = new Set(Save.profile.codexU || []);
+    Codex.dirty = false;
+  },
+  seeEnemy(k) {
+    if (!k || Codex.e.has(k)) return;
+    Codex.e.add(k); Codex.dirty = true;
+  },
+  seeUpgrade(id) {
+    if (!id || Codex.u.has(id)) return;
+    Codex.u.add(id); Codex.dirty = true;
+  },
+  flush() {
+    if (!Codex.dirty) return;
+    Save.profile.codexE = [...Codex.e];
+    Save.profile.codexU = [...Codex.u];
+    Codex.dirty = false;
+    Save.writeLocal(); Save.flush();
+  },
+  /* Ordered entry list: enemies then bosses. A secret boss is only listed once
+     met — it must not sit there as a locked slot, because completing the codex
+     is what summons it and it would make its own requirement unreachable. */
+  enemies() {
+    const out = [];
+    for (const k of Object.keys(CODEX_E))
+      out.push({ key: k, n: CODEX_E[k].n, d: CODEX_E[k].d,
+                 col: ETYPE[k].col, sides: ETYPE[k].sides, boss: false });
+    for (const k of Object.keys(BOSSES)) {
+      const b = BOSSES[k];
+      if (b.secret && !Codex.e.has(k)) continue;
+      out.push({ key: k, n: b.name, d: (CODEX_B[k] || {}).d || '',
+                 col: b.col, sides: b.sides, boss: true, secret: !!b.secret });
+    }
+    return out;
+  },
+  upgrades() {
+    return UPGRADES.map(u => ({ key: u.id, up: u, rar: u.rar, max: u.max }));
+  },
+  // what "filled" means: every ordinary enemy, every boss, every upgrade
+  need() {
+    const e = Object.keys(CODEX_E).length +
+              Object.keys(BOSSES).filter(k => !BOSSES[k].secret).length;
+    return { e, u: UPGRADES.length };
+  },
+  have() {
+    const n = Codex.need();
+    let e = 0;
+    for (const k of Object.keys(CODEX_E)) if (Codex.e.has(k)) e++;
+    for (const k of Object.keys(BOSSES))
+      if (!BOSSES[k].secret && Codex.e.has(k)) e++;
+    let u = 0;
+    for (const x of UPGRADES) if (Codex.u.has(x.id)) u++;
+    return { e, u, needE: n.e, needU: n.u };
+  },
+  complete() {
+    const h = Codex.have();
+    return h.e >= h.needE && h.u >= h.needU;
   }
 };
 
@@ -1962,7 +2208,7 @@ const MALWARE = [
     } },
 
   { id: 'nullref', n: 'NULL DEREFERENCE', col: '#38bdf8',
-    d: 'Points every enemy near you at an address that does not exist. Anything already below a third simply stops existing; the rest lose their armour permanently.',
+    d: 'Points every enemy near you at an address that does not exist. Anything already below a third simply stops existing; everything else takes the fault instead.',
     f: () => {
       const R = 420;
       const near = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < R);
@@ -1975,7 +2221,6 @@ const MALWARE = [
           burst(e.x, e.y, 18, '#38bdf8', 240, 3, 0.5);
           damageEnemy(e, e.hp + 1, true, P.x, P.y);
         } else {
-          e.armor = 0;                        // dereferenced, and it stays gone
           damageEnemy(e, 14 + P.dmg * 1.4, false, P.x, P.y);
           floatText(e.x, e.y - e.r - 8, 'NULL', '#38bdf8', 12);
         }
@@ -2271,6 +2516,7 @@ const Save = {
                   time: 0, muted: false, vol: 1, autofire: false,
                   planetarium: false, skipStreak: 0, clears: 0, altPath: false,
                   charIdx: 0, otherKills: 0, malware: false,
+                  codexE: [], codexU: [], keeperMet: false, keeperDone: false,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -2305,6 +2551,11 @@ const Save = {
     out.altPath = !!(a.altPath || b.altPath);
     out.malware = !!(a.malware || b.malware);
     out.otherKills = Math.max(a.otherKills || 0, b.otherKills || 0);
+    // a codex entry is knowledge: union both stores, never subtract
+    out.codexE = [...new Set([...(a.codexE || []), ...(b.codexE || [])])];
+    out.codexU = [...new Set([...(a.codexU || []), ...(b.codexU || [])])];
+    out.keeperMet = !!(a.keeperMet || b.keeperMet);
+    out.keeperDone = !!(a.keeperDone || b.keeperDone);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
@@ -2337,6 +2588,7 @@ const Save = {
     // older saves only knew mute; treat that as a volume of zero
     Audio_.setVol(Save.profile.vol !== undefined ? Save.profile.vol
                                                  : (Save.profile.muted ? 0 : 1));
+    Codex.load();
     autoFire = !!Save.profile.autofire;
     applyChar(Save.profile.charIdx || 0);
     Save.connect();
@@ -2551,6 +2803,7 @@ function resetGame() {
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
+  shopChipOffered = false;
   curseHpMul = 1; planetSign = null; planetRevealed = false;
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   hitStop = 0; drawFlashT = 0; bannerT = 0;
@@ -2568,6 +2821,7 @@ function gameOver(quiet) {
                 isRecord: score > Save.profile.best };
   Save.recordRun(Object.assign({ build }, lastStats));
   Board.submit(lastStats);
+  Codex.flush();                         // bank whatever this run introduced
   if (quiet) return;                     // quitting records, but does not detonate
   explode(P.x, P.y, 180, 0, COL.player);
   burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
@@ -2586,12 +2840,24 @@ function handleKey(k) {
       return;
     }
     if (k === 'n') { nameBuf = Save.profile.name || ''; state = 'name'; return; }
+    if (k === 'x') { openCodex('menu'); return; }
     if (k === ' ' || k === 'enter') { resetGame(); state = 'play'; }
+    return;
+  }
+  if (state === 'codex') {
+    if (uiArm > 0) return;
+    const list = codexList(), g = codexGeom();
+    if (k === 'escape' || k === 'x' || k === 'p') { closeCodex(); return; }
+    if (k === 'tab') { codexTab = 1 - codexTab; codexSel = 0; codexScroll = 0; Audio_.select(); return; }
+    if (k === 'arrowright' || k === 'd') { codexSel = Math.min(list.length - 1, codexSel + 1); codexReveal(); return; }
+    if (k === 'arrowleft'  || k === 'a') { codexSel = Math.max(0, codexSel - 1); codexReveal(); return; }
+    if (k === 'arrowdown'  || k === 's') { codexSel = Math.min(list.length - 1, codexSel + g.cols); codexReveal(); return; }
+    if (k === 'arrowup'    || k === 'w') { codexSel = Math.max(0, codexSel - g.cols); codexReveal(); return; }
     return;
   }
   if (state === 'dead')  { if (k === ' ' || k === 'enter' || k === 'r') { resetGame(); state = 'play'; } return; }
   if (state === 'levelup') {
-    const i = ['1', '2', '3'].indexOf(k);
+    const i = ['1', '2', '3', '4'].indexOf(k);
     if (i >= 0 && offers[i]) chooseOffer(i);
     return;
   }
@@ -2611,11 +2877,13 @@ function handleKey(k) {
   }
   if (state === 'library') {
     if (uiArm > 0) return;
-    if (k === 'e' || k === 'enter' || k === ' ') takeBook();
+    if (k === 'f' && keeperWants()) handOverCodex();
+    else if (k === 'e' || k === 'enter' || k === ' ') takeBook();
     else if (k === 'escape' || k === 'q') leaveLibrary();
     return;
   }
   if (k === 'q') { useBook(); return; }
+  if (state === 'pause' && k === 'x') { openCodex('pause'); return; }
   if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
@@ -2692,8 +2960,24 @@ function handleClick() {
     if (i >= 0) buyShop(i);
     return;
   }
+  if (state === 'codex') {
+    if (uiArm > 0) return;
+    const tabs = codexTabRects();
+    for (let i = 0; i < 2; i++) if (inRect(mouse.x, mouse.y, tabs[i])) {
+      if (codexTab !== i) { codexTab = i; codexSel = 0; codexScroll = 0; Audio_.select(); }
+      return;
+    }
+    const g = codexGeom();
+    if (mouse.y > g.y0 && mouse.y < g.y0 + g.viewH) {
+      const list = codexList();
+      for (let i = 0; i < list.length; i++)
+        if (inRect(mouse.x, mouse.y, codexCellRect(i))) { codexSel = i; Audio_.select(); return; }
+    }
+    return;
+  }
   if (state === 'library') {
     const b = libraryButtons();
+    if (b.hand && inRect(mouse.x, mouse.y, b.hand)) { handOverCodex(); return; }
     if (inRect(mouse.x, mouse.y, b.take)) { takeBook(); return; }
     if (inRect(mouse.x, mouse.y, b.leave)) leaveLibrary();
     return;
@@ -3105,6 +3389,24 @@ function updatePlayer(dt) {
       }
     } else diaryMirrorList();
     if (P.diaryT <= 0) { diaryBeams.length = 0; diaryMirrors.length = 0; }
+  }
+  /* THE ANNOTATED CODEX. Held flags are cleared every frame rather than saved
+     and restored — the AI that sets them keeps running, so each one simply
+     fails to stick while the book is open and resumes normally after.
+     Bosses keep their scripted invulnerability: those windows drive whole
+     sequences, and opening them would break the scripts rather than the boss. */
+  if (P.annotT > 0) {
+    P.annotT -= dt;
+    for (const e of enemies) {
+      if (e.dead || e.type === 'boss') continue;
+      e.phased = false;                       // phasers stay tangible
+      e.redacting = false;                     // cones go dark
+      if (e.invuln) e.invuln = 0;
+      if (e.type === 'revenant') e.gen = Math.max(e.gen || 0, 1);   // no second life
+      if (Math.random() < 0.12)
+        spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, -26,
+                  2.4, '#fcd34d', 0.4, 0.95);
+    }
   }
   if (P.plateT > 0) { P.plateT -= dt; P.plateAng += dt * 1.3; }
   if (P.twinT > 0) P.twinT -= dt;
@@ -3539,13 +3841,19 @@ function steer(e, tvx, tvy, rate, dt) {
   e.vy = lerp(e.vy, tvy, 1 - Math.exp(-rate * dt));
 }
 
-function eshoot(e, ang, spd, dmg, r = 6) {
-  ebullets.push({
-    x: e.x + Math.cos(ang) * e.r, y: e.y + Math.sin(ang) * e.r,
+// ox/oy override the muzzle (parallel barrels); returns the bullet so a caller
+// can tag it with behaviour, which THE BOOKKEEPER does.
+function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
+  const bx = (ox === undefined ? e.x : ox) + Math.cos(ang) * e.r;
+  const by = (oy === undefined ? e.y : oy) + Math.sin(ang) * e.r;
+  const b = {
+    x: bx, y: by,
     vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
     r, dmg, life: 4.5, col: e.col
-  });
+  };
+  ebullets.push(b);
   Audio_.tone(300, 0.06, 'sawtooth', 0.045, 160);
+  return b;
 }
 
 /* --------------------------------- bosses ---------------------------------
@@ -4040,6 +4348,260 @@ function bossOtherVirus(e, dt) {
 
   // the rage sequence, run fast — same shape, no time to breathe
   bossOtherRage(e, dt * 1.85);
+}
+
+/* ---------------------------- THE BOOKKEEPER -------------------------------
+   Four sections, gated on quarters of his health. He keeps his own stat block
+   and writes real upgrades into it — the same list you draw from — and he
+   calls out anything your codex has an entry for. Section four is all of it
+   at once, and he starts tearing pages out of your build to do it.
+
+   His upgrades are drawn from the ids the shell below actually reads, so a
+   card he takes always changes something you can see.
+-------------------------------------------------------------------------- */
+/* Only ids keeperTake actually implements — a card he takes must visibly change
+   him. 'armor' is deliberately absent: enemies have no damage-reduction
+   mechanic at all, so Nanoweave would have been a card that did nothing. */
+const KEEP_UPS = ['rate','dmg','multi','ric','home','vel','crit','critm',
+                  'spd','regen','shld','oc','para','back','heavy'];
+const KEEP_SECTION = ['I · THE BESTIARY', 'II · THE MARGINALIA',
+                      'III · THE APPENDIX', 'IV · THE COLOPHON'];
+
+function keeperInit(e) {
+  e.kp = -1;                          // section index; -1 forces the first entry
+  e.ku = {};                          // his own upgrade counts
+  e.kRate = 1.1; e.kCount = 1; e.kSpread = 0.1; e.kSpeed = 300;
+  e.kDmgMul = 1; e.kRic = 0; e.kHome = 0;
+  e.kCrit = 0.05; e.kCritM = 2; e.kArmorAdd = 0; e.kRegen = 0;
+  e.kBack = 0; e.kPara = 0; e.kOc = 0; e.kOcCount = 0;
+  e.kShield = 0; e.kDrones = 0; e.kDroneAng = 0;
+  e.kSummonT = 2.2; e.kWriteT = 3.2; e.kTearT = 8;
+  e.lockPhase = 0;
+  e.cd = 0.6;
+}
+
+// give him one card, for real
+function keeperTake(e, id) {
+  const u = UPGRADES.find(z => z.id === id);
+  if (!u) return;
+  if ((e.ku[id] || 0) >= u.max) return;
+  e.ku[id] = (e.ku[id] || 0) + 1;
+  switch (id) {
+    case 'rate':  e.kRate *= 1.16; break;
+    case 'dmg':   e.kDmgMul *= 1.22; break;
+    case 'multi': e.kCount++; e.kDmgMul *= 0.91; e.kSpread += 0.035; break;
+    case 'ric':   e.kRic++; break;
+    case 'home':  e.kHome++; break;
+    case 'vel':   e.kSpeed *= 1.18; e.kDmgMul *= 1.07; break;
+    case 'crit':  e.kCrit += 0.08; break;
+    case 'critm': e.kCritM += 0.7; break;
+    case 'spd':   e.spd *= 1.11; break;
+    /* Hard-capped low. His escort already absorbs most incoming fire, so any
+       meaningful regeneration on top of that let him out-heal a modest build
+       forever — an unwinnable stall, which is worse than a loss. */
+    case 'regen': e.kRegen = Math.min(e.maxHp * 0.0015,
+                                      e.kRegen + e.maxHp * 0.0005); break;
+    case 'shld':  e.kShield++; break;
+    case 'oc':    e.kOc++; break;
+    case 'para':  e.kPara++; break;
+    case 'back':  e.kBack++; break;
+    case 'heavy': e.kDmgMul *= 1.34; e.kRate *= 0.86; break;
+  }
+  floatText(e.x, e.y - e.r - 14, '+ ' + upName(u), RARITY[u.rar], 14);
+  ringFx(e.x, e.y, 8, e.r * 2.4, RARITY[u.rar], 0.45, 3);
+  Audio_.tone(660, 0.12, 'square', 0.07, 1200);
+}
+
+/* Tearing a page out has to actually cost you something, so he only takes
+   cards whose effect can be genuinely undone. Anything not listed here is
+   safe from him — better a smaller steal list than a lying one. */
+const TEARABLE = {
+  rate:  p => p.fireRate /= 1.16,
+  dmg:   p => p.dmg /= 1.22,
+  multi: p => { p.count = Math.max(1, p.count - 1); p.dmg /= 0.91; p.spread -= 0.035; },
+  vel:   p => { p.bspeed /= 1.18; p.dmg /= 1.07; p.knock = Math.max(0, p.knock - 30); },
+  crit:  p => p.crit = Math.max(0, p.crit - 0.08),
+  critm: p => p.critMult = Math.max(1, p.critMult - 0.7),
+  spd:   p => p.speed /= 1.11,
+  armor: p => p.armor = Math.max(0, p.armor - 2),
+  regen: p => p.regen = Math.max(0, p.regen - 0.7),
+  pierce:p => p.pierce = Math.max(0, p.pierce - 1),
+  ric:   p => p.ricochet = Math.max(0, p.ricochet - 1),
+  home:  p => p.homing = Math.max(0, p.homing - 3.1),
+  para:  p => p.parallel = Math.max(0, p.parallel - 1),
+  back:  p => p.back = Math.max(0, p.back - 1),
+  oc:    p => p.overcharge = Math.max(0, p.overcharge - 1),
+  hp:    p => { p.maxHp = Math.max(20, p.maxHp - 25); p.hp = Math.min(p.hp, p.maxHp); },
+  heavy: p => { p.dmg /= 1.34; p.fireRate /= 0.86; p.br /= 1.14; p.heavy = Math.max(0, p.heavy - 1); }
+};
+
+function keeperTear(e) {
+  const owned = Object.keys(P.up).filter(id => P.up[id] > 0 && TEARABLE[id]);
+  if (!owned.length) return false;
+  const id = pick(owned);
+  const u = UPGRADES.find(z => z.id === id);
+  TEARABLE[id](P);
+  P.up[id]--;
+  if (P.up[id] <= 0) delete P.up[id];
+  if (KEEP_UPS.includes(id)) keeperTake(e, id);   // onto his page, if he can use it
+  floatText(P.x, P.y - 50, '− ' + (u ? upName(u) : id), '#f87171', 15);
+  banner('HE TEARS OUT A PAGE', '#f87171', 2.0);
+  Audio_.hurt(); shake(0.4);
+  ringFx(P.x, P.y, 10, 200, '#f87171', 0.5, 4);
+  return true;
+}
+
+function keeperWrite(e, n) {
+  for (let k = 0; k < n; k++) {
+    const pool = KEEP_UPS.filter(id => {
+      const u = UPGRADES.find(z => z.id === id);
+      return u && (e.ku[id] || 0) < u.max;
+    });
+    if (!pool.length) return;
+    keeperTake(e, pick(pool));
+  }
+}
+
+// anything the codex has an entry for is fair game
+function keeperSummon(e, bosses) {
+  const pool = [...Codex.e].filter(k => ETYPE[k] && k !== 'boss' && k !== 'egg');
+  const bpool = [...Codex.e].filter(k => BOSSES[k] && k !== 'keeper');
+  if (bosses && bpool.length && Math.random() < 0.5) {
+    const key = pick(bpool);
+    const a = rnd(TAU), R = rnd(430, 280);
+    const s = spawnEnemy('boss',
+      clamp(e.x + Math.cos(a) * R, arena.x0 + 90, arena.x1 - 90),
+      clamp(e.y + Math.sin(a) * R, arena.y0 + 90, arena.y1 - 90), { boss: key });
+    if (s) {
+      s.shadow = SHADOW_LIFE + 2;
+      s.col = KEEPER_COL; s.xp = 0; s.score = 0;
+      s.hp = s.maxHp = Math.max(80, s.maxHp * 0.16);
+      s.r *= 0.7;
+      floatText(s.x, s.y - s.r - 10, BOSSES[key].name, KEEPER_COL, 12);
+      ringFx(s.x, s.y, 8, s.r * 4, KEEPER_COL, 0.6, 4);
+    }
+    return;
+  }
+  if (!pool.length) return;
+  const n = 2 + (e.kp || 0);
+  for (let k = 0; k < n; k++) {
+    const a = rnd(TAU), R = rnd(420, 240);
+    const s = spawnEnemy(pick(pool),
+      clamp(e.x + Math.cos(a) * R, arena.x0 + 60, arena.x1 - 60),
+      clamp(e.y + Math.sin(a) * R, arena.y0 + 60, arena.y1 - 60), { elite: false });
+    if (s) {
+      /* He is reciting, not breeding: every entry he reads out fades on its
+         own. A permanent escort turned into an impenetrable screen that only
+         a piercing build could ever shoot through. */
+      s.shadow = 8;
+      s.xp = Math.round(s.xp * 0.4);
+      ringFx(s.x, s.y, 4, 46, KEEPER_COL, 0.4, 2);
+    }
+  }
+  Audio_.tone(300, 0.2, 'square', 0.08, 900);
+}
+
+function keeperShoot(e) {
+  e.kOcCount++;
+  const heavy = e.kOc > 0 && e.kOcCount % 6 === 0;
+  const base = e.dmg * 0.4 * e.kDmgMul * (heavy ? 1.8 : 1);
+  const crit = Math.random() < e.kCrit;
+  const dmg = base * (crit ? e.kCritM : 1);
+  const lanes = [];
+  for (let i = 0; i < e.kCount; i++)
+    lanes.push(e.ang + (e.kCount === 1 ? 0 : (i - (e.kCount - 1) / 2) * (e.kSpread + 0.06)));
+  for (let k = 0; k < e.kBack; k++) lanes.push(e.ang + Math.PI + (k - (e.kBack - 1) / 2) * 0.2);
+  const nx = -Math.sin(e.ang), ny = Math.cos(e.ang);
+  for (const a of lanes) {
+    for (let p = 0; p <= e.kPara; p++) {
+      const off = p === 0 ? 0 : (p % 2 ? 1 : -1) * Math.ceil(p / 2) * 22;
+      const b = eshoot(e, a + rnd(0.03, -0.03), e.kSpeed, dmg,
+                       heavy ? 9 : 6, e.x + nx * off, e.y + ny * off);
+      if (b) {
+        b.ricP = e.kRic; b.homeP = e.kHome;
+        b.col = crit ? COL.crit : KEEPER_COL;
+      }
+    }
+  }
+  Audio_.tone(heavy ? 200 : 520, 0.07, 'square', 0.05, heavy ? 90 : 800);
+}
+
+function bossKeeper(e, dt, ux, uy, d) {
+  if (e.kp === undefined) keeperInit(e);
+  if (e.kRegen) e.hp = Math.min(e.maxHp, e.hp + e.kRegen * dt);
+
+  const frac = e.hp / e.maxHp;
+  const want = frac > 0.75 ? 0 : frac > 0.5 ? 1 : frac > 0.25 ? 2 : 3;
+  if (want > e.kp) {
+    e.kp = want;
+    e.lockPhase = Math.min(2, want);      // keep the shared shell quiet
+    e.atkT = 1.4; e.invuln = 1; e.vuln = 1;
+    e.kTransT = 1.4;
+    banner(KEEP_SECTION[want], KEEPER_COL, 3.0);
+    drawFlashT = 0.24; shake(0.9);
+    Audio_.boss();
+    ringFx(e.x, e.y, e.r, 480, KEEPER_COL, 0.9, 6);
+    keeperWrite(e, want === 0 ? 1 : want + 1);
+    if (want >= 1) e.kSummonT = Math.min(e.kSummonT, 0.8);
+    if (want === 3) e.kTearT = 3;         // the last section opens by tearing
+    return;
+  }
+  if (e.kTransT > 0) {                    // brief, readable opening
+    e.kTransT -= dt;
+    e.vx *= Math.pow(0.05, dt); e.vy *= Math.pow(0.05, dt);
+    e.ang += dt * 3;
+    if (e.kTransT <= 0) e.invuln = 0;
+    return;
+  }
+
+  e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+  e.kDroneAng += dt * 2.1;
+
+  /* He reads at arm's length, but never far enough to sit outside a short-range
+     weapon indefinitely — and every few seconds he steps in to turn a page,
+     so kiting alone cannot win the fight for him. */
+  e.kStepT = (e.kStepT || 0) - dt;
+  if (e.kStepT <= -2.2) e.kStepT = 6;               // 2.2s in, then back out
+  const closing = e.kStepT <= 0;
+  // deliberately inside a naked short-range weapon's reach (250) for most of
+  // the fight; he is a reader, not a sniper, and outranging you is not his gimmick
+  const want_d = closing ? 110 : [270, 240, 210, 165][e.kp];
+  const pull = (d - want_d) * 1.4;
+  steer(e, ux * pull, uy * pull, 1.5 + e.kp * 0.35, dt);
+
+  // --- writing into himself ---
+  e.kWriteT -= dt;
+  if (e.kWriteT <= 0) {
+    e.kWriteT = [5.5, 4.2, 3.2, 2.2][e.kp];
+    keeperWrite(e, e.kp >= 2 ? 2 : 1);
+  }
+
+  // --- calling out of the codex ---
+  e.kSummonT -= dt;
+  if (e.kSummonT <= 0) {
+    e.kSummonT = [6.5, 5.0, 4.0, 3.0][e.kp];
+    // a hard concurrency cap: his escort is cover, not the whole fight
+    const live = enemies.filter(z => !z.dead && z !== e).length;
+    if (live < 7 + e.kp * 2) keeperSummon(e, e.kp >= 2);
+  }
+
+  // --- section four: he starts taking pages out of your build ---
+  if (e.kp === 3) {
+    e.kTearT -= dt;
+    if (e.kTearT <= 0) { e.kTearT = 9; keeperTear(e); }
+    if (Math.random() < 0.4) {
+      const a = rnd(TAU);
+      spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+        Math.cos(a) * 130, Math.sin(a) * 130, rnd(4, 2), KEEPER_COL, rnd(0.5, 0.25), 0.93);
+    }
+  }
+
+  // --- his gun, using whatever he has written down ---
+  e.cd -= dt;
+  if (e.cd <= 0 && d < 1000) {
+    e.cd = 1 / clamp(e.kRate * (1 + e.kp * 0.25), 0.5, 9);
+    keeperShoot(e);
+  }
 }
 
 function bossOtherFinale(e, dt) {
@@ -4679,7 +5241,7 @@ function updateBullets(dt) {
     }
 
     // REDACTOR: anything inside its cone is simply erased, before it can hit
-    if (b.mine) {
+    if (b.mine && !annotated()) {
       let erased = false;
       for (const e of enemies) {
         if (e.dead || e.type !== 'redactor' || !e.redacting) continue;
@@ -4705,7 +5267,7 @@ function updateBullets(dt) {
       if (!segCircle(b.px, b.py, b.x, b.y, e.x, e.y, rr)) continue;
 
       // sentinels carry a frontal shield: shots into the face are deflected
-      if (e.type === 'sentinel') {
+      if (e.type === 'sentinel' && !annotated()) {
         const inc = Math.atan2(b.py - e.y, b.px - e.x);
         const dA = Math.abs(((inc - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
         if (dA < 1.15) {
@@ -4716,7 +5278,7 @@ function updateBullets(dt) {
       }
 
       // PRISM: the mirrored half throws your own shot back at you
-      if (e.type === 'prism') {
+      if (e.type === 'prism' && !annotated()) {
         const inc = Math.atan2(b.py - e.y, b.px - e.x);
         const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
         if (off < 1.3) {
@@ -4815,7 +5377,23 @@ function updateEBullets(dt) {
       continue;
     }
     b.life -= dt;
+    // Seeker Rounds and Ricochet, when something has written them onto itself
+    if (b.homeP) {
+      const s = len(b.vx, b.vy) || 1;
+      const want = Math.atan2(P.y - b.y, P.x - b.x);
+      const cur = Math.atan2(b.vy, b.vx);
+      const a = angLerp(cur, want, 1 - Math.exp(-1.6 * b.homeP * dt));
+      b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
+    }
     b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.ricP > 0) {
+      let hit = false;
+      if (b.x < arena.x0 + b.r) { b.x = arena.x0 + b.r; b.vx = -b.vx; hit = true; }
+      else if (b.x > arena.x1 - b.r) { b.x = arena.x1 - b.r; b.vx = -b.vx; hit = true; }
+      if (b.y < arena.y0 + b.r) { b.y = arena.y0 + b.r; b.vy = -b.vy; hit = true; }
+      else if (b.y > arena.y1 - b.r) { b.y = arena.y1 - b.r; b.vy = -b.vy; hit = true; }
+      if (hit) { b.ricP--; burst(b.x, b.y, 3, b.col, 140, 2, 0.2); }
+    }
     if (b.life <= 0 || b.x < -20 || b.y < -20 || b.x > WORLD.w + 20 || b.y > WORLD.h + 20) {
       ebullets.splice(i, 1); continue;
     }
@@ -4997,6 +5575,19 @@ function render() {
   drawFloats();
   ctx.restore();
 
+  if (P.annotT > 0) {
+    // a warm margin around the frame while the record is open
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(uiTime * 7) * 0.18;
+    ctx.strokeStyle = '#fcd34d'; ctx.lineWidth = 2;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+    ctx.globalAlpha = 0.75;
+    ctx.textAlign = 'center';
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#fcd34d';
+    ctx.fillText('ANNOTATED   ' + P.annotT.toFixed(1) + 's', W / 2, 16);
+    ctx.restore();
+  }
   if (P.stopT > 0) {
     // everything but you is held still; say so without hiding the room
     ctx.save();
@@ -5023,6 +5614,7 @@ function render() {
   if (state === 'planet') drawPlanetarium();
   if (state === 'library') drawLibrary();
   if (state === 'pause') drawPause();
+  if (state === 'codex') drawCodex();
   if (state === 'dead') drawDead();
   if (!isTouch && (state === 'play' || state === 'shop' || state === 'planet' ||
       state === 'library')) drawCrosshair();
@@ -5608,6 +6200,51 @@ function drawEnemies() {
     if (e.virus) drawGlow(e.x, e.y, e.r * 5.2, VIRUS_COL, 0.3 + Math.sin(uiTime * 9) * 0.12);
     if (e.shadow > 0) drawGlow(e.x, e.y, e.r * 3.6, VIRUS_COL, 0.24);
     ctx.globalCompositeOperation = 'source-over';
+
+    /* THE BOOKKEEPER: the ledger orbits him, and every card he has written
+       onto himself is listed above his head, so his growth is legible. */
+    if (e.boss === 'keeper') {
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = KEEPER_COL; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) {
+        const a = (e.kDroneAng || 0) * (k % 2 ? -1 : 1) + k * TAU / 3;
+        const rr = e.r + 40 + k * 12;
+        const bx = e.x + Math.cos(a) * rr, by = e.y + Math.sin(a) * rr;
+        ctx.save();
+        ctx.translate(bx, by); ctx.rotate(a + Math.PI / 2);
+        ctx.strokeRect(-9, -12, 18, 24);
+        ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, 12); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+      if (e.kShield > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 + Math.sin(uiTime * 5) * 0.2;
+        ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2.4;
+        for (let k = 0; k < e.kShield; k++) {
+          ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 14 + k * 7, 0, TAU); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      const list = Object.keys(e.ku || {});
+      if (list.length) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+        let ly = e.y - e.r - 26;
+        for (let k = 0; k < list.length; k += 4) {
+          const row = list.slice(k, k + 4)
+            .map(id => { const u = UPGRADES.find(z => z.id === id);
+                         return (u ? upName(u) : id) + (e.ku[id] > 1 ? '×' + e.ku[id] : ''); })
+            .join('  ·  ');
+          ctx.fillStyle = 'rgba(252,211,77,0.75)';
+          ctx.fillText(row, e.x, ly);
+          ly -= 12;
+        }
+        ctx.restore();
+      }
+    }
 
     // a shadow is a silhouette on loan — draw it as an outline and skip the body
     if (e.shadow > 0) {
@@ -6295,6 +6932,16 @@ function drawHUD() {
     }
   }
 
+  /* --- the chip, if it is in --- */
+  if (P.chip) {
+    ctx.textAlign = 'left';
+    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = CHIP_COL;
+    ctx.globalAlpha = 0.6 + Math.sin(uiTime * 2) * 0.2;
+    ctx.fillText('◧ RECORD CHIP', pad, yb + 20);
+    ctx.globalAlpha = 1;
+  }
+
   /* --- installed malware: it owns the dash, so it says so where dash lives --- */
   if (P.malware) {
     const my = yb + (P.book ? 66 : 40);
@@ -6504,6 +7151,12 @@ function drawLevelUp() {
   ctx.fillText('CLICK OR PRESS 1 / 2 / 3', W / 2, rs[0].y + rs[0].h + 30);
 }
 
+// hard cap on a name from the board: it is user-supplied and can be anything
+function clipText(s, n) {
+  s = String(s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
 function wrapText(text, x, y, maxW, lh) {
   const words = String(text).split(' ');
   let line = '', yy = y;
@@ -6579,7 +7232,7 @@ function drawShop() {
 
   for (let i = 0; i < shopItems.length; i++) {
     const it = shopItems[i], r = rs[i];
-    const col = RARITY[it.rar];
+    const col = it.kind === 'chip' ? CHIP_COL : RARITY[it.rar];
     const afford = credits >= it.cost && !it.sold;
     const on = hover === i && afford;
     const y = r.y - (on ? 5 : 0);
@@ -6598,15 +7251,35 @@ function drawShop() {
     ctx.fillStyle = col;
     roundRect(r.x + 12, y + 12, r.w - 24, 3, 2); ctx.fill();
     ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillText(it.kind === 'svc' ? 'SERVICE' : it.rar.toUpperCase(), cx, y + 29);
+    ctx.fillText(it.kind === 'chip' ? 'ONE OF A KIND'
+               : it.kind === 'svc' ? 'SERVICE' : it.rar.toUpperCase(), cx, y + 29);
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    drawGlow(cx, y + 63, 34, col, on ? 0.5 : 0.3);
+    drawGlow(cx, y + 63, it.kind === 'chip' ? 46 : 34, col,
+             it.kind === 'chip' ? 0.55 + Math.sin(uiTime * 3.4) * 0.2 : (on ? 0.5 : 0.3));
     ctx.restore();
-    ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.14); ctx.lineWidth = 2.2;
-    poly(cx, y + 63, 19, 3 + (i + it.name.length) % 5, uiTime * (on ? 1.3 : 0.45) + i);
-    ctx.fill(); ctx.stroke();
+    if (it.kind === 'chip') {
+      // a die with its contacts out, rather than the generic polygon
+      ctx.save();
+      ctx.translate(cx, y + 63);
+      ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.16); ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.rect(-15, -15, 30, 30); ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 1.8;
+      for (let k = -1; k <= 1; k++) {
+        ctx.beginPath(); ctx.moveTo(k * 9, -15); ctx.lineTo(k * 9, -22); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(k * 9, 15);  ctx.lineTo(k * 9, 22);  ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-15, k * 9); ctx.lineTo(-22, k * 9); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(15, k * 9);  ctx.lineTo(22, k * 9);  ctx.stroke();
+      }
+      ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.rect(-6, -6, 12, 12); ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.14); ctx.lineWidth = 2.2;
+      poly(cx, y + 63, 19, 3 + (i + it.name.length) % 5, uiTime * (on ? 1.3 : 0.45) + i);
+      ctx.fill(); ctx.stroke();
+    }
 
     ctx.font = '800 16px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#f8fafc';
@@ -6665,7 +7338,7 @@ function drawPause() {
   ctx.fillText('PAUSED', W / 2, H / 2 - 56);
   ctx.font = '500 13px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('P or ESC to resume   ·   T toggles autofire', W / 2, H / 2 - 20);
+  ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex', W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
   ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
@@ -6845,31 +7518,75 @@ function renderMenu() {
   // leaderboard — the global board when it's reachable, your own runs otherwise
   const global = Board.top.length > 0;
   const all = (global ? Board.top : Save.top).slice(0, 5);
-  /* Fit as many rows as clear the unlocks row, rather than dropping the whole
-     board the moment the fifth one would collide. */
-  const ly = cyp + 252;
-  const fits = Math.max(0, Math.min(all.length,
-                        Math.floor(((H - 112) - (ly + 18)) / 15) + 1));
-  const rows = all.slice(0, fits);
-  if (rows.length) {
+  /* Two layouts, because stacking the board under the centre column puts it on
+     a collision course with the bottom-anchored footer — and on a short window
+     there is simply no gap left to put it in.
+
+     Wide screens have a large empty margin either side of the title, so the
+     board moves out there and the collision cannot happen at all. Narrower
+     screens keep the stacked version, fitting whole rows into the measured gap
+     and dropping the lowest ranks first rather than overlapping anything. */
+  const FOOT_TOP = H - 112;                    // first footer line: the unlocks row
+  const rowGap = 15;
+
+  /* Measure the title rather than guessing at it — the side panel is only
+     viable if it genuinely clears both the wordmark and the screen edge, and
+     that depends on the font size, which scales with width. */
+  ctx.save();
+  ctx.font = `800 ${Math.min(84, W * 0.13)}px Segoe UI, system-ui, sans-serif`;
+  const titleHalf = ctx.measureText('VOIDRUNNER').width / 2;
+  ctx.restore();
+  const panelHalf = 104;
+  const px = Math.min(cxp + titleHalf + 46 + panelHalf, W - panelHalf - 14);
+  const wide = (px - panelHalf) > (cxp + titleHalf + 26) && (px + panelHalf) < W - 10;
+
+  if (wide) {
+    let py = cyp - 40;
+    ctx.textAlign = 'center';
     ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = '#334155';
-    ctx.fillText(global ? (rows.length < all.length ? 'GLOBAL TOP ' + rows.length : 'GLOBAL TOP 5')
-                        : 'YOUR BEST RUNS', cxp, ly);
+    ctx.fillText(global ? 'GLOBAL TOP ' + all.length : 'YOUR BEST RUNS', px, py);
+    py += 20;
     ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
-    rows.forEach((r, i) => {
-      const y = ly + 18 + i * 15;
+    all.forEach((r, i) => {
+      const y = py + i * 17;
       const mine = global && r.name === Save.profile.name;
       ctx.textAlign = 'right';
       ctx.fillStyle = mine ? COL.player : (i === 0 ? COL.crit : '#64748b');
-      ctx.fillText(String((r.score || 0).toLocaleString()), cxp - 12, y);
+      ctx.fillText(String((r.score || 0).toLocaleString()), px - 8, y);
       ctx.textAlign = 'left';
       ctx.fillStyle = mine ? COL.player : '#475569';
-      ctx.fillText(global
-        ? `${i + 1}. ${r.name}   ·   ${r.sector || '—'} W${r.wave}`
-        : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`, cxp + 12, y);
+      const label = global
+        ? `${i + 1}. ${clipText(r.name || '—', 12)}  ·  ${r.sector || '—'} W${r.wave}`
+        : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`;
+      ctx.fillText(label, px + 8, y);
     });
     ctx.textAlign = 'center';
+  } else {
+    const ly = cyp + 252;
+    const room = (FOOT_TOP - 22) - (ly + 18);  // 22px of air above the footer
+    const fits = room < 0 ? 0
+               : Math.max(0, Math.min(all.length, Math.floor(room / rowGap) + 1));
+    const rows = all.slice(0, fits);
+    if (rows.length) {
+      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = '#334155';
+      ctx.fillText(global ? 'GLOBAL TOP ' + rows.length : 'YOUR BEST RUNS', cxp, ly);
+      ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+      rows.forEach((r, i) => {
+        const y = ly + 18 + i * rowGap;
+        const mine = global && r.name === Save.profile.name;
+        ctx.textAlign = 'right';
+        ctx.fillStyle = mine ? COL.player : (i === 0 ? COL.crit : '#64748b');
+        ctx.fillText(String((r.score || 0).toLocaleString()), cxp - 12, y);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = mine ? COL.player : '#475569';
+        ctx.fillText(global
+          ? `${i + 1}. ${clipText(r.name || '—', 12)}  ·  ${r.sector || '—'} W${r.wave}`
+          : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`, cxp + 12, y);
+      });
+      ctx.textAlign = 'center';
+    }
   }
 
   const unlocks = [];
@@ -6923,7 +7640,7 @@ function renderMenu() {
   const lines = isTouch
     ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & fire']
     : ['WASD move   ·   MOUSE aim   ·   HOLD to fire',
-       'SPACE dash (i-frames)   ·   T autofire   ·   P pause'];
+       'SPACE dash (i-frames)   ·   T autofire   ·   P pause   ·   X codex'];
   ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#334155';
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
@@ -6937,8 +7654,293 @@ function renderMenu() {
 /* -------------------------------- library UI ------------------------------- */
 function libraryButtons() {
   const bw = Math.min(180, W * 0.32), bh = 38, y = H / 2 + 136;
-  return { take:  { x: W / 2 - bw - 8, y, w: bw, h: bh },
-           leave: { x: W / 2 + 8,      y, w: bw, h: bh } };
+  const b = { take:  { x: W / 2 - bw - 8, y, w: bw, h: bh },
+              leave: { x: W / 2 + 8,      y, w: bw, h: bh } };
+  if (keeperWants()) b.hand = { x: W / 2 - bw / 2, y: y + 46, w: bw, h: bh };
+  return b;
+}
+
+/* ------------------------------ the bookkeeper -----------------------------
+   He is behind the desk of every library, and he is only ever waiting for one
+   thing. Hand him the finished record and he stops being scenery.
+--------------------------------------------------------------------------- */
+const KEEPER_COL = '#fcd34d';
+
+function keeperWants() {
+  return state === 'library' && !malwareOffer && Codex.complete() &&
+         !Save.profile.keeperDone;
+}
+
+function keeperLine() {
+  const h = Codex.have();
+  if (Save.profile.keeperDone) return 'You finished it. I read it. Take what you like.';
+  if (Codex.complete())        return 'That is all of it. Every entry. Hand it here.';
+  if (h.e < h.needE && h.u < h.needU)
+    return 'Still gaps in both halves. ' + (h.needE - h.e) + ' unseen, ' +
+           (h.needU - h.u) + ' unwritten.';
+  if (h.e < h.needE)
+    return (h.needE - h.e) + ' still unseen. I cannot file an incomplete bestiary.';
+  return (h.needU - h.u) + ' entries still unwritten. Come back when the list is closed.';
+}
+
+function drawKeeperNPC(cx, cy, s) {
+  const wants = keeperWants();
+  const bob = Math.sin(uiTime * 1.6) * 2;
+  ctx.save();
+  ctx.translate(cx, cy + bob);
+  if (wants) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, s * 2.4, KEEPER_COL, 0.3 + Math.sin(uiTime * 3) * 0.12);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // a tall stooped figure behind a desk, holding a ledger
+  ctx.strokeStyle = wants ? KEEPER_COL : '#a16207';
+  ctx.fillStyle = wants ? 'rgba(252,211,77,0.14)' : 'rgba(161,98,7,0.08)';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();                              // hood / shoulders
+  ctx.moveTo(0, -s);
+  ctx.lineTo(s * 0.62, -s * 0.1);
+  ctx.lineTo(s * 0.5, s);
+  ctx.lineTo(-s * 0.5, s);
+  ctx.lineTo(-s * 0.62, -s * 0.1);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath();                              // the ledger he is holding
+  ctx.rect(-s * 0.34, s * 0.05, s * 0.68, s * 0.42);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.05); ctx.lineTo(0, s * 0.47);
+  ctx.stroke();
+  // two points of light where a face would be
+  ctx.fillStyle = wants ? '#fef3c7' : '#a16207';
+  ctx.beginPath(); ctx.arc(-s * 0.17, -s * 0.42, 2.2, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(s * 0.17, -s * 0.42, 2.2, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function handOverCodex() {
+  if (!keeperWants()) return;
+  Save.profile.keeperMet = true;
+  Save.writeLocal(); Save.flush();
+  libraryBook = null; malwareOffer = null;
+  state = 'play';
+  uiArm = 0.3;
+  startKeeperFight();
+}
+
+function startKeeperFight() {
+  enemies.length = 0; ebullets.length = 0; portals.length = 0;
+  awaitingPortal = false;
+  betweenWaves = 1e9;                  // no wave logic during this
+  spawnBudget = 0;
+  bossAlive = true;
+  const a = rnd(TAU);
+  const kx = clamp(P.x + Math.cos(a) * 380, arena.x0 + 120, arena.x1 - 120);
+  const ky = clamp(P.y + Math.sin(a) * 380, arena.y0 + 120, arena.y1 - 120);
+  const e = spawnEnemy('boss', kx, ky, { boss: 'keeper' });
+  if (!e) return;
+  arenaShrinkTo(P.x, P.y, 1600, 1150);
+  banner('THE BOOKKEEPER   ACCEPTS', KEEPER_COL, 3.8);
+  drawFlashT = 0.34; shake(1.3);
+  Audio_.boss(); Audio_.boom();
+  ringFx(e.x, e.y, e.r, 700, KEEPER_COL, 1.3, 9);
+}
+
+/* ---------------------------------- codex UI -------------------------------
+   Two tabs, a grid of cells, one detail panel. Anything not yet met is a dim
+   silhouette with no name — the shape is the reward for having survived it.
+--------------------------------------------------------------------------- */
+let codexTab = 0, codexSel = 0, codexScroll = 0, codexFrom = 'menu';
+
+function codexList() { return codexTab === 0 ? Codex.enemies() : Codex.upgrades(); }
+function codexSeen(en) {
+  return codexTab === 0 ? Codex.e.has(en.key) : Codex.u.has(en.key);
+}
+function codexCols() { return codexTab === 0 ? 6 : 4; }
+function codexGeom() {
+  const cols = codexCols();
+  const pad = 30, top = 132, bottom = 152;   // clear of the detail panel below
+  const gw = Math.min(W - pad * 2, 980);
+  const cw = gw / cols;
+  const ch = codexTab === 0 ? 104 : 62;
+  return { cols, cw, ch, x0: (W - gw) / 2, y0: top,
+           viewH: Math.max(ch, H - top - bottom) };
+}
+function codexCellRect(i) {
+  const g = codexGeom();
+  const r = Math.floor(i / g.cols), c = i % g.cols;
+  return { x: g.x0 + c * g.cw + 4, y: g.y0 + r * g.ch - codexScroll + 4,
+           w: g.cw - 8, h: g.ch - 8 };
+}
+function codexMaxScroll() {
+  const g = codexGeom();
+  const rows = Math.ceil(codexList().length / g.cols);
+  return Math.max(0, rows * g.ch - g.viewH);
+}
+function codexTabRects() {
+  const w = 150, h = 26, y = 88;
+  return [{ x: W / 2 - w - 6, y, w, h }, { x: W / 2 + 6, y, w, h }];
+}
+
+// a compact silhouette from the same shape data the live enemy uses
+function drawCodexIcon(en, x, y, size, seen) {
+  ctx.save();
+  if (seen) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(x, y, size * 1.7, en.col, 0.34);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = seen ? 1 : 0.16;
+  ctx.strokeStyle = seen ? en.col : '#64748b';
+  ctx.fillStyle = seen ? rgba(en.col, 0.16) : 'rgba(100,116,139,0.1)';
+  ctx.lineWidth = en.boss ? 3 : 2.2;
+  poly(x, y, size, en.sides || 6, uiTime * (en.boss ? 0.3 : 0.5));
+  ctx.fill(); ctx.stroke();
+  if (en.boss) {
+    ctx.lineWidth = 1.4;
+    poly(x, y, size * 0.55, en.sides || 6, -uiTime * 0.5);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCodex() {
+  // fully opaque: the live HUD underneath is noise here, not atmosphere
+  ctx.fillStyle = '#03060c';
+  ctx.fillRect(0, 0, W, H);
+  const list = codexList();
+  const g = codexGeom();
+  codexSel = clamp(codexSel, 0, Math.max(0, list.length - 1));
+  const seenCount = list.filter(codexSeen).length;
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '800 30px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText('CODEX', W / 2, 44);
+  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText(seenCount + ' / ' + list.length + '  RECORDED', W / 2, 66);
+
+  // tabs
+  const tabs = codexTabRects();
+  ['ENEMIES', 'UPGRADES'].forEach((label, i) => {
+    const r = tabs[i], on = codexTab === i;
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = on ? 'rgba(103,232,249,0.14)' : (hot ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.04)');
+    ctx.strokeStyle = on ? COL.player : '#334155';
+    ctx.lineWidth = on ? 2 : 1;
+    roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.stroke();
+    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = on ? COL.player : '#64748b';
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+  });
+
+  // grid, clipped to its own viewport so rows scroll under the header
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.x0 - 6, g.y0, g.cw * g.cols + 12, g.viewH);
+  ctx.clip();
+  for (let i = 0; i < list.length; i++) {
+    const r = codexCellRect(i);
+    if (r.y + r.h < g.y0 - 4 || r.y > g.y0 + g.viewH + 4) continue;
+    const en = list[i], seen = codexSeen(en);
+    const sel = i === codexSel;
+    const hot = inRect(mouse.x, mouse.y, r);
+    const col = codexTab === 0 ? (seen ? en.col : '#475569')
+                               : (seen ? RARITY[en.rar] : '#475569');
+    ctx.save();
+    ctx.globalAlpha = seen ? 1 : 0.5;
+    ctx.fillStyle = sel ? rgba(col, 0.13) : (hot ? 'rgba(148,163,184,0.07)' : 'rgba(148,163,184,0.03)');
+    ctx.strokeStyle = sel ? col : 'rgba(71,85,105,0.6)';
+    ctx.lineWidth = sel ? 2 : 1;
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    if (codexTab === 0) {
+      drawCodexIcon(en, r.x + r.w / 2, r.y + r.h / 2 - 12, en.boss ? 22 : 18, seen);
+      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = seen ? (en.boss ? en.col : '#94a3b8') : '#475569';
+      ctx.fillText(seen ? en.n : '? ? ?', r.x + r.w / 2, r.y + r.h - 14);
+    } else {
+      // items get no picture, by design — name and rarity only
+      ctx.font = '700 8px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = seen ? RARITY[en.rar] : '#475569';
+      ctx.fillText(seen ? en.rar.toUpperCase() : '———', r.x + r.w / 2, r.y + 15);
+      ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
+      ctx.fillText(seen ? upName(en.up) : '? ? ?', r.x + r.w / 2, r.y + r.h - 18);
+    }
+  }
+  ctx.restore();
+
+  // scrollbar, only when there is something to scroll
+  const ms = codexMaxScroll();
+  if (ms > 0) {
+    const trackX = g.x0 + g.cw * g.cols + 10;
+    const th = g.viewH * (g.viewH / (g.viewH + ms));
+    const ty = g.y0 + (g.viewH - th) * (codexScroll / ms);
+    ctx.fillStyle = 'rgba(148,163,184,0.12)';
+    roundRect(trackX, g.y0, 4, g.viewH, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(148,163,184,0.45)';
+    roundRect(trackX, ty, 4, th, 2); ctx.fill();
+  }
+
+  // detail panel
+  const en = list[codexSel];
+  if (en) {
+    const seen = codexSeen(en);
+    const dy = H - 108;
+    ctx.textAlign = 'center';
+    if (codexTab === 0) {
+      ctx.font = '800 20px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = seen ? en.col : '#475569';
+      ctx.fillText(seen ? en.n : 'NOT YET ENCOUNTERED', W / 2, dy);
+      if (en.boss) {
+        ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+        ctx.fillStyle = '#7f1d1d';
+        ctx.fillText('BOSS', W / 2, dy - 20);
+      }
+    } else {
+      ctx.font = '800 20px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = seen ? RARITY[en.rar] : '#475569';
+      ctx.fillText(seen ? upName(en.up) : 'NOT YET ENCOUNTERED', W / 2, dy);
+      if (seen) {
+        ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+        ctx.fillStyle = '#475569';
+        ctx.fillText(en.rar.toUpperCase() + '   ·   UP TO ' + en.max, W / 2, dy - 20);
+      }
+    }
+    ctx.font = '400 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = seen ? '#94a3b8' : '#334155';
+    const text = seen ? (codexTab === 0 ? en.d : upDesc(en.up))
+                      : 'Meet it once and it will be recorded here.';
+    wrapText(text, W / 2, dy + 24, Math.min(700, W - 80), 17);
+  }
+
+  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.fillText('TAB switch  ·  ARROWS / WHEEL browse  ·  ESC close', W / 2, H - 18);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function openCodex(from) {
+  codexFrom = from || 'menu';
+  codexTab = 0; codexSel = 0; codexScroll = 0;
+  state = 'codex'; uiArm = 0.3;
+  Audio_.select();
+}
+function closeCodex() {
+  state = codexFrom === 'pause' ? 'pause' : 'menu';
+  uiArm = 0.3;
+  Audio_.select();
+}
+// keep the selected cell inside the viewport when moving by keyboard
+function codexReveal() {
+  const g = codexGeom();
+  const row = Math.floor(codexSel / g.cols);
+  const top = row * g.ch, bot = top + g.ch;
+  if (top < codexScroll) codexScroll = top;
+  else if (bot > codexScroll + g.viewH) codexScroll = bot - g.viewH;
+  codexScroll = clamp(codexScroll, 0, codexMaxScroll());
 }
 
 function drawMalware() {
@@ -7050,6 +8052,19 @@ function drawLibrary() {
   ctx.fillStyle = '#64748b';
   ctx.fillText('WRITTEN FROM ' + bk.from, cx, cy - 148);
 
+  // the bookkeeper, off to the side of the shelf, waiting as he always is
+  const kx = Math.max(96, cx - Math.min(300, W * 0.33));
+  drawKeeperNPC(kx, cy - 40, 42);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = keeperWants() ? KEEPER_COL : '#78716c';
+  ctx.fillText('THE BOOKKEEPER', kx, cy + 34);
+  ctx.font = '400 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = keeperWants() ? '#fde68a' : '#64748b';
+  wrapText('“' + keeperLine() + '”', kx, cy + 56, 210, 15);
+  ctx.restore();
+
   // the book itself
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -7099,11 +8114,19 @@ function drawLibrary() {
   const b = libraryButtons();
   drawButton(b.take, 'TAKE IT  [E]', true, bk.col);
   drawButton(b.leave, 'LEAVE  [ESC]', true, '#64748b');
+  if (b.hand) {
+    const pulse = 0.7 + Math.sin(uiTime * 4) * 0.3;
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    drawButton(b.hand, 'HAND HIM THE CODEX  [F]', true, KEEPER_COL);
+    ctx.restore();
+  }
 
   ctx.textAlign = 'center';
   ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#3f3f46';
-  ctx.fillText('you may only carry one book at a time', cx, H - 26);
+  ctx.fillText(b.hand ? 'he has been waiting for a complete record'
+                      : 'you may only carry one book at a time', cx, H - 26);
 }
 
 /* ------------------------------ planetarium UI ----------------------------- */
