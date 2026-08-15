@@ -15,6 +15,37 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<!-- Channel isolation for the chromatic split. Drawing the scene three times
+     through these and summing them additively reproduces the original exactly
+     when the offsets are zero, so the aberration is real rather than a tint. -->
+<svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true">
+  <filter id="fxR" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="fxG" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="fxB" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+  </filter>
+  <!-- bright pass: a smooth knee that keeps neon and drops the floor -->
+  <filter id="fxBright" color-interpolation-filters="sRGB">
+    <feComponentTransfer>
+      <feFuncR type="gamma" exponent="5" amplitude="1.7" offset="-0.11"/>
+      <feFuncG type="gamma" exponent="5" amplitude="1.7" offset="-0.11"/>
+      <feFuncB type="gamma" exponent="5" amplitude="1.7" offset="-0.11"/>
+    </feComponentTransfer>
+  </filter>
+  <!-- final grade: lifted contrast with a touch of extra saturation -->
+  <filter id="fxGrade" color-interpolation-filters="sRGB">
+    <feComponentTransfer>
+      <feFuncR type="gamma" exponent="0.94" amplitude="1.06" offset="-0.012"/>
+      <feFuncG type="gamma" exponent="0.96" amplitude="1.04" offset="-0.012"/>
+      <feFuncB type="gamma" exponent="0.98" amplitude="1.05" offset="-0.006"/>
+    </feComponentTransfer>
+    <feColorMatrix type="saturate" values="1.14"/>
+  </filter>
+</svg>
 <script>
 "use strict";
 /* ============================================================================
@@ -43,7 +74,163 @@ function resize() {
   cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.imageSmoothingEnabled = true;
+  fxResize();
 }
+
+/* ============================ post-processing ==============================
+   The world is drawn to the main canvas as before, then rebuilt from it: the
+   scene is split into colour channels and recombined at slightly different
+   scales (lateral chromatic aberration), a four-tap bloom is accumulated from
+   progressively smaller blurred copies, and the frame is finished with a
+   grade, a vignette, scanlines and grain. All of it runs on the compositor —
+   there is no getImageData anywhere in here, so nothing stalls the pipeline.
+========================================================================== */
+const FX = { OFF: 0, ON: 1 };
+let fxLevel = FX.ON;
+let bufScene, cScene;
+const bloomTaps = [];                    // { buf, ctx, shift, blur, weight }
+let grainTile = null, scanTile = null;
+
+function makeBuf(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, w | 0); c.height = Math.max(1, h | 0);
+  return c;
+}
+
+function fxResize() {
+  const w = cv.width, h = cv.height;
+  bufScene = makeBuf(w, h);
+  cScene = bufScene.getContext('2d', { alpha: false });
+  cScene.imageSmoothingEnabled = true;
+  /* Four taps at halving resolutions. Because each is blurred at its own
+     scale, the widest one covers a huge radius for almost nothing, which is
+     what gives the bloom its long soft falloff instead of a hard halo. */
+  bloomTaps.length = 0;
+  /* Weights stay low on purpose: bloom is light spilling around a shape, not
+     a wash over it. Too much and every core saturates and reads as blurred. */
+  const spec = [[1, 2, 0.26], [2, 3, 0.20], [3, 4, 0.15], [4, 5, 0.11]];
+  for (const [shift, blur, weight] of spec) {
+    const buf = makeBuf(w >> shift, h >> shift);
+    const c = buf.getContext('2d');
+    c.imageSmoothingEnabled = true;
+    bloomTaps.push({ buf, ctx: c, shift, blur, weight });
+  }
+  if (!grainTile) buildGrainTile();
+  if (!scanTile) buildScanTile();
+}
+
+// a tile of monochrome noise, scrolled and flipped each frame so it never reads
+// as a static texture stuck to the screen
+function buildGrainTile() {
+  const S = 256;
+  grainTile = makeBuf(S, S);
+  const g = grainTile.getContext('2d');
+  const img = g.createImageData(S, S);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 110 + Math.random() * 90;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// transparent but for one dark row: it must darken lines, not lay down paint
+function buildScanTile() {
+  scanTile = makeBuf(1, 3);
+  const s = scanTile.getContext('2d');
+  s.clearRect(0, 0, 1, 3);
+  s.fillStyle = 'rgba(0,0,0,0.20)';
+  s.fillRect(0, 2, 1, 1);
+}
+
+/* Rebuilds the world layer from the main canvas. Everything below works in
+   device pixels, so the transform is reset for the duration. */
+function postWorld() {
+  if (!fxLevel || !bufScene) return;
+  const w = cv.width, h = cv.height;
+
+  // 1. take the scene, grading it on the way in so the bloom is graded too
+  cScene.setTransform(1, 0, 0, 1, 0, 0);
+  cScene.filter = 'url(#fxGrade)';
+  cScene.drawImage(cv, 0, 0);
+  cScene.filter = 'none';
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  /* 2. chromatic aberration. Red is laid down slightly large and blue
+     slightly small, so the split is zero at the centre and widest at the
+     corners — the way a real lens does it. Impacts widen it. */
+  const ab = (1.15 + cam.trauma * 6 + drawFlashT * 7) * DPR;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'lighter';
+  const chan = (filter, px) => {
+    const sy = px * h / w;
+    ctx.filter = filter;
+    ctx.drawImage(bufScene, -px, -sy, w + px * 2, h + sy * 2);
+  };
+  chan('url(#fxR)',  ab);
+  chan('url(#fxG)',  0);
+  chan('url(#fxB)', -ab);
+  ctx.filter = 'none';
+
+  /* 3. bloom. Each tap downsamples from the one before it, so the blur
+     compounds and the widest tap covers most of the screen for almost
+     nothing. The first tap is where the bright pass happens. */
+  for (let i = 0; i < bloomTaps.length; i++) {
+    const t = bloomTaps[i], src = i === 0 ? bufScene : bloomTaps[i - 1].buf;
+    t.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    t.ctx.globalCompositeOperation = 'copy';
+    t.ctx.filter = (i === 0 ? 'url(#fxBright) ' : '') + 'blur(' + t.blur + 'px)';
+    t.ctx.drawImage(src, 0, 0, t.buf.width, t.buf.height);
+    t.ctx.filter = 'none';
+  }
+  for (const t of bloomTaps) {
+    ctx.globalAlpha = t.weight;
+    ctx.drawImage(t.buf, 0, 0, w, h);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+/* The screen itself: falloff at the edges, line structure, and grain over
+   everything including the HUD, so the frame reads as one image. */
+let vigGrad = null, vigKey = '';
+function postScreen() {
+  if (!fxLevel) return;
+  const w = cv.width, h = cv.height;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  const key = w + 'x' + h;
+  if (key !== vigKey) {
+    vigKey = key;
+    const r = Math.hypot(w, h) * 0.5;
+    vigGrad = ctx.createRadialGradient(w / 2, h / 2, r * 0.34, w / 2, h / 2, r);
+    vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vigGrad.addColorStop(0.72, 'rgba(0,0,0,0.16)');
+    vigGrad.addColorStop(1, 'rgba(0,0,0,0.52)');
+  }
+  ctx.fillStyle = vigGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  // scanlines, at device scale so they stay one pixel regardless of DPR
+  ctx.globalAlpha = 0.5;
+  const sp = ctx.createPattern(scanTile, 'repeat');
+  ctx.fillStyle = sp;
+  ctx.fillRect(0, 0, w, h);
+
+  // grain, jittered every frame so it never sits still
+  ctx.globalAlpha = 0.05;
+  ctx.globalCompositeOperation = 'overlay';
+  const gp = ctx.createPattern(grainTile, 'repeat');
+  ctx.translate((Math.random() * 256) | 0, (Math.random() * 256) | 0);
+  ctx.fillStyle = gp;
+  ctx.fillRect(-256, -256, w + 512, h + 512);
+  ctx.restore();
+}
+
 window.addEventListener('resize', resize);
 resize();
 
@@ -262,9 +449,14 @@ function shake(t) { cam.trauma = Math.min(1, cam.trauma + t); }
 /* How much a world-space event should register on screen. 1 while it is in
    view, tapering to 0 once it is well outside the frame. Without this, a vent
    erupting on the far side of the arena whites out a screen it isn't even on. */
+/* Camera zoom. Normally 1; THE AMALGAM pulls it out because the thing is over
+   500px tall and would not otherwise fit on a laptop screen. Every conversion
+   between world and screen space has to divide by it. */
+let camZoom = 1, camZoomT = 1;
+
 function onScreen(x, y, pad = 90) {
-  const dx = Math.abs(x - cam.x) - (W / 2 + pad);
-  const dy = Math.abs(y - cam.y) - (H / 2 + pad);
+  const dx = Math.abs(x - cam.x) - (W / (2 * camZoom) + pad);
+  const dy = Math.abs(y - cam.y) - (H / (2 * camZoom) + pad);
   if (dx <= 0 && dy <= 0) return 1;
   const d = Math.hypot(Math.max(0, dx), Math.max(0, dy));
   return clamp(1 - d / 400, 0, 1);
@@ -455,7 +647,7 @@ function newPlayer() {
     sunT: 0, currentT: 0, scalesDebt: 0, scalesT: 0, twinAng: 0,
     // runtime
     fireT: 0, iframe: 0, dashMax: 1, dashCh: 1, dashCd: 1.5, dashRe: 0,
-    dashT: 0, dashDX: 0, dashDY: 0, hurtFlash: 0,
+    dashT: 0, dashDX: 0, dashDY: 0, hurtFlash: 0, ghosts: [],
     blStacks: 0, blT: 0, tempoT: 0, ocCount: 0, staticT: 0, ghostT: 0,
     // library book: one active item, charged a wave at a time
     book: null, bookCharge: 0,
@@ -691,6 +883,7 @@ const KEEPER_NOTES = {
   theother:    'Its diary is the only honest thing down here.',
   keeper:      'I would rather not be an entry. Yet here we are.',
   unwritten:   'It held no ink for as long as I tried. You closed it anyway.',
+  amalgam:     'I did not file this one. He was not in a filing mood.',
 
   /* ---- upgrades ---- */
   rate:   'They always take this one first.',
@@ -789,6 +982,7 @@ const CODEX_B = {
   curator:    { d: 'A native of THE FRACTURE. It arranges the encounter rather than fighting it, and treats you as the exhibit.' },
   theother:   { d: 'Mirrors you through the centre of the room, then stops pretending: it heals to full, grows legs, and charges blind until it hits a wall. Reduce it far enough and it takes the mirrors — unless something else gets to it first.' },
   keeper:     { d: 'He was in every library, behind the desk, saying very little. He wanted the finished record and he was patient about getting it. Given it, he reads: he writes your own upgrades onto himself, calls out anything you ever logged, and works through the ledger one section at a time.' },
+  amalgam:    { d: 'He did not build anything new. He took the ones he already had, cut them up and bolted them into the shape of a person — two wardens for arms, two broodmothers for legs, the thing that held no ink for a spine — and he talked the whole time he was doing it. It shakes the floor when it walks. You are not permitted to die to it; every killing blow just moves your decimal point one place to the right.' },
   unwritten:  { d: 'Two halves of one thing, standing apart. Hurt either and the other closes the wound, so both have to be opened at once. It deletes the page you are standing on and writes your own build back at you. There was never an entry for it. There is one now.' }
 };
 
@@ -858,7 +1052,10 @@ const BOSSES = {
                  ai: bossKeeper, secret: true },
   // the entry that does not exist until it is closed
   unwritten:   { name: 'THE UNWRITTEN', col: '#f8fafc', r: 40, sides: 4, hpMul: 3.4, spd: 132,
-                 ai: bossUnwritten, secret: true, endgame: true }
+                 ai: bossUnwritten, secret: true, endgame: true },
+  // not fought as a boss entity — its limbs are. This entry exists for the record.
+  amalgam:     { name: 'THE AMALGAM', col: '#fca5a5', r: 70, sides: 9, hpMul: 1, spd: 0,
+                 ai: () => {}, secret: true, endgame: true }
 };
 
 /* -------------------------------- stages ---------------------------------
@@ -1272,6 +1469,8 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
       burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 2, '#94a3b8', 120, 1.8, 0.18);
   }
   if (e.dr > 0) dmg *= 1 - e.dr;         // scales with the build, unlike the flat part
+  if (e.amalPart)
+    dmg *= 1 - (AMAL_DR[P.weapon] !== undefined ? AMAL_DR[P.weapon] : 0.95);
 
   /* THE UNWRITTEN keeps its health on the fight, not on either body: damage is
      banked and only sticks if the twin was opened in the same window. */
@@ -1360,6 +1559,7 @@ function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false) {
    burns enemies rather than its owner. */
 function playerBlast(x, y, radius, dmg, color) {
   explode(x, y, radius, dmg, color, false);
+  knockCorpses(x, y, radius, 620);        // fused bodies ride the blast outward
   if (P.napalm)
     addHazard('fire', x, y, 3.5 + P.napalm, {
       r: radius * 0.72, dmg: 7 + 5 * P.napalm, friendly: true, col: '#fb923c'
@@ -1377,7 +1577,16 @@ function killEnemy(e, ang = 0) {
   score += Math.round(e.score * (1 + wave * 0.05));
   burst(e.x, e.y, e.type === 'boss' ? 90 : (12 + e.r), e.col, e.type === 'boss' ? 520 : 260, e.r * 0.22 + 2, 0.7);
   ringFx(e.x, e.y, e.r * 0.4, e.r * 3.2, e.col, 0.4, 3);
-  corpses.push({ x: e.x, y: e.y, r: e.r, sides: e.sides, ang: e.ang, col: e.col, life: 0.42, max: 0.42 });
+  /* A volatile kill leaves a body with a fuse in it rather than detonating on
+     the spot. It keeps the momentum of whatever killed it and can be shoved
+     further, so the blast can be walked into a crowd instead of going off
+     wherever the thing happened to die. */
+  const volat = P.volatile > 0;
+  corpses.push({ x: e.x, y: e.y, r: e.r, sides: e.sides, ang: e.ang, col: e.col,
+                 life: volat ? 0.85 : 0.42, max: volat ? 0.85 : 0.42,
+                 vol: volat ? P.volatile : 0,
+                 vx: volat ? (e.vx || 0) * 0.4 + (e.kbx || 0) : 0,
+                 vy: volat ? (e.vy || 0) * 0.4 + (e.kby || 0) : 0 });
   Audio_.kill();
   shake(e.type === 'boss' ? 1 : 0.05 + e.r * 0.003);
 
@@ -1429,7 +1638,7 @@ function killEnemy(e, ang = 0) {
       }
     }
   }
-  if (P.volatile) playerBlast(e.x, e.y, 62 + 24 * P.volatile, (10 + 9 * P.volatile) * (1 + wave * 0.06), '#fb923c');
+  // the volatile blast is held until the fuse burns out — see updateCorpses
   if (e.type === 'splitter' && e.gen < 2) {
     for (let i = 0; i < 2; i++) {
       const c = spawnEnemy('splitter', e.x + rnd(26, -26), e.y + rnd(26, -26),
@@ -1452,8 +1661,8 @@ function killEnemy(e, ang = 0) {
     for (const h of hazards) h.orbit = false;
     finaleBeams.length = 0;
   }
-  // a shadow is not the stage boss — killing one must not end the wave
-  if (e.type === 'boss' && !e.shadow) {
+  // a shadow, or a bolted-on limb, is not the stage boss
+  if (e.type === 'boss' && !e.shadow && !e.amalPart) {
     lastBossDeath = { x: e.x, y: e.y };
     bossAlive = false; onBossDefeat(e);
   }
@@ -1503,6 +1712,21 @@ function hurtPlayer(dmg, opts) {
 }
 
 function reviveOrDie() {
+    /* THE AMALGAM: you are not allowed to die, you are only allowed to become
+       a smaller number. Each lethal hit shifts the decimal one place — 1, then
+       0.1, then 0.01 — so the bar keeps reading something and never empties.
+       He took dying away from you and it still was not enough. */
+    if (amalgam) {
+      amalDec++;
+      P.hp = Math.pow(10, 1 - amalDec);
+      P.iframe = Math.max(P.iframe, 1.1);
+      P.hurtFlash = 1;
+      drawFlashT = 0.3; shake(0.9);
+      Audio_.hurt(); Audio_.tone(140, 0.3, 'square', 0.1, 60);
+      ringFx(P.x, P.y, 8, 220, AMAL_COL, 0.6, 4);
+      floatText(P.x, P.y - 44, fmtHp(P.hp), AMAL_COL, 17);
+      return;
+    }
     /* THE UNWRITTEN does not let you lose the run. It rewinds instead, and
        Second Wind is not spent doing it — the attempt simply did not happen.
        This must catch every call while the fight is live, not just the first:
@@ -2089,6 +2313,10 @@ const BOOKS = {
       playerBlast(tx, ty, 200, 45 + P.dmg * 2.6, '#a78bfa');
       ringFx(ox, oy, 10, 240, '#a78bfa', 0.5, 4);
       ringFx(tx, ty, 10, 240, '#a78bfa', 0.5, 4);
+      /* The blink used to be two explosions with nothing between them, so it
+         never read as travel. Now the line it took is left behind, with the
+         ship's own silhouette strung along it. */
+      blinkTrail(ox, oy, tx, ty, '#a78bfa');
       Audio_.tone(760, 0.22, 'sine', 0.12, 220);
     }
   },
@@ -2363,6 +2591,123 @@ function useBook() {
 --------------------------------------------------------------------------- */
 const MAL_COL = '#ef4444';
 
+/* ------------------------- malware execution effects -----------------------
+   Malware should not look like the rest of the game's coloured rings. It is
+   something running on the board, so it draws like one: right-angle traces
+   routed between the things it touches, bracket surges that snap outward in
+   steps rather than sweeping, and torn bands where memory is being scribbled
+   over. Everything here is one list, updated with the particles.
+--------------------------------------------------------------------------- */
+let malFx = [];
+function malPush(o) {
+  o.t = 0;
+  malFx.push(o);
+  if (malFx.length > 160) malFx.shift();
+}
+
+// a square bracket ring that steps outward — a bus, not a shockwave
+function malSurge(x, y, r, col, life) {
+  malPush({ k: 'surge', x, y, r, col: col || MAL_COL, life: life || 0.55 });
+}
+// right-angle routing between two points, the way a trace actually runs
+function malTrace(x1, y1, x2, y2, col, life) {
+  malPush({ k: 'trace', x1, y1, x2, y2, col: col || MAL_COL, life: life || 0.5,
+            mid: Math.random() < 0.5 });
+}
+// memory being scribbled over
+function malGlitch(x, y, r, col, life) {
+  malPush({ k: 'glitch', x, y, r, col: col || MAL_COL, life: life || 0.4,
+            seed: Math.random() * 1000 });
+}
+// the archivist's blink: the line it took, with the hull strung along it
+function blinkTrail(x1, y1, x2, y2, col) {
+  malPush({ k: 'blink', x1, y1, x2, y2, col, life: 0.5, ang: Math.atan2(y2 - y1, x2 - x1) });
+}
+
+function updateMalFx(dt) {
+  for (let i = malFx.length - 1; i >= 0; i--) {
+    malFx[i].t += dt;
+    if (malFx[i].t >= malFx[i].life) malFx.splice(i, 1);
+  }
+}
+
+function drawMalFx() {
+  for (const f of malFx) {
+    const u = clamp(f.t / f.life, 0, 1), a = 1 - u;
+    ctx.lineCap = 'butt';
+    if (f.k === 'surge') {
+      const r = f.r * (0.25 + u * 0.75);
+      ctx.strokeStyle = rgba(f.col, 0.8 * a);
+      ctx.lineWidth = 2.2;
+      // corner brackets rather than a closed circle
+      for (let q = 0; q < 4; q++) {
+        const sx = q < 2 ? 1 : -1, sy = q % 2 ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(f.x + sx * r, f.y + sy * r * 0.55);
+        ctx.lineTo(f.x + sx * r, f.y + sy * r);
+        ctx.lineTo(f.x + sx * r * 0.55, f.y + sy * r);
+        ctx.stroke();
+      }
+      // stubs of trace breaking off it
+      ctx.strokeStyle = rgba(f.col, 0.4 * a);
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 8; i++) {
+        const ang = i * TAU / 8 + 0.4;
+        const cx0 = f.x + Math.cos(ang) * r, cy0 = f.y + Math.sin(ang) * r * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(cx0, cy0);
+        ctx.lineTo(cx0 + Math.cos(ang) * 14, cy0);
+        ctx.lineTo(cx0 + Math.cos(ang) * 14, cy0 + Math.sin(ang) * 12);
+        ctx.stroke();
+      }
+    } else if (f.k === 'trace' || f.k === 'blink') {
+      const p = f.k === 'blink' ? 1 : Math.min(1, u * 2.4);
+      const mx = f.mid ? f.x2 : f.x1, my = f.mid ? f.y1 : f.y2;
+      ctx.strokeStyle = rgba(f.col, 0.85 * a);
+      ctx.lineWidth = f.k === 'blink' ? 3 : 2;
+      ctx.beginPath();
+      if (f.k === 'blink') { ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); }
+      else {
+        ctx.moveTo(f.x1, f.y1);
+        ctx.lineTo(lerp(f.x1, mx, p), lerp(f.y1, my, p));
+        if (p >= 1) ctx.lineTo(f.x2, f.y2);
+      }
+      ctx.stroke();
+      // a charge riding along it
+      const q = (f.t / f.life);
+      ctx.fillStyle = rgba('#fecaca', a);
+      if (f.k === 'blink') {
+        // the hull, ghosted at intervals down the line it took
+        for (let i = 0; i < 5; i++) {
+          const s = i / 4;
+          ctx.save();
+          ctx.globalAlpha = a * (0.5 - s * 0.3);
+          ctx.translate(lerp(f.x1, f.x2, s), lerp(f.y1, f.y2, s));
+          ctx.rotate(f.ang);
+          ctx.lineWidth = 1.6;
+          drawShipHull(f.col, 'rgba(0,0,0,0)');
+          ctx.restore();
+        }
+      } else {
+        const bx = lerp(f.x1, mx, q), by = lerp(f.y1, my, q);
+        ctx.fillRect(bx - 2.5, by - 2.5, 5, 5);
+      }
+    } else if (f.k === 'glitch') {
+      // torn bands, offset left and right like a bad read
+      const n = 5;
+      for (let i = 0; i < n; i++) {
+        const h = f.r * 0.16;
+        const yy = f.y - f.r * 0.5 + i * (f.r / n);
+        const off = Math.sin(f.seed + i * 2.7 + f.t * 30) * f.r * 0.5 * a;
+        ctx.fillStyle = rgba(f.col, 0.30 * a);
+        ctx.fillRect(f.x - f.r * 0.5 + off, yy, f.r, h);
+        ctx.fillStyle = rgba('#38bdf8', 0.16 * a);
+        ctx.fillRect(f.x - f.r * 0.5 - off * 0.6, yy + 1, f.r, h * 0.6);
+      }
+    }
+  }
+}
+
 const MALWARE = [
   { id: 'fork', n: 'FORK BOMB', col: '#f87171',
     d: 'Forces the nearest enemy to spawn processes it cannot kill. It bursts — and everything caught in the burst bursts in turn, all the way through the crowd.',
@@ -2375,11 +2720,12 @@ const MALWARE = [
         const e = queue.shift(); depth++;
         const R = 150;
         playerBlast(e.x, e.y, R, 18 + P.dmg * 1.7, '#f87171');
-        ringFx(e.x, e.y, 8, R, '#f87171', 0.4, 3);
+        malSurge(e.x, e.y, R, '#f87171', 0.5);
         for (const o of enemies) {
           if (o.dead || seen.has(o.id) || o.invuln) continue;
           if (len(o.x - e.x, o.y - e.y) > R + o.r) continue;
           seen.add(o.id); queue.push(o);
+          malTrace(e.x, e.y, o.x, o.y, '#f87171', 0.45);   // the process it spawned
         }
       }
       floatText(seed.x, seed.y - 40, 'FORKED ×' + depth, '#f87171', 15);
@@ -2397,6 +2743,7 @@ const MALWARE = [
       const b = pick(live.filter(e => e !== a));
       const ax = a.x, ay = a.y;
       malTrail(a.x, a.y, b.x, b.y, '#fb7185');
+      malTrace(a.x, a.y, b.x, b.y, '#fb7185', 0.55);
       a.x = clamp(b.x, arena.x0 + a.r, arena.x1 - a.r);
       a.y = clamp(b.y, arena.y0 + a.r, arena.y1 - a.r);
       b.x = clamp(ax, arena.x0 + b.r, arena.x1 - b.r);
@@ -2405,7 +2752,7 @@ const MALWARE = [
       for (const e of [a, b]) {
         e.slow = 0.9; e.slowT = 2;
         damageEnemy(e, 40 + P.dmg * 3.4, true, P.x, P.y);
-        ringFx(e.x, e.y, 6, 120, '#fb7185', 0.45, 3);
+        malGlitch(e.x, e.y, 90, '#fb7185', 0.45);
       }
       P.iframe = Math.max(P.iframe, 0.4);
       Audio_.tone(180, 0.2, 'sawtooth', 0.1, 900);
@@ -2417,7 +2764,7 @@ const MALWARE = [
       const R = 400;
       const near = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < R);
       if (!near.length) return malMiss('EMPTY STACK');
-      ringFx(P.x, P.y, 12, R, '#f97316', 0.6, 4);
+      malSurge(P.x, P.y, R, '#f97316', 0.6);
       const per = (10 + P.dmg * 0.9) * near.length;
       for (const e of near) {
         damageEnemy(e, per, near.length >= 5, P.x, P.y);
@@ -2439,7 +2786,7 @@ const MALWARE = [
       const R = 360;
       const near = enemies.filter(e => !e.dead && len(e.x - P.x, e.y - P.y) < R);
       if (!near.length) return malMiss('NOTHING TO ALLOCATE');
-      ringFx(P.x, P.y, 12, R, '#a3e635', 0.55, 4);
+      malSurge(P.x, P.y, R, '#a3e635', 0.55);
       for (const e of near) {
         e.leak = 0.05 + P.dmg * 0.0016;       // fraction of max HP per second
         e.leakT = 7;
@@ -2455,12 +2802,13 @@ const MALWARE = [
       const R = 420;
       const near = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < R);
       if (!near.length) return malMiss('NULL');
-      ringFx(P.x, P.y, 12, R, '#38bdf8', 0.6, 4);
+      malSurge(P.x, P.y, R, '#38bdf8', 0.6);
       let deleted = 0;
       for (const e of near) {
         if (e.type !== 'boss' && e.hp / e.maxHp < 0.34) {
           deleted++;
           burst(e.x, e.y, 18, '#38bdf8', 240, 3, 0.5);
+          malGlitch(e.x, e.y, 110, '#38bdf8', 0.5);
           damageEnemy(e, e.hp + 1, true, P.x, P.y);
         } else {
           damageEnemy(e, 14 + P.dmg * 1.4, false, P.x, P.y);
@@ -2480,6 +2828,7 @@ const MALWARE = [
       for (const b of ebullets) {
         const near = nearestEnemy(b.x, b.y, 900);
         burst(b.x, b.y, 3, '#fbbf24', 140, 2.2, 0.22);
+        if (Math.random() < 0.3) malGlitch(b.x, b.y, 34, '#fbbf24', 0.3);
         if (near) damageEnemy(near, 6 + P.dmg * 0.8, false, b.x, b.y, { silent: true });
         dropped++;
       }
@@ -2493,7 +2842,10 @@ const MALWARE = [
     d: 'Halts every other thread in the room. Enemies and their rounds freeze solid in a wide radius; yours keep running.',
     f: () => {
       const R = 460;
-      ringFx(P.x, P.y, 14, R, '#c084fc', 0.7, 5);
+      malSurge(P.x, P.y, R, '#c084fc', 0.7);
+      for (const e of enemies)
+        if (!e.dead && len(e.x - P.x, e.y - P.y) < R)
+          malTrace(P.x, P.y, e.x, e.y, '#c084fc', 0.7);
       for (const e of enemies) {
         if (e.dead || len(e.x - P.x, e.y - P.y) > R) continue;
         e.slow = 0.97; e.slowT = 1.6;      // 3% speed reads as stopped
@@ -2762,6 +3114,7 @@ const Save = {
                   codexE: [], codexU: [], codexM: [], codexB: [], codexZ: [],
                   keeperMet: false, keeperDone: false,
                   trueEnd: false, freeplay: false, unwrittenDeaths: 0,
+                  askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -2775,6 +3128,15 @@ const Save = {
       if (legacy > 0) p.best = legacy;
       return p;
     } catch (e) { return Save.blank(); }
+  },
+  /* Anyone who beat THE UNWRITTEN before the monologue was made reliable can
+     be sitting on a finished record with no way to the amalgam: trueEnd closes
+     the keeper's offer, and the one-shot timer that used to open the monologue
+     may never have fired. Having beaten it but never having been asked is
+     exactly that state, so re-arm him. */
+  repair(p) {
+    if (p.trueEnd && !p.amalgamDone && !p.askedHarder) p.devTalkDue = true;
+    return p;
   },
   writeLocal() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(Save.profile)); } catch (e) {}
@@ -2804,6 +3166,9 @@ const Save = {
     out.trueEnd = !!(a.trueEnd || b.trueEnd);
     out.freeplay = !!(a.freeplay || b.freeplay);
     out.unwrittenDeaths = Math.max(a.unwrittenDeaths || 0, b.unwrittenDeaths || 0);
+    out.askedHarder = !!(a.askedHarder || b.askedHarder);
+    out.amalgamDone = !!(a.amalgamDone || b.amalgamDone);
+    out.devTalkDue  = !!(a.devTalkDue  || b.devTalkDue);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
@@ -2830,13 +3195,14 @@ const Save = {
   },
 
   init() {
-    Save.profile = Save.readLocal();
+    Save.profile = Save.repair(Save.readLocal());
     Save.reconcileClears();
     Save.writeLocal();
     // older saves only knew mute; treat that as a volume of zero
     Audio_.setVol(Save.profile.vol !== undefined ? Save.profile.vol
                                                  : (Save.profile.muted ? 0 : 1));
     Codex.load();
+    fxLevel = Save.profile.fx === undefined ? FX.ON : (Save.profile.fx ? FX.ON : FX.OFF);
     autoFire = !!Save.profile.autofire;
     applyChar(Save.profile.charIdx || 0);
     Save.connect();
@@ -2856,7 +3222,7 @@ const Save = {
       try { remote = await db.get('profile'); } catch (e) { remote = null; }
       Save.db = db;
       Save.status = 'cloud';
-      if (remote) { Save.profile = Save.merge(Save.profile, remote); Save.writeLocal(); }
+      if (remote) { Save.profile = Save.repair(Save.merge(Save.profile, remote)); Save.writeLocal(); }
       Save.reconcileClears();   // the merged profile may predate clear tracking
       await Save.flush();
       await Save.refreshTop();
@@ -3045,7 +3411,12 @@ function resetGame() {
   arenaReset(true); lastBossDeath = null;
   libraryPortal = null; libraryBook = null; malwareOffer = null;
   unwritten = null; unwTears = []; unwDeadT = 0; unwSnap = null;
+  amalgam = null; amalCut = null; amalDec = 0; amalSaid = {};
+  devLine = 0; devAsk = false; devType = 0; devOut = 0;
+  devTalkSaidNo = false; devTalkT = 3.2;   // a fresh run, he can raise it again
+  outro = null;
   diaryBeams = []; diaryMirrors = [];
+  gwaves = []; malFx = [];
   awaitingPortal = false; normalIdx = 0; altIdx = -1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
@@ -3054,6 +3425,7 @@ function resetGame() {
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
   shopChipOffered = false;
   freeRun = false; freeOpen = false; freeGod = false; freeSpd = 1;
+  camZoom = 1; camZoomT = 1;
   curseHpMul = 1; planetSign = null; planetRevealed = false;
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   hitStop = 0; drawFlashT = 0; bannerT = 0;
@@ -3165,8 +3537,22 @@ function handleKey(k) {
     } else if (k === ' ' || k === 'enter' || k === 'e') talkAdvance();
     return;
   }
+  if (state === 'devtalk') {
+    if (devAsk) {
+      if (k === 'y') devAnswer(true);
+      else if (k === 'n' || k === 'escape') devAnswer(false);
+    } else if (k === ' ' || k === 'enter' || k === 'e') devAdvance();
+    return;
+  }
+  if (state === 'amalcut') return;         // it does not take input
   if (k === 'q') { useBook(); return; }
   if (state === 'pause' && k === 'x') { openCodex('pause'); return; }
+  if (k === 'g') {                       // an out, for anything that struggles
+    fxLevel = fxLevel ? FX.OFF : FX.ON;
+    Save.profile.fx = fxLevel;
+    Save.writeLocal(); Save.flush();
+    return;
+  }
   if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
@@ -3251,6 +3637,15 @@ function handleClick() {
     else if (inRect(mouse.x, mouse.y, b.no)) talkAnswer(false);
     return;
   }
+  if (state === 'devtalk') {
+    if (uiArm > 0) return;
+    if (!devAsk) { devAdvance(); return; }
+    const b = devButtons();
+    if (inRect(mouse.x, mouse.y, b.yes)) devAnswer(true);
+    else if (inRect(mouse.x, mouse.y, b.no)) devAnswer(false);
+    return;
+  }
+  if (state === 'amalcut') return;
   if (freeRun && freeOpen && state === 'play') {
     const rs = freeRects();
     for (let i = 0; i < FREE_ROWS.length; i++) if (inRect(mouse.x, mouse.y, rs[i])) {
@@ -3315,6 +3710,7 @@ const STEP = 1 / 60;
 
 let frameErrors = 0;
 function frame(now) {
+  if (pageDead) return;                  // the page has stopped; do not requeue
   const dt = Math.min(0.2, (now - last) / 1000);
   last = now;
   acc += dt;
@@ -3355,10 +3751,32 @@ function update(dt) {
 
   // cosmetic layers keep running during level-up / shop / death for smoothness
   updateParticles(dt);
+  updateGWaves(dt);
+  updateMalFx(dt);
+  if (state === 'amalcut') {               // the assembly plays on its own clock
+    if (uiArm > 0) uiArm -= dt;
+    updateAmalCut(dt);
+    /* Frame the thing being built, not the player. The camera normally tracks
+       the ship, which during assembly leaves the body almost entirely offscreen
+       — you would watch a cutscene about its ankles. */
+    const b = amalBodyPos();
+    const k = 1 - Math.exp(-3.2 * dt);
+    cam.x = lerp(cam.x, b.x, k);
+    cam.y = lerp(cam.y, b.y - 20, k);
+    cam.trauma = Math.max(0, cam.trauma - dt * 1.4);
+    cam.sx = rnd(1, -1) * cam.trauma * 26;
+    cam.sy = rnd(1, -1) * cam.trauma * 26;
+    camZoomT = 0.6;
+    camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
+    updateParticles(dt);
+    return;
+  }
   if (state === 'levelup' || state === 'shop' || state === 'planet' ||
-      state === 'library' || state === 'talk' || state === 'dead') {
+      state === 'library' || state === 'talk' || state === 'devtalk' ||
+      state === 'dead') {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
+    if (state === 'devtalk') devTypeTick(dt);
     updateCamera(dt, state === 'dead');
     return;
   }
@@ -3386,6 +3804,21 @@ function update(dt) {
                    (!unwritten.b || unwritten.b.dead)) {
     unwritten = null; unwTears = []; unwDeadT = 0; bossAlive = false;
   }
+  if (amalgam) amalUpdate(dt);
+  /* He is owed a word, and he waits for the floor to be clear to take it.
+     This used to be a one-shot timer that checked state === 'play' once and
+     gave up: a level-up or a shop open at that instant dropped the monologue,
+     and since beating THE UNWRITTEN sets trueEnd the keeper would never offer
+     the fight again — so the amalgam was gone for good. */
+  if (outro) outroTick(dt);
+  if (Save.profile.devTalkDue && !Save.profile.amalgamDone && !devTalkSaidNo &&
+      !unwritten && !amalgam && !amalCut && unwDeadT <= 0) {
+    devTalkT -= dt;
+    if (devTalkT <= 0) startDevTalk();
+  }
+  // pull the view out for the amalgam, ease back afterwards
+  camZoomT = (amalgam || amalCut) ? 0.6 : 1;
+  camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
   updateArena(dt);
   updatePortals(dt);
   updateLibrary(dt);
@@ -3439,8 +3872,8 @@ function updatePlayer(dt) {
   if (il > 1) { ix /= il; iy /= il; }
 
   // aim
-  mouse.wx = mouse.x + cam.x - W / 2 + cam.sx;
-  mouse.wy = mouse.y + cam.y - H / 2 + cam.sy;
+  mouse.wx = (mouse.x - W / 2 - cam.sx) / camZoom + cam.x;
+  mouse.wy = (mouse.y - H / 2 - cam.sy) / camZoom + cam.y;
   let firing = mouse.down || autoFire || keys['j'];
   if (isTouch) {
     if (touchUI.aim) {
@@ -3469,6 +3902,8 @@ function updatePlayer(dt) {
     keys[' '] = false; keys['shift'] = false;
     P.dashCh--;
     burst(P.x, P.y, 16, P.malware.col, 240, 3, 0.4);
+    malSurge(P.x, P.y, 120, P.malware.col, 0.45);
+    malGlitch(P.x, P.y, 70, P.malware.col, 0.3);
     P.malware.f();
   } else if (wantDash && P.dashCh > 0 && P.dashT <= 0) {
     keys[' '] = false; keys['shift'] = false;
@@ -3503,9 +3938,13 @@ function updatePlayer(dt) {
     P.dashT -= dt;
     const ds = 1080;
     P.vx = P.dashDX * ds; P.vy = P.dashDY * ds;
+    // a silhouette dropped every frame, so the dash leaves a body behind it
+    P.ghosts.push({ x: P.x, y: P.y, ang: P.ang, t: 1, phase: P.ghost > 0 });
+    if (P.ghosts.length > 14) P.ghosts.shift();
     if (Math.random() < 0.85)
       spawnPart(P.x, P.y, rnd(50, -50), rnd(50, -50), rnd(6, 3), COL.player, 0.3, 0.9);
   } else {
+    if (P.ghosts.length) P.ghosts.shift();   // the trail drains once you land
     // acid chills you, Tempo kicks in after a kill
     const spdMul = (1 - playerChill) * (P.tempoT > 0 ? 1.35 : 1)
                  * (P.burrowT > 0 ? 1.8 : 1);
@@ -4166,7 +4605,9 @@ function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
   const b = {
     x: bx, y: by,
     vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-    r, dmg, life: 4.5, col: e.col
+    r, dmg, life: 4.5, col: e.col,
+    // what fired it, so its shot can be drawn as its own thing
+    kind: e.boss, spin: rnd(TAU)
   };
   ebullets.push(b);
   Audio_.tone(300, 0.06, 'sawtooth', 0.045, 160);
@@ -4179,6 +4620,11 @@ function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
    movement and picks a new action whenever atkT expires.
 -------------------------------------------------------------------------- */
 function updateBoss(e, dt, ux, uy, d) {
+  /* A limb bolted onto THE AMALGAM is driven entirely by amalUpdate. Letting
+     its original script run as well had every piece fighting you twice — the
+     brood legs laying eggs, NULL sweeping bands, plates spinning — on top of
+     the patterns the body itself fires. */
+  if (e.amalPart) return;
   const frac = e.hp / e.maxHp;
   // lockPhase pins a boss past the HP gates — used when one heals itself and
   // would otherwise fall back through its own phase transitions.
@@ -5265,6 +5711,1020 @@ function unwWin() {
   banner('IT IS WRITTEN', UNW_COL, 5.0);
   Audio_.boss(); Audio_.levelup(); Audio_.boom();
   ringFx(P.x, P.y, 20, 1200, UNW_COL, 1.6, 10);
+  // and then somebody else would like a word. Recorded on the profile rather
+  // than fired on a timer, so quitting here does not lose him.
+  if (!Save.profile.amalgamDone) {
+    Save.profile.devTalkDue = true;
+    Save.writeLocal(); Save.flush();
+    devTalkT = 3.2;
+  }
+}
+
+/* ============================== THE AMALGAM ================================
+   He does not build a new boss. He takes the ones he already made apart and
+   bolts them into something shaped like a person, and he narrates it while he
+   does it. Two wardens for arms, two broodmothers for legs, the thing that
+   held no ink for a spine.
+
+   You cannot die here. Every lethal hit moves the decimal point instead —
+   1, then 0.1, then 0.01 — so the health bar becomes an increasingly absurd
+   number and the fight becomes something you are shown rather than something
+   you survive. That is the entire point of it.
+========================================================================== */
+const AMAL_COL = '#fca5a5';
+let amalgam = null, amalCut = null, amalDec = 0, amalSaid = {};
+
+// offset from the body centre, which boss it was cut from, and how big
+/* Bigger than anything else in the game, and laid out so the silhouette reads
+   as a person from across the room: narrow head, heavy chest, long arms. */
+const AMAL_PARTS = [
+  { id: 'head',  key: 'nullcore',    ox:    0, oy: -244, r: 52, hp: 1.0, layer: 2 },
+  { id: 'spine', key: 'theother',    ox:    0, oy: -132, r: 30, hp: 0.7, layer: 0 },
+  { id: 'torso', key: 'forgeheart',  ox:    0, oy:  -34, r: 88, hp: 1.6, layer: 1 },
+  { id: 'shldL', key: 'curator',     ox: -134, oy: -158, r: 44, hp: 0.8, layer: 2 },
+  { id: 'shldR', key: 'archivist',   ox:  134, oy: -158, r: 44, hp: 0.8, layer: 2 },
+  { id: 'armL',  key: 'warden',      ox: -206, oy:   36, r: 50, hp: 1.0, layer: 2 },
+  { id: 'armR',  key: 'warden',      ox:  206, oy:   36, r: 50, hp: 1.0, layer: 2 },
+  { id: 'legL',  key: 'broodmother', ox:  -96, oy:  186, r: 54, hp: 1.1, layer: 0 },
+  { id: 'legR',  key: 'broodmother', ox:   96, oy:  186, r: 54, hp: 1.1, layer: 0 }
+];
+/* Sized so the fight lasts long enough for him to finish talking. There are
+   seven lines gated on remaining health and they are the whole point of the
+   encounter, so a maxed build folding it in six seconds would throw the ending
+   away. You cannot die here, so length costs nothing but time. */
+/* Expanding rings that lift the arena tiles as they pass, so a slam reads as
+   the floor itself heaving rather than as one more flat ring sprite. Kept
+   global because the grid is drawn long before anything knows about a boss. */
+let gwaves = [];
+
+function groundWave(x, y, o) {
+  o = o || {};
+  gwaves.push({ x, y, t: 0,
+    life:  o.life  || 1.5,
+    speed: o.speed || 900,
+    amp:   o.amp   || 34,
+    width: o.width || 130,
+    col:   o.col   || '#fbbf24' });
+  if (gwaves.length > 8) gwaves.shift();
+}
+
+function updateGWaves(dt) {
+  for (let i = gwaves.length - 1; i >= 0; i--) {
+    gwaves[i].t += dt;
+    if (gwaves[i].t >= gwaves[i].life) gwaves.splice(i, 1);
+  }
+}
+
+// how far a point on the floor is lifted, and how hot the crest is there
+function gwaveLift(wx, wy) {
+  let lift = 0, glow = 0;
+  for (let i = 0; i < gwaves.length; i++) {
+    const w = gwaves[i];
+    // squashed vertically so the ring reads as lying on the ground plane
+    const off = Math.hypot(wx - w.x, (wy - w.y) / 0.82) - w.speed * w.t;
+    if (off < -w.width || off > w.width) continue;
+    const k = Math.cos(off / w.width * Math.PI * 0.5);        // smooth crest
+    const fade = 1 - w.t / w.life;
+    lift += -w.amp * k * k * fade;                            // negative = up
+    glow += k * k * fade;
+  }
+  return { lift, glow };
+}
+
+const AMAL_ROLE = {
+  head: 'helm', spine: 'spool', torso: 'spool',
+  shldL: 'pauldron', shldR: 'pauldron',
+  armL: 'gauntlet', armR: 'gauntlet',
+  legL: 'greave',  legR: 'greave'
+};
+const AMAL_PART_HP = 400000;
+
+/* Same per-hull reduction the unwritten uses, and for a sharper reason: nine
+   bodies standing in a cluster is the ideal target for chain, splash and
+   drones, so a maxed VOIDRUNNER puts roughly a million DPS into it and folded
+   the whole encounter in two seconds. He is not going to allow that twice. */
+const AMAL_DR = { bullet: 0.95, laser: 0.5 };
+
+// which rage line lands as each piece is bolted on
+const AMAL_CUT_STEPS = [
+  { at: 0.0,  line: 0 },
+  { at: 2.0,  line: 1 },
+  { at: 3.6,  line: 2, part: 'armL' },
+  { at: 5.0,  line: 2, part: 'armR' },
+  { at: 6.6,  line: 3, part: 'torso' },
+  { at: 8.6,  line: 4, part: 'legL' },
+  { at: 9.8,  line: 4, part: 'legR' },
+  { at: 11.4, line: 5, part: 'shldR' },
+  { at: 13.0, line: 6, part: 'shldL' },
+  { at: 14.8, line: 7, part: 'spine' },
+  { at: 17.4, line: 8, part: 'head' },
+  { at: 19.6, line: 9 }
+];
+
+function startAmalgamCut() {
+  enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+  portals.length = 0; hazards.length = 0; mortars.length = 0;
+  arenaReset(true);
+  arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, 1900, 1300);
+  P.x = WORLD.w / 2; P.y = WORLD.h / 2 + 300; P.vx = P.vy = 0;
+  cam.x = WORLD.w / 2; cam.y = WORLD.h / 2 - 60;
+  amalCut = { t: 0, line: 0, placed: {}, fired: {}, done: false };
+  amalDec = 0; amalSaid = {};
+  state = 'amalcut'; uiArm = 0.3;
+  drawFlashT = 0.4; shake(1.4);
+  Audio_.boss();
+}
+
+function updateAmalCut(dt) {
+  const c = amalCut;
+  if (!c) return;
+  c.t += dt;
+  for (const s of AMAL_CUT_STEPS) {
+    if (c.t >= s.at && !c.fired[s.at]) {
+      c.fired[s.at] = true;
+      c.line = s.line;
+      if (s.part) {
+        c.placed[s.part] = 0;               // 0..1 slam-in progress
+        shake(1.1); drawFlashT = 0.22;
+        Audio_.boom(); Audio_.tone(90, 0.3, 'square', 0.14, 40);
+      } else {
+        Audio_.tone(300, 0.08, 'sine', 0.05, 500);
+      }
+    }
+  }
+  for (const k in c.placed) c.placed[k] = Math.min(1, c.placed[k] + dt * 2.6);
+  if (Math.random() < 0.5) {
+    const a = rnd(TAU), r = rnd(420, 120);
+    spawnPart(WORLD.w / 2 + Math.cos(a) * r, WORLD.h / 2 - 30 + Math.sin(a) * r * 0.7,
+              rnd(60, -60), rnd(20, -90), rnd(4, 2), AMAL_COL, rnd(0.7, 0.3), 0.94);
+  }
+  if (c.t > 22 && !c.done) { c.done = true; startAmalgam(); }
+}
+
+function amalBodyPos() {
+  return amalgam ? { x: amalgam.x, y: amalgam.y }
+                 : { x: WORLD.w / 2, y: WORLD.h / 2 - 40 };
+}
+
+function drawAmalCut() {
+  const c = amalCut;
+  if (!c) return;
+  const b = amalBodyPos();
+  ctx.save();
+  // the frame it is being bolted onto
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = AMAL_COL; ctx.lineWidth = 2;
+  ctx.setLineDash([10, 8]); ctx.lineDashOffset = -uiTime * 20;
+  for (const p of AMAL_PARTS) {
+    if (c.placed[p.id] !== undefined) continue;
+    ctx.beginPath(); ctx.arc(b.x + p.ox, b.y + p.oy, p.r, 0, TAU); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+  drawAmalBody(b, c.placed, null);
+}
+
+// the rage lines, over the top of the assembly
+function drawAmalCutText() {
+  const c = amalCut;
+  if (!c) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const fade = clamp(c.t / 0.8, 0, 1);
+  ctx.globalAlpha = fade * (c.t > 21 ? clamp(22 - c.t, 0, 1) : 1);
+  // letterbox, so it reads as a cutscene rather than gameplay
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, 64);
+  ctx.fillRect(0, H - 104, W, 104);
+  const line = DEV_RAGE[Math.min(c.line, DEV_RAGE.length - 1)];
+  const big = c.line >= DEV_RAGE.length - 2;
+  ctx.font = (big ? '800 ' + Math.min(38, W * 0.04) : '400 ' + Math.min(20, W * 0.021)) +
+             'px ' + (big ? 'Segoe UI, system-ui, sans-serif' : 'ui-monospace, Consolas, monospace');
+  ctx.fillStyle = big ? '#f87171' : '#e2e8f0';
+  wrapText(line, W / 2, H - 56, Math.min(880, W - 90), 26);
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+function startAmalgam() {
+  const cx = WORLD.w / 2, cy = WORLD.h / 2 - 40;
+  enemies.length = 0; ebullets.length = 0;
+  /* Each piece is spawned as a real enemy rather than a bespoke object, so
+     every damage path in the game — bullets, the lance, drones, chain, static,
+     books, malware — reaches it without a single special case. It is pinned to
+     its slot on the frame every tick instead of steering itself. */
+  const parts = AMAL_PARTS.map(p => {
+    const e = spawnEnemy('boss', cx + p.ox, cy + p.oy, { boss: p.key });
+    e.amalPart = p.id;
+    e.armor = 0; e.absorb = 0; e.dr = 0; e.floor = undefined;
+    e.spd = 0; e.xp = 0; e.score = 0;
+    e.r = p.r;
+    e.hp = e.maxHp = AMAL_PART_HP * p.hp;
+    return Object.assign({}, p, { e, cd: rnd(2.2, 0.4) });
+  });
+  amalgam = { x: cx, y: cy, vx: 0, vy: 0, t: 0, parts,
+              quakeT: 3.2, stepT: 0, phase: 0, said: {},
+              slamT: 5.0, slam: null, beam: null,
+              maxHp: parts.reduce((s, p) => s + p.e.maxHp, 0) };
+  amalgam.hp = amalgam.maxHp;
+  amalCut = null;
+  state = 'play';
+  bossAlive = true;
+  P.hp = P.maxHp;
+  amalDec = 0;
+  banner('THE AMALGAM', AMAL_COL, 5.0);
+  drawFlashT = 0.6; shake(2.4);
+  Audio_.boss(); Audio_.boom();
+  ringFx(cx, cy, 30, 1400, AMAL_COL, 1.8, 12);
+}
+
+const AMAL_LINES = [
+  { at: 0.92, s: 'You are enjoying this.' },
+  { at: 0.78, s: 'I spent four months on the mirror. Four months, on a room ' +
+                 'you walked through backwards.' },
+  { at: 0.62, s: 'Every one of these was somebody\'s favourite, once.' },
+  { at: 0.48, s: 'You cannot even die. I took that away from you. ' +
+                 'It is still not enough, is it.' },
+  { at: 0.34, s: 'I do not know what else there is to give you.' },
+  { at: 0.20, s: 'That is all of them. That is every one I ever made.' },
+  { at: 0.08, s: '...take it. Take all of it.' }
+];
+
+function amalSay(frac) {
+  for (let i = 0; i < AMAL_LINES.length; i++) {
+    const L = AMAL_LINES[i];
+    if (frac <= L.at && !amalSaid[i]) {
+      amalSaid[i] = true;
+      banner(L.s, AMAL_COL, 5.5);
+      Audio_.tone(360, 0.06, 'sine', 0.04, 520);
+      return;
+    }
+  }
+}
+
+/* ------------------------- the last thing it does -------------------------
+   Below a sliver of health it stops pretending to be a boss fight and just
+   holds down a beam across the whole arena. It cannot kill you — that is the
+   point of it — so the only thing left to take is the size of your number. */
+const RAINBOW = ['#ff2d55', '#ff7a00', '#ffd60a', '#34c759',
+                 '#32ade6', '#5e5ce6', '#bf5af2'];
+const BEAM_CHARGE = 2.6, BEAM_FIRE = 10.0, BEAM_HALF = 138, BEAM_LEN = 5200;
+
+function amalBeamOrigin(a) {
+  const c = a.parts.find(z => z.id === 'torso');
+  if (c && c.e && !c.e.dead) return amalPartPos(a, c);
+  return { x: a.x, y: a.y - 34 };
+}
+
+function amalStartBeam(a) {
+  const o = amalBeamOrigin(a);
+  a.beam = { t: 0, ang: Math.atan2(P.y - o.y, P.x - o.x),
+             spin: (Math.random() < 0.5 ? -1 : 1) * 0.20, fired: false, tick: 0 };
+  banner('You were never going to stop, were you.', AMAL_COL, 5.0);
+  Audio_.tone(90, BEAM_CHARGE, 'sawtooth', 0.1, 900);
+}
+
+function amalUpdateBeam(a, dt) {
+  const b = a.beam, o = amalBeamOrigin(a);
+  b.t += dt;
+
+  if (b.t < BEAM_CHARGE) {
+    // keep it aimed at you while it spools up, then commit
+    const want = Math.atan2(P.y - o.y, P.x - o.x);
+    b.ang = angLerp(b.ang, want, 1 - Math.exp(-2.6 * dt));
+    if (Math.random() < 0.9) {                    // light dragged into the chest
+      const ang = rnd(TAU), r = rnd(620, 300);
+      spawnPart(o.x + Math.cos(ang) * r, o.y + Math.sin(ang) * r,
+                -Math.cos(ang) * 460, -Math.sin(ang) * 460,
+                rnd(4, 2), pick(RAINBOW), 0.6, 0.9);
+    }
+    cam.trauma = Math.max(cam.trauma, 0.35);
+    return;
+  }
+
+  if (!b.fired) {
+    b.fired = true;
+    drawFlashT = Math.max(drawFlashT, 0.5);
+    shake(2.8);
+    Audio_.boom(); Audio_.boss();
+    banner('So I will just keep going too.', AMAL_COL, 5.0);
+  }
+
+  b.ang += b.spin * dt;                            // a slow sweep across the room
+  cam.trauma = Math.max(cam.trauma, 0.5);
+
+  // it burns every tick you stand in it — you cannot die, only shrink
+  const dx = P.x - o.x, dy = P.y - o.y;
+  const c = Math.cos(-b.ang), s = Math.sin(-b.ang);
+  const along = dx * c - dy * s, across = dx * s + dy * c;
+  if (along > -40 && along < BEAM_LEN && Math.abs(across) < BEAM_HALF) {
+    hurtPlayer(3.4 + a.phase * 1.2);
+    if (Math.random() < 0.5)
+      spawnPart(P.x + rnd(20, -20), P.y + rnd(20, -20), rnd(160, -160), rnd(160, -160),
+                rnd(4, 2), pick(RAINBOW), 0.4, 0.9);
+  }
+
+  // the floor under the beam keeps ringing
+  b.tick -= dt;
+  if (b.tick <= 0) {
+    b.tick = 0.55;
+    groundWave(o.x + Math.cos(b.ang) * 700, o.y + Math.sin(b.ang) * 700,
+               { life: 1.2, speed: 700, amp: 26, width: 110, col: pick(RAINBOW) });
+    Audio_.tone(140, 0.2, 'sawtooth', 0.05, 90);
+  }
+
+  if (b.t > BEAM_CHARGE + BEAM_FIRE) { a.beam = null; a.beamCd = 7.0; }
+}
+
+function drawAmalBeam(a) {
+  const b = a.beam, o = amalBeamOrigin(a);
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.rotate(b.ang);
+  ctx.globalCompositeOperation = 'lighter';
+
+  if (b.t < BEAM_CHARGE) {
+    // a hairline sight showing exactly where it is about to open up
+    const u = b.t / BEAM_CHARGE;
+    ctx.strokeStyle = rgba('#ffffff', 0.25 + u * 0.5);
+    ctx.lineWidth = 1 + u * 5;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(BEAM_LEN, 0); ctx.stroke();
+    for (let k = 0; k < RAINBOW.length; k++) {
+      const off = (k - 3) * 26 * u;
+      ctx.strokeStyle = rgba(RAINBOW[k], 0.16 * u);
+      ctx.lineWidth = 10 * u;
+      ctx.beginPath(); ctx.moveTo(0, off); ctx.lineTo(BEAM_LEN, off); ctx.stroke();
+    }
+    ctx.restore();
+    drawGlow(o.x, o.y, 90 + u * 210, '#ffffff', 0.3 + u * 0.5);
+    return;
+  }
+
+  const age = b.t - BEAM_CHARGE;
+  const fade = clamp(Math.min(age * 4, (BEAM_FIRE - age) * 2), 0, 1);
+
+  /* Parallax: each colour band is a separate layer with its own width, drift
+     and scroll rate, so the beam shears against itself as it sweeps. */
+  for (let k = 0; k < RAINBOW.length; k++) {
+    const d = k - (RAINBOW.length - 1) / 2;
+    const depth = 0.45 + k / RAINBOW.length;                // layer "distance"
+    const off = d * 34 + Math.sin(uiTime * (1.1 + k * 0.23) + k) * 20 * depth;
+    const h = 26 + Math.sin(uiTime * 2 + k) * 6;
+    ctx.fillStyle = rgba(RAINBOW[k], 0.20 * fade);
+    ctx.fillRect(0, off - h / 2, BEAM_LEN, h);
+    // chevrons racing outward at the layer's own speed
+    const sp = 900 + k * 460, gap = 240;
+    const phase = (uiTime * sp) % gap;
+    ctx.fillStyle = rgba(RAINBOW[k], 0.42 * fade);
+    for (let x = -gap + phase; x < BEAM_LEN; x += gap)
+      ctx.fillRect(x, off - h / 2, 86, h);
+  }
+
+  // white core
+  const pulse = 1 + Math.sin(uiTime * 26) * 0.1;
+  ctx.fillStyle = rgba('#ffffff', 0.72 * fade);
+  ctx.fillRect(0, -22 * pulse, BEAM_LEN, 44 * pulse);
+  ctx.fillStyle = rgba('#ffffff', 0.3 * fade);
+  ctx.fillRect(0, -BEAM_HALF, BEAM_LEN, BEAM_HALF * 2);
+  // hot edges
+  ctx.strokeStyle = rgba('#ffd60a', 0.5 * fade);
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, -BEAM_HALF); ctx.lineTo(BEAM_LEN, -BEAM_HALF);
+  ctx.moveTo(0,  BEAM_HALF); ctx.lineTo(BEAM_LEN,  BEAM_HALF);
+  ctx.stroke();
+  ctx.restore();
+
+  // the muzzle
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(o.x, o.y, 300 * fade, '#ffffff', 0.6 * fade);
+  drawGlow(o.x, o.y, 190 * fade, pick(RAINBOW), 0.4 * fade);
+  ctx.restore();
+}
+
+const SLAM_UP = 0.8, SLAM_DOWN = 0.14, SLAM_HOLD = 0.45;
+
+/* Where the slamming arm is, relative to its socket. It winds up over the
+   shoulder, comes down faster than you can react to at the last moment, and
+   then drags back out of the crater. */
+function amalSlamArm(s) {
+  if (s.t < SLAM_UP) {
+    const u = 1 - Math.pow(1 - s.t / SLAM_UP, 3);
+    return { lift: -210 * u, reach: u, wind: u };
+  }
+  if (s.t < SLAM_UP + SLAM_DOWN) {
+    const u = (s.t - SLAM_UP) / SLAM_DOWN;
+    return { lift: lerp(-210, 150, u * u), reach: 1, wind: 1 - u };
+  }
+  const u = clamp((s.t - SLAM_UP - SLAM_DOWN) / SLAM_HOLD, 0, 1);
+  return { lift: lerp(150, 0, u), reach: 1 - u, wind: 0 };
+}
+
+function amalPartPos(a, p) {
+  // a slow walk cycle, so the whole frame lumbers
+  const sway = Math.sin(a.t * 1.5) * 12;
+  const bob = Math.abs(Math.sin(a.t * 1.5)) * 10;
+  const legSwing = p.id === 'legL' ? Math.sin(a.t * 1.5) * 26
+                 : p.id === 'legR' ? -Math.sin(a.t * 1.5) * 26 : 0;
+  const armSwing = p.id === 'armL' ? -Math.sin(a.t * 1.5) * 20
+                 : p.id === 'armR' ? Math.sin(a.t * 1.5) * 20 : 0;
+  let x = a.x + p.ox + sway * (p.oy < -60 ? 0.4 : 1) + legSwing;
+  let y = a.y + p.oy - bob + armSwing * 0.4;
+  if (a.slam && a.slam.arm === p.id) {
+    const m = amalSlamArm(a.slam);
+    x += (a.slam.tx - x) * m.reach;
+    y += (a.slam.ty - y) * m.reach + m.lift;
+  }
+  return { x, y };
+}
+
+function amalStartSlam(a) {
+  // pick a live arm; if both are gone it stamps with a leg instead
+  const cands = ['armR', 'armL', 'legR', 'legL']
+    .filter(id => { const p = a.parts.find(z => z.id === id); return p && p.e && !p.e.dead; });
+  if (!cands.length) return;
+  const arm = cands[0] === 'armR' && Math.random() < 0.5 && cands.includes('armL')
+            ? 'armL' : cands[0];
+  a.slam = { arm, t: 0, tx: P.x, ty: P.y, hit: false };
+  Audio_.tone(150, 0.5, 'sawtooth', 0.07, 60);
+}
+
+function amalUpdateSlam(a, dt) {
+  const s = a.slam;
+  s.t += dt;
+  // it keeps tracking you while the arm is still going up
+  if (s.t < SLAM_UP * 0.72) {
+    s.tx += (P.x - s.tx) * (1 - Math.exp(-3.4 * dt));
+    s.ty += (P.y - s.ty) * (1 - Math.exp(-3.4 * dt));
+  }
+  // dust sucked toward the impact point during the windup
+  if (s.t < SLAM_UP && Math.random() < 0.6) {
+    const ang = rnd(TAU), r = rnd(320, 150);
+    spawnPart(s.tx + Math.cos(ang) * r, s.ty + Math.sin(ang) * r,
+              -Math.cos(ang) * 220, -Math.sin(ang) * 220 - 40,
+              rnd(4, 2), '#a8a29e', 0.5, 0.9);
+  }
+  if (!s.hit && s.t >= SLAM_UP + SLAM_DOWN) {
+    s.hit = true;
+    amalSlamImpact(a, s);
+  }
+  if (s.t >= SLAM_UP + SLAM_DOWN + SLAM_HOLD) a.slam = null;
+}
+
+function amalSlamImpact(a, s) {
+  shake(2.4);
+  drawFlashT = Math.max(drawFlashT, 0.22);
+  Audio_.boom(); Audio_.tone(48, 0.7, 'square', 0.2, 26);
+  // the floor heaves outward from the fist
+  groundWave(s.tx, s.ty, { life: 1.9, speed: 1050, amp: 72, width: 175, col: '#fbbf24' });
+  groundWave(s.tx, s.ty, { life: 1.3, speed: 620,  amp: 40, width: 115, col: '#f97316' });
+  ringFx(s.tx, s.ty, 20, 700, '#fbbf24', 0.9, 9);
+  ringFx(s.tx, s.ty, 10, 340, '#ffffff', 0.5, 6);
+  // debris thrown up out of the crater
+  for (let k = 0; k < 38; k++) {
+    const ang = rnd(TAU), sp = rnd(520, 160);
+    spawnPart(s.tx + Math.cos(ang) * 30, s.ty + Math.sin(ang) * 30,
+              Math.cos(ang) * sp, Math.sin(ang) * sp * 0.6 - rnd(260, 90),
+              rnd(8, 3), Math.random() < 0.4 ? '#fbbf24' : '#78716c', rnd(1.0, 0.4), 0.93);
+  }
+  // the shock itself: close in and it hurts
+  const d = len(P.x - s.tx, P.y - s.ty);
+  if (d < 190) hurtPlayer(26 + a.phase * 8);
+  // and a ring of shrapnel riding the wave out
+  const n = 22 + a.phase * 6;
+  for (let k = 0; k < n; k++) {
+    const ang = k * TAU / n + rnd(0.06, -0.06);
+    ebullets.push({ x: s.tx, y: s.ty,
+      vx: Math.cos(ang) * 340, vy: Math.sin(ang) * 340 * 0.7,
+      r: 7, dmg: 16 + a.phase * 4, life: 4, col: '#fbbf24' });
+  }
+}
+
+function amalQuake(a) {
+  shake(1.5);
+  groundWave(a.x, a.y + 150, { life: 2.2, speed: 780, amp: 30, width: 150, col: '#fbbf24' });
+  drawFlashT = Math.max(drawFlashT, 0.12);
+  Audio_.boom(); Audio_.tone(60, 0.5, 'square', 0.16, 30);
+  const n = 26 + a.phase * 8;
+  for (let k = 0; k < n; k++) {
+    const ang = k * TAU / n + rnd(0.05, -0.05);
+    ebullets.push({ x: a.x, y: a.y + 150,
+      vx: Math.cos(ang) * (170 + a.phase * 40),
+      vy: Math.sin(ang) * (170 + a.phase * 40) * 0.55,
+      r: 8, dmg: 14, life: 5, col: '#fbbf24' });
+  }
+  ringFx(a.x, a.y + 150, 20, 900, '#fbbf24', 0.8, 7);
+  // the floor itself jumps
+  for (let k = 0; k < 22; k++)
+    spawnPart(a.x + rnd(500, -500), a.y + 150 + rnd(60, -20),
+              rnd(90, -90), rnd(-140, -300), rnd(6, 3), '#fbbf24', rnd(0.8, 0.4), 0.93);
+}
+
+function amalFire(a, p) {
+  const pos = amalPartPos(a, p);
+  const toP = Math.atan2(P.y - pos.y, P.x - pos.x);
+  const ph = a.phase;
+  const dm = 12 + ph * 4;
+  const shot = (ang, spd, r, col) => {
+    const b = { x: pos.x + Math.cos(ang) * p.r, y: pos.y + Math.sin(ang) * p.r,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                r: r || 6, dmg: dm, life: 6, col: col || AMAL_COL };
+    ebullets.push(b); return b;
+  };
+  switch (p.key) {
+    case 'warden': {                       // rings, as it always did
+      const n = 16 + ph * 5, off = rnd(TAU);
+      for (let k = 0; k < n; k++) shot(off + k * TAU / n, 210 + ph * 30, 6, '#ef4444');
+      p.cd = 2.0 - ph * 0.35; break;
+    }
+    case 'forgeheart': {                   // four sweeping arcs
+      const base = a.t * 1.4;
+      for (let q = 0; q < 4; q++)
+        for (let k = 0; k < 5; k++)
+          shot(base + q * TAU / 4 + k * 0.09, 190, 7, '#f97316');
+      p.cd = 0.85 - ph * 0.12; break;
+    }
+    case 'broodmother': {                  // it still lays
+      for (let k = 0; k < 2 + ph; k++) {
+        const ang = rnd(TAU);
+        const s = spawnEnemy('swarmer',
+          clamp(pos.x + Math.cos(ang) * 70, arena.x0 + 40, arena.x1 - 40),
+          clamp(pos.y + Math.sin(ang) * 70, arena.y0 + 40, arena.y1 - 40), { elite: false });
+        if (s) { s.shadow = 9; s.xp = 0; s.score = 0; }
+      }
+      p.cd = 3.4 - ph * 0.5; break;
+    }
+    case 'nullcore': {                     // aimed lances from the head
+      for (let k = -2; k <= 2; k++) shot(toP + k * 0.1, 460 + ph * 60, 9, '#f0abfc');
+      p.cd = 1.5 - ph * 0.25; break;
+    }
+    case 'archivist': {                    // spiral
+      for (let k = 0; k < 3; k++) shot(a.t * 3.1 + k * TAU / 3, 240, 6, '#a78bfa');
+      p.cd = 0.16; break;
+    }
+    case 'curator': {                      // a wall with one gap
+      const gap = rnd(TAU), n = 30;
+      for (let k = 0; k < n; k++) {
+        const ang = k * TAU / n;
+        if (Math.abs(((ang - gap + Math.PI) % TAU + TAU) % TAU - Math.PI) < 0.5) continue;
+        shot(ang, 165, 6, '#e2e8f0');
+      }
+      p.cd = 2.6 - ph * 0.4; break;
+    }
+    case 'theother': {                     // it mirrors you, from the spine
+      const mx = 2 * ((arena.x0 + arena.x1) / 2) - P.x;
+      const my = 2 * ((arena.y0 + arena.y1) / 2) - P.y;
+      const ang = Math.atan2(my - pos.y, mx - pos.x);
+      for (let k = -1; k <= 1; k++) shot(ang + k * 0.16, 330, 7, '#5eead4');
+      p.cd = 1.1 - ph * 0.18; break;
+    }
+  }
+}
+
+function amalUpdate(dt) {
+  const a = amalgam;
+  if (!a) return;
+  a.t += dt;
+
+  const live = a.parts.filter(p => p.e && !p.e.dead);
+  if (!live.length) { amalWin(); return; }
+  // a piece that has just come off says so
+  for (const p of a.parts) {
+    if (p.e && p.e.dead && !p.announced) {
+      p.announced = true;
+      const pos = amalPartPos(a, p);
+      explode(pos.x, pos.y, 220, 0, AMAL_COL);
+      ringFx(pos.x, pos.y, 12, 420, AMAL_COL, 0.8, 6);
+      shake(0.9); drawFlashT = 0.2; Audio_.boom(); Audio_.crit();
+      floatText(pos.x, pos.y - p.r - 12, BOSSES[p.key].name + '  OFF', AMAL_COL, 15);
+    }
+  }
+  a.hp = live.reduce((s, p) => s + Math.max(0, p.e.hp), 0);
+  const frac = a.hp / a.maxHp;
+  a.phase = frac > 0.66 ? 0 : frac > 0.33 ? 1 : 2;
+  amalSay(frac);
+
+  // it lumbers toward you and never stops
+  const dx = P.x - a.x, dy = (P.y - 120) - a.y;
+  const d = len(dx, dy) || 1;
+  const spd = 26 + a.phase * 12;
+  a.x += (dx / d) * spd * dt;
+  a.y += (dy / d) * spd * dt * 0.5;
+  a.x = clamp(a.x, arena.x0 + 220, arena.x1 - 220);
+  a.y = clamp(a.y, arena.y0 + 220, arena.y1 - 160);
+
+  // every footfall shakes the room
+  a.stepT -= dt;
+  if (a.stepT <= 0) {
+    a.stepT = 1.05 / (1 + a.phase * 0.2);
+    shake(0.6);
+    Audio_.tone(70, 0.16, 'square', 0.09, 40);
+    // the foot that just landed throws up dust and a dent ring
+    const down = Math.sin(a.t * 1.5) > 0 ? 'legL' : 'legR';
+    const lp = a.parts.find(z => z.id === down);
+    const fx = lp && lp.e && !lp.e.dead ? amalPartPos(a, lp).x : a.x;
+    const fy = a.y + 232;
+    ringFx(fx, fy, 8, 190, '#78716c', 0.5, 4);
+    groundWave(fx, fy, { life: 0.9, speed: 560, amp: 13, width: 90, col: '#a8a29e' });
+    for (let k = 0; k < 16; k++)
+      spawnPart(fx + rnd(70, -70), fy, rnd(140, -140), rnd(-70, -200),
+                rnd(6, 2.5), '#78716c', rnd(0.7, 0.3), 0.92);
+  }
+  a.quakeT -= dt;
+  if (a.quakeT <= 0) { a.quakeT = 7.5 - a.phase * 1.6; amalQuake(a); }
+
+  // slams: it picks a fist up and drops it where you are standing
+  if (a.slam) amalUpdateSlam(a, dt);
+  else {
+    a.slamT -= dt;
+    if (a.slamT <= 0) { a.slamT = 6.5 - a.phase * 1.5; amalStartSlam(a); }
+  }
+
+  // once it is nearly gone it stops fighting fair and just holds the beam down
+  if (a.beam) amalUpdateBeam(a, dt);
+  else if (frac <= 0.16) {
+    a.beamCd = (a.beamCd || 0) - dt;
+    if (a.beamCd <= 0) amalStartBeam(a);
+  }
+
+  for (const p of live) {
+    // pin the piece to its slot on the frame; it does not steer itself
+    const pos = amalPartPos(a, p);
+    p.e.x = pos.x; p.e.y = pos.y; p.e.vx = p.e.vy = 0;
+    p.e.invuln = 0; p.e.phased = false;
+    p.cd -= dt;
+    if (p.cd <= 0) amalFire(a, p);
+
+    // welds shower sparks, and worse the more damaged the piece is
+    const hurt = 1 - clamp(p.e.hp / p.e.maxHp, 0, 1);
+    if (Math.random() < 0.18 + hurt * 0.5) {
+      const ang = rnd(TAU);
+      spawnPart(pos.x + Math.cos(ang) * p.r * 1.1, pos.y + Math.sin(ang) * p.r * 1.1,
+                rnd(70, -70), rnd(20, 120), rnd(2.6, 1.2),
+                Math.random() < 0.4 ? '#fde68a' : WELD, rnd(0.5, 0.2), 0.9);
+    }
+    // a badly hurt piece leaks fire
+    if (hurt > 0.55 && Math.random() < 0.2)
+      spawnPart(pos.x + rnd(p.r, -p.r), pos.y + rnd(p.r, -p.r),
+                rnd(20, -20), rnd(-40, -90), rnd(5, 2.4), '#ef4444', rnd(0.7, 0.3), 0.94);
+  }
+
+  // torn-off mounts spit as they burn
+  for (const p of a.parts) {
+    if (!p.e || !p.e.dead) continue;
+    if (Math.random() < 0.24) {
+      const pos = amalPartPos(a, p);
+      spawnPart(pos.x + rnd(22, -22), pos.y + rnd(22, -22), rnd(60, -60), rnd(-50, -140),
+                rnd(4, 2), Math.random() < 0.5 ? WELD : '#78716c', rnd(0.8, 0.3), 0.93);
+    }
+  }
+
+  // chest vents breathing
+  if (Math.random() < 0.5) {
+    const c = a.parts.find(z => z.id === 'torso');
+    if (c && c.e && !c.e.dead) {
+      const pos = amalPartPos(a, c);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      spawnPart(pos.x + side * 78, pos.y - 40, side * rnd(60, 10), rnd(-30, -80),
+                rnd(7, 3), '#57534e', rnd(0.9, 0.4), 0.95);
+    }
+  }
+}
+
+function amalWin() {
+  amalgam = null;
+  enemies.length = 0; ebullets.length = 0;
+  bossAlive = false;
+  Codex.seeEnemy('amalgam');
+  Codex.flush();
+  if (!Save.profile.amalgamDone) {
+    Save.profile.amalgamDone = true;
+    Save.writeLocal(); Save.flush();
+  }
+  arenaReset();
+  betweenWaves = 4.0;
+  score += 1000000;
+  drawFlashT = 0.7; shake(2.6);
+  banner('There. That is everything I had.', AMAL_COL, 7.0);
+  Audio_.boss(); Audio_.levelup(); Audio_.boom();
+  ringFx(P.x, P.y, 24, 1500, AMAL_COL, 1.8, 12);
+  P.hp = P.maxHp; amalDec = 0;
+  outro = { t: 0, type: 0, done: 0 };      // and then he stops
+}
+
+/* ------------------------------- the last line -----------------------------
+   He has nothing left to build, so he writes one more line on the floor and
+   takes the page down with him. The save is already flushed above — nothing
+   below this point is allowed to cost the player their progress.
+--------------------------------------------------------------------------- */
+const OUTRO_LINE = '. . . that\'s it. i\'m done.';
+const OUTRO_CPS = 7.5;                   // slow. he is not in a hurry any more
+let outro = null, pageDead = false;
+
+function outroTick(dt) {
+  const o = outro;
+  o.t += dt;
+  if (o.t < 3.4) return;                 // let the room finish celebrating
+  const before = Math.floor(o.type);
+  if (o.type < OUTRO_LINE.length) {
+    o.type += OUTRO_CPS * dt;
+    if (Math.floor(o.type) > before)
+      Audio_.tone(900 + Math.random() * 120, 0.02, 'square', 0.02, 1200);
+    return;
+  }
+  o.done += dt;
+  if (o.done > 2.6 && !pageDead) pageDies();
+}
+
+/* He takes the page down with him, for real. Everything is banked first —
+   the run, the profile, the codex — and only then is the renderer put out of
+   memory, so the tab dies with nothing owed to the player.
+
+   Set REAL_CRASH to false to stop at the drawn recreation instead. Note that
+   a genuine crash can take out another tab that Chrome happens to have put in
+   this same renderer process; the allocation below stays inside V8's own heap,
+   whose hard cap makes the renderer abort rather than dragging the machine
+   into swap. */
+const REAL_CRASH = true;
+
+async function pageDies() {
+  pageDead = true;
+  try { Audio_.setVol(0); } catch (e) {}
+
+  // 1. bank the run: best score, leaderboard, codex. Without this the clear
+  //    that just happened would never be recorded anywhere.
+  try { gameOver(true); } catch (e) {}
+  try { Save.writeLocal(); } catch (e) {}
+  // 2. give the cloud a moment, but never hang the ending on the network
+  try {
+    await Promise.race([Save.flush(),
+                        new Promise(r => setTimeout(r, 2500))]);
+  } catch (e) {}
+
+  // 3. if this window was opened by a script, it really can close
+  try { window.close(); } catch (e) {}
+
+  if (!REAL_CRASH) { setTimeout(drawCrashScreen, 90); return; }
+  setTimeout(exhaustMemory, 120);
+}
+
+function exhaustMemory() {
+  /* Plain small-integer arrays live in V8's heap, so this trips V8's own
+     out-of-memory abort — the renderer is killed and Chrome shows the real
+     "Aw, Snap!". A fatal OOM is not catchable; if a browser instead throws
+     something recoverable, drop the memory and use the recreation. */
+  const hold = [];
+  try {
+    for (;;) hold.push(new Array(2e6).fill(7));
+  } catch (e) {
+    hold.length = 0;
+    drawCrashScreen();
+  }
+}
+
+function drawCrashScreen() {
+  const dark = !window.matchMedia || matchMedia('(prefers-color-scheme: dark)').matches;
+  const bg = dark ? '#202124' : '#fff';
+  const fg = dark ? '#e8eaed' : '#202124';
+  const sub = dark ? '#9aa0a6' : '#5f6368';
+  const icon = dark ? '#9aa0a6' : '#80868b';
+  document.title = location.host || 'VOIDRUNNER';
+  document.documentElement.style.background = bg;
+  document.body.style.cssText =
+    'margin:0;background:' + bg + ';color:' + fg + ';overflow:hidden;' +
+    'font:15px/1.5 system-ui,"Segoe UI",Roboto,Arial,sans-serif;';
+  document.body.innerHTML =
+    '<div style="max-width:600px;margin:0 auto;padding:min(22vh,180px) 24px 0;">' +
+      '<svg width="72" height="72" viewBox="0 0 72 72" fill="none" ' +
+        'style="margin-bottom:28px" aria-hidden="true">' +
+        '<rect x="4" y="4" width="64" height="64" rx="8" stroke="' + icon +
+          '" stroke-width="5"/>' +
+        '<circle cx="25" cy="30" r="4.5" fill="' + icon + '"/>' +
+        '<circle cx="47" cy="30" r="4.5" fill="' + icon + '"/>' +
+        '<path d="M23 51c4-6 22-6 26 0" stroke="' + icon +
+          '" stroke-width="5" stroke-linecap="round"/>' +
+      '</svg>' +
+      '<h1 style="font-size:24px;font-weight:400;margin:0 0 16px;color:' + fg + '">' +
+        'Aw, Snap!</h1>' +
+      '<p style="margin:0 0 8px;color:' + sub + '">Something went wrong while ' +
+        'displaying this web page.</p>' +
+      '<p style="margin:0;color:' + sub + '">Error code: ' +
+        '<span style="white-space:nowrap">STATUS_BREAKPOINT</span></p>' +
+      '<div style="margin-top:44px">' +
+        '<button id="rl" style="background:#1a73e8;color:#fff;border:0;' +
+          'border-radius:4px;padding:9px 18px;font:500 14px system-ui,' +
+          '\'Segoe UI\',Roboto,Arial,sans-serif;cursor:pointer">Reload</button>' +
+      '</div>' +
+    '</div>';
+  const b = document.getElementById('rl');
+  if (b) b.onclick = () => location.reload();
+}
+
+function drawOutro() {
+  const o = outro;
+  if (o.t < 3.4) return;
+  const shown = OUTRO_LINE.slice(0, Math.min(OUTRO_LINE.length, Math.floor(o.type)));
+  // the room dims as he writes it
+  const k = clamp(o.type / OUTRO_LINE.length, 0, 1);
+  ctx.save();
+  ctx.fillStyle = rgba('#050507', 0.35 + k * 0.55);
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '400 ' + Math.min(24, W * 0.028) + 'px ui-monospace, Consolas, monospace';
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgba(226,232,240,0.10)';
+  ctx.fillText(shown, W / 2, H / 2);
+  ctx.restore();
+  ctx.fillStyle = DEV_COL;
+  ctx.fillText(shown, W / 2, H / 2);
+  const cw = ctx.measureText(shown).width;
+  ctx.globalAlpha = o.type >= OUTRO_LINE.length
+    ? 0.5 + Math.sin(uiTime * 3.6) * 0.5 : 1;
+  ctx.fillRect(W / 2 + cw / 2 + 5, H / 2 - 11, 10, 22);
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+/* ============================ THE LAST WORD ================================
+   Beating the unwritten does not end anything. It just gets somebody's
+   attention, and he has been holding this in for a while.
+========================================================================== */
+const DEV_COL = '#e2e8f0';
+let devLine = 0, devAsk = false, devRage = 0;
+/* Each line is typed onto the stage and then wiped off it, so he reads as
+   someone writing over the room rather than a box that appeared in front of
+   it. devType counts characters revealed; devOut runs 1 -> 0 as a line goes. */
+let devType = 0, devOut = 0;
+const DEV_CPS = 46;
+
+function devFullLine() { return DEV_TALK[Math.min(devLine, DEV_TALK.length - 1)]; }
+function devShown()    { const s = devFullLine();
+                         return s.slice(0, Math.min(s.length, Math.floor(devType))); }
+function devTyped()    { return devType >= devFullLine().length; }
+
+function devTypeTick(dt) {
+  if (devOut > 0) {                       // the line is coming back off
+    devOut -= dt * 2.8;
+    if (devOut <= 0) {
+      devOut = 0; devLine++; devType = 0;
+      if (devLine >= DEV_TALK.length) {
+        devLine = DEV_TALK.length - 1; devType = 1e9; devAsk = true;
+      }
+    }
+    return;
+  }
+  if (!devTyped()) {
+    const before = Math.floor(devType);
+    devType += DEV_CPS * dt;
+    // a key click per character, quiet enough to sit under the line
+    if (Math.floor(devType) > before && Math.floor(devType) % 2 === 0)
+      Audio_.tone(1400 + Math.random() * 300, 0.012, 'square', 0.012, 1800);
+  }
+}
+
+const DEV_TALK = [
+  'You beat it.',
+  'Of course you beat it. You always beat it.',
+  'Do you know how long the two-wound thing took me? The window, the banking, ' +
+  'the way it seals if you are half a second late —',
+  'four days. Nobody has ever mentioned it.',
+  'I built a thing with no entry in the book. A thing that was supposed to ' +
+  'mean there is always one more page. You filed it in nine minutes.',
+  'And I know exactly what happens now. I have watched it happen for years.',
+  'It is never “that was good”.',
+  'It is always “is that all”.',
+  'So go on. Say it. Ask me for it.'
+];
+
+const DEV_RAGE = [
+  'Fine.',
+  'FINE.',
+  'You want the warden? Have two of him.',
+  'Take the forge. Take the heart straight out of it.',
+  'She had children. They are arms now. Say thank you.',
+  'The archivist kept records. It can keep score instead.',
+  'The curator arranged things. Let it arrange itself.',
+  'And the one that held no ink — that is the spine. ' +
+  'I hope it was worth nine minutes.',
+  'THERE.',
+  'Is that ENOUGH?'
+];
+
+/* devTalkT is the beat between the banner and him speaking; devTalkSaidNo is
+   per-run, so declining quiets him now without closing the door. */
+let devTalkT = 3.2, devTalkSaidNo = false;
+
+function startDevTalk() {
+  devLine = 0; devAsk = false; devType = 0; devOut = 0;
+  enemies.length = 0; ebullets.length = 0;
+  state = 'devtalk'; uiArm = 0.4;
+  Audio_.select();
+}
+
+function devAdvance() {
+  if (uiArm > 0 || devAsk || devOut > 0) return;
+  if (!devTyped()) { devType = 1e9; return; }   // first press finishes the line
+  devOut = 1;
+  uiArm = 0.16;
+  Audio_.tone(420, 0.04, 'sine', 0.03, 600);
+}
+
+function devAnswer(yes) {
+  if (!devAsk || uiArm > 0) return;
+  if (!yes) {
+    /* He drops it for this run only. The flag stays on the profile, so he
+       raises it again another time rather than the amalgam being lost for
+       saying no once. */
+    devTalkSaidNo = true;
+    state = 'play';
+    uiArm = 0.3;
+    banner('HE GOES QUIET', '#64748b', 4.0);
+    Audio_.select();
+    return;
+  }
+  Save.profile.askedHarder = true;
+  Save.profile.devTalkDue = false;
+  Save.writeLocal(); Save.flush();
+  startAmalgamCut();
+}
+
+function devButtons() {
+  const bw = Math.min(280, (W - 90) / 2), bh = 58;
+  const y = H / 2 + 118;
+  return { no:  { x: W / 2 - bw - 10, y, w: bw, h: bh },
+           yes: { x: W / 2 + 10,      y, w: bw, h: bh } };
+}
+
+function drawDevTalk() {
+  /* The room stays visible underneath. He is writing on it, not replacing it. */
+  const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12,
+                                       W / 2, H / 2, Math.max(W, H) * 0.7);
+  vig.addColorStop(0, 'rgba(5,5,7,0.55)');
+  vig.addColorStop(1, 'rgba(5,5,7,0.9)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  ctx.save();
+  ctx.globalAlpha = devOut > 0 ? devOut : 1;      // the line wipes off
+  ctx.font = '400 17px ui-monospace, Consolas, monospace';
+  const maxW = Math.min(720, W - 100), lh = 27;
+  const lines = wrapLines(devShown(), maxW);
+  const top = cy - 40;
+  // a faint under-glow, so it reads as burned onto the floor
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgba(226,232,240,0.09)';
+  lines.forEach((s, i) => ctx.fillText(s, cx, top + i * lh));
+  ctx.restore();
+  ctx.fillStyle = DEV_COL;
+  lines.forEach((s, i) => ctx.fillText(s, cx, top + i * lh));
+  // the caret sits at the end of what has been written so far
+  if (!devAsk && devOut <= 0) {
+    const last = lines[lines.length - 1] || '';
+    ctx.globalAlpha *= devTyped() ? 0.5 + Math.sin(uiTime * 3.6) * 0.5 : 1;
+    ctx.fillRect(cx + ctx.measureText(last).width / 2 + 5,
+                 top + (lines.length - 1) * lh - 9, 9, 18);
+  }
+  ctx.restore();
+
+  if (!devAsk) {
+    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = rgba('#64748b', 0.5 + Math.sin(uiTime * 3.4) * 0.4);
+    ctx.fillText('SPACE', cx, H - 56);
+    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#27272a';
+    ctx.fillText((devLine + 1) + ' / ' + DEV_TALK.length, cx, H - 36);
+    ctx.textBaseline = 'alphabetic';
+    return;
+  }
+
+  ctx.font = '800 ' + Math.min(30, W * 0.031) + 'px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#f87171';
+  ctx.fillText('Do you want something harder?', cx, cy + 66);
+
+  const b = devButtons();
+  const btn = (r, label, sub, col) => {
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.save();
+    ctx.fillStyle = rgba(col, hot ? 0.2 : 0.06);
+    ctx.strokeStyle = col; ctx.lineWidth = hot ? 2.4 : 1.6;
+    roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+    ctx.fillText(label, r.x + r.w / 2, r.y + 23);
+    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#52525b';
+    ctx.fillText(sub, r.x + r.w / 2, r.y + 43);
+    ctx.restore();
+  };
+  btn(b.no, 'NO   [N]', 'that was enough', '#64748b');
+  btn(b.yes, 'YES   [Y]', 'it is never enough', '#f87171');
+  ctx.textBaseline = 'alphabetic';
 }
 
 /* Spawned outside the scripted path — the dev console, or any future caller —
@@ -5959,6 +7419,18 @@ function updateBullets(dt) {
       if (erased) { bullets.splice(i, 1); continue; }
     }
 
+    /* Fused bodies take a shove from your fire without stopping it — that is
+       the point of them being a corpse and not an enemy: you can putt one
+       into a crowd before it goes off. */
+    for (const c of corpses) {
+      if (!c.vol) continue;
+      if (!segCircle(b.px, b.py, b.x, b.y, c.x, c.y, c.r + b.r)) continue;
+      const s = len(b.vx, b.vy) || 1;
+      c.vx += b.vx / s * 260; c.vy += b.vy / s * 260;
+      c.life = Math.max(c.life, 0.16);   // a nudge buys it a moment to travel
+      spawnPart(c.x, c.y, rnd(70, -70), rnd(70, -70), 3, '#fecaca', 0.25, 0.9);
+    }
+
     // enemy collision (swept against previous position for fast bullets)
     let removed = false;
     for (const e of enemies) {
@@ -6219,7 +7691,7 @@ function updateParticles(dt) {
     r.r = lerp(r.r0, r.r1, 1 - Math.pow(1 - t, 3));
     if (r.life <= 0) rings.splice(i, 1);
   }
-  for (let i = corpses.length - 1; i >= 0; i--) { corpses[i].life -= dt; if (corpses[i].life <= 0) corpses.splice(i, 1); }
+  updateCorpses(dt);
 }
 
 /* ================================ RENDER ================================== */
@@ -6236,10 +7708,12 @@ function render() {
     return;
   }
 
-  const ox = -cam.x + W / 2 + cam.sx;
-  const oy = -cam.y + H / 2 + cam.sy;
+  const z = camZoom;
+  const ox = -cam.x + W / (2 * z) + cam.sx / z;
+  const oy = -cam.y + H / (2 * z) + cam.sy / z;
 
   ctx.save();
+  ctx.scale(z, z);
   ctx.translate(ox, oy);
 
   drawGrid(ox, oy);
@@ -6255,6 +7729,7 @@ function render() {
 
   drawMortars();
   drawUnwritten();
+  drawAmalgam();
   drawCages();
   drawPortals();
   drawLibraryPortal();
@@ -6271,11 +7746,14 @@ function render() {
   drawFinaleBeams();
   drawDiary();
   drawLance();
+  drawMalFx();
   drawParticles();
   ctx.globalCompositeOperation = 'source-over';
 
   drawFloats();
   ctx.restore();
+
+  postWorld();          // bloom, chromatic split and grade, world layer only
 
   if (P.annotT > 0) {
     // a warm margin around the frame while the record is open
@@ -6318,11 +7796,16 @@ function render() {
   if (state === 'planet') drawPlanetarium();
   if (state === 'library') drawLibrary();
   if (state === 'talk') drawTalk();
+  if (state === 'devtalk') drawDevTalk();
+  if (outro) drawOutro();
+  if (state === 'amalcut') drawAmalCutText();
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') drawDead();
   if (!isTouch && (state === 'play' || state === 'shop' || state === 'planet' ||
       state === 'library')) drawCrosshair();
+
+  postScreen();         // vignette, scanlines and grain over the finished frame
 }
 
 /* ------------------------- terrain & deployables -------------------------- */
@@ -6610,8 +8093,8 @@ function drawPortals() {
 function drawLibraryPointer() {
   const L = libraryPortal;
   if (!L || (state !== 'play' && state !== 'pause')) return;
-  const sx = L.x - cam.x + W / 2 + cam.sx;
-  const sy = L.y - cam.y + H / 2 + cam.sy;
+  const sx = (L.x - cam.x) * camZoom + W / 2 + cam.sx;
+  const sy = (L.y - cam.y) * camZoom + H / 2 + cam.sy;
   const m = 54;
   const mal = L.kind === 'malware';
   const pcol = mal ? MAL_COL : '#fcd34d';
@@ -6837,6 +8320,614 @@ function drawUnwrittenOverlay() {
   ctx.textBaseline = 'alphabetic';
 }
 
+/* The pieces draw themselves as the bosses they were. This is the scaffolding
+   that makes them read as one body: spine, ribs and the struts holding the
+   limbs on. During the cutscene it also draws the pieces still in flight. */
+const AMAL_BONES = [['head','spine',20], ['spine','torso',34], ['spine','shldL',18],
+                    ['spine','shldR',18], ['shldL','armL',26], ['shldR','armR',26],
+                    ['torso','legL',30], ['torso','legR',30]];
+const STEEL_D = '#1c1917', STEEL = '#44403c', STEEL_L = '#8b8378', WELD = '#fb923c';
+
+/* A tapered armoured segment with a rim light, plating seams and a joint cap.
+   This is the thing that stops it reading as a stick between two circles. */
+function amalLimb(x1, y1, x2, y2, w1, w2) {
+  const a = Math.atan2(y2 - y1, x2 - x1);
+  const nx = -Math.sin(a), ny = Math.cos(a);
+  const L = len(x2 - x1, y2 - y1) || 1;
+  const quad = (o1, o2, fill) => {
+    ctx.beginPath();
+    ctx.moveTo(x1 + nx * o1, y1 + ny * o1);
+    ctx.lineTo(x2 + nx * o2, y2 + ny * o2);
+    ctx.lineTo(x2 - nx * o2, y2 - ny * o2);
+    ctx.lineTo(x1 - nx * o1, y1 - ny * o1);
+    ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+  };
+  quad(w1, w2, STEEL_D);
+  quad(w1 * 0.72, w2 * 0.72, STEEL);
+  // rim light down one edge
+  ctx.beginPath();
+  ctx.moveTo(x1 + nx * w1 * 0.86, y1 + ny * w1 * 0.86);
+  ctx.lineTo(x2 + nx * w2 * 0.86, y2 + ny * w2 * 0.86);
+  ctx.strokeStyle = 'rgba(214,211,209,0.55)'; ctx.lineWidth = 2.2; ctx.stroke();
+  // plating seams
+  ctx.strokeStyle = 'rgba(12,10,9,0.85)'; ctx.lineWidth = 1.6;
+  const segs = Math.max(2, Math.round(L / 34));
+  for (let k = 1; k < segs; k++) {
+    const u = k / segs, w = lerp(w1, w2, u);
+    const px = lerp(x1, x2, u), py = lerp(y1, y2, u);
+    ctx.beginPath();
+    ctx.moveTo(px + nx * w, py + ny * w);
+    ctx.lineTo(px - nx * w, py - ny * w);
+    ctx.stroke();
+  }
+}
+
+// the ring of scrap a boss got welded into, plus the seam still cooling
+/* Armour outlines, in units of the piece radius. +x always points outward from
+   the body centreline, so the left side is drawn by mirroring x. Nothing here
+   is round on purpose: the silhouette has to read as forged plate, and the only
+   circle on a mounted piece is the small core lens at its middle. */
+const AMAL_SHELL = {
+  pauldron: [[-1.14,-0.50],[-0.30,-0.98],[0.66,-0.92],[1.30,-0.18],
+             [1.16, 0.62],[0.42, 1.06],[-0.52, 0.96],[-1.06, 0.30]],
+  gauntlet: [[-0.94,-0.96],[0.62,-1.10],[1.18,-0.52],[1.24, 0.34],
+             [0.86, 1.02],[-0.62, 1.10],[-1.10, 0.42],[-1.06,-0.30]],
+  greave:   [[-0.88,-1.10],[0.88,-1.10],[1.06,-0.20],[1.34, 0.66],
+             [1.30, 1.14],[-1.30, 1.14],[-1.34, 0.66],[-1.06,-0.20]],
+  helm:     [[-0.92,-0.30],[-0.60,-1.06],[0.60,-1.06],[0.92,-0.30],
+             [0.86, 0.50],[0.40, 1.10],[-0.40, 1.10],[-0.86, 0.50]],
+  spool:    [[-0.86,-1.06],[0.86,-1.06],[1.10,-0.34],[1.10, 0.34],
+             [0.86, 1.06],[-0.86, 1.06],[-1.10, 0.34],[-1.10,-0.34]]
+};
+
+function shellPath(x, y, r, role, sx) {
+  const pts = AMAL_SHELL[role];
+  ctx.beginPath();
+  for (let k = 0; k < pts.length; k++) {
+    const px = x + pts[k][0] * r * sx, py = y + pts[k][1] * r;
+    if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+// the armour a piece is bolted into: beveled plate, bolts, seams, battle damage
+function amalCasing(x, y, r, role, sx, frac, flash) {
+  const hurt = 1 - clamp(frac, 0, 1);
+  ctx.save();
+
+  // dropped shadow plate underneath, for thickness
+  ctx.fillStyle = '#0a0908';
+  shellPath(x + 5 * sx, y + 7, r, role, sx); ctx.fill();
+
+  // the plate
+  shellPath(x, y, r, role, sx);
+  const g = ctx.createLinearGradient(x, y - r, x, y + r);
+  g.addColorStop(0, STEEL);
+  g.addColorStop(0.45, '#302c28');
+  g.addColorStop(1, STEEL_D);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = STEEL_L; ctx.lineWidth = 2.6; ctx.stroke();
+
+  // clip everything that follows to the plate so seams never spill
+  ctx.save();
+  shellPath(x, y, r, role, sx); ctx.clip();
+
+  // lit top bevel
+  ctx.strokeStyle = 'rgba(168,162,150,0.55)'; ctx.lineWidth = 5;
+  shellPath(x, y + 5, r * 0.99, role, sx); ctx.stroke();
+
+  // panel seams, laid out per role
+  ctx.strokeStyle = 'rgba(12,10,9,0.75)'; ctx.lineWidth = 2.4;
+  if (role === 'pauldron' || role === 'greave') {
+    for (let k = -1; k <= 1; k++) {
+      ctx.beginPath();
+      ctx.moveTo(x - r * 1.4 * sx, y + k * r * 0.42 + r * 0.1);
+      ctx.lineTo(x + r * 1.4 * sx, y + k * r * 0.42 - r * 0.14);
+      ctx.stroke();
+    }
+  } else if (role === 'gauntlet') {
+    for (let k = -1; k <= 1; k++) {      // knuckle ridges on the outer edge
+      ctx.beginPath();
+      ctx.moveTo(x + r * 0.34 * sx, y + k * r * 0.5);
+      ctx.lineTo(x + r * 1.4 * sx, y + k * r * 0.5);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(x + r * 0.34 * sx, y - r * 1.2);
+    ctx.lineTo(x + r * 0.34 * sx, y + r * 1.2);
+    ctx.stroke();
+  } else if (role === 'helm') {
+    ctx.beginPath();                     // visor band
+    ctx.moveTo(x - r * 1.2, y - r * 0.16);
+    ctx.lineTo(x + r * 1.2, y - r * 0.16);
+    ctx.lineTo(x + r * 1.2, y + r * 0.30);
+    ctx.lineTo(x - r * 1.2, y + r * 0.30);
+    ctx.closePath();
+    ctx.fillStyle = '#0a0908'; ctx.fill();
+  } else {
+    for (let k = -1; k <= 1; k++) {
+      ctx.beginPath();
+      ctx.moveTo(x - r * 1.2, y + k * r * 0.5);
+      ctx.lineTo(x + r * 1.2, y + k * r * 0.5);
+      ctx.stroke();
+    }
+  }
+
+  // gouges torn into the plate as the piece is worn down
+  if (hurt > 0.15) {
+    const n = Math.floor(hurt * 6);
+    for (let k = 0; k < n; k++) {
+      const a = (k * 2.39 + r) % TAU, len = r * (0.5 + (k % 3) * 0.28);
+      ctx.strokeStyle = '#0a0908'; ctx.lineWidth = 3.6 + (k % 2) * 2;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * r * 0.2, y + Math.sin(a) * r * 0.2);
+      ctx.lineTo(x + Math.cos(a + 0.5) * len, y + Math.sin(a + 0.5) * len);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(WELD, 0.45 * hurt); ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  ctx.restore();                          // end clip
+
+  // bolts at every vertex
+  const pts = AMAL_SHELL[role];
+  for (let k = 0; k < pts.length; k++) {
+    const bx = x + pts[k][0] * r * 0.84 * sx, by = y + pts[k][1] * r * 0.84;
+    ctx.fillStyle = '#0a0908';
+    ctx.beginPath(); ctx.arc(bx, by + 1.4, 3.4, 0, TAU); ctx.fill();
+    ctx.fillStyle = STEEL_L;
+    ctx.beginPath(); ctx.arc(bx, by, 3, 0, TAU); ctx.fill();
+  }
+
+  // the weld holding the piece in, still cooling
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = rgba(WELD, 0.30 + Math.sin(uiTime * 3 + x * 0.01) * 0.12 + flash * 0.3);
+  ctx.lineWidth = 3;
+  shellPath(x, y, r * 0.9, role, sx); ctx.stroke();
+  ctx.restore();
+}
+
+// the boss itself, cut down to a core and sunk into the socket
+function amalCore(x, y, r, key, frac, flash, spin) {
+  const bd = BOSSES[key], cr = r * 0.5;
+  ctx.save();
+  // recessed socket
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(x, y, cr * 1.42, 0, TAU); ctx.fill();
+  ctx.strokeStyle = STEEL_L; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(x, y, cr * 1.42, 0, TAU); ctx.stroke();
+  // retaining claws over the lip
+  ctx.strokeStyle = STEEL; ctx.lineWidth = 5;
+  for (let k = 0; k < 4; k++) {
+    const a = k * TAU / 4 + 0.78;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * cr * 1.6, y + Math.sin(a) * cr * 1.6);
+    ctx.lineTo(x + Math.cos(a) * cr * 0.95, y + Math.sin(a) * cr * 0.95);
+    ctx.stroke();
+  }
+  // the captured boss, dimmed by how hurt it is
+  const lit = 0.35 + clamp(frac, 0, 1) * 0.65;
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, cr * 3.4, bd.col, (0.22 + flash * 0.45) * lit);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = bd.col;
+  ctx.fillStyle = flash > 0.02 ? rgba('#ffffff', 0.4 * flash) : rgba(bd.col, 0.26 * lit);
+  ctx.lineWidth = 3;
+  poly(x, y, cr, bd.sides, spin);
+  ctx.fill(); ctx.stroke();
+  ctx.globalAlpha = 0.5; ctx.lineWidth = 1.6;
+  poly(x, y, cr * 0.54, bd.sides, -spin * 1.4);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// a boss, cut down and bolted in: its own shape, cracked as it takes damage
+function amalChunk(x, y, r, key, frac, flash, spin) {
+  const bd = BOSSES[key];
+  const hurt = 1 - clamp(frac, 0, 1);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, r * 2.2, bd.col, 0.28 + flash * 0.4);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = bd.col;
+  ctx.fillStyle = flash > 0.02 ? rgba('#ffffff', 0.35 * flash) : rgba(bd.col, 0.2);
+  ctx.lineWidth = 3.4;
+  poly(x, y, r, bd.sides, spin);
+  ctx.fill(); ctx.stroke();
+  // inner facet
+  ctx.globalAlpha = 0.55; ctx.lineWidth = 1.8;
+  poly(x, y, r * 0.58, bd.sides, -spin * 1.4);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // damage: fractures that open as it is worn down
+  if (hurt > 0.2) {
+    ctx.strokeStyle = rgba('#0c0a09', 0.9); ctx.lineWidth = 2.4;
+    const n = Math.floor(hurt * 5);
+    for (let k = 0; k < n; k++) {
+      const a = (k * 2.7 + key.length) % TAU;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * r * 0.15, y + Math.sin(a) * r * 0.15);
+      ctx.lineTo(x + Math.cos(a + 0.4) * r * 0.95, y + Math.sin(a + 0.4) * r * 0.95);
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(WELD, 0.5 * hurt); ctx.lineWidth = 1.2;
+    for (let k = 0; k < n; k++) {
+      const a = (k * 2.7 + key.length) % TAU;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * r * 0.15, y + Math.sin(a) * r * 0.15);
+      ctx.lineTo(x + Math.cos(a + 0.4) * r * 0.95, y + Math.sin(a + 0.4) * r * 0.95);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// cabling that sags between the pieces and sways with the walk
+function amalCable(x1, y1, x2, y2, sag, phase) {
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 + sag + Math.sin(uiTime * 1.8 + phase) * 5;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1); ctx.quadraticCurveTo(mx, my, x2, y2);
+  ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 5; ctx.stroke();
+  ctx.strokeStyle = '#57534e'; ctx.lineWidth = 2.4; ctx.stroke();
+}
+
+function drawAmalBody(b, placed, a) {
+  const slot = id => {
+    const p = AMAL_PARTS.find(z => z.id === id);
+    if (a) { const pp = a.parts.find(z => z.id === id); if (pp) return amalPartPos(a, pp); }
+    return { x: b.x + p.ox, y: b.y + p.oy };
+  };
+  const live = id => {
+    if (a) { const pp = a.parts.find(z => z.id === id); return pp && pp.e && !pp.e.dead; }
+    return placed && placed[id] >= 1;
+  };
+  const health = id => {
+    if (!a) return 1;
+    const pp = a.parts.find(z => z.id === id);
+    return pp && pp.e ? clamp(pp.e.hp / pp.e.maxHp, 0, 1) : 0;
+  };
+  const flashOf = id => {
+    if (!a) return 0;
+    const pp = a.parts.find(z => z.id === id);
+    return pp && pp.e ? pp.e.flash : 0;
+  };
+  const foot = slot('legL').y > slot('legR').y ? slot('legL').y : slot('legR').y;
+
+  /* ---- where a fist is about to land ---- */
+  if (a && a.slam && !a.slam.hit) {
+    const s = a.slam, u = clamp(s.t / (SLAM_UP + SLAM_DOWN), 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // the marked ground, filling up as the arm comes over
+    ctx.fillStyle = rgba('#fbbf24', 0.10 + u * 0.16);
+    ctx.beginPath(); ctx.ellipse(s.tx, s.ty, 190, 190 * 0.8, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba('#fbbf24', 0.5 + u * 0.4); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(s.tx, s.ty, 190, 190 * 0.8, 0, 0, TAU); ctx.stroke();
+    // a closing ring that reaches the edge exactly on impact
+    ctx.strokeStyle = rgba('#ffffff', 0.55); ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(s.tx, s.ty, 190 * (1.9 - u * 0.9), 190 * 0.8 * (1.9 - u * 0.9), 0, 0, TAU);
+    ctx.stroke();
+    // cross-hairs, so it is unmistakable
+    ctx.strokeStyle = rgba('#fbbf24', 0.35); ctx.lineWidth = 2;
+    for (let k = 0; k < 4; k++) {
+      const ang = k * TAU / 4 + Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo(s.tx + Math.cos(ang) * 130, s.ty + Math.sin(ang) * 104);
+      ctx.lineTo(s.tx + Math.cos(ang) * 240, s.ty + Math.sin(ang) * 192);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ---- ground shadow, so it has weight ---- */
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(b.x, foot + 42, 250, 46, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+
+  /* ---- backlight, so it reads as enormous ---- */
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(b.x, b.y - 40, 460, '#7f1d1d', 0.20 + Math.sin(uiTime * 1.4) * 0.05);
+  ctx.restore();
+
+  /* ---- limbs behind the chest ---- */
+  const bone = (a1, b1, w) => {
+    if (!live(a1) || !live(b1)) return;
+    const s = slot(a1), t = slot(b1);
+    amalLimb(s.x, s.y, t.x, t.y, w, w * 0.72);
+  };
+  bone('torso', 'legL', 30); bone('torso', 'legR', 30);
+  bone('spine', 'torso', 34);
+  bone('head', 'spine', 20);
+
+  /* ---- cabling ---- */
+  ctx.save();
+  if (live('spine') && live('torso')) {
+    const s = slot('spine'), t = slot('torso');
+    amalCable(s.x - 22, s.y, t.x - 30, t.y - 20, 26, 0);
+    amalCable(s.x + 22, s.y, t.x + 30, t.y - 20, 26, 1.7);
+  }
+  if (live('shldL') && live('armL')) {
+    const s = slot('shldL'), t = slot('armL');
+    amalCable(s.x - 10, s.y + 14, t.x, t.y - 24, 30, 2.4);
+  }
+  if (live('shldR') && live('armR')) {
+    const s = slot('shldR'), t = slot('armR');
+    amalCable(s.x + 10, s.y + 14, t.x, t.y - 24, 30, 3.9);
+  }
+  ctx.restore();
+
+  /* ---- the chest chassis: a plated shell around the forge ---- */
+  if (live('torso')) {
+    const c = slot('torso');
+    const th = health('torso'), thurt = 1 - th;
+    const chest = () => {
+      ctx.beginPath();
+      ctx.moveTo(c.x - 96,  c.y - 96);   // clavicle
+      ctx.lineTo(c.x - 128, c.y - 62);   // shoulder shelf
+      ctx.lineTo(c.x - 112, c.y + 22);
+      ctx.lineTo(c.x - 74,  c.y + 78);   // waist taper
+      ctx.lineTo(c.x - 62,  c.y + 118);  // pelvis
+      ctx.lineTo(c.x + 62,  c.y + 118);
+      ctx.lineTo(c.x + 74,  c.y + 78);
+      ctx.lineTo(c.x + 112, c.y + 22);
+      ctx.lineTo(c.x + 128, c.y - 62);
+      ctx.lineTo(c.x + 96,  c.y - 96);
+      ctx.closePath();
+    };
+    ctx.save();
+    ctx.fillStyle = '#0a0908';           // thickness
+    ctx.translate(6, 8); chest(); ctx.fill(); ctx.translate(-6, -8);
+    chest();
+    const cg = ctx.createLinearGradient(c.x, c.y - 100, c.x, c.y + 120);
+    cg.addColorStop(0, '#4b463f');
+    cg.addColorStop(0.5, '#302c28');
+    cg.addColorStop(1, STEEL_D);
+    ctx.fillStyle = cg; ctx.fill();
+    ctx.strokeStyle = STEEL_L; ctx.lineWidth = 3; ctx.stroke();
+
+    ctx.save(); chest(); ctx.clip();
+    // ribs
+    ctx.strokeStyle = 'rgba(139,131,120,0.45)'; ctx.lineWidth = 5;
+    for (let k = -2; k <= 2; k++) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y + k * 30 + 6, 82 - Math.abs(k) * 11, Math.PI * 0.1, Math.PI * 0.9);
+      ctx.stroke();
+    }
+    // louvred vents at the collarbones
+    ctx.strokeStyle = '#0a0908'; ctx.lineWidth = 4;
+    for (let s2 = -1; s2 <= 1; s2 += 2)
+      for (let k = 0; k < 4; k++) {
+        ctx.beginPath();
+        ctx.moveTo(c.x + s2 * 70, c.y - 78 + k * 11);
+        ctx.lineTo(c.x + s2 * 116, c.y - 70 + k * 11);
+        ctx.stroke();
+      }
+    // pelvis band
+    ctx.fillStyle = '#0a0908';
+    ctx.fillRect(c.x - 66, c.y + 84, 132, 12);
+    // hull damage
+    if (thurt > 0.15) {
+      const n = Math.floor(thurt * 9);
+      for (let k = 0; k < n; k++) {
+        const a = k * 2.39, len = 40 + (k % 4) * 34;
+        ctx.strokeStyle = '#0a0908'; ctx.lineWidth = 5 + (k % 3) * 2.5;
+        ctx.beginPath();
+        ctx.moveTo(c.x + Math.cos(a) * 24, c.y + Math.sin(a) * 24);
+        ctx.lineTo(c.x + Math.cos(a + 0.5) * len, c.y + Math.sin(a + 0.5) * len);
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = rgba(WELD, 0.4 * thurt); ctx.lineWidth = 1.8;
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+    ctx.restore();                       // end clip
+
+    // bolts down the chest edge
+    ctx.fillStyle = STEEL_L;
+    for (let s2 = -1; s2 <= 1; s2 += 2)
+      for (let k = 0; k < 5; k++) {
+        ctx.beginPath();
+        ctx.arc(c.x + s2 * (104 - k * 9), c.y - 66 + k * 40, 3.2, 0, TAU);
+        ctx.fill();
+      }
+    // vents breathing heat
+    ctx.globalCompositeOperation = 'lighter';
+    for (let k = -1; k <= 1; k += 2)
+      drawGlow(c.x + k * 92, c.y - 66, 30, WELD, 0.25 + Math.sin(uiTime * 2.6 + k) * 0.12);
+    ctx.restore();
+  }
+
+  /* ---- limbs in front ---- */
+  bone('spine', 'shldL', 18); bone('spine', 'shldR', 18);
+  bone('shldL', 'armL', 26);  bone('shldR', 'armR', 26);
+
+  /* ---- the pieces themselves ---- */
+  const order = ['legL', 'legR', 'spine', 'torso', 'shldL', 'shldR', 'armL', 'armR', 'head'];
+  for (const id of order) {
+    if (!live(id)) {
+      // a torn-off stump where a piece used to be
+      if (a) {
+        const s = slot(id);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        drawGlow(s.x, s.y, 40, WELD, 0.22 + Math.sin(uiTime * 9 + s.x) * 0.1);
+        ctx.restore();
+      }
+      continue;
+    }
+    if (id === 'torso') continue;   // the chest has its own chassis and core
+    const p = AMAL_PARTS.find(z => z.id === id);
+    const s = slot(id);
+    const sx = p.ox < 0 ? -1 : 1;
+    amalCasing(s.x, s.y, p.r, AMAL_ROLE[id], sx, health(id), flashOf(id));
+    amalCore(s.x, s.y, p.r, p.key, health(id), flashOf(id),
+             uiTime * (id === 'spine' ? 1.1 : 0.35) + p.ox * 0.01);
+  }
+
+  /* ---- the core in its chest ---- */
+  if (live('torso')) {
+    const c = slot('torso');
+    const pulse = 0.55 + Math.sin(uiTime * 4.5) * 0.45;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(c.x, c.y, 90 + pulse * 34, AMAL_COL, 0.5);
+    drawGlow(c.x, c.y, 40, '#ffffff', 0.35 * pulse);
+    // shafts of light escaping the seams
+    ctx.strokeStyle = rgba(AMAL_COL, 0.34 * pulse); ctx.lineWidth = 3;
+    for (let k = 0; k < 8; k++) {
+      const ang = uiTime * 0.5 + k * TAU / 8;
+      ctx.beginPath();
+      ctx.moveTo(c.x + Math.cos(ang) * 26, c.y + Math.sin(ang) * 26);
+      ctx.lineTo(c.x + Math.cos(ang) * (95 + pulse * 26), c.y + Math.sin(ang) * (95 + pulse * 26));
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.6;
+    ctx.fillStyle = rgba(AMAL_COL, 0.5);
+    poly(c.x, c.y, 22 + pulse * 4, 6, -uiTime * 1.2);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---- the head, and an optic that follows you ---- */
+  if (live('head')) {
+    const h = slot('head');
+    const toP = Math.atan2(P.y - h.y, P.x - h.x);
+    ctx.save();
+    // crest fin, so the head has a profile
+    ctx.beginPath();
+    ctx.moveTo(h.x - 10, h.y - 52);
+    ctx.lineTo(h.x, h.y - 92);
+    ctx.lineTo(h.x + 10, h.y - 52);
+    ctx.closePath();
+    ctx.fillStyle = STEEL; ctx.fill();
+    ctx.strokeStyle = STEEL_L; ctx.lineWidth = 2; ctx.stroke();
+    // the eye, tracking across the visor slit
+    const ex = h.x + Math.cos(toP) * 16, ey = h.y + 4 + Math.sin(toP) * 5;
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(ex, ey, 34, '#ef4444', 0.75);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#fecaca';
+    ctx.beginPath(); ctx.arc(ex, ey, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7f1d1d';
+    ctx.beginPath(); ctx.arc(ex, ey, 3.4, 0, TAU); ctx.fill();
+    // a thin sight line toward the player
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(239,68,68,0.18)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex + Math.cos(toP) * 700, ey + Math.sin(toP) * 700);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---- cutscene only: pieces still in flight ---- */
+  if (!a && placed) {
+    for (const p of AMAL_PARTS) {
+      const prog = placed[p.id];
+      if (prog === undefined || prog >= 1) continue;
+      const from = { x: b.x + p.ox * 5 - 1100, y: b.y + p.oy * 2.6 - 620 };
+      const to = { x: b.x + p.ox, y: b.y + p.oy };
+      const u = 1 - Math.pow(1 - prog, 3);
+      const x = lerp(from.x, to.x, u), y = lerp(from.y, to.y, u);
+      const bd = BOSSES[p.key];
+      // motion trail
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let k = 1; k <= 5; k++) {
+        const uu = Math.max(0, u - k * 0.035);
+        drawGlow(lerp(from.x, to.x, uu), lerp(from.y, to.y, uu),
+                 p.r * (2.2 - k * 0.3), bd.col, 0.16 * (1 - k / 6));
+      }
+      drawGlow(x, y, p.r * 3, bd.col, 0.5 * (1 - u) + 0.3);
+      ctx.restore();
+      amalChunk(x, y, p.r, p.key, 1, 0, uiTime * 3 * (1 - u));
+    }
+  }
+}
+
+function drawAmalgam() {
+  if (amalCut) { drawAmalCut(); return; }
+  if (!amalgam) return;
+  drawAmalBody({ x: amalgam.x, y: amalgam.y }, null, amalgam);
+  if (amalgam.beam) drawAmalBeam(amalgam);
+}
+
+/* One bar for the whole frame, plus a pip per piece so you can see what is
+   still bolted on and how close the next limb is to coming off. */
+function drawAmalgamBar() {
+  const a = amalgam;
+  const w2 = Math.min(680, W * 0.74), x2 = (W - w2) / 2, y2 = 20;
+  const frac = clamp(a.hp / a.maxHp, 0, 1);
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = 'rgba(8,12,20,0.82)';
+  roundRect(x2 - 4, y2 - 4, w2 + 8, 22, 10); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  roundRect(x2, y2, w2, 14, 7); ctx.fill();
+
+  // it goes rainbow while the beam is up, matching what is on the floor
+  let fill = AMAL_COL;
+  if (a.beam) {
+    const g = ctx.createLinearGradient(x2, 0, x2 + w2, 0);
+    for (let k = 0; k < RAINBOW.length; k++)
+      g.addColorStop(k / (RAINBOW.length - 1), RAINBOW[k]);
+    fill = g;
+  }
+  const fw = Math.max(0, (w2 - 4) * frac);
+  ctx.fillStyle = fill;
+  roundRect(x2 + 2, y2 + 2, fw, 10, 5); ctx.fill();
+  if (fw > 4) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(x2 + 2 + fw - 3, y2 + 2, 3, 10);
+  }
+  ctx.strokeStyle = rgba(AMAL_COL, 0.6); ctx.lineWidth = 1;
+  roundRect(x2, y2, w2, 14, 7); ctx.stroke();
+
+  // a pip per piece, in the colour of the boss it used to be
+  const n = AMAL_PARTS.length, pw = 13, gap = 5;
+  let px = W / 2 - (n * pw + (n - 1) * gap) / 2;
+  for (const p of AMAL_PARTS) {
+    const pp = a.parts.find(z => z.id === p.id);
+    const alive = pp && pp.e && !pp.e.dead;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    roundRect(px, y2 + 19, pw, 5, 2); ctx.fill();
+    if (alive) {
+      ctx.fillStyle = BOSSES[p.key].col;
+      roundRect(px, y2 + 19, pw * clamp(pp.e.hp / pp.e.maxHp, 0, 1), 5, 2); ctx.fill();
+    }
+    px += pw + gap;
+  }
+
+  // the flat cut it takes off your weapon, which is invisible otherwise
+  const cut = AMAL_DR[P.weapon] !== undefined ? AMAL_DR[P.weapon] : 0.95;
+  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#fca5a5';
+  ctx.textAlign = 'left';
+  ctx.fillText('⛨ −' + Math.round(cut * 100) + '%', x2 + w2 + 10, y2 + 11);
+
+  ctx.textAlign = 'center';
+  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = a.beam ? '#ffffff' : AMAL_COL;
+  ctx.fillText('THE AMALGAM' + (a.beam ? '   — REFUSING' : ''), W / 2, y2 + 40);
+  ctx.restore();
+}
+
 function drawCages() {
   for (const c of cages) {
     const hpf = clamp(c.hp / c.maxHp, 0, 1);
@@ -6974,24 +9065,86 @@ function drawBeams() {
 
 function drawGrid(ox, oy) {
   const S = 64;
-  const x0 = Math.floor((-ox) / S) * S, x1 = -ox + W + S;
-  const y0 = Math.floor((-oy) / S) * S, y1 = -oy + H + S;
+  // the visible world box grows as the camera pulls out
+  const vw = W / camZoom, vh = H / camZoom;
+  const x0 = Math.floor((-ox) / S) * S, x1 = -ox + vw + S;
+  const y0 = Math.floor((-oy) / S) * S, y1 = -oy + vh + S;
   const pulse = 0.5 + Math.sin(uiTime * 1.3) * 0.12;
   ctx.lineWidth = 1;
+
+  if (!gwaves.length) {                      // flat floor: the cheap path
+    ctx.strokeStyle = COL.grid;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (let x = x0; x < x1; x += S) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+    for (let y = y0; y < y1; y += S) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
+    ctx.stroke();
+    ctx.strokeStyle = stage.grid2;
+    ctx.globalAlpha = pulse;
+    ctx.beginPath();
+    for (let x = Math.floor(x0 / (S * 4)) * S * 4; x < x1; x += S * 4) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+    for (let y = Math.floor(y0 / (S * 4)) * S * 4; y < y1; y += S * 4) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  /* A wave is passing, so the grid is walked as a mesh and every vertex is
+     lifted. Segments are half a tile, which is fine at this line weight. */
+  const SEG = S / 2;
+  const strand = (fromX, fromY, toX, toY) => {
+    const steps = Math.ceil(Math.max(Math.abs(toX - fromX), Math.abs(toY - fromY)) / SEG);
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const u = i / steps;
+      const px = fromX + (toX - fromX) * u, py = fromY + (toY - fromY) * u;
+      const l = gwaveLift(px, py);
+      if (i === 0) ctx.moveTo(px, py + l.lift); else ctx.lineTo(px, py + l.lift);
+    }
+    ctx.stroke();
+  };
+
   ctx.strokeStyle = COL.grid;
   ctx.globalAlpha = 0.85;
-  ctx.beginPath();
-  for (let x = x0; x < x1; x += S) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
-  for (let y = y0; y < y1; y += S) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
-  ctx.stroke();
-  // brighter major lines
+  for (let x = x0; x < x1; x += S) strand(x, y0, x, y1);
+  for (let y = y0; y < y1; y += S) strand(x0, y, x1, y);
   ctx.strokeStyle = stage.grid2;
   ctx.globalAlpha = pulse;
-  ctx.beginPath();
-  for (let x = Math.floor(x0 / (S * 4)) * S * 4; x < x1; x += S * 4) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
-  for (let y = Math.floor(y0 / (S * 4)) * S * 4; y < y1; y += S * 4) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
-  ctx.stroke();
+  ctx.lineWidth = 1.6;
+  for (let x = Math.floor(x0 / (S * 4)) * S * 4; x < x1; x += S * 4) strand(x, y0, x, y1);
+  for (let y = Math.floor(y0 / (S * 4)) * S * 4; y < y1; y += S * 4) strand(x0, y, x1, y);
   ctx.globalAlpha = 1;
+  ctx.lineWidth = 1;
+
+  /* Risers: a stub of wall under each raised intersection. This is what
+     actually sells the height — the bent lines alone read as a smudge. */
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let x = x0; x < x1; x += S)
+    for (let y = y0; y < y1; y += S) {
+      const l = gwaveLift(x, y);
+      if (l.glow < 0.06) continue;
+      ctx.strokeStyle = rgba(gwaves[0].col, 0.5 * l.glow);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y); ctx.lineTo(x, y + l.lift);
+      ctx.stroke();
+      ctx.fillStyle = rgba('#ffffff', 0.5 * l.glow);
+      ctx.beginPath(); ctx.arc(x, y + l.lift, 2.2, 0, TAU); ctx.fill();
+    }
+
+  // the crest itself, lit from underneath
+  for (const w of gwaves) {
+    const r = w.speed * w.t, fade = 1 - w.t / w.life;
+    ctx.strokeStyle = rgba(w.col, 0.45 * fade);
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.ellipse(w.x, w.y, r, r * 0.82, 0, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = rgba('#ffffff', 0.3 * fade);
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.ellipse(w.x, w.y - w.amp * 0.8, r, r * 0.82, 0, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawArena() {
@@ -7023,6 +9176,9 @@ function drawEnemies() {
     if (e.dead) continue;
     // intangible enemies fade out; they can't be hit while faint
     const ea = e.phased || e.invuln ? 0.3 : 1;
+
+    // the amalgam's limbs are drawn as one welded body, not as loose bosses
+    if (e.amalPart) continue;
 
     // glow
     ctx.globalCompositeOperation = 'lighter';
@@ -7164,16 +9320,49 @@ function drawEnemies() {
     }
     // forgeheart: rotating armour plates — the gaps are the only way in
     if (e.boss === 'forgeheart') {
-      const seg = TAU / 4;
-      ctx.lineWidth = 11;
-      ctx.strokeStyle = '#fbbf24';
+      /* The plates are the fight, so they are built rather than outlined:
+         armour with a cold face, a bevel catching the forge light, ribs, end
+         bolts, and heat bleeding out of the gaps you have to shoot through. */
+      const seg = TAU / 4, R = e.r + 24;
+      ctx.save();
+      ctx.globalAlpha = ea;
       for (let k = 0; k < 4; k++) {
-        const a0 = e.plateAng + k * seg;
-        ctx.globalAlpha = ea * 0.85;
-        ctx.beginPath();
-        ctx.arc(e.x, e.y, e.r + 24, a0, a0 + seg * 0.62);
-        ctx.stroke();
+        const a0 = e.plateAng + k * seg, a1 = a0 + seg * 0.62;
+        ctx.strokeStyle = '#1c1005'; ctx.lineWidth = 17;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R, a0, a1); ctx.stroke();
+        ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R, a0, a1); ctx.stroke();
+        ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R + 6, a0, a1); ctx.stroke();
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = rgba('#f97316', 0.3 + Math.sin(uiTime * 3 + k) * 0.16);
+        ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R - 4, a0, a1); ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(15,8,2,0.85)'; ctx.lineWidth = 2;
+        for (let i = 1; i < 5; i++) {
+          const a = lerp(a0, a1, i / 5);
+          ctx.beginPath();
+          ctx.moveTo(e.x + Math.cos(a) * (R - 7), e.y + Math.sin(a) * (R - 7));
+          ctx.lineTo(e.x + Math.cos(a) * (R + 7), e.y + Math.sin(a) * (R + 7));
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#fde68a';
+        for (const a of [a0, a1]) {
+          ctx.beginPath();
+          ctx.arc(e.x + Math.cos(a) * R, e.y + Math.sin(a) * R, 3, 0, TAU);
+          ctx.fill();
+        }
+        // the gap after this plate: lit from inside, so the way in is obvious
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = rgba('#fb923c', 0.22 + Math.sin(uiTime * 6 + k) * 0.1);
+        ctx.lineWidth = 10;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R, a1, a0 + seg); ctx.stroke();
+        ctx.restore();
       }
+      ctx.restore();
       ctx.globalAlpha = ea;
     }
 
@@ -7183,6 +9372,27 @@ function drawEnemies() {
       ctx.stroke();
     }
     if (e.psn > 0) {
+      /* Venom should look like it is working, and worse the more of it is in
+         there: the stacks ring the body and the thing sweats. */
+      const sev = clamp(e.psn / 12, 0, 1);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(e.x, e.y, e.r * (1.6 + sev * 1.2), '#a3e635', 0.18 + sev * 0.3);
+      ctx.restore();
+      // one pip per stack, orbiting
+      ctx.fillStyle = '#d9f99d';
+      const pips = Math.min(12, e.psn);
+      for (let k = 0; k < pips; k++) {
+        const a = e.t * 1.8 + k * TAU / pips;
+        const rr = e.r * 1.18 + Math.sin(e.t * 5 + k) * 2;
+        ctx.beginPath();
+        ctx.arc(e.x + Math.cos(a) * rr, e.y + Math.sin(a) * rr, 1.7 + sev, 0, TAU);
+        ctx.fill();
+      }
+      // it drips
+      if (Math.random() < 0.25 + sev * 0.4)
+        spawnPart(e.x + rnd(e.r * 0.8, -e.r * 0.8), e.y + e.r * 0.4,
+                  rnd(14, -14), rnd(70, 30), rnd(2.6, 1.3), '#a3e635', rnd(0.6, 0.3), 0.96);
       ctx.strokeStyle = 'rgba(163,230,53,0.95)'; ctx.lineWidth = 2;
       poly(e.x, e.y, e.r * 0.78, 3, -e.t * 3); ctx.stroke();
       ctx.fillStyle = '#a3e635';
@@ -7311,14 +9521,75 @@ function drawEnemies() {
   }
 }
 
+function updateCorpses(dt) {
+  for (let i = corpses.length - 1; i >= 0; i--) {
+    const c = corpses[i];
+    c.life -= dt;
+    if (c.vol) {
+      // it slides, and anything that hits it shoves it further
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      const dr = Math.pow(0.06, dt);
+      c.vx *= dr; c.vy *= dr;
+      c.x = clamp(c.x, arena.x0 + c.r, arena.x1 - c.r);
+      c.y = clamp(c.y, arena.y0 + c.r, arena.y1 - c.r);
+      c.ang += (Math.abs(c.vx) + Math.abs(c.vy)) * dt * 0.012;
+      // sparks off the fuse, faster as it runs out
+      if (Math.random() < 0.3 + (1 - c.life / c.max) * 0.6)
+        spawnPart(c.x + rnd(c.r, -c.r), c.y + rnd(c.r, -c.r), rnd(60, -60), rnd(-30, -110),
+                  rnd(3.4, 1.6), Math.random() < 0.5 ? '#fb923c' : '#fecaca', rnd(0.5, 0.2), 0.9);
+      if (c.life <= 0) {
+        playerBlast(c.x, c.y, 62 + 24 * c.vol, (10 + 9 * c.vol) * (1 + wave * 0.06), '#fb923c');
+        ringFx(c.x, c.y, 8, 62 + 24 * c.vol, '#fb923c', 0.5, 4);
+        burst(c.x, c.y, 20, '#fb923c', 300, 3.4, 0.55);
+        shake(0.25); Audio_.boom();
+      }
+    }
+    if (c.life <= 0) corpses.splice(i, 1);
+  }
+}
+
+// shove any fused body caught in a blast, so detonations chain across a crowd
+function knockCorpses(x, y, r, force) {
+  for (const c of corpses) {
+    if (!c.vol) continue;
+    const dx = c.x - x, dy = c.y - y, d = len(dx, dy) || 1;
+    if (d > r + c.r) continue;
+    const f = force * (1 - d / (r + c.r));
+    c.vx += dx / d * f; c.vy += dy / d * f;
+  }
+}
+
 function drawCorpses() {
   for (const c of corpses) {
     const t = c.life / c.max;
     ctx.save();
-    ctx.globalAlpha = t * 0.7;
-    ctx.strokeStyle = c.col; ctx.lineWidth = 2;
-    poly(c.x, c.y, c.r * (1 + (1 - t) * 1.5), c.sides, c.ang + (1 - t) * 2);
-    ctx.stroke();
+    if (c.vol) {
+      /* Red, and flashing faster the closer it is to going off — the tell has
+         to be readable at a glance in a crowded room. */
+      const urgency = 1 - t;
+      const blink = Math.sin(uiTime * (14 + urgency * 46)) > 0 ? 1 : 0.28;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(c.x, c.y, c.r * (2.6 + urgency * 2.2), '#ef4444', 0.34 * blink);
+      ctx.restore();
+      ctx.globalAlpha = 0.55 + 0.45 * blink;
+      ctx.fillStyle = rgba('#ef4444', 0.3 * blink);
+      ctx.strokeStyle = blink > 0.5 ? '#fecaca' : '#ef4444';
+      ctx.lineWidth = 2.6;
+      poly(c.x, c.y, c.r * (1 + urgency * 0.3), c.sides, c.ang);
+      ctx.fill(); ctx.stroke();
+      // the fuse burning down around it
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r * 1.5, -Math.PI / 2, -Math.PI / 2 + TAU * t);
+      ctx.stroke();
+    } else {
+      ctx.globalAlpha = t * 0.7;
+      ctx.strokeStyle = c.col; ctx.lineWidth = 2;
+      poly(c.x, c.y, c.r * (1 + (1 - t) * 1.5), c.sides, c.ang + (1 - t) * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }
@@ -7433,16 +9704,50 @@ function drawPlayer() {
 
   // FORGE LEDGER: the borrowed plates, drawn where they actually block
   if (P.plateT > 0) {
+    /* Borrowed plate, and it should look borrowed: forged segments still
+       carrying heat, bolted at the ends, riding a hot seam. */
     const fade = clamp(P.plateT / 1.2, 0, 1);
+    const seg = TAU / 4, R = 62;
     ctx.save();
-    ctx.globalAlpha = fade * 0.9;
-    ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 9;
-    const seg = TAU / 4;
+    ctx.globalAlpha = fade;
     for (let k = 0; k < 4; k++) {
-      const a0 = P.plateAng + k * seg;
-      ctx.beginPath();
-      ctx.arc(P.x, P.y, 62, a0, a0 + seg * 0.62);
-      ctx.stroke();
+      const a0 = P.plateAng + k * seg, a1 = a0 + seg * 0.62;
+      // the plate: dark steel body with a lit outer bevel
+      ctx.strokeStyle = '#2a1c0a'; ctx.lineWidth = 13;
+      ctx.beginPath(); ctx.arc(P.x, P.y, R, a0, a1); ctx.stroke();
+      ctx.strokeStyle = '#78350f'; ctx.lineWidth = 9;
+      ctx.beginPath(); ctx.arc(P.x, P.y, R, a0, a1); ctx.stroke();
+      ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.arc(P.x, P.y, R + 4.6, a0, a1); ctx.stroke();
+      // heat still in it, breathing
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba('#f97316', 0.35 + Math.sin(uiTime * 4 + k) * 0.18);
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(P.x, P.y, R - 2.5, a0, a1); ctx.stroke();
+      ctx.restore();
+      // bolts at each end
+      ctx.fillStyle = '#fde68a';
+      for (const a of [a0, a1]) {
+        ctx.beginPath();
+        ctx.arc(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R, 2.4, 0, TAU);
+        ctx.fill();
+      }
+      // ribs across the plate
+      ctx.strokeStyle = 'rgba(20,12,4,0.8)'; ctx.lineWidth = 1.6;
+      for (let i = 1; i < 4; i++) {
+        const a = lerp(a0, a1, i / 4);
+        ctx.beginPath();
+        ctx.moveTo(P.x + Math.cos(a) * (R - 5), P.y + Math.sin(a) * (R - 5));
+        ctx.lineTo(P.x + Math.cos(a) * (R + 5), P.y + Math.sin(a) * (R + 5));
+        ctx.stroke();
+      }
+    }
+    // an ember shaken loose now and then
+    if (Math.random() < 0.4) {
+      const a = P.plateAng + rnd(TAU);
+      spawnPart(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R,
+                rnd(30, -30), rnd(-20, -70), rnd(3, 1.4), '#fbbf24', rnd(0.6, 0.25), 0.92);
     }
     ctx.restore();
   }
@@ -7465,16 +9770,39 @@ function drawPlayer() {
     ctx.globalAlpha = 0.45 + Math.sin(uiTime * 3) * 0.12;
     ctx.strokeStyle = '#fde047'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
-    ctx.globalAlpha = 0.3;
-    for (let i = 0; i < 12; i++) {
-      const a = uiTime * 0.5 + i * TAU / 12;
-      const r0 = R * 0.86, r1 = R * (1.02 + Math.sin(uiTime * 4 + i) * 0.05);
+    /* Prominences: tongues of flame licking off the edge at their own rates,
+       so the corona churns instead of being a ring with ticks on it. */
+    for (let i = 0; i < 18; i++) {
+      const a = uiTime * 0.35 + i * TAU / 18;
+      const wob = Math.sin(uiTime * (2.4 + (i % 5) * 0.5) + i * 1.7);
+      const r0 = R * 0.82, r1 = R * (1.0 + 0.16 * (0.5 + wob * 0.5));
+      const spread = 0.07 + 0.05 * (0.5 + wob * 0.5);
+      ctx.globalAlpha = 0.22 + 0.2 * (0.5 + wob * 0.5);
+      ctx.fillStyle = i % 3 ? '#fb923c' : '#fde047';
       ctx.beginPath();
-      ctx.moveTo(P.x + Math.cos(a) * r0, P.y + Math.sin(a) * r0);
-      ctx.lineTo(P.x + Math.cos(a) * r1, P.y + Math.sin(a) * r1);
-      ctx.stroke();
+      ctx.moveTo(P.x + Math.cos(a - spread) * r0, P.y + Math.sin(a - spread) * r0);
+      ctx.quadraticCurveTo(P.x + Math.cos(a) * r1 * 1.06, P.y + Math.sin(a) * r1 * 1.06,
+                           P.x + Math.cos(a + spread) * r0, P.y + Math.sin(a + spread) * r0);
+      ctx.closePath(); ctx.fill();
+    }
+    // the boundary that actually burns, and heat shimmer inside it
+    ctx.globalAlpha = 0.5 + Math.sin(uiTime * 5) * 0.14;
+    ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 0.16;
+    ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const rr = R * (0.5 + i * 0.16) + Math.sin(uiTime * 3 + i * 2) * 5;
+      ctx.beginPath(); ctx.arc(P.x, P.y, rr, 0, TAU); ctx.stroke();
     }
     ctx.restore();
+    // embers rising off the corona
+    if (Math.random() < 0.5) {
+      const a = rnd(TAU);
+      spawnPart(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R,
+                Math.cos(a) * 40, Math.sin(a) * 40 - 60, rnd(3.4, 1.6),
+                Math.random() < 0.5 ? '#fde047' : '#fb923c', rnd(0.7, 0.3), 0.93);
+    }
   }
 
   // GEMINI: the twin, mirrored through the centre of the arena
@@ -7492,10 +9820,6 @@ function drawPlayer() {
     drawShipHull('#c4b5fd', 'rgba(196,181,253,0.18)');
     ctx.restore();
   }
-
-  ctx.globalCompositeOperation = 'lighter';
-  drawGlow(P.x, P.y, 46, P.hurtFlash > 0 ? '#ef4444' : COL.player, 0.5);
-  ctx.globalCompositeOperation = 'source-over';
 
   // shields
   for (let i = 0; i < P.shield; i++) {
@@ -7524,19 +9848,85 @@ function drawPlayer() {
     }
   }
 
+  /* Afterimages. GHOST STEP is the one upgrade whose whole point is that you
+     pass through things, and it had nothing to show for it — phased trails go
+     violet and hollow, so you can see the ship is not solid right now. */
+  for (let i = 0; i < P.ghosts.length; i++) {
+    const g = P.ghosts[i];
+    const f = (i + 1) / P.ghosts.length;          // oldest is faintest
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.ang);
+    if (g.phase) {
+      ctx.globalAlpha = 0.32 * f;
+      ctx.lineWidth = 1.6;
+      drawShipHull('#c4b5fd', 'rgba(0,0,0,0)');   // hollow: nothing solid here
+      ctx.globalAlpha = 0.16 * f;
+      ctx.scale(1 + (1 - f) * 0.5, 1 + (1 - f) * 0.5);
+      drawShipHull('#a78bfa', 'rgba(0,0,0,0)');
+    } else {
+      ctx.globalAlpha = 0.26 * f;
+      ctx.lineWidth = 2;
+      drawShipHull(COL.player, rgba(COL.player, 0.10));
+    }
+    ctx.restore();
+  }
+
   if (blink) return;
   ctx.save();
   ctx.translate(P.x, P.y);
   ctx.rotate(P.ang);
+  const phasing = P.ghost > 0 && P.dashT > 0;
+  const hullCol = phasing ? '#c4b5fd' : P.hurtFlash > 0 ? '#fecaca' : COL.player;
+
+  /* The hull glows off its own edge and outward only. A radial sprite centred
+     on the ship washes across the plating and softens it; stroking the
+     silhouette at growing widths throws the light outward instead, and the
+     solid hull drawn over the top keeps the shape hard. */
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineJoin = 'round';
+  for (let i = 5; i >= 1; i--) {
+    ctx.lineWidth = 2.4 + i * 3.4;
+    ctx.strokeStyle = rgba(hullCol, 0.055 * (1 - i / 6.5) + 0.012);
+    drawShipHull(rgba(hullCol, 0.055 * (1 - i / 6.5) + 0.012), 'rgba(0,0,0,0)');
+  }
+  ctx.restore();
+
   ctx.lineWidth = 2.4;
-  ctx.strokeStyle = P.hurtFlash > 0 ? '#fecaca' : COL.player;
-  ctx.fillStyle = P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : 'rgba(103,232,249,0.18)';
-  drawShipHull(P.hurtFlash > 0 ? '#fecaca' : COL.player,
-               P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : rgba(COL.player, 0.18));
+  ctx.strokeStyle = hullCol;
+  // while phasing the hull is barely filled — you are not really there
+  const hullFill = phasing ? 'rgba(167,139,250,0.10)'
+                 : P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : rgba(COL.player, 0.18);
+  ctx.fillStyle = hullFill;
+  drawShipHull(hullCol, hullFill);
   // cockpit
   ctx.fillStyle = '#e0f2fe';
   ctx.beginPath(); ctx.arc(2, 0, 2.6, 0, TAU); ctx.fill();
   ctx.restore();
+}
+
+/* Motion blur. The smear is laid along where the thing has just been and its
+   length comes from how fast it is actually travelling, so a slow shot barely
+   smudges and a railgun round draws a line. Three tapered segments rather than
+   a gradient: with several hundred bullets on screen this allocates nothing. */
+function motionStreak(x, y, vx, vy, w, col, strength) {
+  const k = strength === undefined ? 1 : strength;
+  const s = Math.hypot(vx, vy);
+  if (s < 40) return;                    // slow things do not smear
+  const L = Math.min(s * 0.05, 64) * k;
+  const ux = vx / s, uy = vy / s;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const f = 1 - i / 3;
+    ctx.strokeStyle = rgba(col, 0.36 * f * f * k);
+    ctx.lineWidth = w * (1 - i * 0.24);
+    ctx.beginPath();
+    ctx.moveTo(x - ux * (L * i / 3), y - uy * (L * i / 3));
+    ctx.lineTo(x - ux * (L * (i + 1) / 3), y - uy * (L * (i + 1) / 3));
+    ctx.stroke();
+  }
 }
 
 function drawBullets() {
@@ -7544,36 +9934,165 @@ function drawBullets() {
     // zodiac rounds read differently at a glance
     const c = b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
             : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
-    const s = len(b.vx, b.vy) || 1;
-    const tail = b.arrow ? 46 : b.deep ? 8 : 15;
     drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
-    ctx.strokeStyle = rgba(c, 0.55);
-    ctx.lineWidth = b.r * (b.arrow ? 1.1 : 1.5);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(b.x, b.y);
-    ctx.lineTo(b.x - b.vx / s * tail, b.y - b.vy / s * tail);
-    ctx.stroke();
-    if (b.arrow) {                       // a barbed head, pointing where it flies
-      const a = Math.atan2(b.vy, b.vx);
-      ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 2;
+    motionStreak(b.x, b.y, b.vx, b.vy, b.r * (b.arrow ? 1.3 : 1.7), c,
+                 b.arrow ? 1.5 : 1);
+    if (b.arrow) {
+      /* A whole arrow rather than a dot with two ticks on it: nocked shaft,
+         fletching that catches the light, and a barbed head with an edge. */
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      // shaft
+      ctx.strokeStyle = '#fde68a'; ctx.lineWidth = 1.9;
+      ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(10, 0); ctx.stroke();
+      // fletching, two vanes plus the nock
+      ctx.fillStyle = 'rgba(252,211,77,0.9)';
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(-26, 0); ctx.lineTo(-20, s * 5.4);
+        ctx.lineTo(-11, s * 4.2); ctx.lineTo(-15, 0);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(-27, -3.2); ctx.lineTo(-27, 3.2); ctx.stroke();
+      // head: a solid barbed point with a lit leading edge
+      ctx.fillStyle = '#fffbeb';
       ctx.beginPath();
-      ctx.moveTo(b.x + Math.cos(a) * 9, b.y + Math.sin(a) * 9);
-      ctx.lineTo(b.x + Math.cos(a + 2.5) * 8, b.y + Math.sin(a + 2.5) * 8);
-      ctx.moveTo(b.x + Math.cos(a) * 9, b.y + Math.sin(a) * 9);
-      ctx.lineTo(b.x + Math.cos(a - 2.5) * 8, b.y + Math.sin(a - 2.5) * 8);
-      ctx.stroke();
+      ctx.moveTo(19, 0); ctx.lineTo(7, 6.2); ctx.lineTo(10, 0);
+      ctx.lineTo(7, -6.2); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(19, 0); ctx.lineTo(7, -6.2); ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.62, 0, TAU); ctx.fill();
     }
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.62, 0, TAU); ctx.fill();
   }
 }
 
+/* Every boss throws its own thing. A screen full of identical dots tells you
+   nothing about what is coming at you; these are shaped so you can read the
+   threat by silhouette alone, before you have registered the colour. */
 function drawEBullets() {
   for (const b of ebullets) {
-    drawGlow(b.x, b.y, b.r * 4, b.col, 0.7);
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.5, 0, TAU); ctx.fill();
+    drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
+    motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
+    const r = b.r;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.translate(b.x, b.y);
+    ctx.lineJoin = 'round';
+
+    switch (b.kind) {
+      case 'warden': {                    // a thrown ring, spinning edge-on
+        ctx.rotate(b.spin + uiTime * 5);
+        ctx.strokeStyle = b.col; ctx.lineWidth = r * 0.62;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.15, r * 0.8, 0, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.1;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.15, r * 0.8, 0, 0, TAU); ctx.stroke();
+        break;
+      }
+      case 'forgeheart': {                // a slug of molten metal, still running
+        ctx.rotate(Math.atan2(b.vy, b.vx));
+        ctx.fillStyle = b.col;
+        ctx.beginPath();
+        ctx.moveTo(r * 1.5, 0);
+        ctx.quadraticCurveTo(0, r, -r * 1.7, 0);
+        ctx.quadraticCurveTo(0, -r, r * 1.5, 0);
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath(); ctx.arc(r * 0.35, 0, r * 0.45, 0, TAU); ctx.fill();
+        break;
+      }
+      case 'broodmother': {               // a spore, and it has spines
+        ctx.rotate(b.spin + uiTime * 1.6);
+        ctx.fillStyle = b.col;
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, TAU); ctx.fill();
+        ctx.strokeStyle = b.col; ctx.lineWidth = 1.6;
+        for (let i = 0; i < 6; i++) {
+          const a = i * TAU / 6, o = r * (1.25 + Math.sin(uiTime * 7 + i) * 0.2);
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * r * 0.7, Math.sin(a) * r * 0.7);
+          ctx.lineTo(Math.cos(a) * o, Math.sin(a) * o);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#dcfce7';
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.32, 0, TAU); ctx.fill();
+        break;
+      }
+      case 'archivist': {                 // a filed card, corner-stamped
+        ctx.rotate(b.spin + uiTime * 2.2);
+        ctx.fillStyle = rgba(b.col, 0.85);
+        ctx.fillRect(-r * 1.1, -r * 0.8, r * 2.2, r * 1.6);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+        ctx.strokeRect(-r * 1.1, -r * 0.8, r * 2.2, r * 1.6);
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.fillRect(-r * 0.7, -r * 0.3, r * 1.4, 1.4);
+        ctx.fillRect(-r * 0.7, r * 0.15, r * 0.9, 1.4);
+        break;
+      }
+      case 'nullcore': {                  // a shard with nothing inside it
+        ctx.rotate(b.spin + uiTime * 3.4);
+        ctx.fillStyle = b.col;
+        poly(0, 0, r * 1.35, 3, 0); ctx.fill();
+        ctx.fillStyle = '#0a0a0f';       // the hole, not a highlight
+        poly(0, 0, r * 0.6, 3, Math.PI); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+        poly(0, 0, r * 1.35, 3, 0); ctx.stroke();
+        break;
+      }
+      case 'curator': {                   // a redaction, travelling
+        ctx.rotate(Math.atan2(b.vy, b.vx));
+        ctx.fillStyle = '#0b0b0e';
+        ctx.fillRect(-r * 1.9, -r * 0.62, r * 3.8, r * 1.24);
+        ctx.strokeStyle = b.col; ctx.lineWidth = 1.4;
+        ctx.strokeRect(-r * 1.9, -r * 0.62, r * 3.8, r * 1.24);
+        break;
+      }
+      case 'theother': {                  // a sliver of mirror
+        ctx.rotate(Math.atan2(b.vy, b.vx));
+        ctx.fillStyle = rgba(b.col, 0.55);
+        ctx.beginPath();
+        ctx.moveTo(r * 1.9, 0); ctx.lineTo(0, r * 0.62);
+        ctx.lineTo(-r * 1.9, 0); ctx.lineTo(0, -r * 0.62);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.8, -r * 0.14); ctx.lineTo(r * 0.9, -r * 0.14);
+        ctx.stroke();
+        break;
+      }
+      case 'keeper': {                    // a wax seal, pressed and thrown
+        ctx.rotate(b.spin + uiTime * 1.2);
+        ctx.fillStyle = b.col;
+        poly(0, 0, r * 1.15, 7, 0); ctx.fill();
+        ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 1.2;
+        poly(0, 0, r * 0.66, 7, Math.PI / 7); ctx.stroke();
+        break;
+      }
+      case 'unwritten': {                 // a torn corner of a blank page
+        ctx.rotate(b.spin + uiTime * 0.9);
+        ctx.fillStyle = 'rgba(245,245,247,0.9)';
+        ctx.beginPath();
+        ctx.moveTo(-r, -r * 1.1); ctx.lineTo(r * 1.15, -r * 0.8);
+        ctx.lineTo(r * 0.75, r * 1.15); ctx.lineTo(-r * 1.1, r * 0.7);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = rgba(b.col, 0.9); ctx.lineWidth = 1;
+        ctx.stroke();
+        break;
+      }
+      default: {                          // grunts and anything untagged
+        ctx.fillStyle = b.col;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3; ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.44, 0, TAU); ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 }
 
@@ -7584,11 +10103,24 @@ function drawParticles() {
   }
 }
 
+/* A glow on its own has no edge anywhere, so it reads as a smudge. Each of
+   these is light around a hard little body, not light instead of one. */
 function drawGems() {
   const pu = Math.sin(uiTime * 6) * 0.2 + 0.9;
   for (const g of gems) {
     const fade = g.life < 3 ? (Math.floor(g.life * 7) % 2 ? 0.3 : 1) : 1;
-    drawGlow(g.x, g.y, g.r * 3.6 * pu, COL.xp, 0.72 * fade);
+    drawGlow(g.x, g.y, g.r * 2.9 * pu, COL.xp, 0.5 * fade);
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = fade;
+    const a = uiTime * 1.5 + g.x * 0.01;
+    ctx.fillStyle = COL.xp;
+    poly(g.x, g.y, g.r * 1.25, 4, a); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2;
+    poly(g.x, g.y, g.r * 1.25, 4, a); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    poly(g.x, g.y, g.r * 0.46, 4, a); ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -7706,7 +10238,7 @@ function drawHUD() {
   roundRect(pad, pad, bw, bh, 8); ctx.stroke();
   ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#0b1220';
-  ctx.fillText(`${Math.ceil(P.hp)} / ${Math.round(P.maxHp)}`, pad + 9, pad + bh / 2 + 0.5);
+  ctx.fillText(`${fmtHp(P.hp)} / ${Math.round(P.maxHp)}`, pad + 9, pad + bh / 2 + 0.5);
 
   /* --- xp bar --- */
   const yb = pad + bh + 7;
@@ -7776,11 +10308,12 @@ function drawHUD() {
   /* --- installed malware: it owns the dash, so it says so where dash lives --- */
   if (P.malware) {
     const my = yb + (P.book ? 66 : 40);
+    drawMalChip(pad + 11, my - 3, 9, P.malware.col);   // the part, in miniature
     ctx.textAlign = 'left';
     ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = P.malware.col;
     ctx.globalAlpha = 0.55 + Math.sin(uiTime * 2.4) * 0.2;
-    ctx.fillText('[SPACE] ' + P.malware.n, pad, my);
+    ctx.fillText('[SPACE] ' + P.malware.n, pad + 26, my);
     ctx.globalAlpha = 1;
   }
 
@@ -7805,8 +10338,13 @@ function drawHUD() {
 
   /* --- boss bar --- */
   // a shadow is on loan and must never take the real boss's bar
-  const boss = enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow);
-  if (boss) {
+  /* THE AMALGAM owns the bar outright. Its limbs are nine separate boss
+     enemies, so the finder below would label the whole fight after whichever
+     piece happens to sit first in the array — and show that piece's health
+     instead of the pool. */
+  const boss = amalgam ? null : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow);
+  if (amalgam) drawAmalgamBar();
+  else if (boss) {
     const w2 = Math.min(560, W * 0.62), x2 = (W - w2) / 2, y2 = 22;
     ctx.textAlign = 'center';
     const bd = BOSSES[boss.boss] || BOSSES.warden;
@@ -7841,7 +10379,8 @@ function drawHUD() {
          : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : ''),
       W / 2, y2 + 28);
     // offscreen indicator
-    const sx = boss.x - cam.x + W / 2, sy = boss.y - cam.y + H / 2;
+    const sx = (boss.x - cam.x) * camZoom + W / 2,
+          sy = (boss.y - cam.y) * camZoom + H / 2;
     if (sx < 0 || sy < 0 || sx > W || sy > H) {
       const a = Math.atan2(boss.y - cam.y, boss.x - cam.x);
       const rx = W / 2 + Math.cos(a) * (Math.min(W, H) * 0.42);
@@ -7998,10 +10537,36 @@ function drawLevelUp() {
   ctx.fillText('CLICK OR PRESS 1 / 2 / 3', W / 2, rs[0].y + rs[0].h + 30);
 }
 
+/* Normally a whole number. Under THE AMALGAM it goes fractional and has to
+   print every place, because watching it shrink is the joke and the tension. */
+function fmtHp(hp) {
+  if (hp >= 1) return String(Math.ceil(hp));
+  if (hp <= 0) return '0';
+  // past a certain absurdity the decimals stop reading as a number at all and
+  // start reading as zero, which is exactly the wrong impression to give
+  if (hp < 1e-6) return hp.toExponential(0).replace('e-', 'e−');
+  const places = Math.max(1, Math.round(-Math.log10(hp)));
+  return hp.toFixed(places);
+}
+
 // hard cap on a name from the board: it is user-supplied and can be anything
 function clipText(s, n) {
   s = String(s);
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// same wrapping as wrapText, but handed back so a caller can place a caret
+function wrapLines(text, maxW) {
+  const words = String(text).split(' ');
+  const out = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { out.push(line); line = w; }
+    else line = test;
+  }
+  out.push(line);
+  return out;
 }
 
 function wrapText(text, x, y, maxW, lh) {
@@ -8186,7 +10751,8 @@ function drawPause() {
   ctx.fillText('PAUSED', W / 2, H / 2 - 56);
   ctx.font = '500 13px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex', W / 2, H / 2 - 20);
+  ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex   ·   G effects: ' +
+               (fxLevel ? 'on' : 'off'), W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
   ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
@@ -8517,15 +11083,26 @@ function libraryButtons() {
 --------------------------------------------------------------------------- */
 const KEEPER_COL = '#fcd34d';
 
+/* He takes the record as often as you bring it. This used to be once ever,
+   which stranded anyone who beat him before his own book became a codex
+   entry: book_keeper is only awarded by beating him, trulyFull() needs it,
+   and the talk needs trulyFull() — so the record could never be finished and
+   THE UNWRITTEN could never be reached. He only steps aside for the talk. */
 function keeperWants() {
   return state === 'library' && !malwareOffer && Codex.complete() &&
-         !Save.profile.keeperDone;
+         !(P.book && P.book.id === 'keeper') &&   // already carrying his copy this run
+         !keeperTalks();
 }
 
 function keeperLine() {
   const h = Codex.have();
-  if (Save.profile.keeperDone) return 'You finished it. I read it. Take what you like.';
-  if (Codex.complete())        return 'That is all of it. Every entry. Hand it here.';
+  if (keeperTalks()) return 'You finished it. I read it. Take what you like.';
+  if (P.book && P.book.id === 'keeper')
+    return 'You have my copy already. Go and use it.';
+  if (Codex.complete())
+    return Save.profile.keeperDone
+      ? 'Again? Hand it here. I will read it again.'
+      : 'That is all of it. Every entry. Hand it here.';
   if (h.e < h.needE && h.u < h.needU)
     return 'Still gaps in both halves. ' + (h.needE - h.e) + ' unseen, ' +
            (h.needU - h.u) + ' unwritten.';
@@ -9199,6 +11776,88 @@ function codexReveal() {
   codexScroll = clamp(codexScroll, 0, codexMaxScroll());
 }
 
+/* A die in its package: dark silicon, traces running out to the pins, and a
+   core that pulses like something is executing on it that should not be. */
+function drawMalChip(x, y, s, col) {
+  const t = uiTime;
+  ctx.save();
+  ctx.translate(x, y);
+
+  const pins = 7, pl = s * 0.3, pw = s * 0.11, span = s * 1.28;
+  const pinY = i => -span / 2 + (i + 0.5) * (span / pins);
+
+  // legs, then hot tips travelling down them
+  ctx.fillStyle = '#78350f';
+  for (let i = 0; i < pins; i++) {
+    ctx.fillRect(-s - pl, pinY(i) - pw / 2, pl, pw);
+    ctx.fillRect(s, pinY(i) - pw / 2, pl, pw);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < pins; i++) {
+    const on = 0.2 + 0.8 * Math.max(0, Math.sin(t * 5 + i * 1.6));
+    ctx.fillStyle = rgba(col, 0.75 * on);
+    ctx.fillRect(-s - pl, pinY(i) - pw / 2, pl * 0.55, pw);
+    ctx.fillRect(s + pl * 0.45, pinY(i) - pw / 2, pl * 0.55, pw);
+  }
+  ctx.restore();
+
+  // package
+  roundRect(-s, -s * 0.76, s * 2, s * 1.52, s * 0.1);
+  ctx.fillStyle = '#17060a'; ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2.4; ctx.stroke();
+  roundRect(-s * 0.94, -s * 0.7, s * 1.88, s * 1.4, s * 0.08);
+  ctx.strokeStyle = rgba(col, 0.28); ctx.lineWidth = 1; ctx.stroke();
+
+  // orientation notch, so it reads as a real part
+  ctx.beginPath();
+  ctx.arc(-s, 0, s * 0.14, -Math.PI / 2, Math.PI / 2);
+  ctx.fillStyle = '#2a0a10'; ctx.fill();
+  ctx.strokeStyle = rgba(col, 0.75); ctx.lineWidth = 1.4; ctx.stroke();
+
+  // the die
+  roundRect(-s * 0.58, -s * 0.44, s * 1.16, s * 0.88, s * 0.04);
+  ctx.fillStyle = '#2b0b12'; ctx.fill();
+  ctx.strokeStyle = rgba(col, 0.55); ctx.lineWidth = 1; ctx.stroke();
+
+  // etched traces, with a charge running out along one of them
+  ctx.save();
+  roundRect(-s * 0.58, -s * 0.44, s * 1.16, s * 0.88, s * 0.04); ctx.clip();
+  ctx.strokeStyle = rgba(col, 0.34); ctx.lineWidth = 1;
+  for (let i = 0; i < 7; i++) {
+    const yy = -s * 0.36 + i * s * 0.12;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.58, yy);
+    ctx.lineTo(-s * 0.2 + (i % 3) * s * 0.1, yy);
+    ctx.lineTo(-s * 0.2 + (i % 3) * s * 0.1, yy + s * 0.07);
+    ctx.lineTo(s * 0.58, yy + s * 0.07);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const lane = (Math.floor(t * 1.3) + i * 2) % 7;
+    const yy = -s * 0.36 + lane * s * 0.12;
+    const p = ((t * 1.3 + i * 0.33) % 1);
+    const px = -s * 0.58 + p * s * 1.16;
+    ctx.fillStyle = rgba('#fecaca', 0.85);
+    ctx.fillRect(px, yy + s * 0.035 - 1, s * 0.1, 2);
+  }
+  ctx.restore();
+
+  // the core, executing
+  const pulse = 0.55 + Math.sin(t * 6) * 0.45;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(0, 0, s * (0.7 + pulse * 0.35), col, 0.55);
+  ctx.restore();
+  ctx.fillStyle = rgba(col, 0.25 + pulse * 0.3);
+  ctx.strokeStyle = '#fecaca'; ctx.lineWidth = 1.6;
+  roundRect(-s * 0.17, -s * 0.17, s * 0.34, s * 0.34, s * 0.03);
+  ctx.fill(); ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawMalware() {
   const m = malwareOffer;
   if (!m) return;
@@ -9232,19 +11891,21 @@ function drawMalware() {
   ctx.fillStyle = '#64748b';
   ctx.fillText('OVERWRITES YOUR DASH', cx, cy - 148);
 
-  // the payload glyph
+  // the payload, sitting on the board it is about to ruin
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  drawGlow(cx, cy - 74, 66, m.col, 0.5);
+  drawGlow(cx, cy - 74, 96, '#7f1d1d', 0.4);
+  // board traces running away from the socket
+  ctx.strokeStyle = rgba(MAL_COL, 0.20); ctx.lineWidth = 1.4;
+  for (let i = 0; i < 10; i++) {
+    const a = i * TAU / 10 + uiTime * 0.06, r0 = 62, r1 = 150 + (i % 3) * 26;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy - 74 + Math.sin(a) * r0 * 0.7);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy - 74 + Math.sin(a) * r1 * 0.7);
+    ctx.stroke();
+  }
   ctx.restore();
-  ctx.save();
-  ctx.translate(cx, cy - 74);
-  ctx.strokeStyle = m.col; ctx.lineWidth = 2.6;
-  ctx.fillStyle = rgba(m.col, 0.14);
-  poly(0, 0, 32, 6, uiTime * 0.7); ctx.fill(); ctx.stroke();
-  ctx.lineWidth = 1.6;
-  poly(0, 0, 20, 3, -uiTime * 1.1); ctx.stroke();
-  ctx.restore();
+  drawMalChip(cx, cy - 74, 54, m.col);
 
   ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = m.col;
