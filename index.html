@@ -87,6 +87,49 @@ function resize() {
 ========================================================================== */
 const FX = { OFF: 0, ON: 1 };
 let fxLevel = FX.ON;
+
+/* Per-effect switches. The measured cost of each on a busy boss screen is
+   listed so the menu can show it — these were taken with a GPU flush, not by
+   timing draw-call submission, which lies. */
+const FXO = { bloom: 1, aber: 1, film: 1, mblur: 1, waves: 1,
+              parts: 1, ghosts: 1, malfx: 1, bglow: 1 };
+/* Costs measured on the amalgam fight — the heaviest screen in the game, four
+   hundred bullets up — with a GPU flush around each pass. The two big ones are
+   real and repeatable; the small ones are near the noise floor individually
+   but add up to most of a frame together. */
+const FX_ROWS = [
+  { k: 'aber',   n: 'Chromatic split',    d: 'Colour fringing at the screen edges',  cost: 3.9 },
+  { k: 'mblur',  n: 'Motion blur',        d: 'Smear behind fast shots',              cost: 3.3 },
+  { k: 'bglow',  n: 'Bullet glow',        d: 'Halo behind every shot on screen',     cost: 2.0 },
+  { k: 'bloom',  n: 'Bloom',              d: 'Light spilling around bright things',  cost: 1.0 },
+  { k: 'film',   n: 'Grain & scanlines',  d: 'Screen texture over the whole frame',  cost: 0.8 },
+  { k: 'parts',  n: 'Extra particles',    d: 'Sparks, embers, drips',                cost: 0.5 },
+  { k: 'waves',  n: 'Ground waves',       d: 'The floor heaving under slams',        cost: 0.4 },
+  { k: 'malfx',  n: 'Circuit effects',    d: 'Malware traces and glitches',          cost: 0.4 },
+  { k: 'ghosts', n: 'Dash afterimages',   d: 'The trail your dash leaves',           cost: 0.3 }
+];
+/* Bumped whenever this list changes, so the panel is shown once after an
+   update that adds something new to turn off. */
+const GFX_VER = 1;
+
+function fxApply(p) {
+  if (p && p.gfx) for (const r of FX_ROWS)
+    if (p.gfx[r.k] !== undefined) FXO[r.k] = p.gfx[r.k] ? 1 : 0;
+}
+function fxSave() {
+  Save.profile.gfx = Object.assign({}, FXO);
+  Save.profile.gfxSeen = GFX_VER;
+  Save.writeLocal(); Save.flush();
+}
+function fxPreset(level) {           // 2 = everything, 1 = balanced, 0 = fastest
+  for (const r of FX_ROWS)
+    FXO[r.k] = level === 2 ? 1 : level === 0 ? 0 : (r.cost <= 1.5 ? 1 : 0);
+  // balanced keeps the smear, which carries most of the sense of speed, and
+  // drops the split, which is the single most expensive thing in the list
+  if (level === 1) FXO.mblur = 1;
+  fxLevel = (FXO.bloom || FXO.aber || FXO.film) ? FX.ON : FX.OFF;
+  fxSave();
+}
 let bufScene, cScene;
 const bloomTaps = [];                    // { buf, ctx, shift, blur, weight }
 let grainTile = null, scanTile = null;
@@ -170,15 +213,19 @@ function postWorld() {
     ctx.filter = filter;
     ctx.drawImage(bufScene, -px, -sy, w + px * 2, h + sy * 2);
   };
-  chan('url(#fxR)',  ab);
-  chan('url(#fxG)',  0);
-  chan('url(#fxB)', -ab);
+  if (FXO.aber) {
+    chan('url(#fxR)',  ab);
+    chan('url(#fxG)',  0);
+    chan('url(#fxB)', -ab);
+  } else {
+    ctx.drawImage(bufScene, 0, 0);      // straight back down, no split
+  }
   ctx.filter = 'none';
 
   /* 3. bloom. Each tap downsamples from the one before it, so the blur
      compounds and the widest tap covers most of the screen for almost
      nothing. The first tap is where the bright pass happens. */
-  for (let i = 0; i < bloomTaps.length; i++) {
+  if (FXO.bloom) for (let i = 0; i < bloomTaps.length; i++) {
     const t = bloomTaps[i], src = i === 0 ? bufScene : bloomTaps[i - 1].buf;
     t.ctx.setTransform(1, 0, 0, 1, 0, 0);
     t.ctx.globalCompositeOperation = 'copy';
@@ -186,7 +233,7 @@ function postWorld() {
     t.ctx.drawImage(src, 0, 0, t.buf.width, t.buf.height);
     t.ctx.filter = 'none';
   }
-  for (const t of bloomTaps) {
+  if (FXO.bloom) for (const t of bloomTaps) {
     ctx.globalAlpha = t.weight;
     ctx.drawImage(t.buf, 0, 0, w, h);
   }
@@ -215,6 +262,7 @@ function postScreen() {
   ctx.fillStyle = vigGrad;
   ctx.fillRect(0, 0, w, h);
 
+  if (!FXO.film) { ctx.restore(); return; }
   // scanlines, at device scale so they stay one pixel regardless of DPR
   ctx.globalAlpha = 0.5;
   const sp = ctx.createPattern(scanTile, 'repeat');
@@ -420,7 +468,8 @@ let replay = [];
 
 const partPool = [];
 function spawnPart(x, y, vx, vy, r, color, life, drag = 0.94, glow = true) {
-  if (parts.length > 1400) return;
+  // the cap comes down hard rather than off, so hits and deaths still read
+  if (parts.length > (FXO.parts ? 1400 : 260)) return;
   const p = partPool.pop() || {};
   p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.r = r; p.color = color;
   p.life = life; p.max = life; p.drag = drag; p.glow = glow;
@@ -2632,6 +2681,7 @@ function updateMalFx(dt) {
 }
 
 function drawMalFx() {
+  if (!FXO.malfx) return;
   for (const f of malFx) {
     const u = clamp(f.t / f.life, 0, 1), a = 1 - u;
     ctx.lineCap = 'butt';
@@ -3115,6 +3165,7 @@ const Save = {
                   keeperMet: false, keeperDone: false,
                   trueEnd: false, freeplay: false, unwrittenDeaths: 0,
                   askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
+                  gfx: null, gfxSeen: 0,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -3203,6 +3254,7 @@ const Save = {
                                                  : (Save.profile.muted ? 0 : 1));
     Codex.load();
     fxLevel = Save.profile.fx === undefined ? FX.ON : (Save.profile.fx ? FX.ON : FX.OFF);
+    fxApply(Save.profile);
     autoFire = !!Save.profile.autofire;
     applyChar(Save.profile.charIdx || 0);
     Save.connect();
@@ -3547,12 +3599,18 @@ function handleKey(k) {
   if (state === 'amalcut') return;         // it does not take input
   if (k === 'q') { useBook(); return; }
   if (state === 'pause' && k === 'x') { openCodex('pause'); return; }
-  if (k === 'g') {                       // an out, for anything that struggles
-    fxLevel = fxLevel ? FX.OFF : FX.ON;
-    Save.profile.fx = fxLevel;
-    Save.writeLocal(); Save.flush();
+  if (state === 'gfx') {
+    if (uiArm > 0) return;
+    if (k === 'g' || k === 'escape' || k === 'enter' || k === ' ') { closeGfx(); return; }
+    if (k === 'arrowdown' || k === 's') { gfxSel = (gfxSel + 1) % FX_ROWS.length; return; }
+    if (k === 'arrowup'   || k === 'w') { gfxSel = (gfxSel + FX_ROWS.length - 1) % FX_ROWS.length; return; }
+    if (k === 'arrowleft' || k === 'arrowright' || k === 'a' || k === 'd') { gfxToggle(gfxSel); return; }
+    if (k === '1') { fxPreset(2); return; }
+    if (k === '2') { fxPreset(1); return; }
+    if (k === '3') { fxPreset(0); return; }
     return;
   }
+  if (k === 'g') { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
   if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
@@ -3614,7 +3672,23 @@ function handleClick() {
   if (state === 'name') { if (isTouch) promptName(); return; }
   if (state === 'menu') { resetGame(); state = 'play'; return; }
   if (state === 'dead') { resetGame(); state = 'play'; return; }
-  if (state === 'pause') { state = 'play'; return; }
+  if (state === 'gfx') {
+    if (uiArm > 0) return;
+    const g = gfxRects();
+    for (const b of g.rows)
+      if (inRect(mouse.x, mouse.y, b)) { gfxSel = b.i; gfxToggle(b.i); return; }
+    for (const b of g.presets)
+      if (inRect(mouse.x, mouse.y, b)) { fxPreset(b.lvl); Audio_.select(); return; }
+    if (inRect(mouse.x, mouse.y, g.done)) { closeGfx(); return; }
+    return;
+  }
+  if (state === 'pause') {
+    const g = gfxRects();
+    if (inRect(mouse.x, mouse.y, { x: W / 2 - 90, y: H / 2 - 34, w: 180, h: 26 })) {
+      openGfx('pause'); return;
+    }
+    state = 'play'; return;
+  }
   if (uiArm > 0) return;                 // overlay just opened — swallow it
   if (state === 'levelup') {
     const i = offerIndexAt(mouse.x, mouse.y);
@@ -3773,7 +3847,7 @@ function update(dt) {
   }
   if (state === 'levelup' || state === 'shop' || state === 'planet' ||
       state === 'library' || state === 'talk' || state === 'devtalk' ||
-      state === 'dead') {
+      state === 'gfx' || state === 'dead') {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
     if (state === 'devtalk') devTypeTick(dt);
@@ -3810,6 +3884,13 @@ function update(dt) {
      gave up: a level-up or a shop open at that instant dropped the monologue,
      and since beating THE UNWRITTEN sets trueEnd the keeper would never offer
      the fight again — so the amalgam was gone for good. */
+  /* First run after an update that added effects: show what is new and let
+     them be turned off before anything heavy is on screen. */
+  if (Save.profile.gfxSeen !== GFX_VER && state === 'play' && !amalgam && !amalCut) {
+    gfxFirstRun = true;
+    openGfx('play');
+    return;
+  }
   if (outro) outroTick(dt);
   if (Save.profile.devTalkDue && !Save.profile.amalgamDone && !devTalkSaidNo &&
       !unwritten && !amalgam && !amalCut && unwDeadT <= 0) {
@@ -7799,6 +7880,7 @@ function render() {
   if (state === 'devtalk') drawDevTalk();
   if (outro) drawOutro();
   if (state === 'amalcut') drawAmalCutText();
+  if (state === 'gfx') drawGfx();
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') drawDead();
@@ -9072,7 +9154,7 @@ function drawGrid(ox, oy) {
   const pulse = 0.5 + Math.sin(uiTime * 1.3) * 0.12;
   ctx.lineWidth = 1;
 
-  if (!gwaves.length) {                      // flat floor: the cheap path
+  if (!gwaves.length || !FXO.waves) {        // flat floor: the cheap path
     ctx.strokeStyle = COL.grid;
     ctx.globalAlpha = 0.85;
     ctx.beginPath();
@@ -9851,7 +9933,7 @@ function drawPlayer() {
   /* Afterimages. GHOST STEP is the one upgrade whose whole point is that you
      pass through things, and it had nothing to show for it — phased trails go
      violet and hollow, so you can see the ship is not solid right now. */
-  for (let i = 0; i < P.ghosts.length; i++) {
+  if (FXO.ghosts) for (let i = 0; i < P.ghosts.length; i++) {
     const g = P.ghosts[i];
     const f = (i + 1) / P.ghosts.length;          // oldest is faintest
     ctx.save();
@@ -9911,22 +9993,23 @@ function drawPlayer() {
    length comes from how fast it is actually travelling, so a slow shot barely
    smudges and a railgun round draws a line. Three tapered segments rather than
    a gradient: with several hundred bullets on screen this allocates nothing. */
+/* One stroke, not three. The tapered version cost 11.8ms a frame on its own
+   with a few hundred bullets up — three beginPath/stroke pairs each — which is
+   most of a frame budget spent on smear. A single line with a round cap reads
+   near-identically in motion. */
 function motionStreak(x, y, vx, vy, w, col, strength) {
+  if (!FXO.mblur) return;
   const k = strength === undefined ? 1 : strength;
   const s = Math.hypot(vx, vy);
   if (s < 40) return;                    // slow things do not smear
   const L = Math.min(s * 0.05, 64) * k;
-  const ux = vx / s, uy = vy / s;
+  ctx.strokeStyle = rgba(col, 0.3 * k);
+  ctx.lineWidth = w;
   ctx.lineCap = 'round';
-  for (let i = 0; i < 3; i++) {
-    const f = 1 - i / 3;
-    ctx.strokeStyle = rgba(col, 0.36 * f * f * k);
-    ctx.lineWidth = w * (1 - i * 0.24);
-    ctx.beginPath();
-    ctx.moveTo(x - ux * (L * i / 3), y - uy * (L * i / 3));
-    ctx.lineTo(x - ux * (L * (i + 1) / 3), y - uy * (L * (i + 1) / 3));
-    ctx.stroke();
-  }
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - vx / s * L, y - vy / s * L);
+  ctx.stroke();
 }
 
 function drawBullets() {
@@ -9934,7 +10017,7 @@ function drawBullets() {
     // zodiac rounds read differently at a glance
     const c = b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
             : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
-    drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
+    if (FXO.bglow) drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * (b.arrow ? 1.3 : 1.7), c,
                  b.arrow ? 1.5 : 1);
     if (b.arrow) {
@@ -9977,7 +10060,7 @@ function drawBullets() {
    threat by silhouette alone, before you have registered the colour. */
 function drawEBullets() {
   for (const b of ebullets) {
-    drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
+    if (FXO.bglow) drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
     const r = b.r;
     ctx.save();
@@ -10751,8 +10834,8 @@ function drawPause() {
   ctx.fillText('PAUSED', W / 2, H / 2 - 56);
   ctx.font = '500 13px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex   ·   G effects: ' +
-               (fxLevel ? 'on' : 'off'), W / 2, H / 2 - 20);
+  ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex   ·   G effects',
+               W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
   ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
@@ -11856,6 +11939,127 @@ function drawMalChip(x, y, s, col) {
   ctx.fill(); ctx.stroke();
 
   ctx.restore();
+}
+
+/* ------------------------------ effects panel ------------------------------
+   Shown once after an update that adds new effects, and from the pause menu
+   any time. Costs are measured, not guessed, and shown so the choice is
+   informed rather than trial and error.
+--------------------------------------------------------------------------- */
+let gfxSel = 0, gfxFirstRun = false, gfxReturn = 'play';
+
+function openGfx(from) {
+  gfxReturn = from || 'play';
+  gfxSel = 0;
+  state = 'gfx';
+  uiArm = 0.25;
+  Audio_.select();
+}
+function closeGfx() {
+  fxSave();
+  state = gfxReturn === 'pause' ? 'pause' : 'play';
+  gfxFirstRun = false;
+  uiArm = 0.2;
+  Audio_.select();
+}
+function gfxToggle(i) {
+  const r = FX_ROWS[i];
+  if (!r) return;
+  FXO[r.k] = FXO[r.k] ? 0 : 1;
+  fxLevel = (FXO.bloom || FXO.aber || FXO.film) ? FX.ON : FX.OFF;
+  Audio_.tone(FXO[r.k] ? 620 : 300, 0.05, 'square', 0.05, 900);
+}
+
+function gfxRects() {
+  const w = Math.min(560, W - 60), x = (W - w) / 2;
+  const top = Math.max(96, H / 2 - 220);
+  const rows = FX_ROWS.map((r, i) => ({ x, y: top + 62 + i * 34, w, h: 30, i }));
+  const by = top + 62 + FX_ROWS.length * 34 + 16;
+  const bw = (w - 20) / 3;
+  return { rows, w, x, top,
+    presets: [
+      { x, y: by, w: bw, h: 34, lvl: 2, n: 'EVERYTHING' },
+      { x: x + bw + 10, y: by, w: bw, h: 34, lvl: 1, n: 'BALANCED' },
+      { x: x + (bw + 10) * 2, y: by, w: bw, h: 34, lvl: 0, n: 'FASTEST' }
+    ],
+    done: { x: x + w / 2 - 80, y: by + 74, w: 160, h: 38 } };
+}
+
+function drawGfx() {
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = gfxRects();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  ctx.font = '800 24px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = COL.player;
+  ctx.fillText(gfxFirstRun ? 'NEW EFFECTS ADDED' : 'EFFECTS', W / 2, g.top + 10);
+  ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(gfxFirstRun
+    ? 'Turn off anything your machine would rather not draw.'
+    : 'Costs are per frame on a busy boss screen.', W / 2, g.top + 34);
+
+  let total = 0;
+  for (const r of FX_ROWS) if (FXO[r.k]) total += r.cost;
+
+  ctx.textAlign = 'left';
+  for (const box of g.rows) {
+    const r = FX_ROWS[box.i], on = !!FXO[r.k];
+    const hot = inRect(mouse.x, mouse.y, box) || gfxSel === box.i;
+    ctx.fillStyle = hot ? 'rgba(103,232,249,0.10)' : 'rgba(255,255,255,0.03)';
+    roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill();
+    if (hot) {
+      ctx.strokeStyle = rgba(COL.player, 0.5); ctx.lineWidth = 1.4;
+      roundRect(box.x, box.y, box.w, box.h, 6); ctx.stroke();
+    }
+    // switch
+    const sx = box.x + 12, sy = box.y + box.h / 2;
+    ctx.fillStyle = on ? COL.player : '#334155';
+    roundRect(sx, sy - 7, 30, 14, 7); ctx.fill();
+    ctx.fillStyle = on ? '#062f36' : '#94a3b8';
+    ctx.beginPath(); ctx.arc(sx + (on ? 22 : 8), sy, 5, 0, TAU); ctx.fill();
+
+    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = on ? '#e2e8f0' : '#64748b';
+    ctx.fillText(r.n, box.x + 54, sy);
+    ctx.font = '400 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(r.d, box.x + 176, sy);
+    ctx.textAlign = 'right';
+    ctx.font = '600 11px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = r.cost >= 4 ? '#f87171' : r.cost >= 2 ? '#fbbf24' : '#4ade80';
+    ctx.fillText(r.cost.toFixed(1) + ' ms', box.x + box.w - 12, sy);
+    ctx.textAlign = 'left';
+  }
+
+  ctx.textAlign = 'center';
+  for (const b of g.presets) {
+    const hot = inRect(mouse.x, mouse.y, b);
+    ctx.fillStyle = hot ? 'rgba(103,232,249,0.16)' : 'rgba(255,255,255,0.05)';
+    roundRect(b.x, b.y, b.w, b.h, 7); ctx.fill();
+    ctx.strokeStyle = rgba(COL.player, hot ? 0.7 : 0.28); ctx.lineWidth = 1.4;
+    roundRect(b.x, b.y, b.w, b.h, 7); ctx.stroke();
+    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = hot ? '#e2e8f0' : '#94a3b8';
+    ctx.fillText(b.n, b.x + b.w / 2, b.y + b.h / 2);
+  }
+
+  // what it all adds up to, against the frame you actually have
+  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = total > 12 ? '#f87171' : total > 7 ? '#fbbf24' : '#4ade80';
+  ctx.fillText('≈ ' + total.toFixed(1) + ' ms of a 16.7 ms frame',
+               W / 2, g.presets[0].y + 52);
+
+  const d = g.done, dh = inRect(mouse.x, mouse.y, d);
+  ctx.fillStyle = dh ? 'rgba(103,232,249,0.22)' : 'rgba(103,232,249,0.10)';
+  roundRect(d.x, d.y, d.w, d.h, 8); ctx.fill();
+  ctx.strokeStyle = COL.player; ctx.lineWidth = 1.8;
+  roundRect(d.x, d.y, d.w, d.h, 8); ctx.stroke();
+  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = COL.player;
+  ctx.fillText('DONE   [G]', d.x + d.w / 2, d.y + d.h / 2);
+  ctx.textBaseline = 'alphabetic';
 }
 
 function drawMalware() {
