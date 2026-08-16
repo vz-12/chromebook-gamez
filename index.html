@@ -91,18 +91,19 @@ let fxLevel = FX.ON;
 /* Per-effect switches. The measured cost of each on a busy boss screen is
    listed so the menu can show it — these were taken with a GPU flush, not by
    timing draw-call submission, which lies. */
-const FXO = { bloom: 1, aber: 1, film: 1, mblur: 1, waves: 1,
-              parts: 1, ghosts: 1, malfx: 1, bglow: 1 };
+const FXO = { bloom: 1, aber: 0, film: 1, mblur: 1, waves: 1,
+              parts: 1, ghosts: 1, malfx: 1, bglow: 1, mat: 1 };
 /* Costs measured on the amalgam fight — the heaviest screen in the game, four
    hundred bullets up — with a GPU flush around each pass. The two big ones are
    real and repeatable; the small ones are near the noise floor individually
    but add up to most of a frame together. */
 const FX_ROWS = [
-  { k: 'aber',   n: 'Chromatic split',    d: 'Colour fringing at the screen edges',  cost: 3.9 },
+  { k: 'aber',   n: 'Chromatic split',    d: 'Edge fringing. Costly, and hard to spot — off by default', cost: 3.9 },
   { k: 'mblur',  n: 'Motion blur',        d: 'Smear behind fast shots',              cost: 3.3 },
   { k: 'bglow',  n: 'Bullet glow',        d: 'Halo behind every shot on screen',     cost: 2.0 },
   { k: 'bloom',  n: 'Bloom',              d: 'Light spilling around bright things',  cost: 1.0 },
   { k: 'film',   n: 'Grain & scanlines',  d: 'Screen texture over the whole frame',  cost: 0.8 },
+  { k: 'mat',    n: 'Surface materials',  d: 'Floor plating, hull plates, reflections', cost: 0.7 },
   { k: 'parts',  n: 'Extra particles',    d: 'Sparks, embers, drips',                cost: 0.5 },
   { k: 'waves',  n: 'Ground waves',       d: 'The floor heaving under slams',        cost: 0.4 },
   { k: 'malfx',  n: 'Circuit effects',    d: 'Malware traces and glitches',          cost: 0.4 },
@@ -110,11 +111,94 @@ const FX_ROWS = [
 ];
 /* Bumped whenever this list changes, so the panel is shown once after an
    update that adds something new to turn off. */
-const GFX_VER = 1;
+const GFX_VER = 3;
+
+/* Real frame timing, from actual presented frames rather than from timing
+   draw-call submission — which lies, because the work is async on the GPU. */
+let fpsAvg = 60, frameMs = 16.7;
+function fpsSample(dt) {
+  if (fxMeasuring) return;      // the sweep is not gameplay
+  const ms = Math.min(200, dt * 1000);
+  frameMs += (ms - frameMs) * 0.06;
+  fpsAvg = 1000 / Math.max(1, frameMs);
+}
+
+/* Costs measured HERE, on the machine actually running it. The numbers this
+   ships with came off one developer box and mean very little anywhere else,
+   so the panel can re-time every switch against the scene you are in. Each
+   flag is timed on and off, alternating, so thermal drift cancels instead of
+   biasing whichever side ran first. */
+/* Stepped one switch per frame. Doing the whole sweep in a single call locks
+   the tab for seconds on a slow machine — which is exactly the machine that
+   needs the numbers — so it yields between rows and shows its progress. */
+let fxMeasuring = 0, fxMeasureI = 0, fxMeasureKeep = null, fxNoise = -1;
+const fxSamples = [];
+
+function fxMeasureStart() {
+  fxMeasureKeep = Object.assign({}, FXO);
+  fxNoise = -1;
+  fxSamples.length = 0;
+  for (const r of FX_ROWS) FXO[r.k] = 1;
+  fxMeasureI = 0;
+  fxMeasuring = 1;
+}
+
+function fxMeasureStep() {
+  if (!fxMeasuring) return;
+  const flush = () => ctx.getImageData(0, 0, 1, 1);
+  for (let i = 0; i < 3; i++) render();          // warm once, then sample
+  flush();
+  const time = () => {
+    const t0 = performance.now();
+    for (let i = 0; i < 9; i++) render();
+    flush();
+    return (performance.now() - t0) / 9;
+  };
+  /* Establish what this machine's timing noise looks like before trusting any
+     of it. Two identical passes should differ by zero; whatever they actually
+     differ by is the floor, and anything smaller than it is not a measurement.
+     Without this, switches that draw nothing at all were reporting 6ms. */
+  if (fxNoise < 0) {
+    const a = time(), b = time();
+    fxSamples.push(Math.abs(a - b));
+    if (fxSamples.length < 3) return;
+    fxSamples.sort((x, y) => x - y);
+    fxNoise = fxSamples[1];
+    fxSamples.length = 0;
+    return;
+  }
+
+  /* Median of three on/off pairs, not a mean of two: one bad sample used to
+     move a row by 11ms, and a median throws it away instead of averaging it
+     in. One pair per frame — doing all three in a single step freezes the tab
+     for a second or two per row on exactly the machines that need this. */
+  const r = FX_ROWS[fxMeasureI];
+  FXO[r.k] = 1; const on  = time();
+  FXO[r.k] = 0; const off = time();
+  FXO[r.k] = 1;
+  fxSamples.push(on - off);
+  if (fxSamples.length < 3) return;           // come back next frame
+  fxSamples.sort((x, y) => x - y);
+  r.cost = Math.max(0, +(fxSamples[1] - fxNoise).toFixed(1));
+  fxSamples.length = 0;
+  if (++fxMeasureI >= FX_ROWS.length) {
+    Object.assign(FXO, fxMeasureKeep);
+    Save.profile.gfxCosts = FX_ROWS.map(z => z.cost);
+    fxSave();
+    fxMeasuring = 0;
+    frameMs = 16.7; fpsAvg = 60;        // let the real rate settle in fresh
+  }
+}
 
 function fxApply(p) {
+  if (p && p.gfxCosts && p.gfxCosts.length === FX_ROWS.length)
+    FX_ROWS.forEach((r, i) => { r.cost = p.gfxCosts[i]; });
+  const preAber = p && (p.gfxSeen || 0) < 3;   // predates the split being costed
   if (p && p.gfx) for (const r of FX_ROWS)
     if (p.gfx[r.k] !== undefined) FXO[r.k] = p.gfx[r.k] ? 1 : 0;
+  // a profile from before this was measured keeps whatever it had for
+  // everything else, but loses the split — that was the frame, every frame
+  if (preAber) FXO.aber = 0;
 }
 function fxSave() {
   Save.profile.gfx = Object.assign({}, FXO);
@@ -130,7 +214,7 @@ function fxPreset(level) {           // 2 = everything, 1 = balanced, 0 = fastes
   fxLevel = (FXO.bloom || FXO.aber || FXO.film) ? FX.ON : FX.OFF;
   fxSave();
 }
-let bufScene, cScene;
+let bufScene, cScene, bufChan, cChan;
 const bloomTaps = [];                    // { buf, ctx, shift, blur, weight }
 let grainTile = null, scanTile = null;
 
@@ -145,6 +229,9 @@ function fxResize() {
   bufScene = makeBuf(w, h);
   cScene = bufScene.getContext('2d', { alpha: false });
   cScene.imageSmoothingEnabled = true;
+  bufChan = makeBuf(w, h);
+  cChan = bufChan.getContext('2d', { alpha: false });
+  cChan.imageSmoothingEnabled = true;
   /* Four taps at halving resolutions. Because each is blurred at its own
      scale, the widest one covers a huge radius for almost nothing, which is
      what gives the bloom its long soft falloff instead of a hard halo. */
@@ -192,11 +279,14 @@ function postWorld() {
   if (!fxLevel || !bufScene) return;
   const w = cv.width, h = cv.height;
 
-  // 1. take the scene, grading it on the way in so the bloom is graded too
+  /* 1. take the scene. This used to be graded on the way in through an SVG
+     filter; that filter measured 24ms a frame on hardware where Chrome will
+     not accelerate the SVG filter path, so every url(#…) in this chain is
+     gone and the same work is done with composite operations instead. */
   cScene.setTransform(1, 0, 0, 1, 0, 0);
-  cScene.filter = 'url(#fxGrade)';
+  cScene.globalCompositeOperation = 'copy';
   cScene.drawImage(cv, 0, 0);
-  cScene.filter = 'none';
+  cScene.globalCompositeOperation = 'source-over';
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -208,19 +298,27 @@ function postWorld() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = 'lighter';
-  const chan = (filter, px) => {
+  /* Channel isolation by multiply against a pure primary, which is a blend the
+     compositor does in hardware, rather than by feColorMatrix. Multiplying by
+     #f00 keeps exactly the red channel, so summing the three back additively
+     still reconstructs the original when the offsets are zero. */
+  const chan = (tint, px) => {
     const sy = px * h / w;
-    ctx.filter = filter;
-    ctx.drawImage(bufScene, -px, -sy, w + px * 2, h + sy * 2);
+    cChan.setTransform(1, 0, 0, 1, 0, 0);
+    cChan.globalCompositeOperation = 'copy';
+    cChan.drawImage(bufScene, -px, -sy, w + px * 2, h + sy * 2);
+    cChan.globalCompositeOperation = 'multiply';
+    cChan.fillStyle = tint;
+    cChan.fillRect(0, 0, w, h);
+    ctx.drawImage(bufChan, 0, 0);
   };
   if (FXO.aber) {
-    chan('url(#fxR)',  ab);
-    chan('url(#fxG)',  0);
-    chan('url(#fxB)', -ab);
+    chan('#ff0000',  ab);
+    chan('#00ff00',  0);
+    chan('#0000ff', -ab);
   } else {
     ctx.drawImage(bufScene, 0, 0);      // straight back down, no split
   }
-  ctx.filter = 'none';
 
   /* 3. bloom. Each tap downsamples from the one before it, so the blur
      compounds and the widest tap covers most of the screen for almost
@@ -229,9 +327,19 @@ function postWorld() {
     const t = bloomTaps[i], src = i === 0 ? bufScene : bloomTaps[i - 1].buf;
     t.ctx.setTransform(1, 0, 0, 1, 0, 0);
     t.ctx.globalCompositeOperation = 'copy';
-    t.ctx.filter = (i === 0 ? 'url(#fxBright) ' : '') + 'blur(' + t.blur + 'px)';
+    t.ctx.filter = 'blur(' + t.blur + 'px)';
     t.ctx.drawImage(src, 0, 0, t.buf.width, t.buf.height);
     t.ctx.filter = 'none';
+    /* Bright pass, in hardware: multiplying the buffer by itself squares every
+       channel, and doing it twice takes it to the fourth power. That is close
+       to the gamma knee the SVG filter used, so midtones drop out and only the
+       neon blooms — one pass alone leaves the whole frame hazy. */
+    if (i === 0) {
+      t.ctx.globalCompositeOperation = 'multiply';
+      t.ctx.drawImage(t.buf, 0, 0);
+      t.ctx.drawImage(t.buf, 0, 0);
+      t.ctx.globalCompositeOperation = 'copy';
+    }
   }
   if (FXO.bloom) for (const t of bloomTaps) {
     ctx.globalAlpha = t.weight;
@@ -270,8 +378,8 @@ function postScreen() {
   ctx.fillRect(0, 0, w, h);
 
   // grain, jittered every frame so it never sits still
-  ctx.globalAlpha = 0.05;
-  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.035;
+  ctx.globalCompositeOperation = 'lighter';
   const gp = ctx.createPattern(grainTile, 'repeat');
   ctx.translate((Math.random() * 256) | 0, (Math.random() * 256) | 0);
   ctx.fillStyle = gp;
@@ -310,6 +418,304 @@ function drawGlow(x, y, r, color, a = 1) {
   ctx.globalAlpha = a;
   ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2);
   ctx.globalAlpha = 1;
+}
+
+/* =========================== surface materials =============================
+   One tile per sector, generated once on first entry and then blitted as a
+   repeating pattern — a single fillRect a frame, whatever the screen size. No
+   image files: everything here is drawn with the 2D context at load. All of
+   it is gated on FXO.mat, so the whole pass can be switched off from the
+   graphics panel on a slow machine.
+========================================================================== */
+const _matCache = new Map(), _patCache = new Map();
+
+function matTile(st) {
+  let t = _matCache.get(st.name);
+  if (t) return t;
+  // the two sectors that read as depth rather than surface get a bigger tile:
+  // a 256 repeat of stars is visible as a checkerboard
+  const big = st.name === 'THE VOID' || st.name === 'THE MIRROR';
+  const S = big ? 512 : 256;
+  t = makeBuf(S, S);
+  const g = t.getContext('2d');
+  g.fillStyle = st.bg; g.fillRect(0, 0, S, S);
+  (MAT_BUILD[st.name] || matGeneric)(g, S, st);
+  _matCache.set(st.name, t);
+  return t;
+}
+
+// soft low-contrast blotches: the base of most of the materials
+function matMottle(g, S, col, n, a1, a2, r0, r1) {
+  for (let i = 0; i < n; i++) {
+    const x = rnd(S), y = rnd(S), r = rnd(r1, r0);
+    const grd = g.createRadialGradient(x, y, 0, x, y, r);
+    grd.addColorStop(0, rgba(col, rnd(a2, a1)));
+    grd.addColorStop(1, rgba(col, 0));
+    g.fillStyle = grd;
+    g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+  }
+}
+function matGeneric(g, S, st) { matMottle(g, S, st.grid2, 26, 0.05, 0.16, 14, 54); }
+
+const MAT_BUILD = {
+  /* Etched substrate: die blocks, bus traces between them, a via pad where a
+     trace ends. The two line grids then read as the top metal layer. */
+  'THE GRID': (g, S, st) => {
+    matMottle(g, S, '#16243c', 18, 0.05, 0.12, 20, 60);
+    g.strokeStyle = 'rgba(22,36,60,0.55)'; g.lineWidth = 1.4;
+    for (let i = 0; i < 10; i++) {
+      let x = Math.round(rnd(S / 16)) * 16, y = Math.round(rnd(S / 16)) * 16;
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < 3; k++) { k % 2 ? y += rndi(4, 1) * 16 : x += rndi(4, 1) * 16; g.lineTo(x, y); }
+      g.stroke();
+      g.fillStyle = 'rgba(56,189,248,0.10)';
+      g.beginPath(); g.arc(x, y, 2.2, 0, TAU); g.fill();
+    }
+    g.strokeStyle = 'rgba(14,22,38,0.9)'; g.lineWidth = 2;
+    g.strokeRect(0.5, 0.5, S - 1, S - 1);
+  },
+
+  /* Cast iron deck plate: 128px plates, recessed seams with a lit top lip,
+     rivets at the corners, diamond tread and scorch worked into the surface. */
+  'THE FOUNDRY': (g, S, st) => {
+    matMottle(g, S, '#33200d', 30, 0.06, 0.20, 16, 58);
+    matMottle(g, S, '#000000', 18, 0.10, 0.26, 10, 40);
+    for (let y = 0; y < S; y += 32) for (let x = 0; x < S; x += 32) {
+      g.save(); g.translate(x + 16, y + 16); g.rotate(Math.PI / 4);
+      g.fillStyle = 'rgba(120,70,30,0.055)'; g.fillRect(-7, -7, 14, 14);
+      g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(-7, 4, 14, 3);
+      g.restore();
+    }
+    for (const p of [0, 128]) {
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(p, 0, 3, S); g.fillRect(0, p, S, 3);
+      g.fillStyle = 'rgba(124,45,18,0.5)'; g.fillRect(p + 3, 0, 1, S); g.fillRect(0, p + 3, S, 1);
+    }
+    for (const y of [0, 64, 128, 192]) for (const x of [0, 64, 128, 192]) {
+      g.fillStyle = 'rgba(0,0,0,0.5)';        g.beginPath(); g.arc(x + 1, y + 1, 2.6, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(146,89,42,0.55)';   g.beginPath(); g.arc(x, y, 2.6, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(253,186,116,0.22)'; g.beginPath(); g.arc(x - 0.7, y - 0.9, 1.1, 0, TAU); g.fill();
+    }
+  },
+
+  /* Chitin over wet comb. */
+  'THE HIVE': (g, S, st) => {
+    /* The comb has to close across the tile edge, so the lattice is built from
+       divisions of S rather than from a hex radius — 4 columns of dx = S/4 and
+       a two-row vertical period of S/2. Each cell ends up very slightly tall
+       instead of a regular hexagon, and the repeat becomes invisible. */
+    const dx = S / 4, dy = S / 4, rv = dy / 1.5;
+    for (let row = -1; row <= S / dy + 1; row++)
+      for (let col = -1; col <= S / dx + 1; col++) {
+        const cx = col * dx + (row % 2 ? dx / 2 : 0), cy = row * dy;
+        g.beginPath();
+        g.moveTo(cx, cy - rv);
+        g.lineTo(cx + dx / 2, cy - rv / 2);
+        g.lineTo(cx + dx / 2, cy + rv / 2);
+        g.lineTo(cx, cy + rv);
+        g.lineTo(cx - dx / 2, cy + rv / 2);
+        g.lineTo(cx - dx / 2, cy - rv / 2);
+        g.closePath();
+        g.fillStyle = 'rgba(12,31,19,0.6)'; g.fill();
+        g.strokeStyle = 'rgba(20,53,31,0.9)'; g.lineWidth = 2; g.stroke();
+        g.strokeStyle = 'rgba(74,222,128,0.10)'; g.lineWidth = 1; g.stroke();
+      }
+    matMottle(g, S, '#4ade80', 14, 0.03, 0.09, 12, 40);
+  },
+
+  /* Polished slabs with brass channels inlaid along the seams. */
+  'THE VAULT': (g, S, st) => {
+    for (const p of [0, 128]) {
+      g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(p, 0, 4, S); g.fillRect(0, p, S, 4);
+      g.fillStyle = 'rgba(167,139,250,0.16)'; g.fillRect(p + 1, 0, 2, S); g.fillRect(0, p + 1, S, 2);
+    }
+    for (let i = 0; i < 22; i++) {
+      let x = rnd(S), y = rnd(S);
+      g.strokeStyle = 'rgba(196,181,253,' + rnd(0.05, 0.015) + ')'; g.lineWidth = rnd(1.4, 0.4);
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < 3; k++) { x += rnd(40, -40); y += rnd(30, -30); g.lineTo(x, y); }
+      g.stroke();
+    }
+    for (const y of [0, 128]) for (const x of [0, 128]) {
+      g.fillStyle = 'rgba(196,181,253,0.28)'; g.beginPath(); g.arc(x + 2, y + 2, 3.2, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(0,0,0,0.45)';       g.beginPath(); g.arc(x + 2, y + 2, 1.4, 0, TAU); g.fill();
+    }
+  },
+
+  /* No floor at all: a starfield and nebula sit behind the lattice. */
+  'THE VOID': (g, S, st) => {
+    for (let i = 0; i < 12; i++) {
+      const x = rnd(S), y = rnd(S), r = rnd(190, 70);
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, rgba(i % 2 ? '#6b21a8' : '#c026d3', rnd(0.10, 0.04)));
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 640; i++) {
+      const x = rnd(S), y = rnd(S), a = rnd(0.55, 0.05);
+      g.fillStyle = 'rgba(' + (230 + rndi(25)) + ',' + (220 + rndi(35)) + ',255,' + a + ')';
+      g.beginPath(); g.arc(x, y, a > 0.4 ? rnd(1.4, 0.7) : rnd(0.8, 0.35), 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 14; i++) {
+      const x = rnd(S), y = rnd(S);
+      g.strokeStyle = 'rgba(240,171,252,0.35)'; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x + 4, y); g.moveTo(x, y - 4); g.lineTo(x, y + 4); g.stroke();
+    }
+  },
+
+  /* Paper stock: laid fibre, a ruled baseline, and the redactions. */
+  'THE ARCHIVE': (g, S, st) => {
+    for (let i = 0; i < 260; i++) {
+      const x = rnd(S), y = rnd(S), l = rnd(16, 4), a = rnd(TAU);
+      g.strokeStyle = 'rgba(226,232,240,' + rnd(0.05, 0.012) + ')'; g.lineWidth = 0.7;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+    for (let y = 0; y < S; y += 32) { g.fillStyle = 'rgba(226,232,240,0.035)'; g.fillRect(0, y, S, 1); }
+    for (let i = 0; i < 3; i++) { g.fillStyle = 'rgba(10,10,12,0.75)'; g.fillRect(rnd(S * 0.6), rnd(S), rnd(90, 30), rnd(9, 5)); }
+  },
+
+  /* Black glass. The craze lines are drawn nine times, offset by the tile, so
+     a line that leaves one edge arrives at the other and the repeat vanishes. */
+  'THE MIRROR': (g, S, st) => {
+    const grd = g.createLinearGradient(0, 0, 0, S);
+    grd.addColorStop(0, 'rgba(13,33,41,0.28)');
+    grd.addColorStop(0.5, 'rgba(4,9,12,0)');
+    grd.addColorStop(1, 'rgba(13,33,41,0.2)');
+    g.fillStyle = grd; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 160; i++) {
+      const y = rnd(S);
+      g.strokeStyle = 'rgba(94,234,212,' + rnd(0.045, 0.008) + ')'; g.lineWidth = rnd(1.6, 0.4);
+      g.beginPath(); g.moveTo(0, y); g.lineTo(S, y + rnd(2, -2)); g.stroke();
+    }
+    for (let i = 0; i < 9; i++) {
+      let x = rnd(S), y = rnd(S);
+      const pts = [[x, y]];
+      for (let k = 0; k < 4; k++) { x += rnd(46, -46); y += rnd(46, -46); pts.push([x, y]); }
+      for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+        g.strokeStyle = 'rgba(165,243,252,0.055)'; g.lineWidth = 0.9;
+        g.beginPath();
+        pts.forEach((p, i2) => i2 ? g.lineTo(p[0] + dx, p[1] + dy) : g.moveTo(p[0] + dx, p[1] + dy));
+        g.stroke();
+      }
+    }
+  }
+};
+
+/* The floor itself: one patterned fillRect over the visible world box, plus
+   whichever live pass that sector wants on top of it. */
+function drawFloorMat(ox, oy) {
+  if (!FXO.mat) return;
+  const vw = W / camZoom, vh = H / camZoom;
+  const x0 = -ox, y0 = -oy;
+  ctx.save();
+  let pat = _patCache.get(stage.name);
+  if (!pat) { pat = ctx.createPattern(matTile(stage), 'repeat'); _patCache.set(stage.name, pat); }
+  ctx.fillStyle = pat;
+  ctx.fillRect(x0, y0, vw, vh);
+
+  /* With bloom off there is nothing lifting the frame, so the deck goes flat
+     and muddy and the grain reads as noise rather than texture. A second
+     additive pass of the same tile raises its exposure and puts the contrast
+     back — one more blit of an already-cached pattern, no filter involved. */
+  if (!FXO.bloom) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = fxLevel ? 0.20 : 0.32;
+    ctx.fillRect(x0, y0, vw, vh);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  if (stage.name === 'THE FOUNDRY') {
+    // heat bleeding out of the plate seams, breathing across the deck
+    ctx.globalCompositeOperation = 'lighter';
+    const sx = Math.floor(x0 / 128) * 128, sy = Math.floor(y0 / 128) * 128;
+    for (let x = sx; x < x0 + vw; x += 128)
+      for (let y = sy; y < y0 + vh; y += 128) {
+        const k = 0.5 + Math.sin(uiTime * 0.9 + (x + y) * 0.004) * 0.5;
+        ctx.fillStyle = rgba('#f97316', 0.006 + k * 0.012);
+        ctx.fillRect(x - 1, y - 8, 3, 144);
+        ctx.fillRect(x - 8, y - 1, 144, 3);
+      }
+  } else if (stage.name === 'THE VOID') {
+    // motes below the lattice, each drifting at its own rate, for parallax
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 38; i++) {
+      const mx = x0 + ((i * 137.5 + uiTime * 9) % vw);
+      const my = y0 + ((i * 89.3 + uiTime * 4) % vh);
+      ctx.fillStyle = rgba('#f0abfc', 0.05 + ((i * 7) % 5) * 0.02);
+      ctx.beginPath(); ctx.arc(mx, my, 1.2 + ((i * 3) % 3) * 0.7, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/* THE MIRROR reflects. Live entities are drawn a second time, flipped and
+   squashed, before anything real goes down, so it sits under the fight. */
+function drawMirrorFloor() {
+  if (!FXO.mat || stage.name !== 'THE MIRROR') return;
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  ctx.globalCompositeOperation = 'lighter';
+  const mir = (x, y, drop, fn) => {
+    ctx.save();
+    ctx.translate(x, y + drop); ctx.scale(1, -0.55); ctx.translate(-x, -y);
+    fn(); ctx.restore();
+  };
+  for (const e of enemies) {
+    if (e.dead || e.amalPart) continue;
+    mir(e.x, e.y, e.r * 1.5, () => {
+      ctx.fillStyle = rgba(e.col, 0.5); ctx.strokeStyle = e.col; ctx.lineWidth = 2;
+      poly(e.x, e.y, e.r, e.sides, e.ang);
+      ctx.fill(); ctx.stroke();
+    });
+  }
+  if (state !== 'dead') mir(P.x, P.y, P.r * 1.8, () => {
+    ctx.save(); ctx.translate(P.x, P.y); ctx.rotate(P.ang); ctx.lineWidth = 2;
+    drawShipHull(COL.player, rgba(COL.player, 0.5));
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
+/* An enemy body as machined plates rather than one outline: each edge is its
+   own plate with a gap at the vertex, a bevel inside it, a bolt at the end and
+   a rim light on whichever plates face you. Small bodies keep the cheap single
+   stroke — a screen full of swarmers must not pay for this. */
+function platedBody(e, hot) {
+  const gap = 0.16, n = e.sides;
+  const toP = Math.atan2(P.y - e.y, P.x - e.x);
+  ctx.lineCap = 'butt';
+  for (let i = 0; i < n; i++) {
+    const A = e.ang + i * TAU / n + gap, B = e.ang + (i + 1) * TAU / n - gap;
+    const cA = Math.cos(A), sA = Math.sin(A), cB = Math.cos(B), sB = Math.sin(B);
+    ctx.strokeStyle = hot ? '#ffffff' : e.col;
+    ctx.lineWidth = e.type === 'boss' ? 5 : 3;
+    ctx.beginPath();
+    ctx.moveTo(e.x + cA * e.r, e.y + sA * e.r);
+    ctx.lineTo(e.x + cB * e.r, e.y + sB * e.r);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(e.x + cA * e.r * 0.9, e.y + sA * e.r * 0.9);
+    ctx.lineTo(e.x + cB * e.r * 0.9, e.y + sB * e.r * 0.9);
+    ctx.stroke();
+    const facing = Math.cos((A + B) / 2 - toP);
+    if (facing > 0.1) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba('#ffffff', 0.10 + facing * 0.26); ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(e.x + cA * e.r * 1.03, e.y + sA * e.r * 1.03);
+      ctx.lineTo(e.x + cB * e.r * 1.03, e.y + sB * e.r * 1.03);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = rgba(e.col, 0.85);
+    ctx.beginPath(); ctx.arc(e.x + cA * e.r, e.y + sA * e.r, e.type === 'boss' ? 2.6 : 1.6, 0, TAU); ctx.fill();
+  }
+  // core, turning the other way, so the body never reads as one flat shape
+  ctx.strokeStyle = rgba(e.col, 0.5); ctx.lineWidth = 1;
+  poly(e.x, e.y, e.r * 0.52, n, -e.ang * 0.6);
+  ctx.fillStyle = rgba(e.col, 0.22); ctx.fill(); ctx.stroke();
 }
 
 /* ---------------------------------- audio --------------------------------
@@ -502,6 +908,33 @@ function shake(t) { cam.trauma = Math.min(1, cam.trauma + t); }
    500px tall and would not otherwise fit on a laptop screen. Every conversion
    between world and screen space has to divide by it. */
 let camZoom = 1, camZoomT = 1;
+
+/* View bounds, recomputed once per frame. Every draw loop used to walk its
+   whole list and hand off-screen work to the compositor to throw away; on a
+   full arena that is most of the bullets and nearly all of the particles.
+   Kept as loose module-level numbers so the test is a few comparisons. */
+let _vx0 = -1e9, _vy0 = -1e9, _vx1 = 1e9, _vy1 = 1e9;
+function viewBounds(pad) {
+  // the pad also has to cover the shake offset, which moves the view after this
+  const hw = W / (2 * camZoom) + pad, hh = H / (2 * camZoom) + pad;
+  _vx0 = cam.x - hw; _vx1 = cam.x + hw;
+  _vy0 = cam.y - hh; _vy1 = cam.y + hh;
+}
+function inView(x, y, r) {
+  const e = r || 0;
+  return x + e > _vx0 && x - e < _vx1 && y + e > _vy0 && y - e < _vy1;
+}
+
+/* Screen shake from a world event, scaled by how far away it happened. Same
+   idea as the flash above: something erupting across the arena should not
+   punch the camera as hard as something at your feet. */
+function shakeAt(x, y, t) {
+  const d = Math.hypot(x - cam.x, y - cam.y);
+  const near = Math.min(W, H) / (2 * camZoom);
+  const k = clamp(1 - (d - near * 0.4) / (near * 2), 0, 1);
+  if (k > 0) shake(t * k);
+  return k;
+}
 
 function onScreen(x, y, pad = 90) {
   const dx = Math.abs(x - cam.x) - (W / (2 * camZoom) + pad);
@@ -1580,16 +2013,21 @@ function chainFrom(src, dmg, jumps) {
   }
 }
 
-function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false) {
+function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false, quiet = false) {
   ringFx(x, y, radius * 0.18, radius, color, 0.34, 5);
   burst(x, y, 24, color, 320, 4, 0.55);
   // only blooms you can actually see are allowed to flash or shake the camera
   const vis = onScreen(x, y, radius);
-  if (vis > 0) {
-    drawFlashT = Math.max(drawFlashT, 0.05 * vis);
-    shake(0.22 * vis);
-  }
+  if (vis > 0) drawFlashT = Math.max(drawFlashT, 0.05 * vis);
+  // hazards sitting on the floor light up but never punch the camera
+  if (vis > 0 && !quiet) shakeAt(x, y, 0.22);
   Audio_.boom();
+  /* Anything that detonates now punches the floor, sized to the blast: a
+     bomber dents it, a volatile chain-kill heaves it. */
+  if (FXO.waves && vis > 0)
+    groundWave(x, y, { col: color, amp: clamp(radius * 0.13, 12, 44),
+                       speed: 620 + radius, width: Math.max(90, radius * 0.8),
+                       life: 1.1 });
   for (const e of enemies) {
     if (e.dead) continue;
     const d = len(e.x - x, e.y - y);
@@ -1637,7 +2075,7 @@ function killEnemy(e, ang = 0) {
                  vx: volat ? (e.vx || 0) * 0.4 + (e.kbx || 0) : 0,
                  vy: volat ? (e.vy || 0) * 0.4 + (e.kby || 0) : 0 });
   Audio_.kill();
-  shake(e.type === 'boss' ? 1 : 0.05 + e.r * 0.003);
+  shakeAt(e.x, e.y, e.type === 'boss' ? 1 : 0.05 + e.r * 0.003);
 
   // xp
   const n = clamp(Math.round(e.xp), 1, 14);
@@ -1827,6 +2265,7 @@ function pickEnemyType() {
    before that — so this no longer derives anything from the wave number. */
 function enterStage(def) {
   stage = def;
+  if (FXO.mat) matTile(def);            // build the material before the first frame
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   P.revive = P.reviveMax || 0;          // Second Wind recharges each sector
   seedStageHazards();
@@ -3165,7 +3604,7 @@ const Save = {
                   keeperMet: false, keeperDone: false,
                   trueEnd: false, freeplay: false, unwrittenDeaths: 0,
                   askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
-                  gfx: null, gfxSeen: 0,
+                  gfx: null, gfxSeen: 0, gfxCosts: null,
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -3608,6 +4047,7 @@ function handleKey(k) {
     if (k === '1') { fxPreset(2); return; }
     if (k === '2') { fxPreset(1); return; }
     if (k === '3') { fxPreset(0); return; }
+    if (k === 'm') { fxMeasureStart(); return; }
     return;
   }
   if (k === 'g') { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
@@ -3679,6 +4119,10 @@ function handleClick() {
       if (inRect(mouse.x, mouse.y, b)) { gfxSel = b.i; gfxToggle(b.i); return; }
     for (const b of g.presets)
       if (inRect(mouse.x, mouse.y, b)) { fxPreset(b.lvl); Audio_.select(); return; }
+    if (inRect(mouse.x, mouse.y, g.measure)) {
+      fxMeasureStart(); Audio_.select();
+      return;
+    }
     if (inRect(mouse.x, mouse.y, g.done)) { closeGfx(); return; }
     return;
   }
@@ -3786,6 +4230,7 @@ let frameErrors = 0;
 function frame(now) {
   if (pageDead) return;                  // the page has stopped; do not requeue
   const dt = Math.min(0.2, (now - last) / 1000);
+  fpsSample(dt);
   last = now;
   acc += dt;
   let guard = 0;
@@ -3851,6 +4296,7 @@ function update(dt) {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
     if (state === 'devtalk') devTypeTick(dt);
+  if (state === 'gfx' && fxMeasuring) fxMeasureStep();
     updateCamera(dt, state === 'dead');
     return;
   }
@@ -5841,10 +6287,10 @@ let gwaves = [];
 function groundWave(x, y, o) {
   o = o || {};
   gwaves.push({ x, y, t: 0,
-    life:  o.life  || 1.5,
-    speed: o.speed || 900,
-    amp:   o.amp   || 34,
-    width: o.width || 130,
+    life:  o.life  || 1.7,
+    speed: o.speed || 820,
+    amp:   o.amp   || 52,
+    width: o.width || 150,
     col:   o.col   || '#fbbf24' });
   if (gwaves.length > 8) gwaves.shift();
 }
@@ -6254,7 +6700,7 @@ function amalUpdateSlam(a, dt) {
 }
 
 function amalSlamImpact(a, s) {
-  shake(2.4);
+  shakeAt(s.tx, s.ty, 2.4);
   drawFlashT = Math.max(drawFlashT, 0.22);
   Audio_.boom(); Audio_.tone(48, 0.7, 'square', 0.2, 26);
   // the floor heaves outward from the fist
@@ -6283,7 +6729,7 @@ function amalSlamImpact(a, s) {
 }
 
 function amalQuake(a) {
-  shake(1.5);
+  shakeAt(a.x, a.y, 1.5);
   groundWave(a.x, a.y + 150, { life: 2.2, speed: 780, amp: 30, width: 150, col: '#fbbf24' });
   drawFlashT = Math.max(drawFlashT, 0.12);
   Audio_.boom(); Audio_.tone(60, 0.5, 'square', 0.16, 30);
@@ -6377,7 +6823,7 @@ function amalUpdate(dt) {
       const pos = amalPartPos(a, p);
       explode(pos.x, pos.y, 220, 0, AMAL_COL);
       ringFx(pos.x, pos.y, 12, 420, AMAL_COL, 0.8, 6);
-      shake(0.9); drawFlashT = 0.2; Audio_.boom(); Audio_.crit();
+      shakeAt(pos.x, pos.y, 0.9); drawFlashT = 0.2; Audio_.boom(); Audio_.crit();
       floatText(pos.x, pos.y - p.r - 12, BOSSES[p.key].name + '  OFF', AMAL_COL, 15);
     }
   }
@@ -6399,7 +6845,7 @@ function amalUpdate(dt) {
   a.stepT -= dt;
   if (a.stepT <= 0) {
     a.stepT = 1.05 / (1 + a.phase * 0.2);
-    shake(0.6);
+    shakeAt(a.x, a.y + 232, 0.6);
     Audio_.tone(70, 0.16, 'square', 0.09, 40);
     // the foot that just landed throws up dust and a dent ring
     const down = Math.sin(a.t * 1.5) > 0 ? 'legL' : 'legR';
@@ -7166,7 +7612,7 @@ function updateHazards(dt) {
         if (h.state === 0 && h.cd <= 0) { h.state = 1; h.cd = 1.0; }        // telegraph
         else if (h.state === 1 && h.cd <= 0) {                              // erupt
           h.state = 2; h.cd = 0.45;
-          explode(h.x, h.y, h.r, h.dmg * 1.6, '#fb923c', false);
+          explode(h.x, h.y, h.r, h.dmg * 1.6, '#fb923c', false, true);
           if (pd < h.r + P.r) hurtPlayer(h.dmg * 1.6);
         } else if (h.state === 2 && h.cd <= 0) { h.state = 0; h.cd = rnd(5.5, 3.0); }
         if (h.state === 1 && Math.random() < 0.5)
@@ -7790,6 +8236,7 @@ function render() {
   }
 
   const z = camZoom;
+  viewBounds(140);                 // cull box for every draw loop below
   const ox = -cam.x + W / (2 * z) + cam.sx / z;
   const oy = -cam.y + H / (2 * z) + cam.sy / z;
 
@@ -7797,9 +8244,11 @@ function render() {
   ctx.scale(z, z);
   ctx.translate(ox, oy);
 
+  drawFloorMat(ox, oy);
   drawGrid(ox, oy);
   drawArena();
   drawHazards();
+  drawMirrorFloor();
 
   // --- additive layer: glows -------------------------------------------
   ctx.globalCompositeOperation = 'lighter';
@@ -9171,8 +9620,34 @@ function drawGrid(ox, oy) {
     return;
   }
 
-  /* A wave is passing, so the grid is walked as a mesh and every vertex is
-     lifted. Segments are half a tile, which is fine at this line weight. */
+  /* Slabs first: every cell inside the crest band is a lifted tile with a lit
+     top face and a dark riser wall on its near edge, so the floor reads as
+     solid ground heaving rather than as bent lines. Bounded to the ring's own
+     bounding box, so the cost is the crest and not the screen. */
+  if (FXO.mat) for (const w of gwaves) {
+    const rad = w.speed * w.t, band = w.width;
+    const bx0 = Math.floor((w.x - rad - band) / S) * S, bx1 = w.x + rad + band;
+    const by0 = Math.floor((w.y - (rad + band) * 0.82) / S) * S, by1 = w.y + (rad + band) * 0.82;
+    for (let x = Math.max(x0, bx0); x < Math.min(x1, bx1); x += S)
+      for (let y = Math.max(y0, by0); y < Math.min(y1, by1); y += S) {
+        const la = gwaveLift(x, y), lb = gwaveLift(x + S, y);
+        const lc = gwaveLift(x + S, y + S), ld = gwaveLift(x, y + S);
+        const gl = (la.glow + lb.glow + lc.glow + ld.glow) / 4;
+        if (gl < 0.14) continue;
+        const k = (gl - 0.14) / 0.86;
+        ctx.fillStyle = rgba('#000000', 0.5 * k * k);          // riser wall
+        ctx.beginPath();
+        ctx.moveTo(x, y + S + ld.lift); ctx.lineTo(x + S, y + S + lc.lift);
+        ctx.lineTo(x + S, y + S); ctx.lineTo(x, y + S);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = rgba(w.col, 0.03 + k * k * 0.20);      // lit top face
+        ctx.beginPath();
+        ctx.moveTo(x, y + la.lift); ctx.lineTo(x + S, y + lb.lift);
+        ctx.lineTo(x + S, y + S + lc.lift); ctx.lineTo(x, y + S + ld.lift);
+        ctx.closePath(); ctx.fill();
+      }
+  }
+
   const SEG = S / 2;
   const strand = (fromX, fromY, toX, toY) => {
     const steps = Math.ceil(Math.max(Math.abs(toX - fromX), Math.abs(toY - fromY)) / SEG);
@@ -9227,6 +9702,13 @@ function drawGrid(ox, oy) {
     ctx.ellipse(w.x, w.y - w.amp * 0.8, r, r * 0.82, 0, 0, TAU); ctx.stroke();
   }
   ctx.restore();
+  // the trough the crest leaves behind it, which is what sells the height
+  for (const w of gwaves) {
+    const rr = Math.max(0, w.speed * w.t - w.width * 0.7), fade = 1 - w.t / w.life;
+    ctx.strokeStyle = rgba('#000000', 0.35 * fade);
+    ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.ellipse(w.x, w.y + w.amp * 0.5, rr, rr * 0.82, 0, 0, TAU); ctx.stroke();
+  }
 }
 
 function drawArena() {
@@ -9256,6 +9738,8 @@ function poly(x, y, r, sides, ang) {
 function drawEnemies() {
   for (const e of enemies) {
     if (e.dead) continue;
+    // bosses stay drawn: their telegraphs reach well past their own body
+    if (e.type !== 'boss' && !e.amalPart && !inView(e.x, e.y, e.r * 3 + 40)) continue;
     // intangible enemies fade out; they can't be hit while faint
     const ea = e.phased || e.invuln ? 0.3 : 1;
 
@@ -9341,7 +9825,10 @@ function drawEnemies() {
     ctx.fillStyle = rgba(e.col, 0.16 + e.flash * 0.46);
     ctx.strokeStyle = e.flash > 0.5 ? '#ffffff' : e.col;
     poly(e.x, e.y, e.r, e.sides, e.ang);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    // plates for anything big enough to read them; the rest keep one stroke
+    if (FXO.mat && e.r >= 14) platedBody(e, e.flash > 0.5);
+    else ctx.stroke();
 
     // THE OTHER, awakened: eight jointed legs that grow in during the
     // transition and scuttle faster the angrier it gets
@@ -9623,7 +10110,7 @@ function updateCorpses(dt) {
         playerBlast(c.x, c.y, 62 + 24 * c.vol, (10 + 9 * c.vol) * (1 + wave * 0.06), '#fb923c');
         ringFx(c.x, c.y, 8, 62 + 24 * c.vol, '#fb923c', 0.5, 4);
         burst(c.x, c.y, 20, '#fb923c', 300, 3.4, 0.55);
-        shake(0.25); Audio_.boom();
+        shakeAt(c.x, c.y, 0.25); Audio_.boom();
       }
     }
     if (c.life <= 0) corpses.splice(i, 1);
@@ -9643,6 +10130,7 @@ function knockCorpses(x, y, r, force) {
 
 function drawCorpses() {
   for (const c of corpses) {
+    if (!inView(c.x, c.y, c.r * 3)) continue;
     const t = c.life / c.max;
     ctx.save();
     if (c.vol) {
@@ -9983,6 +10471,28 @@ function drawPlayer() {
                  : P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : rgba(COL.player, 0.18);
   ctx.fillStyle = hullFill;
   drawShipHull(hullCol, hullFill);
+  if (FXO.mat) {
+    /* Panel lines along the spine and across the shoulders, and an engine
+       that actually burns. The silhouette is untouched, so the ship reads
+       exactly the same at a glance. */
+    ctx.strokeStyle = 'rgba(11,18,32,0.75)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(P.charId === 'ember' ? 17 : 14, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-2, -6.4); ctx.lineTo(-2, 6.4); ctx.stroke();
+    ctx.strokeStyle = rgba(hullCol, 0.85); ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(4, 4.5); ctx.lineTo(-4, 7.2);
+    ctx.moveTo(4, -4.5); ctx.lineTo(-4, -7.2);
+    ctx.stroke();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const fl = 0.7 + Math.sin(uiTime * 22) * 0.3;
+    drawGlow(-13, 0, 11 * fl, '#a5f3fc', 0.4);
+    ctx.fillStyle = rgba('#e0f2fe', 0.6);
+    ctx.beginPath();
+    ctx.moveTo(-8, 3.4); ctx.lineTo(-20 - 6 * fl, 0); ctx.lineTo(-8, -3.4);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
   // cockpit
   ctx.fillStyle = '#e0f2fe';
   ctx.beginPath(); ctx.arc(2, 0, 2.6, 0, TAU); ctx.fill();
@@ -10014,6 +10524,7 @@ function motionStreak(x, y, vx, vy, w, col, strength) {
 
 function drawBullets() {
   for (const b of bullets) {
+    if (!inView(b.x, b.y, 40)) continue;
     // zodiac rounds read differently at a glance
     const c = b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
             : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
@@ -10048,6 +10559,48 @@ function drawBullets() {
       ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(19, 0); ctx.lineTo(7, -6.2); ctx.stroke();
       ctx.restore();
+    } else if (FXO.mat) {
+      /* Two strands of beads orbiting the line of travel: the round reads as a
+         helix winding through the air, with the near half of each turn drawn
+         brighter and larger so the twist has depth rather than just wobble.
+         The phase comes from the round's own position, so it spins as it flies
+         and no two rounds in a volley are in step. Bead count drops when the
+         screen is full, which is the only thing that makes this affordable at
+         four hundred bullets up. */
+      ctx.save();
+      ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+      const hPh = uiTime * 26 + (b.x + b.y) * 0.09;
+      const hN = bullets.length > 140 ? 4 : 7, hA = b.r * 2.1, hSP = b.r * 1.5;
+      for (let k = 0; k < 2; k++) {
+        // the strand itself, so the beads read as one coil rather than sparks
+        ctx.strokeStyle = rgba(c, 0.5); ctx.lineWidth = b.r * 0.42; ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let i = 0; i < hN; i++) {
+          const a = hPh - i * 0.8 + k * Math.PI;
+          const X = -i * hSP, Y = Math.sin(a) * hA;
+          i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+        }
+        ctx.stroke();
+        for (let i = 0; i < hN; i++) {
+          const u = i / (hN - 1), a = hPh - i * 0.8 + k * Math.PI;
+          const dep = Math.cos(a), taper = 1 - u * 0.5;
+          ctx.fillStyle = rgba(c, (0.9 - u * 0.55) * (0.6 + dep * 0.4));
+          ctx.beginPath();
+          ctx.arc(-i * hSP, Math.sin(a) * hA,
+                  b.r * 0.62 * taper * (0.7 + dep * 0.3), 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(0, 0, b.r * 0.62, 0, TAU); ctx.fill();
+      if (b.crit) {
+        ctx.strokeStyle = rgba(COL.crit, 0.7); ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-b.r * 1.4, -b.r * 1.4); ctx.lineTo(b.r * 1.4, b.r * 1.4);
+        ctx.moveTo(-b.r * 1.4, b.r * 1.4); ctx.lineTo(b.r * 1.4, -b.r * 1.4);
+        ctx.stroke();
+      }
+      ctx.restore();
     } else {
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.62, 0, TAU); ctx.fill();
@@ -10060,6 +10613,7 @@ function drawBullets() {
    threat by silhouette alone, before you have registered the colour. */
 function drawEBullets() {
   for (const b of ebullets) {
+    if (!inView(b.x, b.y, b.r * 4)) continue;
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
     const r = b.r;
@@ -10181,8 +10735,15 @@ function drawEBullets() {
 
 function drawParticles() {
   for (const p of parts) {
+    if (!inView(p.x, p.y, p.r * 4)) continue;
     const t = p.life / p.max;
-    drawGlow(p.x, p.y, p.r * 3.4 * (0.4 + t * 0.9), p.color, t * 0.75);
+    /* A particle in its last breath is a sub-pixel smear at 4% alpha: the blit
+       costs the same as a bright one and lands on nothing. Dropping the tail
+       is invisible and there are hundreds of them at any moment. */
+    if (t < 0.09) continue;
+    const rad = p.r * 3.4 * (0.4 + t * 0.9);
+    if (rad < 1.6) continue;
+    drawGlow(p.x, p.y, rad, p.color, t * 0.75);
   }
 }
 
@@ -10191,6 +10752,7 @@ function drawParticles() {
 function drawGems() {
   const pu = Math.sin(uiTime * 6) * 0.2 + 0.9;
   for (const g of gems) {
+    if (!inView(g.x, g.y, g.r * 4)) continue;
     const fade = g.life < 3 ? (Math.floor(g.life * 7) % 2 ? 0.3 : 1) : 1;
     drawGlow(g.x, g.y, g.r * 2.9 * pu, COL.xp, 0.5 * fade);
     ctx.save();
@@ -11982,7 +12544,8 @@ function gfxRects() {
       { x: x + bw + 10, y: by, w: bw, h: 34, lvl: 1, n: 'BALANCED' },
       { x: x + (bw + 10) * 2, y: by, w: bw, h: 34, lvl: 0, n: 'FASTEST' }
     ],
-    done: { x: x + w / 2 - 80, y: by + 74, w: 160, h: 38 } };
+    measure: { x: x + w / 2 - 250, y: by + 74, w: 156, h: 38 },
+    done: { x: x + w / 2 - 78, y: by + 74, w: 156, h: 38 } };
 }
 
 function drawGfx() {
@@ -11998,7 +12561,9 @@ function drawGfx() {
   ctx.fillStyle = '#94a3b8';
   ctx.fillText(gfxFirstRun
     ? 'Turn off anything your machine would rather not draw.'
-    : 'Costs are per frame on a busy boss screen.', W / 2, g.top + 34);
+    : (Save.profile.gfxCosts ? 'Measured here. Good at finding the expensive one; rough below a ms.'
+                             : 'Estimates. Press MEASURE HERE to time them on your machine.'),
+    W / 2, g.top + 34);
 
   let total = 0;
   for (const r of FX_ROWS) if (FXO[r.k]) total += r.cost;
@@ -12028,8 +12593,10 @@ function drawGfx() {
     ctx.fillText(r.d, box.x + 176, sy);
     ctx.textAlign = 'right';
     ctx.font = '600 11px ui-monospace, Consolas, monospace';
-    ctx.fillStyle = r.cost >= 4 ? '#f87171' : r.cost >= 2 ? '#fbbf24' : '#4ade80';
-    ctx.fillText(r.cost.toFixed(1) + ' ms', box.x + box.w - 12, sy);
+    const tiny = r.cost <= 0.05;
+    ctx.fillStyle = tiny ? '#475569'
+                  : r.cost >= 4 ? '#f87171' : r.cost >= 2 ? '#fbbf24' : '#4ade80';
+    ctx.fillText(tiny ? 'free' : r.cost.toFixed(1) + ' ms', box.x + box.w - 12, sy);
     ctx.textAlign = 'left';
   }
 
@@ -12050,6 +12617,24 @@ function drawGfx() {
   ctx.fillStyle = total > 12 ? '#f87171' : total > 7 ? '#fbbf24' : '#4ade80';
   ctx.fillText('≈ ' + total.toFixed(1) + ' ms of a 16.7 ms frame',
                W / 2, g.presets[0].y + 52);
+
+  const m = g.measure, mh = inRect(mouse.x, mouse.y, m);
+  ctx.fillStyle = mh ? 'rgba(251,191,36,0.20)' : 'rgba(251,191,36,0.08)';
+  roundRect(m.x, m.y, m.w, m.h, 8); ctx.fill();
+  ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.6;
+  roundRect(m.x, m.y, m.w, m.h, 8); ctx.stroke();
+  ctx.font = '800 12px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText(fxMeasuring
+    ? 'MEASURING ' + (fxMeasureI + 1) + '/' + FX_ROWS.length +
+      '  ' + '·'.repeat(fxSamples.length + 1)
+    : 'MEASURE HERE', m.x + m.w / 2, m.y + m.h / 2);
+
+  // what this machine is actually doing, right now
+  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = fpsAvg >= 55 ? '#4ade80' : fpsAvg >= 40 ? '#fbbf24' : '#f87171';
+  ctx.fillText(Math.round(fpsAvg) + ' fps  ·  ' + frameMs.toFixed(1) + ' ms/frame',
+               W / 2, m.y + m.h + 22);
 
   const d = g.done, dh = inRect(mouse.x, mouse.y, d);
   ctx.fillStyle = dh ? 'rgba(103,232,249,0.22)' : 'rgba(103,232,249,0.10)';
