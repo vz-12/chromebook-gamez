@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#05060a">
 <title>VOIDRUNNER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
-    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+    font-family:Barlow,'Segoe UI',system-ui,sans-serif;
     -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
   canvas{display:block;width:100%;height:100%;cursor:none}
 </style>
@@ -983,6 +986,11 @@ addEventListener('mouseup', () => {
 });
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('wheel', e => {
+  if (state === 'chal') {
+    e.preventDefault();
+    chalScroll = clamp(chalScroll + Math.sign(e.deltaY) * 60, 0, chalMaxScroll());
+    return;
+  }
   if (state !== 'codex') return;
   e.preventDefault();
   codexScroll = clamp(codexScroll + Math.sign(e.deltaY) * 56, 0, codexMaxScroll());
@@ -1037,8 +1045,24 @@ const CHARS = [
     d: 'A charged lance that pierces everything in line. Hits far harder than ' +
        'a bullet but barely reaches. Fire rate shortens the charge rather than ' +
        'adding shots — at 250% it stops charging at all.',
-    hp: 88, speed: 276, dmg: 11, rate: 4.6 }
+    hp: 88, speed: 276, dmg: 11, rate: 4.6 },
+  /* Locked until every payload has been carried at least once. Its gun is
+     an afterthought — barely a third of a hull's damage — because the gun
+     is not the weapon. What it kills, it keeps. */
+  { id: 'hacker', n: 'THE HACKER', weapon: 'bullet',
+    col: '#a3e635', bullet: '#d9f99d',
+    tag: 'weak fire · turns the room',
+    d: 'Barely armed. Everything it kills stands back up on your side and ' +
+       'fights until something puts it down again — eight of them at once, ' +
+       'and one boss. The gun is only there to start the argument.',
+    hp: 96, speed: 262, dmg: 4, rate: 5.2,
+    need: p => MALWARE.every(m => (p.codexM || []).includes(m.id)),
+    needTxt: 'CARRY EVERY MALWARE' }
 ];
+
+/* A pilot with a `need` is not selectable until the profile satisfies it. */
+const charOpen = c => !c.need || c.need(Save.profile);
+const charLocked = i => !charOpen(CHARS[i]);
 let selectedChar = 0;
 const CHAR = () => CHARS[selectedChar];
 
@@ -1093,6 +1117,8 @@ const upDesc = u => { const a = lanceText(u); return (a && a.d) || u.d; };
 
 function applyChar(i) {
   selectedChar = clamp(i, 0, CHARS.length - 1);
+  // a profile carrying a pilot it has not earned falls back to the first
+  if (charLocked(selectedChar)) selectedChar = 0;
   const C = CHAR();
   COL.player = C.col;
   COL.bullet = C.bullet;
@@ -1103,6 +1129,7 @@ function newPlayer() {
   const C = CHAR();
   return {
     weapon: C.weapon, charId: C.id, rate0: C.rate,
+    hacker: C.id === 'hacker' ? 1 : 0,   // what it kills, it keeps
     charge: 0, laserT: 0, laserSegs: [], laserHeavy: false,
     laserDps: 0, laserEnv: 0, laserProcT: 0, laserCrit: false, laserAim: 0,
     twinSegs: [],
@@ -1140,7 +1167,26 @@ function newPlayer() {
     diaryT: 0, diaryAng: 0, diaryTick: 0, annotT: 0,
     level: 1, xp: 0, xpNext: 8, kills: 0, up: {},
     // co-op: on the floor, waiting for your wingman to clear the wave
-    down: false
+    down: false,
+    /* --- challenge rewards. None of these exist in the base pool; each is
+       granted by exactly one unlocked upgrade and read by rewardMul,
+       rewardTargetMul or one of the on-event hooks. --- */
+    echo: 0, cold: 0, heat: 0, tick10: 0, snap: 0, bore: 0, after: 0,
+    slipknot: 0, blinkC: 0, contrail: 0, kick: 0, phaseD: 0,
+    harvest: 0, rolling: 0, requis: 0, shatter: 0, bank: 0, trophy: 0, chainR: 0,
+    counter: 0, grudge: 0, deadman: 0, shell: 0, feedback: 0,
+    wallA: 0, isolate: 0, crowd: 0, centerM: 0,
+    firstB: 0, lastS: 0, sundial: 0, nightS: 0,
+    brand: 0, spall: 0, tag: 0, conduct: 0, suppress: 0,
+    insider: 0, interest: 0, salvage: 0, tithe: 0, bloodP: 0, twoMinds: 0,
+    otime: 0, curator: 0, deadline: 0, ledger: 0, symb: 0, erasure: 0, assembly: 0,
+    // and the counters they keep
+    heatN: 0, heatT: 0, coldT: 0, coldReady: false, blinkReady: false,
+    echoQ: [], shotN: 0, harvestN: 0, requisN: 0, rollN: 0,
+    bankN: 0, bankReady: false, trophyN: 0, grudgeN: 0, eraseN: 0,
+    assemblyN: 0, deadlineT: 0, shellT: 0, shellUp: false,
+    brakeT: 0, brakeUsed: false, dashHits: 0, waveClock: 0,
+    salvageUsed: false, lastTarget: null
   };
 }
 let P = newPlayer();
@@ -1262,7 +1308,10 @@ function offerUpgrades() {
   const out = [];
   const { pool, flat } = offerPool();
   // THE ANNOTATED CODEX: his notes are in it now, so you see one more option
-  const n = Save.profile.keeperDone ? 4 : 3;
+  /* Three, four with his marginalia, and one more each for Curator Eye and
+     Blood Price. Five is the ceiling: past that the cards stop fitting. */
+  const n = Math.min(5, (Save.profile.keeperDone ? 4 : 3)
+                       + (P.curator ? 1 : 0) + (P.bloodP ? 1 : 0));
   for (let k = 0; k < n && pool.length; k++) {
     const chosen = pickFromPool(pool, flat);
     out.push(chosen);
@@ -1506,7 +1555,10 @@ const bossHpCurve = w => (0.5 + Math.pow(1.125, waveLocal(w) - 1) * 0.36)
    a build actually outputs late — a maxed VOIDRUNNER runs several hundred DPS,
    and a value in the tens would be rounding error. Zero for the first two
    sectors so early bosses play exactly as they did, then climbing to a cap. */
-const bossArmorCurve = w => w <= 10 ? 0 : Math.min(320, (w - 10) * 5.5);
+const bossArmorCurve = w => {
+  const gate = hardArmorGate();
+  return w <= gate ? 0 : Math.min(320, (w - gate) * 5.5);
+};
 
 /* And a scaling fraction on top, because flat reduction alone cannot do the job
    asked of it. Player damage scales multiplicatively — maxed builds measure in
@@ -1514,7 +1566,10 @@ const bossArmorCurve = w => w <= 10 ? 0 : Math.min(320, (w - 10) * 5.5);
    survive is rounding error to a finished one. A fraction scales with whatever
    the player has become, which is the only thing that keeps a late boss honest.
    Flat armour handles the mid game; this handles the end of it. */
-const bossDRCurve = w => w <= 10 ? 0 : Math.min(0.55, (w - 10) * 0.016);
+const bossDRCurve = w => {
+  const gate = hardArmorGate();
+  return w <= gate ? 0 : Math.min(0.55, (w - gate) * 0.016);
+};
 
 /* ------------------------------- bosses ----------------------------------
    One per stage. Each supplies its own silhouette and attack script; the
@@ -1613,14 +1668,15 @@ function spawnEnemy(type, x, y, opts = {}) {
   const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w)) * curseHpMul;
   const canElite = type !== 'boss' && type !== 'egg';
   const eliteChance = Math.max(chalElite(),
-                      Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45));
-  const elite = opts.elite ?? (canElite && w > 3 && Math.random() < eliteChance);
+                      Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45) + hardElite());
+  const elite = opts.elite ?? (canElite && (chalElite() >= 1 || w > 3)
+                              && Math.random() < eliteChance);
   const e = {
     id: ++eid, type, x, y, vx: 0, vy: 0, boss: bKey,
     r: (bd ? bd.r : t.r) * (opts.rs || 1) * (elite ? 1.28 : 1),
-    maxHp: t.hp * hpScale * (opts.hs || 1) * (elite ? 2.6 : 1) * chalEHp(),
-    spd: (bd ? bd.spd : t.spd) * (elite ? 0.92 : 1) * (opts.ss || 1) * chalESpd(),
-    dmg: t.dmg * (1 + (w - 1) * 0.05) * (elite ? 1.4 : 1) * chalEDmg(),
+    maxHp: t.hp * hpScale * (opts.hs || 1) * (elite ? 2.6 : 1) * chalEHp() * hardHp(),
+    spd: (bd ? bd.spd : t.spd) * (elite ? 0.92 : 1) * (opts.ss || 1) * chalESpd() * hardSpd(),
+    dmg: t.dmg * (1 + (w - 1) * 0.05) * (elite ? 1.4 : 1) * chalEDmg() * hardDmg(),
     col: bd ? bd.col : t.col, sides: bd ? bd.sides : t.sides,
     xp: t.xp * (elite ? 3 : 1), score: t.score * (elite ? 3 : 1),
     armor: bArmor, absorb: bArmor * 0.25, dr: bDR,
@@ -1809,7 +1865,7 @@ function lanceTick(dt, proc, segs, ox, oy) {
   const struck = new Set();
   for (const s of segs) {
     for (const e of list) {
-      if (e.dead || e.phased || e.invuln || struck.has(e.id)) continue;
+      if (e.dead || e.hacked || e.phased || e.invuln || struck.has(e.id)) continue;
       if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + half)) continue;
       struck.add(e.id);
       const block = beamBlocked(e);
@@ -1890,7 +1946,8 @@ function fireLance() {
   P.ocCount++;
   const heavy = P.overcharge > 0 && P.ocCount % 7 === 0;
   P.laserHeavy = heavy;
-  P.laserDps = P.dmg * LANCE_DPS * stanceMul() * (heavy ? 1.6 + 0.5 * P.overcharge : 1);
+  P.laserDps = P.dmg * LANCE_DPS * stanceMul() * rewardShotMul()
+             * (heavy ? 1.6 + 0.5 * P.overcharge : 1);
   P.laserT = lanceDur();
   P.laserEnv = lanceEnv(0);
   P.laserProcT = 0;                        // first pulse lands immediately
@@ -1899,6 +1956,7 @@ function fireLance() {
   P.laserSegs = castLanceBeams(P.laserAim);
 
   const aim = P.laserAim;
+  onPlayerShot(P.x + Math.cos(aim) * 20, P.y + Math.sin(aim) * 20, aim);
   P.vx -= Math.cos(aim) * (heavy ? 95 : 42);
   P.vy -= Math.sin(aim) * (heavy ? 95 : 42);
   shake(heavy ? 0.18 : 0.05);
@@ -1910,6 +1968,8 @@ function fireLance() {
 
 function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.dead) return;
+  // a hacked body is only reachable by the side it used to be on
+  if (e.hacked && !opts.enemy) return;
   // Enforce invulnerability here rather than only at bullet collision —
   // drones, chain lightning, static field, blasts and poison all arrive
   // through this function and would otherwise ignore it entirely.
@@ -1986,13 +2046,15 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   // LIBRA: the scales record every wound you inflict and collect later
   if (P.scales) P.scalesDebt += dmg * 0.055 * P.scales;
   if (P.cryo && !opts.noStatus) { e.slow = Math.min(0.62, 0.22 * P.cryo); e.slowT = 1.4; }
-  if (P.chain && !opts.noChain) chainFrom(e, dmg * (0.34 + 0.1 * P.chain), P.chain);
+  if (P.chain && !opts.noChain)
+    chainFrom(e, dmg * (0.34 + 0.1 * P.chain) * (P.symb ? 1 + P.symb : 1), P.chain);
   // Executioner's Mark: anything left hanging on a sliver just dies
   if (P.execute && e.hp > 0 && e.type !== 'boss' && e.hp / e.maxHp < 0.12) {
     floatText(e.x, e.y - e.r - 8, 'EXECUTE', '#fbbf24', 15);
     e.hp = 0;
   }
-  if (onRewardHit(e, crit)) { /* erased outright */ }
+  // a direct hit is one you aimed: not a poison tick, a leak or a field
+  onRewardHit(e, crit, !opts.silent);
   if (e.hp <= 0) {
     const excess = Math.min(-e.hp, e.maxHp * 0.6);
     killEnemy(e, a);
@@ -2054,6 +2116,7 @@ function playerBlast(x, y, radius, dmg, color) {
   if (P.chainR) for (const e of enemies)
     if (!e.dead && len(e.x - x, e.y - y) < radius + e.r) e.byBlast = true;
   explode(x, y, radius, dmg, color, false);
+  if (P.chainR) for (const e of enemies) if (!e.dead) e.byBlast = false;
   knockCorpses(x, y, radius, 620);        // fused bodies ride the blast outward
   if (P.napalm)
     addHazard('fire', x, y, 3.5 + P.napalm, {
@@ -2070,7 +2133,7 @@ function killEnemy(e, ang = 0) {
     if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
         && b.ledger.length < 8 && b.ledger.indexOf(e.type) < 0) b.ledger.push(e.type);
   }
-  score += Math.round(e.score * (1 + wave * 0.05));
+  score += Math.round(e.score * (1 + wave * 0.05) * hardScore());
   burst(e.x, e.y, e.type === 'boss' ? 90 : (12 + e.r), e.col, e.type === 'boss' ? 520 : 260, e.r * 0.22 + 2, 0.7);
   ringFx(e.x, e.y, e.r * 0.4, e.r * 3.2, e.col, 0.4, 3);
   /* A volatile kill leaves a body with a fuse in it rather than detonating on
@@ -2108,7 +2171,7 @@ function killEnemy(e, ang = 0) {
     const chance = e.type === 'boss' || e.elite ? 1 : 0.22 + P.luck * 0.06;
     if (Math.random() < chance) {
       const n = e.type === 'boss' ? 10 : e.elite ? 3 : 1;
-      const each = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul));
+      const each = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred()));
       for (let i = 0; i < n; i++) {
         const a = rnd(TAU), s = rnd(200, 60);
         const c = mkDrop(e.x, e.y, 'credit');
@@ -2162,6 +2225,9 @@ function killEnemy(e, ang = 0) {
     lastBossDeath = { x: e.x, y: e.y };
     bossAlive = false; onBossDefeat(e);
   }
+  /* THE HACKER: the kill stands. The body does not — it gets back up on
+     your side, having already paid out everything a death pays out. */
+  hackTake(e);
 }
 
 function mkDrop(x, y, kind) {
@@ -2210,8 +2276,8 @@ function hurtPlayer(dmg, opts) {
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
   const d = Math.max(1, dmg * P.frailty * nightMul - P.armor);
   P.hp -= d;
-  onRewardHurt(d, opts && opts.src);
   P.iframe = 0.62; P.hurtFlash = 1;
+  onRewardHurt(d, opts && opts.src);   // after the guard, never before it
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
   floatText(P.x, P.y - 26, '-' + Math.round(d), '#fca5a5', 16);
@@ -2273,6 +2339,7 @@ function reviveOrDie() {
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
     if (coopCanDown()) { hostDown(); return; }
+    if (mpHost() && Wing.live && Wing.down) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
 }
 
@@ -2363,12 +2430,13 @@ function startWave() {
     banner(bd.name + '   INBOUND', bd.col);
     Audio_.boss();
     spawnRing('boss');
-    spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget());
+    spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget() * hardBudget());
   } else {
     banner(fresh ? stage.name : 'WAVE ' + wave,
            fresh ? stage.accent : COL.player);
     Audio_.wave();
-    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * chalBudget());
+    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5)
+                             * chalBudget() * hardBudget());
   }
   spawnT = 0;
   waveTimer = 0;
@@ -2385,20 +2453,20 @@ function updateWaves(dt) {
   // trickle spawns
   spawnT -= dt;
   const cap = 24 + wave * 3;
-  if (spawnBudget > 0 && spawnT <= 0 && enemies.length < cap) {
+  if (spawnBudget > 0 && spawnT <= 0 && threatCount() < cap) {
     const batch = Math.min(spawnBudget, 1 + rndi(Math.min(4, 1 + wave / 3)));
     for (let i = 0; i < batch; i++) spawnRing(pickEnemyType());
     spawnBudget -= batch;
     spawnT = Math.max(0.24, 1.5 - wave * 0.05);
   }
-  if (spawnBudget <= 0 && enemies.length === 0 && !bossAlive) {
+  if (spawnBudget <= 0 && threatCount() === 0 && !bossAlive) {
     // the room is clear, so anyone on the floor gets back on their feet —
     // ahead of the reward hand-off, which can return before the banner
     coopReviveWave();
     onRewardWave();
     if (P.deadman) P.brakeUsed = false;   // the brake is once a wave
-    const bonus = 50 * wave;
-    const cr = Math.round((12 + wave * 2.4) * P.credMul);
+    const bonus = Math.round(50 * wave * hardScore());
+    const cr = Math.round((12 + wave * 2.4) * P.credMul * hardCred());
     score += bonus; credits += cr;
     if (P.climb) {
       P.dmg *= 1 + 0.20 * P.climb;
@@ -2478,9 +2546,9 @@ function onBossDefeat(e) {
   maybeSpawnMalware(wasVirus);
   maybeSpawnLibrary(stage.boss);
 
-  const cr = Math.round((70 + wave * 6) * (wasVirus ? 2.2 : 1) * P.credMul);
+  const cr = Math.round((70 + wave * 6) * (wasVirus ? 2.2 : 1) * P.credMul * hardCred());
   credits += cr;
-  score += 500 * (stageAbs + 1) * (wasVirus ? 3 : 1);
+  score += Math.round(500 * (stageAbs + 1) * (wasVirus ? 3 : 1) * hardScore());
   for (let i = 0; i < 5; i++)
     setTimeout(() => { if (state === 'play') shake(0.5); }, i * 90);
 }
@@ -2543,7 +2611,8 @@ const CHIP_POOL = {
 
 function chipPool() {
   const ids = CHIP_POOL[P.weapon] || CHIP_POOL.bullet;
-  return chalFilterPool(UPGRADES.filter(u => ids.includes(u.id) && (P.up[u.id] || 0) < u.max));
+  return chalFilterPool(UPGRADES.filter(u =>
+    (ids.includes(u.id) || u.lock) && (P.up[u.id] || 0) < u.max));
 }
 
 // the pool an offer should draw from, and whether rarity still weights it
@@ -2591,13 +2660,14 @@ function makeShopStock() {
     pool.splice(pool.indexOf(ch), 1);
     Codex.seeUpgrade(ch.id);             // shop stock counts too
     items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
-      cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * (P.insider ? 0.65 : 1)) });
+      cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice()
+                       * (P.insider ? 0.65 : 1)) });
   }
   if (chip) items.push(recordChipItem());
   const svc = shopServices();
   for (let i = 0; i < 2 && svc.length; i++) {
     const s = svc.splice(rndi(svc.length), 1)[0];
-    s.cost = Math.round(s.cost * (1 + stageAbs * 0.12));
+    s.cost = Math.round(s.cost * (1 + stageAbs * 0.12) * hardPrice());
     items.push(s);
   }
   for (let i = items.length - 1; i > 0; i--) {
@@ -3660,6 +3730,8 @@ const Save = {
                   gfx: null, gfxSeen: 0, gfxCosts: null,
                   // ids of every challenge cleared; the rewards key off this
                   chal: [],
+                  // escalation: the permanent mark, and the window that earns it
+                  hardened: false, deepRuns: [],
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -3703,9 +3775,12 @@ const Save = {
     out.altPath = !!(a.altPath || b.altPath);
     out.malware = !!(a.malware || b.malware);
     out.otherKills = Math.max(a.otherKills || 0, b.otherKills || 0);
-    // a codex entry is knowledge: union both stores, never subtract
     // a cleared challenge is an unlock: union both stores, never subtract
     out.chal = [...new Set([...(a.chal || []), ...(b.chal || [])])];
+    // escalation is a mark, not a score: once either store has it, it stays
+    out.hardened = !!(a.hardened || b.hardened);
+    out.deepRuns = (b.deepRuns && b.deepRuns.length ? b.deepRuns : a.deepRuns) || [];
+    // a codex entry is knowledge: union both stores, never subtract
     for (const k of ['codexE', 'codexU', 'codexM', 'codexB', 'codexZ'])
       out[k] = [...new Set([...(a[k] || []), ...(b[k] || [])])];
     out.keeperMet = !!(a.keeperMet || b.keeperMet);
@@ -3801,6 +3876,10 @@ const Save = {
   recordRun(s) {
     const p = Save.profile;
     p.runs++;
+    /* Escalation watches the last five runs flown alone under ordinary
+       rules. Two ships is a different game and so is a challenge sheet, so
+       neither is allowed to move the window in either direction. */
+    if (!MP.on && noteRunDepth(s.wave)) s.escalated = true;
     p.kills += s.kills;
     p.time += s.time;
     if (s.score > ((p.bestRun && p.bestRun.score) || 0)) {
@@ -4020,7 +4099,10 @@ function gameOver(quiet) {
   lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                 sector: stage.name, loop: loopNum,
                 isRecord: score > Save.profile.best };
+  const wasHard = Save.profile.hardened;
   Save.recordRun(Object.assign({ build }, lastStats));
+  // the run that tips the window over is the one that gets told
+  lastStats.escalated = !wasHard && !!Save.profile.hardened;
   /* A co-op run still goes on your own record — it happened, and the stats are
      yours. It does not go to the global board: two ships clearing a wave is
      not the run everyone else on that board is being measured on. */
@@ -4058,7 +4140,12 @@ function handleKey(k) {
     if (k === 'k') { openChal('menu'); return; }
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
-      applyChar((selectedChar + 1) % CHARS.length);
+      let n = selectedChar;
+      for (let k2 = 0; k2 < CHARS.length; k2++) {
+        n = (n + 1) % CHARS.length;
+        if (charOpen(CHARS[n])) break;
+      }
+      applyChar(n);
       Save.profile.charIdx = selectedChar;
       Save.writeLocal(); Save.flush();
       Audio_.select();
@@ -4101,7 +4188,7 @@ function handleKey(k) {
     return;
   }
   if (state === 'levelup') {
-    const i = ['1', '2', '3', '4'].indexOf(k);
+    const i = ['1', '2', '3', '4', '5'].indexOf(k);
     if (i >= 0 && offers[i]) chooseOffer(i);
     return;
   }
@@ -4176,7 +4263,7 @@ function drawVolSlider(cx, cy, w) {
 
   ctx.save();
   ctx.textAlign = 'right';
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText(Audio_.muted ? 'MUTED' : 'VOLUME', x - 14, cy + 3);
 
@@ -4194,7 +4281,7 @@ function drawVolSlider(cx, cy, w) {
   ctx.beginPath(); ctx.arc(kx, cy, hot ? 7 : 6, 0, TAU); ctx.stroke();
 
   ctx.textAlign = 'left';
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText(Math.round(v * 100) + '%', x + w + 14, cy + 3);
   ctx.restore();
@@ -4321,6 +4408,21 @@ function handleClick() {
 }
 function chooseOffer(i) {
   applyUpgrade(offers[i]);
+  /* Two Minds: every fifth level, the card you did not take comes with you.
+     Taken from the remaining offers so the choice still costs something. */
+  if (P.twoMinds && P.level % 5 === 0) {
+    const rest = offers.filter((o, k) => k !== i);
+    if (rest.length) {
+      const extra = rest[rndi(rest.length)];
+      applyUpgrade(extra);
+      floatText(P.x, P.y - 56, 'TWO MINDS', '#fbbf24', 16);
+    }
+  }
+  if (P.tithe) {
+    const heal = Math.round(P.maxHp * 0.18 * P.tithe);
+    P.hp = Math.min(P.maxHp, P.hp + heal);
+    floatText(P.x, P.y - 44, '+' + heal + ' HP', COL.hp, 15);
+  }
   offers = [];
   state = 'play';
   Audio_.select();
@@ -4338,6 +4440,12 @@ function checkLevel() {
     P.level++;
     P.xpNext = Math.round(8 + P.level * 5 + Math.pow(P.level, 1.65) * 1.6);
     offers = offerUpgrades();
+    // Blood Price is charged when the extra card is dealt, not when it is taken
+    if (P.bloodP && offers.length > 3) {
+      const cost = Math.max(1, Math.round(P.maxHp * 0.12));
+      P.hp = Math.max(1, P.hp - cost);
+      floatText(P.x, P.y - 40, '-' + cost + ' HP', '#fca5a5', 15);
+    }
     if (offers.length) { state = 'levelup'; uiArm = 0.4; Audio_.levelup(); }
   }
 }
@@ -4454,8 +4562,10 @@ function update(dt) {
      the boss shell never calls the AI again, so the check has to live somewhere
      that still runs. A dev-console room clear used to leave the fight object
      resident with no bodies. */
-  if (unwritten && (!unwritten.a || unwritten.a.dead) &&
-                   (!unwritten.b || unwritten.b.dead)) {
+  if (unwritten && unwDeadT <= 0 &&
+      ((!unwritten.a || unwritten.a.dead) || (!unwritten.b || unwritten.b.dead))) {
+    for (const z of [unwritten.a, unwritten.b])
+      if (z && !z.dead) { z.floor = undefined; z.dead = true; }
     unwritten = null; unwTears = []; unwDeadT = 0; bossAlive = false;
   }
   if (amalgam) amalUpdate(dt);
@@ -4608,7 +4718,8 @@ function updatePlayer(dt) {
       Audio_.tone(900, 0.25, 'sine', 0.09, 300);
     }
     if (P.sentryUp && sentries.length < P.sentryUp + 1) {
-      sentries.push({ x: P.x, y: P.y, ang: P.ang, cd: 0.3, life: 11, dmg: P.dmg * 0.7 + 4 });
+      sentries.push({ x: P.x, y: P.y, ang: P.ang, cd: 0.3, life: 11,
+                      dmg: (P.dmg * 0.7 + 4) * (P.symb ? 1 + P.symb : 1) });
       ringFx(P.x, P.y, 6, 42, COL.player, 0.3, 2);
       Audio_.tone(360, 0.12, 'square', 0.07, 620);
     }
@@ -4883,7 +4994,7 @@ function twinFire() {
 function nearestEnemy(x, y, maxD) {
   let best = null, bd = maxD * maxD;
   for (const e of enemies) {
-    if (e.dead) continue;
+    if (!isThreat(e)) continue;   // yours are not targets, for you or for them
     const d = (e.x - x) ** 2 + (e.y - y) ** 2;
     if (d < bd) { bd = d; best = e; }
   }
@@ -4903,7 +5014,8 @@ function updateDrones(dt) {
       if (e.dead || e.hitCd > 0) continue;
       if (len(e.x - dx, e.y - dy) < e.r + 11) {
         e.hitCd = 0.32;
-        damageEnemy(e, (P.dmg * 0.62 + 4), false, dx, dy, { silent: true, noChain: true });
+        damageEnemy(e, (P.dmg * 0.62 + 4) * (P.symb ? 1 + P.symb : 1), false, dx, dy,
+                    { silent: true, noChain: true });
         burst(dx, dy, 5, '#a78bfa', 180, 2.4, 0.3);
       }
     }
@@ -4929,6 +5041,8 @@ function updateEnemies(dt) {
     }
     e.flash = Math.max(0, e.flash - dt * 7);
     e.hitCd = Math.max(0, e.hitCd - dt);
+    // turned: it fights the room instead of you, on its own simple script
+    if (e.hacked) { if (updateHacked(e, dt)) cull.push(i); continue; }
     // armour budget: refills at `armor` per second, banks at most a quarter of
     // a second's worth so it cannot store up into a burst shield
     if (e.armor > 0)
@@ -5094,7 +5208,7 @@ function updateEnemies(dt) {
           e.x = clamp(e.x + ux * step + rnd(80, -80), 40, WORLD.w - 40);
           e.y = clamp(e.y + uy * step + rnd(80, -80), 40, WORLD.h - 40);
           ringFx(e.x, e.y, 4, e.r + 34, e.col, 0.35, 3);
-          const base = Math.atan2(P.y - e.y, P.x - e.x);
+          const base = Math.atan2(TG.y - e.y, TG.x - e.x);
           for (let k = -1; k <= 1; k++) eshoot(e, base + k * 0.23, 300, e.dmg, 6);
           Audio_.tone(680, 0.12, 'sine', 0.08, 190);
         }
@@ -5133,7 +5247,8 @@ function updateEnemies(dt) {
         if (e.cd <= 0 && d < 940) {
           e.cd = Math.max(1.5, 3.4 - wave * 0.05);
           // leads the target, so standing still is what gets punished
-          mortars.push({ x: P.x + P.vx * 0.34 + rnd(46, -46), y: P.y + P.vy * 0.34 + rnd(46, -46),
+          mortars.push({ x: TG.x + TG.vx * 0.34 + rnd(46, -46),
+                         y: TG.y + TG.vy * 0.34 + rnd(46, -46),
             r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col });
           Audio_.tone(230, 0.2, 'triangle', 0.09, 95);
           burst(e.x, e.y, 6, e.col, 165, 2.6, 0.3);
@@ -5765,7 +5880,11 @@ function startVirus(e) {
 }
 
 function spawnShadowBoss(e) {
-  const keys = Object.keys(BOSSES).filter(k => k !== 'theother');
+  /* Stage bosses only. A secret or endgame entry is not a silhouette this
+     thing is allowed to wear: the bookkeeper is met over a desk, and the
+     other two are the end of the game rather than set dressing in it. */
+  const keys = Object.keys(BOSSES).filter(k =>
+    k !== 'theother' && !BOSSES[k].secret && !BOSSES[k].endgame);
   const key = pick(keys);
   const a = rnd(TAU), R = rnd(430, 260);
   const s = spawnEnemy('boss',
@@ -6590,7 +6709,7 @@ function drawAmalCutText() {
   const line = DEV_RAGE[Math.min(c.line, DEV_RAGE.length - 1)];
   const big = c.line >= DEV_RAGE.length - 2;
   ctx.font = (big ? '800 ' + Math.min(38, W * 0.04) : '400 ' + Math.min(20, W * 0.021)) +
-             'px ' + (big ? 'Segoe UI, system-ui, sans-serif' : 'ui-monospace, Consolas, monospace');
+             'px ' + (big ? 'Barlow, system-ui, sans-serif' : "'JetBrains Mono', ui-monospace, monospace");
   ctx.fillStyle = big ? '#f87171' : '#e2e8f0';
   wrapText(line, W / 2, H - 56, Math.min(880, W - 90), 26);
   ctx.restore();
@@ -7223,7 +7342,7 @@ function drawOutro() {
   ctx.fillStyle = rgba('#050507', 0.35 + k * 0.55);
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = '400 ' + Math.min(24, W * 0.028) + 'px ui-monospace, Consolas, monospace';
+  ctx.font = '400 ' + Math.min(24, W * 0.028) + "px 'JetBrains Mono', ui-monospace, monospace";
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = 'rgba(226,232,240,0.10)';
@@ -7363,7 +7482,7 @@ function drawDevTalk() {
 
   ctx.save();
   ctx.globalAlpha = devOut > 0 ? devOut : 1;      // the line wipes off
-  ctx.font = '400 17px ui-monospace, Consolas, monospace';
+  ctx.font = "400 17px 'JetBrains Mono', ui-monospace, monospace";
   const maxW = Math.min(720, W - 100), lh = 27;
   const lines = wrapLines(devShown(), maxW);
   const top = cy - 40;
@@ -7385,17 +7504,17 @@ function drawDevTalk() {
   ctx.restore();
 
   if (!devAsk) {
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#64748b', 0.5 + Math.sin(uiTime * 3.4) * 0.4);
     ctx.fillText('SPACE', cx, H - 56);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#27272a';
     ctx.fillText((devLine + 1) + ' / ' + DEV_TALK.length, cx, H - 36);
     ctx.textBaseline = 'alphabetic';
     return;
   }
 
-  ctx.font = '800 ' + Math.min(30, W * 0.031) + 'px Segoe UI, system-ui, sans-serif';
+  ctx.font = '800 ' + Math.min(30, W * 0.031) + 'px Barlow, system-ui, sans-serif';
   ctx.fillStyle = '#f87171';
   ctx.fillText('Do you want something harder?', cx, cy + 66);
 
@@ -7407,9 +7526,9 @@ function drawDevTalk() {
     ctx.strokeStyle = col; ctx.lineWidth = hot ? 2.4 : 1.6;
     roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill(); ctx.stroke();
     ctx.fillStyle = col;
-    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText(label, r.x + r.w / 2, r.y + 23);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#52525b';
     ctx.fillText(sub, r.x + r.w / 2, r.y + 43);
     ctx.restore();
@@ -7424,6 +7543,8 @@ function drawDevTalk() {
    sat there as an inert shape. Build the fight around whatever turned up:
    find its twin or create one, then adopt both. */
 function unwAdopt(e) {
+  // a borrowed silhouette is not the thing itself and never starts the fight
+  if (e.shadow > 0) return false;
   let other = null;
   for (const z of enemies)
     if (z !== e && z.boss === 'unwritten' && !z.dead) { other = z; break; }
@@ -8170,6 +8291,7 @@ function updateBullets(dt) {
     let removed = false;
     for (const e of enemies) {
       if (e.dead || e.phased || e.invuln) continue;   // intangible / burrowed
+      if (e.hacked) continue;                          // that one is yours
       if (b.hits && b.hits.has(e.id)) continue;
       const rr = e.r + b.r;
       if (!segCircle(b.px, b.py, b.x, b.y, e.x, e.y, rr)) continue;
@@ -8332,6 +8454,8 @@ function updateEBullets(dt) {
         }
       }
     }
+    // anything you have taken is in the way, and can be shot off you
+    if (hackHitByBullet(b)) { ebullets.splice(i, 1); continue; }
     if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
       hurtPlayer(b.dmg, { src: b.owner });
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
@@ -8392,12 +8516,16 @@ function updatePickups(dt) {
         Audio_.tone(1050 + rnd(300), 0.05, 'square', 0.045, 1600);
       } else if (d0.kind === 'heal') {
         // whoever walked over it is the one who gets patched up
-        const amt = chalNoHeal() ? 0 : Math.round(dt0.maxHp * 0.28);
-        if (!amt) floatText(dt0.x, dt0.y - 30, 'NOTHING HEALS', '#64748b', 13);
-        dt0.hp = Math.min(dt0.maxHp, dt0.hp + amt);
-        floatText(dt0.x, dt0.y - 30, '+' + amt + ' HP', COL.hp, 17);
-        Audio_.heal();
-        ringFx(dt0.x, dt0.y, 8, 90, COL.hp, 0.45, 3);
+        if (chalNoHeal()) {
+          floatText(dt0.x, dt0.y - 30, 'NOTHING HEALS', '#64748b', 13);
+          Audio_.tone(150, 0.12, 'square', 0.05, 90);
+        } else {
+          const amt = Math.round(dt0.maxHp * 0.28);
+          dt0.hp = Math.min(dt0.maxHp, dt0.hp + amt);
+          floatText(dt0.x, dt0.y - 30, '+' + amt + ' HP', COL.hp, 17);
+          Audio_.heal();
+          ringFx(dt0.x, dt0.y, 8, 90, COL.hp, 0.45, 3);
+        }
       } else {
         floatText(P.x, P.y - 30, 'OVERLOAD', '#f0abfc', 18);
         drawFlashT = 0.16; shake(0.8);
@@ -8517,7 +8645,7 @@ function render() {
     ctx.strokeRect(3, 3, W - 6, H - 6);
     ctx.globalAlpha = 0.75;
     ctx.textAlign = 'center';
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#fcd34d';
     ctx.fillText('ANNOTATED   ' + P.annotT.toFixed(1) + 's', W / 2, 16);
     ctx.restore();
@@ -8544,6 +8672,7 @@ function render() {
   drawHUD();
   mpDrawHud();
   drawChalHud();
+  drawHackHud();
   drawFreeplay();
   drawUnwrittenOverlay();
   drawLibraryPointer();
@@ -8835,10 +8964,10 @@ function drawPortals() {
     // label the destination so the choice is informed
     ctx.save();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = alt ? '#f87171' : '#64748b';
     ctx.fillText(alt ? 'THE FRACTURE' : 'ONWARD', p.x, p.y - p.r - 30);
-    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = col;
     ctx.fillText(p.def.name, p.x, p.y - p.r - 14);
     ctx.restore();
@@ -8864,7 +8993,7 @@ function drawLibraryPointer() {
   if (onScreenNow) {
     ctx.globalAlpha = pulse * 0.9;
     ctx.fillStyle = pcol;
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText(label, sx, sy - L.r - 16);
   } else {
     const px = clamp(sx, m, W - m), py = clamp(sy, m, H - m);
@@ -8882,7 +9011,7 @@ function drawLibraryPointer() {
     ctx.closePath(); ctx.fill();
     ctx.rotate(-a);
     ctx.globalAlpha = pulse * 0.85;
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText(label, 0, 26);
   }
   ctx.restore();
@@ -8937,10 +9066,10 @@ function drawLibraryPortal() {
 
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = mal ? '#7f1d1d' : '#a16207';
   ctx.fillText(mal ? 'MALWARE' : 'LIBRARY', L.x, L.y - L.r - 30);
-  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
   if (mal) {
     ctx.fillStyle = L.mal ? L.mal.col : MAL_COL;
     ctx.fillText(L.mal ? L.mal.n : 'A PAYLOAD', L.x, L.y - L.r - 14);
@@ -9044,7 +9173,7 @@ function drawUnwritten() {
   if (u.touchT > UNW_UNTOUCHED) {
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = UNW_COL;
     ctx.globalAlpha = 0.55 + Math.sin(uiTime * 6) * 0.35;
     ctx.fillText('CLOSING', (u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2 + 34);
@@ -9054,7 +9183,7 @@ function drawUnwritten() {
   if (u.pending > 0) {
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = UNW_INK;
     ctx.globalAlpha = 0.6 + Math.sin(uiTime * 8) * 0.3;
     ctx.fillText('HELD  ' + Math.round(u.pending),
@@ -9071,7 +9200,7 @@ function drawUnwrittenOverlay() {
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.globalAlpha = clamp(p * 2.2, 0, 1);
-  ctx.font = '800 ' + Math.min(40, W * 0.045) + 'px Segoe UI, system-ui, sans-serif';
+  ctx.font = '800 ' + Math.min(40, W * 0.045) + 'px Barlow, system-ui, sans-serif';
   ctx.fillStyle = UNW_COL;
   ctx.fillText('you don’t get to give up yet.', W / 2, H / 2);
   ctx.restore();
@@ -9674,13 +9803,13 @@ function drawAmalgamBar() {
 
   // the flat cut it takes off your weapon, which is invisible otherwise
   const cut = AMAL_DR[P.weapon] !== undefined ? AMAL_DR[P.weapon] : 0.95;
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#fca5a5';
   ctx.textAlign = 'left';
   ctx.fillText('⛨ −' + Math.round(cut * 100) + '%', x2 + w2 + 10, y2 + 11);
 
   ctx.textAlign = 'center';
-  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = a.beam ? '#ffffff' : AMAL_COL;
   ctx.fillText('THE AMALGAM' + (a.beam ? '   — REFUSING' : ''), W / 2, y2 + 40);
   ctx.restore();
@@ -9703,7 +9832,7 @@ function drawCages() {
     ctx.setLineDash([]);
     // integrity readout on the ring
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#e2e8f0';
     ctx.fillText('SHOOT THE RING   ' + Math.max(0, Math.ceil(c.hp)), c.x, c.y - c.r - 14);
     ctx.restore();
@@ -9976,10 +10105,26 @@ function drawEnemies() {
     // glow
     ctx.globalCompositeOperation = 'lighter';
     drawGlow(e.x, e.y, e.r * (e.type === 'boss' ? 3.4 : 2.3), e.col, (0.34 + e.flash * 0.3) * ea);
+    if (e.hacked) drawGlow(e.x, e.y, e.r * 3.2, HACK_COL, 0.26);
     if (e.elite) drawGlow(e.x, e.y, e.r * 3, COL.elite, 0.22 * ea);
     if (e.virus) drawGlow(e.x, e.y, e.r * 5.2, VIRUS_COL, 0.3 + Math.sin(uiTime * 9) * 0.12);
     if (e.shadow > 0) drawGlow(e.x, e.y, e.r * 3.6, VIRUS_COL, 0.24);
     ctx.globalCompositeOperation = 'source-over';
+
+    /* Turned. A dashed ring counter-rotating around the body, so a room
+       half yours reads at a glance without changing every silhouette. */
+    if (e.hacked) {
+      ctx.save();
+      ctx.strokeStyle = rgba(HACK_COL, 0.75); ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 6]);
+      ctx.lineDashOffset = uiTime * 26;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 9, 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.5 + Math.sin(uiTime * 4 + e.hackId) * 0.2;
+      ctx.fillStyle = HACK_COL;
+      ctx.fillRect(e.x - 1.5, e.y - e.r - 15, 3, 3);
+      ctx.restore();
+    }
 
     /* THE BOOKKEEPER: the ledger orbits him, and every card he has written
        onto himself is listed above his head, so his growth is legible. */
@@ -10011,7 +10156,7 @@ function drawEnemies() {
       if (list.length) {
         ctx.save();
         ctx.textAlign = 'center';
-        ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+        ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
         let ly = e.y - e.r - 26;
         for (let k = 0; k < list.length; k += 4) {
           const row = list.slice(k, k + 4)
@@ -10192,7 +10337,7 @@ function drawEnemies() {
       ctx.strokeStyle = 'rgba(163,230,53,0.95)'; ctx.lineWidth = 2;
       poly(e.x, e.y, e.r * 0.78, 3, -e.t * 3); ctx.stroke();
       ctx.fillStyle = '#a3e635';
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.textAlign = 'center';
       ctx.fillText(String(e.psn), e.x, e.y - e.r - 18);
     }
@@ -10465,7 +10610,17 @@ function drawLance() {
 
 function drawShipHull(colStroke, colFill) {
   ctx.beginPath();
-  if (P.charId === 'ember') {
+  if (P.charId === 'hacker') {
+    // a splayed fork: two prongs and an open bay where a barrel would be
+    ctx.moveTo(18, 0);
+    ctx.lineTo(4, 6);
+    ctx.lineTo(10, 13);
+    ctx.lineTo(-4, 11);
+    ctx.lineTo(-9, 0);
+    ctx.lineTo(-4, -11);
+    ctx.lineTo(10, -13);
+    ctx.lineTo(4, -6);
+  } else if (P.charId === 'ember') {
     // a blunt hammerhead built around a forward lance prong
     ctx.moveTo(21, 0);
     ctx.lineTo(7, 4);
@@ -10771,7 +10926,8 @@ function drawBullets() {
   for (const b of bullets) {
     if (!inView(b.x, b.y, 40)) continue;
     // zodiac rounds read differently at a glance
-    const c = b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
+    const c = b.hacked ? HACK_COL
+            : b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
             : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * (b.arrow ? 1.3 : 1.7), c,
@@ -11055,7 +11211,7 @@ function drawFloats() {
   for (const f of floats) {
     const t = f.life / f.max;
     ctx.globalAlpha = clamp(t * 1.6, 0, 1);
-    ctx.font = `700 ${f.size}px Segoe UI, system-ui, sans-serif`;
+    ctx.font = `700 ${f.size}px Barlow, system-ui, sans-serif`;
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.75)';
     ctx.strokeText(f.text, f.x, f.y);
@@ -11114,9 +11270,12 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+let hudBotY = 0;                   // next free baseline in the bottom-left column
+
 function drawHUD() {
   const pad = 18;
   ctx.textBaseline = 'middle';
+  hudBotY = H - pad - 30;
 
   /* --- health bar --- */
   const bw = Math.min(340, W * 0.4), bh = 16;
@@ -11129,9 +11288,10 @@ function drawHUD() {
   roundRect(pad + 2, pad + 2, Math.max(0, (bw - 4) * hf), bh - 4, 6); ctx.fill();
   ctx.strokeStyle = 'rgba(148,163,184,0.35)'; ctx.lineWidth = 1;
   roundRect(pad, pad, bw, bh, 8); ctx.stroke();
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#0b1220';
-  ctx.fillText(`${fmtHp(P.hp)} / ${Math.round(P.maxHp)}`, pad + 9, pad + bh / 2 + 0.5);
+  const hpStr = `${fmtHp(P.hp)} / ${Math.round(P.maxHp)}`;
+  fitFont(hpStr, bw - 18, '600', 10.5, "'JetBrains Mono', ui-monospace, monospace", 7);
+  ctx.fillStyle = hf > 0.34 ? '#06111f' : '#e2e8f0';
+  ctx.fillText(hpStr, pad + 9, pad + bh / 2 + 0.5);
 
   /* --- xp bar --- */
   const yb = pad + bh + 7;
@@ -11141,9 +11301,12 @@ function drawHUD() {
   roundRect(pad + 1.5, yb + 1.5, Math.max(0, (bw - 3) * clamp(P.xp / P.xpNext, 0, 1)), 6, 3); ctx.fill();
 
   /* --- level + dash pips --- */
-  ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#7dd3fc';
   ctx.fillText('LV ' + P.level, pad, yb + 26);
+  ctx.restore();
 
   let dx = pad + 58;
   for (let i = 0; i < P.dashMax; i++) {
@@ -11170,7 +11333,7 @@ function drawHUD() {
     const ready = P.bookCharge >= P.book.cost;
     const by = yb + 40;
     ctx.textAlign = 'left';
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = ready ? P.book.col : '#475569';
     ctx.fillText('[Q] ' + P.book.n, pad, by);
     let qx = pad;
@@ -11180,7 +11343,7 @@ function drawHUD() {
       qx += 20;
     }
     if (ready) {
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = P.book.col;
       ctx.globalAlpha = 0.6 + Math.sin(uiTime * 5) * 0.4;
       ctx.fillText('READY', qx + 6, by + 11);
@@ -11191,7 +11354,7 @@ function drawHUD() {
   /* --- the chip, if it is in --- */
   if (P.chip) {
     ctx.textAlign = 'left';
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = CHIP_COL;
     ctx.globalAlpha = 0.6 + Math.sin(uiTime * 2) * 0.2;
     ctx.fillText('◧ RECORD CHIP', pad, yb + 20);
@@ -11203,7 +11366,7 @@ function drawHUD() {
     const my = yb + (P.book ? 66 : 40);
     drawMalChip(pad + 11, my - 3, 9, P.malware.col);   // the part, in miniature
     ctx.textAlign = 'left';
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = P.malware.col;
     ctx.globalAlpha = 0.55 + Math.sin(uiTime * 2.4) * 0.2;
     ctx.fillText('[SPACE] ' + P.malware.n, pad + 26, my);
@@ -11212,22 +11375,50 @@ function drawHUD() {
 
   /* --- score / wave --- */
   ctx.textAlign = 'right';
-  ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
+  /* This column has to hold a nine-digit score, a looped sector name and a
+     five-figure credit count without ever reaching across into the health bar,
+     so every line is fitted to the gutter that is actually left. */
+  const rMax = Math.max(96, W - pad * 2 - bw - 20);
+  ctx.save();
+  const scoreStr = score.toLocaleString();
+  fitFont(scoreStr, rMax, '800', 27, "'JetBrains Mono', ui-monospace, monospace", 13);
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText(score.toLocaleString(), W - pad, pad + 12);
-  ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#64748b';
-  ctx.fillText('BEST ' + Math.max(Save.profile.best, score).toLocaleString(), W - pad, pad + 32);
+  ctx.fillText(scoreStr, W - pad, pad + 12);
+
+  ctx.letterSpacing = '0.12em';
+  const bestStr = 'BEST ' + Math.max(Save.profile.best, score).toLocaleString();
+  fitFont(bestStr, rMax, '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = '#5b6b82';
+  ctx.fillText(bestStr, W - pad, pad + 31);
+  ctx.restore();
+
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  const runStr = `WAVE ${wave}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`;
+  fitFont(runStr, rMax, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
   ctx.fillStyle = '#94a3b8';
-  ctx.fillText(`WAVE ${wave}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`, W - pad, pad + 50);
-  // sector + credits
-  ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+  ctx.fillText(runStr, W - pad, pad + 50);
+
+  ctx.letterSpacing = '0.09em';
+  const secStr = stage.name + (loopNum > 0 ? '  ×' + (loopNum + 1) : '') +
+                 '   ' + (((wave - 1) % 5) + 1) + '/5';
+  fitFont(secStr, rMax, '600', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
   ctx.fillStyle = stage.accent;
-  ctx.fillText(stage.name + (loopNum > 0 ? '  ×' + (loopNum + 1) : '') +
-               '   ' + (((wave - 1) % 5) + 1) + '/5', W - pad, pad + 70);
-  ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+  ctx.fillText(secStr, W - pad, pad + 70);
+  ctx.restore();
+
+  const credStr = '◈ ' + credits;
+  fitFont(credStr, rMax, '800', 15, "'JetBrains Mono', ui-monospace, monospace", 10);
   ctx.fillStyle = '#fbbf24';
-  ctx.fillText('◈ ' + credits, W - pad, pad + 92);
+  ctx.fillText(credStr, W - pad, pad + 92);
+  if (hardOn()) {
+    ctx.save();
+    ctx.letterSpacing = '0.14em';
+    fitFont('⚠ ESCALATED', rMax, '700', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = rgba('#f87171', 0.5 + Math.sin(uiTime * 1.6) * 0.14);
+    ctx.fillText('⚠ ESCALATED', W - pad, pad + 110);
+    ctx.restore();
+  }
 
   /* --- boss bar --- */
   // a shadow is on loan and must never take the real boss's bar
@@ -11235,7 +11426,8 @@ function drawHUD() {
      enemies, so the finder below would label the whole fight after whichever
      piece happens to sit first in the array — and show that piece's health
      instead of the pool. */
-  const boss = amalgam ? null : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow);
+  const boss = amalgam ? null
+    : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow && !e.hacked);
   if (amalgam) drawAmalgamBar();
   else if (boss) {
     const w2 = Math.min(560, W * 0.62), x2 = (W - w2) / 2, y2 = 22;
@@ -11253,24 +11445,32 @@ function drawHUD() {
     const unwCut = boss.boss === 'unwritten'
       ? (UNW_DR[P.weapon] !== undefined ? UNW_DR[P.weapon] : 0.95) : 0;
     if (boss.armor > 0 || boss.dr > 0 || unwCut > 0) {
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillStyle = unwCut ? '#c084fc' : '#94a3b8';
-      ctx.textAlign = 'left';
-      ctx.fillText(unwCut
+      const armStr = unwCut
         ? '⛨ −' + Math.round(unwCut * 100) + '%' +
           (unwritten && unwritten.rage > 1.02
             ? '   ⚠ ×' + unwritten.rage.toFixed(2) : '')
         : '⛨ ' + Math.round(boss.armor) +
-          (boss.dr > 0 ? '  −' + Math.round(boss.dr * 100) + '%' : ''),
-        x2 + w2 + 8, y2 + 11);
+          (boss.dr > 0 ? '  −' + Math.round(boss.dr * 100) + '%' : '');
+      if (x2 + w2 + 8 + ctx.measureText(armStr).width < W - 8) {
+        ctx.textAlign = 'left';
+        ctx.fillText(armStr, x2 + w2 + 8, y2 + 11);
+      } else {
+        ctx.textAlign = 'right';
+        ctx.fillText(armStr, x2 + w2, y2 + 28);
+      }
       ctx.textAlign = 'center';
     }
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = bcol;
-    ctx.fillText(bname + (boss.invuln
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    const bLabel = bname + (boss.invuln
       ? (boss.finale ? '   — OVERLOAD'
-         : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : ''),
-      W / 2, y2 + 28);
+         : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : '');
+    fitFont(bLabel, w2 - 12, '600', 13, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
+    ctx.fillStyle = bcol;
+    ctx.fillText(bLabel, W / 2, y2 + 29);
+    ctx.restore();
     // offscreen indicator
     const sx = (boss.x - cam.x) * camZoom + W / 2,
           sy = (boss.y - cam.y) * camZoom + H / 2;
@@ -11293,7 +11493,9 @@ function drawHUD() {
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = 'center';
-    ctx.font = '800 40px Segoe UI, system-ui, sans-serif';
+    ctx.letterSpacing = '0.05em';
+    fitFont(bannerText, W - 60, '700', 42,
+            "'Chakra Petch', Barlow, system-ui, sans-serif", 20);
     ctx.shadowColor = bannerCol; ctx.shadowBlur = 26;
     ctx.fillStyle = bannerCol;
     ctx.fillText(bannerText, W / 2, H * 0.28 - (1 - a) * 14);
@@ -11304,7 +11506,7 @@ function drawHUD() {
   const owned = state === 'play' ? Object.keys(P.up) : [];
   if (owned.length) {
     ctx.textAlign = 'left';
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     let cx = pad, cy = H - pad - 8;
     for (const id of owned) {
       const u = UPGRADES.find(z => z.id === id);
@@ -11320,6 +11522,7 @@ function drawHUD() {
       ctx.fillText(label, cx + 7, cy + 0.5);
       cx += w3 + 5;
     }
+    hudBotY = cy - 26;             // clear of the topmost chip row
   }
 }
 
@@ -11355,10 +11558,10 @@ function drawLevelUp() {
   const hover = offerIndexAt(mouse.x, mouse.y);
 
   ctx.textAlign = 'center';
-  ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = COL.player;
   ctx.fillText('LEVEL ' + P.level, W / 2, rs[0].y - 62);
-  ctx.font = '800 34px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 34px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#f1f5f9';
   ctx.fillText('CHOOSE AN UPGRADE', W / 2, rs[0].y - 34);
 
@@ -11400,15 +11603,15 @@ function drawLevelUp() {
     ctx.restore();
 
     ctx.textAlign = 'center';
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = col;
     ctx.fillText(u.rar.toUpperCase(), cxp, y + 34);
 
-    ctx.font = '800 19px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 19px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(upName(u), cxp, y + 140);
 
-    ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+    ctx.font = "400 13px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#94a3b8';
     wrapText(upDesc(u), cxp, y + 168, r.w - 36, 17);
 
@@ -11420,14 +11623,15 @@ function drawLevelUp() {
       roundRect(cxp - tw / 2 + k * pw, y + r.h - 44, 8, 4, 2); ctx.fill();
     }
 
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = on ? col : '#475569';
     ctx.fillText('[ ' + (i + 1) + ' ]', cxp, y + r.h - 22);
   }
   ctx.textAlign = 'center';
-  ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
-  ctx.fillText('CLICK OR PRESS 1 / 2 / 3', W / 2, rs[0].y + rs[0].h + 30);
+  ctx.fillText('CLICK OR PRESS ' + offers.map((o, i) => i + 1).join(' / '),
+               W / 2, rs[0].y + rs[0].h + 30);
 }
 
 /* Normally a whole number. Under THE AMALGAM it goes fractional and has to
@@ -11440,6 +11644,20 @@ function fmtHp(hp) {
   if (hp < 1e-6) return hp.toExponential(0).replace('e-', 'e−');
   const places = Math.max(1, Math.round(-Math.log10(hp)));
   return hp.toFixed(places);
+}
+
+/* Sets ctx.font to the largest size <= size that fits s inside maxW, so a long
+   pilot name, a nine-digit score or a translated label narrows instead of
+   running out of its panel. Returns the size it settled on. */
+function fitFont(s, maxW, weight, size, family, min) {
+  min = min || 7;
+  let px = size;
+  ctx.font = weight + ' ' + px + 'px ' + family;
+  while (px > min && ctx.measureText(s).width > maxW) {
+    px -= 0.5;
+    ctx.font = weight + ' ' + px + 'px ' + family;
+  }
+  return px;
 }
 
 // hard cap on a name from the board: it is user-supplied and can be anything
@@ -11511,7 +11729,7 @@ function drawButton(r, label, enabled, col) {
   ctx.strokeStyle = on ? col : rgba(col, 0.45);
   ctx.lineWidth = on ? 2.2 : 1.3;
   roundRect(r.x, r.y, r.w, r.h, 10); ctx.stroke();
-  ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = col;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
@@ -11526,13 +11744,13 @@ function drawShop() {
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = stage.accent;
   ctx.fillText(stage.name + '   ·   SECTOR CLEARED', W / 2, rs[0].y - 78);
-  ctx.font = '800 34px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 34px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#f1f5f9';
   ctx.fillText('BLACK MARKET', W / 2, rs[0].y - 48);
-  ctx.font = '800 20px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 20px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#fbbf24';
   ctx.fillText('◈ ' + credits, W / 2, rs[0].y - 20);
 
@@ -11556,7 +11774,7 @@ function drawShop() {
 
     ctx.fillStyle = col;
     roundRect(r.x + 12, y + 12, r.w - 24, 3, 2); ctx.fill();
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText(it.kind === 'chip' ? 'ONE OF A KIND'
                : it.kind === 'svc' ? 'SERVICE' : it.rar.toUpperCase(), cx, y + 29);
 
@@ -11587,10 +11805,10 @@ function drawShop() {
       ctx.fill(); ctx.stroke();
     }
 
-    ctx.font = '800 16px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 16px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(it.name, cx, y + 101);
-    ctx.font = '400 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#94a3b8';
     wrapText(it.desc, cx, y + 121, r.w - 26, 14);
 
@@ -11602,14 +11820,14 @@ function drawShop() {
       }
     }
     if (it.sold) {
-      ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+      ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = '#64748b';
       ctx.fillText('SOLD', cx, y + r.h - 20);
     } else {
-      ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+      ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = afford ? '#fbbf24' : '#9f1239';
       ctx.fillText('◈ ' + it.cost, cx, y + r.h - 24);
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = on ? col : '#475569';
       ctx.fillText('[ ' + (i + 1) + ' ]', cx, y + r.h - 9);
     }
@@ -11624,12 +11842,12 @@ function drawShop() {
   ctx.textAlign = 'center';
   if (shopMsgT > 0) {
     ctx.globalAlpha = clamp(shopMsgT * 1.6, 0, 1);
-    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#e2e8f0';
     ctx.fillText(shopMsg, W / 2, b.leave.y + 56);
     ctx.globalAlpha = 1;
   }
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('CLICK TO BUY   ·   1-6   ·   R REROLL   ·   ENTER TO CONTINUE', W / 2, H - 24);
 }
@@ -11639,15 +11857,15 @@ function drawPause() {
   ctx.fillStyle = 'rgba(3,5,10,0.78)';
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
-  ctx.font = '800 44px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 44px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#e2e8f0';
   ctx.fillText('PAUSED', W / 2, H / 2 - 56);
-  ctx.font = '500 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
   ctx.fillText('P or ESC to resume   ·   T autofire   ·   X codex   ·   G effects',
                W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
-  ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
     W / 2, H / 2 + 4);
 
@@ -11655,108 +11873,207 @@ function drawPause() {
 
   const pulse = 0.6 + Math.sin(uiTime * 3) * 0.4;
   ctx.textAlign = 'center';
-  ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = rgba('#f87171', pulse);
   ctx.fillText('M   —   MAIN MENU', W / 2, H / 2 + 92);
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('this run is saved to your record before you leave', W / 2, H / 2 + 110);
 }
 
+/* The run report. Every line here is optional — a challenge win, a reward, a
+   new best, a global rank, the escalation notice — so the screen is built as a
+   measured stack rather than a column of fixed offsets: rows are collected,
+   totalled, and the whole block is scaled and centred in the room available.
+   That is what keeps a loaded report on a short window from running off the
+   bottom edge, which the fixed offsets could not do. */
 function drawDead() {
-  ctx.fillStyle = 'rgba(3,5,10,0.84)';
+  ctx.fillStyle = 'rgba(3,5,10,0.86)';
   ctx.fillRect(0, 0, W, H);
   const s = lastStats || { score, wave, kills: 0, level: 1, time: 0 };
   ctx.textAlign = 'center';
-  /* A challenge run ended two ways and only one of them is a death. The
-     board underneath is the same either way — score, wave, kills — because
-     they are still the interesting numbers. */
+  ctx.textBaseline = 'middle';
   const cw = s.chal && s.chalWon;
-  ctx.save();
-  ctx.shadowColor = cw ? '#fbbf24' : '#ef4444'; ctx.shadowBlur = 30;
-  ctx.font = '800 54px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = cw ? '#fde68a' : '#f87171';
-  ctx.fillText(cw ? 'CHALLENGE CLEARED' : 'SIGNAL LOST', W / 2, H / 2 - 96);
-  ctx.restore();
-  if (s.chal) {
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+  const rows = [];
+  const row = (hh, d) => rows.push({ h: hh, d });
+  const CENTER = W / 2;
+  const wide = W - 56;
+
+  // eyebrow: which challenge, and whether the thing you were sent for survived
+  if (s.chal) row(22, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.16em';
+    const t = s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS');
+    fitFont(t, wide, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = cw ? '#fbbf24' : '#94a3b8';
-    // above the 54px title, not behind it
-    ctx.fillText(s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS'),
-                 W / 2, H / 2 - 146);
-  }
-
-  ctx.font = '800 46px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillText(s.score.toLocaleString(), W / 2, H / 2 - 34);
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#64748b';
-  ctx.fillText('FINAL SCORE', W / 2, H / 2 - 8);
-  if (s.sector) {
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText('REACHED   ' + s.sector + (s.loop ? '   ×' + (s.loop + 1) : ''), W / 2, H / 2 + 11);
-  }
-
-  const cols = [
-    ['WAVE', s.wave], ['KILLS', s.kills], ['LEVEL', s.level], ['TIME', fmtTime(s.time)]
-  ];
-  const spacing = Math.min(120, W / 5);
-  cols.forEach((c, i) => {
-    const x = W / 2 + (i - (cols.length - 1) / 2) * spacing;
-    ctx.font = '700 22px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#cbd5e1';
-    ctx.fillText(String(c[1]), x, H / 2 + 34);
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#475569';
-    ctx.fillText(c[0], x, H / 2 + 54);
+    ctx.fillText(t, CENTER, y + 11);
+    ctx.restore();
   });
 
-  if (s.chal) {
-    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
-    if (s.reward) {
-      ctx.fillStyle = RARITY[s.reward.rar];
-      ctx.fillText('UNLOCKED   ' + s.reward.n.toUpperCase(), W / 2, H / 2 + 84);
-      ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
-      ctx.fillStyle = '#64748b';
-      ctx.fillText(s.reward.d + '  —  it is in your pool from now on', W / 2, H / 2 + 102);
-    } else if (s.chalWon) {
-      ctx.fillStyle = '#6ee7b7';
-      ctx.fillText('ALREADY CLEARED   ·   NOTHING NEW TO UNLOCK', W / 2, H / 2 + 84);
-    } else {
-      ctx.fillStyle = '#64748b';
-      ctx.fillText(chalCount() + ' / ' + CHALLENGES.length + '   CHALLENGES CLEARED', W / 2, H / 2 + 84);
-    }
-  } else if (s.isRecord && s.score > 0) {
-    ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
+  row(62, y => {
+    const t = cw ? 'CHALLENGE CLEARED' : 'SIGNAL LOST';
+    ctx.save();
+    ctx.shadowColor = cw ? '#fbbf24' : '#ef4444'; ctx.shadowBlur = 30;
+    ctx.letterSpacing = '0.05em';
+    fitFont(t, wide, '700', 54, "'Chakra Petch', Barlow, system-ui, sans-serif", 24);
+    ctx.fillStyle = cw ? '#fde68a' : '#f87171';
+    ctx.fillText(t, CENTER, y + 33);
+    ctx.restore();
+  });
+
+  // the number the whole screen is about
+  row(76, y => {
+    const t = s.score.toLocaleString();
+    fitFont(t, wide, '800', 46, "'JetBrains Mono', ui-monospace, monospace", 22);
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillText(t, CENTER, y + 30);
+    ctx.save();
+    ctx.letterSpacing = '0.2em';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#5b6b82';
+    ctx.fillText('FINAL SCORE', CENTER, y + 62);
+    ctx.restore();
+  });
+
+  if (s.sector) row(24, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    const t = 'REACHED   ' + s.sector + (s.loop ? '   ×' + (s.loop + 1) : '');
+    fitFont(t, wide, '600', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(t, CENTER, y + 12);
+    ctx.restore();
+  });
+
+  /* Four figures on one rule, so they read as a set rather than four sentences.
+     The columns take an equal share of the width they are allowed. */
+  row(64, y => {
+    const cols = [['WAVE', s.wave], ['KILLS', s.kills],
+                  ['LEVEL', s.level], ['TIME', fmtTime(s.time)]];
+    const bandW = Math.min(460, W - 56);
+    const colW = bandW / cols.length;
+    ctx.fillStyle = 'rgba(148,163,184,0.16)';
+    ctx.fillRect(CENTER - bandW / 2, y + 4, bandW, 1);
+    cols.forEach((c, i) => {
+      const x = CENTER - bandW / 2 + colW * (i + 0.5);
+      fitFont(String(c[1]), colW - 12, '800', 24,
+              "'JetBrains Mono', ui-monospace, monospace", 12);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(String(c[1]), x, y + 30);
+      ctx.save();
+      ctx.letterSpacing = '0.16em';
+      fitFont(c[0], colW - 8, '600', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+      ctx.fillStyle = '#475569';
+      ctx.fillText(c[0], x, y + 50);
+      ctx.restore();
+    });
+  });
+
+  /* What the run earned, in one slot: a challenge reward outranks a personal
+     best, which outranks the standing best. Only one of them is ever true. */
+  if (s.chal && s.reward) row(42, y => {
+    const t = 'UNLOCKED   ' + s.reward.n.toUpperCase();
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    fitFont(t, wide, '700', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
+    ctx.fillStyle = RARITY[s.reward.rar];
+    ctx.fillText(t, CENTER, y + 9);
+    ctx.restore();
+    const d = s.reward.d + '  —  it is in your pool from now on';
+    fitFont(d, wide, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(d, CENTER, y + 28);
+  });
+  else if (s.chal) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    const t = cw ? 'ALREADY CLEARED   ·   NOTHING NEW TO UNLOCK'
+                 : chalCount() + ' / ' + CHALLENGES.length + '   CHALLENGES CLEARED';
+    fitFont(t, wide, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = cw ? '#6ee7b7' : '#64748b';
+    ctx.fillText(t, CENTER, y + 12);
+    ctx.restore();
+  });
+  else if (s.isRecord && s.score > 0) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.16em';
+    fitFont('NEW PERSONAL BEST', wide, '700', 14,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
     ctx.fillStyle = COL.crit;
-    ctx.fillText('NEW PERSONAL BEST', W / 2, H / 2 + 84);
-  } else {
-    ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('NEW PERSONAL BEST', CENTER, y + 12);
+    ctx.restore();
+  });
+  else row(26, y => {
+    const t = 'BEST  ' + Save.profile.best.toLocaleString();
+    fitFont(t, wide, '600', 12, "'JetBrains Mono', ui-monospace, monospace", 8);
     ctx.fillStyle = '#475569';
-    ctx.fillText('BEST  ' + Save.profile.best.toLocaleString(), W / 2, H / 2 + 84);
-  }
+    ctx.fillText(t, CENTER, y + 12);
+  });
 
-  if (Board.rank) {
-    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+  if (Board.rank) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.08em';
+    const t = 'GLOBAL RANK  #' + Board.rank +
+              (Save.profile.name ? '   as ' + clipText(Save.profile.name, 14) : '');
+    fitFont(t, wide, '700', 15, "'Chakra Petch', Barlow, system-ui, sans-serif", 10);
     ctx.fillStyle = Board.rank <= 3 ? COL.crit : '#38bdf8';
-    ctx.fillText(`GLOBAL RANK  #${Board.rank}` +
-                 (Save.profile.name ? '   as ' + Save.profile.name : ''), W / 2, H / 2 + 106);
-  } else if (Board.note) {
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillText(t, CENTER, y + 13);
+    ctx.restore();
+  });
+  else if (Board.note) row(22, y => {
+    const t = 'leaderboard: ' + Board.note;
+    fitFont(t, wide, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#475569';
-    ctx.fillText('leaderboard: ' + Board.note, W / 2, H / 2 + 106);
-  }
+    ctx.fillText(t, CENTER, y + 11);
+  });
 
-  const pulse = 0.6 + Math.sin(uiTime * 4) * 0.4;
-  ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = rgba(COL.player, pulse);
-  // the guest does not own the run and cannot start the next one
-  ctx.fillText(s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
-                                 : 'SPACE RUN IT AGAIN   ·   M CHALLENGES')
-             : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
-             : isTouch  ? 'TAP TO RUN AGAIN'
-             : 'PRESS SPACE / R TO RUN AGAIN', W / 2, H / 2 + 124);
+  /* The record noticing. It is permanent, so it is stated once, plainly, and
+     not dressed up — the menu carries the standing mark from here on. */
+  if (s.escalated) row(44, y => {
+    const bw2 = Math.min(430, W - 48);
+    ctx.fillStyle = 'rgba(69,10,10,0.4)';
+    roundRect(CENTER - bw2 / 2, y + 2, bw2, 38, 9); ctx.fill();
+    ctx.strokeStyle = rgba('#f87171', 0.3); ctx.lineWidth = 1;
+    roundRect(CENTER - bw2 / 2, y + 2, bw2, 38, 9); ctx.stroke();
+    ctx.save();
+    ctx.letterSpacing = '0.16em';
+    fitFont('YOU HAVE BEEN RE-FILED', bw2 - 24, '700', 12,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#f87171';
+    ctx.fillText('YOU HAVE BEEN RE-FILED', CENTER, y + 15);
+    ctx.restore();
+    const d = 'five runs deep in a row — it stops being gentle, permanently';
+    fitFont(d, bw2 - 24, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(d, CENTER, y + 30);
+  });
+
+  row(30, y => {
+    const t = s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
+                                : 'SPACE RUN IT AGAIN   ·   M CHALLENGES')
+            : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
+            : isTouch  ? 'TAP TO RUN AGAIN'
+            : 'PRESS SPACE / R TO RUN AGAIN';
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    fitFont(t, wide, '700', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
+    ctx.fillStyle = rgba(COL.player, 0.6 + Math.sin(uiTime * 4) * 0.4);
+    ctx.fillText(t, CENTER, y + 16);
+    ctx.restore();
+  });
+
+  const total = rows.reduce((a, r) => a + r.h, 0);
+  const sc = clamp((H - 48) / total, 0.55, 1);
+  ctx.save();
+  if (sc < 1) {
+    ctx.translate(CENTER, H / 2);
+    ctx.scale(sc, sc);
+    ctx.translate(-CENTER, -H / 2);
+  }
+  let y = H / 2 - total / 2;
+  for (const r of rows) { r.d(y); y += r.h; }
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
 }
 
 function renderMenu() {
@@ -11769,7 +12086,24 @@ function renderMenu() {
   }
   ctx.restore();
 
-  const cxp = W / 2, cyp = H / 2;
+  const cxp = W / 2;
+  /* The centre column is a fixed 390px stack — emblem, wordmark, pilot select,
+     the prompt, the run totals. On a short window it used to run straight
+     through the footer and off the bottom edge, so it now scales and centres
+     itself in the room left between the corner badges and the footer. */
+  const COL_TOP = -152, COL_BOT = 238;
+  const topLimit = 96, footTop = H - 138;
+  const avail = Math.max(120, footTop - topLimit);
+  const menuScale = clamp(avail / (COL_BOT - COL_TOP), 0.58, 1);
+  const cyp = menuScale < 1
+    ? topLimit + avail / 2 - (COL_TOP + COL_BOT) / 2 * menuScale
+    : H / 2;
+  ctx.save();
+  if (menuScale < 1) {
+    ctx.translate(cxp, cyp);
+    ctx.scale(menuScale, menuScale);
+    ctx.translate(-cxp, -cyp);
+  }
   // rotating emblem
   ctx.save();
   ctx.translate(cxp, cyp - 96);
@@ -11786,24 +12120,25 @@ function renderMenu() {
   ctx.textAlign = 'center';
   ctx.save();
   ctx.shadowColor = COL.player; ctx.shadowBlur = 34;
-  ctx.font = `800 ${Math.min(84, W * 0.13)}px Segoe UI, system-ui, sans-serif`;
+  ctx.font = `800 ${Math.min(84, W * 0.13)}px Barlow, system-ui, sans-serif`;
   ctx.fillStyle = '#e0f2fe';
   ctx.fillText('VOIDRUNNER', cxp, cyp - 6);
   ctx.restore();
 
-  ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('S U R V I V E   T H E   A R E N A', cxp, cyp + 26);
 
   // --- pilot select ---
   const C = CHAR();
   const selY = cyp + 88;
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
   ctx.fillText('PILOT   —   PRESS C', cxp, selY - 30);
   // both hulls, the chosen one lit
   CHARS.forEach((ch, i) => {
     const on = i === selectedChar;
+    const shut = !charOpen(ch);
     const hx = cxp + (i - (CHARS.length - 1) / 2) * 116;
     ctx.save();
     ctx.translate(hx, selY);
@@ -11813,10 +12148,13 @@ function renderMenu() {
       ctx.globalCompositeOperation = 'source-over';
     }
     ctx.rotate(-Math.PI / 2);
-    ctx.globalAlpha = on ? 1 : 0.32;
+    ctx.globalAlpha = shut ? 0.14 : (on ? 1 : 0.32);
     ctx.lineWidth = 2.2;
     ctx.beginPath();
-    if (ch.weapon === 'laser') {
+    if (ch.id === 'hacker') {
+      ctx.moveTo(18, 0); ctx.lineTo(4, 6); ctx.lineTo(10, 13); ctx.lineTo(-4, 11);
+      ctx.lineTo(-9, 0); ctx.lineTo(-4, -11); ctx.lineTo(10, -13); ctx.lineTo(4, -6);
+    } else if (ch.weapon === 'laser') {
       ctx.moveTo(21, 0); ctx.lineTo(7, 4); ctx.lineTo(3, 13); ctx.lineTo(-11, 10);
       ctx.lineTo(-6, 0); ctx.lineTo(-11, -10); ctx.lineTo(3, -13); ctx.lineTo(7, -4);
     } else {
@@ -11827,34 +12165,73 @@ function renderMenu() {
     ctx.strokeStyle = ch.col;
     ctx.fill(); ctx.stroke();
     ctx.restore();
+    if (shut) {
+      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = '#334155';
+      ctx.fillText('LOCKED', hx, selY + 26);
+    }
   });
-  ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = C.col;
   ctx.fillText(C.n, cxp, selY + 38);
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText(C.tag, cxp, selY + 54);
+  /* What the locked one is waiting for, counted out. The malware set is
+     the only collection in the game you can finish without noticing. */
+  const shutOne = CHARS.find(ch => !charOpen(ch));
+  if (shutOne) {
+    const have = MALWARE.filter(m => (Save.profile.codexM || []).includes(m.id)).length;
+    ctx.font = "600 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = have >= MALWARE.length ? '#a3e635' : '#334155';
+    ctx.fillText(shutOne.n + '  —  ' + shutOne.needTxt + '   ' +
+                 have + ' / ' + MALWARE.length, cxp, selY + 70);
+  }
 
   const pulse = 0.55 + Math.sin(uiTime * 3.4) * 0.45;
-  ctx.font = '700 16px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 16px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = rgba(COL.player, pulse);
   ctx.fillText(isTouch ? 'TAP TO START' : 'PRESS SPACE TO START', cxp, cyp + 174);
 
   const pr = Save.profile;
   if (pr.best > 0) {
-    ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 12px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = COL.crit;
     ctx.fillText('BEST  ' + pr.best.toLocaleString(), cxp, cyp + 204);
   }
   if (pr.runs > 0) {
-    ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
+    const totals = `${pr.runs} RUN${pr.runs === 1 ? '' : 'S'}   ·   ${pr.kills.toLocaleString()} KILLS   ·   ` +
+                   `FURTHEST ${pr.bestSector} W${pr.bestWave}   ·   ${fmtTime(pr.time)}`;
+    fitFont(totals, (W - 40) / menuScale, '500', 11,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
     ctx.fillStyle = '#475569';
-    ctx.fillText(`${pr.runs} RUN${pr.runs === 1 ? '' : 'S'}   ·   ${pr.kills.toLocaleString()} KILLS   ·   ` +
-                 `FURTHEST ${pr.bestSector} W${pr.bestWave}   ·   ${fmtTime(pr.time)}`, cxp, cyp + 224);
+    ctx.fillText(totals, cxp, cyp + 224);
   }
+  ctx.restore();                     // end of the scaled centre column
 
   // leaderboard — the global board when it's reachable, your own runs otherwise
   const global = Board.top.length > 0;
+  /* One row, drawn identically in both layouts below: figures in the mono face
+     on the right, who and where on the left, and your own row carried on a
+     tinted pill so you can find yourself without reading the list. */
+  const boardRow = (r, i, xc, y, half) => {
+    const mine = global && r.name === Save.profile.name;
+    if (mine) {
+      ctx.fillStyle = rgba(COL.player, 0.09);
+      roundRect(xc - half, y - 8.5, half * 2, 17, 4); ctx.fill();
+    }
+    ctx.textAlign = 'right';
+    ctx.font = "700 11px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = mine ? COL.player : (i === 0 ? COL.crit : '#7c8ba1');
+    ctx.fillText(String((r.score || 0).toLocaleString()), xc - 9, y);
+    ctx.textAlign = 'left';
+    const label = global
+      ? `${i + 1}. ${clipText(r.name || '—', 12)}  ·  ${r.sector || '—'} W${r.wave}`
+      : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`;
+    fitFont(label, half - 14, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = mine ? COL.player : '#5b6b82';
+    ctx.fillText(label, xc + 9, y);
+  };
   const all = (global ? Board.top : Save.top).slice(0, 5);
   /* Two layouts, because stacking the board under the centre column puts it on
      a collision course with the bottom-anchored footer — and on a short window
@@ -11871,58 +12248,45 @@ function renderMenu() {
      viable if it genuinely clears both the wordmark and the screen edge, and
      that depends on the font size, which scales with width. */
   ctx.save();
-  ctx.font = `800 ${Math.min(84, W * 0.13)}px Segoe UI, system-ui, sans-serif`;
-  const titleHalf = ctx.measureText('VOIDRUNNER').width / 2;
+  ctx.font = `800 ${Math.min(84, W * 0.13)}px Barlow, system-ui, sans-serif`;
+  const titleHalf = ctx.measureText('VOIDRUNNER').width / 2 * menuScale;
   ctx.restore();
   const panelHalf = 104;
   const px = Math.min(cxp + titleHalf + 46 + panelHalf, W - panelHalf - 14);
   const wide = (px - panelHalf) > (cxp + titleHalf + 26) && (px + panelHalf) < W - 10;
 
   if (wide) {
-    let py = cyp - 40;
+    let py = cyp - 40 * menuScale;
     ctx.textAlign = 'center';
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#334155';
+    ctx.save();
+    ctx.letterSpacing = '0.16em';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
     ctx.fillText(global ? 'GLOBAL TOP ' + all.length : 'YOUR BEST RUNS', px, py);
-    py += 20;
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
-    all.forEach((r, i) => {
-      const y = py + i * 17;
-      const mine = global && r.name === Save.profile.name;
-      ctx.textAlign = 'right';
-      ctx.fillStyle = mine ? COL.player : (i === 0 ? COL.crit : '#64748b');
-      ctx.fillText(String((r.score || 0).toLocaleString()), px - 8, y);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = mine ? COL.player : '#475569';
-      const label = global
-        ? `${i + 1}. ${clipText(r.name || '—', 12)}  ·  ${r.sector || '—'} W${r.wave}`
-        : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`;
-      ctx.fillText(label, px + 8, y);
-    });
+    ctx.restore();
+    // a hairline under the heading: the board is a table and reads like one
+    ctx.fillStyle = 'rgba(71,85,105,0.35)';
+    ctx.fillRect(px - panelHalf + 8, py + 8, panelHalf * 2 - 16, 1);
+    py += 22;
+    all.forEach((r, i) => boardRow(r, i, px, py + i * 17, panelHalf));
     ctx.textAlign = 'center';
   } else {
-    const ly = cyp + 252;
+    const ly = cyp + 250 * menuScale;
     const room = (FOOT_TOP - 22) - (ly + 18);  // 22px of air above the footer
     const fits = room < 0 ? 0
                : Math.max(0, Math.min(all.length, Math.floor(room / rowGap) + 1));
     const rows = all.slice(0, fits);
     if (rows.length) {
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-      ctx.fillStyle = '#334155';
+      ctx.save();
+      ctx.letterSpacing = '0.16em';
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = '#475569';
       ctx.fillText(global ? 'GLOBAL TOP ' + rows.length : 'YOUR BEST RUNS', cxp, ly);
-      ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
-      rows.forEach((r, i) => {
-        const y = ly + 18 + i * rowGap;
-        const mine = global && r.name === Save.profile.name;
-        ctx.textAlign = 'right';
-        ctx.fillStyle = mine ? COL.player : (i === 0 ? COL.crit : '#64748b');
-        ctx.fillText(String((r.score || 0).toLocaleString()), cxp - 12, y);
-        ctx.textAlign = 'left';
-        ctx.fillStyle = mine ? COL.player : '#475569';
-        ctx.fillText(global
-          ? `${i + 1}. ${clipText(r.name || '—', 12)}  ·  ${r.sector || '—'} W${r.wave}`
-          : `${r.sector || '—'}  ·  W${r.wave}  ·  LV${r.level}`, cxp + 12, y);
-      });
+      ctx.restore();
+      const sHalf = Math.min(118, W / 2 - 20);
+      ctx.fillStyle = 'rgba(71,85,105,0.35)';
+      ctx.fillRect(cxp - sHalf + 8, ly + 8, sHalf * 2 - 16, 1);
+      rows.forEach((r, i) => boardRow(r, i, cxp, ly + 20 + i * rowGap, sHalf));
       ctx.textAlign = 'center';
     }
   }
@@ -11931,31 +12295,59 @@ function renderMenu() {
   if (Save.profile.planetarium) unlocks.push(['✦ PLANETARIUMS', '#fbbf24']);
   if (Save.profile.altPath) unlocks.push(['◈ THE FRACTURE', '#e2e8f0']);
   if (Save.profile.trueEnd) unlocks.push(['✥ THE UNWRITTEN', '#f8fafc']);
+  if (Save.profile.hardened) unlocks.push(['⚠ ESCALATION', '#f87171']);
+  else {
+    const hp = hardProgress();
+    if (hp && hp.good >= 3) unlocks.push(['⚠ BEING WATCHED  ' + hp.good + '/' + hp.need, '#fbbf24']);
+  }
   if (Save.profile.freeplay) unlocks.push(['⌨ FREEPLAY  [F]', '#38bdf8']);
   else if (Save.profile.clears > 0)
     unlocks.push([`◈ ${Save.profile.clears} / 2 CLEARS`, '#475569']);
   if (unlocks.length) {
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
-    const gap = 22;
-    let tw = 0;
-    unlocks.forEach(u => { tw += ctx.measureText(u[0]).width; });
-    tw += gap * (unlocks.length - 1);
-    let ux2 = cxp - tw / 2;
+    /* One row while it fits, two centred rows when it does not — a narrow
+       portrait window used to push the first and last badge off both edges. */
+    const maxRow = W - 36;
+    const measure = (list, gap) => {
+      ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+      return list.reduce((a, u) => a + ctx.measureText(u[0]).width, 0) +
+             gap * (list.length - 1);
+    };
+    let gap = 22;
+    let rows2 = [unlocks];
+    if (measure(unlocks, gap) > maxRow) {
+      gap = 14;
+      if (measure(unlocks, gap) > maxRow && unlocks.length > 1) {
+        const half = Math.ceil(unlocks.length / 2);
+        rows2 = [unlocks.slice(0, half), unlocks.slice(half)];
+      }
+    }
     ctx.textAlign = 'left';
-    unlocks.forEach(u => {
-      ctx.fillStyle = u[1];
-      ctx.fillText(u[0], ux2, H - 112);
-      ux2 += ctx.measureText(u[0]).width + gap;
+    const rowY = H - 112 - (rows2.length - 1) * 14;
+    rows2.forEach((row, ri) => {
+      const scale = Math.min(1, maxRow / Math.max(1, measure(row, gap)));
+      fitFont(row.map(u => u[0]).join(''), maxRow, '700', 10,
+              "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+      const rw2 = row.reduce((a, u) => a + ctx.measureText(u[0]).width, 0) +
+                  gap * scale * (row.length - 1);
+      let ux2 = cxp - rw2 / 2;
+      row.forEach(u => {
+        ctx.fillStyle = u[1];
+        ctx.fillText(u[0], ux2, rowY + ri * 14);
+        ux2 += ctx.measureText(u[0]).width + gap * scale;
+      });
     });
     ctx.textAlign = 'center';
   }
 
   // who you are on the board
   if (Save.profile.name) {
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#334155';
-    ctx.fillText(`PLAYING AS ${Save.profile.name.toUpperCase()}   ·   PRESS N TO RENAME`,
-      cxp, H - 96);
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    const asLine = `PLAYING AS ${clipText(Save.profile.name.toUpperCase(), 16)}   ·   PRESS N TO RENAME`;
+    fitFont(asLine, W - 48, '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#475569';
+    ctx.fillText(asLine, cxp, H - 96);
+    ctx.restore();
   }
 
   // status badges — save backend and global board, at a glance
@@ -11967,21 +12359,30 @@ function renderMenu() {
                    loading: ['◈ LEADERBOARD…', '#475569'],
                    offline: ['◈ LEADERBOARD OFFLINE', '#475569'],
                    idle: ['', '#475569'] }[Board.status];
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.save();
   ctx.textAlign = 'right';
-  ctx.fillStyle = badge[1];
-  ctx.fillText(badge[0], W - 18, 22);
-  if (bBadge && bBadge[0]) {
-    ctx.fillStyle = bBadge[1];
-    ctx.fillText(bBadge[0], W - 18, 38);
-  }
+  ctx.letterSpacing = '0.1em';
+  const badges = [badge, (bBadge && bBadge[0]) ? bBadge : null].filter(Boolean);
+  badges.forEach((b, i) => {
+    const y = 22 + i * 16;
+    const txt = b[0].replace('◈ ', '');
+    // the LAN and challenge entries own the top left; stay in the right gutter
+    fitFont(txt, Math.max(80, W / 2 - 40), '600', 10,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = b[1];
+    ctx.fillText(txt, W - 18, y);
+    ctx.beginPath();
+    ctx.arc(W - 18 - ctx.measureText(txt).width - 8, y, 2.6, 0, TAU);
+    ctx.fill();
+  });
+  ctx.restore();
   ctx.textAlign = 'center';
 
   const lines = isTouch
     ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & fire']
     : ['WASD move   ·   MOUSE aim   ·   HOLD to fire',
        'SPACE dash (i-frames)   ·   T autofire   ·   P pause   ·   X codex'];
-  ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
 
@@ -12155,7 +12556,7 @@ function drawFreeplay() {
   ctx.textBaseline = 'middle';
   if (!freeOpen) {
     ctx.textAlign = 'left';
-    ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#38bdf8';
     ctx.globalAlpha = 0.55 + Math.sin(uiTime * 2) * 0.2;
     ctx.fillText('FREEPLAY  ·  [ \\ ] CONSOLE  ·  UNRECORDED', 16, 74);
@@ -12168,10 +12569,10 @@ function drawFreeplay() {
   ctx.strokeStyle = '#1e3a5f'; ctx.lineWidth = 1;
   roundRect(panel.x, panel.y, panel.w, panel.h, 8); ctx.fill(); ctx.stroke();
   ctx.textAlign = 'left';
-  ctx.font = '800 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#38bdf8';
   ctx.fillText('FREEPLAY CONSOLE', panel.x + 12, panel.y + 16);
-  ctx.font = '500 8px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 8px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('nothing here is recorded', panel.x + 12, panel.y + 28);
 
@@ -12185,11 +12586,11 @@ function drawFreeplay() {
     ctx.strokeStyle = on ? '#22c55e' : sel ? '#38bdf8' : 'rgba(71,85,105,0.5)';
     ctx.lineWidth = sel || on ? 1.6 : 1;
     roundRect(r.x, r.y, r.w, r.h, 5); ctx.fill(); ctx.stroke();
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = on ? '#bbf7d0' : sel ? '#e2e8f0' : '#94a3b8';
     ctx.fillText(row.n + (row.val ? ' ' + row.val() : ''), r.x + 9, r.y + r.h / 2);
   });
-  ctx.font = '500 8px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 8px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
   ctx.fillText('↑↓ pick  ·  ENTER run  ·  \\ close', panel.x + 12, panel.y + panel.h - 8);
   ctx.restore();
@@ -12259,30 +12660,40 @@ function drawTalk() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
   drawKeeperNPC(cx, cy - 150, 58);
-  ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = KEEPER_COL;
   ctx.fillText('THE BOOKKEEPER', cx, cy - 78);
+  ctx.restore();
 
-  ctx.font = '400 15px Segoe UI, system-ui, sans-serif';
+  /* His lines run long, so the measure is capped for readability rather than
+     stretched to the window, and the size eases down on small screens. */
+  ctx.font = '400 ' + Math.min(17, Math.max(13, W * 0.014)) +
+             "px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#e2e8f0';
   wrapText('“' + KEEPER_TALK[Math.min(talkLine, KEEPER_TALK.length - 1)] + '”',
-           cx, cy - 20, Math.min(680, W - 90), 24);
+           cx, cy - 20, Math.min(620, W - 90), 25);
 
   if (!talkAsk) {
     const pulse = 0.5 + Math.sin(uiTime * 3.6) * 0.4;
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#94a3b8', pulse);
     ctx.fillText('SPACE  ·  continue', cx, H - 60);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#3f3f46';
     ctx.fillText((talkLine + 1) + ' / ' + KEEPER_TALK.length, cx, H - 40);
     ctx.textBaseline = 'alphabetic';
     return;
   }
 
-  ctx.font = '800 ' + Math.min(30, W * 0.032) + 'px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.02em';
+  fitFont('Do you want a real challenge?', Math.min(700, W - 64), '600',
+          Math.min(30, W * 0.032), "'Chakra Petch', Barlow, system-ui, sans-serif", 15);
   ctx.fillStyle = UNW_COL;
   ctx.fillText('Do you want a real challenge?', cx, cy + 70);
+  ctx.restore();
 
   const b = talkButtons();
   const btn = (r, label, sub, col) => {
@@ -12292,10 +12703,13 @@ function drawTalk() {
     ctx.strokeStyle = col; ctx.lineWidth = hot ? 2.4 : 1.6;
     roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill(); ctx.stroke();
     ctx.fillStyle = col;
-    ctx.font = '800 15px Segoe UI, system-ui, sans-serif';
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    fitFont(label, r.w - 24, '700', 15, "'Chakra Petch', Barlow, system-ui, sans-serif", 10);
     ctx.fillText(label, r.x + r.w / 2, r.y + 22);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#64748b';
+    ctx.restore();
+    fitFont(sub, r.w - 18, '500', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
     ctx.fillText(sub, r.x + r.w / 2, r.y + 42);
     ctx.restore();
   };
@@ -12503,7 +12917,7 @@ function drawCodex() {
   const seenCount = list.filter(codexSeen).length;
 
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = '800 30px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = worn ? '#e7d9c4' : '#e2e8f0';
   ctx.fillText('CODEX', W / 2, 44);
   if (worn) {
@@ -12521,7 +12935,7 @@ function drawCodex() {
     ctx.restore();
     ctx.textAlign = 'center';
   }
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = worn ? '#6b5a44' : '#475569';
   ctx.fillText(seenCount + ' / ' + list.length + '  RECORDED', W / 2, 66);
 
@@ -12535,7 +12949,7 @@ function drawCodex() {
     ctx.strokeStyle = on ? COL.player : (open ? '#334155' : 'rgba(51,65,85,0.5)');
     ctx.lineWidth = on ? 2 : 1;
     roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.stroke();
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = on ? COL.player : (open ? '#64748b' : '#3f4a5c');
     ctx.fillText(open ? t.label : '? ? ? ?', r.x + r.w / 2, r.y + r.h / 2 + 1);
   });
@@ -12564,29 +12978,29 @@ function drawCodex() {
 
     if (kind === 'e') {
       drawCodexIcon(en, r.x + r.w / 2, r.y + r.h / 2 - 12, en.boss ? 22 : 18, seen);
-      ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = seen ? (en.boss ? en.col : '#94a3b8') : '#475569';
       ctx.fillText(seen ? en.n : '? ? ?', r.x + r.w / 2, r.y + r.h - 14);
     } else if (kind === 'u') {
       // items get no picture, by design — name and rarity only
-      ctx.font = '700 8px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = seen ? RARITY[en.rar] : '#475569';
       ctx.fillText(seen ? en.rar.toUpperCase() : '———', r.x + r.w / 2, r.y + 15);
-      ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
       ctx.fillText(seen ? upName(en.up) : '? ? ?', r.x + r.w / 2, r.y + r.h - 18);
     } else {
       // malware / books / zodiac: also items, so also no picture
-      ctx.font = '700 8px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = seen ? rgba(en.col, 0.85) : '#475569';
       ctx.fillText(seen ? (kind === 'm' ? 'PAYLOAD' : kind === 'b' ? 'VOLUME' : 'READING')
                         : '———', r.x + r.w / 2, r.y + 16);
-      ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+      ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
       const nm = seen ? clipText(en.n, kind === 'z' ? 13 : 20) : '? ? ?';
       ctx.fillText(nm, r.x + r.w / 2, r.y + r.h / 2 + 4);
       if (seen && en.sub) {
-        ctx.font = '500 8px Segoe UI, system-ui, sans-serif';
+        ctx.font = "500 8px Barlow, 'Segoe UI', system-ui, sans-serif";
         ctx.fillStyle = '#475569';
         ctx.fillText(clipText(en.sub, 30), r.x + r.w / 2, r.y + r.h - 12);
       }
@@ -12625,11 +13039,11 @@ function drawCodex() {
     const dy = H - (worn ? 132 : 108);
     const kind = CODEX_TABS[codexTab].id;
     ctx.textAlign = 'center';
-    ctx.font = '800 20px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 20px 'Chakra Petch', Barlow, system-ui, sans-serif";
     ctx.fillStyle = !seen ? '#475569' : (kind === 'u' ? RARITY[en.rar] : en.col);
     ctx.fillText(seen ? (kind === 'u' ? upName(en.up) : en.n)
                       : 'NOT YET ENCOUNTERED', W / 2, dy);
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     if (kind === 'e' && en.boss) {
       ctx.fillStyle = '#7f1d1d';
       ctx.fillText('BOSS', W / 2, dy - 20);
@@ -12641,7 +13055,7 @@ function drawCodex() {
       ctx.fillText(en.sub, W / 2, dy - 20);
     }
 
-    ctx.font = '400 12px Segoe UI, system-ui, sans-serif';
+    ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = seen ? '#94a3b8' : '#334155';
     const own = kind === 'm' ? 'Install one and it will be recorded here.'
               : kind === 'b' ? 'Carry one and it will be recorded here.'
@@ -12676,7 +13090,7 @@ function drawCodex() {
     }
   }
 
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = worn ? '#4a3d2c' : '#334155';
   ctx.fillText('TAB / Q E section  ·  ARROWS / WHEEL browse  ·  ESC close', W / 2, H - 18);
   ctx.textBaseline = 'alphabetic';
@@ -12836,10 +13250,10 @@ function drawGfx() {
   const g = gfxRects();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
-  ctx.font = '800 24px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 24px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = COL.player;
   ctx.fillText(gfxFirstRun ? 'NEW EFFECTS ADDED' : 'EFFECTS', W / 2, g.top + 10);
-  ctx.font = '500 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#94a3b8';
   ctx.fillText(gfxFirstRun
     ? 'Turn off anything your machine would rather not draw.'
@@ -12867,14 +13281,14 @@ function drawGfx() {
     ctx.fillStyle = on ? '#062f36' : '#94a3b8';
     ctx.beginPath(); ctx.arc(sx + (on ? 22 : 8), sy, 5, 0, TAU); ctx.fill();
 
-    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = on ? '#e2e8f0' : '#64748b';
     ctx.fillText(r.n, box.x + 54, sy);
-    ctx.font = '400 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#64748b';
     ctx.fillText(r.d, box.x + 176, sy);
     ctx.textAlign = 'right';
-    ctx.font = '600 11px ui-monospace, Consolas, monospace';
+    ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
     const tiny = r.cost <= 0.05;
     ctx.fillStyle = tiny ? '#475569'
                   : r.cost >= 4 ? '#f87171' : r.cost >= 2 ? '#fbbf24' : '#4ade80';
@@ -12889,13 +13303,13 @@ function drawGfx() {
     roundRect(b.x, b.y, b.w, b.h, 7); ctx.fill();
     ctx.strokeStyle = rgba(COL.player, hot ? 0.7 : 0.28); ctx.lineWidth = 1.4;
     roundRect(b.x, b.y, b.w, b.h, 7); ctx.stroke();
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = hot ? '#e2e8f0' : '#94a3b8';
     ctx.fillText(b.n, b.x + b.w / 2, b.y + b.h / 2);
   }
 
   // what it all adds up to, against the frame you actually have
-  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = total > 12 ? '#f87171' : total > 7 ? '#fbbf24' : '#4ade80';
   ctx.fillText('≈ ' + total.toFixed(1) + ' ms of a 16.7 ms frame',
                W / 2, g.presets[0].y + 52);
@@ -12905,7 +13319,7 @@ function drawGfx() {
   roundRect(m.x, m.y, m.w, m.h, 8); ctx.fill();
   ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.6;
   roundRect(m.x, m.y, m.w, m.h, 8); ctx.stroke();
-  ctx.font = '800 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#fbbf24';
   ctx.fillText(fxMeasuring
     ? 'MEASURING ' + (fxMeasureI + 1) + '/' + FX_ROWS.length +
@@ -12913,7 +13327,7 @@ function drawGfx() {
     : 'MEASURE HERE', m.x + m.w / 2, m.y + m.h / 2);
 
   // what this machine is actually doing, right now
-  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = fpsAvg >= 55 ? '#4ade80' : fpsAvg >= 40 ? '#fbbf24' : '#f87171';
   ctx.fillText(Math.round(fpsAvg) + ' fps  ·  ' + frameMs.toFixed(1) + ' ms/frame',
                W / 2, m.y + m.h + 22);
@@ -12923,7 +13337,7 @@ function drawGfx() {
   roundRect(d.x, d.y, d.w, d.h, 8); ctx.fill();
   ctx.strokeStyle = COL.player; ctx.lineWidth = 1.8;
   roundRect(d.x, d.y, d.w, d.h, 8); ctx.stroke();
-  ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = COL.player;
   ctx.fillText('DONE   [G]', d.x + d.w / 2, d.y + d.h / 2);
   ctx.textBaseline = 'alphabetic';
@@ -12945,7 +13359,7 @@ function drawMalware() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
   ctx.globalAlpha = 0.13;
-  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = MAL_COL;
   for (let r = 0; r < 14; r++) {
     const yy = ((r * 47 + uiTime * 26) % (H + 40)) - 20;
@@ -12955,10 +13369,10 @@ function drawMalware() {
   }
   ctx.restore();
 
-  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#7f1d1d';
   ctx.fillText('M A L W A R E', cx, cy - 168);
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
   ctx.fillText('OVERWRITES YOUR DASH', cx, cy - 148);
 
@@ -12978,16 +13392,16 @@ function drawMalware() {
   ctx.restore();
   drawMalChip(cx, cy - 74, 54, m.col);
 
-  ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 26px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = m.col;
   ctx.fillText(m.n, cx, cy - 8);
 
-  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "400 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#94a3b8';
   wrapText(m.d, cx, cy + 26, Math.min(520, W - 70), 19);
 
   if (P.malware) {
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#7f1d1d';
     ctx.fillText('replaces ' + P.malware.n, cx, cy + 104);
   }
@@ -13000,7 +13414,7 @@ function drawMalware() {
     ctx.strokeStyle = col; ctx.lineWidth = 2;
     roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill(); ctx.stroke();
     ctx.fillStyle = col;
-    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
     ctx.restore();
   };
@@ -13033,10 +13447,10 @@ function drawLibrary() {
   }
   ctx.restore();
 
-  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#a16207';
   ctx.fillText('L I B R A R Y', cx, cy - 168);
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
   ctx.fillText('WRITTEN FROM ' + bk.from, cx, cy - 148);
 
@@ -13045,10 +13459,10 @@ function drawLibrary() {
   drawKeeperNPC(kx, cy - 40, 42);
   ctx.save();
   ctx.textAlign = 'center';
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = keeperWants() ? KEEPER_COL : '#78716c';
   ctx.fillText('THE BOOKKEEPER', kx, cy + 34);
-  ctx.font = '400 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = keeperWants() ? '#fde68a' : '#64748b';
   wrapText('“' + keeperLine() + '”', kx, cy + 56, 210, 15);
   ctx.restore();
@@ -13077,24 +13491,24 @@ function drawLibrary() {
   }
   ctx.restore();
 
-  ctx.font = '800 26px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 26px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.save();
   ctx.shadowColor = bk.col; ctx.shadowBlur = 22;
   ctx.fillStyle = '#f8fafc';
   ctx.fillText(bk.n, cx, cy + 22);
   ctx.restore();
 
-  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "400 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#94a3b8';
   wrapText(bk.d, cx, cy + 52, Math.min(460, W - 70), 18);
 
-  ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = bk.col;
   ctx.fillText('BOUND TO  [ Q ]   ·   CHARGES OVER ' + bk.cost + ' WAVE' +
                (bk.cost === 1 ? '' : 'S'), cx, cy + 100);
 
   if (P.book && P.book.id !== bk.id) {
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#f87171';
     ctx.fillText('replaces ' + P.book.n, cx, cy + 118);
   }
@@ -13112,7 +13526,7 @@ function drawLibrary() {
   }
 
   ctx.textAlign = 'center';
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#3f3f46';
   ctx.fillText(b.hand ? 'he has been waiting for a complete record'
              : b.talk ? 'every section is filled, and he has noticed'
@@ -13170,7 +13584,7 @@ function drawPlanetarium() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
   ctx.fillText('P L A N E T A R I U M', cx, cy - 176);
 
@@ -13197,34 +13611,34 @@ function drawPlanetarium() {
   });
   ctx.restore();
 
-  ctx.font = '800 38px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 38px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.save();
   ctx.shadowColor = accent; ctx.shadowBlur = 26;
   ctx.fillStyle = '#f8fafc';
   ctx.fillText(sign.n, cx, cy - 6);
   ctx.restore();
 
-  ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = accent;
   ctx.fillText(sign.t.toUpperCase(), cx, cy + 22);
 
-  ctx.font = '400 13px Segoe UI, system-ui, sans-serif';
+  ctx.font = "400 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#94a3b8';
   wrapText(sign.flavour, cx, cy + 50, Math.min(430, W - 60), 18);
 
   if (!planetRevealed) {
-    ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#475569';
     ctx.fillText('the reading is free — but it is not shown until it is taken',
       cx, cy + 92);
   } else {
     // effect strings read "NAME — what it does"; split so the long half wraps
     const half = planetMsg.split(' — ');
-    ctx.font = '800 14px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 14px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = sign.good ? gold : purple;
     ctx.fillText((sign.good ? 'BLESSING   ·   ' : 'CURSE   ·   ') + half[0], cx, cy + 86);
     if (half[1]) {
-      ctx.font = '400 12px Segoe UI, system-ui, sans-serif';
+      ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = '#94a3b8';
       wrapText(half[1], cx, cy + 107, Math.min(420, W - 70), 15);
     }
@@ -13239,7 +13653,7 @@ function drawPlanetarium() {
   }
 
   ctx.textAlign = 'center';
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
   ctx.fillText('every reading is either extraordinary or ruinous — never both, never neither',
     cx, H - 26);
@@ -13252,12 +13666,19 @@ function drawNameEntry() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.22em';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = COL.player;
   ctx.fillText('GLOBAL LEADERBOARD', cx, cy - 96);
-  ctx.font = '800 32px Segoe UI, system-ui, sans-serif';
+  ctx.restore();
+  ctx.save();
+  ctx.letterSpacing = '0.04em';
+  fitFont('CHOOSE A CALLSIGN', W - 64, '700', 32,
+          "'Chakra Petch', Barlow, system-ui, sans-serif", 18);
   ctx.fillStyle = '#f1f5f9';
   ctx.fillText('CHOOSE A CALLSIGN', cx, cy - 62);
+  ctx.restore();
 
   // input field
   const fw = Math.min(360, W - 80), fh = 52;
@@ -13267,28 +13688,31 @@ function drawNameEntry() {
   ctx.strokeStyle = rgba(COL.player, 0.6); ctx.lineWidth = 2;
   roundRect(fx, fy, fw, fh, 12); ctx.stroke();
 
-  ctx.font = '700 22px Segoe UI, system-ui, sans-serif';
   const shown = nameBuf || '';
   const caret = Math.floor(uiTime * 2) % 2 ? '|' : ' ';
+  const field = shown ? shown + caret : (isTouch ? 'TAP TO ENTER NAME' : 'type a name' + caret);
+  fitFont(field, fw - 28, '700', 22,
+          shown ? "'JetBrains Mono', ui-monospace, monospace"
+                : "'Chakra Petch', Barlow, system-ui, sans-serif", 12);
   ctx.fillStyle = shown ? '#f8fafc' : '#334155';
-  ctx.fillText(shown ? shown + caret : (isTouch ? 'TAP TO ENTER NAME' : 'type a name' + caret),
-    cx, fy + fh / 2 + 1);
+  ctx.fillText(field, cx, fy + fh / 2 + 1);
 
-  ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#475569';
-  ctx.fillText(`${shown.length}/${NAME_MAX}   ·   letters, numbers, . _ -`, cx, fy + fh + 20);
+  const rule = `${shown.length}/${NAME_MAX}   ·   letters, numbers, . _ -`;
+  fitFont(rule, W - 64, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = shown.length >= NAME_MAX ? '#fbbf24' : '#475569';
+  ctx.fillText(rule, cx, fy + fh + 20);
 
-  ctx.font = '600 12px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = nameBuf.trim() ? COL.hp : '#334155';
   ctx.fillText(isTouch ? 'TAP THE FIELD TO TYPE' : 'ENTER TO CONFIRM', cx, fy + fh + 52);
 
   if (Save.profile.name) {
-    ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#334155';
     ctx.fillText('ESC TO KEEP ' + Save.profile.name.toUpperCase(), cx, fy + fh + 74);
   }
 
-  ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
   ctx.fillText('anyone can pick any name — scores are not verified', cx, H - 34);
 }
@@ -13365,7 +13789,7 @@ const NET_STALE  = 14000;        // silence from a live peer before we call it
 /* Bumped when the wire format changes. Two builds that disagree would trade
    plausible-looking nonsense for a while and then diverge, so they refuse
    each other at the handshake instead. */
-const NET_PROTO = 2;
+const NET_PROTO = 3;
 const NET_SIG = () => NET_PROTO + '.' + Object.keys(ETYPE).length + '.' +
                       Object.keys(BOSSES).length + '.' + STAGES.length;
 
@@ -14080,7 +14504,8 @@ function mpSendSnapshot() {
     w8(clamp(Math.round(e.hp / (e.maxHp || 1) * 255), 0, 255));
     w8(clamp(Math.round(e.flash * 255), 0, 255));
     w8((e.elite ? 1 : 0) | (e.phased ? 2 : 0) | (e.invuln > 0 ? 4 : 0) |
-       (e.shadow > 0 ? 8 : 0) | (e.virus ? 16 : 0) | (e.rage === 1 ? 32 : 0));
+       (e.shadow > 0 ? 8 : 0) | (e.virus ? 16 : 0) | (e.rage === 1 ? 32 : 0) |
+       (e.hacked ? 64 : 0));
     w8(e.sides || 6);
     n++;
   }
@@ -14478,6 +14903,8 @@ function mpReadSnapshot() {
     e.flash = flash / 255;
     e.elite = !!(fl & 1); e.phased = !!(fl & 2); e.invuln = (fl & 4) ? 1 : 0;
     e.shadow = (fl & 8) ? 1 : 0; e.virus = !!(fl & 16); e.rage = (fl & 32) ? 1 : 0;
+    e.hacked = !!(fl & 64);
+    if (e.hacked) { e.col = HACK_COL; e.hackId = id; }
     e.t += MP_LERP;
     next.set(id, e);
     list.push(e);
@@ -14698,7 +15125,11 @@ function mpGuestUpdate(dt) {
 /* ------------------------------- both ships ------------------------------- */
 function mpHullPath(charIdx) {
   ctx.beginPath();
-  if ((CHARS[charIdx] || CHARS[0]).weapon === 'laser') {
+  const id = (CHARS[charIdx] || CHARS[0]).id;
+  if (id === 'hacker') {
+    ctx.moveTo(18, 0); ctx.lineTo(4, 6); ctx.lineTo(10, 13); ctx.lineTo(-4, 11);
+    ctx.lineTo(-9, 0); ctx.lineTo(-4, -11); ctx.lineTo(10, -13); ctx.lineTo(4, -6);
+  } else if ((CHARS[charIdx] || CHARS[0]).weapon === 'laser') {
     ctx.moveTo(21, 0); ctx.lineTo(7, 4); ctx.lineTo(3, 13); ctx.lineTo(-11, 10);
     ctx.lineTo(-6, 0); ctx.lineTo(-11, -10); ctx.lineTo(3, -13); ctx.lineTo(7, -4);
   } else {
@@ -14762,7 +15193,7 @@ function mpDrawOther(o, charIdx, col, label, hp, maxHp, down) {
   ctx.fillStyle = 'rgba(3,6,12,0.62)';
   ctx.fillRect(bx - 2, by - 12, 56, 18);
   ctx.fillStyle = rgba(col, 0.9);
-  ctx.font = '700 8px Segoe UI, system-ui, sans-serif';
+  ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = 'left';
   ctx.fillText(String(label || '').slice(0, 12).toUpperCase(), bx, by - 4);
   ctx.fillStyle = 'rgba(15,23,42,0.9)';
@@ -14772,7 +15203,7 @@ function mpDrawOther(o, charIdx, col, label, hp, maxHp, down) {
   ctx.fillRect(bx, by, 52 * f, 3.5);
   if (down) {
     ctx.textAlign = 'center';
-    ctx.font = '800 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "800 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#fca5a5', 0.6 + Math.sin(uiTime * 4) * 0.35);
     ctx.fillText('DOWN', o.x, o.y + 4);
   }
@@ -14802,7 +15233,8 @@ function mpDrawHud() {
   if (!MP.on && MP.lostT > 0) {
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    fitFont('WINGMAN DISCONNECTED', W - 48, '700', 12,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
     ctx.fillStyle = rgba('#f87171', Math.min(1, MP.lostT));
     ctx.fillText('WINGMAN DISCONNECTED', W / 2, 74);
     ctx.restore();
@@ -14816,28 +15248,43 @@ function mpDrawHud() {
   const col = down ? '#f87171' : WING_COL;
 
   // below the sector line, which is the lowest thing the stock HUD puts here
-  const w = 150, x = W - w - 14, y = 118;
+  const cardH = down ? 46 : 36;
+  const w = Math.min(168, W - 36), x = W - w - 18, y = 118;
   ctx.save();
-  ctx.fillStyle = 'rgba(4,8,16,0.6)';
-  ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 1;
-  ctx.fillRect(x, y, w, 34); ctx.strokeRect(x, y, w, 34);
-  ctx.textAlign = 'left';
-  ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = rgba(col, 0.95);
-  ctx.fillText(label.toUpperCase(), x + 8, y + 13);
+  ctx.fillStyle = 'rgba(6,10,18,0.8)';
+  roundRect(x, y, w, cardH, 9); ctx.fill();
+  ctx.strokeStyle = rgba(col, 0.32); ctx.lineWidth = 1;
+  roundRect(x, y, w, cardH, 9); ctx.stroke();
+  // accent rail: whose ship this is, without spending another word on it
+  ctx.fillStyle = rgba(col, down ? 0.55 : 0.9);
+  roundRect(x + 1.5, y + 9, 2.5, cardH - 18, 1.5); ctx.fill();
+
+  const ping = (Net.ping || 0) + 'ms';
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#475569';
-  ctx.fillText((Net.ping || 0) + 'MS', x + w - 8, y + 13);
-  ctx.fillStyle = 'rgba(15,23,42,0.9)';
-  ctx.fillRect(x + 8, y + 19, w - 16, 6);
+  ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = (Net.ping || 0) > 140 ? '#f59e0b' : '#64748b';
+  ctx.fillText(ping, x + w - 10, y + 14);
+  const pingW = ctx.measureText(ping).width;
+
+  ctx.textAlign = 'left';
+  const nameStr = clipText(label.toUpperCase(), 16);
+  fitFont(nameStr, w - 26 - pingW - 8, '700', 9.5,
+          "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+  ctx.fillStyle = rgba(col, 0.95);
+  ctx.fillText(nameStr, x + 12, y + 14);
+
+  const barW = w - 24;
+  ctx.fillStyle = 'rgba(2,6,14,0.92)';
+  roundRect(x + 12, y + 22, barW, 6, 3); ctx.fill();
   const f = clamp(partnerHp / (partnerMax || 1), 0, 1);
   ctx.fillStyle = down ? '#7f1d1d' : (f < 0.3 ? '#f87171' : col);
-  ctx.fillRect(x + 8, y + 19, (w - 16) * f, 6);
+  if (f > 0) { roundRect(x + 12, y + 22, Math.max(3, barW * f), 6, 3); ctx.fill(); }
   if (down) {
     ctx.textAlign = 'center';
-    ctx.font = '800 8px Segoe UI, system-ui, sans-serif';
+    fitFont('DOWN  ·  UNTIL THE WAVE CLEARS', barW, '700', 8,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 6);
     ctx.fillStyle = '#fca5a5';
-    ctx.fillText('DOWN  ·  UNTIL THE WAVE CLEARS', x + w / 2, y + 24.5);
+    ctx.fillText('DOWN  ·  UNTIL THE WAVE CLEARS', x + w / 2, y + 37);
   }
   ctx.restore();
 
@@ -14851,24 +15298,29 @@ function mpDrawHud() {
               : MP.hostState === 'pause'   ? 'PAUSED'
               : MP.hostState === 'talk' || MP.hostState === 'devtalk' ? 'TALKING'
               : 'BUSY';
+    // the DOWN banner owns H-118..H-60 when it is up, so sit clear above it
+    const sw = Math.min(280, W - 32), sx = W / 2 - sw / 2;
+    const sy = P.down ? H - 160 : H - 92;
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(3,6,12,0.72)';
-    ctx.fillRect(W / 2 - 130, H - 92, 260, 34);
-    ctx.strokeStyle = rgba(WING_COL, 0.35);
-    ctx.strokeRect(W / 2 - 130, H - 92, 260, 34);
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(3,6,12,0.82)';
+    roundRect(sx, sy, sw, 36, 9); ctx.fill();
+    ctx.strokeStyle = rgba(WING_COL, 0.3);
+    roundRect(sx, sy, sw, 36, 9); ctx.stroke();
+    const line1 = clipText(MP.peerName || 'HOST', 14).toUpperCase() + ' IS ' + msg;
+    fitFont(line1, sw - 24, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = WING_COL;
-    ctx.fillText((MP.peerName || 'HOST') + ' IS ' + msg, W / 2, H - 76);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#475569';
-    ctx.fillText('the room is holding — you can still move', W / 2, H - 64);
+    ctx.fillText(line1, W / 2, sy + 14);
+    fitFont('the room is holding — you can still move', sw - 24, '500', 9,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('the room is holding — you can still move', W / 2, sy + 27);
     ctx.restore();
   }
   if (MP.role === 'guest' && MP.stalled) {
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#fbbf24', 0.6 + Math.sin(uiTime * 5) * 0.35);
     ctx.fillText('WAITING FOR THE HOST — ' + (Net.quiet || 0).toFixed(0) + 's',
                  W / 2, 74);
@@ -14882,24 +15334,28 @@ function mpDrawHud() {
      watching and the last thing it needs is a banner nailed over it. */
   if (P.down) {
     const other = MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'HOST');
-    const bw = 300, bx = W / 2 - bw / 2, by = H - 118;
+    const bw = Math.min(320, W - 32), bx = W / 2 - bw / 2, by = H - 118;
     ctx.save();
-    ctx.fillStyle = 'rgba(3,6,12,0.78)';
-    ctx.fillRect(bx, by, bw, 58);
-    ctx.strokeStyle = rgba('#f87171', 0.45); ctx.lineWidth = 1;
-    ctx.strokeRect(bx, by, bw, 58);
+    ctx.fillStyle = 'rgba(3,6,12,0.84)';
+    roundRect(bx, by, bw, 58, 11); ctx.fill();
+    ctx.strokeStyle = rgba('#f87171', 0.4); ctx.lineWidth = 1;
+    roundRect(bx, by, bw, 58, 11); ctx.stroke();
     ctx.textAlign = 'center';
-    ctx.font = '800 22px Segoe UI, system-ui, sans-serif';
+    ctx.save();
+    ctx.letterSpacing = '0.14em';
+    ctx.font = "700 22px 'Chakra Petch', Barlow, system-ui, sans-serif";
     ctx.fillStyle = rgba('#f87171', 0.65 + Math.sin(uiTime * 3) * 0.2);
-    ctx.fillText('DOWN', W / 2, by + 24);
-    ctx.font = '700 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('DOWN', W / 2, by + 22);
+    ctx.restore();
+    fitFont('BACK UP WHEN THE WAVE IS CLEAR', bw - 28, '700', 11,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('BACK UP WHEN THE WAVE IS CLEAR', W / 2, by + 40);
-    ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('BACK UP WHEN THE WAVE IS CLEAR', W / 2, by + 39);
+    const sub = 'watching ' + clipText(other.toUpperCase(), 14) + '  ·  ' +
+                (enemies.length ? enemies.length + ' left in the wave' : 'wave clearing');
+    fitFont(sub, bw - 28, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = '#64748b';
-    ctx.fillText('watching ' + other.toUpperCase() + '  ·  ' +
-                 (enemies.length ? enemies.length + ' left in the wave' : 'wave clearing'),
-                 W / 2, by + 52);
+    ctx.fillText(sub, W / 2, by + 51);
     ctx.restore();
   }
 }
@@ -14914,6 +15370,13 @@ let lanView = 'home';            // home | host | join | lobby | lost
 let lanCode = '';                // what the guest has typed so far
 let lanBtns = [];                // hit rects, republished every frame
 let lanBlink = 0;
+/* The panel is laid out at one fixed size and scaled down to fit a small
+   window, so every hit test has to happen in panel space rather than screen
+   space. One scalar, set once a frame in drawLan, converts between them. */
+let lanScale = 1;
+const LAN_W = 500, LAN_H = 320;
+function lanMx() { return W / 2 + (mouse.x - W / 2) / lanScale; }
+function lanMy() { return H / 2 + (mouse.y - H / 2) / lanScale; }
 
 /* The way in. Top left, where nothing else lives: the badges are on the right,
    the board is centre or right, and the footer is the bottom three lines. */
@@ -14931,12 +15394,16 @@ function drawMenuLan() {
   ctx.lineWidth = 1.2;
   ctx.stroke();
   ctx.textAlign = 'left';
-  ctx.font = '800 11px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = WING_COL;
   ctx.fillText('◈  LAN CO-OP', r.x + 12, r.y + 15);
-  ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#64748b';
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
   ctx.fillText('TWO SHIPS, ONE RUN  —  L', r.x + 12, r.y + 27);
+  ctx.restore();
   ctx.restore();
   ctx.textAlign = 'center';
 }
@@ -15015,7 +15482,12 @@ function lanKey(k) {
 }
 
 function lanCycleChar() {
-  applyChar((selectedChar + 1) % CHARS.length);
+  let n = selectedChar;
+  for (let k = 0; k < CHARS.length; k++) {
+    n = (n + 1) % CHARS.length;
+    if (charOpen(CHARS[n])) break;
+  }
+  applyChar(n);
   Save.profile.charIdx = selectedChar;
   Save.writeLocal(); Save.flush();
   Audio_.select();
@@ -15026,8 +15498,9 @@ function lanCycleChar() {
 }
 
 function lanClick() {
+  const mx = lanMx(), my = lanMy();
   for (const b of lanBtns) {
-    if (inRect(mouse.x, mouse.y, b)) { lanKey(b.k); return true; }
+    if (inRect(mx, my, b)) { lanKey(b.k); return true; }
   }
   return false;
 }
@@ -15046,7 +15519,7 @@ function lanRect(x, y, w, h, r) {
 function lanButton(label, key, x, y, w, h, col, hint) {
   const r = { x, y, w, h, k: key };
   lanBtns.push(r);
-  const hot = inRect(mouse.x, mouse.y, r);
+  const hot = inRect(lanMx(), lanMy(), r);
   ctx.save();
   lanRect(x, y, w, h, 8);
   ctx.fillStyle = hot ? rgba(col, 0.18) : 'rgba(8,13,22,0.9)';
@@ -15055,12 +15528,15 @@ function lanButton(label, key, x, y, w, h, col, hint) {
   ctx.lineWidth = 1.4;
   ctx.stroke();
   ctx.textAlign = 'center';
-  ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  fitFont(label, w - 20, '700', 13, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
   ctx.fillStyle = col;
   ctx.fillText(label, x + w / 2, y + h / 2 + (hint ? -2 : 4.5));
+  ctx.restore();
   if (hint) {
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#64748b';
+    fitFont(hint, w - 16, '500', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
     ctx.fillText(hint, x + w / 2, y + h / 2 + 13);
   }
   ctx.restore();
@@ -15070,13 +15546,19 @@ function lanTitle(t, sub) {
   ctx.textAlign = 'center';
   ctx.save();
   ctx.shadowColor = WING_COL; ctx.shadowBlur = 24;
-  ctx.font = '800 30px Segoe UI, system-ui, sans-serif';
+  ctx.letterSpacing = '0.06em';
+  fitFont(t, Math.min(560, W - 48), '700', 30,
+          "'Chakra Petch', Barlow, system-ui, sans-serif", 18);
   ctx.fillStyle = '#e9d5ff';
   ctx.fillText(t, W / 2, H / 2 - 118);
   ctx.restore();
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#475569';
-  ctx.fillText(sub, W / 2, H / 2 - 98);
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  fitFont(sub, Math.min(520, W - 48), '600', 10,
+          "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(sub, W / 2, H / 2 - 96);
+  ctx.restore();
 }
 
 /* The pilot each side is flying, side by side. This is also the only place
@@ -15116,10 +15598,11 @@ function lanPilots(y) {
     }
     ctx.restore();
     ctx.textAlign = 'center';
-    ctx.font = '800 11px Segoe UI, system-ui, sans-serif';
+    const pn = String(cell.n).toUpperCase().slice(0, 14);
+    fitFont(pn, 160, '700', 11, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
     ctx.fillStyle = cell.col;
-    ctx.fillText(String(cell.n).toUpperCase().slice(0, 14), x, y + 34);
-    ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+    ctx.fillText(pn, x, y + 34);
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#475569';
     ctx.fillText(cell.c ? cell.c.n : '—', x, y + 48);
     if (cell.me) {
@@ -15142,7 +15625,7 @@ function lanStatusLine(y) {
             : '';
   if (!txt) return;
   ctx.textAlign = 'center';
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = phase === 'failed' ? '#f87171'
                 : phase === 'live' ? '#34d399' : '#64748b';
   ctx.fillText(txt, W / 2, y);
@@ -15155,9 +15638,18 @@ function drawLan() {
   ctx.fillStyle = 'rgba(3,5,10,0.93)';
   ctx.fillRect(0, 0, W, H);
 
+  // the panel keeps its proportions and shrinks rather than spilling: the title
+  // sits above the frame and the footer below it, so both need headroom
+  lanScale = Math.min(1, (W - 32) / LAN_W, (H - 48) / (LAN_H + 44));
+  ctx.save();
+  if (lanScale < 1) {
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(lanScale, lanScale);
+    ctx.translate(-W / 2, -H / 2);
+  }
   const cx = W / 2;
   ctx.save();
-  lanRect(cx - 250, H / 2 - 150, 500, 320, 14);
+  lanRect(cx - LAN_W / 2, H / 2 - 150, LAN_W, LAN_H, 14);
   ctx.fillStyle = 'rgba(6,10,18,0.98)';
   ctx.fill();
   ctx.strokeStyle = rgba(WING_COL, 0.34); ctx.lineWidth = 1.2;
@@ -15172,14 +15664,17 @@ function drawLan() {
     lanButton('JOIN A RUN', 'j', cx + 10, H / 2 + 40, 200, 52, COL.player,
               'you type a code — J');
     ctx.textAlign = 'center';
-    ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+    const homeCopy = 'the host runs the game and keeps the record  ·  the wingman shares the build';
+    fitFont(homeCopy, LAN_W - 48, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#475569';
+    ctx.fillText(homeCopy, cx, H / 2 + 116);
+    ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#334155';
-    ctx.fillText('the host runs the game and keeps the record  ·  the wingman shares the build',
-                 cx, H / 2 + 116);
     ctx.fillText('same network, direct connection — no relay', cx, H / 2 + 132);
     ctx.fillStyle = '#475569';
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillText('ESC  —  BACK', cx, H / 2 + 156);
+    ctx.restore();
     return;
   }
 
@@ -15189,7 +15684,7 @@ function drawLan() {
     ctx.textAlign = 'center';
     ctx.save();
     ctx.shadowColor = WING_COL; ctx.shadowBlur = Net.code ? 30 : 0;
-    ctx.font = '800 68px Consolas, ui-monospace, monospace';
+    ctx.font = "800 68px 'JetBrains Mono', ui-monospace, monospace";
     ctx.fillStyle = Net.code ? '#f5d0fe' : '#1e293b';
     // letter-spaced by hand: a code read aloud should not run together
     const chars = code.split('');
@@ -15206,9 +15701,10 @@ function drawLan() {
       lanStatusLine(H / 2 + 124);
     }
     ctx.textAlign = 'center';
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#475569';
     ctx.fillText('ESC  —  CANCEL', cx, H / 2 + 158);
+    ctx.restore();
     return;
   }
 
@@ -15229,7 +15725,7 @@ function drawLan() {
       ctx.stroke();
       ctx.restore();
       if (on) {
-        ctx.font = '800 38px Consolas, ui-monospace, monospace';
+        ctx.font = "800 38px 'JetBrains Mono', ui-monospace, monospace";
         ctx.fillStyle = '#a5f3fc';
         ctx.fillText(lanCode[i], bx + boxW / 2, H / 2 - 30);
       }
@@ -15237,9 +15733,10 @@ function drawLan() {
     lanStatusLine(H / 2 + 4);
     lanPilots(H / 2 + 46);
     ctx.textAlign = 'center';
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#475569';
     ctx.fillText('BACKSPACE  —  FIX     ·     ESC  —  BACK', cx, H / 2 + 156);
+    ctx.restore();
     return;
   }
 
@@ -15249,43 +15746,51 @@ function drawLan() {
     lanStatusLine(H / 2 + 26);
 
     ctx.textAlign = 'center';
-    ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+    const rules = [
+      'the wingman shares the build, the level and the credits — and flies its own hull',
+      'either ship going down is survivable: clearing the wave stands it back up',
+      'the run ends only when both of you are on the floor at once'
+    ];
     ctx.fillStyle = '#475569';
-    ctx.fillText('the wingman shares the build, the level and the credits — and flies its own hull',
-                 cx, H / 2 + 50);
-    ctx.fillText('either ship going down is survivable: clearing the wave stands it back up',
-                 cx, H / 2 + 66);
-    ctx.fillText('the run ends only when both of you are on the floor at once',
-                 cx, H / 2 + 82);
+    rules.forEach((line, i) => {
+      fitFont(line, LAN_W - 44, '500', 9.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+      ctx.fillText(line, cx, H / 2 + 44 + i * 14);
+    });
 
     if (Net.role === 'host') {
       const pulse = 0.6 + Math.sin(uiTime * 3.6) * 0.4;
-      lanButton('LAUNCH', ' ', cx - 100, H / 2 + 84, 200, 46, WING_COL, 'SPACE');
+      lanButton('LAUNCH', ' ', cx - 100, H / 2 + 88, 200, 46, WING_COL, 'SPACE');
       ctx.globalAlpha = 1;
-      ctx.font = '500 10px Segoe UI, system-ui, sans-serif';
+      ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = rgba('#64748b', pulse);
       ctx.fillText('counts on your own record  ·  stays off the global board',
-                   cx, H / 2 + 146);
+                   cx, H / 2 + 150);
     } else {
       const pulse = 0.55 + Math.sin(uiTime * 3) * 0.35;
-      ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+      fitFont('WAITING FOR THE HOST TO LAUNCH', LAN_W - 60, '700', 13,
+              "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
       ctx.fillStyle = rgba(WING_COL, pulse);
       ctx.fillText('WAITING FOR THE HOST TO LAUNCH', cx, H / 2 + 110);
-      ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+      ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
       ctx.fillStyle = '#475569';
       ctx.fillText('ESC  —  LEAVE', cx, H / 2 + 146);
     }
+    ctx.restore();
     return;
   }
 
   if (lanView === 'lost') {
     lanTitle('DISCONNECTED', Net.note ? Net.note.toUpperCase() : 'THE LINK DROPPED');
     ctx.textAlign = 'center';
-    ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
+    ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#64748b';
-    ctx.fillText('the run continues on the host — you can rejoin with a fresh code', cx, H / 2 - 20);
+    const lostCopy = 'the run continues on the host — you can rejoin with a fresh code';
+    fitFont(lostCopy, LAN_W - 48, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(lostCopy, cx, H / 2 - 20);
     lanButton('BACK', ' ', cx - 90, H / 2 + 30, 180, 44, COL.player, 'SPACE');
   }
+  ctx.restore();
 }
 
 /* ===========================================================================
@@ -15693,6 +16198,23 @@ UPGRADES.push(...CHAL_UPGRADES);
 
 /* Player-state multipliers, folded into stanceMul so every weapon picks them
    up: bullets, the lance, the twin and everything that routes through it. */
+/* Refreshed once a frame by rewardTick, because every term below is read
+   once per projectile and two of them used to walk the entire enemy list
+   to do it. */
+const RC = { live: 0, near: 0, closest: 1e9 };
+function rewardScan() {
+  if (!(P.lastS || P.crowd || P.isolate)) return;
+  let live = 0, near = 0, closest = 1e9;
+  for (const e of enemies) {
+    if (!isThreat(e)) continue;
+    live++;
+    const d = len(e.x - P.x, e.y - P.y);
+    if (d < closest) closest = d;
+    if (d < 220) near++;
+  }
+  RC.live = live; RC.near = near; RC.closest = closest;
+}
+
 function rewardMul() {
   let m = 1;
   if (P.heat)    m *= 1 + Math.min(0.6, (P.heatN || 0) * 0.05) * P.heat;
@@ -15703,11 +16225,7 @@ function rewardMul() {
   if (P.firstB && (P.waveClock || 0) < 6) m *= 1 + 0.9 * P.firstB;
   if (P.deadline) m *= 1.45;
   if (P.nightS && wave % 3 === 0) m *= 2;
-  if (P.lastS) {
-    let live = 0;
-    for (const e of enemies) if (!e.dead) live++;
-    if (live > 0 && live <= 3) m *= 1 + 0.7 * P.lastS;
-  }
+  if (P.lastS && RC.live > 0 && RC.live <= 3) m *= 1 + 0.7 * P.lastS;
   if (P.wallA) {
     const d = Math.min(P.x - arena.x0, arena.x1 - P.x, P.y - arena.y0, arena.y1 - P.y);
     if (d < 130) m *= 1 + 0.45 * P.wallA;
@@ -15717,17 +16235,8 @@ function rewardMul() {
     const w = (arena.x1 - arena.x0) / 6, h = (arena.y1 - arena.y0) / 6;
     if (Math.abs(P.x - cx) < w && Math.abs(P.y - cy) < h) m *= 1 + 0.35 * P.centerM;
   }
-  if (P.crowd || P.isolate) {
-    let near = 0, closest = 1e9;
-    for (const e of enemies) {
-      if (e.dead) continue;
-      const d = len(e.x - P.x, e.y - P.y);
-      if (d < closest) closest = d;
-      if (d < 220) near++;
-    }
-    if (P.crowd && near) m *= 1 + Math.min(0.7, near * 0.07) * P.crowd;
-    if (P.isolate && closest > 320) m *= 1 + 0.55 * P.isolate;
-  }
+  if (P.crowd && RC.near) m *= 1 + Math.min(0.7, RC.near * 0.07) * P.crowd;
+  if (P.isolate && RC.closest > 320) m *= 1 + 0.55 * P.isolate;
   return m;
 }
 
@@ -15748,13 +16257,16 @@ function rewardTargetMul(e) {
 
 /* On-hit effects that are not multipliers. Returns true if the target was
    deleted outright, so the caller can stop working on a corpse. */
-function onRewardHit(e, crit) {
-  if (P.suppress) { e.cd = (e.cd || 0) + 0.6 * P.suppress; e.suppT = 2; }
+function onRewardHit(e, crit, direct) {
+  if (P.suppress && direct && !(e.suppT > 0)) {
+    e.cd = (e.cd || 0) + 0.6 * P.suppress;
+    e.suppT = 2;
+  }
   if (P.spall && crit) {
     if (e.dr > 0) e.dr *= 0.75;
     if (e.armor > 0) { e.armor *= 0.75; e.absorb *= 0.75; }
   }
-  if (P.erasure && e.type !== 'boss') {
+  if (P.erasure && direct && e.type !== 'boss') {
     P.eraseN = (P.eraseN || 0) + 1;
     if (P.eraseN >= 20) {
       P.eraseN = 0;
@@ -15814,8 +16326,13 @@ function onRewardKill(e) {
     P.requisN = (P.requisN || 0) + 1;
     if (P.requisN >= 11 - Math.min(4, P.requis)) {
       P.requisN = 0;
-      for (let i = 0; i < 3; i++)
-        drops.push(mkDrop(e.x + rnd(24, -24), e.y + rnd(24, -24), 'credit'));
+      const each = Math.max(2, Math.round((3 + wave * 0.6) * P.credMul));
+      for (let i = 0; i < 3; i++) {
+        const c = mkDrop(e.x + rnd(24, -24), e.y + rnd(24, -24), 'credit');
+        c.v = each;
+        c.vx = rnd(180, -180); c.vy = rnd(180, -180);
+        drops.push(c);
+      }
     }
   }
   if (P.rolling) P.rollN = (P.rollN || 0) + 1;
@@ -15912,6 +16429,9 @@ function onRewardWave() {
    because it was wired into a branch that some other state returns out of. */
 function rewardTick(dt) {
   P.waveClock = (P.waveClock || 0) + dt;
+  // the ledger is worth one point and stays worth one point
+  if (P.ledger) { P.maxHp = 1; P.hp = Math.min(P.hp, 1); }
+  rewardScan();
 
   if (P.echo && P.echoQ && P.echoQ.length) {
     for (let i = P.echoQ.length - 1; i >= 0; i--) {
@@ -15933,7 +16453,6 @@ function rewardTick(dt) {
     P.heatT = (P.heatT || 0) - dt;
     if (P.heatT <= 0 && P.heatN) { P.heatN = Math.max(0, P.heatN - 1); P.heatT = 0.35; }
   }
-  if (P.rolling) P.fireT -= 0;             // rate is folded in at fire time
   if (P.shell) {
     P.shellT = (P.shellT || 0) + dt;
     if (!P.shellUp && P.shellT > 5) {
@@ -15991,6 +16510,280 @@ function rewardDashSweep(dt) {
 }
 
 
+
+
+/* ===========================================================================
+   THE HACKER — what it kills, it keeps
+   Its gun is deliberately feeble. The weapon is the room: anything it kills
+   stands back up on your side and goes to work on whatever is left, eight
+   bodies at a time and one boss among them.
+
+   A hacked body is still in the enemies array, because it is still an enemy in
+   every way that matters to the renderer, the physics and the crowd. What
+   changes is which side it is on, and that is enforced in three places:
+   damageEnemy refuses anything you throw at it, nearestEnemy stops seeing it
+   so none of your own systems aim at it, and the wave clock stops counting it
+   as something standing between you and the next wave.
+
+   The hack is not permanent. It bleeds a little of the body's maximum health
+   every second, so an army has to be re-taken rather than accumulated, and a
+   ninth kill pushes the oldest one off the end.
+   ========================================================================= */
+const HACK_COL   = '#a3e635';
+const HACK_MAX   = 8;       // bodies held at once
+const HACK_BOSS  = 1;       // and bosses among them
+const HACK_DECAY = 0.020;   // of max health per second
+
+let hackSerial = 0;
+
+// what still counts as an enemy: alive, and not working for you
+const isThreat = e => !e.dead && !e.hacked;
+function threatCount() {
+  let n = 0;
+  for (const e of enemies) if (isThreat(e)) n++;
+  return n;
+}
+function hackedCount(boss) {
+  let n = 0;
+  for (const e of enemies)
+    if (!e.dead && e.hacked && (boss ? e.type === 'boss' : e.type !== 'boss')) n++;
+  return n;
+}
+
+/* Some bodies cannot be taken: an egg is not a fighter, a bomber has already
+   spent itself, a borrowed silhouette is on loan from something else, and the
+   endgame does not hand you its pieces. */
+function hackable(e) {
+  if (!P.hacker || !e || e.hacked) return false;
+  if (state !== 'play') return false;
+  if (e.type === 'egg' || e.type === 'bomber') return false;
+  if (e.shadow > 0 || e.amalPart || e.virus) return false;
+  if (e.boss === 'unwritten' || e.boss === 'amalgam') return false;
+  return true;
+}
+
+/* Called at the very end of killEnemy: the kill has already paid out its
+   score, its experience and its drops. This is what happens to the body
+   afterwards. Returns true if it was kept. */
+function hackTake(e) {
+  if (!hackable(e)) return false;
+  const boss = e.type === 'boss';
+  if (boss) {
+    if (hackedCount(true) >= HACK_BOSS) return false;
+  } else if (hackedCount(false) >= HACK_MAX) {
+    // the oldest one is let go to make room, rather than refusing the newest
+    let oldest = null;
+    for (const z of enemies)
+      if (!z.dead && z.hacked && z.type !== 'boss' &&
+          (!oldest || z.hackId < oldest.hackId)) oldest = z;
+    if (oldest) hackRelease(oldest, true);
+  }
+
+  e.dead = false;
+  e.hacked = true;
+  e.hackId = ++hackSerial;
+  e.hackCd = rnd(0.8, 0.3);
+  e.hp = e.maxHp * (boss ? 0.35 : 0.6);
+  e.col = HACK_COL;
+  e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
+  e.invuln = 0; e.phased = false; e.floor = undefined;
+  e.vx *= 0.2; e.vy *= 0.2;
+
+  ringFx(e.x, e.y, e.r * 0.5, e.r * 3.4, HACK_COL, 0.5, 3);
+  burst(e.x, e.y, 18, HACK_COL, 240, 3, 0.5);
+  malGlitch(e.x, e.y, e.r * 3, HACK_COL, 0.45);
+  malTrace(P.x, P.y, e.x, e.y, HACK_COL, 0.5);
+  floatText(e.x, e.y - e.r - 10, boss ? 'BOSS HACKED' : 'HACKED', HACK_COL, boss ? 17 : 13);
+  Audio_.tone(880, 0.12, 'square', 0.07, 1500);
+  if (boss) { Audio_.levelup(); shake(0.4); }
+  return true;
+}
+
+function hackRelease(e, quiet) {
+  e.dead = true;
+  burst(e.x, e.y, 14, HACK_COL, 220, 2.8, 0.45);
+  if (!quiet) malGlitch(e.x, e.y, e.r * 2.4, HACK_COL, 0.35);
+}
+
+/* A hacked body fights with one behaviour rather than its own script. Its own
+   script is written around a player — where you are, where you were, how to
+   corner you — and none of that survives changing sides. What survives is the
+   silhouette and the statline, which is what you are actually collecting. */
+function updateHacked(e, dt) {
+  e.t += dt;
+  e.flash = Math.max(0, e.flash - dt * 7);
+  e.hackCd -= dt;
+
+  // the hold degrades: an army is taken again, not saved up
+  e.hp -= e.maxHp * HACK_DECAY * dt;
+  if (e.hp <= 0) { hackRelease(e); return true; }
+
+  if (Math.random() < 0.18)
+    spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(20, -20), -24,
+              rnd(2.6, 1.2), HACK_COL, rnd(0.45, 0.2), 0.94);
+
+  const boss = e.type === 'boss';
+  const t = nearestEnemy(e.x, e.y, 1400);
+  if (!t) {
+    // nothing to fight: fall in behind whoever is flying it
+    const dx = P.x - e.x, dy = P.y - e.y, d = len(dx, dy) || 1;
+    const want = 90 + (e.hackId % 5) * 26;
+    const push = d > want ? 1 : -0.4;
+    steer(e, dx / d * e.spd * push, dy / d * e.spd * push, 2.4, dt);
+  } else {
+    const dx = t.x - e.x, dy = t.y - e.y, d = len(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    e.ang = Math.atan2(dy, dx);
+    steer(e, ux * e.spd * (boss ? 1.15 : 1.35), uy * e.spd * (boss ? 1.15 : 1.35),
+          boss ? 1.6 : 3.4, dt);
+
+    // it hits what it reaches, and hits harder if it used to be a boss
+    if (d < e.r + t.r + 4 && e.hackCd <= 0) {
+      e.hackCd = boss ? 0.5 : 0.75;
+      damageEnemy(t, (boss ? 46 : 12) + e.dmg * (boss ? 2.4 : 1.6), false, e.x, e.y,
+                  { silent: true, enemy: true, noChain: true });
+      burst(t.x, t.y, 5, HACK_COL, 190, 2.4, 0.3);
+      const a = Math.atan2(t.y - e.y, t.x - e.x);
+      t.vx += Math.cos(a) * (boss ? 220 : 90);
+      t.vy += Math.sin(a) * (boss ? 220 : 90);
+    }
+    // and everything that used to shoot at you now shoots at them
+    if (e.hackCd <= 0 && d < (boss ? 900 : 640)) {
+      e.hackCd = boss ? 1.5 : 1.9;
+      const n = boss ? 9 : 1;
+      for (let k = 0; k < n; k++) {
+        const a = boss ? e.ang + (k - (n - 1) / 2) * 0.22 : e.ang;
+        hackShot(e, a, boss ? 300 : 260, (boss ? 22 : 7) + e.dmg * (boss ? 1.4 : 0.9));
+      }
+      if (boss) { ringFx(e.x, e.y, e.r, e.r + 50, HACK_COL, 0.3, 3); shake(0.06); }
+      Audio_.tone(520, 0.05, 'square', 0.035, 260);
+    }
+  }
+
+  e.x = clamp(e.x + e.vx * dt, arena.x0 + e.r, arena.x1 - e.r);
+  e.y = clamp(e.y + e.vy * dt, arena.y0 + e.r, arena.y1 - e.r);
+  if (!boss) collideMirrors(e, e.r);
+  return false;
+}
+
+/* Its fire goes into the friendly array so it collides with enemies and not
+   with you. Marked foreign so none of your own per-shot mechanics — heat,
+   snapback, the miss penalty — read it as something you fired. */
+function hackShot(e, ang, spd, dmg) {
+  bullets.push({
+    x: e.x + Math.cos(ang) * (e.r + 4), y: e.y + Math.sin(ang) * (e.r + 4),
+    vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+    r: 5, dmg, crit: false, pierce: 0, ric: 0, life: 2.2,
+    hits: null, frag: 0, px: e.x, py: e.y, dist: 0,
+    mine: false, hacked: true, col: HACK_COL
+  });
+}
+
+/* Enemy fire is allowed to hit them, so an army can be shot off you. Called
+   from updateEBullets, which owns the bullet it is asking about. */
+function hackHitByBullet(b) {
+  for (const e of enemies) {
+    if (e.dead || !e.hacked) continue;
+    if (len(b.x - e.x, b.y - e.y) > b.r + e.r) continue;
+    damageEnemy(e, b.dmg, false, b.x, b.y, { silent: true, enemy: true, noChain: true });
+    burst(b.x, b.y, 6, b.col, 190, 2.2, 0.3);
+    return true;
+  }
+  return false;
+}
+
+/* The readout: how much of the room is currently working for you. */
+function drawHackHud() {
+  if (!P.hacker || state === 'codex' || state === 'gfx' || state === 'chal') return;
+  const n = hackedCount(false), b = hackedCount(true);
+  const w = 150, x = 16, y = hudBotY - 30;
+  hudBotY = y - 8;
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(6,10,18,0.78)';
+  roundRect(x, y, w, 30, 8); ctx.fill();
+  ctx.strokeStyle = rgba(HACK_COL, 0.28); ctx.lineWidth = 1;
+  roundRect(x, y, w, 30, 8); ctx.stroke();
+  ctx.fillStyle = rgba(HACK_COL, 0.9);
+  roundRect(x + 1.5, y + 7, 2.5, 16, 1.5); ctx.fill();
+
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.12em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = HACK_COL;
+  ctx.fillText('HACKED', x + 12, y + 11);
+  ctx.restore();
+  ctx.textAlign = 'right';
+  ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = b ? HACK_COL : '#64748b';
+  ctx.fillText(n + '/' + HACK_MAX + (b ? '  +BOSS' : ''), x + w - 10, y + 11);
+
+  // one pip per body, so a full army reads at a glance rather than as a number
+  const pw = (w - 24 - (HACK_MAX - 1) * 3) / HACK_MAX;
+  for (let i = 0; i < HACK_MAX; i++) {
+    ctx.fillStyle = i < n ? HACK_COL : 'rgba(148,163,184,0.18)';
+    roundRect(x + 12 + i * (pw + 3), y + 19, pw, 4, 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ===========================================================================
+   ESCALATION
+   A permanent mark on the record. Reach the fourth sector on five ordinary
+   runs in a row and the game stops treating you as someone who might not get
+   there: everything gains health, hits harder, arrives sooner and in greater
+   numbers, and boss armour starts five sectors earlier than it used to.
+
+   It is not a setting and there is no way back. That is the point — it is
+   the record noticing, not a menu you ticked. It pays for itself in score and
+   credits so the board stays legible across both sides of the line, and it
+   stays out of challenge runs and freeplay, which carry their own rules.
+   ========================================================================= */
+const HARD_WINDOW = 5;     // consecutive ordinary runs considered
+const HARD_DEPTH  = 15;    // the wave every one of them has to have reached
+
+/* Off during a challenge (its sheet is the difficulty) and off in freeplay
+   (nothing there is real). Everywhere else it is simply how the game is now. */
+const hardOn = () => !!Save.profile.hardened && !Chal.on && !freeRun;
+
+const HARD = {
+  hp: 1.45, dmg: 1.30, spd: 1.12, budget: 1.25,
+  elite: 0.09, score: 1.35, cred: 1.15, price: 1.25,
+  armorFrom: 5              // wave the boss plating starts, instead of 10
+};
+const hardHp     = () => hardOn() ? HARD.hp : 1;
+const hardDmg    = () => hardOn() ? HARD.dmg : 1;
+const hardSpd    = () => hardOn() ? HARD.spd : 1;
+const hardBudget = () => hardOn() ? HARD.budget : 1;
+const hardElite  = () => hardOn() ? HARD.elite : 0;
+const hardScore  = () => hardOn() ? HARD.score : 1;
+const hardCred   = () => hardOn() ? HARD.cred : 1;
+const hardPrice  = () => hardOn() ? HARD.price : 1;
+// boss plating starts on the first boss instead of the third
+const hardArmorGate = () => hardOn() ? HARD.armorFrom : 10;
+
+/* Called once per recorded run. Co-op, challenges and freeplay never reach
+   here, so the window only ever contains runs flown solo under normal rules. */
+function noteRunDepth(w) {
+  const p = Save.profile;
+  p.deepRuns = (p.deepRuns || []).concat(w).slice(-HARD_WINDOW);
+  if (p.hardened) return false;
+  if (p.deepRuns.length < HARD_WINDOW) return false;
+  if (!p.deepRuns.every(d => d >= HARD_DEPTH)) return false;
+  p.hardened = true;
+  return true;                       // the caller announces it
+}
+
+/* How close you are to it, for the menu. Null once it has happened. */
+function hardProgress() {
+  const p = Save.profile;
+  if (p.hardened) return null;
+  const runs = (p.deepRuns || []);
+  const good = runs.filter(d => d >= HARD_DEPTH).length;
+  return { good, need: HARD_WINDOW, depth: HARD_DEPTH,
+           streak: runs.length === HARD_WINDOW && good === HARD_WINDOW };
+}
 
 /* ------------------------------ the machinery -----------------------------
    A challenge run is an ordinary run with a rule sheet stapled to it. The
@@ -16098,8 +16891,6 @@ function chalFilterPool(pool) {
   const m = Chal.on ? (Chal.on.m || {}) : null;
   const out = [];
   for (const u of earned) {
-    if (P.pure && ['drone', 'sentry', 'frag', 'chain', 'vortex', 'napalm'].includes(u.id)) continue;
-    if (P.ascetic && ['regen', 'lifesteal'].includes(u.id)) continue;
     if (m) {
       if (m.oneShot && ['hp', 'regen', 'armor', 'shld', 'wind'].includes(u.id)) continue;
       if (m.ban && m.ban.includes(u.id)) continue;
@@ -16114,7 +16905,7 @@ function chalFilterPool(pool) {
 
 const chalNoLevel = () => !!(Chal.on && Chal.on.m.noLvl);
 const chalNoShop  = () => !!(Chal.on && Chal.on.m.noShop);
-const chalNoHeal  = () => !!(Chal.on && Chal.on.m.noHeal) || !!P.ascetic;
+const chalNoHeal  = () => !!(Chal.on && Chal.on.m.noHeal);
 const chalAuto    = () => !!(Chal.on && Chal.on.m.auto);
 const chalBudget  = () => (Chal.on && Chal.on.m.budget) || 1;
 const chalEHp     = () => (Chal.on && Chal.on.m.ehp) || 1;
@@ -16240,23 +17031,69 @@ function closeChal() {
   Audio_.select();
 }
 
+/* Two ways to browse fifty entries, both list-and-detail:
+     'rows'  a grouped scrolling list — tier bands, names always visible
+     'grid'  a numbered pad, every entry on screen at once, names in the sheet
+   The detail sheet is identical either way, so only the index changes. */
+const UIVAR = { chal: 'rows', shop: 'cards' };
+
 function chalGeom() {
   const pad = Math.min(40, W * 0.04);
   const top = 118, bottom = 74;
-  const listW = Math.min(360, Math.max(220, W * 0.32));
-  const h = Math.max(180, H - top - bottom);
-  return { x: pad, y: top, listW, rowH: 30, viewH: h,
-           px: pad + listW + 22, pw: Math.max(180, W - pad * 2 - listW - 22) };
+  const grid = UIVAR.chal === 'grid';
+  const listW = grid ? Math.min(300, Math.max(190, W * 0.26))
+                     : Math.min(380, Math.max(220, W * 0.33));
+  const hh = Math.max(180, H - top - bottom);
+  return { x: pad, y: top, listW, rowH: 30, viewH: hh, grid,
+           px: pad + listW + 24, pw: Math.max(180, W - pad * 2 - listW - 24) };
+}
+
+/* The grouped list is a flat run of band headers and entries, so scrolling and
+   keyboard travel both work in one coordinate: the item row. */
+function chalItems() {
+  const out = [];
+  let tier = -1;
+  CHALLENGES.forEach((c, i) => {
+    if (c.tier !== tier) { tier = c.tier; out.push({ band: tier }); }
+    out.push({ i });
+  });
+  return out;
+}
+function chalRowOf(sel) {
+  const items = chalItems();
+  for (let k = 0; k < items.length; k++) if (items[k].i === sel) return k;
+  return 0;
+}
+function chalContentH() {
+  const g = chalGeom();
+  if (g.grid) {
+    const cell = chalCell(g);
+    return Math.ceil(CHALLENGES.length / cell.cols) * (cell.h + cell.gap);
+  }
+  return chalItems().length * g.rowH;
+}
+function chalCell(g) {
+  const gap = 6;
+  const cols = Math.max(3, Math.floor((g.listW + gap) / 62));
+  const w = (g.listW - (cols - 1) * gap) / cols;
+  return { cols, gap, w, h: Math.min(46, Math.max(34, w * 0.72)) };
 }
 function chalMaxScroll() {
-  const g = chalGeom();
-  return Math.max(0, CHALLENGES.length * g.rowH - g.viewH);
+  return Math.max(0, chalContentH() - chalGeom().viewH);
 }
 function chalKeepVisible() {
   const g = chalGeom();
-  const y = chalSel * g.rowH;
+  let y, rowH;
+  if (g.grid) {
+    const cell = chalCell(g);
+    rowH = cell.h + cell.gap;
+    y = Math.floor(chalSel / cell.cols) * rowH;
+  } else {
+    rowH = g.rowH;
+    y = chalRowOf(chalSel) * rowH;
+  }
   if (y < chalScroll) chalScroll = y;
-  else if (y + g.rowH > chalScroll + g.viewH) chalScroll = y + g.rowH - g.viewH;
+  else if (y + rowH > chalScroll + g.viewH) chalScroll = y + rowH - g.viewH;
   chalScroll = clamp(chalScroll, 0, chalMaxScroll());
 }
 
@@ -16306,11 +17143,11 @@ function drawChal() {
   ctx.textAlign = 'center';
   ctx.save();
   ctx.shadowColor = CHAL_GOLD; ctx.shadowBlur = 26;
-  ctx.font = '800 30px Segoe UI, system-ui, sans-serif';
+  ctx.font = "800 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#fde68a';
   ctx.fillText('CHALLENGES', W / 2, 52);
   ctx.restore();
-  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
   ctx.fillText(done + ' / ' + CHALLENGES.length + '   COMPLETE   ·   ' +
                'EACH ONE PAYS AN UPGRADE, PERMANENTLY', W / 2, 74);
@@ -16340,12 +17177,12 @@ function drawChal() {
       ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
     }
     ctx.textAlign = 'left';
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = won ? '#6ee7b7' : open ? (sel ? '#fde68a' : '#cbd5e1') : '#334155';
     ctx.fillText((i + 1 < 10 ? '0' : '') + (i + 1) + '  ' + (open || won ? c.n : '—————'),
                  r.x + 12, r.y + 20);
     ctx.textAlign = 'right';
-    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
     if (won) { ctx.fillStyle = '#34d399'; ctx.fillText('CLEARED', r.x + r.w - 12, r.y + 20); }
     else if (!open) { ctx.fillStyle = '#334155'; ctx.fillText('LOCKED', r.x + r.w - 12, r.y + 20); }
   }
@@ -16363,90 +17200,213 @@ function drawChal() {
   drawChalSheet(g);
 
   ctx.textAlign = 'center';
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('↑↓ SELECT   ·   ENTER START   ·   ESC BACK', W / 2, H - 34);
 }
 
 /* The sheet: what this one does to you, in the same plain register the codex
    uses. A locked entry still shows its rules — you are meant to plan for it. */
+/* The sheet: what this one does to you, in the register the codex uses, with
+   the raw modifier bag underneath it. Both are generated from c.m, so the
+   English and the tokens cannot disagree with each other or with the run.
+
+   Laid out as a clipped content column with the start button pinned to the
+   foot of the panel, rather than a flow that hopes to stop in time — a
+   challenge with fourteen rules used to walk straight over the button. */
 function drawChalSheet(g) {
   const c = CHALLENGES[chalSel];
   if (!c) return;
   const open = chalOpen(c), won = chalDone(c.id);
   const x = g.px, w = g.pw;
+  const BTN_H = 46, contentH = g.viewH - BTN_H - 14;
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x - 4, g.y - 4, w + 8, contentH + 4); ctx.clip();
+  ctx.textBaseline = 'alphabetic';
   let y = g.y + 6;
 
+  /* header: name, and a pill saying where you stand with it */
   ctx.textAlign = 'left';
-  ctx.font = '800 22px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = won ? '#6ee7b7' : open ? '#fde68a' : '#475569';
-  ctx.fillText(open || won ? c.n : 'LOCKED', x, y + 16);
+  const status = won ? ['CLEARED', '#6ee7b7'] : open ? ['OPEN', CHAL_GOLD] : ['LOCKED', '#64748b'];
+  ctx.save();
+  ctx.font = "700 8.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.letterSpacing = '0.16em';
+  const pw = ctx.measureText(status[0]).width + 18;
+  ctx.fillStyle = rgba(status[1], 0.13);
+  roundRect(x, y, pw, 16, 8); ctx.fill();
+  ctx.strokeStyle = rgba(status[1], 0.4); ctx.lineWidth = 1;
+  roundRect(x, y, pw, 16, 8); ctx.stroke();
+  ctx.fillStyle = status[1];
+  ctx.textBaseline = 'middle';
+  ctx.fillText(status[0], x + 9, y + 8.5);
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+  ctx.save();
+  ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = '#475569';
+  ctx.fillText(String(chalSel + 1).padStart(2, '0') + ' / ' + CHALLENGES.length,
+               x + pw + 10, y + 12);
+  ctx.restore();
   y += 34;
 
-  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#64748b';
-  ctx.fillText('OBJECTIVE', x, y);
-  y += 16;
-  ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = (BOSSES[c.goal] || {}).col || '#e2e8f0';
-  ctx.fillText('DESTROY   ' + chalGoalName(c), x, y);
+  ctx.save();
+  ctx.letterSpacing = '0.02em';
+  fitFont(open || won ? c.n : 'LOCKED', w, '700', 24,
+          "'Chakra Petch', Barlow, system-ui, sans-serif", 14);
+  ctx.fillStyle = won ? '#6ee7b7' : open ? '#fde68a' : '#475569';
+  ctx.fillText(open || won ? c.n : 'LOCKED', x, y);
+  ctx.restore();
+  y += 26;
+
+  const label = (t, yy) => {
+    ctx.save();
+    ctx.letterSpacing = '0.18em';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText(t, x, yy);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(71,85,105,0.28)';
+    const tw = 26 + t.length * 6.6;
+    ctx.fillRect(x + tw, yy - 3, Math.max(0, w - tw), 1);
+  };
+
+  /* the one thing that ends the run a winner */
+  label('OBJECTIVE', y);
+  y += 19;
+  const goalCol = (BOSSES[c.goal] || {}).col || '#e2e8f0';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  const goal = 'DESTROY   ' + chalGoalName(c);
+  fitFont(goal, w, '700', 15, "'Chakra Petch', Barlow, system-ui, sans-serif", 10);
+  ctx.fillStyle = goalCol;
+  ctx.fillText(goal, x, y);
+  ctx.restore();
   y += 24;
 
-  ctx.font = '500 12.5px Segoe UI, system-ui, sans-serif';
+  ctx.font = "400 12.5px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#94a3b8';
-  y = wrapText(c.d, x, y, w, 17) + 10;
+  y = wrapText(c.d, x, y, w, 17) + 26;
 
+  /* the rules in English — two columns once there are enough of them to
+     make a single list taller than the panel */
   const rules = chalRuleLines(c);
   if (rules.length) {
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText('RULES', x, y);
-    y += 15;
-    ctx.font = '600 11.5px Segoe UI, system-ui, sans-serif';
-    for (const r of rules) {
-      if (y > g.y + g.viewH - 96) break;
+    label('RULES', y);
+    y += 18;
+    const twoCol = rules.length > 6 && w > 330;
+    const colW = twoCol ? (w - 16) / 2 : w;
+    const perCol = twoCol ? Math.ceil(rules.length / 2) : rules.length;
+    let maxY = y;
+    rules.forEach((r, i) => {
+      const cxx = x + (twoCol && i >= perCol ? colW + 16 : 0);
+      const yy = y + (i % perCol) * 16;
+      if (yy > g.y + contentH - 8) return;
       ctx.fillStyle = r[1];
-      ctx.fillText('·  ' + r[0], x + 2, y);
-      y += 15;
-    }
-    y += 8;
+      ctx.beginPath(); ctx.arc(cxx + 3, yy - 3.5, 2, 0, TAU); ctx.fill();
+      fitFont(r[0], colW - 14, '600', 11.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+      ctx.fillStyle = r[1];
+      ctx.globalAlpha = 0.92;
+      ctx.fillText(r[0], cxx + 11, yy);
+      ctx.globalAlpha = 1;
+      maxY = Math.max(maxY, yy);
+    });
+    y = maxY + 24;
   }
 
+  /* the same bag, unglossed — the exact keys the run is built from */
+  const raw = chalRawTokens(c);
+  if (raw.length && y < g.y + contentH - 40) {
+    label('SHEET', y);
+    y += 14;
+    ctx.font = "600 9.5px 'JetBrains Mono', ui-monospace, monospace";
+    const gap = 6, rowH = 17;
+    let tx = x, ty = y, rows2 = 1;
+    for (const t of raw) {
+      const tw = ctx.measureText(t).width + 14;
+      if (tx + tw > x + w && tx > x) { tx = x; ty += rowH; rows2++; }
+      if (ty > g.y + contentH - 12) break;
+      ctx.fillStyle = 'rgba(30,41,59,0.55)';
+      roundRect(tx, ty - 11, tw, 15, 4); ctx.fill();
+      ctx.fillStyle = '#7c8ba1';
+      ctx.fillText(t, tx + 7, ty);
+      tx += tw + gap;
+    }
+    y = ty + 26;
+  }
+
+  /* what clearing it puts in the pool, permanently */
   const rw = CHAL_UPGRADES.find(u => u.id === c.rw);
-  if (rw) {
-    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText('REWARD', x, y);
-    y += 17;
-    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+  if (rw && y < g.y + contentH - 34) {
+    label('REWARD', y);
+    y += 18;
+    ctx.save();
+    ctx.letterSpacing = '0.06em';
+    fitFont(won ? rw.n : '? ? ?', w, '700', 13,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
     ctx.fillStyle = won ? RARITY[rw.rar] : '#475569';
     ctx.fillText(won ? rw.n : '? ? ?', x, y);
-    ctx.font = '500 11.5px Segoe UI, system-ui, sans-serif';
+    ctx.restore();
+    const rd = won ? rw.d : 'an upgrade that is not in your pool yet';
+    ctx.font = "500 11.5px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = won ? '#94a3b8' : '#334155';
-    ctx.fillText(won ? rw.d : 'an upgrade that is not in your pool yet', x, y + 16);
-    y += 34;
+    wrapText(rd, x, y + 16, w, 15);
   }
+  ctx.restore();                             // end of the clipped column
 
+  /* the button never moves: it is the same target on every entry */
   chalStartRect = null;
-  const by = Math.min(g.y + g.viewH - 46, y + 8);
+  const by = g.y + g.viewH - BTN_H;
   if (open) {
-    const bw = Math.min(220, w), bh = 40;
-    chalStartRect = { x, y: by, w: bw, h: bh };
+    const bw = Math.min(220, w);
+    chalStartRect = { x, y: by, w: bw, h: BTN_H - 6 };
     const hot = inRect(mouse.x, mouse.y, chalStartRect);
+    ctx.save();
+    if (hot) { ctx.shadowColor = CHAL_GOLD; ctx.shadowBlur = 18; }
     ctx.fillStyle = hot ? 'rgba(251,191,36,0.2)' : 'rgba(8,13,22,0.9)';
-    ctx.fillRect(x, by, bw, bh);
-    ctx.strokeStyle = rgba(CHAL_GOLD, hot ? 0.95 : 0.55); ctx.lineWidth = 1.3;
-    ctx.strokeRect(x + 0.5, by + 0.5, bw - 1, bh - 1);
+    roundRect(x, by, bw, BTN_H - 6, 9); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = rgba(CHAL_GOLD, hot ? 0.95 : 0.5); ctx.lineWidth = hot ? 1.8 : 1.2;
+    roundRect(x, by, bw, BTN_H - 6, 9); ctx.stroke();
     ctx.textAlign = 'center';
-    ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.14em';
+    ctx.font = "700 13px 'Chakra Petch', Barlow, system-ui, sans-serif";
     ctx.fillStyle = CHAL_GOLD;
-    ctx.fillText(won ? 'RUN IT AGAIN' : 'START', x + bw / 2, by + 25);
+    ctx.fillText(won ? 'RUN IT AGAIN' : 'START', x + bw / 2, by + (BTN_H - 6) / 2);
+    ctx.restore();
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   } else {
-    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    const lock = chalLockText(c);
+    fitFont(lock, w, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#f87171';
-    ctx.fillText(chalLockText(c), x, by + 24);
+    ctx.fillText(lock, x, by + 24);
   }
+}
+
+/* The bag itself, one token per key that is actually set. Read straight off
+   c.m in a fixed order so two sheets can be compared line by line. */
+function chalRawTokens(c) {
+  const m = c.m || {}, out = [];
+  const num = v => (Math.round(v * 100) / 100).toString();
+  const ORDER = ['char', 'hp', 'oneShot', 'dmg', 'rate', 'spd', 'bspd', 'dash', 'credits',
+                 'xp', 'chip', 'mal', 'sign', 'noHeal', 'move', 'auto', 'noLvl', 'noShop',
+                 'rar', 'ehp', 'espd', 'edmg', 'elite', 'budget', 'time', 'curse',
+                 'mirror', 'fog'];
+  for (const k of ORDER) {
+    const v = m[k];
+    if (v === undefined) continue;
+    if (v === true) { out.push(k); continue; }
+    if (Array.isArray(v)) { out.push(k + ' ' + v.join('/')); continue; }
+    out.push(k + ' ' + (typeof v === 'number' ? num(v) : v));
+  }
+  // the list-valued keys are counted rather than spelled out — they run long
+  if (m.start) out.push('start ×' + m.start.length);
+  if (m.only) out.push('only ×' + m.only.length);
+  if (m.ban) out.push('ban ×' + m.ban.length);
+  if (m.swarm) out.push('swarm ' + m.swarm.join('/'));
+  return out;
 }
 
 /* Turns the modifier bag back into English. Generated from the sheet rather
@@ -16500,38 +17460,52 @@ function chalRuleLines(c) {
   return out;
 }
 
-/* Wrapped paragraph, returning the y it finished on. */
-function wrapText(text, x, y, maxW, lh) {
-  const words = String(text).split(' ');
-  let line = '';
-  for (const wd of words) {
-    const test = line ? line + ' ' + wd : wd;
-    if (ctx.measureText(test).width > maxW && line) {
-      ctx.fillText(line, x, y); y += lh; line = wd;
-    } else line = test;
-  }
-  if (line) { ctx.fillText(line, x, y); y += lh; }
-  return y;
-}
-
 /* ------------------------------ in-run readout ---------------------------- */
 function drawChalHud() {
   const c = Chal.on;
   if (!c || state === 'codex' || state === 'gfx' || state === 'chal') return;
-  const x = 16, y = H - 96;
+  const timed = c.m.time && !Chal.won;
+  const w = 190, cardH = timed ? 54 : 38, x = 16, y = hudBotY - cardH;
+  hudBotY = y - 8;
+  const col = Chal.won ? '#6ee7b7' : CHAL_GOLD;
   ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(6,10,18,0.8)';
+  roundRect(x, y, w, cardH, 8); ctx.fill();
+  ctx.strokeStyle = rgba(col, 0.3); ctx.lineWidth = 1;
+  roundRect(x, y, w, cardH, 8); ctx.stroke();
+  ctx.fillStyle = rgba(col, 0.9);
+  roundRect(x + 1.5, y + 7, 2.5, cardH - 14, 1.5); ctx.fill();
+
   ctx.textAlign = 'left';
-  ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = CHAL_GOLD;
-  ctx.fillText('CHALLENGE   ' + c.n, x, y);
-  ctx.font = '600 9px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = Chal.won ? '#6ee7b7' : '#64748b';
-  ctx.fillText(Chal.won ? 'COMPLETE' : 'KILL   ' + chalGoalName(c), x, y + 13);
-  if (c.m.time && !Chal.won) {
-    const t = Math.max(0, Chal.waveT);
-    ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
-    ctx.fillStyle = t < 10 ? rgba('#f87171', 0.6 + Math.sin(uiTime * 8) * 0.4) : '#cbd5e1';
-    ctx.fillText(t.toFixed(1) + 's', x, y + 30);
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 8.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = rgba(col, 0.75);
+  ctx.fillText(Chal.won ? 'CLEARED' : 'CHALLENGE', x + 12, y + 11);
+  ctx.restore();
+  fitFont(c.n, w - 24, '700', 11.5, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+  ctx.fillStyle = col;
+  ctx.fillText(c.n, x + 12, y + 25);
+  if (!Chal.won) {
+    const goal = 'KILL  ' + chalGoalName(c);
+    fitFont(goal, w - 24, '600', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(goal, x + 12, y + 36);
+  }
+  if (timed) {
+    /* The wave clock is the only figure here that moves every frame, so it
+       takes the mono face and a bar that empties, not a bare countdown. */
+    const t = Math.max(0, Chal.waveT), f = clamp(t / c.m.time, 0, 1);
+    const urgent = t < 10;
+    ctx.fillStyle = 'rgba(2,6,14,0.9)';
+    roundRect(x + 12, y + 44, w - 24, 5, 2.5); ctx.fill();
+    ctx.fillStyle = urgent ? rgba('#f87171', 0.6 + Math.sin(uiTime * 8) * 0.4) : '#cbd5e1';
+    if (f > 0) { roundRect(x + 12, y + 44, Math.max(2, (w - 24) * f), 5, 2.5); ctx.fill(); }
+    ctx.textAlign = 'right';
+    ctx.font = "800 10px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = urgent ? '#fca5a5' : '#94a3b8';
+    ctx.fillText(t.toFixed(1) + 's', x + w - 10, y + 25);
   }
   ctx.restore();
 }
@@ -16564,12 +17538,21 @@ function drawMenuChal() {
   ctx.lineWidth = 1.2;
   ctx.stroke();
   ctx.textAlign = 'left';
-  ctx.font = '800 11px Segoe UI, system-ui, sans-serif';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = CHAL_GOLD;
   ctx.fillText('◈  CHALLENGES', r.x + 12, r.y + 15);
-  ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#64748b';
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
   ctx.fillText(done + ' / ' + CHALLENGES.length + ' CLEARED  —  K', r.x + 12, r.y + 27);
+  ctx.restore();
+  // a thin fill along the foot: how much of the ladder is behind you
+  ctx.fillStyle = 'rgba(2,6,14,0.9)';
+  roundRect(r.x + 12, r.y + r.h - 7, r.w - 24, 2, 1); ctx.fill();
+  ctx.fillStyle = rgba(CHAL_GOLD, 0.75);
+  roundRect(r.x + 12, r.y + r.h - 7, (r.w - 24) * (done / CHALLENGES.length), 2, 1); ctx.fill();
   ctx.restore();
   ctx.textAlign = 'center';
 }
