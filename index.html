@@ -1612,14 +1612,15 @@ function spawnEnemy(type, x, y, opts = {}) {
   const bd = bKey ? BOSSES[bKey] : null;
   const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w)) * curseHpMul;
   const canElite = type !== 'boss' && type !== 'egg';
-  const eliteChance = Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45);
+  const eliteChance = Math.max(chalElite(),
+                      Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45));
   const elite = opts.elite ?? (canElite && w > 3 && Math.random() < eliteChance);
   const e = {
     id: ++eid, type, x, y, vx: 0, vy: 0, boss: bKey,
     r: (bd ? bd.r : t.r) * (opts.rs || 1) * (elite ? 1.28 : 1),
-    maxHp: t.hp * hpScale * (opts.hs || 1) * (elite ? 2.6 : 1),
-    spd: (bd ? bd.spd : t.spd) * (elite ? 0.92 : 1) * (opts.ss || 1),
-    dmg: t.dmg * (1 + (w - 1) * 0.05) * (elite ? 1.4 : 1),
+    maxHp: t.hp * hpScale * (opts.hs || 1) * (elite ? 2.6 : 1) * chalEHp(),
+    spd: (bd ? bd.spd : t.spd) * (elite ? 0.92 : 1) * (opts.ss || 1) * chalESpd(),
+    dmg: t.dmg * (1 + (w - 1) * 0.05) * (elite ? 1.4 : 1) * chalEDmg(),
     col: bd ? bd.col : t.col, sides: bd ? bd.sides : t.sides,
     xp: t.xp * (elite ? 3 : 1), score: t.score * (elite ? 3 : 1),
     armor: bArmor, absorb: bArmor * 0.25, dr: bDR,
@@ -1658,7 +1659,8 @@ function spawnRing(type, opts) {
 /* -------------------------------- combat --------------------------------- */
 /* Stance-dependent damage, resolved at the moment of firing. */
 function stanceMul() {
-  let m = 1;
+  let m = rewardMul();      // challenge rewards fold in here, once, for every weapon
+
   if (P.berserk)  m *= 1 + P.berserk * 0.25 * (1 - clamp(P.hp / P.maxHp, 0, 1));
   const spd = len(P.vx, P.vy);
   if (P.momentum) m *= 1 + P.momentum * 0.16 * clamp(spd / Math.max(1, P.speed), 0, 1);
@@ -1674,7 +1676,7 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
     vx: Math.cos(ang) * P.bspeed * (opts.sm || 1),
     vy: Math.sin(ang) * P.bspeed * (opts.sm || 1),
     r: P.br * (opts.rm || 1) * (isCrit ? 1.28 : 1),
-    dmg: P.dmg * dmgMul * stanceMul() * (isCrit ? P.critMult : 1),
+    dmg: P.dmg * dmgMul * stanceMul() * rewardShotMul() * (isCrit ? P.critMult : 1),
     crit: isCrit, pierce: P.pierce + (opts.pierce || 0), ric: P.ricochet,
     life: P.blife * (opts.lm || 1), hits: null, frag: opts.noFrag ? 0 : P.frag,
     px: x, py: y, dist: 0,
@@ -1927,6 +1929,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     return;
   }
   dmg *= (e.vuln || 1);        // stunned enemies take extra
+  dmg *= rewardTargetMul(e);   // brands, tags, conduction, slipknot marks
   if (annotated()) dmg *= 1.5; // you know exactly where to put it
   // boss armour: no single hit may exceed the cap, however it was delivered.
   // Applied after vuln so baiting the stun still pays, just not unboundedly.
@@ -1989,6 +1992,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     floatText(e.x, e.y - e.r - 8, 'EXECUTE', '#fbbf24', 15);
     e.hp = 0;
   }
+  if (onRewardHit(e, crit)) { /* erased outright */ }
   if (e.hp <= 0) {
     const excess = Math.min(-e.hp, e.maxHp * 0.6);
     killEnemy(e, a);
@@ -2047,6 +2051,8 @@ function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false, quie
 /* A blast the player caused. Only these leave Napalm, and the fire they drop
    burns enemies rather than its owner. */
 function playerBlast(x, y, radius, dmg, color) {
+  if (P.chainR) for (const e of enemies)
+    if (!e.dead && len(e.x - x, e.y - y) < radius + e.r) e.byBlast = true;
   explode(x, y, radius, dmg, color, false);
   knockCorpses(x, y, radius, 620);        // fused bodies ride the blast outward
   if (P.napalm)
@@ -2059,6 +2065,7 @@ function killEnemy(e, ang = 0) {
   if (e.dead) return;
   e.dead = true;
   P.kills++;
+  onRewardKill(e);          // harvest, requisition, banks, trophies, chains
   for (const b of enemies) {
     if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
         && b.ledger.length < 8 && b.ledger.indexOf(e.type) < 0) b.ledger.push(e.type);
@@ -2192,8 +2199,18 @@ function hurtPlayer(dmg, opts) {
     floatText(P.x, P.y - 30, 'BLOCKED', COL.shield, 14);
     return;
   }
-  const d = Math.max(1, dmg * P.frailty - P.armor);
+  // Shell is not a shield: it is a grace window that regrows on its own
+  if (P.shell && P.shellUp) {
+    P.shellUp = false; P.shellT = 0; P.iframe = 0.5;
+    floatText(P.x, P.y - 30, 'SHELL', COL.shield, 15);
+    ringFx(P.x, P.y, P.r, 60, COL.shield, 0.3, 3);
+    Audio_.tone(600, 0.14, 'sine', 0.12, 950);
+    return;
+  }
+  const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
+  const d = Math.max(1, dmg * P.frailty * nightMul - P.armor);
   P.hp -= d;
+  onRewardHurt(d, opts && opts.src);
   P.iframe = 0.62; P.hurtFlash = 1;
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
@@ -2225,6 +2242,14 @@ function reviveOrDie() {
     if (unwritten) {
       P.hp = 0;
       if (unwDeadT <= 0) unwFail();
+      return;
+    }
+    if (P.deadman && !P.brakeUsed) {
+      P.brakeUsed = true; P.brakeT = 2;
+      P.hp = Math.max(1, P.maxHp * 0.12);
+      P.iframe = 2.0;
+      banner('DEADMAN BRAKE', '#67e8f9', 2.0);
+      drawFlashT = 0.25; shake(0.8); Audio_.levelup();
       return;
     }
     if (P.revive > 0) {
@@ -2260,6 +2285,9 @@ let bossAlive = false, score = 0, elapsed = 0, credits = 0, slowmo = 1;
 let stageAbs = -1, shopPending = false;
 
 function pickEnemyType() {
+  // a challenge that names its spawns gets those and nothing else
+  const forced = chalSwarm();
+  if (forced) return forced[rndi(forced.length)];
   const pool = stage.pool;
   let tot = 0; for (const p of pool) tot += p[1];
   let r = Math.random() * tot;
@@ -2335,12 +2363,12 @@ function startWave() {
     banner(bd.name + '   INBOUND', bd.col);
     Audio_.boss();
     spawnRing('boss');
-    spawnBudget = 5 + Math.floor(wave * 0.7);
+    spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget());
   } else {
     banner(fresh ? stage.name : 'WAVE ' + wave,
            fresh ? stage.accent : COL.player);
     Audio_.wave();
-    spawnBudget = Math.round(7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5);
+    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * chalBudget());
   }
   spawnT = 0;
   waveTimer = 0;
@@ -2367,6 +2395,8 @@ function updateWaves(dt) {
     // the room is clear, so anyone on the floor gets back on their feet —
     // ahead of the reward hand-off, which can return before the banner
     coopReviveWave();
+    onRewardWave();
+    if (P.deadman) P.brakeUsed = false;   // the brake is once a wave
     const bonus = 50 * wave;
     const cr = Math.round((12 + wave * 2.4) * P.credMul);
     score += bonus; credits += cr;
@@ -2401,6 +2431,7 @@ function updateWaves(dt) {
 
 function onBossDefeat(e) {
   const wasKeeper = !!(e && e.boss === 'keeper');
+  chalCheckGoal(wasKeeper ? 'keeper' : (e && e.boss) || stage.boss);
   const bd = BOSSES[wasKeeper ? 'keeper' : stage.boss];
   const wasVirus = !!(e && e.virus);
   Codex.flush();                         // a sector's worth of new entries
@@ -2464,20 +2495,20 @@ const PRICE = { common: 32, rare: 58, epic: 95, legend: 150 };
 function shopServices() {
   return [
     { kind: 'svc', name: 'Repair Bay',     desc: 'Restore 60% of max HP',      rar: 'common', cost: 45,
-      ok: () => P.hp < P.maxHp * 0.95,
+      ok: () => P.hp < P.maxHp * 0.95 && !chalNoHeal(),
       run: () => { const a = Math.round(P.maxHp * 0.6); P.hp = Math.min(P.maxHp, P.hp + a);
                    floatText(P.x, P.y - 30, '+' + a + ' HP', COL.hp, 17); Audio_.heal(); } },
     { kind: 'svc', name: 'Hull Plating',   desc: '+30 max HP, fully repaired', rar: 'rare',   cost: 88,
-      ok: () => true,
+      ok: () => !(Chal.on && (Chal.on.m.oneShot || Chal.on.m.noHeal)),
       run: () => { P.maxHp += 30; P.hp = P.maxHp; Audio_.heal(); } },
     { kind: 'svc', name: 'Phase Cell',     desc: '+1 dash charge',             rar: 'epic',   cost: 132,
       ok: () => P.dashMax < 4,
       run: () => { P.dashMax++; P.dashCh = P.dashMax; } },
     { kind: 'svc', name: 'Barrier Node',   desc: '+1 regenerating shield',     rar: 'epic',   cost: 120,
-      ok: () => P.shieldMax < 4,
+      ok: () => P.shieldMax < 4 && !(Chal.on && Chal.on.m.oneShot),
       run: () => { P.shieldMax++; P.shield++; } },
     { kind: 'svc', name: 'Data Injection', desc: 'Gain a level immediately',   rar: 'legend', cost: 145,
-      ok: () => true,
+      ok: () => !chalNoLevel(),
       run: () => { P.xp += P.xpNext; } },
     { kind: 'svc', name: 'Coolant Flush',  desc: '+12% fire rate permanently', rar: 'rare',   cost: 76,
       ok: () => true,
@@ -2512,7 +2543,7 @@ const CHIP_POOL = {
 
 function chipPool() {
   const ids = CHIP_POOL[P.weapon] || CHIP_POOL.bullet;
-  return UPGRADES.filter(u => ids.includes(u.id) && (P.up[u.id] || 0) < u.max);
+  return chalFilterPool(UPGRADES.filter(u => ids.includes(u.id) && (P.up[u.id] || 0) < u.max));
 }
 
 // the pool an offer should draw from, and whether rarity still weights it
@@ -2521,7 +2552,8 @@ function offerPool() {
     const p = chipPool();
     if (p.length) return { pool: p, flat: true };
   }
-  return { pool: UPGRADES.filter(u => (P.up[u.id] || 0) < u.max), flat: false };
+  return { pool: chalFilterPool(UPGRADES.filter(u => (P.up[u.id] || 0) < u.max)),
+           flat: false };
 }
 
 function pickFromPool(pool, flat) {
@@ -2559,7 +2591,7 @@ function makeShopStock() {
     pool.splice(pool.indexOf(ch), 1);
     Codex.seeUpgrade(ch.id);             // shop stock counts too
     items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
-      cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15)) });
+      cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * (P.insider ? 0.65 : 1)) });
   }
   if (chip) items.push(recordChipItem());
   const svc = shopServices();
@@ -2615,13 +2647,16 @@ function buyShop(i) {
 }
 
 function rerollShop() {
-  const cost = 30 + shopRerolls * 25;
+  // Salvage Rights pays for the first one; Insider Trading doubles the rest
+  let cost = (30 + shopRerolls * 25) * (P.insider ? 2 : 1);
+  if (P.salvage && !P.salvageUsed) cost = 0;
   if (credits < cost) {
     shopMsg = 'NOT ENOUGH CREDITS'; shopMsgT = 1.3;
     Audio_.tone(150, 0.18, 'square', 0.1, 80);
     return;
   }
   credits -= cost;
+  if (P.salvage && cost === 0) P.salvageUsed = true;
   shopRerolls++;
   shopTouched = true;
   shopItems = makeShopStock();
@@ -2939,7 +2974,7 @@ const Codex = {
   need() {
     const e = Object.keys(CODEX_E).length +
               Object.keys(BOSSES).filter(k => !BOSSES[k].secret).length;
-    return { e, u: UPGRADES.length };
+    return { e, u: UPGRADES.filter(x => !x.lock).length };
   },
   have() {
     const n = Codex.need();
@@ -2948,7 +2983,7 @@ const Codex = {
     for (const k of Object.keys(BOSSES))
       if (!BOSSES[k].secret && Codex.e.has(k)) e++;
     let u = 0;
-    for (const x of UPGRADES) if (Codex.u.has(x.id)) u++;
+    for (const x of UPGRADES) if (!x.lock && Codex.u.has(x.id)) u++;
     return { e, u, needE: n.e, needU: n.u };
   },
   complete() {
@@ -2963,7 +2998,7 @@ const Codex = {
     for (const k of Object.keys(BOSSES))
       if (BOSSES[k].endgame) { if (!Codex.e.has(k)) continue; }   // may not exist yet
       else if (!Codex.e.has(k)) return false;
-    for (const u of UPGRADES) if (!Codex.u.has(u.id)) return false;
+    for (const u of UPGRADES) if (!u.lock && !Codex.u.has(u.id)) return false;
     for (const m of MALWARE) if (!Codex.m.has(m.id)) return false;
     for (const k of Object.keys(BOOKS)) if (!Codex.b.has(k)) return false;
     for (const s of SIGNS) if (!Codex.z.has(s.id)) return false;
@@ -3549,6 +3584,14 @@ function settleShards() {
 
 function openReward() {
   settleShards();
+  // a sheet that shuts the shop shuts the planetarium with it: both are the
+  // same beat in the run, and skipping the beat entirely is the point
+  if (chalNoShop()) {
+    shopPending = false;
+    betweenWaves = 2.2;
+    banner('NO RESUPPLY', '#64748b', 2.0);
+    return;
+  }
   if (Save.profile.planetarium && Math.random() < 0.5) openPlanetarium();
   else openShop();
 }
@@ -3615,6 +3658,8 @@ const Save = {
                   trueEnd: false, freeplay: false, unwrittenDeaths: 0,
                   askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
                   gfx: null, gfxSeen: 0, gfxCosts: null,
+                  // ids of every challenge cleared; the rewards key off this
+                  chal: [],
                   // full stats of the best run, so it can be re-submitted later
                   bestRun: null }),
 
@@ -3659,6 +3704,8 @@ const Save = {
     out.malware = !!(a.malware || b.malware);
     out.otherKills = Math.max(a.otherKills || 0, b.otherKills || 0);
     // a codex entry is knowledge: union both stores, never subtract
+    // a cleared challenge is an unlock: union both stores, never subtract
+    out.chal = [...new Set([...(a.chal || []), ...(b.chal || [])])];
     for (const k of ['codexE', 'codexU', 'codexM', 'codexB', 'codexZ'])
       out[k] = [...new Set([...(a[k] || []), ...(b[k] || [])])];
     out.keeperMet = !!(a.keeperMet || b.keeperMet);
@@ -3930,6 +3977,8 @@ function resetGame() {
   curseHpMul = 1; planetSign = null; planetRevealed = false;
   // a co-op run places the wingman itself, immediately after this
   Wing.live = false; Wing.down = false;
+  // and a challenge re-arms itself immediately after this, too
+  Chal.on = null; Chal.won = false; Chal.reward = null;
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   hitStop = 0; drawFlashT = 0; bannerT = 0;
   Audio_.intensity = 0;
@@ -3939,6 +3988,21 @@ function gameOver(quiet) {
   state = 'dead';
   /* A freeplay run is a sandbox: it must not touch the record in any way —
      no stats, no best, no leaderboard, no codex. */
+  /* A challenge is a different game with a different rule sheet, so it is
+     scored on its own terms: the goal was met or it was not. Nothing here
+     touches your best, your board position or your ordinary progression. */
+  if (Chal.on) {
+    lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                  sector: stage.name, loop: loopNum, isRecord: false,
+                  chal: Chal.on, chalWon: Chal.won, reward: Chal.reward };
+    Codex.flush();
+    if (!quiet) {
+      explode(P.x, P.y, 180, 0, COL.player);
+      burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
+      shake(1); Audio_.over();
+    }
+    return;
+  }
   if (freeRun) {
     lastStats = { score: 0, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false, freeplay: true };
@@ -3970,7 +4034,13 @@ function gameOver(quiet) {
 
 function handleKey(k) {
   // volume lives on the slider now, so M is free for the way out
-  if (k === 'm' && (state === 'pause' || state === 'dead')) { quitToMenu(); return; }
+  if (k === 'm' && (state === 'pause' || state === 'dead')) {
+    // straight back to the ladder, which is where you were going anyway
+    const wasChal = !!Chal.on;
+    quitToMenu();
+    if (wasChal) openChal('menu');
+    return;
+  }
   // --- freeplay console: its own key, and it swallows nothing else ---
   if (freeRun && k === '\\') {
     freeOpen = !freeOpen; freeSel = 0; Audio_.select(); return;
@@ -3982,8 +4052,10 @@ function handleKey(k) {
     if (k === 'escape') { freeOpen = false; return; }
   }
   if (state === 'lan') { lanKey(k); return; }
+  if (state === 'chal') { chalKey(k); return; }
   if (state === 'menu') {
     if (k === 'l') { openLan(); return; }
+    if (k === 'k') { openChal('menu'); return; }
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       applyChar((selectedChar + 1) % CHARS.length);
@@ -4018,6 +4090,10 @@ function handleKey(k) {
   }
   // a guest cannot start a run: the next one begins when the host says so
   if (state === 'dead') {
+    // a challenge restarts as itself; the ordinary run restarts as a run
+    if (Chal.on && (k === ' ' || k === 'enter' || k === 'r')) {
+      const c = Chal.on; chalQuit(); startChallenge(c); return;
+    }
     if (mpGuest() || !(k === ' ' || k === 'enter' || k === 'r')) return;
     // still hosting: the next run is the wingman's too, not a solo restart
     if (mpHost()) { mpStartRun(); return; }
@@ -4134,6 +4210,7 @@ function volFromMouse() {
 function quitToMenu() {
   if (state !== 'dead' && wave > 0 && score > 0) gameOver(true);
   if (MP.on || netLive()) mpQuit();     // hang up before the menu, not after
+  chalQuit();
   state = 'menu';
   uiArm = 0.4;
   Audio_.select();
@@ -4142,11 +4219,14 @@ function quitToMenu() {
 function handleClick() {
   if (state === 'name') { if (isTouch) promptName(); return; }
   if (state === 'lan') { lanClick(); return; }
+  if (state === 'chal') { chalClick(); return; }
   if (state === 'menu') {
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
+    if (inRect(mouse.x, mouse.y, menuChalRect())) { openChal('menu'); return; }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
+    if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
     if (mpGuest()) return;
     if (mpHost()) { mpStartRun(); return; }
     resetGame(); state = 'play'; return;
@@ -4252,6 +4332,7 @@ function checkLevel() {
   // replace the reward room that just opened. Every overlay calls back into
   // this after restoring 'play', so nothing is lost — only deferred.
   if (state !== 'play') return;
+  if (chalNoLevel()) { P.xp = 0; return; }    // this sheet offers nothing, ever
   if (P.xp >= P.xpNext) {
     P.xp -= P.xpNext;
     P.level++;
@@ -4310,6 +4391,7 @@ function update(dt) {
 
   if (state === 'menu' || state === 'name') { updateMenu(dt); return; }
   if (state === 'lan') { updateLan(dt); return; }
+  if (state === 'chal') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }
   /* A guest simulates nothing: it eases the host's picture forward, predicts
      its own hull and draws. This sits above the pause check on purpose — a
      paused guest still has to keep receiving, or the host runs away from it. */
@@ -4360,6 +4442,9 @@ function update(dt) {
          : (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
   const wdt = dt * slowmo;
 
+  chalTick(dt);              // the rule sheet, where it touches the frame
+  rewardTick(dt);            // and the rewards that run on their own clocks
+  rewardDashSweep(dt);
   updateWaves(dt);
   updatePlayer(dt);
   mpHostTick(dt);            // the wingman flies inside the same tick you do
@@ -4468,7 +4553,7 @@ function updatePlayer(dt) {
   // aim
   mouse.wx = (mouse.x - W / 2 - cam.sx) / camZoom + cam.x;
   mouse.wy = (mouse.y - H / 2 - cam.sy) / camZoom + cam.y;
-  let firing = mouse.down || autoFire || keys['j'];
+  let firing = mouse.down || autoFire || keys['j'] || chalAuto();
   if (isTouch) {
     if (touchUI.aim) {
       const dx = touchUI.aim.x - touchUI.aim.ox, dy = touchUI.aim.y - touchUI.aim.oy;
@@ -4506,6 +4591,8 @@ function updatePlayer(dt) {
     let dx = ix, dy = iy;
     if (!il) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); }
     P.dashDX = dx; P.dashDY = dy;
+    onRewardDash(dx, dy);
+    for (const en of enemies) en.dashTagged = false;
     Audio_.dash();
     burst(P.x, P.y, 18, COL.player, 240, 3, 0.4, 1.4, Math.atan2(-dy, -dx));
     if (P.shockwave)
@@ -4541,7 +4628,8 @@ function updatePlayer(dt) {
     if (P.ghosts.length) P.ghosts.shift();   // the trail drains once you land
     // acid chills you, Tempo kicks in after a kill
     const spdMul = (1 - playerChill) * (P.tempoT > 0 ? 1.35 : 1)
-                 * (P.burrowT > 0 ? 1.8 : 1);
+                 * (P.burrowT > 0 ? 1.8 : 1)
+                 * (P.after && firing ? 1 + 0.4 * P.after : 1);
     const tvx = ix * P.speed * spdMul, tvy = iy * P.speed * spdMul;
     const k = 1 - Math.exp(-16 * dt);
     P.vx = lerp(P.vx, tvx, k);
@@ -4563,7 +4651,8 @@ function updatePlayer(dt) {
 
   // shooting
   P.fireT -= dt;
-  const rateMul = 1 + (P.bloodlust ? 0.07 * P.bloodlust * P.blStacks : 0);
+  const rateMul = 1 + (P.bloodlust ? 0.07 * P.bloodlust * P.blStacks : 0)
+                    + (P.rolling ? 0.03 * P.rolling * (P.rollN || 0) : 0);
   // the diary replaces the weapon outright — drop any beam still standing
   if (P.diaryT > 0 && P.laserT > 0) { P.laserT = 0; P.laserSegs.length = 0; P.laserEnv = 0; }
 
@@ -4605,6 +4694,7 @@ function updatePlayer(dt) {
       }
     }
     if (twinActive()) twinFire();
+    onPlayerShot(mx, my, P.ang);
     if (slug) { Audio_.tone(190, 0.16, 'square', 0.13, 70); shake(0.09); }
     else Audio_.shoot();
     P.vx -= Math.cos(P.ang) * 26; P.vy -= Math.sin(P.ang) * 26;
@@ -4634,7 +4724,7 @@ function updatePlayer(dt) {
   }
 
   // regen / shield / timers
-  if (P.regen) P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
+  if (P.regen && !chalNoHeal()) P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
   if (P.shieldMax) {
     if (P.shield < P.shieldMax) {
       P.shieldT += dt;
@@ -5178,7 +5268,7 @@ function updateEnemies(dt) {
     if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost) {
       const cd = e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
                        * (e.rage === 1 ? 2.2 : 1);
-      if (TG === P) hurtPlayer(cd); else hurtWing(cd);
+      if (TG === P) hurtPlayer(cd, { src: e }); else hurtWing(cd);
       if (P.thorns && e.hitCd <= 0) {
         e.hitCd = 0.3;
         damageEnemy(e, (16 + P.dmg * 1.2) * P.thorns, false, TG.x, TG.y, { silent: true });
@@ -5203,7 +5293,7 @@ function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
   const bx = (ox === undefined ? e.x : ox) + Math.cos(ang) * e.r;
   const by = (oy === undefined ? e.y : oy) + Math.sin(ang) * e.r;
   const b = {
-    x: bx, y: by,
+    x: bx, y: by, owner: e,
     vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
     r, dmg, life: 4.5, col: e.col,
     // what fired it, so its shot can be drawn as its own thing
@@ -6298,6 +6388,7 @@ function unwWin() {
   unwritten = null;
   bossAlive = false;
   Codex.seeEnemy('unwritten');           // the entry exists now
+  chalCheckGoal('unwritten');
   Codex.flush();
   if (!Save.profile.trueEnd) {
     Save.profile.trueEnd = true;
@@ -6997,6 +7088,7 @@ function amalWin() {
   enemies.length = 0; ebullets.length = 0;
   bossAlive = false;
   Codex.seeEnemy('amalgam');
+  chalCheckGoal('amalgam');
   Codex.flush();
   if (!Save.profile.amalgamDone) {
     Save.profile.amalgamDone = true;
@@ -7867,6 +7959,9 @@ function updateMortars(dt) {
     const m = mortars[i];
     m.t -= dt;
     if (m.t <= 0) {
+      // Payload Counter calls these in too, and a shell you asked for does
+      // not get to bill you for landing where you aimed it
+      if (m.mine) { playerBlast(m.x, m.y, m.r, m.dmg, m.col); mortars.splice(i, 1); continue; }
       explode(m.x, m.y, m.r, m.dmg, m.col, false);
       if (len(P.x - m.x, P.y - m.y) < m.r + P.r) hurtPlayer(m.dmg);
       const wgm = mpPilots();
@@ -7966,6 +8061,21 @@ function updateBullets(dt) {
     const b = bullets[i];
     b.px = b.x; b.py = b.y;
     b.life -= dt;
+    if (P.bore && b.mine) {
+      const drag = Math.pow(0.72, dt);
+      b.vx *= drag; b.vy *= drag;
+      b.dmg *= 1 + 0.55 * P.bore * dt;
+    }
+    if (b.life <= 0 && P.snap && b.mine && !b.snapped) {
+      b.snapped = true;
+      b.life = 0.85;
+      b.hits = null;                     // it may hit the same bodies again
+      const a = Math.atan2(P.y - b.y, P.x - b.x);
+      const s = Math.max(340, len(b.vx, b.vy));
+      b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
+      b.dmg *= 0.8;
+      continue;
+    }
     if (b.life <= 0) {
       // VIRGO: a shot that hits nothing is an imperfection, and it costs you
       if (P.exacting && b.mine && !b.hit) {
@@ -8223,7 +8333,7 @@ function updateEBullets(dt) {
       }
     }
     if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
-      hurtPlayer(b.dmg);
+      hurtPlayer(b.dmg, { src: b.owner });
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);
       continue;
@@ -8282,7 +8392,8 @@ function updatePickups(dt) {
         Audio_.tone(1050 + rnd(300), 0.05, 'square', 0.045, 1600);
       } else if (d0.kind === 'heal') {
         // whoever walked over it is the one who gets patched up
-        const amt = Math.round(dt0.maxHp * 0.28);
+        const amt = chalNoHeal() ? 0 : Math.round(dt0.maxHp * 0.28);
+        if (!amt) floatText(dt0.x, dt0.y - 30, 'NOTHING HEALS', '#64748b', 13);
         dt0.hp = Math.min(dt0.maxHp, dt0.hp + amt);
         floatText(dt0.x, dt0.y - 30, '+' + amt + ' HP', COL.hp, 17);
         Audio_.heal();
@@ -8339,7 +8450,8 @@ function render() {
   // whichever overlay draws the slider re-publishes it; otherwise it is gone
   if (!volDrag) volRect = null;
 
-  if (state === 'menu' || state === 'name' || state === 'lan') {
+  if (state === 'menu' || state === 'name' || state === 'lan' || state === 'chal') {
+    if (state === 'chal') { drawChal(); return; }
     renderMenu();
     if (state === 'name') drawNameEntry();
     if (state === 'lan') drawLan();
@@ -8428,8 +8540,10 @@ function render() {
     ctx.fillStyle = `rgba(255,255,255,${drawFlashT * 2.4})`;
     ctx.fillRect(0, 0, W, H);
   }
+  drawChalFog();      // over the world, under everything you need to read
   drawHUD();
   mpDrawHud();
+  drawChalHud();
   drawFreeplay();
   drawUnwrittenOverlay();
   drawLibraryPointer();
@@ -11554,12 +11668,23 @@ function drawDead() {
   ctx.fillRect(0, 0, W, H);
   const s = lastStats || { score, wave, kills: 0, level: 1, time: 0 };
   ctx.textAlign = 'center';
+  /* A challenge run ended two ways and only one of them is a death. The
+     board underneath is the same either way — score, wave, kills — because
+     they are still the interesting numbers. */
+  const cw = s.chal && s.chalWon;
   ctx.save();
-  ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 30;
+  ctx.shadowColor = cw ? '#fbbf24' : '#ef4444'; ctx.shadowBlur = 30;
   ctx.font = '800 54px Segoe UI, system-ui, sans-serif';
-  ctx.fillStyle = '#f87171';
-  ctx.fillText('SIGNAL LOST', W / 2, H / 2 - 96);
+  ctx.fillStyle = cw ? '#fde68a' : '#f87171';
+  ctx.fillText(cw ? 'CHALLENGE CLEARED' : 'SIGNAL LOST', W / 2, H / 2 - 96);
   ctx.restore();
+  if (s.chal) {
+    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = cw ? '#fbbf24' : '#94a3b8';
+    // above the 54px title, not behind it
+    ctx.fillText(s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS'),
+                 W / 2, H / 2 - 146);
+  }
 
   ctx.font = '800 46px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = '#f1f5f9';
@@ -11587,7 +11712,22 @@ function drawDead() {
     ctx.fillText(c[0], x, H / 2 + 54);
   });
 
-  if (s.isRecord && s.score > 0) {
+  if (s.chal) {
+    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    if (s.reward) {
+      ctx.fillStyle = RARITY[s.reward.rar];
+      ctx.fillText('UNLOCKED   ' + s.reward.n.toUpperCase(), W / 2, H / 2 + 84);
+      ctx.font = '500 11px Segoe UI, system-ui, sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(s.reward.d + '  —  it is in your pool from now on', W / 2, H / 2 + 102);
+    } else if (s.chalWon) {
+      ctx.fillStyle = '#6ee7b7';
+      ctx.fillText('ALREADY CLEARED   ·   NOTHING NEW TO UNLOCK', W / 2, H / 2 + 84);
+    } else {
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(chalCount() + ' / ' + CHALLENGES.length + '   CHALLENGES CLEARED', W / 2, H / 2 + 84);
+    }
+  } else if (s.isRecord && s.score > 0) {
     ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
     ctx.fillStyle = COL.crit;
     ctx.fillText('NEW PERSONAL BEST', W / 2, H / 2 + 84);
@@ -11612,7 +11752,9 @@ function drawDead() {
   ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
   ctx.fillStyle = rgba(COL.player, pulse);
   // the guest does not own the run and cannot start the next one
-  ctx.fillText(mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
+  ctx.fillText(s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
+                                 : 'SPACE RUN IT AGAIN   ·   M CHALLENGES')
+             : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
              : isTouch  ? 'TAP TO RUN AGAIN'
              : 'PRESS SPACE / R TO RUN AGAIN', W / 2, H / 2 + 124);
 }
@@ -11844,6 +11986,7 @@ function renderMenu() {
   lines.forEach((l, i) => ctx.fillText(l, cxp, H - 74 + i * 18));
 
   drawMenuLan();
+  drawMenuChal();
 
   // below every other footer line, so it competes with nothing
   drawVolSlider(cxp, H - 28, 150);
@@ -15143,6 +15286,1292 @@ function drawLan() {
     ctx.fillText('the run continues on the host — you can rejoin with a fresh code', cx, H / 2 - 20);
     lanButton('BACK', ' ', cx - 90, H / 2 + 30, 180, 44, COL.player, 'SPACE');
   }
+}
+
+/* ===========================================================================
+   CHALLENGES
+   Fifty fixed runs. Each hands you a deliberately broken version of the game
+   and names a boss: kill it and the run is a win, whatever the score.
+
+   A challenge is not a difficulty slider. It is one specific idea — no
+   upgrades, one hit point, half the room on fire — carried far enough that it
+   is a different game for ten minutes. The reward is always the same shape:
+   one upgrade that was not in your pool before and is in it forever after.
+
+   Gating is by challenges completed, so the ladder is the same for everyone:
+   eight are open from the start and the rest arrive in tiers. A few also want
+   something from the ordinary game first — the fracture, the planetarium, the
+   bookkeeper — because they are built out of systems you have not met yet.
+
+   Modifier vocabulary. Every key is read somewhere; nothing here is decorative.
+     char n     force a pilot          hp n       absolute max HP
+     dmg/rate/spd/bspd x               multipliers on the ship
+     start [id] upgrades applied at once (repeat an id to stack it)
+     dash n     dash charges (0 removes it)   credits n  starting credits
+     chip 1     record chip from wave one     mal 1      malware for a dash
+     sign id    a zodiac reading taken at the door
+     ban [id]   removed from every pool       only [id]  the only offers
+     rar [r]    rarities allowed              noLvl 1    no offers at all
+     noShop 1   no shop between sectors       xp x       experience multiplier
+     ehp/espd/edmg x  enemy health / speed / damage
+     elite x    floor on the elite roll       swarm [t]  the only spawns
+     budget x   spawn count multiplier        time n     seconds a wave may take
+     curse kind a hazard the room keeps laying
+     mirror n   shards embedded before you arrive
+     fog 1      you see only what is close    move 1     standing still costs hull
+     auto 1     the trigger is held for you   noHeal 1   healing does nothing
+     oneShot 1  one hit point, no armour
+   ========================================================================= */
+const CHALLENGES = [
+  /* ---- open from the start: five waves, one boss ---- */
+  { id: 'ch_hollow', n: 'HOLLOW', tier: 0, goal: 'warden', rw: 'u_hollow',
+    d: 'No upgrades. No offers. The ship you were handed, exactly as handed to you.',
+    m: { noLvl: 1 } },
+  { id: 'ch_glass', n: 'GLASS', tier: 0, goal: 'warden', rw: 'u_glass',
+    d: 'One hit point. Nothing in the run can raise it.',
+    m: { oneShot: 1 } },
+  { id: 'ch_deadweight', n: 'DEADWEIGHT', tier: 0, goal: 'warden', rw: 'u_deadweight',
+    d: 'Half speed, and plating enough that it might not matter.',
+    m: { spd: 0.52, start: ['armor', 'armor', 'hp', 'hp'] } },
+  { id: 'ch_infest', n: 'INFESTATION', tier: 0, goal: 'warden', rw: 'u_infest',
+    d: 'Swarmers. Only swarmers. Considerably more of them than usual.',
+    m: { swarm: ['swarmer'], budget: 2.8, ehp: 0.75 } },
+  { id: 'ch_fuse', n: 'LONG FUSE', tier: 0, goal: 'warden', rw: 'u_fuse',
+    d: 'One shot a second, carrying the weight of the four it replaced.',
+    m: { rate: 0.26, dmg: 4.4, bspd: 1.3 } },
+  { id: 'ch_switch', n: 'DEAD STICK', tier: 0, goal: 'warden', rw: 'u_switch',
+    d: 'The hull reads a stationary ship as a failed one and starts venting.',
+    m: { move: 1, spd: 1.22 } },
+  { id: 'ch_brownout', n: 'BROWNOUT', tier: 0, goal: 'warden', rw: 'u_brownout',
+    d: 'Sensors down to close range. The rest of the room is still out there.',
+    m: { fog: 1 } },
+  { id: 'ch_welded', n: 'WELDED', tier: 0, goal: 'warden', rw: 'u_welded',
+    d: 'The dash is welded shut. Walk.',
+    m: { dash: 0, start: ['spd', 'spd'] } },
+
+  /* ---- tier one: the foundry, ten waves ---- */
+  { id: 'ch_scatter', n: 'SCATTER', tier: 3, goal: 'forgeheart', rw: 'u_scatter',
+    d: 'Five barrels, none of them accurate, none of them strong.',
+    m: { start: ['multi', 'multi', 'multi', 'multi'], dmg: 0.55, ban: ['pierce', 'home'] } },
+  { id: 'ch_cannon', n: 'GLASS CANNON', tier: 3, goal: 'forgeheart', rw: 'u_cannon',
+    d: 'Triple damage on a hull that holds twenty-five points of it.',
+    m: { dmg: 3, hp: 25, noHeal: 1 } },
+  { id: 'ch_austerity', n: 'AUSTERITY', tier: 3, goal: 'forgeheart', rw: 'u_austerity',
+    d: 'The shop is shut. The credits keep accumulating, which is worse.',
+    m: { noShop: 1 } },
+  { id: 'ch_common', n: 'STANDARD ISSUE', tier: 3, goal: 'forgeheart', rw: 'u_common',
+    d: 'Common parts only. Nothing rare was ever shipped to this sector.',
+    m: { rar: ['common'] } },
+  { id: 'ch_ember', n: 'EMBER PROTOCOL', tier: 4, goal: 'forgeheart', rw: 'u_ember',
+    d: 'EMBER, charging half as fast and hitting three times as hard.',
+    m: { char: 1, rate: 0.5, dmg: 3, ban: ['multi', 'ric'] } },
+  { id: 'ch_promotion', n: 'PROMOTION', tier: 4, goal: 'forgeheart', rw: 'u_promotion',
+    d: 'Everything in the room has been promoted. Every single thing.',
+    m: { elite: 1, ehp: 0.72 } },
+  { id: 'ch_corrosion', n: 'CORROSION', tier: 4, goal: 'forgeheart', rw: 'u_corrosion',
+    d: 'The floor sweats acid. It is not from the hive and nobody will say where it is from.',
+    m: { curse: 'acid' } },
+
+  /* ---- tier two: the hive, fifteen waves ---- */
+  { id: 'ch_clock', n: 'ON THE CLOCK', tier: 8, goal: 'broodmother', rw: 'u_clock',
+    d: 'Forty-five seconds a wave. The hull pays the overtime.',
+    m: { time: 45 } },
+  { id: 'ch_pauper', n: 'PAUPER', tier: 8, goal: 'broodmother', rw: 'u_pauper',
+    d: 'No credits, ever. Levels are the only thing you will be given.',
+    m: { credits: 0, noShop: 1, xp: 1.35 } },
+  { id: 'ch_mirrors', n: 'HALL OF MIRRORS', tier: 8, goal: 'broodmother', rw: 'u_mirrors',
+    d: 'Eight shards buried in the walls before you arrive. Nobody threw them.',
+    m: { mirror: 8, start: ['ric', 'ric'] } },
+  { id: 'ch_famine', n: 'FAMINE', tier: 9, goal: 'broodmother', rw: 'u_famine',
+    d: 'Nothing heals. Not drops, not regeneration, not the shop.',
+    m: { noHeal: 1, start: ['hp', 'hp', 'armor'] } },
+  { id: 'ch_bulk', n: 'BULK', tier: 9, goal: 'broodmother', rw: 'u_bulk',
+    d: 'Everything has three times the health and half the speed. A long afternoon.',
+    m: { ehp: 3, espd: 0.5, budget: 0.55 } },
+  { id: 'ch_needle', n: 'NEEDLE', tier: 9, goal: 'broodmother', rw: 'u_needle',
+    d: 'One projectile, through everything, forever. Do not miss.',
+    m: { start: ['pierce', 'pierce', 'pierce', 'vel', 'vel'], ban: ['multi'], dmg: 1.8, rate: 0.6 } },
+  { id: 'ch_thorn', n: 'THORNBUSH', tier: 10, goal: 'broodmother', rw: 'u_thorn',
+    d: 'Your gun barely works. Whatever touches you regrets it immediately.',
+    m: { dmg: 0.2, start: ['thorns', 'thorns', 'thorns', 'hp', 'hp', 'armor'] } },
+  { id: 'ch_burn', n: 'SCORCHED', tier: 10, goal: 'broodmother', rw: 'u_burn',
+    d: 'The deck is on fire and stays on fire.',
+    m: { curse: 'fire', start: ['spd'] } },
+
+  /* ---- tier three: the vault, twenty waves ---- */
+  { id: 'ch_blindfire', n: 'BLIND FIRE', tier: 13, goal: 'archivist', rw: 'u_blindfire',
+    d: 'Close-range sensors and the trigger held down. Learn the sound of it.',
+    m: { fog: 1, auto: 1, elite: 0.4 } },
+  { id: 'ch_marathon', n: 'MARATHON', tier: 13, goal: 'archivist', rw: 'u_marathon',
+    d: 'Experience at a third of the rate. Twenty waves at that rate.',
+    m: { xp: 0.34, noShop: 1 } },
+  { id: 'ch_paper', n: 'PAPER', tier: 13, goal: 'archivist', rw: 'u_paper',
+    d: 'Twelve hit points. Everything hits harder. Every dash is a decision.',
+    m: { hp: 12, edmg: 1.5, dash: 3, start: ['dashcd'] } },
+  { id: 'ch_lockstep', n: 'LOCKSTEP', tier: 14, goal: 'archivist', rw: 'u_lockstep',
+    d: 'Four upgrades exist. You will be offered those four for twenty waves.',
+    m: { only: ['rate', 'dmg', 'hp', 'spd'] } },
+  { id: 'ch_vermin', n: 'VERMIN', tier: 14, goal: 'archivist', rw: 'u_vermin',
+    d: 'Twice the spawns at two thirds the health, and they do not stop arriving.',
+    m: { budget: 2.1, ehp: 0.66, espd: 1.15 } },
+  { id: 'ch_static', n: 'STATIC DISCHARGE', tier: 14, goal: 'archivist', rw: 'u_static',
+    d: 'A malware payload where the dash used to be, chosen for you.',
+    m: { mal: 1 }, need: p => p.malware, needTxt: 'MEET MALWARE FIRST' },
+  { id: 'ch_frugal', n: 'FRUGAL', tier: 15, goal: 'archivist', rw: 'u_frugal',
+    d: 'Legendary parts only, and experience at half rate to pay for them.',
+    m: { rar: ['legend'], xp: 0.55 } },
+  { id: 'ch_gauntlet', n: 'GAUNTLET', tier: 15, goal: 'archivist', rw: 'u_gauntlet',
+    d: 'Every enemy elite, every wave on a clock, and the shop shut.',
+    m: { elite: 1, time: 60, noShop: 1, ehp: 0.8 } },
+
+  /* ---- tier four: the void, twenty-five waves ---- */
+  { id: 'ch_void', n: 'THE LONG DARK', tier: 19, goal: 'nullcore', rw: 'u_void',
+    d: 'Twenty-five waves with the sensors down.',
+    m: { fog: 1, ehp: 1.15 } },
+  { id: 'ch_ascetic', n: 'ASCETIC', tier: 19, goal: 'nullcore', rw: 'u_ascetic',
+    d: 'No upgrades, no shop, no healing. The whole way to NULL.',
+    m: { noLvl: 1, noShop: 1, noHeal: 1, dmg: 1.9, hp: 160 } },
+  { id: 'ch_overclock', n: 'OVERCLOCK', tier: 19, goal: 'nullcore', rw: 'u_overclock',
+    d: 'Everything runs half again as fast. Including you. Especially them.',
+    m: { espd: 1.5, spd: 1.35, rate: 1.4, edmg: 1.2 } },
+  { id: 'ch_siege', n: 'SIEGE', tier: 20, goal: 'nullcore', rw: 'u_siege',
+    d: 'Four times the health on everything, and a gun built to answer it.',
+    m: { ehp: 4, espd: 0.72, dmg: 2.4, rate: 0.7, budget: 0.6 } },
+  { id: 'ch_tightrope', n: 'TIGHTROPE', tier: 20, goal: 'nullcore', rw: 'u_tightrope',
+    d: 'One hit point, five dashes, and the whole rotation to cross.',
+    m: { oneShot: 1, dash: 5, start: ['dashcd', 'dashcd', 'spd'] } },
+  { id: 'ch_tax', n: 'THE TAX', tier: 20, goal: 'nullcore', rw: 'u_tax',
+    d: 'Levels come faster, everything hits harder, and nothing heals.',
+    m: { xp: 1.5, edmg: 1.25, noHeal: 1, hp: 140, time: 75 } },
+  { id: 'ch_swarmlord', n: 'SWARMLORD', tier: 21, goal: 'nullcore', rw: 'u_swarmlord',
+    d: 'Swarmers and bombers, three deep, all the way down.',
+    m: { swarm: ['swarmer', 'bomber'], budget: 2.4, ehp: 0.8, espd: 1.1 } },
+  { id: 'ch_purist', n: 'PURIST', tier: 21, goal: 'nullcore', rw: 'u_purist',
+    d: 'Nothing that shoots for you. No drones, sentries, fragments or chains.',
+    m: { ban: ['drone', 'sentry', 'frag', 'chain', 'vortex', 'napalm'], dmg: 1.5 } },
+
+  /* ---- tier five: these want the rest of the game met first ---- */
+  { id: 'ch_fracture', n: 'HAIRLINE', tier: 25, goal: 'curator', rw: 'u_fracture',
+    d: 'Into the fracture on a hull that cannot take a second hit.',
+    m: { oneShot: 1, dash: 3 },
+    need: p => p.altPath, needTxt: 'UNLOCK THE FRACTURE FIRST' },
+  { id: 'ch_mirrorfight', n: 'FACING', tier: 25, goal: 'theother', rw: 'u_mirrorfight',
+    d: 'It has your build. Make sure your build is worth having.',
+    m: { xp: 1.4, ehp: 1.2, noShop: 1 },
+    need: p => p.altPath, needTxt: 'UNLOCK THE FRACTURE FIRST' },
+  { id: 'ch_stars', n: 'BAD READING', tier: 26, goal: 'nullcore', rw: 'u_stars',
+    d: 'A cursed reading, taken at the door and carried the whole way.',
+    m: { sign: 'scorpio', ehp: 1.1 },
+    need: p => p.planetarium, needTxt: 'UNLOCK THE PLANETARIUM FIRST' },
+  { id: 'ch_chip', n: 'CURATED', tier: 26, goal: 'nullcore', rw: 'u_chip',
+    d: 'The record chip from wave one. Everything it offers is flat and strange.',
+    m: { chip: 1, noShop: 1 } },
+  { id: 'ch_dogpile', n: 'DOGPILE', tier: 28, goal: 'nullcore', rw: 'u_dogpile',
+    d: 'Three times the spawns, half your damage, sixty seconds a wave.',
+    m: { budget: 3, dmg: 0.55, time: 60, ehp: 0.7 } },
+  { id: 'ch_ironman', n: 'IRONMAN', tier: 30, goal: 'nullcore', rw: 'u_ironman',
+    d: 'One hit point, no dash, no upgrades. It has been done.',
+    m: { oneShot: 1, dash: 0, noLvl: 1, dmg: 2.6, rate: 1.4, spd: 1.15 } },
+  { id: 'ch_inferno', n: 'INFERNO', tier: 32, goal: 'nullcore', rw: 'u_inferno',
+    d: 'Fire underfoot, elites everywhere, and a clock on every wave.',
+    m: { curse: 'fire', elite: 1, time: 55, ehp: 0.85, start: ['spd'] } },
+  { id: 'ch_null', n: 'NULL HYPOTHESIS', tier: 34, goal: 'nullcore', rw: 'u_null',
+    d: 'All of it at once: no offers, no shop, no healing, no dash, fog, a clock.',
+    m: { noLvl: 1, noShop: 1, noHeal: 1, dash: 0, fog: 1, time: 80, dmg: 2.2, hp: 150 } },
+  { id: 'ch_keeper', n: 'THE AUDIT', tier: 36, goal: 'keeper', rw: 'u_keeper',
+    d: 'He wants the record. Bring it to him on a hull he will not respect.',
+    m: { hp: 40, dmg: 1.6, xp: 1.5 },
+    need: p => p.keeperMet, needTxt: 'MEET THE BOOKKEEPER FIRST' },
+  { id: 'ch_unwritten', n: 'FINAL DRAFT', tier: 40, goal: 'unwritten', rw: 'u_unwritten',
+    d: 'The entry that does not exist, on a run offered nothing legendary.',
+    m: { rar: ['common', 'rare'], xp: 1.3 },
+    need: p => p.trueEnd, needTxt: 'FINISH THE RECORD FIRST' },
+  { id: 'ch_amalgam', n: 'THE WHOLE THING', tier: 45, goal: 'amalgam', rw: 'u_amalgam',
+    d: 'All nine of them, on half a hull. He will have something to say about it.',
+    m: { hp: 55, dmg: 1.8, dash: 3 },
+    need: p => p.amalgamDone, needTxt: 'MEET THE AMALGAM FIRST' }
+];
+
+/* Reward upgrades. Locked until the challenge carrying one is beaten, and
+   permanent afterwards: they join the ordinary pool and are offered like
+   anything else.
+
+   Every one of these is a mechanic the base pool does not have. That is the
+   whole design rule — a reward that is Hollow Point with a different number on
+   it is not a reward, it is a longer list. Each hooks somewhere the base
+   upgrades do not reach: the shot clock, the dash line, the wave timer, the
+   shop till, the level-up itself. */
+const CHAL_UPGRADES = [
+  /* ---- the shot itself ---- */
+  { id: 'u_hollow', lock: 'ch_hollow', n: 'Echo Chamber', max: 3, rar: 'epic',
+    d: 'Every shot fires again a moment later at 55% damage',
+    f: p => p.echo++ },
+  { id: 'u_fuse', lock: 'ch_fuse', n: 'Cold Barrel', max: 3, rar: 'epic',
+    d: 'The first shot after a second of holding fire hits for 3.5x',
+    f: p => p.cold++ },
+  { id: 'u_needle', lock: 'ch_needle', n: 'Runaway Heat', max: 3, rar: 'epic',
+    d: 'Each shot in a burst adds +5% damage, up to +60%. Stopping cools it',
+    f: p => p.heat++ },
+  { id: 'u_siege', lock: 'ch_siege', n: 'Payload Counter', max: 2, rar: 'epic',
+    d: 'Every tenth shot calls a mortar down where you are aiming',
+    f: p => p.tick10++ },
+  { id: 'u_scatter', lock: 'ch_scatter', n: 'Snapback', max: 3, rar: 'epic',
+    d: 'Spent bullets turn around and fly back through you',
+    f: p => p.snap++ },
+  { id: 'u_bulk', lock: 'ch_bulk', n: 'Boring Rounds', max: 3, rar: 'rare',
+    d: 'Bullets slow as they travel, and hit harder the slower they get',
+    f: p => p.bore++ },
+  { id: 'u_ember', lock: 'ch_ember', n: 'Afterburner', max: 3, rar: 'epic',
+    d: '+40% move speed while the trigger is held',
+    f: p => p.after++ },
+
+  /* ---- the dash ---- */
+  { id: 'u_welded', lock: 'ch_welded', n: 'Slipknot', max: 3, rar: 'rare',
+    d: 'Anything you dash through takes +45% from you for four seconds',
+    f: p => p.slipknot++ },
+  { id: 'u_paper', lock: 'ch_paper', n: 'Blink Charge', max: 3, rar: 'epic',
+    d: 'The first shot after a dash deals triple damage',
+    f: p => p.blinkC++ },
+  { id: 'u_tightrope', lock: 'ch_tightrope', n: 'Contrail', max: 3, rar: 'epic',
+    d: 'Your dash lays a burning line behind it',
+    f: p => p.contrail++ },
+  { id: 'u_gauntlet', lock: 'ch_gauntlet', n: 'Kickstart', max: 2, rar: 'rare',
+    d: 'A dash that passes through two enemies refunds itself',
+    f: p => p.kick++ },
+  { id: 'u_fracture', lock: 'ch_fracture', n: 'Phase Debt', max: 3, rar: 'legend',
+    d: 'Dashing erases enemy fire it touches, and each round erased repairs 1',
+    f: p => p.phaseD++ },
+
+  /* ---- kills ---- */
+  { id: 'u_infest', lock: 'ch_infest', n: 'Harvest', max: 3, rar: 'rare',
+    d: 'Every eighth kill drops a repair',
+    f: p => p.harvest++ },
+  { id: 'u_swarmlord', lock: 'ch_swarmlord', n: 'Rolling Start', max: 3, rar: 'epic',
+    d: '+3% fire rate for every kill this wave. The wave ends, it resets',
+    f: p => p.rolling++ },
+  { id: 'u_vermin', lock: 'ch_vermin', n: 'Requisition', max: 3, rar: 'rare',
+    d: 'Every tenth kill drops a credit cache',
+    f: p => p.requis++ },
+  { id: 'u_promotion', lock: 'ch_promotion', n: 'Shatter', max: 3, rar: 'epic',
+    d: 'Elites burst into data when they die',
+    f: p => p.shatter++ },
+  { id: 'u_dogpile', lock: 'ch_dogpile', n: 'Charge Bank', max: 3, rar: 'epic',
+    d: 'Kills bank charge. A full bank makes your next dash detonate',
+    f: p => p.bank++ },
+  { id: 'u_ironman', lock: 'ch_ironman', n: 'Trophy Rack', max: 2, rar: 'legend',
+    d: '+12% damage for every boss you have killed this run',
+    f: p => p.trophy++ },
+  { id: 'u_inferno', lock: 'ch_inferno', n: 'Chain Reaction', max: 2, rar: 'legend',
+    d: 'Anything killed by a blast blows up in turn',
+    f: p => p.chainR++ },
+
+  /* ---- being hit ---- */
+  { id: 'u_glass', lock: 'ch_glass', n: 'Counterpunch', max: 3, rar: 'epic',
+    d: 'Taking a hit fires a full circle of shots',
+    f: p => p.counter++ },
+  { id: 'u_famine', lock: 'ch_famine', n: 'Grudge', max: 3, rar: 'epic',
+    d: '+8% damage for every hit you have taken this wave',
+    f: p => p.grudge++ },
+  { id: 'u_cannon', lock: 'ch_cannon', n: 'Deadman Brake', max: 2, rar: 'legend',
+    d: 'Once a wave, a lethal hit slows the room to a crawl instead of landing',
+    f: p => p.deadman++ },
+  { id: 'u_deadweight', lock: 'ch_deadweight', n: 'Shell', max: 3, rar: 'rare',
+    d: 'Five seconds without being hit grows a shell that eats one hit',
+    f: p => p.shell++ },
+  { id: 'u_static', lock: 'ch_static', n: 'Feedback Loop', max: 3, rar: 'epic',
+    d: 'Whatever damages you takes it back twice over',
+    f: p => p.feedback++ },
+
+  /* ---- where you are standing ---- */
+  { id: 'u_brownout', lock: 'ch_brownout', n: 'Wall Anchor', max: 3, rar: 'rare',
+    d: '+45% damage while your back is against a wall',
+    f: p => p.wallA++ },
+  { id: 'u_void', lock: 'ch_void', n: 'Isolation', max: 3, rar: 'epic',
+    d: '+55% damage while nothing is within 320 units of you',
+    f: p => p.isolate++ },
+  { id: 'u_thorn', lock: 'ch_thorn', n: 'Crowd Pressure', max: 3, rar: 'epic',
+    d: '+7% damage for each enemy crowding you, up to +70%',
+    f: p => p.crowd++ },
+  { id: 'u_mirrors', lock: 'ch_mirrors', n: 'Centre Mass', max: 3, rar: 'rare',
+    d: '+35% damage while you hold the middle of the arena',
+    f: p => p.centerM++ },
+
+  /* ---- the clock ---- */
+  { id: 'u_clock', lock: 'ch_clock', n: 'First Blood', max: 3, rar: 'epic',
+    d: '+90% damage for the first six seconds of every wave',
+    f: p => p.firstB++ },
+  { id: 'u_marathon', lock: 'ch_marathon', n: 'Last Stand', max: 3, rar: 'epic',
+    d: '+70% damage once three or fewer of them are left',
+    f: p => p.lastS++ },
+  { id: 'u_burn', lock: 'ch_burn', n: 'Sundial', max: 3, rar: 'rare',
+    d: '+4% damage for every ten seconds a wave has lasted',
+    f: p => p.sundial++ },
+  { id: 'u_overclock', lock: 'ch_overclock', n: 'Night Shift', max: 1, rar: 'legend',
+    d: 'Every third wave, you deal double damage and take it',
+    f: p => p.nightS++ },
+
+  /* ---- what you have already hit ---- */
+  { id: 'u_switch', lock: 'ch_switch', n: 'Brand', max: 3, rar: 'epic',
+    d: 'The first hit on anything brands it. Every hit after that is +35%',
+    f: p => p.brand++ },
+  { id: 'u_stars', lock: 'ch_stars', n: 'Spallation', max: 3, rar: 'epic',
+    d: 'Critical hits strip a quarter of a target armour, permanently',
+    f: p => p.spall++ },
+  { id: 'u_lockstep', lock: 'ch_lockstep', n: 'Tag Team', max: 3, rar: 'epic',
+    d: '+30% damage whenever you hit something other than your last target',
+    f: p => p.tag++ },
+  { id: 'u_corrosion', lock: 'ch_corrosion', n: 'Conduction', max: 3, rar: 'rare',
+    d: '+50% damage to anything slowed, chilled or frozen',
+    f: p => p.conduct++ },
+  { id: 'u_blindfire', lock: 'ch_blindfire', n: 'Suppression', max: 3, rar: 'rare',
+    d: 'Anything you hit attacks 30% slower for two seconds',
+    f: p => p.suppress++ },
+
+  /* ---- the till and the level-up ---- */
+  { id: 'u_austerity', lock: 'ch_austerity', n: 'Insider Trading', max: 2, rar: 'rare',
+    d: 'Shop prices drop 35%. Rerolls cost double',
+    f: p => p.insider++ },
+  { id: 'u_pauper', lock: 'ch_pauper', n: 'Interest', max: 3, rar: 'rare',
+    d: 'Every wave cleared pays 5% of the credits you are holding',
+    f: p => p.interest++ },
+  { id: 'u_tax', lock: 'ch_tax', n: 'Salvage Rights', max: 1, rar: 'rare',
+    d: 'The first reroll of every shop visit is free',
+    f: p => p.salvage++ },
+  { id: 'u_common', lock: 'ch_common', n: 'Tithe', max: 4, rar: 'common',
+    d: 'Every level-up repairs 18% of the hull',
+    f: p => p.tithe++ },
+  { id: 'u_frugal', lock: 'ch_frugal', n: 'Blood Price', max: 1, rar: 'legend',
+    d: 'A fourth upgrade option, paid for with 12% of your max HP each level',
+    f: p => p.bloodP++ },
+  { id: 'u_keeper', lock: 'ch_keeper', n: 'Two Minds', max: 1, rar: 'legend',
+    d: 'Every fifth level-up hands you both of the first two options',
+    f: p => p.twoMinds++ },
+  { id: 'u_mirrorfight', lock: 'ch_mirrorfight', n: 'Overtime', max: 3, rar: 'epic',
+    d: 'Clearing a wave inside twenty-five seconds pays a third of a level',
+    f: p => p.otime++ },
+  { id: 'u_chip', lock: 'ch_chip', n: 'Curator Eye', max: 1, rar: 'legend',
+    d: 'One more upgrade option, every time',
+    f: p => p.curator++ },
+
+  /* ---- runs built around one idea ---- */
+  { id: 'u_null', lock: 'ch_null', n: 'Deadline', max: 1, rar: 'legend',
+    d: 'A clock on the whole run. Each wave cleared adds 40s. +45% damage while it runs',
+    f: p => { p.deadline++; p.deadlineT = Math.max(p.deadlineT || 0, 100); } },
+  { id: 'u_ascetic', lock: 'ch_ascetic', n: 'Glass Ledger', max: 1, rar: 'legend',
+    d: 'Your hull is worth one point. Every wave cleared grows a shield instead',
+    f: p => { p.ledger++; p.maxHp = 1; p.hp = 1; } },
+  { id: 'u_purist', lock: 'ch_purist', n: 'Symbiote', max: 3, rar: 'epic',
+    d: 'Drones, sentries and chains hit twice as hard. You fire 20% slower',
+    f: p => { p.symb++; p.fireRate *= 0.8; } },
+  { id: 'u_unwritten', lock: 'ch_unwritten', n: 'Erasure', max: 1, rar: 'legend',
+    d: 'Every twentieth hit deletes what it lands on',
+    f: p => p.erasure++ },
+  { id: 'u_amalgam', lock: 'ch_amalgam', n: 'Assembly', max: 1, rar: 'legend',
+    d: 'Every wave cleared bolts on +2 max HP and +2% damage, for the rest of the run',
+    f: p => p.assembly++ }
+];
+UPGRADES.push(...CHAL_UPGRADES);
+
+/* ===========================================================================
+   CHALLENGE REWARDS — the mechanics
+   The fifty rewards deliberately do not reuse a single base upgrade's effect,
+   so each one needs somewhere to live. They are gathered here rather than
+   scattered so the whole set can be read at once, and they route through six
+   entry points the rest of the file calls:
+
+     rewardMul()        damage multipliers that depend on you and the clock
+     rewardTargetMul(e) multipliers that depend on what is being hit
+     onPlayerShot()     the shot clock: echoes, counters, charges, heat
+     onRewardKill(e)    the kill ledger: harvest, banks, trophies
+     onRewardHurt(d)    being hit: counters, grudges, shells
+     onRewardDash()     the dash line: slipknots, contrails, refunds
+     onRewardWave()     the wave boundary: interest, resets, assembly
+
+   All of them are no-ops on a profile that has unlocked nothing, and none of
+   them are reachable from the base pool.
+   ========================================================================= */
+
+/* Player-state multipliers, folded into stanceMul so every weapon picks them
+   up: bullets, the lance, the twin and everything that routes through it. */
+function rewardMul() {
+  let m = 1;
+  if (P.heat)    m *= 1 + Math.min(0.6, (P.heatN || 0) * 0.05) * P.heat;
+  if (P.grudge)  m *= 1 + (P.grudgeN || 0) * 0.08 * P.grudge;
+  if (P.trophy)  m *= 1 + (P.trophyN || 0) * 0.12 * P.trophy;
+  if (P.assembly) m *= 1 + (P.assemblyN || 0) * 0.02;
+  if (P.sundial) m *= 1 + Math.floor((P.waveClock || 0) / 10) * 0.04 * P.sundial;
+  if (P.firstB && (P.waveClock || 0) < 6) m *= 1 + 0.9 * P.firstB;
+  if (P.deadline) m *= 1.45;
+  if (P.nightS && wave % 3 === 0) m *= 2;
+  if (P.lastS) {
+    let live = 0;
+    for (const e of enemies) if (!e.dead) live++;
+    if (live > 0 && live <= 3) m *= 1 + 0.7 * P.lastS;
+  }
+  if (P.wallA) {
+    const d = Math.min(P.x - arena.x0, arena.x1 - P.x, P.y - arena.y0, arena.y1 - P.y);
+    if (d < 130) m *= 1 + 0.45 * P.wallA;
+  }
+  if (P.centerM) {
+    const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
+    const w = (arena.x1 - arena.x0) / 6, h = (arena.y1 - arena.y0) / 6;
+    if (Math.abs(P.x - cx) < w && Math.abs(P.y - cy) < h) m *= 1 + 0.35 * P.centerM;
+  }
+  if (P.crowd || P.isolate) {
+    let near = 0, closest = 1e9;
+    for (const e of enemies) {
+      if (e.dead) continue;
+      const d = len(e.x - P.x, e.y - P.y);
+      if (d < closest) closest = d;
+      if (d < 220) near++;
+    }
+    if (P.crowd && near) m *= 1 + Math.min(0.7, near * 0.07) * P.crowd;
+    if (P.isolate && closest > 320) m *= 1 + 0.55 * P.isolate;
+  }
+  return m;
+}
+
+/* Multipliers that need to know what is being hit. Applied once, at the top of
+   damageEnemy, so drones, chains and blasts all honour them too. */
+function rewardTargetMul(e) {
+  let m = 1;
+  if (P.brand) {
+    if (e.branded) m *= 1 + 0.35 * P.brand;
+    else e.branded = true;               // the first hit only marks it
+  }
+  if (P.tag && P.lastTarget && P.lastTarget !== e) m *= 1 + 0.3 * P.tag;
+  if (P.tag) P.lastTarget = e;
+  if (P.conduct && (e.slowT > 0 || e.slow > 0)) m *= 1 + 0.5 * P.conduct;
+  if (P.slipknot && e.slipT > 0) m *= 1 + 0.45 * P.slipknot;
+  return m;
+}
+
+/* On-hit effects that are not multipliers. Returns true if the target was
+   deleted outright, so the caller can stop working on a corpse. */
+function onRewardHit(e, crit) {
+  if (P.suppress) { e.cd = (e.cd || 0) + 0.6 * P.suppress; e.suppT = 2; }
+  if (P.spall && crit) {
+    if (e.dr > 0) e.dr *= 0.75;
+    if (e.armor > 0) { e.armor *= 0.75; e.absorb *= 0.75; }
+  }
+  if (P.erasure && e.type !== 'boss') {
+    P.eraseN = (P.eraseN || 0) + 1;
+    if (P.eraseN >= 20) {
+      P.eraseN = 0;
+      floatText(e.x, e.y - e.r - 10, 'ERASED', '#f8fafc', 16);
+      ringFx(e.x, e.y, e.r, e.r * 3, '#f8fafc', 0.4, 3);
+      e.hp = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ------------------------------- the shot --------------------------------- */
+/* Called once per volley, after the volley has gone out. The echo queue is a
+   list of shots owed rather than a timer per bullet, so a build stacking
+   Echo Chamber with Split Barrel does not turn into a scheduling problem. */
+function onPlayerShot(mx, my, ang) {
+  if (P.cold) { P.coldReady = false; P.coldT = 0; }
+  if (P.blinkC) P.blinkReady = false;
+  if (P.heat) { P.heatN = Math.min(12, (P.heatN || 0) + 1); P.heatT = 0.55; }
+  if (P.echo) {
+    P.echoQ = P.echoQ || [];
+    if (P.echoQ.length < 8) P.echoQ.push({ t: 0.16, x: mx, y: my, a: ang });
+  }
+  if (P.tick10) {
+    P.shotN = (P.shotN || 0) + 1;
+    if (P.shotN >= 10) {
+      P.shotN = 0;
+      const tx = clamp(mouse.wx, arena.x0 + 40, arena.x1 - 40);
+      const ty = clamp(mouse.wy, arena.y0 + 40, arena.y1 - 40);
+      mortars.push({ x: tx, y: ty, r: 96 + 22 * P.tick10, t: 0.9, max: 0.9,
+                     dmg: (P.dmg * 4 + 22) * P.tick10, col: COL.crit, mine: true });
+      Audio_.tone(150, 0.18, 'triangle', 0.09, 70);
+    }
+  }
+}
+
+/* The multiplier a single shot leaves with. Consumed rather than sampled: a
+   cold barrel and a blink charge are each worth exactly one shot. */
+function rewardShotMul() {
+  let m = 1;
+  if (P.cold && P.coldReady) m *= 1 + 2.5 * P.cold;
+  if (P.blinkC && P.blinkReady) m *= 3;
+  return m;
+}
+
+/* ------------------------------- the kill --------------------------------- */
+function onRewardKill(e) {
+  if (P.harvest) {
+    P.harvestN = (P.harvestN || 0) + 1;
+    if (P.harvestN >= 9 - Math.min(3, P.harvest)) {
+      P.harvestN = 0;
+      drops.push(mkDrop(e.x, e.y, 'heal'));
+    }
+  }
+  if (P.requis) {
+    P.requisN = (P.requisN || 0) + 1;
+    if (P.requisN >= 11 - Math.min(4, P.requis)) {
+      P.requisN = 0;
+      for (let i = 0; i < 3; i++)
+        drops.push(mkDrop(e.x + rnd(24, -24), e.y + rnd(24, -24), 'credit'));
+    }
+  }
+  if (P.rolling) P.rollN = (P.rollN || 0) + 1;
+  if (P.shatter && e.elite) {
+    for (let i = 0; i < 6 + 3 * P.shatter; i++) {
+      const a = rnd(TAU);
+      gems.push({ x: e.x, y: e.y, vx: Math.cos(a) * rnd(180, 60), vy: Math.sin(a) * rnd(180, 60),
+                  r: 4, v: e.xp * 0.4, life: 9 });
+    }
+  }
+  if (P.bank) {
+    P.bankN = (P.bankN || 0) + 1;
+    if (P.bankN >= 25) { P.bankN = 25; P.bankReady = true; }
+  }
+  if (P.trophy && e.type === 'boss') P.trophyN = (P.trophyN || 0) + 1;
+  /* Chain Reaction: a body killed by a blast takes the next one with it. The
+     guard is what keeps a room from detonating itself to the last enemy. */
+  if (P.chainR && e.byBlast && !e.chained) {
+    e.chained = true;
+    playerBlast(e.x, e.y, 90 + 30 * P.chainR, (14 + P.dmg * 0.8) * P.chainR, '#fb923c');
+  }
+}
+
+/* ------------------------------ taking a hit ------------------------------ */
+function onRewardHurt(dmg, src) {
+  P.shellT = 0;
+  if (P.shell && P.shellUp) {
+    P.shellUp = false;                    // absorbed elsewhere; this is the reset
+  }
+  if (P.grudge) P.grudgeN = (P.grudgeN || 0) + 1;
+  if (P.counter) {
+    const n = 8 + 4 * P.counter;
+    for (let i = 0; i < n; i++)
+      fireBullet(P.x, P.y, (i / n) * TAU, 0.7, { noFrag: true });
+    Audio_.tone(420, 0.12, 'square', 0.09, 200);
+  }
+  if (P.feedback && src && !src.dead) {
+    damageEnemy(src, dmg * 2 * P.feedback, false, P.x, P.y, { silent: true });
+    arcs.push({ x1: P.x, y1: P.y, x2: src.x, y2: src.y, life: 0.18, max: 0.18, col: '#fde68a' });
+  }
+}
+
+/* ------------------------------- the dash --------------------------------- */
+function onRewardDash(dx, dy) {
+  if (P.contrail) {
+    for (let i = 1; i <= 4; i++)
+      addHazard('fire', P.x + dx * 46 * i, P.y + dy * 46 * i, 3.2,
+                { friendly: true, r: 46, dmg: (8 + P.dmg * 0.5) * P.contrail });
+  }
+  if (P.bank && P.bankReady) {
+    P.bankReady = false; P.bankN = 0;
+    playerBlast(P.x, P.y, 190 + 40 * P.bank, (30 + P.dmg * 2) * P.bank, COL.crit);
+    shake(0.6);
+  }
+  if (P.blinkC) P.blinkReady = true;
+  P.dashHits = 0;                          // counted by the dash-through test
+}
+
+/* ------------------------------ the wave line ----------------------------- */
+/* Everything that resets, pays out or accumulates at a wave boundary. */
+function onRewardWave() {
+  if (P.interest) {
+    const paid = Math.round(credits * 0.05 * P.interest);
+    if (paid > 0) {
+      credits += paid;
+      floatText(P.x, P.y - 58, '+' + paid + ' INTEREST', '#fbbf24', 14);
+    }
+  }
+  if (P.otime && (P.waveClock || 0) < 25) {
+    P.xp += P.xpNext * 0.33 * P.otime;
+    floatText(P.x, P.y - 72, 'OVERTIME', '#38bdf8', 14);
+  }
+  if (P.ledger) {
+    P.shieldMax = Math.min(6, P.shieldMax + 1);
+    P.shield = P.shieldMax;
+    floatText(P.x, P.y - 44, 'LEDGER  +1', COL.shield, 15);
+  }
+  if (P.assembly) {
+    P.assemblyN = (P.assemblyN || 0) + 1;
+    P.maxHp += 2; P.hp += 2;
+  }
+  if (P.deadline) {
+    P.deadlineT = (P.deadlineT || 0) + 40;
+    floatText(P.x, P.y - 86, '+40s', '#f87171', 15);
+  }
+  P.grudgeN = 0;
+  P.rollN = 0;
+  P.waveClock = 0;
+  if (P.salvage) P.salvageUsed = false;
+}
+
+/* ------------------------------ per frame --------------------------------- */
+/* The timers. Kept in one place so a reward can never quietly stop ticking
+   because it was wired into a branch that some other state returns out of. */
+function rewardTick(dt) {
+  P.waveClock = (P.waveClock || 0) + dt;
+
+  if (P.echo && P.echoQ && P.echoQ.length) {
+    for (let i = P.echoQ.length - 1; i >= 0; i--) {
+      const q = P.echoQ[i];
+      q.t -= dt;
+      if (q.t <= 0) {
+        P.echoQ.splice(i, 1);
+        fireBullet(P.x, P.y, q.a, 0.55 * P.echo, { noFrag: true });
+        Audio_.tone(760, 0.05, 'square', 0.035, 900);
+      }
+    }
+  }
+
+  if (P.cold) {
+    P.coldT = (P.coldT || 0) + dt;
+    if (P.coldT > 1.2) P.coldReady = true;
+  }
+  if (P.heat) {
+    P.heatT = (P.heatT || 0) - dt;
+    if (P.heatT <= 0 && P.heatN) { P.heatN = Math.max(0, P.heatN - 1); P.heatT = 0.35; }
+  }
+  if (P.rolling) P.fireT -= 0;             // rate is folded in at fire time
+  if (P.shell) {
+    P.shellT = (P.shellT || 0) + dt;
+    if (!P.shellUp && P.shellT > 5) {
+      P.shellUp = true;
+      ringFx(P.x, P.y, P.r, 46, COL.shield, 0.35, 3);
+      Audio_.tone(880, 0.1, 'sine', 0.06, 1200);
+    }
+  }
+  if (P.deadman && P.brakeT > 0) {
+    P.brakeT -= dt;
+    slowmo = Math.min(slowmo, 0.25);
+  }
+  if (P.deadline) {
+    P.deadlineT -= dt;
+    if (P.deadlineT <= 0) {
+      P.deadlineT = 0;
+      banner('DEADLINE', '#f87171', 2.0);
+      hurtPlayer(1e9, { pure: true });
+    }
+  }
+  // slipknot marks and suppression both run down on the enemies themselves
+  for (const e of enemies) {
+    if (e.slipT > 0) e.slipT -= dt;
+    if (e.suppT > 0) e.suppT -= dt;
+  }
+}
+
+/* The dash-through test: Slipknot marks, Kickstart refunds, Phase Debt eats
+   incoming fire. One pass, run while the dash is live. */
+function rewardDashSweep(dt) {
+  if (P.dashT <= 0) return;
+  if (P.slipknot || P.kick) {
+    for (const e of enemies) {
+      if (e.dead || e.dashTagged) continue;
+      if (len(e.x - P.x, e.y - P.y) < e.r + P.r + 6) {
+        e.dashTagged = true;
+        if (P.slipknot) e.slipT = 4;
+        P.dashHits = (P.dashHits || 0) + 1;
+        if (P.kick && P.dashHits === 2 && P.dashCh < P.dashMax) {
+          P.dashCh++;
+          floatText(P.x, P.y - 34, 'KICKSTART', '#67e8f9', 14);
+        }
+      }
+    }
+  }
+  if (P.phaseD) {
+    for (let i = ebullets.length - 1; i >= 0; i--) {
+      const b = ebullets[i];
+      if (len(b.x - P.x, b.y - P.y) > b.r + P.r + 10) continue;
+      ebullets.splice(i, 1);
+      burst(b.x, b.y, 5, '#5eead4', 180, 2.2, 0.25);
+      if (P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 1);
+    }
+  }
+}
+
+
+
+/* ------------------------------ the machinery -----------------------------
+   A challenge run is an ordinary run with a rule sheet stapled to it. The
+   sheet is read once at the start — everything that changes the ship — and
+   then consulted by a handful of hooks through the frame, for everything that
+   changes the room. None of it runs while Chal.on is null, so the ordinary
+   game keeps exactly the shape it had.
+
+   Challenge runs stay off your record and off the global board: the rules are
+   different, so the number would be measuring a different game.
+--------------------------------------------------------------------------- */
+const Chal = {
+  on: null,          // the active challenge definition, or null
+  won: false,        // its goal has been met this run
+  waveT: 0,          // seconds left on a timed wave
+  moveT: 0,          // grace before a stationary hull starts venting
+  curseT: 0,
+  reward: null       // the upgrade just unlocked, for the end screen
+};
+
+const chalById = id => CHALLENGES.find(c => c.id === id) || null;
+const chalDone = id => (Save.profile.chal || []).includes(id);
+const chalCount = () => (Save.profile.chal || []).length;
+
+/* Locked until you have cleared enough of the ladder, and — for the handful
+   built on systems from the deep game — until you have met the system. */
+function chalOpen(c) {
+  if (chalCount() < c.tier) return false;
+  if (c.need && !c.need(Save.profile)) return false;
+  return true;
+}
+function chalLockText(c) {
+  if (c.need && !c.need(Save.profile)) return c.needTxt || 'LOCKED';
+  const left = c.tier - chalCount();
+  return left > 0 ? 'CLEAR ' + left + ' MORE CHALLENGE' + (left === 1 ? '' : 'S') : 'LOCKED';
+}
+const chalGoalName = c => (BOSSES[c.goal] || { name: c.goal }).name;
+
+/* An upgrade is in the pool if it is not a reward, or if it is a reward you
+   have already earned. Rewards are permanent — they are the point. */
+const chalUnlockedUp = u => !u.lock || chalDone(u.lock);
+
+/* ------------------------------ starting one ------------------------------ */
+function startChallenge(c) {
+  if (!c || !chalOpen(c)) return;
+  const m = c.m || {};
+  if (m.char !== undefined) applyChar(m.char);
+  resetGame();
+  Chal.on = c; Chal.won = false; Chal.reward = null;
+  Chal.waveT = m.time || 0; Chal.moveT = 1.2; Chal.curseT = 2;
+  chalApplyShip(m);
+  chalApplyRoom(m);
+  state = 'play';
+  uiArm = 0.3;
+  banner(c.n, '#fbbf24', 3.2);
+  setTimeout(() => { if (state === 'play' && Chal.on === c)
+    banner('KILL   ' + chalGoalName(c), '#fbbf24', 3.0); }, 3400);
+  Audio_.select();
+}
+
+/* Everything the sheet says about the ship, applied once. Order matters: the
+   starting upgrades go on before the multipliers, so a challenge that hands
+   you four Split Barrels and then halves your damage halves the result. */
+function chalApplyShip(m) {
+  if (m.start) for (const id of m.start) {
+    const u = UPGRADES.find(x => x.id === id);
+    if (u) { P.up[u.id] = (P.up[u.id] || 0) + 1; u.f(P); }
+  }
+  if (m.hp) { P.maxHp = m.hp; P.hp = m.hp; }
+  if (m.oneShot) { P.maxHp = 1; P.hp = 1; P.armor = 0; P.shieldMax = 0; P.shield = 0; }
+  if (m.dmg) P.dmg *= m.dmg;
+  if (m.rate) P.fireRate *= m.rate;
+  if (m.spd) P.speed *= m.spd;
+  if (m.bspd) P.bspeed *= m.bspd;
+  if (m.xp) P.xpMul *= m.xp;
+  if (m.dash !== undefined) { P.dashMax = m.dash; P.dashCh = m.dash; }
+  if (m.chip) P.chip = true;
+  if (m.credits !== undefined) credits = m.credits;
+  if (m.sign) {
+    const s = SIGNS.find(z => z.id === m.sign);
+    if (s) { s.f(P); Codex.seeSign(s.id); planetSign = s; planetRevealed = true; }
+  }
+  if (m.mal && MALWARE.length) {
+    const mw = MALWARE[rndi(MALWARE.length)];
+    P.malware = mw; Codex.seeMal(mw.id);
+  }
+}
+
+/* And everything it says about the room. */
+function chalApplyRoom(m) {
+  if (m.mirror) for (let i = 0; i < m.mirror; i++) {
+    const a = (i / m.mirror) * TAU + rnd(0.4, -0.4);
+    const rx = (arena.x0 + arena.x1) / 2 + Math.cos(a) * (arena.x1 - arena.x0) * 0.34;
+    const ry = (arena.y0 + arena.y1) / 2 + Math.sin(a) * (arena.y1 - arena.y0) * 0.34;
+    addHazard('mirror', rx, ry, 1e9, { r: 52 });
+  }
+}
+
+/* ------------------------------- the hooks -------------------------------- */
+/* Pool: rewards you have not earned yet, plus whatever this challenge forbids.
+   Two of the rewards also forbid things — Purity and Asceticism are written as
+   promises about what will not be offered, so this is where they are kept. */
+function chalFilterPool(pool) {
+  const earned = pool.filter(chalUnlockedUp);
+  const m = Chal.on ? (Chal.on.m || {}) : null;
+  const out = [];
+  for (const u of earned) {
+    if (P.pure && ['drone', 'sentry', 'frag', 'chain', 'vortex', 'napalm'].includes(u.id)) continue;
+    if (P.ascetic && ['regen', 'lifesteal'].includes(u.id)) continue;
+    if (m) {
+      if (m.oneShot && ['hp', 'regen', 'armor', 'shld', 'wind'].includes(u.id)) continue;
+      if (m.ban && m.ban.includes(u.id)) continue;
+      if (m.only && !m.only.includes(u.id)) continue;
+      if (m.rar && !m.rar.includes(u.rar)) continue;
+    }
+    out.push(u);
+  }
+  // a rule sheet that filters everything out still has to leave a game behind
+  return out.length ? out : earned;
+}
+
+const chalNoLevel = () => !!(Chal.on && Chal.on.m.noLvl);
+const chalNoShop  = () => !!(Chal.on && Chal.on.m.noShop);
+const chalNoHeal  = () => !!(Chal.on && Chal.on.m.noHeal) || !!P.ascetic;
+const chalAuto    = () => !!(Chal.on && Chal.on.m.auto);
+const chalBudget  = () => (Chal.on && Chal.on.m.budget) || 1;
+const chalEHp     = () => (Chal.on && Chal.on.m.ehp) || 1;
+const chalESpd    = () => (Chal.on && Chal.on.m.espd) || 1;
+const chalEDmg    = () => (Chal.on && Chal.on.m.edmg) || 1;
+const chalElite   = () => (Chal.on && Chal.on.m.elite) || 0;
+const chalSwarm   = () => (Chal.on && Chal.on.m.swarm) || null;
+const chalFog     = () => !!(Chal.on && Chal.on.m.fog);
+
+/* Per-frame rules: the clock, the standing-still penalty, and the hazard a
+   cursed room keeps laying down. */
+function chalTick(dt) {
+  const c = Chal.on;
+  if (!c || state !== 'play') return;
+  const m = c.m;
+
+  if (m.oneShot) {
+    P.maxHp = 1; P.hp = Math.min(P.hp, 1);
+    P.armor = 0; P.shieldMax = 0; P.shield = 0; P.revive = 0;
+  }
+
+  if (m.time) {
+    // the clock only runs while there is actually a wave to clear
+    if (betweenWaves <= 0 && (spawnBudget > 0 || enemies.length || bossAlive)) {
+      Chal.waveT -= dt;
+      if (Chal.waveT <= 0) {
+        Chal.waveT = 3;
+        banner('OVERTIME', '#f87171', 1.4);
+        hurtPlayer(Math.max(6, P.maxHp * 0.18), { pure: true });
+      }
+    } else Chal.waveT = m.time;
+  }
+
+  if (m.move) {
+    if (len(P.vx, P.vy) > 55) Chal.moveT = 1.1;
+    else {
+      Chal.moveT -= dt;
+      if (Chal.moveT <= 0) {
+        Chal.moveT = 0.55;
+        hurtPlayer(Math.max(2, P.maxHp * 0.055), { pure: true });
+        burst(P.x, P.y, 6, '#f87171', 140, 2.2, 0.3);
+      }
+    }
+  }
+
+  if (m.curse) {
+    Chal.curseT -= dt;
+    if (Chal.curseT <= 0) {
+      Chal.curseT = Math.max(0.8, 2.6 - wave * 0.05);
+      addHazard(m.curse, rnd(arena.x1 - 90, arena.x0 + 90), rnd(arena.y1 - 90, arena.y0 + 90),
+                rnd(9, 5), { dmg: 6 + wave * 0.55 });
+    }
+  }
+}
+
+/* ------------------------------ winning it -------------------------------- */
+/* Called wherever a boss actually dies. The goal is a boss key, so the three
+   that are not stage bosses — the bookkeeper, the unwritten, the amalgam —
+   report in from their own victory paths. */
+function chalCheckGoal(key) {
+  const c = Chal.on;
+  if (!c || Chal.won || state !== 'play') return;
+  if (key !== c.goal) return;
+  Chal.won = true;
+
+  const first = !chalDone(c.id);
+  if (first) {
+    Save.profile.chal = [...new Set([...(Save.profile.chal || []), c.id])];
+    Save.writeLocal(); Save.flush();
+  }
+  const rw = CHAL_UPGRADES.find(u => u.id === c.rw);
+  Chal.reward = first ? rw : null;
+
+  banner('CHALLENGE COMPLETE', '#fbbf24', 4.0);
+  drawFlashT = 0.35; shake(1.4);
+  Audio_.levelup(); Audio_.boss();
+  ringFx(P.x, P.y, 12, 460, '#fbbf24', 1.0, 7);
+  burst(P.x, P.y, 70, '#fbbf24', 420, 4, 1.1);
+  if (first && rw)
+    setTimeout(() => { if (state === 'play') banner('UNLOCKED   ' + rw.n, RARITY[rw.rar], 4.0); }, 2200);
+
+  // the run is over the moment the named boss is down: that is the whole deal
+  setTimeout(() => { if (Chal.on === c && state === 'play') chalEnd(true); }, 3600);
+}
+
+function chalEnd(won) {
+  const c = Chal.on;
+  if (!c) return;
+  lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                sector: stage.name, loop: loopNum, isRecord: false,
+                chal: c, chalWon: won, reward: Chal.reward };
+  state = 'dead';
+  Codex.flush();
+  if (won) Audio_.levelup();
+  else { explode(P.x, P.y, 180, 0, COL.player); shake(1); Audio_.over(); }
+}
+
+// Leaving a challenge, by death or by the menu.
+function chalQuit() { Chal.on = null; Chal.won = false; Chal.reward = null; }
+
+
+/* ------------------------------- the browser ------------------------------
+   Fifty entries is too many for a wall of cards, so this is a list on the left
+   and the selected sheet on the right: what it does to you, what you have to
+   kill, and what it pays. Locked entries stay visible and legible — knowing
+   what is further up the ladder is most of the reason to climb it.
+--------------------------------------------------------------------------- */
+let chalSel = 0, chalScroll = 0, chalFrom = 'menu', chalRows = [];
+
+const CHAL_GOLD = '#fbbf24';
+
+function openChal(from) {
+  chalFrom = from || 'menu';
+  state = 'chal';
+  uiArm = 0.3;
+  chalSel = Math.max(0, CHALLENGES.findIndex(c => chalOpen(c) && !chalDone(c.id)));
+  chalKeepVisible();
+  Audio_.select();
+}
+function closeChal() {
+  state = chalFrom === 'pause' ? 'pause' : 'menu';
+  uiArm = 0.3;
+  Audio_.select();
+}
+
+function chalGeom() {
+  const pad = Math.min(40, W * 0.04);
+  const top = 118, bottom = 74;
+  const listW = Math.min(360, Math.max(220, W * 0.32));
+  const h = Math.max(180, H - top - bottom);
+  return { x: pad, y: top, listW, rowH: 30, viewH: h,
+           px: pad + listW + 22, pw: Math.max(180, W - pad * 2 - listW - 22) };
+}
+function chalMaxScroll() {
+  const g = chalGeom();
+  return Math.max(0, CHALLENGES.length * g.rowH - g.viewH);
+}
+function chalKeepVisible() {
+  const g = chalGeom();
+  const y = chalSel * g.rowH;
+  if (y < chalScroll) chalScroll = y;
+  else if (y + g.rowH > chalScroll + g.viewH) chalScroll = y + g.rowH - g.viewH;
+  chalScroll = clamp(chalScroll, 0, chalMaxScroll());
+}
+
+function chalKey(k) {
+  if (uiArm > 0) return;
+  if (k === 'escape' || k === 'x' || k === 'c') { closeChal(); return; }
+  if (k === 'arrowdown' || k === 's') {
+    chalSel = (chalSel + 1) % CHALLENGES.length; chalKeepVisible(); Audio_.select(); return;
+  }
+  if (k === 'arrowup' || k === 'w') {
+    chalSel = (chalSel + CHALLENGES.length - 1) % CHALLENGES.length; chalKeepVisible(); Audio_.select(); return;
+  }
+  if (k === 'pagedown') { chalSel = Math.min(CHALLENGES.length - 1, chalSel + 8); chalKeepVisible(); return; }
+  if (k === 'pageup')   { chalSel = Math.max(0, chalSel - 8); chalKeepVisible(); return; }
+  if (k === 'enter' || k === ' ') {
+    const c = CHALLENGES[chalSel];
+    if (chalOpen(c)) startChallenge(c);
+    else Audio_.tone(150, 0.12, 'square', 0.06, 90);
+  }
+}
+
+function chalClick() {
+  if (uiArm > 0) return;
+  for (const r of chalRows) if (inRect(mouse.x, mouse.y, r)) {
+    if (chalSel === r.i) {
+      const c = CHALLENGES[r.i];
+      if (chalOpen(c)) startChallenge(c);
+      else Audio_.tone(150, 0.12, 'square', 0.06, 90);
+    } else { chalSel = r.i; Audio_.select(); }
+    return;
+  }
+  if (chalStartRect && inRect(mouse.x, mouse.y, chalStartRect)) {
+    const c = CHALLENGES[chalSel];
+    if (chalOpen(c)) startChallenge(c);
+    return;
+  }
+}
+
+let chalStartRect = null;
+
+function drawChal() {
+  ctx.fillStyle = 'rgba(3,5,10,0.95)';
+  ctx.fillRect(0, 0, W, H);
+  const g = chalGeom();
+  const done = chalCount();
+
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.shadowColor = CHAL_GOLD; ctx.shadowBlur = 26;
+  ctx.font = '800 30px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#fde68a';
+  ctx.fillText('CHALLENGES', W / 2, 52);
+  ctx.restore();
+  ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(done + ' / ' + CHALLENGES.length + '   COMPLETE   ·   ' +
+               'EACH ONE PAYS AN UPGRADE, PERMANENTLY', W / 2, 74);
+
+  // progress rail
+  const rw = Math.min(520, W - 80), rx = (W - rw) / 2;
+  ctx.fillStyle = 'rgba(15,23,42,0.9)';
+  ctx.fillRect(rx, 88, rw, 5);
+  ctx.fillStyle = CHAL_GOLD;
+  ctx.fillRect(rx, 88, rw * (done / CHALLENGES.length), 5);
+
+  /* ---- the list ---- */
+  chalRows = [];
+  ctx.save();
+  ctx.beginPath(); ctx.rect(g.x, g.y, g.listW, g.viewH); ctx.clip();
+  for (let i = 0; i < CHALLENGES.length; i++) {
+    const c = CHALLENGES[i];
+    const y = g.y + i * g.rowH - chalScroll;
+    if (y + g.rowH < g.y - 4 || y > g.y + g.viewH + 4) continue;
+    const r = { x: g.x, y, w: g.listW, h: g.rowH - 2, i };
+    chalRows.push(r);
+    const open = chalOpen(c), won = chalDone(c.id), sel = i === chalSel;
+    if (sel) {
+      ctx.fillStyle = 'rgba(251,191,36,0.13)';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = rgba(CHAL_GOLD, 0.6); ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    }
+    ctx.textAlign = 'left';
+    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = won ? '#6ee7b7' : open ? (sel ? '#fde68a' : '#cbd5e1') : '#334155';
+    ctx.fillText((i + 1 < 10 ? '0' : '') + (i + 1) + '  ' + (open || won ? c.n : '—————'),
+                 r.x + 12, r.y + 20);
+    ctx.textAlign = 'right';
+    ctx.font = '700 9px Segoe UI, system-ui, sans-serif';
+    if (won) { ctx.fillStyle = '#34d399'; ctx.fillText('CLEARED', r.x + r.w - 12, r.y + 20); }
+    else if (!open) { ctx.fillStyle = '#334155'; ctx.fillText('LOCKED', r.x + r.w - 12, r.y + 20); }
+  }
+  ctx.restore();
+
+  // scroll indicator
+  const ms = chalMaxScroll();
+  if (ms > 0) {
+    const th = Math.max(24, g.viewH * (g.viewH / (CHALLENGES.length * g.rowH)));
+    const ty = g.y + (g.viewH - th) * (chalScroll / ms);
+    ctx.fillStyle = 'rgba(148,163,184,0.25)';
+    ctx.fillRect(g.x + g.listW - 3, ty, 3, th);
+  }
+
+  drawChalSheet(g);
+
+  ctx.textAlign = 'center';
+  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText('↑↓ SELECT   ·   ENTER START   ·   ESC BACK', W / 2, H - 34);
+}
+
+/* The sheet: what this one does to you, in the same plain register the codex
+   uses. A locked entry still shows its rules — you are meant to plan for it. */
+function drawChalSheet(g) {
+  const c = CHALLENGES[chalSel];
+  if (!c) return;
+  const open = chalOpen(c), won = chalDone(c.id);
+  const x = g.px, w = g.pw;
+  let y = g.y + 6;
+
+  ctx.textAlign = 'left';
+  ctx.font = '800 22px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = won ? '#6ee7b7' : open ? '#fde68a' : '#475569';
+  ctx.fillText(open || won ? c.n : 'LOCKED', x, y + 16);
+  y += 34;
+
+  ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('OBJECTIVE', x, y);
+  y += 16;
+  ctx.font = '700 14px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = (BOSSES[c.goal] || {}).col || '#e2e8f0';
+  ctx.fillText('DESTROY   ' + chalGoalName(c), x, y);
+  y += 24;
+
+  ctx.font = '500 12.5px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  y = wrapText(c.d, x, y, w, 17) + 10;
+
+  const rules = chalRuleLines(c);
+  if (rules.length) {
+    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('RULES', x, y);
+    y += 15;
+    ctx.font = '600 11.5px Segoe UI, system-ui, sans-serif';
+    for (const r of rules) {
+      if (y > g.y + g.viewH - 96) break;
+      ctx.fillStyle = r[1];
+      ctx.fillText('·  ' + r[0], x + 2, y);
+      y += 15;
+    }
+    y += 8;
+  }
+
+  const rw = CHAL_UPGRADES.find(u => u.id === c.rw);
+  if (rw) {
+    ctx.font = '600 10px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('REWARD', x, y);
+    y += 17;
+    ctx.font = '700 13px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = won ? RARITY[rw.rar] : '#475569';
+    ctx.fillText(won ? rw.n : '? ? ?', x, y);
+    ctx.font = '500 11.5px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = won ? '#94a3b8' : '#334155';
+    ctx.fillText(won ? rw.d : 'an upgrade that is not in your pool yet', x, y + 16);
+    y += 34;
+  }
+
+  chalStartRect = null;
+  const by = Math.min(g.y + g.viewH - 46, y + 8);
+  if (open) {
+    const bw = Math.min(220, w), bh = 40;
+    chalStartRect = { x, y: by, w: bw, h: bh };
+    const hot = inRect(mouse.x, mouse.y, chalStartRect);
+    ctx.fillStyle = hot ? 'rgba(251,191,36,0.2)' : 'rgba(8,13,22,0.9)';
+    ctx.fillRect(x, by, bw, bh);
+    ctx.strokeStyle = rgba(CHAL_GOLD, hot ? 0.95 : 0.55); ctx.lineWidth = 1.3;
+    ctx.strokeRect(x + 0.5, by + 0.5, bw - 1, bh - 1);
+    ctx.textAlign = 'center';
+    ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = CHAL_GOLD;
+    ctx.fillText(won ? 'RUN IT AGAIN' : 'START', x + bw / 2, by + 25);
+    ctx.textAlign = 'left';
+  } else {
+    ctx.font = '700 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = '#f87171';
+    ctx.fillText(chalLockText(c), x, by + 24);
+  }
+}
+
+/* Turns the modifier bag back into English. Generated from the sheet rather
+   than hand-written per challenge, so a rule can never be listed that is not
+   actually applied, or applied without being listed. */
+function chalRuleLines(c) {
+  const m = c.m || {}, out = [];
+  const bad = '#fca5a5', good = '#6ee7b7', neutral = '#cbd5e1';
+  const pct = v => (v >= 1 ? '+' + Math.round((v - 1) * 100) : '-' + Math.round((1 - v) * 100)) + '%';
+  if (m.char !== undefined) out.push(['pilot locked to ' + CHARS[m.char].n, neutral]);
+  if (m.oneShot) out.push(['1 hit point, no armour, no shields', bad]);
+  else if (m.hp) out.push([m.hp + ' max HP', m.hp < 80 ? bad : good]);
+  if (m.dmg) out.push([pct(m.dmg) + ' damage', m.dmg >= 1 ? good : bad]);
+  if (m.rate) out.push([pct(m.rate) + ' fire rate', m.rate >= 1 ? good : bad]);
+  if (m.spd) out.push([pct(m.spd) + ' move speed', m.spd >= 1 ? good : bad]);
+  if (m.bspd) out.push([pct(m.bspd) + ' bullet speed', m.bspd >= 1 ? good : bad]);
+  if (m.xp) out.push([pct(m.xp) + ' experience', m.xp >= 1 ? good : bad]);
+  if (m.dash === 0) out.push(['no dash', bad]);
+  else if (m.dash) out.push([m.dash + ' dash charges', good]);
+  if (m.start) {
+    const names = [...new Set(m.start)].map(id => {
+      const u = UPGRADES.find(z => z.id === id);
+      const n = m.start.filter(s => s === id).length;
+      return (u ? u.n : id) + (n > 1 ? ' x' + n : '');
+    });
+    out.push(['starts with ' + names.join(', '), good]);
+  }
+  if (m.noLvl) out.push(['no upgrades are ever offered', bad]);
+  if (m.only) out.push(['only ' + m.only.length + ' upgrades can be offered', bad]);
+  if (m.ban) out.push([m.ban.length + ' upgrades removed from the pool', bad]);
+  if (m.rar) out.push(['only ' + m.rar.join(' / ') + ' upgrades appear', bad]);
+  if (m.noShop) out.push(['the shop never opens', bad]);
+  if (m.credits === 0) out.push(['no starting credits', bad]);
+  if (m.chip) out.push(['the record chip is installed from wave one', neutral]);
+  if (m.mal) out.push(['a random malware replaces the dash', neutral]);
+  if (m.sign) out.push(['a fixed zodiac reading, taken at the door', neutral]);
+  if (m.noHeal) out.push(['nothing heals you', bad]);
+  if (m.ehp) out.push([pct(m.ehp) + ' enemy health', m.ehp > 1 ? bad : good]);
+  if (m.espd) out.push([pct(m.espd) + ' enemy speed', m.espd > 1 ? bad : good]);
+  if (m.edmg) out.push([pct(m.edmg) + ' enemy damage', m.edmg > 1 ? bad : good]);
+  if (m.budget) out.push([pct(m.budget) + ' spawns', m.budget > 1 ? bad : good]);
+  if (m.elite >= 1) out.push(['every enemy is elite', bad]);
+  else if (m.elite) out.push(['far more elites', bad]);
+  if (m.swarm) out.push(['only ' + m.swarm.join(' and ') + 's spawn', neutral]);
+  if (m.time) out.push([m.time + ' seconds a wave, then the hull pays', bad]);
+  if (m.curse) out.push(['the room keeps laying ' + m.curse, bad]);
+  if (m.mirror) out.push([m.mirror + ' mirror shards buried in the arena', neutral]);
+  if (m.fog) out.push(['you can only see what is close', bad]);
+  if (m.move) out.push(['standing still costs hull', bad]);
+  if (m.auto) out.push(['the trigger is held down for you', neutral]);
+  return out;
+}
+
+/* Wrapped paragraph, returning the y it finished on. */
+function wrapText(text, x, y, maxW, lh) {
+  const words = String(text).split(' ');
+  let line = '';
+  for (const wd of words) {
+    const test = line ? line + ' ' + wd : wd;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, x, y); y += lh; line = wd;
+    } else line = test;
+  }
+  if (line) { ctx.fillText(line, x, y); y += lh; }
+  return y;
+}
+
+/* ------------------------------ in-run readout ---------------------------- */
+function drawChalHud() {
+  const c = Chal.on;
+  if (!c || state === 'codex' || state === 'gfx' || state === 'chal') return;
+  const x = 16, y = H - 96;
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx.font = '700 10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = CHAL_GOLD;
+  ctx.fillText('CHALLENGE   ' + c.n, x, y);
+  ctx.font = '600 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = Chal.won ? '#6ee7b7' : '#64748b';
+  ctx.fillText(Chal.won ? 'COMPLETE' : 'KILL   ' + chalGoalName(c), x, y + 13);
+  if (c.m.time && !Chal.won) {
+    const t = Math.max(0, Chal.waveT);
+    ctx.font = '800 13px Segoe UI, system-ui, sans-serif';
+    ctx.fillStyle = t < 10 ? rgba('#f87171', 0.6 + Math.sin(uiTime * 8) * 0.4) : '#cbd5e1';
+    ctx.fillText(t.toFixed(1) + 's', x, y + 30);
+  }
+  ctx.restore();
+}
+
+/* Sensors down: everything past a short radius is painted out. Drawn over the
+   finished world and under the HUD, so the readouts stay legible. */
+function drawChalFog() {
+  if (!chalFog() || state === 'menu' || state === 'chal' || state === 'dead') return;
+  const r = 210 * camZoom;
+  const g = ctx.createRadialGradient(W / 2, H / 2, r * 0.55, W / 2, H / 2, r * 1.9);
+  g.addColorStop(0, 'rgba(3,5,10,0)');
+  g.addColorStop(0.55, 'rgba(3,5,10,0.82)');
+  g.addColorStop(1, 'rgba(3,5,10,0.985)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* The way in, on the menu: under the LAN panel, same idiom. */
+function menuChalRect() { return { x: 18, y: 54, w: 176, h: 34 }; }
+
+function drawMenuChal() {
+  const r = menuChalRect();
+  const hot = inRect(mouse.x, mouse.y, r);
+  const done = chalCount();
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(251,191,36,0.16)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(CHAL_GOLD, hot ? 0.9 : 0.4);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.font = '800 11px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = CHAL_GOLD;
+  ctx.fillText('◈  CHALLENGES', r.x + 12, r.y + 15);
+  ctx.font = '500 9px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(done + ' / ' + CHALLENGES.length + ' CLEARED  —  K', r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.textAlign = 'center';
 }
 
 /* --------------------------------- start ---------------------------------- */
