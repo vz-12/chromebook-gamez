@@ -2637,6 +2637,10 @@ function onBossDefeat(e) {
     ringFx(e.x, e.y, e.r, 640, KEEPER_COL, 1.1, 7);
     arenaReset();
     bossAlive = false;
+    /* His ledger, left on the counter. None of these three are stage bosses,
+       so nothing was ever seeding a library for them and their books were
+       content that existed and could not be reached. */
+    placePortal({ kind: 'library', boss: 'shopkeeper' });
     // the shop trip resumes where it was interrupted: gates open, streak
     // counted, any owed level-up paid. You simply do not get to buy anything.
     noteShopExit();
@@ -4369,6 +4373,7 @@ function rootOutroTick(dt) {
        either. Without this the room really is yours: permanently, with no
        door. Opened here rather than on the kill so the finale is not played
        over a pair of portals. */
+    placePortal({ kind: 'library', boss: 'root' });
     if (!awaitingPortal) afterReward();
     checkLevel();                      // whatever it owed you, now
   }
@@ -5496,6 +5501,8 @@ let campVisit = null;
 function startCampVisit(i) {
   campVisit = { i, t: 0, gave: false, out: 0 };
   tear.open = false; tear.cd = TEAR_CD;
+  Save.profile.campVisits = Math.max(Save.profile.campVisits || 0, i + 1);
+  Save.writeLocal(); Save.flush();
   Audio_.levelup();
 }
 
@@ -5609,8 +5616,7 @@ function choiceAnswer(openIt) {
     setTimeout(() => { if (state === 'play') gameOver(true); }, 3600);
     return;
   }
-  choice = null;
-  startTribunal();
+  startTurning();          // he has something to say about it first
 }
 
 /* You are standing in the camp with him, looking at the doorway. The whole
@@ -6132,65 +6138,1027 @@ function halTick(T, dt) {
   if (h.atk === 'slam' && h.phase === 'rest') h.done2 = false;
 }
 
+/* A real polearm, drawn along +x from the grip. It has a butt behind the hands
+   as well as a head in front of them, which is the whole reason a halberd
+   reads as heavy: you can see how much of it he is holding back. */
+function halberdGlyph(L, live, rage, a, headMul) {
+  const w = Math.max(3.4, L * 0.024);
+  const hm = headMul || 1;
+  const col = live ? HAL_EDGE : HAL_COL;
+  ctx.save();
+  ctx.lineCap = 'butt';
+  // the haft: dark wood core with a lit edge along the top of it
+  ctx.strokeStyle = rgba('#57534e', 0.95 * a); ctx.lineWidth = w;
+  ctx.beginPath(); ctx.moveTo(-L * 0.3, 0); ctx.lineTo(L, 0); ctx.stroke();
+  ctx.strokeStyle = rgba(HAL_COL, 0.5 * a); ctx.lineWidth = w * 0.34;
+  ctx.beginPath(); ctx.moveTo(-L * 0.3, -w * 0.3); ctx.lineTo(L, -w * 0.3); ctx.stroke();
+  // the binding where his hands go, and a counterweight on the butt
+  ctx.strokeStyle = rgba('#292524', 0.95 * a); ctx.lineWidth = w * 1.5;
+  for (const g of [0.1, 0.26]) {
+    ctx.beginPath();
+    ctx.moveTo(L * g, -w * 0.7); ctx.lineTo(L * (g + 0.055), w * 0.7);
+    ctx.stroke();
+  }
+  poly(-L * 0.3, 0, w * 1.1, 6, Math.PI / 6);
+  ctx.fillStyle = rgba('#78716c', a); ctx.strokeStyle = rgba(HAL_COL, 0.6 * a);
+  ctx.lineWidth = 1.4; ctx.fill(); ctx.stroke();
+
+  // the head: a spike out the end, an axe blade one side, a hook the other
+  ctx.save();
+  ctx.translate(L, 0);
+  if (live) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, L * 0.3, HAL_EDGE, 0.6 * a);
+    ctx.restore();
+  }
+  ctx.fillStyle = rgba(col, a);
+  ctx.strokeStyle = rgba(live ? '#ffffff' : '#fef3c7', 0.9 * a);
+  ctx.lineWidth = 1.6;
+  const u = L * 0.092 * hm;
+  // spike
+  ctx.beginPath();
+  ctx.moveTo(-u * 0.1, -w * 0.5); ctx.lineTo(u * 1.5, 0); ctx.lineTo(-u * 0.1, w * 0.5);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // axe blade, crescent, on the leading side
+  ctx.beginPath();
+  ctx.moveTo(-u * 0.5, -w * 0.5);
+  ctx.quadraticCurveTo(u * 0.5, -u * 1.5, u * 0.85, -u * 0.9);
+  ctx.quadraticCurveTo(u * 0.2, -u * 0.5, u * 0.4, -w * 0.5);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // the fluke behind it
+  ctx.beginPath();
+  ctx.moveTo(-u * 0.4, w * 0.5); ctx.lineTo(u * 0.1, u * 0.95);
+  ctx.lineTo(u * 0.55, u * 0.5); ctx.lineTo(u * 0.2, w * 0.5);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  if (rage) {                            // a notch taken out of it by then
+    ctx.fillStyle = 'rgba(20,12,2,0.9)';
+    ctx.beginPath(); ctx.arc(u * 0.45, -u * 0.85, u * 0.2, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+/* What he is saying, and what the room is doing about it. Screen furniture,
+   so it belongs with the HUD: these sit at W/2 and H-96, and drawTribunal runs
+   under the world transform, which put every one of them at that spot in the
+   arena instead — parked off near the top-left and sliding about with the
+   camera. The throne's own labels stay in the world, because they label the
+   throne and should move with it. */
+function drawTribunalHud() {
+  const T = tribunal;
+  if (!T) return;
+  ctx.save();
+  ctx.textAlign = 'center';
+  if (T.sayT > 0) {
+    ctx.font = '400 ' + Math.min(19, Math.max(13, W * 0.016)) +
+               "px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = rgba(FOUND_COL, clamp(T.sayT, 0, 1) * 0.92);
+    ctx.fillText(T.say, W / 2, H - 96);
+  }
+  if (T.ranksT > 0) {
+    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.letterSpacing = '0.22em';
+    ctx.fillStyle = rgba('#f87171', 0.9);
+    ctx.fillText('CLOSING RANKS', W / 2, 78);
+  } else if (P.hp / P.maxHp > 0.75 && !T.over && !T.hal) {
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.letterSpacing = '0.2em';
+    ctx.fillStyle = 'rgba(148,163,184,0.6)';
+    ctx.fillText('THEY ARE NOT WATCHING YOU', W / 2, 78);
+  }
+  ctx.restore();
+}
+
+/* --------------------------------- the pose --------------------------------
+   What the weapon is doing this frame, as opposed to where its hitbox is. The
+   tick owns h.swing for collision; this owns the picture, and the two agree at
+   the moment of contact — the animation is allowed to lead into it and trail
+   out of it, which is the entire difference between a swing and a teleport.
+
+   len is a multiplier on the reach: shortening it is foreshortening, which is
+   how a weapon raised overhead or drawn back to the hip reads from above.
+--------------------------------------------------------------------------- */
+const easeOut = p => 1 - Math.pow(1 - p, 3);
+const easeIn = p => p * p * p;
+const easeInOut = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+
+function halPose(h) {
+  const base = h.ang;
+  const out = { ang: base, len: 1, head: 1, lean: 0, ghosts: 0, spread: 0 };
+  if (!h.atk) {                                   // carried, breathing
+    out.ang = base + Math.sin(uiTime * 1.3) * 0.06;
+    out.len = 1 + Math.sin(uiTime * 1.3 + 1) * 0.015;
+    return out;
+  }
+  const M = HAL_MOVES[h.atk];
+  const p = clamp(h.pt / M[h.phase] || 0, 0, 1);
+
+  if (h.atk === 'sweep') {
+    const A = HAL_ARC / 2;
+    if (h.phase === 'tell') {                     // cocks past the start
+      out.ang = base - A - 0.62 * easeOut(p);
+      out.lean = -0.5 * easeOut(p);
+      out.len = 1 - 0.06 * easeOut(p);
+    } else if (h.phase === 'live') {              // and comes round fast
+      const e = easeOut(p);
+      out.ang = base - A - 0.62 + (HAL_ARC + 0.92) * e;
+      out.lean = -0.5 + 1.3 * e;
+      out.ghosts = 4; out.spread = -0.5 * (1 - p);
+    } else {                                      // past the end, drifting back
+      out.ang = base + A + 0.3 - 0.3 * easeInOut(p);
+      out.lean = 0.8 * (1 - easeInOut(p));
+    }
+    return out;
+  }
+
+  if (h.atk === 'thrust') {
+    if (h.phase === 'tell') {                     // drawn back to the hip
+      out.len = 1 - 0.58 * easeOut(p);
+      out.ang = base - 0.3 * easeOut(p);
+      out.lean = -0.6 * easeOut(p);
+    } else if (h.phase === 'live') {              // punched out past full reach
+      const e = easeOut(p);
+      out.len = 0.42 + 0.78 * e;
+      out.ang = base - 0.3 + 0.3 * e;
+      out.lean = -0.6 + 0.9 * e;
+      out.ghosts = 3; out.spread = 0;
+    } else {
+      out.len = 1.2 - 0.2 * easeInOut(p);
+      out.lean = 0.3 * (1 - easeInOut(p));
+    }
+    return out;
+  }
+
+  if (h.atk === 'slam') {
+    if (h.phase === 'tell') {                     // straight up: it gets short
+      const e = easeOut(p);
+      out.len = 1 - 0.74 * e;
+      out.head = (1 + 0.85 * e) / out.len;        // and the head gets big
+      out.lean = -0.8 * e;
+    } else if (h.phase === 'live') {              // and comes down hard
+      const e = easeIn(p);
+      out.len = 0.26 + 0.8 * e;
+      out.head = (1.85 - 0.85 * e) / out.len;
+      out.lean = -0.8 + 1.9 * e;
+    } else {
+      out.len = 1.06 - 0.06 * easeInOut(p);
+      out.lean = 1.1 * (1 - easeInOut(p));
+    }
+    return out;
+  }
+
+  /* spin: no beats, it simply keeps going. Every other move can let the
+     picture lead and trail because it has a moment of contact to agree on —
+     this one is a hitbox that is live the whole way round, so the weapon has
+     to sit exactly on h.swing or you are being cut by something that is not
+     where it is drawn. The ghosts read the speed; the angle reads the truth. */
+  if (h.phase === 'live') {
+    out.ang = base + h.swing;
+    out.lean = 0.55;
+    out.ghosts = 6; out.spread = -0.34;
+  } else if (h.phase === 'tell') {
+    out.ang = base + h.swing;
+    out.len = 1 - 0.1 * easeOut(p);
+    out.lean = -0.4 * easeOut(p);
+  } else {
+    out.ang = base + h.swing;
+  }
+  return out;
+}
+
+/* ------------------------------ the turning --------------------------------
+   You opened it, so the person outside comes in. That is the last ordinary
+   thing that happens in this room.
+
+   He does not shout and he does not threaten. He stops arguing and starts
+   organising — the warmth goes out of him in one syllable and what replaces it
+   is procedure, which is worse, and which is where the word tribunal comes
+   from. While he talks, the camp turns itself into the thing it always was:
+   the fire goes out, the seats come round to face the floor, the benches bank
+   up behind him and the plates he climbed out of stack into a chair.
+
+   The room is the same room. That is the reveal, and it only lands if you are
+   made to watch it happen rather than being cut to it.
+--------------------------------------------------------------------------- */
+const TURN_LINES = [
+  { t: 1.1,  s: '. . . ah.' },
+  { t: 4.0,  s: 'No — no, that is fine. Come in, then. Both of you.' },
+  { t: 7.6,  s: 'Everyone up, please. We are going to do this properly.' },
+  { t: 11.4, s: 'Sit at the back. It will not take long.' }
+];
+const TURN_END = 15.6;
+
+let turning = null;
+
+function startTurning() {
+  turning = { t: 0, said: -1, saidT: 0, guest: 0, build: 0, cold: 0 };
+  choice = null;
+  Audio_.tone(190, 0.4, 'sine', 0.09, 200);
+  shake(0.4);
+}
+
+function turningTick(dt) {
+  const v = turning;
+  v.t += dt;
+  v.saidT += dt;
+  // they come in, because you held it open
+  if (v.t > 0.6) v.guest = Math.min(1, v.guest + dt * 0.55);
+  // and the warmth goes out of the place
+  if (v.t > 5.0) v.cold = Math.min(1, v.cold + dt * 0.22);
+  // the seats come round
+  if (v.t > 7.4) v.build = Math.min(1, v.build + dt * 0.26);
+  for (let i = 0; i < TURN_LINES.length; i++)
+    if (v.t >= TURN_LINES[i].t && v.said < i) {
+      v.said = i; v.saidT = 0;
+      Audio_.tone(300 - i * 30, 0.06, 'sine', 0.04, 480);
+      if (i === 2) { shake(0.7); Audio_.boom(); }
+    }
+  if (v.t >= TURN_END) {
+    turning = null;
+    tear = null;                        // there is no door any more
+    startTribunal();
+  }
+}
+
+function drawTurning() {
+  if (!turning) return;
+  const v = turning;
+  const warm = 1 - v.cold * 0.85;
+  ctx.save();
+  ctx.fillStyle = 'rgba(6,4,1,0.94)';
+  ctx.fillRect(0, 0, W, H);
+
+  // the room, going out
+  ctx.save();
+  ctx.globalAlpha = 0.35 + warm * 0.6;
+  ctx.translate(W / 2, H * 0.46);
+  campScene(W, H * 0.92, 0.95, 0);
+  ctx.restore();
+
+  const dy = H * 0.66;
+  const fs = Math.min(H * 0.095, 66);
+  const gap = Math.min(W * 0.19, 190);
+
+  /* The benches coming round. They rise behind him out of the floor of the
+     same room, so it reads as furniture being moved rather than a scene
+     change — nothing here arrives from anywhere else. */
+  if (v.build > 0) {
+    const b = easeOut(v.build);
+    ctx.save();
+    ctx.globalAlpha = b * 0.9;
+    ctx.strokeStyle = rgba(FOUND_COL, 0.5);
+    ctx.lineWidth = 2;
+    for (let r = 0; r < 3; r++) {
+      const yy = dy - 150 - r * 44 * b;
+      const w = W * (0.36 + r * 0.09) * b;
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - w, yy); ctx.lineTo(W / 2 + w, yy);
+      ctx.stroke();
+      // the people on them, standing, turned to face the floor
+      const n = 5 + r;
+      for (let k = 0; k < n; k++) {
+        const x = W / 2 - w + (k + 0.5) * (w * 2 / n);
+        ctx.globalAlpha = b * 0.75;
+        founderFigure(x, yy - 12, fs * 0.30, { col: CROWD_COL, a: 1 });
+      }
+    }
+    ctx.restore();
+  }
+
+  // the bed the words sit on
+  const bed = ctx.createLinearGradient(0, H * 0.72, 0, H);
+  bed.addColorStop(0, 'rgba(4,3,1,0)');
+  bed.addColorStop(1, 'rgba(4,3,1,0.96)');
+  ctx.fillStyle = bed;
+  ctx.fillRect(0, H * 0.72, W, H * 0.28);
+
+  // him, and the one you let in standing where the door used to be
+  ctx.save();
+  founderFigure(W / 2 + gap, dy - fs * 0.52, fs,
+                { open: Math.max(0, 0.5 - v.cold * 0.5) });
+  ctx.restore();
+  if (v.guest > 0) {
+    ctx.save();
+    ctx.globalAlpha = v.guest;
+    founderFigure(W / 2 - gap * (1.05 - v.guest * 0.25), dy - fs * 0.52, fs,
+                  { col: COLD_COL, a: 1 });
+    ctx.restore();
+  }
+
+  ctx.textAlign = 'center';
+  if (v.said >= 0) {
+    const ln = TURN_LINES[v.said].s;
+    const shown = ln.slice(0, Math.min(ln.length, Math.floor(v.saidT * 30)));
+    ctx.font = '400 ' + Math.min(19, Math.max(13, W * 0.016)) +
+               "px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = rgba(FOUND_COL, 0.94);
+    ctx.fillText(shown, W / 2, H * 0.86);
+  }
+  ctx.restore();
+}
+
+/* ------------------------------ the entrance -------------------------------
+   Four beats inside the window the tick already spends idling: he reaches back
+   behind the chair, the thing comes up out of the dark it has been sitting in
+   all fight, he loads and goes straight up out of frame, and he comes down
+   next to you. He is never shown crossing the floor — a man that old walking
+   the length of a room is not the sentence this phase opens with.
+
+   The landing point is wherever the tick has actually got him, so the authored
+   arc and the live position agree on the frame it ends.
+--------------------------------------------------------------------------- */
+const HAL_ENTRY = 1.5;
+
+function halEntry(T, h, S, p) {
+  const th = T.throne;
+  const draw = clamp(p / 0.4, 0, 1);                 // reaching back for it
+  const load = clamp((p - 0.34) / 0.14, 0, 1);       // and loading
+  const a = clamp((p - 0.46) / 0.54, 0, 1);          // up, and down
+  const air = Math.sin(a * Math.PI);
+  const e = 1 - Math.pow(1 - draw, 3);
+
+  // where he is this frame, and how far off the floor
+  const x = lerp(th.x, h.x, a < 1 ? a * a * (3 - 2 * a) : 1);
+  const y = lerp(th.y + S * 0.4, h.y, a < 1 ? a * a * (3 - 2 * a) : 1);
+  const lift = air * H * 1.3;
+  const gone = lift > H * 0.62;                      // out of the frame
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(th.x, th.y - S * 1.2, S * (2.2 + e * 1.4), HAL_COL,
+           (0.2 + e * 0.2) * (1 - a));
+  ctx.restore();
+
+  /* The weapon coming out from behind the chair back, clipped by the chair so
+     it is genuinely emerging. Once he has it, it travels with him. */
+  if (a <= 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(th.x - S * 6, th.y - S * 6, S * 12, S * 7.1);
+    ctx.clip();
+    ctx.translate(th.x + S * 1.1, th.y - S * 1.1);
+    ctx.rotate(-2.15 + e * 0.75);
+    ctx.globalAlpha = 0.3 + e * 0.7;
+    halberdGlyph(HAL_REACH * (0.42 + e * 0.34), false, false, 1);
+    ctx.restore();
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(HAL_COL, 0.85);
+    ctx.lineWidth = Math.max(2, S * 0.09);
+    ctx.beginPath();
+    ctx.moveTo(th.x + S * 0.26, th.y + S * 0.06);
+    ctx.lineTo(th.x + S * (1.1 - e * 0.5), th.y - S * (1.1 - e * 0.5));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // the floor he left, and the floor he is coming back to
+  if (a > 0 && a < 1) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, S * (0.7 - air * 0.4), S * (0.24 - air * 0.14), 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (!gone) {
+    const sq = 1 - load * 0.22 * (1 - a);            // he loads before he goes
+    ctx.save();
+    ctx.translate(x, y - lift);
+    ctx.scale(1 + air * 0.14, sq + air * 0.2);
+    // tucked in the air, both hands on it, blade trailing
+    ctx.save();
+    ctx.rotate(a > 0 ? -1.1 + a * 2.5 : 0);
+    halberdGlyph(HAL_REACH * (a > 0 ? 1 : 0), false, false, a > 0 ? 1 : 0);
+    ctx.restore();
+    founderFigure(0, 0, S, {
+      sit: (0.2 + load * 0.5) * (1 - a) + air * 0.55,
+      open: (0.55 - e * 0.4) * (1 - a)
+    });
+    ctx.restore();
+  } else {
+    // gone off the top: the only thing left is the shadow racing across
+    ctx.save();
+    ctx.strokeStyle = rgba(HAL_COL, 0.35);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 10]);
+    ctx.beginPath(); ctx.moveTo(th.x, th.y); ctx.lineTo(x, y); ctx.stroke();
+    ctx.restore();
+  }
+
+  // the landing
+  if (a > 0.86) {
+    const q = (a - 0.86) / 0.14;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(h.x, h.y, S * (1 + q * 3), HAL_EDGE, 0.5 * (1 - q));
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = rgba('#ffffff', 0.55 * (1 - q));
+    ctx.lineWidth = 3 * (1 - q) + 1;
+    ctx.beginPath(); ctx.arc(h.x, h.y, S * 0.3 + q * S * 1.5, 0, TAU); ctx.stroke();
+    ctx.restore();
+    if (FXO.parts && Math.random() < 0.7)
+      spawnPart(h.x + rnd(S * 0.6, -S * 0.6), h.y + rnd(S * 0.3, -S * 0.3),
+                rnd(220, -220), rnd(60, -160), rnd(3, 1.4), HAL_COL, rnd(0.5, 0.25), 0.9);
+  }
+  if (FXO.parts && a <= 0 && Math.random() < 0.5)
+    spawnPart(th.x + rnd(S, -S), th.y - S * 0.6, rnd(60, -60), rnd(-20, -90),
+              rnd(2.4, 1), HAL_COL, rnd(0.5, 0.25), 0.9);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = rgba(HAL_COL, 0.5 * (a > 0.5 ? 1 - (a - 0.5) * 2 : e));
+  ctx.fillText(a > 0 ? 'HE IS NOT WALKING' : 'IT WAS BEHIND THE SEAT', W / 2, H - 140);
+  ctx.restore();
+}
+
+/* --------------------------------- his end ---------------------------------
+   He does not get to be killed by you. He braces — knocked back, the polearm
+   driven into the floor, both hands on it, still upright — and then the thing
+   that opened THE FRACTURE reaches in and takes the kill off you exactly the
+   way it took the room: as an edit, in its own lime, typed at a prompt.
+
+   It winds him. Nine turns of a coil laid down one at a time round the floor
+   he is standing on, whipped across at intervals so they read as wire and not
+   as rings, and then the whole coil contracts. His weapon is held down and
+   snaps. He is compressed to a white seam, which is the same seam the
+   intrusion left when it closed its selection, and then the turns unwind onto
+   an empty floor with his broken halberd still standing in it.
+
+   The empty benches stay lit behind all of it. They are why he was beatable;
+   the coil is why he was not yours.
+--------------------------------------------------------------------------- */
+const NULLW_COL = INTRUDE_COL;             // the intrusion's own lime
+const NULLW_CMD = 'founder.remove()';
+const NULLW_TAUNT = 'he was taking too long.';
+const NULLW_TURNS = 9;
+
+/* One turn of the coil. Each is a lap of a spiral rather than a closed ring —
+   the lap joins walk round, so nine of them read as something wound. */
+function windingTurn(cx, cy, r, k, laid, hot) {
+  const a0 = -Math.PI / 2 + k * 0.68;
+  const rr = r * (1 - k * 0.011);
+  ctx.strokeStyle = rgba(hot > 0 ? '#ffffff' : NULLW_COL, 0.35 + hot * 0.6);
+  ctx.lineWidth = 2 + hot * 2.4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rr, a0, a0 + laid * TAU * 0.97);
+  ctx.stroke();
+  if (laid >= 1) {                         // the lap join, visibly overlapping
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr * 0.975, a0 - 0.22, a0 + 0.1);
+    ctx.stroke();
+  }
+}
+
+function halDeath(T, over) {
+  const h = T.hal;
+  if (!h) return;
+  const S = 38;
+  const ang = h.dieAng !== undefined ? h.dieAng : h.ang;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const mono = "px 'JetBrains Mono', ui-monospace, monospace";
+
+  h._sfx = h._sfx || 0;
+  const cue = (at, fn) => { if (over >= at && h._sfx < at) { h._sfx = at; fn(); } };
+  cue(1.35, () => { Audio_.noise(0.5, 0.3, 2400, 260, 3); shake(0.5); });
+  cue(3.7, () => Audio_.tone(150, 0.7, 'sawtooth', 0.16, 60));
+  cue(4.55, () => Audio_.noise(0.3, 0.2, 900, 180, 2));
+  cue(5.0, () => { Audio_.boom(); drawFlashT = 0.5; shake(1.5);
+                   ringFx(h.x, h.y, 26, 1200, NULLW_COL, 1.3, 8); });
+
+  /* Beats. He gets the first two; the room gets the rest. */
+  const stag = clamp(over / 0.5, 0, 1);            // driven back a step
+  const plant = clamp((over - 0.4) / 0.8, 0, 1);   // the point goes in
+  const seize = clamp((over - 1.35) / 0.65, 0, 1); // the room changes hands
+  const wind = clamp((over - 1.9) / 1.7, 0, 1);    // nine turns, laid on
+  const tight = clamp((over - 3.7) / 1.35, 0, 1);  // and they contract
+  const crush = clamp((over - 5.0) / 0.4, 0, 1);   // he is not there
+  const undo = clamp((over - 5.6) / 1.4, 0, 1);    // and they unwind
+
+  // he never recovers the ground he is knocked off
+  const bx = h.x - ca * S * 0.5 * easeOut(stag);
+  const by = h.y - sa * S * 0.5 * easeOut(stag) + easeOut(tight) * S * 0.12;
+  const px = h.x + ca * S * 0.75, py = h.y + sa * S * 0.75 + S * 0.34;
+  const PL = HAL_REACH * 0.62;
+  const lean = 0.16 + easeInOut(tight) * 0.1;
+
+  ctx.save();
+
+  /* The field, the gutter, the prompt and the status bar are screen
+     furniture and draw in halDeathHud — this runs under the world
+     transform, which is the wrong space for all four. */
+
+  /* The coil. Laid on from outside his reach, then contracted onto him — the
+     radius is the whole story, so nothing else about it moves. */
+  const R0 = HAL_REACH * 0.62, R1 = S * 0.34;
+  const Rw = lerp(R0, R1, easeInOut(tight)) * (1 + undo * 3.4);
+  // the HUD pass types the prompt under him; this is where "under him" is
+  h._promptY = by + Rw + S * 2.2;
+  if (wind > 0 && undo < 1) {
+    ctx.save();
+    ctx.globalAlpha = 1 - undo;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(bx, by, Rw * 1.5, NULLW_COL, 0.1 + tight * 0.3);
+    ctx.restore();
+    for (let k = 0; k < NULLW_TURNS; k++) {
+      const laid = clamp(wind * (NULLW_TURNS + 2) - k, 0, 1);
+      if (laid <= 0) continue;
+      // the innermost turns are the ones doing the work
+      const hot = tight * clamp(1 - k / 4, 0, 1);
+      windingTurn(bx, by, Rw, k, laid, hot);
+    }
+    /* Whipped across at intervals: this is what makes it wire rather than a
+       stack of circles, and it is where the coil grips. */
+    if (wind > 0.4) {
+      ctx.strokeStyle = rgba(NULLW_COL, 0.5 + tight * 0.4);
+      ctx.lineWidth = 1.6 + tight * 1.6;
+      const n = 12;
+      for (let i = 0; i < n; i++) {
+        const wa = i * TAU / n + wind * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(bx + Math.cos(wa) * Rw * 0.9, by + Math.sin(wa) * Rw * 0.9);
+        ctx.lineTo(bx + Math.cos(wa) * Rw * 1.02, by + Math.sin(wa) * Rw * 1.02);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    if (FXO.parts && tight > 0 && crush < 1 && Math.random() < 0.5) {
+      const wa = rnd(TAU);
+      spawnPart(bx + Math.cos(wa) * Rw, by + Math.sin(wa) * Rw,
+                Math.cos(wa) * 90, Math.sin(wa) * 90, rnd(2.2, 1),
+                NULLW_COL, rnd(0.4, 0.2), 0.9);
+    }
+  }
+
+  /* His weapon. Flung up as he is hit, driven into the floor, held down by the
+     coil, and then it gives — two pieces, and the point stays where it went
+     in, because it is the only thing in the pit the room did not take. */
+  const snapped = tight > 0.62;
+  if (plant < 1) {
+    const e = easeOut(plant), st = easeOut(stag);
+    const gx = bx + ca * S * 0.3, gy = by + sa * S * 0.3;
+    const tx = px + Math.sin(lean) * PL, ty = py - Math.cos(lean) * PL;
+    ctx.save();
+    ctx.translate(lerp(gx, tx, e), lerp(gy, ty, e - st * 0.12 * (1 - e)));
+    ctx.rotate(lerp(ang - 1.15 * st, Math.PI / 2 - lean, e));
+    halberdGlyph(HAL_REACH * (1 - e * 0.38), false, h.rage, 1);
+    ctx.restore();
+  } else {
+    const bend = easeIn(clamp(tight / 0.62, 0, 1)) * 0.3;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(Math.PI / 2 - lean - bend);
+    ctx.translate(-PL, 0);                 // the point is where it went in
+    halberdGlyph(snapped ? PL * 0.58 : PL, false, h.rage, 1);
+    ctx.restore();
+    if (snapped) {                         // the top of it, thrown clear
+      const f = clamp((tight - 0.62) / 0.38, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = 1 - undo * 0.4;
+      ctx.translate(px - Math.sin(lean) * PL * 0.8 - f * S * 1.5,
+                    py - Math.cos(lean) * PL * 0.8 + f * S * 1.9);
+      ctx.rotate(Math.PI / 2 - lean + f * 2.2);
+      halberdGlyph(PL * 0.42, false, h.rage, 0.85);
+      ctx.restore();
+    }
+    ctx.strokeStyle = rgba('#0a0700', 0.5);
+    ctx.lineWidth = 2;
+    for (let k = 0; k < 5; k++) {
+      const ka = k * TAU / 5 + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(px + Math.cos(ka) * S * 0.18, py + Math.sin(ka) * S * 0.18);
+      ctx.lineTo(px + Math.cos(ka + 0.16) * S * 0.62, py + Math.sin(ka + 0.16) * S * 0.62);
+      ctx.stroke();
+    }
+  }
+
+  /* Him. Braced on the haft, then pinned, then compressed — his own warm
+     light is replaced by somebody else's cursor lighting him, which is the
+     whole point of the beat. */
+  if (crush < 1) {
+    const squeeze = easeInOut(tight);
+    const litBy = tight > 0.35 ? NULLW_COL : HAL_COL;
+    ctx.save();
+    ctx.globalAlpha = 1 - crush;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(bx, by, S * (2.2 - squeeze * 0.9), litBy, 0.26);
+    ctx.restore();
+    // the harness, in his own frame, so it stays on his shoulders
+    if (plant > 0.4) {
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.strokeStyle = rgba(AMAL_COL, 0.42 * (1 - squeeze * 0.5));
+      ctx.lineWidth = 2;
+      for (let k = -1; k <= 1; k += 2) {
+        ctx.beginPath();
+        ctx.moveTo(k * S * 0.28, -S * 0.22);
+        ctx.quadraticCurveTo(k * S * 0.46, S * 0.34, k * S * 0.3, S * 0.66);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.translate(bx, by);
+    // pressed in from every side at once, so he loses width before height
+    ctx.scale(1 - squeeze * 0.62, 1 - squeeze * 0.34);
+    ctx.rotate(-0.14 * easeOut(stag) * (1 - plant));
+    founderFigure(0, 0, S, {
+      sit: 0.1 * stag + squeeze * 0.42,
+      open: 0.4 * (1 - plant) * stag,
+      a: 1,
+      lamp: tight < 0.35,                 // his own light goes first
+      col: tight > 0.35 ? NULLW_COL : HAL_COL
+    });
+    ctx.restore();
+    // his hands on the haft while he is still holding himself up
+    if (plant >= 1 && tight < 0.62) {
+      const hold = 1 - easeOut(tight) * 0.5;
+      const hx2 = px - Math.sin(lean) * PL * hold;
+      const hy2 = py - Math.cos(lean) * PL * hold;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = rgba(tight > 0.35 ? NULLW_COL : HAL_COL, 0.9);
+      ctx.lineWidth = Math.max(2, S * 0.09);
+      ctx.beginPath();
+      ctx.moveTo(bx - S * 0.26, by - S * 0.34); ctx.lineTo(hx2, hy2);
+      ctx.moveTo(bx + S * 0.26, by - S * 0.34); ctx.lineTo(hx2, hy2 + S * 0.22);
+      ctx.stroke();
+      for (const g of [hy2, hy2 + S * 0.22]) {
+        ctx.beginPath(); ctx.arc(hx2, g, S * 0.1, 0, TAU);
+        ctx.fillStyle = rgba('#fef3c7', 0.9); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  } else if (undo < 1) {
+    /* And then he is a seam. The same white seam the intrusion left when its
+       selection closed, because it is the same hand doing it. */
+    const k = clamp((over - 5.4) / 0.5, 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(bx, by, S * (2.6 - k * 2), '#ffffff', 0.6 * (1 - k));
+    ctx.restore();
+    ctx.fillStyle = rgba('#ffffff', 1 - k);
+    ctx.fillRect(bx - Rw * 1.1, by - (1 - k) * S * 0.4, Rw * 2.2, Math.max(1, (1 - k) * S * 0.8));
+    ctx.fillStyle = rgba(NULLW_COL, 0.6 * (1 - k * 0.6));
+    ctx.fillRect(bx - Rw * 1.1, by - 1, Rw * 2.2, 2);
+  }
+
+  if (wind > 0 && undo < 1 && crush < 1) {
+    ctx.save();
+    ctx.globalAlpha = (1 - undo) * 0.9;
+    ctx.beginPath();                        // the near half only
+    ctx.rect(bx - Rw * 1.3, by, Rw * 2.6, Rw * 1.3);
+    ctx.clip();
+    for (let k = 0; k < NULLW_TURNS; k++) {
+      const laid = clamp(wind * (NULLW_TURNS + 2) - k, 0, 1);
+      if (laid <= 0) continue;
+      windingTurn(bx, by, Rw, k, laid, tight * clamp(1 - k / 4, 0, 1));
+    }
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* The intrusion's own furniture: the field it holds the room in, its
+   gutter, the prompt it typed him out at, and the bar it signs the kill
+   with. None of that belongs to the pit — it belongs to whoever is holding
+   the pit — so all of it is screen furniture and draws with the HUD.
+
+   halDeath runs from drawTribunal, which is under the world transform, and
+   putting these there parked them off near the arena's top-left corner and
+   slid them about with the camera. drawTribunalHud exists for exactly this
+   reason; this is the same split for the death.
+
+   The one thing that is genuinely his is where the prompt sits: it should
+   read as typed under him, so halDeath leaves that anchor in world units
+   and this converts it the way render() does. */
+function halDeathHud() {
+  const T = tribunal;
+  if (!T || !T.over || !T.hal) return;
+  const h = T.hal, over = T.over;
+  const seize = clamp((over - 1.35) / 0.65, 0, 1);
+  if (seize <= 0) return;
+  const undo = clamp((over - 5.6) / 1.4, 0, 1);
+  const mono = "px 'JetBrains Mono', ui-monospace, monospace";
+
+  ctx.save();
+
+  // the room changes hands: a phosphor field, and a gutter down the side
+  const held = seize * (1 - undo * 0.8);
+  ctx.save();
+  ctx.globalAlpha = 0.05 * held;
+  ctx.fillStyle = NULLW_COL;
+  for (let y = (uiTime * 30) % 4; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = held;
+  const gw = Math.max(46, W * 0.03);
+  ctx.fillStyle = 'rgba(3,8,3,0.55)';
+  ctx.fillRect(0, 0, gw, H);
+  ctx.strokeStyle = rgba(NULLW_COL, 0.2); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(gw + 0.5, 0); ctx.lineTo(gw + 0.5, H); ctx.stroke();
+  ctx.textAlign = 'right';
+  ctx.font = '400 ' + Math.round(Math.max(9, W * 0.011)) + mono;
+  for (let i = 0, y = 22; y < H; i++, y += 26) {
+    ctx.fillStyle = rgba(NULLW_COL, 0.18);
+    ctx.fillText(String(i + 1).padStart(3, '0'), gw - 10, y);
+  }
+  ctx.restore();
+
+  /* The line that did it, at a prompt, with a block caret. Placed under the
+     coil while there is room for it, and never off the bottom of the pass. */
+  const held2 = 1 - undo * 0.5;
+  const typed = Math.floor(clamp((over - 1.35) * 11, 0, NULLW_CMD.length));
+  const fs = Math.min(22, Math.max(13, W * 0.017));
+  const z = camZoom;
+  const oy = -cam.y + H / (2 * z) + cam.sy / z;
+  const y = h._promptY === undefined ? H - 96
+          : clamp((h._promptY + oy) * z, H * 0.42, H - 96);
+  ctx.save();
+  ctx.globalAlpha = seize * held2;
+  ctx.textAlign = 'center';
+  ctx.font = '400 ' + Math.round(fs) + mono;
+  const line = '> ' + NULLW_CMD.slice(0, typed);
+  ctx.fillStyle = rgba(NULLW_COL, 0.95);
+  ctx.fillText(line, W / 2, y);
+  if (typed < NULLW_CMD.length && Math.sin(uiTime * 12) > -0.2) {
+    const w = ctx.measureText(line).width;
+    ctx.fillRect(W / 2 + w / 2 + 3, y - fs * 0.72, fs * 0.5, fs * 0.9);
+  }
+  if (over > 5.0) {
+    ctx.globalAlpha = clamp((over - 5.0) * 1.6, 0, 1) * held2;
+    ctx.font = '400 ' + Math.round(fs * 0.86) + mono;
+    ctx.fillStyle = rgba(NULLW_COL, 0.72);
+    ctx.fillText(NULLW_TAUNT, W / 2, y + fs * 1.7);
+  }
+  ctx.restore();
+
+  // and the status line, in the bar the intrusion took the room with
+  if (over > 5.9) {
+    const al = clamp((over - 5.9) * 1.4, 0, 1);
+    const bh = clamp(H * 0.055, 30, 44);
+    ctx.save();
+    ctx.globalAlpha = al;
+    ctx.fillStyle = 'rgba(163,230,53,0.14)';
+    ctx.fillRect(0, H - bh, W, bh);
+    ctx.fillStyle = 'rgba(163,230,53,0.45)';
+    ctx.fillRect(0, H - bh, W, 1);
+    const fs2 = clamp(bh * 0.34, 11, 15);
+    ctx.font = '600 ' + Math.round(fs2) + mono;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = NULLW_COL;
+    ctx.fillText('1 removed  ·  0 credited', clamp(W * 0.03, 14, 40), H - bh / 2 + fs2 * 0.36);
+    ctx.textAlign = 'right';
+    ctx.letterSpacing = '0.2em';
+    ctx.font = '700 ' + Math.round(fs2) + "px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText('NOT YOU', W - clamp(W * 0.03, 14, 40), H - bh / 2 + fs2 * 0.36);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* Forearms out of his shoulders onto the binding, and both fists. Shared by
+   the fight and the codex page so the hold is identical in each. */
+function halGripArt(bx, by, ang, S, reach) {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const grips = [0.1, 0.265].map(g => ({ x: bx + ca * reach * g, y: by + sa * reach * g }));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(HAL_COL, 0.9);
+  ctx.lineWidth = Math.max(2, S * 0.09);
+  ctx.beginPath();
+  ctx.moveTo(bx - S * 0.26, by - S * 0.34); ctx.lineTo(grips[1].x, grips[1].y);
+  ctx.moveTo(bx + S * 0.26, by - S * 0.34); ctx.lineTo(grips[0].x, grips[0].y);
+  ctx.stroke();
+  for (const g of grips) {
+    ctx.beginPath(); ctx.arc(g.x, g.y, S * 0.11, 0, TAU);
+    ctx.fillStyle = rgba('#fef3c7', 0.95); ctx.fill();
+  }
+  ctx.restore();
+}
+
 function halDraw(T) {
   const h = T.hal;
   if (!h) return;
   const M = h.atk ? HAL_MOVES[h.atk] : null;
+  const live = h.phase === 'live';
+  const S = 38;                          // his shoulder-to-hip, standing
+  const pose = halPose(h);
+  const ang = pose.ang;
+  const reach = HAL_REACH * pose.len;
   ctx.save();
 
-  // the tells: where it is about to be, before it is there
+  /* The first second and a half he has no attack queued, so it is spent
+     getting the thing out: he stands off the seat, reaches back behind it,
+     and it comes up out of the dark where it has been the entire fight.
+     Purely a drawing — the tick is already idling through this window. */
+  const pull = clamp(h.t / HAL_ENTRY, 0, 1);
+  if (pull < 1) { halEntry(T, h, S, pull); ctx.restore(); return; }
+
+  /* The tells. Each one is the shape of the thing that is about to happen,
+     drawn where it will happen — a wedge for the arc, a lane for the lunge, a
+     closing ring for the drop. They fill up rather than blink, so the timing
+     is legible without counting frames. */
   if (h.atk && h.phase === 'tell') {
     const p = clamp(h.pt / M.tell, 0, 1);
-    ctx.globalAlpha = 0.28 + p * 0.5;
-    ctx.strokeStyle = '#f87171';
+    ctx.save();
     if (h.atk === 'sweep' || h.atk === 'spin') {
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(h.x, h.y, HAL_REACH, h.ang - HAL_ARC / 2, h.ang + HAL_ARC / 2);
-      ctx.stroke();
-    } else if (h.atk === 'thrust') {
-      ctx.lineWidth = 2 + p * 4;
+      const a0 = h.ang - HAL_ARC / 2, a1 = h.ang + HAL_ARC / 2;
+      ctx.fillStyle = 'rgba(248,113,113,' + (0.06 + p * 0.16) + ')';
       ctx.beginPath();
       ctx.moveTo(h.x, h.y);
-      ctx.lineTo(h.x + Math.cos(h.ang) * 520, h.y + Math.sin(h.ang) * 520);
+      ctx.arc(h.x, h.y, HAL_REACH + 26, a0, h.atk === 'spin' ? a0 + TAU : a1);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(248,113,113,' + (0.4 + p * 0.5) + ')';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, HAL_REACH + 26, a0, a0 + (h.atk === 'spin' ? TAU : HAL_ARC) * p);
       ctx.stroke();
+    } else if (h.atk === 'thrust') {
+      const L = 520, half = 34;
+      const cosA = Math.cos(h.ang), sinA = Math.sin(h.ang);
+      ctx.save();
+      ctx.translate(h.x, h.y); ctx.rotate(h.ang);
+      const g = ctx.createLinearGradient(0, 0, L, 0);
+      g.addColorStop(0, 'rgba(248,113,113,' + (0.18 + p * 0.2) + ')');
+      g.addColorStop(1, 'rgba(248,113,113,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, -half, L, half * 2);
+      ctx.strokeStyle = 'rgba(248,113,113,' + (0.5 + p * 0.45) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -half); ctx.lineTo(L * p, -half);
+      ctx.moveTo(0, half);  ctx.lineTo(L * p, half);
+      ctx.stroke();
+      ctx.restore();
     } else if (h.atk === 'slam' && h.mark) {
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(h.mark.x, h.mark.y, 132 * (1 - p * 0.4), 0, TAU); ctx.stroke();
+      const r = 132;
+      ctx.fillStyle = 'rgba(248,113,113,' + (0.06 + p * 0.14) + ')';
+      ctx.beginPath(); ctx.arc(h.mark.x, h.mark.y, r, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(248,113,113,0.9)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(h.mark.x, h.mark.y, r, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.3 + p * 0.6) + ')';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(h.mark.x, h.mark.y, r * (1 - p * 0.86), 0, TAU); ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
-  // the weapon. a haft from him to the head, and the head is what cuts
-  const hd = halHead(h);
-  ctx.strokeStyle = rgba('#78716c', 0.95); ctx.lineWidth = 7;
-  ctx.beginPath(); ctx.moveTo(h.x, h.y); ctx.lineTo(hd.x, hd.y); ctx.stroke();
-  ctx.strokeStyle = rgba(HAL_COL, 0.9); ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(h.x, h.y); ctx.lineTo(hd.x, hd.y); ctx.stroke();
-  const live = h.phase === 'live';
+  /* The tip trail. Where the head has actually been over the last few frames,
+     kept as a short ring buffer — a swing is only legible if it leaves the
+     path it took, and a 0.2s window is three or four frames of it. */
+  h._tr = h._tr || [];
+  const tip = { x: h.x + Math.cos(ang) * reach, y: h.y + Math.sin(ang) * reach,
+                live: live };
+  h._tr.push(tip);
+  if (h._tr.length > 9) h._tr.shift();
+  if (!h.atk) h._tr.length = 0;
+  if (h._tr.length > 2) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (let k = 1; k < h._tr.length; k++) {
+      const q = k / h._tr.length;
+      const a0 = h._tr[k - 1], a1 = h._tr[k];
+      ctx.strokeStyle = rgba(a1.live ? HAL_EDGE : HAL_COL, 0.5 * q * q);
+      ctx.lineWidth = 3 + 15 * q * (a1.live ? 1 : 0.4);
+      ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(a1.x, a1.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* The ghosts: the weapon a few frames back, so a stroke that crosses the
+     screen in a fifth of a second still shows the shape it made. */
+  if (pose.ghosts) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let k = 1; k <= pose.ghosts; k++) {
+      const q = k / (pose.ghosts + 1);
+      ctx.save();
+      ctx.globalAlpha = 0.3 * (1 - q);
+      ctx.translate(h.x, h.y);
+      ctx.rotate(ang + pose.spread * q);
+      halberdGlyph(reach * (1 - q * 0.05), false, false, 1, pose.head);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  if (h.atk === 'slam' && (live || h.phase === 'rest')) {
+    const q = live ? clamp(h.pt / M.live, 0, 1)
+                   : 1 + clamp(h.pt / M.rest, 0, 1) * 2.4;
+    const m = h.mark || { x: h.x, y: h.y };
+    if (q > 0.55) {
+      const b = clamp((q - 0.55) / 2.2, 0, 1);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(m.x, m.y, 60 + b * 150, HAL_COL, 0.5 * (1 - b));
+      ctx.strokeStyle = rgba('#ffffff', 0.8 * (1 - b));
+      ctx.lineWidth = 7 * (1 - b) + 1;
+      ctx.beginPath(); ctx.arc(m.x, m.y, 24 + b * 190, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = rgba(HAL_COL, 0.5 * (1 - b));
+      ctx.lineWidth = 3;
+      // and it cracks outward from where it landed
+      for (let k = 0; k < 7; k++) {
+        const a = k * TAU / 7 + 0.3;
+        const r0 = 20 + b * 60, r1 = r0 + 60 * (1 - b) + 30;
+        ctx.beginPath();
+        ctx.moveTo(m.x + Math.cos(a) * r0, m.y + Math.sin(a) * r0);
+        ctx.lineTo(m.x + Math.cos(a + 0.1) * r1, m.y + Math.sin(a + 0.1) * r1);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // him, and the thing in his hands, held at the grip rather than the butt
   ctx.save();
-  ctx.translate(hd.x, hd.y);
-  ctx.rotate(h.ang + h.swing);
   ctx.globalCompositeOperation = 'lighter';
-  drawGlow(0, 0, live ? 54 : 30, live ? HAL_EDGE : HAL_COL, live ? 0.6 : 0.3);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = live ? HAL_EDGE : HAL_COL;
-  ctx.beginPath();
-  ctx.moveTo(-26, -6); ctx.lineTo(16, -30); ctx.lineTo(30, -4);
-  ctx.lineTo(12, 12); ctx.lineTo(-26, 8);
-  ctx.closePath(); ctx.fill();
+  drawGlow(h.x, h.y, h.rage ? S * 2.8 : S * 2.1, HAL_COL,
+           h.hurt > 0 ? 0.5 : (h.rage ? 0.34 : 0.24));
   ctx.restore();
 
-  // him
   ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  drawGlow(h.x, h.y, h.rage ? 92 : 70, HAL_COL, h.hurt > 0 ? 0.55 : 0.32);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.strokeStyle = rgba(HAL_COL, 0.95); ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(h.x, h.y, 22, 0, TAU); ctx.stroke();
-  ctx.fillStyle = rgba(HAL_COL, h.rage ? 0.5 : 0.28);
-  ctx.fill();
+  ctx.translate(h.x, h.y);
+  ctx.rotate(ang);
+  halberdGlyph(reach, live, h.rage, 1, pose.head);
   ctx.restore();
+
+  /* He commits with it: the lean is his weight going into the stroke and out
+     the other side, so the man and the weapon are one motion rather than a
+     figure with a stick attached. */
+  ctx.save();
+  ctx.translate(h.x + Math.cos(h.ang) * pose.lean * S * 0.34,
+                h.y + Math.sin(h.ang) * pose.lean * S * 0.34);
+  founderFigure(0, 0, S * (1 + Math.abs(pose.lean) * 0.04), {
+    open: 0.15,
+    sit: Math.max(0, -pose.lean) * 0.3,
+    a: h.hurt > 0 ? 0.75 : 1,
+    col: h.hurt > 0 ? '#fff7ed' : HAL_COL
+  });
+  ctx.restore();
+
+  // the grip: forearms out of his shoulders onto the binding, and both fists
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const lx = h.x + Math.cos(h.ang) * pose.lean * S * 0.34;
+  const ly = h.y + Math.sin(h.ang) * pose.lean * S * 0.34;
+  const grips = [0.1, 0.265].map(g => ({
+    x: h.x + ca * reach * g, y: h.y + sa * reach * g
+  }));
+  const sh = [{ x: lx - S * 0.26, y: ly - S * 0.34 },
+              { x: lx + S * 0.26, y: ly - S * 0.34 }];
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(HAL_COL, 0.9);
+  ctx.lineWidth = Math.max(2, S * 0.09);
+  ctx.beginPath();
+  ctx.moveTo(sh[0].x, sh[0].y); ctx.lineTo(grips[1].x, grips[1].y);
+  ctx.moveTo(sh[1].x, sh[1].y); ctx.lineTo(grips[0].x, grips[0].y);
+  ctx.stroke();
+  for (const g of grips) {
+    ctx.beginPath(); ctx.arc(g.x, g.y, S * 0.11, 0, TAU);
+    ctx.fillStyle = rgba('#fef3c7', 0.95); ctx.fill();
+  }
+  ctx.restore();
+
+  /* By the time he is angry the harness he has worn since the cockpit has
+     torn loose, and it trails off him. He is not a founder any more, he is
+     just the last person in the room. */
+  if (h.rage) {
+    ctx.save();
+    ctx.strokeStyle = rgba(AMAL_COL, 0.5);
+    ctx.lineWidth = 2;
+    for (let k = -1; k <= 1; k += 2) {
+      const w = Math.sin(uiTime * 5 + k) * 8;
+      ctx.beginPath();
+      ctx.moveTo(h.x + k * S * 0.3, h.y - S * 0.3);
+      ctx.quadraticCurveTo(h.x + k * S * 0.9, h.y + S * 0.4 + w,
+                           h.x + k * S * 0.6, h.y + S * 1.1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // his health, on him, because there is no boss bar for a man
+  const frac = clamp(h.hp / h.maxHp, 0, 1);
+  const bw = S * 1.9, by = h.y - S * 1.62;
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,5,1,0.5)';
+  ctx.fillRect(h.x - bw / 2, by, bw, 3);
+  ctx.fillStyle = rgba(h.rage ? '#f87171' : HAL_COL, 0.85);
+  ctx.fillRect(h.x - bw / 2, by, bw * frac, 3);
+  ctx.restore();
+
   ctx.restore();
 }
 
@@ -6232,6 +7200,7 @@ function tribunalTick(dt) {
       }
       arenaReset();
       betweenWaves = 3.0;
+      placePortal({ kind: 'library', boss: 'founder' });
       if (!awaitingPortal) afterReward();
       banner('HE IS THE ONLY ONE LEFT', FOUND_COL, 5.0);
       checkLevel();
@@ -6243,7 +7212,13 @@ function tribunalTick(dt) {
     halTick(T, dt);
     if (T.hal.hp <= 0 && !T.over) {
       T.over = 0.001;
-      if (T.hal.e) T.hal.e.dead = true;
+      const h = T.hal;
+      // whatever he was doing, he is not doing it any more
+      h.atk = null; h.phase = null; h.pt = 0; h.hitOn = false;
+      h.mark = null; h.spinT = 0; h._tr = null;
+      h.dieAng = h.ang + h.swing;        // the pose the drop starts from
+      h.swing = 0;
+      if (h.e) h.e.dead = true;
       triSay('. . . oh.', 6.0);
       drawFlashT = 0.5; shake(2.2);
       Audio_.boom(); Audio_.levelup();
@@ -6341,7 +7316,6 @@ function drawTribunal() {
   if (!tribunal) return;
   const T = tribunal;
   if (!T.over) drawTriTells(T);      // the slow ones have to be readable first
-  if (T.hal) halDraw(T);
   const th = T.throne;
   const cols = 8;
   const colW = T.seats.length > 1 ? Math.abs(T.seats[1].x - T.seats[0].x) : 72;
@@ -6442,12 +7416,23 @@ function drawTribunal() {
     ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
   }
 
-  // and him in it — standing exactly once, and never coming down off the dais
-  founderFigure(th.x, th.y - (T.stood ? ts * 0.34 : ts * 0.04), ts * 0.86, {
-    sit: T.stood ? 0.1 : 0.92,
-    open: T.over ? 0 : (T.ranksT > 0 ? 0.9 : 0.25),
-    a: T.over ? 0.5 : 1
-  });
+  /* Him in it — standing exactly once, and never coming down off the dais
+     until there is nobody left to stand for him. Once he has, the seat is
+     drawn empty, which is the second hole in this fight he came out of. */
+  if (!T.hal) {
+    founderFigure(th.x, th.y - (T.stood ? ts * 0.34 : ts * 0.04), ts * 0.86, {
+      sit: T.stood ? 0.1 : 0.92,
+      open: T.over ? 0 : (T.ranksT > 0 ? 0.9 : 0.25),
+      a: T.over ? 0.5 : 1
+    });
+  } else {
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,4,1,0.55)';
+    ctx.beginPath();
+    ctx.ellipse(th.x, th.y + ts * 0.1, ts * 0.5, ts * 0.28, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
 
   // the count, and him
   ctx.save();
@@ -6457,30 +7442,19 @@ function drawTribunal() {
   const cw2 = T.seats.length > 1 ? Math.abs(T.seats[1].x - T.seats[0].x) : 72;
   const rh2 = T.seats.length > 8 ? Math.abs(T.seats[8].y - T.seats[0].y) : 52;
   const ts2 = Math.max(38, Math.min(cw2 * 0.62, rh2 * 0.78));
-  ctx.fillStyle = rgba(FOUND_COL, 0.8);
-  ctx.fillText('THE FOUNDER', th.x, th.y + ts2 * 1.5);
-  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
-  ctx.letterSpacing = '0em';
-  ctx.fillStyle = rgba(CROWD_COL, 0.75);
-  ctx.fillText((TRI_SEATS - T.turned) + ' / ' + TRI_SEATS + '  STILL HIS', th.x, th.y + ts2 * 1.86);
-  if (T.sayT > 0) {
-    ctx.font = '400 ' + Math.min(19, Math.max(13, W * 0.016)) +
-               "px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = rgba(FOUND_COL, clamp(T.sayT, 0, 1) * 0.92);
-    ctx.fillText(T.say, W / 2, H - 96);
-  }
-  if (T.ranksT > 0) {
-    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.letterSpacing = '0.22em';
-    ctx.fillStyle = rgba('#f87171', 0.9);
-    ctx.fillText('CLOSING RANKS', W / 2, 78);
-  } else if (P.hp / P.maxHp > 0.75 && !T.over) {
-    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.letterSpacing = '0.2em';
-    ctx.fillStyle = 'rgba(148,163,184,0.6)';
-    ctx.fillText('THEY ARE NOT WATCHING YOU', W / 2, 78);
+  if (!T.hal) {
+    ctx.fillStyle = rgba(FOUND_COL, 0.8);
+    ctx.fillText('THE FOUNDER', th.x, th.y + ts2 * 1.5);
+    ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.letterSpacing = '0em';
+    ctx.fillStyle = rgba(CROWD_COL, 0.75);
+    ctx.fillText((TRI_SEATS - T.turned) + ' / ' + TRI_SEATS + '  STILL HIS', th.x, th.y + ts2 * 1.86);
   }
   ctx.restore();
+  ctx.restore();             // the save this function opened with
+  if (T.hal) {               // on top of the room: he is walking about in it
+    if (T.over) halDeath(T, T.over); else halDraw(T);
+  }
 }
 
 /* ------------------------------ portal room -------------------------------
@@ -6618,6 +7592,90 @@ let libraryPortal = null, libraryBook = null, malwareOffer = null;
 const LIBRARY_CHANCE = 0.5;
 
 const BOOKS = {
+  /* ---- the three that were never in a stage rotation. Each one is the thing
+     its owner did to you, handed over: his till, its console, his people. ---- */
+
+  shopkeeper: {
+    id: 'shopkeeper', n: 'THE DAY BOOK', from: 'THE SHOPKEEPER',
+    col: '#fbbf24', cost: 2,
+    d: 'Cash out. Everything standing is itemised, charged for at once, and paid out of what you were carrying.',
+    f: () => {
+      /* The only book that costs money as well as charge, which is the whole
+         joke: it is his ledger, and a ledger with nothing in it does nothing. */
+      const spend = Math.min(credits, 1200);
+      credits -= spend;
+      const dmg = 40 + spend * 0.9;
+      for (const e of enemies) {
+        if (e.dead || e.hacked) continue;
+        if (len(e.x - P.x, e.y - P.y) > 620) continue;
+        damageEnemy(e, dmg, true, P.x, P.y, {});
+        floatText(e.x, e.y - e.r - 8, '-' + Math.round(dmg), '#fbbf24', 13);
+      }
+      ringFx(P.x, P.y, 14, 620, '#fbbf24', 0.8, 7);
+      burst(P.x, P.y, 44, '#fde68a', 380, 4, 0.8);
+      floatText(P.x, P.y - 46, spend > 0 ? '-' + spend + ' CR' : 'NOTHING TO SPEND',
+                '#fbbf24', 16);
+      shake(0.6); Audio_.boom(); Audio_.levelup();
+    }
+  },
+
+  root: {
+    id: 'root', n: 'THE PATCH NOTES', from: 'ROOT',
+    col: '#f0abfc', cost: 3,
+    d: 'Ship a balance pass. For twelve seconds everything in the room is weaker, and none of it agreed to that.',
+    f: () => {
+      /* It never fought you fairly, so this does not either — it edits the
+         room rather than shooting it. */
+      for (const e of enemies) {
+        if (e.dead || e.hacked) continue;
+        if (!e.nerfT) {                  // never stack it on itself
+          e.nerfDmg = e.dmg; e.nerfSpd = e.spd; e.nerfVuln = e.vuln || 1;
+          e.dmg *= 0.45;
+          e.spd *= 0.6;
+          e.vuln = Math.max(e.vuln || 1, 1.6);
+        }
+        e.nerfT = 12;
+        malGlitch(e.x, e.y, e.r * 2.6, '#f0abfc', 0.4);
+      }
+      ebullets.length = 0;
+      P.patchT = 12;
+      banner('BALANCE PASS  ·  12s', '#f0abfc', 3.0);
+      ringFx(P.x, P.y, 16, 720, '#f0abfc', 0.9, 8);
+      drawFlashT = Math.max(drawFlashT, 0.2);
+      Audio_.noise(0.4, 0.3, 2200, 260, 3); Audio_.levelup();
+    }
+  },
+
+  founder: {
+    id: 'founder', n: 'THE ROLL', from: 'THE FOUNDER',
+    col: '#fcd34d', cost: 3,
+    d: 'Call the room. The ones nearest you remember being asked nicely, and take your side while it lasts.',
+    f: () => {
+      /* He never swung at anything — he asked, and they did it. So does this. */
+      /* hackable() gates on P.hacker, which is THE HACKER's flag — without
+         this the book did nothing at all for the other two pilots. The hold is
+         lent for the call and handed straight back, so nothing else in the run
+         thinks you are him. Every other rule still applies: the caps, the
+         ineligible types, the decay on the hold. */
+      const was = P.hacker;
+      P.hacker = true;
+      let took = 0;
+      try {
+        const near = enemies
+          .filter(e => !e.dead && !e.hacked && hackable(e))
+          .sort((a, b) => len(a.x - P.x, a.y - P.y) - len(b.x - P.x, b.y - P.y));
+        for (const e of near) {
+          if (took >= 4) break;
+          if (hackTake(e)) took++;
+        }
+      } finally { P.hacker = was; }
+      ringFx(P.x, P.y, 12, 540, '#fcd34d', 0.8, 6);
+      burst(P.x, P.y, 34, '#fde68a', 320, 3.6, 0.7);
+      floatText(P.x, P.y - 46, took ? took + ' CAME' : 'NOBODY CAME', '#fcd34d', 16);
+      Audio_.levelup();
+    }
+  },
+
   warden: {
     id: 'warden', n: 'THE WARDEN\'S CODEX', from: 'THE WARDEN',
     col: '#ef4444', cost: 2,
@@ -7482,6 +8540,7 @@ const Save = {
                   askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
                   deepFracture: false, rootDone: false, keyEver: false,
                   metFounder: false, conformed: false, tribunalDone: false,
+                  campVisits: 0,
                   gfx: null, gfxSeen: 0, gfxCosts: null,
                   // ids of every challenge cleared; the rewards key off this
                   chal: [],
@@ -7552,6 +8611,7 @@ const Save = {
     out.metFounder = !!(a.metFounder || b.metFounder);
     out.conformed = !!(a.conformed || b.conformed);
     out.tribunalDone = !!(a.tribunalDone || b.tribunalDone);
+    out.campVisits = Math.max(a.campVisits || 0, b.campVisits || 0);
     out.devTalkDue  = !!(a.devTalkDue  || b.devTalkDue);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
@@ -7810,6 +8870,22 @@ function resetGame() {
   awaitingPortal = false; normalIdx = 0; altIdx = -1;
   root = null; intrusion = null; rootOut = null;
   amalOpen = null; tear = null; choice = null; tribunal = null; campVisit = null;
+  turning = null;
+  /* Once you have been let in, the door is there on every run until he is put
+     down — the key opens the amalgam once, and it would be a poor reward if
+     the whole way back through ROOT had to be walked again to finish talking
+     to him. The visit count rides on the profile with it, so the four visits
+     are four across the account rather than four a run: the gifts are not
+     farmable, and wherever you left the conversation is where it picks up. */
+  if (Save.profile.metFounder && !Save.profile.tribunalDone)
+    tear = { visits: Save.profile.campVisits || 0, open: false, cd: 8,
+             at: null, shown: 0, door: null, invited: false };
+  /* And the key itself. It was a run item, which made the whole thing a
+     lottery on endurance: ROOT is five sectors down the fracture and the
+     amalgam wants the unwritten and the dev talk, so holding both in one
+     sitting is a two-hour ask, and dying anywhere in between put the key back
+     behind all of it. Earned once, carried until it is spent. */
+  if (Save.profile.keyEver && !Save.profile.metFounder) P.key = 1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
@@ -8303,6 +9379,7 @@ function update(dt) {
   if (amalOpen) { amalOpenTick(dt); return; }
   if (choice)   { choiceTick(dt); return; }
   if (campVisit) { campVisitTick(dt); return; }
+  if (turning)   { turningTick(dt); return; }
 
   // cosmetic layers keep running during level-up / shop / death for smoothness
   updateParticles(dt);
@@ -8724,6 +9801,7 @@ function updatePlayer(dt) {
 
   P.iframe = Math.max(0, P.iframe - dt);
   P.hurtFlash = Math.max(0, P.hurtFlash - dt * 2.6);
+  if (P.patchT > 0) P.patchT = Math.max(0, P.patchT - dt);
   // --- library book effects ---
   if (P.diaryT > 0) {
     P.diaryT -= dt;
@@ -8863,6 +9941,15 @@ function updateEnemies(dt) {
       e.absorb = Math.min(e.armor * 0.25, (e.absorb || 0) + e.armor * dt);
     if (e.ramCd > 0) e.ramCd -= dt;
     if (e.slowT > 0) { e.slowT -= dt; if (e.slowT <= 0) e.slow = 0; }
+    /* THE PATCH NOTES: reverted from what was stored rather than by dividing
+       back out, so a second application cannot leave the numbers wrong. */
+    if (e.nerfT > 0) {
+      e.nerfT -= dt;
+      if (e.nerfT <= 0) {
+        e.dmg = e.nerfDmg; e.spd = e.nerfSpd; e.vuln = e.nerfVuln;
+        e.nerfT = 0;
+      }
+    }
     // SCORPIO venom: ticks harder the more stings have landed
     if (e.psn > 0) {
       e.psnT -= dt;
@@ -10676,7 +11763,12 @@ function startAmalgam() {
      after the amalgam has been beaten the honest way at least once. Its own
      ending only lands the first time and it should not be possible to spend
      it on a shortcut you found in another route. */
-  const opening = P.key > 0 && Save.profile.amalgamDone;
+  /* The gate exists so the key cannot rob you of the amalgam's own ending the
+     first time you meet it — that ending only lands once. On the dev build it
+     cannot hold: betaUnlockAll deliberately leaves amalgamDone false so the
+     dev-talk chain stays armed, which is exactly the flag this needs, so the
+     key was unusable on the one build that exists to test it. */
+  const opening = P.key > 0 && (Save.profile.amalgamDone || BETA);
   if (opening) P.key--;
   /* Each piece is spawned as a real enemy rather than a bespoke object, so
      every damage path in the game — bullets, the lance, drones, chain, static,
@@ -12680,6 +13772,16 @@ function render() {
   drawHackHud();
   drawRootCmdHud();
   drawHaltBar();
+  drawTribunalHud();
+  halDeathHud();
+  if (P.patchT > 0) {                  // the whole book is a timer, so show it
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = rgba('#f0abfc', 0.85);
+    ctx.fillText('balance pass  ' + P.patchT.toFixed(1) + 's', 18, H - 124);
+    ctx.restore();
+  }
   drawRoot();
   drawIntrusion();
   drawBetaMark();
@@ -12695,6 +13797,7 @@ function render() {
   if (state === 'devtalk') drawDevTalk();
   if (amalOpen) drawAmalOpen();
   if (campVisit) drawCampVisit();
+  if (turning) drawTurning();
   if (choice) drawChoice();
   if (rootOut) drawRootOutro();
   if (outro) drawOutro();
@@ -14579,6 +15682,12 @@ function drawEnemies() {
     if (unwritten && (e === unwritten.a || e === unwritten.b)) continue;
     // ROOT is a selection box, not a polygon — it draws itself
     if (e.boss === 'root') { drawRootBody(e); continue; }
+    /* THE FOUNDER's entity exists to carry a health bar and to take damage
+       through the ordinary pipeline; the man himself is drawn with the room in
+       halDraw. Without this the generic renderer also drew the placeholder
+       shape his BOSSES entry carries, so a stray triangle followed him around
+       his own boss fight. */
+    if (e.founder) continue;
 
     // glow
     ctx.globalCompositeOperation = 'lighter';
@@ -18126,8 +19235,201 @@ function codexStepTab(dir) {
   }
 }
 
+/* ---------------------------- boss portraits -------------------------------
+   Not illustrations of the bosses — the bosses. Every entry below stands up
+   just enough synthetic state to call the SAME function the fight calls, at
+   the size the fight draws it, and scales that into whatever cell it is given.
+   The grid icon and the detail panel are one function at two scales, and a
+   portrait can never drift from the encounter, because there is only one
+   drawing of each of these things in the file.
+--------------------------------------------------------------------------- */
+
+/* Runs fn inside a cell: origin centred, fight units scaled to fit `size`,
+   and the world's own state left exactly as it was found. A codex page must
+   not be able to spawn particles or read another entity's pose. */
+function codexStage(x, y, size, fightHalf, fn) {
+  const keepRoot = typeof root !== 'undefined' ? root : null;
+  const keepUnw = typeof unwritten !== 'undefined' ? unwritten : null;
+  const keepParts = FXO.parts;
+  const keepPx = P.x, keepPy = P.y, keepAng = P.ang;
+  FXO.parts = false;                       // no page may litter the arena
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / fightHalf, size / fightHalf);
+  ctx.lineJoin = 'round';
+  /* Rim lights and facings are computed against the player, so he is parked
+     below-left of the cell — the light falls the same way on every entry. */
+  P.x = -fightHalf * 2.4; P.y = fightHalf * 2.4; P.ang = 0;
+  try { fn(); } catch (e) { /* a bad page must not take the codex with it */ }
+  ctx.restore();
+  P.x = keepPx; P.y = keepPy; P.ang = keepAng;
+  FXO.parts = keepParts;
+  if (typeof root !== 'undefined') root = keepRoot;
+  if (typeof unwritten !== 'undefined') unwritten = keepUnw;
+}
+
+// the smallest entity the body renderers will accept
+function codexDummy(col, r, sides, extra) {
+  const e = { x: 0, y: 0, r: r, sides: sides, ang: -Math.PI / 2, col: col,
+              type: 'boss', hp: 1, maxHp: 1, flash: 0 };
+  if (extra) for (const k in extra) e[k] = extra[k];
+  return e;
+}
+
+const CODEX_ART = {
+  /* THE FOUNDER as his second phase draws him: the man, the polearm, and the
+     hands actually on the binding. */
+  founder(size, col) {
+    const S = 38, R = HAL_REACH;
+    /* Framed on the man, not on the reach: at the fight's real proportions a
+       polearm this long makes him six pixels tall, so the page crops the haft
+       the way a portrait crops anything that runs out of frame. */
+    const gx = -S * 0.5, gy = S * 1.15;
+    codexStage(0, 0, size, S * 2.5, () => {
+      ctx.save();
+      ctx.translate(gx, gy);
+      ctx.rotate(-1.02);
+      halberdGlyph(R, false, false, 1, 1);
+      ctx.restore();
+      founderFigure(gx, gy, S, { open: 0.15, sit: 0 });
+      halGripArt(gx, gy, -1.02, S, R);
+    });
+  },
+
+  /* THE AMALGAM as the build sequence draws it once every limb is on: the same
+     `drawAmalBody`, with every part placed and no live rig behind it. */
+  amalgam(size, col) {
+    const placed = {};
+    for (const p of AMAL_PARTS) placed[p.id] = 1;
+    codexStage(0, 0, size, 330, () => {
+      ctx.translate(0, 90);            // its origin is the hip, not the middle
+      drawAmalBody({ x: 0, y: 0 }, placed, null);
+    });
+  },
+
+  // ROOT as its own body pass draws it, untouchable and mid-shape-swap
+  root(size, col) {
+    codexStage(0, 0, size, 92, () => {
+      root = { stunT: 0, cmd: null, typed: 0, glyphs: [], e: null };
+      drawRootBody(codexDummy(col, 46, 5, { boss: 'root' }));
+    });
+  },
+
+  /* THE UNWRITTEN as the fight draws it: two of the real sheets, each carrying
+     its own tear, with the seam that joins them between. */
+  unwritten(size, col) {
+    codexStage(0, 0, size, 108, () => {
+      const u = { a: null, b: null, aHitT: 0, bHitT: 0, seam: 1, t: 0 };
+      const a = codexDummy(col, 58, 4, { unwSide: -1, x: -62, y: 0 });
+      const b = codexDummy(col, 58, 4, { unwSide: 1, x: 62, y: 0 });
+      u.a = a; u.b = b;
+      unwritten = u;
+      unwSheet(a, u, 0);
+      unwSheet(b, u, 0);
+      // the seam, drawn the way the fight draws it: stitches between the pair
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, 46, col, 0.35);
+      ctx.restore();
+      ctx.strokeStyle = rgba(col, 0.85); ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let i = -3; i <= 3; i++) {
+        ctx.moveTo(-13, i * 18); ctx.lineTo(13, i * 18 + 9);
+      }
+      ctx.stroke();
+    });
+  },
+
+  // and the three that fight as bodies: the real plated body, real decoration
+  shopkeeper(size, col) {
+    codexStage(0, 0, size, 72, () => {
+      const e = codexDummy(col, 54, 7, { boss: 'shopkeeper' });
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, e.r * 2.4, col, 0.3);
+      ctx.restore();
+      platedBody(e, false);
+      // the hex coin it never quite hands over
+      ctx.save();
+      ctx.translate(e.r * 1.15, -e.r * 0.9);
+      poly(0, 0, 15, 6, Math.PI / 6);
+      ctx.fillStyle = rgba(col, 0.35);
+      ctx.strokeStyle = rgba(col, 0.95); ctx.lineWidth = 3;
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    });
+  },
+
+  keeper(size, col) {
+    codexStage(0, 0, size, 126, () => {
+      const e = codexDummy(col, 52, 6, { boss: 'keeper' });
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, e.r * 2.4, col, 0.3);
+      ctx.restore();
+      platedBody(e, false);
+      // the ledger, on the orbit the fight puts it on
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) {
+        const a = k * TAU / 3 + 0.4, rr = e.r + 40 + k * 12;
+        ctx.save();
+        ctx.translate(Math.cos(a) * rr, Math.sin(a) * rr);
+        ctx.rotate(a + Math.PI / 2);
+        ctx.strokeRect(-9, -12, 18, 24);
+        ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, 12); ctx.stroke();
+        ctx.restore();
+      }
+    });
+  },
+
+  theother(size, col) {
+    codexStage(0, 0, size, 88, () => {
+      const e = codexDummy(col, 46, 3, { boss: 'theother' });
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, e.r * 2.6, col, 0.32);
+      ctx.restore();
+      // the legs it grows when it stops pretending to be you
+      ctx.save();
+      ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 3.4;
+      ctx.lineCap = 'round';
+      for (let k = 0; k < 8; k++) {
+        const a = k * TAU / 8 + 0.2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(Math.cos(a) * e.r * 1.3, Math.sin(a) * e.r * 1.3 - e.r * 0.5,
+                             Math.cos(a) * e.r * 1.7, Math.sin(a) * e.r * 1.9);
+        ctx.stroke();
+      }
+      ctx.restore();
+      platedBody(e, false);
+    });
+  }
+};
+
 // a compact silhouette from the same shape data the live enemy uses
 function drawCodexIcon(en, x, y, size, seen) {
+  const art = en.boss ? CODEX_ART[en.key] : null;
+  if (art && seen) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(x, y, size * 1.9, en.col, 0.26);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.lineJoin = 'round';
+    art(size, en.col);
+    ctx.restore();
+    return;
+  }
+  if (art && !seen) {                 // unseen: the outline of the real thing
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.translate(x, y);
+    art(size, '#64748b');
+    ctx.restore();
+    return;
+  }
   ctx.save();
   if (seen) {
     ctx.globalCompositeOperation = 'lighter';
@@ -23303,7 +24605,14 @@ function betaUnlockAll() {
      Left unfinished and armed instead — the admin panel can flip it. */
   p.amalgamDone = false;
   p.askedHarder = false;
-  p.devTalkDue = true;
+  /* Not armed, though. Saying no to him only sets devTalkSaidNo, which is
+     scoped to the run, and repair() re-arms devTalkDue for anyone sitting on
+     trueEnd without amalgamDone — which is precisely the state the two lines
+     above leave you in. Between them he came back every single launch with no
+     way to dismiss him for good. Cleared here because this runs after repair,
+     so it is the last word; the admin panel's ARM DEV TALK asks for him when
+     he is actually wanted, and killing THE UNWRITTEN still arms him normally. */
+  p.devTalkDue = false;
   p.clears = Math.max(p.clears || 0, 2);
   p.chal = CHALLENGES.map(c => c.id);          // every challenge and its reward
   p.codexE = [...Object.keys(CODEX_E), ...Object.keys(BOSSES)];
