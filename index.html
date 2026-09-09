@@ -955,6 +955,8 @@ let autoFire = false;
 
 addEventListener('keydown', e => {
   if (state === 'name') { nameKey(e); return; }
+  // the password field wants the raw event too: any printable key, unfiltered
+  if (state === 'devlogin') { devLogKey(e); return; }
   const k = e.key.toLowerCase();
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
   if (k === 'tab' && state === 'codex') e.preventDefault();   // don't move focus
@@ -8969,6 +8971,12 @@ function nameKey(e) {
 function commitName() {
   const n = nameBuf.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
   if (!n) return;
+  /* Some names are an account. Only the door — the password is the lock — so
+     anyone may type it and anyone who is not signing in can take the name
+     from the panel. The flag is what stops that choice bouncing back here. */
+  const acct = devLoginFor(n);
+  if (acct && !devLogSkip) { openDevLogin(acct, n); return; }
+  devLogSkip = false;
   Save.profile.name = n;
   Save.writeLocal();
   Save.flush();
@@ -9329,6 +9337,7 @@ function handleClick() {
     return;
   }
   if (state === 'name') { if (isTouch) promptName(); return; }
+  if (state === 'devlogin') { devLogClick(); return; }
   if (state === 'lan') { lanClick(); return; }
   if (state === 'chal') { chalClick(); return; }
   if (state === 'settings') { settingsClick(); return; }
@@ -9532,6 +9541,7 @@ function update(dt) {
   mpHostNet(dt);
   if (MP.lostT > 0) MP.lostT -= dt;
 
+  if (state === 'devlogin') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }
   if (state === 'menu' || state === 'name') {
     updateMenu(dt);
     // updateMenu can move us elsewhere; the notes only belong on the menu
@@ -13854,7 +13864,8 @@ function render() {
   if (!volDrag) volRect = null;
   if (!sensDrag) sensRect = null;
 
-  if (state === 'menu' || state === 'name' || state === 'lan' || state === 'chal' ||
+  if (state === 'menu' || state === 'name' || state === 'devlogin' ||
+      state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' ||
       (state === 'skin' && skinOverMenu())) {
@@ -13862,6 +13873,7 @@ function render() {
     else {
       renderMenu();
       if (state === 'name') drawNameEntry();
+      if (state === 'devlogin') drawDevLogin();
       if (state === 'lan') drawLan();
       if (state === 'settings') drawSettings();
       if (state === 'changelog') drawChangelog();
@@ -17424,7 +17436,7 @@ function drawVignette() {
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'codex', 'gfx',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'skin'];
+                          'daily', 'skin', 'devlogin'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -22354,8 +22366,11 @@ function devGrant(id, via) {
    back is a grant bound to this profile, which the ordinary award sync then
    delivers. Wrong answers are deliberately identical: the endpoint will not
    say whether it was the name or the password that was wrong. */
-window.devLogin = async (user, pass) => {
-  if (location.protocol === 'file:') return 'needs the network';
+/* The attempt itself, shared by the console and by the login window. Returns
+   whether it worked rather than a sentence to be pattern-matched on, so the
+   panel is not reading English to decide what happened. */
+async function devAuthTry(user, pass) {
+  if (location.protocol === 'file:') return { ok: false, msg: 'needs the network' };
   try {
     const r = await fetch(Board.url, {
       method: 'POST',
@@ -22364,13 +22379,17 @@ window.devLogin = async (user, pass) => {
                                                       pass: String(pass || '') } })
     });
     const d = await r.json().catch(() => null);
-    if (r.status === 429) return 'locked out for ' + ((d && d.retryIn) || '?') + 's';
-    if (!r.ok || !d || !d.ok) return 'no';
+    if (r.status === 429)
+      return { ok: false, msg: 'locked out for ' + ((d && d.retryIn) || '?') + 's' };
+    if (!r.ok || !d || !d.ok) return { ok: false, msg: 'no' };
     await Awards.sync();
     skinRefresh();
-    return 'signed in as ' + d.user + ' — ' + d.skins + ' skins on this profile';
-  } catch (e) { return 'board unreachable'; }
-};
+    return { ok: true, user: d.user, skins: d.skins,
+             msg: 'signed in as ' + d.user + ' — ' + d.skins + ' skins on this profile' };
+  } catch (e) { return { ok: false, msg: 'board unreachable' }; }
+}
+
+window.devLogin = async (user, pass) => (await devAuthTry(user, pass)).msg;
 
 window.grantSkin = id => !BETA
   ? 'grantSkin is a development tool and is not enabled in this build'
@@ -23306,6 +23325,186 @@ function skinAwardClick(g) {
     if (inRect(mouse.x, mouse.y, r)) { equipSpecial(r.s.id); return true; }
   }
   return false;
+}
+
+/* ===========================================================================
+   THE DEV LOGIN WINDOW
+
+   Typing a dev account's name at the callsign prompt opens this instead of
+   taking the name. The name is only the door: anybody may type it, and it
+   proves nothing. The password is the lock, it is checked by the function, and
+   nothing here can be talked into saying yes on its own.
+
+   Which means the panel has to be usable by somebody who is NOT signing in.
+   A player who genuinely wants to be called NOT Z can take the name from here
+   and never think about it again — a name that could be claimed by one person
+   and then made unusable for everyone else would be a worse bug than the one
+   this fixes.
+
+   The password is masked while typed, is handed straight to the function, and
+   is dropped from the buffer the moment it is sent. It is never stored, never
+   saved, never put in a variable that outlives the request.
+   ========================================================================= */
+
+/* Typed name -> account id. Normalised past spacing and case, so NOT Z, not z
+   and notz are the same door. Account names are not secrets — the password is
+   — so listing them here costs nothing. Asking the server "is this a dev
+   account?" would cost something: it would be an oracle for enumerating them. */
+const DEV_LOGIN_NAMES = { notz: 'notz' };
+
+const devLoginFor = name => {
+  const k = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return Object.prototype.hasOwnProperty.call(DEV_LOGIN_NAMES, k)
+    ? DEV_LOGIN_NAMES[k] : null;
+};
+
+let devLogUser = '', devLogName = '', devLogBuf = '';
+let devLogMsg = '', devLogBusy = false, devLogSkip = false;
+
+function openDevLogin(acct, typed) {
+  devLogUser = acct; devLogName = typed;
+  devLogBuf = ''; devLogMsg = ''; devLogBusy = false;
+  /* A touch device has no keyboard of ours to type into, and the name screen
+     already falls back to the native prompt for exactly this reason. */
+  if (isTouch) {
+    const p = window.prompt('Password for ' + typed + ' (cancel to use the name):', '');
+    if (p === null || p === '') { devLogTakeName(); return; }
+    state = 'devlogin';
+    devLogBuf = p;
+    devLogSubmit();
+    return;
+  }
+  state = 'devlogin';
+  uiArm = 0.2;
+  Audio_.select();
+}
+
+/* Not signing in. The typed name is taken as an ordinary callsign, and the
+   flag stops commitName bouncing straight back into this panel. */
+function devLogTakeName() {
+  devLogBuf = ''; devLogMsg = ''; devLogBusy = false;
+  devLogSkip = true;
+  nameBuf = devLogName;
+  state = 'name';
+  commitName();
+}
+
+async function devLogSubmit() {
+  if (devLogBusy) return;
+  const pass = devLogBuf;
+  if (!pass) { devLogMsg = 'ENTER THE PASSWORD'; return; }
+  devLogBuf = '';                    // gone from here before the request leaves
+  devLogBusy = true; devLogMsg = 'CHECKING…';
+  const r = await devAuthTry(devLogUser, pass);
+  devLogBusy = false;
+  if (r.ok) { devLogMsg = ''; devLogTakeName(); return; }
+  devLogMsg = r.msg.toUpperCase();
+}
+
+function devLogKey(e) {
+  Audio_.init(); Audio_.resume();
+  if (e.key === 'Escape') { e.preventDefault(); devLogTakeName(); return; }
+  if (devLogBusy) { e.preventDefault(); return; }
+  if (e.key === 'Enter') { e.preventDefault(); devLogSubmit(); return; }
+  if (e.key === 'Backspace') { e.preventDefault(); devLogBuf = devLogBuf.slice(0, -1); return; }
+  // a password may contain anything printable; only a name is restricted
+  if (e.key.length === 1 && devLogBuf.length < 200) {
+    e.preventDefault();
+    devLogBuf += e.key;
+    devLogMsg = '';
+    Audio_.tone(660, 0.02, 'square', 0.03, 900);
+  }
+}
+
+function devLogRects() {
+  const w = Math.min(440, W - 48), x = (W - w) / 2;
+  const h = 206, top = clamp(H / 2 - h / 2, 40, H - h - 40);
+  const bw = (w - 44) / 2;
+  return { x, w, top, h,
+    field: { x: x + 22, y: top + 92, w: w - 44, h: 38 },
+    go:    { x: x + 22, y: top + h - 54, w: bw, h: 36 },
+    skip:  { x: x + 22 + bw + 10, y: top + h - 54, w: bw, h: 36 } };
+}
+
+function drawDevLogin() {
+  const g = devLogRects();
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  lanRect(g.x, g.top, g.w, g.h, 10);
+  ctx.fillStyle = 'rgba(8,13,22,0.92)'; ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.32); ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "800 17px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = COL.player;
+  ctx.fillText('DEV ACCOUNT', W / 2, g.top + 28);
+  ctx.restore();
+  ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('“' + clipText(devLogName, 14) + '” is an account. Sign in, or just take the name.',
+               W / 2, g.top + 50);
+
+  // the field: dots, a caret, and nothing that could be read over a shoulder
+  const f = g.field;
+  ctx.fillStyle = 'rgba(2,6,14,0.9)';
+  roundRect(f.x, f.y, f.w, f.h, 7); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, devLogBusy ? 0.25 : 0.55); ctx.lineWidth = 1.4;
+  roundRect(f.x, f.y, f.w, f.h, 7); ctx.stroke();
+  ctx.save();
+  ctx.letterSpacing = '0.22em';
+  ctx.font = "700 15px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = '#e2e8f0';
+  const dots = '•'.repeat(Math.min(devLogBuf.length, 24));
+  if (dots) ctx.fillText(dots, W / 2, f.y + f.h / 2 + 1);
+  else {
+    ctx.letterSpacing = '0.04em';
+    ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText(devLogBusy ? '' : 'password', W / 2, f.y + f.h / 2);
+  }
+  ctx.restore();
+  if (!devLogBusy && Math.sin(uiTime * 6) > 0) {
+    const dw = dots ? ctx.measureText(dots).width : 0;
+    ctx.fillStyle = COL.player;
+    ctx.fillRect(W / 2 + dw / 2 + 5, f.y + 10, 1.6, f.h - 20);
+  }
+
+  // whatever went wrong, in the same words the server used
+  ctx.font = "700 10px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = devLogBusy ? '#64748b' : '#f87171';
+  ctx.fillText(devLogMsg || '', W / 2, f.y + f.h + 16);
+
+  const btn = (r, label, col, strong) => {
+    const hot = inRect(mouse.x, mouse.y, r) && !devLogBusy;
+    ctx.fillStyle = hot ? rgba(col, 0.22) : rgba(col, strong ? 0.1 : 0.04);
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.fill();
+    ctx.strokeStyle = rgba(col, devLogBusy ? 0.2 : hot ? 0.95 : strong ? 0.6 : 0.28);
+    ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.stroke();
+    ctx.font = "800 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = devLogBusy ? '#475569' : col;
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2);
+  };
+  btn(g.go, 'SIGN IN   [ENTER]', COL.player, true);
+  btn(g.skip, 'JUST THE NAME   [ESC]', '#94a3b8', false);
+
+  ctx.textBaseline = 'alphabetic';
+}
+
+function devLogClick() {
+  if (uiArm > 0 || devLogBusy) return;
+  const g = devLogRects();
+  if (inRect(mouse.x, mouse.y, g.go)) { devLogSubmit(); return; }
+  if (inRect(mouse.x, mouse.y, g.skip)) { devLogTakeName(); return; }
+  if (isTouch && inRect(mouse.x, mouse.y, g.field)) {
+    const p = window.prompt('Password for ' + devLogName + ':', '');
+    if (p) { devLogBuf = p; devLogSubmit(); }
+  }
 }
 
 function drawMalware() {

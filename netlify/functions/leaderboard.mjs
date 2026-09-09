@@ -213,6 +213,18 @@ const SKIN_GRANTS = {
   // '0123456789abcdef0123456789abcdef': ['draft'],   // MARIO — beta tester
 };
 
+/* Every board leaves through here. A pid is how a podium and a dev grant
+   are addressed, so publishing one next to a name hands anyone the ability
+   to write it into their own save and collect that player's rewards — which
+   is the whole reason podium places are addressed by pid and never shown.
+   It is kept on the stored entry because closing a season needs it, and it
+   must not leave this function. */
+const publicBoard = entries =>
+  (entries || []).map(e => {
+    const { pid, ...rest } = e;
+    return rest;
+  });
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -414,7 +426,8 @@ async function commit(store, key, entry, merge) {
 const placed = (top, entry, kept, extra) => {
   const rank = top.findIndex(e => e.name === entry.name);
   return json(Object.assign({ ok: true, rank: rank >= 0 ? rank + 1 : null,
-                              best: kept.score, top }, extra));
+                              best: kept.score,
+                              top: publicBoard(top) }, extra));
 };
 
 export default async (req) => {
@@ -454,13 +467,14 @@ export default async (req) => {
     if (asked !== null) {
       if (!isDay(asked)) return json({ error: 'bad day' }, 400);
       const cur = await store.get(dayKey(asked), { type: 'json' }).catch(() => null);
-      return json(Object.assign({ forDay: asked, top: (cur && cur.entries) || [] }, meta));
+      return json(Object.assign({ forDay: asked,
+                                  top: publicBoard(cur && cur.entries) }, meta));
     }
 
     // all-time is still kept, but it is no longer what "the leaderboard" means
     const key = q.get('all') !== null ? KEY : seasonKey(season);
     const cur = await store.get(key, { type: 'json' }).catch(() => null);
-    return json(Object.assign({ top: (cur && cur.entries) || [],
+    return json(Object.assign({ top: publicBoard(cur && cur.entries),
                                 allTime: q.get('all') !== null }, meta));
   }
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
