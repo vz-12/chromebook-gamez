@@ -8751,6 +8751,7 @@ const Save = {
     // whatever is on disk is input, not truth — run it past the schema
     Save.profile.skin = skinClean(Save.profile.skin);
     Save.profile.awards = Awards.clean(Save.profile.awards);
+    devPerksApply();          // and again from whatever was already cached
     Save.reconcileClears();
     Save.writeLocal();
     // older saves only knew mute; treat that as a volume of zero
@@ -22018,7 +22019,14 @@ const Season = {
    loaded, which is earlier than the skin tables exist. Two lines to keep in
    step, and the alternative is a whitelist that is empty exactly when it
    matters. */
-const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft'];
+/* Every id a grant may name. The podium three are in here so a dev login can
+   hand them over as skins; the podium RECORD — the season chips — still comes
+   only from a closed season, and no grant can invent one. */
+const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
+                      'laurel', 'standard', 'ember-mark'];
+/* Grants that are not skins. Checked against this list the same way, so an
+   invented one cannot arrive from a save file any more than a skin can. */
+const DEV_PERK_IDS = ['unlock-all'];
 
 const Awards = {
   syncing: false,
@@ -22038,6 +22046,15 @@ const Awards = {
          skin is {skin:id}. The id is checked against the shipped table rather
          than trusted — an unknown id is either a typo or somebody editing
          their own localStorage, and the answer to both is to drop it. */
+      if (a.perk !== undefined) {
+        const id = String(a.perk || '');
+        if (!DEV_PERK_IDS.includes(id)) continue;
+        const pk = 'perk:' + id;
+        if (seen.has(pk)) continue;
+        seen.add(pk);
+        out.push({ perk: id, via: String(a.via || '').slice(0, 24) });
+        continue;
+      }
       if (a.skin !== undefined) {
         const id = String(a.skin || '');
         if (!DEV_SKIN_IDS.includes(id)) continue;
@@ -22078,6 +22095,8 @@ const Awards = {
         Save.profile.awards = merged;
         Save.writeLocal(); Save.flush();
       }
+      devPerksApply();          // a grant may have just arrived
+
     } catch (e) { /* a podium is not urgent; try again next launch */ }
     Awards.syncing = false;
   }
@@ -22231,6 +22250,63 @@ function skinFace(s) {
            base: two ? (s.base2 || s.base) : s.base };
 }
 
+const devPerk = id => Awards.list().some(a => a.perk === id);
+
+/* Everything a profile can hold, written to a profile that keeps it.
+
+   The list is betaUnlockAll's, because that one is already maintained and a
+   second copy would drift from it. What is deliberately left out is the
+   rest of that function: it renames an unnamed profile to BETA and rewrites
+   the endgame's narrative flags, which is right for a throwaway build where
+   nothing is saved and wrong for somebody's actual save. Unlocking is not
+   the same as having finished.
+
+   Lists are unioned rather than assigned, so this can never take anything
+   away, and it only writes when something actually changed — otherwise every
+   launch would flush a profile that was already complete. */
+function devUnlockAll() {
+  const p = Save.profile;
+  if (!p) return false;
+  const before = JSON.stringify([p.planetarium, p.altPath, p.malware,
+    p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
+    (p.chal || []).length, (p.codexE || []).length, (p.codexU || []).length,
+    (p.codexM || []).length, (p.codexB || []).length, (p.codexZ || []).length]);
+
+  p.planetarium = true;      // reward rooms
+  p.altPath = true;          // THE FRACTURE
+  p.malware = true;          // payload drops
+  p.deepFracture = true;     // fracture iii-v, below the mirror
+  p.freeplay = true;         // the console
+  p.keeperMet = true;
+  p.keeperDone = true;       // his marginalia, and the chip in shops
+  p.trueEnd = true;          // THE UNWRITTEN has been closed
+  p.clears = Math.max(p.clears || 0, 2);
+  const add = (have, all) => [...new Set([...(have || []), ...all])];
+  p.chal = add(p.chal, CHALLENGES.map(c => c.id));   // and their rewards
+  p.codexE = add(p.codexE, [...Object.keys(CODEX_E), ...Object.keys(BOSSES)]);
+  p.codexU = add(p.codexU, UPGRADES.map(u => u.id));
+  p.codexM = add(p.codexM, MALWARE.map(m => m.id));  // and so THE HACKER flies
+  p.codexB = add(p.codexB, Object.keys(BOOKS));
+  p.codexZ = add(p.codexZ, SIGNS.map(s => s.id));
+
+  const after = JSON.stringify([p.planetarium, p.altPath, p.malware,
+    p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
+    p.chal.length, p.codexE.length, p.codexU.length,
+    p.codexM.length, p.codexB.length, p.codexZ.length]);
+  if (before === after) return false;
+  Codex.load();                       // the sets are read from the profile
+  applyChar(p.charIdx || 0);
+  Save.writeLocal(); Save.flush();
+  return true;
+}
+
+/* Applied wherever the awards list may have just changed: on load, and after
+   a sync. Idempotent, so calling it twice costs a comparison. */
+function devPerksApply() {
+  if (!devPerk('unlock-all')) return false;
+  return devUnlockAll();
+}
+
 /* --------------------------- the era mark --------------------------------
    The one award here the board cannot possibly know about: no server holds a
    record of who was playing in a given month, only of who scored. So it is
@@ -22273,6 +22349,29 @@ function devGrant(id, via) {
    who has not already edited the file. Without the gate this was a console
    command handing the season's reward to whoever opened devtools, which is
    not a gate at all. */
+/* A dev login. The password goes straight out to the function and is never
+   stored, logged, or kept in a variable that outlives the call — what comes
+   back is a grant bound to this profile, which the ordinary award sync then
+   delivers. Wrong answers are deliberately identical: the endpoint will not
+   say whether it was the name or the password that was wrong. */
+window.devLogin = async (user, pass) => {
+  if (location.protocol === 'file:') return 'needs the network';
+  try {
+    const r = await fetch(Board.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pid: myPid(), devAuth: { user: String(user || ''),
+                                                      pass: String(pass || '') } })
+    });
+    const d = await r.json().catch(() => null);
+    if (r.status === 429) return 'locked out for ' + ((d && d.retryIn) || '?') + 's';
+    if (!r.ok || !d || !d.ok) return 'no';
+    await Awards.sync();
+    skinRefresh();
+    return 'signed in as ' + d.user + ' — ' + d.skins + ' skins on this profile';
+  } catch (e) { return 'board unreachable'; }
+};
+
 window.grantSkin = id => !BETA
   ? 'grantSkin is a development tool and is not enabled in this build'
   : devGrant(String(id || ''), 'GRANTED') ? 'granted: ' + id

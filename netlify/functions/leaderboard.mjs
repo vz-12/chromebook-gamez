@@ -12,6 +12,7 @@
    name) but they cannot make a client-submitted score trustworthy.
    ========================================================================= */
 import { getStore } from '@netlify/blobs';
+import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 
 export const config = { path: '/api/leaderboard' };
 
@@ -86,6 +87,128 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
    A pid is a bearer token: whoever holds the string collects what is
    addressed to it. That is fine for a handout and is exactly why podium
    places are addressed the same way and never displayed in the game. */
+/* ------------------------------ dev accounts -----------------------------
+   A login that hands a profile every skin at once.
+
+   The password is not in this file and never travels to a browser. What is
+   here is a scrypt hash of it under a random per-account salt, so somebody
+   who reads this source — or an old backup of it — still has no password.
+   Comparison is constant-time, and an unknown user is made to cost the same
+   as a known one so the endpoint cannot be used to learn which names exist.
+
+   TO ADD AN ACCOUNT: run  node C:/.claude/devpass.mjs  and paste the line it
+   prints. It takes the password on stdin and never writes it anywhere.
+   TO REVOKE: delete the line here AND the profile's row from the `grants`
+   blob — the login is what grants, but the grant outlives the login.
+-------------------------------------------------------------------------- */
+const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
+                   'redaction', 'redaction-open', 'draft'];
+/* Everything that is not a skin: the rooms, the routes, the challenges and
+   the codex. One id rather than a list of them, because a dev account wants
+   the whole game and enumerating it here would be a second copy of a list
+   the client already keeps and would drift from. */
+const ALL_PERKS = ['unlock-all'];
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+const KEYLEN = 32;
+
+const DEV_ACCOUNTS = {
+
+  notz: { salt: '7ef417684c9605974196d78621c6ee8a',
+        hash: '449aa7a763eefec4f9301717b53aa59b7ee04211a3b82e3221cb3d35478aebc1',
+        skins: ALL_SKINS, perks: ALL_PERKS },
+};
+
+/* A stand-in used when the named account does not exist, so a wrong user and
+   a wrong password take the same time and the same shape of answer. Its salt
+   is fresh per cold start and its hash is of nothing anybody knows. */
+const DUMMY = { salt: randomBytes(16).toString('hex'),
+                hash: randomBytes(KEYLEN).toString('hex') };
+
+function passOk(account, password) {
+  const a = account || DUMMY;
+  if (typeof password !== 'string' || !password || password.length > 200) {
+    // still pay the cost, so a blank password is not measurably faster
+    try { scryptSync('x', Buffer.from(DUMMY.salt, 'hex'), KEYLEN, SCRYPT); } catch (e) {}
+    return false;
+  }
+  let want, got;
+  try {
+    want = Buffer.from(a.hash, 'hex');
+    got = scryptSync(password, Buffer.from(a.salt, 'hex'), KEYLEN, SCRYPT);
+  } catch (e) { return false; }
+  if (want.length !== got.length) return false;
+  return timingSafeEqual(want, got) && !!account;
+}
+
+/* Attempts are counted against the source address rather than the profile id:
+   a pid is chosen by the client and rotating it is free, an address is not.
+   Netlify sets the first of these; the second is the ordinary proxy header
+   and is only ever used to key a rate limit, never to decide who anybody is. */
+const clientIp = req =>
+  ((req.headers.get('x-nf-client-connection-ip') || '') ||
+   (req.headers.get('x-forwarded-for') || '').split(',')[0] || '').trim().slice(0, 45)
+  || 'unknown';
+
+const GRANTS = 'grants';      // { byPid: { '<pid>': { user, skins, at } } }
+const GATE = 'gate';          // { byIp: { '<ip>': { fails, until } } }
+const LOCK_AFTER = 6, LOCK_MS = 15 * 60 * 1000;
+
+/* Reads, prunes and writes the attempt log in one pass. Pruning on the way
+   past is what stops a blob that only ever grows — an expired lock is not a
+   record of anything. */
+async function gateBump(store, ip, failed) {
+  for (let i = 0; i < RETRIES; i++) {
+    const res = await store.getWithMetadata(GATE, { type: 'json', consistency: 'strong' })
+      .catch(() => null);
+    const now = Date.now();
+    const byIp = {};
+    const src = (res && res.data && res.data.byIp) || {};
+    for (const k of Object.keys(src))
+      if (src[k] && src[k].until > now) byIp[k] = src[k];
+    const cur = byIp[ip] || { fails: 0, until: 0 };
+    if (!failed) delete byIp[ip];
+    else {
+      cur.fails = (cur.fails || 0) + 1;
+      if (cur.fails >= LOCK_AFTER) { cur.until = now + LOCK_MS; cur.fails = 0; }
+      else cur.until = now + LOCK_MS;      // the window the count lives in
+      byIp[ip] = cur;
+    }
+    const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
+    const wrote = await store.setJSON(GATE, { byIp }, opts).catch(() => ({ modified: false }));
+    if (wrote && wrote.modified) return cur;
+  }
+  return { fails: 0, until: 0 };
+}
+
+/* Locked out? Read-only, so a lookup never costs a write. */
+async function gateLocked(store, ip) {
+  const doc = await store.get(GATE, { type: 'json' }).catch(() => null);
+  const rec = doc && doc.byIp && doc.byIp[ip];
+  if (!rec || !rec.until || rec.until <= Date.now()) return 0;
+  // only a completed lockout blocks; a partial count just accumulates
+  return rec.fails === 0 ? Math.ceil((rec.until - Date.now()) / 1000) : 0;
+}
+
+/* Binds an account's skins to the profile that logged in. Additive: logging
+   in twice, or into a second account, never takes anything away. */
+async function grantTo(store, pid, user, skins, perks) {
+  for (let i = 0; i < RETRIES; i++) {
+    const res = await store.getWithMetadata(GRANTS, { type: 'json', consistency: 'strong' })
+      .catch(() => null);
+    const byPid = Object.assign({}, (res && res.data && res.data.byPid) || {});
+    const had = (byPid[pid] && byPid[pid].skins) || [];
+    const hadP = (byPid[pid] && byPid[pid].perks) || [];
+    byPid[pid] = { user, at: Date.now(),
+                   skins: [...new Set([...had, ...skins])],
+                   perks: [...new Set([...hadP, ...(perks || [])])] };
+    const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
+    const wrote = await store.setJSON(GRANTS, { byPid }, opts)
+      .catch(() => ({ modified: false }));
+    if (wrote && wrote.modified) return byPid[pid].skins;
+  }
+  return skins;
+}
+
 const SKIN_GRANTS = {
   // '0123456789abcdef0123456789abcdef': ['draft'],   // MARIO — beta tester
 };
@@ -197,8 +320,17 @@ async function awardsFor(store, pid) {
      season to be ordered by. Own-property only, so a pid of `constructor`
      or `__proto__` cannot pull something off the prototype — isPid already
      refuses both, and this does not depend on it having. */
+  const given = [];
   if (Object.prototype.hasOwnProperty.call(SKIN_GRANTS, pid))
-    for (const id of SKIN_GRANTS[pid]) out.push({ skin: id, via: 'GRANTED' });
+    given.push(...SKIN_GRANTS[pid]);
+  // and whatever a dev login has bound to this profile
+  const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
+  const row = g && g.byPid && Object.prototype.hasOwnProperty.call(g.byPid, pid)
+    ? g.byPid[pid] : null;
+  if (row && Array.isArray(row.skins)) given.push(...row.skins);
+  for (const id of [...new Set(given)]) out.push({ skin: id, via: 'GRANTED' });
+  if (row && Array.isArray(row.perks))
+    for (const id of [...new Set(row.perks)]) out.push({ perk: id, via: 'GRANTED' });
   return out;
 }
 
@@ -337,6 +469,31 @@ export default async (req) => {
   try { body = await req.json(); } catch (e) { return json({ error: 'bad json' }, 400); }
 
   if (body && body.selftest) return json({ selftest: await selfTest(store) });
+
+  /* A dev login. Answers 'no' to every kind of wrong — unknown user, wrong
+     password, malformed anything — so the reply never says which part was
+     wrong, and the attempt is counted against the address either way. */
+  if (body && body.devAuth) {
+    const ip = clientIp(req);
+    const wait = await gateLocked(store, ip);
+    if (wait) return json({ error: 'too many attempts', retryIn: wait }, 429);
+
+    const pid = body.pid;
+    const user = String((body.devAuth && body.devAuth.user) || '')
+      .toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+    const acct = Object.prototype.hasOwnProperty.call(DEV_ACCOUNTS, user)
+      ? DEV_ACCOUNTS[user] : null;
+    const ok = isPid(pid) && passOk(acct, String((body.devAuth && body.devAuth.pass) || ''));
+    if (!ok) {
+      await gateBump(store, ip, true);
+      return json({ error: 'no' }, 401);
+    }
+    await gateBump(store, ip, false);          // a good login clears the count
+    const skins = await grantTo(store, pid, user, acct.skins || ALL_SKINS,
+                                acct.perks || ALL_PERKS);
+    return json({ ok: true, user, skins: skins.length,
+                  perks: (acct.perks || ALL_PERKS).length });
+  }
 
   const entry = {
     name:   cleanName(body.name) || 'ANON',
