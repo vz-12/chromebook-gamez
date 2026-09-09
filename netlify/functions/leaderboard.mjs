@@ -64,6 +64,32 @@ const seasonAfter = id => seasonOf(seasonEnd(id));
    rather than on anyone who later types the same name. */
 const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
 
+/* ---------------------------- handouts -----------------------------------
+   Skins given to a particular profile for a reason no achievement covers —
+   a tester, a friend, somebody who was here before the thing worked.
+
+   The list lives in this file because this file is a function, not an
+   asset: it never reaches a browser. That is the difference between a gate
+   and a decoration. The version of this that shipped a hash in the client
+   was not a gate at all — the phrase was never the secret, since any string
+   landing on the same 32 bits opened the same door, and one was found in
+   671 million tries with no knowledge of the original. Guessing a profile
+   id instead means guessing 128 bits at one online attempt per try.
+
+   TO ADD SOMEBODY: they run `copy(Save.profile.pid)` in the console once
+   and send you the value — or, if they have ever submitted a score, it is
+   recorded beside their name in that board's blob. Paste it below with a
+   comment saying who, and redeploy. TO TAKE IT BACK: delete the line. The
+   grant is not stored on the player's machine as a permission, only as a
+   cached award, so removing it here removes it everywhere on the next sync.
+
+   A pid is a bearer token: whoever holds the string collects what is
+   addressed to it. That is fine for a handout and is exactly why podium
+   places are addressed the same way and never displayed in the game. */
+const SKIN_GRANTS = {
+  // '0123456789abcdef0123456789abcdef': ['draft'],   // MARIO — beta tester
+};
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -166,7 +192,14 @@ async function awardsFor(store, pid) {
       if (row.pid && row.pid === pid) out.push({ season: id, rank: row.rank, name: row.name });
     }
   }
-  return out.sort((a, b) => (a.season < b.season ? 1 : -1));
+  out.sort((a, b) => (a.season < b.season ? 1 : -1));
+  /* Handouts after the podiums and never sorted among them: they have no
+     season to be ordered by. Own-property only, so a pid of `constructor`
+     or `__proto__` cannot pull something off the prototype — isPid already
+     refuses both, and this does not depend on it having. */
+  if (Object.prototype.hasOwnProperty.call(SKIN_GRANTS, pid))
+    for (const id of SKIN_GRANTS[pid]) out.push({ skin: id, via: 'GRANTED' });
+  return out;
 }
 
 function mergeFirst(entries, entry) {
@@ -341,10 +374,23 @@ export default async (req) => {
         { already: !!r.already, degraded: r.degraded || undefined }, meta));
     }
     /* An ordinary run counts twice: for the season, which is the board people
-       are playing, and for all-time, which is the record. The season board is
-       the one reported back, because it is the one the run is competing on. */
-    const s = await commit(store, seasonKey(season), entry, mergeBoard);
+       are playing, and for all-time, which is the record.
+
+       A replay counts once. A client that has been offline can push a best
+       it had stranded locally, and that run may have been flown under a
+       season which closed months ago — filing it against whichever season
+       happens to be open now would put a stale score at the top of a board
+       nobody set it on. It goes to all-time, which is where a record
+       belongs, and reaches the season board only when it names the season
+       still running. A live run names nothing and is dated here. */
+    const replay = !!(body && body.backfill);
+    const forSeason = body && body.forSeason;
+    const seasonToo = !replay || (isSeason(forSeason) && forSeason === season);
     const a = await commit(store, KEY, entry, mergeBoard);
+    if (!seasonToo)
+      return placed(a.top, entry, a.kept, Object.assign(
+        { allTimeOnly: true, degraded: a.degraded || undefined }, meta));
+    const s = await commit(store, seasonKey(season), entry, mergeBoard);
     return placed(s.top, entry, s.kept, Object.assign(
       { allTimeBest: a.kept.score, degraded: (s.degraded || a.degraded) || undefined }, meta));
   } catch (e) {
