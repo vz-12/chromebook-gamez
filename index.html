@@ -974,6 +974,7 @@ cv.addEventListener('mousemove', e => {
   mouse.x = e.clientX; mouse.y = e.clientY;
   if (volDrag) volFromMouse();
   if (sensDrag) sensFromMouse();
+  if (skinDrag) skinFromMouse();
 });
 cv.addEventListener('mousedown', e => {
   Audio_.init(); Audio_.resume();
@@ -981,15 +982,27 @@ cv.addEventListener('mousedown', e => {
   // the slider claims the click before any overlay button sees it
   if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return; }
   if (sensRect && inRect(mouse.x, mouse.y, sensRect)) { sensDrag = true; sensFromMouse(); return; }
+  if (skinGrab()) return;
   handleClick();
 });
 addEventListener('mouseup', () => {
   mouse.down = false;
   if (volDrag) { volDrag = false; Save.savePrefs(); }
   if (sensDrag) { sensDrag = false; Save.savePrefs(); }
+  if (skinDrag) { skinDrag = null; Save.writeLocal(); Save.flush(); }
 });
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('wheel', e => {
+  if (state === 'skin') {
+    e.preventDefault();
+    skinScroll = clamp(skinScroll + Math.sign(e.deltaY) * 42, 0, skinMaxScroll());
+    return;
+  }
+  if (state === 'changelog') {
+    e.preventDefault();
+    logScroll = clamp(logScroll + Math.sign(e.deltaY) * 56, 0, logMaxScroll());
+    return;
+  }
   if (state === 'chal') {
     e.preventDefault();
     chalScroll = clamp(chalScroll + Math.sign(e.deltaY) * 60, 0, chalMaxScroll());
@@ -1009,7 +1022,13 @@ cv.addEventListener('touchstart', e => {
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
-    if (state !== 'play') { mouse.x = p.x; mouse.y = p.y; handleClick(); continue; }
+    if (state !== 'play') {
+      mouse.x = p.x; mouse.y = p.y; handleClick();
+      // the click may have closed it; only a panel still open takes the drag
+      if (state === 'changelog' && !logDrag)
+        logDrag = { id: t.identifier, y: p.y, s: logScroll };
+      continue;
+    }
     if (p.x < W * 0.5 && !touchUI.move) touchUI.move = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
     else if (!touchUI.aim) touchUI.aim = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
   }
@@ -1020,12 +1039,15 @@ cv.addEventListener('touchmove', e => {
     const p = tpos(t);
     if (touchUI.move && t.identifier === touchUI.move.id) { touchUI.move.x = p.x; touchUI.move.y = p.y; }
     if (touchUI.aim && t.identifier === touchUI.aim.id) { touchUI.aim.x = p.x; touchUI.aim.y = p.y; }
+    if (logDrag && t.identifier === logDrag.id && state === 'changelog')
+      logScroll = clamp(logDrag.s - (p.y - logDrag.y), 0, logMaxScroll());
   }
 }, { passive: false });
 function touchEnd(e) {
   for (const t of e.changedTouches) {
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
+    if (logDrag && t.identifier === logDrag.id) logDrag = null;
   }
 }
 cv.addEventListener('touchend', touchEnd, { passive: false });
@@ -1124,8 +1146,10 @@ function applyChar(i) {
   // a profile carrying a pilot it has not earned falls back to the first
   if (charLocked(selectedChar)) selectedChar = 0;
   const C = CHAR();
-  COL.player = C.col;
-  COL.bullet = C.bullet;
+  // a skinned hull overrides the pilot's own colours, and nothing further
+  // down ever learns the difference
+  COL.player = skinCol('player', C.col);
+  COL.bullet = skinCol('bullet', C.bullet);
 }
 
 /* --------------------------------- player -------------------------------- */
@@ -1740,7 +1764,12 @@ function spawnEnemy(type, x, y, opts = {}) {
     maxHp: t.hp * hpScale * (opts.hs || 1) * (elite ? 2.6 : 1) * chalEHp() * hardHp(),
     spd: (bd ? bd.spd : t.spd) * (elite ? 0.92 : 1) * (opts.ss || 1) * chalESpd() * hardSpd(),
     dmg: t.dmg * (1 + (w - 1) * 0.05) * (elite ? 1.4 : 1) * chalEDmg() * hardDmg(),
-    col: bd ? bd.col : t.col, sides: bd ? bd.sides : t.sides,
+    /* The one seam a skin needs. Appearance was always copied from a
+       table onto the entity and read back off it by the renderer, so a
+       skin is a second table consulted on the way past. Bosses take
+       their colours from BOSSES and have no slot, so they fall through. */
+    col: skinCol(type, bd ? bd.col : t.col),
+    sides: skinSides(type, bd ? bd.sides : t.sides),
     xp: t.xp * (elite ? 3 : 1), score: t.score * (elite ? 3 : 1),
     armor: bArmor, absorb: bArmor * 0.25, dr: bDR,
     elite, flash: 0, slow: 0, slowT: 0, ang: rnd(TAU), spin: rnd(0.6, -0.6),
@@ -8542,6 +8571,17 @@ const Save = {
                   metFounder: false, conformed: false, tribunalDone: false,
                   campVisits: 0,
                   gfx: null, gfxSeen: 0, gfxCosts: null,
+                  // newest changelog entry this player has read
+                  logSeen: 0,
+                  // the daily: which day these counters describe, and it
+                  dayKey: '', dayRuns: 0, dayBest: 0,
+                  dayRanked: 0, dayRankedScore: 0,
+                  dayStreak: 0, dayStreakLast: '',
+                  // slot -> { col, sides }; validated on every load
+                  skin: null,
+                  /* Identity, such as it is: a name is typed and can be
+                     anyone's, so podiums are recorded against this. */
+                  pid: '', awards: [], skinEquip: '',
                   // ids of every challenge cleared; the rewards key off this
                   chal: [],
                   // escalation: the permanent mark, and the window that earns it
@@ -8612,6 +8652,53 @@ const Save = {
     out.conformed = !!(a.conformed || b.conformed);
     out.tribunalDone = !!(a.tribunalDone || b.tribunalDone);
     out.campVisits = Math.max(a.campVisits || 0, b.campVisits || 0);
+    /* Notes read anywhere are read everywhere: the higher number wins, so
+       a second machine never re-asks for something already dismissed. */
+    out.logSeen = Math.max(a.logSeen || 0, b.logSeen || 0);
+    /* Graphics settings were dropped here entirely. Because merge builds
+       on blank(), every cloud connect reset them: the toggles reverted,
+       the costs measured on this machine were thrown away, and gfxSeen
+       fell to 0, which re-opened the new-effects panel on the next run.
+       Shown once is shown, exactly like logSeen above. */
+    out.gfxSeen = Math.max(a.gfxSeen || 0, b.gfxSeen || 0);
+    out.gfx = b.gfx || a.gfx || null;
+    // measured on the machine they were measured on: whoever has them wins
+    out.gfxCosts = b.gfxCosts || a.gfxCosts || null;
+    out.fx = b.fx !== undefined ? b.fx : a.fx;
+    /* Per-day counters belong to their day. Merging two different days
+       would invent a run nobody flew, so the later day simply wins; only
+       when both stores describe the same day are they reconciled. */
+    const ad = a.dayKey || '', bd = b.dayKey || '';
+    const day = bd >= ad ? b : a;
+    out.dayKey = day.dayKey || '';
+    if (ad && ad === bd) {
+      out.dayRuns = Math.max(a.dayRuns || 0, b.dayRuns || 0);
+      out.dayBest = Math.max(a.dayBest || 0, b.dayBest || 0);
+      out.dayRanked = (a.dayRanked || b.dayRanked) ? 1 : 0;
+      out.dayRankedScore = Math.max(a.dayRankedScore || 0, b.dayRankedScore || 0);
+    } else {
+      out.dayRuns = day.dayRuns || 0;
+      out.dayBest = day.dayBest || 0;
+      out.dayRanked = day.dayRanked || 0;
+      out.dayRankedScore = day.dayRankedScore || 0;
+    }
+    // a streak is a mark, like an unlock: the higher of the two stands
+    /* Skins are a preference, so the newer store wins slot by slot rather
+       than wholesale — dressing a mite on one machine and a hulk on
+       another should leave you with both, not with whichever synced last.
+       Cleaned on the way out: a merge is an untrusted document too. */
+    out.skin = skinClean(Object.assign({}, a.skin || {}, b.skin || {}));
+    /* One profile, one pid, and it has to survive a merge or the podiums
+       recorded against it are stranded. Both stores having one is the odd
+       case (two devices that each started offline); the smaller string
+       wins so that every device reaches the same answer unaided. */
+    out.pid = (a.pid && b.pid) ? (a.pid < b.pid ? a.pid : b.pid) : (a.pid || b.pid || '');
+    // a podium is a permanent mark: union, never subtract
+    out.awards = Awards.clean([...(a.awards || []), ...(b.awards || [])]);
+    out.skinEquip = b.skinEquip !== undefined ? b.skinEquip : (a.skinEquip || '');
+    out.dayStreak = Math.max(a.dayStreak || 0, b.dayStreak || 0);
+    out.dayStreakLast = (a.dayStreakLast || '') >= (b.dayStreakLast || '')
+      ? (a.dayStreakLast || '') : (b.dayStreakLast || '');
     out.devTalkDue  = !!(a.devTalkDue  || b.devTalkDue);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
@@ -8640,6 +8727,9 @@ const Save = {
 
   init() {
     Save.profile = Save.repair(Save.readLocal());
+    // whatever is on disk is input, not truth — run it past the schema
+    Save.profile.skin = skinClean(Save.profile.skin);
+    Save.profile.awards = Awards.clean(Save.profile.awards);
     Save.reconcileClears();
     Save.writeLocal();
     // older saves only knew mute; treat that as a volume of zero
@@ -8652,6 +8742,10 @@ const Save = {
     applyChar(Save.profile.charIdx || 0);
     Save.connect();
     Board.load();
+    // a sheet from the local clock now, replaced by the server's date the
+    // moment the board answers — see the note on Daily.load
+    Daily.use(dailyDayOf(), null);
+    Daily.load();
     // first launch: ask who they are before anything else
     if (!Save.profile.name) { nameBuf = ''; state = 'name'; }
   },
@@ -8753,9 +8847,11 @@ const Board = {
       const r = await fetch(Board.url, { cache: 'no-store' });
       if (!r.ok) throw new Error('http ' + r.status);
       const d = await r.json();
+      Season.read(d);              // the server owns the calendar
       Board.top = Array.isArray(d.top) ? d.top : [];
       Board.status = 'ok';
       Board.backfill();
+      Awards.sync();               // and owns who stood on the podium
     } catch (e) {
       Board.status = 'offline';
     }
@@ -8794,6 +8890,7 @@ const Board = {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
+            pid: myPid(),
             name: Save.profile.name, score: s.score, wave: s.wave, sector: s.sector,
             loop: s.loop, level: s.level, kills: s.kills, time: Math.round(s.time)
           })
@@ -8911,6 +9008,27 @@ function gameOver(quiet) {
   /* A challenge is a different game with a different rule sheet, so it is
      scored on its own terms: the goal was met or it was not. Nothing here
      touches your best, your board position or your ordinary progression. */
+  /* A daily is scored on its own board for its own day and nowhere else.
+     Like a challenge it leaves your best, the global board and the
+     escalation window alone — a shared rule sheet is not the game those
+     are measuring. Only the first run of a day is ranked; the flag was
+     taken when the run started and is re-checked here, so two runs racing
+     to the death screen cannot both claim it. */
+  if (Chal.on && Chal.on.daily) {
+    const ranked = !!Chal.on.dailyRanked && Daily.ranked();
+    lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                  sector: stage.name, loop: loopNum, isRecord: false,
+                  chal: Chal.on, chalWon: false, reward: null,
+                  daily: true, dailyRanked: ranked };
+    Daily.finish(ranked);
+    Codex.flush();
+    if (!quiet) {
+      explode(P.x, P.y, 180, 0, COL.player);
+      burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
+      shake(1); Audio_.over();
+    }
+    return;
+  }
   if (Chal.on) {
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false,
@@ -8959,9 +9077,11 @@ function handleKey(k) {
   // volume lives on the slider now, so M is free for the way out
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
     // straight back to the ladder, which is where you were going anyway
-    const wasChal = !!Chal.on;
+    const wasChal = !!Chal.on, wasDaily = !!(Chal.on && Chal.on.daily);
     quitToMenu();
-    if (wasChal) openChal('menu');
+    // back to whichever ladder you were actually on
+    if (wasDaily) openDaily('menu');
+    else if (wasChal) openChal('menu');
     return;
   }
   // --- freeplay console: its own key, and it swallows nothing else ---
@@ -8977,10 +9097,14 @@ function handleKey(k) {
   if (state === 'lan') { lanKey(k); return; }
   if (state === 'chal') { chalKey(k); return; }
   if (state === 'settings') { settingsKey(k); return; }
+  if (state === 'changelog') { logKey(k); return; }
+  if (state === 'daily') { dailyKey(k); return; }
+  if (state === 'skin') { skinKey(k); return; }
   if (state === 'menu') {
     if (k === 'l') { openLan(); return; }
     if (k === 'k') { openChal('menu'); return; }
     if (k === 's') { openSettings('menu'); return; }
+    if (k === 'd') { openDaily('menu'); return; }
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -9022,6 +9146,9 @@ function handleKey(k) {
   if (state === 'dead') {
     // a challenge restarts as itself; the ordinary run restarts as a run
     if (Chal.on && (k === ' ' || k === 'enter' || k === 'r')) {
+      /* A daily restarts as the daily. startDaily re-reads the profile,
+         so the second run of a day comes back as practice by itself. */
+      if (Chal.on.daily) { chalQuit(); startDaily(); return; }
       const c = Chal.on; chalQuit(); startChallenge(c); return;
     }
     if (mpGuest() || !(k === ' ' || k === 'enter' || k === 'r')) return;
@@ -9165,13 +9292,18 @@ function handleClick() {
   if (state === 'lan') { lanClick(); return; }
   if (state === 'chal') { chalClick(); return; }
   if (state === 'settings') { settingsClick(); return; }
+  if (state === 'changelog') { logClick(); return; }
+  if (state === 'daily') { dailyClick(); return; }
+  if (state === 'skin') { skinClick(); return; }
   if (state === 'menu') {
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
     if (inRect(mouse.x, mouse.y, menuChalRect())) { openChal('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuSetRect())) { openSettings('menu'); return; }
+    if (inRect(mouse.x, mouse.y, menuDailyRect())) { openDaily('menu'); return; }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
+    if (Chal.on && Chal.on.daily) { chalQuit(); startDaily(); return; }
     if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
     if (mpGuest()) return;
     if (mpHost()) { mpStartRun(); return; }
@@ -9360,11 +9492,31 @@ function update(dt) {
   mpHostNet(dt);
   if (MP.lostT > 0) MP.lostT -= dt;
 
-  if (state === 'menu' || state === 'name') { updateMenu(dt); return; }
+  if (state === 'menu' || state === 'name') {
+    updateMenu(dt);
+    // updateMenu can move us elsewhere; the notes only belong on the menu
+    if (state === 'menu') logAutoTick(dt);
+    return;
+  }
   if (state === 'lan') { updateLan(dt); return; }
   if (state === 'chal') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }
   if (state === 'settings') {
     if (setFrom === 'menu') updateMenu(dt);
+    if (uiArm > 0) uiArm -= dt;
+    return;
+  }
+  if (state === 'changelog') {
+    if (logOverMenu()) updateMenu(dt);
+    if (uiArm > 0) uiArm -= dt;
+    return;
+  }
+  if (state === 'daily') {
+    updateMenu(dt);
+    if (uiArm > 0) uiArm -= dt;
+    return;
+  }
+  if (state === 'skin') {
+    if (skinOverMenu()) updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
     return;
   }
@@ -13663,13 +13815,18 @@ function render() {
   if (!sensDrag) sensRect = null;
 
   if (state === 'menu' || state === 'name' || state === 'lan' || state === 'chal' ||
-      (state === 'settings' && setFrom === 'menu')) {
+      (state === 'settings' && setFrom === 'menu') ||
+      (state === 'changelog' && logOverMenu()) || state === 'daily' ||
+      (state === 'skin' && skinOverMenu())) {
     if (state === 'chal') drawChal();
     else {
       renderMenu();
       if (state === 'name') drawNameEntry();
       if (state === 'lan') drawLan();
       if (state === 'settings') drawSettings();
+      if (state === 'changelog') drawChangelog();
+      if (state === 'daily') drawDaily();
+      if (state === 'skin') drawSkins();
     }
     // these pages return before the pass at the foot of render(), and they are
     // precisely the ones with no cursor of their own
@@ -13804,6 +13961,8 @@ function render() {
   if (state === 'amalcut') drawAmalCutText();
   if (state === 'gfx') drawGfx();
   if (state === 'settings') drawSettings();
+  if (state === 'changelog') drawChangelog();
+  if (state === 'skin') drawSkins();
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') drawDead();
@@ -16174,6 +16333,11 @@ function drawEnemies() {
       ctx.fillStyle = e.elite ? COL.elite : e.col;
       ctx.fillRect(e.x - w / 2, e.y - e.r - 11, w * clamp(e.hp / e.maxHp, 0, 1), h);
     }
+
+    /* The same seam the hull has. `ea` goes with it: a phased or invulnerable
+       body is drawn faint because it cannot be hit, and a skin drawn over the
+       top at full opacity would take that reading away. */
+    if (SkinFx.on) SkinFx.enemy(e, ea);
   }
 }
 
@@ -16814,6 +16978,8 @@ function drawPlayer() {
   else ctx.arc(2, 0, 2.6, 0, TAU);
   ctx.fill();
   ctx.restore();
+  // an awarded skin gets its own pass, last, over a finished hull
+  if (SkinFx.on) SkinFx.player();
 }
 
 /* Motion blur. The smear is laid along where the thing has just been and its
@@ -16846,6 +17012,8 @@ function drawBullets() {
     const c = b.hacked ? HACK_COL
             : b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
             : b.deep ? '#38bdf8' : b.crit ? COL.crit : COL.bullet;
+    // an awarded skin may own the whole round, streak and glow included
+    if (SkinFx.on && SkinFx.bullet(b, c)) continue;
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * (b.arrow ? 5.4 : 4.6), c, 0.72);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * (b.arrow ? 1.3 : 1.7), c,
                  b.arrow ? 1.5 : 1);
@@ -17061,6 +17229,7 @@ function drawParticles() {
     if (t < 0.09) continue;
     const rad = p.r * 3.4 * (0.4 + t * 0.9);
     if (rad < 1.6) continue;
+    if (SkinFx.on && SkinFx.part(p, t, rad)) continue;
     drawGlow(p.x, p.y, rad, p.color, t * 0.75);
   }
 }
@@ -17214,7 +17383,8 @@ function drawVignette() {
    ========================================================================= */
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'codex', 'gfx',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
-                          'name', 'freeplay', 'devtalk', 'amalcut'];
+                          'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
+                          'daily', 'skin'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -18282,9 +18452,13 @@ function drawDead() {
   if (s.chal) row(22, y => {
     ctx.save();
     ctx.letterSpacing = '0.16em';
-    const t = s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS');
+    // a daily has no boss to leave standing; what it has is whether it counted
+    const t = s.chal.daily
+      ? s.chal.n + '   ·   ' + (s.dailyRanked ? 'RANKED' : 'PRACTICE')
+      : s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS');
     fitFont(t, wide, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
-    ctx.fillStyle = cw ? '#fbbf24' : '#94a3b8';
+    ctx.fillStyle = s.chal.daily ? (s.chal.accent || CHAL_GOLD)
+                                 : (cw ? '#fbbf24' : '#94a3b8');
     ctx.fillText(t, CENTER, y + 11);
     ctx.restore();
   });
@@ -18363,6 +18537,18 @@ function drawDead() {
     ctx.fillStyle = '#64748b';
     ctx.fillText(d, CENTER, y + 28);
   });
+  else if (s.chal && s.chal.daily) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    const t = (s.dailyRanked
+        ? (Daily.rank ? 'RANKED   ·   #' + Daily.rank + ' TODAY' : 'RANKED')
+        : 'PRACTICE   ·   DOES NOT COUNT')
+      + '   ·   BEST TODAY ' + (Save.profile.dayBest || 0).toLocaleString();
+    fitFont(t, wide, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = s.dailyRanked ? '#6ee7b7' : '#64748b';
+    ctx.fillText(t, CENTER, y + 12);
+    ctx.restore();
+  });
   else if (s.chal) row(26, y => {
     ctx.save();
     ctx.letterSpacing = '0.12em';
@@ -18429,7 +18615,8 @@ function drawDead() {
 
   row(30, y => {
     const t = s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
-                                : 'SPACE RUN IT AGAIN   ·   M CHALLENGES')
+                                : 'SPACE RUN IT AGAIN   ·   M ' +
+                                  (s.chal.daily ? 'DAILY' : 'CHALLENGES'))
             : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
             : isTouch  ? 'TAP TO RUN AGAIN'
             : 'PRESS SPACE / R TO RUN AGAIN';
@@ -18726,7 +18913,11 @@ function renderMenu() {
                   connecting: ['◈ CONNECTING…', '#64748b'],
                   error: ['◈ LOCAL SAVE (offline)', '#64748b'],
                   local: ['◈ LOCAL SAVE', '#475569'] }[Save.status];
-  const bBadge = { ok: ['◈ LEADERBOARD LIVE', '#38bdf8'],
+  /* The board is seasonal, so the badge carries which season and how much
+     of it is left. A live board with no visible deadline is just a list. */
+  const bLeft = Season.daysLeft();
+  const bBadge = { ok: ['◈ SEASON ' + (Season.label() || 'LIVE') +
+                        (bLeft === null ? '' : '  ·  ' + bLeft + 'D LEFT'), '#38bdf8'],
                    loading: ['◈ LEADERBOARD…', '#475569'],
                    offline: ['◈ LEADERBOARD OFFLINE', '#475569'],
                    idle: ['', '#475569'] }[Board.status];
@@ -18764,6 +18955,7 @@ function renderMenu() {
 
   drawMenuLan();
   drawMenuChal();
+  drawMenuDaily();
   drawBetaMark();
 
   drawMenuSet();
@@ -20001,14 +20193,16 @@ function closeSettings() {
 function settingsRects() {
   const w = Math.min(520, W - 56), x = (W - w) / 2;
   const rowH = Math.min(46, Math.max(34, H * 0.075)), gap = 9;
-  const bodyH = 3 * (rowH + gap) + 52 + 46;
+  const bodyH = 3 * (rowH + gap) + 52 + 46 + 46 + 46;   // + notes, + skins
   const top = clamp(H / 2 - (bodyH + 70) / 2, 60, H - bodyH - 78);
   const rows = [];
   for (let i = 0; i < 3; i++) rows.push({ x, y: top + 64 + i * (rowH + gap), w, h: rowH, i });
   const by = top + 64 + 3 * (rowH + gap) + 8;
   return { x, w, top, rowH, rows,
     gfx:  { x, y: by, w, h: 40, i: 3 },
-    done: { x: x + w / 2 - 92, y: by + 50, w: 184, h: 40, i: 4 } };
+    log:  { x, y: by + 46, w, h: 40, i: 4 },
+    skin: { x, y: by + 92, w, h: 40, i: 5 },
+    done: { x: x + w / 2 - 92, y: by + 142, w: 184, h: 40, i: 6 } };
 }
 
 /* The sensitivity slider. Its own rect and its own drag, so it and the volume
@@ -20145,6 +20339,46 @@ function drawSettings() {
                gb.x + gb.w - 16, gb.y + gb.h / 2);
   ctx.textAlign = 'center';
 
+  /* --- what changed: the only way back to notes already dismissed --- */
+  const lb = g.log, lbh = inRect(mouse.x, mouse.y, lb) || setSel === lb.i;
+  ctx.fillStyle = lbh ? 'rgba(103,232,249,0.16)' : 'rgba(255,255,255,0.05)';
+  roundRect(lb.x, lb.y, lb.w, lb.h, 7); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, lbh ? 0.7 : 0.28); ctx.lineWidth = 1.4;
+  roundRect(lb.x, lb.y, lb.w, lb.h, 7); ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = lbh ? '#e2e8f0' : '#94a3b8';
+  ctx.fillText('WHAT CHANGED', lb.x + 16, lb.y + lb.h / 2);
+  const unread = (Save.profile.logSeen || 0) < LOG_VER;
+  ctx.textAlign = 'right';
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = unread ? COL.player : '#64748b';
+  ctx.fillText((unread ? 'NEW  \u00b7  ' : '') + logNewest().v,
+               lb.x + lb.w - 16, lb.y + lb.h / 2);
+  ctx.textAlign = 'center';
+
+  /* --- skins: cosmetic, and the panel says exactly how cosmetic --- */
+  const sb = g.skin, sbh = inRect(mouse.x, mouse.y, sb) || setSel === sb.i;
+  ctx.fillStyle = sbh ? 'rgba(103,232,249,0.16)' : 'rgba(255,255,255,0.05)';
+  roundRect(sb.x, sb.y, sb.w, sb.h, 7); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, sbh ? 0.7 : 0.28); ctx.lineWidth = 1.4;
+  roundRect(sb.x, sb.y, sb.w, sb.h, 7); ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = sbh ? '#e2e8f0' : '#94a3b8';
+  ctx.fillText('SKINS', sb.x + 16, sb.y + sb.h / 2);
+  /* The swatches are the summary: a row of what the roster currently
+     looks like says more than a count of how many have been touched. */
+  {
+    const n = Math.min(9, SKIN_SLOTS.length);
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = skinLiveCol(SKIN_SLOTS[i].k);
+      roundRect(sb.x + sb.w - 16 - (n - i) * 13, sb.y + sb.h / 2 - 4, 9, 9, 2);
+      ctx.fill();
+    }
+  }
+  ctx.textAlign = 'center';
+
   const d = g.done, dh = inRect(mouse.x, mouse.y, d) || setSel === d.i;
   ctx.fillStyle = dh ? 'rgba(103,232,249,0.22)' : 'rgba(103,232,249,0.10)';
   roundRect(d.x, d.y, d.w, d.h, 8); ctx.fill();
@@ -20161,10 +20395,12 @@ function settingsKey(k) {
   if (uiArm > 0) return;
   if (k === 's' || k === 'escape' || k === 'enter') {
     if (k === 'enter' && setSel === 3) { openGfx('settings'); return; }
+    if (k === 'enter' && setSel === 4) { openLog('settings'); return; }
+    if (k === 'enter' && setSel === 5) { openSkins('settings'); return; }
     closeSettings(); return;
   }
-  if (k === 'arrowdown') { setSel = (setSel + 1) % 5; Audio_.select(); return; }
-  if (k === 'arrowup')   { setSel = (setSel + 4) % 5; Audio_.select(); return; }
+  if (k === 'arrowdown') { setSel = (setSel + 1) % 7; Audio_.select(); return; }
+  if (k === 'arrowup')   { setSel = (setSel + 6) % 7; Audio_.select(); return; }
   const step = (k === 'arrowright' || k === 'd') ? 1 : (k === 'arrowleft' || k === 'a') ? -1 : 0;
   if (!step) return;
   if (setSel === 0) { Audio_.setVol(Audio_.vol + step * 0.05); Save.savePrefs(); }
@@ -20179,6 +20415,8 @@ function settingsClick() {
     autoFire = !autoFire; Save.savePrefs(); Audio_.select(); return;
   }
   if (inRect(mouse.x, mouse.y, g.gfx))  { openGfx('settings'); return; }
+  if (inRect(mouse.x, mouse.y, g.log))  { openLog('settings'); return; }
+  if (inRect(mouse.x, mouse.y, g.skin)) { openSkins('settings'); return; }
   if (inRect(mouse.x, mouse.y, g.done)) { closeSettings(); return; }
 }
 
@@ -20205,10 +20443,2143 @@ function drawMenuSet() {
   ctx.letterSpacing = '0.1em';
   ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
-  ctx.fillText('SOUND, AIM, EFFECTS  —  S', r.x + 12, r.y + 27);
+  ctx.fillText('SOUND, AIM, SKINS, NOTES  —  S', r.x + 12, r.y + 27);
   ctx.restore();
   ctx.restore();
   ctx.textAlign = 'center';
+}
+
+/* ===========================================================================
+   CHANGELOG
+   What changed, and a promise that it is said once. The whole of the state
+   behind that promise is a single number on the profile — the id of the newest
+   entry this player has already read — so "have they seen this?" is one
+   comparison rather than a pile of per-entry flags, and it survives arriving
+   from another machine because the higher of two numbers is always the right
+   answer.
+
+   The panel opens itself exactly once, at the menu, when the list holds
+   something newer than that number. Dismissing it writes the number down, and
+   from then on the only way back in is SETTINGS → WHAT CHANGED.
+
+   SHIPPING AN UPDATE: put one entry at the top of CHANGELOG with the next id
+   up. That is the entire ceremony. LOG_VER is read out of the list rather than
+   kept beside it, so there is no second number to remember and no way to write
+   notes that nobody is ever shown.
+   ========================================================================= */
+const CHANGELOG = [
+  { id: 1, v: '1.0', date: '8 SEP 2026', lines: [
+    ['new', 'Patch notes. An update opens this panel once, at the menu, and ' +
+            'never again on its own. SETTINGS → WHAT CHANGED reopens it any time.']
+  ] }
+];
+
+/* The highest id in the list rather than the first entry's: one pasted in
+   below its elders still counts as new, instead of quietly shipping notes that
+   nobody is ever shown. */
+const LOG_VER = CHANGELOG.reduce((m, e) => Math.max(m, e.id || 0), 0);
+const logNewest = () =>
+  CHANGELOG.reduce((a, e) => ((e.id || 0) > (a.id || 0) ? e : a),
+                   CHANGELOG[0] || { v: '—', id: 0 });
+
+const LOG_TAGS = {
+  new:     { n: 'NEW',     c: '#4ade80' },
+  fix:     { n: 'FIX',     c: '#67e8f9' },
+  balance: { n: 'BALANCE', c: '#fbbf24' },
+  gone:    { n: 'REMOVED', c: '#f87171' },
+  note:    { n: 'NOTE',    c: '#94a3b8' }
+};
+
+let logReturn = 'menu', logAuto = false, logScroll = 0, logSince = 0;
+let logAutoDone = false, logWaitT = 0, logDrag = null;
+
+/* Whether the menu belongs behind the panel. Reached from the menu it always
+   does; reached from SETTINGS it depends on where SETTINGS itself came from,
+   because from the pause screen there is a run back there. */
+function logOverMenu() {
+  return logReturn === 'menu' || (logReturn === 'settings' && setFrom === 'menu');
+}
+
+function openLog(from, auto) {
+  logReturn = from || 'settings';
+  logAuto = !!auto;
+  logScroll = 0;
+  logSince = Save.profile.logSeen || 0;   // the marks, read before they clear
+  state = 'changelog';
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+/* Closing is what marks them read, not opening. The same button dismisses it
+   whichever way you came in, and someone who went looking in SETTINGS has read
+   them as surely as someone who was shown them. */
+function closeLog() {
+  logMarkSeen();
+  state = logReturn === 'settings' ? 'settings' : 'menu';
+  logAuto = false;
+  logDrag = null;
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+function logMarkSeen() {
+  if ((Save.profile.logSeen || 0) >= LOG_VER) return;
+  Save.profile.logSeen = LOG_VER;
+  Save.writeLocal();
+  Save.flush();
+}
+
+/* Once per launch, at the menu, and not until the cloud profile has had its
+   chance to land. Someone who read these on another machine carries a logSeen
+   that only arrives with the merge, and firing ahead of it would show them the
+   same notes once on every device they own — which is the one thing this is
+   here to prevent. Four seconds is the whole of the patience: a connection
+   that has not answered by then is not going to change the answer. */
+function logAutoTick(dt) {
+  if (logAutoDone) return;
+  if (Save.status === 'connecting' && (logWaitT += dt) < 4) return;
+  logAutoDone = true;
+  const p = Save.profile;
+  if ((p.logSeen || 0) >= LOG_VER) return;
+  /* Nothing on the profile means nobody has played it yet, and a list of what
+     changed since a build they never ran is noise on a first launch. Marked
+     read instead of shown, so their first update is the first they hear. */
+  if (!(p.runs || 0) && !(p.best || 0) && !(p.time || 0)) { logMarkSeen(); return; }
+  openLog('menu', true);
+}
+
+function logGeom() {
+  const w = Math.min(620, W - 48), x = (W - w) / 2;
+  const headH = 76, footH = 58, viewW = w - 52;
+  /* Sized to what there is to read, up to what the window allows. One line
+     of notes in a panel built for twenty reads as a mistake rather than as
+     brevity, and the first update is always going to be one line. */
+  const cap = Math.min(H - 84, 468) - headH - footH;
+  const viewH = clamp(logRows(viewW).contentH, 44, Math.max(44, cap));
+  const panelH = headH + footH + viewH;
+  const top = (H - panelH) / 2;
+  return { x, w, top, panelH, headH, footH, viewW, viewH,
+    clipX: x + 20, clipY: top + headH,
+    done: { x: x + w / 2 - 92, y: top + panelH - footH + 10, w: 184, h: 38 } };
+}
+
+/* Laid out into flat rows carrying their own offsets, so the drawing, the
+   scroll clamp and the scrollbar all read one set of numbers instead of three
+   that agree until they don't. Wrapping needs the font actually set, which is
+   why this measures rather than estimates. */
+function logRows(viewW) {
+  const rows = [];
+  const textX = 62, textW = viewW - textX;
+  let y = 0;
+  for (let i = 0; i < CHANGELOG.length; i++) {
+    const e = CHANGELOG[i];
+    if (i) y += 16;                        // air between versions
+    rows.push({ t: 'head', e, y, h: 32 });
+    y += 32;
+    for (const ln of (e.lines || [])) {
+      ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+      const wrapped = wrapLines(ln[1], textW);
+      const h = wrapped.length * 16 + 8;
+      rows.push({ t: 'line', tag: ln[0], lines: wrapped, textX, y, h });
+      y += h;
+    }
+  }
+  return { rows, contentH: y + 6 };
+}
+
+function logMaxScroll() {
+  const g = logGeom();
+  return Math.max(0, logRows(g.viewW).contentH - g.viewH);
+}
+
+function drawChangelog() {
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = logGeom();
+  const lay = logRows(g.viewW);
+  const ms = Math.max(0, lay.contentH - g.viewH);
+  logScroll = clamp(logScroll, 0, ms);
+
+  ctx.save();
+  lanRect(g.x, g.top, g.w, g.panelH, 10);
+  ctx.fillStyle = 'rgba(8,13,22,0.88)'; ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.30); ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = "800 22px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = COL.player;
+  ctx.fillText(logAuto ? "WHAT'S NEW" : 'WHAT CHANGED', W / 2, g.top + 28);
+  ctx.restore();
+  ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(logAuto ? 'Said once. SETTINGS keeps it, if you want it again.'
+                       : 'Every build, newest first.',
+               W / 2, g.top + 50);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.clipX - 4, g.clipY, g.viewW + 12, g.viewH);
+  ctx.clip();
+  for (const r of lay.rows) {
+    const y = g.clipY + r.y - logScroll;
+    if (y + r.h < g.clipY - 24 || y > g.clipY + g.viewH + 24) continue;
+    if (r.t === 'head') {
+      const fresh = (r.e.id || 0) > logSince;
+      ctx.textAlign = 'left';
+      ctx.save();
+      ctx.letterSpacing = '0.07em';
+      ctx.font = "700 13px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.fillStyle = fresh ? COL.player : '#94a3b8';
+      ctx.fillText(String(r.e.v), g.clipX + 2, y + 12);
+      ctx.restore();
+      if (r.e.date) {
+        ctx.textAlign = 'right';
+        ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+        ctx.fillStyle = '#475569';
+        ctx.fillText(r.e.date, g.clipX + g.viewW, y + 12);
+      }
+      // the rule under a version, brighter for anything not yet read
+      ctx.fillStyle = rgba(COL.player, fresh ? 0.34 : 0.12);
+      ctx.fillRect(g.clipX, y + 24, g.viewW, 1);
+      ctx.textAlign = 'left';
+    } else {
+      const tag = LOG_TAGS[r.tag] || LOG_TAGS.note;
+      ctx.save();
+      ctx.globalAlpha = 0.14;
+      ctx.fillStyle = tag.c;
+      roundRect(g.clipX + 2, y + 3, 50, 15, 4); ctx.fill();
+      ctx.restore();
+      ctx.textAlign = 'center';
+      fitFont(tag.n, 44, '800', 8.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 6);
+      ctx.fillStyle = tag.c;
+      ctx.fillText(tag.n, g.clipX + 27, y + 11);
+      ctx.textAlign = 'left';
+      ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = '#cbd5e1';
+      for (let i = 0; i < r.lines.length; i++)
+        ctx.fillText(r.lines[i], g.clipX + r.textX, y + 11 + i * 16);
+    }
+  }
+  ctx.restore();
+
+  // a track, only when there is something under the fold to reach
+  if (ms > 0) {
+    const tx = g.clipX + g.viewW + 12;
+    ctx.fillStyle = 'rgba(148,163,184,0.14)';
+    roundRect(tx, g.clipY, 3, g.viewH, 1.5); ctx.fill();
+    const th = Math.max(28, g.viewH * (g.viewH / lay.contentH));
+    ctx.fillStyle = rgba(COL.player, 0.5);
+    roundRect(tx, g.clipY + (g.viewH - th) * (logScroll / ms), 3, th, 1.5); ctx.fill();
+  }
+
+  const d = g.done, dh = inRect(mouse.x, mouse.y, d);
+  ctx.fillStyle = dh ? 'rgba(103,232,249,0.22)' : 'rgba(103,232,249,0.10)';
+  roundRect(d.x, d.y, d.w, d.h, 8); ctx.fill();
+  ctx.strokeStyle = COL.player; ctx.lineWidth = 1.8;
+  roundRect(d.x, d.y, d.w, d.h, 8); ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.font = "800 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = COL.player;
+  ctx.fillText(logAuto ? 'GOT IT   [ESC]' : 'DONE   [ESC]', d.x + d.w / 2, d.y + d.h / 2);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function logKey(k) {
+  if (uiArm > 0) return;
+  if (k === 'escape' || k === 'enter' || k === ' ') { closeLog(); return; }
+  const ms = logMaxScroll();
+  if (k === 'arrowdown' || k === 's') { logScroll = clamp(logScroll + 44, 0, ms); return; }
+  if (k === 'arrowup'   || k === 'w') { logScroll = clamp(logScroll - 44, 0, ms); return; }
+  if (k === 'pagedown') { logScroll = clamp(logScroll + logGeom().viewH, 0, ms); return; }
+  if (k === 'pageup')   { logScroll = clamp(logScroll - logGeom().viewH, 0, ms); return; }
+  if (k === 'home') { logScroll = 0; return; }
+  if (k === 'end')  { logScroll = ms; return; }
+}
+
+/* Anywhere off the panel closes it as well. On the menu a stray click starts a
+   run, and this panel is the one thing standing between an update note and a
+   run nobody meant to begin — so it takes the click and shuts instead. */
+function logClick() {
+  if (uiArm > 0) return;
+  closeLog();
+}
+
+/* ===========================================================================
+   DAILY RUN
+   One brief, the same for everybody, changing at midnight UTC.
+
+   What is shared is the rule sheet, the pilot and the starting kit — not the
+   world. The world could not be shared without a fixed timestep: boss AI and
+   the hazard layer roll dice every frame, so two machines running at different
+   frame rates consume randomness at different rates and diverge within
+   seconds, whatever seed they were handed. Promising an identical run and
+   delivering a merely similar one would be worse than not promising it, so the
+   panel says plainly what is fixed and what is not.
+
+   The date comes from the server when the board is reachable, and only from
+   the local clock when it is not. That is not paranoia about cheating — scores
+   are unverifiable anyway, and the board says so — it is because "what day is
+   it" has to have one answer for everyone or the board is comparing runs from
+   two different briefs.
+
+   The first run of a day is the ranked one; everything after it is practice
+   and is labelled as such. The server enforces that too, by keeping the first
+   row it sees for a name on a given day rather than the best.
+   ========================================================================= */
+
+// -- a small deterministic generator, seeded by the date and nothing else ----
+function dailyHash(str) {
+  let h = 2166136261 >>> 0;                        // FNV-1a
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+function dailyRng(seed) {                          // mulberry32
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* Every value below appears in a hand-written challenge somewhere in
+   CHALLENGES, so the modifier vocabulary and the upgrade ids are known good
+   rather than invented here. A daily that referenced an upgrade id that does
+   not exist would fail silently — chalApplyShip simply finds nothing. */
+const DAILY_CORE = [
+  { n: 'GLASS',           d: 'One hit point. Nothing in the run can raise it.',
+    m: { oneShot: 1 } },
+  { n: 'HOLLOW',          d: 'No upgrades, no offers. The ship exactly as handed to you.',
+    m: { noLvl: 1 } },
+  { n: 'LONG FUSE',       d: 'One shot a second, carrying the weight of the four it replaced.',
+    m: { rate: 0.26, dmg: 4.4, bspd: 1.3 } },
+  { n: 'WELDED',          d: 'The dash is welded shut. Walk.',
+    m: { dash: 0, start: ['spd', 'spd'] } },
+  { n: 'BROWNOUT',        d: 'Sensors down to close range. The rest of the room is still out there.',
+    m: { fog: 1 } },
+  { n: 'AUSTERITY',       d: 'The shop is shut. The credits keep accumulating, which is worse.',
+    m: { noShop: 1 } },
+  { n: 'PROMOTION',       d: 'Everything in the room has been promoted. Every single thing.',
+    m: { elite: 1, ehp: 0.72 } },
+  { n: 'INFESTATION',     d: 'Swarmers, only swarmers, and considerably more of them.',
+    m: { swarm: ['swarmer'], budget: 2.6, ehp: 0.8 } },
+  { n: 'DEAD STICK',      d: 'The hull reads a stationary ship as a failed one and starts venting.',
+    m: { move: 1, spd: 1.22 } },
+  { n: 'GLASS CANNON',    d: 'Triple damage on a hull that holds twenty-five points of it.',
+    m: { dmg: 3, hp: 25, noHeal: 1 } },
+  { n: 'ON THE CLOCK',    d: 'Fifty seconds a wave. The hull pays the overtime.',
+    m: { time: 50 } },
+  { n: 'CORROSION',       d: 'The floor sweats acid, and nobody will say where it is from.',
+    m: { curse: 'acid' } },
+  { n: 'STANDARD ISSUE',  d: 'Common parts only. Nothing rare was shipped to this sector.',
+    m: { rar: ['common'] } },
+  { n: 'SCATTER',         d: 'Four barrels, none of them accurate, none of them strong.',
+    m: { start: ['multi', 'multi', 'multi'], dmg: 0.6, ban: ['pierce', 'home'] } },
+  { n: 'EMBER PROTOCOL',  d: 'EMBER, charging half as fast and hitting three times as hard.',
+    m: { char: 1, rate: 0.5, dmg: 3, ban: ['multi', 'ric'] } }
+];
+
+/* The second rule, when there is one. `no` names cores it must not be drawn
+   against — not because they break, but because they say nothing new next to
+   each other: extra plating on a one-hit hull is plating that never matters. */
+const DAILY_SPICE = [
+  { n: 'HEAVY',      d: 'Plating fitted before launch.',            m: { start: ['armor', 'armor'] }, no: ['GLASS'] },
+  { n: 'FRAGILE',    d: 'A little over half a hull.',               m: { hp: 55 },                    no: ['GLASS', 'GLASS CANNON'] },
+  { n: 'LEADEN',     d: 'Half speed, and it will be felt.',         m: { spd: 0.62 },                 no: ['DEAD STICK'] },
+  { n: 'QUICKENED',  d: 'Faster than the hull was rated for.',      m: { spd: 1.3 } },
+  { n: 'PAUPER',     d: 'No credits, ever. Levels are all you get.', m: { credits: 0, xp: 1.3 },      no: ['AUSTERITY'] },
+  { n: 'FLUSH',      d: 'Someone left the account open.',           m: { credits: 400 },              no: ['AUSTERITY', 'PAUPER'] },
+  { n: 'MIRRORS',    d: 'Six shards buried in the walls before you arrive.', m: { mirror: 6 } },
+  { n: 'NO QUARTER', d: 'Nothing in the run will heal you.',        m: { noHeal: 1 },                 no: ['GLASS', 'GLASS CANNON'] },
+  { n: 'CHIPPED',    d: 'Every hit gets through something.',        m: { chip: true },                no: ['GLASS'] },
+  { n: 'THINNED',    d: 'Fewer of them, and harder.',               m: { budget: 0.72, ehp: 1.5 },    no: ['INFESTATION'] }
+];
+
+/* --------------------------- the days that are not ordinary ---------------
+   Keyed MM-DD. A special day replaces the generated sheet entirely: its own
+   name, its own rules, its own accent. This is the table to edit — everything
+   else about a special day follows from what is written here.
+--------------------------------------------------------------------------- */
+const DAILY_SPECIAL = {
+  '01-01': { n: 'FIRST LIGHT', accent: '#fde047',
+    d: 'Nothing carried over. Whatever you were last year, the hull does not remember it.',
+    m: { noLvl: 1, hp: 140, start: ['spd', 'spd'] } },
+  '02-14': { n: 'SWEETHEART', accent: '#f472b6',
+    d: 'Shots that come back to you. Everything in here wants to be close.',
+    m: { start: ['ric', 'ric'], swarm: ['swarmer'], budget: 2.2, ehp: 0.7 } },
+  '03-14': { n: 'THREE ONE FOUR', accent: '#67e8f9',
+    d: 'Three barrels, one hull, four times the damage. It does not go round evenly.',
+    m: { start: ['multi', 'multi', 'multi'], hp: 100, dmg: 4, rate: 0.31 } },
+  '04-01': { n: 'THE PRANK', accent: '#a3e635',
+    d: 'Everything has been promoted, the shop is shut, and the sensors are out. ' +
+       'No, this is the real sheet. Yes, really.',
+    m: { elite: 1, ehp: 0.6, noShop: 1, fog: 1, credits: 0, xp: 1.4 } },
+  '06-21': { n: 'LONGEST DAY', accent: '#fbbf24',
+    d: 'No clock on the waves and nothing to spend, only the room and how long you last in it.',
+    m: { noShop: 1, credits: 0, xp: 1.5, budget: 1.35 } },
+  '10-31': { n: 'ALL HALLOWS', accent: '#fb923c',
+    d: 'The lights are out and the floor is not clean. Something has been promoted.',
+    m: { fog: 1, curse: 'acid', elite: 1, ehp: 0.66 } },
+  '12-25': { n: 'DEAD OF WINTER', accent: '#a5f3fc',
+    d: 'Slow, well armoured, and a long way from anywhere warm.',
+    m: { spd: 0.6, start: ['armor', 'armor', 'hp', 'hp'], budget: 1.5, ehp: 1.2 } },
+  '12-31': { n: 'LAST LIGHT', accent: '#fde047',
+    d: 'Fifty seconds a wave, all year, and the year is nearly out.',
+    m: { time: 50, dmg: 1.5, noHeal: 1 } }
+};
+
+/* Multiplicative keys compound, list keys concatenate, and everything else is
+   a plain override. Without this a spice sheet setting `dmg` would silently
+   throw away the core's `dmg` and the day would be much easier than it read. */
+const DAILY_MUL  = ['dmg', 'rate', 'spd', 'bspd', 'xp', 'ehp', 'espd', 'edmg', 'budget'];
+const DAILY_LIST = ['start', 'ban', 'only', 'rar', 'swarm'];
+function dailyMerge(a, b) {
+  const out = Object.assign({}, a);
+  for (const k in b) {
+    if (DAILY_MUL.includes(k)) out[k] = (out[k] === undefined ? 1 : out[k]) * b[k];
+    else if (DAILY_LIST.includes(k)) out[k] = [...(out[k] || []), ...b[k]];
+    else out[k] = b[k];
+  }
+  return out;
+}
+
+const dailyPad = n => (n < 10 ? '0' : '') + n;
+/* UTC, everywhere, deliberately: a board keyed on local dates would put two
+   players in the same column on different briefs. */
+function dailyDayOf(t) {
+  const d = new Date(t === undefined ? Date.now() : t);
+  return d.getUTCFullYear() + '-' + dailyPad(d.getUTCMonth() + 1) + '-' + dailyPad(d.getUTCDate());
+}
+function dailyPrevDay(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  return dailyDayOf(Date.UTC(y, m - 1, d) - 86400000);
+}
+/* Friday the 13th is a rule rather than a row: it happens one to three times a
+   year and tabling every occurrence would be a maintenance job forever. */
+function dailyIsFri13(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  return d === 13 && new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 5;
+}
+
+const DAILY_FRI13 = { n: 'THIRTEENTH', accent: '#f87171',
+  d: 'One hit point, no dash, and the floor sweats. It is that kind of Friday.',
+  m: { oneShot: 1, dash: 0, curse: 'acid', start: ['spd', 'spd'] } };
+
+/* Builds the whole brief for a date. Pure: the same string in always gives the
+   same sheet out, on any machine, with no reference to the clock. */
+function dailySheet(day) {
+  const mmdd = day.slice(5);
+  const special = DAILY_SPECIAL[mmdd] || (dailyIsFri13(day) ? DAILY_FRI13 : null);
+  if (special) {
+    return { day, name: special.n, special: true, accent: special.accent || CHAL_GOLD,
+             rules: [{ n: special.n, d: special.d }], m: Object.assign({}, special.m) };
+  }
+  const r = dailyRng(dailyHash('voidrunner-daily-' + day));
+  const core = DAILY_CORE[Math.floor(r() * DAILY_CORE.length)];
+  const rules = [core];
+  let m = Object.assign({}, core.m);
+  // most days carry a second rule; some are left to stand on the first alone
+  if (r() < 0.72) {
+    const open = DAILY_SPICE.filter(s => !(s.no || []).includes(core.n));
+    if (open.length) {
+      const spice = open[Math.floor(r() * open.length)];
+      rules.push(spice);
+      m = dailyMerge(m, spice.m);
+    }
+  }
+  return { day, name: 'DAILY RUN', special: false, accent: CHAL_GOLD, rules, m };
+}
+
+/* --------------------------------- state ---------------------------------- */
+const Daily = {
+  day: null,            // the day the current sheet was built for
+  from: 'local',        // 'server' once the board has told us the date
+  sheet: null,
+  top: [], status: 'idle', rank: null, note: '',
+
+  /* Rebuilding on a new day also rolls the profile's per-day counters over,
+     and settles the streak: a day with a ranked run keeps it, a gap ends it. */
+  use(day, from) {
+    if (from) Daily.from = from;
+    if (Daily.day === day) return;
+    Daily.day = day;
+    Daily.sheet = dailySheet(day);
+    Daily.top = []; Daily.rank = null; Daily.note = '';
+    const p = Save.profile;
+    if (p.dayKey !== day) {
+      // the streak survives only if the ranked run happened the day before
+      if (p.dayStreak && p.dayStreakLast && p.dayStreakLast !== dailyPrevDay(day))
+        p.dayStreak = 0;
+      p.dayKey = day; p.dayRuns = 0; p.dayBest = 0;
+      p.dayRanked = 0; p.dayRankedScore = 0;
+      Save.writeLocal(); Save.flush();
+    }
+  },
+
+  ranked: () => !Save.profile.dayRanked,
+  /* Seconds until this brief is replaced. Straight off the clock, so it drifts
+     with it — it is a countdown on a panel, not something a score depends on. */
+  resetIn() {
+    const n = new Date();
+    return Math.max(0, Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000;
+  },
+
+  async load() {
+    if (location.protocol === 'file:') { Daily.status = 'offline'; return; }
+    Daily.status = 'loading';
+    try {
+      const r = await fetch(Board.url + '?day=' + encodeURIComponent(Daily.day || dailyDayOf()),
+                            { cache: 'no-store' });
+      if (!r.ok) throw new Error('http ' + r.status);
+      const d = await r.json();
+      Season.read(d);
+      // the server's date is the authority; ours was only ever a stand-in
+      if (d.day) Daily.use(d.day, 'server');
+      Daily.top = Array.isArray(d.top) ? d.top : [];
+      Daily.status = 'ok';
+    } catch (e) {
+      Daily.status = 'offline';
+    }
+  },
+
+  /* Only the ranked run is ever sent, and only when the date came from the
+     server — a board keyed on an unconfirmed local clock is a board of runs
+     from whichever brief that machine happened to build. */
+  submit(s) {
+    if (location.protocol === 'file:' || !Save.profile.name) return;
+    if (Daily.from !== 'server') { Daily.note = 'OFFLINE — NOT RANKED'; return; }
+    (async () => {
+      try {
+        const r = await fetch(Board.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            day: Daily.day,
+            pid: myPid(),
+            name: Save.profile.name, score: s.score, wave: s.wave, sector: s.sector,
+            loop: s.loop, level: s.level, kills: s.kills, time: Math.round(s.time)
+          })
+        });
+        const d = await r.json().catch(() => null);
+        if (r.ok && d && d.ok) {
+          Daily.rank = d.rank || null;
+          Daily.top = Array.isArray(d.top) ? d.top : Daily.top;
+          Daily.note = d.already ? 'ALREADY RANKED TODAY' : '';
+        } else {
+          Daily.note = (d && d.error) ? String(d.error).toUpperCase() : 'NOT ACCEPTED';
+        }
+      } catch (e) { Daily.note = 'BOARD UNREACHABLE'; }
+    })();
+  },
+
+  /* Called from gameOver, in place of everything the ordinary path does. A
+     daily is its own game with its own sheet: it must not move your best, the
+     global board, or the escalation window. */
+  finish(ranked) {
+    const p = Save.profile;
+    p.dayRuns = (p.dayRuns || 0) + 1;
+    if (score > (p.dayBest || 0)) p.dayBest = score;
+    if (ranked) {
+      p.dayRanked = 1;
+      p.dayRankedScore = score;
+      if (p.dayStreakLast !== Daily.day) {
+        p.dayStreak = (p.dayStreak || 0) + 1;
+        p.dayStreakLast = Daily.day;
+      }
+    }
+    Save.writeLocal(); Save.flush();
+    if (ranked) Daily.submit({ score, wave, sector: stage.name, loop: loopNum,
+                               level: P.level, kills: P.kills, time: elapsed });
+  }
+};
+
+/* ------------------------------- flying it -------------------------------- */
+/* Modelled on startChallenge, not routed through it: that one announces a boss
+   to kill, and a daily has no goal beyond lasting. Leaving `goal` null is what
+   makes it endless — chalCheckGoal compares against it and never matches, so
+   nothing ever declares the run complete. */
+function startDaily() {
+  const sh = Daily.sheet;
+  if (!sh) return;
+  const ranked = Daily.ranked();
+  const m = sh.m || {};
+  if (m.char !== undefined) applyChar(m.char);
+  resetGame();
+  Chal.on = { id: 'daily:' + sh.day, n: sh.name, tier: 0, goal: null,
+              daily: true, dailyRanked: ranked, accent: sh.accent,
+              d: sh.rules.map(r => r.n).join('  ·  '), m };
+  Chal.won = false; Chal.reward = null;
+  Chal.waveT = m.time || 0; Chal.moveT = 1.2; Chal.curseT = 2;
+  chalApplyShip(m);
+  chalApplyRoom(m);
+  state = 'play';
+  uiArm = 0.3;
+  banner(sh.name, sh.accent, 3.2);
+  setTimeout(() => {
+    if (state === 'play' && Chal.on && Chal.on.daily)
+      banner(ranked ? 'RANKED RUN' : 'PRACTICE', ranked ? sh.accent : '#94a3b8', 2.6);
+  }, 3400);
+  Audio_.select();
+}
+
+/* --------------------------------- panel ---------------------------------- */
+let dailyFrom = 'menu', dailySel = 0;
+
+function openDaily(from) {
+  dailyFrom = from || 'menu';
+  dailySel = 0;
+  Daily.use(Daily.day || dailyDayOf(), null);
+  if (Daily.status !== 'loading') Daily.load();
+  state = 'daily';
+  uiArm = 0.25;
+  Audio_.select();
+}
+function closeDaily() {
+  state = 'menu';
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+/* Mirrors the order drawDaily lays things out in, so the panel is the size
+   of what is actually in it. A brief with one short rule and an offline
+   board in a panel built for two rules and six board rows reads as a
+   rendering fault rather than as a quiet day. */
+function dailyBodyH(pw) {
+  const sh = Daily.sheet;
+  let h = 78 + 20;                         // title block, then the sheet label
+  ctx.font = "400 11.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  for (const rule of (sh ? sh.rules : []))
+    h += 40 + (wrapLines(rule.d, pw - 16).length - 1) * 15;
+  h += 24 + 19 + (Daily.note ? 17 : 0) + 26 + 18;
+  const rows = Daily.status === 'ok' ? (Math.min(6, Daily.top.length) || 1) : 1;
+  return h + rows * 16;
+}
+
+function dailyRects() {
+  const w = Math.min(600, W - 48), x = (W - w) / 2;
+  const panelH = clamp(dailyBodyH(w - 48) + 70, 230, Math.max(230, H - 60));
+  const top = (H - panelH) / 2;
+  const bw = Math.min(240, w / 2 - 14);
+  return { x, w, top, panelH,
+    fly:  { x: x + w / 2 - bw - 7, y: top + panelH - 56, w: bw, h: 40, i: 0 },
+    done: { x: x + w / 2 + 7,      y: top + panelH - 56, w: bw, h: 40, i: 1 } };
+}
+
+function drawDaily() {
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = dailyRects();
+  const sh = Daily.sheet;
+  const acc = (sh && sh.accent) || CHAL_GOLD;
+
+  ctx.save();
+  lanRect(g.x, g.top, g.w, g.panelH, 10);
+  ctx.fillStyle = 'rgba(8,13,22,0.88)'; ctx.fill();
+  ctx.strokeStyle = rgba(acc, 0.30); ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = "800 23px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = acc;
+  ctx.fillText(sh ? sh.name : 'DAILY RUN', W / 2, g.top + 28);
+  ctx.restore();
+
+  // the date, and how long this brief has left
+  const secs = Daily.resetIn();
+  const hh = Math.floor(secs / 3600), mm = Math.floor((secs % 3600) / 60);
+  ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = '#64748b';
+  ctx.fillText((Daily.day || '—') + '   ·   NEW BRIEF IN ' + hh + 'H ' + dailyPad(mm) + 'M' +
+               (Daily.from === 'server' ? '' : '   ·   LOCAL CLOCK'),
+               W / 2, g.top + 50);
+
+  let y = g.top + 78;
+  ctx.textAlign = 'left';
+  const px = g.x + 24, pw = g.w - 48;
+
+  // what is fixed, said plainly, because what is not fixed matters too
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText(sh && sh.special ? "TODAY ONLY" : "TODAY'S SHEET", px, y);
+  ctx.restore();
+  y += 20;
+
+  for (const rule of (sh ? sh.rules : [])) {
+    ctx.save();
+    ctx.globalAlpha = 0.14; ctx.fillStyle = acc;
+    roundRect(px, y - 8, 4, 34, 2); ctx.fill();
+    ctx.restore();
+    ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(rule.n, px + 16, y + 1);
+    ctx.font = "400 11.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#94a3b8';
+    y = wrapText(rule.d, px + 16, y + 18, pw - 16, 15) + 22;
+  }
+
+  ctx.font = "400 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText('The sheet is the same for everyone. The room is not — it still rolls its own.',
+               px, y);
+  y += 24;
+
+  // where you stand today
+  const p = Save.profile;
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText('YOU', px, y);
+  ctx.restore();
+  y += 19;
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
+  const rankedTxt = p.dayRanked
+    ? 'RANKED ' + (p.dayRankedScore || 0).toLocaleString()
+    : 'RANKED RUN NOT FLOWN';
+  ctx.fillStyle = p.dayRanked ? '#e2e8f0' : acc;
+  ctx.fillText(rankedTxt, px, y);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText((p.dayRuns || 0) + ' ATTEMPT' + ((p.dayRuns || 0) === 1 ? '' : 'S') +
+               '   ·   BEST ' + (p.dayBest || 0).toLocaleString() +
+               (p.dayStreak ? '   ·   STREAK ' + p.dayStreak : ''),
+               px + 190, y);
+  if (Daily.note) {
+    y += 17;
+    ctx.fillStyle = '#f87171';
+    ctx.fillText(Daily.note, px, y);
+  }
+  y += 26;
+
+  // today's board, as far as it will fit
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText("TODAY'S BOARD", px, y);
+  ctx.restore();
+  y += 18;
+  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
+  if (Daily.status === 'loading') {
+    ctx.fillStyle = '#475569'; ctx.fillText('LOADING…', px, y);
+  } else if (Daily.status !== 'ok') {
+    ctx.fillStyle = '#475569'; ctx.fillText('BOARD OFFLINE', px, y);
+  } else if (!Daily.top.length) {
+    ctx.fillStyle = '#475569'; ctx.fillText('NOBODY HAS FLOWN IT YET', px, y);
+  } else {
+    const room = Math.max(0, Math.floor((g.fly.y - 4 - y) / 16));
+    for (let i = 0; i < Math.min(room, Daily.top.length, 6); i++) {
+      const e = Daily.top[i];
+      const mine = e.name === Save.profile.name;
+      ctx.fillStyle = mine ? acc : '#64748b';
+      ctx.fillText(String(i + 1).padStart(2, ' '), px, y);
+      ctx.fillStyle = mine ? '#e2e8f0' : '#94a3b8';
+      ctx.fillText(clipText(e.name, 16), px + 26, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = mine ? acc : '#64748b';
+      ctx.fillText((e.score || 0).toLocaleString(), px + pw, y);
+      ctx.textAlign = 'left';
+      y += 16;
+    }
+  }
+
+  // buttons
+  const ranked = Daily.ranked();
+  const btn = (b, label, strong, col) => {
+    const hot = inRect(mouse.x, mouse.y, b) || dailySel === b.i;
+    ctx.fillStyle = hot ? rgba(col, 0.22) : rgba(col, strong ? 0.10 : 0.05);
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 1 : strong ? 0.7 : 0.3); ctx.lineWidth = 1.7;
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = "800 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = col;
+    ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2);
+    ctx.textAlign = 'left';
+  };
+  btn(g.fly, ranked ? 'FLY IT   ·   RANKED' : 'FLY AGAIN   ·   PRACTICE', true,
+      ranked ? acc : '#94a3b8');
+  btn(g.done, 'BACK   [ESC]', false, COL.player);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function dailyKey(k) {
+  if (uiArm > 0) return;
+  if (k === 'escape' || k === 'd') { closeDaily(); return; }
+  if (k === 'arrowleft'  || k === 'a') { dailySel = 0; Audio_.select(); return; }
+  if (k === 'arrowright' || k === 'e') { dailySel = 1; Audio_.select(); return; }
+  if (k === 'enter' || k === ' ') {
+    if (dailySel === 1) closeDaily(); else startDaily();
+    return;
+  }
+}
+
+function dailyClick() {
+  if (uiArm > 0) return;
+  const g = dailyRects();
+  if (inRect(mouse.x, mouse.y, g.fly))  { startDaily(); return; }
+  if (inRect(mouse.x, mouse.y, g.done)) { closeDaily(); return; }
+}
+
+/* The fourth door, under the other three. */
+function menuDailyRect() { return { x: 18, y: 134, w: 176, h: 34 }; }
+
+function drawMenuDaily() {
+  const r = menuDailyRect();
+  const hot = inRect(mouse.x, mouse.y, r);
+  const sh = Daily.sheet;
+  const acc = (sh && sh.accent) || CHAL_GOLD;
+  const fresh = Daily.ranked();
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? rgba(acc, 0.16) : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(acc, hot ? 0.9 : fresh ? 0.55 : 0.3);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = acc;
+  ctx.fillText('◈  DAILY RUN', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  const sub = sh && sh.special ? sh.name
+            : fresh ? 'NOT FLOWN TODAY  —  D'
+                    : 'BEST ' + (Save.profile.dayBest || 0).toLocaleString() + '  —  D';
+  ctx.fillText(clipText(sub, 26), r.x + 12, r.y + 27);
+  ctx.restore();
+  // an unflown day is worth an eye: a pip, pulsing, on the corner
+  if (fresh) {
+    const a = 0.55 + Math.sin(uiTime * 3) * 0.3;
+    drawGlow(r.x + r.w - 11, r.y + 11, 7, acc, a * 0.5);
+    ctx.fillStyle = rgba(acc, a);
+    ctx.beginPath(); ctx.arc(r.x + r.w - 11, r.y + 11, 3, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* ===========================================================================
+   SKINS
+   Re-dressing the roster without the renderer knowing it happened.
+
+   Nothing here draws anything the game did not already draw. Appearance was
+   always read off the entity — `e.col` and `e.sides` — and the spawner always
+   copied those from a table, so a skin is just a second table consulted on the
+   way past. Three lines elsewhere in the file changed: the spawn seam, and the
+   two in applyChar that pour a pilot's colours into COL.
+
+   A SKIN IS DATA, NEVER CODE. Skins are meant to be traded between players,
+   and a draw function handed over by a stranger is arbitrary script running in
+   a page that holds their profile and can POST to the leaderboard. A document
+   with a fixed set of keys can be whitelisted, clamped and range-checked on
+   the way in; a script cannot be checked at all. Everything below is built on
+   that, which is also why the editor is straightforward — an editor for a
+   schema is a form, and this file only has to render the form.
+
+   WHAT IS DELIBERATELY NOT SKINNABLE
+     size    — `r` is the hit radius, read by better than a dozen collision
+               tests. Scaling it visually would either change the fight or put
+               the drawing somewhere other than the thing that kills you.
+     opacity — phased bodies fade because they cannot be hit. That is a
+               readout, not a decoration.
+     elite / hacked / virus marks, telegraphs, shield facings — all of them are
+               information the player is meant to act on, and none of them are
+               reachable from here.
+   What is left — hue and edge count — is enough to change the look of the
+   whole roster without touching a single number anybody reacts to.
+   ========================================================================= */
+
+/* Bosses are excluded: their colours come from BOSSES rather than ETYPE, and
+   the four bespoke ones draw themselves entirely. Everything listed here goes
+   through the shared body path, so everything listed here is honest. */
+const SKIN_SLOTS = [
+  { k: 'player', n: 'YOUR HULL',  kind: 'player' },
+  { k: 'bullet', n: 'YOUR SHOTS', kind: 'bullet' }
+].concat(Object.keys(ETYPE).filter(k => k !== 'boss').map(k => ({
+  k, kind: 'enemy', n: (CODEX_E[k] && CODEX_E[k].n) || k.toUpperCase()
+})));
+
+const skinSlotDef = k => SKIN_SLOTS.find(s => s.k === k) || null;
+
+const SKIN_HEX = /^#[0-9a-fA-F]{6}$/;
+const SKIN_SIDES_MIN = 3, SKIN_SIDES_MAX = 9;
+
+/* Relative luminance, sRGB weights. Used for one thing: refusing a colour
+   that would sink into the floor. A mite painted the shade of the background
+   is not a style, it is an advantage, and it would be an advantage that
+   spreads the moment one person shares the code for it. */
+function skinLum(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+}
+const SKIN_LUM_FLOOR = 0.06;
+const skinReadable = hex => skinLum(hex) >= SKIN_LUM_FLOOR;
+
+/* ---------------------------------------------------------------- validate
+   Everything that arrives from storage, from the cloud, or one day from
+   another player's share code goes through here first. Unknown slots and
+   unknown fields are dropped rather than corrected: a document this does not
+   understand is a document from a different version, and guessing at it is
+   how a cosmetic system starts changing the game. */
+function skinClean(doc) {
+  const out = {};
+  if (!doc || typeof doc !== 'object') return out;
+  for (const slot of SKIN_SLOTS) {
+    const src = doc[slot.k];
+    if (!src || typeof src !== 'object') continue;
+    const put = {};
+    if (typeof src.col === 'string' && SKIN_HEX.test(src.col)) {
+      const col = '#' + src.col.slice(1).toLowerCase();
+      if (skinReadable(col)) put.col = col;
+    }
+    // edge count is cosmetic: the body is a circle to every collision test
+    if (slot.kind === 'enemy' && Number.isFinite(src.sides)) {
+      const n = Math.round(src.sides);
+      if (n >= SKIN_SIDES_MIN && n <= SKIN_SIDES_MAX) put.sides = n;
+    }
+    if (Object.keys(put).length) out[slot.k] = put;
+  }
+  return out;
+}
+
+const skinDoc = () => (Save.profile && Save.profile.skin) || null;
+const skinEntry = k => { const d = skinDoc(); return (d && d[k]) || null; };
+
+/* The two readers the rest of the game calls. Both fall through to whatever
+   the table said, so an empty skin is indistinguishable from no skin at all. */
+function skinCol(k, fallback) {
+  const s = skinEntry(k);
+  /* Deliberate order: something the player chose in the editor beats an
+     equipped award, which beats the table. Equipping a podium skin sets a
+     look; it does not quietly throw away work they did themselves. */
+  return (s && s.col) || specialCol(k) || fallback;
+}
+function skinSides(k, fallback) {
+  const s = skinEntry(k);
+  return (s && s.sides) || fallback;
+}
+
+function skinSet(k, field, v) {
+  const p = Save.profile;
+  if (!p.skin) p.skin = {};
+  if (!p.skin[k]) p.skin[k] = {};
+  p.skin[k][field] = v;
+  p.skin = skinClean(p.skin);          // never store what would not survive a load
+  skinRefresh();
+}
+function skinClearSlot(k) {
+  const p = Save.profile;
+  if (p.skin) delete p.skin[k];
+  skinRefresh();
+}
+function skinClearAll() {
+  Save.profile.skin = {};
+  skinRefresh();
+}
+/* Enemies already on the floor keep the colours they spawned with — the
+   spawner is the seam, not the renderer — so the pilot is repainted directly
+   and the rest of the room catches up as it turns over. */
+function skinRefresh() {
+  applyChar(selectedChar);
+  Save.writeLocal(); Save.flush();
+}
+
+/* --------------------------------------------------------------- colour ---
+   The editor works in HSL because that is the space a person picks a colour
+   in; storage stays hex because that is what every draw call already takes. */
+function skinHexToHsl(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) {
+    if (mx === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  const l = (mx + mn) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return { h, s, l };
+}
+function skinHslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = clamp(s, 0, 1); l = clamp(l, 0, 1);
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const hx = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return '#' + hx(r) + hx(g) + hx(b);
+}
+
+/* What a slot looks like right now, skin applied or not. One function, so the
+   list, the preview and the sliders can never disagree about it. */
+function skinLiveCol(k) {
+  const d = skinSlotDef(k);
+  if (!d) return '#ffffff';
+  if (d.kind === 'player') return skinCol('player', CHAR().col);
+  if (d.kind === 'bullet') return skinCol('bullet', CHAR().bullet);
+  return skinCol(k, ETYPE[k].col);
+}
+function skinLiveSides(k) {
+  const d = skinSlotDef(k);
+  return d && d.kind === 'enemy' ? skinSides(k, ETYPE[k].sides) : 0;
+}
+const skinIsDressed = k => !!skinEntry(k);
+const skinCount = () => { const d = skinDoc(); return d ? Object.keys(d).length : 0; };
+
+/* ============================== the editor ==============================
+   A list of slots on the left, the thing itself on the right, drawn by the
+   same code that draws it in a fight. There is no second renderer here and
+   so there is nothing for the preview to be wrong about.
+   ======================================================================= */
+let skinSel = 0, skinScroll = 0, skinFrom = 'settings';
+let skinDrag = null, skinSliderRects = null;
+
+/* Whether the menu belongs behind the editor — the same question SETTINGS and
+   the changelog already answer, and for the same reason: reached from the
+   pause screen there is a run back there instead. */
+function skinOverMenu() {
+  return skinFrom === 'menu' || (skinFrom === 'settings' && setFrom === 'menu');
+}
+
+function openSkins(from) {
+  skinFrom = from || 'settings';
+  skinSel = 0; skinScroll = 0; skinDrag = null; skinDevOpen = false;
+  state = 'skin';
+  uiArm = 0.25;
+  Audio_.select();
+}
+function closeSkins() {
+  skinDrag = null;
+  Save.writeLocal(); Save.flush();
+  state = skinFrom === 'menu' ? 'menu' : 'settings';
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+function skinGeom() {
+  const w = Math.min(700, W - 40), x = (W - w) / 2;
+  const panelH = Math.min(H - 64, 470), top = (H - panelH) / 2;
+  const listW = Math.min(210, w * 0.34);
+  const rowH = 21;
+  const listY = top + 66, listH = panelH - 66 - 58 - 56;   // + the awarded strip
+  const rx = x + listW + 26, rw = w - listW - 42;
+  const prevS = Math.min(132, listH * 0.42);
+  const ctlY = listY + prevS + 22;
+  return { x, w, top, panelH, listW, rowH, listY, listH,
+    listX: x + 16, rx, rw, prevS,
+    prev: { x: rx, y: listY, w: rw, h: prevS },
+    ctlY,
+    done:  { x: x + w - 16 - 150, y: top + panelH - 48, w: 150, h: 34 },
+    reset: { x: x + 16, y: top + panelH - 48, w: 150, h: 34 },
+    resetAll: { x: x + 176, y: top + panelH - 48, w: 150, h: 34 } };
+}
+
+const skinMaxScroll = () => {
+  const g = skinGeom();
+  return Math.max(0, SKIN_SLOTS.length * g.rowH - g.listH);
+};
+
+/* The preview. Enemies go through poly + platedBody exactly as drawEnemies
+   does; the pilot and its shots are indicative rather than literal, because
+   the ship is drawn from live run state that does not exist on this screen. */
+function skinPreview(g, k) {
+  const d = skinSlotDef(k);
+  const col = skinLiveCol(k);
+  const cx = g.prev.x + g.prev.w / 2, cy = g.prev.y + g.prev.h / 2;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(3,6,12,0.75)';
+  roundRect(g.prev.x, g.prev.y, g.prev.w, g.prev.h, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(148,163,184,0.14)'; ctx.lineWidth = 1;
+  roundRect(g.prev.x, g.prev.y, g.prev.w, g.prev.h, 8); ctx.stroke();
+  ctx.clip();
+
+  if (d.kind === 'enemy') {
+    const t = ETYPE[k], sides = skinLiveSides(k);
+    const half = Math.max(26, t.r * 2.3);
+    codexStage(cx, cy, Math.min(g.prev.h, g.prev.w) * 0.42, half, () => {
+      const e = codexDummy(col, t.r, sides, { type: k });
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, e.r * 2.3, col, 0.34);
+      ctx.restore();
+      ctx.lineWidth = 2.2;
+      ctx.fillStyle = rgba(col, 0.16);
+      ctx.strokeStyle = col;
+      poly(0, 0, e.r, sides, e.ang);
+      ctx.fill();
+      if (FXO.mat && e.r >= 14) platedBody(e, false);
+      else ctx.stroke();
+    });
+  } else if (d.kind === 'player') {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, 44, col, 0.4);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.rotate(-Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(20, 0); ctx.lineTo(-13, 12); ctx.lineTo(-7, 0); ctx.lineTo(-13, -12);
+    ctx.closePath();
+    ctx.fillStyle = rgba(col, 0.22);
+    ctx.strokeStyle = col; ctx.lineWidth = 2.4;
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 3; i++) {
+      const px = -34 + i * 34;
+      drawGlow(px, 0, 15, col, 0.5 - i * 0.12);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = rgba(col, 1 - i * 0.24);
+      ctx.beginPath(); ctx.arc(-34 + i * 34, 0, 4.4, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function skinSliderDefs(g) {
+  const hsl = skinHexToHsl(skinLiveCol(SKIN_SLOTS[skinSel].k));
+  const w = g.rw, x = g.rx;
+  return [
+    { id: 'h', n: 'HUE',        v: hsl.h / 360, x, y: g.ctlY,      w, txt: Math.round(hsl.h) + '°' },
+    { id: 's', n: 'SATURATION', v: hsl.s,       x, y: g.ctlY + 34, w, txt: Math.round(hsl.s * 100) + '%' },
+    { id: 'l', n: 'LIGHTNESS',  v: hsl.l,       x, y: g.ctlY + 68, w, txt: Math.round(hsl.l * 100) + '%' }
+  ];
+}
+
+function skinApplyHsl(id, t) {
+  const slot = SKIN_SLOTS[skinSel];
+  const hsl = skinHexToHsl(skinLiveCol(slot.k));
+  if (id === 'h') hsl.h = t * 360;
+  if (id === 's') hsl.s = t;
+  if (id === 'l') hsl.l = t;
+  /* Lightness is floored rather than refused: dragging the slider into the
+     floor colour and having nothing happen reads as a broken control, so it
+     stops at the darkest shade that still reads against the background. */
+  let hex = skinHslToHex(hsl.h, hsl.s, hsl.l);
+  let guard = 0;
+  while (!skinReadable(hex) && guard++ < 60) {
+    hsl.l += 0.01;
+    hex = skinHslToHex(hsl.h, hsl.s, hsl.l);
+  }
+  skinSet(slot.k, 'col', hex);
+}
+
+function drawSkins() {
+  ctx.fillStyle = 'rgba(4,6,12,0.94)';
+  ctx.fillRect(0, 0, W, H);
+  const g = skinGeom();
+  const slot = SKIN_SLOTS[skinSel];
+  skinScroll = clamp(skinScroll, 0, skinMaxScroll());
+
+  ctx.save();
+  lanRect(g.x, g.top, g.w, g.panelH, 10);
+  ctx.fillStyle = 'rgba(8,13,22,0.9)'; ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.28); ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = "800 22px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = COL.player;
+  ctx.fillText('SKINS', W / 2, g.top + 26);
+  ctx.restore();
+  ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('Colour and edges only. Size, fading and every warning mark stay as they are.',
+               W / 2, g.top + 47);
+
+  // ---- the list -----------------------------------------------------------
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.listX - 4, g.listY, g.listW + 8, g.listH);
+  ctx.clip();
+  ctx.textAlign = 'left';
+  for (let i = 0; i < SKIN_SLOTS.length; i++) {
+    const s = SKIN_SLOTS[i];
+    const y = g.listY + i * g.rowH - skinScroll;
+    if (y + g.rowH < g.listY - 4 || y > g.listY + g.listH + 4) continue;
+    const box = { x: g.listX, y, w: g.listW, h: g.rowH - 2 };
+    const hot = inRect(mouse.x, mouse.y, box);
+    if (i === skinSel || hot) {
+      ctx.fillStyle = i === skinSel ? 'rgba(103,232,249,0.14)' : 'rgba(255,255,255,0.04)';
+      roundRect(box.x, box.y, box.w, box.h, 4); ctx.fill();
+    }
+    // the swatch is the row's whole point: the list is the palette
+    const col = skinLiveCol(s.k);
+    ctx.fillStyle = col;
+    roundRect(box.x + 6, box.y + 5, 9, 9, 2); ctx.fill();
+    ctx.font = "600 10.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = i === skinSel ? '#e2e8f0' : '#94a3b8';
+    ctx.fillText(clipText(s.n, 20), box.x + 22, box.y + g.rowH / 2 - 1);
+    if (skinIsDressed(s.k)) {
+      ctx.textAlign = 'right';
+      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = rgba(COL.player, 0.8);
+      ctx.fillText('EDITED', box.x + box.w - 7, box.y + g.rowH / 2 - 1);
+      ctx.textAlign = 'left';
+    }
+  }
+  ctx.restore();
+
+  if (skinMaxScroll() > 0) {
+    const tx = g.listX + g.listW + 6, ms = skinMaxScroll();
+    ctx.fillStyle = 'rgba(148,163,184,0.14)';
+    roundRect(tx, g.listY, 3, g.listH, 1.5); ctx.fill();
+    const th = Math.max(24, g.listH * (g.listH / (SKIN_SLOTS.length * g.rowH)));
+    ctx.fillStyle = rgba(COL.player, 0.45);
+    roundRect(tx, g.listY + (g.listH - th) * (skinScroll / ms), 3, th, 1.5); ctx.fill();
+  }
+
+  // ---- the thing itself ---------------------------------------------------
+  skinPreview(g, slot.k);
+
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.12em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText(slot.kind === 'enemy' ? 'ENEMY' : slot.kind === 'player' ? 'PILOT' : 'PROJECTILE',
+               g.rx, g.prev.y - 10);
+  ctx.restore();
+  ctx.textAlign = 'right';
+  ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(slot.n, g.rx + g.rw, g.prev.y - 10);
+  ctx.textAlign = 'left';
+
+  // ---- the sliders --------------------------------------------------------
+  skinSliderRects = [];
+  for (const s of skinSliderDefs(g)) {
+    const track = { x: s.x, y: s.y + 12, w: s.w, h: 5 };
+    const hit = { x: s.x, y: s.y + 2, w: s.w, h: 24 };
+    skinSliderRects.push({ id: s.id, hit, track });
+    const hot = (skinDrag && skinDrag.id === s.id) || inRect(mouse.x, mouse.y, hit);
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(s.n, s.x, s.y + 1);
+    ctx.textAlign = 'right';
+    ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(s.txt, s.x + s.w, s.y + 1);
+    ctx.textAlign = 'left';
+
+    /* The hue track is drawn in hue, and the other two are drawn in the colour
+       they are actually about — a slider that shows its own outcome needs no
+       label to explain which way is which. */
+    if (s.id === 'h') {
+      const grd = ctx.createLinearGradient(track.x, 0, track.x + track.w, 0);
+      for (let i = 0; i <= 6; i++) grd.addColorStop(i / 6, skinHslToHex(i * 60, 0.75, 0.55));
+      ctx.fillStyle = grd;
+    } else {
+      const hsl = skinHexToHsl(skinLiveCol(slot.k));
+      const grd = ctx.createLinearGradient(track.x, 0, track.x + track.w, 0);
+      grd.addColorStop(0, s.id === 's' ? skinHslToHex(hsl.h, 0, hsl.l) : '#000000');
+      grd.addColorStop(1, s.id === 's' ? skinHslToHex(hsl.h, 1, hsl.l) : '#ffffff');
+      ctx.fillStyle = grd;
+    }
+    roundRect(track.x, track.y, track.w, track.h, 2.5); ctx.fill();
+
+    const kx = track.x + track.w * clamp(s.v, 0, 1);
+    ctx.fillStyle = hot ? '#f8fafc' : '#cbd5e1';
+    ctx.beginPath(); ctx.arc(kx, track.y + track.h / 2, hot ? 7 : 6, 0, TAU); ctx.fill();
+    ctx.strokeStyle = COL.player; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(kx, track.y + track.h / 2, hot ? 7 : 6, 0, TAU); ctx.stroke();
+  }
+
+  // ---- edges --------------------------------------------------------------
+  const ey = g.ctlY + 104;
+  if (slot.kind === 'enemy') {
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('EDGES', g.rx, ey + 12);
+    const b = skinSidesRects(g);
+    const step = (r, label) => {
+      const hot = inRect(mouse.x, mouse.y, r);
+      ctx.fillStyle = hot ? 'rgba(103,232,249,0.18)' : 'rgba(255,255,255,0.05)';
+      roundRect(r.x, r.y, r.w, r.h, 5); ctx.fill();
+      ctx.strokeStyle = rgba(COL.player, hot ? 0.7 : 0.25); ctx.lineWidth = 1.2;
+      roundRect(r.x, r.y, r.w, r.h, 5); ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.font = "800 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = hot ? '#e2e8f0' : '#94a3b8';
+      ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2);
+      ctx.textAlign = 'left';
+    };
+    step(b.dec, '−');
+    step(b.inc, '+');
+    ctx.textAlign = 'center';
+    ctx.font = "700 13px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(String(skinLiveSides(slot.k)), b.mid.x + b.mid.w / 2, b.mid.y + b.mid.h / 2);
+    ctx.textAlign = 'left';
+    ctx.font = "400 9.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText('the body is a circle to every hit test — this is only the outline',
+                 b.inc.x + b.inc.w + 14, ey + 26);
+  } else {
+    ctx.font = "400 9.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText(slot.kind === 'player'
+      ? 'Your hull takes the pilot’s colour unless you set one here.'
+      : 'Shots inherit the pilot’s muzzle colour unless you set one here.',
+      g.rx, ey + 20);
+  }
+
+  drawSkinAwards(g);
+
+  // ---- buttons ------------------------------------------------------------
+  const btn = (r, label, col, strong) => {
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = hot ? rgba(col, 0.2) : rgba(col, strong ? 0.1 : 0.05);
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.95 : strong ? 0.65 : 0.3); ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = "800 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = col;
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2);
+    ctx.textAlign = 'left';
+  };
+  btn(g.reset, 'RESET THIS', skinIsDressed(slot.k) ? '#fbbf24' : '#475569', false);
+  btn(g.resetAll, 'RESET ALL  (' + skinCount() + ')', skinCount() ? '#f87171' : '#475569', false);
+  btn(g.done, 'DONE   [ESC]', COL.player, true);
+  drawSkinDev(g);                 // last: it opens over everything below it
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function skinSidesRects(g) {
+  const y = g.ctlY + 104;
+  return { dec: { x: g.rx + 52, y, w: 26, h: 24 },
+           mid: { x: g.rx + 82, y, w: 30, h: 24 },
+           inc: { x: g.rx + 116, y, w: 26, h: 24 } };
+}
+
+function skinBumpSides(d) {
+  const slot = SKIN_SLOTS[skinSel];
+  if (slot.kind !== 'enemy') return;
+  const cur = skinLiveSides(slot.k);
+  const n = clamp(cur + d, SKIN_SIDES_MIN, SKIN_SIDES_MAX);
+  if (n === cur) return;
+  skinSet(slot.k, 'sides', n);
+  Audio_.tone(420 + n * 30, 0.04, 'square', 0.05, 700);
+}
+
+function skinReveal() {
+  const g = skinGeom();
+  const top = skinSel * g.rowH, bot = top + g.rowH;
+  if (top < skinScroll) skinScroll = top;
+  else if (bot > skinScroll + g.listH) skinScroll = bot - g.listH;
+  skinScroll = clamp(skinScroll, 0, skinMaxScroll());
+}
+
+function skinKey(k) {
+  if (uiArm > 0) return;
+  if (k === 'escape') {
+    if (skinDevOpen) { skinDevOpen = false; Audio_.select(); return; }
+    closeSkins(); return;
+  }
+  if (k === 'arrowdown' || k === 's') {
+    skinSel = Math.min(SKIN_SLOTS.length - 1, skinSel + 1); skinReveal(); Audio_.select(); return;
+  }
+  if (k === 'arrowup' || k === 'w') {
+    skinSel = Math.max(0, skinSel - 1); skinReveal(); Audio_.select(); return;
+  }
+  if (k === 'arrowright' || k === 'd') { skinBumpSides(1); return; }
+  if (k === 'arrowleft'  || k === 'a') { skinBumpSides(-1); return; }
+  if (k === 'r') { skinClearSlot(SKIN_SLOTS[skinSel].k); Audio_.select(); return; }
+}
+
+/* Returns true when the press was a slider grab, so mousedown can claim it
+   before any button underneath gets a look — the same deal volume and
+   sensitivity already have. */
+function skinGrab() {
+  if (state !== 'skin' || uiArm > 0 || !skinSliderRects) return false;
+  for (const s of skinSliderRects) {
+    if (inRect(mouse.x, mouse.y, s.hit)) {
+      skinDrag = s;
+      skinFromMouse();
+      return true;
+    }
+  }
+  return false;
+}
+function skinFromMouse() {
+  if (!skinDrag) return;
+  const t = clamp((mouse.x - skinDrag.track.x) / skinDrag.track.w, 0, 1);
+  skinApplyHsl(skinDrag.id, t);
+}
+
+function skinClick() {
+  if (uiArm > 0) return;
+  const g = skinGeom();
+  if (skinDevClick(g)) return;
+  if (skinAwardClick(g)) return;
+  if (inRect(mouse.x, mouse.y, g.done)) { closeSkins(); return; }
+  if (inRect(mouse.x, mouse.y, g.reset)) {
+    skinClearSlot(SKIN_SLOTS[skinSel].k); Audio_.select(); return;
+  }
+  if (inRect(mouse.x, mouse.y, g.resetAll)) { skinClearAll(); Audio_.select(); return; }
+  if (SKIN_SLOTS[skinSel].kind === 'enemy') {
+    const b = skinSidesRects(g);
+    if (inRect(mouse.x, mouse.y, b.dec)) { skinBumpSides(-1); return; }
+    if (inRect(mouse.x, mouse.y, b.inc)) { skinBumpSides(1); return; }
+  }
+  // the list
+  if (mouse.x >= g.listX - 4 && mouse.x <= g.listX + g.listW + 8 &&
+      mouse.y >= g.listY && mouse.y <= g.listY + g.listH) {
+    const i = Math.floor((mouse.y - g.listY + skinScroll) / g.rowH);
+    if (i >= 0 && i < SKIN_SLOTS.length && i !== skinSel) {
+      skinSel = i; Audio_.select();
+    }
+  }
+}
+
+/* ===========================================================================
+   SEASONS, PODIUMS, AND THE SKINS THEY BUY
+
+   The board resets on the 6th of every month. The server decides when that is
+   and nothing here is consulted about it — a client that believed its own
+   clock could be talked into filing a run against a season that had already
+   closed, which is the one thing a seasonal board must not allow.
+
+   WHY A PROFILE ID
+   There are no accounts, so a name is not an identity: anyone can type
+   VOIDRUNNER at the callsign prompt. If a podium skin were awarded by name,
+   it would be awarded to everyone willing to type the winner's name. So the
+   profile carries a `pid` — sixteen random bytes, made once, never shown, and
+   sent only to the leaderboard function. The server records which pid held
+   each podium place, and hands the award back only to that pid.
+
+   What this fixes and what it does not: it makes the reward land on the
+   machine that actually held the spot. It does NOT make the score honest —
+   scores are still unverified claims, as the function's own header says, and
+   no amount of client-side work can change that. A podium skin means "this
+   profile held first place when the season closed", not "this player earned
+   it fairly", and the two are only the same thing if nobody lies.
+   ========================================================================= */
+
+/* Sixteen bytes of real randomness where it exists. The fallback is weaker,
+   but a pid is a claim ticket rather than a secret key — the failure mode of a
+   guessable one is somebody else collecting a skin, not a compromised account. */
+function newPid() {
+  const b = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
+  return s;
+}
+const PID_RE = /^[0-9a-f]{16,64}$/;
+function myPid() {
+  const p = Save.profile;
+  if (!PID_RE.test(p.pid || '')) { p.pid = newPid(); Save.writeLocal(); }
+  return p.pid;
+}
+
+/* Whatever the server last told us about the calendar. Every reply from the
+   leaderboard carries it, so this stays current without a request of its own. */
+const Season = {
+  id: '', ends: 0, known: false,
+  read(d) {
+    if (!d || !d.season) return;
+    Season.id = d.season;
+    Season.ends = d.seasonEnds || 0;
+    Season.known = true;
+  },
+  daysLeft() {
+    if (!Season.ends) return null;
+    return Math.max(0, Math.ceil((Season.ends - Date.now()) / 86400000));
+  },
+  /* '2026-09' is a key, not a label. Seasons are spoken about by the month
+     they open in, which is the month most of them is actually played in. */
+  label() {
+    if (!Season.id) return '';
+    const [y, mo] = Season.id.split('-').map(Number);
+    const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    return (M[mo - 1] || '?') + ' ' + y;
+  }
+};
+
+/* --------------------------------- awards ---------------------------------
+   Held on the profile so a podium survives being offline, and re-fetched
+   whenever the board is reachable so a newly closed season lands without
+   waiting for anything. The server is the authority; this is a cache.
+--------------------------------------------------------------------------- */
+/* The ids a granted-skin entry is allowed to carry. Kept here, above Awards,
+   rather than read off DEV_SKINS below: clean() runs while the save is being
+   loaded, which is earlier than the skin tables exist. Two lines to keep in
+   step, and the alternative is a whitelist that is empty exactly when it
+   matters. */
+const DEV_SKIN_IDS = ['void-sovereign'];
+
+const Awards = {
+  syncing: false,
+  list: () => (Save.profile.awards || []),
+  best() {                       // 1, 2, 3 — or 0 for no podium ever
+    let b = 0;
+    for (const a of Awards.list()) if (a.rank && (!b || a.rank < b)) b = a.rank;
+    return b;
+  },
+  has: rank => Awards.list().some(a => a.rank === rank),
+  clean(arr) {
+    if (!Array.isArray(arr)) return [];
+    const seen = new Set(), out = [];
+    for (const a of arr) {
+      if (!a || typeof a !== 'object') continue;
+      /* Two shapes live in this list. A podium is {season, rank}; a granted
+         skin is {skin:id}. The id is checked against the shipped table rather
+         than trusted — an unknown id is either a typo or somebody editing
+         their own localStorage, and the answer to both is to drop it. */
+      if (a.skin !== undefined) {
+        const id = String(a.skin || '');
+        if (!DEV_SKIN_IDS.includes(id)) continue;
+        const gk = 'skin:' + id;
+        if (seen.has(gk)) continue;
+        seen.add(gk);
+        out.push({ skin: id, via: String(a.via || '').slice(0, 24) });
+        continue;
+      }
+      const season = String(a.season || '');
+      const rank = Math.round(Number(a.rank));
+      if (!/^\d{4}-\d{2}$/.test(season) || !(rank >= 1 && rank <= 3)) continue;
+      const k = season + ':' + rank;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ season, rank, name: String(a.name || '').slice(0, 16) });
+    }
+    // podiums first, newest at the top; grants after them, in the order won
+    return out.sort((x, y) => (x.skin ? 1 : 0) - (y.skin ? 1 : 0)
+                              || (x.season < y.season ? 1 : -1));
+  },
+  async sync() {
+    if (Awards.syncing || location.protocol === 'file:') return;
+    Awards.syncing = true;
+    try {
+      const r = await fetch(Board.url + '?awards=' + encodeURIComponent(myPid()),
+                            { cache: 'no-store' });
+      if (!r.ok) throw new Error('http ' + r.status);
+      const d = await r.json();
+      Season.read(d);
+      const next = Awards.clean(d.awards);
+      /* Union rather than replace: an award already banked stays banked even
+         if a later request comes back empty. Losing a podium to a bad reply
+         would be the worst possible bug in a system whose whole job is to
+         remember one. */
+      const merged = Awards.clean([...Awards.list(), ...next]);
+      if (JSON.stringify(merged) !== JSON.stringify(Awards.list())) {
+        Save.profile.awards = merged;
+        Save.writeLocal(); Save.flush();
+      }
+    } catch (e) { /* a podium is not urgent; try again next launch */ }
+    Awards.syncing = false;
+  }
+};
+
+/* ======================== awarded skins (tier two) ========================
+   These are authored here rather than by a player, which is exactly why they
+   are allowed to carry code. The editor's schema exists because player skins
+   are traded between strangers and a stranger's draw function is arbitrary
+   script in a page holding a profile; a skin written in this file is not
+   input at all. So these get a draw hook, and the editor never will.
+
+   They dress the PILOT, deliberately. A podium skin on the roster would put
+   decoration on forty moving bodies at once, and the one player guaranteed to
+   be hurt by that is the one who earned it. Your own hull is a single entity
+   you are already looking at, and nothing about it is a telegraph.
+   ========================================================================= */
+const SPECIAL_SKINS = [
+  { id: 'laurel', n: 'LAUREL', rank: 1, col: '#fbbf24',
+    d: 'First place, when a season closed. Three shards keep station on your hull.',
+    base: { player: { col: '#fbbf24' }, bullet: { col: '#fde68a' } }, shards: 3 },
+  { id: 'standard', n: 'SECOND STANDARD', rank: 2, col: '#cbd5e1',
+    d: 'Second place, when a season closed. Two shards, and a quieter rim.',
+    base: { player: { col: '#cbd5e1' }, bullet: { col: '#e2e8f0' } }, shards: 2 },
+  { id: 'ember-mark', n: 'THIRD MARK', rank: 3, col: '#fb923c',
+    d: 'Third place, when a season closed. One shard, still in orbit.',
+    base: { player: { col: '#fb923c' }, bullet: { col: '#fed7aa' } }, shards: 1 }
+];
+
+/* ===================== dev skins (tier three) ============================
+   Authored rewards, handed out for an achievement rather than a placing.
+
+   "Dev" is about authorship, not about who hands it out: these are written
+   here rather than by a player, which is the same licence to carry code the
+   podium skins have and for the same reason — a table in the shipped file
+   is not something a stranger sent.
+
+   They are earned from the same place the podium skins are: the season
+   board, closed and archived by the server and addressed to a profile id.
+   Nothing here is granted by the client deciding it has done well.
+
+   Unlike the podium skins these are allowed onto the roster as well as the
+   pilot. A podium skin dressing forty bodies would be punishing the one
+   player who earned it; a reward specifically about having beaten the roster
+   is different, and the retexture below is built to leave every telegraph,
+   pip and elite mark it draws over still legible. That constraint is the
+   whole design, not a caveat on it.
+   ======================================================================== */
+const DEV_SKINS = [
+  /* rank 1: a season won outright. The most elaborate thing in the game
+     asks for the hardest standing in it. Widening this to any podium is a
+     single character · rank: 3 · and nothing else has to change. */
+  { id: 'void-sovereign', n: 'VOID SOVEREIGN', col: '#8b5cf6', rank: 1,
+    d: 'A season won outright. The crown floats, the rounds collapse inward, '
+     + 'and the roster wears your mark.',
+    req: 'FINISH FIRST WHEN A SEASON CLOSES',
+    base: { player: { col: '#8b5cf6' }, bullet: { col: '#c4b5fd' } },
+    fx: 'void' }
+];
+
+const devHeld = id => Awards.list().some(a => a.skin === id);
+
+/* Banking a grant goes through Awards.clean like everything else, so a bad id
+   cannot get in by the back door either. */
+function devGrant(id, via) {
+  if (!DEV_SKIN_IDS.includes(id) || devHeld(id)) return false;
+  Save.profile.awards = Awards.clean([...Awards.list(), { skin: id, via: via || '' }]);
+  Save.writeLocal(); Save.flush();
+  return true;
+}
+
+/* The hand-out seam, for development only. BETA is read at call time rather
+   than at definition · it is declared near the foot of the file, and this runs
+   long before it · which also means the check cannot be edited out by anyone
+   who has not already edited the file. Without the gate this was a console
+   command handing the season's reward to whoever opened devtools, which is
+   not a gate at all. */
+window.grantSkin = id => !BETA
+  ? 'grantSkin is a development tool and is not enabled in this build'
+  : devGrant(String(id || ''), 'GRANTED') ? 'granted: ' + id
+                                          : 'no such skin, or already held';
+
+const AWARD_SKINS = () => SPECIAL_SKINS.concat(DEV_SKINS);
+const specialById = id => AWARD_SKINS().find(s => s.id === id) || null;
+/* Earned by holding that place or better, whichever table the skin is in ·
+   a first place does not stop you wearing the third-place mark if you
+   preferred how it looked. The dev grant is kept as a second route because
+   a reward that only exists after a month of real play is otherwise
+   untestable; it is a development tool and gated as one. */
+const specialEarned = s => !!s &&
+  ((s.rank && Awards.list().some(a => a.rank && a.rank <= s.rank)) || devHeld(s.id));
+/* The chip strip is podiums; dev skins have their own control, because they
+   are a different kind of thing and a row that mixes them says neither. */
+const specialOwned = () => SPECIAL_SKINS.filter(specialEarned);
+const devOwned = () => DEV_SKINS.filter(specialEarned);
+function equippedSpecial() {
+  const s = specialById(Save.profile.skinEquip || '');
+  return s && specialEarned(s) ? s : null;      // an unearned id equips nothing
+}
+function equipSpecial(id) {
+  Save.profile.skinEquip = (Save.profile.skinEquip === id) ? '' : (id || '');
+  skinRefresh();
+  Audio_.select();
+}
+
+/* The colour an equipped award contributes to a slot, if any. Sits *under* the
+   player's own edits: equipping a podium skin sets a look, and anything they
+   deliberately chose in the editor still wins. */
+function specialCol(k) {
+  const s = equippedSpecial();
+  return (s && s.base && s.base[k] && s.base[k].col) || null;
+}
+
+/* ------------------------------ the extra pass ----------------------------
+   One hook, run last, over a finished hull. Gated on FXO.parts because the
+   effects panel exists to let a slow machine buy frames back, and a reward
+   that quietly spends 2ms of them would be charging the winner for winning.
+--------------------------------------------------------------------------- */
+/* ------------------------------- the void ---------------------------------
+   One palette, three surfaces: unlight for the body, a cold violet for the
+   lit edge, near-white only for the point of a thing. What makes it read as
+   void rather than as purple is that the fill is always darker than the floor
+   and the light is always on an edge — never a bright body.
+--------------------------------------------------------------------------- */
+const VOID_LIT = '#8b5cf6', VOID_INK = '#c4b5fd', VOID_DARK = '#0b0413';
+
+/* The crown. Held upright in screen space rather than bolted to the hull: a
+   crown that rolls with a barrel roll reads as a hat, and this one has to
+   read as rank. It bobs on its own clock so it floats above the ship. */
+function drawVoidCrown(x, y, R, t) {
+  const w = R * 0.72, h = R * 0.5;
+  const by = y - R - 3 - Math.sin(t * 2.1) * 1.7;
+  const spire = i => h * (i === 2 ? 1.55 : (i === 1 || i === 3) ? 1.05 : 0.78);
+  ctx.save();
+  drawGlow(x, by - h * 0.4, R * 1.15, VOID_LIT, 0.28);
+  // band: dark metal, lit along the top edge only
+  ctx.fillStyle = VOID_DARK;
+  roundRect(x - w, by - 1, w * 2, h * 0.4, 1.5); ctx.fill();
+  ctx.strokeStyle = VOID_INK; ctx.lineWidth = 1;
+  roundRect(x - w, by - 1, w * 2, h * 0.4, 1.5); ctx.stroke();
+  // five spires, centre tallest
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const sx = x + ((i / 4) * 2 - 1) * w * 0.84, sh = spire(i);
+    ctx.moveTo(sx - w * 0.19, by);
+    ctx.lineTo(sx, by - sh);
+    ctx.lineTo(sx + w * 0.19, by);
+    ctx.closePath();
+  }
+  ctx.fillStyle = VOID_DARK; ctx.fill();
+  ctx.lineJoin = 'round'; ctx.lineWidth = 1.1; ctx.strokeStyle = VOID_INK;
+  ctx.stroke();
+  ctx.restore();
+  // tips last, so nothing is drawn over the only near-white in the piece
+  for (let i = 0; i < 5; i++) {
+    const sx = x + ((i / 4) * 2 - 1) * w * 0.84, sy = by - spire(i);
+    drawGlow(sx, sy, 4.2, VOID_LIT, 0.34 + Math.sin(t * 3 + i) * 0.22);
+    ctx.fillStyle = '#f5f3ff';
+    ctx.beginPath(); ctx.arc(sx, sy, 1.25, 0, TAU); ctx.fill();
+  }
+}
+
+const SkinFx = {
+  get on() { return !!equippedSpecial(); },
+  player() {
+    const s = equippedSpecial();
+    if (!s || P.down) return;
+    if (s.fx === 'void') { SkinFx.voidPlayer(s); return; }
+    const R = (P.r || 12) + 11, t = uiTime;
+    ctx.save();
+    // the rim: cheap, always drawn, and the part that reads at a glance
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(s.col, 0.22 + Math.sin(t * 2.2) * 0.09);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+    // the shards: decoration, and therefore optional
+    if (FXO.parts) {
+      for (let i = 0; i < s.shards; i++) {
+        const a = t * 1.05 + i * TAU / s.shards;
+        const x = P.x + Math.cos(a) * R, y = P.y + Math.sin(a) * R;
+        drawGlow(x, y, 7, s.col, 0.42);
+        ctx.fillStyle = s.col;
+        poly(x, y, 2.7, 3, a * 2.2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  },
+  /* --- the pilot: mantle, regalia, crown --- */
+  voidPlayer(s) {
+    const R = (P.r || 12) + 11, t = uiTime;
+    ctx.save();
+    // the mantle: a dark ring cut into the light rather than a bright one
+    // added to it, which is the whole difference between void and purple
+    ctx.strokeStyle = rgba(VOID_DARK, 0.85); ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(VOID_INK, 0.3 + Math.sin(t * 2.2) * 0.1);
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R - 1.9, 0, TAU); ctx.stroke();
+    /* Regalia: three broken halos, alternating direction. Decoration, so the
+       effects panel is allowed to take them away. */
+    if (FXO.parts) {
+      ctx.lineWidth = 1.3;
+      for (let i = 0; i < 3; i++) {
+        const rr = R + 3.5 + i * 3.4, dir = i % 2 ? -1 : 1;
+        const ph = t * 0.55 * dir + i * 1.7, arc = 0.62 - i * 0.1;
+        ctx.strokeStyle = rgba(VOID_LIT, 0.42 - i * 0.1);
+        ctx.beginPath();
+        for (let k = 0; k < 3; k++) {
+          const a0 = ph + k * TAU / 3;
+          ctx.moveTo(P.x + Math.cos(a0) * rr, P.y + Math.sin(a0) * rr);
+          ctx.arc(P.x, P.y, rr, a0, a0 + arc);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    drawVoidCrown(P.x, P.y, R, t);
+    SkinFx.voidShed(R, t);
+  },
+
+  /* --- what comes off it ---------------------------------------------------
+     The rim and the crown were geometry alone, which is why it read flat: a
+     shape that never sheds anything looks painted onto the hull rather than
+     worn by it. These go into the ordinary particle pool, so they are drawn
+     by the mote pass below like everything else, they obey the same cap, and
+     the effects panel takes them away with every other particle.
+
+     Emission is on a time accumulator rather than a per-frame chance, so the
+     density is the same at 30fps and 144, and it is clamped so a long frame
+     cannot dump a hundred motes at once.
+  ------------------------------------------------------------------------- */
+  voidShed(R, t) {
+    if (!FXO.parts) return;
+    const dt = Math.min(0.05, Math.max(0, t - (SkinFx._t ?? t)));
+    SkinFx._t = t;
+    if (!dt) return;
+    // the mantle: motes falling off the ring, carried behind by your own speed
+    SkinFx._a = (SkinFx._a || 0) + dt * 30;
+    while (SkinFx._a >= 1) {
+      SkinFx._a -= 1;
+      const a = rnd(TAU), sp = rnd(30, 6);
+      spawnPart(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R,
+                Math.cos(a) * sp - (P.vx || 0) * 0.2,
+                Math.sin(a) * sp - (P.vy || 0) * 0.2,
+                rnd(2.4, 1.2), VOID_INK, rnd(0.8, 0.45), 0.9, false);
+    }
+    /* The crown gets its own, rarer and brighter, and they rise: the five tips
+       are the only near-white in the piece and this is the one thing that
+       makes them read as lit rather than drawn. */
+    SkinFx._c = (SkinFx._c || 0) + dt * 7;
+    while (SkinFx._c >= 1) {
+      SkinFx._c -= 1;
+      const i = (Math.random() * 5) | 0, w = R * 0.72, h = R * 0.5;
+      const sx = P.x + ((i / 4) * 2 - 1) * w * 0.84;
+      const sy = P.y - R - 3 - h * (i === 2 ? 1.55 : (i === 1 || i === 3) ? 1.05 : 0.78);
+      spawnPart(sx, sy, rnd(14, -14), rnd(-16, -42), rnd(2, 1),
+                '#f5f3ff', rnd(0.9, 0.5), 0.93, false);
+    }
+  },
+
+  /* --- the rounds: a shard that collapses space, not a bead helix ---
+     Arrow rounds are left alone on purpose. Their silhouette is information —
+     a zodiac player reads their own volley by shape — and a skin is not
+     allowed to take that away from them. */
+  bullet(b, c) {
+    const s = equippedSpecial();
+    if (!s || s.fx !== 'void' || b.arrow) return false;
+    const r = b.r;
+    /* The phase comes off the round's own position, the same trick the shipped
+       helix uses: it advances as the thing travels, so the roll is tied to
+       distance covered and no two rounds in a volley are in step. */
+    const ph = uiTime * 6 + (b.x + b.y) * 0.05;
+    const roll = Math.cos(ph);                    // -1 edge-on .. 1 edge-on
+    const face = Math.abs(roll);                  // how much of the flat you see
+    const wob = 0.34 + face * 0.66;               // the waist, breathing
+    if (FXO.bglow) drawGlow(b.x, b.y, r * (4.1 + face * 0.6), VOID_LIT, 0.4 + face * 0.14);
+    ctx.save();
+    ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    /* The wake: chevrons streaming backwards on their own cycle rather than
+       three fixed ticks, so a round hanging in the air still reads as moving.
+       Each one is born at the tail, recedes, and fades out as it goes. */
+    if (FXO.parts) {
+      ctx.lineWidth = r * 0.32;
+      for (let i = 0; i < 3; i++) {
+        const u = ((ph * 0.14 + i / 3) % 1);
+        const d = r * (1.4 + u * 3.4), sp = r * (0.72 + u * 0.7);
+        ctx.strokeStyle = rgba(VOID_INK, 0.34 * (1 - u) * (1 - u * 0.4));
+        ctx.beginPath();
+        ctx.moveTo(-d + sp * 0.85, -sp); ctx.lineTo(-d, 0); ctx.lineTo(-d + sp * 0.85, sp);
+        ctx.stroke();
+      }
+    }
+    // the shard: swept lens, notched tail, void inside and lit on the edge
+    const wy = 1.02 * wob, ty = 0.56 * wob;
+    ctx.beginPath();
+    ctx.moveTo(r * 1.75, 0);
+    ctx.quadraticCurveTo(r * 0.1, -r * wy, -r * 1.6, -r * ty);
+    ctx.lineTo(-r * 0.85, 0);
+    ctx.lineTo(-r * 1.6, r * ty);
+    ctx.quadraticCurveTo(r * 0.1, r * wy, r * 1.75, 0);
+    ctx.closePath();
+    ctx.fillStyle = rgba(VOID_DARK, 0.92); ctx.fill();
+    /* One edge catches the light as it turns. Drawn as the whole outline at a
+       base brightness plus the windward half over it, which is a stroke and a
+       half rather than two full passes. */
+    ctx.strokeStyle = rgba(b.crit ? '#f5f3ff' : VOID_INK, 0.45 + face * 0.35);
+    ctx.lineWidth = 1.2; ctx.stroke();
+    const lit = roll >= 0 ? -1 : 1;
+    ctx.strokeStyle = rgba(b.crit ? '#ffffff' : '#ede9fe', 0.25 + face * 0.6);
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(r * 1.75, 0);
+    ctx.quadraticCurveTo(r * 0.1, lit * r * wy, -r * 1.6, lit * r * ty);
+    ctx.stroke();
+    /* Spine and one hot point at the nose. A crit or a zodiac round keeps its
+       own colour here: the shape is the skin, the tint is still the state. */
+    ctx.strokeStyle = rgba(c, 0.55 + face * 0.3); ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(-r * 0.75, 0); ctx.lineTo(r * 1.45, 0); ctx.stroke();
+    // the collapse ring at the nose, seen edge-on and turning with the shard
+    if (FXO.mat) {
+      ctx.strokeStyle = rgba(VOID_LIT, 0.3 + face * 0.35); ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.75, 0, r * 0.5, r * 0.62 * (0.15 + face * 0.85), 0, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(r * 1.15, 0, r * (0.26 + face * 0.1), 0, TAU); ctx.fill();
+    ctx.restore();
+    return true;
+  },
+
+  /* --- the debris: motes of unlight ---
+     A dark body with a luminous rim, the exact inverse of the default spark.
+     The colour the event asked for survives as that rim, so a crit still
+     reads amber and a venom hit still reads green through the void. */
+  part(p, t, rad) {
+    const s = equippedSpecial();
+    if (!s || s.fx !== 'void') return false;
+    const r = p.r * 1.15;
+    drawGlow(p.x, p.y, rad * 0.72, VOID_LIT, t * 0.36);
+    ctx.save();
+    ctx.fillStyle = rgba(VOID_DARK, t * 0.8);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(p.color, t * 0.92); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.stroke();
+    ctx.restore();
+    return true;
+  },
+
+  /* --- the roster: retextured, not recoloured ---
+     A voided shell, spars out to every corner, a stud on each vertex and a
+     broken claim-ring turning the other way. Everything sits either inside
+     0.86r or outside 1.0r and nothing is opaque, so the inner type marks, the
+     telegraphs and the health pip at r+11 all still read. It fades with the
+     body, so a phased shell stays as faint as the thing it is wrapped around. Bosses are skipped:
+     the bespoke four draw themselves and own their own silhouette. */
+  enemy(e, ea) {
+    const s = equippedSpecial();
+    if (!s || s.fx !== 'void' || e.type === 'boss' || !e.sides) return;
+    const R = e.r, n = e.sides, a = e.ang || 0, step = TAU / n;
+    ctx.save();
+    /* Inherited rather than recomputed, so there is one rule about what a
+       body that cannot be hit looks like and the skin cannot drift from it. */
+    ctx.globalAlpha = ea === undefined ? 1 : ea;
+    /* The shell: an even-odd annulus, so the plate darkens the rim and leaves
+       the middle of the body — where the type marks live — alone. */
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const th = a + i * step;
+      const X = e.x + Math.cos(th) * R, Y = e.y + Math.sin(th) * R;
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.closePath();
+    for (let i = 0; i < n; i++) {
+      const th = a + i * step;
+      const X = e.x + Math.cos(th) * R * 0.6, Y = e.y + Math.sin(th) * R * 0.6;
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = rgba(VOID_DARK, 0.6);
+    ctx.fill('evenodd');
+    if (FXO.mat) {
+      // spars: core out to every corner
+      ctx.strokeStyle = rgba(VOID_INK, 0.34); ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const th = a + i * step, cx = Math.cos(th), cy = Math.sin(th);
+        ctx.moveTo(e.x + cx * R * 0.34, e.y + cy * R * 0.34);
+        ctx.lineTo(e.x + cx * R * 0.86, e.y + cy * R * 0.86);
+      }
+      ctx.stroke();
+      /* Studs on the vertices, in the body's own colour, so the roster stays
+         colour-coded underneath the retexture. */
+      ctx.fillStyle = rgba(e.col, 0.9);
+      for (let i = 0; i < n; i++) {
+        const th = a + i * step;
+        poly(e.x + Math.cos(th) * R * 0.9, e.y + Math.sin(th) * R * 0.9, 1.8, 4, th);
+        ctx.fill();
+      }
+      // the claim: a broken ring outside the hull, turning the other way
+      ctx.strokeStyle = rgba(VOID_LIT, 0.4); ctx.lineWidth = 1.4;
+      const rr = R + 3.5, ph = -uiTime * 0.5 - a * 0.4;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const a0 = ph + i * step;
+        ctx.moveTo(e.x + Math.cos(a0) * rr, e.y + Math.sin(a0) * rr);
+        ctx.arc(e.x, e.y, rr, a0, a0 + step * 0.44);
+      }
+      ctx.stroke();
+    }
+    // the mark: one small hole of dark with a lit lip, dead centre
+    ctx.fillStyle = VOID_DARK;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R * 0.19, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(VOID_INK, 0.8); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R * 0.19, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+};
+
+/* ---------------------------- the awarded strip ---------------------------
+   A row of chips along the foot of the editor. Kept out of the slot list on
+   purpose: the list is for things you dress, and these are things you wear.
+--------------------------------------------------------------------------- */
+function skinAwardRects(g) {
+  const owned = specialOwned();
+  const y = g.top + g.panelH - 92;
+  const w = Math.min(150, (g.w - 32 - (owned.length - 1) * 8) / Math.max(1, owned.length));
+  return owned.map((s, i) => ({ s, x: g.x + 16 + i * (w + 8), y, w, h: 30 }));
+}
+
+function drawSkinAwards(g) {
+  const owned = specialOwned();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.12em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText('AWARDED', g.x + 16, g.top + g.panelH - 102);
+  ctx.restore();
+
+  if (!owned.length) {
+    ctx.font = "400 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText(Season.known
+      ? 'Finish a season in the top three and it appears here.'
+      : 'Season standings load when the board is reachable.',
+      g.x + 16, g.top + g.panelH - 78);
+    ctx.textAlign = 'center';
+    return;
+  }
+  const eq = equippedSpecial();
+  for (const r of skinAwardRects(g)) {
+    const on = eq && eq.id === r.s.id;
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = on ? rgba(r.s.col, 0.22) : hot ? rgba(r.s.col, 0.12) : 'rgba(255,255,255,0.04)';
+    roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill();
+    ctx.strokeStyle = rgba(r.s.col, on ? 1 : hot ? 0.6 : 0.3);
+    ctx.lineWidth = on ? 1.8 : 1.2;
+    roundRect(r.x, r.y, r.w, r.h, 6); ctx.stroke();
+    ctx.fillStyle = r.s.col;
+    ctx.beginPath(); ctx.arc(r.x + 13, r.y + r.h / 2, 4, 0, TAU); ctx.fill();
+    fitFont(r.s.n, r.w - 30, '700', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = on ? '#e2e8f0' : '#94a3b8';
+    ctx.fillText(r.s.n, r.x + 24, r.y + r.h / 2);
+  }
+  ctx.textAlign = 'center';
+}
+
+/* --------------------------- the dev dropdown -----------------------------
+   Opens upward, over the panel, because there is nothing under the strip but
+   the buttons. Locked entries are shown rather than hidden: a reward nobody
+   knows about is not one, and the row is where the condition is written down.
+--------------------------------------------------------------------------- */
+let skinDevOpen = false;
+
+function skinDevRects(g) {
+  const w = 196, h = 26;
+  const head = { x: g.x + g.w - 16 - w, y: g.top + g.panelH - 100, w, h };
+  const rowH = 36, listH = DEV_SKINS.length * rowH + 8;
+  const list = { x: head.x, y: head.y - listH - 6, w, h: listH };
+  return { head, list,
+    rows: DEV_SKINS.map((sk, i) => ({ sk, x: list.x + 4, y: list.y + 4 + i * rowH,
+                                      w: w - 8, h: rowH - 4 })) };
+}
+
+function drawSkinDev(g) {
+  const r = skinDevRects(g), owned = devOwned().length, eq = equippedSpecial();
+  const wearing = eq && !eq.rank;
+  const acc = wearing ? eq.col : owned ? DEV_SKINS[0].col : '#475569';
+  const hot = inRect(mouse.x, mouse.y, r.head);
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = skinDevOpen ? rgba(acc, 0.16) : hot ? rgba(acc, 0.1) : 'rgba(255,255,255,0.04)';
+  roundRect(r.head.x, r.head.y, r.head.w, r.head.h, 6); ctx.fill();
+  ctx.strokeStyle = rgba(acc, skinDevOpen || hot ? 0.9 : 0.34); ctx.lineWidth = 1.2;
+  roundRect(r.head.x, r.head.y, r.head.w, r.head.h, 6); ctx.stroke();
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = wearing ? '#e2e8f0' : owned ? '#94a3b8' : '#475569';
+  const cy = r.head.y + r.head.h / 2;
+  fitFont(wearing ? eq.n : 'DEV SKINS', r.head.w - 46, '700', 10,
+          "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillText(wearing ? eq.n : 'DEV SKINS', r.head.x + 12, cy);
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = rgba(acc, 0.8);
+  ctx.textAlign = 'right';
+  ctx.fillText(owned + '/' + DEV_SKINS.length, r.head.x + r.head.w - 24, cy);
+  // the chevron, pointing the way the list will go
+  ctx.strokeStyle = rgba(acc, 0.9); ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+  const vx = r.head.x + r.head.w - 13, vy = cy + (skinDevOpen ? 2 : -2), d = skinDevOpen ? -4 : 4;
+  ctx.beginPath(); ctx.moveTo(vx - 4, vy); ctx.lineTo(vx, vy + d); ctx.lineTo(vx + 4, vy);
+  ctx.stroke();
+
+  if (skinDevOpen) {
+    ctx.fillStyle = 'rgba(6,10,18,0.97)';
+    roundRect(r.list.x, r.list.y, r.list.w, r.list.h, 8); ctx.fill();
+    ctx.strokeStyle = 'rgba(148,163,184,0.28)'; ctx.lineWidth = 1;
+    roundRect(r.list.x, r.list.y, r.list.w, r.list.h, 8); ctx.stroke();
+    for (const row of r.rows) {
+      const held = specialEarned(row.sk), on = eq && eq.id === row.sk.id;
+      const rh = inRect(mouse.x, mouse.y, row);
+      if (held && (on || rh)) {
+        ctx.fillStyle = rgba(row.sk.col, on ? 0.18 : 0.09);
+        roundRect(row.x, row.y, row.w, row.h, 6); ctx.fill();
+      }
+      ctx.textAlign = 'left';
+      ctx.fillStyle = held ? row.sk.col : 'rgba(71,85,105,0.9)';
+      if (held) { ctx.beginPath(); ctx.arc(row.x + 12, row.y + 12, 4, 0, TAU); ctx.fill(); }
+      else {
+        // a shackle rather than a dot: the difference is legible at 8px
+        ctx.strokeStyle = 'rgba(71,85,105,0.9)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(row.x + 12, row.y + 10, 3, Math.PI, TAU); ctx.stroke();
+        ctx.fillRect(row.x + 8.5, row.y + 10, 7, 5);
+      }
+      ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = !held ? '#475569' : on ? '#e2e8f0' : '#94a3b8';
+      ctx.fillText(row.sk.n, row.x + 24, row.y + 11);
+      ctx.font = "400 8.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = held ? 'rgba(148,163,184,0.6)' : 'rgba(100,116,139,0.75)';
+      fitFont(held ? (on ? 'EQUIPPED — CLICK TO REMOVE' : 'CLICK TO WEAR') : row.sk.req,
+              row.w - 30, '400', 8.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+      ctx.fillText(held ? (on ? 'EQUIPPED — CLICK TO REMOVE' : 'CLICK TO WEAR') : row.sk.req,
+                   row.x + 24, row.y + 23);
+    }
+  }
+  ctx.restore();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+}
+
+/* Returns true when the click belonged to the dropdown — including a click
+   anywhere else while it is open, which closes it and does nothing else. */
+function skinDevClick(g) {
+  const r = skinDevRects(g);
+  if (inRect(mouse.x, mouse.y, r.head)) {
+    skinDevOpen = !skinDevOpen; Audio_.select(); return true;
+  }
+  if (!skinDevOpen) return false;
+  for (const row of r.rows) {
+    if (!inRect(mouse.x, mouse.y, row)) continue;
+    if (specialEarned(row.sk)) { equipSpecial(row.sk.id); skinDevOpen = false; }
+    return true;
+  }
+  skinDevOpen = false;
+  return true;
+}
+
+function skinAwardClick(g) {
+  for (const r of skinAwardRects(g)) {
+    if (inRect(mouse.x, mouse.y, r)) { equipSpecial(r.s.id); return true; }
+  }
+  return false;
 }
 
 function drawMalware() {
@@ -24465,7 +26836,8 @@ function drawChalHud() {
   const timed = c.m.time && !Chal.won;
   const w = 190, cardH = timed ? 54 : 38, x = 16, y = hudBotY - cardH;
   hudBotY = y - 8;
-  const col = Chal.won ? '#6ee7b7' : CHAL_GOLD;
+  const col = c.daily ? (c.accent || CHAL_GOLD)
+            : Chal.won ? '#6ee7b7' : CHAL_GOLD;
   ctx.save();
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(6,10,18,0.8)';
@@ -24480,13 +26852,16 @@ function drawChalHud() {
   ctx.letterSpacing = '0.14em';
   ctx.font = "700 8.5px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = rgba(col, 0.75);
-  ctx.fillText(Chal.won ? 'CLEARED' : 'CHALLENGE', x + 12, y + 11);
+  ctx.fillText(c.daily ? (Chal.on.dailyRanked ? 'DAILY' : 'DAILY  \u00b7  PRACTICE')
+                       : Chal.won ? 'CLEARED' : 'CHALLENGE', x + 12, y + 11);
   ctx.restore();
   fitFont(c.n, w - 24, '700', 11.5, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
   ctx.fillStyle = col;
   ctx.fillText(c.n, x + 12, y + 25);
   if (!Chal.won) {
-    const goal = 'KILL  ' + chalGoalName(c);
+    /* A daily names no boss — there is nothing to kill that ends it. What
+       belongs here instead is the thing you would want to be sure of. */
+    const goal = c.daily ? (c.d || 'RANKED RUN') : 'KILL  ' + chalGoalName(c);
     fitFont(goal, w - 24, '600', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = '#64748b';
     ctx.fillText(goal, x + 12, y + 36);
