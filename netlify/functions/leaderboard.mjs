@@ -88,8 +88,8 @@ const KEYLEN = 32;
 
 const DEV_ACCOUNTS = {
 
-  notz: { salt: '7ef417684c9605974196d78621c6ee8a',
-        hash: '449aa7a763eefec4f9301717b53aa59b7ee04211a3b82e3221cb3d35478aebc1',
+   notz: { salt: '291e5059855b9b6a9119e44d9d23ac37',
+        hash: '8ae86433b090a5c06a779dad1a018ef608f0c90042b741bb16b80ba099722ee2',
         skins: ALL_SKINS, perks: ALL_PERKS },
 };
 

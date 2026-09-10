@@ -23644,13 +23644,16 @@ function netDiagCopy() {
      convenience: devtools are blocked by policy on the machines this fails on,
      and the clipboard may be too, which would leave a camera as the only way
      the report gets off the device. */
-  if (netDiagCopied !== 0) { netDiagFull = !netDiagFull; return; }
-  const txt = NetDiag.report();
-  const shown = () => { netDiagCopied = -1; netDiagFull = true; };
+  if (netDiagFull) { netDiagFull = false; return; }   // pressed again: put it away
+  /* Always SHOW it, whether or not the clipboard cooperates. A copy that
+     succeeds silently looks identical to a key that does nothing, which is
+     exactly the dead end this whole diagnostic exists to avoid. */
+  netDiagFull = true;
   try {
-    if (!navigator.clipboard || !navigator.clipboard.writeText) { shown(); return; }
-    navigator.clipboard.writeText(txt).then(() => { netDiagCopied = 1; }, shown);
-  } catch (e) { shown(); }
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { netDiagCopied = -1; return; }
+    navigator.clipboard.writeText(NetDiag.report())
+      .then(() => { netDiagCopied = 1; }, () => { netDiagCopied = -1; });
+  } catch (e) { netDiagCopied = -1; }
 }
 
 /* Drawn under the LAN panel whenever an attempt has ended badly. Deliberately
@@ -23658,7 +23661,19 @@ function netDiagCopy() {
    who cannot open a console. */
 function drawNetDiag() {
   if (!NetDiag.on) return;
-  if (Net.phase !== 'failed' && Net.phase !== 'lost') return;
+  /* Unasked-for on a failure, because that is when it is the answer. On a
+     working link it is one dim line until somebody presses the key — which
+     is what makes it possible to prove it works BEFORE the day it matters. */
+  const bad = Net.phase === 'failed' || Net.phase === 'lost';
+  if (!bad && !netDiagFull) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = '#334155';
+    ctx.fillText('[T]  LINK DIAGNOSTIC', W / 2, Math.min(H - 18, H * 0.94));
+    ctx.restore();
+    return;
+  }
   const [tag, why] = NetDiag.verdict();
   const col = tag === 'ISOLATED' ? '#f87171'
             : tag === 'MDNS' ? '#fbbf24'
@@ -24267,6 +24282,10 @@ function netMakePeer() {
     if (Net.chS.readyState !== 'open' || Net.chC.readyState !== 'open') return;
     Net.phase = 'live';
     Net.note = '';
+    /* One sample after it has settled, then stop: a succeeded pair is worth
+       recording as the baseline a broken link gets compared against, and a
+       once-a-second getStats for the rest of a co-op session is not. */
+    setTimeout(() => { NetDiag.sample(); NetDiag.stop(); }, 1200);
     Net.lastRx = performance.now();
     clearInterval(Net.beat);
     Net.beat = setInterval(netBeat, 1000);
@@ -25822,8 +25841,7 @@ function lanKey(k) {
   if (k === 'escape') { lanBack(); return; }
   /* Devtools are blocked by policy on the machines this fails on, so the
      report has to be able to leave the page without a console. */
-  if (k === 't' && NetDiag.on &&
-      (Net.phase === 'failed' || Net.phase === 'lost')) { netDiagCopy(); return; }
+  if (k === 't' && NetDiag.on) { netDiagCopy(); return; }
 
   if (lanView === 'home') {
     if (k === 'h') { lanView = 'host'; netHost(); Audio_.select(); return; }
