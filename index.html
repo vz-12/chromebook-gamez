@@ -13874,7 +13874,7 @@ function render() {
       renderMenu();
       if (state === 'name') drawNameEntry();
       if (state === 'devlogin') drawDevLogin();
-      if (state === 'lan') drawLan();
+      if (state === 'lan') { drawLan(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
       if (state === 'changelog') drawChangelog();
       if (state === 'daily') drawDaily();
@@ -23507,6 +23507,216 @@ function devLogClick() {
   }
 }
 
+/* ===========================================================================
+   LINK DIAGNOSTIC
+
+   The handshake already times out after 45 seconds. What it never did was say
+   WHY, and the three reasons it can fail want three completely different
+   answers — one is fixable in this file, one is fixable only by whoever runs
+   the network, and one is not a network problem at all.
+
+   Written for a machine with devtools blocked by policy, which is exactly the
+   kind of machine this fails on. So it collects itself, decides what it is
+   saying, and puts it on the screen in words. [T] copies the whole thing to
+   the clipboard for pasting somewhere else.
+
+   WHAT THE THREE LOOK LIKE
+     MDNS      Chrome hides local IPs behind `something.local` names that the
+               other machine resolves over multicast DNS. Cisco controllers
+               drop multicast by default, so the candidate arrives and can
+               never be turned into an address. No pair is ever formed.
+     ISOLATED  Pairs ARE formed, with real addresses, and every check fails.
+               The access point is refusing to carry traffic between two of
+               its own clients (Cisco calls it P2P Blocking). Nothing in a web
+               page can change what a switch forwards.
+     DEVICE    No host candidate was gathered at all, which is the device
+               itself refusing to offer its address rather than the network.
+   ========================================================================= */
+const NetDiag = {
+  on: false,
+  local: [], remote: [], ice: [], gather: [],
+  pairs: [], stats: 0, t0: 0, poll: 0,
+
+  start() {
+    NetDiag.on = true;
+    NetDiag.local = []; NetDiag.remote = []; NetDiag.ice = []; NetDiag.gather = [];
+    NetDiag.pairs = []; NetDiag.stats = 0; NetDiag.t0 = Date.now();
+    clearInterval(NetDiag.poll);
+    /* Sampled while it is still trying rather than read at the end: the
+       failure path closes the peer connection, and a closed one reports
+       nothing. The last sample before the close is the evidence. */
+    NetDiag.poll = setInterval(NetDiag.sample, 1000);
+  },
+  stop() { clearInterval(NetDiag.poll); NetDiag.poll = 0; },
+
+  at: () => ((Date.now() - NetDiag.t0) / 1000).toFixed(1) + 's',
+
+  /* A candidate line is a space-separated string; the address is field 4 and
+     the type follows the word `typ`. Parsed rather than regexed so a candidate
+     shape we have not seen cannot throw during a failure report. */
+  note(side, line) {
+    if (!NetDiag.on || !line) return;
+    const p = String(line).split(' ');
+    const addr = p[4] || '?';
+    const typ = p[p.indexOf('typ') + 1] || '?';
+    (side === 'local' ? NetDiag.local : NetDiag.remote).push({
+      typ, addr, proto: (p[2] || '?').toLowerCase(),
+      mdns: /\.local$/i.test(addr)
+    });
+  },
+
+  async sample() {
+    const pc = Net.pc;
+    if (!pc || !pc.getStats) return;
+    try {
+      const s = await pc.getStats();
+      const pairs = [];
+      s.forEach(r => {
+        if (r.type === 'candidate-pair')
+          pairs.push({ state: r.state || '?', sent: r.requestsSent || 0,
+                       recv: r.responsesReceived || 0 });
+      });
+      if (pairs.length) NetDiag.pairs = pairs;
+      NetDiag.stats++;
+    } catch (e) { /* a diagnostic must never be the thing that breaks */ }
+  },
+
+  /* One line, and it is the whole point of this. */
+  verdict() {
+    const d = NetDiag;
+    const hostL = d.local.filter(c => c.typ === 'host');
+    const hostR = d.remote.filter(c => c.typ === 'host');
+    if (!d.local.length)
+      return ['DEVICE', 'this machine offered no candidates at all — local networking is blocked on the device, not on the network'];
+    if (!hostL.length)
+      return ['DEVICE', 'no host candidate: this machine would not offer its own LAN address'];
+    if (!d.remote.length)
+      return ['NO REPLY', 'the other machine never sent any candidates — it reached the room but gathered nothing'];
+    if (!d.pairs.length) {
+      if (hostR.some(c => c.mdns))
+        return ['MDNS', 'the other side sent .local names that never resolved — multicast is blocked, so ICE never started. Fixable here.'];
+      return ['NO PAIRS', 'both sides had candidates but no pair was ever tried'];
+    }
+    if (d.pairs.some(p => p.state === 'succeeded'))
+      return ['CONNECTED', 'a candidate pair succeeded — whatever failed, failed after ICE'];
+    if (d.pairs.every(p => !p.recv))
+      return ['ISOLATED', 'pairs were tried and nothing ever came back — the access point is dropping traffic between the two machines. Not fixable from the page.'];
+    return ['UNKNOWN', 'pairs were tried and did not settle'];
+  },
+
+  /* The copyable version: everything, in the order somebody reading it would
+     want it, with nothing that identifies the network beyond what the browser
+     already told both machines. */
+  report() {
+    const d = NetDiag, [tag, why] = d.verdict();
+    const cand = c => '    ' + c.typ.padEnd(6) + ' ' + c.proto.padEnd(4) + ' ' +
+                      c.addr + (c.mdns ? '   (mdns)' : '');
+    return [
+      'VOIDRUNNER link diagnostic',
+      'verdict   ' + tag,
+      '          ' + why,
+      '',
+      'role      ' + (Net.role || '-') + '        phase  ' + Net.phase,
+      'note      ' + (Net.note || '-'),
+      'ua        ' + navigator.userAgent,
+      '',
+      'ice state ' + (d.ice.join('  ') || '-'),
+      'gather    ' + (d.gather.join('  ') || '-'),
+      '',
+      'local candidates (' + d.local.length + ')',
+      ...(d.local.length ? d.local.map(cand) : ['    none']),
+      '',
+      'remote candidates (' + d.remote.length + ')',
+      ...(d.remote.length ? d.remote.map(cand) : ['    none']),
+      '',
+      'candidate pairs (' + d.pairs.length + ', ' + d.stats + ' samples)',
+      ...(d.pairs.length
+        ? d.pairs.map(p => '    ' + p.state.padEnd(12) + ' sent ' + p.sent + '  back ' + p.recv)
+        : ['    none formed'])
+    ].join('\n');
+  }
+};
+
+let netDiagCopied = 0, netDiagFull = false;
+
+function netDiagCopy() {
+  /* Pressed a second time it shows the whole report on screen. That is not a
+     convenience: devtools are blocked by policy on the machines this fails on,
+     and the clipboard may be too, which would leave a camera as the only way
+     the report gets off the device. */
+  if (netDiagCopied !== 0) { netDiagFull = !netDiagFull; return; }
+  const txt = NetDiag.report();
+  const shown = () => { netDiagCopied = -1; netDiagFull = true; };
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { shown(); return; }
+    navigator.clipboard.writeText(txt).then(() => { netDiagCopied = 1; }, shown);
+  } catch (e) { shown(); }
+}
+
+/* Drawn under the LAN panel whenever an attempt has ended badly. Deliberately
+   plain: this is meant to be read off a screen, or photographed, by somebody
+   who cannot open a console. */
+function drawNetDiag() {
+  if (!NetDiag.on) return;
+  if (Net.phase !== 'failed' && Net.phase !== 'lost') return;
+  const [tag, why] = NetDiag.verdict();
+  const col = tag === 'ISOLATED' ? '#f87171'
+            : tag === 'MDNS' ? '#fbbf24'
+            : tag === 'CONNECTED' ? '#4ade80' : '#94a3b8';
+  const w = Math.min(600, W - 40), x = (W - w) / 2;
+  const y = Math.min(H - 96, H * 0.72);
+
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText('LINK DIAGNOSTIC', x, y);
+  ctx.restore();
+
+  ctx.font = "800 13px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = col;
+  ctx.fillText(tag, x, y + 20);
+
+  ctx.font = "400 10.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  const yy = wrapText(why, x + 78, y + 16, w - 78, 13);
+
+  ctx.font = "600 9.5px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = '#64748b';
+  const L = NetDiag.local.length, R = NetDiag.remote.length;
+  const md = NetDiag.remote.filter(c => c.mdns).length;
+  ctx.fillText('local ' + L + '   remote ' + R + (md ? ' (' + md + ' mdns)' : '') +
+               '   pairs ' + NetDiag.pairs.length +
+               '   ice ' + (NetDiag.ice[NetDiag.ice.length - 1] || '-'),
+               x, yy + 16);
+  ctx.fillStyle = netDiagCopied === 1 ? '#4ade80' : netDiagCopied === -1 ? '#f87171' : '#475569';
+  ctx.fillText(netDiagCopied === 1 ? '[T]  COPIED TO CLIPBOARD  ·  [T] AGAIN TO SHOW IT'
+             : netDiagCopied === -1 ? '[T]  CLIPBOARD BLOCKED — PHOTOGRAPH THE TEXT BELOW'
+             : '[T]  COPY FULL REPORT', x, yy + 30);
+
+  /* The whole thing, small, for a camera. Drawn over everything because at
+     this point getting the report off the device is the only job left. */
+  if (netDiagFull) {
+    const lines = NetDiag.report().split('\n');
+    const lh = 11, boxH = lines.length * lh + 20;
+    const by = Math.max(8, Math.min(y - 8, H - boxH - 8));
+    ctx.fillStyle = 'rgba(2,4,10,0.94)';
+    roundRect(x - 8, by, w + 16, boxH, 6); ctx.fill();
+    ctx.strokeStyle = 'rgba(148,163,184,0.25)'; ctx.lineWidth = 1;
+    roundRect(x - 8, by, w + 16, boxH, 6); ctx.stroke();
+    ctx.font = "500 9px 'JetBrains Mono', ui-monospace, monospace";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i < 3 ? '#e2e8f0' : '#94a3b8';
+      ctx.fillText(clipText(lines[i], 96), x, by + 14 + i * lh);
+    }
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
 function drawMalware() {
   const m = malwareOffer;
   if (!m) return;
@@ -24004,6 +24214,8 @@ function netReset(role) {
 /* Tearing down is its own function because every exit uses it: cancelling from
    the lobby, a failed handshake, a peer that walked away, and the run ending. */
 function netHangUp(quiet) {
+  // the last sample before the peer closes is the evidence; stop after it
+  NetDiag.stop();
   Net.gen++;
   clearInterval(Net.beat); Net.beat = 0;
   if (Net.chC && Net.chC.readyState === 'open' && !quiet) {
@@ -24032,6 +24244,7 @@ function netLost(why) {
 }
 
 function netMakePeer() {
+  NetDiag.start();
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     iceCandidatePoolSize: 2
@@ -24071,6 +24284,18 @@ function netMakePeer() {
     if (gen !== Net.gen || !e.candidate) return;
     const c = e.candidate;
     Net.iceOut.push({ c: c.candidate, m: c.sdpMid, i: c.sdpMLineIndex });
+    NetDiag.note('local', c.candidate);
+  };
+  /* Watched only so a failure can say which of the three it was. ICE can
+     sit in `checking` long past the point it is going to succeed, which is
+     what a stalled handshake actually looks like from in here. */
+  pc.oniceconnectionstatechange = () => {
+    if (gen !== Net.gen) return;
+    NetDiag.ice.push(pc.iceConnectionState + '@' + NetDiag.at());
+  };
+  pc.onicegatheringstatechange = () => {
+    if (gen !== Net.gen) return;
+    NetDiag.gather.push(pc.iceGatheringState + '@' + NetDiag.at());
   };
   pc.onconnectionstatechange = () => {
     if (gen !== Net.gen) return;
@@ -24083,6 +24308,7 @@ function netMakePeer() {
 
 async function netAddIce(c) {
   if (!c || !Net.pc) return;
+  NetDiag.note('remote', c.c || c.candidate);
   try {
     await Net.pc.addIceCandidate(
       typeof c === 'string' ? { candidate: c, sdpMid: '0' }
@@ -25594,6 +25820,10 @@ function updateLan(dt) {
 function lanKey(k) {
   if (uiArm > 0) return;
   if (k === 'escape') { lanBack(); return; }
+  /* Devtools are blocked by policy on the machines this fails on, so the
+     report has to be able to leave the page without a console. */
+  if (k === 't' && NetDiag.on &&
+      (Net.phase === 'failed' || Net.phase === 'lost')) { netDiagCopy(); return; }
 
   if (lanView === 'home') {
     if (k === 'h') { lanView = 'host'; netHost(); Audio_.select(); return; }
