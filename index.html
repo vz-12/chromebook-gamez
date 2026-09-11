@@ -13874,7 +13874,7 @@ function render() {
       renderMenu();
       if (state === 'name') drawNameEntry();
       if (state === 'devlogin') drawDevLogin();
-      if (state === 'lan') { drawLan(); drawNetDiag(); }
+      if (state === 'lan') { drawLan(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
       if (state === 'changelog') drawChangelog();
       if (state === 'daily') drawDaily();
@@ -23732,6 +23732,167 @@ function drawNetDiag() {
   ctx.textAlign = 'center';
 }
 
+/* ===========================================================================
+   GETTING PAST mDNS
+
+   Chrome does not advertise this machine's LAN address. It advertises a
+   throwaway name like 2030ed71-....local and expects the other machine to
+   resolve it over multicast DNS, which Cisco controllers drop by default. The
+   candidate arrives, cannot be turned into an address, and ICE never sends a
+   single packet — which is exactly what the diagnostic reported: two
+   candidates, zero pairs, iceConnectionState never firing at all.
+
+   Two ways round it, in the order they cost the player something.
+
+   1. THE MICROPHONE. Chrome stops hiding local addresses once the page holds a
+      media permission. Nothing is recorded and no track is kept — the stream
+      is stopped on the same line it is acquired. It is asked for once per
+      machine and Chrome remembers it.
+
+      It has to be granted BEFORE the connection is built, because candidates
+      are gathered when the peer connection is created. So this does not retry
+      a stalled handshake; it arms the next one, which is the attempt the
+      player was going to make anyway.
+
+   2. THE ADDRESS, TYPED. If the microphone is refused, the guest types the
+      host's LAN address and every .local candidate from the host is rewritten
+      to use it. Only one side needs to do this: once a check reaches the host,
+      the host learns the guest's real address from the packet itself and
+      answers it. Read out loud beside the room code, which is a thing these
+      two players are already doing.
+   ========================================================================= */
+const NET_MIC_KEY = 'voidrunner_lan_mic';
+
+const NetFix = {
+  /* Remembered per machine: a device that needed this once needs it every
+     time, and asking again on every link would be worse than asking once. */
+  wantMic: (() => { try { return localStorage.getItem(NET_MIC_KEY) === '1'; }
+                    catch (e) { return false; } })(),
+  micOk: false,
+  mode: 'none',           // none | ip
+  ip: '',
+  msg: '',
+  busy: false
+};
+
+/* Held open for as long as it takes to stop it. The permission is the point;
+   the audio is not, and none of it is read, kept or sent anywhere. */
+async function netAcquireMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const t of s.getTracks()) t.stop();
+    return true;
+  } catch (e) { return false; }
+}
+
+async function netFixMic() {
+  if (NetFix.busy) return;
+  NetFix.busy = true;
+  NetFix.msg = 'asking…';
+  const ok = await netAcquireMic();
+  NetFix.busy = false;
+  NetFix.micOk = ok;
+  if (ok) {
+    NetFix.wantMic = true;
+    try { localStorage.setItem(NET_MIC_KEY, '1'); } catch (e) {}
+    NetFix.msg = 'allowed — host or join again and it should connect';
+  } else {
+    NetFix.msg = 'refused. use the address instead — press I';
+  }
+}
+
+/* Called just before the peer connection is built, so the candidates it
+   gathers carry real addresses. Silent once the permission is remembered. */
+async function netArmMic() {
+  if (!NetFix.wantMic) return;
+  NetFix.micOk = await netAcquireMic();
+}
+
+const IP_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
+
+/* Swaps the hostname out of a candidate line, keeping the port, priority,
+   foundation and ufrag the other side actually chose. Building a candidate
+   from scratch would mean guessing the port; this only replaces the one field
+   that could not be resolved. */
+function netPatchCandidate(line) {
+  if (!line || !NetFix.ip || !IP_RE.test(NetFix.ip)) return line;
+  if (!/\.local(\s|$)/i.test(line)) return line;
+  return line.replace(/[0-9a-f-]+\.local/i, NetFix.ip);
+}
+
+function netFixKey(k) {
+  if (NetFix.mode === 'ip') {
+    if (k === 'escape') { NetFix.mode = 'none'; return true; }
+    if (k === 'backspace') { NetFix.ip = NetFix.ip.slice(0, -1); return true; }
+    if (k === 'enter') {
+      if (IP_RE.test(NetFix.ip)) {
+        NetFix.mode = 'none';
+        NetFix.msg = 'address set — join again with the same code';
+      } else NetFix.msg = 'that is not an address';
+      return true;
+    }
+    if (/^[0-9.]$/.test(k) && NetFix.ip.length < 15) { NetFix.ip += k; return true; }
+    return true;                       // swallow everything while typing
+  }
+  if (k === 'm') { netFixMic(); return true; }
+  if (k === 'i') { NetFix.mode = 'ip'; NetFix.ip = ''; NetFix.msg = ''; return true; }
+  return false;
+}
+
+/* Only offered when the diagnostic actually says this is the problem. A fix
+   button on a failure it cannot fix would be worse than no button. */
+const netFixOffered = () =>
+  NetDiag.on && (Net.phase === 'failed' || Net.phase === 'lost') &&
+  NetDiag.verdict()[0] === 'MDNS';
+
+function drawNetFix() {
+  if (!netFixOffered()) return;
+  const w = Math.min(600, W - 40), x = (W - w) / 2;
+  const y = Math.min(H - 150, H * 0.72) - 74;
+
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  /* Backed, because it lands over the panel behind it and this is read by
+     somebody who has just watched a link fail. */
+  ctx.fillStyle = 'rgba(3,6,14,0.92)';
+  roundRect(x - 12, y - 16, w + 24, NetFix.mode === 'ip' ? 96 : 88, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(251,191,36,0.28)'; ctx.lineWidth = 1;
+  roundRect(x - 12, y - 16, w + 24, NetFix.mode === 'ip' ? 96 : 88, 7); ctx.stroke();
+  ctx.save();
+  ctx.letterSpacing = '0.12em';
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText('THESE MACHINES CANNOT SEE EACH OTHER', x, y);
+  ctx.restore();
+
+  ctx.font = "400 10.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+
+  if (NetFix.mode === 'ip') {
+    ctx.fillText("Type the HOST's address — ChromeOS: Settings ▸ Network ▸ the wifi ▸ IP address",
+                 x, y + 18);
+    ctx.font = "700 15px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = IP_RE.test(NetFix.ip) ? '#4ade80' : '#e2e8f0';
+    ctx.fillText((NetFix.ip || '_') + (Math.sin(uiTime * 6) > 0 ? '|' : ''), x, y + 40);
+    ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = '#475569';
+    ctx.fillText('ENTER — SET     ESC — BACK', x, y + 58);
+  } else {
+    ctx.fillText('[M]  ALLOW THE MICROPHONE — it is what makes Chrome share this machine’s', x, y + 18);
+    ctx.fillText('     address. Nothing is recorded and the stream is stopped immediately.', x, y + 32);
+    ctx.fillText('[I]  or type the host’s address instead', x, y + 50);
+  }
+
+  if (NetFix.msg) {
+    ctx.font = "600 9.5px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = NetFix.micOk ? '#4ade80' : '#fbbf24';
+    ctx.fillText(NetFix.msg, x, y + (NetFix.mode === 'ip' ? 74 : 66));
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
 function drawMalware() {
   const m = malwareOffer;
   if (!m) return;
@@ -24329,9 +24490,12 @@ async function netAddIce(c) {
   if (!c || !Net.pc) return;
   NetDiag.note('remote', c.c || c.candidate);
   try {
+    /* A typed address replaces the hostname the other side could not have
+       resolved; without one this is the identity function. */
+    const line = netPatchCandidate(typeof c === 'string' ? c : c.c);
     await Net.pc.addIceCandidate(
-      typeof c === 'string' ? { candidate: c, sdpMid: '0' }
-                            : { candidate: c.c, sdpMid: c.m, sdpMLineIndex: c.i });
+      typeof c === 'string' ? { candidate: line, sdpMid: '0' }
+                            : { candidate: line, sdpMid: c.m, sdpMLineIndex: c.i });
   } catch (e) { /* a candidate the other side cannot use is not fatal */ }
 }
 
@@ -24394,6 +24558,10 @@ async function netHost() {
   const gen = Net.gen;
   try {
     Net.note = 'opening a room…';
+    /* Before the peer connection exists, because that is when candidates
+       are gathered and it is the candidates that need real addresses. */
+    await netArmMic();
+    if (gen !== Net.gen) return;
     netMakePeer();
     const offer = await Net.pc.createOffer();
     await Net.pc.setLocalDescription(offer);
@@ -24417,6 +24585,8 @@ async function netJoin(code) {
     const r = await netApi(NET_ROOM + '?code=' + Net.code + '&as=guest');
     if (gen !== Net.gen) return;
     if (!r.peer || !r.peer.offer) throw new Error('no such room');
+    await netArmMic();
+    if (gen !== Net.gen) return;
     netMakePeer();
     await Net.pc.setRemoteDescription({ type: 'offer', sdp: r.peer.offer });
     Net.remoteSet = true;
@@ -25841,6 +26011,7 @@ function lanKey(k) {
   if (k === 'escape') { lanBack(); return; }
   /* Devtools are blocked by policy on the machines this fails on, so the
      report has to be able to leave the page without a console. */
+  if (netFixOffered() && netFixKey(k)) return;
   if (k === 't' && NetDiag.on) { netDiagCopy(); return; }
 
   if (lanView === 'home') {
