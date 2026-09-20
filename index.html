@@ -10060,8 +10060,11 @@ function handleKey(k) {
   if (k === 'q') { useBook(); return; }
   if (k === 'f') { ventFire(); return; }
   if (k === 'e' && inHub) {
-    // while he is talking, E hurries him along instead of picking a plinth
-    if (hubTut.on) hubTutSkipLine(); else hubInteract(P);
+    /* Every press goes to the room now. Deciding here that a press means
+       "skip his line" whenever he was talking meant the last tutorial step —
+       whose gate IS the press — could never be satisfied: it deadlocked on its
+       own final line and swallowed E for the rest of the visit. */
+    hubInteract(P);
     return;
   }
   if (state === 'pause' && k === 'x') { openCodex('pause'); return; }
@@ -18544,14 +18547,34 @@ function hubTutSkipLine() {
 /* ART HOOK: hubInteract()'s him branch. He gets subtitles, not a banner —
    a banner is the game shouting and he never shouts. */
 function hubInteract(P) {
+  /* While he is still talking a press hurries him along — except on the last
+     step, where the press is the gate. There it ends the lesson and carries
+     straight on into whatever you are standing at, which is what he just spent
+     four lines telling you to do. */
+  if (hubTut.on) {
+    if (HUB_TUT_STEPS[hubTut.i].gate !== 'interact') { hubTutSkipLine(); return; }
+    hubTut.on = false; hub.met = true;
+  }
   if (hub.kind === 'him') {
-    if (hubTut.on) { hubTutSkipLine(); return; }
     hub.met = true;
     hubTut.say = HUB_SAY[(hub.sayI = ((hub.sayI || 0) + 1) % HUB_SAY.length)];
     hubTut.sayT = 3.4;
     return;
   }
-  if (hubTut.on && HUB_TUT_STEPS[hubTut.i].gate === 'interact') { hubTut.on = false; return; }
+  if (hub.kind === 'out') { exitHub(); return; }
+  /* The plinths. hubCommit() and exitHub() are bridges written for the game —
+     the room this was lifted from had no run to commit and no menu to go back
+     to — and nothing ever called either of them, so every statue in here was
+     scenery and the way out was a dead end. */
+  if (hub.kind === 'plinth') {
+    const st = hubPlinthState(hub.near);
+    if (st === 'dormant') { hubCommit(hub.near); return; }
+    // the same words the prompt is already showing, said out loud
+    floatText(P.x, P.y - 46,
+              st === 'woken' ? 'ALREADY AWAKE' : 'NOTHING IS WRITTEN FOR THIS ONE',
+              st === 'woken' ? hubPlinthCol(hub.near) : '#94a3b8', 13);
+    Audio_.tone(160, 0.14, 'square', 0.07, 90);
+  }
 }
 
 /* where the dim opens up */
