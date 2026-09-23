@@ -980,15 +980,22 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mousedown', e => {
   Audio_.init(); Audio_.resume();
-  mouse.x = e.clientX; mouse.y = e.clientY; mouse.down = true;
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  /* Only the left button fires. This used to set mouse.down for any button at
+     all, so a right-click in the arena squeezed off a shot — harmless enough
+     that nobody reported it, and unacceptable now that the button is a guard:
+     a gun going off when you asked to block is the worst version of this
+     control there is. */
+  if (e.button === 2) { if (state === 'play') bladeParry(); return; }
+  mouse.down = true;
   // the slider claims the click before any overlay button sees it
   if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return; }
   if (sensRect && inRect(mouse.x, mouse.y, sensRect)) { sensDrag = true; sensFromMouse(); return; }
   if (skinGrab()) return;
   handleClick();
 });
-addEventListener('mouseup', () => {
-  mouse.down = false;
+addEventListener('mouseup', e => {
+  if (!e || e.button !== 2) mouse.down = false;
   if (volDrag) { volDrag = false; Save.savePrefs(); }
   if (sensDrag) { sensDrag = false; Save.savePrefs(); }
   if (skinDrag) { skinDrag = null; Save.writeLocal(); Save.flush(); }
@@ -1086,8 +1093,76 @@ const CHARS = [
        'and one boss. The gun is only there to start the argument.',
     hp: 96, speed: 262, dmg: 4, rate: 5.2,
     need: p => MALWARE.every(m => (p.codexM || []).includes(m.id)),
-    needTxt: 'CARRY EVERY MALWARE' }
+    needTxt: 'CARRY EVERY MALWARE',
+    // how far along the route, in its own units, for the locked badge
+    lock: p => MALWARE.filter(m => (p.codexM || []).includes(m.id)).length + '/' + MALWARE.length },
+  /* THE VAGRANT. Sixty pixels of reach, in a game about keeping your distance:
+     the build a tier list puts at the bottom, which is the whole reason its
+     rite is SOLVED. It is also the only hull that does not level into a build —
+     no cards at all, and everything it becomes is what the room dropped. See
+     THE VAGRANT'S KIT.
+
+     Earned at the top of the BOSS RUSH: RUSH_PEAK is the best rush score it
+     asks for, and past it the rush pays nothing more. */
+  { id: 'melee', n: 'THE VAGRANT', weapon: 'blade',
+    col: '#a5b4fc', bullet: '#c7d2fe',
+    tag: 'reach of an arm · wears the room',
+    d: 'No gun. A swing that takes everything standing in front of it, and a ' +
+       'parry that refuses a shot outright and is paid back in the next swing. ' +
+       'Levels into nothing: its whole build is the blades, plates, cores and ' +
+       'sigils the room leaves on the floor.',
+    hp: 124, speed: 292, dmg: 11, rate: 3.2,
+    need: p => (p.rushBest || 0) >= RUSH_PEAK,
+    needTxt: 'TOP THE BOSS RUSH',
+    lock: p => rushK(p.rushBest || 0) + '/' + rushK(RUSH_PEAK) + ' RUSH' }
 ];
+
+/* ---------------------------- the rush's ladder ----------------------------
+   What the BOSS RUSH pays, and the score each rung sits at. Kept up here beside
+   CHARS rather than down with the rush itself: THE VAGRANT's `need` reads
+   RUSH_PEAK, and charOpen() is first asked during boot, far above the rush
+   block — a const declared down there would be a TDZ error that takes the page
+   with it.
+
+   Three imperial skins, knight to king, then the pilot. The skins are real
+   dev-skin entries (DEV_SKINS: fx 'imperial', with a tier), so they are listed,
+   locked and explained in the skin menu exactly like every other award.
+
+   The rungs are placed by depth, because the rush pays only for bosses and a
+   run's score is therefore how far it got plus how fast. Boss n at wave w is
+   worth 600(1 + 0.05w) + 50w + 1000n, plus up to 1000n again for speed:
+
+     THE KNIGHT    9,000   three bosses down at any pace; two, however fast,
+                           falls short
+     THE DUKE     40,000   the first loop cleared — all seven, or six quickly
+     THE KING     75,000   about three into the second loop (nine if quick)
+     THE VAGRANT 140,000   the second loop cleared, or twelve of it done fast
+
+   The second loop is the game's own loop two — 151× health — so the top rung is
+   a real claim about a build and the player flying it. */
+const RUSH_ROSTER = ['warden', 'forgeheart', 'broodmother', 'archivist',
+                     'nullcore', 'curator', 'theother'];
+const RUSH_TIERS = [
+  { id: 'rush-knight', kind: 'skin',  score: 9000 },
+  { id: 'rush-duke',   kind: 'skin',  score: 40000 },
+  { id: 'rush-king',   kind: 'skin',  score: 75000 },
+  { id: 'melee',       kind: 'pilot', score: 140000 }
+];
+const RUSH_PEAK = RUSH_TIERS[RUSH_TIERS.length - 1].score;
+/* Names and colours are read off whatever the rung actually pays, so a skin
+   renamed in DEV_SKINS is renamed on the ladder too. Declarations rather than
+   consts, since DEV_SKINS sits far below and is only read at call time. */
+function rushTierSrc(T) {
+  return T.kind === 'pilot' ? CHARS.find(c => c.id === T.id)
+                            : DEV_SKINS.find(s => s.id === T.id);
+}
+function rushTierName(T) { const s = rushTierSrc(T); return s ? s.n : T.id.toUpperCase(); }
+function rushTierCol(T)  { const s = rushTierSrc(T); return s ? s.col : RUSH_COL; }
+function rushReq(id) {
+  const T = RUSH_TIERS.find(t => t.id === id);
+  return 'SCORE ' + (T ? T.score.toLocaleString() : '?') + ' IN THE BOSS RUSH';
+}
+function rushK(v) { return v >= 1000 ? Math.floor(v / 1000) + 'K' : String(Math.floor(v)); }
 
 /* A pilot with a `need` is not selectable until the profile satisfies it. */
 const charOpen = c => !c.need || c.need(Save.profile);
@@ -1239,9 +1314,27 @@ const LANCE_TEXT = {
   pblank: { d: '+30% damage at close range' },
   crit:   { d: '+8% critical chance (rolled per pulse)' }
 };
+/* The same service for a swing. THE VAGRANT never sees the level-up screen, but
+   the shop, the Record Chip and the challenge ladder all still deal out of the
+   base pool, so any card it can legally be handed has to describe itself
+   honestly: Overclock shortens the gap between swings, and Kinetic Coil is
+   worth taking for the damage and the shove with no bullet to speed up. */
+const BLADE_TEXT = {
+  rate:   { n: 'Whetted',       d: '+16% swing speed' },
+  vel:    { n: 'Weighted Edge', d: '+7% damage, harder shove' },
+  heavy:  { d: '+34% damage, slower swing' },
+  crit:   { d: '+8% critical chance (rolled per body struck)' },
+  cryo:   { d: 'Swings chill what they land on' },
+  chain:  { d: 'Swings arc to a nearby enemy' },
+  mom:    { d: '+16% damage while closing' },
+  exec:   { d: 'Swings finish anything under 12% HP' },
+  okill:  { d: 'Excess damage splashes off the body' },
+  vol:    { d: 'Anything a swing kills detonates' }
+};
 const lanceText = u => (P && P.weapon === 'laser' && LANCE_TEXT[u.id]) || null;
-const upName = u => { const a = lanceText(u); return (a && a.n) || u.n; };
-const upDesc = u => { const a = lanceText(u); return (a && a.d) || u.d; };
+const bladeTextOf = u => (P && P.weapon === 'blade' && BLADE_TEXT[u.id]) || null;
+const upName = u => { const a = lanceText(u) || bladeTextOf(u); return (a && a.n) || u.n; };
+const upDesc = u => { const a = lanceText(u) || bladeTextOf(u); return (a && a.d) || u.d; };
 
 function applyChar(i) {
   selectedChar = clamp(i, 0, CHARS.length - 1);
@@ -1271,6 +1364,23 @@ function newPlayer() {
     charge: 0, laserT: 0, laserSegs: [], laserHeavy: false,
     laserDps: 0, laserEnv: 0, laserProcT: 0, laserCrit: false, laserAim: 0,
     twinSegs: [],
+    /* THE VAGRANT: the swing, the chain and the parry. Kept in its own fields
+       rather than borrowed from the lance's, because a half-finished swing and
+       a half-finished beam are not the same state and reading one as the other
+       is the kind of bug that only surfaces in co-op. */
+    swingT: 0, swingP: 0, swingA0: 0, swingAim: 0, swingArc: 0, swingDir: 1,
+    swingSide: 0, swingId: 0, swingFin: 0, swingCut: 0,
+    swingReach: 0, swingFade: 0, rig: 0, parryFx: 0,
+    combo: 0, comboT: 0, parryT: 0, parryCd: 0, parryTook: 0, riposte: 0,
+    /* The kit, and the folded answer it is read back through. gb is left null
+       rather than built here: newPlayer() runs once at module scope to make a
+       throwaway P, thousands of lines above where gearBlank() is declared, and
+       calling it from here would be a TDZ error that takes the page down on
+       load. gearStat() answers correctly for a null gb, and resetGame() calls
+       gearStart() before any run begins. */
+    gear: { blade: null, plate: null, core: null, sigil: null },
+    gb: null, gearHp: 0, gearArmor: 0, gearRegen: 0, gearThorn: 0,
+    gearXp: 1, gearCred: 1,
     x: WORLD.w / 2, y: WORLD.h / 2, vx: 0, vy: 0, r: 13, ang: 0,
     hp: C.hp, maxHp: C.hp, armor: 0, regen: 0, speed: C.speed,
     // weapon
@@ -1442,6 +1552,492 @@ const UPGRADES = [
     f: p => { p.armor += 2; const g = p.maxHp * 0.12; p.maxHp += g; p.hp += g; } }
 ];
 const RAR_W = { common: 100, rare: 58, epic: 30, legend: 13 };
+/* ========================== THE VAGRANT'S KIT =============================
+   The fourth hull does not level into a build. Every other pilot is dealt
+   three cards at every level and assembles itself out of the same fifty-three
+   ideas; this one is dealt nothing, and wears what the room leaves on the
+   floor.
+
+   Why this had to be its own system rather than its own cards: two thirds of
+   the pool is written for a projectile. Railshot pushes a bullet through a
+   body, Seeker curves one, Longshot pays a bullet for the distance it covered
+   — and a swing has no bullet for any of that to happen to. The remainder was
+   worse than dead: Point Blank pays +30% "at close range", and a hull that is
+   never anywhere else would have taken a free +90% three times over and
+   called it a decision. So the projectile cards are struck from its offers
+   (MELEE_DEAD), its level-up screen never opens at all (checkLevel), and the
+   whole of its build arrives as loot instead.
+
+   Four slots. A BLADE decides how it swings, a PLATE what it survives, a CORE
+   what a hit does on the way through, and a SIGIL what the run owes it.
+
+   Nothing here is permanent, and that is the one property the card system has
+   never needed and this one cannot work without. Upgrades multiply themselves
+   into P and are then indistinguishable from the hull; gear is read back out
+   through gearStat() at the moment it matters, so taking a thing off returns
+   exactly what putting it on cost. The two exceptions are max HP and armour,
+   which are stateful — you can be standing in the damage they are supposed to
+   stop — so those are applied to P as a tracked delta and reversed by the
+   same amount. gearRecalc() is idempotent: it always rebuilds from the four
+   things currently worn and never from what it computed last time.
+--------------------------------------------------------------------------- */
+
+const isBlade = () => P.weapon === 'blade';
+
+const GEAR_SLOTS = [
+  { k: 'blade', n: 'BLADE', d: 'how it swings',    col: '#fca5a5' },
+  { k: 'plate', n: 'PLATE', d: 'what it takes',    col: '#93c5fd' },
+  { k: 'core',  n: 'CORE',  d: 'what a hit does',  col: '#c084fc' },
+  { k: 'sigil', n: 'SIGIL', d: 'what it is owed',  col: '#fbbf24' }
+];
+
+/* The stat vocabulary. Everything gear is allowed to say has to be one of
+   these keys, and each is either a multiplier that rests at 1 or a bonus that
+   rests at 0 — which is the whole of how gearRecalc folds four items into one
+   answer without a table of special cases. */
+const GB_MUL = ['dmg', 'rate', 'spd', 'parry', 'combo', 'fin', 'xp', 'cred'];
+const GB_ADD = ['reach', 'arc', 'crit', 'critm', 'hp', 'armor', 'steal',
+                'luck', 'regen', 'thorn'];
+
+/* Which of the bonuses are counted in absolute units and therefore have to be
+   worth more when they drop later. A +18 HP plate found on wave 3 is a third
+   of your health; the same plate on wave 30 is a rounding error, so the flat
+   keys are scaled by the wave that produced them and baked into the item at
+   roll time — baked rather than scaled on read, so the number on the card and
+   the number in the fight can never disagree. Multipliers are left alone:
+   they ride on P.dmg and P.maxHp, which already grow on their own. */
+const GB_SCALED = ['hp', 'armor', 'regen', 'thorn', 'steal'];
+
+/* -------------------------------- the bases -------------------------------
+   A base is the item's identity and does not roll: every CLEAVER swings wide
+   and every PIKE swings long, so a drop can be recognised across the room and
+   read before it is picked up. What rolls is quality and affixes. */
+const GEAR_BASES = [
+  /* --- blades. The shape of the swing, and the one slot that must never be
+     empty: the hull is issued a SCRAP EDGE at the start of a run so that the
+     first minute is playable and every drop after it is a comparison. --- */
+  { id: 'edge',   n: 'SCRAP EDGE',  slot: 'blade', w: 10, base: true,
+    d: 'Something sharp that was something else first.',
+    s: { dmg: 1 } },
+  { id: 'shiv',   n: 'SHIV',        slot: 'blade', w: 10,
+    d: 'Short, quick, and honest about it.',
+    s: { dmg: 0.74, rate: 1.55, reach: -14, crit: 0.06 } },
+  { id: 'cleaver',n: 'CLEAVER',     slot: 'blade', w: 10,
+    d: 'Takes the whole line in front of you.',
+    s: { dmg: 1.02, arc: 0.52, reach: -4 } },
+  { id: 'pike',   n: 'PIKE',        slot: 'blade', w: 9,
+    d: 'Reaches a body before the body reaches you.',
+    s: { dmg: 1.14, reach: 42, arc: -0.3 } },
+  { id: 'great',  n: 'GREATBLADE',  slot: 'blade', w: 7,
+    d: 'One swing, and time to regret starting it.',
+    s: { dmg: 1.9, rate: 0.55, reach: 12, arc: 0.16, fin: 1.3 } },
+  { id: 'flense', n: 'FLENSER',     slot: 'blade', w: 8,
+    d: 'Comes back wetter than it went out.',
+    s: { dmg: 0.88, steal: 1.2, reach: -6 } },
+  { id: 'tooth',  n: 'SPLITTOOTH',  slot: 'blade', w: 8,
+    d: 'Finds the seam. Always the same seam.',
+    s: { dmg: 0.94, crit: 0.13, critm: 0.55 } },
+  { id: 'hook',   n: 'BOARDING HOOK', slot: 'blade', w: 7,
+    d: 'Swings hard enough to move what it hits.',
+    s: { dmg: 1.2, rate: 0.82, reach: 16, thorn: 0.5 } },
+
+  /* --- plates. What it survives. Every one of these is a trade, because a
+     plate that was only ever upside would make the slot a formality. --- */
+  { id: 'scrapp', n: 'SCRAP PLATE', slot: 'plate', w: 10, base: true,
+    d: 'Bolted on. Mostly covers the important parts.',
+    s: { hp: 18, armor: 1 } },
+  { id: 'weave',  n: 'VOIDWEAVE',   slot: 'plate', w: 10,
+    d: 'Weighs nothing. Stops nearly as much.',
+    s: { spd: 1.13, hp: -8 } },
+  /* 4, not 5: armour subtracts from every hit that lands, and a maxed
+     Nanoweave — four cards — is 8. One plate must not quietly beat that. */
+  { id: 'cara',   n: 'CARAPACE',    slot: 'plate', w: 10,
+    d: 'You will not be moved, and you will not be quick.',
+    s: { armor: 4, spd: 0.94, hp: 14 } },
+  { id: 'husk',   n: 'HULK HUSK',   slot: 'plate', w: 9,
+    d: 'More of you to lose before any of it matters.',
+    s: { hp: 44, spd: 0.97 } },
+  { id: 'mirror', n: 'MIRRORPLATE', slot: 'plate', w: 8,
+    d: 'Made to be hit on purpose.',
+    s: { parry: 1.7, hp: 16 } },
+  { id: 'briar',  n: 'BRIAR MAIL',  slot: 'plate', w: 8,
+    d: 'Touching it is the mistake.',
+    s: { thorn: 1.5, armor: 2 } },
+  { id: 'kiln',   n: 'KILN PLATE',  slot: 'plate', w: 7,
+    d: 'Runs hot. Swings faster for it.',
+    s: { rate: 1.14, hp: -14, armor: 1 } },
+
+  /* --- cores. The interesting slot: a core does not add a number, it changes
+     what happens at the far end of a swing. Each `on` is one branch in
+     bladeHit(), which is the only place that reads them. --- */
+  { id: 'embc',   n: 'EMBER CORE',  slot: 'core', w: 10, on: 'burn',
+    d: 'What it cuts, it lights.',
+    s: {} },
+  { id: 'glac',   n: 'GLACIER CORE',slot: 'core', w: 10, on: 'chill',
+    d: 'What it cuts stops trying so hard.',
+    s: {} },
+  { id: 'leech',  n: 'LEECH CORE',  slot: 'core', w: 9,  on: 'leech',
+    d: 'A finisher is a meal.',
+    s: { steal: 0.6 } },
+  { id: 'echo',   n: 'ECHO CORE',   slot: 'core', w: 8,  on: 'echo',
+    d: 'The last swing of a chain happens twice.',
+    s: {} },
+  { id: 'arcc',   n: 'ARC CORE',    slot: 'core', w: 9,  on: 'arc',
+    d: 'The cut carries to whatever is nearest.',
+    s: {} },
+  { id: 'voidc',  n: 'VOID CORE',   slot: 'core', w: 8,  on: 'pull',
+    d: 'A finisher gathers the room in first.',
+    s: {} },
+  { id: 'spallc', n: 'SPALL CORE',  slot: 'core', w: 9,  on: 'spall',
+    d: 'Whatever is behind it gets some of it too.',
+    s: {} },
+  { id: 'ripc',   n: 'RIPOSTE CORE',slot: 'core', w: 8,  on: 'riposte',
+    d: 'A parry is not a pause. It is the wind-up.',
+    s: { parry: 1.25 } },
+
+  /* --- sigils. What the run owes it. Deliberately the quiet slot: economy,
+     luck and upkeep, so that a sigil is never the reason a fight was won and
+     is often the reason the next one was. --- */
+  { id: 'tally',  n: 'TALLY SIGIL', slot: 'sigil', w: 10,
+    d: 'It counts everything. It always has.',
+    s: { xp: 1.3 } },
+  { id: 'toll',   n: 'TOLL SIGIL',  slot: 'sigil', w: 10,
+    d: 'Something is owed and it intends to collect.',
+    s: { cred: 1.5 } },
+  { id: 'omen',   n: 'OMEN SIGIL',  slot: 'sigil', w: 9,
+    d: 'Worse company. Better pockets.',
+    s: { luck: 2 } },
+  { id: 'vigil',  n: 'VIGIL SIGIL', slot: 'sigil', w: 10,
+    d: 'It closes on its own if you let it.',
+    s: { regen: 1.1 } },
+  { id: 'grudge', n: 'GRUDGE SIGIL',slot: 'sigil', w: 8,
+    d: 'It remembers how deep you are.',
+    s: { dmg: 1.06 }, deep: true },
+  { id: 'whet',   n: 'WHETSTONE',   slot: 'sigil', w: 10,
+    d: 'Nothing clever. Just sharper.',
+    s: { dmg: 1.12 } },
+  { id: 'stride', n: 'STRIDE SIGIL',slot: 'sigil', w: 9,
+    d: 'Closing the distance is most of the work.',
+    s: { spd: 1.09, reach: 6 } }
+];
+
+/* ------------------------------- the affixes ------------------------------
+   One roll each, from a pool restricted by slot so a blade never rolls a
+   plate's idea. `lo`/`hi` are the roll band; which side of GB_MUL / GB_ADD a
+   key falls on decides whether it multiplies or sums. */
+const GEAR_AFFIX = [
+  { id: 'keen',   n: 'Keen',       k: 'crit',  lo: 0.04, hi: 0.11, on: ['blade', 'core'] },
+  { id: 'cruel',  n: 'Cruel',      k: 'critm', lo: 0.3,  hi: 0.9,  on: ['blade', 'core'] },
+  { id: 'heavy',  n: 'Weighted',   k: 'dmg',   lo: 1.08, hi: 1.24, on: ['blade', 'core', 'sigil'] },
+  { id: 'quick',  n: 'Quick',      k: 'rate',  lo: 1.08, hi: 1.22, on: ['blade', 'plate'] },
+  { id: 'long',   n: 'Long',       k: 'reach', lo: 8,    hi: 26,   on: ['blade', 'sigil'] },
+  { id: 'wide',   n: 'Wide',       k: 'arc',   lo: 0.12, hi: 0.34, on: ['blade'] },
+  { id: 'thirsty',n: 'Thirsting',  k: 'steal', lo: 0.4,  hi: 1.1,  on: ['blade', 'core'] },
+  { id: 'brutal', n: 'Brutal',     k: 'fin',   lo: 1.15, hi: 1.45, on: ['blade', 'core'] },
+  { id: 'sound',  n: 'Sound',      k: 'hp',    lo: 12,   hi: 30,   on: ['plate', 'sigil'] },
+  { id: 'plated', n: 'Plated',     k: 'armor', lo: 1,    hi: 3,    on: ['plate', 'core'] },
+  { id: 'fleet',  n: 'Fleet',      k: 'spd',   lo: 1.05, hi: 1.14, on: ['plate', 'sigil'] },
+  { id: 'mending',n: 'Mending',    k: 'regen', lo: 0.5,  hi: 1.6,  on: ['plate', 'sigil'] },
+  /* Narrow, because `thorn` is depth-scaled and lands on top of whatever
+     Retribution is already worth: at 0.6 to 2.0 a legendary blade was printing
+     "colliders take 284% more" as a side effect of being a blade. */
+  { id: 'barbed', n: 'Barbed',     k: 'thorn', lo: 0.4,  hi: 1.1,  on: ['plate', 'blade'] },
+  { id: 'timed',  n: 'Measured',   k: 'parry', lo: 1.15, hi: 1.5,  on: ['plate', 'core'] },
+  { id: 'flowing',n: 'Flowing',    k: 'combo', lo: 1.2,  hi: 1.7,  on: ['core', 'sigil'] },
+  { id: 'greedy', n: 'Greedy',     k: 'cred',  lo: 1.2,  hi: 1.6,  on: ['sigil', 'plate'] },
+  { id: 'learned',n: 'Learned',    k: 'xp',    lo: 1.12, hi: 1.35, on: ['sigil', 'core'] },
+  { id: 'lucky',  n: 'Fortunate',  k: 'luck',  lo: 1,    hi: 3,    on: ['sigil'] }
+];
+
+/* How many affixes a rarity is worth, and how good a roll it is allowed to be.
+   Quality is the promise that a second CLEAVER is still worth stopping for: it
+   bends the base's own figures, so two items with the same name are not the
+   same item. */
+const GEAR_RAR = {
+  common: { aff: 0, q: [0.00, 0.45] },
+  rare:   { aff: 1, q: [0.25, 0.70] },
+  epic:   { aff: 2, q: [0.50, 0.88] },
+  legend: { aff: 3, q: [0.75, 1.00] }
+};
+/* Drop weights, deliberately steeper than RAR_W: an upgrade card is taken once
+   and kept, but gear is always compared against what is already worn, so
+   legendaries have to stay rare enough that replacing one is a real loss. */
+const GEAR_RAR_W = { common: 100, rare: 46, epic: 17, legend: 5 };
+const GEAR_RAR_ORDER = ['common', 'rare', 'epic', 'legend'];
+
+const gearBase = id => GEAR_BASES.find(b => b.id === id) || null;
+const gearAffix = id => GEAR_AFFIX.find(a => a.id === id) || null;
+
+/* The depth an item was made for, as a multiplier on its flat keys. Square-
+   rooted so a late drop is better without being a different category of thing,
+   and the coefficient is small because it compounds with a base that is already
+   generous: at 0.42 a rare HULK HUSK rolled on wave 12 read +228 max HP, when
+   the entire Vitality line — six cards, a whole run of level-ups — pays +150.
+   0.16 puts a mid-run plate at roughly three or four Vitality cards, which is
+   what one dedicated slot should be worth. */
+const gearLvMul = lv => 1 + Math.sqrt(Math.max(0, lv)) * 0.16;
+
+/* bias > 0 rolls the table that many extra times and keeps the best — how a
+   boss pays better than a grunt without needing a second weight table. */
+function gearRollRar(bias) {
+  let best = 'common';
+  for (let i = 0; i <= Math.max(0, bias | 0); i++) {
+    let tot = 0;
+    for (const k in GEAR_RAR_W) tot += GEAR_RAR_W[k];
+    let r = Math.random() * tot, got = 'common';
+    for (const k in GEAR_RAR_W) { r -= GEAR_RAR_W[k]; if (r <= 0) { got = k; break; } }
+    if (GEAR_RAR_ORDER.indexOf(got) > GEAR_RAR_ORDER.indexOf(best)) best = got;
+  }
+  return best;
+}
+
+/* Roll one item. `slot` may be null for "anything", which is what a corpse
+   pays; the shop asks for a slot so its stock is never four blades. */
+function gearRoll(slot, lv, bias) {
+  const cands = GEAR_BASES.filter(b => (!slot || b.slot === slot) && !b.base);
+  if (!cands.length) return null;
+  let tot = 0; for (const b of cands) tot += b.w;
+  let r = Math.random() * tot, base = cands[cands.length - 1];
+  for (const b of cands) { r -= b.w; if (r <= 0) { base = b; break; } }
+  return gearMake(base.id, gearRollRar(bias), lv);
+}
+
+/* Build a concrete item from a base, a rarity and a depth. Every number the
+   card will ever show is resolved here and stored on the item, so display and
+   effect cannot drift apart. */
+function gearMake(baseId, rar, lv) {
+  const base = gearBase(baseId);
+  if (!base) return null;
+  const R = GEAR_RAR[rar] || GEAR_RAR.common;
+  const q = rnd(R.q[1], R.q[0]);
+  const lvm = gearLvMul(lv || 0);
+  const s = {};
+  for (const k in base.s) {
+    let v = base.s[k];
+    /* Quality bends a multiplier toward its stated value and a flat key toward
+       its stated size, and never flips a sign — so a VOIDWEAVE's −8 HP stays a
+       cost at every quality it can roll. */
+    if (GB_MUL.includes(k)) v = 1 + (v - 1) * (0.82 + 0.36 * q);
+    else v = v * (0.82 + 0.36 * q);
+    if (GB_SCALED.includes(k)) v *= lvm;
+    s[k] = v;
+  }
+  const affs = [];
+  const pool = GEAR_AFFIX.filter(a => a.on.includes(base.slot));
+  for (let i = 0; i < R.aff && pool.length; i++) {
+    const a = pool.splice(rndi(pool.length), 1)[0];
+    let v;
+    if (GB_MUL.includes(a.k)) v = 1 + (rnd(a.hi, a.lo) - 1) * (0.8 + 0.4 * q);
+    else v = rnd(a.hi, a.lo) * (0.8 + 0.4 * q);
+    if (GB_SCALED.includes(a.k)) v *= lvm;
+    affs.push({ id: a.id, v });
+  }
+  return { b: baseId, slot: base.slot, rar, q, lv: lv || 0, s, affs };
+}
+
+/* The name on the card: the base, dressed by its first affix. Two would read
+   as prefix and suffix the way loot always has, but three stops fitting the
+   card, so the rest are only ever seen in the stat lines. */
+function gearName(it) {
+  if (!it) return '—';
+  const b = gearBase(it.b);
+  const n = b ? b.n : '?';
+  if (!it.affs || !it.affs.length) return n;
+  const a0 = gearAffix(it.affs[0].id);
+  return (a0 ? a0.n.toUpperCase() + ' ' : '') + n;
+}
+
+/* Reading order on a card: what it does to a swing, then what it does to you,
+   then what it does to the run. */
+const GEAR_STAT_ORDER = ['dmg', 'rate', 'reach', 'arc', 'crit', 'critm', 'fin',
+                         'steal', 'thorn', 'hp', 'armor', 'regen', 'spd',
+                         'parry', 'combo', 'xp', 'cred', 'luck'];
+
+const GEAR_ON_TEXT = {
+  burn:    'Hits set the body alight',
+  chill:   'Hits slow what they land on',
+  leech:   'A finisher heals you',
+  echo:    'A finisher strikes twice',
+  arc:     'Hits carry to a nearby body',
+  pull:    'A finisher drags the room in',
+  spall:   'Hits splash behind the target',
+  riposte: 'A parry makes the next swing a finisher'
+};
+
+/* One stat as a line of text. The sign work matters: a VOIDWEAVE's −8 HP and a
+   CARAPACE's 0.94 speed both have to read as the costs they are. */
+function gearStatText(k, v) {
+  const pc = m => (m >= 1 ? '+' : '−') + Math.round(Math.abs(m - 1) * 100) + '%';
+  const fl = n => (n >= 0 ? '+' : '−') + (Math.abs(n) < 10
+                   ? (Math.round(Math.abs(n) * 10) / 10) : Math.round(Math.abs(n)));
+  const flat = Math.abs(v - 1) < 0.005;
+  switch (k) {
+    case 'dmg':   return flat ? null : pc(v) + ' swing damage';
+    case 'rate':  return flat ? null : pc(v) + ' swing speed';
+    case 'spd':   return flat ? null : pc(v) + ' move speed';
+    case 'fin':   return flat ? null : pc(v) + ' finisher damage';
+    case 'parry': return flat ? null : pc(v) + ' parry window';
+    case 'combo': return flat ? null : pc(v) + ' combo window';
+    case 'xp':    return flat ? null : pc(v) + ' experience';
+    case 'cred':  return flat ? null : pc(v) + ' credits';
+    case 'reach': return fl(v) + ' reach';
+    case 'arc':   return fl(Math.round(v * 57.3)) + '° arc';
+    case 'crit':  return fl(Math.round(v * 100)) + '% crit chance';
+    case 'critm': return fl(Math.round(v * 100)) + '% crit damage';
+    case 'hp':    return fl(Math.round(v)) + ' max HP';
+    case 'armor': return fl(Math.round(v * 10) / 10) + ' armour';
+    case 'regen': return fl(Math.round(v * 10) / 10) + ' HP/s';
+    case 'steal': return fl(Math.round(v * 10) / 10) + ' HP per hit';
+    case 'thorn': return 'Colliders take ' + Math.round(v * 100) + '% more';
+    case 'luck':  return '+' + Math.round(v) + ' fortune';
+    default:      return null;
+  }
+}
+
+/* Every figure an item contributes, base and affixes folded together, as the
+   lines a card prints. Written once here so the drop card, the shop card and
+   the HUD panel can never describe the same item differently. */
+function gearLines(it) {
+  if (!it) return [];
+  const tot = {};
+  const add = (k, v) => {
+    if (GB_MUL.includes(k)) tot[k] = (tot[k] === undefined ? 1 : tot[k]) * v;
+    else tot[k] = (tot[k] || 0) + v;
+  };
+  for (const k in it.s) add(k, it.s[k]);
+  for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) add(d.k, a.v); }
+  const out = [];
+  for (const k of GEAR_STAT_ORDER) {
+    if (tot[k] === undefined) continue;
+    const t = gearStatText(k, tot[k]);
+    if (t) out.push(t);
+  }
+  const b = gearBase(it.b);
+  if (b && b.on) out.push(GEAR_ON_TEXT[b.on] || b.on);
+  if (b && b.deep) out.push('+2% swing damage per sector cleared');
+  return out;
+}
+
+/* ------------------------------- wearing it -------------------------------
+   P.gb is the folded answer, rebuilt from scratch whenever the kit changes.
+   Read it through gearStat() rather than reaching in, so a pilot with no gear
+   and no P.gb at all still answers 1 for a multiplier and 0 for a bonus. */
+function gearBlank() {
+  const g = {};
+  for (const k of GB_MUL) g[k] = 1;
+  for (const k of GB_ADD) g[k] = 0;
+  g.on = {};
+  return g;
+}
+
+function gearStat(k) {
+  const g = P.gb;
+  if (!g || g[k] === undefined) return GB_MUL.includes(k) ? 1 : 0;
+  return g[k];
+}
+/* Does the kit do this thing at all — the only question bladeHit() asks. */
+const gearOn = k => !!(P.gb && P.gb.on && P.gb.on[k]);
+
+function gearRecalc() {
+  const g = gearBlank();
+  const worn = P.gear || {};
+  for (const sl of GEAR_SLOTS) {
+    const it = worn[sl.k];
+    if (!it) continue;
+    const b = gearBase(it.b);
+    if (b && b.on) g.on[b.on] = true;
+    /* GRUDGE SIGIL and anything else marked `deep` is paid for how far in the
+       run has got, which is the one figure that cannot be baked at roll time.
+       Guarded because stageAbs is declared far below this. */
+    const deep = b && b.deep
+      ? 1 + 0.02 * (typeof stageAbs === 'number' ? stageAbs : 0) : 1;
+    const put = (k, v) => {
+      if (GB_MUL.includes(k)) g[k] *= (k === 'dmg' ? 1 + (v - 1) * deep : v);
+      else if (GB_ADD.includes(k)) g[k] += v;
+    };
+    for (const k in it.s) put(k, it.s[k]);
+    for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) put(d.k, a.v); }
+  }
+  P.gb = g;
+  /* The two stateful ones. Applied as a delta against what the last recalc
+     put there, so swapping a +60 HP husk for a +14 one takes 46 back rather
+     than compounding, and a run that never touches gear is never touched. */
+  const hpWant = Math.round(g.hp);
+  const hpHave = P.gearHp || 0;
+  if (hpWant !== hpHave) {
+    P.maxHp = Math.max(1, P.maxHp + (hpWant - hpHave));
+    /* Gaining capacity is not a heal, but losing it must not leave you standing
+       above your own maximum. */
+    if (hpWant > hpHave) P.hp += (hpWant - hpHave);
+    P.hp = clamp(P.hp, 1, P.maxHp);
+    P.gearHp = hpWant;
+  }
+  P.armor += g.armor - (P.gearArmor || 0);
+  P.gearArmor = g.armor;
+  /* The same delta for the four figures that are read from all over the game
+     rather than from one place. Patching every site that reads P.credMul to
+     also ask the kit would have been five edits and a standing invitation to
+     miss the sixth; folding gear into the field keeps the whole of the reversal
+     in this one function. */
+  P.regen  += g.regen - (P.gearRegen || 0);  P.gearRegen = g.regen;
+  P.thorns += g.thorn - (P.gearThorn || 0);  P.gearThorn = g.thorn;
+  /* Multiplicative, so reversing divides out whatever was applied last time.
+     The drift from doing that a few hundred times in a run sits far below a
+     rounding of either figure it feeds. */
+  P.xpMul   = P.xpMul   / (P.gearXp   || 1) * g.xp;   P.gearXp   = g.xp;
+  P.credMul = P.credMul / (P.gearCred || 1) * g.cred; P.gearCred = g.cred;
+}
+
+/* Put it on. Returns whatever came off, which is what the compare screen shows
+   being dropped. */
+function gearEquip(it) {
+  if (!it || !P.gear) return null;
+  const old = P.gear[it.slot] || null;
+  P.gear[it.slot] = it;
+  gearRecalc();
+  return old;
+}
+
+/* A single number for "is this better", used only to mark a card so the player
+   is not made to do arithmetic under fire. It is a heuristic and is never
+   allowed to decide anything — the equip is always the player's. */
+function gearScore(it) {
+  if (!it) return -1;
+  const L = {};
+  const add = (k, v) => {
+    if (GB_MUL.includes(k)) L[k] = (L[k] === undefined ? 1 : L[k]) * v;
+    else L[k] = (L[k] || 0) + v;
+  };
+  for (const k in it.s) add(k, it.s[k]);
+  for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) add(d.k, a.v); }
+  const m = k => (L[k] === undefined ? 1 : L[k]);
+  const f = k => (L[k] || 0);
+  let s = 0;
+  s += (m('dmg') - 1) * 140 + (m('rate') - 1) * 110 + (m('fin') - 1) * 40;
+  s += f('crit') * 260 + f('critm') * 34 + f('reach') * 0.9 + f('arc') * 40;
+  s += f('hp') * 0.8 + f('armor') * 9 + f('regen') * 14 + f('steal') * 12;
+  s += (m('spd') - 1) * 160 + (m('parry') - 1) * 30 + (m('combo') - 1) * 25;
+  s += (m('xp') - 1) * 40 + (m('cred') - 1) * 22 + f('luck') * 6 + f('thorn') * 8;
+  const b = gearBase(it.b);
+  if (b && b.on) s += 45;                // an effect is worth about an affix
+  return s;
+}
+
+/* The kit a run starts in: something sharp and something bolted on, both at the
+   bottom of the quality band. Everything after this is the room's. Called for
+   every pilot and returns immediately for the three that do not use it, so
+   resetGame() never has to know which hull it is holding. */
+function gearStart() {
+  P.gear = { blade: null, plate: null, core: null, sigil: null };
+  P.gearHp = 0; P.gearArmor = 0; P.gearRegen = 0; P.gearThorn = 0;
+  P.gearXp = 1; P.gearCred = 1;
+  P.gb = gearBlank();
+  if (!isBlade()) return;
+  P.gear.blade = gearMake('edge', 'common', 0);
+  P.gear.plate = gearMake('scrapp', 'common', 0);
+  gearRecalc();
+}
+
 
 function offerUpgrades() {
   const out = [];
@@ -2234,6 +2830,294 @@ function fireLance() {
   else Audio_.tone(920, 0.08, 'sawtooth', 0.085, 300);
 }
 
+/* ------------------------------- the blade --------------------------------
+   THE VAGRANT's weapon. A sweep rather than a shot: the hull swings through an
+   arc in front of it, everything standing in the arc is struck once, and three
+   swings inside the combo window make the third one a finisher.
+
+   Why a sweep and not a cone check. Testing "is the enemy inside the arc" on a
+   single frame reads as a hitbox being switched on, and at 0.15s per swing the
+   difference is visible — a body standing where the blade has not reached yet
+   dies before the blade gets there. So the swing travels: the sector it has
+   covered so far grows across the swing, each body is struck the frame the
+   edge passes it, and a swing-id tag on the enemy keeps it to one hit however
+   many frames the pass takes.
+
+   The parry is the other half of the character and is not optional. EMBER can
+   hold a lance from inside a crowd because it flies over the furniture and the
+   lance out-ranges contact; a hull whose reach is sixty pixels has to walk into
+   the thing that is shooting it. Without an answer to a bullet already in the
+   air, melee stops being playable somewhere around wave ten — so a parry is a
+   fifth of a second of refusing damage outright, on a cooldown short enough to
+   be part of the rhythm and long enough that it cannot be held up as a wall.
+   The reward is a riposte: the next swing lands as a finisher whether or not
+   the chain earned it.
+--------------------------------------------------------------------------- */
+const BLADE_REACH = 58;    // past the hull's own radius
+const BLADE_ARC   = 1.15;  // ~66 degrees, before a blade's own shape
+const BLADE_DMG   = 1.9;   // one swing, in multiples of P.dmg
+const SWING_T     = 0.15;  // how long the edge takes to cross the arc
+const COMBO_N     = 3;     // the third swing of a chain is the finisher
+const COMBO_WIN   = 1.05;  // and this is how long the chain survives a pause
+const FIN_DMG     = 2.0;
+const FIN_ARC     = 0.85;  // a finisher is a much wider swing
+const FIN_REACH   = 16;
+const PARRY_WIN   = 0.2;   // the window that refuses damage
+const PARRY_CD    = 0.85;
+
+/* Signed shortest angle from a to b, which the sweep needs and angLerp only
+   computes privately. */
+const bladeDelta = (a, b) => ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+
+const bladeRate  = () => Math.max(0.35, P.fireRate * gearStat('rate'));
+/* Both are pure: the finisher's extra reach and width are added once, by
+   bladeStart(), and parked on the swing. A swing already travelling must not
+   change shape because a KILN PLATE came off or a stack expired halfway
+   through it, and the draw pass has to be able to read the same figures the
+   hitbox used without re-deriving them from a flag. */
+const bladeReach = () => P.r + BLADE_REACH + gearStat('reach');
+const bladeArc   = () => clamp(BLADE_ARC + gearStat('arc'), 0.35, 2.6);
+const bladeComboWin = () => COMBO_WIN * gearStat('combo');
+const bladeParryWin = () => PARRY_WIN * gearStat('parry');
+const bladeParryActive = () => P.parryT > 0;
+/* The kit's crit, folded once so the swing and the card agree. */
+const bladeCrit  = () => clamp(P.crit + gearStat('crit'), 0, 0.95);
+const bladeCritM = () => P.critMult + gearStat('critm');
+
+function bladeStart() {
+  /* A chain that has been left alone for longer than the window starts over.
+     Checked here rather than on a timer so a pause never silently eats the
+     swing you were owed. */
+  if (P.comboT <= 0) P.combo = 0;
+  const fin = P.combo >= COMBO_N - 1 || P.riposte > 0;
+  P.swingFin = fin ? 1 : 0;
+  P.swingId = (P.swingId || 0) + 1;
+  P.swingT = SWING_T;
+  P.swingP = 0;
+  P.swingDir = P.swingSide ? -1 : 1;     // alternate, so a chain reads as one
+  P.swingSide = P.swingSide ? 0 : 1;
+  /* The arc is centred on the aim and swept from one edge to the other, so the
+     thing under the cursor is struck halfway through rather than at the end. */
+  const arc = bladeArc() + (fin ? FIN_ARC : 0);
+  P.swingA0 = P.ang - P.swingDir * arc / 2;
+  P.swingAim = P.ang;
+  P.swingArc = arc;
+  P.swingReach = bladeReach() + (fin ? FIN_REACH : 0);
+  P.swingCut = 0;                        // how many bodies this swing found
+  if (P.riposte > 0) P.riposte--;
+
+  onPlayerShot(P.x + Math.cos(P.ang) * bladeReach() * 0.6,
+               P.y + Math.sin(P.ang) * bladeReach() * 0.6, P.ang);
+  /* A swing carries the hull with it. Small, and forward rather than back —
+     the opposite of a gun's recoil, because the whole character is about
+     arriving. */
+  P.vx += Math.cos(P.ang) * (fin ? 96 : 34);
+  P.vy += Math.sin(P.ang) * (fin ? 96 : 34);
+  shake(fin ? 0.13 : 0.02);
+  if (fin) {
+    Audio_.tone(150, 0.2, 'square', 0.12, 64);
+    burst(P.x + Math.cos(P.ang) * 24, P.y + Math.sin(P.ang) * 24,
+          10, COL.crit, 260, 3.2, 0.26, arc, P.ang);
+  } else {
+    Audio_.tone(430, 0.07, 'triangle', 0.055, 250);
+  }
+}
+
+/* One swing, advanced. Everything the edge has passed since the last frame is
+   struck, so the sweep cannot skip a body between two frames however long the
+   frame was. */
+function updateBlade(dt) {
+  if (P.swingT <= 0) return;
+  P.swingT -= dt;
+  const prev = P.swingP;
+  P.swingP = clamp(1 - Math.max(0, P.swingT) / SWING_T, 0, 1);
+  const reach = P.swingReach;
+  const a0 = P.swingA0, dir = P.swingDir, arc = P.swingArc;
+  /* The sector covered between the last frame and this one, as a pair of
+     offsets along the swing. A body is struck when its own angular extent
+     overlaps that band. */
+  const lo = arc * prev, hi = arc * P.swingP;
+  for (const e of enemies) {
+    if (e.dead || e.hacked) continue;
+    if (e.swungBy === P.swingId) continue;
+    const dx = e.x - P.x, dy = e.y - P.y;
+    const d = len(dx, dy);
+    if (d > reach + e.r) continue;
+    /* Anything close enough to be touching the hull is inside every part of
+       the swing, and testing its angle at that range is meaningless — a body
+       at distance 2 covers most of the circle. */
+    const off = dir * bladeDelta(a0, Math.atan2(dy, dx));
+    const pad = d > 4 ? Math.atan2(e.r, Math.max(6, d)) : Math.PI;
+    if (off + pad < lo || off - pad > hi) continue;
+    e.swungBy = P.swingId;
+    bladeHit(e, d);
+  }
+  if (P.swingT <= 0) {
+    P.swingT = 0;
+    /* The chain only advances on a swing that connected. Swinging at air is
+       how you reset your own combo, which is what makes the finisher a thing
+       you set up rather than a thing that happens every third click. */
+    if (P.swingCut > 0) {
+      P.combo = P.swingFin ? 0 : P.combo + 1;
+      P.comboT = bladeComboWin();
+    }
+    /* swingFin is deliberately NOT cleared: the fade below still has to know
+       what colour the arc it is fading out was. bladeStart() sets it fresh on
+       every swing, so it can never be read stale. */
+    P.swingFade = 0.14;
+  }
+}
+
+/* One body, struck once. Every core effect in the game lives in this function
+   and nowhere else, which is the reason a core can be described by a single
+   key on its base. */
+function bladeHit(e, dist) {
+  P.swingCut++;
+  const fin = !!P.swingFin;
+  const crit = Math.random() < bladeCrit();
+  let dmg = P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul() * rewardShotMul();
+  if (fin) dmg *= FIN_DMG * gearStat('fin');
+  if (crit) dmg *= bladeCritM();
+  damageEnemy(e, dmg, crit, P.x, P.y);
+
+  // the shove. A finisher clears space; an ordinary swing only leans on it
+  const a = Math.atan2(e.y - P.y, e.x - P.x);
+  const kn = (P.knock * 0.9 + (fin ? 340 : 0)) / Math.max(1, e.r / 13);
+  if (!e.dead && e.type !== 'boss') {
+    e.vx = (e.vx || 0) + Math.cos(a) * kn;
+    e.vy = (e.vy || 0) + Math.sin(a) * kn;
+  }
+  burst(e.x - Math.cos(a) * e.r * 0.5, e.y - Math.sin(a) * e.r * 0.5,
+        crit ? 9 : 4, crit ? COL.crit : '#fecdd3', fin ? 300 : 190,
+        crit ? 3.2 : 2.4, 0.26, 1.1, a);
+
+  /* What the kit does on the way through.
+
+     Lifesteal is paid once per swing rather than once per body, and that is not
+     a rounding decision. This weapon strikes everything standing in the arc, so
+     per-body healing multiplies by the size of the crowd — exactly the
+     situation the pilot is supposed to find dangerous. A FLENSER into eight
+     grunts was returning more health per second than anything in the game could
+     take off, which turns the whole character into a hull that cannot die in
+     precisely the fights that were meant to kill it. Paid on the first body of
+     the swing, so it still rewards connecting and never scales with the crowd.
+     P.swingCut was incremented at the top of this function, so 1 is the first. */
+  const steal = gearStat('steal');
+  if (steal > 0 && P.swingCut === 1 && P.hp < P.maxHp)
+    P.hp = Math.min(P.maxHp, P.hp + steal);
+  if (gearOn('burn')) applyBurn(e, fin ? 2 : 1);
+  if (gearOn('chill')) { e.slow = Math.min(0.6, Math.max(e.slow || 0, 0.3)); e.slowT = 1.6; }
+  if (gearOn('arc')) chainFrom(e, dmg * 0.32, 1);
+  if (gearOn('spall')) {
+    /* Behind the target, along the line of the blow — a second, smaller strike
+       on whatever was standing in cover. */
+    const bx = e.x + Math.cos(a) * (e.r + 22), by = e.y + Math.sin(a) * (e.r + 22);
+    for (const o of enemies) {
+      if (o.dead || o === e || o.hacked) continue;
+      if (len(o.x - bx, o.y - by) > 42 + o.r) continue;
+      damageEnemy(o, dmg * 0.4, false, P.x, P.y, { silent: true, noChain: true });
+    }
+    ringFx(bx, by, 6, 44, '#fda4af', 0.22, 2);
+  }
+  if (fin) {
+    if (gearOn('leech')) {
+      const h = Math.max(2, Math.round(P.maxHp * 0.035));
+      P.hp = Math.min(P.maxHp, P.hp + h);
+      floatText(P.x, P.y - 34, '+' + h, COL.hp, 14);
+    }
+    if (gearOn('pull')) {
+      for (const o of enemies) {
+        if (o.dead || o.type === 'boss') continue;
+        const d2 = len(o.x - P.x, o.y - P.y);
+        if (d2 > 260 || d2 < 1) continue;
+        const p = (1 - d2 / 260) * 420;
+        o.vx = (o.vx || 0) - (o.x - P.x) / d2 * p;
+        o.vy = (o.vy || 0) - (o.y - P.y) / d2 * p;
+      }
+    }
+    /* ECHO CORE strikes the same body again a beat later. Queued rather than
+       applied twice here, so the second hit reads as a second hit. */
+    if (gearOn('echo') && !e.dead)
+      bladeEchoes.push({ id: e.id, t: 0.14, dmg: dmg * 0.6 });
+  }
+}
+
+/* The ECHO CORE's second strikes, resolved on their own short clock. Held by
+   enemy id rather than by reference so a body that died in between is simply
+   not found. */
+const bladeEchoes = [];
+function updateBladeEchoes(dt) {
+  for (let i = bladeEchoes.length - 1; i >= 0; i--) {
+    const q = bladeEchoes[i];
+    q.t -= dt;
+    if (q.t > 0) continue;
+    bladeEchoes.splice(i, 1);
+    const e = enemies.find(z => z.id === q.id && !z.dead);
+    if (!e) continue;
+    damageEnemy(e, q.dmg, false, P.x, P.y);
+    ringFx(e.x, e.y, 4, e.r + 18, '#c084fc', 0.2, 2);
+    Audio_.tone(620, 0.05, 'triangle', 0.04, 420);
+  }
+}
+
+/* ------------------------------- the parry -------------------------------- */
+function bladeParry() {
+  if (!isBlade() || P.parryCd > 0 || P.parryT > 0) return;
+  P.parryT = bladeParryWin();
+  P.parryCd = PARRY_CD;
+  P.parryTook = 0;
+  ringFx(P.x, P.y, P.r + 4, P.r + 34, '#e0f2fe', 0.2, 3);
+  Audio_.tone(1250, 0.06, 'sine', 0.05, 900);
+}
+
+/* Something was refused. Called from hurtPlayer, which is the one funnel every
+   source of damage already passes through — contact, bullets, blasts, hazards
+   — so the parry does not have to be taught about any of them individually. */
+function bladeParried(amount) {
+  P.parryTook++;
+  P.riposte = Math.min(3, P.riposte + 1);
+  P.parryFx = 1;                         // the flash is for a parry that connected
+  /* A parry is worth a link in the chain even with nothing in reach, so the
+     defensive play and the offensive one are the same play. */
+  P.combo = Math.min(COMBO_N - 1, P.combo + 1);
+  P.comboT = bladeComboWin();
+  /* RIPOSTE CORE turns the refusal into a guaranteed finisher rather than one
+     step toward it. */
+  if (gearOn('riposte')) P.combo = COMBO_N - 1;
+  floatText(P.x, P.y - 42, 'PARRY', '#e0f2fe', 16);
+  ringFx(P.x, P.y, P.r + 6, P.r + 68, '#bae6fd', 0.3, 4);
+  burst(P.x, P.y, 12, '#e0f2fe', 300, 2.6, 0.3);
+  shake(0.06);
+  Audio_.tone(1600, 0.09, 'square', 0.07, 2400);
+  /* And the shot that was refused does not carry on past you. Only what was
+     genuinely close enough to be turned aside — a parry is not a screen clear. */
+  const R = bladeReach() + 18;
+  for (let i = ebullets.length - 1; i >= 0; i--) {
+    const b = ebullets[i];
+    if (len(b.x - P.x, b.y - P.y) > R) continue;
+    burst(b.x, b.y, 4, '#e0f2fe', 200, 2.2, 0.2);
+    ebullets.splice(i, 1);
+  }
+}
+
+/* The timers, ticked whoever is flying. Cheap, and keeps the parry's state out
+   of the firing branch. */
+function bladeTick(dt) {
+  if (P.swingFade > 0) P.swingFade = Math.max(0, P.swingFade - dt);
+  /* The rig: how far the carried blade has come up for the finisher. Eased
+     rather than set, so the hull visibly winds up instead of snapping. */
+  const rigWant = (P.combo >= COMBO_N - 1 || P.riposte > 0) ? 1 : 0;
+  P.rig += (rigWant - P.rig) * Math.min(1, dt * 9);
+  if (P.parryFx > 0) P.parryFx = Math.max(0, P.parryFx - dt * 3.2);
+  if (P.parryT > 0) P.parryT = Math.max(0, P.parryT - dt);
+  if (P.parryCd > 0) P.parryCd = Math.max(0, P.parryCd - dt);
+  if (P.comboT > 0) {
+    P.comboT = Math.max(0, P.comboT - dt);
+    if (P.comboT === 0) P.combo = 0;
+  }
+  updateBladeEchoes(dt);
+}
+
 function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.dead) return;
   // a hacked body is only reachable by the side it used to be on
@@ -2433,7 +3317,12 @@ function killEnemy(e, ang = 0) {
     if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
         && b.ledger.length < 8 && b.ledger.indexOf(e.type) < 0) b.ledger.push(e.type);
   }
-  score += Math.round(e.score * (1 + wave * 0.05) * hardScore());
+  /* In a rush only the bosses pay. Several of them summon adds without limit,
+     and measured against the rush a slow fight with THE NULL was worth some
+     25,000 in adds alone — enough to buy a rung by stalling at boss five rather
+     than going deeper. Depth and speed are what the ladder is for. */
+  if (!rushOn() || e.type === 'boss')
+    score += Math.round(e.score * (1 + wave * 0.05) * hardScore());
   if (e.burn > 0 && e.type !== 'boss') {
     // burnt out rather than blown up: see shatterBody
     burst(e.x, e.y, 5, '#7f1d1d', 140, e.r * 0.16 + 1.5, 0.45);
@@ -2473,6 +3362,17 @@ function killEnemy(e, ang = 0) {
     for (let i = 0; i < 3; i++) drops.push(mkDrop(e.x + rnd(60, -60), e.y + rnd(60, -60), 'heal'));
   } else if (Math.random() < (e.elite ? 0.35 : 0.035) * (1 + P.luck * 0.35)) {
     drops.push(mkDrop(e.x, e.y, Math.random() < 0.72 ? 'heal' : 'nuke'));
+  }
+  /* And the kit. Rolled only for the pilot that can wear it rather than rolled
+     and thrown away, because this runs on every death in the game. A boss pays
+     twice and pays biased; an elite often; a body rarely. */
+  if (isBlade()) {
+    if (e.type === 'boss') {
+      gearDrop(e.x + rnd(46, -46), e.y + rnd(46, -46), 2);
+      gearDrop(e.x + rnd(46, -46), e.y + rnd(46, -46), 1);
+    } else if (Math.random() < (e.elite ? 0.26 : 0.022) * (1 + P.luck * 0.3)) {
+      gearDrop(e.x, e.y, e.elite ? 1 : 0);
+    }
   }
   // credits — the shop currency
   if (e.type !== 'egg') {
@@ -2538,6 +3438,28 @@ function killEnemy(e, ang = 0) {
   hackTake(e);
 }
 
+/* Put one item on the floor. Rolled at the depth the fight is actually at, so
+   a drop is worth what the room that produced it was worth. Returns null for
+   every pilot but one, which is how the call sites stay free of the question. */
+function gearDrop(x, y, bias, slot) {
+  if (!isBlade()) return null;
+  const it = gearRoll(slot || null, wave, bias || 0);
+  if (!it) return null;
+  const g = mkDrop(x, y, 'gear');
+  g.gear = it;
+  g.col = RARITY[it.rar] || '#94a3b8';
+  g.r = 12;
+  /* Far longer-lived than a heal or a credit. A build decision that expires
+     while you are busy not dying is a build decision you never got to make. */
+  g.life = 45;
+  const a = rnd(TAU), s = rnd(120, 30);
+  g.vx = Math.cos(a) * s; g.vy = Math.sin(a) * s;
+  drops.push(g);
+  floatText(x, y - 16, gearName(it), g.col, 12, -22);
+  Audio_.tone(880, 0.09, 'triangle', 0.05, 1320);
+  return g;
+}
+
 function mkDrop(x, y, kind) {
   return {
     x, y, vx: 0, vy: 0, kind, v: 0, t: rnd(TAU),
@@ -2553,6 +3475,12 @@ function mkDrop(x, y, kind) {
 function hurtPlayer(dmg, opts) {
   if (state !== 'play') return;
   if (P.down) return;                    // a wreck cannot be hurt further
+  /* THE VAGRANT's parry. This function is the funnel every source of damage
+     already passes through — contact, bullets, blasts, hazards, a boss's floor
+     — so the parry does not have to be taught about any of them one at a time.
+     `pure` is the exception: Virgo and Libra charge you for your own build, and
+     that is not a thing there is anything to turn aside. */
+  if (bladeParryActive() && !(opts && opts.pure)) { bladeParried(dmg); return; }
   /* The clash is a cutscene you play, not a fight you can lose — the same
      promise his ordinary beam already makes, turned around. A surge costs the
      meter and the ground, never the run. */
@@ -2729,6 +3657,7 @@ function advanceAlt() {
 }
 
 function startWave() {
+  if (rushOn()) { rushWave(); return; }   // every wave of a rush is a boss
   wave++;
   betweenWaves = 0;
   const abs = Math.floor((wave - 1) / 5);
@@ -2828,6 +3757,11 @@ function onBossDefeat(e) {
   const bd = BOSSES[wasKeeper ? 'keeper' : stage.boss];
   const wasVirus = !!(e && e.virus);
   Codex.flush();                         // a sector's worth of new entries
+  /* A rush boss hands out none of what a stage boss does — no gate, no
+     library, no payload roll — only the rush's own payout and the reward room.
+     Checked against the roster so THE SHOPKEEPER, who can still be summoned out
+     of a rush shop, keeps his own ending below. */
+  if (rushOn() && e && RUSH_ROSTER.includes(e.boss)) { rushBossDown(e); return; }
 
   /* THE BOOKKEEPER is not a stage boss: he opens no shop and no gate, he just
      gives the record back with his notes in it. */
@@ -3002,7 +3936,15 @@ const CHIP_POOL = {
            'zerk','glass','drone','shld','wind','btime','stat'],
   laser:  ['dmg','rate','pierce','heavy','ric','crit','critm','pblank','long','vel',
            'oc','chain','vol','frag','exec','okill','zerk','glass','mom','stdy',
-           'drone','shld','wind','btime','stat','cryo']
+           'drone','shld','wind','btime','stat','cryo'],
+  /* THE VAGRANT's list is the shortest of the three, and that is correct: the
+     chip promises everything it offers is worth taking, and most of the pool is
+     written for a bullet. What is left is the hull, the dash and the handful of
+     weapon cards a swing can genuinely use. */
+  blade:  ['dmg','rate','heavy','crit','critm','vel','chain','vol','cryo','exec',
+           'okill','zerk','glass','mom','stdy','thorn','stat','blood','tempo',
+           'drone','shld','wind','btime','hard','armor','hp','spd','dashn',
+           'dashcd','shock','nova','ghost','vamp','siph']
 };
 
 function chipPool() {
@@ -3016,7 +3958,22 @@ function chipPool() {
    nothing at all and Split Barrel is a flat −9% in exchange for nothing.
    CHIP_POOL already left them out; the ordinary shop was still selling them. */
 const LANCE_DEAD = ['multi', 'para'];
-const weaponOK = u => !(P.weapon === 'laser' && LANCE_DEAD.includes(u.id));
+
+/* And what cannot do anything for a swing — two different failures in one
+   list. Most are written for a projectile that does not exist: Railshot pushes
+   a bullet through a body, Seeker curves one, Longshot pays it for the distance
+   it flew, Backdraft fires one out of the back of the ship, and Fragmentation,
+   Ricochet and Overcharge all act on a bullet at the moment it lands.
+
+   Point Blank is the opposite problem, and the reason this is not simply "the
+   projectile cards": it pays +30% "at close range", and a hull that is never
+   anywhere else would have banked a free +90% across three levels and called it
+   a decision. It is struck out for being too good rather than for being dead. */
+const MELEE_DEAD = ['multi', 'para', 'pierce', 'ric', 'home', 'back', 'long',
+                    'frag', 'oc', 'pblank'];
+const weaponOK = u =>
+  !(P.weapon === 'laser' && LANCE_DEAD.includes(u.id)) &&
+  !(P.weapon === 'blade' && MELEE_DEAD.includes(u.id));
 
 // the pool an offer should draw from, and whether rarity still weights it
 function offerPool() {
@@ -3054,18 +4011,58 @@ function recordChipItem() {
   };
 }
 
+/* One item, dressed as something the counter can sell. Buying is equipping
+   outright rather than opening the compare screen: the card already prints what
+   the item does, the kit panel already shows what is in the slot, and stacking
+   a decision screen on top of the shop would be a screen about a screen. What
+   comes off is said out loud instead. */
+function gearShopItem(it) {
+  const lines = gearLines(it);
+  const slot = GEAR_SLOTS.find(s => s.k === it.slot);
+  return {
+    kind: 'gear', gear: it, name: gearName(it), rar: it.rar,
+    /* The shop card has room for about two lines, so it gets the figures that
+       matter most and the slot it goes in — which is the one thing the name
+       does not already say. */
+    desc: (slot ? slot.n + ': ' : '') + lines.slice(0, 3).join(' · '),
+    cost: Math.round(PRICE[it.rar] * 1.15 * (1 + stageAbs * 0.15) * hardPrice()
+                     * (P.insider ? 0.65 : 1)),
+    ok: () => true,
+    run: () => {
+      const old = gearEquip(it);
+      gearSaid(it, old ? 'SWAPPED' : 'WORN');
+    }
+  };
+}
+
 function makeShopStock() {
   const items = [];
   const chip = shopChipOffered && !P.chip;
   const { pool, flat } = offerPool();
   const nUp = chip ? 3 : 4;
-  for (let i = 0; i < nUp && pool.length; i++) {
-    const ch = pickFromPool(pool, flat);
-    pool.splice(pool.indexOf(ch), 1);
-    Codex.seeUpgrade(ch.id);             // shop stock counts too
-    items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
-      cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice()
-                       * (P.insider ? 0.65 : 1)) });
+  /* THE VAGRANT buys gear, because cards are not what it spends a level on and
+     they should not be what it spends credits on either. Drawn one item per
+     slot and shuffled, so the counter is never four blades on the run where
+     the plate is what is killing you — and biased a tier, because paying for a
+     thing should beat finding it. */
+  if (isBlade()) {
+    const slots = GEAR_SLOTS.map(s => s.k);
+    for (let i = slots.length - 1; i > 0; i--) {
+      const j = rndi(i + 1); const t = slots[i]; slots[i] = slots[j]; slots[j] = t;
+    }
+    for (let i = 0; i < nUp; i++) {
+      const it = gearRoll(slots[i % slots.length], wave, 1);
+      if (it) items.push(gearShopItem(it));
+    }
+  } else {
+    for (let i = 0; i < nUp && pool.length; i++) {
+      const ch = pickFromPool(pool, flat);
+      pool.splice(pool.indexOf(ch), 1);
+      Codex.seeUpgrade(ch.id);           // shop stock counts too
+      items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
+        cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice()
+                         * (P.insider ? 0.65 : 1)) });
+    }
   }
   if (chip) items.push(recordChipItem());
   const svc = shopServices();
@@ -7702,6 +8699,8 @@ function drawTribunal() {
 let awaitingPortal = false;
 
 function afterReward() {
+  // the rush has no portal room: the reward room leads to the next boss
+  if (rushOn()) { betweenWaves = RUSH_BREATH; return; }
   if (Save.profile.altPath) openPortalRoom();
   else betweenWaves = 2.0;
 }
@@ -9324,6 +10323,10 @@ function banner(t, c, dur = 2.2) {
 /* --------------------------------- state --------------------------------- */
 let state = 'menu';           // menu | play | levelup | pause | dead
 let offers = [], offerHover = -1;
+/* The item currently being decided on, and what it would displace. Held here
+   rather than passed around so the draw pass, the key handler and the click
+   handler are all reading the same one thing. */
+let gearOffer = null, gearOld = null;
 let hitStop = 0, drawFlashT = 0, uiTime = 0;
 // overlays ignore input for a beat after opening, so a shot fired the instant
 // a boss dies can't eat the upgrade screen or the shop
@@ -9386,6 +10389,8 @@ const Save = {
                   dayStreak: 0, dayStreakLast: '',
                   // days won outright, and the last one counted
                   dayWins: 0, dayWinLast: '',
+                  // the BOSS RUSH: its own best, never the ordinary one
+                  rushBest: 0, rushRuns: 0,
                   // slot -> { col, sides }; validated on every load
                   skin: null,
                   /* Identity, such as it is: a name is typed and can be
@@ -9527,6 +10532,11 @@ const Save = {
       ? (a.dayWinLast || '') : (b.dayWinLast || '');
     out.dayStreakLast = (a.dayStreakLast || '') >= (b.dayStreakLast || '')
       ? (a.dayStreakLast || '') : (b.dayStreakLast || '');
+    /* The rush's best is what its ladder and THE VAGRANT read, so it is a mark
+       like an unlock: the higher of the two stands. Without these two lines a
+       cloud connect rebuilds from blank() and quietly takes the pilot away. */
+    out.rushBest = Math.max(a.rushBest || 0, b.rushBest || 0);
+    out.rushRuns = Math.max(a.rushRuns || 0, b.rushRuns || 0);
     out.devTalkDue  = !!(a.devTalkDue  || b.devTalkDue);
     out.clears = Math.max(a.clears || 0, b.clears || 0);
     out.charIdx = b.charIdx !== undefined ? b.charIdx : (a.charIdx || 0);
@@ -9803,6 +10813,7 @@ function promptName() {
 function resetGame() {
   applyChar(selectedChar);
   P = newPlayer();
+  gearStart();                           // returns at once for the other three
   enemies = []; bullets = []; ebullets = []; gems = []; drops = [];
   parts = []; floats = []; arcs = []; rings = []; corpses = [];
   hazards = []; mortars = []; sentries = []; beams = [];
@@ -9871,6 +10882,25 @@ function gameOver(quiet) {
      are measuring. Only the first run of a day is ranked; the flag was
      taken when the run started and is re-checked here, so two runs racing
      to the death screen cannot both claim it. */
+  /* A rush is scored on its own ladder and nowhere else — like the daily it
+     leaves your best, the board and the escalation window alone. */
+  if (Chal.on && Chal.on.rush) {
+    lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                  sector: stage.name, loop: loopNum, isRecord: false,
+                  chal: Chal.on, chalWon: false, reward: null,
+                  rush: true, rushDown: Math.max(0, Rush.n - (bossAlive ? 1 : 0)),
+                  rushRecord: score > (Save.profile.rushBest || 0),
+                  rushEarned: Rush.earned.slice() };
+    rushFinish();
+    lastStats.rushEarned = Rush.earned.slice();   // the last frame may have paid one
+    Codex.flush();
+    if (!quiet) {
+      explode(P.x, P.y, 180, 0, COL.player);
+      burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
+      shake(1); Audio_.over();
+    }
+    return;
+  }
   if (Chal.on && Chal.on.daily) {
     const ranked = !!Chal.on.dailyRanked && Daily.ranked();
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
@@ -9935,9 +10965,11 @@ function handleKey(k) {
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
     // straight back to the ladder, which is where you were going anyway
     const wasChal = !!Chal.on, wasDaily = !!(Chal.on && Chal.on.daily);
+    const wasRush = !!(Chal.on && Chal.on.rush);
     quitToMenu();
     // back to whichever ladder you were actually on
-    if (wasDaily) openDaily('menu');
+    if (wasRush) openRush('menu');
+    else if (wasDaily) openDaily('menu');
     else if (wasChal) openChal('menu');
     return;
   }
@@ -9956,6 +10988,7 @@ function handleKey(k) {
   if (state === 'settings') { settingsKey(k); return; }
   if (state === 'changelog') { logKey(k); return; }
   if (state === 'daily') { dailyKey(k); return; }
+  if (state === 'rush') { rushKey(k); return; }
   if (state === 'skin') { skinKey(k); return; }
   if (state === 'menu') {
     if (k === 'h' && Save.profile.outsiderIn) { enterHub(); return; }
@@ -9963,6 +10996,7 @@ function handleKey(k) {
     if (k === 'k') { openChal('menu'); return; }
     if (k === 's') { openSettings('menu'); return; }
     if (k === 'd') { openDaily('menu'); return; }
+    if (k === 'b') { openRush('menu'); return; }
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -10006,6 +11040,7 @@ function handleKey(k) {
     if (Chal.on && (k === ' ' || k === 'enter' || k === 'r')) {
       /* A daily restarts as the daily. startDaily re-reads the profile,
          so the second run of a day comes back as practice by itself. */
+      if (Chal.on.rush) { chalQuit(); startRush(); return; }
       if (Chal.on.daily) { chalQuit(); startDaily(); return; }
       const c = Chal.on; chalQuit(); startChallenge(c); return;
     }
@@ -10018,6 +11053,12 @@ function handleKey(k) {
   if (state === 'levelup') {
     const i = ['1', '2', '3', '4', '5'].indexOf(k);
     if (i >= 0 && offers[i]) chooseOffer(i);
+    return;
+  }
+  if (state === 'gear') {
+    if (uiArm > 0) return;
+    if (k === '1' || k === 'e' || k === 'enter' || k === ' ') gearTake();
+    else if (k === '2' || k === 'q' || k === 'escape') gearLeave();
     return;
   }
   if (state === 'shop') {
@@ -10058,7 +11099,9 @@ function handleKey(k) {
   }
   if (state === 'amalcut') return;         // it does not take input
   if (k === 'q') { useBook(); return; }
-  if (k === 'f') { ventFire(); return; }
+  /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
+     and ventFire() already refuses anything that is not holding a lance. */
+  if (k === 'f') { if (isBlade()) bladeParry(); else ventFire(); return; }
   if (k === 'e' && inHub) {
     /* Every press goes to the room now. Deciding here that a press means
        "skip his line" whenever he was talking meant the last tutorial step —
@@ -10163,6 +11206,7 @@ function handleClick() {
   if (state === 'settings') { settingsClick(); return; }
   if (state === 'changelog') { logClick(); return; }
   if (state === 'daily') { dailyClick(); return; }
+  if (state === 'rush') { rushClick(); return; }
   if (state === 'skin') { skinClick(); return; }
   if (state === 'menu') {
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
@@ -10170,9 +11214,11 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuChalRect())) { openChal('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuSetRect())) { openSettings('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuDailyRect())) { openDaily('menu'); return; }
+    if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
+    if (Chal.on && Chal.on.rush) { chalQuit(); startRush(); return; }
     if (Chal.on && Chal.on.daily) { chalQuit(); startDaily(); return; }
     if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
     if (mpGuest()) return;
@@ -10201,6 +11247,12 @@ function handleClick() {
   if (state === 'levelup') {
     const i = offerIndexAt(mouse.x, mouse.y);
     if (i >= 0) chooseOffer(i);
+    return;
+  }
+  if (state === 'gear') {
+    const i = gearHitAt(mouse.x, mouse.y);
+    if (i === 0) gearTake();
+    else if (i === 1) gearLeave();
     return;
   }
   if (state === 'shop') {
@@ -10264,6 +11316,25 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, b.leave)) leavePlanetarium();
   }
 }
+/* What a level is worth to a hull with no cards to spend it on. Deliberately
+   a little under what three cards a level would come to: the shortfall is
+   exactly the room the drops have to fill, and a kit that could be ignored
+   would make the whole system decoration. Tuning this figure is how the pilot
+   gets easier or harder without touching a single item. */
+function bladeLevel() {
+  P.maxHp += 7; P.hp = Math.min(P.maxHp, P.hp + 7);
+  P.dmg *= 1.055;
+  if (P.level % 2 === 0) P.speed *= 1.012;
+  if (P.level % 4 === 0) P.crit += 0.01;
+  floatText(P.x, P.y - 48, 'LEVEL ' + P.level, COL.player, 17);
+  ringFx(P.x, P.y, 10, 130, COL.player, 0.5, 3);
+  burst(P.x, P.y, 16, COL.player, 240, 3, 0.5);
+  Audio_.levelup();
+  /* Dropped rather than granted, so it still has to be walked over and still
+     has to be compared against what is already on. */
+  if (P.level % 3 === 0) gearDrop(P.x + rnd(40, -40), P.y + rnd(40, -40), 1);
+}
+
 function chooseOffer(i) {
   applyUpgrade(offers[i]);
   /* Two Minds: every fifth level, the card you did not take comes with you.
@@ -10286,6 +11357,56 @@ function chooseOffer(i) {
   Audio_.select();
   if (P.xp >= P.xpNext) checkLevel();
 }
+/* Somebody walked over a blade. The run stops while it is decided, the same way
+   it stops for a level-up — this is that pilot's level-up. */
+function openGear(it) {
+  if (!it) return;
+  /* Never over a shop, a gate or a scripted sequence, for the same reasons
+     checkLevel() lists. Unlike a level-up there is nothing to defer to: the
+     item is simply worn if its slot is empty and otherwise dropped, because the
+     alternative is a queue the player never asked for. */
+  if (state !== 'play' || rootOut || outro || intrusion || amalCut) {
+    if (P.gear && !P.gear[it.slot]) { gearEquip(it); gearSaid(it, 'WORN'); }
+    return;
+  }
+  gearOffer = it;
+  gearOld = (P.gear && P.gear[it.slot]) || null;
+  /* An empty slot is not a decision. Wearing it outright keeps the first four
+     drops of a run from being four identical screens saying yes. */
+  if (!gearOld) {
+    gearEquip(it);
+    gearSaid(it, 'WORN');
+    gearOffer = null;
+    return;
+  }
+  state = 'gear';
+  uiArm = 0.35;
+  Audio_.levelup();
+}
+
+function gearSaid(it, verb) {
+  floatText(P.x, P.y - 44, verb + '  ' + gearName(it), RARITY[it.rar] || '#94a3b8', 15);
+  ringFx(P.x, P.y, 8, 110, RARITY[it.rar] || '#94a3b8', 0.4, 3);
+  Audio_.select();
+}
+
+function gearTake() {
+  if (!gearOffer) { state = 'play'; return; }
+  const it = gearOffer;
+  gearEquip(it);
+  gearSaid(it, 'WORN');
+  gearOffer = null; gearOld = null;
+  state = 'play';
+  checkLevel();                          // a level may have been owed meanwhile
+}
+
+function gearLeave() {
+  gearOffer = null; gearOld = null;
+  state = 'play';
+  Audio_.tone(280, 0.09, 'square', 0.05, 180);
+  checkLevel();
+}
+
 function checkLevel() {
   // Never open over a shop, planetarium or gate. updatePickups() runs after
   // updateWaves() in the same tick, so a wave-clear XP payout could otherwise
@@ -10299,6 +11420,20 @@ function checkLevel() {
      overlay: these all call back here when they are finished. */
   if (rootOut || outro || intrusion || amalCut) return;
   if (chalNoLevel()) { P.xp = 0; return; }    // this sheet offers nothing, ever
+  /* THE VAGRANT is never dealt a card, because choosing is what the loot is
+     for. A level is flat growth — the RPG half of the bargain — and every third
+     one the room owes it a drop whatever it thinks. Looped rather than returned
+     out of, because a boss can pay two levels at once and the other branch
+     relies on chooseOffer() calling back here to collect the second. */
+  if (isBlade()) {
+    while (P.xp >= P.xpNext) {
+      P.xp -= P.xpNext;
+      P.level++;
+      P.xpNext = Math.round(8 + P.level * 5 + Math.pow(P.level, 1.65) * 1.6);
+      bladeLevel();
+    }
+    return;
+  }
   if (P.xp >= P.xpNext) {
     P.xp -= P.xpNext;
     P.level++;
@@ -10382,7 +11517,7 @@ function update(dt) {
     if (uiArm > 0) uiArm -= dt;
     return;
   }
-  if (state === 'daily') {
+  if (state === 'daily' || state === 'rush') {
     updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
     return;
@@ -10429,7 +11564,7 @@ function update(dt) {
   }
   if (state === 'levelup' || state === 'shop' || state === 'planet' ||
       state === 'library' || state === 'talk' || state === 'devtalk' ||
-      state === 'gfx' || state === 'dead') {
+      state === 'gfx' || state === 'dead' || state === 'gear') {
     if (shopMsgT > 0) shopMsgT -= dt;
     if (uiArm > 0) uiArm -= dt;
     if (state === 'devtalk') devTypeTick(dt);
@@ -10450,6 +11585,7 @@ function update(dt) {
   const wdt = dt * slowmo;
 
   chalTick(dt);              // the rule sheet, where it touches the frame
+  rushTick(dt);              // the rush's boss clock and its ladder
   rewardTick(dt);            // and the rewards that run on their own clocks
   rewardDashSweep(dt);
   updateWaves(dt);
@@ -10660,7 +11796,7 @@ function updatePlayer(dt) {
     const spdMul = (1 - playerChill) * (P.tempoT > 0 ? 1.35 : 1)
                  * (P.burrowT > 0 ? 1.8 : 1)
                  * (P.after && firing ? 1 + 0.4 * P.after : 1)
-                 * awakeSpd();
+                 * awakeSpd() * gearStat('spd');
     const tvx = ix * P.speed * spdMul, tvy = iy * P.speed * spdMul;
     const k = 1 - Math.exp(-16 * dt);
     P.vx = lerp(P.vx, tvx, k);
@@ -10713,6 +11849,11 @@ function updatePlayer(dt) {
                     + (P.rolling ? 0.03 * P.rolling * (P.rollN || 0) : 0);
   // the diary replaces the weapon outright — drop any beam still standing
   if (P.diaryT > 0 && P.laserT > 0) { P.laserT = 0; P.laserSegs.length = 0; P.laserEnv = 0; }
+  // and any swing, for the same reason
+  if (P.diaryT > 0 && P.swingT > 0) { P.swingT = 0; P.swingFin = 0; }
+  /* The parry window, the combo clock and the echo queue run whether or not a
+     swing is out, so they are ticked outside the weapon branch below. */
+  if (isBlade()) bladeTick(dt);
 
   if (P.weapon === 'laser' && P.diaryT <= 0) {
     updateLance(dt);
@@ -10726,6 +11867,16 @@ function updatePlayer(dt) {
       } else {
         P.charge = Math.max(0, P.charge - dt * 1.6);   // bleeds off if released
       }
+    }
+  } else if (P.weapon === 'blade' && P.diaryT <= 0) {
+    /* A swing runs on its own clock rather than on P.fireT, so a rate change
+       landing mid-sweep — Bloodlust stacking, a KILN PLATE coming off — can
+       never cut short an arc that is already travelling and owes damage to
+       bodies it has not reached yet. P.fireT is only the gap between swings. */
+    updateBlade(dt);
+    if (firing && P.swingT <= 0 && P.fireT <= 0) {
+      P.fireT = 1 / (bladeRate() * rateMul);
+      bladeStart();
     }
   } else if (firing && P.fireT <= 0 && P.diaryT <= 0) {
     P.fireT = 1 / (P.fireRate * rateMul);
@@ -12258,7 +13409,7 @@ const UNW_UNTOUCHED = 1.4;      // seconds of no contact before it starts closin
    point: the fight is equally punishing whichever you fly — EMBER paying for
    its share by holding a muzzle against a body that heals the instant it lets
    go, and the far half of its beam barely paying at all. */
-const UNW_DR = { bullet: 0.95, laser: 0.88 };
+const UNW_DR = { bullet: 0.95, laser: 0.88, blade: 0.86 };
 
 /* And a fixed pool rather than a wave-scaled one. It is a set piece triggered
    from a library at whatever depth you happen to be, and with per-loop health
@@ -12758,7 +13909,7 @@ function refillThrottle(bucket, target, dt) {
    bodies standing in a cluster is the ideal target for chain, splash and
    drones, so a maxed VOIDRUNNER puts roughly a million DPS into it and folded
    the whole encounter in two seconds. He is not going to allow that twice. */
-const AMAL_DR = { bullet: 0.95, laser: 0.5 };
+const AMAL_DR = { bullet: 0.95, laser: 0.5, blade: 0.6 };
 
 // which rage line lands as each piece is bolted on
 const AMAL_CUT_STEPS = [
@@ -17196,6 +18347,11 @@ function updatePickups(dt) {
           Audio_.heal();
           ringFx(dt0.x, dt0.y, 8, 90, COL.hp, 0.45, 3);
         }
+      } else if (d0.kind === 'gear') {
+        /* Held up rather than applied: the whole point of the slot is the
+           comparison, so picking a thing up opens the decision and nothing
+           else. Ahead of the nuke branch below, which is the `else`. */
+        openGear(d0.gear);
       } else {
         floatText(P.x, P.y - 30, 'OVERLOAD', '#f0abfc', 18);
         drawFlashT = 0.16; shake(0.8);
@@ -17263,7 +18419,7 @@ function render() {
   if (state === 'menu' || state === 'name' || state === 'devlogin' ||
       state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
-      (state === 'changelog' && logOverMenu()) || state === 'daily' ||
+      (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
       (state === 'skin' && skinOverMenu())) {
     if (state === 'chal') drawChal();
     else {
@@ -17274,6 +18430,7 @@ function render() {
       if (state === 'settings') drawSettings();
       if (state === 'changelog') drawChangelog();
       if (state === 'daily') drawDaily();
+      if (state === 'rush') drawRush();
       if (state === 'skin') drawSkins();
     }
     // these pages return before the pass at the foot of render(), and they are
@@ -17320,7 +18477,17 @@ function render() {
   drawCages();
   drawPortals();
   drawLibraryPortal();
-  if (inHub) drawHubWorld(P);
+  if (inHub) {
+    drawHubWorld(P);
+    /* The tutorial's dim, and the 1–5 it counts the plinths with. It works
+       in hubPos() world units, so it has to be drawn here, inside the camera
+       transform, after the room and before the ship. It used to be called
+       from the screen pass after drawHUD(), which drew arena-centre world
+       coordinates as raw pixels: the count and its dashed line landed far
+       off to the right of the plinths, the clear spot opened in the wrong
+       place, and the HUD was dimmed along with the room. */
+    drawHubTutDim(P);
+  }
   drawCorpses();
   drawEnemies();
   drawSentries();
@@ -17331,6 +18498,9 @@ function render() {
      painted across the plating instead of blowing out from behind it.
      odDrawWings sets its own 'lighter' and restores, so it is safe here. */
   odDrawShip();
+  /* THE VAGRANT's swing goes under the hull, so the grip end of the blade
+     disappears into the hand that is holding it. */
+  drawBladeSwing();
   if (state !== 'dead') drawPlayer();
   mpDrawCoopShip();          // the other pilot, whichever side you are on
 
@@ -17342,6 +18512,7 @@ function render() {
   drawFinaleBeams();
   drawDiary();
   drawLance();
+  drawBladeParry();
   drawMalFx();
   drawParticles();
   drawAsh();
@@ -17408,11 +18579,11 @@ function render() {
   drawLibraryPointer();
   if (isTouch && state === 'play') drawTouchSticks();
   if (state === 'levelup') drawLevelUp();
+  if (state === 'gear') drawGearOffer();
   if (state === 'shop') drawShop();
   if (state === 'planet') drawPlanetarium();
   odDrawGrade();
   if (inHub) {
-    drawHubTutDim(P);                       // the room dims to what he means
     if (hubTut.on) drawHubTut(); else drawHubHUD();
   }
   if (state === 'library') drawLibrary();
@@ -17479,6 +18650,11 @@ function osHullPath(id) {
     ctx.lineTo(-7, 12); ctx.lineTo(-5, 4.6); ctx.lineTo(-12, 3.2); ctx.lineTo(-9, 0);
     ctx.lineTo(-12, -3.2); ctx.lineTo(-5, -4.6); ctx.lineTo(-7, -12); ctx.lineTo(2, -13.5);
     ctx.lineTo(9, -7); ctx.lineTo(13, -2.6);
+  } else if (id === 'melee') {
+    ctx.moveTo(12.6, 0); ctx.lineTo(10.4, 4.4); ctx.lineTo(11.4, 10.2); ctx.lineTo(2.4, 13.2);
+    ctx.lineTo(-6.4, 12); ctx.lineTo(-9.2, 6); ctx.lineTo(-15, 4); ctx.lineTo(-12.8, 0);
+    ctx.lineTo(-15, -4); ctx.lineTo(-9.2, -6); ctx.lineTo(-6.4, -12); ctx.lineTo(2.4, -13.2);
+    ctx.lineTo(11.4, -10.2); ctx.lineTo(10.4, -4.4);
   } else {
     ctx.moveTo(18, 0); ctx.lineTo(9, 3.4); ctx.lineTo(5.5, 8.5); ctx.lineTo(-5, 13);
     ctx.lineTo(-8.5, 9.5); ctx.lineTo(-6, 4.2); ctx.lineTo(-10.5, 3.2); ctx.lineTo(-6.5, 0);
@@ -18627,7 +19803,11 @@ function drawHubTutDim(P) {
     HUB_PLINTHS.forEach((o, i) => {
       const q = hubPos(o);
       ctx.fillStyle = rgba(COLD_COL, 0.5);
-      ctx.fillText(String(i + 1), q.x, q.y + 74);
+      /* Under the name and its AWAKE line, not on them: the plinth prints its
+         name at q.y + 74 (sy + 40) and AWAKE at q.y + 88, and this used to sit on
+         the name's own baseline. Nobody saw it while this pass was drawn in
+         screen space, because the count never landed on the plinths at all. */
+      ctx.fillText(String(i + 1), q.x, q.y + 106);
     });
     ctx.textAlign = 'left';
     ctx.restore();
@@ -21689,6 +22869,26 @@ function hullPath(id) {
     ctx.lineTo(2, -13.5);
     ctx.lineTo(9, -7);
     ctx.lineTo(13, -2.6);
+  } else if (id === 'melee') {
+    /* The frame is what the pilot is without the room: a wreck. A blunt stub
+       where every other hull has a nose, mass across the shoulders and a
+       counterweight tail. Everything that makes it look like anything is
+       bolted on by drawVagrantHull(); this outline is also what the menu, the
+       afterimages and the twin draw, and there it is meant to look bare. */
+    ctx.moveTo(12.6, 0);
+    ctx.lineTo(10.4, 4.4);
+    ctx.lineTo(11.4, 10.2);
+    ctx.lineTo(2.4, 13.2);
+    ctx.lineTo(-6.4, 12);
+    ctx.lineTo(-9.2, 6);
+    ctx.lineTo(-15, 4);
+    ctx.lineTo(-12.8, 0);
+    ctx.lineTo(-15, -4);
+    ctx.lineTo(-9.2, -6);
+    ctx.lineTo(-6.4, -12);
+    ctx.lineTo(2.4, -13.2);
+    ctx.lineTo(11.4, -10.2);
+    ctx.lineTo(10.4, -4.4);
   } else {
     /* A swept interceptor rather than a paper dart: needle nose, cranked
        wings raked back past the body, notched twin-nozzle tail. Same length
@@ -22022,6 +23222,7 @@ function drawPlayer() {
   }
 
   if (blink) return;
+  if (SkinFx.on) SkinFx.under();
   ctx.save();
   ctx.translate(P.x, P.y);
   ctx.rotate(P.ang);
@@ -22041,6 +23242,20 @@ function drawPlayer() {
     drawShipHull(rgba(hullCol, 0.055 * (1 - i / 6.5) + 0.012), 'rgba(0,0,0,0)');
   }
   ctx.restore();
+
+  /* THE VAGRANT wears its kit, so its hull is a stack rather than a silhouette
+     with furniture on it — see drawVagrantHull. The game's own states still
+     have to read on it, so the hurt flash and Ghost Step's violet are handed in
+     as the frame's colours. Drawn whatever the Surface materials setting says:
+     on this hull the detail is not decoration, it is the build. */
+  if (P.charId === 'melee') {
+    drawVagrantHull(P, uiTime, hullCol,
+                    phasing ? 'rgba(167,139,250,0.10)'
+                    : P.hurtFlash > 0 ? 'rgba(239,68,68,0.5)' : null);
+    ctx.restore();
+    if (SkinFx.on) SkinFx.player();
+    return;
+  }
 
   ctx.lineWidth = 2.4;
   ctx.strokeStyle = hullCol;
@@ -22698,6 +23913,22 @@ function drawDrops() {
   for (const d of drops) {
     const s = 1 + Math.sin(d.t) * 0.16;
     drawGlow(d.x, d.y, d.r * 3.4 * s, d.col, 0.8);
+    /* Gear is the one drop worth crossing a room for, so it is the one drop
+       with a shape: the slot's own glyph, in its rarity colour, standing on a
+       column of light. A heal and a credit stay bare glows — they are picked up
+       on the way past and never chosen. */
+    if (d.kind !== 'gear') continue;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5 + Math.sin(d.t * 1.3) * 0.2;
+    ctx.strokeStyle = d.col; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y - 4); ctx.lineTo(d.x, d.y - 30 - 6 * s);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.translate(d.x, d.y - 2 - 3 * s);
+    gearSlotGlyph(0, 0, 9, d.gear ? d.gear.slot : 'core', d.col);
+    ctx.restore();
   }
 }
 /* Chain lightning as a fractal rather than a zigzag. The span is subdivided by
@@ -22819,10 +24050,10 @@ function drawVignette() {
    it answers when it is over something you can press — the ring closes and the
    head brightens, so hit targets announce themselves before you click.
    ========================================================================= */
-const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'codex', 'gfx',
+const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'skin', 'devlogin'];
+                          'daily', 'rush', 'skin', 'devlogin'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -22855,6 +24086,7 @@ function uiCursorHot() {
       return shopIndexAt() >= 0 || inRect(mx, my, b.reroll) || inRect(mx, my, b.leave);
     }
     if (state === 'levelup') return offerIndexAt(mouse.x, mouse.y) >= 0;
+    if (state === 'gear') return gearHitAt(mouse.x, mouse.y) >= 0;
     if (state === 'codex') {
       const list = codexList();
       for (let i = 0; i < list.length; i++)
@@ -22962,6 +24194,830 @@ function roundRect(x, y, w, h, r) {
 }
 
 let hudBotY = 0;                   // next free baseline in the bottom-left column
+
+/* ========================= THE VAGRANT, DRAWN ============================
+   Scrap-knight pass (Vagrant redesign v1). The frame is what the pilot is
+   without the room: a wreck. Everything that makes it look like anything is
+   bolted on, and every gear base has its own artwork, so one piece of art
+   answers in four places — carried on the hull, thrown along the swing,
+   printed on the gear card, and shrunk into the kit panel. An item is
+   recognised before its name is read.
+
+   Lifted from the standalone preview, where every function took its context
+   as an argument; here they draw on the game's own ctx like everything else,
+   and read the game's own item model (gearBase, gearName, gearLines) rather
+   than the preview's stand-in one.
+========================================================================= */
+
+/* The design's two plate steels. Prefixed because STEEL already belongs to
+   something else in this file. */
+const VAG_STEEL = '#16213a', VAG_STEEL2 = '#24324e';
+
+/* --- blades. Grip at (0,0), edge along +x, `len` native so the swing can
+   scale any of them to the reach it actually has. ------------------------ */
+const BLADE_ART = {
+  edge: { len: 15, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.8); ctx.lineTo(5.5, -2.8); ctx.lineTo(8, -1.4); ctx.lineTo(12, -3.2);
+    ctx.lineTo(15, -0.4); ctx.lineTo(10.5, 1.7); ctx.lineTo(5, 2.3); ctx.lineTo(0, 1.8);
+    ctx.closePath(); } },
+  shiv: { len: 11, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.5); ctx.lineTo(7, -1.7); ctx.lineTo(11, 0); ctx.lineTo(7, 1.7); ctx.lineTo(0, 1.5);
+    ctx.closePath(); } },
+  cleaver: { len: 16, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.5); ctx.lineTo(6.5, -1.8); ctx.lineTo(6.5, -7.4); ctx.lineTo(16, -8.4);
+    ctx.lineTo(16, 6.4); ctx.lineTo(6.5, 5.4); ctx.lineTo(6.5, 1.8); ctx.lineTo(0, 1.5);
+    ctx.closePath(); } },
+  pike: { len: 32, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.3); ctx.lineTo(22, -1.3); ctx.lineTo(24.5, -3.6); ctx.lineTo(26, -1.1);
+    ctx.lineTo(32, 0); ctx.lineTo(26, 1.1); ctx.lineTo(24.5, 3.6); ctx.lineTo(22, 1.3); ctx.lineTo(0, 1.3);
+    ctx.closePath(); } },
+  great: { len: 27, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -2.1); ctx.lineTo(5, -2.4); ctx.lineTo(6.5, -5.4); ctx.lineTo(22, -4.6);
+    ctx.lineTo(27, 0); ctx.lineTo(22, 4.6); ctx.lineTo(6.5, 5.4); ctx.lineTo(5, 2.4); ctx.lineTo(0, 2.1);
+    ctx.closePath(); } },
+  flense: { len: 17, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.6); ctx.quadraticCurveTo(10, -7.5, 17, -5.2);
+    ctx.quadraticCurveTo(13, -1.2, 11, 2.4);
+    ctx.lineTo(9, 0.4); ctx.lineTo(6.5, 2.8); ctx.lineTo(4.5, 0.8); ctx.lineTo(2, 2.6);
+    ctx.lineTo(0, 1.6); ctx.closePath(); } },
+  tooth: { len: 18, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.5); ctx.lineTo(9, -2.4); ctx.lineTo(18, -4.4); ctx.lineTo(14, -1);
+    ctx.lineTo(18, 1.6); ctx.lineTo(9, 2.4); ctx.lineTo(0, 1.5); ctx.closePath(); } },
+  hook: { len: 19, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.5); ctx.lineTo(12, -1.7); ctx.quadraticCurveTo(19.5, -2.6, 18, 3.6);
+    ctx.lineTo(15.4, 6.4); ctx.lineTo(15.2, 2.2); ctx.quadraticCurveTo(15.6, 1.3, 12, 1.7);
+    ctx.lineTo(0, 1.5); ctx.closePath(); } }
+};
+
+/* --- plates. `under` is bolted around the frame and is the layer allowed to
+   change the silhouette; `over` is the little that has to sit on top (a mesh,
+   a specular, heat). The frame is redrawn between the two, so however heavy
+   the armour gets the pilot underneath is never painted out. -------------- */
+const PLATE_ART = {
+  scrapp: { under(trim, open) {
+    // mismatched salvage, hung at different angles and never quite square
+    for (const sd of [1, -1]) {
+      ctx.save(); ctx.scale(1, sd); ctx.translate(0, open * 1.6);
+      ctx.fillStyle = VAG_STEEL; ctx.strokeStyle = trim; ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(1.4, 6.4); ctx.lineTo(9.2, 8); ctx.lineTo(7.4, 16.2);
+      ctx.lineTo(-1.4, 13.8); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-9.8, 4.6); ctx.lineTo(-2.6, 6.4); ctx.lineTo(-4.6, 14.6);
+      ctx.lineTo(-11.4, 10.6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = rgba(trim, 0.9);
+      for (const p of [[0.6, 9.6], [6.4, 11], [-8.4, 7.4]]) {
+        ctx.beginPath(); ctx.arc(p[0], p[1], 0.9, 0, TAU); ctx.fill(); }
+      ctx.restore(); } } },
+  weave: { over(trim) {
+    // weighs nothing: a mesh, not a panel — you can see the frame through it
+    ctx.strokeStyle = rgba(trim, 0.6); ctx.lineWidth = 0.8; ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const x = 8 - i * 4.4;
+      ctx.moveTo(x, -10.5 + Math.abs(i - 2) * 1.6); ctx.lineTo(x - 2.4, 10.5 - Math.abs(i - 2) * 1.6); }
+    ctx.moveTo(-10, -4.4); ctx.lineTo(9, -3.4); ctx.moveTo(-10, 4.4); ctx.lineTo(9, 3.4);
+    ctx.stroke();
+    ctx.fillStyle = rgba(trim, 0.8);
+    for (const p of [[8, -9.4], [8, 9.4], [-10, -4.4], [-10, 4.4]]) {
+      ctx.beginPath(); ctx.arc(p[0], p[1], 0.8, 0, TAU); ctx.fill(); } } },
+  cara: { under(trim) {
+    // one continuous shell, following the whole outline out by three
+    ctx.fillStyle = VAG_STEEL2; ctx.strokeStyle = trim; ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(15.2, 0); ctx.lineTo(12.6, 5.6); ctx.lineTo(13.8, 12.8); ctx.lineTo(2.6, 16.2);
+    ctx.lineTo(-7.8, 14.8); ctx.lineTo(-11, 7.4); ctx.lineTo(-17.6, 4.8); ctx.lineTo(-15.2, 0);
+    ctx.lineTo(-17.6, -4.8); ctx.lineTo(-11, -7.4); ctx.lineTo(-7.8, -14.8); ctx.lineTo(2.6, -16.2);
+    ctx.lineTo(13.8, -12.8); ctx.lineTo(12.6, -5.6); ctx.closePath();
+    ctx.fill(); ctx.stroke(); },
+    over(trim) {
+      ctx.strokeStyle = rgba(trim, 0.4); ctx.lineWidth = 0.9; ctx.beginPath();
+      ctx.moveTo(9.6, -11.4); ctx.lineTo(8.2, 11.4); ctx.moveTo(-4.6, -14); ctx.lineTo(-6, 14);
+      ctx.stroke(); } },
+  husk: { under(trim, open) {
+    // more of you to lose: two pauldrons, and the hull genuinely reads bigger
+    for (const sd of [1, -1]) {
+      ctx.save(); ctx.scale(1, sd); ctx.translate(0, open * 2.4);
+      ctx.fillStyle = VAG_STEEL2; ctx.strokeStyle = trim; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(8.6, 7.4); ctx.quadraticCurveTo(14.6, 11, 11.2, 19.6);
+      ctx.quadraticCurveTo(2.6, 22.4, -5.4, 18.6); ctx.quadraticCurveTo(-7.4, 11, -3.2, 7.6);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = rgba(trim, 0.45); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-1.4, 10.6); ctx.quadraticCurveTo(5.4, 13.4, 8.2, 18.2); ctx.stroke();
+      ctx.restore(); } } },
+  mirror: { under(trim) {
+    // made to be hit on purpose: two flat facets angled off the front
+    for (const sd of [1, -1]) {
+      ctx.save(); ctx.scale(1, sd);
+      ctx.fillStyle = '#101d33'; ctx.strokeStyle = trim; ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(11.6, -1.2); ctx.lineTo(16.8, 5.4); ctx.lineTo(9.6, 15.2); ctx.lineTo(2.2, 11.4);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore(); } },
+    over(trim, open, t) {
+      for (const sd of [1, -1]) {
+        ctx.save(); ctx.scale(1, sd);
+        ctx.beginPath();
+        ctx.moveTo(11.6, -1.2); ctx.lineTo(16.8, 5.4); ctx.lineTo(9.6, 15.2); ctx.lineTo(2.2, 11.4);
+        ctx.closePath(); ctx.clip();
+        const sw = ((t * 0.45 + (sd > 0 ? 0 : 0.5)) % 1) * 26 - 4;
+        const g = ctx.createLinearGradient(sw - 4, 0, sw + 4, 16);
+        g.addColorStop(0, 'rgba(226,232,240,0)');
+        g.addColorStop(0.5, 'rgba(226,232,240,0.55)');
+        g.addColorStop(1, 'rgba(226,232,240,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, -4, 20, 22); ctx.restore(); } } },
+  briar: { under(trim, open) {
+    // touching it is the mistake
+    ctx.fillStyle = VAG_STEEL; ctx.strokeStyle = trim; ctx.lineWidth = 1;
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * TAU + 0.35, r = 10.8 + (i % 2) * 1.2, L = r + 5.6 + open * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * r - Math.sin(a) * 2.1, Math.sin(a) * r + Math.cos(a) * 2.1);
+      ctx.lineTo(Math.cos(a) * L, Math.sin(a) * L);
+      ctx.lineTo(Math.cos(a) * r + Math.sin(a) * 2.1, Math.sin(a) * r - Math.cos(a) * 2.1);
+      ctx.closePath(); ctx.fill(); ctx.stroke(); } } },
+  kiln: { under(trim, open) {
+    for (const sd of [1, -1]) {
+      ctx.save(); ctx.scale(1, sd); ctx.translate(0, open * 1.6);
+      ctx.fillStyle = VAG_STEEL2; ctx.strokeStyle = trim; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(-8.4, 5.6); ctx.lineTo(7.8, 7.2); ctx.lineTo(6.2, 16);
+      ctx.lineTo(-9.8, 12.6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore(); } },
+    over(trim, open, t) {
+      // runs hot, and the vents say so
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const sd of [1, -1]) {
+        ctx.save(); ctx.scale(1, sd); ctx.translate(0, open * 1.6);
+        ctx.globalAlpha = 0.5 + Math.sin(t * 4 + sd) * 0.22;
+        ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 1.4; ctx.beginPath();
+        for (let i = 0; i < 3; i++) {
+          const x = 4 - i * 4.4;
+          ctx.moveTo(x, 8.8); ctx.lineTo(x - 1, 13.8); }
+        ctx.stroke(); ctx.restore(); }
+      ctx.restore(); } }
+};
+
+/* --- cores. The light in the chest, and the only part of the hull that is
+   allowed to be a colour the pilot is not. ------------------------------- */
+const CORE_ART = {
+  embc:   { c: '#fb923c', draw(t) { poly(0, 0, 3.2, 3, t * 1.4); ctx.fill();
+              ctx.globalAlpha = 0.5 + Math.sin(t * 17) * 0.3; poly(0, 0, 4.6, 3, -t * 1.1); ctx.stroke(); } },
+  glac:   { c: '#7dd3fc', draw(t) { poly(0, 0, 3.4, 6, t * 0.3); ctx.fill();
+              ctx.globalAlpha = 0.55; poly(0, 0, 5.2, 6, t * 0.3 + 0.5); ctx.stroke(); } },
+  leech:  { c: '#f87171', draw(t) {
+              const b = 1 + Math.max(0, Math.sin(t * 5)) * 0.35; ctx.beginPath();
+              ctx.arc(0, 0, 2.9 * b, 0, TAU); ctx.fill();
+              ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(0, 0, 5 * b, 0, TAU); ctx.stroke(); } },
+  echo:   { c: '#c4b5fd', draw() { ctx.beginPath(); ctx.arc(0, 0, 2.4, 0, TAU); ctx.fill();
+              ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.arc(0.9, 0, 4.4, 0, TAU); ctx.stroke();
+              ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(-0.9, 0, 5.6, 0, TAU); ctx.stroke(); } },
+  arcc:   { c: '#a78bfa', draw(t) { ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, TAU); ctx.fill();
+              ctx.globalAlpha = 0.8; ctx.beginPath();
+              const a = t * 3;
+              for (let i = 0; i < 5; i++) {
+                const r = 3.4 + i * 0.9, an = a + i * 1.9;
+                const x = Math.cos(an) * r, y = Math.sin(an) * r; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+              ctx.stroke(); } },
+  voidc:  { c: '#818cf8', draw(t) {
+              ctx.save(); ctx.globalCompositeOperation = 'source-over';
+              ctx.fillStyle = '#05060a'; ctx.beginPath(); ctx.arc(0, 0, 3.6, 0, TAU); ctx.fill(); ctx.restore();
+              ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(0, 0, 3.8, 0, TAU); ctx.stroke();
+              ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(0, 0, 5.4 + Math.sin(t * 2) * 0.8, 0, TAU); ctx.stroke(); } },
+  spallc: { c: '#cbd5e1', draw() {
+              for (let i = 0; i < 5; i++) {
+                const a = i / 5 * TAU + 0.4;
+                ctx.save(); ctx.rotate(a); ctx.beginPath();
+                ctx.moveTo(1.4, -1.1); ctx.lineTo(4.6, -0.5); ctx.lineTo(4.2, 1.3); ctx.lineTo(1.4, 1.1);
+                ctx.closePath(); ctx.fill(); ctx.restore(); }
+              ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, TAU); ctx.fill(); } },
+  ripc:   { c: '#7dd3fc', draw(t) { ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, TAU); ctx.fill();
+              const p = (t * 0.8) % 1; ctx.globalAlpha = (1 - p) * 0.7;
+              ctx.beginPath(); ctx.arc(0, 0, 2.6 + p * 5, 0, TAU); ctx.stroke(); } }
+};
+
+/* --- sigils. A token on a short tether at the tail, because what the run
+   owes you is carried rather than worn. ---------------------------------- */
+const SIGIL_ART = {
+  tally:  { draw() { ctx.beginPath();
+              for (let i = 0; i < 4; i++) { ctx.moveTo(-1.8 + i * 1.2, -2.4); ctx.lineTo(-1.8 + i * 1.2, 2.4); }
+              ctx.moveTo(-2.6, 1.4); ctx.lineTo(2.4, -1.8); ctx.stroke(); } },
+  toll:   { draw() { ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, TAU); ctx.stroke();
+              ctx.beginPath(); ctx.arc(0, 0, 1.1, 0, TAU); ctx.fill(); } },
+  omen:   { draw() { ctx.beginPath();
+              ctx.moveTo(-3.2, 0); ctx.quadraticCurveTo(0, -3, 3.2, 0); ctx.quadraticCurveTo(0, 3, -3.2, 0);
+              ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 0.9, 0, TAU); ctx.fill(); } },
+  vigil:  { draw() { ctx.beginPath();
+              ctx.moveTo(0, -3); ctx.lineTo(0, 3); ctx.moveTo(-2.2, -0.6); ctx.lineTo(2.2, -0.6); ctx.stroke(); } },
+  grudge: { draw() { ctx.beginPath();
+              ctx.moveTo(-2.8, -2.6); ctx.lineTo(0.4, -0.6); ctx.lineTo(-1.6, 0.4); ctx.lineTo(2.8, 2.8);
+              ctx.stroke(); } },
+  whet:   { draw() { ctx.beginPath();
+              ctx.moveTo(-2.8, -1.6); ctx.lineTo(2.8, -2.4); ctx.lineTo(2.8, 1.6); ctx.lineTo(-2.8, 2.4);
+              ctx.closePath(); ctx.stroke(); } },
+  stride: { draw() { ctx.beginPath();
+              ctx.moveTo(-2.4, -2.8); ctx.lineTo(1.6, 0); ctx.lineTo(-2.4, 2.8);
+              ctx.moveTo(0.4, -2.8); ctx.lineTo(4, 0); ctx.lineTo(0.4, 2.8); ctx.stroke(); } }
+};
+
+/* The rest pose of whatever is being carried. Alternates with swingSide so a
+   chain reads as one motion rather than three identical twitches. Held low and
+   back at rest; at combo three it comes up and across, which is the whole of
+   what "the next one is a finisher" looks like from ten feet away with the HUD
+   off the side of the screen. `rig` is that shift, eased by bladeTick(). */
+function bladeRestPose(V) {
+  const sd = V.swingSide ? -1 : 1;
+  const wind = V.rig || 0;
+  return { x: -2 + wind * 4, y: sd * (7.6 - wind * 3),
+           a: sd * (2.5 - wind * 1.15), s: 0.74 };
+}
+
+/* One blade, drawn. `s` scales the native art; trim is the rarity colour, and
+   it is the whole of how a legendary reads as a legendary from across a room. */
+function drawBladeArt(it, s, fill, trim, glowA, lw) {
+  const art = BLADE_ART[it && it.b] || BLADE_ART.edge;
+  ctx.save(); ctx.scale(s, s);
+  ctx.fillStyle = fill; ctx.strokeStyle = trim; ctx.lineWidth = (lw || 1.4) / s;
+  art.draw(); ctx.fill(); ctx.stroke();
+  // the edge itself, one bright line down the long side
+  ctx.strokeStyle = rgba('#e0e7ff', 0.7); ctx.lineWidth = 0.9 / s;
+  ctx.beginPath(); ctx.moveTo(art.len * 0.28, -0.2); ctx.lineTo(art.len * 0.92, -0.2); ctx.stroke();
+  ctx.restore();
+  if (glowA > 0) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(art.len * s * 0.7, 0, art.len * s * 0.5, trim, glowA);
+    ctx.restore();
+  }
+}
+
+/* The hull, wearing what it found, in hull space (already translated to the
+   ship and rotated to its aim). Draw order is the order it was bolted on —
+   plate, frame, plate trim, core, sigil, blade — so the weapon is always on top
+   and the silhouette answer to "what am I carrying" is never occluded.
+
+   `V` is anything shaped like P: the ship itself in drawPlayer(), and a
+   stand-in wearing the offered item on the gear card. The frame colours are
+   passed in so the game's own states still read on this hull — the hurt flash
+   and Ghost Step's violet — exactly as they do on the other three. */
+function drawVagrantHull(V, t, frameCol, frameFill) {
+  const g = V.gear || {};
+  const fcol = frameCol || COL.player;
+  const rigcol = k => g[k] ? (RARITY[g[k].rar] || '#94a3b8') : rgba(COL.player, 0.6);
+  const open = V.rig || 0;
+  const plate = g.plate && PLATE_ART[g.plate.b];
+
+  ctx.save();
+  // PLATE, under: bolted around the frame, and the one layer that is allowed
+  // to change the silhouette
+  if (plate && plate.under) { ctx.save(); plate.under(rigcol('plate'), open, t); ctx.restore(); }
+
+  // the frame, on top of its own armour, so the pilot is never painted out
+  hullPath('melee');
+  ctx.fillStyle = frameFill || 'rgba(14,21,38,0.97)';
+  ctx.strokeStyle = fcol; ctx.lineWidth = 1.8;
+  ctx.fill(); ctx.stroke();
+  // structural ribs, always there, always the same: this is the part that is his
+  ctx.strokeStyle = 'rgba(8,13,26,0.9)'; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(1.6, -10.4); ctx.lineTo(1.6, 10.4); ctx.stroke();
+  ctx.strokeStyle = rgba(COL.player, 0.5); ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-6, -5.6); ctx.lineTo(8, -4); ctx.moveTo(-6, 5.6); ctx.lineTo(8, 4);
+  ctx.moveTo(-9.6, 0); ctx.lineTo(-4.4, 0);
+  ctx.stroke();
+
+  if (plate && plate.over) { ctx.save(); plate.over(rigcol('plate'), open, t); ctx.restore(); }
+
+  // CORE — the chest light
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const cc = g.core && CORE_ART[g.core.b];
+  if (cc) {
+    drawGlow(-1.5, 0, 10 + open * 5, cc.c, 0.4 + open * 0.25);
+    ctx.fillStyle = cc.c; ctx.strokeStyle = cc.c; ctx.lineWidth = 0.9;
+    ctx.save(); ctx.translate(-1.5, 0); cc.draw(t, open); ctx.restore();
+  } else {
+    drawGlow(-1.5, 0, 6, COL.player, 0.25);
+    ctx.fillStyle = rgba(COL.player, 0.5);
+    ctx.beginPath(); ctx.arc(-1.5, 0, 1.8, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+
+  // SIGIL — a token on a tether at the tail
+  const sg = g.sigil && SIGIL_ART[g.sigil.b];
+  if (sg) {
+    ctx.save(); ctx.translate(-9.4, 4.4); ctx.rotate(Math.sin(t * 2.6) * 0.32);
+    ctx.strokeStyle = rgba(rigcol('sigil'), 0.6); ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 3); ctx.stroke();
+    ctx.translate(0, 5.8);
+    ctx.strokeStyle = rigcol('sigil'); ctx.fillStyle = rigcol('sigil'); ctx.lineWidth = 0.9;
+    sg.draw();
+    ctx.restore();
+  }
+
+  // BLADE — carried, until it is not: mid-swing it is out on the arc instead
+  if (!(V.swingT > 0)) {
+    const p = bladeRestPose(V);
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
+    drawBladeArt(g.blade, p.s, '#1b2740', rigcol('blade'),
+                 g.blade && g.blade.rar === 'legend' ? 0.3 : 0);
+    ctx.restore();
+  }
+
+  // combo readout: the two shoulder horns, lit by the chain
+  const ck = V.riposte > 0 ? 1 : clamp((V.combo || 0) / (COMBO_N - 1), 0, 1);
+  if (ck > 0.02 || open > 0.02) {
+    const hot = V.riposte > 0 || V.combo >= COMBO_N - 1;
+    const hc = hot ? COL.crit : COL.player;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.3 + ck * 0.55;
+    ctx.strokeStyle = hc; ctx.lineWidth = 1.4 + ck * 1.2;
+    ctx.beginPath();
+    ctx.moveTo(2.4, 13.2); ctx.lineTo(11.4 + open * 2, 10.2 - open * 1.4);
+    ctx.moveTo(2.4, -13.2); ctx.lineTo(11.4 + open * 2, -10.2 + open * 1.4);
+    ctx.stroke(); ctx.globalAlpha = 1;
+    drawGlow(11.4, 10.2, 4 + ck * 7, hc, 0.25 + ck * 0.4);
+    drawGlow(11.4, -10.2, 4 + ck * 7, hc, 0.25 + ck * 0.4);
+    ctx.restore();
+  }
+
+  /* The beak. The hull has no barrel and no nose, and in a twin-stick game that
+     is not a style choice you can afford — so one hard bright chevron, drawn
+     last, over everything the room bolted on, says which way this is pointing
+     from across the arena. */
+  ctx.strokeStyle = '#eef2ff'; ctx.lineWidth = 1.7; ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  ctx.moveTo(7.6, -5.4); ctx.lineTo(13.2, 0); ctx.lineTo(7.6, 5.4);
+  ctx.stroke();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  drawGlow(12, 0, 5, COL.bullet, 0.3); ctx.restore();
+
+  // the drive: one cold thruster, doing the minimum
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const fl = 0.7 + Math.sin(t * 20) * 0.3;
+  drawGlow(-14, 0, 7 * fl, COL.player, 0.24);
+  ctx.fillStyle = rgba('#c7d2fe', 0.36);
+  ctx.beginPath(); ctx.moveTo(-12, 2.2); ctx.lineTo(-18 - 4 * fl, 0); ctx.lineTo(-12, -2.2);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+/* ------------------------------- the swing --------------------------------
+   The sector the edge has actually covered, which is the figure updateBlade()
+   struck bodies with — plus the blade itself, at true scale, at the leading
+   edge. A GREATBLADE's swing has a greatblade in it. Drawn under the hull, so
+   the grip end disappears into the hand that is holding it. */
+function drawBladeSwing() {
+  if (!isBlade()) return;
+  const live = P.swingT > 0;
+  const fade = live ? 1 : clamp((P.swingFade || 0) / 0.14, 0, 1);
+  if (fade <= 0.002) return;
+  const arc = P.swingArc || BLADE_ARC, reach = P.swingReach || (P.r + BLADE_REACH);
+  const a0 = P.swingA0, dir = P.swingDir || 1;
+  const prog = live ? P.swingP : 1;
+  const a1 = a0 + dir * arc * prog;
+  const fin = !!P.swingFin;
+  const col = fin ? COL.crit : COL.player;
+  const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+
+  ctx.save();
+  ctx.translate(P.x, P.y);
+  ctx.globalCompositeOperation = 'lighter';
+
+  /* The covered sector, banded rather than flat-filled: eight arcs of rising
+     alpha toward the edge, so the wedge reads as something travelling instead
+     of a hitbox switched on. */
+  const N = 8;
+  for (let i = 0; i < N; i++) {
+    const k0 = i / N, k1 = (i + 1) / N;
+    const b0 = lerp(a0, a1, k0), b1 = lerp(a0, a1, k1);
+    ctx.globalAlpha = (fin ? 0.3 : 0.19) * fade * (0.18 + k0 * 1.3);
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.arc(0, 0, reach, Math.min(b0, b1), Math.max(b0, b1));
+    ctx.closePath(); ctx.fill();
+  }
+  // the outer edge: the line the reach actually is
+  ctx.globalAlpha = (fin ? 1 : 0.8) * fade;
+  ctx.strokeStyle = col; ctx.lineWidth = fin ? 3.6 : 2.4;
+  ctx.beginPath(); ctx.arc(0, 0, reach, lo, hi); ctx.stroke();
+  // and the inner one, on a finisher only, so the wedge closes
+  if (fin) {
+    ctx.globalAlpha = 0.45 * fade; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 0, reach * 0.46, lo, hi); ctx.stroke();
+  }
+
+  /* Four ghosts of the blade along the arc behind the edge. Motion blur done as
+     the actual object, which is cheaper than it looks and reads far better
+     than a smear. */
+  const blade = P.gear && P.gear.blade;
+  const art = BLADE_ART[blade && blade.b] || BLADE_ART.edge;
+  const s = (reach * 0.94) / art.len;
+  if (live) {
+    for (let i = 4; i >= 1; i--) {
+      const k = clamp(prog - i * 0.075, 0, 1);
+      if (k <= 0) continue;
+      ctx.globalAlpha = fade * 0.17 * (1 - i / 5) * (fin ? 2 : 1.4);
+      ctx.save(); ctx.rotate(a0 + dir * arc * k); ctx.scale(s, s);
+      ctx.fillStyle = fin ? '#fef3c7' : COL.bullet; art.draw(); ctx.fill(); ctx.restore();
+    }
+    // the edge itself, at full brightness, last and widest. Filled thin and
+    // outlined hard, so a GREATBLADE at reach is a blade and not a white slab.
+    ctx.globalAlpha = fade;
+    ctx.save(); ctx.rotate(a1);
+    drawBladeArt(blade, s,
+                 fin ? 'rgba(254,243,199,0.6)' : rgba(COL.bullet, 0.42),
+                 fin ? '#fffbeb' : '#e0e7ff', 0, fin ? 3.4 : 2.4);
+    ctx.restore();
+    drawGlow(Math.cos(a1) * reach, Math.sin(a1) * reach, fin ? 26 : 14, col, 0.65 * fade);
+  } else {
+    /* What is left behind: a thin cut in the floor along the swept edge,
+       fading out. Without it a swing has no consequence between frames. */
+    ctx.globalAlpha = fade * 0.5; ctx.strokeStyle = fin ? '#fef3c7' : COL.bullet;
+    ctx.lineWidth = fin ? 2.4 : 1.2;
+    ctx.beginPath(); ctx.arc(0, 0, reach * 0.97, lo, hi); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ------------------------------- the guard --------------------------------
+   It refuses damage from every direction, so it cannot be a shape on the
+   front. Six faceted segments snapping inward: a moment, not a facing. And
+   when one actually connects, the refusal made loud — a hard ring and six
+   shards thrown back out along the facets. */
+function drawBladeParry() {
+  if (!isBlade()) return;
+  const t = uiTime;
+  if (P.parryT > 0) {
+    const k = clamp(P.parryT / Math.max(0.01, bladeParryWin()), 0, 1);
+    const R = P.r + 7 + (1 - k) * 9;
+    ctx.save(); ctx.translate(P.x, P.y);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.rotate(t * 1.6);
+    const seg = TAU / 6;
+    for (let i = 0; i < 6; i++) {
+      const a0 = i * seg + 0.1, a1 = a0 + seg * 0.68;
+      ctx.globalAlpha = 0.3 + 0.5 * k;
+      ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 2 + 2.4 * k;
+      ctx.beginPath(); ctx.arc(0, 0, R, a0, a1); ctx.stroke();
+      // the facet's leading corner, brighter
+      ctx.globalAlpha = 0.5 + 0.5 * k;
+      ctx.fillStyle = '#e0f2fe';
+      ctx.beginPath(); ctx.arc(Math.cos(a1) * R, Math.sin(a1) * R, 1.5 + k, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 0.16 * k; ctx.fillStyle = '#7dd3fc';
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  if (P.parryFx > 0) {
+    const k = clamp(P.parryFx, 0, 1);
+    ctx.save(); ctx.translate(P.x, P.y); ctx.globalCompositeOperation = 'lighter';
+    const R = P.r + 8 + (1 - k) * 30;
+    ctx.globalAlpha = k; ctx.strokeStyle = '#f0f9ff'; ctx.lineWidth = 1.4 + k * 4;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.stroke();
+    drawGlow(0, 0, R * 1.15, '#7dd3fc', k * 0.3);
+    ctx.globalAlpha = k * 0.95; ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 2.6;
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * (R - 7), Math.sin(a) * (R - 7));
+      ctx.lineTo(Math.cos(a) * (R + 10), Math.sin(a) * (R + 10)); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* ------------------------------ the kit panel ------------------------------
+   Four rows under the dash pips, on the same stacked cursor every other
+   carried thing uses, and every row carries the item's own art. The whole
+   build lives here, so it has to be readable at a glance and has to agree
+   with what is bolted to the hull.
+
+   The design was laid out on an alphabetic baseline and drawHUD() runs on a
+   middle one, so the block is drawn alphabetic and dropped 3.5px: its text
+   then sits on the cursor exactly where every other HUD row's does, and its
+   art stays where the design put it relative to the text. */
+function drawBladeHUD(pad, bw, ly) {
+  if (!isBlade()) return ly;
+  const t = uiTime;
+  ctx.save();
+  ctx.translate(0, 3.5);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+
+  const ready = P.parryCd <= 0;
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = P.parryT > 0 ? '#e0f2fe' : ready ? '#7dd3fc' : '#475569';
+  ctx.fillText(P.parryT > 0 ? 'PARRY' : '[F] PARRY', pad, ly);
+  if (!ready) {
+    const w = 34, k = 1 - clamp(P.parryCd / PARRY_CD, 0, 1);
+    ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(pad + 56, ly - 3, w, 5, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(125,211,252,0.7)'; roundRect(pad + 56, ly - 3, Math.max(2, w * k), 5, 3); ctx.fill();
+  }
+  // combo chevrons: the last is drawn as the finisher it is about to become,
+  // and a banked riposte lights all of them
+  const rip = P.riposte > 0;
+  let cx0 = pad + 100;
+  for (let i = 0; i < COMBO_N; i++) {
+    const on = rip || i < P.combo, last = i === COMBO_N - 1;
+    ctx.fillStyle = on ? (last || rip ? COL.crit : COL.player) : 'rgba(148,163,184,0.2)';
+    ctx.beginPath();
+    if (last) {
+      ctx.moveTo(cx0, ly - 4.5); ctx.lineTo(cx0 + 8, ly - 0.5); ctx.lineTo(cx0, ly + 3.5);
+      ctx.lineTo(cx0 + 3, ly - 0.5); ctx.closePath();
+    } else {
+      ctx.moveTo(cx0, ly - 4); ctx.lineTo(cx0 + 5, ly - 0.5); ctx.lineTo(cx0, ly + 3);
+      ctx.lineTo(cx0 + 2, ly - 0.5); ctx.closePath();
+    }
+    ctx.fill(); cx0 += last ? 13 : 9;
+  }
+  ly += 19;
+
+  for (const sl of GEAR_SLOTS) {
+    const it = P.gear ? P.gear[sl.k] : null;
+    const col = it ? (RARITY[it.rar] || '#94a3b8') : '#334155';
+    // rarity tick, then the item's own art, then the name
+    ctx.fillStyle = col; roundRect(pad, ly - 7.5, 2, 10, 1); ctx.fill();
+    ctx.save(); ctx.translate(pad + 8, ly - 2.5);
+    ctx.globalAlpha = it ? 1 : 0.35;
+    drawKitGlyph(sl.k, it, col, 7, t);
+    ctx.restore();
+    ctx.font = "700 8px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = it ? rgba(col, 0.7) : '#334155';
+    ctx.fillText(sl.n, pad + 22, ly);
+    const nm = it ? gearName(it) : '—';
+    fitFont(nm, Math.max(60, bw - 62), '700', 9.5,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = it ? col : '#334155';
+    ctx.fillText(nm, pad + 58, ly);
+    ly += 14;
+  }
+  ctx.restore();
+  return ly + 6;
+}
+
+/* One item at icon size, for the kit panel and the gear card, centred on the
+   origin. Each slot draws its own art; an empty slot draws the slot's shape in
+   outline, so the panel still says what is missing. */
+function drawKitGlyph(slot, it, col, r, t) {
+  ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.18); ctx.lineWidth = 1.1;
+  if (slot === 'blade') {
+    const art = it && BLADE_ART[it.b];
+    if (!art) { ctx.beginPath(); ctx.moveTo(-r * 0.7, 0); ctx.lineTo(r * 0.7, 0); ctx.stroke(); return; }
+    const s = (r * 2) / art.len;
+    ctx.save(); ctx.rotate(-0.5); ctx.translate(-r * 0.8, 0); ctx.scale(s, s);
+    ctx.lineWidth = 1.1 / s; art.draw(); ctx.fill(); ctx.stroke(); ctx.restore();
+    return;
+  }
+  if (slot === 'plate') {
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.75, -r * 0.7); ctx.lineTo(r * 0.75, -r * 0.7); ctx.lineTo(r * 0.75, r * 0.1);
+    ctx.lineTo(0, r); ctx.lineTo(-r * 0.75, r * 0.1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (it) {
+      ctx.strokeStyle = rgba(col, 0.55); ctx.lineWidth = 0.8; ctx.beginPath();
+      ctx.moveTo(-r * 0.4, -r * 0.4); ctx.lineTo(-r * 0.4, r * 0.3);
+      ctx.moveTo(r * 0.4, -r * 0.4); ctx.lineTo(r * 0.4, r * 0.3); ctx.stroke();
+    }
+    return;
+  }
+  if (slot === 'core') {
+    const cc = it && CORE_ART[it.b];
+    if (cc) {
+      ctx.save(); ctx.scale(r / 5, r / 5); ctx.fillStyle = cc.c; ctx.strokeStyle = cc.c;
+      ctx.lineWidth = 0.8; cc.draw(t, 0); ctx.restore();
+    } else { ctx.beginPath(); ctx.arc(0, 0, r * 0.7, 0, TAU); ctx.fill(); ctx.stroke(); }
+    return;
+  }
+  const sg = it && SIGIL_ART[it.b];
+  if (sg) {
+    ctx.save(); ctx.scale(r / 3.4, r / 3.4); ctx.lineWidth = 0.9 / (r / 3.4);
+    sg.draw(); ctx.restore();
+  } else { poly(0, 0, r * 0.85, 3, -Math.PI / 2); ctx.fill(); ctx.stroke(); }
+}
+
+/* --------------------------- the gear decision -----------------------------
+   Two cards: what is on the floor and what is already on. The pilot has no
+   level-up screen, so this is the screen that has to feel like one. */
+function gearCardRects() {
+  const cw = Math.min(282, (W - 92) / 2);
+  const ch = clamp(Math.min(342, H * 0.62), 188, 342);
+  const gap = Math.min(26, Math.max(12, (W - cw * 2) / 6));
+  // the eyebrow lives 52px above the cards, so the band has to be reserved
+  const x0 = (W - (cw * 2 + gap)) / 2, y0 = Math.max(62, (H - ch) / 2 + 6);
+  return [{ x: x0, y: y0, w: cw, h: ch },
+          { x: x0 + cw + gap, y: y0, w: cw, h: ch }];
+}
+
+function gearBtnRects() {
+  const rs = gearCardRects();
+  const y = Math.min(H - 42, rs[0].y + rs[0].h + 14);
+  const bw = Math.min(190, rs[0].w), bh = 32;
+  return [{ x: rs[0].x + (rs[0].w - bw) / 2, y, w: bw, h: bh },
+          { x: rs[1].x + (rs[1].w - bw) / 2, y, w: bw, h: bh }];
+}
+/* Both the card and the button under it are the same click, so a decision can
+   be made by pointing at the thing rather than at the label for the thing. */
+function gearHitAt(mx, my) {
+  const rs = gearCardRects(), bs = gearBtnRects();
+  for (let i = 0; i < 2; i++)
+    if (inRect(mx, my, rs[i]) || inRect(mx, my, bs[i])) return i;
+  return -1;
+}
+
+function gearSlotGlyph(x, y, r, slot, col) {
+  ctx.strokeStyle = col; ctx.lineWidth = 2;
+  ctx.fillStyle = rgba(col, 0.14);
+  ctx.beginPath();
+  if (slot === 'blade') {
+    // a point-up taper: the only glyph that has a tip
+    ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.42, y + r * 0.3);
+    ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.42, y + r * 0.3);
+    ctx.closePath();
+  } else if (slot === 'plate') {
+    ctx.moveTo(x - r * 0.72, y - r * 0.6); ctx.lineTo(x + r * 0.72, y - r * 0.6);
+    ctx.lineTo(x + r * 0.72, y + r * 0.2); ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r * 0.72, y + r * 0.2);
+    ctx.closePath();
+  } else if (slot === 'core') {
+    ctx.arc(x, y, r * 0.72, 0, TAU);
+  } else {
+    poly(x, y, r * 0.86, 3, -Math.PI / 2);
+  }
+  ctx.fill(); ctx.stroke();
+  if (slot === 'core') {
+    ctx.beginPath(); ctx.arc(x, y, r * 0.3, 0, TAU); ctx.stroke();
+  }
+}
+
+function gearCard(r, it, label, lit, better) {
+  const col = it ? (RARITY[it.rar] || '#94a3b8') : '#475569';
+  const lift = lit ? 5 : 0, y = r.y - lift, k = Math.min(1, r.h / 342);
+  const t = uiTime;
+  const face = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.save();
+  // laid out on an alphabetic baseline, as designed, whatever the HUD left set
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.save();
+  if (lit) { ctx.shadowColor = col; ctx.shadowBlur = 26; }
+  ctx.fillStyle = lit ? 'rgba(22,32,52,0.98)' : 'rgba(12,18,30,0.96)';
+  roundRect(r.x, y, r.w, r.h, 14); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = lit ? col : rgba(col, 0.45); ctx.lineWidth = lit ? 2.4 : 1.4;
+  roundRect(r.x, y, r.w, r.h, 14); ctx.stroke();
+  ctx.fillStyle = col; roundRect(r.x + 14, y + 15 * k, r.w - 28, 3, 2); ctx.fill();
+
+  const cx = r.x + r.w / 2;
+  ctx.textAlign = 'center';
+  ctx.save(); ctx.letterSpacing = '0.2em';
+  ctx.font = '700 9px ' + face;
+  ctx.fillStyle = '#64748b'; ctx.fillText(label, cx, y + 32 * k);
+  ctx.restore();
+
+  if (!it) {
+    ctx.font = '600 13px ' + face;
+    ctx.fillStyle = '#475569'; ctx.fillText('nothing in this slot', cx, y + r.h / 2);
+    ctx.restore();
+    return;
+  }
+
+  /* The portrait band: the thing itself on the left, and the hull actually
+     wearing it on the right. The question a drop asks is never "is +12% good",
+     it is "is that me" — so both halves of that are on the card. */
+  const gy = y + 82 * k, lx = r.x + r.w * 0.28, rx = r.x + r.w * 0.73;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  drawGlow(lx, gy, 46 * k, col, lit ? 0.45 : 0.26);
+  ctx.restore();
+  ctx.save(); ctx.translate(lx, gy);
+  if (it.slot === 'blade') {
+    const art = BLADE_ART[it.b] || BLADE_ART.edge, s = (52 * k) / art.len;
+    ctx.rotate(-0.5); ctx.translate(-22 * k, 0);
+    drawBladeArt(it, s, '#1b2740', col, it.rar === 'legend' ? 0.35 : 0, 1.8);
+  } else if (it.slot === 'plate') {
+    /* a plate means nothing off a body, so it is shown as the panels
+       themselves, in the arrangement they actually sit in */
+    ctx.scale(1.9 * k, 1.9 * k); ctx.rotate(-Math.PI / 2);
+    const pa = PLATE_ART[it.b];
+    if (pa && pa.under) { ctx.save(); pa.under(col, 0, t); ctx.restore(); }
+    if (pa && pa.over) { ctx.save(); pa.over(col, 0, t); ctx.restore(); }
+  } else {
+    drawKitGlyph(it.slot, it, col, 30 * k, t);
+  }
+  ctx.restore();
+
+  // the hull, wearing it — everything else it has on, with this in its slot
+  ctx.save(); ctx.translate(rx, gy); ctx.scale(1.75 * k, 1.75 * k); ctx.rotate(-Math.PI / 2);
+  const ghost = { rig: 0, combo: 0, riposte: 0, swingT: 0, swingSide: 0,
+                  gear: Object.assign({}, P.gear, { [it.slot]: it }) };
+  drawVagrantHull(ghost, t);
+  ctx.restore();
+  ctx.save();
+  ctx.font = "700 7px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.letterSpacing = '0.14em'; ctx.fillStyle = '#475569';
+  ctx.fillText('THE THING', lx, gy + 50 * k); ctx.fillText('AS WORN', rx, gy + 50 * k);
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(148,163,184,0.1)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(r.x + r.w / 2, gy - 40 * k); ctx.lineTo(r.x + r.w / 2, gy + 42 * k); ctx.stroke();
+
+  ctx.save(); ctx.letterSpacing = '0.15em';
+  ctx.font = '700 9px ' + face;
+  ctx.fillStyle = col;
+  ctx.fillText(it.rar.toUpperCase(), cx, y + 152 * k);
+  ctx.restore();
+
+  /* Fitted rather than set: the design's 19px holds a base name, but the game
+     puts an affix in front of it, and WEIGHTED BOARDING HOOK on a phone-width
+     card would otherwise run off both edges. */
+  fitFont(gearName(it), r.w - 20, '700', Math.max(12, 19 * k), face, 10);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText(gearName(it), cx, y + 174 * k);
+
+  /* The hint. A heuristic, marked as one: an arrow and a word, never a number,
+     because a number would look like an instruction. */
+  if (better !== null && better !== undefined) {
+    ctx.save();
+    ctx.font = '700 9px ' + face;
+    ctx.fillStyle = better ? '#86efac' : '#fca5a5';
+    ctx.fillText(better ? '▲ LOOKS BETTER' : '▼ LOOKS WORSE', cx, y + 192 * k);
+    ctx.restore();
+  }
+
+  const lines = gearLines(it);
+  ctx.font = '500 ' + Math.max(9.5, 12 * k) + 'px ' + face;
+  let ty = y + 214 * k;
+  for (const L of lines) {
+    if (ty > y + r.h - 30) break;
+    // a cost is printed in the colour of a cost
+    ctx.fillStyle = L.charAt(0) === '−' ? '#fca5a5' : '#cbd5e1';
+    ctx.fillText(L, cx, ty);
+    ty += Math.max(11, 14.5 * k);
+  }
+  const b = gearBase(it.b);
+  if (b) {
+    fitFont(b.d, r.w - 24, '400', 10, face, 8);
+    ctx.fillStyle = '#475569';
+    ctx.fillText(b.d, cx, y + r.h - 14);
+  }
+  ctx.restore();
+}
+
+function drawGearOffer() {
+  if (!gearOffer) return;
+  ctx.fillStyle = 'rgba(3,5,10,0.84)';
+  ctx.fillRect(0, 0, W, H);
+  const rs = gearCardRects();
+  const hover = gearHitAt(mouse.x, mouse.y);
+  const slot = GEAR_SLOTS.find(s => s.k === gearOffer.slot);
+
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.letterSpacing = '0.18em';
+  fitFont('SOMETHING ON THE FLOOR', W - 56, '700', 13,
+          "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
+  ctx.fillStyle = COL.player;
+  ctx.fillText('SOMETHING ON THE FLOOR', W / 2, rs[0].y - 54);
+  ctx.letterSpacing = '0.05em';
+  const h2 = slot ? slot.n + '  ·  ' + slot.d : 'EQUIPMENT';
+  fitFont(h2, W - 56, '700', 30, "'Chakra Petch', Barlow, system-ui, sans-serif", 16);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillText(h2, W / 2, rs[0].y - 26);
+  ctx.restore();
+
+  const sNew = gearScore(gearOffer), sOld = gearScore(gearOld);
+  gearCard(rs[0], gearOffer, 'ON THE FLOOR', hover === 0,
+           gearOld ? sNew >= sOld : null);
+  gearCard(rs[1], gearOld, 'ALREADY WORN', hover === 1, null);
+
+  const bs = gearBtnRects();
+  const labels = ['[ 1 ]  WEAR IT', '[ 2 ]  LEAVE IT'];
+  const cols = [RARITY[gearOffer.rar] || '#94a3b8', '#64748b'];
+  for (let i = 0; i < 2; i++) {
+    const on = hover === i;
+    ctx.fillStyle = on ? rgba(cols[i], 0.18) : 'rgba(12,18,30,0.9)';
+    roundRect(bs[i].x, bs[i].y, bs[i].w, bs[i].h, 9); ctx.fill();
+    ctx.strokeStyle = on ? cols[i] : rgba(cols[i], 0.4);
+    ctx.lineWidth = on ? 2 : 1.2;
+    roundRect(bs[i].x, bs[i].y, bs[i].w, bs[i].h, 9); ctx.stroke();
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = on ? '#f8fafc' : '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText(labels[i], bs[i].x + bs[i].w / 2, bs[i].y + bs[i].h / 2 + 0.5);
+  }
+  /* What leaving it means, said plainly. There is no stash and nothing comes
+     back, so the screen has to be honest that this is the whole decision. */
+  ctx.save();
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'center';
+  ctx.fillText('whatever you do not wear is left behind',
+               W / 2, Math.min(H - 12, bs[0].y + bs[0].h + 18));
+  ctx.restore();
+}
 
 function drawHUD() {
   const pad = 18;
@@ -23129,6 +25185,10 @@ function drawHUD() {
     ly += 22;
   }
 
+  /* The kit. Last on the cursor because it is the tallest block and the only
+     one that is always there for the pilot that has it. */
+  ly = drawBladeHUD(pad, bw, ly);
+
   /* --- score / wave --- */
   ctx.textAlign = 'right';
   /* This column has to hold a nine-digit score, a looped sector name and a
@@ -23150,13 +25210,17 @@ function drawHUD() {
 
   ctx.save();
   ctx.letterSpacing = '0.08em';
-  const runStr = `WAVE ${wave}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`;
+  // a rush counts bosses, not waves: its waves are five apart and all bosses
+  const runStr = rushOn()
+    ? `BOSS ${Rush.n}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`
+    : `WAVE ${wave}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`;
   fitFont(runStr, rMax, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
   ctx.fillStyle = '#94a3b8';
   ctx.fillText(runStr, W - pad, pad + 50);
 
   ctx.letterSpacing = '0.09em';
-  const secStr = stage.name + (loopNum > 0 ? '  ×' + (loopNum + 1) : '') +
+  const secStr = rushOn() ? rushHudLine()
+               : stage.name + (loopNum > 0 ? '  ×' + (loopNum + 1) : '') +
                  '   ' + (((wave - 1) % 5) + 1) + '/5';
   fitFont(secStr, rMax, '600', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
   ctx.fillStyle = stage.accent;
@@ -23948,11 +26012,13 @@ function drawDead() {
     ctx.save();
     ctx.letterSpacing = '0.16em';
     // a daily has no boss to leave standing; what it has is whether it counted
-    const t = s.chal.daily
+    const t = s.chal.rush
+      ? s.chal.n + '   ·   ' + s.rushDown + ' BOSS' + (s.rushDown === 1 ? '' : 'ES') + ' DOWN'
+      : s.chal.daily
       ? s.chal.n + '   ·   ' + (s.dailyRanked ? 'RANKED' : 'PRACTICE')
       : s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS');
     fitFont(t, wide, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
-    ctx.fillStyle = s.chal.daily ? (s.chal.accent || CHAL_GOLD)
+    ctx.fillStyle = (s.chal.daily || s.chal.rush) ? (s.chal.accent || CHAL_GOLD)
                                  : (cw ? '#fbbf24' : '#94a3b8');
     ctx.fillText(t, CENTER, y + 11);
     ctx.restore();
@@ -23996,7 +26062,8 @@ function drawDead() {
   /* Four figures on one rule, so they read as a set rather than four sentences.
      The columns take an equal share of the width they are allowed. */
   row(64, y => {
-    const cols = [['WAVE', s.wave], ['KILLS', s.kills],
+    // a rush's waves are all bosses, so it counts the bosses instead
+    const cols = [s.rush ? ['BOSSES', s.rushDown] : ['WAVE', s.wave], ['KILLS', s.kills],
                   ['LEVEL', s.level], ['TIME', fmtTime(s.time)]];
     const bandW = Math.min(460, W - 56);
     const colW = bandW / cols.length;
@@ -24031,6 +26098,31 @@ function drawDead() {
     fitFont(d, wide, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#64748b';
     ctx.fillText(d, CENTER, y + 28);
+  });
+  /* A rush says what it paid this run, if anything, then where the best
+     stands against the next rung. */
+  else if (s.chal && s.chal.rush) row(s.rushEarned.length ? 44 : 26, y => {
+    const T = rushNext();
+    const tail = (s.rushRecord ? 'NEW RUSH BEST' : 'BEST ' + (Save.profile.rushBest || 0).toLocaleString())
+               + '   ·   ' + (T ? 'NEXT  ' + rushTierName(T) + '  AT  ' + T.score.toLocaleString()
+                               : 'EVERY REWARD HELD');
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    if (s.rushEarned.length) {
+      const got = 'EARNED   ' + s.rushEarned
+        .map(id => rushTierName(RUSH_TIERS.find(R => R.id === id))).join('   ·   ');
+      fitFont(got, wide, '700', 14, "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
+      ctx.fillStyle = RUSH_COL;
+      ctx.fillText(got, CENTER, y + 10);
+      fitFont(tail, wide, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(tail, CENTER, y + 31);
+    } else {
+      fitFont(tail, wide, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+      ctx.fillStyle = s.rushRecord ? COL.crit : '#64748b';
+      ctx.fillText(tail, CENTER, y + 12);
+    }
+    ctx.restore();
   });
   else if (s.chal && s.chal.daily) row(26, y => {
     ctx.save();
@@ -24111,7 +26203,8 @@ function drawDead() {
   row(30, y => {
     const t = s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
                                 : 'SPACE RUN IT AGAIN   ·   M ' +
-                                  (s.chal.daily ? 'DAILY' : 'CHALLENGES'))
+                                  (s.chal.daily ? 'DAILY' : s.chal.rush ? 'BOSS RUSH'
+                                                          : 'CHALLENGES'))
             : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
             : isTouch  ? 'TAP TO RUN AGAIN'
             : 'PRESS SPACE / R TO RUN AGAIN';
@@ -24224,22 +26317,22 @@ function renderMenu() {
     ctx.fill(); ctx.stroke();
     ctx.restore();
     if (shut) {
-      const have = MALWARE.filter(m => (Save.profile.codexM || []).includes(m.id)).length;
-      const full = have >= MALWARE.length;
-      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
-      ctx.fillStyle = full ? '#a3e635' : '#334155';
-      ctx.fillText(full ? 'READY' : 'LOCKED', hx, selY + 26);
-      ctx.font = "600 8px 'JetBrains Mono', ui-monospace, monospace";
-      ctx.fillStyle = full ? '#a3e635' : '#2b3a4f';
-      ctx.fillText(have + '/' + MALWARE.length + ' MALWARE', hx, selY + 37);
+      /* One line, not two. The badge sits under its own hull and the selected
+         pilot's name is centred under the whole row, so anything tall enough
+         here reaches the middle of the row and collides with it. Each locked
+         pilot reports its own route in its own units — carried malware for
+         THE HACKER, rush score for THE VAGRANT — through its `lock`. */
+      ctx.font = "700 8px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = '#2b3a4f';
+      ctx.fillText('LOCKED  ' + (ch.lock ? ch.lock(Save.profile) : ''), hx, selY + 24);
     }
   });
   ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = C.col;
-  ctx.fillText(C.n, cxp, selY + 38);
+  ctx.fillText(C.n, cxp, selY + 46);
   ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
-  ctx.fillText(C.tag, cxp, selY + 54);
+  ctx.fillText(C.tag, cxp, selY + 61);
 
   const pulse = 0.55 + Math.sin(uiTime * 3.4) * 0.45;
   ctx.font = "700 16px Barlow, 'Segoe UI', system-ui, sans-serif";
@@ -24451,6 +26544,7 @@ function renderMenu() {
   drawMenuLan();
   drawMenuChal();
   drawMenuDaily();
+  drawMenuRush();
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
@@ -25968,6 +28062,31 @@ function drawMenuSet() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 4, v: '1.3', date: '22 SEP 2026', lines: [
+    ['new', 'BOSS RUSH. Every stage boss back to back, each on its own floor '
+          + 'with a reward room between them, then round again, harder. It pays '
+          + 'three imperial skins on the way up, knight to king, and THE VAGRANT '
+          + 'at the top. Past that the score keeps counting and nothing else is paid.'],
+    ['new', 'THE VAGRANT, the rush\'s top reward. A fourth pilot with no gun at all — it swings, and '
+          + 'everything standing in the arc is struck at once. Three swings '
+          + 'inside the window make the third a finisher: wider, harder, and '
+          + 'it clears the space around you.'],
+    ['new', 'It can refuse a hit. [F] or right-click raises a guard for a fifth '
+          + 'of a second, and anything that lands in that window is turned '
+          + 'aside outright and paid back as a step toward the next finisher. '
+          + 'Sixty pixels of reach in a room full of bullets needs an answer.'],
+    ['new', 'It does not take upgrades. Nothing is offered at a level-up, '
+          + 'because its build is worn rather than chosen: blades, plates, '
+          + 'cores and sigils drop off bodies and bosses, and what you are '
+          + 'wearing is the whole of what you are. A level is growth and, '
+          + 'every third one, something on the floor.'],
+    ['new', 'A core decides what a hit does on the way through — setting the '
+          + 'body alight, chilling it, carrying to the next one, splashing '
+          + 'behind it, or striking the finisher twice.'],
+    ['balance', 'Right-click no longer fires. It used to count as a trigger '
+              + 'pull for every pilot, which nobody noticed until the button '
+              + 'became a guard.']
+  ] },
   { id: 3, v: '1.2', date: '18 SEP 2026', lines: [
     ['balance', 'EMBER flies. Hulls and wreckage no longer stop it, shove it or '
               + 'wear it down on the way past — the one pilot that has to stand '
@@ -26822,6 +28941,412 @@ function drawMenuDaily() {
   ctx.textAlign = 'center';
 }
 
+/* =============================== BOSS RUSH =================================
+   The seven stage bosses back to back, then again, harder, for as long as the
+   hull lasts. A permanent door on the menu rather than an event with a date on
+   it: it is where THE VAGRANT is earned, and a pilot has to stay earnable by
+   whoever picks the game up next year.
+
+   Built the way the daily is — a synthesized Chal.on with goal: null, which is
+   what makes it endless — and scored on its own terms. It never moves your
+   best, the global board or the escalation window; its best lives on the
+   profile as rushBest and nowhere else.
+
+   HOW A RUN GOES. Each boss is fought at a wave inside the game's own loop
+   (RUSH_LOCAL), on its own home floor, with the usual escort. An ordinary run
+   gets to a boss having cleared the waves before it; the rush skips them, so it
+   pays RUSH_PAY of what those waves would have paid — experience and credits —
+   in one lump before the first boss and after every kill. Less
+   than all of it, because a rush should be harder than the run it is cut from,
+   and the bosses' own drops cover some of the rest. Between kills the ordinary
+   reward room opens (the shop, or a planetarium once those are open), and
+   afterReward() sends you to the next boss instead of the portal room.
+
+   HOW IT SCORES. Only the bosses pay. Each kill is worth its ordinary kill
+   score and wave-clear bonus, plus RUSH_BOSS_PTS × n on top — a boss is worth
+   more the deeper it sits — plus up to the same again for speed, falling to
+   nothing at RUSH_PAR seconds. The escort and anything a boss summons pay
+   nothing (see killEnemy): stalling a fight to farm its adds must never be
+   cheaper than going deeper. So a run's score is a function of how far it got
+   and how fast, and nothing else, which is what lets the ladder be read as
+   depth (see RUSH_TIERS for where each rung falls). Depth is what earns the
+   rewards; speed is what separates two runs that fell to the same boss, which
+   is the room above the peak.
+
+   THE REWARDS are a ladder on the score (RUSH_TIERS, next to CHARS). Crossing a
+   rung grants it there and then, mid-run, so a hull that dies a second later
+   has still earned it. Past the last rung the score keeps counting and nothing
+   else is paid. That is the design, not an unfinished edge.
+
+   Earned on the word of a local save, which is the trade the era mark already
+   makes and for the same reason: this is an achievement, not a placing, and
+   nobody else's standing depends on it. A podium is addressed by a server;
+   this is not.
+========================================================================= */
+const RUSH_COL      = '#f43f5e';
+const RUSH_BOSS_PTS = 1000;  // × boss number, per kill
+const RUSH_PAR      = 75;    // seconds; the speed bonus is gone by here
+const RUSH_PAY      = 0.75;  // share of the four skipped waves paid per kill
+const RUSH_HEAL     = 0.30;  // of max HP, on every kill
+const RUSH_BREATH   = 2.6;   // seconds from the reward room to the next boss
+
+/* Where each of the seven sits inside the game's own 25-wave loop. The game
+   scales health per loop — loopHpMul, ×151 from the second loop on — and the
+   first version of this mapped boss n to wave 5n, which put THE CURATOR and
+   THE OTHER at waves 30 and 35: already in the second loop, at 151× health,
+   and a sheer wall between boss five and the rest of the ladder. Spread over
+   one loop instead, the seven ramp the way a loop ramps, and "they come back
+   harder" means exactly what the game's second loop means. */
+const RUSH_LOCAL = [5, 8, 11, 15, 18, 22, 25];
+const rushWaveOf = n => Math.floor((n - 1) / RUSH_ROSTER.length) * LOOP_WAVES
+                      + RUSH_LOCAL[(n - 1) % RUSH_ROSTER.length];
+
+const Rush = { n: 0, t: 0, earned: [] };
+const rushOn = () => !!(Chal.on && Chal.on.rush);
+const rushBossKey = n => RUSH_ROSTER[(n - 1) % RUSH_ROSTER.length];
+/* Each boss is fought on the floor it owns. Two of the seven live in THE
+   FRACTURE, so both tables are asked. */
+function rushStageOf(key) {
+  return STAGES.find(s => s.boss === key) || ALT_STAGES.find(s => s.boss === key)
+      || STAGES[0];
+}
+
+/* The first rung this profile has not yet reached, measured against the best
+   of what it has banked and what this run has already scored. */
+function rushNext() {
+  const top = Math.max(Save.profile.rushBest || 0, rushOn() ? score : 0);
+  return RUSH_TIERS.find(T => T.score > top) || null;
+}
+
+/* What waves w0..w1 of an ordinary run would have paid, at RUSH_PAY. Read off
+   the same budget formula startWave() spends, so a retune of the wave curve
+   carries through here instead of leaving the rush behind it. */
+function rushSkipped(w0, w1) {
+  let xp = 0, cr = 0;
+  for (let w = w0; w <= w1; w++) {
+    const n = (7 + w * 3.1 + Math.pow(w, 1.55) * 0.5) * chalBudget() * hardBudget();
+    xp += n * 2.2;                                    // the average body is worth ~2
+    cr += n * 0.22 * (2 + w * 0.5) + 12 + w * 2.4;   // its drops, then the clear bonus
+  }
+  return { xp: xp * RUSH_PAY, cr: cr * RUSH_PAY };
+}
+function rushPayout(w0, w1, quiet) {
+  const s = rushSkipped(w0, w1);
+  const xp = Math.round(s.xp * P.xpMul);
+  const cr = Math.round(s.cr * P.credMul * hardCred());
+  P.xp += xp; credits += cr;
+  if (!quiet) floatText(P.x, P.y - 58, '+' + xp + ' XP   ◈' + cr, RUSH_COL, 15);
+}
+
+function startRush() {
+  if (netLive()) return;                   // a rush is flown alone
+  resetGame();
+  Chal.on = { id: 'rush', n: 'BOSS RUSH', tier: 0, goal: null, rush: true,
+              accent: RUSH_COL, d: 'Every stage boss, back to back.', m: {} };
+  Chal.won = false; Chal.reward = null;
+  Chal.waveT = 0; Chal.moveT = 1.2; Chal.curseT = 2;
+  Rush.n = 0; Rush.t = 0; Rush.earned = [];
+  rushPayout(1, rushWaveOf(1) - 1, true);  // the waves before the first boss
+  betweenWaves = 3.2;
+  state = 'play';
+  uiArm = 0.3;
+  banner('BOSS RUSH', RUSH_COL, 3.0);
+  Audio_.select();
+}
+
+/* Called from startWave() in place of everything it would ordinarily do. */
+function rushWave() {
+  Rush.n++;
+  const n = Rush.n, key = rushBossKey(n), bd = BOSSES[key];
+  wave = rushWaveOf(n);
+  stageAbs = n - 1;                        // shop prices scale on this
+  loopNum = Math.floor((n - 1) / RUSH_ROSTER.length);
+  enterStage(rushStageOf(key));            // its floor, and Second Wind back
+  Rush.t = 0;
+  betweenWaves = 0;
+  bossAlive = true;
+  banner((loopNum ? 'LOOP ' + (loopNum + 1) + '   ·   ' : '') + bd.name + '   INBOUND', bd.col);
+  Audio_.boss();
+  spawnRing('boss', { boss: key });
+  spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget() * hardBudget());
+  spawnT = 0;
+  waveTimer = 0;
+}
+
+/* Called from onBossDefeat() for a rush boss, in place of the gates, the
+   libraries and the payload rolls an ordinary stage boss hands out. */
+function rushBossDown(e) {
+  const n = Rush.n, bd = BOSSES[e.boss] || BOSSES.warden;
+  const took = Rush.t;
+  const speed = clamp(1 - took / RUSH_PAR, 0, 1);
+  const base = Math.round(RUSH_BOSS_PTS * n * hardScore());
+  const fast = Math.round(base * speed);
+  score += base + fast;
+  banner(bd.name + '   DESTROYED   +' + (base + fast).toLocaleString(), COL.crit);
+  if (fast > 0)
+    setTimeout(() => {
+      if (state === 'play' && rushOn())
+        banner('FAST   +' + fast.toLocaleString() + '   ·   ' + Math.round(took) + 's',
+               RUSH_COL, 2.2);
+    }, 1700);
+  drawFlashT = 0.2;
+  credits += Math.round((70 + wave * 6) * P.credMul * hardCred());
+  if (!chalNoHeal()) P.hp = Math.min(P.maxHp, P.hp + P.maxHp * RUSH_HEAL);
+  // the waves between this boss and the next, which you did not have to fly
+  rushPayout(rushWaveOf(n) + 1, rushWaveOf(n + 1) - 1);
+  shopPending = true;                      // the reward room, once the floor clears
+  for (let i = 0; i < 5; i++)
+    setTimeout(() => { if (state === 'play') shake(0.5); }, i * 90);
+}
+
+/* Every frame of a rush: the boss clock, and the ladder. */
+function rushTick(dt) {
+  if (!rushOn() || state !== 'play') return;
+  if (bossAlive) Rush.t += dt;
+  rushClaim();
+}
+
+/* Grants every rung the score has just passed that the profile had not.
+   `before` is read once, ahead of the loop: a big payout can cross two rungs
+   in one frame, and raising the best inside the loop would have the second
+   one see itself as already reached and skip it. */
+function rushClaim() {
+  const p = Save.profile;
+  const before = p.rushBest || 0;
+  if (score <= before) return;
+  let got = false;
+  for (const T of RUSH_TIERS) {
+    if (score < T.score || before >= T.score) continue;
+    rushGrant(T);
+    got = true;
+  }
+  if (got) {
+    p.rushBest = Math.max(before, score);
+    Save.writeLocal(); Save.flush();
+  }
+}
+
+function rushGrant(T) {
+  Rush.earned.push(T.id);
+  if (T.kind === 'skin') devGrant(T.id, 'BOSS RUSH');
+  const col = rushTierCol(T);
+  const top = T === RUSH_TIERS[RUSH_TIERS.length - 1];
+  banner(rushTierName(T) + (top ? '   ·   UNLOCKED' : '   ·   EARNED'), col, 4.2);
+  drawFlashT = Math.max(drawFlashT, 0.25);
+  ringFx(P.x, P.y, 10, 560, col, 0.9, 6);
+  burst(P.x, P.y, 50, col, 340, 3.6, 0.9);
+  Audio_.levelup(); Audio_.crit();
+}
+
+/* The one way the ladder and the awards can disagree: a best that reached this
+   machine by cloud merge before that machine's awards did. The pilot needs no
+   healing — it reads rushBest directly — so only the skins are checked. */
+function rushReconcile() {
+  const best = Save.profile.rushBest || 0;
+  for (const T of RUSH_TIERS)
+    if (T.kind === 'skin' && best >= T.score && !devHeld(T.id)) devGrant(T.id, 'BOSS RUSH');
+}
+
+/* From gameOver(), in place of the ordinary record. */
+function rushFinish() {
+  rushClaim();
+  const p = Save.profile;
+  p.rushRuns = (p.rushRuns || 0) + 1;
+  if (score > (p.rushBest || 0)) p.rushBest = score;
+  Save.writeLocal(); Save.flush();
+}
+
+/* The HUD's sector line, while a rush is on: the next thing it pays, and at
+   what score. The target has to be on screen, or a rung is something you find
+   out you crossed rather than something you were going for. */
+function rushHudLine() {
+  const T = rushNext();
+  return T ? 'NEXT   ' + rushTierName(T) + '   ' + T.score.toLocaleString()
+           : 'EVERY REWARD HELD';
+}
+
+/* The challenge chip, bottom left, while a rush is on: which loop, which boss,
+   and the one figure that drains while you look at it — what is left of the
+   speed bonus on the boss in front of you. */
+function rushChipLabel() {
+  return 'BOSS RUSH' + (loopNum ? '  ·  LOOP ' + (loopNum + 1) : '');
+}
+function rushChipTitle() {
+  return Rush.n ? 'BOSS ' + Rush.n + '  ·  ' + BOSSES[rushBossKey(Rush.n)].name : 'BOSS RUSH';
+}
+function rushChipGoal() {
+  return bossAlive
+    ? 'SPEED BONUS  ' + Math.round(clamp(1 - Rush.t / RUSH_PAR, 0, 1) * 100) + '%'
+    : 'THE NEXT ONE IS COMING';
+}
+
+/* --------------------------------- panel ---------------------------------- */
+let rushFrom = 'menu';
+
+const RUSH_BLURB = 'Every stage boss in order, each on its own floor, with a reward ' +
+  'room between them and no waves in between. When the seven are down they come ' +
+  'back harder. A boss pays more the deeper it sits and more again the faster it ' +
+  'dies. The rewards sit on your best score; past the last one the score keeps ' +
+  'counting and nothing else is paid.';
+
+function openRush(from) {
+  rushFrom = from || 'menu';
+  rushReconcile();
+  state = 'rush';
+  uiArm = 0.25;
+  Audio_.select();
+}
+function closeRush() {
+  state = 'menu';
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+function rushRects() {
+  const w = Math.min(560, W - 32), x = (W - w) / 2;
+  ctx.font = "400 11.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+  const body = wrapLines(RUSH_BLURB, w - 48);
+  const want = 96 + body.length * 16 + 18 + RUSH_TIERS.length * 38 + 30 + 70;
+  const panelH = Math.min(H - 24, want);
+  const top = Math.max(12, (H - panelH) / 2);
+  const bw = Math.min(220, w / 2 - 14);
+  return { x, w, top, panelH, body,
+    fly:  { x: x + w / 2 - bw - 7, y: top + panelH - 56, w: bw, h: 40 },
+    done: { x: x + w / 2 + 7,      y: top + panelH - 56, w: bw, h: 40 } };
+}
+
+function drawRush() {
+  const g = rushRects();
+  const p = Save.profile;
+  const best = p.rushBest || 0;
+  const face = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.save();
+  ctx.fillStyle = 'rgba(3,5,10,0.8)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(8,11,20,0.97)';
+  roundRect(g.x, g.top, g.w, g.panelH, 14); ctx.fill();
+  ctx.strokeStyle = rgba(RUSH_COL, 0.45); ctx.lineWidth = 1.4;
+  roundRect(g.x, g.top, g.w, g.panelH, 14); ctx.stroke();
+  ctx.fillStyle = RUSH_COL;
+  roundRect(g.x + 18, g.top + 16, g.w - 36, 3, 2); ctx.fill();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.save(); ctx.letterSpacing = '0.06em';
+  fitFont('BOSS RUSH', g.w - 48, '700', 28, "'Chakra Petch', Barlow, system-ui, sans-serif", 18);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText('BOSS RUSH', W / 2, g.top + 54);
+  ctx.letterSpacing = '0.2em';
+  ctx.font = '700 9px ' + face;
+  ctx.fillStyle = RUSH_COL;
+  ctx.fillText('THE SEVEN, BACK TO BACK', W / 2, g.top + 74);
+  ctx.restore();
+
+  ctx.font = '400 11.5px ' + face;
+  ctx.fillStyle = '#94a3b8';
+  let y = g.top + 98;
+  for (const L of g.body) { ctx.fillText(L, W / 2, y); y += 16; }
+  y += 14;
+
+  /* The ladder. Each rung is its reward, the score it sits at, and either that
+     it is held or how far the best is from it — the bar is the whole reason to
+     open this panel between runs. */
+  const lx = g.x + 24, lw = g.w - 48;
+  RUSH_TIERS.forEach((T, i) => {
+    const held = best >= T.score;
+    const col = rushTierCol(T);
+    const top = i === RUSH_TIERS.length - 1;
+    ctx.fillStyle = held ? rgba(col, 0.1) : 'rgba(15,23,42,0.7)';
+    roundRect(lx, y, lw, 32, 7); ctx.fill();
+    ctx.strokeStyle = held ? rgba(col, 0.55) : 'rgba(148,163,184,0.14)'; ctx.lineWidth = 1;
+    roundRect(lx, y, lw, 32, 7); ctx.stroke();
+    ctx.textAlign = 'left';
+    ctx.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = held ? col : '#475569';
+    ctx.fillText(['I', 'II', 'III', 'IV', 'V'][i] || String(i + 1), lx + 12, y + 20);
+    // the reward, and under it what kind of thing it is
+    fitFont(rushTierName(T), lw * 0.5, '700', 13, face, 9);
+    ctx.fillStyle = held ? '#f8fafc' : '#cbd5e1';
+    ctx.fillText(rushTierName(T), lx + 40, y + 15);
+    ctx.font = '700 8px ' + face;
+    ctx.fillStyle = held ? rgba(col, 0.8) : '#475569';
+    const kind = T.kind === 'pilot' ? 'PILOT' : 'SKIN';
+    ctx.fillText(top ? kind + '  ·  NOTHING PAST THIS' : kind, lx + 40, y + 27);
+    ctx.textAlign = 'right';
+    ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = held ? col : '#94a3b8';
+    ctx.fillText(held ? 'HELD' : T.score.toLocaleString(), lx + lw - 12, y + 15);
+    if (!held) {
+      const bwid = Math.min(120, lw * 0.26), bx = lx + lw - 12 - bwid;
+      ctx.fillStyle = 'rgba(148,163,184,0.16)'; roundRect(bx, y + 21, bwid, 4, 2); ctx.fill();
+      const k = clamp(best / T.score, 0, 1);
+      if (k > 0) { ctx.fillStyle = rgba(col, 0.75); roundRect(bx, y + 21, Math.max(3, bwid * k), 4, 2); ctx.fill(); }
+    }
+    y += 38;
+  });
+
+  ctx.textAlign = 'center';
+  ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.fillStyle = '#64748b';
+  const stat = 'BEST ' + best.toLocaleString() + '   ·   ' + (p.rushRuns || 0) +
+               ' RUN' + ((p.rushRuns || 0) === 1 ? '' : 'S') + '   ·   FLYING ' + CHAR().n;
+  fitFont(stat, g.w - 48, '600', 10, "'JetBrains Mono', ui-monospace, monospace", 7.5);
+  ctx.fillText(stat, W / 2, y + 12);
+
+  const hover = inRect(mouse.x, mouse.y, g.fly) ? 0 : inRect(mouse.x, mouse.y, g.done) ? 1 : -1;
+  [[g.fly, 'FLY IT   [SPACE]', RUSH_COL], [g.done, 'BACK   [ESC]', '#64748b']].forEach(([r, t, c], i) => {
+    ctx.fillStyle = hover === i ? rgba(c, 0.2) : 'rgba(12,18,30,0.92)';
+    roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
+    ctx.strokeStyle = hover === i ? c : rgba(c, 0.45); ctx.lineWidth = hover === i ? 2 : 1.2;
+    roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+    ctx.font = '700 12px ' + face;
+    ctx.fillStyle = hover === i ? '#f8fafc' : '#cbd5e1';
+    ctx.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + 4);
+  });
+  ctx.restore();
+}
+
+function rushKey(k) {
+  if (uiArm > 0) return;
+  if (k === ' ' || k === 'enter') { startRush(); return; }
+  if (k === 'escape' || k === 'b' || k === 'q') closeRush();
+}
+function rushClick() {
+  if (uiArm > 0) return;
+  const g = rushRects();
+  if (inRect(mouse.x, mouse.y, g.fly))  { startRush(); return; }
+  if (inRect(mouse.x, mouse.y, g.done)) { closeRush(); return; }
+}
+
+/* The fifth door, under the daily. */
+function menuRushRect() { return { x: 18, y: 174, w: 176, h: 34 }; }
+
+function drawMenuRush() {
+  const r = menuRushRect();
+  const hot = inRect(mouse.x, mouse.y, r);
+  const T = rushNext();
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? rgba(RUSH_COL, 0.16) : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(RUSH_COL, hot ? 0.9 : 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = RUSH_COL;
+  ctx.fillText('◆  BOSS RUSH', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  const sub = (T ? 'NEXT  ' + rushTierName(T) : 'EVERY REWARD HELD') + '  —  B';
+  ctx.fillText(clipText(sub, 26), r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
 /* ===========================================================================
    SKINS
    Re-dressing the roster without the renderer knowing it happened.
@@ -27498,7 +30023,9 @@ const Season = {
    hand them over as skins; the podium RECORD — the season chips — still comes
    only from a closed season, and no grant can invent one. */
 const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
-                      'laurel', 'standard', 'ember-mark'];
+                      'laurel', 'standard', 'ember-mark',
+                      // the BOSS RUSH's three, knight to king
+                      'rush-knight', 'rush-duke', 'rush-king'];
 /* Grants that are not skins. Checked against this list the same way, so an
    invented one cannot arrive from a save file any more than a skin can. */
 const DEV_PERK_IDS = ['unlock-all'];
@@ -27658,7 +30185,32 @@ const DEV_SKINS = [
     req2: 'WIN THREE DAILY RUNS TO UNSEAL IT',
     req2done: 'UNSEALED · THREE DAILY RUNS WON',
     base:  { player: { col: '#cfc7b3' }, bullet: { col: '#d8d2c2' } },
-    base2: { player: { col: '#e9e3d2' }, bullet: { col: '#f0e6d2' } } }
+    base2: { player: { col: '#e9e3d2' }, bullet: { col: '#f0e6d2' } } },
+
+  /* THE BOSS RUSH's line: an imperial progression, knight to king, one rung
+     each on the rush's score ladder (RUSH_TIERS), with THE VAGRANT above them.
+
+     All three carry fx 'imperial' and a `tier` of 1 to 3 (drawn by the imp*
+     functions above SkinFx), so
+     the look is written ONCE, as an effect that gains regalia with rank,
+     rather than three unrelated skins — SkinFx.player/bullet/part/enemy each
+     take one `if (s.fx === 'imperial')` branch reading s.tier. The names are
+     the ladder's, and the ladder reads them from here. */
+  { id: 'rush-knight', n: 'THE KNIGHT', col: '#b8c2d6', fx: 'imperial', tier: 1,
+    d: 'Knighted by the rush. Steel on gules: a shield worn over the hull, four '
+     + 'blades standing guard, a pennon off the stern, and every round a lance.',
+    req: rushReq('rush-knight'),
+    base: { player: { col: '#b8c2d6' }, bullet: { col: '#dde3ee' } } },
+  { id: 'rush-duke', n: 'THE DUKE', col: '#a855f7', fx: 'imperial', tier: 2,
+    d: 'Raised to duke. The coronet and the purpure, a velvet mantle in gold, six '
+     + 'jewelled blades, and the roster taken into fief.',
+    req: rushReq('rush-duke'),
+    base: { player: { col: '#a855f7' }, bullet: { col: '#d8b4fe' } } },
+  { id: 'rush-king', n: 'THE KING', col: '#eab308', fx: 'imperial', tier: 3,
+    d: 'Crowned. The arched crown in a turning sun, a train in ermine, the laurel, '
+     + 'eight blades, and everything that breaks comes apart as gold.',
+    req: rushReq('rush-king'),
+    base: { player: { col: '#eab308' }, bullet: { col: '#fde047' } } }
 ];
 
 /* ======================= the unlisted (tier three) ========================
@@ -27745,7 +30297,8 @@ function devUnlockAll() {
   const before = JSON.stringify([p.planetarium, p.altPath, p.malware,
     p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
     (p.chal || []).length, (p.codexE || []).length, (p.codexU || []).length,
-    (p.codexM || []).length, (p.codexB || []).length, (p.codexZ || []).length]);
+    (p.codexM || []).length, (p.codexB || []).length, (p.codexZ || []).length,
+    p.rushBest || 0]);
 
   p.planetarium = true;      // reward rooms
   p.altPath = true;          // THE FRACTURE
@@ -27756,6 +30309,7 @@ function devUnlockAll() {
   p.keeperDone = true;       // his marginalia, and the chip in shops
   p.trueEnd = true;          // THE UNWRITTEN has been closed
   p.clears = Math.max(p.clears || 0, 2);
+  p.rushBest = Math.max(p.rushBest || 0, RUSH_PEAK);  // and so THE VAGRANT flies
   const add = (have, all) => [...new Set([...(have || []), ...all])];
   p.chal = add(p.chal, CHALLENGES.map(c => c.id));   // and their rewards
   p.codexE = add(p.codexE, [...Object.keys(CODEX_E), ...Object.keys(BOSSES)]);
@@ -27767,7 +30321,8 @@ function devUnlockAll() {
   const after = JSON.stringify([p.planetarium, p.altPath, p.malware,
     p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
     p.chal.length, p.codexE.length, p.codexU.length,
-    p.codexM.length, p.codexB.length, p.codexZ.length]);
+    p.codexM.length, p.codexB.length, p.codexZ.length,
+    p.rushBest || 0]);
   if (before === after) return false;
   Codex.load();                       // the sets are read from the profile
   applyChar(p.charIdx || 0);
@@ -28102,14 +30657,688 @@ function drawDraftRig(x, y, R, t) {
   ctx.restore();
 }
 
+/* =============================== the imperial ===============================
+   THE BOSS RUSH's line, written once. Knight, duke and king are one effect that
+   gains regalia with rank rather than three unrelated skins, and every tier
+   keeps what the tier below it had in some grown form:
+
+     KNIGHT  steel on gules. A heater shield over the hull, four blades on a
+             faceted collar, a swallow-tailed pennon off the stern, and every
+             round a lance. Dresses the pilot only.
+     DUKE    gilt on purpure. The shield takes a coronet and three bezants, the
+             collar six blades and jewels, the pennon grows into a velvet
+             mantle, and the roster is taken into fief.
+     KING    gold on crimson. The arched crown in a turning sun, a train in
+             ermine, a laurel under the hull, eight jewelled blades, the roster
+             banded in gold, and everything that breaks comes apart as coin.
+
+   Shape is what keeps it apart from the other awards in a shared arena: the
+   void is circles and crowns of unlight, the redaction is bars and square
+   corners, the prototype is a selection box. This one is facets, blades and
+   cloth, and it is the only one whose bodies are lit, because it is metal.
+
+   Hooks: SkinFx.under() before the hull (the cloth hangs beneath the ship),
+   SkinFx.player/bullet/part/enemy after, each one branch on s.tier.
+   ========================================================================== */
+const IMP_T = [null, {
+  metal: ['#262d3b', '#96a2b8', '#f4f7fc'],
+  mid: '#b8c2d6', hi: '#f4f7fc', lo: '#3b4457', dark: '#0c1018',
+  field: '#a11d27', fieldHi: '#e0434b', cloth: '#9b1b25', clothHi: '#e0434b',
+  edge: '#e8edf5', glow: '#cbd5e1', gem: null, gem2: null, blades: 4, spark: '#e8edf5'
+}, {
+  metal: ['#4f360b', '#cf9f38', '#fff1c1'],
+  mid: '#d4a53c', hi: '#fff1c1', lo: '#6b4a12', dark: '#12081f',
+  field: '#5b21b6', fieldHi: '#9d5cf5', cloth: '#4c1d95', clothHi: '#8b5cf6',
+  edge: '#f3d98b', glow: '#c084fc', gem: '#c084fc', gem2: '#c084fc', blades: 6, spark: '#f3d98b'
+}, {
+  metal: ['#5e3f00', '#e3ad0b', '#fffbe6'],
+  mid: '#eab308', hi: '#fffbe6', lo: '#7a5200', dark: '#1a1204',
+  field: '#9f1239', fieldHi: '#f43f5e', cloth: '#8a0f2c', clothHi: '#e11d48',
+  edge: '#fde68a', glow: '#fbbf24', gem: '#e11d48', gem2: '#3b82f6', blades: 8, spark: '#fde68a'
+}];
+const IMP_FUR = '#f7f3e8', IMP_TAIL = '#141018';
+const IMP_STATE = {};
+const impTier = s => Math.max(1, Math.min(3, (s && s.tier) | 0));
+
+/* Polished metal is a gradient with the light in the middle of it: dark at
+   both ends, a hot line just past centre. Used on the regalia, never on the
+   rounds, which are too many to pay a gradient each. */
+function impGrad(x0, y0, x1, y1, T) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, T.metal[0]); g.addColorStop(0.38, T.metal[1]);
+  g.addColorStop(0.52, T.metal[2]); g.addColorStop(0.66, T.metal[1]);
+  g.addColorStop(1, T.metal[0]);
+  return g;
+}
+// a four-point glint, the thing a jewel does when light crosses it
+function impStar(x, y, r, a) {
+  if (a <= 0.02 || r <= 0.3) return;
+  const k = r * 0.14;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba('#ffffff', Math.min(1, a));
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.quadraticCurveTo(x + k, y - k, x + r, y);
+  ctx.quadraticCurveTo(x + k, y + k, x, y + r);
+  ctx.quadraticCurveTo(x - k, y + k, x - r, y);
+  ctx.quadraticCurveTo(x - k, y - k, x, y - r);
+  ctx.fill();
+  ctx.restore();
+}
+const impBlink = (t, per, off) => {
+  const u = ((t + off) % per) / per;
+  return u < 0.12 ? Math.sin(u / 0.12 * Math.PI) : 0;
+};
+/* The polish going past: a bright bar swept across whatever is clipped, once
+   a period. It is the one thing that makes a flat shape read as a hard one. */
+function impShine(x, y, w, h, t, per, off) {
+  const u = ((t + off) % per) / 0.8;
+  if (u >= 1) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(x - w * 0.9 + u * w * 1.8, y);
+  ctx.rotate(0.45);
+  ctx.fillStyle = rgba('#ffffff', 0.55 * Math.sin(u * Math.PI));
+  ctx.fillRect(-w * 0.07, -h * 1.2, w * 0.14, h * 2.4);
+  ctx.restore();
+}
+
+/* ---- the arms: a heater shield, held upright over the hull like the other
+   awards' marks, because a crest that rolls with a barrel roll is a decal. */
+function impShieldPath(cx, ty, w, h) {
+  const hw = w / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, ty); ctx.lineTo(cx + hw, ty);
+  ctx.lineTo(cx + hw, ty + h * 0.42);
+  ctx.quadraticCurveTo(cx + hw, ty + h * 0.82, cx, ty + h);
+  ctx.quadraticCurveTo(cx - hw, ty + h * 0.82, cx - hw, ty + h * 0.42);
+  ctx.closePath();
+}
+function impShield(cx, ty, w, h, T, tier, t) {
+  ctx.save();
+  drawGlow(cx, ty + h * 0.45, h * 1.4, T.glow, 0.18);
+  impShieldPath(cx, ty, w, h);
+  const fg = ctx.createLinearGradient(cx - w * 0.5, ty, cx + w * 0.4, ty + h);
+  fg.addColorStop(0, T.fieldHi); fg.addColorStop(0.55, T.field); fg.addColorStop(1, T.dark);
+  ctx.fillStyle = fg; ctx.fill();
+  ctx.save();
+  ctx.clip();
+  const mg = impGrad(cx - w * 0.5, ty, cx + w * 0.5, ty + h, T);
+  // the chevron: the knight's whole blazon, kept by every rank above it
+  ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+  ctx.strokeStyle = rgba(T.dark, 0.7); ctx.lineWidth = h * 0.24;
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.62, ty + h * 0.9); ctx.lineTo(cx, ty + h * 0.36); ctx.lineTo(cx + w * 0.62, ty + h * 0.9);
+  ctx.stroke();
+  ctx.strokeStyle = mg; ctx.lineWidth = h * 0.16; ctx.stroke();
+  if (tier === 2) {
+    // between three bezants: gold coin in the field, the duke's addition
+    ctx.fillStyle = mg;
+    for (const [bx, by] of [[-0.25, 0.19], [0.25, 0.19], [0, 0.72]]) {
+      ctx.beginPath(); ctx.arc(cx + bx * w, ty + by * h, w * 0.085, 0, TAU); ctx.fill();
+    }
+  }
+  impShine(cx, ty + h * 0.5, w, h, t, 3.4, 0);
+  ctx.restore();
+  // the bordure: dark under, polished over
+  impShieldPath(cx, ty, w, h);
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = 3; ctx.stroke();
+  ctx.strokeStyle = mg; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+}
+
+/* ---- the duke's coronet: a band, three strawberry leaves, two pearls on
+   stems. Low and wide, because it is a rank and not yet a crown. */
+function impCoronet(cx, by, w, T, t) {
+  const hw = w * 0.56, bh = w * 0.19;
+  const g = impGrad(cx - hw, by - bh * 3, cx + hw, by, T);
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = g; ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (const lx of [-0.74, 0, 0.74]) {
+    const x = cx + lx * hw, s = lx ? 0.82 : 1;
+    ctx.moveTo(x - bh * 0.95 * s, by - bh);
+    ctx.quadraticCurveTo(x - bh * 1.2 * s, by - bh * 2.2 * s, x, by - bh * 2.9 * s);
+    ctx.quadraticCurveTo(x + bh * 1.2 * s, by - bh * 2.2 * s, x + bh * 0.95 * s, by - bh);
+    ctx.closePath();
+  }
+  ctx.fill(); ctx.stroke();
+  for (const px of [-0.37, 0.37]) {
+    const x = cx + px * hw;
+    ctx.strokeStyle = g; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(x, by - bh); ctx.lineTo(x, by - bh * 2); ctx.stroke();
+    ctx.fillStyle = IMP_FUR;
+    ctx.beginPath(); ctx.arc(x, by - bh * 2.3, bh * 0.42, 0, TAU); ctx.fill();
+  }
+  ctx.beginPath(); ctx.rect(cx - hw, by - bh, hw * 2, bh);
+  ctx.fillStyle = impGrad(cx, by - bh, cx, by, T); ctx.fill();
+  ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = 0.8; ctx.stroke();
+  ctx.fillStyle = T.gem;
+  for (const jx of [-0.5, 0, 0.5]) {
+    ctx.beginPath(); ctx.ellipse(cx + jx * hw, by - bh / 2, bh * 0.36, bh * 0.28, 0, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  impStar(cx, by - bh * 2.9, 3.4, impBlink(t, 2.8, 0.4) * 0.95);
+  impStar(cx, by - bh / 2, 2.4, impBlink(t, 3.6, 1.7) * 0.8);
+}
+
+/* ---- the king's crown: velvet cap, two arches and a front arch meeting at
+   the monde, a jewelled band on an ermine roll, and a sun turning behind it.
+   The void already floats a crown, so this one is its opposite in every way
+   that reads at a distance: lit where that is dark, arched where that is
+   spired, and sitting in rays where that sits in a glow. */
+function impCrown(cx, by, W, T, t) {
+  const hw = W / 2, bh = W * 0.21, top = by - bh, ah = W * 0.6;
+  const g = impGrad(cx - hw, top - ah, cx + hw, by, T);
+  const sx = cx, sy = top - ah * 0.45;
+  ctx.save();
+  if (FXO.parts) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const rg = ctx.createRadialGradient(sx, sy, W * 0.2, sx, sy, W * 1.55);
+    rg.addColorStop(0, rgba(T.glow, 0.38)); rg.addColorStop(1, rgba(T.glow, 0));
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    const rot = t * 0.16;
+    for (let i = 0; i < 16; i++) {
+      const a = rot + i * TAU / 16, L = W * (i % 2 ? 0.95 : 1.55), s = i % 2 ? 0.05 : 0.08;
+      ctx.moveTo(sx + Math.cos(a - s) * W * 0.3, sy + Math.sin(a - s) * W * 0.3);
+      ctx.lineTo(sx + Math.cos(a) * L, sy + Math.sin(a) * L);
+      ctx.lineTo(sx + Math.cos(a + s) * W * 0.3, sy + Math.sin(a + s) * W * 0.3);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.restore();
+  }
+  drawGlow(sx, sy, W * 1.3, T.glow, 0.32);
+  // the cap
+  ctx.beginPath();
+  ctx.moveTo(cx - hw * 0.8, top);
+  ctx.bezierCurveTo(cx - hw * 0.84, top - ah * 1.05, cx + hw * 0.84, top - ah * 1.05, cx + hw * 0.8, top);
+  ctx.closePath();
+  const cg = ctx.createLinearGradient(cx - hw, top - ah, cx + hw * 0.6, top);
+  cg.addColorStop(0, T.clothHi); cg.addColorStop(0.6, T.cloth); cg.addColorStop(1, T.dark);
+  ctx.fillStyle = cg; ctx.fill();
+  // the arches
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (const sg of [-1, 1]) {
+    ctx.moveTo(cx + sg * hw * 0.84, top);
+    ctx.bezierCurveTo(cx + sg * hw * 0.92, top - ah * 0.78, cx + sg * hw * 0.3, top - ah * 1.02, cx, top - ah);
+  }
+  ctx.moveTo(cx, top); ctx.lineTo(cx, top - ah);
+  ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = W * 0.13; ctx.stroke();
+  ctx.strokeStyle = g; ctx.lineWidth = W * 0.075; ctx.stroke();
+  ctx.fillStyle = IMP_FUR;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath(); ctx.arc(cx, top - ah * i / 4, W * 0.03, 0, TAU); ctx.fill();
+  }
+  // the monde and its cross
+  const oy = top - ah - W * 0.09, orr = W * 0.11;
+  ctx.fillStyle = impGrad(cx - orr, oy - orr, cx + orr, oy + orr, T);
+  ctx.beginPath(); ctx.arc(cx, oy, orr, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = 0.8; ctx.stroke();
+  const cy0 = oy - orr, cs = W * 0.12, cw = W * 0.065;
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - cw / 2, cy0 - cs * 1.7, cw, cs * 1.75);
+  ctx.fillRect(cx - cs * 0.55, cy0 - cs * 1.25, cs * 1.1, cw);
+  // crosses and fleurs along the rim
+  ctx.fillStyle = g; ctx.strokeStyle = rgba(T.dark, 0.85); ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const x = cx + (i / 4 * 2 - 1) * hw * 0.86, ht = bh * (i % 2 ? 1.1 : 1.5);
+    ctx.moveTo(x - bh * 0.55, top + 0.5); ctx.lineTo(x, top - ht); ctx.lineTo(x + bh * 0.55, top + 0.5);
+    ctx.closePath();
+  }
+  ctx.fill(); ctx.stroke();
+  // the ermine roll, then the band on it
+  ctx.beginPath(); ctx.rect(cx - hw * 1.05, by - 0.4, W * 1.05, bh * 0.8);
+  ctx.fillStyle = IMP_FUR; ctx.fill();
+  ctx.fillStyle = IMP_TAIL;
+  for (let i = 0; i < 6; i++) {
+    const x = cx + (i / 5 * 2 - 1) * hw * 0.88, y = by + bh * 0.3;
+    ctx.beginPath(); ctx.moveTo(x, y - 1); ctx.lineTo(x + 0.8, y + 1); ctx.lineTo(x - 0.8, y + 1); ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.rect(cx - hw, top, W, bh);
+  ctx.fillStyle = impGrad(cx, top, cx, by, T); ctx.fill();
+  ctx.strokeStyle = rgba(T.dark, 0.9); ctx.lineWidth = 0.9; ctx.stroke();
+  const gem = (x, col, r) => {
+    ctx.fillStyle = rgba(T.dark, 0.9);
+    ctx.beginPath(); ctx.ellipse(x, top + bh / 2, r * 1.45, r * 1.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(x, top + bh / 2, r * 1.2, r, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = rgba('#ffffff', 0.75);
+    ctx.beginPath(); ctx.arc(x - r * 0.4, top + bh / 2 - r * 0.35, r * 0.35, 0, TAU); ctx.fill();
+  };
+  gem(cx, T.gem, bh * 0.34); gem(cx - hw * 0.55, T.gem2, bh * 0.27); gem(cx + hw * 0.55, T.gem2, bh * 0.27);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(cx - hw, top, W, bh); ctx.clip();
+  impShine(cx, top + bh / 2, W, bh * 3, t, 3.1, 0.6);
+  ctx.restore();
+  ctx.restore();
+  impStar(cx, cy0 - cs * 1.7, 4.2, impBlink(t, 2.6, 0));
+  impStar(cx, top + bh / 2, 3.4, impBlink(t, 3.3, 1.2));
+  impStar(cx - hw * 0.55, top + bh / 2, 2.6, impBlink(t, 3.7, 2.1));
+  impStar(cx + hw * 0.55, top + bh / 2, 2.6, impBlink(t, 4.1, 0.3));
+}
+
+/* ---- the guard: a faceted collar with blades set in it, pointing out. The
+   facets are the point: every other award rings the hull with a circle. Each
+   blade is two facets lit from the upper left, so the light stays where it
+   is while the ring turns under it, which is what polished metal does. */
+const impGuardRot = (t, tier) => t * 0.32 * (tier === 2 ? -1 : 1);
+const impBladeLen = (R, tier, i) => R * (0.3 + tier * 0.04) * (tier === 3 && i % 2 ? 0.74 : 1);
+function impGuard(x, y, R, T, tier, t) {
+  const n = T.blades, rot = impGuardRot(t, tier), m = n * 2, rr = R - 1;
+  ctx.save();
+  ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  for (let i = 0; i < m; i++) {
+    const a = rot + (i + 0.5) * TAU / m;
+    const X = x + Math.cos(a) * rr, Y = y + Math.sin(a) * rr;
+    i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = rgba(T.dark, 0.85); ctx.lineWidth = 3.2; ctx.stroke();
+  ctx.strokeStyle = rgba(T.mid, 0.6); ctx.lineWidth = 1; ctx.stroke();
+  for (let i = 0; i < n; i++) {
+    const a = rot + i * TAU / n, lit = 0.5 + 0.5 * Math.cos(a + 2.2);
+    const L = impBladeLen(R, tier, i), w = R * 0.085;
+    ctx.save();
+    ctx.translate(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    ctx.rotate(a);
+    ctx.beginPath();
+    ctx.moveTo(0, -w); ctx.lineTo(L * 0.7, -w * 0.8); ctx.lineTo(L, 0); ctx.lineTo(L * 0.7, w * 0.8); ctx.lineTo(0, w);
+    ctx.closePath();
+    ctx.fillStyle = T.mid; ctx.fill();
+    ctx.strokeStyle = rgba(T.dark, 0.7); ctx.lineWidth = 0.6; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -w); ctx.lineTo(L * 0.7, -w * 0.8); ctx.lineTo(L, 0); ctx.lineTo(0, 0); ctx.closePath();
+    ctx.fillStyle = rgba(T.hi, 0.12 + lit * 0.72); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, w); ctx.lineTo(L * 0.7, w * 0.8); ctx.lineTo(L, 0); ctx.lineTo(0, 0); ctx.closePath();
+    ctx.fillStyle = rgba(T.dark, 0.55 - lit * 0.3); ctx.fill();
+    ctx.fillStyle = T.mid; ctx.fillRect(-1, -w * 2.3, 2, w * 4.6);
+    ctx.fillStyle = rgba(T.hi, lit * 0.75); ctx.fillRect(-1, -w * 2.3, 1, w * 4.6);
+    ctx.restore();
+    if (T.gem) {
+      const gx = x + Math.cos(a) * rr, gy = y + Math.sin(a) * rr;
+      ctx.fillStyle = rgba(T.dark, 0.9);
+      ctx.beginPath(); ctx.arc(gx, gy, 1.9, 0, TAU); ctx.fill();
+      ctx.fillStyle = tier === 3 && i % 2 ? T.gem2 : T.gem;
+      ctx.beginPath(); ctx.arc(gx, gy, 1.35, 0, TAU); ctx.fill();
+      ctx.fillStyle = rgba('#ffffff', 0.85); ctx.fillRect(gx - 0.7, gy - 0.7, 0.7, 0.7);
+    }
+  }
+  ctx.restore();
+  // one edge catches the light at a time, walking round the collar
+  if (FXO.parts) {
+    const per = 1.5 - tier * 0.2, u = (t % per) / per;
+    if (u < 0.3) {
+      const k = Math.floor(t / per) % n, a = rot + k * TAU / n, d = rr + impBladeLen(R, tier, k);
+      impStar(x + Math.cos(a) * d, y + Math.sin(a) * d, 3 + tier, Math.sin(u / 0.3 * Math.PI));
+    }
+  }
+}
+
+/* ---- the king's laurel: two branches cupping the hull from below, tied at
+   the foot with a crimson bow. Held to the screen, so it always reads as a
+   wreath rather than as scenery going round. */
+function impLaurel(x, y, R, T, t) {
+  const r = R + 6;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const sd of [-1, 1]) {
+    const a0 = Math.PI / 2 + sd * 0.2, a1 = Math.PI / 2 + sd * 1.95;
+    ctx.strokeStyle = rgba(T.lo, 0.95); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(x, y, r, Math.min(a0, a1), Math.max(a0, a1)); ctx.stroke();
+    for (let k = 0; k < 7; k++) {
+      const u = k / 6, a = Math.PI / 2 + sd * (0.32 + u * 1.6);
+      const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      const tang = a + sd * Math.PI / 2, ls = 3.6 - u * 1.3;
+      for (const side of [-1, 1]) {
+        const la = tang + side * 0.62;
+        ctx.save();
+        ctx.translate(px + Math.cos(la) * ls * 0.85, py + Math.sin(la) * ls * 0.85);
+        ctx.rotate(la);
+        ctx.beginPath(); ctx.ellipse(0, 0, ls, ls * 0.38, 0, 0, TAU);
+        ctx.fillStyle = side * sd > 0 ? T.metal[1] : T.mid; ctx.fill();
+        ctx.strokeStyle = rgba(T.hi, 0.55); ctx.lineWidth = 0.5; ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+  const by = y + r;
+  ctx.fillStyle = T.cloth; ctx.strokeStyle = rgba(T.edge, 0.7); ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(x, by); ctx.lineTo(x - 4, by - 2.2); ctx.lineTo(x - 4, by + 2.2); ctx.closePath();
+  ctx.moveTo(x, by); ctx.lineTo(x + 4, by - 2.2); ctx.lineTo(x + 4, by + 2.2); ctx.closePath();
+  ctx.moveTo(x - 0.6, by); ctx.lineTo(x - 3, by + 5); ctx.lineTo(x - 1.4, by + 5.4); ctx.closePath();
+  ctx.moveTo(x + 0.6, by); ctx.lineTo(x + 3, by + 5); ctx.lineTo(x + 1.4, by + 5.4); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = T.mid; ctx.beginPath(); ctx.arc(x, by, 1.3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ---- the cloth: pennon, mantle, train. A chain hung off the stern that is
+   pulled out behind the heading and let fall, then made to follow its own
+   leader, so it streams when you fly and hangs and sways when you do not.
+   The time step is clamped like the shed's, so a long frame cannot fling it. */
+function impCape(st, T, tier, t) {
+  const N = tier === 1 ? 11 : tier === 2 ? 12 : 14, L = tier === 1 ? 3.1 : tier === 2 ? 3.3 : 3.6;
+  const ang = P.ang || 0, ca = Math.cos(ang), sa = Math.sin(ang);
+  const ax = P.x - ca * 10, ay = P.y - sa * 10;
+  let pts = st.cape;
+  if (!pts || pts.length !== N || Math.hypot(pts[0].x - ax, pts[0].y - ay) > 60) {
+    pts = st.cape = [];
+    for (let i = 0; i < N; i++) pts.push({ x: ax - ca * i * L, y: ay - sa * i * L });
+  }
+  const dt = Math.min(0.05, Math.max(0, t - (st.ct ?? t)));
+  st.ct = t;
+  pts[0].x = ax; pts[0].y = ay;
+  for (let i = 1; i < N; i++) {
+    const p = pts[i], q = pts[i - 1], f = i / N;
+    p.x += (-ca * 22 + Math.sin(t * 2.6 - i * 0.6) * 14 * f) * dt;
+    p.y += (-sa * 22 + 20 * (0.35 + f)) * dt;
+    const dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy) || 1;
+    p.x = q.x + dx / d * L; p.y = q.y + dy / d * L;
+  }
+  const w0 = 2.2, w1 = tier === 1 ? 2.6 : tier === 2 ? 7.5 : 9.5;
+  const Lp = [], Rp = [], nn = [];
+  for (let i = 0; i < N; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N - 1, i + 1)];
+    let nx = -(b.y - a.y), ny = b.x - a.x;
+    const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+    const f = i / (N - 1), w = w0 + (w1 - w0) * (tier === 1 ? f : Math.sqrt(f));
+    nn.push([nx, ny, w]);
+    Lp.push([pts[i].x + nx * w, pts[i].y + ny * w]);
+    Rp.push([pts[i].x - nx * w, pts[i].y - ny * w]);
+  }
+  const e = pts[N - 1];
+  ctx.save();
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const outline = () => {
+    ctx.beginPath();
+    ctx.moveTo(Lp[0][0], Lp[0][1]);
+    for (let i = 1; i < N; i++) ctx.lineTo(Lp[i][0], Lp[i][1]);
+    if (tier === 1) ctx.lineTo(pts[N - 3].x, pts[N - 3].y);   // the swallowtail
+    for (let i = N - 1; i >= 0; i--) ctx.lineTo(Rp[i][0], Rp[i][1]);
+    ctx.closePath();
+  };
+  outline();
+  const cg = ctx.createLinearGradient(ax, ay, e.x, e.y);
+  cg.addColorStop(0, T.clothHi); cg.addColorStop(0.45, T.cloth); cg.addColorStop(1, T.dark);
+  ctx.fillStyle = cg; ctx.fill();
+  if (FXO.mat && tier > 1) {
+    // velvet: two folds down the length and a sheen that travels along it
+    ctx.save(); outline(); ctx.clip();
+    for (const off of [-0.45, 0.45]) {
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const k = off * nn[i][2] * (1 + Math.sin(t * 2 + i * 0.7) * 0.2);
+        const X = pts[i].x + nn[i][0] * k, Y = pts[i].y + nn[i][1] * k;
+        i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+      }
+      ctx.strokeStyle = rgba(T.dark, 0.4); ctx.lineWidth = 1.3; ctx.stroke();
+    }
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = rgba(T.clothHi, 0.28 + Math.sin(t * 1.7) * 0.12); ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.restore();
+  }
+  // trim down both edges
+  ctx.strokeStyle = tier === 1 ? rgba(T.edge, 0.6) : T.mid; ctx.lineWidth = tier === 1 ? 0.8 : 1.1;
+  ctx.beginPath();
+  for (let i = 0; i < N; i++) i ? ctx.lineTo(Lp[i][0], Lp[i][1]) : ctx.moveTo(Lp[i][0], Lp[i][1]);
+  for (let i = 0; i < N; i++) i ? ctx.lineTo(Rp[i][0], Rp[i][1]) : ctx.moveTo(Rp[i][0], Rp[i][1]);
+  ctx.stroke();
+  if (tier === 2) {
+    // gold fringe off the hem
+    const dx = e.x - pts[N - 2].x, dy = e.y - pts[N - 2].y, dl = Math.hypot(dx, dy) || 1;
+    ctx.strokeStyle = rgba(T.mid, 0.9); ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    for (let k = 0; k <= 6; k++) {
+      const u = k / 6, X = Lp[N - 1][0] + (Rp[N - 1][0] - Lp[N - 1][0]) * u;
+      const Y = Lp[N - 1][1] + (Rp[N - 1][1] - Lp[N - 1][1]) * u;
+      ctx.moveTo(X, Y); ctx.lineTo(X + dx / dl * 2.4, Y + dy / dl * 2.4);
+    }
+    ctx.stroke();
+  } else if (tier === 3) {
+    // the ermine hem, sewn on with a gold seam
+    ctx.beginPath();
+    ctx.moveTo(Lp[N - 3][0], Lp[N - 3][1]); ctx.lineTo(Lp[N - 2][0], Lp[N - 2][1]); ctx.lineTo(Lp[N - 1][0], Lp[N - 1][1]);
+    ctx.lineTo(Rp[N - 1][0], Rp[N - 1][1]); ctx.lineTo(Rp[N - 2][0], Rp[N - 2][1]); ctx.lineTo(Rp[N - 3][0], Rp[N - 3][1]);
+    ctx.closePath();
+    ctx.fillStyle = IMP_FUR; ctx.fill();
+    ctx.fillStyle = IMP_TAIL;
+    for (const i of [N - 2, N - 1]) for (const k of [-0.55, 0, 0.55]) {
+      const kk = i === N - 1 ? k + 0.27 : k;
+      if (kk > 0.8) continue;
+      const X = pts[i].x + nn[i][0] * nn[i][2] * kk, Y = pts[i].y + nn[i][1] * nn[i][2] * kk;
+      ctx.beginPath(); ctx.moveTo(X, Y - 1.1); ctx.lineTo(X + 0.8, Y + 0.9); ctx.lineTo(X - 0.8, Y + 0.9); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = T.mid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Lp[N - 3][0], Lp[N - 3][1]); ctx.lineTo(Rp[N - 3][0], Rp[N - 3][1]); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ---- what comes off it. Same pool, same cap, same accumulator as the void's
+   motes and the redaction's chaff: sparks off the blade points at every rank,
+   gold leaf off the hem from the duke up, and glitter rising off the crown. */
+function impShed(st, R, T, tier, t) {
+  if (!FXO.parts) return;
+  const dt = Math.min(0.05, Math.max(0, t - (st.sht ?? t)));
+  st.sht = t;
+  if (!dt) return;
+  const n = T.blades, rot = impGuardRot(t, tier), rr = R - 1, dir = tier === 2 ? -1 : 1;
+  st.sa = (st.sa || 0) + dt * (3 + tier * 2);
+  while (st.sa >= 1) {
+    st.sa -= 1;
+    const i = (Math.random() * n) | 0, a = rot + i * TAU / n, d = rr + impBladeLen(R, tier, i);
+    const ta = a + Math.PI / 2 * dir, sp = rnd(40, 14);
+    spawnPart(P.x + Math.cos(a) * d, P.y + Math.sin(a) * d,
+              Math.cos(ta) * sp - (P.vx || 0) * 0.2, Math.sin(ta) * sp - (P.vy || 0) * 0.2,
+              rnd(1.8, 0.9), T.spark, rnd(0.6, 0.3), 0.9, false);
+  }
+  if (tier >= 2 && st.cape) {
+    st.sb = (st.sb || 0) + dt * (tier === 2 ? 9 : 14);
+    while (st.sb >= 1) {
+      st.sb -= 1;
+      const e = st.cape[st.cape.length - 1];
+      spawnPart(e.x + rnd(5, -5), e.y + rnd(5, -5), rnd(14, -14), rnd(22, 2), rnd(2, 1),
+                Math.random() < 0.45 ? T.edge : (tier === 2 ? '#c084fc' : T.hi),
+                rnd(0.9, 0.5), 0.92, false);
+    }
+  }
+  if (tier === 3) {
+    st.sc = (st.sc || 0) + dt * 8;
+    const W = R * 0.95;
+    while (st.sc >= 1) {
+      st.sc -= 1;
+      spawnPart(P.x + rnd(W * 0.5, -W * 0.5), P.y - R - 8 - rnd(W * 0.85, W * 0.2),
+                rnd(10, -10), rnd(-14, -40), rnd(2.2, 1.1),
+                Math.random() < 0.5 ? T.hi : T.edge, rnd(1, 0.6), 0.93, false);
+    }
+  }
+}
+
+/* ---- the pilot, in two passes: the cloth under the hull, everything else
+   over it. The regalia sit at R + 8, clear of the longest blade. */
+function impUnder(s, st) {
+  const tier = impTier(s);
+  impCape(st, IMP_T[tier], tier, uiTime);
+}
+function impPlayer(s, st) {
+  const tier = impTier(s), T = IMP_T[tier];
+  const R = (P.r || 12) + 11, t = uiTime, x = P.x, y = P.y;
+  if (tier === 3) impLaurel(x, y, R, T, t);
+  impGuard(x, y, R, T, tier, t);
+  const bob = Math.sin(t * 1.9) * 1.3;
+  if (tier === 3) impCrown(x, y - R - 8 - bob, R * 0.95, T, t);
+  else {
+    const w = R * 0.62, h = R * 0.74, ty = y - R - 8 - h - bob - (tier === 2 ? 1 : 0);
+    impShield(x, ty, w, h, T, tier, t);
+    if (tier === 2) impCoronet(x, ty - 0.5, w, T, t);
+  }
+  impShed(st, R, T, tier, t);
+}
+
+/* ---- the rounds: a lance with its pennon. Two facets split down the spine
+   instead of a gradient, a crossguard, a jewel in the guard from the duke up,
+   a glint on the point for the king. The round's own tint stays on the spine:
+   the shape is the skin, the colour is still the state. Arrow rounds are left
+   alone, as they are by every award. */
+function impBullet(b, c, tier) {
+  const T = IMP_T[tier], r = b.r, ph = uiTime * 7 + (b.x + b.y) * 0.05;
+  if (FXO.bglow) drawGlow(b.x, b.y, r * (3.4 + tier * 0.35), T.glow, 0.24 + tier * 0.06);
+  ctx.save();
+  ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+  ctx.lineJoin = 'miter';
+  if (FXO.parts) {
+    const x0 = -r * 0.5, len = r * (2.5 + tier * 0.45), hw = r * 0.42;
+    const wave = u => Math.sin(ph - u * 3.2) * r * 0.3 * u;
+    ctx.beginPath();
+    ctx.moveTo(x0, -hw);
+    for (let k = 1; k <= 4; k++) { const u = k / 4; ctx.lineTo(x0 - u * len, -hw * (1 - u * 0.3) + wave(u)); }
+    ctx.lineTo(x0 - len * 0.72, wave(0.72));
+    ctx.lineTo(x0 - len, hw * 0.7 + wave(1));
+    for (let k = 3; k >= 0; k--) { const u = k / 4; ctx.lineTo(x0 - u * len, hw * (1 - u * 0.3) + wave(u)); }
+    ctx.closePath();
+    ctx.fillStyle = rgba(tier === 1 ? T.field : T.cloth, 0.95); ctx.fill();
+    ctx.strokeStyle = rgba(T.edge, tier === 1 ? 0.45 : 0.7); ctx.lineWidth = 0.8; ctx.stroke();
+  }
+  const nose = r * 2.05;
+  ctx.beginPath();
+  ctx.moveTo(nose, 0); ctx.lineTo(r * 0.55, -r * 0.58); ctx.lineTo(-r * 0.25, -r * 0.34);
+  ctx.lineTo(-r * 0.25, r * 0.34); ctx.lineTo(r * 0.55, r * 0.58); ctx.closePath();
+  ctx.fillStyle = T.mid; ctx.fill();
+  ctx.strokeStyle = b.crit ? '#ffffff' : rgba(T.dark, 0.8); ctx.lineWidth = b.crit ? 1.1 : 0.8; ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(nose, 0); ctx.lineTo(r * 0.55, -r * 0.58); ctx.lineTo(-r * 0.25, -r * 0.34); ctx.lineTo(-r * 0.25, 0);
+  ctx.closePath();
+  ctx.fillStyle = rgba(T.hi, 0.55 + Math.sin(ph * 0.5) * 0.2); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(nose, 0); ctx.lineTo(r * 0.55, r * 0.58); ctx.lineTo(-r * 0.25, r * 0.34); ctx.lineTo(-r * 0.25, 0);
+  ctx.closePath();
+  ctx.fillStyle = rgba(T.dark, 0.38); ctx.fill();
+  ctx.strokeStyle = rgba(c, 0.75); ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(-r * 0.2, 0); ctx.lineTo(r * 1.6, 0); ctx.stroke();
+  ctx.fillStyle = T.mid; ctx.fillRect(-r * 0.52, -r * 0.88, r * 0.3, r * 1.76);
+  ctx.fillStyle = rgba(T.hi, 0.7); ctx.fillRect(-r * 0.52, -r * 0.88, r * 0.3, r * 0.3);
+  if (T.gem) {
+    ctx.fillStyle = T.gem;
+    ctx.beginPath(); ctx.arc(-r * 0.37, 0, r * 0.22, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  if (tier === 3) {
+    const a = Math.atan2(b.vy, b.vx);
+    impStar(b.x + Math.cos(a) * r * 1.8, b.y + Math.sin(a) * r * 1.8, r * (0.7 + 0.5 * Math.sin(ph)), 0.7);
+  }
+  return true;
+}
+
+/* ---- the debris: struck metal. A two-facet lozenge turning as it falls at
+   the first two ranks; at the king it is a coin, flipping. The colour the
+   event asked for survives as the rim, so a crit still reads as a crit. */
+function impPart(p, t, rad, tier) {
+  /* The debris is the costly part of this line: measured in a heavy fight
+     (200 bodies, ~175 rounds, the particle cap full) it is most of what the
+     duke and the king cost over a bare hull. So it answers to the same switch
+     as every other extra particle — with Extra particles off, the game's own
+     plain glow draws instead, as it does for the sparks and the pennons. */
+  if (!FXO.parts) return false;
+  const T = IMP_T[tier], r = p.r * 1.15, spin = p.x * 0.09 + p.y * 0.07;
+  if (tier >= 2) drawGlow(p.x, p.y, rad * 0.6, T.glow, t * 0.3);
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  if (tier === 3) {
+    const f = Math.abs(Math.cos(spin)), rx = r * 1.2 * (0.18 + f * 0.82), ry = r * 1.2;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0.3, 0, TAU);
+    ctx.fillStyle = rgba(T.metal[1], t * 0.92); ctx.fill();
+    ctx.strokeStyle = rgba(p.color, t * 0.95); ctx.lineWidth = 1; ctx.stroke();
+    if (f > 0.4) {
+      ctx.strokeStyle = rgba(T.hi, t * 0.75 * f); ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.ellipse(0, 0, rx * 0.58, ry * 0.58, 0.3, 0, TAU); ctx.stroke();
+    }
+  } else {
+    ctx.rotate(spin);
+    const a = r * 1.4, b = r * 0.8;
+    ctx.beginPath(); ctx.moveTo(0, -a); ctx.lineTo(b, 0); ctx.lineTo(-b, 0); ctx.closePath();
+    ctx.fillStyle = rgba(T.hi, t * 0.6); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, a); ctx.lineTo(b, 0); ctx.lineTo(-b, 0); ctx.closePath();
+    ctx.fillStyle = rgba(T.lo, t * 0.85); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, -a); ctx.lineTo(b, 0); ctx.lineTo(0, a); ctx.lineTo(-b, 0); ctx.closePath();
+    ctx.strokeStyle = rgba(p.color, t * 0.95); ctx.lineWidth = 1; ctx.stroke();
+  }
+  ctx.restore();
+  return true;
+}
+
+/* ---- the roster, from the duke up: taken into fief. Under the same rule as
+   the void and the disclosure: everything sits in the annulus between 0.86r
+   and 1.0r or outside the hull, so type marks, telegraphs and the pip at
+   r + 11 all still read. Studs are the body's own colour, set in the tier's
+   metal, so the roster stays colour-coded. At the king the band is gold, the
+   studs are jewels, and a tithe mark rides the leading corner. */
+function impEnemy(e, ea, tier) {
+  const T = IMP_T[tier], R = e.r, n = e.sides, a = e.ang || 0, step = TAU / n;
+  const ring = k => {
+    for (let i = 0; i < n; i++) {
+      const th = a + i * step, X = e.x + Math.cos(th) * R * k, Y = e.y + Math.sin(th) * R * k;
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.globalAlpha = ea === undefined ? 1 : ea;
+  ctx.lineJoin = 'miter';
+  ctx.beginPath(); ring(1); ring(0.86);
+  ctx.fillStyle = tier === 3 ? rgba(T.lo, 0.6) : rgba(T.dark, 0.62);
+  ctx.fill('evenodd');
+  ctx.beginPath(); ring(0.86);
+  ctx.strokeStyle = rgba(T.mid, tier === 3 ? 0.75 : 0.55); ctx.lineWidth = 1; ctx.stroke();
+  if (FXO.mat) {
+    for (let i = 0; i < n; i++) {
+      const th = a + i * step, X = e.x + Math.cos(th) * R * 0.93, Y = e.y + Math.sin(th) * R * 0.93;
+      poly(X, Y, 2.4, 4, th);
+      ctx.fillStyle = T.mid; ctx.fill();
+      poly(X, Y, 1.5, 4, th);
+      ctx.fillStyle = rgba(e.col, 0.95); ctx.fill();
+    }
+    if (tier === 3) {
+      // the tithe: a gold chevron off the leading corner, pointing out
+      const cx = e.x + Math.cos(a) * (R + 3.5), cy = e.y + Math.sin(a) * (R + 3.5);
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(a);
+      ctx.beginPath(); ctx.moveTo(2.6, 0); ctx.lineTo(-1, -2.6); ctx.lineTo(0, 0); ctx.lineTo(-1, 2.6); ctx.closePath();
+      ctx.fillStyle = T.mid; ctx.fill();
+      ctx.restore();
+      const k = Math.floor(uiTime * 1.3 + e.x * 0.01) % n, th = a + k * step;
+      impStar(e.x + Math.cos(th) * R * 0.93, e.y + Math.sin(th) * R * 0.93, 2.8,
+              impBlink(uiTime + e.y * 0.013, 0.77, 0) * 0.9);
+    }
+  }
+  ctx.restore();
+}
+
 const SkinFx = {
   get on() { return !!equippedSpecial(); },
+  /* before the hull: only the imperial line has anything that hangs beneath it */
+  under() {
+    const s = equippedSpecial();
+    if (s && s.fx === 'imperial' && !P.down) impUnder(s, IMP_STATE);
+  },
   player() {
     const s = equippedSpecial();
     if (!s || P.down) return;
     if (s.fx === 'void') { SkinFx.voidPlayer(s); return; }
     if (s.fx === 'redaction') { SkinFx.redPlayer(s); return; }
     if (s.fx === 'draft') { drawDraftRig(P.x, P.y, (P.r || 12) + 11, uiTime); return; }
+    if (s.fx === 'imperial') { impPlayer(s, IMP_STATE); return; }
     const R = (P.r || 12) + 11, t = uiTime;
     ctx.save();
     // the rim: cheap, always drawn, and the part that reads at a glance
@@ -28451,6 +31680,7 @@ const SkinFx = {
     if (!s || !s.fx || b.arrow) return false;
     if (s.fx === 'redaction') return SkinFx.redBullet(b, c, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftBullet(b, c);
+    if (s.fx === 'imperial') return impBullet(b, c, impTier(s));
     if (s.fx !== 'void') return false;
     const r = b.r;
     /* The phase comes off the round's own position, the same trick the shipped
@@ -28526,6 +31756,7 @@ const SkinFx = {
     if (!s || !s.fx) return false;
     if (s.fx === 'redaction') return SkinFx.redPart(p, t, rad, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftPart(p, t, rad);
+    if (s.fx === 'imperial') return impPart(p, t, rad, impTier(s));
     if (s.fx !== 'void') return false;
     const r = p.r * 1.15;
     drawGlow(p.x, p.y, rad * 0.72, VOID_LIT, t * 0.36);
@@ -28550,6 +31781,7 @@ const SkinFx = {
     if (!s || !s.fx || e.type === 'boss' || !e.sides) return;
     if (s.fx === 'redaction') { if (devStage(s) === 2) SkinFx.redEnemy(e, ea); return; }
     if (s.fx === 'draft') return;
+    if (s.fx === 'imperial') { if (impTier(s) >= 2) impEnemy(e, ea, impTier(s)); return; }
     if (s.fx !== 'void') return;
     const R = e.r, n = e.sides, a = e.ang || 0, step = TAU / n;
     ctx.save();
@@ -30179,10 +33411,12 @@ function netTick(dt) {
 const MP_ETYPES = Object.keys(ETYPE);
 const MP_BOSSES = Object.keys(BOSSES);
 const MP_HAZ    = ['fire', 'acid', 'vent', 'laser', 'current', 'mirror', 'delete', 'well'];
-const MP_DROPS  = ['credit', 'heal', 'nuke'];
+/* Appended rather than inserted: the index is the wire format, so a new kind
+   may only ever go on the end or an older build reads gear as a heal. */
+const MP_DROPS  = ['credit', 'heal', 'nuke', 'gear'];
 /* Every state the host can be in that the guest has to react to. Index, not
    name, goes on the wire — a mismatch here is caught by the version signature. */
-const MP_STATES = ['play', 'levelup', 'shop', 'planet', 'library', 'talk', 'devtalk',
+const MP_STATES = ['play', 'levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk',
                    'gfx', 'pause', 'dead', 'codex', 'amalcut', 'menu', 'name', 'lan'];
 
 /* Colours are sent as palette indices. Every colour any entity can carry is
@@ -33643,7 +36877,7 @@ function drawChalHud() {
   const timed = c.m.time && !Chal.won;
   const w = 190, cardH = timed ? 54 : 38, x = 16, y = hudBotY - cardH;
   hudBotY = y - 8;
-  const col = c.daily ? (c.accent || CHAL_GOLD)
+  const col = c.rush ? RUSH_COL : c.daily ? (c.accent || CHAL_GOLD)
             : Chal.won ? '#6ee7b7' : CHAL_GOLD;
   ctx.save();
   ctx.textBaseline = 'middle';
@@ -33659,16 +36893,19 @@ function drawChalHud() {
   ctx.letterSpacing = '0.14em';
   ctx.font = "700 8.5px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = rgba(col, 0.75);
-  ctx.fillText(c.daily ? (Chal.on.dailyRanked ? 'DAILY' : 'DAILY  \u00b7  PRACTICE')
+  ctx.fillText(c.rush ? rushChipLabel() : c.daily ? (Chal.on.dailyRanked ? 'DAILY' : 'DAILY  \u00b7  PRACTICE')
                        : Chal.won ? 'CLEARED' : 'CHALLENGE', x + 12, y + 11);
   ctx.restore();
-  fitFont(c.n, w - 24, '700', 11.5, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+  // a rush names the boss it is on; everything else names its sheet
+  const title = c.rush ? rushChipTitle() : c.n;
+  fitFont(title, w - 24, '700', 11.5, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
   ctx.fillStyle = col;
-  ctx.fillText(c.n, x + 12, y + 25);
+  ctx.fillText(title, x + 12, y + 25);
   if (!Chal.won) {
     /* A daily names no boss — there is nothing to kill that ends it. What
        belongs here instead is the thing you would want to be sure of. */
-    const goal = c.daily ? (c.d || 'RANKED RUN') : 'KILL  ' + chalGoalName(c);
+    const goal = c.rush ? rushChipGoal()
+               : c.daily ? (c.d || 'RANKED RUN') : 'KILL  ' + chalGoalName(c);
     fitFont(goal, w - 24, '600', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = '#64748b';
     ctx.fillText(goal, x + 12, y + 36);

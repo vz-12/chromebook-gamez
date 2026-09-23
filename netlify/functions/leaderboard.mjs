@@ -77,7 +77,9 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
    blob — the login is what grants, but the grant outlives the login.
 -------------------------------------------------------------------------- */
 const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
-                   'redaction', 'redaction-open', 'draft'];
+                   'redaction', 'redaction-open', 'draft',
+                   // the BOSS RUSH's three, knight to king
+                   'rush-knight', 'rush-duke', 'rush-king'];
 /* Everything that is not a skin: the rooms, the routes, the challenges and
    the codex. One id rather than a list of them, because a dev account wants
    the whole game and enumerating it here would be a second copy of a list
