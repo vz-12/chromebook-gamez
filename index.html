@@ -1107,10 +1107,10 @@ const CHARS = [
   { id: 'melee', n: 'THE VAGRANT', weapon: 'blade',
     col: '#a5b4fc', bullet: '#c7d2fe',
     tag: 'reach of an arm · wears the room',
-    d: 'No gun. A swing that takes everything standing in front of it, and a ' +
-       'parry that refuses a shot outright and is paid back in the next swing. ' +
-       'Levels into nothing: its whole build is the blades, plates, cores and ' +
-       'sigils the room leaves on the floor.',
+    d: 'No gun. It lives on the parry: every one in a row raises its damage, ' +
+       'and a perfect one sends the blow straight back as a narrow wave. Levels ' +
+       'into nothing: its whole build is the blades, plates, cores and sigils ' +
+       'the room leaves on the floor.',
     hp: 124, speed: 292, dmg: 11, rate: 3.2,
     need: p => (p.rushBest || 0) >= RUSH_PEAK,
     needTxt: 'TOP THE BOSS RUSH',
@@ -1370,8 +1370,11 @@ function newPlayer() {
        is the kind of bug that only surfaces in co-op. */
     swingT: 0, swingP: 0, swingA0: 0, swingAim: 0, swingArc: 0, swingDir: 1,
     swingSide: 0, swingId: 0, swingFin: 0, swingCut: 0,
-    swingReach: 0, swingFade: 0, rig: 0, parryFx: 0,
-    combo: 0, comboT: 0, parryT: 0, parryCd: 0, parryTook: 0, riposte: 0,
+    swingReach: 0, swingFade: 0, rig: 0, parryFx: 0, perfectFx: 0,
+    parryT: 0, parryAge: 0, parryCd: 0, parryTook: 0, parrySrc: [], riposte: 0,
+    // the parry chain, the stillness, the lunge and rally — see the parry is the pilot
+    chain: 0, chainT: 0, stillT: 0, stillMax: 0, stillCd: 0, rally: 0, rallyT: 0,
+    lungeId: 0, lungeCut: 0, lungeKill: 0,
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
        throwaway P, thousands of lines above where gearBlank() is declared, and
@@ -1580,6 +1583,11 @@ const RAR_W = { common: 100, rare: 58, epic: 30, legend: 13 };
    stop — so those are applied to P as a tracked delta and reversed by the
    same amount. gearRecalc() is idempotent: it always rebuilds from the four
    things currently worn and never from what it computed last time.
+
+   And nothing on the floor is wasted. A drop is looked at when you choose to
+   look — [E], standing on it — never because the fight carried you over it,
+   and one you do not want is broken down into the piece already in its slot.
+   See tempering.
 --------------------------------------------------------------------------- */
 
 const isBlade = () => P.weapon === 'blade';
@@ -1595,7 +1603,7 @@ const GEAR_SLOTS = [
    these keys, and each is either a multiplier that rests at 1 or a bonus that
    rests at 0 — which is the whole of how gearRecalc folds four items into one
    answer without a table of special cases. */
-const GB_MUL = ['dmg', 'rate', 'spd', 'parry', 'combo', 'fin', 'xp', 'cred'];
+const GB_MUL = ['dmg', 'rate', 'spd', 'parry', 'combo', 'fin', 'xp', 'cred', 'ret'];
 const GB_ADD = ['reach', 'arc', 'crit', 'critm', 'hp', 'armor', 'steal',
                 'luck', 'regen', 'thorn'];
 
@@ -1640,6 +1648,9 @@ const GEAR_BASES = [
   { id: 'hook',   n: 'BOARDING HOOK', slot: 'blade', w: 7,
     d: 'Swings hard enough to move what it hits.',
     s: { dmg: 1.2, rate: 0.82, reach: 16, thorn: 0.5 } },
+  { id: 'turn',   n: 'TURNING BAR', slot: 'blade', w: 8,
+    d: 'Everything thrown at it goes back harder.',
+    s: { dmg: 0.9, arc: 0.24, ret: 1.5 } },
 
   /* --- plates. What it survives. Every one of these is a trade, because a
      plate that was only ever upside would make the slot a formality. --- */
@@ -1666,6 +1677,9 @@ const GEAR_BASES = [
   { id: 'kiln',   n: 'KILN PLATE',  slot: 'plate', w: 7,
     d: 'Runs hot. Swings faster for it.',
     s: { rate: 1.14, hp: -14, armor: 1 } },
+  { id: 'scab',   n: 'SCAB PLATE',  slot: 'plate', w: 9, on: 'rally',
+    d: 'It closes back over, if you keep swinging.',
+    s: { hp: 20 } },
 
   /* --- cores. The interesting slot: a core does not add a number, it changes
      what happens at the far end of a swing. Each `on` is one branch in
@@ -1694,6 +1708,9 @@ const GEAR_BASES = [
   { id: 'ripc',   n: 'RIPOSTE CORE',slot: 'core', w: 8,  on: 'riposte',
     d: 'A parry is not a pause. It is the wind-up.',
     s: { parry: 1.25 } },
+  { id: 'stillc', n: 'STILL CORE',  slot: 'core', w: 8,  on: 'still',
+    d: 'The room waits for it.',
+    s: { parry: 1.12 } },
 
   /* --- sigils. What the run owes it. Deliberately the quiet slot: economy,
      luck and upkeep, so that a sigil is never the reason a fight was won and
@@ -1718,7 +1735,13 @@ const GEAR_BASES = [
     s: { dmg: 1.12 } },
   { id: 'stride', n: 'STRIDE SIGIL',slot: 'sigil', w: 9,
     d: 'Closing the distance is most of the work.',
-    s: { spd: 1.09, reach: 6 } }
+    s: { spd: 1.09, reach: 6 } },
+  { id: 'bowl',   n: "BEGGAR'S BOWL", slot: 'sigil', w: 8, on: 'alms',
+    d: 'Held out to everything thrown at you.',
+    s: { cred: 1.15 } },
+  { id: 'metro',  n: 'METRONOME',   slot: 'sigil', w: 8, on: 'metro',
+    d: 'It keeps time when you cannot.',
+    s: { combo: 1.2 } }
 ];
 
 /* ------------------------------- the affixes ------------------------------
@@ -1746,7 +1769,8 @@ const GEAR_AFFIX = [
   { id: 'flowing',n: 'Flowing',    k: 'combo', lo: 1.2,  hi: 1.7,  on: ['core', 'sigil'] },
   { id: 'greedy', n: 'Greedy',     k: 'cred',  lo: 1.2,  hi: 1.6,  on: ['sigil', 'plate'] },
   { id: 'learned',n: 'Learned',    k: 'xp',    lo: 1.12, hi: 1.35, on: ['sigil', 'core'] },
-  { id: 'lucky',  n: 'Fortunate',  k: 'luck',  lo: 1,    hi: 3,    on: ['sigil'] }
+  { id: 'lucky',  n: 'Fortunate',  k: 'luck',  lo: 1,    hi: 3,    on: ['sigil'] },
+  { id: 'retrn',  n: 'Returning',  k: 'ret',   lo: 1.1,  hi: 1.35, on: ['blade', 'core'] }
 ];
 
 /* How many affixes a rarity is worth, and how good a roll it is allowed to be.
@@ -1841,15 +1865,47 @@ function gearMake(baseId, rar, lv) {
 function gearName(it) {
   if (!it) return '—';
   const b = gearBase(it.b);
-  const n = b ? b.n : '?';
+  const n = (b ? b.n : '?') + (it.tp ? ' +' + it.tp : '');
   if (!it.affs || !it.affs.length) return n;
   const a0 = gearAffix(it.affs[0].id);
   return (a0 ? a0.n.toUpperCase() + ' ' : '') + n;
 }
 
+/* -------------------------------- tempering --------------------------------
+   Every drop is worth something. One that is not worth wearing is broken down
+   into the piece already in its slot: TEMPER_PER points by rarity, and each
+   point raises what that slot is FOR — a blade cuts harder, a plate holds more,
+   a core lands the finisher harder, a sigil is owed more. By slot rather than
+   by the piece's own figures, because the SCRAP EDGE a run starts with has no
+   figures at all and is exactly the thing you most want to pour scrap into.
+   The points stay on the piece, and that is the whole question a drop now
+   asks: the fresh thing on the floor, or everything already poured into what
+   you have on. */
+const TEMPER_PER  = { common: 1, rare: 2, epic: 3, legend: 4 };
+const TEMPER_MAX  = 12;
+const TEMPER_SLOT = {
+  blade: [['dmg', 0.05]],
+  plate: [['hp', 6], ['armor', 0.25]],
+  core:  [['fin', 0.06], ['crit', 0.005]],
+  sigil: [['xp', 0.04], ['cred', 0.04]]
+};
+/* Every figure an item contributes, temper included, one key at a time. The
+   fold, the card and the score all walk an item through this, so the number on
+   the card and the number in the fight cannot disagree. */
+function gearEach(it, fn) {
+  for (const k in it.s) fn(k, it.s[k]);
+  for (const a of (it.affs || [])) {
+    const g = gearAffix(a.id);
+    if (g) fn(g.k, a.v);
+  }
+  const tp = it.tp || 0, ts = TEMPER_SLOT[it.slot];
+  if (tp && ts)
+    for (const [k, per] of ts) fn(k, GB_MUL.includes(k) ? 1 + per * tp : per * tp);
+}
+
 /* Reading order on a card: what it does to a swing, then what it does to you,
    then what it does to the run. */
-const GEAR_STAT_ORDER = ['dmg', 'rate', 'reach', 'arc', 'crit', 'critm', 'fin',
+const GEAR_STAT_ORDER = ['dmg', 'rate', 'reach', 'arc', 'crit', 'critm', 'fin', 'ret',
                          'steal', 'thorn', 'hp', 'armor', 'regen', 'spd',
                          'parry', 'combo', 'xp', 'cred', 'luck'];
 
@@ -1861,7 +1917,11 @@ const GEAR_ON_TEXT = {
   arc:     'Hits carry to a nearby body',
   pull:    'A finisher drags the room in',
   spall:   'Hits splash behind the target',
-  riposte: 'A parry makes the next swing a finisher'
+  riposte: 'A parry answers with a finisher at once',
+  still:   'A perfect parry stills the room twice as long',
+  rally:   'Rally keeps all of a hit, and holds it longer',
+  alms:    'A parry often shakes loose a credit',
+  metro:   'The chain holds longer; a hit only halves it'
 };
 
 /* One stat as a line of text. The sign work matters: a VOIDWEAVE's −8 HP and a
@@ -1876,8 +1936,9 @@ function gearStatText(k, v) {
     case 'rate':  return flat ? null : pc(v) + ' swing speed';
     case 'spd':   return flat ? null : pc(v) + ' move speed';
     case 'fin':   return flat ? null : pc(v) + ' finisher damage';
+    case 'ret':   return flat ? null : pc(v) + ' counter damage';
     case 'parry': return flat ? null : pc(v) + ' parry window';
-    case 'combo': return flat ? null : pc(v) + ' combo window';
+    case 'combo': return flat ? null : pc(v) + ' chain hold';
     case 'xp':    return flat ? null : pc(v) + ' experience';
     case 'cred':  return flat ? null : pc(v) + ' credits';
     case 'reach': return fl(v) + ' reach';
@@ -1904,8 +1965,7 @@ function gearLines(it) {
     if (GB_MUL.includes(k)) tot[k] = (tot[k] === undefined ? 1 : tot[k]) * v;
     else tot[k] = (tot[k] || 0) + v;
   };
-  for (const k in it.s) add(k, it.s[k]);
-  for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) add(d.k, a.v); }
+  gearEach(it, add);
   const out = [];
   for (const k of GEAR_STAT_ORDER) {
     if (tot[k] === undefined) continue;
@@ -1955,8 +2015,7 @@ function gearRecalc() {
       if (GB_MUL.includes(k)) g[k] *= (k === 'dmg' ? 1 + (v - 1) * deep : v);
       else if (GB_ADD.includes(k)) g[k] += v;
     };
-    for (const k in it.s) put(k, it.s[k]);
-    for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) put(d.k, a.v); }
+    gearEach(it, put);
   }
   P.gb = g;
   /* The two stateful ones. Applied as a delta against what the last recalc
@@ -1993,6 +2052,10 @@ function gearRecalc() {
 function gearEquip(it) {
   if (!it || !P.gear) return null;
   const old = P.gear[it.slot] || null;
+  /* Half of what was poured into the old piece is poured into the new one, so
+     a tempered piece is never a reason to walk past something better — and
+     the shop, which equips outright, can never quietly throw a +8 away. */
+  if (old && old.tp) it.tp = Math.min(TEMPER_MAX, (it.tp || 0) + gearCarry(old));
   P.gear[it.slot] = it;
   gearRecalc();
   return old;
@@ -2008,8 +2071,7 @@ function gearScore(it) {
     if (GB_MUL.includes(k)) L[k] = (L[k] === undefined ? 1 : L[k]) * v;
     else L[k] = (L[k] || 0) + v;
   };
-  for (const k in it.s) add(k, it.s[k]);
-  for (const a of (it.affs || [])) { const d = gearAffix(a.id); if (d) add(d.k, a.v); }
+  gearEach(it, add);
   const m = k => (L[k] === undefined ? 1 : L[k]);
   const f = k => (L[k] || 0);
   let s = 0;
@@ -2018,6 +2080,7 @@ function gearScore(it) {
   s += f('hp') * 0.8 + f('armor') * 9 + f('regen') * 14 + f('steal') * 12;
   s += (m('spd') - 1) * 160 + (m('parry') - 1) * 30 + (m('combo') - 1) * 25;
   s += (m('xp') - 1) * 40 + (m('cred') - 1) * 22 + f('luck') * 6 + f('thorn') * 8;
+  s += (m('ret') - 1) * 45;
   const b = gearBase(it.b);
   if (b && b.on) s += 45;                // an effect is worth about an affix
   return s;
@@ -2669,6 +2732,8 @@ function lanceTick(dt, proc, segs, ox, oy) {
   const list = enemies.slice();            // kills can push splitters mid-loop
   const struck = new Set();
   for (const s of segs) {
+    rootHitSeg(s.x1, s.y1, s.x2, s.y2, half);   // ROOT's line, which only bullets could cut
+    if (cages.length) cageStrikeSeg(s.x1, s.y1, s.x2, s.y2, P.laserDps * (s.mul || 1) * dt, !proc);
     for (const e of list) {
       if (e.dead || e.hacked || e.phased || e.invuln || struck.has(e.id)) continue;
       if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + half)) continue;
@@ -2832,8 +2897,8 @@ function fireLance() {
 
 /* ------------------------------- the blade --------------------------------
    THE VAGRANT's weapon. A sweep rather than a shot: the hull swings through an
-   arc in front of it, everything standing in the arc is struck once, and three
-   swings inside the combo window make the third one a finisher.
+   arc in front of it, everything standing in the arc is struck once, and the
+   swing after a parry is a finisher.
 
    Why a sweep and not a cone check. Testing "is the enemy inside the arc" on a
    single frame reads as a hitbox being switched on, and at 0.15s per swing the
@@ -2850,20 +2915,74 @@ function fireLance() {
    air, melee stops being playable somewhere around wave ten — so a parry is a
    fifth of a second of refusing damage outright, on a cooldown short enough to
    be part of the rhythm and long enough that it cannot be held up as a wall.
-   The reward is a riposte: the next swing lands as a finisher whether or not
-   the chain earned it.
+   Since the third cut it is more than the other half: it is the pilot. See
+   THE PARRY IS THE PILOT below for what a parry pays.
 --------------------------------------------------------------------------- */
-const BLADE_REACH = 58;    // past the hull's own radius
-const BLADE_ARC   = 1.15;  // ~66 degrees, before a blade's own shape
+const BLADE_REACH = 62;    // past the hull's own radius
+const BLADE_ARC   = 1.4;   // ~80 degrees, before a blade's own shape
 const BLADE_DMG   = 1.9;   // one swing, in multiples of P.dmg
 const SWING_T     = 0.15;  // how long the edge takes to cross the arc
-const COMBO_N     = 3;     // the third swing of a chain is the finisher
-const COMBO_WIN   = 1.05;  // and this is how long the chain survives a pause
-const FIN_DMG     = 2.0;
-const FIN_ARC     = 0.85;  // a finisher is a much wider swing
+const FIN_DMG     = 2.0;   // the riposte: the swing a parry earns
+const FIN_ARC     = 1.0;   // a finisher is a much wider swing
 const FIN_REACH   = 16;
-const PARRY_WIN   = 0.2;   // the window that refuses damage
-const PARRY_CD    = 0.85;
+
+/* ---------------------------- the parry is the pilot ----------------------------
+   THE VAGRANT is built around one verb, and it is not the swing.
+
+     THE CHAIN        every parry in a row adds CHAIN_STEP to everything the hull
+                      deals, up to CHAIN_MAX. "In a row" is the whole rule: a hit
+                      that lands ends it. Left alone it holds for CHAIN_HOLD, then
+                      comes apart a link at a time.
+     THE PERFECT      a blow that lands in the opening PERFECT_WIN of the window —
+                      the guard raised just before impact — is a full counter:
+                      the blow goes straight back at whoever threw it as a narrow
+                      wave, COUNTER_MUL times its own weight and scaled by
+                      everything the hull has become, the chain included. The room
+                      goes still while it travels.
+     THE RHYTHM       a window that catches anything is ready again at once, so a
+                      volley can be answered shot for shot; one that catches
+                      nothing leaves the hull open for PARRY_CD_WHIFF, and that
+                      is the whole of its cost — the chain goes to the hit that
+                      lands in the gap, not to the miss. Breaking it for the
+                      miss as well was tried: a swing knocking the body you had
+                      timed a parry for out of reach cost you the chain for
+                      being right.
+     THE RIPOSTE      the swing after a parry is the finisher. Swinging on its own
+                      never builds to one.
+
+   What stays from the second cut, because it serves the parry rather than
+   competing with it: a finisher makes the struck reel and throws the small
+   ones, bombers are batted, the dash lunges, and RALLY — most of a hit can
+   still be won back, all of it by the next parry. What went: the swing no
+   longer cuts shots out of the air, and an ordinary swing no longer staggers.
+   Both were answers to being attacked, and in this pilot the answer to being
+   attacked is the parry.
+--------------------------------------------------------------------------- */
+const PARRY_WIN      = 0.24;  // the window that refuses damage
+const PERFECT_WIN    = 0.09;  // its opening: a blow landing this soon after the press is countered
+const PARRY_CD_HIT   = 0.08;  // after a window that caught something — ready again at once
+const PARRY_CD_WHIFF = 0.6;   // after one that caught nothing
+const CHAIN_STEP     = 0.25;  // on everything the hull deals, per parry in a row
+const CHAIN_MAX      = 8;     // ×3 at the top
+const CHAIN_HOLD     = 5;     // seconds a chain holds after its last parry
+const CHAIN_FALL     = 0.8;   // then one link lost per this many seconds
+const COUNTER_MUL    = 5;     // a counter, in multiples of the blow it answers
+const COUNTER_SPD    = 1350;
+const COUNTER_RANGE  = 1000;
+const COUNTER_W      = 9;     // half the wave's width, for hitting: it is narrow
+const STILL_T        = 0.7;   // real seconds a perfect parry holds the room
+const STILL_SLOW     = 0.28;  // the pace the room crawls at meanwhile
+const STILL_CD       = 1.6;   // counted from when the stillness ends
+const STAGGER_T      = 0.34;  // a struck body reels this long
+const STAGGER_FIN    = 0.8;
+const LAUNCH_T       = 0.4;   // how long a finisher's body is a thrown weapon
+const BAT_FUSE       = 0.5;   // a batted bomber goes off this long after the hit
+const LUNGE_DMG      = 1.0;   // everything the dash passes through, in swings
+const LUNGE_REFUND   = 0.5;   // of a charge, paid back by a lunge that kills
+const RALLY_KEEP     = 0.6;   // how much of a hit can be won back
+const RALLY_HOLD     = 0.8;   // before it starts to drain
+const RALLY_DRAIN    = 0.08;  // of max HP per second once it does
+const RALLY_HIT      = 0.2;   // of what is left, per swing that lands; a parry takes all
 
 /* Signed shortest angle from a to b, which the sweep needs and angLerp only
    computes privately. */
@@ -2877,24 +2996,33 @@ const bladeRate  = () => Math.max(0.35, P.fireRate * gearStat('rate'));
    hitbox used without re-deriving them from a flag. */
 const bladeReach = () => P.r + BLADE_REACH + gearStat('reach');
 const bladeArc   = () => clamp(BLADE_ARC + gearStat('arc'), 0.35, 2.6);
-const bladeComboWin = () => COMBO_WIN * gearStat('combo');
-const bladeParryWin = () => PARRY_WIN * gearStat('parry');
+const bladeParryWin   = () => PARRY_WIN * gearStat('parry');
+const bladePerfectWin = () => PERFECT_WIN * gearStat('parry');
 const bladeParryActive = () => P.parryT > 0;
 /* The kit's crit, folded once so the swing and the card agree. */
 const bladeCrit  = () => clamp(P.crit + gearStat('crit'), 0, 0.95);
 const bladeCritM = () => P.critMult + gearStat('critm');
+/* The chain, as the multiplier it is, and how long it holds after a parry.
+   The kit's `combo` figure is that hold now that there is no swing combo. */
+const bladeChainMul  = () => 1 + CHAIN_STEP * (P.chain || 0);
+const bladeChainHold = () => CHAIN_HOLD * gearStat('combo') * (gearOn('metro') ? 1.6 : 1);
+/* One ordinary swing, before a body or a crit has had its say, and with the
+   chain on it — the unit a lunge, a batted bomber and a counter are all
+   measured in. */
+const bladeSwingDmg = () => P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul() * rewardShotMul()
+                          * bladeChainMul();
+/* How long a perfect parry holds the room: one figure for the trigger, the
+   overlay and the card. */
+const bladeStillT = () => STILL_T * (gearOn('still') ? 1.8 : 1);
 
 function bladeStart() {
-  /* A chain that has been left alone for longer than the window starts over.
-     Checked here rather than on a timer so a pause never silently eats the
-     swing you were owed. */
-  if (P.comboT <= 0) P.combo = 0;
-  const fin = P.combo >= COMBO_N - 1 || P.riposte > 0;
+  // the only finisher is the one a parry earned
+  const fin = P.riposte > 0;
   P.swingFin = fin ? 1 : 0;
   P.swingId = (P.swingId || 0) + 1;
   P.swingT = SWING_T;
   P.swingP = 0;
-  P.swingDir = P.swingSide ? -1 : 1;     // alternate, so a chain reads as one
+  P.swingDir = P.swingSide ? -1 : 1;     // alternate, so a flurry reads as one motion
   P.swingSide = P.swingSide ? 0 : 1;
   /* The arc is centred on the aim and swept from one edge to the other, so the
      thing under the cursor is struck halfway through rather than at the end. */
@@ -2938,7 +3066,8 @@ function updateBlade(dt) {
      overlaps that band. */
   const lo = arc * prev, hi = arc * P.swingP;
   for (const e of enemies) {
-    if (e.dead || e.hacked) continue;
+    // intangible is intangible: a bullet passes through a phased body, so does this
+    if (e.dead || e.hacked || e.phased) continue;
     if (e.swungBy === P.swingId) continue;
     const dx = e.x - P.x, dy = e.y - P.y;
     const d = len(dx, dy);
@@ -2950,17 +3079,32 @@ function updateBlade(dt) {
     const pad = d > 4 ? Math.atan2(e.r, Math.max(6, d)) : Math.PI;
     if (off + pad < lo || off - pad > hi) continue;
     e.swungBy = P.swingId;
-    bladeHit(e, d);
+    bladeHit(e, d, 'swing');
+  }
+  /* A filing's ring, by the blade itself — the line from the hand to the edge
+     — once a swing. */
+  if (cages.length) {
+    const ang = a0 + dir * arc * P.swingP;
+    const tx = P.x + Math.cos(ang) * reach, ty = P.y + Math.sin(ang) * reach;
+    for (const c of cages) {
+      if (c.swungBy === P.swingId || !cageCrossed(c, P.x, P.y, tx, ty)) continue;
+      c.swungBy = P.swingId;
+      cageChew(c, bladeSwingDmg() * (P.swingFin ? FIN_DMG * gearStat('fin') : 1), tx, ty);
+    }
+  }
+  /* ROOT's characters, by the same band: the edge cuts one it passes over. */
+  const gs = rootGlyphsUp();
+  if (gs) for (const g of gs) {
+    if (g.dead) continue;
+    const dx = g.x - P.x, dy = g.y - P.y, d = len(dx, dy);
+    if (d > reach + ROOT_GLYPH_R) continue;
+    const off = dir * bladeDelta(a0, Math.atan2(dy, dx));
+    const pad = d > 4 ? Math.atan2(ROOT_GLYPH_R, Math.max(6, d)) : Math.PI;
+    if (off + pad < lo || off - pad > hi) continue;
+    rootGlyphBreak(g);
   }
   if (P.swingT <= 0) {
     P.swingT = 0;
-    /* The chain only advances on a swing that connected. Swinging at air is
-       how you reset your own combo, which is what makes the finisher a thing
-       you set up rather than a thing that happens every third click. */
-    if (P.swingCut > 0) {
-      P.combo = P.swingFin ? 0 : P.combo + 1;
-      P.comboT = bladeComboWin();
-    }
     /* swingFin is deliberately NOT cleared: the fade below still has to know
        what colour the arc it is fading out was. bladeStart() sets it fresh on
        every swing, so it can never be read stale. */
@@ -2968,28 +3112,58 @@ function updateBlade(dt) {
   }
 }
 
+/* Damage from the blade, by whatever route — a swing, a lunge, a counter. A
+   body that caps any single hit (THE OTHER, once something else gets in) is
+   what a heavy blow is worst against: its whole weight arrives as one number
+   and is clipped to nothing, while a gun's spray of small rounds passes under
+   the same cap untouched. So the blow drags through it instead — up to three
+   strikes of a share each, still far short of a spray. */
+function bladeDeal(e, dmg, crit, sx, sy) {
+  const cuts = e.dmgCap ? clamp(Math.ceil(dmg / e.dmgCap), 1, 3) : 1;
+  for (let k = 0; k < cuts && !e.dead; k++)
+    damageEnemy(e, dmg / cuts, crit, sx, sy, k ? { silent: true } : undefined);
+}
+
 /* One body, struck once. Every core effect in the game lives in this function
    and nowhere else, which is the reason a core can be described by a single
-   key on its base. */
-function bladeHit(e, dist) {
-  P.swingCut++;
-  const fin = !!P.swingFin;
+   key on its base. `how` is 'swing' or 'lunge': a lunge is never a finisher,
+   and keeps its own count so it cannot pay a swing's first-body bonuses. */
+function bladeHit(e, dist, how) {
+  const lunge = how === 'lunge';
+  const first = lunge ? ++P.lungeCut === 1 : ++P.swingCut === 1;
+  const fin = !lunge && !!P.swingFin;
+  const a = Math.atan2(e.y - P.y, e.x - P.x);
+  /* A bomber is not burst in your face. It is struck — sent flying on a short
+     fuse, to go off wherever it lands, on them. */
+  if (e.type === 'bomber') {
+    bladeBat(e, lunge ? Math.atan2(P.dashDY, P.dashDX) : a, fin);
+    return;
+  }
   const crit = Math.random() < bladeCrit();
-  let dmg = P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul() * rewardShotMul();
+  let dmg = bladeSwingDmg() * (lunge ? LUNGE_DMG : 1);
   if (fin) dmg *= FIN_DMG * gearStat('fin');
   if (crit) dmg *= bladeCritM();
-  damageEnemy(e, dmg, crit, P.x, P.y);
+  bladeDeal(e, dmg, crit, P.x, P.y);
 
-  // the shove. A finisher clears space; an ordinary swing only leans on it
-  const a = Math.atan2(e.y - P.y, e.x - P.x);
+  /* The shove. A finisher clears space and makes the struck reel; an
+     ordinary swing only leans on what it hits, which keeps coming — and what
+     keeps coming is what the parry is for. */
   const kn = (P.knock * 0.9 + (fin ? 340 : 0)) / Math.max(1, e.r / 13);
   if (!e.dead && e.type !== 'boss') {
     e.vx = (e.vx || 0) + Math.cos(a) * kn;
     e.vy = (e.vy || 0) + Math.sin(a) * kn;
+    if (fin) bladeStagger(e, true, dmg);
   }
   burst(e.x - Math.cos(a) * e.r * 0.5, e.y - Math.sin(a) * e.r * 0.5,
         crit ? 9 : 4, crit ? COL.crit : '#fecdd3', fin ? 300 : 190,
         crit ? 3.2 : 2.4, 0.26, 1.1, a);
+  /* The finisher lands, and the world holds its breath for a frame or three.
+     Once a swing, on the first body — a crowd must not stutter the game. */
+  if (fin && first) hitStop = Math.max(hitStop, 0.05);
+  /* A little of what you lost a moment ago, clawed back by landing something.
+     Once a swing, like the lifesteal below and for the same reason: a crowd
+     must not be the fastest way back to health. The parry takes back all of it. */
+  if (first) bladeRally(RALLY_HIT);
 
   /* What the kit does on the way through.
 
@@ -3000,10 +3174,9 @@ function bladeHit(e, dist) {
      grunts was returning more health per second than anything in the game could
      take off, which turns the whole character into a hull that cannot die in
      precisely the fights that were meant to kill it. Paid on the first body of
-     the swing, so it still rewards connecting and never scales with the crowd.
-     P.swingCut was incremented at the top of this function, so 1 is the first. */
+     the swing, so it still rewards connecting and never scales with the crowd. */
   const steal = gearStat('steal');
-  if (steal > 0 && P.swingCut === 1 && P.hp < P.maxHp)
+  if (steal > 0 && first && P.hp < P.maxHp)
     P.hp = Math.min(P.maxHp, P.hp + steal);
   if (gearOn('burn')) applyBurn(e, fin ? 2 : 1);
   if (gearOn('chill')) { e.slow = Math.min(0.6, Math.max(e.slow || 0, 0.3)); e.slowT = 1.6; }
@@ -3042,6 +3215,104 @@ function bladeHit(e, dist) {
   }
 }
 
+/* ------------------------------ the struck reel -----------------------------
+   A body a finisher lands on — or one a parry throws off the hull, or one a
+   counter passes through — stops being a body that is fighting you. For a
+   moment it does not steer, does not shoot and cannot land contact.
+
+   Bosses do not reel, and neither does an egg, which has nothing to stop.
+   The big ones reel for less, and an elite shrugs off more of it: a brute
+   stunlocked by a shiv would be a brute in name only. */
+function bladeStagger(e, fin, dmg) {
+  if (!e || e.dead || e.type === 'boss' || e.type === 'egg') return;
+  const size = clamp(18 / e.r, 0.35, 1) * (e.elite ? 0.6 : 1);
+  e.stagger = Math.max(e.stagger || 0, (fin ? STAGGER_FIN : STAGGER_T) * size);
+  // a charge that is struck is a charge that stops
+  if (e.type === 'dasher') { e.state = 0; e.cd = Math.max(e.cd || 0, 0.8); }
+  /* A finisher throws the small ones: for the next moment the body is a
+     weapon, and the first thing it meets takes most of what put it there. */
+  if (fin && e.r < 30) {
+    e.launched = LAUNCH_T;
+    e.launchId = P.swingId;
+    e.launchDmg = dmg * 0.5;
+  }
+}
+
+/* A reeling body, ticked instead of its own script. It drifts with the blow
+   and drags to a stop — or flies, if it was thrown — and does nothing else.
+   True when it is finished, so the caller can move on. */
+function bladeStaggerTick(e, dt) {
+  e.stagger -= dt;
+  const k = Math.pow(e.launched > 0 ? 0.3 : 0.015, dt);
+  e.vx *= k; e.vy *= k;
+  e.ang += (e.spin || 0.4) * dt * 7;     // it reels
+  if (e.launched > 0) { e.launched -= dt; bladeLaunchTick(e); }
+  if (e.batted && !e.dead) {
+    e.fuse -= dt;
+    if (Math.floor(e.fuse * 14) % 2 === 0) e.flash = Math.max(e.flash, 0.8);
+    if (e.fuse <= 0) killEnemy(e);
+  }
+  return !!e.dead;
+}
+
+/* A thrown body, for as long as it is still moving fast. One impact per body
+   it meets, and bodies thrown by the same blow never count each other. A wall
+   takes the rest back out of the body itself. */
+function bladeLaunchTick(e) {
+  if (len(e.vx, e.vy) < 170) { e.launched = 0; return; }
+  for (const o of enemies) {
+    if (o === e || o.dead || o.hacked || o.phased) continue;
+    if (o.launchHit === e.launchId || (o.launched > 0 && o.launchId === e.launchId)) continue;
+    const rr = e.r + o.r, dx = o.x - e.x, dy = o.y - e.y;
+    if (dx * dx + dy * dy > rr * rr) continue;
+    o.launchHit = e.launchId;
+    // a bomber goes off on the first thing it meets
+    if (e.batted) { killEnemy(e); return; }
+    damageEnemy(o, e.launchDmg, false, e.x, e.y);
+    damageEnemy(e, e.launchDmg * 0.5, false, o.x, o.y, { silent: true });
+    if (!o.dead && o.type !== 'boss') {
+      o.vx += e.vx * 0.55; o.vy += e.vy * 0.55;
+      bladeStagger(o, false, 0);
+    }
+    e.vx *= 0.4; e.vy *= 0.4;
+    burst((e.x + o.x) / 2, (e.y + o.y) / 2, 10, '#fecdd3', 260, 2.8, 0.3);
+    Audio_.tone(130, 0.1, 'square', 0.08, 60);
+    shake(0.06);
+    if (e.dead) return;
+  }
+  const m = e.r + 2;
+  if (e.x <= arena.x0 + m || e.x >= arena.x1 - m || e.y <= arena.y0 + m || e.y >= arena.y1 - m) {
+    e.launched = 0;
+    if (e.batted) { killEnemy(e); return; }
+    damageEnemy(e, e.launchDmg * 0.8, false, e.x, e.y);
+    burst(e.x, e.y, 12, '#e2e8f0', 280, 3, 0.35);
+    Audio_.tone(90, 0.14, 'square', 0.09, 45);
+    shake(0.08);
+  }
+}
+
+/* The bomber, batted. It takes no damage from the blow — it is going off in a
+   moment anyway — and flies along the line of the swing until its fuse runs out
+   or it meets something. killEnemy() sees `batted` and makes the blast the
+   pilot's: sized to the pilot's weight, and never on the hull that sent it. */
+function bladeBat(e, ang, fin) {
+  if (e.batted || e.dead) return;
+  e.batted = true;
+  e.fuse = BAT_FUSE;
+  e.stagger = BAT_FUSE + 0.3;
+  e.launched = BAT_FUSE + 0.3;
+  e.launchId = -(P.swingId || 1);
+  e.launchDmg = 0;
+  e.batDmg = bladeSwingDmg() * (fin ? 2.4 : 1.5);
+  const s = fin ? 780 : 580;
+  e.vx = Math.cos(ang) * s; e.vy = Math.sin(ang) * s;
+  floatText(e.x, e.y - e.r - 8, 'BATTED', '#fdba74', 13);
+  burst(e.x, e.y, 10, '#fdba74', 280, 3, 0.3, 1.2, ang);
+  Audio_.tone(240, 0.1, 'square', 0.1, 90);
+  hitStop = Math.max(hitStop, 0.035);
+  shake(0.08);
+}
+
 /* The ECHO CORE's second strikes, resolved on their own short clock. Held by
    enemy id rather than by reference so a body that died in between is simply
    not found. */
@@ -3064,58 +3335,276 @@ function updateBladeEchoes(dt) {
 function bladeParry() {
   if (!isBlade() || P.parryCd > 0 || P.parryT > 0) return;
   P.parryT = bladeParryWin();
-  P.parryCd = PARRY_CD;
+  P.parryAge = 0;                        // the perfect part is the opening of it
   P.parryTook = 0;
+  P.parrySrc = [];                       // who this window has already answered
   ringFx(P.x, P.y, P.r + 4, P.r + 34, '#e0f2fe', 0.2, 3);
   Audio_.tone(1250, 0.06, 'sine', 0.05, 900);
 }
 
 /* Something was refused. Called from hurtPlayer, which is the one funnel every
    source of damage already passes through — contact, bullets, blasts, hazards
-   — so the parry does not have to be taught about any of them individually. */
-function bladeParried(amount) {
-  P.parryTook++;
-  P.riposte = Math.min(3, P.riposte + 1);
-  P.parryFx = 1;                         // the flash is for a parry that connected
-  /* A parry is worth a link in the chain even with nothing in reach, so the
-     defensive play and the offensive one are the same play. */
-  P.combo = Math.min(COMBO_N - 1, P.combo + 1);
-  P.comboT = bladeComboWin();
-  /* RIPOSTE CORE turns the refusal into a guaranteed finisher rather than one
-     step toward it. */
-  if (gearOn('riposte')) P.combo = COMBO_N - 1;
-  floatText(P.x, P.y - 42, 'PARRY', '#e0f2fe', 16);
-  ringFx(P.x, P.y, P.r + 6, P.r + 68, '#bae6fd', 0.3, 4);
-  burst(P.x, P.y, 12, '#e0f2fe', 300, 2.6, 0.3);
-  shake(0.06);
-  Audio_.tone(1600, 0.09, 'square', 0.07, 2400);
-  /* And the shot that was refused does not carry on past you. Only what was
-     genuinely close enough to be turned aside — a parry is not a screen clear. */
-  const R = bladeReach() + 18;
-  for (let i = ebullets.length - 1; i >= 0; i--) {
-    const b = ebullets[i];
-    if (len(b.x - P.x, b.y - P.y) > R) continue;
-    burst(b.x, b.y, 4, '#e0f2fe', 200, 2.2, 0.2);
-    ebullets.splice(i, 1);
+   — so the parry does not have to be taught about any of them individually.
+
+   One window is one parry, however many blows it turns aside: the chain, the
+   riposte and the rally are paid on the first. The perfect test is made per
+   blow, since two blows can land either side of the line; each attacker is
+   answered once. */
+function bladeParried(amount, opts) {
+  const perfect = P.parryAge <= bladePerfectWin();
+  const first = P.parryTook++ === 0;
+  if (first) {
+    P.chain = Math.min(CHAIN_MAX, (P.chain || 0) + 1);
+    P.chainT = bladeChainHold();
+    P.riposte = Math.min(2, P.riposte + 1);
+    bladeRally(1);                       // a parry wins back all of the last hit
+    P.parryFx = 1;
+    if (perfect) P.perfectFx = 1;
+    const tag = (perfect ? 'PERFECT' : 'PARRY') + '  ×' + bladeChainMul().toFixed(2);
+    floatText(P.x, P.y - 42, tag, perfect ? '#fde68a' : '#e0f2fe', perfect ? 17 : 15);
+    ringFx(P.x, P.y, P.r + 6, P.r + (perfect ? 96 : 68), perfect ? '#fde68a' : '#bae6fd', 0.3, 4);
+    burst(P.x, P.y, perfect ? 20 : 12, perfect ? '#fde68a' : '#e0f2fe', 300, 2.6, 0.3);
+    shake(perfect ? 0.14 : 0.06);
+    hitStop = Math.max(hitStop, perfect ? 0.08 : 0.05);
+    if (perfect) {
+      Audio_.tone(2100, 0.12, 'triangle', 0.08, 3200);
+      Audio_.tone(95, 0.3, 'square', 0.11, 48);
+    } else Audio_.tone(1600, 0.09, 'square', 0.07, 2400);
+    /* A perfect parry holds the room while its answer travels: everything but
+       the hull at a crawl. Once per STILL_CD, so a volley answered shot for shot
+       is not a slowed game. */
+    if (perfect && P.stillCd <= 0) {
+      P.stillMax = P.stillT = bladeStillT();
+      P.stillCd = STILL_CD + P.stillT;
+      ringFx(P.x, P.y, P.r, 460, '#fde68a', 0.6, 3);
+      Audio_.tone(110, 0.55, 'sine', 0.1, 55);
+    }
+    /* BEGGAR'S BOWL: what was thrown at you is worth something to somebody. A
+       coin on the floor rather than a number in the purse, so it still has to
+       be picked up out of the fight it came from. */
+    if (gearOn('alms') && Math.random() < 0.5) {
+      const c = mkDrop(P.x, P.y, 'credit');
+      const s = rnd(200, 80), a = rnd(TAU);
+      c.vx = Math.cos(a) * s; c.vy = Math.sin(a) * s;
+      c.v = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred()));
+      drops.push(c);
+    }
+    /* The round that was refused does not carry on past you, and nor does
+       anything else close enough to have been turned aside in the same
+       motion. Arm's length: a parry is not a screen clear. */
+    const R = bladeReach() + 18;
+    for (let i = ebullets.length - 1; i >= 0; i--) {
+      const b = ebullets[i];
+      if (len(b.x - P.x, b.y - P.y) > R) continue;
+      burst(b.x, b.y, 4, '#e0f2fe', 200, 2.2, 0.2);
+      ebullets.splice(i, 1);
+    }
   }
+  if (perfect) bladeCounter(amount, opts);
+  /* Whatever was leaning on you is thrown off you, or it lands the same hit
+     the frame the window closes. A boss is too big to throw; it gets the
+     refusal, and the counter if it earned one. */
+  const src = opts && opts.src;
+  if (src && !src.dead && src.type && src.type !== 'boss' && !src.hacked &&
+      len(src.x - P.x, src.y - P.y) < src.r + P.r + 30) {
+    const a = Math.atan2(src.y - P.y, src.x - P.x);
+    src.vx = Math.cos(a) * 520; src.vy = Math.sin(a) * 520;
+    if (src.type === 'bomber') bladeBat(src, a, true);
+    else bladeStagger(src, true, bladeSwingDmg());
+  }
+  /* RIPOSTE CORE: the answer comes before you ask for it — the finisher the
+     parry earned, thrown at once at whatever is nearest. */
+  if (first && gearOn('riposte') && P.swingT <= 0) {
+    const t = nearestEnemy(P.x, P.y, bladeReach() + 90);
+    const keep = P.ang;
+    if (t) P.ang = Math.atan2(t.y - P.y, t.x - P.x);
+    bladeStart();
+    P.ang = keep;
+  }
+}
+
+/* ------------------------------- the counter -------------------------------
+   A perfect parry is a full counter: the blow it turned aside goes straight
+   back at whoever threw it, as a narrow wave. Its weight is the blow's own,
+   COUNTER_MUL times over, and then scaled by everything the hull has become —
+   levels, kit and the chain — because a blow's raw figure is sized for a hull
+   and would be nothing against a body at depth. Aimed at the attacker if it is
+   still standing; back along the round's own line if the shooter is gone; and
+   along the guard if the blow had no author at all (a blast, the floor).
+
+   The wave is narrow and it does not stop: everything on its line is struck,
+   and any round it passes through is cut on the way. */
+const bladeWaves = [];
+function bladeCounter(amount, opts) {
+  const src = opts && opts.src, shot = opts && opts.shot;
+  const key = src && src.id !== undefined ? src.id : -1;
+  if (P.parrySrc.includes(key)) return;  // one answer per attacker per window
+  P.parrySrc.push(key);
+  let ang = P.ang;
+  if (src && !src.dead && !src.hacked && src.x !== undefined)
+    ang = Math.atan2(src.y - P.y, src.x - P.x);
+  else if (shot && (shot.vx || shot.vy))
+    ang = Math.atan2(-shot.vy, -shot.vx);
+  const crit = Math.random() < bladeCrit();
+  const power = bladeSwingDmg() / (CHAR().dmg * BLADE_DMG);
+  const dmg = Math.max(1, amount) * COUNTER_MUL * power * gearStat('ret')
+            * (crit ? bladeCritM() : 1);
+  bladeWaves.push({
+    x: P.x, y: P.y, px: P.x, py: P.y,
+    vx: Math.cos(ang) * COUNTER_SPD, vy: Math.sin(ang) * COUNTER_SPD,
+    dist: 0, t: 0, dmg, crit, hit: [],
+    // the attacker's own colour trails it home; rgba() wants plain hex
+    col: /^#[0-9a-f]{6}$/i.test(src && src.col) ? src.col : '#fde68a'
+  });
+  floatText(P.x + Math.cos(ang) * 40, P.y + Math.sin(ang) * 40 - 16, 'COUNTER',
+            '#fde68a', 13, -30);
+}
+
+function updateBladeWaves(dt) {
+  for (let i = bladeWaves.length - 1; i >= 0; i--) {
+    const w = bladeWaves[i];
+    w.px = w.x; w.py = w.y;
+    w.x += w.vx * dt; w.y += w.vy * dt;
+    w.dist += COUNTER_SPD * dt; w.t += dt;
+    const a = Math.atan2(w.vy, w.vx);
+    for (const e of enemies) {
+      if (e.dead || e.hacked || e.phased || w.hit.includes(e.id)) continue;
+      if (!segCircle(w.px, w.py, w.x, w.y, e.x, e.y, e.r + COUNTER_W)) continue;
+      w.hit.push(e.id);
+      bladeDeal(e, w.dmg, w.crit, w.px, w.py);
+      if (!e.dead && e.type !== 'boss') {
+        e.vx = (e.vx || 0) + Math.cos(a) * 260; e.vy = (e.vy || 0) + Math.sin(a) * 260;
+        bladeStagger(e, false, 0);
+      }
+      burst(e.x, e.y, 12, '#fde68a', 300, 3, 0.3, 1.2, a);
+      shake(0.05);
+    }
+    // it cuts the rounds it passes through, ROOT's line, and a filing's ring
+    rootHitSeg(w.px, w.py, w.x, w.y, COUNTER_W);
+    for (const c of cages) {
+      if ((w.cg || (w.cg = [])).includes(c) || !cageCrossed(c, w.px, w.py, w.x, w.y)) continue;
+      w.cg.push(c);
+      cageChew(c, w.dmg, w.x, w.y);
+    }
+    for (let j = ebullets.length - 1; j >= 0; j--) {
+      const b = ebullets[j];
+      if (!segCircle(w.px, w.py, w.x, w.y, b.x, b.y, b.r + COUNTER_W)) continue;
+      burst(b.x, b.y, 3, '#fde68a', 160, 2, 0.18);
+      ebullets.splice(j, 1);
+    }
+    const out = w.x < arena.x0 || w.x > arena.x1 || w.y < arena.y0 || w.y > arena.y1;
+    if (w.dist > COUNTER_RANGE || out) bladeWaves.splice(i, 1);
+  }
+}
+
+/* The chain ends: a hit landed. METRONOME keeps time when you cannot — with
+   it on, a hit only halves the chain. */
+function bladeChainBreak(why) {
+  if (!(P.chain > 0)) return;
+  const was = P.chain;
+  P.chain = gearOn('metro') ? Math.floor(P.chain / 2) : 0;
+  P.chainT = P.chain > 0 ? bladeChainHold() : 0;
+  if (was >= 2) floatText(P.x, P.y - 58, P.chain ? 'CHAIN HALVED' : 'CHAIN BROKEN', '#94a3b8', 12);
+}
+
+/* -------------------------------- the lunge --------------------------------
+   THE VAGRANT's dash is the ordinary dash — same distance, same invulnerable
+   frames, same charges — with the blade held out in front of it. Everything it
+   passes through is struck once, and a lunge that kills pays half a charge
+   back. Closing the gap is most of this pilot's work, so the way it closes the
+   gap should be work too. */
+function bladeLungeStart() {
+  P.lungeId = (P.lungeId || 0) + 1;
+  P.lungeCut = 0;
+  P.lungeKill = 0;
+  Audio_.tone(760, 0.1, 'sawtooth', 0.045, 1500);
+}
+
+function bladeLungeTick() {
+  const R = P.r + 18;
+  for (const e of enemies) {
+    if (e.dead || e.hacked || e.phased || e.lungedBy === P.lungeId) continue;
+    const d = len(e.x - P.x, e.y - P.y);
+    if (d > R + e.r) continue;
+    e.lungedBy = P.lungeId;
+    bladeHit(e, d, 'lunge');
+    if (e.dead && !P.lungeKill++) {
+      if (P.dashCh < P.dashMax) P.dashRe = Math.min(P.dashCd, P.dashRe + P.dashCd * LUNGE_REFUND);
+      hitStop = Math.max(hitStop, 0.025);
+    }
+  }
+  rootHitCircle(P.x, P.y, R);            // and any of ROOT's line in the way
+  for (const c of cages) {                 // and a filing's ring it meets
+    if (c.lungedBy === P.lungeId || Math.abs(len(P.x - c.x, P.y - c.y) - c.r) > R) continue;
+    c.lungedBy = P.lungeId;
+    cageChew(c, bladeSwingDmg() * LUNGE_DMG, P.x, P.y);
+  }
+}
+
+/* ---------------------------------- rally ----------------------------------
+   Most of a hit, held for a moment as health you have not quite lost. It drains
+   if you back off; the next parry wins all of it back, and each swing that
+   lands a little — which turns the cost of standing where this hull has to
+   stand into a reason to keep standing there. Not paid on pure damage (that is
+   the build charging you), and not while a sheet says nothing heals. */
+function bladeRallyAdd(d) {
+  if (chalNoHeal()) return;
+  const rich = gearOn('rally');
+  P.rally = Math.min(Math.max(0, P.maxHp - P.hp),
+                     (P.rally || 0) + d * (rich ? 1 : RALLY_KEEP));
+  P.rallyT = RALLY_HOLD * (rich ? 1.8 : 1);
+}
+
+function bladeRally(k) {
+  if (!(P.rally > 0.05) || P.hp <= 0) return;
+  const g = Math.min(P.rally, Math.max(1, P.rally * k));
+  P.hp = Math.min(P.maxHp, P.hp + g);
+  P.rally = Math.max(0, P.rally - g);
+  if (g >= 1) spawnPart(P.x + rnd(10, -10), P.y + rnd(10, -10), 0, -40, 3, COL.hp, 0.35, 0.92);
 }
 
 /* The timers, ticked whoever is flying. Cheap, and keeps the parry's state out
    of the firing branch. */
 function bladeTick(dt) {
   if (P.swingFade > 0) P.swingFade = Math.max(0, P.swingFade - dt);
-  /* The rig: how far the carried blade has come up for the finisher. Eased
+  /* The rig: how far the carried blade has come up for the riposte. Eased
      rather than set, so the hull visibly winds up instead of snapping. */
-  const rigWant = (P.combo >= COMBO_N - 1 || P.riposte > 0) ? 1 : 0;
+  const rigWant = P.riposte > 0 ? 1 : 0;
   P.rig += (rigWant - P.rig) * Math.min(1, dt * 9);
   if (P.parryFx > 0) P.parryFx = Math.max(0, P.parryFx - dt * 3.2);
-  if (P.parryT > 0) P.parryT = Math.max(0, P.parryT - dt);
+  if (P.perfectFx > 0) P.perfectFx = Math.max(0, P.perfectFx - dt * 2.4);
+  if (P.parryT > 0) {
+    P.parryAge += dt;
+    P.parryT = Math.max(0, P.parryT - dt);
+    /* The window closes. If it caught anything the guard is ready again at
+       once; if it caught nothing the hull is open for a moment. */
+    if (P.parryT === 0) {
+      if (P.parryTook > 0) P.parryCd = PARRY_CD_HIT;
+      else {
+        P.parryCd = PARRY_CD_WHIFF;
+        Audio_.tone(170, 0.08, 'square', 0.035, 120);
+      }
+    }
+  }
   if (P.parryCd > 0) P.parryCd = Math.max(0, P.parryCd - dt);
-  if (P.comboT > 0) {
-    P.comboT = Math.max(0, P.comboT - dt);
-    if (P.comboT === 0) P.combo = 0;
+  if (P.stillT > 0) P.stillT = Math.max(0, P.stillT - dt);
+  if (P.stillCd > 0) P.stillCd = Math.max(0, P.stillCd - dt);
+  // the chain holds after its last parry, then comes apart a link at a time
+  if (P.chain > 0) {
+    P.chainT -= dt;
+    if (P.chainT <= 0) {
+      P.chain--;
+      P.chainT = P.chain > 0 ? CHAIN_FALL : 0;
+    }
+  }
+  if (P.rally > 0) {
+    // healed some other way: the rally can never promise more than is missing
+    P.rally = Math.min(P.rally, Math.max(0, P.maxHp - P.hp));
+    if (P.rallyT > 0) P.rallyT -= dt;
+    else P.rally = Math.max(0, P.rally - P.maxHp * RALLY_DRAIN * dt);
   }
   updateBladeEchoes(dt);
+  updateBladeWaves(dt);
 }
 
 function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
@@ -3423,7 +3912,12 @@ function killEnemy(e, ang = 0) {
     floatText(e.x, e.y - 26, 'RETURNS', '#e2e8f0', 13);
     Audio_.tone(320, 0.35, 'sine', 0.09, 120);
   }
-  if (e.type === 'bomber') explode(e.x, e.y, 92, e.dmg * 1.4, '#f97316', true);
+  /* A bomber THE VAGRANT batted is the pilot's now: it goes off at the pilot's
+     weight, on them, and never on the hull that sent it. */
+  if (e.type === 'bomber') {
+    if (e.batted) playerBlast(e.x, e.y, 104, Math.max(e.dmg * 1.4, e.batDmg || 0), '#f97316');
+    else explode(e.x, e.y, 92, e.dmg * 1.4, '#f97316', true);
+  }
   if (e.boss === 'theother') {          // release any mirrors it had captured
     for (const h of hazards) h.orbit = false;
     finaleBeams.length = 0;
@@ -3441,17 +3935,22 @@ function killEnemy(e, ang = 0) {
 /* Put one item on the floor. Rolled at the depth the fight is actually at, so
    a drop is worth what the room that produced it was worth. Returns null for
    every pilot but one, which is how the call sites stay free of the question. */
-function gearDrop(x, y, bias, slot) {
-  if (!isBlade()) return null;
-  const it = gearRoll(slot || null, wave, bias || 0);
-  if (!it) return null;
+/* An item, lying on the floor. Far longer-lived than a heal or a credit: a
+   build decision that expires while you are busy not dying is a build decision
+   you never got to make. */
+function gearFloor(it, x, y) {
   const g = mkDrop(x, y, 'gear');
   g.gear = it;
   g.col = RARITY[it.rar] || '#94a3b8';
   g.r = 12;
-  /* Far longer-lived than a heal or a credit. A build decision that expires
-     while you are busy not dying is a build decision you never got to make. */
   g.life = 45;
+  return g;
+}
+function gearDrop(x, y, bias, slot) {
+  if (!isBlade()) return null;
+  const it = gearRoll(slot || null, wave, bias || 0);
+  if (!it) return null;
+  const g = gearFloor(it, x, y);
   const a = rnd(TAU), s = rnd(120, 30);
   g.vx = Math.cos(a) * s; g.vy = Math.sin(a) * s;
   drops.push(g);
@@ -3480,7 +3979,7 @@ function hurtPlayer(dmg, opts) {
      — so the parry does not have to be taught about any of them one at a time.
      `pure` is the exception: Virgo and Libra charge you for your own build, and
      that is not a thing there is anything to turn aside. */
-  if (bladeParryActive() && !(opts && opts.pure)) { bladeParried(dmg); return; }
+  if (bladeParryActive() && !(opts && opts.pure)) { bladeParried(dmg, opts); return; }
   /* The clash is a cutscene you play, not a fight you can lose — the same
      promise his ordinary beam already makes, turned around. A surge costs the
      meter and the ground, never the run. */
@@ -3516,6 +4015,8 @@ function hurtPlayer(dmg, opts) {
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
   const d = Math.max(1, dmg * P.frailty * nightMul - P.armor);
   P.hp -= d;
+  // most of it can still be won back, but the parry chain is gone
+  if (isBlade()) { bladeRallyAdd(d); bladeChainBreak('hit'); }
   P.iframe = 0.62; P.hurtFlash = 1;
   onRewardHurt(d, opts && opts.src);   // after the guard, never before it
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
@@ -4920,6 +5421,58 @@ const ROOT_FAIL = [
 
 let root = null;
 
+/* ---------------------------- breaking a character ----------------------------
+   The characters were only ever tested against `bullets`, which was every
+   weapon the game had when ROOT was written. It is not every weapon now: EMBER's
+   lance is a ray and THE VAGRANT's blade is a sweep, so with either hull no
+   character could ever be broken — the line always ran, the window never
+   opened, and ROOT could not be beaten at all. The weapons that are not bullets
+   ask here instead: the lance and a counter as a line, the swing by its own
+   band, the lunge as a circle round the hull. */
+function rootGlyphBreak(g) {
+  g.dead = true;
+  burst(g.x, g.y, 12, ROOT_COL, 200, 2.6, 0.4);
+  Audio_.tone(1500, 0.03, 'square', 0.04, 2000);
+}
+// the live line, or nothing — cheap enough to ask every frame of every fight
+const rootGlyphsUp = () => (root && root.cmd && root.glyphs.length) ? root.glyphs : null;
+function rootHitSeg(x1, y1, x2, y2, w) {
+  const gs = rootGlyphsUp();
+  if (!gs) return;
+  for (const g of gs)
+    if (!g.dead && segCircle(x1, y1, x2, y2, g.x, g.y, ROOT_GLYPH_R + w)) rootGlyphBreak(g);
+}
+function rootHitCircle(x, y, rad) {
+  const gs = rootGlyphsUp();
+  if (!gs) return;
+  for (const g of gs)
+    if (!g.dead && len(g.x - x, g.y - y) < ROOT_GLYPH_R + rad) rootGlyphBreak(g);
+}
+
+/* THE VAGRANT has sixty pixels of reach and a room this size to cover, and it
+   cannot cross it in the time a line takes. Measured with a best-case route,
+   an arm's-length hull reached every character in time six times in ten on a
+   small screen, once in sixteen at 1080p, and never once ROOT was angry — and
+   the fight needs five broken lines. So for the blade the line is typed AT the
+   hull: the characters come off the floor and fly in, and what meets them is
+   the fight. The edge cuts them, the guard parries them — a parry like any
+   other, chain and all — and one that reaches the hull breaks on it and hurts,
+   so a missed parry costs health rather than the attempt.
+
+   On a beat, not in a swarm. Each character is due at its own moment of the
+   line, in the order it was typed, spread from ROOT_BEAT_FROM to ROOT_BEAT_TO of
+   the way through; its speed is whatever gets it there on time from wherever
+   the hull has gone. Letting them fly at a fixed pace had the whole line land
+   at once, and anger made it worse: at anger 14 all twelve arrived inside a
+   fraction of a second and nothing could parry that. And for the blade the
+   tempo stops climbing at ROOT_ANGER_CAP. A gun takes about eight broken lines
+   to finish ROOT; an arm's-length hull, which has to walk to it every window,
+   takes more, and past eight the beat is faster than a guard can be raised. */
+const ROOT_BEAT_FROM = 0.35;
+const ROOT_BEAT_TO = 0.9;
+const ROOT_ANGER_CAP = 8;
+const rootTempo = r => ROOT_TYPE_SEC / (1 + (isBlade() ? Math.min(r.angry, ROOT_ANGER_CAP) : r.angry) * 0.12);
+
 function startRoot() {
   enemies.length = 0; ebullets.length = 0;
   awaitingPortal = false; portals.length = 0;
@@ -4951,6 +5504,8 @@ function rootBeginCmd() {
   const chars = r.cmd.s.replace(/\s/g, '').split('');
   const n = Math.min(chars.length, 9 + Math.min(3, r.angry));
   for (let i = 0; i < n; i++) {
+    // THE VAGRANT's beat: when, as a share of the line, this character is due
+    const at = ROOT_BEAT_FROM + (ROOT_BEAT_TO - ROOT_BEAT_FROM) * (n > 1 ? i / (n - 1) : 0);
     /* Scattered inside the screen, not inside the arena. At a third of the
        arena most of the line lands off-camera, and a fight about reaching the
        characters before the line finishes cannot ask you to shoot ones you
@@ -4962,7 +5517,7 @@ function rootBeginCmd() {
       ch: chars[i % chars.length], dead: false,
       x: clamp(r.e.x + Math.cos(a) * rr, arena.x0 + 60, arena.x1 - 60),
       y: clamp(r.e.y + Math.sin(a) * rr, arena.y0 + 60, arena.y1 - 60),
-      t: rnd(TAU)
+      t: rnd(TAU), at
     });
   }
   Audio_.tone(300, 0.12, 'square', 0.08, 120);
@@ -5037,19 +5592,30 @@ function rootUpdate(dt) {
                    r.tok + r.maxHp / ROOT_TARGET_SEC * dt);
 
   if (r.cmd) {
-    const speed = ROOT_TYPE_SEC / (1 + r.angry * 0.12);
+    const speed = rootTempo(r);
     r.typed += dt / speed;
     for (const g of r.glyphs) {
       if (g.dead) continue;
       g.t += dt;
+      if (isBlade()) {                   // typed at the hull, on its beat — see ROOT_BEAT_FROM
+        const dx = P.x - g.x, dy = P.y - g.y, dd = len(dx, dy) || 1;
+        const left = (g.at - r.typed) * speed;
+        const v = left > 0.05 ? clamp((dd - P.r) / left, 40, 900) : 900;
+        g.x += dx / dd * v * dt; g.y += dy / dd * v * dt;
+        if (dd < P.r + ROOT_GLYPH_R * 0.7) {
+          rootGlyphBreak(g);
+          // refused, chained and countered if the guard is up; paid for if not
+          hurtPlayer(Math.max(8, P.maxHp * 0.07));
+          continue;
+        }
+      }
+      // a wingman's rounds still count, whoever the host is flying
       for (const b of bullets) {
         if (b.dead) continue;
         if (len(b.x - g.x, b.y - g.y) < ROOT_GLYPH_R + (b.r || 4)) {
-          g.dead = true;
           b.pierce = (b.pierce || 0) - 1;
           if (!b.pierce || b.pierce < 0) b.dead = true;
-          burst(g.x, g.y, 12, ROOT_COL, 200, 2.6, 0.4);
-          Audio_.tone(1500, 0.03, 'square', 0.04, 2000);
+          rootGlyphBreak(g);
           break;
         }
       }
@@ -10327,6 +10893,9 @@ let offers = [], offerHover = -1;
    rather than passed around so the draw pass, the key handler and the click
    handler are all reading the same one thing. */
 let gearOffer = null, gearOld = null;
+/* The drop being looked at, off the floor while it is, so ESC can put it back;
+   and the one the hull is standing on this frame, which is what E looks at. */
+let gearOfferDrop = null, gearNear = null;
 let hitStop = 0, drawFlashT = 0, uiTime = 0;
 // overlays ignore input for a beat after opening, so a shot fired the instant
 // a boss dies can't eat the upgrade screen or the shop
@@ -10820,6 +11389,8 @@ function resetGame() {
   portals = []; cages = []; replay = []; finaleBeams = []; keyItem = null;
   arenaReset(true); lastBossDeath = null;
   libraryPortal = null; libraryBook = null; malwareOffer = null;
+  gearNear = null; gearOfferDrop = null;
+  bladeWaves.length = 0; bladeEchoes.length = 0;   // nothing of the last run in flight
   unwritten = null; unwTears = []; unwDeadT = 0; unwSnap = null;
   amalgam = null; amalCut = null; amalDec = 0; amalSaid = {};
   devLine = 0; devAsk = false; devType = 0; devOut = 0;
@@ -11058,7 +11629,8 @@ function handleKey(k) {
   if (state === 'gear') {
     if (uiArm > 0) return;
     if (k === '1' || k === 'e' || k === 'enter' || k === ' ') gearTake();
-    else if (k === '2' || k === 'q' || k === 'escape') gearLeave();
+    else if (k === '2' || k === 'q') gearLeave();
+    else if (k === 'escape' || k === 'x') gearPutBack();
     return;
   }
   if (state === 'shop') {
@@ -11102,6 +11674,8 @@ function handleKey(k) {
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
      and ventFire() already refuses anything that is not holding a lance. */
   if (k === 'f') { if (isBlade()) bladeParry(); else ventFire(); return; }
+  // THE VAGRANT: E over something on the floor is a look at it
+  if (k === 'e' && state === 'play' && gearNear && !inHub) { gearInspect(); return; }
   if (k === 'e' && inHub) {
     /* Every press goes to the room now. Deciding here that a press means
        "skip his line" whenever he was talking meant the last tutorial step —
@@ -11395,16 +11969,63 @@ function gearTake() {
   const it = gearOffer;
   gearEquip(it);
   gearSaid(it, 'WORN');
-  gearOffer = null; gearOld = null;
+  gearOffer = null; gearOld = null; gearOfferDrop = null;
   state = 'play';
   checkLevel();                          // a level may have been owed meanwhile
 }
 
+/* [2]: broken down into the piece already in that slot — see tempering. At
+   TEMPER_MAX there is nothing left to pour in, so the scrap is sold instead. */
 function gearLeave() {
-  gearOffer = null; gearOld = null;
+  const it = gearOffer, worn = gearOld;
+  gearOffer = null; gearOld = null; gearOfferDrop = null;
   state = 'play';
+  if (it && worn) {
+    const was = worn.tp || 0;
+    worn.tp = Math.min(TEMPER_MAX, was + gearTemperGain(it));
+    if (worn.tp > was) {
+      gearRecalc();
+      gearSaid(worn, 'TEMPERED');
+    } else {
+      const c = gearScrapPrice(it);
+      credits += c;
+      floatText(P.x, P.y - 44, 'SALVAGED  ◈' + c, '#fde68a', 15);
+      Audio_.tone(1050, 0.07, 'square', 0.05, 1600);
+    }
+  } else Audio_.tone(280, 0.09, 'square', 0.05, 180);
+  checkLevel();
+}
+const gearTemperGain = it => TEMPER_PER[it.rar] || 1;
+const gearCarry = old => Math.floor((old.tp || 0) / 2);
+const gearScrapPrice = it => Math.round(PRICE[it.rar] * 0.35 * (1 + Math.max(0, stageAbs) * 0.15));
+
+/* [ESC]: not now. Back on the floor where it was, for at least a few seconds
+   more — a decision you did not want to make under fire can wait for a gap. */
+function gearPutBack() {
+  const it = gearOffer, d0 = gearOfferDrop;
+  gearOffer = null; gearOld = null; gearOfferDrop = null;
+  state = 'play';
+  if (it) {
+    const g = d0 || gearFloor(it, P.x, P.y);
+    g.vx = 0; g.vy = 0; g.life = Math.max(g.life, 6);
+    if (drops.indexOf(g) < 0) drops.push(g);
+  }
   Audio_.tone(280, 0.09, 'square', 0.05, 180);
   checkLevel();
+}
+
+/* [E] over something on the floor. It comes up off the floor while it is being
+   looked at, so ESC can set it back down exactly as it was. */
+function gearInspect() {
+  const d0 = gearNear;
+  gearNear = null;
+  if (!d0 || !d0.gear) return;
+  const i = drops.indexOf(d0);
+  if (i < 0) return;
+  drops.splice(i, 1);
+  gearOfferDrop = d0;
+  openGear(d0.gear);
+  if (state !== 'gear') gearOfferDrop = null;   // an empty slot simply wore it
 }
 
 function checkLevel() {
@@ -11582,6 +12203,8 @@ function update(dt) {
   // Bullet Time slows the world but never the player
   slowmo = P.stopT > 0 ? 0
          : (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
+  // THE VAGRANT's parry holds the room the same way, never the hull
+  if (P.stillT > 0) slowmo = Math.min(slowmo, STILL_SLOW);
   const wdt = dt * slowmo;
 
   chalTick(dt);              // the rule sheet, where it touches the frame
@@ -11757,6 +12380,7 @@ function updatePlayer(dt) {
     if (!il) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); }
     P.dashDX = dx; P.dashDY = dy;
     onRewardDash(dx, dy);
+    if (isBlade()) bladeLungeStart();
     for (const en of enemies) en.dashTagged = false;
     Audio_.dash();
     burst(P.x, P.y, 18, COL.player, 240, 3, 0.4, 1.4, Math.atan2(-dy, -dx));
@@ -11992,6 +12616,8 @@ function updatePlayer(dt) {
       }
     }
   }
+  // THE VAGRANT: the dash carries the blade through whatever it passes
+  if (isBlade() && P.dashT > 0) bladeLungeTick();
 
   // LIBRA: the scales collect on their own schedule
   if (P.scales && P.scalesDebt > 0) {
@@ -12259,7 +12885,12 @@ function updateEnemies(dt) {
     const d = len(dx, dy) || 1;
     const ux = dx / d, uy = dy / d;
 
-    switch (e.type) {
+    /* THE VAGRANT's struck reel: a body its blade has just landed on runs no
+       script at all until it recovers — no steering, no shooting. See
+       bladeStagger(). */
+    if (e.stagger > 0 && e.type !== 'boss') {
+      if (bladeStaggerTick(e, dt)) continue;
+    } else switch (e.type) {
       case 'grunt':
         steer(e, ux * sp, uy * sp, 5, dt);
         e.ang = Math.atan2(e.vy, e.vx);
@@ -12548,7 +13179,8 @@ function updateEnemies(dt) {
        touches is the one thing that made that position unholdable. Bullets and
        hazards still land on it, so no boss telegraph gets any easier. */
     const tgGhost = TG === P && ((P.ghost && P.dashT > 0) || P.fly);
-    if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost) {
+    // ...and no touching: a reeling body is not leaning on anybody
+    if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost && !(e.stagger > 0)) {
       const cd = e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
                        * (e.rage === 1 ? 2.2 : 1);
       if (TG === P) hurtPlayer(cd, { src: e }); else hurtWing(cd);
@@ -17943,7 +18575,30 @@ function updateSentries(dt) {
 /* ------------------------------- the filing --------------------------------
    A ring that closes on the player and has to be shot open. If it reaches its
    minimum radius it detonates. Bullets crossing the ring damage it, which
-   means firing outward is the escape — the opposite of the usual instinct. */
+   means firing outward is the escape — the opposite of the usual instinct.
+
+   And not only bullets. The ring was only ever tested against `bullets`, so
+   EMBER's lance and THE VAGRANT's blade could not open one at all: every
+   filing ran to its minimum and went off on them. Anything that crosses the
+   line now chews it — the lance and a counter as a segment, the swing by the
+   blade itself, once a swing, and a lunge that meets the line. */
+const cageCrossed = (c, x1, y1, x2, y2) =>
+  (len(x1 - c.x, y1 - c.y) < c.r) !== (len(x2 - c.x, y2 - c.y) < c.r);
+function cageChew(c, dmg, x, y, quiet) {
+  c.hp -= dmg;
+  burst(x, y, 5, '#e2e8f0', 200, 2.4, 0.3);
+  if (!quiet) floatText(x, y, Math.round(dmg), '#e2e8f0', 11);
+}
+// a line crossing a ring's boundary chews it — the lance, a counter wave
+function cageStrikeSeg(x1, y1, x2, y2, dmg, quiet) {
+  for (const c of cages) {
+    if (!cageCrossed(c, x1, y1, x2, y2)) continue;
+    const d1 = len(x1 - c.x, y1 - c.y), d2 = len(x2 - c.x, y2 - c.y);
+    const k = clamp((c.r - d1) / ((d2 - d1) || 1), 0, 1);    // near enough, for the sparks
+    cageChew(c, dmg, x1 + (x2 - x1) * k, y1 + (y2 - y1) * k, quiet);
+  }
+}
+
 function updateCages(dt) {
   for (let i = cages.length - 1; i >= 0; i--) {
     const c = cages[i];
@@ -18278,7 +18933,7 @@ function updateEBullets(dt) {
     // anything you have taken is in the way, and can be shot off you
     if (hackHitByBullet(b)) { ebullets.splice(i, 1); continue; }
     if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
-      hurtPlayer(b.dmg, { src: b.owner });
+      hurtPlayer(b.dmg, { src: b.owner, shot: b });   // the shot, for a counter
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);
       continue;
@@ -18320,6 +18975,8 @@ function updatePickups(dt) {
   }
   checkLevel();
 
+  gearNear = null;
+  let gearNearD = 1e9;
   for (let i = drops.length - 1; i >= 0; i--) {
     const d0 = drops[i];
     d0.life -= dt; d0.t += dt * 3;
@@ -18327,9 +18984,21 @@ function updatePickups(dt) {
     d0.vx *= Math.pow(0.08, dt); d0.vy *= Math.pow(0.08, dt);
     const dt0 = mpAim(d0.x, d0.y);
     const dx = dt0.x - d0.x, dy = dt0.y - d0.y, d = len(dx, dy) || 1;
-    if (d < pr * 1.2) { d0.x += dx / d * 240 * dt; d0.y += dy / d * 240 * dt; }
+    // gear is walked to, never pulled: this hull stands on the loot all fight
+    if (d < pr * 1.2 && d0.kind !== 'gear') { d0.x += dx / d * 240 * dt; d0.y += dy / d * 240 * dt; }
     if (Math.random() < (d0.kind === 'credit' ? 0.12 : 0.3))
       spawnPart(d0.x + rnd(14, -14), d0.y + rnd(14, -14), 0, -20, 2.4, d0.col, 0.4, 0.95);
+    /* A drop for a slot that is already filled is a decision, and a decision is
+       never forced on you by where the fight carried you: stand on it and press
+       E. The tag over it says what it is and which way it leans. Only a touch
+       screen, which has no E, still opens the screen on contact — and only the
+       pilot that wears gear can pick it up at all. */
+    if (d0.kind === 'gear' && d0.gear &&
+        (dt0 !== P || (!isTouch && P.gear && P.gear[d0.gear.slot]))) {
+      if (dt0 === P && d < P.r + d0.r + 18 && d < gearNearD) { gearNear = d0; gearNearD = d; }
+      if (d0.life <= 0) drops.splice(i, 1);
+      continue;
+    }
     if (d < dt0.r + d0.r + 6) {
       if (d0.kind === 'credit') {
         credits += d0.v;
@@ -18513,11 +19182,13 @@ function render() {
   drawDiary();
   drawLance();
   drawBladeParry();
+  drawBladeWaves();
   drawMalFx();
   drawParticles();
   drawAsh();
   ctx.globalCompositeOperation = 'source-over';
 
+  drawGearTags();            // THE VAGRANT's drops say what they are
   drawFloats();
   ctx.restore();
 
@@ -18549,6 +19220,7 @@ function render() {
     ctx.strokeRect(3, 3, W - 6, H - 6);
     ctx.restore();
   }
+  if (P.stillT > 0 && isBlade()) drawBladeStill();
   drawVignette();
   if (drawFlashT > 0) {
     ctx.fillStyle = `rgba(255,255,255,${drawFlashT * 2.4})`;
@@ -22140,6 +22812,22 @@ function drawEnemies() {
       ctx.restore();
     }
 
+    /* THE VAGRANT's reel: a struck body wears a broken ring while it cannot
+       touch you, the gaps closing as the stagger runs out — so a room full of
+       reeling bodies reads, at a glance, as a room you can stand in. A batted
+       bomber's ring is the colour of its fuse. */
+    if (e.stagger > 0 && !e.hacked) {
+      const k = clamp(e.stagger / 0.5, 0, 1), R = e.r + 6, sp = uiTime * 5 + e.id;
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.5 * k;
+      ctx.strokeStyle = e.batted ? '#fdba74' : '#e0e7ff'; ctx.lineWidth = 1.6;
+      for (let q = 0; q < 3; q++) {
+        const a0 = sp + q * TAU / 3;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R, a0, a0 + 0.25 + 0.9 * k); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     /* THE BOOKKEEPER: the ledger orbits him, and every card he has written
        onto himself is listed above his head, so his growth is legible. */
     if (e.boss === 'keeper') {
@@ -24254,7 +24942,13 @@ const BLADE_ART = {
     ctx.beginPath();
     ctx.moveTo(0, -1.5); ctx.lineTo(12, -1.7); ctx.quadraticCurveTo(19.5, -2.6, 18, 3.6);
     ctx.lineTo(15.4, 6.4); ctx.lineTo(15.2, 2.2); ctx.quadraticCurveTo(15.6, 1.3, 12, 1.7);
-    ctx.lineTo(0, 1.5); ctx.closePath(); } }
+    ctx.lineTo(0, 1.5); ctx.closePath(); } },
+  // a flat bar with a paddle for a head: made to meet things, not to cut them
+  turn: { len: 17, draw() {
+    ctx.beginPath();
+    ctx.moveTo(0, -1.4); ctx.lineTo(7, -1.6); ctx.lineTo(9, -4.2); ctx.lineTo(16, -4.8);
+    ctx.lineTo(17, -2.8); ctx.lineTo(17, 2.8); ctx.lineTo(16, 4.8); ctx.lineTo(9, 4.2);
+    ctx.lineTo(7, 1.6); ctx.lineTo(0, 1.4); ctx.closePath(); } }
 };
 
 /* --- plates. `under` is bolted around the frame and is the layer allowed to
@@ -24360,6 +25054,24 @@ const PLATE_ART = {
           const x = 4 - i * 4.4;
           ctx.moveTo(x, 8.8); ctx.lineTo(x - 1, 13.8); }
         ctx.stroke(); ctx.restore(); }
+      ctx.restore(); } },
+  scab: { under(trim, open) {
+    // healed over, badly: overlapping crusts, none of them the same size
+    for (const sd of [1, -1]) {
+      ctx.save(); ctx.scale(1, sd); ctx.translate(0, open * 1.4);
+      ctx.fillStyle = '#26182a'; ctx.strokeStyle = trim; ctx.lineWidth = 1.1;
+      for (const c of [[5.8, 9.8, 4.4], [-1.2, 11.6, 4.9], [-7.8, 9.2, 3.9]]) {
+        ctx.beginPath(); ctx.ellipse(c[0], c[1], c[2], c[2] * 0.72, 0.3, 0, TAU);
+        ctx.fill(); ctx.stroke(); }
+      ctx.restore(); } },
+    over(trim, open, t) {
+      // and the seams still weep a little
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.35 + Math.sin(t * 3) * 0.15;
+      ctx.strokeStyle = '#fb7185'; ctx.lineWidth = 0.8;
+      for (const sd of [1, -1]) {
+        ctx.beginPath(); ctx.moveTo(-4.6, sd * (9.8 + open * 1.4)); ctx.lineTo(2.2, sd * (10.8 + open * 1.4));
+        ctx.stroke(); }
       ctx.restore(); } }
 };
 
@@ -24398,7 +25110,11 @@ const CORE_ART = {
               ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, TAU); ctx.fill(); } },
   ripc:   { c: '#7dd3fc', draw(t) { ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, TAU); ctx.fill();
               const p = (t * 0.8) % 1; ctx.globalAlpha = (1 - p) * 0.7;
-              ctx.beginPath(); ctx.arc(0, 0, 2.6 + p * 5, 0, TAU); ctx.stroke(); } }
+              ctx.beginPath(); ctx.arc(0, 0, 2.6 + p * 5, 0, TAU); ctx.stroke(); } },
+  // a ring that barely turns: the room, waiting
+  stillc: { c: '#bae6fd', draw(t) { ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, TAU); ctx.fill();
+              ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(0, 0, 4.4, t * 0.25, t * 0.25 + TAU * 0.78);
+              ctx.stroke(); ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.stroke(); } }
 };
 
 /* --- sigils. A token on a short tether at the tail, because what the run
@@ -24422,7 +25138,15 @@ const SIGIL_ART = {
               ctx.closePath(); ctx.stroke(); } },
   stride: { draw() { ctx.beginPath();
               ctx.moveTo(-2.4, -2.8); ctx.lineTo(1.6, 0); ctx.lineTo(-2.4, 2.8);
-              ctx.moveTo(0.4, -2.8); ctx.lineTo(4, 0); ctx.lineTo(0.4, 2.8); ctx.stroke(); } }
+              ctx.moveTo(0.4, -2.8); ctx.lineTo(4, 0); ctx.lineTo(0.4, 2.8); ctx.stroke(); } },
+  bowl:   { draw() { ctx.beginPath();
+              ctx.moveTo(-3.2, -0.6); ctx.quadraticCurveTo(0, 4.4, 3.2, -0.6); ctx.closePath(); ctx.stroke();
+              ctx.beginPath(); ctx.arc(0.5, -2.2, 0.9, 0, TAU); ctx.fill(); } },
+  // a pendulum mid-swing, inside its frame
+  metro:  { draw() { ctx.beginPath();
+              ctx.moveTo(-2.8, 3.2); ctx.lineTo(0, -3.4); ctx.lineTo(2.8, 3.2); ctx.closePath(); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(0, 2.2); ctx.lineTo(1.5, -1.8); ctx.stroke();
+              ctx.beginPath(); ctx.arc(1.1, -0.8, 0.8, 0, TAU); ctx.fill(); } }
 };
 
 /* The rest pose of whatever is being carried. Alternates with swingSide so a
@@ -24521,17 +25245,18 @@ function drawVagrantHull(V, t, frameCol, frameFill) {
 
   // BLADE — carried, until it is not: mid-swing it is out on the arc instead
   if (!(V.swingT > 0)) {
-    const p = bladeRestPose(V);
+    // thrust out ahead for the length of a lunge, carried otherwise
+    const p = V.dashT > 0 ? { x: 6, y: 0, a: 0, s: 0.92 } : bladeRestPose(V);
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
     drawBladeArt(g.blade, p.s, '#1b2740', rigcol('blade'),
                  g.blade && g.blade.rar === 'legend' ? 0.3 : 0);
     ctx.restore();
   }
 
-  // combo readout: the two shoulder horns, lit by the chain
-  const ck = V.riposte > 0 ? 1 : clamp((V.combo || 0) / (COMBO_N - 1), 0, 1);
+  // the parry chain: the two shoulder horns, lit link by link, hot with a riposte banked
+  const ck = clamp((V.chain || 0) / CHAIN_MAX, 0, 1);
   if (ck > 0.02 || open > 0.02) {
-    const hot = V.riposte > 0 || V.combo >= COMBO_N - 1;
+    const hot = V.riposte > 0 || ck >= 1;
     const hc = hot ? COL.crit : COL.player;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.3 + ck * 0.55;
@@ -24647,14 +25372,17 @@ function drawBladeSwing() {
 
 /* ------------------------------- the guard --------------------------------
    It refuses damage from every direction, so it cannot be a shape on the
-   front. Six faceted segments snapping inward: a moment, not a facing. And
-   when one actually connects, the refusal made loud — a hard ring and six
-   shards thrown back out along the facets. */
+   front. Six faceted segments snapping inward: a moment, not a facing. Gold
+   while the window is still in its opening — a blow landing now is countered —
+   and the ordinary cold white after, so the guard teaches its own timing. And
+   when one actually connects, the refusal made loud: a hard ring and six
+   shards thrown back out along the facets, gold for a perfect one. */
 function drawBladeParry() {
   if (!isBlade()) return;
   const t = uiTime;
   if (P.parryT > 0) {
     const k = clamp(P.parryT / Math.max(0.01, bladeParryWin()), 0, 1);
+    const gold = P.parryAge <= bladePerfectWin();
     const R = P.r + 7 + (1 - k) * 9;
     ctx.save(); ctx.translate(P.x, P.y);
     ctx.globalCompositeOperation = 'lighter';
@@ -24663,30 +25391,125 @@ function drawBladeParry() {
     for (let i = 0; i < 6; i++) {
       const a0 = i * seg + 0.1, a1 = a0 + seg * 0.68;
       ctx.globalAlpha = 0.3 + 0.5 * k;
-      ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 2 + 2.4 * k;
+      ctx.strokeStyle = gold ? '#fde68a' : '#bae6fd'; ctx.lineWidth = 2 + 2.4 * k;
       ctx.beginPath(); ctx.arc(0, 0, R, a0, a1); ctx.stroke();
       // the facet's leading corner, brighter
       ctx.globalAlpha = 0.5 + 0.5 * k;
-      ctx.fillStyle = '#e0f2fe';
+      ctx.fillStyle = gold ? '#fffbeb' : '#e0f2fe';
       ctx.beginPath(); ctx.arc(Math.cos(a1) * R, Math.sin(a1) * R, 1.5 + k, 0, TAU); ctx.fill();
     }
-    ctx.globalAlpha = 0.16 * k; ctx.fillStyle = '#7dd3fc';
+    ctx.globalAlpha = 0.16 * k; ctx.fillStyle = gold ? '#fbbf24' : '#7dd3fc';
     ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
     ctx.restore();
   }
   if (P.parryFx > 0) {
-    const k = clamp(P.parryFx, 0, 1);
+    const k = clamp(P.parryFx, 0, 1), pf = P.perfectFx > 0;
     ctx.save(); ctx.translate(P.x, P.y); ctx.globalCompositeOperation = 'lighter';
-    const R = P.r + 8 + (1 - k) * 30;
-    ctx.globalAlpha = k; ctx.strokeStyle = '#f0f9ff'; ctx.lineWidth = 1.4 + k * 4;
+    const R = P.r + 8 + (1 - k) * (pf ? 44 : 30);
+    ctx.globalAlpha = k; ctx.strokeStyle = pf ? '#fffbeb' : '#f0f9ff'; ctx.lineWidth = 1.4 + k * 4;
     ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.stroke();
-    drawGlow(0, 0, R * 1.15, '#7dd3fc', k * 0.3);
-    ctx.globalAlpha = k * 0.95; ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 2.6;
+    drawGlow(0, 0, R * 1.15, pf ? '#fbbf24' : '#7dd3fc', k * (pf ? 0.45 : 0.3));
+    ctx.globalAlpha = k * 0.95; ctx.strokeStyle = pf ? '#fde68a' : '#bae6fd'; ctx.lineWidth = 2.6;
     for (let i = 0; i < 6; i++) {
       const a = i * TAU / 6 + 0.4;
       ctx.beginPath();
       ctx.moveTo(Math.cos(a) * (R - 7), Math.sin(a) * (R - 7));
       ctx.lineTo(Math.cos(a) * (R + 10), Math.sin(a) * (R + 10)); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* ------------------------------ the counter, drawn ----------------------------
+   A narrow crescent bowed forward along its line, with a streak behind it in
+   the colour of whoever it is going back to — narrow, because the wave is only
+   as wide as it looks. Additive pass, after the guard. */
+function drawBladeWaves() {
+  if (!bladeWaves.length) return;
+  for (const w of bladeWaves) {
+    if (!inView(w.x, w.y, 110)) continue;
+    const f = clamp(1 - w.dist / COUNTER_RANGE, 0, 1), L = Math.min(120, w.dist);
+    ctx.save();
+    ctx.translate(w.x, w.y); ctx.rotate(Math.atan2(w.vy, w.vx));
+    const g = ctx.createLinearGradient(-L, 0, 0, 0);
+    g.addColorStop(0, rgba(w.col, 0));
+    g.addColorStop(1, rgba(w.col, 0.25 + 0.5 * f));
+    ctx.strokeStyle = g; ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(-L, 0); ctx.lineTo(0, 0); ctx.stroke();
+    drawGlow(0, 0, 28, '#fbbf24', 0.25 + 0.4 * f);
+    ctx.strokeStyle = w.crit ? '#fff7ed' : '#fde68a'; ctx.lineWidth = 3.2;
+    ctx.beginPath(); ctx.arc(-12, 0, 18, -0.95, 0.95); ctx.stroke();
+    ctx.strokeStyle = '#fffbeb'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(-10.5, 0, 18, -0.7, 0.7); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ------------------------------- the stillness -------------------------------
+   The room, held. A cold edge closing in from the frame and four brackets —
+   enough to say that the world is slow and the hull is not, without laying a
+   wash over the thing you are about to hit. Screen space, after the world. */
+function drawBladeStill() {
+  const T = Math.max(0.01, P.stillMax || STILL_T);
+  const k = clamp(P.stillT / 0.2, 0, 1) * clamp((T - P.stillT) / 0.06, 0, 1);
+  if (k <= 0.01) return;
+  ctx.save();
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.28,
+                                     W / 2, H / 2, Math.max(W, H) * 0.78);
+  // gold, since it is the perfect parry's to give
+  g.addColorStop(0, 'rgba(251,191,36,0)');
+  g.addColorStop(1, 'rgba(251,191,36,' + (0.2 * k).toFixed(3) + ')');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 0.6 * k; ctx.strokeStyle = '#fde68a'; ctx.lineWidth = 2;
+  const m = 10 + (1 - k) * 14, L = 28;
+  ctx.beginPath();
+  ctx.moveTo(m, m + L); ctx.lineTo(m, m); ctx.lineTo(m + L, m);
+  ctx.moveTo(W - m - L, m); ctx.lineTo(W - m, m); ctx.lineTo(W - m, m + L);
+  ctx.moveTo(W - m, H - m - L); ctx.lineTo(W - m, H - m); ctx.lineTo(W - m - L, H - m);
+  ctx.moveTo(m + L, H - m); ctx.lineTo(m, H - m); ctx.lineTo(m, H - m - L);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ------------------------------ what is lying there --------------------------
+   Every drop near the hull carries its name. The one under it carries the whole
+   question: which way it leans against what is already worn, and the key that
+   asks it. World space, so the tag stands over the thing it describes. */
+function drawGearTags() {
+  if (!isBlade() || state === 'dead') return;
+  const face = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  for (const d of drops) {
+    if (d.kind !== 'gear' || !d.gear) continue;
+    const near = d === gearNear;
+    const dist = len(d.x - P.x, d.y - P.y);
+    if (!near && dist > 280) continue;
+    const it = d.gear, col = RARITY[it.rar] || '#94a3b8';
+    const nm = gearName(it);
+    ctx.save();
+    ctx.globalAlpha = near ? 1 : clamp((280 - dist) / 120, 0, 0.85);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    if (near) {
+      const worn = P.gear && P.gear[it.slot];
+      const better = gearScore(it) >= gearScore(worn);
+      const slot = GEAR_SLOTS.find(s => s.k === it.slot);
+      ctx.font = '700 11px ' + face;
+      const w = Math.max(ctx.measureText(nm).width, 92) + 24, y = d.y - 66;
+      ctx.fillStyle = 'rgba(8,12,20,0.88)';
+      roundRect(d.x - w / 2, y - 15, w, 45, 7); ctx.fill();
+      ctx.strokeStyle = rgba(col, 0.75); ctx.lineWidth = 1.2;
+      roundRect(d.x - w / 2, y - 15, w, 45, 7); ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.fillText(nm, d.x, y);
+      ctx.font = '700 8.5px ' + face;
+      ctx.fillStyle = better ? '#86efac' : '#fca5a5';
+      ctx.fillText((better ? '▲ LOOKS BETTER' : '▼ LOOKS WORSE') +
+                   (slot ? '  ·  ' + slot.n : ''), d.x, y + 12);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText('[E]  LOOK', d.x, y + 24);
+    } else {
+      ctx.font = '700 9px ' + face;
+      ctx.fillStyle = col;
+      ctx.fillText(nm, d.x, d.y - 42);
     }
     ctx.restore();
   }
@@ -24710,31 +25533,48 @@ function drawBladeHUD(pad, bw, ly) {
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 
-  const ready = P.parryCd <= 0;
+  const ready = P.parryCd <= 0 && P.parryT <= 0;
+  const gold = P.parryT > 0 && P.parryAge <= bladePerfectWin();
   ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = P.parryT > 0 ? '#e0f2fe' : ready ? '#7dd3fc' : '#475569';
-  ctx.fillText(P.parryT > 0 ? 'PARRY' : '[F] PARRY', pad, ly);
-  if (!ready) {
-    const w = 34, k = 1 - clamp(P.parryCd / PARRY_CD, 0, 1);
+  ctx.fillStyle = P.stillT > 0 || gold ? '#fde68a' : P.parryT > 0 ? '#e0f2fe'
+                : ready ? '#7dd3fc' : '#475569';
+  ctx.fillText(P.stillT > 0 ? 'STILL' : P.parryT > 0 ? 'PARRY' : '[F] PARRY', pad, ly);
+  // only a parry into nothing leaves a wait worth drawing
+  if (P.parryCd > 0) {
+    const w = 34, k = 1 - clamp(P.parryCd / PARRY_CD_WHIFF, 0, 1);
     ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(pad + 56, ly - 3, w, 5, 3); ctx.fill();
     ctx.fillStyle = 'rgba(125,211,252,0.7)'; roundRect(pad + 56, ly - 3, Math.max(2, w * k), 5, 3); ctx.fill();
   }
-  // combo chevrons: the last is drawn as the finisher it is about to become,
-  // and a banked riposte lights all of them
-  const rip = P.riposte > 0;
-  let cx0 = pad + 100;
-  for (let i = 0; i < COMBO_N; i++) {
-    const on = rip || i < P.combo, last = i === COMBO_N - 1;
-    ctx.fillStyle = on ? (last || rip ? COL.crit : COL.player) : 'rgba(148,163,184,0.2)';
+  /* Whether the next perfect parry will still the room: a small diamond, lit
+     when it will. Without it a counter that merely flies reads as a failure. */
+  const sr = P.stillCd <= 0, dx0 = pad + 98;
+  ctx.fillStyle = sr ? '#fde68a' : 'rgba(148,163,184,0.2)';
+  ctx.beginPath();
+  ctx.moveTo(dx0 + 4, ly - 5); ctx.lineTo(dx0 + 8, ly - 0.5);
+  ctx.lineTo(dx0 + 4, ly + 4); ctx.lineTo(dx0, ly - 0.5); ctx.closePath(); ctx.fill();
+  ly += 17;
+  /* The chain: its multiplier, then a pip for every parry in the row, the last
+     one flickering once it is about to come off. Then a chevron for each
+     riposte banked — the finisher the next swing will be. */
+  const n = P.chain || 0;
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = n ? COL.crit : '#475569';
+  ctx.fillText('×' + bladeChainMul().toFixed(2), pad, ly);
+  let px = pad + 46;
+  for (let i = 0; i < CHAIN_MAX; i++) {
+    const on = i < n;
+    ctx.globalAlpha = on && i === n - 1 && P.chainT < 1 ? 0.4 + 0.6 * Math.abs(Math.sin(t * 11)) : 1;
+    ctx.fillStyle = on ? (i >= CHAIN_MAX - 2 ? '#fef9c3' : COL.crit) : 'rgba(148,163,184,0.18)';
+    roundRect(px, ly - 7, 6, 8, 1.5); ctx.fill();
+    px += 8;
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.crit;
+  for (let i = 0; i < (P.riposte || 0); i++) {
+    const cx0 = px + 5 + i * 9;
     ctx.beginPath();
-    if (last) {
-      ctx.moveTo(cx0, ly - 4.5); ctx.lineTo(cx0 + 8, ly - 0.5); ctx.lineTo(cx0, ly + 3.5);
-      ctx.lineTo(cx0 + 3, ly - 0.5); ctx.closePath();
-    } else {
-      ctx.moveTo(cx0, ly - 4); ctx.lineTo(cx0 + 5, ly - 0.5); ctx.lineTo(cx0, ly + 3);
-      ctx.lineTo(cx0 + 2, ly - 0.5); ctx.closePath();
-    }
-    ctx.fill(); cx0 += last ? 13 : 9;
+    ctx.moveTo(cx0, ly - 7); ctx.lineTo(cx0 + 6, ly - 3); ctx.lineTo(cx0, ly + 1);
+    ctx.lineTo(cx0 + 2.4, ly - 3); ctx.closePath(); ctx.fill();
   }
   ly += 19;
 
@@ -24755,6 +25595,16 @@ function drawBladeHUD(pad, bw, ly) {
             "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = it ? col : '#334155';
     ctx.fillText(nm, pad + 58, ly);
+    ly += 14;
+  }
+  /* The verbs, said once at the top of a run and then left alone. */
+  if (wave <= 2 && elapsed < 45) {
+    ctx.globalAlpha = clamp((45 - elapsed) / 8, 0, 1) * 0.8;
+    ctx.fillStyle = '#64748b';
+    const hint = '[F] PARRY · EACH IN A ROW +25% DAMAGE · JUST BEFORE IMPACT = COUNTER';
+    fitFont(hint, Math.max(120, bw - 4), '600', 8.5, "'JetBrains Mono', ui-monospace, monospace", 6.5);
+    ctx.fillText(hint, pad, ly + 2);
+    ctx.globalAlpha = 1;
     ly += 14;
   }
   ctx.restore();
@@ -24912,7 +25762,7 @@ function gearCard(r, it, label, lit, better) {
 
   // the hull, wearing it — everything else it has on, with this in its slot
   ctx.save(); ctx.translate(rx, gy); ctx.scale(1.75 * k, 1.75 * k); ctx.rotate(-Math.PI / 2);
-  const ghost = { rig: 0, combo: 0, riposte: 0, swingT: 0, swingSide: 0,
+  const ghost = { rig: 0, chain: 0, riposte: 0, swingT: 0, swingSide: 0,
                   gear: Object.assign({}, P.gear, { [it.slot]: it }) };
   drawVagrantHull(ghost, t);
   ctx.restore();
@@ -24994,7 +25844,7 @@ function drawGearOffer() {
   gearCard(rs[1], gearOld, 'ALREADY WORN', hover === 1, null);
 
   const bs = gearBtnRects();
-  const labels = ['[ 1 ]  WEAR IT', '[ 2 ]  LEAVE IT'];
+  const labels = ['[ 1 ]  WEAR IT', '[ 2 ]  SALVAGE IT'];
   const cols = [RARITY[gearOffer.rar] || '#94a3b8', '#64748b'];
   for (let i = 0; i < 2; i++) {
     const on = hover === i;
@@ -25008,14 +25858,23 @@ function drawGearOffer() {
     ctx.textAlign = 'center';
     ctx.fillText(labels[i], bs[i].x + bs[i].w / 2, bs[i].y + bs[i].h / 2 + 0.5);
   }
-  /* What leaving it means, said plainly. There is no stash and nothing comes
-     back, so the screen has to be honest that this is the whole decision. */
+  /* What salvaging it means, said plainly and in figures: the piece it goes
+     into, and what that piece becomes. */
   ctx.save();
   ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#475569';
+  ctx.fillStyle = '#64748b';
   ctx.textAlign = 'center';
-  ctx.fillText('whatever you do not wear is left behind',
-               W / 2, Math.min(H - 12, bs[0].y + bs[0].h + 18));
+  let note = '';
+  if (gearOld) {
+    const was = gearOld.tp || 0, now = Math.min(TEMPER_MAX, was + gearTemperGain(gearOffer));
+    const carry = gearCarry(gearOld), base = gearBase(gearOld.b), nm = base ? base.n : 'piece';
+    note = (carry ? '[1] carries +' + carry + ' of your temper across   ·   ' : '') +
+           (now > was ? '[2] tempers your ' + nm + '  +' + was + ' → +' + now
+                      : '[2] sells it for ◈' + gearScrapPrice(gearOffer) + ', yours is fully tempered');
+  }
+  note += (note ? '   ·   ' : '') + '[ESC] put it back';
+  fitFont(note, W - 40, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillText(note, W / 2, Math.min(H - 12, bs[0].y + bs[0].h + 18));
   ctx.restore();
 }
 
@@ -25033,6 +25892,13 @@ function drawHUD() {
   const hc = hf > 0.5 ? COL.hp : hf > 0.25 ? '#facc15' : '#ef4444';
   ctx.fillStyle = hc;
   roundRect(pad + 2, pad + 2, Math.max(0, (bw - 4) * hf), bh - 4, 6); ctx.fill();
+  /* THE VAGRANT's rally: the part of the last hit that can still be won back,
+     drawn where it was lost, and flickering once it has started to drain. */
+  if (isBlade() && P.rally > 0.3) {
+    const rf = Math.min(1 - hf, P.rally / P.maxHp);
+    ctx.fillStyle = rgba('#fecdd3', P.rallyT > 0 ? 0.62 : 0.42 + Math.sin(uiTime * 14) * 0.12);
+    roundRect(pad + 2 + (bw - 4) * hf, pad + 2, Math.max(2, (bw - 4) * rf), bh - 4, 3); ctx.fill();
+  }
   ctx.strokeStyle = 'rgba(148,163,184,0.35)'; ctx.lineWidth = 1;
   roundRect(pad, pad, bw, bh, 8); ctx.stroke();
   const hpStr = `${fmtHp(P.hp)} / ${Math.round(P.maxHp)}`;
@@ -26528,12 +27394,18 @@ function renderMenu() {
   ctx.restore();
   ctx.textAlign = 'center';
 
+  // THE VAGRANT has other verbs, and the menu is where they are first said
+  const blade = CHAR().weapon === 'blade';
   const lines = isTouch
-    ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & fire']
+    ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & ' + (blade ? 'swing' : 'fire')]
     : tiny
-      ? ['WASD move  ·  MOUSE aim  ·  SPACE dash  ·  S settings']
-      : ['WASD move   ·   MOUSE aim   ·   HOLD to fire',
-         'SPACE dash (i-frames)   ·   P pause   ·   X codex   ·   S settings'];
+      ? [blade ? 'WASD move  ·  HOLD swing  ·  F parry  ·  SPACE lunge'
+               : 'WASD move  ·  MOUSE aim  ·  SPACE dash  ·  S settings']
+      : blade
+        ? ['F / RIGHT-CLICK parry  —  in a row for damage, just before impact to counter',
+           'WASD move   ·   HOLD to swing   ·   SPACE lunge   ·   E look at gear']
+        : ['WASD move   ·   MOUSE aim   ·   HOLD to fire',
+           'SPACE dash (i-frames)   ·   P pause   ·   X codex   ·   S settings'];
   ctx.fillStyle = '#334155';
   const ly2 = tiny ? H - 56 : H - 74;
   lines.forEach((l, i) => {
@@ -28062,6 +28934,41 @@ function drawMenuSet() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 5, v: '1.3.1', date: '24 SEP 2026', lines: [
+    ['balance', 'THE VAGRANT lives on the parry now. Every parry in a row adds 25% to '
+              + 'everything it deals, up to three times over, and a hit that lands '
+              + 'breaks the chain.'],
+    ['new', 'A perfect parry, raised just before the blow lands, is a full counter: '
+          + 'the hit goes straight back at whoever threw it as a narrow wave, five '
+          + 'times over and scaled by the chain. The room stills while it flies.'],
+    ['balance', 'A parry that catches something is ready again at once, so a volley '
+              + 'can be answered shot for shot. One that catches nothing leaves you '
+              + 'open for a moment.'],
+    ['balance', 'The swing after a parry is the finisher; three swings in a row no '
+              + 'longer are. Whatever a finisher lands on reels, unable to shoot or '
+              + 'touch you, and the small ones are thrown into whatever is behind '
+              + 'them. A bomber is batted away on a short fuse instead of going off '
+              + 'in your face.'],
+    ['new', 'Its dash is a lunge that strikes everything it passes through. A lunge '
+          + 'that kills pays half a charge back.'],
+    ['new', 'Rally. Most of a hit you have just taken can be won back, all of it by '
+          + 'your next parry and a little by each swing, before it drains: the pale '
+          + 'stretch on the health bar.'],
+    ['balance', 'Gear no longer stops the game when you walk over it. Stand on it and '
+              + 'press [E] to look. Salvage what you do not want and it tempers the '
+              + 'piece you already wear, so a CLEAVER +4 is a better CLEAVER, and '
+              + 'swapping a tempered piece out carries half its temper across.'],
+    ['new', 'Five new pieces for the parry: the TURNING BAR, SCAB PLATE, STILL CORE, '
+          + "BEGGAR'S BOWL and METRONOME. The RIPOSTE CORE now answers a parry with "
+          + 'a finisher on the spot.'],
+    ['fix', "ROOT could not be beaten by EMBER or THE VAGRANT: only bullets could break "
+          + 'the characters of its line, so it always ran. The lance now cuts them, '
+          + 'and THE VAGRANT has its line typed at it, one character at a time, to '
+          + 'cut or parry.'],
+    ['fix', "THE CURATOR's filing could only be shot open by bullets, so for EMBER and "
+          + 'THE VAGRANT it always closed and went off. The lance and the blade chew '
+          + 'through the ring now.']
+  ] },
   { id: 4, v: '1.3', date: '22 SEP 2026', lines: [
     ['new', 'BOSS RUSH. Every stage boss back to back, each on its own floor '
           + 'with a reward room between them, then round again, harder. It pays '
