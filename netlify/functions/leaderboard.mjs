@@ -84,7 +84,9 @@ const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
    the codex. One id rather than a list of them, because a dev account wants
    the whole game and enumerating it here would be a second copy of a list
    the client already keeps and would drift from. */
-const ALL_PERKS = ['unlock-all'];
+/* unlock-evo: every evolution that has been built, awake. Its own id because
+   waking a hull skips its rite, and an account may want the rest without it. */
+const ALL_PERKS = ['unlock-all', 'unlock-evo'];
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 const KEYLEN = 32;
 
@@ -270,10 +272,20 @@ async function awardsFor(store, pid) {
   const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
   const row = g && g.byPid && Object.prototype.hasOwnProperty.call(g.byPid, pid)
     ? g.byPid[pid] : null;
+  /* Read through the account as well as off the row. The row is what the
+     account held at the moment of login, so anything added to the account
+     since — a new skin, a new perk — reaches every profile already signed in
+     to it on its next sync, without a second login. An account deleted from
+     DEV_ACCOUNTS stops adding anything; what its logins banked stays on their
+     rows, exactly as before. */
+  const acct = row && typeof row.user === 'string'
+    && Object.prototype.hasOwnProperty.call(DEV_ACCOUNTS, row.user) ? DEV_ACCOUNTS[row.user] : null;
   if (row && Array.isArray(row.skins)) given.push(...row.skins);
+  if (acct) given.push(...(acct.skins || ALL_SKINS));
   for (const id of [...new Set(given)]) out.push({ skin: id, via: 'GRANTED' });
-  if (row && Array.isArray(row.perks))
-    for (const id of [...new Set(row.perks)]) out.push({ perk: id, via: 'GRANTED' });
+  const perks = [...(row && Array.isArray(row.perks) ? row.perks : []),
+                 ...(acct ? (acct.perks || ALL_PERKS) : [])];
+  for (const id of [...new Set(perks)]) out.push({ perk: id, via: 'GRANTED' });
   return out;
 }
 

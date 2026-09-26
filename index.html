@@ -37137,7 +37137,7 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
                       'rush-knight', 'rush-duke', 'rush-king'];
 /* Grants that are not skins. Checked against this list the same way, so an
    invented one cannot arrive from a save file any more than a skin can. */
-const DEV_PERK_IDS = ['unlock-all'];
+const DEV_PERK_IDS = ['unlock-all', 'unlock-evo'];
 
 const Awards = {
   syncing: false,
@@ -37439,11 +37439,31 @@ function devUnlockAll() {
   return true;
 }
 
+/* Every evolution there is, awake: each pilot whose rite has been built, so
+   one added later is handed over on the next load or sync and nothing here
+   has to learn about it. Its own perk rather than part of unlock-all, because
+   waking a hull skips its rite. Additive and written only on a change, like
+   devUnlockAll. */
+function devUnlockEvo() {
+  const p = Save.profile;
+  if (!p) return false;
+  let ids;
+  try { ids = Object.keys(RITES).filter(id => riteBuilt(id) && !isAwake(id)); }
+  catch (e) { return false; }            // asked before the rites table exists
+  if (!ids.length) return false;
+  p.awakened = Object.assign({}, p.awakened || {});
+  for (const id of ids) p.awakened[id] = true;
+  Save.writeLocal(); Save.flush();
+  return true;
+}
+
 /* Applied wherever the awards list may have just changed: on load, and after
    a sync. Idempotent, so calling it twice costs a comparison. */
 function devPerksApply() {
-  if (!devPerk('unlock-all')) return false;
-  return devUnlockAll();
+  let changed = false;
+  if (devPerk('unlock-all')) changed = devUnlockAll() || changed;
+  if (devPerk('unlock-evo')) changed = devUnlockEvo() || changed;
+  return changed;
 }
 
 /* --------------------------- the era mark --------------------------------
