@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>EMBER · REWORK — OVERDRIVE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;800&display=swap">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
+    font-family:Barlow,'Segoe UI',system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+/* ===========================================================================
+   EMBER — REWORK PREVIEW  ·  standalone render, nothing here touches the game
+   ---------------------------------------------------------------------------
+   Beat sheet (seconds):
+     0.00  the room, as it is
+     1.00  screen dims to the devtalk level (same radial, 0.55 -> 0.90)
+     1.70  one spark falls top to bottom, flickering orange <-> red
+     3.30  it lands: the room takes
+     3.45  wings open, the lance re-lights as a helix
+    12.30  overdrive runs out, the room cools
+    15.20  loop
+
+   The effect itself lives in three self-contained draw functions —
+   drawFireRoom(), drawWings() and drawHelix() — each takes plain args and
+   nothing else, so they lift straight out into the game's renderer.
+   SPACE / click replays · 1-4 jump to a beat
+=========================================================================== */
+
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rnd = (a, b = 0) => b + Math.random() * (a - b);
+const ease = t => t * t * (3 - 2 * t);
+const easeIn = t => t * t * t;
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function mixHex(h1, h2, t) {
+  const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+  const r = Math.round(lerp((a >> 16) & 255, (b >> 16) & 255, t));
+  const g = Math.round(lerp((a >> 8) & 255, (b >> 8) & 255, t));
+  const bl = Math.round(lerp(a & 255, b & 255, t));
+  return `rgb(${r},${g},${bl})`;
+}
+
+/* --- glow sprites: radial gradients cached per colour, blitted additively.
+       Same trick the game uses — far cheaper than shadowBlur. ------------- */
+const _glow = new Map();
+function glowSprite(color) {
+  let s = _glow.get(color);
+  if (s) return s;
+  s = document.createElement('canvas');
+  s.width = s.height = 128;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, color); gr.addColorStop(0.32, color.replace('rgb', 'rgba').replace(')', ',0.42)'));
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  _glow.set(color, s); return s;
+}
+function glowHex(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255})`;
+}
+function drawGlow(ctx, x, y, r, hex, a = 1) {
+  ctx.globalAlpha = a;
+  ctx.drawImage(glowSprite(glowHex(hex)), x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = 1;
+}
+
+/* --------------------------------- canvas -------------------------------- */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  buildTiles();
+}
+window.addEventListener('resize', resize);
+
+/* film tiles — grain and scanlines, built once */
+let grainTile = null, scanTile = null;
+function buildTiles() {
+  if (!grainTile) {
+    grainTile = document.createElement('canvas');
+    grainTile.width = grainTile.height = 96;
+    const g = grainTile.getContext('2d');
+    const d = g.createImageData(96, 96);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const v = 128 + (Math.random() * 2 - 1) * 42;
+      d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 26;
+    }
+    g.putImageData(d, 0, 0);
+  }
+  if (!scanTile) {
+    scanTile = document.createElement('canvas');
+    scanTile.width = 1; scanTile.height = 3;
+    const s = scanTile.getContext('2d');
+    s.fillStyle = 'rgba(0,0,0,0.20)'; s.fillRect(0, 2, 1, 1);
+  }
+}
+
+/* ------------------------------ the timeline ------------------------------ */
+const T_DIM    = 1.00,  T_DIM_END = 1.90;
+const T_SPARK  = 1.70,  T_LAND    = 3.30;
+const T_WINGS  = 3.45;
+const OD_LEN   = 9.00;
+const T_COOL   = T_LAND + OD_LEN;     // 12.30
+const T_END    = T_COOL + 1.30;
+const T_LOOP   = T_END + 1.60;
+const BEATS = [0, T_DIM, T_SPARK, T_LAND + 0.02];
+
+let T = 0, last = 0, shake = 0, flash = 0;
+let prevX = 0, prevY = 0;
+let parts = [], pools = [], trail = [];
+let sparkLanded = false, poolsSeeded = false;
+
+function reset() {
+  T = 0; shake = 0; flash = 0;
+  parts.length = 0; pools.length = 0; trail.length = 0;
+  sparkLanded = false; poolsSeeded = false;
+}
+function seek(t) { reset(); T = t; if (t > T_LAND) { ignite(true); T = t; } }
+
+/* ------------------------------- particles -------------------------------- */
+function spawnPart(x, y, vx, vy, r, hex, life, drag = 0.94) {
+  if (parts.length > 1100) return;
+  parts.push({ x, y, vx, vy, r, hex, life, max: life, drag });
+}
+function updateParts(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const d = Math.pow(p.drag, dt * 60);
+    p.vx *= d; p.vy *= d;
+    p.vy -= 26 * dt;                    // embers rise
+  }
+}
+function drawParts(c) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    const a = clamp(p.life / p.max, 0, 1);
+    drawGlow(c, p.x, p.y, p.r * 3.4, p.hex, a * 0.30);
+    c.globalAlpha = a;
+    c.fillStyle = p.hex;
+    c.beginPath(); c.arc(p.x, p.y, p.r * (0.4 + a * 0.6), 0, TAU); c.fill();
+  }
+  c.restore();
+}
+
+/* ----------------------------- the room, cold ----------------------------- */
+function drawRoom(c, warm) {
+  c.fillStyle = '#05060a';
+  c.fillRect(-40, -40, W + 80, H + 80);
+  const G = 64;
+  c.lineWidth = 1;
+  c.strokeStyle = warm > 0.02 ? rgba('#2a1206', 0.5 + warm * 0.5) : '#0e1626';
+  c.beginPath();
+  for (let x = (W / 2 % G); x < W; x += G) { c.moveTo(x, 0); c.lineTo(x, H); }
+  for (let y = (H / 2 % G); y < H; y += G) { c.moveTo(0, y); c.lineTo(W, y); }
+  c.stroke();
+  // plating studs, so the floor has a surface rather than a wireframe
+  c.fillStyle = warm > 0.02 ? rgba('#7c2d12', 0.35 + warm * 0.4) : 'rgba(29,53,87,0.35)';
+  for (let x = (W / 2 % G); x < W; x += G)
+    for (let y = (H / 2 % G); y < H; y += G) { c.beginPath(); c.arc(x, y, 1.4, 0, TAU); c.fill(); }
+  // arena wall
+  const m = Math.min(W, H) * 0.07;
+  c.lineWidth = 3;
+  c.strokeStyle = warm > 0.02 ? mixHex('#1d3557', '#b45309', warm) : '#1d3557';
+  c.strokeRect(m, m, W - m * 2, H - m * 2);
+  c.lineWidth = 1;
+  c.strokeStyle = warm > 0.02 ? rgba('#f97316', 0.16 + warm * 0.3) : 'rgba(29,53,87,0.35)';
+  c.strokeRect(m + 6, m + 6, W - m * 2 - 12, H - m * 2 - 12);
+  return m;
+}
+
+/* =========================== EFFECT · the room takes ======================
+   Top-down fire: pools of flame on the plating with tongues licking off them,
+   lit from inside. Kept to two additive passes per pool — the point is heat on
+   the floor, not a bloom wash over the frame.
+=========================================================================== */
+function ignite(silent) {
+  if (poolsSeeded) return;
+  poolsSeeded = true;
+  const m = Math.min(W, H) * 0.07;
+  const add = (x, y, r) => pools.push({ x, y, r, seed: rnd(100), born: T, k: rnd(1.3, 0.7) });
+  // the wall line catches first
+  const n = Math.max(4, Math.round(W / 300));
+  for (let i = 0; i < n; i++) {
+    add(lerp(m, W - m, (i + 0.5) / n) + rnd(40, -40), m + rnd(20, -4), rnd(62, 38));
+    add(lerp(m, W - m, (i + 0.5) / n) + rnd(40, -40), H - m + rnd(4, -20), rnd(62, 38));
+  }
+  const nv = Math.max(3, Math.round(H / 340));
+  for (let i = 0; i < nv; i++) {
+    add(m + rnd(20, -4), lerp(m, H - m, (i + 0.5) / nv) + rnd(40, -40), rnd(58, 36));
+    add(W - m + rnd(4, -20), lerp(m, H - m, (i + 0.5) / nv) + rnd(40, -40), rnd(58, 36));
+  }
+  // and the floor between, kept off the ship so the silhouette stays readable
+  for (let i = 0; i < 6; i++) {
+    const a = rnd(TAU), d = rnd(Math.min(W, H) * 0.44, 210);
+    add(W / 2 + Math.cos(a) * d, H / 2 + Math.sin(a) * d * 0.72, rnd(88, 52));
+  }
+  if (!silent) { flash = 1; shake = 16; }
+  for (let i = 0; i < 90; i++) {
+    const a = rnd(TAU), s = rnd(620, 160);
+    spawnPart(W / 2 + rnd(20, -20), H / 2 + rnd(20, -20),
+      Math.cos(a) * s, Math.sin(a) * s * 0.7, rnd(3.4, 1.4),
+      Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1.1, 0.4), 0.9);
+  }
+}
+
+/* One tongue: a tapered leaf, wide at the coals and pinched at the tip, with a
+   lean on it. Filled shapes, not round-capped strokes — a stroke with a cap on
+   it always reads as a limb, and a floor full of them reads as a spider. */
+function flameLeaf(c, bx, by, ang, len, wid, bend) {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const nx = -sa, ny = ca;
+  const tx = bx + ca * len + nx * bend, ty = by + sa * len + ny * bend;
+  const mx = bx + ca * len * 0.45, my = by + sa * len * 0.45;
+  c.beginPath();
+  c.moveTo(bx + nx * wid, by + ny * wid);
+  c.quadraticCurveTo(mx + nx * wid * 1.15 + nx * bend * 0.4,
+                     my + ny * wid * 1.15 + ny * bend * 0.4, tx, ty);
+  c.quadraticCurveTo(mx - nx * wid * 1.15 + nx * bend * 0.4,
+                     my - ny * wid * 1.15 + ny * bend * 0.4,
+                     bx - nx * wid, by - ny * wid);
+  c.closePath();
+}
+
+function drawFireRoom(c, t, life) {
+  if (!pools.length) return;
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for (const p of pools) {
+    const up = clamp((t - p.born) / 0.55, 0, 1) * life;       // pools bloom in
+    if (up <= 0.001) continue;
+    const fl = 0.82 + Math.sin(t * (5.1 + p.k) + p.seed) * 0.10
+                    + Math.sin(t * (11.3 + p.k * 2) + p.seed * 2) * 0.05;
+    const R = p.r * up * fl;
+    drawGlow(c, p.x, p.y, R * 1.5, '#7c2d12', 0.30 * up);
+    drawGlow(c, p.x, p.y, R * 0.8, '#ea580c', 0.26 * up);
+    // the burning floor itself: a flattened bed, brightest at the middle
+    c.globalAlpha = 0.16 * up;
+    c.fillStyle = '#9a3412';
+    c.beginPath(); c.ellipse(p.x, p.y, R * 0.66, R * 0.4, 0, 0, TAU); c.fill();
+
+    /* Tongues. All of them lean up-screen within a narrow cone and overlap, so
+       the pool churns as one body of flame instead of throwing spokes. */
+    const tn = 8;
+    for (let i = 0; i < tn; i++) {
+      const ph = (t * (0.9 + p.k * 0.35) + i * 0.317 + p.seed) % 1;
+      const spread = (i / (tn - 1) - 0.5) * 0.95 + Math.sin(p.seed + i) * 0.08;
+      const a = -Math.PI / 2 + spread * 0.8 + Math.sin(t * 1.9 + i * 2.2 + p.seed) * 0.14;
+      const bx = p.x + spread * R * 0.5, by = p.y + Math.abs(spread) * R * 0.1;
+      const grow = 0.5 + Math.sin(ph * Math.PI) * 0.7;
+      const len = R * (0.62 + (0.5 - Math.abs(spread)) * 0.8) * grow;
+      const bend = Math.sin(t * 3.4 + i * 1.6 + p.seed) * R * 0.14;
+      const fade = up * (0.35 + Math.sin(ph * Math.PI) * 0.5);
+      c.globalAlpha = 0.2 * fade;
+      c.fillStyle = '#b91c1c';
+      flameLeaf(c, bx, by, a, len, R * 0.28, bend); c.fill();
+      c.globalAlpha = 0.26 * fade;
+      c.fillStyle = '#ea580c';
+      flameLeaf(c, bx, by, a, len * 0.72, R * 0.17, bend * 0.7); c.fill();
+      c.globalAlpha = 0.3 * fade;
+      c.fillStyle = '#fdba74';
+      flameLeaf(c, bx, by, a, len * 0.36, R * 0.08, bend * 0.4); c.fill();
+    }
+    // the coal bed
+    c.globalAlpha = (0.24 + Math.sin(t * 7 + p.seed) * 0.08) * up;
+    c.fillStyle = '#fdba74';
+    c.beginPath(); c.ellipse(p.x, p.y, R * 0.24, R * 0.1, 0, 0, TAU); c.fill();
+    if (Math.random() < 0.1 * life)
+      spawnPart(p.x + rnd(R * 0.45, -R * 0.45), p.y + rnd(R * 0.3, -R * 0.3),
+        rnd(22, -22), rnd(-30, -92), rnd(2.4, 1),
+        Math.random() < 0.3 ? '#fde047' : '#fb923c', rnd(1.4, 0.6), 0.93);
+  }
+  c.restore();
+}
+
+/* ============================ EFFECT · the spark ==========================
+   One spark, drawn properly: a stretched core with a sampled trail behind it,
+   flickering between orange and red on a noisy beat, throwing a little light
+   onto the plating as it goes past.
+=========================================================================== */
+function sparkState(t) {
+  const p = clamp((t - T_SPARK) / (T_LAND - T_SPARK), 0, 1);
+  const y = lerp(-60, H + 30, easeIn(p) * 0.82 + p * 0.18);
+  const x = W / 2 + Math.sin(p * 5.2) * 26 * (1 - p * 0.5);
+  // flicker: two beats out of phase, so it reads as combustion not a blink
+  const f = clamp(0.5 + Math.sin(t * 27) * 0.34 + Math.sin(t * 61.7) * 0.22, 0, 1);
+  return { p, x, y, f, hot: mixHex('#ef4444', '#fb923c', f) };
+}
+function drawSpark(c, t) {
+  const s = sparkState(t);
+  if (s.p <= 0 || s.p >= 1) return s;
+  trail.push({ x: s.x, y: s.y, hot: s.hot, t });
+  if (trail.length > 34) trail.shift();
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  // the light it throws on the floor as it passes
+  drawGlow(c, s.x, s.y, 220, '#7c2d12', 0.16 + s.f * 0.08);
+  // trail — every sample keeps the colour it was born, so the streak itself
+  // is banded orange/red rather than one tinted smear
+  for (let i = 0; i < trail.length; i++) {
+    const q = trail[i], k = i / trail.length;
+    c.globalAlpha = k * k * (0.55 + s.f * 0.2);
+    c.fillStyle = q.hot;
+    const rr = 1 + k * 3.4;
+    c.beginPath(); c.ellipse(q.x, q.y, rr * 0.55, rr * (1 + (1 - k) * 2.4), 0, 0, TAU); c.fill();
+  }
+  // head: halo, stretched body, hard white core
+  drawGlow(c, s.x, s.y, 46 + s.f * 20, s.hot, 0.55);
+  c.globalAlpha = 0.95;
+  c.fillStyle = s.hot;
+  c.beginPath(); c.ellipse(s.x, s.y, 2.6 + s.f * 0.9, 11 + s.f * 7, 0, 0, TAU); c.fill();
+  c.globalAlpha = 1;
+  c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(s.x, s.y - 1, 1.15 + s.f * 0.5, 4.2 + s.f * 2.4, 0, 0, TAU); c.fill();
+  // a couple of chips falling off it
+  if (Math.random() < 0.55)
+    spawnPart(s.x + rnd(3, -3), s.y - rnd(6), rnd(34, -34), rnd(-40, -150),
+      rnd(1.8, 0.8), Math.random() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2), 0.9);
+  c.restore();
+  return s;
+}
+
+/* ============================ EFFECT · the vent plume =====================
+   Heat storming out of the exhaust notch, not wings bolted to the hull.
+
+   Four things do the selling, and none of them are more feathers:
+     · LAG    — the plume keeps its own heading (plumeAng), chasing the hull's
+                with a spring. Turn and the gas trails; stop and it catches up.
+                This is the whole "gas, not geometry" cue.
+     · NOTCH  — the rear notch is the white-hot source. The vanes are bleed off
+                it, so brightness falls off with distance from the notch.
+     · SURGE  — pressure relief comes in irregular gouts, not a sine idle: two
+                incommensurable beats plus a sharp gate, so it gouts and sags.
+     · CONDUCT— the metal around the vane roots glows, hottest at the root and
+                dying off forward. That is what welds the plume to the ship.
+=========================================================================== */
+const plume = { ang: 0, vel: 0, stretch: 1, init: false };
+function updatePlume(ang, spd, dt) {
+  if (!plume.init) { plume.ang = ang; plume.init = true; }
+  // critically-damped-ish spring on the heading: lag in, no ringing out
+  let d = ang - plume.ang;
+  while (d > Math.PI) d -= TAU;
+  while (d < -Math.PI) d += TAU;
+  plume.vel += (d * 165 - plume.vel * 17) * dt;
+  plume.ang += plume.vel * dt;
+  plume.lag = d;                                  // how far behind it is, radians
+  // gas stretches when the emitter accelerates into it
+  const want = 1 + clamp(spd * 0.0016, 0, 0.5);
+  plume.stretch += (want - plume.stretch) * Math.min(1, dt * 7);
+}
+// irregular gouts: two beats that never line up, gated so it spikes and sags
+function surge(t) {
+  const a = Math.sin(t * 3.7), b = Math.sin(t * 8.9 + 1.3), c3 = Math.sin(t * 1.61);
+  const raw = a * 0.5 + b * 0.28 + c3 * 0.22;
+  const g = Math.pow(clamp(raw * 0.5 + 0.5, 0, 1), 2.1);
+  return 0.72 + g * 0.95;                         // ~0.72 idle … ~1.67 gout
+}
+
+function drawWings(c, x, y, ang, t, open) {
+  if (open <= 0.001) return;
+  const sg = surge(t);
+  const lag = clamp((plume.lag || 0) * 1.9, -0.9, 0.9);   // trail direction
+  const stretch = plume.stretch || 1;
+  c.save();
+  c.translate(x, y);
+  c.rotate(ang);
+
+  /* ---- conduction: the hull metal around the vane roots, hottest at the
+     notch and falling off forward. Drawn clipped to the hull so it is the
+     plating glowing, not a smear sitting on top of it. ---- */
+  c.save();
+  hullPath(c); c.clip();
+  c.globalCompositeOperation = 'lighter';
+  const cond = c.createLinearGradient(-13, 0, 14, 0);
+  const heat = open * (0.55 + sg * 0.3);
+  cond.addColorStop(0, `rgba(255,237,213,${0.52 * heat})`);
+  cond.addColorStop(0.28, `rgba(249,115,22,${0.38 * heat})`);
+  cond.addColorStop(0.62, `rgba(153,27,27,${0.16 * heat})`);
+  cond.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = cond; c.fillRect(-16, -16, 34, 32);
+  c.restore();
+
+  /* ---- the notch: the actual source. White-hot core, a short jet of gas
+     leaving it, and it breathes on the surge. ---- */
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  const nx = -10.5;
+  drawGlow(c, nx, 0, (13 + sg * 9) * open, '#fb923c', 0.5 * open);
+  drawGlow(c, nx, 0, (6 + sg * 4) * open, '#fff7ed', 0.45 * open);
+  c.globalAlpha = 0.9 * open;
+  c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(nx, 0, 2.6 + sg * 1.1, 3.4 + sg * 0.8, 0, 0, TAU); c.fill();
+  // the jet off the notch, bent by the lag
+  c.globalAlpha = 0.5 * open;
+  c.fillStyle = '#fdba74';
+  flameLeaf(c, nx, 0, Math.PI + lag * 0.55, (16 + sg * 14) * stretch, 4.4, lag * 9);
+  c.fill();
+  c.globalAlpha = 0.72 * open;
+  c.fillStyle = '#fff7ed';
+  flameLeaf(c, nx, 0, Math.PI + lag * 0.55, (8 + sg * 7) * stretch, 1.9, lag * 4);
+  c.fill();
+  c.restore();
+
+  c.globalCompositeOperation = 'lighter';
+  for (const sd of [1, -1]) {
+    /* One side leads a turn and the other is pushed out — the lag term is
+       signed against the vane side, so the plume skews instead of fanning
+       symmetrically. Roots run along the hull, not out of one hinge. */
+    const N = 9;
+    const skew = lag * sd;
+    drawGlow(c, -14 - lag * sd * 4, sd * 15, (40 + sg * 12) * open, '#9a3412', 0.26 * open);
+    for (let i = 0; i < N; i++) {
+      const k = i / (N - 1);
+      const flick = 0.86 + Math.sin(t * (6 + i * 1.6) + i * 2.3 + sd) * 0.14;
+      const span = open * flick;
+      const rootX = 6 - k * 13, rootY = sd * (4.5 + k * 4);
+      // heading: back and out, dragged toward the plume's own lagging heading
+      const dir = Math.PI - sd * (0.32 + k * 0.30) - lag * (0.35 + k * 0.5);
+      const len = (26 + 46 * Math.sin(Math.min(1, 0.18 + k * 0.92) * Math.PI)) *
+                  span * (0.8 + sg * 0.34) * stretch;
+      const bend = sd * (7 + k * 12) * span + skew * (10 + k * 16) * span +
+                   Math.sin(t * 4.2 + i * 1.3 + sd) * 3 * span;
+      const w = (4.2 - k * 1.4) * span * (0.85 + sg * 0.25);
+      /* Brightness is bleed off the notch: the vanes nearest it run hottest
+         and the outer ones are cooling gas by the time they get there. */
+      const near = 1 - k * 0.55;
+      c.globalAlpha = 0.26 * span;
+      c.fillStyle = '#7f1d1d';
+      flameLeaf(c, rootX, rootY, dir, len, w * 1.9, bend); c.fill();
+      c.globalAlpha = 0.4 * span * near;
+      c.fillStyle = '#ea580c';
+      flameLeaf(c, rootX, rootY, dir, len * 0.86, w * 1.05, bend * 0.8); c.fill();
+      c.globalAlpha = 0.6 * span * flick * near * near;
+      c.fillStyle = k < 0.3 ? '#fff7ed' : i % 3 === 0 ? '#fde68a' : '#fdba74';
+      flameLeaf(c, rootX, rootY, dir, len * 0.5, w * 0.42, bend * 0.5); c.fill();
+      // a gout throws embers; an idle barely does
+      if (Math.random() < 0.035 * open * sg * sg) {
+        const tx = rootX + Math.cos(dir) * len, ty = rootY + Math.sin(dir) * len + bend;
+        spawnPart(x + Math.cos(ang) * tx - Math.sin(ang) * ty,
+                  y + Math.sin(ang) * tx + Math.cos(ang) * ty,
+                  rnd(30, -30), rnd(-20, -80), rnd(2.2, 1),
+                  Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.9, 0.4), 0.92);
+      }
+    }
+    // the spar the feathers hang off — one crisp line, and the reason the
+    // whole fan reads as a wing rather than as smoke
+    c.globalAlpha = 0.6 * open;
+    c.strokeStyle = '#fed7aa'; c.lineWidth = 1.5; c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(6, sd * 4.5);
+    c.quadraticCurveTo(-9 - skew * 6, sd * 19 * open, -32 * open - skew * 14, sd * 26 * open);
+    c.stroke();
+    c.globalAlpha = 0.3 * open;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(-7, sd * 8);
+    c.quadraticCurveTo(-24 * open, sd * 24 * open, -48 * open, sd * 29 * open);
+    c.stroke();
+  }
+  c.restore();
+}
+
+/* =========================== EFFECT · the helix lance =====================
+   The reworked beam. Two strands winding a common axis, drawn as depth-sorted
+   polylines: strand width and alpha follow the winding phase, so one passes
+   behind the other instead of both floating in the same haze. No wide soft
+   passes — a tight core, one narrow sheath, and light only where it lands.
+=========================================================================== */
+function drawHelix(c, ox, oy, ang, len, t, intensity) {
+  if (intensity <= 0.001) return;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const nx = -sa, ny = ca;
+  const STEPS = 56, TURNS = 5.4, SPIN = 7.2, AMP = 11;
+  const pt = (k, s) => {
+    const u = s / STEPS, d = u * len;
+    const ph = u * TURNS * TAU - t * SPIN + k * Math.PI;
+    const taper = Math.sin(Math.min(1, u * 1.35) * Math.PI * 0.5) * (1 - u * 0.22);
+    const off = Math.sin(ph) * AMP * taper * intensity;
+    return { x: ox + ca * d + nx * off, y: oy + sa * d + ny * off, depth: Math.cos(ph), u };
+  };
+  c.save();
+  c.lineCap = 'round'; c.lineJoin = 'round';
+
+  // containment thread down the axis: thin, straight, keeps the eye on the lane
+  c.globalAlpha = 0.30 * intensity;
+  c.strokeStyle = '#fb923c'; c.lineWidth = 1;
+  c.setLineDash([5, 9]); c.lineDashOffset = -t * 260;
+  c.beginPath(); c.moveTo(ox, oy); c.lineTo(ox + ca * len, oy + sa * len); c.stroke();
+  c.setLineDash([]);
+
+  // strands, back first
+  for (const pass of [-1, 1]) {
+    for (const k of [0, 1]) {
+      let run = null;
+      for (let s = 0; s <= STEPS; s++) {
+        const p = pt(k, s);
+        const behind = p.depth < 0 ? -1 : 1;
+        if (behind !== pass) { run = null; continue; }
+        if (!run) { run = true; c.beginPath(); c.moveTo(p.x, p.y); }
+        else c.lineTo(p.x, p.y);
+        if (s === STEPS || (pt(k, s + 1).depth < 0 ? -1 : 1) !== pass) {
+          const front = pass > 0;
+          const fade = intensity;
+          c.globalAlpha = (front ? 0.30 : 0.16) * fade;
+          c.strokeStyle = '#7f1d1d'; c.lineWidth = front ? 7.5 : 5; c.stroke();
+          c.globalAlpha = (front ? 0.85 : 0.42) * fade;
+          c.strokeStyle = front ? '#f97316' : '#b91c1c'; c.lineWidth = front ? 3.4 : 2.2; c.stroke();
+          if (front) {
+            c.globalAlpha = 0.95 * fade;
+            c.strokeStyle = '#fff7ed'; c.lineWidth = 1.3; c.stroke();
+          }
+          run = null;
+        }
+      }
+    }
+  }
+  // crossings: the two strands meeting is the only place that gets a flare
+  c.globalCompositeOperation = 'lighter';
+  for (let s = 2; s < STEPS; s++) {
+    const a = pt(0, s), b = pt(1, s);
+    if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) > 5) continue;
+    drawGlow(c, (a.x + b.x) / 2, (a.y + b.y) / 2, 16, '#fdba74', 0.4 * intensity);
+  }
+  // muzzle and impact
+  drawGlow(c, ox, oy, 26, '#f97316', 0.55 * intensity);
+  const ex = ox + ca * len, ey = oy + sa * len;
+  drawGlow(c, ex, ey, 34 + Math.sin(t * 22) * 5, '#fb923c', 0.6 * intensity);
+  c.globalAlpha = 0.9 * intensity;
+  c.fillStyle = '#fff7ed';
+  c.save(); c.translate(ex, ey); c.rotate(ang + t * 3);
+  c.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = i * TAU / 6, r = i % 2 ? 4 : 11;
+    i ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  c.closePath(); c.fill(); c.restore();
+  c.restore();
+  if (Math.random() < 0.6 * intensity)
+    spawnPart(ex + rnd(8, -8), ey + rnd(8, -8), rnd(90, -90), rnd(20, -110),
+      rnd(2.6, 1.2), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.91);
+}
+
+/* ------------------------------ EMBER's hull ------------------------------ */
+function hullPath(c) {
+  c.beginPath();
+  c.moveTo(22, 0); c.lineTo(13, 2.6); c.lineTo(9, 7); c.lineTo(2, 13.5);
+  c.lineTo(-7, 12); c.lineTo(-5, 4.6); c.lineTo(-12, 3.2); c.lineTo(-9, 0);
+  c.lineTo(-12, -3.2); c.lineTo(-5, -4.6); c.lineTo(-7, -12); c.lineTo(2, -13.5);
+  c.lineTo(9, -7); c.lineTo(13, -2.6);
+  c.closePath();
+}
+function drawShip(c, x, y, ang, heat) {
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  drawGlow(c, x, y, 34 + heat * 26, heat > 0.02 ? '#f97316' : '#f87171', 0.20 + heat * 0.25);
+  c.restore();
+  c.save();
+  c.translate(x, y); c.rotate(ang);
+  c.lineWidth = 2;
+  hullPath(c);
+  c.fillStyle = heat > 0.02 ? rgba('#7c2d12', 0.30 + heat * 0.25) : 'rgba(248,113,113,0.14)';
+  c.strokeStyle = heat > 0.02 ? mixHex('#f87171', '#fdba74', heat) : '#f87171';
+  c.fill(); c.stroke();
+  // cockpit
+  c.globalAlpha = 0.85;
+  c.fillStyle = heat > 0.02 ? '#fff7ed' : '#fca5a5';
+  c.beginPath(); c.arc(1, 0, 3.1, 0, TAU); c.fill();
+  // the seam down the lance prong: warm, but never the brightest thing on the
+  // hull once the vent is lit — the notch owns that
+  c.globalAlpha = 0.45 - heat * 0.22;
+  c.strokeStyle = heat > 0.02 ? '#c2410c' : 'rgba(252,165,165,0.6)';
+  c.lineWidth = 1.2;
+  c.beginPath(); c.moveTo(-4, 0); c.lineTo(20, 0); c.stroke();
+  c.restore();
+}
+
+/* ---------------------------------- HUD ----------------------------------- */
+function drawHUD(c, t, odLeft) {
+  c.save();
+  c.textBaseline = 'alphabetic';
+  // title block
+  c.font = "800 12px Barlow, system-ui, sans-serif";
+  c.letterSpacing = '3px';
+  c.fillStyle = 'rgba(248,113,113,0.9)';
+  c.fillText('EMBER', 30, 42);
+  c.fillStyle = 'rgba(100,116,139,0.7)';
+  c.fillText('REWORK PREVIEW', 92, 42);
+  c.letterSpacing = '0px';
+  c.font = "400 11px 'JetBrains Mono', ui-monospace, monospace";
+  c.fillStyle = 'rgba(100,116,139,0.45)';
+  const label = t < T_DIM ? 'the room, as it is'
+    : t < T_SPARK ? 'dim — devtalk level'
+    : t < T_LAND ? 'one spark, falling'
+    : t < T_COOL ? 'overdrive — helix lance, wings'
+    : t < T_LOOP ? 'cooling' : '';
+  c.fillText(label, 30, 62);
+
+  // overdrive meter, only while it is running
+  if (odLeft > 0) {
+    const bw = 148, bx = 30, by = 78;
+    c.fillStyle = 'rgba(0,0,0,0.55)';
+    c.fillRect(bx, by, bw, 4);
+    c.fillStyle = mixHex('#ef4444', '#fbbf24', clamp(odLeft / OD_LEN, 0, 1));
+    c.fillRect(bx, by, bw * clamp(odLeft / OD_LEN, 0, 1), 4);
+    c.font = "600 9px Barlow, system-ui, sans-serif";
+    c.letterSpacing = '2px';
+    c.fillStyle = 'rgba(253,186,116,0.75)';
+    c.fillText('OVERDRIVE  ' + odLeft.toFixed(1) + 'S', bx, by + 18);
+    c.letterSpacing = '0px';
+  }
+
+  // footer
+  c.textAlign = 'center';
+  c.font = "600 10px Barlow, system-ui, sans-serif";
+  c.letterSpacing = '2px';
+  c.fillStyle = 'rgba(100,116,139,' + (0.32 + Math.sin(t * 2.6) * 0.12) + ')';
+  c.fillText('SPACE / CLICK  REPLAY      1–4  BEAT', W / 2, H - 30);
+  c.letterSpacing = '0px';
+  c.textAlign = 'left';
+  c.restore();
+}
+
+/* ---------------------------------- loop ---------------------------------- */
+function frame(ts) {
+  const dt = Math.min(0.034, (ts - last) / 1000 || 0);
+  last = ts;
+  T += dt;
+  if (T > T_LOOP) reset();
+
+  // phase values
+  const dim = clamp((T - T_DIM) / (T_DIM_END - T_DIM), 0, 1);
+  const lit = clamp((T - T_LAND) / 0.7, 0, 1);
+  const cool = clamp((T - T_COOL) / 1.2, 0, 1);
+  const life = lit * (1 - cool);                       // how alive the fire is
+  const open = ease(clamp((T - T_WINGS) / 0.85, 0, 1)) * (1 - ease(cool));
+  const lance = ease(clamp((T - T_WINGS - 0.25) / 0.6, 0, 1)) * (1 - ease(cool));
+  const odLeft = T > T_LAND && T < T_COOL ? T_COOL - T : 0;
+
+  if (T >= T_LAND && !sparkLanded) { sparkLanded = true; ignite(false); }
+  if (flash > 0) flash = Math.max(0, flash - dt * 2.6);
+  if (shake > 0) shake = Math.max(0, shake - dt * 34);
+  updateParts(dt);
+
+  const sh = shake > 0 ? shake : 0;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.save();
+  if (sh) ctx.translate(rnd(sh, -sh), rnd(sh, -sh));
+
+  drawRoom(ctx, life * 0.85);
+  drawFireRoom(ctx, T, life);
+
+  // the ship: idles, then holds the lance out across the room. Sweeping turns
+  // with the odd fast whip in them, which is what makes the plume's lag read.
+  const px = W / 2 + Math.sin(T * 0.62) * 26;
+  const py = H / 2 + Math.sin(T * 1.3) * 5;
+  const ang = Math.sin(T * 0.52) * 0.72 + Math.sin(T * 1.83 + 1.1) * 0.26;
+  const spd = Math.hypot(px - prevX, py - prevY) / Math.max(1e-4, dt);
+  prevX = px; prevY = py;
+  updatePlume(ang, spd, dt);
+  drawWings(ctx, px, py, ang, T, open);
+  drawShip(ctx, px, py, ang, life);
+  if (lance > 0.001) {
+    const len = Math.min(W, H) * 0.44 * (0.9 + 0.1 * Math.sin(T * 5));
+    drawHelix(ctx, px + Math.cos(ang) * 21, py + Math.sin(ang) * 21, ang, len, T, lance);
+  }
+  drawParts(ctx);
+  ctx.restore();
+
+  // ---- the dim. Same radial the devtalk overlay uses, eased in, and it lifts
+  // partway once the room is burning because the fire is lighting it now.
+  const dAmt = dim * (1 - life * 0.45);
+  if (dAmt > 0.002) {
+    const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12,
+                                         W / 2, H / 2, Math.max(W, H) * 0.7);
+    vig.addColorStop(0, `rgba(5,5,7,${0.55 * dAmt})`);
+    vig.addColorStop(1, `rgba(5,5,7,${0.90 * dAmt})`);
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  }
+  // the spark sits above the dim — it is the only thing in the room
+  drawSpark(ctx, T);
+
+  // ---- grade: warm exposure once it is burning
+  if (life > 0.01) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    const pulse = 0.05 + Math.sin(T * 3.1) * 0.012;
+    g.addColorStop(0, `rgba(249,115,22,${(pulse + 0.03) * life})`);
+    g.addColorStop(1, `rgba(120,30,6,${pulse * 0.5 * life})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+  if (flash > 0) {
+    ctx.fillStyle = `rgba(255,237,213,${Math.pow(flash, 2) * 0.72})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ---- film: vignette, scanlines, grain
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
+                                      W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = ctx.createPattern(scanTile, 'repeat');
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(Math.random() * 96 | 0, Math.random() * 96 | 0);
+  ctx.fillStyle = ctx.createPattern(grainTile, 'repeat');
+  ctx.fillRect(-96, -96, W + 192, H + 192);
+  ctx.restore();
+
+  drawHUD(ctx, T, odLeft);
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'r') { e.preventDefault(); reset(); }
+  if (k >= '1' && k <= '4') seek(BEATS[+k - 1]);
+});
+addEventListener('pointerdown', () => reset());
+
+resize();
+reset();
+requestAnimationFrame(ts => { last = ts; frame(ts); });
+</script>
+</body>
+</html>

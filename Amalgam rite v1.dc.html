@@ -1,0 +1,2632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>THE RITE · SEQUENCES 1–4 (BEAMS, TELLS, HAND-OFFS)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@400;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
+    font-family:Barlow,'Segoe UI',system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ===========================================================================
+   THE RITE — sequences 1 to 4, on their own.
+   ---------------------------------------------------------------------------
+   The clash (SEQ 5) has its own file. This is the other eighty per cent of
+   the fight: his four cutting sequences, drawn in the same vocabulary the
+   clash render uses, and — the point of this file — the seams between them.
+
+   Nothing in here switches on.
+
+     the seam      RITE_HAND   what he was holding is let go and falls out of
+                               the room; he gathers, visibly, holding nothing
+     the spool     RITE_ARM    one aperture winds up, throws a sighting line
+                               down the heading it is about to take, and two
+                               brackets close on that line
+     the strike                a flare, a thump, and only then is it a beam
+                               you can be burned by or cut
+     the hand-off  SEQ 4       the live one of the seven is handed over: the
+                               next spools while the hot one goes cold
+
+   The beam itself is the clash column in plan: floor light under it, the
+   donors' colours as sheets stacked THROUGH it, chevrons riding outward,
+   a turbulent boundary, one hard white core, the aperture as its heaviest
+   point, and the crossing drawn last because the crossing is the fight.
+
+   1–4 sequences · SPACE replay the seam · hold MOUSE to hold the cut · F data
+   Mirrors index.html: riteBeamLife / drawRiteCharge / drawRiteBeam.
+=========================================================================== */
+
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rnd = (a = 1, b = 0) => b + Math.random() * (a - b);
+const rndi = (a, b = 0) => Math.floor(rnd(a, b));
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+const len = (x, y) => Math.hypot(x, y);
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function mix(h1, h2, t) {
+  const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+  return 'rgb(' + Math.round(lerp((a >> 16) & 255, (b >> 16) & 255, t)) + ',' +
+         Math.round(lerp((a >> 8) & 255, (b >> 8) & 255, t)) + ',' +
+         Math.round(lerp(a & 255, b & 255, t)) + ')';
+}
+const _glow = new Map();
+function glowSprite(hex) {
+  let s = _glow.get(hex);
+  if (s) return s;
+  s = document.createElement('canvas'); s.width = s.height = 128;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, rgba(hex, 1)); gr.addColorStop(0.3, rgba(hex, 0.4));
+  gr.addColorStop(1, rgba(hex, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  _glow.set(hex, s); return s;
+}
+function drawGlow(x, y, r, color, a = 1) {
+  if (r <= 0 || a <= 0) return;
+  ctx.globalAlpha = clamp(a, 0, 1);
+  ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = 1;
+}
+/* segment × segment, the game's own: t is how far along the FIRST segment */
+function segSeg(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const d = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3);
+  if (!d) return null;
+  const t = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / d;
+  const u = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / d;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, t };
+}
+
+/* --------------------------------- canvas -------------------------------- */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+/* ------------------------------- the room --------------------------------
+   The rite is fought in a 1900×1300 box with him upfield. The view is fixed
+   and fitted to it, so nothing here needs the game's camera.
+-------------------------------------------------------------------------- */
+const ARENA = { w: 1900, h: 1300 };
+const BOSS = { x: 0, y: -300 };
+const cam = { x: 0, y: 0 };
+let camZoom = 1;
+function fit() {
+  camZoom = Math.min(W / (ARENA.w * 1.06), H / (ARENA.h * 1.06));
+  cam.x = 0; cam.y = 0;
+}
+function onScreen(x, y, pad = 90) {
+  return Math.abs(x - cam.x) < W / (2 * camZoom) + pad &&
+         Math.abs(y - cam.y) < H / (2 * camZoom) + pad;
+}
+
+/* ------------------------------- particles ------------------------------- */
+let parts = [], rings = [], floats = [];
+function spawnPart(x, y, vx, vy, r, col, life, drag = 0.92) {
+  if (parts.length > 700) return;
+  parts.push({ x, y, vx, vy, r, col, life, max: life, drag });
+}
+function burst(x, y, n, col, spd, r, life) {
+  for (let i = 0; i < n; i++) {
+    const a = rnd(TAU), s = rnd(spd, spd * 0.3);
+    spawnPart(x, y, Math.cos(a) * s, Math.sin(a) * s, rnd(r, r * 0.4), col, rnd(life, life * 0.4));
+  }
+}
+function ringFx(x, y, r0, r1, col, life, w) { rings.push({ x, y, r0, r1, col, life, max: life, w }); }
+function floatText(x, y, s, col, size) { floats.push({ x, y, s, col, size, t: 0 }); }
+function updateFx(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const k = Math.pow(p.drag, dt * 60);
+    p.vx *= k; p.vy *= k;
+  }
+  for (let i = rings.length - 1; i >= 0; i--) {
+    rings[i].life -= dt;
+    if (rings[i].life <= 0) rings.splice(i, 1);
+  }
+  for (let i = floats.length - 1; i >= 0; i--) {
+    floats[i].t += dt;
+    if (floats[i].t > 0.9) floats.splice(i, 1);
+  }
+}
+function drawFx() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    const k = clamp(p.life / p.max, 0, 1);
+    ctx.globalAlpha = k;
+    ctx.fillStyle = p.col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (0.4 + k * 0.8), 0, TAU); ctx.fill();
+  }
+  for (const r of rings) {
+    const k = 1 - r.life / r.max;
+    ctx.globalAlpha = (1 - k) * 0.7;
+    ctx.strokeStyle = r.col; ctx.lineWidth = r.w * (1 - k * 0.6);
+    ctx.beginPath(); ctx.arc(r.x, r.y, lerp(r.r0, r.r1, k), 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+let shakeAmt = 0;
+function shake(t) { shakeAmt = Math.min(1, shakeAmt + t); }
+function shakeAt(x, y, t) { shake(t * 0.7); }
+const Audio_ = { tone() {}, boss() {}, boom() {} };
+let bannerTxt = '', bannerT = 0, bannerCol = '#d8b4fe';
+function banner(s, col, life) { bannerTxt = s; bannerCol = col; bannerT = life; }
+
+/* ============================== HIS BODY =================================
+   The rite chassis, lifted from index.html: nine donors on a rig, each plate
+   a beveled box with a gradient and seams, and FORGEHEART as the aperture —
+   the vanes crank with whatever he is about to do, which is the first thing
+   in the room that says a beam is coming.
+========================================================================= */
+const AMAL_COL = '#d8b4fe';
+const RAINBOW = ['#f87171','#fb923c','#fde047','#4ade80','#38bdf8','#a78bfa','#f472b6'];
+const PLATE_DK = '#0b0912', PLATE_MD = '#191428', PLATE_LT = '#2b2242';
+const RIG = '#d8b4fe', APERTURE = '#f472b6', VANE = '#f9a8d4';
+
+const PARTS = [
+  { id:'head',  n:'NULLCORE',    ox:   0, oy:-360, r:50, layer:2, w:112, h:112, plates:3, kind:'skull',    tint:'#a78bfa' },
+  { id:'spine', n:'THE OTHER',   ox:   0, oy:-246, r:34, layer:0, w: 92, h:140, plates:4, kind:'stack',    tint:'#5eead4' },
+  { id:'torso', n:'FORGEHEART',  ox:   0, oy: -20, r:98, layer:1, w:246, h:230, plates:5, kind:'chest',    tint:'#f59e0b' },
+  { id:'shldL', n:'CURATOR',     ox:-150, oy:-190, r:52, layer:2, w:126, h:112, plates:3, kind:'pauldron', tint:'#e2e8f0' },
+  { id:'shldR', n:'ARCHIVIST',   ox: 150, oy:-190, r:52, layer:2, w:126, h:112, plates:3, kind:'pauldron', tint:'#38bdf8' },
+  { id:'armL',  n:'WARDEN',      ox:-238, oy:  30, r:48, layer:2, w: 94, h:196, plates:4, kind:'arm',      tint:'#ef4444' },
+  { id:'armR',  n:'WARDEN',      ox: 238, oy:  30, r:48, layer:2, w: 94, h:196, plates:4, kind:'arm',      tint:'#ef4444' },
+  { id:'legL',  n:'BROODMOTHER', ox:-100, oy: 188, r:54, layer:0, w:126, h:200, plates:4, kind:'leg',      tint:'#4ade80' },
+  { id:'legR',  n:'BROODMOTHER', ox: 100, oy: 188, r:54, layer:0, w:126, h:200, plates:4, kind:'leg',      tint:'#4ade80' }
+];
+const BONES = [['head','spine'],['spine','torso'],['spine','shldL'],['spine','shldR'],
+               ['shldL','armL'],['shldR','armR'],['torso','legL'],['torso','legR']];
+
+const slot = id => {
+  const p = PARTS.find(z => z.id === id);
+  return { x: BOSS.x + p.ox, y: BOSS.y + p.oy };
+};
+
+function amalPlate(w, h, p, hurt) {
+  const bev = Math.min(w, h) * 0.22;
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + bev, -h / 2); ctx.lineTo(w / 2 - bev, -h / 2);
+    ctx.lineTo(w / 2, -h / 2 + bev);  ctx.lineTo(w / 2, h / 2 - bev);
+    ctx.lineTo(w / 2 - bev, h / 2);   ctx.lineTo(-w / 2 + bev, h / 2);
+    ctx.lineTo(-w / 2, h / 2 - bev);  ctx.lineTo(-w / 2, -h / 2 + bev);
+    ctx.closePath();
+  };
+  path();
+  const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+  g.addColorStop(0, PLATE_MD); g.addColorStop(0.45, PLATE_DK); g.addColorStop(1, '#05040a');
+  ctx.fillStyle = g; ctx.fill();
+
+  ctx.save(); path(); ctx.clip();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.1 + hurt * 0.3;
+  ctx.fillStyle = p.tint; ctx.fillRect(-w, -h, w * 2, h * 2);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = PLATE_LT; ctx.lineWidth = 1.2;
+  for (let i = 1; i < p.plates; i++) {
+    const y = -h / 2 + h * (i / p.plates);
+    ctx.beginPath(); ctx.moveTo(-w / 2, y); ctx.lineTo(w / 2, y); ctx.stroke();
+  }
+  ctx.globalAlpha = 0.3;
+  ctx.beginPath(); ctx.moveTo(-w * 0.18, -h / 2); ctx.lineTo(-w * 0.18, h / 2); ctx.stroke();
+  ctx.restore();
+
+  path();
+  ctx.strokeStyle = hurt > 0.3 ? mix(p.tint, '#fff7ed', hurt * 0.7) : rgba(p.tint, 0.75);
+  ctx.lineWidth = 2.2; ctx.stroke();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = rgba(p.tint, 0.9); ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + bev, -h / 2 + 2); ctx.lineTo(w / 2 - bev, -h / 2 + 2); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawBody(t) {
+  // ground contact first: in plan view this is what gives the plates mass
+  ctx.save();
+  for (const p of PARTS) {
+    const s = slot(p.id);
+    ctx.globalAlpha = 0.34; ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y + p.h * 0.22, p.w * 0.56, p.h * 0.26, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // the rig: dark core, mid plate, lit conduit, and a pulse toward the chest
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [x, y] of BONES) {
+    const A = slot(x), B = slot(y);
+    ctx.strokeStyle = '#07050c'; ctx.lineWidth = 26;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    ctx.strokeStyle = PLATE_MD; ctx.lineWidth = 18;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    ctx.strokeStyle = rgba(RIG, 0.35); ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5 + Math.sin(t * 4 - A.x * 0.006) * 0.3;
+    ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.3;
+    ctx.setLineDash([4, 16]); ctx.lineDashOffset = t * 180;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  const order = PARTS.slice().sort((u, v) => (u.layer - v.layer) || (u.oy - v.oy));
+  for (const p of order) {
+    const s = slot(p.id), hurt = 0.15;
+    ctx.save();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(s.x, s.y, p.r * 1.8, p.tint, 0.12);
+    ctx.restore();
+    ctx.translate(s.x, s.y);
+    const cant = (p.kind === 'arm' ? Math.sign(p.ox) * 0.12
+               : p.kind === 'leg' ? Math.sign(p.ox) * 0.07 : 0)
+               + Math.sin(t * 0.7 + p.ox * 0.01) * 0.02;
+    ctx.rotate(cant);
+    amalPlate(p.w, p.h, p, hurt);
+
+    // the salvaged core: a housing, three spinning arcs, an iris
+    const cr = p.r * 0.3;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, cr * 3.2, p.tint, 0.3 + Math.sin(t * 3 + p.oy * 0.02) * 0.1);
+    ctx.restore();
+    ctx.fillStyle = '#05040a';
+    ctx.beginPath(); ctx.arc(0, 0, cr * 1.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(p.tint, 0.8); ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 0, cr * 1.5, 0, TAU); ctx.stroke();
+    ctx.save();
+    ctx.rotate(t * (p.kind === 'chest' ? 0.5 : 0.9) * (p.ox > 0 ? 1 : -1));
+    ctx.strokeStyle = rgba(p.tint, 0.5); ctx.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) {
+      const a0 = i * TAU / 3;
+      ctx.beginPath(); ctx.arc(0, 0, cr * 1.1, a0, a0 + 1.2); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 0.75 + Math.sin(t * 5 + p.oy * 0.03) * 0.2;
+    ctx.fillStyle = p.tint;
+    ctx.beginPath(); ctx.arc(0, 0, cr * 0.55, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    /* FORGEHEART is the muzzle, so it has to look like the part that makes
+       the beam: collector vanes that crank open with the load. */
+    if (p.kind === 'chest') {
+      const warm = R.warm > 0 ? clamp(1 - R.warm / RITE_HAND, 0, 1) : 0;
+      let armp = 0;
+      for (const bm of R.beams) if (bm.arm > 0) armp = Math.max(armp, 1 - bm.arm / bm.armMax);
+      const load = 0.25 + Math.max(warm, armp) * 0.6;
+      const ap = p.r * 0.62;
+      ctx.strokeStyle = rgba(APERTURE, 0.6); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, ap, 0, TAU); ctx.stroke();
+      for (let i = 0; i < 10; i++) {
+        const a0 = i / 10 * TAU + t * 0.25;
+        const open = ap * (0.42 + load * 0.5);
+        ctx.strokeStyle = rgba(VANE, 0.45); ctx.lineWidth = 3.4;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a0) * ap * 0.96, Math.sin(a0) * ap * 0.96);
+        ctx.lineTo(Math.cos(a0 + 0.3) * open, Math.sin(a0 + 0.3) * open);
+        ctx.stroke();
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(0, 0, ap * 1.6 * (0.7 + load * 0.6), APERTURE, 0.45 * (0.5 + load));
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+}
+
+/* ============================== THE RITE =================================
+   Constants and lifecycle are index.html's. Changing one here and not there
+   is how the two drift apart, so they are named the same on both sides.
+========================================================================= */
+const RITE_LEN        = 6000;
+const RITE_HALF       = 44;
+const RITE_BAND       = 190;
+const RITE_HAND       = 1.35;
+const RITE_ARM        = 0.85;
+const RITE_SEVEN_TELL = 0.55;
+const RITE_SPIN_SWEEP   = 1.75;
+const RITE_SPIN_SCISSOR = 1.10;
+const RITE_SPIN_FAN     = 0.80;
+const RITE_SPIN_SEVEN   = 0.14;
+const RITE_SPLIT        = 300;
+const RITE_SEQ = [
+  { id:'sweep',   n:'IT SWEEPS' },
+  { id:'scissor', n:'IT OPENS' },
+  { id:'fan',     n:'IT SPLITS' },
+  { id:'seven',   n:'ALL OF IT AT ONCE' }
+];
+
+const R = { i: -1, seq: null, t: 0, beams: [], out: [], warm: 0,
+            gT: 2.0, liveT: 0, live: 0, next: -1, swapT: 0 };
+
+function riteOrigin(id) { return slot(id); }
+
+function riteEnter(i) {
+  R.i = i;
+  R.seq = RITE_SEQ[i].id;
+  R.t = 0;
+  R.out = R.out.concat(R.beams.map(b => { b.going = true; b.cut = null; return b; }));
+  R.beams = [];
+  R.warm = RITE_HAND;
+  R.gT = 1.6 + R.warm; R.liveT = 0; R.live = 0; R.next = -1; R.swapT = 0;
+  banner(RITE_SEQ[i].n, AMAL_COL, 3.2);
+  shake(1.4);
+  hazards.length = 0;
+}
+
+function riteBeam(o, ang, spin, col, extra) {
+  const b = Object.assign({ ox: o.x, oy: o.y, ang, spin, col,
+                            cut: null, from: null, dead: false,
+                            on: 0, arm: RITE_ARM, flash: 0, going: false }, extra || {});
+  b.armMax = Math.max(0.0001, b.arm);
+  R.beams.push(b);
+  return b;
+}
+
+/* An aperture spools, throws a sighting line down the heading it is going to
+   take, and strikes. Letting go is the same thing in reverse. Until it has
+   struck it cannot burn you and there is nothing there to cut. */
+function riteBeamLife(b, dt) {
+  if (b.going) { b.on = Math.max(0, b.on - dt * 2.4); b.arm = 0; return; }
+  if (b.arm > 0) {
+    b.arm = Math.max(0, b.arm - dt);
+    if (b.arm === 0) riteStrike(b);
+    return;
+  }
+  const want = b.dead ? 0 : 1;
+  b.on += (want - b.on) * Math.min(1, dt * (want ? 9 : 5));
+  b.flash = Math.max(0, (b.flash || 0) - dt * 2.6);
+}
+function riteStrike(b) {
+  b.on = 0.05; b.flash = 1;
+  ringFx(b.ox, b.oy, 8, 170, b.col, 0.5, 3);
+  burst(b.ox, b.oy, 10, b.col, 240, 2.6, 0.35);
+  shakeAt(b.ox, b.oy, 0.35);
+}
+function riteWarmFx(dt) {
+  const o = riteOrigin('torso');
+  if (Math.random() < dt * 30)
+    spawnPart(o.x + rnd(80, -80), o.y + rnd(80, -80), rnd(110, -110), rnd(110, -110),
+              rnd(2.8, 1.2), pick(RAINBOW), rnd(0.55, 0.25), 0.9);
+}
+
+/* the crossing, and whether it is hot enough to hold */
+const CUT_RANGE = 560;
+function riteCut(b) {
+  if (!ship.firing) return null;
+  const ex = b.ox + Math.cos(b.ang) * RITE_LEN;
+  const ey = b.oy + Math.sin(b.ang) * RITE_LEN;
+  const hit = segSeg(b.ox, b.oy, ex, ey, ship.x, ship.y, ship.lx, ship.ly);
+  if (!hit) return null;
+  /* the cut only holds where your own beam is still hot — a crossing made at
+     arm's length is free, which is why you have to stand next to his light */
+  if (len(hit.x - ship.x, hit.y - ship.y) > CUT_RANGE) return null;
+  return hit;
+}
+function riteReach(b) { return b.cut ? len(b.cut.x - b.ox, b.cut.y - b.oy) : RITE_LEN; }
+
+function riteBeamTick(b, dt, opts) {
+  opts = opts || {};
+  riteBeamLife(b, dt);
+  // charging, cooling, or being let go: light, but nothing to stand in or cut
+  if (b.dead || b.going || b.arm > 0 || b.on < 0.55) { b.cut = null; return; }
+  b.cut = riteCut(b);
+  const reach = riteReach(b);
+
+  // burn along the surviving length only
+  if (!opts.noBurn) {
+    const c = Math.cos(-b.ang), s = Math.sin(-b.ang);
+    const dx = ship.x - b.ox, dy = ship.y - b.oy;
+    const along = dx * c - dy * s, across = dx * s + dy * c;
+    if (along > -18 && along < reach && Math.abs(across) < RITE_HALF) {
+      ship.burn = 0.2;
+      if (Math.random() < 0.4)
+        spawnPart(ship.x + rnd(18, -18), ship.y + rnd(18, -18), rnd(150, -150),
+                  rnd(150, -150), rnd(3.6, 1.8), b.col, 0.4, 0.9);
+    }
+  }
+  if (b.cut && !opts.noDamage) {
+    cutHeld = 0.15;
+    if (Math.random() < 0.7)
+      spawnPart(b.cut.x + rnd(9, -9), b.cut.y + rnd(9, -9), rnd(190, -190),
+                rnd(190, -190), rnd(3.2, 1.4),
+                Math.random() < 0.5 ? '#fff7ed' : b.col, rnd(0.4, 0.18), 0.9);
+  }
+}
+
+/* ---- SEQ 1. one beam turning fast, and grenades that cut the floor into
+   eighths so the shadow you are standing in cannot be stood in for long. --- */
+function riteSweep(dt) {
+  if (!R.beams.length) {
+    const b = riteBeam(riteOrigin('torso'), rnd(TAU), RITE_SPIN_SWEEP, RAINBOW[0]);
+    b.from = 'torso';
+  }
+  const b = R.beams[0], o = riteOrigin('torso');
+  b.ox = o.x; b.oy = o.y;
+  b.ang += b.spin * dt;
+  riteBeamTick(b, dt);
+  R.gT -= dt;
+  if (R.gT <= 0) { R.gT = 3.4; riteGrenade(); }
+}
+
+/* ---- SEQ 2. both arms, turning against each other. ---- */
+function riteScissor(dt) {
+  if (!R.beams.length) {
+    // one arm spools, then the other: two beams arriving at once reads as a cut
+    const l  = riteBeam(riteOrigin('armL'), rnd(TAU),  RITE_SPIN_SCISSOR, RAINBOW[1], { arm: RITE_ARM });
+    const rr = riteBeam(riteOrigin('armR'), rnd(TAU), -RITE_SPIN_SCISSOR, RAINBOW[4], { arm: RITE_ARM + 0.4 });
+    l.from = 'armL'; rr.from = 'armR';
+  }
+  for (const b of R.beams) {
+    const o = riteOrigin(b.from);
+    b.ox = o.x; b.oy = o.y;
+    b.ang += b.spin * dt;
+    riteBeamTick(b, dt);
+  }
+}
+
+/* ---- SEQ 3. a trunk and four branches hung off it. ---- */
+function riteFan(dt) {
+  if (!R.beams.length) {
+    const t = riteBeam(riteOrigin('torso'), rnd(TAU), RITE_SPIN_FAN, RAINBOW[2]);
+    t.from = 'torso'; t.trunk = true;
+    for (let i = 0; i < 4; i++) {
+      // the branches are hung off a trunk that is already up
+      const br = riteBeam({ x: 0, y: 0 }, 0, 0, RAINBOW[(i + 3) % RAINBOW.length],
+                          { arm: RITE_ARM + 0.55 + i * 0.1 });
+      br.from = 'torso'; br.branch = (i - 1.5) * 0.42;
+    }
+  }
+  const t = R.beams[0], o = riteOrigin('torso');
+  t.ox = o.x; t.oy = o.y;
+  t.ang += t.spin * dt;
+  riteBeamTick(t, dt);
+  const cutShort = t.cut && riteReach(t) < RITE_SPLIT;
+  const sx = t.ox + Math.cos(t.ang) * RITE_SPLIT;
+  const sy = t.oy + Math.sin(t.ang) * RITE_SPLIT;
+  for (let i = 1; i < R.beams.length; i++) {
+    const b = R.beams[i];
+    b.dead = !!cutShort;
+    b.ox = sx; b.oy = sy;
+    b.ang = t.ang + b.branch;
+    riteBeamTick(b, dt, { noDamage: true });
+  }
+}
+
+/* ---- SEQ 4. Seven, still, one of them live, and the live one moves. ---- */
+function riteSeven(dt) {
+  if (!R.beams.length) {
+    for (let i = 0; i < 7; i++) {
+      // they come up around the circle in order, so seven is a thing he did
+      const b = riteBeam(riteOrigin('torso'), i * TAU / 7, RITE_SPIN_SEVEN, RAINBOW[i],
+                         { arm: RITE_ARM + i * 0.14 });
+      b.from = 'torso';
+    }
+    R.liveT = 1.2 + RITE_ARM + 7 * 0.14;
+    R.next = -1; R.swapT = 0;
+  }
+  /* The live one is handed over rather than teleported: the next aperture
+     spools for RITE_SEVEN_TELL while the hot one goes out. */
+  R.liveT -= dt;
+  if (R.liveT <= 0 && R.next < 0) {
+    R.liveT = 1.1 + RITE_SEVEN_TELL;
+    let n = R.live;
+    while (n === R.live) n = rndi(7);
+    R.next = n; R.swapT = RITE_SEVEN_TELL;
+    const nb = R.beams[n];
+    if (nb) { nb.dead = false; nb.arm = RITE_SEVEN_TELL; nb.armMax = RITE_SEVEN_TELL; }
+  }
+  if (R.next >= 0) {
+    R.swapT -= dt;
+    if (R.swapT <= 0) { R.live = R.next; R.next = -1; }
+  }
+  const o = riteOrigin('torso');
+  for (let i = 0; i < R.beams.length; i++) {
+    const b = R.beams[i];
+    b.ox = o.x; b.oy = o.y;
+    b.ang += b.spin * dt;
+    b.dead = (i !== R.live) && i !== R.next;   // six are only light
+    riteBeamTick(b, dt);
+  }
+}
+
+/* the grenade: it lands, and a moment later the floor opens along all eight
+   compass lines out of wherever it stopped. Telegraphed, like everything. */
+const hazards = [];
+function riteGrenade() {
+  const gx = clamp(ship.x + rnd(150, -150), -ARENA.w / 2 + 80, ARENA.w / 2 - 80);
+  const gy = clamp(ship.y + rnd(150, -150), -ARENA.h / 2 + 80, ARENA.h / 2 - 80);
+  for (let i = 0; i < 8; i++)
+    hazards.push({ x: gx, y: gy, ang: i * Math.PI / 4, t: 0, life: 2.1,
+                   col: RAINBOW[i % RAINBOW.length] });
+  ringFx(gx, gy, 10, 190, '#fde68a', 0.6, 4);
+  burst(gx, gy, 18, '#fde68a', 200, 3, 0.5);
+}
+function updateHazards(dt) {
+  for (let i = hazards.length - 1; i >= 0; i--) {
+    hazards[i].t += dt;
+    if (hazards[i].t > hazards[i].life) hazards.splice(i, 1);
+  }
+}
+function drawHazards() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const h of hazards) {
+    const warn = clamp(h.t / 1.0, 0, 1);
+    const live = h.t > 1.0;
+    const L = 4000;
+    const ca = Math.cos(h.ang), sa = Math.sin(h.ang);
+    const x1 = h.x - ca * L, y1 = h.y - sa * L, x2 = h.x + ca * L, y2 = h.y + sa * L;
+    if (!live) {
+      ctx.globalAlpha = 0.1 + warn * 0.3;
+      ctx.strokeStyle = h.col; ctx.lineWidth = 1 + warn * 3;
+      ctx.setLineDash([14, 26]); ctx.lineDashOffset = -h.t * 200;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      const k = clamp(1 - (h.t - 1.0) / (h.life - 1.0), 0, 1);
+      ctx.globalAlpha = 0.2 * k; ctx.strokeStyle = h.col; ctx.lineWidth = 34;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.globalAlpha = 0.85 * k; ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function riteTick(dt) {
+  R.t += dt;
+  // whatever he let go of, on its way out of the room
+  for (let i = R.out.length - 1; i >= 0; i--) {
+    riteBeamLife(R.out[i], dt);
+    if (R.out[i].on <= 0.01) R.out.splice(i, 1);
+  }
+  /* the seam. He is holding nothing and winding up, and the sequence below
+     does not get to spawn anything until he has finished doing it. */
+  if (R.warm > 0) {
+    R.warm -= dt;
+    riteWarmFx(dt);
+    if (R.warm > 0) return;
+  }
+  if (R.seq === 'sweep')        riteSweep(dt);
+  else if (R.seq === 'scissor') riteScissor(dt);
+  else if (R.seq === 'fan')     riteFan(dt);
+  else if (R.seq === 'seven')   riteSeven(dt);
+}
+
+/* ============================== THE BEAM =================================
+   Identical to index.html's drawRiteCold / drawRiteCharge / drawRiteBeam.
+========================================================================= */
+const _riteSheets = new Map();
+function riteSheets(col) {
+  let s = _riteSheets.get(col);
+  if (s) return s;
+  const i = Math.max(0, RAINBOW.indexOf(col)), n = RAINBOW.length;
+  s = [RAINBOW[(i + n - 1) % n], col, '#fff7ed', col, RAINBOW[(i + 1) % n]];
+  _riteSheets.set(col, s);
+  return s;
+}
+function riteWidthAt(d, press) {
+  return RITE_HALF * (1.06 - 0.2 * clamp(d / 2400, 0, 1)) * press;
+}
+function riteDrawLen(b, reach) {
+  return Math.min(reach, len(b.ox - cam.x, b.oy - cam.y) + Math.hypot(W, H) / camZoom);
+}
+
+function drawRiteCold(b, t, ca, sa, px, py, ex, ey, fade) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const w = RITE_HALF * 0.5;
+  ctx.globalAlpha = 0.07 * fade; ctx.fillStyle = b.col;
+  ctx.beginPath();
+  ctx.moveTo(b.ox + px * w, b.oy + py * w);
+  ctx.lineTo(ex + px * w * 0.7, ey + py * w * 0.7);
+  ctx.lineTo(ex - px * w * 0.7, ey - py * w * 0.7);
+  ctx.lineTo(b.ox - px * w, b.oy - py * w);
+  ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = 0.22 * fade; ctx.strokeStyle = b.col; ctx.lineWidth = 1.6;
+  for (const sd of [1, -1]) {
+    ctx.beginPath();
+    ctx.moveTo(b.ox + px * w * sd, b.oy + py * w * sd);
+    ctx.lineTo(ex + px * w * 0.7 * sd, ey + py * w * 0.7 * sd);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.18 * fade; ctx.lineWidth = 2.2;
+  ctx.setLineDash([10, 46]); ctx.lineDashOffset = t * 40;
+  ctx.beginPath(); ctx.moveTo(b.ox, b.oy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.setLineDash([]);
+  drawGlow(b.ox, b.oy, 46, b.col, 0.18 * fade);
+  ctx.restore();
+}
+
+/* ---- the spool. The aperture winds up, a sighting line is thrown down the
+   heading it is about to take, and two brackets close on that line. By the
+   time it strikes you have known where it was going for the better part of a
+   second — which is the difference between a beam and an ambush. ---- */
+function drawRiteCharge(b, t, ca, sa, px, py, ex, ey) {
+  const p = clamp(1 - b.arm / b.armMax, 0, 1);
+  const jit = p > 0.8 ? (Math.random() - 0.5) * (p - 0.8) * 60 : 0;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.1 + p * 0.3;
+  ctx.strokeStyle = b.col; ctx.lineWidth = 1.4 + p * 1.6;
+  ctx.setLineDash([16, 30]); ctx.lineDashOffset = -t * 260;
+  ctx.beginPath(); ctx.moveTo(b.ox, b.oy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const stub = 120 + p * 460;
+  const sg = ctx.createLinearGradient(b.ox, b.oy, b.ox + ca * stub, b.oy + sa * stub);
+  sg.addColorStop(0, rgba(b.col, 0.15 + 0.55 * p));
+  sg.addColorStop(1, rgba(b.col, 0));
+  const sw = RITE_HALF * (0.18 + p * 0.55);
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.moveTo(b.ox + px * sw, b.oy + py * sw);
+  ctx.lineTo(b.ox + ca * stub, b.oy + sa * stub);
+  ctx.lineTo(b.ox - px * sw, b.oy - py * sw);
+  ctx.closePath(); ctx.fillStyle = sg; ctx.fill();
+
+  const at = 230;
+  for (const sd of [1, -1]) {
+    const off = lerp(RITE_HALF * 3.6, RITE_HALF * 1.15, p) + jit;
+    ctx.globalAlpha = 0.25 + p * 0.55;
+    ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(b.ox + ca * (at - 44) + px * off * sd, b.oy + sa * (at - 44) + py * off * sd);
+    ctx.lineTo(b.ox + ca * at + px * off * sd, b.oy + sa * at + py * off * sd);
+    ctx.lineTo(b.ox + ca * (at + 44) + px * off * sd, b.oy + sa * (at + 44) + py * off * sd);
+    ctx.stroke();
+  }
+
+  drawGlow(b.ox, b.oy, 40 + p * 90 + jit, b.col, 0.25 + p * 0.45);
+  ctx.globalAlpha = 0.3 + p * 0.5;
+  ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 3; i++) {
+    const rr = lerp(RITE_HALF * 3.4, RITE_HALF * 0.7, clamp(p * 1.25 - i * 0.2, 0, 1));
+    ctx.beginPath(); ctx.arc(b.ox, b.oy, rr, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawRiteBeam(b, t) {
+  const L = riteDrawLen(b, Math.min(riteReach(b), RITE_LEN));
+  if (L < 4) return;
+  const ca = Math.cos(b.ang), sa = Math.sin(b.ang);
+  const px = -sa, py = ca;
+  const ex = b.ox + ca * L, ey = b.oy + sa * L;
+  const k = clamp(b.on || 0, 0, 1);
+
+  if (b.arm > 0 && !b.going) { drawRiteCharge(b, t, ca, sa, px, py, ex, ey); return; }
+  if (b.dead || b.going) drawRiteCold(b, t, ca, sa, px, py, ex, ey, b.going ? k : 1);
+  if (k <= 0.02) return;
+
+  const press = (1 + Math.sin(t * 2.4 + b.ox * 0.01) * 0.05) * (b.cut ? 0.9 : 1)
+              * (0.4 + 0.6 * k);
+  const w0 = riteWidthAt(0, press), w1 = riteWidthAt(L, press);
+  const quad = (wa, wb) => {
+    ctx.beginPath();
+    ctx.moveTo(b.ox + px * wa, b.oy + py * wa);
+    ctx.lineTo(ex + px * wb, ey + py * wb);
+    ctx.lineTo(ex - px * wb, ey - py * wb);
+    ctx.lineTo(b.ox - px * wa, b.oy - py * wa);
+    ctx.closePath();
+  };
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  const steps = Math.min(14, Math.max(2, Math.round(L / 240)));
+  for (let i = 0; i <= steps; i++) {
+    const gx = b.ox + ca * (L * i / steps), gy = b.oy + sa * (L * i / steps);
+    if (!onScreen(gx, gy, 200)) continue;
+    drawGlow(gx, gy, 150 * press, b.col, 0.07 * k);
+    drawGlow(gx, gy, 66 * press, '#fff7ed', 0.05 * k);
+  }
+
+  ctx.globalAlpha = k;
+  const hz = ctx.createLinearGradient(b.ox, b.oy, ex, ey);
+  hz.addColorStop(0, rgba(b.col, 0.30));
+  hz.addColorStop(0.7, rgba(b.col, 0.16));
+  hz.addColorStop(1, rgba(b.col, 0.22));
+  quad(w0 * 1.6, w1 * 1.6); ctx.fillStyle = hz; ctx.fill();
+
+  const SH = riteSheets(b.col);
+  for (let j = 0; j < SH.length; j++) {
+    const d = (j - (SH.length - 1) / 2) / ((SH.length - 1) / 2);
+    const churn = Math.sin(t * (2.6 + j * 0.7) + j * 1.9 + b.ang) * 0.16;
+    const wa = w0 * (0.92 - Math.abs(d) * 0.5 + churn);
+    const wb = w1 * (0.92 - Math.abs(d) * 0.5 + churn);
+    const sh = d * 0.22 + churn * 0.3;
+    ctx.globalAlpha = (0.3 - Math.abs(d) * 0.12) * k;
+    ctx.fillStyle = SH[j];
+    ctx.beginPath();
+    ctx.moveTo(b.ox + px * (wa + w0 * sh), b.oy + py * (wa + w0 * sh));
+    ctx.lineTo(ex + px * (wb + w1 * sh), ey + py * (wb + w1 * sh));
+    ctx.lineTo(ex - px * (wb - w1 * sh), ey - py * (wb - w1 * sh));
+    ctx.lineTo(b.ox - px * (wa - w0 * sh), b.oy - py * (wa - w0 * sh));
+    ctx.closePath(); ctx.fill();
+  }
+
+  const bands = Math.min(30, Math.floor(L / RITE_BAND) + 1);
+  const roll = (t * 0.55) % 1;
+  for (let i = 0; i < bands; i++) {
+    const dd = (i + roll) * RITE_BAND;
+    if (dd > L) continue;
+    const bw = riteWidthAt(dd, press) * 1.02;
+    const cxp = b.ox + ca * dd, cyp = b.oy + sa * dd;
+    ctx.globalAlpha = (0.14 + (1 - dd / Math.max(1, L)) * 0.2) * k;
+    ctx.strokeStyle = i % 4 === 0 ? '#fff7ed' : b.col;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(cxp + px * bw, cyp + py * bw);
+    ctx.lineTo(cxp + ca * 26, cyp + sa * 26);
+    ctx.lineTo(cxp - px * bw, cyp - py * bw);
+    ctx.stroke();
+  }
+
+  const eSteps = Math.min(30, Math.max(6, Math.round(L / 110)));
+  for (const sd of [1, -1]) {
+    ctx.globalAlpha = 0.42 * k; ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i <= eSteps; i++) {
+      const dd = L * i / eSteps;
+      const wv = riteWidthAt(dd, press)
+        + Math.sin(dd * 0.013 - t * 9) * 4.5
+        + Math.sin(dd * 0.029 - t * 17 + sd) * 2.4;
+      const x = b.ox + ca * dd + px * wv * sd, y = b.oy + sa * dd + py * wv * sd;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.95 * k;
+  const cg = ctx.createLinearGradient(b.ox, b.oy, ex, ey);
+  cg.addColorStop(0, 'rgba(255,255,255,0.95)');
+  cg.addColorStop(1, 'rgba(255,247,237,0.78)');
+  quad(w0 * 0.2, w1 * 0.17); ctx.fillStyle = cg; ctx.fill();
+
+  drawGlow(b.ox, b.oy, 132 * press, b.col, 0.45 * k);
+  drawGlow(b.ox, b.oy, 62 * press, '#fff7ed', 0.45 * k);
+  if (b.flash > 0.01) {
+    drawGlow(b.ox, b.oy, 90 + 200 * b.flash, '#fff7ed', 0.5 * b.flash);
+    drawGlow(b.ox, b.oy, 60 + 320 * b.flash, b.col, 0.4 * b.flash);
+  }
+  ctx.globalAlpha = 0.85 * k; ctx.fillStyle = '#fff7ed';
+  ctx.beginPath(); ctx.arc(b.ox, b.oy, w0 * 0.34, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawRiteCut(b, t) {
+  const x = b.cut.x, y = b.cut.y;
+  const Rr = 24 + Math.sin(t * 9 + x * 0.01) * 3;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, Rr * 3.6, b.col, 0.45);
+  drawGlow(x, y, Rr * 1.6, '#fff7ed', 0.6);
+  ctx.globalAlpha = 0.95; ctx.fillStyle = '#fff7ed';
+  ctx.beginPath(); ctx.arc(x, y, Rr * 0.42, 0, TAU); ctx.fill();
+  ctx.translate(x, y);
+  ctx.rotate(t * 1.7);
+  ctx.globalAlpha = 0.8; ctx.strokeStyle = '#fdba74'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i <= 14; i++) {
+    const a0 = i / 14 * TAU, rr = Rr * (i % 2 ? 0.72 : 1.08);
+    i ? ctx.lineTo(Math.cos(a0) * rr, Math.sin(a0) * rr)
+      : ctx.moveTo(Math.cos(a0) * rr, Math.sin(a0) * rr);
+  }
+  ctx.closePath(); ctx.stroke();
+  ctx.rotate(-t * 3.1);
+  ctx.globalAlpha = 0.35; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(0, 0, Rr * 1.6, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+function drawRiteBeams(t) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const b of R.out) drawRiteBeam(b, t);
+
+  /* ---- the seam. He is holding nothing, and the room can see him gather:
+     rings closing on the chest, and the next set of apertures about to be
+     somebody's problem. This is where a sequence change stops being a cut. */
+  if (R.warm > 0) {
+    const o = riteOrigin('torso');
+    const p = clamp(1 - R.warm / RITE_HAND, 0, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(o.x, o.y, 70 + 120 * p, RAINBOW[(R.i + 2) % RAINBOW.length], 0.16 + 0.34 * p);
+    drawGlow(o.x, o.y, 40 + 40 * p, '#fff7ed', 0.1 + 0.3 * p);
+    ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 1.6;
+    for (let i = 0; i < 4; i++) {
+      const q = clamp(p * 1.3 - i * 0.16, 0, 1);
+      if (q <= 0) continue;
+      ctx.globalAlpha = 0.1 + q * 0.4;
+      ctx.beginPath(); ctx.arc(o.x, o.y, lerp(430, 52, q), 0, TAU); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  for (const b of R.beams) if (b.dead) drawRiteBeam(b, t);
+  for (const b of R.beams) if (!b.dead) drawRiteBeam(b, t);
+
+  if (R.seq === 'fan' && R.beams.length > 1) {
+    const s = R.beams[1];
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(s.ox, s.oy, s.dead ? 46 : 104, RAINBOW[2], s.dead ? 0.12 : 0.36);
+    ctx.globalAlpha = s.dead ? 0.2 : 0.7;
+    ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, 22 + Math.sin(t * 5) * 2, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+
+  for (const b of R.beams) if (!b.dead && b.cut) drawRiteCut(b, t);
+  ctx.restore();
+}
+
+/* ================================ the hull ===============================
+   Enough of the pilot to make the cut real: it goes where the mouse is, the
+   lance points at his chest, and holding the button is holding the crossing.
+========================================================================= */
+const ship = { x: 0, y: 380, ax: 0, ay: 380, ang: -Math.PI / 2,
+               lx: 0, ly: 0, firing: true, burn: 0 };
+let cutHeld = 0;
+const mouse = { x: 0, y: 380, down: false };
+
+function shipTick(dt) {
+  ship.x += (mouse.x - ship.x) * Math.min(1, dt * 7);
+  ship.y += (mouse.y - ship.y) * Math.min(1, dt * 7);
+  ship.x = clamp(ship.x, -ARENA.w / 2 + 40, ARENA.w / 2 - 40);
+  ship.y = clamp(ship.y, -ARENA.h / 2 + 40, ARENA.h / 2 - 40);
+  const o = riteOrigin('torso');
+  ship.ang = Math.atan2(o.y - ship.y, o.x - ship.x);
+  const reach = 1500;
+  ship.lx = ship.x + Math.cos(ship.ang) * reach;
+  ship.ly = ship.y + Math.sin(ship.ang) * reach;
+  ship.burn = Math.max(0, ship.burn - dt);
+  cutHeld = Math.max(0, cutHeld - dt);
+}
+
+function drawShip(t) {
+  // the lance: the old one, bloom-heavy and soft-edged
+  if (ship.firing) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const [wl, al, col] of [[40, 0.1, '#7f1d1d'], [22, 0.22, '#f87171'], [9, 0.5, '#fca5a5']]) {
+      ctx.globalAlpha = al; ctx.strokeStyle = col; ctx.lineWidth = wl;
+      ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(ship.lx, ship.ly); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.8; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(ship.lx, ship.ly); ctx.stroke();
+    // the window the crossing has to be made inside
+    ctx.globalAlpha = 0.16; ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 1.4;
+    ctx.setLineDash([8, 12]);
+    ctx.beginPath(); ctx.arc(ship.x, ship.y, CUT_RANGE, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    drawGlow(ship.x, ship.y, 60, '#f87171', 0.35);
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.translate(ship.x, ship.y);
+  ctx.rotate(ship.ang);
+  const S = 2.0;
+  const p = [[22,0],[13,2.6],[9,7],[2,13.5],[-7,12],[-5,4.6],[-12,3.2],[-9,0],
+             [-12,-3.2],[-5,-4.6],[-7,-12],[2,-13.5],[9,-7],[13,-2.6]];
+  ctx.beginPath();
+  p.forEach((q, i) => i ? ctx.lineTo(q[0] * S, q[1] * S) : ctx.moveTo(q[0] * S, q[1] * S));
+  ctx.closePath();
+  ctx.fillStyle = ship.burn > 0 ? '#7f1d1d' : '#1c1917';
+  ctx.fill();
+  ctx.strokeStyle = ship.burn > 0 ? '#fca5a5' : '#fb923c'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.restore();
+}
+
+/* ================================== HUD ================================== */
+let showData = false;
+function drawHUD(t) {
+  ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.font = "800 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.letterSpacing = '3px';
+  ctx.fillStyle = rgba(AMAL_COL, 0.9);
+  ctx.fillText('THE RITE', 30, 40);
+  ctx.letterSpacing = '0px';
+  ctx.font = "400 11px 'JetBrains Mono', ui-monospace, monospace";
+  const state = R.warm > 0 ? 'HANDING OVER'
+              : R.beams.some(b => b.arm > 0) ? 'SPOOLING'
+              : 'HOLDING';
+  ctx.fillStyle = 'rgba(148,163,184,0.72)';
+  ctx.fillText((R.i + 1) + '/4  ' + RITE_SEQ[R.i].id.toUpperCase() +
+               '   —   ' + RITE_SEQ[R.i].n + '   ·   ' + state, 30, 58);
+
+  // the only read that matters while you play it
+  ctx.textAlign = 'center';
+  if (cutHeld > 0) {
+    ctx.font = "800 18px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = rgba('#fdba74', 0.55 + Math.sin(t * 14) * 0.35);
+    ctx.fillText('CUT HELD', W / 2, H - 92);
+  } else if (ship.burn > 0) {
+    ctx.font = "800 18px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = rgba('#f87171', 0.5 + Math.sin(t * 18) * 0.4);
+    ctx.fillText('IN THE BEAM', W / 2, H - 92);
+  }
+  ctx.letterSpacing = '0px';
+
+  if (bannerT > 0) {
+    ctx.globalAlpha = clamp(bannerT, 0, 1) * 0.5;
+    ctx.font = "800 " + Math.min(64, W * 0.05) + "px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.letterSpacing = '8px';
+    ctx.fillStyle = bannerCol;
+    ctx.fillText(bannerTxt, W / 2, H / 2 - 40);
+    ctx.globalAlpha = 1; ctx.letterSpacing = '0px';
+  }
+
+  ctx.font = "600 9px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.letterSpacing = '2px';
+  ctx.fillStyle = 'rgba(100,116,139,0.5)';
+  ctx.fillText('1–4 SEQUENCES    5 THE CLASH    SPACE REPLAY    MOUSE MOVE    HOLD TO CUT    F DATA',
+               W / 2, H - 28);
+  ctx.letterSpacing = '0px';
+  ctx.textAlign = 'left';
+
+  if (showData) {
+    ctx.font = "400 10px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = 'rgba(148,163,184,0.7)';
+    const rows = [
+      'RITE_HAND        ' + RITE_HAND.toFixed(2) + '   the seam',
+      'RITE_ARM         ' + RITE_ARM.toFixed(2) + '   one aperture spooling',
+      'RITE_SEVEN_TELL  ' + RITE_SEVEN_TELL.toFixed(2) + '   SEQ 4 hand-over',
+      'warm             ' + Math.max(0, R.warm).toFixed(2),
+      'beams            ' + R.beams.length + '   letting go: ' + R.out.length,
+      'live / next      ' + R.live + ' / ' + R.next,
+      'cut              ' + (R.beams.some(b => b.cut) ? 'held' : '—')
+    ];
+    rows.forEach((s, i) => ctx.fillText(s, 30, 92 + i * 15));
+  }
+  ctx.restore();
+}
+
+/* the clash draws its own readouts; this is only the way back to 1–4 */
+function drawClashKeys() {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "600 9px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.letterSpacing = '2px';
+  ctx.fillStyle = 'rgba(100,116,139,0.45)';
+  ctx.fillText('HOLD FIRE TO FEED    F VENT WHEN ASKED    SPACE REPLAY    1–4 SEQUENCES',
+               W / 2, H - 12);
+  ctx.restore();
+}
+
+/* ================================= frame ================================= */
+function drawFloor() {
+  ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2 + cam.x, H / 2 + cam.y);
+  ctx.scale(camZoom, camZoom);
+  ctx.strokeStyle = 'rgba(56,66,86,0.22)'; ctx.lineWidth = 1 / camZoom;
+  for (let x = -ARENA.w / 2; x <= ARENA.w / 2; x += 100) {
+    ctx.beginPath(); ctx.moveTo(x, -ARENA.h / 2); ctx.lineTo(x, ARENA.h / 2); ctx.stroke();
+  }
+  for (let y = -ARENA.h / 2; y <= ARENA.h / 2; y += 100) {
+    ctx.beginPath(); ctx.moveTo(-ARENA.w / 2, y); ctx.lineTo(ARENA.w / 2, y); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(148,163,184,0.35)'; ctx.lineWidth = 2 / camZoom;
+  ctx.strokeRect(-ARENA.w / 2, -ARENA.h / 2, ARENA.w, ARENA.h);
+  ctx.restore();
+}
+
+let last = 0, T = 0;
+function frame(ms) {
+  const now = ms / 1000;
+  const dt = Math.min(0.05, last ? now - last : 0.016);
+  last = now; T += dt;
+
+  fit();
+  if (clashOn()) {
+    // the scene owns the frame, and the contest owns the pilot
+    drawFlashT = Math.max(0, drawFlashT - dt * 2);
+    riteClash(amalgam, dt);
+    ship.x = P.x; ship.y = P.y;
+    updateFx(dt);
+    bannerT = Math.max(0, bannerT - dt);
+    // the wind-down, and then the take runs again from the top
+    if (R.done) {
+      R.endT -= dt;
+      if (R.endT <= 0) { R.clash = null; R.done = false; riteEnter(0); }
+    }
+    rsDrawScene(amalgam);
+    rsDrawHUD(amalgam);
+    drawClashKeys();
+    requestAnimationFrame(frame);
+    return;
+  }
+  shipTick(dt);
+  riteTick(dt);
+  updateHazards(dt);
+  updateFx(dt);
+  bannerT = Math.max(0, bannerT - dt);
+  shakeAmt = Math.max(0, shakeAmt - dt * 2.4);
+
+  drawFloor();
+  ctx.save();
+  const sx = rnd(1, -1) * shakeAmt * 14, sy = rnd(1, -1) * shakeAmt * 14;
+  ctx.translate(W / 2 + cam.x + sx, H / 2 + cam.y + sy);
+  ctx.scale(camZoom, camZoom);
+  drawHazards();
+  drawBody(T);
+  drawRiteBeams(T);
+  drawShip(T);
+  drawFx();
+  ctx.restore();
+
+  // vignette, so the room has edges
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
+                                      W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+
+  drawHUD(T);
+  requestAnimationFrame(frame);
+}
+
+/* ------------------------------- controls -------------------------------- */
+function toWorld(cx, cy) {
+  return { x: (cx - W / 2 - cam.x) / camZoom, y: (cy - H / 2 - cam.y) / camZoom };
+}
+addEventListener('pointermove', e => {
+  const w = toWorld(e.clientX, e.clientY);
+  mouse.x = w.x; mouse.y = w.y;
+});
+addEventListener('pointerdown', e => {
+  const w = toWorld(e.clientX, e.clientY);
+  mouse.x = w.x; mouse.y = w.y; mouse.down = true; ship.firing = true;
+});
+addEventListener('pointerup', () => { mouse.down = false; });
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k >= '1' && k <= '4') { riteEnter(+k - 1); e.preventDefault(); }
+  if (k === '5') { clashBegin(); e.preventDefault(); }
+  if (k === ' ') { clashOn() ? clashBegin() : riteEnter(R.i); e.preventDefault(); }
+  if (k === 'f' && clashOn() && R.clash && !R.clash.fired &&
+      R.clash.act === 'FULL') { R.clash.fired = true; e.preventDefault(); return; }
+  if (k === 'f') showData = !showData;
+});
+
+
+/* ===================== SEQ 5 — THE CLASH, AS IT PLAYS ====================
+   Not re-authored. The two blocks below are lifted verbatim out of
+   index.html: riteClash() (the contest logic) and the whole rs/RS_ scene
+   (its own projection, camera, standing body, particles with a z on them,
+   and the readouts). Everything between here and the end of the file is the
+   game's own source, so what you are watching is what the fight does.
+
+   This is the shim that stands in for the game around them: the player, the
+   room, the meter, the vent. Nothing here is drawn — the scene owns the
+   frame for the whole length of the clash, exactly as it does in game.
+========================================================================= */
+// the game's easing, which the scene's cameras and blow-out curves are written against
+const easeOut = p => 1 - Math.pow(1 - p, 3);
+const easeIn = p => p * p * p;
+const easeInOut = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+
+const HEAT_MAX = 100;
+const VENT_LEN = 3.4;
+let drawFlashT = 0;
+let autoFire = false;
+const keys = {};
+const chalAuto = () => false;
+const grantAwakening = () => {};
+Audio_.levelup = () => {};
+
+const arena = { x0: -ARENA.w / 2, x1: ARENA.w / 2, y0: -ARENA.h / 2, y1: ARENA.h / 2 };
+/* the pilot, as the clash reads them: a position in the room, a heat meter,
+   and a vent. The hull that flies sequences 1–4 is the same object. */
+const P = { x: 0, y: 380, vx: 0, vy: 0, r: 22, heat: 0, ventT: 0,
+            awake: 0, charId: 'ember' };
+const amalgam = { hp: 1, maxHp: 1, rite: R, parts: [] };
+function riteFinish(a) {
+  const r = a.rite;
+  r.done = true;
+  P.heat = 0;
+  if (!P.awake) { P.awake = 1; P.ventT = VENT_LEN; }
+  r.out = r.out.concat(r.beams.map(b => { b.going = true; b.cut = null; return b; }));
+  r.beams = [];
+  r.endT = VENT_LEN;
+}
+// the clash reads his aperture off the rig, same as every other sequence
+function rsRiteOrigin(a, id) { return slot(id); }
+
+function clashBegin() {
+  R.i = 4; R.seq = 'clash'; R.clash = null; R.done = false;
+  R.out = R.out.concat(R.beams.map(b => { b.going = true; b.cut = null; return b; }));
+  R.beams = [];
+  R.warm = 0;
+  P.x = ship.x; P.y = ship.y; P.awake = 0; P.ventT = 0;
+  hazards.length = 0;
+  banner('IT STOPS PRETENDING', AMAL_COL, 2.6);
+}
+const clashOn = () => R.seq === 'clash';
+
+/* ------------------- SEQ 5 \u2014 THE CLASH, as a playable cutscene -------------
+   The other four sequences are fights: his light crosses yours at an angle and
+   segSeg finds the crossing. A head-on lock has no crossing \u2014 the two beams
+   are collinear, the determinant is zero, and there is nothing to intersect.
+   So this one is not built out of geometry. It is a contest point parameterised
+   along the line between the two of you, which is the only honest way to say
+   "these two beams are pushing against each other".
+
+   And it is a cutscene you play rather than a fight you can lose, which is the
+   contract his ordinary beam already sets: that one cannot kill you either, and
+   the only thing it takes is the size of your number. Same promise, turned
+   around \u2014 you cannot lose this, and what is at stake is how well you answered.
+
+   AUTHORED, always resolves: the acts, the seven surges, the vent, the walk,
+   his two failed resists, the impact.
+   YOURS, moment to moment: where you stand against the wall, how hard you feed
+   it, and whether you read the tell and give ground. All three move the node,
+   the meter and the rate on the frame you do them.
+
+   Acts advance on max(floor, state) with a ceiling, so playing well gets there
+   sooner, playing passively still gets there, and nothing can stall.
+
+   Ported from 'Amalgam clash v1.dc.html'. The draw side stays in that file.
+-------------------------------------------------------------------------- */
+/* Scaled to the room this is actually fought in. The reference render lays
+   the duel across ~1500u of floor; riteOpen takes the arena down to 1900x1300
+   and starts you about 460 off him, so a 640 standoff was wider than the
+   whole engagement and the wall could never be reached, let alone pressed. */
+const CLASH_STANDOFF = 320;     // his output is a wall, not a shove
+const CLASH_CLICK    = 20;      // one click of ground given back
+const CLASH_CLICK_MX = 7;       // clicks/sec at the very face of the wall
+const CLASH_PROX_R   = 280;     // heat falls off over this
+const CLASH_PROX_P   = 360;     // your push falls off over this
+const CLASH_HEAT_R   = 18;      // peak heat/sec
+const CLASH_FEED_FLR = 0.45;    // holding, or autofire, still participates
+const CLASH_DRIVE    = 300;    // units/sec you close at, not force applied
+/* Mashing does not shove you forward, it asks to be closer — exactly as the
+   reference pilot seeks a wantGap rather than pushing. Raw force was 430/s
+   against a wall that peaks at 140/s, so the trigger simply walked through it
+   and the contest collapsed to zero gap in eight seconds. */
+const CLASH_GAP_OUT  = CLASH_STANDOFF + 150;   // where you drift with no feed
+const CLASH_GAP_IN   = CLASH_STANDOFF - 90;    // what full feed asks for
+const CLASH_SURGES   = [2.4, 5.2, 7.8, 10.4, 13.0, 15.4, 17.6];
+
+/* floor = the soonest an act may end, cap = the latest. CONTEST is the only
+   one the player actually drives; the rest are the authored back half. */
+const CLASH_ACTS = [
+  { id: 'LOCK',      floor: 2.0,  cap: 6.0,  cap_say: 'it stops' },
+  { id: 'CONTEST',   floor: 6.0,  cap: 34.0, cap_say: 'the node moves' },
+  /* FULL holds on the player: the meter is capped and the ship is over
+     temperature, and it waits to be told. floor is the dilation beat playing
+     out before the prompt can be answered at all; cap is the deadlock guard,
+     because a cutscene that needs a press is a cutscene that can be walked
+     away from mid-take. */
+  { id: 'FULL',      floor: 2.4,  cap: 9.0,  cap_say: 'a hull that cannot shed it' },
+  { id: 'OVERDRIVE', floor: 6.2,  cap: 6.2,  cap_say: 'first overdrive ever fired' },
+  { id: 'WALK',      floor: 5.0,  cap: 5.0,  cap_say: 'the standoff collapses' },
+  { id: 'IMPACT',    floor: 7.4,  cap: 7.4,  cap_say: '' }
+];
+
+function clashWallClicks(gap, walk) {
+  const wall = CLASH_STANDOFF * (1 - walk);
+  if (gap >= wall) return 0;
+  const depth = clamp((wall - gap) / Math.max(1, wall * 0.55), 0, 1);
+  return 1 + depth * depth * (CLASH_CLICK_MX - 1);   // never below one click
+}
+
+/* his two resist stalls on the way in. Both fail; that is the read. */
+function clashResist(c) {
+  if (c.act !== 'WALK') return 1;
+  const bump = (at, w, h) => Math.exp(-Math.pow((c.at - at) / w, 2)) * h;
+  return 1 + bump(1.4, 0.5, 3.2) + bump(3.1, 0.45, 2.4);
+}
+
+function clashEnter(c, i) {
+  c.i = i;
+  c.act = CLASH_ACTS[i].id;
+  c.at = 0;
+  c.surgeIdx = 0;
+  if (CLASH_ACTS[i].cap_say) banner(CLASH_ACTS[i].cap_say, AMAL_COL, 2.6);
+  if (c.act === 'FULL') { c.fired = false; c.nudge = 0; }
+}
+
+function riteClash(a, dt) {
+  const r = a.rite;
+  if (!r.clash) {
+    r.clash = { i: -1, act: null, at: 0, nodeU: 0.42, feed: 0, wasFire: false,
+                surge: 0, surgeTell: 0, surgeIdx: 0, walk: 0, gap: 1400, rate: 0 };
+    clashEnter(r.clash, 0);
+    P.heat = 0;
+    rsReset();
+  }
+  const c = r.clash;
+  c.at += dt;
+
+  const o = rsRiteOrigin(a, 'torso');
+  const nodeX = lerp(o.x, P.x, c.nodeU), nodeY = lerp(o.y, P.y, c.nodeU);
+  c.gap = len(P.x - nodeX, P.y - nodeY);
+
+  /* ---- the feed. Any fire input participates: a press is an impulse, a hold
+     (or autofire, which a lot of profiles run) sits at the floor, and mashing
+     stacks above it. Nobody is locked out of the act and nobody gets it free. */
+  const firingNow = mouse.down || autoFire || keys['j'] || chalAuto();
+  c.feed = Math.max(0, c.feed - dt * 1.15);
+  if (firingNow && !c.wasFire) c.feed = clamp(c.feed + 0.34, 0, 1.35);
+  if (firingNow) c.feed = Math.max(c.feed, CLASH_FEED_FLR);
+  c.wasFire = firingNow;
+
+  /* ---- the contest. His output drives the node at you, yours drives it at
+     him, and proximity multiplies what the feed is worth. */
+  const driving = c.act === 'LOCK' || c.act === 'CONTEST';
+  const his = (1.0 + c.surge * 3.6) * clashResist(c);
+  const you = (0.32 + 1.15 * Math.exp(-c.gap / CLASH_PROX_P)) * (0.45 + c.feed)
+            + c.walk * 6.5;
+  c.nodeU = clamp(c.nodeU + (his - you) * 0.055 * dt * 4.0, -0.02, 0.985);
+
+  c.rate = CLASH_HEAT_R * Math.exp(-c.gap / CLASH_PROX_R) * (0.35 + c.feed * 0.75);
+  if (driving) P.heat = clamp(P.heat + c.rate * dt, 0, HEAT_MAX);
+  else P.heat = HEAT_MAX;
+
+  /* ---- the wall. It gives ground back at a rate rather than throwing you:
+     an impulse would take you out of the fight and the beam off the screen
+     with you. Inside it you are always losing at least a click a second. */
+  {
+    const ax = P.x - nodeX, ay = P.y - nodeY, d = len(ax, ay) || 1;
+    /* How close the trigger is asking to be, then the move toward it, then the
+       wall giving ground back on top. Where the two settle is where you stand,
+       and it is the feed that decides it. Once the walk collapses the wall,
+       nothing is pushing any more and you close all the way in. */
+    const want = c.walk >= 1 ? 40
+               : lerp(CLASH_GAP_OUT, CLASH_GAP_IN, clamp(c.feed / 1.35, 0, 1));
+    const step = clamp(want - c.gap, -CLASH_DRIVE * dt, CLASH_DRIVE * dt);
+    const push = c.walk < 1 ? clashWallClicks(c.gap, c.walk) * CLASH_CLICK * dt : 0;
+    const net  = step + push;
+    P.x = clamp(P.x + ax / d * net, arena.x0 + P.r, arena.x1 - P.r);
+    P.y = clamp(P.y + ay / d * net, arena.y0 + P.r, arena.y1 - P.r);
+    P.vx = 0; P.vy = 0;                 // nothing else is steering this
+  }
+
+  /* ---- surges. They cost you the meter and the ground you had bought, and
+     they never cost health: there is no losing this, only answering it badly. */
+  if (c.act === 'CONTEST') {
+    c.surgeTell = Math.max(0, c.surgeTell - dt);
+    c.surge = Math.max(0, c.surge - dt * 1.6);
+    const next = CLASH_SURGES[c.surgeIdx];
+    if (next !== undefined) {
+      if (c.at > next - 0.7 && c.surgeTell <= 0 && c.surge <= 0.01) {
+        c.surgeTell = 0.7;
+        Audio_.tone(150, 0.5, 'sawtooth', 0.07, 90);
+      }
+      if (c.at > next) {
+        c.surgeIdx++;
+        c.surge = 1;
+        shake(1.2);
+        ringFx(o.x, o.y, 20, 700, RAINBOW[0], 0.7, 6);
+        Audio_.boom();
+        if (c.gap < CLASH_STANDOFF * 0.8) {
+          P.heat = Math.max(0, P.heat - HEAT_MAX * 0.22);
+          c.feed = 0;
+          floatText(P.x, P.y - 48, 'SURGE', RAINBOW[0], 15);
+        }
+      }
+    }
+  }
+
+  /* ---- the prompt. Held open once the dilation beat has played, and asked
+     for again every so often rather than once, because the room is loud. ---- */
+  if (c.act === 'FULL' && !c.fired && c.at >= CLASH_ACTS[c.i].floor) {
+    c.nudge -= dt;
+    if (c.nudge <= 0) {
+      c.nudge = 1.15;
+      floatText(P.x, P.y - 56, 'VENT  [F]', '#fb923c', 16);
+      Audio_.tone(620, 0.09, 'sine', 0.07, 940);
+    }
+  }
+
+  /* ---- the authored back half ---- */
+  if (c.act === 'WALK') c.walk = Math.min(1, c.walk + dt * 0.62);
+  if (c.act === 'OVERDRIVE' && c.at < dt * 2) {
+    P.ventT = VENT_LEN;
+    grantAwakening(P.charId);
+    P.awake = 1;
+    banner('OVERDRIVE', '#fb923c', 2.4);
+    drawFlashT = 0.6; shake(2.6);
+    Audio_.boom(); Audio_.boss();
+    ringFx(P.x, P.y, 14, 900, '#fb923c', 1.2, 8);
+    burst(P.x, P.y, 60, '#fde047', 360, 4, 0.9);
+  }
+  if (c.act === 'IMPACT' && c.at < dt * 2) {
+    drawFlashT = 1; shake(3.2);
+    Audio_.boom(); Audio_.levelup();
+    ringFx(o.x, o.y, 24, 1600, '#fff7ed', 1.8, 12);
+    for (let i = 0; i < 90; i++) {
+      const ang = rnd(TAU), s = rnd(700, 120);
+      spawnPart(o.x + rnd(60, -60), o.y + rnd(60, -60), Math.cos(ang) * s,
+                Math.sin(ang) * s, rnd(4, 1.6), pick(RAINBOW), rnd(1.8, 0.6), 0.9);
+    }
+  }
+
+  /* ---- act advance: earned, floored, and capped so it cannot stall ---- */
+  const A = CLASH_ACTS[c.i];
+  let ready = c.at >= A.floor;
+  if (A.id === 'CONTEST') ready = ready && P.heat >= HEAT_MAX;
+  if (A.id === 'LOCK') ready = c.at >= A.floor;
+  // the vent is the one beat in the back half the player fires themselves
+  if (A.id === 'FULL') ready = ready && !!c.fired;
+  if ((ready || c.at >= A.cap) && c.i < CLASH_ACTS.length - 1)
+    clashEnter(c, c.i + 1);
+  else if (c.act === 'IMPACT' && c.at >= A.floor && !r.done)
+    riteFinish(a);
+
+  rsSync(a, dt);        // and the scene follows whatever the contest just did
+}
+
+/* The hand-off. Everything above is the logic; the sequence itself — the dim,
+   the spark, the room taking, the vanes blowing out, the helix walking the
+   crossing up his beam — is authored separately and triggered from here. */
+
+/* ======================= THE CLASH, AS THE SCENE ==========================
+   SEQ 5 is not drawn by the game's renderer. It is the scene from
+   'Amalgam clash v1.dc.html', lifted whole: its own perspective projection,
+   its own camera, its own standing body, its own particles with a z on them.
+   The game's top-down view cannot express any of it, and an approximation of
+   it in 2D is not the thing that was designed.
+
+   So for the length of the clash the frame belongs to this. Everything below
+   is the reference render with its top-level names prefixed rs/RS_ so that
+   cam, parts, proj, RAINBOW and the rest do not collide with the game's own.
+   The only things rewritten rather than lifted are the three that used to
+   read the standalone file's own simulation — rsSIM, rsT and rsStand — which
+   now read the clash state riteClash() is already maintaining.
+========================================================================= */
+/* The reference's smoothstep. The game has easeIn/easeOut/easeInOut at module
+   scope but no plain `ease` — its two are function-local shadows — and the
+   scene's camera and stand curves are written against smoothstep, not cubic. */
+const rsEase = t => t * t * (3 - 2 * t);
+const rsSmooth = (v, to, k, dt) => v + (to - v) * Math.min(1, k * dt);
+function rsMix(h1, h2, t) {
+  const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+  const r = Math.round(lerp((a >> 16) & 255, (b >> 16) & 255, t));
+  const g = Math.round(lerp((a >> 8) & 255, (b >> 8) & 255, t));
+  const c = Math.round(lerp(a & 255, b & 255, t));
+  return `rgb(${r},${g},${c})`;
+}
+/* The reference draws glows with an explicit ctx and its own sprite cache;
+   the game's drawGlow has neither, so this keeps the reference's signature. */
+const _rsGlow = new Map();
+function rsGlowSprite(hex) {
+  let s = _rsGlow.get(hex);
+  if (s) return s;
+  s = document.createElement('canvas');
+  s.width = s.height = 128;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, hex);
+  gr.addColorStop(0.32, rgba(hex, 0.42));
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  _rsGlow.set(hex, s); return s;
+}
+function rsGlow(c, x, y, r, hex, a = 1) {
+  c.globalAlpha = a;
+  c.drawImage(rsGlowSprite(hex), x - r, y - r, r * 2, r * 2);
+  c.globalAlpha = 1;
+}
+
+/* The bridge. The scene was written against a standalone sim; these are the
+   same fields, filled each tick from the clash the game is actually running. */
+const rsSIM = { shipX: 0, shipY: 300, shipAim: -Math.PI / 2, nodeU: 0.42,
+                heat: 0, locked: false, lockBreak: 0, gap: 1400, rate: 0,
+                feed: 0, mash: 0, surge: 0, surgeTell: 0, walk: 0,
+                broke: 0, impact: 0 };
+/* The scene's own mutable state. Lifted from the reference's declaration
+   block, which sat outside every range the render functions came from. */
+let rsFlash = 0, rsDim = 0, rsPoolsSeeded = false;
+let rsParts = [], rsPools = [], rsSparkTrail = [], rsShocks = [];
+const rsSpark = { on: false, x: 0, y: 0, z: 1500, done: false };
+const rsBlow  = { on: false, t: 0 };
+const rsPlume = { ang: 0, vel: 0, lag: 0, stretch: 1 };
+
+let rsT = 0;
+let rsActName = 'LOCK';
+const RS_ACT_IN = { LOCK: 0, CONTEST: 4.2, FULL: 27.0, OVERDRIVE: 29.4,
+                    WALK: 35.6, IMPACT: 40.6 };
+let rsActAtT = 0;                       // when the current act started, in rsT
+
+// how far out of the floor plane he has come, tied to the meter breaking
+function rsStand() {
+  const k = rsT - rsActAtT;
+  if (rsActName === 'OVERDRIVE') return rsEase(clamp((k - 0.2) / 3.4, 0, 1));
+  if (rsActName === 'WALK' || rsActName === 'IMPACT') return 1;
+  if (rsActName === 'FULL') return rsEase(clamp(k / 2.4, 0, 1)) * 0.22;
+  return 0;
+}
+
+function rsFlameLeaf(c, bx, by, ang, len, wid, bend) {
+  const ca = Math.cos(ang), sa = Math.sin(ang), nx = -sa, ny = ca;
+  const tx = bx + ca * len + nx * bend, ty = by + sa * len + ny * bend;
+  const mx = bx + ca * len * 0.45, my = by + sa * len * 0.45;
+  c.beginPath();
+  c.moveTo(bx + nx * wid, by + ny * wid);
+  c.quadraticCurveTo(mx + nx * wid * 1.15 + nx * bend * 0.4, my + ny * wid * 1.15 + ny * bend * 0.4, tx, ty);
+  c.quadraticCurveTo(mx - nx * wid * 1.15 + nx * bend * 0.4, my - ny * wid * 1.15 + ny * bend * 0.4, bx - nx * wid, by - ny * wid);
+  c.closePath();
+}
+
+
+const RS_FOCAL = 900;
+const rsCam = { x: 0, y: -660, D: 3020, pitch: 0.13, yaw: 0, roll: 0, cy: 0.42, shake: 0 };
+function rsProj(x, y, z) {
+  const cy = Math.cos(rsCam.yaw), sy = Math.sin(rsCam.yaw);
+  const rx = x - rsCam.x, ry = y - rsCam.y;
+  const x1 = rx * cy - ry * sy, y1 = rx * sy + ry * cy;
+  const cp = Math.cos(rsCam.pitch), sp = Math.sin(rsCam.pitch);
+  const yc = y1 * cp - z * sp;
+  const dist = rsCam.D - y1 * sp - z * cp;
+  if (dist < 90) return { sx: 0, sy: 0, s: 0, dist, vis: false };
+  const s = RS_FOCAL / dist;
+  return { sx: W / 2 + x1 * s, sy: H * rsCam.cy + yc * s, s, dist, vis: true };
+}
+
+/* ============================== the fighters ==============================
+   The Amalgam is a chassis, not a constellation. Nine salvaged cores are
+   grafted onto plated mass: each part carries a `w`/`h` box footprint, a
+   plate count, and the boss it used to be. The boxes OVERLAP — head into
+   spine, shoulders into chest, legs into the hip — so the union of them is a
+   single silhouette and the spars are internal structure rather than sticks
+   holding separate shapes apart.
+=========================================================================== */
+
+const RS_BOSS_Y = -900, RS_BOSS_X = 0;
+const RS_AMAL = [
+  { id:'head',  key:'NULLCORE',    ox:   0, oy:-360, w:112, h:112, r:50, col:'#a78bfa', plates:3, kind:'skull' },
+  { id:'spine', key:'THE OTHER',   ox:   0, oy:-246, w: 92, h:140, r:34, col:'#5eead4', plates:4, kind:'stack' },
+  { id:'torso', key:'FORGEHEART',  ox:   0, oy: -20, w:246, h:230, r:98, col:'#f59e0b', plates:5, kind:'chest' },
+  { id:'shldL', key:'CURATOR',     ox:-150, oy:-190, w:126, h:112, r:52, col:'#e2e8f0', plates:3, kind:'pauldron' },
+  { id:'shldR', key:'ARCHIVIST',   ox: 150, oy:-190, w:126, h:112, r:52, col:'#38bdf8', plates:3, kind:'pauldron' },
+  { id:'armL',  key:'WARDEN',      ox:-238, oy:  30, w: 94, h:196, r:48, col:'#ef4444', plates:4, kind:'arm' },
+  { id:'armR',  key:'WARDEN',      ox: 238, oy:  30, w: 94, h:196, r:48, col:'#ef4444', plates:4, kind:'arm' },
+  { id:'legL',  key:'BROODMOTHER', ox:-100, oy: 188, w:126, h:200, r:54, col:'#4ade80', plates:4, kind:'leg' },
+  { id:'legR',  key:'BROODMOTHER', ox: 100, oy: 188, w:126, h:200, r:54, col:'#4ade80', plates:4, kind:'leg' }
+];
+const RS_BONES = [['head','spine'],['spine','torso'],['spine','shldL'],['spine','shldR'],
+               ['shldL','armL'],['shldR','armR'],['torso','legL'],['torso','legR']];
+const RS_RAINBOW = ['#f87171','#fb923c','#fde047','#4ade80','#38bdf8','#a78bfa','#f472b6'];
+const RS_AMAL_COL = '#d8b4fe';
+const RS_PLATE_DK = '#0b0912', RS_PLATE_MD = '#191428', RS_PLATE_LT = '#2b2242';
+
+
+function rsPartPos(p, stand, t, rsBlow) {
+  const planY = RS_BOSS_Y + p.oy, standZ = (188 - p.oy) * 1.02;
+  let x = RS_BOSS_X + p.ox;
+  let y = lerp(planY, RS_BOSS_Y + p.oy * 0.1, stand);
+  let z = lerp(0, standZ, stand);
+  // idle: the rig breathes and the limbs hang a little
+  const sw = Math.sin(t * 0.8 + p.oy * 0.01) * (4 + stand * 9);
+  y += sw * 0.4; z += stand * Math.sin(t * 1.1 + p.ox * 0.01) * 5;
+  if (rsBlow && rsBlow.on) {                      // impact: the body comes apart
+    const k = rsBlow.t, e = easeOut(clamp(k / 1.6, 0, 1));
+    x += p.bx * e * 260; y += p.by * e * 230; z += p.bz * e * 300 - k * k * 90;
+  }
+  return { x, y, z };
+}
+for (const p of RS_AMAL) { p.bx = rnd(1, -1); p.by = rnd(1, -1); p.bz = rnd(1.4, -0.2); }
+
+/* ================================ the sim =================================
+   Everything the piece is about lives in these numbers.
+=========================================================================== */
+
+function rsSpawnPart(x, y, z, vx, vy, vz, r, hex, life, drag = 0.93) {
+  if (rsParts.length > 900) return;
+  rsParts.push({ x, y, z, vx, vy, vz, r, hex, life, max: life, drag });
+}
+function rsUpdateParts(dt) {
+  for (let i = rsParts.length - 1; i >= 0; i--) {
+    const p = rsParts[i];
+    p.life -= dt;
+    if (p.life <= 0) { rsParts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const d = Math.pow(p.drag, dt * 60);
+    p.vx *= d; p.vy *= d; p.vz = p.vz * d + 34 * dt;       // embers rise
+  }
+}
+function rsShockwave(x, y, col, r1, life) { rsShocks.push({ x, y, t: 0, life: life || 0.8, r1: r1 || 320, col: col || '#fb923c' }); }
+
+/* ============================ the surge clock ============================= */
+
+function rsIgnite() {
+  if (rsPoolsSeeded) return;
+  rsPoolsSeeded = true;
+  const add = (x, y, r) => rsPools.push({ x, y, r, seed: rnd(100), born: rsT, k: rnd(1.3, 0.7) });
+  for (let i = 0; i < 26; i++) {
+    const a = rnd(TAU), d = rnd(2400, 400);
+    add(rsSIM.shipX + Math.cos(a) * d, rsSIM.shipY + Math.sin(a) * d * 0.8, rnd(150, 80));
+  }
+  for (let i = 0; i < 10; i++) add(rnd(1400, -1400), RS_BOSS_Y + rnd(500, 180), rnd(160, 90));
+  for (let i = 0; i < 120; i++) {
+    const a = rnd(TAU), sp = rnd(900, 200);
+    rsSpawnPart(rsSIM.shipX, rsSIM.shipY, 20, Math.cos(a) * sp, Math.sin(a) * sp * 0.8, rnd(420, 60),
+      rnd(3.6, 1.4), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1.4, 0.5), 0.9);
+  }
+}
+
+
+function rsDrawFloor(c, warm) {
+  const G = 200, EXT = 3600;
+  c.lineWidth = 1;
+  c.strokeStyle = warm > 0.02 ? rgba('#3f1706', 0.55 + warm * 0.4) : '#0e1626';
+  for (let g = -EXT; g <= EXT; g += G) {
+    const a = rsProj(g, -EXT, 0), b = rsProj(g, EXT, 0);
+    if (a.vis && b.vis) { c.beginPath(); c.moveTo(a.sx, a.sy); c.lineTo(b.sx, b.sy); c.stroke(); }
+    const d = rsProj(-EXT, g, 0), e = rsProj(EXT, g, 0);
+    if (d.vis && e.vis) { c.beginPath(); c.moveTo(d.sx, d.sy); c.lineTo(e.sx, e.sy); c.stroke(); }
+  }
+  // arena wall, and the far one catches the light first
+  c.lineWidth = 2.4;
+  c.strokeStyle = warm > 0.02 ? rsMix('#1d3557', '#b45309', warm) : '#1d3557';
+  const corners = [[-2600,-1750],[2600,-1750],[2600,1450],[-2600,1450]].map(p => rsProj(p[0], p[1], 0));
+  c.beginPath();
+  corners.forEach((p, i) => i ? c.lineTo(p.sx, p.sy) : c.moveTo(p.sx, p.sy));
+  c.closePath(); c.stroke();
+}
+
+
+function rsDrawPools(c, t) {
+  if (!rsPools.length) return;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const sorted = rsPools.map(p => ({ p, pr: rsProj(p.x, p.y, 0) })).filter(o => o.pr.vis)
+                      .sort((a, b) => b.pr.dist - a.pr.dist);
+  for (const { p, pr } of sorted) {
+    const up = clamp((t - p.born) / 0.6, 0, 1);
+    const fl = 0.82 + Math.sin(t * (5.1 + p.k) + p.seed) * 0.1 + Math.sin(t * (11.3 + p.k * 2) + p.seed * 2) * 0.05;
+    const R = p.r * up * fl * pr.s;
+    if (R < 1) continue;
+    rsGlow(c, pr.sx, pr.sy, R * 1.5, '#7c2d12', 0.3 * up);
+    rsGlow(c, pr.sx, pr.sy, R * 0.8, '#ea580c', 0.24 * up);
+    for (let i = 0; i < 7; i++) {
+      const ph = (t * (0.9 + p.k * 0.35) + i * 0.317 + p.seed) % 1;
+      const spread = (i / 6 - 0.5) * 0.95;
+      const a = -Math.PI / 2 + spread * 0.8 + Math.sin(t * 1.9 + i * 2.2 + p.seed) * 0.14;
+      const bx = pr.sx + spread * R * 0.5, by = pr.sy + Math.abs(spread) * R * 0.1;
+      const len = R * (0.62 + (0.5 - Math.abs(spread)) * 0.8) * (0.5 + Math.sin(ph * Math.PI) * 0.7);
+      const bend = Math.sin(t * 3.4 + i * 1.6 + p.seed) * R * 0.14;
+      const fade = up * (0.35 + Math.sin(ph * Math.PI) * 0.5);
+      c.globalAlpha = 0.2 * fade;  c.fillStyle = '#b91c1c'; rsFlameLeaf(c, bx, by, a, len, R * 0.28, bend); c.fill();
+      c.globalAlpha = 0.26 * fade; c.fillStyle = '#ea580c'; rsFlameLeaf(c, bx, by, a, len * 0.72, R * 0.17, bend * 0.7); c.fill();
+      c.globalAlpha = 0.3 * fade;  c.fillStyle = '#fdba74'; rsFlameLeaf(c, bx, by, a, len * 0.36, R * 0.08, bend * 0.4); c.fill();
+    }
+    c.globalAlpha = 0.24 * up; c.fillStyle = '#fdba74';
+    c.beginPath(); c.ellipse(pr.sx, pr.sy, R * 0.24, R * 0.1, 0, 0, TAU); c.fill();
+    if (Math.random() < 0.06)
+      rsSpawnPart(p.x + rnd(60, -60), p.y + rnd(40, -40), 8, rnd(30, -30), rnd(20, -20), rnd(150, 50),
+        rnd(2.6, 1), Math.random() < 0.3 ? '#fde047' : '#fb923c', rnd(1.5, 0.6), 0.94);
+  }
+  c.restore();
+}
+
+
+function rsDrawShocks(c) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (const s of rsShocks) {
+    const k = s.t / s.life, r = easeOut(k) * s.r1;
+    const a = (1 - k) * 0.5;
+    // a ring on the floor, so it is in the room rather than on the lens
+    c.globalAlpha = a; c.strokeStyle = s.col; c.lineWidth = 2 + (1 - k) * 3;
+    c.beginPath();
+    for (let i = 0; i <= 28; i++) {
+      const th = i / 28 * TAU;
+      const p = rsProj(s.x + Math.cos(th) * r, s.y + Math.sin(th) * r, 0);
+      if (!p.vis) { c.closePath(); break; }
+      i ? c.lineTo(p.sx, p.sy) : c.moveTo(p.sx, p.sy);
+    }
+    c.stroke();
+  }
+  c.restore();
+}
+
+/* ============================== THE AMALGAM ===============================
+   Nine rsParts, the bosses they were, and the rig holding them together. In
+   plan view they are a layout; standing, the silhouette is a person.
+=========================================================================== */
+/* --- a plated box: dark mass, a bevel catching the rim light, and panel
+   seams across it. Drawn in the part's own rotated space. --------------- */
+
+function rsPlateBox(c, w, h, p, hurt, t, s) {
+  const bev = Math.min(w, h) * 0.22;
+  const path = () => {
+    c.beginPath();
+    c.moveTo(-w / 2 + bev, -h / 2); c.lineTo(w / 2 - bev, -h / 2);
+    c.lineTo(w / 2, -h / 2 + bev); c.lineTo(w / 2, h / 2 - bev);
+    c.lineTo(w / 2 - bev, h / 2); c.lineTo(-w / 2 + bev, h / 2);
+    c.lineTo(-w / 2, h / 2 - bev); c.lineTo(-w / 2, -h / 2 + bev);
+    c.closePath();
+  };
+  // mass
+  path();
+  const g = c.createLinearGradient(0, -h / 2, 0, h / 2);
+  g.addColorStop(0, RS_PLATE_MD); g.addColorStop(0.45, RS_PLATE_DK); g.addColorStop(1, '#05040a');
+  c.fillStyle = g; c.fill();
+  // a wash of the boss it used to be, strongest as it comes apart
+  c.save(); path(); c.clip();
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = 0.1 + hurt * 0.3;
+  c.fillStyle = p.col; c.fillRect(-w, -h, w * 2, h * 2);
+  // panel seams
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = 0.5;
+  c.strokeStyle = RS_PLATE_LT; c.lineWidth = Math.max(1, 1.2 * s);
+  for (let i = 1; i < p.plates; i++) {
+    const y = -h / 2 + h * (i / p.plates);
+    c.beginPath(); c.moveTo(-w / 2, y); c.lineTo(w / 2, y); c.stroke();
+  }
+  c.globalAlpha = 0.3;
+  c.beginPath(); c.moveTo(-w * 0.18, -h / 2); c.lineTo(-w * 0.18, h / 2); c.stroke();
+  c.restore();
+  // rim
+  path();
+  c.strokeStyle = hurt > 0.3 ? rsMix(p.col, '#fff7ed', hurt * 0.7) : rgba(p.col, 0.75);
+  c.lineWidth = Math.max(1, 2.2 * s); c.stroke();
+  // the lit top bevel, which is what gives it a facing surface
+  c.globalAlpha = 0.5;
+  c.strokeStyle = rgba(p.col, 0.9); c.lineWidth = Math.max(1, 1.4 * s);
+  c.beginPath();
+  c.moveTo(-w / 2 + bev, -h / 2 + 2); c.lineTo(w / 2 - bev, -h / 2 + 2); c.stroke();
+  c.globalAlpha = 1;
+}
+
+
+function rsDrawAmalgam(c, t, stand) {
+  const pos = {};
+  for (const p of RS_AMAL) pos[p.id] = rsPartPos(p, stand, t, rsBlow);
+  const pr = {};
+  for (const p of RS_AMAL) pr[p.id] = rsProj(pos[p.id].x, pos[p.id].y, pos[p.id].z);
+  const hurt = rsSIM.walk > 0.02 ? rsSIM.walk : 0;
+
+  // ---- ground contact first: one shadow per part, under everything
+  if (stand > 0.05) {
+    for (const p of RS_AMAL) {
+      const g = rsProj(pos[p.id].x, pos[p.id].y, 0);
+      if (!g.vis) continue;
+      c.globalAlpha = 0.4 * stand * clamp(1 - pos[p.id].z / 700, 0.12, 1);
+      c.fillStyle = '#000';
+      c.beginPath();
+      c.ellipse(g.sx, g.sy, p.w * 0.55 * g.s, p.w * 0.2 * g.s, 0, 0, TAU);
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+
+  // ---- the rig: structural spars, dark and thick, with a lit conduit inside
+  c.save();
+  for (const [a, b] of RS_BONES) {
+    const A = pr[a], B = pr[b];
+    if (!A.vis || !B.vis) continue;
+    const s = (A.s + B.s) / 2;
+    c.lineCap = 'round';
+    c.strokeStyle = '#07050c'; c.lineWidth = Math.max(2, 26 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.strokeStyle = RS_PLATE_MD; c.lineWidth = Math.max(1.5, 18 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.strokeStyle = rgba(RS_AMAL_COL, 0.35 + hurt * 0.3); c.lineWidth = Math.max(1, 3.5 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    // the conduit pulses toward the chest — nine bosses feeding one aperture
+    c.save(); c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.5 + Math.sin(t * 4 - A.sx * 0.006) * 0.3;
+    c.strokeStyle = '#fff7ed'; c.lineWidth = Math.max(1, 1.3 * s);
+    c.setLineDash([4 * s, 16 * s]); c.lineDashOffset = t * 180;
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.setLineDash([]); c.restore();
+  }
+  c.restore();
+
+  // ---- rsParts, far to near
+  const order = RS_AMAL.slice().sort((x, y) => pr[y.id].dist - pr[x.id].dist);
+  for (const p of order) {
+    const P = pr[p.id];
+    if (!P.vis) continue;
+    const s = P.s, w = p.w * s, h = p.h * s;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    rsGlow(c, P.sx, P.sy, p.r * s * 1.8, p.col, 0.1 + hurt * 0.22);
+    c.restore();
+
+    c.save();
+    c.translate(P.sx, P.sy);
+    // limbs cant outward; the chassis itself stays square to the room
+    const cant = (p.kind === 'arm' ? Math.sign(p.ox) * 0.12 : p.kind === 'leg' ? Math.sign(p.ox) * 0.07 : 0)
+                 + Math.sin(t * 0.7 + p.ox * 0.01) * 0.02;
+    c.rotate(cant + (rsBlow.on ? rsBlow.t * 1.4 * (p.bx || 1) : 0));
+    rsPlateBox(c, w, h, p, hurt, t, s);
+
+    /* the salvaged core: a housing, an iris, and the boss's name stencilled
+       on the plate — it should be legible that these are nine trophies */
+    const cr = p.r * s * 0.3;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    rsGlow(c, 0, 0, cr * 3.2, p.col, 0.3 + Math.sin(t * 3 + p.oy * 0.02) * 0.1);
+    c.restore();
+    c.fillStyle = '#05040a';
+    c.beginPath(); c.arc(0, 0, cr * 1.5, 0, TAU); c.fill();
+    c.strokeStyle = rgba(p.col, 0.8); c.lineWidth = Math.max(1, 1.6 * s);
+    c.beginPath(); c.arc(0, 0, cr * 1.5, 0, TAU); c.stroke();
+    c.save();
+    c.rotate(t * (p.kind === 'chest' ? 0.5 : 0.9) * (p.ox > 0 ? 1 : -1));
+    c.strokeStyle = rgba(p.col, 0.5); c.lineWidth = Math.max(1, 1.2 * s);
+    for (let i = 0; i < 3; i++) {
+      const a0 = i * TAU / 3;
+      c.beginPath(); c.arc(0, 0, cr * 1.1, a0, a0 + 1.2); c.stroke();
+    }
+    c.restore();
+    c.globalAlpha = 0.75 + Math.sin(t * 5 + p.oy * 0.03) * 0.2;
+    c.fillStyle = p.col;
+    c.beginPath(); c.arc(0, 0, cr * 0.55, 0, TAU); c.fill();
+    c.globalAlpha = 1;
+
+    /* ---- the chest is the aperture: a ring of collector vanes around the
+       muzzle, and they crank open under load. This is where his beam lives,
+       so it has to look like the part that makes it. */
+    if (p.kind === 'chest') {
+      const load = rsSIM.locked ? 0.55 + rsSIM.surge * 0.45 : 0.25;
+      const ap = p.r * s * 0.62;
+      c.strokeStyle = rgba('#f472b6', 0.6); c.lineWidth = Math.max(1, 2 * s);
+      c.beginPath(); c.arc(0, 0, ap, 0, TAU); c.stroke();
+      for (let i = 0; i < 10; i++) {
+        const a0 = i / 10 * TAU + t * 0.25;
+        const open = ap * (0.42 + load * 0.5);
+        c.strokeStyle = rgba('#f9a8d4', 0.45);
+        c.lineWidth = Math.max(1, 3.4 * s);
+        c.beginPath();
+        c.moveTo(Math.cos(a0) * ap * 0.96, Math.sin(a0) * ap * 0.96);
+        c.lineTo(Math.cos(a0 + 0.3) * open, Math.sin(a0 + 0.3) * open);
+        c.stroke();
+      }
+      c.save(); c.globalCompositeOperation = 'lighter';
+      rsGlow(c, 0, 0, ap * 1.6 * (0.7 + load * 0.6), '#f472b6', 0.45 * (0.5 + load));
+      c.restore();
+      // and the stencil, so the chassis has a maker's mark on it
+      c.globalAlpha = 0.3;
+      c.font = '700 ' + Math.max(6, 9 * s) + "px 'JetBrains Mono', monospace";
+      c.textAlign = 'center'; c.fillStyle = p.col;
+      c.fillText(p.key, 0, h / 2 - 8 * s);
+      c.textAlign = 'left'; c.globalAlpha = 1;
+    } else if (s > 0.18) {
+      c.globalAlpha = 0.4;
+      c.font = '700 ' + Math.max(6, 8 * s) + "px 'JetBrains Mono', monospace";
+      c.textAlign = 'center'; c.fillStyle = p.col;
+      c.fillText(p.key, 0, h / 2 - 5 * s);
+      c.textAlign = 'left'; c.globalAlpha = 1;
+    }
+    c.restore();
+
+    if (hurt > 0.4 && Math.random() < hurt * 0.25)
+      rsSpawnPart(pos[p.id].x, pos[p.id].y, pos[p.id].z, rnd(120, -120), rnd(120, -120), rnd(160, 20),
+        rnd(3, 1.2), p.col, rnd(0.9, 0.3));
+  }
+  return pos;
+}
+
+/* his beam origin: the chest aperture, wherever the chest currently is */
+
+function rsBeamOrigin(pos) {
+  const t = pos.torso;
+  return { x: t.x, y: t.y + 10, z: t.z };
+}
+
+/* ============================== HIS BEAM ==================================
+   One beam, held. Seven bands sheared against each other so it churns, and a
+   hard white sight down the middle. It ends at the node, because past the node
+   it is not winning any more.
+=========================================================================== */
+/* ============================== HIS BEAM ==================================
+   A sustained column, not a stroke. Built as a quad from muzzle to node so it
+   has real width, with the width tapering into the node under your pressure;
+   pressure bands travelling down it; turbulent edges that churn; and the floor
+   scorched and lit beneath its whole length. It ends at the node, because past
+   the node it is not winning any more.
+=========================================================================== */
+
+function rsDrawHisBeam(c, o, nx, ny, nz, t, alive) {
+  const A = rsProj(o.x, o.y, o.z), B = rsProj(nx, ny, nz);
+  if (!A.vis || !B.vis) return;
+  const dx = B.sx - A.sx, dy = B.sy - A.sy, L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  const s = (A.s + B.s) / 2;
+  // he opens up on a surge, and squeezes down as your node pushes back on him
+  const press = 1 + rsSIM.surge * 0.7 - clamp(1 - rsSIM.nodeU, 0, 1) * 0.25;
+  const w0 = 46 * s * press, w1 = 30 * s * press;
+
+  /* ---- the light it lays on the plating, sampled along its length so the
+     floor under the beam is lit rather than the beam floating over it. */
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const SEG = 12;
+  for (let i = 0; i <= SEG; i++) {
+    const k = i / SEG;
+    const gx = lerp(o.x, nx, k), gy = lerp(o.y, ny, k);
+    const gp = rsProj(gx, gy, 0);
+    if (!gp.vis) continue;
+    rsGlow(c, gp.sx, gp.sy, 150 * gp.s * press, '#831843', 0.16 * alive);
+    rsGlow(c, gp.sx, gp.sy, 70 * gp.s * press, '#f472b6', 0.1 * alive);
+  }
+  c.restore();
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  // ---- outer haze: the column's atmosphere, one wide soft quad
+  const quad = (wa, wb) => {
+    c.beginPath();
+    c.moveTo(A.sx + px * wa, A.sy + py * wa);
+    c.lineTo(B.sx + px * wb, B.sy + py * wb);
+    c.lineTo(B.sx - px * wb, B.sy - py * wb);
+    c.lineTo(A.sx - px * wa, A.sy - py * wa);
+    c.closePath();
+  };
+  const hz = c.createLinearGradient(A.sx, A.sy, B.sx, B.sy);
+  hz.addColorStop(0, rgba('#be185d', 0.42 * alive));
+  hz.addColorStop(0.7, rgba('#9d174d', 0.22 * alive));
+  hz.addColorStop(1, rgba('#f472b6', 0.34 * alive));
+  quad(w0 * 1.5, w1 * 1.7); c.fillStyle = hz; c.fill();
+
+  /* ---- the body: the seven bosses' colours as sheets stacked THROUGH the
+     column rather than beside it, so it reads as one thing made of many. */
+  for (let k = 0; k < RS_RAINBOW.length; k++) {
+    const d = (k - (RS_RAINBOW.length - 1) / 2) / ((RS_RAINBOW.length - 1) / 2);
+    const churn = Math.sin(t * (2.6 + k * 0.7) + k * 1.9) * 0.16;
+    const wa = w0 * (0.92 - Math.abs(d) * 0.5 + churn) , wb = w1 * (0.92 - Math.abs(d) * 0.5 + churn);
+    const sh = d * 0.22 + churn * 0.3;
+    c.globalAlpha = (0.3 - Math.abs(d) * 0.12) * alive;
+    c.fillStyle = RS_RAINBOW[k];
+    c.beginPath();
+    c.moveTo(A.sx + px * (wa + w0 * sh), A.sy + py * (wa + w0 * sh));
+    c.lineTo(B.sx + px * (wb + w1 * sh), B.sy + py * (wb + w1 * sh));
+    c.lineTo(B.sx - px * (wb - w1 * sh), B.sy - py * (wb - w1 * sh));
+    c.lineTo(A.sx - px * (wa - w0 * sh), A.sy - py * (wa - w0 * sh));
+    c.closePath(); c.fill();
+  }
+
+  /* ---- pressure bands: chevrons riding down the column. This is the single
+     clearest read that output is flowing at you and hasn't stopped. */
+  const BANDS = 16;
+  for (let i = 0; i < BANDS; i++) {
+    const k = ((i / BANDS) + (t * 0.55) % 1) % 1;
+    const bw = lerp(w0, w1, k) * (1.02 - k * 0.1);
+    const cxp = A.sx + dx * k, cyp = A.sy + dy * k;
+    const lead = 12 * s * (1 + rsSIM.surge);
+    c.globalAlpha = (0.34 - k * 0.12) * alive * (0.6 + rsSIM.surge * 0.5);
+    c.strokeStyle = i % 4 === 0 ? '#fff7ed' : '#f9a8d4';
+    c.lineWidth = Math.max(1, 2.6 * s);
+    c.beginPath();
+    c.moveTo(cxp + px * bw, cyp + py * bw);
+    c.lineTo(cxp + ux * lead, cyp + uy * lead);
+    c.lineTo(cxp - px * bw, cyp - py * bw);
+    c.stroke();
+  }
+
+  /* ---- turbulent edges: the boundary is never straight on a beam this big */
+  for (const sd of [1, -1]) {
+    c.globalAlpha = 0.5 * alive;
+    c.strokeStyle = '#f9a8d4'; c.lineWidth = Math.max(1, 1.8 * s);
+    c.beginPath();
+    for (let i = 0; i <= 26; i++) {
+      const k = i / 26;
+      const wv = lerp(w0, w1, k)
+        + Math.sin(k * 14 - t * 9) * 5 * s * press
+        + Math.sin(k * 31 - t * 17 + sd) * 2.6 * s * press;
+      const x = A.sx + dx * k + px * wv * sd, y = A.sy + dy * k + py * wv * sd;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.stroke();
+  }
+
+  // ---- the core: hard, bright, and it is what the node is actually resisting
+  c.globalAlpha = 0.95 * alive;
+  const cg = c.createLinearGradient(A.sx, A.sy, B.sx, B.sy);
+  cg.addColorStop(0, rgba('#ffffff', 0.95)); cg.addColorStop(1, rgba('#fff7ed', 0.8));
+  quad(w0 * 0.2, w1 * 0.16); c.fillStyle = cg; c.fill();
+
+  // ---- the aperture: where it leaves him, heaviest point on the whole beam
+  rsGlow(c, A.sx, A.sy, 150 * s * press * alive, '#be185d', 0.55 * alive);
+  rsGlow(c, A.sx, A.sy, 70 * s * press * alive, '#f9a8d4', 0.5 * alive);
+  c.globalAlpha = 0.9 * alive; c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(A.sx, A.sy, w0 * 0.34, w0 * 0.34, 0, 0, TAU); c.fill();
+  c.restore();
+  // the column throws spall along itself
+  if (Math.random() < 0.5 * alive) {
+    const k = Math.random();
+    rsSpawnPart(lerp(o.x, nx, k) + rnd(40, -40), lerp(o.y, ny, k) + rnd(40, -40), lerp(o.z, nz, k) + rnd(40),
+      rnd(160, -160), rnd(160, -160), rnd(160, 20), rnd(2.6, 1), pick(RS_RAINBOW), rnd(0.6, 0.25));
+  }
+}
+
+/* ======================= YOUR LANCE — before and after ====================
+   Before overdrive it is the old lance: soft, wide, bloom-heavy, and it does
+   not sever his beam. After, it is the helix: two strands winding one axis,
+   depth-sorted, tight core, one sheath, light only where it lands.
+=========================================================================== */
+
+function rsDrawLance(c, sx3, sy3, sz3, nx, ny, nz, t, heavy, alive) {
+  const A = rsProj(sx3, sy3, sz3), B = rsProj(nx, ny, nz);
+  if (!A.vis || !B.vis) return;
+  const s = (A.s + B.s) / 2;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  if (!heavy) {
+    /* the old lance: bloom-heavy and soft-edged, and it visibly pulses with
+       your mash — the spam is the only thing keeping it in the fight */
+    const fd = 0.55 + rsSIM.feed * 0.5, mk = 1 + rsSIM.mash * 0.55;
+    for (const [wl, al, col] of [[40, 0.1, '#7f1d1d'], [22, 0.22, '#f87171'], [9, 0.5, '#fca5a5']]) {
+      c.globalAlpha = al * alive * fd; c.strokeStyle = col;
+      c.lineWidth = Math.max(1, wl * s * fd * mk);
+      c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    }
+    c.globalAlpha = 0.8 * alive; c.strokeStyle = '#ffffff';
+    c.lineWidth = Math.max(1.2, 4 * s * mk);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    // each pull of the trigger runs a pulse up the beam into the node
+    if (rsSIM.mash > 0.05) {
+      c.globalAlpha = rsSIM.mash * 0.8 * alive;
+      c.strokeStyle = '#fde68a'; c.lineWidth = Math.max(1, 7 * s);
+      c.setLineDash([26 * s, 40 * s]); c.lineDashOffset = -t * 900;
+      c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+      c.setLineDash([]);
+    }
+    rsGlow(c, A.sx, A.sy, 40 * s * (0.6 + rsSIM.feed), '#f87171', 0.4 * alive);
+    c.restore(); return;
+  }
+  // ---- the helix
+  const STEPS = 54, TURNS = 5.2, SPIN = 7.4, AMP = 26;
+  const ax = nx - sx3, ay = ny - sy3, az = nz - sz3;
+  const aLen = Math.hypot(ax, ay, az) || 1;
+  // a perpendicular pair in world space
+  let ux = -ay / aLen, uy = ax / aLen, uz = 0;
+  const un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;
+  const vx = (ay / aLen) * uz - (az / aLen) * uy;
+  const vy = (az / aLen) * ux - (ax / aLen) * uz;
+  const vz = (ax / aLen) * uy - (ay / aLen) * ux;
+  const pt = (kk, i) => {
+    const u = i / STEPS;
+    const ph = u * TURNS * TAU - t * SPIN + kk * Math.PI;
+    const taper = Math.sin(Math.min(1, u * 1.35) * Math.PI * 0.5) * (1 - u * 0.2);
+    const o1 = Math.cos(ph) * AMP * taper, o2 = Math.sin(ph) * AMP * taper;
+    const P = rsProj(sx3 + ax * u + ux * o1 + vx * o2,
+                   sy3 + ay * u + uy * o1 + vy * o2,
+                   sz3 + az * u + uz * o1 + vz * o2);
+    return { P, depth: o2 };
+  };
+  c.globalAlpha = 0.3 * alive; c.strokeStyle = '#fb923c'; c.lineWidth = Math.max(1, 1.4 * s);
+  c.setLineDash([6 * s, 11 * s]); c.lineDashOffset = -t * 320;
+  c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+  c.setLineDash([]);
+  for (const pass of [-1, 1]) for (const kk of [0, 1]) {
+    let open = false;
+    for (let i = 0; i <= STEPS; i++) {
+      const a = pt(kk, i);
+      if (!a.P.vis) { open = false; continue; }
+      const side = a.depth < 0 ? -1 : 1;
+      if (side !== pass) { if (open) { rsStrokeStrand(c, pass, alive, s); open = false; } continue; }
+      if (!open) { c.beginPath(); c.moveTo(a.P.sx, a.P.sy); open = true; }
+      else c.lineTo(a.P.sx, a.P.sy);
+      if (i === STEPS) { rsStrokeStrand(c, pass, alive, s); open = false; }
+    }
+  }
+  rsGlow(c, A.sx, A.sy, 30 * s, '#f97316', 0.55 * alive);
+  c.restore();
+}
+
+function rsStrokeStrand(c, pass, alive, s) {
+  const front = pass > 0;
+  c.globalAlpha = (front ? 0.3 : 0.16) * alive;
+  c.strokeStyle = '#7f1d1d'; c.lineWidth = Math.max(1, (front ? 10 : 7) * s); c.stroke();
+  c.globalAlpha = (front ? 0.85 : 0.42) * alive;
+  c.strokeStyle = front ? '#f97316' : '#b91c1c'; c.lineWidth = Math.max(1, (front ? 4.4 : 3) * s); c.stroke();
+  if (front) {
+    c.globalAlpha = 0.95 * alive; c.strokeStyle = '#fff7ed';
+    c.lineWidth = Math.max(1, 1.7 * s); c.stroke();
+  }
+}
+
+/* ============================== THE NODE ==================================
+   Where the two meet. It is the read for the whole fight: which way it is
+   moving is which way the fight is going.
+=========================================================================== */
+
+function rsDrawNode(c, nx, ny, nz, t, heavy) {
+  const P = rsProj(nx, ny, nz);
+  if (!P.vis) return;
+  const s = P.s;
+  const push = clamp((rsSIM.surge * 0.8 + (heavy ? -0.6 : 0.2)), -1, 1);
+  const R = (26 + rsSIM.surge * 14 + rsSIM.heat * 0.06) * s;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  // compression: the losing side gets squashed against the node
+  rsGlow(c, P.sx, P.sy, R * 3.4, heavy ? '#fb923c' : '#f472b6', 0.5);
+  rsGlow(c, P.sx, P.sy, R * 1.5, '#fff7ed', 0.6);
+  // hard core
+  c.globalAlpha = 0.95;
+  c.fillStyle = '#fff7ed';
+  c.beginPath(); c.arc(P.sx, P.sy, R * 0.42, 0, TAU); c.fill();
+  // the shell: jagged, spun, and it leans toward whoever is winning
+  c.translate(P.sx, P.sy);
+  c.rotate(t * 1.7);
+  c.globalAlpha = 0.75;
+  c.strokeStyle = heavy ? '#fdba74' : '#f9a8d4'; c.lineWidth = Math.max(1, 2 * s);
+  c.beginPath();
+  for (let i = 0; i <= 14; i++) {
+    const a = i / 14 * TAU, rr = R * (i % 2 ? 0.72 : 1.05 + push * 0.12);
+    i ? c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : c.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  c.closePath(); c.stroke();
+  c.rotate(-t * 3.1);
+  c.globalAlpha = 0.4;
+  c.beginPath(); c.arc(0, 0, R * 1.5, 0, TAU); c.stroke();
+  c.restore();
+  if (Math.random() < 0.7)
+    rsSpawnPart(nx + rnd(20, -20), ny + rnd(20, -20), nz + rnd(20, -20),
+      rnd(260, -260), rnd(260, -260), rnd(240, -40), rnd(3, 1.2),
+      heavy ? pick(['#fde047','#fb923c']) : pick(RS_RAINBOW), rnd(0.6, 0.2));
+}
+
+/* ================================ the ship ================================ */
+
+function rsHullPath(c, S) {
+  const p = [[22,0],[13,2.6],[9,7],[2,13.5],[-7,12],[-5,4.6],[-12,3.2],[-9,0],
+             [-12,-3.2],[-5,-4.6],[-7,-12],[2,-13.5],[9,-7],[13,-2.6]];
+  c.beginPath();
+  p.forEach((q, i) => i ? c.lineTo(q[0] * S, q[1] * S) : c.moveTo(q[0] * S, q[1] * S));
+  c.closePath();
+}
+function rsSurgeGout(t) {
+  const a = Math.sin(t * 3.7), b = Math.sin(t * 8.9 + 1.3), d = Math.sin(t * 1.61);
+  return 0.72 + Math.pow(clamp((a * 0.5 + b * 0.28 + d * 0.22) * 0.5 + 0.5, 0, 1), 2.1) * 0.95;
+}
+
+function rsDrawShip(c, t, vent) {
+  const P = rsProj(rsSIM.shipX, rsSIM.shipY, 14);
+  if (!P.vis) return;
+  const S = P.s * 4.0;                 // the hull is small; it needs the help
+  const sg = rsSurgeGout(t);
+  const heat = vent;
+  // floor shadow / ground contact
+  const g = rsProj(rsSIM.shipX, rsSIM.shipY, 0);
+  c.globalAlpha = 0.4; c.fillStyle = '#000';
+  c.beginPath(); c.ellipse(g.sx, g.sy, 24 * S, 9 * S, 0, 0, TAU); c.fill();
+  c.globalAlpha = 1;
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  rsGlow(c, P.sx, P.sy, (34 + heat * 30) * S, heat > 0.02 ? '#f97316' : '#f87171', 0.2 + heat * 0.25);
+  c.restore();
+
+  c.save();
+  c.translate(P.sx, P.sy);
+  c.rotate(rsSIM.shipAim + Math.PI / 2 * 0 + (rsCam.yaw));
+  // ---- the rsPlume, lagging the hull, gouting on the surge
+  if (heat > 0.001) {
+    const lag = clamp(rsPlume.lag * 1.9, -0.9, 0.9), st = rsPlume.stretch;
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (const sd of [1, -1]) {
+      const skew = lag * sd;
+      rsGlow(c, (-14 - lag * sd * 4) * S, sd * 15 * S, (40 + sg * 12) * S * heat, '#9a3412', 0.26 * heat);
+      for (let i = 0; i < 9; i++) {
+        const k = i / 8;
+        const flick = 0.86 + Math.sin(t * (6 + i * 1.6) + i * 2.3 + sd) * 0.14;
+        const span = heat * flick;
+        const dir = Math.PI - sd * (0.32 + k * 0.3) - lag * (0.35 + k * 0.5);
+        const len = (26 + 46 * Math.sin(Math.min(1, 0.18 + k * 0.92) * Math.PI)) * span * (0.8 + sg * 0.34) * st * S;
+        const bend = (sd * (7 + k * 12) + skew * (10 + k * 16)) * span * S;
+        const w = (4.2 - k * 1.4) * span * (0.85 + sg * 0.25) * S;
+        const near = 1 - k * 0.55;
+        c.globalAlpha = 0.26 * span; c.fillStyle = '#7f1d1d';
+        rsFlameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len, w * 1.9, bend); c.fill();
+        c.globalAlpha = 0.4 * span * near; c.fillStyle = '#ea580c';
+        rsFlameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len * 0.86, w * 1.05, bend * 0.8); c.fill();
+        c.globalAlpha = 0.6 * span * flick * near * near;
+        c.fillStyle = k < 0.3 ? '#fff7ed' : '#fdba74';
+        rsFlameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len * 0.5, w * 0.42, bend * 0.5); c.fill();
+      }
+    }
+    c.restore();
+  }
+  // ---- hull, with the notch as the hot point and heat conducted into the metal
+  c.lineWidth = Math.max(1, 2 * S);
+  rsHullPath(c, S);
+  c.fillStyle = heat > 0.02 ? rgba('#7c2d12', 0.3 + heat * 0.25) : 'rgba(248,113,113,0.14)';
+  c.strokeStyle = heat > 0.02 ? rsMix('#f87171', '#fdba74', heat) : '#f87171';
+  c.fill(); c.stroke();
+  if (heat > 0.001) {
+    c.save(); rsHullPath(c, S); c.clip();
+    c.globalCompositeOperation = 'lighter';
+    const cond = c.createLinearGradient(-13 * S, 0, 14 * S, 0);
+    const hh = heat * (0.55 + sg * 0.3);
+    cond.addColorStop(0, `rgba(255,237,213,${0.52 * hh})`);
+    cond.addColorStop(0.28, `rgba(249,115,22,${0.38 * hh})`);
+    cond.addColorStop(0.62, `rgba(153,27,27,${0.16 * hh})`);
+    cond.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = cond; c.fillRect(-16 * S, -16 * S, 34 * S, 32 * S);
+    c.restore();
+    c.save(); c.globalCompositeOperation = 'lighter';
+    rsGlow(c, -10.5 * S, 0, (13 + sg * 9) * S * heat, '#fb923c', 0.5 * heat);
+    rsGlow(c, -10.5 * S, 0, (6 + sg * 4) * S * heat, '#fff7ed', 0.45 * heat);
+    c.restore();
+  }
+  // pre-vent: the hull is already over temperature, and it shows before it vents
+  if (vent < 0.02 && rsSIM.heat > 1) {
+    const hk = rsSIM.heat / 100;
+    c.save(); rsHullPath(c, S); c.clip();
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.14 + hk * 0.5 + Math.sin(t * (4 + hk * 16)) * hk * 0.16;
+    c.fillStyle = rsMix('#7f1d1d', '#fb923c', hk);
+    c.fillRect(-20 * S, -16 * S, 42 * S, 32 * S);
+    c.restore();
+  }
+  c.globalAlpha = 0.85; c.fillStyle = heat > 0.02 ? '#fff7ed' : '#fca5a5';
+  c.beginPath(); c.arc(1 * S, 0, 3.1 * S, 0, TAU); c.fill();
+  c.restore();
+  // venting hull throws embers into the room
+  if (heat > 0.3 && Math.random() < 0.5)
+    rsSpawnPart(rsSIM.shipX + rnd(30, -30), rsSIM.shipY + rnd(30, -30), 20,
+      rnd(60, -60), rnd(60, -60), rnd(200, 60), rnd(2.4, 1),
+      Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1, 0.4));
+}
+
+/* ================================ the rsSpark =============================== */
+
+function rsDrawSpark(c, t) {
+  if (!rsSpark.on) return;
+  const P = rsProj(rsSpark.x, rsSpark.y, rsSpark.z);
+  if (!P.vis) return;
+  const f = clamp(0.5 + Math.sin(t * 27) * 0.34 + Math.sin(t * 61.7) * 0.22, 0, 1);
+  const hot = rsMix('#ef4444', '#fb923c', f);
+  rsSparkTrail.push({ x: P.sx, y: P.sy, hot, s: P.s });
+  if (rsSparkTrail.length > 30) rsSparkTrail.shift();
+  c.save(); c.globalCompositeOperation = 'lighter';
+  // the light it throws on the plating below it
+  const gp = rsProj(rsSpark.x, rsSpark.y, 0);
+  if (gp.vis) rsGlow(c, gp.sx, gp.sy, 260 * gp.s * clamp(1 - rsSpark.z / 1500, 0.1, 1), '#7c2d12', 0.3);
+  for (let i = 0; i < rsSparkTrail.length; i++) {
+    const q = rsSparkTrail[i], k = i / rsSparkTrail.length;
+    c.globalAlpha = k * k * (0.55 + f * 0.2);
+    c.fillStyle = q.hot;
+    const rr = (1 + k * 3.6) * (0.6 + q.s);
+    c.beginPath(); c.ellipse(q.x, q.y, rr * 0.55, rr * (1 + (1 - k) * 2.6), 0, 0, TAU); c.fill();
+  }
+  rsGlow(c, P.sx, P.sy, (48 + f * 22) * (0.5 + P.s), hot, 0.6);
+  c.globalAlpha = 0.95; c.fillStyle = hot;
+  c.beginPath(); c.ellipse(P.sx, P.sy, 3 + f, 12 + f * 8, 0, 0, TAU); c.fill();
+  c.globalAlpha = 1; c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(P.sx, P.sy - 1, 1.3 + f * 0.5, 4.6 + f * 2.6, 0, 0, TAU); c.fill();
+  c.restore();
+  if (Math.random() < 0.6)
+    rsSpawnPart(rsSpark.x + rnd(8, -8), rsSpark.y + rnd(8, -8), rsSpark.z, rnd(40, -40), rnd(40, -40), rnd(-40, -180),
+      rnd(1.8, 0.8), Math.random() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2));
+}
+
+
+function rsDrawParts(c) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const list = rsParts.map(p => ({ p, pr: rsProj(p.x, p.y, p.z) })).filter(o => o.pr.vis);
+  for (const { p, pr } of list) {
+    const a = clamp(p.life / p.max, 0, 1);
+    const r = p.r * pr.s;
+    rsGlow(c, pr.sx, pr.sy, r * 3.6, p.hex, a * 0.28);
+    c.globalAlpha = a; c.fillStyle = p.hex;
+    c.beginPath(); c.arc(pr.sx, pr.sy, Math.max(0.6, r * (0.4 + a * 0.6)), 0, TAU); c.fill();
+  }
+  c.restore();
+}
+
+/* ================================== HUD ===================================
+   The meter is the fight, so it is on screen the whole time: heat, the
+   proximity curve it charges on, and which way the node is going.
+=========================================================================== */
+
+/* ---- driving it from the clash the game is running ---------------------- */
+function rsSync(a, dt) {
+  const c = a.rite.clash;
+  rsT += dt;
+  if (rsActName !== c.act) { rsActName = c.act; rsActAtT = rsT; }
+  /* His frame sits upfield of the origin and you sit below it, in the scene's
+     own coordinates — the fight's world positions do not carry over, because
+     the scene is framed by its own camera and not by the game's. gap and the
+     node come straight across, so what you are pressing against is the same
+     contest the sim is resolving. */
+  rsSIM.shipX = 0;
+  /* Where you stand in the scene is how deep into the wall you have pressed,
+     not a copy of a world coordinate: the scene frames a 1200u duel and the
+     fight is run across a few hundred, so mapping the raw gap put the hull on
+     his chest. GAP_OUT is the far end of the window feed can ask for, so this
+     reads 1 when you have drifted all the way out and 0 pressed to the face. */
+  const depth = clamp(c.gap / CLASH_GAP_OUT, 0, 1.3);
+  rsSIM.shipY = RS_BOSS_Y + lerp(430, 1420, depth);
+  rsSIM.nodeU = c.nodeU;
+  rsSIM.gap = c.gap;
+  rsSIM.feed = c.feed;
+  rsSIM.surge = c.surge;
+  rsSIM.surgeTell = c.surgeTell;
+  rsSIM.walk = c.walk;
+  rsSIM.heat = P.heat;
+  rsSIM.locked = c.act !== 'LOCK' || rsT - rsActAtT > 1.2;
+  rsSIM.lockBreak = 0;
+  rsSIM.shipAim = -Math.PI / 2;
+  rsUpdateParts(dt);
+  for (let i = rsShocks.length - 1; i >= 0; i--) {
+    rsShocks[i].t += dt;
+    if (rsShocks[i].t > rsShocks[i].life) rsShocks.splice(i, 1);
+  }
+  if (rsFlash > 0) rsFlash = Math.max(0, rsFlash - dt * 2.2);
+  rsCam.shake = Math.max(0, rsCam.shake - dt * 30);
+
+  // the plume's own heading, lagging the hull's
+  let d = rsSIM.shipAim - rsPlume.ang;
+  while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
+  rsPlume.vel += (d * 165 - rsPlume.vel * 17) * dt;
+  rsPlume.ang += rsPlume.vel * dt; rsPlume.lag = d;
+
+  // the spark, and the room taking
+  if (rsActName === 'OVERDRIVE') {
+    const k = rsT - rsActAtT;
+    if (k > 0.5 && !rsSpark.done) {
+      rsSpark.on = true;
+      rsSpark.z -= dt * (420 + Math.max(0, k - 0.5) * 900);
+      rsSpark.x = rsSIM.shipX + Math.sin(rsT * 4) * 12;
+      rsSpark.y = rsSIM.shipY - 30;
+      if (rsSpark.z <= 20) {
+        rsSpark.on = false; rsSpark.done = true;
+        rsIgnite(); rsFlash = Math.max(rsFlash, 0.95); rsCam.shake = 18;
+        rsShockwave(rsSIM.shipX, rsSIM.shipY, '#fb923c', 900, 1.6);
+      }
+    }
+    const want = k < 1.0 ? 1 : 0.45;
+    rsDim = rsSmooth(rsDim, want, 2.4, dt);
+  } else if (rsActName === 'WALK' || rsActName === 'IMPACT') {
+    rsDim = rsSmooth(rsDim, 0.45, 2.4, dt);
+  } else rsDim = rsSmooth(rsDim, 0, 2.4, dt);
+
+  if (rsActName === 'IMPACT' && !rsBlow.on) {
+    rsBlow.on = true; rsBlow.t = 0;
+    rsFlash = 1; rsCam.shake = 26;
+    rsShockwave(RS_BOSS_X, RS_BOSS_Y, '#fff7ed', 1400, 2.2);
+    for (let i = 0; i < 160; i++) {
+      const ang = rnd(TAU);
+      rsSpawnPart(RS_BOSS_X + rnd(60, -60), RS_BOSS_Y + rnd(60, -60), rnd(360, 40),
+        Math.cos(ang) * rnd(700, 120), Math.sin(ang) * rnd(700, 120), rnd(600, -60),
+        rnd(4, 1.6), pick(RS_RAINBOW.concat(['#fff7ed', '#fde047'])), rnd(1.8, 0.6), 0.9);
+    }
+  }
+  if (rsBlow.on) rsBlow.t += dt;
+
+  // camera: it holds the game's plan view until the meter breaks the frame
+  const nX = lerp(RS_BOSS_X, rsSIM.shipX, rsSIM.nodeU);
+  const nY = lerp(RS_BOSS_Y, rsSIM.shipY, rsSIM.nodeU);
+  let tx = nX * 0.4, ty = -660, tD = 3020, tP = 0.13, tYaw = 0, tCy = 0.42;
+  const A = rsActName;
+  if (A === 'CONTEST')   { tD = 2900; tP = 0.17; tCy = 0.43; ty = -640; }
+  if (A === 'FULL')      { tD = 2100; tP = 0.32; tCy = 0.53; tYaw = 0.05;
+                           ty = lerp(nY, rsSIM.shipY, 0.4); }
+  if (A === 'OVERDRIVE') { tD = 1780; tP = 0.2 + 0.52 * rsEase(clamp((rsT - rsActAtT) / 3.2, 0, 1));
+                           tCy = 0.60; tYaw = 0.12; ty = lerp(nY, rsSIM.shipY, 0.55); }
+  if (A === 'WALK')      { tD = 2380; tP = 0.78; tCy = 0.60; tYaw = -0.14;
+                           tx = nX * 0.5; ty = lerp(nY, RS_BOSS_Y, 0.4) + 140; }
+  if (A === 'IMPACT')    { tD = 2700 + (rsT - rsActAtT) * 200; tP = 0.72; tCy = 0.52;
+                           tYaw = 0.2; tx = RS_BOSS_X; ty = RS_BOSS_Y + 340; }
+  const k2 = A === 'IMPACT' ? 1.1 : 1.6;
+  rsCam.x = rsSmooth(rsCam.x, tx, k2, dt);       rsCam.y = rsSmooth(rsCam.y, ty, k2, dt);
+  rsCam.D = rsSmooth(rsCam.D, tD, k2, dt);       rsCam.pitch = rsSmooth(rsCam.pitch, tP, k2, dt);
+  rsCam.yaw = rsSmooth(rsCam.yaw, tYaw, k2 * 0.7, dt);
+  rsCam.cy = rsSmooth(rsCam.cy, tCy, k2, dt);
+  rsCam.roll = rsSmooth(rsCam.roll, A === 'WALK' ? -0.035 : A === 'IMPACT' ? 0.03 : 0, 1.2, dt);
+}
+
+/* The whole frame, in the reference's own order. */
+function rsDrawScene(a) {
+  const t = rsT, stand = rsStand();
+  const k = rsT - rsActAtT;
+  const vent = rsActName === 'OVERDRIVE' ? clamp((k - 1.1) / 1.2, 0, 1)
+             : rsActName === 'WALK' ? 1
+             : rsActName === 'IMPACT' ? clamp(1 - (k - 2) / 2, 0, 1) : 0;
+  const life = rsPoolsSeeded ? clamp((rsT - rsActAtT + (rsActName === 'OVERDRIVE' ? 0 : 6) - 1) / 1.2, 0, 1) : 0;
+
+  ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  if (rsCam.shake > 0 || rsCam.roll) {
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(rsCam.roll);
+    ctx.translate(-W / 2 + rnd(rsCam.shake, -rsCam.shake), -H / 2 + rnd(rsCam.shake, -rsCam.shake));
+  }
+  rsDrawFloor(ctx, life * 0.9);
+  rsDrawPools(ctx, t);
+  rsDrawShocks(ctx);
+
+  const pos = rsDrawAmalgam(ctx, t, stand);
+  const o = rsBeamOrigin(pos);
+  const nx = lerp(o.x, rsSIM.shipX, rsSIM.nodeU);
+  const ny = lerp(o.y, rsSIM.shipY, rsSIM.nodeU);
+  const nz = lerp(o.z, 14, rsSIM.nodeU);
+  const heavy = vent > 0.35;
+
+  if (!rsBlow.on) rsDrawHisBeam(ctx, o, nx, ny, nz, t, 1);
+  if (rsSIM.locked) {
+    rsDrawLance(ctx, rsSIM.shipX, rsSIM.shipY, 14, nx, ny, nz, t, heavy, 1);
+    if (!rsBlow.on) rsDrawNode(ctx, nx, ny, nz, t, heavy);
+  }
+  rsDrawShip(ctx, t, vent);
+  rsDrawSpark(ctx, t);
+  rsDrawParts(ctx);
+  ctx.restore();
+
+  if (rsDim > 0.004) {
+    const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12,
+                                         W / 2, H / 2, Math.max(W, H) * 0.7);
+    vig.addColorStop(0, `rgba(5,5,7,${0.55 * rsDim})`);
+    vig.addColorStop(1, `rgba(5,5,7,${0.9 * rsDim})`);
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  }
+  if (life > 0.01) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    const pulse = 0.05 + Math.sin(t * 3.1) * 0.012;
+    g.addColorStop(0, `rgba(249,115,22,${(pulse + 0.03) * life})`);
+    g.addColorStop(1, `rgba(120,30,6,${pulse * 0.5 * life})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+  }
+  if (rsFlash > 0) {
+    ctx.fillStyle = `rgba(255,247,237,${Math.pow(rsFlash, 2) * 0.8})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  // letterbox: opens when the frame breaks, closes on the card
+  const lb = clamp(stand * 0.6 + (rsActName === 'IMPACT' ? 1 : 0), 0, 1) * 52;
+  if (lb > 0.5) {
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, lb); ctx.fillRect(0, H - lb, W, lb);
+  }
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
+                                      W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+}
+
+/* The scene carries state across a whole take — pools, the spark, the
+   break-up — so it has to be wound back when a clash begins. */
+function rsReset() {
+  rsT = 0; rsActName = 'LOCK'; rsActAtT = 0;
+  rsFlash = 0; rsDim = 0;
+  rsParts.length = 0; rsPools.length = 0; rsShocks.length = 0;
+  rsSparkTrail.length = 0; rsPoolsSeeded = false;
+  rsSpark.on = false; rsSpark.done = false; rsSpark.z = 1500;
+  rsSpark.x = 0; rsSpark.y = -40;
+  rsBlow.on = false; rsBlow.t = 0;
+  rsPlume.ang = -Math.PI / 2; rsPlume.vel = 0; rsPlume.lag = 0; rsPlume.stretch = 1;
+  rsCam.x = 0; rsCam.y = -660; rsCam.D = 3020;
+  rsCam.pitch = 0.13; rsCam.yaw = 0; rsCam.roll = 0; rsCam.cy = 0.42; rsCam.shake = 0;
+}
+
+/* =========================== THE CLASH READOUTS ==========================
+   SEQ 5 hands the frame to the scene, which means the game's own HUD never
+   draws for the length of it. These are the reference's readouts, rebuilt on
+   the state riteClash() is already keeping: the heat the whole act is spent
+   arriving at, the curve it charges on and the wall standing in front of the
+   good half of that curve, the feed you are paying in, and which way the
+   node is going. Without them the contest is a light show you cannot score.
+========================================================================= */
+function rsClashCurveX(gap, cw, AX) { return clamp(gap / AX, 0, 1) * cw; }
+
+function rsDrawHUD(a) {
+  const c = a.rite && a.rite.clash;
+  if (!c) return;
+  const t = rsT;
+  const A = CLASH_ACTS[c.i] || CLASH_ACTS[0];
+  const fin = c.act === 'IMPACT';
+  const driving = c.act === 'LOCK' || c.act === 'CONTEST';
+  const pad = 26;
+
+  ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+
+  /* ---- the act line. The banner says it once; this holds it, so a player
+     who looked away still knows which beat of the take they are in. ---- */
+  ctx.font = "800 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.letterSpacing = '3px';
+  ctx.fillStyle = rgba(AMAL_COL, 0.9);
+  ctx.fillText('THE AMALGAM', pad, 40);
+  ctx.letterSpacing = '0px';
+  ctx.font = "400 11px 'JetBrains Mono', ui-monospace, monospace";
+  const cap = (c.i + 1) + '/' + CLASH_ACTS.length + '  ' + c.act +
+              (A.cap_say ? '   —   ' + A.cap_say : '');
+  ctx.fillStyle = 'rgba(148,163,184,0.72)';
+  ctx.fillText(cap, pad, 58);
+
+  if (!fin) {
+    /* ---- HEAT. Vertical, right side: it is a hull temperature, and the
+       marks are the thresholds, so the fill has somewhere to arrive. ---- */
+    const bh = Math.min(320, H * 0.42), bx = W - 62, by = H / 2 - bh / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx, by, 14, bh);
+    ctx.strokeStyle = 'rgba(148,163,184,0.25)'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, 14, bh);
+    const hk = clamp(P.heat / HEAT_MAX, 0, 1);
+    const gg = ctx.createLinearGradient(0, by + bh, 0, by);
+    gg.addColorStop(0, '#7f1d1d'); gg.addColorStop(0.55, '#ea580c'); gg.addColorStop(1, '#fde68a');
+    ctx.fillStyle = gg; ctx.fillRect(bx + 1, by + bh * (1 - hk) + 1, 12, bh * hk - 2);
+    if (hk > 0.99) {
+      ctx.globalAlpha = 0.4 + Math.sin(t * 12) * 0.3;
+      ctx.fillStyle = '#fff7ed'; ctx.fillRect(bx - 3, by - 3, 20, bh + 6);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+    for (const m of [0.25, 0.5, 0.75]) {
+      const y = by + bh * (1 - m);
+      ctx.beginPath(); ctx.moveTo(bx - 4, y); ctx.lineTo(bx, y); ctx.stroke();
+    }
+    ctx.save();
+    ctx.translate(bx - 12, by + bh / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.font = "800 10px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = hk > 0.99 ? '#fde68a' : 'rgba(253,186,116,0.8)';
+    ctx.fillText(hk > 0.99 ? 'OVERDRIVE READY' : 'HEAT  ' + Math.floor(P.heat), 0, 0);
+    ctx.restore();
+    ctx.letterSpacing = '0px'; ctx.textAlign = 'left';
+
+    // ---- the proximity curve, and the wall standing in front of its good half
+    const cw = 150, ch = 54, cx0 = pad, cy0 = H - 132, AX = 900;
+    ctx.strokeStyle = 'rgba(148,163,184,0.2)'; ctx.lineWidth = 1;
+    ctx.strokeRect(cx0, cy0, cw, ch);
+    ctx.beginPath();
+    for (let i = 0; i <= cw; i++) {
+      const y = cy0 + ch - Math.exp(-(i / cw * AX) / CLASH_PROX_R) * ch;
+      i ? ctx.lineTo(cx0 + i, y) : ctx.moveTo(cx0 + i, y);
+    }
+    ctx.strokeStyle = 'rgba(251,146,60,0.75)'; ctx.lineWidth = 1.5; ctx.stroke();
+    /* everything left of this line is where the curve pays best and where his
+       output will not let you stand. It only opens on the walk. */
+    const wx = cx0 + rsClashCurveX(CLASH_STANDOFF * (1 - c.walk), cw, AX);
+    if (wx > cx0 + 1) {
+      ctx.fillStyle = 'rgba(244,114,182,0.14)';
+      ctx.fillRect(cx0, cy0, wx - cx0, ch);
+      ctx.strokeStyle = 'rgba(244,114,182,0.75)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(wx, cy0 - 3); ctx.lineTo(wx, cy0 + ch + 3); ctx.stroke();
+      ctx.font = "700 8px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = 'rgba(244,114,182,0.8)';
+      ctx.fillText(c.walk > 0.02 ? 'COLLAPSING' : 'STANDOFF', cx0 + 3, cy0 + 10);
+      const wc = clashWallClicks(c.gap, c.walk);
+      if (wc > 0) {
+        ctx.fillStyle = 'rgba(249,168,212,0.9)';
+        ctx.fillText('← ' + wc.toFixed(1) + ' clk/s', cx0 + 3, cy0 + ch - 4);
+      }
+    }
+    ctx.font = "400 9px 'JetBrains Mono', ui-monospace, monospace";
+    const gx = cx0 + rsClashCurveX(c.gap, cw, AX);
+    const gy = cy0 + ch - clamp(c.rate / (CLASH_HEAT_R * 1.36), 0, 1) * ch;
+    ctx.strokeStyle = 'rgba(255,247,237,0.3)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(gx, cy0); ctx.lineTo(gx, cy0 + ch); ctx.stroke();
+    ctx.fillStyle = '#fff7ed';
+    ctx.beginPath(); ctx.arc(gx, gy, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(148,163,184,0.55)';
+    ctx.fillText('CHARGE RATE  ×  PROXIMITY', cx0, cy0 - 8);
+    ctx.fillText('gap ' + Math.round(c.gap) + 'u', cx0, cy0 + ch + 14);
+    ctx.fillText('+' + c.rate.toFixed(1) + ' heat/s', cx0 + 86, cy0 + ch + 14);
+
+    /* ---- FEED: the spam. A beam battle is won by out-feeding him, so the
+       mash rate gets its own read under the curve it multiplies. ---- */
+    const fw = 150, fx = pad, fy = cy0 - 34;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(fx, fy, fw, 8);
+    ctx.strokeStyle = 'rgba(148,163,184,0.22)'; ctx.lineWidth = 1;
+    ctx.strokeRect(fx, fy, fw, 8);
+    const fk = clamp(c.feed / 1.35, 0, 1);
+    const fg = ctx.createLinearGradient(fx, 0, fx + fw, 0);
+    fg.addColorStop(0, '#7f1d1d'); fg.addColorStop(0.6, '#f97316'); fg.addColorStop(1, '#fde68a');
+    ctx.fillStyle = fg; ctx.fillRect(fx + 1, fy + 1, (fw - 2) * fk, 6);
+    if (c.wasFire) {
+      ctx.globalAlpha = 0.5 + Math.sin(t * 22) * 0.4; ctx.fillStyle = '#fff7ed';
+      ctx.fillRect(fx + (fw - 2) * fk - 2, fy - 2, 4, 12); ctx.globalAlpha = 1;
+    }
+    ctx.font = "400 9px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.fillStyle = fk > 0.7 ? 'rgba(253,230,138,0.85)' : 'rgba(148,163,184,0.55)';
+    ctx.fillText('FEED  ×' + (CLASH_FEED_FLR + c.feed).toFixed(2) +
+                 (fk < 0.25 ? '   — MASH' : ''), fx, fy - 6);
+
+    // ---- the contest bar: which way the node is going
+    const lw = Math.min(360, W * 0.3), lx = W / 2 - lw / 2, ly = H - 66;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(lx, ly, lw, 6);
+    const ng = ctx.createLinearGradient(lx, 0, lx + lw, 0);
+    ng.addColorStop(0, '#f472b6'); ng.addColorStop(1, '#fb923c');
+    ctx.fillStyle = ng; ctx.globalAlpha = 0.35; ctx.fillRect(lx, ly, lw, 6);
+    ctx.globalAlpha = 1;
+    const np = lx + clamp(c.nodeU, 0, 1) * lw;
+    ctx.fillStyle = '#fff7ed'; ctx.fillRect(np - 2, ly - 5, 4, 16);
+    ctx.font = "600 9px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.letterSpacing = '2px';
+    ctx.fillStyle = 'rgba(244,114,182,0.7)'; ctx.fillText('HIM', lx, ly - 10);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(251,146,60,0.8)'; ctx.fillText('YOU', lx + lw, ly - 10);
+    ctx.textAlign = 'left'; ctx.letterSpacing = '0px';
+
+    // ---- the one line of state that matters this second
+    ctx.textAlign = 'center';
+    if (c.act === 'FULL' && !c.fired && c.at >= A.floor) {
+      ctx.font = "800 20px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.letterSpacing = '4px';
+      ctx.fillStyle = rgba('#fb923c', 0.55 + Math.sin(t * 16) * 0.4);
+      ctx.fillText('VENT   [F]', W / 2, H - 92);
+    } else if (c.surge > 0.02 && driving) {
+      ctx.font = "800 20px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.letterSpacing = '4px';
+      ctx.fillStyle = rgba('#f87171', 0.4 + c.surge * 0.5);
+      ctx.fillText('SURGE', W / 2, H - 92);
+    } else if (c.surgeTell > 0 && driving) {
+      ctx.font = "800 18px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.letterSpacing = '5px';
+      ctx.fillStyle = rgba('#f472b6', 0.4 + Math.sin(t * 26) * 0.4);
+      ctx.fillText('SURGE', W / 2, H - 92);
+    } else if (c.act === 'LOCK' || c.act === 'CONTEST') {
+      ctx.font = "600 10px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.letterSpacing = '3px';
+      ctx.fillStyle = 'rgba(148,163,184,0.4)';
+      ctx.fillText(c.gap < CLASH_STANDOFF + 90 && c.walk < 0.02
+                   ? 'STANDOFF HELD — CANNOT CLOSE' : 'LOCK HELD', W / 2, H - 92);
+    }
+    ctx.letterSpacing = '0px'; ctx.textAlign = 'left';
+
+    // ---- the acts, as a strip: six beats, and which one is running
+    const tw = Math.min(520, W * 0.44), tx = W / 2 - tw / 2, ty = H - 32;
+    const seg = tw / CLASH_ACTS.length;
+    for (let i = 0; i < CLASH_ACTS.length; i++) {
+      const done = i < c.i;
+      const here = i === c.i;
+      ctx.fillStyle = done ? 'rgba(253,230,138,0.55)' : 'rgba(148,163,184,0.16)';
+      ctx.fillRect(tx + seg * i, ty, seg - 4, 2);
+      if (here) {
+        ctx.fillStyle = 'rgba(253,186,116,0.85)';
+        ctx.fillRect(tx + seg * i, ty, (seg - 4) * clamp(c.at / Math.max(0.1, A.cap), 0, 1), 2);
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+
+
+fit();
+riteEnter(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

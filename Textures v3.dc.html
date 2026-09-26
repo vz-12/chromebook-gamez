@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  body{margin:0;background:#05060a;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif}
+  a{color:#fcd34d}a:hover{color:#fde68a}
+</style>
+</helmet>
+<div style="min-height:100vh;background:#05060a;color:#cbd5e1;padding:24px 24px 44px;display:flex;flex-direction:column;gap:14px;align-items:center">
+
+  <div style="width:100%;max-width:1600px;display:flex;align-items:baseline;justify-content:space-between;gap:20px;flex-wrap:wrap">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.22em;color:#e0f2fe">VOIDRUNNER</div>
+      <div style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#475569">texture pass 03 · the giant key · the founder · the camp · the tribunal</div>
+    </div>
+    <div style="font-size:11px;color:#334155;letter-spacing:.06em">canvas 2D only · no assets · every scene runs live</div>
+  </div>
+
+  <div style="width:100%;max-width:1600px;display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <sc-for list="{{ scenes }}" as="s" hint-placeholder-count="6">
+        <button onClick="{{ s.pick }}" style="background:#0b1220;padding:8px 13px;border-radius:7px;font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.14em;cursor:pointer;white-space:nowrap;color:{{ s.col }};border:1px solid {{ s.bc }}">{{ s.label }}</button>
+      </sc-for>
+    </div>
+    <div style="display:flex;gap:8px;margin-left:auto">
+      <button onClick="{{ toggleCompare }}" style="background:#0b1220;padding:8px 13px;border-radius:7px;font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.14em;cursor:pointer;white-space:nowrap;color:{{ cmpCol }};border:1px solid {{ cmpBc }}">SPLIT: OLD | NEW</button>
+      <button onClick="{{ restart }}" style="background:#0b1220;color:#fcd34d;border:1px solid rgba(252,211,77,.45);padding:8px 13px;border-radius:7px;font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.14em;cursor:pointer;white-space:nowrap">REPLAY SCENE</button>
+    </div>
+  </div>
+
+  <div style="position:relative;width:100%;max-width:1600px;aspect-ratio:16/9;border:1px solid #131c2b;border-radius:4px;overflow:hidden">
+    <canvas ref="{{ cv }}" style="display:block;width:100%;height:100%"></canvas>
+  </div>
+
+  <div style="width:100%;max-width:1600px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;margin-top:6px">
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.2em;color:{{ accent }}">{{ sceneName }} — WAS</div>
+      <div style="font-size:12.5px;line-height:1.65;color:#94a3b8">{{ before }}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.2em;color:#64748b">IS</div>
+      <div style="font-size:12.5px;line-height:1.65;color:#94a3b8">{{ after }}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="font:700 10px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.2em;color:#64748b">WHY</div>
+      <div style="font-size:12.5px;line-height:1.65;color:#94a3b8">{{ why }}</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1680,&quot;height&quot;:1180}}">
+const TAU = Math.PI * 2;
+const clamp = (v,a,b)=>v<a?a:v>b?b:v;
+const lerp = (a,b,t)=>a+(b-a)*t;
+const rgba = (hex,a)=>{const n=parseInt(hex.slice(1),16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;};
+const R = (a=1,b=0)=>b+Math.random()*(a-b);
+
+const FOUND_COL = '#fcd34d', CROWD_COL = '#fde68a';
+const CAMP_DARK = '#2a1c06', CAMP_EMBER = '#f59e0b', COLD_COL = '#94a3b8';
+const KEY_COL = '#a3e635', AMAL_COL = '#fb7185';
+const KEY_R = 30;
+
+const OPEN_T = { unbolt:2.6, drift:5.4, cockpit:7.2, out:9.4, done:17.6 };
+const FOUND_HELLO = [
+  { t:9.8,  s:'Oh — hello. Give me a moment, it sticks.' },
+  { t:12.2, s:'Nobody has opened that in a very long time.' },
+  { t:14.4, s:'You are hurt. Come inside, we have somewhere for that.' }
+];
+const CHOICE_LINES = [
+  'Ah — not that one.',
+  'That one argues. You have seen what that does to a room.',
+  'Come in and sit down. I will close it.'
+];
+const TRI_SEATS = 24;
+
+const SCENES = [
+  { key:'gkey', name:'THE GIANT KEY', accent:KEY_COL,
+    before:'A 13px glyph orbiting your shoulder at a fixed radius, plus a line of HUD text reading player.key ×1. It was jewellery, and it was the same size as a pickup.',
+    after:'Thirty pixels of it, heavy: a wider lag, a slower bank, a shadow dragged along the floor underneath. It does not fit anything you own — the only lock it goes in is a boss.',
+    why:'It has to survive a whole run in the corner of your eye and still read as the thing ROOT could not explain. A trinket gets forgotten; something you are visibly hauling does not.' },
+  { key:'unlock', name:'THE UNLOCK', accent:AMAL_COL,
+    before:'Starting the amalgam fight with the key just skipped it — a flash, a banner, and the boss was gone. The one moment the whole route is built on had no picture at all.',
+    after:'The chassis is a real exoskeleton: hex frame, ribs, and a sternum seam. The key is far too big to turn, so it is driven into that seam and levered. Bolts go dead in banks, eight armour plates fall off the frame, the frame stands empty, a six-leaf iris retracts, and there is a man inside strapped to a harness.',
+    why:'The assembly sequence ran forwards, so this one runs backwards on the same hardware — every joint releasing instead of clamping. It reads as the machine being opened rather than broken, which is the difference between a rescue and a kill.' },
+  { key:'camp', name:'THE CAMP', accent:CAMP_EMBER,
+    before:'There was no place. Walking into the tear healed you, printed a line of dialogue and closed it again — the safe space existed entirely as a banner.',
+    after:'A room. Plate-and-hex shelters leaning on each other, a fire that is the only bright thing in it, people sitting round it with their backs to you, embers going up, and the corners falling away into dark.',
+    why:'It is drawn once and reused through the slit, behind the choice and under the tribunal — because the tribunal IS this room with the chairs turned round, and that only lands if you recognise it.' },
+  { key:'tear', name:'THE TEAR', accent:FOUND_COL,
+    before:'A brown ellipse with a yellow outline and the word INSIDE over it. It read as a hazard, or as a pickup, and gave you no reason to cross a room under fire to reach it.',
+    after:'The room\u2019s own wall pulled open: a breathing, irregular rim with the camp visible through the gap, the floor grid ending raggedly against it, and heat coming off it. The fifth one is cold and has somebody standing in it.',
+    why:'You should want to go there before you know what it does. Seeing the fire and the people from across the arena is the whole invitation, and the cold fifth one is the first thing that is wrong.' },
+  { key:'choice', name:'THE CHOICE', accent:FOUND_COL,
+    before:'Two glowing dots either side of a grey vertical line, labelled OUTSIDE and INSIDE, over a black wash. It was a diagram of an argument rather than the argument.',
+    after:'One image on one ground: the camp you have been healed in four times, a torn doorway with the game\u2019s cold grey behind it, him inside with his arms open, and them outside at exactly the same size, unlit.',
+    why:'The scene only has one point to make and two identical figures make it without a word — one of them is being kept in the cold, and the man doing it is being lovely about it.' },
+  { key:'tribunal', name:'THE TRIBUNAL', accent:FOUND_COL,
+    before:'Twenty-four circles floating in a grid, filled if still his and drawn as an arc if not, around a rectangle with a dot in it. Nothing was a room and nothing was a person.',
+    after:'The camp with the chairs turned round: banked stands with real risers and benches, the crowd standing on them at the size they were round the fire, and a throne built out of the amalgam plates he climbed out of. A bench goes dark as its row empties.',
+    why:'It is a pantheon staging — you are in the pit and the room is pointed at you. Turning a seat has to be visible from the floor, so a seat does not change colour, it turns its back and takes the light off the bench with it.' }
+];
+
+class Component extends DCLogic {
+  state = { idx: 0, compare: false };
+  cv = React.createRef();
+
+  componentDidMount(){ this.boot(); }
+  componentDidUpdate(){
+    /* The scene's state has to exist before anything draws it, and this runs
+       BEFORE a setState callback, so build() cannot live in the pick handler.
+       Which scene was last built is tracked here rather than read off a
+       prevState argument, which this runtime does not supply. */
+    if(this._built!==this.state.idx) this.build();
+    this.paint();
+  }
+  paint(){
+    if(!this.ctx || !this.raf){ this.boot(); return; }   // revive, don't no-op
+    try{ this.frame(); }catch(e){ console.error('paint failed', e && e.message); }
+  }
+  componentWillUnmount(){
+    cancelAnimationFrame(this.raf);
+    clearTimeout(this._retry);
+    if(this._ro){ this._ro.disconnect(); this._ro=null; }
+    if(this._vis){ document.removeEventListener('visibilitychange',this._vis); this._vis=null; }
+    this.raf = 0; this.ctx = null;
+  }
+
+  boot(){
+    const cv=this.cv.current;
+    /* Nothing in the boot path may depend on requestAnimationFrame: a document
+       that is not being looked at gets no animation frames at all, so a rAF
+       retry here would never run and the sheet would stay blank forever. */
+    if(!cv){ clearTimeout(this._retry); this._retry=setTimeout(()=>this.boot(),16); return; }
+    if(this.ctx && this.ctx.canvas===cv && this.raf) return;
+    cancelAnimationFrame(this.raf);
+    this.ctx=cv.getContext('2d',{alpha:false});
+    if(!this._ro && typeof ResizeObserver!=='undefined'){
+      this._ro=new ResizeObserver(()=>this.paint());
+      this._ro.observe(cv);
+    }
+    this.t0=performance.now(); this.last=this.t0;
+    this.glowCache=this.glowCache||new Map(); this.parts=[];
+    const scan=document.createElement('canvas'); scan.width=1; scan.height=3;
+    const s=scan.getContext('2d'); s.fillStyle='rgba(0,0,0,0.20)'; s.fillRect(0,2,1,1); this.scanTile=scan;
+    const grain=document.createElement('canvas'); grain.width=grain.height=256;
+    const g=grain.getContext('2d'); const img=g.createImageData(256,256);
+    for(let i=0;i<img.data.length;i+=4){const v=110+Math.random()*90;img.data[i]=img.data[i+1]=img.data[i+2]=v;img.data[i+3]=255;}
+    g.putImageData(img,0,0); this.grainTile=grain;
+    this.build();
+    const loop=()=>{
+      try{ this.frame(); }catch(e){ console.error('scene frame failed',e); }
+      this.raf=requestAnimationFrame(loop);
+    };
+    this.frame();                       // a hidden document gets no rAF at all
+    this.raf=requestAnimationFrame(loop);
+    if(!this._vis){
+      this._vis=()=>{ if(!document.hidden) this.boot(); };
+      document.addEventListener('visibilitychange',this._vis);
+    }
+    clearTimeout(this._retry);
+  }
+
+  /* ------------------------------------------------------------ helpers */
+  glow(color){
+    let s=this.glowCache.get(color); if(s) return s;
+    const S=96,c=document.createElement('canvas'); c.width=c.height=S;
+    const g=c.getContext('2d');
+    const grd=g.createRadialGradient(S/2,S/2,0,S/2,S/2,S/2);
+    grd.addColorStop(0,rgba(color,1)); grd.addColorStop(0.18,rgba(color,0.75));
+    grd.addColorStop(0.45,rgba(color,0.22)); grd.addColorStop(1,rgba(color,0));
+    g.fillStyle=grd; g.fillRect(0,0,S,S);
+    this.glowCache.set(color,c); return c;
+  }
+  drawGlow(x,y,r,color,a=1){ const c=this.ctx; const p=c.globalAlpha; c.globalAlpha=a; c.drawImage(this.glow(color),x-r,y-r,r*2,r*2); c.globalAlpha=p; }
+  poly(x,y,r,n,a0){ const c=this.ctx; c.beginPath();
+    for(let i=0;i<n;i++){ const a=a0+i*TAU/n; const X=x+Math.cos(a)*r,Y=y+Math.sin(a)*r; i?c.lineTo(X,Y):c.moveTo(X,Y); } c.closePath(); }
+  rr(x,y,w,h,r){ const c=this.ctx; c.beginPath(); c.moveTo(x+r,y);
+    c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+  spark(x,y,vx,vy,r,col,life){
+    this.parts.push({x:x+(this._ox||0),y,vx,vy,r,col,life,t:0});
+    if(this.parts.length>420) this.parts.shift();
+  }
+  // origin at the middle of the shaft, pointing +x. r is half its length.
+  keyGlyph(r,col,a){
+    const c=this.ctx;
+    c.lineWidth=Math.max(1.1,r*0.09);
+    c.strokeStyle=rgba(col,a);
+    c.fillStyle=rgba(col,a*0.2);
+    this.poly(-r*0.55,0,r*0.44,6,Math.PI/6);
+    c.fill(); c.stroke();
+    c.fillStyle='rgba(4,9,4,0.92)';
+    c.beginPath(); c.arc(-r*0.55,0,r*0.18,0,TAU); c.fill();
+    c.strokeStyle=rgba(col,a*0.85);
+    c.beginPath(); c.arc(-r*0.55,0,r*0.18,0,TAU); c.stroke();
+    c.fillStyle=rgba(col,a*0.9);
+    c.fillRect(-r*0.16,-r*0.08,r*1.04,r*0.16);
+    c.fillRect(r*0.42,0,r*0.14,r*0.36);
+    c.fillRect(r*0.66,0,r*0.14,r*0.26);
+    c.fillStyle=rgba('#f7fee7',a);
+    c.fillRect(r*0.86,-r*0.08,r*0.06,r*0.16);
+  }
+
+  /* One man, drawn in one place. He is the pilot in the chassis, the host at
+     the tear, the pleasant voice at the door and the shape on the throne. The
+     harness never comes off: the shoulder yoke, the spine cabling and the hex
+     hip plate are the amalgam's own hardware still bolted to him. */
+  founderFigure(x,y,s,o){
+    o=o||{}; const c=this.ctx;
+    const col=o.col||FOUND_COL, a=o.a===undefined?1:o.a;
+    const sit=o.sit||0, open=o.open||0;
+    const lw=Math.max(1.2,s*0.085);
+    c.save(); c.translate(x,y); c.lineCap='round'; c.lineJoin='round';
+    const hipY=s*(0.5-sit*0.16), headY=-s*(0.72-sit*0.1);
+    c.strokeStyle=rgba(col,a*0.3); c.lineWidth=lw*0.7;
+    for(let k=-1;k<=1;k+=2){
+      c.beginPath(); c.moveTo(k*s*0.3,-s*0.3);
+      c.quadraticCurveTo(k*s*0.62,s*0.06,k*s*0.42,hipY+s*0.16); c.stroke();
+    }
+    c.strokeStyle=rgba(col,a*0.85); c.lineWidth=lw;
+    if(sit>0.5){
+      c.beginPath();
+      c.moveTo(-s*0.16,hipY); c.lineTo(-s*0.5,hipY+s*0.1); c.lineTo(-s*0.5,hipY+s*0.46);
+      c.moveTo(s*0.16,hipY);  c.lineTo(s*0.5,hipY+s*0.1);  c.lineTo(s*0.5,hipY+s*0.46);
+      c.stroke();
+    } else {
+      c.beginPath();
+      c.moveTo(-s*0.14,hipY); c.lineTo(-s*0.2,hipY+s*0.52);
+      c.moveTo(s*0.14,hipY);  c.lineTo(s*0.22,hipY+s*0.52);
+      c.stroke();
+    }
+    c.beginPath(); c.moveTo(0,-s*0.42); c.lineTo(0,hipY); c.stroke();
+    const ax=s*(0.34+open*0.3), ay=-s*0.34+s*(0.34-open*0.24);
+    c.beginPath();
+    c.moveTo(-s*0.26,-s*0.34); c.lineTo(-ax,ay);
+    c.moveTo(s*0.26,-s*0.34);  c.lineTo(ax,ay);
+    c.stroke();
+    c.fillStyle=rgba(col,a*0.22); c.strokeStyle=rgba(col,a); c.lineWidth=lw*0.9;
+    c.beginPath();
+    c.moveTo(-s*0.34,-s*0.36); c.lineTo(-s*0.24,-s*0.46);
+    c.lineTo(s*0.24,-s*0.46);  c.lineTo(s*0.34,-s*0.36);
+    c.lineTo(s*0.2,-s*0.26);   c.lineTo(-s*0.2,-s*0.26);
+    c.closePath(); c.fill(); c.stroke();
+    this.poly(0,hipY,s*0.2,6,Math.PI/6);
+    c.fillStyle=rgba(col,a*0.16); c.fill(); c.stroke();
+    c.beginPath(); c.arc(0,headY,s*0.2,0,TAU);
+    c.fillStyle=rgba(CAMP_DARK,a*0.9); c.fill(); c.stroke();
+    if(o.lamp!==false){
+      c.save(); c.globalCompositeOperation='lighter';
+      this.drawGlow(0,headY,s*0.9,col,a*0.3); c.restore();
+      c.fillStyle=rgba('#fffbeb',a);
+      c.fillRect(-s*0.07,headY-s*0.26,s*0.14,s*0.08);
+    }
+    c.restore();
+  }
+
+  /* His people: the same silhouette with the hardware taken off, because they
+     were never in the machine. Facing you while they are still his; drawn from
+     behind, and grey, once they are not. */
+  crowdFigure(x,y,s,held,hard,a){
+    const c=this.ctx, col=held?CROWD_COL:'#64748b';
+    const lw=Math.max(1.1,s*0.09);
+    c.save(); c.translate(x,y); c.lineCap='round'; c.lineJoin='round';
+    c.strokeStyle=rgba(col,a*(hard>0?1:0.8));
+    c.lineWidth=hard>0?lw*1.5:lw;
+    c.beginPath();
+    c.moveTo(0,-s*0.34); c.lineTo(0,s*0.34);
+    c.moveTo(-s*0.16,s*0.34); c.lineTo(-s*0.2,s*0.8);
+    c.moveTo(s*0.16,s*0.34);  c.lineTo(s*0.2,s*0.8);
+    c.stroke();
+    if(held){
+      c.beginPath();
+      c.moveTo(-s*0.34,-s*0.2); c.lineTo(s*0.34,-s*0.2);
+      c.moveTo(-s*0.32,-s*0.2); c.lineTo(-s*0.36,s*0.26);
+      c.moveTo(s*0.32,-s*0.2);  c.lineTo(s*0.36,s*0.26);
+      c.stroke();
+      c.beginPath(); c.arc(0,-s*0.56,s*0.21,0,TAU);
+      c.fillStyle=rgba(col,a*0.28); c.fill(); c.stroke();
+      c.fillStyle=rgba('#fffbeb',a*0.9);
+      c.fillRect(-s*0.11,-s*0.6,s*0.07,s*0.05);
+      c.fillRect(s*0.04,-s*0.6,s*0.07,s*0.05);
+    } else {
+      c.beginPath(); c.moveTo(-s*0.24,-s*0.18); c.lineTo(s*0.24,-s*0.18); c.stroke();
+      c.beginPath(); c.arc(0,-s*0.52,s*0.19,Math.PI*0.12,Math.PI*0.88); c.stroke();
+    }
+    c.restore();
+  }
+
+  /* The place behind the tear. Built from the deep sectors' plate-and-hex
+     hardware, but warm: every edge is lit from a fire on the floor rather than
+     from a screen. No straight horizons — shelters lean on each other. */
+  campScene(w,h,a,T){
+    const c=this.ctx, t=T;
+    const g=c.createLinearGradient(0,-h/2,0,h/2);
+    g.addColorStop(0,rgba('#120b02',a));
+    g.addColorStop(0.55,rgba(CAMP_DARK,a*0.95));
+    g.addColorStop(1,rgba('#3b2708',a));
+    c.fillStyle=g; c.fillRect(-w/2,-h/2,w,h);
+
+    const floor=h*0.24;
+    c.strokeStyle=rgba(CAMP_EMBER,a*0.18); c.lineWidth=1;
+    for(let x=-w/2;x<w/2;x+=46){ c.beginPath(); c.moveTo(x,-h/2); c.lineTo(x,floor); c.stroke(); }
+    c.strokeStyle=rgba(CAMP_EMBER,a*0.13);
+    for(let y=-h/2;y<floor;y+=34){ c.beginPath(); c.moveTo(-w/2,y); c.lineTo(w/2,y); c.stroke(); }
+
+    const shel=[[-0.34,1.0,-0.06],[0.06,0.82,0.05],[0.4,1.14,-0.03],[-0.12,0.6,0.08],[0.28,0.58,-0.07]];
+    for(let i=0;i<shel.length;i++){
+      const fx=shel[i][0], sc=shel[i][1], tilt=shel[i][2];
+      const sw=w*0.15*sc, sh=h*0.2*sc;
+      c.save(); c.translate(fx*w,floor-h*0.02); c.rotate(tilt);
+      c.fillStyle=rgba('#1a1002',a*0.95);
+      c.strokeStyle=rgba(CAMP_EMBER,a*0.5); c.lineWidth=1.6;
+      c.beginPath();
+      c.moveTo(-sw/2,0); c.lineTo(-sw*0.36,-sh); c.lineTo(sw*0.36,-sh); c.lineTo(sw/2,0);
+      c.closePath(); c.fill(); c.stroke();
+      if(i%2===0){
+        c.fillStyle=rgba(CAMP_EMBER,a*(0.3+Math.sin(t*1.4+i)*0.08));
+        c.fillRect(-sw*0.1,-sh*0.52,sw*0.2,sh*0.52);
+      }
+      c.restore();
+    }
+
+    const fx2=-w*0.06, fy=floor+h*0.14;
+    const flick=0.8+Math.sin(t*7.1)*0.12+Math.sin(t*3.3)*0.08;
+    c.save(); c.globalCompositeOperation='lighter';
+    this.drawGlow(fx2,fy,h*0.4*flick,CAMP_EMBER,a*0.3);
+    this.drawGlow(fx2,fy,h*0.13*flick,'#fde68a',a*0.5);
+    c.restore();
+    c.fillStyle=rgba('#0d0801',a);
+    c.fillRect(-w/2,floor,w,h/2-floor);
+    c.save(); c.globalCompositeOperation='lighter';
+    const fl=c.createRadialGradient(fx2,fy,0,fx2,fy,w*0.5);
+    fl.addColorStop(0,rgba(CAMP_EMBER,a*0.34)); fl.addColorStop(1,rgba(CAMP_EMBER,0));
+    c.fillStyle=fl; c.fillRect(-w/2,floor,w,h/2-floor);
+    c.restore();
+    c.strokeStyle=rgba(CAMP_EMBER,a*0.8); c.lineWidth=2;
+    for(let k=-2;k<=2;k++){
+      c.beginPath();
+      c.moveTo(fx2+k*h*0.035,fy+h*0.02);
+      c.lineTo(fx2+k*h*0.02,fy-h*0.05*flick);
+      c.stroke();
+    }
+
+    const sit=[[-0.26,0.02],[-0.15,-0.01],[0.02,0.03],[0.14,-0.01],[0.24,0.02]];
+    for(let i=0;i<sit.length;i++){
+      const ps=h*0.055;
+      c.save(); c.globalAlpha=a*0.85;
+      this.crowdFigure(fx2+sit[i][0]*w*0.7, fy+sit[i][1]*h-ps*0.6, ps, false, 0, 1);
+      c.restore();
+    }
+
+    // the corners go down, so the fire is the only bright thing in here
+    const vg=c.createRadialGradient(fx2,fy-h*0.1,h*0.12,fx2,fy-h*0.1,Math.max(w,h)*0.72);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(0.62,rgba('#090500',a*0.5));
+    vg.addColorStop(1,rgba('#050300',a*0.94));
+    c.fillStyle=vg; c.fillRect(-w/2,-h/2,w,h);
+
+    c.fillStyle=rgba('#fde68a',a*0.6);
+    for(let i=0;i<7;i++){
+      const ph=(t*0.34+i*0.31)%1;
+      c.globalAlpha=a*(1-ph)*0.7;
+      c.fillRect(fx2+Math.sin(t*1.6+i*2.1)*w*0.08, fy-ph*h*0.5, 2, 2);
+    }
+    c.globalAlpha=1;
+  }
+
+  // the torn rim, shared by the tear in the arena and the doorway in the camp
+  tearPath(rx,ry,wob,seed){
+    const c=this.ctx; c.beginPath();
+    const N=26;
+    for(let i=0;i<=N;i++){
+      const a=(i/N)*TAU;
+      const w=1+Math.sin(a*3+seed)*wob+Math.sin(a*7-seed*1.7)*wob*0.6;
+      const px=Math.cos(a)*rx*w, py=Math.sin(a)*ry*w;
+      i?c.lineTo(px,py):c.moveTo(px,py);
+    }
+    c.closePath();
+  }
+
+  /* ---------------------------------------------------------- scene sim */
+  build(){
+    this._built=this.state.idx;
+    const k=SCENES[this.state.idx].key;
+    this.T0=performance.now(); this.parts.length=0;
+    if(k==='gkey') this.S={ t:0, kx:0, ky:0, vx:0, vy:0, ang:0, ox:0, oy:0, oang:0 };
+    else if(k==='unlock') this.S={ t:0 };
+    else if(k==='tribunal') this.S={ t:0, turned:0, stood:false, seats:null };
+    else this.S={ t:0 };
+  }
+
+  step(dt,T,W,H){
+    const k=SCENES[this.state.idx].key, S=this.S;
+    S.t+=dt;
+    if(k==='unlock' && S.t>OPEN_T.done+1.6) this.build();
+    if(k==='choice' && S.t>11) this.build();
+    if(k==='tribunal'){
+      // it turns while you are dying in front of them, so it just runs
+      S.turned=clamp(Math.floor(S.t*1.15),0,TRI_SEATS);
+      S.stood=S.turned>=TRI_SEATS*0.85;
+      if(S.t>26) this.build();
+    }
+  }
+
+  /* -------------------------------------------------------------- frame */
+  frame(){
+    const cv=this.cv.current, ctx=this.ctx; if(!cv||!ctx) return;
+    const DPR=Math.min(window.devicePixelRatio||1,2);
+    const W=cv.clientWidth,H=cv.clientHeight; if(!W||!H) return;
+    if(cv.width!==(W*DPR|0)||cv.height!==(H*DPR|0)){ cv.width=W*DPR|0; cv.height=H*DPR|0; }
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    const now=performance.now(), dt=Math.min(0.05,(now-this.last)/1000); this.last=now;
+    const T=(now-this.T0)/1000;
+    this.step(dt,T,W,H);
+    const sc=SCENES[this.state.idx], split=this.state.compare?W*0.5:0;
+
+    ctx.fillStyle='#05060a'; ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.strokeStyle='#0e1626'; ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let x=0;x<=W;x+=64){ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let y=0;y<=H;y+=64){ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.stroke(); ctx.restore();
+
+    /* Each panel is its own viewport, not a window onto one composition —
+       otherwise a screen-space scene gets sliced down the middle and neither
+       half is readable. */
+    const passes = split ? [[0,split,true],[split,W,false]] : [[0,W,false]];
+    for(const p of passes){
+      const x0=p[0], x1=p[1], legacy=p[2];
+      ctx.save();
+      this._ox=0;
+      if(split){
+        ctx.beginPath(); ctx.rect(x0,0,x1-x0,H); ctx.clip();
+        ctx.translate(x0,0);
+        this._ox=x0;
+      }
+      ctx.textAlign='center';
+      try{ this['sc_'+sc.key](ctx,x1-x0,H,T,legacy); }
+      catch(e){ console.error('scene '+sc.key+' failed',e); }
+      ctx.restore();
+    }
+
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    for(const p of this.parts){ const f=1-p.t/p.life;
+      ctx.globalAlpha=f*0.75; ctx.fillStyle=p.col;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r*f,0,TAU); ctx.fill(); }
+    ctx.restore(); ctx.globalAlpha=1;
+    for(const p of this.parts){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; }
+    this.parts=this.parts.filter(p=>p.t<p.life);
+
+    const vg=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.78);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.72)');
+    ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalAlpha=0.5; ctx.fillStyle=ctx.createPattern(this.scanTile,'repeat'); ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.globalAlpha=0.05; ctx.globalCompositeOperation='overlay';
+    ctx.translate((Math.random()*256)|0,(Math.random()*256)|0);
+    ctx.fillStyle=ctx.createPattern(this.grainTile,'repeat'); ctx.fillRect(-256,-256,cv.width+512,cv.height+512);
+    ctx.restore();
+
+    if(split){
+      ctx.save();
+      ctx.strokeStyle='rgba(226,232,240,0.5)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(split,0); ctx.lineTo(split,H); ctx.stroke();
+      ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif"; ctx.textBaseline='top';
+      ctx.fillStyle='#64748b'; ctx.textAlign='right'; ctx.fillText('SHIPPING', split-10, 12);
+      ctx.fillStyle=sc.accent; ctx.textAlign='left'; ctx.fillText('PROPOSED', split+10, 12);
+      ctx.restore(); ctx.textBaseline='alphabetic';
+    }
+  }
+
+  /* ------------------------------------------------------ THE GIANT KEY */
+  sc_gkey(ctx,W,H,T,legacy){
+    const S=this.S;
+    // the ship, going round so you can see the thing behind it lag
+    const cx=W*0.5, cy=H*0.52, orb=Math.min(W,H)*0.24;
+    const pa=T*0.62;
+    const px=cx+Math.cos(pa)*orb, py=cy+Math.sin(pa)*orb*0.7;
+    const pang=pa+Math.PI/2;
+
+    const r=legacy?13:KEY_R;
+    const back=legacy?30:46, side=legacy?17:26;
+    const pull=legacy?30:18, damp=legacy?0.0012:0.004;
+    const ca=Math.cos(pang), sa=Math.sin(pang);
+    const tx=px-ca*back-sa*side, ty=py-sa*back+ca*side;
+    const dt=1/60;
+    S.vx=(S.vx||0)+(tx-(S.kx||tx))*pull*dt;
+    S.vy=(S.vy||0)+(ty-(S.ky||ty))*pull*dt;
+    const d=Math.pow(damp,dt); S.vx*=d; S.vy*=d;
+    S.kx=(S.kx||tx)+S.vx*dt; S.ky=(S.ky||ty)+S.vy*dt;
+    const sp=Math.hypot(S.vx,S.vy);
+    const want=sp>30?Math.atan2(S.vy,S.vx):(S.ang||0)+0.6*dt;
+    let da=want-(S.ang||0);
+    while(da>Math.PI)da-=TAU; while(da<-Math.PI)da+=TAU;
+    S.ang=(S.ang||0)+da*Math.min(1,(legacy?9:5)*dt);
+
+    // the ship
+    ctx.save();
+    ctx.translate(px,py); ctx.rotate(pang);
+    ctx.globalCompositeOperation='lighter';
+    this.drawGlow(0,0,26,'#67e8f9',0.22);
+    ctx.globalCompositeOperation='source-over';
+    ctx.strokeStyle='#67e8f9'; ctx.fillStyle='rgba(8,20,26,0.9)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(10,12); ctx.lineTo(0,7); ctx.lineTo(-10,12);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    const bob=Math.sin(T*(legacy?2.4:1.7))*(legacy?2.2:2.6);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    this.drawGlow(S.kx,S.ky+bob,r*1.7,KEY_COL,0.24+Math.sin(T*2)*0.05);
+    ctx.restore();
+    if(!legacy){
+      // heavy enough to have a shadow on the floor and to scrape along it
+      ctx.save(); ctx.fillStyle='rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(S.kx,S.ky+r*0.42,r*0.8,r*0.2,S.ang,0,TAU); ctx.fill();
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.translate(S.kx,S.ky+bob); ctx.rotate(S.ang);
+    this.keyGlyph(r,KEY_COL,0.95);
+    ctx.restore();
+
+    if(legacy){
+      ctx.save(); ctx.textAlign='left';
+      ctx.font="600 11px ui-monospace,'JetBrains Mono',monospace";
+      ctx.fillStyle=rgba(KEY_COL,0.85);
+      ctx.fillText('player.key  ×1', 20, H-24);
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.letterSpacing='0.2em';
+      ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(KEY_COL,0.5);
+      ctx.fillText('IT DOES NOT FIT ANYTHING YOU OWN', W/2, H-26);
+      ctx.restore();
+    }
+  }
+
+  /* --------------------------------------------------------- THE UNLOCK */
+  sc_unlock(ctx,W,H,T,legacy){
+    const t=this.S.t;
+    const cx=W*0.5;
+    // the shot rises as he climbs down, so he ends up standing on floor
+    const cy=H*0.47-clamp((t-OPEN_T.out)/2.2,0,1)*Math.min(W*0.3,H*0.38)*0.34;
+
+    if(legacy){
+      // it simply died, the way every other boss does
+      const Sl=Math.min(W*0.24,H*0.3);
+      if(t<1.6){
+        this.poly(cx,cy,Sl,6,Math.PI/6);
+        ctx.fillStyle=rgba(AMAL_COL,0.14); ctx.strokeStyle=AMAL_COL; ctx.lineWidth=4;
+        ctx.fill(); ctx.stroke();
+      } else if(t<2.6){
+        const p=clamp((t-1.6)/1.0,0,1);
+        ctx.save(); ctx.globalAlpha=1-p;
+        ctx.strokeStyle=AMAL_COL; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.arc(cx,cy,Sl+p*320,0,TAU); ctx.stroke();
+        ctx.restore();
+        if(Math.random()<0.5) this.spark(cx+R(Sl,-Sl),cy+R(Sl,-Sl),R(300,-300),R(300,-300),R(3.4,1.6),AMAL_COL,R(0.5,0.25));
+      } else {
+        ctx.save(); ctx.letterSpacing='0.24em';
+        ctx.font="800 14px Barlow,'Segoe UI',system-ui,sans-serif";
+        ctx.fillStyle=rgba(FOUND_COL,0.8);
+        ctx.fillText('THE KEY TURNS', cx, cy);
+        ctx.restore();
+      }
+      return;
+    }
+
+    const S=Math.min(W*0.3,H*0.38);
+    const drive=clamp(t/1.5,0,1);
+    const bite=clamp((t-1.5)/1.1,0,1);
+    const letGo=clamp((t-OPEN_T.unbolt)/2.0,0,1);
+    const hollow=clamp((t-OPEN_T.drift)/1.4,0,1);
+    const iris=clamp((t-OPEN_T.cockpit)/1.6,0,1);
+    const out=clamp((t-OPEN_T.out)/2.2,0,1);
+    const warm=clamp((t-OPEN_T.cockpit)/4.0,0,1);
+    const cr=S*0.34;
+
+    if(warm>0){
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(cx,cy+S*0.1,S*2.4,CAMP_EMBER,0.1*warm); ctx.restore();
+    }
+
+    // the frame the plates are bolted to: it stays, and it is what hangs empty
+    ctx.save();
+    ctx.globalAlpha=0.9-hollow*0.15;
+    ctx.strokeStyle=rgba(AMAL_COL,0.5+hollow*0.3); ctx.lineWidth=3.4;
+    ctx.fillStyle='rgba(10,7,4,0.9)';
+    this.poly(cx,cy,S*1.06,6,Math.PI/6); ctx.fill(); ctx.stroke();
+    ctx.lineWidth=1.6; ctx.strokeStyle=rgba(AMAL_COL,0.28);
+    for(let k=-3;k<=3;k++){
+      const ry=cy+k*S*0.28;
+      const half=S*0.92*Math.sqrt(Math.max(0,1-Math.pow(k/3.6,2)));
+      ctx.beginPath(); ctx.moveTo(cx-half,ry); ctx.lineTo(cx+half,ry); ctx.stroke();
+    }
+    ctx.strokeStyle=rgba(bite>0?KEY_COL:AMAL_COL,0.7);
+    ctx.lineWidth=2+bite*4;
+    ctx.beginPath(); ctx.moveTo(cx,cy-S*1.02); ctx.lineTo(cx,cy-S*0.42); ctx.stroke();
+    ctx.restore();
+
+    const PLATE=[[-0.62,-0.72,0.52,0.42],[0.10,-0.72,0.52,0.42],
+                 [-0.80,-0.24,0.44,0.56],[0.36,-0.24,0.44,0.56],
+                 [-0.62,0.36,0.52,0.40],[0.10,0.36,0.52,0.40],
+                 [-0.26,-0.96,0.52,0.26],[-0.26,0.74,0.52,0.26]];
+    const ease=1-Math.pow(1-letGo,2.2);
+    for(let i=0;i<PLATE.length;i++){
+      const px=PLATE[i][0], py=PLATE[i][1], pw=PLATE[i][2], ph=PLATE[i][3];
+      const ang=Math.atan2(py+ph/2,px+pw/2);
+      const fly=ease*(0.12+(i%3)*0.07);
+      const x=cx+(px+pw/2)*S+Math.cos(ang)*S*fly*0.9;
+      const y=cy+(py+ph/2)*S+Math.sin(ang)*S*fly*0.9+ease*S*0.14;
+      ctx.save();
+      ctx.globalAlpha=1-hollow*0.55;
+      ctx.translate(x,y); ctx.rotate(ease*(i%2?0.5:-0.42)*(1+(i%3)*0.3));
+      ctx.fillStyle=rgba('#181009',0.98);
+      ctx.strokeStyle=rgba(AMAL_COL,0.85-ease*0.25); ctx.lineWidth=2.4;
+      this.rr(-pw*S/2,-ph*S/2,pw*S,ph*S,S*0.012); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle=rgba(AMAL_COL,0.3); ctx.lineWidth=1;
+      this.rr(-pw*S/2+S*0.03,-ph*S/2+S*0.03,pw*S-S*0.06,ph*S-S*0.06,S*0.01); ctx.stroke();
+      for(let b=0;b<3;b++){
+        const bx=-pw*S/2+pw*S*(b+0.5)/3;
+        const by=py<0?ph*S/2-S*0.05:-ph*S/2+S*0.05;
+        const gone=clamp(ease*3-i*0.22-b*0.1,0,1);
+        ctx.globalAlpha=(1-hollow*0.55)*(1-gone*0.7);
+        this.poly(bx,by,S*0.028,6,Math.PI/6);
+        ctx.fillStyle=rgba(gone>0.4?'#5b4a2a':AMAL_COL,0.5);
+        ctx.strokeStyle=rgba(gone>0.4?'#5b4a2a':AMAL_COL,0.9);
+        ctx.lineWidth=1.4; ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    this.drawGlow(cx,cy,cr*(1.4+iris*1.6),iris>0?FOUND_COL:AMAL_COL,0.12+iris*0.34);
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(cx,cy,cr,0,TAU);
+    ctx.fillStyle=rgba('#08060b',0.95); ctx.fill();
+    ctx.strokeStyle=rgba(iris>0?FOUND_COL:AMAL_COL,0.9); ctx.lineWidth=3; ctx.stroke();
+
+    if(iris>0){
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx,cy,cr-2,0,TAU); ctx.clip();
+      ctx.fillStyle=rgba('#241703',0.95); ctx.fillRect(cx-cr,cy-cr,cr*2,cr*2);
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(cx,cy+cr*0.2,cr*1.3,CAMP_EMBER,0.3*iris); ctx.restore();
+      ctx.strokeStyle=rgba(FOUND_COL,0.4); ctx.lineWidth=2;
+      for(let k=-1;k<=1;k+=2){
+        ctx.beginPath();
+        ctx.moveTo(cx+k*cr*0.55,cy-cr*0.7);
+        ctx.quadraticCurveTo(cx+k*cr*0.3,cy,cx+k*cr*0.5,cy+cr*0.75);
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1-out;
+      this.founderFigure(cx,cy-cr*0.05,cr*0.86,{sit:1});
+      ctx.restore();
+    }
+    if(iris<1){
+      ctx.save(); ctx.translate(cx,cy);
+      for(let k=0;k<6;k++){
+        ctx.save();
+        ctx.rotate(k*TAU/6+iris*0.5);
+        ctx.translate(0,-iris*cr*1.1);
+        ctx.fillStyle=rgba('#171208',0.98);
+        ctx.strokeStyle=rgba(AMAL_COL,0.7); ctx.lineWidth=1.8;
+        ctx.beginPath();
+        ctx.moveTo(0,0); ctx.lineTo(cr*0.62,-cr*0.36); ctx.lineTo(cr*0.62,-cr*1.02);
+        ctx.lineTo(-cr*0.62,-cr*1.02); ctx.lineTo(-cr*0.62,-cr*0.36);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    /* The key. Driven into the sternum seam and levered — it never turns, it
+       is far too big to turn, and that is the joke the route is built on. */
+    if(out<1){
+      const kr=Math.min(S*0.34,H*0.15);
+      const seam=cy-cr-S*0.06;
+      const ky=seam-kr*0.92-(1-drive)*H*0.8;
+      ctx.save();
+      ctx.globalAlpha=1-out;
+      ctx.translate(cx,ky+bite*S*0.1);
+      ctx.rotate(Math.PI/2+bite*0.5);
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(0,0,kr*1.4,KEY_COL,0.22+bite*0.2); ctx.restore();
+      this.keyGlyph(kr,KEY_COL,1);
+      ctx.restore();
+      if(drive>=1&&bite<1&&Math.random()<0.6)
+        this.spark(cx+R(S*0.2,-S*0.2),cy-S*0.5,R(160,-160),R(40,-220),R(2.6,1.2),KEY_COL,R(0.4,0.2));
+    }
+
+    if(out>0){
+      const oe=1-Math.pow(1-out,2);
+      const fsz=S*(0.42+oe*0.16);
+      // he climbs down to the floor, and the floor is above what he is saying
+      const floor=H-96-fsz*1.05;
+      ctx.save();
+      ctx.globalAlpha=Math.min(1,out*2);
+      this.founderFigure(cx,Math.min(cy+oe*S*0.62,floor),fsz,{
+        sit:1-oe, open:clamp((t-FOUND_HELLO[2].t+0.6)/1.4,0,1)
+      });
+      ctx.restore();
+    }
+
+    /* The words sit on their own ground. Without this the cockpit light and
+       whoever is standing in front of it read straight through the line. */
+    const bedG=ctx.createLinearGradient(0,H-112,0,H);
+    bedG.addColorStop(0,'rgba(4,3,2,0)');
+    bedG.addColorStop(0.42,'rgba(4,3,2,0.86)');
+    bedG.addColorStop(1,'rgba(4,3,2,0.96)');
+    ctx.fillStyle=bedG; ctx.fillRect(0,H-112,W,112);
+
+    ctx.save(); ctx.letterSpacing='0.24em';
+    ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+    ctx.fillStyle=rgba(t<OPEN_T.cockpit?KEY_COL:FOUND_COL,0.55);
+    ctx.fillText(t<OPEN_T.unbolt?'THE KEY DOES NOT TURN'
+               :t<OPEN_T.cockpit?'IT LEVERS'
+               :t<OPEN_T.out?'THERE IS SOMEBODY IN IT':'THE FOUNDER', cx, H-30);
+    ctx.restore();
+
+    let said=-1;
+    for(let i=0;i<FOUND_HELLO.length;i++) if(t>=FOUND_HELLO[i].t) said=i;
+    if(said>=0){
+      const ln=FOUND_HELLO[said].s;
+      const shown=ln.slice(0,Math.min(ln.length,Math.floor((t-FOUND_HELLO[said].t)*34)));
+      ctx.font='400 '+Math.min(20,Math.max(14,W*0.017))+"px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.92);
+      ctx.fillText(shown,cx,H-64);
+    }
+  }
+
+  /* ----------------------------------------------------------- THE CAMP */
+  sc_camp(ctx,W,H,T,legacy){
+    if(legacy){
+      ctx.save();
+      ctx.letterSpacing='0.24em';
+      ctx.font="800 13px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.85);
+      ctx.fillText('SOMEWHERE FOR THAT', W/2, H*0.46);
+      ctx.letterSpacing='0em';
+      ctx.font="400 14px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle='rgba(148,163,184,0.65)';
+      ctx.fillText('Sit down, you are bleeding. There — better.', W/2, H*0.54);
+      ctx.font="600 11px ui-monospace,'JetBrains Mono',monospace";
+      ctx.fillStyle=rgba(FOUND_COL,0.6);
+      ctx.fillText('+20 max hp', W/2, H*0.62);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    ctx.translate(W/2,H/2);
+    this.campScene(W,H,1,T);
+    ctx.restore();
+    ctx.save();
+    ctx.letterSpacing='0.2em';
+    ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+    ctx.fillStyle=rgba(CAMP_EMBER,0.5);
+    ctx.fillText('NOBODY HERE IS ON DUTY', W/2, 34);   // the fire owns the floor
+    ctx.restore();
+  }
+
+  /* ----------------------------------------------------------- THE TEAR */
+  sc_tear(ctx,W,H,T,legacy){
+    const Rr=Math.min(W,H)*0.3;
+    const cx=W*0.5, cy=H*0.48;
+    if(legacy){
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(cx,cy,Rr*1.7,FOUND_COL,0.22); ctx.restore();
+      ctx.save(); ctx.translate(cx,cy);
+      ctx.fillStyle=rgba('#2a1c06',0.9);
+      ctx.beginPath(); ctx.ellipse(0,0,Rr*0.52,Rr,0,0,TAU); ctx.fill();
+      ctx.strokeStyle=rgba(FOUND_COL,0.9); ctx.lineWidth=2.4; ctx.stroke();
+      ctx.restore();
+      ctx.save(); ctx.letterSpacing='0.2em';
+      ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.7);
+      ctx.fillText('INSIDE',cx,cy-Rr-16); ctx.restore();
+      return;
+    }
+    // two of them: the one that heals you, and the fifth one
+    const draw=(x,y,scale,last)=>{
+      const breathe=1+Math.sin(T*1.6)*0.03;
+      const rx=Rr*0.58*breathe*scale, ry=Rr*breathe*scale;
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(x,y,Rr*2.1*scale,last?COLD_COL:FOUND_COL,0.2+Math.sin(T*2.4)*0.05);
+      ctx.restore();
+      ctx.save(); ctx.translate(x,y);
+      ctx.save();
+      this.tearPath(rx,ry,0.05,T*0.6); ctx.clip();
+      ctx.save(); ctx.scale(scale*0.62,scale*0.62);
+      this.campScene(Rr*5,Rr*5.4,last?0.45:1,T);
+      ctx.restore();
+      if(last){
+        ctx.fillStyle='rgba(6,8,14,0.55)';
+        ctx.fillRect(-rx*2,-ry*2,rx*4,ry*4);
+        this.founderFigure(0,ry*0.34,Rr*0.46*scale,{open:0.5,a:0.95});
+      }
+      ctx.restore();
+      ctx.strokeStyle=rgba(last?COLD_COL:FOUND_COL,0.95); ctx.lineWidth=3;
+      this.tearPath(rx,ry,0.05,T*0.6); ctx.stroke();
+      ctx.strokeStyle=rgba('#0a0700',0.9); ctx.lineWidth=1.2;
+      this.tearPath(rx*1.1,ry*1.06,0.09,T*0.6+1.4); ctx.stroke();
+      // the room's grid ending raggedly against the gap
+      ctx.strokeStyle=rgba(last?COLD_COL:FOUND_COL,0.3); ctx.lineWidth=1.4;
+      for(let k=0;k<12;k++){
+        const a=(k/12)*TAU+0.2;
+        const w=1+Math.sin(a*3+T*0.6)*0.05;
+        const x0=Math.cos(a)*rx*w*1.08, y0=Math.sin(a)*ry*w*1.08;
+        const l=Rr*scale*(0.1+(k%3)*0.07);
+        ctx.beginPath(); ctx.moveTo(x0,y0);
+        ctx.lineTo(x0+Math.cos(a)*l,y0+Math.sin(a)*l); ctx.stroke();
+      }
+      ctx.restore();
+      if(!last&&Math.random()<0.4)
+        this.spark(x+R(rx,-rx),y+R(ry*0.5,-ry*0.5),R(16,-16),R(-24,-60),R(2,1),CAMP_EMBER,R(0.5,0.3));
+      ctx.save(); ctx.letterSpacing='0.2em';
+      ctx.font="700 9px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(last?COLD_COL:FOUND_COL,0.75);
+      ctx.fillText(last?'SOMEBODY IS AT THE DOOR':'INSIDE',x,y-ry-16);
+      ctx.restore();
+    };
+    draw(W*0.3,cy,0.86,false);
+    draw(W*0.72,cy,0.86,true);
+  }
+
+  /* --------------------------------------------------------- THE CHOICE */
+  sc_choice(ctx,W,H,T,legacy){
+    const t=this.S.t;
+    if(legacy){
+      const dy=H/2-40;
+      ctx.strokeStyle='rgba(100,116,139,0.55)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(W/2,dy-90); ctx.lineTo(W/2,dy+60); ctx.stroke();
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(W/2-74,dy-10,40,'#94a3b8',0.3);
+      this.drawGlow(W/2+74,dy-10,52,FOUND_COL,0.34);
+      ctx.restore();
+      ctx.save(); ctx.letterSpacing='0.2em';
+      ctx.font="700 9px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle='rgba(148,163,184,0.85)'; ctx.fillText('OUTSIDE',W/2-74,dy+44);
+      ctx.fillStyle=rgba(FOUND_COL,0.85); ctx.fillText('INSIDE',W/2+74,dy+44);
+      ctx.restore();
+      ctx.font="400 14px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.9);
+      ctx.fillText('Come in and sit down. I will close it.',W/2,H/2+74);
+      return;
+    }
+    const fade=clamp(t*1.1,0,1);
+    ctx.save(); ctx.globalAlpha=fade;
+    ctx.translate(W/2,H*0.46); this.campScene(W,H*0.92,0.95,T);
+    ctx.restore();
+
+    const dy=H*0.66;                              // campScene's floor line
+    const gap=Math.min(W*0.19,190);
+    const dw=Math.min(W*0.12,120), dh=Math.min(H*0.34,250);
+    const fs=Math.min(H*0.095,66);
+
+    // a bed under the bottom third, so the words have ground
+    const bed=ctx.createLinearGradient(0,H*0.72,0,H);
+    bed.addColorStop(0,'rgba(4,3,1,0)');
+    bed.addColorStop(0.5,'rgba(4,3,1,'+(0.82*fade)+')');
+    bed.addColorStop(1,'rgba(4,3,1,'+(0.96*fade)+')');
+    ctx.fillStyle=bed; ctx.fillRect(0,H*0.72,W,H*0.28);
+
+    // the doorway: the same torn rim, with the game's cold grey behind it
+    ctx.save(); ctx.globalAlpha=fade;
+    ctx.translate(W/2,dy-dh*0.5);
+    ctx.save();
+    this.tearPath(dw*0.5,dh*0.5,0.045,T*0.5); ctx.clip();
+    ctx.fillStyle='#080a10'; ctx.fillRect(-dw,-dh,dw*2,dh*2);
+    ctx.strokeStyle='rgba(100,116,139,0.35)'; ctx.lineWidth=1;
+    for(let gx=-dw;gx<dw;gx+=22){ ctx.beginPath(); ctx.moveTo(gx,-dh); ctx.lineTo(gx,dh); ctx.stroke(); }
+    for(let gy=-dh;gy<dh;gy+=22){ ctx.beginPath(); ctx.moveTo(-dw,gy); ctx.lineTo(dw,gy); ctx.stroke(); }
+    ctx.restore();
+    ctx.strokeStyle=rgba(COLD_COL,0.6); ctx.lineWidth=2.6;
+    this.tearPath(dw*0.5,dh*0.5,0.045,T*0.5); ctx.stroke();
+    ctx.restore();
+
+    ctx.save(); ctx.globalAlpha=fade;
+    this.founderFigure(W/2+gap,dy-fs*0.52,fs,{open:0.55});
+    ctx.globalAlpha=fade*0.8;
+    this.crowdFigure(W/2-gap,dy-fs*0.84,fs*1.02,false,0,0.85);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    this.drawGlow(W/2-gap,dy-fs*0.9,fs*0.8,COLD_COL,0.1*fade);
+    ctx.restore();
+    ctx.restore();
+
+    ctx.save(); ctx.globalAlpha=fade; ctx.letterSpacing='0.2em';
+    ctx.font="700 9px Barlow,'Segoe UI',system-ui,sans-serif";
+    ctx.fillStyle=rgba(COLD_COL,0.7);
+    ctx.fillText('OUTSIDE',W/2-gap,dy-fs*1.86);
+    ctx.fillStyle=rgba(FOUND_COL,0.8);
+    ctx.fillText('INSIDE',W/2+gap,dy-fs*1.5);
+    ctx.restore();
+
+    let said=-1;
+    for(let i=0;i<CHOICE_LINES.length;i++) if(t>=1.0+i*2.4) said=i;
+    if(said>=0){
+      const ln=CHOICE_LINES[said];
+      const shown=ln.slice(0,Math.min(ln.length,Math.floor((t-(1.0+said*2.4))*34)));
+      ctx.font='400 '+Math.min(19,Math.max(13,W*0.016))+"px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.92);
+      ctx.fillText(shown,W/2,H-96);
+    }
+    if(said>=CHOICE_LINES.length-1){
+      const bw=Math.min(220,(W-70)/2), bh=44, by=H-70;
+      const btn=(x,label,col)=>{
+        ctx.fillStyle=rgba(col,0.08); ctx.strokeStyle=col; ctx.lineWidth=2;
+        this.rr(x,by,bw,bh,8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=col; ctx.letterSpacing='0em';
+        ctx.font="700 12px Barlow,'Segoe UI',system-ui,sans-serif";
+        ctx.fillText(label,x+bw/2,by+bh/2+4);
+      };
+      btn(W/2-bw-8,'SIT DOWN   [Y]',FOUND_COL);
+      btn(W/2+8,'OPEN IT   [N]','#94a3b8');
+    }
+  }
+
+  /* ------------------------------------------------------- THE TRIBUNAL */
+  sc_tribunal(ctx,W,H,T,legacy){
+    const S=this.S;
+    const cx=W*0.5, cy=H*0.66;
+    const cols=8;
+    const colW=clamp(W*0.088,52,92), rowH=clamp(H*0.072,42,60);
+    const ty=cy-clamp(H*0.12,64,110);
+    if(!S.seats){
+      S.seats=[];
+      for(let i=0;i<TRI_SEATS;i++){
+        const row=Math.floor(i/cols), col=i%cols;
+        S.seats.push({i,row,x:0,y:0,hard:0,look:0});
+      }
+    }
+    for(let i=0;i<TRI_SEATS;i++){
+      const s=S.seats[i], row=s.row, col=i%cols;
+      s.x=cx+(col-3.5)*colW+(row%2?colW/2:0);
+      s.y=ty-rowH-row*rowH;
+      s.turned=i<S.turned;
+    }
+
+    if(legacy){
+      for(const s of S.seats){
+        const held=!s.turned;
+        ctx.save(); ctx.globalCompositeOperation='lighter';
+        this.drawGlow(s.x,s.y,26,held?CROWD_COL:'#334155',held?0.22:0.08);
+        ctx.restore();
+        ctx.strokeStyle=held?rgba(CROWD_COL,0.75):'rgba(71,85,105,0.55)';
+        ctx.lineWidth=1.6; ctx.beginPath();
+        if(held){ ctx.arc(s.x,s.y,13,0,TAU); ctx.stroke();
+                  ctx.fillStyle=rgba(CROWD_COL,0.22); ctx.fill(); }
+        else { ctx.arc(s.x,s.y,13,Math.PI*0.15,Math.PI*0.85); ctx.stroke(); }
+      }
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      this.drawGlow(cx,ty,92,FOUND_COL,0.3); ctx.restore();
+      ctx.strokeStyle=rgba(FOUND_COL,0.9); ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(cx-52,ty+46); ctx.lineTo(cx-52,ty-58);
+      ctx.lineTo(cx+52,ty-58); ctx.lineTo(cx+52,ty+46); ctx.stroke();
+      ctx.fillStyle=rgba(FOUND_COL,0.7);
+      ctx.beginPath(); ctx.arc(cx,ty-6,21,0,TAU); ctx.fill();
+      ctx.save(); ctx.letterSpacing='0.2em';
+      ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+      ctx.fillStyle=rgba(FOUND_COL,0.8); ctx.fillText('THE FOUNDER',cx,ty-78);
+      ctx.restore();
+      return;
+    }
+
+    const rows=Math.ceil(TRI_SEATS/cols);
+    const halfW=colW*(cols/2+0.6);
+    const fs=Math.min(colW*0.5,rowH*0.62);
+
+    /* Drawn back to front so the near riser occludes the feet of the row
+       behind it and the bank reads as depth rather than as a grid. */
+    for(let r=rows-1;r>=0;r--){
+      const y=S.seats[r*cols].y;
+      const inset=halfW-r*colW*0.16;
+      const live=S.seats.filter(s=>s.row===r&&!s.turned).length;
+      const lit=live/cols;
+      ctx.fillStyle=rgba('#150d02',0.95);
+      ctx.strokeStyle=rgba(CAMP_EMBER,0.16+lit*0.3); ctx.lineWidth=1.6;
+      ctx.beginPath();
+      ctx.moveTo(cx-inset,y+rowH*0.34);
+      ctx.lineTo(cx-inset+colW*0.16,y+rowH*0.62);
+      ctx.lineTo(cx+inset-colW*0.16,y+rowH*0.62);
+      ctx.lineTo(cx+inset,y+rowH*0.34);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // the bench top, lit only where he still has somebody sitting on it
+      ctx.strokeStyle=rgba(CROWD_COL,0.1+lit*0.45); ctx.lineWidth=2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx-inset,y+rowH*0.34); ctx.lineTo(cx+inset,y+rowH*0.34); ctx.stroke();
+      for(const s of S.seats){
+        if(s.row!==r) continue;
+        const held=!s.turned;
+        const gy=y+rowH*0.34-fs*1.1;
+        if(held){
+          ctx.save(); ctx.globalCompositeOperation='lighter';
+          this.drawGlow(s.x,gy,fs*1.5,CROWD_COL,0.14); ctx.restore();
+        }
+        this.crowdFigure(s.x,y+rowH*0.34-fs*0.82,fs,held,s.hard,held?1:0.5);
+      }
+    }
+
+    /* Not a rectangle — a chair built out of the amalgam: the chassis plates
+       he was inside are the back of it, and he is sitting in the hole they
+       came off. */
+    const ts=Math.max(38,Math.min(colW*0.62,rowH*0.78));
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    this.drawGlow(cx,ty,ts*(S.stood?3.4:2.6),FOUND_COL,0.28); ctx.restore();
+    ctx.save(); ctx.translate(cx,ty);
+    for(let k=-3;k<=3;k++){
+      ctx.save(); ctx.rotate(k*0.19);
+      ctx.fillStyle=rgba('#150d02',0.95);
+      ctx.strokeStyle=rgba(AMAL_COL,0.4); ctx.lineWidth=1.6;
+      this.rr(-ts*0.15,-ts*1.62,ts*0.3,ts*1.05,ts*0.05);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.fillStyle=rgba('#1c1203',0.96);
+    ctx.strokeStyle=rgba(FOUND_COL,0.9); ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(cx-ts*0.86,ty+ts*0.86);
+    ctx.lineTo(cx-ts*0.66,ty-ts*1.04);
+    ctx.lineTo(cx+ts*0.66,ty-ts*1.04);
+    ctx.lineTo(cx+ts*0.86,ty+ts*0.86);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    for(const sx of [-1,1]){
+      this.poly(cx+sx*ts*0.8,ty+ts*0.06,ts*0.19,6,Math.PI/6);
+      ctx.fillStyle=rgba(FOUND_COL,0.16); ctx.strokeStyle=rgba(FOUND_COL,0.7);
+      ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+    }
+    this.founderFigure(cx,ty-(S.stood?ts*0.34:ts*0.04),ts*0.86,{
+      sit:S.stood?0.1:0.92, open:S.stood?0.9:0.25
+    });
+
+    ctx.save(); ctx.letterSpacing='0.2em';
+    ctx.font="700 10px Barlow,'Segoe UI',system-ui,sans-serif";
+    ctx.fillStyle=rgba(FOUND_COL,0.8);
+    ctx.fillText('THE FOUNDER',cx,ty+ts*1.5);
+    ctx.letterSpacing='0em';
+    ctx.font="600 11px ui-monospace,'JetBrains Mono',monospace";
+    ctx.fillStyle=rgba(CROWD_COL,0.75);
+    ctx.fillText((TRI_SEATS-S.turned)+' / '+TRI_SEATS+'  STILL HIS',cx,ty+ts*1.86);
+    ctx.restore();
+  }
+
+  renderVals(){
+    if(!this.ctx || !this.raf){ clearTimeout(this._retry); this._retry=setTimeout(()=>this.boot(),0); }
+    const idx=this.state.idx, sc=SCENES[idx];
+    return {
+      cv: this.cv,
+      accent: sc.accent,
+      sceneName: sc.name,
+      before: sc.before,
+      after: sc.after,
+      why: sc.why,
+      cmpCol: this.state.compare?'#e2e8f0':'#64748b',
+      cmpBc: this.state.compare?'#475569':'#1e293b',
+      toggleCompare: ()=>this.setState(s=>({compare:!s.compare})),
+      restart: ()=>{ this.build(); this.paint(); },
+      scenes: SCENES.map((s,i)=>({
+        label: s.name.replace('THE ',''),
+        pick: ()=>this.setState({idx:i}),
+        col: i===idx?s.accent:'#64748b',
+        bc: i===idx?s.accent:'#1e293b'
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

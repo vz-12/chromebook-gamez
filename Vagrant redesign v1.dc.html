@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="theme-color" content="#05060a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@600;700&family=JetBrains+Mono:wght@400;600;800&display=swap">
+<style>
+  html,body{margin:0;padding:0;background:#05060a;overscroll-behavior:none}
+  a{color:#a5b4fc}a:hover{color:#c7d2fe}
+  ::-webkit-scrollbar{height:6px;width:6px}
+  ::-webkit-scrollbar-thumb{background:#1e293b;border-radius:3px}
+</style>
+<script>
+/* =========================================================================
+   THE VAGRANT — REDESIGN PREVIEW. Standalone; nothing here touches the game.
+   Every draw function below is written against a plain P-like object and the
+   game's own helpers (rgba, drawGlow, poly, roundRect, clamp, lerp), so each
+   lifts into index.html as-is.
+   ========================================================================= */
+window.VAG = (function () {
+const TAU = Math.PI * 2;
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const lerp  = (a,b,t) => a+(b-a)*t;
+const rnd   = (a,b=0) => b+Math.random()*(a-b);
+const ease  = t => t<=0?0:t>=1?1:t*t*(3-2*t);
+function rgba(hex,a){const n=parseInt(hex.slice(1),16);
+  return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';}
+
+const COL = { player:'#a5b4fc', bullet:'#c7d2fe', crit:'#fde047', bg:'#05060a' };
+const RARITY = { common:'#94a3b8', rare:'#38bdf8', epic:'#c084fc', legend:'#fbbf24' };
+const DARK = 'rgba(7,11,22,0.92)', STEEL = '#16213a', STEEL2 = '#24324e';
+
+/* glow sprites — the game's trick, cached radial gradients blitted additively */
+const _glow = new Map();
+function glowSprite(hex){
+  let s=_glow.get(hex); if(s) return s;
+  s=document.createElement('canvas'); s.width=s.height=128;
+  const g=s.getContext('2d'), n=parseInt(hex.slice(1),16);
+  const rgb=((n>>16)&255)+','+((n>>8)&255)+','+(n&255);
+  const gr=g.createRadialGradient(64,64,0,64,64,64);
+  gr.addColorStop(0,'rgba('+rgb+',1)'); gr.addColorStop(0.3,'rgba('+rgb+',0.42)');
+  gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr; g.fillRect(0,0,128,128); _glow.set(hex,s); return s;
+}
+function drawGlow(ctx,x,y,r,hex,a){ctx.globalAlpha=a===undefined?1:a;
+  ctx.drawImage(glowSprite(hex),x-r,y-r,r*2,r*2);ctx.globalAlpha=1;}
+function poly(ctx,x,y,r,sides,ang){ctx.beginPath();
+  for(let i=0;i<sides;i++){const a=ang+i*TAU/sides;
+    const px=x+Math.cos(a)*r,py=y+Math.sin(a)*r; i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+  ctx.closePath();}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+/* ===================== THE KIT, AS DRAWN ARTWORK =========================
+   One entry per gear base. The same art answers in four places: carried on
+   the hull, thrown along the swing, printed on the gear card, and shrunk
+   into the kit panel — so an item is recognised before its name is read.
+   ======================================================================= */
+
+/* --- blades. Grip at (0,0), edge along +x, `len` native so the swing can
+   scale any of them to the reach it actually has. ----------------------- */
+const BLADE_ART = {
+  edge: { len:15, n:'SCRAP EDGE', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.8);c.lineTo(5.5,-2.8);c.lineTo(8,-1.4);c.lineTo(12,-3.2);
+    c.lineTo(15,-0.4);c.lineTo(10.5,1.7);c.lineTo(5,2.3);c.lineTo(0,1.8);
+    c.closePath(); } },
+  shiv: { len:11, n:'SHIV', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.5);c.lineTo(7,-1.7);c.lineTo(11,0);c.lineTo(7,1.7);c.lineTo(0,1.5);
+    c.closePath(); } },
+  cleaver: { len:16, n:'CLEAVER', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.5);c.lineTo(6.5,-1.8);c.lineTo(6.5,-7.4);c.lineTo(16,-8.4);
+    c.lineTo(16,6.4);c.lineTo(6.5,5.4);c.lineTo(6.5,1.8);c.lineTo(0,1.5);
+    c.closePath(); } },
+  pike: { len:32, n:'PIKE', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.3);c.lineTo(22,-1.3);c.lineTo(24.5,-3.6);c.lineTo(26,-1.1);
+    c.lineTo(32,0);c.lineTo(26,1.1);c.lineTo(24.5,3.6);c.lineTo(22,1.3);c.lineTo(0,1.3);
+    c.closePath(); } },
+  great: { len:27, n:'GREATBLADE', draw(c){
+    c.beginPath();
+    c.moveTo(0,-2.1);c.lineTo(5,-2.4);c.lineTo(6.5,-5.4);c.lineTo(22,-4.6);
+    c.lineTo(27,0);c.lineTo(22,4.6);c.lineTo(6.5,5.4);c.lineTo(5,2.4);c.lineTo(0,2.1);
+    c.closePath(); } },
+  flense: { len:17, n:'FLENSER', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.6);c.quadraticCurveTo(10,-7.5,17,-5.2);
+    c.quadraticCurveTo(13,-1.2,11,2.4);
+    c.lineTo(9,0.4);c.lineTo(6.5,2.8);c.lineTo(4.5,0.8);c.lineTo(2,2.6);
+    c.lineTo(0,1.6);c.closePath(); } },
+  tooth: { len:18, n:'SPLITTOOTH', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.5);c.lineTo(9,-2.4);c.lineTo(18,-4.4);c.lineTo(14,-1);
+    c.lineTo(18,1.6);c.lineTo(9,2.4);c.lineTo(0,1.5);c.closePath(); } },
+  hook: { len:19, n:'BOARDING HOOK', draw(c){
+    c.beginPath();
+    c.moveTo(0,-1.5);c.lineTo(12,-1.7);c.quadraticCurveTo(19.5,-2.6,18,3.6);
+    c.lineTo(15.4,6.4);c.lineTo(15.2,2.2);c.quadraticCurveTo(15.6,1.3,12,1.7);
+    c.lineTo(0,1.5);c.closePath(); } }
+};
+
+/* --- plates. `under` is bolted around the frame and is the layer allowed to
+   change the silhouette; `over` is the little that has to sit on top (a mesh,
+   a specular, heat). The frame is redrawn between the two, so however heavy
+   the armour gets the pilot underneath is never painted out. --------------- */
+const PLATE_ART = {
+  scrapp: { n:'SCRAP PLATE', under(c,trim,open){
+    /* mismatched salvage, hung at different angles and never quite square */
+    for(const sd of [1,-1]){
+      c.save(); c.scale(1,sd); c.translate(0,open*1.6);
+      c.fillStyle=STEEL; c.strokeStyle=trim; c.lineWidth=1.1;
+      c.beginPath(); c.moveTo(1.4,6.4);c.lineTo(9.2,8);c.lineTo(7.4,16.2);
+      c.lineTo(-1.4,13.8); c.closePath(); c.fill(); c.stroke();
+      c.beginPath(); c.moveTo(-9.8,4.6);c.lineTo(-2.6,6.4);c.lineTo(-4.6,14.6);
+      c.lineTo(-11.4,10.6); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle=rgba(trim,0.9);
+      for(const p of [[0.6,9.6],[6.4,11],[-8.4,7.4]]){
+        c.beginPath();c.arc(p[0],p[1],0.9,0,TAU);c.fill();}
+      c.restore(); } } },
+  weave: { n:'VOIDWEAVE', over(c,trim,open){
+    /* weighs nothing: a mesh, not a panel — you can see the frame through it */
+    c.strokeStyle=rgba(trim,0.6); c.lineWidth=0.8; c.beginPath();
+    for(let i=0;i<5;i++){const x=8-i*4.4;
+      c.moveTo(x,-10.5+Math.abs(i-2)*1.6);c.lineTo(x-2.4,10.5-Math.abs(i-2)*1.6);}
+    c.moveTo(-10,-4.4);c.lineTo(9,-3.4); c.moveTo(-10,4.4);c.lineTo(9,3.4);
+    c.stroke();
+    c.fillStyle=rgba(trim,0.8);
+    for(const p of [[8,-9.4],[8,9.4],[-10,-4.4],[-10,4.4]]){
+      c.beginPath();c.arc(p[0],p[1],0.8,0,TAU);c.fill();} } },
+  cara: { n:'CARAPACE', under(c,trim,open){
+    /* one continuous shell, following the whole outline out by three */
+    c.fillStyle=STEEL2; c.strokeStyle=trim; c.lineWidth=1.3;
+    c.beginPath();
+    c.moveTo(15.2,0);c.lineTo(12.6,5.6);c.lineTo(13.8,12.8);c.lineTo(2.6,16.2);
+    c.lineTo(-7.8,14.8);c.lineTo(-11,7.4);c.lineTo(-17.6,4.8);c.lineTo(-15.2,0);
+    c.lineTo(-17.6,-4.8);c.lineTo(-11,-7.4);c.lineTo(-7.8,-14.8);c.lineTo(2.6,-16.2);
+    c.lineTo(13.8,-12.8);c.lineTo(12.6,-5.6);c.closePath();
+    c.fill(); c.stroke(); },
+    over(c,trim){ c.strokeStyle=rgba(trim,0.4); c.lineWidth=0.9; c.beginPath();
+      c.moveTo(9.6,-11.4);c.lineTo(8.2,11.4); c.moveTo(-4.6,-14);c.lineTo(-6,14);
+      c.stroke(); } },
+  husk: { n:'HULK HUSK', under(c,trim,open){
+    /* more of you to lose: two pauldrons, and the hull genuinely reads bigger */
+    for(const sd of [1,-1]){
+      c.save(); c.scale(1,sd); c.translate(0,open*2.4);
+      c.fillStyle=STEEL2; c.strokeStyle=trim; c.lineWidth=1.4;
+      c.beginPath();
+      c.moveTo(8.6,7.4);c.quadraticCurveTo(14.6,11,11.2,19.6);
+      c.quadraticCurveTo(2.6,22.4,-5.4,18.6);c.quadraticCurveTo(-7.4,11,-3.2,7.6);
+      c.closePath(); c.fill(); c.stroke();
+      c.strokeStyle=rgba(trim,0.45); c.lineWidth=1;
+      c.beginPath(); c.moveTo(-1.4,10.6);c.quadraticCurveTo(5.4,13.4,8.2,18.2); c.stroke();
+      c.restore(); } } },
+  mirror: { n:'MIRRORPLATE', under(c,trim,open){
+    /* made to be hit on purpose: two flat facets angled off the front */
+    for(const sd of [1,-1]){
+      c.save(); c.scale(1,sd);
+      c.fillStyle='#101d33'; c.strokeStyle=trim; c.lineWidth=1.3;
+      c.beginPath();
+      c.moveTo(11.6,-1.2);c.lineTo(16.8,5.4);c.lineTo(9.6,15.2);c.lineTo(2.2,11.4);
+      c.closePath(); c.fill(); c.stroke();
+      c.restore(); } },
+    over(c,trim,open,t){
+      for(const sd of [1,-1]){
+        c.save(); c.scale(1,sd);
+        c.beginPath();
+        c.moveTo(11.6,-1.2);c.lineTo(16.8,5.4);c.lineTo(9.6,15.2);c.lineTo(2.2,11.4);
+        c.closePath(); c.clip();
+        const sw=((t*0.45+(sd>0?0:0.5))%1)*26-4;
+        const g=c.createLinearGradient(sw-4,0,sw+4,16);
+        g.addColorStop(0,'rgba(226,232,240,0)');
+        g.addColorStop(0.5,'rgba(226,232,240,0.55)');
+        g.addColorStop(1,'rgba(226,232,240,0)');
+        c.fillStyle=g; c.fillRect(0,-4,20,22); c.restore(); } } },
+  briar: { n:'BRIAR MAIL', under(c,trim,open){
+    /* touching it is the mistake */
+    c.fillStyle=STEEL; c.strokeStyle=trim; c.lineWidth=1;
+    for(let i=0;i<9;i++){
+      const a=i/9*TAU+0.35, r=10.8+(i%2)*1.2, L=r+5.6+open*2;
+      c.beginPath();
+      c.moveTo(Math.cos(a)*r-Math.sin(a)*2.1, Math.sin(a)*r+Math.cos(a)*2.1);
+      c.lineTo(Math.cos(a)*L, Math.sin(a)*L);
+      c.lineTo(Math.cos(a)*r+Math.sin(a)*2.1, Math.sin(a)*r-Math.cos(a)*2.1);
+      c.closePath(); c.fill(); c.stroke(); } } },
+  kiln: { n:'KILN PLATE', under(c,trim,open){
+    for(const sd of [1,-1]){
+      c.save(); c.scale(1,sd); c.translate(0,open*1.6);
+      c.fillStyle=STEEL2; c.strokeStyle=trim; c.lineWidth=1.2;
+      c.beginPath(); c.moveTo(-8.4,5.6);c.lineTo(7.8,7.2);c.lineTo(6.2,16);
+      c.lineTo(-9.8,12.6); c.closePath(); c.fill(); c.stroke();
+      c.restore(); } },
+    over(c,trim,open,t){
+      /* runs hot, and the vents say so */
+      c.save(); c.globalCompositeOperation='lighter';
+      for(const sd of [1,-1]){
+        c.save(); c.scale(1,sd); c.translate(0,open*1.6);
+        c.globalAlpha=0.5+Math.sin(t*4+sd)*0.22;
+        c.strokeStyle='#fb923c'; c.lineWidth=1.4; c.beginPath();
+        for(let i=0;i<3;i++){const x=4-i*4.4;
+          c.moveTo(x,8.8);c.lineTo(x-1,13.8);}
+        c.stroke(); c.restore(); }
+      c.restore(); } }
+};
+
+/* --- cores. The light in the chest, and the only part of the hull that is
+   allowed to be a colour the pilot is not. ------------------------------- */
+const CORE_ART = {
+  embc:  { n:'EMBER CORE',   c:'#fb923c', draw(c,t,k){ poly(c,0,0,3.2,3,t*1.4); c.fill();
+             c.globalAlpha=0.5+Math.sin(t*17)*0.3; poly(c,0,0,4.6,3,-t*1.1); c.stroke(); } },
+  glac:  { n:'GLACIER CORE', c:'#7dd3fc', draw(c,t,k){ poly(c,0,0,3.4,6,t*0.3); c.fill();
+             c.globalAlpha=0.55; poly(c,0,0,5.2,6,t*0.3+0.5); c.stroke(); } },
+  leech: { n:'LEECH CORE',   c:'#f87171', draw(c,t,k){
+             const b=1+Math.max(0,Math.sin(t*5))*0.35; c.beginPath();
+             c.arc(0,0,2.9*b,0,TAU); c.fill();
+             c.globalAlpha=0.6; c.beginPath(); c.arc(0,0,5*b,0,TAU); c.stroke(); } },
+  echo:  { n:'ECHO CORE',    c:'#c4b5fd', draw(c,t,k){ c.beginPath();c.arc(0,0,2.4,0,TAU);c.fill();
+             c.globalAlpha=0.7; c.beginPath();c.arc(0.9,0,4.4,0,TAU);c.stroke();
+             c.globalAlpha=0.4; c.beginPath();c.arc(-0.9,0,5.6,0,TAU);c.stroke(); } },
+  arcc:  { n:'ARC CORE',     c:'#a78bfa', draw(c,t,k){ c.beginPath();c.arc(0,0,2.6,0,TAU);c.fill();
+             c.globalAlpha=0.8; c.beginPath();
+             let a=t*3; for(let i=0;i<5;i++){const r=3.4+i*0.9,an=a+i*1.9;
+               const x=Math.cos(an)*r,y=Math.sin(an)*r; i?c.lineTo(x,y):c.moveTo(x,y);}
+             c.stroke(); } },
+  voidc: { n:'VOID CORE',    c:'#818cf8', draw(c,t,k){
+             c.save(); c.globalCompositeOperation='source-over';
+             c.fillStyle='#05060a'; c.beginPath();c.arc(0,0,3.6,0,TAU);c.fill(); c.restore();
+             c.globalAlpha=0.9; c.beginPath();c.arc(0,0,3.8,0,TAU);c.stroke();
+             c.globalAlpha=0.35; c.beginPath();c.arc(0,0,5.4+Math.sin(t*2)*0.8,0,TAU);c.stroke(); } },
+  spallc:{ n:'SPALL CORE',   c:'#cbd5e1', draw(c,t,k){
+             for(let i=0;i<5;i++){const a=i/5*TAU+0.4;
+               c.save(); c.rotate(a); c.beginPath();
+               c.moveTo(1.4,-1.1);c.lineTo(4.6,-0.5);c.lineTo(4.2,1.3);c.lineTo(1.4,1.1);
+               c.closePath(); c.fill(); c.restore(); }
+             c.globalAlpha=0.5; c.beginPath();c.arc(0,0,1.5,0,TAU);c.fill(); } },
+  ripc:  { n:'RIPOSTE CORE', c:'#7dd3fc', draw(c,t,k){ c.beginPath();c.arc(0,0,2.6,0,TAU);c.fill();
+             const p=(t*0.8)%1; c.globalAlpha=(1-p)*0.7;
+             c.beginPath();c.arc(0,0,2.6+p*5,0,TAU);c.stroke(); } }
+};
+
+/* --- sigils. A token on a short tether at the tail, because what the run
+   owes you is carried rather than worn. ---------------------------------- */
+const SIGIL_ART = {
+  tally:  { n:'TALLY SIGIL',  draw(c){ c.beginPath();
+              for(let i=0;i<4;i++){c.moveTo(-1.8+i*1.2,-2.4);c.lineTo(-1.8+i*1.2,2.4);}
+              c.moveTo(-2.6,1.4);c.lineTo(2.4,-1.8); c.stroke(); } },
+  toll:   { n:'TOLL SIGIL',   draw(c){ c.beginPath();c.arc(0,0,2.6,0,TAU);c.stroke();
+              c.beginPath();c.arc(0,0,1.1,0,TAU);c.fill(); } },
+  omen:   { n:'OMEN SIGIL',   draw(c){ c.beginPath();
+              c.moveTo(-3.2,0);c.quadraticCurveTo(0,-3,3.2,0);c.quadraticCurveTo(0,3,-3.2,0);
+              c.stroke(); c.beginPath();c.arc(0,0,0.9,0,TAU);c.fill(); } },
+  vigil:  { n:'VIGIL SIGIL',  draw(c){ c.beginPath();
+              c.moveTo(0,-3);c.lineTo(0,3);c.moveTo(-2.2,-0.6);c.lineTo(2.2,-0.6); c.stroke(); } },
+  grudge: { n:'GRUDGE SIGIL', draw(c){ c.beginPath();
+              c.moveTo(-2.8,-2.6);c.lineTo(0.4,-0.6);c.lineTo(-1.6,0.4);c.lineTo(2.8,2.8);
+              c.stroke(); } },
+  whet:   { n:'WHETSTONE',    draw(c){ c.beginPath();
+              c.moveTo(-2.8,-1.6);c.lineTo(2.8,-2.4);c.lineTo(2.8,1.6);c.lineTo(-2.8,2.4);
+              c.closePath(); c.stroke(); } },
+  stride: { n:'STRIDE SIGIL', draw(c){ c.beginPath();
+              c.moveTo(-2.4,-2.8);c.lineTo(1.6,0);c.lineTo(-2.4,2.8);
+              c.moveTo(0.4,-2.8);c.lineTo(4,0);c.lineTo(0.4,2.8); c.stroke(); } }
+};
+
+/* ============================ THE HULL ==================================
+   The frame is what the pilot is without the room: a wreck. Blunt stub where
+   every other hull has a nose, mass across the shoulders, a counterweight
+   tail. Everything that makes it look like anything is bolted on.
+   ====================================================================== */
+function hullPathVagrant(c){
+  c.beginPath();
+  c.moveTo(12.6,0);
+  c.lineTo(10.4,4.4); c.lineTo(11.4,10.2); c.lineTo(2.4,13.2);
+  c.lineTo(-6.4,12);  c.lineTo(-9.2,6);    c.lineTo(-15,4);
+  c.lineTo(-12.8,0);  c.lineTo(-15,-4);    c.lineTo(-9.2,-6);
+  c.lineTo(-6.4,-12); c.lineTo(2.4,-13.2); c.lineTo(11.4,-10.2);
+  c.lineTo(10.4,-4.4);
+  c.closePath();
+}
+
+/* The rest pose of whatever is being carried. Alternates with swingSide so a
+   chain reads as one motion rather than three identical twitches. */
+function bladeRestPose(P){
+  const sd = P.swingSide ? -1 : 1;
+  const wind = P.rig;                       // 0..1, the combo-3 shift
+  /* Held low and back at rest; at combo three it comes up and across, which
+     is the whole of what "the next one is a finisher" looks like from ten
+     feet away with the HUD off the side of the screen. */
+  return { x:-2+wind*4, y:sd*(7.6-wind*3),
+           a:sd*(2.5-wind*1.15), s:0.74 };
+}
+
+/* One item, drawn. `s` scales the native art; trim is the rarity colour, and
+   it is the whole of how a legendary reads as a legendary from across a room. */
+function drawBladeArt(c,it,s,fill,trim,glowA,lw){
+  const art = BLADE_ART[it && it.b] || BLADE_ART.edge;
+  c.save(); c.scale(s,s);
+  c.fillStyle = fill; c.strokeStyle = trim; c.lineWidth = (lw||1.4)/s;
+  art.draw(c); c.fill(); c.stroke();
+  // the edge itself, one bright line down the long side
+  c.strokeStyle = rgba('#e0e7ff',0.7); c.lineWidth = 0.9/s;
+  c.beginPath(); c.moveTo(art.len*0.28,-0.2); c.lineTo(art.len*0.92,-0.2); c.stroke();
+  c.restore();
+  if (glowA>0){ c.save(); c.globalCompositeOperation='lighter';
+    drawGlow(c,art.len*s*0.7,0,art.len*s*0.5,trim,glowA); c.restore(); }
+}
+
+/* The hull, wearing what it found. Draw order is the order it was bolted on:
+   frame, plate, core, sigil, blade — so the weapon is always on top and the
+   silhouette answer to "what am I carrying" is never occluded. */
+function drawVagrantHull(c,P,t){
+  const g = P.gear||{};
+  function rigcol(k){ return g[k] ? (RARITY[g[k].rar]||'#94a3b8') : rgba(COL.player,0.6); }
+  const open = P.rig;
+  const plate = g.plate && PLATE_ART[g.plate.b];
+
+  // PLATE, under: bolted around the frame, and the one layer that is allowed
+  // to change the silhouette
+  if (plate && plate.under) {
+    c.save(); plate.under(c, rigcol('plate'), open, t); c.restore();
+  }
+
+  // the frame, on top of its own armour, so the pilot is never painted out
+  hullPathVagrant(c);
+  c.fillStyle = 'rgba(14,21,38,0.97)'; c.strokeStyle = COL.player; c.lineWidth = 1.8;
+  c.fill(); c.stroke();
+  // structural ribs, always there, always the same: this is the part that is his
+  c.strokeStyle = 'rgba(8,13,26,0.9)'; c.lineWidth = 2.6;
+  c.beginPath(); c.moveTo(1.6,-10.4); c.lineTo(1.6,10.4); c.stroke();
+  c.strokeStyle = rgba(COL.player,0.5); c.lineWidth = 0.9;
+  c.beginPath();
+  c.moveTo(-6,-5.6);c.lineTo(8,-4);  c.moveTo(-6,5.6);c.lineTo(8,4);
+  c.moveTo(-9.6,0); c.lineTo(-4.4,0);
+  c.stroke();
+
+  if (plate && plate.over) {
+    c.save(); plate.over(c, rigcol('plate'), open, t); c.restore();
+  }
+
+  // CORE — the chest light
+  c.save();
+  c.globalCompositeOperation='lighter';
+  if (g.core && CORE_ART[g.core.b]) {
+    const cc = CORE_ART[g.core.b];
+    drawGlow(c,-1.5,0,10+open*5,cc.c,0.4+open*0.25);
+    c.fillStyle = cc.c; c.strokeStyle = cc.c; c.lineWidth = 0.9;
+    c.save(); c.translate(-1.5,0); cc.draw(c,t,open); c.restore();
+    c.globalAlpha = 1;
+  } else {
+    drawGlow(c,-1.5,0,6,COL.player,0.25);
+    c.fillStyle = rgba(COL.player,0.5);
+    c.beginPath(); c.arc(-1.5,0,1.8,0,TAU); c.fill();
+  }
+  c.restore();
+
+  // SIGIL — a token on a tether at the tail
+  if (g.sigil && SIGIL_ART[g.sigil.b]) {
+    const sw = Math.sin(t*2.6)*0.32;
+    c.save(); c.translate(-9.4,4.4); c.rotate(sw);
+    c.strokeStyle = rgba(rigcol('sigil'),0.6); c.lineWidth = 0.8;
+    c.beginPath(); c.moveTo(0,0); c.lineTo(0,3); c.stroke();
+    c.translate(0,5.8);
+    c.strokeStyle = rigcol('sigil'); c.fillStyle = rigcol('sigil'); c.lineWidth = 0.9;
+    SIGIL_ART[g.sigil.b].draw(c);
+    c.restore();
+  }
+
+  // BLADE — carried, until it is not
+  if (P.swingT <= 0) {
+    const p = bladeRestPose(P);
+    c.save(); c.translate(p.x,p.y); c.rotate(p.a);
+    drawBladeArt(c, g.blade, p.s, '#1b2740', rigcol('blade'),
+                 g.blade && g.blade.rar==='legend' ? 0.3 : 0);
+    c.restore();
+  }
+
+  // combo readout: the two shoulder horns, lit by the chain
+  const ck = P.riposte>0 ? 1 : clamp((P.combo||0)/2,0,1);
+  if (ck>0.02 || P.rig>0.02){
+    const hot = P.riposte>0 || P.combo>=2;
+    c.save(); c.globalCompositeOperation='lighter';
+    c.globalAlpha = 0.3+ck*0.55;
+    c.strokeStyle = hot?COL.crit:COL.player; c.lineWidth = 1.4+ck*1.2;
+    c.beginPath();
+    c.moveTo(2.4,13.2); c.lineTo(11.4+open*2,10.2-open*1.4);
+    c.moveTo(2.4,-13.2);c.lineTo(11.4+open*2,-10.2+open*1.4);
+    c.stroke(); c.globalAlpha=1;
+    drawGlow(c,11.4,10.2,4+ck*7,hot?COL.crit:COL.player,0.25+ck*0.4);
+    drawGlow(c,11.4,-10.2,4+ck*7,hot?COL.crit:COL.player,0.25+ck*0.4);
+    c.restore();
+  }
+
+  /* The beak. The hull has no barrel and no nose, and in a twin-stick game
+     that is not a style choice you can afford — so one hard bright chevron,
+     drawn last, over everything the room bolted on, says which way this is
+     pointing from across the arena. */
+  c.strokeStyle = '#eef2ff'; c.lineWidth = 1.7; c.lineJoin = 'miter';
+  c.beginPath();
+  c.moveTo(7.6,-5.4); c.lineTo(13.2,0); c.lineTo(7.6,5.4);
+  c.stroke();
+  c.save(); c.globalCompositeOperation='lighter';
+  drawGlow(c,12,0,5,COL.bullet,0.3); c.restore();
+
+  // the drive: one cold thruster, doing the minimum
+  c.save(); c.globalCompositeOperation='lighter';
+  const fl = 0.7+Math.sin(t*20)*0.3;
+  drawGlow(c,-14,0,7*fl,COL.player,0.24);
+  c.fillStyle = rgba('#c7d2fe',0.36);
+  c.beginPath(); c.moveTo(-12,2.2); c.lineTo(-18-4*fl,0); c.lineTo(-12,-2.2);
+  c.closePath(); c.fill();
+  c.restore();
+}
+
+/* ============================== THE SWING ===============================
+   The sector the edge has actually covered, which is the figure updateBlade
+   struck bodies with — plus the blade itself, at true scale, at the leading
+   edge. A GREATBLADE's swing has a greatblade in it.
+   ====================================================================== */
+function drawBladeSwing(c,P,t){
+  const live = P.swingT>0;
+  const fade = live?1:clamp((P.swingFade||0)/0.14,0,1);
+  if (fade<=0.002) return;
+  const arc=P.swingArc, reach=P.swingReach, a0=P.swingA0, dir=P.swingDir;
+  const prog = live?P.swingP:1;
+  const a1 = a0+dir*arc*prog;
+  const fin = !!P.swingFin;
+  const col = fin?COL.crit:COL.player;
+  const lo = Math.min(a0,a1), hi = Math.max(a0,a1);
+
+  c.save();
+  c.translate(P.x,P.y);
+  c.globalCompositeOperation='lighter';
+
+  /* The covered sector, banded rather than flat-filled: eight arcs of rising
+     alpha toward the edge, so the wedge reads as something travelling instead
+     of a hitbox switched on. */
+  const N=8;
+  for(let i=0;i<N;i++){
+    const k0=i/N,k1=(i+1)/N;
+    const b0=lerp(a0,a1,k0), b1=lerp(a0,a1,k1);
+    c.globalAlpha = (fin?0.3:0.19)*fade*(0.18+k0*1.3);
+    c.fillStyle = col;
+    c.beginPath(); c.moveTo(0,0);
+    c.arc(0,0,reach,Math.min(b0,b1),Math.max(b0,b1));
+    c.closePath(); c.fill();
+  }
+  // the outer edge: the line the reach actually is
+  c.globalAlpha=(fin?1:0.8)*fade;
+  c.strokeStyle=col; c.lineWidth=fin?3.6:2.4;
+  c.beginPath(); c.arc(0,0,reach,lo,hi); c.stroke();
+  // and the inner one, on a finisher only, so the wedge closes
+  if(fin){ c.globalAlpha=0.45*fade; c.lineWidth=1.6;
+    c.beginPath(); c.arc(0,0,reach*0.46,lo,hi); c.stroke(); }
+
+  /* Four ghosts of the blade along the arc behind the edge. Motion blur done
+     as the actual object, which is cheaper than it looks and reads far better
+     than a smear. */
+  const art = BLADE_ART[(P.gear&&P.gear.blade&&P.gear.blade.b)||'edge'];
+  const s = (reach*0.94)/art.len;
+  const trim = P.gear&&P.gear.blade ? (RARITY[P.gear.blade.rar]||'#94a3b8') : COL.bullet;
+  if (live){
+    for(let i=4;i>=1;i--){
+      const k = clamp(prog-i*0.075,0,1);
+      if(k<=0) continue;
+      c.globalAlpha = fade*0.17*(1-i/5)*(fin?2:1.4);
+      c.save(); c.rotate(a0+dir*arc*k); c.scale(s,s);
+      c.fillStyle = fin?'#fef3c7':COL.bullet; art.draw(c); c.fill(); c.restore();
+    }
+    // the edge itself, at full brightness, last and widest. Filled thin and
+    // outlined hard, so a GREATBLADE at reach is a blade and not a white slab.
+    c.globalAlpha = fade;
+    c.save(); c.rotate(a1);
+    drawBladeArt(c,P.gear&&P.gear.blade,s,
+                 fin?'rgba(254,243,199,0.6)':rgba(COL.bullet,0.42),
+                 fin?'#fffbeb':'#e0e7ff',0,fin?3.4:2.4);
+    c.restore();
+    drawGlow(c,Math.cos(a1)*reach,Math.sin(a1)*reach,fin?26:14,col,0.65*fade);
+  }
+
+  /* What is left behind: a thin cut in the floor along the swept edge, fading
+     out. Without it a swing has no consequence between frames. */
+  if(!live){
+    c.globalAlpha=fade*0.5; c.strokeStyle=fin?'#fef3c7':COL.bullet;
+    c.lineWidth=fin?2.4:1.2;
+    c.beginPath(); c.arc(0,0,reach*0.97,lo,hi); c.stroke();
+  }
+  c.restore();
+}
+
+/* ============================== THE GUARD ===============================
+   It refuses damage from every direction, so it cannot be a shape on the
+   front. Six faceted segments snapping inward: a moment, not a facing.
+   ====================================================================== */
+function drawBladeParry(c,P,t,win){
+  if (P.parryT<=0) return;
+  const k = clamp(P.parryT/win,0,1);
+  const R = P.r+7+(1-k)*9;
+  c.save(); c.translate(P.x,P.y);
+  c.globalCompositeOperation='lighter';
+  c.rotate(t*1.6);
+  const seg = TAU/6;
+  for(let i=0;i<6;i++){
+    const a0=i*seg+0.1, a1=a0+seg*0.68;
+    c.globalAlpha=(0.3+0.5*k);
+    c.strokeStyle='#bae6fd'; c.lineWidth=2+2.4*k;
+    c.beginPath(); c.arc(0,0,R,a0,a1); c.stroke();
+    // the facet's leading corner, brighter
+    c.globalAlpha=0.5+0.5*k;
+    c.fillStyle='#e0f2fe';
+    c.beginPath(); c.arc(Math.cos(a1)*R,Math.sin(a1)*R,1.5+k,0,TAU); c.fill();
+  }
+  c.globalAlpha=0.16*k; c.fillStyle='#7dd3fc';
+  c.beginPath(); c.arc(0,0,R,0,TAU); c.fill();
+  c.restore();
+}
+
+/* A parry that connected. The refusal, made loud: a hard ring and six shards
+   thrown back out along the facets. */
+function parryFlash(c,P,k){
+  c.save(); c.translate(P.x,P.y); c.globalCompositeOperation='lighter';
+  const R=P.r+8+(1-k)*30;
+  c.globalAlpha=k; c.strokeStyle='#f0f9ff'; c.lineWidth=1.4+k*4;
+  c.beginPath(); c.arc(0,0,R,0,TAU); c.stroke();
+  drawGlow(c,0,0,R*1.15,'#7dd3fc',k*0.3);
+  c.globalAlpha=k*0.95; c.strokeStyle='#bae6fd'; c.lineWidth=2.6;
+  for(let i=0;i<6;i++){const a=i*TAU/6+0.4;
+    c.beginPath();
+    c.moveTo(Math.cos(a)*(R-7),Math.sin(a)*(R-7));
+    c.lineTo(Math.cos(a)*(R+10),Math.sin(a)*(R+10)); c.stroke();}
+  c.restore();
+}
+
+/* ============================= THE KIT PANEL ============================
+   Four rows, and every one of them carries the item's own art at 9px. The
+   whole build lives here; it has to be readable at a glance and it has to
+   agree with what is bolted to the hull.
+   ====================================================================== */
+function drawBladeHUD(c,P,pad,bw,ly,t){
+  const ready = P.parryCd<=0;
+  c.textAlign='left';
+  c.font="700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  c.fillStyle = P.parryT>0?'#e0f2fe':ready?'#7dd3fc':'#475569';
+  c.fillText(P.parryT>0?'PARRY':'[F] PARRY',pad,ly);
+  if(!ready){
+    const w=34,k=1-clamp(P.parryCd/0.85,0,1);
+    c.fillStyle='rgba(148,163,184,0.18)'; roundRect(c,pad+56,ly-3,w,5,3); c.fill();
+    c.fillStyle='rgba(125,211,252,0.7)'; roundRect(c,pad+56,ly-3,Math.max(2,w*k),5,3); c.fill();
+  }
+  // combo chevrons: the third is drawn as the finisher it is about to become
+  const rip=P.riposte>0; let cx0=pad+100;
+  for(let i=0;i<3;i++){
+    const on=rip||i<P.combo, last=i===2;
+    c.fillStyle = on?(last||rip?COL.crit:COL.player):'rgba(148,163,184,0.2)';
+    c.beginPath();
+    if(last){ c.moveTo(cx0,ly-4.5);c.lineTo(cx0+8,ly-0.5);c.lineTo(cx0,ly+3.5);
+              c.lineTo(cx0+3,ly-0.5); c.closePath(); }
+    else { c.moveTo(cx0,ly-4);c.lineTo(cx0+5,ly-0.5);c.lineTo(cx0,ly+3);
+           c.lineTo(cx0+2,ly-0.5); c.closePath(); }
+    c.fill(); cx0+=last?13:9;
+  }
+  ly+=19;
+
+  const SL=[['blade','BLADE'],['plate','PLATE'],['core','CORE'],['sigil','SIGIL']];
+  for(const [k,n] of SL){
+    const it=P.gear?P.gear[k]:null;
+    const col=it?(RARITY[it.rar]||'#94a3b8'):'#334155';
+    // rarity tick, then the item's own art, then the name
+    c.fillStyle=col; roundRect(c,pad,ly-7.5,2,10,1); c.fill();
+    c.save(); c.translate(pad+8,ly-2.5);
+    c.globalAlpha=it?1:0.35;
+    drawKitGlyph(c,k,it,col,7,t);
+    c.restore();
+    c.font="700 8px 'JetBrains Mono', ui-monospace, monospace";
+    c.fillStyle=it?rgba(col,0.7):'#334155';
+    c.fillText(n,pad+22,ly);
+    c.font="700 9.5px Barlow, 'Segoe UI', system-ui, sans-serif";
+    c.fillStyle=it?col:'#334155';
+    c.fillText(it?gearName(it):'—',pad+58,ly);
+    ly+=14;
+  }
+  return ly+6;
+}
+
+/* One item at icon size, for the kit panel and the gear card. Each slot draws
+   its own art; an empty slot draws the slot's shape in outline, so the panel
+   still says what is missing. */
+function drawKitGlyph(c,slot,it,col,r,t){
+  c.strokeStyle=col; c.fillStyle=rgba(col,0.18); c.lineWidth=1.1;
+  if(slot==='blade'){
+    const art=BLADE_ART[(it&&it.b)||null];
+    if(!art){ c.beginPath();c.moveTo(-r*0.7,0);c.lineTo(r*0.7,0);c.stroke(); return; }
+    const s=(r*2)/art.len; c.save(); c.rotate(-0.5); c.translate(-r*0.8,0); c.scale(s,s);
+    c.lineWidth=1.1/s; art.draw(c); c.fill(); c.stroke(); c.restore(); return;
+  }
+  if(slot==='plate'){
+    c.beginPath();
+    c.moveTo(-r*0.75,-r*0.7);c.lineTo(r*0.75,-r*0.7);c.lineTo(r*0.75,r*0.1);
+    c.lineTo(0,r);c.lineTo(-r*0.75,r*0.1);c.closePath(); c.fill(); c.stroke();
+    if(it){ c.strokeStyle=rgba(col,0.55); c.lineWidth=0.8; c.beginPath();
+      c.moveTo(-r*0.4,-r*0.4);c.lineTo(-r*0.4,r*0.3);
+      c.moveTo(r*0.4,-r*0.4);c.lineTo(r*0.4,r*0.3); c.stroke(); }
+    return;
+  }
+  if(slot==='core'){
+    const cc=it?CORE_ART[it.b]:null;
+    if(cc){ c.save(); c.scale(r/5,r/5); c.fillStyle=cc.c; c.strokeStyle=cc.c;
+      c.lineWidth=0.8; cc.draw(c,t,0); c.restore(); }
+    else { c.beginPath();c.arc(0,0,r*0.7,0,TAU);c.fill();c.stroke(); }
+    return;
+  }
+  const sg=it?SIGIL_ART[it.b]:null;
+  if(sg){ c.save(); c.scale(r/3.4,r/3.4); c.lineWidth=0.9/(r/3.4); sg.draw(c); c.restore(); }
+  else { poly(c,0,0,r*0.85,3,-Math.PI/2); c.fill(); c.stroke(); }
+}
+
+/* ========================== THE GEAR DECISION ===========================
+   The one screen where a drop is decided, and the pilot's only level-up
+   screen. Each card carries the item's real art and, under it, the hull
+   actually wearing it — because the question is never "is +12% good", it is
+   "is that me".
+   ====================================================================== */
+function gearCard(c,r,it,label,lit,better,P,t){
+  const col = it?(RARITY[it.rar]||'#94a3b8'):'#475569';
+  const lift = lit?5:0, y=r.y-lift, k=Math.min(1,r.h/342);
+  c.save();
+  if(lit){c.shadowColor=col;c.shadowBlur=26;}
+  c.fillStyle=lit?'rgba(22,32,52,0.98)':'rgba(12,18,30,0.96)';
+  roundRect(c,r.x,y,r.w,r.h,14); c.fill(); c.restore();
+  c.strokeStyle=lit?col:rgba(col,0.45); c.lineWidth=lit?2.4:1.4;
+  roundRect(c,r.x,y,r.w,r.h,14); c.stroke();
+  c.fillStyle=col; roundRect(c,r.x+14,y+15*k,r.w-28,3,2); c.fill();
+
+  const cx=r.x+r.w/2; c.textAlign='center';
+  c.save(); c.letterSpacing='0.2em';
+  c.font="700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  c.fillStyle='#64748b'; c.fillText(label,cx,y+32*k); c.restore();
+
+  if(!it){ c.font="600 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+    c.fillStyle='#475569'; c.fillText('nothing in this slot',cx,y+r.h/2); return; }
+
+  /* The portrait band: the thing itself on the left, and the hull actually
+     wearing it on the right. The question a drop asks is never "is +12% good",
+     it is "is that me" — so both halves of that are on the card. */
+  const gy=y+82*k, lx=r.x+r.w*0.28, rx=r.x+r.w*0.73;
+  c.save(); c.globalCompositeOperation='lighter';
+  drawGlow(c,lx,gy,46*k,col,lit?0.45:0.26); c.restore();
+  c.save(); c.translate(lx,gy);
+  if(it.slot==='blade'){
+    const art=BLADE_ART[it.b], s=(52*k)/art.len;
+    c.rotate(-0.5); c.translate(-22*k,0);
+    drawBladeArt(c,it,s,'#1b2740',col,it.rar==='legend'?0.35:0,1.8);
+  } else if(it.slot==='plate'){
+    /* a plate means nothing off a body, so it is shown as the panels
+       themselves, in the arrangement they actually sit in */
+    c.save(); c.scale(1.9*k,1.9*k); c.rotate(-Math.PI/2);
+    const pa=PLATE_ART[it.b];
+    if(pa&&pa.under) pa.under(c,col,0,t);
+    if(pa&&pa.over) pa.over(c,col,0,t);
+    c.restore();
+  } else { drawKitGlyph(c,it.slot,it,col,30*k,t); }
+  c.restore();
+
+  // the hull, wearing it
+  c.save(); c.translate(rx,gy); c.scale(1.75*k,1.75*k); c.rotate(-Math.PI/2);
+  const ghost={x:0,y:0,r:13,rig:0,combo:0,riposte:0,swingT:0,swingSide:0,parryT:0,
+    gear:Object.assign({},P.gear,{[it.slot]:it})};
+  drawVagrantHull(c,ghost,t); c.restore();
+  c.save(); c.font="700 7px 'JetBrains Mono', ui-monospace, monospace";
+  c.letterSpacing='0.14em'; c.fillStyle='#475569'; c.textAlign='center';
+  c.fillText('THE THING',lx,gy+50*k); c.fillText('AS WORN',rx,gy+50*k);
+  c.restore();
+  c.strokeStyle='rgba(148,163,184,0.1)'; c.lineWidth=1;
+  c.beginPath(); c.moveTo(r.x+r.w/2,gy-40*k); c.lineTo(r.x+r.w/2,gy+42*k); c.stroke();
+
+  c.save(); c.letterSpacing='0.15em';
+  c.font="700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  c.fillStyle=col; c.textAlign='center';
+  c.fillText(it.rar.toUpperCase(),cx,y+152*k); c.restore();
+
+  c.font="700 "+Math.max(12,19*k)+"px Barlow, 'Segoe UI', system-ui, sans-serif";
+  c.fillStyle='#f8fafc'; c.fillText(gearName(it),cx,y+174*k);
+
+  if(better!==null&&better!==undefined){
+    c.save(); c.font="700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    c.fillStyle=better?'#86efac':'#fca5a5';
+    c.fillText(better?'▲ LOOKS BETTER':'▼ LOOKS WORSE',cx,y+192*k); c.restore();
+  }
+  const lines=gearLines(it);
+  c.font='500 '+Math.max(9.5,12*k)+"px Barlow, 'Segoe UI', system-ui, sans-serif";
+  let ty=y+214*k;
+  for(const L of lines){ if(ty>y+r.h-30) break;
+    c.fillStyle=L.charAt(0)==='−'?'#fca5a5':'#cbd5e1'; c.fillText(L,cx,ty); ty+=Math.max(11,14.5*k); }
+  const b=BASES[it.b];
+  if(b){ c.font="400 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    c.fillStyle='#475569'; c.fillText(b.d,cx,y+r.h-14); }
+}
+
+/* ---- the preview's own model of an item (the game rolls its own) -------- */
+const BASES = {
+  edge:{slot:'blade',d:'Something sharp that was something else first.',s:{dmg:1}},
+  shiv:{slot:'blade',d:'Short, quick, and honest about it.',s:{dmg:0.74,rate:1.55,reach:-14,crit:0.06}},
+  cleaver:{slot:'blade',d:'Takes the whole line in front of you.',s:{dmg:1.02,arc:0.52,reach:-4}},
+  pike:{slot:'blade',d:'Reaches a body before the body reaches you.',s:{dmg:1.14,reach:42,arc:-0.3}},
+  great:{slot:'blade',d:'One swing, and time to regret starting it.',s:{dmg:1.9,rate:0.55,reach:12,arc:0.16}},
+  flense:{slot:'blade',d:'Comes back wetter than it went out.',s:{dmg:0.88,steal:1.2,reach:-6}},
+  tooth:{slot:'blade',d:'Finds the seam. Always the same seam.',s:{dmg:0.94,crit:0.13,critm:0.55}},
+  hook:{slot:'blade',d:'Swings hard enough to move what it hits.',s:{dmg:1.2,rate:0.82,reach:16}},
+  scrapp:{slot:'plate',d:'Bolted on. Mostly covers the important parts.',s:{hp:18,armor:1}},
+  weave:{slot:'plate',d:'Weighs nothing. Stops nearly as much.',s:{spd:1.13,hp:-8}},
+  cara:{slot:'plate',d:'You will not be moved, and you will not be quick.',s:{armor:4,spd:0.94,hp:14}},
+  husk:{slot:'plate',d:'More of you to lose before any of it matters.',s:{hp:44,spd:0.97}},
+  mirror:{slot:'plate',d:'Made to be hit on purpose.',s:{parry:1.7,hp:16}},
+  briar:{slot:'plate',d:'Touching it is the mistake.',s:{thorn:1.5,armor:2}},
+  kiln:{slot:'plate',d:'Runs hot. Swings faster for it.',s:{rate:1.14,hp:-14,armor:1}},
+  embc:{slot:'core',d:'What it cuts, it lights.',s:{}},
+  glac:{slot:'core',d:'What it cuts stops trying so hard.',s:{}},
+  leech:{slot:'core',d:'A finisher is a meal.',s:{steal:0.6}},
+  echo:{slot:'core',d:'The last swing of a chain happens twice.',s:{}},
+  arcc:{slot:'core',d:'The cut carries to whatever is nearest.',s:{}},
+  voidc:{slot:'core',d:'A finisher gathers the room in first.',s:{}},
+  spallc:{slot:'core',d:'Whatever is behind it gets some of it too.',s:{}},
+  ripc:{slot:'core',d:'A parry is not a pause. It is the wind-up.',s:{parry:1.25}},
+  tally:{slot:'sigil',d:'It counts everything. It always has.',s:{xp:1.3}},
+  toll:{slot:'sigil',d:'Something is owed and it intends to collect.',s:{cred:1.5}},
+  omen:{slot:'sigil',d:'Worse company. Better pockets.',s:{luck:2}},
+  vigil:{slot:'sigil',d:'It closes on its own if you let it.',s:{regen:1.1}},
+  grudge:{slot:'sigil',d:'It remembers how deep you are.',s:{dmg:1.06}},
+  whet:{slot:'sigil',d:'Nothing clever. Just sharper.',s:{dmg:1.12}},
+  stride:{slot:'sigil',d:'Closing the distance is most of the work.',s:{spd:1.09,reach:6}}
+};
+const NAMES = {};
+for(const k in BLADE_ART) NAMES[k]=BLADE_ART[k].n;
+for(const k in PLATE_ART) NAMES[k]=PLATE_ART[k].n;
+for(const k in CORE_ART)  NAMES[k]=CORE_ART[k].n;
+for(const k in SIGIL_ART) NAMES[k]=SIGIL_ART[k].n;
+const AFFN={common:'',rare:'KEEN ',epic:'CRUEL ',legend:'BRUTAL '};
+function gearName(it){ return it?(AFFN[it.rar]||'')+(NAMES[it.b]||'?'):'—'; }
+const LBL={dmg:'damage',rate:'swing rate',reach:'reach',arc:'arc',crit:'crit chance',
+  critm:'crit damage',steal:'lifesteal',thorn:'thorns',hp:'max HP',armor:'armour',
+  regen:'regen',spd:'speed',parry:'parry window',xp:'XP',cred:'credits',luck:'luck'};
+const MUL=['dmg','rate','spd','parry','combo','xp','cred'];
+function gearLines(it){
+  const b=BASES[it.b]; if(!b) return [];
+  const out=[];
+  for(const k in b.s){ const v=b.s[k];
+    if(MUL.includes(k)){ const p=Math.round((v-1)*100);
+      out.push((p<0?'−':'+')+Math.abs(p)+'% '+LBL[k]); }
+    else out.push((v<0?'−':'+')+Math.abs(Math.round(v*10)/10)+' '+LBL[k]); }
+  return out;
+}
+
+/* ============================== the preview ============================= */
+let ctx=null, cv=null, W=0, H=0, DPR=1, raf=0, t0=0;
+const mouse={x:0,y:0};
+const P={ x:0,y:0,r:13,ang:0, combo:0,comboT:0,riposte:0, rig:0,
+  swingT:0,swingP:0,swingFade:0,swingA0:0,swingDir:1,swingArc:1.15,swingReach:71,
+  swingFin:0,swingSide:0, parryT:0,parryCd:0, flash:0,
+  gear:{ blade:{b:'edge',rar:'common',slot:'blade'},
+         plate:{b:'scrapp',rar:'common',slot:'plate'},
+         core:null, sigil:null } };
+const opt={ zoom:2.2, auto:false, offer:false, hud:true, grid:true, dummies:true,
+            offerItem:{b:'great',rar:'legend',slot:'blade'} };
+const dummies=[];
+function seedDummies(){ dummies.length=0;
+  for(let i=0;i<7;i++) dummies.push({a:i/7*TAU,d:rnd(140,62),r:rnd(11,7),hit:0}); }
+seedDummies();
+
+function reach(){ const b=BASES[P.gear.blade&&P.gear.blade.b]||BASES.edge;
+  return P.r+58+((b.s&&b.s.reach)||0); }
+function arcOf(){ const b=BASES[P.gear.blade&&P.gear.blade.b]||BASES.edge;
+  return clamp(1.15+((b.s&&b.s.arc)||0),0.35,2.6); }
+
+function swing(){
+  if(P.swingT>0) return;
+  if(P.comboT<=0) P.combo=0;
+  const fin = P.combo>=2 || P.riposte>0;
+  P.swingFin=fin?1:0; P.swingT=0.15; P.swingP=0;
+  P.swingDir=P.swingSide?-1:1; P.swingSide=P.swingSide?0:1;
+  const a=arcOf()+(fin?0.85:0);
+  P.swingA0=P.ang-P.swingDir*a/2; P.swingArc=a;
+  P.swingReach=reach()+(fin?16:0);
+  if(P.riposte>0) P.riposte--;
+}
+function parry(){ if(P.parryCd>0) return; P.parryT=0.2; P.parryCd=0.85; P.flash=1; P.riposte=1; }
+
+function tick(dt,t){
+  P.ang=Math.atan2(mouse.y-H/2,mouse.x-W/2);
+  if(P.swingT>0){ P.swingT-=dt; P.swingP=clamp(1-Math.max(0,P.swingT)/0.15,0,1);
+    if(P.swingT<=0){ P.swingT=0; P.swingFade=0.14;
+      P.combo=P.swingFin?0:Math.min(2,P.combo+1); P.comboT=1.05;
+      for(const d of dummies) d.hit=0.3; } }
+  else if(P.swingFade>0) P.swingFade-=dt;
+  if(P.comboT>0){ P.comboT-=dt; if(P.comboT<=0) P.combo=0; }
+  if(P.parryT>0) P.parryT-=dt;
+  if(P.parryCd>0) P.parryCd-=dt;
+  if(P.flash>0) P.flash-=dt*3.2;
+  const want = (P.combo>=2||P.riposte>0)?1:0;
+  P.rig += (want-P.rig)*Math.min(1,dt*9);
+  for(const d of dummies){ d.a+=dt*0.12; if(d.hit>0) d.hit-=dt; }
+  if(opt.auto && P.swingT<=0 && Math.random()<dt*3.4) swing();
+}
+
+function frame(ts){
+  raf=requestAnimationFrame(frame);
+  if(!ctx) return;
+  if(!t0) t0=ts; const t=(ts-t0)/1000;
+  const dt=Math.min(0.05,(ts-(frame.last||ts))/1000); frame.last=ts;
+  tick(dt,t);
+
+  ctx.fillStyle=COL.bg; ctx.fillRect(0,0,W,H);
+  if(opt.grid){
+    ctx.strokeStyle='#0e1626'; ctx.lineWidth=1; ctx.beginPath();
+    for(let x=(W/2)%56;x<W;x+=56){ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let y=(H/2)%56;y<H;y+=56){ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.stroke();
+  }
+  ctx.save();
+  ctx.translate(W/2,H/2); ctx.scale(opt.zoom,opt.zoom); ctx.translate(-W/2,-H/2);
+  const cxp=W/2, cyp=H/2; P.x=cxp; P.y=cyp;
+
+  if(opt.dummies) for(const d of dummies){
+    const x=cxp+Math.cos(d.a)*d.d, y=cyp+Math.sin(d.a)*d.d;
+    ctx.strokeStyle=d.hit>0?'#fca5a5':'#334155'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(x,y,d.r,0,TAU); ctx.stroke();
+  }
+  drawBladeSwing(ctx,P,t);
+  ctx.save(); ctx.translate(P.x,P.y); ctx.rotate(P.ang);
+  drawVagrantHull(ctx,P,t); ctx.restore();
+  drawBladeParry(ctx,P,t,0.2);
+  if(P.flash>0) parryFlash(ctx,P,clamp(P.flash,0,1));
+  ctx.restore();
+
+  if(opt.hud){
+    ctx.save();
+    ctx.fillStyle='rgba(5,7,14,0.72)'; roundRect(ctx,14,H-104,236,90,10); ctx.fill();
+    ctx.strokeStyle='rgba(148,163,184,0.12)'; ctx.lineWidth=1;
+    roundRect(ctx,14,H-104,236,90,10); ctx.stroke();
+    drawBladeHUD(ctx,P,26,224,H-84,t);
+    ctx.restore();
+  }
+  if(opt.offer) drawOffer(t);
+}
+
+function drawOffer(t){
+  ctx.fillStyle='rgba(3,5,10,0.86)'; ctx.fillRect(0,0,W,H);
+  const cw=Math.min(282,(W-92)/2), ch=clamp(Math.min(342,H*0.62),188,342);
+  const gap=Math.min(26,Math.max(12,(W-cw*2)/6));
+  // the eyebrow lives 52px above the cards, so the band has to be reserved
+  const x0=(W-(cw*2+gap))/2, y0=Math.max(62,(H-ch)/2+6);
+  const rs=[{x:x0,y:y0,w:cw,h:ch},{x:x0+cw+gap,y:y0,w:cw,h:ch}];
+  const it=opt.offerItem, old=P.gear[it.slot];
+  ctx.textAlign='center';
+  ctx.save(); ctx.letterSpacing='0.18em';
+  ctx.font="700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle=COL.player; ctx.fillText('SOMETHING ON THE FLOOR',W/2,y0-52);
+  ctx.letterSpacing='0.05em';
+  ctx.font="700 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle='#f1f5f9';
+  const SD={blade:'how it swings',plate:'what it takes',core:'what a hit does',sigil:'what it is owed'};
+  ctx.fillText(it.slot.toUpperCase()+'  ·  '+SD[it.slot],W/2,y0-24); ctx.restore();
+  gearCard(ctx,rs[0],it,'ON THE FLOOR',true,true,P,t);
+  gearCard(ctx,rs[1],old,'ALREADY WORN',false,null,P,t);
+}
+
+function resize(){
+  if(!cv) return;
+  const b=cv.parentElement.getBoundingClientRect();
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=Math.max(320,b.width); H=Math.max(260,b.height);
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+
+return {
+  boot(canvas){
+    cv=canvas; ctx=cv.getContext('2d');
+    resize(); new ResizeObserver(resize).observe(cv.parentElement);
+    cv.addEventListener('pointermove',e=>{const r=cv.getBoundingClientRect();
+      mouse.x=(e.clientX-r.left-W/2)/opt.zoom+W/2;
+      mouse.y=(e.clientY-r.top-H/2)/opt.zoom+H/2;});
+    cv.addEventListener('pointerdown',()=>{ if(opt.offer){opt.offer=false;return;} swing(); });
+    window.addEventListener('keydown',e=>{
+      const k=e.key.toLowerCase();
+      if(k==='f'){parry();e.preventDefault();}
+      if(k===' '){swing();e.preventDefault();} });
+    if(!raf) raf=requestAnimationFrame(frame);
+  },
+  setGear(slot,b,rar){ P.gear[slot]= b?{b,rar:rar||(P.gear[slot]&&P.gear[slot].rar)||'common',slot}:null; },
+  setRar(rar){ for(const k in P.gear) if(P.gear[k]) P.gear[k].rar=rar; },
+  offer(b,slot,rar){ opt.offerItem={b,slot,rar}; opt.offer=true; },
+  set(k,v){ opt[k]=v; if(k==='zoom') resize(); },
+  get:()=>({gear:P.gear,opt}),
+  swing, parry,
+  names:NAMES, bases:BASES
+};
+})();
+</script>
+</helmet>
+
+<div style="height:100vh;overflow:hidden;display:flex;flex-direction:column;background:#05060a;color:#cbd5e1;font-family:Barlow,'Segoe UI',system-ui,sans-serif">
+
+  <div style="display:flex;align-items:baseline;gap:16px;padding:14px 20px 12px;border-bottom:1px solid #131c2e;flex-wrap:wrap">
+    <div style="font-family:'Chakra Petch',Barlow,system-ui,sans-serif;font-weight:700;font-size:20px;letter-spacing:0.08em;color:#a5b4fc">THE VAGRANT</div>
+    <div style="font-size:12px;letter-spacing:0.18em;font-weight:700;color:#475569">REDESIGN · SCRAP-KNIGHT</div>
+    <div style="flex:1"></div>
+    <div style="font-size:11px;color:#475569;font-family:'JetBrains Mono',ui-monospace,monospace">click / space = swing · F = parry · aim with the mouse</div>
+  </div>
+
+  <div style="flex:1 1 auto;min-height:340px;position:relative;background:#05060a">
+    <canvas ref="{{ cv }}" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
+  </div>
+
+  <div style="border-top:1px solid #131c2e;padding:10px 20px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px 18px;background:#070a12;flex:0 1 auto;min-height:0;max-height:34vh;overflow-y:auto;overflow-x:hidden">
+    <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+      <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:800;font-size:10px;letter-spacing:0.16em;color:#64748b">{{ row.label }}</span>
+          <span style="font-size:10px;color:#334155">{{ row.hint }}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          <sc-for list="{{ row.items }}" as="it" hint-placeholder-count="8">
+            <button onClick="{{ it.pick }}" style="{{ it.st }}">{{ it.n }}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:800;font-size:10px;letter-spacing:0.16em;color:#64748b">RARITY · VIEW</span>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        <sc-for list="{{ rars }}" as="r" hint-placeholder-count="4">
+          <button onClick="{{ r.pick }}" style="{{ r.st }}">{{ r.n }}</button>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:2px">
+        <sc-for list="{{ toggles }}" as="g" hint-placeholder-count="5">
+          <button onClick="{{ g.pick }}" style="{{ g.st }}">{{ g.n }}</button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:860}}">
+const CHIP = (on, col) => ({
+  padding: '4px 9px', borderRadius: '5px', cursor: 'pointer',
+  border: '1px solid ' + (on ? col : '#1e293b'),
+  background: on ? col + '22' : '#0b1220',
+  color: on ? col : '#64748b',
+  font: "700 10.5px Barlow, 'Segoe UI', system-ui, sans-serif",
+  letterSpacing: '0.04em', lineHeight: 1.2, whiteSpace: 'nowrap'
+});
+const RARC = { common: '#94a3b8', rare: '#38bdf8', epic: '#c084fc', legend: '#fbbf24' };
+
+const SLOTS = [
+  { k: 'blade', label: 'BLADE', hint: 'how it swings', col: '#fca5a5',
+    ids: ['edge','shiv','cleaver','pike','great','flense','tooth','hook'] },
+  { k: 'plate', label: 'PLATE', hint: 'what it takes', col: '#93c5fd',
+    ids: ['scrapp','weave','cara','husk','mirror','briar','kiln'] },
+  { k: 'core',  label: 'CORE',  hint: 'what a hit does', col: '#c084fc',
+    ids: ['embc','glac','leech','echo','arcc','voidc','spallc','ripc'] },
+  { k: 'sigil', label: 'SIGIL', hint: 'what it is owed', col: '#fbbf24',
+    ids: ['tally','toll','omen','vigil','grudge','whet','stride'] }
+];
+
+class Component extends DCLogic {
+  state = {
+    gear: { blade: 'edge', plate: 'scrapp', core: null, sigil: null },
+    rar: 'common',
+    opt: { auto: false, hud: true, grid: true, dummies: true, offer: false },
+    zoom: 2.2
+  };
+
+  componentDidMount() {
+    const boot = () => {
+      if (!window.VAG || !this.cv) return setTimeout(boot, 40);
+      window.VAG.boot(this.cv);
+      const g = this.state.gear;
+      for (const k in g) window.VAG.setGear(k, g[k], this.state.rar);
+      window.VAG.set('zoom', this.state.zoom);
+    };
+    boot();
+  }
+
+  pickGear(slot, id) {
+    const g = Object.assign({}, this.state.gear);
+    g[slot] = g[slot] === id ? null : id;
+    this.setState({ gear: g });
+    window.VAG.setGear(slot, g[slot], this.state.rar);
+  }
+  pickRar(r) {
+    this.setState({ rar: r });
+    window.VAG.setRar(r);
+  }
+  toggle(k) {
+    const o = Object.assign({}, this.state.opt);
+    o[k] = !o[k];
+    this.setState({ opt: o });
+    if (k === 'offer') {
+      const slot = 'blade', id = this.state.gear.blade === 'great' ? 'pike' : 'great';
+      if (o.offer) window.VAG.offer(id, slot, 'legend');
+      else window.VAG.set('offer', false);
+    } else window.VAG.set(k, o[k]);
+  }
+
+  renderVals() {
+    const short = { scrapp:'SCRAP', weave:'VOIDWEAVE', cara:'CARAPACE', husk:'HULK HUSK',
+      mirror:'MIRROR', briar:'BRIAR', kiln:'KILN', embc:'EMBER', glac:'GLACIER',
+      leech:'LEECH', echo:'ECHO', arcc:'ARC', voidc:'VOID', spallc:'SPALL', ripc:'RIPOSTE',
+      edge:'SCRAP EDGE', shiv:'SHIV', cleaver:'CLEAVER', pike:'PIKE', great:'GREATBLADE',
+      flense:'FLENSER', tooth:'SPLITTOOTH', hook:'HOOK', tally:'TALLY', toll:'TOLL',
+      omen:'OMEN', vigil:'VIGIL', grudge:'GRUDGE', whet:'WHETSTONE', stride:'STRIDE' };
+    const rows = SLOTS.map(s => ({
+      label: s.label, hint: s.hint,
+      items: s.ids.map(id => ({
+        n: short[id] || id,
+        st: CHIP(this.state.gear[s.k] === id, RARC[this.state.rar]),
+        pick: () => this.pickGear(s.k, id)
+      }))
+    }));
+    const rars = ['common','rare','epic','legend'].map(r => ({
+      n: r.toUpperCase(),
+      st: CHIP(this.state.rar === r, RARC[r]),
+      pick: () => this.pickRar(r)
+    }));
+    const T = [['auto','AUTO-SWING'],['hud','KIT PANEL'],['grid','GRID'],
+               ['dummies','TARGETS'],['offer','GEAR SCREEN']];
+    const toggles = T.map(([k, n]) => ({
+      n, st: CHIP(this.state.opt[k], '#a5b4fc'), pick: () => this.toggle(k)
+    }));
+    return { rows, rars, toggles, cv: el => { this.cv = el; } };
+  }
+}
+</script>
+</body>
+</html>

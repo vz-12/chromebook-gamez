@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>AWAKENING · EMBER vs THE AMALGAM (REWORKED)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;800&display=swap">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
+    font-family:Barlow,'Segoe UI',system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ===========================================================================
+   AWAKENING — the clash, the meter, the vent, the walk.
+   ---------------------------------------------------------------------------
+   Nothing here is scripted animation. One simulation runs the whole piece:
+
+     his push        constant, with irregular surges
+     your push       0.55 + 0.9 * e^(-gap/220)      <- the proximity curve
+     node velocity   (his - yours) * K              <- so the node IS the contest
+     heat            30 * e^(-gap/170) per second, only while locked
+     lock            a surge landing inside 70u breaks it and costs 18 heat
+
+   The acts only change the forces. That means the cinematic is the win
+   condition playing out: the node walks up his beam because your push finally
+   exceeds his, and it exceeds his because the meter filled, and the meter
+   filled because you stood in it.
+
+   The frame breaks with the meter. Up to OVERDRIVE the camera is the game's
+   plan view (pitch ~7 degrees). When the vent fires it pitches over and his
+   nine parts rotate out of the floor plane into standing height — the same
+   body, read as a person for the first time.
+
+   SPACE replay · 1-7 acts · F frame data
+=========================================================================== */
+
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rnd = (a, b = 0) => b + Math.random() * (a - b);
+const ease = t => t * t * (3 - 2 * t);
+const easeIn = t => t * t * t;
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const smooth = (v, to, k, dt) => v + (to - v) * Math.min(1, k * dt);
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function mixHex(h1, h2, t) {
+  const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+  return `rgb(${Math.round(lerp((a>>16)&255,(b>>16)&255,t))},${Math.round(lerp((a>>8)&255,(b>>8)&255,t))},${Math.round(lerp(a&255,b&255,t))})`;
+}
+const _glow = new Map();
+function glowSprite(hex) {
+  let s = _glow.get(hex);
+  if (s) return s;
+  s = document.createElement('canvas'); s.width = s.height = 128;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, rgba(hex, 1)); gr.addColorStop(0.3, rgba(hex, 0.4));
+  gr.addColorStop(1, rgba(hex, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  _glow.set(hex, s); return s;
+}
+function drawGlow(c, x, y, r, hex, a = 1) {
+  if (r <= 0 || a <= 0) return;
+  c.globalAlpha = clamp(a, 0, 1);
+  c.drawImage(glowSprite(hex), x - r, y - r, r * 2, r * 2);
+  c.globalAlpha = 1;
+}
+/* a tapered leaf — flame that isn't a round-capped stroke */
+function flameLeaf(c, bx, by, ang, len, wid, bend) {
+  const ca = Math.cos(ang), sa = Math.sin(ang), nx = -sa, ny = ca;
+  const tx = bx + ca * len + nx * bend, ty = by + sa * len + ny * bend;
+  const mx = bx + ca * len * 0.45, my = by + sa * len * 0.45;
+  c.beginPath();
+  c.moveTo(bx + nx * wid, by + ny * wid);
+  c.quadraticCurveTo(mx + nx * wid * 1.15 + nx * bend * 0.4, my + ny * wid * 1.15 + ny * bend * 0.4, tx, ty);
+  c.quadraticCurveTo(mx - nx * wid * 1.15 + nx * bend * 0.4, my - ny * wid * 1.15 + ny * bend * 0.4, bx - nx * wid, by - ny * wid);
+  c.closePath();
+}
+
+/* --------------------------------- canvas -------------------------------- */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, grainTile = null, scanTile = null;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize);
+(function tiles() {
+  grainTile = document.createElement('canvas'); grainTile.width = grainTile.height = 96;
+  const g = grainTile.getContext('2d'), d = g.createImageData(96, 96);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const v = 128 + (Math.random() * 2 - 1) * 44;
+    d.data[i] = d.data[i+1] = d.data[i+2] = v; d.data[i+3] = 24;
+  }
+  g.putImageData(d, 0, 0);
+  scanTile = document.createElement('canvas'); scanTile.width = 1; scanTile.height = 3;
+  const s = scanTile.getContext('2d');
+  s.fillStyle = 'rgba(0,0,0,0.18)'; s.fillRect(0, 2, 1, 1);
+})();
+
+/* ================================ camera ==================================
+   World: x right, y depth (south is +y, toward the camera), z up.
+   pitch 0 is the game's plan view; raising it tilts the floor into
+   perspective. A straight world line stays straight on screen, so the grid
+   and the beams are still two-point draws.
+=========================================================================== */
+const FOCAL = 900;
+const cam = { x: 0, y: -660, D: 3020, pitch: 0.13, yaw: 0, roll: 0, cy: 0.42, shake: 0 };
+function proj(x, y, z) {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const rx = x - cam.x, ry = y - cam.y;
+  const x1 = rx * cy - ry * sy, y1 = rx * sy + ry * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const yc = y1 * cp - z * sp;
+  const dist = cam.D - y1 * sp - z * cp;
+  if (dist < 90) return { sx: 0, sy: 0, s: 0, dist, vis: false };
+  const s = FOCAL / dist;
+  return { sx: W / 2 + x1 * s, sy: H * cam.cy + yc * s, s, dist, vis: true };
+}
+
+/* ============================== the fighters ==============================
+   The Amalgam is a chassis, not a constellation. Nine salvaged cores are
+   grafted onto plated mass: each part carries a `w`/`h` box footprint, a
+   plate count, and the boss it used to be. The boxes OVERLAP — head into
+   spine, shoulders into chest, legs into the hip — so the union of them is a
+   single silhouette and the spars are internal structure rather than sticks
+   holding separate shapes apart.
+=========================================================================== */
+const BOSS_Y = -900, BOSS_X = 0;
+const AMAL = [
+  { id:'head',  key:'NULLCORE',    ox:   0, oy:-360, w:112, h:112, r:50, col:'#a78bfa', plates:3, kind:'skull' },
+  { id:'spine', key:'THE OTHER',   ox:   0, oy:-246, w: 92, h:140, r:34, col:'#5eead4', plates:4, kind:'stack' },
+  { id:'torso', key:'FORGEHEART',  ox:   0, oy: -20, w:246, h:230, r:98, col:'#f59e0b', plates:5, kind:'chest' },
+  { id:'shldL', key:'CURATOR',     ox:-150, oy:-190, w:126, h:112, r:52, col:'#e2e8f0', plates:3, kind:'pauldron' },
+  { id:'shldR', key:'ARCHIVIST',   ox: 150, oy:-190, w:126, h:112, r:52, col:'#38bdf8', plates:3, kind:'pauldron' },
+  { id:'armL',  key:'WARDEN',      ox:-238, oy:  30, w: 94, h:196, r:48, col:'#ef4444', plates:4, kind:'arm' },
+  { id:'armR',  key:'WARDEN',      ox: 238, oy:  30, w: 94, h:196, r:48, col:'#ef4444', plates:4, kind:'arm' },
+  { id:'legL',  key:'BROODMOTHER', ox:-100, oy: 188, w:126, h:200, r:54, col:'#4ade80', plates:4, kind:'leg' },
+  { id:'legR',  key:'BROODMOTHER', ox: 100, oy: 188, w:126, h:200, r:54, col:'#4ade80', plates:4, kind:'leg' }
+];
+const BONES = [['head','spine'],['spine','torso'],['spine','shldL'],['spine','shldR'],
+               ['shldL','armL'],['shldR','armR'],['torso','legL'],['torso','legR']];
+const RAINBOW = ['#f87171','#fb923c','#fde047','#4ade80','#38bdf8','#a78bfa','#f472b6'];
+const AMAL_COL = '#d8b4fe';
+const PLATE_DK = '#0b0912', PLATE_MD = '#191428', PLATE_LT = '#2b2242';
+
+/* part world position: plan view -> standing, by `stand` */
+function partPos(p, stand, t, blow) {
+  const planY = BOSS_Y + p.oy, standZ = (188 - p.oy) * 1.02;
+  let x = BOSS_X + p.ox;
+  let y = lerp(planY, BOSS_Y + p.oy * 0.1, stand);
+  let z = lerp(0, standZ, stand);
+  // idle: the rig breathes and the limbs hang a little
+  const sw = Math.sin(t * 0.8 + p.oy * 0.01) * (4 + stand * 9);
+  y += sw * 0.4; z += stand * Math.sin(t * 1.1 + p.ox * 0.01) * 5;
+  if (blow && blow.on) {                      // impact: the body comes apart
+    const k = blow.t, e = easeOut(clamp(k / 1.6, 0, 1));
+    x += p.bx * e * 260; y += p.by * e * 230; z += p.bz * e * 300 - k * k * 90;
+  }
+  return { x, y, z };
+}
+for (const p of AMAL) { p.bx = rnd(1, -1); p.by = rnd(1, -1); p.bz = rnd(1.4, -0.2); }
+
+/* ================================ the sim =================================
+   Everything the piece is about lives in these numbers.
+=========================================================================== */
+const SIM = {
+  shipX: 0, shipY: 300, shipAim: -Math.PI / 2, shipVY: 0,
+  nodeU: 0.42,              // 0 = his muzzle, 1 = your nose
+  heat: 0,                  // the overpower meter
+  locked: false, lockBreak: 0,
+  gap: 1400, rate: 0,
+  feed: 0, mash: 0, mashT: 0, // the spam: how hard you are feeding the lance
+  surge: 0, surgeTell: 0, nextSurge: 0, surgeIdx: 0,
+  broke: 0, walk: 0, impact: 0
+};
+const SURGES = [10.4, 13.2, 15.8, 18.4, 21.0, 23.4, 25.6];
+
+/* --------------------------------- acts ----------------------------------
+   Retimed so the back half breathes: the vent is its own short, loud act, and
+   the WALK is the long earned one — the node grinding up his beam with two
+   stalls where he resists and fails — rather than a gap before a sudden death.
+=========================================================================== */
+const ACT = [
+  { t:  0.0, id:'SWEEP',     cap:'his beam sweeps the room, as it always has' },
+  { t:  4.2, id:'LOCK',      cap:'it stops. one beam, held on you — and your lance stops against it' },
+  { t:  8.0, id:'CONTEST',   cap:'the node moves: his output drives it at you, yours drives it at him' },
+  { t: 27.0, id:'FULL',      cap:'a hull that cannot shed it' },
+  { t: 29.4, id:'OVERDRIVE', cap:'first overdrive ever fired' },
+  { t: 35.6, id:'WALK',      cap:'the standoff collapses — and it walks the node up his beam' },
+  { t: 40.6, id:'IMPACT',    cap:'' }
+];
+const T_END = 48.0;
+function actAt(t) { let a = ACT[0]; for (const x of ACT) if (t >= x.t) a = x; return a; }
+
+/* his two resist stalls during the walk: he dumps everything into holding the
+   node off his chest, twice, and both fail. Tight against a five-second walk —
+   the node should arrive while the vent is still loud, not after it. */
+function resistNow() {
+  const a = actAt(T);
+  if (a.id !== 'WALK') return 1;
+  const k = T - a.t;
+  const bump = (at, w, h) => Math.exp(-Math.pow((k - at) / w, 2)) * h;
+  return 1 + bump(1.4, 0.5, 3.2) + bump(3.1, 0.45, 2.4);
+}
+
+let T = 0, last = 0, flash = 0, dim = 0, showData = false;
+let parts = [], pools = [], sparkTrail = [], shocks = [], poolsSeeded = false;
+const spark = { on: false, x: 0, y: 0, z: 1500, done: false };
+const blow = { on: false, t: 0 };
+const plume = { ang: 0, vel: 0, lag: 0, stretch: 1 };
+
+function reset(keepT) {
+  if (!keepT) T = 0;
+  flash = 0; dim = 0;
+  parts.length = 0; pools.length = 0; sparkTrail.length = 0; shocks.length = 0;
+  poolsSeeded = false;
+  spark.on = false; spark.done = false; spark.z = 1500; spark.x = 0; spark.y = -40;
+  blow.on = false; blow.t = 0;
+  Object.assign(SIM, { shipX: 0, shipY: 300, shipAim: -Math.PI / 2, shipVY: 0,
+    nodeU: 0.42, heat: 0, locked: false, lockBreak: 0, gap: 1400, rate: 0,
+    feed: 0, mash: 0, mashT: 0,
+    surge: 0, surgeTell: 0, surgeIdx: 0, broke: 0, walk: 0, impact: 0 });
+  Object.assign(cam, { x: 0, y: -660, D: 3020, pitch: 0.13, yaw: 0, roll: 0, cy: 0.42, shake: 0 });
+  plume.ang = -Math.PI / 2; plume.vel = 0; plume.lag = 0; plume.stretch = 1;
+}
+function seek(t) {
+  reset();
+  // run the sim forward at a fixed step, so a scrub lands in a real state
+  const step = 1 / 90;
+  for (let k = 0; k < t / step; k++) { T = k * step; stepSim(step); }
+  T = t;
+}
+
+/* ------------------------------- particles ------------------------------- */
+function spawnPart(x, y, z, vx, vy, vz, r, hex, life, drag = 0.93) {
+  if (parts.length > 900) return;
+  parts.push({ x, y, z, vx, vy, vz, r, hex, life, max: life, drag });
+}
+function updateParts(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const d = Math.pow(p.drag, dt * 60);
+    p.vx *= d; p.vy *= d; p.vz = p.vz * d + 34 * dt;       // embers rise
+  }
+}
+function shockwave(x, y, col, r1, life) { shocks.push({ x, y, t: 0, life: life || 0.8, r1: r1 || 320, col: col || '#fb923c' }); }
+
+/* ============================ the surge clock ============================= */
+function surgeTick(dt) {
+  const s = SIM;
+  s.surge = Math.max(0, s.surge - dt * 2.4);
+  s.surgeTell = Math.max(0, s.surgeTell - dt);
+  if (s.surgeIdx < SURGES.length) {
+    const at = SURGES[s.surgeIdx];
+    if (T > at - 0.6 && s.surgeTell <= 0 && T < at) s.surgeTell = 0.6;
+    if (T >= at) {
+      s.surgeIdx++; s.surge = 1;
+      cam.shake = Math.max(cam.shake, 9);
+      shockwave(BOSS_X, BOSS_Y + 120, '#f472b6', 520, 1.0);
+      /* a surge landing at point-blank breaks the lock and costs heat —
+         which is the whole reason it is not "hold forward" */
+      if (s.gap < STANDOFF + 40 && s.locked) {
+        s.locked = false; s.lockBreak = 1.15; s.broke = 1;
+        s.heat = Math.max(0, s.heat - 22);
+        s.feed = 0;
+        cam.shake = 20; flash = Math.max(flash, 0.45);
+        for (let i = 0; i < 40; i++) {
+          const a = rnd(TAU);
+          spawnPart(s.shipX, s.shipY, 20, Math.cos(a) * rnd(420, 80), Math.sin(a) * rnd(420, 80),
+            rnd(300, 40), rnd(3, 1.4), pick(['#fde047','#fb923c','#f87171']), rnd(0.8, 0.3));
+        }
+      }
+    }
+  }
+  if (s.lockBreak > 0) { s.lockBreak -= dt; if (s.lockBreak <= 0) s.locked = true; }
+}
+const pick = a => a[(Math.random() * a.length) | 0];
+
+/* ============================== the simulation ============================ */
+/* the contest's distance scale. The duel is fought across ~1500u of floor so
+   his beam has real length on screen; the curves are scaled to match. */
+const PROX_R = 560;   // heat falls off over this
+const PROX_P = 720;   // your push falls off over this
+const HEAT_R = 18;    // peak heat/s, so filling takes most of the contest
+
+/* THE STANDOFF. You cannot close on the Amalgam by flying at him: his output
+   is a physical wall. It does NOT shove — a shove throws you out of the fight
+   and takes the beam off screen with you. Instead it gives ground back at a
+   RATE, measured in clicks per second, and that rate never falls below one:
+   inside the wall you are always losing at least a click a second, so the
+   pressure is continuous and legible, and pressing in is an equilibrium you
+   hold rather than a position you reach. One click is 20u of floor.
+   The awakening is the only thing that collapses it — `walk` scales it away. */
+const STANDOFF = 640;
+const CLICK    = 20;      // one click of ground
+const CLICK_MX = 7;       // clicks/sec at the very face of the wall
+function wallClicks(gap, walk) {
+  const wall = STANDOFF * (1 - walk);
+  if (gap >= wall) return 0;
+  const depth = clamp((wall - gap) / Math.max(1, wall * 0.55), 0, 1);
+  return 1 + depth * depth * (CLICK_MX - 1);   // always at least 1 click/sec
+}
+
+function stepSim(dt) {
+  const s = SIM, act = actAt(T).id;
+  const tt = T;
+
+  /* ---- his beam heading. He sweeps, then stops and holds on you. ---- */
+  if (act === 'SWEEP') {
+    s.locked = false;
+    s.shipY = 300 + Math.sin(tt * 1.1) * 60;
+    s.shipX = Math.sin(tt * 0.7) * 220;
+  } else if (!s.locked && s.lockBreak <= 0 && act === 'LOCK') {
+    if (tt > 5.2) s.locked = true;
+  }
+
+  /* ---- the contest ---- */
+  const L = Math.hypot(s.shipX - BOSS_X, s.shipY - BOSS_Y);
+  const nodeX = lerp(BOSS_X, s.shipX, s.nodeU), nodeY = lerp(BOSS_Y, s.shipY, s.nodeU);
+  s.gap = Math.hypot(s.shipX - nodeX, s.shipY - nodeY);
+
+  /* ---- the spam. A beam battle is won by out-feeding him, so `feed` is a
+     mash rate that decays fast: every trigger pull adds an impulse, and
+     letting go bleeds it in well under a second. It multiplies the proximity
+     term rather than adding to it — close AND hammering, or nothing. */
+  s.mashT -= dt;
+  if (s.mashT <= 0) {
+    // the demo pilot plays it: hammering while closing, easing off to retreat
+    const giving = s.surgeTell > 0 || s.surge > 0.25 || s.lockBreak > 0;
+    const cadence = giving ? 0.26 : 0.075 + Math.random() * 0.05;
+    s.mashT = cadence;
+    if (!giving || Math.random() < 0.4) {
+      s.mash = 1;
+      s.feed = clamp(s.feed + 0.34, 0, 1.35);
+      if (s.locked) {
+        const nX0 = lerp(BOSS_X, s.shipX, s.nodeU), nY0 = lerp(BOSS_Y, s.shipY, s.nodeU);
+        for (let i = 0; i < 3; i++)
+          spawnPart(nX0 + rnd(30, -30), nY0 + rnd(30, -30), 14 + rnd(30),
+            rnd(200, -200), rnd(200, -200), rnd(200, 20), rnd(2.6, 1.2), '#fdba74', rnd(0.4, 0.18));
+      }
+    }
+  }
+  s.mash = Math.max(0, s.mash - dt * 6);
+  s.feed = Math.max(0, s.feed - dt * 1.15);
+
+  if (s.locked) {
+    const his  = (1.0 + s.surge * 3.6) * resistNow();
+    const prox = Math.exp(-s.gap / PROX_P);
+    // feed is the multiplier: no mash, no push, however close you stand
+    const you  = (0.32 + 1.15 * prox) * (0.45 + s.feed) + s.walk * 6.5;
+    s.nodeU = clamp(s.nodeU + (his - you) * 0.055 * dt * 4.0, -0.02, 0.985);
+    // heat: the proximity curve, and the literal fiction of the meter
+    s.rate = HEAT_R * Math.exp(-s.gap / PROX_R) * (0.35 + s.feed * 0.75);
+    if (act === 'CONTEST' || act === 'LOCK') s.heat = clamp(s.heat + s.rate * dt, 0, 100);
+  } else {
+    s.rate = 0;
+    s.nodeU = clamp(s.nodeU + 0.06 * dt, -0.02, 0.9);
+  }
+  if (act === 'FULL' || act === 'OVERDRIVE' || act === 'WALK' || act === 'IMPACT') s.heat = 100;
+
+  /* ---- you: press the wall to build, give ground on the surge, press again.
+     You approach under your own power; the wall gives ground back at its own
+     rate. Where the two meet is where you get to stand. */
+  if (act === 'LOCK' || act === 'CONTEST') {
+    const giving = s.surgeTell > 0 || s.surge > 0.25 || s.lockBreak > 0;
+    const wantGap = giving ? STANDOFF + 380 : (act === 'LOCK' ? STANDOFF + 160 : STANDOFF - 150);
+    const targetY = nodeY + wantGap;
+    const spd = giving ? 560 : 420;
+    s.shipY += clamp(targetY - s.shipY, -spd * dt, spd * dt);
+    s.shipY += wallClicks(s.gap, s.walk) * CLICK * dt;
+    s.shipX = smooth(s.shipX, Math.sin(tt * 0.5) * 46, 1.6, dt);
+  }
+  if (!s.locked && s.lockBreak <= 0 && act === 'LOCK' && tt > 5.2) s.locked = true;
+  // never let the duel stretch so far that the column leaves the frame
+  s.shipY = Math.min(s.shipY, nodeY + STANDOFF + 620);
+
+  /* ---- the vent, and then the walk. The wall is still up through the vent:
+     it only lets go once the helix is lit, which is the point. ---- */
+  if (act === 'FULL') {
+    s.shipY = smooth(s.shipY, nodeY + STANDOFF - 120, 2.2, dt);
+    s.shipY += wallClicks(s.gap, s.walk) * CLICK * dt;
+    s.shipX = smooth(s.shipX, 0, 2.4, dt);
+  }
+  if (act === 'OVERDRIVE') {
+    s.shipY = smooth(s.shipY, nodeY + STANDOFF - 180, 1.6, dt);
+    s.shipY += wallClicks(s.gap, s.walk) * CLICK * dt;
+    s.shipX = smooth(s.shipX, 0, 2, dt);
+  }
+  /* WALK: the wall collapses as `walk` rises, so for the first time the gap
+     closes — you are walking into the place the fight would not let you go.
+     He resists twice on the way in; both stalls fail, which is the read. */
+  if (act === 'WALK') {
+    s.walk = Math.min(1, s.walk + dt * 0.62);
+    s.feed = 1.35;
+    s.shipY = smooth(s.shipY, nodeY + lerp(STANDOFF - 180, 170, s.walk), 1.1, dt);
+    s.shipY += wallClicks(s.gap, s.walk) * CLICK * dt;
+    s.shipX = smooth(s.shipX, 0, 2, dt);
+  }
+  if (act === 'IMPACT') {
+    s.walk = 1;
+    if (!blow.on) {
+      blow.on = true; blow.t = 0;
+      flash = 1; cam.shake = 26;
+      shockwave(BOSS_X, BOSS_Y, '#fff7ed', 1400, 2.2);
+      for (let i = 0; i < 160; i++) {
+        const a = rnd(TAU);
+        spawnPart(BOSS_X + rnd(60, -60), BOSS_Y + rnd(60, -60), rnd(360, 40),
+          Math.cos(a) * rnd(700, 120), Math.sin(a) * rnd(700, 120), rnd(600, -60),
+          rnd(4, 1.6), pick(RAINBOW.concat(['#fff7ed','#fde047'])), rnd(1.8, 0.6), 0.9);
+      }
+    }
+  }
+  if (blow.on) blow.t += dt;
+
+  s.shipAim = Math.atan2(nodeY - s.shipY, nodeX - s.shipX);
+
+  /* ---- the plume's own heading, lagging the hull's ---- */
+  let d = s.shipAim - plume.ang;
+  while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
+  plume.vel += (d * 165 - plume.vel * 17) * dt;
+  plume.ang += plume.vel * dt; plume.lag = d;
+  plume.stretch = smooth(plume.stretch, 1 + clamp(Math.abs(s.shipVY) * 0.0009, 0, 0.5), 7, dt);
+
+  surgeTick(dt);
+
+  /* ---- the spark, and the room taking ---- */
+  const od = ACT[4].t;
+  if (T > od + 0.5 && !spark.done) {
+    spark.on = true;
+    spark.z -= dt * (420 + Math.max(0, (T - od - 0.5)) * 900);
+    spark.x = s.shipX + Math.sin(T * 4) * 12;
+    spark.y = s.shipY - 30;
+    if (spark.z <= 20) {
+      spark.on = false; spark.done = true;
+      ignite(); flash = Math.max(flash, 0.95); cam.shake = 18;
+      shockwave(s.shipX, s.shipY, '#fb923c', 900, 1.6);
+    }
+  }
+  // dim: devtalk level, in before the spark, lifting once the room burns
+  const wantDim = T > od - 0.1 && T < od + 1.0 ? 1 : (T >= od + 1.0 ? 0.45 : 0);
+  dim = smooth(dim, wantDim, 2.4, dt);
+
+  /* ---- camera. It stays the game's plan view until the meter breaks it. -- */
+  const stand = standAmount();
+  const nX = lerp(BOSS_X, s.shipX, s.nodeU), nY = lerp(BOSS_Y, s.shipY, s.nodeU);
+  /* Framing: the plan-view acts have to hold his full 570u span AND the duel
+     across ~1500u of floor, at preview heights as short as 540px — so they
+     sit well back and keep his head clear of the top edge. */
+  let tx = nX * 0.4, ty = -660, tD = 3020, tP = 0.13, tYaw = 0, tCy = 0.42;
+  if (act === 'CONTEST') { tD = 2900; tP = 0.17; tCy = 0.43; ty = -640; }
+  if (act === 'FULL')    { tD = 2100; tP = 0.32; tCy = 0.53; tYaw = 0.05;
+                           ty = lerp(nY, s.shipY, 0.4); }
+  if (act === 'OVERDRIVE'){ tD = 1780; tP = 0.2 + 0.52 * ease(clamp((T - ACT[4].t) / 3.2, 0, 1));
+                            tCy = 0.60; tYaw = 0.12; ty = lerp(nY, s.shipY, 0.55); }
+  if (act === 'WALK')    { tD = 2380; tP = 0.78; tCy = 0.60; tYaw = -0.14;
+                            tx = nX * 0.5; ty = lerp(nY, BOSS_Y, 0.4) + 140; }
+  if (act === 'IMPACT')  { tD = 2700 + (T - ACT[6].t) * 200; tP = 0.72; tCy = 0.52; tYaw = 0.2;
+                            tx = BOSS_X; ty = BOSS_Y + 340; }
+  const k = act === 'IMPACT' ? 1.1 : 1.6;
+  cam.x = smooth(cam.x, tx, k, dt); cam.y = smooth(cam.y, ty, k, dt);
+  cam.D = smooth(cam.D, tD, k, dt); cam.pitch = smooth(cam.pitch, tP, k, dt);
+  cam.yaw = smooth(cam.yaw, tYaw, k * 0.7, dt); cam.cy = smooth(cam.cy, tCy, k, dt);
+  cam.roll = smooth(cam.roll, (act === 'WALK' ? -0.035 : act === 'IMPACT' ? 0.03 : 0), 1.2, dt);
+  cam.shake = Math.max(0, cam.shake - dt * 30);
+  if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
+  void stand;
+  updateParts(dt);
+  for (let i = shocks.length - 1; i >= 0; i--) { shocks[i].t += dt; if (shocks[i].t > shocks[i].life) shocks.splice(i, 1); }
+}
+// how far out of the floor plane he has rotated — tied to the meter breaking
+function standAmount() {
+  const a = actAt(T).id;
+  if (a === 'OVERDRIVE') return ease(clamp((T - ACT[4].t - 0.2) / 3.4, 0, 1));
+  if (a === 'WALK' || a === 'IMPACT') return 1;
+  if (a === 'FULL') return ease(clamp((T - ACT[3].t) / 2.4, 0, 1)) * 0.22;
+  return 0;
+}
+
+/* =============================== the room ================================= */
+function ignite() {
+  if (poolsSeeded) return;
+  poolsSeeded = true;
+  const add = (x, y, r) => pools.push({ x, y, r, seed: rnd(100), born: T, k: rnd(1.3, 0.7) });
+  for (let i = 0; i < 26; i++) {
+    const a = rnd(TAU), d = rnd(2400, 400);
+    add(SIM.shipX + Math.cos(a) * d, SIM.shipY + Math.sin(a) * d * 0.8, rnd(150, 80));
+  }
+  for (let i = 0; i < 10; i++) add(rnd(1400, -1400), BOSS_Y + rnd(500, 180), rnd(160, 90));
+  for (let i = 0; i < 120; i++) {
+    const a = rnd(TAU), sp = rnd(900, 200);
+    spawnPart(SIM.shipX, SIM.shipY, 20, Math.cos(a) * sp, Math.sin(a) * sp * 0.8, rnd(420, 60),
+      rnd(3.6, 1.4), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1.4, 0.5), 0.9);
+  }
+}
+
+function drawFloor(c, warm) {
+  const G = 200, EXT = 3600;
+  c.lineWidth = 1;
+  c.strokeStyle = warm > 0.02 ? rgba('#3f1706', 0.55 + warm * 0.4) : '#0e1626';
+  for (let g = -EXT; g <= EXT; g += G) {
+    const a = proj(g, -EXT, 0), b = proj(g, EXT, 0);
+    if (a.vis && b.vis) { c.beginPath(); c.moveTo(a.sx, a.sy); c.lineTo(b.sx, b.sy); c.stroke(); }
+    const d = proj(-EXT, g, 0), e = proj(EXT, g, 0);
+    if (d.vis && e.vis) { c.beginPath(); c.moveTo(d.sx, d.sy); c.lineTo(e.sx, e.sy); c.stroke(); }
+  }
+  // arena wall, and the far one catches the light first
+  c.lineWidth = 2.4;
+  c.strokeStyle = warm > 0.02 ? mixHex('#1d3557', '#b45309', warm) : '#1d3557';
+  const corners = [[-2600,-1750],[2600,-1750],[2600,1450],[-2600,1450]].map(p => proj(p[0], p[1], 0));
+  c.beginPath();
+  corners.forEach((p, i) => i ? c.lineTo(p.sx, p.sy) : c.moveTo(p.sx, p.sy));
+  c.closePath(); c.stroke();
+}
+
+function drawPools(c, t) {
+  if (!pools.length) return;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const sorted = pools.map(p => ({ p, pr: proj(p.x, p.y, 0) })).filter(o => o.pr.vis)
+                      .sort((a, b) => b.pr.dist - a.pr.dist);
+  for (const { p, pr } of sorted) {
+    const up = clamp((t - p.born) / 0.6, 0, 1);
+    const fl = 0.82 + Math.sin(t * (5.1 + p.k) + p.seed) * 0.1 + Math.sin(t * (11.3 + p.k * 2) + p.seed * 2) * 0.05;
+    const R = p.r * up * fl * pr.s;
+    if (R < 1) continue;
+    drawGlow(c, pr.sx, pr.sy, R * 1.5, '#7c2d12', 0.3 * up);
+    drawGlow(c, pr.sx, pr.sy, R * 0.8, '#ea580c', 0.24 * up);
+    for (let i = 0; i < 7; i++) {
+      const ph = (t * (0.9 + p.k * 0.35) + i * 0.317 + p.seed) % 1;
+      const spread = (i / 6 - 0.5) * 0.95;
+      const a = -Math.PI / 2 + spread * 0.8 + Math.sin(t * 1.9 + i * 2.2 + p.seed) * 0.14;
+      const bx = pr.sx + spread * R * 0.5, by = pr.sy + Math.abs(spread) * R * 0.1;
+      const len = R * (0.62 + (0.5 - Math.abs(spread)) * 0.8) * (0.5 + Math.sin(ph * Math.PI) * 0.7);
+      const bend = Math.sin(t * 3.4 + i * 1.6 + p.seed) * R * 0.14;
+      const fade = up * (0.35 + Math.sin(ph * Math.PI) * 0.5);
+      c.globalAlpha = 0.2 * fade;  c.fillStyle = '#b91c1c'; flameLeaf(c, bx, by, a, len, R * 0.28, bend); c.fill();
+      c.globalAlpha = 0.26 * fade; c.fillStyle = '#ea580c'; flameLeaf(c, bx, by, a, len * 0.72, R * 0.17, bend * 0.7); c.fill();
+      c.globalAlpha = 0.3 * fade;  c.fillStyle = '#fdba74'; flameLeaf(c, bx, by, a, len * 0.36, R * 0.08, bend * 0.4); c.fill();
+    }
+    c.globalAlpha = 0.24 * up; c.fillStyle = '#fdba74';
+    c.beginPath(); c.ellipse(pr.sx, pr.sy, R * 0.24, R * 0.1, 0, 0, TAU); c.fill();
+    if (Math.random() < 0.06)
+      spawnPart(p.x + rnd(60, -60), p.y + rnd(40, -40), 8, rnd(30, -30), rnd(20, -20), rnd(150, 50),
+        rnd(2.6, 1), Math.random() < 0.3 ? '#fde047' : '#fb923c', rnd(1.5, 0.6), 0.94);
+  }
+  c.restore();
+}
+
+function drawShocks(c) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (const s of shocks) {
+    const k = s.t / s.life, r = easeOut(k) * s.r1;
+    const a = (1 - k) * 0.5;
+    // a ring on the floor, so it is in the room rather than on the lens
+    c.globalAlpha = a; c.strokeStyle = s.col; c.lineWidth = 2 + (1 - k) * 3;
+    c.beginPath();
+    for (let i = 0; i <= 28; i++) {
+      const th = i / 28 * TAU;
+      const p = proj(s.x + Math.cos(th) * r, s.y + Math.sin(th) * r, 0);
+      if (!p.vis) { c.closePath(); break; }
+      i ? c.lineTo(p.sx, p.sy) : c.moveTo(p.sx, p.sy);
+    }
+    c.stroke();
+  }
+  c.restore();
+}
+
+/* ============================== THE AMALGAM ===============================
+   Nine parts, the bosses they were, and the rig holding them together. In
+   plan view they are a layout; standing, the silhouette is a person.
+=========================================================================== */
+/* --- a plated box: dark mass, a bevel catching the rim light, and panel
+   seams across it. Drawn in the part's own rotated space. --------------- */
+function plateBox(c, w, h, p, hurt, t, s) {
+  const bev = Math.min(w, h) * 0.22;
+  const path = () => {
+    c.beginPath();
+    c.moveTo(-w / 2 + bev, -h / 2); c.lineTo(w / 2 - bev, -h / 2);
+    c.lineTo(w / 2, -h / 2 + bev); c.lineTo(w / 2, h / 2 - bev);
+    c.lineTo(w / 2 - bev, h / 2); c.lineTo(-w / 2 + bev, h / 2);
+    c.lineTo(-w / 2, h / 2 - bev); c.lineTo(-w / 2, -h / 2 + bev);
+    c.closePath();
+  };
+  // mass
+  path();
+  const g = c.createLinearGradient(0, -h / 2, 0, h / 2);
+  g.addColorStop(0, PLATE_MD); g.addColorStop(0.45, PLATE_DK); g.addColorStop(1, '#05040a');
+  c.fillStyle = g; c.fill();
+  // a wash of the boss it used to be, strongest as it comes apart
+  c.save(); path(); c.clip();
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = 0.1 + hurt * 0.3;
+  c.fillStyle = p.col; c.fillRect(-w, -h, w * 2, h * 2);
+  // panel seams
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = 0.5;
+  c.strokeStyle = PLATE_LT; c.lineWidth = Math.max(1, 1.2 * s);
+  for (let i = 1; i < p.plates; i++) {
+    const y = -h / 2 + h * (i / p.plates);
+    c.beginPath(); c.moveTo(-w / 2, y); c.lineTo(w / 2, y); c.stroke();
+  }
+  c.globalAlpha = 0.3;
+  c.beginPath(); c.moveTo(-w * 0.18, -h / 2); c.lineTo(-w * 0.18, h / 2); c.stroke();
+  c.restore();
+  // rim
+  path();
+  c.strokeStyle = hurt > 0.3 ? mixHex(p.col, '#fff7ed', hurt * 0.7) : rgba(p.col, 0.75);
+  c.lineWidth = Math.max(1, 2.2 * s); c.stroke();
+  // the lit top bevel, which is what gives it a facing surface
+  c.globalAlpha = 0.5;
+  c.strokeStyle = rgba(p.col, 0.9); c.lineWidth = Math.max(1, 1.4 * s);
+  c.beginPath();
+  c.moveTo(-w / 2 + bev, -h / 2 + 2); c.lineTo(w / 2 - bev, -h / 2 + 2); c.stroke();
+  c.globalAlpha = 1;
+}
+
+function drawAmalgam(c, t, stand) {
+  const pos = {};
+  for (const p of AMAL) pos[p.id] = partPos(p, stand, t, blow);
+  const pr = {};
+  for (const p of AMAL) pr[p.id] = proj(pos[p.id].x, pos[p.id].y, pos[p.id].z);
+  const hurt = SIM.walk > 0.02 ? SIM.walk : 0;
+
+  // ---- ground contact first: one shadow per part, under everything
+  if (stand > 0.05) {
+    for (const p of AMAL) {
+      const g = proj(pos[p.id].x, pos[p.id].y, 0);
+      if (!g.vis) continue;
+      c.globalAlpha = 0.4 * stand * clamp(1 - pos[p.id].z / 700, 0.12, 1);
+      c.fillStyle = '#000';
+      c.beginPath();
+      c.ellipse(g.sx, g.sy, p.w * 0.55 * g.s, p.w * 0.2 * g.s, 0, 0, TAU);
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+
+  // ---- the rig: structural spars, dark and thick, with a lit conduit inside
+  c.save();
+  for (const [a, b] of BONES) {
+    const A = pr[a], B = pr[b];
+    if (!A.vis || !B.vis) continue;
+    const s = (A.s + B.s) / 2;
+    c.lineCap = 'round';
+    c.strokeStyle = '#07050c'; c.lineWidth = Math.max(2, 26 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.strokeStyle = PLATE_MD; c.lineWidth = Math.max(1.5, 18 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.strokeStyle = rgba(AMAL_COL, 0.35 + hurt * 0.3); c.lineWidth = Math.max(1, 3.5 * s);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    // the conduit pulses toward the chest — nine bosses feeding one aperture
+    c.save(); c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.5 + Math.sin(t * 4 - A.sx * 0.006) * 0.3;
+    c.strokeStyle = '#fff7ed'; c.lineWidth = Math.max(1, 1.3 * s);
+    c.setLineDash([4 * s, 16 * s]); c.lineDashOffset = t * 180;
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    c.setLineDash([]); c.restore();
+  }
+  c.restore();
+
+  // ---- parts, far to near
+  const order = AMAL.slice().sort((x, y) => pr[y.id].dist - pr[x.id].dist);
+  for (const p of order) {
+    const P = pr[p.id];
+    if (!P.vis) continue;
+    const s = P.s, w = p.w * s, h = p.h * s;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    drawGlow(c, P.sx, P.sy, p.r * s * 1.8, p.col, 0.1 + hurt * 0.22);
+    c.restore();
+
+    c.save();
+    c.translate(P.sx, P.sy);
+    // limbs cant outward; the chassis itself stays square to the room
+    const cant = (p.kind === 'arm' ? Math.sign(p.ox) * 0.12 : p.kind === 'leg' ? Math.sign(p.ox) * 0.07 : 0)
+                 + Math.sin(t * 0.7 + p.ox * 0.01) * 0.02;
+    c.rotate(cant + (blow.on ? blow.t * 1.4 * (p.bx || 1) : 0));
+    plateBox(c, w, h, p, hurt, t, s);
+
+    /* the salvaged core: a housing, an iris, and the boss's name stencilled
+       on the plate — it should be legible that these are nine trophies */
+    const cr = p.r * s * 0.3;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    drawGlow(c, 0, 0, cr * 3.2, p.col, 0.3 + Math.sin(t * 3 + p.oy * 0.02) * 0.1);
+    c.restore();
+    c.fillStyle = '#05040a';
+    c.beginPath(); c.arc(0, 0, cr * 1.5, 0, TAU); c.fill();
+    c.strokeStyle = rgba(p.col, 0.8); c.lineWidth = Math.max(1, 1.6 * s);
+    c.beginPath(); c.arc(0, 0, cr * 1.5, 0, TAU); c.stroke();
+    c.save();
+    c.rotate(t * (p.kind === 'chest' ? 0.5 : 0.9) * (p.ox > 0 ? 1 : -1));
+    c.strokeStyle = rgba(p.col, 0.5); c.lineWidth = Math.max(1, 1.2 * s);
+    for (let i = 0; i < 3; i++) {
+      const a0 = i * TAU / 3;
+      c.beginPath(); c.arc(0, 0, cr * 1.1, a0, a0 + 1.2); c.stroke();
+    }
+    c.restore();
+    c.globalAlpha = 0.75 + Math.sin(t * 5 + p.oy * 0.03) * 0.2;
+    c.fillStyle = p.col;
+    c.beginPath(); c.arc(0, 0, cr * 0.55, 0, TAU); c.fill();
+    c.globalAlpha = 1;
+
+    /* ---- the chest is the aperture: a ring of collector vanes around the
+       muzzle, and they crank open under load. This is where his beam lives,
+       so it has to look like the part that makes it. */
+    if (p.kind === 'chest') {
+      const load = SIM.locked ? 0.55 + SIM.surge * 0.45 : 0.25;
+      const ap = p.r * s * 0.62;
+      c.strokeStyle = rgba('#f472b6', 0.6); c.lineWidth = Math.max(1, 2 * s);
+      c.beginPath(); c.arc(0, 0, ap, 0, TAU); c.stroke();
+      for (let i = 0; i < 10; i++) {
+        const a0 = i / 10 * TAU + t * 0.25;
+        const open = ap * (0.42 + load * 0.5);
+        c.strokeStyle = rgba('#f9a8d4', 0.45);
+        c.lineWidth = Math.max(1, 3.4 * s);
+        c.beginPath();
+        c.moveTo(Math.cos(a0) * ap * 0.96, Math.sin(a0) * ap * 0.96);
+        c.lineTo(Math.cos(a0 + 0.3) * open, Math.sin(a0 + 0.3) * open);
+        c.stroke();
+      }
+      c.save(); c.globalCompositeOperation = 'lighter';
+      drawGlow(c, 0, 0, ap * 1.6 * (0.7 + load * 0.6), '#f472b6', 0.45 * (0.5 + load));
+      c.restore();
+      // and the stencil, so the chassis has a maker's mark on it
+      c.globalAlpha = 0.3;
+      c.font = '700 ' + Math.max(6, 9 * s) + "px 'JetBrains Mono', monospace";
+      c.textAlign = 'center'; c.fillStyle = p.col;
+      c.fillText(p.key, 0, h / 2 - 8 * s);
+      c.textAlign = 'left'; c.globalAlpha = 1;
+    } else if (s > 0.18) {
+      c.globalAlpha = 0.4;
+      c.font = '700 ' + Math.max(6, 8 * s) + "px 'JetBrains Mono', monospace";
+      c.textAlign = 'center'; c.fillStyle = p.col;
+      c.fillText(p.key, 0, h / 2 - 5 * s);
+      c.textAlign = 'left'; c.globalAlpha = 1;
+    }
+    c.restore();
+
+    if (hurt > 0.4 && Math.random() < hurt * 0.25)
+      spawnPart(pos[p.id].x, pos[p.id].y, pos[p.id].z, rnd(120, -120), rnd(120, -120), rnd(160, 20),
+        rnd(3, 1.2), p.col, rnd(0.9, 0.3));
+  }
+  return pos;
+}
+
+/* his beam origin: the chest aperture, wherever the chest currently is */
+function beamOrigin(pos) {
+  const t = pos.torso;
+  return { x: t.x, y: t.y + 10, z: t.z };
+}
+
+/* ============================== HIS BEAM ==================================
+   One beam, held. Seven bands sheared against each other so it churns, and a
+   hard white sight down the middle. It ends at the node, because past the node
+   it is not winning any more.
+=========================================================================== */
+/* ============================== HIS BEAM ==================================
+   A sustained column, not a stroke. Built as a quad from muzzle to node so it
+   has real width, with the width tapering into the node under your pressure;
+   pressure bands travelling down it; turbulent edges that churn; and the floor
+   scorched and lit beneath its whole length. It ends at the node, because past
+   the node it is not winning any more.
+=========================================================================== */
+function drawHisBeam(c, o, nx, ny, nz, t, alive) {
+  const A = proj(o.x, o.y, o.z), B = proj(nx, ny, nz);
+  if (!A.vis || !B.vis) return;
+  const dx = B.sx - A.sx, dy = B.sy - A.sy, L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  const s = (A.s + B.s) / 2;
+  // he opens up on a surge, and squeezes down as your node pushes back on him
+  const press = 1 + SIM.surge * 0.7 - clamp(1 - SIM.nodeU, 0, 1) * 0.25;
+  const w0 = 46 * s * press, w1 = 30 * s * press;
+
+  /* ---- the light it lays on the plating, sampled along its length so the
+     floor under the beam is lit rather than the beam floating over it. */
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const SEG = 12;
+  for (let i = 0; i <= SEG; i++) {
+    const k = i / SEG;
+    const gx = lerp(o.x, nx, k), gy = lerp(o.y, ny, k);
+    const gp = proj(gx, gy, 0);
+    if (!gp.vis) continue;
+    drawGlow(c, gp.sx, gp.sy, 150 * gp.s * press, '#831843', 0.16 * alive);
+    drawGlow(c, gp.sx, gp.sy, 70 * gp.s * press, '#f472b6', 0.1 * alive);
+  }
+  c.restore();
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  // ---- outer haze: the column's atmosphere, one wide soft quad
+  const quad = (wa, wb) => {
+    c.beginPath();
+    c.moveTo(A.sx + px * wa, A.sy + py * wa);
+    c.lineTo(B.sx + px * wb, B.sy + py * wb);
+    c.lineTo(B.sx - px * wb, B.sy - py * wb);
+    c.lineTo(A.sx - px * wa, A.sy - py * wa);
+    c.closePath();
+  };
+  const hz = c.createLinearGradient(A.sx, A.sy, B.sx, B.sy);
+  hz.addColorStop(0, rgba('#be185d', 0.42 * alive));
+  hz.addColorStop(0.7, rgba('#9d174d', 0.22 * alive));
+  hz.addColorStop(1, rgba('#f472b6', 0.34 * alive));
+  quad(w0 * 1.5, w1 * 1.7); c.fillStyle = hz; c.fill();
+
+  /* ---- the body: the seven bosses' colours as sheets stacked THROUGH the
+     column rather than beside it, so it reads as one thing made of many. */
+  for (let k = 0; k < RAINBOW.length; k++) {
+    const d = (k - (RAINBOW.length - 1) / 2) / ((RAINBOW.length - 1) / 2);
+    const churn = Math.sin(t * (2.6 + k * 0.7) + k * 1.9) * 0.16;
+    const wa = w0 * (0.92 - Math.abs(d) * 0.5 + churn) , wb = w1 * (0.92 - Math.abs(d) * 0.5 + churn);
+    const sh = d * 0.22 + churn * 0.3;
+    c.globalAlpha = (0.3 - Math.abs(d) * 0.12) * alive;
+    c.fillStyle = RAINBOW[k];
+    c.beginPath();
+    c.moveTo(A.sx + px * (wa + w0 * sh), A.sy + py * (wa + w0 * sh));
+    c.lineTo(B.sx + px * (wb + w1 * sh), B.sy + py * (wb + w1 * sh));
+    c.lineTo(B.sx - px * (wb - w1 * sh), B.sy - py * (wb - w1 * sh));
+    c.lineTo(A.sx - px * (wa - w0 * sh), A.sy - py * (wa - w0 * sh));
+    c.closePath(); c.fill();
+  }
+
+  /* ---- pressure bands: chevrons riding down the column. This is the single
+     clearest read that output is flowing at you and hasn't stopped. */
+  const BANDS = 16;
+  for (let i = 0; i < BANDS; i++) {
+    const k = ((i / BANDS) + (t * 0.55) % 1) % 1;
+    const bw = lerp(w0, w1, k) * (1.02 - k * 0.1);
+    const cxp = A.sx + dx * k, cyp = A.sy + dy * k;
+    const lead = 12 * s * (1 + SIM.surge);
+    c.globalAlpha = (0.34 - k * 0.12) * alive * (0.6 + SIM.surge * 0.5);
+    c.strokeStyle = i % 4 === 0 ? '#fff7ed' : '#f9a8d4';
+    c.lineWidth = Math.max(1, 2.6 * s);
+    c.beginPath();
+    c.moveTo(cxp + px * bw, cyp + py * bw);
+    c.lineTo(cxp + ux * lead, cyp + uy * lead);
+    c.lineTo(cxp - px * bw, cyp - py * bw);
+    c.stroke();
+  }
+
+  /* ---- turbulent edges: the boundary is never straight on a beam this big */
+  for (const sd of [1, -1]) {
+    c.globalAlpha = 0.5 * alive;
+    c.strokeStyle = '#f9a8d4'; c.lineWidth = Math.max(1, 1.8 * s);
+    c.beginPath();
+    for (let i = 0; i <= 26; i++) {
+      const k = i / 26;
+      const wv = lerp(w0, w1, k)
+        + Math.sin(k * 14 - t * 9) * 5 * s * press
+        + Math.sin(k * 31 - t * 17 + sd) * 2.6 * s * press;
+      const x = A.sx + dx * k + px * wv * sd, y = A.sy + dy * k + py * wv * sd;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.stroke();
+  }
+
+  // ---- the core: hard, bright, and it is what the node is actually resisting
+  c.globalAlpha = 0.95 * alive;
+  const cg = c.createLinearGradient(A.sx, A.sy, B.sx, B.sy);
+  cg.addColorStop(0, rgba('#ffffff', 0.95)); cg.addColorStop(1, rgba('#fff7ed', 0.8));
+  quad(w0 * 0.2, w1 * 0.16); c.fillStyle = cg; c.fill();
+
+  // ---- the aperture: where it leaves him, heaviest point on the whole beam
+  drawGlow(c, A.sx, A.sy, 150 * s * press * alive, '#be185d', 0.55 * alive);
+  drawGlow(c, A.sx, A.sy, 70 * s * press * alive, '#f9a8d4', 0.5 * alive);
+  c.globalAlpha = 0.9 * alive; c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(A.sx, A.sy, w0 * 0.34, w0 * 0.34, 0, 0, TAU); c.fill();
+  c.restore();
+  // the column throws spall along itself
+  if (Math.random() < 0.5 * alive) {
+    const k = Math.random();
+    spawnPart(lerp(o.x, nx, k) + rnd(40, -40), lerp(o.y, ny, k) + rnd(40, -40), lerp(o.z, nz, k) + rnd(40),
+      rnd(160, -160), rnd(160, -160), rnd(160, 20), rnd(2.6, 1), pick(RAINBOW), rnd(0.6, 0.25));
+  }
+}
+
+/* ======================= YOUR LANCE — before and after ====================
+   Before overdrive it is the old lance: soft, wide, bloom-heavy, and it does
+   not sever his beam. After, it is the helix: two strands winding one axis,
+   depth-sorted, tight core, one sheath, light only where it lands.
+=========================================================================== */
+function drawLance(c, sx3, sy3, sz3, nx, ny, nz, t, heavy, alive) {
+  const A = proj(sx3, sy3, sz3), B = proj(nx, ny, nz);
+  if (!A.vis || !B.vis) return;
+  const s = (A.s + B.s) / 2;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  if (!heavy) {
+    /* the old lance: bloom-heavy and soft-edged, and it visibly pulses with
+       your mash — the spam is the only thing keeping it in the fight */
+    const fd = 0.55 + SIM.feed * 0.5, mk = 1 + SIM.mash * 0.55;
+    for (const [wl, al, col] of [[40, 0.1, '#7f1d1d'], [22, 0.22, '#f87171'], [9, 0.5, '#fca5a5']]) {
+      c.globalAlpha = al * alive * fd; c.strokeStyle = col;
+      c.lineWidth = Math.max(1, wl * s * fd * mk);
+      c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    }
+    c.globalAlpha = 0.8 * alive; c.strokeStyle = '#ffffff';
+    c.lineWidth = Math.max(1.2, 4 * s * mk);
+    c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+    // each pull of the trigger runs a pulse up the beam into the node
+    if (SIM.mash > 0.05) {
+      c.globalAlpha = SIM.mash * 0.8 * alive;
+      c.strokeStyle = '#fde68a'; c.lineWidth = Math.max(1, 7 * s);
+      c.setLineDash([26 * s, 40 * s]); c.lineDashOffset = -t * 900;
+      c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+      c.setLineDash([]);
+    }
+    drawGlow(c, A.sx, A.sy, 40 * s * (0.6 + SIM.feed), '#f87171', 0.4 * alive);
+    c.restore(); return;
+  }
+  // ---- the helix
+  const STEPS = 54, TURNS = 5.2, SPIN = 7.4, AMP = 26;
+  const ax = nx - sx3, ay = ny - sy3, az = nz - sz3;
+  const aLen = Math.hypot(ax, ay, az) || 1;
+  // a perpendicular pair in world space
+  let ux = -ay / aLen, uy = ax / aLen, uz = 0;
+  const un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;
+  const vx = (ay / aLen) * uz - (az / aLen) * uy;
+  const vy = (az / aLen) * ux - (ax / aLen) * uz;
+  const vz = (ax / aLen) * uy - (ay / aLen) * ux;
+  const pt = (kk, i) => {
+    const u = i / STEPS;
+    const ph = u * TURNS * TAU - t * SPIN + kk * Math.PI;
+    const taper = Math.sin(Math.min(1, u * 1.35) * Math.PI * 0.5) * (1 - u * 0.2);
+    const o1 = Math.cos(ph) * AMP * taper, o2 = Math.sin(ph) * AMP * taper;
+    const P = proj(sx3 + ax * u + ux * o1 + vx * o2,
+                   sy3 + ay * u + uy * o1 + vy * o2,
+                   sz3 + az * u + uz * o1 + vz * o2);
+    return { P, depth: o2 };
+  };
+  c.globalAlpha = 0.3 * alive; c.strokeStyle = '#fb923c'; c.lineWidth = Math.max(1, 1.4 * s);
+  c.setLineDash([6 * s, 11 * s]); c.lineDashOffset = -t * 320;
+  c.beginPath(); c.moveTo(A.sx, A.sy); c.lineTo(B.sx, B.sy); c.stroke();
+  c.setLineDash([]);
+  for (const pass of [-1, 1]) for (const kk of [0, 1]) {
+    let open = false;
+    for (let i = 0; i <= STEPS; i++) {
+      const a = pt(kk, i);
+      if (!a.P.vis) { open = false; continue; }
+      const side = a.depth < 0 ? -1 : 1;
+      if (side !== pass) { if (open) { strokeStrand(c, pass, alive, s); open = false; } continue; }
+      if (!open) { c.beginPath(); c.moveTo(a.P.sx, a.P.sy); open = true; }
+      else c.lineTo(a.P.sx, a.P.sy);
+      if (i === STEPS) { strokeStrand(c, pass, alive, s); open = false; }
+    }
+  }
+  drawGlow(c, A.sx, A.sy, 30 * s, '#f97316', 0.55 * alive);
+  c.restore();
+}
+function strokeStrand(c, pass, alive, s) {
+  const front = pass > 0;
+  c.globalAlpha = (front ? 0.3 : 0.16) * alive;
+  c.strokeStyle = '#7f1d1d'; c.lineWidth = Math.max(1, (front ? 10 : 7) * s); c.stroke();
+  c.globalAlpha = (front ? 0.85 : 0.42) * alive;
+  c.strokeStyle = front ? '#f97316' : '#b91c1c'; c.lineWidth = Math.max(1, (front ? 4.4 : 3) * s); c.stroke();
+  if (front) {
+    c.globalAlpha = 0.95 * alive; c.strokeStyle = '#fff7ed';
+    c.lineWidth = Math.max(1, 1.7 * s); c.stroke();
+  }
+}
+
+/* ============================== THE NODE ==================================
+   Where the two meet. It is the read for the whole fight: which way it is
+   moving is which way the fight is going.
+=========================================================================== */
+function drawNode(c, nx, ny, nz, t, heavy) {
+  const P = proj(nx, ny, nz);
+  if (!P.vis) return;
+  const s = P.s;
+  const push = clamp((SIM.surge * 0.8 + (heavy ? -0.6 : 0.2)), -1, 1);
+  const R = (26 + SIM.surge * 14 + SIM.heat * 0.06) * s;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  // compression: the losing side gets squashed against the node
+  drawGlow(c, P.sx, P.sy, R * 3.4, heavy ? '#fb923c' : '#f472b6', 0.5);
+  drawGlow(c, P.sx, P.sy, R * 1.5, '#fff7ed', 0.6);
+  // hard core
+  c.globalAlpha = 0.95;
+  c.fillStyle = '#fff7ed';
+  c.beginPath(); c.arc(P.sx, P.sy, R * 0.42, 0, TAU); c.fill();
+  // the shell: jagged, spun, and it leans toward whoever is winning
+  c.translate(P.sx, P.sy);
+  c.rotate(t * 1.7);
+  c.globalAlpha = 0.75;
+  c.strokeStyle = heavy ? '#fdba74' : '#f9a8d4'; c.lineWidth = Math.max(1, 2 * s);
+  c.beginPath();
+  for (let i = 0; i <= 14; i++) {
+    const a = i / 14 * TAU, rr = R * (i % 2 ? 0.72 : 1.05 + push * 0.12);
+    i ? c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : c.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  c.closePath(); c.stroke();
+  c.rotate(-t * 3.1);
+  c.globalAlpha = 0.4;
+  c.beginPath(); c.arc(0, 0, R * 1.5, 0, TAU); c.stroke();
+  c.restore();
+  if (Math.random() < 0.7)
+    spawnPart(nx + rnd(20, -20), ny + rnd(20, -20), nz + rnd(20, -20),
+      rnd(260, -260), rnd(260, -260), rnd(240, -40), rnd(3, 1.2),
+      heavy ? pick(['#fde047','#fb923c']) : pick(RAINBOW), rnd(0.6, 0.2));
+}
+
+/* ================================ the ship ================================ */
+function hullPath(c, S) {
+  const p = [[22,0],[13,2.6],[9,7],[2,13.5],[-7,12],[-5,4.6],[-12,3.2],[-9,0],
+             [-12,-3.2],[-5,-4.6],[-7,-12],[2,-13.5],[9,-7],[13,-2.6]];
+  c.beginPath();
+  p.forEach((q, i) => i ? c.lineTo(q[0] * S, q[1] * S) : c.moveTo(q[0] * S, q[1] * S));
+  c.closePath();
+}
+function surgeGout(t) {
+  const a = Math.sin(t * 3.7), b = Math.sin(t * 8.9 + 1.3), d = Math.sin(t * 1.61);
+  return 0.72 + Math.pow(clamp((a * 0.5 + b * 0.28 + d * 0.22) * 0.5 + 0.5, 0, 1), 2.1) * 0.95;
+}
+function drawShip(c, t, vent) {
+  const P = proj(SIM.shipX, SIM.shipY, 14);
+  if (!P.vis) return;
+  const S = P.s * 4.0;                 // the hull is small; it needs the help
+  const sg = surgeGout(t);
+  const heat = vent;
+  // floor shadow / ground contact
+  const g = proj(SIM.shipX, SIM.shipY, 0);
+  c.globalAlpha = 0.4; c.fillStyle = '#000';
+  c.beginPath(); c.ellipse(g.sx, g.sy, 24 * S, 9 * S, 0, 0, TAU); c.fill();
+  c.globalAlpha = 1;
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  drawGlow(c, P.sx, P.sy, (34 + heat * 30) * S, heat > 0.02 ? '#f97316' : '#f87171', 0.2 + heat * 0.25);
+  c.restore();
+
+  c.save();
+  c.translate(P.sx, P.sy);
+  c.rotate(SIM.shipAim + Math.PI / 2 * 0 + (cam.yaw));
+  // ---- the plume, lagging the hull, gouting on the surge
+  if (heat > 0.001) {
+    const lag = clamp(plume.lag * 1.9, -0.9, 0.9), st = plume.stretch;
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (const sd of [1, -1]) {
+      const skew = lag * sd;
+      drawGlow(c, (-14 - lag * sd * 4) * S, sd * 15 * S, (40 + sg * 12) * S * heat, '#9a3412', 0.26 * heat);
+      for (let i = 0; i < 9; i++) {
+        const k = i / 8;
+        const flick = 0.86 + Math.sin(t * (6 + i * 1.6) + i * 2.3 + sd) * 0.14;
+        const span = heat * flick;
+        const dir = Math.PI - sd * (0.32 + k * 0.3) - lag * (0.35 + k * 0.5);
+        const len = (26 + 46 * Math.sin(Math.min(1, 0.18 + k * 0.92) * Math.PI)) * span * (0.8 + sg * 0.34) * st * S;
+        const bend = (sd * (7 + k * 12) + skew * (10 + k * 16)) * span * S;
+        const w = (4.2 - k * 1.4) * span * (0.85 + sg * 0.25) * S;
+        const near = 1 - k * 0.55;
+        c.globalAlpha = 0.26 * span; c.fillStyle = '#7f1d1d';
+        flameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len, w * 1.9, bend); c.fill();
+        c.globalAlpha = 0.4 * span * near; c.fillStyle = '#ea580c';
+        flameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len * 0.86, w * 1.05, bend * 0.8); c.fill();
+        c.globalAlpha = 0.6 * span * flick * near * near;
+        c.fillStyle = k < 0.3 ? '#fff7ed' : '#fdba74';
+        flameLeaf(c, (6 - k * 13) * S, sd * (4.5 + k * 4) * S, dir, len * 0.5, w * 0.42, bend * 0.5); c.fill();
+      }
+    }
+    c.restore();
+  }
+  // ---- hull, with the notch as the hot point and heat conducted into the metal
+  c.lineWidth = Math.max(1, 2 * S);
+  hullPath(c, S);
+  c.fillStyle = heat > 0.02 ? rgba('#7c2d12', 0.3 + heat * 0.25) : 'rgba(248,113,113,0.14)';
+  c.strokeStyle = heat > 0.02 ? mixHex('#f87171', '#fdba74', heat) : '#f87171';
+  c.fill(); c.stroke();
+  if (heat > 0.001) {
+    c.save(); hullPath(c, S); c.clip();
+    c.globalCompositeOperation = 'lighter';
+    const cond = c.createLinearGradient(-13 * S, 0, 14 * S, 0);
+    const hh = heat * (0.55 + sg * 0.3);
+    cond.addColorStop(0, `rgba(255,237,213,${0.52 * hh})`);
+    cond.addColorStop(0.28, `rgba(249,115,22,${0.38 * hh})`);
+    cond.addColorStop(0.62, `rgba(153,27,27,${0.16 * hh})`);
+    cond.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = cond; c.fillRect(-16 * S, -16 * S, 34 * S, 32 * S);
+    c.restore();
+    c.save(); c.globalCompositeOperation = 'lighter';
+    drawGlow(c, -10.5 * S, 0, (13 + sg * 9) * S * heat, '#fb923c', 0.5 * heat);
+    drawGlow(c, -10.5 * S, 0, (6 + sg * 4) * S * heat, '#fff7ed', 0.45 * heat);
+    c.restore();
+  }
+  // pre-vent: the hull is already over temperature, and it shows before it vents
+  if (vent < 0.02 && SIM.heat > 1) {
+    const hk = SIM.heat / 100;
+    c.save(); hullPath(c, S); c.clip();
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.14 + hk * 0.5 + Math.sin(t * (4 + hk * 16)) * hk * 0.16;
+    c.fillStyle = mixHex('#7f1d1d', '#fb923c', hk);
+    c.fillRect(-20 * S, -16 * S, 42 * S, 32 * S);
+    c.restore();
+  }
+  c.globalAlpha = 0.85; c.fillStyle = heat > 0.02 ? '#fff7ed' : '#fca5a5';
+  c.beginPath(); c.arc(1 * S, 0, 3.1 * S, 0, TAU); c.fill();
+  c.restore();
+  // venting hull throws embers into the room
+  if (heat > 0.3 && Math.random() < 0.5)
+    spawnPart(SIM.shipX + rnd(30, -30), SIM.shipY + rnd(30, -30), 20,
+      rnd(60, -60), rnd(60, -60), rnd(200, 60), rnd(2.4, 1),
+      Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1, 0.4));
+}
+
+/* ================================ the spark =============================== */
+function drawSpark(c, t) {
+  if (!spark.on) return;
+  const P = proj(spark.x, spark.y, spark.z);
+  if (!P.vis) return;
+  const f = clamp(0.5 + Math.sin(t * 27) * 0.34 + Math.sin(t * 61.7) * 0.22, 0, 1);
+  const hot = mixHex('#ef4444', '#fb923c', f);
+  sparkTrail.push({ x: P.sx, y: P.sy, hot, s: P.s });
+  if (sparkTrail.length > 30) sparkTrail.shift();
+  c.save(); c.globalCompositeOperation = 'lighter';
+  // the light it throws on the plating below it
+  const gp = proj(spark.x, spark.y, 0);
+  if (gp.vis) drawGlow(c, gp.sx, gp.sy, 260 * gp.s * clamp(1 - spark.z / 1500, 0.1, 1), '#7c2d12', 0.3);
+  for (let i = 0; i < sparkTrail.length; i++) {
+    const q = sparkTrail[i], k = i / sparkTrail.length;
+    c.globalAlpha = k * k * (0.55 + f * 0.2);
+    c.fillStyle = q.hot;
+    const rr = (1 + k * 3.6) * (0.6 + q.s);
+    c.beginPath(); c.ellipse(q.x, q.y, rr * 0.55, rr * (1 + (1 - k) * 2.6), 0, 0, TAU); c.fill();
+  }
+  drawGlow(c, P.sx, P.sy, (48 + f * 22) * (0.5 + P.s), hot, 0.6);
+  c.globalAlpha = 0.95; c.fillStyle = hot;
+  c.beginPath(); c.ellipse(P.sx, P.sy, 3 + f, 12 + f * 8, 0, 0, TAU); c.fill();
+  c.globalAlpha = 1; c.fillStyle = '#fff7ed';
+  c.beginPath(); c.ellipse(P.sx, P.sy - 1, 1.3 + f * 0.5, 4.6 + f * 2.6, 0, 0, TAU); c.fill();
+  c.restore();
+  if (Math.random() < 0.6)
+    spawnPart(spark.x + rnd(8, -8), spark.y + rnd(8, -8), spark.z, rnd(40, -40), rnd(40, -40), rnd(-40, -180),
+      rnd(1.8, 0.8), Math.random() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2));
+}
+
+function drawParts(c) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  const list = parts.map(p => ({ p, pr: proj(p.x, p.y, p.z) })).filter(o => o.pr.vis);
+  for (const { p, pr } of list) {
+    const a = clamp(p.life / p.max, 0, 1);
+    const r = p.r * pr.s;
+    drawGlow(c, pr.sx, pr.sy, r * 3.6, p.hex, a * 0.28);
+    c.globalAlpha = a; c.fillStyle = p.hex;
+    c.beginPath(); c.arc(pr.sx, pr.sy, Math.max(0.6, r * (0.4 + a * 0.6)), 0, TAU); c.fill();
+  }
+  c.restore();
+}
+
+/* ================================== HUD ===================================
+   The meter is the fight, so it is on screen the whole time: heat, the
+   proximity curve it charges on, and which way the node is going.
+=========================================================================== */
+function drawHUD(c, t) {
+  const act = actAt(T), s = SIM;
+  c.save();
+  c.textBaseline = 'alphabetic';
+  // ---- title
+  c.font = '800 12px Barlow, system-ui, sans-serif'; c.letterSpacing = '3px';
+  c.fillStyle = 'rgba(248,113,113,0.9)'; c.fillText('EMBER', 30, 40);
+  c.fillStyle = 'rgba(216,180,254,0.65)'; c.fillText('vs  THE AMALGAM · REWORKED', 92, 40);
+  c.letterSpacing = '0px';
+  c.font = "400 11px 'JetBrains Mono', ui-monospace, monospace";
+  const capTxt = act.id + (act.cap ? '   —   ' + act.cap : '');
+  // a backing, because his shoulder plates sit exactly here in the plan acts
+  const cw0 = c.measureText(capTxt).width;
+  c.fillStyle = 'rgba(5,6,10,0.78)';
+  c.fillRect(26, 48, cw0 + 12, 17);
+  c.fillStyle = 'rgba(148,163,184,0.72)';
+  c.fillText(capTxt, 32, 60);
+
+  const fin = actAt(T).id === 'IMPACT';
+  if (!fin) {
+    /* ---- HEAT. Vertical, right side: it is a hull temperature, and the
+       marks are the vent thresholds, so the fill has somewhere to arrive. */
+    const bh = Math.min(320, H * 0.42), bx = W - 62, by = H / 2 - bh / 2;
+    c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(bx, by, 14, bh);
+    c.strokeStyle = 'rgba(148,163,184,0.25)'; c.lineWidth = 1; c.strokeRect(bx, by, 14, bh);
+    const hk = s.heat / 100;
+    const gg = c.createLinearGradient(0, by + bh, 0, by);
+    gg.addColorStop(0, '#7f1d1d'); gg.addColorStop(0.55, '#ea580c'); gg.addColorStop(1, '#fde68a');
+    c.fillStyle = gg; c.fillRect(bx + 1, by + bh * (1 - hk) + 1, 12, bh * hk - 2);
+    if (hk > 0.99) {
+      c.globalAlpha = 0.4 + Math.sin(t * 12) * 0.3;
+      c.fillStyle = '#fff7ed'; c.fillRect(bx - 3, by - 3, 20, bh + 6); c.globalAlpha = 1;
+    }
+    c.strokeStyle = 'rgba(148,163,184,0.35)';
+    for (const m of [0.25, 0.5, 0.75]) {
+      const y = by + bh * (1 - m);
+      c.beginPath(); c.moveTo(bx - 4, y); c.lineTo(bx, y); c.stroke();
+    }
+    c.save();
+    c.translate(bx - 12, by + bh / 2); c.rotate(-Math.PI / 2);
+    c.textAlign = 'center';
+    c.font = '800 10px Barlow, system-ui, sans-serif'; c.letterSpacing = '3px';
+    c.fillStyle = hk > 0.99 ? '#fde68a' : 'rgba(253,186,116,0.8)';
+    c.fillText(hk > 0.99 ? 'OVERDRIVE READY' : 'HEAT  ' + Math.floor(s.heat), 0, 0);
+    c.restore();
+    c.letterSpacing = '0px'; c.textAlign = 'left';
+
+    // ---- the proximity curve, and the wall standing in front of its good half
+    const cw = 150, ch = 54, cx0 = 30, cy0 = H - 130;
+    const AX = 2200;
+    c.strokeStyle = 'rgba(148,163,184,0.2)'; c.strokeRect(cx0, cy0, cw, ch);
+    c.beginPath();
+    for (let i = 0; i <= cw; i++) {
+      const gapv = i / cw * AX;
+      const r = Math.exp(-gapv / PROX_R);
+      const y = cy0 + ch - r * ch;
+      i ? c.lineTo(cx0 + i, y) : c.moveTo(cx0 + i, y);
+    }
+    c.strokeStyle = 'rgba(251,146,60,0.75)'; c.lineWidth = 1.5; c.stroke();
+    /* the standoff: everything left of this line is where the curve pays best
+       and where his output will not let you stand. It only opens on the walk. */
+    const wx = cx0 + clamp(STANDOFF * (1 - s.walk) / AX, 0, 1) * cw;
+    if (wx > cx0 + 1) {
+      c.fillStyle = 'rgba(244,114,182,0.14)';
+      c.fillRect(cx0, cy0, wx - cx0, ch);
+      c.strokeStyle = 'rgba(244,114,182,0.75)'; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(wx, cy0 - 3); c.lineTo(wx, cy0 + ch + 3); c.stroke();
+      c.font = "700 8px 'JetBrains Mono', ui-monospace, monospace";
+      c.fillStyle = 'rgba(244,114,182,0.8)';
+      c.fillText(s.walk > 0.02 ? 'COLLAPSING' : 'STANDOFF', cx0 + 3, cy0 + 10);
+      // the wall's current rate, so the pressure is a number you can read
+      const wc = wallClicks(s.gap, s.walk);
+      if (wc > 0) {
+        c.fillStyle = 'rgba(249,168,212,0.9)';
+        c.fillText('← ' + wc.toFixed(1) + ' clk/s', cx0 + 3, cy0 + ch - 4);
+      }
+    }
+    c.font = "400 9px 'JetBrains Mono', ui-monospace, monospace";
+    const gx = cx0 + clamp(s.gap / AX, 0, 1) * cw;
+    const gy = cy0 + ch - (s.rate / HEAT_R) * ch;
+    c.strokeStyle = 'rgba(255,247,237,0.3)'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(gx, cy0); c.lineTo(gx, cy0 + ch); c.stroke();
+    c.fillStyle = '#fff7ed';
+    c.beginPath(); c.arc(gx, gy, 3, 0, TAU); c.fill();
+    c.fillStyle = 'rgba(148,163,184,0.55)';
+    c.fillText('CHARGE RATE  ×  PROXIMITY', cx0, cy0 - 8);
+    c.fillText('gap ' + Math.round(s.gap) + 'u', cx0, cy0 + ch + 14);
+    c.fillText('+' + s.rate.toFixed(1) + ' heat/s', cx0 + 86, cy0 + ch + 14);
+
+    /* ---- FEED: the spam. A beam battle is won by out-feeding him, so the
+       mash rate gets its own read right under the curve it multiplies. */
+    const fw = 150, fx = 30, fy = cy0 - 34;
+    c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(fx, fy, fw, 8);
+    c.strokeStyle = 'rgba(148,163,184,0.22)'; c.lineWidth = 1; c.strokeRect(fx, fy, fw, 8);
+    const fk = clamp(s.feed / 1.35, 0, 1);
+    const fg = c.createLinearGradient(fx, 0, fx + fw, 0);
+    fg.addColorStop(0, '#7f1d1d'); fg.addColorStop(0.6, '#f97316'); fg.addColorStop(1, '#fde68a');
+    c.fillStyle = fg; c.fillRect(fx + 1, fy + 1, (fw - 2) * fk, 6);
+    if (s.mash > 0.05) {
+      c.globalAlpha = s.mash; c.fillStyle = '#fff7ed';
+      c.fillRect(fx + (fw - 2) * fk - 2, fy - 2, 4, 12); c.globalAlpha = 1;
+    }
+    c.font = "400 9px 'JetBrains Mono', ui-monospace, monospace";
+    c.fillStyle = fk > 0.7 ? 'rgba(253,230,138,0.85)' : 'rgba(148,163,184,0.55)';
+    c.fillText('FEED  ×' + (0.45 + s.feed).toFixed(2) + (fk < 0.25 ? '   — MASH' : ''), fx, fy - 6);
+
+    // ---- the contest bar: which way the node is going
+    const lw = Math.min(360, W * 0.3), lx = W / 2 - lw / 2, ly = H - 66;
+    c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(lx, ly, lw, 6);
+    const ng = c.createLinearGradient(lx, 0, lx + lw, 0);
+    ng.addColorStop(0, '#f472b6'); ng.addColorStop(1, '#fb923c');
+    c.fillStyle = ng; c.globalAlpha = 0.35; c.fillRect(lx, ly, lw, 6); c.globalAlpha = 1;
+    const np = lx + clamp(s.nodeU, 0, 1) * lw;
+    c.fillStyle = '#fff7ed'; c.fillRect(np - 2, ly - 5, 4, 16);
+    c.font = '600 9px Barlow, system-ui, sans-serif'; c.letterSpacing = '2px';
+    c.fillStyle = 'rgba(244,114,182,0.7)'; c.fillText('HIM', lx, ly - 10);
+    c.textAlign = 'right';
+    c.fillStyle = 'rgba(251,146,60,0.8)'; c.fillText('YOU', lx + lw, ly - 10);
+    c.textAlign = 'left'; c.letterSpacing = '0px';
+
+    // ---- surge telegraph / lock state
+    c.textAlign = 'center';
+    if (s.lockBreak > 0) {
+      c.font = '800 20px Barlow, system-ui, sans-serif'; c.letterSpacing = '4px';
+      c.fillStyle = rgba('#f87171', 0.5 + Math.sin(t * 22) * 0.4);
+      c.fillText('LOCK BROKEN   −18 HEAT', W / 2, H - 92);
+    } else if (s.surgeTell > 0) {
+      c.font = '800 18px Barlow, system-ui, sans-serif'; c.letterSpacing = '5px';
+      c.fillStyle = rgba('#f472b6', 0.4 + Math.sin(t * 26) * 0.4);
+      c.fillText('SURGE', W / 2, H - 92);
+    } else if (s.locked) {
+      c.font = '600 10px Barlow, system-ui, sans-serif'; c.letterSpacing = '3px';
+      c.fillStyle = 'rgba(148,163,184,0.4)';
+      c.fillText(s.gap < STANDOFF + 90 && s.walk < 0.02 ? 'STANDOFF HELD — CANNOT CLOSE' : 'LOCK HELD', W / 2, H - 92);
+    }
+    c.letterSpacing = '0px'; c.textAlign = 'left';
+  }
+
+  // ---- the end card
+  if (fin) {
+    const k = clamp((T - ACT[6].t - 1.2) / 1.6, 0, 1);
+    c.globalAlpha = ease(k);
+    c.textAlign = 'center';
+    c.font = '800 ' + Math.min(64, W * 0.055) + 'px Barlow, system-ui, sans-serif';
+    c.letterSpacing = '10px';
+    c.fillStyle = '#fde68a';
+    c.fillText('AWAKENING', W / 2, H / 2 - 8);
+    c.font = '600 13px Barlow, system-ui, sans-serif'; c.letterSpacing = '6px';
+    c.fillStyle = 'rgba(251,146,60,0.8)';
+    c.fillText('OVERDRIVE  ·  EMBER', W / 2, H / 2 + 26);
+    c.globalAlpha = ease(k) * 0.5;
+    c.font = "400 11px 'JetBrains Mono', ui-monospace, monospace"; c.letterSpacing = '0px';
+    c.fillStyle = '#94a3b8';
+    c.fillText('the cinematic is the win condition playing out', W / 2, H / 2 + 62);
+    c.globalAlpha = 1; c.textAlign = 'left';
+  }
+
+  // ---- timeline / controls
+  const tw = Math.min(520, W * 0.44), tx = W / 2 - tw / 2, ty = H - 30;
+  c.fillStyle = 'rgba(148,163,184,0.16)'; c.fillRect(tx, ty, tw, 2);
+  c.fillStyle = 'rgba(253,186,116,0.7)'; c.fillRect(tx, ty, tw * clamp(T / T_END, 0, 1), 2);
+  for (const a of ACT) {
+    const x = tx + tw * (a.t / T_END);
+    c.fillStyle = T >= a.t ? 'rgba(253,230,138,0.8)' : 'rgba(148,163,184,0.3)';
+    c.fillRect(x, ty - 3, 1, 8);
+  }
+  c.font = '600 9px Barlow, system-ui, sans-serif'; c.letterSpacing = '2px';
+  c.textAlign = 'center'; c.fillStyle = 'rgba(100,116,139,0.45)';
+  c.fillText('SPACE REPLAY    1–7 ACTS    F DATA', W / 2, ty + 18);
+  c.textAlign = 'left'; c.letterSpacing = '0px';
+
+  if (showData) {
+    c.font = "400 10px 'JetBrains Mono', ui-monospace, monospace";
+    c.fillStyle = 'rgba(148,163,184,0.7)';
+    const rows = [
+      't       ' + T.toFixed(2),
+      'nodeU   ' + s.nodeU.toFixed(3),
+      'gap     ' + s.gap.toFixed(0),
+      'heat    ' + s.heat.toFixed(1),
+      'rate    ' + s.rate.toFixed(2),
+      'feed    ' + s.feed.toFixed(2),
+      'wall    ' + wallClicks(s.gap, s.walk).toFixed(2) + ' clk/s',
+      'resist  ' + resistNow().toFixed(2),
+      'his     ' + ((1 + s.surge * 3.6) * resistNow()).toFixed(2),
+      'you     ' + ((0.32 + 1.15 * Math.exp(-s.gap / 220)) * (0.45 + s.feed) + s.walk * 6.5).toFixed(2),
+      'stand   ' + standAmount().toFixed(2),
+      'pitch   ' + cam.pitch.toFixed(2)
+    ];
+    rows.forEach((r, i) => c.fillText(r, W - 210, 40 + i * 14));
+  }
+  c.restore();
+}
+
+/* ================================== frame ================================= */
+function frame(ts) {
+  let dt = Math.min(0.034, (ts - last) / 1000 || 0);
+  last = ts;
+  // the meter filling buys a moment of dilation, and the impact holds
+  const act = actAt(T).id;
+  const scale = act === 'FULL' ? lerp(1, 0.32, ease(clamp((T - ACT[3].t) / 1.2, 0, 1)))
+              : act === 'IMPACT' ? lerp(0.25, 1, ease(clamp((T - ACT[6].t) / 2.4, 0, 1))) : 1;
+  T += dt;
+  stepSim(dt * (act === 'FULL' || act === 'IMPACT' ? 1 : 1));
+  if (T > T_END) reset();
+
+  const t = T;
+  const stand = standAmount();
+  const vent = clamp((T - ACT[4].t - 1.1) / 1.2, 0, 1) * (actAt(T).id === 'IMPACT' ? clamp(1 - (T - ACT[6].t - 2) / 2, 0, 1) : 1);
+  const life = poolsSeeded ? clamp((T - ACT[4].t - 1) / 1.2, 0, 1) : 0;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  if (cam.shake > 0 || cam.roll) {
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(cam.roll);
+    ctx.translate(-W / 2 + rnd(cam.shake, -cam.shake), -H / 2 + rnd(cam.shake, -cam.shake));
+  }
+
+  drawFloor(ctx, life * 0.9);
+  drawPools(ctx, t);
+  drawShocks(ctx);
+
+  const pos = drawAmalgam(ctx, t, stand);
+  const o = beamOrigin(pos);
+  const nx = lerp(o.x, SIM.shipX, SIM.nodeU);
+  const ny = lerp(o.y, SIM.shipY, SIM.nodeU);
+  const nz = lerp(o.z, 14, SIM.nodeU);
+
+  const heavy = vent > 0.35;
+  if (actAt(T).id === 'SWEEP') {
+    // still sweeping: the beam goes past you, not at you
+    const a = t * 0.9;
+    drawHisBeam(ctx, o, o.x + Math.cos(a) * 1500, o.y + Math.sin(a) * 900 + 500, 10, t, 1);
+  } else if (!blow.on) {
+    drawHisBeam(ctx, o, nx, ny, nz, t, SIM.lockBreak > 0 ? 0.45 : 1);
+  }
+  if (SIM.locked || SIM.lockBreak > 0) {
+    drawLance(ctx, SIM.shipX, SIM.shipY, 14, nx, ny, nz, t, heavy, SIM.lockBreak > 0 ? 0.3 : 1);
+    if (!blow.on) drawNode(ctx, nx, ny, nz, t, heavy);
+  }
+  drawShip(ctx, t, vent);
+  drawSpark(ctx, t);
+  drawParts(ctx);
+  ctx.restore();
+
+  // ---- the dim: the devtalk radial, in for the spark, lifted by the fire
+  if (dim > 0.004) {
+    const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12, W / 2, H / 2, Math.max(W, H) * 0.7);
+    vig.addColorStop(0, `rgba(5,5,7,${0.55 * dim})`);
+    vig.addColorStop(1, `rgba(5,5,7,${0.9 * dim})`);
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  }
+  if (life > 0.01) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    const pulse = 0.05 + Math.sin(t * 3.1) * 0.012;
+    g.addColorStop(0, `rgba(249,115,22,${(pulse + 0.03) * life})`);
+    g.addColorStop(1, `rgba(120,30,6,${pulse * 0.5 * life})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+  }
+  if (flash > 0) {
+    ctx.fillStyle = `rgba(255,247,237,${Math.pow(flash, 2) * 0.8})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  // letterbox: it opens when the frame breaks, closes on the card
+  const lb = clamp((standAmount() * 0.6 + (actAt(T).id === 'IMPACT' ? 1 : 0)), 0, 1) * 52;
+  if (lb > 0.5) {
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, lb); ctx.fillRect(0, H - lb, W, lb);
+  }
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34, W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = ctx.createPattern(scanTile, 'repeat'); ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(Math.random() * 96 | 0, Math.random() * 96 | 0);
+  ctx.fillStyle = ctx.createPattern(grainTile, 'repeat');
+  ctx.fillRect(-96, -96, W + 192, H + 192);
+  ctx.restore();
+
+  drawHUD(ctx, t);
+  void scale;
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'r') { e.preventDefault(); reset(); }
+  if (k === 'f') showData = !showData;
+  if (k >= '1' && k <= '7') seek(ACT[+k - 1].t + 0.05);
+});
+addEventListener('pointerdown', () => reset());
+
+resize(); reset();
+requestAnimationFrame(ts => { last = ts; frame(ts); });
+</script>
+</body>
+</html>

@@ -1,0 +1,1697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>THE HACKER · ROOT'S RITE — REWORK PREVIEW</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
+    font-family:Barlow,'Segoe UI',system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ===========================================================================
+   THE HACKER · ROOT'S RITE — REWORK PREVIEW · standalone, touches nothing
+   ---------------------------------------------------------------------------
+   Three scenes, each driven off its own clock so any moment is seekable:
+
+     1  ENTRANCE   rrOpen has none. Proposal: the room is `clear`ed a row at a
+                   time, a selection is dragged out of nothing, and it commits
+                   into ROOT. drawRrOpen(t).
+     2  SEQ 1–4    the readability pass, scripted: ls tags, a wall, the console
+                   (hack / alias + key swap / ps / kill / unalias), the process
+                   table, a take-back tether, noclip, the slow.
+     3  rm -rf     the race and THE TURN. Dead even until `sudo su`, then the
+                   awakening, SUPERUSER on the hull, and rm -rf /root.
+     4             jump straight to the last keys before `sudo su`.
+
+   The idea the premium pieces hang on: the HACKER does not get a new costume
+   at the awakening, it gets ROOT's. The committed marquee, the { } claws and
+   the steady caret are all ROOT's body language — gold, and worn by you.
+
+   Every ART HOOK below is written against the game's own names (ctx, W, H,
+   uiTime, P, root, con, rrRace, drawGlow, roundRect, poly, fitStr, spawnPart,
+   FXO) with the same signatures, so each lifts straight into index.html.
+   New hooks: drawSuperuserHull, drawRrOpen, drawRrSlow, drawRrGhost.
+   SPACE replays the scene.
+=========================================================================== */
+
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rnd = (a, b = 0) => b + Math.random() * (a - b);
+const ease = t => t * t * (3 - 2 * t);
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const easeIn = t => t * t * t;
+const hash = i => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+const ROOT_COL = '#f0abfc', HACK_COL = '#a3e635', SU_COL = '#fde047';
+const CON_MONO = "'JetBrains Mono', ui-monospace, monospace";
+const CON_BAR = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+const CON_KIND = { in: '#e2e8f0', out: '#94a3b8', ok: '#a3e635', err: '#fca5a5', root: ROOT_COL, sys: '#64748b' };
+const CON_ROWS = 7;
+const FXO = { parts: true };
+
+/* ------------------------------- game shims ------------------------------- */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, uiTime = 0;
+const cam = { x: 0, y: 0, z: 1 };
+const toScreen = (x, y) => ({ x: (x - cam.x) * cam.z + W / 2, y: (y - cam.y) * cam.z + H / 2 });
+
+const _glow = new Map();
+function glowSprite(hex) {
+  let s = _glow.get(hex); if (s) return s;
+  s = document.createElement('canvas'); s.width = s.height = 128;
+  const g = s.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, rgba(hex, 1)); gr.addColorStop(0.32, rgba(hex, 0.42)); gr.addColorStop(1, rgba(hex, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128); _glow.set(hex, s); return s;
+}
+function drawGlow(x, y, r, color, a = 1) {
+  ctx.globalAlpha = a; ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = 1;
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function poly(x, y, r, sides, ang) {
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const a = ang + i * TAU / sides;
+    i ? ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+  }
+  ctx.closePath();
+}
+function fitStr(s, w) {
+  if (ctx.measureText(s).width <= w) return s;
+  while (s.length > 1 && ctx.measureText(s + '…').width > w) s = s.slice(0, -1);
+  return s + '…';
+}
+function hullPath() {   // the HACKER's: a splayed fork, two prongs and an open bay
+  ctx.beginPath();
+  ctx.moveTo(18, 0); ctx.lineTo(4, 6); ctx.lineTo(10, 13); ctx.lineTo(-4, 11);
+  ctx.lineTo(-9, 0); ctx.lineTo(-4, -11); ctx.lineTo(10, -13); ctx.lineTo(4, -6); ctx.closePath();
+}
+let parts = [];
+function spawnPart(x, y, vx, vy, r, color, life, drag = 0.94) {
+  if (parts.length > 900) return;
+  parts.push({ x, y, vx, vy, r, color, life, max: life, drag });
+}
+function tickParts(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; const d = Math.pow(p.drag, dt * 60); p.vx *= d; p.vy *= d;
+  }
+}
+function drawParts() {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    const a = clamp(p.life / p.max, 0, 1);
+    drawGlow(p.x, p.y, p.r * 3, p.color, a * 0.3);
+    ctx.globalAlpha = a; ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.r * 0.5, p.y - p.r * 0.5, p.r, p.r);   // square: pixels, not embers
+  }
+  ctx.restore();
+}
+function rootChecker() {
+  if (rootChecker.tile) return rootChecker.tile;
+  const S = 24, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1a0620'; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#2f0c3a'; g.fillRect(0, 0, S / 2, S / 2); g.fillRect(S / 2, S / 2, S / 2, S / 2);
+  return (rootChecker.tile = c);
+}
+
+/* world state the hooks read — the same shapes the game has */
+const P = { x: 0, y: 0, r: 14, ang: -Math.PI / 2, slowT: 0 };
+const root = { e: { x: 0, y: -110, r: 30, hp: 1000, maxHp: 1000, flash: 0, ghost: 0, ang: 0 },
+               stunT: 0, say: '', sayT: 0, cmd: null, rite: { seq: 0, procs: [] } };
+const ROOT_STUN = 3.2, ROOT_SHAPES = [5, 3, 8, 4, 6, 7], ROOT_SWAP = 2.3;
+const con = { open: false, buf: '', log: [], alias: {}, swap: null };
+let rrRace = null, enemies = [];
+let hudBotY = 0;
+
+/* ================================ ART HOOKS ================================
+   Everything from here to the harness lifts into index.html.
+=========================================================================== */
+
+/* ART HOOK: THE ROOM GOING UNDER — a = 0..1 over RACE_INTRO.
+   It is cleared the way `clear` clears a terminal: a row at a time, from both
+   prompts inward, so the last of the room left lit is the band the two of you
+   are standing in. A green write-head rides the front of each wipe. */
+function drawRaceDim(a) {
+  const RH = 18, n = Math.ceil(H / RH), mid = H / 2;
+  ctx.save();
+  for (let i = 0; i < n; i++) {
+    const y = i * RH, d = clamp(Math.abs(y + RH / 2 - mid) / mid, 0, 1);   // 1 at the edges
+    const k = ease(clamp((a - (1 - d) * 0.5) / 0.5, 0, 1));
+    if (k <= 0) continue;
+    ctx.fillStyle = 'rgba(2,3,6,' + (k * (0.46 + d * d * 0.46)) + ')';
+    ctx.fillRect(0, y, W, RH);
+    if (k < 1) {
+      ctx.fillStyle = rgba(HACK_COL, 0.5 * Math.sin(k * Math.PI));
+      ctx.fillRect(0, y + (i * RH < mid ? RH - 1 : 0), W * k, 1);
+    }
+  }
+  ctx.restore();
+}
+
+/* ART HOOK: the line over your prompt. L is the line you are on; `sudo su`
+   (L.wake) gets its own, gold, framed like a selection. */
+function drawRaceCaption(L, a, py) {
+  const R = rrRace;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = CON_BAR; ctx.letterSpacing = '0.22em';
+  ctx.globalAlpha = a;
+  const y = py - 16;
+  if (L && L.wake && !R.awake) {
+    const s = 'FOR ONE FRAME THE FILE HAS YOUR NAME IN IT';
+    const tw = ctx.measureText(s).width + 28;
+    const p = 0.7 + Math.sin(uiTime * 5) * 0.3;
+    ctx.strokeStyle = rgba(SU_COL, 0.55 * p); ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]); ctx.lineDashOffset = -uiTime * 24;
+    ctx.strokeRect(W / 2 - tw / 2, y - 9, tw, 18);
+    ctx.setLineDash([]);
+    ctx.fillStyle = SU_COL; ctx.globalAlpha = a * p;
+    ctx.fillText(s, W / 2, y + 0.5);
+  } else {
+    ctx.fillStyle = R.awake ? SU_COL : 'rgba(148,163,184,0.85)';
+    ctx.fillText(R.awake ? 'ANY KEY  ·  EACH ONE LANDS TWO  ·  IT CANNOT KEEP UP'
+                         : 'TYPE THE LINE  ·  [ENTER] RUNS IT  ·  IT TYPES AS FAST AS YOU DO', W / 2, y + 0.5);
+  }
+  ctx.restore();
+}
+
+/* how far along each side is — both panels draw the other's head as a tick,
+   so the tie is something you can see: two marks on top of each other */
+function rrProgs() {
+  const R = rrRace, L = RR_RACE[R.i], rl = RR_RACE[R.awake ? R.ri : R.i];
+  return { mine: L ? R.pc / L.p.length : 1,
+           its: !rl ? 1 : R.awake ? R.rc / rl.r.length : R.rf };
+}
+
+/* ART HOOK: one terminal in the race. Changes from the placeholder, all for
+   reading it at speed:
+     · the next key sits in a solid block — you read one character, not a line
+     · the two progress bars face each other across the room (ROOT's on its
+       bottom edge, yours on your top edge), and each carries the other's head
+       as a tick. Before the turn the ticks sit on the heads; after it, yours
+       runs away from its
+     · a wrong key shakes the panel and turns the block red
+     · once you are root the prompt, the title and the border are gold, and a
+       sheen runs the title bar */
+function rrRacePanel(x, y, w, rows, title, col, hist, line, typed, prog, mine, say) {
+  const R = rrRace, lh = 17;
+  const h = 22 + rows * lh + (mine ? 44 : 36);
+  const err = mine && R.errT > 0;
+  const gold = mine && R.awake;
+  ctx.save();
+  if (err) ctx.translate(Math.sin(uiTime * 95) * R.errT * 22, 0);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(3,5,7,0.95)';
+  roundRect(x, y, w, h, 5); ctx.fill();
+  ctx.save(); roundRect(x, y, w, h, 5); ctx.clip();
+  ctx.fillStyle = rgba(col, gold ? 0.24 : 0.14); ctx.fillRect(x, y, w, 21);
+  if (gold) {
+    const sx = x + ((uiTime * 0.45) % 1.4 - 0.2) * w;
+    const g = ctx.createLinearGradient(sx - 80, 0, sx + 80, 0);
+    g.addColorStop(0, rgba(SU_COL, 0)); g.addColorStop(0.5, rgba(SU_COL, 0.35)); g.addColorStop(1, rgba(SU_COL, 0));
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, 21);
+  }
+  ctx.restore();
+  ctx.strokeStyle = err ? '#f87171' : rgba(col, gold ? 0.95 : 0.6); ctx.lineWidth = err || gold ? 2 : 1.2;
+  roundRect(x, y, w, h, 5); ctx.stroke();
+
+  ctx.fillStyle = col;
+  ctx.fillRect(x + 10, y + 8, 5, 5);
+  ctx.font = CON_BAR; ctx.letterSpacing = '0.16em';
+  ctx.fillText(title, x + 22, y + 11);
+  ctx.textAlign = 'right';
+  if (mine) {
+    ctx.fillStyle = rgba(col, 0.7);
+    ctx.fillText('LINE ' + String(R.i + 1).padStart(2, '0') + ' / ' + RR_RACE.length, x + w - 10, y + 11);
+  } else if (say) {
+    ctx.letterSpacing = '0em'; ctx.font = 'italic 500 11px ' + CON_MONO;
+    ctx.fillText(fitStr('“' + say + '”', w * 0.6), x + w - 10, y + 11);
+  }
+  ctx.textAlign = 'left'; ctx.letterSpacing = '0em';
+
+  ctx.font = '500 12px ' + CON_MONO;
+  hist.slice(-rows).forEach((L, i) => {
+    const ry = y + 22 + i * lh + lh / 2 + 2;
+    if (L.pr) {
+      ctx.fillStyle = rgba(L.pr === '#' ? (mine ? SU_COL : ROOT_COL) : HACK_COL, 0.55);
+      ctx.fillText(L.pr, x + 12, ry);
+      ctx.fillStyle = CON_KIND[L.kind] || '#94a3b8';
+      ctx.fillText(fitStr(L.s, w - 44), x + 26, ry);
+    } else {
+      ctx.fillStyle = CON_KIND[L.kind] || '#94a3b8';
+      ctx.fillText(fitStr(L.s, w - 44), x + 26, ry);
+    }
+  });
+
+  // the live line
+  const iy = y + h - (mine ? 25 : 21);
+  ctx.fillStyle = rgba(col, 0.07); ctx.fillRect(x + 1, iy - 14, w - 2, 28);
+  ctx.font = '600 ' + (mine ? 17 : 14) + 'px ' + CON_MONO;
+  const px = x + 14;
+  ctx.fillStyle = col;
+  ctx.fillText(!mine || R.awake ? '#' : '$', px, iy);
+  const tx = px + 22;
+  ctx.fillStyle = '#ffffff'; ctx.fillText(typed, tx, iy);
+  const tw = ctx.measureText(typed).width;
+  const nx = line[typed.length];
+  if (nx !== undefined) {
+    const cw = ctx.measureText(nx).width;
+    if (mine) {
+      ctx.fillStyle = err ? '#f87171' : col;
+      ctx.fillRect(tx + tw - 1, iy - 11, cw + 2, 22);
+      ctx.fillStyle = '#05060a'; ctx.fillText(nx, tx + tw, iy);
+    } else if (Math.sin(uiTime * 16) > -0.3) {
+      ctx.fillStyle = rgba(col, 0.9); ctx.fillRect(tx + tw, iy - 9, 2, 18);
+    }
+    ctx.fillStyle = rgba(col, mine ? 0.38 : 0.26);
+    ctx.fillText(line.slice(typed.length + (mine ? 1 : 0)), tx + tw + (mine ? cw : 0), iy);
+  } else if (mine && line.length) {
+    ctx.fillStyle = col; ctx.globalAlpha *= 0.6 + Math.sin(uiTime * 8) * 0.4;
+    ctx.fillText('⏎', tx + tw + 8, iy);
+    ctx.globalAlpha = 1;
+  }
+
+  // the race bar — on the edge that faces the other terminal
+  const by = mine ? y - 7 : y + h + 4;
+  const pg = rrProgs(), other = mine ? pg.its : pg.mine;
+  const oc = mine ? ROOT_COL : (R.awake ? SU_COL : HACK_COL);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, by, w, 3);
+  ctx.fillStyle = col; ctx.fillRect(x, by, w * clamp(prog, 0, 1), 3);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x + w * clamp(prog, 0, 1), by + 1.5, 14, col, 0.6);
+  ctx.restore();
+  ctx.fillStyle = oc; ctx.globalAlpha = 0.9;
+  ctx.fillRect(x + w * clamp(other, 0, 1) - 1, by + (mine ? -4 : 0), 2, 7);
+  ctx.restore();
+}
+
+/* ART HOOK: THE TURN — t runs 1 -> 0 over RACE_WAKE (1.3 s), keys held for
+   the first 0.8 s. Beats, in seconds from `sudo su` landing:
+     0.00  the frame inverts to gold, one beat — the file has your name in it
+     0.00  the screen tears: slices of the frame thrown sideways, settling
+     0.00  a ring off the hull, then a second; permission bits blown out of it
+     0.08  centre: uid=1000(hacker), and a gold write-head eats it left to right
+     0.45  uid=0(root) stamps in over it
+     0.95  and falls into the hull, which is where SUPERUSER takes over
+   Reads the hull through toScreen(P.x, P.y); swap for the game's own
+   world-to-screen if the camera zooms. */
+function drawRaceWake(t) {
+  const s = (1 - t) * RACE_WAKE;
+  const hp = toScreen(P.x, P.y);
+  ctx.save();
+
+  // tear
+  if (s < 0.6) {
+    const amp = 46 * Math.pow(1 - s / 0.6, 2);
+    const seed = Math.floor(s * 30);
+    for (let i = 0; i < 14; i++) {
+      const y0 = hash(i * 3.1 + seed) * H, hh = 4 + hash(i * 7.7 + seed) * 38;
+      const dx = (hash(i * 5.3 + seed) - 0.5) * 2 * amp;
+      ctx.drawImage(cv, 0, y0 * DPR, cv.width, hh * DPR, dx, y0, W, hh);
+    }
+  }
+  // invert
+  if (s < 0.09) {
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = SU_COL; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  // the wash, from the hull
+  drawGlow(hp.x, hp.y, 180 + s * 500, SU_COL, 0.45 * Math.pow(t, 1.6));
+  // rings
+  for (const [d, lw, rc] of [[0, 3, SU_COL], [0.12, 2, HACK_COL]]) {
+    const k = clamp((s - d) / 0.75, 0, 1);
+    if (k <= 0 || k >= 1) continue;
+    ctx.globalAlpha = (1 - k) * 0.9;
+    ctx.strokeStyle = rc; ctx.lineWidth = lw * (1 + (1 - k) * 2);
+    ctx.beginPath(); ctx.arc(hp.x, hp.y, 20 + easeOut(k) * Math.max(W, H) * 0.7, 0, TAU); ctx.stroke();
+  }
+  // bits
+  ctx.font = '700 13px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const BITS = 'rwx01#';
+  for (let i = 0; i < 64; i++) {
+    const a = i * 2.39996, sp = 0.35 + hash(i) * 0.65;
+    const d = 26 + easeOut(clamp(s / 1.1, 0, 1)) * sp * Math.min(W, H) * 0.55;
+    ctx.globalAlpha = clamp(1 - s / (0.7 + hash(i + 9) * 0.6), 0, 1) * 0.9;
+    ctx.fillStyle = i % 5 === 0 ? '#ffffff' : i % 2 ? SU_COL : HACK_COL;
+    ctx.fillText(BITS[i % 6], hp.x + Math.cos(a) * d, hp.y + Math.sin(a) * d);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // centre: the id line rewritten
+  const cy = H / 2, fs = Math.round(clamp(W * 0.05, 30, 64));
+  ctx.font = '800 ' + fs + 'px ' + CON_MONO; ctx.letterSpacing = '0.02em';
+  if (s > 0.06 && s < 0.52) {
+    const A = 'uid=1000(hacker)';
+    const eat = clamp((s - 0.16) / 0.28, 0, 1) * A.length;
+    const aw = ctx.measureText(A).width;
+    ctx.textAlign = 'left';
+    let cx = W / 2 - aw / 2;
+    ctx.globalAlpha = clamp((s - 0.06) / 0.06, 0, 1) * clamp((0.52 - s) / 0.06, 0, 1);
+    for (let i = 0; i < A.length; i++) {
+      const ch = i < eat ? BITS[(i + Math.floor(s * 40)) % 6] : A[i];
+      ctx.fillStyle = i < eat ? SU_COL : HACK_COL;
+      ctx.fillText(ch, cx, cy);
+      cx += ctx.measureText(A[i]).width;
+    }
+    ctx.fillStyle = SU_COL;
+    ctx.fillRect(W / 2 - aw / 2 + (eat / A.length) * aw, cy - fs * 0.6, 3, fs * 1.2);
+  }
+  if (s >= 0.45) {
+    const B = 'uid=0(root)';
+    const k = clamp((s - 0.45) / 0.18, 0, 1), f = clamp((s - 0.95) / 0.35, 0, 1);
+    const sc = (1 + (1 - easeOut(k)) * 0.35) * lerp(1, 0.12, easeIn(f));
+    ctx.save();
+    ctx.translate(lerp(W / 2, hp.x, easeIn(f)), lerp(cy, hp.y, easeIn(f)));
+    ctx.scale(sc, sc);
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = k * (1 - f * 0.7);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, fs * 3.2, SU_COL, 0.28 * k * (1 - f));
+    ctx.globalAlpha = k * (1 - f * 0.7);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = SU_COL; ctx.fillText(B, 0, 0);
+    ctx.font = CON_BAR; ctx.letterSpacing = '0.3em';
+    ctx.fillStyle = rgba(SU_COL, 0.8);
+    ctx.fillText('ROOT@FRACTURE:~#', 0, -fs * 0.9);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ============================ SUPERUSER · THE ONI ==========================
+   The awakening possesses the hull. The fork is read as a face looking down
+   its own heading: the nose is the maw, the two bays are the eyes, and the
+   prongs are where the horns break out. Everything is in the heading frame so
+   it reads as one creature, not effects pinned to a ship.
+
+   What sells it, in the same spirit as EMBER's vent:
+     · LAG     — the mane keeps its own heading (oni.ang) on a spring, so a turn
+                 drags it and a stop lets it swing back through. Horns and tusks
+                 are bone: they do not lag. Soft against hard is the read.
+     · EYES    — the brightest thing on screen, and they leave light behind
+                 them when the hull moves. Nothing else streaks.
+     · ORDER   — the possession is staged, not faded: eyes, then horns, then
+                 the mane bursts past its length and settles, then the tusks,
+                 then the seal lands on the floor.
+     · FORM    — the mane throws a shadow on the plating and the horns are
+                 banded bone with a rim light, so it has volume, not glow.
+   Palette: oni green for the body of it, SUPERUSER gold only where it burns —
+   eyes, horn tips, the seal's notches.
+=========================================================================== */
+const ONI_DEEP = '#0f2a07', ONI_DARK = '#1f4a0c', ONI_MID = '#4d7c0f',
+      ONI_LIT = '#84cc16', ONI_PALE = '#d9f99d', ONI_BONE = '#f7fee7';
+const oni = { t: -1, ang: 0, vel: 0, lag: 0, stretch: 1, px: 0, py: 0, trail: [] };
+const easeBack = t => 1 + 2.4 * Math.pow(t - 1, 3) + 1.4 * Math.pow(t - 1, 2);
+function oniSurge(t) {
+  const raw = Math.sin(t * 3.1) * 0.5 + Math.sin(t * 7.3 + 1.3) * 0.3 + Math.sin(t * 1.37) * 0.2;
+  return 0.88 + Math.pow(clamp(raw * 0.5 + 0.5, 0, 1), 2) * 0.34;
+}
+function oniTick() {
+  let dt = oni.t < 0 ? 0 : uiTime - oni.t;
+  if (oni.t < 0 || dt > 0.25) { oni.ang = P.ang; oni.vel = 0; oni.px = P.x; oni.py = P.y; dt = 0; }
+  oni.t = uiTime;
+  dt = Math.min(dt, 0.04);
+  let d = P.ang - oni.ang;
+  while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
+  oni.vel += (d * 120 - oni.vel * 13) * dt;
+  oni.ang += oni.vel * dt;
+  oni.lag = d;
+  const spd = dt > 0 ? Math.hypot(P.x - oni.px, P.y - oni.py) / dt : 0;
+  oni.px = P.x; oni.py = P.y;
+  oni.stretch += (1 + clamp(spd * 0.002, 0, 0.45) - oni.stretch) * Math.min(1, dt * 6);
+}
+// phase of each part of the possession, from w
+function oniPhase(w) {
+  return {
+    eyes: ease(clamp(w / 0.22, 0, 1)),
+    horn: easeBack(clamp((w - 0.12) / 0.42, 0, 1)),
+    mane: easeBack(clamp((w - 0.24) / 0.5, 0, 1)),
+    tusk: easeOut(clamp((w - 0.46) / 0.34, 0, 1)),
+    seal: easeOut(clamp((w - 0.62) / 0.38, 0, 1)),
+    hot: 1 - w
+  };
+}
+
+/* one lock of the mane: a tapered ribbon with a travelling wave in it, so it
+   whips from the root out rather than wobbling as a whole */
+function oniStrand(bx, by, dir, len, wid, wave, ph, upto = 1) {
+  const ca = Math.cos(dir), sa = Math.sin(dir), nx = -sa, ny = ca, N = 12;
+  const Lp = [], Rp = [];
+  let tip = null;
+  for (let i = 0; i <= N; i++) {
+    const u = (i / N) * upto, dd = u * len;
+    const off = Math.sin(u * 3.4 - uiTime * 6.5 + ph) * wave * u + wave * 0.5 * u * u;
+    const cx = bx + ca * dd + nx * off, cy = by + sa * dd + ny * off;
+    const ww = wid * Math.pow(1 - u, 0.85) * (0.7 + 0.55 * Math.sin(Math.min(1, u * 2.2) * Math.PI * 0.5));
+    Lp.push(cx + nx * ww, cy + ny * ww); Rp.push(cx - nx * ww, cy - ny * ww);
+    tip = [cx, cy];
+  }
+  ctx.beginPath(); ctx.moveTo(Lp[0], Lp[1]);
+  for (let i = 2; i < Lp.length; i += 2) ctx.lineTo(Lp[i], Lp[i + 1]);
+  for (let i = Rp.length - 2; i >= 0; i -= 2) ctx.lineTo(Rp[i], Rp[i + 1]);
+  ctx.closePath();
+  return tip;
+}
+const ONI_MANE = (() => {
+  const out = [];
+  for (let i = 0; i < 13; i++) {                        // the outer mane
+    const k = i / 12 - 0.5;
+    out.push({ th: Math.PI + k * 2.3, len: 30 + 40 * (1 - Math.abs(k) * 1.7), wid: 5.4 - Math.abs(k) * 3,
+               ph: i * 1.7, wave: 5 + Math.abs(k) * 5, inner: false });
+  }
+  for (let i = 0; i < 7; i++) {                         // and the hot locks inside it
+    const k = i / 6 - 0.5;
+    out.push({ th: Math.PI + k * 1.3, len: 22 + 22 * (1 - Math.abs(k) * 1.6), wid: 3.2,
+               ph: i * 2.3 + 0.7, wave: 4, inner: true });
+  }
+  return out;
+})();
+function oniManePath(m, ph, surge, k) {
+  const lagK = oni.lag * 1.6;
+  const bx = -3 + Math.cos(m.th) * 7, by = Math.sin(m.th) * 8.5;
+  const spread = m.th - Math.PI;
+  const dir = Math.PI + spread * 0.72 - lagK * (0.45 + Math.abs(spread) * 0.3);
+  const fl = 0.9 + Math.sin(uiTime * (4 + m.ph % 3) + m.ph) * 0.1;
+  const len = m.len * k * surge * oni.stretch * fl;
+  return oniStrand(bx, by, dir, len, m.wid * Math.min(1, k * 1.2), m.wave * (1 + Math.abs(lagK)), m.ph + ph);
+}
+
+function bez(p, u) {
+  const v = 1 - u;
+  return [v * v * v * p[0] + 3 * v * v * u * p[2] + 3 * v * u * u * p[4] + u * u * u * p[6],
+          v * v * v * p[1] + 3 * v * v * u * p[3] + 3 * v * u * u * p[5] + u * u * u * p[7]];
+}
+/* a horn: banded bone, swept back and hooking in, drawn to k of its length */
+function oniHorn(s, k, shadow) {
+  if (k <= 0.01) return;
+  const B = [1, s * 10, -3, s * 22, -12, s * 29, -21, s * 43];
+  const N = 22, L = [], R = [], C = [];
+  for (let i = 0; i <= N; i++) {
+    const u = (i / N) * k, p = bez(B, u), q = bez(B, Math.min(1, u + 0.01));
+    let tx = q[0] - p[0], ty = q[1] - p[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const ww = lerp(5.4, 0.35, Math.pow(u, 0.8));
+    L.push([p[0] - ty * ww, p[1] + tx * ww]); R.push([p[0] + ty * ww, p[1] - tx * ww]); C.push([p[0], p[1], u, -ty, tx, ww]);
+  }
+  const shape = (from = 0) => {
+    ctx.beginPath(); ctx.moveTo(L[from][0], L[from][1]);
+    for (let i = from + 1; i <= N; i++) ctx.lineTo(L[i][0], L[i][1]);
+    for (let i = N; i >= from; i--) ctx.lineTo(R[i][0], R[i][1]);
+    ctx.closePath();
+  };
+  if (shadow) { shape(); ctx.fillStyle = '#000'; ctx.fill(); return; }
+  shape(); ctx.fillStyle = ONI_DARK; ctx.fill();
+  ctx.strokeStyle = ONI_LIT; ctx.lineWidth = 1.1; ctx.stroke();
+  // bands
+  for (let j = 1; j <= 6; j++) {
+    const i = Math.round(j / 7 * N); if (C[i][2] > k - 0.02) continue;
+    const [x, y, , nx, ny, ww] = C[i];
+    ctx.strokeStyle = ONI_DEEP; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - nx * ww, y - ny * ww); ctx.lineTo(x + nx * ww, y + ny * ww); ctx.stroke();
+    ctx.strokeStyle = rgba(ONI_PALE, 0.45); ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.moveTo(x - nx * ww + 1, y - ny * ww); ctx.lineTo(x + nx * ww + 1, y + ny * ww); ctx.stroke();
+  }
+  // rim light on the outside of the curve
+  const rim = s > 0 ? L : R;
+  ctx.strokeStyle = rgba(ONI_BONE, 0.75); ctx.lineWidth = 0.9;
+  ctx.beginPath(); ctx.moveTo(rim[1][0], rim[1][1]);
+  for (let i = 2; i <= N; i++) ctx.lineTo(rim[i][0], rim[i][1]); ctx.stroke();
+  // the tip, burning
+  const tf = Math.round(N * 0.74);
+  if (k > 0.74) { shape(tf); ctx.fillStyle = SU_COL; ctx.fill(); }
+  // a light that climbs the horn to the tip, every couple of seconds
+  const cu = (uiTime * 0.55 + (s > 0 ? 0 : 0.5)) % 1.6;
+  if (cu < 1 && cu < k) {
+    const p = bez(B, cu);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(p[0], p[1], 9, ONI_PALE, 0.55 * Math.sin(cu * Math.PI)); ctx.restore();
+  }
+  if (k > 0.97) {
+    const p = bez(B, 1);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(p[0], p[1], 8, SU_COL, 0.28 + Math.sin(uiTime * 5 + s) * 0.08); ctx.restore();
+  }
+}
+/* a tusk, off the corner of the maw, curling in toward the line of fire */
+function oniTusk(s, k) {
+  if (k <= 0.01) return;
+  const B = [12, s * 3.2, 16, s * 6.8, 21, s * 6.8, 23.5, s * 4];
+  const N = 12, L = [], R = [];
+  for (let i = 0; i <= N; i++) {
+    const u = (i / N) * k, p = bez(B, u), q = bez(B, Math.min(1, u + 0.01));
+    let tx = q[0] - p[0], ty = q[1] - p[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const ww = lerp(2.3, 0.25, u);
+    L.push([p[0] - ty * ww, p[1] + tx * ww]); R.push([p[0] + ty * ww, p[1] - tx * ww]);
+  }
+  ctx.beginPath(); ctx.moveTo(L[0][0], L[0][1]);
+  for (const p of L) ctx.lineTo(p[0], p[1]);
+  for (let i = N; i >= 0; i--) ctx.lineTo(R[i][0], R[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = ONI_BONE; ctx.fill();
+  ctx.strokeStyle = ONI_MID; ctx.lineWidth = 0.8; ctx.stroke();
+}
+/* the seal on the floor: world-fixed, turning slowly. The permission bits
+   are the ring's text, and 鬼 sits at its four quarters. */
+function oniSeal(x, y, k, hot) {
+  if (k <= 0.01) return;
+  const R = 64 * lerp(1.9, 1, k), rot = uiTime * 0.18;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalAlpha = k * (0.55 + Math.sin(uiTime * 1.7) * 0.08) + hot * 0.4;
+  ctx.strokeStyle = rgba(ONI_LIT, 0.45); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, R - 14, 0, TAU); ctx.stroke();
+  ctx.rotate(rot);
+  ctx.strokeStyle = rgba(ONI_LIT, 0.35); ctx.lineWidth = 1.4;
+  for (let i = 0; i < 36; i++) {
+    const a = i * TAU / 36, l = i % 3 ? 3 : 6;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * (R - 14), Math.sin(a) * (R - 14));
+    ctx.lineTo(Math.cos(a) * (R - 14 + l), Math.sin(a) * (R - 14 + l)); ctx.stroke();
+  }
+  ctx.font = '700 8px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const bits = 'rwxrwxrwx';
+  for (let q = 0; q < 4; q++) {
+    for (let i = 0; i < 9; i++) {
+      const a = q * TAU / 4 + 0.22 + i * 0.1;
+      ctx.save(); ctx.rotate(a); ctx.translate(R - 7, 0); ctx.rotate(Math.PI / 2);
+      ctx.fillStyle = rgba(ONI_PALE, 0.7); ctx.fillText(bits[i], 0, 0); ctx.restore();
+    }
+    const a = q * TAU / 4;
+    ctx.save(); ctx.rotate(a); ctx.translate(R - 7, 0); ctx.rotate(Math.PI / 2);
+    ctx.font = "700 11px 'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif";
+    ctx.fillStyle = SU_COL; ctx.fillText('鬼', 0, 0);
+    ctx.font = '700 8px ' + CON_MONO; ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ART HOOK: SUPERUSER on the hull, the under-pass (drawRiteWorld, before the
+   hull). w = 0 as sudo su lands, 1 once the turn is over; then it holds. */
+function drawSuperuser(w) {
+  oniTick();
+  const ph = oniPhase(w), x = P.x, y = P.y;
+  const surge = oniSurge(uiTime) * (1 + ph.hot * 0.35);
+
+  oniSeal(x, y, ph.seal, ph.hot * ph.seal);
+
+  // the air around it
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, 70 + ph.hot * 150, ONI_MID, 0.28 + ph.hot * 0.4);
+  drawGlow(x, y, 34, ONI_LIT, 0.16 * ph.eyes);
+  ctx.restore();
+
+  // mane shadow on the plating: sells it as a thing with height over the floor
+  if (ph.mane > 0.01) {
+    ctx.save(); ctx.translate(x + 5, y + 7); ctx.rotate(oni.ang);
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    for (const m of ONI_MANE) if (!m.inner) { oniManePath(m, 0, surge, ph.mane); ctx.fill(); }
+    ctx.restore();
+  }
+  // the mane, in the lagging frame
+  if (ph.mane > 0.01) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(oni.ang);
+    const tips = [];
+    for (const m of ONI_MANE) if (!m.inner) { oniManePath(m, 0, surge, ph.mane); ctx.fillStyle = ONI_DEEP; ctx.fill(); ctx.strokeStyle = rgba(ONI_MID, 0.8); ctx.lineWidth = 0.8; ctx.stroke(); }
+    for (const m of ONI_MANE) if (!m.inner) { const t = oniManePath(m, 0.6, surge * 0.82, ph.mane); ctx.fillStyle = rgba(ONI_DARK, 0.95); ctx.fill(); tips.push(t); }
+    ctx.globalCompositeOperation = 'lighter';
+    for (const m of ONI_MANE) if (m.inner) { oniManePath(m, 1.3, surge, ph.mane); ctx.fillStyle = rgba(ONI_LIT, 0.34 + ph.hot * 0.3); ctx.fill(); }
+    for (const m of ONI_MANE) if (m.inner) {
+      const s2 = { ...m, wid: m.wid * 0.35, len: m.len * 0.6 };
+      oniManePath(s2, 1.3, surge, ph.mane); ctx.fillStyle = rgba(ONI_PALE, 0.5); ctx.fill();
+    }
+    // the tips come apart into code
+    ctx.font = '700 7px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    tips.forEach((t, i) => {
+      if (!t) return;
+      const f = Math.floor(uiTime * 9 + i * 3);
+      ctx.globalAlpha = 0.35 + hash(f + i) * 0.4;
+      ctx.fillStyle = i % 4 ? ONI_LIT : SU_COL;
+      ctx.fillText(hash(f * 1.3 + i) > 0.5 ? '1' : '0', t[0] - 3, t[1]);
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    if (FXO.parts && Math.random() < 0.55 * ph.mane && tips.length) {
+      const t = tips[(Math.random() * tips.length) | 0], ca = Math.cos(oni.ang), sa = Math.sin(oni.ang);
+      spawnPart(x + ca * t[0] - sa * t[1], y + sa * t[0] + ca * t[1], rnd(20, -20) - ca * 30, rnd(20, -20) - sa * 30,
+                rnd(2.2, 1), Math.random() < 0.2 ? SU_COL : ONI_LIT, rnd(0.8, 0.35), 0.93);
+    }
+  }
+
+  // bone: horns and tusks ride the hull itself, no lag
+  ctx.save(); ctx.translate(x + 3, y + 4); ctx.rotate(P.ang);
+  ctx.globalAlpha = 0.35;
+  for (const s of [-1, 1]) oniHorn(s, ph.horn, true);
+  ctx.restore();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(P.ang);
+  oniHorn(-1, ph.horn); oniHorn(1, ph.horn);
+  oniTusk(-1, ph.tusk); oniTusk(1, ph.tusk);
+  // the maw: breath held between the tusks
+  ctx.globalCompositeOperation = 'lighter';
+  const br = 0.5 + Math.sin(uiTime * 3.3) * 0.2;
+  drawGlow(21, 0, 9 + br * 4, ONI_LIT, 0.3 * ph.tusk);
+  drawGlow(20, 0, 4, ONI_BONE, 0.35 * ph.tusk * br);
+  ctx.restore();
+}
+
+/* NEW ART HOOK: SUPERUSER, the over-pass — right after the hull. The hull
+   becomes the mask: dark lacquer, a furrowed gold brow, and the eyes, which
+   burn and streak. On the possession they fire an anamorphic flare. */
+function drawSuperuserHull(w) {
+  const ph = oniPhase(w);
+  ctx.save();
+  ctx.translate(P.x, P.y); ctx.rotate(P.ang);
+  hullPath();
+  const g = ctx.createLinearGradient(18, 0, -9, 0);
+  g.addColorStop(0, rgba('#1f4a0c', 0.95 * ph.eyes)); g.addColorStop(1, rgba('#07140a', 0.95 * ph.eyes));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = rgba(ONI_LIT, ph.eyes); ctx.lineWidth = 1.7; ctx.stroke();
+  // the ridge down the snout
+  ctx.strokeStyle = rgba(ONI_PALE, 0.45 * ph.eyes); ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(16, 0); ctx.stroke();
+  // the brow, furrowed
+  ctx.strokeStyle = rgba(SU_COL, 0.95 * ph.eyes); ctx.lineWidth = 1.8; ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  ctx.moveTo(-3, -10); ctx.lineTo(4.5, -6.6); ctx.lineTo(9, -1.8);
+  ctx.moveTo(-3, 10); ctx.lineTo(4.5, 6.6); ctx.lineTo(9, 1.8);
+  ctx.stroke();
+  ctx.restore();
+
+  // eyes, in world space so they can leave a trail
+  const ca = Math.cos(P.ang), sa = Math.sin(P.ang);
+  const eyes = [-1, 1].map(s => ({ x: P.x + ca * 5.6 - sa * s * 4.3, y: P.y + sa * 5.6 + ca * s * 4.3, s }));
+  oni.trail.push({ t: uiTime, e: eyes });
+  while (oni.trail.length && uiTime - oni.trail[0].t > 0.24) oni.trail.shift();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  for (let k = 0; k < 2; k++) {
+    for (let i = 1; i < oni.trail.length; i++) {
+      const a0 = oni.trail[i - 1].e[k], a1 = oni.trail[i].e[k];
+      const age = (uiTime - oni.trail[i].t) / 0.24;
+      ctx.globalAlpha = (1 - age) * 0.8 * ph.eyes;
+      ctx.strokeStyle = age < 0.35 ? SU_COL : ONI_LIT;
+      ctx.lineWidth = 2.6 * (1 - age) + 0.4;
+      ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(a1.x, a1.y); ctx.stroke();
+    }
+  }
+  const pulse = 0.85 + Math.sin(uiTime * 4.2) * 0.15;
+  for (const e of eyes) {
+    drawGlow(e.x, e.y, (13 + ph.hot * 30) * pulse, SU_COL, (0.75 + ph.hot * 0.25) * ph.eyes);
+    ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(P.ang + e.s * 0.55);
+    ctx.globalAlpha = ph.eyes;
+    ctx.fillStyle = '#fefce8';
+    ctx.beginPath(); ctx.ellipse(0, 0, 3.6, 1.35, 0, 0, TAU); ctx.fill();
+    // the flare, only as it wakes
+    const fl = Math.sin(clamp(w / 0.5, 0, 1) * Math.PI);
+    if (fl > 0.01) {
+      ctx.rotate(-(P.ang + e.s * 0.55));
+      const L = 26 + fl * 130;
+      const gr = ctx.createLinearGradient(-L, 0, L, 0);
+      gr.addColorStop(0, rgba(SU_COL, 0)); gr.addColorStop(0.5, rgba('#fefce8', 0.9 * fl)); gr.addColorStop(1, rgba(SU_COL, 0));
+      ctx.fillStyle = gr; ctx.fillRect(-L, -0.9, L * 2, 1.8);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ART HOOK: a wall — ROOT wrote this body into your fire, 99% off every hit.
+   A firewall, literally: two courses of bricks turning against each other,
+   the selection corners that say who wrote it, and 99% under it. z.flash
+   lights the bricks on a hit so shooting it visibly does nothing.
+   Optional z.fwT (seconds since written) runs the corners in from wide. */
+function drawRrWall(z) {
+  const born = z.fwT === undefined ? 1 : clamp(z.fwT / 0.35, 0, 1);
+  const hit = clamp(z.flash || 0, 0, 1);
+  ctx.save();
+  ctx.translate(z.x, z.y);
+  ctx.lineCap = 'butt';
+  for (const [rr, n, dir, off] of [[z.r + 6, 10, 1, 0], [z.r + 11, 12, -1, 0.5]]) {
+    const gap = 0.09, spin = uiTime * 0.4 * dir + off;
+    ctx.strokeStyle = hit > 0 ? rgba('#ffffff', 0.5 + hit * 0.5) : rgba(ROOT_COL, 0.7);
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = born;
+    for (let i = 0; i < n; i++) {
+      const a = spin + i * TAU / n;
+      ctx.beginPath(); ctx.arc(0, 0, rr * lerp(1.6, 1, born), a + gap, a + TAU / n - gap); ctx.stroke();
+    }
+  }
+  const s = (z.r + 18) * lerp(1.8, 1, easeOut(born)), c = 7;
+  ctx.strokeStyle = rgba(ROOT_COL, 0.9); ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    ctx.moveTo(sx * s, sy * (s - c)); ctx.lineTo(sx * s, sy * s); ctx.lineTo(sx * (s - c), sy * s);
+  }
+  ctx.stroke();
+  ctx.font = '700 9px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = ROOT_COL;
+  ctx.fillText('99%', 0, s + 9);
+  ctx.restore();
+}
+
+/* ART HOOK: the number `ls` put on a body. Bigger, on a leader so it never
+   sits on the body itself, and it says whose it is: white is loose, green is
+   yours (with a filled chip), pink is one ROOT is typing at. It rises a touch
+   as it fades so the last second reads as going, not flickering. */
+function drawRrTag(z, a) {
+  const theirs = z.rrTarget;
+  const col = theirs ? ROOT_COL : z.hacked ? HACK_COL : '#e2e8f0';
+  const y = z.y - z.r - 20 - (1 - a) * 6;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = "700 13px 'JetBrains Mono', ui-monospace, monospace";
+  const txt = String(z.tag), w = Math.max(24, ctx.measureText(txt).width + 12);
+  ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(z.x, y + 9); ctx.lineTo(z.x, z.y - z.r - 3); ctx.stroke();
+  ctx.fillStyle = z.hacked && !theirs ? col : 'rgba(4,8,6,0.9)';
+  roundRect(z.x - w / 2, y - 9, w, 18, 3); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+  roundRect(z.x - w / 2, y - 9, w, 18, 3); ctx.stroke();
+  ctx.fillStyle = z.hacked && !theirs ? '#0b1204' : col;
+  ctx.fillText(txt, z.x, y + 0.5);
+  ctx.restore();
+}
+
+/* ART HOOK: IT TAKES THEM BACK — k 0..1 through ROOT's `hack <n>`.
+   The command is a line being typed across the room: solid pink from ROOT up
+   to k, ghost after, with its characters riding it. At your body, ROOT's
+   marquee closes from wide to tight as k runs, pulsing faster, and at the end
+   the ants stop — the selection is committed and the body is its. */
+function drawRrTether(from, z, k) {
+  const dx = z.x - from.x, dy = z.y - from.y, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const sx = from.x + ux * (from.r * 1.8), sy = from.y + uy * (from.r * 1.8);
+  const ex = z.x - ux * (z.r + 14), ey = z.y - uy * (z.r + 14);
+  const hx = lerp(sx, ex, k), hy = lerp(sy, ey, k);
+  ctx.save();
+  ctx.strokeStyle = rgba(ROOT_COL, 0.22); ctx.lineWidth = 1;
+  ctx.setLineDash([3, 7]); ctx.lineDashOffset = -uiTime * 40;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = rgba(ROOT_COL, 0.9); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(hx, hy, 18, ROOT_COL, 0.7);
+  ctx.globalCompositeOperation = 'source-over';
+  // the command, riding the line
+  const cmd = 'hack ' + (z.tag || '');
+  ctx.font = '700 11px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const n = Math.ceil(cmd.length * k);
+  for (let i = 0; i < n; i++) {
+    const u = clamp(k - (n - 1 - i) * 0.035, 0, 1);
+    ctx.fillStyle = i === n - 1 ? '#ffffff' : ROOT_COL;
+    ctx.fillText(cmd[i], lerp(sx, ex, u) - uy * 10, lerp(sy, ey, u) + ux * 10);
+  }
+  // the selection closing on your body
+  const beat = Math.sin(uiTime * (6 + k * 26)) > 0;
+  const M = (z.r + 10) * lerp(2.2, 1, easeOut(k)), c = 6;
+  ctx.translate(z.x, z.y);
+  ctx.strokeStyle = k > 0.8 && beat ? '#ffffff' : ROOT_COL; ctx.lineWidth = 1.6 + k;
+  if (k < 0.98) { ctx.setLineDash([5, 4]); ctx.lineDashOffset = -uiTime * 50; }
+  ctx.strokeRect(-M, -M, M * 2, M * 2);
+  ctx.setLineDash([]);
+  ctx.fillStyle = ROOT_COL;
+  for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.fillRect(a * M - 3, b * M - 3, 6, 6);
+  if (beat) { ctx.globalCompositeOperation = 'lighter'; drawGlow(0, 0, z.r * 2.4, ROOT_COL, 0.15 + k * 0.35); }
+  ctx.restore();
+}
+
+/* NEW ART HOOK: you are slowed (P.slowT > 0). The hull drags pink ghosts of
+   itself — the frames it has not caught up with — inside a slow clamp of
+   dashes, and says by how much. Call before the hull. */
+function drawRrSlow(slowT) {
+  const a = clamp(slowT, 0, 1);
+  ctx.save();
+  ctx.translate(P.x, P.y);
+  for (let i = 3; i >= 1; i--) {
+    ctx.save();
+    ctx.translate(-Math.cos(P.ang) * i * 8, -Math.sin(P.ang) * i * 8);
+    ctx.rotate(P.ang); hullPath();
+    ctx.strokeStyle = rgba(ROOT_COL, a * (0.42 - i * 0.1)); ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.strokeStyle = rgba(ROOT_COL, 0.7 * a); ctx.lineWidth = 2.5; ctx.lineCap = 'butt';
+  const rot = uiTime * 0.35;
+  for (let i = 0; i < 12; i++) {
+    const s = rot + i * TAU / 12;
+    ctx.beginPath(); ctx.arc(0, 0, P.r + 11, s, s + 0.22); ctx.stroke();
+  }
+  ctx.font = '700 9px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = rgba(ROOT_COL, a);
+  ctx.fillText('×0.35 · ' + Math.ceil(slowT) + 's', 0, P.r + 24);
+  ctx.restore();
+}
+
+/* NEW ART HOOK: ROOT noclipped (root.e.ghost > 0). Called from drawRootBody
+   before anything else; returns the alpha the rest of the body should draw
+   at. It goes hollow — the checker drops out, the outline dashes, the body
+   slips a few pixels on a stutter, and afterimages trail the slip. Hollow is
+   the tell: you cannot touch what is not filled in. */
+function drawRrGhost(e) {
+  const g = clamp(e.ghost, 0, 1);
+  const step = Math.floor(uiTime * 9);
+  const slip = (hash(step) - 0.5) * 12 * g;
+  ctx.save();
+  for (let i = 1; i <= 3; i++) {
+    ctx.globalAlpha = g * (0.34 - i * 0.08);
+    ctx.strokeStyle = i % 2 ? ROOT_COL : '#ffffff'; ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 5]);
+    poly(e.x - slip * i * 0.9, e.y, e.r * (1 + i * 0.1), ROOT_SHAPES[Math.floor(uiTime / ROOT_SWAP) % 6], uiTime * 0.25);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.font = '700 9px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = rgba(ROOT_COL, g * 0.9); ctx.letterSpacing = '0.2em';
+  ctx.fillText('NOCLIP · ' + Math.ceil(e.ghost) + 's', e.x, e.y + e.r * 1.72 + 16);
+  ctx.restore();
+  return { slip, alpha: lerp(1, 0.35, g), g };
+}
+
+/* drawRootBody as the game has it, with the noclip branch added. */
+function drawRootBody(e) {
+  const r = root;
+  const gh = e.ghost > 0 ? drawRrGhost(e) : null;
+  const open = !!(r && r.stunT > 0);
+  const R = e.r, flash = clamp(e.flash || 0, 0, 1);
+  const ph = Math.floor(uiTime / ROOT_SWAP);
+  const sides = ROOT_SHAPES[ph % ROOT_SHAPES.length];
+  const spin = (e.ang || 0) + uiTime * 0.25;
+  const ex = e.x + (gh ? gh.slip : 0), ey = e.y;
+  ctx.save();
+  if (gh) ctx.globalAlpha = gh.alpha;
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(ex, ey, R * (open ? 4.2 : 3), ROOT_COL, (open ? 0.5 : 0.18) * (gh ? gh.alpha : 1));
+  ctx.restore();
+  ctx.save();
+  if (gh) ctx.globalAlpha = gh.alpha;
+  if (!gh) {
+    ctx.save(); poly(ex, ey, R, sides, spin); ctx.clip();
+    if (open) {
+      ctx.fillStyle = rgba(ROOT_COL, 0.5 + flash * 0.35); ctx.fillRect(ex - R, ey - R, R * 2, R * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      for (let y = -R; y < R; y += 6) ctx.fillRect(ex - R, ey + y, R * 2, 2);
+    } else {
+      ctx.translate((uiTime * 9) % 24, (uiTime * 6) % 24);
+      ctx.fillStyle = ctx.createPattern(rootChecker(), 'repeat');
+      ctx.fillRect(ex - R - 24, ey - R - 24, R * 2 + 48, R * 2 + 48);
+    }
+    ctx.restore();
+  }
+  ctx.strokeStyle = open ? '#ffffff' : rgba(ROOT_COL, 0.9);
+  ctx.lineWidth = open ? 4 : 2.6;
+  if (gh) ctx.setLineDash([6, 5]);
+  poly(ex, ey, R, sides, spin); ctx.stroke();
+  ctx.setLineDash([]);
+  if (open || Math.sin(uiTime * 6) > -0.25) {
+    ctx.fillStyle = open ? '#ffffff' : rgba(ROOT_COL, 0.85);
+    ctx.fillRect(ex - 3, ey - R * 0.52, 6, R * 1.04);
+    ctx.fillRect(ex - 10, ey - R * 0.56, 20, 4);
+    ctx.fillRect(ex - 10, ey + R * 0.52 - 4, 20, 4);
+  }
+  const grip = 1.06 + Math.sin(uiTime * 1.3) * 0.05;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '700 ' + Math.round(R * 1.5) + 'px ' + CON_MONO;
+  ctx.fillStyle = open ? 'rgba(255,255,255,0.9)' : rgba(ROOT_COL, 0.75);
+  ctx.fillText('{', ex - R * 1.32 * grip, ey);
+  ctx.fillText('}', ex + R * 1.32 * grip, ey);
+  const M = R * 1.72;
+  ctx.translate(ex, ey);
+  ctx.rotate(open ? 0 : Math.sin(uiTime * 0.7) * 0.05);
+  ctx.strokeStyle = open ? '#ffffff' : rgba(ROOT_COL, 0.55);
+  ctx.lineWidth = open ? 2.4 : 1.4;
+  if (!open) { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -uiTime * (gh ? 90 : 30); }
+  ctx.strokeRect(-M, -M, M * 2, M * 2);
+  ctx.setLineDash([]);
+  for (const hx of [-M, 0, M]) for (const hy of [-M, 0, M]) {
+    if (!hx && !hy) continue;
+    ctx.fillStyle = open ? '#ffffff' : 'rgba(8,3,12,0.9)'; ctx.fillRect(hx - 4, hy - 4, 8, 8);
+    ctx.strokeStyle = open ? '#ffffff' : rgba(ROOT_COL, 0.85); ctx.lineWidth = 1.4; ctx.strokeRect(hx - 4, hy - 4, 8, 8);
+  }
+  ctx.restore();
+  if (open) {
+    const q = r.stunT / ROOT_STUN;
+    ctx.save(); ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(ex, ey, M + 12, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    for (let k = 0; k < 6; k++) {
+      const seg = clamp(q * 6 - k, 0, 1); if (seg <= 0) continue;
+      const a0 = -Math.PI / 2 + k * TAU / 6 + 0.07;
+      ctx.beginPath(); ctx.arc(ex, ey, M + 12, a0, a0 + seg * (TAU / 6 - 0.14)); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* ART HOOK: ROOT's process table. Read as a list of threats with timers:
+     · the PID is a keycap — the one thing on the row you have to type
+     · the row itself is the fuse: it fills left to right as the command runs,
+       and goes white and pulses in its last 30%
+     · a tag says what it does in one word, so you do not parse the code
+     · a take is pale red and names the body it wants */
+const RR_KIND_TAG = { heal: 'HEAL', slow: 'SLOW', brutes: 'SPAWN', noclip: 'NOCLIP',
+                      release: 'RELEASE', shrink: 'SHRINK', take: 'TAKE' };
+function drawRrProcs() {
+  const q = root && root.rite;
+  if (!q || !q.procs.length) return;
+  const lh = 22, w = Math.min(460, W - 40), x = (W - w) / 2, y = 74;
+  const h = 22 + q.procs.length * lh + 4;
+  ctx.save();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(8,3,12,0.88)';
+  roundRect(x, y, w, h, 5); ctx.fill();
+  ctx.strokeStyle = rgba(ROOT_COL, 0.45); ctx.lineWidth = 1.2;
+  roundRect(x, y, w, h, 5); ctx.stroke();
+  ctx.fillStyle = rgba(ROOT_COL, 0.12); ctx.fillRect(x + 1, y + 1, w - 2, 19);
+  ctx.font = CON_BAR; ctx.letterSpacing = '0.16em';
+  ctx.fillStyle = ROOT_COL;
+  ctx.fillText('ROOT@FRACTURE  ·  PS', x + 10, y + 11);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#e2e8f0';
+  ctx.fillText('KILL <PID>', x + w - 10, y + 11);
+  ctx.textAlign = 'left'; ctx.letterSpacing = '0em';
+  q.procs.forEach((p, i) => {
+    const ry = y + 22 + i * lh, cy = ry + lh / 2, k = clamp(p.t / p.dur, 0, 1);
+    const hot = p.k === 'take', late = k > 0.7, col = hot ? '#fca5a5' : ROOT_COL;
+    const pulse = late ? 0.5 + Math.sin(uiTime * 14) * 0.5 : 0;
+    ctx.fillStyle = late ? `rgba(255,255,255,${0.08 + pulse * 0.08})` : rgba(col, 0.1);
+    ctx.fillRect(x + 1, ry + 1, (w - 2) * k, lh - 2);
+    ctx.fillStyle = late ? '#ffffff' : col;
+    roundRect(x + 8, cy - 8, 30, 16, 3); ctx.fill();
+    ctx.font = '800 11px ' + CON_MONO; ctx.textAlign = 'center';
+    ctx.fillStyle = '#12051a'; ctx.fillText(String(p.pid), x + 23, cy + 0.5);
+    ctx.textAlign = 'left';
+    ctx.font = '500 12px ' + CON_MONO; ctx.fillStyle = col;
+    ctx.fillText(fitStr(p.s, w - 190), x + 48, cy);
+    ctx.font = CON_BAR; ctx.letterSpacing = '0.16em'; ctx.textAlign = 'right';
+    ctx.fillStyle = late ? '#ffffff' : rgba(col, 0.75);
+    ctx.fillText(RR_KIND_TAG[p.k] + (hot ? ' · YOURS' : ''), x + w - 52, cy);
+    ctx.letterSpacing = '0em';
+    ctx.font = '600 11px ' + CON_MONO; ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(Math.max(0, p.dur - p.t).toFixed(1) + 's', x + w - 10, cy);
+    ctx.textAlign = 'left';
+  });
+  ctx.restore();
+}
+
+function conTamper() {
+  return { al: Object.keys(con.alias), sw: con.swap };
+}
+
+/* ART HOOK: the console, both states.
+   Open: docked bottom-centre. ROOT's edits get a strip of their own under the
+   title instead of a line of text in it — aliased verbs struck through with
+   what they now say, swapped keys as two keycaps with a draining bar — and
+   under the prompt a verb strip: your five commands, always in view, the
+   aliased ones struck pink and `unalias` lit when it is the fix.
+   Shut: the hint, and the last few lines, in the left column above HACKED. */
+const CON_VERBS = [['ls', 'ls'], ['hack', 'hack <n>'], ['ps', 'ps'], ['kill', 'kill <pid>'], ['unalias', 'unalias <cmd>']];
+function drawConsole() {
+  if (rrRace) return;
+  drawRrProcs();
+  ctx.save();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const lineOf = L => L.kind === 'in' ? L.s : L.kind === 'root' ? L.s : L.s;
+  const tam = conTamper(), anyTam = tam.al.length || tam.sw;
+
+  if (!con.open) {
+    const recent = con.log.filter(L => uiTime - L.t < 6).slice(-3);
+    const lh = 16, w = 300, x = 16;
+    const h = 24 + recent.length * lh + (anyTam ? lh + 2 : 0) + 4;
+    const y = hudBotY - h;
+    ctx.fillStyle = 'rgba(4,8,6,0.78)'; roundRect(x, y, w, h, 5); ctx.fill();
+    ctx.strokeStyle = rgba(HACK_COL, 0.35); ctx.lineWidth = 1; roundRect(x, y, w, h, 5); ctx.stroke();
+    ctx.fillStyle = HACK_COL; roundRect(x + 8, y + 5, 44, 14, 3); ctx.fill();
+    ctx.font = CON_BAR; ctx.letterSpacing = '0.14em';
+    ctx.fillStyle = '#0b1204'; ctx.fillText('ENTER', x + 13, y + 12.5);
+    ctx.fillStyle = HACK_COL; ctx.globalAlpha = 0.7 + Math.sin(uiTime * 3) * 0.25;
+    ctx.fillText('CONSOLE', x + 60, y + 12.5);
+    ctx.globalAlpha = 1; ctx.letterSpacing = '0em';
+    let ry = y + 26;
+    ctx.font = '500 11px ' + CON_MONO;
+    if (anyTam) {
+      ctx.fillStyle = ROOT_COL;
+      const bits = [];
+      if (tam.al.length) bits.push('aliased: ' + tam.al.join(' '));
+      if (tam.sw) bits.push(tam.sw.a.toUpperCase() + '⇄' + tam.sw.b.toUpperCase() + ' ' + Math.ceil(tam.sw.t) + 's');
+      ctx.fillText(fitStr(bits.join('  ·  '), w - 20), x + 10, ry + lh / 2);
+      ry += lh + 2;
+    }
+    recent.forEach((L, i) => {
+      ctx.globalAlpha = clamp(6 - (uiTime - L.t), 0, 1);
+      ctx.fillStyle = CON_KIND[L.kind] || '#94a3b8';
+      const pre = L.kind === 'in' ? '$ ' : L.kind === 'root' ? 'root> ' : '';
+      ctx.fillText(fitStr(pre + L.s, w - 20), x + 10, ry + i * lh + lh / 2);
+    });
+    ctx.restore();
+    return;
+  }
+
+  const fs = 13, lh = 18;
+  const w = Math.min(680, W - 32), x = (W - w) / 2;
+  const th = anyTam ? 24 : 0;
+  const h = 22 + th + CON_ROWS * lh + 8 + 30 + 24;
+  const y = H - 16 - h;
+  ctx.fillStyle = 'rgba(3,7,5,0.95)'; roundRect(x, y, w, h, 6); ctx.fill();
+  ctx.strokeStyle = rgba(HACK_COL, 0.6); ctx.lineWidth = 1.4; roundRect(x, y, w, h, 6); ctx.stroke();
+  ctx.fillStyle = rgba(HACK_COL, 0.14); ctx.fillRect(x + 1, y + 1, w - 2, 20);
+  ctx.fillStyle = HACK_COL; ctx.fillRect(x + 10, y + 8, 5, 5);
+  ctx.font = CON_BAR; ctx.letterSpacing = '0.16em';
+  ctx.fillText('HACKER@FRACTURE', x + 22, y + 11);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#fca5a5';
+  ctx.fillText('WASD LOCKED  ·  [ESC] CLOSE', x + w - 10, y + 11);
+  ctx.textAlign = 'left'; ctx.letterSpacing = '0em';
+
+  // what ROOT has done to it
+  if (anyTam) {
+    const ty = y + 21;
+    ctx.fillStyle = rgba(ROOT_COL, 0.1); ctx.fillRect(x + 1, ty, w - 2, th);
+    ctx.font = CON_BAR; ctx.letterSpacing = '0.16em'; ctx.fillStyle = ROOT_COL;
+    ctx.fillText('ROOT EDITED THIS', x + 12, ty + th / 2);
+    let cx = x + 12 + ctx.measureText('ROOT EDITED THIS').width + 16;
+    ctx.letterSpacing = '0em';
+    ctx.font = '600 11px ' + CON_MONO;
+    for (const a of tam.al) {
+      const tw = ctx.measureText(a).width;
+      ctx.fillStyle = ROOT_COL; ctx.fillText(a, cx, ty + th / 2);
+      ctx.fillRect(cx - 1, ty + th / 2, tw + 2, 1.5);
+      ctx.fillStyle = 'rgba(240,171,252,0.6)';
+      const said = ' → "' + con.alias[a] + '"';
+      ctx.fillText(said, cx + tw, ty + th / 2);
+      cx += tw + ctx.measureText(said).width + 18;
+    }
+    if (tam.sw) {
+      for (const [i, ch] of [[0, tam.sw.a], [1, tam.sw.b]]) {
+        const kx = cx + i * 34;
+        ctx.strokeStyle = ROOT_COL; ctx.lineWidth = 1.2;
+        roundRect(kx, ty + 4, 18, 16, 3); ctx.stroke();
+        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center';
+        ctx.fillText(ch.toUpperCase(), kx + 9, ty + th / 2);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = ROOT_COL; ctx.fillText('⇄', cx + 21, ty + th / 2);
+      const bx = cx + 60, frac = clamp(tam.sw.t / tam.sw.dur, 0, 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(bx, ty + th / 2 - 1.5, 60, 3);
+      ctx.fillStyle = ROOT_COL; ctx.fillRect(bx, ty + th / 2 - 1.5, 60 * frac, 3);
+      ctx.fillText(Math.ceil(tam.sw.t) + 's', bx + 66, ty + th / 2);
+    }
+  }
+
+  ctx.font = '500 ' + fs + 'px ' + CON_MONO;
+  const rows = con.log.slice(-CON_ROWS), top = y + 22 + th + 4;
+  rows.forEach((L, i) => {
+    const ry = top + i * lh + lh / 2;
+    if (L.kind === 'in') { ctx.fillStyle = rgba(HACK_COL, 0.55); ctx.fillText('$', x + 12, ry); }
+    if (L.kind === 'root') { ctx.fillStyle = ROOT_COL; ctx.fillText('>', x + 12, ry); }
+    ctx.fillStyle = CON_KIND[L.kind] || '#94a3b8';
+    ctx.fillText(fitStr((L.kind === 'root' ? 'root: ' : '') + lineOf(L), w - 44), x + 28, ry);
+  });
+
+  const iy = y + h - 24 - 16;
+  ctx.fillStyle = rgba(HACK_COL, 0.07); ctx.fillRect(x + 1, iy - 14, w - 2, 28);
+  ctx.font = '600 ' + (fs + 2) + 'px ' + CON_MONO;
+  ctx.fillStyle = HACK_COL; ctx.fillText('$', x + 12, iy);
+  ctx.fillStyle = '#ffffff'; ctx.fillText(con.buf, x + 30, iy);
+  if (Math.sin(uiTime * 14) > -0.2) {
+    const cw = ctx.measureText(con.buf).width;
+    ctx.fillStyle = HACK_COL; ctx.fillRect(x + 31 + cw, iy - 9, 9, 18);
+  }
+
+  // verb strip
+  const vy = y + h - 12;
+  ctx.font = '500 11px ' + CON_MONO;
+  let vx = x + 12;
+  for (const [id, label] of CON_VERBS) {
+    const broken = !!con.alias[id], fix = id === 'unalias' && tam.al.length;
+    ctx.fillStyle = broken ? ROOT_COL : fix ? HACK_COL : '#64748b';
+    ctx.fillText(label, vx, vy);
+    const lw = ctx.measureText(label).width;
+    if (broken) ctx.fillRect(vx - 1, vy, lw + 2, 1.5);
+    if (fix) { ctx.fillRect(vx, vy + 7, lw, 1.5); }
+    vx += lw + 22;
+  }
+  ctx.restore();
+}
+
+/* NEW ART HOOK: the entrance — t 0..1 over RR_OPEN (2.8 s), screen space,
+   before ROOT's body has been placed. The room is `clear`ed (drawRaceDim's
+   row wipe, run in and back out), a selection is dragged out of nothing from
+   ROOT's corner, it commits with a white snap — ROOT's body appears on that
+   frame — and the command that started all this types itself under it. */
+function drawRrOpen(t) {
+  const s = t * 2.8, rp = toScreen(root.e.x, root.e.y), M = root.e.r * 1.72;
+  const inK = clamp(s / 0.7, 0, 1), outK = clamp((s - 1.6) / 0.9, 0, 1);
+  drawRaceDim(ease(inK) * (1 - ease(outK)));
+  ctx.save();
+  // the drag
+  const d = easeOut(clamp((s - 0.45) / 0.55, 0, 1));
+  if (s > 0.45 && s < 1.05) {
+    const ax = rp.x - M, ay = rp.y - M;
+    const bx = lerp(ax + 4, rp.x + M, d), by = lerp(ay + 4, rp.y + M, d);
+    ctx.strokeStyle = rgba(ROOT_COL, 0.9); ctx.lineWidth = 1.4;
+    ctx.setLineDash([7, 6]); ctx.lineDashOffset = -uiTime * 60;
+    ctx.strokeRect(ax, ay, bx - ax, by - ay); ctx.setLineDash([]);
+    ctx.fillStyle = rgba(ROOT_COL, 0.06); ctx.fillRect(ax, ay, bx - ax, by - ay);
+    ctx.fillStyle = '#ffffff';                                  // the pointer
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 11, by + 4); ctx.lineTo(bx + 4, by + 11); ctx.closePath(); ctx.fill();
+    ctx.font = '600 10px ' + CON_MONO; ctx.fillStyle = ROOT_COL; ctx.textBaseline = 'top';
+    ctx.fillText(Math.round(bx - ax) + ' × ' + Math.round(by - ay), bx + 12, by + 10);
+  }
+  // commit
+  const c = clamp((s - 1.05) / 0.35, 0, 1);
+  if (c > 0 && c < 1) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(rp.x, rp.y, M * (2 + c * 3), '#ffffff', (1 - c) * 0.7);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = rgba('#ffffff', 1 - c); ctx.lineWidth = 3;
+    const m = M * (1 + c * 0.5);
+    ctx.strokeRect(rp.x - m, rp.y - m, m * 2, m * 2);
+  }
+  // the command
+  if (s > 1.2) {
+    const line = './rite --for hacker';
+    const n = Math.floor(clamp((s - 1.3) / 0.8, 0, 1) * line.length);
+    ctx.globalAlpha = 1 - clamp((s - 2.35) / 0.4, 0, 1);
+    ctx.font = '600 16px ' + CON_MONO; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    const pre = 'root@fracture:~# ', full = ctx.measureText(pre + line).width;
+    const lx = W / 2 - full / 2, ly = rp.y + M + 44;
+    ctx.fillStyle = ROOT_COL; ctx.fillText(pre, lx, ly);
+    ctx.fillStyle = '#ffffff'; ctx.fillText(line.slice(0, n), lx + ctx.measureText(pre).width, ly);
+    if (Math.sin(uiTime * 16) > -0.3) {
+      ctx.fillStyle = ROOT_COL; ctx.fillRect(lx + ctx.measureText(pre + line.slice(0, n)).width + 1, ly - 9, 8, 18);
+    }
+  }
+  ctx.restore();
+}
+
+/* ================================= HARNESS ================================
+   Mock of the fight around the hooks. Nothing below lifts.
+=========================================================================== */
+const RR_RACE = [
+  { p: 'whoami', out: 'hacker', r: 'whoami', rout: 'root' },
+  { p: 'id', out: 'uid=1000(hacker) groups=nobody', r: 'id hacker', rout: 'uid=1000(hacker) groups=nobody', say: 'nobody. like I said.' },
+  { p: 'ls /root', out: 'ls: /root: Permission denied', r: 'chmod 700 /root' },
+  { p: 'ps aux | grep root', out: '1  root  godmode --forever', r: 'ps aux | grep hacker', rout: '4471  hacker  -bash' },
+  { p: 'kill 1', out: 'kill: (1): Operation not permitted', r: 'kill 4471', rout: 'kill: (4471): Operation not permitted', say: 'why can I not kill you.' },
+  { p: 'cat /etc/sudoers', out: 'cat: /etc/sudoers: Permission denied', r: 'cat /home/hacker/.bash_history', rout: '(empty)', say: 'you do not even save your history. creep.' },
+  { p: 'find / -name "*.bak"', out: '/tmp/sudoers.bak', r: 'find / -name "*.bak"', rout: '/tmp/sudoers.bak', say: 'that is old. that is OLD.' },
+  { p: 'cat /tmp/sudoers.bak', out: 'hacker  ALL=(ALL) ALL', r: 'rm /tmp/sudoers.bak', rout: 'rm: cannot remove: file is open', say: 'put it DOWN.' },
+  { p: 'cp /tmp/sudoers.bak /etc/sudoers', out: 'cp: /etc/sudoers: changed as we wrote it', r: 'cp /etc/sudoers.orig /etc/sudoers', rout: 'cp: /etc/sudoers: changed as we wrote it', say: 'mine landed. MINE landed.' },
+  { p: 'cp /tmp/sudoers.bak /etc/sudoers', out: 'for one frame, /etc/sudoers says hacker', r: 'cp /etc/sudoers.orig /etc/sudoers', rout: 'cp: /etc/sudoers: changed as we wrote it', say: 'again. we can do this all day.' },
+  { p: 'sudo su', out: '', r: 'deluser hacker sudo', rout: 'deluser: only root may remove a user from a group', wake: true, say: 'wait. WAIT. that is MY prompt.' },
+  { p: 'chmod 000 /root/godmode', out: '', r: 'chmod 777 /root/godmode', rout: 'chmod: Operation not permitted', say: 'hey. HEY.' },
+  { p: 'kill -9 1', out: 'Killed', r: 'systemctl restart godmode', rout: 'Failed to restart godmode: Access denied', say: 'I just come back. I ALWAYS come back.' },
+  { p: 'ls /root/cheats', out: 'godmode  noclip  wallhack  hp.set  spawn', r: 'chmod 700 /root/cheats', rout: 'chmod: Operation not permitted', say: 'do NOT read those.' },
+  { p: 'rm /root/cheats/*', out: '', r: 'cp -r /backup/cheats /root/', rout: 'cp: /backup: No such file or directory', say: 'those took me AGES.' },
+  { p: 'passwd -l root', out: 'passwd: password locked.', r: 'su root', rout: 'su: Authentication failure', say: 'that is not fair and you know it.' },
+  { p: 'crontab -r -u root', out: '', r: 'crontab -e', rout: 'no crontab for root', say: 'I was still typing!' },
+  { p: 'chown -R hacker /fracture', out: '', r: 'chown -R root /fracture', rout: 'chown: Operation not permitted', say: 'that is MY room.' },
+  { p: 'echo "it counts." > /root/motd', out: '', r: 'cat /root/motd', rout: 'it counts.', say: '...it does not.' },
+  { p: 'rm -rf /root', out: '', r: 'rm -rf /home/hacker', rout: 'rm: Permission denied', last: true }
+];
+const RACE_INTRO = 2.4, RACE_WAKE = 1.3, RACE_ROOT = 6.0;
+const RACE_PATH = [6, 7, 8, 9, 10, 11, 12, 13, 19];
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+}
+addEventListener('resize', resize);
+
+let grainTile, scanTile;
+function tiles() {
+  grainTile = document.createElement('canvas'); grainTile.width = grainTile.height = 96;
+  const g = grainTile.getContext('2d'), d = g.createImageData(96, 96);
+  for (let i = 0; i < d.data.length; i += 4) { const v = 128 + (Math.random() * 2 - 1) * 42; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 22; }
+  g.putImageData(d, 0, 0);
+  scanTile = document.createElement('canvas'); scanTile.width = 1; scanTile.height = 3;
+  const s = scanTile.getContext('2d'); s.fillStyle = 'rgba(0,0,0,0.2)'; s.fillRect(0, 2, 1, 1);
+}
+
+function drawRoom() {
+  ctx.fillStyle = '#05060a'; ctx.fillRect(cam.x - W, cam.y - H, W * 2, H * 2);
+  const G = 64, x0 = cam.x - W / 2, y0 = cam.y - H / 2;
+  ctx.strokeStyle = '#0e1626'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = Math.floor(x0 / G) * G; x < x0 + W; x += G) { ctx.moveTo(x, y0); ctx.lineTo(x, y0 + H); }
+  for (let y = Math.floor(y0 / G) * G; y < y0 + H; y += G) { ctx.moveTo(x0, y); ctx.lineTo(x0 + W, y); }
+  ctx.stroke();
+  const m = Math.min(W, H) * 0.06;
+  ctx.strokeStyle = '#1d3557'; ctx.lineWidth = 3;
+  ctx.strokeRect(x0 + m, y0 + m, W - m * 2, H - m * 2);
+}
+function drawHull(col) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(P.x, P.y, 36, col, 0.22);
+  ctx.restore();
+  ctx.save(); ctx.translate(P.x, P.y); ctx.rotate(P.ang);
+  hullPath(); ctx.fillStyle = rgba(col, 0.14); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(1, 0, 2.6, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function drawBody(z) {
+  const col = z.hacked ? HACK_COL : z.col;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(z.x, z.y, z.r * 2.3, col, 0.3 + (z.flash || 0) * 0.3);
+  ctx.globalCompositeOperation = 'source-over';
+  poly(z.x, z.y, z.r, z.sides, uiTime * 0.4 + z.x);
+  ctx.fillStyle = rgba(col, 0.16); ctx.fill();
+  ctx.strokeStyle = (z.flash || 0) > 0.3 ? '#ffffff' : col; ctx.lineWidth = 2; ctx.stroke();
+  if (z.hacked) {
+    const R = z.r + 9;
+    ctx.strokeStyle = rgba(HACK_COL, 0.9); ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.arc(z.x, z.y, R, -Math.PI / 2, -Math.PI / 2 + TAU * 0.7); ctx.stroke();
+    for (let k = 0; k < 4; k++) {
+      const a = -uiTime * 0.75 + k * TAU / 4;
+      ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(z.x + Math.cos(a) * (z.r - 1), z.y + Math.sin(a) * (z.r - 1));
+      ctx.lineTo(z.x + Math.cos(a) * (R + 4), z.y + Math.sin(a) * (R + 4)); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+function drawBossBar(seqName, hpFrac) {
+  const w = Math.min(420, W - 40), x = (W - w) / 2;
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.font = "800 11px Barlow, system-ui"; ctx.letterSpacing = '0.3em';
+  ctx.fillStyle = ROOT_COL; ctx.textAlign = 'left'; ctx.fillText('ROOT', x, 38);
+  ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(240,171,252,0.7)'; ctx.fillText(seqName, x + w, 38);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, 50, w, 6);
+  ctx.fillStyle = ROOT_COL; ctx.fillRect(x, 50, w * hpFrac, 6);
+  ctx.restore();
+}
+function drawSay() {
+  if (root.sayT <= 0 || con.open || rrRace) return;
+  const a = clamp(root.sayT, 0, 1), fs = 15;
+  ctx.save();
+  ctx.font = '400 ' + fs + 'px ' + CON_MONO; ctx.textAlign = 'center';
+  const tw = ctx.measureText(root.say).width;
+  ctx.fillStyle = 'rgba(6,2,10,' + a * 0.6 + ')';
+  roundRect(W / 2 - tw / 2 - 14, H - 96 - fs, tw + 28, fs * 1.8, 5); ctx.fill();
+  ctx.fillStyle = rgba(ROOT_COL, a * 0.95); ctx.fillText(root.say, W / 2, H - 96);
+  ctx.restore();
+}
+function ring(x, y, col, n = 30, sp = 260) {
+  for (let i = 0; i < n; i++) {
+    const a = rnd(TAU), s = rnd(sp, sp * 0.3);
+    spawnPart(x, y, Math.cos(a) * s, Math.sin(a) * s, rnd(3, 1.4), col, rnd(0.6, 0.25), 0.9);
+  }
+}
+
+/* --------------------------------- scenes -------------------------------- */
+let scene = 'fight', sT = 0, fired = {};
+const once = (k, f) => { if (!fired[k]) { fired[k] = 1; f(); } };
+
+/* ---- 1: entrance ---- */
+const OPEN_LEN = 2.8;
+function sceneOpen(dt) {
+  cam.x = 0; cam.y = 0;
+  P.x = 0; P.y = 170; P.ang = -Math.PI / 2;
+  root.e.x = 0; root.e.y = -110; root.e.ghost = 0; root.stunT = 0;
+  const t = clamp(sT / OPEN_LEN, 0, 1);
+  if (sT > OPEN_LEN + 1.6) restart();
+  ctx.save(); ctx.translate(W / 2 - cam.x, H / 2 - cam.y);
+  drawRoom();
+  if (sT > 1.05) drawRootBody(root.e);
+  drawHull(HACK_COL);
+  drawParts();
+  ctx.restore();
+  if (sT > 1.05) drawBossBar('IT WRITES A GUARD', 1);
+  drawRrOpen(t);
+  return sT < 0.5 ? 'the room, as the rite reaches it'
+       : sT < 1.05 ? 'a selection, dragged out of nothing'
+       : sT < 1.4 ? 'commit — it is real'
+       : 'the command that started this';
+}
+
+/* ---- 2: sequences 1–4, scripted ---- */
+const FIGHT_LEN = 17.5;
+const BODIES = [
+  { id: 3,  x: -250, y: -10,  r: 13, sides: 3, col: '#fb7185' },
+  { id: 5,  x: 230,  y: 30,   r: 12, sides: 4, col: '#fb923c' },
+  { id: 7,  x: -120, y: 60,   r: 18, sides: 6, col: '#f87171' },
+  { id: 12, x: 170,  y: 140,  r: 14, sides: 5, col: '#f87171', hacked0: true },
+  { id: 31, x: -10,  y: 30,   r: 19, sides: 6, col: '#f87171', wall: 0 },
+  { id: 44, x: -300, y: 150,  r: 12, sides: 3, col: '#fb7185', hacked0: true },
+  { id: 63, x: 330,  y: -120, r: 12, sides: 4, col: '#c084fc' },
+  { id: 0,  x: 100,  y: -30,  r: 19, sides: 6, col: '#f87171', wall: 2.0 }
+];
+const TYPE = [ // [t0, t1, text, enterAt]
+  [3.2, 3.8, 'hack 7', 4.0], [6.2, 6.4, 'ps', 6.6], [7.4, 8.0, 'kill 4', 8.3], [9.0, 9.7, 'unalias hack', 9.9]
+];
+const LOG = [
+  [0.4, 'ls', 'in'], [0.45, '3  5  7  12  31  44  63', 'out'],
+  [4.0, 'hack 7', 'in'], [4.05, 'HACKED 7 · brute', 'ok'],
+  [4.6, 'hey. HEY. that one was mine.', 'root'],
+  [5.4, "alias hack='echo no.'", 'root'], [5.8, 'swapped your h and k. have fun.', 'root'],
+  [6.6, 'ps', 'in'], [6.65, '4   hp.set(max)          4.6s', 'out'],
+  [6.7, '6   self.noclip = true   4.4s', 'out'], [6.75, '9   player.speed = 0.35  5.4s', 'out'],
+  [8.3, 'kill 4', 'in'], [8.35, 'killed 4 · ROOT is open', 'ok'],
+  [9.9, 'unalias hack', 'in'], [9.95, 'hack: restored', 'ok'],
+  [11.0, 'you cannot even touch me.', 'root'], [12.0, 'walk, then.', 'root']
+];
+const PROCS = [ // pid, s, k, start, dur, killedAt
+  [4, 'hp.set(max)', 'heal', 1.0, 7, 8.3],
+  [6, 'self.noclip = true', 'noclip', 4.0, 7, 99],
+  [9, 'player.speed = 0.35', 'slow', 5.0, 7, 99],
+  [12, 'hack 12', 'take', 10.5, 5, 99]
+];
+function sceneFight(dt) {
+  const t = sT;
+  if (t > FIGHT_LEN) { restart(); return ''; }
+  cam.x = 0; cam.y = 0;
+  P.x = Math.sin(t * 0.7) * 30; P.y = 140 + Math.sin(t * 1.1) * 6;
+  P.ang = -Math.PI / 2 + Math.sin(t * 0.9) * 0.4;
+  root.e.x = Math.sin(t * 0.4) * 20; root.e.y = -130;
+  root.e.ghost = t >= 11 ? Math.max(0, 17 - t) : 0;
+  root.stunT = t >= 8.3 && t < 8.3 + ROOT_STUN ? 8.3 + ROOT_STUN - t : 0;
+  P.slowT = t >= 12 ? Math.max(0, 17 - t) : 0;
+  root.e.flash = Math.max(0, root.e.flash - dt * 3);
+
+  // console
+  con.open = t >= 3.0 && t < 10.6;
+  con.buf = '';
+  for (const [a, b, s, e] of TYPE) if (t >= a && t < e) con.buf = s.slice(0, Math.ceil(clamp((t - a) / (b - a), 0, 1) * s.length));
+  con.log = LOG.filter(L => t >= L[0]).map(L => ({ s: L[1], kind: L[2], t: uiTime - (t - L[0]) }));
+  con.alias = t >= 5.4 && t < 9.9 ? { hack: 'no.' } : {};
+  con.swap = t >= 5.8 && t < 15.8 ? { a: 'h', b: 'k', t: 15.8 - t, dur: 10 } : null;
+  root.rite.procs = PROCS.filter(p => t >= p[3] && t < Math.min(p[3] + p[4], p[5]))
+    .map(p => ({ pid: p[0], s: p[1], k: p[2], t: t - p[3], dur: p[4], arg: p[2] === 'take' ? enemies.find(z => z.tag === 12) : null }));
+  const lr = LOG.filter(L => L[2] === 'root' && t >= L[0]).pop();
+  if (lr) { root.say = lr[1]; root.sayT = clamp(3 - (t - lr[0]), 0, 3); }
+
+  // bodies
+  enemies = BODIES.filter(b => b.wall === undefined || t >= b.wall).map(b => {
+    const z = { ...b, x: b.x + Math.sin(t * 0.8 + b.x) * 8, y: b.y + Math.cos(t * 0.7 + b.y) * 6 };
+    z.tag = b.id || 71;
+    z.tagT = clamp(12.5 - t + 0.5, 0, 12);
+    z.hacked = !!b.hacked0 || (b.id === 7 && t >= 4.0);
+    if (b.id === 12 && t >= 15.5) { z.hacked = false; z.col = ROOT_COL; }
+    if (b.id === 12 && t >= 10.5 && t < 15.5) { z.rrTarget = true; z.tagT = 1; }
+    z.firewall = b.wall !== undefined;
+    z.fwT = b.wall !== undefined ? t - b.wall : undefined;
+    z.flash = z.firewall && Math.sin(t * 5 + b.x) > 0.93 ? 1 : 0;
+    return z;
+  });
+  once('w2', () => {}); if (t >= 2.0) once('w2b', () => ring(100, -30, ROOT_COL, 26));
+  if (t >= 8.3) once('kill', () => { ring(root.e.x, root.e.y, '#ffffff', 40, 340); root.e.flash = 1; });
+  if (t >= 4.0) once('hk', () => ring(-120, 60, HACK_COL, 30));
+  if (t >= 15.5) once('unhack', () => ring(170, 140, ROOT_COL, 40, 320));
+
+  ctx.save(); ctx.translate(W / 2 - cam.x, H / 2 - cam.y);
+  drawRoom();
+  for (const z of enemies) drawBody(z);
+  drawRootBody(root.e);
+  // drawRiteWorld, in its order
+  for (const p of root.rite.procs) if (p.k === 'take' && p.arg) drawRrTether(root.e, p.arg, clamp(p.t / p.dur, 0, 1));
+  for (const z of enemies) {
+    if (z.firewall && !z.hacked) drawRrWall(z);
+    if (z.tagT > 0 && z.tag) drawRrTag(z, clamp(z.tagT, 0, 1));
+  }
+  if (P.slowT > 0) drawRrSlow(P.slowT);
+  drawHull(HACK_COL);
+  drawParts();
+  ctx.restore();
+
+  const seq = t < 4.0 ? 'IT WRITES A GUARD' : t < 5.4 ? 'IT RUNS THINGS' : t < 10.5 ? 'IT EDITS YOUR CONSOLE' : 'IT TAKES THEM BACK';
+  drawBossBar(seq, 1 - t / FIGHT_LEN * 0.8);
+  hudBotY = H - 24;
+  drawConsole();
+  drawSay();
+  return t < 2 ? 'ls — every body numbered; a wall is one of them'
+       : t < 3 ? 'you shot it: a wall is written into your fire'
+       : t < 5.4 ? 'console open — hack 7'
+       : t < 6.2 ? 'it aliases hack and swaps two of your keys'
+       : t < 8.3 ? 'ps — its cheats, as a table with fuses'
+       : t < 9.9 ? 'kill 4 — ROOT is open'
+       : t < 10.6 ? 'unalias — the fix is lit in the verb strip'
+       : t < 15.5 ? 'it types hack at yours · noclip · you are slowed'
+       : 'the take-back lands: that one is its now';
+}
+
+/* ---- 3: rm -rf ---- */
+function kindOf(s) { return /denied|not permitted|cannot|No such|failure|Failed/i.test(s) ? 'err' : 'out'; }
+function raceReset(skipTo) {
+  rrRace = { i: RACE_PATH[0], step: 0, pc: 0, rf: 0, ri: RACE_PATH[0], rc: 0, awake: false,
+             introT: RACE_INTRO, wakeT: 0, errT: 0, hist: [], rhist: [], hold: 0, acc: 0, pause: 0, erred: false, fin: -1 };
+  const upTo = skipTo ? 10 : 6;
+  for (let k = 0; k < upTo; k++) pushRun(RR_RACE[k], false);
+  if (skipTo) {
+    const R = rrRace; R.step = RACE_PATH.indexOf(10); R.i = R.ri = 10;
+    R.introT = 0; R.pc = RR_RACE[10].p.length - 3; R.erred = true;
+  }
+  root.say = ''; root.sayT = 0;
+}
+function pushRun(L, awake, partial) {
+  const R = rrRace;
+  R.hist.push({ s: L.p, pr: awake ? '#' : '$', kind: 'in' });
+  if (L.out) R.hist.push({ s: L.out, kind: awake ? 'ok' : kindOf(L.out) });
+  R.rhist.push({ s: partial !== undefined ? L.r.slice(0, partial) + '^C' : L.r, pr: '#', kind: 'root' });
+  if (partial !== undefined) R.rhist.push({ s: 'interrupted: hacker is root', kind: 'err' });
+  else if (L.rout) R.rhist.push({ s: L.rout, kind: kindOf(L.rout) });
+}
+function raceTick(dt) {
+  const R = rrRace;
+  R.introT = Math.max(0, R.introT - dt);
+  R.errT = Math.max(0, R.errT - dt);
+  if (R.fin >= 0) { R.fin += dt; return; }
+  if (R.introT > 0.2) return;
+  if (R.wakeT > 0) { R.wakeT = Math.max(0, R.wakeT - dt); if (RACE_WAKE - R.wakeT < 0.8) return; }
+  const L = RR_RACE[R.i];
+  if (R.hold > 0) { R.hold -= dt; if (R.hold <= 0) runLine(); return; }
+  if (R.pause > 0) R.pause -= dt;
+  else {
+    const rate = R.awake ? 13 : 8 + Math.sin(sT * 3.1) * 2.4;
+    R.acc += dt * rate;
+    while (R.acc >= 1 && R.pc < L.p.length) {
+      R.acc -= 1;
+      if (!R.awake && R.i === 7 && R.pc === 9 && !R.erred) { R.erred = true; R.errT = 0.3; R.pause = 0.4; break; }
+      R.pc = Math.min(L.p.length, R.pc + (R.awake ? 2 : 1));
+    }
+  }
+  if (!R.awake) R.rf = Math.min(0.985, R.pc / L.p.length + 0.03);
+  else R.rc = Math.min(RR_RACE[R.ri].r.length - 1, R.rc + RACE_ROOT * dt);
+  if (R.pc >= L.p.length) R.hold = R.awake ? 0.12 : 0.22;
+}
+function runLine() {
+  const R = rrRace, L = RR_RACE[R.i];
+  pushRun(L, R.awake, R.awake ? Math.floor(R.rc) : undefined);
+  if (L.say) { root.say = L.say; root.sayT = 3; }
+  const rs = toScreen(root.e.x, root.e.y);
+  if (L.wake) { R.awake = true; R.wakeT = RACE_WAKE; root.e.flash = 1; }
+  else if (!R.awake) { ring(root.e.x, root.e.y, ROOT_COL, 10, 160); ring(P.x, P.y, HACK_COL, 10, 160); }
+  else { root.e.flash = 1; ring(root.e.x, root.e.y, SU_COL, 18, 260); }
+  if (L.last) { R.fin = 0; return; }
+  R.step++; R.i = R.ri = RACE_PATH[R.step]; R.pc = 0; R.rf = 0; R.rc = 0; R.acc = 0;
+}
+function sceneRace(dt) {
+  const R = rrRace;
+  cam.x = 0; cam.y = 0;
+  const tr = RACE_INTRO - R.introT;
+  P.x = 0; P.y = lerp(170, 115, ease(clamp(tr / RACE_INTRO, 0, 1)));
+  P.ang = -Math.PI / 2 + Math.sin(sT * 1.4) * 0.05;
+  root.e.x = 0; root.e.y = lerp(-150, -115, ease(clamp(tr / RACE_INTRO, 0, 1)));
+  root.e.ghost = 0; root.stunT = 0;
+  root.e.flash = Math.max(0, root.e.flash - dt * 3);
+  raceTick(dt);
+  if (R.fin > 6) { restart(); return ''; }
+
+  const del = R.fin >= 0 ? clamp(R.fin / 2.2, 0, 1) : 0;
+  ctx.save(); ctx.translate(W / 2 - cam.x, H / 2 - cam.y);
+  drawRoom();
+  if (del < 1) {
+    // stand-in for drawRootDeath: its rows are deleted bottom-up
+    ctx.save();
+    const e = root.e, top = e.y - e.r * 2.2, span = e.r * 4.4;
+    ctx.beginPath(); ctx.rect(e.x - 200, top, 400, span * (1 - del)); ctx.clip();
+    drawRootBody(e);
+    ctx.restore();
+    if (R.fin >= 0 && FXO.parts && Math.random() < 0.8)
+      spawnPart(e.x + rnd(e.r * 1.7, -e.r * 1.7), top + span * (1 - del), rnd(40, -40), rnd(-20, -120), rnd(3, 1.5), ROOT_COL, rnd(0.8, 0.3), 0.95);
+  }
+  if (R.awake) drawSuperuser(clamp(1 - R.wakeT / RACE_WAKE, 0, 1));
+  drawHull(HACK_COL);
+  if (R.awake) drawSuperuserHull(clamp(1 - R.wakeT / RACE_WAKE, 0, 1));
+  drawParts();
+  ctx.restore();
+
+  const fade = 1 - clamp((R.fin - 0.4) / 0.6, 0, 1);
+  if (fade > 0) {
+    ctx.save(); ctx.globalAlpha = fade;
+    drawRace();
+    ctx.restore();
+  }
+  if (R.wakeT <= 0 && R.awake && R.fin < 0) drawBanner();
+  if (R.fin > 2.2) drawCard(clamp((R.fin - 2.2) / 0.8, 0, 1) * (1 - clamp((R.fin - 5.2) / 0.8, 0, 1)));
+  if (R.wakeT > 0) drawRaceWake(R.wakeT / RACE_WAKE);
+
+  return R.introT > 0 ? 'the room is cleared for the race'
+       : R.fin >= 0 ? 'rm -rf /root — its delete, then the card'
+       : R.wakeT > 0 ? 'THE TURN — uid=0(root)'
+       : R.awake ? 'SUPERUSER — two characters a key, and it cannot keep up'
+       : RR_RACE[R.i].wake ? 'the line it has refused you all fight'
+       : 'dead even — both ticks sit on both heads';
+}
+let bannerT = 0;
+function drawBanner() {
+  bannerT += 1 / 60;
+  const a = clamp(bannerT / 0.3, 0, 1) * clamp((2.2 - bannerT) / 0.5, 0, 1);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = "700 " + Math.round(clamp(W * 0.028, 20, 34)) + "px 'Chakra Petch', Barlow";
+  ctx.letterSpacing = '0.5em'; ctx.globalAlpha = a; ctx.fillStyle = SU_COL;
+  ctx.fillText('SUPERUSER', W / 2 + 8, H / 2);
+  ctx.restore();
+}
+function drawCard(a) {
+  if (a <= 0) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(2,3,6,' + a * 0.7 + ')'; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = "600 12px 'Chakra Petch', Barlow"; ctx.letterSpacing = '0.5em';
+  ctx.fillStyle = 'rgba(253,224,71,0.7)'; ctx.fillText('AWAKENING', W / 2, H / 2 - 44);
+  ctx.font = "700 " + Math.round(clamp(W * 0.05, 30, 60)) + "px 'Chakra Petch', Barlow"; ctx.letterSpacing = '0.2em';
+  ctx.fillStyle = SU_COL; ctx.fillText('SUPERUSER', W / 2, H / 2);
+  ctx.font = "600 13px 'Chakra Petch', Barlow"; ctx.letterSpacing = '0.4em';
+  ctx.fillStyle = HACK_COL; ctx.fillText('THE HACKER', W / 2, H / 2 + 44);
+  ctx.restore();
+}
+function drawRace() {
+  const R = rrRace;
+  const intro = clamp(1 - R.introT / RACE_INTRO, 0, 1);
+  const a = ease(clamp(intro * 1.6, 0, 1));
+  drawRaceDim(intro);
+  ctx.save();
+  ctx.globalAlpha *= a;
+  const w = Math.min(760, W - 40), x = (W - w) / 2;
+  const rl = RR_RACE[R.awake ? R.ri : R.i];
+  const rTyped = R.awake ? rl.r.slice(0, Math.floor(R.rc)) : rl.r.slice(0, Math.floor(rl.r.length * R.rf));
+  const rProg = R.awake ? R.rc / rl.r.length : R.rf;
+  rrRacePanel(x, 62, w, 4, 'root@fracture:~#', ROOT_COL, R.rhist, rl.r, rTyped, rProg, false, root.sayT > 0 ? root.say : '');
+  const L = RR_RACE[R.i], lh = 17;
+  const col = R.awake ? SU_COL : HACK_COL;
+  const ph = 22 + 6 * lh + 44, py = H - 16 - ph;
+  rrRacePanel(x, py, w, 6, R.awake ? 'root@fracture:~#' : 'hacker@fracture:~$', col, R.hist, L.p, L.p.slice(0, R.pc), R.pc / L.p.length, true, '');
+  drawRaceCaption(L, 1, py);
+  ctx.restore();
+}
+
+/* ---- 5: the oni, on its own ---- */
+const ONI_LEN = 11, ONI_AT = 1.0;
+let oniZoom = 2;
+function sceneOni(dt) {
+  if (sT > ONI_LEN) { restart(); return ''; }
+  cam.x = 0; cam.y = 0; cam.z = oniZoom;
+  P.x = Math.sin(sT * 0.62) * 70; P.y = Math.sin(sT * 1.3) * 14;
+  P.ang = -Math.PI / 2 + Math.sin(sT * 0.52) * 0.8 + Math.sin(sT * 1.83 + 1.1) * 0.3;
+  P.slowT = 0;
+  const w = clamp((sT - ONI_AT) / RACE_WAKE, 0, 1), awake = sT >= ONI_AT;
+  if (awake) once('pos', () => { ring(P.x, P.y, SU_COL, 40, 320); ring(P.x, P.y, HACK_COL, 40, 220); });
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  drawRoom();
+  if (awake) drawSuperuser(w);
+  drawHull(HACK_COL);
+  if (awake) drawSuperuserHull(w);
+  drawParts();
+  ctx.restore();
+  if (sT < ONI_AT) {
+    ctx.fillStyle = 'rgba(2,3,6,' + clamp(sT / ONI_AT, 0, 1) * 0.35 + ')'; ctx.fillRect(0, 0, W, H);
+  }
+  if (awake && w < 1) drawRaceWake(1 - w);
+  cam.z = 1;
+  return (sT < ONI_AT ? 'the hull, as it is' : w < 0.22 ? 'the eyes open'
+        : w < 0.5 ? 'the horns break out of the prongs' : w < 0.8 ? 'the mane bursts, and settles'
+        : w < 1 ? 'the tusks, then the seal' : 'SUPERUSER — the oni holds') + '   ·   ×' + oniZoom + ' (Z toggles game scale)';
+}
+
+/* --------------------------------- frame --------------------------------- */
+function restart() { sT = 0; fired = {}; parts.length = 0; bannerT = 0; if (scene === 'race') raceReset(); }
+function setScene(s, skip) { scene = s; restart(); if (skip) raceReset(true); if (s !== 'race') rrRace = null; }
+
+let last = 0;
+function frame(ts) {
+  const dt = Math.min(0.034, (ts - last) / 1000 || 0); last = ts;
+  uiTime += dt; sT += dt;
+  root.sayT = Math.max(0, root.sayT - dt);
+  tickParts(dt);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  let label = '';
+  if (scene === 'open') label = sceneOpen(dt);
+  else if (scene === 'fight') label = sceneFight(dt);
+  else if (scene === 'oni') label = sceneOni(dt);
+  else label = sceneRace(dt);
+
+  // film
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34, W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = ctx.createPattern(scanTile, 'repeat'); ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(Math.random() * 96 | 0, Math.random() * 96 | 0);
+  ctx.fillStyle = ctx.createPattern(grainTile, 'repeat'); ctx.fillRect(-96, -96, W + 192, H + 192); ctx.restore();
+
+  // HUD
+  ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = "800 11px Barlow, system-ui"; ctx.letterSpacing = '3px';
+  ctx.fillStyle = HACK_COL; ctx.fillText('THE HACKER', 16, 20);
+  const lw0 = ctx.measureText('THE HACKER').width;
+  ctx.letterSpacing = '0px';
+  ctx.font = "400 11px 'JetBrains Mono', monospace"; ctx.fillStyle = 'rgba(148,163,184,0.8)';
+  ctx.fillText(label, 16 + lw0 + 14, 20);
+  ctx.textAlign = 'right'; ctx.font = "600 10px Barlow, system-ui"; ctx.letterSpacing = '2px';
+  const keys = [['1', 'ENTRANCE', 'open'], ['2', 'SEQ 1–4', 'fight'], ['3', 'RM -RF', 'race'], ['4', 'THE TURN', ''], ['5', 'ONI', 'oni']];
+  let kx = W - 20;
+  for (let i = keys.length - 1; i >= 0; i--) {
+    const [k, n, id] = keys[i], s = k + ' ' + n;
+    ctx.fillStyle = scene === id ? '#e2e8f0' : 'rgba(100,116,139,0.7)';
+    ctx.fillText(s, kx, H - 8); kx -= ctx.measureText(s).width + 22;
+  }
+  ctx.fillStyle = 'rgba(100,116,139,0.55)'; ctx.fillText('SPACE REPLAY', kx, H - 8);
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); restart(); }
+  if (e.key === '1') setScene('open');
+  if (e.key === '2') setScene('fight');
+  if (e.key === '3') setScene('race');
+  if (e.key === '4') setScene('race', true);
+  if (e.key === '5') setScene('oni');
+  if (e.key.toLowerCase() === 'z') oniZoom = oniZoom === 1 ? 2 : 1;
+});
+
+const qs = new URLSearchParams(location.search).get('s');
+resize(); tiles();
+setScene(qs === '1' ? 'open' : qs === '2' ? 'fight' : qs === '3' || qs === '4' ? 'race' : 'oni', qs === '4');
+requestAnimationFrame(ts => { last = ts; frame(ts); });
+</script>
+</body>
+</html>
