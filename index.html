@@ -8092,8 +8092,11 @@ function suTick(dt) {
 function suDrillTick(d, dt) {
   d.t += dt;
   const z = d.target;
-  // a held body that died under it, or left, is let go
-  if (z && (z.dead || !enemies.includes(z))) suLetGo(d);
+  /* a held body that died under it, or left, is let go. THE HACKER keeps what
+     it kills, so a body killed on the end of the mane by something else is
+     not dead but hacked — standing again on your side — and is let go too,
+     rather than lifted and slammed as an ally. */
+  if (z && (z.dead || z.hacked || !enemies.includes(z))) suLetGo(d);
 
   if (d.ph === 'out') {
     d.len = Math.min(DRILL_RANGE, DRILL_RANGE * d.t / DRILL_OUT);
@@ -8111,7 +8114,11 @@ function suDrillTick(d, dt) {
       d.hit.add(e.id);
       damageEnemy(e, DRILL_DMG * suPower(), false, P.x, P.y);
       suBite(e);
-      if (e.dead) continue;                            // it drills on through
+      /* it drills on through a kill. What THE HACKER kills, it keeps: hackTake
+         has already stood the body back up on your side inside damageEnemy, so
+         a kill here reads hacked, not dead. Checking dead alone stopped the
+         drill on the first thing it killed, every time. */
+      if (e.dead || e.hacked) continue;
       if (suCanPin(e)) { suImpale(d, e, along); return; }
       d.len = Math.max(0, along); suBack(d); return;   // it cannot hold this one
     }
@@ -8172,9 +8179,10 @@ function suImpale(d, e, along) {
    The big hit, and the pin (e.suPin, e.suPinMax) starts here. */
 function suSlam(d, e) {
   e.suLift = 0; e.suHold = false;
-  e.suPin = e.suPinMax = e.type === 'boss' ? PIN_BOSS : PIN_T;
   e.vx = e.vy = 0;
   damageEnemy(e, DRILL_DMG * SLAM_MUL * suPower(), false, e.x, e.y);
+  // a slam that kills has nothing left to pin: the body is gone, or it is yours
+  if (!e.dead && !e.hacked) e.suPin = e.suPinMax = e.type === 'boss' ? PIN_BOSS : PIN_T;
   shake(1.6);
   drawFlashT = Math.max(drawFlashT, 0.1);
   ringFx(e.x, e.y, e.r, e.r * 5, SU_COL, 0.6, 6);
@@ -8219,12 +8227,19 @@ function drawSuOverBodies() {
 
 /* ART HOOK: the floor under a lifted body — its shadow, where it will land.
    k = e.suLift, 0 on the floor to 1 at the top (SU_LIFT_H up).
-   PLACEHOLDER: a shadow that shrinks as it rises. */
+   PLACEHOLDER: a shadow that shrinks as it rises, and a mark in oni gold that
+   closes in on where it will come down — the floors are near black, so the
+   shadow on its own could not be seen at all. */
 function drawSuLiftShadow(e, k) {
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,' + (0.5 - k * 0.2) + ')';
   ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.4, e.r * (1.1 - k * 0.3), e.r * (0.45 - k * 0.12), 0, 0, TAU);
   ctx.fill();
+  const R = e.r * (1.7 - k * 0.6);
+  ctx.strokeStyle = rgba(SU_COL, 0.3 + k * 0.5); ctx.lineWidth = 2;
+  ctx.setLineDash([7, 5]); ctx.lineDashOffset = -uiTime * 40;
+  ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.4, R, R * 0.42, 0, 0, TAU);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -39252,6 +39267,10 @@ function hackTake(e, typed) {
   e.col = HACK_COL;
   e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
   e.invuln = 0; e.phased = false; e.floor = undefined;
+  /* SUPERUSER's mane lets go of what it kept. A body killed while pinned
+     would otherwise carry the pin onto your side, where updateHacked never
+     runs it down: stakes round an ally for the rest of the run. */
+  e.suHold = false; e.suLift = 0; e.suPin = 0;
   e.vx *= 0.2; e.vy *= 0.2;
 
   ringFx(e.x, e.y, e.r * 0.5, e.r * 3.4, HACK_COL, 0.5, 3);
