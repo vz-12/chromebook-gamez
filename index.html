@@ -2168,6 +2168,11 @@ const ETYPE = {
   redactor:{ r: 20, hp: 74,  spd: 46,  dmg: 12, col: '#f87171', xp: 6, score: 62, sides: 4 },
   mimic:   { r: 14, hp: 52,  spd: 0,   dmg: 14, col: '#5eead4', xp: 6, score: 70, sides: 3 },
   prism:   { r: 19, hp: 86,  spd: 38,  dmg: 12, col: '#a5f3fc', xp: 6, score: 66, sides: 6 },
+  // --- ALL HALLOWS: THE PATCH, each built around one idea ---
+  gourd:   { r: 16, hp: 26,  spd: 0,   dmg: 0,  col: '#fb923c', xp: 2, score: 20, sides: 8 },
+  jack:    { r: 17, hp: 44,  spd: 64,  dmg: 12, col: '#f97316', xp: 4, score: 40, sides: 5 },
+  creeper: { r: 15, hp: 34,  spd: 70,  dmg: 8,  col: '#4ade80', xp: 4, score: 42, sides: 6 },
+  scarecrow:{r: 18, hp: 60,  spd: 150, dmg: 20, col: '#d6d3d1', xp: 5, score: 55, sides: 4 },
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
@@ -2193,7 +2198,12 @@ const CODEX_E = {
   revenant: { n: 'REVENANT',    d: 'Refuses the first death and stands back up as its own ghost — faster, weaker, and only once. The second kill is permanent.' },
   redactor: { n: 'REDACTOR',    d: 'Projects a cone that erases whatever enters it — bullets and beams alike, before they ever reach the far side. The cone blinks off on a cycle; that gap is the whole answer.' },
   mimic:    { n: 'MIMIC',       d: 'Copies you. It fires your gun back at you with your own upgrades attached, and the better your build gets the worse this becomes.' },
-  prism:    { n: 'PRISM',       d: 'Wears a plate that does not absorb your fire but returns it. Shooting the front is worse than not shooting at all.' }
+  prism:    { n: 'PRISM',       d: 'Wears a plate that does not absorb your fire but returns it. Shooting the front is worse than not shooting at all.' },
+  // --- ALL HALLOWS ---
+  gourd:    { n: 'GOURD',       d: 'Does not move and does not attack. Left alone it ripens and splits into a jack, and every one still standing hurries everything else in the patch along.' },
+  jack:     { n: 'JACK',        d: 'Keeps its distance and lobs seeds. Up close it winds up and breathes flame down one heading. Hit it in the face: that doubles, and the first one puts the candle out.' },
+  creeper:  { n: 'CREEPER',     d: 'Throws a vine. One that lands slows you and reels you in until it is cut, dashed through, or lets go.' },
+  scarecrow:{ n: 'SCARECROW',   d: 'Perfectly still while your aim is on it. It only moves while you are looking somewhere else, and it is quick when it does.' }
 };
 
 /* His marginalia. Once he has handed the record back, every entry he had an
@@ -2325,6 +2335,7 @@ const KEEPER_NOTES = {
 };
 
 const CODEX_B = {
+  backlog:    { d: 'Buys everything and finishes nothing. Every attack it starts, it abandons partway, and the abandoned thing waits exactly where it stopped until something finishes it: you, or a binge.' },
   warden:     { d: 'The first thing that was built to stop you rather than to inconvenience you. Straightforward, and much harder than what came before it.' },
   forgeheart: { d: 'Turns four armour plates around itself, sealing every approach but the gaps between them. The gaps rotate.' },
   broodmother:{ d: 'Submerges where nothing can reach her and lays while she is under. Everything you do to the floor she is beneath is wasted.' },
@@ -2428,6 +2439,9 @@ const BOSSES = {
   // the bottom of the fracture
   root:        { name: 'ROOT', col: '#f0abfc', r: 44, sides: 5, hpMul: 2.2, spd: 90,
                  ai: bossRoot, secret: true, endgame: true },
+  // ALL HALLOWS: THE PATCH's, in no rotation
+  backlog:     { name: 'THE BACKLOG', col: '#fb923c', r: 64, sides: 9, hpMul: 1.5, spd: 40,
+                 ai: bossBacklog, secret: true },
   // the man himself, once there is nobody left to swing for him
   founder:     { name: 'THE FOUNDER', col: '#fcd34d', r: 24, sides: 3, hpMul: 2.6,
                  spd: 178, ai: () => {}, secret: true, endgame: true }
@@ -3652,6 +3666,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     Audio_.tone(1100, 0.08, 'square', 0.06, 1500);
     return;
   }
+  if (e.type === 'jack' && !opts.enemy) dmg = hlJackFace(e, dmg, srcX, srcY);   // THE PATCH: the face
   dmg *= (e.vuln || 1);        // stunned enemies take extra
   dmg *= rewardTargetMul(e);   // brands, tags, conduction, slipknot marks
   if (annotated()) dmg *= 1.5; // you know exactly where to put it
@@ -3827,6 +3842,7 @@ function playerBlast(x, y, radius, dmg, color) {
 function killEnemy(e, ang = 0) {
   if (e.dead) return;
   e.dead = true;
+  hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   P.kills++;
   onRewardKill(e);          // harvest, requisition, banks, trophies, chains
   for (const b of enemies) {
@@ -3894,7 +3910,7 @@ function killEnemy(e, ang = 0) {
   if (e.type !== 'egg') {
     const chance = e.type === 'boss' || e.elite ? 1 : 0.22 + P.luck * 0.06;
     if (Math.random() < chance) {
-      const n = e.type === 'boss' ? 10 : e.elite ? 3 : 1;
+      const n = (e.type === 'boss' ? 10 : e.elite ? 3 : 1) * (e.hlRipe ? 2 : 1);   // THE GOURD pays double
       const each = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred()));
       for (let i = 0; i < n; i++) {
         const a = rnd(TAU), s = rnd(200, 60);
@@ -4188,6 +4204,7 @@ function advanceAlt() {
 
 function startWave() {
   if (rushOn()) { rushWave(); return; }   // every wave of a rush is a boss
+  if (hlAreaOn()) { hlAreaWave(); return; }   // an event area keeps its own five
   wave++;
   betweenWaves = 0;
   const abs = Math.floor((wave - 1) / 5);
@@ -4282,8 +4299,10 @@ function updateWaves(dt) {
 }
 
 function onBossDefeat(e) {
+  hlBossPay();                           // ONE DAY: whatever was put aside, paid
   P.suAscUsed = false;                   // SUPERUSER's V: once an area, and an area ends with its boss
   if (e && e.boss === 'root' && rootRite) { rrWin(e); return; }
+  if (hlAreaOn() && e && HL_BOSSES[e.boss]) { hlBossDown(e); return; }   // ALL HALLOWS
   const wasKeeper = !!(e && e.boss === 'keeper');
   chalCheckGoal(wasKeeper ? 'keeper' : (e && e.boss) || stage.boss);
   const bd = BOSSES[wasKeeper ? 'keeper' : stage.boss];
@@ -5468,12 +5487,14 @@ function rootGlyphBreak(g) {
 // the live line, or nothing — cheap enough to ask every frame of every fight
 const rootGlyphsUp = () => (root && root.cmd && root.glyphs.length) ? root.glyphs : null;
 function rootHitSeg(x1, y1, x2, y2, w) {
+  hlHitSeg(x1, y1, x2, y2, w);           // ALL HALLOWS: every weapon that reports here
   const gs = rootGlyphsUp();
   if (!gs) return;
   for (const g of gs)
     if (!g.dead && segCircle(x1, y1, x2, y2, g.x, g.y, ROOT_GLYPH_R + w)) rootGlyphBreak(g);
 }
 function rootHitCircle(x, y, rad) {
+  hlHitCircle(x, y, rad);
   const gs = rootGlyphsUp();
   if (!gs) return;
   for (const g of gs)
@@ -15751,9 +15772,12 @@ const Codex = {
      is what summons it and it would make its own requirement unreachable. */
   enemies() {
     const out = [];
-    for (const k of Object.keys(CODEX_E))
+    for (const k of Object.keys(CODEX_E)) {
+      // ALL HALLOWS' bodies: listed once met, never as a locked slot
+      if (HL_ETYPES[k] && !Codex.e.has(k)) continue;
       out.push({ key: k, n: CODEX_E[k].n, d: CODEX_E[k].d,
                  col: ETYPE[k].col, sides: ETYPE[k].sides, boss: false });
+    }
     for (const k of Object.keys(BOSSES)) {
       const b = BOSSES[k];
       if (b.secret && !Codex.e.has(k)) continue;
@@ -15767,14 +15791,15 @@ const Codex = {
   },
   // what "filled" means: every ordinary enemy, every boss, every upgrade
   need() {
-    const e = Object.keys(CODEX_E).length +
+    // the event's bodies can only be met in October: never owed
+    const e = Object.keys(CODEX_E).filter(k => !HL_ETYPES[k]).length +
               Object.keys(BOSSES).filter(k => !BOSSES[k].secret).length;
     return { e, u: UPGRADES.filter(x => !x.lock).length };
   },
   have() {
     const n = Codex.need();
     let e = 0;
-    for (const k of Object.keys(CODEX_E)) if (Codex.e.has(k)) e++;
+    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && Codex.e.has(k)) e++;
     for (const k of Object.keys(BOSSES))
       if (!BOSSES[k].secret && Codex.e.has(k)) e++;
     let u = 0;
@@ -15789,9 +15814,9 @@ const Codex = {
      other kind: every entry in every section, optional ones included, and the
      secret bosses too. Nothing in the game asks for this except him, once. */
   trulyFull() {
-    for (const k of Object.keys(CODEX_E)) if (!Codex.e.has(k)) return false;
+    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && !Codex.e.has(k)) return false;
     for (const k of Object.keys(BOSSES))
-      if (BOSSES[k].endgame) { if (!Codex.e.has(k)) continue; }   // may not exist yet
+      if (BOSSES[k].endgame || HL_BOSSES[k]) { if (!Codex.e.has(k)) continue; }   // may not exist yet, or not this month
       else if (!Codex.e.has(k)) return false;
     for (const u of UPGRADES) if (!u.lock && !Codex.u.has(u.id)) return false;
     for (const m of MALWARE) if (!Codex.m.has(m.id)) return false;
@@ -20025,6 +20050,9 @@ const Save = {
                      plays a single time per profile; after that the hole in
                      the wall is simply part of the room. */
                   outsiderIn: false,
+                  /* ALL HALLOWS: each book's quests, medals and candles, keyed
+                     by the event's id (hlP) */
+                  hl: {},
                   gfx: null, gfxSeen: 0, gfxCosts: null,
                   // newest changelog entry this player has read
                   logSeen: 0,
@@ -20121,6 +20149,7 @@ const Save = {
        never flown. */
     out.awakened = Object.assign({}, a.awakened || {}, b.awakened || {});
     out.outsiderIn = !!(a.outsiderIn || b.outsiderIn);
+    out.hl = hlMerge(a.hl, b.hl);
     /* Notes read anywhere are read everywhere: the higher number wins, so
        a second machine never re-asks for something already dismissed. */
     out.logSeen = Math.max(a.logSeen || 0, b.logSeen || 0);
@@ -20503,6 +20532,7 @@ function resetGame() {
   // a fresh run is not an awakening run until a statue says so
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
+  inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
   amalRite = false; inHub = false; rootRite = false; rrClear(); suZones.length = 0; suPieces.length = 0; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
@@ -20618,7 +20648,10 @@ function handleKey(k) {
     // straight back to the ladder, which is where you were going anyway
     const wasChal = !!Chal.on, wasDaily = !!(Chal.on && Chal.on.daily);
     const wasRush = !!(Chal.on && Chal.on.rush);
+    const wasHl = !!(Chal.on && Chal.on.hl);
     quitToMenu();
+    // an event area goes back down to the vigil
+    if (wasHl) { if (hlLive()) enterVigil(); return; }
     // back to whichever ladder you were actually on
     if (wasRush) openRush('menu');
     else if (wasDaily) openDaily('menu');
@@ -20646,6 +20679,9 @@ function handleKey(k) {
   if (state === 'rush') { rushKey(k); return; }
   if (state === 'skin') { skinKey(k); return; }
   if (state === 'menu') {
+    // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
+    if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
+    if (k === 'v' && hlOpenVigil()) return;
     if (k === 'h' && Save.profile.outsiderIn) { enterHub(); return; }
     if (k === 'l') { openLan(); return; }
     if (k === 'k') { openChal('menu'); return; }
@@ -20695,6 +20731,7 @@ function handleKey(k) {
     if (Chal.on && (k === ' ' || k === 'enter' || k === 'r')) {
       /* A daily restarts as the daily. startDaily re-reads the profile,
          so the second run of a day comes back as practice by itself. */
+      if (Chal.on.hl) { const id = Chal.on.hl; chalQuit(); hlAreaStart(id); return; }
       if (Chal.on.rush) { chalQuit(); startRush(); return; }
       if (Chal.on.daily) { chalQuit(); startDaily(); return; }
       const c = Chal.on; chalQuit(); startChallenge(c); return;
@@ -20765,6 +20802,7 @@ function handleKey(k) {
     if (P.charId === 'hacker') { suAbility(SU_KEYS.indexOf(k)); return; }
     if (P.charId === 'ember')  { odAbility(SU_KEYS.indexOf(k)); return; }
   }
+  if (vigilKey(k)) return;               // ALL HALLOWS: the vigil's own keys first
   // THE VAGRANT: E over something on the floor is a look at it
   if (k === 'e' && state === 'play' && gearNear && !inHub) { gearInspect(); return; }
   if (k === 'e' && inHub) {
@@ -20857,6 +20895,8 @@ function volFromMouse() {
    score by accident is exactly the failure the freeze bug already caused. */
 function quitToMenu() {
   rsCard = null;
+  inVigil = false;
+  hlPartsClear();
   if (state !== 'dead' && wave > 0 && score > 0) gameOver(true);
   if (MP.on || netLive()) mpQuit();     // hang up before the menu, not after
   chalQuit();
@@ -20882,6 +20922,8 @@ function handleClick() {
   if (state === 'rush') { rushClick(); return; }
   if (state === 'skin') { skinClick(); return; }
   if (state === 'menu') {
+    if (hlProOn()) return;                 // ALL HALLOWS: the knock
+    if (hlHatchUp() && inRect(mouse.x, mouse.y, hlHatchRect())) { hlOpenVigil(); return; }
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
     if (inRect(mouse.x, mouse.y, menuChalRect())) { openChal('menu'); return; }
@@ -20891,6 +20933,7 @@ function handleClick() {
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
+    if (Chal.on && Chal.on.hl) { const id = Chal.on.hl; chalQuit(); hlAreaStart(id); return; }
     if (Chal.on && Chal.on.rush) { chalQuit(); startRush(); return; }
     if (Chal.on && Chal.on.daily) { chalQuit(); startDaily(); return; }
     if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
@@ -21375,6 +21418,7 @@ function update(dt) {
   replay.push({ x: P.x, y: P.y, ang: P.ang });
   if (replay.length > 260) replay.shift();
   updateEnemies(wdt);
+  hlTick(dt, wdt);           // ALL HALLOWS: the areas, THE BACKLOG's pile, the barks
   odRingHold(wdt);           // COMBO 1's wall, once the room has moved
   updateStageAmbient(dt);
   updateHazards(wdt);
@@ -21389,6 +21433,7 @@ function update(dt) {
 }
 
 function updateMenu(dt) {
+  hlMenuTick(dt);                        // ALL HALLOWS: the knock, and the count
   // idle ambience: drifting sparks
   if (Math.random() < 0.5) {
     spawnPart(rnd(W), rnd(H), rnd(24, -24), rnd(24, -24), rnd(2.4, 0.8),
@@ -21459,6 +21504,7 @@ function updatePlayer(dt) {
   let firing = mouse.down || autoFire || keys['j'] || chalAuto();
   if (haltFrozen()) firing = false;     // THE HALT: you may move or act, not both
   if (rrRaceOn() || rrOpening()) firing = false;
+  if (inVigil) firing = false;           // nothing is shot down there
   if (isTouch) {
     if (touchUI.aim) {
       const dx = touchUI.aim.x - touchUI.aim.ox, dy = touchUI.aim.y - touchUI.aim.oy;
@@ -21565,6 +21611,7 @@ function updatePlayer(dt) {
   }
 
   if (inHub) hubTick(dt, len(ix, iy) > 0.01);
+  if (inVigil) vigilTick(dt);
 
   // shooting
   P.fireT -= dt;
@@ -21910,6 +21957,8 @@ function updateEnemies(dt) {
     const e = enemies[i];
     if (e.dead) { cull.push(i); continue; }
     e.t += dt;
+    // THE GOURD (medal): left alive long enough, it ripens
+    if (HL.eq.gourd && !e.hlRipe && e.t > HL_RIPEN_T && e.type !== 'boss' && e.type !== 'gourd' && !e.hacked) hlRipen(e);
     // a shadow boss is on loan: five seconds, then it is pulled back under
     if (e.shadow > 0) {
       e.shadow -= dt;
@@ -22031,7 +22080,7 @@ function updateEnemies(dt) {
       if (e.leakT <= 0) e.leak = 0;
     }
 
-    const sp = e.spd * (1 - e.slow);
+    const sp = e.spd * (1 - e.slow) * hlPileMul(e);   // THE PATCH: the pile
     /* Co-op: everything below steers, aims and lands contact damage on this
        one target, so aggro is decided once, here, by proximity. Solo this is
        P and nothing changes. A downed wingman is not in the running. */
@@ -22310,6 +22359,9 @@ function updateEnemies(dt) {
       }
 
       case 'boss': updateBoss(e, dt, ux, uy, d); break;
+      // ALL HALLOWS: THE PATCH's four
+      case 'gourd': case 'jack': case 'creeper': case 'scarecrow':
+        hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy); break;
     }
 
     // separation so crowds don't stack into a single blob
@@ -27930,6 +27982,9 @@ function updateBullets(dt) {
       spawnPart(c.x, c.y, rnd(70, -70), rnd(70, -70), 3, '#fecaca', 0.25, 0.9);
     }
 
+    // ALL HALLOWS: THE BACKLOG's pile and a creeper's vine are in the way too
+    if (hlBulletHit(b)) { bullets.splice(i, 1); continue; }
+
     // enemy collision (swept against previous position for fast bullets)
     let removed = false;
     for (const e of enemies) {
@@ -28050,6 +28105,7 @@ function updateEBullets(dt) {
       if (b.frozen <= 0) { b.vx = b.svx; b.vy = b.svy; }
       continue;
     }
+    if (b.hlHeld) continue;               // THE BACKLOG: abandoned mid-air, harmless until resumed
     b.life -= dt;
     // Seeker Rounds and Ricochet, when something has written them onto itself
     if (b.homeP) {
@@ -28060,6 +28116,7 @@ function updateEBullets(dt) {
       b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.hlTurn && hlTurnHit(b)) { ebullets.splice(i, 1); continue; }   // resumed: it hurts him too
     if (b.ricP > 0) {
       let hit = false;
       if (b.x < arena.x0 + b.r) { b.x = arena.x0 + b.r; b.vx = -b.vx; hit = true; }
@@ -28133,7 +28190,8 @@ function updatePickups(dt) {
     g.x += g.vx * dt; g.y += g.vy * dt;
     if (d < gt.r + g.r + 4 || g.life <= 0) {
       if (g.life > 0) {
-        P.xp += g.v * P.xpMul;
+        if (HL.eq.oneday) hlBankXp(g.v * P.xpMul);   // ONE DAY: put aside
+        else P.xp += g.v * P.xpMul;
         if (P.siphon) P.hp = Math.min(P.maxHp, P.hp + 0.2 * P.siphon);
         Audio_.gem();
         spawnPart(g.x, g.y, 0, 0, 8, COL.xp, 0.22, 0.9);
@@ -28288,6 +28346,7 @@ function render() {
   drawFloorMat(ox, oy);
   drawGrid(ox, oy);
   drawArena();
+  hlDrawFloor();              // ALL HALLOWS: an area's floor
   drawHazards();
   drawDeepNodes();
   drawTear();
@@ -28319,6 +28378,7 @@ function render() {
   drawCages();
   drawPortals();
   drawLibraryPortal();
+  hlDrawWorldUnder();         // ALL HALLOWS: the vigil, lit particles, slams
   if (inHub) {
     drawHubWorld(P);
     /* The tutorial's dim, and the 1–5 it counts the plinths with. It works
@@ -28349,6 +28409,7 @@ function render() {
   drawBladeSwing();
   if (state !== 'dead' && !P.odStrike) { drawRiteUnderHull(); drawPlayer(); drawRiteOverHull(); }
   mpDrawCoopShip();          // the other pilot, whichever side you are on
+  hlDrawWorldOver();          // ALL HALLOWS: the light pass, when the art lights the room
 
   ctx.globalCompositeOperation = 'lighter';
   drawEBullets();
@@ -28369,6 +28430,7 @@ function render() {
   drawMalFx();
   drawParticles();
   drawAsh();
+  hlDrawWorldGlow();          // ALL HALLOWS: sweeps, vines, barks, glows
   ctx.globalCompositeOperation = 'source-over';
 
   if (P.odStrike && !odStrikePov()) drawOdStrikeHull();   // C: the hull, over everything, until the cut takes it
@@ -28422,6 +28484,7 @@ function render() {
   drawOdStrikeUi();     // C's aiming view
   drawOdBrandUi();      // COMBO 1: what to press
   drawOdFusionScreen(); // V: FUSION CORE, over the frame
+  hlDrawScreen();       // ALL HALLOWS: the vigil's words, the areas' HUD
   drawRootCmdHud();
   drawHaltBar();
   drawTribunalHud();
@@ -28478,6 +28541,2773 @@ function render() {
 }
 
 /* ------------------------- terrain & deployables -------------------------- */
+/* ===========================================================================
+   THE KIT — ALL HALLOWS
+   The shared runtime every piece of the event is drawn on: light and shadow,
+   cloth and rope, rigs, the cutscene clock, dialogue, particles and baked
+   layers. Written once, so that the soul, the rooms, the bosses and the
+   scenes all read as one thing instead of eleven separately-lit drawings.
+
+   The same file runs in the harness (hl-base.js provides the shims) and in
+   the game (lifted whole into index.html, like su-art.js and od-art.js).
+   It leans only on what both have: ctx, W, H, DPR, TAU, clamp, lerp, rgba,
+   glowSprite, drawGlow and uiTime. Everything it declares is prefixed hl.
+
+   There is no frame budget (user, 27 Sep). The light pass is full
+   resolution and shadows are soft-sampled; nothing here is tuned down.
+=========================================================================== */
+
+/* =============================== NOISE & EASE ============================== */
+
+const hlHash = i => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+/* smooth 1D value noise, 0..1 */
+function hlNoise(x, seed = 0) {
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f), o = seed * 57.31;
+  return hlHash(i + o) * (1 - u) + hlHash(i + 1 + o) * u;
+}
+function hlFbm(x, seed = 0) {
+  return hlNoise(x, seed) * 0.55 + hlNoise(x * 2.31, seed + 1) * 0.3 + hlNoise(x * 5.17, seed + 2) * 0.15;
+}
+/* A flame's breath: a restless flutter with, now and then, a gutter — the
+   dip a candle takes when the air moves. k scales how much it moves at all. */
+function hlFlicker(t, seed = 0, k = 1) {
+  const flutter = 1 - hlFbm(t * 7.3 + seed * 13.1, seed);
+  const gutter = Math.pow(hlNoise(t * 0.83 + seed * 3.7, seed + 9), 7);
+  return clamp(1 - k * (0.24 * flutter + 0.55 * gutter), 0.12, 1.04);
+}
+
+const HL_EASE = {
+  lin: t => t,
+  in: t => t * t,
+  out: t => 1 - (1 - t) * (1 - t),
+  inOut: t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2),
+  in3: t => t * t * t,
+  out3: t => 1 - Math.pow(1 - t, 3),
+  inOut3: t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  out5: t => 1 - Math.pow(1 - t, 5),
+  smooth: t => t * t * (3 - 2 * t),
+  outBack: t => { const c = 1.70158; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); },
+  inBack: t => { const c = 1.70158; return (c + 1) * t * t * t - c * t * t; },
+  outElastic: t => (t <= 0 || t >= 1 ? t
+    : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (TAU / 3)) + 1),
+  outBounce: t => {
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+    return n * (t -= 2.625 / d) * t + 0.984375;
+  },
+  step: t => (t < 1 ? 0 : 1),
+  hold: () => 0
+};
+const hlEase = (name, t) => (HL_EASE[name] || HL_EASE.smooth)(clamp(t, 0, 1));
+/* 0..1 across [a, b] of x, eased */
+const hlSpan = (x, a, b, e) => hlEase(e || 'lin', (x - a) / (b - a || 1));
+
+/* ================================== COLOUR ================================= */
+
+const _hlHexC = new Map();
+function hlHex(hex) {
+  let c = _hlHexC.get(hex);
+  if (!c) {
+    const n = parseInt(hex.slice(1), 16);
+    c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    _hlHexC.set(hex, c);
+  }
+  return c;
+}
+const hlRgbS = (r, g, b, a = 1) =>
+  `rgba(${clamp(r | 0, 0, 255)},${clamp(g | 0, 0, 255)},${clamp(b | 0, 0, 255)},${a})`;
+function hlMix(a, b, t, al = 1) {
+  const A = hlHex(a), B = hlHex(b);
+  return hlRgbS(lerp(A[0], B[0], t), lerp(A[1], B[1], t), lerp(A[2], B[2], t), al);
+}
+/* a colour scaled by a light: [r,g,b] in 0..~1.5 */
+function hlLit(hex, L, al = 1) {
+  const c = hlHex(hex);
+  return hlRgbS(c[0] * L[0], c[1] * L[1], c[2] * L[2], al);
+}
+
+/* =================================== LIGHT =================================
+   The room is drawn fully lit, then multiplied by a light buffer: filled with
+   the ambient colour, with every light added into it. A light that casts
+   shadows is drawn on its own first and has its shadows cut out of it, so one
+   candle's shadow is only dark where no other candle reaches — the way two
+   lamps in a real room work.
+
+   Shadows are soft by sampling: the light is treated as a small disk, a
+   shadow is cast from several points on it, and the samples are summed, so
+   the edge is hard at the foot of a stone and opens into a penumbra away from
+   it. A light has a height (z) and an occluder can have one (h): a low thing
+   by a tall lamp throws a short shadow, a tall stone by a floor candle throws
+   one right across the room.
+
+   Order in a scene:
+     1. everything that receives light (floor, props, bodies)
+     2. hlLightRender()          — the multiply, then the hot pass
+     3. emissive things, additive — flames, eyes, the lantern's core
+     4. the game's post (bloom picks up what the light made bright)
+   Things drawn after the pass can ask hlLightAt / hlLightDir for the light
+   at a point, for rim light and tint.
+=========================================================================== */
+
+const hlL = {
+  ambient: [10, 12, 22],     // what an unlit floor is multiplied by (0..255)
+  lights: [],                // this frame's lights
+  occ: [],                   // this frame's occluders
+  samples: 5,                // shadow samples per light
+  blur: 1.6,                 // device px, softening between samples
+  hot: 0.32,                 // light squared, added back: pools glow
+  far: 4000,                 // shadow length when nothing limits it
+  buf: null, bufT: null, bufS: null, cL: null, cT: null, cS: null,
+  w: 0, h: 0, on: true
+};
+
+/* Starts a frame's light. ambient is what the darkest corner is. */
+function hlLightBegin(ambientHex = '#0a0c16', level = 1) {
+  hlL.lights.length = 0;
+  hlL.occ.length = 0;
+  const c = hlHex(ambientHex);
+  hlL.ambient = [c[0] * level, c[1] * level, c[2] * level];
+}
+
+/* A light, in world space.
+     x, y     where it is
+     r        how far it reaches
+     col      its colour
+     a        its strength (can exceed 1: overbright light glows in the hot pass)
+     z        how high it hangs (default 60) — sets shadow length
+     flick    0 steady … 1 candle; seed makes candles breathe differently
+     shadow   false for fill lights that should cast nothing
+     size     radius of the source disk, for the penumbra
+     cone     { ang, spread, soft } for a spill through a door or from a lantern
+   Returns the light, so a caller can read back .f, the flicker it drew with. */
+function hlLight(o) {
+  const L = Object.assign({ a: 1, z: 60, flick: 0, seed: 0, shadow: true, size: 5, col: '#ffffff' }, o);
+  L.f = L.flick ? hlFlicker(uiTime, L.seed, L.flick) : 1;
+  L.rr = L.r * (L.flick ? 0.93 + 0.09 * L.f : 1);
+  hlL.lights.push(L);
+  return L;
+}
+
+/* Occluders. h is height; leave it out for walls and anything tall. */
+function hlOccCircle(x, y, r, h = Infinity) { hlL.occ.push({ k: 0, x, y, r, h }); }
+function hlOccSeg(x1, y1, x2, y2, h = Infinity) { hlL.occ.push({ k: 1, x1, y1, x2, y2, h }); }
+function hlOccPoly(pts, h = Infinity) {          // [x0,y0,x1,y1,...], closed
+  for (let i = 0; i < pts.length; i += 2) {
+    const j = (i + 2) % pts.length;
+    hlL.occ.push({ k: 1, x1: pts[i], y1: pts[i + 1], x2: pts[j], y2: pts[j + 1], h });
+  }
+}
+
+/* The falloff every light is drawn with, as data, so the CPU sample
+   (hlLightAt) and the sprite agree about how bright a point is. */
+const HL_FALL = [[0, 1], [0.06, 0.92], [0.16, 0.7], [0.3, 0.44], [0.48, 0.22],
+                 [0.66, 0.09], [0.84, 0.025], [1, 0]];
+function hlFall(u) {
+  if (u <= 0) return 1;
+  if (u >= 1) return 0;
+  for (let i = 1; i < HL_FALL.length; i++) {
+    if (u <= HL_FALL[i][0]) {
+      const a = HL_FALL[i - 1], b = HL_FALL[i];
+      return lerp(a[1], b[1], (u - a[0]) / (b[0] - a[0]));
+    }
+  }
+  return 0;
+}
+const _hlSpr = new Map();
+function hlLightSprite(hex) {
+  let s = _hlSpr.get(hex);
+  if (s) return s;
+  const S = 512;
+  s = document.createElement('canvas'); s.width = s.height = S;
+  const g = s.getContext('2d');
+  const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  const c = hlHex(hex);
+  for (const [u, v] of HL_FALL) gr.addColorStop(u, `rgba(${c[0]},${c[1]},${c[2]},${v})`);
+  g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  _hlSpr.set(hex, s);
+  return s;
+}
+
+function hlLightEnsure() {
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (hlL.buf && hlL.w === w && hlL.h === h) return;
+  const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  hlL.buf = mk(); hlL.bufT = mk(); hlL.bufS = mk();
+  hlL.cL = hlL.buf.getContext('2d');
+  hlL.cT = hlL.bufT.getContext('2d');
+  hlL.cS = hlL.bufS.getContext('2d');
+  hlL.w = w; hlL.h = h;
+}
+
+/* One shadow polygon, from a point, pushed into the current path of g.
+   Every quad is wound the same way so a nonzero fill unions them. */
+function _hlQuad(g, ax, ay, bx, by, cx, cy, dx, dy) {
+  const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay) + (cx - ax) * (dy - ay) - (dx - ax) * (cy - ay);
+  if (area < 0) { g.moveTo(ax, ay); g.lineTo(dx, dy); g.lineTo(cx, cy); g.lineTo(bx, by); }
+  else          { g.moveTo(ax, ay); g.lineTo(bx, by); g.lineTo(cx, cy); g.lineTo(dx, dy); }
+  g.closePath();
+}
+function _hlLen(L, h, d) {
+  // how far a shadow reaches: unlimited if the thing is as tall as the light
+  if (!(h < L.z)) return hlL.far;
+  return Math.min(hlL.far, d * h / (L.z - h));
+}
+function _hlShadowPath(g, L, px, py) {
+  for (const o of hlL.occ) {
+    if (o.k === 0) {
+      const dx = o.x - px, dy = o.y - py, d = Math.hypot(dx, dy);
+      if (d <= o.r + 0.5 || d - o.r > L.rr) continue;
+      const base = Math.atan2(dy, dx), al = Math.acos(o.r / d);
+      const t1x = o.x + Math.cos(base + Math.PI + al) * o.r, t1y = o.y + Math.sin(base + Math.PI + al) * o.r;
+      const t2x = o.x + Math.cos(base + Math.PI - al) * o.r, t2y = o.y + Math.sin(base + Math.PI - al) * o.r;
+      const ln = _hlLen(L, o.h, d);
+      const e1 = Math.hypot(t1x - px, t1y - py) || 1, e2 = Math.hypot(t2x - px, t2y - py) || 1;
+      _hlQuad(g, t1x, t1y,
+        t1x + (t1x - px) / e1 * ln, t1y + (t1y - py) / e1 * ln,
+        t2x + (t2x - px) / e2 * ln, t2y + (t2y - py) / e2 * ln,
+        t2x, t2y);
+      if (o.h < L.z) {
+        // a short shadow ends round, not square
+        const ex = o.x + dx / d * ln, ey = o.y + dy / d * ln;
+        g.moveTo(ex + o.r, ey); g.arc(ex, ey, o.r, 0, TAU); g.closePath();
+      }
+    } else {
+      const mx = (o.x1 + o.x2) / 2, my = (o.y1 + o.y2) / 2;
+      const hl = Math.hypot(o.x2 - o.x1, o.y2 - o.y1) / 2;
+      const dm = Math.hypot(mx - px, my - py);
+      if (dm - hl > L.rr) continue;
+      const e1 = Math.hypot(o.x1 - px, o.y1 - py) || 1, e2 = Math.hypot(o.x2 - px, o.y2 - py) || 1;
+      const l1 = _hlLen(L, o.h, e1), l2 = _hlLen(L, o.h, e2);
+      _hlQuad(g, o.x1, o.y1,
+        o.x1 + (o.x1 - px) / e1 * l1, o.y1 + (o.y1 - py) / e1 * l1,
+        o.x2 + (o.x2 - px) / e2 * l2, o.y2 + (o.y2 - py) / e2 * l2,
+        o.x2, o.y2);
+    }
+  }
+}
+
+function _hlDrawLight(g, L) {
+  const spr = hlLightSprite(L.col);
+  const rr = L.rr;
+  g.globalAlpha = Math.min(1, L.a * L.f);
+  if (L.cone) {
+    const { ang, spread, soft = 0.35 } = L.cone;
+    // the wedge, feathered: three nested wedges at rising alpha
+    const base = g.globalAlpha;
+    for (let k = 0; k < 3; k++) {
+      const sp = spread * (1 + soft * (1 - k / 2));
+      g.save();
+      g.beginPath(); g.moveTo(L.x, L.y);
+      g.arc(L.x, L.y, rr, ang - sp, ang + sp);
+      g.closePath(); g.clip();
+      g.globalAlpha = base / 3;
+      g.drawImage(spr, L.x - rr, L.y - rr, rr * 2, rr * 2);
+      g.restore();
+    }
+    g.globalAlpha = base;
+  } else {
+    g.drawImage(spr, L.x - rr, L.y - rr, rr * 2, rr * 2);
+  }
+  // overbright: a light stronger than 1 draws again, tighter
+  if (L.a * L.f > 1) {
+    g.globalAlpha = Math.min(1, L.a * L.f - 1);
+    g.drawImage(spr, L.x - rr * 0.55, L.y - rr * 0.55, rr * 1.1, rr * 1.1);
+  }
+  g.globalAlpha = 1;
+}
+
+/* Call with the WORLD transform active on ctx. */
+function hlLightRender() {
+  if (!hlL.on) return;
+  hlLightEnsure();
+  const m = ctx.getTransform();
+  const { cL, cT, cS, w, h } = hlL;
+  const A = hlL.ambient;
+
+  cL.setTransform(1, 0, 0, 1, 0, 0);
+  cL.globalCompositeOperation = 'copy';
+  cL.fillStyle = hlRgbS(A[0], A[1], A[2]);
+  cL.fillRect(0, 0, w, h);
+  cL.globalCompositeOperation = 'lighter';
+
+  const N = Math.max(1, hlL.samples);
+  for (const L of hlL.lights) {
+    if (L.a * L.f <= 0.002) continue;
+    const casts = L.shadow && hlL.occ.length;
+    if (!casts) {
+      cL.setTransform(m);
+      _hlDrawLight(cL, L);
+      continue;
+    }
+    // the light, alone
+    cT.setTransform(1, 0, 0, 1, 0, 0);
+    cT.globalCompositeOperation = 'source-over';
+    cT.clearRect(0, 0, w, h);
+    cT.setTransform(m);
+    _hlDrawLight(cT, L);
+    // its shadows, summed from points across the source disk
+    cS.setTransform(1, 0, 0, 1, 0, 0);
+    cS.globalCompositeOperation = 'source-over';
+    cS.clearRect(0, 0, w, h);
+    cS.setTransform(m);
+    cS.globalCompositeOperation = 'lighter';
+    cS.fillStyle = `rgba(0,0,0,${1 / N})`;
+    for (let k = 0; k < N; k++) {
+      const a = (k / N) * TAU + L.seed, s = N === 1 ? 0 : L.size;
+      cS.beginPath();
+      _hlShadowPath(cS, L, L.x + Math.cos(a) * s, L.y + Math.sin(a) * s);
+      cS.fill();
+    }
+    // cut them out of the light, then add what is left to the room
+    cT.setTransform(1, 0, 0, 1, 0, 0);
+    cT.globalCompositeOperation = 'destination-out';
+    if (hlL.blur > 0) cT.filter = `blur(${hlL.blur * (typeof DPR === 'number' ? DPR : 1)}px)`;
+    cT.drawImage(hlL.bufS, 0, 0);
+    cT.filter = 'none';
+    cT.globalCompositeOperation = 'source-over';
+    cL.setTransform(1, 0, 0, 1, 0, 0);
+    cL.drawImage(hlL.bufT, 0, 0);
+  }
+  cL.globalCompositeOperation = 'source-over';
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.drawImage(hlL.buf, 0, 0);
+  if (hlL.hot > 0) {
+    // light squared: pools go warm and bright without lifting the dark
+    cT.setTransform(1, 0, 0, 1, 0, 0);
+    cT.globalCompositeOperation = 'copy';
+    cT.drawImage(hlL.buf, 0, 0);
+    cT.globalCompositeOperation = 'multiply';
+    cT.drawImage(hlL.buf, 0, 0);
+    cT.globalCompositeOperation = 'source-over';
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = hlL.hot;
+    ctx.drawImage(hlL.bufT, 0, 0);
+  }
+  ctx.restore();
+}
+
+/* ---- the same light, asked about on the CPU ---- */
+function _hlSegHit(ax, ay, bx, by, cx, cy, dx, dy) {
+  const r = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+  if (Math.abs(r) < 1e-9) return false;
+  const u = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / r;
+  const v = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / r;
+  return u > 0.001 && u < 0.999 && v >= 0 && v <= 1;
+}
+function _hlBlocked(L, x, y) {
+  for (const o of hlL.occ) {
+    if (o.k === 0) {
+      // skip the occluder the point is standing on
+      if (Math.hypot(x - o.x, y - o.y) <= o.r) continue;
+      const dx = x - L.x, dy = y - L.y, l2 = dx * dx + dy * dy || 1;
+      const t = clamp(((o.x - L.x) * dx + (o.y - L.y) * dy) / l2, 0, 1);
+      if (Math.hypot(L.x + dx * t - o.x, L.y + dy * t - o.y) < o.r && t < 0.999) {
+        if (!(o.h < L.z)) return true;
+        const dOcc = Math.hypot(o.x - L.x, o.y - L.y);
+        if (Math.hypot(x - o.x, y - o.y) < _hlLen(L, o.h, dOcc)) return true;
+      }
+    } else if (_hlSegHit(L.x, L.y, x, y, o.x1, o.y1, o.x2, o.y2)) return true;
+  }
+  return false;
+}
+/* The light at a point, as [r, g, b] multipliers (1 = fully lit). */
+function hlLightAt(x, y, shadows = true) {
+  const A = hlL.ambient, out = [A[0] / 255, A[1] / 255, A[2] / 255];
+  for (const L of hlL.lights) {
+    const d = Math.hypot(x - L.x, y - L.y);
+    if (d >= L.rr) continue;
+    if (L.cone) {
+      let da = Math.atan2(y - L.y, x - L.x) - L.cone.ang;
+      da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+      if (da > L.cone.spread * (1 + (L.cone.soft || 0.35))) continue;
+    }
+    if (shadows && L.shadow && _hlBlocked(L, x, y)) continue;
+    const k = hlFall(d / L.rr) * L.a * L.f, c = hlHex(L.col);
+    out[0] += c[0] / 255 * k; out[1] += c[1] / 255 * k; out[2] += c[2] / 255 * k;
+  }
+  return out;
+}
+/* Where the light at a point is coming from, weighted by how much of it each
+   source gives: { x, y } unit vector toward the light, and k its strength.
+   For rim light on anything drawn after the pass. */
+function hlLightDir(x, y, shadows = true) {
+  let vx = 0, vy = 0, k = 0, col = null, best = 0;
+  for (const L of hlL.lights) {
+    const d = Math.hypot(x - L.x, y - L.y);
+    if (d >= L.rr || d < 0.001) continue;
+    if (shadows && L.shadow && _hlBlocked(L, x, y)) continue;
+    const w = hlFall(d / L.rr) * L.a * L.f;
+    vx += (L.x - x) / d * w; vy += (L.y - y) / d * w; k += w;
+    if (w > best) { best = w; col = L.col; }
+  }
+  const l = Math.hypot(vx, vy) || 1;
+  return { x: vx / l, y: vy / l, k, col: col || '#ffffff' };
+}
+
+/* The room's grade: laid over the finished world before the post. mul tints
+   everything, lift raises the blacks toward a colour (so the dark has a hue
+   rather than being dead), and edge darkens the frame toward its own colour. */
+function hlGrade(o) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (o.mul) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = o.mul; ctx.fillRect(0, 0, w, h);
+  }
+  if (o.lift) {
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = o.liftA === undefined ? 0.06 : o.liftA;
+    ctx.fillStyle = o.lift; ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+  }
+  if (o.edge) {
+    const r = Math.hypot(w, h) * 0.5;
+    const g = ctx.createRadialGradient(w / 2, h / 2, r * (o.edgeIn || 0.3), w / 2, h / 2, r);
+    g.addColorStop(0, rgba(o.edge, 0));
+    g.addColorStop(1, rgba(o.edge, o.edgeA === undefined ? 0.55 : o.edgeA));
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }
+  ctx.restore();
+}
+
+/* ============================== CLOTH & ROPE ===============================
+   Verlet: every point remembers where it was, moves by the difference, and
+   the constraints drag the points back to their rest lengths a few times a
+   frame. That is the whole method, and it gives sheets that fold, vines that
+   drag and a cord that whips, without anything being animated by hand.
+
+   A constraint can be given a tear ratio: stretched past it, it breaks, and
+   stays broken. A cloth is drawn cell by cell and a cell with a broken edge
+   is not drawn, so tearing a sheet is simply pulling on it.
+=========================================================================== */
+
+function hlVBody(o = {}) {
+  return { p: [], c: [], gx: o.gx || 0, gy: o.gy === undefined ? 900 : o.gy,
+           damp: o.damp === undefined ? 0.985 : o.damp, iters: o.iters || 8,
+           cols: 0, rows: 0, circles: [] };
+}
+function hlVPoint(b, x, y, pin = false) {
+  const q = { x, y, px: x, py: y, pin, ox: x, oy: y };
+  b.p.push(q);
+  return b.p.length - 1;
+}
+function hlVLink(b, i, j, o = {}) {
+  const a = b.p[i], c = b.p[j];
+  b.c.push({ a: i, b: j, rest: o.rest || Math.hypot(c.x - a.x, c.y - a.y), k: o.k === undefined ? 1 : o.k,
+             tear: o.tear || 0, alive: true, shear: !!o.shear });
+}
+/* A rope hanging from (x, y) along ang, n points spaced seg apart. */
+function hlRope(x, y, n, seg, o = {}) {
+  const b = hlVBody(o), ang = o.ang === undefined ? Math.PI / 2 : o.ang;
+  for (let i = 0; i < n; i++)
+    hlVPoint(b, x + Math.cos(ang) * seg * i, y + Math.sin(ang) * seg * i, i === 0 && o.pinHead !== false);
+  for (let i = 0; i < n - 1; i++) hlVLink(b, i, i + 1, { tear: o.tear, k: o.k });
+  if (o.pinTail) b.p[n - 1].pin = true;
+  return b;
+}
+/* A cloth, cols × rows points, top-left at (x, y). pin: 'top' | 'corners' |
+   an array of point indices. Shear links keep it from folding into a line. */
+function hlCloth(x, y, cols, rows, seg, o = {}) {
+  const b = hlVBody(o);
+  b.cols = cols; b.rows = rows; b.seg = seg;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) hlVPoint(b, x + c * seg, y + r * seg * (o.squash || 1));
+  const id = (c, r) => r * cols + c;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (c < cols - 1) hlVLink(b, id(c, r), id(c + 1, r), { rest: seg, tear: o.tear, k: o.k });
+    if (r < rows - 1) hlVLink(b, id(c, r), id(c, r + 1), { rest: seg, tear: o.tear, k: o.k });
+    if (o.shear !== false && c < cols - 1 && r < rows - 1) {
+      hlVLink(b, id(c, r), id(c + 1, r + 1), { rest: seg * Math.SQRT2, k: 0.4, shear: true, tear: o.tear });
+      hlVLink(b, id(c + 1, r), id(c, r + 1), { rest: seg * Math.SQRT2, k: 0.4, shear: true, tear: o.tear });
+    }
+  }
+  const pin = o.pin || 'top';
+  if (pin === 'top') for (let c = 0; c < cols; c++) b.p[id(c, 0)].pin = true;
+  else if (pin === 'corners') { b.p[id(0, 0)].pin = true; b.p[id(cols - 1, 0)].pin = true; }
+  else if (Array.isArray(pin)) for (const i of pin) b.p[i].pin = true;
+  // where each pinned point sits relative to the first, for hlVCarry
+  const p0 = b.p[0];
+  for (const q of b.p) { q.ox = q.x - p0.x; q.oy = q.y - p0.y; }
+  return b;
+}
+/* One step. wind(x, y) → [ax, ay] is optional, in px/s². */
+function hlVStep(b, dt, wind) {
+  dt = Math.min(dt, 1 / 30);
+  if (dt <= 0) return;
+  const dt2 = dt * dt, d = Math.pow(b.damp, dt * 60);
+  for (const q of b.p) {
+    if (q.pin) { q.px = q.x; q.py = q.y; continue; }
+    let ax = b.gx, ay = b.gy;
+    if (wind) { const w = wind(q.x, q.y); ax += w[0]; ay += w[1]; }
+    const vx = (q.x - q.px) * d, vy = (q.y - q.py) * d;
+    q.px = q.x; q.py = q.y;
+    q.x += vx + ax * dt2; q.y += vy + ay * dt2;
+  }
+  for (let it = 0; it < b.iters; it++) {
+    for (const c of b.c) {
+      if (!c.alive) continue;
+      const a = b.p[c.a], e = b.p[c.b];
+      const dx = e.x - a.x, dy = e.y - a.y, l = Math.hypot(dx, dy) || 1e-6;
+      if (c.tear && l > c.rest * c.tear) { c.alive = false; continue; }
+      const diff = (l - c.rest) / l * c.k;
+      const wa = a.pin ? 0 : e.pin ? 1 : 0.5, we = e.pin ? 0 : a.pin ? 1 : 0.5;
+      a.x += dx * diff * wa; a.y += dy * diff * wa;
+      e.x -= dx * diff * we; e.y -= dy * diff * we;
+    }
+    for (const s of b.circles) for (const q of b.p) {
+      if (q.pin) continue;
+      const dx = q.x - s.x, dy = q.y - s.y, l = Math.hypot(dx, dy);
+      if (l < s.r && l > 0) { q.x = s.x + dx / l * s.r; q.y = s.y + dy / l * s.r; }
+    }
+  }
+}
+/* Moves a pinned point (carrying its velocity, so a swung rope swings). */
+function hlVPin(b, i, x, y) { const q = b.p[i]; q.pin = true; q.x = x; q.y = y; }
+/* Moves every pinned point of a cloth together, keeping their layout. */
+function hlVCarry(b, x, y) { for (const q of b.p) if (q.pin) { q.x = x + q.ox; q.y = y + q.oy; } }
+function hlVRelease(b, i) { b.p[i].pin = false; }
+/* Breaks every link whose middle is within r of (x, y). */
+function hlVTear(b, x, y, r) {
+  let n = 0;
+  for (const c of b.c) {
+    if (!c.alive) continue;
+    const a = b.p[c.a], e = b.p[c.b];
+    if (Math.hypot((a.x + e.x) / 2 - x, (a.y + e.y) / 2 - y) < r) { c.alive = false; n++; }
+  }
+  return n;
+}
+/* A shove: every point within r gets a kick, falling off to the edge. */
+function hlVKick(b, x, y, r, fx, fy) {
+  for (const q of b.p) {
+    if (q.pin) continue;
+    const d = Math.hypot(q.x - x, q.y - y);
+    if (d < r) { const k = 1 - d / r; q.px -= fx * k; q.py -= fy * k; }
+  }
+}
+
+/* A rope as a ribbon: a smooth centreline, tapering from w0 to w1. */
+function hlDrawRope(b, o = {}) {
+  const P = b.p, n = P.length;
+  if (n < 2) return;
+  const w0 = o.w0 === undefined ? 2 : o.w0, w1 = o.w1 === undefined ? w0 : o.w1;
+  // a smoothed centreline: midpoints of the verlet points, with the ends kept
+  const C = [[P[0].x, P[0].y]];
+  for (let i = 0; i < n - 1; i++) C.push([(P[i].x + P[i + 1].x) / 2, (P[i].y + P[i + 1].y) / 2]);
+  C.push([P[n - 1].x, P[n - 1].y]);
+  const L = [], R = [];
+  for (let i = 0; i < C.length; i++) {
+    const a = C[Math.max(0, i - 1)], c = C[Math.min(C.length - 1, i + 1)];
+    let tx = c[0] - a[0], ty = c[1] - a[1];
+    const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const u = i / (C.length - 1), w = lerp(w0, w1, o.ease ? hlEase(o.ease, u) : u) / 2;
+    L.push([C[i][0] - ty * w, C[i][1] + tx * w]);
+    R.push([C[i][0] + ty * w, C[i][1] - tx * w]);
+  }
+  ctx.beginPath();
+  ctx.moveTo(L[0][0], L[0][1]);
+  for (let i = 1; i < L.length; i++) ctx.lineTo(L[i][0], L[i][1]);
+  for (let i = R.length - 1; i >= 0; i--) ctx.lineTo(R[i][0], R[i][1]);
+  ctx.closePath();
+  if (o.fill !== false) { ctx.fillStyle = o.col || '#94a3b8'; ctx.fill(); }
+  if (o.stroke) { ctx.strokeStyle = o.stroke; ctx.lineWidth = o.lw || 1; ctx.stroke(); }
+  return C;
+}
+/* A cloth, cell by cell. Each cell is shaded by how squeezed it is — a fold
+   gathers darker, a stretch goes pale — and, if lit is set, by the light at
+   its middle. Torn cells are skipped; the edges they leave are frayed. */
+function hlDrawCloth(b, o = {}) {
+  const { cols, rows } = b, P = b.p, seg = b.seg;
+  const id = (c, r) => r * cols + c;
+  const alive = new Map();
+  for (const c of b.c) if (!c.shear) alive.set(c.a * 1e5 + c.b, c.alive);
+  const edge = (i, j) => alive.get(Math.min(i, j) * 1e5 + Math.max(i, j)) !== false;
+  const col = o.col || '#e2e8f0', dark = o.dark || '#1e293b', hi = o.hi || '#ffffff';
+  const rest = seg * seg;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++) {
+    const i0 = id(c, r), i1 = id(c + 1, r), i2 = id(c + 1, r + 1), i3 = id(c, r + 1);
+    if (!edge(i0, i1) || !edge(i1, i2) || !edge(i3, i2) || !edge(i0, i3)) continue;
+    const a = P[i0], e = P[i1], f = P[i2], g = P[i3];
+    const area = Math.abs((e.x - a.x) * (g.y - a.y) - (g.x - a.x) * (e.y - a.y)
+                        + (f.x - e.x) * (g.y - e.y) - (g.x - e.x) * (f.y - e.y)) / 2;
+    const squeeze = clamp(area / rest, 0.15, 1.4);
+    // which way the cell leans: a fold facing away reads darker
+    const lean = clamp(((f.y + g.y) - (a.y + e.y)) / (2 * seg), 0, 1.3);
+    let k = clamp(0.35 + squeeze * 0.5 + (lean - 1) * 0.35 + (o.bias || 0), 0, 1);
+    let fill = k < 0.75 ? hlMix(dark, col, k / 0.75) : hlMix(col, hi, (k - 0.75) / 0.25);
+    if (o.lit) {
+      const L = hlLightAt((a.x + f.x) / 2, (a.y + f.y) / 2, o.litShadows !== false);
+      const cc = fill.match(/\d+(\.\d+)?/g).map(Number);
+      fill = hlRgbS(cc[0] * L[0], cc[1] * L[1], cc[2] * L[2]);
+    }
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = fill; ctx.lineWidth = 0.8;       // closes the hairline seams
+    ctx.globalAlpha = o.a === undefined ? 1 : o.a;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(e.x, e.y); ctx.lineTo(f.x, f.y); ctx.lineTo(g.x, g.y);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  // frayed edges where it tore
+  if (o.fray !== false) {
+    ctx.globalAlpha = (o.a === undefined ? 1 : o.a) * 0.8;
+    ctx.strokeStyle = o.frayCol || col; ctx.lineWidth = 0.9;
+    for (const c of b.c) {
+      if (c.alive || c.shear) continue;
+      const a = P[c.a], e = P[c.b];
+      const mx = (a.x + e.x) / 2, my = (a.y + e.y) / 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y); ctx.lineTo(lerp(a.x, mx, 0.7) + (hlHash(c.a) - 0.5) * 3, lerp(a.y, my, 0.7) + (hlHash(c.a + 7) - 0.5) * 3);
+      ctx.moveTo(e.x, e.y); ctx.lineTo(lerp(e.x, mx, 0.7) + (hlHash(c.b) - 0.5) * 3, lerp(e.y, my, 0.7) + (hlHash(c.b + 7) - 0.5) * 3);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* =================================== RIG ===================================
+   Springs for secondary motion, two-bone IK for anything that reaches, and a
+   chain that follows its root with lag — the three things hand-animated
+   pieces keep having to reinvent.
+=========================================================================== */
+
+/* A damped spring toward .to. k stiffness, d damping; d = 2√k is critical. */
+function hlSpring(v = 0, k = 140, d = 16) {
+  return {
+    v, vel: 0, to: v, k, d,
+    step(dt) {
+      dt = Math.min(dt, 1 / 30);
+      this.vel += ((this.to - this.v) * this.k - this.vel * this.d) * dt;
+      this.v += this.vel * dt;
+      return this.v;
+    },
+    kick(i) { this.vel += i; return this; },
+    snap(v) { this.v = this.to = v; this.vel = 0; return this; }
+  };
+}
+function hlSpring2(x = 0, y = 0, k = 140, d = 16) {
+  const s = { x: hlSpring(x, k, d), y: hlSpring(y, k, d) };
+  s.step = (dt, tx, ty) => {
+    if (tx !== undefined) { s.x.to = tx; s.y.to = ty; }
+    s.x.step(dt); s.y.step(dt);
+    return s;
+  };
+  return s;
+}
+/* Two bones from a root to a target. bend ±1 picks which way the joint goes.
+   The target is pulled in if it is out of reach. */
+function hlIK(ax, ay, tx, ty, l1, l2, bend = 1) {
+  let dx = tx - ax, dy = ty - ay, d = Math.hypot(dx, dy);
+  const max = (l1 + l2) * 0.9999, min = Math.abs(l1 - l2) + 0.001;
+  const dc = clamp(d, min, max);
+  if (d > 0) { dx = dx / d * dc; dy = dy / d * dc; } else { dx = dc; dy = 0; }
+  const base = Math.atan2(dy, dx);
+  const cosA = clamp((l1 * l1 + dc * dc - l2 * l2) / (2 * l1 * dc), -1, 1);
+  const a1 = base - Math.acos(cosA) * bend;
+  const ex = ax + Math.cos(a1) * l1, ey = ay + Math.sin(a1) * l1;
+  return { ex, ey, hx: ax + dx, hy: ay + dy, a1, a2: Math.atan2(ay + dy - ey, ax + dx - ex) };
+}
+/* A chain that trails its root: each link turns toward its parent's heading
+   on a spring, so a flick at the root travels down the length. */
+function hlChain(n, seg, o = {}) {
+  const ch = {
+    n, seg, stiff: o.stiff || 60, damp: o.damp || 9, droop: o.droop || 0,
+    ang: new Array(n).fill(o.ang || 0), vel: new Array(n).fill(0),
+    pts: new Array(n + 1).fill(0).map(() => ({ x: 0, y: 0 })),
+    step(x, y, rootAng, dt) {
+      dt = Math.min(dt, 1 / 30);
+      let parent = rootAng;
+      this.pts[0].x = x; this.pts[0].y = y;
+      for (let i = 0; i < this.n; i++) {
+        let d = parent + this.droop * (i + 1) / this.n - this.ang[i];
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        const k = this.stiff / (1 + i * 0.35);
+        this.vel[i] += (d * k - this.vel[i] * this.damp) * dt;
+        this.ang[i] += this.vel[i] * dt;
+        const p = this.pts[i], q = this.pts[i + 1];
+        q.x = p.x + Math.cos(this.ang[i]) * this.seg;
+        q.y = p.y + Math.sin(this.ang[i]) * this.seg;
+        parent = this.ang[i];
+      }
+      return this.pts;
+    }
+  };
+  return ch;
+}
+/* squash and stretch from a speed: long along the motion, thin across it,
+   area kept. */
+function hlStretch(speed, k = 0.0016, max = 0.45) {
+  const s = 1 + clamp(speed * k, 0, max);
+  return { along: s, across: 1 / Math.sqrt(s) };
+}
+/* blends two poses (plain objects of numbers) */
+function hlPose(a, b, t) {
+  const o = {};
+  for (const k in a) o[k] = typeof a[k] === 'number' && typeof b[k] === 'number' ? lerp(a[k], b[k], t) : (t < 0.5 ? a[k] : b[k]);
+  return o;
+}
+
+/* ================================= TIMELINE ================================
+   A scene is data: named tracks of keys, and cues. Every value is a pure
+   function of the clock — nothing accumulates — so the scene can be dragged
+   to any frame and it is exactly that frame, which is what the harness's
+   scrubber relies on. Only 'call' cues do anything, and only when the clock
+   passes them going forwards in play (never while scrubbing).
+
+   def = {
+     len: 12,
+     tracks: {
+       camX:  [[0, 0], [2.5, 140, 'inOut3'], [6, 140], [7, 0, 'out3']],
+       rise:  [[3, 0], [4.2, 1, 'outBack']],
+       ...                      // [time, value, ease into this key]
+     },
+     cues: [
+       { at: 0.4, say: 'outsider', text: 'It is a run.', dur: 3.2 },
+       { at: 5.1, shake: 0.6 },                // decays on its own
+       { at: 6.0, span: 'door', dur: 1.4 },    // tl.s('door') → 0..1
+       { at: 9.0, call: () => … },
+     ]
+   }
+=========================================================================== */
+
+function hlTimeline(def) {
+  const tl = {
+    len: def.len || 0, tracks: def.tracks || {}, cues: (def.cues || []).slice().sort((a, b) => a.at - b.at),
+    t: 0, playing: true, speed: 1, done: false, name: def.name || 'scene',
+    /* the value of a track now */
+    v(name, dflt = 0) {
+      const k = this.tracks[name];
+      if (!k || !k.length) return dflt;
+      const t = this.t;
+      if (t <= k[0][0]) return k[0][1];
+      for (let i = 1; i < k.length; i++) {
+        if (t < k[i][0]) {
+          const a = k[i - 1], b = k[i];
+          return lerp(a[1], b[1], hlEase(b[2] || 'smooth', (t - a[0]) / (b[0] - a[0])));
+        }
+      }
+      return k[k.length - 1][1];
+    },
+    /* progress through a named span cue, 0 before it and 1 after */
+    s(name, e) {
+      for (const c of this.cues) if (c.span === name) return hlEase(e || 'lin', (this.t - c.at) / (c.dur || 1));
+      return 0;
+    },
+    /* seconds since a named mark (−1 if not yet reached) */
+    since(name) {
+      let best = -1;
+      for (const c of this.cues) if (c.mark === name && this.t >= c.at) best = this.t - c.at;
+      return best;
+    },
+    /* the line being spoken now: { who, text, age, dur, cue } or null */
+    line(who) {
+      let out = null;
+      for (const c of this.cues) {
+        if (!c.say || (who && c.say !== who)) continue;
+        if (this.t >= c.at && this.t < c.at + (c.dur || 3)) out = { who: c.say, text: c.text, age: this.t - c.at, dur: c.dur || 3, cue: c };
+      }
+      return out;
+    },
+    /* camera shake from shake cues, as an offset; seeded so it scrubs */
+    shake(amp = 12) {
+      let x = 0, y = 0;
+      for (const c of this.cues) {
+        if (!c.shake || this.t < c.at) continue;
+        const age = this.t - c.at, life = c.life || 0.6;
+        if (age > life) continue;
+        const k = c.shake * Math.pow(1 - age / life, 2) * amp;
+        x += (hlNoise(age * 38 + c.at * 7, 3) - 0.5) * 2 * k;
+        y += (hlNoise(age * 38 + c.at * 7, 5) - 0.5) * 2 * k;
+      }
+      return { x, y };
+    },
+    tick(dt) {
+      if (!this.playing || this.done) return;
+      const t0 = this.t;
+      this.t = Math.min(this.len, this.t + dt * this.speed);
+      for (const c of this.cues) if (c.call && c.at > t0 && c.at <= this.t) c.call(this);
+      if (this.t >= this.len) { this.done = true; if (def.onEnd) def.onEnd(this); }
+    },
+    seek(t) { this.t = clamp(t, 0, this.len); this.done = this.t >= this.len; },
+    restart() { this.t = 0; this.done = false; this.playing = true; },
+    skip() { this.tick(this.len - this.t + 1e-6); }
+  };
+  return tl;
+}
+
+/* ================================= DIALOGUE ================================
+   One presentation with a voice per speaker. Every line is typed as a pure
+   function of its age, so it scrubs with the scene.
+
+   The soul types unevenly — a stall on every ellipsis, a catch now and then,
+   letters surfacing rather than appearing — and its `steady` (0 at first,
+   rising with each ascension) takes the unevenness out of it. The outsider
+   types flat and even, the way the hub already has him.
+=========================================================================== */
+
+const HL_VOICE = {
+  outsider: { tag: 'OUTSIDE', col: '#dbe3ec', tagCol: '#94a3b8', cps: 26, font: "400 19px Barlow, 'Segoe UI', system-ui, sans-serif" },
+  soul:     { tag: '',        col: '#cfe8ff', tagCol: '#a5b4fc', cps: 15, font: "400 19px Barlow, 'Segoe UI', system-ui, sans-serif", uneven: true },
+  sys:      { tag: '',        col: '#94a3b8', tagCol: '#64748b', cps: 40, font: "600 13px 'JetBrains Mono', ui-monospace, monospace" }
+};
+
+/* When each character of a line lands, in seconds from the line's start. */
+function hlTypeTimes(text, voice, steady = 0) {
+  const v = HL_VOICE[voice] || HL_VOICE.outsider, out = [];
+  let t = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    let d = 1 / v.cps;
+    if (v.uneven) {
+      const un = 1 - steady;
+      d *= 1 + (hlHash(i * 3.1 + text.length) - 0.5) * 1.2 * un;
+      if (ch === '.' && text[i + 1] === '.') d += 0.05 * un;
+      if (ch === '.' && text[i + 1] !== '.') d += 0.34 * un + 0.12;
+      if (ch === ',') d += 0.16;
+      if (hlHash(i * 7.7 + 1) < 0.06 * un) d += 0.28;          // a catch
+    } else {
+      if (ch === '.' || ch === ',') d += 0.08;
+    }
+    out.push(t);
+    t += Math.max(0.012, d);
+  }
+  out.push(t);
+  return out;
+}
+/* Draws a line as a subtitle across the bottom, in the hub's grammar: a plate
+   with one hairline, the speaker's tag above, the words below. */
+function hlSayDraw(line, o = {}) {
+  if (!line) return;
+  const v = HL_VOICE[line.who] || HL_VOICE.outsider;
+  const steady = o.steady || 0;
+  const times = line.cue && line.cue._tt && line.cue._st === steady ? line.cue._tt
+    : hlTypeTimes(line.text, line.who, steady);
+  if (line.cue) { line.cue._tt = times; line.cue._st = steady; }
+  const fadeOut = clamp((line.dur - line.age) / 0.35, 0, 1);
+  const y = o.y === undefined ? H - 118 : o.y;
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if (o.plate !== false) {
+    const bg = ctx.createLinearGradient(0, y - 46, 0, H);
+    bg.addColorStop(0, 'rgba(4,6,11,0)');
+    bg.addColorStop(0.35, `rgba(4,6,11,${0.88 * fadeOut})`);
+    bg.addColorStop(1, `rgba(4,6,11,${0.96 * fadeOut})`);
+    ctx.fillStyle = bg; ctx.fillRect(0, y - 46, W, H - y + 46);
+    ctx.fillStyle = rgba(v.tagCol, 0.14 * fadeOut); ctx.fillRect(0, y - 46, W, 1);
+  }
+  let x = o.x === undefined ? Math.max(48, W / 2 - 430) : o.x;
+  /* A portrait, if the art draws one (hlSayPortrait, in the art hooks): it
+     takes the left of the plate and hands back how much room it used. */
+  if (o.portrait !== false && typeof hlSayPortrait === 'function') {
+    const typing = line.age < times[times.length - 1];
+    x += hlSayPortrait(line, x, y, { fade: fadeOut, steady, typing }) || 0;
+  }
+  if (v.tag) {
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.letterSpacing = '0.3em';
+    ctx.fillStyle = rgba(v.tagCol, 0.5 * fadeOut);
+    ctx.fillText(v.tag, x, y - 18);
+    ctx.letterSpacing = '0em';
+  }
+  ctx.font = v.font;
+  let cx = x, shown = 0;
+  for (let i = 0; i < line.text.length; i++) {
+    const ch = line.text[i], w = ctx.measureText(ch).width;
+    const age = line.age - times[i];
+    if (age < 0) break;
+    shown = i + 1;
+    let a = 1, dy = 0, dx = 0;
+    if (v.uneven) {
+      // letters surface: rise a little and sharpen in, and never quite settle
+      const un = 1 - steady, k = clamp(age / 0.22, 0, 1);
+      a = k * (0.82 + 0.18 * hlNoise(uiTime * 3 + i, 4));
+      dy = (1 - HL_EASE.out3(k)) * 6 + (hlNoise(uiTime * 1.7 + i * 0.37, 8) - 0.5) * 1.6 * un;
+      dx = (hlNoise(uiTime * 1.3 + i * 0.51, 11) - 0.5) * 1.1 * un;
+      // the older the fragment, the fainter its tail
+      if (un > 0 && i > line.text.length - 4 && line.text.endsWith('.')) a *= 0.7 + 0.3 * steady;
+    }
+    ctx.globalAlpha = a * fadeOut;
+    ctx.fillStyle = v.col;
+    ctx.fillText(ch, cx + dx, y + 12 + dy);
+    cx += w;
+  }
+  ctx.globalAlpha = fadeOut;
+  if (shown < line.text.length && !v.uneven && Math.sin(uiTime * 14) > 0) {
+    ctx.fillStyle = rgba(v.tagCol, 0.8);
+    ctx.fillRect(cx + 4, y - 2, 8, 16);
+  }
+  ctx.restore();
+}
+/* Letterbox bars, k 0..1. */
+function hlLetterbox(k, h = 0.11) {
+  if (k <= 0) return;
+  const b = H * h * HL_EASE.inOut3(clamp(k, 0, 1));
+  ctx.save();
+  ctx.setTransform(typeof DPR === 'number' ? DPR : 1, 0, 0, typeof DPR === 'number' ? DPR : 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, b); ctx.fillRect(0, H - b, W, b);
+  ctx.restore();
+}
+/* A full-screen fade toward a colour. */
+function hlFade(k, col = '#000000') {
+  if (k <= 0) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = clamp(k, 0, 1);
+  ctx.fillStyle = col;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+}
+
+/* ================================ PARTICLES ================================
+   One pool, many kinds. A kind is a spawn, a step and a draw; the step and
+   draw are looked up per particle, so a new kind is one table entry. Two
+   layers: 'lit' is drawn before the light pass and is lit like the floor
+   (smoke, dirt, leaves, moths), 'glow' is drawn after, additively (embers,
+   sparks, wisps).
+=========================================================================== */
+
+const hlParts = [];
+const HL_PART_MAX = 2400;
+const HL_PART = {
+  /* a spark off a flame: rises, drifts, winks out */
+  ember: {
+    layer: 'glow',
+    make: (q, o) => { q.vx = rnd(-14, 14) + (o.vx || 0); q.vy = rnd(-70, -30) + (o.vy || 0);
+                      q.life = q.max = rnd(0.5, 1.4) * (o.life || 1); q.r = rnd(0.8, 2) * (o.size || 1); q.col = o.col || '#fdba74'; q.seed = Math.random() * 99; },
+    step: (q, dt) => { q.vx += (hlNoise(uiTime * 2 + q.seed, 1) - 0.5) * 120 * dt; q.vy -= 10 * dt;
+                       q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const k = q.life / q.max, f = 0.6 + 0.4 * hlNoise(uiTime * 20 + q.seed, 2);
+                 drawGlow(q.x, q.y, q.r * 5, q.col, 0.35 * k * f);
+                 ctx.globalAlpha = k * f; ctx.fillStyle = '#fff7ed';
+                 ctx.beginPath(); ctx.arc(q.x, q.y, q.r * 0.6, 0, TAU); ctx.fill(); }
+  },
+  /* candle smoke: a thin thread that thickens and curls as it climbs */
+  smoke: {
+    layer: 'lit',
+    make: (q, o) => { q.vx = rnd(-4, 4); q.vy = rnd(-34, -22) * (o.speed || 1);
+                      q.life = q.max = rnd(1.6, 2.8) * (o.life || 1); q.r = rnd(1.5, 2.5) * (o.size || 1); q.col = o.col || '#9ca3af';
+                      q.seed = Math.random() * 99; q.a = o.a || 0.16; },
+    step: (q, dt) => { const age = q.max - q.life;
+                       q.vx += (hlNoise(age * 1.3 + q.seed, 3) - 0.5) * 70 * dt; q.vy *= Math.pow(0.97, dt * 60);
+                       q.x += q.vx * dt; q.y += q.vy * dt; q.r += dt * 7; },
+    draw: q => { const k = q.life / q.max, fade = Math.min(1, (q.max - q.life) / 0.25);
+                 ctx.globalAlpha = q.a * k * fade; ctx.fillStyle = q.col;
+                 ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, TAU); ctx.fill(); }
+  },
+  /* dust turning in a beam: only visible where the light is */
+  mote: {
+    layer: 'glow',
+    make: (q, o) => { q.vx = rnd(-5, 5); q.vy = rnd(-5, 5); q.life = q.max = rnd(4, 9); q.r = rnd(0.5, 1.3);
+                      q.seed = Math.random() * 99; q.col = o.col || '#fde68a'; },
+    step: (q, dt) => { q.vx += (hlNoise(uiTime * 0.4 + q.seed, 6) - 0.5) * 18 * dt;
+                       q.vy += (hlNoise(uiTime * 0.4 + q.seed, 7) - 0.5) * 18 * dt;
+                       q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const L = hlLightAt(q.x, q.y, false), b = Math.max(0, (L[0] + L[1] + L[2]) / 3 - 0.08);
+                 const k = Math.min(1, q.life / 1.2, (q.max - q.life) / 1.2);
+                 ctx.globalAlpha = clamp(b * 1.3, 0, 1) * k * (0.5 + 0.5 * hlNoise(uiTime * 3 + q.seed, 9));
+                 ctx.fillStyle = q.col; ctx.fillRect(q.x - q.r / 2, q.y - q.r / 2, q.r, q.r); }
+  },
+  /* wax, earth, splinters: thrown, falls to a floor line, settles */
+  clod: {
+    layer: 'lit',
+    make: (q, o) => { const a = rnd(0, TAU), s = rnd(40, 160) * (o.speed || 1);
+                      q.vx = Math.cos(a) * s; q.vy = Math.sin(a) * s * 0.5; q.z = 0; q.vz = rnd(80, 220) * (o.speed || 1);
+                      q.life = q.max = rnd(1.2, 2.4) * (o.life || 1); q.r = rnd(1, 3) * (o.size || 1); q.col = o.col || '#57534e'; },
+    step: (q, dt) => { if (q.z > 0 || q.vz > 0) { q.vz -= 600 * dt; q.z = Math.max(0, q.z + q.vz * dt);
+                       if (q.z === 0 && q.vz < 0) { q.vz = -q.vz * 0.3; q.vx *= 0.6; q.vy *= 0.6; if (q.vz < 20) q.vz = 0; } }
+                       else { q.vx *= Math.pow(0.8, dt * 60); q.vy *= Math.pow(0.8, dt * 60); }
+                       q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const k = Math.min(1, q.life / 0.5);
+                 ctx.globalAlpha = 0.35 * k; ctx.fillStyle = '#000';
+                 ctx.beginPath(); ctx.ellipse(q.x, q.y, q.r, q.r * 0.5, 0, 0, TAU); ctx.fill();
+                 ctx.globalAlpha = k; ctx.fillStyle = q.col;
+                 ctx.beginPath(); ctx.arc(q.x, q.y - q.z, q.r, 0, TAU); ctx.fill(); }
+  },
+  /* a cold wisp: the soul's shedding */
+  wisp: {
+    layer: 'glow',
+    make: (q, o) => { q.vx = rnd(-10, 10) + (o.vx || 0); q.vy = rnd(-40, -16) + (o.vy || 0);
+                      q.life = q.max = rnd(0.8, 1.8) * (o.life || 1); q.r = rnd(1.5, 3.5) * (o.size || 1); q.col = o.col || '#a5f3fc';
+                      q.seed = Math.random() * 99; },
+    step: (q, dt) => { q.vx += (hlNoise(uiTime * 1.5 + q.seed, 12) - 0.5) * 60 * dt; q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const k = q.life / q.max; drawGlow(q.x, q.y, q.r * 4, q.col, 0.22 * k * k); }
+  },
+  /* a bat: flutters along, wings beating, veering on noise */
+  bat: {
+    layer: 'lit',
+    make: (q, o) => { const a = o.ang === undefined ? rnd(0, TAU) : o.ang + rnd(-0.4, 0.4), s = rnd(90, 150);
+                      q.vx = Math.cos(a) * s; q.vy = Math.sin(a) * s; q.life = q.max = o.life || rnd(3, 5);
+                      q.r = rnd(4, 7) * (o.size || 1); q.seed = Math.random() * 99; q.col = o.col || '#0b0b12'; },
+    step: (q, dt) => { const turn = (hlNoise(uiTime * 1.1 + q.seed, 13) - 0.5) * 4 * dt;
+                       const c = Math.cos(turn), s = Math.sin(turn), vx = q.vx;
+                       q.vx = vx * c - q.vy * s; q.vy = vx * s + q.vy * c;
+                       q.x += q.vx * dt; q.y += q.vy * dt + Math.sin(uiTime * 9 + q.seed) * 18 * dt; },
+    draw: q => { const flap = Math.sin(uiTime * 22 + q.seed * 3), ang = Math.atan2(q.vy, q.vx);
+                 const k = Math.min(1, q.life / 0.4, (q.max - q.life) / 0.3);
+                 ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(ang + Math.PI / 2);
+                 ctx.globalAlpha = k; ctx.fillStyle = q.col; const r = q.r, up = flap * r * 0.7;
+                 ctx.beginPath(); ctx.moveTo(0, -r * 0.4);
+                 ctx.quadraticCurveTo(-r * 0.8, -r * 0.2 - up, -r * 1.6, up * 0.6);
+                 ctx.quadraticCurveTo(-r * 0.9, r * 0.1, -r * 0.5, r * 0.25);
+                 ctx.quadraticCurveTo(-r * 0.2, 0, 0, r * 0.45);
+                 ctx.quadraticCurveTo(r * 0.2, 0, r * 0.5, r * 0.25);
+                 ctx.quadraticCurveTo(r * 0.9, r * 0.1, r * 1.6, up * 0.6);
+                 ctx.quadraticCurveTo(r * 0.8, -r * 0.2 - up, 0, -r * 0.4);
+                 ctx.fill(); ctx.restore(); }
+  }
+};
+function hlEmit(kind, x, y, n = 1, o = {}) {
+  const K = HL_PART[kind];
+  if (!K) return;
+  for (let i = 0; i < n; i++) {
+    if (hlParts.length >= HL_PART_MAX) hlParts.shift();
+    const q = { kind, x: x + (o.spread ? rnd(-o.spread, o.spread) : 0), y: y + (o.spread ? rnd(-o.spread, o.spread) : 0) };
+    K.make(q, o);
+    hlParts.push(q);
+  }
+}
+function hlPartsTick(dt) {
+  for (let i = hlParts.length - 1; i >= 0; i--) {
+    const q = hlParts[i];
+    q.life -= dt;
+    if (q.life <= 0) { hlParts.splice(i, 1); continue; }
+    HL_PART[q.kind].step(q, dt);
+  }
+}
+function hlPartsDraw(layer) {
+  ctx.save();
+  if (layer === 'glow') ctx.globalCompositeOperation = 'lighter';
+  for (const q of hlParts) {
+    const K = HL_PART[q.kind];
+    if (K.layer !== layer) continue;
+    K.draw(q);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+function hlPartsClear() { hlParts.length = 0; }
+
+/* =============================== BAKED LAYERS ==============================
+   Anything that does not move is drawn once, at device resolution, into a
+   canvas the size of the room, and blitted each frame. key names the layer;
+   a change of key, size or DPR rebakes it. draw(g) is handed the bake's own
+   context, already transformed so it draws in world coordinates — ctx is a
+   const in the game and cannot be swapped out underneath the drawing code.
+
+   hlBakePrep does the baking without the blit, so a layer can be made ahead
+   of the first frame that needs it (the event's preload, hlArtPreload).
+=========================================================================== */
+
+const _hlBakes = new Map();
+function hlBakePrep(key, x, y, w, h, draw) {
+  const dpr = typeof DPR === 'number' ? DPR : 1;
+  let b = _hlBakes.get(key);
+  if (!b || b.w !== w || b.h !== h || b.dpr !== dpr) {
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr);
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, -x * dpr, -y * dpr);
+    draw(g);
+    b = { c, w, h, dpr };
+    _hlBakes.set(key, b);
+  }
+  return b;
+}
+function hlBake(key, x, y, w, h, draw) {
+  const b = hlBakePrep(key, x, y, w, h, draw);
+  ctx.drawImage(b.c, x, y, w, h);
+}
+function hlUnbake(key) { if (key) _hlBakes.delete(key); else _hlBakes.clear(); }
+/* Every sprite a set of colours will need, made now rather than on the frame
+   that first asks: the light pass's falloff and the game's glow. */
+function hlSpritePrep(cols) {
+  for (const c of cols) { hlLightSprite(c); glowSprite(c); }
+}
+
+/* ===========================================================================
+   ALL HALLOWS — BOOK I: THE LOST SOUL · ACT I
+   The knock on the menu, the vigil under the floor, and THE PATCH: its four
+   bodies, THE BACKLOG, and the first two quests.
+
+   The design is EVENT-DRAFTS.txt (prepatch). Everything this block shows is
+   drawn through the art hooks in "ALL HALLOWS · ACT I — art hooks" below, and
+   HALLOWS-GUIDE.txt says what each hook is handed and when it is called. No
+   drawing lives up here.
+
+   The event is data first — HL_EVENT, HL_QUESTS, HL_MEDALS, HL_AREAS — so the
+   later acts, and next year's book, are new rows rather than new machinery.
+=========================================================================== */
+
+/* -------------------------------- the event -------------------------------- */
+const HL_EVENT = {
+  id: 'hallows-2026', book: 'I', n: 'ALL HALLOWS',
+  from: '2026-10-01',          // the knock, the vigil and chapter I (UTC days)
+  to:   '2026-11-01',          // exclusive: the vigil shuts at 00:00 UTC
+  chapters: [
+    { n: 'I',   area: 'patch', opens: '2026-10-01' },
+    { n: 'II',  area: 'house', opens: '2026-10-14' },
+    { n: 'III', area: 'yard',  opens: '2026-10-23' }
+  ],
+  /* The worldwide count's prizes. The server holds the same marks and is
+     the authority on whether one has been reached; these are what they pay. */
+  prizes: [
+    { at: 150,  skin: 'hl-carved' },
+    { at: 400,  skin: 'hl-lantern' },
+    { at: 750,  skin: 'hl-hallows' },
+    { at: 1200, skin: 'hl-lostsoul' }
+  ]
+};
+
+/* Seven quests, in order. `later` marks the ones written but not built yet:
+   the chain stops in front of the first of them and the soul waits. */
+const HL_QUESTS = [
+  { id: 'q1', n: 'THE REST OF IT',  ch: 0, area: 'patch', kind: 'errand', need: 3, candles: 10, medal: 'gourd' },
+  { id: 'q2', n: 'ON SALE',         ch: 0, area: 'patch', kind: 'boss', boss: 'backlog', candles: 15, medal: 'oneday', ascend: 1 },
+  { id: 'q3', n: 'LAST MESSAGE',    ch: 1, area: 'house', kind: 'errand', need: 3, candles: 10, medal: 'sheet', later: true },
+  { id: 'q4', n: 'STILL HERE',      ch: 1, area: 'house', kind: 'boss', boss: 'deadgame', candles: 15, medal: 'stillhere', ascend: 2, later: true },
+  { id: 'q5', n: 'WHERE HE PUT ME', ch: 2, area: 'yard',  kind: 'errand', need: 3, candles: 10, medal: 'grave', later: true },
+  { id: 'q6', n: 'GG',              ch: 2, area: 'yard',  kind: 'boss', boss: 'ragequit', candles: 20, medal: 'lag', ascend: 3, later: true },
+  { id: 'q7', n: 'PAST NINETEEN',   ch: 2, area: null,    kind: 'run', wave: 20, candles: 20, medal: 'lantern', later: true }
+];
+
+/* Two worn at a time. Only the first two do anything yet; the rest are
+   listed so the stand knows how many hooks it has. */
+const HL_EQUIP_MAX = 2;
+const HL_MEDALS = [
+  { id: 'gourd',     n: 'THE GOURD',
+    d: 'Anything left alive for fifteen seconds ripens: half as much health again, and double the experience and credits when it dies.' },
+  { id: 'oneday',    n: 'ONE DAY',
+    d: 'Experience from bodies is put aside instead of paid, then paid all at once, plus half again, when a boss dies.' },
+  { id: 'sheet',     n: 'SHEET',         later: true, d: '' },
+  { id: 'stillhere', n: 'STILL HERE',    later: true, d: '' },
+  { id: 'grave',     n: 'SHALLOW GRAVE', later: true, d: '' },
+  { id: 'lag',       n: 'LAG',           later: true, d: '' },
+  { id: 'lantern',   n: 'THE LANTERN',   later: true, d: '' }
+];
+
+/* ---------------------------------- words ----------------------------------
+   Everything said, by moment. [speaker, line]. The soul's lines are typed
+   less evenly the less of it there is (HL_STEADY, by how far it has come). */
+const HL_SAY = {
+  proIn: [
+    ['outsider', 'Something has been knocking under the floor.'],
+    ['outsider', 'Not at the door. Under it.'],
+    ['outsider', 'I went down. There is someone there, and it is not for me.'],
+    ['outsider', 'Come and look. It will take the month.']],
+  proNew: [
+    ['outsider', 'You have not let me in. I came up anyway.'],
+    ['outsider', 'Something has been knocking under your floor. It is not knocking for me.'],
+    ['outsider', 'Come and look. It will take the month.']],
+  first: [
+    ['outsider', 'It was here when I found it. It had been here a long time before that.']],
+  firstNear: [
+    ['outsider', 'It is a run.'],
+    ['outsider', 'When you quit, the run is written down. When the tab is closed, nothing writes it down. It stops where it was, and it stays.'],
+    ['soul', '...nineteen.'],
+    ['soul', "...he said he'd be right back."],
+    ['outsider', 'It says that. I do not know who he is.'],
+    ['outsider', 'It wants to go up. I cannot take it. You can fight, which is the part it needs.'],
+    ['soul', '...the patch. the rest of me is in the patch.']],
+  q1Give: [
+    ['soul', '...three of them are mine. the cold ones.'],
+    ['outsider', 'Three of the gourds up there are not orange. Break them before they ripen, or the one who farms them keeps them.']],
+  q1Done: [
+    ['soul', "...that's what i was flying."],
+    ['outsider', 'An ordinary hull. The one everyone starts in.']],
+  q2Give: [
+    ['soul', "...he has the rest. he says he's going to play it."],
+    ['outsider', 'He has more than he will ever finish. He is not giving one back because you asked.']],
+  q2Done: [
+    ['soul', "wave nineteen. hull at four percent. that's where i am. that's where i've been."],
+    ['soul', "i can go up now. there's a house."],
+    ['outsider', 'He was never going to play it. Nobody plays all of them.']],
+  /* not in the draft: what is said while the next floor is still shut */
+  wait: [
+    ['outsider', 'The house is not open yet. It will wait. It is good at that.']],
+  idle: [
+    'It is still here.',
+    'It does not sleep. I do not much, either.',
+    'Go up when you are ready. It is not going anywhere. That is the whole problem.'],
+  more: 'More of them are lit than yesterday.'
+};
+/* how evenly the soul types, by how much of it has come back (hlSoulShown) */
+const HL_STEADY = [0, 0, 0.35, 0.7, 1, 1];
+
+const HL_BARK = {
+  backlog: {
+    enter: 'Oh — careful. Those are mine.',
+    idle: ["I'll get to it.", 'It was on sale.', 'Not now. Later.', "I'm saving that one."],
+    gourd: 'Another one. For later.',
+    binge: 'Fine. FINE. All of it. Now.',
+    death: '...I was going to play that one.'
+  }
+};
+
+/* ---------------------------------- areas ----------------------------------
+   An area plays like a stage: five waves of its own roster, the boss on the
+   fifth. It is scaled as a slice of an ordinary run (waveFrom), and you go in
+   with what that run would have paid you by then. */
+const HL_AREAS = {
+  patch: {
+    id: 'patch', ch: 0, waveFrom: 6, errand: 'q1', bossQ: 'q2',
+    stage: { name: 'THE PATCH', tag: 'all hallows · i', hl: 'patch',
+             bg: '#08060a', grid: '#1a120a', grid2: '#2b1d0e', wall: '#7c2d12',
+             glow: 'rgba(251,146,60,0.12)', accent: '#fb923c', hazard: null,
+             pool: [['jack', 40], ['gourd', 34], ['creeper', 28], ['scarecrow', 24]],
+             boss: 'backlog' }
+  }
+};
+const HL_ETYPES = { gourd: 1, jack: 1, creeper: 1, scarecrow: 1 };
+const HL_BOSSES = { backlog: 1 };
+
+/* ------------------------------- the numbers -------------------------------
+   Every figure the Act I rules run on. The art reads some of them (timers,
+   radii); HALLOWS-GUIDE.txt lists which. First drafts, for tuning in play. */
+const HL_END_T      = 4.2;    // s from an area ending to the vigil
+const HL_ASC_T      = 2.8;    // s the soul takes to rise a landing
+const HL_RIPEN_T    = 15;     // THE GOURD medal: s alive before a body ripens
+const HL_BANK_MUL   = 1.5;    // ONE DAY: what the bank pays out at a boss
+
+const GOURD_RIPEN   = 15;     // s before a gourd splits into a jack
+const PILE_STEP     = 0.03;   // every unbroken gourd: everything else this much faster
+const COLD_AFTER    = [4, 9]; // s into waves 2–4 before the cold gourd comes up
+const JACK_WANT     = 220;    // the distance a jack keeps
+const JACK_BREATH_R = 130;    // how far the flame reaches
+const JACK_BREATH_A = 0.55;   // half-width of the flame, radians
+const JACK_WIND     = 0.5;    // s of wind-up before the breath
+const JACK_BREATH_T = 0.8;    // s the breath lasts
+const JACK_FACE     = 0.7;    // half-width of the face, radians: hits inside it double
+const VINE_SPD      = 520;    // px/s the vine is thrown at
+const VINE_RANGE    = 380;
+const VINE_HOLD     = 4;      // s a vine holds before it lets go on its own
+const VINE_SLOW     = 0.6;    // speed while tethered (40% slower)
+const VINE_REEL     = 150;    // px/s it pulls you in
+const VINE_SPARE    = 40;     // px of vine at the hull that shots cannot cut
+const CROW_WATCH    = 0.33;   // half-width of the look that holds a scarecrow still
+const CROW_RANGE    = 1100;
+
+const BACKLOG_BINGE = [0.75, 0.5, 0.25];
+const BACKLOG_EAT_HEAL  = 0.03;   // of his health, per gourd
+const BACKLOG_EAT_ARMOR = 4;      // armour per gourd (the game's flat-rate armour)
+const HELD_AFTER    = [0.15, 0.55];   // s a volley flies before it is abandoned
+const SWEEP_LEN     = 760, SWEEP_W = 16, SWEEP_SPD = 1.1, SWEEP_TELE = 0.6;
+const SWEEP_HELD    = [0.35, 0.8];    // share of the arc swept before it is abandoned
+const SLAM_R        = 110, SLAM_T = 1.0;
+const SLAM_HELD     = [0.3, 0.9];     // share of the countdown before it is abandoned
+/* What a resumed piece takes off him, as shares of his health, so that
+   luring him into his own pile matters however hard the run hits. */
+const TURN_SHOT = 0.012, TURN_SWEEP = 0.06, TURN_SLAM = 0.08;
+
+/* ---------------------------------- state ---------------------------------- */
+/* Session state. force and day are the admin panel's: the event on without
+   touching the clock, and a pinned date. */
+const HL = { force: false, day: null, pro: null, eq: {}, lastLoad: 0 };
+let inVigil = false;
+let hlArea = null;            // the area run: { id, n, t, coldDue, coldLive, end, death }
+let hlPile = 0;               // unbroken gourds in THE PATCH, this frame
+const hlHeld = [];            // THE BACKLOG's unfinished attacks
+let hlHeldSeq = 0;
+const hlBarks = [];           // bosses' spoken lines, in the world
+
+/* ================================ the calendar ============================== */
+/* The day as the server says it, the same authority the daily uses. Null
+   until the board has answered: the device's own clock is never asked, because
+   anybody can set it forward, and the event must not open on it. */
+function hlToday() {
+  if (HL.day) return HL.day;
+  try { if (Daily.from === 'server' && Daily.day) return Daily.day; } catch (e) {}
+  return null;
+}
+/* Early: the admin panel's FORCE ON, or a dev account holding the
+   'unlock-event' perk (granted by the server, so it can be tried on a real
+   device before the date). The event is open to it whatever the calendar
+   says, every chapter included. The worldwide count still refuses anything
+   reported outside its window, so a test run lights no real candles.
+   The perk counts only once the server has handed it over this session
+   (Awards.served), never because the saved profile lists it: the save is
+   localStorage, and a valid id typed into it would open the event to anyone. */
+function hlEarly() {
+  if (HL.force) return true;
+  try { return Awards.served.includes('unlock-event'); } catch (e) { return false; }
+}
+function hlLive() {
+  if (hlEarly()) return true;
+  const d = hlToday();
+  return !!d && d >= HL_EVENT.from && d < HL_EVENT.to;
+}
+function hlChapterOpen(i) {
+  const c = HL_EVENT.chapters[i];
+  if (!c || !hlLive()) return false;
+  return hlEarly() || hlToday() >= c.opens;
+}
+
+/* ================================ the art file ==============================
+   The art is not in this page. It is hl-art.js, beside it, and it is only
+   fetched while it can be seen: while the event is live, or while one of the
+   vigil's prize skins is worn (those keep their look all year). Outside that,
+   nobody downloads any of it. Until it arrives, and if it never does, the
+   placeholder hooks inline below draw instead; the file's hooks replace them
+   by name as it loads.
+
+   While the event is live it is fetched from the menu, then warmed in idle
+   moments (hlArtPreload, in the art: the baked floors, the sprites), so the
+   first step into the vigil or the patch does not stall on building them.
+
+   HL_ART_VER is stamped by C:\.claude\lift-hl-art.mjs from the file's
+   contents, so a new art file is never served out of a stale cache.
+=========================================================================== */
+const HL_ART_VER = '7c7be4e5af';
+const HL_ART = { status: 'none', t0: 0, ms: 0, prepped: false };
+function hlArtWanted() {
+  if (hlLive()) return true;
+  try {
+    const s = equippedSpecial();
+    return !!(s && (s.fx === 'hallows' || s.fx === 'lostsoul'));
+  } catch (e) { return false; }
+}
+/* Cheap enough for every frame: it is two flags until there is work to do. */
+function hlArtEnsure() {
+  if (HL_ART.status === 'none' && hlArtWanted()) hlArtLoad();
+  if (HL_ART.status === 'ready' && !HL_ART.prepped && hlLive()) hlArtPrep();
+}
+function hlArtLoad() {
+  HL_ART.status = 'loading';
+  HL_ART.t0 = performance.now();
+  const el = document.createElement('script');
+  el.src = 'hl-art.js?v=' + HL_ART_VER;
+  el.async = true;
+  el.onload = () => { HL_ART.status = 'ready'; HL_ART.ms = performance.now() - HL_ART.t0; };
+  el.onerror = () => { HL_ART.status = 'failed'; };      // the placeholders stay
+  document.head.appendChild(el);
+}
+/* The art's own list of what to make ahead, run one piece per idle moment so
+   the menu never hitches for long. Only while the event is live: a vigil skin
+   worn in March needs its hooks, not the patch's floor. */
+function hlArtPrep() {
+  HL_ART.prepped = true;
+  if (typeof hlArtPreload !== 'function') return;
+  let tasks = [];
+  try { tasks = hlArtPreload() || []; } catch (e) { tasks = []; }
+  const idle = window.requestIdleCallback
+    ? f => window.requestIdleCallback(f, { timeout: 1500 })
+    : f => setTimeout(f, 60);
+  const step = () => {
+    const t = tasks.shift();
+    if (!t) return;
+    try { t(); } catch (e) {}
+    idle(step);
+  };
+  setTimeout(() => idle(step), 800);     // after the menu has settled in
+}
+
+/* ================================== profile ================================= */
+/* This book's slice of the profile, made on first touch. */
+function hlP() {
+  const p = Save.profile;
+  if (!p.hl || typeof p.hl !== 'object') p.hl = {};
+  let b = p.hl[HL_EVENT.id];
+  if (!b) b = p.hl[HL_EVENT.id] = { q: {}, prog: {}, medals: [], equip: [], candles: 0, seen: {}, sent: [], total: 0 };
+  return b;
+}
+function hlSave() { Save.writeLocal(); Save.flush(); }
+const hlSeen = k => !!hlP().seen[k];
+function hlSee(k) { const b = hlP(); if (!b.seen[k]) { b.seen[k] = 1; hlSave(); } }
+const hlQDone  = id => hlP().q[id] === 2;
+const hlQGiven = id => (hlP().q[id] || 0) >= 1;
+const hlQuest  = id => HL_QUESTS.find(q => q.id === id);
+function hlGive(id) { const b = hlP(); if (!b.q[id]) { b.q[id] = 1; hlSave(); } }
+
+/* Both stores, one record: what either has done is done, progress is the
+   further of the two, medals are the union, and the worn pair is the one the
+   second store holds if it holds one. Save.merge runs at boot, before this
+   block is reached, so nothing declared below may be named in here. */
+function hlMerge(a, b) {
+  a = a || {}; b = b || {};
+  const out = {};
+  const keys = (x, y) => new Set([...Object.keys(x || {}), ...Object.keys(y || {})]);
+  for (const id of keys(a, b)) {
+    const x = a[id] || {}, y = b[id] || {}, q = {}, prog = {};
+    for (const k of keys(x.q, y.q)) q[k] = Math.max((x.q || {})[k] || 0, (y.q || {})[k] || 0);
+    for (const k of keys(x.prog, y.prog)) prog[k] = Math.max((x.prog || {})[k] || 0, (y.prog || {})[k] || 0);
+    out[id] = {
+      q, prog,
+      seen: Object.assign({}, x.seen || {}, y.seen || {}),
+      medals: [...new Set([...(x.medals || []), ...(y.medals || [])])],
+      equip: ((y.equip && y.equip.length) ? y.equip : (x.equip || [])).slice(0, 2),
+      candles: Math.max(x.candles || 0, y.candles || 0),
+      sent: [...new Set([...(x.sent || []), ...(y.sent || [])])],
+      total: Math.max(x.total || 0, y.total || 0)
+    };
+  }
+  return out;
+}
+
+/* ================================== quests ================================== */
+/* The quest the soul is on: the first not yet done, if its chapter is open and
+   it has been built. null while it is waiting on either. */
+function hlCurrent() {
+  for (const q of HL_QUESTS) {
+    if (hlQDone(q.id)) continue;
+    return (q.later || !hlChapterOpen(q.ch)) ? null : q;
+  }
+  return null;
+}
+function hlProgress(id) { return hlP().prog[id] || 0; }
+function hlProgAdd(id, n = 1) {
+  const b = hlP();
+  b.prog[id] = (b.prog[id] || 0) + n;
+  hlSave();
+  return b.prog[id];
+}
+/* Done, paid and reported. The candles are this profile's own count; the
+   world's is the server's, and it is told once (Vigil.turnIn). A medal won
+   goes straight into a free slot, so the first two are worn without a trip to
+   the stand. */
+function hlComplete(id) {
+  const q = hlQuest(id), b = hlP();
+  if (!q || b.q[id] === 2) return;
+  b.q[id] = 2;
+  b.candles = (b.candles || 0) + q.candles;
+  if (q.medal && !b.medals.includes(q.medal)) {
+    b.medals.push(q.medal);
+    if (b.equip.length < HL_EQUIP_MAX) b.equip.push(q.medal);
+  }
+  hlSave();
+  Vigil.turnIn(id);
+  hlQuestDoneFx(q);
+}
+/* How much of the soul has come back, as the vigil shows it. A quest counts
+   once it has been told there — finishing one up in the patch does not change
+   the soul down here until you walk back to it. */
+const hlShown = id => hlQDone(id) && hlSeen(id + ':shown');
+function hlSoulShown() {
+  return hlShown('q7') ? 5 : hlShown('q6') ? 4 : hlShown('q4') ? 3 : hlShown('q2') ? 2 : hlShown('q1') ? 1 : 0;
+}
+function hlLandingShown() {
+  return hlShown('q6') ? 3 : hlShown('q4') ? 2 : hlShown('q2') ? 1 : 0;
+}
+
+/* ================================== medals ================================== */
+/* On in every ordinary run, the rush and the event's own areas while the event
+   is live. Off in dailies and challenges, which are rule sheets everyone
+   flies the same, and meaningless in the vigil. Worked out once a frame. */
+function hlMedalsOn() {
+  if (!hlLive() || inVigil) return false;
+  const c = Chal.on;
+  return !(c && !c.hl && !c.rush);
+}
+function hlMedalSync() {
+  HL.eq = {};
+  if (!hlMedalsOn()) return;
+  for (const id of hlP().equip) HL.eq[id] = 1;
+}
+/* THE GOURD: left alive long enough, a body is worth more and harder to put
+   down. */
+function hlRipen(e) {
+  e.hlRipe = true;
+  e.maxHp *= 1.5; e.hp *= 1.5;
+  e.xp *= 2; e.score *= 2;
+  hlRipenFx(e);
+}
+/* ONE DAY: put aside, then paid at a boss, half again on top. */
+function hlBankXp(v) { P.hlBank = (P.hlBank || 0) + v; }
+function hlBossPay() {
+  if (!(P.hlBank > 0)) return;
+  const v = P.hlBank * HL_BANK_MUL;
+  P.hlBank = 0;
+  P.xp += v;
+  hlBankPaidFx(v);
+  checkLevel();
+}
+function hlStandToggle(id) {
+  const b = hlP(), m = HL_MEDALS.find(z => z.id === id);
+  if (!m || m.later || !b.medals.includes(id)) return 'locked';
+  const i = b.equip.indexOf(id);
+  if (i >= 0) { b.equip.splice(i, 1); hlSave(); return 'off'; }
+  if (b.equip.length >= HL_EQUIP_MAX) return 'full';
+  b.equip.push(id); hlSave();
+  return 'on';
+}
+
+/* =========================== the vigil: the count ===========================
+   Every candle lit by anyone, as one number. The server pays each quest once
+   per profile however often it is told, which is what keeps the number honest:
+   nobody can add more than a finished story's worth. */
+const Vigil = {
+  total: 0, lit: 0, marks: HL_EVENT.prizes.map(p => p.at), status: 'idle', at: 0,
+  local: null,                 // the admin panel's stand-in total
+  async load() {
+    if (location.protocol === 'file:') { Vigil.status = 'offline'; return; }
+    Vigil.status = 'loading';
+    try {
+      const r = await fetch(Board.url + '?vigil=' + encodeURIComponent(HL_EVENT.id) +
+                            '&pid=' + encodeURIComponent(myPid()), { cache: 'no-store' });
+      if (!r.ok) throw new Error('http ' + r.status);
+      const d = await r.json();
+      Vigil.take(d);
+      Vigil.status = 'ok';
+      Vigil.flush();
+    } catch (e) { Vigil.status = 'offline'; }
+  },
+  take(d) {
+    if (!d) return;
+    if (d.total !== undefined) Vigil.total = Math.max(0, d.total | 0);
+    if (d.lit !== undefined) Vigil.lit = Math.max(0, d.lit | 0);
+    if (Array.isArray(d.marks)) Vigil.marks = d.marks.map(Number);
+    Vigil.at = Date.now();
+    hlClaimPrizes();
+  },
+  /* Once per quest per profile. What never got there is sent again on the next
+     load, so a quest finished offline still lights its candles. */
+  async turnIn(id) {
+    if (BETA || location.protocol === 'file:') return;
+    try {
+      const r = await fetch(Board.url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vigil: HL_EVENT.id, quest: id, pid: myPid() })
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      const b = hlP();
+      if (!b.sent.includes(id)) { b.sent.push(id); hlSave(); }
+      Vigil.take(d);
+    } catch (e) {}
+  },
+  flush() {
+    const b = hlP();
+    for (const id of Object.keys(b.q)) if (b.q[id] === 2 && !b.sent.includes(id)) Vigil.turnIn(id);
+  },
+  /* what the room shows: the world's count, and never less than your own */
+  shown() { return Vigil.local !== null ? Vigil.local : Math.max(Vigil.total, hlP().candles || 0); }
+};
+/* A prize belongs to everyone who has lit at least one candle, once the
+   count reaches it — including anyone who lit theirs and stopped playing. */
+function hlClaimPrizes() {
+  if (!(Vigil.lit > 0)) return;
+  for (const p of HL_EVENT.prizes) {
+    if (Vigil.total < p.at || devHeld(p.skin)) continue;
+    if (devGrant(p.skin, 'ALL HALLOWS')) hlPrizeFx(p);
+  }
+}
+
+/* ============================ the knock (the menu) ==========================
+   Once per profile, on the menu, the first time it loads with the event live
+   — after the outsider's own arrival if that is still owed, and after any
+   unread notes. The menu does not answer while it plays; [ESC] skips it. */
+function hlProDue() {
+  return state === 'menu' && hlLive() && !hlSeen('prologue') && !arrival &&
+         !outsiderArrivalDue() && (Save.profile.logSeen || 0) >= LOG_VER;
+}
+const hlProOn = () => !!HL.pro;
+function hlProStart() {
+  const lines = Save.profile.outsiderIn ? HL_SAY.proIn : HL_SAY.proNew;
+  const cues = [
+    { at: 1.0, shake: 0.5, call: () => hlKnockFx(0) },
+    { at: 1.7, shake: 0.6, call: () => hlKnockFx(1) },
+    { at: 2.4, shake: 0.8, call: () => hlKnockFx(2) },
+    { at: 3.1, shake: 1.0, call: () => hlHatchOpenFx() }
+  ];
+  let t = 4.8;
+  for (const [who, text] of lines) {
+    const dur = text.length / 26 + 1.9;
+    cues.push({ at: t, say: who, text, dur });
+    t += dur + 0.15;
+  }
+  const end = t + 0.9;
+  HL.pro = hlTimeline({
+    name: 'prologue', len: end + 0.7,
+    tracks: {
+      stall: [[0, 0], [0.6, 1, 'out3'], [end, 1], [end + 0.7, 0, 'inOut']],   // the menu goes quiet
+      open:  [[3.1, 0], [3.7, 1, 'outBack']],                                 // the hatch
+      rise:  [[3.6, 0], [4.6, 1, 'out3'], [t, 1], [end, 0, 'in3']]           // him, in it
+    },
+    cues,
+    onEnd: () => { HL.pro = null; hlSee('prologue'); }
+  });
+}
+function hlProSkip() { if (HL.pro) { HL.pro.skip(); HL.pro = null; hlSee('prologue'); } }
+/* The hatch is on the menu from the knock until the event closes. */
+const hlHatchUp = () => hlLive() && (hlSeen('prologue') || hlProOn());
+function hlHatchRect() { return { x: W - 236, y: H - 150, w: 210, h: 104 }; }
+function hlMenuTick(dt) {
+  hlArtEnsure();
+  if (state !== 'menu') return;
+  hlPartsTick(dt);
+  if (HL.pro) HL.pro.tick(dt);
+  else if (hlProDue()) hlProStart();
+  if (hlHatchUp()) hlArtTick(dt, 'menu');
+  // the count, now and then, while it is on
+  if (hlLive() && Date.now() - HL.lastLoad > 5 * 60000) { HL.lastLoad = Date.now(); Vigil.load(); }
+}
+function hlOpenVigil() {
+  if (!hlHatchUp() || hlProOn()) return false;
+  enterVigil();
+  return true;
+}
+
+/* ================================ the vigil =================================
+   A room under the floor, walked like the hub. The spots are offsets from the
+   room's centre; the art places everything it draws from these, so moving a
+   thing is moving it here. */
+const VIG_SIZE = { w: 1400, h: 1000 };
+const VIG_SPOTS = {
+  exit:     { x: 0,    y: 420 },
+  outsider: { x: -230, y: 60 },
+  stand:    { x: 420,  y: 170 },
+  wall:     { x: 0,    y: -470 },
+  ways: [ { area: 'patch', ch: 0, x: -380, y: -400 },
+          { area: 'house', ch: 1, x: 0,    y: -440 },
+          { area: 'yard',  ch: 2, x: 380,  y: -400 } ],
+  landings: [ { x: 0, y: -60 }, { x: 0, y: -160 }, { x: 0, y: -250 }, { x: 0, y: -330 } ],
+  alcoves:  [ { x: -660, y: -230 }, { x: -660, y: 140 }, { x: 660, y: -230 }, { x: 660, y: 140 } ]
+};
+const VIG_REACH = { soul: 110, outsider: 90, stand: 110, way: 100, exit: 90 };
+const vig = { t: 0, near: null, nearI: -1, talk: null, stand: null, asc: null, change: null, sayT: 0, said: '' };
+
+function vigPos(o) {
+  return { x: (arena.x0 + arena.x1) / 2 + o.x, y: (arena.y0 + arena.y1) / 2 + o.y };
+}
+/* Where the soul is, mid-rise included. */
+function vigSoulPos() {
+  const L = VIG_SPOTS.landings;
+  if (vig.asc) {
+    const a = vigPos(L[vig.asc.from]), b = vigPos(L[vig.asc.to]);
+    const k = hlEase('inOut3', vig.asc.t / HL_ASC_T);
+    return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k) };
+  }
+  return vigPos(L[hlLandingShown()]);
+}
+
+function enterVigil() {
+  if (!hlLive() || netLive()) return;
+  resetGame();
+  inVigil = true;
+  enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+  portals.length = 0; hazards.length = 0; mortars.length = 0;
+  libraryPortal = null; libraryBook = null; malwareOffer = null;
+  awaitingPortal = false; bossAlive = false;
+  betweenWaves = 1e9; spawnBudget = 0; wave = 0;
+  arenaReset(true);
+  arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, VIG_SIZE.w, VIG_SIZE.h);
+  const e = vigPos(VIG_SPOTS.exit);
+  P.x = e.x; P.y = e.y - 70; P.vx = P.vy = 0; P.ang = -Math.PI / 2;
+  cam.x = P.x; cam.y = P.y;
+  state = 'play'; uiArm = 0.3;
+  vig.t = 0; vig.talk = null; vig.stand = null; vig.asc = null; vig.change = null;
+  vig.sayT = 0; vig.said = '';
+  hlPartsClear();
+  Vigil.load();
+  if (!hlSeen('first')) hlTalk(HL_SAY.first);    // the rest waits for you to walk up to it
+  hlVigilEnterFx();
+  Audio_.select();
+}
+function exitVigil() {
+  inVigil = false;
+  hlPartsClear();
+  vig.talk = null; vig.stand = null;
+  enemies.length = 0; ebullets.length = 0;
+  bossAlive = false;
+  state = 'menu'; uiArm = 0.3;
+  Audio_.select();
+}
+
+/* ---- talking: one conversation at a time. Each line waits once it has
+   finished typing — for [E], or for a few seconds — and a press while it is
+   still typing finishes it. ---- */
+function hlTalk(lines, then) {
+  vig.talk = { lines, i: 0, age: 0, then, cue: {} };
+}
+function hlTalkLine() {
+  const T = vig.talk;
+  if (!T) return null;
+  const L = T.lines[T.i];
+  return { who: L[0], text: L[1], age: T.age, dur: Infinity, cue: T.cue };
+}
+function hlTalkTyped() {
+  const T = vig.talk, L = T.lines[T.i];
+  const tt = hlTypeTimes(L[1], L[0], L[0] === 'soul' ? HL_STEADY[hlSoulShown()] : 0);
+  return tt[tt.length - 1];
+}
+function hlTalkNext() {
+  const T = vig.talk;
+  if (!T) return;
+  const full = hlTalkTyped();
+  if (T.age < full) { T.age = full + 0.001; return; }
+  T.i++; T.age = 0; T.cue = {};
+  if (T.i >= T.lines.length) {
+    vig.talk = null;
+    if (T.then) T.then();
+  }
+}
+function hlTalkTick(dt) {
+  const T = vig.talk;
+  if (!T) return;
+  T.age += dt;
+  if (T.age > hlTalkTyped() + 3.6) hlTalkNext();
+}
+
+/* What the soul has to say when you are close enough, in order: anything
+   finished out there and not yet told here, then the next quest. A boss
+   quest's telling starts with the soul rising a landing. */
+function hlSoulSpeaks() {
+  for (const q of HL_QUESTS) {
+    if (!hlQDone(q.id) || hlSeen(q.id + ':done')) continue;
+    const lines = HL_SAY[q.id + 'Done'] || [];
+    const tell = () => {
+      hlSee(q.id + ':shown');
+      vig.change = { stage: hlSoulShown(), t: 0 };
+      hlSoulChangeFx(hlSoulShown());
+      hlTalk(lines, () => hlSee(q.id + ':done'));
+    };
+    if (q.ascend && !hlSeen(q.id + ':shown')) {
+      const from = hlLandingShown();
+      vig.asc = { from, to: q.ascend, t: 0, then: tell };
+      hlAscendFx(q.ascend);
+    } else tell();
+    return true;
+  }
+  const c = hlCurrent();
+  if (c && !hlQGiven(c.id) && HL_SAY[c.id + 'Give']) {
+    hlTalk(HL_SAY[c.id + 'Give'], () => hlGive(c.id));
+    return true;
+  }
+  return false;
+}
+
+function vigilTick(dt) {
+  vig.t += dt;
+  hlTalkTick(dt);
+  if (vig.change) { vig.change.t += dt; if (vig.change.t > 3) vig.change = null; }
+  if (vig.asc) {
+    vig.asc.t += dt;
+    if (vig.asc.t >= HL_ASC_T) { const a = vig.asc; vig.asc = null; a.then(); }
+  }
+  if (vig.sayT > 0) vig.sayT -= dt;
+
+  // the nearest thing that answers [E]
+  vig.near = null; vig.nearI = -1;
+  const soul = vigSoulPos();
+  const dS = len(P.x - soul.x, P.y - soul.y);
+  const check = (kind, o, r, i) => {
+    const q = vigPos(o);
+    if (!vig.near && len(P.x - q.x, P.y - q.y) < r + P.r) { vig.near = kind; vig.nearI = i === undefined ? -1 : i; }
+  };
+  if (dS < VIG_REACH.soul + P.r && hlSoulShown() < 5) vig.near = 'soul';
+  check('outsider', VIG_SPOTS.outsider, VIG_REACH.outsider);
+  check('stand', VIG_SPOTS.stand, VIG_REACH.stand);
+  VIG_SPOTS.ways.forEach((w, i) => check('way', w, VIG_REACH.way, i));
+  check('exit', VIG_SPOTS.exit, VIG_REACH.exit);
+
+  // the first time down, the rest of it is said once you are standing by it
+  if (!vig.talk && !vig.asc && dS < 240) {
+    if (!hlSeen('first'))
+      hlTalk(HL_SAY.firstNear.concat(HL_SAY.q1Give), () => { hlSee('first'); hlGive('q1'); });
+    else hlSoulSpeaks();
+  }
+  if (vig.stand) {
+    const s = vigPos(VIG_SPOTS.stand);
+    if (len(P.x - s.x, P.y - s.y) > 190) vig.stand = null;
+  }
+}
+
+/* [E] in the vigil. Returns true if the press was used. */
+function vigilInteract() {
+  if (vig.talk) { hlTalkNext(); return true; }
+  if (vig.asc) return true;
+  switch (vig.near) {
+    case 'soul':
+      if (!hlSoulSpeaks()) {
+        const c = hlCurrent();
+        if (c && HL_SAY[c.id + 'Give']) hlTalk([HL_SAY[c.id + 'Give'][0]]);
+        else hlTalk(HL_SAY.wait);
+      }
+      return true;
+    case 'outsider': {
+      const b = hlP(), now = Vigil.shown();
+      let line = pick(HL_SAY.idle);
+      if (b.total && now > b.total) line = HL_SAY.more;
+      if (now !== b.total) { b.total = now; hlSave(); }
+      hlTalk([['outsider', line]]);
+      return true;
+    }
+    case 'stand':
+      vig.stand = vig.stand ? null : { sel: 0, msg: '', msgT: 0 };
+      Audio_.select();
+      return true;
+    case 'way': {
+      const w = VIG_SPOTS.ways[vig.nearI];
+      if (!w || !HL_AREAS[w.area] || !hlChapterOpen(w.ch)) {
+        vig.sayT = 2.2; vig.said = 'shut';
+        Audio_.tone(140, 0.12, 'square', 0.05, 90);
+        return true;
+      }
+      hlAreaStart(w.area);
+      return true;
+    }
+    case 'exit':
+      exitVigil();
+      return true;
+  }
+  return false;
+}
+/* Keys while in the vigil, ahead of the game's own. true = used. */
+function vigilKey(k) {
+  if (!inVigil || state !== 'play') return false;
+  if (vig.stand) {
+    const own = HL_MEDALS;
+    if (k === 'escape' || k === 'q') { vig.stand = null; return true; }
+    if (k === 'arrowdown' || k === 's') { vig.stand.sel = (vig.stand.sel + 1) % own.length; return true; }
+    if (k === 'arrowup' || k === 'w') { vig.stand.sel = (vig.stand.sel + own.length - 1) % own.length; return true; }
+    const n = ['1', '2', '3', '4', '5', '6', '7'].indexOf(k);
+    if (n >= 0 || k === 'enter') {
+      const i = n >= 0 ? n : vig.stand.sel;
+      if (!own[i]) return true;
+      vig.stand.sel = i;
+      const r = hlStandToggle(own[i].id);
+      vig.stand.msg = r; vig.stand.msgT = 1.6;
+      Audio_.select();
+      return true;
+    }
+  }
+  if (k === 'e') return vigilInteract();
+  return false;
+}
+
+/* ================================ the areas ================================= */
+const hlAreaOn = () => !!(hlArea && Chal.on && Chal.on.hl);
+function hlAreaStart(id) {
+  const A = HL_AREAS[id];
+  if (!A || netLive()) return;             // an area is flown alone
+  resetGame();
+  Chal.on = { id: 'hl-' + id, n: A.stage.name, tier: 0, goal: null, hl: id,
+              accent: A.stage.accent, d: HL_EVENT.n, m: {} };
+  Chal.won = false; Chal.reward = null;
+  Chal.waveT = 0; Chal.moveT = 1.2; Chal.curseT = 2;
+  hlArea = { id, n: 0, t: 0, coldDue: 0, coldLive: 0, end: null, death: null };
+  hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;
+  /* The head start: what the waves before this one would have paid, in full.
+     rushSkipped reads the same budget curve startWave spends. */
+  const s = rushSkipped(1, A.waveFrom - 1);
+  P.xp += Math.round(s.xp / RUSH_PAY * P.xpMul);
+  credits += Math.round(s.cr / RUSH_PAY * P.credMul * hardCred());
+  wave = A.waveFrom - 1;
+  stageAbs = Math.floor((A.waveFrom - 1) / 5);   // shop prices scale on this
+  enterStage(A.stage);
+  betweenWaves = 2.6;
+  state = 'play'; uiArm = 0.3;
+  hlPartsClear();
+  banner(A.stage.name, A.stage.accent, 3.0);
+  hlAreaEnterFx(A);
+  Audio_.select();
+}
+const hlAreaDef = () => hlArea && HL_AREAS[hlArea.id];
+const hlErrandDone = A => hlQDone(A.errand);
+
+/* startWave(), for an area. Waves 1–4 are the roster; the fifth is the boss,
+   once the chapter's errand is done — and if it is not, the area lets you go
+   with whatever you found kept. */
+function hlAreaWave() {
+  const A = hlAreaDef();
+  hlArea.n++;
+  wave++;
+  betweenWaves = 0;
+  if (hlArea.n >= 5) {
+    if (!hlErrandDone(A)) { hlAreaEnd('errand'); return; }
+    const bd = BOSSES[A.stage.boss];
+    bossAlive = true;
+    banner(bd.name + '   INBOUND', bd.col);
+    Audio_.boss();
+    spawnRing('boss', { boss: A.stage.boss });
+    spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget() * hardBudget());
+  } else {
+    banner(hlArea.n === 1 ? A.stage.name : 'WAVE ' + hlArea.n + '  /  5', A.stage.accent);
+    Audio_.wave();
+    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * chalBudget() * hardBudget());
+    // the errand's piece for this wave, while one is owed
+    const q = hlQuest(A.errand);
+    if (!hlQDone(q.id) && hlArea.n >= 2 && hlProgress(q.id) + hlArea.coldLive < q.need)
+      hlArea.coldDue = rnd(COLD_AFTER[1], COLD_AFTER[0]);
+  }
+  spawnT = 0;
+  waveTimer = 0;
+}
+/* why: 'errand' (wave five with the errand still open), 'win' (the boss) */
+function hlAreaEnd(why) {
+  if (!hlArea || hlArea.end) return;
+  hlArea.end = { why, t: 0 };
+  betweenWaves = 1e9; spawnBudget = 0;
+  const A = hlAreaDef();
+  if (why === 'errand') {
+    for (const e of enemies) if (!e.dead && !e.hacked) { e.dead = true; burst(e.x, e.y, 10, e.col, 180, 2.4, 0.4); }
+    ebullets.length = 0;
+    hlHeldClear();
+    banner(A.stage.name + '   LETS YOU GO', A.stage.accent, 3.6);
+  }
+  hlAreaEndFx(why);
+}
+/* Called from onBossDefeat for an area's boss, in place of everything a stage
+   boss hands out: no shop, no gate, no library. The quest, then the vigil. */
+function hlBossDown(e) {
+  const A = hlAreaDef();
+  bossAlive = false;
+  hlBark(e, HL_BARK[e.boss] ? HL_BARK[e.boss].death : '');
+  hlHeldClear();
+  for (const o of enemies) if (!o.dead && o !== e && !o.hacked) { o.dead = true; burst(o.x, o.y, 12, o.col, 200, 2.4, 0.4); }
+  ebullets.length = 0;
+  score += Math.round(500 * (stageAbs + 1) * hardScore());
+  credits += Math.round((70 + wave * 6) * P.credMul * hardCred());
+  hlArea.death = { boss: e.boss, x: e.x, y: e.y, r: e.r, t: 0 };
+  hlComplete(A.bossQ);
+  banner(BOSSES[e.boss].name + '   DESTROYED', COL.crit);
+  drawFlashT = 0.3; shake(1.6);
+  hlBossDeathFx(e);
+  hlAreaEnd('win');
+}
+/* A chip line for the challenge HUD, and the death screen's note. */
+function hlChipGoal() {
+  const A = hlAreaDef();
+  if (!A) return '';
+  const q = hlQuest(A.errand);
+  if (!hlQDone(q.id)) return q.n + '   ' + hlProgress(q.id) + ' / ' + q.need;
+  return 'KILL  ' + BOSSES[A.stage.boss].name;
+}
+
+/* ---- per frame, in play ---- */
+function hlTick(dt, wdt) {
+  hlArtEnsure();
+  hlMedalSync();
+  hlPartsTick(dt);
+  if (inVigil || hlAreaOn()) hlArtTick(dt, inVigil ? 'vigil' : hlArea.id);
+  // barks age out whatever else is going on
+  for (let i = hlBarks.length - 1; i >= 0; i--) {
+    const b = hlBarks[i];
+    b.t += dt;
+    if (b.e && !b.e.dead) { b.x = b.e.x; b.y = b.e.y; }
+    if (b.t > b.life) hlBarks.splice(i, 1);
+  }
+  if (!hlAreaOn()) { hlPile = 0; return; }
+  const A = hlAreaDef();
+  hlArea.t += dt;
+  if (hlArea.death) hlArea.death.t += dt;
+  if (hlArea.end) {
+    hlArea.end.t += dt;
+    if (hlArea.end.t >= HL_END_T) { hlArea = null; chalQuit(); enterVigil(); }
+    return;
+  }
+  // THE PATCH: the pile
+  hlPile = 0;
+  if (A.id === 'patch')
+    for (const g of enemies) if (!g.dead && g.type === 'gourd' && !g.hacked) hlPile++;
+  // the errand's cold gourd, some seconds into its wave
+  if (hlArea.coldDue > 0) {
+    hlArea.coldDue -= wdt;
+    if (hlArea.coldDue <= 0) hlColdSprout();
+  }
+  hlHeldTick(wdt);
+}
+const hlPileMul = e => (hlPile && e.type !== 'gourd' ? 1 + PILE_STEP * hlPile : 1);
+
+/* Somewhere you can find it: in front of you, not on top of you. */
+function hlColdSprout() {
+  let x = P.x, y = P.y;
+  for (let tries = 0; tries < 20; tries++) {
+    const a = P.ang + rnd(1.1, -1.1), d = rnd(520, 300);
+    x = clamp(P.x + Math.cos(a) * d, arena.x0 + 60, arena.x1 - 60);
+    y = clamp(P.y + Math.sin(a) * d, arena.y0 + 60, arena.y1 - 60);
+    if (len(x - P.x, y - P.y) > 240) break;
+  }
+  const g = spawnEnemy('gourd', x, y, { elite: false });
+  g.hlCold = true;
+  hlArea.coldLive++;
+  hlColdSproutFx(g);
+}
+
+/* ============================= the patch's bodies ===========================
+   Called from updateEnemies' switch for the four types. sp is the body's
+   speed this frame (slow and pile already in it). */
+function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
+  switch (e.type) {
+    /* GOURD: does not move and does not attack. It ripens, and a ripe one
+       splits into a jack. The cold ones are the soul's. */
+    case 'gourd': {
+      e.vx = 0; e.vy = 0;
+      e.hlGrow = clamp(e.t / GOURD_RIPEN, 0, 1);
+      if (e.hlGrow >= 1) hlGourdRipe(e);
+      break;
+    }
+    /* JACK: keeps its distance and lobs seeds; up close it winds up and
+       breathes flame down a locked heading. Its face is its weak point. */
+    case 'jack': {
+      e.hlBreathCd = (e.hlBreathCd || 0) - dt;
+      if (e.state === 0) {
+        e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-5 * dt));
+        const push = d < JACK_WANT - 40 ? -0.7 : d > JACK_WANT + 60 ? 1 : 0;
+        steer(e, (ux * push - uy * 0.4) * sp, (uy * push + ux * 0.4) * sp, 2.4, dt);
+        e.cd -= dt;
+        if (!e.hlDark && d < JACK_BREATH_R + 40 && e.hlBreathCd <= 0) {
+          e.state = 1; e.atkT = JACK_WIND;
+          hlJackWindFx(e);
+        } else if (e.cd <= 0 && d < 640) {
+          e.cd = rnd(2.8, 2.0);
+          hlJackSeeds(e);
+        }
+      } else if (e.state === 1) {                 // wind-up: it still turns to you
+        steer(e, 0, 0, 6, dt);
+        e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-8 * dt));
+        e.atkT -= dt;
+        if (e.hlDark) { e.state = 0; break; }
+        if (e.atkT <= 0) { e.state = 2; e.atkT = JACK_BREATH_T; e.hlBreathAng = e.ang; e.hlBreathTick = 0; hlJackBreathFx(e); }
+      } else {                                     // breathing, down the locked heading
+        steer(e, 0, 0, 6, dt);
+        e.atkT -= dt;
+        e.hlBreathTick -= dt;
+        if (e.hlBreathTick <= 0) {
+          e.hlBreathTick = 0.2;
+          let da = Math.atan2(P.y - e.y, P.x - e.x) - e.hlBreathAng;
+          da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+          if (d < JACK_BREATH_R + P.r && da < JACK_BREATH_A && !P.down) hurtPlayer(e.dmg * 0.6, { src: e });
+        }
+        if (e.atkT <= 0 || e.hlDark) { e.state = 0; e.hlBreathCd = 3.2; }
+      }
+      break;
+    }
+    /* CREEPER: keeps off and throws a vine. A vine that lands holds you —
+       slower, and reeled in — until it is cut, dashed through, or it lets go. */
+    case 'creeper': {
+      const v = e.hlVine;
+      if (!v) {
+        const push = d < 220 ? -0.8 : d > 320 ? 1 : 0;
+        steer(e, (ux * push + uy * 0.5) * sp, (uy * push - ux * 0.5) * sp, 2.2, dt);
+        e.ang = Math.atan2(dy, dx);
+        e.cd -= dt;
+        if (e.cd <= 0 && d < VINE_RANGE) {
+          e.cd = rnd(4, 2.6);
+          e.hlVine = { st: 'fly', x: e.x, y: e.y, vx: ux * VINE_SPD, vy: uy * VINE_SPD, t: 0 };
+          hlVineThrowFx(e);
+        }
+        break;
+      }
+      steer(e, 0, 0, 5, dt);
+      v.t += dt;
+      e.ang = Math.atan2(v.y - e.y, v.x - e.x);
+      if (v.st === 'fly') {
+        v.x += v.vx * dt; v.y += v.vy * dt;
+        if (len(v.x - P.x, v.y - P.y) < P.r + 8 && !(P.dashT > 0) && !P.down) {
+          v.st = 'held'; v.t = 0;
+          hlVineLatchFx(e);
+        } else if (len(v.x - e.x, v.y - e.y) > VINE_RANGE + 40 || v.t > 1.2) v.st = 'back';
+      } else if (v.st === 'held') {
+        v.x = P.x; v.y = P.y;
+        P.slowT = Math.max(P.slowT || 0, 0.08); P.slowV = VINE_SLOW;
+        const dd = len(e.x - P.x, e.y - P.y) || 1;
+        if (dd > e.r + P.r + 24) { P.x += (e.x - P.x) / dd * VINE_REEL * dt; P.y += (e.y - P.y) / dd * VINE_REEL * dt; }
+        if (P.dashT > 0) hlVineCut(e);
+        else if (v.t > VINE_HOLD || P.down) v.st = 'back';
+      } else {
+        const bx = e.x - v.x, by = e.y - v.y, bl = len(bx, by) || 1;
+        v.x += bx / bl * VINE_SPD * 1.3 * dt; v.y += by / bl * VINE_SPD * 1.3 * dt;
+        if (bl < 22) e.hlVine = null;
+      }
+      break;
+    }
+    /* SCARECROW: perfectly still while your aim is on it; it moves only while
+       you are looking somewhere else, and it is fast when it does. */
+    case 'scarecrow': {
+      let da = Math.atan2(e.y - P.y, e.x - P.x) - P.ang;
+      da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+      const watched = da < CROW_WATCH && d < CROW_RANGE;
+      if (watched) {
+        e.vx = 0; e.vy = 0;
+        if (!e.hlWatched) hlCrowFreezeFx(e);
+        e.hlWatched = true;
+      } else {
+        if (e.hlWatched) hlCrowMoveFx(e);
+        e.hlWatched = false;
+        steer(e, ux * sp, uy * sp, 9, dt);
+        e.ang = Math.atan2(dy, dx);
+      }
+      break;
+    }
+  }
+}
+function hlGourdRipe(e) {
+  e.dead = true;
+  if (e.hlCold) {
+    if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+    banner('IT WAS CARRIED OFF', '#a5f3fc', 2.4);
+    hlColdLostFx(e);
+    return;
+  }
+  const j = spawnEnemy('jack', e.x, e.y, { elite: false });
+  j.hlHatched = true;
+  hlGourdSplitFx(e, j);
+}
+function hlJackSeeds(e) {
+  const base = Math.atan2(P.y - e.y, P.x - e.x), n = 5;
+  for (let k = 0; k < n; k++) {
+    const b = eshoot(e, base + (k - (n - 1) / 2) * 0.13, 215, e.dmg * 0.6, 5);
+    b.hlKind = 'seed';
+  }
+  hlJackSeedFx(e);
+}
+/* A hit landing inside the face doubles, and the first one puts the candle
+   out. Called from damageEnemy with the damage's source. */
+function hlJackFace(e, dmg, sx, sy) {
+  let da = Math.atan2(sy - e.y, sx - e.x) - e.ang;
+  da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+  if (da > JACK_FACE) return dmg;
+  if (!e.hlDark) { e.hlDark = true; hlJackSnuffFx(e); }
+  return dmg * 2;
+}
+function hlVineCut(e) {
+  const v = e.hlVine;
+  if (!v) return;
+  hlVineCutFx(e, v);
+  e.hlVine = null;
+  e.cd = Math.max(e.cd, 2.4);
+}
+/* the part of a vine that can be cut: all of it but the last stretch at the
+   hull, which your own muzzle would otherwise sever every time you fired */
+function hlVineSeg(e) {
+  const v = e.hlVine;
+  if (!v) return null;
+  let x2 = v.x, y2 = v.y;
+  if (v.st === 'held') {
+    const l = len(v.x - e.x, v.y - e.y) || 1;
+    const k = Math.max(0, (l - VINE_SPARE) / l);
+    x2 = e.x + (v.x - e.x) * k; y2 = e.y + (v.y - e.y) * k;
+  }
+  return { x1: e.x, y1: e.y, x2, y2 };
+}
+
+/* On any death (from killEnemy): the cold gourds are pieces. */
+function hlOnKill(e) {
+  if (e.type === 'creeper' && e.hlVine) e.hlVine = null;
+  if (!e.hlCold || e.hlCounted) return;
+  e.hlCounted = true;
+  if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+  const A = hlAreaDef(), q = A && hlQuest(A.errand);
+  if (!q || hlQDone(q.id)) return;
+  const n = hlProgAdd(q.id);
+  floatText(e.x, e.y - 30, n + ' / ' + q.need, '#a5f3fc', 18);
+  hlColdBreakFx(e, n, q.need);
+  if (n >= q.need) {
+    hlComplete(q.id);
+    banner(q.n + '   ·   DONE', '#a5f3fc', 3.2);
+  }
+}
+
+/* ================================ THE BACKLOG ===============================
+   The hoarder: buys everything, finishes nothing. Every attack it starts, it
+   abandons partway, and the abandoned thing stays exactly where it stopped —
+   a volley in the air, a sweep hanging as a line, a slam's marker on the
+   floor. That is the pile (hlHeld).
+
+   At 75/50/25% it binges: everything in the pile resumes at once. Anything
+   of yours that touches a paused piece resumes it on the spot, so the pile
+   can be cleared one piece at a time from a safe angle. And a resumed piece
+   hurts him too — lure him into a paused volley's path and then shoot it.
+
+   He also walks to unbroken gourds and adds them to his heap: a little
+   health and a little armour each.
+=========================================================================== */
+function bossBacklog(e, dt, ux, uy, d, ph) {
+  if (!e.hlInit) {
+    e.hlInit = true;
+    e.lockPhase = 0;                 // the shell's phase novas are not his; the binges are
+    e.hlBinge = 0; e.hlHeap = 0; e.hlSayT = 5;
+    hlBark(e, HL_BARK.backlog.enter);
+  }
+  const frac = e.hp / e.maxHp;
+  while (e.hlBinge < BACKLOG_BINGE.length && frac <= BACKLOG_BINGE[e.hlBinge]) {
+    e.hlBinge++;
+    hlBinge(e);
+  }
+  e.hlSayT -= dt;
+  if (e.hlSayT <= 0) { e.hlSayT = rnd(11, 7); hlBark(e, pick(HL_BARK.backlog.idle)); }
+
+  // the nearest gourd, if there is one worth walking to
+  let g = null, gd = 520;
+  for (const o of enemies) {
+    if (o.dead || o.type !== 'gourd' || o.hacked || o.hlCold) continue;
+    const dd = len(o.x - e.x, o.y - e.y);
+    if (dd < gd) { gd = dd; g = o; }
+  }
+  if (g) {
+    steer(e, (g.x - e.x) / gd * e.spd * 1.4, (g.y - e.y) / gd * e.spd * 1.4, 1.6, dt);
+    if (gd < e.r + g.r + 6) hlBacklogEat(e, g);
+  } else {
+    const push = d < 300 ? -0.6 : d > 460 ? 0.8 : 0;
+    steer(e, (ux * push - uy * 0.3) * e.spd, (uy * push + ux * 0.3) * e.spd, 1.2, dt);
+  }
+  e.ang += dt * 0.25;
+  if (e.atkT > 0) return;
+  const n = e.hlBinge;               // 0..3: more of everything as it goes
+  const a = pick([0, 0, 1, 2]);
+  if (a === 0) hlBacklogVolley(e, n);
+  else if (a === 1) hlBacklogSweep(e, n);
+  else hlBacklogSlam(e, n);
+  e.atkT = rnd(2.1, 1.5) - n * 0.15;
+}
+function hlBacklogEat(e, g) {
+  g.dead = true;
+  e.hp = Math.min(e.maxHp, e.hp + e.maxHp * BACKLOG_EAT_HEAL);
+  e.armor = (e.armor || 0) + BACKLOG_EAT_ARMOR;
+  e.hlHeap++;
+  if (Math.random() < 0.6) hlBark(e, HL_BARK.backlog.gourd);
+  hlBacklogEatFx(e, g);
+}
+function hlBinge(e) {
+  hlBark(e, HL_BARK.backlog.binge);
+  let n = 0;
+  for (const p of hlHeld) if (p.held) { hlResume(p, true); n++; }
+  hlBingeFx(e, n);
+}
+
+/* The three things he starts. Each is a piece in hlHeld: live until it is
+   abandoned (heldAt), then held until something resumes it, then live again
+   — turned, so it hurts him as well — until it finishes. */
+function hlBacklogVolley(e, n) {
+  const id = ++hlHeldSeq, base = Math.atan2(P.y - e.y, P.x - e.x), k = 9 + n * 2;
+  const shots = [];
+  for (let i = 0; i < k; i++) {
+    const b = eshoot(e, base + (i - (k - 1) / 2) * 0.11, 250 + n * 20, e.dmg * 0.55, 7);
+    b.hlKind = 'backlog'; b.hlGroup = id; b.life = 9;
+    shots.push(b);
+  }
+  const p = { id, kind: 'volley', e, shots, t: 0, heldAt: rnd(HELD_AFTER[1], HELD_AFTER[0]),
+              live: true, held: false, turned: false };
+  hlHeld.push(p);
+  hlPieceStartFx(p);
+}
+function hlBacklogSweep(e, n) {
+  const id = ++hlHeldSeq, aim = Math.atan2(P.y - e.y, P.x - e.x);
+  const dir = Math.random() < 0.5 ? 1 : -1, arc = 1.6 + n * 0.2;
+  const p = { id, kind: 'sweep', e, x: e.x, y: e.y, dir,
+              a0: aim - dir * arc / 2, a1: aim + dir * arc / 2, a: aim - dir * arc / 2,
+              spd: SWEEP_SPD + n * 0.15, len: SWEEP_LEN, w: SWEEP_W, tele: SWEEP_TELE,
+              heldAt: rnd(SWEEP_HELD[1], SWEEP_HELD[0]), t: 0, hitCd: 0, hitBoss: false,
+              live: true, held: false, turned: false };
+  hlHeld.push(p);
+  hlPieceStartFx(p);
+}
+function hlBacklogSlam(e, n) {
+  const id = ++hlHeldSeq;
+  const p = { id, kind: 'slam', e, x: P.x, y: P.y, r: SLAM_R + n * 10, T: SLAM_T, t: 0,
+              heldAt: rnd(SLAM_HELD[1], SLAM_HELD[0]) * SLAM_T,
+              live: true, held: false, turned: false };
+  hlHeld.push(p);
+  hlPieceStartFx(p);
+}
+/* how far through a piece is, 0..1, for the art */
+function hlPieceK(p) {
+  if (p.kind === 'sweep') return clamp(Math.abs(p.a - p.a0) / Math.abs(p.a1 - p.a0), 0, 1);
+  if (p.kind === 'slam') return clamp(p.t / p.T, 0, 1);
+  return 0;
+}
+function hlHold(p) {
+  p.live = false; p.held = true; p.heldT = 0;
+  if (p.kind === 'volley') for (const b of p.shots) b.hlHeld = true;
+  hlPieceHoldFx(p);
+}
+function hlResume(p, byBinge) {
+  if (!p.held) return;
+  p.held = false; p.live = true; p.turned = true;
+  if (p.kind === 'volley') for (const b of p.shots) { b.hlHeld = false; b.hlTurn = true; }
+  hlPieceResumeFx(p, byBinge);
+}
+function hlHeldClear() {
+  for (const p of hlHeld) if (p.kind === 'volley') for (const b of p.shots) b.life = 0;
+  hlHeld.length = 0;
+}
+function hlHeldTick(dt) {
+  for (let i = hlHeld.length - 1; i >= 0; i--) {
+    const p = hlHeld[i];
+    if (p.held) { p.heldT += dt; continue; }
+    p.t += dt;
+    if (p.kind === 'volley') {
+      if (!p.turned && p.t >= p.heldAt) { hlHold(p); continue; }
+      if (p.shots.every(b => b.life <= 0 || !ebullets.includes(b))) hlHeld.splice(i, 1);
+    } else if (p.kind === 'sweep') {
+      if (p.t < p.tele) continue;
+      p.a += p.dir * p.spd * dt;
+      const done = p.dir > 0 ? p.a >= p.a1 : p.a <= p.a1;
+      if (done) { hlHeld.splice(i, 1); hlPieceEndFx(p); continue; }
+      if (!p.turned && hlPieceK(p) >= p.heldAt) { hlHold(p); continue; }
+      const x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
+      p.hitCd -= dt;
+      if (p.hitCd <= 0 && !P.down && segCircle(p.x, p.y, x2, y2, P.x, P.y, P.r + p.w / 2)) {
+        p.hitCd = 0.5;
+        hurtPlayer(p.e.dmg * 0.9, { src: p.e });
+      }
+      if (p.turned && !p.hitBoss && !p.e.dead && segCircle(p.x, p.y, x2, y2, p.e.x, p.e.y, p.e.r + p.w / 2)) {
+        p.hitBoss = true;
+        damageEnemy(p.e, p.e.maxHp * TURN_SWEEP, false, p.x, p.y, { silent: true });
+        hlTurnHitFx(p, p.e.x, p.e.y);
+      }
+    } else if (p.kind === 'slam') {
+      if (!p.turned && p.t >= p.heldAt) { hlHold(p); continue; }
+      if (p.t >= p.T) {
+        hlHeld.splice(i, 1);
+        if (!P.down && len(P.x - p.x, P.y - p.y) < p.r + P.r) hurtPlayer(p.e.dmg * 1.3, { src: p.e });
+        if (p.turned && !p.e.dead && len(p.e.x - p.x, p.e.y - p.y) < p.r + p.e.r) {
+          damageEnemy(p.e, p.e.maxHp * TURN_SLAM, false, p.x, p.y, { silent: true });
+          hlTurnHitFx(p, p.e.x, p.e.y);
+        }
+        shakeAt(p.x, p.y, 0.6);
+        hlSlamLandFx(p);
+      }
+    }
+  }
+}
+/* A resumed shot of his reaching him. From updateEBullets; true = spent. */
+function hlTurnHit(b) {
+  const e = b.owner;
+  if (!e || e.dead || len(b.x - e.x, b.y - e.y) > e.r + b.r) return false;
+  damageEnemy(e, e.maxHp * TURN_SHOT, false, b.x, b.y, { silent: true });
+  hlTurnHitFx({ kind: 'volley', e }, b.x, b.y);
+  return true;
+}
+
+/* ---- your weapons touching the event's things. Bullets ask hlBulletHit;
+   everything that is not a bullet already reports to rootHitSeg and
+   rootHitCircle (the lance, a counter wave, the swing, the lunge, the stars),
+   and those two hand on to hlHitSeg / hlHitCircle — so every pilot can
+   resume a paused piece and cut a vine. ---- */
+function hlAnyTargets() {
+  if (!hlAreaOn()) return false;          // piles and vines only exist up there
+  if (hlHeld.length) return true;
+  for (const e of enemies) if (e.hlVine) return true;
+  return false;
+}
+function hlPieceTouched(p, test) {
+  if (!p.held) return false;
+  if (p.kind === 'volley') {
+    for (const s of p.shots) if (s.hlHeld && test.pt(s.x, s.y, s.r + 3)) return true;
+    return false;
+  }
+  if (p.kind === 'sweep') {
+    const x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
+    return test.seg(p.x, p.y, x2, y2, p.w / 2);
+  }
+  return test.pt(p.x, p.y, 22);            // a slam: its core
+}
+function hlVineTouched(test) {
+  for (const e of enemies) {
+    if (e.dead || !e.hlVine) continue;
+    const s = hlVineSeg(e);
+    if (s && test.seg(s.x1, s.y1, s.x2, s.y2, 5)) { hlVineCut(e); return true; }
+  }
+  return false;
+}
+function hlTouch(test) {
+  let hit = false;
+  for (const p of hlHeld) if (hlPieceTouched(p, test)) { hlResume(p, false); hit = true; }
+  if (hlVineTouched(test)) hit = true;
+  return hit;
+}
+function hlBulletHit(b) {
+  if (!b.mine || !hlAnyTargets()) return false;
+  const r = b.r;
+  return hlTouch({
+    pt: (x, y, rr) => segCircle(b.px, b.py, b.x, b.y, x, y, rr + r),
+    seg: (x1, y1, x2, y2, w) => segCircle(x1, y1, x2, y2, b.x, b.y, w + r)
+  });
+}
+function hlHitSeg(x1, y1, x2, y2, w) {
+  if (!hlAnyTargets()) return;
+  hlTouch({
+    pt: (x, y, rr) => segCircle(x1, y1, x2, y2, x, y, rr + w),
+    seg: (a1, b1, a2, b2, ww) => {
+      // two segments meet if either passes within reach of points along the other
+      const n = Math.max(2, Math.ceil(len(a2 - a1, b2 - b1) / 18));
+      for (let i = 0; i <= n; i++) {
+        const u = i / n;
+        if (segCircle(x1, y1, x2, y2, lerp(a1, a2, u), lerp(b1, b2, u), ww + w)) return true;
+      }
+      return false;
+    }
+  });
+}
+function hlHitCircle(x, y, rad) {
+  if (!hlAnyTargets()) return;
+  hlTouch({
+    pt: (px, py, rr) => len(px - x, py - y) < rr + rad,
+    seg: (a1, b1, a2, b2, ww) => segCircle(a1, b1, a2, b2, x, y, ww + rad)
+  });
+}
+
+/* ================================== barks =================================== */
+function hlBark(e, text) {
+  if (!text) return;
+  while (hlBarks.length > 1) hlBarks.shift();
+  hlBarks.push({ e, x: e.x, y: e.y, r: e.r, boss: e.boss, text, t: 0, life: 2.6 + text.length * 0.045 });
+  hlBarkFx(e, text);
+}
+
+/* ============================ the render seams ==============================
+   Where the hooks are called from. The world pass is inside the camera
+   transform; the screen pass is not. */
+function hlOwnsBody(e) { return !!(HL_ETYPES[e.type] || HL_BOSSES[e.boss]); }
+function hlDrawFloor() {
+  if (hlAreaOn()) drawHlAreaFloor(hlAreaDef());
+}
+function hlDrawWorldUnder() {
+  if (inVigil) drawVigilWorld();
+  if (hlAreaOn() || inVigil) hlPartsDraw('lit');
+  if (hlHeld.length) for (const p of hlHeld) if (p.kind === 'slam') drawHlSlam(p);
+}
+function hlDrawWorldOver() {
+  if (!(inVigil || hlAreaOn())) return;
+  /* The light pass: only if the art has lit the room this frame. */
+  hlL.lights.length = 0; hlL.occ.length = 0;
+  if (hlLights(inVigil ? 'vigil' : hlArea.id)) hlLightRender();
+}
+function hlDrawWorldGlow() {
+  if (!(inVigil || hlAreaOn())) return;
+  for (const p of hlHeld) if (p.kind === 'sweep') drawHlSweep(p);
+  for (const e of enemies) if (!e.dead && e.hlVine) drawHlVine(e, e.hlVine);
+  hlPartsDraw('glow');
+  drawHlGlow(inVigil ? 'vigil' : hlArea.id);
+  if (hlArea && hlArea.death) drawHlBossDeath(hlArea.death);
+  for (const b of hlBarks) drawHlBark(b);
+}
+function hlDrawScreen() {
+  if (hlAreaOn()) drawHlAreaHud(hlAreaDef(), hlArea);
+  if (inVigil) {
+    if (vig.talk) hlSayDraw(hlTalkLine(), { steady: vig.talk.lines[vig.talk.i][0] === 'soul' ? HL_STEADY[hlSoulShown()] : 0 });
+    else drawHlVigilHud(vig);
+    if (vig.stand) drawHlStandUi(vig.stand, hlP());
+  }
+  if (state === 'play' && (inVigil || hlAreaOn())) drawHlMedalHud(hlP().equip, P.hlBank || 0);
+}
+function hlDrawMenu() {
+  if (!hlHatchUp()) return;
+  const r = hlHatchRect(), T = HL.pro;
+  drawHlHatch(r, T);
+  if (T) {
+    const line = T.line();
+    if (line) hlSayDraw(line, {});
+  }
+}
+
+/* ===========================================================================
+   ALL HALLOWS · ACT I — art hooks
+   PLACEHOLDERS. Nothing here is the look; it is the least that keeps Act I
+   playable and its telegraphs readable while the art is made. The whole
+   block is replaced by the designed file when it lands, from this header to
+   the "end of ALL HALLOWS · ACT I art hooks" line — lift it whole, the way
+   su-art.js and od-art.js are lifted.
+
+   HALLOWS-GUIDE.txt is the contract: every hook below, when it is called,
+   what it is handed, which layer it draws in, and what it must not touch.
+   The kit (THE KIT — ALL HALLOWS, above) is there for the art to use:
+   light and shadow, cloth and rope, rigs, the timeline, dialogue, particles.
+=========================================================================== */
+
+/* ---- effect hooks: called once, at the moment. Placeholders say so with the
+   game's stock bursts, or say nothing. ---- */
+function hlQuestDoneFx(q) { Audio_.levelup(); }
+function hlRipenFx(e) { ringFx(e.x, e.y, e.r, e.r * 2.2, '#fb923c', 0.4, 3); }
+function hlBankPaidFx(v) { floatText(P.x, P.y - 60, 'ONE DAY  +' + Math.round(v) + ' XP', '#fde68a', 16); }
+function hlPrizeFx(p) { banner('THE VIGIL   ·   A PRIZE', '#fb923c', 3.6); }
+function hlKnockFx(i) { Audio_.tone(70 - i * 6, 0.22, 'sine', 0.14, 40); }
+function hlHatchOpenFx() { Audio_.boom(); }
+function hlVigilEnterFx() {}
+/* once a frame, wherever the event is on screen — scene is 'menu', 'vigil' or
+   an area's id. The place to step cloth and ropes, run art timers and
+   spawn ambient particles; draw hooks only draw. */
+function hlArtTick(dt, scene) {}
+function hlSoulChangeFx(stage) { const s = vigSoulPos(); ringFx(s.x, s.y, 8, 90, '#a5f3fc', 0.6, 3); }
+function hlAscendFx(n) { Audio_.levelup(); }
+function hlAreaEnterFx(A) {}
+function hlAreaEndFx(why) {}
+function hlBossDeathFx(e) { burst(e.x, e.y, 60, e.col, 420, 4, 0.9); }
+function hlColdSproutFx(g) { ringFx(g.x, g.y, 6, 70, '#a5f3fc', 0.5, 3); }
+function hlColdLostFx(e) { burst(e.x, e.y, 16, '#a5f3fc', 160, 2.4, 0.5); }
+function hlColdBreakFx(e, n, need) { burst(e.x, e.y, 24, '#a5f3fc', 240, 3, 0.6); Audio_.gem(); }
+function hlGourdSplitFx(e, j) { burst(e.x, e.y, 14, '#fb923c', 200, 3, 0.4); }
+function hlJackWindFx(e) {}
+function hlJackBreathFx(e) {}
+function hlJackSeedFx(e) {}
+function hlJackSnuffFx(e) { burst(e.x, e.y, 8, '#fde68a', 120, 2, 0.3); }
+function hlVineThrowFx(e) {}
+function hlVineLatchFx(e) { Audio_.tone(180, 0.1, 'square', 0.05, 120); }
+function hlVineCutFx(e, v) { burst(v.x, v.y, 8, '#4ade80', 160, 2, 0.3); }
+function hlCrowFreezeFx(e) {}
+function hlCrowMoveFx(e) {}
+function hlBacklogEatFx(e, g) { burst(g.x, g.y, 12, '#fb923c', 180, 2.6, 0.4); }
+function hlBingeFx(e, n) { shake(1.2); Audio_.boom(); }
+function hlPieceStartFx(p) {}
+function hlPieceHoldFx(p) {}
+function hlPieceResumeFx(p, byBinge) { Audio_.tone(520, 0.06, 'square', 0.05, 780); }
+function hlPieceEndFx(p) {}
+function hlTurnHitFx(p, x, y) { burst(x, y, 10, '#fde68a', 220, 2.6, 0.3); }
+function hlSlamLandFx(p) { ringFx(p.x, p.y, p.r * 0.3, p.r, p.turned ? '#fde68a' : '#fb923c', 0.4, 5); Audio_.boom(); }
+function hlBarkFx(e, text) {}
+
+/* ---- the world ---- */
+/* the lights of the room this frame (hlLightBegin, hlLight, hlOcc*).
+   true to run the light pass; the placeholder lights nothing. */
+function hlLights(scene) { return false; }
+function drawHlAreaFloor(A) {}
+function drawHlGlow(scene) {}
+
+/* the event's own bodies, in place of the generic polygon */
+function drawHlBody(e, ea) {
+  ctx.save();
+  ctx.globalAlpha = ea;
+  const col = e.hlCold ? '#a5f3fc' : e.col;
+  ctx.lineWidth = e.type === 'boss' ? 4 : 2.2;
+  ctx.fillStyle = rgba(col, 0.16 + e.flash * 0.46);
+  ctx.strokeStyle = e.flash > 0.5 ? '#ffffff' : col;
+  poly(e.x, e.y, e.r, e.sides, e.ang);
+  ctx.fill(); ctx.stroke();
+  if (e.type === 'gourd') {                   // how ripe
+    ctx.strokeStyle = rgba(col, 0.9); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6, -Math.PI / 2, -Math.PI / 2 + TAU * (e.hlGrow || 0)); ctx.stroke();
+  }
+  if (e.type === 'jack') {                    // the face, and the flame's reach
+    ctx.fillStyle = e.hlDark ? '#334155' : '#fde68a';
+    ctx.beginPath(); ctx.moveTo(e.x, e.y);
+    ctx.arc(e.x, e.y, e.r, e.ang - JACK_FACE, e.ang + JACK_FACE); ctx.closePath(); ctx.fill();
+    if (e.state >= 1) {
+      const a = e.state === 2 ? e.hlBreathAng : e.ang;
+      ctx.fillStyle = rgba('#f97316', e.state === 2 ? 0.45 : 0.15);
+      ctx.beginPath(); ctx.moveTo(e.x, e.y);
+      ctx.arc(e.x, e.y, JACK_BREATH_R, a - JACK_BREATH_A, a + JACK_BREATH_A); ctx.closePath(); ctx.fill();
+    }
+  }
+  if (e.type === 'scarecrow' && e.hlWatched) {
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 5, 0, TAU); ctx.stroke();
+  }
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'center'; ctx.fillStyle = rgba('#e2e8f0', 0.8);
+  ctx.fillText((e.boss ? 'THE BACKLOG · heap ' + (e.hlHeap || 0) : e.type.toUpperCase()) + (e.hlCold ? ' · COLD' : ''),
+               e.x, e.y - e.r - 8);
+  ctx.restore();
+}
+/* the event's enemy rounds (seeds, THE BACKLOG's): held is paused, turned
+   is resumed and dangerous to him as well */
+function drawHlEBullet(b) {
+  ctx.save();
+  ctx.globalAlpha = b.hlHeld ? 0.45 : 1;
+  ctx.fillStyle = b.hlTurn ? '#fde68a' : b.col;
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+  if (b.hlHeld) {
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawHlSweep(p) {
+  const x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
+  ctx.save();
+  ctx.strokeStyle = p.turned ? '#fde68a' : '#fb923c';
+  ctx.globalAlpha = p.t < p.tele ? 0.25 : p.held ? 0.4 : 0.9;
+  ctx.lineWidth = p.t < p.tele ? 2 : p.w;
+  if (p.held) ctx.setLineDash([10, 8]);
+  ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.restore();
+}
+function drawHlSlam(p) {
+  ctx.save();
+  ctx.strokeStyle = p.turned ? '#fde68a' : '#fb923c'; ctx.lineWidth = 2;
+  if (p.held) ctx.setLineDash([8, 6]);
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.stroke();
+  ctx.fillStyle = rgba('#fb923c', 0.18);
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r * hlPieceK(p), 0, TAU); ctx.fill();
+  ctx.fillStyle = '#e2e8f0';
+  ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function drawHlVine(e, v) {
+  ctx.save();
+  ctx.strokeStyle = '#4ade80'; ctx.lineWidth = v.st === 'held' ? 4 : 2;
+  ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(v.x, v.y); ctx.stroke();
+  ctx.restore();
+}
+function drawHlBossDeath(d) {}
+function drawHlBark(b) {
+  const k = clamp(Math.min(b.t / 0.2, (b.life - b.t) / 0.4), 0, 1);
+  ctx.save();
+  ctx.globalAlpha = k;
+  ctx.textAlign = 'center';
+  ctx.font = "600 15px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#fed7aa';
+  ctx.fillText(b.text, b.x, b.y - b.r - 30);
+  ctx.restore();
+}
+
+/* the room, and everything standing in it */
+function drawVigilWorld() {
+  const c = vigPos({ x: 0, y: 0 });
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  const label = (o, t, col) => { const q = vigPos(o); ctx.fillStyle = col || '#64748b'; ctx.fillText(t, q.x, q.y + 40); };
+  ctx.strokeStyle = 'rgba(148,163,184,0.12)'; ctx.lineWidth = 1;
+  ctx.strokeRect(c.x - VIG_SIZE.w / 2 + 20, c.y - VIG_SIZE.h / 2 + 20, VIG_SIZE.w - 40, VIG_SIZE.h - 40);
+  // the candles: one for every ten lit anywhere
+  const n = Math.min(240, Math.floor(Vigil.shown() / 10)), base = vigPos(VIG_SPOTS.landings[0]);
+  ctx.fillStyle = '#fbbf24';
+  for (let i = 0; i < n; i++) {
+    const a = i * 2.39996, r = 70 + 16 * Math.sqrt(i);
+    ctx.fillRect(base.x + Math.cos(a) * r - 1.5, base.y + 60 + Math.sin(a) * r * 0.6 - 1.5, 3, 3);
+  }
+  // the ways up
+  VIG_SPOTS.ways.forEach(w => {
+    const q = vigPos(w), open = hlChapterOpen(w.ch) && !!HL_AREAS[w.area];
+    ctx.strokeStyle = open ? '#fb923c' : '#334155'; ctx.lineWidth = 2;
+    ctx.strokeRect(q.x - 40, q.y - 30, 80, 60);
+    label(w, 'THE ' + w.area.toUpperCase() + (open ? '' : ' · SHUT'), open ? '#fb923c' : '#475569');
+  });
+  // the alcoves: a prize each, lit once the count reaches it
+  VIG_SPOTS.alcoves.forEach((o, i) => {
+    const q = vigPos(o), p = HL_EVENT.prizes[i], lit = p && Vigil.total >= p.at;
+    ctx.strokeStyle = lit ? '#fbbf24' : '#334155';
+    ctx.beginPath(); ctx.arc(q.x, q.y, 26, 0, TAU); ctx.stroke();
+    if (p) label(o, p.at + '', lit ? '#fbbf24' : '#475569');
+  });
+  // the stand, the wall, the way back
+  const s = vigPos(VIG_SPOTS.stand);
+  ctx.strokeStyle = '#94a3b8'; ctx.strokeRect(s.x - 30, s.y - 20, 60, 40);
+  label(VIG_SPOTS.stand, 'THE STAND');
+  const wl = vigPos(VIG_SPOTS.wall);
+  ctx.strokeStyle = '#334155'; ctx.beginPath(); ctx.moveTo(wl.x - 120, wl.y); ctx.lineTo(wl.x + 120, wl.y); ctx.stroke();
+  label(VIG_SPOTS.exit, 'THE WAY BACK');
+  const ex = vigPos(VIG_SPOTS.exit);
+  ctx.beginPath(); ctx.arc(ex.x, ex.y, 30, 0, TAU); ctx.stroke();
+  // the landings, and the soul on one of them
+  VIG_SPOTS.landings.forEach(o => { const q = vigPos(o); ctx.strokeStyle = '#1e293b'; ctx.strokeRect(q.x - 50, q.y - 12, 100, 24); });
+  const st = hlSoulShown();
+  if (st < 5) {
+    const q = vigSoulPos();
+    ctx.fillStyle = '#a5f3fc';
+    ctx.beginPath(); ctx.arc(q.x, q.y, 8 + st * 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#a5f3fc'; ctx.fillText('THE LOST SOUL · ' + st, q.x, q.y + 34);
+  }
+  ctx.restore();
+  // him: the game's own figure
+  const o = vigPos(VIG_SPOTS.outsider);
+  outsiderFigure(o.x, o.y, 42, { pose: 'idle', look: clamp((P.x - o.x) / 260, -1, 1), ph: 0.6 });
+}
+
+/* ---- the screen ---- */
+function drawHlAreaHud(A, area) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = A.stage.accent;
+  ctx.fillText(A.stage.name + '   ·   WAVE ' + Math.max(1, Math.min(5, area.n)) + ' / 5   ·   ' + hlChipGoal(), W / 2, 68);
+  // where the cold ones are
+  for (const e of enemies) {
+    if (e.dead || !e.hlCold) continue;
+    const sx = (e.x - cam.x) * camZoom + W / 2, sy = (e.y - cam.y) * camZoom + H / 2;
+    if (sx > 0 && sx < W && sy > 0 && sy < H) continue;
+    const a = Math.atan2(sy - H / 2, sx - W / 2);
+    const px = W / 2 + Math.cos(a) * Math.min(W, H) * 0.42, py = H / 2 + Math.sin(a) * Math.min(W, H) * 0.42;
+    ctx.fillStyle = '#a5f3fc';
+    ctx.beginPath(); ctx.arc(px, py, 6, 0, TAU); ctx.fill();
+  }
+  if (area.end) {
+    ctx.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(area.end.why === 'win' ? 'BACK TO THE VIGIL' : 'THE PATCH LETS YOU GO', W / 2, H / 2 + 120);
+  }
+  ctx.restore();
+}
+function drawHlVigilHud(v) {
+  const said = v.sayT > 0 && v.said === 'shut';
+  const t = said ? 'THAT WAY IS SHUT FOR NOW'
+          : v.near === 'soul' ? '[E]  THE LOST SOUL'
+          : v.near === 'outsider' ? '[E]  HIM'
+          : v.near === 'stand' ? '[E]  THE STAND  ·  MEDALS'
+          : v.near === 'way' ? '[E]  GO UP  ·  THE ' + VIG_SPOTS.ways[v.nearI].area.toUpperCase()
+          : v.near === 'exit' ? '[E]  THE WAY BACK' : '';
+  if (!t) return;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.letterSpacing = '0.2em';
+  ctx.fillStyle = rgba('#e2e8f0', 0.75);
+  ctx.fillText(t, W / 2, H - 70);
+  ctx.letterSpacing = '0em';
+  ctx.restore();
+}
+function drawHlStandUi(ui, book) {
+  if (ui.msgT > 0) ui.msgT -= lastDT;
+  const x = W / 2 - 200, y = H / 2 - 150;
+  ctx.save();
+  ctx.fillStyle = 'rgba(4,6,11,0.9)'; ctx.fillRect(x, y, 400, 300);
+  ctx.strokeStyle = '#334155'; ctx.strokeRect(x, y, 400, 300);
+  ctx.textAlign = 'left';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('THE STAND   ·   TWO AT A TIME   ·   1–7 / ENTER   ·   ESC', x + 16, y + 24);
+  HL_MEDALS.forEach((m, i) => {
+    const own = book.medals.includes(m.id), on = book.equip.includes(m.id);
+    ctx.fillStyle = i === ui.sel ? '#e2e8f0' : own ? '#94a3b8' : '#334155';
+    ctx.fillText((i + 1) + '   ' + (own ? m.n : '???') + (on ? '   ·   WORN' : ''), x + 16, y + 56 + i * 30);
+  });
+  const m = HL_MEDALS[ui.sel];
+  if (m && book.medals.includes(m.id)) {
+    ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif"; ctx.fillStyle = '#64748b';
+    ctx.fillText(m.d.slice(0, 70), x + 16, y + 280);
+  }
+  if (ui.msgT > 0 && ui.msg === 'full') { ctx.fillStyle = '#fca5a5'; ctx.fillText('TWO AT A TIME. TAKE ONE OFF.', x + 220, y + 24); }
+  ctx.restore();
+}
+function drawHlMedalHud(equip, bank) {
+  if (!equip.length && !bank) return;
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#94a3b8';
+  const names = equip.map(id => (HL_MEDALS.find(m => m.id === id) || { n: id }).n).join('  ·  ');
+  ctx.fillText(names + (bank > 0 ? '   ·   PUT ASIDE ' + Math.round(bank) + ' XP' : ''), W - 18, H - 18);
+  ctx.restore();
+}
+/* the menu: the hatch, and him in it while the knock plays (T is the
+   prologue's timeline, or null once it is over) */
+function drawHlHatch(r, T) {
+  const open = T ? T.v('open') : 1, rise = T ? T.v('rise') : 0;
+  const sh = T ? T.shake(6) : { x: 0, y: 0 };
+  ctx.save();
+  ctx.translate(sh.x, sh.y);
+  if (T && T.v('stall') > 0) { ctx.fillStyle = `rgba(2,4,8,${0.5 * T.v('stall')})`; ctx.fillRect(-20, -20, W + 40, H + 40); }
+  ctx.strokeStyle = rgba('#fb923c', 0.4 + 0.5 * open); ctx.lineWidth = 2;
+  ctx.strokeRect(r.x, r.y + r.h * (1 - open) * 0.5, r.w, r.h * open);
+  if (rise > 0) outsiderFigure(r.x + r.w / 2, r.y + r.h - 24 * rise, 34, { pose: 'rim', a: rise });
+  if (!T) {
+    ctx.textAlign = 'center';
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.letterSpacing = '0.2em';
+    ctx.fillStyle = rgba('#fb923c', 0.6);
+    ctx.fillText('THE VIGIL  —  V', r.x + r.w / 2, r.y + r.h + 16);
+    ctx.letterSpacing = '0em';
+  }
+  ctx.restore();
+}
+/* ---- the vigil's prize skins (DEV_SKINS 'hl-*'): fx 'hallows' with a tier
+   1–3, and 'lostsoul'. Called from SkinFx the way the imperial line is.
+   Placeholders: false and nothing, so the stock special look draws. ---- */
+function hlSkinUnder(s) {}
+function hlSkinPlayer(s) { return false; }        // true: drawn, skip the stock rim
+function hlSkinBullet(b, c, s) { return false; }  // true: drawn, skip the stock round
+function hlSkinPart(p, t, rad, s) { return false; }
+function hlSkinEnemy(e, ea, s) {}
+/* ===================== end of ALL HALLOWS · ACT I art hooks ===================== */
+
 /* ========================= THE ONE YOU LET IN =============================
    The arrival, the hole, what he says and the room behind it, lifted whole
    out of 'outsider-art.js'. That file is authored standalone against its own
@@ -32129,6 +34959,9 @@ function drawEnemiesBody() {
       continue;
     }
 
+    // ALL HALLOWS: its bodies are drawn by their own hooks
+    if (hlOwnsBody(e)) { drawHlBody(e, ea); continue; }
+
     ctx.save();
     ctx.globalAlpha = ea;
     ctx.lineWidth = e.type === 'boss' ? 4 : 2.2;
@@ -33323,6 +36156,7 @@ function drawBullets() {
 function drawEBullets() {
   for (const b of ebullets) {
     if (!inView(b.x, b.y, b.r * 4)) continue;
+    if (b.hlKind) { drawHlEBullet(b); continue; }   // ALL HALLOWS: its rounds draw themselves
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
     const r = b.r;
@@ -36125,6 +38959,7 @@ function drawDead() {
       ? s.chal.n + '   ·   ' + s.rushDown + ' BOSS' + (s.rushDown === 1 ? '' : 'ES') + ' DOWN'
       : s.chal.daily
       ? s.chal.n + '   ·   ' + (s.dailyRanked ? 'RANKED' : 'PRACTICE')
+      : s.chal.hl ? s.chal.n + '   ·   WHAT YOU FOUND IS KEPT'
       : s.chal.n + (cw ? '' : '   ·   ' + chalGoalName(s.chal) + ' STILL STANDS');
     fitFont(t, wide, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = (s.chal.daily || s.chal.rush) ? (s.chal.accent || CHAL_GOLD)
@@ -36245,7 +39080,7 @@ function drawDead() {
     ctx.fillText(t, CENTER, y + 12);
     ctx.restore();
   });
-  else if (s.chal) row(26, y => {
+  else if (s.chal && !s.chal.hl) row(26, y => {
     ctx.save();
     ctx.letterSpacing = '0.12em';
     const t = cw ? 'ALREADY CLEARED   ·   NOTHING NEW TO UNLOCK'
@@ -36313,7 +39148,7 @@ function drawDead() {
     const t = s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
                                 : 'SPACE RUN IT AGAIN   ·   M ' +
                                   (s.chal.daily ? 'DAILY' : s.chal.rush ? 'BOSS RUSH'
-                                                          : 'CHALLENGES'))
+                                                          : s.chal.hl ? 'THE VIGIL' : 'CHALLENGES'))
             : mpGuest() ? 'WAITING FOR THE HOST TO RUN AGAIN'
             : isTouch  ? 'TAP TO RUN AGAIN'
             : 'PRESS SPACE / R TO RUN AGAIN';
@@ -36665,6 +39500,7 @@ function renderMenu() {
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
   else if (outsiderArrivalDue()) startOutsiderArrival();
   else drawMenuHole();   // his, and it does not line up with the others
+  hlDrawMenu();          // ALL HALLOWS: the hatch, and the knock
   drawBetaMark();
 
   drawMenuSet();
@@ -36776,7 +39612,7 @@ const FREE_ROWS = [
   { n: 'NEXT WAVE',      f: () => { betweenWaves = 0.2; spawnBudget = 0;
                                     enemies.length = 0; ebullets.length = 0; } },
   { n: 'SPAWN BOSS',     f: () => {
-      const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame);
+      const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame && !HL_BOSSES[k]);
       const k = keys[(freeBoss = (freeBoss + 1) % keys.length)];
       const a = rnd(TAU);
       spawnEnemy('boss', clamp(P.x + Math.cos(a) * 340, arena.x0 + 90, arena.x1 - 90),
@@ -36784,7 +39620,7 @@ const FREE_ROWS = [
                  { boss: k });
       bossAlive = true; banner(BOSSES[k].name, BOSSES[k].col, 2.0); } },
   { n: 'SPAWN A CROWD',  f: () => {
-      const pool = Object.keys(ETYPE).filter(k => k !== 'boss' && k !== 'egg');
+      const pool = Object.keys(ETYPE).filter(k => k !== 'boss' && k !== 'egg' && !HL_ETYPES[k]);
       for (let i = 0; i < 8; i++) {
         const a = rnd(TAU), r = rnd(420, 240);
         spawnEnemy(pick(pool), clamp(P.x + Math.cos(a) * r, arena.x0 + 50, arena.x1 - 50),
@@ -39578,7 +42414,7 @@ function drawMenuRush() {
 const SKIN_SLOTS = [
   { k: 'player', n: 'YOUR HULL',  kind: 'player' },
   { k: 'bullet', n: 'YOUR SHOTS', kind: 'bullet' }
-].concat(Object.keys(ETYPE).filter(k => k !== 'boss').map(k => ({
+].concat(Object.keys(ETYPE).filter(k => k !== 'boss' && !HL_ETYPES[k]).map(k => ({
   k, kind: 'enemy', n: (CODEX_E[k] && CODEX_E[k].n) || k.toUpperCase()
 })));
 
@@ -40219,13 +43055,16 @@ const Season = {
 const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
                       'laurel', 'standard', 'ember-mark',
                       // the BOSS RUSH's three, knight to king
-                      'rush-knight', 'rush-duke', 'rush-king'];
+                      'rush-knight', 'rush-duke', 'rush-king',
+                      // ALL HALLOWS: the vigil's four
+                      'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul'];
 /* Grants that are not skins. Checked against this list the same way, so an
    invented one cannot arrive from a save file any more than a skin can. */
-const DEV_PERK_IDS = ['unlock-all', 'unlock-evo'];
+const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event'];
 
 const Awards = {
   syncing: false,
+  served: [],                    // perk ids the server confirmed this session
   list: () => (Save.profile.awards || []),
   best() {                       // 1, 2, 3 — or 0 for no podium ever
     let b = 0;
@@ -40282,6 +43121,7 @@ const Awards = {
       const d = await r.json();
       Season.read(d);
       const next = Awards.clean(d.awards);
+      Awards.served = next.filter(a => a.perk).map(a => a.perk);
       /* Union rather than replace: an award already banked stays banked even
          if a later request comes back empty. Losing a podium to a bad reply
          would be the worst possible bug in a system whose whole job is to
@@ -40404,7 +43244,28 @@ const DEV_SKINS = [
     d: 'Crowned. The arched crown in a turning sun, a train in ermine, the laurel, '
      + 'eight blades, and everything that breaks comes apart as gold.',
     req: rushReq('rush-king'),
-    base: { player: { col: '#eab308' }, bullet: { col: '#fde047' } } }
+    base: { player: { col: '#eab308' }, bullet: { col: '#fde047' } } },
+
+  /* ALL HALLOWS: what the vigil's worldwide count pays, to every profile
+     that lit a candle (hlClaimPrizes). One line, carved to burning, written
+     once as fx 'hallows' with a tier, plus the soul's own hull. The looks are
+     art hooks still: HALLOWS-GUIDE.txt. */
+  { id: 'hl-carved', n: 'THE CARVED', col: '#fb923c', fx: 'hallows', tier: 1,
+    d: 'A face cut into the hull, and nothing lit behind it yet.',
+    req: 'THE VIGIL: 150 CANDLES LIT WORLDWIDE',
+    base: { player: { col: '#fb923c' }, bullet: { col: '#fdba74' } } },
+  { id: 'hl-lantern', n: 'THE LANTERN', col: '#f97316', fx: 'hallows', tier: 2,
+    d: 'Lit from inside. The rounds go out as sparks.',
+    req: 'THE VIGIL: 400 CANDLES LIT WORLDWIDE',
+    base: { player: { col: '#f97316' }, bullet: { col: '#fed7aa' } } },
+  { id: 'hl-hallows', n: 'ALL HALLOWS', col: '#ea580c', fx: 'hallows', tier: 3,
+    d: 'Burning. Whatever it kills comes apart as embers.',
+    req: 'THE VIGIL: 750 CANDLES LIT WORLDWIDE',
+    base: { player: { col: '#ea580c' }, bullet: { col: '#fdba74' } } },
+  { id: 'hl-lostsoul', n: 'THE LOST SOUL', col: '#a5f3fc', fx: 'lostsoul',
+    d: 'The ordinary hull, as a ghost, flickering at four percent.',
+    req: 'THE VIGIL: 1,200 CANDLES LIT WORLDWIDE',
+    base: { player: { col: '#a5f3fc' }, bullet: { col: '#cffafe' } } }
 ];
 
 /* ======================= the unlisted (tier three) ========================
@@ -40431,7 +43292,11 @@ const SECRET_SKINS = [
 const devHeld = id => Awards.list().some(a => a.skin === id);
 /* What the dropdown lists: the shipped table, plus anything unlisted this
    profile has actually been given. */
-const devList = () => DEV_SKINS.concat(SECRET_SKINS.filter(s => devHeld(s.id)));
+/* The vigil's prizes are not listed before the event opens: a locked row
+   reading "150 CANDLES LIT WORLDWIDE" in September would announce it. Once
+   the event is live they are listed like any award, and a held one always is. */
+const devList = () => DEV_SKINS.filter(s => !/^hl-/.test(s.id) || devHeld(s.id) || hlLive())
+                               .concat(SECRET_SKINS.filter(s => devHeld(s.id)));
 
 /* The handshake. Typed into the callsign field, which is the one place in
    the game that takes a free string and the one place nothing says to type
@@ -41545,6 +44410,7 @@ const SkinFx = {
   under() {
     const s = equippedSpecial();
     if (s && s.fx === 'imperial' && !P.down) impUnder(s, IMP_STATE);
+    if (s && (s.fx === 'hallows' || s.fx === 'lostsoul') && !P.down) hlSkinUnder(s);   // ALL HALLOWS' prizes
   },
   player() {
     const s = equippedSpecial();
@@ -41553,6 +44419,7 @@ const SkinFx = {
     if (s.fx === 'redaction') { SkinFx.redPlayer(s); return; }
     if (s.fx === 'draft') { drawDraftRig(P.x, P.y, (P.r || 12) + 11, uiTime); return; }
     if (s.fx === 'imperial') { impPlayer(s, IMP_STATE); return; }
+    if ((s.fx === 'hallows' || s.fx === 'lostsoul') && hlSkinPlayer(s)) return;
     const R = (P.r || 12) + 11, t = uiTime;
     ctx.save();
     // the rim: cheap, always drawn, and the part that reads at a glance
@@ -41895,6 +44762,7 @@ const SkinFx = {
     if (s.fx === 'redaction') return SkinFx.redBullet(b, c, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftBullet(b, c);
     if (s.fx === 'imperial') return impBullet(b, c, impTier(s));
+    if (s.fx === 'hallows' || s.fx === 'lostsoul') return hlSkinBullet(b, c, s);
     if (s.fx !== 'void') return false;
     const r = b.r;
     /* The phase comes off the round's own position, the same trick the shipped
@@ -41971,6 +44839,7 @@ const SkinFx = {
     if (s.fx === 'redaction') return SkinFx.redPart(p, t, rad, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftPart(p, t, rad);
     if (s.fx === 'imperial') return impPart(p, t, rad, impTier(s));
+    if (s.fx === 'hallows' || s.fx === 'lostsoul') return hlSkinPart(p, t, rad, s);
     if (s.fx !== 'void') return false;
     const r = p.r * 1.15;
     drawGlow(p.x, p.y, rad * 0.72, VOID_LIT, t * 0.36);
@@ -41996,6 +44865,7 @@ const SkinFx = {
     if (s.fx === 'redaction') { if (devStage(s) === 2) SkinFx.redEnemy(e, ea); return; }
     if (s.fx === 'draft') return;
     if (s.fx === 'imperial') { if (impTier(s) >= 2) impEnemy(e, ea, impTier(s)); return; }
+    if (s.fx === 'hallows' || s.fx === 'lostsoul') { hlSkinEnemy(e, ea, s); return; }
     if (s.fx !== 'void') return;
     const R = e.r, n = e.sides, a = e.ang || 0, step = TAU / n;
     ctx.save();
@@ -47128,7 +49998,7 @@ function drawChalHud() {
     /* A daily names no boss — there is nothing to kill that ends it. What
        belongs here instead is the thing you would want to be sure of. */
     const goal = c.rush ? rushChipGoal()
-               : c.daily ? (c.d || 'RANKED RUN') : 'KILL  ' + chalGoalName(c);
+               : c.daily ? (c.d || 'RANKED RUN') : c.hl ? hlChipGoal() : 'KILL  ' + chalGoalName(c);
     fitFont(goal, w - 24, '600', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = '#64748b';
     ctx.fillText(goal, x + 12, y + 36);

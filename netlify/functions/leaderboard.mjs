@@ -79,14 +79,19 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
 const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
                    'redaction', 'redaction-open', 'draft',
                    // the BOSS RUSH's three, knight to king
-                   'rush-knight', 'rush-duke', 'rush-king'];
+                   'rush-knight', 'rush-duke', 'rush-king',
+                   // ALL HALLOWS: the vigil's four prizes
+                   'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul'];
 /* Everything that is not a skin: the rooms, the routes, the challenges and
    the codex. One id rather than a list of them, because a dev account wants
    the whole game and enumerating it here would be a second copy of a list
    the client already keeps and would drift from. */
 /* unlock-evo: every evolution that has been built, awake. Its own id because
    waking a hull skips its rite, and an account may want the rest without it. */
-const ALL_PERKS = ['unlock-all', 'unlock-evo'];
+/* unlock-event: ALL HALLOWS open to the account before its date, to try it
+   on a real device. The vigil's count still refuses what is reported outside
+   its window, so a test run lights no real candles. */
+const ALL_PERKS = ['unlock-all', 'unlock-evo', 'unlock-event'];
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 const KEYLEN = 32;
 
@@ -186,6 +191,69 @@ async function grantTo(store, pid, user, skins, perks) {
     if (wrote && wrote.modified) return byPid[pid].skins;
   }
   return skins;
+}
+
+/* =============================== ALL HALLOWS ================================
+   THE VIGIL: one number every profile adds to. A quest is paid once per
+   profile however often it is reported, and only by the table below, so the
+   client never says how much — it says which quest, and this decides. That
+   caps any one profile at a finished story's worth. New profiles are counted
+   against the address that brings them in, so minting pids to pad the count
+   runs out quickly.
+
+   The marks are here, not in the game, so they can be moved mid-event
+   without shipping it. The window has a day's grace after the end: a quest
+   finished at 23:59 on the last night still lands. None before the start:
+   nobody but a dev account can play before then, and its test runs must not
+   light real candles.
+
+   VIGIL_ANYTIME in the environment lifts the window, for a local test run.
+========================================================================== */
+const VIGIL = {
+  'hallows-2026': {
+    from: '2026-10-01', to: '2026-11-02',           // UTC days, inclusive
+    pay: { q1: 10, q2: 15, q3: 10, q4: 15, q5: 10, q6: 20, q7: 20 },
+    marks: [150, 400, 750, 1200]
+  }
+};
+const VIGIL_NEW_PER_IP = 6;         // new profiles one address may add in a day
+const vigilKey = id => 'vigil:' + id;
+const vigilOpen = (ev, day) =>
+  !!(typeof process !== 'undefined' && process.env && process.env.VIGIL_ANYTIME) ||
+  (day >= ev.from && day <= ev.to);
+function vigilView(ev, doc, pid) {
+  const total = (doc && doc.total) || 0;
+  const mine = pid && doc && doc.byPid && doc.byPid[pid];
+  return { total, marks: ev.marks, reached: ev.marks.filter(m => total >= m),
+           lit: mine ? mine.n || 0 : 0, done: mine ? mine.q || [] : [] };
+}
+async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
+  for (let i = 0; i < RETRIES; i++) {
+    const res = await store.getWithMetadata(vigilKey(id), { type: 'json', consistency: 'strong' })
+      .catch(() => null);
+    const doc = (res && res.data) || { total: 0, byPid: {}, byIp: {} };
+    doc.byPid = doc.byPid || {}; doc.byIp = doc.byIp || {};
+    const me = doc.byPid[pid];
+    if (me && (me.q || []).includes(quest)) return { view: vigilView(ev, doc, pid), already: true };
+    if (!me) {
+      // a new profile, counted against the address for the day
+      const a = doc.byIp[ip] && doc.byIp[ip].day === today ? doc.byIp[ip] : { day: today, n: 0 };
+      if (a.n >= VIGIL_NEW_PER_IP) return { error: 'too many new profiles' };
+      a.n++; doc.byIp[ip] = a;
+    }
+    // yesterday's address counts are nobody's business today
+    for (const k of Object.keys(doc.byIp)) if (doc.byIp[k].day !== today) delete doc.byIp[k];
+    const cur = doc.byPid[pid] || { q: [], n: 0 };
+    cur.q = [...(cur.q || []), quest];
+    cur.n = (cur.n || 0) + ev.pay[quest];
+    cur.at = Date.now();
+    doc.byPid[pid] = cur;
+    doc.total = (doc.total || 0) + ev.pay[quest];
+    const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
+    const wrote = await store.setJSON(vigilKey(id), doc, opts).catch(() => ({ modified: false }));
+    if (wrote && wrote.modified) return { view: vigilView(ev, doc, pid) };
+  }
+  return { error: 'busy' };
 }
 
 const SKIN_GRANTS = {
@@ -385,6 +453,17 @@ export default async (req) => {
   if (req.method === 'GET') {
     const q = new URL(req.url).searchParams;
 
+    // ALL HALLOWS: the vigil's count, and this profile's share of it
+    const vid = q.get('vigil');
+    if (vid !== null) {
+      const ev = Object.prototype.hasOwnProperty.call(VIGIL, vid) ? VIGIL[vid] : null;
+      if (!ev) return json({ error: 'no such vigil' }, 404);
+      const vp = q.get('pid');
+      const doc = await store.get(vigilKey(vid), { type: 'json' }).catch(() => null);
+      return json(Object.assign({ vigil: vid, open: vigilOpen(ev, today) },
+                                vigilView(ev, doc, isPid(vp) ? vp : null), meta));
+    }
+
     /* Which podiums a profile holds. Answered by pid and never by name, so
        the reply cannot be used to enumerate who won what. */
     const pid = q.get('awards');
@@ -426,6 +505,23 @@ export default async (req) => {
   try { body = await req.json(); } catch (e) { return json({ error: 'bad json' }, 400); }
 
   if (body && body.selftest) return json({ selftest: await selfTest(store) });
+
+  /* ALL HALLOWS: a quest reported. Which quest, never how much. */
+  if (body && body.vigil !== undefined) {
+    const vid = String(body.vigil), quest = String(body.quest || ''), pid = body.pid;
+    const ev = Object.prototype.hasOwnProperty.call(VIGIL, vid) ? VIGIL[vid] : null;
+    if (!ev) return json({ error: 'no such vigil' }, 404);
+    if (!isPid(pid)) return json({ error: 'bad pid' }, 400);
+    if (!Object.prototype.hasOwnProperty.call(ev.pay, quest)) return json({ error: 'bad quest' }, 400);
+    if (!vigilOpen(ev, today)) return json({ error: 'the vigil is closed' }, 409);
+    try {
+      const r = await vigilTurnIn(store, vid, ev, quest, pid, clientIp(req), today);
+      if (r.error) return json({ error: r.error }, r.error === 'busy' ? 503 : 429);
+      return json(Object.assign({ vigil: vid, already: !!r.already }, r.view, meta));
+    } catch (e) {
+      return json({ error: 'write failed: ' + String((e && e.message) || e).slice(0, 120) }, 503);
+    }
+  }
 
   /* A dev login. Answers 'no' to every kind of wrong — unknown user, wrong
      password, malformed anything — so the reply never says which part was
