@@ -29649,10 +29649,10 @@ function hlSpritePrep(cols) {
 /* -------------------------------- the event -------------------------------- */
 const HL_EVENT = {
   id: 'hallows-2026', book: 'I', n: 'ALL HALLOWS',
-  from: '2026-10-05',          // the knock, the vigil and chapter I (UTC days)
+  from: '2026-10-01',          // the knock, the vigil and chapter I (UTC days)
   to:   '2026-11-01',          // exclusive: the vigil shuts at 00:00 UTC
   chapters: [
-    { n: 'I',   area: 'patch', opens: '2026-10-05' },
+    { n: 'I',   area: 'patch', opens: '2026-10-01' },
     { n: 'II',  area: 'house', opens: '2026-10-14' },
     { n: 'III', area: 'yard',  opens: '2026-10-23' }
   ],
@@ -29818,26 +29818,30 @@ let hlHeldSeq = 0;
 const hlBarks = [];           // bosses' spoken lines, in the world
 
 /* ================================ the calendar ============================== */
-/* The day as the server says it, the same authority the daily uses; the local
-   UTC date only stands in until the board has answered. */
+/* The day as the server says it, the same authority the daily uses. Null
+   until the board has answered: the device's own clock is never asked, because
+   anybody can set it forward, and the event must not open on it. */
 function hlToday() {
   if (HL.day) return HL.day;
   try { if (Daily.from === 'server' && Daily.day) return Daily.day; } catch (e) {}
-  return dailyDayOf();
+  return null;
 }
 /* Early: the admin panel's FORCE ON, or a dev account holding the
    'unlock-event' perk (granted by the server, so it can be tried on a real
    device before the date). The event is open to it whatever the calendar
    says, every chapter included. The worldwide count still refuses anything
-   reported outside its window, so a test run lights no real candles. */
+   reported outside its window, so a test run lights no real candles.
+   The perk counts only once the server has handed it over this session
+   (Awards.served), never because the saved profile lists it: the save is
+   localStorage, and a valid id typed into it would open the event to anyone. */
 function hlEarly() {
   if (HL.force) return true;
-  try { return devPerk('unlock-event'); } catch (e) { return false; }
+  try { return Awards.served.includes('unlock-event'); } catch (e) { return false; }
 }
 function hlLive() {
   if (hlEarly()) return true;
   const d = hlToday();
-  return d >= HL_EVENT.from && d < HL_EVENT.to;
+  return !!d && d >= HL_EVENT.from && d < HL_EVENT.to;
 }
 function hlChapterOpen(i) {
   const c = HL_EVENT.chapters[i];
@@ -43060,6 +43064,7 @@ const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event'];
 
 const Awards = {
   syncing: false,
+  served: [],                    // perk ids the server confirmed this session
   list: () => (Save.profile.awards || []),
   best() {                       // 1, 2, 3 — or 0 for no podium ever
     let b = 0;
@@ -43116,6 +43121,7 @@ const Awards = {
       const d = await r.json();
       Season.read(d);
       const next = Awards.clean(d.awards);
+      Awards.served = next.filter(a => a.perk).map(a => a.perk);
       /* Union rather than replace: an award already banked stays banked even
          if a later request comes back empty. Losing a podium to a bad reply
          would be the worst possible bug in a system whose whole job is to

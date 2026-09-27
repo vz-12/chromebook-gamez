@@ -202,14 +202,16 @@ async function grantTo(store, pid, user, skins, perks) {
    runs out quickly.
 
    The marks are here, not in the game, so they can be moved mid-event
-   without shipping it. The window has a day's grace either side: a quest
-   finished at 23:59 on the last night still lands.
+   without shipping it. The window has a day's grace after the end: a quest
+   finished at 23:59 on the last night still lands. None before the start:
+   nobody but a dev account can play before then, and its test runs must not
+   light real candles.
 
    VIGIL_ANYTIME in the environment lifts the window, for a local test run.
 ========================================================================== */
 const VIGIL = {
   'hallows-2026': {
-    from: '2026-10-04', to: '2026-11-02',           // UTC days, inclusive
+    from: '2026-10-01', to: '2026-11-02',           // UTC days, inclusive
     pay: { q1: 10, q2: 15, q3: 10, q4: 15, q5: 10, q6: 20, q7: 20 },
     marks: [150, 400, 750, 1200]
   }
