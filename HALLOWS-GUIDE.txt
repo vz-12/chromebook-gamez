@@ -1,0 +1,470 @@
+VOIDRUNNER — ALL HALLOWS · ACT I
+The art guide: every hook, what it is handed, and when.
+Written 27 Sep 2026. Prepatch only; never deployed.
+
+
+================================================================================
+0. WHAT IS BUILT
+================================================================================
+
+Act I, the part of the event that opens first, is in index.html and plays end
+to end. The story, lines and rules are EVENT-DRAFTS.txt.
+
+  THE KNOCK     the menu stalls, three knocks, a hatch opens bottom-right, and
+                the Outsider rises in it and speaks (two versions, depending on
+                whether this profile ever let him in). ESC skips it.
+  THE HATCH     stays on the menu for the event: click it or press [V].
+  THE VIGIL     the room under the floor, walked like the hub, with the soul,
+                him, three ways up, the stand, four prize alcoves, the wall,
+                and one candle per ten lit worldwide.
+  THE PATCH     five waves of its own four bodies, then THE BACKLOG.
+  QUESTS 1–2    the cold gourds (3), then THE BACKLOG. Each pays its candles and
+                its medal, and is reported to the worldwide count.
+  ASCENSION I   back in the vigil: the soul rises a landing, then speaks.
+  MEDALS        THE GOURD and ONE DAY work, worn two at a time at the stand.
+  THE COUNT     server-side and live: the prizes unlock for everyone who lit
+                one candle.
+
+Everything you would see is a placeholder: shapes and labels, just enough to
+play it and read its telegraphs. There is no art in it. That is this
+guide's job.
+
+
+================================================================================
+1. THE FILES
+================================================================================
+
+  hl-art.js        THE ART. It is NOT in index.html: it ships as its own file
+                   beside it and the game fetches it only while the event is
+                   live, or while a vigil prize skin is worn (see 1.1). Design
+                   over this one: it is the live file.
+  hl-kit.js        THE KIT: light and shadow, cloth and rope, rigs, the
+                   timeline, dialogue, particles, baked layers. It is inline in
+                   index.html (the logic runs on it), and this file is an
+                   identical copy of that block. It is tooling for the art to
+                   use; it isn't art.
+  EVENT-DRAFTS.txt the design: story, script, rules.
+  HALLOWS-GUIDE.txt this file.
+
+  PUTTING A NEW VERSION IN:
+      node C:\.claude\lift-hl-art.mjs --art <art.js>
+      node C:\.claude\lift-hl-art.mjs --kit <kit.js>
+      node C:\.claude\lift-hl-art.mjs --kit <kit.js> --art <art.js>    (both)
+  --kit swaps the inline kit block. --art CHECKS the art and publishes it as
+  prepatch hl-art.js, stamping its hash into index.html (HL_ART_VER) so a
+  changed file is never served from a stale cache. Keep the two marker lines
+  exactly as they are:
+      /* ===========…
+         ALL HALLOWS · ACT I — art hooks                  (a line of its own)
+      …
+      /* ===================== end of ALL HALLOWS · ACT I art hooks ===================== */
+  It refuses (and writes nothing) if a marker is missing, if the file does not
+  parse, if it declares a const/let the page already has, or if it would
+  replace a game function that is not a hook. New helpers are fine: hlArt* /
+  HL_ART_*.
+
+1.1 WHEN THE ART IS LOADED (user, 27 Sep: only during the event)
+  - Outside the event nobody downloads any of it. The page carries only the
+    small placeholder hooks inline, as the fallback.
+  - While the event is live (the server's date, or FORCE ON), the menu fetches
+    hl-art.js on its first frame. Its hooks replace the placeholders by name.
+  - Then, in idle moments on the menu, it is WARMED: hlArtPreload() (in the
+    art) returns a list of jobs, and the logic runs one per idle moment: the
+    baked floors, the light sprites, the candle layout. So the first step into
+    the vigil or the patch builds nothing. A new bake or a light in a new
+    colour belongs in that list; each job must ask for exactly the key and
+    size the draw hook will, or the draw simply builds it again.
+  - A vigil prize skin keeps its look all year, so wearing one fetches the art
+    outside the event too (hooks only; nothing is warmed then).
+  - If the file cannot be fetched, the placeholders keep the event playable.
+
+
+================================================================================
+2. HOW TO SEE IT
+================================================================================
+
+The dev admin panel (` or F2) has an ALL HALLOWS · EVENT section:
+  FORCE ON        the event is live whatever the date says (this tab only)
+  KNOCK (replay)  plays the menu prologue again
+  VIGIL / PATCH   straight in
+  BACKLOG NOW     skips to wave 5 of the patch, with quest 1 marked done
+  COLD GOURD      one of the soul's gourds, in front of you
+  BINGE           THE BACKLOG resumes his whole pile now
+  DONE q1 / q2    completes a quest (it pays, reports and grants its medal)
+  SOUL: TELL ALL  the vigil shows every finished quest as already told
+  ALL MEDALS      every medal built so far is owned
+  RESET EVENT     wipes this profile's book
+  0 … 1300 / REAL a stand-in for the worldwide count (this tab only)
+
+Without the panel, the event opens on HL_EVENT.from ('2026-10-05').
+
+
+================================================================================
+3. THE RULES FOR ART CODE
+================================================================================
+
+  - DRAW, DO NOT DECIDE. A hook may read any state listed here and must not
+    write any of it. The one exception is a hook's own art-only fields: add
+    them on the object with an `art` prefix (e.artSway), never an hl one.
+  - Time comes from uiTime (always running) or the fields handed in. Never
+    accumulate dt inside a draw hook: they can be called more than once a
+    frame, or skipped. Anything that has to advance (cloth, ropes, springs,
+    art timers, ambient particles) advances in hlArtTick(dt, scene), which
+    runs once a frame on the menu while the hatch is up, in the vigil and in
+    the areas; the draw hooks then only draw it.
+  - The world hooks draw in world coordinates, with the camera already
+    applied. The screen hooks draw in CSS pixels (W × H).
+  - Leave ctx as you found it (save/restore). A lot of the game draws after
+    you and assumes source-over, alpha 1, and textAlign left.
+  - FX hooks (…Fx) are called once, at the moment, on the logic's side.
+    Spawn particles there (hlEmit, or the game's burst/ringFx/spawnPart), or
+    start art-side timers on the object. Returning anything does nothing.
+  - No performance ceiling (user, 27 Sep). The one rule that is about
+    design: THE HOUSE's darkness will be a gameplay rule, so it runs on the
+    fog. Light makes it beautiful, but it must never be the only thing that
+    makes it dark.
+
+
+================================================================================
+4. THE ORDER THINGS ARE DRAWN IN
+================================================================================
+
+  THE MENU (screen space, after the menu, under the settings button)
+      drawHlHatch(r, T), then the prologue's subtitle
+
+  A FRAME IN THE VIGIL OR THE PATCH (world space, inside the camera)
+      floor, grid, arena walls
+      drawHlAreaFloor(A)                    the patch's floor dressing
+      hazards … portals
+      drawVigilWorld()                      the whole room, him and the soul
+      hlPartsDraw('lit')                    kit particles that light receives
+      drawHlSlam(p)                         THE BACKLOG's slam markers
+      corpses
+      enemies: drawHlBody(e, ea)            the event's bodies (the generic
+                                            glow, elite ring and hacked
+                                            collar are drawn under them first)
+      the hull
+      hlLights(scene) → hlLightRender()     THE LIGHT PASS (see 6)
+      — additive from here —
+      enemy rounds: drawHlEBullet(b)        seeds, THE BACKLOG's rounds
+      bullets, the lance, particles …
+      drawHlSweep(p)                        THE BACKLOG's sweeps
+      drawHlVine(e, v)                      a creeper's vine
+      hlPartsDraw('glow')                   kit particles, additive
+      drawHlGlow(scene)                     anything else that glows
+      drawHlBossDeath(d)                    the boss coming apart
+      drawHlBark(b)                         a boss's spoken line
+      — post (bloom, grade) —
+
+  THE SCREEN (CSS pixels, after the HUD)
+      drawHlAreaHud(A, area)                in an area
+      the talk subtitle, or drawHlVigilHud(vig)   in the vigil
+      drawHlStandUi(ui, book)               the stand, when open
+      drawHlMedalHud(equip, bank)           in the vigil and the areas
+
+  scene is 'vigil' or the area's id ('patch').
+
+
+================================================================================
+5. THE HOOKS
+================================================================================
+
+------------------------------------------------------------------------------
+5.1 THE MENU
+------------------------------------------------------------------------------
+drawHlHatch(r, T)
+  r   { x, y, w, h } — the hatch's rect, bottom-right (hlHatchRect()).
+      Clicks land inside it.
+  T   the prologue's timeline while the knock plays, else null.
+      T.v('stall')  0→1  the menu going quiet (0.6 s in, out at the end)
+      T.v('open')   0→1  the hatch (3.1–3.7 s, outBack)
+      T.v('rise')   0→1  him coming up into it (3.6–4.6 s), and 1→0 going
+                          down after the last line
+      T.shake(amp)  { x, y } from the knock cues (1.0, 1.7, 2.4, 3.1 s),
+                          seeded, so it scrubs
+      T.t, T.len    the clock
+  With T null the hatch sits open on the menu: it is the way down all
+  month. Label it [V].
+  His figure: outsiderFigure(x, y, s, { pose: 'rim'|'idle'|'point', a,
+  grip, look, ph }) is the game's own drawing of him; use it or redraw
+  him, but he should read as the same man.
+
+hlKnockFx(i)        i = 0, 1, 2 — each knock (a thud is played now)
+hlHatchOpenFx()     the moment it gives
+
+The subtitle is the kit's hlSayDraw, in his voice. It is drawn for you.
+
+------------------------------------------------------------------------------
+5.2 THE VIGIL
+------------------------------------------------------------------------------
+drawVigilWorld()
+  The whole room, the lot: floor, walls, the ways up, the stand, the alcoves,
+  the wall, the candles, the landings, the soul, and him. Place everything
+  off the spots, never off hard-coded numbers:
+    vigPos(o) → world { x, y } of a spot in VIG_SPOTS:
+      exit, outsider, stand, wall,
+      ways[0..2]  { area: 'patch'|'house'|'yard', ch }
+      landings[0..3]   the soul's four: it climbs one per ascension
+      alcoves[0..3]    one per prize, in HL_EVENT.prizes order
+    VIG_SIZE { w: 1400, h: 1000 }  the room (the arena is shrunk to it)
+    vigSoulPos() → where the soul is right now, mid-rise included
+  What to read:
+    hlSoulShown()     0 a light · 1 a hull gathered · 2 carries a lantern
+                      (ascended once) · 3 whole (II) · 4 warm (III) · 5 gone
+    hlLandingShown()  0–3
+    vig.asc           { from, to, t } while rising (HL_ASC_T = 2.8 s), else null
+    vig.change        { stage, t } for 3 s after the soul changes: the gather
+    vig.talk          the conversation, or null. vig.talk.lines[vig.talk.i]
+                      is [speaker, text]: 'soul' or 'outsider'. The soul can
+                      turn toward you while it speaks.
+    vig.near          'soul'|'outsider'|'stand'|'way'|'exit'|null, and
+                      vig.nearI (which way). Things can answer being near.
+    vig.t             seconds since you came down
+    Vigil.shown()     the worldwide count: one candle per 10 (the
+                      placeholder caps at 240)
+    Vigil.total, HL_EVENT.prizes[i].at   whether alcove i is lit
+    hlChapterOpen(ch) whether a way up is open
+    P                 the hull: him looking at it (see outsiderFigure look)
+
+hlVigilEnterFx()        on arriving
+hlArtTick(dt, scene)    once a frame; scene 'menu' | 'vigil' | 'patch'.
+                        Candle smoke, motes, cloth and rope steps, timers.
+hlSoulChangeFx(stage)   the soul has just become `stage` (as the telling starts)
+hlAscendFx(n)           a rise to landing n has begun (vig.asc is set)
+
+drawHlVigilHud(vig)     the [E] prompts, and 'THAT WAY IS SHUT FOR NOW' while
+                        vig.sayT > 0 and vig.said === 'shut'. Not drawn while
+                        someone is talking.
+
+drawHlStandUi(ui, book)
+  ui    { sel, msg, msgT }   sel is the highlighted medal. msg: 'on'|'off'|
+        'full'|'locked', shown for msgT seconds (the placeholder counts it
+        down with lastDT; keep doing that or keep your own clock).
+  book  the profile's slice: book.medals (owned ids), book.equip (worn,
+        up to 2)
+  HL_MEDALS[i] { id, n, d, later }   later = not built yet: show it as unknown
+  Keys: 1–7 or ENTER toggles, W/S or arrows move, ESC or Q closes, E again closes.
+
+drawHlMedalHud(equip, bank)   the worn pair; bank = ONE DAY's XP put aside
+
+------------------------------------------------------------------------------
+5.3 THE WORDS
+------------------------------------------------------------------------------
+hlSayPortrait(line, x, y, o) → width used     (optional; the kit calls it)
+  Called by hlSayDraw for every subtitle, before the words. line is
+  { who, text, age, dur }, (x, y) is where the words would start, and
+  o = { fade, steady, typing }. Draw the speaker at the plate's left and
+  return how much room it took; the words move right by that much.
+Every subtitle goes through the kit's hlSayDraw(line, { steady }). To
+restyle the voices, edit HL_VOICE in THE KIT, not the hooks:
+  outsider   'OUTSIDE' tag, flat and even, 26 characters/s, with a caret
+  soul       no tag, lowercase, uneven: letters surface, a stall on every
+             ellipsis, a catch now and then. steady (HL_STEADY by stage:
+             0, 0, 0.35, 0.7, 1, 1) takes the unevenness out as it comes back.
+Barks:
+drawHlBark(b)   { e, x, y, r, boss, text, t, life }: a boss's line, following
+                the body while it lives. t runs from 0 to life. Style per
+                b.boss: THE BACKLOG's are price stickers in the draft.
+hlBarkFx(e, text)
+
+------------------------------------------------------------------------------
+5.4 THE PATCH
+------------------------------------------------------------------------------
+drawHlAreaFloor(A)    A = HL_AREAS.patch: A.stage has the placeholder
+                      colours (bg, grid, wall, accent). The floor, and
+                      anything fixed on it. Bake it (hlBake) if it is heavy.
+drawHlAreaHud(A, area)
+  area   { id, n (wave 1–5; 0 before the first), t, coldDue, coldLive,
+           end: { why: 'errand'|'win', t } | null, death }
+  hlChipGoal()   'THE REST OF IT   2 / 3' or 'KILL  THE BACKLOG'
+  The placeholder points at cold gourds that are off-screen; keep that,
+  they are the errand.
+  area.end: HL_END_T (4.2 s) until you are back in the vigil.
+hlAreaEnterFx(A), hlAreaEndFx(why)
+
+drawHlBody(e, ea)   ONE hook for all four bodies and THE BACKLOG; branch on
+                    e.type ('gourd'|'jack'|'creeper'|'scarecrow'|'boss') and
+                    e.boss ('backlog'). ea is the alpha the game wants
+                    (faint while phased). Every body has x, y, r, ang, col,
+                    sides, flash (0–1, hit), hp, maxHp, elite, hacked, t
+                    (seconds alive), vx, vy.
+
+  GOURD
+    e.hlGrow     0→1 over GOURD_RIPEN (15 s): the face carving itself in.
+                 At 1 it splits.
+    e.hlCold     the soul's (cold, not orange). These are the quest.
+    e.hlRipe     THE GOURD medal ripened it (any body can carry this)
+    hlGourdSplitFx(e, j)   j is the jack it became (j.hlHatched)
+    hlColdSproutFx(g)      a cold one comes up
+    hlColdLostFx(e)        a cold one ripened: carried off to the heap
+    hlColdBreakFx(e, n, need)   one broken: n of need
+
+  JACK
+    e.state      0 stalking · 1 winding up the breath (JACK_WIND 0.5 s) ·
+                 2 breathing (JACK_BREATH_T 0.8 s)
+    e.atkT       time left in state 1 or 2
+    e.ang        where it faces (it turns to you); the face spans
+                 ±JACK_FACE (0.7 rad)
+    e.hlBreathAng    the locked heading of a breath (state 2)
+    JACK_BREATH_R 130, JACK_BREATH_A 0.55: the flame's reach and half-width
+    e.hlDark     the candle is out: no more breath
+    e.hlHatched  it came out of a gourd
+    hlJackWindFx(e), hlJackBreathFx(e), hlJackSeedFx(e), hlJackSnuffFx(e)
+    Its seeds are rounds with b.hlKind 'seed' (see drawHlEBullet).
+
+  CREEPER
+    e.hlVine     null, or { st: 'fly'|'held'|'back', x, y, t }: the tip. While
+                 'held' the tip is on the hull. The vine runs from the body
+                 to the tip.
+    drawHlVine(e, v)   drawn additively. A verlet rope (hlRope) wants
+                       its own state on the body: e.artRope.
+    hlVineThrowFx(e), hlVineLatchFx(e), hlVineCutFx(e, v)
+    Cut by fire anywhere but the last VINE_SPARE (40 px) at the hull, or by
+    a dash.
+
+  SCARECROW
+    e.hlWatched  true while your aim is on it: perfectly still
+    hlCrowFreezeFx(e), hlCrowMoveFx(e)   the moment it stops or starts
+
+  THE BACKLOG  (e.type 'boss', e.boss 'backlog')
+    e.hlHeap     gourds eaten: the heap grows
+    e.hlBinge    binges spent, 0–3 (at 75 / 50 / 25%)
+    hlBacklogEatFx(e, g), hlBingeFx(e, n)   n = pieces it resumed
+    hlBossDeathFx(e) and drawHlBossDeath(d)   d = { boss, x, y, r, t }: the
+        heap spilling and the soul's save rolling out of it. It stays
+        drawn until the room hands you back to the vigil (HL_END_T).
+
+  HIS PILE. Every attack he starts is a PIECE in hlHeld:
+    p.kind       'volley'|'sweep'|'slam'
+    p.live       moving now · p.held  abandoned (paused) · p.turned  resumed
+                 (it hurts him too, and should look different)
+    p.heldT      seconds it has been paused
+    hlPieceK(p)  0–1: how far through it got (sweep and slam)
+    volley       p.shots: its rounds (b.hlKind 'backlog', b.hlHeld while
+                 paused, b.hlTurn once resumed). They go through
+                 drawHlEBullet(b).
+    sweep        drawHlSweep(p): from (p.x, p.y) at angle p.a, length p.len,
+                 width p.w. p.t < p.tele (0.6 s) is the telegraph; a0 → a1 is
+                 the whole arc it meant to sweep.
+    slam         drawHlSlam(p): a circle (p.x, p.y, p.r) counting p.t to p.T
+                 (1 s). Its core (22 px) is what a shot has to touch.
+    hlPieceStartFx(p), hlPieceHoldFx(p), hlPieceResumeFx(p, byBinge),
+    hlPieceEndFx(p), hlSlamLandFx(p), hlTurnHitFx(p, x, y) — a resumed piece
+    hitting him.
+
+drawHlEBullet(b)   every round with b.hlKind ('seed' | 'backlog'), in
+                   place of the stock round. Additive layer.
+
+------------------------------------------------------------------------------
+5.5 MEDALS, QUESTS, PRIZES
+------------------------------------------------------------------------------
+hlRipenFx(e)          THE GOURD ripened a body (e.hlRipe from now on)
+hlBankPaidFx(v)       ONE DAY paid v XP at a boss
+hlQuestDoneFx(q)      a quest done: q = HL_QUESTS entry { id, n, candles, medal }
+hlPrizeFx(p)          a prize unlocked for this profile: p = { at, skin }
+
+THE PRIZE SKINS (DEV_SKINS 'hl-carved' / 'hl-lantern' / 'hl-hallows', fx
+'hallows' tier 1–3, and 'hl-lostsoul', fx 'lostsoul'). They are called from
+SkinFx exactly where the imperial line is:
+  hlSkinUnder(s)                    before the hull
+  hlSkinPlayer(s)       → true      drawn (skip the stock rim)
+  hlSkinBullet(b, c, s) → true      drawn (skip the stock round)
+  hlSkinPart(p, t, rad, s) → true   drawn (skip the stock particle)
+  hlSkinEnemy(e, ea, s)             on every body, while worn
+  s.tier is 1–3 for 'hallows'. Placeholders return false, so the stock
+  special look draws in the skin's base colours.
+
+
+================================================================================
+6. THE KIT (hl-kit.js), in brief
+================================================================================
+
+LIGHT — the room drawn fully lit, multiplied by a light buffer.
+  hlLights(scene) is the hook. Return true to run the pass:
+    function hlLights(scene) {
+      hlLightBegin('#0a0c16', 1);        // the ambient: the darkest corner
+      hlLight({ x, y, r: 220, col: '#fbbf24', a: 1.1, flick: 1, seed: i,
+                z: 30, size: 4 });       // a candle: low, so shadows are long
+      hlOccCircle(x, y, r, h);           // a thing that casts a shadow
+      hlOccSeg(x1, y1, x2, y2, h); hlOccPoly([x0, y0, …], h);
+      return true;
+    }
+  A light: a (can exceed 1: the overbright core glows), z (height: sets how
+  long shadows are), flick 0 steady … 1 candle, seed, shadow:false for fill
+  lights, size (the penumbra), cone { ang, spread, soft } (a doorway).
+  An occluder's h is its height; leave it out for walls.
+  hlLightAt(x, y) → [r, g, b] and hlLightDir(x, y) → { x, y, k, col }: the
+  light at a point, for tinting and rim light on anything drawn after the
+  pass. hlL.hot (0.32) is how much the pools glow; hlL.samples (5) and
+  hlL.blur (1.6) are the shadow softness.
+  hlFlicker(t, seed, k) is the candle's breath, if the flame itself should
+  match its light.
+  hlGrade({ mul, lift, liftA, edge, edgeA, edgeIn }): a room's grade.
+
+CLOTH & ROPE (verlet) — keep the body on your object (e.artSheet), step it
+  in hlArtTick, draw it in the draw hook, and let it fall where it will.
+  hlRope(x, y, n, seg, { ang, gy, damp, tear }), hlCloth(x, y, cols, rows,
+  seg, { pin: 'top'|'corners'|[i…], tear, squash }), hlVStep(b, dt, wind),
+  hlVPin, hlVCarry (move a cloth's pinned edge), hlVRelease, hlVTear(b, x,
+  y, r), hlVKick, hlDrawRope(b, { w0, w1, col, stroke }), hlDrawCloth(b,
+  { col, dark, hi, lit, fray }).
+  A SHEET (Act II) tearing is hlVTear, then hlDrawCloth.
+
+RIG — hlSpring(v, k, d) and hlSpring2 (lag and overshoot), hlIK(ax, ay,
+  tx, ty, l1, l2, bend) (a reaching arm), hlChain(n, seg, { stiff, damp,
+  droop }).step(x, y, ang, dt) (a tail or a trailing thread), hlStretch
+  (squash and stretch from speed), hlPose(a, b, t).
+
+TIMELINE — hlTimeline({ len, tracks, cues }): every value a pure function
+  of t, so a harness can scrub it. tl.v(track), tl.s(span), tl.since(mark),
+  tl.line(), tl.shake(amp), tl.tick(dt), tl.seek(t). The prologue is one;
+  the ascensions and deaths are free to be.
+
+DIALOGUE — hlSayDraw, HL_VOICE, hlTypeTimes, hlLetterbox(k), hlFade(k, col).
+
+PARTICLES — hlEmit(kind, x, y, n, { vx, vy, spread, size, life, col, … })
+  with kinds ember, smoke, mote (visible only where it is lit), clod, wisp,
+  bat. A new kind is one entry in HL_PART.
+
+BAKED LAYERS — hlBake(key, x, y, w, h, g => { …draw with g… }): drawn once,
+  blitted every frame. hlBakePrep(same arguments) builds it without drawing
+  it, for the preload. hlUnbake(key) redraws it.
+  hlSpritePrep([colours]) makes every light and glow sprite those colours
+  will need, ahead of time.
+
+EASING — hlEase(name, t) with HL_EASE: lin in out inOut in3 out3 inOut3 out5
+  smooth outBack inBack outElastic outBounce step. hlSpan(x, a, b, ease).
+  hlNoise, hlFbm, hlHash.
+
+
+================================================================================
+7. THE NUMBERS THE ART READS
+================================================================================
+
+  HL_ASC_T 2.8   HL_END_T 4.2   GOURD_RIPEN 15   HL_RIPEN_T 15
+  JACK_WIND 0.5   JACK_BREATH_T 0.8   JACK_BREATH_R 130   JACK_BREATH_A 0.55
+  JACK_FACE 0.7   VINE_RANGE 380   VINE_SPARE 40   CROW_WATCH 0.33
+  SWEEP_LEN 760   SWEEP_W 16   SWEEP_TELE 0.6   SLAM_R 110 (+10 a binge)
+  SLAM_T 1.0   THE BACKLOG r 64, col '#fb923c'
+  The Act I block, under "the numbers", has the rest and says what each is.
+  These are the logic's: art code reads them and never redeclares them.
+
+
+================================================================================
+8. NOT YET
+================================================================================
+
+  - Acts II and III (THE HOUSE, DEAD GAME, THE YARD, THE RAGE QUIT, the
+    epilogue) and their medals. The chain stops at the soul's "the house is
+    not open yet".
+  - The event's HUD still shows the game's own sector counter (THE PATCH
+    n/5) beside the area's.
+  - The prize skins are listed in the skin menu all year with how they are
+    earned, like the imperial line. Whether to hide them outside October is
+    open.
+  - SHIPPING: index.html AND hl-art.js go to C:\game. hl-art.js is a runtime
+    asset now, not a design file. The server change is in
+    prepatch's netlify/functions/leaderboard.mjs (the VIGIL block, a GET
+    branch and a POST branch) and must be HAND-PORTED into C:\game's copy,
+    never copied over it (its admin credentials). The prize ids also go into
+    that file's ALL_SKINS, so a dev login receives them.
