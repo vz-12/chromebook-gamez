@@ -21894,7 +21894,8 @@ function updatePlayer(dt) {
   if (P.annotT > 0) {
     P.annotT -= dt;
     for (const e of enemies) {
-      if (e.dead || e.type === 'boss') continue;
+      // THE HACKER's army is not what the book is annotating: its cones stay lit
+      if (e.dead || e.type === 'boss' || e.hacked) continue;
       e.phased = false;                       // phasers stay tangible
       e.redacting = false;                     // cones go dark
       if (e.invuln) e.invuln = 0;
@@ -35406,21 +35407,23 @@ function drawEnemiesBody() {
         ctx.globalAlpha = ea;
       }
     } else if (e.type === 'redactor') {
-      // the erasure cone, drawn exactly where it eats your shots
+      /* The erasure cone, drawn exactly where it eats your shots — or, on one
+         THE HACKER has taken, where it eats theirs and lets yours through. */
+      const mine = e.hacked;
       ctx.save();
       ctx.globalAlpha = ea * (e.redacting ? 0.2 : 0.05);
-      ctx.fillStyle = e.redacting ? '#ef4444' : '#64748b';
+      ctx.fillStyle = e.redacting ? (mine ? HACK_COL : '#ef4444') : '#64748b';
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
       ctx.arc(e.x, e.y, 330, e.ang - 0.55, e.ang + 0.55);
       ctx.closePath(); ctx.fill();
       ctx.globalAlpha = ea * (e.redacting ? 0.6 : 0.25);
-      ctx.strokeStyle = e.redacting ? '#f87171' : '#475569';
+      ctx.strokeStyle = e.redacting ? (mine ? '#d9f99d' : '#f87171') : '#475569';
       ctx.lineWidth = e.redacting ? 2.2 : 1.2;
       ctx.setLineDash(e.redacting ? [] : [12, 9]); ctx.lineDashOffset = -uiTime * 20;
       ctx.stroke();
       ctx.restore();
-      ctx.strokeStyle = rgba('#fecaca', 0.9); ctx.lineWidth = 2;
+      ctx.strokeStyle = rgba(mine ? '#ecfccb' : '#fecaca', 0.9); ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(e.x - e.r * 0.5, e.y); ctx.lineTo(e.x + e.r * 0.5, e.y);
       ctx.stroke();
