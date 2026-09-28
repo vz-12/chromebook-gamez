@@ -12,7 +12,8 @@
    the dark stays the fog's job; every flame is additive and drawn after the
    pass, so a face or a breath always reads however dark the corner is.
    Orange is the patch and the candles. Cold (#a5f3fc) is only ever the soul
-   and what is its own. Gold (#fde68a) is anything of his that you turned.
+   and what is its own. Gold (#fde68a) is anything of his that you finished. Red (#ef4444) is
+   anything of his a binge set off at you.
 =========================================================================== */
 
 const HL_ART_C = {
@@ -25,13 +26,13 @@ const HL_ART_C = {
   box: '#9a6a36', boxHi: '#c08a4e', boxLo: '#5c3d1c', tape: '#d8c39a', sticker: '#fb923c', tag: '#fef3c7', price: '#9a3412',
   stone: '#161c2a', stoneHi: '#252d3e', stoneLo: '#0d1119', mortar: '#07090e',
   wax: '#e8dcc2', waxLo: '#a8977a', wood: '#3a2a1c', woodHi: '#5c4330', woodLo: '#1c140d', iron: '#475569',
-  turned: '#fde68a', held: '#94a3b8', ink: '#e2e8f0', dim: '#64748b'
+  turned: '#fde68a', held: '#94a3b8', resumed: '#ef4444', ink: '#e2e8f0', dim: '#64748b'
 };
 const HL_ART_FONT = "Barlow, 'Segoe UI', system-ui, sans-serif";
 const HL_ART_MONO = "'JetBrains Mono', ui-monospace, monospace";
 const HL_ART_SKIN_COL = { 'hl-carved': '#fb923c', 'hl-lantern': '#f59e0b', 'hl-hallows': '#ea580c', 'hl-lostsoul': '#a5f3fc' };
 /* art-side clocks and smoothing; nothing the logic reads */
-const HL_ART_S = { knockAt: [-9, -9, -9], openAt: -9, soulAng: -Math.PI / 2, smokeT: 0, wispT: 0, batT: 3, emberT: 0, candles: null, candleKey: '' };
+const HL_ART_S = { knockAt: [-9, -9, -9], openAt: -9, soulAng: -Math.PI / 2, smokeT: 0, wispT: 0, batT: 3, emberT: 0, candles: null, candleKey: '', kicks: [], pileAt: -9 };
 
 /* ================================ small tools ============================== */
 function hlArtEll(x, y, rx, ry, rot = 0) { ctx.beginPath(); ctx.ellipse(x, y, Math.max(0.01, rx), Math.max(0.01, ry), rot, 0, TAU); }
@@ -166,12 +167,35 @@ function hlArtPumpkin(x, y, r, o = {}) {
 function hlArtCarve(g) {
   return { scratch: clamp(g / 0.4, 0, 1), cut: clamp((g - 0.4) / 0.45, 0, 1), split: clamp((g - 0.85) / 0.15, 0, 1) };
 }
+/* reeled in by THE BACKLOG: which way, whether it has started, and how it rides */
+function hlArtReel(e) {
+  if (!e.hlReel) return null;
+  const b = enemies.find(o => o.boss === 'backlog' && !o.dead);
+  const ang = b ? Math.atan2(b.y - e.y, b.x - e.x) : Math.atan2(e.vy || 0, e.vx || 1);
+  const mov = (e.hlReel.d || 0) <= 0, sd = hlArtSeed(e);
+  const wait = mov ? 0 : Math.sin(uiTime * 38 + sd) * 0.6;
+  return { b, ang, mov, sd, hop: mov ? -Math.abs(Math.sin(uiTime * 22 + sd)) * e.r * 0.12 : 0,
+           lean: (mov ? 0.3 : 0.08) * Math.cos(ang) + wait * 0.05, shk: mov ? 0 : wait * e.r * 0.06 };
+}
+/* the furrow it leaves: dragged, not rolled */
+function hlArtReelDrag(e, R) {
+  if (!R.mov) return;
+  const ca = Math.cos(R.ang), sa = Math.sin(R.ang), L = Math.min(90, (e.hlReel.v || HL_REEL_SPD) * 0.14);
+  const gr = ctx.createLinearGradient(e.x, e.y, e.x - ca * L, e.y - sa * L);
+  gr.addColorStop(0, 'rgba(12,6,3,0.55)'); gr.addColorStop(1, 'rgba(12,6,3,0)');
+  ctx.strokeStyle = gr; ctx.lineCap = 'round'; ctx.lineWidth = e.r * 1.1;
+  ctx.beginPath(); ctx.moveTo(e.x, e.y + e.r * 0.55); ctx.lineTo(e.x - ca * L, e.y + e.r * 0.55 - sa * L); ctx.stroke();
+}
 function hlArtGourd(e, ea) {
   const C = HL_ART_C, r = e.r, g = e.hlGrow || 0, K = hlArtCarve(g), sd = hlArtSeed(e);
-  const up = HL_EASE.outBack(clamp(e.t / 0.45, 0, 1));
-  const shk = K.split > 0 ? Math.sin(uiTime * 46 + sd) * K.split * r * 0.08 : 0;
-  hlArtPumpkin(e.x + shk, e.y, r * up, {
-    cold: e.hlCold, flash: e.flash, a: ea, squash: 0.9 + 0.1 * up, lean: (hlHash(sd) - 0.5) * 0.16,
+  const up = HL_EASE.outBack(clamp(e.t / 0.45, 0, 1)), R = hlArtReel(e);
+  // lit and holding at GOURD_LIT: it breathes. Hatching: it shakes itself open.
+  const hold = !e.hlCold && !e.hlHatch && K.cut >= 1 ? 1 + Math.sin(uiTime * 3.1 + sd) * 0.025 : 1;
+  const hk = e.hlHatch ? 1 + K.split * 0.6 : 1;
+  const shk = (K.split > 0 ? Math.sin(uiTime * 46 + sd) * K.split * r * 0.08 * hk : 0) + (R ? R.shk : 0);
+  if (R) hlArtReelDrag(e, R);
+  hlArtPumpkin(e.x + shk, e.y + (R ? R.hop : 0), r * up * hold * (1 + K.split * 0.06), {
+    cold: e.hlCold, flash: e.flash, a: ea, squash: (0.9 + 0.1 * up) * (1 - K.split * 0.05), lean: (hlHash(sd) - 0.5) * 0.16 + (R ? R.lean : 0),
     face: (w, h) => {
       const s = r * 0.82, fy = h * 0.06;
       // the scratches, one piece at a time
@@ -192,9 +216,22 @@ function hlArtGourd(e, ea) {
         ctx.beginPath(); ctx.moveTo(0, -h * 0.9);
         for (let i = 1; i <= 6; i++) ctx.lineTo((i % 2 ? 1 : -1) * r * 0.08, -h * 0.9 + i * h * 0.3);
         ctx.stroke();
+        if (K.split > 0.5) {
+          // and the rind starting to give either side of it
+          ctx.lineWidth = Math.max(0.8, r * 0.04);
+          for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * r * 0.08, -h * 0.3); ctx.lineTo(s * r * (0.08 + 0.3 * (K.split - 0.5)), -h * 0.55); ctx.stroke(); }
+        }
       }
     }
   });
+  if (R || e.hlWanted) {
+    // his sticker, slapped on: it is his now (or will be, if you let him)
+    const tx = e.x + shk + r * 0.55, ty = e.y + (R ? R.hop : 0) - r * 0.35, fl = R && R.mov ? Math.sin(uiTime * 24 + sd) * 0.25 : Math.sin(uiTime * 3 + sd) * 0.08;
+    hlArtTagShape(tx, ty, r * 0.9, r * 0.52, -0.5 + fl);
+    ctx.globalAlpha = ea; ctx.fillStyle = C.sticker; ctx.fill(); ctx.strokeStyle = C.price; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = C.hole; ctx.beginPath(); ctx.arc(-r * 0.3, 0, r * 0.07, 0, TAU); ctx.fill();
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
 }
 function hlArtGourdGlow(e) {
   const C = HL_ART_C, r = e.r, g = e.hlGrow || 0, K = hlArtCarve(g), sd = hlArtSeed(e);
@@ -208,7 +245,21 @@ function hlArtGourdGlow(e) {
     drawGlow(e.x, fy + r * 0.1, r * (1.6 + K.split), col, 0.25 * K.cut * f);
     ctx.globalAlpha = 1;
   }
-  if (K.split > 0) drawGlow(e.x, e.y, r * 2.4, col, 0.2 * K.split * (0.6 + 0.4 * Math.sin(uiTime * 30)));
+  if (K.split > 0) {
+    drawGlow(e.x, e.y, r * 2.4, col, 0.2 * K.split * (0.6 + 0.4 * Math.sin(uiTime * 30)));
+    // light through the split, straight up
+    ctx.globalAlpha = 0.5 * K.split; ctx.fillStyle = C.flameHi;
+    ctx.fillRect(e.x - 1 - K.split * r * 0.05, e.y - r * 0.9, 2 + K.split * r * 0.1, r * 1.1); ctx.globalAlpha = 1;
+  }
+}
+/* the tape he reels them in on: from him to it, running his way */
+function hlArtReelTape(e) {
+  const R = hlArtReel(e); if (!R || !R.b) return;
+  const b = R.b, k = R.mov ? 1 : 0.4 + 0.2 * Math.sin(uiTime * 12 + R.sd);
+  const pulse = clamp(1 - (uiTime - HL_ART_S.pileAt) / 0.6, 0, 1);
+  ctx.strokeStyle = rgba(HL_ART_C.sticker, (0.22 + 0.4 * pulse) * k); ctx.lineWidth = 1.5 + pulse * 2;
+  ctx.setLineDash([6, 7]); ctx.lineDashOffset = uiTime * (R.mov ? 90 : 20);
+  ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
 }
 
 /* =================================== jack ================================== */
@@ -1100,6 +1151,12 @@ function hlVigilEnterFx() {
 /* once a frame, wherever the event is on screen */
 function hlArtTick(dt, scene) {
   if (dt <= 0) return;
+  if (scene !== 'menu' && scene !== 'vigil' && typeof enemies !== 'undefined') {
+    for (const e of enemies) if (e.hlReel && !e.dead && (e.hlReel.d || 0) <= 0 && Math.random() < dt * 14) {
+      const R = hlArtReel(e);
+      hlEmit('clod', e.x - Math.cos(R.ang) * e.r * 0.6, e.y + e.r * 0.5, 1, { col: '#3f2208', speed: 0.5, size: 0.7 });
+    }
+  }
   if (scene === 'menu') {
     HL_ART_S.emberT -= dt;
     if (HL_ART_S.emberT <= 0 && (!HL.pro || HL.pro.v('open') > 0.5)) {
@@ -1226,13 +1283,43 @@ function hlBacklogEatFx(e, g) {
 function hlBingeFx(e, n) {
   shake(1.2); Audio_.boom();
   hlEmit('clod', e.x, e.y - e.r * 0.5, 24, { col: '#fb923c', speed: 1.6, size: 1.2 });
-  ringFx(e.x, e.y, e.r, e.r * 4, '#fde68a', 0.6, 3);
+  ringFx(e.x, e.y, e.r, e.r * 4, '#ef4444', 0.6, 3);
 }
 function hlPieceStartFx(p) {}
 function hlPieceHoldFx(p) { ringFx(p.x, p.y, 4, 26, '#94a3b8', 0.35, 1.5); }
 function hlPieceResumeFx(p, byBinge) {
-  Audio_.tone(520, 0.06, 'square', 0.05, 780);
-  ringFx(p.x, p.y, 4, 34, p.turned ? '#fde68a' : '#fb923c', 0.3, 2);
+  const q = hlPieceAt(p), col = byBinge ? '#ef4444' : p.turned ? '#fde68a' : '#fb923c';
+  Audio_.tone(byBinge ? 380 : 520, 0.06, 'square', 0.05, byBinge ? 1100 : 780);
+  ringFx(q.x, q.y, 4, byBinge ? 48 : 34, col, 0.3, 2);
+  if (byBinge) burst(q.x, q.y, 6, '#ef4444', 140, 2, 0.25);
+}
+function hlPieceKickFx(p, ang) {
+  const q = hlPieceAt(p), ca = Math.cos(ang), sa = Math.sin(ang);
+  shake(0.7); Audio_.tone(150, 0.1, 'square', 0.1, 620); Audio_.tone(900, 0.05, 'sine', 0.06, 1500);
+  HL_ART_S.kicks.push({ x: q.x, y: q.y, ang, t: uiTime });
+  burst(q.x, q.y, 16, '#fde68a', 300, 3, 0.35);
+  ringFx(q.x, q.y, 6, 70, '#fde68a', 0.25, 3);
+  hlEmit('ember', q.x, q.y, 16, { vx: ca * 280, vy: sa * 280, spread: 8, life: 0.5, col: '#fde68a' });
+}
+function hlBingeWarnFx(e, n) {
+  shake(0.4); Audio_.tone(120, BINGE_WARN, 'sawtooth', 0.07, 420);
+  ringFx(e.x, e.y, e.r * 5, e.r * 1.1, '#ef4444', 0.5, 3);
+  hlEmit('ember', e.x, e.y - e.r * 0.4, 14, { spread: e.r * 0.7, vy: -40, col: '#ef4444', life: 0.9 });
+}
+/* his heap soaks ordinary fire: a price tag knocked loose, and nothing else */
+function hlHeapFx(e, x, y) {
+  hlEmit('clod', x, y, 2, { col: '#fef3c7', speed: 0.7, size: 0.8 });
+  hlEmit('clod', x, y, 1, { col: '#fb923c', speed: 0.5, size: 0.7 });
+  ringFx(x, y, 3, 14, '#94a3b8', 0.15, 1);
+}
+function hlPileArriveFx(e, n) {
+  HL_ART_S.pileAt = uiTime;
+  shake(0.6); Audio_.tone(90, 0.3, 'sawtooth', 0.08, 55);
+  ringFx(e.x, e.y, e.r, e.r * 6, '#fb923c', 0.8, 3);
+  for (const g of enemies) if (g.hlReel && !g.dead) {
+    ringFx(g.x, g.y, 4, g.r * 2.2, '#fb923c', 0.35, 2);
+    hlEmit('clod', g.x, g.y + g.r * 0.5, 5, { col: '#3f2208', speed: 0.7 });
+  }
 }
 function hlPieceEndFx(p) {}
 function hlTurnHitFx(p, x, y) { burst(x, y, 10, '#fde68a', 220, 2.6, 0.3); ringFx(x, y, 6, 50, '#fde68a', 0.35, 2); }
@@ -1357,7 +1444,7 @@ function drawHlGlow(scene) {
     });
     for (const e of enemies) {
       if (e.dead) continue;
-      if (e.type === 'gourd') hlArtGourdGlow(e);
+      if (e.type === 'gourd') { hlArtGourdGlow(e); if (e.hlReel) hlArtReelTape(e); }
       else if (e.type === 'jack') hlArtJackGlow(e);
       else if (e.type === 'scarecrow') hlArtCrowGlow(e);
       else if (e.boss === 'backlog') hlArtBacklogGlow(e);
@@ -1369,13 +1456,28 @@ function drawHlGlow(scene) {
     }
     // the slams' cores, bright enough to shoot at in any light
     for (const p of hlHeld) if (p.kind === 'slam') {
-      const col = p.turned ? C.turned : p.held ? C.held : C.sticker;
-      drawGlow(p.x, p.y, 36, col, p.held ? 0.15 : 0.35);
-      ctx.strokeStyle = rgba(col, p.held ? 0.5 : 0.9); ctx.lineWidth = 2;
+      const col = hlArtPieceCol(p), q = hlArtQuiet(p);
+      drawGlow(p.x, p.y, 36, col, (p.held ? 0.15 : p.resumed ? 0.45 : 0.35) * q);
+      ctx.strokeStyle = rgba(col, (p.held ? 0.5 : 0.9) * q); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, TAU); ctx.stroke();
     }
+    hlArtKicks();
   }
   ctx.restore();
+}
+/* a finished piece's hit: a slash the way it went, over in a fifth of a second */
+function hlArtKicks() {
+  const K = HL_ART_S.kicks;
+  for (let i = K.length - 1; i >= 0; i--) {
+    const k = K[i], u = (uiTime - k.t) / 0.22;
+    if (u >= 1 || u < 0) { K.splice(i, 1); continue; }
+    const ca = Math.cos(k.ang), sa = Math.sin(k.ang), e = HL_EASE.out3(u), L = 30 + 110 * e;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(HL_ART_C.turned, 0.9 * (1 - u)); ctx.lineWidth = 10 * (1 - u) + 1;
+    ctx.beginPath(); ctx.moveTo(k.x - ca * 20, k.y - sa * 20); ctx.lineTo(k.x + ca * L, k.y + sa * L); ctx.stroke();
+    ctx.strokeStyle = rgba('#fff7ed', 1 - u); ctx.lineWidth = 3 * (1 - u) + 0.5; ctx.stroke();
+    drawGlow(k.x, k.y, 60 * (1 - u * 0.5), HL_ART_C.turned, 0.6 * (1 - u));
+  }
 }
 
 /* the event's own bodies, in place of the generic polygon */
@@ -1392,8 +1494,8 @@ function drawHlBody(e, ea) {
   }
   ctx.restore();
 }
-/* the event's enemy rounds: seeds, and his price stickers — held is paused,
-   turned is resumed and dangerous to him as well */
+/* the event's enemy rounds: seeds, and his price stickers — hlHeld is paused,
+   hlTurn finished by you (gold, dangerous to him), hlResumed set off by a binge */
 function drawHlEBullet(b) {
   const C = HL_ART_C, r = b.r, ang = Math.atan2(b.vy || 0, b.vx || 1);
   ctx.save();
@@ -1407,12 +1509,12 @@ function drawHlEBullet(b) {
     ctx.restore();
     return;
   }
-  // THE BACKLOG's: a sticker, spinning. Paused, it hangs grey; resumed, gold.
-  const held = b.hlHeld, turn = b.hlTurn;
-  const col = turn ? C.turned : held ? C.held : C.sticker;
-  drawGlow(b.x, b.y, r * (held ? 2.4 : 3.6), col, held ? 0.14 : turn ? 0.55 : 0.4);
-  if (turn) {
-    ctx.strokeStyle = rgba(C.turned, 0.5); ctx.lineWidth = r * 0.7; ctx.lineCap = 'round';
+  // THE BACKLOG's: a sticker, spinning. Paused, grey; finished, gold; set off, red.
+  const held = b.hlHeld, turn = b.hlTurn, res = !turn && b.hlResumed;
+  const col = turn ? C.turned : res ? C.resumed : held ? C.held : C.sticker;
+  drawGlow(b.x, b.y, r * (held ? 2.4 : 3.6), col, held ? 0.14 : turn || res ? 0.55 : 0.4);
+  if (turn || res) {
+    ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = r * 0.7; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - Math.cos(ang) * r * 4, b.y - Math.sin(ang) * r * 4); ctx.stroke();
   }
   ctx.globalCompositeOperation = 'source-over';
@@ -1434,6 +1536,18 @@ function drawHlEBullet(b) {
     ctx.restore();
   }
 }
+/* how loud a paused piece may be: 1, down to HL_QUIET_A as it becomes furniture */
+function hlArtQuiet(p) { return p.held && !p.turned && !p.resumed ? lerp(1, typeof HL_QUIET_A === 'number' ? HL_QUIET_A : 0.3, clamp(p.quiet || 0, 0, 1)) : 1; }
+/* a piece's colour: gold finished by you, red set off by a binge, grey paused */
+function hlArtPieceCol(p) { const C = HL_ART_C; return p.turned ? C.turned : p.resumed ? C.resumed : p.held ? C.held : C.sticker; }
+/* the play glyph: a paused thing going again */
+function hlArtPlay(x, y, s, ang, col, a) {
+  ctx.globalAlpha = a; ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x + Math.cos(ang) * s * 0.7, y + Math.sin(ang) * s * 0.7);
+  ctx.lineTo(x + Math.cos(ang + 2.3) * s * 0.6, y + Math.sin(ang + 2.3) * s * 0.6);
+  ctx.lineTo(x + Math.cos(ang - 2.3) * s * 0.6, y + Math.sin(ang - 2.3) * s * 0.6); ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = 1;
+}
 /* the pause glyph, anywhere */
 function hlArtPause(x, y, s, col, a) {
   ctx.globalAlpha = a; ctx.fillStyle = col;
@@ -1443,7 +1557,7 @@ function hlArtPause(x, y, s, col, a) {
 /* a sweep: a price-gun's line of tape, run across the room */
 function drawHlSweep(p) {
   const C = HL_ART_C, x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
-  const col = p.turned ? C.turned : p.held ? C.held : C.sticker;
+  const col = hlArtPieceCol(p);
   ctx.save();
   ctx.lineCap = 'butt';
   if (p.t < p.tele) {
@@ -1463,6 +1577,11 @@ function drawHlSweep(p) {
     ctx.beginPath(); ctx.arc(p.x, p.y, p.len * 0.97, lo, hi); ctx.stroke();
     ctx.setLineDash([]);
   }
+  if (p.resumed) {
+    // set off at you: hot, and it will not stop again
+    ctx.strokeStyle = rgba(C.resumed, 0.18 + 0.12 * Math.sin(uiTime * 30)); ctx.lineWidth = p.w * 4;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x2, y2); ctx.stroke();
+  }
   ctx.strokeStyle = rgba(col, p.held ? 0.12 : 0.28); ctx.lineWidth = p.w * 2.4;
   ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x2, y2); ctx.stroke();
   ctx.strokeStyle = rgba(col, p.held ? 0.4 : 0.85); ctx.lineWidth = p.w;
@@ -1472,15 +1591,15 @@ function drawHlSweep(p) {
   if (!p.held) {
     // the barcode, running down the tape
     ctx.strokeStyle = rgba('#fff7ed', 0.55); ctx.lineWidth = p.w * 0.6;
-    ctx.setLineDash([2, 4, 1, 3, 3, 5, 1, 6]); ctx.lineDashOffset = -uiTime * (p.turned ? 260 : 180);
+    ctx.setLineDash([2, 4, 1, 3, 3, 5, 1, 6]); ctx.lineDashOffset = -uiTime * (p.turned || p.resumed ? 260 : 180);
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x2, y2); ctx.stroke();
     ctx.setLineDash([]);
   } else {
     for (let d = 90; d < p.len; d += 150) hlArtPause(p.x + Math.cos(p.a) * d, p.y + Math.sin(p.a) * d, 7, C.ink, 0.5);
   }
-  if (p.turned) {
+  if (p.turned || p.resumed) {
     // chevrons: which way it is going now
-    ctx.strokeStyle = rgba(C.turned, 0.8); ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 2;
     const dir = Math.sign(p.a1 - p.a0) || 1, nx = -Math.sin(p.a) * dir, ny = Math.cos(p.a) * dir;
     for (let d = 60; d < p.len; d += 110) {
       const cx = p.x + Math.cos(p.a) * d + nx * p.w, cy = p.y + Math.sin(p.a) * d + ny * p.w;
@@ -1492,8 +1611,24 @@ function drawHlSweep(p) {
 /* a slam: a sale sticker slapped on the floor, counting down */
 function drawHlSlam(p) {
   const C = HL_ART_C, k = hlPieceK(p);
-  const col = p.turned ? C.turned : p.held ? C.held : C.sticker;
+  const col = hlArtPieceCol(p);
+  const sp = Math.hypot(p.vx || 0, p.vy || 0), sliding = p.turned && sp > 1;
+  const su = sliding ? clamp((p.slide || 0) / SLAM_SLIDE_T, 0, 1) : 0;
   ctx.save();
+  if (sliding) {
+    // finished: it slides like a puck. Ghosts behind it, and the floor scuffed.
+    const ux = p.vx / sp, uy = p.vy / sp, L = Math.min(p.r * 2.2, sp * 0.22);
+    for (let i = 3; i >= 1; i--) {
+      ctx.strokeStyle = rgba(C.turned, 0.12 * (4 - i) / 3); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x - ux * L * i / 3, p.y - uy * L * i / 3, p.r * (1 - i * 0.06), 0, TAU); ctx.stroke();
+    }
+    ctx.strokeStyle = rgba(C.turned, 0.35); ctx.lineWidth = 1.5;
+    for (const s of [-0.7, 0, 0.7]) {
+      ctx.beginPath(); ctx.moveTo(p.x - uy * p.r * s - ux * p.r, p.y + ux * p.r * s - uy * p.r);
+      ctx.lineTo(p.x - uy * p.r * s - ux * (p.r + L), p.y + ux * p.r * s - uy * (p.r + L)); ctx.stroke();
+    }
+    ctx.translate(p.x, p.y); ctx.rotate((p.slide || 0) * 6); ctx.translate(-p.x, -p.y);
+  }
   // the scalloped edge
   ctx.beginPath();
   const N = 28;
@@ -1506,17 +1641,19 @@ function drawHlSlam(p) {
   ctx.strokeStyle = rgba(col, p.held ? 0.45 : 0.85); ctx.lineWidth = 2;
   if (p.held) ctx.setLineDash([8, 6]);
   ctx.stroke(); ctx.setLineDash([]);
-  // the countdown, filling in
+  // the countdown, filling in; sliding, the ring is the slide it has left
   ctx.fillStyle = rgba(col, p.held ? 0.12 : 0.2 + 0.15 * k);
   ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, TAU); ctx.fill();
-  ctx.strokeStyle = rgba(col, 0.9); ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 6, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+  const ring = sliding ? 1 - su : k;
+  ctx.strokeStyle = rgba(col, p.resumed ? 0.7 + 0.3 * Math.sin(uiTime * 28) : 0.9); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 6, -Math.PI / 2, -Math.PI / 2 + TAU * ring); ctx.stroke();
+  if (p.resumed) { ctx.strokeStyle = rgba(C.resumed, 0.35); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 12, 0, TAU); ctx.stroke(); }
   // the core: the thing to shoot
-  ctx.fillStyle = p.held ? '#1e293b' : '#fef3c7';
+  ctx.fillStyle = p.held ? '#1e293b' : p.resumed ? '#fecaca' : '#fef3c7';
   ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, TAU); ctx.fill();
   ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
   if (p.held) hlArtPause(p.x, p.y, 12, C.ink, 0.85);
-  else hlArtText('SALE', p.x, p.y + 4, { px: 10, w: 800, ls: '0.08em', al: 'center', col: p.turned ? '#92400e' : '#9a3412' });
+  else hlArtText('SALE', p.x, p.y + 4, { px: 10, w: 800, ls: '0.08em', al: 'center', col: p.turned ? '#92400e' : p.resumed ? '#7f1d1d' : '#9a3412' });
   ctx.restore();
 }
 /* the vine: a rope with leaves and thorns. Drawn solid over the additive
@@ -1657,7 +1794,162 @@ function drawVigilWorld() {
   outsiderFigure(o.x, o.y, 42, { pose: 'idle', look: clamp((P.x - o.x) / 260, -1, 1), ph: 0.6, glow: his ? 1.8 : 1 });
 }
 
+/* ---- the telegraphs: marks only, plain paint, after every piece ----
+   loudest first: his wind-up (red), what a dash would finish (gold), the
+   rest faint. The pieces have faded themselves already. */
+function hlArtChev(x, y, ang, s) {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  ctx.beginPath();
+  ctx.moveTo(x - ca * s * 0.5 - sa * s * 0.6, y - sa * s * 0.5 + ca * s * 0.6);
+  ctx.lineTo(x + ca * s * 0.5, y + sa * s * 0.5);
+  ctx.lineTo(x - ca * s * 0.5 + sa * s * 0.6, y - sa * s * 0.5 - ca * s * 0.6); ctx.stroke();
+}
+function hlArtBrackets(x, y, r, col, a) {
+  ctx.strokeStyle = rgba(col, a); ctx.lineWidth = 2.5; ctx.lineCap = 'square';
+  const L = r * 0.35;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    ctx.beginPath(); ctx.moveTo(x + sx * r, y + sy * (r - L)); ctx.lineTo(x + sx * r, y + sy * r); ctx.lineTo(x + sx * (r - L), y + sy * r); ctx.stroke();
+  }
+}
+function drawHlTele(e, teach) {
+  const C = HL_ART_C;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  let hits = false;
+  for (const p of hlHeld) {
+    if (!p.held || p.turned || p.resumed) continue;
+    const w = clamp(p.warn || 0, 0, 1), K = p.kick;
+    // 1. his wind-up: red, filling
+    if (w > 0) {
+      const a = 0.4 + 0.6 * w, fl = 0.75 + 0.25 * Math.sin(uiTime * 30);
+      ctx.strokeStyle = rgba(C.resumed, a * fl); ctx.lineWidth = 2; ctx.lineCap = 'round';
+      if (p.kind === 'volley' && p.shots) {
+        for (const b of p.shots) {
+          const sp = Math.hypot(b.vx || 0, b.vy || 0); if (sp < 0.01) continue;
+          const ux = b.vx / sp, uy = b.vy / sp, L = 14 + 50 * w;
+          ctx.beginPath(); ctx.moveTo(b.x + ux * 8, b.y + uy * 8); ctx.lineTo(b.x + ux * (8 + L), b.y + uy * (8 + L)); ctx.stroke();
+        }
+      } else if (p.kind === 'sweep') {
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.len * 0.97, Math.min(p.a, p.a1), Math.max(p.a, p.a1)); ctx.stroke();
+        ctx.lineWidth = 1.5; ctx.setLineDash([8, 7]);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(p.a1) * p.len, p.y + Math.sin(p.a1) * p.len); ctx.stroke(); ctx.setLineDash([]);
+      } else if (p.kind === 'slam') {
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 10, -Math.PI / 2, -Math.PI / 2 + TAU * w); ctx.stroke();
+      }
+    }
+    if (!K) continue;
+    // 2. what a dash would finish: gold
+    if (p.aim != null) {
+      const g = p.goes == null ? p.aim : p.goes, br = p.aimHits ? 1 : 0.5;
+      if (p.aimHits) hits = true;
+      ctx.strokeStyle = rgba(C.turned, 0.9); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(K.x, K.y, (K.r || 10) + 5, 0, TAU); ctx.stroke();
+      ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (let i = 0; i < 3; i++) {
+        const d = (K.r || 10) + 18 + i * 16 + ((uiTime * 40) % 16);
+        ctx.strokeStyle = rgba(C.turned, br * (1 - i * 0.25));
+        hlArtChev(K.x + Math.cos(g) * d, K.y + Math.sin(g) * d, g, 9);
+      }
+    } else if (p.reach) {
+      // in reach, not lined up: a small diamond where a dash would meet it
+      const s = 5 + Math.sin(uiTime * 4) * 0.8;
+      ctx.fillStyle = rgba(C.turned, 0.75);
+      ctx.beginPath(); ctx.moveTo(K.x, K.y - s); ctx.lineTo(K.x + s, K.y); ctx.lineTo(K.x, K.y + s); ctx.lineTo(K.x - s, K.y); ctx.closePath(); ctx.fill();
+    }
+    // 3. the lesson, until the first finish ever
+    if (teach === p) {
+      const g = p.goes == null ? (p.aim == null ? -Math.PI / 2 : p.aim) : p.goes;
+      const tx = K.x - Math.cos(g) * ((K.r || 10) + 34), ty = K.y - Math.sin(g) * ((K.r || 10) + 34);
+      ctx.font = '800 10px ' + HL_ART_FONT; ctx.letterSpacing = '0.22em';
+      const tw = ctx.measureText('DASH THROUGH IT').width;
+      ctx.letterSpacing = '0em';
+      ctx.fillStyle = 'rgba(12,5,3,0.82)'; ctx.beginPath(); ctx.roundRect(tx - tw / 2 - 9, ty - 11, tw + 18, 20, 3); ctx.fill();
+      ctx.strokeStyle = rgba(C.turned, 0.8); ctx.lineWidth = 1; ctx.stroke();
+      hlArtText('DASH THROUGH IT', tx, ty + 3.5, { px: 10, w: 800, ls: '0.22em', al: 'center', col: C.turned });
+    }
+  }
+  if (e) {
+    if (hits) hlArtBrackets(e.x, e.y, e.r + 14 + Math.sin(uiTime * 8) * 2, C.turned, 0.9);
+    // the gourd he is walking to: break it first
+    const g = e.hlWant;
+    if (g && !g.dead) {
+      ctx.strokeStyle = rgba(C.sticker, 0.55); ctx.lineWidth = 1.5; ctx.setLineDash([5, 8]); ctx.lineDashOffset = uiTime * 30;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(g.x, g.y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = rgba(C.sticker, 0.6 + 0.3 * Math.sin(uiTime * 6)); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(g.x, g.y, g.r + 8, 0, TAU); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+/* over his bar: where the binges are, and the edge going red in a wind-up */
+function drawHlBossBar(e, x, y, w) {
+  const C = HL_ART_C, B = typeof BACKLOG_BINGE !== 'undefined' ? BACKLOG_BINGE : [0.75, 0.5, 0.25];
+  const k = typeof hlBingeK === 'function' ? hlBingeK(e) : 0, spent = e.hlBinge || 0;
+  ctx.save();
+  B.forEach((f, i) => {
+    const nx = x + w * f, used = i < spent;
+    ctx.fillStyle = used ? 'rgba(100,116,139,0.6)' : '#0c0503'; ctx.fillRect(nx - 1, y - 3, 2, 20);
+    hlArtTagShape(nx, y - 8, 12, 7, 0);
+    ctx.fillStyle = used ? '#334155' : C.sticker; ctx.fill();
+    ctx.strokeStyle = used ? '#64748b' : C.price; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.restore();
+  });
+  if (k > 0) {
+    const fl = 0.55 + 0.45 * Math.sin(uiTime * 28);
+    ctx.strokeStyle = rgba(C.resumed, (0.4 + 0.6 * k) * fl); ctx.lineWidth = 2 + k * 2;
+    ctx.strokeRect(x - 2, y - 2, w + 4, 18);
+    ctx.fillStyle = rgba(C.resumed, 0.25 * k); ctx.fillRect(x, y, w * k, 14);
+  }
+  ctx.restore();
+}
+/* his unfinished pieces, in the line the gourds had: a meter to the cap */
+function drawHlPiecesHud(n, max, warn, a) {
+  const C = HL_ART_C, y = 108, gap = 14, x0 = W / 2 - (max - 1) * gap / 2;
+  if (a <= 0) return;
+  const near = n >= max - 2, hot = warn > 0;
+  ctx.save();
+  const lab = hot ? 'ALL OF IT' : 'UNFINISHED';
+  hlArtText(lab, x0 - 18, y + 4, { px: 10, ls: '0.24em', al: 'right', col: hot || near ? C.resumed : C.ink, a: 0.85 * a });
+  for (let i = 0; i < max; i++) {
+    const x = x0 + i * gap + (hot && i < n ? Math.sin(uiTime * 40 + i * 2) * 1.2 : 0), on = i < n;
+    ctx.globalAlpha = a * (on ? 1 : 0.5);
+    const col = hot ? C.resumed : near && on ? C.resumed : C.held;
+    hlArtTagShape(x, y, 11, 7, 0);
+    if (on) { ctx.fillStyle = hot ? rgba(C.resumed, 0.4 + 0.5 * warn) : '#334155'; ctx.fill(); }
+    ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+    if (on && !hot) hlArtPause(x + 1, y, 4, C.ink, a * 0.8);
+  }
+  ctx.globalAlpha = 1;
+  hlArtText(n + ' / ' + max, x0 + (max - 1) * gap + 18, y + 4, { px: 10, ls: '0.2em', mono: true, col: hot || near ? C.resumed : C.held, a: 0.9 * a });
+  ctx.restore();
+}
+
 /* ---- the screen ---- */
+/* the gourds standing in the patch: each one hurries the room along. Once he
+   has come, the ones that reached him turn into his price tags. */
+function drawHlPileHud(n, area) {
+  const C = HL_ART_C, took = area.boss ? (area.pileTaken || 0) : 0, tot = Math.min(n + took, 12);
+  if (!tot) return;
+  const step = typeof PILE_STEP === 'number' ? PILE_STEP : 0.03, y = 108, gap = 16, x0 = W / 2 - (tot - 1) * gap / 2;
+  ctx.save();
+  hlArtText(area.boss ? 'HIS PILE' : 'THE PILE', x0 - 18, y + 4, { px: 10, ls: '0.24em', al: 'right', col: area.boss ? C.sticker : C.ink, a: 0.8 });
+  for (let i = 0; i < tot; i++) {
+    const x = x0 + i * gap;
+    if (i < took) {
+      hlArtTagShape(x, y, 12, 7, -0.3); ctx.fillStyle = C.sticker; ctx.fill(); ctx.strokeStyle = C.price; ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.fillStyle = C.hole; ctx.beginPath(); ctx.arc(-3.5, 0, 1, 0, TAU); ctx.fill(); ctx.restore();
+    } else {
+      const bob = area.boss ? Math.sin(uiTime * 14 + i) * 1.2 : 0;
+      hlArtPumpkin(x + bob, y, 5.5, { face: () => { ctx.fillStyle = C.flameHi; hlArtFacePath(0, 0.6, 4.4, 1, 1); ctx.fill(); } });
+    }
+  }
+  const tail = area.boss ? took + ' TAKEN' : '+' + Math.round(n * step * 100) + '%';
+  hlArtText(tail, x0 + (tot - 1) * gap + 18, y + 4, { px: 10, ls: '0.2em', mono: true, col: area.boss ? C.sticker : '#fb923c', a: 0.9 });
+  ctx.restore();
+}
 function drawHlAreaHud(A, area) {
   const C = HL_ART_C, acc = A.stage.accent, n = Math.max(1, Math.min(5, area.n));
   ctx.save();
@@ -1676,7 +1968,8 @@ function drawHlAreaHud(A, area) {
       ctx.beginPath(); ctx.arc(x, y - 4, on && i === n - 1 ? 3.6 : 2.6, 0, TAU); ctx.fill();
     }
   }
-  const goal = hlChipGoal(), m = /(\d+)\s*\/\s*(\d+)/.exec(goal);
+  // in his fight his bar says it; the line goes
+  const goal = area.boss ? '' : hlChipGoal(), m = /(\d+)\s*\/\s*(\d+)/.exec(goal);
   const label = m ? goal.replace(/\s*\d+\s*\/\s*\d+\s*$/, '') : goal;
   hlArtText(label, W / 2 + (m ? -30 : 0), y + 20, { px: 10, ls: '0.24em', al: 'center', col: C.ink, a: 0.8 });
   if (m) {
@@ -1980,7 +2273,8 @@ function hlArtPreload() {
     () => hlBakePrep('hl-patch-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtPatchFloor(g, 0, 0, WORLD.w, WORLD.h)),
     // every light's falloff, and the glows
     () => hlSpritePrep(['#fb923c', '#a5f3fc', '#fed7aa', '#f97316', '#fbbf24', '#64748b', '#94a3b8',
-                        '#c2410c', '#e0f2fe', '#fde68a', '#84cc16', '#ea580c', '#f59e0b', '#cbd5e1']),
+                        '#c2410c', '#e0f2fe', '#fde68a', '#84cc16', '#ea580c', '#f59e0b', '#cbd5e1',
+                        '#ef4444']),
     // where the candles stand, for today's count
     () => hlArtCandles(Math.min(260, Math.floor(Vigil.shown() / 10)))
   ];

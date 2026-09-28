@@ -868,6 +868,9 @@ function updateArena(dt) {
 let lastBossDeath = null;
 
 /* ------------------------------ entity pools ------------------------------ */
+/* THE HACKER: the body of yours whose script is running right now, or null.
+   While it is set, what the script makes is yours — see the HACKER block. */
+let hackBy = null;
 let enemies = [], bullets = [], ebullets = [], gems = [], drops = [],
     parts = [], floats = [], arcs = [], rings = [], corpses = [],
     hazards = [], mortars = [], sentries = [], beams = [],
@@ -2584,6 +2587,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   // first point of damage can land, whatever order things tick in.
   if (bKey === 'theother') e.floor = 10;
   enemies.push(e);
+  if (hackBy) hackKin(e);                // called up by one of yours: kin
   return e;
 }
 
@@ -2683,7 +2687,7 @@ function clipRedactors(segs) {
   if (annotated()) return null;              // the cones are dark for now
   const rs = [];
   for (const e of enemies)
-    if (!e.dead && e.type === 'redactor' && e.redacting) rs.push(e);
+    if (!e.dead && !e.hacked && e.type === 'redactor' && e.redacting) rs.push(e);
   if (!rs.length) return null;
   const inCone = (x, y) => {
     for (const e of rs) {
@@ -3116,6 +3120,8 @@ function updateBlade(dt) {
     e.swungBy = P.swingId;
     bladeHit(e, d, 'swing');
   }
+  // THE BACKLOG's pile: the edge finishes what it passes over
+  if (hlHeld.length) hlKickSwing(a0, dir, lo, hi, reach);
   /* A filing's ring, by the blade itself — the line from the hand to the edge
      — once a swing. */
   if (cages.length) {
@@ -3667,6 +3673,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     return;
   }
   if (e.type === 'jack' && !opts.enemy) dmg = hlJackFace(e, dmg, srcX, srcY);   // THE PATCH: the face
+  if (e.boss === 'backlog' && !opts.hlKick) { dmg *= hlHeapTakes(e); opts = hlHeapHit(e, srcX, srcY, opts); }   // his heap: only his own gets through
   dmg *= (e.vuln || 1);        // stunned enemies take extra
   dmg *= rewardTargetMul(e);   // brands, tags, conduction, slipknot marks
   if (annotated()) dmg *= 1.5; // you know exactly where to put it
@@ -3751,25 +3758,27 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   e.flash = Math.min(1, e.flash + 0.65);
   // secondary hits (chain / drones / blasts) only show numbers sometimes,
   // otherwise a dense crowd turns into an unreadable pile of digits
-  if (!opts.silent || Math.random() < 0.34)
+  if (opts.hlKick) hlKickNum(e, dmg);        // ALL HALLOWS: what his own pile took, in gold
+  else if (!opts.silent || Math.random() < 0.34)
     floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5 + rnd(10, -10), Math.round(dmg),
-      crit ? COL.crit : '#e2e8f0', crit ? 19 : 13, crit ? -70 : -46);
+      opts.hlDull ? '#64748b' : crit ? COL.crit : '#e2e8f0', opts.hlDull ? 11 : crit ? 19 : 13, crit ? -70 : -46);
   if (crit) { Audio_.crit(); shake(0.05); } else if (!opts.silent) Audio_.hit();
   const a = Math.atan2(e.y - srcY, e.x - srcX);
   burst(e.x - Math.cos(a) * e.r * 0.6, e.y - Math.sin(a) * e.r * 0.6,
         crit ? 8 : 4, e.col, 190, 2.6, 0.32, 1.5, a);
   // LIBRA: the scales record every wound you inflict and collect later
-  if (P.scales) P.scalesDebt += dmg * 0.055 * P.scales;
-  if (P.cryo && !opts.noStatus) { e.slow = Math.min(0.62, 0.22 * P.cryo); e.slowT = 1.4; }
+  if (P.scales && !e.hacked) P.scalesDebt += dmg * 0.055 * P.scales;
+  if (P.cryo && !opts.noStatus && !e.hacked) { e.slow = Math.min(0.62, 0.22 * P.cryo); e.slowT = 1.4; }
   if (P.chain && !opts.noChain)
     chainFrom(e, dmg * (0.34 + 0.1 * P.chain) * (P.symb ? 1 + P.symb : 1), P.chain);
   // Executioner's Mark: anything left hanging on a sliver just dies
-  if (P.execute && e.hp > 0 && e.type !== 'boss' && e.hp / e.maxHp < 0.12) {
+  if (P.execute && e.hp > 0 && e.type !== 'boss' && !e.hacked && e.hp / e.maxHp < 0.12) {
     floatText(e.x, e.y - e.r - 8, 'EXECUTE', '#fbbf24', 15);
     e.hp = 0;
   }
-  // a direct hit is one you aimed: not a poison tick, a leak or a field
-  onRewardHit(e, crit, !opts.silent);
+  // a direct hit is one you aimed: not a poison tick, a leak or a field — and
+  // not their fire landing on one of yours
+  if (!e.hacked) onRewardHit(e, crit, !opts.silent);
   if (e.hp <= 0) {
     const excess = Math.min(-e.hp, e.maxHp * 0.6);
     killEnemy(e, a);
@@ -3797,6 +3806,8 @@ function chainFrom(src, dmg, jumps) {
 }
 
 function explode(x, y, radius, dmg, color = '#f97316', hurtsPlayer = false, quiet = false) {
+  // set off by one of yours: it lands on their side at their weight, and never on you
+  if (hackBy) { hurtsPlayer = false; dmg = hackDmg(dmg); color = HACK_COL; }
   ringFx(x, y, radius * 0.18, radius, color, 0.34, 5);
   burst(x, y, 24, color, 320, 4, 0.55);
   // only blooms you can actually see are allowed to flash or shake the camera
@@ -3841,6 +3852,17 @@ function playerBlast(x, y, radius, dmg, color) {
 
 function killEnemy(e, ang = 0) {
   if (e.dead) return;
+  // one of yours, put down by the side it left: nothing is paid out twice
+  if (e.hacked) { hackDown(e); return; }
+  /* What this death sets off — a splitter's halves, a revenant, a bomber's
+     blast — belongs to the body that died, even when one of yours did the
+     killing in the middle of its script. */
+  const was = hackBy;
+  hackBy = null;
+  try { killBody(e, ang); } finally { hackBy = was; }
+}
+
+function killBody(e, ang) {
   e.dead = true;
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   P.kills++;
@@ -4016,6 +4038,7 @@ function mkDrop(x, y, kind) {
    but still routes through Second Wind so revives behave consistently. */
 function hurtPlayer(dmg, opts) {
   if (state !== 'play') return;
+  if (hackBy) return;                    // THE HACKER: a script of yours cannot reach you
   if (P.down) return;                    // a wreck cannot be hurt further
   /* THE VAGRANT's parry. This function is the funnel every source of damage
      already passes through — contact, bullets, blasts, hazards, a boss's floor
@@ -4141,7 +4164,7 @@ function pickEnemyType() {
   // a challenge that names its spawns gets those and nothing else
   const forced = chalSwarm();
   if (forced) return forced[rndi(forced.length)];
-  const pool = stage.pool;
+  const pool = (bossAlive && stage.bossPool) || stage.pool;   // ALL HALLOWS: a boss wave's own roster
   let tot = 0; for (const p of pool) tot += p[1];
   let r = Math.random() * tot;
   for (const p of pool) { r -= p[1]; if (r <= 0) return p[0]; }
@@ -4252,15 +4275,16 @@ function updateWaves(dt) {
   }
   // trickle spawns
   spawnT -= dt;
-  const cap = 24 + wave * 3;
-  if (spawnBudget > 0 && spawnT <= 0 && threatCount() < cap) {
-    const batch = Math.min(spawnBudget, 1 + rndi(Math.min(4, 1 + wave / 3)));
+  const hlB = hlBossWave();                                              // ALL HALLOWS: his fight is his
+  const cap = hlB ? HL_BOSS_LIVE + 1 : 24 + wave * 3;                   // (+1: he counts himself)
+  if (spawnBudget > 0 && spawnT <= 0 && hlWaveThreats() < cap) {      // a gourd holds nothing
+    const batch = Math.min(spawnBudget, hlB ? 1 : 1 + rndi(Math.min(4, 1 + wave / 3)));
     for (let i = 0; i < batch; i++) spawnRing(pickEnemyType());
     spawnBudget -= batch;
-    spawnT = Math.max(0.24, 1.5 - wave * 0.05);
+    spawnT = hlB ? HL_BOSS_TRICKLE : Math.max(0.24, 1.5 - wave * 0.05);
   }
   if (stage.deep && !nodesDone) return;      // the door is still held shut
-  if (spawnBudget <= 0 && threatCount() === 0 && !bossAlive) {
+  if (spawnBudget <= 0 && hlWaveThreats() === 0 && !bossAlive) {
     // the room is clear, so anyone on the floor gets back on their feet —
     // ahead of the reward hand-off, which can return before the banner
     coopReviveWave();
@@ -4795,7 +4819,7 @@ function seedDeepNodes(def) {
 
 function deepDone(accent) {
   nodesDone = true;
-  enemies.length = 0; ebullets.length = 0;
+  hackKeepArmy(false); ebullets.length = 0;  // the defenders go; yours stay
   spawnBudget = 0;
   banner('DEFENCES DOWN', accent, 3.6);
   drawFlashT = 0.3; shake(1.0);
@@ -6490,7 +6514,7 @@ function rrRunProc(q, p) {
 function rrUnhack(z) {
   if (!z || z.dead || !z.hacked) return;
   z.hacked = false;
-  z.hackId = 0;
+  z.hackId = 0; z.hackKin = false; z.hackTgt = null;
   z.col = (ETYPE[z.type] && ETYPE[z.type].col) || ROOT_COL;
   ringFx(z.x, z.y, z.r * 0.5, z.r * 3.2, ROOT_COL, 0.5, 3);
   malGlitch(z.x, z.y, z.r * 3, ROOT_COL, 0.4);
@@ -15408,7 +15432,7 @@ function afterReward() {
 function openPortalRoom() {
   awaitingPortal = true;
   portals.length = 0;
-  enemies.length = 0; ebullets.length = 0;
+  hackKeepArmy(false); ebullets.length = 0;   // THE HACKER's army waits with you
   const nDef = STAGES[(normalIdx + 1) % STAGES.length];
   const aPool = altPool();
   const aDef = aPool[(altIdx + 1) % aPool.length];
@@ -15514,7 +15538,8 @@ function takePortal(p) {
   // step through: recentre in the new arena so you arrive somewhere safe
   P.x = WORLD.w / 2; P.y = WORLD.h / 2; P.vx = P.vy = 0;
   cam.x = P.x; cam.y = P.y;
-  enemies.length = 0; ebullets.length = 0; replay.length = 0;
+  // the sector is left behind; THE HACKER's army comes through the gate with you
+  hackKeepArmy(true); ebullets.length = 0; replay.length = 0;
   banner(stage.name, stage.accent, 2.6);
   betweenWaves = 1.8;
 }
@@ -19989,6 +20014,8 @@ function noteShopExit() {
 /* ------------------------------- banners --------------------------------- */
 let bannerText = '', bannerCol = '#fff', bannerT = 0, bannerMax = 2.2;
 function banner(t, c, dur = 2.2) {
+  // a body of yours does not get to announce its phases, or file you
+  if (hackBy) return;
   bannerText = t; bannerCol = c; bannerT = dur; bannerMax = dur;
 }
 
@@ -20603,6 +20630,7 @@ function gameOver(quiet) {
                   sector: stage.name, loop: loopNum, isRecord: false,
                   chal: Chal.on, chalWon: Chal.won, reward: Chal.reward };
     Codex.flush();
+    if (Chal.on.hl) hlOnDeath();         // ALL HALLOWS: a word, if it was him
     if (!quiet) {
       explode(P.x, P.y, 180, 0, COL.player);
       burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
@@ -21872,7 +21900,8 @@ function updatePlayer(dt) {
   if (P.annotT > 0) {
     P.annotT -= dt;
     for (const e of enemies) {
-      if (e.dead || e.type === 'boss') continue;
+      // THE HACKER's army is not what the book is annotating: its cones stay lit
+      if (e.dead || e.type === 'boss' || e.hacked) continue;
       e.phased = false;                       // phasers stay tangible
       e.redacting = false;                     // cones go dark
       if (e.invuln) e.invuln = 0;
@@ -21953,8 +21982,10 @@ function updateDrones(dt) {
 /* ------------------------------ enemy logic ------------------------------- */
 function updateEnemies(dt) {
   const cull = [];
+  hackFight = threatCount() > 0;       // THE HACKER: is there anything for yours to fight
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
+    hackBy = null;                     // a script that ended on a `continue` does not leak
     if (e.dead) { cull.push(i); continue; }
     e.t += dt;
     // THE GOURD (medal): left alive long enough, it ripens
@@ -21971,8 +22002,11 @@ function updateEnemies(dt) {
     }
     e.flash = Math.max(0, e.flash - dt * 7);
     e.hitCd = Math.max(0, e.hitCd - dt);
-    // turned: it fights the room instead of you, on its own simple script
-    if (e.hacked) { if (updateHacked(e, dt)) cull.push(i); continue; }
+    /* Turned: it runs its own script below, aimed at the room instead of at
+       you. hackTick picks what it is fighting and bleeds the hack. */
+    const hk = e.hacked ? hackTick(e, dt) : HK_RUN;
+    if (hk === HK_GONE) { cull.push(i); continue; }
+    if (hk === HK_HOLD) continue;
     // armour budget: refills at `armor` per second, banks at most a quarter of
     // a second's worth so it cannot store up into a burst shield
     if (e.armor > 0)
@@ -22070,7 +22104,7 @@ function updateEnemies(dt) {
                   2.6, '#a3e635', 0.5, 0.95);
       if (Math.random() < 0.25) {
         for (const o of enemies) {
-          if (o.dead || o === e || o.leakT > 0) continue;
+          if (o.dead || o === e || o.leakT > 0 || o.hacked) continue;
           if (len(o.x - e.x, o.y - e.y) > e.r + o.r + 14) continue;
           o.leak = e.leak; o.leakT = Math.max(o.leakT || 0, e.leakT * 0.8);
           floatText(o.x, o.y - o.r - 8, 'LEAKING', '#a3e635', 10);
@@ -22084,7 +22118,7 @@ function updateEnemies(dt) {
     /* Co-op: everything below steers, aims and lands contact damage on this
        one target, so aggro is decided once, here, by proximity. Solo this is
        P and nothing changes. A downed wingman is not in the running. */
-    const TG = mpAim(e.x, e.y);
+    const TG = e.hacked ? foe(e) : mpAim(e.x, e.y);   // yours aim at what they picked
     const dx = TG.x - e.x, dy = TG.y - e.y;
     const d = len(dx, dy) || 1;
     const ux = dx / d, uy = dy / d;
@@ -22094,7 +22128,10 @@ function updateEnemies(dt) {
        bladeStagger(). */
     /* SUPERUSER's mane: held, lifted, slammed and pinned. No script at all
        until it lets go — and unlike the stagger below, bosses included. */
-    if (suPinned(e)) {
+    hackBy = e.hacked ? e : null;      // what a script of yours makes is yours
+    if (hk === HK_IDLE) {
+      hackHeel(e, dt);                 // nothing to fight: it follows you
+    } else if (suPinned(e)) {
       suPinTick(e, dt);
     } else if (e.stagger > 0 && e.type !== 'boss') {
       if (bladeStaggerTick(e, dt)) continue;
@@ -22229,7 +22266,9 @@ function updateEnemies(dt) {
           e.healT = 1.15;
           let n = 0;
           for (const o of enemies) {
+            // each side mends its own: yours patch yours, theirs never touch them
             if (o.dead || o === e || o.type === 'boss' || o.hp >= o.maxHp) continue;
+            if (!!o.hacked !== !!e.hacked) continue;
             if (len(o.x - e.x, o.y - e.y) > 270) continue;
             o.hp = Math.min(o.maxHp, o.hp + o.maxHp * 0.13);
             beams.push({ x1: e.x, y1: e.y, x2: o.x, y2: o.y, life: 0.4, max: 0.4, col: '#6ee7b7' });
@@ -22252,7 +22291,7 @@ function updateEnemies(dt) {
           // leads the target, so standing still is what gets punished
           mortars.push({ x: TG.x + TG.vx * 0.34 + rnd(46, -46),
                          y: TG.y + TG.vy * 0.34 + rnd(46, -46),
-            r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col });
+            r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col, ally: !!e.hacked });
           Audio_.tone(230, 0.2, 'triangle', 0.09, 95);
           burst(e.x, e.y, 6, e.col, 165, 2.6, 0.3);
         }
@@ -22337,7 +22376,7 @@ function updateEnemies(dt) {
           const tx = WORLD.w - rec.x, ty = WORLD.h - rec.y;
           e.x = lerp(e.x, tx, 1 - Math.exp(-6 * dt));
           e.y = lerp(e.y, ty, 1 - Math.exp(-6 * dt));
-          e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+          e.ang = Math.atan2(foe(e).y - e.y, foe(e).x - e.x);
         }
         e.cd -= dt;
         if (e.cd <= 0 && d < 700) {
@@ -22363,6 +22402,7 @@ function updateEnemies(dt) {
       case 'gourd': case 'jack': case 'creeper': case 'scarecrow':
         hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy); break;
     }
+    hackBy = null;
 
     // separation so crowds don't stack into a single blob
     for (let j = i + 1; j < enemies.length && !e.phased; j++) {
@@ -22383,6 +22423,8 @@ function updateEnemies(dt) {
     e.x = clamp(e.x + e.vx * dt, arena.x0 + e.r, arena.x1 - e.r);
     e.y = clamp(e.y + e.vy * dt, arena.y0 + e.r, arena.y1 - e.r);
     if (e.type !== 'boss') collideMirrors(e, e.r);
+    // one of yours lands its contact on what it was going for, never on you
+    if (e.hacked) { hackContact(e); continue; }
 
     /* Contact damage — intangible enemies, Ghost Step dashes and EMBER pass
        through. EMBER's damage is all at the muzzle, so it has to stand exactly
@@ -22405,6 +22447,12 @@ function updateEnemies(dt) {
       TG.vx += ux * 140; TG.vy += uy * 140;
     }
   }
+  /* The last body in the list may have ended its script on a `continue` — a
+     kin egg hatching, a kin bomber going off — and the reset at the top of the
+     loop never came round again. Nothing after this is anybody's script: left
+     set, it made you unhittable for the rest of the frame and handed the next
+     frame's wave spawns to your side as kin. */
+  hackBy = null;
   for (let i = cull.length - 1; i >= 0; i--) enemies.splice(cull[i], 1);
 }
 
@@ -22416,6 +22464,8 @@ function steer(e, tvx, tvy, rate, dt) {
 // ox/oy override the muzzle (parallel barrels); returns the bullet so a caller
 // can tag it with behaviour, which THE BOOKKEEPER does.
 function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
+  // one of yours: its fire flies in your array, at a weight that hurts its own side
+  if (e.hacked) return hackShot(e, ang, spd, hackDmg(dmg), r, ox, oy);
   const bx = (ox === undefined ? e.x : ox) + Math.cos(ang) * e.r;
   const by = (oy === undefined ? e.y : oy) + Math.sin(ang) * e.r;
   const b = {
@@ -22475,7 +22525,8 @@ function bossShopkeeper(e, dt, ux, uy, d, ph) {
   e.atk = a;
   switch (a) {
     case 0: {                            // PRICE CHECK — a counted-out burst
-      const base = Math.atan2(P.y - e.y, P.x - e.x), n = 4 + ph;
+      const T = foe(e);
+      const base = Math.atan2(T.y - e.y, T.x - e.x), n = 4 + ph;
       for (let k = 0; k < n; k++)
         eshoot(e, base + (k - (n - 1) / 2) * 0.13, 330 + ph * 25, e.dmg * 0.45, 7);
       Audio_.tone(880, 0.05, 'square', 0.05, 1200);
@@ -22510,9 +22561,10 @@ function bossWarden(e, dt, ux, uy, d, ph) {
   }
   if (e.atkT > 0) return;
 
+  const T = foe(e);                      // you, or whatever it is fighting for you
   if (e.atk === -2) {                   // release the charge
     e.atk = 3; e.atkT = 0.85;
-    const a = Math.atan2(P.y - e.y, P.x - e.x);
+    const a = Math.atan2(T.y - e.y, T.x - e.x);
     e.vx = Math.cos(a) * 900; e.vy = Math.sin(a) * 900;
     Audio_.noise(0.4, 0.2, 3000, 300, 3); shake(0.3);
     return;
@@ -22528,7 +22580,7 @@ function bossWarden(e, dt, ux, uy, d, ph) {
       e.atkT = 1.5 - ph * 0.18; break;
     }
     case 1: {                            // aimed spread
-      const base = Math.atan2(P.y - e.y, P.x - e.x), n = 5 + ph * 2;
+      const base = Math.atan2(T.y - e.y, T.x - e.x), n = 5 + ph * 2;
       for (let k = 0; k < n; k++) eshoot(e, base + (k - (n - 1) / 2) * 0.14, 320, e.dmg * 0.5, 8);
       e.atkT = 1.2 - ph * 0.15; break;
     }
@@ -22569,7 +22621,7 @@ function bossForge(e, dt, ux, uy, d, ph) {
   e.atk = a;
   switch (a) {
     case 0: {                            // molten spray — slow, fat, wide
-      const base = Math.atan2(P.y - e.y, P.x - e.x), n = 9 + ph * 3;
+      const base = Math.atan2(foe(e).y - e.y, foe(e).x - e.x), n = 9 + ph * 3;
       for (let k = 0; k < n; k++) eshoot(e, base + (k - (n - 1) / 2) * 0.15, 178, e.dmg * 0.4, 9);
       Audio_.tone(120, 0.35, 'sawtooth', 0.14, 60);
       e.atkT = 1.7 - ph * 0.2; break;
@@ -22586,9 +22638,9 @@ function bossForge(e, dt, ux, uy, d, ph) {
       e.atkT = 1.9; break;
     }
     case 3:                              // slam: telegraphed crater on your head
-      e.atk = 2; e.slamX = P.x; e.slamY = P.y; e.atkT = 1.0;
+      e.atk = 2; e.slamX = foe(e).x; e.slamY = foe(e).y; e.atkT = 1.0;
       mortars.push({ x: e.slamX, y: e.slamY, r: 168, t: 1.0, max: 1.0,
-        dmg: e.dmg * 1.5, col: '#fbbf24', big: true });
+        dmg: e.dmg * 1.5, col: e.hacked ? HACK_COL : '#fbbf24', big: true, ally: !!e.hacked });
       Audio_.tone(90, 0.6, 'square', 0.16, 50);
       break;
   }
@@ -22623,7 +22675,7 @@ function bossBrood(e, dt, ux, uy, d, ph) {
   e.atk = a;
   switch (a) {
     case 0: {                            // acid fan — denies a whole quadrant
-      const base = Math.atan2(P.y - e.y, P.x - e.x);
+      const base = Math.atan2(foe(e).y - e.y, foe(e).x - e.x);
       for (let k = -2; k <= 2; k++) {
         const ang = base + k * 0.26, dist = rnd(420, 150);
         addHazard('acid', clamp(e.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
@@ -22659,6 +22711,7 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
   e.vx *= Math.pow(0.2, dt); e.vy *= Math.pow(0.2, dt);
   if (e.atkT > 0) return;
 
+  const T = foe(e);
   const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
   e.atk = a;
   switch (a) {
@@ -22666,8 +22719,8 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
       burst(e.x, e.y, 20, e.col, 260, 3.4, 0.5);
       ringFx(e.x, e.y, e.r, e.r + 70, e.col, 0.4, 3);
       const ang = rnd(TAU), dist = rnd(420, 240);
-      e.x = clamp(P.x + Math.cos(ang) * dist, 80, WORLD.w - 80);
-      e.y = clamp(P.y + Math.sin(ang) * dist, 80, WORLD.h - 80);
+      e.x = clamp(T.x + Math.cos(ang) * dist, 80, WORLD.w - 80);
+      e.y = clamp(T.y + Math.sin(ang) * dist, 80, WORLD.h - 80);
       ringFx(e.x, e.y, 6, e.r + 60, e.col, 0.45, 4);
       const n = 14 + ph * 6, off = rnd(TAU);
       for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 230, e.dmg * 0.42, 7);
@@ -22677,7 +22730,7 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
     case 1: {                            // crossing laser lattice
       const n = 2 + ph;
       for (let k = 0; k < n; k++) {
-        addHazard('laser', P.x + rnd(160, -160), P.y + rnd(160, -160), 2.0,
+        addHazard('laser', T.x + rnd(160, -160), T.y + rnd(160, -160), 2.0,
           { ang: rnd(TAU), dmg: e.dmg * 0.9, col: e.col });
       }
       Audio_.tone(900, 0.4, 'sine', 0.08, 1400);
@@ -22698,7 +22751,7 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
         const ang = k * TAU / 22;
         eshoot(e, ang, 150 + ph * 40, e.dmg * 0.36, 6);
       }
-      const base = Math.atan2(P.y - e.y, P.x - e.x);
+      const base = Math.atan2(T.y - e.y, T.x - e.x);
       for (let k = 0; k < 5; k++) eshoot(e, base + (k - 2) * 0.1, 380, e.dmg * 0.5, 8);
       e.atkT = 1.3; break;
     }
@@ -22713,6 +22766,7 @@ function bossNull(e, dt, ux, uy, d, ph) {
   steer(e, (ux * push - uy * 0.4) * e.spd, (uy * push + ux * 0.4) * e.spd, 1.0, dt);
   if (e.atkT > 0) return;
 
+  const T = foe(e);
   const a = pick(ph === 0 ? [0, 1, 2] : ph === 1 ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5, 5]);
   e.atk = a;
   switch (a) {
@@ -22720,12 +22774,12 @@ function bossNull(e, dt, ux, uy, d, ph) {
       e.atk = 6; e.atkT = 1.6; e.salvo = 14; e.salvoT = 0; e.arms = 3 + ph;
       break;
     case 1: {                            // aimed lance
-      const base = Math.atan2(P.y - e.y, P.x - e.x), n = 7 + ph * 2;
+      const base = Math.atan2(T.y - e.y, T.x - e.x), n = 7 + ph * 2;
       for (let k = 0; k < n; k++) eshoot(e, base + (k - (n - 1) / 2) * 0.1, 400, e.dmg * 0.45, 8);
       e.atkT = 1.1; break;
     }
     case 2: {                            // the signature: a wall with one gap
-      const gap = Math.atan2(P.y - e.y, P.x - e.x) + rnd(1.6, -1.6);
+      const gap = Math.atan2(T.y - e.y, T.x - e.x) + rnd(1.6, -1.6);
       const n = 40;
       for (let k = 0; k < n; k++) {
         const ang = k * TAU / n;
@@ -22740,14 +22794,14 @@ function bossNull(e, dt, ux, uy, d, ph) {
     case 3: {                            // scorched ground
       for (let k = 0; k < 5; k++) {
         const ang = rnd(TAU), dist = rnd(430, 140);
-        addHazard('fire', clamp(P.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
-                          clamp(P.y + Math.sin(ang) * dist, 60, WORLD.h - 60), 7);
+        addHazard('fire', clamp(T.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
+                          clamp(T.y + Math.sin(ang) * dist, 60, WORLD.h - 60), 7);
       }
       e.atkT = 1.6; break;
     }
     case 4: {                            // laser lattice
       for (let k = 0; k < 2 + ph; k++)
-        addHazard('laser', P.x + rnd(200, -200), P.y + rnd(200, -200), 2.0,
+        addHazard('laser', T.x + rnd(200, -200), T.y + rnd(200, -200), 2.0,
           { ang: rnd(TAU), dmg: e.dmg * 0.85, col: e.col });
       e.atkT = 2.2; break;
     }
@@ -22802,8 +22856,12 @@ function bossCurator(e, dt, ux, uy, d, ph) {
       e.atkT = 1.5 - ph * 0.15; break;
     }
     case 2: {                            // THE FILING — sealed in a closing ring
-      cages.push({ x: P.x, y: P.y, r: 300, min: 62, hp: 60 + wave * 9,
-                   maxHp: 60 + wave * 9, dmg: e.dmg * 1.6, t: 0 });
+      /* Filed by one of yours, it closes round what it is fighting instead:
+         see updateCages. Its blast is theirs to take, at their weight. */
+      const T = foe(e);
+      cages.push({ x: T.x, y: T.y, r: e.hacked ? 240 : 300, min: 62, hp: 60 + wave * 9,
+                   maxHp: 60 + wave * 9, dmg: e.hacked ? hackDmg(e.dmg * 1.6) : e.dmg * 1.6, t: 0,
+                   ally: !!e.hacked });
       banner('FILED', '#e2e8f0', 1.4);
       Audio_.tone(140, 0.7, 'square', 0.14, 90);
       shake(0.4);
@@ -23149,7 +23207,8 @@ function bossKeeper(e, dt, ux, uy, d) {
 
   const frac = e.hp / e.maxHp;
   const want = frac > 0.75 ? 0 : frac > 0.5 ? 1 : frac > 0.25 ? 2 : 3;
-  if (want > e.kp) {
+  // yours, the hack bleeding him is not a section of the fight turning over
+  if (want > e.kp && !e.hacked) {
     e.kp = want;
     e.lockPhase = Math.min(2, want);      // keep the shared shell quiet
     e.atkT = 1.4; e.invuln = 1; e.vuln = 1;
@@ -23171,7 +23230,7 @@ function bossKeeper(e, dt, ux, uy, d) {
     return;
   }
 
-  e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+  e.ang = Math.atan2(foe(e).y - e.y, foe(e).x - e.x);
   e.kDroneAng += dt * 2.1;
 
   /* He reads at arm's length, but never far enough to sit outside a short-range
@@ -23202,8 +23261,8 @@ function bossKeeper(e, dt, ux, uy, d) {
     if (live < 7 + e.kp * 2) keeperSummon(e, e.kp >= 2);
   }
 
-  // --- section four: he starts taking pages out of your build ---
-  if (e.kp === 3) {
+  // --- section four: he starts taking pages out of your build — not for you ---
+  if (e.kp === 3 && !e.hacked) {
     e.kTearT -= dt;
     if (e.kTearT <= 0) { e.kTearT = 9; keeperTear(e); }
     if (Math.random() < 0.4) {
@@ -27301,6 +27360,10 @@ function bossOtherFinale(e, dt) {
 function bossOther(e, dt, ux, uy, d, ph) {
   if (e.virus) return bossOtherVirus(e, dt);
   if (e.finale) return bossOtherFinale(e, dt);
+  /* Yours, it has no last ten seconds and no second wind: its ending — the
+     finale, the infection — belongs to the fight it lost, and it neither heals
+     to full nor stops pretending on the way out. */
+  if (e.hacked) return e.awakened ? bossOtherRage(e, dt) : bossOtherMirror(e, dt, ux, uy, d, ph);
   if (e.hp <= 10) {
     /* Something else gets to it first, more often the more times you have
        won. This used to open at 0.05 and climb by 0.05, which was fine while
@@ -27329,14 +27392,21 @@ function bossOther(e, dt, ux, uy, d, ph) {
     return;
   }
   if (e.awakened) return bossOtherRage(e, dt);
+  bossOtherMirror(e, dt, ux, uy, d, ph);
+}
 
-  e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+/* THE OTHER before it stops pretending: your position through the arena
+   centre, your gun, your dash. Yours, it stands off what it is fighting
+   instead of mirroring anybody. */
+function bossOtherMirror(e, dt, ux, uy, d, ph) {
+  const T = foe(e);
+  e.ang = Math.atan2(T.y - e.y, T.x - e.x);
 
   // mirror your position through the arena centre, then close in
   const mx = WORLD.w - P.x, my = WORLD.h - P.y;
-  const toMirror = ph === 0 ? 1 : 0.55;
-  const tx = lerp(P.x - ux * 260, mx, toMirror);
-  const ty = lerp(P.y - uy * 260, my, toMirror);
+  const toMirror = e.hacked ? 0 : ph === 0 ? 1 : 0.55;
+  const tx = lerp(T.x - ux * 260, mx, toMirror);
+  const ty = lerp(T.y - uy * 260, my, toMirror);
   steer(e, (tx - e.x) * 1.6, (ty - e.y) * 1.6, 1.6 + ph * 0.5, dt);
 
   // it shoots your gun back at you
@@ -27356,7 +27426,7 @@ function bossOther(e, dt, ux, uy, d, ph) {
   e.atk = a;
   switch (a) {
     case 0: {                            // your dash, used against you
-      const ang = Math.atan2(P.y - e.y, P.x - e.x);
+      const ang = Math.atan2(T.y - e.y, T.x - e.x);
       e.vx = Math.cos(ang) * 1100; e.vy = Math.sin(ang) * 1100;
       burst(e.x, e.y, 20, '#5eead4', 280, 3.4, 0.45);
       Audio_.dash();
@@ -27418,7 +27488,7 @@ function bossOtherRage(e, dt) {
   if (e.rage === 0) {                        // winding up, still trackable
     e.invuln = 0; e.vuln = 1;
     e.vx *= Math.pow(0.08, dt); e.vy *= Math.pow(0.08, dt);
-    e.ang = angLerp(e.ang, Math.atan2(P.y - e.y, P.x - e.x), 1 - Math.exp(-9 * dt));
+    e.ang = angLerp(e.ang, Math.atan2(foe(e).y - e.y, foe(e).x - e.x), 1 - Math.exp(-9 * dt));
     e.atkT -= dt;
     if (e.atkT <= 0) {
       e.rage = 1;
@@ -27480,6 +27550,8 @@ let playerChill = 0;
 const LASER_HALF = 30;
 
 function addHazard(kind, x, y, life = 8, opts = {}) {
+  // laid by one of yours: it works on their side of the room, and reads as yours
+  const ally = !!hackBy;
   // Evict the oldest *temporary* hazard. Plain shift() would happily delete a
   // stage's permanent vents or gravity wells once a trail starts spamming.
   if (hazards.length > 46) {
@@ -27487,13 +27559,13 @@ function addHazard(kind, x, y, life = 8, opts = {}) {
     hazards.splice(i >= 0 ? i : 0, 1);
   }
   hazards.push({
-    kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly,
+    kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly || ally, ally,
     r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74
        : kind === 'mirror' ? 58 : kind === 'delete' ? 105 : 76),
     ang: opts.ang !== undefined ? opts.ang : rnd(TAU),
     state: 0, cd: opts.cd !== undefined ? opts.cd : rnd(3.2, 1.2),
-    dmg: opts.dmg || 9,
-    col: opts.col || (kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
+    dmg: ally ? hackDmg(opts.dmg || 9) : (opts.dmg || 9),
+    col: ally ? HACK_COL : opts.col || (kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
        : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9'
        : kind === 'delete' ? '#f87171' : kind === 'mirror' ? '#5eead4' : '#f97316')
   });
@@ -27516,6 +27588,21 @@ function collideMirrors(o, r) {
     o.y = h.y + ny * min;
     const dot = o.vx * nx + o.vy * ny;
     if (dot < 0) { o.vx -= dot * nx; o.vy -= dot * ny; }
+  }
+}
+
+/* Ground one of yours laid: it ticks on their side of the room instead of on
+   you. every — seconds between ticks; mul — the share of h.dmg a tick is
+   worth; slow — whether it drags at them the way acid drags at you. */
+function hazAlly(h, dt, every, mul, slow) {
+  h.tick -= dt;
+  const tick = h.tick <= 0;
+  if (tick) h.tick = every;
+  for (const en of enemies) {
+    if (!isThreat(en) || en.phased || en.invuln) continue;
+    if (len(en.x - h.x, en.y - h.y) > h.r + en.r * 0.5) continue;
+    if (slow) { en.slow = Math.max(en.slow || 0, 0.4); en.slowT = Math.max(en.slowT || 0, 0.3); }
+    if (tick) damageEnemy(en, h.dmg * mul, false, h.x, h.y, { silent: true, noChain: true });
   }
 }
 
@@ -27560,7 +27647,8 @@ function updateHazards(dt) {
       case 'acid': {
         if (Math.random() < 0.35)
           spawnPart(h.x + rnd(h.r, -h.r) * 0.8, h.y + rnd(h.r, -h.r) * 0.8,
-            rnd(10, -10), rnd(-8, -24), rnd(3.4, 1.6), '#4ade80', rnd(0.6, 0.3), 0.95);
+            rnd(10, -10), rnd(-8, -24), rnd(3.4, 1.6), h.ally ? HACK_COL : '#4ade80', rnd(0.6, 0.3), 0.95);
+        if (h.ally) { hazAlly(h, dt, 0.6, 0.7, true); break; }
         if (pd < h.r || wd < h.r) {
           if (pd < h.r) playerChill = Math.max(playerChill, 0.42);
           h.tick -= dt;
@@ -27592,7 +27680,18 @@ function updateHazards(dt) {
           Audio_.noise(0.35, 0.2, 6000, 1200, 3);
           shake(0.25);
         }
-        if (h.state === 1 && h.t < 1.55) {
+        if (h.state === 1 && h.t < 1.55 && h.ally) {
+          // one of yours drew it: it cuts through their side, bosses included, and not you
+          const dxl = Math.cos(h.ang), dyl = Math.sin(h.ang);
+          for (const en of enemies) {
+            if (!isThreat(en) || en.phased || en.invuln) continue;
+            const r2 = (en.x - h.x) * -dyl + (en.y - h.y) * dxl;
+            if (Math.abs(r2) < LASER_HALF + en.r * 0.5 && en.hitCd <= 0) {
+              en.hitCd = 0.3;
+              damageEnemy(en, h.dmg, false, h.x, h.y, { silent: true, noChain: true });
+            }
+          }
+        } else if (h.state === 1 && h.t < 1.55) {
           const dxl = Math.cos(h.ang), dyl = Math.sin(h.ang);
           const rel = (P.x - h.x) * -dyl + (P.y - h.y) * dxl;   // perpendicular distance
           if (Math.abs(rel) < LASER_HALF) hurtPlayer(h.dmg);
@@ -27665,7 +27764,8 @@ function updateHazards(dt) {
         // THE ARCHIVE: a band that blinks out of existence, taking you with it
         const on = (h.t % 2.2) > 1.2;
         h.state = on ? 1 : 0;
-        if (on) {
+        if (on && h.ally) hazAlly(h, dt, 0.4, 1, false);
+        else if (on) {
           h.tick -= dt;
           if (h.tick <= 0 && (pd < h.r || wd < h.r)) {
             h.tick = 0.4;
@@ -27751,6 +27851,8 @@ function updateMortars(dt) {
       // Payload Counter calls these in too, and a shell you asked for does
       // not get to bill you for landing where you aimed it
       if (m.mine) { playerBlast(m.x, m.y, m.r, m.dmg, m.col); mortars.splice(i, 1); continue; }
+      // one of yours called it in: it goes off on their side, and never on you
+      if (m.ally) { explode(m.x, m.y, m.r, hackDmg(m.dmg), HACK_COL, false); mortars.splice(i, 1); continue; }
       explode(m.x, m.y, m.r, m.dmg, m.col, false);
       if (len(P.x - m.x, P.y - m.y) < m.r + P.r) hurtPlayer(m.dmg);
       const wgm = mpPilots();
@@ -27804,6 +27906,7 @@ function updateSentries(dt) {
 const cageCrossed = (c, x1, y1, x2, y2) =>
   (len(x1 - c.x, y1 - c.y) < c.r) !== (len(x2 - c.x, y2 - c.y) < c.r);
 function cageChew(c, dmg, x, y, quiet) {
+  if (c.ally) return;                    // one of yours filed them: your fire passes through
   c.hp -= dmg;
   burst(x, y, 5, '#e2e8f0', 200, 2.4, 0.3);
   if (!quiet) floatText(x, y, Math.round(dmg), '#e2e8f0', 11);
@@ -27823,6 +27926,25 @@ function updateCages(dt) {
     const c = cages[i];
     c.t += dt;
     c.r = Math.max(c.min, c.r - 46 * dt);
+
+    /* Filed by one of yours: it never holds you, your fire passes through it,
+       and what is inside it with them stays in until it closes on them. */
+    if (c.ally) {
+      for (const o of enemies) {
+        if (!isThreat(o) || o.type === 'boss') continue;
+        const od = len(o.x - c.x, o.y - c.y);
+        if (od > c.r + 30 || od < c.r - o.r) continue;
+        const a = Math.atan2(o.y - c.y, o.x - c.x);
+        o.x = c.x + Math.cos(a) * Math.max(0, c.r - o.r);
+        o.y = c.y + Math.sin(a) * Math.max(0, c.r - o.r);
+        o.vx *= 0.4; o.vy *= 0.4;
+      }
+      if (c.r <= c.min + 0.5) {
+        explode(c.x, c.y, c.min + 40, c.dmg, HACK_COL, false);
+        cages.splice(i, 1);
+      }
+      continue;
+    }
 
     // bullets crossing the ring chew through it
     for (let b = bullets.length - 1; b >= 0; b--) {
@@ -27956,7 +28078,7 @@ function updateBullets(dt) {
     if (b.mine && !annotated()) {
       let erased = false;
       for (const e of enemies) {
-        if (e.dead || e.type !== 'redactor' || !e.redacting) continue;
+        if (e.dead || e.hacked || e.type !== 'redactor' || !e.redacting) continue;
         const dxr = b.x - e.x, dyr = b.y - e.y;
         const dr = len(dxr, dyr);
         if (dr > 330) continue;
@@ -28011,7 +28133,8 @@ function updateBullets(dt) {
         const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
         if (off < 1.3) {
           const back = Math.atan2(P.y - e.y, P.x - e.x) + rnd(0.25, -0.25);
-          ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
+          // your army's rounds are stopped by the mirror, not thrown back at you
+          if (!b.hacked) ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
             vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
             r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
           burst(b.x, b.y, 5, '#a5f3fc', 220, 2.4, 0.28);
@@ -28116,7 +28239,12 @@ function updateEBullets(dt) {
       b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
-    if (b.hlTurn && hlTurnHit(b)) { ebullets.splice(i, 1); continue; }   // resumed: it hurts him too
+    // finished by you: it flies at him and his side, and never at you
+    if (b.hlTurn) {
+      if (hlTurnHit(b) || b.life <= 0 || b.x < -20 || b.y < -20 || b.x > WORLD.w + 20 || b.y > WORLD.h + 20)
+        ebullets.splice(i, 1);
+      continue;
+    }
     if (b.ricP > 0) {
       let hit = false;
       if (b.x < arena.x0 + b.r) { b.x = arena.x0 + b.r; b.vx = -b.vx; hit = true; }
@@ -28432,6 +28560,7 @@ function render() {
   drawAsh();
   hlDrawWorldGlow();          // ALL HALLOWS: sweeps, vines, barks, glows
   ctx.globalCompositeOperation = 'source-over';
+  hlDrawWorldTele();          // ALL HALLOWS: what you can finish, and what is about to go
 
   if (P.odStrike && !odStrikePov()) drawOdStrikeHull();   // C: the hull, over everything, until the cut takes it
   drawGearTags();            // THE VAGRANT's drops say what they are
@@ -28529,7 +28658,7 @@ function render() {
   if (state === 'skin') drawSkins();
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
-  if (state === 'dead') drawDead();
+  if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   if (!isTouch && state === 'play') drawCrosshair();
   // every other screen has no system cursor either, so it carries the pointer
   if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
@@ -29736,7 +29865,40 @@ const HL_SAY = {
     'It is still here.',
     'It does not sleep. I do not much, either.',
     'Go up when you are ready. It is not going anywhere. That is the whole problem.'],
-  more: 'More of them are lit than yesterday.'
+  more: 'More of them are lit than yesterday.',
+  /* After a death in THE BACKLOG's fight (hlOnDeath): what went wrong, read
+     from the fight, said by one of them. Each list goes from oblique to a
+     little plainer, one line per death, and never names a key. */
+  hint: {
+    // never finished a single piece
+    finish: [
+      ['outsider', 'He starts everything. Look at how much of it he finishes.'],
+      ['soul', "...the stopped ones don't feel bullets. they're waiting for somebody."],
+      ['outsider', 'What he leaves hanging goes wherever the next thing through it is going.']],
+    // finished a few, but mostly shot at him
+    gun: [
+      ['soul', '...he just puts it on the pile. everything you give him.'],
+      ['outsider', 'You will not hurt a hoarder by giving him more. Give him back his own.'],
+      ['soul', '...nothing hurts him like his own things.']],
+    // went down to a binge
+    binge: [
+      ['outsider', 'When he says all of it, he means all of it.'],
+      ['soul', '...it all came back at once. everything he ever put down.'],
+      ['outsider', 'He always says so first. Whatever you have finished by then is not his to throw.']],
+    // he had eaten well
+    gourds: [
+      ['soul', '...he was bigger than last time. he had been eating.'],
+      ['outsider', 'Whatever is still standing in the patch when he comes is his.'],
+      ['soul', '...he walks to them. for later, he says. get there first.']],
+    // nearly had him
+    close: [
+      ['outsider', 'Nearly. He noticed. He is putting that away for later, too.'],
+      ['soul', '...he was almost empty. i saw the bottom of the pile.']],
+    // none of the above
+    general: [
+      ['soul', "...he's only a heap. heaps come apart."],
+      ['outsider', 'He has had years to get like this. You have had an afternoon.']]
+  }
 };
 /* how evenly the soul types, by how much of it has come back (hlSoulShown) */
 const HL_STEADY = [0, 0, 0.35, 0.7, 1, 1];
@@ -29762,6 +29924,10 @@ const HL_AREAS = {
              bg: '#08060a', grid: '#1a120a', grid2: '#2b1d0e', wall: '#7c2d12',
              glow: 'rgba(251,146,60,0.12)', accent: '#fb923c', hazard: null,
              pool: [['jack', 40], ['gourd', 34], ['creeper', 28], ['scarecrow', 24]],
+             // while he is up: his food and one kind of pressure. A vine holds
+             // you still and a scarecrow wants watching, and his fight needs both
+             // your dash and your eyes.
+             bossPool: [['jack', 60], ['gourd', 40]],
              boss: 'backlog' }
   }
 };
@@ -29776,7 +29942,10 @@ const HL_ASC_T      = 2.8;    // s the soul takes to rise a landing
 const HL_RIPEN_T    = 15;     // THE GOURD medal: s alive before a body ripens
 const HL_BANK_MUL   = 1.5;    // ONE DAY: what the bank pays out at a boss
 
-const GOURD_RIPEN   = 15;     // s before a gourd splits into a jack
+const GOURD_RIPEN   = 15;     // s a gourd takes to carve itself and light
+const GOURD_LIT     = 0.85;   // how far it carves before it holds, lit (hlGrow; the art's split starts here)
+const HL_HATCH_T    = 1.2;    // s a lit gourd takes to come open when the next wave starts
+const HL_REEL_SPD   = 420;    // px/s the pile slides to him when he arrives
 const PILE_STEP     = 0.03;   // every unbroken gourd: everything else this much faster
 const COLD_AFTER    = [4, 9]; // s into waves 2–4 before the cold gourd comes up
 const JACK_WANT     = 220;    // the distance a jack keeps
@@ -29802,14 +29971,35 @@ const SWEEP_LEN     = 760, SWEEP_W = 16, SWEEP_SPD = 1.1, SWEEP_TELE = 0.6;
 const SWEEP_HELD    = [0.35, 0.8];    // share of the arc swept before it is abandoned
 const SLAM_R        = 110, SLAM_T = 1.0;
 const SLAM_HELD     = [0.3, 0.9];     // share of the countdown before it is abandoned
-/* What a resumed piece takes off him, as shares of his health, so that
-   luring him into his own pile matters however hard the run hits. */
-const TURN_SHOT = 0.012, TURN_SWEEP = 0.06, TURN_SLAM = 0.08;
+/* What a piece you finished takes off him, as shares of his health, so that
+   his own pile is how he is hurt however hard the run hits; and off anything
+   of his in the way, as a share of its own. */
+const TURN_SHOT = 0.016, TURN_SWEEP = 0.07, TURN_SLAM = 0.1, TURN_ADD = 0.5;
+const HEAP_TAKES    = 0.3;    // share of anything else his heap lets through
+const HEAP_STEP     = 0.01;   // …less for every gourd he has eaten
+const HEAP_FLOOR    = 0.15;
+const HEAP_HP       = 0.05;   // of his starting health, added per gourd he arrives to
+const HL_PILE_MAX   = 9;      // paused pieces before he binges on his own
+const KICK_REACH    = 14;     // px past the hull that a dash finishes a piece at
+const KICK_SHOT     = 1.7;    // a flung volley's speed, against its own
+const SWEEP_KICK_ARC = 1.8, KICK_SWEEP = 1.6;   // how far a finished sweep swings on, and how fast
+const SLAM_KICK_SPD = 760, SLAM_FRICTION = 0.25, SLAM_SLIDE_T = 1.1;
+/* The telegraphs (28 Sep). One loud thing at a time: what hurts you now, then
+   what you can do now, then what is coming. The rest of his pile is furniture. */
+const BINGE_WARN    = 1.1;    // s from a binge being called to the pile going off
+const HL_DASH_LEN   = 184;    // px a dash covers (0.17 s at 1080): what "in reach" means
+const HL_QUIET_A    = 0.3;    // how much of a paused piece shows while it is out of reach
+const HL_QUIET_RATE = 6;      // how fast a piece goes quiet or comes back, per s
+const HL_PILE_HUD_T = 2.5;    // s the gourd pile's line stays up once he has it all
+const HL_BOSS_ADDS  = 8;      // bodies the patch sends while he is up, in all
+const HL_BOSS_LIVE  = 2;      // …at once, not counting him or the gourds
+const HL_BOSS_TRICKLE = 3.5;  // s between them
 
 /* ---------------------------------- state ---------------------------------- */
 /* Session state. force and day are the admin panel's: the event on without
    touching the clock, and a pinned date. */
-const HL = { force: false, day: null, pro: null, eq: {}, lastLoad: 0 };
+const HL = { force: false, day: null, pro: null, eq: {}, lastLoad: 0, teach: null, heapT: -9, kickNum: null,
+             fight: null, deadSay: null, lastHint: null };
 let inVigil = false;
 let hlArea = null;            // the area run: { id, n, t, coldDue, coldLive, end, death }
 let hlPile = 0;               // unbroken gourds in THE PATCH, this frame
@@ -29864,7 +30054,7 @@ function hlChapterOpen(i) {
    HL_ART_VER is stamped by C:\.claude\lift-hl-art.mjs from the file's
    contents, so a new art file is never served out of a stale cache.
 =========================================================================== */
-const HL_ART_VER = '7c7be4e5af';
+const HL_ART_VER = '139544a2e8';
 const HL_ART = { status: 'none', t0: 0, ms: 0, prepped: false };
 function hlArtWanted() {
   if (hlLive()) return true;
@@ -30203,6 +30393,7 @@ function enterVigil() {
   state = 'play'; uiArm = 0.3;
   vig.t = 0; vig.talk = null; vig.stand = null; vig.asc = null; vig.change = null;
   vig.sayT = 0; vig.said = '';
+  HL.deadSay = null;
   hlPartsClear();
   Vigil.load();
   if (!hlSeen('first')) hlTalk(HL_SAY.first);    // the rest waits for you to walk up to it
@@ -30326,11 +30517,17 @@ function vigilInteract() {
     case 'soul':
       if (!hlSoulSpeaks()) {
         const c = hlCurrent();
-        if (c && HL_SAY[c.id + 'Give']) hlTalk([HL_SAY[c.id + 'Give'][0]]);
+        // what it said after the last time he put you down, said again, once
+        if (HL.lastHint && HL.lastHint.who === 'soul') { hlTalk([['soul', HL.lastHint.text]]); HL.lastHint = null; }
+        else if (c && HL_SAY[c.id + 'Give']) hlTalk([HL_SAY[c.id + 'Give'][0]]);
         else hlTalk(HL_SAY.wait);
       }
       return true;
     case 'outsider': {
+      if (HL.lastHint && HL.lastHint.who === 'outsider') {
+        hlTalk([['outsider', HL.lastHint.text]]); HL.lastHint = null;
+        return true;
+      }
       const b = hlP(), now = Vigil.shown();
       let line = pick(HL_SAY.idle);
       if (b.total && now > b.total) line = HL_SAY.more;
@@ -30393,6 +30590,7 @@ function hlAreaStart(id) {
   Chal.waveT = 0; Chal.moveT = 1.2; Chal.curseT = 2;
   hlArea = { id, n: 0, t: 0, coldDue: 0, coldLive: 0, end: null, death: null };
   hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;
+  HL.fight = null; HL.deadSay = null;
   /* The head start: what the waves before this one would have paid, in full.
      rushSkipped reads the same budget curve startWave spends. */
   const s = rushSkipped(1, A.waveFrom - 1);
@@ -30425,9 +30623,19 @@ function hlAreaWave() {
     bossAlive = true;
     banner(bd.name + '   INBOUND', bd.col);
     Audio_.boss();
-    spawnRing('boss', { boss: A.stage.boss });
-    spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget() * hardBudget());
+    const boss = spawnRing('boss', { boss: A.stage.boss });
+    hlArea.boss = boss;
+    HL.fight = { kicks: 0, binges: 0, bingeAt: -99, eaten: 0 };   // for the word after, if it goes badly
+    // what was left standing is his: every gourd slides to him, one after another
+    const pile = hlPileGourds();
+    pile.forEach((g, k) => { g.hlReel = { d: 0.7 + k * 0.09, v: 0 }; g.hlHatch = undefined; });
+    hlArea.pileTaken = 0;                  // counted as each one reaches him
+    if (pile.length) hlPileArriveFx(boss, pile.length);
+    spawnBudget = Math.round(HL_BOSS_ADDS * chalBudget() * hardBudget());
+    spawnT = 2;
   } else {
+    // what you left lit last wave comes open now
+    if (hlArea.n > 1) for (const g of hlPileGourds()) if (g.hlGrow >= GOURD_LIT - 1e-6) g.hlHatch = 0;
     banner(hlArea.n === 1 ? A.stage.name : 'WAVE ' + hlArea.n + '  /  5', A.stage.accent);
     Audio_.wave();
     spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * chalBudget() * hardBudget());
@@ -30436,9 +30644,11 @@ function hlAreaWave() {
     if (!hlQDone(q.id) && hlArea.n >= 2 && hlProgress(q.id) + hlArea.coldLive < q.need)
       hlArea.coldDue = rnd(COLD_AFTER[1], COLD_AFTER[0]);
   }
-  spawnT = 0;
+  if (!bossAlive) spawnT = 0;
   waveTimer = 0;
 }
+/* the boss wave of an area: a trickle, not a crowd (updateWaves) */
+const hlBossWave = () => hlAreaOn() && bossAlive;
 /* why: 'errand' (wave five with the errand still open), 'win' (the boss) */
 function hlAreaEnd(why) {
   if (!hlArea || hlArea.end) return;
@@ -30471,6 +30681,43 @@ function hlBossDown(e) {
   hlBossDeathFx(e);
   hlAreaEnd('win');
 }
+/* ---- after a death in his fight: a word from one of them. What went wrong
+   is read from the fight (HL.fight) and the word is about that; each kind is
+   said obliquely first, a little plainer every time it happens again, and
+   once they have all been said, any of them. Only while his quest is open. ---- */
+const HL_DEAD_SAY_AT = 1.1;    // s into the death screen before it is said
+function hlOnDeath() {
+  HL.deadSay = null;
+  const A = hlAreaDef(), e = hlArea && hlArea.boss, F = HL.fight;
+  if (!A || !e || e.dead || !F || hlArea.end || hlQDone(A.bossQ)) return;
+  const theme = hlHintTheme(e, F), lines = HL_SAY.hint[theme];
+  let i = 0;
+  while (i < lines.length && hlSeen('hint:' + theme + ':' + i)) i++;
+  if (i >= lines.length) i = rndi(lines.length);
+  hlSee('hint:' + theme + ':' + i);
+  const [who, text] = lines[i];
+  HL.deadSay = { who, text, at: uiTime, cue: {}, theme };
+  HL.lastHint = { who, text };
+}
+/* what to say something about, most basic first */
+function hlHintTheme(e, F) {
+  if (!F.kicks) return 'finish';                          // never finished one of his
+  if (elapsed - F.bingeAt < 3) return 'binge';            // went down in the flood
+  if (F.eaten >= 3) return 'gourds';                      // he had eaten well
+  if (e.hp / e.maxHp < 0.3) return 'close';
+  if (F.kicks < 4) return 'gun';                          // mostly shot at him
+  return 'general';
+}
+/* On the death screen, under everything, in the speaker's own voice. */
+function hlDrawDead() {
+  const S = HL.deadSay;
+  if (!S || !hlLive()) return;
+  const age = uiTime - S.at - HL_DEAD_SAY_AT;
+  if (age < 0) return;
+  hlSayDraw({ who: S.who, text: S.text, age, dur: Infinity, cue: S.cue },
+            { steady: S.who === 'soul' ? HL_STEADY[hlSoulShown()] : 0 });
+}
+
 /* A chip line for the challenge HUD, and the death screen's note. */
 function hlChipGoal() {
   const A = hlAreaDef();
@@ -30511,6 +30758,8 @@ function hlTick(dt, wdt) {
     hlArea.coldDue -= wdt;
     if (hlArea.coldDue <= 0) hlColdSprout();
   }
+  hlTeleTick(dt);
+  hlKickCheck();
   hlHeldTick(wdt);
 }
 const hlPileMul = e => (hlPile && e.type !== 'gourd' ? 1 + PILE_STEP * hlPile : 1);
@@ -30535,12 +30784,26 @@ function hlColdSprout() {
    speed this frame (slow and pile already in it). */
 function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
   switch (e.type) {
-    /* GOURD: does not move and does not attack. It ripens, and a ripe one
-       splits into a jack. The cold ones are the soul's. */
+    /* GOURD: does not move and does not attack, and never holds a wave. It
+       carves itself and then holds, lit; when the next wave starts, every lit
+       one comes open as a jack. When THE BACKLOG arrives he pulls in every one
+       still standing. The cold ones are the soul's, and are carried off when
+       they are ripe. */
     case 'gourd': {
       e.vx = 0; e.vy = 0;
-      e.hlGrow = clamp(e.t / GOURD_RIPEN, 0, 1);
-      if (e.hlGrow >= 1) hlGourdRipe(e);
+      if (e.hlReel) { hlGourdReel(e, dt); break; }
+      if (e.hlCold) {
+        e.hlGrow = clamp(e.t / GOURD_RIPEN, 0, 1);
+        if (e.hlGrow >= 1) hlGourdRipe(e);
+        break;
+      }
+      if (e.hlHatch !== undefined) {
+        e.hlHatch += dt;
+        e.hlGrow = GOURD_LIT + (1 - GOURD_LIT) * clamp(e.hlHatch / HL_HATCH_T, 0, 1);
+        if (e.hlHatch >= HL_HATCH_T) hlGourdRipe(e);
+        break;
+      }
+      e.hlGrow = Math.min(GOURD_LIT, e.t / GOURD_RIPEN * GOURD_LIT);
       break;
     }
     /* JACK: keeps its distance and lobs seeds; up close it winds up and
@@ -30571,9 +30834,12 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
         e.hlBreathTick -= dt;
         if (e.hlBreathTick <= 0) {
           e.hlBreathTick = 0.2;
-          let da = Math.atan2(P.y - e.y, P.x - e.x) - e.hlBreathAng;
-          da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
-          if (d < JACK_BREATH_R + P.r && da < JACK_BREATH_A && !P.down) hurtPlayer(e.dmg * 0.6, { src: e });
+          if (e.hacked) hlJackBreathTurned(e);
+          else {
+            let da = Math.atan2(P.y - e.y, P.x - e.x) - e.hlBreathAng;
+            da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+            if (d < JACK_BREATH_R + P.r && da < JACK_BREATH_A && !P.down) hurtPlayer(e.dmg * 0.6, { src: e });
+          }
         }
         if (e.atkT <= 0 || e.hlDark) { e.state = 0; e.hlBreathCd = 3.2; }
       }
@@ -30600,10 +30866,24 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
       e.ang = Math.atan2(v.y - e.y, v.x - e.x);
       if (v.st === 'fly') {
         v.x += v.vx * dt; v.y += v.vy * dt;
-        if (len(v.x - P.x, v.y - P.y) < P.r + 8 && !(P.dashT > 0) && !P.down) {
-          v.st = 'held'; v.t = 0;
+        const caught = e.hacked ? hlVineCatch(v)
+          : (len(v.x - P.x, v.y - P.y) < P.r + 8 && !(P.dashT > 0) && !P.down ? P : null);
+        if (caught) {
+          v.st = 'held'; v.t = 0; v.on = caught;
           hlVineLatchFx(e);
         } else if (len(v.x - e.x, v.y - e.y) > VINE_RANGE + 40 || v.t > 1.2) v.st = 'back';
+      } else if (v.st === 'held' && v.on && v.on !== P) {
+        // THE HACKER's creeper: held, slowed and reeled in, until it lets go
+        const o = v.on;
+        if (!isThreat(o) || v.t > VINE_HOLD) v.st = 'back';
+        else {
+          v.x = o.x; v.y = o.y;
+          o.slow = Math.max(o.slow || 0, 0.5); o.slowT = Math.max(o.slowT || 0, 0.15);
+          const dd = len(e.x - o.x, e.y - o.y) || 1;
+          if (dd > e.r + o.r + 24 && o.type !== 'boss') {
+            o.x += (e.x - o.x) / dd * VINE_REEL * dt; o.y += (e.y - o.y) / dd * VINE_REEL * dt;
+          }
+        }
       } else if (v.st === 'held') {
         v.x = P.x; v.y = P.y;
         P.slowT = Math.max(P.slowT || 0, 0.08); P.slowV = VINE_SLOW;
@@ -30623,7 +30903,7 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
     case 'scarecrow': {
       let da = Math.atan2(e.y - P.y, e.x - P.x) - P.ang;
       da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
-      const watched = da < CROW_WATCH && d < CROW_RANGE;
+      const watched = !e.hacked && da < CROW_WATCH && d < CROW_RANGE;
       if (watched) {
         e.vx = 0; e.vy = 0;
         if (!e.hlWatched) hlCrowFreezeFx(e);
@@ -30638,6 +30918,26 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
     }
   }
 }
+/* The pile going to him as he arrives: a pause, then it slides, faster as it
+   goes. Still a gourd all the way — break it before it reaches him and he
+   never gets it. */
+function hlGourdReel(g, dt) {
+  const R = g.hlReel, e = hlArea && hlArea.boss;
+  if (!e || e.dead) { g.hlReel = null; return; }
+  if (R.d > 0) { R.d -= dt; return; }
+  const dx = e.x - g.x, dy = e.y - g.y, d = len(dx, dy) || 1;
+  R.v = Math.min(HL_REEL_SPD, (R.v || 0) + HL_REEL_SPD * 2 * dt);
+  g.x += dx / d * R.v * dt; g.y += dy / d * R.v * dt;
+  if (d < e.r + g.r) hlBacklogEat(e, g, true);
+}
+/* the gourds a new wave opens, or he takes: lit or not, never the soul's */
+const hlPileGourds = () => enemies.filter(g => !g.dead && g.type === 'gourd' && !g.hacked && !g.hlCold);
+/* Gourds never hold a wave: the pile is whatever is left standing between them. */
+function hlWaveThreats() {
+  let n = 0;
+  for (const e of enemies) if (isThreat(e) && e.type !== 'gourd') n++;
+  return n;
+}
 function hlGourdRipe(e) {
   e.dead = true;
   if (e.hlCold) {
@@ -30650,8 +30950,28 @@ function hlGourdRipe(e) {
   j.hlHatched = true;
   hlGourdSplitFx(e, j);
 }
+/* THE HACKER's creeper: the first of theirs the vine touches. */
+function hlVineCatch(v) {
+  for (const o of enemies)
+    if (isThreat(o) && !o.phased && len(v.x - o.x, v.y - o.y) < o.r + 8) return o;
+  return null;
+}
+/* THE HACKER's jack breathes down the same locked heading, over everything
+   of theirs in the cone. */
+function hlJackBreathTurned(e) {
+  for (const o of enemies) {
+    if (!isThreat(o) || o.phased || o.invuln) continue;
+    const od = len(o.x - e.x, o.y - e.y);
+    if (od > JACK_BREATH_R + o.r) continue;
+    let da = Math.atan2(o.y - e.y, o.x - e.x) - e.hlBreathAng;
+    da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+    if (da < JACK_BREATH_A)
+      damageEnemy(o, hackDmg(e.dmg * 0.6), false, e.x, e.y, { silent: true, enemy: true, noChain: true });
+  }
+}
 function hlJackSeeds(e) {
-  const base = Math.atan2(P.y - e.y, P.x - e.x), n = 5;
+  const T = foe(e);
+  const base = Math.atan2(T.y - e.y, T.x - e.x), n = 5;
   for (let k = 0; k < n; k++) {
     const b = eshoot(e, base + (k - (n - 1) / 2) * 0.13, 215, e.dmg * 0.6, 5);
     b.hlKind = 'seed';
@@ -30711,45 +31031,75 @@ function hlOnKill(e) {
    a volley in the air, a sweep hanging as a line, a slam's marker on the
    floor. That is the pile (hlHeld).
 
-   At 75/50/25% it binges: everything in the pile resumes at once. Anything
-   of yours that touches a paused piece resumes it on the spot, so the pile
-   can be cleared one piece at a time from a safe angle. And a resumed piece
-   hurts him too — lure him into a paused volley's path and then shoot it.
+   FINISH IT FOR HIM (27 Sep). Nothing you fire finishes a piece: shots pass
+   through. You finish one by going through it — the dash, THE VAGRANT's
+   lunge or its swing — and it goes the way you were going, as yours: gold,
+   hurting him and his side and never you. A volley is flung, keeping its
+   spread; a sweep swings on round the way you pushed it; a slam slides along
+   the floor like a puck and goes off on him, or where it stops.
 
-   He also walks to unbroken gourds and adds them to his heap: a little
-   health and a little armour each.
+   His heap lets only some of anything else through (hlHeapTakes), less for
+   every gourd he has eaten, so what he left unfinished is how he is really
+   hurt.
+
+   He binges at 75/50/25%, and whenever the pile reaches HL_PILE_MAX:
+   whatever is still paused goes off at once, the way it was going — at you.
+   So the pile is ammunition and a debt at the same time.
+
+   He walks to unbroken gourds and adds them to his heap, and when he arrives
+   he pulls in every gourd still standing in the patch (hlAreaWave).
 =========================================================================== */
+function hlHeapTakes(e) {
+  return clamp(HEAP_TAKES - HEAP_STEP * (e.hlHeap || 0), HEAP_FLOOR, HEAP_TAKES);
+}
+
 function bossBacklog(e, dt, ux, uy, d, ph) {
   if (!e.hlInit) {
     e.hlInit = true;
     e.lockPhase = 0;                 // the shell's phase novas are not his; the binges are
-    e.hlBinge = 0; e.hlHeap = 0; e.hlSayT = 5;
+    e.hlBinge = 0; e.hlSayT = 5;
+    e.hlHeap = e.hlHeap || 0;        // the pile may have reached him before he looked round
+    e.hlBaseHp = e.hlBaseHp || e.maxHp;
     hlBark(e, HL_BARK.backlog.enter);
+  }
+  // a binge he has called goes off when the wind-up is over
+  if (e.hlWarn) {
+    e.hlWarn.t += dt;
+    if (e.hlWarn.t >= e.hlWarn.T) { e.hlWarn = null; hlBinge(e); }
   }
   const frac = e.hp / e.maxHp;
   while (e.hlBinge < BACKLOG_BINGE.length && frac <= BACKLOG_BINGE[e.hlBinge]) {
     e.hlBinge++;
-    hlBinge(e);
+    hlBingeCall(e);
   }
+  // too much left unfinished: he does it all now, whatever his health says
+  let held = 0;
+  for (const p of hlHeld) if (p.held) held++;
+  if (held >= HL_PILE_MAX) hlBingeCall(e);
+
   e.hlSayT -= dt;
   if (e.hlSayT <= 0) { e.hlSayT = rnd(11, 7); hlBark(e, pick(HL_BARK.backlog.idle)); }
 
-  // the nearest gourd, if there is one worth walking to
+  // the nearest gourd, if there is one worth walking to (the pile comes to him by itself)
   let g = null, gd = 520;
   for (const o of enemies) {
-    if (o.dead || o.type !== 'gourd' || o.hacked || o.hlCold) continue;
+    if (o.dead || o.type !== 'gourd' || o.hacked || o.hlCold || o.hlReel) continue;
     const dd = len(o.x - e.x, o.y - e.y);
     if (dd < gd) { gd = dd; g = o; }
   }
+  // the one he is going for says so (g.hlWanted), so you can get to it first
+  if (e.hlWant && e.hlWant !== g) e.hlWant.hlWanted = false;
+  e.hlWant = g;
   if (g) {
+    g.hlWanted = true;
     steer(e, (g.x - e.x) / gd * e.spd * 1.4, (g.y - e.y) / gd * e.spd * 1.4, 1.6, dt);
-    if (gd < e.r + g.r + 6) hlBacklogEat(e, g);
+    if (gd < e.r + g.r + 6) hlBacklogEat(e, g, false);
   } else {
-    const push = d < 300 ? -0.6 : d > 460 ? 0.8 : 0;
+    const push = d < 210 ? -0.6 : d > 330 ? 0.8 : 0;     // close enough to stay on screen: you kick at him
     steer(e, (ux * push - uy * 0.3) * e.spd, (uy * push + ux * 0.3) * e.spd, 1.2, dt);
   }
   e.ang += dt * 0.25;
-  if (e.atkT > 0) return;
+  if (e.atkT > 0 || e.hlWarn) return;   // nothing new while he winds up
   const n = e.hlBinge;               // 0..3: more of everything as it goes
   const a = pick([0, 0, 1, 2]);
   if (a === 0) hlBacklogVolley(e, n);
@@ -30757,24 +31107,48 @@ function bossBacklog(e, dt, ux, uy, d, ph) {
   else hlBacklogSlam(e, n);
   e.atkT = rnd(2.1, 1.5) - n * 0.15;
 }
-function hlBacklogEat(e, g) {
+/* A gourd into the heap. Arriving, he takes the patch's pile for health as
+   well as heap; mid-fight, a gourd he walks to mends him. Either way the heap
+   thickens and lets less of your fire through. */
+function hlBacklogEat(e, g, arrival) {
   g.dead = true;
-  e.hp = Math.min(e.maxHp, e.hp + e.maxHp * BACKLOG_EAT_HEAL);
+  const base = e.hlBaseHp || (e.hlBaseHp = e.maxHp);
+  if (arrival) {
+    e.maxHp += base * HEAP_HP; e.hp += base * HEAP_HP;
+    if (hlArea) hlArea.pileTaken = (hlArea.pileTaken || 0) + 1;
+  }
+  else e.hp = Math.min(e.maxHp, e.hp + e.maxHp * BACKLOG_EAT_HEAL);
   e.armor = (e.armor || 0) + BACKLOG_EAT_ARMOR;
-  e.hlHeap++;
-  if (Math.random() < 0.6) hlBark(e, HL_BARK.backlog.gourd);
+  e.hlHeap = (e.hlHeap || 0) + 1;
+  if (HL.fight) HL.fight.eaten++;
+  if (!arrival && Math.random() < 0.6) hlBark(e, HL_BARK.backlog.gourd);
   hlBacklogEatFx(e, g);
 }
-function hlBinge(e) {
-  hlBark(e, HL_BARK.backlog.binge);
+/* A binge is called, then comes. For BINGE_WARN he winds up: every paused
+   piece shakes and shows where it is going, and any you finish in that time
+   are yours, not his. With nothing paused there is nothing to call. */
+function hlBingeCall(e) {
+  if (e.hlWarn) return;
   let n = 0;
-  for (const p of hlHeld) if (p.held) { hlResume(p, true); n++; }
+  for (const p of hlHeld) if (p.held) n++;
+  if (!n) return;
+  e.hlWarn = { t: 0, T: BINGE_WARN };
+  hlBark(e, HL_BARK.backlog.binge);
+  hlBingeWarnFx(e, n);
+}
+/* how far through his wind-up he is, 0..1; 0 when there is none */
+const hlBingeK = e => e && e.hlWarn ? clamp(e.hlWarn.t / e.hlWarn.T, 0, 1) : 0;
+function hlBinge(e) {
+  let n = 0;
+  for (const p of hlHeld) if (p.held) { hlResume(p); n++; }
+  e.atkT = Math.max(e.atkT || 0, 0.9);   // room for what he just set off
+  if (HL.fight) { HL.fight.binges++; HL.fight.bingeAt = elapsed; }
   hlBingeFx(e, n);
 }
 
 /* The three things he starts. Each is a piece in hlHeld: live until it is
-   abandoned (heldAt), then held until something resumes it, then live again
-   — turned, so it hurts him as well — until it finishes. */
+   abandoned (heldAt), then held. From there a binge sends it on at you
+   (resumed), or you finish it through (turned: yours). */
 function hlBacklogVolley(e, n) {
   const id = ++hlHeldSeq, base = Math.atan2(P.y - e.y, P.x - e.x), k = 9 + n * 2;
   const shots = [];
@@ -30784,7 +31158,8 @@ function hlBacklogVolley(e, n) {
     shots.push(b);
   }
   const p = { id, kind: 'volley', e, shots, t: 0, heldAt: rnd(HELD_AFTER[1], HELD_AFTER[0]),
-              live: true, held: false, turned: false };
+              live: true, held: false, turned: false, resumed: false };
+  for (const b of shots) b.hlPiece = p;
   hlHeld.push(p);
   hlPieceStartFx(p);
 }
@@ -30794,35 +31169,87 @@ function hlBacklogSweep(e, n) {
   const p = { id, kind: 'sweep', e, x: e.x, y: e.y, dir,
               a0: aim - dir * arc / 2, a1: aim + dir * arc / 2, a: aim - dir * arc / 2,
               spd: SWEEP_SPD + n * 0.15, len: SWEEP_LEN, w: SWEEP_W, tele: SWEEP_TELE,
-              heldAt: rnd(SWEEP_HELD[1], SWEEP_HELD[0]), t: 0, hitCd: 0, hitBoss: false,
-              live: true, held: false, turned: false };
+              heldAt: rnd(SWEEP_HELD[1], SWEEP_HELD[0]), t: 0, hitCd: 0, hits: null,
+              live: true, held: false, turned: false, resumed: false };
   hlHeld.push(p);
   hlPieceStartFx(p);
 }
 function hlBacklogSlam(e, n) {
   const id = ++hlHeldSeq;
   const p = { id, kind: 'slam', e, x: P.x, y: P.y, r: SLAM_R + n * 10, T: SLAM_T, t: 0,
-              heldAt: rnd(SLAM_HELD[1], SLAM_HELD[0]) * SLAM_T,
-              live: true, held: false, turned: false };
+              heldAt: rnd(SLAM_HELD[1], SLAM_HELD[0]) * SLAM_T, vx: 0, vy: 0, slide: 0,
+              live: true, held: false, turned: false, resumed: false };
   hlHeld.push(p);
   hlPieceStartFx(p);
 }
 /* how far through a piece is, 0..1, for the art */
 function hlPieceK(p) {
-  if (p.kind === 'sweep') return clamp(Math.abs(p.a - p.a0) / Math.abs(p.a1 - p.a0), 0, 1);
+  if (p.kind === 'sweep') return clamp(Math.abs(p.a - p.a0) / (Math.abs(p.a1 - p.a0) || 1), 0, 1);
   if (p.kind === 'slam') return clamp(p.t / p.T, 0, 1);
   return 0;
 }
+/* where a piece is, for a hint or an effect */
+function hlPieceAt(p) {
+  if (p.kind === 'volley') {
+    const s = p.shots.find(b => ebullets.includes(b)) || p.shots[0];
+    return { x: s.x, y: s.y };
+  }
+  if (p.kind === 'sweep') return { x: p.x + Math.cos(p.a) * p.len * 0.5, y: p.y + Math.sin(p.a) * p.len * 0.5 };
+  return { x: p.x, y: p.y };
+}
 function hlHold(p) {
+  if (p.kind === 'volley') {
+    // a round already spent (on the hull, or out of the room) is not paused,
+    // it is gone: kept, it would be a ghost a dash could kick and a mark could draw
+    p.shots = p.shots.filter(b => ebullets.includes(b));
+    if (!p.shots.length) { hlHeld.splice(hlHeld.indexOf(p), 1); return; }
+    for (const b of p.shots) b.hlHeld = true;
+  }
   p.live = false; p.held = true; p.heldT = 0;
-  if (p.kind === 'volley') for (const b of p.shots) b.hlHeld = true;
   hlPieceHoldFx(p);
 }
-function hlResume(p, byBinge) {
+/* A binge: it goes on the way it was going — at you. Never paused again. */
+function hlResume(p) {
   if (!p.held) return;
-  p.held = false; p.live = true; p.turned = true;
-  if (p.kind === 'volley') for (const b of p.shots) { b.hlHeld = false; b.hlTurn = true; }
-  hlPieceResumeFx(p, byBinge);
+  p.held = false; p.live = true; p.resumed = true;
+  if (p.kind === 'volley') for (const b of p.shots) b.hlHeld = false;
+  hlPieceResumeFx(p, true);
+}
+/* Finished through, the way you were going (ang): yours from here. */
+function hlKick(p, ang) {
+  if (!p.held) return false;
+  p.held = false; p.live = true; p.turned = true; p.kickAng = ang;
+  if (p.kind === 'volley') {
+    // the fan keeps its spread, turned round to fly the way you went
+    let sx = 0, sy = 0;
+    for (const b of p.shots) { const l = len(b.vx, b.vy) || 1; sx += b.vx / l; sy += b.vy / l; }
+    const rot = ang - Math.atan2(sy, sx), c = Math.cos(rot), s = Math.sin(rot);
+    for (const b of p.shots) {
+      const vx = b.vx, vy = b.vy;
+      b.vx = (vx * c - vy * s) * KICK_SHOT; b.vy = (vx * s + vy * c) * KICK_SHOT;
+      b.hlHeld = false; b.hlTurn = true; b.life = 3;
+    }
+  } else if (p.kind === 'sweep') {
+    // it swings on round the side you pushed it from
+    const cross = Math.cos(p.a) * Math.sin(ang) - Math.sin(p.a) * Math.cos(ang);
+    p.dir = cross >= 0 ? 1 : -1;
+    p.a0 = p.a; p.a1 = p.a + p.dir * SWEEP_KICK_ARC;
+    p.spd *= KICK_SWEEP; p.t = Math.max(p.t, p.tele); p.hits = new Set();
+  } else {
+    p.vx = Math.cos(ang) * SLAM_KICK_SPD; p.vy = Math.sin(ang) * SLAM_KICK_SPD;
+    p.slide = 0;
+  }
+  hitStop = Math.max(hitStop, 0.04); shake(0.25);
+  hlSee('kicked');
+  if (HL.fight) HL.fight.kicks++;
+  hlPieceKickFx(p, ang);
+  return true;
+}
+/* What a piece of his does when it is yours: a share of him, since he is the
+   point, and a big bite of anything of his standing in the way. */
+function hlTurnDamage(o, share, x, y) {
+  const dmg = o.boss === 'backlog' ? o.maxHp * share : Math.max(o.maxHp * TURN_ADD, 20);
+  damageEnemy(o, dmg, false, x, y, { silent: true, hlKick: true });
 }
 function hlHeldClear() {
   for (const p of hlHeld) if (p.kind === 'volley') for (const b of p.shots) b.life = 0;
@@ -30830,90 +31257,333 @@ function hlHeldClear() {
 }
 function hlHeldTick(dt) {
   for (let i = hlHeld.length - 1; i >= 0; i--) {
+    /* A piece you finished can kill him mid-loop, and his death clears the
+       pile (hlBossDown) out from under the rest of this pass. */
+    if (i >= hlHeld.length) continue;
     const p = hlHeld[i];
-    if (p.held) { p.heldT += dt; continue; }
+    if (p.held) {
+      // a held volley whose rounds were swept away (Second Wind clears them) is
+      // nothing now, and must not sit in the pile counting toward a binge
+      if (p.kind === 'volley' && !p.shots.some(b => ebullets.includes(b))) { hlHeld.splice(i, 1); continue; }
+      p.heldT += dt;
+      continue;
+    }
     p.t += dt;
+    const fresh = !p.turned && !p.resumed;
     if (p.kind === 'volley') {
-      if (!p.turned && p.t >= p.heldAt) { hlHold(p); continue; }
+      if (fresh && p.t >= p.heldAt) { hlHold(p); continue; }
       if (p.shots.every(b => b.life <= 0 || !ebullets.includes(b))) hlHeld.splice(i, 1);
     } else if (p.kind === 'sweep') {
       if (p.t < p.tele) continue;
       p.a += p.dir * p.spd * dt;
       const done = p.dir > 0 ? p.a >= p.a1 : p.a <= p.a1;
       if (done) { hlHeld.splice(i, 1); hlPieceEndFx(p); continue; }
-      if (!p.turned && hlPieceK(p) >= p.heldAt) { hlHold(p); continue; }
+      if (fresh && hlPieceK(p) >= p.heldAt) { hlHold(p); continue; }
       const x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
-      p.hitCd -= dt;
-      if (p.hitCd <= 0 && !P.down && segCircle(p.x, p.y, x2, y2, P.x, P.y, P.r + p.w / 2)) {
-        p.hitCd = 0.5;
-        hurtPlayer(p.e.dmg * 0.9, { src: p.e });
-      }
-      if (p.turned && !p.hitBoss && !p.e.dead && segCircle(p.x, p.y, x2, y2, p.e.x, p.e.y, p.e.r + p.w / 2)) {
-        p.hitBoss = true;
-        damageEnemy(p.e, p.e.maxHp * TURN_SWEEP, false, p.x, p.y, { silent: true });
-        hlTurnHitFx(p, p.e.x, p.e.y);
+      if (p.turned) {
+        for (const o of enemies) {
+          if (!isThreat(o) || p.hits.has(o.id)) continue;
+          if (!segCircle(p.x, p.y, x2, y2, o.x, o.y, o.r + p.w / 2)) continue;
+          p.hits.add(o.id);
+          hlTurnDamage(o, TURN_SWEEP, p.x, p.y);
+          hlTurnHitFx(p, o.x, o.y);
+        }
+      } else {
+        p.hitCd -= dt;
+        if (p.hitCd <= 0 && !P.down && segCircle(p.x, p.y, x2, y2, P.x, P.y, P.r + p.w / 2)) {
+          p.hitCd = 0.5;
+          hurtPlayer(p.e.dmg * 0.9, { src: p.e });
+        }
       }
     } else if (p.kind === 'slam') {
-      if (!p.turned && p.t >= p.heldAt) { hlHold(p); continue; }
+      if (p.turned) {
+        // sliding: it slows, it banks off the walls, it goes off on him or where it stops
+        p.slide += dt;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        const f = Math.pow(SLAM_FRICTION, dt);
+        p.vx *= f; p.vy *= f;
+        if (p.x < arena.x0 + 30 || p.x > arena.x1 - 30) { p.vx = -p.vx; p.x = clamp(p.x, arena.x0 + 30, arena.x1 - 30); }
+        if (p.y < arena.y0 + 30 || p.y > arena.y1 - 30) { p.vy = -p.vy; p.y = clamp(p.y, arena.y0 + 30, arena.y1 - 30); }
+        const onHim = !p.e.dead && len(p.e.x - p.x, p.e.y - p.y) < p.e.r + 26;
+        if (!onHim && p.slide < SLAM_SLIDE_T) continue;
+        hlHeld.splice(i, 1);
+        for (const o of enemies) {
+          if (!isThreat(o) || len(o.x - p.x, o.y - p.y) > p.r + o.r) continue;
+          hlTurnDamage(o, TURN_SLAM, p.x, p.y);
+          hlTurnHitFx(p, o.x, o.y);
+        }
+        shakeAt(p.x, p.y, 0.7);
+        hlSlamLandFx(p);
+        continue;
+      }
+      if (fresh && p.t >= p.heldAt) { hlHold(p); continue; }
       if (p.t >= p.T) {
         hlHeld.splice(i, 1);
         if (!P.down && len(P.x - p.x, P.y - p.y) < p.r + P.r) hurtPlayer(p.e.dmg * 1.3, { src: p.e });
-        if (p.turned && !p.e.dead && len(p.e.x - p.x, p.e.y - p.y) < p.r + p.e.r) {
-          damageEnemy(p.e, p.e.maxHp * TURN_SLAM, false, p.x, p.y, { silent: true });
-          hlTurnHitFx(p, p.e.x, p.e.y);
-        }
         shakeAt(p.x, p.y, 0.6);
         hlSlamLandFx(p);
       }
     }
   }
 }
-/* A resumed shot of his reaching him. From updateEBullets; true = spent. */
+/* A shot of his you flung, meeting anything on his side. From updateEBullets;
+   true = spent. */
 function hlTurnHit(b) {
-  const e = b.owner;
-  if (!e || e.dead || len(b.x - e.x, b.y - e.y) > e.r + b.r) return false;
-  damageEnemy(e, e.maxHp * TURN_SHOT, false, b.x, b.y, { silent: true });
-  hlTurnHitFx({ kind: 'volley', e }, b.x, b.y);
-  return true;
-}
-
-/* ---- your weapons touching the event's things. Bullets ask hlBulletHit;
-   everything that is not a bullet already reports to rootHitSeg and
-   rootHitCircle (the lance, a counter wave, the swing, the lunge, the stars),
-   and those two hand on to hlHitSeg / hlHitCircle — so every pilot can
-   resume a paused piece and cut a vine. ---- */
-function hlAnyTargets() {
-  if (!hlAreaOn()) return false;          // piles and vines only exist up there
-  if (hlHeld.length) return true;
-  for (const e of enemies) if (e.hlVine) return true;
+  for (const o of enemies) {
+    if (!isThreat(o) || o.phased || len(b.x - o.x, b.y - o.y) > o.r + b.r) continue;
+    hlTurnDamage(o, TURN_SHOT, b.x, b.y);
+    hlTurnHitFx({ kind: 'volley', e: o }, b.x, b.y);
+    return true;
+  }
   return false;
 }
-function hlPieceTouched(p, test) {
-  if (!p.held) return false;
+
+/* ---- the telegraphs: worked out every frame for the art to read ----
+   p.quiet  0..1  paused and not about to be finished: furniture (the logic fades it)
+   p.reach        paused and a dash from here could get to it
+   p.kick         {x, y}: the point of it nearest the hull, where a dash meets it
+   p.aim          the dash's heading if you dashed now and it would finish this, or null
+   p.goes         …the way the piece itself then travels from p.kick (a sweep
+                  swings round its pivot, so not the dash's heading)
+   p.aimHits      …and that way runs into him
+   p.warn   0..1  he has called a binge and this goes off at 1
+   HL.teach       until the first finish ever, the piece to label       */
+function hlTeleTick(dt) {
+  const e = hlArea && hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null;
+  if (hlArea && hlArea.boss && hlArea.pileDoneAt === undefined && !enemies.some(g => !g.dead && g.hlReel))
+    hlArea.pileDoneAt = uiTime;
+  HL.teach = null;
+  if (!hlHeld.length) return;
+  const warn = hlBingeK(e), dir = hlDashDir();
+  const x1 = P.x + Math.cos(dir) * HL_DASH_LEN, y1 = P.y + Math.sin(dir) * HL_DASH_LEN;
+  const can = P.dashCh > 0 && !P.down && P.dashT <= 0, R = P.r + KICK_REACH;
+  let td = 1e9;
+  for (const p of hlHeld) {
+    p.aim = null; p.goes = null; p.aimHits = false; p.reach = false; p.warn = 0;
+    if (p.held) {
+      p.kick = hlPieceKickAt(p, P.x, P.y);
+      const d = len(p.kick.x - P.x, p.kick.y - P.y) - p.kick.r;
+      p.reach = can && d < HL_DASH_LEN + R;
+      if (p.reach && hlPieceNear(p, P.x, P.y, x1, y1, R)) {
+        p.aim = dir; p.aimHits = hlAimHits(p, dir, e);
+        if (p.kind === 'sweep') {
+          const cross = Math.cos(p.a) * Math.sin(dir) - Math.sin(p.a) * Math.cos(dir);
+          p.goes = p.a + (cross >= 0 ? 1 : -1) * Math.PI / 2;
+        } else p.goes = dir;
+      }
+      p.warn = warn;
+      if (d < td) { td = d; HL.teach = p; }
+    }
+    // a sweep reaches across the room, so "near" cannot be what wakes a piece:
+    // only being about to be finished, or about to go off — and that one comes
+    // up with the wind-up, so the red marks say it first
+    const want = !p.held || p.aim !== null ? 0 : warn ? 1 - warn : 1;
+    const q = p.quiet || 0;
+    p.quiet = want > q ? Math.min(want, q + dt * HL_QUIET_RATE) : Math.max(want, q - dt * HL_QUIET_RATE * 2);
+  }
+  // the player reads the fight; the words come after deaths (hlOnDeath), and
+  // only once they have twice gone down without finishing a thing is it spelt out
+  if (hlSeen('kicked') || !hlSeen('hint:finish:1')) HL.teach = null;
+}
+/* the way a dash pressed this frame would go: the stick, or the nose */
+function hlDashDir() {
+  let ix = 0, iy = 0;
+  if (keys['a'] || keys['arrowleft'])  ix -= 1;
+  if (keys['d'] || keys['arrowright']) ix += 1;
+  if (keys['w'] || keys['arrowup'])    iy -= 1;
+  if (keys['s'] || keys['arrowdown'])  iy += 1;
+  if (touchUI.move) {
+    const dx = touchUI.move.x - touchUI.move.ox, dy = touchUI.move.y - touchUI.move.oy;
+    if (len(dx, dy) > 6) { ix = dx; iy = dy; }
+  }
+  return ix || iy ? Math.atan2(iy, ix) : P.ang;
+}
+function hlSegDist(ax, ay, bx, by, px, py) {
+  const vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy || 1;
+  const u = clamp(((px - ax) * vx + (py - ay) * vy) / l2, 0, 1);
+  return len(px - (ax + vx * u), py - (ay + vy * u));
+}
+/* the point of a piece nearest x, y that a dash finishes, and its radius */
+function hlPieceKickAt(p, x, y) {
   if (p.kind === 'volley') {
-    for (const s of p.shots) if (s.hlHeld && test.pt(s.x, s.y, s.r + 3)) return true;
+    let best = null, bd = 1e9;
+    for (const s of p.shots) {
+      if (!s.hlHeld) continue;
+      const d = len(s.x - x, s.y - y);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best ? { x: best.x, y: best.y, r: best.r } : { x: p.shots[0].x, y: p.shots[0].y, r: 0 };
+  }
+  if (p.kind === 'sweep') {
+    const vx = Math.cos(p.a) * p.len, vy = Math.sin(p.a) * p.len;
+    const u = clamp(((x - p.x) * vx + (y - p.y) * vy) / (p.len * p.len), 0, 1);
+    return { x: p.x + vx * u, y: p.y + vy * u, r: p.w / 2 };
+  }
+  return { x: p.x, y: p.y, r: 22 };
+}
+/* the middle of what a dash finishes: a volley's held shots, a sweep's
+   middle, a slam's core */
+function hlPieceMid(p) {
+  if (p.kind === 'volley') {
+    let x = 0, y = 0, n = 0;
+    for (const s of p.shots) if (s.hlHeld) { x += s.x; y += s.y; n++; }
+    return n ? { x: x / n, y: y / n } : hlPieceAt(p);
+  }
+  return hlPieceAt(p);
+}
+/* would it find him, finished that way? Roughly: what a player needs told */
+function hlAimHits(p, ang, e) {
+  if (!e) return false;
+  const c = Math.cos(ang), sn = Math.sin(ang);
+  if (p.kind === 'sweep') {
+    // it swings on round its pivot, the side it was pushed from
+    const cross = Math.cos(p.a) * sn - Math.sin(p.a) * c, dir = cross >= 0 ? 1 : -1;
+    if (len(e.x - p.x, e.y - p.y) > p.len + e.r) return false;
+    for (let i = 0; i <= 12; i++) {
+      const a = p.a + dir * SWEEP_KICK_ARC * i / 12;
+      if (segCircle(p.x, p.y, p.x + Math.cos(a) * p.len, p.y + Math.sin(a) * p.len, e.x, e.y, e.r + p.w / 2)) return true;
+    }
+    return false;
+  }
+  const m = hlPieceMid(p), dx = e.x - m.x, dy = e.y - m.y;
+  const along = dx * c + dy * sn, across = Math.abs(-dx * sn + dy * c);
+  if (along <= 0) return false;
+  if (p.kind === 'slam') {
+    // it slides about this far before it goes off where it stops
+    const far = SLAM_KICK_SPD * (1 - Math.pow(SLAM_FRICTION, SLAM_SLIDE_T)) / -Math.log(SLAM_FRICTION);
+    return (along < far && across < e.r + 26) || len(e.x - (m.x + c * far), e.y - (m.y + sn * far)) < p.r + e.r;
+  }
+  // a volley keeps its spread: somewhere inside the fan, within its range
+  let spread = 0;
+  for (const s of p.shots) if (s.hlHeld) spread++;
+  const half = Math.max(1, spread - 1) * 0.055;
+  return along < 1100 && Math.atan2(across, along) < half + Math.atan2(e.r, along);
+}
+/* A paused piece drawn at its quiet (down to HL_QUIET_A), and shaking while
+   he winds up. The art draws the piece as it likes; this sits around the
+   call, so furniture stays furniture whatever the art does. An art file that
+   handles p.quiet itself sets HL_ART_QUIET and this only shakes. */
+function hlQuietDraw(p, fn, arg) {
+  const q = p.quiet || 0, w = p.warn || 0;
+  const fade = q > 0.02 && !(typeof HL_ART_QUIET !== 'undefined' && HL_ART_QUIET);
+  if (!fade && !w) return fn(arg === undefined ? p : arg);
+  hlAlphaHook();
+  ctx.save();
+  if (w) ctx.translate(Math.sin(uiTime * 71 + p.id) * 2.4 * w, Math.cos(uiTime * 83 + p.id) * 2.4 * w);
+  const a0 = ctx.globalAlpha;
+  hlAlphaK = fade ? 1 - q * (1 - HL_QUIET_A) : 1;
+  ctx.globalAlpha = a0;
+  try { fn(arg === undefined ? p : arg); }
+  finally { hlAlphaK = 1; ctx.restore(); }
+}
+/* The fade itself. A canvas filter would do it, but it renders every draw
+   call through a layer of its own (about 40 ms a frame with the pile up), so
+   instead every alpha the art sets while a quiet piece draws is scaled by
+   hlAlphaK: set 0.8 and it gets 0.8·k, read it back and it says 0.8. Put on
+   the game's context once, the first time it is needed; at k = 1 it changes
+   nothing for anything else. */
+let hlAlphaK = 1;
+function hlAlphaHook() {
+  if (hlAlphaHook.on) return;
+  hlAlphaHook.on = true;
+  const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'globalAlpha');
+  if (!d || !d.get || !d.set) return;
+  Object.defineProperty(ctx, 'globalAlpha', {
+    configurable: true,
+    get() { return d.get.call(this) / hlAlphaK; },
+    set(v) { d.set.call(this, v * hlAlphaK); }
+  });
+}
+/* His heap taking the edge off ordinary fire: it says so, dully. */
+function hlHeapHit(e, x, y, opts) {
+  if (uiTime - HL.heapT > 0.12) { HL.heapT = uiTime; hlHeapFx(e, x, y); }
+  return Object.assign({}, opts, { hlDull: true });
+}
+/* What his own pile took off him, as one number per finish: a volley's shots
+   landing together add up rather than stacking a column of digits. */
+function hlKickNum(o, dmg) {
+  const boss = o.boss === 'backlog', f = HL.kickNum;
+  const say = v => boss ? '\u2212' + Math.max(1, Math.round(v / o.maxHp * 100)) + '%' : String(Math.round(v));
+  if (f && f.o === o && uiTime - f.at < 0.4 && floats.includes(f.fl)) {
+    f.sum += dmg; f.at = uiTime;
+    f.fl.text = say(f.sum); f.fl.life = f.fl.max;
+    return;
+  }
+  floatText(o.x + rnd(12, -12), o.y - o.r - 14, say(dmg), '#fde68a', boss ? 22 : 16, -58);
+  HL.kickNum = { o, sum: dmg, at: uiTime, fl: floats[floats.length - 1] };
+}
+
+/* ---- finishing a piece: going through it. ---- */
+function hlPieceNear(p, x0, y0, x1, y1, R) {
+  if (p.kind === 'volley') {
+    for (const s of p.shots) if (s.hlHeld && segCircle(x0, y0, x1, y1, s.x, s.y, R + s.r)) return true;
     return false;
   }
   if (p.kind === 'sweep') {
     const x2 = p.x + Math.cos(p.a) * p.len, y2 = p.y + Math.sin(p.a) * p.len;
-    return test.seg(p.x, p.y, x2, y2, p.w / 2);
+    const n = Math.max(2, Math.ceil(p.len / 18));
+    for (let k = 0; k <= n; k++) {
+      const u = k / n;
+      if (segCircle(x0, y0, x1, y1, lerp(p.x, x2, u), lerp(p.y, y2, u), R + p.w / 2)) return true;
+    }
+    return false;
   }
-  return test.pt(p.x, p.y, 22);            // a slam: its core
+  return segCircle(x0, y0, x1, y1, p.x, p.y, R + 22);          // a slam: its core
+}
+/* The dash (and THE VAGRANT's lunge, which is its dash): swept from where the
+   hull was last frame, so a fast dash cannot step over a piece. */
+function hlKickCheck() {
+  const x0 = HL.kickX === undefined ? P.x : HL.kickX, y0 = HL.kickY === undefined ? P.y : HL.kickY;
+  HL.kickX = P.x; HL.kickY = P.y;
+  if (!(P.dashT > 0) || P.down || !hlHeld.length) return;
+  const ang = Math.atan2(P.dashDY || 0, P.dashDX || 1);
+  for (const p of hlHeld) if (p.held && hlPieceNear(p, x0, y0, P.x, P.y, P.r + KICK_REACH)) hlKick(p, ang);
+}
+/* THE VAGRANT's swing, by the band it covered this frame (updateBlade): a
+   piece it passes over goes the way the pilot is aiming. */
+function hlKickSwing(a0, dir, lo, hi, reach) {
+  if (!hlAreaOn() || !hlHeld.length) return;
+  const inBand = (x, y, r) => {
+    const dx = x - P.x, dy = y - P.y, d = len(dx, dy);
+    if (d > reach + r) return false;
+    const off = dir * bladeDelta(a0, Math.atan2(dy, dx));
+    const pad = d > 4 ? Math.atan2(r, Math.max(6, d)) : Math.PI;
+    return !(off + pad < lo || off - pad > hi);
+  };
+  for (const p of hlHeld) {
+    if (!p.held) continue;
+    let hit = false;
+    if (p.kind === 'volley') hit = p.shots.some(s => s.hlHeld && inBand(s.x, s.y, s.r));
+    else if (p.kind === 'slam') hit = inBand(p.x, p.y, 22);
+    else {
+      for (let k = 0; k <= 12 && !hit; k++) {
+        const u = k / 12;
+        hit = inBand(p.x + Math.cos(p.a) * p.len * u, p.y + Math.sin(p.a) * p.len * u, p.w / 2);
+      }
+    }
+    if (hit) hlKick(p, P.ang);
+  }
+}
+
+/* ---- your weapons touching the event's things: only a creeper's vine now.
+   Bullets ask hlBulletHit; everything that is not a bullet already reports to
+   rootHitSeg and rootHitCircle (the lance, a counter wave, the swing, the
+   lunge, the stars), and those hand on to hlHitSeg / hlHitCircle. His pile
+   is not shot through: fire passes it, and only going through it counts. ---- */
+function hlAnyTargets() {
+  if (!hlAreaOn()) return false;          // vines only exist up there
+  for (const e of enemies) if (e.hlVine && !e.hacked) return true;
+  return false;
 }
 function hlVineTouched(test) {
   for (const e of enemies) {
-    if (e.dead || !e.hlVine) continue;
+    if (e.dead || !e.hlVine || e.hacked) continue;   // yours holds one of theirs
     const s = hlVineSeg(e);
     if (s && test.seg(s.x1, s.y1, s.x2, s.y2, 5)) { hlVineCut(e); return true; }
   }
   return false;
 }
-function hlTouch(test) {
-  let hit = false;
-  for (const p of hlHeld) if (hlPieceTouched(p, test)) { hlResume(p, false); hit = true; }
-  if (hlVineTouched(test)) hit = true;
-  return hit;
-}
+function hlTouch(test) { return hlVineTouched(test); }
 function hlBulletHit(b) {
   if (!b.mine || !hlAnyTargets()) return false;
   const r = b.r;
@@ -30963,7 +31633,7 @@ function hlDrawFloor() {
 function hlDrawWorldUnder() {
   if (inVigil) drawVigilWorld();
   if (hlAreaOn() || inVigil) hlPartsDraw('lit');
-  if (hlHeld.length) for (const p of hlHeld) if (p.kind === 'slam') drawHlSlam(p);
+  if (hlHeld.length) for (const p of hlHeld) if (p.kind === 'slam') hlQuietDraw(p, drawHlSlam);
 }
 function hlDrawWorldOver() {
   if (!(inVigil || hlAreaOn())) return;
@@ -30973,15 +31643,30 @@ function hlDrawWorldOver() {
 }
 function hlDrawWorldGlow() {
   if (!(inVigil || hlAreaOn())) return;
-  for (const p of hlHeld) if (p.kind === 'sweep') drawHlSweep(p);
+  for (const p of hlHeld) if (p.kind === 'sweep') hlQuietDraw(p, drawHlSweep);
   for (const e of enemies) if (!e.dead && e.hlVine) drawHlVine(e, e.hlVine);
   hlPartsDraw('glow');
   drawHlGlow(inVigil ? 'vigil' : hlArea.id);
   if (hlArea && hlArea.death) drawHlBossDeath(hlArea.death);
   for (const b of hlBarks) drawHlBark(b);
 }
+/* over the world, in plain paint: the telegraph marks (drawHlTele) */
+function hlDrawWorldTele() {
+  if (!hlAreaOn() || hlArea.end || !(hlHeld.length || hlArea.boss)) return;
+  drawHlTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null, HL.teach);
+}
 function hlDrawScreen() {
   if (hlAreaOn()) drawHlAreaHud(hlAreaDef(), hlArea);
+  if (hlAreaOn() && hlArea.id === 'patch' && !hlArea.end) {
+    // the gourds' line, until he has them all; then the line is his unfinished pile
+    const e = hlArea.boss;
+    if (!e || hlArea.pileDoneAt === undefined || uiTime - hlArea.pileDoneAt < HL_PILE_HUD_T) drawHlPileHud(hlPile, hlArea);
+    else if (!e.dead) {
+      let held = 0;
+      for (const p of hlHeld) if (p.held) held++;
+      drawHlPiecesHud(held, HL_PILE_MAX, hlBingeK(e), clamp((uiTime - hlArea.pileDoneAt - HL_PILE_HUD_T) / 0.4, 0, 1));
+    }
+  }
   if (inVigil) {
     if (vig.talk) hlSayDraw(hlTalkLine(), { steady: vig.talk.lines[vig.talk.i][0] === 'soul' ? HL_STEADY[hlSoulShown()] : 0 });
     else drawHlVigilHud(vig);
@@ -31053,6 +31738,171 @@ function hlPieceEndFx(p) {}
 function hlTurnHitFx(p, x, y) { burst(x, y, 10, '#fde68a', 220, 2.6, 0.3); }
 function hlSlamLandFx(p) { ringFx(p.x, p.y, p.r * 0.3, p.r, p.turned ? '#fde68a' : '#fb923c', 0.4, 5); Audio_.boom(); }
 function hlBarkFx(e, text) {}
+/* a piece you finished through, at the moment it goes: ang is the way it is going */
+function hlPieceKickFx(p, ang) {
+  const q = hlPieceAt(p);
+  ringFx(q.x, q.y, 6, 60, '#fde68a', 0.35, 3);
+  burst(q.x, q.y, 14, '#fde68a', 260, 2.6, 0.35, 1, ang);
+  Audio_.tone(420, 0.08, 'square', 0.07, 900);
+}
+/* he has arrived, and n gourds have started to slide to him */
+function hlPileArriveFx(e, n) { Audio_.tone(110, 0.5, 'sawtooth', 0.06, 70); }
+/* he has called a binge: n pieces go off in BINGE_WARN s (e.hlWarn) */
+function hlBingeWarnFx(e, n) {
+  ringFx(e.x, e.y, e.r, e.r * 3, '#ef4444', BINGE_WARN, 3);
+  Audio_.tone(160, BINGE_WARN, 'sawtooth', 0.07, 520);
+}
+/* his heap took the edge off ordinary fire at x, y (at most every 0.12 s) */
+function hlHeapFx(e, x, y) {
+  const a = Math.atan2(y - e.y, x - e.x);
+  burst(e.x + Math.cos(a) * e.r * 0.8, e.y + Math.sin(a) * e.r * 0.8, 3, '#64748b', 140, 2, 0.22, 1, a);
+}
+/* the pile, on the screen: n gourds standing (each one hurries the room along;
+   whatever is standing when he arrives is his). area.boss is set once he has
+   come, and area.pileTaken says how many he was given. */
+/* The telegraphs, over the world in plain paint (source-over), after every
+   piece has drawn. e is THE BACKLOG (null once he is down); teach is the
+   piece to label until the player's first finish ever, or null. Reads, per
+   paused piece: p.reach, p.kick, p.aim, p.goes, p.aimHits, p.warn (see
+   hlTeleTick); and e.hlWant, the gourd he is walking to. Draw only these
+   marks: the pieces themselves are drawHlSweep / drawHlSlam / drawHlEBullet,
+   already faded by p.quiet. */
+function drawHlTele(e, teach) {
+  let hits = false;
+  ctx.save();
+  ctx.lineCap = 'round';
+  // the gourd he is walking to (e.hlWant, g.hlWanted): break it before he gets there
+  const g = e && e.hlWant;
+  if (g && !g.dead) {
+    ctx.strokeStyle = rgba('#fb923c', 0.35); ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 8]); ctx.lineDashOffset = -uiTime * 30;
+    ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(g.x, g.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = rgba('#fb923c', 0.6 + 0.3 * Math.sin(uiTime * 8));
+    ctx.beginPath(); ctx.arc(g.x, g.y, g.r + 7, 0, TAU); ctx.stroke();
+  }
+  for (const p of hlHeld) {
+    if (!p.held) continue;
+    const m = hlPieceMid(p);
+    if (p.warn > 0) {
+      // where it goes when he does it all: red, filling toward the moment
+      const k = p.warn, a = 0.35 + 0.5 * k;
+      ctx.strokeStyle = rgba('#ef4444', a); ctx.fillStyle = rgba('#ef4444', a);
+      if (p.kind === 'volley') {
+        ctx.lineWidth = 2;
+        for (const s of p.shots) {
+          if (!s.hlHeld) continue;
+          const l = len(s.vx, s.vy) || 1, L = 18 + 46 * k;
+          ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x + s.vx / l * L, s.y + s.vy / l * L); ctx.stroke();
+        }
+      } else if (p.kind === 'sweep') {
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.len * 0.55, p.a, p.a + (p.a1 - p.a) * k, p.a1 < p.a); ctx.stroke();
+        ctx.setLineDash([10, 8]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(p.a1) * p.len, p.y + Math.sin(p.a1) * p.len); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+      }
+    } else if (p.aim != null) {
+      // a dash now finishes this, and sends it that way
+      ctx.strokeStyle = rgba('#fde68a', 0.95); ctx.lineWidth = 2;
+      if (p.kind === 'volley') for (const s of p.shots) { if (s.hlHeld) { ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 5, 0, TAU); ctx.stroke(); } }
+      else if (p.kind === 'sweep') { ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(p.a) * p.len, p.y + Math.sin(p.a) * p.len); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, TAU); ctx.stroke(); }
+      // from where it is met (a sweep) or its middle, the way it then goes
+      const o = p.kind === 'sweep' ? p.kick : m, c = Math.cos(p.goes), sn = Math.sin(p.goes);
+      ctx.fillStyle = rgba('#fde68a', p.aimHits ? 1 : 0.55);
+      for (let i = 0; i < 3; i++) {
+        const d = 34 + i * 20 + (uiTime * 40) % 20, x = o.x + c * d, y = o.y + sn * d;
+        ctx.beginPath(); ctx.moveTo(x + c * 7, y + sn * 7);
+        ctx.lineTo(x - c * 4 - sn * 6, y - sn * 4 + c * 6); ctx.lineTo(x - c * 4 + sn * 6, y - sn * 4 - c * 6);
+        ctx.closePath(); ctx.fill();
+      }
+      if (p.aimHits) hits = true;
+    } else if (p.reach) {
+      // near enough to finish: a small mark where a dash would meet it
+      const k = p.kick, r = 5;
+      ctx.strokeStyle = rgba('#fde68a', 0.5); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(k.x, k.y - r); ctx.lineTo(k.x + r, k.y); ctx.lineTo(k.x, k.y + r); ctx.lineTo(k.x - r, k.y); ctx.closePath(); ctx.stroke();
+    }
+    if (p === teach) {
+      // on the far side from the chevrons, or above
+      const o = p.kind === 'sweep' ? p.kick : m, back = p.goes != null ? p.goes + Math.PI : -Math.PI / 2;
+      ctx.textAlign = 'center';
+      ctx.font = "800 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.letterSpacing = '0.2em';
+      ctx.fillStyle = rgba('#fde68a', 0.75 + 0.25 * Math.sin(uiTime * 6));
+      ctx.fillText('DASH THROUGH IT', o.x + Math.cos(back) * 46, o.y + Math.sin(back) * 40 + 4);
+      ctx.letterSpacing = '0em';
+    }
+  }
+  if (hits && e) {
+    // …and that way finds him
+    ctx.strokeStyle = rgba('#fde68a', 0.8); ctx.lineWidth = 2.5;
+    const r = e.r + 12 + Math.sin(uiTime * 10) * 3;
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + Math.PI / 4;
+      ctx.beginPath(); ctx.arc(e.x, e.y, r, a - 0.3, a + 0.3); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+/* His health bar (x, y, w; 14 tall), already drawn: mark it. The binges at
+   BACKLOG_BINGE (e.hlBinge of them spent), and the wind-up (hlBingeK(e)). */
+function drawHlBossBar(e, x, y, w) {
+  const k = hlBingeK(e);
+  ctx.save();
+  BACKLOG_BINGE.forEach((f, i) => {
+    const spent = i < (e.hlBinge || 0);
+    ctx.fillStyle = spent ? 'rgba(148,163,184,0.3)' : '#fecaca';
+    ctx.fillRect(x + 2 + (w - 4) * f - 1, y - 3, 2, 20);
+  });
+  if (k > 0) {
+    ctx.strokeStyle = rgba('#ef4444', 0.5 + 0.5 * Math.sin(uiTime * 30)); ctx.lineWidth = 2;
+    roundRect(x - 3, y - 3, w + 6, 20, 10); ctx.stroke();
+  }
+  ctx.restore();
+}
+/* Once the gourds are his, their line is this: n pieces paused of max before
+   he does them all anyway; warn 0..1 while a binge winds up; a 0..1 as it
+   takes over the line. */
+function drawHlPiecesHud(n, max, warn, a) {
+  const gap = 12, x0 = W / 2 - (max - 1) * gap / 2, y = 108;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.letterSpacing = '0.24em';
+  ctx.textAlign = 'right'; ctx.fillStyle = '#94a3b8';
+  ctx.fillText('UNFINISHED', x0 - 14, y + 4);
+  for (let i = 0; i < max; i++) {
+    const on = i < n;
+    ctx.fillStyle = warn > 0 ? (Math.sin(uiTime * 30) > 0 ? '#ef4444' : '#7f1d1d')
+                  : on ? (n >= max - 2 ? '#f87171' : '#cbd5e1') : 'rgba(148,163,184,0.2)';
+    ctx.fillRect(x0 + i * gap - 3, y - 3, 7, 7);
+  }
+  ctx.textAlign = 'left'; ctx.fillStyle = warn > 0 ? '#ef4444' : '#94a3b8';
+  ctx.fillText(warn > 0 ? 'ALL OF IT' : n + ' / ' + max, x0 + (max - 1) * gap + 14, y + 4);
+  ctx.letterSpacing = '0em';
+  ctx.restore();
+}
+function drawHlPileHud(n, area) {
+  const taking = area.boss && !area.boss.dead;
+  if (!n && !taking) return;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.letterSpacing = '0.24em';
+  ctx.fillStyle = taking ? '#fed7aa' : '#fb923c';
+  let coming = 0;
+  for (const g of enemies) if (!g.dead && g.hlReel) coming++;
+  const t = taking ? (coming ? 'HE IS TAKING THE PILE   ·   ' + coming
+                             : area.pileTaken ? 'HE TOOK THE PILE   ·   ' + area.pileTaken : '')
+                   : 'THE PILE   ·   ' + n + '   ·   +' + Math.round(n * PILE_STEP * 100) + '% SPEED';
+  if (t) ctx.fillText(t, W / 2, 108);
+  ctx.letterSpacing = '0em';
+  ctx.restore();
+}
 
 /* ---- the world ---- */
 /* the lights of the room this frame (hlLightBegin, hlLight, hlOcc*).
@@ -32835,20 +33685,21 @@ function drawHazards() {
       case 'delete': {
         // a band that blinks out of reality on a fixed rhythm
         const on = h.state === 1;
+        const mine = h.ally;                 // laid by one of THE HACKER's: yours, and lime
         ctx.save();
         ctx.globalAlpha = on ? 0.85 : 0.28 + Math.sin(uiTime * 18) * 0.1;
-        ctx.strokeStyle = on ? '#fca5a5' : '#7f1d1d';
+        ctx.strokeStyle = on ? (mine ? '#d9f99d' : '#fca5a5') : (mine ? '#3f6212' : '#7f1d1d');
         ctx.lineWidth = on ? 3 : 1.6;
         ctx.setLineDash(on ? [] : [10, 8]);
         ctx.strokeRect(h.x - h.r, h.y - h.r * 0.55, h.r * 2, h.r * 1.1);
         if (on) {
           ctx.globalAlpha = 0.16;
-          ctx.fillStyle = '#ef4444';
+          ctx.fillStyle = mine ? HACK_COL : '#ef4444';
           ctx.fillRect(h.x - h.r, h.y - h.r * 0.55, h.r * 2, h.r * 1.1);
           for (let k = 0; k < 5; k++) {
             const yy = h.y - h.r * 0.55 + Math.random() * h.r * 1.1;
             ctx.globalAlpha = 0.5;
-            ctx.fillStyle = '#fecaca';
+            ctx.fillStyle = mine ? '#ecfccb' : '#fecaca';
             ctx.fillRect(h.x - h.r, yy, h.r * 2, 1.2);
           }
         }
@@ -34478,14 +35329,16 @@ function drawAmalgamBar() {
 
 function drawCages() {
   for (const c of cages) {
-    const hpf = clamp(c.hp / c.maxHp, 0, 1);
+    // one THE HACKER's Curator filed round them: lime, whole, and not yours to shoot
+    const hpf = c.ally ? 1 : clamp(c.hp / c.maxHp, 0, 1);
+    const col = c.ally ? HACK_COL : '#e2e8f0';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    drawGlow(c.x, c.y, c.r * 0.28, '#e2e8f0', 0.10);
+    drawGlow(c.x, c.y, c.r * 0.28, col, 0.10);
     ctx.restore();
     ctx.save();
     // the ring itself, thinning as you break it down
-    ctx.strokeStyle = rgba('#e2e8f0', 0.45 + hpf * 0.5);
+    ctx.strokeStyle = rgba(col, 0.45 + hpf * 0.5);
     ctx.lineWidth = 3 + hpf * 7;
     ctx.setLineDash([18, 10]);
     ctx.lineDashOffset = -uiTime * 26;
@@ -34494,8 +35347,8 @@ function drawCages() {
     // integrity readout on the ring
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#e2e8f0';
-    ctx.fillText('SHOOT THE RING   ' + Math.max(0, Math.ceil(c.hp)), c.x, c.y - c.r - 14);
+    ctx.fillStyle = col;
+    ctx.fillText(c.ally ? 'FILED' : 'SHOOT THE RING   ' + Math.max(0, Math.ceil(c.hp)), c.x, c.y - c.r - 14);
     ctx.restore();
   }
 }
@@ -35256,21 +36109,23 @@ function drawEnemiesBody() {
         ctx.globalAlpha = ea;
       }
     } else if (e.type === 'redactor') {
-      // the erasure cone, drawn exactly where it eats your shots
+      /* The erasure cone, drawn exactly where it eats your shots — or, on one
+         THE HACKER has taken, where it eats theirs and lets yours through. */
+      const mine = e.hacked;
       ctx.save();
       ctx.globalAlpha = ea * (e.redacting ? 0.2 : 0.05);
-      ctx.fillStyle = e.redacting ? '#ef4444' : '#64748b';
+      ctx.fillStyle = e.redacting ? (mine ? HACK_COL : '#ef4444') : '#64748b';
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
       ctx.arc(e.x, e.y, 330, e.ang - 0.55, e.ang + 0.55);
       ctx.closePath(); ctx.fill();
       ctx.globalAlpha = ea * (e.redacting ? 0.6 : 0.25);
-      ctx.strokeStyle = e.redacting ? '#f87171' : '#475569';
+      ctx.strokeStyle = e.redacting ? (mine ? '#d9f99d' : '#f87171') : '#475569';
       ctx.lineWidth = e.redacting ? 2.2 : 1.2;
       ctx.setLineDash(e.redacting ? [] : [12, 9]); ctx.lineDashOffset = -uiTime * 20;
       ctx.stroke();
       ctx.restore();
-      ctx.strokeStyle = rgba('#fecaca', 0.9); ctx.lineWidth = 2;
+      ctx.strokeStyle = rgba(mine ? '#ecfccb' : '#fecaca', 0.9); ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(e.x - e.r * 0.5, e.y); ctx.lineTo(e.x + e.r * 0.5, e.y);
       ctx.stroke();
@@ -36156,7 +37011,7 @@ function drawBullets() {
 function drawEBullets() {
   for (const b of ebullets) {
     if (!inView(b.x, b.y, b.r * 4)) continue;
-    if (b.hlKind) { drawHlEBullet(b); continue; }   // ALL HALLOWS: its rounds draw themselves
+    if (b.hlKind) { b.hlPiece ? hlQuietDraw(b.hlPiece, drawHlEBullet, b) : drawHlEBullet(b); continue; }   // ALL HALLOWS: its rounds draw themselves
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
     const r = b.r;
@@ -38204,6 +39059,7 @@ function drawHUD() {
     roundRect(x2 + 2, y2 + 2, Math.max(0, (w2 - 4) * clamp(boss.hp / boss.maxHp, 0, 1)), 10, 5); ctx.fill();
     ctx.strokeStyle = rgba(bcol, 0.5); ctx.lineWidth = 1;
     roundRect(x2, y2, w2, 14, 7); ctx.stroke();
+    if (boss.boss === 'backlog' && hlAreaOn()) drawHlBossBar(boss, x2, y2, w2);   // ALL HALLOWS: where he binges
     // armour is invisible otherwise: the player just sees smaller numbers
     const unwCut = boss.boss === 'unwritten'
       ? (UNW_DR[P.weapon] !== undefined ? UNW_DR[P.weapon] : 0.95) : 0;
@@ -39610,7 +40466,7 @@ const FREE_ROWS = [
   { n: '+1 LEVEL',       f: () => { P.xp = P.xpNext; checkLevel(); } },
   { n: '+500 CREDITS',   f: () => { credits += 500; } },
   { n: 'NEXT WAVE',      f: () => { betweenWaves = 0.2; spawnBudget = 0;
-                                    enemies.length = 0; ebullets.length = 0; } },
+                                    hackKeepArmy(false); ebullets.length = 0; } },
   { n: 'SPAWN BOSS',     f: () => {
       const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame && !HL_BOSSES[k]);
       const k = keys[(freeBoss = (freeBoss + 1) % keys.length)];
@@ -39631,9 +40487,10 @@ const FREE_ROWS = [
       freeStage = (freeStage + 1) % (STAGES.length + ALT_STAGES.length);
       const s = freeStage < STAGES.length ? STAGES[freeStage]
                                          : ALT_STAGES[freeStage - STAGES.length];
-      enemies.length = 0; ebullets.length = 0; portals.length = 0;
+      ebullets.length = 0; portals.length = 0;
       awaitingPortal = false;
-      enterStage(s); betweenWaves = 0.6; } },
+      enterStage(s); betweenWaves = 0.6;
+      hackKeepArmy(true); } },
   { n: 'GIVE A BOOK',    f: () => {
       const keys = Object.keys(BOOKS);
       const k = keys[(freeBook = (freeBook + 1) % keys.length)];
@@ -39860,7 +40717,7 @@ function handOverCodex() {
 }
 
 function startKeeperFight() {
-  enemies.length = 0; ebullets.length = 0; portals.length = 0;
+  hackKeepArmy(false); ebullets.length = 0; portals.length = 0;   // yours stand with you
   awaitingPortal = false;
   betweenWaves = 1e9;                  // no wave logic during this
   spawnBudget = 0;
@@ -46653,6 +47510,7 @@ function coopReviveWave() {
 
 function hurtWing(dmg, opts) {
   if (!Wing.live || Wing.down || state !== 'play') return;
+  if (hackBy) return;                    // nor your wingman
   if (freeGod) return;
   if (opts && opts.pure) {
     Wing.hp -= Math.max(0.5, dmg);
@@ -48884,16 +49742,39 @@ function rewardDashSweep(dt) {
    so none of your own systems aim at it, and the wave clock stops counting it
    as something standing between you and the next wave.
 
-   The hack is not permanent. It bleeds a little of the body's maximum health
-   every second, so an army has to be re-taken rather than accumulated, and a
-   ninth kill pushes the oldest one off the end.
+   It fights as itself. Every body runs its own script — the spitter's volleys,
+   the lancer's charge, the artillery's shells, the mender's beams, a boss's
+   whole last phase — aimed at the nearest thing still against you (foe)
+   instead of at you. While that script runs, hackBy names the body, and what
+   the script makes changes sides on the way out: its shots fly in your array
+   (eshoot), the ground it lights burns them (addHazard), its shells land on
+   them (mortars), its blasts miss you (explode), and anything it calls up is
+   yours as well (spawnEnemy). hurtPlayer, hurtWing and banner refuse outright
+   while it is set, so a script that still reaches for you reaches nothing.
+
+   What yours call up is KIN: not one of the eight, never more than a dozen,
+   and fading three times as fast whether there is a fight or not.
+
+   Put down by the side it left, a body pays nothing out a second time — it
+   was paid for when it was taken (hackDown). The hack is not permanent: while
+   there is anything left to fight it bleeds a little of the body's maximum
+   health every second, so an army has to be re-taken rather than accumulated,
+   and a ninth kill pushes the oldest one off the end. Between fights it holds,
+   and it follows you through the gate into the next sector (hackKeepArmy).
    ========================================================================= */
 const HACK_COL   = '#a3e635';
 const HACK_MAX   = 8;       // bodies held at once
 const HACK_BOSS  = 1;       // and bosses among them
-const HACK_DECAY = 0.020;   // of max health per second
+const HACK_DECAY = 0.020;   // of max health per second, while there is a fight
+const HACK_KIN_MAX   = 12;  // what yours call up, held at once
+const HACK_KIN_DECAY = 3;   // how much faster kin fade than the bodies you took
+const HACK_FIRE  = 1.4;     // a body's own attacks, turned on its own side
+const HACK_SIGHT = 1600;    // how far a body looks for something to fight
+// what hackTick tells the enemy loop to do with a body this frame
+const HK_RUN = 0, HK_IDLE = 1, HK_HOLD = 2, HK_GONE = 3;
 
 let hackSerial = 0;
+let hackFight = false;      // anything left to fight, this frame: set by updateEnemies
 
 // what still counts as an enemy: alive, and not working for you
 const isThreat = e => !e.dead && !e.hacked;
@@ -48902,23 +49783,56 @@ function threatCount() {
   for (const e of enemies) if (isThreat(e)) n++;
   return n;
 }
+// the ones you took: kin are not counted against the eight, or the one boss
 function hackedCount(boss) {
   let n = 0;
   for (const e of enemies)
-    if (!e.dead && e.hacked && (boss ? e.type === 'boss' : e.type !== 'boss')) n++;
+    if (!e.dead && e.hacked && !e.hackKin && (boss ? e.type === 'boss' : e.type !== 'boss')) n++;
+  return n;
+}
+function kinCount() {
+  let n = 0;
+  for (const e of enemies) if (!e.dead && e.hackKin) n++;
   return n;
 }
 
+/* What a script aims at: you, unless it is yours, in which case whatever it
+   has picked out of the room this frame. */
+const foe = e => (e.hacked && e.hackTgt) || P;
+
+/* A body's attacks are sized to your health, and your health does not climb
+   with the waves the way theirs does: enemy damage gains 5% a wave, enemy
+   health rides hpCurve. This is the gap, closed, so a body taken at wave 30
+   hits the room as hard as one taken at wave 3 did. */
+const hackPow = () => {
+  const w = Math.max(1, wave);
+  return hpCurve(w) / (1 + (w - 1) * 0.05);
+};
+const hackDmg = dmg => dmg * HACK_FIRE * hackPow();
+
+// run f as body e: whatever it spawns, fires or sets alight is yours
+function hackAs(e, f) {
+  const was = hackBy;
+  hackBy = e;
+  try { return f(); } finally { hackBy = was; }
+}
+
 /* Some bodies cannot be taken: an egg is not a fighter, a bomber has already
-   spent itself, a borrowed silhouette is on loan from something else, and the
-   endgame does not hand you its pieces. */
+   spent itself, a gourd is the soul's and not a body at all, a borrowed
+   silhouette is on loan from something else, and the endgame does not hand you
+   its pieces. ROOT and THE FOUNDER end in set pieces that clear the room
+   whatever is standing in it, and THE BACKLOG's death ends its area: there is
+   nothing left for any of them to stand up for. THE SHOPKEEPER's death clears
+   the room too, to put the shop trip back where it was, and it did so before
+   the take: "BOSS HACKED", and no body anywhere. */
 function hackable(e) {
   if (!P.hacker || !e || e.hacked) return false;
   if (e.suRipped) return false;            // torn in four by SUPERUSER: nothing left to stand up
   if (state !== 'play') return false;
-  if (e.type === 'egg' || e.type === 'bomber') return false;
-  if (e.shadow > 0 || e.amalPart || e.virus) return false;
+  if (e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd') return false;
+  if (e.shadow > 0 || e.amalPart || e.virus || e.founder) return false;
   if (e.boss === 'unwritten' || e.boss === 'amalgam') return false;
+  if (e.boss === 'root' || e.boss === 'founder' || e.boss === 'shopkeeper' || HL_BOSSES[e.boss]) return false;
   return true;
 }
 
@@ -48935,24 +49849,17 @@ function hackTake(e, typed) {
     // the oldest one is let go to make room, rather than refusing the newest
     let oldest = null;
     for (const z of enemies)
-      if (!z.dead && z.hacked && z.type !== 'boss' &&
+      if (!z.dead && z.hacked && !z.hackKin && z.type !== 'boss' &&
           (!oldest || z.hackId < oldest.hackId)) oldest = z;
     if (oldest) hackRelease(oldest, true);
   }
 
   e.dead = false;
   e.hacked = true;
+  e.hackKin = false;
   e.hackId = ++hackSerial;
-  e.hackCd = rnd(0.8, 0.3);
   e.hp = e.maxHp * (boss ? 0.35 : 0.6);
-  e.col = HACK_COL;
-  e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
-  e.invuln = 0; e.phased = false; e.floor = undefined;
-  /* SUPERUSER's mane lets go of what it kept. A body killed while pinned
-     would otherwise carry the pin onto your side, where updateHacked never
-     runs it down: stakes round an ally for the rest of the run. */
-  e.suHold = false; e.suLift = 0; e.suPin = 0; e.suJab = null; e.suFly = null; e.suDaze = 0;
-  e.vx *= 0.2; e.vy *= 0.2;
+  hackTurn(e);
 
   ringFx(e.x, e.y, e.r * 0.5, e.r * 3.4, HACK_COL, 0.5, 3);
   burst(e.x, e.y, 18, HACK_COL, 240, 3, 0.5);
@@ -48965,94 +49872,194 @@ function hackTake(e, typed) {
   return true;
 }
 
+/* Called from spawnEnemy while one of yours is running its script: an escort,
+   a clutch, a decoy, a whole roster — yours, as kin. Past the dozen it never
+   stands up at all; the caller still gets a body to set fields on, and the
+   loop sweeps it away next frame. */
+function hackKin(e) {
+  if (kinCount() >= HACK_KIN_MAX) { e.dead = true; return; }
+  e.hacked = true;
+  e.hackKin = true;
+  e.hackId = ++hackSerial;
+  hackTurn(e);
+}
+
+/* Everything that tied a body to the side it was on, let go. */
+function hackTurn(e) {
+  e.hackCd = rnd(0.8, 0.3);
+  e.hackTgt = null;
+  e.col = HACK_COL;
+  e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
+  e.burn = 0; e.burnT = 0; e.stagger = 0;
+  e.invuln = 0; e.phased = false; e.floor = undefined;
+  /* SUPERUSER's mane lets go of what it kept. A body killed while pinned
+     would otherwise carry the pin onto your side, where hackTick never
+     runs it down: stakes round an ally for the rest of the run. */
+  e.suHold = false; e.suLift = 0; e.suPin = 0; e.suJab = null; e.suFly = null; e.suDaze = 0;
+  e.vx *= 0.2; e.vy *= 0.2;
+  hackReset(e);
+}
+
+/* A script caught mid-move starts again from the top: an attack wound up
+   against the old side is not carried across, and neither is a boss's pause
+   between phases. A boss comes over at its last phase — the whole of what it
+   can do, which is what you took it for. */
+function hackReset(e) {
+  e.state = 0; e.atkT = 0; e.cd = rnd(0.9, 0.3);
+  e.hlVine = null; e.hlWatched = false;
+  if (e.type !== 'boss') return;
+  e.phase = 2; e.lockPhase = 2;
+  /* THE BOOKKEEPER's last phase is his last section. His script reads its
+     spacing and its timers out of four-entry tables by section, and a keeper
+     taken before his first tick sat at -1 — off the table, NaN, and gone. */
+  if (e.boss === 'keeper') { if (e.kp === undefined) keeperInit(e); e.kp = 3; }
+  e.atk = -1; e.atkT = rnd(1.0, 0.5);
+  e.invuln = 0; e.vuln = 1; e.kTransT = 0;
+  e.finale = false;                        // THE OTHER: its last ten seconds were yours
+  if (e.awakened) { e.rage = 0; e.atkT = 0.55; }
+}
+
 function hackRelease(e, quiet) {
   e.dead = true;
   burst(e.x, e.y, 14, HACK_COL, 220, 2.8, 0.45);
   if (!quiet) malGlitch(e.x, e.y, e.r * 2.4, HACK_COL, 0.35);
 }
 
-/* A hacked body fights with one behaviour rather than its own script. Its own
-   script is written around a player — where you are, where you were, how to
-   corner you — and none of that survives changing sides. What survives is the
-   silhouette and the statline, which is what you are actually collecting. */
-function updateHacked(e, dt) {
+/* Put down by the side it left — shot off you, caught in their blast, hatched
+   out. Everything a death pays was paid when it was taken, so nothing is paid
+   again: killEnemy sends it here before it reaches the ledger. A body whose
+   death is its move still makes it, on your side: a splitter comes apart into
+   two of yours, a revenant stands up once more. */
+function hackDown(e) {
+  hackRelease(e);
+  // a bomber's death is its move: on their side, at their weight, never on you
+  if (e.type === 'bomber')
+    hackAs(e, () => explode(e.x, e.y, 92, e.dmg * 1.4, HACK_COL, false));
+  if (e.type === 'splitter' && e.gen < 2) {
+    hackAs(e, () => {
+      for (let i = 0; i < 2; i++) {
+        const c = spawnEnemy('splitter', e.x + rnd(26, -26), e.y + rnd(26, -26),
+          { gen: e.gen + 1, rs: 0.62, hs: 0.34, ss: 1.25, elite: false });
+        c.vx = rnd(160, -160); c.vy = rnd(160, -160);
+      }
+    });
+  }
+  if (e.type === 'revenant' && e.gen < 1) {
+    hackAs(e, () => {
+      const g = spawnEnemy('revenant', e.x, e.y, { gen: 1, hs: 0.5, rs: 0.85, elite: false });
+      g.iframeT = 0.5;
+    });
+    ringFx(e.x, e.y, 6, 90, HACK_COL, 0.5, 3);
+    floatText(e.x, e.y - 26, 'RETURNS', HACK_COL, 13);
+  }
+}
+
+/* Once a frame, before the enemy loop runs a body of yours. Picks what it is
+   fighting, bleeds the hack while there is a fight, and says what the loop is
+   to do with it: run its script (HK_RUN), bring it to heel (HK_IDLE), leave it
+   where it is (HK_HOLD), or sweep it up (HK_GONE). */
+function hackTick(e, dt) {
   // on SUPERUSER's mane, being drained: it holds still, and its hack stops bleeding
-  if (e.suDrain) { e.vx = e.vy = 0; e.flash = Math.max(0, e.flash - dt * 7); return false; }
-  e.t += dt;
-  e.flash = Math.max(0, e.flash - dt * 7);
+  if (e.suDrain) { e.vx = e.vy = 0; return HK_HOLD; }
+  // whatever called it up may have painted it its own colour on the way out
+  if (e.col !== HACK_COL) e.col = HACK_COL;
   e.hackCd -= dt;
 
   // the hold degrades: an army is taken again, not saved up
-  e.hp -= e.maxHp * HACK_DECAY * dt;
-  if (e.hp <= 0) { hackRelease(e); return true; }
+  if (hackFight || e.hackKin) {
+    e.hp -= e.maxHp * HACK_DECAY * (e.hackKin ? HACK_KIN_DECAY : 1) * dt;
+    if (e.hp <= 0) { hackRelease(e); return HK_GONE; }
+  }
 
   if (Math.random() < 0.18)
     spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(20, -20), -24,
               rnd(2.6, 1.2), HACK_COL, rnd(0.45, 0.2), 0.94);
 
+  e.hackTgt = hackFight ? nearestEnemy(e.x, e.y, HACK_SIGHT) : null;
+  return e.hackTgt ? HK_RUN : HK_IDLE;
+}
+
+/* Nothing in reach: fall in behind whoever is flying it. The rooted ones — a
+   phaser, a mimic — are carried along at a walk rather than left behind. */
+function hackHeel(e, dt) {
+  const dx = P.x - e.x, dy = P.y - e.y, d = len(dx, dy) || 1;
+  const want = 90 + (e.hackId % 5) * 26 + (e.type === 'boss' ? 70 : 0);
+  const push = d > want ? 1 : -0.4;
+  const sp = Math.max(e.spd, 110);
+  steer(e, dx / d * sp * push, dy / d * sp * push, 2.4, dt);
+  if (e.type !== 'boss' && len(e.vx, e.vy) > 8) e.ang = angLerp(e.ang, Math.atan2(e.vy, e.vx), 0.2);
+}
+
+/* Contact, turned round: what it walks into is what it was walking at, and it
+   hits harder coming in on a charge. Called by the enemy loop in place of the
+   contact damage it would have done to you. */
+function hackContact(e) {
+  const t = e.hackTgt;
+  if (!t || t.dead || t.hacked || e.phased || e.hackCd > 0 || !(e.dmg > 0)) return;
+  if (len(t.x - e.x, t.y - e.y) > e.r + t.r + 4) return;
   const boss = e.type === 'boss';
-  const t = nearestEnemy(e.x, e.y, 1400);
-  if (!t) {
-    // nothing to fight: fall in behind whoever is flying it
-    const dx = P.x - e.x, dy = P.y - e.y, d = len(dx, dy) || 1;
-    const want = 90 + (e.hackId % 5) * 26;
-    const push = d > want ? 1 : -0.4;
-    steer(e, dx / d * e.spd * push, dy / d * e.spd * push, 2.4, dt);
-  } else {
-    const dx = t.x - e.x, dy = t.y - e.y, d = len(dx, dy) || 1;
-    const ux = dx / d, uy = dy / d;
-    e.ang = Math.atan2(dy, dx);
-    steer(e, ux * e.spd * (boss ? 1.15 : 1.35), uy * e.spd * (boss ? 1.15 : 1.35),
-          boss ? 1.6 : 3.4, dt);
-
-    // it hits what it reaches, and hits harder if it used to be a boss
-    if (d < e.r + t.r + 4 && e.hackCd <= 0) {
-      e.hackCd = boss ? 0.5 : 0.75;
-      damageEnemy(t, (boss ? 46 : 12) + e.dmg * (boss ? 2.4 : 1.6), false, e.x, e.y,
-                  { silent: true, enemy: true, noChain: true });
-      burst(t.x, t.y, 5, HACK_COL, 190, 2.4, 0.3);
-      const a = Math.atan2(t.y - e.y, t.x - e.x);
-      t.vx += Math.cos(a) * (boss ? 220 : 90);
-      t.vy += Math.sin(a) * (boss ? 220 : 90);
-    }
-    // and everything that used to shoot at you now shoots at them
-    if (e.hackCd <= 0 && d < (boss ? 900 : 640)) {
-      e.hackCd = boss ? 1.5 : 1.9;
-      const n = boss ? 9 : 1;
-      for (let k = 0; k < n; k++) {
-        const a = boss ? e.ang + (k - (n - 1) / 2) * 0.22 : e.ang;
-        hackShot(e, a, boss ? 300 : 260, (boss ? 22 : 7) + e.dmg * (boss ? 1.4 : 0.9));
-      }
-      if (boss) { ringFx(e.x, e.y, e.r, e.r + 50, HACK_COL, 0.3, 3); shake(0.06); }
-      Audio_.tone(520, 0.05, 'square', 0.035, 260);
-    }
-  }
-
-  e.x = clamp(e.x + e.vx * dt, arena.x0 + e.r, arena.x1 - e.r);
-  e.y = clamp(e.y + e.vy * dt, arena.y0 + e.r, arena.y1 - e.r);
-  if (!boss) collideMirrors(e, e.r);
-  return false;
+  const charging = (e.type === 'dasher' && e.state === 2) || (boss && e.atk === 3)
+                || (e.boss === 'theother' && e.rage === 1);
+  e.hackCd = boss ? 0.5 : 0.75;
+  damageEnemy(t, hackDmg(e.dmg) * (boss ? 2.2 : 1.5) * (charging ? 1.5 : 1), false, e.x, e.y,
+              { silent: true, enemy: true, noChain: true });
+  burst(t.x, t.y, 5, HACK_COL, 190, 2.4, 0.3);
+  const a = Math.atan2(t.y - e.y, t.x - e.x);
+  t.vx += Math.cos(a) * (boss ? 220 : 90);
+  t.vy += Math.sin(a) * (boss ? 220 : 90);
 }
 
 /* Its fire goes into the friendly array so it collides with enemies and not
    with you. Marked foreign so none of your own per-shot mechanics — heat,
-   snapback, the miss penalty — read it as something you fired. */
-function hackShot(e, ang, spd, dmg) {
-  bullets.push({
-    x: e.x + Math.cos(ang) * (e.r + 4), y: e.y + Math.sin(ang) * (e.r + 4),
+   snapback, the miss penalty — read it as something you fired. eshoot sends
+   every shot a body of yours fires through here; ox/oy are its muzzle. */
+function hackShot(e, ang, spd, dmg, r = 5, ox, oy) {
+  const x0 = ox === undefined ? e.x : ox, y0 = oy === undefined ? e.y : oy;
+  const b = {
+    x: x0 + Math.cos(ang) * (e.r + 4), y: y0 + Math.sin(ang) * (e.r + 4),
     vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-    r: 5, dmg, crit: false, pierce: 0, ric: 0, life: 2.2,
-    hits: null, frag: 0, px: e.x, py: e.y, dist: 0,
+    r, dmg, crit: false, pierce: 0, ric: 0, life: 2.6,
+    hits: null, frag: 0, px: x0, py: y0, dist: 0,
     mine: false, hacked: true, col: HACK_COL
-  });
+  };
+  bullets.push(b);
+  return b;
 }
 
 /* Enemy fire is allowed to hit them, so an army can be shot off you. Called
-   from updateEBullets, which owns the bullet it is asking about. */
+   from updateEBullets, which owns the bullet it is asking about. A body keeps
+   its own defences on your side: a redactor's cone erases what comes through
+   it, a sentinel's face stops it, a prism's mirror throws it back at them,
+   and a wraith between steps or a brood underground is not there to hit. */
 function hackHitByBullet(b) {
+  const inc = Math.atan2(-b.vy, -b.vx);      // the way it is coming from
   for (const e of enemies) {
     if (e.dead || !e.hacked) continue;
-    if (len(b.x - e.x, b.y - e.y) > b.r + e.r) continue;
+    const dx = b.x - e.x, dy = b.y - e.y, dd = len(dx, dy);
+    if (e.type === 'redactor' && e.redacting && dd < 330) {
+      const off = Math.abs(((Math.atan2(dy, dx) - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (off < 0.55) {
+        burst(b.x, b.y, 4, HACK_COL, 130, 2.2, 0.25);
+        if (Math.random() < 0.25) floatText(b.x, b.y, 'REDACTED', HACK_COL, 10, -24);
+        return true;
+      }
+    }
+    if (dd > b.r + e.r || e.phased || e.invuln) continue;
+    if (e.type === 'sentinel') {
+      const dA = Math.abs(((inc - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (dA < 1.15) { burst(b.x, b.y, 5, HACK_COL, 200, 2.4, 0.28); return true; }
+    }
+    if (e.type === 'prism') {
+      const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (off < 1.3) {
+        const t = nearestEnemy(e.x, e.y, 900);
+        const back = (t ? Math.atan2(t.y - e.y, t.x - e.x) : inc) + rnd(0.25, -0.25);
+        hackShot(e, back, 330, hackDmg(Math.max(b.dmg, e.dmg)), 6);
+        burst(b.x, b.y, 5, HACK_COL, 220, 2.4, 0.28);
+        Audio_.tone(1250, 0.05, 'sine', 0.05, 700);
+        return true;
+      }
+    }
     damageEnemy(e, b.dmg, false, b.x, b.y, { silent: true, enemy: true, noChain: true });
     burst(b.x, b.y, 6, b.col, 190, 2.2, 0.3);
     return true;
@@ -49060,11 +50067,33 @@ function hackHitByBullet(b) {
   return false;
 }
 
+/* The room is cleared — through a gate, at the end of a deep sector, when the
+   Bookkeeper takes the floor — and everything is swept off it but what is
+   yours. With regroup it has come through a gate with you, and is stood round
+   you on the far side with whatever it was halfway through dropped. */
+function hackKeepArmy(regroup) {
+  let n = 0;
+  for (const e of enemies) if (e.hacked && !e.dead) enemies[n++] = e;
+  enemies.length = n;
+  if (!regroup) return;
+  for (let k = 0; k < n; k++) {
+    const e = enemies[k];
+    const a = k * 2.399 + rnd(0.3, -0.3);              // the golden angle: an even spread
+    const R = 90 + 20 * k + (e.type === 'boss' ? 70 : 0);
+    e.x = clamp(P.x + Math.cos(a) * R, arena.x0 + e.r, arena.x1 - e.r);
+    e.y = clamp(P.y + Math.sin(a) * R, arena.y0 + e.r, arena.y1 - e.r);
+    e.vx = 0; e.vy = 0;
+    e.hackTgt = null;
+    hackReset(e);
+    ringFx(e.x, e.y, 4, e.r * 2.6, HACK_COL, 0.45, 2);
+  }
+}
+
 /* The readout: how much of the room is currently working for you. */
 function drawHackHud() {
   if (!P.hacker || state === 'codex' || state === 'gfx' || state === 'chal') return;
-  const n = hackedCount(false), b = hackedCount(true);
-  const w = 150, x = 16, y = hudBotY - 30;
+  const n = hackedCount(false), b = hackedCount(true), k = kinCount();
+  const w = k ? 176 : 150, x = 16, y = hudBotY - 30;
   hudBotY = y - 8;
   ctx.save();
   ctx.textBaseline = 'middle';
@@ -49085,7 +50114,8 @@ function drawHackHud() {
   ctx.textAlign = 'right';
   ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = b ? HACK_COL : '#64748b';
-  ctx.fillText(n + '/' + HACK_MAX + (b ? '  +BOSS' : ''), x + w - 10, y + 11);
+  // kin — what yours called up — are counted apart: they are not one of the eight
+  ctx.fillText(n + '/' + HACK_MAX + (b ? '  +BOSS' : '') + (k ? '  +' + k : ''), x + w - 10, y + 11);
 
   // one pip per body, so a full army reads at a glance rather than as a number
   const pw = (w - 24 - (HACK_MAX - 1) * 3) / HACK_MAX;
