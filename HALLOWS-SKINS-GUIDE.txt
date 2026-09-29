@@ -1,0 +1,552 @@
+VOIDRUNNER — ALL HALLOWS · THE WARDROBE
+The prize skins' toolkit: every hook, what it is handed, and when.
+Written 28 Sep 2026. Prepatch only; never deployed.
+
+
+================================================================================
+0. WHAT IT IS
+================================================================================
+
+The vigil's four prizes (DEV_SKINS 'hl-*') are event cosmetics, and event
+cosmetics carry the event's budget (user, 28 Sep: "cosmetics for events have
+a much higher budget"; "forget latency just keep it reasonable"). So they do
+not go through the ordinary awards' one pass over a finished hull. They are
+drawn on THE WARDROBE, a toolkit built on THE KIT for these skins only:
+
+  THE WEARER   one object every hook is handed, called `me`. The art reads the
+               pilot through it and never through P: where it is, how fast,
+               turning which way, hurt, dashing, low, how hot the fight is. It
+               also asks it for things: sockets on the hull, moments,
+               particles, rope and cloth, springs, trail points, lamps, lights.
+  THE HOOKS    35 of them. Draw hooks for every layer of the pilot, and Fx
+               hooks for every moment of a run a skin can answer.
+  THE STAGE    a puppet that flies, fires, dashes, kills and levels by
+               itself, drawn through exactly the same hooks. It is the skin
+               menu's showcase, the dropdown's hover card and the bench.
+
+The same art draws in a run, in the menu and in the design file without a
+change, because none of it reads the game directly.
+
+THE PRIZES (planning sheet §11; the logic that grants them is unchanged)
+  150    hl-carved    THE CARVED     fx 'hallows' tier 1  a face cut into the
+                                     hull, nothing lit behind it yet
+  400    hl-lantern   THE LANTERN    fx 'hallows' tier 2  lit from inside;
+                                     rounds go out as sparks
+  750    hl-hallows   ALL HALLOWS    fx 'hallows' tier 3  burning; kills come
+                                     apart as embers
+  1,200  hl-lostsoul  THE LOST SOUL  fx 'lostsoul'        the ordinary hull as
+                                     a ghost, flickering at 4%
+  One skin line, carved to burning, plus one on top. me.fx and me.tier tell
+  the hooks which is worn, so one set of hooks can draw all four (the
+  imperial line's pattern), or branch as far as they like.
+
+WHERE THINGS STAND
+  The toolkit, the game's wiring, the menu stage, the admin SKIN LAB and the
+  bench were built and tested on 28 Sep. The user's art is in the same day:
+  all 35 hooks, lifted as HL_ART_VER e69cd08f81 (prepatch only). The 27 Sep
+  prize hooks are gone from hl-art.js. The rind, lid, vine and carved face
+  burn up the line from THE CARVED to ALL HALLOWS, and the soul is a dashed
+  ghost of the runner's hull. Tested on the bench (every prize, every event,
+  the lit room) and in runs, the menu stage, THE PATCH and a death, with no
+  hook errors. The hand-over in 3 is now only a fallback for an art file that
+  fails to load.
+
+
+================================================================================
+1. THE FILES
+================================================================================
+
+  hl-wardrobe.js     THE WARDROBE. Inline in index.html right after THE KIT,
+                     byte for byte, the way hl-kit.js is. Its last part is the
+                     SKINS placeholder block: every hlSkin* hook, between
+                         /* ===…
+                            ALL HALLOWS · SKINS — art hooks
+                         …
+                         /* ===================== end of ALL HALLOWS · SKINS art hooks ===================== */
+  index.html         also has "ALL HALLOWS · SKINS — the adapter" right after
+                     the wardrobe: the game's side, which reads the pilot into
+                     a wearer and calls the passes from where the game draws.
+                     It is not in hl-wardrobe.js because the harness has no
+                     game to read.
+  hl-art.js          THE ART, as for Act I: its function declarations replace
+                     placeholders by name. Skin hooks go in the same file,
+                     anywhere between its two Act I marker lines.
+  hl-skin-base.js    the harness base (prepatch only): shims, then loads
+                     hl-kit.js → hl-wardrobe.js → the art, then builds the bench.
+  Hallows Skins.dc.html
+                     the design file: the bench (prepatch only).
+
+  PUTTING A NEW VERSION IN
+      node C:\.claude\lift-hl-art.mjs --art <art.js>
+          The skin hooks are checked like the Act I ones: the art may
+          replace any function in either placeholder block, and nothing else.
+          HL_ART_VER is stamped from the file.
+      node C:\.claude\lift-hl-art.mjs --wardrobe <hl-wardrobe.js>
+          Swaps the inline wardrobe (the toolkit itself). It refuses if the new
+          text declares a name the rest of the page has, drops the SKINS
+          markers, or stops the page parsing. Editing prepatch
+          hl-wardrobe.js in place and lifting that same file works: the old
+          block is found by its marker lines.
+
+  LOADING (the 27 Sep rule, unchanged). A worn prize fetches hl-art.js whether
+  the event is live or not (hlArtWanted). The art's own list of things to make
+  ahead, hlSkinPreload(me), runs one job per idle moment the first time each
+  prize is worn on each pilot, and again after the art changes. It runs only
+  for a worn prize, never for the rest of the event.
+
+  SHIPPING. Nothing new to carry: the wardrobe and adapter are in index.html,
+  and the skins' art is in hl-art.js, which already ships. hl-wardrobe.js,
+  hl-skin-base.js, the design file and this guide stay in prepatch.
+
+
+================================================================================
+2. HOW TO SEE IT
+================================================================================
+
+THE BENCH ("Hallows Skins.dc.html", or any static server over prepatch)
+  The big stage: any prize, any pilot (VOIDRUNNER / EMBER / HACKER /
+  VAGRANT), ARENA (four bodies closing in, fast fire), PLATE (a close-up, held
+  nearly still) or CARD (the menu's), and a zoom slider.
+  Along the foot: all four prizes at menu size, side by side.
+  EVENTS: equip, run, volley, kill, elite, boss, streak, hurt, heal, shield,
+          dash, parry, perfect, level, wave, low, down, death.
+  REPEAT LAST fires the last event again every 1.6 s while you draw it.
+  AUTO     the stage's own dashes and levels. HURT EVERY 4S.
+  PAUSE stops the clock (uiTime too). STEP advances one frame.
+  SCRUB    while paused, drags every live moment through its length (m.k,
+           m.age, and m.tl). To work on a flourish: pause, fire the event,
+           drag.
+  LIT ROOM runs the kit's light pass under the rounds, with two candles and
+           your hlSkinLights: how the prize looks in THE PATCH at night.
+  DEBUG    sockets, the trail, managed bodies, springs, moments.
+  RELOAD ART re-fetches the art in place.
+  HOOKS    lists every hook: ● drawn by the art, ○ still a placeholder.
+  THE WEARER is a live readout of the fields in section 5.
+  ?art=<file> draws a different art file (a drop not lifted yet).
+
+IN THE GAME (dev server, ` or F2): ALL HALLOWS · SKIN LAB
+  CARVED / LANTERN / HALLOWS / LOST SOUL   wear it. It is banked in this tab's
+                                           profile, which the dev server
+                                           never saves.
+  TAKE OFF · DEBUG · RELOAD ART (re-fetches hl-art.js without a page reload)
+  STAGE   the skin menu, PILOT slot, where the prize is shown on its stage
+  HOOKS   drawn / placeholder, as a table in the console
+  moments  each fires straight at its hook; the run does not change:
+           EQUIP RUN KILL ONE ELITE BOSS STREAK ×10 HURT HEAL SHIELD ± DASH
+           DASH END PARRY PERFECT LEVEL WAVE DOWN UP DEATH
+  the real thing, through the game: LOW HP · FULL HP · VOLLEY ×5 · RING OF 8
+  (PLAYER's KILL kills you. The lab's is KILL ONE.)
+
+IN THE MENU
+  SKINS → the PILOT slot, while a prize is worn: the pilot wearing it, on its
+  stage. The DEV SKINS dropdown: hovering a held prize shows it on a card
+  beside the list. Putting one on plays its equip on every stage showing it.
+
+
+================================================================================
+3. THE RULES FOR SKIN ART
+================================================================================
+
+  - READ THE WEARER, NEVER THE GAME. Everything a hook needs is on `me` or is
+    handed in. P, bullets and enemies are not the stage's or the bench's,
+    and art that reads them will draw in the wrong place there.
+  - DRAW, DO NOT DECIDE. A hook may write only me.art (its own bag), the art
+    fields of what it asked for (m.art on a moment, R.art on a round), and
+    the .to of its own springs. Nothing a hook does changes the run.
+  - ADVANCE ONLY IN hlSkinTick. It runs once a frame wherever the prize is
+    (a run, the menu stage, the bench). The draw hooks may be called more
+    than once a frame or skipped. Ropes, cloth, chains and springs made
+    through me.* are stepped for you after hlSkinTick. me.every(key, rate,
+    fn) is the emitter, and works only inside hlSkinTick.
+  - FX HOOKS START THINGS. They are called once, at the moment. Start a
+    moment (me.moment), emit particles (me.emit), kick a spring. Their
+    return value is ignored.
+  - TIME: me.clock (the skin's own, frozen while the run is held),
+    me.since.<event>, m.k / m.age on a moment, and uiTime for anything that
+    should keep breathing on a paused screen.
+  - LEAVE ctx AS YOU FOUND IT. The wardrobe saves and restores around every
+    hook, but a hook that throws halfway through a save still leaves the
+    stack uneven for that frame.
+  - A HOOK THAT THROWS IS SWITCHED OFF. The error is logged once, and that
+    function is skipped until the art is reloaded (a new function object).
+    The game drops any frame that throws, so one bad line would otherwise
+    stop the run.
+  - NO BUDGET, NO PANEL GATES. The effects panel's switches (FXO.*) belong to
+    the ordinary game. The wardrobe gates nothing on them, and the art does
+    not have to.
+  - WHAT A SKIN NEVER TAKES. Arrows are never dressed: their silhouette is
+    information a zodiac pilot reads their own volley by. Bosses are never
+    dressed by hlSkinBody: the bespoke ones own their silhouette. The game's
+    telegraphs, pips and elite marks must still read through anything drawn
+    on a body.
+  - LIT ROOMS. In the vigil and the areas the kit's light pass runs after the
+    pilot is drawn. So everything in hlSkinTrail, hlSkinBack, hlSkinHull,
+    hlSkinFront and 'back' / 'front' moments is lit like the floor (it goes
+    dark in the dark). Anything that should glow in the dark belongs in
+    hlSkinGlow, a 'glow' moment, a 'glow' particle kind, or a real light
+    (hlSkinLights). me.lit says which kind of room this is. THE HOUSE's
+    darkness is a gameplay rule on the fog, and a skin's light does not
+    lift it.
+  - THE 27 SEP HOOKS. hlSkinBack, hlSkinFront, hlSkinRound, hlSkinDebris and
+    hlSkinBody still call hlSkinUnder / Player / Bullet / Part / Enemy while
+    they are placeholders and me.real is true (a run, the bench). Once the
+    art declares the new hook, the old one is no longer called and can be
+    deleted from hl-art.js.
+
+
+================================================================================
+4. THE ORDER THINGS ARE DRAWN IN
+================================================================================
+
+A FRAME IN A RUN (world space, camera applied, unless said)
+    the floor, hazards, the room … bodies (hlSkinBody over each one)
+    hlSkinTrail(me)                          ─┐ under the ship
+    the wearer's 'lit' particles              │
+    'back' moments (hlSkinMoment)            ─┘
+    the ship's afterimages (hlSkinGhost each, in hull space)
+    hlSkinBack(me)                           just before the hull
+    hlSkinHullSwap(me)  — true: the stock hull is not drawn at all
+    the stock hull (glow, plating, detail, canopy), unless swapped
+    hlSkinHull(me)      in hull space, over the finished hull
+    hlSkinFront(me)     over the hull
+    'front' moments
+      (if neither hlSkinHull nor hlSkinFront returned true: the stock rim)
+    [lit rooms only: the room's light, with hlSkinLights(me) in it]
+    ── additive from here ──
+    enemy rounds, then the pilot's rounds (hlSkinRound each)
+    beams, lances … the game's particles (hlSkinDebris each)
+    the event's own glow pass
+    the wearer's 'glow' particles, hlSkinGlow(me), 'glow' moments
+    ── the world ends; the post (bloom) ──
+    the vignette
+    hlSkinScreen(me), 'screen' moments       CSS px, under the HUD
+    the HUD
+
+  Not drawn: the hull (and everything from hlSkinBack to 'front' moments)
+  while dead, downed in co-op (the wreck), in FUSION CORE, or in the strike.
+  me.hidden is true then. The trail, particles, glow and screen passes still
+  run, so a death can play out over the empty place.
+
+THE STAGE (menu, dropdown card, bench) draws the same passes in the same
+order, inside its box: hlSkinStage(me, box) for the backdrop (true = drawn),
+bodies with hlSkinBody, afterimages, under, back, swap / stock hull, hull,
+front, [LIT ROOM on the bench], rounds, sparks (hlSkinDebris), glow.
+
+
+================================================================================
+5. THE WEARER (`me`)
+================================================================================
+
+WHO
+  me.s the DEV_SKINS row · me.id · me.fx 'hallows' | 'lostsoul' · me.tier 1–3
+  (0 for the soul) · me.col · me.look (what hlSkinLook returned)
+  me.pilot 'runner' | 'ember' | 'hacker' | 'melee' · me.where 'run' |
+  'stage' | 'bench' · me.scene 'run' | 'hub' | 'vigil' | an area id | 'stage'
+  me.real (the global P is this pilot: a run, the bench) · me.live (a run is
+  being played this frame) · me.lit (the room has the light pass) ·
+  me.hidden (the hull is not being drawn)
+  me.hullCol: the colour the game drew the hull in this frame (hurt flash,
+  Ghost Step's violet), for a swapped hull to honour
+
+WHERE AND HOW IT MOVES
+  x, y, ang (the hull's heading) · vx, vy, speed, dir (heading of motion)
+  turn (rad/s, smoothed) · r (P.r) · R (r + 11: the ring the ordinary
+  awards draw at) · stretch { along, across } (THE KIT's hlStretch of the
+  speed)
+  trail: samples { x, y, ang, t, speed, dash } spaced trailGap px, kept
+  look.trail s. Read it through me.trailPts().
+
+ITS STATE
+  hp, maxHp, hpK (0..1) · low (under 30%, until back over 42%) · hurt (the
+  game's hurt flash, s) · phasing · blink (the i-frame flicker, on the
+  frames drawPlayer skips) · dashing, dashK (0..1 through the dash),
+  dashX, dashY · parry (THE VAGRANT's window is up) · still (a perfect
+  parry is holding the room) · down (co-op wreck) · shield (count) · level
+  · wave · kills
+
+GIVEN FOR NOTHING (secondary motion, springs the wardrobe steps)
+  lean      −1..1, banks into turns, with a little overshoot
+  recoil    px, kicked backwards by every volley and springing home
+  flinch    kicked by every hurt, ringing out
+  bob       −1..1, fades in only after about a second of standing still
+  pulse     0..1.5, +0.6 a kill, draining at 2.4/s
+  heat      0..1: +0.07 a kill (elite 0.16, boss 0.45), +0.004 a round; held
+            1.6 s after the last kill, then draining at 0.14/s. How hot the
+            fight is, for a skin that burns brighter the longer it goes.
+  streak    kills each within 2.2 s of the last · best (this run)
+  firing    a round in the last 0.3 s · idle (s without moving or firing)
+  lowK      0..1, eases toward low
+  since     { equip, run, shot, kill, hurt, heal, shield, dash, dashEnd,
+              parry, perfect, level, wave, low, down, death, streak }:
+            seconds since each (99 = never)
+
+THE ART'S OWN
+  me.art (kept across runs until the prize is taken off; reset it in
+  hlSkinRunFx if a run should start clean) · me.bodies, me.springs (what
+  me.rope/cloth/chain/spring made) · me.moments · me.parts · me.rounds
+
+
+================================================================================
+6. THE HOOKS
+================================================================================
+
+THE LOOK AND THE CLOCK
+hlSkinLook(me) → {}
+    Called when a prize is put on (and when the art loads or reloads). What
+    it returns is me.look. The wardrobe reads these keys, all optional:
+      trail (s, 0.5)   trailGap (px, 3)   streakGap (s, 2.2)
+      streaks ([5, 10, 20, 35, 50, 75, 100, 150, 200, 300])
+      drag (1.2) / settle (60): how ropes and cloth stream (see 7)
+      kinds: { name: { layer: 'lit'|'glow', make(q, o), step(q, dt),
+               draw(q, me) } }: particle kinds of the skin's own, beside THE
+               KIT's
+    Anything else is yours (palettes per tier, say).
+hlSkinPreload(me) → [jobs]
+    Functions to run ahead, one per idle moment, the first time this prize
+    is worn on this pilot. Make sprites here (hlWrSprite), so the first
+    frame does not pay for them.
+hlSkinTick(me, dt)
+    Once a frame. Set springs' .to, make ropes / cloth / chains (first ask),
+    emit with me.every, run the art's own timers. dt is 0 while the run is
+    held.
+
+THE LAYERS (see 4 for the order; world space unless said)
+hlSkinTrail(me)                     under the ship. me.trailPts + me.ribbon.
+hlSkinBack(me)                      just before the hull: cloth, chains, the
+                                    glow behind it.
+hlSkinHullSwap(me) → true           HULL SPACE (origin on the hull, x along
+                                    the nose). The prize IS the hull: the
+                                    stock glow, plating, detail and canopy are
+                                    not drawn. Honour me.hullCol / me.hurt /
+                                    me.phasing, which the stock hull would
+                                    have shown.
+hlSkinHull(me) → true if drew       HULL SPACE, over the finished hull.
+                                    me.hullPath(); ctx.clip() to carve into the
+                                    plating.
+hlSkinFront(me) → true if drew      over the hull: halos, orbiting things,
+                                    upright things (me.upright, sock 'above').
+hlSkinGhost(me, g, f) → true        HULL SPACE at one of the dash
+                                    afterimages: g { x, y, ang, phase (Ghost
+                                    Step) }, f 0..1 (1 = the newest).
+hlSkinRound(me, b, c, R) → true     one of the pilot's rounds, whole, glow and
+                                    streak included. Additive. c is the colour
+                                    the game would use (crit, venom, solar,
+                                    deep, hacked): keep the state readable. R
+                                    is the round's record (see 7).
+hlSkinDebris(me, p, t, rad) → true  one of the game's own sparks (hits, kills,
+                                    everything). p { x, y, r, color, … },
+                                    t 0..1 of its life, rad the size the game
+                                    would draw. Additive.
+hlSkinBody(me, e, ea)               over each body of the roster (not
+                                    bosses). ea is the body's own alpha: a
+                                    phased body stays as faint as it is.
+hlSkinGlow(me)                      additive, over everything in the world.
+hlSkinMoment(me, m)                 each live moment, on its layer (see 7).
+hlSkinScreen(me)                    CSS px (0..W, 0..H), over the world and
+                                    under the HUD.
+hlSkinLights(me)                    only in a lit room: me.light({ x, y, r,
+                                    col, a, flick, seed, z, cone, … }) adds a
+                                    real light with shadows (THE KIT's
+                                    hlLight).
+hlSkinStage(me, box) → true         the menu stage's backdrop, in the canvas's
+                                    units (box { x, y, w, h }). False: the
+                                    default dark grid.
+
+THE MOMENTS (called once, when it happens)
+hlSkinEquipFx(me)              put on: from the menu (each stage showing it)
+                               or mid-run
+hlSkinRunFx(me)                a run begins wearing it (reset me.art here)
+hlSkinShotFx(me, b, R)         a round leaves the hull (each one)
+hlSkinVolleyFx(me, n, crits)   n rounds this frame: the muzzle. (me.recoil
+                               has already been kicked.)
+hlSkinRoundEndFx(me, R, how)   a round is gone. how is 'hit' (it still had
+                               life) or 'spent' (ran out). A room cleared of
+                               rounds at once does not fire this.
+hlSkinKillFx(me, e, o)         the pilot put a body down. o { x, y, r, col,
+                               ang (the blow's direction), boss, elite, type,
+                               sides, streak }
+hlSkinStreakFx(me, n)          the streak reached n (look.streaks)
+hlSkinHurtFx(me, dmg)          health went down (me.flinch is kicked)
+hlSkinHealFx(me, amt)          health went up (also on a level-up's max-hp)
+hlSkinShieldFx(me, n, up)      shields now n; up: one was gained
+hlSkinDashFx(me, dx, dy)       a dash, along (dx, dy)
+hlSkinDashEndFx(me)
+hlSkinParryFx(me, perfect)     THE VAGRANT turned a blow aside
+hlSkinLevelFx(me, lvl)
+hlSkinWaveFx(me, n)
+hlSkinLowFx(me, on)            under 30% (on) / back over 42% (off)
+hlSkinDownFx(me, down)         co-op: wrecked / back up
+hlSkinDeathFx(me)              the hull is gone (state 'dead'). me.hidden is
+                               already true: whatever plays here plays
+                               without a ship under it.
+
+
+================================================================================
+7. THE TOOLS
+================================================================================
+
+SOCKETS: where things attach, per hull, in hull space
+  me.sock(name) → { x, y, ang } in the world · me.sockL(name) → [x, y]
+  me.local(lx, ly) → a hull-space point in the world
+  names: nose · muzzle · canopy · core · tail · exhaust · wingL · wingR ·
+         tipL · tipR (taken off each pilot's hullPath points)
+         above · below (NOT on the hull: square to the screen, R + 4 over and
+         under it; for a lantern that hangs, a crown that floats)
+  me.inHull(fn) runs fn in hull space · me.upright(fn) with the origin on
+  the hull, axes square to the screen · me.hullPath() the outline as a path
+  (in hull space: fill, stroke, clip)
+
+MOMENTS: anything with a length
+  me.moment(name, dur, o) → m. Aged by the wardrobe; drawn every frame by
+  hlSkinMoment(me, m) until m.age reaches m.dur.
+    o.x, o.y, o.ang  where (default: the pilot, now)
+    o.follow         rides with the pilot
+    o.layer          'back' (under the hull, lit) · 'front' (over the hull)
+                     · 'glow' (additive) · 'screen' (CSS px). Default:
+                     'front' if it follows, else 'glow'.
+    o.tl             a THE KIT timeline ({ tracks, cues }); m.tl.v('track')
+                     is scrubbed with the moment, so a flourish can be keyed
+                     rather than written as maths. o.tl.len sets the length.
+    anything else    yours, on m.o
+  m { name, dur, age, k (0..1), x, y, ang, follow, layer, seed, o, art, tl }
+  me.playing(name) → the live ones of that name.
+  me.env(ev, dur, ease) → 1 at the event, falling to 0 over dur (a flash that
+  answers every kill: me.env('kill', 0.3)).
+
+PARTICLES: the wearer's own pool (1,800)
+  me.emit(kind, x, y, n, o): THE KIT's kinds (ember, smoke, mote, clod,
+  wisp, bat) and any in look.kinds. o is the kind's own (col, size, life,
+  vx, vy, speed, spread …). Stepped and drawn by the wardrobe in a run, in
+  the menu and on the bench, outside the event's rooms too: 'lit' kinds
+  under the ship, 'glow' kinds in the additive pass.
+  me.every(key, rate, fn): rate per second, the same at any frame rate,
+  never more than 24 at once. Inside hlSkinTick only.
+  The game's own sparks are dressed through hlSkinDebris instead.
+
+ROPE, CLOTH, CHAIN, SPRING: made on first ask, stepped for you
+  me.rope(key, sock, n, seg, o) → a THE KIT verlet rope, head pinned to the
+      socket, streaming astern. Draw with hlDrawRope(b, { w0, w1, col }).
+  me.cloth(key, sock, cols, rows, seg, o) → a THE KIT cloth, its pinned edge
+      laid across the hull at the socket, rows trailing astern. Draw with
+      hlDrawCloth(b, { col, dark, hi, lit }). o.spread widens the edge,
+      o.rot turns it off the axis, o.squash; o.tear tears. Nothing of it is
+      let forward of the pin line (o.behind, default on): spun half a turn,
+      a cape drags round the stern rather than folding over the hull.
+  me.chain(key, sock, n, seg, o) → THE KIT's hlChain rooted at the socket,
+      pointing astern (a tail, a tongue of flame): draw its .pts.
+  me.spring(key, v, k, d) → THE KIT's hlSpring: set .to in hlSkinTick, read
+      .v anywhere.
+  How they stream: pushed against the pilot's velocity (o.drag / look.drag,
+  1.2), settling astern at rest (o.settle / look.settle, 60 px/s²), with a
+  flutter (o.flutter, 40). They go when a run starts or the prize comes off,
+  and are re-hung when the pilot changes.
+  Ask for them in hlSkinTick or an Fx hook, never first from a draw hook.
+
+ROUNDS: each of the pilot's rounds has a record, R
+  R { b, seed, age, dist (px flown), x0, y0 (born), x, y, ang, crit, mine
+  (the pilot's own, not a hacked one), kind 'plain' | 'crit' | 'venom' |
+  'solar' | 'deep' | 'hacked', art }
+  It is made the first time the wardrobe sees the round and dropped the
+  frame it is gone (hlSkinRoundEndFx). me.rounds is the map.
+
+TRAILS
+  me.trailPts(sock, maxAge) → points newest first, from where the pilot is
+  now: { x, y, age, k (0 now → 1 oldest), speed, dash }. With a socket, the
+  points are where that socket was (me.trailPts('tipL'): a wingtip ribbon).
+  me.ribbon(pts, o) (= hlWrRibbon): a filled ribbon through them.
+    o { w0, w1 (width head → tail), a0, a1 (alpha), col, ease, comp
+        ('lighter'), wob (noise on the width), wobSpd, seed, edge, edgeA, lw,
+        quads (shade segment by segment: for a trail that curls back on
+        itself) }
+
+LIGHT
+  me.lamp(x, y, r, col, a, flick, seed) (= hlWrLamp): the kit's light falloff
+  laid on additively, with its candle flicker. It brightens and cannot
+  darken: a light's look anywhere without a light pass (an ordinary run, the
+  menu). Returns the flicker, so a flame can breathe with its own glow.
+  me.light(o): a real light, inside hlSkinLights only.
+
+SPRITES: expensive things made once
+  hlWrSprite(key, w, h, draw(g, w, h), res = 2): its own canvas, origin at
+  the centre, in the units it will be drawn in. hlWrBlit(key, x, y, ang,
+  scale, alpha). hlWrUnsprite(key) (or all). Make them in hlSkinPreload.
+
+ODDS AND ENDS
+  me.seed(obj) → 0..1, the same for the same round / body / moment every time
+  hlWrStockHull(me, col) (hull space) and hlWrStockRim(me): the stock look,
+  for a skin that wants to build on it rather than replace it
+  hlWrHookState() → [{ name, art }]: which hooks the art has drawn
+  HL_WR.debug: the overlay
+
+
+================================================================================
+8. WHERE THE BUDGET GOES
+================================================================================
+
+The planning sheet puts the prizes in tier B. These are the places a prize
+is looked at longest and where the extra budget pays back most:
+
+  S  the equip (the menu stage plays it every time it is put on), the death
+     (the last thing a run shows), the streak milestones, a boss kill (o.boss)
+  A  the hull itself (hlSkinHull / HullSwap, hlSkinFront), the rounds (they
+     are on screen more than anything else the pilot owns), kills
+  B  the trail, dash and afterimages, level and wave, hurt and heal, low, the
+     bodies' dressing, the screen pass
+
+  The line is carved to burning, so each tier should keep what the tier
+  below had, grown, the way the imperial line does: me.tier is the only
+  thing that has to differ. The soul is its own thing (me.fx 'lostsoul').
+
+
+================================================================================
+9. A SKELETON (shape only, no art)
+================================================================================
+
+  function hlSkinLook(me) {
+    return { trail: 0.6, kinds: { /* a kind of your own */ } };
+  }
+  function hlSkinTick(me, dt) {
+    me.rope('wick', 'tail', 6, 4);                   // made once, stepped for you
+    me.spring('glow').to = me.heat;                  // read .v when drawing
+    me.every('smoke', 6 + me.heat * 20, () => {
+      const p = me.sock('exhaust'); me.emit('smoke', p.x, p.y, 1);
+    });
+  }
+  function hlSkinHull(me) {
+    me.hullPath(); ctx.clip();                       // carve inside the plating
+    /* … */
+    return true;
+  }
+  function hlSkinKillFx(me, e, o) {
+    me.moment('kill', 0.5, { x: o.x, y: o.y, col: o.col });
+  }
+  function hlSkinMoment(me, m) {
+    if (m.name === 'kill') { /* draw at m.x, m.y by m.k */ }
+  }
+
+
+================================================================================
+10. THE NUMBERS (HL_WR, in the wardrobe; tune there)
+================================================================================
+
+  partMax 1800 · momentMax 160 · trail 0.5 s · trailGap 3 px
+  streakGap 2.2 s · streaks 5 10 20 35 50 75 100 150 200 300
+  lowIn 0.3 · lowOut 0.42
+  heat: kill 0.07 · elite 0.16 · boss 0.45 · shot 0.004 · hold 1.6 s ·
+        decay 0.14/s
+  recoil 60 (the volley's kick)
+
+
+================================================================================
+11. NOT YET / OPEN
+================================================================================
+
+  - The art: every new hook is a placeholder. The 27 Sep look holds in a run
+    through the hand-over (3); the menu stage and the dropdown card show the
+    stock hull and rim until the art is on the new hooks.
+  - Co-op: the other pilot's prize is not drawn. The game does not draw a
+    partner's awarded skin for any award.
+  - Raising the parry (THE VAGRANT's window opening, before anything is
+    turned aside) is not a moment of its own; me.parry is true while it is up.
+  - The prizes are listed in the skin menu all year once owned (planning
+    sheet 17, open).

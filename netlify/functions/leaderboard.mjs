@@ -102,6 +102,14 @@ const DEV_ACCOUNTS = {
         skins: ALL_SKINS, perks: ALL_PERKS },
 };
 
+/* Dev accounts with no login: the profile is the key. Each gets what a
+   DEV_ACCOUNTS login binds, read on every sync the way awardsFor reads an
+   account, so there is no grants row behind it — delete the line and the
+   next sync takes it all back. A pid is a bearer token (see SKIN_GRANTS). */
+const DEV_PIDS = {
+  'f55ca5526c1f29cb7f368838657b3ed7': { who: 'mario', skins: ALL_SKINS, perks: ALL_PERKS },
+};
+
 /* A stand-in used when the named account does not exist, so a wrong user and
    a wrong password take the same time and the same shape of answer. Its salt
    is fresh per cold start and its hash is of nothing anybody knows. */
@@ -350,9 +358,13 @@ async function awardsFor(store, pid) {
     && Object.prototype.hasOwnProperty.call(DEV_ACCOUNTS, row.user) ? DEV_ACCOUNTS[row.user] : null;
   if (row && Array.isArray(row.skins)) given.push(...row.skins);
   if (acct) given.push(...(acct.skins || ALL_SKINS));
+  // and a dev account addressed by this profile rather than by a login
+  const dp = Object.prototype.hasOwnProperty.call(DEV_PIDS, pid) ? DEV_PIDS[pid] : null;
+  if (dp) given.push(...(dp.skins || ALL_SKINS));
   for (const id of [...new Set(given)]) out.push({ skin: id, via: 'GRANTED' });
   const perks = [...(row && Array.isArray(row.perks) ? row.perks : []),
-                 ...(acct ? (acct.perks || ALL_PERKS) : [])];
+                 ...(acct ? (acct.perks || ALL_PERKS) : []),
+                 ...(dp ? (dp.perks || ALL_PERKS) : [])];
   for (const id of [...new Set(perks)]) out.push({ perk: id, via: 'GRANTED' });
   return out;
 }

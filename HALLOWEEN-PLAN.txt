@@ -1,0 +1,1169 @@
+VOIDRUNNER — ALL HALLOWS 2026
+THE PLANNING SHEET · Book I: THE LOST SOUL
+Written 28 Sep 2026 (Monday). Prepatch only: never copy this file into C:\game.
+Everything in one place: the brief, the calendar, the story, every chapter,
+the numbers, the tech, the tools, the shipping procedure, and what is left.
+
+  Companion files (prepatch):
+    EVENT-DRAFTS.txt    the script and design as it was drafted and revised
+    HALLOWS-GUIDE.txt   the art contract: every hook, what it is handed, when
+    HALLOWS-SKINS-GUIDE.txt  the prize skins' contract (THE WARDROBE)
+    hl-wardrobe.js      THE WARDROBE: the prize skins' toolkit (inline too)
+    hl-kit.js           the kit (light, cloth, rig, timeline, dialogue, …)
+    hl-art.js           the art (the user's), shipped beside index.html
+  Where this sheet and those disagree, this sheet is the newer one, and it
+  was checked against the code on 28 Sep.
+
+  Status key used below:
+    [BUILT]     in prepatch, tested, and in C:\game (shipped dark 28 Sep 06:43)
+    [DESIGNED]  written and agreed in outline; no code yet
+    [OPEN]      a decision still to make
+    [TODO]      decided, not done
+
+
+================================================================================
+0. AT A GLANCE
+================================================================================
+
+  WHAT IT IS
+    The yearly October event. Each year is a BOOK: the same place, the same
+    guide and the same systems, with one new chapter of the storyline on top.
+    This is Book I. The Outsider (the evolution-tutorial guide) knocks from
+    under the menu, leads the player down to a new hub, THE VIGIL, where a
+    LOST SOUL waits. The soul sends the player up into three areas, one after
+    another, to kill three bosses and bring back the pieces of itself. Each
+    quest lights candles on a worldwide counter (prizes for everyone who took
+    part) and pays a medal (two worn at once, run modifiers for the month).
+
+  WHERE IT STANDS (28 Sep)
+    Act I (prologue, vigil, THE PATCH, THE BACKLOG, quests 1–2, ascension I,
+    medals THE GOURD and ONE DAY, the worldwide count, the four prize skins):
+    [BUILT], with the user's art, and sitting dark in C:\game. It opens by
+    itself on 1 Oct from the server's date once C:\game is deployed.
+    Acts II and III, the epilogue, five medals: [DESIGNED].
+
+  KEY DATES
+    Thu  1 Oct   the event opens: knock, vigil, Chapter I          (live data)
+    Wed 14 Oct   Chapter II, THE HOUSE                             (live data)
+    Fri 23 Oct   Chapter III, THE YARD, and the epilogue           (live data)
+    Sun  1 Nov   00:00 UTC the vigil shuts (client, exclusive)
+    Mon  2 Nov   last UTC day the server still accepts a quest (grace day)
+
+  THE NEXT THREE THINGS
+    1. Deploy C:\game before 1 Oct (it is ready; the user deploys).
+    2. [TODO, urgent] the abandoned-run logger (section 16, hook 4). Its data
+       needs a year to exist, so it has to ship this October to be of use.
+    3. Chapter II logic under placeholder hooks, so its art can start.
+
+
+================================================================================
+1. THE BRIEF — the user's decisions, in their words where they gave them
+================================================================================
+
+  STRUCTURE (27 Sep)
+    - "the outsider … will greet you on the main menu, telling you that he
+      just found something new and leading you into a new event hub area."
+    - "a new character called the Lost Soul … will send you on a quest to
+      kill an event boss, and once he is defeated, the soul will ascend and
+      lead you into another quest."
+    - Quests pay "event currency (for a collective worldwide counter for
+      prizes)" and "event medals, which you can equip up to 2 at a time …
+      special modifiers to runs for the duration of the event".
+    - "the quests are not supposed to be infinite, so script them well and
+      specifically."
+    - "about 3 bosses and 3 areas with their own enemies for a separate
+      storyline so we can easily build on the storyline next year."
+
+  THE LOOK (27 Sep)
+    - "this should be on a higher animation budget than the rest of the
+      game, so plan to make this look better than anything we've made so far"
+    - "don't worry about performance constraints"
+    - "don't make art, just code the first act and leave placeholder hooks
+      and a guide" — the working split: Claude builds the logic under
+      placeholder hooks; the user draws the art against the kit; the art
+      file is lifted in whole.
+
+  LOADING (27 Sep)
+    - "only preload all the art during the time of the event to prevent
+      unnecessary latency"
+
+  PRIVACY (27 Sep)
+    - Force it open for the dev account notz for testing on another device,
+      and "make sure no one else can see anything". The user then hardened it
+      and published it dark themselves.
+
+  PLAY (27–28 Sep)
+    - After the A–F pitch: "let's get A and B done first" (finish-it-for-him,
+      and the pile carrying into the fight). Both built.
+    - With the art in: "the fight looks cluttered" → the telegraph pass.
+    - "let the player read it, and if they die, specifically to the backlog,
+      either the soul or the outsider could give some hints, not too
+      directly" → the word after (6.9). Scripted teaching waves dropped.
+
+  STANDING RULES
+    - prepatch is where work happens; C:\game is the publish root.
+    - Never overwrite C:\game's netlify/functions/leaderboard.mjs (the dev
+      accounts' credentials). Server changes are hand-ported line by line and
+      the credential lines checked unchanged.
+    - Design files (this one included) never go into C:\game. hl-art.js is
+      the one exception: it is a runtime asset.
+
+
+================================================================================
+2. CALENDAR AND SCHEDULE
+================================================================================
+
+  THE WINDOW (all UTC days; data, not code)
+    Client  HL_EVENT.from '2026-10-01', to '2026-11-01' (exclusive)
+            chapters: I opens 10-01 · II 10-14 · III 10-23
+    Server  VIGIL['hallows-2026'].from '2026-10-01', to '2026-11-02'
+            (inclusive: one day's grace after the end, none before the start,
+            so dev test runs before 1 Oct light no real candles)
+
+  WHAT "TODAY" MEANS
+    The server's date only (hlToday, via Daily.load at boot). Until the board
+    answers, today is null and the event is shut. The device clock is never
+    asked, because anybody can set it forward.
+
+  A CHAPTER, ONCE OPEN, STAYS OPEN until the event closes, so late players
+  catch up in order.
+
+  BUILD PLAN (proposed; the art is the long pole)
+    by Wed 30 Sep   deploy C:\game (Act I, dark until 1 Oct)
+                    abandoned-run logger in the same deploy, if at all possible
+    Thu  1 Oct      Chapter I live. Watch the count and the first deaths.
+    ~ 1–5 Oct       Chapter II logic under placeholder hooks (Claude), plus
+                    the chapter-open menu line for II
+    ~ 5–12 Oct      Chapter II art (user); lift; test
+    by Tue 13 Oct   ship Chapter II (it stays shut until the 14th by date)
+    ~ 6–12 Oct      Chapter III + epilogue logic (Claude), plus the menu line
+                    for III and the November farewell
+    ~ 12–21 Oct     Chapter III + epilogue art (user); lift; test
+    by Thu 22 Oct   ship Chapter III + epilogue + farewell (the LAST ship that
+                    can add anything the event needs before it closes)
+    Sun  1 Nov      closes. The November line and the hatch closing run from
+                    code already shipped.
+
+  IF THE ART SLIPS: the chapter dates are data (HL_EVENT.chapters), so a
+  chapter can open later by changing one string and shipping. Moving a date
+  EARLIER needs the code shipped first. Move the server's window only if
+  the event's end moves.
+
+
+================================================================================
+3. THE STORY
+================================================================================
+
+  THE PREMISE, from one fact the game already has
+    Quitting a run from the menu files it: quitToMenu() calls gameOver(), and
+    it gets a score, a place on the board and a line in the ledger. Closing
+    the tab mid-run does none of that. The run is never written down. It
+    stops where it was, and it stays there.
+    A LOST SOUL is one of those runs: a tab closed, and nothing came for it.
+
+  THE THEME: things that never end properly. Each boss is a person, in the
+  game's usual way, stuck on not finishing:
+    THE BACKLOG     never finishes what he has   "I'll get to it."
+    DEAD GAME       never leaves                 "Still here, though."
+    THE RAGE QUIT   never lets anything end      "That one didn't count."
+  The soul is what they leave behind; the event is the soul getting finished.
+
+  THE HALLOWEEN TIE: the jack-o'-lantern legend is itself a lost-soul story
+  (Stingy Jack, refused everywhere, wandering with a coal in a carved turnip).
+  So the soul carries a carved lantern once it has one, the prize skins are
+  lanterns, and the pumpkins belong to the story rather than decorating it.
+
+  THE PEOPLE
+    THE OUTSIDER (existing). The guide. Flat, singular, unconditional; tells
+      you what a thing costs, never that you are welcome. He left the crowd
+      himself, which matters by the end: the soul was LEFT, and he LEFT. He is
+      the one thing that does not change over the event.
+    THE LOST SOUL (new). A run whose tab was closed at WAVE 19, HULL 4%, in
+      the ordinary starting hull. It does not know who it flew for, only that
+      "he said he'd be right back."
+      Voice, by how much of it has come back (HL_STEADY):
+        0 start       fragments, lowercase, trailing: "...nineteen."
+        1 after Q1    lowercase, still uneven
+        2 after I     lowercase, whole sentences, steadier (0.35)
+        3 after II    capitals, full sentences, its own voice (0.7)
+        4 after III   plain and sure (1.0)
+        5 the end     gone
+      Look, by state (the user draws it; all six are in hl-art.js):
+        0  a small cold light on the floor, beside one unlit candle
+        1  a hull outline gathers round it, flickering at 4%
+        2  it holds a carved lantern
+        3  the hull is whole, still cold
+        4  the lantern burns warm
+        5  gone; its candle stays lit
+    THE BOOKKEEPER (existing; optional cameo) [OPEN]. Unfiled runs are the one
+      thing not in his ledger. One dry line at most, e.g. in the codex: "Not
+      my department. Somebody ought to have made it one."
+
+
+================================================================================
+4. THE SHAPE
+================================================================================
+
+  SEVEN QUESTS, fixed order, none repeat (HL_QUESTS; candles paid by server):
+
+    #  QUEST             WHERE      TASK                           CANDLES  MEDAL          STATUS
+    -  ----------------  ---------  -----------------------------  -------  -------------  ----------
+    1  THE REST OF IT    THE PATCH  break 3 cold gourds            10       THE GOURD      [BUILT]
+    2  ON SALE           THE PATCH  kill THE BACKLOG               15       ONE DAY        [BUILT]
+       -- ASCENSION I --
+    3  LAST MESSAGE      THE HOUSE  tear 3 marked sheets           10       SHEET          [DESIGNED]
+    4  STILL HERE        THE HOUSE  kill DEAD GAME                 15       STILL HERE     [DESIGNED]
+       -- ASCENSION II --
+    5  WHERE HE PUT ME   THE YARD   stop 3 marked gravediggers     10       SHALLOW GRAVE  [DESIGNED]
+    6  GG                THE YARD   kill THE RAGE QUIT             20       LAG            [DESIGNED]
+       -- ASCENSION III --
+    7  PAST NINETEEN     any run    carry the soul to wave 20      20       THE LANTERN    [DESIGNED]
+                                                                   ---
+                                                                   100 per profile, at most
+
+  The errand before each boss (1, 3, 5) was Claude's addition to the brief;
+  it is built for Chapter I and planned for the rest. It gives each chapter a
+  beat before its boss and gives the soul something back each time.
+
+  THE QUEST RUNNER (built, general)
+    hlCurrent(): the first quest not done, if its chapter is open and it is
+    built (q.later marks the unbuilt ones; the chain stops in front of the
+    first and the soul says the "wait" line).
+    Progress is kept per profile (prog), so an errand's pieces survive a death.
+    A quest finished up in an area is TOLD in the vigil: the soul only changes
+    once you walk back to it (hlShown). A boss quest's telling starts with the
+    soul rising a landing (HL_ASC_T 2.8 s).
+
+  HOW AN AREA PLAYS (the frame is built; THE PATCH uses it)
+    - Entered through its way up in the vigil ([E]), with the selected pilot.
+    - Runs as a pseudo-challenge (Chal.on = { hl: id }): five waves of the
+      area's roster, the boss on the fifth.
+    - Scaled as a slice of an ordinary run (waveFrom):
+        THE PATCH  waves 6–10 · THE HOUSE 11–15 · THE YARD 16–20
+        (THE YARD ends where the soul ended.)
+    - HEAD START: you go in with what the earlier waves would have paid, in
+      full (rushSkipped over waves 1..waveFrom−1: XP and credits), so the
+      level-up cards are picked at the door. THE VAGRANT gets gear instead.
+    - The boss comes on wave 5 only once that chapter's errand is done. If it
+      is not, wave 5 ends the run gently: "THE PATCH LETS YOU GO". A strong
+      player does a chapter in one run; anyone else in two.
+    - Ending: win or let go → HL_END_T (4.2 s) → back to the vigil.
+      Death → the death screen ("WHAT YOU FOUND IS KEPT"): SPACE runs it again,
+      M goes back down to the vigil.
+    - Solo only for now (an area refuses to start while a co-op link is up).
+      Co-op later [OPEN]: new enemy types sync through ETYPE on their own.
+    - Medals apply inside areas.
+
+
+================================================================================
+5. THE PLACES
+================================================================================
+
+  THE KNOCK — the menu, once per profile [BUILT]
+    The first time the menu loads with the event live, after the Outsider's
+    own arrival if that is still owed, and after any unread notes. The menu
+    stalls (the arrival's grammar, shorter). Timeline: knocks at 1.0, 1.7 and
+    2.4 s (a thud and a shake each), the hatch opens at 3.1 s, he rises in it
+    and holds the edge, and his lines start at 4.8 s. [ESC] skips it.
+      Profile that has let him in:
+        OUTSIDER "Something has been knocking under the floor."
+        OUTSIDER "Not at the door. Under it."
+        OUTSIDER "I went down. There is someone there, and it is not for me."
+        OUTSIDER "Come and look. It will take the month."
+      Profile that has not (he has never met them):
+        OUTSIDER "You have not let me in. I came up anyway."
+        OUTSIDER "Something has been knocking under your floor. It is not
+                  knocking for me."
+        OUTSIDER "Come and look. It will take the month."
+    [TODO] on the first menu after a chapter opens:
+        II   OUTSIDER "It has gone up a floor. It is asking for you."
+        III  OUTSIDER "It is near the top. It knows who it is waiting for."
+    [TODO] on the first menu of November:
+        OUTSIDER "It is quiet down there now. I will keep the candle."
+        The hatch closes until next October.
+
+  THE HATCH — the menu, all month [BUILT]
+    A trapdoor at the menu's bottom right (hlHatchRect: W−236, H−150,
+    210×104), with light and knocks coming up. A way down separate from the
+    Outsider's hole, so every player can reach the event, including those who
+    never let him in. Open it with [V] or a click. Up from the knock until the
+    event closes.
+
+  THE VIGIL — the event hub [BUILT]
+    A low, cold room under the floor (1400 × 1000), walked like the hub; [E]
+    answers the nearest thing. Positions are offsets from the room's centre
+    (VIG_SPOTS), and the art places everything from them.
+      exit          (0, 420)       back up to the menu
+      the Outsider  (−230, 60)     at the foot of the stairs; idle lines on [E]
+      the stand     (420, 170)     medals: pick two (keys 1–7, arrows, enter)
+      the wall      (0, −470)      blank until the end [TODO: the epitaph]
+      ways up       PATCH (−380, −400) · HOUSE (0, −440) · YARD (380, −400);
+                    a shut one says so
+      landings      y −60 / −160 / −250 / −330: the soul climbs one per ascension
+      alcoves       four, at x ±660: one per prize, lit when it lands
+      candles       the worldwide count drawn on the floor, one for every 10
+    The first time down, the rest is said once you walk up to the light:
+        OUTSIDER "It was here when I found it. It had been here a long time
+                  before that."
+        [you walk to it]
+        OUTSIDER "It is a run."
+        OUTSIDER "When you quit, the run is written down. When the tab is
+                  closed, nothing writes it down. It stops where it was, and
+                  it stays."
+        SOUL     "...nineteen."
+        SOUL     "...he said he'd be right back."
+        OUTSIDER "It says that. I do not know who he is."
+        OUTSIDER "It wants to go up. I cannot take it. You can fight, which is
+                  the part it needs."
+        SOUL     "...the patch. the rest of me is in the patch."
+        → quest 1 is given
+    After that, the Outsider has one line a visit, no lesson:
+        "It is still here." · "It does not sleep. I do not much, either." ·
+        "Go up when you are ready. It is not going anywhere. That is the whole
+        problem." · "More of them are lit than yesterday." (after the count
+        moved since his last line)
+    While the next floor is shut:
+        OUTSIDER "The house is not open yet. It will wait. It is good at that."
+
+
+================================================================================
+6. CHAPTER I — THE PATCH [BUILT]
+================================================================================
+
+  A field under a low orange light. Every gourd in it is a run somebody
+  paused and never opened again. THE BACKLOG farms them.
+  Stage: bg #08060a, grid #1a120a / #2b1d0e, wall #7c2d12, accent #fb923c.
+  waveFrom 6. Roster weights: jack 40 · gourd 34 · creeper 28 · scarecrow 24.
+
+  6.1 AREA RULE — RIPENING, AND THE PILE (reworked 27 Sep)
+    - A gourd carves its face over GOURD_RIPEN (15 s) up to GOURD_LIT (0.85)
+      and then HOLDS, lit. It never holds a wave: a wave can end with gourds
+      standing. That is the pile.
+    - Every unbroken gourd makes everything else 3% faster (PILE_STEP). The
+      HUD shows it (drawHlPileHud): THE PILE · n · +x%.
+    - When the next wave starts, every lit gourd comes open (HL_HATCH_T 1.2 s)
+      as a JACK.
+    - When THE BACKLOG arrives, every gourd still standing is his: each slides
+      to him (HL_REEL_SPD 420 px/s, staggered from 0.7 s) and is eaten on
+      arrival: +5% of his base health (HEAP_HP) and a thicker heap. They are
+      still gourds while they slide: break one and he never gets it.
+    - So waves 1–4 are the preparation for the fight: break them and he
+      arrives smaller.
+
+  6.2 THE ENEMIES (base stats; scaled like any wave)
+    GOURD      r16 hp26 spd0 dmg0 · 2xp. Does not move or attack. Ripens as
+               above. The soul's COLD gourds are different (6.3).
+    JACK       r17 hp44 spd64 dmg12 · 4xp. Keeps JACK_WANT (220 px), lobs seeds
+               (every 2.0–2.8 s within 640 px). Up close (JACK_BREATH_R 130 +
+               40) it winds up JACK_WIND (0.5 s, still turning to you) and
+               breathes down a locked heading for JACK_BREATH_T (0.8 s), half-
+               width JACK_BREATH_A (0.55 rad), 0.6× dmg per 0.2 s tick; 3.2 s
+               before the next. THE FACE (±JACK_FACE 0.7 rad): hits there do
+               double, and the first one puts the candle out (hlDark): no more
+               breath.
+    CREEPER    r15 hp34 spd70 dmg8 · 4xp. Keeps 220–320 px, throws a vine
+               (VINE_SPD 520, VINE_RANGE 380, every 2.6–4 s). Held: 40% slower
+               (VINE_SLOW 0.6), reeled in at VINE_REEL 150 px/s, for up to
+               VINE_HOLD 4 s. Cut it by fire anywhere but the last VINE_SPARE
+               (40 px) at the hull, or dash through it.
+    SCARECROW  r18 hp60 spd150 dmg20 · 5xp. Perfectly still while your aim is
+               on it (±CROW_WATCH 0.33 rad, within CROW_RANGE 1100); fast when
+               you look away. Contact hurts (~26 at area scale).
+    Under THE HACKER (the user's army rework): a taken jack's breath hits its
+    foes (hlJackBreathTurned); a taken creeper's vine holds enemies
+    (hlVineCatch) and your fire passes it (fixed 27 Sep; ported 28 Sep); a
+    taken scarecrow never freezes under your aim.
+
+  6.3 QUEST 1 — THE REST OF IT
+    Given:
+      SOUL     "...three of them are mine. the cold ones."
+      OUTSIDER "Three of the gourds up there are not orange. Break them before
+                they ripen, or the one who farms them keeps them."
+    Task: one COLD GOURD comes up in waves 2, 3 and 4 (COLD_AFTER: 4–9 s into
+    the wave), in front of you but not on you. Break it before it ripens
+    (15 s, the old rule: it does not hold at 0.85). Broken ones are kept
+    across attempts; one that ripens is carried off to his heap and comes up
+    again next attempt. Off-screen cold ones are pointed at from the HUD.
+    Done:
+      SOUL     "...that's what i was flying."
+      OUTSIDER "An ordinary hull. The one everyone starts in."
+    Pays 10 candles and THE GOURD.
+
+  6.4 QUEST 2 — ON SALE
+    Given:
+      SOUL     "...he has the rest. he says he's going to play it."
+      OUTSIDER "He has more than he will ever finish. He is not giving one back
+                because you asked."
+    Task: THE PATCH, wave 5 (reachable once quest 1 is done). Kill THE BACKLOG.
+    Done — ASCENSION I:
+      [The heap spills across the patch and the soul's save rolls out of it.
+      Back in the vigil the soul rises to the first landing, holding a carved
+      lantern.]
+      SOUL     "wave nineteen. hull at four percent. that's where i am. that's
+                where i've been."
+      SOUL     "i can go up now. there's a house."
+      OUTSIDER "He was never going to play it. Nobody plays all of them."
+    Pays 15 candles and ONE DAY.
+
+  6.5 THE BACKLOG — who he is
+    The hoarder: buys everything, finishes nothing, believes one day he will
+    get to all of it, and that belief is the whole problem. A heap that walks:
+    gourds, sealed boxes and a price sticker on everything.
+    Base: r64, hpMul 1.5, spd 40, colour #fb923c. Secret (kept out of the
+    codex count, freeplay spawns and the skin editor).
+    Lines (world barks):
+      entrance "Oh — careful. Those are mine."
+      idle     "I'll get to it." · "It was on sale." · "Not now. Later." ·
+               "I'm saving that one."   (every 7–11 s)
+      a gourd  "Another one. For later."  (60% of the time)
+      binge    "Fine. FINE. All of it. Now."
+      death    "...I was going to play that one."
+
+  6.6 HIS FIGHT — UNFINISHED
+    Everything he starts, he abandons partway, and the abandoned thing waits
+    exactly where it stopped: a PIECE in the pile (hlHeld).
+    Every 1.5–2.1 s (−0.15 per binge spent) he starts one (volley 50%,
+    sweep 25%, slam 25%); n = binges spent, 0–3, makes each bigger.
+      VOLLEY  9+2n rounds fanned 0.11 rad apart at 250+20n px/s, 0.55× dmg.
+              Paused 0.15–0.55 s after it is fired, in the air.
+      SWEEP   a bar SWEEP_LEN 760 × SWEEP_W 16 from him, arc 1.6+0.2n rad,
+              SWEEP_SPD 1.1+0.15n rad/s after a SWEEP_TELE (0.6 s) telegraph,
+              0.9× dmg (0.5 s between hits). Paused at 35–80% of its arc.
+      SLAM    a ring SLAM_R 110+10n where you stood, counting SLAM_T (1 s),
+              1.3× dmg on landing. Paused at 30–90% of its count.
+    FINISH IT FOR HIM (built 27 Sep). Fire passes through a paused piece.
+    Going through it — the dash, THE VAGRANT's lunge or its swing — finishes
+    it the way you were going, as YOURS (gold): it hurts him and his side and
+    never you.
+      volley  flung the way you went, spread kept, ×1.7 speed (KICK_SHOT),
+              3 s life; each round 1.6% of him (TURN_SHOT)
+      sweep   swings on round its pivot the side you pushed it from, 1.8 rad
+              (SWEEP_KICK_ARC) at ×1.6 speed; 7% of him (TURN_SWEEP)
+      slam    slides like a puck: 760 px/s (SLAM_KICK_SPD), friction 0.25/s,
+              banks off walls, goes off on him or where it stops after
+              SLAM_SLIDE_T (1.1 s, about 430 px); 10% of him (TURN_SLAM)
+      anything of his in the way: half its own health (TURN_ADD), at least 20
+      reach: the hull plus KICK_REACH (14 px); a dash covers ~184 px
+      each finish: a short hitstop, a shake, a gold slash
+    HIS HEAP. Anything else gets through at HEAP_TAKES 30%, −1% per gourd he
+    has eaten (HEAP_STEP), down to HEAP_FLOOR 15%. His own pile is how he is
+    really hurt.
+    HE EATS. He walks to the nearest unbroken gourd within 520 px at 1.4×
+    speed: +3% heal (BACKLOG_EAT_HEAL) and +4 flat armour (BACKLOG_EAT_ARMOR)
+    each. Arrival pile: +5% of base health each instead of the heal.
+    THE BINGE. At 75 / 50 / 25% health (BACKLOG_BINGE), and whenever nine
+    pieces are paused at once (HL_PILE_MAX): everything still paused goes off
+    the way it was going — at you, as RESUMED (red), never paused again. The
+    pile is ammunition and a debt at once. He gets 0.9 s after a binge before
+    he starts anything new.
+    DISTANCE. Without a gourd to walk to, he keeps 210–330 px from you and
+    circles (was 300–460; closer so he is on screen: you kick at him).
+
+  6.7 HIS WAVE (reworked 28 Sep)
+    A trickle, not a crowd: bossPool jacks 60 / gourds 40 (no creepers — a vine
+    holds you still; no scarecrows — they want watching; his fight needs your
+    dash and your eyes). HL_BOSS_ADDS 8 in all, HL_BOSS_LIVE 2 at once (plus
+    him), one every HL_BOSS_TRICKLE 3.5 s, the first after 2 s. Gourds that
+    come up in his wave are his food: the one he is walking to is marked.
+
+  6.8 READING IT — the telegraphs (28 Sep: "the fight looks cluttered")
+    One loud thing at a time, loudest first:
+      1. what hurts you now        live and resumed pieces, adds' attacks
+      2. what is about to          a binge winding up: red
+      3. what you can do now       the piece a dash would finish: gold
+      4. the rest of his pile      FURNITURE, faded to HL_QUIET_A (30%)
+    - FADE: a paused piece not about to be finished is drawn at 30% (the logic
+      scales every alpha the art sets around its draw call: hlQuietDraw; an
+      art file that wants to do it itself declares HL_ART_QUIET).
+    - THE DASH LINE: every frame the logic works out which paused pieces a
+      dash pressed now would finish (the stick's way, or the nose), and where
+      each would then go. Those light gold with chevrons (drawHlTele), and he
+      gets brackets if that way finds him. Pieces merely in reach get a small
+      diamond where a dash would meet them.
+    - THE WIND-UP: a binge is CALLED, then comes BINGE_WARN (1.1 s) later. He
+      says his line at the call and starts nothing new; the pieces shake and
+      show in red where they will go; anything finished in that time is yours.
+      With nothing paused, nothing is called.
+    - THE RULES ON SCREEN: his bar carries a notch at each binge (grey once
+      spent) and flashes red in a wind-up (drawHlBossBar). Once the gourds are
+      his, the pile line under the area HUD becomes UNFINISHED n / 9
+      (drawHlPiecesHud). The gourd he is walking to gets a tether and a ring
+      (his sticker, in the art).
+    - NUMBERS: ordinary fire on him shows dull grey and small (the heap took
+      it); what his own pile takes shows as one gold share, e.g. −7%, one
+      number per finish (a volley's rounds add up into it).
+    - In his fight the area HUD drops its goal line (his bar says it).
+
+  6.9 THE WORD AFTER — hints only after a death to him (28 Sep)
+    Nothing teaches the fight up front: the player reads it. When they go down
+    in his fight while ON SALE is open, the game reads how it went (HL.fight:
+    finishes, binges and when, gourds eaten) and ONE of them says ONE line
+    about it on the death screen, 1.1 s in (HL_DEAD_SAY_AT), in the kit's
+    subtitle with the art's portrait. Themes, most basic first:
+      finish   never finished a piece        binge   went down within 3 s of
+      gourds   he ate three or more                  a binge
+      close    he was under 30%              gun     under 4 finishes
+      general  none of those
+    Each theme goes from oblique to a little plainer, one line per death
+    (seen 'hint:<theme>:<i>'), then any of them. Never a key name.
+      never finished one
+        OUTSIDER "He starts everything. Look at how much of it he finishes."
+        SOUL     "...the stopped ones don't feel bullets. they're waiting for
+                  somebody."
+        OUTSIDER "What he leaves hanging goes wherever the next thing through
+                  it is going."
+      mostly shot him
+        SOUL     "...he just puts it on the pile. everything you give him."
+        OUTSIDER "You will not hurt a hoarder by giving him more. Give him back
+                  his own."
+        SOUL     "...nothing hurts him like his own things."
+      died in a binge
+        OUTSIDER "When he says all of it, he means all of it."
+        SOUL     "...it all came back at once. everything he ever put down."
+        OUTSIDER "He always says so first. Whatever you have finished by then
+                  is not his to throw."
+      he had eaten well
+        SOUL     "...he was bigger than last time. he had been eating."
+        OUTSIDER "Whatever is still standing in the patch when he comes is his."
+        SOUL     "...he walks to them. for later, he says. get there first."
+      nearly
+        OUTSIDER "Nearly. He noticed. He is putting that away for later, too."
+        SOUL     "...he was almost empty. i saw the bottom of the pile."
+      otherwise
+        SOUL     "...he's only a heap. heaps come apart."
+        OUTSIDER "He has had years to get like this. You have had an afternoon."
+    Back in the vigil, whoever said it says it once more on [E] (after any
+    quest telling). The DASH THROUGH IT label is the last resort: it shows only
+    after two deaths without a single finish, and only until the first.
+
+  6.10 MEASURED (bots, hull kept full; 27–28 Sep)
+    Before the telegraph pass, no adds:  finishing 33 s (6-gourd pile 57 s);
+                                         shooting only 129 s, 11 binges
+    After, with his trickle of adds:     ideal finisher 30–40 s, pile or not
+                                         (32 s with 6 gourds, 1 binge)
+                                         shooting only 77–133 s, 5–9 binges;
+                                         240 s+ when he ate 5 gourds mid-fight
+                                         (+4 flat armour each hurts small hits)
+    Every run ended in a win and back to the vigil, with no errors.
+    Tuning notes: the gourd armour is the swing factor for weak builds (the
+    tether is there so players get to them first); scarecrow contact is
+    heavy in waves 1–4 [watch in live play].
+
+
+================================================================================
+7. CHAPTER II — THE HOUSE [DESIGNED]
+================================================================================
+
+  An empty lobby: a house where every room is a menu somebody left open. The
+  lights are on a timer, and nobody is left to reset it. waveFrom 11.
+
+  7.1 AREA RULE — THE QUIET
+    The light closes in while nothing dies, and every kill throws it back out.
+    About 4 s without a kill and the room goes dark past your hull, and the
+    dark keeps closing. Built on the existing fog underneath the light pass
+    (the one design rule that survives "no performance constraints": the dark
+    is gameplay, so the fog stays the source of truth).
+
+  7.2 THE ENEMIES
+    SHEET        A sheet over something else. The sheet soaks up the first
+                 40% of the damage. Tear it off and whatever was under it
+                 (anything from the main roster) is out. Cloth that TEARS
+                 along its constraints (the kit's verlet) is its death.
+    LURKER       Lives in the dark: cannot be seen past the light, moves only
+                 in the dark, strikes from it. The light burns it: caught in
+                 it, it flees and takes double. Keeping the kills coming keeps
+                 it off you.
+    POLTERGEIST  Never attacks directly. Picks up wreckage and bodies and
+                 throws them.
+
+  7.3 QUEST 3 — LAST MESSAGE
+    Given:
+      SOUL     "...someone said something before it stopped. it's in the house."
+      OUTSIDER "The house keeps whatever was said in it last. It is written on
+                the underside of the sheets. I would not have looked."
+    Task: one MARKED SHEET (edged in cold light, and it runs from you) in each
+    of waves 2, 3, 4. Tear each off; underneath is one line of the lobby's
+    last chat, kept across attempts, read in order:  ez · wait · brb
+    Done:
+      SOUL     "ez. wait. brb."
+      SOUL     "that's him. that's all he said."
+      OUTSIDER "Three words. People have been left with less."
+    Pays 10 candles and SHEET.
+
+  7.4 QUEST 4 — STILL HERE
+    Given:
+      SOUL     "...there's someone in the house who says nobody's coming back."
+      OUTSIDER "He has been telling it that since before I found it. He tells
+                everyone. He is always here to say it."
+    Task: THE HOUSE, wave 5. Kill DEAD GAME.
+
+  7.5 DEAD GAME
+    The commenter who calls the game dead after every update, and is here
+    every single day to say so. Cares too much to leave, too proud to play. A
+    ghost shaped like a comment: a speech bubble with a face, trailing a
+    thread of replies (the kit's rope).
+    Gimmick — ONLY SOLID WHILE THE ROOM IS ALIVE:
+      - A HUD meter, ONLINE. Every kill raises it (yours, an ally's,
+        anything's); it drains all the time.
+      - Above its line he is solid and can be hurt. Below it he is a ghost:
+        he cannot be hurt, drifts, heals, and says so.
+      - THEY LEFT: he culls his own adds in a grey wave, to starve you of
+        kills. Kill them before he takes them back; keep some alive for the
+        moment you need the meter.
+      - LAST SEEN marks: the grey shapes of players who left. Decoys:
+        harmless, worth nothing.
+      - Last phase: the house goes fully dark; only kills light it.
+    Lines:
+      entrance    "Oh. Someone's here. Weird." · "Dead game." · "Nobody plays
+                  this anymore." · "It was better before." · "Look around.
+                  Nobody."
+      culling     "They left."
+      fading out  "See? Nothing." · "Why are you even still here?"
+      to the soul "Nobody's coming back for you."
+      death       "...still here, though."
+    Keep his lines about STAYING, never about leaving (THE NEXT THING, from
+    BOSS-DRAFTS, is the one who drifts away and never cared).
+    Done — ASCENSION II:
+      [The soul rises to the second landing; its hull is whole; full sentences.]
+      SOUL     "He's wrong. Someone said he'd be right back. I'm going to go
+                and get him."
+      OUTSIDER "He said 'still here'. I say that."
+      OUTSIDER "I did not like hearing it from him."
+    Pays 15 candles and STILL HERE.
+
+  7.6 BUILD NOTES (Claude)
+    - Stage entry in HL_AREAS.house (waveFrom 11, roster, bossPool, boss
+      'deadgame'); HL_ETYPES += sheet, lurker, poltergeist; HL_BOSSES +=
+      deadgame; BOSSES/ETYPE/codex entries marked secret like THE BACKLOG.
+    - THE QUIET: a light radius driven by time since the last kill; the fog
+      reads it; the art lights to it (hlLights for 'house').
+    - SHEET: a wrapper body with a sheet share and an inner type rolled from
+      the main roster; hlSheetTear hook; the marked one runs and carries the
+      quest line.
+    - LURKER: visible only in light; flee + ×2 when lit; strikes from dark.
+    - POLTERGEIST: picks up corpses/wreckage (the game has corpses) and
+      throws them as rounds with a new b.hlKind.
+    - DEAD GAME: ONLINE meter (kills in, drain out), solid/ghost threshold,
+      THEY LEFT cull, LAST SEEN decoys, last-phase blackout.
+    - Hacked versions of all three (the user's army: foe(e), hackBy).
+    - Telegraph pass from day one (section 6.8's rules), and a WORD AFTER set
+      for DEAD GAME (themes to be drafted with the fight).
+    - q3/q4 lose `later`; HL_SAY q3Give/q3Done/q4Give/q4Done; menu line II.
+
+
+================================================================================
+8. CHAPTER III — THE YARD [DESIGNED]
+================================================================================
+
+  A graveyard of runs. Each headstone is one run that was quit, with its wave,
+  its hull and the last thing typed in it. He buries them himself and never
+  comes back to any of them. waveFrom 16 (ends at 20, where the soul ended).
+
+  8.1 AREA RULE — RISING
+    A grave rises when a body is killed on its plot, or when the bell tolls. A
+    RISEN climbs out.
+
+  8.2 THE ENEMIES
+    RISEN        A ghost hull flying a quit run's weapon at random (a stream, a
+                 short lance, a swing): the mimic's copied-gun code fed a
+                 random build. Dying, it leaves its headstone line a moment:
+                   "WAVE 12 · 'lag'" · "WAVE 7 · 'this is rigged'" ·
+                   "WAVE 22 · 'afk'" · "WAVE 3 · 'boring'" · "WAVE 31 · 'gtg'"
+    GRAVEDIGGER  Digs graves where you have been: open pits that slow you and
+                 swallow shots. A body killed near it is buried, rises later.
+    BELLRINGER   A stationary bell. Tolls every 6 s; each toll raises the
+                 three nearest graves. Put it down first.
+
+  8.3 QUEST 5 — WHERE HE PUT ME
+    Given:
+      SOUL     "He put me somewhere up there, with the others."
+      OUTSIDER "There are a great many stones up there. Most of them say the
+                same thing."
+    Task: in each of waves 2, 3, 4 a GRAVEDIGGER marked with the soul's cold
+    light goes to one stone and starts to fill it in (20 s). Kill it first.
+    Kept across attempts; three to finish, and the stone is uncovered:
+        HERE LIES A RUN
+        WAVE 19 · HULL 4%
+        "brb"
+    Done:
+      SOUL     "That's mine."
+      SOUL     "He put 'brb' on it. He knew he wasn't coming back when he
+                wrote it."
+      OUTSIDER "Most of them say that."
+    Pays 10 candles and SHALLOW GRAVE.
+
+  8.4 QUEST 6 — GG
+    Given:
+      SOUL     "He's up there. He's always up there, digging."
+      OUTSIDER "He leaves before he loses. He has never lost. That is not the
+                same as winning, but he does not know that."
+    Task: THE YARD, wave 5. Kill THE RAGE QUIT.
+
+  8.5 THE RAGE QUIT
+    The sore loser who closes the tab before a run can end on him and blames
+    the lag. Every stone in the yard is one of his runs. A figure with a
+    controller cord for a tail (the kit's rope) and a cracked screen for a face.
+    Gimmick — HE QUITS BEFORE HE LOSES:
+      - Four GATES at the yard's edges. Each time his health crosses a
+        quarter, he bolts for the nearest open gate.
+      - If he gets there: "THAT ONE DIDN'T COUNT." The room jolts back and he
+        comes in again with the health he had at the start of that quarter,
+        bringing the graves he raised.
+      - A gate is shut while someone stands in it; you can hold one with your
+        hull. Running, his back is to you: +50% damage. Burn the quarter
+        down, or body-block the gate he is making for.
+      - From the second quarter THE SOUL holds one gate: the one he left it
+        through.
+      - Last quarter: when he bolts, the RISEN stop fighting you and walk into
+        the other gates and hold them. Every run he left stands in a door. He
+        cannot leave, and loses for the first time.
+      - Otherwise, his tilt: the lower his health, the faster and wilder he
+        gets. Throws the controller (bounces across the yard), mashes (a
+        spray), charges ("I wasn't even trying").
+    Lines:
+      entrance  "Oh great. This again." · "That one didn't count." · "Lag." ·
+                "I wasn't even trying." · "Again." · "This game is rigged."
+      bolting   "I'm done. I'm DONE."
+      restart   "That one didn't count."
+      the soul takes its gate:
+        SOUL      "You said you'd be right back."
+        RAGE QUIT "...who are you?"
+        SOUL      "Wave nineteen."
+      the risen fill the gates:
+        RAGE QUIT "No. No no no. Let me out."
+      death     "...gg."
+    Done — ASCENSION III:
+      [The soul rises to the top landing, and its lantern burns warm.]
+      SOUL     "He said it. He finally said it."
+      SOUL     "I'm still at nineteen, though. Nobody finished me. He only
+                stopped."
+      SOUL     "The others up there — not all of them were left, you know.
+                Some of them were taken. I could hear them."
+      OUTSIDER "Then there will be more of this."
+      OUTSIDER "It needs finishing first."
+    Pays 20 candles and LAG.
+
+  8.6 BUILD NOTES (Claude)
+    - Graves as floor objects with plots; rising on kills and tolls.
+    - RISEN reuse the mimic's copied-gun code with a random build; epitaph
+      floats from a list.
+    - GRAVEDIGGER pits: slow + swallow shots; burial queue.
+    - THE RAGE QUIT: gate state machine, quarter snapshots and the rewind
+      ("the room jolts back"), the soul as a gate-holder, the risen march in
+      the last quarter, tilt scaling.
+    - Telegraphs from day one; a WORD AFTER set for him.
+
+
+================================================================================
+9. EPILOGUE [DESIGNED]
+================================================================================
+
+  QUEST 7 — PAST NINETEEN
+    Given:
+      SOUL     "Take me with you. A real run. I never saw twenty."
+      OUTSIDER "An ordinary run. It will ride along. It cannot help much. The
+                ride is the part it needs."
+    Task: any ORDINARY run (not a daily, not a challenge), with the soul along
+    as a small light at your shoulder, to wave 20.
+    [When wave 20 starts, the soul's hull flashes back to full for a beat.]
+      SOUL     "Oh. That's what it looks like."
+    [It rises out of the arena and is gone. The run carries on: nothing about
+    the player's run stops for the story.]
+    Back in the vigil: the soul is gone, its candle is lit, and the wall reads
+        A RUN · WAVE 20 · FINISHED
+      OUTSIDER "It went up. I did not see where."
+      OUTSIDER "I will keep the candle."
+      [a beat]
+      OUTSIDER "There are more down there. I can hear them."
+    Pays 20 candles and THE LANTERN (it left it behind).
+
+  BUILD NOTES: kind 'run' quest (wave: 20) watched from ordinary runs while
+  q7 is given; the rider (no gameplay unless THE LANTERN is worn later); the
+  wave-20 beat on the kit's timeline; the wall's epitaph; soul state 5.
+
+
+================================================================================
+10. MEDALS
+================================================================================
+
+  Two worn at a time, chosen at THE STAND. A won medal goes straight into a
+  free slot, so the first two are worn without a trip to the stand. They work
+  in every ordinary run, THE BOSS RUSH and the event areas while the event is
+  live. Off in dailies and challenges (fixed rule sheets everyone flies the
+  same) and meaningless in the vigil. After the event they stop and stay on
+  the stand as a record. All pilot-agnostic (THE VAGRANT gets full value).
+  Icons: all but THE LANTERN are drawn in hl-art.js (hlArtMedalGlyph).
+
+  THE GOURD      [BUILT]  Anything left alive HL_RIPEN_T (15 s) ripens: ×1.5
+                          health; pays double XP, score and credit drops.
+                          (Not bosses, gourds or taken bodies.)
+  ONE DAY        [BUILT]  XP from bodies is put aside instead of paid, then
+                          paid all at once, ×HL_BANK_MUL (1.5), when a boss
+                          dies. The bank shows on the medal HUD.
+  SHEET          [DESIGNED] The dash keeps you intangible 0.35 s longer and
+                          you pass through bodies while it lasts; it
+                          recharges 25% slower.
+  STILL HERE     [DESIGNED] Once a run, the killing blow leaves you a ghost for
+                          8 s: untouchable, half damage. Kill 10 before it
+                          ends and you stand back up at 30% hull; fewer and
+                          the run ends.
+  SHALLOW GRAVE  [DESIGNED] One body in ten you kill climbs back out on your
+                          side for 8 s (THE HACKER's ally code). On THE
+                          HACKER itself: its bodies last 25% longer instead.
+  LAG            [DESIGNED] One enemy round in six that comes within reach
+                          stutters and hangs in the air for a second.
+  THE LANTERN    [DESIGNED] The soul's lantern rides at your shoulder: it shoots
+                          what you shoot, weakly, and once a wave takes a hit
+                          for you.
+  All numbers are first drafts, for tuning in play. Note: SHEET and LAG touch
+  THE BACKLOG's fight (a longer dash is a longer finish; LAG stutters rounds,
+  paused ones included) — check them against Chapter I when they are built.
+
+
+================================================================================
+11. THE WORLDWIDE COUNT AND THE PRIZES
+================================================================================
+
+  THE IDEA. Every candle anyone lights goes on one number the whole world
+  shares. The vigil draws it (one candle on the floor per 10), and prizes
+  unlock at milestones. Every profile that has lit at least one candle gets
+  every prize the count reaches, including prizes reached after it stopped
+  playing: the count is communal, so the prizes are too.
+
+  THE PRIZES [BUILT: ids, grants, skin entries. Their toolkit, THE WARDROBE,
+  BUILT 28 Sep, and the user's looks on it, lifted 28 Sep (HL_ART_VER
+  e69cd08f81): the pumpkin line carved → lit → burning, and the soul as a
+  dashed ghost. Prepatch only, not shipped yet. See HALLOWS-SKINS-GUIDE.txt.]
+    Event cosmetics carry the event's budget (user, 28 Sep: "i want these to
+    be event-specific since cosmetics for events have a much higher budget";
+    "forget latency just keep it reasonable"; "don't make the art, just
+    create an in depth toolkit with prebuilt hooks"). So the prizes are drawn
+    on their own toolkit rather than SkinFx's one pass: a wearer object the
+    art reads instead of P, 35 hooks (every layer of the pilot, every moment
+    of a run), sockets, moments with timelines, a particle pool, managed
+    rope / cloth / chains / springs, trails, lamps and real lights, sprites,
+    and a stage (menu showcase, dropdown card, bench). Only this book's fx
+    are dressed by it (HL_WR.fx); the ordinary awards are untouched.
+    One skin line, a lantern going from carved to burning (the imperial
+    line's pattern: fx 'hallows', tier 1–3), plus one on top.
+      at   150   hl-carved    THE CARVED     tier 1: a face cut into the hull,
+                                             nothing lit behind it yet
+      at   400   hl-lantern   THE LANTERN    tier 2: lit from inside; rounds
+                                             go out as sparks
+      at   750   hl-hallows   ALL HALLOWS    tier 3: burning; kills come apart
+                                             as embers
+      at 1,200   hl-lostsoul  THE LOST SOUL  the ordinary hull as a ghost,
+                                             flickering at 4% (fx 'lostsoul')
+    They are listed in the skin menu only while the event is live (hidden
+    from devList until then); once owned they keep their look all year (the
+    art file is fetched for a worn prize skin).
+
+  THE SCALE. September's board had 18 names; a profile lights at most 100. So
+  750 needs about eight people to finish the story, 1,200 about twelve. The
+  marks live on the server so they can be moved mid-event without shipping.
+  [OPEN: watch the first week and retune if the community is bigger/smaller.]
+
+  THE SERVER (netlify/functions/leaderboard.mjs, VIGIL block; both copies
+  identical as of 28 Sep)
+    GET  ?vigil=<id>&pid=<pid>  → { total, marks, reached, lit, done }
+    POST { vigil: <id>, quest: <qid>, pid }
+         The client never says how much: the server's pay table decides
+         (q1 10 · q2 15 · q3 10 · q4 15 · q5 10 · q6 20 · q7 20). Each quest is
+         paid once per pid however often it is sent. Compare-and-swap on the
+         blob (etag / onlyIfNew, retried). A NEW pid is counted against its
+         IP for the day: at most VIGIL_NEW_PER_IP (6); yesterday's IP counts
+         are dropped. Outside the window it refuses (VIGIL_ANYTIME lifts that
+         for a local test).
+  THE CLIENT (Vigil): load() on entering the vigil and every 5 min on the
+  menu while live; turnIn(qid) when a quest completes (never in BETA or from
+  file:); flush() re-sends anything done but never acknowledged, so a quest
+  finished offline still lands. shown() = the world's count, never less than
+  your own. Prizes are claimed (devGrant) when the total passes a mark and
+  this profile has lit at least one candle.
+
+
+================================================================================
+12. THE LOOK
+================================================================================
+
+  THE BAR: better than anything the game has done. No performance
+  constraints (no frame budget, nothing to trim).
+
+  WHY LIGHT FIRST: the whole story is about light (candles, the lantern, the
+  house going dark, a graveyard at night), and the game had glows but no
+  light. The single biggest jump is a real light pass.
+
+  THE KIT [BUILT] (hl-kit.js; the same code inline in index.html)
+    LIGHT       a light buffer at full resolution: ambient + lights (colour,
+                radius, falloff, layered-noise flicker), multiplied over the
+                world before bloom; OCCLUDERS cast soft shadows; emitters glow
+                additively on top; a grade per area.
+    CLOTH/ROPE  verlet: ropes (vines, the cord, the reply thread, the soul's
+                wisp tail, cobwebs) and cloth that TEARS (sheets, curtains).
+    RIG         bone chains with pose blending, two-bone IK, springs (lag,
+                overshoot, settle), squash and stretch.
+    TIMELINE    beats on a clock; eased tweens on anything (camera, letterbox,
+                fades, dialogue); wall-safe and skippable; a scrubber in the
+                harness.
+    DIALOGUE    one presentation, a voice per speaker (HL_VOICE: the Outsider
+                flat and steady at 26 cps; the soul uneven at 15 cps, steadier
+                with each ascension; sys). Portraits through the art's
+                hlSayPortrait (the user's).
+    PARTICLES   pooled: embers, curling smoke, dust motes, bats, leaves, wax,
+                grave dirt, clods, wisps.
+    BAKED       floors and fixed props rendered once (hlBake, hlBakePrep) and
+                sprites made ahead (hlSpritePrep).
+
+  WHERE THE BUDGET GOES
+    S  hero moments: the soul's six states and three ascensions, the wave-20
+       exit, the knock, the vigil and its candles, three boss entrances and
+       deaths, the RAGE QUIT's gates filling, the epilogue.
+    A  the bosses in the fight (every attack's wind-up, telegraph, release and
+       recovery; phase changes); the area rules on screen; the stand.
+    B  ten enemies (idle, move, attack, hurt, a bespoke death each); the prize
+       skins; the medal icons.
+
+  ART STATUS (hl-art.js, the user's; HL_ART_VER 139544a2e8)
+    DONE   the hatch and the knock · the vigil room, candles, alcoves, the
+           stand, the ways · the soul's six states · the Outsider's and the
+           soul's portraits · THE PATCH floor, lamps and light · gourd (with
+           carving, hatching, the reel and his sticker), jack, creeper (vine),
+           scarecrow · THE BACKLOG, his heap, pieces in every state (live,
+           paused, finished, resumed), kick slashes, the pile arriving, his
+           death · the telegraph marks, his bar's notches, the UNFINISHED
+           meter, the pile HUD, the area HUD · barks · six medal icons · the
+           four prize skins (player, rounds, particles, enemies)
+    TO DO  THE LANTERN's icon · THE HOUSE (floor, light, QUIET, three enemies,
+           DEAD GAME, its HUD meter, ascension II staging) · THE YARD (floor,
+           graves, three enemies, THE RAGE QUIT, gates, the risen march,
+           ascension III) · the epilogue (rider, wave-20 beat, the wall) ·
+           the chapter-open and November menu beats
+  THE PIPELINE: the user draws against the kit; the whole art file is lifted
+  in (node C:\.claude\lift-hl-art.mjs --art <file>), which checks it may only
+  replace placeholder hooks, never game functions or declared names, stamps
+  HL_ART_VER from its contents, and re-attaches hlArtPreload if the drop is
+  missing it. Hero moments get a timing sheet first (beats with timestamps,
+  drafted by Claude, reshaped by the user).
+
+
+================================================================================
+13. THE TECH
+================================================================================
+
+  13.1 FILES
+    index.html (prepatch → C:\game)  the game; three event blocks:
+      "THE KIT — ALL HALLOWS"                            the kit
+      "ALL HALLOWS — BOOK I: THE LOST SOUL · ACT I"      the logic and data
+      "ALL HALLOWS · ACT I — art hooks"                  inline placeholders
+                                                         (the fallback)
+    hl-art.js (prepatch → C:\game)   the art; its function declarations
+                                     replace the placeholders by name
+    index.html also carries "THE WARDROBE — ALL HALLOWS" (= hl-wardrobe.js,
+      right after the kit; its foot is the SKINS hooks block) and "ALL
+      HALLOWS · SKINS — the adapter" (the game's side of it)
+    hl-wardrobe.js, hl-skin-base.js, Hallows Skins.dc.html,
+    HALLOWS-SKINS-GUIDE.txt          prepatch only
+    hl-kit.js, EVENT-DRAFTS.txt, HALLOWS-GUIDE.txt, HALLOWEEN-PLAN.txt
+                                     prepatch only
+    netlify/functions/leaderboard.mjs  the VIGIL block; hand-port only
+    netlify.toml                     both copies 404 the design files and
+                                     /netlify/* (the functions' source carries
+                                     the dev accounts' password hashes)
+
+  13.2 DATA-SHAPED
+    HL_EVENT (id 'hallows-2026', book, dates, chapters, prizes) · HL_QUESTS ·
+    HL_MEDALS · HL_AREAS · HL_SAY (every line, by moment, and the hints) ·
+    HL_BARK · HL_STEADY · the numbers block. Next year appends a new event and
+    reuses the vigil, the quest runner, the stand, the count and the area frame.
+
+  13.3 THE PROFILE
+    Save.profile.hl['hallows-2026'] = { q: {qid: 1 given | 2 done}, prog,
+    medals, equip (≤2), candles, seen (flags: prologue, first, qN:shown,
+    qN:done, kicked, hint:*), sent (quests acknowledged by the server), total
+    (the count the Outsider last mentioned) }. Merged across devices by
+    hlMerge: max of q and prog, union of seen / medals / sent, the second
+    store's equip if it has one, max of candles and total.
+
+  13.4 LOADING (user: only during the event)
+    Outside the event nobody downloads any of it. While live, the menu fetches
+    hl-art.js?v=HL_ART_VER on its first frame, then warms it one job per idle
+    moment (hlArtPreload: the vigil bake, the patch floor bake, every light's
+    sprite, the candle layout). A worn prize skin fetches the art outside the
+    event too (hooks only, nothing warmed). If the fetch fails, the inline
+    placeholders keep everything playable.
+
+  13.5 THE GATE (user: nobody else sees anything)
+    hlLive() = hlEarly() || (server today within the window).
+    hlEarly() = the admin panel's FORCE (session only) or the 'unlock-event'
+    perk as SERVED by the server this session (Awards.served) — never because
+    the saved profile lists it (localStorage is editable). Chapters open by
+    date (early: all). Hidden until live: the hatch and knock, the vigil, the
+    prize skins in the skin menu, the event's enemies and THE BACKLOG in the
+    codex, freeplay spawns and the skin editor. The count refuses dev test
+    runs outside its window. Checked 28 Sep on the shipped build: hidden on
+    28 Sep, live on 1 Oct, shut on 1 Nov; the art is not fetched while shut.
+
+  13.6 THE AREA RUN
+    Chal.on = { id: 'hl-patch', hl: 'patch', … }; hlArea = { id, n, t,
+    coldDue, coldLive, end, death, boss, pileTaken, pileDoneAt }; hlHeld (his
+    pieces); HL.fight (finishes, binges, bingeAt, eaten); gameOver's
+    challenge branch calls hlOnDeath. Waves via hlAreaWave; gourds never
+    count toward a wave (hlWaveThreats).
+
+
+================================================================================
+14. TOOLS AND TESTING
+================================================================================
+
+  ADMIN PANEL (C:\.claude\admin.js; dev server only; ` or F2)
+    ALL HALLOWS · EVENT
+      FORCE ON · KNOCK (replay) · VIGIL · PATCH · BACKLOG NOW (wave 5, q1 done)
+      COLD GOURD · BINGE (goes through the wind-up) · DIE TO HIM (shows the
+      theme picked) · HINTS: FORGET
+      quests: DONE q1 · DONE q2 · SOUL: TELL ALL · ALL MEDALS · RESET EVENT
+      the count (this tab only): 0 · 160 · 420 · 800 · 1300 · REAL
+    ALL HALLOWS · SKIN LAB (28 Sep)
+      wear CARVED / LANTERN / HALLOWS / LOST SOUL · TAKE OFF · DEBUG ·
+      RELOAD ART · STAGE · HOOKS · every moment fired at its hook (KILL ONE,
+      not PLAYER's KILL) · LOW HP / FULL HP / VOLLEY ×5 / RING OF 8 for real
+  THE SKIN BENCH (28 Sep): "Hallows Skins.dc.html" over a static server on
+    prepatch (vagrant-test, 8131). See HALLOWS-SKINS-GUIDE.txt §2.
+  DEV SERVERS (C:\.claude\launch.json)
+    voidrunner-dev-alt (8897, prepatch, redirects to ?beta=1: BETA seals saves)
+    game-publish (8132, C:\game: the closest local stand-in for Netlify)
+    devserver.mjs serves hl-art.js through its RUNTIME whitelist.
+  TESTING IN THE PAGE
+    pageDead = true (not window.pageDead) stops the loop; step with
+    update(1/60); render() then POST cv.toDataURL() to /shot?n=<name> (lands in
+    C:\.claude\shots); pick level-up cards with chooseOffer(0); aim with
+    mouse.x/y (screen) — never assign aimX, it is a function.
+  BOTS used for the fight numbers: a finisher that sets up behind a paused
+  piece and dashes through toward him; a shooter that aims at him; P.hp held
+  full; runs in 15 s slices (the tool's time limit).
+
+
+================================================================================
+15. SHIPPING
+================================================================================
+
+  WHAT IS IN C:\game NOW (28 Sep 06:43, not yet deployed by the user)
+    index.html = prepatch's (Act I complete, telegraphs, the word after, the
+    hacked-vine fix) · hl-art.js = prepatch's (139544a2e8) · leaderboard.mjs:
+    vigil window hand-ported to open 1 Oct (credential lines fingerprinted,
+    unchanged) · netlify.toml = prepatch's hardened copy.
+    Backups of the replaced files: scratchpad game-*.pre-ship2.*
+
+  THE PROCEDURE (every ship)
+    1. Back up C:\game's files that will be replaced.
+    2. Check C:\game's index.html still equals the last ship (no in-place edit
+       to lose).
+    3. Copy index.html and hl-art.js from prepatch. Nothing else from prepatch
+       unless named.
+    4. Diff leaderboard.mjs; hand-port any non-credential change; fingerprint
+       the credential lines before and after (never print them).
+    5. Diff netlify.toml (it once lacked the /netlify/* block).
+    6. Check HL_ART_VER in index.html matches hl-art.js's content hash.
+    7. Check the gate on the shipped build (hidden before from, live on from,
+       shut on to) and that no dev injection is in the page.
+    8. The user deploys.
+
+  THE 1 OCT CHECKLIST
+    - the deploy is up; the server answers the daily (so today is not null)
+    - a normal profile sees the knock on its first menu; the hatch is there
+    - the vigil loads the count; quest 1 is given at the light
+    - a finished quest reaches the server (sent[] fills) and the count moves
+    - the art loads once, from the menu, and is warmed in idle moments
+    - hints and telegraphs behave for a first-time player (no label until two
+      finish-less deaths)
+
+
+================================================================================
+16. FOR NEXT YEAR — Book II hooks (left open on purpose)
+================================================================================
+
+  1. "Some of them were taken." Not every run in the yard was left; some were
+     taken. Book II's antagonist: whoever takes runs (a person, in the game's
+     usual way; still to be decided).
+  2. "There are more down there." THE PATCH still holds thousands of gourds;
+     the vigil, its candle and the three ways up all stay.
+  3. THE OUTSIDER: the soul was left, and he left. Why he walked out of the
+     crowd can be the through-line from book to book.
+  4. START COUNTING NOW [TODO, URGENT]. Log real abandoned runs from this
+     update on: a tab closed (pagehide) during play records {pilot, wave,
+     date} on the profile. Cheap and invisible. Next October the patch can
+     hold the player's OWN lost runs, their own waves and pilots on them. The
+     data needs a year to exist, so it has to ship this October — ideally in
+     the 1 Oct deploy. Not built yet.
+  5. Book I can come back each October for anyone who missed it, beside that
+     year's new book.
+
+
+================================================================================
+17. OPEN DECISIONS AND TODO (roughly in order)
+================================================================================
+
+  URGENT
+    [TODO] deploy C:\game before 1 Oct (user)
+    [TODO] the abandoned-run logger (16.4), in the same deploy if possible
+  CHAPTER I, SMALL
+    [TODO] the codex text for GOURD is stale: it still says a gourd "ripens
+           and splits into a jack" on its own; since 27 Sep it holds lit and
+           opens when the next wave starts
+    [OPEN] the DASH THROUGH IT label: gated behind two finish-less deaths
+           (Claude's call, 28 Sep). Keep, remove entirely, or restore to
+           always-on-first-encounter
+    [OPEN] the game's own sector counter (THE PATCH n/5) still shows beside the
+           area's
+    [WATCH] scarecrow contact in waves 1–4; gourd armour in his fight;
+           head-start size; binge frequency for shooters
+  THE REST OF THE STORY
+    [TODO] Chapter II logic → art → ship by 13 Oct (section 7)
+    [TODO] Chapter III + epilogue logic → art → ship by 22 Oct (sections 8, 9)
+    [TODO] the menu lines for chapters II and III, and the November farewell
+           with the hatch closing (in the 22 Oct ship at the latest)
+    [TODO] five medals (SHEET, STILL HERE, SHALLOW GRAVE, LAG, THE LANTERN)
+    [TODO] a WORD AFTER set for DEAD GAME and THE RAGE QUIT
+  OPEN QUESTIONS
+    [OPEN] the prize skins are listed all year once owned; whether to hide the
+           unowned ones outside October
+    [OPEN] milestones vs the real community size (retune server-side in week 1)
+    [OPEN] the Bookkeeper cameo
+    [OPEN] co-op in the areas
+    [OPEN] pitched and not taken up for Act I: D (the errand as a carry), E (a
+           one-screen door draft), F (THE PATCH at night, repeatable). C
+           (scripted teaching waves) was dropped for the word after.
+
+
+================================================================================
+18. WHAT HAPPENED WHEN
+================================================================================
+
+  27 Sep  The brief, the draft (EVENT-DRAFTS.txt), the look (kit-first).
+          THE KIT built; Act I built under placeholder hooks with the guide.
+          The user's art arrived (portraits seam added); the art made a
+          runtime file (hl-art.js), fetched and warmed only while live.
+          Force-unlock for notz via the 'unlock-event' perk; shipped to
+          C:\game 16:53; the user hardened the gate (server date only, served
+          perk only) and published it dark.
+          THE HACKER's army reworked by the user; Claude's fixes (hackBy leak,
+          kin bomber blast, keeper kp, hacked creeper's vine); THE SHOPKEEPER
+          made unhackable.
+          A + B: finish it for him; the pile carries into the fight.
+  28 Sep  The user's A+B art lifted. The telegraph pass (quiet pile, dash line,
+          binge wind-up, rules on screen, his closer range, a trickle for his
+          wave, dull/gold numbers). The user's telegraph art lifted; the ghost-
+          round fix (spent rounds no longer kept in a paused volley). The word
+          after (hints on death). Everything shipped dark to C:\game 06:43,
+          with the vigil window and the hardened netlify.toml.
+          Mario (pid f55ca…) made a dev account: DEV_PIDS in leaderboard.mjs,
+          both copies (ALL_SKINS + ALL_PERKS, no login).
+          THE WARDROBE: the prize skins' toolkit, the game's adapter, the menu
+          stage and hover card, the admin SKIN LAB, the bench (hl-skin-base.js,
+          Hallows Skins.dc.html), HALLOWS-SKINS-GUIDE.txt, and --wardrobe in
+          the lift. Then the user's prize-skin art on it, lifted the same
+          day (HL_ART_VER e69cd08f81).
+          Shipped to C:\game (user: "push to \game, make sure the mario dev is
+          also included"): index.html + hl-art.js; leaderboard.mjs already
+          carried Mario's DEV_PIDS line (credential lines fingerprinted,
+          unchanged); netlify.toml unchanged. Gate checked on the shipped
+          build. Backups: scratchpad ship3\. The user deploys.

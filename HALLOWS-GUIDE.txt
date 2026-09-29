@@ -74,6 +74,8 @@ guide's job.
     the vigil or the patch builds nothing. A new bake or a light in a new
     colour belongs in that list; each job must ask for exactly the key and
     size the draw hook will, or the draw simply builds it again.
+    If a new art file arrives without hlArtPreload (drawn from an older
+    copy), the lift carries the current one over and says so.
   - A vigil prize skin keeps its look all year, so wearing one fetches the art
     outside the event too (hooks only; nothing is warmed then).
   - If the file cannot be fetched, the placeholders keep the event playable.
@@ -140,7 +142,8 @@ server's date only; before that, only a dev account the server has granted
       hazards … portals
       drawVigilWorld()                      the whole room, him and the soul
       hlPartsDraw('lit')                    kit particles that light receives
-      drawHlSlam(p)                         THE BACKLOG's slam markers
+      drawHlSlam(p)                         THE BACKLOG's slam markers (faded
+                                            by p.quiet: see 5.4, THE TELEGRAPHS)
       corpses
       enemies: drawHlBody(e, ea)            the event's bodies (the generic
                                             glow, elite ring and hacked
@@ -156,10 +159,20 @@ server's date only; before that, only a dev account the server has granted
       drawHlGlow(scene)                     anything else that glows
       drawHlBossDeath(d)                    the boss coming apart
       drawHlBark(b)                         a boss's spoken line
+      — plain paint again —
+      drawHlTele(e, teach)                  NEW: the telegraph marks over his
+                                            pile (see 5.4, THE TELEGRAPHS)
       — post (bloom, grade) —
+
+  THE HUD (CSS pixels)
+      drawHlBossBar(e, x, y, w)             NEW: over THE BACKLOG's health bar
 
   THE SCREEN (CSS pixels, after the HUD)
       drawHlAreaHud(A, area)                in an area
+      drawHlPileHud(n, area)                THE PATCH: the gourds, until he has
+                                            them all (+HL_PILE_HUD_T, 2.5 s)
+      drawHlPiecesHud(n, max, warn, a)      NEW: …then, in its place, his
+                                            unfinished pieces
       the talk subtitle, or drawHlVigilHud(vig)   in the vigil
       drawHlStandUi(ui, book)               the stand, when open
       drawHlMedalHud(equip, bank)           in the vigil and the areas
@@ -291,10 +304,18 @@ drawHlBody(e, ea)   ONE hook for all four bodies and THE BACKLOG; branch on
                     sides, flash (0–1, hit), hp, maxHp, elite, hacked, t
                     (seconds alive), vx, vy.
 
-  GOURD
-    e.hlGrow     0→1 over GOURD_RIPEN (15 s): the face carving itself in.
-                 At 1 it splits.
-    e.hlCold     the soul's (cold, not orange). These are the quest.
+  GOURD  (reworked 27 Sep: the pile carries into the fight)
+    e.hlGrow     0 → GOURD_LIT (0.85) over GOURD_RIPEN (15 s): the face
+                 carving itself in. Then it HOLDS at 0.85, fully cut and lit;
+                 it no longer splits on its own, and it never holds a wave.
+    e.hlHatch    set when the next wave starts and this one was lit: hlGrow
+                 runs 0.85 → 1 over HL_HATCH_T (1.2 s), the split, and at 1
+                 it comes open as a jack.
+    e.hlReel     { d, v } while THE BACKLOG pulls it in on arrival: d is the
+                 delay before it moves, v its speed. It slides to him and is
+                 eaten on touching him. Still a gourd: it can be broken.
+    e.hlCold     the soul's (cold, not orange). These are the quest, and keep
+                 the old rule: 0 → 1 over 15 s, carried off at 1.
     e.hlRipe     THE GOURD medal ripened it (any body can carry this)
     hlGourdSplitFx(e, j)   j is the jack it became (j.hlHatched)
     hlColdSproutFx(g)      a cold one comes up
@@ -329,33 +350,163 @@ drawHlBody(e, ea)   ONE hook for all four bodies and THE BACKLOG; branch on
     hlCrowFreezeFx(e), hlCrowMoveFx(e)   the moment it stops or starts
 
   THE BACKLOG  (e.type 'boss', e.boss 'backlog')
-    e.hlHeap     gourds eaten: the heap grows
+    e.hlHeap     gourds eaten: the heap grows. hlHeapTakes(e) is how much of
+                 ordinary fire gets through it (0.3, less per gourd, down to
+                 0.15): the heap should look like it is soaking that up.
     e.hlBinge    binges spent, 0–3 (at 75 / 50 / 25%)
     hlBacklogEatFx(e, g), hlBingeFx(e, n)   n = pieces it resumed
     hlBossDeathFx(e) and drawHlBossDeath(d)   d = { boss, x, y, r, t }: the
         heap spilling and the soul's save rolling out of it. It stays
         drawn until the room hands you back to the vigil (HL_END_T).
 
-  HIS PILE. Every attack he starts is a PIECE in hlHeld:
+  HIS PILE. Every attack he starts is a PIECE in hlHeld. (Reworked 27 Sep:
+  FINISH IT FOR HIM. Fire passes through a paused piece. Going through it —
+  the dash, THE VAGRANT's lunge or swing — finishes it the way you were
+  going, as yours.)
     p.kind       'volley'|'sweep'|'slam'
-    p.live       moving now · p.held  abandoned (paused) · p.turned  resumed
-                 (it hurts him too, and should look different)
+    p.live       moving now
+    p.held       abandoned: paused where it stopped
+    p.turned     FINISHED BY YOU: yours, gold. It hurts him and his side and
+                 never you. p.kickAng is the way it was sent.
+    p.resumed    set off by a binge: his, going on the way it was going — at
+                 you. Never pauses again. (Binges no longer turn anything.)
     p.heldT      seconds it has been paused
     hlPieceK(p)  0–1: how far through it got (sweep and slam)
+    hlPieceAt(p) { x, y }: where it is, for an effect
     volley       p.shots: its rounds (b.hlKind 'backlog', b.hlHeld while
-                 paused, b.hlTurn once resumed). They go through
-                 drawHlEBullet(b).
+                 paused, b.hlTurn once finished by you). Finished, the fan
+                 keeps its spread and flies the way you went. They go
+                 through drawHlEBullet(b). From the pause on, p.shots is only
+                 the rounds still in the air: any already spent on the hull
+                 are dropped, and a volley with none left leaves the pile
+                 (28 Sep; they used to linger as ghosts a dash could kick).
     sweep        drawHlSweep(p): from (p.x, p.y) at angle p.a, length p.len,
                  width p.w. p.t < p.tele (0.6 s) is the telegraph; a0 → a1 is
-                 the whole arc it meant to sweep.
+                 the arc it is sweeping. Finished, it swings on round the side
+                 you pushed it from: a0 is reset to where it was and p.dir to
+                 the new way, so sign(a1 − a0) is the way it goes now.
     slam         drawHlSlam(p): a circle (p.x, p.y, p.r) counting p.t to p.T
-                 (1 s). Its core (22 px) is what a shot has to touch.
+                 (1 s). Its core (22 px) is what a dash has to go through.
+                 Finished, it SLIDES: p.x/p.y move, p.vx/p.vy is its velocity,
+                 p.slide the seconds it has slid (to SLAM_SLIDE_T, 1.1 s). It
+                 goes off on him or where it stops.
     hlPieceStartFx(p), hlPieceHoldFx(p), hlPieceResumeFx(p, byBinge),
-    hlPieceEndFx(p), hlSlamLandFx(p), hlTurnHitFx(p, x, y) — a resumed piece
-    hitting him.
+    hlPieceEndFx(p), hlSlamLandFx(p), hlTurnHitFx(p, x, y) — a piece of
+    yours hitting him or his side.
+    hlPieceKickFx(p, ang)    NEW: the moment you finish one through; ang is
+                             the way it is going. The hit should feel like a
+                             hit: the logic already adds a short hitstop.
+    hlPileArriveFx(e, n)     NEW: he has arrived and n gourds start to slide
+                             to him.
+    Until you have finished one ever, the paused piece nearest you is
+    labelled DASH THROUGH IT by drawHlTele (HL.teach; below). The old
+    floating hint is gone.
 
 drawHlEBullet(b)   every round with b.hlKind ('seed' | 'backlog'), in
                    place of the stock round. Additive layer.
+
+drawHlPileHud(n, area)   NEW, screen space, in THE PATCH: n gourds standing
+                   (each hurries the room along PILE_STEP, 3%). Once he has
+                   come, area.boss is set and area.pileTaken counts the ones
+                   that reached him. The placeholder writes one line at y 108,
+                   under drawHlAreaHud. Once the last gourd has reached him
+                   (area.pileDoneAt) it stays HL_PILE_HUD_T (2.5 s) and then
+                   hands the line to drawHlPiecesHud.
+
+  THE TELEGRAPHS (28 Sep: "the fight looks cluttered")
+  One loud thing at a time. The loudness goes, highest first:
+    1. what can hurt you now       live and resumed pieces, adds' attacks
+    2. what is about to            a binge winding up: red marks
+    3. what you can do now         the piece a dash would finish: gold
+    4. everything else of his      paused and not about to be finished:
+                                   FURNITURE, at HL_QUIET_A (30%)
+  Every rule also says itself somewhere: the binges on his bar, the pile cap
+  as a meter, the heap in the numbers. The measured clutter was paused
+  pieces at full strength (a paused sweep is 760 px of bright tape, and
+  there could be eight), him often off screen, and seven adds of all four
+  kinds in his wave.
+
+  What the logic does now (nothing for the art to do unless it wants to):
+    - FADE. drawHlSlam / drawHlSweep / drawHlEBullet for a paused piece are
+      called inside hlQuietDraw: every globalAlpha the art sets while it
+      draws is scaled down to p.quiet's level, and the piece shakes while
+      a binge winds up. So any art is faded whole without knowing. An art
+      file that would rather use p.quiet itself (a desaturated look, say)
+      declares  const HL_ART_QUIET = true;  and the logic only shakes.
+      Your drawHlGlow still glows paused pieces (0.15) at full: read
+      p.quiet there too.
+    - BINGES WIND UP. A binge (75/50/25%, or HL_PILE_MAX paused) is CALLED,
+      then comes BINGE_WARN (1.1 s) later: e.hlWarn { t, T }, hlBingeK(e)
+      0..1. He starts nothing new meanwhile, he says his line at the call,
+      and anything you finish in the wind-up is yours, not his. With
+      nothing paused, nothing is called.
+    - HE STAYS CLOSER (210–330 px, was 300–460) so he is on screen: you
+      kick at him.
+    - HIS WAVE IS A TRICKLE. A.stage.bossPool: jacks and gourds only (a
+      vine holds you still and a scarecrow wants watching; his fight needs
+      your dash and your eyes). HL_BOSS_ADDS 8 in all, HL_BOSS_LIVE 2 at
+      once, one every HL_BOSS_TRICKLE 3.5 s.
+    - NUMBERS. Ordinary fire on him is dull grey and small (the heap took
+      most of it). What his own pile takes is gold, as a share of him
+      (−7%), one number per finish: a volley's shots add up into it.
+
+  Per paused piece, every frame (hlTeleTick):
+    p.quiet   0..1  1 = furniture. Eases; comes up with a wind-up (1 − k)
+    p.reach         a dash from here could get to it
+    p.kick          { x, y, r }: the point of it nearest the hull, where a
+                    dash meets it (the nearest held round; the nearest point
+                    on a sweep; a slam's core)
+    p.aim           the dash's heading, if a dash now would finish it; null
+    p.goes          …the way the piece then travels from p.kick. For a
+                    volley or slam this is p.aim; a sweep swings round its
+                    pivot, so it is the tangent the side it is pushed from
+    p.aimHits       …and that way runs into him (a prediction, roughly)
+    p.warn    0..1  his wind-up; it goes off at 1
+  And:
+    HL.teach        the piece to label DASH THROUGH IT. The last resort now
+                    (user, 28 Sep: let the player read it; hints come after
+                    deaths): only once they have gone down to him twice
+                    without ever finishing a piece, and only until the first
+                    finish (then null for good). See THE WORD AFTER, below.
+    e.hlWant        the gourd he is walking to (g.hlWanted on it): break it
+                    before he gets there. hlArtReel's sticker would suit it.
+
+  drawHlTele(e, teach)   NEW, world, plain paint (source-over), after every
+      piece and glow. e is THE BACKLOG (null once he is down). Draw the
+      marks only; the pieces have drawn themselves. The placeholder:
+        reach           a small diamond at p.kick
+        aim             a gold rim on the piece, three chevrons along p.goes
+                        (bright if p.aimHits), and brackets on him if any
+                        aimed piece would find him
+        warn            red, filling with the wind-up: a volley's rounds get
+                        lines along their heading; a sweep the arc it has
+                        left and a dashed line where it stops; a slam its ring
+        teach           DASH THROUGH IT, on the far side from the chevrons
+        e.hlWant        a dashed tether from him to the gourd, a ring on it
+  drawHlBossBar(e, x, y, w)   NEW, HUD: his bar at x, y, w wide, 14 tall,
+      already drawn. Placeholder: a notch at each of BACKLOG_BINGE (grey once
+      e.hlBinge has spent it), and the bar's edge flashing red in a wind-up.
+  drawHlPiecesHud(n, max, warn, a)   NEW, screen: n paused of max
+      (HL_PILE_MAX) before he does them all anyway; warn is hlBingeK; a 0..1
+      as it takes the line over from the gourds. Placeholder: UNFINISHED and
+      nine pips at y 108, red near the cap, ALL OF IT in a wind-up.
+  hlBingeWarnFx(e, n)    NEW: he has called a binge; n pieces go in BINGE_WARN.
+                         (hlBingeFx(e, n) is still the moment they go.)
+  hlHeapFx(e, x, y)      NEW: his heap took the edge off ordinary fire at
+                         x, y. At most every 0.12 s. Price tags off the heap?
+
+  THE WORD AFTER (28 Sep). Nothing teaches the fight up front: the player
+  reads it. When they go down in his fight (while ON SALE is open), the game
+  reads how it went (HL.fight: kicks, binges, bingeAt, eaten) and one of them
+  says one line about it on the death screen, HL_DEAD_SAY_AT (1.1 s) in:
+    finish   never finished a piece       gun      finished few, shot him
+    binge    went down in a binge         gourds   he had eaten three or more
+    close    he was under 30%             general  none of those
+  Each theme's lines (HL_SAY.hint) go from oblique to a little plainer, one
+  per death (seen 'hint:<theme>:<i>'), then any of them. Never a key name.
+  Drawn with the kit's hlSayDraw, so your hlSayPortrait and the voices do
+  it; nothing new to draw. Back in the vigil, whoever said it says it once
+  more on [E] (after any quest telling). Admin: DIE TO HIM, HINTS: FORGET.
 
 ------------------------------------------------------------------------------
 5.5 MEDALS, QUESTS, PRIZES
@@ -366,8 +517,12 @@ hlQuestDoneFx(q)      a quest done: q = HL_QUESTS entry { id, n, candles, medal 
 hlPrizeFx(p)          a prize unlocked for this profile: p = { at, skin }
 
 THE PRIZE SKINS (DEV_SKINS 'hl-carved' / 'hl-lantern' / 'hl-hallows', fx
-'hallows' tier 1–3, and 'hl-lostsoul', fx 'lostsoul'). They are called from
-SkinFx exactly where the imperial line is:
+'hallows' tier 1–3, and 'hl-lostsoul', fx 'lostsoul').
+  SUPERSEDED 28 Sep: the prizes are drawn on THE WARDROBE now, with 35 hooks
+  that take the wearer `me`. See HALLOWS-SKINS-GUIDE.txt. The five below are
+  still called by the wardrobe's placeholders until the art moves across,
+  so the look holds meanwhile. They were called from SkinFx exactly where the
+  imperial line is:
   hlSkinUnder(s)                    before the hull
   hlSkinPlayer(s)       → true      drawn (skip the stock rim)
   hlSkinBullet(b, c, s) → true      drawn (skip the stock round)
@@ -447,6 +602,10 @@ EASING — hlEase(name, t) with HL_EASE: lin in out inOut in3 out3 inOut3 out5
   JACK_WIND 0.5   JACK_BREATH_T 0.8   JACK_BREATH_R 130   JACK_BREATH_A 0.55
   JACK_FACE 0.7   VINE_RANGE 380   VINE_SPARE 40   CROW_WATCH 0.33
   SWEEP_LEN 760   SWEEP_W 16   SWEEP_TELE 0.6   SLAM_R 110 (+10 a binge)
+  GOURD_LIT 0.85   HL_HATCH_T 1.2   HL_REEL_SPD 420   SLAM_SLIDE_T 1.1
+  SWEEP_KICK_ARC 1.8   KICK_REACH 14   HL_PILE_MAX 9
+  BINGE_WARN 1.1   HL_DASH_LEN 184   HL_QUIET_A 0.3   HL_PILE_HUD_T 2.5
+  BACKLOG_BINGE [0.75, 0.5, 0.25]
   SLAM_T 1.0   THE BACKLOG r 64, col '#fb923c'
   The Act I block, under "the numbers", has the rest and says what each is.
   These are the logic's: art code reads them and never redeclares them.
@@ -461,6 +620,8 @@ EASING — hlEase(name, t) with HL_EASE: lin in out inOut in3 out3 inOut3 out5
     not open yet".
   - The event's HUD still shows the game's own sector counter (THE PATCH
     n/5) beside the area's.
+  - In his fight, drawHlAreaHud's goal line (KILL THE BACKLOG) says what
+    his bar already says. area.boss is set then, if the art wants to drop it.
   - The prize skins are listed in the skin menu all year with how they are
     earned, like the imperial line. Whether to hide them outside October is
     open.
