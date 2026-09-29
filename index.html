@@ -15476,8 +15476,10 @@ function drawTribunal() {
      SHOW IT OUT          the door behind you opens, and the rest come down to
                           walk you through it, shoving on the beat
      HE COMES DOWN        the halberd, on his beat: parry, then riposte
-     THE LAST EXCHANGE    blade against haft, dead even, and the hull wakes in
-                          the middle of it, as it does in every rite
+     THE LAST EXCHANGE    a cutscene you play: blade against haft, both of them
+                          swinging and refusing, dead even until the hull wakes
+                          in the middle of it, as it does in every rite, and
+                          overpowers him
 
    What the art is handed is `fr` (see THE VAGRANT · art hooks, below, and
    VAGRANT-GUIDE.txt for every field). Nothing here draws.
@@ -15521,16 +15523,10 @@ const FR_OUT_GRACE = 1.5;    // and how long before they raise their hands again
 const FR_FOLK_R    = 13;     // one of them, for touching
 const FR_THRUST    = 230;    // how far he goes with a thrust
 const FR_KEEP      = 150;    // how close he likes to stand, halberd out
-const FR_EX_HIT    = 0.12;   // an exchange lost
-const FR_EX_N      = 11;     // exchanges in the last one
-const FR_EX_WAKE   = 6;      // the one the hull wakes on, counting from 0
-const FR_EX_BPM    = 84;     // and their pace, FR_EX_RAMP quicker each until then
-const FR_EX_RAMP   = 6;
-const FR_EX_BPM_AWAKE = 132; // after it: the hull's pace, and he cannot hold it
-const FR_EX_GAP    = 150;    // the two of them, face to face
-const FR_WAKE_T    = 1.3;    // the beat the awakening takes, the exchange held
+const FR_WAKE_T    = 1.3;    // the hull's turn, as the art sees it (frWokeW)
 const FR_WAKE_WIN  = 1.8;    // after it the guard is this much longer
 const FR_WAKE_PERFECT = 4.0; // and nearly all of it is the perfect part
+/* THE LAST EXCHANGE has its own figures, with it below (FR_CUT_ACTS on). */
 const FR_ENTRY     = 5.0;    // the entrance, before the first count
 const FR_FIRST     = 3;      // beats he only counts before anybody throws
 const FR_ROOM_W    = 1300, FR_ROOM_H = 820;
@@ -15551,7 +15547,7 @@ const FR_SEQ = [
   { id: 'unison', until: 0.60, n: 'EVERYONE UP',       bpm: 72 },
   { id: 'out',    until: 0.40, n: 'SHOW IT OUT',       bpm: 80 },
   { id: 'down',   until: 0.15, n: 'HE COMES DOWN',     bpm: 84 },
-  { id: 'exch',   until: 0.00, n: 'THE LAST EXCHANGE', bpm: FR_EX_BPM }
+  { id: 'exch',   until: 0.00, n: 'THE LAST EXCHANGE', bpm: 84 }
 ];
 const FR_EX_SEQ = FR_SEQ.length - 1;
 
@@ -15586,6 +15582,7 @@ const FR_SAY = {
   mark:   'All of you. There.',
   exMiss: ['Sit down.', 'You were never going to last.', 'Again.'],
   exTie:  ['We can do this all night.', 'I built every bench in here.', 'Nobody leaves.'],
+  turn2:  '. . . I am sorry about this.',
   wake:   'What. No. That is MY time.',
   exWon:  ['Stop.', 'Slower. SLOWER.', 'I cannot.'],
   end:    '. . . close it on your way out.'
@@ -15604,9 +15601,12 @@ const frSeqId   = () => (fr ? FR_SEQ[fr.seq].id : null);
 // the door behind you stands open from SHOW IT OUT until he stops needing it
 const frDoorOpen = () => !!(fr && !fr.ex && !fr.end && fr.openT <= 0 &&
                             (frSeqId() === 'out' || frSeqId() === 'down'));
-// where the beat is: 0 on it, rising to 1 at the next; and how long until then
-const frBeatK   = () => !fr ? 0 : fr.ex ? clamp(fr.ex.bt / fr.ex.per, 0, 1) : clamp(fr.bt / fr.per, 0, 1);
-const frNextIn  = () => !fr ? 0 : fr.ex ? Math.max(0, fr.ex.per - fr.ex.bt) : Math.max(0, fr.per - fr.bt);
+// where the beat is: 0 on it, rising to 1 at the next; and how long until then.
+// In the last exchange, the same for whichever blow of his is on its way, else 0
+const frBeatK   = () => !fr ? 0 : fr.ex ? (frCutTimed() ? clamp(fr.ex.pt / fr.ex.pdur, 0, 1) : 0)
+                                        : clamp(fr.bt / fr.per, 0, 1);
+const frNextIn  = () => !fr ? 0 : fr.ex ? (frCutTimed() ? Math.max(0, fr.ex.pdur - fr.ex.pt) : 0)
+                                        : Math.max(0, fr.per - fr.bt);
 
 /* The guard, in the last exchange once the hull is awake: long, and nearly all
    of it perfect. The race's "none of them can be wrong", for a parry. */
@@ -15968,7 +15968,7 @@ function frParried(opts, perfect) {
   } else if (opts.fr === 'hal') {
     if (perfect) frOpenHim();
   }
-  // 'ex' reads frRes itself
+  // 'cut', the last exchange, reads frRes itself
 }
 
 /* The throw goes home. Fast, gold, and in real time: it lands while the room
@@ -16383,12 +16383,84 @@ function frSwingBand(a0, dir, lo, hi, reach) {
 }
 
 /* ---------------------------- THE LAST EXCHANGE -----------------------------
-   The rite's set piece, played. He strikes on one beat and you refuse it; your
-   answer goes on the next and he catches it on the haft. Dead even, and it
-   gets quicker every time, until the exchange the hull wakes on. From there
-   the guard is long and nearly all perfect, the pace is the hull's, and every
-   answer lands. A blow that gets through costs you and is thrown again. */
-const frExBpm = () => (fr.ex.awake ? FR_EX_BPM_AWAKE : FR_EX_BPM + FR_EX_RAMP * fr.ex.i);
+   The rite's cutscene, played: a parry battle, blade against haft, at a pace
+   that climbs. Both of them swing and both of them refuse. His comes, you
+   raise the guard; yours goes, and he catches it on the haft. It is dead even
+   (he answers at your speed, and nothing either of you throws gets through)
+   until the hull wakes in the middle of it, as it does in every rite. From
+   there it is the hull's pace: nothing of his gets through, nothing of yours
+   is caught, and he is driven back to his own fire until the haft goes.
+
+   And it is a cutscene you play rather than a fight you can lose: the
+   contract EMBER's clash set. Nothing in it touches your health. A blow of his
+   that gets through costs you ground and some of the momentum you had built,
+   and that is all it costs.
+
+   AUTHORED, always resolves: the square-up, the one blow he has been saving,
+   the wake, the break. YOURS, moment to moment: every parry and every swing,
+   which decide how cleanly it plays and how soon the turn comes. Acts advance
+   on max(floor, state) with a ceiling, so playing well gets there sooner,
+   playing badly still gets there, and nothing can stall.
+
+     SQUARE   face to face, framed. "Sit. DOWN."
+     TRADE    his swing and your guard; your swing and his haft. Momentum
+              fills with clean trades. The ground only moves when you miss,
+              and only ever toward you: a clean trade takes it back to even,
+              never past it
+     TURN     he steps back and brings down the one he has been saving. [F]
+              as it lands refuses it; left alone, the hull refuses it anyway
+     WAKE     the transformation, in the middle of that parry
+     OVER     the hull's pace. It swings on its own now, and the trigger only
+              makes it quicker. Every swing lands; his are refused whether you
+              raise the guard or not, and the ones you do refuse go back into
+              him. He is driven back to his fire and the haft comes apart
+   The haft goes when he has nothing left, and the ending is frWin's.
+
+   The art reads fr.ex (see VAGRANT-GUIDE.txt): the act and how long it has
+   run, the phase and how far into it, momentum and the ground, when each of
+   them last swung, the last clash, and how broken the haft is.
+--------------------------------------------------------------------------- */
+const FR_CUT_ACTS = [
+  { id: 'SQUARE', floor: 2.2, cap: 2.2 },
+  { id: 'TRADE',  floor: 7.0, cap: 20.0 },
+  { id: 'TURN',   floor: 2.2, cap: 2.8 },
+  { id: 'WAKE',   floor: 1.4, cap: 1.4 },
+  { id: 'OVER',   floor: 5.0, cap: 10.0 }
+];
+const FR_CUT_GAP    = 110;    // face to face: the haft's length apart, not the blade's
+const FR_CUT_BASE   = 240;    // where the two of them meet, below his fire
+const FR_CUT_SHIFT  = 105;    // how far the ground moves either way: the door, or his fire
+const FR_CUT_VIEW   = 620;    // and how much of the room the camera keeps, top to bottom
+const FR_TELL_0     = 0.75;   // his wind-up in the trade, at first,
+const FR_TELL_MIN   = 0.36;   // at its quickest,
+const FR_TELL_STEP  = 0.04;   // and this much quicker for every trade
+const FR_WIN_0      = 0.90;   // your window to answer, the same way
+const FR_WIN_MIN    = 0.45;
+const FR_WIN_STEP   = 0.04;
+const FR_MIRROR     = 0.6;    // he comes back in this share of the time you took
+const FR_MO_PARRY   = 0.07;   // momentum: a blow of his refused
+const FR_MO_PERFECT = 0.03;   // and a little more for refusing it perfectly
+const FR_MO_ANSWER  = 0.05;   // an answer of yours, caught
+const FR_MO_STRUCK  = 0.05;   // lost when one of his gets through
+const FR_GIVE       = 0.18;   // and the ground that costs
+const FR_TAKE       = 0.06;   // a clean trade takes this back, never past even
+const FR_TURN_RAISE = 1.3;    // the one he has been saving: raised for this long,
+const FR_TURN_FALL  = 0.9;    // and brought down over this. It lands at the end
+const FR_TURN_BACK  = 60;     // he steps back this far to bring it down
+const FR_OVER_N     = 16;     // swings of yours that finish him, after the wake
+const FR_OVER_RATE  = 3.2;    // and how quickly they come with the trigger held,
+const FR_OVER_AUTO  = 1.8;    // and without it: the hull does not wait to be asked
+const FR_OVER_HIS   = 1.0;    // how often he still tries
+const FR_OVER_TELL  = 0.42;
+const FR_OVER_DRIVE = 0.07;   // the ground a landed swing takes, at least
+
+const frCutAct = () => (fr && fr.ex ? fr.ex.act : null);
+// the last exchange is a cutscene from the square-up to the card
+const frCutOn = () => !!(frRite && fr && (fr.ex || fr.end));
+// a blow of his on its way: the ring on the hull closes on these
+const frCutTimed = () => !!(fr && fr.ex && !fr.ex.done && (fr.ex.ph === 'tell' || fr.ex.ph === 'fall'));
+const frTellDur = () => Math.max(FR_TELL_MIN, FR_TELL_0 - FR_TELL_STEP * fr.ex.tempo);
+const frWinDur  = () => Math.max(FR_WIN_MIN, FR_WIN_0 - FR_WIN_STEP * fr.ex.tempo);
 
 function frExStart() {
   const q = fr, h = q.him;
@@ -16401,90 +16473,238 @@ function frExStart() {
     f.wind = -1; f.mark = null; f.shove = -1;
   }
   q.hold = Math.min(q.hold, FR_HP * FR_SEQ[FR_EX_SEQ - 1].until);
-  P.x = q.room.cx; P.y = q.fire.y + 260; P.vx = P.vy = 0;
-  h.x = P.x; h.y = P.y - FR_EX_GAP; h.ang = Math.PI / 2;
   h.st = 'ex'; h.atk = null; h.stum = null; h.openT = 0; h.stT = 0; h.mark = null;
-  q.ex = { i: 0, ph: 'wind', bt: 0, per: 60 / FR_EX_BPM, res: null, awake: false,
-           wakeT: 0, introT: 1.8, broke: 0, lost: 0, done: false,
-           hold0: Math.max(1, q.hold) };  // whatever of him the riposte left, it goes in equal parts
+  P.vx = P.vy = 0;
+  // their marks: below his fire, him above you, the door behind you
+  q.ex = { act: null, i: -1, at: 0, ph: 'idle', pt: 0, pdur: 0,
+           mo: 0, ground: 0, g0: 0, tempo: 0, clean: 0, struck: 0,
+           awake: false, turned: false, broke: 0, hold0: Math.max(1, q.hold),
+           base: { x: q.room.cx, y: q.fire.y + FR_CUT_BASE }, gap: FR_CUT_GAP,
+           swingT: 0, nextHis: 0, hisT: -9, mineT: -9, clash: null, done: false };
+  frCutEnter(0);
   frSeqFx(FR_EX_SEQ);
 }
 
+function frCutEnter(i) {
+  const q = fr, x = q.ex;
+  x.i = i; x.act = FR_CUT_ACTS[i].id; x.at = 0;
+  frCutPhase('idle', 0);
+  if (x.act === 'TRADE') frCutPhase('tell', frTellDur());
+  if (x.act === 'TURN') {
+    frCutPhase('raise', FR_TURN_RAISE);
+    frSay(FR_SAY.turn2, 2.6); q.sayCd = 3;
+    Audio_.tone(110, 0.6, 'sine', 0.1, 70);
+  }
+  if (x.act === 'WAKE') frWake();
+  if (x.act === 'OVER') {
+    frCutPhase('free', 0);
+    x.nextHis = FR_OVER_HIS * 0.8; x.g0 = x.ground;
+    banner(FR_FORM, FR_FORM_COL, 2.4);       // after the turn, not over it
+  }
+}
+
+function frCutPhase(ph, dur) { const x = fr.ex; x.ph = ph; x.pt = 0; x.pdur = dur; }
+
 function frExTick(dt) {
   const q = fr, x = q.ex, h = q.him;
-  h.ang = Math.atan2(P.y - h.y, P.x - h.x);
-  h.stT += dt;
-  if (x.introT > 0) { x.introT -= dt; return; }
-  if (x.wakeT > 0) {
-    x.wakeT -= dt;
-    if (x.wakeT <= 0) banner(FR_FORM, FR_FORM_COL, 2.4);   // after the turn, not over it
-    return;
-  }
   if (x.done) return;
-  x.bt += dt;
-  if (x.bt < x.per) return;
-  x.bt -= x.per;
-  if (x.ph === 'wind') { frExStrike(); x.ph = 'answer'; }
-  else { frExAnswer(); x.ph = 'wind'; if (fr && fr.ex) x.per = 60 / frExBpm(); }
+  x.at += dt; x.pt += dt; h.stT += dt;
+  frFolkTick(dt);                        // his people get back to their places, and watch
+  /* The cutscene reads the trigger itself: the hull does not steer and the
+     blade does not fire on its own in here, it swings when the exchange says
+     it may. Holding it, or autofire, answers as soon as a window opens. */
+  const fire = !!(mouse.down || autoFire || keys['j'] || chalAuto() || (isTouch && touchUI.aim));
+  if (x.act === 'TRADE') frTradeTick(fire);
+  else if (x.act === 'TURN') frTurnTick();
+  else if (x.act === 'OVER') frOverTick(dt, fire);
+  frCutStage(dt);
+  // the act advance: earned, floored, and capped so it cannot stall
+  const A = FR_CUT_ACTS[x.i];
+  const earned = x.act === 'TRADE' ? x.mo >= 1
+               : x.act === 'TURN' ? x.turned
+               : x.act === 'OVER' ? q.hold <= 0.5
+               : true;
+  if (x.at < A.cap && !(x.at >= A.floor && earned)) return;
+  if (x.act === 'TURN' && !x.turned) frTurnMeet(false);   // it comes down anyway
+  if (x.i + 1 < FR_CUT_ACTS.length) frCutEnter(x.i + 1);
+  else frWin();
 }
 
-function frExStrike() {
-  const q = fr, x = q.ex, h = q.him;
-  const opts = { src: q.e, fr: 'ex' };
-  hurtPlayer(P.maxHp * FR_EX_HIT, opts);
-  if (state !== 'play') return;
-  x.res = opts.frRes ? 'parried' : 'hit';
-  frExClashFx((P.x + h.x) / 2, (P.y + h.y) / 2, 'his', x.res);
-  if (x.res === 'hit') { x.lost++; frSayOne(FR_SAY.exMiss, 0); return; }
-  Audio_.tone(1320, 0.05, 'square', 0.05, 880);
-  if (x.i === FR_EX_WAKE && !x.awake) frWake();
-}
-
-function frExAnswer() {
-  const q = fr, x = q.ex, h = q.him;
-  const res = x.res;
-  x.res = null;
-  if (res !== 'parried') return;          // he throws the same one again
-  // the answer: the swing the parry earned, at him, from where you stand
-  if (P.swingT <= 0) {
-    const keep = P.ang;
-    P.ang = Math.atan2(h.y - P.y, h.x - P.x);
-    bladeStart();
-    P.ang = keep;
-    P.vx = P.vy = 0;
+/* ---- TRADE. His swing, your guard; your swing, his haft. ---- */
+function frTradeTick(fire) {
+  const x = fr.ex;
+  if (x.ph === 'tell') {
+    if (x.pt >= x.pdur) frTradeStrike();
+  } else if (x.ph === 'win') {
+    // a hair after the clash, so one press is never two moves
+    if (fire && x.pt > 0.06) frTradeAnswer();
+    else if (x.pt >= x.pdur) frCutPhase('reset', 0.22);   // he takes it back
+  } else if (x.ph === 'reset') {
+    if (x.pt >= x.pdur) frCutPhase('tell', frTellDur());
   }
-  if (!x.awake) {
-    frExClashFx((P.x + h.x) / 2, (P.y + h.y) / 2, 'yours', 'caught');
-    Audio_.tone(1500, 0.05, 'square', 0.05, 1000);
-    if (Math.random() < 0.45) frSayOne(FR_SAY.exTie, 0);
-    x.i++;
+}
+
+// his blow arrives: the guard is up or it is not
+function frTradeStrike() {
+  const q = fr, x = q.ex;
+  x.hisT = uiTime;
+  if (bladeParryActive()) {
+    const opts = { fr: 'cut', src: q.e };
+    bladeParried(0, opts);                 // the guard's own business: chain, rally, its ring
+    const perfect = opts.frRes === 'perfect';
+    x.mo = Math.min(1, x.mo + FR_MO_PARRY + (perfect ? FR_MO_PERFECT : 0));
+    x.clean++;
+    frExClash('refused', perfect);
+    frCutPhase('win', frWinDur());
+    // RIPOSTE CORE: the answer comes before you ask for it
+    if (gearOn('riposte')) frTradeAnswer();
     return;
   }
-  const n = FR_EX_N - FR_EX_WAKE;
-  const dmg = x.hold0 / n;
-  frHurt(dmg);
-  x.broke = clamp((x.i - FR_EX_WAKE + 1) / n, 0, 1);
-  floatText(h.x, h.y - 34, Math.round(dmg), '#fde68a', 19, -52);
-  frRiposteFx(h, dmg, true);
-  hitStop = Math.max(hitStop, 0.06); shake(0.5);
-  Audio_.tone(150, 0.2, 'square', 0.12, 64);
-  x.i++;
-  if (x.i >= FR_EX_N) { frWin(); return; }
-  frSayOne(FR_SAY.exWon, 0);
+  // it gets through: ground and momentum, never health
+  x.mo = Math.max(0, x.mo - FR_MO_STRUCK);
+  x.ground = Math.max(-1, x.ground - FR_GIVE);
+  x.struck++;
+  frExClash('struck', false);
+  P.hurtFlash = Math.max(P.hurtFlash, 0.5);
+  drawFlashT = Math.max(drawFlashT, 0.08); shake(0.6);
+  Audio_.hurt();
+  frSayOne(FR_SAY.exMiss, 2.5);
+  frCutPhase('reset', 0.35);
 }
 
-/* THE AWAKENING, in the middle of the exchange, as SUPERUSER comes in the
-   middle of the race. Granted the moment it happens, not at the card: a hull
-   that goes down after this has still woken. */
+// your blow goes, and before the wake it is caught, every time
+function frTradeAnswer() {
+  const x = fr.ex;
+  const took = x.pt;
+  frCutSwing();
+  x.mo = Math.min(1, x.mo + FR_MO_ANSWER);
+  x.ground = Math.min(0, x.ground + FR_TAKE);
+  x.tempo++;
+  frExClash('caught', false);
+  // he answers at your pace: the quicker you came, the quicker he comes back
+  frCutPhase('reset', Math.max(0.12, took * FR_MIRROR));
+  if (Math.random() < 0.3) frSayOne(FR_SAY.exTie, 3);
+}
+
+// the hull swings at him: the blade's own arc, pointed his way
+function frCutSwing() {
+  const h = fr.him;
+  fr.ex.mineT = uiTime;
+  if (P.swingT > 0) return;
+  const keep = P.ang;
+  P.ang = Math.atan2(h.y - P.y, h.x - P.x);
+  bladeStart();
+  P.ang = keep;
+  P.vx = P.vy = 0;
+}
+
+/* ---- TURN. He steps back and brings down the one he has been saving. It
+   lands when it lands: a guard up then refuses it, and so does the hull. ---- */
+function frTurnTick() {
+  const x = fr.ex;
+  if (x.ph === 'raise' && x.pt >= x.pdur) frCutPhase('fall', FR_TURN_FALL);
+  else if (x.ph === 'fall' && x.pt >= x.pdur) frTurnMeet(bladeParryActive());
+}
+function frTurnMeet(pressed) {
+  const q = fr, x = q.ex;
+  x.turned = true; x.hisT = uiTime;
+  frCutPhase('met', 0);
+  let perfect = false;
+  if (pressed) {
+    const opts = { fr: 'cut', src: q.e };
+    bladeParried(0, opts);
+    perfect = opts.frRes === 'perfect';
+  }
+  frExClash('turn', perfect);
+  hitStop = Math.max(hitStop, 0.12);
+  drawFlashT = Math.max(drawFlashT, 0.35); shake(1.8);
+  Audio_.boom();
+}
+
+/* ---- OVER. The hull's pace: every swing lands, and he still tries. ---- */
+function frOverTick(dt, fire) {
+  const q = fr, x = q.ex;
+  x.swingT = Math.max(0, x.swingT - dt);
+  if (x.swingT <= 0 && q.hold > 0.5) {
+    x.swingT = 1 / (fire ? FR_OVER_RATE : FR_OVER_AUTO);
+    frOverLand(1);
+  }
+  if (x.ph === 'free') {
+    x.nextHis -= dt;
+    if (x.nextHis <= 0) frCutPhase('tell', FR_OVER_TELL);
+  } else if (x.ph === 'tell' && x.pt >= x.pdur) {
+    x.hisT = uiTime;
+    /* Nothing of his gets through any more. Raise the guard and it goes back
+       into him; don't, and the hull refuses it anyway. */
+    if (bladeParryActive()) {
+      const opts = { fr: 'cut', src: q.e };
+      bladeParried(0, opts);
+      frExClash('refused', opts.frRes === 'perfect');
+      x.clean++;
+      if (q.hold > 0.5) frOverLand(0.5);
+    } else frExClash('refused', false);
+    x.ground = Math.min(1, x.ground + 0.04);
+    frCutPhase('free', 0); x.nextHis = FR_OVER_HIS;
+  }
+}
+function frOverLand(k) {
+  const q = fr, x = q.ex, h = q.him;
+  frCutSwing();
+  const dmg = Math.min(q.hold, x.hold0 / FR_OVER_N * k);
+  frHurt(dmg);
+  x.broke = clamp(1 - q.hold / x.hold0, 0, 1);
+  // back to his fire: all the way there by the time the haft goes
+  x.ground = Math.min(1, Math.max(x.ground + FR_OVER_DRIVE * k, lerp(x.g0, 1, x.broke)));
+  floatText(h.x + rnd(10, -10), h.y - 34, Math.round(dmg), '#fde68a', 17, -52);
+  frRiposteFx(h, dmg, true);
+  frExClash('landed', true);
+  hitStop = Math.max(hitStop, 0.03); shake(0.3);
+  Audio_.tone(150, 0.14, 'square', 0.1, 64);
+  if (Math.random() < 0.25) frSayOne(FR_SAY.exWon, 2.5);
+}
+
+/* Where the two of them stand: on their marks, moved together by the ground,
+   eased so a trade reads as weight going back and forth rather than a jump.
+   He steps back to bring the last one down, and comes in with it. */
+function frCutStage(dt) {
+  const q = fr, x = q.ex, h = q.him;
+  let gap = x.gap;
+  if (x.act === 'TURN') {
+    gap += x.ph === 'raise' ? FR_TURN_BACK * clamp(x.pt / 0.6, 0, 1)
+         : x.ph === 'fall' ? FR_TURN_BACK * (1 - easeIn(clamp(x.pt / x.pdur, 0, 1)))
+         : 0;
+  }
+  const mx = x.base.x, my = x.base.y - x.ground * FR_CUT_SHIFT;
+  const k = 1 - Math.exp(-(x.act === 'SQUARE' ? 4 : 11) * dt);
+  P.x = lerp(P.x, mx, k); P.y = lerp(P.y, my + gap / 2, k);
+  P.vx = P.vy = 0;
+  h.x = lerp(h.x, mx, k); h.y = lerp(h.y, my - gap / 2, k);
+  h.ang = Math.atan2(P.y - h.y, P.x - h.x);
+  P.ang = Math.atan2(h.y - P.y, h.x - P.x);   // the hull faces him, whatever the pointer does
+}
+
+// blade meets haft, or does not: one record for the art, and its moment
+function frExClash(kind, perfect) {
+  const q = fr, h = q.him;
+  const cx = (P.x + h.x) / 2, cy = (P.y + h.y) / 2;
+  q.ex.clash = { kind, perfect: !!perfect, t: uiTime, x: cx, y: cy };
+  if (kind === 'refused' || kind === 'caught' || kind === 'turn')
+    Audio_.tone(kind === 'caught' ? 1500 : 1320, 0.05, 'square', 0.05, kind === 'caught' ? 1000 : 880);
+  frExClashFx(cx, cy, kind, !!perfect);
+}
+
+/* THE AWAKENING, in the middle of the parry that met the blow he saved, as
+   SUPERUSER comes in the middle of the race. Granted the moment it happens,
+   not at the card. */
 function frWake() {
   const x = fr.ex;
-  x.awake = true; x.wakeT = FR_WAKE_T;
+  x.awake = true;
   grantAwakening(P.charId);
   P.awake = 1;
   frWakeT = uiTime;
   frSay(FR_SAY.wake, 3.0);
   fr.sayCd = 3;
-  shake(2.4); drawFlashT = 0.4;
+  shake(2.4); drawFlashT = Math.max(drawFlashT, 0.4);
   Audio_.boom(); Audio_.boss(); Audio_.levelup();
   frWakeFx();
 }
@@ -16496,6 +16716,7 @@ function frWake() {
 function frWin() {
   const q = fr, h = q.him;
   q.ex.done = true;
+  q.ex.broke = 1;
   q.hold = 0;
   if (q.e) { q.e.hp = 0; q.e.dead = true; }
   h.st = 'down'; h.stT = 0;
@@ -16528,7 +16749,7 @@ function frEndTick(dt) {
 function frZoom() {
   const q = fr;
   if (!q) return 1;
-  if (q.ex || q.end) return 1.08;
+  if (q.ex || q.end) return clamp(H / FR_CUT_VIEW, 0.9, 1.8);
   if (frSeqId() === 'down' && q.openT <= 0) return 0.9;
   return clamp(Math.min(W / (FR_ROOM_W + 80), H / (FR_ROOM_H + 200)), 0.45, 1);
 }
@@ -16691,10 +16912,11 @@ function drawFrHim(q, h) {
     let L = HAL_REACH, ang = h.ang;
     if (h.st === 'tell') L *= 0.62;
     if (h.st === 'live' && h.atk === 'spin') ang += h.spinA;
+    let live = h.st === 'live';
     if (open) { ang += Math.PI * 0.7; L *= 0.8; }
-    if (h.st === 'ex') L *= 1 - broke * 0.45;
+    if (h.st === 'ex') { const p = frExPose(q.ex, h); ang = p.ang; L = p.L; live = p.live; }
     ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(ang);
-    halberdGlyph(L, h.st === 'live', broke > 0.5, 1);
+    halberdGlyph(L, live, broke > 0.5, 1);
     ctx.restore();
   }
   ctx.save();
@@ -16713,6 +16935,25 @@ function drawFrHim(q, h) {
     ctx.fillText('OPEN', h.x, h.y - S * 1.8);
   }
   ctx.restore();
+}
+
+/* The haft in the last exchange: wound back through a tell, swung through
+   just after his blow, across him just after he catches yours, raised
+   overhead for the one he saved and brought down with it, and shorter as it
+   comes apart. */
+function frExPose(x, h) {
+  // held across him, the head off to your side: at rest it does not point through you
+  let ang = h.ang - 0.7, L = HAL_REACH * 0.9, live = false;
+  const k = x.pdur > 0 ? clamp(x.pt / x.pdur, 0, 1) : 0;
+  if (x.ph === 'tell') { ang -= 1.3 * easeOut(k); L *= 1 - 0.2 * k; }
+  else if (x.ph === 'raise') { ang = lerp(ang, h.ang + Math.PI, easeOut(clamp(x.pt / 0.6, 0, 1))); L *= 0.8; }
+  else if (x.ph === 'fall') { ang = h.ang + Math.PI * (1 - easeIn(k)); L = Math.min(L, x.gap + 12); live = true; }
+  // his blow, just landed: the head at your guard, not through it
+  if (uiTime - x.hisT < 0.16) { ang = h.ang + 0.35; L = Math.min(L, x.gap + 16); live = true; }
+  const c = x.clash;
+  if (c && c.kind === 'caught' && uiTime - c.t < 0.22) { ang = h.ang + Math.PI / 2; L *= 0.8; }
+  L *= 1 - x.broke * 0.45;
+  return { ang, L, live };
 }
 
 /* ---- world: what is about to happen. The ring on the hull is the whole
@@ -16757,12 +16998,11 @@ function drawFrTells(q) {
       ctx.beginPath(); ctx.arc(h.mark.x, h.mark.y, 132 * (1 - p * 0.86), 0, TAU); ctx.stroke();
     }
   }
-  // the beat, on you
+  // the beat, on you: in the last exchange, whichever blow of his is on its way
   const D = q.due;
-  const exOn = !!(q.ex && !q.ex.done && q.ex.ph === 'wind' && q.ex.introT <= 0 && q.ex.wakeT <= 0);
-  const due = q.ex ? (exOn ? 1 : 0) : D.home + D.mark + D.shove + (D.hal ? 1 : 0);
+  const due = q.ex ? (frCutTimed() ? 1 : 0) : D.home + D.mark + D.shove + (D.hal ? 1 : 0);
   if (due > 0 && q.openT <= 0 && !q.end) {
-    const per = q.ex ? q.ex.per : q.per, left = frNextIn();
+    const per = q.ex ? q.ex.pdur : q.per, left = frNextIn();
     const R = P.r + 8 + 70 * clamp(left / per, 0, 1);
     const gold = left <= bladePerfectWin();
     ctx.strokeStyle = gold ? '#fde68a' : 'rgba(226,232,240,0.7)';
@@ -16775,6 +17015,13 @@ function drawFrTells(q) {
       ctx.font = "700 10px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillStyle = gold ? '#fde68a' : '#e2e8f0';
       ctx.fillText('×' + due, P.x, P.y - R - 6);
+    }
+    if (q.ex && q.ex.ph === 'fall') {
+      // the one he saved: what to press, under the ring
+      ctx.textAlign = 'center';
+      ctx.font = "700 13px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = gold ? '#fde68a' : '#e2e8f0';
+      ctx.fillText('[F]', P.x, P.y + R + 16);
     }
   }
   ctx.restore();
@@ -16821,47 +17068,82 @@ function drawFrFrame(q) {
   ctx.restore();
 }
 
-/* ---- screen, over the HUD: the count, and his words ---- */
+/* ---- screen, over the HUD: the count, and his words. In the last exchange
+   the HUD is put away (drawHUD keeps only the banner) and this is all of it. ---- */
 function drawFrHud(q) {
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   const face = "Barlow, 'Segoe UI', system-ui, sans-serif";
-  if (q.openT <= 0 && !q.end) {
+  if (q.ex && !q.end) drawFrCutHud(q, q.ex, face);
+  else if (q.openT <= 0 && !q.end) {
     // four ticks, the one it is on lit and draining toward the next
     const k = frBeatK();
-    const bn = q.ex ? q.ex.i * 2 + (q.ex.ph === 'answer' ? 1 : 0) : q.bn;
     const y = H - 24;
     for (let i = 0; i < 4; i++) {
-      const on = ((bn % 4) + 4) % 4 === i;
+      const on = ((q.bn % 4) + 4) % 4 === i;
       ctx.fillStyle = on ? rgba(FOUND_COL, 0.95 - k * 0.55) : 'rgba(148,163,184,0.22)';
       roundRect(W / 2 - 54 + i * 28, y, 20, 6, 3); ctx.fill();
     }
     ctx.font = '700 10px ' + face;
     ctx.letterSpacing = '0.2em';
-    if (q.ex) {
-      ctx.fillStyle = rgba(q.ex.awake ? FR_FORM_COL : FOUND_COL, 0.8);
-      ctx.fillText('EXCHANGE  ' + Math.min(FR_EX_N, q.ex.i + 1) + ' / ' + FR_EX_N, W / 2, y - 8);
-    } else {
-      const D = q.due, n = D.home + D.mark + D.shove;
-      ctx.fillStyle = 'rgba(203,213,225,0.7)';
-      ctx.fillText(D.hal ? 'HIS BLOW ON THE BEAT' : n ? n + ' ON THE BEAT' : 'HIS COUNT', W / 2, y - 8);
-      ctx.fillStyle = rgba(CROWD_COL, 0.75);
-      ctx.fillText((FR_FOLK - q.turned) + ' / ' + FR_FOLK + '  STILL HIS', W / 2, 68);
-    }
+    const D = q.due, n = D.home + D.mark + D.shove;
+    ctx.fillStyle = 'rgba(203,213,225,0.7)';
+    ctx.fillText(D.hal ? 'HIS BLOW ON THE BEAT' : n ? n + ' ON THE BEAT' : 'HIS COUNT', W / 2, y - 8);
+    ctx.fillStyle = rgba(CROWD_COL, 0.75);
+    ctx.fillText((FR_FOLK - q.turned) + ' / ' + FR_FOLK + '  STILL HIS', W / 2, 68);
     ctx.letterSpacing = '0em';
   }
   if (q.sayT > 0) {
     ctx.font = '400 ' + Math.min(19, Math.max(13, W * 0.016)) + 'px ' + face;
     ctx.fillStyle = rgba(FOUND_COL, clamp(q.sayT, 0, 1) * 0.92);
-    ctx.fillText(q.say, W / 2, H - (q.ex || q.end ? 58 : 50));
+    // once it is a cutscene, in the frame's bottom bar, like a subtitle
+    ctx.fillText(q.say, W / 2, q.ex || q.end ? H - 22 : H - 50);
   }
   if (q.hintT > 0 && !q.ex && !q.end) {
     ctx.font = '700 10px ' + face;
     ctx.letterSpacing = '0.18em';
     ctx.fillStyle = rgba('#e2e8f0', clamp(q.hintT, 0, 1) * 0.65);
     ctx.fillText(q.hint, W / 2, 86);
+    ctx.letterSpacing = '0em';
   }
   ctx.restore();
+}
+
+/* The cutscene's few marks. Before the wake: momentum, filling toward the
+   turn, and the ground, which only ever moves toward you and sits on the
+   notch while it is even. After it: what is left of his haft. And what to
+   press, while it is still new. */
+function drawFrCutHud(q, x, face) {
+  const bw = Math.min(260, W * 0.4), x0 = W / 2 - bw / 2, y = 64;
+  ctx.font = '700 10px ' + face;
+  ctx.letterSpacing = '0.2em';
+  ctx.fillStyle = 'rgba(148,163,184,0.22)';
+  roundRect(x0, y, bw, 5, 2.5); ctx.fill();
+  if (!x.awake) {
+    ctx.fillStyle = 'rgba(203,213,225,0.7)';
+    ctx.fillText(x.act === 'TURN' ? 'THE ONE HE SAVED' : x.ground < -0.01 ? 'GIVING GROUND' : 'DEAD EVEN',
+                 W / 2, y - 8);
+    if (x.mo > 0) { ctx.fillStyle = rgba(FOUND_COL, 0.9); roundRect(x0, y, Math.max(5, bw * x.mo), 5, 2.5); ctx.fill(); }
+    const gy = y + 18;
+    ctx.fillStyle = 'rgba(148,163,184,0.3)'; ctx.fillRect(x0, gy, bw, 1.5);
+    ctx.fillStyle = 'rgba(226,232,240,0.7)'; ctx.fillRect(W / 2 - 1, gy - 5, 2, 11);
+    ctx.fillStyle = x.ground < -0.01 ? '#f87171' : '#e2e8f0';
+    ctx.beginPath(); ctx.arc(W / 2 + x.ground * bw / 2, gy + 0.75, 4, 0, TAU); ctx.fill();
+  } else {
+    ctx.fillStyle = rgba(FR_FORM_COL, 0.85);
+    ctx.fillText('HIS HAFT', W / 2, y - 8);
+    const left = 1 - x.broke;
+    if (left > 0) { ctx.fillStyle = rgba(HAL_COL, 0.9); roundRect(x0, y, Math.max(5, bw * left), 5, 2.5); ctx.fill(); }
+  }
+  let pr = '';
+  if (x.act === 'TRADE') pr = x.ph === 'win' ? 'SWING' : x.ph === 'tell' && x.clean < 4 ? '[F] AS IT LANDS' : '';
+  else if (x.act === 'OVER') pr = 'SWING';
+  if (pr) {
+    ctx.font = '700 12px ' + face;
+    ctx.fillStyle = rgba(pr === 'SWING' ? FR_FORM_COL : '#e2e8f0', 0.8);
+    ctx.fillText(pr, W / 2, H - 58);
+  }
+  ctx.letterSpacing = '0em';
 }
 
 /* ---- the moments: called once each, from the logic ---- */
@@ -16887,8 +17169,11 @@ function frRiposteFx(h, dmg, fin) {
 function frStrikeFx(h, move, hit) {
   if (move === 'slam' && h.mark) ringFx(h.mark.x, h.mark.y, 12, 150, HAL_COL, 0.5, 5);
 }
-function frExClashFx(x, y, whose, res) {
-  burst(x, y, 14, whose === 'his' ? HAL_EDGE : '#fde68a', 320, 2.8, 0.3);
+function frExClashFx(x, y, kind, perfect) {
+  const col = kind === 'struck' ? '#f87171' : kind === 'caught' ? HAL_EDGE
+            : kind === 'landed' ? FR_FORM_COL : perfect ? '#fde68a' : '#e0f2fe';
+  burst(x, y, kind === 'turn' ? 34 : 14, col, kind === 'turn' ? 460 : 320, 2.8, 0.3);
+  if (kind === 'turn') ringFx(x, y, 8, 240, '#fde68a', 0.5, 5);
 }
 function frWakeFx() { ringFx(P.x, P.y, 10, 520, FR_FORM_COL, 1.2, 8); }
 function frSnapFx(h) { burst(h.x, h.y, 40, HAL_COL, 420, 3.6, 0.7); }
@@ -23017,7 +23302,6 @@ function updatePlayer(dt) {
   let firing = mouse.down || autoFire || keys['j'] || chalAuto();
   if (haltFrozen()) firing = false;     // THE HALT: you may move or act, not both
   if (rrRaceOn() || rrOpening()) firing = false;
-  if (frLocked()) firing = false;        // the exchange swings for you: the guard is yours
   if (inVigil) firing = false;           // nothing is shot down there
   if (isTouch) {
     if (touchUI.aim) {
@@ -23032,6 +23316,8 @@ function updatePlayer(dt) {
   } else {
     P.ang = Math.atan2(mouse.wy - P.y, mouse.wx - P.x);
   }
+  // THE VAGRANT'S RITE: the exchange reads the trigger itself, and nothing else swings
+  if (frLocked()) firing = false;
   // SCORCHED EARTH holds the hull on the heading it was cast along (and in place: below)
   if (P.odScorch) P.ang = P.odScorch.ang;
 
@@ -41659,10 +41945,29 @@ function drawGearOffer() {
   ctx.restore();
 }
 
+/* The banner, on its own so a cutscene that puts the rest of the HUD away can
+   still say what is happening: THE VAGRANT'S RITE's last exchange. */
+function drawBanner() {
+  if (bannerT <= 0) return;
+  const t = bannerT / 2.2;
+  const a = clamp(Math.min(t * 3.4, (1 - t) * 6), 0, 1);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  ctx.letterSpacing = '0.05em';
+  fitFont(bannerText, W - 60, '700', 42,
+          "'Chakra Petch', Barlow, system-ui, sans-serif", 20);
+  ctx.shadowColor = bannerCol; ctx.shadowBlur = 26;
+  ctx.fillStyle = bannerCol;
+  ctx.fillText(bannerText, W / 2, H * 0.28 - (1 - a) * 14);
+  ctx.restore();
+}
+
 function drawHUD() {
   const pad = 18;
   ctx.textBaseline = 'middle';
   hudBotY = H - pad - 30;
+  if (frCutOn()) { drawBanner(); return; }   // THE VAGRANT'S RITE: the last exchange is a cutscene
 
   /* --- health bar --- */
   const bw = Math.min(340, W * 0.4), bh = 16;
@@ -41958,20 +42263,7 @@ function drawHUD() {
   }
 
   /* --- banner --- */
-  if (bannerT > 0) {
-    const t = bannerT / 2.2;
-    const a = clamp(Math.min(t * 3.4, (1 - t) * 6), 0, 1);
-    ctx.save();
-    ctx.globalAlpha = a;
-    ctx.textAlign = 'center';
-    ctx.letterSpacing = '0.05em';
-    fitFont(bannerText, W - 60, '700', 42,
-            "'Chakra Petch', Barlow, system-ui, sans-serif", 20);
-    ctx.shadowColor = bannerCol; ctx.shadowBlur = 26;
-    ctx.fillStyle = bannerCol;
-    ctx.fillText(bannerText, W / 2, H * 0.28 - (1 - a) * 14);
-    ctx.restore();
-  }
+  drawBanner();
 
   /* --- build chips (owned upgrades) — hidden under full-screen overlays --- */
   const owned = state === 'play' ? Object.keys(P.up) : [];
