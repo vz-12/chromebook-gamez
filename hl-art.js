@@ -2179,84 +2179,836 @@ function drawHlHatch(r, T) {
   }
   ctx.restore();
 }
-/* ---- the vigil's prize skins (DEV_SKINS 'hl-*'): fx 'hallows' with a tier
-   1–3, and 'lostsoul'. Called from SkinFx the way the imperial line is. ---- */
-function hlSkinUnder(s) {
-  ctx.save(); ctx.globalCompositeOperation = 'lighter';
-  if (s.fx === 'lostsoul') drawGlow(P.x, P.y, 46, '#a5f3fc', 0.1 + 0.05 * hlHash(Math.floor(uiTime * 9)));
-  else if ((s.tier || 1) >= 2) drawGlow(P.x, P.y + 4, 42, '#f97316', 0.12 * hlFlicker(uiTime, 1.3, 0.7));
+/* ---- THE WARDROBE: the vigil's prize skins (DEV_SKINS 'hl-*') ---------------
+   Drawn on THE WARDROBE's hooks (HALLOWS-SKINS-GUIDE.txt); every one reads the
+   wearer, `me`, and never the game. These replace the 27 Sep prize hooks
+   (hlSkinUnder / Player / Bullet / Part / Enemy), which are gone.
+
+   One line, a pumpkin going from carved to burning (fx 'hallows', me.tier):
+     1 THE CARVED    the hull is the rind: ribs, a lid cut round the stem at
+                     the tail, a vine streaming astern, a face cut into it with
+                     nothing behind. Rounds are seeds. Kills are cut and spill
+                     seeds. Nothing of it glows: in a dark room it goes dark.
+     2 THE LANTERN   the same, lit from inside: the face burns (a real light
+                     in THE PATCH), rounds are sparks and go out as sparks.
+     3 ALL HALLOWS   burning: the ribs glow with the heat of the fight, fire
+                     climbs off the hull and out of the eyes, three small jacks
+                     keep it company, rounds are fire, and kills and the
+                     game's own sparks come apart as embers.
+   And on top, THE LOST SOUL (fx 'lostsoul'): the ordinary starting hull as a
+   ghost, flickering at 4%, shedding cold. It flares whole on a streak or a
+   level, and on death folds down to one cold point that goes out.
+
+   Equip is carved in front of you (and lit, and set burning, by tier); death
+   snuffs the face and leaves the smoke. Orange is the patch, cold is only
+   the soul, as for Act I. Helpers are hlSk* / HL_SK; state lives on me.art.
+------------------------------------------------------------------------------ */
+const HL_SK = {
+  seed: '#f5e6c8', seedLo: '#c9b48c', flesh: '#f6c68b', cavity: '#3a1204', burn: '#ea580c',
+  fs: 6.5,                                          // the face's size, hull units
+  // the ordinary hull (index.html's hullPath('runner')), for the soul's equip
+  runner: [18, 0, 9, 3.4, 5.5, 8.5, -5, 13, -8.5, 9.5, -6, 4.2, -10.5, 3.2, -6.5, 0, -10.5, -3.2, -6, -4.2,
+           -8.5, -9.5, -5, -13, 5.5, -8.5, 9, -3.4]
+};
+const hlSkSoul = me => me.fx === 'lostsoul';
+const hlSkHex = (c, d) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : d);
+/* where the face sits on this pilot's hull (clear of the lid at the tail) */
+function hlSkFaceX(me) { return Math.max(me.sockL('canopy')[0] + 1, me.sockL('tail')[0] + 10); }
+/* the carved face in hull space, eyes to the nose. ks: each piece's size 0..1 (null = whole) */
+function hlSkFacePath(cx, s, ks) {
+  ctx.beginPath();
+  for (let i = 0; i < 4; i++) {
+    const k = ks ? ks[i] : 1;
+    if (k <= 0.01) continue;
+    const P = HL_ART_FACE[i];
+    let mx = 0, my = 0;
+    for (const p of P) { mx += p[0]; my += p[1]; }
+    mx /= P.length; my /= P.length;
+    for (let j = 0; j < P.length; j++) {
+      const fx = mx + (P[j][0] - mx) * k, fy = my + (P[j][1] - my) * k;
+      j ? ctx.lineTo(cx - fy * s, fx * s) : ctx.moveTo(cx - fy * s, fx * s);
+    }
+    ctx.closePath();
+  }
+}
+function hlSkEyes(me) {
+  const cx = hlSkFaceX(me), s = HL_SK.fs;
+  return [me.local(cx + 0.16 * s, -0.35 * s), me.local(cx + 0.16 * s, 0.35 * s)];
+}
+/* how far the equip has carved (and lit) the face */
+function hlSkCarve(me) {
+  const m = me.playing('hlsEquip')[0];
+  if (!m) return { ks: null, lit: 1 };
+  const t = m.age;
+  return { ks: [0, 1, 2, 3].map(i => hlEase('outBack', clamp((t - 0.12 - i * 0.2) / 0.18, 0, 1))),
+           lit: me.tier >= 2 ? hlEase('out', clamp((t - 1.2) / 0.2, 0, 1)) : 0 };
+}
+/* how bright the flame inside is: guttering when hurt or low, flaring on the good moments */
+function hlSkLevel(me) {
+  if (me.tier < 2) return 0;
+  const f = hlFlicker(uiTime, 2.2, 0.7 + me.lowK * 0.7);
+  let L = (0.62 + 0.38 * f) * (1 - 0.55 * me.lowK) * (1 - 0.65 * (me.art.gutter || 0));
+  L += me.pulse * 0.2 + (me.tier >= 3 ? me.heat * 0.3 : 0) + me.env('streak', 1.2) * 0.8
+     + me.env('level', 1) * 0.6 + me.env('heal', 0.6) * 0.4 + me.env('wave', 0.6) * 0.3;
+  return L * hlSkCarve(me).lit;
+}
+/* which way fire climbs: up the screen, pushed back by the way it is going */
+function hlSkUp(me, k = 0.25) { return Math.atan2(-60 - me.vy * k, -me.vx * k); }
+/* a tongue of flame from (x, y), its tip along ang. Additive. */
+function hlSkTongue(x, y, h, ang, seed, a, col, hi) {
+  if (h < 0.5 || a <= 0) return;
+  const f = hlFlicker(uiTime, seed, 0.9), hh = h * (0.7 + 0.4 * f), w = h * 0.3;
+  const lean = (hlNoise(uiTime * 3 + seed, 4) - 0.5) * 1.2;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang + lean * 0.35);
+  ctx.globalAlpha = a * (0.6 + 0.4 * f); ctx.fillStyle = col;
+  ctx.beginPath(); ctx.moveTo(0, -w);
+  ctx.quadraticCurveTo(hh * 0.55, -w * 1.1, hh, lean * w);
+  ctx.quadraticCurveTo(hh * 0.55, w * 1.1, 0, w);
+  ctx.quadraticCurveTo(-w * 0.8, 0, 0, -w); ctx.fill();
+  ctx.fillStyle = hi; ctx.globalAlpha = a * 0.85 * f;
+  hlArtEll(hh * 0.22, 0, hh * 0.26, w * 0.45); ctx.fill();
   ctx.restore();
 }
-function hlSkinPlayer(s) {
-  const C = HL_ART_C, tier = s.tier || 1, a = P.ang || 0;
+/* a four-point glint */
+function hlSkStar(x, y, r, a, col) {
+  ctx.globalAlpha = a; ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+  ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+/* the rind's ribs, pole to pole, and the lid cut round the stem (hull space) */
+function hlSkRibs() {
+  ctx.beginPath();
+  for (const y0 of [-11, -5.5, 5.5, 11]) { ctx.moveTo(-15, y0 * 0.25); ctx.quadraticCurveTo(3, y0 * 1.5, 24, y0 * 0.1); }
+}
+function hlSkLid(me) {
+  const tx = me.sockL('tail')[0];
+  ctx.beginPath();
+  for (let i = 0; i <= 10; i++) {
+    const a = -1.25 + i * 0.25, r = i % 2 ? 5.6 : 4.5;
+    i ? ctx.lineTo(tx + Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(tx + Math.cos(a) * r, Math.sin(a) * r);
+  }
+}
+/* the pumpkin hull (hull space) */
+function hlSkRind(me) {
+  const C = HL_ART_C, T = me.tier, cx = hlSkFaceX(me), s = HL_SK.fs, tx = me.sockL('tail')[0];
   ctx.save();
-  if (s.fx === 'lostsoul') {
-    // the ordinary hull again, a ghost of it, at four percent
-    const f = hlHash(Math.floor(uiTime * 11) * 1.7);
+  if (me.phasing) ctx.globalAlpha *= 0.55;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const la = -2.36 - me.ang;                              // the light, from the screen's top left
+  const g = ctx.createRadialGradient(Math.cos(la) * 8, Math.sin(la) * 8, 1, 0, 0, 21);
+  g.addColorStop(0, C.rindHi); g.addColorStop(0.5, C.rind); g.addColorStop(1, C.rindLo);
+  me.hullPath(); ctx.fillStyle = g; ctx.fill();
+  ctx.save();
+  me.hullPath(); ctx.clip();
+  hlSkRibs(); ctx.strokeStyle = rgba(C.rindDeep, 0.55); ctx.lineWidth = 1.1; ctx.stroke();
+  ctx.translate(0, -0.8); hlSkRibs(); ctx.strokeStyle = rgba(C.rindHi, 0.22); ctx.lineWidth = 0.6; ctx.stroke();
+  ctx.restore();
+  hlSkLid(me); ctx.strokeStyle = rgba(C.hole, 0.85); ctx.lineWidth = 0.9; ctx.stroke();
+  // the stem, in the notch at the tail
+  ctx.beginPath(); ctx.moveTo(tx + 0.6, -1.6);
+  ctx.quadraticCurveTo(tx - 3, -2.6, tx - 5.2, -1.2); ctx.quadraticCurveTo(tx - 5.8, 0.4, tx - 3.6, 0.7);
+  ctx.quadraticCurveTo(tx - 1.6, 0.9, tx + 0.6, 1.6); ctx.closePath();
+  ctx.fillStyle = C.stem; ctx.fill(); ctx.strokeStyle = C.stemHi; ctx.lineWidth = 0.6; ctx.stroke();
+  // the face: flesh at the cut, dark (or the lantern's cavity) behind
+  const { ks } = hlSkCarve(me);
+  hlSkFacePath(cx, s, ks);
+  ctx.strokeStyle = HL_SK.flesh; ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.fillStyle = T >= 2 ? HL_SK.cavity : C.hole; ctx.fill();
+  // what the game would have shown on the stock hull
+  if (me.hurt > 0 || me.phasing) {
+    me.hullPath();
+    ctx.fillStyle = rgba(hlSkHex(me.hullCol, '#fecaca'), me.phasing ? 0.35 : Math.min(0.55, me.hurt * 1.4));
+    ctx.fill();
+  }
+  me.hullPath(); ctx.strokeStyle = C.rindLo; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.restore();
+}
+function hlSkPumpkinFace(w, h) { hlArtFacePath(0, h * 0.05, w * 0.72, 1, 1); ctx.fillStyle = HL_ART_C.hole; ctx.fill(); }
+function hlSkOrbiters(me, back) {
+  const O = me.art.orb;
+  if (!O) return;
+  for (const o of O) if ((Math.sin(o.a) < 0) === back) hlArtPumpkin(o.x, o.y, 3.8, { face: hlSkPumpkinFace });
+}
+
+/* ---- the soul ---- */
+/* how much of the ghost is there: most of it, with dropouts, whole on a flare */
+function hlSoulFlick(me) {
+  const t = uiTime, n = Math.floor(t * 12);
+  let v = 0.55 + 0.2 * hlNoise(t * 3, 5);
+  const d = hlHash(n * 1.37 + 0.5);
+  if (d < 0.06 + me.lowK * 0.16) v *= 0.08;
+  else if (d > 0.975) v = 1;
+  if (me.env('hurt', 0.5) > 0 && hlHash(n * 3.1) > 0.45) v *= 0.15;
+  const flare = Math.max(me.env('streak', 1.6, 'in'), me.env('level', 1, 'in') * 0.85, me.env('heal', 0.6) * 0.5);
+  v = lerp(v, 1, flare);
+  const eq = me.playing('soulEquip')[0];
+  if (eq) v *= hlSpan(eq.k, 0.5, 0.7);
+  return v;
+}
+function hlSoulHull(me) {
+  const C = HL_ART_C, v = hlSoulFlick(me), n = Math.floor(uiTime * 12);
+  const col = me.hurt > 0 ? hlSkHex(me.hullCol, C.cold) : C.cold;
+  ctx.save();
+  if (me.phasing) ctx.globalAlpha *= 0.5;
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineJoin = 'round';
+  hullPath('runner'); ctx.fillStyle = rgba(col, 0.04 + 0.07 * v); ctx.fill();
+  ctx.lineWidth = 1.3; ctx.strokeStyle = rgba(col, 0.18 + 0.62 * v);
+  ctx.setLineDash([3 + v * 7, 1.5 + (1 - v) * 4]); ctx.lineDashOffset = -uiTime * 9; ctx.stroke();
+  ctx.setLineDash([]);
+  const gl = hlHash(n * 7.7) > 0.93 || me.env('hurt', 0.4) > 0 ? (hlHash(n * 2.3) - 0.5) * 5 : 0;
+  if (gl) { ctx.translate(-gl * 0.4, gl); hullPath('runner'); ctx.strokeStyle = rgba('#e0f2fe', 0.28 * v + 0.08); ctx.lineWidth = 0.7; ctx.stroke(); ctx.translate(gl * 0.4, -gl); }
+  ctx.fillStyle = rgba('#e0f2fe', 0.25 + 0.65 * v); ctx.beginPath(); ctx.arc(3, 0, 2.2, 0, TAU); ctx.fill();
+  ctx.restore();
+  return true;
+}
+
+/* ---- particle kinds of the skins' own ---- */
+const HL_SK_KINDS = {
+  /* a spark: a short streak that drags to a stop */
+  hlsSpark: {
+    layer: 'glow',
+    make: (q, o) => { const arc = o.arc ?? Math.PI, a = (o.ang ?? rnd(TAU)) + rnd(-arc, arc), s = rnd(40, 170) * (o.speed || 1);
+                      q.vx = Math.cos(a) * s + (o.vx || 0); q.vy = Math.sin(a) * s + (o.vy || 0);
+                      q.life = q.max = rnd(0.18, 0.5) * (o.life || 1); q.col = o.col || '#fdba74'; q.w = rnd(0.6, 1.3) * (o.size || 1); },
+    step: (q, dt) => { const k = Math.pow(0.03, dt); q.vx *= k; q.vy *= k; q.vy += 30 * dt; q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const k = q.life / q.max;
+                 ctx.globalAlpha = k; ctx.strokeStyle = q.col; ctx.lineWidth = q.w; ctx.lineCap = 'round';
+                 ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x - q.vx * 0.05, q.y - q.vy * 0.05); ctx.stroke();
+                 ctx.fillStyle = '#fff7ed'; ctx.fillRect(q.x - 0.5, q.y - 0.5, 1, 1); }
+  },
+  /* an ember off a kill: a tumbling shard, cooling white → orange → out, drifting up */
+  hlsShard: {
+    layer: 'glow',
+    make: (q, o) => { const arc = o.arc ?? Math.PI, a = (o.ang ?? rnd(TAU)) + rnd(-arc, arc), s = rnd(30, 200) * (o.speed || 1);
+                      q.vx = Math.cos(a) * s; q.vy = Math.sin(a) * s; q.life = q.max = rnd(0.7, 1.7) * (o.life || 1);
+                      q.r = rnd(1.1, 3) * (o.size || 1); q.rot = rnd(TAU); q.spin = rnd(-12, 12); q.col = o.col || '#f97316'; },
+    step: (q, dt) => { const k = Math.pow(0.1, dt); q.vx *= k; q.vy *= k; q.vy -= 20 * dt; q.rot += q.spin * dt; q.x += q.vx * dt; q.y += q.vy * dt; },
+    draw: q => { const k = q.life / q.max, r = q.r * (0.5 + 0.5 * k);
+                 drawGlow(q.x, q.y, r * 4, q.col, 0.3 * k);
+                 ctx.globalAlpha = Math.min(1, k * 1.6);
+                 ctx.fillStyle = k > 0.7 ? '#fff7ed' : k > 0.4 ? '#fdba74' : q.col;
+                 const c = Math.cos(q.rot), s = Math.sin(q.rot);
+                 ctx.beginPath(); ctx.moveTo(q.x + c * r, q.y + s * r);
+                 ctx.lineTo(q.x - c * r * 0.6 - s * r * 0.5, q.y - s * r * 0.6 + c * r * 0.5);
+                 ctx.lineTo(q.x - c * r * 0.4 + s * r * 0.6, q.y - s * r * 0.4 - c * r * 0.6);
+                 ctx.closePath(); ctx.fill(); }
+  },
+  /* the soul's shedding: a cold fleck that is there and then is not */
+  hlsFlake: {
+    layer: 'glow',
+    make: (q, o) => { q.vx = rnd(-14, 14) + (o.vx || 0); q.vy = rnd(-30, -6) + (o.vy || 0);
+                      q.life = q.max = rnd(0.5, 1.3) * (o.life || 1); q.r = rnd(0.6, 1.5) * (o.size || 1); q.seed = Math.random() * 99; },
+    step: (q, dt) => { q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= Math.pow(0.4, dt); },
+    draw: q => { if (hlHash(Math.floor(uiTime * 16) + q.seed) < 0.3) return;
+                 const k = q.life / q.max;
+                 drawGlow(q.x, q.y, q.r * 4, '#a5f3fc', 0.25 * k);
+                 ctx.globalAlpha = k; ctx.fillStyle = '#e0f2fe'; ctx.fillRect(q.x - q.r / 2, q.y - q.r / 2, q.r, q.r); }
+  }
+};
+
+/* ================================ the look, the clock ================================ */
+function hlSkinLook(me) {
+  if (hlSkSoul(me)) return { trail: 0.6, trailGap: 3, kinds: HL_SK_KINDS };
+  return { trail: [0.3, 0.4, 0.55][me.tier - 1] || 0.3, kinds: HL_SK_KINDS, drag: 1.0 };
+}
+function hlSkinPreload(me) {
+  const cols = hlSkSoul(me) ? ['#a5f3fc', '#e0f2fe'] : ['#f97316', '#fde68a', '#ea580c', '#fdba74', '#fb923c', '#c2410c', '#fff7ed', '#f6c68b'];
+  return [() => { for (const c of cols) { hlLightSprite(c); if (typeof glowSprite === 'function') glowSprite(c); } }];
+}
+function hlSkinTick(me, dt) {
+  if (hlSkSoul(me)) {
+    if (me.hidden || me.down) return;
+    me.every('wisp', 3 + me.speed * 0.02 + me.lowK * 4, () => {
+      const p = me.local(rnd(-9, 9), rnd(-8, 8));
+      me.emit('wisp', p.x, p.y, 1, { size: 0.55, life: 0.7, vx: -me.vx * 0.15, vy: -me.vy * 0.15 });
+    });
+    me.every('flake', 1.5 + me.lowK * 3, () => { const p = me.local(rnd(-10, 14), rnd(-10, 10)); me.emit('hlsFlake', p.x, p.y, 1); });
+    return;
+  }
+  const A = me.art, T = me.tier, C = HL_ART_C;
+  A.gutter = Math.max(0, (A.gutter || 0) - dt * 2.2);
+  const vine = me.rope('vine', 'tail', [5, 7, 9][T - 1] || 5, 3, { drag: 0.9, flutter: 60 });
+  // the equip: flesh chips while it is carved, sparks as it catches, the roar
+  const eq = me.playing('hlsEquip')[0];
+  if (eq && eq.age > 0.1 && eq.age < 0.95) me.every('chips', 26, () => {
+    const p = me.local(hlSkFaceX(me) + rnd(-3, 3), rnd(-4, 4));
+    me.emit('clod', p.x, p.y, 1, { col: Math.random() < 0.5 ? HL_SK.flesh : C.rindHi, size: 0.35, speed: 0.4, life: 0.5 });
+  });
+  if (eq && T >= 2 && eq.age > 1.2 && !eq.art.lit) {
+    eq.art.lit = true;
+    const f = me.local(hlSkFaceX(me), 0);
+    me.emit('hlsSpark', f.x, f.y, 12, { speed: 0.8 });
+  }
+  if (eq && T >= 3 && eq.age > 1.7 && !eq.art.roar) {
+    eq.art.roar = true;
+    me.emit('hlsShard', me.x, me.y, 18, { speed: 1.1 });
+    me.emit('ember', me.x, me.y, 18, { spread: 10 });
+  }
+  // after a death: the smoke off the snuffed face
+  for (const m of me.playing('hlsDeath')) if (T >= 2 && m.k > 0.4 && m.k < 0.95)
+    me.every('dsmoke', 7, () => me.emit('smoke', m.x + rnd(-2, 2), m.y, 1, { a: 0.14 }));
+  if (me.hidden || me.down) return;
+  // smoke off the lid: always once it burns, and any tier when low
+  const sm = (T >= 3 ? 1.2 + me.heat * 5 : 0) + me.lowK * 7;
+  if (sm > 0.1) { const lid = me.sock('tail'); me.every('smoke', sm, () => me.emit('smoke', lid.x, lid.y, 1, { a: 0.05 + me.lowK * 0.08, size: 0.6 })); }
+  if (T < 3) return;
+  me.every('emb', 3 + me.heat * 16 + me.pulse * 10, () => {
+    const p = me.local(rnd(-8, 12), rnd(-9, 9));
+    me.emit('ember', p.x, p.y, 1, { size: 0.8, life: 0.8, vx: -me.vx * 0.25, vy: -me.vy * 0.25 });
+  });
+  const tip = vine.p[vine.p.length - 1];
+  me.every('vtip', 4, () => me.emit('ember', tip.x, tip.y, 1, { size: 0.6, life: 0.6 }));
+  if (me.rounds.size) {
+    const Rs = [...me.rounds.values()];
+    me.every('rtr', Rs.length * 10, () => { const R = Rs[(Math.random() * Rs.length) | 0]; me.emit('ember', R.x, R.y, 1, { size: 0.6, life: 0.45 }); });
+  }
+  // three small jacks, lagging a little behind their places round the hull
+  const O = A.orb || (A.orb = [0, 1, 2].map(() => ({ x: me.x, y: me.y, a: 0 })));
+  O.forEach((o, i) => {
+    const a = me.clock * 1.15 + i * TAU / 3, R = me.R * 1.1;
+    const tx = me.x + Math.cos(a) * R, ty = me.y + Math.sin(a) * R * 0.8 + Math.sin(me.clock * 2.3 + i) * 1.5;
+    if (Math.hypot(tx - o.x, ty - o.y) > 200) { o.x = tx; o.y = ty; }
+    const k = 1 - Math.exp(-dt * 10);
+    o.x += (tx - o.x) * k; o.y += (ty - o.y) * k; o.a = a;
+  });
+}
+
+/* ================================ the layers ================================ */
+function hlSkinTrail(me) {
+  const pts = me.trailPts(), C = HL_ART_C;
+  if (pts.length < 3) return;
+  if (hlSkSoul(me)) {
+    // broken, the way a signal breaks up
+    const roll = Math.floor(uiTime * 9) * 31;
+    let run = [];
+    const out = () => { if (run.length > 1) me.ribbon(run, { w0: 5, w1: 0.5, a0: 0.3, a1: 0, col: C.cold, comp: 'lighter', quads: true }); run = []; };
+    for (let i = 0; i < pts.length; i++) { run.push(pts[i]); if (hlHash(i * 0.37 + roll) < 0.18) out(); }
+    out();
+    return;
+  }
+  const T = me.tier;
+  if (T === 1) { me.ribbon(pts, { w0: 6, w1: 0, a0: 0.2, a1: 0, col: C.rind, comp: 'lighter' }); return; }
+  if (T === 2) {
+    me.ribbon(pts, { w0: 9, w1: 0, a0: 0.3, a1: 0, col: C.flame, comp: 'lighter', ease: 'out' });
+    me.ribbon(pts, { w0: 3, w1: 0, a0: 0.35, a1: 0, col: C.flameHi, comp: 'lighter' });
+  } else {
+    me.ribbon(pts, { w0: 15, w1: 1, a0: 0.34, a1: 0, col: HL_SK.burn, comp: 'lighter', wob: 0.45, wobSpd: 5, seed: 3, quads: true });
+    me.ribbon(pts, { w0: 8, w1: 0, a0: 0.4, a1: 0, col: C.flame, comp: 'lighter', wob: 0.35, wobSpd: 7, seed: 5 });
+    me.ribbon(pts, { w0: 3, w1: 0, a0: 0.5, a1: 0, col: C.flameHi, comp: 'lighter' });
+  }
+  if (pts.some(p => p.dash)) for (const s of ['tipL', 'tipR'])
+    me.ribbon(me.trailPts(s, 0.3), { w0: 2.4, w1: 0, a0: 0.6, a1: 0, col: C.flameHi, comp: 'lighter' });
+}
+function hlSkinBack(me) {
+  if (hlSkSoul(me)) return;
+  const C = HL_ART_C, B = me.bodies.vine;
+  if (B) {
+    const b = B.b, P = b.p;
+    hlDrawRope(b, { w0: 2.2, w1: 0.8, col: C.vine, stroke: C.vineLo, lw: 0.5 });
+    // leaves off the vine, alternating sides, and a tendril curling at the end
+    for (let i = 2; i < P.length - 1; i += 3) {
+      const a = Math.atan2(P[i + 1].y - P[i - 1].y, P[i + 1].x - P[i - 1].x) + (i % 2 ? 1 : -1) * 1.1;
+      ctx.save(); ctx.translate(P[i].x, P[i].y); ctx.rotate(a);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(2, -1.9, 4.2, 0); ctx.quadraticCurveTo(2, 1.9, 0, 0);
+      ctx.fillStyle = C.leaf; ctx.fill(); ctx.strokeStyle = C.leafHi; ctx.lineWidth = 0.4; ctx.stroke();
+      ctx.restore();
+    }
+    const e = P[P.length - 1], p = P[P.length - 2], a0 = Math.atan2(e.y - p.y, e.x - p.x);
+    ctx.beginPath();
+    for (let j = 0; j <= 14; j++) {
+      const u = j / 14, r = 2.6 * (1 - u * 0.85), a = a0 - Math.PI / 2 + u * TAU * 1.4;
+      const x = e.x + Math.cos(a0) * 2.6 + Math.cos(a) * r, y = e.y + Math.sin(a0) * 2.6 + Math.sin(a) * r;
+      j ? ctx.lineTo(x, y) : ctx.moveTo(e.x, e.y);
+    }
+    ctx.strokeStyle = C.vineHi; ctx.lineWidth = 0.5; ctx.stroke();
+    if (me.tier >= 3) { ctx.globalCompositeOperation = 'lighter'; drawGlow(e.x, e.y, 6, C.flame, 0.5 * hlFlicker(uiTime, 9, 1)); }
+  }
+  if (me.tier >= 3) { ctx.globalCompositeOperation = 'source-over'; hlSkOrbiters(me, true); }
+}
+function hlSkinHullSwap(me) {
+  if (hlSkSoul(me)) return hlSoulHull(me);
+  hlSkRind(me);
+  return true;
+}
+function hlSkinHull(me) { return false; }
+function hlSkinFront(me) {
+  if (!hlSkSoul(me) && me.tier >= 3) hlSkOrbiters(me, false);
+  return true;
+}
+function hlSkinGhost(me, g, f) {
+  const C = HL_ART_C;
+  if (hlSkSoul(me)) {
     ctx.globalCompositeOperation = 'lighter';
-    hlArtHull(P.x - Math.cos(a) * 3, P.y - Math.sin(a) * 3, a, 1.35);
-    ctx.strokeStyle = rgba(C.cold, 0.18 + 0.4 * f); ctx.lineWidth = 1.2; ctx.setLineDash([2 + f * 5, 3 + (1 - f) * 4]); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
+    ctx.translate((hlHash(f * 91 + Math.floor(uiTime * 20)) - 0.5) * 2, 0);
+    hullPath('runner'); ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeStyle = rgba(C.cold, 0.4 * f); ctx.stroke();
     return true;
   }
-  // a face cut into the hull; lit from tier 2
-  ctx.translate(P.x, P.y); ctx.rotate(a + Math.PI / 2);
-  const lvl = tier >= 2 ? 0.6 + 0.4 * hlFlicker(uiTime, 2.2, 0.8) : 0;
-  if (tier >= 2) { ctx.globalCompositeOperation = 'lighter'; drawGlow(0, 2, 16, C.flame, 0.3 * lvl); }
-  ctx.globalCompositeOperation = tier >= 2 ? 'lighter' : 'source-over';
-  ctx.fillStyle = tier >= 2 ? rgba(C.flameHi, 0.85 * lvl) : 'rgba(12,5,3,0.85)';
-  hlArtFacePath(0, 2, 7, 1, 1); ctx.fill();
-  ctx.restore();
-  ctx.save(); ctx.globalCompositeOperation = 'lighter';
-  const R = (P.r || 12) + 11;
-  ctx.strokeStyle = rgba(s.col || '#fb923c', 0.18 + Math.sin(uiTime * 2.2) * 0.07); ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
-  if (tier >= 3) {
-    // three small lanterns keep it company
-    for (let i = 0; i < 3; i++) {
-      const b = uiTime * 0.9 + i * TAU / 3, x = P.x + Math.cos(b) * R, y = P.y + Math.sin(b) * R;
-      drawGlow(x, y, 9, C.flame, 0.35);
-      ctx.fillStyle = C.flameHi; ctx.globalAlpha = 0.9; hlArtFacePath(x, y, 3.2, 1, 1); ctx.fill(); ctx.globalAlpha = 1;
+  const T = me.tier;
+  ctx.globalAlpha = 0.5 * f;
+  me.hullPath(); ctx.fillStyle = T >= 2 ? C.rind : C.rindLo; ctx.fill();
+  hlSkFacePath(hlSkFaceX(me), HL_SK.fs, null);
+  if (T >= 2) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = C.flameHi; ctx.globalAlpha = 0.75 * f; }
+  else ctx.fillStyle = C.hole;
+  ctx.fill();
+  return true;
+}
+function hlSkinRound(me, b, c, R) {
+  const C = HL_ART_C, r = b.r || 3.8, ang = R.ang, tint = R.kind === 'plain' ? null : hlSkHex(c, null);
+  if (hlSkSoul(me)) {
+    const tc = tint || C.cold, len = Math.min(R.dist, r * 6);
+    drawGlow(b.x, b.y, r * 4, tc, 0.4);
+    ctx.strokeStyle = rgba(tc, 0.5); ctx.lineWidth = r; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - Math.cos(ang) * len, b.y - Math.sin(ang) * len); ctx.stroke();
+    ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.75, 0, TAU); ctx.fill();
+    return true;
+  }
+  const T = me.tier;
+  if (T === 1) {
+    // a seed, tumbling a little; a crit (or any state) rings it in its colour
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(b.x, b.y, r * 3.4, tint || '#fdba74', 0.32);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.translate(b.x, b.y); ctx.rotate(ang + Math.sin(R.age * 16 + R.seed * 9) * 0.35);
+    ctx.beginPath(); ctx.moveTo(r * 1.5, 0);
+    ctx.quadraticCurveTo(r * 0.4, r * 1.05, -r * 1.1, r * 0.55); ctx.quadraticCurveTo(-r * 1.5, 0, -r * 1.1, -r * 0.55);
+    ctx.quadraticCurveTo(r * 0.4, -r * 1.05, r * 1.5, 0); ctx.closePath();
+    ctx.fillStyle = HL_SK.seed; ctx.fill();
+    ctx.strokeStyle = tint || HL_SK.seedLo; ctx.lineWidth = tint ? 1.3 : 0.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(r * 1.05, 0); ctx.lineTo(-r * 0.9, 0);
+    ctx.strokeStyle = rgba(HL_SK.seedLo, 0.8); ctx.lineWidth = 0.5; ctx.stroke();
+    return true;
+  }
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  ctx.globalCompositeOperation = 'lighter';
+  if (T === 2) {
+    drawGlow(b.x, b.y, r * 4.6, tint || C.flame, 0.55);
+    const len = Math.max(1, Math.min(R.dist, r * 7));
+    const g = ctx.createLinearGradient(b.x, b.y, b.x - ca * len, b.y - sa * len);
+    g.addColorStop(0, rgba(C.flameHi, 0.9)); g.addColorStop(1, rgba(C.flame, 0));
+    ctx.strokeStyle = g; ctx.lineWidth = r * 0.9; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ca * len, b.y - sa * len); ctx.stroke();
+    // crackle thrown off behind it
+    const n = Math.floor(R.age * 40);
+    ctx.fillStyle = rgba('#fde68a', 0.85);
+    for (let i = 0; i < 2; i++) {
+      const d = r * (1.5 + hlHash(n * 3.1 + i * 7 + R.seed * 50) * 5), off = (hlHash(n * 1.7 + i * 3 + R.seed * 20) - 0.5) * r * 2.2;
+      ctx.fillRect(b.x - ca * d - sa * off - 0.6, b.y - sa * d + ca * off - 0.6, 1.2, 1.2);
     }
-    if (Math.random() < 0.3) spawnPart(P.x + rnd(-8, 8), P.y + rnd(-8, 8), rnd(20, -20), rnd(-20, -60), rnd(2, 1), '#fdba74', rnd(0.6, 0.3), 0.92);
+    ctx.fillStyle = C.flameCore; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.7, 0, TAU); ctx.fill();
+    return true;
   }
-  ctx.restore();
+  drawGlow(b.x, b.y, r * 5.2, tint || HL_SK.burn, 0.6);
+  hlSkTongue(b.x, b.y, r * (3.5 + Math.min(1, R.dist / 60) * 2.5), ang + Math.PI, R.seed * 9, 0.9, HL_SK.burn, C.flameHi);
+  drawGlow(b.x, b.y, r * 2, C.flameHi, 0.7);
+  ctx.fillStyle = C.flameCore; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.8, 0, TAU); ctx.fill();
   return true;
 }
-function hlSkinBullet(b, c, s) {
-  if (s.fx !== 'lostsoul' && (s.tier || 1) < 2) return false;
-  const C = HL_ART_C, r = b.r, ang = Math.atan2(b.vy || 0, b.vx || 1);
-  ctx.save();
-  if (s.fx === 'lostsoul') {
-    drawGlow(b.x, b.y, r * 4, C.cold, 0.4);
-    ctx.strokeStyle = rgba(C.cold, 0.5); ctx.lineWidth = r; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - Math.cos(ang) * r * 5, b.y - Math.sin(ang) * r * 5); ctx.stroke();
-    ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.8, 0, TAU); ctx.fill();
-  } else {
-    // a seed of fire: a flame lying along its flight
-    drawGlow(b.x, b.y, r * 4.2, C.flame, 0.45);
-    ctx.translate(b.x, b.y); ctx.rotate(ang);
-    ctx.fillStyle = rgba(C.flame, 0.8);
-    ctx.beginPath(); ctx.moveTo(r * 1.4, 0); ctx.quadraticCurveTo(-r * 0.2, r * 1.2, -r * 3.4, 0); ctx.quadraticCurveTo(-r * 0.2, -r * 1.2, r * 1.4, 0); ctx.fill();
-    ctx.fillStyle = C.flameHi; hlArtEll(r * 0.3, 0, r * 0.8, r * 0.5); ctx.fill();
+function hlSkinDebris(me, p, t, rad) {
+  if (hlSkSoul(me) || me.tier < 3) return false;
+  drawGlow(p.x, p.y, rad * 0.85, t > 0.6 ? '#fdba74' : t > 0.3 ? '#f97316' : '#c2410c', t * 0.45);
+  ctx.globalAlpha = Math.min(1, t * 1.4); ctx.fillStyle = t > 0.5 ? '#fff7ed' : '#fdba74';
+  ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.6, (p.r || 2) * 0.45), 0, TAU); ctx.fill();
+  return true;
+}
+function hlSkinBody(me, e, ea) {
+  if (hlSkSoul(me) || me.tier < 3 || e.boss) return;
+  const r = e.r || 12;
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(e.x, e.y + r * 0.3, r * 1.7, '#f97316', ea * (0.04 + me.heat * 0.08));
+}
+function hlSkinGlow(me) {
+  if (me.hidden || me.down) return;
+  const C = HL_ART_C;
+  if (hlSkSoul(me)) {
+    const v = hlSoulFlick(me), c = me.local(3, 0);
+    drawGlow(me.x, me.y, 36, C.cold, 0.06 + 0.1 * v);
+    me.lamp(c.x, c.y, 18, '#e0f2fe', 0.3 * v);
+    return;
   }
-  ctx.restore();
-  return true;
+  const T = me.tier;
+  if (T < 2) return;
+  const L = hlSkLevel(me), cx = hlSkFaceX(me), s = HL_SK.fs, { ks } = hlSkCarve(me);
+  const fp = me.local(cx, 0);
+  me.lamp(fp.x, fp.y, 26 + T * 8 + me.heat * 14, C.flame, 0.3 * L, 0.6, 2.2);
+  me.inHull(() => {
+    hlSkFacePath(cx, s, ks);
+    const g = ctx.createRadialGradient(cx, 0, 0, cx, 0, s * 0.9);
+    g.addColorStop(0, C.flameCore); g.addColorStop(0.35, C.flameHi); g.addColorStop(1, C.flame);
+    ctx.fillStyle = g; ctx.globalAlpha = clamp(L, 0, 1); ctx.fill();
+    if (T >= 3) {
+      // the rind glowing along its ribs and the lid, hotter as the fight goes on
+      const h = (0.25 + me.heat * 0.55 + me.pulse * 0.15) * hlFlicker(uiTime, 6.1, 0.8) * hlSkCarve(me).lit;
+      ctx.globalAlpha = 1;
+      ctx.save(); me.hullPath(); ctx.clip();
+      hlSkRibs(); ctx.strokeStyle = rgba(C.flame, clamp(h, 0, 1)); ctx.lineWidth = 1.1; ctx.stroke();
+      ctx.restore();
+      hlSkLid(me); ctx.strokeStyle = rgba(C.flameHi, clamp(h * 1.2, 0, 1)); ctx.lineWidth = 0.9; ctx.stroke();
+    }
+  });
+  if (T < 3) return;
+  const up = hlSkUp(me), hk = (0.6 + me.heat * 0.9 + me.pulse * 0.3 + me.env('streak', 1.2)) * hlSkCarve(me).lit;
+  for (const [sk, h, sd] of [['wingL', 4, 2], ['wingR', 4, 3], ['tail', 5.5, 4], ['tipL', 3, 5], ['tipR', 3, 6]]) {
+    const p = me.sock(sk);
+    hlSkTongue(p.x, p.y, h * hk, up, sd * 3.1, 0.42, HL_SK.burn, C.flameHi);
+  }
+  hlSkEyes(me).forEach((p, i) => hlSkTongue(p.x, p.y, 3.4 * hk, up, 11 + i, 0.6, C.flame, C.flameCore));
+  if (me.art.orb) for (const o of me.art.orb) {
+    const w = 3.8 * 1.1, h = 3.8 * 0.9, f = hlFlicker(uiTime, o.a % 7, 0.8);
+    hlArtFacePath(o.x, o.y + h * 0.05, w * 0.72, 1, 1);
+    ctx.globalAlpha = 0.9 * f; ctx.fillStyle = C.flameHi; ctx.fill(); ctx.globalAlpha = 1;
+    me.lamp(o.x, o.y, 14, C.flame, 0.3 * f);
+  }
 }
-function hlSkinPart(p, t, rad, s) {
-  if (s.fx === 'lostsoul' || (s.tier || 1) < 3) return false;
-  drawGlow(p.x, p.y, rad * 0.8, '#f97316', t * 0.4);
-  ctx.save(); ctx.globalAlpha = t; ctx.fillStyle = '#fff7ed';
-  ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.6, p.r * 0.5), 0, TAU); ctx.fill();
-  ctx.restore();
-  return true;
+function hlSkinMoment(me, m) {
+  const C = HL_ART_C, k = m.k, T = me.tier;
+  if (m.layer === 'glow') ctx.globalCompositeOperation = 'lighter';
+  switch (m.name) {
+    case 'hlsEquip': {
+      const t = m.age, cx = hlSkFaceX(me), s = HL_SK.fs;
+      ctx.globalCompositeOperation = 'lighter';
+      if (t > 0.1 && t < 0.95) {
+        // the knife's glint, walking the corners of the piece being cut
+        const i = clamp(Math.floor((t - 0.12) / 0.2), 0, 3), u = clamp((t - 0.12 - i * 0.2) / 0.2, 0, 1);
+        const P = HL_ART_FACE[i], q = P[Math.min(P.length - 1, Math.floor(u * P.length))];
+        const w = me.local(cx - q[1] * s, q[0] * s);
+        drawGlow(w.x, w.y, 8, '#fde68a', 0.4);
+        hlSkStar(w.x, w.y, 1 + 3.2 * Math.sin(u * Math.PI), 0.95, '#ffffff');
+      }
+      if (T >= 2 && t > 0.9 && t < 1.25) {
+        // a spark drops in
+        const u = hlEase('in', (t - 0.9) / 0.35), f = me.local(cx, 0);
+        const x = lerp(me.x + 6, f.x, u), y = lerp(me.y - 42, f.y, u);
+        drawGlow(x, y, 7, C.flameHi, 0.8);
+        ctx.fillStyle = C.flameCore; ctx.beginPath(); ctx.arc(x, y, 1.2, 0, TAU); ctx.fill();
+      }
+      if (T >= 2 && t > 1.2) { const u = clamp((t - 1.2) / 0.5, 0, 1), f = me.local(cx, 0); me.lamp(f.x, f.y, 30 + u * 40, C.flame, 0.7 * (1 - u)); }
+      if (T >= 3 && t > 1.7) {
+        const u = clamp((t - 1.7) / 0.8, 0, 1);
+        ctx.strokeStyle = rgba(C.flame, 0.7 * (1 - u)); ctx.lineWidth = 4 * (1 - u) + 0.5;
+        ctx.beginPath(); ctx.arc(me.x, me.y, me.R * (0.6 + hlEase('out3', u) * 2.6), 0, TAU); ctx.stroke();
+        me.lamp(me.x, me.y, 50 + u * 60, HL_SK.burn, 0.5 * (1 - u));
+      }
+      break;
+    }
+    case 'hlsDeath': {
+      const cx = hlSkFaceX(me), s = HL_SK.fs;
+      ctx.translate(m.x, m.y); ctx.rotate(m.ang);
+      if (T === 1) {
+        ctx.globalCompositeOperation = 'source-over';
+        hlSkFacePath(cx, s, null); ctx.strokeStyle = rgba(HL_SK.flesh, 0.7 * (1 - k)); ctx.lineWidth = 1; ctx.stroke();
+        break;
+      }
+      // the flame gutters, then goes out
+      const L = (1 - hlSpan(k, 0.3, 0.5, 'in')) * (0.45 + 0.55 * hlFlicker(uiTime * 1.6, 7, 1.4));
+      if (L > 0.01) {
+        hlSkFacePath(cx, s, null); ctx.fillStyle = rgba(C.flameHi, clamp(L, 0, 1)); ctx.fill();
+        drawGlow(cx, 0, 24, C.flame, 0.4 * L);
+      }
+      if (T >= 3 && k < 0.3) {
+        const u = k / 0.3;
+        ctx.rotate(-m.ang);
+        drawGlow(0, 0, 70 * (1 - u * 0.5), HL_SK.burn, 0.6 * (1 - u));
+        hlSkTongue(0, 0, 46 * (1 - u), -Math.PI / 2, m.seed * 9, 0.9 * (1 - u), HL_SK.burn, C.flameHi);
+      }
+      break;
+    }
+    case 'hlsSlash': {
+      const r = (m.o.r || 12) * 1.3;
+      ctx.strokeStyle = rgba(HL_SK.flesh, 0.9 * (1 - k)); ctx.lineWidth = 1.6 * (1 - k) + 0.4; ctx.lineCap = 'round';
+      for (const [d, dl] of [[0.75, 0], [-0.75, 0.08]]) {
+        const u = hlEase('out3', clamp((m.age - dl) / 0.1, 0, 1)), c = Math.cos(m.ang + d), s = Math.sin(m.ang + d);
+        ctx.beginPath(); ctx.moveTo(m.x - c * r, m.y - s * r); ctx.lineTo(m.x - c * r + c * 2 * r * u, m.y - s * r + s * 2 * r * u); ctx.stroke();
+      }
+      break;
+    }
+    case 'hlsPop': {
+      const col = hlSkHex(m.o.col, C.flame), r = m.o.r || 12;
+      drawGlow(m.x, m.y, r * 2.4, C.flame, 0.45 * (1 - k));
+      ctx.strokeStyle = rgba(C.flameHi, 0.7 * (1 - k)); ctx.lineWidth = 2 * (1 - k) + 0.3;
+      ctx.beginPath(); ctx.arc(m.x, m.y, r * (0.8 + hlEase('out3', k) * 1.6), 0, TAU); ctx.stroke();
+      drawGlow(m.x, m.y, r * 1.2, col, 0.3 * (1 - k));
+      break;
+    }
+    case 'hlsBoss': {
+      // the thing's own face, cut into the air where it died
+      const s = (m.o.r || 30) * (1.2 + hlEase('out3', k) * 0.35), a = Math.pow(1 - k, 1.5);
+      hlArtFacePath(m.x, m.y, s, 1, 1);
+      if (T === 1) { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = rgba(HL_SK.flesh, 0.8 * a); ctx.lineWidth = 2; ctx.stroke(); }
+      else { ctx.fillStyle = rgba(C.flameHi, 0.75 * a); ctx.fill(); me.lamp(m.x, m.y, s * 3, C.flame, 0.6 * a, 0.8, m.seed * 9); }
+      break;
+    }
+    case 'hlsFlash': {
+      const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.hypot(W, H) / 2);
+      g.addColorStop(0, rgba(T >= 2 ? '#fdba74' : HL_SK.flesh, (T >= 2 ? 0.18 : 0.08) * (1 - k)));
+      g.addColorStop(1, rgba(HL_SK.burn, 0.05 * (1 - k)));
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      break;
+    }
+    case 'hlsMuzzle': {
+      const p = me.sock('muzzle');
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(p.x, p.y, 4 + 10 * (1 - k), C.flameHi, 0.6 * (1 - k));
+      break;
+    }
+    case 'hlsHeal': case 'hlsShield': {
+      const soul = hlSkSoul(me);
+      const col = soul ? C.cold : m.name === 'hlsHeal' ? '#fde68a' : m.o.up ? C.flameHi : C.rindLo;
+      const r = m.name === 'hlsHeal' ? me.R * (2 - hlEase('out3', k)) : me.R + 2 + k * 5;
+      ctx.strokeStyle = rgba(col, 0.55 * (1 - k)); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, TAU); ctx.stroke();
+      break;
+    }
+    case 'hlsParry': {
+      const col = hlSkSoul(me) ? '#e0f2fe' : T >= 2 ? C.flameHi : HL_SK.flesh;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(col, 0.85 * (1 - k)); ctx.lineWidth = 2.5 * (1 - k) + 0.4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(me.x, me.y, me.R + 3 + k * 6, me.ang - 1.1, me.ang + 1.1); ctx.stroke();
+      if (m.o.perfect) { ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(col, 0.5 * (1 - k)); ctx.beginPath(); ctx.arc(me.x, me.y, me.R * (1 + hlEase('out3', k) * 2.2), 0, TAU); ctx.stroke(); }
+      break;
+    }
+    case 'hlsLevel': {
+      const col = T >= 2 ? C.flameHi : HL_SK.flesh;
+      ctx.strokeStyle = rgba(col, 0.6 * (1 - k)); ctx.lineWidth = 2 * (1 - k) + 0.4;
+      ctx.beginPath(); ctx.arc(m.x, m.y, me.R * (0.8 + hlEase('out3', k) * 1.6), 0, TAU); ctx.stroke();
+      if (T >= 3 && k < 0.6) hlSkTongue(m.x, m.y - 4, 34 * (1 - k / 0.6), -Math.PI / 2, m.seed * 7, 0.7 * (1 - k / 0.6), HL_SK.burn, C.flameHi);
+      break;
+    }
+    case 'hlsStreak': {
+      ctx.globalCompositeOperation = 'lighter';
+      const g = Math.sin(Math.min(1, k * 2.5) * Math.PI);
+      for (const p of hlSkEyes(me)) hlSkStar(p.x, p.y, 1 + g * 4.5, 0.95 * g, '#ffffff');
+      if (T >= 2) {
+        ctx.strokeStyle = rgba(C.flameHi, 0.6 * (1 - k)); ctx.lineWidth = 3 * (1 - k) + 0.4;
+        ctx.beginPath(); ctx.arc(me.x, me.y, me.R * (0.9 + hlEase('out3', k) * 2.4), 0, TAU); ctx.stroke();
+      }
+      break;
+    }
+    /* ---- the soul's ---- */
+    case 'soulEquip': {
+      // it gathers: flecks come in to the corners of the ordinary hull, then it is there, at 4%
+      const V = HL_SK.runner, n = V.length / 2, fade = 1 - hlSpan(k, 0.7, 1);
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.ang);
+      for (let i = 0; i < n; i++) {
+        const r = hlArtRng(((m.seed * 1e6) | 0) + i * 97), a0 = r() * TAU, d0 = 30 + r() * 30;
+        const u = hlEase('out3', clamp(k * 1.7 - i * 0.025, 0, 1));
+        const x = lerp(Math.cos(a0) * d0, V[i * 2], u), y = lerp(Math.sin(a0) * d0, V[i * 2 + 1], u);
+        drawGlow(x, y, 5, C.cold, 0.5 * fade);
+        ctx.globalAlpha = fade; ctx.fillStyle = '#e0f2fe'; ctx.fillRect(x - 0.7, y - 0.7, 1.4, 1.4); ctx.globalAlpha = 1;
+      }
+      if (k > 0.55) { const u = hlSpan(k, 0.55, 1); hullPath('runner'); ctx.strokeStyle = rgba('#e0f2fe', 0.8 * (1 - u)); ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.restore();
+      if (k > 0.5) {
+        const a = hlSpan(k, 0.5, 0.62) * (1 - hlSpan(k, 0.86, 1)), y = m.y + me.R + 7;
+        hlArtText('HULL 4%', m.x, y, { px: 5.5, w: 600, mono: true, ls: '0.14em', al: 'center', col: C.cold, a });
+        ctx.globalAlpha = a; ctx.strokeStyle = rgba(C.cold, 0.5); ctx.lineWidth = 0.6;
+        ctx.strokeRect(m.x - 13, y + 2.5, 26, 1.8);
+        ctx.fillStyle = '#f87171'; ctx.fillRect(m.x - 13, y + 2.5, 26 * 0.04, 1.8); ctx.globalAlpha = 1;
+      }
+      break;
+    }
+    case 'soulKill': {
+      // what it was, going up cold and dashed
+      const r = (m.o.r || 12) * (1 + k * 0.2), y = m.y - hlEase('out', k) * (m.o.boss ? 34 : 18);
+      if (hlHash(Math.floor(uiTime * 14) + m.seed * 99) < 0.15) break;
+      ctx.strokeStyle = rgba(C.cold, 0.6 * (1 - k)); ctx.lineWidth = 1; ctx.setLineDash([2.5, 2]);
+      if ((m.o.sides | 0) >= 3) poly(m.x, y, r, m.o.sides | 0, m.ang); else { ctx.beginPath(); ctx.arc(m.x, y, r, 0, TAU); }
+      ctx.stroke(); ctx.setLineDash([]);
+      drawGlow(m.x, y, r * 1.5, C.cold, 0.18 * (1 - k));
+      break;
+    }
+    case 'soulDeath': {
+      // the tab closes: the hull folds down to one cold point, and the point goes out
+      ctx.translate(m.x, m.y); ctx.rotate(m.ang);
+      if (k < 0.7) {
+        const sc = Math.max(0.03, 1 - hlSpan(k, 0.3, 0.7, 'in3'));
+        if (hlHash(Math.floor(uiTime * 15) + m.seed * 50) > (k < 0.3 ? 0.35 : 0.1)) {
+          ctx.save(); ctx.scale(sc, sc); hullPath('runner');
+          ctx.strokeStyle = rgba(C.cold, 0.8); ctx.lineWidth = 1.3 / Math.max(0.1, sc); ctx.stroke(); ctx.restore();
+        }
+      }
+      if (k > 0.55) {
+        const u = hlSpan(k, 0.55, 1);
+        if (hlHash(Math.floor(uiTime * 12) + m.seed * 80) > 0.04 + u * 0.5) {
+          drawGlow(0, 0, 10 * (1 - u * 0.6), C.cold, 0.8 * (1 - u));
+          ctx.fillStyle = rgba('#e0f2fe', 1 - u); ctx.beginPath(); ctx.arc(0, 0, 1.4, 0, TAU); ctx.fill();
+        }
+      }
+      break;
+    }
+    case 'soulFlare': {
+      ctx.strokeStyle = rgba(C.cold, 0.5 * (1 - k)); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(m.x, m.y, me.R * (0.9 + hlEase('out3', k) * (m.o.heal ? 0.5 : 2)), 0, TAU); ctx.stroke();
+      break;
+    }
+  }
 }
-function hlSkinEnemy(e, ea, s) {
-  if (s.fx === 'lostsoul' || (s.tier || 1) < 3 || e.boss) return;
+function hlSkinScreen(me) {
+  const soul = hlSkSoul(me);
+  let a = me.lowK * (0.22 + 0.08 * Math.sin(uiTime * 4)), col = soul ? '#0e3a47' : '#431407';
+  if (!soul && me.tier >= 3) { const h = Math.max(0, me.heat - 0.5) * 0.28; if (h > a) { a = h; col = '#9a3412'; } }
+  if (a < 0.01) return;
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+  g.addColorStop(0, rgba(col, 0)); g.addColorStop(1, rgba(col, a));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function hlSkinLights(me) {
+  if (me.hidden || me.down) return;
+  if (hlSkSoul(me)) { me.light({ x: me.x, y: me.y, r: 80, col: '#a5f3fc', a: 0.45 * hlSoulFlick(me), flick: 0.5, seed: 4, z: 16 }); return; }
+  if (me.tier < 2) return;                                 // THE CARVED has nothing lit behind it
+  const f = me.local(hlSkFaceX(me), 0);
+  me.light({ x: f.x, y: f.y, r: me.tier >= 3 ? 170 : 120, col: '#f97316', a: 0.75 * clamp(hlSkLevel(me), 0, 1.4), flick: 0.8, seed: 2.2, z: 18 });
+  if (me.tier >= 3 && me.art.orb) for (const o of me.art.orb) me.light({ x: o.x, y: o.y, r: 46, col: '#fb923c', a: 0.4, flick: 1, seed: 5, z: 10 });
+}
+function hlSkinStage(me, box) {
+  const soul = hlSkSoul(me), { x, y, w, h } = box;
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, soul ? '#070b12' : '#0c0709'); g.addColorStop(1, soul ? '#03050a' : '#050306');
+  ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+  const gc = soul ? '#a5f3fc' : '#c2410c', gx = x + w * 0.4, gy = y + h * 1.15;
+  const rg = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(w, h) * 0.8);
+  rg.addColorStop(0, rgba(gc, soul ? 0.07 : 0.12)); rg.addColorStop(1, rgba(gc, 0));
+  ctx.fillStyle = rg; ctx.fillRect(x, y, w, h);
+  // ground fog, drifting
   ctx.save(); ctx.globalCompositeOperation = 'lighter';
-  drawGlow(e.x, e.y + e.r * 0.3, e.r * 1.6, '#f97316', 0.06 * ea);
+  for (let i = 0; i < 4; i++) {
+    const span = w + h * 2, fx = x - h + ((uiTime * (5 + i * 3) + i * 211) % span), fy = y + h * (0.6 + i * 0.11);
+    ctx.save(); ctx.translate(fx, fy); ctx.scale(3.4, 0.5);
+    drawGlow(0, 0, h * 0.45, soul ? '#64748b' : '#78716c', 0.05);
+    ctx.restore();
+  }
   ctx.restore();
+  return true;
+}
+
+/* ================================ the moments ================================ */
+function hlSkinEquipFx(me) {
+  if (hlSkSoul(me)) { me.moment('soulEquip', 1.8, { follow: true, layer: 'glow' }); return; }
+  me.moment('hlsEquip', [1.3, 1.9, 2.5][me.tier - 1] || 1.3, { follow: true, layer: 'front' });
+}
+function hlSkinRunFx(me) { me.art = {}; }
+function hlSkinShotFx(me, b, R) {
+  // a crit glints at the muzzle, whatever the tier
+  if (!R.crit) return;
+  const m = me.sock('muzzle');
+  me.emit('hlsSpark', m.x, m.y, 2, { ang: R.ang, arc: 0.5, col: hlSkSoul(me) ? '#e0f2fe' : '#fbbf24', size: 0.8 });
+}
+function hlSkinVolleyFx(me, n, crits) {
+  const m = me.sock('muzzle');
+  if (hlSkSoul(me)) { me.emit('hlsFlake', m.x, m.y, Math.min(4, n)); return; }
+  if (me.tier < 2) return;
+  me.moment('hlsMuzzle', 0.09, { follow: true, layer: 'front' });
+  me.emit('hlsSpark', m.x, m.y, Math.min(6, 1 + n), { ang: me.ang, arc: 0.6, speed: 0.9 });
+}
+function hlSkinRoundEndFx(me, R, how) {
+  if (hlSkSoul(me)) { me.emit('wisp', R.x, R.y, 1, { size: 0.5, life: 0.5 }); return; }
+  const T = me.tier, back = R.ang + Math.PI, hit = how === 'hit';
+  if (T === 1) { if (hit) me.emit('clod', R.x, R.y, 1, { col: HL_SK.seed, size: 0.5, speed: 0.5 }); return; }
+  me.emit('hlsSpark', R.x, R.y, hit ? 6 : 3, { ang: back, arc: 1.3, speed: hit ? 1 : 0.5 });
+  if (!hit) me.emit('smoke', R.x, R.y, 1, { a: 0.1, size: 0.5 });
+  if (T >= 3) me.emit('hlsShard', R.x, R.y, hit ? 3 : 1, { ang: back, arc: 1.2, speed: 0.6, size: 0.6 });
+}
+function hlSkinKillFx(me, e, o) {
+  const big = o.boss ? 3 : o.elite ? 1.8 : 1;
+  if (hlSkSoul(me)) {
+    me.moment('soulKill', o.boss ? 2 : 1.2, { x: o.x, y: o.y, r: o.r, sides: o.sides, boss: o.boss, ang: e.ang || 0, layer: 'glow' });
+    me.emit('wisp', o.x, o.y, Math.round(5 * big), { spread: o.r * 0.5, size: 0.8 });
+    if (o.boss) me.emit('hlsFlake', o.x, o.y, 30, { spread: o.r });
+    return;
+  }
+  const T = me.tier;
+  me.emit('clod', o.x, o.y, Math.round(4 * big), { col: HL_SK.seed, size: 0.55, speed: 0.8 });
+  if (T === 1) me.moment('hlsSlash', 0.35, { x: o.x, y: o.y, ang: o.ang, r: o.r, layer: 'front' });
+  if (T >= 2) {
+    me.emit('hlsSpark', o.x, o.y, Math.round(10 * big), { ang: o.ang, arc: 1.2, speed: 1.3 });
+    me.moment('hlsPop', 0.45, { x: o.x, y: o.y, r: o.r, col: o.col });
+  }
+  if (T >= 3) {
+    me.emit('hlsShard', o.x, o.y, Math.round(((o.sides | 0) || 4) * 5 * big), { ang: o.ang, arc: 1.4, speed: 1.2 * Math.sqrt(big) });
+    me.emit('ember', o.x, o.y, Math.round(6 * big), { spread: o.r * 0.4 });
+  }
+  if (o.boss) {
+    me.moment('hlsBoss', 1.6, { x: o.x, y: o.y, r: o.r, layer: 'glow' });
+    me.moment('hlsFlash', 0.6, { layer: 'screen' });
+  }
+}
+function hlSkinStreakFx(me, n) {
+  if (hlSkSoul(me)) {
+    me.moment('soulFlare', 1.4, { follow: true, layer: 'glow' });
+    me.emit('wisp', me.x, me.y, 8 + Math.min(20, (n / 5) | 0), { spread: me.R * 0.6 });
+    return;
+  }
+  const T = me.tier;
+  me.moment('hlsStreak', 1.1, { follow: true, layer: 'front', n });
+  me.emit('bat', me.x, me.y, Math.min(7, 1 + Math.floor(n / 10)), { size: 0.5, life: 1.8, col: '#4a2c1c' });
+  if (T >= 2) me.emit('hlsSpark', me.x, me.y, 14, { speed: 1.4 });
+  if (T >= 3) { me.emit('hlsShard', me.x, me.y, 20, { speed: 1.2 }); me.emit('ember', me.x, me.y, 16, { spread: 8 }); }
+}
+function hlSkinHurtFx(me, dmg) {
+  const p = me.local(rnd(-6, 10), rnd(-8, 8));
+  if (hlSkSoul(me)) { me.emit('hlsFlake', p.x, p.y, 8, { spread: 6 }); return; }
+  me.art.gutter = 1;
+  me.emit('clod', p.x, p.y, 3 + Math.min(4, dmg | 0), { col: HL_ART_C.rind, size: 0.6, speed: 0.7 });
+  if (me.tier >= 2) me.emit('hlsSpark', p.x, p.y, 4, { speed: 0.8 });
+}
+function hlSkinHealFx(me, amt) {
+  me.moment(hlSkSoul(me) ? 'soulFlare' : 'hlsHeal', 0.7, { follow: true, layer: 'glow', heal: true });
+}
+function hlSkinShieldFx(me, n, up) { me.moment('hlsShield', 0.5, { follow: true, layer: 'glow', up }); }
+function hlSkinDashFx(me, dx, dy) {
+  const e = me.sock('exhaust'), back = Math.atan2(-dy, -dx);
+  if (hlSkSoul(me)) { me.emit('wisp', e.x, e.y, 6, { size: 0.7, vx: -dx * 60, vy: -dy * 60 }); return; }
+  if (me.tier === 1) { me.emit('clod', e.x, e.y, 2, { col: HL_SK.flesh, size: 0.4, speed: 0.5 }); return; }
+  me.emit('hlsSpark', e.x, e.y, 8, { ang: back, arc: 0.7, speed: 1.2 });
+  if (me.tier >= 3) { me.emit('ember', e.x, e.y, 8, { spread: 4 }); me.moment('hlsPop', 0.35, { x: e.x, y: e.y, r: 6, col: HL_SK.burn }); }
+}
+function hlSkinDashEndFx(me) {
+  if (hlSkSoul(me) || me.tier < 3) return;
+  const e = me.sock('exhaust');
+  me.emit('ember', e.x, e.y, 5, { spread: 3 });
+}
+function hlSkinParryFx(me, perfect) {
+  me.moment('hlsParry', perfect ? 0.55 : 0.35, { follow: true, layer: 'front', perfect });
+  const n = me.sock('nose');
+  if (hlSkSoul(me)) { me.emit('hlsFlake', n.x, n.y, perfect ? 10 : 4, { spread: 4 }); return; }
+  if (me.tier >= 2) me.emit('hlsSpark', n.x, n.y, perfect ? 14 : 6, { ang: me.ang, arc: 1.1, speed: 1.2 });
+  if (perfect && me.tier >= 3) me.emit('hlsShard', n.x, n.y, 10, { ang: me.ang, arc: 1.3 });
+}
+function hlSkinLevelFx(me, lvl) {
+  if (hlSkSoul(me)) { me.moment('soulFlare', 1, { follow: true, layer: 'glow' }); return; }
+  me.moment('hlsLevel', 1.2, { follow: true, layer: 'glow' });
+  if (me.tier >= 2) for (let i = 0; i < 10; i++) {
+    const a = i * TAU / 10;
+    me.emit('ember', me.x + Math.cos(a) * me.R, me.y + Math.sin(a) * me.R, 1, { vy: -30, life: 1.2 });
+  }
+}
+function hlSkinWaveFx(me, n) {
+  if (hlSkSoul(me)) { me.emit('wisp', me.x, me.y, 6, { spread: me.R }); return; }
+  me.emit('bat', me.x, me.y, 2, { size: 0.5, life: 1.6, col: '#4a2c1c' });
+}
+function hlSkinLowFx(me, on) {
+  if (!on) return;
+  if (hlSkSoul(me)) me.emit('hlsFlake', me.x, me.y, 10, { spread: 8 });
+  else { const l = me.sock('tail'); me.emit('smoke', l.x, l.y, 4, { a: 0.18 }); me.art.gutter = 1; }
+}
+function hlSkinDownFx(me, down) {
+  if (!down) return;
+  if (hlSkSoul(me)) me.emit('wisp', me.x, me.y, 8, { spread: 6 });
+  else me.emit('smoke', me.x, me.y, 6, { a: 0.2, spread: 5 });
+}
+function hlSkinDeathFx(me) {
+  if (hlSkSoul(me)) {
+    me.moment('soulDeath', 2.4, { layer: 'glow' });
+    me.emit('wisp', me.x, me.y, 3, { life: 2, vy: 10 });
+    return;
+  }
+  const T = me.tier, C = HL_ART_C;
+  me.moment('hlsDeath', 2.6, { layer: 'glow' });
+  // the rind comes apart and the seeds go everywhere
+  for (let i = 0; i < 12; i++) me.emit('clod', me.x + rnd(-8, 8), me.y + rnd(-8, 8), 1, { col: i % 2 ? C.rind : C.rindLo, size: 0.75, speed: 1 });
+  me.emit('clod', me.x, me.y, 10, { col: HL_SK.seed, size: 0.55, speed: 1.1 });
+  if (T >= 2) me.emit('hlsSpark', me.x, me.y, 18, { speed: 1.5 });
+  if (T >= 3) { me.emit('hlsShard', me.x, me.y, 40, { speed: 1.4 }); me.emit('ember', me.x, me.y, 24, { spread: 10 }); }
 }
 /* ---- made ahead. Added by Claude on 27 Sep for the event's preload, and
    kept when the art changes: a new bake, or a light in a new colour, belongs
