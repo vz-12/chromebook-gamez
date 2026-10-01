@@ -221,7 +221,7 @@ async function grantTo(store, pid, user, skins, perks) {
    `npx wrangler dev --var VIGIL_ANYTIME:1`. (nodejs_compat puts Worker vars
    on process.env, which is what keeps the line below unchanged.)
 ========================================================================== */
-const VIGIL = {
+export const VIGIL = {
   'hallows-2026': {
     from: '2026-10-01', to: '2026-11-02',           // UTC days, inclusive
     pay: { q1: 10, q2: 15, q3: 10, q4: 15, q5: 10, q6: 20, q7: 20 },
