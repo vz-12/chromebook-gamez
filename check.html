@@ -89,10 +89,10 @@ const CHECKS = [
     run: async () => {
       if (location.protocol === 'file:')
         return FAIL('Opened as a local file (file://).',
-          'Network features are switched off by design here. Open your Netlify URL instead — this page cannot test a deploy from disk.');
+          'Network features are switched off by design here. Open your Cloudflare URL instead — this page cannot test a deploy from disk.');
       if (location.protocol !== 'https:' && location.hostname !== 'localhost')
         return WARN('Served over ' + location.protocol,
-          'Fireproof and the leaderboard both want HTTPS. Netlify provides it automatically.');
+          'Fireproof and the leaderboard both want HTTPS. Cloudflare provides it automatically.');
       return PASS(location.origin);
     }
   },
@@ -101,7 +101,7 @@ const CHECKS = [
     run: async () => {
       const r = await fetch('index.html', { cache: 'no-store' });
       if (!r.ok) return FAIL('HTTP ' + r.status + ' fetching index.html',
-        'The publish directory may be wrong. netlify.toml should say publish = "."');
+        'The assets folder may be wrong. wrangler.jsonc should say "directory": "./", and .assetsignore must not list index.html.');
       const t = await r.text();
       if (!/VOIDRUNNER/.test(t) || !/requestAnimationFrame/.test(t))
         return FAIL('index.html exists but does not look like the game.',
@@ -110,29 +110,35 @@ const CHECKS = [
     }
   },
   {
-    name: 'Leaderboard function is live',
+    name: 'Leaderboard API is live',
     run: async () => {
       let r;
       try { r = await fetch('/api/leaderboard', { cache: 'no-store' }); }
       catch (e) { return FAIL('Request failed: ' + e.message, 'Network blocked, or the site is offline.'); }
 
-      if (r.status === 404) return FAIL('404 — no function at /api/leaderboard.',
-        'Netlify did not deploy the function. Confirm netlify/functions/leaderboard.mjs is in the repo and that this was a Git build, not a drag-and-drop upload (drag-and-drop cannot install dependencies).');
-      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — the function crashed.',
-        'Almost always a missing dependency. Check package.json is in the repo root with @netlify/blobs, and look for the npm install step in the Netlify deploy log.');
+      if (r.status === 404) return FAIL('404 — nothing answers at /api/leaderboard.',
+        'The Worker code did not deploy. Confirm src/index.js and wrangler.jsonc are in the repo, and that wrangler.jsonc has "run_worker_first": ["/api/*"].');
+      if (r.status === 503) {
+        let why = '';
+        try { why = (await r.json()).error || ''; } catch (e) {}
+        return FAIL('HTTP 503' + (why ? ' — ' + why : '') + '.',
+          'The Worker is running but has no database. wrangler.jsonc must bind the D1 database "voidrunner" as DB, with the right database_id.');
+      }
+      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — the Worker crashed.',
+        'Open the Worker in the Cloudflare dashboard and look at Logs for the error.');
       if (!r.ok) return FAIL('HTTP ' + r.status);
 
       let d;
       try { d = await r.json(); }
       catch (e) { return FAIL('Responded, but not with JSON.',
-        'You are probably seeing the 404 page. The /api/leaderboard route is not active.'); }
+        'Something other than the Worker answered. The /api/leaderboard route is not active.'); }
 
       if (!d || !Array.isArray(d.top)) return FAIL('JSON had no "top" array.',
-        'The function replied but not in the expected shape — is leaderboard.mjs the current version?');
+        'The Worker replied but not in the expected shape — is src/leaderboard.js the current version?');
 
       boardData = d.top;
       return PASS(d.top.length + ' entr' + (d.top.length === 1 ? 'y' : 'ies') +
-                  ' — blob storage read OK');
+                  ' — database read OK');
     }
   },
   {
@@ -150,11 +156,11 @@ const CHECKS = [
       } catch (e) { return FAIL('Request failed: ' + e.message); }
 
       if (r.status === 422) return PASS('Impossible score rejected (422) — nothing written');
-      if (r.status === 404) return FAIL('404 — function not deployed.', 'See the check above.');
-      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — function crashed on write.',
-        'The read path may work while the write path fails. Check the function log in Netlify.');
+      if (r.status === 404) return FAIL('404 — Worker not deployed.', 'See the check above.');
+      if (r.status >= 500) return FAIL('HTTP ' + r.status + ' — the Worker failed on write.',
+        'The read path may work while the write path fails. Check the Worker\'s Logs in the Cloudflare dashboard.');
       if (r.ok) return WARN('The server ACCEPTED an impossible score.',
-        'Validation is not running. leaderboard.mjs may be an older version. Your board can be filled with fake scores.');
+        'Validation is not running. src/leaderboard.js may be an older version. Your board can be filled with fake scores.');
       return WARN('Unexpected status ' + r.status);
     }
   },
@@ -172,19 +178,19 @@ const CHECKS = [
         d = await r.json();
       } catch (e) { return FAIL('Request failed: ' + e.message); }
 
-      if (r.status === 404) return FAIL('404 — function not deployed.');
+      if (r.status === 404) return FAIL('404 — Worker not deployed.');
       const s = d && d.selftest;
       if (!s) return WARN('No self-test in the response.',
-        'The deployed leaderboard.mjs predates this check. Redeploy the current version.');
-      if (s.error) return FAIL('Blob storage threw: ' + s.error,
-        'Netlify Blobs is not working for this site.');
-      if (!s.canWrite) return FAIL('Could not write to blob storage at all.',
-        'Scores can never be saved. Check the function log in Netlify.');
+        (d && d.error) ? 'The Worker said: ' + d.error : 'The deployed src/leaderboard.js predates this check. Redeploy the current version.');
+      if (s.error) return FAIL('The database threw: ' + s.error,
+        'D1 is not working for this Worker. Check the DB binding in wrangler.jsonc.');
+      if (!s.canWrite) return FAIL('Could not write to the database at all.',
+        'Scores can never be saved. Check the Worker\'s Logs in the Cloudflare dashboard.');
       if (!s.casAccepted) return FAIL(
         'Conditional writes always fail (' + s.verdict + ').',
-        'This is the bug where only the very first score ever lands and the board then freezes. The current function falls back to an unconditional write, so scores will still save — but redeploy to get that fallback.');
+        'This is the bug where only the very first score ever lands and the board then freezes. The current Worker falls back to an unconditional write, so scores will still save — but redeploy to get that fallback.');
       if (!s.staleRefused) return WARN(
-        'Writes work, but onlyIfMatch is ignored by this Blobs version.',
+        'Writes work, but onlyIfMatch is ignored by the store.',
         'Scores save fine. Two players finishing at the exact same moment could rarely overwrite one another.');
       return PASS(s.verdict + (s.reReadEtag ? ' (etag ' + s.reReadEtag + ')' : ''));
     }
@@ -200,7 +206,7 @@ const CHECKS = [
         });
       } catch (e) { return FAIL('Request failed: ' + e.message); }
       if (r.status === 400) return PASS('Bad JSON rejected (400)');
-      if (r.status === 404) return FAIL('404 — function not deployed.');
+      if (r.status === 404) return FAIL('404 — Worker not deployed.');
       return WARN('Expected 400, got ' + r.status);
     }
   },

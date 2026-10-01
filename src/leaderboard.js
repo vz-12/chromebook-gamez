@@ -3,23 +3,22 @@
    GET  /api/leaderboard   -> { top: [...] }
    POST /api/leaderboard   -> { ok, rank, best, top }
 
-   Storage is a single Netlify Blob holding the whole board. Concurrent
-   submissions use compare-and-swap on the blob's ETag, so two players
-   finishing at the same moment can't clobber each other's entry.
+   Storage is a single document in the D1-backed store (store.js) holding the
+   whole board. Concurrent submissions use compare-and-swap on the document's
+   ETag, so two players finishing at the same moment can't clobber each
+   other's entry.
 
    There are no accounts, so a submission is only ever a *claim*. The checks
    below raise the effort bar (shape, ceilings, plausibility, one row per
    name) but they cannot make a client-submitted score trustworthy.
    ========================================================================= */
-import { getStore } from '@netlify/blobs';
+import { getStore } from './store.js';
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 
-export const config = { path: '/api/leaderboard' };
-
 /* The season rule lives in one place, shared with the scheduled closer. */
-import { STORE, KEY, RETRIES, SEASON_DAY, META, ARCHIVE, seasonKey, isSeason,
+import { STORE, KEY, RETRIES, backoff, SEASON_DAY, META, ARCHIVE, seasonKey, isSeason,
          seasonOf, seasonStart, seasonEnd, seasonAfter,
-         closeSeason, ensureSeason } from '../lib/season.mjs';
+         closeSeason, ensureSeason } from './season.js';
 const MAX_ENTRIES = 100;
 const MAX_NAME = 16;
 
@@ -34,7 +33,7 @@ const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 /* An award belongs to a profile id, never to a name. Names are typed in by
    whoever fancies them; a pid is generated once inside one browser and only
-   ever travels to this function, so it is the closest thing to an identity a
+   ever travels to this Worker, so it is the closest thing to an identity a
    game with no accounts has. It does not make a score honest — nothing here
    can — but it does mean the reward lands on the machine that held the spot
    rather than on anyone who later types the same name. */
@@ -44,7 +43,7 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
    Skins given to a particular profile for a reason no achievement covers —
    a tester, a friend, somebody who was here before the thing worked.
 
-   The list lives in this file because this file is a function, not an
+   The list lives in this file because this file is Worker code, not an
    asset: it never reaches a browser. That is the difference between a gate
    and a decoration. The version of this that shipped a hash in the client
    was not a gate at all — the phrase was never the secret, since any string
@@ -54,7 +53,7 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
 
    TO ADD SOMEBODY: they run `copy(Save.profile.pid)` in the console once
    and send you the value — or, if they have ever submitted a score, it is
-   recorded beside their name in that board's blob. Paste it below with a
+   recorded beside their name in that board's row. Paste it below with a
    comment saying who, and redeploy. TO TAKE IT BACK: delete the line. The
    grant is not stored on the player's machine as a permission, only as a
    cached award, so removing it here removes it everywhere on the next sync.
@@ -112,15 +111,17 @@ const DEV_PIDS = {
 
 /* A stand-in used when the named account does not exist, so a wrong user and
    a wrong password take the same time and the same shape of answer. Its salt
-   is fresh per cold start and its hash is of nothing anybody knows. */
-const DUMMY = { salt: randomBytes(16).toString('hex'),
-                hash: randomBytes(KEYLEN).toString('hex') };
+   is fresh per isolate and its hash is of nothing anybody knows. Made on first
+   use, not at load: a Worker may not generate random values in global scope. */
+let DUMMY = null;
+const dummy = () => DUMMY || (DUMMY = { salt: randomBytes(16).toString('hex'),
+                                        hash: randomBytes(KEYLEN).toString('hex') });
 
 function passOk(account, password) {
-  const a = account || DUMMY;
+  const a = account || dummy();
   if (typeof password !== 'string' || !password || password.length > 200) {
     // still pay the cost, so a blank password is not measurably faster
-    try { scryptSync('x', Buffer.from(DUMMY.salt, 'hex'), KEYLEN, SCRYPT); } catch (e) {}
+    try { scryptSync('x', Buffer.from(dummy().salt, 'hex'), KEYLEN, SCRYPT); } catch (e) {}
     return false;
   }
   let want, got;
@@ -134,10 +135,11 @@ function passOk(account, password) {
 
 /* Attempts are counted against the source address rather than the profile id:
    a pid is chosen by the client and rotating it is free, an address is not.
-   Netlify sets the first of these; the second is the ordinary proxy header
-   and is only ever used to key a rate limit, never to decide who anybody is. */
+   Cloudflare sets the first of these on every request and a client cannot
+   forge it; the second is the ordinary proxy header and is only ever used to
+   key a rate limit, never to decide who anybody is. */
 const clientIp = req =>
-  ((req.headers.get('x-nf-client-connection-ip') || '') ||
+  ((req.headers.get('cf-connecting-ip') || '') ||
    (req.headers.get('x-forwarded-for') || '').split(',')[0] || '').trim().slice(0, 45)
   || 'unknown';
 
@@ -215,7 +217,9 @@ async function grantTo(store, pid, user, skins, perks) {
    nobody but a dev account can play before then, and its test runs must not
    light real candles.
 
-   VIGIL_ANYTIME in the environment lifts the window, for a local test run.
+   VIGIL_ANYTIME in the environment lifts the window, for a local test run:
+   `npx wrangler dev --var VIGIL_ANYTIME:1`. (nodejs_compat puts Worker vars
+   on process.env, which is what keeps the line below unchanged.)
 ========================================================================== */
 const VIGIL = {
   'hallows-2026': {
@@ -260,6 +264,7 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
     const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
     const wrote = await store.setJSON(vigilKey(id), doc, opts).catch(() => ({ modified: false }));
     if (wrote && wrote.modified) return { view: vigilView(ev, doc, pid) };
+    await backoff(i);
   }
   return { error: 'busy' };
 }
@@ -273,7 +278,7 @@ const SKIN_GRANTS = {
    to write it into their own save and collect that player's rewards — which
    is the whole reason podium places are addressed by pid and never shown.
    It is kept on the stored entry because closing a season needs it, and it
-   must not leave this function. */
+   must not leave this Worker. */
 const publicBoard = entries =>
   (entries || []).map(e => {
     const { pid, ...rest } = e;
@@ -378,7 +383,8 @@ function mergeFirst(entries, entry) {
 
 /* Exercises the exact conditional-write path the leaderboard depends on,
    against a throwaway key. Verifies a fresh ETag is accepted and a stale one
-   is refused — the two things a fake store cannot prove. */
+   is refused — the two things a fake store cannot prove. check.html reads
+   the field names, so they must not change. */
 async function selfTest(store) {
   const K = 'selftest';
   const s = {};
@@ -429,7 +435,8 @@ async function commit(store, key, entry, merge) {
       .catch(() => ({ modified: false }));
 
     if (wrote && wrote.modified) return merged;
-    // someone else wrote first — re-read and merge again
+    // someone else wrote first — wait a moment, re-read and merge again
+    await backoff(attempt);
   }
 
   /* Every conditional write failed. That is either genuine contention or an
@@ -453,8 +460,8 @@ const placed = (top, entry, kept, extra) => {
                               top: publicBoard(top) }, extra));
 };
 
-export default async (req) => {
-  const store = getStore({ name: STORE, consistency: 'strong' });
+export default async (req, env) => {
+  const store = getStore(env, STORE);
   const today = utcDay();
   /* Before anything else reads or writes a board: if the 6th has passed since
      the last request, the old season is closed and filed here, and everything
@@ -490,7 +497,7 @@ export default async (req) => {
       const list = (doc && doc.list) || {};
       const out = Object.keys(list).sort().reverse().map(id => ({
         season: id, closedAt: list[id].closedAt,
-        // pids never leave the function attached to a name
+        // pids never leave the Worker attached to a name
         top3: (list[id].top3 || []).map(r => ({ rank: r.rank, name: r.name,
                                                 score: r.score, wave: r.wave }))
       }));

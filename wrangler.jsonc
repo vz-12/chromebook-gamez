@@ -1,0 +1,38 @@
+/* VOIDRUNNER on Cloudflare Workers.
+   Cloudflare's GitHub integration (Workers Builds) runs `npx wrangler deploy`
+   on every push to main. There is no build step: the static files are
+   uploaded straight from the repo root, minus everything .assetsignore
+   lists — which is what keeps node_modules and the Worker source off the
+   public site. */
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  // must match the Worker's name in the Cloudflare dashboard
+  "name": "chromebook-gamez",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // node:crypto, for the dev accounts' scrypt password check
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    // the repo root, filtered by .assetsignore
+    "directory": "./",
+    "binding": "ASSETS",
+    // static files are served without running the Worker; /api/* runs it
+    "run_worker_first": ["/api/*"]
+  },
+
+  // the leaderboard, seasons, awards, vigil and co-op rooms
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "voidrunner",
+      "database_id": "c2fde46d-3e3d-4354-92b9-e70338f22cfa"
+    }
+  ],
+
+  // closes a finished season at 00:05 UTC every day (src/season-close.js)
+  "triggers": { "crons": ["5 0 * * *"] },
+
+  // keeps console.log output (season closes, errors) in the dashboard
+  "observability": { "enabled": true }
+}
