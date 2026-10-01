@@ -288,9 +288,11 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
 
      · one claim per old pid: from then on every callsign that pid ever
        posted under is off limits, and typing any of them gets nothing.
+     · an old pid never turns into a different old pid. One that turns up
+       as itself claims itself, whatever callsign it gives, so it can
+       neither take up nor use up anybody else's.
      · one claim per profile: a pid that has claimed keeps its gift and its
-       old pid whatever it is renamed to, and never takes up another. An
-       old pid never turns into a different old pid.
+       old pid whatever it is renamed to, and never takes up another.
      · a callsign posted by several old pids, or with no pid on record,
        still pays the gift but hands no pid back: there is no saying whose
        it was.
@@ -298,6 +300,10 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
        grants — is never handed out by name, since a callsign is on every
        leaderboard for anyone to read. Its callsigns still pay the gift and
        are still taken; the pid stays where it is.
+     · nothing is claimed until sync.js has filed which old pid posted each
+       callsign: a claim made before that could neither hand the pid back
+       nor close off its other callsigns, and would stand like that for
+       good. The game asks again every launch.
 
    All of it is one document written under compare-and-swap, so two
    profiles racing for the same callsign cannot both win it. A callsign is
@@ -329,7 +335,8 @@ async function comebackClaim(store, pid, name) {
   const none = { has: false, adopt: null };
   const known = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
   const names = (known && Array.isArray(known.names)) ? known.names : [];
-  const owners = (known && known.owners && typeof known.owners === 'object') ? known.owners : {};
+  const ready = !!(known && known.owners && typeof known.owners === 'object');
+  const owners = ready ? known.owners : {};
   const ownersOf = n => (hasOwn(owners, claimKey(n)) && Array.isArray(owners[claimKey(n)]))
     ? owners[claimKey(n)] : [];
   const oldPids = new Set();
@@ -344,10 +351,18 @@ async function comebackClaim(store, pid, name) {
     const old = Object.assign({}, doc.old || {});
     const mine = hasOwn(byPid, pid) ? byPid[pid] : null;
     if (mine && typeof mine === 'object') return { has: true, adopt: mine.adopt || null };
+    if (!ready) return none;                         // old pids not filed yet
 
-    let n;
+    let n, sole = null;
     if (typeof mine === 'string') n = mine;          // an older claim, settled now
-    else {
+    else if (oldPids.has(pid)) {
+      // an old pid claims itself, never somebody else's callsign
+      if (hasOwn(old, pid)) return none;
+      const its = Object.keys(owners).map(k => k.slice(2)).filter(t => ownersOf(t).includes(pid));
+      const asked = comebackName(name);
+      n = its.includes(asked) ? asked : its[0];
+      sole = pid;
+    } else {
       n = comebackName(name);
       if (!n || n === 'anon' || !names.includes(n)) return none;
       if (hasOwn(byName, claimKey(n))) return none;  // taken, or under a taken old pid
@@ -355,8 +370,10 @@ async function comebackClaim(store, pid, name) {
       if (ownersOf(n).some(p => hasOwn(old, p))) return none;
     }
 
-    const ps = ownersOf(n);
-    const sole = ps.length === 1 && !hasOwn(old, ps[0]) ? ps[0] : null;
+    if (!sole) {
+      const ps = ownersOf(n);
+      sole = ps.length === 1 && !hasOwn(old, ps[0]) ? ps[0] : null;
+    }
     let adopt = null;
     // an old pid never becomes another one, and a hand-given pid is never handed out
     if (sole && !oldPids.has(pid) && !hasOwn(old, pid) && !(await handGiven(store, sole)))
