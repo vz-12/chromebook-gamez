@@ -20104,6 +20104,9 @@ const Save = {
                   /* Identity, such as it is: a name is typed and can be
                      anyone's, so podiums are recorded against this. */
                   pid: '', awards: [], skinEquip: '',
+                  /* WELCOME BACK: the old pid this profile took up, if it
+                     claimed one. Once set it is the pid, for good. */
+                  adopted: '',
                   // ids of every challenge cleared; the rewards key off this
                   chal: [],
                   /* the challenges a WELCOME BACK pass was spent on: what is
@@ -20234,6 +20237,12 @@ const Save = {
        case (two devices that each started offline); the smaller string
        wins so that every device reaches the same answer unaided. */
     out.pid = (a.pid && b.pid) ? (a.pid < b.pid ? a.pid : b.pid) : (a.pid || b.pid || '');
+    /* Except that a pid taken up through WELCOME BACK beats both: it is the
+       one the old boards and podiums are addressed to, and a store that has
+       not heard about it yet must not put the new pid back. */
+    out.adopted = (a.adopted && b.adopted) ? (a.adopted < b.adopted ? a.adopted : b.adopted)
+                                           : (a.adopted || b.adopted || '');
+    if (out.adopted) out.pid = out.adopted;
     // a podium is a permanent mark: union, never subtract
     out.awards = Awards.clean([...(a.awards || []), ...(b.awards || [])]);
     out.skinEquip = b.skinEquip !== undefined ? b.skinEquip : (a.skinEquip || '');
@@ -43232,8 +43241,9 @@ const CHANGELOG = [
     ['new', 'WELCOME BACK. The game was down for a few days, so every returning '
           + 'player gets THE HACKER unlocked and 10 challenge passes.'],
     ['note', 'To claim it, play under the callsign you used before the move. If it '
-           + 'was on a leaderboard, the gift is yours. Each old callsign can be '
-           + 'claimed once, and each save claims one.'],
+           + 'was on a leaderboard, the gift is yours, and so are that callsign\'s '
+           + 'scores and any podium it earns. Each old player can be claimed once, '
+           + 'and each save claims one.'],
     ['new', 'A challenge pass clears any challenge on the ladder at once, locked or '
           + 'not, and pays its upgrade. In CHALLENGES pick one and press [P] or '
           + 'USE PASS, then once more to spend it.']
@@ -45357,6 +45367,16 @@ const Awards = {
       if (!r.ok) throw new Error('http ' + r.status);
       const d = await r.json();
       Season.read(d);
+      /* WELCOME BACK: claiming an old callsign hands back the pid it played
+         under, and this profile becomes it, so its old boards, candles and
+         podiums are its own again. Taken up once: a profile that has one
+         never trades it for another, whatever a reply says. */
+      if (d.adopt && PID_RE.test(d.adopt) && !Save.profile.adopted) {
+        Save.profile.adopted = d.adopt;
+        Save.profile.pid = d.adopt;
+        Save.writeLocal(); Save.flush();
+        Awards.again = true;          // and ask again, as the profile it now is
+      }
       const next = Awards.clean(d.awards);
       Awards.served = next.filter(a => a.perk).map(a => a.perk);
       /* Union rather than replace: an award already banked stays banked even
@@ -45691,9 +45711,11 @@ function eraMark(played) {
    Only the server hands it out. The game came back on a new address, so no
    save from the old one is here to vouch for anybody; what the player brings
    is the callsign they type, and the awards request carries it. The server
-   knows every callsign that was on an old board, and lets each one be
-   claimed by exactly one profile, and each profile claim exactly one — so
-   renaming afterwards keeps the gift and cannot take somebody else's.
+   knows every callsign that was on an old board and the pid that posted it,
+   and lets each old pid be claimed by exactly one profile, and each profile
+   claim exactly one. The claimant is handed the old pid and takes it up as
+   its own (see Awards.sync), so renaming afterwards keeps everything and
+   cannot take somebody else's.
 
    A pass clears any challenge outright, locked or not, and pays its reward
    (see chalPass). What is spent is recorded as the challenges it was spent

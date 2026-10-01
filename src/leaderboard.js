@@ -278,50 +278,126 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
    The move is also why this cannot be read off the player's machine: the
    new site is a different address, so no save, pid or cookie from the old
    one comes with them. What does come with them is the callsign they type.
-   sync.js keeps every callsign that was on an old board (COMEBACK_KEY), and
-   a profile that enters one of those claims the gift — once, both ways:
+   sync.js keeps every callsign that was on an old board, and which old
+   profile id posted it (COMEBACK_KEY).
 
-     · one per profile: a pid that has claimed keeps its gift whatever it is
-       renamed to, and can never claim a second old callsign. Renaming onto
-       somebody else's name cannot spend their gift.
-     · one per old callsign: once claimed, the next pid to type it gets
-       nothing, so a second device or a wiped save does not double up.
+   Entering one of those callsigns claims the gift, and with it the old pid
+   the callsign played under: the reply carries it (`adopt`), and the game
+   takes it up as its own, so that player's boards, vigil candles and any
+   podium still to come are theirs again. Once, every way round:
 
-   Both halves live in one document written under compare-and-swap, so two
+     · one claim per old pid: from then on every callsign that pid ever
+       posted under is off limits, and typing any of them gets nothing.
+     · an old pid never turns into a different old pid. One that turns up
+       as itself claims itself, whatever callsign it gives, so it can
+       neither take up nor use up anybody else's.
+     · one claim per profile: a pid that has claimed keeps its gift and its
+       old pid whatever it is renamed to, and never takes up another.
+     · a callsign posted by several old pids, or with no pid on record,
+       still pays the gift but hands no pid back: there is no saying whose
+       it was.
+     · a pid given something by hand — DEV_PIDS, SKIN_GRANTS, a dev login's
+       grants — is never handed out by name, since a callsign is on every
+       leaderboard for anyone to read. Its callsigns still pay the gift and
+       are still taken; the pid stays where it is.
+     · nothing is claimed until sync.js has filed which old pid posted each
+       callsign: a claim made before that could neither hand the pid back
+       nor close off its other callsigns, and would stand like that for
+       good. The game asks again every launch.
+
+   All of it is one document written under compare-and-swap, so two
    profiles racing for the same callsign cannot both win it. A callsign is
    not an identity — anyone can type one — so this is first come, first
-   served: the honest kind of guess a free gift can afford, and never a way
-   in to anything that is somebody else's. Podiums stay addressed to a pid.
+   served, and the first to type an old callsign walks off with its pid.
 ========================================================================== */
-export const COMEBACK_KEY = 'comeback';        // { names: [...] }, from sync.js
-const CLAIMS_KEY = 'comeback-claims';          // { byName: {'n:<name>': pid}, byPid: {pid: name} }
+export const COMEBACK_KEY = 'comeback';  // { names: [...], owners: {'n:<name>': [old pid...]} }, from sync.js
+/* { byName: {'n:<name>': pid}    callsigns taken, and by which profile
+     byPid:  {pid: {name, adopt}}  each claimant, and each old pid taken up:
+                                   the callsign, and the old pid handed back
+     old:    {oldPid: pid} }       old pids already claimed, and by whom
+   A byPid entry that is a bare string is a claim from before old pids were
+   handed back; it is settled the next time that profile asks. */
+const CLAIMS_KEY = 'comeback-claims';
 export const comebackName = v => cleanName(v).toLowerCase();
 // names are prefixed as keys, so a callsign like __proto__ is only a name
 const claimKey = n => 'n:' + n;
+const hasOwn = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 
-/* True if this profile has the gift: already claimed, or claiming it now. */
+async function handGiven(store, pid) {
+  if (hasOwn(DEV_PIDS, pid) || hasOwn(SKIN_GRANTS, pid)) return true;
+  const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
+  return !!(g && hasOwn(g.byPid, pid));
+}
+
+/* { has, adopt }: whether this profile has the gift, and the old pid it is
+   to take up, if there is one. */
 async function comebackClaim(store, pid, name) {
+  const none = { has: false, adopt: null };
+  const known = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
+  const names = (known && Array.isArray(known.names)) ? known.names : [];
+  const ready = !!(known && known.owners && typeof known.owners === 'object');
+  const owners = ready ? known.owners : {};
+  const ownersOf = n => (hasOwn(owners, claimKey(n)) && Array.isArray(owners[claimKey(n)]))
+    ? owners[claimKey(n)] : [];
+  const oldPids = new Set();
+  for (const l of Object.values(owners)) if (Array.isArray(l)) for (const p of l) oldPids.add(p);
+
   for (let i = 0; i < RETRIES; i++) {
     const res = await store.getWithMetadata(CLAIMS_KEY, { type: 'json', consistency: 'strong' })
       .catch(() => null);
     const doc = (res && res.data) || {};
     const byName = Object.assign({}, doc.byName || {});
     const byPid = Object.assign({}, doc.byPid || {});
-    if (Object.prototype.hasOwnProperty.call(byPid, pid)) return true;  // its one, already
-    const n = comebackName(name);
-    if (!n || n === 'anon') return false;
-    if (Object.prototype.hasOwnProperty.call(byName, claimKey(n))) return false;  // taken
-    const known = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
-    if (!known || !Array.isArray(known.names) || !known.names.includes(n)) return false;
-    byName[claimKey(n)] = pid;
-    byPid[pid] = n;
+    const old = Object.assign({}, doc.old || {});
+    const mine = hasOwn(byPid, pid) ? byPid[pid] : null;
+    if (mine && typeof mine === 'object') return { has: true, adopt: mine.adopt || null };
+    if (!ready) return none;                         // old pids not filed yet
+
+    let n, sole = null;
+    if (typeof mine === 'string') n = mine;          // an older claim, settled now
+    else if (oldPids.has(pid)) {
+      // an old pid claims itself, never somebody else's callsign
+      if (hasOwn(old, pid)) return none;
+      const its = Object.keys(owners).map(k => k.slice(2)).filter(t => ownersOf(t).includes(pid));
+      const asked = comebackName(name);
+      n = its.includes(asked) ? asked : its[0];
+      sole = pid;
+    } else {
+      n = comebackName(name);
+      if (!n || n === 'anon' || !names.includes(n)) return none;
+      if (hasOwn(byName, claimKey(n))) return none;  // taken, or under a taken old pid
+      // a callsign found on the old boards after its old pid was claimed
+      if (ownersOf(n).some(p => hasOwn(old, p))) return none;
+    }
+
+    if (!sole) {
+      const ps = ownersOf(n);
+      sole = ps.length === 1 && !hasOwn(old, ps[0]) ? ps[0] : null;
+    }
+    let adopt = null;
+    // an old pid never becomes another one, and a hand-given pid is never handed out
+    if (sole && !oldPids.has(pid) && !hasOwn(old, pid) && !(await handGiven(store, sole)))
+      adopt = sole;
+
+    // the callsign is taken, and with it every callsign its old pid ever used
+    const taken = [n];
+    if (sole) {
+      old[sole] = pid;
+      for (const [k, l] of Object.entries(owners))
+        if (Array.isArray(l) && l.includes(sole)) taken.push(k.slice(2));
+    }
+    for (const t of taken) if (!hasOwn(byName, claimKey(t))) byName[claimKey(t)] = pid;
+    const rec = { name: n, adopt };
+    byPid[pid] = rec;
+    if (adopt) byPid[adopt] = rec;       // the old pid, taken up, has claimed too
+
     const opts = res ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
-    const wrote = await store.setJSON(CLAIMS_KEY, { byName, byPid }, opts)
+    const wrote = await store.setJSON(CLAIMS_KEY, { byName, byPid, old }, opts)
       .catch(() => ({ modified: false }));
-    if (wrote && wrote.modified) return true;
+    if (wrote && wrote.modified) return { has: true, adopt };
     await backoff(i);                    // somebody else claimed something; look again
   }
-  return false;
+  return none;
 }
 
 const SKIN_GRANTS = {
@@ -544,9 +620,12 @@ export default async (req, env) => {
     if (pid !== null) {
       if (!isPid(pid)) return json({ error: 'bad pid' }, 400);
       const awards = await awardsFor(store, pid);
-      if (await comebackClaim(store, pid, q.get('name')))
-        awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
-      return json(Object.assign({ awards }, meta));
+      const back = await comebackClaim(store, pid, q.get('name'));
+      if (back.has) awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
+      /* the old pid this profile is to become; only ever told to the
+         profile that claimed it */
+      const out = back.adopt && back.adopt !== pid ? { awards, adopt: back.adopt } : { awards };
+      return json(Object.assign(out, meta));
     }
 
     // the finished seasons, for a hall of past winners
