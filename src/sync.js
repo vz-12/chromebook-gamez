@@ -19,7 +19,11 @@
      anything new       copied across if D1 has nothing under that name
 
    meta (this side keeps its own calendar), gate (lockouts) and selftest are
-   never copied. Every write is a compare-and-swap, the same as a player's,
+   never copied.
+
+   Every run also adds to the WELCOME BACK list (see leaderboard.js): each
+   callsign on an old board and each profile id the old store recorded, so a
+   returning player whose save did not make the move is still recognised. Every write is a compare-and-swap, the same as a player's,
    and nothing is written unless the merge changed something, so a sync with
    nothing new costs reads only.
 
@@ -32,7 +36,7 @@
    ========================================================================= */
 import { getStore } from './store.js';
 import { STORE, RETRIES, backoff, META } from './season.js';
-import { VIGIL } from './leaderboard.js';
+import { VIGIL, COMEBACK_KEY, comebackName } from './leaderboard.js';
 
 const SYNC = 'voidrunner-sync';
 const MAX_ENTRIES = 100;
@@ -118,6 +122,45 @@ async function syncDoc(store, key, theirs) {
   throw new Error('could not merge ' + key + ' (busy)');
 }
 
+/* Everyone the old store knew: callsigns off every board, and the profile
+   ids on board rows, vigil candles and dev grants. */
+function knownPlayers(docs) {
+  const names = new Set(), pids = new Set();
+  for (const [key, doc] of docs) {
+    if (!doc || typeof doc !== 'object') continue;
+    if (key === 'top' || key.startsWith('season:') || key.startsWith('day:')) {
+      for (const e of doc.entries || []) {
+        if (!e) continue;
+        const n = comebackName(e.name);
+        if (n && n !== 'anon') names.add(n);
+        if (typeof e.pid === 'string') pids.add(e.pid);
+      }
+    } else if (key === 'grants' || key.startsWith('vigil:')) {
+      for (const pid of Object.keys(doc.byPid || {})) pids.add(pid);
+    }
+  }
+  return { names, pids };
+}
+
+/* Union into the stored list, under compare-and-swap. It only ever grows:
+   being recognised once is enough, and the gift is banked on the device. */
+async function recordKnown(store, known) {
+  for (let i = 0; i < RETRIES; i++) {
+    const res = await store.getWithMetadata(COMEBACK_KEY, { type: 'json', consistency: 'strong' });
+    const had = (res && res.data) || {};
+    const names = new Set([...(had.names || []), ...known.names]);
+    const pids = new Set([...(had.pids || []), ...known.pids]);
+    if (names.size === (had.names || []).length && pids.size === (had.pids || []).length)
+      return false;
+    const wrote = await store.setJSON(COMEBACK_KEY,
+      { names: [...names].sort(), pids: [...pids].sort() },
+      res ? { onlyIfMatch: res.etag } : { onlyIfNew: true });
+    if (wrote.modified) return true;
+    await backoff(i);
+  }
+  throw new Error('could not record returning players (busy)');
+}
+
 export async function syncFromNetlify(env) {
   const sync = getStore(env, SYNC);
   const cfg = await sync.get('config', { type: 'json' });
@@ -136,12 +179,18 @@ export async function syncFromNetlify(env) {
 
     const store = getStore(env, STORE);
     state.seen = 0; state.changed = [];
+    const docs = [];
     for (const d of body.docs) {
       if (!d || typeof d.key !== 'string' || typeof d.value !== 'string') continue;
-      if (NEVER.has(d.key)) continue;
+      if (NEVER.has(d.key) || d.key === COMEBACK_KEY) continue;
       state.seen++;
-      if (await syncDoc(store, d.key, JSON.parse(d.value))) state.changed.push(d.key);
+      const value = JSON.parse(d.value);
+      docs.push([d.key, value]);
+      if (await syncDoc(store, d.key, value)) state.changed.push(d.key);
     }
+    const known = knownPlayers(docs);
+    if (await recordKnown(store, known)) state.changed.push(COMEBACK_KEY);
+    state.returning = { names: known.names.size, pids: known.pids.size };
     state.ok = true;
     console.log('netlify sync: ' + state.seen + ' docs, changed: ' + (state.changed.join(', ') || 'none'));
   } catch (e) {

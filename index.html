@@ -1097,7 +1097,8 @@ const CHARS = [
        'fights until something puts it down again — eight of them at once, ' +
        'and one boss. The gun is only there to start the argument.',
     hp: 96, speed: 262, dmg: 4, rate: 5.2,
-    need: p => MALWARE.every(m => (p.codexM || []).includes(m.id)),
+    // or handed over outright to a returning player — see WELCOME BACK
+    need: p => comebackHas(p) || MALWARE.every(m => (p.codexM || []).includes(m.id)),
     needTxt: 'CARRY EVERY MALWARE',
     // how far along the route, in its own units, for the locked badge
     lock: p => MALWARE.filter(m => (p.codexM || []).includes(m.id)).length + '/' + MALWARE.length },
@@ -20105,6 +20106,9 @@ const Save = {
                   pid: '', awards: [], skinEquip: '',
                   // ids of every challenge cleared; the rewards key off this
                   chal: [],
+                  /* the challenges a WELCOME BACK pass was spent on: what is
+                     left is the passes granted less these */
+                  passUsed: [],
                   // escalation: the permanent mark, and the window that earns it
                   hardened: false, deepRuns: [],
                   // full stats of the best run, so it can be re-submitted later
@@ -20153,6 +20157,9 @@ const Save = {
     out.otherKills = Math.max(a.otherKills || 0, b.otherKills || 0);
     // a cleared challenge is an unlock: union both stores, never subtract
     out.chal = [...new Set([...(a.chal || []), ...(b.chal || [])])];
+    /* A spent pass is the challenge it was spent on, so the union is right
+       both ways: each store's spending counts, and none is counted twice. */
+    out.passUsed = [...new Set([...(a.passUsed || []), ...(b.passUsed || [])])];
     // escalation is a mark, not a score: once either store has it, it stays
     out.hardened = !!(a.hardened || b.hardened);
     out.deepRuns = (b.deepRuns && b.deepRuns.length ? b.deepRuns : a.deepRuns) || [];
@@ -20282,6 +20289,7 @@ const Save = {
     // older saves only knew mute; treat that as a volume of zero
     Audio_.setVol(Save.profile.vol !== undefined ? Save.profile.vol
                                                  : (Save.profile.muted ? 0 : 1));
+    comebackLocal();         // WELCOME BACK, before verFirst can be stamped
     eraMark(false);          // stamps the era, and pays out an old one
     Codex.load();
     fxLevel = Save.profile.fx === undefined ? FX.ON : (Save.profile.fx ? FX.ON : FX.OFF);
@@ -20310,6 +20318,7 @@ const Save = {
       Save.db = db;
       Save.status = 'cloud';
       if (remote) { Save.profile = Save.repair(Save.merge(Save.profile, remote)); Save.writeLocal(); }
+      comebackLocal();          // the merged profile may be the older save
       Save.reconcileClears();   // the merged profile may predate clear tracking
       await Save.flush();
       await Save.refreshTop();
@@ -39047,7 +39056,8 @@ function uiCursorHot() {
     }
     if (state === 'chal')
       return chalRows.some(r => inRect(mouse.x, mouse.y, r)) ||
-             (chalStartRect && inRect(mouse.x, mouse.y, chalStartRect));
+             (chalStartRect && inRect(mouse.x, mouse.y, chalStartRect)) ||
+             (chalPassRect && inRect(mouse.x, mouse.y, chalPassRect));
     if (state === 'shop') {
       const mx = shopMx(), my = shopMy(), b = shopButtons();
       return shopIndexAt() >= 0 || inRect(mx, my, b.reroll) || inRect(mx, my, b.leave);
@@ -43220,6 +43230,17 @@ function drawMenuSet() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  /* id 7 is WELCOME BACK's COMEBACK_LOG: a save first opened on this version
+     or later does not count as returning on its own word. */
+  { id: 7, v: '1.4.1', date: '1 OCT 2026', lines: [
+    ['new', 'WELCOME BACK. The game was down for a few days, so every returning '
+          + 'player gets THE HACKER unlocked and 10 challenge passes.'],
+    ['new', 'A challenge pass clears any challenge on the ladder at once, locked or '
+          + 'not, and pays its upgrade. In CHALLENGES pick one and press [P] or '
+          + 'USE PASS, then once more to spend it.'],
+    ['note', 'Starting from a fresh save? Enter the callsign you played under, and if '
+           + 'it was on a leaderboard the game will know you.']
+  ] },
   { id: 6, v: '1.4', date: '26 SEP 2026', lines: [
     ['new', "Evolutions. Beat your pilot's own finale again in its rite, a changed "
           + 'version of that boss built around the pilot, and the hull wakes for good. '
@@ -45268,8 +45289,9 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
                       // ALL HALLOWS: the vigil's four
                       'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul'];
 /* Grants that are not skins. Checked against this list the same way, so an
-   invented one cannot arrive from a save file any more than a skin can. */
-const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event'];
+   invented one cannot arrive from a save file any more than a skin can.
+   'comeback' is WELCOME BACK's: THE HACKER and the challenge passes. */
+const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback'];
 
 const Awards = {
   syncing: false,
@@ -45324,7 +45346,10 @@ const Awards = {
     if (Awards.syncing || location.protocol === 'file:') return;
     Awards.syncing = true;
     try {
-      const r = await fetch(Board.url + '?awards=' + encodeURIComponent(myPid()),
+      /* The callsign goes along so the server can recognise a returning
+         player whose save did not make the move (WELCOME BACK). */
+      const nm = Save.profile.name ? '&name=' + encodeURIComponent(Save.profile.name) : '';
+      const r = await fetch(Board.url + '?awards=' + encodeURIComponent(myPid()) + nm,
                             { cache: 'no-store' });
       if (!r.ok) throw new Error('http ' + r.status);
       const d = await r.json();
@@ -45650,6 +45675,49 @@ function eraMark(played) {
   if ((parseInt(p.verFirst, 10) || 0) !== 1) return;
   // played, not installed: a launcher opened once and closed is not a run
   if (played || (p.runs || 0) > 0 || (p.best || 0) > 0) devGrant('redaction', '1.x');
+}
+
+/* ------------------------------ welcome back ------------------------------
+   The game was down for a few days at the end of September 2026, so every
+   returning player is given THE HACKER, whatever their malware codex says,
+   and COMEBACK_PASSES challenge passes. Both hang off one perk, 'comeback',
+   banked in the awards list like a dev grant — cleaned, merged and kept the
+   same way — and it arrives by either of two roads:
+
+     · this save, if it had flown a run before the version that shipped the
+       gift (changelog entry COMEBACK_LOG). A profile first opened on that
+       version or later never qualifies on its own word, so the gift is a
+       latch that closes itself, exactly like the era mark above.
+     · the server, which knows every callsign and profile id the old site
+       recorded, for a returning player whose save did not make the move.
+
+   A pass clears any challenge outright, locked or not, and pays its reward
+   (see chalPass). What is spent is recorded as the challenges it was spent
+   on, so two stores merge to the right count and a spent pass never comes
+   back. Function declarations, not consts: THE HACKER's `need` asks
+   comebackHas() and can be asked before this line has run. */
+const COMEBACK_PASSES = 10;
+const COMEBACK_LOG = 7;
+function comebackHas(p) {
+  return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
+}
+function passesLeft() {
+  if (!comebackHas()) return 0;
+  return Math.max(0, COMEBACK_PASSES - (Save.profile.passUsed || []).length);
+}
+/* The local road. Runs before eraMark stamps verFirst, so a save from before
+   verFirst existed reads as the old save it is. */
+function comebackLocal() {
+  const p = Save.profile;
+  if (!p || comebackHas(p)) return false;
+  if (!((p.runs || 0) > 0 || (p.best || 0) > 0)) return false;
+  if (p.verFirst) {
+    const e = CHANGELOG.find(x => x.v === p.verFirst);
+    if (!e || (e.id || 0) >= COMEBACK_LOG) return false;
+  }
+  p.awards = Awards.clean([...Awards.list(), { perk: 'comeback', via: 'WELCOME BACK' }]);
+  Save.writeLocal(); Save.flush();
+  return true;
 }
 
 /* Banking a grant goes through Awards.clean like everything else, so a bad id
@@ -51764,6 +51832,40 @@ function chalEnd(won) {
 // Leaving a challenge, by death or by the menu.
 function chalQuit() { Chal.on = null; Chal.won = false; Chal.reward = null; }
 
+/* ------------------------------- a pass -----------------------------------
+   WELCOME BACK's challenge pass clears the selected challenge outright,
+   locked or not, exactly as beating it does: into chal, so its reward joins
+   the pool and it counts toward the tiers above it. Two presses, so a stray
+   key cannot spend one — the first arms it for CHAL_PASS_ARM_MS, the second
+   spends it. */
+const CHAL_PASS_ARM_MS = 3000;
+let chalPassRect = null, chalPassArm = null, chalPassNote = null;
+
+function chalPassPress() {
+  const c = CHALLENGES[chalSel];
+  if (!c || chalDone(c.id) || passesLeft() <= 0) {
+    Audio_.tone(150, 0.12, 'square', 0.06, 90);
+    return;
+  }
+  const now = Date.now();
+  if (!chalPassArm || chalPassArm.id !== c.id || now - chalPassArm.at > CHAL_PASS_ARM_MS) {
+    chalPassArm = { id: c.id, at: now };
+    Audio_.select();
+    return;
+  }
+  chalPassArm = null;
+  chalPass(c);
+}
+
+function chalPass(c) {
+  const p = Save.profile;
+  p.chal = [...new Set([...(p.chal || []), c.id])];
+  p.passUsed = [...new Set([...(p.passUsed || []), c.id])];
+  Save.writeLocal(); Save.flush();
+  chalPassNote = { id: c.id, at: Date.now(), rw: CHAL_UPGRADES.find(u => u.id === c.rw) || null };
+  Audio_.levelup();
+}
+
 
 /* ------------------------------- the browser ------------------------------
    Fifty entries is too many for a wall of cards, so this is a list on the left
@@ -51886,6 +51988,7 @@ function chalKey(k) {
   if (k === 'arrowleft' || k === 'a') {
     chalSel = Math.max(0, chalSel - 1); chalKeepVisible(); Audio_.select(); return;
   }
+  if (k === 'p') { chalPassPress(); return; }
   if (k === 'pagedown') { chalSel = Math.min(CHALLENGES.length - 1, chalSel + 8); chalKeepVisible(); return; }
   if (k === 'pageup')   { chalSel = Math.max(0, chalSel - 8); chalKeepVisible(); return; }
   if (k === 'enter' || k === ' ') {
@@ -51910,6 +52013,7 @@ function chalClick() {
     if (chalOpen(c)) startChallenge(c);
     return;
   }
+  if (chalPassRect && inRect(mouse.x, mouse.y, chalPassRect)) { chalPassPress(); return; }
 }
 
 let chalStartRect = null;
@@ -51932,8 +52036,10 @@ function drawChal() {
   ctx.restore();
   ctx.save();
   ctx.letterSpacing = '0.1em';
+  const passes = passesLeft();
   const sub2 = done + ' / ' + CHALLENGES.length + '   COMPLETE   ·   ' +
-               'EACH ONE PAYS AN UPGRADE, PERMANENTLY';
+               'EACH ONE PAYS AN UPGRADE, PERMANENTLY' +
+               (passes ? '   ·   ' + passes + ' PASS' + (passes === 1 ? '' : 'ES') + ' LEFT' : '');
   fitFont(sub2, W - 48, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
   ctx.fillStyle = '#64748b';
   ctx.fillText(sub2, W / 2, t2 ? 52 : 74);
@@ -52077,7 +52183,8 @@ function drawChal() {
   ctx.textAlign = 'center';
   ctx.save();
   ctx.letterSpacing = '0.12em';
-  const keys2 = '↑↓ SELECT   ·   ENTER START   ·   ESC BACK';
+  const passable = passes && CHALLENGES[chalSel] && !chalDone(CHALLENGES[chalSel].id);
+  const keys2 = '↑↓ SELECT   ·   ENTER START   ·   ' + (passable ? 'P USE PASS   ·   ' : '') + 'ESC BACK';
   fitFont(keys2, W - 36, '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
   ctx.fillStyle = '#475569';
   ctx.fillText(keys2, W / 2, H - (g.tight ? 18 : 34));
@@ -52241,9 +52348,12 @@ function drawChalSheet(g) {
 
   /* the button never moves: it is the same target on every entry */
   chalStartRect = null;
+  chalPassRect = null;
   const by = g.y + g.viewH - BTN_H;
+  // WELCOME BACK: a pass sits beside START, or alone where START cannot go
+  const passes = won ? 0 : passesLeft();
+  const bw = open && passes ? Math.min(220, (w - 10) / 2) : Math.min(220, w);
   if (open) {
-    const bw = Math.min(220, w);
     chalStartRect = { x, y: by, w: bw, h: BTN_H - 6 };
     const hot = inRect(mouse.x, mouse.y, chalStartRect);
     ctx.save();
@@ -52262,14 +52372,56 @@ function drawChalSheet(g) {
     ctx.restore();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-  } else {
+  } else if (!won) {                         // passed while locked: nothing to explain
     ctx.save();
     ctx.textAlign = 'left';                  // the clip restore hands back 'center'
     ctx.textBaseline = 'alphabetic';
     const lock = chalLockText(c);
     fitFont(lock, w, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#f87171';
-    ctx.fillText(lock, x, by + 24);
+    // with a pass on offer the button takes the row, and the reason sits on it
+    ctx.fillText(lock, x, passes ? by - 4 : by + 24);
+    ctx.restore();
+  }
+
+  if (passes) {
+    const px = open ? x + bw + 10 : x;
+    const pw = Math.min(open ? 220 : 240, x + w - px);
+    const armed = chalPassArm && chalPassArm.id === c.id &&
+                  Date.now() - chalPassArm.at <= CHAL_PASS_ARM_MS;
+    const PASS_COL = '#a3e635';
+    chalPassRect = { x: px, y: by, w: pw, h: BTN_H - 6 };
+    const hot = armed || inRect(mouse.x, mouse.y, chalPassRect);
+    ctx.save();
+    if (hot) { ctx.shadowColor = PASS_COL; ctx.shadowBlur = 18; }
+    ctx.fillStyle = armed ? 'rgba(163,230,53,0.22)' : hot ? 'rgba(163,230,53,0.14)' : 'rgba(8,13,22,0.9)';
+    roundRect(px, by, pw, BTN_H - 6, 9); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = rgba(PASS_COL, hot ? 0.95 : 0.5); ctx.lineWidth = hot ? 1.8 : 1.2;
+    roundRect(px, by, pw, BTN_H - 6, 9); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.12em';
+    const t = armed ? 'AGAIN TO SPEND 1' : 'USE PASS  ·  ' + passes + ' LEFT';
+    fitFont(t, pw - 16, '700', 13, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+    ctx.fillStyle = PASS_COL;
+    ctx.fillText(t, px + pw / 2, by + (BTN_H - 6) / 2);
+    ctx.restore();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // what the pass just did, for a few seconds after
+  if (chalPassNote && chalPassNote.id === c.id && Date.now() - chalPassNote.at < 4500) {
+    const rw = chalPassNote.rw;
+    const t = 'PASSED' + (rw ? '   ·   UNLOCKED ' + rw.n : '');
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.letterSpacing = '0.1em';
+    fitFont(t, w, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#a3e635';
+    ctx.fillText(t, x, open ? by - 4 : by + 24);
     ctx.restore();
   }
 }

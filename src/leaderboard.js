@@ -269,6 +269,32 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
   return { error: 'busy' };
 }
 
+/* =============================== WELCOME BACK ===============================
+   The game was down for a few days at the end of September 2026, and moved
+   house to come back. Every returning player is owed THE HACKER and ten
+   challenge passes; the game holds both as one perk, 'comeback', in the
+   same awards list a dev grant arrives in.
+
+   The game grants it itself when the save on this address had flown a run
+   before the gift shipped. This is for everyone whose save did not make the
+   move: a profile id the old site recorded, or a callsign that was on one of
+   its boards. sync.js keeps that list (COMEBACK_KEY) from the old store.
+
+   A callsign is not an identity — anyone can type one — so a name match is
+   the honest kind of guess a free gift can afford, never a way in to
+   anything that is somebody else's. Podiums stay addressed to a pid.
+========================================================================== */
+export const COMEBACK_KEY = 'comeback';    // { names: [...], pids: [...] }
+export const comebackName = v => cleanName(v).toLowerCase();
+
+async function isReturning(store, pid, name) {
+  const doc = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
+  if (!doc) return false;
+  if (Array.isArray(doc.pids) && doc.pids.includes(pid)) return true;
+  const n = comebackName(name);
+  return !!n && n !== 'anon' && Array.isArray(doc.names) && doc.names.includes(n);
+}
+
 const SKIN_GRANTS = {
   'ecd8c7a3671b4582f6b62ee1106510c8': ['draft'],   // MARIO — beta tester
 };
@@ -488,7 +514,10 @@ export default async (req, env) => {
     const pid = q.get('awards');
     if (pid !== null) {
       if (!isPid(pid)) return json({ error: 'bad pid' }, 400);
-      return json(Object.assign({ awards: await awardsFor(store, pid) }, meta));
+      const awards = await awardsFor(store, pid);
+      if (await isReturning(store, pid, q.get('name')))
+        awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
+      return json(Object.assign({ awards }, meta));
     }
 
     // the finished seasons, for a hall of past winners
