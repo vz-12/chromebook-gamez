@@ -22,8 +22,9 @@
    never copied.
 
    Every run also adds to the WELCOME BACK list (see leaderboard.js): each
-   callsign that was on an old board, which is how a returning player is
-   recognised on a new address where none of their old save exists. Every write is a compare-and-swap, the same as a player's,
+   callsign that was on an old board and the old profile ids that posted it,
+   which is how a returning player is recognised, and given their old id
+   back, on a new address where none of their old save exists. Every write is a compare-and-swap, the same as a player's,
    and nothing is written unless the merge changed something, so a sync with
    nothing new costs reads only.
 
@@ -122,30 +123,45 @@ async function syncDoc(store, key, theirs) {
   throw new Error('could not merge ' + key + ' (busy)');
 }
 
-/* Every callsign on every old board. Profile ids are no use here: the new
-   site is a different address, so no old pid can ever arrive at it. */
-function knownNames(docs) {
-  const names = new Set();
+const PID_RE = /^[0-9a-f]{16,64}$/;
+
+/* Every callsign on every old board, and which old pids posted it — keyed
+   'n:<name>' so a callsign like __proto__ is only a name. */
+function knownPlayers(docs) {
+  const owners = new Map();
   for (const [key, doc] of docs) {
     if (!doc || typeof doc !== 'object') continue;
     if (key !== 'top' && !key.startsWith('season:') && !key.startsWith('day:')) continue;
     for (const e of doc.entries || []) {
       const n = e && comebackName(e.name);
-      if (n && n !== 'anon') names.add(n);
+      if (!n || n === 'anon') continue;
+      if (!owners.has(n)) owners.set(n, new Set());
+      if (typeof e.pid === 'string' && PID_RE.test(e.pid)) owners.get(n).add(e.pid);
     }
   }
-  return names;
+  return owners;
 }
 
 /* Union into the stored list, under compare-and-swap. It only ever grows: a
-   callsign the old site knew stays known after the old site is gone. */
+   callsign the old site knew stays known, with every pid that posted it,
+   after the old site is gone. */
 async function recordKnown(store, known) {
   for (let i = 0; i < RETRIES; i++) {
     const res = await store.getWithMetadata(COMEBACK_KEY, { type: 'json', consistency: 'strong' });
-    const had = (res && res.data && res.data.names) || [];
-    const names = new Set([...had, ...known]);
-    if (names.size === had.length) return false;
-    const wrote = await store.setJSON(COMEBACK_KEY, { names: [...names].sort() },
+    const had = (res && res.data) || {};
+    const owners = {};
+    for (const [k, l] of Object.entries(had.owners || {}))
+      if (k.startsWith('n:') && Array.isArray(l)) owners[k] = new Set(l);
+    for (const n of had.names || []) if (!owners['n:' + n]) owners['n:' + n] = new Set();
+    for (const [n, ps] of known) {
+      const k = 'n:' + n;
+      owners[k] = new Set([...(owners[k] || []), ...ps]);
+    }
+    const next = { names: Object.keys(owners).map(k => k.slice(2)).sort(), owners: {} };
+    for (const k of Object.keys(owners).sort()) next.owners[k] = [...owners[k]].sort();
+    const was = { names: had.names || [], owners: had.owners || {} };
+    if (JSON.stringify(was) === JSON.stringify(next)) return false;
+    const wrote = await store.setJSON(COMEBACK_KEY, next,
       res ? { onlyIfMatch: res.etag } : { onlyIfNew: true });
     if (wrote.modified) return true;
     await backoff(i);
@@ -180,7 +196,7 @@ export async function syncFromNetlify(env) {
       docs.push([d.key, value]);
       if (await syncDoc(store, d.key, value)) state.changed.push(d.key);
     }
-    const known = knownNames(docs);
+    const known = knownPlayers(docs);
     if (await recordKnown(store, known)) state.changed.push(COMEBACK_KEY);
     state.returning = known.size;
     state.ok = true;
