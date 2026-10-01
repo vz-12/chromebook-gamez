@@ -19,7 +19,8 @@
      anything new       copied across if D1 has nothing under that name
 
    meta (this side keeps its own calendar), gate (lockouts) and selftest are
-   never copied.
+   never copied, and a MISFILED row (a run under somebody else's callsign)
+   is dropped from both sides.
 
    Every run also adds to the WELCOME BACK list (see leaderboard.js): each
    callsign that was on an old board and the old profile ids that posted it,
@@ -44,6 +45,20 @@ const MAX_ENTRIES = 100;
 const TIMEOUT_MS = 15000;
 const NEVER = new Set([META, 'gate', 'selftest']);
 
+/* Rows on the old boards filed under the wrong player: one player's run,
+   posted from their own profile under another player's callsign. They are
+   dropped from every merge, here and in D1, and kept out of the WELCOME
+   BACK list, so each of these callsigns points only at its own player's
+   profile. Matched on callsign (any case) and pid together. */
+const MISFILED = [
+  // NOT Z's 4,942,749, posted once as "mario" from NOT Z's profile
+  { name: 'mario', pid: 'f55ca5526c1f29cb7f368838657b3ed7' },
+  // Mario's 3,649,291, posted once as "not z" from Mario's profile
+  { name: 'not z', pid: 'ecd8c7a3671b4582f6b62ee1106510c8' },
+];
+const misfiled = e => !!e && typeof e.name === 'string' &&
+  MISFILED.some(m => m.pid === e.pid && m.name === comebackName(e.name));
+
 const byScore = (a, b) => b.score - a.score;
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
@@ -51,9 +66,11 @@ const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
    deciding which of two rows for the same name stands. */
 function mergeRows(ours, theirs, wins) {
   const byName = new Map();
-  for (const e of ours || []) if (e && typeof e.name === 'string') byName.set(e.name, e);
+  for (const e of ours || [])
+    if (e && typeof e.name === 'string' && !misfiled(e)) byName.set(e.name, e);
   for (const e of theirs || []) {
     if (!e || typeof e.name !== 'string' || typeof e.score !== 'number') continue;
+    if (misfiled(e)) continue;
     const mine = byName.get(e.name);
     if (!mine || !wins(mine, e)) byName.set(e.name, e);
   }
@@ -133,6 +150,7 @@ function knownPlayers(docs) {
     if (!doc || typeof doc !== 'object') continue;
     if (key !== 'top' && !key.startsWith('season:') && !key.startsWith('day:')) continue;
     for (const e of doc.entries || []) {
+      if (misfiled(e)) continue;
       const n = e && comebackName(e.name);
       if (!n || n === 'anon') continue;
       if (!owners.has(n)) owners.set(n, new Set());
@@ -144,7 +162,7 @@ function knownPlayers(docs) {
 
 /* Union into the stored list, under compare-and-swap. It only ever grows: a
    callsign the old site knew stays known, with every pid that posted it,
-   after the old site is gone. */
+   after the old site is gone. The one thing taken out is a MISFILED pair. */
 async function recordKnown(store, known) {
   for (let i = 0; i < RETRIES; i++) {
     const res = await store.getWithMetadata(COMEBACK_KEY, { type: 'json', consistency: 'strong' });
@@ -157,6 +175,8 @@ async function recordKnown(store, known) {
       const k = 'n:' + n;
       owners[k] = new Set([...(owners[k] || []), ...ps]);
     }
+    // and out of what an earlier run already filed
+    for (const m of MISFILED) if (owners['n:' + m.name]) owners['n:' + m.name].delete(m.pid);
     const next = { names: Object.keys(owners).map(k => k.slice(2)).sort(), owners: {} };
     for (const k of Object.keys(owners).sort()) next.owners[k] = [...owners[k]].sort();
     const was = { names: had.names || [], owners: had.owners || {} };

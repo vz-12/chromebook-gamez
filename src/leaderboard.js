@@ -104,9 +104,17 @@ const DEV_ACCOUNTS = {
 /* Dev accounts with no login: the profile is the key. Each gets what a
    DEV_ACCOUNTS login binds, read on every sync the way awardsFor reads an
    account, so there is no grants row behind it — delete the line and the
-   next sync takes it all back. A pid is a bearer token (see SKIN_GRANTS). */
+   next sync takes it all back. A pid is a bearer token (see SKIN_GRANTS).
+
+   `callsign` hands the pid out by name (WELCOME BACK): on the new address
+   a player has a new pid, and typing any spelling of the callsign that
+   reads the same claims this one, so its grants follow its player there.
+   Mario's is the pid that posted "Mario", "mario" and "ERROR" on the old
+   boards. (The one listed here before, f55ca552, was NOT Z's, from a run
+   posted once as "mario"; it keeps everything through its notz login.) */
 const DEV_PIDS = {
-  'f55ca5526c1f29cb7f368838657b3ed7': { who: 'mario', skins: ALL_SKINS, perks: ALL_PERKS },
+  'ecd8c7a3671b4582f6b62ee1106510c8': { who: 'mario', callsign: 'mario',
+                                        skins: ALL_SKINS, perks: ALL_PERKS },
 };
 
 /* A stand-in used when the named account does not exist, so a wrong user and
@@ -299,7 +307,10 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
      · a pid given something by hand — DEV_PIDS, SKIN_GRANTS, a dev login's
        grants — is never handed out by name, since a callsign is on every
        leaderboard for anyone to read. Its callsigns still pay the gift and
-       are still taken; the pid stays where it is.
+       are still taken; the pid stays where it is. The exception is a
+       DEV_PIDS entry with a `callsign`, which is handed out like any old
+       pid, and answers to every spelling of that callsign (looseNames):
+       Mario, MARIO, M A R I O, Mar1o, mario_2.
      · nothing is claimed until sync.js has filed which old pid posted each
        callsign: a claim made before that could neither hand the pid back
        nor close off its other callsigns, and would stand like that for
@@ -323,7 +334,27 @@ export const comebackName = v => cleanName(v).toLowerCase();
 const claimKey = n => 'n:' + n;
 const hasOwn = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 
+/* A callsign with its spelling taken out: lower case, letters only, runs of
+   a letter cut to one. Twice, once reading digits and symbols as the
+   letters they stand in for (Mar1o, M4RIO) and once dropping them
+   (mario123), since either is how a name gets dressed up. */
+const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', 8: 'b', '@': 'a', '$': 's' };
+function looseNames(v) {
+  const low = cleanName(v).toLowerCase();
+  const squeeze = t => t.replace(/[^a-z]/g, '').replace(/(.)\1+/g, '$1');
+  return [squeeze(low), squeeze([...low].map(ch => LEET[ch] || ch).join(''))];
+}
+/* The DEV_PIDS entry whose callsign this name is a spelling of, if any. */
+function devByCallsign(name) {
+  const mine = looseNames(name).filter(Boolean);
+  for (const [pid, d] of Object.entries(DEV_PIDS))
+    if (d.callsign && mine.includes(looseNames(d.callsign)[0]))
+      return { pid, n: comebackName(d.callsign) };
+  return null;
+}
+
 async function handGiven(store, pid) {
+  if (hasOwn(DEV_PIDS, pid) && DEV_PIDS[pid].callsign) return false;   // handed out by name
   if (hasOwn(DEV_PIDS, pid) || hasOwn(SKIN_GRANTS, pid)) return true;
   const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
   return !!(g && hasOwn(g.byPid, pid));
@@ -363,11 +394,16 @@ async function comebackClaim(store, pid, name) {
       n = its.includes(asked) ? asked : its[0];
       sole = pid;
     } else {
-      n = comebackName(name);
-      if (!n || n === 'anon' || !names.includes(n)) return none;
+      const dev = devByCallsign(name);
+      n = dev ? dev.n : comebackName(name);
+      if (!n || n === 'anon' || !(dev || names.includes(n))) return none;
       if (hasOwn(byName, claimKey(n))) return none;  // taken, or under a taken old pid
       // a callsign found on the old boards after its old pid was claimed
       if (ownersOf(n).some(p => hasOwn(old, p))) return none;
+      if (dev) {
+        if (hasOwn(old, dev.pid)) return none;
+        sole = dev.pid;                              // its own, whoever else posted the name
+      }
     }
 
     if (!sole) {
