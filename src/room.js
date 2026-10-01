@@ -14,12 +14,11 @@
    no retry loop: a writer can never clobber the other side's data because it
    cannot address it.
    ========================================================================= */
-import { getStore } from '@netlify/blobs';
-
-export const config = { path: '/api/room' };
+import { getStore } from './store.js';
 
 const STORE = 'voidrunner-rooms';
 const TTL_MS = 15 * 60 * 1000;      // a room is stale long before this
+const KEEP_MS = 60 * 60 * 1000;     // and its rows are deleted after this
 const MAX_ICE = 40;                 // plenty for a LAN; a cap all the same
 const MAX_SDP = 20000;              // an SDP blob is ~2-4KB
 const CODE_LEN = 4;
@@ -69,8 +68,8 @@ const cleanIce = v => {
 const fresh = d => d && typeof d.at === 'number' && Date.now() - d.at < TTL_MS;
 const keyFor = (code, side) => 'room/' + code + '/' + side;
 
-export default async (req) => {
-  const store = getStore({ name: STORE, consistency: 'strong' });
+export default async (req, env) => {
+  const store = getStore(env, STORE);
   const url = new URL(req.url);
   const code = cleanCode(url.searchParams.get('code'));
 
@@ -100,6 +99,11 @@ export default async (req) => {
   /* ---- open a room: allocate a code nobody is using ---- */
   if (!code) {
     if (!sdpOk(body.offer)) return json({ error: 'bad offer' }, 400);
+    /* Sweep out rooms nobody has touched in an hour. Opening a room is rare
+       enough to carry the cost, and without it every room ever opened would
+       sit in the database for good. A failed sweep is not this host's
+       problem: the next one gets it. */
+    await store.prune(KEEP_MS).catch(() => {});
     for (let i = 0; i < TRIES; i++) {
       const c = newCode();
       const existing = await store.get(keyFor(c, 'host'), { type: 'json' }).catch(() => null);

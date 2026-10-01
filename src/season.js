@@ -1,18 +1,28 @@
 /* ===========================================================================
    SEASONS — the arithmetic, and the rollover.
 
-   Shared by the API function and by the scheduled one that closes the board
+   Shared by the API handler and by the cron trigger that closes the board
    whether or not anybody is playing. It lives here so there is exactly one
    copy of the rule about when a season ends; two would drift, and the day
    they drifted is the day a season closed twice or not at all.
 
-   Deliberately free of any Netlify import: the caller hands in a store. That
+   Deliberately free of any platform import: the caller hands in a store. That
    is what lets the tests drive it with a fake one, and it means this module
    has no opinion about where it is running.
    ========================================================================= */
 export const STORE = 'voidrunner-leaderboard';
 export const KEY = 'top';
 export const RETRIES = 6;
+
+/* A pause before retrying a lost compare-and-swap: random, and longer each
+   time. Retrying at once means every writer that just lost re-reads the same
+   version and collides again, round after round, until the retries run out;
+   spreading them lets one land per gap. A read-then-write against D1 can take
+   tens of ms from a far-off edge, so the gaps are sized to that: under a
+   second in total even for a writer that loses every round, and nothing at
+   all for one that never collides. */
+export const backoff = attempt =>
+  new Promise(r => setTimeout(r, Math.random() * 40 * (attempt + 1)));
 
 /* A season runs from the 6th to the 6th, UTC, and is named for the month it
    opens in: '2026-09' opens 6 Sep and closes 6 Oct. The 6th rather than the
@@ -62,9 +72,9 @@ export async function closeSeason(store, id) {
   }
 }
 
-/* The rollover. Lazy by necessity: a function only exists while a request is
-   in flight, so there is nobody to notice midnight on the 6th except the next
-   caller. It walks forward one season at a time rather than jumping, so a
+/* The rollover. Lazy as a backstop: the Worker only runs while a request or
+   the daily cron is in flight, so between those there is nobody to notice
+   midnight on the 6th except the next caller. It walks forward one season at a time rather than jumping, so a
    month nobody played still gets closed and filed (empty) instead of being
    skipped — the archive stays a continuous record. */
 export async function ensureSeason(store) {
