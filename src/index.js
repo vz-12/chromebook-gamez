@@ -9,12 +9,17 @@
      /api/leaderboard   the boards, seasons, awards, vigil and dev logins
      /api/room          the LAN co-op signalling dead-drop
 
-   And once a day, the cron trigger closes a finished season whether or not
-   anybody is playing (season-close.js).
+   Two cron triggers (wrangler.jsonc): once a day, closing a finished season
+   whether or not anybody is playing (season-close.js); and every 15 minutes,
+   merging in the old Netlify leaderboard store (sync.js).
    ========================================================================= */
 import leaderboard from './leaderboard.js';
 import room from './room.js';
 import seasonClose from './season-close.js';
+import { syncFromNetlify } from './sync.js';
+
+// must match the schedule in wrangler.jsonc exactly
+const SEASON_CLOSE_CRON = '5 0 * * *';
 
 const json = (body, status) =>
   new Response(JSON.stringify(body), {
@@ -45,6 +50,6 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(seasonClose(env));
+    ctx.waitUntil(event.cron === SEASON_CLOSE_CRON ? seasonClose(env) : syncFromNetlify(env));
   }
 };
