@@ -275,24 +275,53 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
    challenge passes; the game holds both as one perk, 'comeback', in the
    same awards list a dev grant arrives in.
 
-   The game grants it itself when the save on this address had flown a run
-   before the gift shipped. This is for everyone whose save did not make the
-   move: a profile id the old site recorded, or a callsign that was on one of
-   its boards. sync.js keeps that list (COMEBACK_KEY) from the old store.
+   The move is also why this cannot be read off the player's machine: the
+   new site is a different address, so no save, pid or cookie from the old
+   one comes with them. What does come with them is the callsign they type.
+   sync.js keeps every callsign that was on an old board (COMEBACK_KEY), and
+   a profile that enters one of those claims the gift — once, both ways:
 
-   A callsign is not an identity — anyone can type one — so a name match is
-   the honest kind of guess a free gift can afford, never a way in to
-   anything that is somebody else's. Podiums stay addressed to a pid.
+     · one per profile: a pid that has claimed keeps its gift whatever it is
+       renamed to, and can never claim a second old callsign. Renaming onto
+       somebody else's name cannot spend their gift.
+     · one per old callsign: once claimed, the next pid to type it gets
+       nothing, so a second device or a wiped save does not double up.
+
+   Both halves live in one document written under compare-and-swap, so two
+   profiles racing for the same callsign cannot both win it. A callsign is
+   not an identity — anyone can type one — so this is first come, first
+   served: the honest kind of guess a free gift can afford, and never a way
+   in to anything that is somebody else's. Podiums stay addressed to a pid.
 ========================================================================== */
-export const COMEBACK_KEY = 'comeback';    // { names: [...], pids: [...] }
+export const COMEBACK_KEY = 'comeback';        // { names: [...] }, from sync.js
+const CLAIMS_KEY = 'comeback-claims';          // { byName: {'n:<name>': pid}, byPid: {pid: name} }
 export const comebackName = v => cleanName(v).toLowerCase();
+// names are prefixed as keys, so a callsign like __proto__ is only a name
+const claimKey = n => 'n:' + n;
 
-async function isReturning(store, pid, name) {
-  const doc = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
-  if (!doc) return false;
-  if (Array.isArray(doc.pids) && doc.pids.includes(pid)) return true;
-  const n = comebackName(name);
-  return !!n && n !== 'anon' && Array.isArray(doc.names) && doc.names.includes(n);
+/* True if this profile has the gift: already claimed, or claiming it now. */
+async function comebackClaim(store, pid, name) {
+  for (let i = 0; i < RETRIES; i++) {
+    const res = await store.getWithMetadata(CLAIMS_KEY, { type: 'json', consistency: 'strong' })
+      .catch(() => null);
+    const doc = (res && res.data) || {};
+    const byName = Object.assign({}, doc.byName || {});
+    const byPid = Object.assign({}, doc.byPid || {});
+    if (Object.prototype.hasOwnProperty.call(byPid, pid)) return true;  // its one, already
+    const n = comebackName(name);
+    if (!n || n === 'anon') return false;
+    if (Object.prototype.hasOwnProperty.call(byName, claimKey(n))) return false;  // taken
+    const known = await store.get(COMEBACK_KEY, { type: 'json' }).catch(() => null);
+    if (!known || !Array.isArray(known.names) || !known.names.includes(n)) return false;
+    byName[claimKey(n)] = pid;
+    byPid[pid] = n;
+    const opts = res ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
+    const wrote = await store.setJSON(CLAIMS_KEY, { byName, byPid }, opts)
+      .catch(() => ({ modified: false }));
+    if (wrote && wrote.modified) return true;
+    await backoff(i);                    // somebody else claimed something; look again
+  }
+  return false;
 }
 
 const SKIN_GRANTS = {
@@ -515,7 +544,7 @@ export default async (req, env) => {
     if (pid !== null) {
       if (!isPid(pid)) return json({ error: 'bad pid' }, 400);
       const awards = await awardsFor(store, pid);
-      if (await isReturning(store, pid, q.get('name')))
+      if (await comebackClaim(store, pid, q.get('name')))
         awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
       return json(Object.assign({ awards }, meta));
     }

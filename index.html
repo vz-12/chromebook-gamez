@@ -20289,7 +20289,6 @@ const Save = {
     // older saves only knew mute; treat that as a volume of zero
     Audio_.setVol(Save.profile.vol !== undefined ? Save.profile.vol
                                                  : (Save.profile.muted ? 0 : 1));
-    comebackLocal();         // WELCOME BACK, before verFirst can be stamped
     eraMark(false);          // stamps the era, and pays out an old one
     Codex.load();
     fxLevel = Save.profile.fx === undefined ? FX.ON : (Save.profile.fx ? FX.ON : FX.OFF);
@@ -20318,7 +20317,6 @@ const Save = {
       Save.db = db;
       Save.status = 'cloud';
       if (remote) { Save.profile = Save.repair(Save.merge(Save.profile, remote)); Save.writeLocal(); }
-      comebackLocal();          // the merged profile may be the older save
       Save.reconcileClears();   // the merged profile may predate clear tracking
       await Save.flush();
       await Save.refreshTop();
@@ -43230,16 +43228,15 @@ function drawMenuSet() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
-  /* id 7 is WELCOME BACK's COMEBACK_LOG: a save first opened on this version
-     or later does not count as returning on its own word. */
   { id: 7, v: '1.4.1', date: '1 OCT 2026', lines: [
     ['new', 'WELCOME BACK. The game was down for a few days, so every returning '
           + 'player gets THE HACKER unlocked and 10 challenge passes.'],
+    ['note', 'To claim it, play under the callsign you used before the move. If it '
+           + 'was on a leaderboard, the gift is yours. Each old callsign can be '
+           + 'claimed once, and each save claims one.'],
     ['new', 'A challenge pass clears any challenge on the ladder at once, locked or '
           + 'not, and pays its upgrade. In CHALLENGES pick one and press [P] or '
-          + 'USE PASS, then once more to spend it.'],
-    ['note', 'Starting from a fresh save? Enter the callsign you played under, and if '
-           + 'it was on a leaderboard the game will know you.']
+          + 'USE PASS, then once more to spend it.']
   ] },
   { id: 6, v: '1.4', date: '26 SEP 2026', lines: [
     ['new', "Evolutions. Beat your pilot's own finale again in its rite, a changed "
@@ -45295,6 +45292,7 @@ const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback'];
 
 const Awards = {
   syncing: false,
+  again: false,                  // a sync was asked for while one was out
   served: [],                    // perk ids the server confirmed this session
   list: () => (Save.profile.awards || []),
   best() {                       // 1, 2, 3 — or 0 for no podium ever
@@ -45343,11 +45341,16 @@ const Awards = {
                               || (x.season < y.season ? 1 : -1));
   },
   async sync() {
-    if (Awards.syncing || location.protocol === 'file:') return;
+    if (location.protocol === 'file:') return;
+    /* A sync asked for while one is in flight runs again after it, rather
+       than being dropped: the callsign just typed is what claims WELCOME
+       BACK, and a launch's own sync can still be out when it is entered. */
+    if (Awards.syncing) { Awards.again = true; return; }
     Awards.syncing = true;
+    Awards.again = false;
     try {
-      /* The callsign goes along so the server can recognise a returning
-         player whose save did not make the move (WELCOME BACK). */
+      /* The callsign goes along: on the new address it is the only thing
+         that can say who a returning player is (WELCOME BACK). */
       const nm = Save.profile.name ? '&name=' + encodeURIComponent(Save.profile.name) : '';
       const r = await fetch(Board.url + '?awards=' + encodeURIComponent(myPid()) + nm,
                             { cache: 'no-store' });
@@ -45369,6 +45372,7 @@ const Awards = {
 
     } catch (e) { /* a podium is not urgent; try again next launch */ }
     Awards.syncing = false;
+    if (Awards.again) Awards.sync();
   }
 };
 
@@ -45682,14 +45686,14 @@ function eraMark(played) {
    returning player is given THE HACKER, whatever their malware codex says,
    and COMEBACK_PASSES challenge passes. Both hang off one perk, 'comeback',
    banked in the awards list like a dev grant — cleaned, merged and kept the
-   same way — and it arrives by either of two roads:
+   same way.
 
-     · this save, if it had flown a run before the version that shipped the
-       gift (changelog entry COMEBACK_LOG). A profile first opened on that
-       version or later never qualifies on its own word, so the gift is a
-       latch that closes itself, exactly like the era mark above.
-     · the server, which knows every callsign and profile id the old site
-       recorded, for a returning player whose save did not make the move.
+   Only the server hands it out. The game came back on a new address, so no
+   save from the old one is here to vouch for anybody; what the player brings
+   is the callsign they type, and the awards request carries it. The server
+   knows every callsign that was on an old board, and lets each one be
+   claimed by exactly one profile, and each profile claim exactly one — so
+   renaming afterwards keeps the gift and cannot take somebody else's.
 
    A pass clears any challenge outright, locked or not, and pays its reward
    (see chalPass). What is spent is recorded as the challenges it was spent
@@ -45697,27 +45701,12 @@ function eraMark(played) {
    back. Function declarations, not consts: THE HACKER's `need` asks
    comebackHas() and can be asked before this line has run. */
 const COMEBACK_PASSES = 10;
-const COMEBACK_LOG = 7;
 function comebackHas(p) {
   return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
 }
 function passesLeft() {
   if (!comebackHas()) return 0;
   return Math.max(0, COMEBACK_PASSES - (Save.profile.passUsed || []).length);
-}
-/* The local road. Runs before eraMark stamps verFirst, so a save from before
-   verFirst existed reads as the old save it is. */
-function comebackLocal() {
-  const p = Save.profile;
-  if (!p || comebackHas(p)) return false;
-  if (!((p.runs || 0) > 0 || (p.best || 0) > 0)) return false;
-  if (p.verFirst) {
-    const e = CHANGELOG.find(x => x.v === p.verFirst);
-    if (!e || (e.id || 0) >= COMEBACK_LOG) return false;
-  }
-  p.awards = Awards.clean([...Awards.list(), { perk: 'comeback', via: 'WELCOME BACK' }]);
-  Save.writeLocal(); Save.flush();
-  return true;
 }
 
 /* Banking a grant goes through Awards.clean like everything else, so a bad id
