@@ -12,6 +12,7 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | D1 database `voidrunner` | Where the leaderboard and co-op rooms are stored. |
 | Cron trigger `5 0 * * *` | Closes a finished season at 00:05 UTC every day. |
 | Cron trigger `*/15 * * * *` | Merges in the old Netlify leaderboard store (see below). |
+| Custom domain `voidrunner.online` | Where players go. `www` redirects to it. |
 | `wrangler.jsonc` | All of the above, as config. |
 | `.assetsignore` | Files that must never be uploaded as part of the site. |
 | `_headers` | Response headers for the static files. |
@@ -43,19 +44,29 @@ Workers & Pages → `chromebook-gamez` → Settings → Build should read:
 - Deploy command: `npx wrangler deploy`
 - Root directory: `/`
 
-After a deploy, open `https://chromebook-gamez.<your-subdomain>.workers.dev/check.html`.
-Every line should be green except "Fireproof", which only warns if a network
-blocks esm.sh.
+After a deploy, open `https://voidrunner.online/check.html`. Every line should
+be green except "Fireproof", which only warns if a network blocks esm.sh.
 
-### Custom domain (chromebookgame.com)
+### The domain (voidrunner.online)
 
-1. The domain has to be a zone in the same Cloudflare account. If it is not,
-   go to Cloudflare → Add a domain, then change the nameservers at the
-   registrar to the two Cloudflare gives you.
-2. Workers & Pages → `chromebook-gamez` → Settings → Domains & Routes → Add →
-   Custom domain → `chromebookgame.com`. Optionally add `www.chromebookgame.com`
-   too.
-3. If the domain is set up anywhere else (GitHub Pages, say), remove it there.
+The game lives at **voidrunner.online**. The domain is attached to the Worker
+in `wrangler.jsonc` (`routes`), so every deploy keeps it attached and there
+is nothing to set in the dashboard. Deploying creates the DNS records and
+the certificate.
+
+- **The domain must be an active zone in the same Cloudflare account.** A
+  domain bought through Cloudflare is one already. One bought elsewhere has to
+  be added (Cloudflare → Add a domain) and the registrar's nameservers changed
+  to the two Cloudflare gives; it is active once Cloudflare sees them.
+- **If a deploy fails at the domain step,** the zone usually still has DNS
+  records left over from the registrar (a parking page) for `voidrunner.online`
+  or `www`. Delete those in the zone's DNS page and deploy again.
+- **www.voidrunner.online** is attached as well. The game sends anyone who
+  lands there to `voidrunner.online` before loading anything, because a save
+  belongs to the address it was made on.
+- **The workers.dev address** (`chromebook-gamez.<your-subdomain>.workers.dev`)
+  stays up as a fallback (`workers_dev` in `wrangler.jsonc`). Saves made there
+  stay there.
 
 The `CNAME` file is not used by Cloudflare and is not published.
 
