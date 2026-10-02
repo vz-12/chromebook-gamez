@@ -304,7 +304,7 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
      · a callsign posted by several old pids, or with no pid on record,
        still pays the gift but hands no pid back: there is no saying whose
        it was.
-     · a pid given something by hand — DEV_PIDS, SKIN_GRANTS, a dev login's
+     · a pid given something by hand — DEV_PIDS, SKIN_GRANTS, PERK_GRANTS, a dev login's
        grants — is never handed out by name, since a callsign is on every
        leaderboard for anyone to read. Its callsigns still pay the gift and
        are still taken; the pid stays where it is. The exception is a
@@ -355,7 +355,7 @@ function devByCallsign(name) {
 
 async function handGiven(store, pid) {
   if (hasOwn(DEV_PIDS, pid) && DEV_PIDS[pid].callsign) return false;   // handed out by name
-  if (hasOwn(DEV_PIDS, pid) || hasOwn(SKIN_GRANTS, pid)) return true;
+  if (hasOwn(DEV_PIDS, pid) || hasOwn(SKIN_GRANTS, pid) || hasOwn(PERK_GRANTS, pid)) return true;
   const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
   return !!(g && hasOwn(g.byPid, pid));
 }
@@ -438,6 +438,14 @@ async function comebackClaim(store, pid, name) {
 
 const SKIN_GRANTS = {
   'ecd8c7a3671b4582f6b62ee1106510c8': ['draft'],   // MARIO — beta tester
+  // EMBER: their own skin. Blank and held back (`wip` in index.html) until drawn.
+  '06a21d4e756af978bb640b8dff30d92e': ['ember-gift'],
+};
+
+/* Perks handed to one profile by hand, the way SKIN_GRANTS hands skins, and
+   taken back the same way. evo-<pilot> wakes that one pilot's evolution. */
+const PERK_GRANTS = {
+  '06a21d4e756af978bb640b8dff30d92e': ['evo-ember'],   // EMBER — the EMBER evolution
 };
 
 /* Every board leaves through here. A pid is how a podium and a dev grant
@@ -534,7 +542,8 @@ async function awardsFor(store, pid) {
   const dp = Object.prototype.hasOwnProperty.call(DEV_PIDS, pid) ? DEV_PIDS[pid] : null;
   if (dp) given.push(...(dp.skins || ALL_SKINS));
   for (const id of [...new Set(given)]) out.push({ skin: id, via: 'GRANTED' });
-  const perks = [...(row && Array.isArray(row.perks) ? row.perks : []),
+  const perks = [...(hasOwn(PERK_GRANTS, pid) ? PERK_GRANTS[pid] : []),
+                 ...(row && Array.isArray(row.perks) ? row.perks : []),
                  ...(acct ? (acct.perks || ALL_PERKS) : []),
                  ...(dp ? (dp.perks || ALL_PERKS) : [])];
   for (const id of [...new Set(perks)]) out.push({ perk: id, via: 'GRANTED' });

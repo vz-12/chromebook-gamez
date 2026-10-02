@@ -53538,11 +53538,16 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
                       // the BOSS RUSH's three, knight to king
                       'rush-knight', 'rush-duke', 'rush-king',
                       // ALL HALLOWS: the vigil's four
-                      'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul'];
+                      'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul',
+                      // EMBER's, by hand (SECRET_SKINS)
+                      'ember-gift'];
 /* Grants that are not skins. Checked against this list the same way, so an
    invented one cannot arrive from a save file any more than a skin can.
-   'comeback' is WELCOME BACK's: THE HACKER and the challenge passes. */
-const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback'];
+   'comeback' is WELCOME BACK's: THE HACKER and the challenge passes.
+   'evo-<pilot>' wakes that one pilot's evolution (devPerksApply), where
+   unlock-evo wakes them all. */
+const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback',
+                      'evo-ember'];
 
 const Awards = {
   syncing: false,
@@ -53788,8 +53793,28 @@ const SECRET_SKINS = [
      + 'construction lines, a dimension under it, and the silhouette that was '
      + 'cut turning up now and again over the one that shipped.',
     req: '—',
-    base: { player: { col: '#7dd3fc' }, bullet: { col: '#38bdf8' } } }
+    base: { player: { col: '#7dd3fc' }, bullet: { col: '#38bdf8' } } },
+
+  /* EMBER's, handed to that profile by SKIN_GRANTS in src/leaderboard.js.
+     Blank: no colours, and every art hook is an empty function on EMBER_GIFT
+     below. `wip` keeps it out of the list and unequippable while it is, so
+     the holder sees nothing yet; delete that one key to ship it. A rename is
+     three lines: this id, DEV_SKIN_IDS, and SKIN_GRANTS. */
+  { id: 'ember-gift', n: 'UNTITLED', col: '#fb923c', fx: 'ember-gift', wip: true,
+    d: '—',
+    req: '—' }
 ];
+
+/* ART HOOKS for EMBER's skin. Each is called by SkinFx with the same
+   arguments the other skins' art gets. Empty, they draw nothing: the hull,
+   its rounds, its sparks and the roster all look exactly as they do with no
+   skin on. bullet and part answer false for "draw the stock one". */
+const EMBER_GIFT = {
+  player(s) {},                       // over the hull, every frame
+  bullet(b, c) { return false; },     // one round
+  part(p, t, rad) { return false; },  // one spark
+  enemy(e, ea) {}                     // one body of the roster; empty leaves them alone
+};
 
 const devHeld = id => Awards.list().some(a => a.skin === id);
 /* What the dropdown lists: the shipped table, plus anything unlisted this
@@ -53798,7 +53823,7 @@ const devHeld = id => Awards.list().some(a => a.skin === id);
    reading "150 CANDLES LIT WORLDWIDE" in September would announce it. Once
    the event is live they are listed like any award, and a held one always is. */
 const devList = () => DEV_SKINS.filter(s => !/^hl-/.test(s.id) || devHeld(s.id) || hlLive())
-                               .concat(SECRET_SKINS.filter(s => devHeld(s.id)));
+                               .concat(SECRET_SKINS.filter(s => devHeld(s.id) && !s.wip));
 
 /* The handshake. Typed into the callsign field, which is the one place in
    the game that takes a free string and the one place nothing says to type
@@ -53920,7 +53945,17 @@ function devPerksApply() {
   let changed = false;
   if (devPerk('unlock-all')) changed = devUnlockAll() || changed;
   if (devPerk('unlock-evo')) changed = devUnlockEvo() || changed;
+  for (const a of Awards.list())
+    if (a.perk && a.perk.startsWith('evo-')) changed = devWakeOne(a.perk.slice(4)) || changed;
   return changed;
+}
+
+/* One pilot's evolution, by hand ('evo-<pilot>'): that hull awake and no
+   other. Only a hull whose rite is built, the same as devUnlockEvo. */
+function devWakeOne(id) {
+  try { if (!riteBuilt(id)) return false; }
+  catch (e) { return false; }            // asked before the rites table exists
+  return grantAwakening(id);
 }
 
 /* --------------------------- the era mark --------------------------------
@@ -54039,7 +54074,7 @@ const specialById = id => AWARD_SKINS().find(s => s.id === id) || null;
    preferred how it looked. The dev grant is kept as a second route because
    a reward that only exists after a month of real play is otherwise
    untestable; it is a development tool and gated as one. */
-const specialEarned = s => !!s &&
+const specialEarned = s => !!s && !s.wip &&     // a skin still being drawn equips nothing
   ((s.rank && Awards.list().some(a => a.rank && a.rank <= s.rank)) || devStage(s) > 0);
 /* The chip strip is podiums; dev skins have their own control, because they
    are a different kind of thing and a row that mixes them says neither. */
@@ -54956,6 +54991,7 @@ const SkinFx = {
     if (s.fx === 'void') { SkinFx.voidPlayer(s); return; }
     if (s.fx === 'redaction') { SkinFx.redPlayer(s); return; }
     if (s.fx === 'draft') { drawDraftRig(P.x, P.y, (P.r || 12) + 11, uiTime); return; }
+    if (s.fx === 'ember-gift') { EMBER_GIFT.player(s); return; }
     if (s.fx === 'imperial') { impPlayer(s, IMP_STATE); return; }
     if (hlWrOwns(s) && hlWrOnTap()) return;     // ALL HALLOWS: THE WARDROBE (false: the stock rim)
     const R = (P.r || 12) + 11, t = uiTime;
@@ -55299,6 +55335,7 @@ const SkinFx = {
     if (!s || !s.fx || b.arrow) return false;
     if (s.fx === 'redaction') return SkinFx.redBullet(b, c, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftBullet(b, c);
+    if (s.fx === 'ember-gift') return EMBER_GIFT.bullet(b, c);
     if (s.fx === 'imperial') return impBullet(b, c, impTier(s));
     if (hlWrOwns(s)) return hlWrRoundTap(b, c);
     if (s.fx !== 'void') return false;
@@ -55376,6 +55413,7 @@ const SkinFx = {
     if (!s || !s.fx) return false;
     if (s.fx === 'redaction') return SkinFx.redPart(p, t, rad, devStage(s));
     if (s.fx === 'draft') return SkinFx.draftPart(p, t, rad);
+    if (s.fx === 'ember-gift') return EMBER_GIFT.part(p, t, rad);
     if (s.fx === 'imperial') return impPart(p, t, rad, impTier(s));
     if (hlWrOwns(s)) return hlWrDebrisTap(p, t, rad);
     if (s.fx !== 'void') return false;
@@ -55402,6 +55440,7 @@ const SkinFx = {
     if (!s || !s.fx || e.type === 'boss' || !e.sides) return;
     if (s.fx === 'redaction') { if (devStage(s) === 2) SkinFx.redEnemy(e, ea); return; }
     if (s.fx === 'draft') return;
+    if (s.fx === 'ember-gift') { EMBER_GIFT.enemy(e, ea); return; }
     if (s.fx === 'imperial') { if (impTier(s) >= 2) impEnemy(e, ea, impTier(s)); return; }
     if (hlWrOwns(s)) { hlWrBodyTap(e, ea); return; }
     if (s.fx !== 'void') return;
