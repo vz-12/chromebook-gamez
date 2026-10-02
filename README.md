@@ -91,6 +91,26 @@ To stop syncing, delete the config row. The export endpoint stops answering on
 2026-10-15; after that, delete `src/sync.js`, its call in `src/index.js` and its
 cron, and the Netlify site.
 
+## Co-op relay (TURN)
+
+Co-op connects through Cloudflare Realtime TURN, so two players can join from
+any networks. The game asks `GET /api/turn` (`src/turn.js`) for short-lived
+credentials before each host or join, and holds the link to the relay
+(`NET_RELAY_ONLY` in `index.html`).
+
+It needs a TURN key, which only the Worker ever sees:
+
+1. Cloudflare dashboard → **Realtime → TURN Server → Create**. Note the
+   **Turn Token ID** and the **API Token**.
+2. Workers & Pages → `chromebook-gamez` → **Settings → Variables and Secrets**.
+   Add both as type **Secret**, so a deploy never clears them:
+   `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`.
+
+Until both are set, `/api/turn` answers 503 and co-op falls back to the old
+direct connection (same network only). Each address can get 30 sets of
+credentials an hour. Relayed data is billed at $0.05/GB after the first
+1,000 GB a month.
+
 ## Dev accounts
 
 Dev logins (`DEV_ACCOUNTS`), profile handouts (`DEV_PIDS`, `SKIN_GRANTS`) and
