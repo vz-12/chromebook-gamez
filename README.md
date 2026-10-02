@@ -64,7 +64,7 @@ the certificate.
 - **www.voidrunner.online** is attached as well. The game sends anyone who
   lands there to `voidrunner.online` before loading anything, because a save
   belongs to the address it was made on.
-- **The workers.dev address** (`voidrunner.<your-subdomain>.workers.dev`)
+- **The workers.dev address** (`voidrunner.play101.workers.dev`)
   stays up as a fallback (`workers_dev` in `wrangler.jsonc`). Saves made there
   stay there.
 
