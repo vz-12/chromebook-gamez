@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#05060a">
+<!-- AdSense: proves the site is this publisher's. Loads nothing; the one ad is ADS. -->
+<meta name="google-adsense-account" content="ca-pub-3461416270406814">
 <title>VOIDRUNNER</title>
 <script>
   /* A save belongs to the address it was made on, so the game keeps to one:
@@ -21,6 +23,12 @@
     font-family:Barlow,'Segoe UI',system-ui,sans-serif;
     -webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
   canvas{display:block;width:100%;height:100%;cursor:none}
+  /* the menu's one ad (see ADS) */
+  #vr-ad{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:5;
+    width:728px;max-width:calc(100vw - 440px);cursor:auto}
+  #vr-ad .vr-ad-label{font:600 9px/14px 'JetBrains Mono',monospace;letter-spacing:.2em;
+    color:#475569;text-align:center}
+  #vr-ad:has(ins[data-ad-status="unfilled"]){display:none}
 </style>
 </head>
 <body>
@@ -29456,6 +29464,72 @@ let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
 
 let frameErrors = 0;
+/* ================================== ADS ====================================
+   The one ad in the game: a single banner across the top of the main menu,
+   now and then, to pay for the domain. It is not allowed to cost the game
+   anything, so it only ever appears
+     · on the main menu itself: never in a run, and never while the menu is
+       busy with something else (the hub, a lead-in, his break-in),
+     · after the player has finished at least one run, so a first visit is
+       ad-free,
+     · once per page load at most, and once per ADS.every across loads,
+     · where it fits beside the menu (ADS.minW, ADS.minH),
+   and it is taken down the moment the menu is left. A blocked or unfilled
+   ad leaves nothing behind.
+
+   Off until ADS.client and ADS.slot are filled in from AdSense: with either
+   empty, no script is loaded and nothing is drawn. In AdSense, keep Auto ads
+   off for the site, or Google will place its own ads anywhere, runs
+   included. The privacy page AdSense asks for is privacy.html.
+   ========================================================================= */
+const ADS = {
+  client: 'ca-pub-3461416270406814',   // AdSense publisher id
+  slot: '',                  // the display ad unit's id
+  every: 15 * 60e3,          // at most one showing in this long, across reloads
+  minW: 1180, minH: 700      // smaller, it crowds the logo and the season line
+};
+const ADS_KEY = 'voidrunner_ad_last';
+const Ads = {
+  box: null, loading: false, failed: false, done: false,
+  last() { try { return Number(localStorage.getItem(ADS_KEY)) || 0; } catch (e) { return 0; } },
+  want() {
+    return state === 'menu' && !inHub && !arrival && !hlProOn()
+        && innerWidth >= ADS.minW && innerHeight >= ADS.minH
+        && ((Save.profile && Save.profile.runs) || 0) > 0;
+  },
+  tick() {
+    if (!ADS.client || !ADS.slot || Ads.failed || location.protocol === 'file:') return;
+    if (Ads.box) { if (!Ads.want()) Ads.close(); return; }
+    if (Ads.done || !Ads.want() || Date.now() - Ads.last() < ADS.every) return;
+    Ads.open();
+  },
+  open() {
+    Ads.done = true;                       // one per page load, whatever happens next
+    try { localStorage.setItem(ADS_KEY, String(Date.now())); } catch (e) {}
+    const box = document.createElement('div');
+    box.id = 'vr-ad';
+    box.innerHTML = '<div class="vr-ad-label">ADVERTISEMENT</div>'
+      + '<ins class="adsbygoogle" style="display:block;width:100%;height:90px"'
+      + ' data-ad-client="' + ADS.client + '" data-ad-slot="' + ADS.slot + '"'
+      + ' data-ad-format="horizontal" data-full-width-responsive="false"></ins>';
+    document.body.appendChild(box);
+    Ads.box = box;
+    if (!Ads.loading) {
+      Ads.loading = true;
+      const s = document.createElement('script');
+      s.async = true;
+      s.crossOrigin = 'anonymous';
+      s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client='
+            + encodeURIComponent(ADS.client);
+      s.onerror = () => { Ads.failed = true; Ads.close(); };   // blocked: nothing left behind
+      document.head.appendChild(s);
+    }
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); }
+    catch (e) { Ads.close(); }
+  },
+  close() { if (Ads.box) { Ads.box.remove(); Ads.box = null; } }
+};
+
 function frame(now) {
   if (pageDead) return;                  // the page has stopped; do not requeue
   const dt = Math.min(0.2, (now - last) / 1000);
@@ -29475,6 +29549,7 @@ function frame(now) {
     if (acc > STEP) acc = 0;
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
+    try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
   } catch (err) {
     // A thrown frame used to kill the rAF loop outright and freeze the
     // game mid-run. Drop the frame, keep the loop alive; losing a
