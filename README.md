@@ -122,8 +122,7 @@ that signed in on Netlify keeps its grants through the sync above.
 The game has room for one Google AdSense banner. It sits across the top of the
 main menu and appears now and then: only after a finished run, at most once a
 page load and once every 15 minutes, never during play, and only where it fits
-beside the menu. It is off until it is given an AdSense publisher id and ad
-unit id:
+beside the menu. It is off until it is given an ad unit id:
 
 1. In AdSense, add the site `voidrunner.online` and get it approved. AdSense
    asks for a privacy policy; that is `https://voidrunner.online/privacy`.
@@ -131,9 +130,10 @@ unit id:
    Google places its own ads anywhere, runs included.
 3. If many players are under 13, turn on AdSense's child-directed treatment for
    the site.
-4. In `index.html`, fill in `ADS.client` (`ca-pub-…`) and `ADS.slot`.
-5. Add an `ads.txt` file beside `index.html` containing the line AdSense gives
-   you (`google.com, pub-…, DIRECT, …`).
+4. In `index.html`, fill in `ADS.slot`. `ADS.client`, the
+   `google-adsense-account` meta tag and `ads.txt` already carry the publisher
+   id `pub-3461416270406814`; `.assetsignore` lets `ads.txt` through its rule
+   against `.txt` files.
 
 How often it shows is `ADS.every`; the smallest window it shows in is
 `ADS.minW` × `ADS.minH`.
