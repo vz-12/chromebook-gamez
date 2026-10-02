@@ -1404,6 +1404,7 @@ function newPlayer() {
     chain: 0, chainT: 0, stillT: 0, stillMax: 0, stillCd: 0, rally: 0, rallyT: 0,
     lungeId: 0, lungeCut: 0, lungeKill: 0,
     roninT: 0, roninAt: 0,                         // RONIN, once awake: see THE VAGRANT'S RITE
+    roninIntro: null,                              // its lead-in, while it runs: see RONIN's lead-in
     roninCd: [0, 0, 0, 0],                         // its Z X C V: see RONIN'S KIT
     roninChain: null, roninDash: null,             // the chain in hand, and X's dash
     roninStill: null, roninExec: null, roninExecN: 0,   // C's stance, its counter or execution, and whose turn
@@ -3388,7 +3389,7 @@ function updateBladeEchoes(dt) {
 
 /* ------------------------------- the parry -------------------------------- */
 function bladeParry() {
-  if (!isBlade() || P.parryCd > 0 || P.parryT > 0) return;
+  if (!isBlade() || P.parryCd > 0 || P.parryT > 0 || roninCutIn()) return;
   P.parryT = bladeParryWin();
   P.parryAge = 0;                        // the perfect part is the opening of it
   P.parryTook = 0;
@@ -4064,7 +4065,7 @@ function hurtPlayer(dmg, opts) {
   if (state !== 'play') return;
   if (hackBy) return;                    // THE HACKER: a script of yours cannot reach you
   if (P.down) return;                    // a wreck cannot be hurt further
-  if (P.roninDash || P.roninExec) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter
+  if (P.roninDash || P.roninExec || roninCutIn()) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while its cut-in has the screen
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
   /* THE VAGRANT's parry. This function is the funnel every source of damage
@@ -7003,7 +7004,7 @@ function drawRiteWorld() {
    eyes. SUPERUSER keys off the moment it woke (rrSuT) rather than off the
    race, so it holds through ROOT's delete and the card. */
 function drawRiteUnderHull() {
-  if (roninOn()) drawRoninUnder(roninW());   // THE VAGRANT awake: RONIN
+  if (roninShown()) drawRoninUnder(roninW());   // THE VAGRANT awake: RONIN
   drawSuOverBodies();                    // the mane's drill and its pins
   drawSuAscWorld(P.suAsc);               // V: ROOT's jabs, and the bodies they have thrown
   if (P.slowT > 0) drawRrSlow(P.slowT);
@@ -7014,9 +7015,10 @@ function drawRiteUnderHull() {
   }
 }
 function drawRiteOverHull() {
-  if (roninOn()) drawRoninOver(roninW());
+  if (roninShown()) drawRoninOver(roninW());
   // RONIN is over, but what it shed is still in the air: its end, a wound still bleeding
   else if (VRA.parts.length) { vraTick(); vraDrawParts(); }
+  { const rq = roninPhase(); if (rq) drawRoninIntroOver(rq); }   // RONIN's lead-in, over the hull
   if (rrSuT >= 0) drawSuperuserHull(rrSuW());
   else if (suOn()) {
     drawSuperuserHull(suW());
@@ -16236,15 +16238,85 @@ const RONIN_GROW = 0.9;          // how long the look takes to come in (art)
 const roninOn = () => P.roninT > 0;
 const roninW = () => clamp((uiTime - (P.roninAt || 0)) / RONIN_GROW, 0, 1);
 
+/* ---------------------------- RONIN's lead-in -----------------------------
+   Built the way OVERDRIVE's is (user, 1 Oct 2026): a clock of its own
+   (P.roninIntro), named beats, and a phase the art reads (roninPhase). The
+   room hushes; something falls to the hull; on the cut the transformation
+   drawn in v2 begins (P.roninAt is set there, and RONIN's own passes run from
+   there: roninShown). RONIN works from the press, as OVERDRIVE does; only
+   its look waits for the cut. In the rite the duel is already the lead-in,
+   so it starts at the cut.
+
+   The lead-in is a cut-in (user, 1 Oct): close on a cloak being thrown on,
+   with nobody to be seen in it; the camera pulls back to his profile, the
+   face dark under the brim; one eye lights red in it and flashes; the cut.
+   It has the whole screen, so while it runs the room is held at RN_SLOW and
+   the hull with it, the way an execution holds them (roninCutIn), and none
+   of it is spent from RONIN's minute. */
+const RN_T_HUSH = 0.0, RN_T_HUSH_END = 0.35;  // the room goes still, and the frame is his
+const RN_T_THROW = 0.2, RN_T_PULL = 1.15;     // close on the cloak, thrown on; then the camera pulls back
+const RN_T_EYE = 2.05, RN_T_FLASH = 2.5;      // his profile: an eye lights under the brim, and flashes
+const RN_T_CUT = 2.75;                        // and on that, the cut
+const RN_T_SETTLE = 0.9;                      // after the cut: the room comes back
+const RN_T_OUT = 1.2;                         // RONIN's last seconds, for its look to let go
+const RN_SLOW = 0.04;                         // the room, while the cut-in has the screen
+const roninShown = () => roninOn() && !(P.roninIntro && !P.roninIntro.cut);
+const roninCutIn = () => !!(P.roninIntro && !P.roninIntro.cut);
+function roninPhase() {
+  const I = P.roninIntro;
+  if (!I && !roninOn()) return null;
+  const t = I ? I.t : Infinity;
+  const span = (a, b) => I ? clamp((t - a) / (b - a), 0, 1) : 1;
+  const settle = span(RN_T_CUT, RN_T_CUT + RN_T_SETTLE);
+  return {
+    t, rite: !!(I && I.rite),
+    hush: (I ? span(RN_T_HUSH, RN_T_HUSH_END) : 0) * (1 - settle),
+    cloak: span(RN_T_THROW, RN_T_PULL),
+    pull: span(RN_T_PULL, RN_T_EYE),
+    eye: span(RN_T_EYE, RN_T_FLASH),
+    flash: I ? (t >= RN_T_FLASH ? t - RN_T_FLASH : -1) : 99,
+    cutAge: I ? (I.cut ? t - RN_T_CUT : -1) : 99,
+    settle,
+    out: roninOn() ? 1 - clamp(P.roninT / RN_T_OUT, 0, 1) : 0
+  };
+}
+// the cut: the moment the transformation itself begins
+function roninCut(I) {
+  I.cut = true;
+  P.roninAt = uiTime;
+  banner('RONIN', '#fde68a', 2.4);
+  if (!I.rite) { shake(1.6); Audio_.boom(); }   // the art brings its own flash
+  ringFx(P.x, P.y, 14, 700, '#fde68a', 1.0, 6);
+  roninIntroCutFx(I);
+  roninFx();
+}
+function roninIntroTick(dt) {
+  const I = P.roninIntro;
+  if (!I) return;
+  if (!roninOn()) { P.roninIntro = null; return; }
+  const was = I.t;
+  I.t += dt;
+  const on = b => was < b && I.t >= b;
+  if (on(RN_T_THROW)) {                   // the cloak: a sweep, and the crack as it opens
+    Audio_.noise(0.5, 0.14, 400, 3200, 1.4);
+    Audio_.noise(0.14, 0.12, 4200, 700, 2, 0.24);
+  }
+  if (on(RN_T_FLASH)) {                   // the eye
+    Audio_.tone(1760, 0.55, 'sine', 0.06, 2640);
+    Audio_.tone(110, 0.7, 'sine', 0.12, 55);
+  }
+  if (!I.cut && I.t >= RN_T_CUT) roninCut(I);
+  if (I.t >= RN_T_CUT + RN_T_SETTLE) P.roninIntro = null;
+}
+
 function roninFire(rite) {
   P.roninT = RONIN_LEN;
-  P.roninAt = uiTime;
   P.roninCd = [0, 0, 0, 0];               // RONIN'S KIT: every key ready
   P.roninChain = null;
-  banner('RONIN', '#fde68a', 2.4);
-  if (!rite) { shake(1.6); Audio_.boom(); }   // the art brings its own flash
-  ringFx(P.x, P.y, 14, 700, '#fde68a', 1.0, 6);
-  roninFx();
+  const I = P.roninIntro = { t: rite ? RN_T_CUT : 0, rite: !!rite, cut: false };
+  if (!rite) Audio_.tone(330, 0.7, 'sine', 0.05, 150);   // the room going quiet
+  roninIntroFx(I);
+  if (rite) roninCut(I);                  // the duel was the lead-in
 }
 /* from bladeParried: the perfect that tops the chain out, on a woken hull */
 function roninCheck(perfect) {
@@ -16252,7 +16324,9 @@ function roninCheck(perfect) {
   if ((P.chain || 0) >= CHAIN_MAX) roninFire(false);
 }
 function roninTick(dt) {
+  roninIntroTick(dt);
   if (!(P.roninT > 0)) return;
+  if (roninCutIn()) return;               // the cut-in is not spent from the minute
   P.roninT = Math.max(0, P.roninT - dt);
   if (P.roninT === 0) { floatText(P.x, P.y - 48, 'RONIN ENDS', '#94a3b8', 13); roninEndFx(); }
 }
@@ -18009,6 +18083,655 @@ function roninEndFx() {
   vraSparks(P.x, P.y, 24, VRA_ASH, 260, 0, TAU, 0.5);
   ringFx(P.x, P.y, P.r + 14, P.r + 60, VRA_ASH, 0.6, 1.5);
 }
+/* ---------------------------------------------------------------------------
+   RONIN's lead-in: the cut-in (1 Oct). The room goes still and the frame is
+   his. Close on a cloak being thrown on: it whips out across the moon, lining
+   first, hangs there, and falls root to hem into place, and there is nobody
+   to be seen in it. The camera pulls back and pans, and it is on him: his
+   side profile against the moon, the kasa tipped down over his face, the
+   collar up to the bridge of his nose, the hilt out of the cloak at his hip,
+   his hair and the cloak's two tails streaming in the wind. Under the brim the
+   face is dark. One eye lights in it, red, and flashes: a streak across the
+   frame. The frame is cut open along that line, onto the room, and the v2
+   transformation plays from there.
+
+   Called from:
+     drawRoninIntroWorld(q)    world, floor layer (source-over), after drawRoninScores
+     drawRoninIntroOver(q)     world, over the hull (drawRiteOverHull), after drawRoninOver
+     drawRoninIntroScreen(q)   screen space, just before drawRoninScreen (over the HUD)
+     roninIntroFx(I)           RONIN fires: the lead-in begins (in the rite it begins at the cut)
+     roninIntroCutFx(I)        the cut: called just before roninFx, as the transformation begins
+   The draw hooks are called every frame RONIN is on or its lead-in is running.
+
+   WHAT THEY ARE HANDED
+     q   roninPhase(): { t (seconds since the press; Infinity once the lead-in
+         is over), rite, hush (0→1 over RN_T_HUSH..RN_T_HUSH_END, back to 0 as
+         it settles), cloak (0→1 over RN_T_THROW..RN_T_PULL: the cloak thrown
+         on), pull (0→1 over RN_T_PULL..RN_T_EYE: the camera pulling back),
+         eye (0→1 over RN_T_EYE..RN_T_FLASH: the eye lighting), flash (seconds
+         since RN_T_FLASH; -1 before it, 99 once the lead-in is over), cutAge
+         (seconds since the cut; -1 before it, 99 once the lead-in is over),
+         settle (0→1 over RN_T_SETTLE after the cut), out (0→1 over RONIN's
+         last RN_T_OUT seconds) }. Any hook may call roninPhase() itself.
+     I   P.roninIntro while it runs: { t, rite, cut }
+   While the cut-in has the screen (roninCutIn()) the logic holds the room at
+   RN_SLOW and the hull with it, and RONIN's minute does not run. Before the
+   cut RONIN's own passes are not called and the stock hull is drawn under the
+   plate; from the cut on they run as they always have, with P.roninAt set at
+   the cut. In the rite the duel is the lead-in: it starts at the cut, and
+   there is no cut-in. The beats are the logic's (RN_T_*). Ask, and they move.
+
+   The scene has its own units: the space between the letterbox bars is 100
+   tall, and he stands with his collar near the origin, facing +x. A camera
+   (vriCam) moves over it, and every layer sits at a depth, so the moon and the
+   clouds move less than he does and the near petals more. Its state is VRI,
+   stepped on the lead-in's clock, so it holds still under the pause.
+--------------------------------------------------------------------------- */
+const VRI_BAR = 0.12;                        // each letterbox bar, a share of the screen's height
+const VRI_IN = 0.24, VRI_OPEN = 0.32;        // the wipe on; the frame opening along the cut
+const VRI_RED = '#ef4444';
+const VRI_MOON = { x: -12, y: -15, r: 36, d: 0.15 };   // behind his head, far back
+const VRI_EYE = { x: 23.4, y: -18.3 };       // in the dark under the brim
+const VRI_U = 9, VRI_N = 16;                 // the cloak: strands front to back, segments down each
+const VRI_TAILS = [[0.6, -12.6, 52, 0, 1.1], [-1, -10.4, 44, 1.9, 0.9]];   // x, y, length, phase, width
+const VRI_SEAS = [[-0.34, -0.2, 0.24, 0.16, 0.4], [-0.2, -0.3, 0.16, 0.12, -0.2], [0.14, -0.4, 0.14, 0.09, -0.3],
+                  [0.26, 0.08, 0.26, 0.15, 0.25], [0.1, 0.2, 0.18, 0.1, 0.5], [-0.16, 0.38, 0.16, 0.1, 0.1],
+                  [0.5, -0.1, 0.08, 0.14, 0], [-0.46, 0.12, 0.1, 0.16, 0.3], [0.32, 0.42, 0.1, 0.06, -0.4]];
+const VRI_CLOUDS = [                         // long ink strokes, at depth 0.5
+  { y: 4, n: 9, gap: 34, L: 60, w: 2.2, v: 3, a: 0.55, col: '#05060a', s: 11 },     // across the moon's lower third
+  { y: -40, n: 8, gap: 40, L: 70, w: 1.6, v: 2, a: 0.4, col: '#0a0e1c', s: 23 },
+  { y: 24, n: 9, gap: 36, L: 80, w: 3.2, v: 4, a: 0.65, col: '#05060a', s: 37 }
+];
+const VRI = { parts: [], hem: null, at: -1, dt: 0 };
+const vriGlide = t => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+function vriMix(h1, h2, t, a) {
+  const p = parseInt(h1.slice(1), 16), q = parseInt(h2.slice(1), 16), k = clamp(t, 0, 1);
+  const c = s => Math.round(lerp((p >> s) & 255, (q >> s) & 255, k));
+  return 'rgba(' + c(16) + ',' + c(8) + ',' + c(0) + ',' + (a === undefined ? 1 : a) + ')';
+}
+
+/* ------------------------------ frame and camera --------------------------- */
+function vriFrame(q) {
+  const bar = H * VRI_BAR, u = (H - 2 * bar) / 100;
+  const on = vraOut(q.t / 0.2), off = q.cutAge >= 0 ? vraEase(q.cutAge / 0.45) : 0;
+  return { bar, barK: on * (1 - off), u, cam: vriCam(q, W / 2 / u), cx: W / 2, cy: H / 2 };
+}
+/* close, under his collar and behind him, so the cloak is all there is (the
+   frame's right edge is held short of the hilt and its top under the collar,
+   whatever the screen's shape); down with the cloak as it falls; then back
+   and across onto him; then in, a little, on the eye */
+function vriCam(q, half) {
+  const z0 = 2.6, c = vraEase(clamp((q.t - RN_T_THROW - 0.3) / 0.75, 0, 1));
+  let x = lerp(18, 28, c) - half / z0, y = lerp(9, 13, c);
+  const p = vriGlide(q.pull);
+  x = lerp(x, 30, p); y = lerp(y, -3, p);
+  let z = Math.exp(Math.log(z0) * (1 - p));
+  const e = vraEase(q.eye);
+  x = lerp(x, 27, e * 0.5); y = lerp(y, -9, e * 0.5); z *= 1 + 0.1 * e;
+  if (q.flash >= 0) z *= 1 + 0.06 * clamp(q.flash / 0.03, 0, 1) * Math.exp(-q.flash * 6);
+  return { x, y, z };
+}
+/* draw fn in the scene at depth d (1 is his; less is further away) */
+function vriAt(F, d, fn) {
+  const k = (1 + (F.cam.z - 1) * d) * F.u;
+  ctx.save();
+  ctx.translate(F.cx, F.cy); ctx.scale(k, k); ctx.translate(-F.cam.x * d, -F.cam.y * d);
+  fn(k);
+  ctx.restore();
+}
+function vriScreen(F, d, x, y) {
+  const k = (1 + (F.cam.z - 1) * d) * F.u;
+  return { x: F.cx + (x - F.cam.x * d) * k, y: F.cy + (y - F.cam.y * d) * k };
+}
+
+/* ---------------------------------- the cloak ------------------------------
+   Strands hung off the shoulder line. Each is a chain of angles: its rest
+   drape, plus the throw (flung out behind him, held, then let fall, the root
+   turning before the hem so the hem cracks down last), plus a billow running
+   down it that dies as it settles, plus the wind. */
+function vriRoot(u) {                         // the shoulder line, front (0) to back (1)
+  const a = 1 - u;
+  return { x: a * a * 27 + 2 * a * u * 6 - u * u * 17, y: -a * a * 7 - 2 * a * u * 16 - u * u };
+}
+function vriCloth(q, T) {
+  if (T <= 0) return null;
+  const grow = 0.08 + 0.92 * vraOut(T / 0.3), env = Math.exp(-2.2 * Math.max(0, T - 0.45));
+  const C = [];
+  for (let j = 0; j < VRI_U; j++) {
+    const u = j / (VRI_U - 1), r = vriRoot(u);
+    const L = lerp(64, 70, u) * (1 + 0.035 * Math.sin(u * 17 + 1)) * grow / VRI_N;   // an uneven hem
+    const rest = lerp(1.45, 1.98, u), fling = lerp(1.85, 0.3, u);   // flung open behind him like a sail, clear of his hat
+    const row = [{ x: r.x, y: r.y }];
+    let x = r.x, y = r.y;
+    for (let i = 0; i < VRI_N; i++) {
+      const s = (i + 0.5) / VRI_N;
+      const tau = T - 0.34 - s * lerp(0.14, 0.26, u);
+      const fl = tau < 0 ? fling * (1 + 0.06 * Math.sin(T * 7 + s * 5))
+                         : fling * Math.exp(-3 * tau) * Math.cos(4 * tau);
+      const wave = (0.46 * env + lerp(0.03, 0.09, u)) * s * Math.sin(s * 6.5 - q.t * (6 + 8 * env) + u * 4.2);
+      const th = rest + (u - 0.4) * 0.32 * s + 0.1 * Math.sin(s * Math.PI) * (0.5 - u) + fl + wave + 0.06 * s;
+      x += Math.cos(th) * L; y += Math.sin(th) * L;
+      row.push({ x, y });
+    }
+    C.push(row);
+  }
+  return C;
+}
+function vriCloak(C) {
+  const nU = C.length, nN = C[0].length - 1;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  // quad by quad: the outside is ink with the folds catching the moon; the
+  // lining, where the throw turns it toward us, is old gold
+  for (let i = 0; i < nN; i++) for (let j = 0; j < nU - 1; j++) {
+    const a = C[j][i], b = C[j + 1][i], c = C[j][i + 1], d = C[j + 1][i + 1];
+    const out = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) <= 0;
+    const u = (j + 0.5) / (nU - 1), s = (i + 0.5) / nN;
+    const fold = 0.5 + 0.5 * Math.sin(u * 15.5 + s * 1.6 + 0.4);
+    const col = out ? vriMix('#04060b', '#1d2538', fold * 0.8 + 0.15 * (1 - s))
+                    : vriMix('#2a1c0a', '#6e4c17', fold * 0.5 + 0.25 + 0.2 * s);
+    ctx.fillStyle = ctx.strokeStyle = col; ctx.lineWidth = 0.3;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(d.x, d.y); ctx.lineTo(c.x, c.y); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  // a crease down each fold's shadow: hard on the outside, soft on the lining
+  ctx.lineCap = 'round'; ctx.lineWidth = 0.35;
+  for (let j = 1; j < nU - 1; j += 2) for (let i = 0; i < nN; i++) {
+    const a = C[j][i], b = C[j + 1][i], c = C[j][i + 1];
+    const out = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) <= 0;
+    ctx.strokeStyle = out ? 'rgba(0,0,0,0.45)' : 'rgba(40,24,6,0.35)';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+  }
+  // the crest on its back, where the outside shows: a ring and a cut, in the cloth's own frame
+  const j = 5, i = 6, o = C[j][i];
+  const A = { x: (C[j + 1][i].x - C[j - 1][i].x) / 2, y: (C[j + 1][i].y - C[j - 1][i].y) / 2 };
+  const B = { x: (C[j][i + 1].x - C[j][i - 1].x) / 2, y: (C[j][i + 1].y - C[j][i - 1].y) / 2 };
+  const det = A.x * B.y - A.y * B.x;
+  if (det < -2) {
+    ctx.save();
+    ctx.transform(A.x, A.y, B.x, B.y, o.x, o.y);
+    vraBrushArc(0, 0, 0.75, 0.6, TAU - 1.1, 0.16, VRA_GOLD, 0.9);
+    vraLens(-1, 0.7, 1, -0.7, 0.07, VRA_GOLD, 0.9);
+    ctx.restore();
+  }
+  // gold all the way round its edge: the front, the hem, the back
+  const edge = () => {
+    ctx.beginPath();
+    C[0].forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    for (let k = 1; k < nU; k++) ctx.lineTo(C[k][nN].x, C[k][nN].y);
+    for (let k = nN - 1; k >= 0; k--) ctx.lineTo(C[nU - 1][k].x, C[nU - 1][k].y);
+  };
+  edge();
+  ctx.strokeStyle = rgba(VRA_GOLD, 0.9); ctx.lineWidth = 0.75; ctx.stroke();
+  ctx.strokeStyle = rgba(VRA_IVORY, 0.55); ctx.lineWidth = 0.22; ctx.stroke();
+  // the moon along his shoulder
+  ctx.strokeStyle = rgba(VRA_IVORY, 0.35); ctx.lineWidth = 0.3;
+  ctx.beginPath(); C.forEach((r, k) => k ? ctx.lineTo(r[0].x, r[0].y) : ctx.moveTo(r[0].x, r[0].y)); ctx.stroke();
+  ctx.restore();
+}
+
+/* the cloak's two tails, off the back of the collar: ribbons that turn as they
+   go, so they thin where they are edge-on, ivory with gold at the ends */
+function vriTails(q, T) {
+  if (T <= 0) return;
+  const grow = 0.1 + 0.9 * vraOut(T / 0.4), N = 16;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (const [ox, oy, L, ph, w] of VRI_TAILS) {
+    const pts = [];
+    let x = ox, y = oy;
+    for (let i = 0; i <= N; i++) {
+      const s = i / N;
+      const a = Math.PI + 0.14 - 0.3 * s * s + 0.42 * s * Math.sin(s * 6.5 - q.t * 10 + ph);
+      const tw = (0.3 + 0.7 * Math.abs(Math.cos(s * 5 - q.t * 8 + ph))) * w * (1 - 0.45 * s);
+      pts.push({ x, y, nx: -Math.sin(a) * tw, ny: Math.cos(a) * tw, s });
+      x += Math.cos(a) * L * grow / N; y += Math.sin(a) * L * grow / N;
+    }
+    for (let i = 1; i <= N; i++) {
+      const p = pts[i - 1], n = pts[i];
+      ctx.fillStyle = ctx.strokeStyle = n.s > 0.76 ? VRA_GOLD : vriMix('#fef3c7', '#d6c7a1', n.s);
+      ctx.lineWidth = 0.15;
+      ctx.beginPath();
+      ctx.moveTo(p.x + p.nx, p.y + p.ny); ctx.lineTo(n.x + n.nx, n.y + n.ny);
+      ctx.lineTo(n.x - n.nx, n.y - n.ny); ctx.lineTo(p.x - p.nx, p.y - p.ny); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* his hair, out from under the back of the brim, combed back by the wind */
+function vriHair(q) {
+  ctx.fillStyle = '#06070c';
+  for (let i = 0; i < 6; i++) {
+    const L = 7 + vraH(i + 3) * 8, ph = i * 1.4, N = 8, top = [], bot = [];
+    let x = 3.6 - i * 0.2, y = -22.4 + i * 1.3;
+    for (let k = 0; k <= N; k++) {
+      const s = k / N, a = Math.PI + 0.25 - 0.32 * s + 0.35 * s * Math.sin(s * 5 - q.t * 12 + ph);
+      const w = 0.9 * (1 - s) + 0.05, nx = -Math.sin(a) * w, ny = Math.cos(a) * w;
+      top.push([x + nx, y + ny]); bot.push([x - nx, y - ny]);
+      x += Math.cos(a) * L / N; y += Math.sin(a) * L / N;
+    }
+    ctx.beginPath();
+    top.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py));
+    for (let k = bot.length - 1; k >= 0; k--) ctx.lineTo(bot[k][0], bot[k][1]);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+/* the collar: up over his mouth to the bridge of his nose, gold on its edge */
+function vriCollar() {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(28.2, -6.8);
+  ctx.quadraticCurveTo(31.4, -10, 30.6, -14.6);
+  ctx.quadraticCurveTo(17, -15.8, 4.2, -12.6);
+  ctx.quadraticCurveTo(0.8, -10.5, -1.5, -6);
+  ctx.quadraticCurveTo(12, -10.5, 28.2, -6.8);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, -16, 0, -6);
+  g.addColorStop(0, '#1a2132'); g.addColorStop(1, '#07090f');
+  ctx.fillStyle = g; ctx.fill();
+  // the turns of it, wound round and falling away to the back
+  ctx.save(); ctx.clip();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const y = -14 + i * 2.2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 0.32;
+    ctx.beginPath(); ctx.moveTo(31, y - 0.6); ctx.quadraticCurveTo(16, y - 0.4, 0, y + 3.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(148,163,184,0.12)'; ctx.lineWidth = 0.18;
+    ctx.beginPath(); ctx.moveTo(31, y + 0.1); ctx.quadraticCurveTo(16, y + 0.3, 0, y + 3.9); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(VRA_GOLD, 0.85); ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(30.6, -14.6); ctx.quadraticCurveTo(17, -15.8, 4.2, -12.6); ctx.stroke();
+  ctx.restore();
+}
+
+/* the face, between the brim and the collar: dark, the moon only on its line */
+function vriFace() {
+  const line = () => {
+    ctx.lineTo(26.7, -21);
+    ctx.quadraticCurveTo(27.2, -19.6, 27.9, -18.6);
+    ctx.quadraticCurveTo(29.2, -16.6, 30.4, -14.9);
+  };
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(2.4, -26); ctx.lineTo(26.3, -24);
+  line();
+  ctx.lineTo(4.2, -12.2);
+  ctx.quadraticCurveTo(1.8, -18, 2.4, -26);
+  ctx.closePath();
+  ctx.fillStyle = '#030408'; ctx.fill();
+  ctx.strokeStyle = rgba('#cbd5e1', 0.2); ctx.lineWidth = 0.22;
+  ctx.beginPath(); ctx.moveTo(26.6, -22); line(); ctx.stroke();
+  ctx.restore();
+}
+
+/* the hilt, out of the front of the cloak at his hip; it comes in with the
+   pull, since in shot 1 it would be hanging off nobody */
+function vriHilt(q) {
+  const a = vraEase(q.pull * 2.5);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.translate(32.6, 26.2); ctx.rotate(-0.4);
+  // the tsuka: dark cord bound over gold, the binding showing as diamonds
+  ctx.fillStyle = '#6b4f1d'; ctx.fillRect(0.8, -1.25, 14, 2.5);
+  ctx.fillStyle = '#0b0d14';
+  for (let x = 1.2; x < 14.4; x += 1.75) {
+    ctx.beginPath();
+    ctx.moveTo(x, -1.25); ctx.lineTo(x + 1.75, -1.25); ctx.lineTo(x + 0.875, -0.15); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x, 1.25); ctx.lineTo(x + 1.75, 1.25); ctx.lineTo(x + 0.875, 0.15); ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = vraMetal(0, -2.6, 0, 2.6, ['#fef3c7', '#b45309', '#78350f']);
+  ctx.fillRect(14.6, -1.45, 1.3, 2.9);
+  ctx.beginPath(); ctx.ellipse(0.4, 0, 0.7, 2.6, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(VRA_IVORY, 0.45); ctx.lineWidth = 0.18;
+  ctx.beginPath(); ctx.moveTo(0.8, -1.25); ctx.lineTo(14.6, -1.25); ctx.stroke();
+  ctx.restore();
+}
+
+/* the kasa, from the side: a shallow cone tipped down over his face */
+function vriKasa() {
+  const Bx = -24, By = -28.5, Ax = 9, Ay = -40, Fx = 41, Fy = -19;
+  const top = () => {
+    ctx.moveTo(Bx, By);
+    ctx.quadraticCurveTo(-7, -33.2, Ax, Ay);
+    ctx.quadraticCurveTo(27.5, -27.4, Fx, Fy);
+  };
+  ctx.save();
+  ctx.beginPath(); top(); ctx.quadraticCurveTo(8, -20.6, Bx, By); ctx.closePath();
+  const g = ctx.createLinearGradient(-6, -40, 12, -20);
+  g.addColorStop(0, '#2c2313'); g.addColorStop(0.55, '#16110a'); g.addColorStop(1, '#07080c');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save();
+  ctx.clip();
+  // the weave: ribs from the crown to the brim, two rings round it
+  ctx.strokeStyle = rgba(VRA_GOLD, 0.14); ctx.lineWidth = 0.18;
+  for (let i = 1; i < 16; i++) {
+    const k = i / 16;
+    ctx.beginPath(); ctx.moveTo(Ax, Ay);
+    ctx.lineTo(lerp(Bx, Fx, k), lerp(By, Fy, k) + Math.sin(k * Math.PI) * 1.6); ctx.stroke();
+  }
+  for (const k of [0.36, 0.68]) {
+    ctx.beginPath();
+    ctx.moveTo(lerp(Ax, Bx, k), lerp(Ay, By, k));
+    ctx.quadraticCurveTo(lerp(Ax, 8, k), lerp(Ay, -19.4, k), lerp(Ax, Fx, k), lerp(Ay, Fy, k));
+    ctx.stroke();
+  }
+  // the underside of the brim, in shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.beginPath(); ctx.moveTo(Fx, Fy); ctx.quadraticCurveTo(8, -20.6, Bx, By); ctx.quadraticCurveTo(8, -23.6, Fx, Fy); ctx.fill();
+  ctx.restore();
+  // the moon round the top of it, gold round the brim
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(VRA_IVORY, 0.55); ctx.lineWidth = 0.4;
+  ctx.beginPath(); top(); ctx.stroke();
+  ctx.strokeStyle = rgba(VRA_GOLD, 0.85); ctx.lineWidth = 0.45;
+  ctx.beginPath(); ctx.moveTo(Fx, Fy); ctx.quadraticCurveTo(8, -20.6, Bx, By); ctx.stroke();
+  ctx.fillStyle = vraMetal(Ax - 1, Ay - 1.4, Ax + 1, Ay + 0.8, ['#fffbeb', '#b45309']);
+  ctx.beginPath(); ctx.arc(Ax, Ay - 0.3, 1.1, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* the eye: an ember first, then it opens, a hard almond, and it burns.
+   Drawn after the brim, so its light comes up under it */
+function vriEye(q) {
+  if (q.eye <= 0) return;
+  const kindle = vraIn(clamp(q.eye / 0.45, 0, 1)), open = vraOut(clamp((q.eye - 0.35) / 0.65, 0, 1));
+  const hot = q.flash >= 0 ? 1 : kindle * (0.35 + 0.65 * open);
+  const fl = 0.92 + 0.08 * Math.sin(q.t * 31) * Math.sin(q.t * 17);
+  ctx.save();
+  ctx.translate(VRI_EYE.x, VRI_EYE.y); ctx.rotate(0.12);
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(0, 0, 3 + 7 * hot, '#dc2626', 0.5 * hot * fl);
+  drawGlow(0, 0, 1.2 + 1.8 * hot, VRI_RED, 0.85 * hot);
+  const h = 0.08 + 0.5 * open;
+  ctx.beginPath();
+  ctx.moveTo(-1.5, -0.05);
+  ctx.quadraticCurveTo(-0.1, -h * 1.5, 1.35, 0.1);
+  ctx.quadraticCurveTo(0.1, h * 0.9, -1.5, -0.05);
+  ctx.closePath();
+  ctx.fillStyle = rgba(VRI_RED, Math.min(1, 0.4 + hot) * fl); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0.05, -0.02, 0.7 * (0.4 + 0.6 * open), h * 0.45, 0, 0, TAU);
+  ctx.fillStyle = rgba('#fee2e2', hot * fl); ctx.fill();
+  ctx.restore();
+}
+
+/* what the throw sheds: ink off the hem and gold off the trim, in his space */
+function vriStep(q) {
+  let dt = q.t - VRI.at;                  // the lead-in's clock: it never jumps, and holds under the pause
+  dt = dt >= 0 && VRI.at >= 0 ? Math.min(dt, 0.25) : 0;
+  VRI.at = q.t; VRI.dt = dt;
+  const ps = VRI.parts;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    const p = ps[i];
+    p.t += dt;
+    if (p.t >= p.life) { ps.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const dr = Math.pow(0.3, dt);
+    p.vx *= dr; p.vy = p.vy * dr + 40 * dt;
+  }
+}
+function vriSpray(C) {
+  const hem = C ? C.map(r => r[r.length - 1]) : null;
+  if (hem && VRI.hem && VRI.dt > 0) {
+    for (let j = 0; j < hem.length; j++) {
+      const a = VRI.hem[j], b = hem[j];
+      const vx = (b.x - a.x) / VRI.dt, vy = (b.y - a.y) / VRI.dt;
+      if (Math.hypot(vx, vy) < 70 || Math.random() > 0.5) continue;
+      const ink = Math.random() < 0.6;
+      VRI.parts.push({ ink, x: b.x, y: b.y, vx: vx * rnd(0.7, 0.3) + rnd(12, -12), vy: vy * rnd(0.7, 0.3) + rnd(12, -12),
+                       r: ink ? rnd(0.7, 0.25) : rnd(0.35, 0.15), t: 0, life: rnd(0.7, 0.3) });
+    }
+  }
+  VRI.hem = hem && hem.map(p => ({ x: p.x, y: p.y }));
+  if (VRI.parts.length > 260) VRI.parts.splice(0, VRI.parts.length - 260);
+}
+function vriDrawParts() {
+  ctx.save();
+  for (const p of VRI.parts) if (p.ink) {
+    const k = 1 - p.t / p.life, L = Math.min(2.5, Math.hypot(p.vx, p.vy) * 0.012);
+    ctx.fillStyle = rgba(VRA_INK, 0.85 * k);
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r + L, p.r, Math.atan2(p.vy, p.vx), 0, TAU); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of VRI.parts) if (!p.ink) {
+    const k = 1 - p.t / p.life;
+    drawGlow(p.x, p.y, p.r * 6, VRA_GOLD, 0.3 * k);
+    ctx.fillStyle = rgba(VRA_IVORY, 0.9 * k);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ------------------------------ the world behind him ----------------------- */
+function vriSky(F) {
+  const g = ctx.createLinearGradient(0, F.bar, 0, H - F.bar);
+  g.addColorStop(0, '#0d1428'); g.addColorStop(0.55, '#080b17'); g.addColorStop(1, '#05060a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function vriMoon(F, q) {
+  vriAt(F, VRI_MOON.d, () => {
+    const M = VRI_MOON;
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(M.x, M.y, M.r * 2.7, VRA_GOLD, 0.14);
+    drawGlow(M.x, M.y, M.r * 1.45, '#fff7d6', 0.13);
+    ctx.globalCompositeOperation = 'source-over';
+    const g = ctx.createRadialGradient(M.x - M.r * 0.3, M.y - M.r * 0.35, M.r * 0.1, M.x, M.y, M.r);
+    g.addColorStop(0, '#fffbeb'); g.addColorStop(0.6, '#fcefc6'); g.addColorStop(1, '#e6cb86');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(M.x, M.y, M.r, 0, TAU); ctx.fill();
+    // its seas, soft-edged
+    for (const [dx, dy, rx, ry, a] of VRI_SEAS) {
+      ctx.save();
+      ctx.translate(M.x + dx * M.r, M.y + dy * M.r); ctx.rotate(a); ctx.scale(rx * M.r, ry * M.r);
+      const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      sg.addColorStop(0, 'rgba(176,140,74,0.13)'); sg.addColorStop(0.6, 'rgba(176,140,74,0.08)'); sg.addColorStop(1, 'rgba(176,140,74,0)');
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+    // its limb a shade darker, and mist over its lower half
+    const lg = ctx.createRadialGradient(M.x, M.y, M.r * 0.7, M.x, M.y, M.r);
+    lg.addColorStop(0, 'rgba(120,90,40,0)'); lg.addColorStop(1, 'rgba(120,90,40,0.22)');
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.arc(M.x, M.y, M.r, 0, TAU); ctx.fill();
+    const mg = ctx.createLinearGradient(0, M.y, 0, M.y + M.r);
+    mg.addColorStop(0, 'rgba(8,11,23,0)'); mg.addColorStop(1, 'rgba(8,11,23,0.55)');
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(M.x, M.y, M.r + 0.5, 0, TAU); ctx.fill();
+    // brushed round it as the camera comes back: an ensō
+    const sw = (TAU - 0.5) * vraOut(clamp(q.pull * 1.4 - 0.15, 0, 1));
+    if (sw > 0.02) vriEnso(M.x, M.y, M.r * 1.1, -2.3, sw, 2.2, 0.75);
+  });
+}
+/* an ensō: one stroke of the brush, loaded where it starts, running dry where
+   it ends, with the bristles' streaks along the dry end */
+function vriEnso(x, y, r, a0, sweep, w, a) {
+  const N = Math.max(12, Math.ceil(sweep / 0.05)), out = [], inn = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, an = a0 + sweep * u;
+    const load = Math.pow(Math.sin(Math.PI * clamp(u * 0.92 + 0.08, 0, 1)), 0.5) * (1 - 0.45 * u);
+    const ww = w * load * (0.85 + 0.15 * Math.sin(u * 37)), rr = r + Math.sin(u * 9 + 1) * w * 0.25;
+    out.push([x + Math.cos(an) * (rr + ww / 2), y + Math.sin(an) * (rr + ww / 2)]);
+    inn.push([x + Math.cos(an) * (rr - ww / 2), y + Math.sin(an) * (rr - ww / 2)]);
+  }
+  ctx.save();
+  ctx.beginPath();
+  out.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py));
+  for (let i = inn.length - 1; i >= 0; i--) ctx.lineTo(inn[i][0], inn[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = rgba(VRA_GOLD, a); ctx.fill();
+  ctx.strokeStyle = rgba(VRA_GOLD, a * 0.5); ctx.lineWidth = w * 0.06;
+  for (const k of [-0.62, -0.3, 0.3, 0.6]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r + k * w * 0.5, a0 + sweep * (0.82 + 0.06 * k), a0 + sweep * (0.995 - 0.03 * Math.abs(k)));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function vriClouds(F, q) {
+  vriAt(F, 0.5, () => {
+    for (const C of VRI_CLOUDS) for (let i = 0; i < C.n; i++) {
+      const h1 = vraH(C.s + i), h2 = vraH(C.s + i + 40);
+      const x = -150 + i * C.gap + h1 * 18 - q.t * C.v, y = C.y + (h2 - 0.5) * 5, L = C.L * (0.6 + 0.6 * h1);
+      vraLens(x - L / 2, y, x + L / 2, y + (h1 - 0.5) * 1.5, C.w * (0.6 + 0.7 * h2), C.col, C.a * (0.6 + 0.4 * h2));
+    }
+  });
+}
+/* sakura on the wind, a layer behind him and a few big ones in front */
+function vriPetals(F, q, d, n, seed, size, cx, span) {
+  vriAt(F, d, () => {
+    for (let i = 0; i < n; i++) {
+      const h1 = vraH(seed + i), h2 = vraH(seed + i + 50), h3 = vraH(seed + i + 90);
+      const x = cx + span / 2 - ((h2 * span + q.t * (16 + 22 * h1)) % span);
+      const y = -58 + h3 * 112 + Math.sin(q.t * (1.2 + h1) + i) * 4;
+      const spin = q.t * (2 + 3 * h2) + i * 1.7, flip = Math.cos(spin * 1.3);
+      const s = size * (0.7 + 0.6 * h3);
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(spin * 0.6 + h1 * TAU);
+      ctx.scale(s * (0.25 + 0.75 * Math.abs(flip)), s);
+      ctx.beginPath();
+      ctx.moveTo(-1, 0);
+      ctx.quadraticCurveTo(-0.2, -0.78, 0.86, -0.36);
+      ctx.lineTo(0.6, 0); ctx.lineTo(0.86, 0.36);
+      ctx.quadraticCurveTo(-0.2, 0.78, -1, 0);
+      ctx.fillStyle = rgba(flip > 0 ? '#fbcfe8' : '#f9a8d4', 0.85);
+      ctx.fill();
+      ctx.restore();
+    }
+  });
+}
+/* 浪人, brushed down the right of the frame as the camera settles on him */
+function vriKanji(F, q) {
+  const k = vraOut(clamp((q.pull - 0.55) / 0.45, 0, 1));
+  if (k <= 0) return;
+  const fs = Math.round(F.u * 6.5), x = W - Math.max(48, W * 0.085), y0 = F.bar + F.u * 14;
+  ctx.save();
+  ctx.font = "700 " + fs + "px 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', 'Noto Serif CJK JP', serif";
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.beginPath(); ctx.rect(x - fs, y0 - 6, fs * 2, (fs * 2.3 + 12) * k); ctx.clip();
+  ctx.shadowColor = rgba(VRA_GOLD, 0.6); ctx.shadowBlur = 14;
+  ctx.fillStyle = rgba(VRA_GOLD, 0.5);
+  ctx.fillText('浪', x, y0); ctx.fillText('人', x, y0 + fs * 1.15);
+  ctx.restore();
+}
+
+/* ------------------------------- the plate --------------------------------- */
+function vriPlate(F, q, C, T) {
+  vriSky(F);
+  vriMoon(F, q);
+  vriClouds(F, q);
+  vriPetals(F, q, 0.7, 22, 3, 1.1, 20, 290);
+  vriAt(F, 1, () => {
+    vriTails(q, T);
+    vriHair(q);
+    if (C) vriCloak(C);
+    vriCollar(); vriFace(); vriHilt(q); vriKasa(); vriEye(q);
+    vriDrawParts();
+  });
+  vriPetals(F, q, 1.6, 6, 61, 2.6, 15, 330);
+  vriKanji(F, q);
+}
+/* on: an ink brush wipes it across, a gold edge leading */
+function vriWipe(F, q, plate) {
+  const k = vraOut(q.t / VRI_IN);
+  if (k >= 1) { plate(); return; }
+  const top = F.bar, bot = H - F.bar, n = 12;
+  const ex = y => lerp(-0.4 * W, 1.4 * W, k) - (y - H / 2) * 0.35;
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(-10, top - 2);
+  for (let i = 0; i <= n; i++) { const y = lerp(top - 2, bot + 2, i / n); ctx.lineTo(ex(y) + (vraH(i * 7.1) - 0.5) * W * 0.03, y); }
+  ctx.lineTo(-10, bot + 2); ctx.closePath(); ctx.clip();
+  plate();
+  ctx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  vraLens(ex(top), top, ex(bot), bot, 6, VRA_GOLD, 0.75 * (1 - k));
+  ctx.restore();
+}
+/* off: cut along the eye's line, the two halves part onto the room */
+function vriSplit(F, q, p, plate) {
+  const o = vraIn(q.cutAge / VRI_OPEN) * H * 0.75;
+  for (const sd of [-1, 1]) {
+    ctx.save();
+    ctx.translate(0, sd * o);                 // slide, then clip: each half keeps its own half
+    ctx.beginPath();
+    if (sd < 0) ctx.rect(0, 0, W, p.y); else ctx.rect(0, p.y, W, H - p.y);
+    ctx.clip();
+    plate();
+    ctx.restore();
+  }
+}
+/* the eye flashing: the frame takes the red, a streak the width of it */
+function vriFlash(F, q, p) {
+  if (q.flash < 0) return;
+  const f = q.flash, rise = clamp(f / 0.035, 0, 1), k = rise * Math.exp(-Math.max(0, f - 0.035) * 4);
+  const hold = q.cutAge >= 0 ? clamp(1 - q.cutAge / VRI_OPEN, 0, 1) : 1, px = H / 720;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba('#7f1d1d', 0.32 * k * k); ctx.fillRect(0, 0, W, H);
+  drawGlow(p.x, p.y, H * (0.22 + 0.26 * rise), '#dc2626', 0.55 * k);
+  drawGlow(p.x, p.y, H * 0.07, '#fee2e2', 0.9 * k);
+  const reach = W * (0.3 + 1.0 * vraOut(f / 0.14));
+  vraLens(p.x - reach, p.y, p.x + reach, p.y, (2 + 6 * k) * px, VRI_RED, Math.max(0.95 * k, 0.45 * hold));
+  vraLens(p.x - reach * 0.7, p.y, p.x + reach * 0.7, p.y, (0.8 + 1.8 * k) * px, '#ffffff', Math.max(k, 0.6 * hold));
+  vraLens(p.x, p.y - H * 0.13 * k, p.x, p.y + H * 0.13 * k, (1 + 2.2 * k) * px, '#fca5a5', 0.8 * k);
+  const rq = clamp(f / 0.4, 0, 1);
+  if (rq < 1) {
+    ctx.strokeStyle = rgba(VRI_RED, 0.6 * (1 - rq)); ctx.lineWidth = (2.5 * (1 - rq) + 0.5) * px;
+    ctx.beginPath(); ctx.arc(p.x, p.y, H * (0.03 + 0.4 * vraOut(rq)), 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+function vriBars(F) {
+  const b = F.bar * F.barK;
+  if (b < 0.5) return;
+  ctx.fillStyle = VRA_INK;
+  ctx.fillRect(0, 0, W, b); ctx.fillRect(0, H - b, W, b);
+  ctx.fillStyle = rgba(VRA_GOLD, 0.2 * F.barK);
+  ctx.fillRect(0, b - 1, W, 1); ctx.fillRect(0, H - b, W, 1);
+}
+
+/* ---------------------------------- hooks ---------------------------------- */
+function drawRoninIntroWorld(q) {}
+/* after the cut: the eye, still on the hull a moment, along the aim */
+function drawRoninIntroOver(q) {
+  if (q.rite || !(q.cutAge >= 0 && q.cutAge < 0.9)) return;
+  const a = 1 - q.cutAge / 0.9, x = P.x + Math.cos(P.ang) * 10, y = P.y + Math.sin(P.ang) * 10;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, 16, '#dc2626', 0.7 * a);
+  drawGlow(x, y, 5, '#fee2e2', 0.9 * a);
+  vraLens(x - 22 * a, y, x + 22 * a, y, 1.2, VRI_RED, 0.8 * a);
+  ctx.restore();
+}
+function drawRoninIntroScreen(q) {
+  // the room going still, under the plate, and coming back after it
+  if (q.hush > 0.002) {
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.15, W / 2, H / 2, Math.max(W, H) * 0.7);
+    g.addColorStop(0, rgba(VRA_INK, 0.45 * q.hush)); g.addColorStop(1, rgba(VRA_INK, 0.85 * q.hush));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (q.rite || !(q.t < Infinity)) return;
+  const F = vriFrame(q);
+  if (q.cutAge < VRI_OPEN) {
+    const T = q.t - RN_T_THROW, C = vriCloth(q, T);
+    vriStep(q); vriSpray(C);
+    const eye = vriScreen(F, 1, VRI_EYE.x, VRI_EYE.y), plate = () => vriPlate(F, q, C, T);
+    ctx.save();
+    if (q.cutAge >= 0) vriSplit(F, q, eye, plate); else vriWipe(F, q, plate);
+    vriFlash(F, q, eye);
+    ctx.restore();
+  }
+  vriBars(F);
+}
+function roninIntroFx(I) { VRI.parts.length = 0; VRI.hem = null; VRI.at = -1; }
+function roninIntroCutFx(I) {
+  if (I.rite) return;
+  vraSparks(P.x, P.y, 16, VRI_RED, 420, P.ang, 0.8, 0.35, 1.3);
+}
 /* ===================== end of THE VAGRANT'S RITE art hooks ===================== */
 
 /* =============================== RONIN'S KIT ===============================
@@ -18121,7 +18844,7 @@ function roninChainClose() {
 }
 
 function roninAbility(i) {
-  if (state !== 'play' || P.charId !== 'melee' || vrRite) return;
+  if (state !== 'play' || P.charId !== 'melee' || vrRite || roninCutIn()) return;
   const a = RONIN_KIT[i];
   if (!a) return;                              // not written yet
   if (!roninOn()) {
@@ -28090,6 +28813,8 @@ function update(dt) {
   if (odStrikeAiming()) slowmo = Math.min(slowmo, STRIKE_SLOW);
   // and RONIN's executions hold it almost still
   if (P.roninExec && P.roninExec.exec) slowmo = Math.min(slowmo, EXEC_SLOW);
+  // and its lead-in, while the cut-in has the screen
+  if (roninCutIn()) slowmo = Math.min(slowmo, RN_SLOW);
   const wdt = dt * slowmo;
 
   chalTick(dt);              // the rule sheet, where it touches the frame
@@ -28274,7 +28999,7 @@ function updatePlayer(dt) {
     P.dashRe += dt;
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = (keys[' '] || keys['shift']) && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !vrDuelLock();
+  const wantDash = (keys[' '] || keys['shift']) && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -28343,7 +29068,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || roninCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -28442,7 +29167,7 @@ function updatePlayer(dt) {
        never cut short an arc that is already travelling and owes damage to
        bodies it has not reached yet. P.fireT is only the gap between swings. */
     updateBlade(dt);
-    if (firing && P.swingT <= 0 && P.fireT <= 0 && !P.roninStill && !P.roninExec) {
+    if (firing && P.swingT <= 0 && P.fireT <= 0 && !P.roninStill && !P.roninExec && !roninCutIn()) {
       P.fireT = 1 / (bladeRate() * rateMul);
       bladeStart();
     }
@@ -35229,6 +35954,7 @@ function render() {
   drawOdStrikeMarks();       // C: the X to be cut, and what is left of it to trace
   drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
   drawRoninScores();         // RONIN's Z: the X it leaves in the floor
+  { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
 
   // --- additive layer: glows -------------------------------------------
   ctx.globalCompositeOperation = 'lighter';
@@ -35366,7 +36092,8 @@ function render() {
   drawHaltBar();
   drawTribunalHud();
   drawVrScreen();       // THE VAGRANT'S RITE: the entrance, the duel's letterbox and prompts
-  if (roninOn()) drawRoninScreen(roninW());
+  { const rq = roninPhase(); if (rq) drawRoninIntroScreen(rq); }   // RONIN's lead-in, over the frame
+  if (roninShown()) drawRoninScreen(roninW());
   halDeathHud();
   if (P.patchT > 0) {                  // the whole book is a timer, so show it
     ctx.save();
@@ -35409,7 +36136,7 @@ function render() {
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
-  if (!isTouch && state === 'play') drawCrosshair();
+  if (!isTouch && state === 'play' && !roninCutIn()) drawCrosshair();   // not over RONIN's cut-in
   // every other screen has no system cursor either, so it carries the pointer
   if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
   // his ending outlives his body, but it is not drawn over a screen the
@@ -44932,7 +45659,7 @@ function drawPlayer() {
   // FUSION CORE: a full reskin — the star is the hull, and no awarded skin is drawn over it
   if (odFusionOn()) { drawOdFusionHull(); return; }
   // RONIN: a full reskin once the transformation owns the hull (VRA v2)
-  if (roninOn() && vraRoninOwns()) { drawRoninHull(); return; }
+  if (roninShown() && vraRoninOwns()) { drawRoninHull(); return; }
   if (SkinFx.on) SkinFx.under();
   // ALL HALLOWS: a prize that is its own hull draws it, and the stock one is skipped
   if (hlWrSwapTap()) { SkinFx.player(); return; }
@@ -46326,7 +47053,7 @@ function drawVagrantHull(V, t, frameCol, frameFill) {
    the grip end disappears into the hand that is holding it. */
 function drawBladeSwing() {
   if (!isBlade()) return;
-  if (roninOn() && vraRoninOwns()) { drawRoninSwing(); return; }   // VRA v2: the katana's swing
+  if (roninShown() && vraRoninOwns()) { drawRoninSwing(); return; }   // VRA v2: the katana's swing
   const live = P.swingT > 0;
   const fade = live ? 1 : clamp((P.swingFade || 0) / 0.14, 0, 1);
   if (fade <= 0.002) return;
