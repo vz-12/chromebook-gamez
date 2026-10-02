@@ -36,7 +36,7 @@ integration (Workers Builds). Uploading files on GitHub counts as a push. Pull
 requests get a preview build first, and its result shows up as a check on the
 PR.
 
-Workers & Pages → `chromebook-gamez` → Settings → Build should read:
+Workers & Pages → `voidrunner` → Settings → Build should read:
 
 - Git repository: `vz-12/chromebook-gamez`
 - Production branch: `main`
@@ -64,7 +64,7 @@ the certificate.
 - **www.voidrunner.online** is attached as well. The game sends anyone who
   lands there to `voidrunner.online` before loading anything, because a save
   belongs to the address it was made on.
-- **The workers.dev address** (`chromebook-gamez.<your-subdomain>.workers.dev`)
+- **The workers.dev address** (`voidrunner.<your-subdomain>.workers.dev`)
   stays up as a fallback (`workers_dev` in `wrangler.jsonc`). Saves made there
   stay there.
 
@@ -102,7 +102,7 @@ It needs a TURN key, which only the Worker ever sees:
 
 1. Cloudflare dashboard → **Realtime → TURN Server → Create**. Note the
    **Turn Token ID** and the **API Token**.
-2. Workers & Pages → `chromebook-gamez` → **Settings → Variables and Secrets**.
+2. Workers & Pages → `voidrunner` → **Settings → Variables and Secrets**.
    Add both as type **Secret**, so a deploy never clears them:
    `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`.
 

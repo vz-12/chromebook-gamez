@@ -9,7 +9,7 @@
    and hands each player short-lived credentials made from it, once per
    connection attempt.
 
-   Two Worker secrets (Workers & Pages → chromebook-gamez → Settings →
+   Two Worker secrets (Workers & Pages → voidrunner → Settings →
    Variables and Secrets, both of type Secret so a deploy never clears them):
      TURN_KEY_ID          the TURN key's id      (Realtime → TURN Server)
      TURN_KEY_API_TOKEN   that key's API token
