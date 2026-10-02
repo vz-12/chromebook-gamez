@@ -1385,6 +1385,7 @@ function newPlayer() {
     ventShow: 0, ventPrev: 0,                      // and what the meter says about it
     // THE HACKER's SUPERUSER: the root meter, the clock, the four cooldowns
     suRoot: 0, suT: 0, suAt: 0, suCd: [0, 0, 0, 0], suDrill: null, suPlunge: null, suCombo: null, suDrain: null, suFling: null,
+    suIntro: null,                                 // its cut-in, while it runs: see SUPERUSER's cut-in
     suAsc: null, suAscUsed: false,                 // V: ROOT, and whether this area has had it
     odScorch: null,                                // EMBER's Z, SCORCHED EARTH, while its beam is out
     odStrike: null,                                // EMBER's C, from the vanes turning to touching down
@@ -4066,6 +4067,7 @@ function hurtPlayer(dmg, opts) {
   if (hackBy) return;                    // THE HACKER: a script of yours cannot reach you
   if (P.down) return;                    // a wreck cannot be hurt further
   if (P.roninDash || P.roninExec || roninCutIn()) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while its cut-in has the screen
+  if (suCutIn()) return;                   // nor while SUPERUSER's has it
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
   /* THE VAGRANT's parry. This function is the funnel every source of damage
@@ -7009,7 +7011,7 @@ function drawRiteUnderHull() {
   drawSuAscWorld(P.suAsc);               // V: ROOT's jabs, and the bodies they have thrown
   if (P.slowT > 0) drawRrSlow(P.slowT);
   if (rrSuT >= 0) drawSuperuser(rrSuW());
-  else if (suOn()) {
+  else if (suShown()) {
     drawSuperuser(suW());                // SUPERUSER in a run
     if (P.suAsc) drawSuAscUnder(suAscW());   // and ROOT growing out of it — on it, not instead of it
   }
@@ -7020,10 +7022,11 @@ function drawRiteOverHull() {
   else if (VRA.parts.length) { vraTick(); vraDrawParts(); }
   { const rq = roninPhase(); if (rq) drawRoninIntroOver(rq); }   // RONIN's lead-in, over the hull
   if (rrSuT >= 0) drawSuperuserHull(rrSuW());
-  else if (suOn()) {
+  else if (suShown()) {
     drawSuperuserHull(suW());
     if (P.suAsc) drawSuAscOver(suAscW());
   }
+  { const sq = suPhase(); if (sq) drawSuIntroOver(sq); }   // SUPERUSER's cut-in, over the hull
 }
 
 /* HACK_COL is declared far below this block, so its value is written out here:
@@ -8149,15 +8152,65 @@ function suFire() {
     Audio_.tone(160, 0.14, 'square', 0.07, 90);
     return;
   }
-  P.suRoot = 0; P.suT = SU_LEN; P.suAt = uiTime;
+  P.suRoot = 0; P.suT = SU_LEN;
   P.suCd = [0, 0, 0, 0];
+  const I = P.suIntro = { t: 0, cut: false };
+  Audio_.tone(220, 0.6, 'square', 0.04, 110);   // the room going quiet
+  suIntroFx(I);                           // the cut-in; SUPERUSER itself begins at the cut (suCut)
+}
+
+/* --------------------------- SUPERUSER's cut-in ----------------------------
+   Built the way RONIN's is (user, 2 Oct 2026: "i'm going to do the same thing
+   with hacker"): a clock of its own (P.suIntro), named beats, and a phase the
+   art reads (suPhase). The cut-in has the whole screen, so while it runs the
+   room is held at SU_SLOW and the hull with it (suCutIn): no moving, dashing,
+   firing, Z X C V or damage, and none of it is spent from SUPERUSER's minute.
+   On the cut SUPERUSER begins as it always has: P.suAt is set there, so the
+   rite's turn (drawRaceWake) plays over the room and the oni grows in from it;
+   suShown keeps both off until then. The rite has no cut-in: its SUPERUSER is
+   the race's, and keys off rrSuT. */
+const SU_T_HUSH = 0.0, SU_T_HUSH_END = 0.35;   // the room goes still, and the frame is the cut-in's
+const SU_T_CUT = 2.75;                         // the cut: SUPERUSER's turn plays over the room
+const SU_T_SETTLE = 0.9;                       // after the cut: the room comes back
+const SU_T_OUT = 1.2;                          // SUPERUSER's last seconds, for its look to let go
+const SU_SLOW = 0.04;                          // the room, while the cut-in has the screen
+const suCutIn = () => !!(P.suIntro && !P.suIntro.cut);
+const suShown = () => suOn() && !suCutIn();
+function suPhase() {
+  const I = P.suIntro;
+  if (!I && !suOn()) return null;
+  const t = I ? I.t : Infinity;
+  const span = (a, b) => I ? clamp((t - a) / (b - a), 0, 1) : 1;
+  const settle = span(SU_T_CUT, SU_T_CUT + SU_T_SETTLE);
+  return {
+    t,
+    hush: (I ? span(SU_T_HUSH, SU_T_HUSH_END) : 0) * (1 - settle),
+    lead: span(0, SU_T_CUT),
+    cutAge: I ? (I.cut ? t - SU_T_CUT : -1) : 99,
+    settle,
+    out: suOn() ? 1 - clamp(P.suT / SU_T_OUT, 0, 1) : 0
+  };
+}
+// the cut: the moment SUPERUSER itself begins, as it did before it had a cut-in
+function suCut(I) {
+  I.cut = true;
+  P.suAt = uiTime;
   shake(2.2);
   Audio_.boom(); Audio_.boss(); Audio_.levelup();
+  suIntroCutFx(I);
+}
+function suIntroTick(dt) {
+  const I = P.suIntro;
+  if (!I) return;
+  if (!(P.suT > 0) || rootRite) { P.suIntro = null; return; }
+  I.t += dt;
+  if (!I.cut && I.t >= SU_T_CUT) suCut(I);
+  if (I.t >= SU_T_CUT + SU_T_SETTLE) P.suIntro = null;
 }
 
 // Z X C V
 function suAbility(i) {
-  if (state !== 'play' || P.charId !== 'hacker' || rootRite) return;
+  if (state !== 'play' || P.charId !== 'hacker' || rootRite || suCutIn()) return;
   if (!suOn()) {
     if (P.awake) floatText(P.x, P.y - 42, 'SUPERUSER ONLY', '#94a3b8', 12);
     return;
@@ -8196,7 +8249,8 @@ function suDrillStart() {
 // once a frame from updatePlayer, whatever state SUPERUSER is in
 function suTick(dt) {
   if (P.charId !== 'hacker') return;
-  if (P.suT > 0 && !rootRite) {
+  suIntroTick(dt);
+  if (P.suT > 0 && !rootRite && !suCutIn()) {   // the cut-in is not spent from the minute
     P.suT -= dt;
     if (P.suT <= 0) {
       P.suT = 0;
@@ -12129,10 +12183,734 @@ function suFlungWallFx(e, a) {
    ends; then SUPERUSER's turn — the rite's, drawRaceWake — as it begins. */
 function drawSuScreen() {
   drawSuImpact();
-  if (!suOn()) return;
+  if (!suShown()) return;
   const s = uiTime - P.suAt;
   if (s >= 0 && s < RACE_WAKE) drawRaceWake(1 - s / RACE_WAKE);
 }
+
+/* ===================== SUPERUSER'S CUT-IN — art hooks =====================
+   THE HACKER's transformation, outside its rite, opens on a cut-in the way
+   RONIN's does (drawn 2 Oct). The room goes still and the screen comes on
+   like a tube. Close on a terminal, with nobody in it: a little history
+   (whoami, a Permission denied), then `sudo su` typed key by key with the
+   camera riding the cursor, the password's eight stars, and root's prompt,
+   its `#` stamped in gold. The camera pulls back off the glass and a hooded
+   head rises into the frame in front of it: THE HACKER in profile, black
+   against the monitor, the face lost in the hood, one eye catching the green.
+   A gold write-head runs down the screen and the light in the room turns
+   with it; the oni's seal stamps onto the glass behind his head, horns break
+   up through the hood, the mane bursts out of the back of it and comes apart
+   into bits at the tips, and in the dark of the hood the eye burns gold and
+   flashes. On the cut the frame tears into strips that drop out over the
+   room, onto SUPERUSER's turn, which plays as it always has.
+
+   Called from:
+     drawSuIntroWorld(q)    world, floor layer (source-over), after drawRoninIntroWorld
+     drawSuIntroOver(q)     world, over the hull: the end of drawRiteOverHull, after the oni's mask
+     drawSuIntroScreen(q)   screen space, over the HUD and over SUPERUSER's turn
+                            (drawSuScreen), just after RONIN's screen pass
+     suIntroFx(I)           [F]: the cut-in begins
+     suIntroCutFx(I)        the cut: after the logic's own shake and sounds,
+                            as SUPERUSER's turn begins
+   The draw hooks are called every frame SUPERUSER is on or its cut-in is running.
+
+   WHAT THEY ARE HANDED
+     q   suPhase(): { t (seconds since [F]; Infinity once the cut-in is over),
+         hush (0→1 over SU_T_HUSH..SU_T_HUSH_END, back to 0 as it settles),
+         lead (0→1 from [F] to the cut), cutAge (seconds since the cut; -1
+         before it, 99 once the cut-in is over), settle (0→1 over SU_T_SETTLE
+         after the cut), out (0→1 over SUPERUSER's last SU_T_OUT seconds) }.
+         Any hook may call suPhase() itself.
+     I   P.suIntro while it runs: { t, cut }
+   While the cut-in has the screen (suCutIn()) the logic holds the room at
+   SU_SLOW and the hull with it, and SUPERUSER's minute does not run. Before
+   the cut the oni (drawSuperuser / drawSuperuserHull) and the turn are not
+   drawn, so the stock hull shows; from the cut on they run as they always
+   have, with P.suAt set at the cut. The rite has no cut-in.
+
+   The logic hands over only the cut, so the shots keep a clock of their own
+   (suiS, off q.t) and their beats are SUI_T, in seconds from [F] as the
+   logic's SU_T_CUT of 2.75 has them: move the cut and they stretch with it.
+   The keys, the stamp, the write and the eye are heard off the same clock,
+   from the screen hook, so the pause holds them with everything else.
+   The scene has its own units: the space between the letterbox bars is 100
+   tall, and THE HACKER sits with his hood near the origin facing +x. The
+   monitor is behind him at depth SUI_D, so it moves less than he does when
+   the camera does (suiCam): pulling back off the glass is what brings him up
+   into the frame.
+--------------------------------------------------------------------------- */
+const SUI_BAR = 0.12;                         // each letterbox bar, a share of the screen's height
+const SUI_OPEN = 0.34;                        // after the cut: the frame torn away in strips
+const SUI_D = 0.45, SUI_D2 = 0.52;            // the monitor's depth, and the second one's (his is 1)
+const SUI_SCREEN = { x: -40, y: -44, w: 110, h: 68 };   // the monitor's glass, at its depth
+const SUI_SIDE = { x: 80, y: -32, w: 40, h: 44 };       // a second one, off to his right
+const SUI_SEAL = { x: -12, y: -15, r: 25 };   // where the oni's seal lands on the glass: behind his head
+const SUI_EYE = { x: 3.2, y: -11.4 };         // in the dark of the hood
+const SUI_FS = 3.2, SUI_LH = 4.7;             // the terminal's type and line height, on the glass
+const SUI_CH = SUI_FS * 0.6;                  // one character's advance: it is monospace
+const SUI_X0 = -36, SUI_Y0 = -38;             // where the terminal's text starts
+/* the beats, seconds from [F] at SU_T_CUT 2.75 */
+const SUI_T = { onLen: 0.22,
+                keys: [0.3, 0.37, 0.45, 0.51, 0.6, 0.66, 0.73],   // s u d o _ s u
+                enter: 0.81, pass: 0.87, passGap: 0.022, enter2: 1.06, root: 1.1,
+                pull: 1.16, settle: 1.94,
+                write: 1.9, writeLen: 0.22, seal: 2.04, horn: 2.06, mane: 2.14,
+                eye: 2.2, flash: 2.46 };
+const SUI_HIST = [                            // what was on the screen already
+  ['hacker@fracture:~$ ', 'whoami'], ['', 'hacker'],
+  ['hacker@fracture:~$ ', 'ls /root'], ['', "ls: cannot open directory '/root': Permission denied"]
+];
+const SUI_HORNS = [                           // bezier, base width: the far one first, then the near
+  { B: [1.2, -24.6, 2.4, -32.6, -2.4, -40.4, -9.2, -45], w: 2.9, far: true },
+  { B: [-4.6, -24.2, -6.2, -33, -12, -39.8, -21, -43], w: 3.5, far: false }
+];
+/* Type is the one thing here that is dear: drawn under a camera that never
+   stops moving, every glyph is rasterised afresh every frame (about 20 ms of
+   a frame on the terminal alone). So the terminal, the seal and the hex dump
+   are drawn into images of their own, again only when what they say changes,
+   and the camera moves the images. This is where the terminal's image sits
+   on the glass, and how many pixels it has to a unit. */
+const SUI_TERM = { x: -37.5, y: -41.5, w: 107, h: 36, res: 24 };
+const SUI = { lastS: -1, at: -1, bits: [], term: {}, seal: {}, hex: {} };
+// an image of its own, w × h pixels, kept in o (o.key says what is on it)
+function suiCanvas(o, w, h) {
+  if (!o.c) { o.c = document.createElement('canvas'); o.g = o.c.getContext('2d'); }
+  if (o.c.width !== w || o.c.height !== h) { o.c.width = w; o.c.height = h; o.key = null; }
+  return o.g;
+}
+const suiS = q => q.t * 2.75 / SU_T_CUT;      // the shots' clock
+const suiGlide = t => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const suiGold = s => rrEase(clamp((s - SUI_T.write) / SUI_T.writeLen, 0, 1));
+function suiMix(h1, h2, t, a) {
+  const p = parseInt(h1.slice(1), 16), q = parseInt(h2.slice(1), 16), k = clamp(t, 0, 1);
+  const c = sh => Math.round(lerp((p >> sh) & 255, (q >> sh) & 255, k));
+  return 'rgba(' + c(16) + ',' + c(8) + ',' + c(0) + ',' + (a === undefined ? 1 : a) + ')';
+}
+// the room's light: the screen's green, gold once it has been written
+const suiLight = (s, a) => suiMix('#a3e635', SU_COL, suiGold(s), a);
+function suiGlow(x, y, r, s, a) {            // a glow in the room's light (two cached sprites, cross-faded)
+  const g = suiGold(s);
+  if (g < 1) drawGlow(x, y, r, '#a3e635', a * (1 - g));
+  if (g > 0) drawGlow(x, y, r, SU_COL, a * g);
+}
+
+/* ------------------------------ frame and camera --------------------------- */
+function suiFrame(q, s) {
+  const bar = H * SUI_BAR, u = (H - 2 * bar) / 100;
+  const on = rrEaseOut(clamp(s / 0.2, 0, 1)), off = q.cutAge >= 0 ? rrEase(clamp(q.cutAge / 0.45, 0, 1)) : 0;
+  const p = suiGlide((s - SUI_T.pull) / (SUI_T.settle - SUI_T.pull));
+  return { bar, barK: on * (1 - off), u, cam: suiCam(s), cx: W / 2, cy: H / 2, rot: -0.045 * (1 - p) };
+}
+/* where the cursor is on the glass, smoothly, line by line: the camera rides it */
+function suiFocus(s) {
+  const T = SUI_T;
+  let typed = 0;
+  for (const k of T.keys) typed += clamp((s - k) / 0.05, 0, 1);
+  const stars = clamp((s - T.pass) / (T.passGap * 8), 0, 1) * 8;
+  const a = rrEase(clamp((s - T.enter) / 0.1, 0, 1)), b = rrEase(clamp((s - T.enter2) / 0.1, 0, 1));
+  const x1 = SUI_X0 + (19 + typed) * SUI_CH, x2 = SUI_X0 + (28 + stars) * SUI_CH, x3 = SUI_X0 + 27 * SUI_CH;
+  const y = i => SUI_Y0 + i * SUI_LH;
+  return { x: lerp(lerp(x1, x2, a), x3, b), y: lerp(lerp(y(4), y(5), a), y(6), b) };
+}
+/* Close on the glass, the monitor's zoom about 4, creeping in as he types;
+   then back, off the glass, to his plane's framing SUI_END; then in, a
+   little, on the eye. The camera is his plane's: a point f on the glass sits
+   mid-frame when it is at f / SUI_D, with zoom 1 + (Zglass - 1) / SUI_D. */
+const SUI_END = { x: 6, y: -5, z: 1.2 };
+function suiCam(s) {
+  const f = suiFocus(s), creep = rrEase(clamp(s / SUI_T.pull, 0, 1));
+  const Z0 = lerp(3.5, 4.3, creep), Z1 = 1 + (SUI_END.z - 1) * SUI_D;
+  const p = suiGlide((s - SUI_T.pull) / (SUI_T.settle - SUI_T.pull));
+  const Zs = Math.exp(lerp(Math.log(Z0), Math.log(Z1), p));
+  const fx = lerp(f.x - 8, SUI_END.x * SUI_D, p), fy = lerp(f.y + 2, SUI_END.y * SUI_D, p);
+  let x = fx / SUI_D, y = fy / SUI_D, z = 1 + (Zs - 1) / SUI_D;
+  const e = rrEase(clamp((s - SUI_T.eye + 0.2) / 0.45, 0, 1));
+  x = lerp(x, 8, e * 0.4); y = lerp(y, -8, e * 0.3); z *= 1 + 0.05 * e;
+  const fl = s - SUI_T.flash;
+  if (fl >= 0) z *= 1 + 0.06 * clamp(fl / 0.03, 0, 1) * Math.exp(-fl * 6);
+  return { x, y, z };
+}
+/* draw fn in the scene at depth d (1 is his; less is further away) */
+function suiAt(F, d, fn) {
+  const k = (1 + (F.cam.z - 1) * d) * F.u;
+  ctx.save();
+  ctx.translate(F.cx, F.cy); ctx.rotate(F.rot); ctx.scale(k, k); ctx.translate(-F.cam.x * d, -F.cam.y * d);
+  fn(k);
+  ctx.restore();
+}
+function suiToScreen(F, d, x, y) {
+  const k = (1 + (F.cam.z - 1) * d) * F.u, lx = (x - F.cam.x * d) * k, ly = (y - F.cam.y * d) * k;
+  const c = Math.cos(F.rot), sn = Math.sin(F.rot);
+  return { x: F.cx + lx * c - ly * sn, y: F.cy + lx * sn + ly * c };
+}
+
+/* ----------------------------------- the glass ----------------------------- */
+function suiMonitor(F, q, s) {
+  const M = SUI_SCREEN, w = clamp((s - SUI_T.write) / SUI_T.writeLen, 0, 1);
+  const head = M.y + M.h * rrEase(w);
+  suiAt(F, SUI_D, () => {
+    // what it throws into the room
+    ctx.globalCompositeOperation = 'lighter';
+    suiGlow(M.x + M.w / 2, M.y + M.h / 2, M.w * 1.15, s, 0.22);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#0a0f0c';
+    roundRect(M.x - 3.4, M.y - 3.4, M.w + 6.8, M.h + 6.8, 2.6); ctx.fill();
+    ctx.strokeStyle = suiLight(s, 0.22); ctx.lineWidth = 0.3;
+    roundRect(M.x - 3.4, M.y - 3.4, M.w + 6.8, M.h + 6.8, 2.6); ctx.stroke();
+    ctx.save();
+    roundRect(M.x, M.y, M.w, M.h, 1.4); ctx.clip();
+    // the tube, lit from its middle; the gold comes down it behind the write-head
+    const cx = M.x + M.w * 0.42, cy = M.y + M.h * 0.45;
+    const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, M.w * 0.72);
+    gg.addColorStop(0, '#0f3a14'); gg.addColorStop(0.55, '#06200b'); gg.addColorStop(1, '#020a04');
+    ctx.fillStyle = gg; ctx.fillRect(M.x, M.y, M.w, M.h);
+    if (w > 0) {
+      const ga = ctx.createRadialGradient(cx, cy, 0, cx, cy, M.w * 0.72);
+      ga.addColorStop(0, '#5a420a'); ga.addColorStop(0.55, '#2a1e04'); ga.addColorStop(1, '#0c0802');
+      ctx.fillStyle = ga; ctx.fillRect(M.x, M.y, M.w, head - M.y);
+    }
+    suiSeal(s);
+    suiTerm(s, w > 0 ? head : -1e9);
+    if (w > 0 && w < 1) {                    // the write-head
+      ctx.globalCompositeOperation = 'lighter';
+      const hg = ctx.createLinearGradient(0, head - 7, 0, head);
+      hg.addColorStop(0, 'rgba(253,224,71,0)'); hg.addColorStop(1, 'rgba(253,224,71,0.5)');
+      ctx.fillStyle = hg; ctx.fillRect(M.x, head - 7, M.w, 7);
+      ctx.fillStyle = 'rgba(254,252,232,0.95)'; ctx.fillRect(M.x, head - 0.35, M.w, 0.7);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // scanlines, and a glare off the glass
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    for (let y = M.y; y < M.y + M.h; y += 0.8) ctx.fillRect(M.x, y, M.w, 0.34);
+    const gl = ctx.createLinearGradient(M.x, M.y, M.x + M.w * 0.5, M.y + M.h * 0.6);
+    gl.addColorStop(0, 'rgba(236,252,203,0.07)'); gl.addColorStop(1, 'rgba(236,252,203,0)');
+    ctx.fillStyle = gl; ctx.fillRect(M.x, M.y, M.w, M.h);
+    const vg = ctx.createRadialGradient(cx, cy, M.h * 0.45, cx, cy, M.w * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = vg; ctx.fillRect(M.x, M.y, M.w, M.h);
+    ctx.restore();
+  });
+}
+/* The terminal. Its type lives in an image (SUI.term) drawn again only when
+   what it says changes: a key, a star, root's prompt, a line going gold under
+   the write-head. The cursor and the `#` being stamped are drawn live. */
+function suiTerm(s, head) {
+  const T = SUI_T, ch = SUI_CH, R = SUI_TERM, o = SUI.term;
+  const y = i => SUI_Y0 + i * SUI_LH;
+  let n = 0, last = -9;
+  for (const k of T.keys) if (s >= k) { n++; last = k; }
+  const hot = s - last < 0.07, stars = Math.round(clamp((s - T.pass) / (T.passGap * 8), 0, 1) * 8);
+  const stamped = s >= T.root + 0.12;
+  let gold = 0;
+  for (let i = 0; i < 7; i++) if (y(i) < head) gold = i + 1;
+  const key = [n, hot ? 1 : 0, s >= T.enter ? stars : -1, s >= T.root ? 1 : 0, stamped ? 1 : 0, gold].join(',');
+  const g = suiCanvas(o, Math.round(R.w * R.res), Math.round(R.h * R.res));
+  if (o.key !== key) {
+    o.key = key;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, o.c.width, o.c.height);
+    g.setTransform(R.res, 0, 0, R.res, -R.x * R.res, -R.y * R.res);   // the glass's own units
+    g.font = '700 ' + SUI_FS + 'px ' + CON_MONO;
+    g.textAlign = 'left'; g.textBaseline = 'middle';
+    // a run of text at column c of line i, with the tube's fringes
+    const run = (str, c, i, col, a) => {
+      if (!str) return;
+      const x = SUI_X0 + c * ch, yy = y(i), cl = i < gold ? SU_COL : col;
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = 'rgba(255,40,80,' + 0.18 * a + ')'; g.fillText(str, x - 0.22, yy);
+      g.fillStyle = 'rgba(40,160,255,' + 0.18 * a + ')'; g.fillText(str, x + 0.22, yy);
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = rgba(cl, a); g.fillText(str, x, yy);
+    };
+    SUI_HIST.forEach(([pr, out], i) => {
+      run(pr, 0, i, '#a3e635', 0.55);
+      run(out, pr.length, i, i === 3 ? '#f87171' : '#d9f99d', 0.55);
+    });
+    // sudo su, a key at a time; the newest one white for a moment
+    run('hacker@fracture:~$ ', 0, 4, '#a3e635', 1);
+    const cmd = 'sudo su'.slice(0, n);
+    run(hot ? cmd.slice(0, -1) : cmd, 19, 4, '#ecfccb', 1);
+    if (hot) run(cmd.slice(-1), 19 + n - 1, 4, '#ffffff', 1);
+    if (s >= T.enter) {
+      run('[sudo] password for hacker: ', 0, 5, '#d9f99d', 0.85);
+      run('*'.repeat(stars), 28, 5, '#ecfccb', 1);
+    }
+    if (s >= T.root) {
+      run('root@fracture', 0, 6, SU_COL, 1);
+      run(':/home/hacker', 13, 6, '#a3e635', 1);
+      if (stamped) run('#', 26, 6, SU_COL, 1);
+    }
+  }
+  ctx.drawImage(o.c, R.x, R.y, R.w, R.h);
+  // the # stamped in: big, white-gold, then settled into the type above
+  if (s >= T.root) {
+    const k = rrEaseOut(clamp((s - T.root) / 0.12, 0, 1)), x = SUI_X0 + 26.5 * ch, yy = y(6);
+    ctx.save();
+    ctx.translate(x, yy);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(0, 0, 7, SU_COL, 0.7 * (1 - k * 0.6));
+    ctx.globalCompositeOperation = 'source-over';
+    if (!stamped) {
+      ctx.scale(lerp(2.4, 1, k), lerp(2.4, 1, k));
+      ctx.font = '700 ' + SUI_FS + 'px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fefce8'; ctx.fillText('#', 0, 0);
+    }
+    ctx.restore();
+  }
+  // the block cursor: solid while keys come, blinking between
+  let cur = { c: 19 + n, i: 4 };
+  if (s >= T.enter) cur = { c: 28 + stars, i: 5 };
+  if (s >= T.root) cur = { c: 28, i: 6 }; else if (s >= T.enter2) cur = { c: 0, i: 6 };
+  if (s < T.enter2 + 0.05 || Math.floor(s * 3.2) % 2 === 0) {
+    const col = cur.i === 6 && s >= T.root ? SU_COL : '#a3e635';
+    ctx.fillStyle = rgba(y(cur.i) < head ? SU_COL : col, 0.9);
+    ctx.fillRect(SUI_X0 + cur.c * ch + 0.15, y(cur.i) - SUI_FS * 0.55, ch * 0.9, SUI_FS * 1.1);
+  }
+}
+/* the oni's seal, stamped onto the glass behind his head and turning: the
+   floor seal's ring and ticks, its permission bits, 鬼 at the quarters. Drawn
+   once into an image (SUI.seal), then stamped and turned */
+const SUI_SEAL_RES = 20;
+function suiSealImage() {
+  const o = SUI.seal, R = SUI_SEAL.r, half = R + 2, px = Math.round(half * 2 * SUI_SEAL_RES);
+  const g = suiCanvas(o, px, px);
+  if (o.key === 'seal') return o.c;
+  o.key = 'seal';
+  g.setTransform(SUI_SEAL_RES, 0, 0, SUI_SEAL_RES, half * SUI_SEAL_RES, half * SUI_SEAL_RES);
+  g.clearRect(-half, -half, half * 2, half * 2);
+  g.strokeStyle = rgba(SU_COL, 0.8); g.lineWidth = 0.55;
+  g.beginPath(); g.arc(0, 0, R, 0, TAU); g.stroke();
+  g.lineWidth = 0.35;
+  g.beginPath(); g.arc(0, 0, R - 5.2, 0, TAU); g.stroke();
+  g.strokeStyle = rgba(SU_COL, 0.6); g.lineWidth = 0.4;
+  for (let i = 0; i < 36; i++) {
+    const a = i * TAU / 36, l = i % 3 ? 1.1 : 2.2;
+    g.beginPath(); g.moveTo(Math.cos(a) * (R - 5.2), Math.sin(a) * (R - 5.2));
+    g.lineTo(Math.cos(a) * (R - 5.2 + l), Math.sin(a) * (R - 5.2 + l)); g.stroke();
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let qd = 0; qd < 4; qd++) {
+    for (let i = 0; i < 9; i++) {
+      g.save(); g.rotate(qd * TAU / 4 + 0.22 + i * 0.1); g.translate(R - 2.6, 0); g.rotate(Math.PI / 2);
+      g.font = '700 2.4px ' + CON_MONO; g.fillStyle = rgba('#fef9c3', 0.85); g.fillText('rwxrwxrwx'[i], 0, 0);
+      g.restore();
+    }
+    g.save(); g.rotate(qd * TAU / 4); g.translate(R - 2.6, 0); g.rotate(Math.PI / 2);
+    g.font = "700 3.6px 'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif";
+    g.fillStyle = '#fefce8'; g.fillText('鬼', 0, 0);
+    g.restore();
+  }
+  return o.c;
+}
+function suiSeal(s) {
+  const k = rrEaseOut(clamp((s - SUI_T.seal) / 0.2, 0, 1));
+  if (k <= 0) return;
+  const S = SUI_SEAL, half = S.r + 2, sc = lerp(1.7, 1, k);
+  ctx.save();
+  ctx.translate(S.x, S.y);
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(0, 0, S.r * sc * 1.6, SU_COL, 0.3 * k);
+  ctx.rotate((s - SUI_T.seal) * 0.35); ctx.scale(sc, sc);
+  ctx.globalAlpha = k;
+  ctx.drawImage(suiSealImage(), -half, -half, half * 2, half * 2);
+  ctx.restore();
+}
+/* the second monitor, off to his right: a hex dump running up it */
+function suiSide(F, s) {
+  const M = SUI_SIDE, g = rrEase(clamp((s - SUI_T.write - 0.08) / SUI_T.writeLen, 0, 1));
+  suiAt(F, SUI_D2, () => {
+    ctx.globalCompositeOperation = 'lighter';
+    if (g < 1) drawGlow(M.x + M.w / 2, M.y + M.h / 2, M.w * 1.1, '#a3e635', 0.12 * (1 - g));
+    if (g > 0) drawGlow(M.x + M.w / 2, M.y + M.h / 2, M.w * 1.1, SU_COL, 0.12 * g);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#0a0f0c';
+    roundRect(M.x - 2.6, M.y - 2.6, M.w + 5.2, M.h + 5.2, 2); ctx.fill();
+    ctx.save();
+    roundRect(M.x, M.y, M.w, M.h, 1); ctx.clip();
+    ctx.fillStyle = suiMix('#03140a', '#1a1203', g); ctx.fillRect(M.x, M.y, M.w, M.h);
+    // its rows live in an image (SUI.hex), drawn again as each new row comes up
+    const off = (s * 9) % 1, row0 = Math.floor(s * 9), o = SUI.hex, res = 20, rows = 22;
+    const hg = suiCanvas(o, M.w * res, Math.round((rows * 2.2 + 1) * res)), key = row0 + ',' + Math.round(g * 8);
+    if (o.key !== key) {
+      o.key = key;
+      hg.setTransform(1, 0, 0, 1, 0, 0); hg.clearRect(0, 0, o.c.width, o.c.height);
+      hg.setTransform(res, 0, 0, res, 0, 0);
+      hg.font = '600 1.7px ' + CON_MONO; hg.textAlign = 'left'; hg.textBaseline = 'top';
+      hg.fillStyle = suiMix('#4d7c0f', '#ca8a04', Math.round(g * 8) / 8, 0.85);
+      for (let r = 0; r < rows; r++) {
+        const id = row0 + r;
+        let line = (0x7f3a00 + id * 16).toString(16) + '  ';
+        for (let b = 0; b < 8; b++) line += ('0' + Math.floor(rrHash(id * 8.1 + b) * 256).toString(16)).slice(-2) + ' ';
+        hg.fillText(line, 1.4, 1 + r * 2.2);
+      }
+    }
+    ctx.drawImage(o.c, M.x, M.y - off * 2.2, M.w, rows * 2.2 + 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.26)';
+    for (let y = M.y; y < M.y + M.h; y += 0.8) ctx.fillRect(M.x, y, M.w, 0.34);
+    ctx.restore();
+  });
+}
+
+/* ---------------------------------- him ------------------------------------ */
+// the desk and the keyboard under his hands, in his plane, lit by the glass
+function suiDesk(s) {
+  ctx.fillStyle = '#050806';
+  ctx.fillRect(8, 31, 160, 40);
+  ctx.strokeStyle = suiLight(s, 0.35); ctx.lineWidth = 0.35;
+  ctx.beginPath(); ctx.moveTo(8, 31); ctx.lineTo(168, 31); ctx.stroke();
+  ctx.fillStyle = '#0b100d';
+  ctx.beginPath(); ctx.moveTo(17, 31); ctx.lineTo(18.4, 28.6); ctx.lineTo(50, 28); ctx.lineTo(51, 31); ctx.closePath(); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = suiLight(s, 0.55); ctx.lineWidth = 0.3;
+  ctx.beginPath(); ctx.moveTo(18.6, 28.5); ctx.lineTo(49.8, 27.9); ctx.stroke();
+  suiGlow(34, 28.4, 12, s, 0.18);
+  ctx.globalCompositeOperation = 'source-over';
+}
+/* the mane: locks out of the back of the hood, a wave running root to tip,
+   bursting past their length and settling; the tips come apart into bits */
+function suiMane(s) {
+  const k = rrEaseBack(clamp((s - SUI_T.mane) / 0.42, 0, 1));
+  if (k <= 0.01) return;
+  const t = s, tips = [];
+  const lock = (i, n, inner) => {
+    const v = i / (n - 1);
+    const bx = lerp(-11.5, -16.8, v), by = lerp(-22, -8, v);
+    const dir = Math.PI + lerp(0.32, -0.42, v) + Math.sin(t * 2.1 + i) * 0.05;
+    const len = (inner ? 16 : 24) * (0.75 + 0.45 * Math.sin(v * Math.PI)) * k;
+    const wid = inner ? 0.9 : lerp(2.6, 1.6, Math.abs(v - 0.4)), wave = inner ? 1.6 : 2.6;
+    const ca = Math.cos(dir), sa = Math.sin(dir), nx = -sa, ny = ca, N = 12, Lp = [], Rp = [];
+    let tip = null;
+    for (let j = 0; j <= N; j++) {
+      const u = j / N, dd = u * len;
+      const off = Math.sin(u * 3.4 - t * 7 + i * 1.7) * wave * u + wave * 0.4 * u * u;
+      const cx = bx + ca * dd + nx * off, cy = by + sa * dd + ny * off;
+      const ww = wid * Math.pow(1 - u, 0.85) * (0.7 + 0.55 * Math.sin(Math.min(1, u * 2.2) * Math.PI * 0.5));
+      Lp.push([cx + nx * ww, cy + ny * ww]); Rp.push([cx - nx * ww, cy - ny * ww]);
+      tip = [cx, cy];
+    }
+    ctx.beginPath(); ctx.moveTo(Lp[0][0], Lp[0][1]);
+    for (const p of Lp) ctx.lineTo(p[0], p[1]);
+    for (let j = Rp.length - 1; j >= 0; j--) ctx.lineTo(Rp[j][0], Rp[j][1]);
+    ctx.closePath();
+    return tip;
+  };
+  ctx.save();
+  for (let i = 0; i < 9; i++) {
+    tips.push(lock(i, 9, false));
+    ctx.fillStyle = ONI_DEEP; ctx.fill();
+    ctx.strokeStyle = suiMix(ONI_MID, SU_COL, 0.3, 0.7); ctx.lineWidth = 0.22; ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 5; i++) { lock(i + 0.5, 6, true); ctx.fillStyle = rgba(ONI_LIT, 0.4); ctx.fill(); }
+  // the tips, coming apart into code
+  ctx.font = '700 1.7px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  tips.forEach((p, i) => {
+    if (!p) return;
+    const f = Math.floor(t * 12 + i * 3);
+    ctx.fillStyle = rgba(i % 3 ? ONI_LIT : SU_COL, 0.5 + rrHash(f + i) * 0.5);
+    ctx.fillText(rrHash(f * 1.3 + i) > 0.5 ? '1' : '0', p[0] - 1, p[1]);
+  });
+  ctx.restore();
+}
+/* a horn in profile: banded bone, a rim, the tip burning; it overshoots as it
+   breaks through and settles */
+function suiHorn(h, k, s) {
+  if (k <= 0.01) return;
+  const N = 20, L = [], R = [], C = [], um = Math.min(1, k), sc = Math.max(1, k);
+  const at = u => { const p = rrBez(h.B, u); return [h.B[0] + (p[0] - h.B[0]) * sc, h.B[1] + (p[1] - h.B[1]) * sc]; };
+  for (let i = 0; i <= N; i++) {
+    const u = (i / N) * um, p = at(u), q = at(Math.min(1, u + 0.01));
+    let tx = q[0] - p[0], ty = q[1] - p[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const ww = lerp(h.w, 0.2, Math.pow(u, 0.8));
+    L.push([p[0] - ty * ww, p[1] + tx * ww]); R.push([p[0] + ty * ww, p[1] - tx * ww]); C.push([p[0], p[1], u, -ty, tx, ww]);
+  }
+  const shape = (from = 0) => {
+    ctx.beginPath(); ctx.moveTo(L[from][0], L[from][1]);
+    for (let i = from + 1; i <= N; i++) ctx.lineTo(L[i][0], L[i][1]);
+    for (let i = N; i >= from; i--) ctx.lineTo(R[i][0], R[i][1]);
+    ctx.closePath();
+  };
+  ctx.save();
+  shape(); ctx.fillStyle = h.far ? ONI_DEEP : ONI_DARK; ctx.fill();
+  ctx.strokeStyle = rgba(ONI_LIT, h.far ? 0.5 : 0.9); ctx.lineWidth = 0.3; ctx.stroke();
+  for (let j = 1; j <= 6; j++) {
+    const i = Math.round(j / 7 * N); if (C[i][2] > um - 0.02) continue;
+    const [x, y, , nx, ny, ww] = C[i];
+    ctx.strokeStyle = ONI_DEEP; ctx.lineWidth = 0.45;
+    ctx.beginPath(); ctx.moveTo(x - nx * ww, y - ny * ww); ctx.lineTo(x + nx * ww, y + ny * ww); ctx.stroke();
+    ctx.strokeStyle = rgba(ONI_PALE, h.far ? 0.2 : 0.45); ctx.lineWidth = 0.18;
+    ctx.beginPath(); ctx.moveTo(x - nx * ww + 0.3, y - ny * ww); ctx.lineTo(x + nx * ww + 0.3, y + ny * ww); ctx.stroke();
+  }
+  ctx.strokeStyle = rgba(ONI_BONE, h.far ? 0.35 : 0.8); ctx.lineWidth = 0.28;
+  ctx.beginPath(); ctx.moveTo(R[1][0], R[1][1]); for (let i = 2; i <= N; i++) ctx.lineTo(R[i][0], R[i][1]); ctx.stroke();
+  const tf = Math.round(N * 0.74);
+  if (um > 0.74) { shape(tf); ctx.fillStyle = SU_COL; ctx.fill(); }
+  if (k > 0.97) {
+    const p = at(1);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(p[0], p[1], 3.4, SU_COL, 0.5 + Math.sin(s * 5 + (h.far ? 1 : 0)) * 0.1);
+  }
+  ctx.restore();
+}
+/* THE HACKER: hood, hunched back, the near arm out to the keys, black
+   against the glass; the glass only on his edges */
+function suiHacker(s) {
+  const body = () => {
+    ctx.beginPath();
+    ctx.moveTo(6.6, -19.2);                             // the peak of the hood, over his face
+    ctx.bezierCurveTo(4.2, -25.4, -3.6, -27.8, -10.2, -25.2);
+    ctx.bezierCurveTo(-15.8, -22.9, -18.3, -15.2, -17.2, -7.4);   // down the back of the hood
+    ctx.bezierCurveTo(-23.8, -2.4, -30.6, 9.6, -32.8, 26);        // the hunched back
+    ctx.lineTo(-36, 64); ctx.lineTo(18, 64);
+    ctx.bezierCurveTo(13.6, 42, 10.4, 18, 7.2, 6.2);              // his chest, leaning in
+    ctx.bezierCurveTo(5.6, 1.2, 3.8, -1.4, 2.6, -2.2);            // to the mouth of the hood
+    ctx.bezierCurveTo(4.1, -6.2, 5.2, -12.4, 6.6, -19.2);         // the edge of it, back up to the peak
+    ctx.closePath();
+  };
+  ctx.save();
+  body(); ctx.fillStyle = '#020403'; ctx.fill();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // the glass on his edges: hardest on the hood's rim, where he faces it
+  ctx.strokeStyle = suiLight(s, 0.5); ctx.lineWidth = 0.38;
+  ctx.beginPath(); ctx.moveTo(-10.2, -25.2); ctx.bezierCurveTo(-3.6, -27.8, 4.2, -25.4, 6.6, -19.2); ctx.stroke();
+  ctx.strokeStyle = suiLight(s, 0.85); ctx.lineWidth = 0.42;
+  ctx.beginPath(); ctx.moveTo(6.6, -19.2); ctx.bezierCurveTo(5.2, -12.4, 4.1, -6.2, 2.6, -2.2); ctx.stroke();
+  ctx.strokeStyle = suiLight(s, 0.22); ctx.lineWidth = 0.3;
+  ctx.beginPath(); ctx.moveTo(-15.8, -22.9); ctx.bezierCurveTo(-18.3, -15.2, -17.2, -7.4, -17.2, -7.4); ctx.stroke();
+  // the hood's thickness, inside the rim, and a seam up over the crown
+  ctx.strokeStyle = suiLight(s, 0.16); ctx.lineWidth = 0.25;
+  ctx.beginPath(); ctx.moveTo(5.4, -18.6); ctx.bezierCurveTo(4.2, -12.4, 3.2, -6.6, 1.8, -3.2); ctx.stroke();
+  ctx.strokeStyle = suiLight(s, 0.1);
+  ctx.beginPath(); ctx.moveTo(3.4, -24.6); ctx.bezierCurveTo(-4, -22, -10, -14, -12.6, -6.4); ctx.stroke();
+  // a drawstring, swinging a little
+  const sw = Math.sin(s * 2.6) * 0.5;
+  ctx.strokeStyle = suiLight(s, 0.45); ctx.lineWidth = 0.28;
+  ctx.beginPath(); ctx.moveTo(3.4, -3); ctx.quadraticCurveTo(4.4 + sw, 2, 4.2 + sw * 1.6, 8.6); ctx.stroke();
+  ctx.fillStyle = suiLight(s, 0.6);
+  ctx.fillRect(3.85 + sw * 1.6, 8.4, 0.7, 1.8);
+  // the near arm, out to the keys
+  ctx.beginPath();
+  ctx.moveTo(-6.4, 3.6);
+  ctx.bezierCurveTo(4, 2.6, 14, 14, 23.6, 24.4);                  // along the top of the sleeve
+  ctx.lineTo(29.6, 26.6); ctx.quadraticCurveTo(31.6, 27.4, 31, 28.6);   // the hand, on the keys
+  ctx.lineTo(23, 28.6);
+  ctx.bezierCurveTo(14, 26, 2, 22, -9.4, 16);
+  ctx.closePath();
+  ctx.fillStyle = '#030504'; ctx.fill();
+  ctx.strokeStyle = suiLight(s, 0.55); ctx.lineWidth = 0.32;
+  ctx.beginPath(); ctx.moveTo(-1, 3.4); ctx.bezierCurveTo(6, 4.4, 14, 14, 23.6, 24.4); ctx.lineTo(29.6, 26.6);
+  ctx.quadraticCurveTo(31.6, 27.4, 31, 28.6); ctx.stroke();
+  ctx.strokeStyle = suiLight(s, 0.25); ctx.lineWidth = 0.25;    // the cuff
+  ctx.beginPath(); ctx.moveTo(22.4, 24.6); ctx.lineTo(21.8, 28.2); ctx.stroke();
+  ctx.restore();
+}
+/* the eye: the green catching it as he is found; then it burns gold */
+function suiEye(s) {
+  const p = clamp((s - SUI_T.pull - 0.3) / 0.4, 0, 1);
+  const kindle = rrEaseIn(clamp((s - SUI_T.eye) / 0.16, 0, 1)), open = rrEaseOut(clamp((s - SUI_T.eye - 0.08) / 0.18, 0, 1));
+  const lit = s >= SUI_T.flash ? 1 : kindle * (0.4 + 0.6 * open);
+  ctx.save();
+  ctx.translate(SUI_EYE.x, SUI_EYE.y); ctx.rotate(0.14);
+  ctx.globalCompositeOperation = 'lighter';
+  if (lit < 1 && p > 0) {                     // a glint of the screen in it
+    ctx.fillStyle = rgba('#a3e635', 0.45 * p * (1 - lit));
+    ctx.beginPath(); ctx.ellipse(0.2, 0, 0.55, 0.22, 0, 0, TAU); ctx.fill();
+  }
+  if (lit > 0) {
+    const fl = 0.92 + 0.08 * Math.sin(s * 37) * Math.sin(s * 19);
+    drawGlow(0, 0, 2.6 + 6.5 * lit, SU_COL, 0.55 * lit * fl);
+    drawGlow(0, 0, 1 + 1.6 * lit, '#fefce8', 0.7 * lit);
+    const h = 0.1 + 0.42 * open;
+    ctx.beginPath();
+    ctx.moveTo(-1.35, 0.05); ctx.quadraticCurveTo(-0.1, -h * 1.5, 1.25, 0.12); ctx.quadraticCurveTo(0, h * 0.8, -1.35, 0.05);
+    ctx.closePath();
+    ctx.fillStyle = rgba(SU_COL, Math.min(1, 0.4 + lit) * fl); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0.05, 0, 0.62 * (0.4 + 0.6 * open), h * 0.42, 0, 0, TAU);
+    ctx.fillStyle = rgba('#fefce8', lit * fl); ctx.fill();
+  }
+  ctx.restore();
+}
+/* bits off the horns as they break through and off the mane as it bursts */
+function suiStepBits(s) {
+  let dt = s - SUI.at;
+  dt = dt >= 0 && SUI.at >= 0 ? Math.min(dt, 0.25) : 0;
+  SUI.at = s;
+  const B = SUI.bits;
+  for (let i = B.length - 1; i >= 0; i--) {
+    const b = B[i];
+    b.t += dt;
+    if (b.t >= b.life) { B.splice(i, 1); continue; }
+    b.x += b.vx * dt; b.y += b.vy * dt; b.vx *= Math.pow(0.4, dt); b.vy = b.vy * Math.pow(0.4, dt) - 6 * dt;
+  }
+  if (!(dt > 0)) return;
+  const burst = (x, y, n, spd, ang, spread) => {
+    for (let i = 0; i < n; i++) {
+      const a = ang + (Math.random() - 0.5) * spread, v = spd * (0.4 + Math.random() * 0.8);
+      B.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 0.4 + Math.random() * 0.5,
+               ch: 'rwx01#'[(Math.random() * 6) | 0], gold: Math.random() < 0.35 });
+    }
+  };
+  const was = s - dt, hit = t => was < t && s >= t;
+  if (hit(SUI_T.horn + 0.04)) for (const h of SUI_HORNS) burst(h.B[0], h.B[1], 14, 40, -Math.PI / 2 - 0.4, 1.8);
+  if (s > SUI_T.mane && s < SUI_T.mane + 0.5 && Math.random() < 0.7) burst(-24 - Math.random() * 10, -16 + Math.random() * 16, 1, 30, Math.PI, 0.8);
+  if (B.length > 160) B.splice(0, B.length - 160);
+}
+function suiDrawBits() {
+  if (!SUI.bits.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.font = '700 1.8px ' + CON_MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const b of SUI.bits) {
+    ctx.fillStyle = rgba(b.gold ? SU_COL : ONI_LIT, 0.9 * (1 - b.t / b.life));
+    ctx.fillText(b.ch, b.x, b.y);
+  }
+  ctx.restore();
+}
+
+/* ------------------------------- the plate --------------------------------- */
+function suiPlate(F, q, s) {
+  ctx.fillStyle = '#020403'; ctx.fillRect(0, 0, W, H);       // the room, dark
+  suiSide(F, s);
+  suiMonitor(F, q, s);
+  suiAt(F, 1, () => {
+    suiDesk(s);
+    suiHorn(SUI_HORNS[0], rrEaseBack(clamp((s - SUI_T.horn - 0.04) / 0.34, 0, 1)), s);
+    suiMane(s);
+    suiHacker(s);
+    suiHorn(SUI_HORNS[1], rrEaseBack(clamp((s - SUI_T.horn) / 0.34, 0, 1)), s);
+    suiEye(s);
+    suiDrawBits();
+  });
+}
+/* on: the tube opens, a line across the middle first, then the frame */
+function suiOn(F, s, plate) {
+  const k = clamp(s / SUI_T.onLen, 0, 1);
+  if (k >= 1) { plate(); return; }
+  const top = F.bar, bot = H - F.bar, mid = (top + bot) / 2;
+  const wx = rrEaseOut(clamp(k / 0.3, 0, 1)), hy = rrEaseOut(clamp((k - 0.25) / 0.75, 0, 1));
+  const hh = Math.max(2, (bot - top) * hy), x0 = W / 2 - W / 2 * wx;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, mid - hh / 2, W * wx, hh); ctx.clip();
+  plate();
+  ctx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba('#ecfccb', 0.9 * (1 - k));
+  ctx.fillRect(x0, mid - hh / 2 - 1, W * wx, 2); ctx.fillRect(x0, mid + hh / 2 - 1, W * wx, 2);
+  drawGlow(W / 2, mid, W * 0.35 * wx, '#a3e635', 0.45 * (1 - k));
+  ctx.restore();
+}
+/* off: on the cut the frame tears into strips that are shoved sideways and
+   drop out one by one over the room (and the turn, already tearing it) */
+function suiTear(F, q, plate) {
+  const c = q.cutAge / SUI_OPEN, n = 9, top = F.bar, bot = H - F.bar, hh = (bot - top) / n;
+  for (let i = 0; i < n; i++) {
+    const go = 0.12 + rrHash(i * 3.7 + 1) * 0.8;          // when this strip drops out
+    if (c >= go) continue;
+    const kk = c / go, y0 = top + i * hh;
+    const dx = (rrHash(i * 9.1 + 4) - 0.5) * W * 0.3 * kk * kk + (rrHash(i + Math.floor(q.cutAge * 40)) - 0.5) * 14;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, y0 - 0.5, W, hh + 1); ctx.clip();
+    ctx.translate(dx, 0);
+    plate();
+    ctx.restore();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rgba(SU_COL, 0.5 * (1 - kk)); ctx.fillRect(0, y0, W, 1.2);
+    ctx.restore();
+  }
+}
+/* the eye flashing: the frame takes the gold, a streak the width of it */
+function suiFlash(F, s, cutAge) {
+  const f = s - SUI_T.flash;
+  if (f < 0) return;
+  const p = suiToScreen(F, 1, SUI_EYE.x, SUI_EYE.y);
+  const rise = clamp(f / 0.035, 0, 1), k = rise * Math.exp(-Math.max(0, f - 0.035) * 4);
+  const hold = cutAge >= 0 ? clamp(1 - cutAge / SUI_OPEN, 0, 1) : 1, px = H / 720;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba('#a16207', 0.3 * k * k); ctx.fillRect(0, 0, W, H);
+  drawGlow(p.x, p.y, H * (0.22 + 0.26 * rise), SU_COL, 0.5 * k);
+  drawGlow(p.x, p.y, H * 0.07, '#fefce8', 0.9 * k);
+  const reach = W * (0.3 + 1.0 * rrEaseOut(clamp(f / 0.14, 0, 1)));
+  const lens = (x0, y0, x1, y1, w, col, a) => {
+    if (a <= 0.003) return;
+    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L * w, ny = dx / L * w;
+    ctx.fillStyle = rgba(col, clamp(a, 0, 1));
+    ctx.beginPath(); ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo((x0 + x1) / 2 + nx, (y0 + y1) / 2 + ny, x1, y1);
+    ctx.quadraticCurveTo((x0 + x1) / 2 - nx, (y0 + y1) / 2 - ny, x0, y0); ctx.fill();
+  };
+  lens(p.x - reach, p.y, p.x + reach, p.y, (2 + 6 * k) * px, SU_COL, Math.max(0.9 * k, 0.4 * hold));
+  lens(p.x - reach * 0.7, p.y, p.x + reach * 0.7, p.y, (0.8 + 1.8 * k) * px, '#ffffff', Math.max(k, 0.55 * hold));
+  lens(p.x, p.y - H * 0.13 * k, p.x, p.y + H * 0.13 * k, (1 + 2.2 * k) * px, '#fef9c3', 0.8 * k);
+  const rq = clamp(f / 0.4, 0, 1);
+  if (rq < 1) {
+    ctx.strokeStyle = rgba(SU_COL, 0.6 * (1 - rq)); ctx.lineWidth = (2.5 * (1 - rq) + 0.5) * px;
+    ctx.beginPath(); ctx.arc(p.x, p.y, H * (0.03 + 0.4 * rrEaseOut(rq)), 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+function suiBars(F) {
+  const b = F.bar * F.barK;
+  if (b < 0.5) return;
+  ctx.fillStyle = '#020403';
+  ctx.fillRect(0, 0, W, b); ctx.fillRect(0, H - b, W, b);
+  ctx.fillStyle = rgba('#a3e635', 0.16 * F.barK);
+  ctx.fillRect(0, b - 1, W, 1); ctx.fillRect(0, H - b, W, 1);
+}
+/* what is heard, off the shots' clock: keys, the password, root, the write,
+   the horns, the eye */
+function suiSounds(s) {
+  const was = SUI.lastS;
+  SUI.lastS = s;
+  if (!(was >= 0) || !(s > was)) return;
+  const hit = t => was < t && s >= t, T = SUI_T;
+  for (const k of T.keys) if (hit(k)) Audio_.noise(0.035, 0.09, 5200, 1600, 2);
+  for (let i = 0; i < 8; i++) if (hit(T.pass + i * T.passGap)) Audio_.noise(0.025, 0.06, 6400, 2400, 2);
+  if (hit(T.enter) || hit(T.enter2)) Audio_.noise(0.07, 0.13, 3200, 500, 2);
+  if (hit(T.root)) Audio_.tone(880, 0.22, 'square', 0.04, 1320);
+  if (hit(T.write)) Audio_.tone(110, 0.5, 'sawtooth', 0.05, 220);
+  if (hit(T.horn)) Audio_.noise(0.3, 0.14, 1800, 120, 3);
+  if (hit(T.flash)) { Audio_.tone(1760, 0.5, 'sine', 0.06, 2640); Audio_.tone(98, 0.6, 'sine', 0.1, 49); }
+}
+
+/* ---------------------------------- hooks ---------------------------------- */
+function drawSuIntroWorld(q) {
+}
+
+function drawSuIntroOver(q) {
+}
+
+function drawSuIntroScreen(q) {
+  // the room going still, under the tube as it opens
+  if (q.cutAge < 0 && q.hush > 0.002) {
+    ctx.fillStyle = 'rgba(2,4,3,' + 0.9 * q.hush + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (!(q.t < Infinity)) return;
+  const s = suiS(q);
+  suiSounds(s);
+  const F = suiFrame(q, s);
+  if (q.cutAge < SUI_OPEN) {
+    suiStepBits(s);
+    const plate = () => suiPlate(F, q, s);
+    ctx.save();
+    if (q.cutAge >= 0) suiTear(F, q, plate); else suiOn(F, s, plate);
+    suiFlash(F, s, q.cutAge);
+    ctx.restore();
+  }
+  suiBars(F);
+}
+
+// [F]: the cut-in begins
+function suIntroFx(I) {
+  SUI.lastS = -1; SUI.at = -1; SUI.bits.length = 0;
+}
+
+// the cut: SUPERUSER's turn begins
+function suIntroCutFx(I) {
+}
+/* ==================== end of SUPERUSER'S CUT-IN art hooks ==================== */
 
 /* ---------------------------- being deleted --------------------------------
    Everything else in the game blows up. ROOT cannot: it is a selection with
@@ -28815,6 +29593,8 @@ function update(dt) {
   if (P.roninExec && P.roninExec.exec) slowmo = Math.min(slowmo, EXEC_SLOW);
   // and its lead-in, while the cut-in has the screen
   if (roninCutIn()) slowmo = Math.min(slowmo, RN_SLOW);
+  // and SUPERUSER's, the same way
+  if (suCutIn()) slowmo = Math.min(slowmo, SU_SLOW);
   const wdt = dt * slowmo;
 
   chalTick(dt);              // the rule sheet, where it touches the frame
@@ -28993,13 +29773,14 @@ function updatePlayer(dt) {
   // SCORCHED EARTH holds the hull on the heading it was cast along (and in place: below)
   if (P.odScorch) P.ang = P.odScorch.ang;
   if (vrDuelLock()) P.ang = vrDuelAim();  // and holds the guard on him
+  if (suCutIn()) firing = false;          // SUPERUSER's cut-in has the screen
 
   // dash
   if (P.dashCh < P.dashMax) {
     P.dashRe += dt;
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = (keys[' '] || keys['shift']) && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !vrDuelLock();
+  const wantDash = (keys[' '] || keys['shift']) && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !suCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -29068,7 +29849,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || roninCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || roninCutIn() || suCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -35955,6 +36736,7 @@ function render() {
   drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
   drawRoninScores();         // RONIN's Z: the X it leaves in the floor
   { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
+  { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
 
   // --- additive layer: glows -------------------------------------------
   ctx.globalCompositeOperation = 'lighter';
@@ -36094,6 +36876,7 @@ function render() {
   drawVrScreen();       // THE VAGRANT'S RITE: the entrance, the duel's letterbox and prompts
   { const rq = roninPhase(); if (rq) drawRoninIntroScreen(rq); }   // RONIN's lead-in, over the frame
   if (roninShown()) drawRoninScreen(roninW());
+  { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
   halDeathHud();
   if (P.patchT > 0) {                  // the whole book is a timer, so show it
     ctx.save();
@@ -36136,7 +36919,7 @@ function render() {
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
-  if (!isTouch && state === 'play' && !roninCutIn()) drawCrosshair();   // not over RONIN's cut-in
+  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn()) drawCrosshair();   // not over a cut-in
   // every other screen has no system cursor either, so it carries the pointer
   if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
   // his ending outlives his body, but it is not drawn over a screen the
