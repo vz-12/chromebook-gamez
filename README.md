@@ -7,7 +7,7 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 
 | Piece | What it is |
 | --- | --- |
-| `index.html`, `check.html`, `hl-art.js` | The game, the deployment check page, and the ALL HALLOWS art. Served as static files. |
+| `index.html`, `check.html`, `privacy.html`, `hl-art.js` | The game, the deployment check page, the privacy page, and the ALL HALLOWS art. Served as static files. |
 | `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins) and `/api/room` (LAN co-op signalling). Never served to players. |
 | D1 database `voidrunner` | Where the leaderboard and co-op rooms are stored. |
 | Cron trigger `5 0 * * *` | Closes a finished season at 00:05 UTC every day. |
@@ -116,6 +116,27 @@ credentials an hour. Relayed data is billed at $0.05/GB after the first
 Dev logins (`DEV_ACCOUNTS`), profile handouts (`DEV_PIDS`, `SKIN_GRANTS`) and
 how to add or revoke them are documented in `src/leaderboard.js`. A profile
 that signed in on Netlify keeps its grants through the sync above.
+
+## Ads
+
+The game has room for one Google AdSense banner. It sits across the top of the
+main menu and appears now and then: only after a finished run, at most once a
+page load and once every 15 minutes, never during play, and only where it fits
+beside the menu. It is off until it is given an AdSense publisher id and ad
+unit id:
+
+1. In AdSense, add the site `voidrunner.online` and get it approved. AdSense
+   asks for a privacy policy; that is `https://voidrunner.online/privacy`.
+2. Create one **display** ad unit. Keep **Auto ads off** for the site, or
+   Google places its own ads anywhere, runs included.
+3. If many players are under 13, turn on AdSense's child-directed treatment for
+   the site.
+4. In `index.html`, fill in `ADS.client` (`ca-pub-…`) and `ADS.slot`.
+5. Add an `ads.txt` file beside `index.html` containing the line AdSense gives
+   you (`google.com, pub-…, DIRECT, …`).
+
+How often it shows is `ADS.every`; the smallest window it shows in is
+`ADS.minW` × `ADS.minH`.
 
 ## Running it locally
 
