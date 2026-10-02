@@ -7,7 +7,8 @@
    page load never costs a Worker request.
 
      /api/leaderboard   the boards, seasons, awards, vigil and dev logins
-     /api/room          the LAN co-op signalling dead-drop
+     /api/room          the co-op signalling dead-drop
+     /api/turn          short-lived credentials for Cloudflare's TURN relay (co-op)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js); and every 15 minutes,
@@ -15,6 +16,7 @@
    ========================================================================= */
 import leaderboard from './leaderboard.js';
 import room from './room.js';
+import turn from './turn.js';
 import seasonClose from './season-close.js';
 import { syncFromNetlify } from './sync.js';
 
@@ -27,7 +29,7 @@ const json = (body, status) =>
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
   });
 
-const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room };
+const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn };
 
 export default {
   async fetch(req, env) {
