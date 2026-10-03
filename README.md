@@ -151,6 +151,46 @@ D1, not the real database. To try ALL HALLOWS outside its dates:
 `npm run dev -- --test-scheduled`, then open
 `http://localhost:8787/__scheduled?cron=5+0+*+*+*`.
 
+## The determinism test
+
+```sh
+npm test                                   # about 3 minutes
+node scripts/determinism.mjs --quick       # about a minute
+node scripts/determinism.mjs --only rush,keeper
+node scripts/determinism.mjs --diagnose hacker --fields
+```
+
+Co-op is moving to lockstep: both machines run the same game and send only
+their inputs. That only works if the same seed, inputs and run settings give
+the same game, step for step, on any machine. The test plays 14 scenarios
+twice: the four pilots, Boss Rush, the finales, the rites and ALL HALLOWS'
+area. Run A is never drawn and has every effect off. Run B is drawn to a stub
+canvas with every effect on, at another window size, while the keyboard,
+mouse, autofire and the save's flags are scrambled every step. The two must
+match at every second of game time. It also checks that a different seed
+changes the run, and that a planted unseeded roll is caught.
+
+It needs only Node, with no browser and no packages: the game's script runs
+in a bare context with the canvas, audio, storage and network stubbed out.
+`--diagnose` replays one scenario with each of run B's differences on its
+own, to name the cause of a split. `--fields` then narrows a save-flag split
+to the flag.
+
+The rules it holds the game to:
+
+- **Randomness:** what changes the game rolls `simRand` / `simRnd` /
+  `simRndi` / `simPick`, the run's seeded stream. What only paints or sounds
+  rolls `rnd` / `rndi` / `pick`.
+- **Input:** the game reads a pilot only through its input record, `P.in`.
+  Keys that act are queued (`inputPress`) and played on the next step
+  (`playKey`).
+- **Screen and clocks:** the game never reads the window, the camera or the
+  wall clock. It uses `runView` for the window, `simAfter` and `simTick` for
+  time, and never `setTimeout`. It never reads what the drawing wrote.
+- **The save:** the save's flags are read from `RUN`, frozen when the run
+  starts. Progress goes through `runSet`. Each run zeroes its counters in
+  `resetGame`.
+
 ## Limits worth knowing (Workers Free plan)
 
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the

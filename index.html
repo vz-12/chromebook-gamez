@@ -107,6 +107,39 @@ let runViewNext = null;
    runs f s seconds of play later on the step clock, not the wall clock
    (setTimeout), so a delayed game over or a rite taking you lands on the same
    step on every machine, and it waits through a pause instead of firing into it. */
+/* The run's settings, frozen (step 4). The flags in a save that decide what a
+   run contains (escalation, the story so far, what has been unlocked) are
+   copied here when the run starts: from this machine's save, or handed in
+   (runFlagsNext: later, the host's). The game reads RUN for them, never
+   Save.profile, so two players with different saves play the same run.
+   Progress made during the run goes through runSet: the run sees it at once,
+   and the save keeps it. Menus and the records still read the save itself. */
+const RUN_FLAGS = ['hardened', 'keeperDone', 'rootDone', 'altPath', 'clears', 'deepFracture', 'malware',
+                   'planetarium', 'skipStreak', 'otherKills', 'unwrittenDeaths', 'amalgamDone',
+                   'tribunalDone', 'metFounder', 'keyEver', 'campVisits', 'devTalkDue', 'trueEnd'];
+const RUN = {};
+let runFlagsNext = null;
+function runTake() {
+  const src = runFlagsNext;
+  if (src) {
+    for (const k of RUN_FLAGS) RUN[k] = src[k];
+    RUN.hlLive = !!src.hlLive; RUN.medals = (src.medals || []).slice();
+    RUN.chal = (src.chal || []).slice();
+    const c = src.codex || {};
+    RUN.codex = { e: new Set(c.e || []), u: new Set(c.u || []), m: new Set(c.m || []), b: new Set(c.b || []), z: new Set(c.z || []) };
+  } else {
+    const p = Save.profile || {};
+    for (const k of RUN_FLAGS) RUN[k] = p[k];
+    // ALL HALLOWS: whether the event is on, by the calendar, and the medals worn
+    RUN.hlLive = hlLive();
+    RUN.medals = RUN.hlLive ? (hlP().equip || []).slice() : [];
+    // the challenges cleared (they let rewards into the pool) and the codex (THE KEEPER reads it)
+    RUN.chal = (p.chal || []).slice();
+    RUN.codex = { e: new Set(Codex.e), u: new Set(Codex.u), m: new Set(Codex.m), b: new Set(Codex.b), z: new Set(Codex.z) };
+  }
+  runFlagsNext = null;
+}
+function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; }
 let simTick = 0;
 const simTimers = [];
 function simAfter(sec, f) { simTimers.push({ t: sec, f }); }
@@ -2252,7 +2285,7 @@ function offerUpgrades() {
   // THE ANNOTATED CODEX: his notes are in it now, so you see one more option
   /* Three, four with his marginalia, and one more each for Curator Eye and
      Blood Price. Five is the ceiling: past that the cards stop fitting. */
-  const n = Math.min(5, (Save.profile.keeperDone ? 4 : 3)
+  const n = Math.min(5, (RUN.keeperDone ? 4 : 3)
                        + (P.curator ? 1 : 0) + (P.bloodP ? 1 : 0));
   for (let k = 0; k < n && pool.length; k++) {
     const chosen = pickFromPool(pool, flat);
@@ -2657,7 +2690,7 @@ const ALT_STAGES = [
 /* The deep sectors are hidden until the infection at the bottom of THE MIRROR
    has been cleared, so the fracture stays a two-stop farm until then. */
 function altPool() {
-  return Save.profile.deepFracture ? ALT_STAGES : ALT_STAGES.filter(s => !s.deep);
+  return RUN.deepFracture ? ALT_STAGES : ALT_STAGES.filter(s => !s.deep);
 }
 
 let stage = STAGES[0], stageIdx = 0, loopNum = 0;
@@ -4348,10 +4381,9 @@ function applyStage(abs) {
    ever earn — you needed portals to get clears and clears to get portals. */
 function noteClear() {
   if (freeRun) return;                   // sandbox clears earn nothing
-  const p = Save.profile;
-  p.clears = (p.clears || 0) + 1;
-  if (p.clears >= 2 && !p.altPath) {
-    p.altPath = true;
+  runSet('clears', (RUN.clears || 0) + 1);
+  if (RUN.clears >= 2 && !RUN.altPath) {
+    runSet('altPath', true);
     // something reaches in and takes the room off you; the banner comes after
     startIntrusion();
   }
@@ -4380,7 +4412,7 @@ function startWave() {
   const abs = Math.floor((wave - 1) / 5);
   // Before the portals exist, stages advance on the wave clock as they always
   // did. Afterwards the portal room owns transitions and this stays put.
-  const fresh = !Save.profile.altPath && abs !== stageAbs;
+  const fresh = !RUN.altPath && abs !== stageAbs;
   if (fresh) { stageAbs = abs; applyStage(abs); }
   else if (abs !== stageAbs) stageAbs = abs;
 
@@ -4490,8 +4522,8 @@ function onBossDefeat(e) {
   if (e && e.boss === 'root') {
     root = null;
     bossAlive = false;
-    if (!Save.profile.rootDone) {
-      Save.profile.rootDone = true;
+    if (!RUN.rootDone) {
+      runSet('rootDone', true);
       Save.writeLocal(); Save.flush();
     }
     score += 500000;
@@ -4542,8 +4574,8 @@ function onBossDefeat(e) {
     Codex.seeBook('keeper');
     P.bookCharge = BOOKS.keeper.cost;        // charged, once
     setTimeout(() => { if (state === 'play') banner('THE ANNOTATED CODEX', KEEPER_COL, 3.6); }, 2400);
-    if (!Save.profile.keeperDone) {
-      Save.profile.keeperDone = true;
+    if (!RUN.keeperDone) {
+      runSet('keeperDone', true);
       Save.writeLocal(); Save.flush();
       setTimeout(() => { if (state === 'play') banner('HIS MARGINALIA   ·   +1 CHOICE', KEEPER_COL, 3.6); }, 5000);
     }
@@ -4558,18 +4590,18 @@ function onBossDefeat(e) {
   shopPending = true;
 
   if (e && e.boss === 'theother') {
-    Save.profile.otherKills = (Save.profile.otherKills || 0) + 1;
+    runSet('otherKills', (RUN.otherKills || 0) + 1);
     Save.writeLocal(); Save.flush();
   }
-  if (wasVirus && !Save.profile.malware) {
-    Save.profile.malware = true;
+  if (wasVirus && !RUN.malware) {
+    runSet('malware', true);
     Save.writeLocal(); Save.flush();
     banner('MALWARE UNLOCKED', VIRUS_COL, 4.0);
   }
   /* Clearing the infection is what opens the floor. The mirror was the bottom
      of the fracture only for as long as nothing had gone through it. */
-  if (wasVirus && !Save.profile.deepFracture) {
-    Save.profile.deepFracture = true;
+  if (wasVirus && !RUN.deepFracture) {
+    runSet('deepFracture', true);
     Save.writeLocal(); Save.flush();
     setTimeout(() => { if (state === 'play') banner('THE FRACTURE GOES DEEPER', '#84cc16', 4.4); }, 2600);
   }
@@ -4803,7 +4835,7 @@ function openShop() {
   shopPending = false;
   // rolled once, here — makeShopStock only reads it, so rerolls neither
   // create the chip nor destroy it
-  shopChipOffered = !!Save.profile.keeperDone && !P.chip &&
+  shopChipOffered = !!RUN.keeperDone && !P.chip &&
                     simRand() < CHIP_CHANCE;
   shopItems = makeShopStock();
   shopRerolls = 0;
@@ -13257,8 +13289,8 @@ function rootOutroTick(dt) {
   if (o.t >= ROOT_GRANT_T && !o.granted) {
     o.granted = true;
     P.key = (P.key || 0) + 1;
-    if (!Save.profile.keyEver) {          // the record notes it turned up
-      Save.profile.keyEver = true;
+    if (!RUN.keyEver) {          // the record notes it turned up
+      runSet('keyEver', true);
       Save.writeLocal(); Save.flush();
     }
     Audio_.tone(1180, 0.08, 'sine', 0.06, 1500);
@@ -14006,7 +14038,7 @@ function amalOpenTick(dt) {
        would have stayed shut on his own invitation. */
     tear = { visits: 0, open: false, cd: 2.5, at: null, shown: 0, door: null,
              invited: true };
-    Save.profile.metFounder = true;
+    runSet('metFounder', true);
     Save.writeLocal(); Save.flush();
     banner('THE FOUNDER', FOUND_COL, 4.0);
     checkLevel();
@@ -14406,7 +14438,7 @@ let campVisit = null;
 function startCampVisit(i) {
   campVisit = { i, t: 0, gave: false, out: 0 };
   tear.open = false; tear.cd = TEAR_CD;
-  Save.profile.campVisits = Math.max(Save.profile.campVisits || 0, i + 1);
+  runSet('campVisits', Math.max(RUN.campVisits || 0, i + 1));
   Save.writeLocal(); Save.flush();
   Audio_.levelup();
 }
@@ -16099,8 +16131,8 @@ function tribunalTick(dt) {
     T.over += dt;
     if (T.over > 7.2) {
       tribunal = null; bossAlive = false;
-      if (!Save.profile.tribunalDone) {
-        Save.profile.tribunalDone = true;
+      if (!RUN.tribunalDone) {
+        runSet('tribunalDone', true);
         Save.writeLocal(); Save.flush();
       }
       arenaReset();
@@ -20066,7 +20098,7 @@ const stillCanExec = e => (e.boss === 'theother' ? otherExecutable(e) : suCanPin
 // the beat, on THE OTHER in its own fight: the mirrors' ending is the execution; the
 // infection's is something else knitting it back together, and that fight begins
 function otherExecuted(e, ang) {
-  const odds = 0.25 + 0.25 * (Save.profile.otherKills || 0);     // as bossOther rolls it
+  const odds = 0.25 + 0.25 * (RUN.otherKills || 0);     // as bossOther rolls it
   if (simRand() < odds) { startVirus(e); return; }
   e.floor = undefined; e.hp = 0; killEnemy(e, ang);
 }
@@ -23747,7 +23779,7 @@ let awaitingPortal = false;
 function afterReward() {
   // the rush has no portal room: the reward room leads to the next boss
   if (rushOn()) { betweenWaves = RUSH_BREATH; return; }
-  if (Save.profile.altPath) openPortalRoom();
+  if (RUN.altPath) openPortalRoom();
   else betweenWaves = 2.0;
 }
 
@@ -24094,7 +24126,9 @@ const Codex = {
   },
   see(set, k) {
     if (freeRun) return;                 // a sandbox writes nothing down
-    if (!k || Codex[set].has(k)) return;
+    if (!k) return;
+    if (RUN.codex) RUN.codex[set].add(k);   // the run's own copy: see RUN
+    if (Codex[set].has(k)) return;
     Codex[set].add(k); Codex.dirty = true;
   },
   seeEnemy(k)   { Codex.see('e', k); },
@@ -24143,32 +24177,32 @@ const Codex = {
               Object.keys(BOSSES).filter(k => !BOSSES[k].secret).length;
     return { e, u: UPGRADES.filter(x => !x.lock).length };
   },
-  have() {
+  have(c = Codex) {
     const n = Codex.need();
     let e = 0;
-    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && Codex.e.has(k)) e++;
+    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && c.e.has(k)) e++;
     for (const k of Object.keys(BOSSES))
-      if (!BOSSES[k].secret && Codex.e.has(k)) e++;
+      if (!BOSSES[k].secret && c.e.has(k)) e++;
     let u = 0;
-    for (const x of UPGRADES) if (!x.lock && Codex.u.has(x.id)) u++;
+    for (const x of UPGRADES) if (!x.lock && c.u.has(x.id)) u++;
     return { e, u, needE: n.e, needU: n.u };
   },
-  complete() {
-    const h = Codex.have();
+  complete(c = Codex) {
+    const h = Codex.have(c);
     return h.e >= h.needE && h.u >= h.needU;
   },
   /* Completion the bookkeeper cares about is enemies + upgrades. This is the
      other kind: every entry in every section, optional ones included, and the
      secret bosses too. Nothing in the game asks for this except him, once. */
-  trulyFull() {
-    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && !Codex.e.has(k)) return false;
+  trulyFull(c = Codex) {
+    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && !c.e.has(k)) return false;
     for (const k of Object.keys(BOSSES))
-      if (BOSSES[k].endgame || HL_BOSSES[k]) { if (!Codex.e.has(k)) continue; }   // may not exist yet, or not this month
-      else if (!Codex.e.has(k)) return false;
-    for (const u of UPGRADES) if (!u.lock && !Codex.u.has(u.id)) return false;
-    for (const m of MALWARE) if (!Codex.m.has(m.id)) return false;
-    for (const k of Object.keys(BOOKS)) if (!Codex.b.has(k)) return false;
-    for (const s of SIGNS) if (!Codex.z.has(s.id)) return false;
+      if (BOSSES[k].endgame || HL_BOSSES[k]) { if (!c.e.has(k)) continue; }   // may not exist yet, or not this month
+      else if (!c.e.has(k)) return false;
+    for (const u of UPGRADES) if (!u.lock && !c.u.has(u.id)) return false;
+    for (const m of MALWARE) if (!c.m.has(m.id)) return false;
+    for (const k of Object.keys(BOOKS)) if (!c.b.has(k)) return false;
+    for (const s of SIGNS) if (!c.z.has(s.id)) return false;
     return true;
   }
 };
@@ -24247,14 +24281,14 @@ function riteTakesYou() {
 const MALWARE_CHANCE = 0.05;
 
 function maybeSpawnMalware(force) {
-  if (!Save.profile.malware && !force) return;
+  if (!RUN.malware && !force) return;
   if (!force && simRand() >= MALWARE_CHANCE) return;
   placePortal({ kind: 'malware', mal: simPick(MALWARE) });
 }
 
 function maybeSpawnLibrary(bossKey) {
   if (libraryPortal) return;                 // a malware door already claimed it
-  if (!Save.profile.altPath || !BOOKS[bossKey]) return;
+  if (!RUN.altPath || !BOOKS[bossKey]) return;
   // the first loop's way through is guaranteed; later loops stay a roll
   const guaranteed = bossKey === UNW_FROM_BOSS && loopNum === 0;
   if (!guaranteed && simRand() >= LIBRARY_CHANCE) return;
@@ -28313,18 +28347,17 @@ function openReward() {
     banner('NO RESUPPLY', '#64748b', 2.0);
     return;
   }
-  if (Save.profile.planetarium && simRand() < 0.5) openPlanetarium();
+  if (RUN.planetarium && simRand() < 0.5) openPlanetarium();
   else openShop();
 }
 
 /* Two consecutive no-spend shop exits earn the unlock. */
 function noteShopExit() {
-  if (Save.profile.planetarium) return;
-  const p = Save.profile;
-  p.skipStreak = shopTouched ? 0 : (p.skipStreak || 0) + 1;
-  if (p.skipStreak >= 2) {
-    p.planetarium = true;
-    p.skipStreak = 0;
+  if (RUN.planetarium) return;
+  runSet('skipStreak', shopTouched ? 0 : (RUN.skipStreak || 0) + 1);
+  if (RUN.skipStreak >= 2) {
+    runSet('planetarium', true);
+    runSet('skipStreak', 0);
     banner('THE PLANETARIUMS OPEN', '#fbbf24');
     Audio_.levelup();
     drawFlashT = 0.15;
@@ -28858,6 +28891,7 @@ function resetGame() {
   runSeedNext = null;
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
+  runTake();                             // and its settings: see RUN
   applyChar(selectedChar);
   P = newPlayer();
   gearStart();                           // returns at once for the other three
@@ -28890,15 +28924,15 @@ function resetGame() {
      to him. The visit count rides on the profile with it, so the four visits
      are four across the account rather than four a run: the gifts are not
      farmable, and wherever you left the conversation is where it picks up. */
-  if (Save.profile.metFounder && !Save.profile.tribunalDone)
-    tear = { visits: Save.profile.campVisits || 0, open: false, cd: 8,
+  if (RUN.metFounder && !RUN.tribunalDone)
+    tear = { visits: RUN.campVisits || 0, open: false, cd: 8,
              at: null, shown: 0, door: null, invited: false };
   /* And the key itself. It was a run item, which made the whole thing a
      lottery on endurance: ROOT is five sectors down the fracture and the
      amalgam wants the unwritten and the dev talk, so holding both in one
      sitting is a two-hour ask, and dying anywhere in between put the key back
      behind all of it. Earned once, carried until it is spent. */
-  if (Save.profile.keyEver && !Save.profile.metFounder) P.key = 1;
+  if (RUN.keyEver && !RUN.metFounder) P.key = 1;
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
   // a fresh run is not an awakening run until a statue says so
@@ -29897,7 +29931,7 @@ function update(dt) {
      twice. Without this the key was unreachable content on every save: beating
      the amalgam sets amalgamDone, amalgamDone stops him ever asking again, and
      the key only works once amalgamDone is set. */
-  if (Save.profile.devTalkDue && (!Save.profile.amalgamDone || P.key > 0) && !devTalkSaidNo &&
+  if (RUN.devTalkDue && (!RUN.amalgamDone || P.key > 0) && !devTalkSaidNo &&
       !unwritten && !amalgam && !amalCut && !root && !bossAlive && unwDeadT <= 0) {
     devTalkT -= dt;
     if (devTalkT <= 0) startDevTalk();
@@ -31610,8 +31644,8 @@ function keeperWrite(e, n) {
 
 // anything the codex has an entry for is fair game
 function keeperSummon(e, bosses) {
-  const pool = [...Codex.e].filter(k => ETYPE[k] && k !== 'boss' && k !== 'egg');
-  const bpool = [...Codex.e].filter(k => BOSSES[k] && k !== 'keeper');
+  const pool = [...RUN.codex.e].filter(k => ETYPE[k] && k !== 'boss' && k !== 'egg');   // the run's codex: see RUN
+  const bpool = [...RUN.codex.e].filter(k => BOSSES[k] && k !== 'keeper');
   if (bosses && bpool.length && simRand() < 0.5) {
     const key = simPick(bpool);
     const a = simRnd(TAU), R = simRnd(430, 280);
@@ -31844,7 +31878,7 @@ function startUnwritten() {
   };
   const a = spawn(-1), b = spawn(1);
   // one pool, shared: hp lives on the fight, not on either body
-  const deaths = Save.profile.unwrittenDeaths || 0;
+  const deaths = RUN.unwrittenDeaths || 0;
   const pool = UNW_POOL * Math.max(0.35, 1 - deaths * UNW_ATTRITION);
   unwritten = { a, b, hp: pool, maxHp: pool, t: 0,
                 tok: pool / UNW_TARGET_SEC * ENDGAME_BURST,
@@ -31861,7 +31895,7 @@ function startUnwritten() {
 }
 
 function unwFail() {
-  Save.profile.unwrittenDeaths = (Save.profile.unwrittenDeaths || 0) + 1;
+  runSet('unwrittenDeaths', (RUN.unwrittenDeaths || 0) + 1);
   Save.writeLocal(); Save.flush();
   unwDeadT = 2.0;                       // long enough to read, short enough to retry
   drawFlashT = 0.5; shake(1.8);
@@ -32091,8 +32125,8 @@ function unwWin() {
   Codex.seeEnemy('unwritten');           // the entry exists now
   chalCheckGoal('unwritten');
   Codex.flush();
-  if (!Save.profile.trueEnd) {
-    Save.profile.trueEnd = true;
+  if (!RUN.trueEnd) {
+    runSet('trueEnd', true);
     Save.profile.freeplay = true;         // beating it also opens the console
     Save.writeLocal(); Save.flush();
   }
@@ -32105,8 +32139,8 @@ function unwWin() {
   ringFx(P.x, P.y, 20, 1200, UNW_COL, 1.6, 10);
   // and then somebody else would like a word. Recorded on the profile rather
   // than fired on a timer, so quitting here does not lose him.
-  if (!Save.profile.amalgamDone || P.key > 0) {
-    Save.profile.devTalkDue = true;
+  if (!RUN.amalgamDone || P.key > 0) {
+    runSet('devTalkDue', true);
     Save.writeLocal(); Save.flush();
     devTalkT = 3.2;
   }
@@ -32552,7 +32586,7 @@ function startAmalgam() {
      cannot hold: betaUnlockAll deliberately leaves amalgamDone false so the
      dev-talk chain stays armed, which is exactly the flag this needs, so the
      key was unusable on the one build that exists to test it. */
-  const opening = P.key > 0 && (Save.profile.amalgamDone || BETA);
+  const opening = P.key > 0 && (RUN.amalgamDone || BETA);
   /* THE RITE. Reached through the door rather than down the run, and it is not
      the same fight: see the awakening notes. Everything below still builds the
      ordinary body — the rite's own staging is the next thing to write, and it
@@ -35407,8 +35441,8 @@ function amalWin() {
      dev-talk chain and the ROOT key shortcut, and the outro is the page going
      down with him — all of that is earned on the ordinary route, by the fight
      that has his arc in it. Waking a hull does not stand in for that. */
-  if (!wasRite && !Save.profile.amalgamDone) {
-    Save.profile.amalgamDone = true;
+  if (!wasRite && !RUN.amalgamDone) {
+    runSet('amalgamDone', true);
     Save.writeLocal(); Save.flush();
   }
   arenaReset();
@@ -35660,7 +35694,7 @@ function devAnswer(yes) {
     return;
   }
   Save.profile.askedHarder = true;
-  Save.profile.devTalkDue = false;
+  runSet('devTalkDue', false);
   Save.writeLocal(); Save.flush();
   startAmalgamCut();
 }
@@ -35762,7 +35796,7 @@ function unwAdopt(e) {
   e.unwSide = -1; other.unwSide = 1;
   e.floor = 0; other.floor = 0;
   for (const z of [e, other]) { z.armor = 0; z.absorb = 0; z.dr = 0; }
-  const deaths = Save.profile.unwrittenDeaths || 0;
+  const deaths = RUN.unwrittenDeaths || 0;
   const pool = UNW_POOL * Math.max(0.35, 1 - deaths * UNW_ATTRITION);
   unwritten = { a: e, b: other, hp: pool, maxHp: pool, t: 0,
                 tok: pool / UNW_TARGET_SEC * ENDGAME_BURST,
@@ -35854,7 +35888,7 @@ function bossOther(e, dt, ux, uy, d, ph) {
        this and nothing else, so at those odds most runs never saw the route
        existed. It now opens at a quarter and is certain by the fourth clear:
        still a surprise the first time, no longer a lottery for a whole path. */
-    const odds = 0.25 + 0.25 * (Save.profile.otherKills || 0);
+    const odds = 0.25 + 0.25 * (RUN.otherKills || 0);
     if (simRand() < odds) startVirus(e); else startFinale(e);
     return;
   }
@@ -40030,14 +40064,14 @@ function hlLandingShown() {
    is live. Off in dailies and challenges, which are rule sheets everyone
    flies the same, and meaningless in the vigil. Worked out once a frame. */
 function hlMedalsOn() {
-  if (!hlLive() || inVigil) return false;
+  if (!RUN.hlLive || inVigil) return false;   // the run's: see RUN
   const c = Chal.on;
   return !(c && !c.hl && !c.rush);
 }
 function hlMedalSync() {
   HL.eq = {};
   if (!hlMedalsOn()) return;
-  for (const id of hlP().equip) HL.eq[id] = 1;
+  for (const id of RUN.medals) HL.eq[id] = 1;   // the medals worn when the run began
 }
 /* THE GOURD: left alive long enough, a body is worth more and harder to put
    down. */
@@ -44172,7 +44206,7 @@ function drawUnwrittenOverlay() {
   ctx.globalAlpha = al * 0.8;
   ctx.font = "600 " + Math.round(Math.max(11, fs * 0.34)) + "px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = UNW_INK;
-  ctx.fillText('ATTEMPT ' + String((Save.profile.unwrittenDeaths || 0) + 1).padStart(2, '0'),
+  ctx.fillText('ATTEMPT ' + String((RUN.unwrittenDeaths || 0) + 1).padStart(2, '0'),
                W / 2, H / 2 + fs * 1.5);
   ctx.restore();
   ctx.textBaseline = 'alphabetic';
@@ -50231,22 +50265,22 @@ const KEEPER_COL = '#fcd34d';
    and the talk needs trulyFull() — so the record could never be finished and
    THE UNWRITTEN could never be reached. He only steps aside for the talk. */
 function keeperWants() {
-  return state === 'library' && !malwareOffer && Codex.complete() &&
+  return state === 'library' && !malwareOffer && Codex.complete(RUN.codex) &&
          !(P.book && P.book.id === 'keeper') &&   // already carrying his copy this run
          !keeperTalks();
 }
 
 function keeperLine() {
-  const h = Codex.have();
+  const h = Codex.have(RUN.codex);
   // the talk no longer waits on a finished record, so he only claims to have
   // read one when there is one
   if (keeperTalks())
-    return Codex.trulyFull()
+    return Codex.trulyFull(RUN.codex)
       ? 'You finished it. I read it. Take what you like.'
       : 'The record can wait. There is one entry it was never going to hold.';
   if (P.book && P.book.id === 'keeper')
     return 'You have my copy already. Go and use it.';
-  if (Codex.complete())
+  if (Codex.complete(RUN.codex))
     return Save.profile.keeperDone
       ? 'Again? Hand it here. I will read it again.'
       : 'That is all of it. Every entry. Hand it here.';
@@ -60146,7 +60180,7 @@ const HARD_DEPTH  = 15;    // the wave every one of them has to have reached
 
 /* Off during a challenge (its sheet is the difficulty) and off in freeplay
    (nothing there is real). Everywhere else it is simply how the game is now. */
-const hardOn = () => !!Save.profile.hardened && !Chal.on && !freeRun;
+const hardOn = () => !!RUN.hardened && !Chal.on && !freeRun;   // the run's: see RUN
 
 const HARD = {
   hp: 1.45, dmg: 1.30, spd: 1.12, budget: 1.25,
@@ -60228,8 +60262,8 @@ const chalGoalName = c => (BOSSES[c.goal] || { name: c.goal }).name;
 /* `lock` names a challenge; `need` reads the profile, the same way the pilots
    and the challenge list already gate themselves. The route finales are not
    challenges, so what they leave behind could not be expressed before. */
-const chalUnlockedUp = u => (!u.lock || chalDone(u.lock))
-                         && (!u.need || u.need(Save.profile));
+const chalUnlockedUp = u => (!u.lock || (RUN.chal || []).includes(u.lock))   // the run's: see RUN
+                         && (!u.need || u.need(RUN));
 
 /* ------------------------------ starting one ------------------------------ */
 function startChallenge(c) {
@@ -60379,6 +60413,7 @@ function chalCheckGoal(key) {
   const first = !chalDone(c.id);
   if (first) {
     Save.profile.chal = [...new Set([...(Save.profile.chal || []), c.id])];
+    RUN.chal = [...new Set([...(RUN.chal || []), c.id])];
     Save.writeLocal(); Save.flush();
   }
   const rw = CHAL_UPGRADES.find(u => u.id === c.rw);
