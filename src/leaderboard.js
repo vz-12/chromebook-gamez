@@ -13,6 +13,7 @@
    name) but they cannot make a client-submitted score trustworthy.
    ========================================================================= */
 import { getStore } from './store.js';
+import { scorePut } from './boards.js';
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 
 /* The season rule lives in one place, shared with the scheduled closer. */
@@ -631,6 +632,12 @@ async function commit(store, key, entry, merge) {
   return merged;
 }
 
+/* Every run filed here is also filed in boards.js, where every player's row
+   is kept and not only the top 100. Never at the cost of the reply: the
+   document above is what the game reads, and it has already landed. */
+const fileRow = (env, req, board, entry) =>
+  scorePut(env, req, board, entry).catch(e => console.error('scorePut', board, e && e.stack || e));
+
 const placed = (top, entry, kept, extra) => {
   const rank = top.findIndex(e => e.name === entry.name);
   return json(Object.assign({ ok: true, rank: rank >= 0 ? rank + 1 : null,
@@ -783,6 +790,7 @@ export default async (req, env) => {
       if (!isDay(day)) return json({ error: 'bad day' }, 400);
       if (day !== today) return json({ error: 'day is closed' }, 409);
       const r = await commit(store, dayKey(day), entry, mergeFirst);
+      await fileRow(env, req, dayKey(day), entry);
       return placed(r.top, entry, r.kept, Object.assign(
         { already: !!r.already, degraded: r.degraded || undefined }, meta));
     }
@@ -800,10 +808,12 @@ export default async (req, env) => {
     const forSeason = body && body.forSeason;
     const seasonToo = !replay || (isSeason(forSeason) && forSeason === season);
     const a = await commit(store, KEY, entry, mergeBoard);
+    await fileRow(env, req, 'all', entry);
     if (!seasonToo)
       return placed(a.top, entry, a.kept, Object.assign(
         { allTimeOnly: true, degraded: a.degraded || undefined }, meta));
     const s = await commit(store, seasonKey(season), entry, mergeBoard);
+    await fileRow(env, req, seasonKey(season), entry);
     return placed(s.top, entry, s.kept, Object.assign(
       { allTimeBest: a.kept.score, degraded: (s.degraded || a.degraded) || undefined }, meta));
   } catch (e) {

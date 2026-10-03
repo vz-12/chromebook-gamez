@@ -9,9 +9,10 @@
    A session is a random token in a cookie. Only its SHA-256 is stored, so
    somebody reading the database still cannot sign in as anyone. The cookie
    is HttpOnly, so the game's own script never sees it either. On
-   voidrunner.online it is set for the whole domain, which is what carries
-   one sign-in over to pvp.voidrunner.online; anywhere else (workers.dev,
-   localhost) it stays on the address that set it.
+   voidrunner.online it is set for the whole domain (www included); anywhere
+   else (workers.dev, localhost) it stays on the address that set it. PvP
+   lives on its own workers.dev address, which no cookie from here can
+   reach, so it keeps sessions of its own in the same table.
 
    Tables are made on first use, the way store.js makes its own: a fresh
    database, or a local one under `wrangler dev`, just works.
@@ -24,11 +25,10 @@ const DAY = 24 * 60 * 60 * 1000;
 export const SESSION_MS = 90 * DAY;      // since last seen; renewed at most once a day
 export const MAX_SESSIONS = 20;          // devices one account may be signed in on
 
-/* Where a write may come from: the game, the www address it forwards from,
-   and PvP. The page's own origin is always allowed as well, which covers
-   workers.dev and a local `wrangler dev`. */
-const ORIGINS = ['https://voidrunner.online', 'https://www.voidrunner.online',
-                 'https://pvp.voidrunner.online'];
+/* Where a write may come from: the game and the www address it forwards
+   from. The page's own origin is always allowed as well, which covers PvP's
+   Worker (it talks only to itself), workers.dev and a local `wrangler dev`. */
+const ORIGINS = ['https://voidrunner.online', 'https://www.voidrunner.online'];
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (

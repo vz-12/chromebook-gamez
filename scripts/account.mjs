@@ -174,10 +174,10 @@ section('the cloud save');
   ok(e.status === 403, 'another site cannot write, even holding the cookie', e);
   const eo = await evil.op('logout');
   ok(eo.status === 403 && count('sessions') === 2, 'or sign anybody out', eo);
-  const pvp = device({ origin: 'https://pvp.voidrunner.online', base: 'https://pvp.voidrunner.online' });
-  pvp.cookie = A.cookie;
-  const pr = await pvp.call('GET', '/api/account/save');
-  ok(pr.status === 200 && pr.d.save.best === 13, 'PvP\'s address reads the same session', pr.status);
+  const www = device({ origin: 'https://www.voidrunner.online', base: 'https://www.voidrunner.online' });
+  www.cookie = A.cookie;
+  const pr = await www.call('GET', '/api/account/save');
+  ok(pr.status === 200 && pr.d.save.best === 13, 'the www address reads the same session', pr.status);
 }
 
 section('sign out other devices');

@@ -28779,6 +28779,7 @@ Save.profile = Save.blank();
 const Board = {
   url: '/api/leaderboard',
   top: [], status: 'idle', rank: null, note: '',
+  linkRect: null,         // FULL LEADERBOARD under the menu's board, while it is drawn
 
   async load() {
     if (location.protocol === 'file:') { Board.status = 'offline'; return; }
@@ -29430,6 +29431,10 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuDailyRect())) { openDaily('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
+    if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
+      window.open('/leaderboard/', '_blank', 'noopener');
+      return;
+    }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
@@ -50156,6 +50161,7 @@ function renderMenu() {
     ctx.fillText(label, xc + 9, y);
   };
   const all = (global ? Board.top : Save.top).slice(0, 5);
+  Board.linkRect = null;                       // drawn again below if there is room
   /* Two layouts, because stacking the board under the centre column puts it on
      a collision course with the bottom-anchored footer — and on a short window
      there is simply no gap left to put it in.
@@ -50192,6 +50198,7 @@ function renderMenu() {
     ctx.fillRect(px - panelHalf + 8, py + 8, panelHalf * 2 - 16, 1);
     py += 22;
     all.forEach((r, i) => boardRow(r, i, px, py + i * 17, panelHalf));
+    if (global) boardLink(px, py + all.length * 17 + 8);
     ctx.textAlign = 'center';
   } else {
     const ly = cyp + 250 * menuScale;
@@ -50210,6 +50217,8 @@ function renderMenu() {
       ctx.fillStyle = 'rgba(71,85,105,0.35)';
       ctx.fillRect(cxp - sHalf + 8, ly + 8, sHalf * 2 - 16, 1);
       rows.forEach((r, i) => boardRow(r, i, cxp, ly + 20 + i * rowGap, sHalf));
+      if (global && room - (rows.length - 1) * rowGap >= rowGap + 8)
+        boardLink(cxp, ly + 20 + rows.length * rowGap + 4);
       ctx.textAlign = 'center';
     }
   }
@@ -57450,6 +57459,24 @@ function drawPlanetarium() {
   ctx.fillStyle = '#334155';
   ctx.fillText('every reading is either extraordinary or ruinous — never both, never neither',
     cx, H - 26);
+}
+
+/* The whole board, every pilot with a search, is a page of its own
+   (/leaderboard/, leaderboard/ in the repo). The menu shows five rows and
+   this line under them; a click opens the page beside the game. */
+function boardLink(x, y) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  const t = 'FULL LEADERBOARD  ·  SEARCH  ↗';
+  const w = ctx.measureText(t).width;
+  const r = { x: x - w / 2 - 8, y: y - 10, w: w + 16, h: 20 };
+  ctx.fillStyle = inRect(mouse.x, mouse.y, r) ? COL.player : '#64748b';
+  ctx.fillText(t, x, y);
+  ctx.restore();
+  Board.linkRect = r;
 }
 
 function drawNameEntry() {

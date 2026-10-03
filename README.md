@@ -8,6 +8,7 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | Piece | What it is |
 | --- | --- |
 | `index.html`, `check.html`, `privacy.html`, `hl-art.js` | The game, the deployment check page, the privacy page, and the ALL HALLOWS art. Served as static files. |
+| `leaderboard/` | The standalone leaderboard page at `/leaderboard/`: every board, every pilot, and a search. Its own small files, not part of the game's. |
 | `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins), `/api/room` (LAN co-op signalling), `/api/turn` (the co-op relay) and `/api/account` (accounts and cloud saves). Never served to players. |
 | D1 database `voidrunner` | Where the leaderboard, co-op rooms and accounts are stored. |
 | Cron trigger `5 0 * * *` | Closes a finished season at 00:05 UTC every day. |
@@ -149,6 +150,37 @@ and out of an account:
 - the save's compare-and-swap
 - writes from another site being refused
 - deleting the account
+
+## The leaderboard page
+
+`voidrunner.online/leaderboard/` lists every player on every board. That
+covers the season and past seasons, all-time, and the daily and past days,
+plus a PVP tab that fills in when PvP opens. The game's menu links to it
+from under its GLOBAL TOP 5.
+
+- **What it offers:**
+  - A search by callsign or account name gives a placement on each board.
+    A placement opens its page with the row lit.
+  - YOUR PLACEMENT is shown for whoever is signed in. Otherwise it's for the
+    save this browser plays under.
+- **Where the rows come from:**
+  - The boards in the game are one document each, holding only the top
+    100. `src/boards.js` keeps a `scores` row for every player on every
+    board.
+  - Every run filed through `/api/leaderboard` writes its row too.
+  - Every 15 minutes the board documents are folded in, which carried over
+    everything from before and whatever the Netlify sync merges.
+- **Whose a row is:**
+  - A signed-in player, or a profile linked to an account, has one row per
+    board under the account. Guests have one per callsign, as the boards
+    always have.
+  - A guest who signs in brings their rows into the account.
+- **`/api/boards`:** a page of a board, a search, or a player's own
+  placement. Profile ids and account ids never leave the Worker.
+
+```sh
+npm run test:boards                        # a few seconds
+```
 
 ## Dev accounts
 

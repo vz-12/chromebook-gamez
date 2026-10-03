@@ -11,16 +11,20 @@
      /api/turn          short-lived credentials for Cloudflare's TURN relay (co-op)
      /api/account       accounts: sign up, sign in, the cloud save (account.js;
                         what a session is lives in auth.js, shared with PvP)
+     /api/boards        every player's row on every board: ranks, pages, search
+                        (boards.js; the page is /leaderboard/)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
    expired sign-ins (auth.js); and every 15 minutes,
-   merging in the old Netlify leaderboard store (sync.js).
+   merging in the old Netlify leaderboard store (sync.js) and then folding
+   the boards into their rows (boards.js).
    ========================================================================= */
 import leaderboard from './leaderboard.js';
 import room from './room.js';
 import turn from './turn.js';
 import account from './account.js';
+import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
 import { syncFromNetlify } from './sync.js';
@@ -35,7 +39,7 @@ const json = (body, status) =>
   });
 
 const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
-                 '/api/account': account, '/api/account/save': account };
+                 '/api/account': account, '/api/account/save': account, '/api/boards': boards };
 
 export default {
   async fetch(req, env) {
@@ -61,6 +65,9 @@ export default {
     if (event.cron === SEASON_CLOSE_CRON) {
       ctx.waitUntil(seasonClose(env));
       ctx.waitUntil(pruneAuth(env).catch(e => console.error('pruneAuth', e && e.stack || e)));
-    } else ctx.waitUntil(syncFromNetlify(env));
+    } else {
+      ctx.waitUntil(syncFromNetlify(env).catch(e => console.error('sync', e && e.stack || e))
+        .then(() => foldBoards(env)).catch(e => console.error('foldBoards', e && e.stack || e)));
+    }
   }
 };
