@@ -50,6 +50,11 @@ const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 429496729
 const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
+  // each player in a skin of their own, and wearing an award: each machine draws the other pilot in it
+  Save.profile.skin = { player: { col: '${role}' === 'host' ? '#22c55e' : '#ff00ff' }, bullet: { col: '${role}' === 'host' ? '#bbf7d0' : '#fde047' } };
+  { const aw = AWARD_SKINS(); if (aw.length) Save.profile.skinEquip = aw[('${role}' === 'host' ? 0 : 1) % aw.length].id; }
+  globalThis.__drawErr = [];
+  globalThis.__draw = () => { try { render(); } catch (e) { if (__drawErr.length < 5) __drawErr.push(String(e && e.message || e) + ' @ ' + String(e && e.stack || '').split(' at ')[1]); __drawErr.n = (__drawErr.n || 0) + 1; } };
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
   ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true };" : ''}
   ${scramble ? `// the guest's own save says otherwise about everything: the host's must win
@@ -228,6 +233,8 @@ function play(sc) {
       const dt = Math.min(0.2, (now - m.last) / 1000);
       m.last = now;
       m.g.run(`lsFrame(${dt})`);
+      // and drawn, as a browser would: drawing two pilots must touch nothing the game reads
+      if (m.frames % 3 === 0) m.g.run('__draw()');
       m.frames++;
       if (m.g.run('LS.waitT > 0')) m.waitFrames++;
       ship(m);
@@ -262,6 +269,7 @@ function play(sc) {
     acts: [JSON.parse(H.g.run('JSON.stringify(__acts)')), JSON.parse(G.g.run('JSON.stringify(__acts)'))],
     seen: [H.g.run('[...__seen]'), G.g.run('[...__seen]')],
     left: H.g.run('OPENERS_LEFT()').filter(t => t < TICKS),
+    drawErr: [H.g.run('__drawErr.n || 0'), G.g.run('__drawErr.n || 0'), H.g.run('__drawErr[0] || ""'), G.g.run('__drawErr[0] || ""')],
   };
 }
 
@@ -280,6 +288,7 @@ for (const sc of SCENARIOS) {
   const [ah, ag] = r.acts, miss = [];
   if (!ah.pick && !ah.gearTake && !SHORT) miss.push('no card or gear chosen');   // THE VAGRANT has loot, not cards, and may find none in a minute
   if (!ah['pick·guest'] && !ah['gearTake·guest'] && !SHORT) miss.push("the guest's pilot never chose its own card or gear");
+  if (r.drawErr[0] || r.drawErr[1]) miss.push(`drawing threw (host ${r.drawErr[0]}, guest ${r.drawErr[1]}): ${r.drawErr[2] || r.drawErr[3]}`);
   if (!ah.pause || !ah.resume) miss.push('no shared pause');
   if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
   if (!SHORT && !r.seen[0].includes('gfx')) miss.push('host never opened graphics over the pause');

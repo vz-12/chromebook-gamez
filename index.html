@@ -37151,7 +37151,7 @@ function render() {
 
   ctx.globalCompositeOperation = 'lighter';
   drawEBullets();
-  drawBullets();
+  pilotsDraw(drawBullets);
   drawArcs();
   drawBeams();
   drawFinaleBeams();
@@ -39613,6 +39613,7 @@ function hlWrMenuish() {
 }
 
 function hlWrFrame() {
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), hlWrFrame); return; }   // co-op: the wearer is this machine's pilot
   const dt = clamp(uiTime - HLW.t, 0, 0.1);
   HLW.t = uiTime;
   let s = null;
@@ -39666,7 +39667,8 @@ function hlWrFrame() {
 }
 
 /* ---- the taps: one line each at the game's end ---- */
-const hlWrHere = () => (HLW.me && HLW.prev ? HLW.me : null);
+// the wearer, while the pilot being drawn (or killing) is the one it dresses: never the other pilot in co-op
+const hlWrHere = () => (HLW.me && HLW.prev && HLW.P === P ? HLW.me : null);
 function hlWrKillTap(e, ang) {
   const me = hlWrHere();
   if (!me || state !== 'play') return;
@@ -46882,6 +46884,8 @@ function motionStreak(x, y, vx, vy, w, col, strength) {
 function drawBullets() {
   for (const b of bullets) {
     if (!inView(b.x, b.y, 40)) continue;
+    // co-op: each pilot's pass draws its own shots, in its colours and its skin
+    if (PILOTS.length > 1 && ((b.by && b.by.pid) || 0) !== PILOT.on) continue;
     // zodiac rounds read differently at a glance
     const c = b.hacked ? HACK_COL
             : b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
@@ -53298,7 +53302,8 @@ function skinClean(doc) {
   return out;
 }
 
-const skinDoc = () => (Save.profile && Save.profile.skin) || null;
+// whose skin: this player's, or, drawing the other pilot in co-op, theirs (pilotSkin)
+const skinDoc = () => (pilotSkin ? pilotSkin.doc : (Save.profile && Save.profile.skin) || null);
 const skinEntry = k => { const d = skinDoc(); return (d && d[k]) || null; };
 
 /* The two readers the rest of the game calls. Both fall through to whatever
@@ -54438,6 +54443,7 @@ const specialEarned = s => !!s && !s.wip &&     // a skin still being drawn equi
 const specialOwned = () => SPECIAL_SKINS.filter(specialEarned);
 const devOwned = () => devList().filter(specialEarned);
 function equippedSpecial() {
+  if (pilotSkin) return (pilotSkin.equip && specialById(pilotSkin.equip)) || null;   // the other player's, as they wear it
   const s = specialById(Save.profile.skinEquip || '');
   return s && specialEarned(s) ? s : null;      // an unearned id equips nothing
 }
@@ -54706,7 +54712,7 @@ const IMP_T = [null, {
   edge: '#fde68a', glow: '#fbbf24', gem: '#e11d48', gem2: '#3b82f6', blades: 8, spark: '#fde68a'
 }];
 const IMP_FUR = '#f7f3e8', IMP_TAIL = '#141018';
-const IMP_STATE = {};
+let IMP_STATE = {};
 const impTier = s => Math.max(1, Math.min(3, (s && s.tier) | 0));
 
 /* Polished metal is a gradient with the light in the middle of it: dark at
@@ -57470,7 +57476,11 @@ function netTick(dt) {
    machine draws and listens as its own pilot (pilotMine): its HUD, its
    camera, its cards. Solo there is one pilot and nothing is ever swapped.
    ========================================================================= */
-const PILOT_VARS = ['P', 'selectedChar', 'offers', 'gearOffer', 'gearOld', 'gearOfferDrop', 'gearNear', 'sentries', 'playerChill',
+/* The skin a pilot is drawn in: null for this machine's own pilot (its save's
+   skin), and the other player's, as their hello sent it, for theirs. Drawing
+   only: skinDoc and equippedSpecial read it. */
+let pilotSkin = null;
+const PILOT_VARS = ['P', 'selectedChar', 'pilotSkin', 'IMP_STATE', 'offers', 'gearOffer', 'gearOld', 'gearOfferDrop', 'gearNear', 'sentries', 'playerChill',
   'od', 'odFlash', 'odShake', 'odSeeded', 'odPools', 'odTrail', 'odRing', 'odScorchLitAt', 'odScorchEndAt',
   'odFusionLitAt', 'odFusionOutAt', 'odFusionThrow', 'odPlume', 'odPyros', 'odScars', 'odStars', 'odStarBooms',
   'suImp', 'suAscGone', 'suHead', 'suZones', 'suPieces', 'suFx', 'SUI',
@@ -57541,6 +57551,7 @@ function pilotsBegin(char, awake) {
   const v1 = v0.map((x, i) => (i === 0 ? null : pilotFresh(x)));
   PILOTS.push({ v: v1, col: [COL.player, COL.bullet] });
   pilotUse(1);
+  pilotSkin = pilotMine() === 1 ? null : pilotPeerSkin();   // each pilot in its own player's skin
   applyChar(char, true);
   runAwakeNext = !!awake;
   P = newPlayer(); P.pid = 1;
@@ -57550,7 +57561,11 @@ function pilotsBegin(char, awake) {
   P.x = clamp(p0.x + 54, arena.x0 + 20, arena.x1 - 20); P.y = p0.y;
   P.iframe = 1.4;
   pilotUse(0);
+  pilotSkin = pilotMine() === 0 ? null : pilotPeerSkin();
+  applyChar(selectedChar, true);          // its colours, now the skin is the right one
 }
+// the other player's skin, as their hello sent it
+const pilotPeerSkin = () => MP.peerSkin || { doc: {}, equip: '' };
 function pilotsEnd() {
   pilotUse(0);
   PILOTS.length = 0;
@@ -57679,6 +57694,11 @@ function coopSayMine(mineText, mineCol, otherText, otherCol, dur) {
   const mine = PILOTS.length < 2 || PILOT.on === pilotMine();
   banner(mine ? mineText : otherText, mine ? mineCol : otherCol, dur);
 }
+// this player's skin, for the other machine to draw this pilot in
+function skinHello() {
+  const s = equippedSpecial();
+  return { skin: (Save.profile && Save.profile.skin) || {}, equip: s ? s.id : '' };
+}
 // the other player, by name
 const coopThem = () => (MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'THE HOST')).toUpperCase();
 // whose run this machine records: its own pilot's kills, level and build
@@ -57742,7 +57762,7 @@ function mpStartRun() {
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0,
+  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(),
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -57760,6 +57780,7 @@ function mpOnEvent(m) {
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
       MP.peerAwake = !!m.awake;
+      MP.peerSkin = { doc: skinClean(m.skin), equip: String(m.equip || '').slice(0, 40) };   // how to draw their pilot
       MP.ready = true;
       break;
 
@@ -57866,6 +57887,7 @@ const SNAP_LOCAL = new Set([
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
   'RKA', 'RKC',                          // RONIN's art layers (a WeakMap of wounds, draw closures)
+  'pilotSkin', 'IMP_STATE',              // and how a pilot is dressed: each machine's own idea of it
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
 ]);
@@ -58798,7 +58820,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0,
+    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(),
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 
