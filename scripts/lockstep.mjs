@@ -251,6 +251,8 @@ function play(sc) {
     compared, firstDiff, diffs, ticks: [tick(H), tick(G)],
     resyncs: [H.g.run('LS.resyncs'), G.g.run('LS.resyncs')],
     replayed: G.g.run('LS.replayed'),
+    // each player's own kills: the host's ship and the wingman, and what each machine would record
+    kills: { host: H.g.run('P.kills'), wing: H.g.run('Wing.kills'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') },
     wave: H.g.run('__stat.waves'), bosses: H.g.run('[...__stat.bosses]'),
     wait: [H.waitFrames / Math.max(1, H.frames), G.waitFrames / Math.max(1, G.frames)],
     kbps: [H.g.run('Net.tx') / 1024 / secs, G.g.run('Net.tx') / 1024 / secs],
@@ -278,6 +280,10 @@ for (const sc of SCENARIOS) {
   if (!ah.pause || !ah.resume) miss.push('no shared pause');
   if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
   if (!SHORT && !r.seen[0].includes('gfx')) miss.push('host never opened graphics over the pause');
+  // each records its own kills, and the wingman's are not the host's
+  const k = r.kills;
+  if (k.hostRecords !== k.host || k.guestRecords !== k.wing) miss.push(`kills recorded as ${k.hostRecords}/${k.guestRecords}, flown ${k.host}/${k.wing}`);
+  if (!k.wing && !SHORT) miss.push('the wingman was never credited a kill');
   const same = JSON.stringify(Object.entries(ah).sort()) === JSON.stringify(Object.entries(ag).sort());
   /* In step: every fingerprint the same, and the safety net never needed. Where
      a machine was nudged out of step on purpose, the two may part only for a
@@ -305,6 +311,7 @@ for (const sc of SCENARIOS) {
     ` · ${r.kbps[0].toFixed(1)}/${r.kbps[1].toFixed(1)} KB/s · wave ${r.wave} ${r.bosses.join(',')} · ${((Date.now() - t0) / 1000).toFixed(1)}s` +
     `  [${sc.lat}±${sc.jit} ms, ${(sc.loss * 100).toFixed(0)}% loss, ${sc.hostHz}/${sc.guestHz} Hz${sc.freeze ? ', guest froze ' + sc.freeze.ms + ' ms' : ''}${sc.guestSave ? ', saves differ' : ''}]` +
     `\n          menus: ${Object.entries(ah).sort().map(([k, n]) => k + ' ' + n).join(' · ')}${same ? '' : '  (the guest saw a different count: it may have stopped a step behind)'}` +
+    `\n          kills: host ${r.kills.host} · wingman ${r.kills.wing}, each on its own record` +
     net +
     (r.left.length ? `\n          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +
     (miss.length ? `\n          NOT COVERED: ${miss.join('; ')}` : ''));

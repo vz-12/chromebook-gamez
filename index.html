@@ -2794,9 +2794,13 @@ function stanceMul() {
   return m;
 }
 
+/* Who is firing, while it is not P: the wingman (wingUpdate). A shot carries
+   its shooter (by), and a kill goes to whoever landed it (killBy, killBody). */
+let shotBy = null, killBy = null;
 function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
   const isCrit = simRand() < P.crit;
   bullets.push({
+    by: shotBy || P,
     x, y,
     vx: Math.cos(ang) * P.bspeed * (opts.sm || 1),
     vy: Math.sin(ang) * P.bspeed * (opts.sm || 1),
@@ -4050,7 +4054,7 @@ function killBody(e, ang) {
   e.dead = true;
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
-  P.kills++;
+  (killBy || P).kills++;                 // to whoever landed it: the wingman's go on the guest's record
   onRewardKill(e);          // harvest, requisition, banks, trophies, chains
   for (const b of enemies) {
     if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
@@ -14561,7 +14565,7 @@ function choiceAnswer(openIt) {
     choice = null; tear = null;
     Save.profile.conformed = true;
     Save.writeLocal(); Save.flush();
-    banner('YOU SIT DOWN', FOUND_COL, 5.0);
+    coopSay('YOU SIT DOWN', FOUND_COL, coopThem() + ' SITS DOWN', FOUND_COL, 5.0);   // the host's answer, on both screens
     simAfter(3.6, 'sitDown');
     return;
   }
@@ -29049,7 +29053,8 @@ function gameOver(quiet) {
     const u = UPGRADES.find(z => z.id === id);
     return u ? upName(u) + (P.up[id] > 1 ? ' ×' + P.up[id] : '') : id;
   });
-  lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+  // this machine's pilot: in co-op each player's record is their own (coopMine)
+  lastStats = { score, wave, kills: coopMine().kills, level: P.level, time: elapsed,
                 sector: stage.name, loop: loopNum,
                 isRecord: score > Save.profile.best };
   const wasHard = Save.profile.hardened;
@@ -36732,6 +36737,8 @@ function updateBullets(dt) {
       // SAGITTARIUS: an arrow gathers force the longer it has been flying
       if (b.arrow) dmg *= 1 + b.arrow * 1.1 * clamp(b.dist / 700, 0, 1);
       b.hit = true;
+      // whoever fired it lands it: the kill, and the fragments it throws, are theirs
+      killBy = shotBy = b.by === P ? null : b.by || null;
       // a stolen body's rounds fly in your array, so say whose they are
       damageEnemy(e, dmg, b.crit, b.px, b.py, b.hacked ? { hacked: true } : undefined);
       // SCORPIO: inject venom that builds with every sting
@@ -36756,6 +36763,7 @@ function updateBullets(dt) {
           fireBullet(b.x, b.y, a, 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
         }
       }
+      killBy = shotBy = null;
       if (b.arrow) {
         // an arrow does not stop for anything
         (b.hits || (b.hits = new Set())).add(e.id);
@@ -48943,8 +48951,8 @@ function drawHUD() {
   ctx.letterSpacing = '0.08em';
   // a rush counts bosses, not waves: its waves are five apart and all bosses
   const runStr = rushOn()
-    ? `BOSS ${Rush.n}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`
-    : `WAVE ${wave}   ·   ${P.kills} KILLS   ·   ${fmtTime(elapsed)}`;
+    ? `BOSS ${Rush.n}   ·   ${coopMine().kills} KILLS   ·   ${fmtTime(elapsed)}`
+    : `WAVE ${wave}   ·   ${coopMine().kills} KILLS   ·   ${fmtTime(elapsed)}`;
   fitFont(runStr, rMax, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
   ctx.fillStyle = '#94a3b8';
   ctx.fillText(runStr, W - pad, pad + 50);
@@ -57479,6 +57487,7 @@ const Wing = {
   hp: 100, maxHp: 100, iframe: 0, hurtFlash: 0,
   dashT: 0, dashDX: 0, dashDY: 0, dashCh: 1, dashMax: 1, dashCd: 1.5, dashRe: 0,
   fireT: 0, charIdx: 0, ghosts: [], shots: 0,
+  kills: 0,                              // its own, for the guest's record
   // the guest's input for the step being played (lsWingInput)
   in: { mx: 0, my: 0, ang: 0, fire: false, dash: false }
 };
@@ -57492,7 +57501,7 @@ function wingSpawn() {
   Wing.vx = Wing.vy = 0; Wing.ang = 0;
   Wing.iframe = 1.4; Wing.hurtFlash = 0;
   Wing.dashT = 0; Wing.dashCh = 1; Wing.dashMax = 1; Wing.dashRe = 0;
-  Wing.fireT = 0; Wing.shots = 0; Wing.ghosts.length = 0;
+  Wing.fireT = 0; Wing.shots = 0; Wing.ghosts.length = 0; Wing.kills = 0;
   Wing.in.fire = false; Wing.in.dash = false; Wing.in.mx = 0; Wing.in.my = 0;
 }
 
@@ -57517,6 +57526,20 @@ const coopCanDown = () => mpSim() && Wing.live && !Wing.down && !P.down;
 
 /* The host's own ship, on the floor. The simulation does not pause, move or
    change hands — it carries on around the wreck. */
+/* A co-op banner, worded for the screen showing it: the same moment is "YOU
+   ARE DOWN" on one machine and "HOSTY IS DOWN" on the other. Banners are only
+   drawn, so each machine words its own; the game is the same either way. */
+function coopSay(hostText, hostCol, guestText, guestCol, dur) {
+  const guest = MP.on && MP.role === 'guest';
+  banner(guest ? guestText : hostText, guest ? guestCol : hostCol, dur);
+}
+// the other player, by name
+const coopThem = () => (MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'THE HOST')).toUpperCase();
+/* Whose run this machine is recording: the host flies P; the guest, the
+   wingman. Its kills are its own; the build, the level and the score are
+   shared until each pilot has its own (the rework's Phase 3). */
+const coopMine = () => (MP.on && MP.role === 'guest' && Wing.live ? Wing : P);
+
 function hostDown() {
   P.hp = 0; P.down = true;
   P.vx = 0; P.vy = 0; P.dashT = 0; P.laserT = 0;
@@ -57525,7 +57548,7 @@ function hostDown() {
   burst(P.x, P.y, 52, COL.player, 360, 4, 1.0);
   ringFx(P.x, P.y, 8, 220, COL.player, 0.7, 5);
   drawFlashT = 0.14; shake(0.8); Audio_.over();
-  banner('YOU ARE DOWN — CLEAR THE WAVE', '#f87171', 2.6);
+  coopSay('YOU ARE DOWN — CLEAR THE WAVE', '#f87171', coopThem() + ' IS DOWN — CLEAR THE WAVE', WING_COL, 2.6);
 }
 
 function hostRevive() {
@@ -57551,8 +57574,9 @@ function coopReviveWave() {
   if (!wasP && !wasW) return;
   if (wasP) hostRevive();
   if (wasW) wingRevive();
-  banner(wasP && wasW ? 'BOTH BACK UP' : wasP ? 'BACK UP' : 'WINGMAN BACK UP',
-         COL.hp, 2.0);
+  if (wasP && wasW) banner('BOTH BACK UP', COL.hp, 2.0);
+  else if (wasP) coopSay('BACK UP', COL.hp, coopThem() + ' IS BACK UP', COL.hp, 2.0);
+  else coopSay(coopThem() + ' IS BACK UP', COL.hp, 'BACK UP', COL.hp, 2.0);
 }
 
 function hurtWing(dmg, opts) {
@@ -57592,7 +57616,7 @@ function wingDown() {
     return;
   }
   Wing.down = true;
-  banner('WINGMAN DOWN — CLEAR THE WAVE', WING_COL, 2.6);
+  coopSay(coopThem() + ' IS DOWN — CLEAR THE WAVE', WING_COL, 'YOU ARE DOWN — CLEAR THE WAVE', '#f87171', 2.6);
 }
 
 function wingRevive() {
@@ -57687,7 +57711,9 @@ function wingUpdate(dt) {
     const n = Math.max(1, P.count);
     for (let i = 0; i < n; i++) {
       const a0 = n === 1 ? 0 : (i - (n - 1) / 2) * (P.spread * 1.9);
+      shotBy = Wing;
       fireBullet(mx, my, Wing.ang + a0 + simRnd(P.spread, -P.spread) * 0.5, 0.85);
+      shotBy = null;
     }
     Audio_.shoot();
     Wing.shots++;
