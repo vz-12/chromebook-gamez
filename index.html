@@ -995,6 +995,63 @@ const mouse = { x: W / 2, y: H / 2, down: false, wx: 0, wy: 0 };
 let lastDT = 0.016;                      // the frame delta, for UI easing
 let autoFire = false;
 
+/* ---------------------------- the input record ----------------------------
+   (2 Oct 2026, the seeded rework, Phase 1 step 2.) The game reads a pilot
+   only through its record, P.in, never the devices. What is held (movement,
+   aim, the trigger, dash) is sampled once, at the top of each step; what is
+   pressed (the keys that act: Q, F, Z X C V, E on gear, the right button) is
+   queued as it happens and played on that step, in order (playKey). A record
+   per pilot per step is what lockstep co-op will send, and what a replay or
+   the determinism test feeds in place of the devices (inputSource).
+     mx, my   movement: the keys, or the left stick (updatePlayer normalises)
+     ax, ay   the aim point in the world: the cursor, through this camera
+     trig     the trigger held, the left button or J;  lmb: the left button alone
+     auto     autofire (T) is on
+     dash     space or shift held
+     touch    a touch screen;  taim: the right stick's pull, or null
+     press    the keys that act, pressed since the last step
+     local    sampled from this machine's own devices */
+const newInput = () => ({ mx: 0, my: 0, ax: 0, ay: 0, trig: false, lmb: false, auto: false,
+                          dash: false, touch: false, taim: null, press: [], local: true });
+const inputQueue = [];
+const inputPress = k => { inputQueue.push(k); };
+function inputSample(rec) {
+  let ix = 0, iy = 0;
+  if (keys['a'] || keys['arrowleft'])  ix -= 1;
+  if (keys['d'] || keys['arrowright']) ix += 1;
+  if (keys['w'] || keys['arrowup'])    iy -= 1;
+  if (keys['s'] || keys['arrowdown'])  iy += 1;
+  if (touchUI.move) {
+    const dx = touchUI.move.x - touchUI.move.ox, dy = touchUI.move.y - touchUI.move.oy;
+    const d = len(dx, dy);
+    if (d > 6) { const m = Math.min(1, d / 62) / d; ix = dx * m; iy = dy * m; }
+  }
+  rec.mx = ix; rec.my = iy;
+  // mouse.wx / wy stay too: the drawing still reads the cursor's world point
+  mouse.wx = (aimX() - W / 2 - cam.sx) / camZoom + cam.x;
+  mouse.wy = (aimY() - H / 2 - cam.sy) / camZoom + cam.y;
+  rec.ax = mouse.wx; rec.ay = mouse.wy;
+  rec.trig = !!(mouse.down || keys['j']);
+  rec.lmb = !!mouse.down;
+  rec.auto = autoFire;
+  rec.dash = !!(keys[' '] || keys['shift']);
+  rec.touch = isTouch;
+  rec.taim = touchUI.aim ? { dx: touchUI.aim.x - touchUI.aim.ox, dy: touchUI.aim.y - touchUI.aim.oy } : null;
+  rec.press = inputQueue.splice(0);
+  rec.local = true;
+}
+let inputSource = inputSample;           // the devices; a replay, the test, later a partner stand in here
+// once a step, before anything moves: the pilot's record, then what it pressed
+function inputStep() {
+  inputSource(P.in);
+  for (const k of P.in.press) playKey(k);
+}
+// a dash taken: the press is spent, and held it waits for the key to repeat, as it always has
+function inputDashTaken() {
+  P.in.dash = false;
+  if (P.in.local) { keys[' '] = false; keys['shift'] = false; }
+}
+
 addEventListener('keydown', e => {
   if (state === 'name') { nameKey(e); return; }
   // the password field wants the raw event too: any printable key, unfiltered
@@ -1030,7 +1087,7 @@ cv.addEventListener('mousedown', e => {
      that nobody reported it, and unacceptable now that the button is a guard:
      a gun going off when you asked to block is the worst version of this
      control there is. */
-  if (e.button === 2) { if (state === 'play') bladeParry(); return; }
+  if (e.button === 2) { if (state === 'play') inputPress('parry'); return; }   // played on the next step
   mouse.down = true;
   // the slider claims the click before any overlay button sees it
   if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return; }
@@ -1406,6 +1463,7 @@ function newPlayer() {
   const C = CHAR();
   return {
     weapon: C.weapon, charId: C.id, rate0: C.rate,
+    in: newInput(),                      // what it is told to do: see the input record
     hacker: C.id === 'hacker' ? 1 : 0,   // what it kills, it keeps
     fly: C.id === 'ember' ? 1 : 0,       // EMBER holds its lance inside the crowd
     awake: isAwake(C.id) ? 1 : 0,        // been through its rite
@@ -8437,7 +8495,7 @@ const suZones = [];
 function suKitStart() {
   if (P.suPlunge) return;
   if (P.suDrill || P.suDrain || P.suFling) { floatText(P.x, P.y - 42, 'THE MANE IS OUT', '#94a3b8', 12); return; }
-  const dx = mouse.wx - P.x, dy = mouse.wy - P.y, d = len(dx, dy) || 1;
+  const dx = P.in.ax - P.x, dy = P.in.ay - P.y, d = len(dx, dy) || 1;
   const r = Math.min(d, DRILL_RANGE);
   P.suPlunge = { ph: 'dive', t: 0, ang: Math.atan2(dy, dx),
                  x: clamp(P.x + dx / d * r, arena.x0 + 30, arena.x1 - 30),
@@ -16814,7 +16872,7 @@ function vrDuelTick(dt) {
   if (D.over) { if (D.ph === 'finish' && D.beat > 0.9 && !V.done) vrDuelFall(); return; }
 
   // a fresh click is a swing; the trigger held down is not
-  const fire = !!(mouse.down || keys['j']);
+  const fire = P.in.trig;
   const fresh = fire && !D.fireWas;
   D.fireWas = fire;
   let swung = false;
@@ -19722,7 +19780,7 @@ function roninChainTick(dt) {
    The cross is laid where the cursor is, held to LUNAR_RANGE and inside the
    room, and crossed on the line from the hull to it. */
 function lunarCleave(prefix, ch) {
-  const dx = mouse.wx - P.x, dy = mouse.wy - P.y;
+  const dx = P.in.ax - P.x, dy = P.in.ay - P.y;
   const ang = Math.atan2(dy, dx), r = Math.min(Math.hypot(dx, dy), LUNAR_RANGE);
   const x = clamp(P.x + Math.cos(ang) * r, arena.x0 + 24, arena.x1 - 24);
   const y = clamp(P.y + Math.sin(ang) * r, arena.y0 + 24, arena.y1 - 24);
@@ -23916,8 +23974,8 @@ const BOOKS = {
     d: 'Blink to your cursor. Both the place you left and the place you arrive detonate.',
     f: () => {
       const ox = P.x, oy = P.y;
-      const tx = clamp(mouse.wx, arena.x0 + P.r, arena.x1 - P.r);
-      const ty = clamp(mouse.wy, arena.y0 + P.r, arena.y1 - P.r);
+      const tx = clamp(P.in.ax, arena.x0 + P.r, arena.x1 - P.r);
+      const ty = clamp(P.in.ay, arena.y0 + P.r, arena.y1 - P.r);
       playerBlast(ox, oy, 200, 45 + P.dmg * 2.6, '#a78bfa');
       P.x = tx; P.y = ty; P.vx = 0; P.vy = 0;
       P.iframe = Math.max(P.iframe, 0.7);
@@ -25025,8 +25083,8 @@ const PYRO_AFTER = 1.2;    // the column standing and the floor cooling, after i
 const odPyros = [];
 
 function odPyroStart() {
-  const p = { x: clamp(mouse.wx, arena.x0 + 20, arena.x1 - 20),
-              y: clamp(mouse.wy, arena.y0 + 20, arena.y1 - 20),
+  const p = { x: clamp(P.in.ax, arena.x0 + 20, arena.x1 - 20),
+              y: clamp(P.in.ay, arena.y0 + 20, arena.y1 - 20),
               r: PYRO_R, t: 0, up: false, hit: 0, seed: rnd(1000) };
   odPyros.push(p);
   odPyroCastFx(p);
@@ -25201,7 +25259,7 @@ function odStrikeStart() {
   if (P.odScorch || P.odStrike || P.diaryT > 0) return false;
   // any beam still standing goes out: it does not fire from up there
   P.laserT = 0; P.laserSegs.length = 0; P.twinSegs.length = 0; P.laserEnv = 0;
-  P.odStrike = { ph: 'wings', t: 0, T: 0, mx: 0, my: 0, strokes: [], beam: null, down: mouse.down };
+  P.odStrike = { ph: 'wings', t: 0, T: 0, mx: 0, my: 0, strokes: [], beam: null, down: P.in.lmb };
   odStrikeLiftFx(P.odStrike);
   return true;
 }
@@ -25218,12 +25276,12 @@ function odStrikeTick(st, dt) {
     if (!st.snapped && st.t >= STRIKE_CUT_OUT) { st.snapped = true; odStrikeSnap(); }
     if (st.t >= STRIKE_CUT_OUT + STRIKE_CUT_HOLD + STRIKE_CUT_IN) {
       if (st.ph === 'cutDown') odStrikeGo(st, 'land');
-      else { odStrikeGo(st, 'aim'); st.down = mouse.down; odStrikeAimFx(st); }
+      else { odStrikeGo(st, 'aim'); st.down = P.in.lmb; odStrikeAimFx(st); }
     }
   } else if (st.ph === 'aim') {
     // a fresh click, not a button already held from firing the lance
-    const click = mouse.down && !st.down;
-    st.down = mouse.down;
+    const click = P.in.lmb && !st.down;
+    st.down = P.in.lmb;
     if (click || st.t >= STRIKE_AIM_MAX) odStrikeMark(st);
   } else if (st.ph === 'tell') {
     if (st.t >= STRIKE_TELL) {
@@ -25248,8 +25306,8 @@ function odStrikeTick(st, dt) {
 }
 
 function odStrikeMark(st) {
-  st.mx = clamp(mouse.wx, arena.x0 + 1, arena.x1 - 1);
-  st.my = clamp(mouse.wy, arena.y0 + 1, arena.y1 - 1);
+  st.mx = clamp(P.in.ax, arena.x0 + 1, arena.x1 - 1);
+  st.my = clamp(P.in.ay, arena.y0 + 1, arena.y1 - 1);
   st.strokes = odStrikeX(st.mx, st.my).map(s => Object.assign(s, {
     ang: Math.atan2(s.y2 - s.y1, s.x2 - s.x1), len: len(s.x2 - s.x1, s.y2 - s.y1) }));
   odStrikeGo(st, 'tell');
@@ -25586,7 +25644,7 @@ function odFusionStart() {
   const more = FUSION_T - P.ventT;
   if (more > 0) { P.ventT += more; P.ventLen = (P.ventLen || OD_RUN_LEN) + more; }
   P.odFusion = { t: 0, life: FUSION_T, tick: 0, seed: rnd(1000) };
-  P.odStarHeld = mouse.down || !!keys['j']; P.odStarQ = false;
+  P.odStarHeld = P.in.trig; P.odStarQ = false;
   odFusionFx(P.odFusion);
   return true;
 }
@@ -28837,6 +28895,7 @@ function resetGame() {
      is the same run whatever was played before it, and on any machine. */
   eid = 0; hackSerial = 0; roninCleaveId = 0; roninSplitId = 0; odRingId = 0; hlHeldSeq = 0;
   shopkeepTake = 0; waveTimer = 0; spawnT = 0; ambientT = 3;
+  inputQueue.length = 0;
 }
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
@@ -28932,6 +28991,34 @@ function gameOver(quiet) {
   shake(1); Audio_.over();
 }
 
+/* The keys that act on the game. handleKey and the right button only queue
+   them (inputPress); they are played here, at the top of the step they land
+   on (inputStep), so in lockstep a press is part of the same step on both
+   machines. Each is weighed again here, against the game as it is now. */
+function playKey(k) {
+  if (k === 'parry') { bladeParry(); return; }        // the right button
+  if (k === 'q') { useBook(); return; }
+  /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
+     and ventFire() already refuses anything that is not holding a lance. */
+  if (k === 'f') { if (isBlade()) bladeParry(); else ventFire(); return; }
+  // the awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's and RONIN's
+  if (k === 'z' || k === 'x' || k === 'c') {
+    if (P.charId === 'hacker') suAbility(SU_KEYS.indexOf(k));
+    else if (P.charId === 'ember') odAbility(SU_KEYS.indexOf(k));
+    else if (P.charId === 'melee') roninAbility(SU_KEYS.indexOf(k));
+    return;
+  }
+  // THE VAGRANT: E over something on the floor is a look at it
+  if (k === 'e') { if (gearNear && !inHub) gearInspect(); return; }
+  /* V is the kit's fourth while it is on, and the ROOT key's room.clear() the
+     rest of the time, so a charge is never spent by reaching for the kit. */
+  if (k === 'v') {
+    if (P.charId === 'hacker' && suOn()) suAbility(3);
+    else if (P.charId === 'ember' && odKitOn() && OD_KIT[3]) odAbility(3);
+    else if (P.charId === 'melee' && roninOn() && RONIN_KIT[3]) roninAbility(3);
+    else useRootCmd();
+  }
+}
 function handleKey(k) {
   // volume lives on the slider now, so M is free for the way out
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
@@ -29081,21 +29168,19 @@ function handleKey(k) {
     return;
   }
   if (state === 'amalcut') return;         // it does not take input
-  if (k === 'q') { useBook(); return; }
+  if (k === 'q') { inputPress(k); return; }   // the keys that act are played on the next step: playKey
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
      and ventFire() already refuses anything that is not holding a lance. */
-  if (k === 'f') { if (isBlade()) bladeParry(); else ventFire(); return; }
+  if (k === 'f') { inputPress(k); return; }
   /* The awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's and RONIN's. Only in play,
      because paused X is the codex, and swallowing it here kept THE HACKER out
      of the codex for as long as it was paused. */
-  if (state === 'play' && (k === 'z' || k === 'x' || k === 'c')) {
-    if (P.charId === 'hacker') { suAbility(SU_KEYS.indexOf(k)); return; }
-    if (P.charId === 'ember')  { odAbility(SU_KEYS.indexOf(k)); return; }
-    if (P.charId === 'melee')  { roninAbility(SU_KEYS.indexOf(k)); return; }
+  if (state === 'play' && (k === 'z' || k === 'x' || k === 'c') && ['hacker', 'ember', 'melee'].includes(P.charId)) {
+    inputPress(k); return;
   }
   if (vigilKey(k)) return;               // ALL HALLOWS: the vigil's own keys first
   // THE VAGRANT: E over something on the floor is a look at it
-  if (k === 'e' && state === 'play' && gearNear && !inHub) { gearInspect(); return; }
+  if (k === 'e' && state === 'play' && gearNear && !inHub) { inputPress(k); return; }
   if (k === 'e' && inHub) {
     /* Every press goes to the room now. Deciding here that a press means
        "skip his line" whenever he was talking meant the last tutorial step —
@@ -29125,13 +29210,7 @@ function handleKey(k) {
   /* V is SUPERUSER's fourth while it is on, and the ROOT key's room.clear()
      the rest of the time — so a charge is never spent by reaching for ROOT. */
   /* And OVERDRIVE's fourth, once it has one. */
-  if (k === 'v') {
-    if (P.charId === 'hacker' && suOn()) suAbility(3);
-    else if (P.charId === 'ember' && odKitOn() && OD_KIT[3]) odAbility(3);
-    else if (P.charId === 'melee' && roninOn() && RONIN_KIT[3]) roninAbility(3);
-    else useRootCmd();
-    return;
-  }
+  if (k === 'v') { inputPress(k); return; }
   if (k === 't') { autoFire = !autoFire; Save.savePrefs(); }
 }
 function inRect(mx, my, r) { return mx > r.x && mx < r.x + r.w && my > r.y && my < r.y + r.h; }
@@ -29702,6 +29781,13 @@ function update(dt) {
 
   if (hitStop > 0) { hitStop -= dt; updateCamera(dt); return; }
 
+  /* The pilot's input for this step, and the keys it pressed since the last
+     (the input record). A press can open a screen (E on gear); then the step
+     stops there, as it did when the press landed between frames. */
+  const stateIn = state;
+  inputStep();
+  if (state !== stateIn) return;
+
   elapsed += dt;
   Audio_.update(clamp(enemies.length / 26 + wave / 22, 0, 1));
 
@@ -29853,16 +29939,8 @@ function updatePlayer(dt) {
                 rnd(3, 1.4), COL.player, rnd(0.6, 0.3), 0.94);
     return;
   }
-  let ix = 0, iy = 0;
-  if (keys['a'] || keys['arrowleft'])  ix -= 1;
-  if (keys['d'] || keys['arrowright']) ix += 1;
-  if (keys['w'] || keys['arrowup'])    iy -= 1;
-  if (keys['s'] || keys['arrowdown'])  iy += 1;
-  if (touchUI.move) {
-    const dx = touchUI.move.x - touchUI.move.ox, dy = touchUI.move.y - touchUI.move.oy;
-    const d = len(dx, dy);
-    if (d > 6) { const m = Math.min(1, d / 62) / d; ix = dx * m; iy = dy * m; }
-  }
+  const inp = P.in;                      // the input record: never the devices
+  let ix = inp.mx, iy = inp.my;
   /* The clash is a cutscene you play. You do not steer in it — the only
      input is the trigger, and feeding it is what walks you into the wall.
      Leaving WASD live let you stroll round the column it is about. */
@@ -29873,16 +29951,14 @@ function updatePlayer(dt) {
   if (il > 1) { ix /= il; iy /= il; }
 
   // aim
-  mouse.wx = (aimX() - W / 2 - cam.sx) / camZoom + cam.x;
-  mouse.wy = (aimY() - H / 2 - cam.sy) / camZoom + cam.y;
-  let firing = mouse.down || autoFire || keys['j'] || chalAuto();
+  let firing = inp.trig || inp.auto || chalAuto();
   if (haltFrozen()) firing = false;     // THE HALT: you may move or act, not both
   if (rrRaceOn() || rrOpening()) firing = false;
   if (vrDuelLock()) firing = false;       // the duel reads its own clicks
   if (inVigil) firing = false;           // nothing is shot down there
-  if (isTouch) {
-    if (touchUI.aim) {
-      const dx = touchUI.aim.x - touchUI.aim.ox, dy = touchUI.aim.y - touchUI.aim.oy;
+  if (inp.touch) {
+    if (inp.taim) {
+      const dx = inp.taim.dx, dy = inp.taim.dy;
       if (len(dx, dy) > 10) { P.ang = Math.atan2(dy, dx); firing = true; }
       else firing = true;
     } else {
@@ -29891,7 +29967,7 @@ function updatePlayer(dt) {
       if (t) { P.ang = angLerp(P.ang, Math.atan2(t.y - P.y, t.x - P.x), 0.2); firing = true; }
     }
   } else {
-    P.ang = Math.atan2(mouse.wy - P.y, mouse.wx - P.x);
+    P.ang = Math.atan2(inp.ay - P.y, inp.ax - P.x);
   }
   // SCORCHED EARTH holds the hull on the heading it was cast along (and in place: below)
   if (P.odScorch) P.ang = P.odScorch.ang;
@@ -29903,19 +29979,19 @@ function updatePlayer(dt) {
     P.dashRe += dt;
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = (keys[' '] || keys['shift']) && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !suCutIn() && !vrDuelLock();
+  const wantDash = inp.dash && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !suCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
   if (P.malware && wantDash && P.dashCh > 0 && P.dashT <= 0) {
-    keys[' '] = false; keys['shift'] = false;
+    inputDashTaken();
     P.dashCh--;
     burst(P.x, P.y, 16, P.malware.col, 240, 3, 0.4);
     malSurge(P.x, P.y, 120, P.malware.col, 0.45);
     malGlitch(P.x, P.y, 70, P.malware.col, 0.3);
     P.malware.f();
   } else if (wantDash && P.dashCh > 0 && P.dashT <= 0) {
-    keys[' '] = false; keys['shift'] = false;
+    inputDashTaken();
     P.dashCh--;
     P.dashT = 0.17; P.iframe = Math.max(P.iframe, 0.28);
     let dx = ix, dy = iy;
@@ -30047,10 +30123,10 @@ function updatePlayer(dt) {
          only with autofire on (T) — never just for holding the button (user).
          A click inside the cooldown is kept and thrown when it comes round;
          clicks while the IFRIT is changing are not. */
-      const down = firing && (mouse.down || !!keys['j']);
+      const down = firing && inp.trig;
       if (down && !P.odStarHeld && odFusionWhole()) P.odStarQ = true;
       P.odStarHeld = down;
-      const auto = firing && (autoFire || chalAuto());
+      const auto = firing && (inp.auto || chalAuto());
       if ((P.odStarQ || auto) && P.fireT <= 0 && odFusionWhole() && !P.odScorch && !P.odStrike) {
         P.fireT = 1 / (STAR_RATE * (P.fireRate / (P.rate0 || 4.6)) * rateMul);
         P.odStarQ = false;
@@ -33332,7 +33408,7 @@ function riteClash(a, dt) {
   /* ---- the feed. Any fire input participates: a press is an impulse, a hold
      (or autofire, which a lot of profiles run) sits at the floor, and mashing
      stacks above it. Nobody is locked out of the act and nobody gets it free. */
-  const firingNow = mouse.down || autoFire || keys['j'] || chalAuto();
+  const firingNow = P.in.trig || P.in.auto || chalAuto();
   c.feed = Math.max(0, c.feed - dt * 1.15);
   if (firingNow && !c.wasFire) c.feed = clamp(c.feed + 0.34, 0, 1.35);
   if (firingNow) c.feed = Math.max(c.feed, CLASH_FEED_FLR);
@@ -36712,7 +36788,7 @@ function updatePickups(dt) {
        screen, which has no E, still opens the screen on contact — and only the
        pilot that wears gear can pick it up at all. */
     if (d0.kind === 'gear' && d0.gear &&
-        (dt0 !== P || (!isTouch && P.gear && P.gear[d0.gear.slot]))) {
+        (dt0 !== P || (!P.in.touch && P.gear && P.gear[d0.gear.slot]))) {
       if (dt0 === P && d < P.r + d0.r + 18 && d < gearNearD) { gearNear = d0; gearNearD = d; }
       if (d0.life <= 0) drops.splice(i, 1);
       continue;
@@ -41108,15 +41184,7 @@ function hlTeleTick(dt) {
 }
 /* the way a dash pressed this frame would go: the stick, or the nose */
 function hlDashDir() {
-  let ix = 0, iy = 0;
-  if (keys['a'] || keys['arrowleft'])  ix -= 1;
-  if (keys['d'] || keys['arrowright']) ix += 1;
-  if (keys['w'] || keys['arrowup'])    iy -= 1;
-  if (keys['s'] || keys['arrowdown'])  iy += 1;
-  if (touchUI.move) {
-    const dx = touchUI.move.x - touchUI.move.ox, dy = touchUI.move.y - touchUI.move.oy;
-    if (len(dx, dy) > 6) { ix = dx; iy = dy; }
-  }
+  const ix = P.in.mx, iy = P.in.my;      // the input record (its stick is scaled, not turned)
   return ix || iy ? Math.atan2(iy, ix) : P.ang;
 }
 function hlSegDist(ax, ay, bx, by, px, py) {
@@ -59404,8 +59472,8 @@ function onPlayerShot(mx, my, ang) {
     P.shotN = (P.shotN || 0) + 1;
     if (P.shotN >= 10) {
       P.shotN = 0;
-      const tx = clamp(mouse.wx, arena.x0 + 40, arena.x1 - 40);
-      const ty = clamp(mouse.wy, arena.y0 + 40, arena.y1 - 40);
+      const tx = clamp(P.in.ax, arena.x0 + 40, arena.x1 - 40);
+      const ty = clamp(P.in.ay, arena.y0 + 40, arena.y1 - 40);
       mortars.push({ x: tx, y: ty, r: 96 + 22 * P.tick10, t: 0.9, max: 0.9,
                      dmg: (P.dmg * 4 + 22) * P.tick10, col: COL.crit, mine: true });
       Audio_.tone(150, 0.18, 'triangle', 0.09, 70);
