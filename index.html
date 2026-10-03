@@ -103,6 +103,8 @@ function seedSim(seed) { simSeed = seed >>> 0; simRngState = simSeed; }
    reads this, fixed for the run, and never W and H or the camera. */
 const runView = { w: 1280, h: 720 };
 let runViewNext = null;
+// the pilot, and whether it is awake: handed in by a co-op header, else this machine's own
+let runCharNext = null, runAwakeNext = null;
 /* Game time, counted (step 3). simTick is the step the run is on. simAfter(s, f)
    runs f s seconds of play later on the step clock, not the wall clock
    (setTimeout), so a delayed game over or a rite taking you lands on the same
@@ -1123,7 +1125,7 @@ addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
   mouse.down = false;
-  if (state === 'play') { state = 'pause'; }
+  if (state === 'play' && !LS.on) { state = 'pause'; }
 });
 
 cv.addEventListener('mousemove', e => {
@@ -1500,10 +1502,10 @@ const bladeTextOf = u => (P && P.weapon === 'blade' && BLADE_TEXT[u.id]) || null
 const upName = u => { const a = lanceText(u) || bladeTextOf(u); return (a && a.n) || u.n; };
 const upDesc = u => { const a = lanceText(u) || bladeTextOf(u); return (a && a.d) || u.d; };
 
-function applyChar(i) {
+function applyChar(i, force) {
   selectedChar = clamp(i, 0, CHARS.length - 1);
-  // a profile carrying a pilot it has not earned falls back to the first
-  if (charLocked(selectedChar)) selectedChar = 0;
+  // a profile carrying a pilot it has not earned falls back to the first (unless a co-op host is flying it)
+  if (!force && charLocked(selectedChar)) selectedChar = 0;
   const C = CHAR();
   // a skinned hull overrides the pilot's own colours, and nothing further
   // down ever learns the difference
@@ -1519,7 +1521,7 @@ function newPlayer() {
     in: newInput(),                      // what it is told to do: see the input record
     hacker: C.id === 'hacker' ? 1 : 0,   // what it kills, it keeps
     fly: C.id === 'ember' ? 1 : 0,       // EMBER holds its lance inside the crowd
-    awake: isAwake(C.id) ? 1 : 0,        // been through its rite
+    awake: (runAwakeNext != null ? runAwakeNext : isAwake(C.id)) ? 1 : 0,   // been through its rite (or the co-op host's was)
     /* The overdrive meter. It was called heat, which collided head-on with
        the reward mechanic of the same name further down this same literal —
        a duplicate key, so one P.heat served both, and charging the vent to 40
@@ -4328,7 +4330,7 @@ function reviveOrDie() {
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
     if (coopCanDown()) { hostDown(); return; }
-    if (mpHost() && Wing.live && Wing.down) banner('BOTH DOWN', '#f87171', 2.6);
+    if (mpSim() && Wing.live && Wing.down) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
 }
 
@@ -28892,8 +28894,9 @@ function resetGame() {
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
-  applyChar(selectedChar);
+  applyChar(runCharNext != null ? runCharNext : selectedChar, runCharNext != null);
   P = newPlayer();
+  runCharNext = null; runAwakeNext = null;
   gearStart();                           // returns at once for the other three
   enemies = []; bullets = []; ebullets = []; gems = []; drops = [];
   parts = []; floats = []; arcs = []; rings = []; corpses = [];
@@ -29182,6 +29185,7 @@ function handleKey(k) {
     resetGame(); state = 'play';
     return;
   }
+  if (LS.on && MP.role === 'guest' && state !== 'play' && state !== 'dead') return;   // menus: the host's, for now
   if (state === 'levelup') {
     const i = ['1', '2', '3', '4', '5'].indexOf(k);
     if (i >= 0 && offers[i]) chooseOffer(i);
@@ -29266,8 +29270,8 @@ function handleKey(k) {
     if (k === 'm') { fxMeasureStart(); return; }
     return;
   }
-  if (k === 'g') { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
-  if (k === 'p' || k === 'escape') state = state === 'pause' ? 'play' : 'pause';
+  if (k === 'g' && !LS.on) { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
+  if ((k === 'p' || k === 'escape') && !LS.on) state = state === 'pause' ? 'play' : 'pause';   // lockstep: a shared game, not one side's to pause
   if (choice) { if (k === 'y') choiceAnswer(false);
                 else if (k === 'n') choiceAnswer(true); return; }
   /* V is SUPERUSER's fourth while it is on, and the ROOT key's room.clear()
@@ -29394,6 +29398,7 @@ function handleClick() {
     state = 'play'; return;
   }
   if (uiArm > 0) return;                 // overlay just opened — swallow it
+  if (LS.on && MP.role === 'guest' && state !== 'play' && state !== 'dead') return;   // menus: the host's, for now
   if (state === 'levelup') {
     const i = offerIndexAt(mouse.x, mouse.y);
     if (i >= 0) chooseOffer(i);
@@ -29734,7 +29739,8 @@ function frame(now) {
     // freeplay can scale time; the step itself stays fixed so physics is intact
     const reps = freeRun && freeSpd > 1 ? Math.round(freeSpd) : 1;
     const slow = freeRun && freeSpd < 1 ? freeSpd : 1;
-    while (acc >= STEP && guard++ < STEPS_PER_FRAME) {
+    if (LS.on) lsFrame(dt);                // co-op in lockstep: see LOCKSTEP CO-OP
+    else while (acc >= STEP && guard++ < STEPS_PER_FRAME) {
       for (let k = 0; k < reps; k++) update(STEP * slow);
       acc -= STEP;
     }
@@ -29810,7 +29816,7 @@ function update(dt) {
   /* A guest simulates nothing: it eases the host's picture forward, predicts
      its own hull and draws. This sits above the pause check on purpose — a
      paused guest still has to keep receiving, or the host runs away from it. */
-  if (mpGuest()) { mpGuestUpdate(dt); return; }
+  if (mpGuest() && !LS.on) { mpGuestUpdate(dt); return; }
   if (state === 'pause') return;
   if (state === 'play') simTimersTick(dt);   // the game's own delays: see simAfter
   /* Ahead of the wave ticker on purpose: it clears the floor, and if the
@@ -57281,7 +57287,7 @@ async function netJoin(code) {
 /* One preallocated buffer per direction. Snapshots go out thirty times a
    second for the length of a run; allocating a fresh one each time would hand
    the collector a megabyte a minute to sweep up mid-fight. */
-const MSG = { HELLO: 1, INPUT: 2, SNAP: 3, EVT: 4, PING: 5, PONG: 6 };
+const MSG = { HELLO: 1, INPUT: 2, SNAP: 3, EVT: 4, PING: 5, PONG: 6, LSIN: 7 };   // LSIN: lockstep input records
 
 const _nb = new ArrayBuffer(192 * 1024);
 const _nv = new DataView(_nb);
@@ -57337,6 +57343,7 @@ function netOnMessage(data) {
   const type = r8();
   if (type === MSG.SNAP)       mpReadSnapshot();
   else if (type === MSG.INPUT) mpReadInput();
+  else if (type === MSG.LSIN)  lsRecv();
   else if (type === MSG.PING) {
     const stamp = r32();
     wSeek(0); w8(MSG.PONG); w32(stamp);
@@ -57439,6 +57446,8 @@ const mpGuest = () => MP.on && MP.role === 'guest';
 /* Who the camera is watching. Your own ship, unless it is on the floor and
    your partner is not — then theirs, because that is where the run is. */
 function mpCamSubject() {
+  // lockstep: the guest's own ship is the wingman
+  if (LS.on && MP.role === 'guest') return Wing.live && (!Wing.down || P.down) ? Wing : P;
   if (!MP.on || !P.down) return P;
   if (MP.role === 'host') return (Wing.live && !Wing.down) ? Wing : P;
   return MP.hostShip.seen ? MP.hostShip : P;
@@ -57487,7 +57496,7 @@ function wingSpawn() {
 /* The wingman, if it is standing. A downed pilot stops pulling the room onto
    itself: nothing aims at it, nothing shoots it, and no pickup flies to it. */
 function mpPilots() {
-  if (!mpHost() || !Wing.live || Wing.down) return null;
+  if (!mpSim() || !Wing.live || Wing.down) return null;
   return Wing;
 }
 function mpAim(x, y) {
@@ -57501,7 +57510,7 @@ function mpAim(x, y) {
 
 /* Whether a pilot can be put down rather than killed: somebody else has to
    still be standing to hold the room and clear the wave. */
-const coopCanDown = () => mpHost() && Wing.live && !Wing.down && !P.down;
+const coopCanDown = () => mpSim() && Wing.live && !Wing.down && !P.down;
 
 /* The host's own ship, on the floor. The simulation does not pause, move or
    change hands — it carries on around the wreck. */
@@ -57534,7 +57543,7 @@ function hostRevive() {
    Called from the wave-clear branch, so a boss wave counts too: go down in a
    boss fight and you are out of it until your partner finishes the boss. */
 function coopReviveWave() {
-  if (!mpHost()) return;
+  if (!mpSim()) return;
   const wasP = P.down, wasW = Wing.live && Wing.down;
   if (!wasP && !wasW) return;
   if (wasP) hostRevive();
@@ -57624,6 +57633,7 @@ function wingUpdate(dt) {
   }
   if (IN.dash && Wing.dashCh > 0 && Wing.dashT <= 0) {
     IN.dash = false;                       // edge-triggered: one press, one dash
+    if (LS.on && MP.role === 'guest') { keys[' '] = false; keys['shift'] = false; }   // it is this machine's key that was spent
     Wing.dashCh--;
     Wing.dashT = 0.17; Wing.iframe = Math.max(Wing.iframe, 0.28);
     const il = len(IN.mx, IN.my);
@@ -57860,7 +57870,8 @@ function mpPushBuild() {
 /* The wingman only flies while the room is live: an upgrade screen or a shop
    holds the world still for both pilots, exactly as it does solo. */
 function mpHostTick(dt) {
-  if (!mpHost()) return;
+  if (!mpSim()) return;
+  if (LS.on) lsWingInput();               // the wingman flies the guest's record for this step
   wingUpdate(dt);
 }
 
@@ -57869,7 +57880,7 @@ function mpHostTick(dt) {
    are the ones where the host has stopped simulating — a level-up, a shop, a
    pause. Silence there would read to the guest as a dropped connection. */
 function mpHostNet(dt) {
-  if (!mpHost()) return;
+  if (!mpHost() || LS.on) return;        // lockstep sends no pictures: both machines are running it
 
   const sig = mpBuildSig();
   if (sig !== MP.buildSig) mpPushBuild();
@@ -57897,6 +57908,7 @@ function mpStartRun() {
   if (!netLive() || Net.role !== 'host') return;
   MP.on = true; MP.role = 'host';
   Wing.charIdx = MP.peerChar;
+  if (MP.ls) { lsHostStart(); return; }   // see LOCKSTEP CO-OP
   resetGame();
   wingSpawn();
   state = 'play';
@@ -57910,7 +57922,7 @@ function mpStartRun() {
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar,
+  netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0,
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -57926,6 +57938,16 @@ function mpOnEvent(m) {
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
       MP.ready = true;
+      MP.ls = LS_WANT && !!m.ls;          // lockstep, only if both ask for it
+      break;
+
+    case 'lsrun':
+      // guest: the host has started a lockstep run; the header is the whole of it
+      if (Net.role !== 'guest') break;
+      MP.on = true; MP.role = 'guest';
+      MP.peerChar = clamp(m.host | 0, 0, CHARS.length - 1);
+      MP.peerName = String(m.name || '').slice(0, 14) || 'HOST';
+      lsGuestStart(m);
       break;
 
     case 'run':
@@ -57975,6 +57997,8 @@ function mpOnEvent(m) {
    forty-minute run because someone's laptop slept is never the right trade —
    and the guest, which has nothing to simulate, is put back on the menu. */
 function mpPeerGone() {
+  if (LS.on) lsLeave();
+  MP.ls = false;
   if (MP.role === 'host') {
     if (Wing.live) {
       explode(Wing.x, Wing.y, 140, 0, WING_COL);
@@ -58000,12 +58024,251 @@ function mpPeerGone() {
 /* Leaving co-op from either side, deliberately. */
 function mpQuit() {
   const wasHost = MP.role === 'host';
+  if (LS.on) lsLeave();
+  MP.ls = false;
   if (netLive()) netEvent({ t: 'bye' });
   netHangUp(true);
   Net.phase = 'off'; Net.note = '';
   MP.on = false; MP.ready = false; MP.role = null;
   Wing.live = false;
   if (!wasHost && state !== 'menu') { state = 'menu'; }
+}
+
+/* ===========================================================================
+   LOCKSTEP CO-OP (2 Oct 2026: the seeded rework, Phase 2 step 1)
+   Both machines run the whole game. The host hands the guest the run's
+   header once (the seed, the view, the run's settings, both pilots and the
+   input delay); after that the only traffic is input. Each machine samples
+   its own pilot's input for the step LS.delay ahead of the one it is about
+   to play, sends it (again and again until the partner says it has it), and
+   plays a step only when it holds both pilots' input for it. Same seed and
+   same inputs make the same game, step for step: scripts/determinism.mjs
+   holds the game to that, and scripts/lockstep.mjs holds two of them to it
+   over a lossy, laggy link.
+
+   The host's pilot is P on both machines; the guest's is the wingman, a
+   plain gun, until each gets its full pilot (the plan's Phase 3). Menus are
+   still the host's alone until they travel as input (step 2), so this sits
+   behind a switch: both players open the game with ?lockstep=1, and the
+   picture stream above stays the default until lockstep has proven itself.
+   ========================================================================= */
+const LS_WANT = (() => { try { return /[?&]lockstep=1\b/.test(location.search); } catch (e) { return false; } })();
+const LS_SEND_MAX = 32;               // input records in one packet, at most
+const LS_RESEND = 0.05;               // while waiting, our inputs go out again this often
+/* Steps of input delay: three is 50 ms, enough on one network; the host adds
+   half its ping. Capped below ten, because a dash held down is spent only when
+   it lands, and inputs already sampled behind it must still fall inside the
+   dash's own 0.17 s or a second dash would follow the first. */
+const LS_DELAY_MIN = 3, LS_DELAY_MAX = 8;
+const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e'];   // the keys that act, as they travel
+const LS = {
+  on: false, run: 0, tick: 0, delay: LS_DELAY_MIN, acc: 0,
+  mine: new Map(), theirs: new Map(),   // step → input record
+  hi: -1,                               // the last step our own input has been sampled for
+  peerNeed: 0,                          // the first step the partner still needs from us
+  waitT: 0, resendT: 0,
+  cur: null,                            // the step being played: { host, wing }
+  source: null,                         // where our own input comes from: the devices, or a test
+  after: null                           // and a test's hook, run after every step
+};
+// this machine runs the co-op world: the host always, the guest when in lockstep
+const mpSim = () => MP.on && (MP.role === 'host' || LS.on);
+
+/* An input record on the wire, about sixteen bytes: movement and the aim
+   point, the held buttons, the touch stick when there is one, and the keys
+   that act. Our own record goes through the same encoding before we play it
+   (lsCanon), so the two machines play exactly the same numbers. */
+function lsWrite(r) {
+  wI(Math.round(r.mx * 1000)); wI(Math.round(r.my * 1000));
+  wPos(r.ax); wPos(r.ay);
+  w8((r.trig ? 1 : 0) | (r.lmb ? 2 : 0) | (r.auto ? 4 : 0) | (r.dash ? 8 : 0) | (r.touch ? 16 : 0) | (r.taim ? 32 : 0));
+  if (r.taim) { wI(Math.round(r.taim.dx)); wI(Math.round(r.taim.dy)); }
+  const p = (r.press || []).map(k => LS_KEYS.indexOf(k)).filter(i => i >= 0);
+  w8(p.length); for (const i of p) w8(i);
+}
+function lsRead() {
+  const r = newInput();
+  r.mx = rI() / 1000; r.my = rI() / 1000;
+  r.ax = rPos(); r.ay = rPos();
+  const b = r8();
+  r.trig = !!(b & 1); r.lmb = !!(b & 2); r.auto = !!(b & 4); r.dash = !!(b & 8); r.touch = !!(b & 16);
+  r.taim = b & 32 ? { dx: rI(), dy: rI() } : null;
+  const n = r8();
+  r.press = [];
+  for (let i = 0; i < n; i++) { const k = LS_KEYS[r8()]; if (k) r.press.push(k); }
+  r.local = false;
+  return r;
+}
+function lsCanon(rec, local) {
+  wSeek(0); lsWrite(rec);
+  rOpen(wOut());
+  const r = lsRead(); r.local = !!local;
+  return r;
+}
+
+function lsBegin(run, delay) {
+  LS.on = true; LS.run = run; LS.tick = 0; LS.delay = delay; LS.acc = 0;
+  LS.mine.clear(); LS.theirs.clear();
+  for (let s = 0; s < delay; s++) {              // the first steps: nobody has pressed anything yet
+    LS.mine.set(s, lsCanon(newInput(), true));
+    LS.theirs.set(s, lsCanon(newInput(), false));
+  }
+  LS.hi = delay - 1; LS.peerNeed = 0;
+  LS.waitT = 0; LS.resendT = 0; LS.cur = null;
+  inputQueue.length = 0;
+  inputSource = lsHostInput;
+}
+function lsEnd() {
+  LS.on = false; LS.cur = null;
+  LS.mine.clear(); LS.theirs.clear();
+  inputSource = inputSample;
+  MP.stalled = false;
+}
+
+// our own input for the step LS.delay ahead, sampled once, and sent
+function lsSample() {
+  const s = LS.tick + LS.delay;
+  if (LS.hi >= s) return;
+  for (let k = LS.hi + 1; k <= s; k++) {
+    const rec = newInput();
+    (LS.source || inputSample)(rec);
+    LS.mine.set(k, lsCanon(rec, true));
+  }
+  LS.hi = s;
+  lsSend();
+}
+/* What we send: from the first step the partner still needs, up to the last
+   we have, so a lost packet is covered by the next one and a long gap by the
+   partner telling us where it got to. */
+function lsSend() {
+  if (!netLive()) return;
+  let first = Math.max(LS.peerNeed, LS.hi - 63);
+  while (first <= LS.hi && !LS.mine.has(first)) first++;   // only what we hold: a blank in its place would be a lie
+  let last = first;
+  while (last < LS.hi && last - first + 1 < LS_SEND_MAX && LS.mine.has(last + 1)) last++;
+  if (first > LS.hi) return;
+  wSeek(0);
+  w8(MSG.LSIN); w16(LS.run); w32(lsNeed()); w32(first); w8(last - first + 1);
+  for (let s = first; s <= last; s++) lsWrite(LS.mine.get(s));
+  netSend(wOut(), false);
+  LS.resendT = LS_RESEND;
+}
+function lsRecv() {
+  const run = r16(), need = r32(), first = r32(), n = r8();
+  if (!LS.on || run !== LS.run) return;          // a packet from another run, or before ours began
+  if (need > LS.peerNeed) {
+    LS.peerNeed = need;
+    // ours can go once both machines are past it: the partner may be ahead of us, and we still play these
+    for (const k of LS.mine.keys()) if (k < need && k < LS.tick) LS.mine.delete(k);
+  }
+  for (let i = 0; i < n; i++) {
+    const s = first + i, rec = lsRead();
+    if (s >= LS.tick && s <= LS.tick + 256 && !LS.theirs.has(s)) LS.theirs.set(s, rec);
+  }
+}
+const lsReady = () => LS.mine.has(LS.tick) && LS.theirs.has(LS.tick);
+// the first step we have nothing from the partner for: all it need send us, from there on
+function lsNeed() { let s = LS.tick; while (LS.theirs.has(s)) s++; return s; }
+function lsStep() {
+  const t = LS.tick, me = LS.mine.get(t), them = LS.theirs.get(t);
+  LS.cur = MP.role === 'host' ? { host: me, wing: them } : { host: them, wing: me };
+  update(STEP);
+  LS.theirs.delete(t);
+  if (t < LS.peerNeed) LS.mine.delete(t);    // the partner has it, and now so have we
+  LS.tick++;
+  if (LS.after) LS.after();               // a test's hook: the same moment on both machines
+}
+/* The frame, in lockstep: play the steps owed while both inputs are in hand,
+   and when the partner's are late, wait for them. Waiting long enough says so
+   on the screen (MP.stalled). */
+function lsFrame(dt) {
+  LS.acc = Math.min(LS.acc + dt, ACC_MAX);
+  let n = 0;
+  while (LS.on && LS.acc >= STEP && n < STEPS_PER_FRAME) {
+    lsSample();
+    if (!lsReady()) break;
+    lsStep();
+    LS.acc -= STEP; n++;
+  }
+  const waiting = LS.on && LS.acc >= STEP && !lsReady();
+  LS.waitT = waiting ? LS.waitT + dt : 0;
+  MP.stalled = LS.waitT > 0.3;
+  if (waiting && (LS.resendT -= dt) <= 0) lsSend();
+}
+
+// P plays the host's record, on both machines (the inputSource while lockstep runs)
+function lsHostInput(rec) {
+  const h = LS.cur && LS.cur.host;
+  if (!h) { Object.assign(rec, newInput()); return; }
+  rec.mx = h.mx; rec.my = h.my; rec.ax = h.ax; rec.ay = h.ay;
+  rec.trig = h.trig; rec.lmb = h.lmb; rec.auto = h.auto; rec.dash = h.dash;
+  rec.touch = h.touch; rec.taim = h.taim; rec.press = h.press.slice();
+  rec.local = MP.role === 'host';
+}
+// and the wingman the guest's, in the form wingUpdate reads
+function lsWingInput() {
+  const w = LS.cur && LS.cur.wing, IN = Wing.in;
+  if (!w) { IN.mx = IN.my = 0; IN.fire = false; IN.dash = false; return; }
+  IN.mx = w.mx; IN.my = w.my;
+  const il = len(IN.mx, IN.my);
+  if (il > 1) { IN.mx /= il; IN.my /= il; }
+  IN.fire = w.trig || w.auto;
+  IN.dash = w.dash;
+  if (w.touch) {
+    if (w.taim && len(w.taim.dx, w.taim.dy) > 10) { IN.ang = Math.atan2(w.taim.dy, w.taim.dx); IN.fire = true; }
+    else {
+      const t = nearestEnemy(Wing.x, Wing.y, 900);
+      if (t) IN.ang = angLerp(IN.ang, Math.atan2(t.y - Wing.y, t.x - Wing.x), 0.2);
+      IN.fire = !!(w.taim || t);
+    }
+  } else IN.ang = Math.atan2(w.ay - Wing.y, w.ax - Wing.x);
+}
+
+/* The run's settings, as the host took them, for the header. RUN's sets go
+   as arrays, in their order: THE KEEPER picks from the codex by position. */
+function runPack() {
+  const o = {};
+  for (const k of RUN_FLAGS) o[k] = RUN[k];
+  o.hlLive = !!RUN.hlLive; o.medals = (RUN.medals || []).slice(); o.chal = (RUN.chal || []).slice();
+  o.codex = {};
+  for (const k of ['e', 'u', 'm', 'b', 'z']) o.codex[k] = [...(RUN.codex ? RUN.codex[k] : [])];
+  return o;
+}
+// host: a lockstep run begins here, and the header tells the guest how
+function lsHostStart() {
+  const run = ((LS.run + 1) & 0xffff) || 1;
+  resetGame();                            // a fresh seed, this window's view, this save's settings
+  wingSpawn();
+  state = 'play';
+  MP.wasState = 'play'; MP.buildSig = '';
+  const delay = clamp(LS_DELAY_MIN + Math.ceil((Net.ping || 0) / 2 / (STEP * 1000)), LS_DELAY_MIN, LS_DELAY_MAX);
+  lsBegin(run, delay);
+  netEvent({ t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
+             awake: P.awake ? 1 : 0, host: selectedChar, wing: Wing.charIdx, delay,
+             name: Save.profile.name || '' });
+  banner('CO-OP ENGAGED', WING_COL, 2.0);
+}
+// guest: the same run, from the header
+function lsGuestStart(h) {
+  if (MP.myChar == null) MP.myChar = selectedChar;
+  const v = h.view || {};
+  runSeedNext = (h.seed >>> 0);
+  runViewNext = { w: +v.w || 1280, h: +v.h || 720 };
+  runFlagsNext = h.flags && typeof h.flags === 'object' ? h.flags : {};
+  runCharNext = clamp(h.host | 0, 0, CHARS.length - 1);   // the host's pilot is P here too, earned here or not
+  runAwakeNext = !!h.awake;
+  resetGame();
+  Wing.charIdx = clamp(h.wing | 0, 0, CHARS.length - 1);
+  wingSpawn();
+  state = 'play';
+  MP.hostState = 'play'; MP.overStats = null;
+  lsBegin((h.run | 0) & 0xffff, clamp(h.delay | 0, LS_DELAY_MIN, LS_DELAY_MAX));
+  banner('CO-OP ENGAGED', WING_COL, 2.0);
+}
+// leaving: the guest gets its own pilot back
+function lsLeave() {
+  lsEnd();
+  if (MP.myChar != null) { applyChar(MP.myChar); MP.myChar = null; }
 }
 
 /* ===========================================================================
@@ -58455,10 +58718,10 @@ function mpDrawOther(o, charIdx, col, label, hp, maxHp, down) {
 // Called from render(): whichever ship is not the one you are flying.
 function mpDrawCoopShip() {
   if (!MP.on) return;
-  if (MP.role === 'host') {
+  if (MP.role === 'host' || LS.on) {
     if (!Wing.live) return;
     mpDrawOther(Wing, Wing.charIdx, (CHARS[Wing.charIdx] || CHARS[0]).col,
-                MP.peerName || 'WINGMAN', Wing.hp, Wing.maxHp, Wing.down);
+                MP.role === 'host' ? (MP.peerName || 'WINGMAN') : 'YOU', Wing.hp, Wing.maxHp, Wing.down);
   } else {
     const hs = MP.hostShip;
     if (!hs.seen) return;
@@ -58483,9 +58746,9 @@ function mpDrawHud() {
     return;
   }
 
-  const partnerHp = MP.role === 'host' ? Wing.hp : MP.hostShip.hp;
-  const partnerMax = MP.role === 'host' ? Wing.maxHp : MP.hostShip.maxHp;
-  const down = MP.role === 'host' ? Wing.down : !!MP.hostShip.down;
+  const partnerHp = MP.role === 'host' ? Wing.hp : LS.on ? P.hp : MP.hostShip.hp;
+  const partnerMax = MP.role === 'host' ? Wing.maxHp : LS.on ? P.maxHp : MP.hostShip.maxHp;
+  const down = MP.role === 'host' ? Wing.down : LS.on ? !!P.down : !!MP.hostShip.down;
   const label = MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'HOST');
   const col = down ? '#f87171' : WING_COL;
 
@@ -58532,7 +58795,7 @@ function mpDrawHud() {
 
   // The guest cannot act while the host is in a shop or an upgrade screen, so
   // say what is happening rather than leaving them staring at a frozen room.
-  if (MP.role === 'guest' && MP.hostState !== 'play' && MP.hostState !== 'dead') {
+  if (MP.role === 'guest' && !LS.on && MP.hostState !== 'play' && MP.hostState !== 'dead') {
     const msg = MP.hostState === 'levelup' ? 'CHOOSING AN UPGRADE'
               : MP.hostState === 'shop'    ? 'IN THE SHOP'
               : MP.hostState === 'planet'  ? 'AT THE PLANETARIUM'
@@ -58559,12 +58822,13 @@ function mpDrawHud() {
     ctx.fillText('the room is holding — you can still move', W / 2, sy + 27);
     ctx.restore();
   }
-  if (MP.role === 'guest' && MP.stalled) {
+  if ((MP.role === 'guest' || LS.on) && MP.stalled) {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#fbbf24', 0.6 + Math.sin(uiTime * 5) * 0.35);
-    ctx.fillText('WAITING FOR THE HOST — ' + (Net.quiet || 0).toFixed(0) + 's',
+    ctx.fillText(LS.on ? 'WAITING FOR ' + (MP.peerName || 'YOUR PARTNER').toUpperCase() + ' — ' + LS.waitT.toFixed(0) + 's'
+                       : 'WAITING FOR THE HOST — ' + (Net.quiet || 0).toFixed(0) + 's',
                  W / 2, 74);
     ctx.restore();
   }
@@ -58740,7 +59004,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar,
+    netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0,
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 

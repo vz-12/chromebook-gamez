@@ -23,11 +23,10 @@
      node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name]
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
-import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { webcrypto } from 'node:crypto';
+import { loadGame, canvasCalls } from './lib/game-vm.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -35,110 +34,9 @@ const QUICK = args.includes('--quick');
 const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? new Set(args[i + 1].split(',')) : null; })();
 const IDX = args.find(a => a.endsWith('.html')) || path.join(here, '..', 'index.html');
 
-/* ------------------------------ the stub browser ------------------------------ */
-const noop = () => {};
-let ctxCalls = 0;                                // canvas calls made: proof the drawing really ran
-const CTX_DEFAULTS = {
-  globalAlpha: 1, lineWidth: 1, font: '10px sans-serif', fillStyle: '#000', strokeStyle: '#000',
-  globalCompositeOperation: 'source-over', textAlign: 'start', textBaseline: 'alphabetic',
-  letterSpacing: '0px', filter: 'none', imageSmoothingEnabled: true, shadowBlur: 0, shadowColor: '#000',
-  shadowOffsetX: 0, shadowOffsetY: 0, lineCap: 'butt', lineJoin: 'miter', miterLimit: 10, lineDashOffset: 0,
-  direction: 'ltr', fontKerning: 'auto',
-};
-const gradient = { addColorStop: noop };
-const matrix = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, invertSelf() { return this; }, inverse() { return this; },
-  multiply() { return this; }, translate() { return this; }, scale() { return this; }, rotate() { return this; },
-  transformPoint: p => ({ x: p.x, y: p.y }) });
-function makeCtx(canvas) {
-  const t = Object.assign({}, CTX_DEFAULTS);
-  const fns = {
-    measureText: s => ({ width: String(s).length * 7, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2,
-                         actualBoundingBoxLeft: 0, actualBoundingBoxRight: String(s).length * 7 }),
-    getImageData: (x, y, w, h) => { w = Math.max(1, w | 0); h = Math.max(1, h | 0); return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; },
-    createImageData: (w, h) => { if (typeof w === 'object') { h = w.height; w = w.width; } w = Math.max(1, w | 0); h = Math.max(1, h | 0); return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; },
-    createLinearGradient: () => gradient, createRadialGradient: () => gradient, createConicGradient: () => gradient,
-    createPattern: () => ({ setTransform: noop }),
-    getTransform: matrix, isPointInPath: () => false, isPointInStroke: () => false, getLineDash: () => [],
-  };
-  return new Proxy(t, {
-    get(o, k) { if (k === 'canvas') return canvas; if (k in fns) { ctxCalls++; return fns[k]; } if (k in o) return o[k]; ctxCalls++; return noop; },
-    set(o, k, v) { o[k] = v; return true; },
-  });
-}
-function makeEl(tag = 'div') {
-  const el = { tagName: String(tag).toUpperCase(), style: {}, children: [], dataset: {},
-    appendChild(c) { this.children.push(c); return c; }, removeChild: noop, remove: noop, insertBefore(c) { return c; },
-    setAttribute: noop, getAttribute: () => null, addEventListener: noop, removeEventListener: noop,
-    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
-    getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }),
-    focus: noop, blur: noop, click: noop, querySelector: () => null, querySelectorAll: () => [] };
-  return el;
-}
-function makeCanvas() {
-  const c = makeEl('canvas');
-  c.width = 300; c.height = 150;
-  const ctx = makeCtx(c);
-  c.getContext = () => ctx;
-  c.toDataURL = () => 'data:,';
-  c.toBlob = cb => cb && cb(null);
-  c.getBoundingClientRect = () => ({ left: 0, top: 0, right: c.width, bottom: c.height, width: c.width, height: c.height });
-  return c;
-}
-function makeStorage() {
-  const m = new Map();
-  return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: k => { m.delete(k); },
-           clear: () => m.clear(), key: i => [...m.keys()][i] ?? null, get length() { return m.size; } };
-}
-function makeWindow(w, h) {
-  const els = {};
-  const document = {
-    getElementById: id => els[id] || (els[id] = id === 'c' ? makeCanvas() : makeEl()),
-    createElement: tag => (String(tag).toLowerCase() === 'canvas' ? makeCanvas() : makeEl(tag)),
-    createElementNS: (ns, tag) => makeEl(tag), createTextNode: () => makeEl('#text'),
-    body: makeEl('body'), head: makeEl('head'), documentElement: makeEl('html'),
-    addEventListener: noop, removeEventListener: noop, querySelector: () => null, querySelectorAll: () => [],
-    fonts: { load: () => Promise.resolve([]), ready: Promise.resolve(), add: noop, check: () => true, forEach: noop },
-    hidden: false, visibilityState: 'visible', title: '', cookie: '', referrer: '',
-  };
-  class Img { constructor() { this.width = 0; this.height = 0; this.complete = false; } set src(v) { this._src = v; } get src() { return this._src; } addEventListener() {} decode() { return Promise.resolve(); } }
-  class FontFace { constructor(n) { this.family = n; } load() { return Promise.resolve(this); } }
-  class Obs { observe() {} unobserve() {} disconnect() {} }
-  const win = {
-    document, innerWidth: w, innerHeight: h, devicePixelRatio: 1, screen: { width: 1920, height: 1080 },
-    localStorage: makeStorage(), sessionStorage: makeStorage(),
-    navigator: { userAgent: 'node determinism', language: 'en-US', languages: ['en-US'], maxTouchPoints: 0, onLine: true,
-                 clipboard: { writeText: async () => {} }, getGamepads: () => [] },
-    location: { hostname: 'localhost', host: 'localhost', origin: 'http://localhost', href: 'http://localhost/',
-                protocol: 'http:', pathname: '/', search: '', hash: '', replace: noop, reload: noop, assign: noop },
-    history: { replaceState: noop, pushState: noop },
-    matchMedia: () => ({ matches: false, addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }),
-    getComputedStyle: () => ({ getPropertyValue: () => '' }),
-    addEventListener: noop, removeEventListener: noop, dispatchEvent: () => true,
-    requestAnimationFrame: () => 0, cancelAnimationFrame: noop,
-    requestIdleCallback: () => 0, cancelIdleCallback: noop,
-    setTimeout: () => 0, clearTimeout: noop, setInterval: () => 0, clearInterval: noop,   // nothing runs on the wall clock here
-    fetch: () => Promise.reject(new Error('offline')),
-    Image: Img, FontFace, ResizeObserver: Obs, IntersectionObserver: Obs, MutationObserver: Obs,
-    OffscreenCanvas: class { constructor(w2, h2) { const c = makeCanvas(); c.width = w2; c.height = h2; return c; } },
-    Event: class { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } preventDefault() {} stopPropagation() {} },
-    performance: globalThis.performance, crypto: webcrypto, console,
-    URL, URLSearchParams, Blob, TextEncoder, TextDecoder, atob, btoa, structuredClone, queueMicrotask,
-    Promise, Math, JSON, Date, Intl,
-  };
-  win.KeyboardEvent = win.MouseEvent = win.TouchEvent = win.Event;
-  win.window = win.self = win.globalThis = win.top = win.parent = win;
-  return win;
-}
-
 /* ------------------------------ load the game ------------------------------ */
-const html = fs.readFileSync(IDX, 'utf8').replace(/\r\n/g, '\n');
-const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-const game = scripts.reduce((a, b) => (b.length > a.length ? b : a));
-const win = makeWindow(1280, 720);
-const ctx = vm.createContext(win);
-const t0 = Date.now();
-vm.runInContext(game, ctx, { filename: 'index.html' });
-const loadMs = Date.now() - t0;
+const g = loadGame(IDX, { w: 1280, h: 720 });
+const { win, ctx, loadMs } = g;
 
 /* --------------------- the harness, inside the game's scope --------------------- */
 vm.runInContext(`(() => {
@@ -147,7 +45,7 @@ vm.runInContext(`(() => {
   Save.profile.gfxSeen = GFX_VER;
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;   // THE VAGRANT unlocked
   const SNAP = JSON.stringify(Save.profile), FX0 = JSON.stringify(FXO);
-  const restore = () => { const o = JSON.parse(SNAP); for (const k of Object.keys(Save.profile)) delete Save.profile[k]; Object.assign(Save.profile, o); };
+  const restore = () => { const o = JSON.parse(SNAP); for (const k of Object.keys(Save.profile)) delete Save.profile[k]; Object.assign(Save.profile, o); Codex.load(); };   // the codex too: runs write sightings into it
   const r = v => typeof v === 'number' ? (Number.isFinite(v) ? +v.toPrecision(12) : String(v)) : (v === undefined ? null : v);
   const pk = (o, ks) => ks.map(k => r(o[k]));
   // what the game is, at a moment: everything a desync would show up in
@@ -296,7 +194,7 @@ for (const sc of S) {
   const t = Date.now();
   let a, b, err = null;
   let drawn = 0;
-  try { a = play(sc, false); const c0 = ctxCalls; b = play(sc, true); drawn = ctxCalls - c0; } catch (e) { err = e; }
+  try { a = play(sc, false); const c0 = canvasCalls(); b = play(sc, true); drawn = canvasCalls() - c0; } catch (e) { err = e; }
   if (err) { failed++; console.log(`${pad(sc.name, 12)} ERROR  ${String(err && err.stack || err).split('\n').slice(0, 4).join(' | ')}`); continue; }
   const i = a.prints.findIndex((h, j) => h !== b.prints[j]);
   const ok = i < 0 && a.prints.length === b.prints.length && a.prints.length > 0;

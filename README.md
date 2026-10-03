@@ -191,6 +191,27 @@ The rules it holds the game to:
   starts. Progress goes through `runSet`. Each run zeroes its counters in
   `resetGame`.
 
+## The lockstep test
+
+```sh
+npm run test:lockstep                      # about a minute
+node scripts/lockstep.mjs --only bad --short
+```
+
+Lockstep co-op is behind a switch for now: both players open the game with
+`?lockstep=1`. Without it, co-op is the old host-streams-pictures mode.
+
+The test runs two copies of the game in one process, a host and a guest,
+joined by a fake link with latency, jitter, reordering and packet loss. Each
+copy has its own frame rate, window and save. A bot flies each pilot through
+its own machine's input. The machines trade only the run's header (seed,
+view, the host's `RUN`, both pilots, the input delay) and input records. Both
+fingerprint the game every second of game time, and the fingerprints must
+match. The four links are a LAN, an ordinary internet link, a bad one where
+the guest's machine also freezes for almost two seconds, and two players
+whose saves disagree. Both scripts load the game through
+`scripts/lib/game-vm.mjs`.
+
 ## Limits worth knowing (Workers Free plan)
 
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the
