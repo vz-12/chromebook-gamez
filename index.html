@@ -96,6 +96,26 @@ const simRndi = (a, b = 0) => Math.floor(simRnd(a, b));
 const simPick = arr => arr[(simRand() * arr.length) | 0];
 function seedSim(seed) { simSeed = seed >>> 0; simRngState = simSeed; }
 // a run's seed: one handed in (runSeedNext: the daily's, later a partner's), else a fresh one
+/* The view a run is laid out for (step 3): the window it started in, or one
+   handed in (runViewNext: later the partner's). A few things are sized to the
+   screen so that you can see them: where bodies spawn, ROOT's glyphs, the deep
+   nodes' ring, THE TRIBUNAL's tiers. Two machines' windows differ, so the game
+   reads this, fixed for the run, and never W and H or the camera. */
+const runView = { w: 1280, h: 720 };
+let runViewNext = null;
+/* Game time, counted (step 3). simTick is the step the run is on. simAfter(s, f)
+   runs f s seconds of play later on the step clock, not the wall clock
+   (setTimeout), so a delayed game over or a rite taking you lands on the same
+   step on every machine, and it waits through a pause instead of firing into it. */
+let simTick = 0;
+const simTimers = [];
+function simAfter(sec, f) { simTimers.push({ t: sec, f }); }
+function simTimersTick(dt) {
+  for (let i = 0; i < simTimers.length; i++) {
+    const tm = simTimers[i];
+    if ((tm.t -= dt) <= 0) { simTimers.splice(i--, 1); tm.f(); }
+  }
+}
 function freshSeed() {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) return crypto.getRandomValues(new Uint32Array(1))[0];
   return (rnd() * 4294967296) >>> 0;
@@ -2695,13 +2715,20 @@ function spawnEnemy(type, x, y, opts = {}) {
   return e;
 }
 
+/* Where the view is aimed for a pilot: the camera's own target (updateCamera),
+   worked out from the game alone (the pilot, its aim, the run's view), since
+   the camera itself is this machine's. */
+function viewCentre(S = P) {
+  return { x: runView.w > WORLD.w ? WORLD.w / 2 : clamp(S.x + Math.cos(S.ang) * 60, runView.w / 2 - 120, WORLD.w - runView.w / 2 + 120),
+           y: runView.h > WORLD.h ? WORLD.h / 2 : clamp(S.y + Math.sin(S.ang) * 60, runView.h / 2 - 120, WORLD.h - runView.h / 2 + 120) };
+}
 function spawnRing(type, opts) {
-  // spawn just outside the visible area, clamped into the arena
-  const view = Math.max(W, H) * 0.62 + 90;
+  // spawn just outside the run's view, around where it is aimed, clamped into the arena
+  const view = Math.max(runView.w, runView.h) * 0.62 + 90, c = viewCentre();
   for (let tries = 0; tries < 24; tries++) {
     const a = simRnd(TAU);
-    let x = cam.x + Math.cos(a) * view;
-    let y = cam.y + Math.sin(a) * view;
+    let x = c.x + Math.cos(a) * view;
+    let y = c.y + Math.sin(a) * view;
     x = clamp(x, 40, WORLD.w - 40); y = clamp(y, 40, WORLD.h - 40);
     if (len(x - P.x, y - P.y) > 260) {
       const e = spawnEnemy(type, x, y, opts);
@@ -4904,7 +4931,7 @@ function seedDeepNodes(def) {
      shape of is not a puzzle — you would be flying blind between junctions
      with no way to plan a route. Kept inside the walls either way. */
   const R = Math.min(Math.min(arena.x1 - arena.x0, arena.y1 - arena.y0) * 0.33,
-                     Math.min(W, H) * 0.34);
+                     Math.min(runView.w, runView.h) * 0.34);
 
   if (def.rule === 'leak') {
     const sinks = [];
@@ -5711,7 +5738,7 @@ function rootBeginCmd() {
        characters before the line finishes cannot ask you to shoot ones you
        have no way of knowing are there. */
     const spread = Math.min(Math.min(arena.x1 - arena.x0, arena.y1 - arena.y0) * 0.36,
-                            Math.min(W, H) * 0.38);
+                            Math.min(runView.w, runView.h) * 0.38);
     const a = rnd(TAU), rr = rnd(spread, 120);
     r.glyphs.push({
       ch: chars[i % chars.length], dead: false,
@@ -14491,7 +14518,7 @@ function choiceAnswer(openIt) {
     Save.profile.conformed = true;
     Save.writeLocal(); Save.flush();
     banner('YOU SIT DOWN', FOUND_COL, 5.0);
-    setTimeout(() => { if (state === 'play') gameOver(true); }, 3600);
+    simAfter(3.6, () => { if (state === 'play') gameOver(true); });
     return;
   }
   startTurning();          // he has something to say about it first
@@ -14633,9 +14660,9 @@ function startTribunal() {
      sat a clear screen-height above the throne, so the camera — which follows
      you, and you are down in front of it — never had them in frame at all.
      The whole point of the room is being able to see who is still his. */
-  const colW = clamp(W * 0.088, 56, 96);
-  const rowH2 = clamp(H * 0.072, 44, 62);
-  const ty = cy - clamp(H * 0.12, 70, 120);
+  const colW = clamp(runView.w * 0.088, 56, 96);      // the run's view, not this window: see runView
+  const rowH2 = clamp(runView.h * 0.072, 44, 62);
+  const ty = cy - clamp(runView.h * 0.12, 70, 120);
   const seats = [];
   for (let i = 0; i < TRI_SEATS; i++) {
     const row = Math.floor(i / 8), col = i % 8;
@@ -24209,7 +24236,7 @@ function riteTakesYou() {
   banner('IT IS TIME', COLD_COL, 3.2);
   drawFlashT = 0.5; shake(1.8);
   Audio_.boss();
-  setTimeout(() => { if (state === 'play') enterRite(id); }, 1400);
+  simAfter(1.4, () => { if (state === 'play') enterRite(id); });
 }
 
 /* The mid-run door is gone. It was a portal that turned up after a boss and
@@ -28829,6 +28856,8 @@ function promptName() {
 function resetGame() {
   seedSim(runSeedNext != null ? runSeedNext : freshSeed());   // the run's stream starts here
   runSeedNext = null;
+  { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
+  simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   applyChar(selectedChar);
   P = newPlayer();
   gearStart();                           // returns at once for the other three
@@ -29589,6 +29618,8 @@ function checkLevel() {
 /* ------------------------------- game loop -------------------------------- */
 let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
+const STEPS_PER_FRAME = 5;     // at most this many steps in one frame
+const ACC_MAX = 0.25;          // and at most this much owed: past it (a hidden tab, a long stall) the time is let go
 
 let frameErrors = 0;
 /* ================================== ADS ====================================
@@ -29669,11 +29700,14 @@ function frame(now) {
     // freeplay can scale time; the step itself stays fixed so physics is intact
     const reps = freeRun && freeSpd > 1 ? Math.round(freeSpd) : 1;
     const slow = freeRun && freeSpd < 1 ? freeSpd : 1;
-    while (acc >= STEP && guard++ < 5) {
+    while (acc >= STEP && guard++ < STEPS_PER_FRAME) {
       for (let k = 0; k < reps; k++) update(STEP * slow);
       acc -= STEP;
     }
-    if (acc > STEP) acc = 0;
+    /* Behind: the steps still owed are kept and caught up over the next frames
+       rather than thrown away, so the game keeps to the wall clock (and, in
+       lockstep, to the partner). Only a stall past ACC_MAX is let go. */
+    if (acc > ACC_MAX) acc = ACC_MAX;
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
@@ -29732,11 +29766,19 @@ function update(dt) {
     if (uiArm > 0) uiArm -= dt;
     return;
   }
+  /* The codex is read with the world stopped, from the menu or from pause. It
+     used to fall through to the play step below, and the run went on behind it. */
+  if (state === 'codex') {
+    if (codexFrom === 'menu') updateMenu(dt);
+    if (uiArm > 0) uiArm -= dt;
+    return;
+  }
   /* A guest simulates nothing: it eases the host's picture forward, predicts
      its own hull and draws. This sits above the pause check on purpose — a
      paused guest still has to keep receiving, or the host runs away from it. */
   if (mpGuest()) { mpGuestUpdate(dt); return; }
   if (state === 'pause') return;
+  if (state === 'play') simTimersTick(dt);   // the game's own delays: see simAfter
   /* Ahead of the wave ticker on purpose: it clears the floor, and if the
      spawner still ran the room would quietly refill behind the moment. */
   if (intrusion) { intrusionTick(dt); return; }
@@ -29787,6 +29829,7 @@ function update(dt) {
   const stateIn = state;
   inputStep();
   if (state !== stateIn) return;
+  simTick++;                            // the run's step: see simAfter
 
   elapsed += dt;
   Audio_.update(clamp(enemies.length / 26 + wave / 22, 0, 1));
@@ -60350,7 +60393,7 @@ function chalCheckGoal(key) {
     setTimeout(() => { if (state === 'play') banner('UNLOCKED   ' + rw.n, RARITY[rw.rar], 4.0); }, 2200);
 
   // the run is over the moment the named boss is down: that is the whole deal
-  setTimeout(() => { if (Chal.on === c && state === 'play') chalEnd(true); }, 3600);
+  simAfter(3.6, () => { if (Chal.on === c && state === 'play') chalEnd(true); });
 }
 
 function chalEnd(won) {
