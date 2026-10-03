@@ -9,14 +9,19 @@
      /api/leaderboard   the boards, seasons, awards, vigil and dev logins
      /api/room          the co-op signalling dead-drop
      /api/turn          short-lived credentials for Cloudflare's TURN relay (co-op)
+     /api/account       accounts: sign up, sign in, the cloud save (account.js;
+                        what a session is lives in auth.js, shared with PvP)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
-   whether or not anybody is playing (season-close.js); and every 15 minutes,
+   whether or not anybody is playing (season-close.js) and sweeping out
+   expired sign-ins (auth.js); and every 15 minutes,
    merging in the old Netlify leaderboard store (sync.js).
    ========================================================================= */
 import leaderboard from './leaderboard.js';
 import room from './room.js';
 import turn from './turn.js';
+import account from './account.js';
+import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
 import { syncFromNetlify } from './sync.js';
 
@@ -29,7 +34,8 @@ const json = (body, status) =>
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
   });
 
-const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn };
+const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
+                 '/api/account': account, '/api/account/save': account };
 
 export default {
   async fetch(req, env) {
@@ -52,6 +58,9 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(event.cron === SEASON_CLOSE_CRON ? seasonClose(env) : syncFromNetlify(env));
+    if (event.cron === SEASON_CLOSE_CRON) {
+      ctx.waitUntil(seasonClose(env));
+      ctx.waitUntil(pruneAuth(env).catch(e => console.error('pruneAuth', e && e.stack || e)));
+    } else ctx.waitUntil(syncFromNetlify(env));
   }
 };

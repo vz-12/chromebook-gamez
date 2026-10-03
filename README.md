@@ -8,8 +8,8 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | Piece | What it is |
 | --- | --- |
 | `index.html`, `check.html`, `privacy.html`, `hl-art.js` | The game, the deployment check page, the privacy page, and the ALL HALLOWS art. Served as static files. |
-| `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins) and `/api/room` (LAN co-op signalling). Never served to players. |
-| D1 database `voidrunner` | Where the leaderboard and co-op rooms are stored. |
+| `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins), `/api/room` (LAN co-op signalling), `/api/turn` (the co-op relay) and `/api/account` (accounts and cloud saves). Never served to players. |
+| D1 database `voidrunner` | Where the leaderboard, co-op rooms and accounts are stored. |
 | Cron trigger `5 0 * * *` | Closes a finished season at 00:05 UTC every day. |
 | Cron trigger `*/15 * * * *` | Merges in the old Netlify leaderboard store (see below). |
 | Custom domain `voidrunner.online` | Where players go. `www` redirects to it. |
@@ -110,6 +110,45 @@ Until both are set, `/api/turn` answers 503 and co-op falls back to the old
 direct connection (same network only). Each address can get 30 sets of
 credentials an hour. Relayed data is billed at $0.05/GB after the first
 1,000 GB a month.
+
+## Accounts
+
+Players can make an account in the game (ACCOUNT, in the menu's left column)
+with a name and a password. There is no email. The account keeps a copy of
+the save, so a player's progress follows them to any device they sign in on,
+and to PvP (see `PVP-PLAN.md`).
+
+- **The server** is `src/account.js` (`/api/account`, `/api/account/save`).
+  What a session is lives in `src/auth.js`, which PvP's Worker will share.
+- **The tables** (`accounts`, `sessions`, `account_pids`, `saves`,
+  `auth_gate`) are made in D1 on first use. There is nothing to set up.
+- **Passwords** are scrypt hashes. A forgotten password is reset with the
+  recovery code the game shows once at sign-up.
+- **Sessions** are an HttpOnly cookie, `vr_s`, set for the whole of
+  `voidrunner.online`. Expired sessions are swept by the daily cron.
+- **The save** is merged with the device's own save through `Save.merge`,
+  in both directions, so nothing earned on either side is lost.
+- **Not uploaded:** graphics settings, measured costs, volume, aim, the last
+  pilot picked, and the profile id stay on each device.
+- **Signing out** leaves the device a fresh guest save.
+- **Accounts are off in the beta build.**
+
+```sh
+npm run test:account                       # about 5 seconds
+```
+
+The test runs the real Worker against a real SQLite database (Node's own
+`node:sqlite`, through `scripts/lib/d1-sqlite.mjs`). It plays every way into
+and out of an account:
+
+- sign-up rules
+- wrong answers that all look the same
+- the rate limits
+- recovery
+- changing the password
+- the save's compare-and-swap
+- writes from another site being refused
+- deleting the account
 
 ## Dev accounts
 

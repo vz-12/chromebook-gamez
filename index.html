@@ -1115,6 +1115,8 @@ function inputDashTaken() {
 }
 
 addEventListener('keydown', e => {
+  // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
+  if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
   if (state === 'name') { nameKey(e); return; }
   // the password field wants the raw event too: any printable key, unfiltered
   if (state === 'devlogin') { devLogKey(e); return; }
@@ -28671,12 +28673,14 @@ const Save = {
     fxApply(Save.profile);
     autoFire = !!Save.profile.autofire;
     applyChar(Save.profile.charIdx || 0);
-    Save.connect();
+    // kept, so the account (ACCOUNTS) merges only once both local stores have
+    Save.connected = Save.connect();
     Board.load();
     // a sheet from the local clock now, replaced by the server's date the
     // moment the board answers — see the note on Daily.load
     Daily.use(dailyDayOf(), null);
     Daily.load();
+    Account.boot();          // signed in: the account's save is merged in, and kept up to date
     // first launch: ask who they are before anything else
     if (!Save.profile.name) { nameBuf = ''; state = 'name'; }
   },
@@ -28704,6 +28708,7 @@ const Save = {
   },
 
   async flush() {
+    Account.soon();
     if (!Save.db) return;
     try {
       let doc;
@@ -29424,6 +29429,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuSetRect())) { openSettings('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuDailyRect())) { openDaily('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
+    if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
@@ -50322,6 +50328,7 @@ function renderMenu() {
   drawMenuChal();
   drawMenuDaily();
   drawMenuRush();
+  drawMenuAcct();
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
@@ -56050,6 +56057,520 @@ function skinAwardClick(g) {
 }
 
 /* ===========================================================================
+   ACCOUNTS
+
+   A name and a password, kept by the Worker (src/account.js), with the save
+   kept beside them. Signing in is what lets a save follow its player to
+   another machine, and to PvP's address, which can never read this one's
+   storage.
+
+   The save on this device stays the one the game reads and writes. The
+   account's copy is merged into it when signing in and on every launch, and
+   this device's is pushed up after it changes. Both ways go through
+   Save.merge, the union the two local stores already use, so nothing earned
+   on one side can be lost by the other.
+
+   Some of a profile belongs to the machine, not the player (ACCT_DEVICE): the
+   graphics settings and the costs measured here, volume and aim, the pilot
+   last picked, and the profile id, which the boards and podiums are
+   addressed to. None of it travels.
+
+   Signing out leaves a fresh guest profile, so the next person on a shared
+   machine starts their own. Off in BETA: that build unlocks everything, and
+   must never write that into a real account.
+   ========================================================================= */
+const ACCT_URL = '/api/account';
+const ACCT_DEVICE = ['pid', 'adopted', 'gfx', 'gfxCosts', 'gfxSeen', 'fx', 'vol', 'muted', 'sens', 'charIdx'];
+const ACCT_EVERY = 30000;              // ms between pushes, at most
+const ACCT_RETRY = 60000;              // and after one that could not get through
+
+const Account = {
+  me: null,             // { name, display, created } while signed in
+  rev: 0,               // the account save's revision, as last seen
+  cloud: null,          // the account save, as last seen (machine fields stripped)
+  due: false,           // the account save still has to be taken in, at the menu
+  sent: '',             // the last save pushed, so an unchanged one is never sent twice
+  status: '',           // '' | 'saving' | 'saved' | 'offline' | 'out'
+  at: 0,                // when the last push landed
+  last: 0,              // when the last push left
+  timer: 0, busy: false, again: false,
+
+  off: () => BETA || location.protocol === 'file:',
+
+  async call(method, path, body, keepalive) {
+    const opt = { method, cache: 'no-store', credentials: 'same-origin', headers: {} };
+    if (body !== undefined) {
+      opt.headers['content-type'] = 'application/json';
+      opt.body = JSON.stringify(body);
+      // a page being closed only gets to send a small body
+      if (keepalive && opt.body.length < 60000) opt.keepalive = true;
+    }
+    try {
+      const r = await fetch(ACCT_URL + (path || ''), opt);
+      const d = await r.json().catch(() => null);
+      return { ok: r.ok, status: r.status, d };
+    } catch (e) { return { ok: false, status: 0, d: null }; }
+  },
+
+  strip(p) {
+    const o = JSON.parse(JSON.stringify(p || {}));
+    for (const k of ACCT_DEVICE) delete o[k];
+    return o;
+  },
+
+  /* What PvP reads, worked out from a profile: the pilots open to it, the
+     ones awake, the challenges cleared, and the reward upgrades that leaves. */
+  unlocks(p) {
+    const has = (f, x) => { try { return !!f(x); } catch (e) { return false; } };
+    return {
+      chars: CHARS.filter(c => !c.need || has(c.need, p)).map(c => c.id),
+      awake: Object.keys(p.awakened || {}).filter(k => p.awakened[k]),
+      chal: (p.chal || []).slice(),
+      ups: UPGRADES.filter(u => (u.lock || u.need) && (!u.lock || (p.chal || []).includes(u.lock))
+                                && (!u.need || has(u.need, p))).map(u => u.id)
+    };
+  },
+
+  /* The account's save, taken into this one. Only at the menu: a run reads
+     the save it started from (RUN), and swapping the profile out from under
+     one is not worth the risk. Held back, it still reaches the account,
+     because every push is merged over the account's copy first. */
+  adopt(remote) {
+    if (!remote || state !== 'menu') return false;
+    Save.profile = Save.repair(Save.merge(Save.profile, remote));
+    Save.profile.skin = skinClean(Save.profile.skin);
+    Save.profile.awards = Awards.clean(Save.profile.awards);
+    Codex.load();
+    devPerksApply();
+    Save.reconcileClears();
+    Save.writeLocal(); Save.flush();
+    skinRefresh();
+    return true;
+  },
+
+  async boot() {
+    if (Account.off()) return;
+    await Save.connected;              // both local stores first, so the merge sees all of it
+    const r = await Account.call('GET');
+    if (!r.ok || !r.d) { Account.status = 'offline'; return; }
+    Account.me = r.d.account || null;
+    Account.status = '';
+    if (Account.me) await Account.pull();
+  },
+
+  async pull() {
+    const r = await Account.call('GET', '/save');
+    if (r.status === 401) { Account.lost(); return false; }
+    if (!r.ok || !r.d) { Account.status = 'offline'; Account.soon(ACCT_RETRY); return false; }
+    Account.rev = r.d.rev || 0;
+    Account.cloud = r.d.save ? Account.strip(r.d.save) : null;
+    // the account's copy counts as sent: only what this device adds goes back up
+    Account.sent = Account.cloud ? JSON.stringify(Account.cloud) : '';
+    Account.due = !!Account.cloud && !Account.adopt(Account.cloud);
+    await Account.push();              // and the union goes back up
+    return true;
+  },
+
+  // after the save changes (Save.flush), at most once every ACCT_EVERY
+  soon(wait) {
+    if (!Account.me || Account.off() || Account.timer) return;
+    if (wait === undefined) wait = Math.max(1000, ACCT_EVERY - (Date.now() - Account.last));
+    Account.timer = setTimeout(() => { Account.timer = 0; Account.push(); }, wait);
+  },
+
+  /* This device's save, merged over the account's, sent up. A refusal means
+     another device wrote first: it carries that save, and the next try merges
+     with it. Resolves to whether the account now holds this device's save. */
+  async push(keepalive) {
+    if (!Account.me || Account.off()) return false;
+    if (Account.busy) { Account.again = true; return false; }
+    Account.busy = true;
+    Account.last = Date.now();
+    if (Account.timer) { clearTimeout(Account.timer); Account.timer = 0; }
+    let done = false;
+    for (let i = 0; i < 4; i++) {
+      const mine = Account.strip(Save.profile);
+      const up = Account.cloud ? Account.strip(Save.merge(Account.cloud, mine)) : mine;
+      const text = JSON.stringify(up);
+      if (text === Account.sent) { done = true; break; }
+      Account.status = 'saving';
+      const r = await Account.call('PUT', '/save', { rev: Account.rev, save: up, unlocks: Account.unlocks(up),
+                                                     pid: myPid() }, keepalive);
+      if (r.status === 409 && r.d) {
+        Account.rev = r.d.rev || 0;
+        Account.cloud = r.d.save ? Account.strip(r.d.save) : null;
+        Account.due = true;
+        continue;
+      }
+      if (r.status === 401) { Account.lost(); break; }
+      if (!r.ok || !r.d) break;
+      Account.rev = r.d.rev;
+      Account.cloud = up;
+      Account.sent = text;
+      done = true;
+      break;
+    }
+    Account.busy = false;
+    if (Account.me) {
+      Account.status = done ? 'saved' : 'offline';
+      if (done) Account.at = Date.now();
+      else Account.soon(ACCT_RETRY);
+    }
+    if (Account.again) { Account.again = false; Account.soon(); }
+    return done;
+  },
+
+  /* The server no longer knows this session: it expired, or the password was
+     changed somewhere else. The save here is the player's, so it stays. */
+  lost() {
+    Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = '';
+    Account.due = false; Account.status = 'out';
+  },
+
+  // what went wrong, in the panel's words
+  why(r, wrong) {
+    if (!r.status) return { ok: false, msg: 'CAN\'T REACH THE SERVER' };
+    if (r.status === 429) {
+      const s = (r.d && r.d.retryIn) || 60;
+      return { ok: false, msg: 'TOO MANY TRIES. WAIT ' + Math.ceil(s / 60) + ' MIN' };
+    }
+    if (r.status === 401) return { ok: false, msg: wrong || 'WRONG NAME OR PASSWORD' };
+    if (r.status === 409) return { ok: false, msg: 'THAT NAME IS TAKEN' };
+    if (r.status === 400 && r.d && r.d.error) return { ok: false, msg: String(r.d.error).toUpperCase() };
+    return { ok: false, msg: 'SOMETHING WENT WRONG (' + r.status + ')' };
+  },
+
+  begin(account) {
+    Account.me = account; Account.status = '';
+    Account.rev = 0; Account.cloud = null; Account.sent = ''; Account.due = false;
+  },
+
+  async signIn(name, pass) {
+    const r = await Account.call('POST', '', { op: 'login', name, pass, pid: myPid() });
+    if (!r.ok || !r.d) return Account.why(r);
+    Account.begin(r.d.account);
+    await Account.pull();
+    return { ok: true };
+  },
+
+  async signUp(name, pass) {
+    const r = await Account.call('POST', '', { op: 'register', name, pass, pid: myPid() });
+    if (!r.ok || !r.d) return Account.why(r);
+    Account.begin(r.d.account);
+    Account.push();                    // this device's progress is the account's first save
+    return { ok: true, code: r.d.recovery };
+  },
+
+  async recover(name, code, next) {
+    const r = await Account.call('POST', '', { op: 'recover', name, code, next, pid: myPid() });
+    if (!r.ok || !r.d) return Account.why(r, 'WRONG NAME OR RECOVERY CODE');
+    Account.begin(r.d.account);
+    await Account.pull();
+    return { ok: true, code: r.d.recovery };
+  },
+
+  async password(pass, next) {
+    const r = await Account.call('POST', '', { op: 'password', pass, next });
+    return r.ok ? { ok: true } : Account.why(r, 'WRONG PASSWORD');
+  },
+
+  async others() {
+    const r = await Account.call('POST', '', { op: 'logout-others' });
+    return r.ok ? { ok: true } : Account.why(r);
+  },
+
+  /* Pushes first, and will not sign out until the account holds this
+     device's save: what was played since the last push would otherwise be
+     left behind in a guest save nobody signs into. */
+  async signOut() {
+    while (Account.busy) await new Promise(res => setTimeout(res, 100));
+    if (!(await Account.push()))
+      return { ok: false, msg: Account.me ? 'COULDN\'T SAVE TO YOUR ACCOUNT. TRY AGAIN'
+                                          : 'SIGNED OUT ELSEWHERE · SIGN IN AGAIN TO SAVE FIRST' };
+    await Account.call('POST', '', { op: 'logout' });
+    Account.lost(); Account.status = '';
+    await Account.guest();
+    return { ok: true };
+  },
+
+  async remove(pass) {
+    const r = await Account.call('POST', '', { op: 'delete', pass });
+    if (!r.ok) return Account.why(r, 'WRONG PASSWORD');
+    Account.lost(); Account.status = '';
+    return { ok: true };
+  },
+
+  /* A fresh profile for whoever is next, keeping only what is the machine's,
+     and the notes it has already shown. Both local stores are overwritten
+     before the reload, or the old profile would be merged straight back in. */
+  async guest() {
+    const old = Save.profile, p = Save.blank();
+    for (const k of ACCT_DEVICE) if (k !== 'pid' && k !== 'adopted' && old[k] !== undefined) p[k] = old[k];
+    p.logSeen = old.logSeen || 0;
+    Save.profile = p;
+    Save.writeLocal();
+    await Save.connected;
+    await Save.flush();
+    location.reload();
+  }
+};
+
+// a tab put away or closed: whatever is unsent goes now
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && Account.me && !Account.busy) Account.push(true);
+});
+
+/* --------------------------- the account panel ---------------------------
+   A real form over the canvas, not one drawn on it: a password manager can
+   fill it, a phone shows its own keyboard, and the browser masks the
+   password. Keys typed into it never reach the game. */
+const ACCT_CSS = `
+#acct{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+  padding:16px;background:rgba(4,6,12,.84);overflow:auto;touch-action:auto;cursor:auto;
+  font-family:Barlow,'Segoe UI',system-ui,sans-serif;color:#cbd5e1}
+#acct[hidden]{display:none}
+#acct form{position:relative;width:100%;max-width:380px;margin:auto;padding:22px 22px 16px;
+  background:rgba(8,13,22,.97);border:1px solid rgba(103,232,249,.32);border-radius:10px;
+  box-shadow:0 0 44px rgba(103,232,249,.07)}
+#acct h2{font:800 17px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.1em;color:#67e8f9;text-align:center}
+#acct .sub{font-size:13px;line-height:1.45;color:#94a3b8;text-align:center;margin:8px 0 6px}
+#acct .sub b{color:#e2e8f0}
+#acct label{display:block;font:600 10px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em;color:#64748b;margin-top:12px}
+#acct input{display:block;width:100%;margin-top:5px;padding:9px 10px;background:rgba(2,6,14,.9);
+  border:1px solid rgba(103,232,249,.38);border-radius:7px;color:#e2e8f0;outline:none;
+  font:600 15px 'JetBrains Mono',ui-monospace,monospace}
+#acct input:focus{border-color:#67e8f9;box-shadow:0 0 0 2px rgba(103,232,249,.14)}
+#acct .msg{min-height:16px;margin-top:12px;font:700 11px 'JetBrains Mono',ui-monospace,monospace;
+  letter-spacing:.04em;color:#f87171;text-align:center}
+#acct .msg.good{color:#86efac}
+#acct .go{display:block;width:100%;margin-top:10px;padding:11px;border-radius:7px;cursor:pointer;
+  background:rgba(103,232,249,.15);border:1px solid rgba(103,232,249,.7);color:#67e8f9;
+  font:700 12px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
+#acct .go:hover{background:rgba(103,232,249,.24)}
+#acct .go:disabled,#acct .link:disabled{opacity:.45;cursor:default}
+#acct .go.danger{color:#fca5a5;border-color:rgba(248,113,113,.7);background:rgba(248,113,113,.12)}
+#acct .row{display:flex;flex-wrap:wrap;justify-content:center;gap:2px 14px;margin-top:10px}
+#acct .link{background:none;border:0;padding:6px 2px;cursor:pointer;color:#64748b;
+  font:600 10px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.12em}
+#acct .link:hover{color:#94a3b8}
+#acct .link.danger{color:#f87171}
+#acct .x{position:absolute;top:8px;right:10px;background:none;border:0;cursor:pointer;
+  color:#64748b;font:400 22px/1 Barlow,sans-serif;padding:4px 6px}
+#acct .x:hover{color:#e2e8f0}
+#acct .code{margin-top:14px;padding:14px 8px;border:1px dashed rgba(103,232,249,.45);border-radius:7px;
+  text-align:center;color:#e2e8f0;font:800 19px 'JetBrains Mono',ui-monospace,monospace;
+  letter-spacing:.06em;user-select:all;-webkit-user-select:all}
+#acct .fine{margin-top:8px;font-size:12px;line-height:1.45;color:#64748b;text-align:center}
+#acct .state{margin-top:2px;font:600 11px 'JetBrains Mono',ui-monospace,monospace;color:#64748b;text-align:center}`;
+
+const ACCT_NAME_IN = '<label>NAME<input name="username" autocomplete="username" maxlength="16" required ' +
+                'spellcheck="false" autocapitalize="off" autocorrect="off"></label>';
+const acctPassIn = (label, ac, name = 'password') => '<label>' + label + '<input name="' + name +
+  '" type="password" autocomplete="' + ac + '" maxlength="200" required></label>';
+const ACCT_VIEWS = {
+  in: '<h2>SIGN IN</h2><p class="sub">Keep your progress on every device, and take it into PvP.</p>' +
+      ACCT_NAME_IN + acctPassIn('PASSWORD', 'current-password') +
+      '<div class="msg"></div><button class="go" type="submit">SIGN IN</button>' +
+      '<div class="row"><button type="button" class="link" data-go="up">CREATE AN ACCOUNT</button>' +
+      '<button type="button" class="link" data-go="rec">FORGOT PASSWORD?</button></div>',
+  up: '<h2>CREATE AN ACCOUNT</h2><p class="sub">Just a name and a password, no email. ' +
+      'What you\'ve unlocked on this device goes into the account.</p>' +
+      ACCT_NAME_IN.replace('NAME', 'NAME <span style="color:#475569">· 3–16 letters, digits, _ or -</span>') +
+      acctPassIn('PASSWORD · AT LEAST 8 CHARACTERS', 'new-password') + acctPassIn('PASSWORD AGAIN', 'new-password', 'again') +
+      '<div class="msg"></div><button class="go" type="submit">CREATE ACCOUNT</button>' +
+      '<div class="row"><button type="button" class="link" data-go="in">I HAVE ONE · SIGN IN</button></div>',
+  code: '<h2>YOUR RECOVERY CODE</h2><p class="sub">If you forget your password, this code is the only ' +
+        'way back in. Nobody can send it to you, so write it down or save it somewhere safe.</p>' +
+        '<div class="code"></div><div class="row"><button type="button" class="link" data-act="copy">COPY IT</button></div>' +
+        '<div class="msg"></div><button class="go" type="submit">I\'VE SAVED IT</button>',
+  rec: '<h2>FORGOT PASSWORD</h2><p class="sub">Use the recovery code you got when you made the account.</p>' +
+       ACCT_NAME_IN + '<label>RECOVERY CODE<input name="code" autocomplete="off" maxlength="24" required ' +
+       'spellcheck="false" autocapitalize="characters"></label>' + acctPassIn('NEW PASSWORD', 'new-password') +
+       '<div class="msg"></div><button class="go" type="submit">RESET PASSWORD</button>' +
+       '<div class="row"><button type="button" class="link" data-go="in">BACK TO SIGN IN</button></div>',
+  me: '<h2>ACCOUNT</h2><p class="sub">Signed in as <b class="who"></b></p><p class="state"></p>' +
+      '<div class="msg"></div><button class="go" type="submit">SIGN OUT</button>' +
+      '<p class="fine">Signing out leaves this device with a fresh guest save. Your progress stays in your account.</p>' +
+      '<div class="row"><button type="button" class="link" data-go="pass">CHANGE PASSWORD</button>' +
+      '<button type="button" class="link" data-act="others">SIGN OUT OTHER DEVICES</button>' +
+      '<button type="button" class="link danger" data-go="del">DELETE ACCOUNT</button></div>',
+  pass: '<h2>CHANGE PASSWORD</h2><p class="sub">Every other device will be signed out.</p>' +
+        '<input name="username" autocomplete="username" hidden>' +
+        acctPassIn('CURRENT PASSWORD', 'current-password') + acctPassIn('NEW PASSWORD', 'new-password', 'next') +
+        acctPassIn('NEW PASSWORD AGAIN', 'new-password', 'again') +
+        '<div class="msg"></div><button class="go" type="submit">CHANGE PASSWORD</button>' +
+        '<div class="row"><button type="button" class="link" data-go="me">BACK</button></div>',
+  del: '<h2>DELETE ACCOUNT</h2><p class="sub">This deletes the account and its saved progress from the ' +
+       'server, for good. This device keeps its own progress as a guest save.</p>' +
+       acctPassIn('PASSWORD', 'current-password') +
+       '<div class="msg"></div><button class="go danger" type="submit">DELETE ACCOUNT</button>' +
+       '<div class="row"><button type="button" class="link" data-go="me">BACK</button></div>'
+};
+
+const AcctUI = {
+  el: null, on: false, view: '', busy: false, code: '', tick: 0,
+
+  build() {
+    const st = document.createElement('style');
+    st.textContent = ACCT_CSS;
+    document.head.appendChild(st);
+    const el = document.createElement('div');
+    el.id = 'acct'; el.hidden = true;
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    // typed here is the form's, never the game's
+    for (const t of ['keydown', 'keyup', 'keypress']) el.addEventListener(t, e => {
+      e.stopPropagation();
+      if (t === 'keydown' && e.key === 'Escape') { e.preventDefault(); AcctUI.close(); }
+    });
+    el.addEventListener('mousedown', e => { if (e.target === el) AcctUI.close(); });
+    el.addEventListener('click', e => {
+      const b = e.target.closest && e.target.closest('button[data-go],button[data-act]');
+      if (!b || AcctUI.busy) return;
+      if (b.dataset.go) AcctUI.show(b.dataset.go);
+      else AcctUI.act(b.dataset.act);
+    });
+    el.addEventListener('submit', e => { e.preventDefault(); AcctUI.submit(); });
+    document.body.appendChild(el);
+    AcctUI.el = el;
+  },
+
+  open(view) {
+    if (Account.off()) return;
+    if (!AcctUI.el) AcctUI.build();
+    AcctUI.on = true;
+    AcctUI.el.hidden = false;
+    AcctUI.show(view || (Account.me ? 'me' : 'in'));
+    clearInterval(AcctUI.tick);
+    AcctUI.tick = setInterval(AcctUI.state, 1000);
+    Audio_.select();
+  },
+
+  close(force) {
+    // the code is shown once: it is put away on purpose, never by a stray click
+    if (!AcctUI.on || (AcctUI.busy && !force) || (AcctUI.view === 'code' && !force)) return;
+    AcctUI.on = false; AcctUI.view = ''; AcctUI.code = '';
+    clearInterval(AcctUI.tick);
+    AcctUI.el.hidden = true;
+    AcctUI.el.innerHTML = '';
+  },
+
+  show(view, msg, good) {
+    AcctUI.view = view;
+    AcctUI.el.innerHTML = '<form novalidate>' + (view === 'code' ? '' :
+      '<button type="button" class="x" data-act="close" aria-label="Close">×</button>') + ACCT_VIEWS[view] + '</form>';
+    const q = s => AcctUI.el.querySelector(s);
+    if (view === 'code') q('.code').textContent = AcctUI.code;
+    if (view === 'me') q('.who').textContent = Account.me ? Account.me.display : '';
+    if (view === 'pass' && Account.me) q('input[name=username]').value = Account.me.name;
+    AcctUI.say(msg || '', good);
+    AcctUI.state();
+    const first = q('input:not([hidden])');
+    if (first && !isTouch) first.focus();
+  },
+
+  say(msg, good) {
+    const m = AcctUI.el && AcctUI.el.querySelector('.msg');
+    if (!m) return;
+    m.textContent = msg || '';
+    m.classList.toggle('good', !!good);
+  },
+
+  // the "saved" line under the name, kept current while the panel is open
+  state() {
+    const s = AcctUI.on && AcctUI.el.querySelector('.state');
+    if (!s) return;
+    const ago = Account.at ? Math.round((Date.now() - Account.at) / 1000) : -1;
+    s.textContent = Account.status === 'saving' ? 'SAVING…'
+      : Account.status === 'offline' ? 'CAN\'T REACH THE SERVER · IT WILL KEEP TRYING'
+      : ago < 0 ? 'YOUR PROGRESS SAVES TO YOUR ACCOUNT'
+      : 'SAVED ' + (ago < 10 ? 'JUST NOW' : ago < 90 ? ago + ' S AGO' : Math.round(ago / 60) + ' MIN AGO');
+  },
+
+  wait(on) {
+    AcctUI.busy = on;
+    for (const b of AcctUI.el.querySelectorAll('button')) b.disabled = on;
+    if (on) AcctUI.say('…');
+  },
+
+  async act(a) {
+    if (a === 'close') { AcctUI.close(); return; }
+    if (a === 'copy') {
+      try { await navigator.clipboard.writeText(AcctUI.code); AcctUI.say('COPIED', true); }
+      catch (e) { AcctUI.say('SELECT IT AND COPY BY HAND'); }
+      return;
+    }
+    if (a === 'others') {
+      AcctUI.wait(true);
+      const r = await Account.others();
+      AcctUI.wait(false);
+      AcctUI.say(r.ok ? 'EVERY OTHER DEVICE IS SIGNED OUT' : r.msg, r.ok);
+    }
+  },
+
+  async submit() {
+    if (AcctUI.busy) return;
+    const f = AcctUI.el.querySelector('form');
+    const val = n => (f.elements[n] ? String(f.elements[n].value || '') : '');
+    const v = AcctUI.view;
+    if (v === 'code') { AcctUI.code = ''; AcctUI.show('me', 'SIGNED IN', true); return; }
+    if ((v === 'up' || v === 'pass') && val(v === 'up' ? 'password' : 'next') !== val('again'))
+      { AcctUI.say('THE TWO PASSWORDS DON\'T MATCH'); return; }
+    if (v !== 'me' && [...f.querySelectorAll('input[required]')].some(i => !i.value))
+      { AcctUI.say('FILL IN EVERY BOX'); return; }
+    AcctUI.wait(true);
+    let r;
+    if (v === 'in') r = await Account.signIn(val('username').trim(), val('password'));
+    else if (v === 'up') r = await Account.signUp(val('username').trim(), val('password'));
+    else if (v === 'rec') r = await Account.recover(val('username').trim(), val('code'), val('password'));
+    else if (v === 'pass') r = await Account.password(val('password'), val('next'));
+    else if (v === 'del') r = await Account.remove(val('password'));
+    else if (v === 'me') r = await Account.signOut();      // reloads when it works
+    AcctUI.wait(false);
+    if (!r || !r.ok) { AcctUI.say((r && r.msg) || 'SOMETHING WENT WRONG'); return; }
+    if (r.code) { AcctUI.code = r.code; AcctUI.show('code'); return; }
+    if (v === 'in') AcctUI.show('me', 'SIGNED IN', true);
+    else if (v === 'pass') AcctUI.show('me', 'PASSWORD CHANGED · OTHER DEVICES SIGNED OUT', true);
+    else if (v === 'del') AcctUI.show('in', 'ACCOUNT DELETED', true);
+  }
+};
+
+/* The menu's entry: under BOSS RUSH in the left column. */
+function menuAcctRect() { return { x: 18, y: 214, w: 176, h: 34 }; }
+
+function drawMenuAcct() {
+  // an account save that arrived mid-run is taken in on the way back here
+  if (Account.due && Account.cloud && Account.adopt(Account.cloud)) Account.due = false;
+  const r = menuAcctRect();
+  const hot = !AcctUI.on && !Account.off() && inRect(mouse.x, mouse.y, r);
+  const me = Account.me;
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(103,232,249,0.16)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, hot ? 0.9 : 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = COL.player;
+  ctx.fillText(clipText(me ? '●  ' + me.display.toUpperCase() : '○  ACCOUNT', 22), r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  const sub = Account.off() ? (BETA ? 'OFF IN THE BETA BUILD' : 'NEEDS THE NETWORK')
+    : !me ? (Account.status === 'out' ? 'SIGNED OUT  ·  SIGN IN AGAIN' : 'SIGN IN  ·  SAVE ONLINE')
+    : Account.status === 'saving' ? 'SAVING…'
+    : Account.status === 'offline' ? 'OFFLINE  ·  WILL RETRY'
+    : 'SAVED TO YOUR ACCOUNT';
+  ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* ===========================================================================
    THE DEV LOGIN WINDOW
 
    Typing a dev account's name at the callsign prompt opens this instead of
@@ -57902,6 +58423,7 @@ const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'V
 // and containers that are this machine's own
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
   'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
+  'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris

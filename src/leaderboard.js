@@ -100,6 +100,8 @@ const DEV_ACCOUNTS = {
         hash: '8ae86433b090a5c06a779dad1a018ef608f0c90042b741bb16b80ba099722ee2',
         skins: ALL_SKINS, perks: ALL_PERKS },
 };
+// reserved as account names (account.js), so no account can pass itself off as one
+export const DEV_LOGINS = Object.keys(DEV_ACCOUNTS);
 
 /* Dev accounts with no login: the profile is the key. Each gets what a
    DEV_ACCOUNTS login binds, read on every sync the way awardsFor reads an
