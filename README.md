@@ -218,8 +218,11 @@ npm run test:lockstep                      # about a minute
 node scripts/lockstep.mjs --only bad --short
 ```
 
-Lockstep co-op is behind a switch for now: both players open the game with
-`?lockstep=1`. Without it, co-op is the old host-streams-pictures mode.
+Co-op is lockstep: both machines run the whole game and send each other
+only their inputs. The old mode, where the host streamed pictures of the
+room to the guest, was removed on 3 Oct 2026. Two players need the same
+build: the hello carries a hash of each side's script, and different builds
+refuse to connect and ask both players to reload.
 
 The test runs two copies of the game in one process, a host and a guest,
 joined by a fake link with latency, jitter, reordering and packet loss. Each
@@ -250,8 +253,7 @@ takes it over and replays any steps it had already played past that point,
 using the inputs they were first played with. A clean run must never need
 it. The `parted` scenario knocks each machine out of step once, on purpose,
 and both must be back in step within seconds. The `builds` check confirms
-two different builds refuse lockstep: the hello carries a hash of each
-side's script.
+two different builds refuse to connect.
 
 ## Limits worth knowing (Workers Free plan)
 

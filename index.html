@@ -29822,7 +29822,6 @@ function update(dt) {
   rsCardTick(dt);          // his ending outlives his body, and ends at the menu
   // the link is kept alive on its own clock, whatever the game is doing
   netTick(dt);
-  mpHostNet(dt);
   if (MP.lostT > 0) MP.lostT -= dt;
 
   if (state === 'devlogin') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }
@@ -29861,10 +29860,6 @@ function update(dt) {
     if (uiArm > 0) uiArm -= dt;
     return;
   }
-  /* A guest simulates nothing: it eases the host's picture forward, predicts
-     its own hull and draws. This sits above the pause check on purpose — a
-     paused guest still has to keep receiving, or the host runs away from it. */
-  if (mpGuest() && !LS.on) { mpGuestUpdate(dt); return; }
   if (state === 'pause') return;
   if (state === 'play') simTimersTick(dt);   // the game's own delays: see simAfter
   /* Ahead of the wave ticker on purpose: it clears the floor, and if the
@@ -57037,7 +57032,7 @@ const NET_STALE  = 14000;        // silence from a live peer before we call it
 /* Bumped when the wire format changes. Two builds that disagree would trade
    plausible-looking nonsense for a while and then diverge, so they refuse
    each other at the handshake instead. */
-const NET_PROTO = 5;                     // 4: lockstep input records carry menu choices; 5: and fingerprints, and snapshots
+const NET_PROTO = 6;                     // 4: lockstep input records carry menu choices; 5: and fingerprints, and snapshots; 6: lockstep only
 const NET_SIG = () => NET_PROTO + '.' + Object.keys(ETYPE).length + '.' +
                       Object.keys(BOSSES).length + '.' + STAGES.length;
 
@@ -57337,10 +57332,11 @@ async function netJoin(code) {
 }
 
 /* --------------------------------- wire ---------------------------------- */
-/* One preallocated buffer per direction. Snapshots go out thirty times a
-   second for the length of a run; allocating a fresh one each time would hand
-   the collector a megabyte a minute to sweep up mid-fight. */
-const MSG = { HELLO: 1, INPUT: 2, SNAP: 3, EVT: 4, PING: 5, PONG: 6, LSIN: 7, LSSTATE: 8 };   // LSIN: lockstep input records; LSSTATE: a run snapshot, in pieces
+/* One preallocated buffer per direction. Input records go out every step for
+   the length of a run; allocating a fresh one each time would hand the
+   collector garbage to sweep up mid-fight. */
+// LSIN: lockstep input records; LSSTATE: a run snapshot, in pieces. 1 to 4 were the picture stream's (retired 3 Oct 2026)
+const MSG = { PING: 5, PONG: 6, LSIN: 7, LSSTATE: 8 };
 
 const _nb = new ArrayBuffer(192 * 1024);
 const _nv = new DataView(_nb);
@@ -57394,9 +57390,7 @@ function netOnMessage(data) {
   }
   rOpen(data);
   const type = r8();
-  if (type === MSG.SNAP)       mpReadSnapshot();
-  else if (type === MSG.INPUT) mpReadInput();
-  else if (type === MSG.LSIN)  lsRecv();
+  if (type === MSG.LSIN)  lsRecv();
   else if (type === MSG.LSSTATE) lsStateRecv();
   else if (type === MSG.PING) {
     const stamp = r32();
@@ -57430,14 +57424,10 @@ function netTick(dt) {
 
 /* ===========================================================================
    LAN CO-OP — the run
-   One run, two ships, one authority. The host simulates the entire game
-   exactly as it does solo; the guest's hull is simulated inside that same
-   world from the input it sends, and the host ships back a picture of the
-   result thirty times a second.
-
-   The guest never simulates anything except its own hull, which it predicts
-   locally so its own controls feel wired to the ship rather than to the
-   network. Everything else it draws is the host's word.
+   One run, two ships, two machines running it. Both simulate the whole game
+   from the same seed and trade only their pilots' input (LOCKSTEP CO-OP).
+   Until 3 Oct 2026 the host simulated alone and streamed a picture of the
+   room to the guest thirty times a second; that stream is gone.
 
    What the wingman shares and what it does not:
      shared    the build, the level, credits, score, the run itself
@@ -57445,53 +57435,13 @@ function netTick(dt) {
    A downed wingman is not a lost run — it stands back up. The run ends when
    the host's ship dies, because the run's record belongs to the host.
    ========================================================================= */
-const MP_ETYPES = Object.keys(ETYPE);
-const MP_BOSSES = Object.keys(BOSSES);
-const MP_HAZ    = ['fire', 'acid', 'vent', 'laser', 'current', 'mirror', 'delete', 'well'];
-/* Appended rather than inserted: the index is the wire format, so a new kind
-   may only ever go on the end or an older build reads gear as a heal. */
-const MP_DROPS  = ['credit', 'heal', 'nuke', 'gear'];
-/* Every state the host can be in that the guest has to react to. Index, not
-   name, goes on the wire — a mismatch here is caught by the version signature. */
-const MP_STATES = ['play', 'levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk',
-                   'gfx', 'pause', 'dead', 'codex', 'amalcut', 'menu', 'name', 'lan'];
-
-/* Colours are sent as palette indices. Every colour any entity can carry is
-   already declared somewhere in this file, so the palette is derived rather
-   than written out and cannot drift from what the game actually spawns. */
-const MP_COLS = [...new Set([
-  ...Object.values(ETYPE).map(t => t.col),
-  ...Object.values(BOSSES).map(b => b.col),
-  COL.player, COL.bullet, COL.crit, COL.xp, COL.hp, COL.shield, COL.elite,
-  '#f97316', '#4ade80', '#f0abfc', '#a78bfa', '#67e8f9', '#5eead4', '#f87171',
-  '#fbbf24', '#ffffff', '#e2e8f0', '#fca5a5', '#a5f3fc'
-])];
-const MP_COLI = new Map(MP_COLS.map((c, i) => [c, i]));
-const mpCol = c => (MP_COLI.has(c) ? MP_COLI.get(c) : 0);
-
-/* Caps. A snapshot has to fit in a handful of packets or an unreliable
-   channel starts losing whole frames of it on a busy screen. Entities are
-   filtered by distance to the guest first — what it cannot see it cannot
-   miss — and the caps are only reached in the worst rooms in the game. */
-const MP_MAX = { e: 72, b: 150, eb: 220, g: 90, d: 24, h: 44, m: 18 };
-const MP_CULL = 1250;            // half a screen past the guest's view
-
 const MP = {
   on: false,               // a co-op run is live
   role: null,              // 'host' | 'guest' — mirrors Net.role while connected
   ready: false,            // handshake done, both sides in the lobby
   name: '', peerName: '', peerChar: 0,
-  tick: 0, sendT: 0,
-  hostState: 'play',       // guest: what the host is doing right now
   lostT: 0,                // banner timer after a wingman drops
-  wasState: '',
-  buildSig: '',
-  /* guest only */
-  snapT: 0,                   // seconds since the last snapshot landed
-  stalled: false,
-  down: false, lastHp: undefined,
-  overStats: null,
-  hostShip: { x: 0, y: 0, ang: 0, hp: 1, maxHp: 1, charIdx: 0, iframe: 0, dash: 0, ghosts: [] }
+  stalled: false           // waiting on the partner's input (lsFrame)
 };
 
 const mpHost  = () => MP.on && MP.role === 'host';
@@ -57500,11 +57450,10 @@ const mpGuest = () => MP.on && MP.role === 'guest';
 /* Who the camera is watching. Your own ship, unless it is on the floor and
    your partner is not — then theirs, because that is where the run is. */
 function mpCamSubject() {
-  // lockstep: the guest's own ship is the wingman
-  if (LS.on && MP.role === 'guest') return Wing.live && (!Wing.down || P.down) ? Wing : P;
-  if (!MP.on || !P.down) return P;
-  if (MP.role === 'host') return (Wing.live && !Wing.down) ? Wing : P;
-  return MP.hostShip.seen ? MP.hostShip : P;
+  if (!MP.on) return P;
+  // the guest's own ship is the wingman
+  if (MP.role === 'guest') return Wing.live && (!Wing.down || P.down) ? Wing : P;
+  return P.down && Wing.live && !Wing.down ? Wing : P;
 }
 
 /* --------------------------------- wingman --------------------------------
@@ -57530,8 +57479,8 @@ const Wing = {
   hp: 100, maxHp: 100, iframe: 0, hurtFlash: 0,
   dashT: 0, dashDX: 0, dashDY: 0, dashCh: 1, dashMax: 1, dashCd: 1.5, dashRe: 0,
   fireT: 0, charIdx: 0, ghosts: [], shots: 0,
-  // last input the guest sent, held until the next one arrives
-  in: { mx: 0, my: 0, ang: 0, fire: false, dash: false, seq: 0, t: 0 }
+  // the guest's input for the step being played (lsWingInput)
+  in: { mx: 0, my: 0, ang: 0, fire: false, dash: false }
 };
 
 function wingSpawn() {
@@ -57687,7 +57636,7 @@ function wingUpdate(dt) {
   }
   if (IN.dash && Wing.dashCh > 0 && Wing.dashT <= 0) {
     IN.dash = false;                       // edge-triggered: one press, one dash
-    if (LS.on && MP.role === 'guest') { keys[' '] = false; keys['shift'] = false; }   // it is this machine's key that was spent
+    if (MP.role === 'guest') { keys[' '] = false; keys['shift'] = false; }   // it is this machine's key that was spent
     Wing.dashCh--;
     Wing.dashT = 0.17; Wing.iframe = Math.max(Wing.iframe, 0.28);
     const il = len(IN.mx, IN.my);
@@ -57747,236 +57696,27 @@ function wingUpdate(dt) {
   }
 }
 
-/* --------------------------- host: reading input -------------------------- */
-function mpReadInput() {
-  if (!mpHost() || !Wing.live) return;
-  const seq = r16();
-  const mx = rI() / 1000, my = rI() / 1000;
-  const ang = rAng();
-  const bits = r8();
-  // Input is unreliable and unordered: an older packet arriving after a newer
-  // one is stale by definition and would jerk the ship backwards.
-  const gap = (seq - Wing.in.seq) & 0xffff;
-  if (Wing.in.seq && (gap === 0 || gap > 32768)) return;
-  Wing.in.seq = seq;
-  Wing.in.mx = mx; Wing.in.my = my; Wing.in.ang = ang;
-  Wing.in.fire = !!(bits & 1);
-  if (bits & 2) Wing.in.dash = true;         // latched; wingUpdate consumes it
-  Wing.in.t = performance.now();
-}
-
-/* --------------------------- host: the snapshot --------------------------- */
-function mpNear(x, y) {
-  const w = Wing.live ? Wing : P;
-  return Math.abs(x - w.x) < MP_CULL && Math.abs(y - w.y) < MP_CULL;
-}
-
-function mpSendSnapshot() {
-  if (!netLive() || !Net.chS) return;
-  MP.tick = (MP.tick + 1) >>> 0;
-  wSeek(0);
-  w8(MSG.SNAP);
-  w32(MP.tick);
-  const si = MP_STATES.indexOf(state);
-  w8(si < 0 ? 0 : si);
-  w8((bossAlive ? 1 : 0) | (Wing.down ? 2 : 0) | (P.down ? 4 : 0) |
-     (amalgam || amalCut ? 8 : 0) | (P.stopT > 0 ? 16 : 0));
-  w8(stageIdx); w8(loopNum); w16(wave); w32(score); w16(credits);
-  wF(elapsed);
-  wF(camZoom);
-  wPos(arena.x0); wPos(arena.y0); wPos(arena.x1); wPos(arena.y1);
-
-  // shared run values, so the guest's HUD reads the same numbers as the host's
-  w8(P.level); w16(Math.min(65535, Math.round(P.xp))); w16(Math.min(65535, Math.round(P.xpNext)));
-  w8(P.dashCh); w8(P.dashMax); w8(P.shield); w8(Math.min(255, Math.round(P.pickupR)));
-  // kills belong to the run: the wingman's shots are credited through P too
-  w16(Math.min(65535, P.kills));
-
-  // the host's ship
-  wPos(P.x); wPos(P.y); wAng(P.ang);
-  w8(selectedChar); wF(P.hp); wF(P.maxHp);
-  w8((P.iframe > 0 ? 1 : 0) | (P.dashT > 0 ? 2 : 0) | (P.laserT > 0 ? 4 : 0));
-
-  // the guest's own ship, authoritative
-  wPos(Wing.x); wPos(Wing.y); wAng(Wing.ang);
-  wF(Wing.hp); wF(Wing.maxHp);
-  w8(Wing.dashCh);
-  w8((Wing.iframe > 0 ? 1 : 0) | (Wing.dashT > 0 ? 2 : 0) | (Wing.live ? 4 : 0));
-  wI(Math.round(Wing.vx)); wI(Math.round(Wing.vy));
-  // shots fired since the last snapshot, so the guest's own gun makes a noise
-  w8(Math.min(255, Wing.shots)); Wing.shots = 0;
-
-  /* ---- enemies. Bosses are never culled: their telegraphs cover the room
-     and the HP bar has to agree with what is on screen. ---- */
-  let n = 0, at = _np; w16(0);
-  for (const e of enemies) {
-    if (e.dead || e.amalPart) continue;
-    if (e.type !== 'boss' && !mpNear(e.x, e.y)) continue;
-    if (n >= MP_MAX.e) break;
-    w16(e.id & 0xffff);
-    w8(MP_ETYPES.indexOf(e.type));
-    w8(e.boss ? MP_BOSSES.indexOf(e.boss) + 1 : 0);
-    wPos(e.x); wPos(e.y); wAng(e.ang || 0);
-    w8(Math.min(255, Math.round(e.r)));
-    w8(clamp(Math.round(e.hp / (e.maxHp || 1) * 255), 0, 255));
-    w8(clamp(Math.round(e.flash * 255), 0, 255));
-    w8((e.elite ? 1 : 0) | (e.phased ? 2 : 0) | (e.invuln > 0 ? 4 : 0) |
-       (e.shadow > 0 ? 8 : 0) | (e.virus ? 16 : 0) | (e.rage === 1 ? 32 : 0) |
-       (e.hacked ? 64 : 0));
-    w8(e.sides || 6);
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  /* ---- friendly bullets. Sent with velocity and dead-reckoned on the far
-     side, so thirty snapshots a second still reads as continuous fire. ---- */
-  n = 0; at = _np; w16(0);
-  for (const b of bullets) {
-    if (!mpNear(b.x, b.y)) continue;
-    if (n >= MP_MAX.b) break;
-    wPos(b.x); wPos(b.y); wI(Math.round(b.vx)); wI(Math.round(b.vy));
-    w8(Math.min(255, Math.round(b.r * 4)));
-    w8(b.crit ? 1 : 0);
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  n = 0; at = _np; w16(0);
-  for (const b of ebullets) {
-    if (!mpNear(b.x, b.y)) continue;
-    if (n >= MP_MAX.eb) break;
-    wPos(b.x); wPos(b.y); wI(Math.round(b.vx)); wI(Math.round(b.vy));
-    w8(Math.min(255, Math.round(b.r)));
-    w8(b.kind ? MP_BOSSES.indexOf(b.kind) + 1 : 0);
-    w8(mpCol(b.col));
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  n = 0; at = _np; w16(0);
-  for (const g of gems) {
-    if (!mpNear(g.x, g.y)) continue;
-    if (n >= MP_MAX.g) break;
-    wPos(g.x); wPos(g.y); w8(Math.min(255, Math.round(g.r || 4))); n++;
-  }
-  _nv.setUint16(at, n);
-
-  n = 0; at = _np; w16(0);
-  for (const d of drops) {
-    if (n >= MP_MAX.d) break;
-    wPos(d.x); wPos(d.y);
-    w8(Math.max(0, MP_DROPS.indexOf(d.kind)));
-    w8(Math.min(255, Math.round(d.r)));
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  n = 0; at = _np; w16(0);
-  for (const h of hazards) {
-    if (n >= MP_MAX.h) break;
-    const ki = MP_HAZ.indexOf(h.kind);
-    if (ki < 0) continue;
-    w8(ki); wPos(h.x); wPos(h.y); w16(Math.min(65535, Math.round(h.r)));
-    wAng(h.ang || 0); wF(h.t); w8(h.state || 0);
-    w8((h.friendly ? 1 : 0) | (h.flying ? 2 : 0) | (h.embedded ? 4 : 0));
-    wF(Math.min(1e6, h.life));
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  n = 0; at = _np; w16(0);
-  for (const m of mortars) {
-    if (n >= MP_MAX.m) break;
-    wPos(m.x); wPos(m.y); w16(Math.round(m.r));
-    wF(m.t); wF(m.max); w8(mpCol(m.col)); w8(m.big ? 1 : 0);
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  // portals, so the guest can see the gate the host is about to walk through
-  n = 0; at = _np; w16(0);
-  for (const p of portals) {
-    if (n >= 4) break;
-    wPos(p.x); wPos(p.y); w16(Math.round(p.r)); wF(p.t);
-    w8(p.kind === 'alt' ? 1 : 0);
-    n++;
-  }
-  _nv.setUint16(at, n);
-
-  netSend(wOut(), false);
-}
-
-/* ------------------------------ host: control ----------------------------- */
-function mpBuildSig() {
-  let s = '';
-  for (const k in P.up) s += k + P.up[k] + ',';
-  return s + '|' + P.level + '|' + P.maxHp + '|' + P.weapon;
-}
-
-/* The events the guest cannot infer from a snapshot: what the run is, what
-   the build became, and how it ended. */
-function mpPushBuild() {
-  MP.buildSig = mpBuildSig();
-  netEvent({ t: 'build', up: P.up, level: P.level, weapon: P.weapon,
-             maxHp: P.maxHp, name: stage.name });
-}
-
 /* The wingman only flies while the room is live: an upgrade screen or a shop
    holds the world still for both pilots, exactly as it does solo. */
 function mpHostTick(dt) {
   if (!mpSim()) return;
-  if (LS.on) lsWingInput();               // the wingman flies the guest's record for this step
+  lsWingInput();                          // the wingman flies the guest's record for this step
   wingUpdate(dt);
 }
 
-/* Sending, on the other hand, never stops. This runs above every early return
-   in update(), because the moments the guest most needs to hear from the host
-   are the ones where the host has stopped simulating — a level-up, a shop, a
-   pause. Silence there would read to the guest as a dropped connection. */
-function mpHostNet(dt) {
-  if (!mpHost() || LS.on) return;        // lockstep sends no pictures: both machines are running it
-
-  const sig = mpBuildSig();
-  if (sig !== MP.buildSig) mpPushBuild();
-
-  if (state !== MP.wasState) {
-    MP.wasState = state;
-    if (state === 'dead')
-      netEvent({ t: 'over', stats: lastStats || null, best: Save.profile.best });
-  }
-  if (bannerT > 0 && bannerT >= bannerMax - dt * 1.5 && bannerText !== MP.lastBanner) {
-    MP.lastBanner = bannerText;
-    netEvent({ t: 'banner', s: bannerText, c: bannerCol, d: bannerMax });
-  }
-
-  MP.sendT -= dt;
-  if (MP.sendT <= 0) {
-    MP.sendT = 1 / 30;
-    mpSendSnapshot();
-  }
-}
-
-/* Starting a co-op run. The host owns the record, the sector and the shop, so
-   this is just the ordinary run start with the wingman placed alongside. */
+/* Starting a co-op run: the host's run, with the wingman placed alongside,
+   and the header that lets the guest's machine start the same one. */
 function mpStartRun() {
   if (!netLive() || Net.role !== 'host') return;
   MP.on = true; MP.role = 'host';
   Wing.charIdx = MP.peerChar;
-  if (MP.ls) { lsHostStart(); return; }   // see LOCKSTEP CO-OP
-  resetGame();
-  wingSpawn();
-  state = 'play';
-  MP.wasState = 'play';
-  MP.buildSig = '';
-  netEvent({ t: 'run', host: selectedChar, wing: MP.peerChar,
-             name: Save.profile.name || '', stage: stageIdx });
-  banner('CO-OP ENGAGED', WING_COL, 2.0);
+  lsHostStart();                          // see LOCKSTEP CO-OP
 }
 
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0, build: LS_WANT ? buildId() : '',
+  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar,
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -57985,16 +57725,15 @@ function mpOnEvent(m) {
   if (!m || !m.t) return;
   switch (m.t) {
     case 'hello':
-      if (m.sig !== NET_SIG()) {
-        netFail(new Error('the other machine is running a different build'));
+      /* Both machines run the game, so they must be running the same one: the
+         smallest difference between two builds parts them within seconds. */
+      if (m.sig !== NET_SIG() || m.build !== buildId()) {
+        netFail(new Error('the other player has a different version of the game: reload both pages'));
         return;
       }
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
       MP.ready = true;
-      // lockstep, only if both ask for it, and only between two copies of one build: any difference parts them
-      MP.ls = LS_WANT && !!m.ls && m.build === buildId();
-      MP.lsNote = LS_WANT && m.ls && !MP.ls ? 'lockstep needs the same build: reload both pages' : '';
       break;
 
     case 'lsagain':
@@ -58011,43 +57750,6 @@ function mpOnEvent(m) {
       lsGuestStart(m);
       break;
 
-    case 'run':
-      // guest: the host has launched, so mirror the run locally and fly
-      if (Net.role !== 'guest') break;
-      MP.on = true; MP.role = 'guest';
-      MP.peerChar = clamp(m.host | 0, 0, CHARS.length - 1);
-      MP.peerName = String(m.name || '').slice(0, 14) || 'HOST';
-      mpGuestBegin();
-      break;
-
-    case 'build':
-      if (Net.role !== 'guest') break;
-      P.up = m.up || {};
-      P.level = m.level || 1;
-      break;
-
-    case 'banner': {
-      if (Net.role !== 'guest') break;
-      /* The host's banners are written from the host's point of view. Two of
-         them are about the guest, and reading "WINGMAN DOWN" while it is you
-         on the floor is nonsense. */
-      let s = String(m.s || '').slice(0, 40);
-      const them = (MP.peerName || 'THE HOST').toUpperCase();
-      if (s === 'WINGMAN DOWN — CLEAR THE WAVE') s = 'YOU ARE DOWN — CLEAR THE WAVE';
-      else if (s === 'YOU ARE DOWN — CLEAR THE WAVE') s = them + ' IS DOWN — CLEAR THE WAVE';
-      else if (s === 'WINGMAN BACK UP') s = 'BACK UP';
-      else if (s === 'BACK UP') s = them + ' IS BACK UP';
-      else if (s === 'WINGMAN LOST — SOLO' || s === 'WINGMAN LOST') break;
-      banner(s, m.c || '#fff', m.d || 2.2);
-      break;
-    }
-
-    case 'over':
-      if (Net.role !== 'guest') break;
-      MP.overStats = m.stats || null;
-      MP.hostState = 'dead';
-      break;
-
     case 'bye':
       netLost(Net.role === 'host' ? 'the wingman left' : 'the host ended the run');
       break;
@@ -58059,7 +57761,6 @@ function mpOnEvent(m) {
    and the guest, which has nothing to simulate, is put back on the menu. */
 function mpPeerGone() {
   if (LS.on) lsLeave();
-  MP.ls = false;
   if (MP.role === 'host') {
     if (Wing.live) {
       explode(Wing.x, Wing.y, 140, 0, WING_COL);
@@ -58086,7 +57787,6 @@ function mpPeerGone() {
 function mpQuit() {
   const wasHost = MP.role === 'host';
   if (LS.on) lsLeave();
-  MP.ls = false;
   if (netLive()) netEvent({ t: 'bye' });
   netHangUp(true);
   Net.phase = 'off'; Net.note = '';
@@ -58142,7 +57842,7 @@ const SNAP_LOCAL = new Set([
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
   // the link
-  'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'mpInSeq', 'mpInT', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
+  'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Wing', 'Chal', 'Rush', 'Daily', 'arena', 'suHead', 'con', 'SUI', 'VRA', 'VRI', 'RKA', 'RKC', 'RC',
@@ -58396,11 +58096,9 @@ function snapRead(snap) {
    The host's pilot is P on both machines; the guest's is the wingman, a
    plain gun, until each gets its full pilot (the plan's Phase 3). Menu
    choices ride the records too (ui(), lsUiApply): the host makes the run's,
-   and either player can pause the shared game. This sits behind a switch:
-   both players open the game with ?lockstep=1, and the picture stream above
-   stays the default until lockstep has proven itself.
+   and either player can pause the shared game. Since 3 Oct 2026 this is the
+   only co-op there is: the picture stream it replaced is gone.
    ========================================================================= */
-const LS_WANT = (() => { try { return /[?&]lockstep=1\b/.test(location.search); } catch (e) { return false; } })();
 const LS_SEND_MAX = 32;               // input records in one packet, at most
 const LS_RESEND = 0.05;               // while waiting, our inputs go out again this often
 /* Steps of input delay: three is 50 ms, enough on one network; the host adds
@@ -58436,8 +58134,8 @@ const LS = {
   resyncT: 0, resyncs: 0, replayed: 0, syncNote: 0, inbound: null,
   after: null                           // and a test's hook, run after every step
 };
-// this machine runs the co-op world: the host always, the guest when in lockstep
-const mpSim = () => MP.on && (MP.role === 'host' || LS.on);
+// this machine runs the co-op world: in lockstep, both do
+const mpSim = () => MP.on;
 
 /* An input record on the wire, about sixteen bytes: movement and the aim
    point, the held buttons, the touch stick when there is one, and the keys
@@ -58782,7 +58480,6 @@ function lsHostStart() {
   resetGame();                            // a fresh seed, this window's view, this save's settings
   wingSpawn();
   state = 'play';
-  MP.wasState = 'play'; MP.buildSig = '';
   const delay = clamp(LS_DELAY_MIN + Math.ceil((Net.ping || 0) / 2 / (STEP * 1000)), LS_DELAY_MIN, LS_DELAY_MAX);
   lsBegin(run, delay);
   netEvent({ t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
@@ -58803,7 +58500,6 @@ function lsGuestStart(h) {
   Wing.charIdx = clamp(h.wing | 0, 0, CHARS.length - 1);
   wingSpawn();
   state = 'play';
-  MP.hostState = 'play'; MP.overStats = null;
   lsBegin((h.run | 0) & 0xffff, clamp(h.delay | 0, LS_DELAY_MIN, LS_DELAY_MAX));
   banner('CO-OP ENGAGED', WING_COL, 2.0);
 }
@@ -58814,373 +58510,11 @@ function lsLeave() {
 }
 
 /* ===========================================================================
-   LAN CO-OP — the guest
-   The guest runs no simulation. It decodes the host's snapshot straight into
-   the arrays the renderer already reads, so every draw path in this file —
-   floors, bosses, bullets, bloom, the HUD — works untouched on both machines.
-
-   Two things are not simply copied:
-     · positions are eased between snapshots rather than snapped to them, so
-       thirty updates a second still reads as sixty frames of motion, and
-     · the guest's own hull is predicted locally from its own input and only
-       corrected toward the host's version, because a ship that answers the
-       stick a round trip later does not feel like a ship.
+   LAN CO-OP — the other ship, and the co-op HUD
+   (Until 3 Oct 2026 this was the guest's half of the picture stream: decoding
+   the host's snapshots, easing them, predicting its own hull. In lockstep the
+   guest runs the game itself, and only the drawing below is left.)
    ========================================================================= */
-const MP_LERP = 1 / 22;          // ease window for interpolated positions
-
-function mpGuestBegin() {
-  resetGame();                   // clears every array and rebuilds the ship
-  state = 'play';
-  MP.hostState = 'play';
-  MP.overStats = null;
-  MP.snapT = 0;
-  MP.hostShip.ghosts.length = 0;
-  banner('CO-OP ENGAGED', WING_COL, 2.0);
-}
-
-/* ------------------------------ decoding ---------------------------------- */
-function mpReadSnapshot() {
-  if (!mpGuest()) return;
-  const tick = r32();
-  // unreliable channel: a snapshot that arrives behind one already applied is
-  // a rewind, not an update. Unsigned wrap, so a tick counter rolling over
-  // 2^32 mid-run is still ordered correctly.
-  if (MP.tick && ((tick - MP.tick) >>> 0) > 0x7fffffff) return;
-  MP.tick = tick;
-
-  const si = r8();
-  MP.hostState = MP_STATES[si] || 'play';
-  const flags = r8();
-  bossAlive = !!(flags & 1);
-
-  const sIdx = r8(), lp = r8();
-  if (STAGES[sIdx] && stage !== STAGES[sIdx]) {
-    stage = STAGES[sIdx]; stageIdx = sIdx;
-    COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
-  }
-  loopNum = lp;
-  wave = r16(); score = r32(); credits = r16();
-  elapsed = rF();
-  camZoomT = rF();
-  arena.tx0 = arena.x0 = rPos(); arena.ty0 = arena.y0 = rPos();
-  arena.tx1 = arena.x1 = rPos(); arena.ty1 = arena.y1 = rPos();
-
-  P.level = r8(); P.xp = r16(); P.xpNext = r16();
-  const hostDash = r8(), hostDashMax = r8();
-  P.shield = r8(); P.pickupR = r8();
-  P.kills = r16();
-
-  /* ---- the host's ship: interpolated, since it is somebody else's ---- */
-  const hs = MP.hostShip;
-  hs.px = hs.x; hs.py = hs.y; hs.pang = hs.ang;
-  hs.tx = rPos(); hs.ty = rPos(); hs.tang = rAng();
-  hs.charIdx = r8(); hs.hp = rF(); hs.maxHp = rF();
-  hs.down = !!(flags & 4);
-  const hf = r8();
-  hs.iframe = (hf & 1) ? 0.2 : 0;
-  hs.dash = !!(hf & 2);
-  hs.lerp = 0;
-  if (!hs.seen) { hs.x = hs.tx; hs.y = hs.ty; hs.ang = hs.tang; hs.seen = true; }
-
-  /* ---- our own hull: authority to reconcile the prediction against ---- */
-  const ax = rPos(), ay = rPos(), aang = rAng();
-  P.hp = rF(); P.maxHp = rF();
-  P.dashCh = r8(); P.dashMax = Math.max(1, hostDashMax);
-  const wf = r8();
-  const wvx = rI(), wvy = rI();
-  const shots = r8();
-  MP.down = !!(flags & 2);
-  P.down = MP.down;                      // the local hull agrees with the host
-  /* Mercy frames are a blink, and a blink is a clock. Pinning the timer to a
-     constant on every snapshot froze the phase and left the hull invisible for
-     the whole window, so the host only says whether it is running and the
-     countdown itself is local. */
-  if (wf & 1) { if (P.iframe <= 0) P.iframe = 0.6; }
-  else P.iframe = 0;
-  P.dashT = (wf & 2) ? Math.max(P.dashT, 0.05) : P.dashT;
-  MP.wingLive = !!(wf & 4);
-  // Reconcile: a small error is eased away over the next few frames, a large
-  // one means the prediction is simply wrong (a dash we never saw, a wall, a
-  // revive) and is taken as read.
-  const err = len(ax - P.x, ay - P.y);
-  if (err > 110 || MP.down) { P.x = ax; P.y = ay; P.vx = wvx; P.vy = wvy; }
-  else if (err > 1) {
-    P.x = lerp(P.x, ax, 0.3); P.y = lerp(P.y, ay, 0.3);
-    P.vx = lerp(P.vx, wvx, 0.3); P.vy = lerp(P.vy, wvy, 0.3);
-  }
-
-  /* --- feedback the guest has no way to work out for itself ---
-     Its gun is fired on the host, its hits are resolved on the host, and a
-     silent ship that takes damage without a sound is the fastest way to make
-     a networked game feel like a video of one. */
-  for (let s = 0; s < Math.min(3, shots); s++) Audio_.shoot();
-  if (shots) {
-    burst(P.x + Math.cos(P.ang) * 18, P.y + Math.sin(P.ang) * 18,
-          3, COL.bullet, 165, 2.2, 0.16, 0.9, P.ang);
-    P.vx -= Math.cos(P.ang) * 8; P.vy -= Math.sin(P.ang) * 8;   // recoil, locally
-  }
-  if (MP.lastHp === undefined) MP.lastHp = P.hp;
-  if (P.hp < MP.lastHp - 0.4 && !MP.down) {
-    Audio_.hurt();
-    P.hurtFlash = 1; drawFlashT = 0.09; shake(0.42);
-    burst(P.x, P.y, 14, '#ef4444', 220, 3, 0.5);
-    floatText(P.x, P.y - 26, '-' + Math.round(MP.lastHp - P.hp), '#fca5a5', 16);
-  }
-  MP.lastHp = P.hp;
-
-  /* ---- enemies: matched by id so each one keeps its own easing ---- */
-  const prev = MP.byId || (MP.byId = new Map());
-  const next = new Map();
-  let n = r16();
-  const list = [];
-  for (let i = 0; i < n; i++) {
-    const id = r16();
-    const ti = r8(), bi = r8();
-    const x = rPos(), y = rPos(), ang = rAng();
-    const r = r8(), hpf = r8(), flash = r8(), fl = r8(), sides = r8();
-    const type = MP_ETYPES[ti] || 'grunt';
-    const bossKey = bi ? MP_BOSSES[bi - 1] : null;
-    const def = bossKey ? BOSSES[bossKey] : ETYPE[type];
-    let e = prev.get(id);
-    if (!e) {
-      // Built once, then only moved. Every cosmetic field the renderer reads
-      // is filled from the same tables the host spawned it from, so a remote
-      // enemy draws as exactly the thing it is.
-      e = { id, type, boss: bossKey, x, y, vx: 0, vy: 0, ang,
-            col: def ? def.col : '#f472b6', sides, r, maxHp: 100, hp: 100,
-            t: 0, cd: 0, state: 0, phase: 0, atk: 0, atkT: 0, wob: rnd(TAU),
-            spin: rnd(0.6, -0.6), flash: 0, slow: 0, slowT: 0, dead: false,
-            elite: false, phased: false, invuln: 0, shadow: 0, hitCd: 0,
-            absorb: 0, armor: 0, dr: 0, dmg: 0, xp: 0, score: 0 };
-      e.px = x; e.py = y; e.pang = ang;
-    } else {
-      e.px = e.x; e.py = e.y; e.pang = e.ang;
-    }
-    e.tx = x; e.ty = y; e.tang = ang; e.lerp = 0;
-    e.r = r; e.sides = sides; e.hp = hpf; e.maxHp = 255;
-    e.flash = flash / 255;
-    e.elite = !!(fl & 1); e.phased = !!(fl & 2); e.invuln = (fl & 4) ? 1 : 0;
-    e.shadow = (fl & 8) ? 1 : 0; e.virus = !!(fl & 16); e.rage = (fl & 32) ? 1 : 0;
-    e.hacked = !!(fl & 64);
-    if (e.hacked) { e.col = HACK_COL; e.hackId = id; }
-    e.t += MP_LERP;
-    next.set(id, e);
-    list.push(e);
-  }
-  /* Anything that was on the last snapshot and is not on this one either died
-     or drifted out of the range the host bothers to send. Close in, it died —
-     and a kill with no bang reads as a rendering glitch. */
-  for (const [id, old] of prev) {
-    if (next.has(id) || len(old.x - P.x, old.y - P.y) > 700) continue;
-    burst(old.x, old.y, old.type === 'boss' ? 40 : 14, old.col, 250, 3, 0.5);
-    ringFx(old.x, old.y, old.r * 0.5, old.r * 2.6, old.col, 0.32, 2);
-    if (old.type === 'boss') { Audio_.boom(); shake(0.5); } else Audio_.kill();
-  }
-  MP.byId = next;
-  enemies = list;
-
-  n = r16();
-  bullets = [];
-  for (let i = 0; i < n; i++) {
-    const x = rPos(), y = rPos(), vx = rI(), vy = rI(), r = r8() / 4, cr = r8();
-    bullets.push({ x, y, vx, vy, r, crit: !!cr, px: x - vx * 0.02, py: y - vy * 0.02,
-                   dmg: 0, life: 9, pierce: 0, ric: 0, dist: 0, hits: null,
-                   wob: rnd(TAU), mine: true });
-  }
-
-  n = r16();
-  ebullets = [];
-  for (let i = 0; i < n; i++) {
-    const x = rPos(), y = rPos(), vx = rI(), vy = rI(), r = r8(), ki = r8(), ci = r8();
-    ebullets.push({ x, y, vx, vy, r, dmg: 0, life: 9,
-                    col: MP_COLS[ci] || '#f87171',
-                    kind: ki ? MP_BOSSES[ki - 1] : null, spin: rnd(TAU) });
-  }
-
-  n = r16();
-  gems = [];
-  for (let i = 0; i < n; i++)
-    gems.push({ x: rPos(), y: rPos(), r: r8(), vx: 0, vy: 0, v: 1, life: 9 });
-
-  n = r16();
-  drops = [];
-  for (let i = 0; i < n; i++) {
-    const x = rPos(), y = rPos(), ki = r8(), r = r8();
-    const kind = MP_DROPS[ki] || 'credit';
-    drops.push({ x, y, r, kind, vx: 0, vy: 0, v: 1, life: 9, t: rnd(TAU),
-                 col: kind === 'heal' ? COL.hp : kind === 'credit' ? '#fbbf24' : '#f0abfc' });
-  }
-
-  n = r16();
-  hazards = [];
-  for (let i = 0; i < n; i++) {
-    const ki = r8(), x = rPos(), y = rPos(), r = r16(), ang = rAng();
-    const t = rF(), st = r8(), fl = r8(), life = rF();
-    const kind = MP_HAZ[ki] || 'fire';
-    hazards.push({ kind, x, y, r, ang, t, state: st, life, max: Math.max(life, 1),
-                   tick: 0, cd: 0, dmg: 0,
-                   friendly: !!(fl & 1), flying: !!(fl & 2), embedded: !!(fl & 4),
-                   rot: ang, spin: 0, vx: 0, vy: 0, embT: t,
-                   col: kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
-                      : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9'
-                      : kind === 'delete' ? '#f87171' : kind === 'mirror' ? '#5eead4'
-                      : '#f97316' });
-  }
-
-  n = r16();
-  mortars = [];
-  for (let i = 0; i < n; i++)
-    mortars.push({ x: rPos(), y: rPos(), r: r16(), t: rF(), max: rF(),
-                   col: MP_COLS[r8()] || '#fbbf24', big: !!r8(), dmg: 0 });
-
-  n = r16();
-  portals = [];
-  for (let i = 0; i < n; i++) {
-    const x = rPos(), y = rPos(), r = r16(), t = rF(), alt = r8();
-    portals.push({ x, y, r, t, arm: 0, kind: alt ? 'alt' : 'normal',
-                   def: alt ? STAGES[0] : STAGES[0] });
-  }
-  MP.snapT = 0;
-}
-
-/* --------------------------- guest: the local frame ----------------------- */
-let mpInSeq = 1, mpInT = 0;
-
-function mpSendInput() {
-  if (!netLive()) return;
-  let ix = 0, iy = 0, fire = false, dash = false;
-  if (state === 'play') {
-    if (keys['a'] || keys['arrowleft'])  ix -= 1;
-    if (keys['d'] || keys['arrowright']) ix += 1;
-    if (keys['w'] || keys['arrowup'])    iy -= 1;
-    if (keys['s'] || keys['arrowdown'])  iy += 1;
-    if (touchUI.move) {
-      const dx = touchUI.move.x - touchUI.move.ox, dy = touchUI.move.y - touchUI.move.oy;
-      const d = len(dx, dy);
-      if (d > 6) { const m = Math.min(1, d / 62) / d; ix = dx * m; iy = dy * m; }
-    }
-    const il = len(ix, iy);
-    if (il > 1) { ix /= il; iy /= il; }
-    fire = mouse.down || autoFire || keys['j'];
-    if (isTouch) {
-      if (touchUI.aim) {
-        const dx = touchUI.aim.x - touchUI.aim.ox, dy = touchUI.aim.y - touchUI.aim.oy;
-        if (len(dx, dy) > 10) P.ang = Math.atan2(dy, dx);
-        fire = true;
-      } else {
-        const t = nearestEnemy(P.x, P.y, 900);
-        if (t) { P.ang = angLerp(P.ang, Math.atan2(t.y - P.y, t.x - P.x), 0.2); fire = true; }
-        else fire = false;
-      }
-    } else {
-      mouse.wx = (aimX() - W / 2 - cam.sx) / camZoom + cam.x;
-      mouse.wy = (aimY() - H / 2 - cam.sy) / camZoom + cam.y;
-      P.ang = Math.atan2(mouse.wy - P.y, mouse.wx - P.x);
-    }
-    if (keys[' '] || keys['shift']) { dash = true; keys[' '] = false; keys['shift'] = false; }
-  }
-  MP.wantMx = ix; MP.wantMy = iy;
-  MP.wantFire = fire;
-  if (dash) MP.wantDash = true;
-
-  wSeek(0);
-  w8(MSG.INPUT);
-  w16(mpInSeq = (mpInSeq + 1) & 0xffff);
-  wI(Math.round(ix * 1000)); wI(Math.round(iy * 1000));
-  wAng(P.ang);
-  w8((MP.wantFire ? 1 : 0) | (MP.wantDash ? 2 : 0));
-  netSend(wOut(), false);
-  MP.wantDash = false;
-}
-
-/* The guest's own hull, run forward locally with the same maths the host uses
-   for it. Divergence is corrected on every snapshot, so this only ever has to
-   be right for the sixteen milliseconds before the next correction lands. */
-function mpPredict(dt) {
-  P.iframe = Math.max(0, P.iframe - dt);
-  P.hurtFlash = Math.max(0, P.hurtFlash - dt * 2.4);
-  if (MP.down) return;
-  const C = CHARS[selectedChar] || CHARS[0];
-  if (P.dashT > 0) {
-    P.dashT -= dt;
-    P.ghosts.push({ x: P.x, y: P.y, ang: P.ang, t: 1 });
-    if (P.ghosts.length > 14) P.ghosts.shift();
-  } else {
-    if (P.ghosts.length) P.ghosts.shift();
-    const k = 1 - Math.exp(-16 * dt);
-    P.vx = lerp(P.vx, (MP.wantMx || 0) * C.speed, k);
-    P.vy = lerp(P.vy, (MP.wantMy || 0) * C.speed, k);
-  }
-  P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
-  P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
-  if (len(P.vx, P.vy) > 40 && rnd() < 0.5) {
-    const a = Math.atan2(-P.vy, -P.vx);
-    spawnPart(P.x + Math.cos(a) * 8, P.y + Math.sin(a) * 8,
-      Math.cos(a) * rnd(70, 20), Math.sin(a) * rnd(70, 20),
-      rnd(3, 1.4), '#38bdf8', rnd(0.3, 0.14), 0.9);
-  }
-}
-
-// Ease every interpolated body toward the position the last snapshot gave it.
-function mpEase(dt) {
-  const k = Math.min(1, dt / MP_LERP);
-  for (const e of enemies) {
-    if (e.tx === undefined) continue;
-    e.lerp = Math.min(1, (e.lerp || 0) + k);
-    e.x = lerp(e.px, e.tx, e.lerp);
-    e.y = lerp(e.py, e.ty, e.lerp);
-    e.ang = angLerp(e.pang, e.tang, e.lerp);
-  }
-  const hs = MP.hostShip;
-  if (hs.seen) {
-    hs.lerp = Math.min(1, (hs.lerp || 0) + k);
-    hs.x = lerp(hs.px, hs.tx, hs.lerp);
-    hs.y = lerp(hs.py, hs.ty, hs.lerp);
-    hs.ang = angLerp(hs.pang, hs.tang, hs.lerp);
-    if (hs.dash) {
-      hs.ghosts.push({ x: hs.x, y: hs.y, ang: hs.ang, t: 1 });
-      if (hs.ghosts.length > 14) hs.ghosts.shift();
-    } else if (hs.ghosts.length) hs.ghosts.shift();
-  }
-  // projectiles are dead-reckoned: they are the fastest thing on screen and
-  // easing them would read as lag on exactly the objects you dodge
-  for (const b of bullets) { b.px = b.x; b.py = b.y; b.x += b.vx * dt; b.y += b.vy * dt; }
-  for (const b of ebullets) { b.x += b.vx * dt; b.y += b.vy * dt; }
-}
-
-function mpGuestUpdate(dt) {
-  MP.snapT += dt;
-  mpInT -= dt;
-  if (mpInT <= 0) { mpInT = 1 / 60; mpSendInput(); }
-  mpPredict(dt);
-  mpEase(dt);
-  // the music tracks the room the guest is actually standing in
-  Audio_.update(clamp(enemies.length / 26 + wave / 22, 0, 1));
-  updateParticles(dt); ashTick(dt);
-  updateGWaves(dt);
-  updateMalFx(dt);
-  camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
-  updateCamera(dt);
-  bannerT = Math.max(0, bannerT - dt);
-  if (shopMsgT > 0) shopMsgT -= dt;
-  if (uiArm > 0) uiArm -= dt;
-  if (state === 'gfx' && fxMeasuring) fxMeasureStep();   // local panel, local clock
-  // the host died: show the same board the host is looking at
-  if (MP.hostState === 'dead' && state === 'play') {
-    state = 'dead';
-    lastStats = MP.overStats ||
-      { score, wave, kills: 0, level: P.level, time: elapsed,
-        sector: stage.name, loop: loopNum, isRecord: false };
-  } else if (MP.hostState !== 'dead' && state === 'dead') {
-    state = 'play';                       // the host started another run
-  }
-  /* A snapshot drought is usually the host's tab sitting in the background,
-     not a dead link — the heartbeat is the thing that decides that. Say so
-     and keep drawing the last picture we were given. */
-  MP.stalled = MP.snapT > 1.5;
-}
-
-/* ------------------------------- both ships ------------------------------- */
 function mpHullPath(charIdx) {
   hullPath((CHARS[charIdx] || CHARS[0]).id);
 }
@@ -59259,17 +58593,9 @@ function mpDrawOther(o, charIdx, col, label, hp, maxHp, down) {
 
 // Called from render(): whichever ship is not the one you are flying.
 function mpDrawCoopShip() {
-  if (!MP.on) return;
-  if (MP.role === 'host' || LS.on) {
-    if (!Wing.live) return;
-    mpDrawOther(Wing, Wing.charIdx, (CHARS[Wing.charIdx] || CHARS[0]).col,
-                MP.role === 'host' ? (MP.peerName || 'WINGMAN') : 'YOU', Wing.hp, Wing.maxHp, Wing.down);
-  } else {
-    const hs = MP.hostShip;
-    if (!hs.seen) return;
-    mpDrawOther(hs, hs.charIdx, (CHARS[hs.charIdx] || CHARS[0]).col,
-                MP.peerName || 'HOST', hs.hp, hs.maxHp, hs.down);
-  }
+  if (!MP.on || !Wing.live) return;
+  mpDrawOther(Wing, Wing.charIdx, (CHARS[Wing.charIdx] || CHARS[0]).col,
+              MP.role === 'host' ? (MP.peerName || 'WINGMAN') : 'YOU', Wing.hp, Wing.maxHp, Wing.down);
 }
 
 /* ------------------------------- co-op HUD -------------------------------- */
@@ -59288,9 +58614,9 @@ function mpDrawHud() {
     return;
   }
 
-  const partnerHp = MP.role === 'host' ? Wing.hp : LS.on ? P.hp : MP.hostShip.hp;
-  const partnerMax = MP.role === 'host' ? Wing.maxHp : LS.on ? P.maxHp : MP.hostShip.maxHp;
-  const down = MP.role === 'host' ? Wing.down : LS.on ? !!P.down : !!MP.hostShip.down;
+  const partnerHp = MP.role === 'host' ? Wing.hp : P.hp;
+  const partnerMax = MP.role === 'host' ? Wing.maxHp : P.maxHp;
+  const down = MP.role === 'host' ? Wing.down : !!P.down;
   const label = MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'HOST');
   const col = down ? '#f87171' : WING_COL;
 
@@ -59335,42 +58661,12 @@ function mpDrawHud() {
   }
   ctx.restore();
 
-  // The guest cannot act while the host is in a shop or an upgrade screen, so
-  // say what is happening rather than leaving them staring at a frozen room.
-  if (MP.role === 'guest' && !LS.on && MP.hostState !== 'play' && MP.hostState !== 'dead') {
-    const msg = MP.hostState === 'levelup' ? 'CHOOSING AN UPGRADE'
-              : MP.hostState === 'shop'    ? 'IN THE SHOP'
-              : MP.hostState === 'planet'  ? 'AT THE PLANETARIUM'
-              : MP.hostState === 'library' ? 'IN THE LIBRARY'
-              : MP.hostState === 'pause'   ? 'PAUSED'
-              : MP.hostState === 'talk' || MP.hostState === 'devtalk' ? 'TALKING'
-              : 'BUSY';
-    // the DOWN banner owns H-118..H-60 when it is up, so sit clear above it
-    const sw = Math.min(280, W - 32), sx = W / 2 - sw / 2;
-    const sy = P.down ? H - 160 : H - 92;
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(3,6,12,0.82)';
-    roundRect(sx, sy, sw, 36, 9); ctx.fill();
-    ctx.strokeStyle = rgba(WING_COL, 0.3);
-    roundRect(sx, sy, sw, 36, 9); ctx.stroke();
-    const line1 = clipText(MP.peerName || 'HOST', 14).toUpperCase() + ' IS ' + msg;
-    fitFont(line1, sw - 24, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
-    ctx.fillStyle = WING_COL;
-    ctx.fillText(line1, W / 2, sy + 14);
-    fitFont('the room is holding — you can still move', sw - 24, '500', 9,
-            "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
-    ctx.fillStyle = '#64748b';
-    ctx.fillText('the room is holding — you can still move', W / 2, sy + 27);
-    ctx.restore();
-  }
-  if ((MP.role === 'guest' || LS.on) && MP.stalled) {
+  if (MP.stalled) {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = rgba('#fbbf24', 0.6 + Math.sin(uiTime * 5) * 0.35);
-    ctx.fillText(LS.on ? 'WAITING FOR ' + (MP.peerName || 'YOUR PARTNER').toUpperCase() + ' — ' + LS.waitT.toFixed(0) + 's'
-                       : 'WAITING FOR THE HOST — ' + (Net.quiet || 0).toFixed(0) + 's',
+    ctx.fillText('WAITING FOR ' + (MP.peerName || 'YOUR PARTNER').toUpperCase() + ' — ' + LS.waitT.toFixed(0) + 's',
                  W / 2, 74);
     ctx.restore();
   }
@@ -59546,7 +58842,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0, build: LS_WANT ? buildId() : '',
+    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar,
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 
@@ -59671,8 +58967,7 @@ function lanPilots(y) {
 function lanStatusLine(y) {
   const phase = Net.phase;
   const txt = phase === 'failed' ? Net.note || 'connection failed'
-            : phase === 'live'   ? 'connected  ·  ' + (Net.relayed ? 'relayed  ·  ' : '') + (Net.ping || 0) + 'ms' +
-                                   (MP.ls ? '  ·  lockstep' : MP.lsNote ? '  ·  ' + MP.lsNote : '')
+            : phase === 'live'   ? 'connected  ·  ' + (Net.relayed ? 'relayed  ·  ' : '') + (Net.ping || 0) + 'ms'
             : phase === 'connecting' ? 'handshaking…'
             : phase === 'waiting' ? 'waiting for a wingman…'
             : phase === 'signalling' ? (Net.note || 'connecting…')
@@ -59718,7 +59013,7 @@ function drawLan() {
     lanButton('JOIN A RUN', 'j', cx + 10, H / 2 + 40, 200, 52, COL.player,
               'you type a code — J');
     ctx.textAlign = 'center';
-    const homeCopy = 'the host runs the game and keeps the record  ·  the wingman shares the build';
+    const homeCopy = 'both of you run the game  ·  the host makes the run\'s choices  ·  either can pause';
     fitFont(homeCopy, LAN_W - 48, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#475569';
     ctx.fillText(homeCopy, cx, H / 2 + 116);

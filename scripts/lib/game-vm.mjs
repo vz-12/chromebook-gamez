@@ -3,7 +3,7 @@
    network are stubs. Enough of a browser for the game to load, step and draw
    (to nowhere), so the tests can play it in plain Node with no packages.
 
-     const g = loadGame('index.html', { w: 1280, h: 720, search: '?lockstep=1' });
+     const g = loadGame('index.html', { w: 1280, h: 720, search: '?beta=1' });
      g.run('update(1 / 60)');            // code in the game's own scope
      g.ctx.someGlobal                     // its globals (lexical ones through run())
      canvasCalls()                        // how many canvas calls drawing has made */

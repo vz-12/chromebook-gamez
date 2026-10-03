@@ -187,8 +187,8 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
 
 function play(sc) {
   ls = 12345;
-  const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720, search: '?lockstep=1' }), hz: sc.hostHz };
-  const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640, search: '?lockstep=1' }), hz: sc.guestHz };
+  const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720 }), hz: sc.hostHz };
+  const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640 }), hz: sc.guestHz };
   H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host), 'setup-host');
   G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest), 'setup-guest');
   H.peer = G; G.peer = H;
@@ -212,7 +212,7 @@ function play(sc) {
   // the handshake, then the host starts the run
   H.g.run('mpOnOpen()'); G.g.run('mpOnOpen()'); ship(H); ship(G);
   now = 200; deliver(H); deliver(G);
-  if (!H.g.run('MP.ls') || !G.g.run('MP.ls')) throw new Error('lockstep was not agreed');
+  if (!H.g.run('MP.ready') || !G.g.run('MP.ready')) throw new Error('the handshake did not finish');
   H.g.run(`runSeedNext = ${sc.seed}; mpStartRun()`); ship(H);   // the host's seed, fixed so a failing run can be replayed
   for (const m of [H, G]) { m.next = now; m.last = now; }
   const tick = m => m.g.run('LS.on ? LS.tick : 0');
@@ -310,11 +310,11 @@ for (const sc of SCENARIOS) {
     (miss.length ? `\n          NOT COVERED: ${miss.join('; ')}` : ''));
 }
 
-/* Two different builds must not try lockstep at all: the smallest change to
-   the game parts them. The hello carries each side's build, and both fall back
-   to the picture stream, saying why. */
+/* Two different builds must not play together at all: the smallest change to
+   the game parts them. The hello carries each side's build, and both refuse,
+   saying why. */
 function buildsCheck() {
-  const H = loadGame(IDX, { w: 1280, h: 720, search: '?lockstep=1' }), G = loadGame(IDX, { w: 900, h: 640, search: '?lockstep=1' });
+  const H = loadGame(IDX, { w: 1280, h: 720 }), G = loadGame(IDX, { w: 900, h: 640 });
   for (const [m, role] of [[H, 'host'], [G, 'guest']])
     m.run(`pageDead = true; Save.profile.gfxSeen = GFX_VER; globalThis.__out = [];
            netSend = function (buf) { __out.push(buf); return true; }; Net.phase = 'live'; Net.role = '${role}';`);
@@ -322,12 +322,13 @@ function buildsCheck() {
   H.run('mpOnOpen()'); G.run('mpOnOpen()');
   const pass = (a, b) => { for (const d of a.run('__out.splice(0)')) { b.ctx.__msg = d; b.run('netOnMessage(__msg)'); } };
   pass(H, G); pass(G, H);
-  return { host: H.run('MP.ls'), guest: G.run('MP.ls'), note: H.run('MP.lsNote') || '' };
+  return { host: H.run('MP.ready'), guest: G.run('MP.ready'), failed: H.run("Net.phase") === 'failed' && G.run("Net.phase") === 'failed',
+           note: H.run('Net.note') || '' };
 }
 if (!ONLY || ONLY.has('builds')) {
-  const b = buildsCheck(), ok = !b.host && !b.guest && !!b.note;
+  const b = buildsCheck(), ok = !b.host && !b.guest && b.failed && /version/.test(b.note);
   if (!ok) failed++;
-  console.log(`${'builds'.padEnd(9)} ${ok ? 'refused' : 'NOT REFUSED'}  two different builds stay on the picture stream${b.note ? ': "' + b.note + '"' : ''}`);
+  console.log(`${'builds'.padEnd(9)} ${ok ? 'refused' : 'NOT REFUSED'}  two different builds do not connect${b.note ? ': "' + b.note + '"' : ''}`);
 }
 console.log(failed ? `\n${failed} FAILED` : '\nall in step');
 process.exit(failed ? 1 : 0);
