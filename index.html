@@ -1125,7 +1125,7 @@ addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
   mouse.down = false;
-  if (state === 'play' && !LS.on) { state = 'pause'; }
+  if (state === 'play') ui('pause');      // in lockstep it pauses both: one player away is both players' problem
 });
 
 cv.addEventListener('mousemove', e => {
@@ -19903,7 +19903,7 @@ const skyNear = (p, far) => Math.hypot(p.x - P.x, p.y - P.y) <= (far || SKY_RANG
 // the chain's k-th newest cross, if it is still on the floor
 const skyCross = (ch, k) => { const c = ch.cleaves[ch.cleaves.length - 1 - (k || 0)]; return c && roninCleaves.includes(c) ? c : null; };
 function skyAim() {
-  const dx = mouse.wx - P.x, dy = mouse.wy - P.y, d = Math.hypot(dx, dy);
+  const dx = P.in.ax - P.x, dy = P.in.ay - P.y, d = Math.hypot(dx, dy);   // the pilot's aim: never this machine's cursor
   const a = d > 1 ? Math.atan2(dy, dx) : P.ang, r = clamp(d, SKY_MIN, SKY_RANGE);
   return skyPt(P.x + Math.cos(a) * r, P.y + Math.sin(a) * r);
 }
@@ -29085,6 +29085,45 @@ function playKey(k) {
     else useRootCmd();
   }
 }
+/* ------------------------------ menu choices ------------------------------
+   (3 Oct 2026, the seeded rework, Phase 2 step 2.) What a choice on a screen
+   does to the run (a card taken, gear worn, an item bought, a line answered,
+   the game paused) goes through ui(), never straight to the function. Alone it
+   acts at once, as it always did. In lockstep co-op it rides the input record
+   and acts on the same step on both machines (lsUiApply): the host makes the
+   run's choices, and either player can pause or resume the shared game. Each
+   act checks its screen is still up when it lands, because by then a second
+   press may already have closed it. */
+const UI_ACTS = {
+  pick:      i => { if (state === 'levelup' && offers[i]) chooseOffer(i); },
+  gearTake:  () => { if (state === 'gear') gearTake(); },
+  gearLeave: () => { if (state === 'gear') gearLeave(); },
+  gearBack:  () => { if (state === 'gear') gearPutBack(); },
+  buy:       i => { if (state === 'shop') buyShop(i); },
+  reroll:    () => { if (state === 'shop') rerollShop(); },
+  shopOut:   () => { if (state === 'shop') closeShop(); },
+  sign:      () => { if (state === 'planet' && !planetRevealed) acceptSign(); },
+  planetOut: () => { if (state === 'planet') leavePlanetarium(); },
+  handOver:  () => { if (state === 'library') handOverCodex(); },
+  keeper:    () => { if (state === 'library' && keeperTalks()) startTalk(); },
+  book:      () => { if (state === 'library') takeBook(); },
+  libOut:    () => { if (state === 'library') leaveLibrary(); },
+  talkNext:  () => { if (state === 'talk') talkAdvance(); },
+  talkYes:   () => { if (state === 'talk') talkAnswer(true); },
+  talkNo:    () => { if (state === 'talk') talkAnswer(false); },
+  devNext:   () => { if (state === 'devtalk') devAdvance(); },
+  devYes:    () => { if (state === 'devtalk') devAnswer(true); },
+  devNo:     () => { if (state === 'devtalk') devAnswer(false); },
+  stay:      () => { if (choice) choiceAnswer(false); },
+  open:      () => { if (choice) choiceAnswer(true); },
+  pause:     () => { if (state === 'play') state = 'pause'; },
+  resume:    () => { if (state === 'pause') state = 'play'; },
+};
+const UI_NAMES = Object.keys(UI_ACTS);          // an act's number on the wire is its place here
+function ui(act, i) {
+  if (LS.on) { lsUi(act, i | 0); return; }     // see LOCKSTEP CO-OP
+  UI_ACTS[act](i | 0);
+}
 function handleKey(k) {
   // volume lives on the slider now, so M is free for the way out
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
@@ -29185,53 +29224,52 @@ function handleKey(k) {
     resetGame(); state = 'play';
     return;
   }
-  if (LS.on && MP.role === 'guest' && state !== 'play' && state !== 'dead') return;   // menus: the host's, for now
   if (state === 'levelup') {
     const i = ['1', '2', '3', '4', '5'].indexOf(k);
-    if (i >= 0 && offers[i]) chooseOffer(i);
+    if (i >= 0 && offers[i]) ui('pick', i);
     return;
   }
   if (state === 'gear') {
     if (uiArm > 0) return;
-    if (k === '1' || k === 'e' || k === 'enter' || k === ' ') gearTake();
-    else if (k === '2' || k === 'q') gearLeave();
-    else if (k === 'escape' || k === 'x') gearPutBack();
+    if (k === '1' || k === 'e' || k === 'enter' || k === ' ') ui('gearTake');
+    else if (k === '2' || k === 'q') ui('gearLeave');
+    else if (k === 'escape' || k === 'x') ui('gearBack');
     return;
   }
   if (state === 'shop') {
     const i = ['1', '2', '3', '4', '5', '6'].indexOf(k);
-    if (i >= 0) buyShop(i);
-    else if (k === 'r') rerollShop();
-    else if (k === 'enter' || k === ' ' || k === 'escape') closeShop();
+    if (i >= 0) ui('buy', i);
+    else if (k === 'r') ui('reroll');
+    else if (k === 'enter' || k === ' ' || k === 'escape') ui('shopOut');
     return;
   }
   if (state === 'planet') {
     if (uiArm > 0) return;
-    if (!planetRevealed && (k === 'a' || k === 'y')) acceptSign();
+    if (!planetRevealed && (k === 'a' || k === 'y')) ui('sign');
     else if (k === 'enter' || k === ' ' || k === 'escape' || k === 'd' || k === 'n')
-      leavePlanetarium();
+      ui('planetOut');
     return;
   }
   if (state === 'library') {
     if (uiArm > 0) return;
-    if (k === 'f' && keeperWants()) handOverCodex();
-    else if (k === 'f' && keeperTalks()) startTalk();
-    else if (k === 'e' || k === 'enter' || k === ' ') takeBook();
-    else if (k === 'escape' || k === 'q') leaveLibrary();
+    if (k === 'f' && keeperWants()) ui('handOver');
+    else if (k === 'f' && keeperTalks()) ui('keeper');
+    else if (k === 'e' || k === 'enter' || k === ' ') ui('book');
+    else if (k === 'escape' || k === 'q') ui('libOut');
     return;
   }
   if (state === 'talk') {
     if (talkAsk) {
-      if (k === 'y') talkAnswer(true);
-      else if (k === 'n' || k === 'escape') talkAnswer(false);
-    } else if (k === ' ' || k === 'enter' || k === 'e') talkAdvance();
+      if (k === 'y') ui('talkYes');
+      else if (k === 'n' || k === 'escape') ui('talkNo');
+    } else if (k === ' ' || k === 'enter' || k === 'e') ui('talkNext');
     return;
   }
   if (state === 'devtalk') {
     if (devAsk) {
-      if (k === 'y') devAnswer(true);
-      else if (k === 'n' || k === 'escape') devAnswer(false);
-    } else if (k === ' ' || k === 'enter' || k === 'e') devAdvance();
+      if (k === 'y') ui('devYes');
+      else if (k === 'n' || k === 'escape') ui('devNo');
+    } else if (k === ' ' || k === 'enter' || k === 'e') ui('devNext');
     return;
   }
   if (state === 'amalcut') return;         // it does not take input
@@ -29270,10 +29308,11 @@ function handleKey(k) {
     if (k === 'm') { fxMeasureStart(); return; }
     return;
   }
-  if (k === 'g' && !LS.on) { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
-  if ((k === 'p' || k === 'escape') && !LS.on) state = state === 'pause' ? 'play' : 'pause';   // lockstep: a shared game, not one side's to pause
-  if (choice) { if (k === 'y') choiceAnswer(false);
-                else if (k === 'n') choiceAnswer(true); return; }
+  // in lockstep the panel opens only over the shared pause: from play it would stop one machine's run
+  if (k === 'g' && (!LS.on || state === 'pause')) { openGfx(state === 'pause' ? 'pause' : 'play'); return; }
+  if (k === 'p' || k === 'escape') ui(state === 'pause' ? 'resume' : 'pause');   // in lockstep, either player's, for both
+  if (choice) { if (k === 'y') ui('stay');
+                else if (k === 'n') ui('open'); return; }
   /* V is SUPERUSER's fourth while it is on, and the ROOT key's room.clear()
      the rest of the time — so a charge is never spent by reaching for ROOT. */
   /* And OVERDRIVE's fourth, once it has one. */
@@ -29346,8 +29385,8 @@ function quitToMenu() {
 function handleClick() {
   if (choice) {
     const b = choiceButtons();
-    if (inRect(mouse.x, mouse.y, b.stay)) { choiceAnswer(false); return; }
-    if (inRect(mouse.x, mouse.y, b.open)) { choiceAnswer(true); return; }
+    if (inRect(mouse.x, mouse.y, b.stay)) { ui('stay'); return; }
+    if (inRect(mouse.x, mouse.y, b.open)) { ui('open'); return; }
     return;
   }
   if (state === 'name') { if (isTouch) promptName(); return; }
@@ -29395,43 +29434,42 @@ function handleClick() {
   }
   if (state === 'pause') {
     if (inRect(mouse.x, mouse.y, pauseSetRect())) { openSettings('pause'); return; }
-    state = 'play'; return;
+    ui('resume'); return;
   }
   if (uiArm > 0) return;                 // overlay just opened — swallow it
-  if (LS.on && MP.role === 'guest' && state !== 'play' && state !== 'dead') return;   // menus: the host's, for now
   if (state === 'levelup') {
     const i = offerIndexAt(mouse.x, mouse.y);
-    if (i >= 0) chooseOffer(i);
+    if (i >= 0) ui('pick', i);
     return;
   }
   if (state === 'gear') {
     const i = gearHitAt(mouse.x, mouse.y);
-    if (i === 0) gearTake();
-    else if (i === 1) gearLeave();
+    if (i === 0) ui('gearTake');
+    else if (i === 1) ui('gearLeave');
     return;
   }
   if (state === 'shop') {
     const b = shopButtons();
-    if (inRect(mouse.x, mouse.y, b.reroll)) { rerollShop(); return; }
-    if (inRect(mouse.x, mouse.y, b.leave))  { closeShop(); return; }
+    if (inRect(mouse.x, mouse.y, b.reroll)) { ui('reroll'); return; }
+    if (inRect(mouse.x, mouse.y, b.leave))  { ui('shopOut'); return; }
     const i = shopIndexAt(mouse.x, mouse.y);
-    if (i >= 0) buyShop(i);
+    if (i >= 0) ui('buy', i);
     return;
   }
   if (state === 'talk') {
     if (uiArm > 0) return;
-    if (!talkAsk) { talkAdvance(); return; }
+    if (!talkAsk) { ui('talkNext'); return; }
     const b = talkButtons();
-    if (inRect(mouse.x, mouse.y, b.yes)) talkAnswer(true);
-    else if (inRect(mouse.x, mouse.y, b.no)) talkAnswer(false);
+    if (inRect(mouse.x, mouse.y, b.yes)) ui('talkYes');
+    else if (inRect(mouse.x, mouse.y, b.no)) ui('talkNo');
     return;
   }
   if (state === 'devtalk') {
     if (uiArm > 0) return;
-    if (!devAsk) { devAdvance(); return; }
+    if (!devAsk) { ui('devNext'); return; }
     const b = devButtons();
-    if (inRect(mouse.x, mouse.y, b.yes)) devAnswer(true);
-    else if (inRect(mouse.x, mouse.y, b.no)) devAnswer(false);
+    if (inRect(mouse.x, mouse.y, b.yes)) ui('devYes');
+    else if (inRect(mouse.x, mouse.y, b.no)) ui('devNo');
     return;
   }
   if (state === 'amalcut') return;
@@ -29459,16 +29497,16 @@ function handleClick() {
   }
   if (state === 'library') {
     const b = libraryButtons();
-    if (b.hand && inRect(mouse.x, mouse.y, b.hand)) { handOverCodex(); return; }
-    if (b.talk && inRect(mouse.x, mouse.y, b.talk)) { startTalk(); return; }
-    if (inRect(mouse.x, mouse.y, b.take)) { takeBook(); return; }
-    if (inRect(mouse.x, mouse.y, b.leave)) leaveLibrary();
+    if (b.hand && inRect(mouse.x, mouse.y, b.hand)) { ui('handOver'); return; }
+    if (b.talk && inRect(mouse.x, mouse.y, b.talk)) { ui('keeper'); return; }
+    if (inRect(mouse.x, mouse.y, b.take)) { ui('book'); return; }
+    if (inRect(mouse.x, mouse.y, b.leave)) ui('libOut');
     return;
   }
   if (state === 'planet') {
     const b = planetButtons();
-    if (!planetRevealed && inRect(mouse.x, mouse.y, b.accept)) { acceptSign(); return; }
-    if (inRect(mouse.x, mouse.y, b.leave)) leavePlanetarium();
+    if (!planetRevealed && inRect(mouse.x, mouse.y, b.accept)) { ui('sign'); return; }
+    if (inRect(mouse.x, mouse.y, b.leave)) ui('planetOut');
   }
 }
 /* What a level is worth to a hull with no cards to spend it on. Deliberately
@@ -29821,11 +29859,15 @@ function update(dt) {
   if (state === 'play') simTimersTick(dt);   // the game's own delays: see simAfter
   /* Ahead of the wave ticker on purpose: it clears the floor, and if the
      spawner still ran the room would quietly refill behind the moment. */
-  if (intrusion) { intrusionTick(dt); return; }
-  if (amalOpen) { amalOpenTick(dt); return; }
-  if (choice)   { choiceTick(dt); return; }
-  if (campVisit) { campVisitTick(dt); return; }
-  if (turning)   { turningTick(dt); return; }
+  /* The graphics panel holds the run as pause does, the room's own scenes
+     included; they used to play on behind it. In lockstep it opens over the
+     shared pause on one machine only, and must move nothing there. */
+  const held = state === 'gfx';
+  if (intrusion && !held) { intrusionTick(dt); return; }
+  if (amalOpen && !held) { amalOpenTick(dt); return; }
+  if (choice && !held)   { choiceTick(dt); return; }
+  if (campVisit && !held) { campVisitTick(dt); return; }
+  if (turning && !held)   { turningTick(dt); return; }
 
   // cosmetic layers keep running during level-up / shop / death for smoothness
   updateParticles(dt); ashTick(dt);
@@ -37201,6 +37243,7 @@ function render() {
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
+  lsDrawHint();         // lockstep: who is choosing, who paused
   if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn()) drawCrosshair();   // not over a cut-in
   // every other screen has no system cursor either, so it carries the pointer
   if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
@@ -56984,7 +57027,7 @@ const NET_STALE  = 14000;        // silence from a live peer before we call it
 /* Bumped when the wire format changes. Two builds that disagree would trade
    plausible-looking nonsense for a while and then diverge, so they refuse
    each other at the handshake instead. */
-const NET_PROTO = 3;
+const NET_PROTO = 4;                     // 4: lockstep input records carry menu choices
 const NET_SIG = () => NET_PROTO + '.' + Object.keys(ETYPE).length + '.' +
                       Object.keys(BOSSES).length + '.' + STAGES.length;
 
@@ -58047,10 +58090,11 @@ function mpQuit() {
    over a lossy, laggy link.
 
    The host's pilot is P on both machines; the guest's is the wingman, a
-   plain gun, until each gets its full pilot (the plan's Phase 3). Menus are
-   still the host's alone until they travel as input (step 2), so this sits
-   behind a switch: both players open the game with ?lockstep=1, and the
-   picture stream above stays the default until lockstep has proven itself.
+   plain gun, until each gets its full pilot (the plan's Phase 3). Menu
+   choices ride the records too (ui(), lsUiApply): the host makes the run's,
+   and either player can pause the shared game. This sits behind a switch:
+   both players open the game with ?lockstep=1, and the picture stream above
+   stays the default until lockstep has proven itself.
    ========================================================================= */
 const LS_WANT = (() => { try { return /[?&]lockstep=1\b/.test(location.search); } catch (e) { return false; } })();
 const LS_SEND_MAX = 32;               // input records in one packet, at most
@@ -58061,6 +58105,8 @@ const LS_RESEND = 0.05;               // while waiting, our inputs go out again 
    dash's own 0.17 s or a second dash would follow the first. */
 const LS_DELAY_MIN = 3, LS_DELAY_MAX = 8;
 const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e'];   // the keys that act, as they travel
+const LS_UI_GUEST = new Set(['pause', 'resume']);   // the guest's choices; every other is the host's
+const LS_HOST_SCREENS = ['levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk'];
 const LS = {
   on: false, run: 0, tick: 0, delay: LS_DELAY_MIN, acc: 0,
   mine: new Map(), theirs: new Map(),   // step → input record
@@ -58069,6 +58115,9 @@ const LS = {
   waitT: 0, resendT: 0,
   cur: null,                            // the step being played: { host, wing }
   source: null,                         // where our own input comes from: the devices, or a test
+  paused: false, pausedBy: '',          // the shared pause, and whose it was
+  uiQ: [],                              // our menu choices, waiting for the next record: act, index, ...
+  uiBusy: -1,                           // the step our last choice lands on: one at a time
   after: null                           // and a test's hook, run after every step
 };
 // this machine runs the co-op world: the host always, the guest when in lockstep
@@ -58081,10 +58130,12 @@ const mpSim = () => MP.on && (MP.role === 'host' || LS.on);
 function lsWrite(r) {
   wI(Math.round(r.mx * 1000)); wI(Math.round(r.my * 1000));
   wPos(r.ax); wPos(r.ay);
-  w8((r.trig ? 1 : 0) | (r.lmb ? 2 : 0) | (r.auto ? 4 : 0) | (r.dash ? 8 : 0) | (r.touch ? 16 : 0) | (r.taim ? 32 : 0));
+  const u = r.ui && r.ui.length ? r.ui : null;
+  w8((r.trig ? 1 : 0) | (r.lmb ? 2 : 0) | (r.auto ? 4 : 0) | (r.dash ? 8 : 0) | (r.touch ? 16 : 0) | (r.taim ? 32 : 0) | (u ? 64 : 0));
   if (r.taim) { wI(Math.round(r.taim.dx)); wI(Math.round(r.taim.dy)); }
   const p = (r.press || []).map(k => LS_KEYS.indexOf(k)).filter(i => i >= 0);
   w8(p.length); for (const i of p) w8(i);
+  if (u) { w8(u.length >> 1); for (const v of u) w8(v); }   // menu choices: act, index
 }
 function lsRead() {
   const r = newInput();
@@ -58096,6 +58147,8 @@ function lsRead() {
   const n = r8();
   r.press = [];
   for (let i = 0; i < n; i++) { const k = LS_KEYS[r8()]; if (k) r.press.push(k); }
+  r.ui = [];
+  if (b & 64) { const m = r8() * 2; for (let i = 0; i < m; i++) r.ui.push(r8()); }
   r.local = false;
   return r;
 }
@@ -58115,6 +58168,7 @@ function lsBegin(run, delay) {
   }
   LS.hi = delay - 1; LS.peerNeed = 0;
   LS.waitT = 0; LS.resendT = 0; LS.cur = null;
+  LS.paused = false; LS.pausedBy = ''; LS.uiQ.length = 0; LS.uiBusy = -1;
   inputQueue.length = 0;
   inputSource = lsHostInput;
 }
@@ -58132,6 +58186,10 @@ function lsSample() {
   for (let k = LS.hi + 1; k <= s; k++) {
     const rec = newInput();
     (LS.source || inputSample)(rec);
+    if (LS.uiQ.length) {                       // the choices made since: they land on this step
+      rec.ui = LS.uiQ.splice(0);
+      for (let j = 0; j < rec.ui.length; j += 2) if (!LS_UI_GUEST.has(UI_NAMES[rec.ui[j]])) LS.uiBusy = k;
+    }
     LS.mine.set(k, lsCanon(rec, true));
   }
   LS.hi = s;
@@ -58172,6 +58230,8 @@ function lsNeed() { let s = LS.tick; while (LS.theirs.has(s)) s++; return s; }
 function lsStep() {
   const t = LS.tick, me = LS.mine.get(t), them = LS.theirs.get(t);
   LS.cur = MP.role === 'host' ? { host: me, wing: them } : { host: them, wing: me };
+  lsUiApply(LS.cur.host, 'host');           // the step's menu choices first, the host's before the guest's
+  lsUiApply(LS.cur.wing, 'guest');
   update(STEP);
   LS.theirs.delete(t);
   if (t < LS.peerNeed) LS.mine.delete(t);    // the partner has it, and now so have we
@@ -58222,6 +58282,55 @@ function lsWingInput() {
       IN.fire = !!(w.taim || t);
     }
   } else IN.ang = Math.atan2(w.ay - Wing.y, w.ax - Wing.x);
+}
+
+/* A menu choice, in lockstep: into our next record, not into the game. The
+   guest may only pause and resume; the run's choices are the host's. One
+   choice at a time, and none before its screen is armed: the act lands a few
+   steps after the press, and the screen is still up until it does. */
+function lsUi(act, i) {
+  const pause = LS_UI_GUEST.has(act);
+  if (!pause && (MP.role !== 'host' || uiArm > 0 || LS.uiBusy >= LS.tick ||
+                 LS.uiQ.some((a, j) => j % 2 === 0 && !LS_UI_GUEST.has(UI_NAMES[a])))) return;
+  LS.uiQ.push(UI_NAMES.indexOf(act), i & 255);
+}
+/* The step's choices, on both machines at once. The arming delay was the
+   chooser's, checked at the press, so it is cleared here: the two machines
+   must not each decide again. A screen one player opened over the shared
+   pause (the codex, settings, graphics) is theirs alone and stops nothing, and
+   a resume closes it. */
+function lsUiApply(rec, who) {
+  if (!rec || !rec.ui || !rec.ui.length) return;
+  for (let j = 0; j < rec.ui.length; j += 2) {
+    const act = UI_NAMES[rec.ui[j]];
+    if (!act || (who === 'guest' && !LS_UI_GUEST.has(act))) continue;
+    uiArm = 0;
+    if (act === 'pause') {
+      if (state === 'play') { state = 'pause'; LS.paused = true; LS.pausedBy = who; }
+    } else if (act === 'resume') {
+      if (LS.paused) { if (state === 'gfx') fxSave(); state = 'play'; LS.paused = false; }
+    } else UI_ACTS[act](rec.ui[j + 1]);
+  }
+}
+// who has the screen: the host's choices on the guest's machine, and whose pause it is
+function lsDrawHint() {
+  if (!LS.on) return;
+  const peer = (MP.peerName || (MP.role === 'host' ? 'YOUR WINGMAN' : 'THE HOST')).toUpperCase();
+  let msg = '';
+  if (state === 'pause') msg = (LS.pausedBy === MP.role ? 'YOU PAUSED' : peer + ' PAUSED') + '  ·  EITHER OF YOU CAN RESUME';
+  else if (MP.role === 'guest' && (LS_HOST_SCREENS.includes(state) || (choice && state === 'play'))) msg = peer + ' IS CHOOSING';
+  if (!msg) return;
+  ctx.save();
+  ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'center';
+  const w = ctx.measureText(msg).width + 36, y = state === 'pause' ? H / 2 + 140 : H - 34;
+  ctx.fillStyle = 'rgba(3,5,10,0.82)';
+  roundRect(W / 2 - w / 2, y - 15, w, 26, 13); ctx.fill();
+  ctx.strokeStyle = rgba(WING_COL, 0.5); ctx.lineWidth = 1;
+  roundRect(W / 2 - w / 2, y - 15, w, 26, 13); ctx.stroke();
+  ctx.fillStyle = WING_COL;
+  ctx.fillText(msg, W / 2, y + 2);
+  ctx.restore();
 }
 
 /* The run's settings, as the host took them, for the header. RUN's sets go

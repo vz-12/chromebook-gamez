@@ -26,11 +26,11 @@ const SHORT = args.includes('--short');
    packets (the inputs) that never arrive. hz: each machine's frame rate.
    freeze: the guest's machine stops for a while, the way a laptop does. */
 const SCENARIOS = [
-  { name: 'lan',      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember' },
-  { name: 'internet', lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true },
-  { name: 'bad',      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
+  { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember' },
+  { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true },
+  { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
                       freeze: { at: 40000, ms: 1800 } },
-  { name: 'saves',    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
+  { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
                       guestSave: true },
 ];
 const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
@@ -39,7 +39,7 @@ const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 let ls = 12345;
 const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 4294967296; };
 
-const SETUP = (role, char, kit, scramble, kitRun) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines)
+const SETUP = (role, char, kit, scramble, kitRun, yes) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines)
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
@@ -53,9 +53,60 @@ const SETUP = (role, char, kit, scramble, kitRun) => `(() => {   // kit: this sa
   netSend = function (buf, reliable) { __out.push({ d: buf, r: !!reliable }); Net.tx += (buf.byteLength || buf.length || 0); Net.txN++; return true; };
   Net.phase = 'live'; Net.role = '${role}';
   const near = (list, S, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - S.x) ** 2 + (o.y - S.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
+  /* The menus, as a player meets them: keys through handleKey, at a human's
+     pace, on this machine only. The host's choices travel and land on both;
+     the guest's presses on the host's screens must change nothing. And the
+     shared pause, from both sides, with a screen of one's own opened over it. */
+  globalThis.__seen = new Set();
+  let shopN = 0;
+  const YES = ${yes ? "'y'" : "'n'"};       // a yes takes the story's turn: THE UNWRITTEN's fight, the amalgam's assembly
+  const HOST_SCREENS = ['levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk'];
+  /* The pauses, one episode after another: who pauses (both at once, in the
+     last), who opens a screen of their own over it, and who resumes. A pause
+     that lands on a menu does nothing (the menu already holds the run), so
+     the pauser tries again until the run is paused. */
+  const EPISODES = [
+    { at: 2000, by: ['guest'], over: { guest: 'x' }, up: 'host' },             // the codex over it, closed by the other's resume
+    { at: 5000, by: ['host'], key: 'escape', over: { host: 'g' }, up: 'guest' },   // graphics over it, the same
+    { at: 7000, by: ['guest'], up: 'guest' },                                   // its own pause, its own resume
+    { at: 8500, by: ['host', 'guest'], up: 'host' },                            // both at the same step
+  ];
+  let ep = 0, pausedAt = -1, tried = -1e9;
+  function pauses(k) {
+    const e = EPISODES[ep], me = '${role}';
+    if (!e) return;
+    if (!LS.paused) {
+      if (pausedAt >= 0) { ep++; pausedAt = -1; return; }                  // resumed: on to the next
+      if (k >= e.at && state === 'play' && e.by.includes(me) && k - tried >= 30) { tried = k; handleKey(e.key || 'p'); }
+      return;
+    }
+    if (pausedAt < 0) pausedAt = k;
+    if (e.over && e.over[me] && k === pausedAt + 30) handleKey(e.over[me]);
+    if (e.up === me && state === 'pause' && k >= pausedAt + 150 && (k - pausedAt) % 30 === 0) handleKey('p');
+  }
+  function menus(k) {
+    __seen.add(state);
+    pauses(k);
+    if (k % 9) return;
+    if ('${role}' !== 'host') {
+      if (HOST_SCREENS.includes(state) || choice) handleKey(['1', '2', 'e', 'enter', ' ', 'r', 'y', 'n', 'a', 'f', 'x', 'q'][(k / 9 | 0) % 12]);
+      return;
+    }
+    if (state !== 'shop') shopN = 0;
+    if (state === 'levelup') handleKey(String(1 + (k / 9 | 0) % Math.max(1, offers.length)));
+    else if (state === 'gear') handleKey(['1', '2', 'x'][(k / 9 | 0) % 3]);
+    else if (state === 'shop') { if (uiArm <= 0) handleKey(['1', 'r', '2', '3', 'enter'][Math.min(4, shopN++)]); }   // not before it is armed
+    else if (state === 'planet') handleKey(planetRevealed ? 'enter' : 'a');
+    else if (state === 'library') handleKey('e');
+    else if (state === 'talk') handleKey(talkAsk ? YES : ' ');
+    else if (state === 'devtalk') handleKey(devAsk ? YES : ' ');
+    else if (state === 'play' && choice) handleKey('n');
+  }
   // a player: only ever its own machine's input record
+  let sampled = -1;
   LS.source = rec => {
-    const S = '${role}' === 'host' ? P : Wing, k = LS.tick;
+    const S = '${role}' === 'host' ? P : Wing, k = sampled = Math.max(sampled + 1, LS.delay);   // the step this record is for
+    menus(k);
     let ix = 0, iy = 0;
     const [g, gd] = near(gems.concat(drops), S);
     if (g && gd < 900 * 900) { ix = g.x > S.x + 6 ? 1 : g.x < S.x - 6 ? -1 : 0; iy = g.y > S.y + 6 ? 1 : g.y < S.y - 6 ? -1 : 0; }
@@ -71,12 +122,25 @@ const SETUP = (role, char, kit, scramble, kitRun) => `(() => {   // kit: this sa
       if (k % 75 === 40) rec.press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) rec.press.push('f');
     }
+    if ('${role}' === 'host' && gearNear && k % 30 === 0) rec.press.push('e');   // THE VAGRANT: a look at what is on the floor
   };
   const r = v => typeof v === 'number' ? (Number.isFinite(v) ? +v.toPrecision(12) : String(v)) : (v === undefined ? null : v);
   const pk = (o, ks) => ks.map(k => r(o[k]));
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   globalThis.__prints = new Map();
   globalThis.__stat = { waves: 0, bosses: new Set() };
+  // every menu choice that lands, counted where it lands (pause and resume are counted from LS.paused)
+  globalThis.__acts = {};
+  let __was = false;
+  for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { __acts[a] = (__acts[a] || 0) + 1; f(i); }; }
+  globalThis.OPENERS_LEFT = () => OPENERS.map(o => o[0]);
+  const OPENERS = [
+    [1500, () => openPlanetarium()],
+    [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
+    [3200, () => startTalk()],
+    [4200, () => startDevTalk()],
+    [6000, () => openShop()],
+  ];
   // the same moment on both machines: test conditions, menus, and the fingerprint
   LS.after = () => {
     const t = LS.tick;
@@ -86,18 +150,21 @@ const SETUP = (role, char, kit, scramble, kitRun) => `(() => {   // kit: this sa
       else if (P.charId === 'ember') P.vent = VENT_MAX;
       else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
     }
-    if (state === 'levelup' && offers[0]) chooseOffer(0);
-    else if (state !== 'play' && state !== 'dead') state = 'play';
+    // the rarer screens, opened on both machines at once when the run is in play; the host's bot answers them
+    const shared = LS.paused ? 'pause' : state;
+    __seen.add(state);
+    if (LS.paused !== __was) { __acts[LS.paused ? 'pause' : 'resume'] = (__acts[LS.paused ? 'pause' : 'resume'] || 0) + 1; __was = LS.paused; }
+    if (OPENERS.length && t >= OPENERS[0][0] && shared === 'play' && !choice) OPENERS.shift()[1]();
     __stat.waves = Math.max(__stat.waves, wave);
     for (const e of enemies) if (e.boss) __stat.bosses.add(e.boss);
     const TR = globalThis.__trace;
-    if (TR && t >= TR[0] && t <= TR[1]) (globalThis.__full || (globalThis.__full = new Map())).set(t, JSON.stringify({ rng: simRngState, simTick, wave, state, elapsed: r(elapsed),
+    if (TR && t >= TR[0] && t <= TR[1]) (globalThis.__full || (globalThis.__full = new Map())).set(t, JSON.stringify({ rng: simRngState, simTick, wave, state: shared, elapsed: r(elapsed),
       P: pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'parryT', 'parryCd', 'swingT', 'roninT', 'chain']),
       in: P.in && [P.in.mx, P.in.my, P.in.ax, P.in.ay, P.in.trig, P.in.dash, P.in.press.join('')],
       W: pk(Wing, ['x', 'y', 'vx', 'vy', 'hp', 'dashCh', 'ang', 'down']), Win: [Wing.in.mx, Wing.in.my, Wing.in.ang, Wing.in.fire, Wing.in.dash],
       E: enemies.filter(e => !e.dead).map(e => [e.type, ...pk(e, ['x', 'y', 'hp', 'id'])]),
       B: bullets.length, EB: ebullets.length, G: gems.length, D: drops.length, RUN: RUN_FLAGS.map(k => r(RUN[k])) }));
-    if (t % 60 === 0) __prints.set(t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), state,
+    if (t % 60 === 0) __prints.set(t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
       pk(Wing, ['x', 'y', 'vx', 'vy', 'hp', 'dashCh', 'ang', 'down']),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),
@@ -111,8 +178,8 @@ function play(sc) {
   ls = 12345;
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720, search: '?lockstep=1' }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640, search: '?lockstep=1' }), hz: sc.guestHz };
-  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit), 'setup-guest');
+  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes), 'setup-host');
+  G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit, sc.yes), 'setup-guest');
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
@@ -135,7 +202,7 @@ function play(sc) {
   H.g.run('mpOnOpen()'); G.g.run('mpOnOpen()'); ship(H); ship(G);
   now = 200; deliver(H); deliver(G);
   if (!H.g.run('MP.ls') || !G.g.run('MP.ls')) throw new Error('lockstep was not agreed');
-  H.g.run('mpStartRun()'); ship(H);
+  H.g.run(`runSeedNext = ${sc.seed}; mpStartRun()`); ship(H);   // the host's seed, fixed so a failing run can be replayed
   for (const m of [H, G]) { m.next = now; m.last = now; }
   const tick = m => m.g.run('LS.on ? LS.tick : 0');
   const limit = now + TICKS * 1000 / 60 * 4;
@@ -174,6 +241,9 @@ function play(sc) {
     wait: [H.waitFrames / Math.max(1, H.frames), G.waitFrames / Math.max(1, G.frames)],
     kbps: [H.g.run('Net.tx') / 1024 / secs, G.g.run('Net.tx') / 1024 / secs],
     delay: H.g.run('LS.delay'), realSecs: secs, speed: Math.min(tick(H), tick(G)) / 60 / ((now - 200) / 1000),
+    acts: [JSON.parse(H.g.run('JSON.stringify(__acts)')), JSON.parse(G.g.run('JSON.stringify(__acts)'))],
+    seen: [H.g.run('[...__seen]'), G.g.run('[...__seen]')],
+    left: H.g.run('OPENERS_LEFT()').filter(t => t < TICKS),
   };
 }
 
@@ -185,12 +255,28 @@ for (const sc of SCENARIOS) {
   let r, err = null;
   try { r = play(sc); } catch (e) { err = e; }
   if (err) { failed++; console.log(`${sc.name.padEnd(9)} ERROR ${String(err && err.stack || err).split('\n').slice(0, 4).join(' | ')}`); continue; }
-  const ok = r.firstDiff == null && r.compared >= TICKS / 60 - 2;
+  /* Coverage, or the test proves nothing about menus: cards were picked through
+     the host's keys, the shared pause went both ways, and each side opened a
+     screen of its own over it (cards or gear, and the host's graphics, only
+     in the full run). */
+  const [ah, ag] = r.acts, miss = [];
+  if (!ah.pick && !ah.gearTake && !SHORT) miss.push('no card or gear chosen');   // THE VAGRANT has loot, not cards, and may find none in a minute
+  if (!ah.pause || !ah.resume) miss.push('no shared pause');
+  if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
+  if (!SHORT && !r.seen[0].includes('gfx')) miss.push('host never opened graphics over the pause');
+  const same = JSON.stringify(Object.entries(ah).sort()) === JSON.stringify(Object.entries(ag).sort());
+  const ok = r.firstDiff == null && r.compared >= TICKS / 60 - 2 && !miss.length;
   if (!ok) failed++;
   console.log(`${sc.name.padEnd(9)} ${ok ? 'same' : r.firstDiff != null ? 'DIFFER at ' + (r.firstDiff / 60).toFixed(0) + 's' : 'STALLED'}` +
     `  ${r.compared}s compared · delay ${r.delay} · game ran at ${(r.speed * 100).toFixed(0)}% of real time` +
     ` · ${r.kbps[0].toFixed(1)}/${r.kbps[1].toFixed(1)} KB/s · wave ${r.wave} ${r.bosses.join(',')} · ${((Date.now() - t0) / 1000).toFixed(1)}s` +
-    `  [${sc.lat}±${sc.jit} ms, ${(sc.loss * 100).toFixed(0)}% loss, ${sc.hostHz}/${sc.guestHz} Hz${sc.freeze ? ', guest froze ' + sc.freeze.ms + ' ms' : ''}${sc.guestSave ? ', saves differ' : ''}]`);
+    `  [${sc.lat}±${sc.jit} ms, ${(sc.loss * 100).toFixed(0)}% loss, ${sc.hostHz}/${sc.guestHz} Hz${sc.freeze ? ', guest froze ' + sc.freeze.ms + ' ms' : ''}${sc.guestSave ? ', saves differ' : ''}]` +
+    `
+          menus: ${Object.entries(ah).sort().map(([k, n]) => k + ' ' + n).join(' · ')}${same ? '' : '  (the guest saw a different count: it may have stopped a step behind)'}` +
+    (r.left.length ? `
+          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +
+    (miss.length ? `
+          NOT COVERED: ${miss.join('; ')}` : ''));
 }
 console.log(failed ? `\n${failed} FAILED` : '\nall in step');
 process.exit(failed ? 1 : 0);

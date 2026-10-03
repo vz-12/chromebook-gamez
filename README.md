@@ -212,6 +212,17 @@ the guest's machine also freezes for almost two seconds, and two players
 whose saves disagree. Both scripts load the game through
 `scripts/lib/game-vm.mjs`.
 
+Menus are input too. A choice on a screen (a card, gear, the shop, the
+planetarium, the library, the talks, the founder's choice, pause) goes
+through `ui()`. Alone it acts at once. In lockstep it rides the input record
+and lands on the same step on both machines. The host makes the run's
+choices; either player can pause or resume the shared game, and can open the
+codex, settings or graphics over the pause on their own machine. The host's
+bot plays every screen through `handleKey`, and the guest's bot presses keys
+on the host's screens, which must change nothing. Both pause, resume and
+open their own screens over the pause, and the run must cover all of it.
+Each scenario's seed is fixed, so a failure replays exactly.
+
 ## Limits worth knowing (Workers Free plan)
 
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the

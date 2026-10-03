@@ -94,6 +94,8 @@ vm.runInContext(`(() => {
     if (b.devices) {
       for (const key of ['w', 'a', 's', 'd', ' ', 'shift', 'j', 'z', 'x', 'c', 'v', 'f', 'q', 'e']) keys[key] = rnd() < 0.5;
       mouse.down = rnd() < 0.5; mouse.x = rnd(W); mouse.y = rnd(H); autoFire = rnd() < 0.5;
+      // and the cursor's world point, which only the drawing may read (CLEAR SKY aimed at it once)
+      mouse.wx = rnd(4000) - 2000; mouse.wy = rnd(4000) - 2000;
     }
     if (!b.save) return;
     const only = globalThis.__junkOnly;
