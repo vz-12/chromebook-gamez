@@ -76,6 +76,30 @@ const TAU = Math.PI * 2;
 const rnd  = (a = 1, b = 0) => b + Math.random() * (a - b);
 const rndi = (a, b = 0) => Math.floor(rnd(a, b));
 const pick = arr => arr[(Math.random() * arr.length) | 0];
+/* Two kinds of chance (2 Oct 2026, the seeded co-op rework). What changes
+   the game (spawns, AI, drops, offers, crits, hazards) draws from the run's
+   seeded stream: simRand / simRnd / simRndi / simPick. The same seed and the
+   same inputs then play the same run, on any machine. What only paints or
+   sounds (particles, shake, barks, art seeds) keeps rnd / rndi / pick on
+   Math.random: how often it runs depends on the frame rate and the graphics
+   settings, so it must never move the seeded stream. Math.random is called
+   nowhere else. RNG-AUDIT.md (prepatch) says which is which, and why. */
+let simSeed = 0, simRngState = 0, runSeedNext = null;
+function simRand() {                     // mulberry32, the same as the daily's dailyRng
+  let t = simRngState = (simRngState + 0x6D2B79F5) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const simRnd  = (a = 1, b = 0) => b + simRand() * (a - b);
+const simRndi = (a, b = 0) => Math.floor(simRnd(a, b));
+const simPick = arr => arr[(simRand() * arr.length) | 0];
+function seedSim(seed) { simSeed = seed >>> 0; simRngState = simSeed; }
+// a run's seed: one handed in (runSeedNext: the daily's, later a partner's), else a fresh one
+function freshSeed() {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) return crypto.getRandomValues(new Uint32Array(1))[0];
+  return (rnd() * 4294967296) >>> 0;
+}
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp = (a, b, t) => a + (b - a) * t;
 const len = (x, y) => Math.hypot(x, y);
@@ -275,7 +299,7 @@ function buildGrainTile() {
   const g = grainTile.getContext('2d');
   const img = g.createImageData(S, S);
   for (let i = 0; i < img.data.length; i += 4) {
-    const v = 110 + Math.random() * 90;
+    const v = 110 + rnd() * 90;
     img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
     img.data[i + 3] = 255;
   }
@@ -399,7 +423,7 @@ function postScreen() {
   ctx.globalAlpha = 0.035;
   ctx.globalCompositeOperation = 'lighter';
   const gp = ctx.createPattern(grainTile, 'repeat');
-  ctx.translate((Math.random() * 256) | 0, (Math.random() * 256) | 0);
+  ctx.translate((rnd() * 256) | 0, (rnd() * 256) | 0);
   ctx.fillStyle = gp;
   ctx.fillRect(-256, -256, w + 512, h + 512);
   ctx.restore();
@@ -764,7 +788,7 @@ const Audio_ = {
     // shared noise buffer
     const n = this.ac.sampleRate * 1.2, buf = this.ac.createBuffer(1, n, this.ac.sampleRate);
     const d = buf.getChannelData(0);
-    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    for (let i = 0; i < n; i++) d[i] = rnd() * 2 - 1;
     this.noiseBuf = buf;
     this.ready = true;
     this.nextStep = this.ac.currentTime + 0.1;
@@ -1850,7 +1874,7 @@ function gearRollRar(bias) {
   for (let i = 0; i <= Math.max(0, bias | 0); i++) {
     let tot = 0;
     for (const k in GEAR_RAR_W) tot += GEAR_RAR_W[k];
-    let r = Math.random() * tot, got = 'common';
+    let r = simRand() * tot, got = 'common';
     for (const k in GEAR_RAR_W) { r -= GEAR_RAR_W[k]; if (r <= 0) { got = k; break; } }
     if (GEAR_RAR_ORDER.indexOf(got) > GEAR_RAR_ORDER.indexOf(best)) best = got;
   }
@@ -1863,7 +1887,7 @@ function gearRoll(slot, lv, bias) {
   const cands = GEAR_BASES.filter(b => (!slot || b.slot === slot) && !b.base);
   if (!cands.length) return null;
   let tot = 0; for (const b of cands) tot += b.w;
-  let r = Math.random() * tot, base = cands[cands.length - 1];
+  let r = simRand() * tot, base = cands[cands.length - 1];
   for (const b of cands) { r -= b.w; if (r <= 0) { base = b; break; } }
   return gearMake(base.id, gearRollRar(bias), lv);
 }
@@ -1875,7 +1899,7 @@ function gearMake(baseId, rar, lv) {
   const base = gearBase(baseId);
   if (!base) return null;
   const R = GEAR_RAR[rar] || GEAR_RAR.common;
-  const q = rnd(R.q[1], R.q[0]);
+  const q = simRnd(R.q[1], R.q[0]);
   const lvm = gearLvMul(lv || 0);
   const s = {};
   for (const k in base.s) {
@@ -1891,10 +1915,10 @@ function gearMake(baseId, rar, lv) {
   const affs = [];
   const pool = GEAR_AFFIX.filter(a => a.on.includes(base.slot));
   for (let i = 0; i < R.aff && pool.length; i++) {
-    const a = pool.splice(rndi(pool.length), 1)[0];
+    const a = pool.splice(simRndi(pool.length), 1)[0];
     let v;
-    if (GB_MUL.includes(a.k)) v = 1 + (rnd(a.hi, a.lo) - 1) * (0.8 + 0.4 * q);
-    else v = rnd(a.hi, a.lo) * (0.8 + 0.4 * q);
+    if (GB_MUL.includes(a.k)) v = 1 + (simRnd(a.hi, a.lo) - 1) * (0.8 + 0.4 * q);
+    else v = simRnd(a.hi, a.lo) * (0.8 + 0.4 * q);
     if (GB_SCALED.includes(a.k)) v *= lvm;
     affs.push({ id: a.id, v });
   }
@@ -2582,7 +2606,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   const eliteChance = Math.max(chalElite(),
                       Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45) + hardElite());
   const elite = opts.elite ?? (canElite && (chalElite() >= 1 || w > 3)
-                              && Math.random() < eliteChance);
+                              && simRand() < eliteChance);
   const e = {
     id: ++eid, type, x, y, vx: 0, vy: 0, boss: bKey,
     r: (bd ? bd.r : t.r) * (opts.rs || 1) * (elite ? 1.28 : 1),
@@ -2597,12 +2621,12 @@ function spawnEnemy(type, x, y, opts = {}) {
     sides: skinSides(type, bd ? bd.sides : t.sides),
     xp: t.xp * (elite ? 3 : 1), score: t.score * (elite ? 3 : 1),
     armor: bArmor, absorb: bArmor * 0.25, dr: bDR,
-    elite, flash: 0, slow: 0, slowT: 0, ang: rnd(TAU), spin: rnd(0.6, -0.6),
-    t: 0, cd: rnd(1.2, 0.4), state: 0, gen: opts.gen || 0,
-    phase: 0, atk: 0, atkT: 0, hitCd: 0, wob: rnd(TAU),
+    elite, flash: 0, slow: 0, slowT: 0, ang: simRnd(TAU), spin: simRnd(0.6, -0.6),
+    t: 0, cd: simRnd(1.2, 0.4), state: 0, gen: opts.gen || 0,
+    phase: 0, atk: 0, atkT: 0, hitCd: 0, wob: simRnd(TAU),
     // expansion state: phasing, armour plates, healing beams, blink timers
-    phased: false, phaseT: rnd(2, 0.5), plateAng: 0, healT: 0, ramCd: 0, psn: 0, psnT: 0,
-    blinkT: rnd(1.6, 0.7), invuln: 0, tether: null
+    phased: false, phaseT: simRnd(2, 0.5), plateAng: 0, healT: 0, ramCd: 0, psn: 0, psnT: 0,
+    blinkT: simRnd(1.6, 0.7), invuln: 0, tether: null
   };
   e.hp = e.maxHp;
   // Set at spawn, not lazily in the AI: the floor has to exist before the
@@ -2617,7 +2641,7 @@ function spawnRing(type, opts) {
   // spawn just outside the visible area, clamped into the arena
   const view = Math.max(W, H) * 0.62 + 90;
   for (let tries = 0; tries < 24; tries++) {
-    const a = rnd(TAU);
+    const a = simRnd(TAU);
     let x = cam.x + Math.cos(a) * view;
     let y = cam.y + Math.sin(a) * view;
     x = clamp(x, 40, WORLD.w - 40); y = clamp(y, 40, WORLD.h - 40);
@@ -2627,7 +2651,7 @@ function spawnRing(type, opts) {
       return e;
     }
   }
-  return spawnEnemy(type, clamp(P.x + rnd(700, -700), 40, WORLD.w - 40), clamp(P.y + rnd(700, -700), 40, WORLD.h - 40), opts);
+  return spawnEnemy(type, clamp(P.x + simRnd(700, -700), 40, WORLD.w - 40), clamp(P.y + simRnd(700, -700), 40, WORLD.h - 40), opts);
 }
 
 /* -------------------------------- combat --------------------------------- */
@@ -2644,7 +2668,7 @@ function stanceMul() {
 }
 
 function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
-  const isCrit = Math.random() < P.crit;
+  const isCrit = simRand() < P.crit;
   bullets.push({
     x, y,
     vx: Math.cos(ang) * P.bspeed * (opts.sm || 1),
@@ -2656,7 +2680,7 @@ function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
     px: x, py: y, dist: 0,
     // zodiac projectile types
     arrow: P.arrow, venom: P.venom, solar: P.sun, deep: P.deepwater,
-    wob: rnd(TAU), hit: false, mine: !opts.foreign
+    wob: simRnd(TAU), hit: false, mine: !opts.foreign
   });
 }
 
@@ -2800,7 +2824,7 @@ function lanceTick(dt, proc, segs, ox, oy) {
         if (proc) {
           burst(e.x, e.y, 5, block === 'prism' ? '#a5f3fc' : '#bae6fd', 200, 2.4, 0.28);
           if (block === 'prism') {
-            const back = Math.atan2(oy - e.y, ox - e.x) + rnd(0.25, -0.25);
+            const back = Math.atan2(oy - e.y, ox - e.x) + simRnd(0.25, -0.25);
             ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
               vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
               r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
@@ -2866,15 +2890,15 @@ function lanceTick(dt, proc, segs, ox, oy) {
          hot enough to. Under VENT_BURN_AT the lance is only a lance, which is
          what makes the first third of the meter worth climbing. */
       if (P.awake && ventLit()) applyBurn(e, P.ventT > 0 ? 2 : 1);
-      if (P.sun && Math.random() < 0.5)
+      if (P.sun && simRand() < 0.5)
         addHazard('fire', e.x, e.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
                                            friendly: true, col: '#fbbf24' });
       if (P.frag > 0) {
         const n = 1 + P.frag;
         for (let k = 0; k < n; k++)
-          fireBullet(e.x, e.y, rnd(TAU), 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
+          fireBullet(e.x, e.y, simRnd(TAU), 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
       }
-      if (struck.size === 1 || Math.random() < 0.34)
+      if (struck.size === 1 || rnd() < 0.34)
         floatText(e.x, e.y - e.r - 6, Math.round(pulse),
                   P.laserCrit ? COL.crit : '#fca5a5', P.laserCrit ? 15 : 12);
     }
@@ -2916,7 +2940,7 @@ function updateLance(dt) {
   const proc = P.laserProcT <= 0;
   if (proc) {
     P.laserProcT += LANCE_PROC;
-    P.laserCrit = Math.random() < P.crit;
+    P.laserCrit = simRand() < P.crit;
     Audio_.tone(760, 0.05, 'sawtooth', 0.03, 520);
   }
   lanceTick(dt, proc);
@@ -2941,7 +2965,7 @@ function fireLance() {
   P.laserT = lanceDur();
   P.laserEnv = lanceEnv(0);
   P.laserProcT = 0;                        // first pulse lands immediately
-  P.laserCrit = Math.random() < P.crit;
+  P.laserCrit = simRand() < P.crit;
   P.laserAim = lanceAim();
   P.laserSegs = castLanceBeams(P.laserAim);
 
@@ -3204,7 +3228,7 @@ function bladeHit(e, dist, how) {
     bladeBat(e, lunge ? Math.atan2(P.dashDY, P.dashDX) : a, fin);
     return;
   }
-  const crit = Math.random() < bladeCrit();
+  const crit = simRand() < bladeCrit();
   let dmg = bladeSwingDmg() * (lunge ? LUNGE_DMG : 1);
   if (fin) dmg *= FIN_DMG * gearStat('fin');
   if (crit) dmg *= bladeCritM();
@@ -3449,9 +3473,9 @@ function bladeParried(amount, opts) {
     /* BEGGAR'S BOWL: what was thrown at you is worth something to somebody. A
        coin on the floor rather than a number in the purse, so it still has to
        be picked up out of the fight it came from. */
-    if (gearOn('alms') && Math.random() < 0.5) {
+    if (gearOn('alms') && simRand() < 0.5) {
       const c = mkDrop(P.x, P.y, 'credit');
-      const s = rnd(200, 80), a = rnd(TAU);
+      const s = simRnd(200, 80), a = simRnd(TAU);
       c.vx = Math.cos(a) * s; c.vy = Math.sin(a) * s;
       c.v = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred()));
       drops.push(c);
@@ -3512,7 +3536,7 @@ function bladeCounter(amount, opts) {
     ang = Math.atan2(src.y - P.y, src.x - P.x);
   else if (shot && (shot.vx || shot.vy))
     ang = Math.atan2(-shot.vy, -shot.vx);
-  const crit = Math.random() < bladeCrit();
+  const crit = simRand() < bladeCrit();
   const power = bladeSwingDmg() / (CHAR().dmg * BLADE_DMG);
   const dmg = Math.max(1, amount) * COUNTER_MUL * power * gearStat('ret')
             * (crit ? bladeCritM() : 1);
@@ -3690,7 +3714,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   // drones, chain lightning, static field, blasts and poison all arrive
   // through this function and would otherwise ignore it entirely.
   if (e.invuln) {
-    if (Math.random() < 0.25) {
+    if (rnd() < 0.25) {
       burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 3, '#cbd5e1', 130, 2, 0.22);
     }
     return;
@@ -3718,7 +3742,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   // Applied after vuln so baiting the stun still pays, just not unboundedly.
   if (e.dmgCap !== undefined && dmg > e.dmgCap) {
     dmg = e.dmgCap;
-    if (Math.random() < 0.3)
+    if (rnd() < 0.3)
       burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 3, '#fca5a5', 150, 2, 0.2);
   }
   /* Boss armour: a flat rate of damage absorbed PER SECOND, not per hit.
@@ -3735,7 +3759,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     const cut = Math.min(dmg * 0.6, e.absorb);
     e.absorb -= cut;
     dmg -= cut;
-    if (cut > dmg * 0.25 && Math.random() < 0.16)
+    if (cut > dmg * 0.25 && rnd() < 0.16)
       burst(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 2, '#94a3b8', 120, 1.8, 0.18);
   }
   if (e.dr > 0) dmg *= 1 - e.dr;         // scales with the build, unlike the flat part
@@ -3747,7 +3771,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.boss === 'unwritten' && unwritten) {
     unwHit(e, dmg);
     e.flash = Math.min(1, e.flash + 0.65);
-    if (!opts.silent || Math.random() < 0.34)
+    if (!opts.silent || rnd() < 0.34)
       floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5, Math.round(dmg),
                 crit ? COL.crit : '#e2e8f0', crit ? 19 : 13, -46);
     if (crit) { Audio_.crit(); shake(0.05); } else if (!opts.silent) Audio_.hit();
@@ -3792,7 +3816,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   // secondary hits (chain / drones / blasts) only show numbers sometimes,
   // otherwise a dense crowd turns into an unreadable pile of digits
   if (opts.hlKick) hlKickNum(e, dmg);        // ALL HALLOWS: what his own pile took, in gold
-  else if (!opts.silent || Math.random() < 0.34)
+  else if (!opts.silent || rnd() < 0.34)
     floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5 + rnd(10, -10), Math.round(dmg),
       opts.hlDull ? '#64748b' : crit ? COL.crit : '#e2e8f0', opts.hlDull ? 11 : crit ? 19 : 13, crit ? -70 : -46);
   if (crit) { Audio_.crit(); shake(0.05); } else if (!opts.silent) Audio_.hit();
@@ -3938,7 +3962,7 @@ function killBody(e, ang) {
   const n = clamp(Math.round(e.xp), 1, 14);
   const v = e.xp / n;
   for (let i = 0; i < n; i++) {
-    const a = rnd(TAU), s = rnd(150, 40);
+    const a = simRnd(TAU), s = simRnd(150, 40);
     gems.push({ x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
       v, r: 4 + Math.min(3, v), life: 26 });
   }
@@ -3947,36 +3971,36 @@ function killBody(e, ang) {
   while (gems.length > 320) { gems[1].v += gems[0].v; gems.shift(); }
   // drops
   if (e.type === 'boss') {
-    for (let i = 0; i < 3; i++) drops.push(mkDrop(e.x + rnd(60, -60), e.y + rnd(60, -60), 'heal'));
-  } else if (Math.random() < (e.elite ? 0.35 : 0.035) * (1 + P.luck * 0.35)) {
-    drops.push(mkDrop(e.x, e.y, Math.random() < 0.72 ? 'heal' : 'nuke'));
+    for (let i = 0; i < 3; i++) drops.push(mkDrop(e.x + simRnd(60, -60), e.y + simRnd(60, -60), 'heal'));
+  } else if (simRand() < (e.elite ? 0.35 : 0.035) * (1 + P.luck * 0.35)) {
+    drops.push(mkDrop(e.x, e.y, simRand() < 0.72 ? 'heal' : 'nuke'));
   }
   /* And the kit. Rolled only for the pilot that can wear it rather than rolled
      and thrown away, because this runs on every death in the game. A boss pays
      twice and pays biased; an elite often; a body rarely. */
   if (isBlade()) {
     if (e.type === 'boss') {
-      gearDrop(e.x + rnd(46, -46), e.y + rnd(46, -46), 2);
-      gearDrop(e.x + rnd(46, -46), e.y + rnd(46, -46), 1);
-    } else if (Math.random() < (e.elite ? 0.26 : 0.022) * (1 + P.luck * 0.3)) {
+      gearDrop(e.x + simRnd(46, -46), e.y + simRnd(46, -46), 2);
+      gearDrop(e.x + simRnd(46, -46), e.y + simRnd(46, -46), 1);
+    } else if (simRand() < (e.elite ? 0.26 : 0.022) * (1 + P.luck * 0.3)) {
       gearDrop(e.x, e.y, e.elite ? 1 : 0);
     }
   }
   // credits — the shop currency
   if (e.type !== 'egg') {
     const chance = e.type === 'boss' || e.elite ? 1 : 0.22 + P.luck * 0.06;
-    if (Math.random() < chance) {
+    if (simRand() < chance) {
       const n = (e.type === 'boss' ? 10 : e.elite ? 3 : 1) * (e.hlRipe ? 2 : 1);   // THE GOURD pays double
       const each = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred()));
       for (let i = 0; i < n; i++) {
-        const a = rnd(TAU), s = rnd(200, 60);
+        const a = simRnd(TAU), s = simRnd(200, 60);
         const c = mkDrop(e.x, e.y, 'credit');
         c.vx = Math.cos(a) * s; c.vy = Math.sin(a) * s; c.v = each;
         drops.push(c);
       }
     }
   }
-  if (P.lifesteal && Math.random() < P.lifesteal) {
+  if (P.lifesteal && simRand() < P.lifesteal) {
     P.hp = Math.min(P.maxHp, P.hp + 3);
     floatText(P.x, P.y - 22, '+3', COL.hp, 13);
   }
@@ -3996,9 +4020,9 @@ function killBody(e, ang) {
   // the volatile blast is held until the fuse burns out — see updateCorpses
   if (e.type === 'splitter' && e.gen < 2) {
     for (let i = 0; i < 2; i++) {
-      const c = spawnEnemy('splitter', e.x + rnd(26, -26), e.y + rnd(26, -26),
+      const c = spawnEnemy('splitter', e.x + simRnd(26, -26), e.y + simRnd(26, -26),
         { gen: e.gen + 1, rs: 0.62, hs: 0.34, ss: 1.25, elite: false });
-      c.vx = rnd(160, -160); c.vy = rnd(160, -160);
+      c.vx = simRnd(160, -160); c.vy = simRnd(160, -160);
     }
   }
   // REVENANT: refuses the first death and stands back up as its own ghost
@@ -4050,7 +4074,7 @@ function gearDrop(x, y, bias, slot) {
   const it = gearRoll(slot || null, wave, bias || 0);
   if (!it) return null;
   const g = gearFloor(it, x, y);
-  const a = rnd(TAU), s = rnd(120, 30);
+  const a = simRnd(TAU), s = simRnd(120, 30);
   g.vx = Math.cos(a) * s; g.vy = Math.sin(a) * s;
   drops.push(g);
   floatText(x, y - 16, gearName(it), g.col, 12, -22);
@@ -4201,10 +4225,10 @@ let stageAbs = -1, shopPending = false;
 function pickEnemyType() {
   // a challenge that names its spawns gets those and nothing else
   const forced = chalSwarm();
-  if (forced) return forced[rndi(forced.length)];
+  if (forced) return forced[simRndi(forced.length)];
   const pool = (bossAlive && stage.bossPool) || stage.pool;   // ALL HALLOWS: a boss wave's own roster
   let tot = 0; for (const p of pool) tot += p[1];
-  let r = Math.random() * tot;
+  let r = simRand() * tot;
   for (const p of pool) { r -= p[1]; if (r <= 0) return p[0]; }
   return pool[0][0];
 }
@@ -4316,7 +4340,7 @@ function updateWaves(dt) {
   const hlB = hlBossWave();                                              // ALL HALLOWS: his fight is his
   const cap = hlB ? HL_BOSS_LIVE + 1 : 24 + wave * 3;                   // (+1: he counts himself)
   if (spawnBudget > 0 && spawnT <= 0 && hlWaveThreats() < cap) {      // a gourd holds nothing
-    const batch = Math.min(spawnBudget, hlB ? 1 : 1 + rndi(Math.min(4, 1 + wave / 3)));
+    const batch = Math.min(spawnBudget, hlB ? 1 : 1 + simRndi(Math.min(4, 1 + wave / 3)));
     for (let i = 0; i < batch; i++) spawnRing(pickEnemyType());
     spawnBudget -= batch;
     spawnT = hlB ? HL_BOSS_TRICKLE : Math.max(0.24, 1.5 - wave * 0.05);
@@ -4600,9 +4624,9 @@ function offerPool() {
 }
 
 function pickFromPool(pool, flat) {
-  if (flat) return pool[rndi(pool.length)];
+  if (flat) return pool[simRndi(pool.length)];
   let tot = 0; for (const u of pool) tot += RAR_W[u.rar];
-  let r = Math.random() * tot, ch = pool[0];
+  let r = simRand() * tot, ch = pool[0];
   for (const u of pool) { r -= RAR_W[u.rar]; if (r <= 0) { ch = u; break; } }
   return ch;
 }
@@ -4661,7 +4685,7 @@ function makeShopStock() {
   if (isBlade()) {
     const slots = GEAR_SLOTS.map(s => s.k);
     for (let i = slots.length - 1; i > 0; i--) {
-      const j = rndi(i + 1); const t = slots[i]; slots[i] = slots[j]; slots[j] = t;
+      const j = simRndi(i + 1); const t = slots[i]; slots[i] = slots[j]; slots[j] = t;
     }
     for (let i = 0; i < nUp; i++) {
       const it = gearRoll(slots[i % slots.length], wave, 1);
@@ -4680,12 +4704,12 @@ function makeShopStock() {
   if (chip) items.push(recordChipItem());
   const svc = shopServices();
   for (let i = 0; i < 2 && svc.length; i++) {
-    const s = svc.splice(rndi(svc.length), 1)[0];
+    const s = svc.splice(simRndi(svc.length), 1)[0];
     s.cost = Math.round(s.cost * (1 + stageAbs * 0.12) * hardPrice());
     items.push(s);
   }
   for (let i = items.length - 1; i > 0; i--) {
-    const j = rndi(i + 1); const t = items[i]; items[i] = items[j]; items[j] = t;
+    const j = simRndi(i + 1); const t = items[i]; items[i] = items[j]; items[j] = t;
   }
   return items;
 }
@@ -4695,7 +4719,7 @@ function openShop() {
   // rolled once, here — makeShopStock only reads it, so rerolls neither
   // create the chip nor destroy it
   shopChipOffered = !!Save.profile.keeperDone && !P.chip &&
-                    Math.random() < CHIP_CHANCE;
+                    simRand() < CHIP_CHANCE;
   shopItems = makeShopStock();
   shopRerolls = 0;
   shopMsg = ''; shopMsgT = 0;
@@ -4746,7 +4770,7 @@ function rerollShop() {
   // he arrives instead of the new stock, and the counter shuts behind him
   const risk = Math.min(SHOPKEEP_CAP,
                         Math.max(0, shopRerolls - SHOPKEEP_FREE) * SHOPKEEP_STEP);
-  if (risk > 0 && Math.random() < risk) { summonShopkeeper(); return; }
+  if (risk > 0 && simRand() < risk) { summonShopkeeper(); return; }
   shopItems = makeShopStock();
   Audio_.select();
 }
@@ -4763,7 +4787,7 @@ function summonShopkeeper() {
   state = 'play';
   uiArm = 0.3;
 
-  const a = rnd(TAU);
+  const a = simRnd(TAU);
   const x = clamp(P.x + Math.cos(a) * 300, arena.x0 + 120, arena.x1 - 120);
   const y = clamp(P.y + Math.sin(a) * 300, arena.y0 + 120, arena.y1 - 120);
   const e = spawnEnemy('boss', x, y, { boss: 'shopkeeper' });
@@ -4897,7 +4921,7 @@ function updateDeepNodes(dt) {
     z.srcCd = Math.max(0, z.srcCd - dt);
     if (z.carry > 0) {
       z.carry = Math.max(0, z.carry - LEAK_DECAY * dt);
-      if (Math.random() < 0.6)
+      if (rnd() < 0.6)
         spawnPart(P.x + rnd(14, -14), P.y + rnd(14, -14), rnd(50, -50), rnd(40, 10),
                   rnd(2.4, 1), stage.accent, rnd(0.45, 0.2), 0.9);
       if (z.carry <= 0) sayNode('CHARGE LOST', 1.8);
@@ -4942,7 +4966,7 @@ function updateDeepNodes(dt) {
     if (!z.pkt) {
       z.spawnT -= dt;
       if (z.spawnT <= 0) {
-        const start = z.J[rndi(z.J.length)];
+        const start = z.J[simRndi(z.J.length)];
         z.pkt = { at: start.i, x: start.x, y: start.y, tx: start.x, ty: start.y, hops: 0 };
         z.spawnT = 2.4;
         sayNode('PACKET IN', 1.4);
@@ -4953,7 +4977,7 @@ function updateDeepNodes(dt) {
     const dx = pk.tx - pk.x, dy = pk.ty - pk.y, d = Math.hypot(dx, dy);
     if (d > 4) {
       pk.x += dx / d * PKT_SPD * dt; pk.y += dy / d * PKT_SPD * dt;
-      if (Math.random() < 0.5)
+      if (rnd() < 0.5)
         spawnPart(pk.x, pk.y, rnd(30, -30), rnd(30, -30), 2.2, stage.accent, 0.3, 0.9);
       return;
     }
@@ -4999,7 +5023,7 @@ function updateDeepNodes(dt) {
     for (const n of z.nodes) {
       if (n.done || len(P.x - n.x, P.y - n.y) >= 52) continue;
       n.hold += dt;
-      if (Math.random() < 0.6)
+      if (rnd() < 0.6)
         spawnPart(n.x + rnd(40, -40), n.y + rnd(40, -40), rnd(30, -30), -rnd(70, 20),
                   rnd(2.4, 1.1), stage.accent, rnd(0.45, 0.2), 0.9);
       if (n.hold >= HALT_NEED) {
@@ -5126,7 +5150,7 @@ function drawDeepNodes() {
       ctx.strokeStyle = rgba(col, s.done ? 0.55 : 0.28); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(s.x, s.y, 47, 0, TAU); ctx.stroke();
       deepLabel(s.done ? 'SEALED' : Math.round(p * 100) + '%', s.x, s.y - 60, col, s.done ? 0.55 : 0.9);
-      if (!s.done && FXO.parts && Math.random() < 0.12)
+      if (!s.done && FXO.parts && rnd() < 0.12)
         spawnPart(s.x + rnd(30, -30), s.y + rnd(30, -30), rnd(24, -24), rnd(-30, -70),
                   rnd(2, 1), A, rnd(0.5, 0.2), 0.92);
     }
@@ -5360,8 +5384,8 @@ function intrusionTick(dt) {
   q.t += dt;
   if (q.typed < INTRUDE_CMD.length) {
     q.typed += dt * 15;
-    if (Math.random() < 0.5)
-      Audio_.tone(1100 + Math.random() * 300, 0.015, 'square', 0.02, 1600);
+    if (rnd() < 0.5)
+      Audio_.tone(1100 + rnd() * 300, 0.015, 'square', 0.02, 1600);
     return;
   }
   if (!q.fired) {                          // and it runs
@@ -5614,7 +5638,7 @@ const rootSay = (m, t) => {
 
 function rootBeginCmd() {
   const r = root;
-  r.cmd = ROOT_CMDS[rndi(ROOT_CMDS.length)];
+  r.cmd = ROOT_CMDS[simRndi(ROOT_CMDS.length)];
   r.typed = 0;
   r.glyphs = [];
   /* one loose character per glyph, scattered wide enough that clearing them is
@@ -5977,7 +6001,7 @@ function drawRootBody(e) {
       ctx.stroke();
     }
     ctx.restore();
-    if (FXO.parts && Math.random() < 0.5)
+    if (FXO.parts && rnd() < 0.5)
       spawnPart(e.x + rnd(R, -R), e.y + rnd(R, -R), rnd(150, -150),
                 rnd(150, -150), rnd(3, 1.4), ROOT_COL, rnd(0.4, 0.2), 0.9);
   }
@@ -6407,10 +6431,10 @@ function rrTick(e, dt) {
 function rrWriteGuard(e, n) {
   rootSay('spawn("guard", ' + n + ')', 2.4);
   for (let i = 0; i < n; i++) {
-    const a = i / n * TAU + rnd(0.4, -0.4);
+    const a = i / n * TAU + simRnd(0.4, -0.4);
     const x = clamp(e.x + Math.cos(a) * (e.r + 80), arena.x0 + 40, arena.x1 - 40);
     const y = clamp(e.y + Math.sin(a) * (e.r + 80), arena.y0 + 40, arena.y1 - 40);
-    if (!rrSpawn(pick(RR_GUARD_TYPES), x, y)) continue;
+    if (!rrSpawn(simPick(RR_GUARD_TYPES), x, y)) continue;
     ringFx(x, y, 6, 70, ROOT_COL, 0.4, 3);
   }
   Audio_.tone(300, 0.12, 'square', 0.08, 120);
@@ -6426,13 +6450,13 @@ function rrStruck(e, opts, sx, sy) {
   if (rrRace || rrOpening()) return;
   if (opts.enemy || opts.hacked) {
     if (e.ghost > 0) {
-      if (Math.random() < 0.08) floatText(e.x, e.y - e.r - 8, 'noclip', ROOT_COL, 12, -40);
+      if (rnd() < 0.08) floatText(e.x, e.y - e.r - 8, 'noclip', ROOT_COL, 12, -40);
       return;
     }
     const v = (opts.hacked ? RR_SHOT : RR_HIT) * (root && root.stunT > 0 ? RR_STUN_MUL : 1);
     e.hp -= v;
     e.flash = Math.min(1, (e.flash || 0) + 0.5);
-    if (!opts.hacked || Math.random() < 0.4)
+    if (!opts.hacked || rnd() < 0.4)
       floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5, v, HACK_COL, 13, -46);
     burst(sx, sy, 4, HACK_COL, 180, 2.4, 0.3);
     /* The race is the only way it dies: health that reaches its line waits
@@ -6453,10 +6477,10 @@ function rrFirewall(e) {
   q.wallT = RR_WALL_CD;
   // in the path of the shot: somewhere along the line from the hull to it
   const dx = e.x - P.x, dy = e.y - P.y, d = len(dx, dy) || 1;
-  const t = rnd(0.62, 0.38), off = rnd(40, -40);
+  const t = simRnd(0.62, 0.38), off = simRnd(40, -40);
   const x = clamp(P.x + dx * t - dy / d * off, arena.x0 + 40, arena.x1 - 40);
   const y = clamp(P.y + dy * t + dx / d * off, arena.y0 + 40, arena.y1 - 40);
-  const w = rrSpawn(pick(RR_WALL_TYPES), x, y);
+  const w = rrSpawn(simPick(RR_WALL_TYPES), x, y);
   if (!w) return;
   w.dr = RR_WALL_DR;
   w.firewall = true;
@@ -6471,7 +6495,7 @@ function rrFirewall(e) {
 /* ------------------------------ its processes ------------------------------ */
 function rrPid(q) {
   let p;
-  do p = 100 + rndi(900); while (q.procs.some(x => x.pid === p));
+  do p = 100 + simRndi(900); while (q.procs.some(x => x.pid === p));
   return p;
 }
 
@@ -6480,7 +6504,7 @@ function rrStartProc(q) {
   const free = RR_PROCS.filter(d => !q.procs.some(p => p.k === d.k) &&
                                     !(d.k === 'shrink' && q.shrunk));
   if (!free.length) return;
-  const d = pick(free);
+  const d = simPick(free);
   const p = { pid: rrPid(q), s: d.s, k: d.k, say: d.t, t: 0, dur: RR_PROC_DUR };
   q.procs.push(p);
   rootSay(d.s + ' &', 2.2);
@@ -6495,7 +6519,7 @@ function rrTakeBack(q) {
   const mine = enemies.filter(z => !z.dead && z.hacked && z.type !== 'boss' &&
                                    !q.procs.some(p => p.arg === z));
   if (!mine.length) return;
-  const z = pick(mine);
+  const z = simPick(mine);
   if (!z.tag) z.tag = rrNextTag();
   z.tagT = RR_TAKE_DUR + 1;
   const p = { pid: rrPid(q), s: 'hack ' + z.tag, k: 'take', arg: z, t: 0, dur: RR_TAKE_DUR };
@@ -6531,7 +6555,7 @@ function rrRunProc(q, p) {
     case 'slow': P.slowT = 5; P.slowV = 0.35; break;
     case 'brutes':
       for (let i = 0; i < 4; i++) {
-        const a = i / 4 * TAU + rnd(0.3, -0.3);
+        const a = i / 4 * TAU + simRnd(0.3, -0.3);
         rrSpawn('brute', clamp(e.x + Math.cos(a) * 140, arena.x0 + 40, arena.x1 - 40),
                          clamp(e.y + Math.sin(a) * 140, arena.y0 + 40, arena.y1 - 40));
       }
@@ -6565,18 +6589,18 @@ function rrTamper() {
     k === 'alias' ? RR_ALIAS_OF.some(c => !con.alias[c])
     : k === 'swap' ? !con.swap : !con.inject);
   if (!kinds.length) return;
-  const k = pick(kinds);
+  const k = simPick(kinds);
   if (k === 'alias') {
-    const c = pick(RR_ALIAS_OF.filter(x => !con.alias[x]));
-    const says = pick(RR_ALIAS_SAYS);
+    const c = simPick(RR_ALIAS_OF.filter(x => !con.alias[x]));
+    const says = simPick(RR_ALIAS_SAYS);
     con.alias[c] = says;
     rootSay("alias " + c + "='echo " + says + "'", 3.0);
   } else if (k === 'swap') {
-    const [a, b] = pick(RR_SWAPS);
+    const [a, b] = simPick(RR_SWAPS);
     con.swap = { a, b, t: RR_SWAP_SEC, dur: RR_SWAP_SEC };
     rootSay('keymap.swap("' + a + '", "' + b + '")', 3.0);
   } else {
-    con.inject = { s: pick(RR_INJECT), i: 0, t: 0 };
+    con.inject = { s: simPick(RR_INJECT), i: 0, t: 0 };
     rootSay('let me help you type.', 2.6);
   }
   Audio_.tone(700, 0.08, 'square', 0.06, 300);
@@ -6906,7 +6930,7 @@ const CON_CMDS = {
     if (!hackTake(z, true)) { conPrint('hack: ' + n + ': refused', 'err'); return; }
     z.tagT = RR_TAG_SEC;
     conPrint('hack: ' + n + ': ok  ·  ' + hackedCount(false) + '/' + HACK_MAX + ' held', 'ok');
-    if (Math.random() < 0.4) rootSay(pick(RR_HACK_LINES), 2.6);
+    if (rnd() < 0.4) rootSay(pick(RR_HACK_LINES), 2.6);
   },
   ps() {
     const q = root && root.rite;
@@ -7383,6 +7407,22 @@ function oniTick() {
   oni.px = P.x; oni.py = P.y;
   oni.stretch += (1 + clamp(spd * 0.002, 0, 0.45) - oni.stretch) * Math.min(1, dt * 6);
 }
+/* SUPERUSER's head, on the game's clock (2 Oct 2026, the seeded rework). The
+   oni above is ticked by its drawing, on the cosmetic clock, so nothing that
+   changes the game may read it: what comes out of the head (the drain's
+   locks, the fling's husks) aims off suHeadAng, the same lagging spring
+   stepped with the game in suTick and reset with the run. */
+const suHead = { on: false, ang: 0, vel: 0 };
+function suHeadTick(dt) {
+  if (!(suShown() || rrSuT >= 0)) { suHead.on = false; return; }
+  if (!suHead.on) { suHead.on = true; suHead.ang = P.ang; suHead.vel = 0; return; }
+  const h = Math.min(dt, 0.04);
+  let d = P.ang - suHead.ang;
+  while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
+  suHead.vel += (d * 120 - suHead.vel * 13) * h;
+  suHead.ang += suHead.vel * h;
+}
+const suHeadAng = () => suHead.on ? suHead.ang : P.ang;
 // phase of each part of the possession, from w
 function oniPhase(w) {
   return {
@@ -7586,10 +7626,10 @@ function drawSuperuser(w) {
     });
     ctx.globalAlpha = 1;
     ctx.restore();
-    if (FXO.parts && Math.random() < 0.55 * ph.mane && tips.length) {
-      const t = tips[(Math.random() * tips.length) | 0], ca = Math.cos(oni.ang), sa = Math.sin(oni.ang);
+    if (FXO.parts && rnd() < 0.55 * ph.mane && tips.length) {
+      const t = tips[(rnd() * tips.length) | 0], ca = Math.cos(oni.ang), sa = Math.sin(oni.ang);
       spawnPart(x + ca * t[0] - sa * t[1], y + sa * t[0] + ca * t[1], rnd(20, -20) - ca * 30, rnd(20, -20) - sa * 30,
-                rnd(2.2, 1), Math.random() < 0.2 ? SU_COL : ONI_LIT, rnd(0.8, 0.35), 0.93);
+                rnd(2.2, 1), rnd() < 0.2 ? SU_COL : ONI_LIT, rnd(0.8, 0.35), 0.93);
     }
   }
 
@@ -8258,6 +8298,7 @@ function suDrillStart() {
 function suTick(dt) {
   if (P.charId !== 'hacker') return;
   suIntroTick(dt);
+  suHeadTick(dt);
   if (P.suT > 0 && !rootRite && !suCutIn()) {   // the cut-in is not spent from the minute
     P.suT -= dt;
     if (P.suT <= 0) {
@@ -8719,6 +8760,7 @@ function suDrainStart() {
   }
   P.suDrain = dr;
   P.suCd[2] = DRAIN_CD;
+  suDrainOrder(dr);                       // the game numbers the locks, before any draw can
   suDrainCast(dr);
 }
 
@@ -8812,7 +8854,7 @@ function suFlingStart(dr, keep) {
   keep.sort((u, v) => at(u) - at(v));
   const f = { ph: 'reel', t: 0, n: dr.bodies.length, thrown: 0, lastRel: 0, list: [] };
   // hung in an arc behind the hull, on the mane's side of it, the big ones further out
-  const oa = oni.t >= 0 ? oni.ang : P.ang, m = keep.length, spread = Math.min(TAU * 0.62, m * 0.55);
+  const oa = suHeadAng(), m = keep.length, spread = Math.min(TAU * 0.62, m * 0.55);
   keep.forEach((b, j) => {
     const e = b.e, er = e.r;
     const sa = oa + Math.PI + (m > 1 ? j / (m - 1) - 0.5 : 0) * spread, R = 72 + er * 1.3;
@@ -8929,7 +8971,7 @@ function suAscTick(dt) {
 function suJabStart() {
   const a = P.suAsc;
   a.hand = -a.hand;                      // left, right, left: which lock it comes off, for the art
-  const j = { ph: 'out', t: 0, ang: P.ang + rnd(JAB_SPREAD, -JAB_SPREAD), len: 0, back0: 0,
+  const j = { ph: 'out', t: 0, ang: P.ang + simRnd(JAB_SPREAD, -JAB_SPREAD), len: 0, back0: 0,
               hit: new Set(), carry: null, hand: a.hand, seed: rnd(1000) };
   a.jabs.push(j);
   suJabFx(j);
@@ -8954,7 +8996,7 @@ function suJabOut(j) {
     suJabHitFx(e, j);
     if (e.dead || e.hacked) continue;
     j.len = Math.max(0, along);
-    if (Math.random() < JAB_IMPALE && suJabCanTake(e)) { suJabTake(j, e); return; }
+    if (simRand() < JAB_IMPALE && suJabCanTake(e)) { suJabTake(j, e); return; }
     suJabBack(j);
     return;
   }
@@ -9378,7 +9420,7 @@ function drawSuLiftShadow(e, k) {
    to a fluted bit. Over the bodies, under the hull and the gathered mane. */
 function suManeCurve(d, ex, ey) {
   const a = oni.t >= 0 ? oni.ang : P.ang, ca = Math.cos(a), sa = Math.sin(a), nx = -sa, ny = ca;
-  if (d.side === undefined) d.side = Math.random() < 0.5 ? -1 : 1;
+  if (d.side === undefined) d.side = rnd() < 0.5 ? -1 : 1;
   const dx = ex - P.x, dy = ey - P.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
   const cr = ca * uy - sa * ux;
   const s = Math.abs(cr) > 0.2 ? Math.sign(cr) : d.side;
@@ -9399,7 +9441,7 @@ function drawSuDrill(d) {
   if (wind) {
     // the wind-up: the locks leave the nape and twist into a knot behind the hull
     const oa = oni.t >= 0 ? oni.ang : P.ang, ca = Math.cos(oa), sa = Math.sin(oa);
-    if (d.side === undefined) d.side = Math.random() < 0.5 ? -1 : 1;
+    if (d.side === undefined) d.side = rnd() < 0.5 ? -1 : 1;
     const x0 = P.x - ca * 10, y0 = P.y - sa * 10, L = 10 + 46 * wk, s = d.side, nx = -sa, ny = ca;
     tx = x0 - ca * L + nx * s * L * 0.3; ty = y0 - sa * L + ny * s * L * 0.3;
     B = [x0, y0, x0 - ca * L * 0.45, y0 - sa * L * 0.45, lerp(x0, tx, 0.75), lerp(y0, ty, 0.75), tx, ty];
@@ -9542,10 +9584,10 @@ function drawSuDrill(d) {
   ctx.restore();
 
   // bits come off the rope as it spins
-  if (FXO.parts && d.ph !== 'back' && Math.random() < 0.5) {
-    const i = 2 + (Math.random() * (bi - 2)) | 0, [nx, ny] = nrm(i), s = Math.random() < 0.5 ? -1 : 1;
+  if (FXO.parts && d.ph !== 'back' && rnd() < 0.5) {
+    const i = 2 + (rnd() * (bi - 2)) | 0, [nx, ny] = nrm(i), s = rnd() < 0.5 ? -1 : 1;
     spawnPart(pts[i][0], pts[i][1], nx * s * rnd(90, 30), ny * s * rnd(90, 30), rnd(1.8, 0.8),
-              Math.random() < 0.2 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
+              rnd() < 0.2 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
   }
 }
 
@@ -9962,7 +10004,7 @@ function drawSuPlunge(p) {
   const gathering = dive && p.t < KIT_PLUNGE * KIT_GATHER;
   const fade = dive ? 1 : 1 - clamp((p.t / KIT_PULL - 0.6) / 0.4, 0, 1);
   const oa = oni.t >= 0 ? oni.ang : P.ang, ca = Math.cos(oa), sa = Math.sin(oa), nx = -sa, ny = ca;
-  if (p.side === undefined) p.side = Math.random() < 0.5 ? -1 : 1;
+  if (p.side === undefined) p.side = rnd() < 0.5 ? -1 : 1;
   const s = p.side, x0 = P.x - ca * 10, y0 = P.y - sa * 10;
   const Hm = 60 + Math.min(Math.hypot(p.x - P.x, p.y - P.y), DRILL_RANGE) * 0.3;
   // on the floor: back behind the hull, round the side, then settling on the spot
@@ -10087,12 +10129,12 @@ function drawSuPlunge(p) {
     for (let j = 0; j < 2; j++) {
       const a = rnd(TAU), v = rnd(260, 90);
       spawnPart(p.x + Math.cos(a) * 8, p.y + Math.sin(a) * 3, Math.cos(a) * v, Math.sin(a) * v * 0.45 - 40, rnd(2.4, 1),
-                Math.random() < 0.3 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
+                rnd() < 0.3 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
     }
-  } else if (FXO.parts && !gathering && p.ph !== 'pull' && Math.random() < 0.5 && bi > 3) {
-    const i = 2 + (Math.random() * (bi - 2)) | 0, [mx, my] = nrm(i), sd = Math.random() < 0.5 ? -1 : 1;
+  } else if (FXO.parts && !gathering && p.ph !== 'pull' && rnd() < 0.5 && bi > 3) {
+    const i = 2 + (rnd() * (bi - 2)) | 0, [mx, my] = nrm(i), sd = rnd() < 0.5 ? -1 : 1;
     spawnPart(pts[i][0], pts[i][1], mx * sd * rnd(90, 30), my * sd * rnd(90, 30), rnd(1.8, 0.8),
-              Math.random() < 0.2 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
+              rnd() < 0.2 ? SU_COL : ONI_LIT, rnd(0.4, 0.2), 0.9);
   }
 }
 
@@ -10716,9 +10758,9 @@ function drawSuPiece(p) {
     ctx.fillRect(rimX - 1.5, -4.5, 3, 9);
     ctx.globalCompositeOperation = 'source-over';
     ctx.restore();
-    if (FXO.parts && Math.random() < (p.th ? 0.6 : 0.25)) {   // it sheds as it hangs, and more as it is swung
+    if (FXO.parts && rnd() < (p.th ? 0.6 : 0.25)) {   // it sheds as it hangs, and more as it is swung
       const u = rnd(0.9, 0.2), x = q.x + ca * er * u, y = q.y + sa * er * u;
-      spawnPart(x, y, rnd(30, -30), rnd(160, 60), rnd(2.4, 1), Math.random() < 0.4 ? SU_COL : (p.col || SU_COL), rnd(0.5, 0.25), 0.96);
+      spawnPart(x, y, rnd(30, -30), rnd(160, 60), rnd(2.4, 1), rnd() < 0.4 ? SU_COL : (p.col || SU_COL), rnd(0.5, 0.25), 0.96);
     }
     return;
   }
@@ -10736,9 +10778,9 @@ function drawSuPiece(p) {
   ctx.translate(p.x, p.y); ctx.rotate(head + Math.PI + Math.sin(p.t * 34 + p.i) * 0.07); ctx.translate(-er * 0.55, 0);
   suWedge(p, seed, SU_RIP_ROT - p.a, hot);
   ctx.restore();
-  if (FXO.parts && Math.random() < 0.6)
+  if (FXO.parts && rnd() < 0.6)
     spawnPart(p.x, p.y, -ux * rnd(160, 40) + rnd(40, -40), -uy * rnd(160, 40) + rnd(40, -40), rnd(2.4, 1),
-              Math.random() < 0.5 ? SU_COL : (p.col || SU_COL), rnd(0.35, 0.15), 0.9);
+              rnd() < 0.5 ? SU_COL : (p.col || SU_COL), rnd(0.35, 0.15), 0.9);
 }
 
 // the rip: four gold tears out along the X, and the white of it
@@ -10906,7 +10948,7 @@ const DRAIN_GULP = 2.6;     // gulps a second, each lock
 // the order the locks leave the nape in: by where each soldier stands round the hull
 function suDrainOrder(dr) {
   if (dr._ord && dr._ord.length === dr.bodies.length) return dr._ord;
-  const oa = oni.t >= 0 ? oni.ang : P.ang;
+  const oa = suHeadAng();                // the game's head, never the drawn oni
   const rel = b => { let a = Math.atan2(b.y - P.y, b.x - P.x) - oa; while (a > Math.PI) a -= TAU; while (a <= -Math.PI) a += TAU; return a; };
   const idx = dr.bodies.map((b, i) => [rel(b), i]).sort((p, q) => p[0] - q[0]);
   const ord = new Array(dr.bodies.length);
@@ -11098,8 +11140,8 @@ function drawSuDrain(dr) {
       const hide = [b.x, b.y, e.r * 0.92];
       const entry = suDrainLock(B, 1, { pulse, hide, taut: 0.6, spin: 12, gulpA: 1 - k * 0.35 });
       if (entry) suDrainBody(b, k, entry[0], entry[1]);
-      if (FXO.parts && Math.random() < 0.12 && entry)
-        spawnPart(entry[0], entry[1], rnd(40, -40), rnd(40, -40), rnd(1.8, 0.8), Math.random() < 0.3 ? SU_COL : HACK_COL, rnd(0.35, 0.15), 0.9);
+      if (FXO.parts && rnd() < 0.12 && entry)
+        spawnPart(entry[0], entry[1], rnd(40, -40), rnd(40, -40), rnd(1.8, 0.8), rnd() < 0.3 ? SU_COL : HACK_COL, rnd(0.35, 0.15), 0.9);
     } else {
       const u = clamp(dr.t / DRAIN_BACK, 0, 1);
       suDrainLock(B, 1 - rrEaseIn(u), { slack: 0.8 + u * 0.4, a: 1 - u * 0.4, thin: 0.9 });
@@ -11372,10 +11414,10 @@ function drawSuHusk(p) {
     drawGlow(p.x + Math.cos(a) * R * 0.8, p.y + Math.sin(a) * R * 0.8, 9 + heat * 5, SU_COL, 0.5 + heat * 0.3);
     ctx.restore();
   }
-  if (FXO.parts && Math.random() < (p.held ? (th ? 0.5 : reel ? 0.6 : 0.12) : 0.55)) {
+  if (FXO.parts && rnd() < (p.held ? (th ? 0.5 : reel ? 0.6 : 0.12) : 0.55)) {
     const a = rnd(TAU);
     spawnPart(p.x + Math.cos(a) * R * 0.7, p.y + Math.sin(a) * R * 0.7, rnd(40, -40) - (p.held ? 0 : p.vx * 0.15), (p.held ? rnd(120, 40) : 0) - (p.held ? 0 : p.vy * 0.15),
-              rnd(2.2, 0.8), Math.random() < 0.2 ? SU_COL : '#64748b', rnd(0.45, 0.2), 0.94);
+              rnd(2.2, 0.8), rnd() < 0.2 ? SU_COL : '#64748b', rnd(0.45, 0.2), 0.94);
   }
 }
 
@@ -12014,8 +12056,8 @@ function drawSuAscWorld(a) {
     ctx.strokeStyle = rgba('#e2e8f0', 0.6 * k); ctx.lineWidth = 1.6;
     for (let q = 0; q < 2; q++) { ctx.beginPath(); ctx.arc(e.x, y, r + 5, rot + q * Math.PI, rot + q * Math.PI + 1.1); ctx.stroke(); }
     ctx.restore();
-    if (FXO.parts && Math.random() < 0.5)
-      spawnPart(e.x + rnd(r, -r) * 0.6, y + rnd(r, -r) * 0.6, -ux * rnd(80, 20), -uy * rnd(80, 20), rnd(2, 0.8), Math.random() < 0.25 ? SU_COL : '#64748b', rnd(0.35, 0.15), 0.9);
+    if (FXO.parts && rnd() < 0.5)
+      spawnPart(e.x + rnd(r, -r) * 0.6, y + rnd(r, -r) * 0.6, -ux * rnd(80, 20), -uy * rnd(80, 20), rnd(2, 0.8), rnd() < 0.25 ? SU_COL : '#64748b', rnd(0.35, 0.15), 0.9);
   }
 }
 
@@ -12752,14 +12794,14 @@ function suiStepBits(s) {
   if (!(dt > 0)) return;
   const burst = (x, y, n, spd, ang, spread) => {
     for (let i = 0; i < n; i++) {
-      const a = ang + (Math.random() - 0.5) * spread, v = spd * (0.4 + Math.random() * 0.8);
-      B.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 0.4 + Math.random() * 0.5,
-               ch: 'rwx01#'[(Math.random() * 6) | 0], gold: Math.random() < 0.35 });
+      const a = ang + (rnd() - 0.5) * spread, v = spd * (0.4 + rnd() * 0.8);
+      B.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 0.4 + rnd() * 0.5,
+               ch: 'rwx01#'[(rnd() * 6) | 0], gold: rnd() < 0.35 });
     }
   };
   const was = s - dt, hit = t => was < t && s >= t;
   if (hit(SUI_T.horn + 0.04)) for (const h of SUI_HORNS) burst(h.B[0], h.B[1], 14, 40, -Math.PI / 2 - 0.4, 1.8);
-  if (s > SUI_T.mane && s < SUI_T.mane + 0.5 && Math.random() < 0.7) burst(-24 - Math.random() * 10, -16 + Math.random() * 16, 1, 30, Math.PI, 0.8);
+  if (s > SUI_T.mane && s < SUI_T.mane + 0.5 && rnd() < 0.7) burst(-24 - rnd() * 10, -16 + rnd() * 16, 1, 30, Math.PI, 0.8);
   if (B.length > 160) B.splice(0, B.length - 160);
 }
 function suiDrawBits() {
@@ -13005,7 +13047,7 @@ function drawRootDeath() {
       ctx.fillRect(d.x - M, d.y - M, M * 2, M * 2);
       ctx.fillStyle = 'rgba(2,1,4,0.9)';            // it tears apart in bands
       for (let k = 0; k < 9; k++) {
-        if (Math.random() > fail * 0.8) continue;
+        if (rnd() > fail * 0.8) continue;
         const by = d.y - M + (k / 9) * M * 2;
         ctx.fillRect(d.x - M + rnd(26, -26), by, M * 2, (M * 2 / 9) * 0.7);
       }
@@ -13057,7 +13099,7 @@ function drawRootDeath() {
     ctx.fillText('-', d.x, d.y + R * 0.24);
     ctx.restore();
   }
-  if (FXO.parts && t < 3.2 && Math.random() < 0.5)
+  if (FXO.parts && t < 3.2 && rnd() < 0.5)
     spawnPart(d.x + rnd(M, -M), d.y + rnd(M, -M), rnd(120, -120), rnd(120, -120),
               rnd(2.8, 1.2), ROOT_COL, rnd(0.5, 0.2), 0.92);
 }
@@ -13372,7 +13414,7 @@ function drawGrantedKey(o) {
   ctx.rotate((1 - ease) * 4.2 + Math.sin(uiTime * 1.5) * 0.07);
   keyGlyph(r, KEY_COL, 1);
   ctx.restore();
-  if (FXO.parts && p < 1 && Math.random() < 0.5)
+  if (FXO.parts && p < 1 && rnd() < 0.5)
     spawnPart(x + rnd(12, -12), y + rnd(12, -12), rnd(50, -50), rnd(50, -50),
               rnd(2.2, 1), KEY_COL, rnd(0.4, 0.2), 0.9);
 }
@@ -13508,7 +13550,7 @@ function keyTick(dt) {
   while (d > Math.PI) d -= TAU;
   while (d < -Math.PI) d += TAU;
   k.ang += d * Math.min(1, 5 * dt);
-  if (FXO.parts && sp > 200 && Math.random() < 0.3)
+  if (FXO.parts && sp > 200 && rnd() < 0.3)
     spawnPart(k.x, k.y, rnd(30, -30), rnd(30, -30), rnd(1.8, 0.9),
               KEY_COL, rnd(0.32, 0.14), 0.9);
 }
@@ -13854,7 +13896,7 @@ function amalOpenTick(dt) {
       p.e.x += p.dx * dt * 60 * k;
       p.e.y += p.dy * dt * 60 * k;
       p.e.ang = (p.e.ang || 0) + p.spin * dt;
-      if (Math.random() < 0.25)
+      if (rnd() < 0.25)
         spawnPart(p.e.x + rnd(p.r, -p.r), p.e.y + rnd(p.r, -p.r),
                   rnd(60, -60), rnd(60, -60), rnd(3, 1.4), AMAL_COL, rnd(0.5, 0.2), 0.94);
     }
@@ -14071,7 +14113,7 @@ function drawAmalOpen() {
     ctx.restore();
     keyGlyph(kr, KEY_COL, 1);
     ctx.restore();
-    if (drive >= 1 && bite < 1 && FXO.parts && Math.random() < 0.6)
+    if (drive >= 1 && bite < 1 && FXO.parts && rnd() < 0.6)
       spawnPart(cx + rnd(S * 0.2, -S * 0.2), cy - S * 0.5,
                 rnd(160, -160), rnd(40, -220), rnd(2.6, 1.2),
                 KEY_COL, rnd(0.4, 0.2), 0.92);
@@ -14158,7 +14200,7 @@ function tearTick(dt) {
     // it only turns up when it is worth turning up
     if (tear.cd <= 0 && (tear.invited || P.hp / P.maxHp < TEAR_HP) && state === 'play') {
       const a = Math.atan2(P.y - (arena.y0 + arena.y1) / 2,
-                           P.x - (arena.x0 + arena.x1) / 2) + rnd(0.7, -0.7);
+                           P.x - (arena.x0 + arena.x1) / 2) + simRnd(0.7, -0.7);
       tear.at = { x: clamp(P.x + Math.cos(a) * 330, arena.x0 + 90, arena.x1 - 90),
                   y: clamp(P.y + Math.sin(a) * 330, arena.y0 + 90, arena.y1 - 90) };
       tear.open = true;
@@ -14256,7 +14298,7 @@ function drawTear() {
   ctx.restore();
 
   // heat coming out of it, so it is legible as warmth and not as a hazard
-  if (FXO.parts && !last && Math.random() < 0.4)
+  if (FXO.parts && !last && rnd() < 0.4)
     spawnPart(x + rnd(rx, -rx), y + rnd(ry * 0.5, -ry * 0.5),
               rnd(16, -16), rnd(-24, -60), rnd(2, 1), CAMP_EMBER, rnd(0.5, 0.3), 0.9);
 
@@ -14585,7 +14627,7 @@ function triPick(T) {
   if (gone > 0.25) pool.push('pile');
   if (gone > 0.40) pool.push('point', 'wave');
   if (gone > 0.60) pool.push('ovation', 'pile');
-  return pool[(Math.random() * pool.length) | 0];
+  return pool[(simRand() * pool.length) | 0];
 }
 
 function triStartMove(T) {
@@ -14596,8 +14638,8 @@ function triStartMove(T) {
   switch (T.move) {
     case 'wave': {                       // along a bench, one after another
       const rows = [0, 1, 2].filter(r => triRow(T, r).length > 1);
-      T.row = rows.length ? rows[(Math.random() * rows.length) | 0] : 0;
-      T.dir = Math.random() < 0.5 ? 1 : -1;
+      T.row = rows.length ? rows[(simRand() * rows.length) | 0] : 0;
+      T.dir = simRand() < 0.5 ? 1 : -1;
       T.queue = triRow(T, T.row).sort((a, b) => (a.x - b.x) * T.dir);
       T.atkT = 6;                        // it owns the beat while it runs
       Audio_.tone(300, 0.1, 'sine', 0.05, 420);
@@ -14622,10 +14664,10 @@ function triStartMove(T) {
       break;
     default: {                           // a few of them, shouting
       for (let k = 0; k < Math.min(5, held.length); k++) {
-        const s = held[(Math.random() * held.length) | 0];
-        triFire(s, Math.atan2(P.y - s.y, P.x - s.x) + rnd(0.1, -0.1));
+        const s = held[(simRand() * held.length) | 0];
+        triFire(s, Math.atan2(P.y - s.y, P.x - s.x) + simRnd(0.1, -0.1));
       }
-      T.atkT = 1.5 + Math.random() * 0.8;
+      T.atkT = 1.5 + simRand() * 0.8;
       T.move = null;
     }
   }
@@ -14697,8 +14739,8 @@ function triHeckle(T, dt) {
   const turned = T.seats.filter(s => s.turned);
   const held = T.seats.filter(s => !s.turned);
   if (!turned.length || !held.length) return;
-  const from = turned[(Math.random() * turned.length) | 0];
-  const at = held[(Math.random() * held.length) | 0];
+  const from = turned[(rnd() * turned.length) | 0];
+  const at = held[(simRand() * held.length) | 0];
   at.hush = Math.max(at.hush || 0, 1.5);
   ringFx(at.x, at.y, 5, 40, '#94a3b8', 0.3, 3);
   spawnPart(from.x, from.y, (at.x - from.x) * 0.5, (at.y - from.y) * 0.5,
@@ -14800,7 +14842,7 @@ function halPick(h) {
              : d < 150 ? ['sweep', 'spin', 'sweep']
                        : ['sweep', 'thrust', 'slam', 'spin'];
   if (h.rage) pool.push('spin', 'sweep');
-  return pool[(Math.random() * pool.length) | 0];
+  return pool[(simRand() * pool.length) | 0];
 }
 
 function halHit(h, dmg) {
@@ -14866,7 +14908,7 @@ function halTick(T, dt) {
   else if (h.phase === 'live' && h.pt >= M.live) { h.phase = 'rest'; h.pt = 0; h.hitOn = false; }
   else if (h.phase === 'rest' && h.pt >= M.rest) {
     h.atk = null; h.swing = 0; h.spinT = 0;
-    h.atkT = (h.rage ? 0.5 : 0.85) + Math.random() * 0.5;
+    h.atkT = (h.rage ? 0.5 : 0.85) + simRand() * 0.5;
     return;
   }
 
@@ -15338,11 +15380,11 @@ function halEntry(T, h, S, p) {
     ctx.lineWidth = 3 * (1 - q) + 1;
     ctx.beginPath(); ctx.arc(h.x, h.y, S * 0.3 + q * S * 1.5, 0, TAU); ctx.stroke();
     ctx.restore();
-    if (FXO.parts && Math.random() < 0.7)
+    if (FXO.parts && rnd() < 0.7)
       spawnPart(h.x + rnd(S * 0.6, -S * 0.6), h.y + rnd(S * 0.3, -S * 0.3),
                 rnd(220, -220), rnd(60, -160), rnd(3, 1.4), HAL_COL, rnd(0.5, 0.25), 0.9);
   }
-  if (FXO.parts && a <= 0 && Math.random() < 0.5)
+  if (FXO.parts && a <= 0 && rnd() < 0.5)
     spawnPart(th.x + rnd(S, -S), th.y - S * 0.6, rnd(60, -60), rnd(-20, -90),
               rnd(2.4, 1), HAL_COL, rnd(0.5, 0.25), 0.9);
 
@@ -15466,7 +15508,7 @@ function halDeath(T, over) {
       }
     }
     ctx.restore();
-    if (FXO.parts && tight > 0 && crush < 1 && Math.random() < 0.5) {
+    if (FXO.parts && tight > 0 && crush < 1 && rnd() < 0.5) {
       const wa = rnd(TAU);
       spawnPart(bx + Math.cos(wa) * Rw, by + Math.sin(wa) * Rw,
                 Math.cos(wa) * 90, Math.sin(wa) * 90, rnd(2.2, 1),
@@ -16014,7 +16056,7 @@ function tribunalTick(dt) {
     if (T.atkT <= 0) {
       T.atkT = 0.5;
       for (const s of T.seats) {
-        if (s.turned || Math.random() > 0.4) continue;
+        if (s.turned || simRand() > 0.4) continue;
         const a = Math.atan2(P.y - s.y, P.x - s.x);
         ebullets.push({ x: s.x, y: s.y, vx: Math.cos(a) * 250, vy: Math.sin(a) * 250,
                         r: 6, dmg: 9, col: CROWD_COL, life: 5, t: 0 });
@@ -16475,14 +16517,14 @@ function vrHalPick(S, h) {
   const pool = S.pool.filter(m =>
     d > 330 ? m === 'thrust' || m === 'slam' : d < 150 ? m === 'sweep' || m === 'spin' : true);
   const from = pool.length ? pool : S.pool;
-  return from[(Math.random() * from.length) | 0];
+  return from[(simRand() * from.length) | 0];
 }
 function vrHalStart(S, h, atk, quick) {
   h.atk = atk;
   h.phase = 'tell'; h.pt = 0; h.swing = 0; h.landed = false; h.pass = 0; h.spinT = 0;
   h.quick = quick || 1;                          // a riposte or a follow-up tells short
   h.feintT = 0;
-  h.feint = !quick && !!S.feint && Math.random() < S.feint && atk !== 'spin';
+  h.feint = !quick && !!S.feint && simRand() < S.feint && atk !== 'spin';
   if (atk === 'sweep') h.swing = -HAL_ARC / 2;
   if (atk === 'slam') h.mark = { x: P.x, y: P.y };
   Audio_.tone(210, 0.08, 'square', 0.06, 150);
@@ -16526,14 +16568,14 @@ function vrHalTick(V, S, dt) {
   } else if (h.phase === 'live' && h.pt >= M.live) {
     h.phase = 'rest'; h.pt = 0;
     // a string: straight into the next one, no breath
-    if (S.string && h.strung < 2 && Math.random() < S.string) {
+    if (S.string && h.strung < 2 && simRand() < S.string) {
       h.strung++;
       vrHalStart(S, h, vrHalPick(S, h), 0.75);
       return;
     }
   } else if (h.phase === 'rest' && h.pt >= M.rest) {
     h.atk = null; h.phase = null; h.swing = 0; h.spinT = 0; h.strung = 0;
-    h.atkT = rnd(S.gap[1], S.gap[0]);
+    h.atkT = simRnd(S.gap[1], S.gap[0]);
     return;
   }
   if (h.phase !== 'live') return;
@@ -16668,8 +16710,8 @@ function vrCrowdDrift(V, dt) {
 function vrCrowdThrow(V) {
   const ready = V.crowd.filter(c => c.in >= 1);
   for (let k = 0; k < Math.min(2, ready.length); k++) {
-    const c = ready[(Math.random() * ready.length) | 0];
-    const a = Math.atan2(P.y - c.y, P.x - c.x) + rnd(0.06, -0.06);
+    const c = ready[(simRand() * ready.length) | 0];
+    const a = Math.atan2(P.y - c.y, P.x - c.x) + simRnd(0.06, -0.06);
     ebullets.push({ x: c.x, y: c.y, vx: Math.cos(a) * VR_CROWD_SHOT, vy: Math.sin(a) * VR_CROWD_SHOT,
                     r: 6, dmg: VR_CROWD_DMG, col: CROWD_COL, life: 5, t: 0 });
     c.look = 0.5;
@@ -16838,7 +16880,7 @@ function vrDuelHis(D, sooner, cont) {
   D.ph = 'wind'; D.beat = 0;
   D.atk = D.atk === 'sweep' ? 'thrust' : 'sweep';
   if (!cont) {
-    const r = Math.random(), tp = vrTempo(D);
+    const r = simRand(), tp = vrTempo(D);
     D.burst = D.awake || D.n >= VR_DUEL_WAKE || D.n < VR_BURST_FROM ? 1
             : D.n >= VR_BURST3_FROM && r < 0.3 ? 3
             : r < 0.3 + 0.3 * tp ? 2 : 1;
@@ -16961,7 +17003,7 @@ function vrDuelFinish(V, D) {
   V.hp = 0;
   const h = V.h;
   h.atk = null; h.phase = null; h.swing = 0;
-  V.disarm = { x: h.x, y: h.y, vx: rnd(160, -160), vy: -420, a: h.ang, spin: rnd(9, 5) * (Math.random() < 0.5 ? -1 : 1), t: 0 };
+  V.disarm = { x: h.x, y: h.y, vx: rnd(160, -160), vy: -420, a: h.ang, spin: rnd(9, 5) * (rnd() < 0.5 ? -1 : 1), t: 0 };
   shake(2.8);                  // no white flash: it whited out the art's disarm (vrDisarmFx) whole
   Audio_.boom(); Audio_.levelup();
   ringFx(h.x, h.y, 24, 1200, '#fde68a', 1.4, 9);
@@ -18512,8 +18554,8 @@ function drawRoninUnder(w) {
     vraPart({ k: 'ember', x: P.x + Math.cos(an) * 16, y: P.y + Math.sin(an) * 16,
               vx: -Math.cos(P.ang) * 30 + rnd(15, -15), vy: -Math.sin(P.ang) * 30 - 25,
               r: rnd(1.4, 0.6), col: VRA_GOLD, a: 0.9, life: rnd(1, 0.5), drag: 0.4, g: -20 });
-    if (C && Math.random() < 0.35) {
-      const T = C.ch[2 + (Math.random() < 0.5 ? 0 : 1)], e = T[T.length - 1];
+    if (C && rnd() < 0.35) {
+      const T = C.ch[2 + (rnd() < 0.5 ? 0 : 1)], e = T[T.length - 1];
       vraInk(e.x, e.y, 1, 20, 3.5, 0.7);
     }
   }
@@ -18684,11 +18726,11 @@ function drawRoninSwing() {
     ctx.globalCompositeOperation = 'lighter';
     const tx = Math.cos(a1) * reach, ty = Math.sin(a1) * reach;
     drawGlow(tx, ty, fin ? 30 : 18, VRA_GOLD, 0.7);
-    if (Math.random() < 0.6) {
+    if (rnd() < 0.6) {
       const ta = a1 + dir * Math.PI / 2;
-      vraPart({ k: Math.random() < 0.5 ? 'ink' : 'spark', x: P.x + tx, y: P.y + ty,
+      vraPart({ k: rnd() < 0.5 ? 'ink' : 'spark', x: P.x + tx, y: P.y + ty,
                 vx: Math.cos(ta) * 160 + rnd(40, -40), vy: Math.sin(ta) * 160 + rnd(40, -40),
-                r: Math.random() < 0.5 ? 3 : 1.2, col: VRA_GOLD, a: 0.9, life: 0.35, drag: 0.05 });
+                r: rnd() < 0.5 ? 3 : 1.2, col: VRA_GOLD, a: 0.9, life: 0.35, drag: 0.05 });
     }
   }
   ctx.restore();
@@ -19268,8 +19310,8 @@ function vriSpray(C) {
     for (let j = 0; j < hem.length; j++) {
       const a = VRI.hem[j], b = hem[j];
       const vx = (b.x - a.x) / VRI.dt, vy = (b.y - a.y) / VRI.dt;
-      if (Math.hypot(vx, vy) < 70 || Math.random() > 0.5) continue;
-      const ink = Math.random() < 0.6;
+      if (Math.hypot(vx, vy) < 70 || rnd() > 0.5) continue;
+      const ink = rnd() < 0.6;
       VRI.parts.push({ ink, x: b.x, y: b.y, vx: vx * rnd(0.7, 0.3) + rnd(12, -12), vy: vy * rnd(0.7, 0.3) + rnd(12, -12),
                        r: ink ? rnd(0.7, 0.25) : rnd(0.35, 0.15), t: 0, life: rnd(0.7, 0.3) });
     }
@@ -19710,7 +19752,7 @@ function lunarStroke(c, s) {
   for (const e of enemies.slice()) {           // kills can push splitters mid-loop
     if (e.dead || e.hacked || e.phased || e.vrFounder) continue;
     if (!segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + LUNAR_W)) continue;
-    const crit = Math.random() < bladeCrit();
+    const crit = simRand() < bladeCrit();
     bladeDeal(e, dmg * (crit ? bladeCritM() : 1), crit, c.x, c.y);
     s.hits++;
     roninCleaveHitFx(e, c, s);
@@ -19864,7 +19906,7 @@ function skyTouches(sp, e) {
   return false;
 }
 function skyCut(sp, e, dmg, star) {
-  const crit = Math.random() < bladeCrit();
+  const crit = simRand() < bladeCrit();
   bladeDeal(e, dmg * (crit ? bladeCritM() : 1), crit, P.x, P.y);
   sp.hits++;
   roninSplitHitFx(e, sp, star);
@@ -19940,7 +19982,7 @@ const stillCanExec = e => (e.boss === 'theother' ? otherExecutable(e) : suCanPin
 // infection's is something else knitting it back together, and that fight begins
 function otherExecuted(e, ang) {
   const odds = 0.25 + 0.25 * (Save.profile.otherKills || 0);     // as bossOther rolls it
-  if (Math.random() < odds) { startVirus(e); return; }
+  if (simRand() < odds) { startVirus(e); return; }
   e.floor = undefined; e.hp = 0; killEnemy(e, ang);
 }
 /* The four finales: which one a body belongs to, and the health that is the
@@ -20007,7 +20049,7 @@ function stillCatch(amount, opts) {
   const blow = src && src.x !== undefined ? { x: src.x, y: src.y } : shot ? { x: shot.x, y: shot.y } : { x: P.x, y: P.y };
   const power = bladeSwingDmg() / (CHAR().dmg * BLADE_DMG);
   let dmg = Math.max(bladeSwingDmg() * WATER_DMG, Math.max(1, amount) * COUNTER_MUL * power * gearStat('ret') * WATER_BLOW);
-  const crit = Math.random() < bladeCrit();
+  const crit = simRand() < bladeCrit();
   if (crit) dmg *= bladeCritM();
   const from = { x: P.x, y: P.y }, e = stillFind(opts);
   const x = { kind: 'wave', exec: false, boss: false, e, t: 0, T: WATER_STRIKE_T, kill: WATER_STRIKE_KILL,
@@ -20179,7 +20221,7 @@ function rkaPetals(x, y, n, spd, ang, spread) {
     const a = ang === undefined ? rnd(TAU) : ang + rnd(spread / 2, -spread / 2), s = spd * rnd(1.2, 0.3);
     RKA.petals.push({ x: x + rnd(4, -4), y: y + rnd(4, -4), vx: Math.cos(a) * s, vy: Math.sin(a) * s,
                       z: rnd(26, 8), vz: rnd(60, 10), rot: rnd(TAU), spin: rnd(9, -9), ph: rnd(TAU),
-                      sz: rnd(4.2, 2.6), col: RKA_PETAL[Math.floor(Math.random() * RKA_PETAL.length)],
+                      sz: rnd(4.2, 2.6), col: RKA_PETAL[Math.floor(rnd() * RKA_PETAL.length)],
                       t: 0, down: -1, life: rnd(3.5, 2) });
   }
 }
@@ -20366,7 +20408,7 @@ function drawRoninWounds() {
     }
     ctx.restore();
     // bleeding: red embers off the cut, falling
-    if (drip && typeof vraPart === 'function' && Math.random() < dt * (3 + 6 * beat)) {
+    if (drip && typeof vraPart === 'function' && rnd() < dt * (3 + 6 * beat)) {
       const u = rnd(1, -1);
       vraPart({ k: 'ember', x: e.x + c * L * u, y: e.y + s * L * u, vx: rnd(20, -20), vy: rnd(10, -30),
                 r: rnd(1.4, 0.7), col: VRA_RED, a: 0.9, life: rnd(0.8, 0.4), drag: 0.4, g: 90 });
@@ -20659,12 +20701,12 @@ function roninStrokeFx(c, s) {
   const second = c.strokes.indexOf(s) === 1;
   const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1, n = Math.max(6, Math.round(L / 14));
   for (let i = 0; i < n; i++) {
-    const u = (i + Math.random()) / n, x = lerp(s.x1, s.x2, u), y = lerp(s.y1, s.y2, u);
-    vraSparks(x, y, 1, VRA_GOLD, 200, s.a + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 0.8, 0.28, 1.1);
+    const u = (i + rnd()) / n, x = lerp(s.x1, s.x2, u), y = lerp(s.y1, s.y2, u);
+    vraSparks(x, y, 1, VRA_GOLD, 200, s.a + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 0.8, 0.28, 1.1);
   }
   vraSparks(s.x2, s.y2, second ? 14 : 8, VRA_GOLD, 380, s.a, 0.5, 0.35, 1.4);
   for (let i = 0; i < 5; i++) {                  // petals off the edge as it passes
-    const u = Math.random(), side = Math.random() < 0.5 ? 1 : -1;
+    const u = rnd(), side = rnd() < 0.5 ? 1 : -1;
     rkaPetals(lerp(s.x1, s.x2, u), lerp(s.y1, s.y2, u), 1, 70, s.a + side * Math.PI / 2, 1.2);
   }
   rkaPetals(s.x2, s.y2, 3, 110, s.a, 0.8);
@@ -20807,7 +20849,7 @@ function drawRoninDashTrail() {
     if (frame) {
       const h = rkxAt(d, at), c = Math.cos(h.a), s = Math.sin(h.a);
       for (let i = 0; i < 3; i++) {                  // wind lines peeling off the hull
-        const off = rnd(26, 10) * (Math.random() < 0.5 ? -1 : 1);
+        const off = rnd(26, 10) * (rnd() < 0.5 ? -1 : 1);
         vraPart({ k: 'spark', x: P.x - s * off, y: P.y + c * off, vx: -c * rnd(420, 220), vy: -s * rnd(420, 220),
                   r: 0.8, col: RKX_SKY, a: 0.7, life: rnd(0.2, 0.1), drag: 0.05 });
       }
@@ -21152,9 +21194,9 @@ function roninSplitFx(sp) {
     if (L > LL) { LL = L; longest = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2, a }; }
     const n = Math.max(4, Math.round(L / 16));
     for (let i = 0; i < n; i++) {
-      const u = (i + Math.random()) / n, x = s.x1 + dx * u, y = s.y1 + dy * u;
-      vraSparks(x, y, 1, Math.random() < 0.4 ? '#ffffff' : tint, 240, a + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 0.7, 0.3, 1.1);
-      if (Math.random() < 0.35) rkaPetals(x, y, 1, 60, a + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 1.4);
+      const u = (i + rnd()) / n, x = s.x1 + dx * u, y = s.y1 + dy * u;
+      vraSparks(x, y, 1, rnd() < 0.4 ? '#ffffff' : tint, 240, a + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 0.7, 0.3, 1.1);
+      if (rnd() < 0.35) rkaPetals(x, y, 1, 60, a + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 1.4);
     }
   }
   const A = sp.area;
@@ -21325,7 +21367,7 @@ function rkcDrops(x, y, n, spd, ang, spread, col, z) {
   for (let i = 0; i < n; i++) {
     const an = ang === undefined ? rnd(TAU) : ang + rnd(spread / 2, -spread / 2), sp = spd * rnd(1.2, 0.3);
     rkcBit({ k: 'drop', x, y, z: z === undefined ? rnd(18, 5) : z, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp,
-             vz: rnd(170, 30), g: 560, r: rnd(2.3, 0.9), col: col || (Math.random() < 0.5 ? '#b91c1c' : '#991b1b'),
+             vz: rnd(170, 30), g: 560, r: rnd(2.3, 0.9), col: col || (rnd() < 0.5 ? '#b91c1c' : '#991b1b'),
              life: 3, drag: 0.45 });
   }
 }
@@ -21341,7 +21383,7 @@ function rkcLilies(x, y, n, spd, ang, spread) {
   for (let i = 0; i < n; i++) {
     rkaPetals(x, y, 1, spd, ang, spread);
     const p = RKA.petals[RKA.petals.length - 1];
-    if (p) p.col = RKC_LILY[(Math.random() * RKC_LILY.length) | 0];
+    if (p) p.col = RKC_LILY[(rnd() * RKC_LILY.length) | 0];
   }
 }
 function rkcPolyPts(n, r0, r1) {
@@ -21355,10 +21397,10 @@ function rkcFling(k, x, y, n, spd, o) {
     const b = { k, x: x + rnd(o.jit || 0, -(o.jit || 0)), y: y + rnd(o.jit || 0, -(o.jit || 0)), z: o.z === undefined ? rnd(24, 6) : o.z,
                 vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, vz: rnd(o.vz || 200, (o.vz || 200) * 0.3), g: o.g || 520,
                 rot: rnd(TAU), spin: rnd(14, -14), life: o.life || 2.4, drag: o.drag === undefined ? 0.45 : o.drag,
-                col: o.cols ? o.cols[(Math.random() * o.cols.length) | 0] : o.col, ph: rnd(TAU) };
+                col: o.cols ? o.cols[(rnd() * o.cols.length) | 0] : o.col, ph: rnd(TAU) };
     if (k === 'page') { b.w = rnd(9, 6); b.h = b.w * 1.3; b.g = 90; b.vmin = -38; b.drag = 0.6; b.vz = rnd(110, 30); }
     if (k === 'shard') b.pts = rkcPolyPts(3, 3, o.size || 9);
-    if (k === 'plate') b.pts = rkcPolyPts((5 + Math.random() * 3) | 0, (o.size || 30) * 0.5, o.size || 30);
+    if (k === 'plate') b.pts = rkcPolyPts((5 + rnd() * 3) | 0, (o.size || 30) * 0.5, o.size || 30);
     if (k === 'square') b.s = rnd(o.size || 8, (o.size || 8) * 0.5);
     rkcBit(b);
   }
@@ -21402,10 +21444,10 @@ function rkcStep() {
     if (!w.still) continue;
     const a = Math.atan2(w.vy, w.vx);
     for (let j = 0; j < 2; j++) {
-      const sd = Math.random() < 0.5 ? -1 : 1, off = rnd(26, 6) * sd;
+      const sd = rnd() < 0.5 ? -1 : 1, off = rnd(26, 6) * sd;
       vraPart({ k: 'spark', x: w.x - Math.cos(a) * 12 - Math.sin(a) * off, y: w.y - Math.sin(a) * 12 + Math.cos(a) * off,
                 vx: -Math.cos(a) * rnd(160, 40) - Math.sin(a) * sd * rnd(120, 30), vy: -Math.sin(a) * rnd(160, 40) + Math.cos(a) * sd * rnd(120, 30),
-                r: rnd(1.2, 0.6), col: Math.random() < 0.3 ? '#ffffff' : RKC_SHEEN, a: 0.9, life: rnd(0.4, 0.2), drag: 0.1 });
+                r: rnd(1.2, 0.6), col: rnd() < 0.3 ? '#ffffff' : RKC_SHEEN, a: 0.9, life: rnd(0.4, 0.2), drag: 0.1 });
     }
   }
   return dt;
@@ -22107,7 +22149,7 @@ function rkcClick(x) {
 function rkcSpill(cx, cy, a, r, amt) {
   const c = Math.cos(a), s = Math.sin(a), n = Math.round(16 * amt);
   for (let i = 0; i < n; i++) {
-    const u = rnd(1, -1) * r, side = Math.random() < 0.5 ? -1 : 1;
+    const u = rnd(1, -1) * r, side = rnd() < 0.5 ? -1 : 1;
     rkcDrops(cx + c * u, cy + s * u, 1, rnd(240, 60), a + side * Math.PI / 2, 1);
   }
   for (let i = 0; i < Math.round(5 * amt); i++) { const u = rnd(1, -1) * r * 0.9; rkcSplat(cx + c * u, cy + s * u, rnd(5, 2.5)); }
@@ -22207,7 +22249,7 @@ RKC_KILL.strike = (x, p) => {
   const e = x.e;
   if (!e) return;
   const c = Math.cos(p.ca), s = Math.sin(p.ca), L = e.r * 1.1;
-  for (let i = 0; i < 8; i++) { const u = rnd(1, -1); vraSparks(e.x + c * L * u, e.y + s * L * u, 1, '#ffffff', 260, p.ca + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 0.7, 0.25, 1.1); }
+  for (let i = 0; i < 8; i++) { const u = rnd(1, -1); vraSparks(e.x + c * L * u, e.y + s * L * u, 1, '#ffffff', 260, p.ca + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 0.7, 0.25, 1.1); }
   vraSparks(e.x, e.y, 10, VRA_GOLD, 360, x.ang, 0.6, 0.3, 1.3);
   vraEmbers(e.x, e.y, 8, VRA_RED, 90, 0.7, 1.1);
   rkcDrops(e.x, e.y, 6, 180, x.ang, 1.4);
@@ -22350,7 +22392,7 @@ RKC_DRAW[2] = (x, q) => {
     rkcSlash(rx - c * L, ry - s * L, rx + c * L, ry + s * L, 3, vraOut(k / 0.05), vraEase((k - 0.05) / 0.3), RKC_SHEEN, 1);
     rkcHair(rx - c * L, ry - s * L, rx + c * L, ry + s * L, 0.6 * (1 - rkcQ(q, 0.6, K)), RKC_SHEEN);
     if (rkcOnce('water')) {
-      for (let i = 0; i < 12; i++) { const u = rnd(1, -1) * L; rkcSpray(rx + c * u, ry + s * u, 2, 150, va + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 1); }
+      for (let i = 0; i < 12; i++) { const u = rnd(1, -1) * L; rkcSpray(rx + c * u, ry + s * u, 2, 150, va + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 1); }
       rkcRip(rx, ry, 6, e.r * 2, 0.8, RKC_SHEEN, 1.6);
       shake(0.12);
     }
@@ -22369,7 +22411,7 @@ RKC_KILL[2] = (x, p) => {
   const rx = e.x, ry = 2 * p.by - e.y;
   for (let i = 0; i < 3; i++) rkcRip(rx, ry, 6 + i * 10, pool.r * (0.7 + i * 0.15), 0.8 + i * 0.3, i ? RKC_SHEEN : '#ffffff', 1.8 - i * 0.4);
   const c = Math.cos(p.ca), s = Math.sin(p.ca);
-  for (let i = 0; i < 18; i++) { const u = rnd(1, -1) * e.r; rkcSpray(e.x + c * u, e.y + s * u, 1, 220, p.ca + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 1.2, 10); }
+  for (let i = 0; i < 18; i++) { const u = rnd(1, -1) * e.r; rkcSpray(e.x + c * u, e.y + s * u, 1, 220, p.ca + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 1.2, 10); }
   for (let i = 0; i < 6; i++) rkcMist(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(18, 10), rnd(30, -30), rnd(-10, -40), 1.4);
   rkcSpill(e.x, e.y, p.ca, e.r, 0.8);
   rkcLilies(pool.x, pool.y, 16, 90);
@@ -22404,10 +22446,10 @@ RKC_DRAW.warden = (x, q) => {
       shake(0.05);
     }
   });
-  if (q > 1.06 && Math.random() < 0.6) {
-    const ct = p.cuts[(Math.random() * p.cuts.length) | 0], u = Math.random();
+  if (q > 1.06 && rnd() < 0.6) {
+    const ct = p.cuts[(rnd() * p.cuts.length) | 0], u = rnd();
     vraPart({ k: 'ember', x: e.x + Math.cos(ct.a) * e.r * u, y: e.y + Math.sin(ct.a) * e.r * u, vx: rnd(14, -14), vy: rnd(-20, -60),
-              r: rnd(1.4, 0.7), col: Math.random() < 0.5 ? VRA_RED : VRA_GOLD, a: 0.9, life: rnd(0.9, 0.5), drag: 0.5, g: -20 });
+              r: rnd(1.4, 0.7), col: rnd() < 0.5 ? VRA_RED : VRA_GOLD, a: 0.9, life: rnd(0.9, 0.5), drag: 0.5, g: -20 });
   }
   if (beat > 0.9 && rkcOnce('b' + Math.round(q * 10))) shake(0.08);
 };
@@ -22492,7 +22534,7 @@ RKC_DRAW.forgeheart = (x, q) => {
       for (let j = 0; j < 4; j++) rkcMist(e.x + c * p.R, e.y + s * p.R, rnd(12, 6), c * rnd(60, 20), s * rnd(60, 20) - 25, 1.3);
       shake(0.08);
     }
-    if (qi > 0.12 && Math.random() < 0.3 + cool * 0.5) rkcMist(e.x + c * (p.R + rnd(10, -10)), e.y + s * (p.R + rnd(10, -10)), rnd(9, 4), c * 30 + rnd(10, -10), s * 30 - 26, rnd(1.4, 0.9));
+    if (qi > 0.12 && rnd() < 0.3 + cool * 0.5) rkcMist(e.x + c * (p.R + rnd(10, -10)), e.y + s * (p.R + rnd(10, -10)), rnd(9, 4), c * 30 + rnd(10, -10), s * 30 - 26, rnd(1.4, 0.9));
   });
 };
 RKC_KILL.forgeheart = (x, p) => {
@@ -22578,7 +22620,7 @@ RKC_DRAW.broodmother = (x, q) => {
       rkcGhost(e.x + Math.cos(ha) * (p.rc * sc + 16), e.y + Math.sin(ha) * (p.rc * sc + 16), ha + Math.PI / 2, 0.8 - i * 0.25);
     } else rkcRingSeam(e.x, e.y, p.rc * sc, 0.4 + 0.5 * Math.sin(uiTime * 16) ** 2, 0.8);
   }
-  if (Math.random() < 0.5) rkcBit({ k: 'bubble', x: e.x + rnd(e.r, -e.r), y: e.y + rnd(e.r, -e.r), r: rnd(3.5, 1.2), vx: 0, vy: 0, life: rnd(0.7, 0.3) });
+  if (rnd() < 0.5) rkcBit({ k: 'bubble', x: e.x + rnd(e.r, -e.r), y: e.y + rnd(e.r, -e.r), r: rnd(3.5, 1.2), vx: 0, vy: 0, life: rnd(0.7, 0.3) });
 };
 RKC_KILL.broodmother = (x, p) => {
   const e = x.e;
@@ -23239,7 +23281,7 @@ RKC_DRAW.unwritten = (x, q) => {
     const u = Math.max(0, prog - i * 0.03), h = p.pts[Math.floor(u * (p.pts.length - 1))], h2 = p.pts[Math.min(p.pts.length - 1, Math.floor(u * (p.pts.length - 1)) + 1)];
     rkcGhost(h.x, h.y, Math.atan2(h2.y - h.y, h2.x - h.x), 0.8 - i * 0.2, VRA_GOLD, 0.2);
   }
-  if (prog > 0.05 && Math.random() < 0.5) { const h = p.pts[Math.floor(prog * (p.pts.length - 1))]; vraInk(h.x, h.y, 1, 60, 3, 0.4); }
+  if (prog > 0.05 && rnd() < 0.5) { const h = p.pts[Math.floor(prog * (p.pts.length - 1))]; vraInk(h.x, h.y, 1, 60, 3, 0.4); }
   const vk = rkcIn(q, 1.95, 2.4);
   rkcVeins(p.A.x, p.A.y, p.A.r, vk, RKC.seed, 1);
   rkcVeins(p.B.x, p.B.y, p.B.r, vk, RKC.seed + 11, 1);
@@ -23255,7 +23297,7 @@ RKC_KILL.unwritten = (x, p) => {
     vraInk(H.x, H.y, 8, 160, 8, 0.7);
     vraSparks(H.x, H.y, 16, '#ffffff', 420, 0, TAU, 0.3, 1.2);
   }
-  for (let i = 0; i < 12; i++) { const h = p.pts[(Math.random() * p.pts.length) | 0]; rkcSplat(h.x + rnd(16, -16), h.y + rnd(16, -16), rnd(6, 2.5), '#0b0d14'); }
+  for (let i = 0; i < 12; i++) { const h = p.pts[(rnd() * p.pts.length) | 0]; rkcSplat(h.x + rnd(16, -16), h.y + rnd(16, -16), rnd(6, 2.5), '#0b0d14'); }
   rkcLilies((p.A.x + p.B.x) / 2, (p.A.y + p.B.y) / 2, 30, 240);
   rkcBeat(x, (p.A.x + p.B.x) / 2, (p.A.y + p.B.y) / 2, p.ang);
 };
@@ -23343,7 +23385,7 @@ RKC_DRAW.founder = (x, q) => {
     const fl = 0.5 + 0.5 * Math.sin(uiTime * 31) * Math.sin(uiTime * 7.3);
     drawGlow(p.F.x, p.F.y - 28, 30, '#fde68a', 0.25 * st * fl);
     ctx.restore();
-    if (Math.random() < 0.08) rkaPetals(p.F.x + rnd(160, -160), p.F.y + rnd(120, -140), 1, 10);
+    if (rnd() < 0.08) rkaPetals(p.F.x + rnd(160, -160), p.F.y + rnd(120, -140), 1, 10);
   }
   const k = q - 2.2;
   if (k >= 0) {
@@ -23367,7 +23409,7 @@ RKC_KILL.founder = (x, p) => {
 /* -------------------------------- the hooks ------------------------------- */
 function rkcBegin(x) {
   RKC.x = x; RKC.at = uiTime; RKC.once = {};
-  RKC.seed = Math.floor(Math.random() * 997) + 1; RKC.side = Math.random() < 0.5 ? -1 : 1;
+  RKC.seed = Math.floor(rnd() * 997) + 1; RKC.side = rnd() < 0.5 ? -1 : 1;
   RKC.fx = x.e ? (x.e.x + x.to.x) / 2 : x.to.x; RKC.fy = x.e ? (x.e.y + x.to.y) / 2 : x.to.y;
   const f = RKC_PLAN[x.kind] || (x.boss && !RKC_DRAW[x.kind] ? RKC_PLAN[0] : null);
   try { RKC.plan = f ? f(x) : {}; } catch (err) { RKC.plan = {}; }
@@ -23572,7 +23614,7 @@ function roninStillCatchFx(x) {
     shake(0.18);
     return;
   }
-  for (let i = 0; i < 6; i++) { const u = Math.random(); rkaPetals(lerp(fx, x.to.x, u), lerp(fy, x.to.y, u), 1, 80, x.ang + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2, 1.2); }
+  for (let i = 0; i < 6; i++) { const u = rnd(); rkaPetals(lerp(fx, x.to.x, u), lerp(fy, x.to.y, u), 1, 80, x.ang + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2, 1.2); }
   vraInk(fx, fy, 4, 80, 5, 0.45);
   vraInk(x.to.x, x.to.y, 3, 60, 4, 0.4);
   vraSparks(x.to.x, x.to.y, 8, RKC_SHEEN, 220, x.ang, 1, 0.22, 1);
@@ -23596,7 +23638,7 @@ function roninExecKillFx(x) {
       const q = parts[i];
       if (q.life !== q.max || Math.abs(q.x - e.x) > 1 || Math.abs(q.y - e.y) > 1) continue;
       n++;
-      if (Math.random() < 0.8) { parts.splice(i, 1); if (typeof partPool !== 'undefined') partPool.push(q); }
+      if (rnd() < 0.8) { parts.splice(i, 1); if (typeof partPool !== 'undefined') partPool.push(q); }
     }
   }
   if (x.exec && x.e && typeof corpses !== 'undefined')
@@ -23639,7 +23681,7 @@ function openPortalRoom() {
   const ox = clamp(lastBossDeath ? lastBossDeath.x : P.x, arena.x0 + pad, arena.x1 - pad);
   const oy = clamp(lastBossDeath ? lastBossDeath.y : P.y, arena.y0 + pad, arena.y1 - pad);
   lastBossDeath = null;
-  const a = rnd(TAU);
+  const a = simRnd(TAU);
   const place = (ang, kind, def) => portals.push({
     kind, def, t: 0, arm: 0.9, r: 44,
     x: ox + Math.cos(ang) * R,
@@ -23710,7 +23752,7 @@ function updatePortals(dt) {
   for (const p of portals) {
     p.t += dt;
     p.arm -= dt;                         // brief arming delay: no instant entry
-    if (Math.random() < 0.7) {
+    if (rnd() < 0.7) {
       const a = rnd(TAU), rr = p.r * rnd(1.5, 0.7);
       spawnPart(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr,
         -Math.cos(a) * 90, -Math.sin(a) * 90, rnd(3.4, 1.6),
@@ -23922,7 +23964,7 @@ const BOOKS = {
        'beam, splitting into a fan through every pane it crosses.',
     f: () => {
       P.diaryT = 10;
-      P.diaryAng = rnd(TAU);
+      P.diaryAng = simRnd(TAU);
       P.diaryTick = 0;
       ringFx(P.x, P.y, 12, 320, '#5eead4', 0.8, 6);
       burst(P.x, P.y, 44, '#5eead4', 350, 3.8, 0.75);
@@ -24069,7 +24111,7 @@ function diaryMirrorList() {
 function placePortal(extra) {
   const ox = lastBossDeath ? lastBossDeath.x : P.x;
   const oy = lastBossDeath ? lastBossDeath.y : P.y;
-  const a = rnd(TAU), R = 190;
+  const a = simRnd(TAU), R = 190;
   libraryPortal = Object.assign({
     kind: 'library', t: 0, arm: 0.8, r: 46,
     x: clamp(ox + Math.cos(a) * R, arena.x0 + 120, arena.x1 - 120),
@@ -24121,8 +24163,8 @@ const MALWARE_CHANCE = 0.05;
 
 function maybeSpawnMalware(force) {
   if (!Save.profile.malware && !force) return;
-  if (!force && Math.random() >= MALWARE_CHANCE) return;
-  placePortal({ kind: 'malware', mal: pick(MALWARE) });
+  if (!force && simRand() >= MALWARE_CHANCE) return;
+  placePortal({ kind: 'malware', mal: simPick(MALWARE) });
 }
 
 function maybeSpawnLibrary(bossKey) {
@@ -24130,7 +24172,7 @@ function maybeSpawnLibrary(bossKey) {
   if (!Save.profile.altPath || !BOOKS[bossKey]) return;
   // the first loop's way through is guaranteed; later loops stay a roll
   const guaranteed = bossKey === UNW_FROM_BOSS && loopNum === 0;
-  if (!guaranteed && Math.random() >= LIBRARY_CHANCE) return;
+  if (!guaranteed && simRand() >= LIBRARY_CHANCE) return;
   placePortal({ kind: 'library', boss: bossKey });
   // No banner or ring here — the shop is about to cover the screen and eat
   // them, and the door still has to be moved clear of the gates. The portal
@@ -24143,7 +24185,7 @@ function updateLibrary(dt) {
   L.t += dt;
   L.arm -= dt;
   const col = L.kind === 'malware' ? MAL_COL : '#fcd34d';
-  if (Math.random() < 0.6) {
+  if (rnd() < 0.6) {
     const a = rnd(TAU), rr = L.r * rnd(1.6, 0.7);
     spawnPart(L.x + Math.cos(a) * rr, L.y + Math.sin(a) * rr,
       -Math.cos(a) * 70, -Math.sin(a) * 70, rnd(3.4, 1.5), col, rnd(0.7, 0.3), 0.95);
@@ -24310,7 +24352,7 @@ function odIgnite(silent) {
     const a = rnd(TAU), s = rnd(620, 160);
     odSpawnPart(W / 2 + rnd(20, -20), H / 2 + rnd(20, -20),
       Math.cos(a) * s, Math.sin(a) * s * 0.7, rnd(3.4, 1.4),
-      Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1.1, 0.4), 0.9);
+      rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(1.1, 0.4), 0.9);
   }
 }
 
@@ -24375,10 +24417,10 @@ function odDrawFireRoom(c, t, life) {
     c.globalAlpha = (0.24 + Math.sin(t * 7 + p.seed) * 0.08) * up;
     c.fillStyle = '#fdba74';
     c.beginPath(); c.ellipse(p.x, p.y, R * 0.24, R * 0.1, 0, 0, TAU); c.fill();
-    if (Math.random() < 0.1 * life)
+    if (rnd() < 0.1 * life)
       odSpawnPart(p.x + rnd(R * 0.45, -R * 0.45), p.y + rnd(R * 0.3, -R * 0.3),
         rnd(22, -22), rnd(-30, -92), rnd(2.4, 1),
-        Math.random() < 0.3 ? '#fde047' : '#fb923c', rnd(1.4, 0.6), 0.93);
+        rnd() < 0.3 ? '#fde047' : '#fb923c', rnd(1.4, 0.6), 0.93);
   }
   c.restore();
 }
@@ -24425,9 +24467,9 @@ function odDrawSpark(c, t) {
   c.fillStyle = '#fff7ed';
   c.beginPath(); c.ellipse(s.x, s.y - 1, 1.15 + s.f * 0.5, 4.2 + s.f * 2.4, 0, 0, TAU); c.fill();
   // a couple of chips falling off it
-  if (Math.random() < 0.55)
+  if (rnd() < 0.55)
     odSpawnPart(s.x + rnd(3, -3), s.y - rnd(6), rnd(34, -34), rnd(-40, -150),
-      rnd(1.8, 0.8), Math.random() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2), 0.9);
+      rnd(1.8, 0.8), rnd() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2), 0.9);
   c.restore();
   return s;
 }
@@ -24531,12 +24573,12 @@ function odDrawWings(c, x, y, ang, t, open) {
       c.fillStyle = k < 0.3 ? '#fff7ed' : i % 3 === 0 ? '#fde68a' : '#fdba74';
       odFlameLeaf(c, rootX, rootY, dir, len * 0.5, w * 0.42, bend * 0.5); c.fill();
       // a gout throws embers; an idle barely does
-      if (Math.random() < 0.035 * open * sg * sg) {
+      if (rnd() < 0.035 * open * sg * sg) {
         const tx = rootX + Math.cos(dir) * len, ty = rootY + Math.sin(dir) * len + bend;
         odSpawnPart(x + Math.cos(ang) * tx - Math.sin(ang) * ty,
                   y + Math.sin(ang) * tx + Math.cos(ang) * ty,
                   rnd(30, -30), rnd(-20, -80), rnd(2.2, 1),
-                  Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.9, 0.4), 0.92);
+                  rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.9, 0.4), 0.92);
       }
     }
     // the spar the feathers hang off — one crisp line, and the reason the
@@ -24632,9 +24674,9 @@ function odDrawHelix(c, ox, oy, ang, len, t, intensity) {
   }
   c.closePath(); c.fill(); c.restore();
   c.restore();
-  if (Math.random() < 0.6 * intensity)
+  if (rnd() < 0.6 * intensity)
     odSpawnPart(ex + rnd(8, -8), ey + rnd(8, -8), rnd(90, -90), rnd(20, -110),
-      rnd(2.6, 1.2), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.91);
+      rnd(2.6, 1.2), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.91);
 }
 
 /* --------------------------- driving the beat ---------------------------- */
@@ -24916,7 +24958,7 @@ function odScorchHurt(sc, dt, proc) {
     if (!proc || e.dead) continue;
     applyBurn(e, 2);
     odScorchHitFx(e, sc);
-    if (Math.random() < 0.4)
+    if (rnd() < 0.4)
       floatText(e.x, e.y - e.r - 6, Math.round(dps * SCORCH_PROC), '#fdba74', 12);
   }
 }
@@ -25294,7 +25336,7 @@ function odStrikeHurt(b, dt, proc) {
     if (!proc || e.dead) continue;
     applyBurn(e, 2);
     odStrikeHitFx(e, b);
-    if (Math.random() < 0.4)
+    if (rnd() < 0.4)
       floatText(e.x, e.y - e.r - 6, Math.round(dps * SCORCH_PROC), '#fdba74', 12);
   }
 }
@@ -25634,7 +25676,7 @@ function odStarTick(dt) {
       if (!isThreat(e) || e.phased || e.invuln || e.odStar) continue;
       if (len(e.x - s.x, e.y - s.y) > s.r + e.r) continue;
       if (e.type === 'boss' || !suCanPin(e)) { odStarBlow(s); break; }
-      e.odStar = s; e.odStarA = rnd(TAU);
+      e.odStar = s; e.odStarA = simRnd(TAU);
       s.held.push(e);
       if (s.fuse < 0) s.fuse = STAR_FUSE;
       odStarEngulfFx(e, s);
@@ -25679,7 +25721,7 @@ function odStarBlow(s) {
     applyBurn(e, was ? 3 : 2);
     odStarHitFx(e, s);
     if (e.type !== 'boss' && suCanPin(e)) {
-      const a = d > 1 ? Math.atan2(dy, dx) : rnd(TAU);
+      const a = d > 1 ? Math.atan2(dy, dx) : simRnd(TAU);
       e.vx += Math.cos(a) * STAR_SHOVE; e.vy += Math.sin(a) * STAR_SHOVE;
     }
   }
@@ -25828,10 +25870,10 @@ function drawOdScars() {
         ctx.stroke();
       }
       // it smokes while it is still hot
-      if (odParts() && heat > 0.15 && Math.random() < 0.02 * heat) {
-        const u = Math.random();
+      if (odParts() && heat > 0.15 && rnd() < 0.02 * heat) {
+        const u = rnd();
         spawnPart(lerp(ax, bx, u), lerp(ay, by, u), rnd(12, -12), rnd(-30, -70), rnd(2, 1),
-                  Math.random() < 0.5 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.93);
+                  rnd() < 0.5 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.93);
       }
     }
   }
@@ -25940,18 +25982,18 @@ function drawOdScorch() {
 
   if (odParts()) {
     // spray off the impact, thrown back and wide
-    if (Math.random() < 0.9 * k) {
-      const sd = Math.random() < 0.5 ? -1 : 1, v = rnd(260, 90);
+    if (rnd() < 0.9 * k) {
+      const sd = rnd() < 0.5 ? -1 : 1, v = rnd(260, 90);
       spawnPart(ex + rnd(6, -6), ey + rnd(6, -6), -ca * v * 0.6 + nx * sd * v, -sa * v * 0.6 + ny * sd * v,
-                rnd(3, 1.4), sc.cut ? '#bae6fd' : Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.9);
+                rnd(3, 1.4), sc.cut ? '#bae6fd' : rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.9);
     }
     // the plating kicked up along its edges as it gouges
     for (let i = 0; i < 2; i++) {
-      if (Math.random() > 0.8 * k) continue;
-      const d = Math.random() * L, sd = Math.random() < 0.5 ? -1 : 1, v = rnd(160, 60);
+      if (rnd() > 0.8 * k) continue;
+      const d = rnd() * L, sd = rnd() < 0.5 ? -1 : 1, v = rnd(160, 60);
       spawnPart(sc.x1 + ca * d + nx * sd * hw, sc.y1 + sa * d + ny * sd * hw,
                 nx * sd * v + ca * rnd(40, -40), ny * sd * v + sa * rnd(40, -40),
-                rnd(2.2, 1), Math.random() < 0.3 ? '#fff7ed' : '#fb923c', rnd(0.35, 0.15), 0.88);
+                rnd(2.2, 1), rnd() < 0.3 ? '#fff7ed' : '#fb923c', rnd(0.35, 0.15), 0.88);
     }
   }
 }
@@ -26050,7 +26092,7 @@ function odScorchFx(sc) {
 
 function odScorchHitFx(e, sc) {
   burst(e.x, e.y, 5, '#fdba74', 220, 2.6, 0.3, 1.3, sc.ang);
-  if (Math.random() < 0.5) burst(e.x, e.y, 2, '#fff7ed', 120, 3, 0.2);
+  if (rnd() < 0.5) burst(e.x, e.y, 2, '#fff7ed', 120, 3, 0.2);
 }
 
 function odScorchEndFx(sc) {
@@ -26061,17 +26103,17 @@ function odScorchEndFx(sc) {
   // it goes out in smoke, all down its length
   const dx = sc.x2 - sc.x1, dy = sc.y2 - sc.y1;
   for (let i = 0; i < 14; i++) {
-    const u = Math.random();
+    const u = rnd();
     spawnPart(sc.x1 + dx * u + rnd(8, -8), sc.y1 + dy * u + rnd(8, -8), rnd(20, -20), rnd(-20, -60),
               rnd(5, 2.5), '#44403c', rnd(0.9, 0.5), 0.95, false);
   }
 }
 
 function odScarHitFx(e, s) {
-  const n = Math.random() < 0.5 ? 2 : 1;
+  const n = rnd() < 0.5 ? 2 : 1;
   for (let i = 0; i < n; i++)
     spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r * 0.5, -e.r * 0.2), rnd(24, -24), rnd(-40, -110),
-              rnd(2.4, 1.1), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.6, 0.3), 0.92);
+              rnd(2.4, 1.1), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.6, 0.3), 0.92);
 }
 
 /* ------------------------- X — PYROTECHNICS — art --------------------------
@@ -26211,10 +26253,10 @@ function drawOdPyroMarks() {
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
-      if (odParts() && Math.random() < 0.25 + 0.6 * k) {
-        const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * p.r;
+      if (odParts() && rnd() < 0.25 + 0.6 * k) {
+        const a = rnd() * TAU, d = Math.sqrt(rnd()) * p.r;
         spawnPart(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, rnd(10, -10), rnd(-20, -60 - 80 * k),
-                  rnd(1.8, 0.8), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.25), 0.93);
+                  rnd(1.8, 0.8), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.25), 0.93);
       }
     } else {
       const u = clamp((p.t - PYRO_DELAY) / PYRO_AFTER, 0, 1);
@@ -26331,10 +26373,10 @@ function odPyroColumn(p) {
     }
     ctx.restore();
     drawGlow(p.x, lerp(base, top, 0.3), bw * 2.2, '#fb923c', 0.35 * colK);
-    if (odParts() && u < 0.85 && Math.random() < 0.9 * (1 - u)) {
-      const v = Math.random();
+    if (odParts() && u < 0.85 && rnd() < 0.9 * (1 - u)) {
+      const v = rnd();
       spawnPart(p.x + rnd(bw, -bw) * (1 - v * 0.6), lerp(base, top, v), rnd(40, -40), rnd(-140, -320),
-                rnd(2.6, 1.2), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.94);
+                rnd(2.6, 1.2), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.94);
     }
   }
 }
@@ -26481,10 +26523,10 @@ function drawOdStrikeGround() {
     }
   }
   ctx.restore();
-  if (odParts() && heat > 0.2 && Math.random() < 0.7 * heat) {
-    const an = Math.random() * TAU, v = rnd(260, 120);
+  if (odParts() && heat > 0.2 && rnd() < 0.7 * heat) {
+    const an = rnd() * TAU, v = rnd(260, 120);
     spawnPart(P.x + Math.cos(an) * 16, P.y + Math.sin(an) * 16, Math.cos(an) * v, Math.sin(an) * v,
-              rnd(2.2, 1), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.4, 0.2), 0.9);
+              rnd(2.2, 1), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.4, 0.2), 0.9);
   }
 }
 
@@ -26758,10 +26800,10 @@ function drawOdStrike() {
   drawGlow(b.x, b.y, R * 1.9, '#f97316', 0.4 * k);
   if (odParts()) {
     for (let j = 0; j < 2; j++) {
-      if (Math.random() > 0.9 * k) continue;
+      if (rnd() > 0.9 * k) continue;
       const an = rnd(TAU), v = rnd(420, 160);
       spawnPart(b.x + Math.cos(an) * R * 0.9, b.y + Math.sin(an) * R * 0.9, Math.cos(an) * v, Math.sin(an) * v,
-                rnd(3.4, 1.6), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.9);
+                rnd(3.4, 1.6), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.5, 0.2), 0.9);
     }
   }
 }
@@ -26885,7 +26927,7 @@ function odStrikeEndFx(st) {
   if (!odParts()) return;
   // smoke off the whole X as the last of it goes out
   for (const s of st.strokes) for (let j = 0; j < 16; j++) {
-    const u = Math.random();
+    const u = rnd();
     spawnPart(lerp(s.x1, s.x2, u) + rnd(20, -20), lerp(s.y1, s.y2, u) + rnd(20, -20), rnd(20, -20), rnd(-20, -60),
               rnd(9, 4), '#44403c', rnd(1.1, 0.6), 0.95, false);
   }
@@ -27000,10 +27042,10 @@ function drawOdBrandWall() {
     drawGlow(g.x + Math.cos(ha) * (g.r - 22), g.y + Math.sin(ha) * (g.r - 22), 10 * px, '#fff7ed', 0.8 * k);
   }
   ctx.restore();
-  if (odParts() && Math.random() < 0.9 * k) {
-    const a = Math.random() * TAU;
-    spawnPart(g.x + Math.cos(a) * g.r, g.y + Math.sin(a) * g.r - H * Math.random(), rnd(20, -20), rnd(-60, -160),
-              rnd(2.4, 1), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.93);
+  if (odParts() && rnd() < 0.9 * k) {
+    const a = rnd() * TAU;
+    spawnPart(g.x + Math.cos(a) * g.r, g.y + Math.sin(a) * g.r - H * rnd(), rnd(20, -20), rnd(-60, -160),
+              rnd(2.4, 1), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.7, 0.35), 0.93);
   }
 }
 
@@ -27534,14 +27576,14 @@ function drawOdFusionHull() {
   ctx.restore();
 
   if (odParts()) {
-    if (writhe > 0.05 && Math.random() < 0.9 * writhe) {           // the change throwing sparks off its edge
-      const p = R[Math.floor(Math.random() * N)], sd = Math.random() < 0.5 ? 1 : -1;
+    if (writhe > 0.05 && rnd() < 0.9 * writhe) {           // the change throwing sparks off its edge
+      const p = R[Math.floor(rnd() * N)], sd = rnd() < 0.5 ? 1 : -1;
       const w = odIfritAt(p[0], p[1] * sd);
-      spawnPart(w[0], w[1], rnd(80, -80), rnd(80, -80), rnd(2.4, 1), Math.random() < 0.4 ? '#fff7ed' : '#fde047', rnd(0.35, 0.15), 0.9);
+      spawnPart(w[0], w[1], rnd(80, -80), rnd(80, -80), rnd(2.4, 1), rnd() < 0.4 ? '#fff7ed' : '#fde047', rnd(0.35, 0.15), 0.9);
     }
-    if (form > 0.6 && Math.random() < 0.4 * form) {
-      const p = odIfritAt(-20 - Math.random() * 20, rnd(8, -8));
-      spawnPart(p[0], p[1], rnd(20, -20), rnd(-30, -80), rnd(2, 0.8), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(0.6, 0.3), 0.93);
+    if (form > 0.6 && rnd() < 0.4 * form) {
+      const p = odIfritAt(-20 - rnd() * 20, rnd(8, -8));
+      spawnPart(p[0], p[1], rnd(20, -20), rnd(-30, -80), rnd(2, 0.8), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(0.6, 0.3), 0.93);
     }
   }
   // the moment it is whole, and the moment it lets go
@@ -27658,15 +27700,15 @@ function odFusionEndFx(f) {
   burst(P.x, P.y, 20, '#fb923c', 200, 3, 0.5);
   if (!odParts()) return;
   for (let i = 0; i < 18; i++) {
-    const a = Math.random() * TAU, v = rnd(90, 30);
+    const a = rnd() * TAU, v = rnd(90, 30);
     spawnPart(P.x + Math.cos(a) * 10, P.y + Math.sin(a) * 10, Math.cos(a) * v, Math.sin(a) * v - 30,
               rnd(10, 5), '#292524', rnd(1.2, 0.7), 0.95, false);
   }
 }
 
 function odFusionAuraHitFx(e) {
-  if (Math.random() < 0.4) burst(e.x, e.y, 2, '#fdba74', 120, 2.2, 0.3);
-  if (Math.random() < 0.3) spawnPart(e.x + rnd(e.r, -e.r), e.y, rnd(10, -10), rnd(-40, -90), rnd(1.8, 0.8), '#fde047', rnd(0.5, 0.25), 0.93);
+  if (rnd() < 0.4) burst(e.x, e.y, 2, '#fdba74', 120, 2.2, 0.3);
+  if (rnd() < 0.3) spawnPart(e.x + rnd(e.r, -e.r), e.y, rnd(10, -10), rnd(-40, -90), rnd(1.8, 0.8), '#fde047', rnd(0.5, 0.25), 0.93);
 }
 
 // from one hand, then the other
@@ -27739,12 +27781,12 @@ function malSurge(x, y, r, col, life) {
 // right-angle routing between two points, the way a trace actually runs
 function malTrace(x1, y1, x2, y2, col, life) {
   malPush({ k: 'trace', x1, y1, x2, y2, col: col || MAL_COL, life: life || 0.5,
-            mid: Math.random() < 0.5 });
+            mid: rnd() < 0.5 });
 }
 // memory being scribbled over
 function malGlitch(x, y, r, col, life) {
   malPush({ k: 'glitch', x, y, r, col: col || MAL_COL, life: life || 0.4,
-            seed: Math.random() * 1000 });
+            seed: rnd() * 1000 });
 }
 // the archivist's blink: the line it took, with the hull strung along it
 function blinkTrail(x1, y1, x2, y2, col) {
@@ -27867,8 +27909,8 @@ const MALWARE = [
     f: () => {
       const live = enemies.filter(e => !e.dead && !e.invuln && len(e.x - P.x, e.y - P.y) < 760);
       if (live.length < 2) return malMiss('NO ADDRESS');
-      const a = pick(live);
-      const b = pick(live.filter(e => e !== a));
+      const a = simPick(live);
+      const b = simPick(live.filter(e => e !== a));
       const ax = a.x, ay = a.y;
       malTrail(a.x, a.y, b.x, b.y, '#fb7185');
       malTrace(a.x, a.y, b.x, b.y, '#fb7185', 0.55);
@@ -27956,7 +27998,7 @@ const MALWARE = [
       for (const b of ebullets) {
         const near = nearestEnemy(b.x, b.y, 900);
         burst(b.x, b.y, 3, '#fbbf24', 140, 2.2, 0.22);
-        if (Math.random() < 0.3) malGlitch(b.x, b.y, 34, '#fbbf24', 0.3);
+        if (rnd() < 0.3) malGlitch(b.x, b.y, 34, '#fbbf24', 0.3);
         if (near) damageEnemy(near, 6 + P.dmg * 0.8, false, b.x, b.y, { silent: true });
         dropped++;
       }
@@ -28084,7 +28126,7 @@ const SIGNS = [
 
 function openPlanetarium() {
   shopPending = false;
-  planetSign = pick(SIGNS);
+  planetSign = simPick(SIGNS);
   planetRevealed = false;
   planetMsg = '';
   state = 'planet';
@@ -28186,7 +28228,7 @@ function openReward() {
     banner('NO RESUPPLY', '#64748b', 2.0);
     return;
   }
-  if (Save.profile.planetarium && Math.random() < 0.5) openPlanetarium();
+  if (Save.profile.planetarium && simRand() < 0.5) openPlanetarium();
   else openShop();
 }
 
@@ -28727,6 +28769,8 @@ function promptName() {
 }
 
 function resetGame() {
+  seedSim(runSeedNext != null ? runSeedNext : freshSeed());   // the run's stream starts here
+  runSeedNext = null;
   applyChar(selectedChar);
   P = newPlayer();
   gearStart();                           // returns at once for the other three
@@ -28774,7 +28818,7 @@ function resetGame() {
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
   inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
-  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; suZones.length = 0; suPieces.length = 0; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0;
+  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
@@ -28789,6 +28833,10 @@ function resetGame() {
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   hitStop = 0; drawFlashT = 0; bannerT = 0;
   Audio_.intensity = 0;
+  /* Every counter and clock the game keeps for a run, from zero: the same seed
+     is the same run whatever was played before it, and on any machine. */
+  eid = 0; hackSerial = 0; roninCleaveId = 0; roninSplitId = 0; odRingId = 0; hlHeldSeq = 0;
+  shopkeepTake = 0; waveTimer = 0; spawnT = 0; ambientT = 3;
 }
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
@@ -29292,7 +29340,7 @@ function bladeLevel() {
   Audio_.levelup();
   /* Dropped rather than granted, so it still has to be walked over and still
      has to be compared against what is already on. */
-  if (P.level % 3 === 0) gearDrop(P.x + rnd(40, -40), P.y + rnd(40, -40), 1);
+  if (P.level % 3 === 0) gearDrop(P.x + simRnd(40, -40), P.y + simRnd(40, -40), 1);
 }
 
 function chooseOffer(i) {
@@ -29302,7 +29350,7 @@ function chooseOffer(i) {
   if (P.twoMinds && P.level % 5 === 0) {
     const rest = offers.filter((o, k) => k !== i);
     if (rest.length) {
-      const extra = rest[rndi(rest.length)];
+      const extra = rest[simRndi(rest.length)];
       applyUpgrade(extra);
       floatText(P.x, P.y - 56, 'TWO MINDS', '#fbbf24', 16);
     }
@@ -29756,7 +29804,7 @@ function update(dt) {
 function updateMenu(dt) {
   hlMenuTick(dt);                        // ALL HALLOWS: the knock, and the count
   // idle ambience: drifting sparks
-  if (Math.random() < 0.5) {
+  if (rnd() < 0.5) {
     spawnPart(rnd(W), rnd(H), rnd(24, -24), rnd(24, -24), rnd(2.4, 0.8),
       pick([COL.player, '#f472b6', '#c084fc']), rnd(2.4, 1.2), 0.995);
   }
@@ -29800,7 +29848,7 @@ function updatePlayer(dt) {
     P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
     P.hurtFlash = Math.max(0, P.hurtFlash - dt * 2.4);
     if (P.ghosts.length) P.ghosts.shift();
-    if (Math.random() < 0.35)
+    if (rnd() < 0.35)
       spawnPart(P.x + rnd(12, -12), P.y + rnd(12, -12), rnd(20, -20), rnd(-30, -8),
                 rnd(3, 1.4), COL.player, rnd(0.6, 0.3), 0.94);
     return;
@@ -29906,7 +29954,7 @@ function updatePlayer(dt) {
     // a silhouette dropped every frame, so the dash leaves a body behind it
     P.ghosts.push({ x: P.x, y: P.y, ang: P.ang, t: 1, phase: P.ghost > 0 });
     if (P.ghosts.length > 14) P.ghosts.shift();
-    if (Math.random() < 0.85)
+    if (rnd() < 0.85)
       spawnPart(P.x, P.y, rnd(50, -50), rnd(50, -50), rnd(6, 3), COL.player, 0.3, 0.9);
   } else {
     if (P.ghosts.length) P.ghosts.shift();   // the trail drains once you land
@@ -29932,7 +29980,7 @@ function updatePlayer(dt) {
   P.y = clamp(P.y, arena.y0 + P.r, arena.y1 - P.r);
 
   // engine trail
-  if (len(P.vx, P.vy) > 40 && Math.random() < 0.6) {
+  if (len(P.vx, P.vy) > 40 && rnd() < 0.6) {
     const a = Math.atan2(-P.vy, -P.vx);
     spawnPart(P.x + Math.cos(a) * 8, P.y + Math.sin(a) * 8,
       Math.cos(a) * rnd(70, 20) + rnd(20, -20), Math.sin(a) * rnd(70, 20) + rnd(20, -20),
@@ -30046,7 +30094,7 @@ function updatePlayer(dt) {
       const off = lane === 0 ? 0 : (lane % 2 ? 1 : -1) * Math.ceil(lane / 2) * 17;
       for (let i = 0; i < P.count; i++) {
         const a0 = P.count === 1 ? 0 : (i - (P.count - 1) / 2) * (spread * 1.9);
-        const a = P.ang + a0 + rnd(spread, -spread) * 0.5;
+        const a = P.ang + a0 + simRnd(spread, -spread) * 0.5;
         if (slug) fireBullet(mx + nx * off, my + ny * off, a,
                              1.6 + 0.7 * P.overcharge, { rm: 2.1, sm: 0.86, pierce: 2 });
         else      fireBullet(mx + nx * off, my + ny * off, a);
@@ -30116,7 +30164,7 @@ function updatePlayer(dt) {
         }
       }
     }
-    if (Math.random() < 0.5) {
+    if (rnd() < 0.5) {
       const a = rnd(TAU), R = 130 + 40 * P.sun;
       spawnPart(P.x + Math.cos(a) * R * 0.9, P.y + Math.sin(a) * R * 0.9,
         Math.cos(a) * 40, Math.sin(a) * 40, rnd(4, 2), '#fbbf24', rnd(0.5, 0.25), 0.94);
@@ -30208,7 +30256,7 @@ function updatePlayer(dt) {
       e.redacting = false;                     // cones go dark
       if (e.invuln) e.invuln = 0;
       if (e.type === 'revenant') e.gen = Math.max(e.gen || 0, 1);   // no second life
-      if (Math.random() < 0.12)
+      if (rnd() < 0.12)
         spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, -26,
                   2.4, '#fcd34d', 0.4, 0.95);
     }
@@ -30219,7 +30267,7 @@ function updatePlayer(dt) {
   if (P.burrowT > 0) {
     P.burrowT -= dt;
     P.iframe = Math.max(P.iframe, 0.12);
-    if (Math.random() < 0.7)
+    if (rnd() < 0.7)
       spawnPart(P.x + rnd(18, -18), P.y + rnd(18, -18), 0, 0, rnd(6, 3),
                 '#4ade80', 0.5, 0.94);
     if (P.burrowT <= 0) {                 // surface, the way she does
@@ -30245,7 +30293,7 @@ function twinFire() {
   for (let i = 0; i < P.count; i++) {
     const off = P.count === 1 ? 0 : (i - (P.count - 1) / 2) * (P.spread * 1.9);
     fireBullet(t.x + Math.cos(ang) * 18, t.y + Math.sin(ang) * 18,
-               ang + off + rnd(P.spread, -P.spread) * 0.5, 1, { foreign: true });
+               ang + off + simRnd(P.spread, -P.spread) * 0.5, 1, { foreign: true });
   }
   burst(t.x + Math.cos(ang) * 18, t.y + Math.sin(ang) * 18, 3, '#c4b5fd', 150, 2.2, 0.16, 0.9, ang);
 }
@@ -30267,7 +30315,7 @@ function updateDrones(dt) {
   for (let i = 0; i < P.drones; i++) {
     const a = P.droneAng + i * TAU / P.drones;
     const dx = P.x + Math.cos(a) * R, dy = P.y + Math.sin(a) * R;
-    if (Math.random() < 0.25)
+    if (rnd() < 0.25)
       spawnPart(dx, dy, rnd(24, -24), rnd(24, -24), 2.2, '#a78bfa', 0.28, 0.9);
     for (const e of enemies) {
       if (e.dead || e.hitCd > 0) continue;
@@ -30333,7 +30381,7 @@ function updateEnemies(dt) {
         damageEnemy(e, (1.5 + P.dmg * 0.09) * e.psn, false, e.x, e.y - 20,
                     { silent: true, noChain: true, noStatus: true });
         if (e.dead) { cull.push(i); continue; }
-        if (Math.random() < 0.6)
+        if (rnd() < 0.6)
           spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, -30, 2.4, '#a3e635', 0.5, 0.95);
       }
       if (e.psnT <= 0) e.psn = 0;
@@ -30348,17 +30396,17 @@ function updateEnemies(dt) {
       const sp = len(e.vx, e.vy);
       const ux = sp > 1 ? -e.vx / sp : 0, uy = sp > 1 ? -e.vy / sp : 1;
       const shed = 0.14 + Math.min(0.4, sp / 300) + e.burn * 0.02;
-      if (Math.random() < shed) {
+      if (rnd() < shed) {
         spawnAsh(e.x + ux * e.r * 0.8 + rnd(e.r * 0.5, -e.r * 0.5),
                  e.y + uy * e.r * 0.8 + rnd(e.r * 0.5, -e.r * 0.5),
                  ux * sp * 0.35 + rnd(26, -26),
                  uy * sp * 0.35 + rnd(10, -34),
-                 Math.random() < 0.25);
+                 rnd() < 0.25);
       }
       /* Smoke off the same trailing edge. Ash is what you can still see the
          edge of; this is the rest of it, and it is what makes a body read as
          consumed rather than lit. */
-      if (Math.random() < 0.1 + e.burn * 0.012)
+      if (rnd() < 0.1 + e.burn * 0.012)
         spawnSmoke(e.x + ux * e.r * 0.7 + rnd(e.r * 0.6, -e.r * 0.6),
                    e.y + uy * e.r * 0.7 + rnd(e.r * 0.6, -e.r * 0.6),
                    ux * sp * 0.2 + rnd(12, -12),
@@ -30386,7 +30434,7 @@ function updateEnemies(dt) {
           for (let q = 0; q < 6 + e.burn; q++) {
             const a0 = rnd(TAU), sp0 = rnd(120, 20);
             spawnAsh(e.x, e.y, Math.cos(a0) * sp0, Math.sin(a0) * sp0 - 30,
-                     Math.random() < 0.4);
+                     rnd() < 0.4);
           }
           cull.push(i); continue;
         }
@@ -30401,10 +30449,10 @@ function updateEnemies(dt) {
       damageEnemy(e, e.maxHp * e.leak * dt, false, e.x, e.y,
                   { silent: true, noChain: true, noStatus: true });
       if (e.dead) { cull.push(i); continue; }
-      if (Math.random() < 0.4)
+      if (rnd() < 0.4)
         spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(30, -30), -34,
                   2.6, '#a3e635', 0.5, 0.95);
-      if (Math.random() < 0.25) {
+      if (simRand() < 0.25) {
         for (const o of enemies) {
           if (o.dead || o === e || o.leakT > 0 || o.hacked) continue;
           if (len(o.x - e.x, o.y - e.y) > e.r + o.r + 14) continue;
@@ -30493,9 +30541,9 @@ function updateEnemies(dt) {
         } else {                               // charge
           e.atkT -= dt;
           e.vx *= Math.pow(0.35, dt); e.vy *= Math.pow(0.35, dt);
-          if (Math.random() < 0.8)
+          if (rnd() < 0.8)
             spawnPart(e.x, e.y, rnd(40, -40), rnd(40, -40), 3, e.col, 0.3, 0.9);
-          if (e.atkT <= 0) { e.state = 0; e.cd = rnd(2.4, 1.3); }
+          if (e.atkT <= 0) { e.state = 0; e.cd = simRnd(2.4, 1.3); }
         }
         break;
       }
@@ -30545,12 +30593,12 @@ function updateEnemies(dt) {
         e.ang = Math.atan2(dy, dx);
         e.blinkT -= dt;
         if (e.blinkT <= 0) {
-          e.blinkT = rnd(2.8, 1.7);
+          e.blinkT = simRnd(2.8, 1.7);
           burst(e.x, e.y, 12, e.col, 210, 3, 0.4);
           ringFx(e.x, e.y, e.r, e.r + 44, e.col, 0.3, 2);
           const step = clamp(d - 200, 0, 470);
-          e.x = clamp(e.x + ux * step + rnd(80, -80), 40, WORLD.w - 40);
-          e.y = clamp(e.y + uy * step + rnd(80, -80), 40, WORLD.h - 40);
+          e.x = clamp(e.x + ux * step + simRnd(80, -80), 40, WORLD.w - 40);
+          e.y = clamp(e.y + uy * step + simRnd(80, -80), 40, WORLD.h - 40);
           ringFx(e.x, e.y, 4, e.r + 34, e.col, 0.35, 3);
           const base = Math.atan2(TG.y - e.y, TG.x - e.x);
           for (let k = -1; k <= 1; k++) eshoot(e, base + k * 0.23, 300, e.dmg, 6);
@@ -30593,8 +30641,8 @@ function updateEnemies(dt) {
         if (e.cd <= 0 && d < 940) {
           e.cd = Math.max(1.5, 3.4 - wave * 0.05);
           // leads the target, so standing still is what gets punished
-          mortars.push({ x: TG.x + TG.vx * 0.34 + rnd(46, -46),
-                         y: TG.y + TG.vy * 0.34 + rnd(46, -46),
+          mortars.push({ x: TG.x + TG.vx * 0.34 + simRnd(46, -46),
+                         y: TG.y + TG.vy * 0.34 + simRnd(46, -46),
             r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col, ally: !!e.hacked });
           Audio_.tone(230, 0.2, 'triangle', 0.09, 95);
           burst(e.x, e.y, 6, e.col, 165, 2.6, 0.3);
@@ -30623,7 +30671,7 @@ function updateEnemies(dt) {
         e.atkT += dt;
         if (e.atkT > 3.2) {
           for (let k = 0; k < 3; k++) {
-            const a = rnd(TAU);
+            const a = simRnd(TAU);
             const s = spawnEnemy('swarmer', e.x + Math.cos(a) * 14, e.y + Math.sin(a) * 14, { elite: false });
             s.vx = Math.cos(a) * 230; s.vy = Math.sin(a) * 230;
           }
@@ -30643,7 +30691,7 @@ function updateEnemies(dt) {
         steer(e, (ux + Math.cos(e.wob) * 0.3) * sp * (gh ? 1.5 : 1),
                  (uy + Math.sin(e.wob) * 0.3) * sp * (gh ? 1.5 : 1), gh ? 6 : 3.6, dt);
         e.ang = Math.atan2(e.vy, e.vx);
-        if (gh && Math.random() < 0.3)
+        if (gh && rnd() < 0.3)
           spawnPart(e.x, e.y, rnd(20, -20), rnd(20, -20), 3, '#f1f5f9', 0.4, 0.94);
         break;
       }
@@ -30685,7 +30733,7 @@ function updateEnemies(dt) {
         e.cd -= dt;
         if (e.cd <= 0 && d < 700) {
           e.cd = clamp(1 / Math.max(0.8, P.fireRate * 0.35), 0.22, 1.6);
-          eshoot(e, e.ang + rnd(0.1, -0.1), 340, e.dmg, 5);
+          eshoot(e, e.ang + simRnd(0.1, -0.1), 340, e.dmg, 5);
         }
         break;
       }
@@ -30825,7 +30873,7 @@ function bossShopkeeper(e, dt, ux, uy, d, ph) {
   steer(e, ux * push * e.spd, uy * push * e.spd, 1.6, dt);
   if (e.atkT > 0) return;
 
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2]);
   e.atk = a;
   switch (a) {
     case 0: {                            // PRICE CHECK — a counted-out burst
@@ -30837,7 +30885,7 @@ function bossShopkeeper(e, dt, ux, uy, d, ph) {
       e.atkT = 1.15 - ph * 0.14; break;
     }
     case 1: {                            // THE TILL — it opens all the way round
-      const n = 18 + ph * 6, off = rnd(TAU);
+      const n = 18 + ph * 6, off = simRnd(TAU);
       for (let k = 0; k < n; k++)
         eshoot(e, off + k * TAU / n, 190 + ph * 30, e.dmg * 0.4, 6);
       ringFx(e.x, e.y, e.r, e.r + 70, e.col, 0.35, 4);
@@ -30855,7 +30903,7 @@ function bossWarden(e, dt, ux, uy, d, ph) {
   e.ang += dt * 0.5;
   if (e.atk === 3) {                    // mid-charge
     e.vx *= Math.pow(0.5, dt); e.vy *= Math.pow(0.5, dt);
-    if (Math.random() < 0.9)
+    if (rnd() < 0.9)
       spawnPart(e.x + rnd(40, -40), e.y + rnd(40, -40), rnd(60, -60), rnd(60, -60), 5, e.col, 0.4, 0.9);
   } else if (e.atk === -2) {            // winding up a charge
     steer(e, 0, 0, 4, dt);
@@ -30873,11 +30921,11 @@ function bossWarden(e, dt, ux, uy, d, ph) {
     Audio_.noise(0.4, 0.2, 3000, 300, 3); shake(0.3);
     return;
   }
-  const a = pick(ph === 0 ? [0, 1, 2] : ph === 1 ? [0, 1, 2, 4] : [0, 1, 2, 4, 4]);
+  const a = simPick(ph === 0 ? [0, 1, 2] : ph === 1 ? [0, 1, 2, 4] : [0, 1, 2, 4, 4]);
   e.atk = a;
   switch (a) {
     case 0: {                            // radial burst
-      const n = 16 + ph * 8, off = rnd(TAU);
+      const n = 16 + ph * 8, off = simRnd(TAU);
       for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 210 + ph * 30, e.dmg * 0.45, 7);
       ringFx(e.x, e.y, e.r, e.r + 60, e.col, 0.35, 4);
       Audio_.tone(140, 0.3, 'square', 0.14, 70);
@@ -30894,8 +30942,8 @@ function bossWarden(e, dt, ux, uy, d, ph) {
     case 4: {                            // summon escort
       const n = 3 + ph;
       for (let k = 0; k < n; k++) {
-        const ang = rnd(TAU);
-        const s = spawnEnemy(pick(['grunt', 'grunt', 'dasher', 'spitter']),
+        const ang = simRnd(TAU);
+        const s = spawnEnemy(simPick(['grunt', 'grunt', 'dasher', 'spitter']),
           e.x + Math.cos(ang) * (e.r + 30), e.y + Math.sin(ang) * (e.r + 30), { elite: false });
         s.vx = Math.cos(ang) * 260; s.vy = Math.sin(ang) * 260;
         ringFx(s.x, s.y, 4, 40, s.col, 0.4, 2);
@@ -30904,7 +30952,7 @@ function bossWarden(e, dt, ux, uy, d, ph) {
       e.atkT = 1.6; break;
     }
   }
-  if (ph >= 1 && Math.random() < 0.32) { e.atk = -2; e.atkT = 0.75; }
+  if (ph >= 1 && simRand() < 0.32) { e.atk = -2; e.atkT = 0.75; }
 }
 
 /* --- stage 2: FORGEHEART — armoured. Plates block shots; find the gaps. --- */
@@ -30913,7 +30961,7 @@ function bossForge(e, dt, ux, uy, d, ph) {
   e.ang = e.plateAng * 0.4;
   if (e.atk === 2) {                    // hauling itself toward the slam point
     steer(e, (e.slamX - e.x) * 2.4, (e.slamY - e.y) * 2.4, 3, dt);
-    if (Math.random() < 0.8)
+    if (rnd() < 0.8)
       spawnPart(e.x + rnd(50, -50), e.y + rnd(50, -50), rnd(40, -40), rnd(40, -40), 5, '#fbbf24', 0.4, 0.9);
   } else {
     const push = d < 300 ? -0.6 : 0.9;
@@ -30921,7 +30969,7 @@ function bossForge(e, dt, ux, uy, d, ph) {
   }
   if (e.atkT > 0) return;
 
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 3] : [0, 1, 3, 3]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 3] : [0, 1, 3, 3]);
   e.atk = a;
   switch (a) {
     case 0: {                            // molten spray — slow, fat, wide
@@ -30933,8 +30981,8 @@ function bossForge(e, dt, ux, uy, d, ph) {
     case 1: {                            // vents burning ground around the arena
       const n = 4 + ph;
       for (let k = 0; k < n; k++) {
-        const ang = e.plateAng + k * TAU / n + rnd(0.4, -0.4);
-        const dist = rnd(320, 130);
+        const ang = e.plateAng + k * TAU / n + simRnd(0.4, -0.4);
+        const dist = simRnd(320, 130);
         addHazard('fire', clamp(e.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
                           clamp(e.y + Math.sin(ang) * dist, 60, WORLD.h - 60), 7.5);
       }
@@ -30956,7 +31004,7 @@ function bossBrood(e, dt, ux, uy, d, ph) {
   if (e.atk === 5) {                    // burrowed: untouchable and fast
     e.invuln = 1;
     steer(e, ux * e.spd * 3.1, uy * e.spd * 3.1, 2.4, dt);
-    if (Math.random() < 0.7)
+    if (rnd() < 0.7)
       spawnPart(e.x + rnd(40, -40), e.y + rnd(40, -40), 0, 0, 6, e.col, 0.5, 0.94);
   } else {
     e.invuln = 0;
@@ -30969,19 +31017,19 @@ function bossBrood(e, dt, ux, uy, d, ph) {
     e.invuln = 0; e.atk = -1; e.atkT = 1.3;
     explode(e.x, e.y, 190, e.dmg * 1.2, e.col, true);
     for (let k = 0; k < 5 + ph * 2; k++) {
-      const ang = rnd(TAU);
+      const ang = simRnd(TAU);
       const s = spawnEnemy('swarmer', e.x + Math.cos(ang) * (e.r + 20), e.y + Math.sin(ang) * (e.r + 20), { elite: false });
       s.vx = Math.cos(ang) * 320; s.vy = Math.sin(ang) * 320;
     }
     return;
   }
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2]);
   e.atk = a;
   switch (a) {
     case 0: {                            // acid fan — denies a whole quadrant
       const base = Math.atan2(foe(e).y - e.y, foe(e).x - e.x);
       for (let k = -2; k <= 2; k++) {
-        const ang = base + k * 0.26, dist = rnd(420, 150);
+        const ang = base + k * 0.26, dist = simRnd(420, 150);
         addHazard('acid', clamp(e.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
                           clamp(e.y + Math.sin(ang) * dist, 60, WORLD.h - 60), 8);
       }
@@ -30993,7 +31041,7 @@ function bossBrood(e, dt, ux, uy, d, ph) {
     case 1: {                            // lay a clutch of eggs
       const n = 3 + ph;
       for (let k = 0; k < n; k++) {
-        const ang = rnd(TAU), dist = rnd(230, 90);
+        const ang = simRnd(TAU), dist = simRnd(230, 90);
         spawnEnemy('egg', clamp(e.x + Math.cos(ang) * dist, 50, WORLD.w - 50),
                           clamp(e.y + Math.sin(ang) * dist, 50, WORLD.h - 50), { elite: false });
       }
@@ -31016,17 +31064,17 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
   if (e.atkT > 0) return;
 
   const T = foe(e);
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
   e.atk = a;
   switch (a) {
     case 0: {                            // blink, then bloom outward
       burst(e.x, e.y, 20, e.col, 260, 3.4, 0.5);
       ringFx(e.x, e.y, e.r, e.r + 70, e.col, 0.4, 3);
-      const ang = rnd(TAU), dist = rnd(420, 240);
+      const ang = simRnd(TAU), dist = simRnd(420, 240);
       e.x = clamp(T.x + Math.cos(ang) * dist, 80, WORLD.w - 80);
       e.y = clamp(T.y + Math.sin(ang) * dist, 80, WORLD.h - 80);
       ringFx(e.x, e.y, 6, e.r + 60, e.col, 0.45, 4);
-      const n = 14 + ph * 6, off = rnd(TAU);
+      const n = 14 + ph * 6, off = simRnd(TAU);
       for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 230, e.dmg * 0.42, 7);
       Audio_.tone(740, 0.2, 'sine', 0.11, 220);
       e.atkT = 1.5 - ph * 0.15; break;
@@ -31034,15 +31082,15 @@ function bossArchivist(e, dt, ux, uy, d, ph) {
     case 1: {                            // crossing laser lattice
       const n = 2 + ph;
       for (let k = 0; k < n; k++) {
-        addHazard('laser', T.x + rnd(160, -160), T.y + rnd(160, -160), 2.0,
-          { ang: rnd(TAU), dmg: e.dmg * 0.9, col: e.col });
+        addHazard('laser', T.x + simRnd(160, -160), T.y + simRnd(160, -160), 2.0,
+          { ang: simRnd(TAU), dmg: e.dmg * 0.9, col: e.col });
       }
       Audio_.tone(900, 0.4, 'sine', 0.08, 1400);
       e.atkT = 2.2; break;
     }
     case 2: {                            // decoys that shoot back
       for (let k = 0; k < 2; k++) {
-        const ang = rnd(TAU);
+        const ang = simRnd(TAU);
         const s = spawnEnemy('phaser', e.x + Math.cos(ang) * 90, e.y + Math.sin(ang) * 90, { elite: false });
         s.col = e.col;
         ringFx(s.x, s.y, 4, 50, e.col, 0.4, 2);
@@ -31071,7 +31119,7 @@ function bossNull(e, dt, ux, uy, d, ph) {
   if (e.atkT > 0) return;
 
   const T = foe(e);
-  const a = pick(ph === 0 ? [0, 1, 2] : ph === 1 ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5, 5]);
+  const a = simPick(ph === 0 ? [0, 1, 2] : ph === 1 ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5, 5]);
   e.atk = a;
   switch (a) {
     case 0:                              // ringed spiral, fired over time
@@ -31083,7 +31131,7 @@ function bossNull(e, dt, ux, uy, d, ph) {
       e.atkT = 1.1; break;
     }
     case 2: {                            // the signature: a wall with one gap
-      const gap = Math.atan2(T.y - e.y, T.x - e.x) + rnd(1.6, -1.6);
+      const gap = Math.atan2(T.y - e.y, T.x - e.x) + simRnd(1.6, -1.6);
       const n = 40;
       for (let k = 0; k < n; k++) {
         const ang = k * TAU / n;
@@ -31097,7 +31145,7 @@ function bossNull(e, dt, ux, uy, d, ph) {
     }
     case 3: {                            // scorched ground
       for (let k = 0; k < 5; k++) {
-        const ang = rnd(TAU), dist = rnd(430, 140);
+        const ang = simRnd(TAU), dist = simRnd(430, 140);
         addHazard('fire', clamp(T.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
                           clamp(T.y + Math.sin(ang) * dist, 60, WORLD.h - 60), 7);
       }
@@ -31105,15 +31153,15 @@ function bossNull(e, dt, ux, uy, d, ph) {
     }
     case 4: {                            // laser lattice
       for (let k = 0; k < 2 + ph; k++)
-        addHazard('laser', T.x + rnd(200, -200), T.y + rnd(200, -200), 2.0,
-          { ang: rnd(TAU), dmg: e.dmg * 0.85, col: e.col });
+        addHazard('laser', T.x + simRnd(200, -200), T.y + simRnd(200, -200), 2.0,
+          { ang: simRnd(TAU), dmg: e.dmg * 0.85, col: e.col });
       e.atkT = 2.2; break;
     }
     case 5: {                            // call in the whole roster
       const roster = ['wraith', 'phaser', 'sentinel', 'swarmer', 'swarmer'];
       for (let k = 0; k < 4 + ph; k++) {
-        const ang = rnd(TAU);
-        const s = spawnEnemy(pick(roster), e.x + Math.cos(ang) * (e.r + 40), e.y + Math.sin(ang) * (e.r + 40), { elite: false });
+        const ang = simRnd(TAU);
+        const s = spawnEnemy(simPick(roster), e.x + Math.cos(ang) * (e.r + 40), e.y + Math.sin(ang) * (e.r + 40), { elite: false });
         s.vx = Math.cos(ang) * 280; s.vy = Math.sin(ang) * 280;
       }
       Audio_.tone(180, 0.5, 'sawtooth', 0.14, 420);
@@ -31137,15 +31185,15 @@ function bossCurator(e, dt, ux, uy, d, ph) {
   if (!e.ledger) e.ledger = [];
   if (e.atkT > 0) return;
 
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2, 3]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 2, 3]);
   e.atk = a;
   switch (a) {
     case 0: {                            // RESTORE — undo your work
       const roster = e.ledger.length ? e.ledger : ['revenant', 'redactor', 'grunt'];
       const n = 3 + ph;
       for (let k = 0; k < n; k++) {
-        const ang = rnd(TAU), dist = rnd(320, 160);
-        const s = spawnEnemy(pick(roster),
+        const ang = simRnd(TAU), dist = simRnd(320, 160);
+        const s = spawnEnemy(simPick(roster),
           clamp(e.x + Math.cos(ang) * dist, 60, WORLD.w - 60),
           clamp(e.y + Math.sin(ang) * dist, 60, WORLD.h - 60), { elite: false });
         ringFx(s.x, s.y, 4, 60, '#e2e8f0', 0.5, 2);
@@ -31155,7 +31203,7 @@ function bossCurator(e, dt, ux, uy, d, ph) {
       e.atkT = 2.2; break;
     }
     case 1: {                            // catalogue sweep — radial index marks
-      const n = 18 + ph * 6, off = rnd(TAU);
+      const n = 18 + ph * 6, off = simRnd(TAU);
       for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 200 + ph * 25, e.dmg * 0.4, 6);
       e.atkT = 1.5 - ph * 0.15; break;
     }
@@ -31173,7 +31221,7 @@ function bossCurator(e, dt, ux, uy, d, ph) {
     }
     case 3: {                            // redaction bands across the arena
       for (let k = 0; k < 3; k++)
-        addHazard('delete', rnd(WORLD.w - 200, 200), rnd(WORLD.h - 200, 200), 3.4,
+        addHazard('delete', simRnd(WORLD.w - 200, 200), simRnd(WORLD.h - 200, 200), 3.4,
                   { r: 120, dmg: e.dmg * 0.9 });
       e.atkT = 1.9; break;
     }
@@ -31292,8 +31340,8 @@ function spawnShadowBoss(e) {
      other two are the end of the game rather than set dressing in it. */
   const keys = Object.keys(BOSSES).filter(k =>
     k !== 'theother' && !BOSSES[k].secret && !BOSSES[k].endgame);
-  const key = pick(keys);
-  const a = rnd(TAU), R = rnd(430, 260);
+  const key = simPick(keys);
+  const a = simRnd(TAU), R = simRnd(430, 260);
   const s = spawnEnemy('boss',
     clamp(e.x + Math.cos(a) * R, arena.x0 + 90, arena.x1 - 90),
     clamp(e.y + Math.sin(a) * R, arena.y0 + 90, arena.y1 - 90), { boss: key });
@@ -31314,12 +31362,12 @@ function bossOtherVirus(e, dt) {
   // shadows keep surfacing for as long as it stands
   e.shadowT -= dt;
   if (e.shadowT <= 0) {
-    e.shadowT = rnd(3.4, 2.0);
+    e.shadowT = simRnd(3.4, 2.0);
     const live = enemies.filter(z => !z.dead && z.shadow > 0).length;
     if (live < 4) spawnShadowBoss(e);
   }
 
-  if (Math.random() < 0.5) {
+  if (rnd() < 0.5) {
     const a = rnd(TAU);
     spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
       Math.cos(a) * 150, Math.sin(a) * 150, rnd(5, 2), VIRUS_COL, rnd(0.5, 0.25), 0.93);
@@ -31417,7 +31465,7 @@ const TEARABLE = {
 function keeperTear(e) {
   const owned = Object.keys(P.up).filter(id => P.up[id] > 0 && TEARABLE[id]);
   if (!owned.length) return false;
-  const id = pick(owned);
+  const id = simPick(owned);
   const u = UPGRADES.find(z => z.id === id);
   TEARABLE[id](P);
   P.up[id]--;
@@ -31437,7 +31485,7 @@ function keeperWrite(e, n) {
       return u && (e.ku[id] || 0) < u.max;
     });
     if (!pool.length) return;
-    keeperTake(e, pick(pool));
+    keeperTake(e, simPick(pool));
   }
 }
 
@@ -31445,9 +31493,9 @@ function keeperWrite(e, n) {
 function keeperSummon(e, bosses) {
   const pool = [...Codex.e].filter(k => ETYPE[k] && k !== 'boss' && k !== 'egg');
   const bpool = [...Codex.e].filter(k => BOSSES[k] && k !== 'keeper');
-  if (bosses && bpool.length && Math.random() < 0.5) {
-    const key = pick(bpool);
-    const a = rnd(TAU), R = rnd(430, 280);
+  if (bosses && bpool.length && simRand() < 0.5) {
+    const key = simPick(bpool);
+    const a = simRnd(TAU), R = simRnd(430, 280);
     const s = spawnEnemy('boss',
       clamp(e.x + Math.cos(a) * R, arena.x0 + 90, arena.x1 - 90),
       clamp(e.y + Math.sin(a) * R, arena.y0 + 90, arena.y1 - 90), { boss: key });
@@ -31464,8 +31512,8 @@ function keeperSummon(e, bosses) {
   if (!pool.length) return;
   const n = 2 + (e.kp || 0);
   for (let k = 0; k < n; k++) {
-    const a = rnd(TAU), R = rnd(420, 240);
-    const s = spawnEnemy(pick(pool),
+    const a = simRnd(TAU), R = simRnd(420, 240);
+    const s = spawnEnemy(simPick(pool),
       clamp(e.x + Math.cos(a) * R, arena.x0 + 60, arena.x1 - 60),
       clamp(e.y + Math.sin(a) * R, arena.y0 + 60, arena.y1 - 60), { elite: false });
     if (s) {
@@ -31484,7 +31532,7 @@ function keeperShoot(e) {
   e.kOcCount++;
   const heavy = e.kOc > 0 && e.kOcCount % 6 === 0;
   const base = e.dmg * 0.4 * e.kDmgMul * (heavy ? 1.8 : 1);
-  const crit = Math.random() < e.kCrit;
+  const crit = simRand() < e.kCrit;
   const dmg = base * (crit ? e.kCritM : 1);
   const lanes = [];
   for (let i = 0; i < e.kCount; i++)
@@ -31494,7 +31542,7 @@ function keeperShoot(e) {
   for (const a of lanes) {
     for (let p = 0; p <= e.kPara; p++) {
       const off = p === 0 ? 0 : (p % 2 ? 1 : -1) * Math.ceil(p / 2) * 22;
-      const b = eshoot(e, a + rnd(0.03, -0.03), e.kSpeed, dmg,
+      const b = eshoot(e, a + simRnd(0.03, -0.03), e.kSpeed, dmg,
                        heavy ? 9 : 6, e.x + nx * off, e.y + ny * off);
       if (b) {
         b.ricP = e.kRic; b.homeP = e.kHome;
@@ -31569,7 +31617,7 @@ function bossKeeper(e, dt, ux, uy, d) {
   if (e.kp === 3 && !e.hacked) {
     e.kTearT -= dt;
     if (e.kTearT <= 0) { e.kTearT = 9; keeperTear(e); }
-    if (Math.random() < 0.4) {
+    if (rnd() < 0.4) {
       const a = rnd(TAU);
       spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
         Math.cos(a) * 130, Math.sin(a) * 130, rnd(4, 2), KEEPER_COL, rnd(0.5, 0.25), 0.93);
@@ -31748,8 +31796,8 @@ function unwUpdate(dt) {
   u.touchT = (u.touchT || 0) + dt;
   if (u.touchT > UNW_UNTOUCHED && u.hp < u.maxHp) {
     u.hp = Math.min(u.maxHp, u.hp + u.maxHp * UNW_REGEN * dt);
-    if (Math.random() < 0.25) {
-      const src = Math.random() < 0.5 ? u.a : u.b;
+    if (rnd() < 0.25) {
+      const src = rnd() < 0.5 ? u.a : u.b;
       if (src && !src.dead)
         spawnPart(src.x + rnd(src.r, -src.r), src.y + rnd(src.r, -src.r),
                   0, rnd(-30, -70), rnd(3, 1.6), UNW_COL, rnd(0.5, 0.25), 0.94);
@@ -31782,10 +31830,10 @@ function unwUpdate(dt) {
     for (let k = 0; k < n; k++) {
       // deliberately unfair: most of them open under or beside you
       let c, r;
-      if (Math.random() < 0.62) {
-        c = clamp(here.c + rndi(3) - 1, 0, TEAR_COLS - 1);
-        r = clamp(here.r + rndi(3) - 1, 0, TEAR_ROWS - 1);
-      } else { c = rndi(TEAR_COLS); r = rndi(TEAR_ROWS); }
+      if (simRand() < 0.62) {
+        c = clamp(here.c + simRndi(3) - 1, 0, TEAR_COLS - 1);
+        r = clamp(here.r + simRndi(3) - 1, 0, TEAR_ROWS - 1);
+      } else { c = simRndi(TEAR_COLS); r = simRndi(TEAR_ROWS); }
       if (unwTearAt(c, r)) continue;
       unwTears.push({ c, r, warn: [0.95, 0.8, 0.62][u.phase], life: [6, 5, 4.2][u.phase] });
     }
@@ -31802,8 +31850,8 @@ function unwUpdate(dt) {
       if (P.x > rc.x && P.x < rc.x + rc.w && P.y > rc.y && P.y < rc.y + rc.h)
         hurtPlayer(9999, { pure: true });      // there is no floor there
       // sparse: with twenty holes open, one emitter each floods the screen
-      if (Math.random() < 0.06)
-        spawnPart(rc.x + Math.random() * rc.w, rc.y + Math.random() * rc.h,
+      if (rnd() < 0.06)
+        spawnPart(rc.x + rnd() * rc.w, rc.y + rnd() * rc.h,
                   0, rnd(-40, -90), rnd(3, 1.5), UNW_INK, rnd(0.6, 0.3), 0.95);
     }
   }
@@ -31814,7 +31862,7 @@ function unwUpdate(dt) {
     u.writeT = [7, 5.5, 4][u.phase];
     const owned = Object.keys(P.up).filter(id => P.up[id] > 0);
     if (owned.length) {
-      const id = pick(owned);
+      const id = simPick(owned);
       u.ups[id] = (u.ups[id] || 0) + 1;
       const up = UPGRADES.find(z => z.id === id);
       floatText((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2 - 60,
@@ -31844,7 +31892,7 @@ function unwUpdate(dt) {
       const extra = 1 + Object.values(u.ups).reduce((s, v) => s + v, 0) * 0.06;
       const dmg = e.dmg * 0.5 * extra;
       const n = 6 + u.phase * 3 + (u.ups.multi || 0) + Math.floor((rage - 1) * 5);
-      const off = rnd(TAU);
+      const off = simRnd(TAU);
       for (let k = 0; k < n; k++) {
         const b = eshoot(e, off + k * TAU / n, (230 + u.phase * 40) * rage, dmg, 6);
         if (b) { b.col = UNW_INK;
@@ -31860,11 +31908,11 @@ function unwUpdate(dt) {
         }
       }
     }
-    if (Math.random() < 0.5) {
+    if (rnd() < 0.5) {
       const a3 = rnd(TAU);
       spawnPart(e.x + Math.cos(a3) * e.r, e.y + Math.sin(a3) * e.r,
                 Math.cos(a3) * 120, Math.sin(a3) * 120, rnd(4, 2),
-                Math.random() < 0.5 ? UNW_COL : UNW_INK, rnd(0.5, 0.25), 0.93);
+                rnd() < 0.5 ? UNW_COL : UNW_INK, rnd(0.5, 0.25), 0.93);
     }
   }
 
@@ -32261,7 +32309,7 @@ function updateAmalCut(dt) {
   }
   // it keeps counting past 1 — the overshoot is how old the weld is
   for (const k in c.placed) c.placed[k] = Math.min(2.6, c.placed[k] + dt * 2.6);
-  if (Math.random() < 0.5) {
+  if (rnd() < 0.5) {
     const a = rnd(TAU), r = rnd(420, 120);
     spawnPart(WORLD.w / 2 + Math.cos(a) * r, WORLD.h / 2 - 30 + Math.sin(a) * r * 0.7,
               rnd(60, -60), rnd(20, -90), rnd(4, 2), AMAL_COL, rnd(0.7, 0.3), 0.94);
@@ -32406,7 +32454,7 @@ function startAmalgam() {
     /* the rite is fought against a body sized for one lance, not for a
        cluster-clearing bullet build — see RITE_POOL */
     e.hp = e.maxHp = rite ? RITE_POOL * p.hp / riteWeight : AMAL_PART_HP * p.hp;
-    return Object.assign({}, p, { e, cd: rnd(2.2, 0.4) });
+    return Object.assign({}, p, { e, cd: simRnd(2.2, 0.4) });
   });
   amalgam = { x: cx, y: cy, vx: 0, vy: 0, t: 0, parts,
               quakeT: 3.2, stepT: 0, phase: 0, said: {},
@@ -32423,9 +32471,9 @@ function startAmalgam() {
   if (opening) {
     // it never gets to stand up: the seams give and it comes apart on them
     for (const p of parts) {
-      const a = Math.atan2(p.e.y - cy, p.e.x - cx) + rnd(0.3, -0.3);
+      const a = Math.atan2(p.e.y - cy, p.e.x - cx) + simRnd(0.3, -0.3);
       p.dx = Math.cos(a) * 2.4; p.dy = Math.sin(a) * 2.4 - 0.4;
-      p.spin = rnd(1.6, -1.6);
+      p.spin = simRnd(1.6, -1.6);
       p.e.invuln = 1;
     }
     startAmalOpen(parts);
@@ -32487,7 +32535,7 @@ function amalBeamOrigin(a) {
 function amalStartBeam(a) {
   const o = amalBeamOrigin(a);
   a.beam = { t: 0, ang: Math.atan2(P.y - o.y, P.x - o.x),
-             spin: (Math.random() < 0.5 ? -1 : 1) * 0.20, fired: false, tick: 0 };
+             spin: (simRand() < 0.5 ? -1 : 1) * 0.20, fired: false, tick: 0 };
   banner('You were never going to stop, were you.', AMAL_COL, 5.0);
   Audio_.tone(90, BEAM_CHARGE, 'sawtooth', 0.1, 900);
 }
@@ -32500,7 +32548,7 @@ function amalUpdateBeam(a, dt) {
     // keep it aimed at you while it spools up, then commit
     const want = Math.atan2(P.y - o.y, P.x - o.x);
     b.ang = angLerp(b.ang, want, 1 - Math.exp(-2.6 * dt));
-    if (Math.random() < 0.9) {                    // light dragged into the chest
+    if (rnd() < 0.9) {                    // light dragged into the chest
       const ang = rnd(TAU), r = rnd(620, 300);
       spawnPart(o.x + Math.cos(ang) * r, o.y + Math.sin(ang) * r,
                 -Math.cos(ang) * 460, -Math.sin(ang) * 460,
@@ -32527,7 +32575,7 @@ function amalUpdateBeam(a, dt) {
   const along = dx * c - dy * s, across = dx * s + dy * c;
   if (along > -40 && along < BEAM_LEN && Math.abs(across) < BEAM_HALF) {
     hurtPlayer(3.4 + a.phase * 1.2);
-    if (Math.random() < 0.5)
+    if (rnd() < 0.5)
       spawnPart(P.x + rnd(20, -20), P.y + rnd(20, -20), rnd(160, -160), rnd(160, -160),
                 rnd(4, 2), pick(RAINBOW), 0.4, 0.9);
   }
@@ -32652,7 +32700,7 @@ function amalStartSlam(a) {
   const cands = ['armR', 'armL', 'legR', 'legL']
     .filter(id => { const p = a.parts.find(z => z.id === id); return p && p.e && !p.e.dead; });
   if (!cands.length) return;
-  const arm = cands[0] === 'armR' && Math.random() < 0.5 && cands.includes('armL')
+  const arm = cands[0] === 'armR' && simRand() < 0.5 && cands.includes('armL')
             ? 'armL' : cands[0];
   a.slam = { arm, t: 0, tx: P.x, ty: P.y, hit: false };
   Audio_.tone(150, 0.5, 'sawtooth', 0.07, 60);
@@ -32667,7 +32715,7 @@ function amalUpdateSlam(a, dt) {
     s.ty += (P.y - s.ty) * (1 - Math.exp(-3.4 * dt));
   }
   // dust sucked toward the impact point during the windup
-  if (s.t < SLAM_UP && Math.random() < 0.6) {
+  if (s.t < SLAM_UP && rnd() < 0.6) {
     const ang = rnd(TAU), r = rnd(320, 150);
     spawnPart(s.tx + Math.cos(ang) * r, s.ty + Math.sin(ang) * r,
               -Math.cos(ang) * 220, -Math.sin(ang) * 220 - 40,
@@ -32694,7 +32742,7 @@ function amalSlamImpact(a, s) {
     const ang = rnd(TAU), sp = rnd(520, 160);
     spawnPart(s.tx + Math.cos(ang) * 30, s.ty + Math.sin(ang) * 30,
               Math.cos(ang) * sp, Math.sin(ang) * sp * 0.6 - rnd(260, 90),
-              rnd(8, 3), Math.random() < 0.4 ? '#fbbf24' : '#78716c', rnd(1.0, 0.4), 0.93);
+              rnd(8, 3), rnd() < 0.4 ? '#fbbf24' : '#78716c', rnd(1.0, 0.4), 0.93);
   }
   // the shock itself: close in and it hurts
   const d = len(P.x - s.tx, P.y - s.ty);
@@ -32702,7 +32750,7 @@ function amalSlamImpact(a, s) {
   // and a ring of shrapnel riding the wave out
   const n = 22 + a.phase * 6;
   for (let k = 0; k < n; k++) {
-    const ang = k * TAU / n + rnd(0.06, -0.06);
+    const ang = k * TAU / n + simRnd(0.06, -0.06);
     ebullets.push({ x: s.tx, y: s.ty,
       vx: Math.cos(ang) * 340, vy: Math.sin(ang) * 340 * 0.7,
       r: 7, dmg: 16 + a.phase * 4, life: 4, col: '#fbbf24' });
@@ -32716,7 +32764,7 @@ function amalQuake(a) {
   Audio_.boom(); Audio_.tone(60, 0.5, 'square', 0.16, 30);
   const n = 26 + a.phase * 8;
   for (let k = 0; k < n; k++) {
-    const ang = k * TAU / n + rnd(0.05, -0.05);
+    const ang = k * TAU / n + simRnd(0.05, -0.05);
     ebullets.push({ x: a.x, y: a.y + 150,
       vx: Math.cos(ang) * (170 + a.phase * 40),
       vy: Math.sin(ang) * (170 + a.phase * 40) * 0.55,
@@ -32742,7 +32790,7 @@ function amalFire(a, p) {
   };
   switch (p.key) {
     case 'warden': {                       // rings, as it always did
-      const n = 16 + ph * 5, off = rnd(TAU);
+      const n = 16 + ph * 5, off = simRnd(TAU);
       for (let k = 0; k < n; k++) shot(off + k * TAU / n, 210 + ph * 30, 6, '#ef4444');
       p.cd = 2.0 - ph * 0.35; break;
     }
@@ -32755,7 +32803,7 @@ function amalFire(a, p) {
     }
     case 'broodmother': {                  // it still lays
       for (let k = 0; k < 2 + ph; k++) {
-        const ang = rnd(TAU);
+        const ang = simRnd(TAU);
         const s = spawnEnemy('swarmer',
           clamp(pos.x + Math.cos(ang) * 70, arena.x0 + 40, arena.x1 - 40),
           clamp(pos.y + Math.sin(ang) * 70, arena.y0 + 40, arena.y1 - 40), { elite: false });
@@ -32772,7 +32820,7 @@ function amalFire(a, p) {
       p.cd = 0.16; break;
     }
     case 'curator': {                      // a wall with one gap
-      const gap = rnd(TAU), n = 30;
+      const gap = simRnd(TAU), n = 30;
       for (let k = 0; k < n; k++) {
         const ang = k * TAU / n;
         if (Math.abs(((ang - gap + Math.PI) % TAU + TAU) % TAU - Math.PI) < 0.5) continue;
@@ -32957,11 +33005,11 @@ function riteStrike(b) {
 /* the gathering between sequences, and what it throws off */
 function riteWarmFx(a, dt) {
   const o = riteOrigin(a, 'torso');
-  if (Math.random() < dt * 30)
+  if (rnd() < dt * 30)
     spawnPart(o.x + rnd(80, -80), o.y + rnd(80, -80), rnd(110, -110), rnd(110, -110),
               rnd(2.8, 1.2), pick(RAINBOW), rnd(0.55, 0.25), 0.9);
-  if (Math.random() < dt * 3.5)
-    Audio_.tone(80 + Math.random() * 70, 0.13, 'sawtooth', 0.035, 240);
+  if (rnd() < dt * 3.5)
+    Audio_.tone(80 + rnd() * 70, 0.13, 'sawtooth', 0.035, 240);
 }
 
 function riteOrigin(a, id) {
@@ -33018,7 +33066,7 @@ function riteBeamTick(a, b, dt, opts) {
         b.bt = RITE_BURN_TICK;
         hurtPlayer(RITE_BURN * RITE_BURN_TICK, { pure: true });
       }
-      if (Math.random() < 0.4)
+      if (rnd() < 0.4)
         spawnPart(P.x + rnd(18, -18), P.y + rnd(18, -18), rnd(150, -150),
                   rnd(150, -150), rnd(3.6, 1.8), b.col, 0.4, 0.9);
     } else b.bt = 0;                      // step out and the next one is instant
@@ -33036,10 +33084,10 @@ function riteBeamTick(a, b, dt, opts) {
     const critE = 1 + P.crit * (P.critMult - 1);
     if (p) damageEnemy(p.e, (P.laserDps || 110) * critE * RITE_CUT_MUL * dt,
                        false, P.x, P.y, { silent: true, noChain: true, rite: true });
-    if (Math.random() < 0.7)
+    if (rnd() < 0.7)
       spawnPart(b.cut.x + rnd(9, -9), b.cut.y + rnd(9, -9),
                 rnd(190, -190), rnd(190, -190), rnd(3.2, 1.4),
-                Math.random() < 0.5 ? '#fff7ed' : b.col, rnd(0.4, 0.18), 0.9);
+                rnd() < 0.5 ? '#fff7ed' : b.col, rnd(0.4, 0.18), 0.9);
   }
 }
 
@@ -33049,7 +33097,7 @@ function riteSweep(a, dt) {
   const r = a.rite;
   if (!r.beams.length) {
     const o = riteOrigin(a, 'torso');
-    const b = riteBeam(r, o, rnd(TAU), RITE_SPIN_SWEEP, RAINBOW[0]);
+    const b = riteBeam(r, o, simRnd(TAU), RITE_SPIN_SWEEP, RAINBOW[0]);
     b.from = 'torso';
   }
   const b = r.beams[0];
@@ -33069,8 +33117,8 @@ function riteSweep(a, dt) {
    all eight compass lines out of wherever it stopped. They are not cuttable:
    they exist to stop the shadow being a place you can live in. */
 function riteGrenade(a) {
-  const gx = clamp(P.x + rnd(150, -150), arena.x0 + 80, arena.x1 - 80);
-  const gy = clamp(P.y + rnd(150, -150), arena.y0 + 80, arena.y1 - 80);
+  const gx = clamp(P.x + simRnd(150, -150), arena.x0 + 80, arena.x1 - 80);
+  const gy = clamp(P.y + simRnd(150, -150), arena.y0 + 80, arena.y1 - 80);
   for (let i = 0; i < 8; i++)
     addHazard('laser', gx, gy, 2.1, { ang: i * Math.PI / 4, dmg: 11,
                                       col: RAINBOW[i % RAINBOW.length], cd: 0 });
@@ -33085,9 +33133,9 @@ function riteScissor(a, dt) {
   const r = a.rite;
   if (!r.beams.length) {
     // one arm spools, then the other: two beams arriving at once reads as a cut
-    const l  = riteBeam(r, riteOrigin(a, 'armL'), rnd(TAU),  RITE_SPIN_SCISSOR, RAINBOW[1],
+    const l  = riteBeam(r, riteOrigin(a, 'armL'), simRnd(TAU),  RITE_SPIN_SCISSOR, RAINBOW[1],
                         { arm: RITE_ARM });
-    const rr = riteBeam(r, riteOrigin(a, 'armR'), rnd(TAU), -RITE_SPIN_SCISSOR, RAINBOW[4],
+    const rr = riteBeam(r, riteOrigin(a, 'armR'), simRnd(TAU), -RITE_SPIN_SCISSOR, RAINBOW[4],
                         { arm: RITE_ARM + 0.4 });
     l.from = 'armL'; rr.from = 'armR';
   }
@@ -33106,7 +33154,7 @@ const RITE_SPLIT = 300;            // how far down the trunk the branches leave
 function riteFan(a, dt) {
   const r = a.rite;
   if (!r.beams.length) {
-    const t = riteBeam(r, riteOrigin(a, 'torso'), rnd(TAU), RITE_SPIN_FAN, RAINBOW[2]);
+    const t = riteBeam(r, riteOrigin(a, 'torso'), simRnd(TAU), RITE_SPIN_FAN, RAINBOW[2]);
     t.from = 'torso'; t.trunk = true;
     for (let i = 0; i < 4; i++) {
       // the branches are hung off a trunk that is already up
@@ -33158,7 +33206,7 @@ function riteSeven(a, dt) {
     const frac = clamp(a.hp / a.maxHp, 0, 1);
     r.liveT = 0.55 + frac * 0.9 + RITE_SEVEN_TELL;
     let n = r.live;
-    while (n === r.live) n = rndi(7);
+    while (n === r.live) n = simRndi(7);
     r.next = n; r.swapT = RITE_SEVEN_TELL;
     const nb = r.beams[n];
     if (nb) { nb.dead = false; nb.arm = RITE_SEVEN_TELL; nb.armMax = RITE_SEVEN_TELL; }
@@ -33677,7 +33725,7 @@ function rsIgnite() {
   for (let i = 0; i < 120; i++) {
     const a = rnd(TAU), sp = rnd(900, 200);
     rsSpawnPart(rsSIM.shipX, rsSIM.shipY, 20, Math.cos(a) * sp, Math.sin(a) * sp * 0.8, rnd(420, 60),
-      rnd(3.6, 1.4), Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1.4, 0.5), 0.9);
+      rnd(3.6, 1.4), rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(1.4, 0.5), 0.9);
   }
 }
 
@@ -33728,9 +33776,9 @@ function rsDrawPools(c, t) {
     }
     c.globalAlpha = 0.24 * up; c.fillStyle = '#fdba74';
     c.beginPath(); c.ellipse(pr.sx, pr.sy, R * 0.24, R * 0.1, 0, 0, TAU); c.fill();
-    if (Math.random() < 0.06)
+    if (rnd() < 0.06)
       rsSpawnPart(p.x + rnd(60, -60), p.y + rnd(40, -40), 8, rnd(30, -30), rnd(20, -20), rnd(150, 50),
-        rnd(2.6, 1), Math.random() < 0.3 ? '#fde047' : '#fb923c', rnd(1.5, 0.6), 0.94);
+        rnd(2.6, 1), rnd() < 0.3 ? '#fde047' : '#fb923c', rnd(1.5, 0.6), 0.94);
   }
   c.restore();
 }
@@ -33929,7 +33977,7 @@ function rsDrawAmalgam(c, t, stand) {
     }
     c.restore();
 
-    if (hurt > 0.4 && Math.random() < hurt * 0.25)
+    if (hurt > 0.4 && rnd() < hurt * 0.25)
       rsSpawnPart(pos[p.id].x, pos[p.id].y, pos[p.id].z, rnd(120, -120), rnd(120, -120), rnd(160, 20),
         rnd(3, 1.2), p.col, rnd(0.9, 0.3));
   }
@@ -34061,8 +34109,8 @@ function rsDrawHisBeam(c, o, nx, ny, nz, t, alive) {
   c.beginPath(); c.ellipse(A.sx, A.sy, w0 * 0.34, w0 * 0.34, 0, 0, TAU); c.fill();
   c.restore();
   // the column throws spall along itself
-  if (Math.random() < 0.5 * alive) {
-    const k = Math.random();
+  if (rnd() < 0.5 * alive) {
+    const k = rnd();
     rsSpawnPart(lerp(o.x, nx, k) + rnd(40, -40), lerp(o.y, ny, k) + rnd(40, -40), lerp(o.z, nz, k) + rnd(40),
       rnd(160, -160), rnd(160, -160), rnd(160, 20), rnd(2.6, 1), pick(RS_RAINBOW), rnd(0.6, 0.25));
   }
@@ -34188,7 +34236,7 @@ function rsDrawNode(c, nx, ny, nz, t, heavy) {
   c.globalAlpha = 0.4;
   c.beginPath(); c.arc(0, 0, R * 1.5, 0, TAU); c.stroke();
   c.restore();
-  if (Math.random() < 0.7)
+  if (rnd() < 0.7)
     rsSpawnPart(nx + rnd(20, -20), ny + rnd(20, -20), nz + rnd(20, -20),
       rnd(260, -260), rnd(260, -260), rnd(240, -40), rnd(3, 1.2),
       heavy ? pick(['#fde047','#fb923c']) : pick(RS_RAINBOW), rnd(0.6, 0.2));
@@ -34291,10 +34339,10 @@ function rsDrawShip(c, t, vent) {
   c.beginPath(); c.arc(1 * S, 0, 3.1 * S, 0, TAU); c.fill();
   c.restore();
   // venting hull throws embers into the room
-  if (heat > 0.3 && Math.random() < 0.5)
+  if (heat > 0.3 && rnd() < 0.5)
     rsSpawnPart(rsSIM.shipX + rnd(30, -30), rsSIM.shipY + rnd(30, -30), 20,
       rnd(60, -60), rnd(60, -60), rnd(200, 60), rnd(2.4, 1),
-      Math.random() < 0.4 ? '#fde047' : '#fb923c', rnd(1, 0.4));
+      rnd() < 0.4 ? '#fde047' : '#fb923c', rnd(1, 0.4));
 }
 
 /* ================================ the rsSpark =============================== */
@@ -34341,10 +34389,10 @@ function rsDrawSpark(c, t) {
   c.restore();
 
   // and a couple of chips coming off it, in the room rather than on the glass
-  if (Math.random() < 0.55)
+  if (rnd() < 0.55)
     rsSpawnPart(rsSpark.x + rnd(14, -14), rsSpark.y + rnd(14, -14),
       lerp(900, 30, fall), rnd(40, -40), rnd(40, -40), rnd(-40, -180),
-      rnd(1.8, 0.8), Math.random() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2));
+      rnd(1.8, 0.8), rnd() < 0.5 ? '#ef4444' : '#fb923c', rnd(0.5, 0.2));
 }
 function rsDrawParts(c) {
   c.save(); c.globalCompositeOperation = 'lighter';
@@ -34857,7 +34905,7 @@ function drawRiteCold(b, t, ca, sa, px, py, ex, ey, fade) {
    second — which is the difference between a beam and an ambush. ---- */
 function drawRiteCharge(b, t, ca, sa, px, py, ex, ey) {
   const p = clamp(1 - b.arm / b.armMax, 0, 1);
-  const jit = p > 0.8 ? (Math.random() - 0.5) * (p - 0.8) * 60 : 0;
+  const jit = p > 0.8 ? (rnd() - 0.5) * (p - 0.8) * 60 : 0;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
 
@@ -35193,14 +35241,14 @@ function amalUpdate(dt) {
 
     // welds shower sparks, and worse the more damaged the piece is
     const hurt = 1 - clamp(p.e.hp / p.e.maxHp, 0, 1);
-    if (Math.random() < 0.18 + hurt * 0.5) {
+    if (rnd() < 0.18 + hurt * 0.5) {
       const ang = rnd(TAU);
       spawnPart(pos.x + Math.cos(ang) * p.r * 1.1, pos.y + Math.sin(ang) * p.r * 1.1,
                 rnd(70, -70), rnd(20, 120), rnd(2.6, 1.2),
-                Math.random() < 0.4 ? '#fde68a' : WELD, rnd(0.5, 0.2), 0.9);
+                rnd() < 0.4 ? '#fde68a' : WELD, rnd(0.5, 0.2), 0.9);
     }
     // a badly hurt piece leaks fire
-    if (hurt > 0.55 && Math.random() < 0.2)
+    if (hurt > 0.55 && rnd() < 0.2)
       spawnPart(pos.x + rnd(p.r, -p.r), pos.y + rnd(p.r, -p.r),
                 rnd(20, -20), rnd(-40, -90), rnd(5, 2.4), '#ef4444', rnd(0.7, 0.3), 0.94);
   }
@@ -35208,19 +35256,19 @@ function amalUpdate(dt) {
   // torn-off mounts spit as they burn
   for (const p of a.parts) {
     if (!p.e || !p.e.dead) continue;
-    if (Math.random() < 0.24) {
+    if (rnd() < 0.24) {
       const pos = amalPartPos(a, p);
       spawnPart(pos.x + rnd(22, -22), pos.y + rnd(22, -22), rnd(60, -60), rnd(-50, -140),
-                rnd(4, 2), Math.random() < 0.5 ? WELD : '#78716c', rnd(0.8, 0.3), 0.93);
+                rnd(4, 2), rnd() < 0.5 ? WELD : '#78716c', rnd(0.8, 0.3), 0.93);
     }
   }
 
   // chest vents breathing
-  if (Math.random() < 0.5) {
+  if (rnd() < 0.5) {
     const c = a.parts.find(z => z.id === 'torso');
     if (c && c.e && !c.e.dead) {
       const pos = amalPartPos(a, c);
-      const side = Math.random() < 0.5 ? -1 : 1;
+      const side = rnd() < 0.5 ? -1 : 1;
       spawnPart(pos.x + side * 78, pos.y - 40, side * rnd(60, 10), rnd(-30, -80),
                 rnd(7, 3), '#57534e', rnd(0.9, 0.4), 0.95);
     }
@@ -35278,7 +35326,7 @@ function outroTick(dt) {
   if (o.type < OUTRO_LINE.length) {
     o.type += OUTRO_CPS * dt;
     if (Math.floor(o.type) > before)
-      Audio_.tone(900 + Math.random() * 120, 0.02, 'square', 0.02, 1200);
+      Audio_.tone(900 + rnd() * 120, 0.02, 'square', 0.02, 1200);
     return;
   }
   o.done += dt;
@@ -35428,7 +35476,7 @@ function devTypeTick(dt) {
     devType += DEV_CPS * dt;
     // a key click per character, quiet enough to sit under the line
     if (Math.floor(devType) > before && Math.floor(devType) % 2 === 0)
-      Audio_.tone(1400 + Math.random() * 300, 0.012, 'square', 0.012, 1800);
+      Audio_.tone(1400 + rnd() * 300, 0.012, 'square', 0.012, 1800);
   }
 }
 
@@ -35639,7 +35687,7 @@ function bossOtherFinale(e, dt) {
       if (h.kind !== 'mirror' || !h.orbit) continue;
       h.orbit = false;
       h.flying = true;
-      const a = Math.atan2(h.y - e.y, h.x - e.x) + rnd(0.12, -0.12);
+      const a = Math.atan2(h.y - e.y, h.x - e.x) + simRnd(0.12, -0.12);
       h.vx = Math.cos(a) * 1550;
       h.vy = Math.sin(a) * 1550;
       h.rot = 0; h.spin = rnd(7, -7);
@@ -35665,12 +35713,12 @@ function bossOtherFinale(e, dt) {
       }
     }
   }
-  if (Math.random() < 0.6) {
+  if (rnd() < 0.6) {
     const a = rnd(TAU);
     spawnPart(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
       Math.cos(a) * 120, Math.sin(a) * 120, rnd(4, 2), '#5eead4', rnd(0.5, 0.25), 0.94);
   }
-  if (Math.random() < 0.25) shake(0.05);
+  if (rnd() < 0.25) shake(0.05);
 }
 
 function bossOther(e, dt, ux, uy, d, ph) {
@@ -35688,7 +35736,7 @@ function bossOther(e, dt, ux, uy, d, ph) {
        existed. It now opens at a quarter and is certain by the fourth clear:
        still a surprise the first time, no longer a lottery for a whole path. */
     const odds = 0.25 + 0.25 * (Save.profile.otherKills || 0);
-    if (Math.random() < odds) startVirus(e); else startFinale(e);
+    if (simRand() < odds) startVirus(e); else startFinale(e);
     return;
   }
 
@@ -35733,12 +35781,12 @@ function bossOtherMirror(e, dt, ux, uy, d, ph) {
     const n = clamp(P.count, 1, 5);
     const dmg = clamp(P.dmg * 0.16, e.dmg * 0.28, e.dmg * 1.1);
     for (let k = 0; k < n; k++)
-      eshoot(e, e.ang + (k - (n - 1) / 2) * 0.13 + rnd(0.05, -0.05), 400, dmg, 6);
+      eshoot(e, e.ang + (k - (n - 1) / 2) * 0.13 + simRnd(0.05, -0.05), 400, dmg, 6);
     if (P.sun) addHazard('fire', e.x, e.y, 2.2, { r: 60, dmg: e.dmg * 0.5 });
   }
 
   if (e.atkT > 0) return;
-  const a = pick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
+  const a = simPick(ph === 0 ? [0, 1] : ph === 1 ? [0, 1, 2] : [0, 1, 2, 3]);
   e.atk = a;
   switch (a) {
     case 0: {                            // your dash, used against you
@@ -35749,13 +35797,13 @@ function bossOtherMirror(e, dt, ux, uy, d, ph) {
       e.atkT = 1.1; break;
     }
     case 1: {                            // reflected volley
-      const n = 9 + ph * 3, off = rnd(TAU);
+      const n = 9 + ph * 3, off = simRnd(TAU);
       for (let k = 0; k < n; k++) eshoot(e, off + k * TAU / n, 260, e.dmg * 0.42, 6);
       e.atkT = 1.3; break;
     }
     case 2: {                            // it makes copies of itself
       for (let k = 0; k < 2; k++) {
-        const ang = rnd(TAU);
+        const ang = simRnd(TAU);
         const s = spawnEnemy('mimic', e.x + Math.cos(ang) * 90, e.y + Math.sin(ang) * 90,
                              { elite: false });
         s.col = '#5eead4';
@@ -35765,7 +35813,7 @@ function bossOtherMirror(e, dt, ux, uy, d, ph) {
       e.atkT = 1.6; break;
     }
     case 3: {                            // mirror prison: ring with one gap
-      const gap = rnd(TAU), n = 34;
+      const gap = simRnd(TAU), n = 34;
       for (let k = 0; k < n; k++) {
         const ang = k * TAU / n;
         const dA = Math.abs(((ang - gap + Math.PI) % TAU + TAU) % TAU - Math.PI);
@@ -35785,7 +35833,7 @@ function bossOtherMirror(e, dt, ux, uy, d, ph) {
 function bossOtherRage(e, dt) {
   e.legs = Math.min(1, (e.legs || 0) + dt * 0.65);
   const scuttle = () => {
-    if (Math.random() < 0.7)
+    if (rnd() < 0.7)
       spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r),
         rnd(70, -70), rnd(70, -70), rnd(3.4, 1.6), '#5eead4', rnd(0.45, 0.2), 0.93);
   };
@@ -35795,7 +35843,7 @@ function bossOtherRage(e, dt) {
     e.vx *= Math.pow(0.02, dt); e.vy *= Math.pow(0.02, dt);
     e.ang += dt * 6;
     scuttle();
-    if (Math.random() < 0.25) shake(0.08);
+    if (rnd() < 0.25) shake(0.08);
     e.atkT -= dt;
     if (e.atkT <= 0) { e.rage = 0; e.invuln = 0; e.atkT = 0.55; }
     return;
@@ -35828,7 +35876,7 @@ function bossOtherRage(e, dt) {
       e.vy = -Math.sin(e.chargeAng) * 240;
       explode(e.x, e.y, 165, e.dmg * 0.85, '#5eead4', true);
       shake(1); drawFlashT = 0.18;
-      for (let k = 0; k < 16; k++) eshoot(e, rnd(TAU), rnd(270, 150), e.dmg * 0.28, 6);
+      for (let k = 0; k < 16; k++) eshoot(e, simRnd(TAU), simRnd(270, 150), e.dmg * 0.28, 6);
     }
     return;
   }
@@ -35837,7 +35885,7 @@ function bossOtherRage(e, dt) {
   e.vuln = 2.2;                              // the reward for baiting it
   e.vx *= Math.pow(0.02, dt); e.vy *= Math.pow(0.02, dt);
   e.ang += dt * 1.2;
-  if (Math.random() < 0.3)
+  if (rnd() < 0.3)
     spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), 0, rnd(-40, -80),
       3, '#fde047', 0.5, 0.94);
   e.atkT -= dt;
@@ -35878,8 +35926,8 @@ function addHazard(kind, x, y, life = 8, opts = {}) {
     kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly || ally, ally,
     r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74
        : kind === 'mirror' ? 58 : kind === 'delete' ? 105 : 76),
-    ang: opts.ang !== undefined ? opts.ang : rnd(TAU),
-    state: 0, cd: opts.cd !== undefined ? opts.cd : rnd(3.2, 1.2),
+    ang: opts.ang !== undefined ? opts.ang : simRnd(TAU),
+    state: 0, cd: opts.cd !== undefined ? opts.cd : simRnd(3.2, 1.2),
     dmg: ally ? hackDmg(opts.dmg || 9) : (opts.dmg || 9),
     col: ally ? HACK_COL : opts.col || (kind === 'acid' ? '#4ade80' : kind === 'well' ? '#f0abfc'
        : kind === 'laser' ? '#a78bfa' : kind === 'current' ? '#67e8f9'
@@ -35941,7 +35989,7 @@ function updateHazards(dt) {
 
     switch (h.kind) {
       case 'fire': {
-        if (Math.random() < 0.5)
+        if (rnd() < 0.5)
           spawnPart(h.x + rnd(h.r, -h.r) * 0.8, h.y + rnd(h.r, -h.r) * 0.8,
             rnd(14, -14), rnd(-20, -46), rnd(4, 2), '#fb923c', rnd(0.5, 0.25), 0.94);
         h.tick -= dt;
@@ -35961,7 +36009,7 @@ function updateHazards(dt) {
         break;
       }
       case 'acid': {
-        if (Math.random() < 0.35)
+        if (rnd() < 0.35)
           spawnPart(h.x + rnd(h.r, -h.r) * 0.8, h.y + rnd(h.r, -h.r) * 0.8,
             rnd(10, -10), rnd(-8, -24), rnd(3.4, 1.6), h.ally ? HACK_COL : '#4ade80', rnd(0.6, 0.3), 0.95);
         if (h.ally) { hazAlly(h, dt, 0.6, 0.7, true); break; }
@@ -35984,8 +36032,8 @@ function updateHazards(dt) {
           explode(h.x, h.y, h.r, h.dmg * 1.6, '#fb923c', false, true);
           if (pd < h.r + P.r) hurtPlayer(h.dmg * 1.6);
           if (wg && wd < h.r + wg.r) hurtWing(h.dmg * 1.6);
-        } else if (h.state === 2 && h.cd <= 0) { h.state = 0; h.cd = rnd(5.5, 3.0); }
-        if (h.state === 1 && Math.random() < 0.5)
+        } else if (h.state === 2 && h.cd <= 0) { h.state = 0; h.cd = simRnd(5.5, 3.0); }
+        if (h.state === 1 && rnd() < 0.5)
           spawnPart(h.x + rnd(30, -30), h.y + rnd(30, -30), 0, rnd(-40, -90), 3, '#fbbf24', 0.4, 0.94);
         break;
       }
@@ -36033,7 +36081,7 @@ function updateHazards(dt) {
             if (en.dead || en.phased || en.invuln) continue;
             if (len(en.x - h.x, en.y - h.y) < h.r + en.r) {
               damageEnemy(en, h.dmg, false, h.x, h.y, { silent: true, noChain: true });
-              if (Math.random() < 0.4)
+              if (rnd() < 0.4)
                 arcs.push({ x1: h.x, y1: h.y, x2: en.x, y2: en.y,
                             life: 0.12, max: 0.12, col: '#a5f3fc' });
             }
@@ -36049,12 +36097,12 @@ function updateHazards(dt) {
           if (h.embedded) {
             h.embT = (h.embT || 0) + dt;
             // the puncture keeps bleeding material into the room
-            if (Math.random() < 0.45) {
+            if (rnd() < 0.45) {
               const a = rnd(TAU);
               spawnPart(h.x + Math.cos(a) * h.r * 0.75, h.y + Math.sin(a) * h.r * 0.75,
                 (h.wallNx || 0) * rnd(75, 20) + rnd(36, -36),
                 (h.wallNy || 0) * rnd(75, 20) + rnd(36, -36),
-                rnd(3.2, 1.3), Math.random() < 0.45 ? '#ffffff' : '#99f6e4',
+                rnd(3.2, 1.3), rnd() < 0.45 ? '#ffffff' : '#99f6e4',
                 rnd(0.85, 0.35), 0.95);
             }
           }
@@ -36062,7 +36110,7 @@ function updateHazards(dt) {
         }
         h.x += h.vx * dt; h.y += h.vy * dt;
         h.rot = (h.rot || 0) + (h.spin || 0) * dt;
-        if (Math.random() < 0.8)
+        if (rnd() < 0.8)
           spawnPart(h.x + rnd(h.r, -h.r) * 0.6, h.y + rnd(h.r, -h.r) * 0.6,
             rnd(60, -60), rnd(60, -60), rnd(4, 2), '#99f6e4', rnd(0.4, 0.2), 0.92);
         if (len(P.x - h.x, P.y - h.y) < h.r + P.r) {
@@ -36088,7 +36136,7 @@ function updateHazards(dt) {
             if (pd < h.r) hurtPlayer(h.dmg);
             if (wd < h.r) hurtWing(h.dmg);
           }
-          if (Math.random() < 0.5)
+          if (rnd() < 0.5)
             spawnPart(h.x + rnd(h.r, -h.r) * 0.9, h.y + rnd(h.r, -h.r) * 0.9,
               0, rnd(20, -20), rnd(3, 1.5), '#f87171', 0.4, 0.94);
         }
@@ -36106,7 +36154,7 @@ function updateHazards(dt) {
           wg.vx += (h.x - wg.x) / wd * f * dt;
           wg.vy += (h.y - wg.y) / wd * f * dt;
         }
-        if (Math.random() < 0.4) {
+        if (rnd() < 0.4) {
           const a = rnd(TAU), rr = rnd(h.r, h.r * 0.4);
           spawnPart(h.x + Math.cos(a) * rr, h.y + Math.sin(a) * rr,
             -Math.cos(a) * 60, -Math.sin(a) * 60, 2.4, h.col, 0.6, 0.96);
@@ -36129,7 +36177,7 @@ function seedStageHazards() {
   for (let i = 0; i < n; i++) {
     let x, y, tries = 0;
     do {
-      x = rnd(WORLD.w - 200, 200); y = rnd(WORLD.h - 200, 200);
+      x = simRnd(WORLD.w - 200, 200); y = simRnd(WORLD.h - 200, 200);
     } while ((len(x - P.x, y - P.y) < 340 ||
               len(x - WORLD.w / 2, y - WORLD.h / 2) < 260) && ++tries < 24);
     addHazard(k, x, y, 1e9, { dmg: 10 + wave * 0.6 });
@@ -36145,16 +36193,16 @@ function updateStageAmbient(dt) {
   ambientT -= dt;
   if (ambientT > 0) return;
   if (k === 'acid') {
-    ambientT = rnd(4.6, 2.6);
+    ambientT = simRnd(4.6, 2.6);
     let x, y, tries = 0;
-    do { x = rnd(WORLD.w - 160, 160); y = rnd(WORLD.h - 160, 160); }
+    do { x = simRnd(WORLD.w - 160, 160); y = simRnd(WORLD.h - 160, 160); }
     while (len(x - P.x, y - P.y) < 230 && ++tries < 16);
-    addHazard('acid', x, y, rnd(11, 7), { dmg: 8 + wave * 0.35 });
+    addHazard('acid', x, y, simRnd(11, 7), { dmg: 8 + wave * 0.35 });
   } else {
-    ambientT = rnd(7.5, 4.5);
-    addHazard('laser', clamp(P.x + rnd(320, -320), 80, WORLD.w - 80),
-                       clamp(P.y + rnd(320, -320), 80, WORLD.h - 80), 2.0,
-      { ang: rnd(TAU), dmg: 10 + wave * 0.45, col: stage.accent });
+    ambientT = simRnd(7.5, 4.5);
+    addHazard('laser', clamp(P.x + simRnd(320, -320), 80, WORLD.w - 80),
+                       clamp(P.y + simRnd(320, -320), 80, WORLD.h - 80), 2.0,
+      { ang: simRnd(TAU), dmg: 10 + wave * 0.45, col: stage.accent });
   }
 }
 
@@ -36401,7 +36449,7 @@ function updateBullets(dt) {
         const off = Math.abs(((Math.atan2(dyr, dxr) - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
         if (off < 0.55) {
           burst(b.x, b.y, 4, '#f87171', 130, 2.2, 0.25);
-          if (Math.random() < 0.25) floatText(b.x, b.y, 'REDACTED', '#f87171', 10, -24);
+          if (rnd() < 0.25) floatText(b.x, b.y, 'REDACTED', '#f87171', 10, -24);
           erased = true; break;
         }
       }
@@ -36448,7 +36496,7 @@ function updateBullets(dt) {
         const inc = Math.atan2(b.py - e.y, b.px - e.x);
         const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
         if (off < 1.3) {
-          const back = Math.atan2(P.y - e.y, P.x - e.x) + rnd(0.25, -0.25);
+          const back = Math.atan2(P.y - e.y, P.x - e.x) + simRnd(0.25, -0.25);
           // your army's rounds are stopped by the mirror, not thrown back at you
           if (!b.hacked) ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
             vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
@@ -36486,7 +36534,7 @@ function updateBullets(dt) {
         e.psnT = 4.5;
       }
       // LEO: solar rounds set the ground alight where they land
-      if (b.solar && Math.random() < 0.5)
+      if (b.solar && simRand() < 0.5)
         addHazard('fire', b.x, b.y, 2.2, { r: 46, dmg: 5 + P.dmg * 0.14,
                                            friendly: true, col: '#fbbf24' });
       if (!e.dead) {
@@ -36498,7 +36546,7 @@ function updateBullets(dt) {
         const base = Math.atan2(b.vy, b.vx);
         const n = 2 + b.frag;
         for (let k = 0; k < n; k++) {
-          const a = base + Math.PI + (k - (n - 1) / 2) * 0.55 + rnd(0.2, -0.2);
+          const a = base + Math.PI + (k - (n - 1) / 2) * 0.55 + simRnd(0.2, -0.2);
           fireBullet(b.x, b.y, a, 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
         }
       }
@@ -36584,7 +36632,7 @@ function updateEBullets(dt) {
       burst(b.x, b.y, 4, '#5eead4', 170, 2.2, 0.22);
       break;
     }
-    if (Math.random() < 0.3)
+    if (rnd() < 0.3)
       spawnPart(b.x, b.y, 0, 0, b.r * 0.7, b.col, 0.2, 0.9);
     if (P.plateT > 0) {
       const pd = len(b.x - P.x, b.y - P.y);
@@ -36656,7 +36704,7 @@ function updatePickups(dt) {
     const dx = dt0.x - d0.x, dy = dt0.y - d0.y, d = len(dx, dy) || 1;
     // gear is walked to, never pulled: this hull stands on the loot all fight
     if (d < pr * 1.2 && d0.kind !== 'gear') { d0.x += dx / d * 240 * dt; d0.y += dy / d * 240 * dt; }
-    if (Math.random() < (d0.kind === 'credit' ? 0.12 : 0.3))
+    if (rnd() < (d0.kind === 'credit' ? 0.12 : 0.3))
       spawnPart(d0.x + rnd(14, -14), d0.y + rnd(14, -14), 0, -20, 2.4, d0.col, 0.4, 0.95);
     /* A drop for a slot that is already filled is a decision, and a decision is
        never forced on you by where the fight carried you: stand on it and press
@@ -37945,7 +37993,7 @@ const HL_PART = {
   ember: {
     layer: 'glow',
     make: (q, o) => { q.vx = rnd(-14, 14) + (o.vx || 0); q.vy = rnd(-70, -30) + (o.vy || 0);
-                      q.life = q.max = rnd(0.5, 1.4) * (o.life || 1); q.r = rnd(0.8, 2) * (o.size || 1); q.col = o.col || '#fdba74'; q.seed = Math.random() * 99; },
+                      q.life = q.max = rnd(0.5, 1.4) * (o.life || 1); q.r = rnd(0.8, 2) * (o.size || 1); q.col = o.col || '#fdba74'; q.seed = rnd() * 99; },
     step: (q, dt) => { q.vx += (hlNoise(uiTime * 2 + q.seed, 1) - 0.5) * 120 * dt; q.vy -= 10 * dt;
                        q.x += q.vx * dt; q.y += q.vy * dt; },
     draw: q => { const k = q.life / q.max, f = 0.6 + 0.4 * hlNoise(uiTime * 20 + q.seed, 2);
@@ -37958,7 +38006,7 @@ const HL_PART = {
     layer: 'lit',
     make: (q, o) => { q.vx = rnd(-4, 4); q.vy = rnd(-34, -22) * (o.speed || 1);
                       q.life = q.max = rnd(1.6, 2.8) * (o.life || 1); q.r = rnd(1.5, 2.5) * (o.size || 1); q.col = o.col || '#9ca3af';
-                      q.seed = Math.random() * 99; q.a = o.a || 0.16; },
+                      q.seed = rnd() * 99; q.a = o.a || 0.16; },
     step: (q, dt) => { const age = q.max - q.life;
                        q.vx += (hlNoise(age * 1.3 + q.seed, 3) - 0.5) * 70 * dt; q.vy *= Math.pow(0.97, dt * 60);
                        q.x += q.vx * dt; q.y += q.vy * dt; q.r += dt * 7; },
@@ -37970,7 +38018,7 @@ const HL_PART = {
   mote: {
     layer: 'glow',
     make: (q, o) => { q.vx = rnd(-5, 5); q.vy = rnd(-5, 5); q.life = q.max = rnd(4, 9); q.r = rnd(0.5, 1.3);
-                      q.seed = Math.random() * 99; q.col = o.col || '#fde68a'; },
+                      q.seed = rnd() * 99; q.col = o.col || '#fde68a'; },
     step: (q, dt) => { q.vx += (hlNoise(uiTime * 0.4 + q.seed, 6) - 0.5) * 18 * dt;
                        q.vy += (hlNoise(uiTime * 0.4 + q.seed, 7) - 0.5) * 18 * dt;
                        q.x += q.vx * dt; q.y += q.vy * dt; },
@@ -38000,7 +38048,7 @@ const HL_PART = {
     layer: 'glow',
     make: (q, o) => { q.vx = rnd(-10, 10) + (o.vx || 0); q.vy = rnd(-40, -16) + (o.vy || 0);
                       q.life = q.max = rnd(0.8, 1.8) * (o.life || 1); q.r = rnd(1.5, 3.5) * (o.size || 1); q.col = o.col || '#a5f3fc';
-                      q.seed = Math.random() * 99; },
+                      q.seed = rnd() * 99; },
     step: (q, dt) => { q.vx += (hlNoise(uiTime * 1.5 + q.seed, 12) - 0.5) * 60 * dt; q.x += q.vx * dt; q.y += q.vy * dt; },
     draw: q => { const k = q.life / q.max; drawGlow(q.x, q.y, q.r * 4, q.col, 0.22 * k * k); }
   },
@@ -38009,7 +38057,7 @@ const HL_PART = {
     layer: 'lit',
     make: (q, o) => { const a = o.ang === undefined ? rnd(0, TAU) : o.ang + rnd(-0.4, 0.4), s = rnd(90, 150);
                       q.vx = Math.cos(a) * s; q.vy = Math.sin(a) * s; q.life = q.max = o.life || rnd(3, 5);
-                      q.r = rnd(4, 7) * (o.size || 1); q.seed = Math.random() * 99; q.col = o.col || '#0b0b12'; },
+                      q.r = rnd(4, 7) * (o.size || 1); q.seed = rnd() * 99; q.col = o.col || '#0b0b12'; },
     step: (q, dt) => { const turn = (hlNoise(uiTime * 1.1 + q.seed, 13) - 0.5) * 4 * dt;
                        const c = Math.cos(turn), s = Math.sin(turn), vx = q.vx;
                        q.vx = vx * c - q.vy * s; q.vy = vx * s + q.vy * c;
@@ -38297,7 +38345,7 @@ const HL_WR_ME = {
       name, dur: (o.tl && o.tl.len) || dur, age: 0, k: 0,
       x: o.x ?? this.x, y: o.y ?? this.y, ang: o.ang ?? this.ang,
       follow: !!o.follow, layer: o.layer || (o.follow ? 'front' : 'glow'),
-      seed: Math.random(), o, art: {}, tl: null
+      seed: rnd(), o, art: {}, tl: null
     };
     if (o.tl) m.tl = hlTimeline(Object.assign({ len: m.dur, name }, o.tl));
     this.moments.push(m);
@@ -38384,7 +38432,7 @@ const HL_WR_ME = {
     if (typeof o === 'number') return hlHash(o);
     if (!o || typeof o !== 'object') return 0.5;
     let v = this._seed.get(o);
-    if (v === undefined) { v = Math.random(); this._seed.set(o, v); }
+    if (v === undefined) { v = rnd(); this._seed.set(o, v); }
     return v;
   },
   /* the trail as points, newest first, from where the pilot is now: each
@@ -38545,7 +38593,7 @@ function hlWrBodiesStep(me, dt) {
       continue;
     }
     const dr = o.drag ?? me.look.drag ?? 1.2, st = o.settle ?? me.look.settle ?? 60;
-    const fl = o.flutter ?? 40, seed = B.seed ?? (B.seed = Math.random() * 99);
+    const fl = o.flutter ?? 40, seed = B.seed ?? (B.seed = rnd() * 99);
     const ax = -me.vx * dr - Math.cos(me.ang) * st, ay = -me.vy * dr - Math.sin(me.ang) * st;
     const wind = (x, y) => [ax + (hlNoise(uiTime * 2.3 + x * 0.03 + seed, 21) - 0.5) * fl,
                             ay + (hlNoise(uiTime * 2.3 + y * 0.03 + seed, 22) - 0.5) * fl];
@@ -38650,7 +38698,7 @@ function hlWrKill(me, e, o = {}) {
    reads their own volley by it), and the game's rule is that no skin takes
    that away. */
 function hlWrRound(me, b) {
-  const R = { b, seed: Math.random(), age: 0, dist: 0, x0: b.x, y0: b.y, x: b.x, y: b.y,
+  const R = { b, seed: rnd(), age: 0, dist: 0, x0: b.x, y0: b.y, x: b.x, y: b.y,
               ang: Math.atan2(b.vy || 0, b.vx || 1), crit: !!b.crit, mine: b.mine !== false && !b.hacked,
               kind: b.hacked ? 'hacked' : b.venom ? 'venom' : b.solar ? 'solar' : b.deep ? 'deep'
                   : b.crit ? 'crit' : 'plain',
@@ -38984,8 +39032,8 @@ function hlWrStageDress(st, s, pilot) {
 function hlWrStageBody(st) {
   const a = rnd(-0.9, 0.9), plate = st.mode === 'plate';
   const x = st.ww * (plate ? 0.8 : 0.78 + rnd(0.14, 0)), y = st.wh * (0.5 + a * 0.38);
-  return { x, y, r: plate ? 13 : rnd(15, 9), sides: 3 + ((Math.random() * 4) | 0), ang: rnd(TAU),
-           spin: rnd(1, -1), col: HL_WR_STAGE_COLS[(Math.random() * HL_WR_STAGE_COLS.length) | 0],
+  return { x, y, r: plate ? 13 : rnd(15, 9), sides: 3 + ((rnd() * 4) | 0), ang: rnd(TAU),
+           spin: rnd(1, -1), col: HL_WR_STAGE_COLS[(rnd() * HL_WR_STAGE_COLS.length) | 0],
            hp: plate ? 4 : 3, flash: 0, fade: 0, vx: 0, vy: 0, type: 'stage', stage: true };
 }
 function hlWrStageFire(st, ev) {
@@ -39074,7 +39122,7 @@ function hlWrStageTick(st, dt) {
     if (st.burst > 0) st.burst--;
     const m = me.sock('muzzle'), sp = plate ? 300 : 520;
     st.rounds.push({ x: m.x, y: m.y, vx: Math.cos(me.ang) * sp, vy: Math.sin(me.ang) * sp,
-                     r: 3.8, crit: Math.random() < 0.14, life: 1.4, mine: true });
+                     r: 3.8, crit: rnd() < 0.14, life: 1.4, mine: true });
   }
   for (const b of st.rounds) {
     b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
@@ -40315,7 +40363,7 @@ function hlAreaWave() {
     // the errand's piece for this wave, while one is owed
     const q = hlQuest(A.errand);
     if (!hlQDone(q.id) && hlArea.n >= 2 && hlProgress(q.id) + hlArea.coldLive < q.need)
-      hlArea.coldDue = rnd(COLD_AFTER[1], COLD_AFTER[0]);
+      hlArea.coldDue = simRnd(COLD_AFTER[1], COLD_AFTER[0]);
   }
   if (!bossAlive) spawnT = 0;
   waveTimer = 0;
@@ -40441,7 +40489,7 @@ const hlPileMul = e => (hlPile && e.type !== 'gourd' ? 1 + PILE_STEP * hlPile : 
 function hlColdSprout() {
   let x = P.x, y = P.y;
   for (let tries = 0; tries < 20; tries++) {
-    const a = P.ang + rnd(1.1, -1.1), d = rnd(520, 300);
+    const a = P.ang + simRnd(1.1, -1.1), d = simRnd(520, 300);
     x = clamp(P.x + Math.cos(a) * d, arena.x0 + 60, arena.x1 - 60);
     y = clamp(P.y + Math.sin(a) * d, arena.y0 + 60, arena.y1 - 60);
     if (len(x - P.x, y - P.y) > 240) break;
@@ -40492,7 +40540,7 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
           e.state = 1; e.atkT = JACK_WIND;
           hlJackWindFx(e);
         } else if (e.cd <= 0 && d < 640) {
-          e.cd = rnd(2.8, 2.0);
+          e.cd = simRnd(2.8, 2.0);
           hlJackSeeds(e);
         }
       } else if (e.state === 1) {                 // wind-up: it still turns to you
@@ -40528,7 +40576,7 @@ function hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy) {
         e.ang = Math.atan2(dy, dx);
         e.cd -= dt;
         if (e.cd <= 0 && d < VINE_RANGE) {
-          e.cd = rnd(4, 2.6);
+          e.cd = simRnd(4, 2.6);
           e.hlVine = { st: 'fly', x: e.x, y: e.y, vx: ux * VINE_SPD, vy: uy * VINE_SPD, t: 0 };
           hlVineThrowFx(e);
         }
@@ -40774,11 +40822,11 @@ function bossBacklog(e, dt, ux, uy, d, ph) {
   e.ang += dt * 0.25;
   if (e.atkT > 0 || e.hlWarn) return;   // nothing new while he winds up
   const n = e.hlBinge;               // 0..3: more of everything as it goes
-  const a = pick([0, 0, 1, 2]);
+  const a = simPick([0, 0, 1, 2]);
   if (a === 0) hlBacklogVolley(e, n);
   else if (a === 1) hlBacklogSweep(e, n);
   else hlBacklogSlam(e, n);
-  e.atkT = rnd(2.1, 1.5) - n * 0.15;
+  e.atkT = simRnd(2.1, 1.5) - n * 0.15;
 }
 /* A gourd into the heap. Arriving, he takes the patch's pile for health as
    well as heap; mid-fight, a gourd he walks to mends him. Either way the heap
@@ -40794,7 +40842,7 @@ function hlBacklogEat(e, g, arrival) {
   e.armor = (e.armor || 0) + BACKLOG_EAT_ARMOR;
   e.hlHeap = (e.hlHeap || 0) + 1;
   if (HL.fight) HL.fight.eaten++;
-  if (!arrival && Math.random() < 0.6) hlBark(e, HL_BARK.backlog.gourd);
+  if (!arrival && rnd() < 0.6) hlBark(e, HL_BARK.backlog.gourd);
   hlBacklogEatFx(e, g);
 }
 /* A binge is called, then comes. For BINGE_WARN he winds up: every paused
@@ -40830,7 +40878,7 @@ function hlBacklogVolley(e, n) {
     b.hlKind = 'backlog'; b.hlGroup = id; b.life = 9;
     shots.push(b);
   }
-  const p = { id, kind: 'volley', e, shots, t: 0, heldAt: rnd(HELD_AFTER[1], HELD_AFTER[0]),
+  const p = { id, kind: 'volley', e, shots, t: 0, heldAt: simRnd(HELD_AFTER[1], HELD_AFTER[0]),
               live: true, held: false, turned: false, resumed: false };
   for (const b of shots) b.hlPiece = p;
   hlHeld.push(p);
@@ -40838,11 +40886,11 @@ function hlBacklogVolley(e, n) {
 }
 function hlBacklogSweep(e, n) {
   const id = ++hlHeldSeq, aim = Math.atan2(P.y - e.y, P.x - e.x);
-  const dir = Math.random() < 0.5 ? 1 : -1, arc = 1.6 + n * 0.2;
+  const dir = simRand() < 0.5 ? 1 : -1, arc = 1.6 + n * 0.2;
   const p = { id, kind: 'sweep', e, x: e.x, y: e.y, dir,
               a0: aim - dir * arc / 2, a1: aim + dir * arc / 2, a: aim - dir * arc / 2,
               spd: SWEEP_SPD + n * 0.15, len: SWEEP_LEN, w: SWEEP_W, tele: SWEEP_TELE,
-              heldAt: rnd(SWEEP_HELD[1], SWEEP_HELD[0]), t: 0, hitCd: 0, hits: null,
+              heldAt: simRnd(SWEEP_HELD[1], SWEEP_HELD[0]), t: 0, hitCd: 0, hits: null,
               live: true, held: false, turned: false, resumed: false };
   hlHeld.push(p);
   hlPieceStartFx(p);
@@ -40850,7 +40898,7 @@ function hlBacklogSweep(e, n) {
 function hlBacklogSlam(e, n) {
   const id = ++hlHeldSeq;
   const p = { id, kind: 'slam', e, x: P.x, y: P.y, r: SLAM_R + n * 10, T: SLAM_T, t: 0,
-              heldAt: rnd(SLAM_HELD[1], SLAM_HELD[0]) * SLAM_T, vx: 0, vy: 0, slide: 0,
+              heldAt: simRnd(SLAM_HELD[1], SLAM_HELD[0]) * SLAM_T, vx: 0, vy: 0, slide: 0,
               live: true, held: false, turned: false, resumed: false };
   hlHeld.push(p);
   hlPieceStartFx(p);
@@ -42063,7 +42111,7 @@ function outsiderArrivalTick(dt) {
   const hit = (k, f, sh) => { if (was < T[k] && a.t >= T[k]) { drawFlashT = f; osShakeT = sh; } };
   hit(1, 0.10, 0.5); hit(2, 0.16, 0.9); hit(3, 0.55, 2.2); hit(5, 0.12, 0.7);
   // dust off the break, while it is being worked open
-  if (a.t > T[1] && a.t < T[5] && Math.random() < 0.6) {
+  if (a.t > T[1] && a.t < T[5] && rnd() < 0.6) {
     const r = menuHoleRect();
     osSpawnPart(r.x + rnd(r.w), r.y + rnd(r.h * 0.5), rnd(22, -22), rnd(40, 10),
               rnd(2.2, 1), COLD_COL, rnd(0.8, 0.4), 0.55);
@@ -42378,7 +42426,7 @@ function drawMenuHole() {
 
   // he goes past every so often, and it is over before you look
   h.passT -= 1 / 60;
-  if (h.passT <= 0 && h.pass <= 0 && Math.random() < 0.004) h.pass = 1;
+  if (h.passT <= 0 && h.pass <= 0 && rnd() < 0.004) h.pass = 1;
   if (h.pass > 0) { h.pass -= 0.0055; if (h.pass <= 0) { h.pass = 0; h.passT = 8; } }
 
   drawHoleCracks(1, 1);
@@ -42472,7 +42520,7 @@ function hubPlinthRise(dt, P) {
     const nx = cur + clamp(tgt - cur, -dt * sp, dt * sp);
     hub.rise[o.id] = nx;
     // grit off the socket lip while it moves
-    if (Math.abs(nx - cur) > 0.0015 && Math.random() < 0.5)
+    if (Math.abs(nx - cur) > 0.0015 && rnd() < 0.5)
       osSpawnPart(q.x + rnd(HUB_R, -HUB_R), q.y + 34, rnd(14, -14), rnd(30, 6),
                 rnd(2.4, 1), st === 'veiled' ? HUB_COL_VEIL : hubPlinthCol(o.id),
                 rnd(0.7, 0.3), 0.5);
@@ -43333,7 +43381,7 @@ function drawHazards() {
           ctx.lineDashOffset = -uiTime * 1100 - 120; beam(-LASER_HALF * 0.62);
           ctx.setLineDash([]);
           drawGlow(h.x, h.y, 36 + fire * 56, '#ffffff', a * 0.65);
-          if (FXO.parts && Math.random() < 0.5) {
+          if (FXO.parts && rnd() < 0.5) {
             const d = rnd(700, -700);
             spawnPart(h.x + dxl * d, h.y + dyl * d,
                       nxl * rnd(130, -130), nyl * rnd(130, -130),
@@ -43373,7 +43421,7 @@ function drawHazards() {
           ctx.fillStyle = mine ? HACK_COL : '#ef4444';
           ctx.fillRect(h.x - h.r, h.y - h.r * 0.55, h.r * 2, h.r * 1.1);
           for (let k = 0; k < 5; k++) {
-            const yy = h.y - h.r * 0.55 + Math.random() * h.r * 1.1;
+            const yy = h.y - h.r * 0.55 + rnd() * h.r * 1.1;
             ctx.globalAlpha = 0.5;
             ctx.fillStyle = mine ? '#ecfccb' : '#fecaca';
             ctx.fillRect(h.x - h.r, yy, h.r * 2, 1.2);
@@ -43631,7 +43679,7 @@ function drawLibraryPortal() {
       ctx.lineTo(L.x + Math.cos(a) * 17, L.y + Math.sin(a) * 17);
     }
     ctx.stroke();
-    if (Math.random() < 0.4)
+    if (rnd() < 0.4)
       spawnPart(L.x + rnd(L.r, -L.r), L.y + rnd(L.r, -L.r), rnd(90, -90), rnd(90, -90),
                 rnd(4, 2), MAL_COL, rnd(0.4, 0.2), 0.92);
   } else {
@@ -43949,7 +43997,7 @@ function drawUnwritten() {
   // ink shed from a half that is currently open
   if (FXO.parts)
     for (const [e, open] of [[u.a, u.aHitT], [u.b, u.bHitT]]) {
-      if (open <= 0 || Math.random() > 0.4) continue;
+      if (open <= 0 || rnd() > 0.4) continue;
       spawnPart(e.x + rnd(e.r * 0.6, -e.r * 0.6), e.y + rnd(e.r, 0),
                 rnd(20, -20), rnd(70, 20), rnd(2.4, 1.1), UNW_INK, rnd(0.5, 0.2), 0.94);
     }
@@ -44516,7 +44564,7 @@ function drawAmalBodyRite(b, placed, a) {
     ctx.textAlign = 'left';
     ctx.restore();
 
-    if (hurt > 0.4 && Math.random() < hurt * 0.25)
+    if (hurt > 0.4 && rnd() < hurt * 0.25)
       spawnPart(s.x + rnd(p.w * 0.4, -p.w * 0.4), s.y + rnd(p.h * 0.4, -p.h * 0.4),
                 rnd(120, -120), rnd(120, -120), rnd(3, 1.2), p.tint, rnd(0.9, 0.3), 0.93);
   }
@@ -44647,7 +44695,7 @@ function drawAmalBody(b, placed, a) {
       ctx.stroke();
     }
     // and dust, at the bottom of the stride
-    if (a && FXO.parts && Math.abs(Math.sin(a.t * 1.5)) < 0.14 && Math.random() < 0.5)
+    if (a && FXO.parts && Math.abs(Math.sin(a.t * 1.5)) < 0.14 && rnd() < 0.5)
       spawnPart(f.x + rnd(p.r, -p.r), fy + 14, rnd(90, -90), rnd(-10, -60),
                 rnd(3.4, 1.6), '#78716c', rnd(0.7, 0.35), 0.9);
   }
@@ -44760,7 +44808,7 @@ function drawAmalBody(b, placed, a) {
     amalCore(s.x, s.y, p.r, p.key, health(id), flashOf(id),
              uiTime * (id === 'spine' ? 1.1 : 0.35) + p.ox * 0.01);
     // a worn piece drips: the welds holding it in are letting go
-    if (a && FXO.parts && health(id) < 0.6 && Math.random() < 0.22)
+    if (a && FXO.parts && health(id) < 0.6 && rnd() < 0.22)
       spawnPart(s.x + rnd(p.r * 0.8, -p.r * 0.8), s.y + p.r * 0.7,
                 rnd(14, -14), rnd(120, 50), rnd(2.6, 1.2), WELD, rnd(0.6, 0.3), 0.96);
   }
@@ -44790,9 +44838,9 @@ function drawAmalBody(b, placed, a) {
     ctx.fill(); ctx.stroke();
     ctx.restore();
     // cinders lifting off it, so the thing looks like it is running hot
-    if (a && FXO.parts && Math.random() < 0.3)
+    if (a && FXO.parts && rnd() < 0.3)
       spawnPart(c.x + rnd(120, -120), c.y - 60, rnd(24, -24), rnd(-40, -110),
-                rnd(2.4, 1), Math.random() < 0.5 ? WELD : AMAL_COL, rnd(0.9, 0.4), 0.95);
+                rnd(2.4, 1), rnd() < 0.5 ? WELD : AMAL_COL, rnd(0.9, 0.4), 0.95);
   }
 
   /* ---- the head, and an optic that follows you ---- */
@@ -44880,10 +44928,10 @@ function drawAmalBody(b, placed, a) {
                     p.r * (1 + (1 - f) * 3.4) * 0.82, 0, 0, TAU);
         ctx.stroke();
         ctx.restore();
-        if (FXO.parts && f > 0.4 && Math.random() < 0.7)
+        if (FXO.parts && f > 0.4 && rnd() < 0.7)
           spawnPart(to.x + rnd(p.r, -p.r), to.y + rnd(p.r, -p.r),
                     rnd(220, -220), rnd(180, -180), rnd(3.4, 1.4),
-                    Math.random() < 0.6 ? WELD : '#fde68a', rnd(0.5, 0.2), 0.9);
+                    rnd() < 0.6 ? WELD : '#fde68a', rnd(0.5, 0.2), 0.9);
         continue;
       }
 
@@ -44925,7 +44973,7 @@ function drawAmalBody(b, placed, a) {
       ctx.lineTo(x + Math.cos(spin) * p.r * scale, y + Math.sin(spin) * p.r * scale);
       ctx.stroke();
       ctx.restore();
-      if (FXO.parts && Math.random() < 0.4)
+      if (FXO.parts && rnd() < 0.4)
         spawnPart(x + rnd(p.r, -p.r), y + rnd(p.r, -p.r), rnd(60, -60), rnd(60, -60),
                   rnd(2.6, 1.2), bd.col, rnd(0.4, 0.2), 0.92);
     }
@@ -45731,7 +45779,7 @@ function drawEnemiesBody() {
         ctx.fill();
       }
       // it drips
-      if (Math.random() < 0.25 + sev * 0.4)
+      if (rnd() < 0.25 + sev * 0.4)
         spawnPart(e.x + rnd(e.r * 0.8, -e.r * 0.8), e.y + e.r * 0.4,
                   rnd(14, -14), rnd(70, 30), rnd(2.6, 1.3), '#a3e635', rnd(0.6, 0.3), 0.96);
       ctx.strokeStyle = 'rgba(163,230,53,0.95)'; ctx.lineWidth = 2;
@@ -45882,9 +45930,9 @@ function updateCorpses(dt) {
       c.y = clamp(c.y, arena.y0 + c.r, arena.y1 - c.r);
       c.ang += (Math.abs(c.vx) + Math.abs(c.vy)) * dt * 0.012;
       // sparks off the fuse, faster as it runs out
-      if (Math.random() < 0.3 + (1 - c.life / c.max) * 0.6)
+      if (rnd() < 0.3 + (1 - c.life / c.max) * 0.6)
         spawnPart(c.x + rnd(c.r, -c.r), c.y + rnd(c.r, -c.r), rnd(60, -60), rnd(-30, -110),
-                  rnd(3.4, 1.6), Math.random() < 0.5 ? '#fb923c' : '#fecaca', rnd(0.5, 0.2), 0.9);
+                  rnd(3.4, 1.6), rnd() < 0.5 ? '#fb923c' : '#fecaca', rnd(0.5, 0.2), 0.9);
       if (c.life <= 0) {
         playerBlast(c.x, c.y, 62 + 24 * c.vol, (10 + 9 * c.vol) * (1 + wave * 0.06), '#fb923c');
         ringFx(c.x, c.y, 8, 62 + 24 * c.vol, '#fb923c', 0.5, 4);
@@ -45990,7 +46038,7 @@ function drawLance() {
     ctx.lineTo(P.x + ca * (60 + c * 320), P.y + sa * (60 + c * 320));
     ctx.stroke();
     ctx.restore();
-    if (FXO.parts && c > 0.45 && Math.random() < 0.3)
+    if (FXO.parts && c > 0.45 && rnd() < 0.3)
       spawnPart(mx + rnd(10, -10), my + rnd(10, -10), rnd(24, -24), rnd(24, -24),
                 rnd(2.2, 1), cc, rnd(0.3, 0.15), 0.9);
   }
@@ -46078,7 +46126,7 @@ function drawLance() {
   for (const s of P.laserSegs) {
     if (!s.cut) continue;                  // a redactor ate the rest of this lane
     drawGlow(s.x2, s.y2, w * 1.8, '#f87171', 0.75 * a);
-    if (Math.random() < 0.5)
+    if (rnd() < 0.5)
       spawnPart(s.x2 + rnd(7, -7), s.y2 + rnd(7, -7), rnd(50, -50), rnd(50, -50),
                 rnd(3.2, 1.4), '#f87171', rnd(0.4, 0.2), 0.9);
   }
@@ -46089,7 +46137,7 @@ function drawLance() {
   ctx.translate(first.x1, first.y1);
   ctx.rotate(Math.atan2(first.y2 - first.y1, first.x2 - first.x1));
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = a * (0.45 + Math.random() * 0.35);
+  ctx.globalAlpha = a * (0.45 + rnd() * 0.35);
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.moveTo(w * 1.6, 0); ctx.lineTo(0, w * 1.1);
@@ -46117,9 +46165,9 @@ function drawLance() {
   ctx.stroke();
   ctx.restore();
   // heat shed off the length of it
-  if (FXO.parts && Math.random() < 0.55) {
-    const s = P.laserSegs[Math.floor(Math.random() * P.laserSegs.length)];
-    const t = Math.random();
+  if (FXO.parts && rnd() < 0.55) {
+    const s = P.laserSegs[Math.floor(rnd() * P.laserSegs.length)];
+    const t = rnd();
     spawnPart(lerp(s.x1, s.x2, t), lerp(s.y1, s.y2, t),
               rnd(40, -40), rnd(6, -66), rnd(2.4, 1.1),
               P.laserHeavy ? '#fde047' : '#fca5a5', rnd(0.45, 0.2), 0.92);
@@ -46383,7 +46431,7 @@ function drawPlayer() {
       }
     }
     // an ember shaken loose now and then
-    if (Math.random() < 0.4) {
+    if (rnd() < 0.4) {
       const a = P.plateAng + rnd(TAU);
       spawnPart(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R,
                 rnd(30, -30), rnd(-20, -70), rnd(3, 1.4), '#fbbf24', rnd(0.6, 0.25), 0.92);
@@ -46436,11 +46484,11 @@ function drawPlayer() {
     }
     ctx.restore();
     // embers rising off the corona
-    if (Math.random() < 0.5) {
+    if (rnd() < 0.5) {
       const a = rnd(TAU);
       spawnPart(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R,
                 Math.cos(a) * 40, Math.sin(a) * 40 - 60, rnd(3.4, 1.6),
-                Math.random() < 0.5 ? '#fde047' : '#fb923c', rnd(0.7, 0.3), 0.93);
+                rnd() < 0.5 ? '#fde047' : '#fb923c', rnd(0.7, 0.3), 0.93);
     }
   }
 
@@ -46901,7 +46949,7 @@ const BURN_CAP  = 10;
 function applyBurn(e, n) {
   e.burn = Math.min(BURN_CAP, (e.burn || 0) + (n || 1));
   e.burnT = BURN_TIME;
-  if (e.burnSeed == null) e.burnSeed = Math.random() * 997;
+  if (e.burnSeed == null) e.burnSeed = rnd() * 997;
 }
 
 /* ============================= COMING APART ==============================
@@ -46921,7 +46969,7 @@ function applyBurn(e, n) {
 /* Wear does not heal. Once a bite is out of the silhouette it stays out, so
    a thing that has been through the lance twice looks like it. */
 function burnWear(e, dt) {
-  if (e.burnSeed == null) e.burnSeed = Math.random() * 997;
+  if (e.burnSeed == null) e.burnSeed = rnd() * 997;
   e.eaten = Math.min(0.9, (e.eaten || 0) + dt * (0.14 + e.burn * 0.055));
 }
 
@@ -46934,7 +46982,7 @@ const chunks = [];
 
 function spawnChunk(x, y, vx, vy, r) {
   if (chunks.length >= CHUNK_MAX) return;
-  const n = 3 + (Math.random() * 3 | 0), pts = [];
+  const n = 3 + (rnd() * 3 | 0), pts = [];
   for (let i = 0; i < n; i++) {
     const a = i * TAU / n + rnd(0.35, -0.35), rr = rnd(1.2, 0.5);
     pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
@@ -47164,7 +47212,7 @@ function shatterBody(e) {
   }
   for (let i = 0; i < 10; i++) {
     const a = rnd(TAU), sp = rnd(140, 25);
-    spawnAsh(e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp - 26, Math.random() < 0.4);
+    spawnAsh(e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp - 26, rnd() < 0.4);
   }
   for (let i = 0; i < 3; i++)
     spawnSmoke(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r),
@@ -47254,7 +47302,7 @@ function arcPath(a) {
   const base = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
   a.forks = [];
   for (let k = 0; k < 2; k++) {
-    const p = pts[2 + Math.floor(Math.random() * (pts.length - 3))];
+    const p = pts[2 + Math.floor(rnd() * (pts.length - 3))];
     const fa = base + rnd(1.5, -1.5), fl = L * rnd(0.3, 0.12);
     a.forks.push([p, { x: p.x + Math.cos(fa) * fl, y: p.y + Math.sin(fa) * fl }]);
   }
@@ -50156,7 +50204,7 @@ const FREE_ROWS = [
   { n: 'SPAWN BOSS',     f: () => {
       const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame && !HL_BOSSES[k]);
       const k = keys[(freeBoss = (freeBoss + 1) % keys.length)];
-      const a = rnd(TAU);
+      const a = simRnd(TAU);
       spawnEnemy('boss', clamp(P.x + Math.cos(a) * 340, arena.x0 + 90, arena.x1 - 90),
                          clamp(P.y + Math.sin(a) * 340, arena.y0 + 90, arena.y1 - 90),
                  { boss: k });
@@ -50164,8 +50212,8 @@ const FREE_ROWS = [
   { n: 'SPAWN A CROWD',  f: () => {
       const pool = Object.keys(ETYPE).filter(k => k !== 'boss' && k !== 'egg' && !HL_ETYPES[k]);
       for (let i = 0; i < 8; i++) {
-        const a = rnd(TAU), r = rnd(420, 240);
-        spawnEnemy(pick(pool), clamp(P.x + Math.cos(a) * r, arena.x0 + 50, arena.x1 - 50),
+        const a = simRnd(TAU), r = simRnd(420, 240);
+        spawnEnemy(simPick(pool), clamp(P.x + Math.cos(a) * r, arena.x0 + 50, arena.x1 - 50),
                                clamp(P.y + Math.sin(a) * r, arena.y0 + 50, arena.y1 - 50),
                    { elite: false });
       } } },
@@ -50408,7 +50456,7 @@ function startKeeperFight() {
   betweenWaves = 1e9;                  // no wave logic during this
   spawnBudget = 0;
   bossAlive = true;
-  const a = rnd(TAU);
+  const a = simRnd(TAU);
   const kx = clamp(P.x + Math.cos(a) * 380, arena.x0 + 120, arena.x1 - 120);
   const ky = clamp(P.y + Math.sin(a) * 380, arena.y0 + 120, arena.y1 - 120);
   const e = spawnEnemy('boss', kx, ky, { boss: 'keeper' });
@@ -52262,6 +52310,7 @@ function startDaily() {
   const ranked = Daily.ranked();
   const m = sh.m || {};
   if (m.char !== undefined) applyChar(m.char);
+  runSeedNext = dailyHash('voidrunner-run-' + sh.day);   // everyone's daily plays the same seed
   resetGame();
   Chal.on = { id: 'daily:' + sh.day, n: sh.name, tier: 0, goal: null,
               daily: true, dailyRanked: ranked, accent: sh.accent,
@@ -53558,7 +53607,7 @@ function skinClick() {
 function newPid() {
   const b = new Uint8Array(16);
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
-  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(rnd() * 256);
   let s = '';
   for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
   return s;
@@ -54865,7 +54914,7 @@ function impShed(st, R, T, tier, t) {
   st.sa = (st.sa || 0) + dt * (3 + tier * 2);
   while (st.sa >= 1) {
     st.sa -= 1;
-    const i = (Math.random() * n) | 0, a = rot + i * TAU / n, d = rr + impBladeLen(R, tier, i);
+    const i = (rnd() * n) | 0, a = rot + i * TAU / n, d = rr + impBladeLen(R, tier, i);
     const ta = a + Math.PI / 2 * dir, sp = rnd(40, 14);
     spawnPart(P.x + Math.cos(a) * d, P.y + Math.sin(a) * d,
               Math.cos(ta) * sp - (P.vx || 0) * 0.2, Math.sin(ta) * sp - (P.vy || 0) * 0.2,
@@ -54877,7 +54926,7 @@ function impShed(st, R, T, tier, t) {
       st.sb -= 1;
       const e = st.cape[st.cape.length - 1];
       spawnPart(e.x + rnd(5, -5), e.y + rnd(5, -5), rnd(14, -14), rnd(22, 2), rnd(2, 1),
-                Math.random() < 0.45 ? T.edge : (tier === 2 ? '#c084fc' : T.hi),
+                rnd() < 0.45 ? T.edge : (tier === 2 ? '#c084fc' : T.hi),
                 rnd(0.9, 0.5), 0.92, false);
     }
   }
@@ -54888,7 +54937,7 @@ function impShed(st, R, T, tier, t) {
       st.sc -= 1;
       spawnPart(P.x + rnd(W * 0.5, -W * 0.5), P.y - R - 8 - rnd(W * 0.85, W * 0.2),
                 rnd(10, -10), rnd(-14, -40), rnd(2.2, 1.1),
-                Math.random() < 0.5 ? T.hi : T.edge, rnd(1, 0.6), 0.93, false);
+                rnd() < 0.5 ? T.hi : T.edge, rnd(1, 0.6), 0.93, false);
     }
   }
 }
@@ -55155,7 +55204,7 @@ const SkinFx = {
     SkinFx._c = (SkinFx._c || 0) + dt * 7;
     while (SkinFx._c >= 1) {
       SkinFx._c -= 1;
-      const i = (Math.random() * 5) | 0, w = R * 0.72, h = R * 0.5;
+      const i = (rnd() * 5) | 0, w = R * 0.72, h = R * 0.5;
       const sx = P.x + ((i / 4) * 2 - 1) * w * 0.84;
       const sy = P.y - R - 3 - h * (i === 2 ? 1.55 : (i === 1 || i === 3) ? 1.05 : 0.78);
       spawnPart(sx, sy, rnd(14, -14), rnd(-16, -42), rnd(2, 1),
@@ -55186,14 +55235,14 @@ const SkinFx = {
     SkinFx._ra = (SkinFx._ra || 0) + dt * (st === 2 ? 24 : 15);
     while (SkinFx._ra >= 1) {
       SkinFx._ra -= 1;
-      const e = R + 5, edge = Math.random() < 0.5;
-      const sx = P.x + (edge ? rnd(e, -e) : (Math.random() < 0.5 ? -e : e));
-      const sy = P.y + (edge ? (Math.random() < 0.5 ? -e : e) : rnd(e, -e));
+      const e = R + 5, edge = rnd() < 0.5;
+      const sx = P.x + (edge ? rnd(e, -e) : (rnd() < 0.5 ? -e : e));
+      const sy = P.y + (edge ? (rnd() < 0.5 ? -e : e) : rnd(e, -e));
       spawnPart(sx, sy,
                 rnd(15, -15) - (P.vx || 0) * 0.18,
                 rnd(32, 6) - (P.vy || 0) * 0.18,
                 rnd(2.1, 1.1),
-                st === 2 ? (Math.random() < 0.16 ? RED_STAMP : '#fff6e6') : RED_PAPER,
+                st === 2 ? (rnd() < 0.16 ? RED_STAMP : '#fff6e6') : RED_PAPER,
                 rnd(0.9, 0.5), 0.92, false);
     }
   },
@@ -57328,8 +57377,8 @@ function hostRevive() {
   P.iframe = 2.2; P.hurtFlash = 0;
   const w = Wing.live && !Wing.down ? Wing : null;
   if (w) {
-    P.x = clamp(w.x + rnd(50, -50), arena.x0 + 20, arena.x1 - 20);
-    P.y = clamp(w.y + rnd(50, -50), arena.y0 + 20, arena.y1 - 20);
+    P.x = clamp(w.x + simRnd(50, -50), arena.x0 + 20, arena.x1 - 20);
+    P.y = clamp(w.y + simRnd(50, -50), arena.y0 + 20, arena.y1 - 20);
   }
   ringFx(P.x, P.y, 10, 200, COL.player, 0.7, 5);
   burst(P.x, P.y, 40, COL.player, 300, 3.4, 0.8);
@@ -57394,8 +57443,8 @@ function wingRevive() {
   Wing.hp = Wing.maxHp * 0.5;
   Wing.iframe = 2.2; Wing.hurtFlash = 0;
   const at = P.down ? Wing : P;         // stand up where somebody is standing
-  Wing.x = clamp(at.x + rnd(50, -50), arena.x0 + 20, arena.x1 - 20);
-  Wing.y = clamp(at.y + rnd(50, -50), arena.y0 + 20, arena.y1 - 20);
+  Wing.x = clamp(at.x + simRnd(50, -50), arena.x0 + 20, arena.x1 - 20);
+  Wing.y = clamp(at.y + simRnd(50, -50), arena.y0 + 20, arena.y1 - 20);
   ringFx(Wing.x, Wing.y, 10, 200, WING_COL, 0.7, 5);
   burst(Wing.x, Wing.y, 40, WING_COL, 300, 3.4, 0.8);
   Audio_.heal();
@@ -57411,7 +57460,7 @@ function wingUpdate(dt) {
   // down until the wave is cleared — the clock that used to run here is gone
   if (Wing.down) {
     Wing.vx *= Math.pow(0.02, dt); Wing.vy *= Math.pow(0.02, dt);
-    if (Math.random() < 0.35)
+    if (rnd() < 0.35)
       spawnPart(Wing.x + rnd(12, -12), Wing.y + rnd(12, -12), rnd(20, -20), rnd(-30, -8),
                 rnd(3, 1.4), WING_COL, rnd(0.6, 0.3), 0.94);
     return;
@@ -57458,7 +57507,7 @@ function wingUpdate(dt) {
   Wing.x = clamp(Wing.x, arena.x0 + Wing.r, arena.x1 - Wing.r);
   Wing.y = clamp(Wing.y, arena.y0 + Wing.r, arena.y1 - Wing.r);
 
-  if (len(Wing.vx, Wing.vy) > 40 && Math.random() < 0.5) {
+  if (len(Wing.vx, Wing.vy) > 40 && rnd() < 0.5) {
     const a = Math.atan2(-Wing.vy, -Wing.vx);
     spawnPart(Wing.x + Math.cos(a) * 8, Wing.y + Math.sin(a) * 8,
       Math.cos(a) * rnd(70, 20), Math.sin(a) * rnd(70, 20),
@@ -57480,7 +57529,7 @@ function wingUpdate(dt) {
     const n = Math.max(1, P.count);
     for (let i = 0; i < n; i++) {
       const a0 = n === 1 ? 0 : (i - (n - 1) / 2) * (P.spread * 1.9);
-      fireBullet(mx, my, Wing.ang + a0 + rnd(P.spread, -P.spread) * 0.5, 0.85);
+      fireBullet(mx, my, Wing.ang + a0 + simRnd(P.spread, -P.spread) * 0.5, 0.85);
     }
     Audio_.shoot();
     Wing.shots++;
@@ -58114,7 +58163,7 @@ function mpPredict(dt) {
   }
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
-  if (len(P.vx, P.vy) > 40 && Math.random() < 0.5) {
+  if (len(P.vx, P.vy) > 40 && rnd() < 0.5) {
     const a = Math.atan2(-P.vy, -P.vx);
     spawnPart(P.x + Math.cos(a) * 8, P.y + Math.sin(a) * 8,
       Math.cos(a) * rnd(70, 20), Math.sin(a) * rnd(70, 20),
@@ -59388,9 +59437,9 @@ function onRewardKill(e) {
       P.requisN = 0;
       const each = Math.max(2, Math.round((3 + wave * 0.6) * P.credMul));
       for (let i = 0; i < 3; i++) {
-        const c = mkDrop(e.x + rnd(24, -24), e.y + rnd(24, -24), 'credit');
+        const c = mkDrop(e.x + simRnd(24, -24), e.y + simRnd(24, -24), 'credit');
         c.v = each;
-        c.vx = rnd(180, -180); c.vy = rnd(180, -180);
+        c.vx = simRnd(180, -180); c.vy = simRnd(180, -180);
         drops.push(c);
       }
     }
@@ -59398,8 +59447,8 @@ function onRewardKill(e) {
   if (P.rolling) P.rollN = (P.rollN || 0) + 1;
   if (P.shatter && e.elite) {
     for (let i = 0; i < 6 + 3 * P.shatter; i++) {
-      const a = rnd(TAU);
-      gems.push({ x: e.x, y: e.y, vx: Math.cos(a) * rnd(180, 60), vy: Math.sin(a) * rnd(180, 60),
+      const a = simRnd(TAU);
+      gems.push({ x: e.x, y: e.y, vx: Math.cos(a) * simRnd(180, 60), vy: Math.sin(a) * simRnd(180, 60),
                   r: 4, v: e.xp * 0.4, life: 9 });
     }
   }
@@ -59729,7 +59778,7 @@ function hackKin(e) {
 
 /* Everything that tied a body to the side it was on, let go. */
 function hackTurn(e) {
-  e.hackCd = rnd(0.8, 0.3);
+  e.hackCd = simRnd(0.8, 0.3);
   e.hackTgt = null;
   e.col = HACK_COL;
   e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
@@ -59748,7 +59797,7 @@ function hackTurn(e) {
    between phases. A boss comes over at its last phase — the whole of what it
    can do, which is what you took it for. */
 function hackReset(e) {
-  e.state = 0; e.atkT = 0; e.cd = rnd(0.9, 0.3);
+  e.state = 0; e.atkT = 0; e.cd = simRnd(0.9, 0.3);
   e.hlVine = null; e.hlWatched = false;
   if (e.type !== 'boss') return;
   e.phase = 2; e.lockPhase = 2;
@@ -59756,7 +59805,7 @@ function hackReset(e) {
      spacing and its timers out of four-entry tables by section, and a keeper
      taken before his first tick sat at -1 — off the table, NaN, and gone. */
   if (e.boss === 'keeper') { if (e.kp === undefined) keeperInit(e); e.kp = 3; }
-  e.atk = -1; e.atkT = rnd(1.0, 0.5);
+  e.atk = -1; e.atkT = simRnd(1.0, 0.5);
   e.invuln = 0; e.vuln = 1; e.kTransT = 0;
   e.finale = false;                        // THE OTHER: its last ten seconds were yours
   if (e.awakened) { e.rage = 0; e.atkT = 0.55; }
@@ -59781,9 +59830,9 @@ function hackDown(e) {
   if (e.type === 'splitter' && e.gen < 2) {
     hackAs(e, () => {
       for (let i = 0; i < 2; i++) {
-        const c = spawnEnemy('splitter', e.x + rnd(26, -26), e.y + rnd(26, -26),
+        const c = spawnEnemy('splitter', e.x + simRnd(26, -26), e.y + simRnd(26, -26),
           { gen: e.gen + 1, rs: 0.62, hs: 0.34, ss: 1.25, elite: false });
-        c.vx = rnd(160, -160); c.vy = rnd(160, -160);
+        c.vx = simRnd(160, -160); c.vy = simRnd(160, -160);
       }
     });
   }
@@ -59814,7 +59863,7 @@ function hackTick(e, dt) {
     if (e.hp <= 0) { hackRelease(e); return HK_GONE; }
   }
 
-  if (Math.random() < 0.18)
+  if (rnd() < 0.18)
     spawnPart(e.x + rnd(e.r, -e.r), e.y + rnd(e.r, -e.r), rnd(20, -20), -24,
               rnd(2.6, 1.2), HACK_COL, rnd(0.45, 0.2), 0.94);
 
@@ -59883,7 +59932,7 @@ function hackHitByBullet(b) {
       const off = Math.abs(((Math.atan2(dy, dx) - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
       if (off < 0.55) {
         burst(b.x, b.y, 4, HACK_COL, 130, 2.2, 0.25);
-        if (Math.random() < 0.25) floatText(b.x, b.y, 'REDACTED', HACK_COL, 10, -24);
+        if (rnd() < 0.25) floatText(b.x, b.y, 'REDACTED', HACK_COL, 10, -24);
         return true;
       }
     }
@@ -59896,7 +59945,7 @@ function hackHitByBullet(b) {
       const off = Math.abs(((inc - e.plateAng + Math.PI) % TAU + TAU) % TAU - Math.PI);
       if (off < 1.3) {
         const t = nearestEnemy(e.x, e.y, 900);
-        const back = (t ? Math.atan2(t.y - e.y, t.x - e.x) : inc) + rnd(0.25, -0.25);
+        const back = (t ? Math.atan2(t.y - e.y, t.x - e.x) : inc) + simRnd(0.25, -0.25);
         hackShot(e, back, 330, hackDmg(Math.max(b.dmg, e.dmg)), 6);
         burst(b.x, b.y, 5, HACK_COL, 220, 2.4, 0.28);
         Audio_.tone(1250, 0.05, 'sine', 0.05, 700);
@@ -59921,7 +59970,7 @@ function hackKeepArmy(regroup) {
   if (!regroup) return;
   for (let k = 0; k < n; k++) {
     const e = enemies[k];
-    const a = k * 2.399 + rnd(0.3, -0.3);              // the golden angle: an even spread
+    const a = k * 2.399 + simRnd(0.3, -0.3);              // the golden angle: an even spread
     const R = 90 + 20 * k + (e.type === 'boss' ? 70 : 0);
     e.x = clamp(P.x + Math.cos(a) * R, arena.x0 + e.r, arena.x1 - e.r);
     e.y = clamp(P.y + Math.sin(a) * R, arena.y0 + e.r, arena.y1 - e.r);
@@ -60112,7 +60161,7 @@ function chalApplyShip(m) {
     if (s) { s.f(P); Codex.seeSign(s.id); planetSign = s; planetRevealed = true; }
   }
   if (m.mal && MALWARE.length) {
-    const mw = MALWARE[rndi(MALWARE.length)];
+    const mw = MALWARE[simRndi(MALWARE.length)];
     P.malware = mw; Codex.seeMal(mw.id);
   }
 }
@@ -60120,7 +60169,7 @@ function chalApplyShip(m) {
 /* And everything it says about the room. */
 function chalApplyRoom(m) {
   if (m.mirror) for (let i = 0; i < m.mirror; i++) {
-    const a = (i / m.mirror) * TAU + rnd(0.4, -0.4);
+    const a = (i / m.mirror) * TAU + simRnd(0.4, -0.4);
     const rx = (arena.x0 + arena.x1) / 2 + Math.cos(a) * (arena.x1 - arena.x0) * 0.34;
     const ry = (arena.y0 + arena.y1) / 2 + Math.sin(a) * (arena.y1 - arena.y0) * 0.34;
     addHazard('mirror', rx, ry, 1e9, { r: 52 });
@@ -60200,8 +60249,8 @@ function chalTick(dt) {
     Chal.curseT -= dt;
     if (Chal.curseT <= 0) {
       Chal.curseT = Math.max(0.8, 2.6 - wave * 0.05);
-      addHazard(m.curse, rnd(arena.x1 - 90, arena.x0 + 90), rnd(arena.y1 - 90, arena.y0 + 90),
-                rnd(9, 5), { dmg: 6 + wave * 0.55 });
+      addHazard(m.curse, simRnd(arena.x1 - 90, arena.x0 + 90), simRnd(arena.y1 - 90, arena.y0 + 90),
+                simRnd(9, 5), { dmg: 6 + wave * 0.55 });
     }
   }
 }
