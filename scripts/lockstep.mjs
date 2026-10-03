@@ -31,13 +31,17 @@ const SHORT = args.includes('--short');
    packets (the inputs) that never arrive. hz: each machine's frame rate.
    freeze: the guest's machine stops for a while, the way a laptop does. */
 const SCENARIOS = [
-  { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember' },
+  { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember', end: 'host leaves' },
   { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true },
   { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
                       freeze: { at: 40000, ms: 1800 } },
   { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
                       guestSave: true },
   // the safety net: each machine nudges its own game once, out of step; both must find it and come back
+  /* A run as people play it: ordinary hulls, so pilots go down, stand back up
+     and die; the host starts the next run; and the guest leaves partway
+     through one, and the host plays on alone. */
+  { name: 'lifecycle', seed: 206, lat: 30, jit: 15, loss: 0.03, hostHz: 60, guestHz: 60,  host: 'runner', wing: 'melee', life: true, end: 'guest leaves' },
   { name: 'parted', seed: 205,   lat: 40,  jit: 20, loss: 0.05, hostHz: 60, guestHz: 72,  host: 'ember',  wing: 'runner', kit: true,
                       part: { guest: [1500], host: [6000] } },
 ];
@@ -47,7 +51,7 @@ const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 let ls = 12345;
 const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 4294967296; };
 
-const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
+const SETUP = (role, char, kit, scramble, kitRun, yes, part, life) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
   // each player in a skin of their own, and wearing an award: each machine draws the other pilot in it
@@ -142,6 +146,9 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   globalThis.__prints = new Map();
   globalThis.__stat = { waves: 0, bosses: new Set() };
+  // the life of a run: steps across every run, pilots down and up, runs ended (on this machine's record)
+  globalThis.__steps = 0;
+  globalThis.__life = { downs: 0, ups: 0, deaths: 0, runs0: Save.profile.runs || 0, was: [false, false], dead: false };
   // every menu choice that lands, counted where it lands (pause and resume are counted from LS.paused)
   globalThis.__acts = {};
   let __was = false;
@@ -161,7 +168,12 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
     const t = LS.tick;
     // a nudge on this machine alone: its roll and its enemies' hulls, as a desync would leave them (once: a replay passes here again)
     if (PARTS.includes(t) && !parted.has(t)) { parted.add(t); simRngState = (simRngState ^ 0x5bd1e995) >>> 0; for (const e of enemies) e.hp *= 0.93; }
-    if (t === 1) pilotsEach(() => { P.maxHp = P.hp = 60000; P.dmg *= 3; });
+    __steps++;
+    if (t === 1 && !${!!life}) pilotsEach(() => { P.maxHp = P.hp = 60000; P.dmg *= 3; });
+    if (t === 1 && ${!!life}) pilotsEach(() => { P.dmg *= 2; });   // ordinary hulls, so they go down; enough bite to clear a wave alone
+    for (let k = 0; k < PILOTS.length; k++) { const o = pilotP(k), d = !!(o && o.down); if (d && !__life.was[k]) __life.downs++; if (!d && __life.was[k]) __life.ups++; __life.was[k] = d; }
+    if (state === 'dead' && !__life.dead) __life.deaths++;
+    __life.dead = state === 'dead';
     if (${!!kitRun} && t % 900 === 60) pilotsEach(() => {   // every pilot's kit, charged
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
       else if (P.charId === 'ember') P.vent = VENT_MAX;
@@ -181,7 +193,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
       W: pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'kills']),
       E: enemies.filter(e => !e.dead).map(e => [e.type, ...pk(e, ['x', 'y', 'hp', 'id'])]),
       B: bullets.length, EB: ebullets.length, G: gems.length, D: drops.length, RUN: RUN_FLAGS.map(k => r(RUN[k])) }));
-    if (t % 60 === 0) __prints.set(t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
+    if (t % 60 === 0) __prints.set(LS.run * 1e6 + t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
       pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT']),
       Object.entries((pilotP(1) || {}).up || {}).sort(),
@@ -196,8 +208,8 @@ function play(sc) {
   ls = 12345;
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720 }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640 }), hz: sc.guestHz };
-  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest), 'setup-guest');   // its own pilot, awake too when the scenario has kits
+  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host, sc.life), 'setup-host');
+  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest, sc.life), 'setup-guest');   // its own pilot, awake too when the scenario has kits
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
@@ -223,8 +235,10 @@ function play(sc) {
   H.g.run(`runSeedNext = ${sc.seed}; mpStartRun()`); ship(H);   // the host's seed, fixed so a failing run can be replayed
   for (const m of [H, G]) { m.next = now; m.last = now; }
   const tick = m => m.g.run('LS.on ? LS.tick : 0');
+  const steps = m => m.g.run('__steps');
   const limit = now + TICKS * 1000 / 60 * 4;
-  while (Math.min(tick(H), tick(G)) < TICKS && now < limit) {
+  let deadFor = 0, restarts = 0;
+  while (Math.min(steps(H), steps(G)) < TICKS && now < limit) {
     const m = H.next <= G.next ? H : G;
     now = m.next;
     deliver(m);
@@ -237,6 +251,11 @@ function play(sc) {
       if (m.frames % 3 === 0) m.g.run('__draw()');
       m.frames++;
       if (m.g.run('LS.waitT > 0')) m.waitFrames++;
+      // the host starts the next run a moment after both pilots are gone, as a player would
+      if (m === H && sc.life) {
+        if (H.g.run("state === 'dead' && LS.on")) deadFor += dt; else deadFor = 0;
+        if (deadFor > 2) { deadFor = 0; restarts++; H.g.run(`runSeedNext = ${sc.seed + restarts}; handleKey(' ')`); }
+      }
       ship(m);
     }
     m.next = now + (1000 / m.hz) * (0.9 + lr() * 0.2);
@@ -251,21 +270,45 @@ function play(sc) {
       break; } }
   }
   if (process.env.LSDEBUG) for (const m of [H, G]) console.log(m.name, 'inbox', m.inbox.length, m.g.run("JSON.stringify({ on: LS.on, run: LS.run, tick: LS.tick, hi: LS.hi, delay: LS.delay, peerNeed: LS.peerNeed, acc: +LS.acc.toFixed(3), waitT: +LS.waitT.toFixed(2), mine: [...LS.mine.keys()].slice(0, 8), mineN: LS.mine.size, theirs: [...LS.theirs.keys()].slice(0, 8), theirsN: LS.theirs.size, state, MPon: MP.on, role: MP.role, frameErrors })"));
+  /* The end of the session: one side leaves. The other must carry on as it
+     should, with nothing thrown: the host alone, flying its run on for ten
+     seconds; the guest, back at the lobby. */
+  // each player's own kills, while both pilots are still flying
+  const kills = { host: H.g.run('pilotP(0).kills'), wing: H.g.run('pilotP(1) ? pilotP(1).kills : 0'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') };
+  let ending = null;
+  if (sc.end) {
+    const [goes, stays] = sc.end === 'guest leaves' ? [G, H] : [H, G];
+    const was = JSON.parse(stays.g.run("JSON.stringify({ state, offers: offers.length })"));
+    goes.g.run('mpQuit()'); ship(goes);
+    now += sc.lat + 50; deliver(stays);
+    const errs = [];
+    for (let i = 0; i < 600; i++) {
+      try { stays.g.run(`update(1 / 60); if (${i} % 3 === 0) __draw();`); } catch (e) { if (errs.length < 3) errs.push(String(e && e.message || e)); }
+    }
+    try { goes.g.run('update(1 / 60); __draw();'); } catch (e) { errs.push('the one who left: ' + String(e && e.message || e)); }
+    ending = { was, stays: JSON.parse(stays.g.run("JSON.stringify({ MPon: MP.on, LSon: LS.on, pilots: PILOTS.length, state, lanView, offers: offers.length })")),
+               goes: JSON.parse(goes.g.run("JSON.stringify({ MPon: MP.on, LSon: LS.on, pilots: PILOTS.length, state })")),
+               errs, drawErr: [stays.g.run('__drawErr.n || 0'), goes.g.run('__drawErr.n || 0')] };
+  }
   const ph = H.g.run('[...__prints]'), pg = new Map(G.g.run('[...__prints]'));
   let compared = 0, firstDiff = null;
   const diffs = [];
-  for (const [t, h] of ph) { if (!pg.has(t)) continue; compared++; if (pg.get(t) !== h) { diffs.push(t); if (firstDiff == null) firstDiff = t; } }
+  // (keyed run * 1e6 + step; the step within its run is what the windows below are in)
+  for (const [t, h] of ph) { if (!pg.has(t)) continue; compared++; if (pg.get(t) !== h) { diffs.push(t % 1e6); if (firstDiff == null) firstDiff = t % 1e6; } }
   const secs = now / 1000;
   return {
     compared, firstDiff, diffs, ticks: [tick(H), tick(G)],
     resyncs: [H.g.run('LS.resyncs'), G.g.run('LS.resyncs')],
     replayed: G.g.run('LS.replayed'),
+    ending, restarts,
+    life: [JSON.parse(H.g.run('JSON.stringify(__life)')), JSON.parse(G.g.run('JSON.stringify(__life)'))],
+    runsRecorded: [H.g.run('(Save.profile.runs || 0) - __life.runs0'), G.g.run('(Save.profile.runs || 0) - __life.runs0')],
     // each player's own kills: the host's ship and the wingman, and what each machine would record
-    kills: { host: H.g.run('P.kills'), wing: H.g.run('pilotP(1).kills'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') },
+    kills,
     wave: H.g.run('__stat.waves'), bosses: H.g.run('[...__stat.bosses]'),
     wait: [H.waitFrames / Math.max(1, H.frames), G.waitFrames / Math.max(1, G.frames)],
     kbps: [H.g.run('Net.tx') / 1024 / secs, G.g.run('Net.tx') / 1024 / secs],
-    delay: H.g.run('LS.delay'), realSecs: secs, speed: Math.min(tick(H), tick(G)) / 60 / ((now - 200) / 1000),
+    delay: H.g.run('LS.delay'), realSecs: secs, speed: Math.min(steps(H), steps(G)) / 60 / ((now - 200) / 1000),
     acts: [JSON.parse(H.g.run('JSON.stringify(__acts)')), JSON.parse(G.g.run('JSON.stringify(__acts)'))],
     seen: [H.g.run('[...__seen]'), G.g.run('[...__seen]')],
     left: H.g.run('OPENERS_LEFT()').filter(t => t < TICKS),
@@ -288,6 +331,23 @@ for (const sc of SCENARIOS) {
   const [ah, ag] = r.acts, miss = [];
   if (!ah.pick && !ah.gearTake && !SHORT) miss.push('no card or gear chosen');   // THE VAGRANT has loot, not cards, and may find none in a minute
   if (!ah['pick·guest'] && !ah['gearTake·guest'] && !SHORT) miss.push("the guest's pilot never chose its own card or gear");
+  // a run as people play it: down and up, dead, again; each side keeps its own record of every run that ended
+  if (sc.life) {
+    const [lh, lg] = r.life;
+    if (!lh.downs || !lh.ups) miss.push('no pilot went down and stood back up');
+    if (!r.restarts) miss.push('no run ended and started again');
+    if (lh.deaths !== lg.deaths || r.runsRecorded[0] !== lh.deaths || r.runsRecorded[1] !== lg.deaths)
+      miss.push(`runs ended ${lh.deaths}/${lg.deaths}, recorded ${r.runsRecorded[0]}/${r.runsRecorded[1]}`);
+  }
+  // and the end of a session: whoever stays carries on, with nothing thrown
+  if (r.ending) {
+    const e = r.ending;
+    if (e.errs.length || e.drawErr[0] || e.drawErr[1]) miss.push('after ' + sc.end + ': ' + (e.errs[0] || 'drawing threw'));
+    if (e.stays.MPon || e.stays.LSon || e.stays.pilots || e.goes.MPon || e.goes.pilots) miss.push('after ' + sc.end + ': still linked ' + JSON.stringify(e));
+    if (sc.end === 'guest leaves' && !['play', 'dead', 'pause', 'levelup', 'gear', 'shop'].includes(e.stays.state)) miss.push('the host was left in ' + e.stays.state);
+    if (sc.end === 'guest leaves' && e.stays.state === 'levelup' && !e.stays.offers) miss.push('the host was left waiting on cards that went with the guest');
+    if (sc.end === 'host leaves' && e.stays.state !== 'lan') miss.push('the guest was left in ' + e.stays.state + ', not the lobby');
+  }
   if (r.drawErr[0] || r.drawErr[1]) miss.push(`drawing threw (host ${r.drawErr[0]}, guest ${r.drawErr[1]}): ${r.drawErr[2] || r.drawErr[3]}`);
   if (!ah.pause || !ah.resume) miss.push('no shared pause');
   if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
@@ -295,7 +355,7 @@ for (const sc of SCENARIOS) {
   // each records its own kills, and the wingman's are not the host's
   const k = r.kills;
   if (k.hostRecords !== k.host || k.guestRecords !== k.wing) miss.push(`kills recorded as ${k.hostRecords}/${k.guestRecords}, flown ${k.host}/${k.wing}`);
-  if (!k.wing && !SHORT) miss.push('the wingman was never credited a kill');
+  if (!k.wing && !SHORT && !sc.life) miss.push('the wingman was never credited a kill');   // (a life scenario's count is the last run's)
   const same = JSON.stringify(Object.entries(ah).sort()) === JSON.stringify(Object.entries(ag).sort());
   /* In step: every fingerprint the same, and the safety net never needed. Where
      a machine was nudged out of step on purpose, the two may part only for a
@@ -325,6 +385,10 @@ for (const sc of SCENARIOS) {
     `\n          menus: ${Object.entries(ah).sort().map(([k, n]) => k + ' ' + n).join(' · ')}${same ? '' : '  (the guest saw a different count: it may have stopped a step behind)'}` +
     `\n          kills: host ${r.kills.host} · wingman ${r.kills.wing}, each on its own record` +
     net +
+    (sc.life ? `
+          life: ${r.life[0].downs} downs, ${r.life[0].ups} back up, ${r.life[0].deaths} runs ended and recorded on both, ${r.restarts} restarted by the host` : '') +
+    (r.ending ? `
+          ${sc.end}: the ${sc.end === 'guest leaves' ? 'host' : 'guest'} carried on (${r.ending.was.state} -> ${r.ending.stays.state}${r.ending.stays.lanView && sc.end === 'host leaves' ? ', ' + r.ending.stays.lanView : ''}), nothing thrown` : '') +
     (r.left.length ? `\n          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +
     (miss.length ? `\n          NOT COVERED: ${miss.join('; ')}` : ''));
 }

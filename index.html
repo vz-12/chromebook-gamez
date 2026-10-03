@@ -57810,8 +57810,12 @@ function mpOnEvent(m) {
 function mpPeerGone() {
   const gone = PILOTS.length > 1 ? pilotP(MP.role === 'host' ? 1 : 0) : null;
   if (LS.on) lsLeave();
+  pilotsEnd();                           // one pilot again, whatever state the link was in
   if (MP.role === 'host') {
     if (gone) explode(gone.x, gone.y, 140, 0, WING_COL);
+    /* What the guest was choosing went with them: a card or gear screen that
+       was only waiting on their pilot lets the run go on. */
+    if ((state === 'levelup' && !offers.length) || (state === 'gear' && !gearOffer)) state = 'play';
     MP.on = false; MP.ready = false; MP.lostT = 5;
     /* Downed when they left. Nobody is going to clear the wave that would have
        stood you back up, so the knockdown becomes what it would have been
@@ -57833,6 +57837,7 @@ function mpPeerGone() {
 function mpQuit() {
   const wasHost = MP.role === 'host';
   if (LS.on) lsLeave();
+  pilotsEnd();
   if (netLive()) netEvent({ t: 'bye' });
   netHangUp(true);
   Net.phase = 'off'; Net.note = '';

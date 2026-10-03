@@ -267,6 +267,13 @@ it. The `parted` scenario knocks each machine out of step once, on purpose,
 and both must be back in step within seconds. The `builds` check confirms
 two different builds refuse to connect.
 
+`lifecycle` plays a session the way people do. Pilots have ordinary hulls,
+so they go down and stand back up, and both die. The host starts the next
+run, and each side must record every run that ended on its own save. Then
+the guest leaves partway through, and the host must play on alone. In `lan`
+the host leaves, and the guest must land in the lobby. Every scenario draws
+both machines as it goes, so a drawing error fails it too.
+
 ## Limits worth knowing (Workers Free plan)
 
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the
