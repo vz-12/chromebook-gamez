@@ -2794,13 +2794,12 @@ function stanceMul() {
   return m;
 }
 
-/* Who is firing, while it is not P: the wingman (wingUpdate). A shot carries
-   its shooter (by), and a kill goes to whoever landed it (killBy, killBody). */
-let shotBy = null, killBy = null;
+/* A shot carries its shooter (by): in co-op it is resolved as that pilot
+   (updateBullets), so the kill, the upgrades and the fragments are theirs. */
 function fireBullet(x, y, ang, dmgMul = 1, opts = {}) {
   const isCrit = simRand() < P.crit;
   bullets.push({
-    by: shotBy || P,
+    by: P,
     x, y,
     vx: Math.cos(ang) * P.bspeed * (opts.sm || 1),
     vy: Math.sin(ang) * P.bspeed * (opts.sm || 1),
@@ -3536,7 +3535,7 @@ function bladeBat(e, ang, fin) {
 /* The ECHO CORE's second strikes, resolved on their own short clock. Held by
    enemy id rather than by reference so a body that died in between is simply
    not found. */
-const bladeEchoes = [];
+let bladeEchoes = [];
 function updateBladeEchoes(dt) {
   for (let i = bladeEchoes.length - 1; i >= 0; i--) {
     const q = bladeEchoes[i];
@@ -3656,7 +3655,7 @@ function bladeParried(amount, opts) {
 
    The wave is narrow and it does not stop: everything on its line is struck,
    and any round it passes through is cut on the way. */
-const bladeWaves = [];
+let bladeWaves = [];
 function bladeCounter(amount, opts) {
   const src = opts && opts.src, shot = opts && opts.shot;
   const key = src && src.id !== undefined ? src.id : -1;
@@ -4054,7 +4053,7 @@ function killBody(e, ang) {
   e.dead = true;
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
-  (killBy || P).kills++;                 // to whoever landed it: the wingman's go on the guest's record
+  P.kills++;                             // to whoever landed it: in co-op, the pilot it was resolved as
   onRewardKill(e);          // harvest, requisition, banks, trophies, chains
   for (const b of enemies) {
     if (b.boss === 'curator' && !b.dead && b.ledger && e.type !== 'boss'
@@ -4341,7 +4340,7 @@ function reviveOrDie() {
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
     if (coopCanDown()) { hostDown(); return; }
-    if (mpSim() && Wing.live && Wing.down) banner('BOTH DOWN', '#f87171', 2.6);
+    if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
 }
 
@@ -7545,7 +7544,7 @@ function oniTick() {
    changes the game may read it: what comes out of the head (the drain's
    locks, the fling's husks) aims off suHeadAng, the same lagging spring
    stepped with the game in suTick and reset with the run. */
-const suHead = { on: false, ang: 0, vel: 0 };
+let suHead = { on: false, ang: 0, vel: 0 };
 function suHeadTick(dt) {
   if (!(suShown() || rrSuT >= 0)) { suHead.on = false; return; }
   if (!suHead.on) { suHead.on = true; suHead.ang = P.ang; suHead.vel = 0; return; }
@@ -8565,7 +8564,7 @@ const KIT_PLUNGE = 0.4;    // the mane going into the floor; the area opens as i
 const KIT_PULL   = 0.3;    // and coming back out
 const SU_CD_MAX  = [DRILL_CD, KIT_CD, 0, 0];   // each key's cooldown, for the HUD
 
-const suZones = [];
+let suZones = [];
 
 function suKitStart() {
   if (P.suPlunge) return;
@@ -8652,7 +8651,7 @@ const THROW_WIND   = 0.16;
 const THROW_SNAP   = 0.08;
 const THROW_FWD    = 18;
 
-const suPieces = [];
+let suPieces = [];
 
 // the boss the combo would take right now, or null
 function suComboReady() {
@@ -9327,7 +9326,7 @@ function oniManePath(m, ph, surge, k) {
 
 /* ------------------------------ one-off fx --------------------------------
    Timed marks the moments leave behind, drawn from the two world passes. */
-const suFx = [];
+let suFx = [];
 const SU_FX_LIFE = { bite: 0.28, impale: 0.36, slam: 1.0, open: 0.9, take: 0.6, rip: 0.8, throw: 0.3, lodge: 0.85,
                      drcast: 0.42, husk: 0.55, paid: 0.9,
                      farm: 0.4, freel: 0.5, hsplat: 0.75,
@@ -12454,7 +12453,7 @@ const SUI_HORNS = [                           // bezier, base width: the far one
    and the camera moves the images. This is where the terminal's image sits
    on the glass, and how many pixels it has to a unit. */
 const SUI_TERM = { x: -37.5, y: -41.5, w: 107, h: 36, res: 24 };
-const SUI = { lastS: -1, at: -1, bits: [], term: {}, seal: {}, hex: {} };
+let SUI = { lastS: -1, at: -1, bits: [], term: {}, seal: {}, hex: {} };
 // an image of its own, w × h pixels, kept in o (o.key says what is on it)
 function suiCanvas(o, w, h) {
   if (!o.c) { o.c = document.createElement('canvas'); o.g = o.c.getContext('2d'); }
@@ -19778,9 +19777,9 @@ const WATER_ZOOM   = 1.35;     // and the camera, come in
 const RONIN_CHAIN_WIN = 1.0;   // after a move finishes, how long the next has to follow it
 const RONIN_CHAIN_MAX = 3;
 
-const roninCleaves = [];       // every cleave still on the floor, oldest first
+let roninCleaves = [];       // every cleave still on the floor, oldest first
 let roninCleaveId = 0;
-const roninSplits = [];        // every CLEAR SKY path waiting to split, or just split
+let roninSplits = [];        // every CLEAR SKY path waiting to split, or just split
 let roninSplitId = 0;
 
 // [Z X C V] while RONIN is on. `cd` is the full cooldown the HUD sweeps; start(prefix, chain)
@@ -20339,7 +20338,7 @@ function roninKitTick(dt) {
 
    Art-side state lives in RKA and changes nothing of the logic's.
 =========================================================================== */
-const RKA = { hits: [], flashes: [], windAt: -9, windX: 0, windY: 0, petals: [], petalAt: -1,
+let RKA = { hits: [], flashes: [], windAt: -9, windX: 0, windY: 0, petals: [], petalAt: -1,
               wound: new WeakMap(), prevCd: [0, 0, 0, 0], readyAt: [-9, -9, -9, -9], dripAt: -1 };
 const RKA_PETAL = ['#fbcfe8', '#f9a8d4', '#fce7f3', '#f472b6'];
 
@@ -21449,7 +21448,7 @@ const RKC_NAME = { 0: 'ONE FLASH', 1: 'SCATTERED BLOSSOM', 2: 'MOON IN WATER',
   nullcore: 'ENSO', curator: 'THE EXHIBIT', theother: 'THE MIRROR BREAKS', keeper: 'CLOSED BOOKS',
   shopkeeper: 'PAID IN FULL', backlog: 'DONE', amalgam: 'UNMADE', unwritten: 'WRITTEN', root: 'EXECUTE',
   founder: 'THE LAST EXCHANGE' };
-const RKC = { x: null, last: null, at: -9, endAt: -9, plan: {}, once: {}, side: 1, seed: 1, fx: 0, fy: 0,
+let RKC = { x: null, last: null, at: -9, endAt: -9, plan: {}, once: {}, side: 1, seed: 1, fx: 0, fy: 0,
               stepAt: -1, dt: 0.016, stillPos: null, stillOff: null, stillAt: -9,
               bits: [], splats: [], pools: [], rips: [], corpses: [], marks: [], beat: null, buf: null };
 
@@ -24424,7 +24423,7 @@ const OD_T_WINGS = 3.45;
 
 let odFlash = 0, odShake = 0, odSeeded = false;
 let odPools = [], odTrail = [];
-const odPlume = { ang: 0, vel: 0, lag: 0, stretch: 1 };
+let odPlume = { ang: 0, vel: 0, lag: 0, stretch: 1 };
 let od = null;                       // { t } for as long as it is running
 
 /* The reference passes its context first; the game's drawGlow does not take
@@ -24930,7 +24929,7 @@ function odDrawGrade() {
 const odKitOn = () => P.ventT > 0 && !amalRite && !!P.awake && P.charId === 'ember';
 
 // every score on the floor, oldest first: see Z — SCORCHED EARTH
-const odScars = [];
+let odScars = [];
 const OD_SCARS_MAX = 12;
 
 // [Z X C V] while OVERDRIVE is on
@@ -25157,7 +25156,7 @@ const PYRO_DMG   = 1400;   // everything in it, once, before upgrades
 const PYRO_AFTER = 1.2;    // the column standing and the floor cooling, after it rises: art only
 
 // every circle down and every column up, oldest first
-const odPyros = [];
+let odPyros = [];
 
 function odPyroStart() {
   const p = { x: clamp(P.in.ax, arena.x0 + 20, arena.x1 - 20),
@@ -25708,7 +25707,7 @@ const STAR_BLAST_GROW  = 16;
 const STAR_SHOVE       = 380;   // what the blast throws a survivor outward with
 
 // every star in flight
-const odStars = [];
+let odStars = [];
 
 const odFusionOn = () => !!P.odFusion && !amalRite;
 // the IFRIT is whole: past the change in, short of the change back
@@ -27412,7 +27411,7 @@ function odBrandNukeHitFx(e, n) {
      odStarHitFx(e, s)      once per body the blast catches that lives
 --------------------------------------------------------------------------- */
 let odFusionLitAt = -99, odFusionOutAt = -99, odFusionThrow = { at: -99, hand: 1 };
-const odStarBooms = [];
+let odStarBooms = [];
 
 // a point in the hull's own frame, out in the world
 function odIfritAt(lx, ly) {
@@ -28903,6 +28902,7 @@ function promptName() {
 }
 
 function resetGame() {
+  pilotsEnd();                           // one pilot: a co-op run adds the second straight after (pilotsBegin)
   seedSim(runSeedNext != null ? runSeedNext : freshSeed());   // the run's stream starts here
   runSeedNext = null;
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
@@ -28964,8 +28964,6 @@ function resetGame() {
   freeRun = false; freeOpen = false; freeGod = false; freeSpd = 1;
   camZoom = 1; camZoomT = 1;
   curseHpMul = 1; planetSign = null; planetRevealed = false;
-  // a co-op run places the wingman itself, immediately after this
-  Wing.live = false; Wing.down = false;
   // and a challenge re-arms itself immediately after this, too
   Chal.on = null; Chal.won = false; Chal.reward = null;
   cam.x = P.x; cam.y = P.y; cam.trauma = 0;
@@ -29049,12 +29047,13 @@ function gameOver(quiet) {
     }
     return;
   }
-  const build = Object.keys(P.up).map(id => {
+  const mine = coopMine();                // co-op: each machine records its own pilot
+  const build = Object.keys(mine.up).map(id => {
     const u = UPGRADES.find(z => z.id === id);
-    return u ? upName(u) + (P.up[id] > 1 ? ' ×' + P.up[id] : '') : id;
+    return u ? upName(u) + (mine.up[id] > 1 ? ' ×' + mine.up[id] : '') : id;
   });
   // this machine's pilot: in co-op each player's record is their own (coopMine)
-  lastStats = { score, wave, kills: coopMine().kills, level: P.level, time: elapsed,
+  lastStats = { score, wave, kills: mine.kills, level: mine.level, time: elapsed,
                 sector: stage.name, loop: loopNum,
                 isRecord: score > Save.profile.best };
   const wasHard = Save.profile.hardened;
@@ -29140,6 +29139,8 @@ function ui(act, i) {
   UI_ACTS[act](i | 0);
 }
 function handleKey(k) {
+  // co-op: this machine's keys are its own pilot's (its cards, its gear)
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), () => handleKey(k)); return; }
   // volume lives on the slider now, so M is free for the way out
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
     // straight back to the ladder, which is where you were going anyway
@@ -29398,6 +29399,7 @@ function quitToMenu() {
 }
 
 function handleClick() {
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), handleClick); return; }
   if (choice) {
     const b = choiceButtons();
     if (inRect(mouse.x, mouse.y, b.stay)) { ui('stay'); return; }
@@ -29667,7 +29669,9 @@ function checkLevel() {
   // updateWaves() in the same tick, so a wave-clear XP payout could otherwise
   // replace the reward room that just opened. Every overlay calls back into
   // this after restoring 'play', so nothing is lost — only deferred.
-  if (state !== 'play') return;
+  // co-op: a pilot can be dealt its cards while the other is still choosing, never twice over
+  if (state !== 'play' && !(PILOTS.length > 1 && state === 'levelup')) return;
+  if (PILOTS.length > 1 && offers.length) return;
   /* A scripted sequence is not a state — it runs inside 'play' — so the check
      above does not see one. Killing ROOT pays enough score to owe a level, and
      the card stack opened straight over its closing lines while the sequence,
@@ -29919,37 +29923,45 @@ function update(dt) {
      (the input record). A press can open a screen (E on gear); then the step
      stops there, as it did when the press landed between frames. */
   const stateIn = state;
-  inputStep();
+  pilotsEach(() => { inputStep(); return state === stateIn; });   // each pilot's record, and what it pressed
   if (state !== stateIn) return;
   simTick++;                            // the run's step: see simAfter
 
   elapsed += dt;
   Audio_.update(clamp(enemies.length / 26 + wave / 22, 0, 1));
 
-  // Bullet Time slows the world but never the player
-  slowmo = P.stopT > 0 ? 0
-         : (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
-  // THE VAGRANT's parry holds the room the same way, never the hull
-  if (P.stillT > 0) slowmo = Math.min(slowmo, STILL_SLOW);
-  // and while EMBER aims C from up there: the room slows, the hull does not
-  if (odStrikeAiming()) slowmo = Math.min(slowmo, STRIKE_SLOW);
-  // and RONIN's executions hold it almost still
-  if (P.roninExec && P.roninExec.exec) slowmo = Math.min(slowmo, EXEC_SLOW);
-  // and its lead-in, while the cut-in has the screen
-  if (roninCutIn()) slowmo = Math.min(slowmo, RN_SLOW);
-  // and SUPERUSER's, the same way
-  if (suCutIn()) slowmo = Math.min(slowmo, SU_SLOW);
+  // whichever pilot is slowing the room, slows it for both
+  slowmo = 1;
+  pilotsEach(() => {
+    // Bullet Time slows the world but never the player
+    let sl = P.stopT > 0 ? 0
+           : (P.bullettime && P.hp / P.maxHp < 0.3) ? 0.55 : 1;
+    // THE VAGRANT's parry holds the room the same way, never the hull
+    if (P.stillT > 0) sl = Math.min(sl, STILL_SLOW);
+    // and while EMBER aims C from up there: the room slows, the hull does not
+    if (odStrikeAiming()) sl = Math.min(sl, STRIKE_SLOW);
+    // and RONIN's executions hold it almost still
+    if (P.roninExec && P.roninExec.exec) sl = Math.min(sl, EXEC_SLOW);
+    // and its lead-in, while the cut-in has the screen
+    if (roninCutIn()) sl = Math.min(sl, RN_SLOW);
+    // and SUPERUSER's, the same way
+    if (suCutIn()) sl = Math.min(sl, SU_SLOW);
+    slowmo = Math.min(slowmo, sl);
+  });
   const wdt = dt * slowmo;
 
   chalTick(dt);              // the rule sheet, where it touches the frame
   rushTick(dt);              // the rush's boss clock and its ladder
-  rewardTick(dt);            // and the rewards that run on their own clocks
-  rewardDashSweep(dt);
+  pilotsEach(() => {
+    rewardTick(dt);          // and the rewards that run on their own clocks
+    rewardDashSweep(dt);
+  });
   updateWaves(dt);
-  updatePlayer(dt);
-  mpHostTick(dt);            // the wingman flies inside the same tick you do
-  if (!P.down) updateDrones(dt);   // your escort does not fight over your wreck
-  updateSentries(dt);
+  pilotsEach(() => {         // each pilot, as itself
+    updatePlayer(dt);
+    if (!P.down) updateDrones(dt);   // your escort does not fight over your wreck
+    updateSentries(dt);
+  });
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
      the boss shell never calls the AI again, so the check has to live somewhere
      that still runs. A dev-console room clear used to leave the fight object
@@ -29968,7 +29980,7 @@ function update(dt) {
      the fight again — so the amalgam was gone for good. */
   /* First run after an update that added effects: show what is new and let
      them be turned off before anything heavy is on screen. */
-  if (Save.profile.gfxSeen !== GFX_VER && state === 'play' && !amalgam && !amalCut) {
+  if (Save.profile.gfxSeen !== GFX_VER && state === 'play' && !amalgam && !amalCut && !LS.on) {   // not into a shared game: it would stop one machine
     gfxFirstRun = true;
     openGfx('play');
     return;
@@ -29995,12 +30007,14 @@ function update(dt) {
     if (devTalkT <= 0) startDevTalk();
   }
   // pull the view out for the amalgam, ease back afterwards
-  camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : 1;   // the duel comes in close
-  // and all the way out for C, while the view is EMBER's (the cut snaps it there and back)
-  if (odStrikePov()) camZoomT = Math.min(camZoomT, odStrikeZoom());
-  // RONIN's executions come in close, from whatever framing the fight had (THE AMALGAM's is wide)
-  if (P.roninExec && P.roninExec.exec) camZoomT *= WATER_ZOOM;
-  camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
+  pilotDo(pilotMine(), () => {            // the view is this machine's pilot's
+    camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : 1;   // the duel comes in close
+    // and all the way out for C, while the view is EMBER's (the cut snaps it there and back)
+    if (odStrikePov()) camZoomT = Math.min(camZoomT, odStrikeZoom());
+    // RONIN's executions come in close, from whatever framing the fight had (THE AMALGAM's is wide)
+    if (P.roninExec && P.roninExec.exec) camZoomT *= WATER_ZOOM;
+    camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
+  });
   updateArena(dt);
   updateDeepNodes(dt);
   updatePortals(dt);
@@ -30009,12 +30023,12 @@ function update(dt) {
   if (replay.length > 260) replay.shift();
   updateEnemies(wdt);
   hlTick(dt, wdt);           // ALL HALLOWS: the areas, THE BACKLOG's pile, the barks
-  odRingHold(wdt);           // COMBO 1's wall, once the room has moved
+  pilotsEach(() => odRingHold(wdt));   // COMBO 1's wall, once the room has moved
   updateStageAmbient(dt);
   updateHazards(wdt);
   updateMortars(wdt);
   updateCages(dt);
-  updateBullets(dt);
+  pilotsEach(() => updateBullets(dt));  // co-op: each pilot's shots, as that pilot
   updateEBullets(wdt);
   updateBeams(dt);
   updatePickups(dt);
@@ -30033,6 +30047,7 @@ function updateMenu(dt) {
 }
 
 function updateCamera(dt, loose = false) {
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), () => updateCamera(dt, loose)); return; }
   const k = loose ? 2.2 : 6.2;
   /* Down in co-op: watching your own wreck from a fixed angle while the fight
      that decides whether you get back up happens offscreen is the worst seat
@@ -30994,12 +31009,13 @@ function updateEnemies(dt) {
        where the bodies are, and being shoved and chipped by every hull it
        touches is the one thing that made that position unholdable. Bullets and
        hazards still land on it, so no boss telegraph gets any easier. */
-    const tgGhost = TG === P && ((P.ghost && P.dashT > 0) || P.fly);
+    const tgGhost = (TG === P || TG.pid != null) && ((TG.ghost && TG.dashT > 0) || TG.fly);
     // ...and no touching: a reeling body is not leaning on anybody
     if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost && !(e.stagger > 0) && !suPinned(e)) {
       const cd = e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
                        * (e.rage === 1 ? 2.2 : 1);
-      if (TG === P) hurtPlayer(cd, { src: e }); else hurtWing(cd);
+      if (TG === P) hurtPlayer(cd, { src: e });
+      else if (TG.pid != null) pilotDo(TG.pid, () => hurtPlayer(cd, { src: e }));   // the other pilot, as itself
       if (P.thorns && e.hitCd <= 0) {
         e.hitCd = 0.3;
         damageEnemy(e, (16 + P.dmg * 1.2) * P.thorns, false, TG.x, TG.y, { silent: true });
@@ -36567,6 +36583,8 @@ function updateBeams(dt) {
 /* -------------------------------- bullets --------------------------------- */
 function updateBullets(dt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
+    // co-op: each pilot's pass takes only its own shots, so they land with its upgrades
+    if (PILOTS.length > 1 && ((bullets[i].by && bullets[i].by.pid) || 0) !== PILOT.on) continue;
     if (tribunal && !tribunal.over && triShot(bullets[i].x, bullets[i].y)) {
       bullets.splice(i, 1);            // it lands, and it costs you
       continue;
@@ -36737,8 +36755,6 @@ function updateBullets(dt) {
       // SAGITTARIUS: an arrow gathers force the longer it has been flying
       if (b.arrow) dmg *= 1 + b.arrow * 1.1 * clamp(b.dist / 700, 0, 1);
       b.hit = true;
-      // whoever fired it lands it: the kill, and the fragments it throws, are theirs
-      killBy = shotBy = b.by === P ? null : b.by || null;
       // a stolen body's rounds fly in your array, so say whose they are
       damageEnemy(e, dmg, b.crit, b.px, b.py, b.hacked ? { hacked: true } : undefined);
       // SCORPIO: inject venom that builds with every sting
@@ -36763,7 +36779,6 @@ function updateBullets(dt) {
           fireBullet(b.x, b.y, a, 0.42, { sm: 0.72, rm: 0.72, lm: 0.5, noFrag: true });
         }
       }
-      killBy = shotBy = null;
       if (b.arrow) {
         // an arrow does not stop for anything
         (b.hits || (b.hits = new Set())).add(e.id);
@@ -36869,10 +36884,10 @@ function updateEBullets(dt) {
       ebullets.splice(i, 1);
       continue;
     }
-    // the wingman is shot at by the same rounds, on the same terms
+    // the other pilot is shot at by the same rounds, on the same terms
     const wg = mpPilots();
-    if (wg && len(b.x - wg.x, b.y - wg.y) < b.r + wg.r) {
-      hurtWing(b.dmg);
+    if (wg && !hackBy && len(b.x - wg.x, b.y - wg.y) < b.r + wg.r) {
+      pilotDo(wg.pid, () => hurtPlayer(b.dmg, { src: b.owner, shot: b }));
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);
     }
@@ -36897,15 +36912,15 @@ function updatePickups(dt) {
     if (d < gt.r + g.r + 4 || g.life <= 0) {
       if (g.life > 0) {
         if (HL.eq.oneday) hlBankXp(g.v * P.xpMul);   // ONE DAY: put aside
-        else P.xp += g.v * P.xpMul;
-        if (P.siphon) P.hp = Math.min(P.maxHp, P.hp + 0.2 * P.siphon);
+        else pilotsEach(() => { P.xp += g.v * P.xpMul; });   // co-op: every pilot's, so you level together
+        pilotDo(gt.pid || 0, () => { if (P.siphon) P.hp = Math.min(P.maxHp, P.hp + 0.2 * P.siphon); });
         Audio_.gem();
         spawnPart(g.x, g.y, 0, 0, 8, COL.xp, 0.22, 0.9);
       }
       gems.splice(i, 1);
     }
   }
-  checkLevel();
+  if (PILOTS.length > 1) coopHold(); else checkLevel();
 
   gearNear = null;
   let gearNearD = 1e9;
@@ -36926,7 +36941,7 @@ function updatePickups(dt) {
        screen, which has no E, still opens the screen on contact — and only the
        pilot that wears gear can pick it up at all. */
     if (d0.kind === 'gear' && d0.gear &&
-        (dt0 !== P || (!P.in.touch && P.gear && P.gear[d0.gear.slot]))) {
+        ((dt0 !== P && dt0.pid == null) || (!dt0.in.touch && dt0.gear && dt0.gear[d0.gear.slot]))) {
       if (dt0 === P && d < P.r + d0.r + 18 && d < gearNearD) { gearNear = d0; gearNearD = d; }
       if (d0.life <= 0) drops.splice(i, 1);
       continue;
@@ -36952,8 +36967,8 @@ function updatePickups(dt) {
         /* Held up rather than applied: the whole point of the slot is the
            comparison, so picking a thing up opens the decision and nothing
            else. Ahead of the nuke branch below, which is the `else`. */
-        openGear(d0.gear);
-      } else {
+        pilotDo(dt0.pid || 0, () => openGear(d0.gear));   // the one who walked onto it weighs it
+      } else pilotDo(dt0.pid || 0, () => {
         floatText(P.x, P.y - 30, 'OVERLOAD', '#f0abfc', 18);
         drawFlashT = 0.16; shake(0.8);
         ringFx(P.x, P.y, 20, 900, '#f0abfc', 0.7, 8);
@@ -36964,11 +36979,12 @@ function updatePickups(dt) {
             damageEnemy(e, 90 + wave * 22, true, P.x, P.y, { silent: true });
         }
         ebullets.length = 0;
-      }
+      });
       drops.splice(i, 1); continue;
     }
     if (d0.life <= 0) drops.splice(i, 1);
   }
+  if (PILOTS.length > 1) pilotsEach(gearNearScan);   // and what each pilot is standing on
 }
 
 /* ------------------------------- particles -------------------------------- */
@@ -36999,6 +37015,8 @@ function updateParticles(dt) {
 
 /* ================================ RENDER ================================== */
 function render() {
+  // co-op: drawn as this machine's pilot, its HUD, its camera, its cards; the other pilot in its own passes
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), render); return; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = COL.bg;
   ctx.fillRect(0, 0, W, H);
@@ -37066,14 +37084,16 @@ function render() {
      the reference lays it down right after the room and before the ship, and
      bringing the call over into the additive pass put it above the hull, the
      bodies and the bullets — so anything standing in the fire was behind it. */
-  odDrawWorld();
-  drawOdScars();             // SCORCHED EARTH's scores, on the floor with the fire
-  drawOdPyroMarks();         // PYROTECHNICS' circles, and the floor where a column stood
-  drawOdStrikeMarks();       // C: the X to be cut, and what is left of it to trace
-  drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
-  drawRoninScores();         // RONIN's Z: the X it leaves in the floor
-  { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
-  { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
+  pilotsDraw(() => {          // each pilot's marks on the floor
+    odDrawWorld();
+    drawOdScars();             // SCORCHED EARTH's scores, on the floor with the fire
+    drawOdPyroMarks();         // PYROTECHNICS' circles, and the floor where a column stood
+    drawOdStrikeMarks();       // C: the X to be cut, and what is left of it to trace
+    drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
+    drawRoninScores();         // RONIN's Z: the X it leaves in the floor
+    { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
+    { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
+  });
 
   // --- additive layer: glows -------------------------------------------
   ctx.globalCompositeOperation = 'lighter';
@@ -37100,11 +37120,13 @@ function render() {
        place, and the HUD was dimmed along with the room. */
     drawHubTutDim(P);
   }
-  drawSuUnderBodies();       // SUPERUSER: shadows under the bodies the mane has lifted
+  pilotsDraw(drawSuUnderBodies);   // SUPERUSER: shadows under the bodies the mane has lifted
   drawCorpses();
   drawEnemies();
-  drawRoninWounds();         // RONIN's DEEP WOUND, on the bodies that carry it
-  drawSentries();
+  pilotsDraw(() => {
+    drawRoninWounds();         // RONIN's DEEP WOUND, on the bodies that carry it
+    drawSentries();
+  });
   drawKeyItem();
   /* The vanes go UNDER the hull. The reference is unambiguous about it —
      drawWings() then drawShip(), in that order — and porting the call into the
@@ -37112,6 +37134,7 @@ function render() {
      painted across the plating instead of blowing out from behind it.
      odDrawWings sets its own 'lighter' and restores, so it is safe here. */
   // C has the hull from the vanes turning to touching down: drawOdStrikeHull, over everything
+  pilotsDraw(() => {          // each pilot's hull, and what goes under and over it
   if (P.odStrike) { if (!odStrikePov()) drawOdStrikeGround(); }
   else if (odFusionOn()) drawOdFusionAura();   // V: the aura, where the vanes were
   else odDrawShip();
@@ -37122,7 +37145,8 @@ function render() {
   drawRoninStillUnder();      // RONIN's C: the stance, under the hull
   hlWrWorldUnder();          // ALL HALLOWS: a prize skin's trail, and what it sheds under the ship
   if (state !== 'dead' && !P.odStrike && !(P.roninExec && P.roninExec.hull === false)) { drawRiteUnderHull(); drawPlayer(); drawRiteOverHull(); }
-  mpDrawCoopShip();          // the other pilot, whichever side you are on
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) mpDrawTag();   // the other pilot, named
+  });
   hlDrawWorldOver();          // ALL HALLOWS: the light pass, when the art lights the room
 
   ctx.globalCompositeOperation = 'lighter';
@@ -37132,27 +37156,29 @@ function render() {
   drawBeams();
   drawFinaleBeams();
   drawDiary();
-  drawLance();
-  drawOdScorch();            // SCORCHED EARTH, in the lance's place while it is out
-  drawOdPyros();             // PYROTECHNICS' columns
-  drawOdStrike();            // C: the foot of fire
-  drawOdBrandWall();         // COMBO 1: the wall
-  drawOdBrandNuke();         // COMBO 1: the giant column
-  drawOdStars();             // V: FUSION CORE's stars
-  drawBladeParry();
-  drawBladeWaves();
-  drawRoninCleaves();         // RONIN's Z: the strokes
-  drawRoninSky();             // RONIN's X: the paths, and the sky clearing along them
+  pilotsDraw(() => {          // each pilot's weapon and kit, in the room
+    drawLance();
+    drawOdScorch();            // SCORCHED EARTH, in the lance's place while it is out
+    drawOdPyros();             // PYROTECHNICS' columns
+    drawOdStrike();            // C: the foot of fire
+    drawOdBrandWall();         // COMBO 1: the wall
+    drawOdBrandNuke();         // COMBO 1: the giant column
+    drawOdStars();             // V: FUSION CORE's stars
+    drawBladeParry();
+    drawBladeWaves();
+    drawRoninCleaves();         // RONIN's Z: the strokes
+    drawRoninSky();             // RONIN's X: the paths, and the sky clearing along them
+  });
   drawMalFx();
   drawParticles();
   drawAsh();
   hlDrawWorldGlow();          // ALL HALLOWS: sweeps, vines, barks, glows
   hlWrWorldGlow();            // ALL HALLOWS: a prize skin's glow pass
   ctx.globalCompositeOperation = 'source-over';
-  drawRoninExecWorld();       // RONIN's C: the counter and the executions, over everything in the room
+  pilotsDraw(drawRoninExecWorld);   // RONIN's C: the counter and the executions, over everything in the room
   hlDrawWorldTele();          // ALL HALLOWS: what you can finish, and what is about to go
 
-  if (P.odStrike && !odStrikePov()) drawOdStrikeHull();   // C: the hull, over everything, until the cut takes it
+  pilotsDraw(() => { if (P.odStrike && !odStrikePov()) drawOdStrikeHull(); });   // C: the hull, over everything, until the cut takes it
   drawGearTags();            // THE VAGRANT's drops say what they are
   drawFloats();
   ctx.restore();
@@ -37230,8 +37256,8 @@ function render() {
   drawUnwrittenOverlay();
   drawLibraryPointer();
   if (isTouch && state === 'play') drawTouchSticks();
-  if (state === 'levelup') drawLevelUp();
-  if (state === 'gear') drawGearOffer();
+  if (state === 'levelup' && offers.length) drawLevelUp();   // co-op: only the cards dealt to this pilot
+  if (state === 'gear' && gearOffer) drawGearOffer();
   if (state === 'shop') drawShop();
   if (state === 'planet') drawPlanetarium();
   odDrawGrade();
@@ -57431,6 +57457,152 @@ function netTick(dt) {
 }
 
 /* ===========================================================================
+   TWO PILOTS (3 Oct 2026: the seeded rework, Phase 3)
+   In co-op each player flies a whole pilot of their own: their character,
+   weapon, build, level and kit. The game was written for one pilot, P, and
+   reads it everywhere, so a second pilot is a second P. Everything that is a
+   pilot's (PILOT_VARS: P, its kit's state, the cards it was dealt, the gear
+   it is weighing, its sentries, its colours) is kept per pilot, and each part
+   of a step runs as the pilot it belongs to (pilotUse): its input, movement,
+   weapons and kit; the bullets it fired; the hits it takes; its cards. The
+   world itself (waves, enemies, the floor) runs once, as the host's pilot,
+   and turns to the other where it must (mpAim, mpPilots, hurtWing). Each
+   machine draws and listens as its own pilot (pilotMine): its HUD, its
+   camera, its cards. Solo there is one pilot and nothing is ever swapped.
+   ========================================================================= */
+const PILOT_VARS = ['P', 'selectedChar', 'offers', 'gearOffer', 'gearOld', 'gearOfferDrop', 'gearNear', 'sentries', 'playerChill',
+  'od', 'odFlash', 'odShake', 'odSeeded', 'odPools', 'odTrail', 'odRing', 'odScorchLitAt', 'odScorchEndAt',
+  'odFusionLitAt', 'odFusionOutAt', 'odFusionThrow', 'odPlume', 'odPyros', 'odScars', 'odStars', 'odStarBooms',
+  'suImp', 'suAscGone', 'suHead', 'suZones', 'suPieces', 'suFx', 'SUI',
+  'roninCleaves', 'roninSplits', 'RKA', 'RKC', 'bladeEchoes', 'bladeWaves'];
+// each pilot's own while another is flying: { v: PILOT_VARS' values, col: [COL.player, COL.bullet] }
+const PILOTS = [];
+const PILOT = { on: 0, get: null, set: null };
+function pilotFns() {
+  if (PILOT.get) return;
+  PILOT.get = new Function('return [' + PILOT_VARS.join(',') + ']');
+  PILOT.set = new Function('v', PILOT_VARS.map((n, i) => n + ' = v[' + i + ']').join(';'));
+}
+// pilot k takes the stick: its values into the globals, the last one's back out
+function pilotUse(k) {
+  if (k === PILOT.on || !PILOTS[k]) return;
+  const out = PILOTS[PILOT.on];
+  out.v = PILOT.get(); out.col = [COL.player, COL.bullet];
+  const inn = PILOTS[k];
+  PILOT.set(inn.v); COL.player = inn.col[0]; COL.bullet = inn.col[1];
+  PILOT.on = k;
+}
+// fn, as pilot k (and then back to whoever was flying)
+function pilotDo(k, fn) {
+  if (PILOTS.length < 2 || k === PILOT.on || !PILOTS[k]) return fn();
+  const was = PILOT.on;
+  pilotUse(k);
+  try { return fn(); } finally { pilotUse(was); }
+}
+// fn once per pilot, as each; a false back stops the round. Solo: once, as P.
+function pilotsEach(fn) {
+  if (PILOTS.length < 2) { fn(); return; }
+  const was = PILOT.on;
+  for (let k = 0; k < PILOTS.length; k++) { pilotUse(k); if (fn() === false) break; }
+  pilotUse(was);
+}
+// a drawing pass for every pilot: the others first, then whoever is drawing, on top
+function pilotsDraw(fn) {
+  if (PILOTS.length < 2) { fn(); return; }
+  for (let k = 0; k < PILOTS.length; k++) if (k !== PILOT.on) pilotDo(k, fn);
+  fn();
+}
+// pilot k's P, flying or not
+const pilotP = k => (k === PILOT.on ? P : PILOTS[k] ? PILOTS[k].v[0] : null);
+// the pilot this machine flies: the guest's is the second
+const pilotMine = () => (PILOTS.length > 1 && MP.role === 'guest' ? 1 : 0);
+// a fresh copy of a pilot's kit state: the same shape, nothing in it
+function pilotFresh(v) {
+  if (v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) return [];
+  if (v instanceof Map) return new Map();
+  if (v instanceof Set) return new Set();
+  if (v instanceof WeakMap) return new WeakMap();
+  if (v instanceof WeakSet) return new WeakSet();
+  if (Object.getPrototypeOf(v) !== Object.prototype) return v;
+  const o = {};
+  for (const k of Object.keys(v)) o[k] = pilotFresh(v[k]);
+  return o;
+}
+/* A co-op run's second pilot, made the way resetGame makes the first: its
+   character, its awakening, its starting gear, a kit with nothing in it, and
+   it starts beside the first. Run on both machines alike, after resetGame. */
+function pilotsBegin(char, awake) {
+  pilotsEnd();
+  pilotFns();
+  P.pid = 0;
+  const v0 = PILOT.get();
+  PILOTS.push({ v: v0, col: [COL.player, COL.bullet] });
+  const v1 = v0.map((x, i) => (i === 0 ? null : pilotFresh(x)));
+  PILOTS.push({ v: v1, col: [COL.player, COL.bullet] });
+  pilotUse(1);
+  applyChar(char, true);
+  runAwakeNext = !!awake;
+  P = newPlayer(); P.pid = 1;
+  runAwakeNext = null;
+  gearStart();
+  const p0 = pilotP(0);
+  P.x = clamp(p0.x + 54, arena.x0 + 20, arena.x1 - 20); P.y = p0.y;
+  P.iframe = 1.4;
+  pilotUse(0);
+}
+function pilotsEnd() {
+  pilotUse(0);
+  PILOTS.length = 0;
+  PILOT.on = 0;
+}
+/* A choice made, or a level owed: the world holds while either pilot still
+   has cards to pick or gear to weigh, and each picks their own. */
+function coopHold() {
+  if (PILOTS.length < 2) return;
+  if (state !== 'play' && state !== 'levelup' && state !== 'gear') return;
+  pilotsEach(checkLevel);
+  let lv = false, gr = false;
+  pilotsEach(() => { if (offers.length) lv = true; else if (gearOffer) gr = true; });
+  state = lv ? 'levelup' : gr ? 'gear' : 'play';
+}
+// THE VAGRANT's loot underfoot, for whoever is standing on it
+function gearNearScan() {
+  gearNear = null;
+  let best = 1e9;
+  for (const d0 of drops) {
+    if (d0.kind !== 'gear' || !d0.gear || P.down || P.in.touch || !P.gear || !P.gear[d0.gear.slot]) continue;
+    const d = len(P.x - d0.x, P.y - d0.y);
+    if (d < P.r + d0.r + 18 && d < best) { gearNear = d0; best = d; }
+  }
+}
+// the other pilot's name and hull, over their ship (drawn as them)
+function mpDrawTag() {
+  if (!inView(P.x, P.y, 90)) return;
+  const bx = P.x - 26, by = P.y - 34;
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = 'rgba(3,6,12,0.62)';
+  ctx.fillRect(bx - 2, by - 12, 56, 18);
+  ctx.fillStyle = rgba(COL.player, 0.9);
+  ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'left';
+  ctx.fillText(coopThem().slice(0, 12), bx, by - 4);
+  ctx.fillStyle = 'rgba(15,23,42,0.9)';
+  ctx.fillRect(bx, by, 52, 3.5);
+  const f = clamp(P.hp / (P.maxHp || 1), 0, 1);
+  ctx.fillStyle = P.down ? '#7f1d1d' : (f < 0.3 ? '#f87171' : COL.player);
+  ctx.fillRect(bx, by, 52 * f, 3.5);
+  if (!P.down) {
+    // a ring your own ship never wears, so the two never swap places at a glance
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(P.x, P.y, 19, 0, TAU);
+    ctx.strokeStyle = rgba(WING_COL, 0.55); ctx.lineWidth = 1.2; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ===========================================================================
    LAN CO-OP — the run
    One run, two ships, two machines running it. Both simulate the whole game
    from the same seed and trade only their pilots' input (LOCKSTEP CO-OP).
@@ -57458,63 +57630,34 @@ const mpGuest = () => MP.on && MP.role === 'guest';
 /* Who the camera is watching. Your own ship, unless it is on the floor and
    your partner is not — then theirs, because that is where the run is. */
 function mpCamSubject() {
-  if (!MP.on) return P;
-  // the guest's own ship is the wingman
-  if (MP.role === 'guest') return Wing.live && (!Wing.down || P.down) ? Wing : P;
-  return P.down && Wing.live && !Wing.down ? Wing : P;
+  if (PILOTS.length < 2 || !P.down) return P;   // updateCamera runs as this machine's pilot
+  return mpPilots() || P;
 }
 
-/* --------------------------------- wingman --------------------------------
+/* ----------------------------- the other pilot -----------------------------
    Losing the run takes both of you.
 
    Either pilot can be put on the floor, and neither one being down ends
    anything: the survivor holds the room alone until the wave is cleared, and
    clearing it stands the other one back up. Only a room that puts both ships
-   down at once ends the run — which is also the only case where there is
-   nobody left to clear a wave, so the rule closes itself.
-
-   Note that the host's ship going down does not move authority anywhere. The
-   host's machine keeps simulating exactly as it did; its pilot is simply a
-   wreck on the floor inside that simulation. Handing the simulation to the
-   other machine is only needed when the host actually leaves, which is a
-   different problem from the host dying.
+   down at once ends the run, which is also the only case where there is
+   nobody left to clear a wave, so the rule closes itself. (Until 3 Oct 2026
+   the guest flew a wingman, a plain gun; now it is a pilot: TWO PILOTS.)
 --------------------------------------------------------------------------- */
 const WING_COL  = '#c084fc';     // its own accent, so two ships never read alike
 
-const Wing = {
-  live: false, down: false,
-  x: 0, y: 0, vx: 0, vy: 0, ang: 0, r: 13,
-  hp: 100, maxHp: 100, iframe: 0, hurtFlash: 0,
-  dashT: 0, dashDX: 0, dashDY: 0, dashCh: 1, dashMax: 1, dashCd: 1.5, dashRe: 0,
-  fireT: 0, charIdx: 0, ghosts: [], shots: 0,
-  kills: 0,                              // its own, for the guest's record
-  // the guest's input for the step being played (lsWingInput)
-  in: { mx: 0, my: 0, ang: 0, fire: false, dash: false }
-};
-
-function wingSpawn() {
-  const C = CHARS[Wing.charIdx] || CHARS[0];
-  Wing.live = true; Wing.down = false;
-  Wing.maxHp = C.hp; Wing.hp = C.hp;
-  Wing.x = clamp(P.x + 54, arena.x0 + 20, arena.x1 - 20);
-  Wing.y = P.y;
-  Wing.vx = Wing.vy = 0; Wing.ang = 0;
-  Wing.iframe = 1.4; Wing.hurtFlash = 0;
-  Wing.dashT = 0; Wing.dashCh = 1; Wing.dashMax = 1; Wing.dashRe = 0;
-  Wing.fireT = 0; Wing.shots = 0; Wing.ghosts.length = 0; Wing.kills = 0;
-  Wing.in.fire = false; Wing.in.dash = false; Wing.in.mx = 0; Wing.in.my = 0;
-}
-
-/* The wingman, if it is standing. A downed pilot stops pulling the room onto
-   itself: nothing aims at it, nothing shoots it, and no pickup flies to it. */
+/* The other pilot, if it is standing: the guest's while the host's is flying,
+   and the other way round. A downed pilot stops pulling the room onto itself:
+   nothing aims at it, nothing shoots it, and no pickup flies to it. */
 function mpPilots() {
-  if (!mpSim() || !Wing.live || Wing.down) return null;
-  return Wing;
+  if (PILOTS.length < 2) return null;
+  const o = pilotP(PILOT.on === 0 ? 1 : 0);
+  return o && !o.down ? o : null;
 }
 function mpAim(x, y) {
   const w = mpPilots();
-  if (!w) return P;                    // solo, or the wingman is on the floor
-  if (P.down) return w;                // you are on the floor: it is all theirs
+  if (!w) return P;                    // solo, or the other pilot is on the floor
+  if (P.down) return w;                // this one is on the floor: it is all theirs
   const dp = (P.x - x) * (P.x - x) + (P.y - y) * (P.y - y);
   const dw = (w.x - x) * (w.x - x) + (w.y - y) * (w.y - y);
   return dw < dp ? w : P;
@@ -57522,10 +57665,8 @@ function mpAim(x, y) {
 
 /* Whether a pilot can be put down rather than killed: somebody else has to
    still be standing to hold the room and clear the wave. */
-const coopCanDown = () => mpSim() && Wing.live && !Wing.down && !P.down;
+const coopCanDown = () => !P.down && !!mpPilots();
 
-/* The host's own ship, on the floor. The simulation does not pause, move or
-   change hands — it carries on around the wreck. */
 /* A co-op banner, worded for the screen showing it: the same moment is "YOU
    ARE DOWN" on one machine and "HOSTY IS DOWN" on the other. Banners are only
    drawn, so each machine words its own; the game is the same either way. */
@@ -57533,13 +57674,17 @@ function coopSay(hostText, hostCol, guestText, guestCol, dur) {
   const guest = MP.on && MP.role === 'guest';
   banner(guest ? guestText : hostText, guest ? guestCol : hostCol, dur);
 }
+// the same, by whose pilot it is about: the pilot flying now
+function coopSayMine(mineText, mineCol, otherText, otherCol, dur) {
+  const mine = PILOTS.length < 2 || PILOT.on === pilotMine();
+  banner(mine ? mineText : otherText, mine ? mineCol : otherCol, dur);
+}
 // the other player, by name
 const coopThem = () => (MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'THE HOST')).toUpperCase();
-/* Whose run this machine is recording: the host flies P; the guest, the
-   wingman. Its kills are its own; the build, the level and the score are
-   shared until each pilot has its own (the rework's Phase 3). */
-const coopMine = () => (MP.on && MP.role === 'guest' && Wing.live ? Wing : P);
+// whose run this machine records: its own pilot's kills, level and build
+const coopMine = () => (PILOTS.length > 1 ? pilotP(pilotMine()) : P);
 
+// the pilot flying now goes down
 function hostDown() {
   P.hp = 0; P.down = true;
   P.vx = 0; P.vy = 0; P.dashT = 0; P.laserT = 0;
@@ -57548,14 +57693,15 @@ function hostDown() {
   burst(P.x, P.y, 52, COL.player, 360, 4, 1.0);
   ringFx(P.x, P.y, 8, 220, COL.player, 0.7, 5);
   drawFlashT = 0.14; shake(0.8); Audio_.over();
-  coopSay('YOU ARE DOWN — CLEAR THE WAVE', '#f87171', coopThem() + ' IS DOWN — CLEAR THE WAVE', WING_COL, 2.6);
+  coopSayMine('YOU ARE DOWN — CLEAR THE WAVE', '#f87171', coopThem() + ' IS DOWN — CLEAR THE WAVE', WING_COL, 2.6);
 }
 
+// and stands back up, beside whoever held the room
 function hostRevive() {
   P.down = false;
   P.hp = P.maxHp * 0.5;
   P.iframe = 2.2; P.hurtFlash = 0;
-  const w = Wing.live && !Wing.down ? Wing : null;
+  const w = mpPilots();
   if (w) {
     P.x = clamp(w.x + simRnd(50, -50), arena.x0 + 20, arena.x1 - 20);
     P.y = clamp(w.y + simRnd(50, -50), arena.y0 + 20, arena.y1 - 20);
@@ -57569,180 +57715,34 @@ function hostRevive() {
    Called from the wave-clear branch, so a boss wave counts too: go down in a
    boss fight and you are out of it until your partner finishes the boss. */
 function coopReviveWave() {
-  if (!mpSim()) return;
-  const wasP = P.down, wasW = Wing.live && Wing.down;
-  if (!wasP && !wasW) return;
-  if (wasP) hostRevive();
-  if (wasW) wingRevive();
-  if (wasP && wasW) banner('BOTH BACK UP', COL.hp, 2.0);
-  else if (wasP) coopSay('BACK UP', COL.hp, coopThem() + ' IS BACK UP', COL.hp, 2.0);
-  else coopSay(coopThem() + ' IS BACK UP', COL.hp, 'BACK UP', COL.hp, 2.0);
+  if (PILOTS.length < 2) return;
+  const up = [];
+  pilotsEach(() => { if (P.down) { hostRevive(); up.push(PILOT.on); } });
+  if (!up.length) return;
+  if (up.length > 1) banner('BOTH BACK UP', COL.hp, 2.0);
+  else if (up[0] === pilotMine()) banner('BACK UP', COL.hp, 2.0);
+  else banner(coopThem() + ' IS BACK UP', COL.hp, 2.0);
 }
 
+// the other pilot takes a hit, as itself
 function hurtWing(dmg, opts) {
-  if (!Wing.live || Wing.down || state !== 'play') return;
-  if (hackBy) return;                    // nor your wingman
-  if (freeGod) return;
-  if (opts && opts.pure) {
-    Wing.hp -= Math.max(0.5, dmg);
-    Wing.hurtFlash = Math.max(Wing.hurtFlash, 0.5);
-    if (Wing.hp <= 0) wingDown();
-    return;
-  }
-  if (Wing.iframe > 0) return;
-  // The wingman carries the host's armour at half weight: it shares the build
-  // without the plating that build bought for a hull it is not flying.
-  const d = Math.max(1, dmg * P.frailty - P.armor * 0.5);
-  Wing.hp -= d;
-  Wing.iframe = 0.62; Wing.hurtFlash = 1;
-  burst(Wing.x, Wing.y, 14, '#ef4444', 210, 3, 0.45);
-  floatText(Wing.x, Wing.y - 26, '-' + Math.round(d), '#fca5a5', 15);
-  Audio_.hurt();
-  if (Wing.hp <= 0) wingDown();
+  if (hackBy) return;                    // nor your partner, while one of yours is running its script
+  const w = mpPilots();
+  if (w) pilotDo(w.pid, () => hurtPlayer(dmg, opts));
 }
 
-function wingDown() {
-  Wing.hp = 0; Wing.vx = Wing.vy = 0; Wing.dashT = 0;
-  explode(Wing.x, Wing.y, 120, 0, WING_COL);
-  burst(Wing.x, Wing.y, 46, WING_COL, 340, 4, 0.9);
-  ringFx(Wing.x, Wing.y, 8, 180, WING_COL, 0.6, 4);
-  shake(0.5); Audio_.over();
-  /* Nobody left standing: there is no one to clear the wave that would stand
-     either of you up, so this is where the run actually ends. */
-  if (P.down) {
-    Wing.down = true;
-    banner('BOTH DOWN', '#f87171', 2.6);
-    gameOver();
-    return;
-  }
-  Wing.down = true;
-  coopSay(coopThem() + ' IS DOWN — CLEAR THE WAVE', WING_COL, 'YOU ARE DOWN — CLEAR THE WAVE', '#f87171', 2.6);
-}
-
-function wingRevive() {
-  Wing.down = false;
-  Wing.hp = Wing.maxHp * 0.5;
-  Wing.iframe = 2.2; Wing.hurtFlash = 0;
-  const at = P.down ? Wing : P;         // stand up where somebody is standing
-  Wing.x = clamp(at.x + simRnd(50, -50), arena.x0 + 20, arena.x1 - 20);
-  Wing.y = clamp(at.y + simRnd(50, -50), arena.y0 + 20, arena.y1 - 20);
-  ringFx(Wing.x, Wing.y, 10, 200, WING_COL, 0.7, 5);
-  burst(Wing.x, Wing.y, 40, WING_COL, 300, 3.4, 0.8);
-  Audio_.heal();
-}
-
-/* The guest's hull, simulated here. Movement is deliberately the same maths as
-   updatePlayer so the guest's local prediction of it can be identical. */
-function wingUpdate(dt) {
-  if (!Wing.live) return;
-  Wing.iframe = Math.max(0, Wing.iframe - dt);
-  Wing.hurtFlash = Math.max(0, Wing.hurtFlash - dt * 2.4);
-
-  // down until the wave is cleared — the clock that used to run here is gone
-  if (Wing.down) {
-    Wing.vx *= Math.pow(0.02, dt); Wing.vy *= Math.pow(0.02, dt);
-    if (rnd() < 0.35)
-      spawnPart(Wing.x + rnd(12, -12), Wing.y + rnd(12, -12), rnd(20, -20), rnd(-30, -8),
-                rnd(3, 1.4), WING_COL, rnd(0.6, 0.3), 0.94);
-    return;
-  }
-
-  const C = CHARS[Wing.charIdx] || CHARS[0];
-  const IN = Wing.in;
-  Wing.ang = IN.ang;
-
-  // dash charges refill on the same economy the host's do
-  Wing.dashCd = P.dashCd;
-  Wing.dashMax = P.dashMax;
-  if (Wing.dashCh < Wing.dashMax) {
-    Wing.dashRe += dt;
-    if (Wing.dashRe >= Wing.dashCd) { Wing.dashRe = 0; Wing.dashCh++; }
-  }
-  if (IN.dash && Wing.dashCh > 0 && Wing.dashT <= 0) {
-    IN.dash = false;                       // edge-triggered: one press, one dash
-    if (MP.role === 'guest') { keys[' '] = false; keys['shift'] = false; }   // it is this machine's key that was spent
-    Wing.dashCh--;
-    Wing.dashT = 0.17; Wing.iframe = Math.max(Wing.iframe, 0.28);
-    const il = len(IN.mx, IN.my);
-    Wing.dashDX = il ? IN.mx / il : Math.cos(Wing.ang);
-    Wing.dashDY = il ? IN.my / il : Math.sin(Wing.ang);
-    Audio_.dash();
-    burst(Wing.x, Wing.y, 16, WING_COL, 230, 3, 0.4, 1.4,
-          Math.atan2(-Wing.dashDY, -Wing.dashDX));
-  }
-
-  if (Wing.dashT > 0) {
-    Wing.dashT -= dt;
-    Wing.vx = Wing.dashDX * 1080; Wing.vy = Wing.dashDY * 1080;
-    Wing.ghosts.push({ x: Wing.x, y: Wing.y, ang: Wing.ang, t: 1 });
-    if (Wing.ghosts.length > 14) Wing.ghosts.shift();
-  } else {
-    if (Wing.ghosts.length) Wing.ghosts.shift();
-    const spd = C.speed * (1 - playerChill);
-    const k = 1 - Math.exp(-16 * dt);
-    Wing.vx = lerp(Wing.vx, IN.mx * spd, k);
-    Wing.vy = lerp(Wing.vy, IN.my * spd, k);
-  }
-  Wing.x = clamp(Wing.x + Wing.vx * dt, arena.x0 + Wing.r, arena.x1 - Wing.r);
-  Wing.y = clamp(Wing.y + Wing.vy * dt, arena.y0 + Wing.r, arena.y1 - Wing.r);
-  collideMirrors(Wing, Wing.r);
-  Wing.x = clamp(Wing.x, arena.x0 + Wing.r, arena.x1 - Wing.r);
-  Wing.y = clamp(Wing.y, arena.y0 + Wing.r, arena.y1 - Wing.r);
-
-  if (len(Wing.vx, Wing.vy) > 40 && rnd() < 0.5) {
-    const a = Math.atan2(-Wing.vy, -Wing.vx);
-    spawnPart(Wing.x + Math.cos(a) * 8, Wing.y + Math.sin(a) * 8,
-      Math.cos(a) * rnd(70, 20), Math.sin(a) * rnd(70, 20),
-      rnd(3, 1.4), WING_COL, rnd(0.3, 0.14), 0.9);
-  }
-
-  /* The wingman throws bullets whatever hull it picked. EMBER's lance is a
-     charge, a beam object and a second of standing damage that all live on the
-     host's ship; handing the guest a second one of those is a fight for
-     another day, so the lance stays the host's weapon and the wingman gets a
-     conventional gun built from the same build. This is stated in the lobby. */
-  Wing.fireT -= dt;
-  if (IN.fire && Wing.fireT <= 0) {
-    const rate = P.weapon === 'laser' ? P.fireRate * 0.8 : P.fireRate;
-    Wing.fireT = 1 / Math.max(0.6, rate);
-    const muzzle = Wing.r + 6;
-    const mx = Wing.x + Math.cos(Wing.ang) * muzzle;
-    const my = Wing.y + Math.sin(Wing.ang) * muzzle;
-    const n = Math.max(1, P.count);
-    for (let i = 0; i < n; i++) {
-      const a0 = n === 1 ? 0 : (i - (n - 1) / 2) * (P.spread * 1.9);
-      shotBy = Wing;
-      fireBullet(mx, my, Wing.ang + a0 + simRnd(P.spread, -P.spread) * 0.5, 0.85);
-      shotBy = null;
-    }
-    Audio_.shoot();
-    Wing.shots++;
-    Wing.vx -= Math.cos(Wing.ang) * 22; Wing.vy -= Math.sin(Wing.ang) * 22;
-    burst(mx, my, 3, COL.bullet, 165, 2.2, 0.16, 0.9, Wing.ang);
-  }
-}
-
-/* The wingman only flies while the room is live: an upgrade screen or a shop
-   holds the world still for both pilots, exactly as it does solo. */
-function mpHostTick(dt) {
-  if (!mpSim()) return;
-  lsWingInput();                          // the wingman flies the guest's record for this step
-  wingUpdate(dt);
-}
-
-/* Starting a co-op run: the host's run, with the wingman placed alongside,
+/* Starting a co-op run: the host's run, with the guest's pilot alongside,
    and the header that lets the guest's machine start the same one. */
 function mpStartRun() {
   if (!netLive() || Net.role !== 'host') return;
   MP.on = true; MP.role = 'host';
-  Wing.charIdx = MP.peerChar;
   lsHostStart();                          // see LOCKSTEP CO-OP
 }
 
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar,
+  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0,
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -57759,6 +57759,7 @@ function mpOnEvent(m) {
       }
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
+      MP.peerAwake = !!m.awake;
       MP.ready = true;
       break;
 
@@ -57786,12 +57787,10 @@ function mpOnEvent(m) {
    forty-minute run because someone's laptop slept is never the right trade —
    and the guest, which has nothing to simulate, is put back on the menu. */
 function mpPeerGone() {
+  const gone = PILOTS.length > 1 ? pilotP(MP.role === 'host' ? 1 : 0) : null;
   if (LS.on) lsLeave();
   if (MP.role === 'host') {
-    if (Wing.live) {
-      explode(Wing.x, Wing.y, 140, 0, WING_COL);
-      Wing.live = false;
-    }
+    if (gone) explode(gone.x, gone.y, 140, 0, WING_COL);
     MP.on = false; MP.ready = false; MP.lostT = 5;
     /* Downed when they left. Nobody is going to clear the wave that would have
        stood you back up, so the knockdown becomes what it would have been
@@ -57817,7 +57816,6 @@ function mpQuit() {
   netHangUp(true);
   Net.phase = 'off'; Net.note = '';
   MP.on = false; MP.ready = false; MP.role = null;
-  Wing.live = false;
   if (!wasHost && state !== 'menu') { state = 'menu'; }
 }
 
@@ -57867,15 +57865,16 @@ const SNAP_LOCAL = new Set([
   'devLogUser', 'devLogName', 'devLogBuf', 'devLogMsg', 'devLogBusy', 'devLogSkip',
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
+  'RKA', 'RKC',                          // RONIN's art layers (a WeakMap of wounds, draw closures)
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
 ]);
 // objects the run writes into that do not start out empty
-const SNAP_OBJS = ['RUN', 'runView', 'Wing', 'Chal', 'Rush', 'Daily', 'arena', 'suHead', 'con', 'SUI', 'VRA', 'VRI', 'RKA', 'RKC', 'RC',
-                   'rsSIM', 'rsSpark', 'rsBlow', 'rsPlume', 'rsCam', 'odPlume', 'HL', 'Vigil', 'vig', 'hubState', 'hub', 'hubTut'];
+const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
+                   'rsSIM', 'rsSpark', 'rsBlow', 'rsPlume', 'rsCam', 'HL', 'Vigil', 'vig', 'hubState', 'hub', 'hubTut'];
 // and containers that are this machine's own
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
-  'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP',
+  'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
@@ -58047,7 +58046,10 @@ function snapWrite() {
   const vars = R.vars.map((n, i) => enc(vals[i], n));
   // a container goes as its contents, and is filled in place on the other side
   const objs = R.objs.map((n, i) => {
-    const o = objVals[i];
+    let o = objVals[i];
+    /* The pilots kept aside: the one flying is in the globals already, and of
+       the others only what is the game's goes (a pilot's art stays here). */
+    if (n === 'PILOTS') o = o.map((e, k) => (k === PILOT.on || !e.v ? null : { v: e.v.map((x, j) => (SNAP_LOCAL.has(PILOT_VARS[j]) ? undefined : x)) }));
     if (Array.isArray(o)) return { a: -1, v: o.map((x, j) => enc(x, n + '[' + j + ']')) };
     if (o instanceof Map) return { m: -1, v: [...o].map(([a, b]) => [enc(a, n + '.key'), enc(b, n + '.get()')]) };
     if (o instanceof Set) return { s: -1, v: [...o].map(a => enc(a, n + '.has()')) };
@@ -58094,7 +58096,18 @@ function snapRead(snap) {
   on.forEach((n, i) => {
     const o = byName.get(n), v = objs[i];
     if (!o) return;
-    if (Array.isArray(o)) { o.length = 0; for (const x of v) o.push(x); }
+    if (n === 'PILOTS') {                  // the pilots kept aside: their art, this machine's own, stays
+      const was = o.slice();
+      o.length = 0;
+      v.forEach((e, k) => {
+        const w = was[k];
+        if (!e) { o.push(w || { v: null, col: [COL.player, COL.bullet] }); return; }
+        if (w && w.v) e.v.forEach((x, j) => { if (SNAP_LOCAL.has(PILOT_VARS[j])) e.v[j] = w.v[j]; });
+        e.col = w ? w.col : [COL.player, COL.bullet];
+        o.push(e);
+      });
+    }
+    else if (Array.isArray(o)) { o.length = 0; for (const x of v) o.push(x); }
     else if (o instanceof Map) { o.clear(); for (const [a, b] of v) o.set(a, b); }
     else if (o instanceof Set) { o.clear(); for (const a of v) o.add(a); }
     else {
@@ -58119,10 +58132,11 @@ function snapRead(snap) {
    holds the game to that, and scripts/lockstep.mjs holds two of them to it
    over a lossy, laggy link.
 
-   The host's pilot is P on both machines; the guest's is the wingman, a
-   plain gun, until each gets its full pilot (the plan's Phase 3). Menu
-   choices ride the records too (ui(), lsUiApply): the host makes the run's,
-   and either player can pause the shared game. Since 3 Oct 2026 this is the
+   Each player flies a whole pilot of their own, on both machines (TWO
+   PILOTS): the host's is the first, the guest's the second. Menu choices ride
+   the records too (ui(), lsUiApply): the host makes the run's, each player
+   picks their own pilot's cards and gear and buys for it, and either player
+   can pause the shared game. Since 3 Oct 2026 this is the
    only co-op there is: the picture stream it replaced is gone.
    ========================================================================= */
 const LS_SEND_MAX = 32;               // input records in one packet, at most
@@ -58133,7 +58147,9 @@ const LS_RESEND = 0.05;               // while waiting, our inputs go out again 
    dash's own 0.17 s or a second dash would follow the first. */
 const LS_DELAY_MIN = 3, LS_DELAY_MAX = 8;
 const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e'];   // the keys that act, as they travel
-const LS_UI_GUEST = new Set(['pause', 'resume']);   // the guest's choices; every other is the host's
+// the guest's choices: the shared pause, and what is its own pilot's (its cards, its gear, what it buys); every other is the host's
+const LS_UI_GUEST = new Set(['pause', 'resume', 'pick', 'gearTake', 'gearLeave', 'gearBack', 'buy']);
+const LS_UI_PAUSE = new Set(['pause', 'resume']);   // and the ones that are not a choice: no waiting on them
 const LS_HOST_SCREENS = ['levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk'];
 // screens one player can open over the shared pause, which a snapshot leaves open
 const LS_OVER_PAUSE = ['codex', 'settings', 'gfx', 'changelog', 'skin'];
@@ -58228,10 +58244,10 @@ function lsSample() {
   if (LS.hi >= s) return;
   for (let k = LS.hi + 1; k <= s; k++) {
     const rec = newInput();
-    (LS.source || inputSample)(rec);
+    pilotDo(pilotMine(), () => (LS.source || inputSample)(rec));
     if (LS.uiQ.length) {                       // the choices made since: they land on this step
       rec.ui = LS.uiQ.splice(0);
-      for (let j = 0; j < rec.ui.length; j += 2) if (!LS_UI_GUEST.has(UI_NAMES[rec.ui[j]])) LS.uiBusy = k;
+      for (let j = 0; j < rec.ui.length; j += 2) if (!LS_UI_PAUSE.has(UI_NAMES[rec.ui[j]])) LS.uiBusy = k;
     }
     LS.mine.set(k, lsCanon(rec, true));
   }
@@ -58326,7 +58342,8 @@ function lsHash() {
   for (let i = 0; i < st.length; i++) h = Math.imul(h ^ st.charCodeAt(i), 16777619) >>> 0;
   n(simRngState); n(simTick); n(wave); n(elapsed); n(credits);
   n(P.x); n(P.y); n(P.hp); n(P.maxHp); n(P.level); n(P.xp);
-  n(Wing.x); n(Wing.y); n(Wing.hp);
+  const o = PILOTS.length > 1 ? pilotP(1) : null;
+  if (o) { n(o.x); n(o.y); n(o.hp); n(o.level); n(o.xp); }
   n(enemies.length);
   for (const e of enemies) { n(e.id); n(e.x); n(e.y); n(e.hp); }
   n(bullets.length); n(ebullets.length); n(gems.length); n(drops.length);
@@ -58409,42 +58426,24 @@ function lsAdopt(at, epoch, json) {
   LS.resyncs++; LS.syncNote = 2.5;
 }
 
-// P plays the host's record, on both machines (the inputSource while lockstep runs)
+// each pilot plays its player's record, on both machines (the inputSource while lockstep runs)
 function lsHostInput(rec) {
-  const h = LS.cur && LS.cur.host;
+  const h = LS.cur && LS.cur[PILOT.on === 1 ? 'wing' : 'host'];   // 'wing': the guest's
   if (!h) { Object.assign(rec, newInput()); return; }
   rec.mx = h.mx; rec.my = h.my; rec.ax = h.ax; rec.ay = h.ay;
   rec.trig = h.trig; rec.lmb = h.lmb; rec.auto = h.auto; rec.dash = h.dash;
   rec.touch = h.touch; rec.taim = h.taim; rec.press = h.press.slice();
-  rec.local = MP.role === 'host';
+  rec.local = (MP.role === 'guest') === (PILOT.on === 1);   // the keys it spends are this machine's
 }
-// and the wingman the guest's, in the form wingUpdate reads
-function lsWingInput() {
-  const w = LS.cur && LS.cur.wing, IN = Wing.in;
-  if (!w) { IN.mx = IN.my = 0; IN.fire = false; IN.dash = false; return; }
-  IN.mx = w.mx; IN.my = w.my;
-  const il = len(IN.mx, IN.my);
-  if (il > 1) { IN.mx /= il; IN.my /= il; }
-  IN.fire = w.trig || w.auto;
-  IN.dash = w.dash;
-  if (w.touch) {
-    if (w.taim && len(w.taim.dx, w.taim.dy) > 10) { IN.ang = Math.atan2(w.taim.dy, w.taim.dx); IN.fire = true; }
-    else {
-      const t = nearestEnemy(Wing.x, Wing.y, 900);
-      if (t) IN.ang = angLerp(IN.ang, Math.atan2(t.y - Wing.y, t.x - Wing.x), 0.2);
-      IN.fire = !!(w.taim || t);
-    }
-  } else IN.ang = Math.atan2(w.ay - Wing.y, w.ax - Wing.x);
-}
-
 /* A menu choice, in lockstep: into our next record, not into the game. The
    guest may only pause and resume; the run's choices are the host's. One
    choice at a time, and none before its screen is armed: the act lands a few
    steps after the press, and the screen is still up until it does. */
 function lsUi(act, i) {
-  const pause = LS_UI_GUEST.has(act);
-  if (!pause && (MP.role !== 'host' || uiArm > 0 || LS.uiBusy >= LS.tick ||
-                 LS.uiQ.some((a, j) => j % 2 === 0 && !LS_UI_GUEST.has(UI_NAMES[a])))) return;
+  if (MP.role !== 'host' && !LS_UI_GUEST.has(act)) return;
+  const pause = LS_UI_PAUSE.has(act);
+  if (!pause && (uiArm > 0 || LS.uiBusy >= LS.tick ||
+                 LS.uiQ.some((a, j) => j % 2 === 0 && !LS_UI_PAUSE.has(UI_NAMES[a])))) return;
   LS.uiQ.push(UI_NAMES.indexOf(act), i & 255);
 }
 /* The step's choices, on both machines at once. The arming delay was the
@@ -58454,6 +58453,10 @@ function lsUi(act, i) {
    a resume closes it. */
 function lsUiApply(rec, who) {
   if (!rec || !rec.ui || !rec.ui.length) return;
+  pilotDo(who === 'guest' && PILOTS.length > 1 ? 1 : 0, () => lsUiActs(rec, who));   // as the chooser's pilot
+  coopHold();
+}
+function lsUiActs(rec, who) {
   for (let j = 0; j < rec.ui.length; j += 2) {
     const act = UI_NAMES[rec.ui[j]];
     if (!act || (who === 'guest' && !LS_UI_GUEST.has(act))) continue;
@@ -58471,7 +58474,10 @@ function lsDrawHint() {
   const peer = (MP.peerName || (MP.role === 'host' ? 'YOUR WINGMAN' : 'THE HOST')).toUpperCase();
   let msg = '';
   if (state === 'pause') msg = (LS.pausedBy === MP.role ? 'YOU PAUSED' : peer + ' PAUSED') + '  ·  EITHER OF YOU CAN RESUME';
-  else if (MP.role === 'guest' && (LS_HOST_SCREENS.includes(state) || (choice && state === 'play'))) msg = peer + ' IS CHOOSING';
+  else if (state === 'levelup' && !offers.length) msg = peer + ' IS CHOOSING';     // their cards, not yours
+  else if (state === 'gear' && !gearOffer) msg = peer + ' IS CHOOSING';
+  else if (MP.role === 'guest' && state === 'shop') msg = 'BUY FOR YOUR OWN SHIP  ·  ' + peer + ' CLOSES THE SHOP';
+  else if (MP.role === 'guest' && (['planet', 'library', 'talk', 'devtalk'].includes(state) || (choice && state === 'play'))) msg = peer + ' IS CHOOSING';
   if (msg) lsPill(msg, state === 'pause' ? H / 2 + 140 : H - 34, WING_COL);
   if (LS.syncNote > 0) lsPill('BACK IN STEP WITH ' + peer, 92, '#fbbf24', Math.min(1, LS.syncNote));
 }
@@ -58504,12 +58510,12 @@ function runPack() {
 function lsHostStart() {
   const run = ((LS.run + 1) & 0xffff) || 1;
   resetGame();                            // a fresh seed, this window's view, this save's settings
-  wingSpawn();
+  pilotsBegin(MP.peerChar, MP.peerAwake); // and the guest's own pilot beside yours
   state = 'play';
   const delay = clamp(LS_DELAY_MIN + Math.ceil((Net.ping || 0) / 2 / (STEP * 1000)), LS_DELAY_MIN, LS_DELAY_MAX);
   lsBegin(run, delay);
   netEvent({ t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
-             awake: P.awake ? 1 : 0, host: selectedChar, wing: Wing.charIdx, delay,
+             awake: P.awake ? 1 : 0, host: selectedChar, wing: MP.peerChar, wingAwake: MP.peerAwake ? 1 : 0, delay,
              name: Save.profile.name || '' });
   banner('CO-OP ENGAGED', WING_COL, 2.0);
 }
@@ -58523,8 +58529,7 @@ function lsGuestStart(h) {
   runCharNext = clamp(h.host | 0, 0, CHARS.length - 1);   // the host's pilot is P here too, earned here or not
   runAwakeNext = !!h.awake;
   resetGame();
-  Wing.charIdx = clamp(h.wing | 0, 0, CHARS.length - 1);
-  wingSpawn();
+  pilotsBegin(clamp(h.wing | 0, 0, CHARS.length - 1), !!h.wingAwake);   // its own pilot: the second
   state = 'play';
   lsBegin((h.run | 0) & 0xffff, clamp(h.delay | 0, LS_DELAY_MIN, LS_DELAY_MAX));
   banner('CO-OP ENGAGED', WING_COL, 2.0);
@@ -58532,6 +58537,7 @@ function lsGuestStart(h) {
 // leaving: the guest gets its own pilot back
 function lsLeave() {
   lsEnd();
+  pilotsEnd();
   if (MP.myChar != null) { applyChar(MP.myChar); MP.myChar = null; }
 }
 
@@ -58541,87 +58547,9 @@ function lsLeave() {
    the host's snapshots, easing them, predicting its own hull. In lockstep the
    guest runs the game itself, and only the drawing below is left.)
    ========================================================================= */
+// a pilot's hull, by character: the lobby draws both
 function mpHullPath(charIdx) {
   hullPath((CHARS[charIdx] || CHARS[0]).id);
-}
-
-/* The other pilot, drawn in world space: their hull, their name, their health.
-   Deliberately not the same silhouette treatment as your own ship — at a
-   glance you should never have to work out which one you are flying. */
-function mpDrawOther(o, charIdx, col, label, hp, maxHp, down) {
-  if (!inView(o.x, o.y, 90)) return;
-  const blink = o.iframe > 0 && Math.floor(uiTime * 22) % 2 === 0;
-
-  if (o.ghosts) for (let i = 0; i < o.ghosts.length; i++) {
-    const g = o.ghosts[i], f = (i + 1) / o.ghosts.length;
-    ctx.save();
-    ctx.translate(g.x, g.y); ctx.rotate(g.ang);
-    ctx.globalAlpha = 0.3 * f;
-    mpHullPath(charIdx);
-    ctx.fillStyle = rgba(col, 0.2); ctx.strokeStyle = col; ctx.lineWidth = 1.6;
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
-  }
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  drawGlow(o.x, o.y, down ? 26 : 44, col, down ? 0.2 : 0.34);
-  ctx.restore();
-
-  ctx.save();
-  ctx.translate(o.x, o.y);
-  if (down) {
-    // a downed wingman is a wreck on the floor with a clock over it
-    ctx.rotate(uiTime * 0.7);
-    ctx.globalAlpha = 0.5;
-    ctx.strokeStyle = col; ctx.lineWidth = 2;
-    ctx.setLineDash([5, 6]);
-    ctx.beginPath(); ctx.arc(0, 0, 17, 0, TAU); ctx.stroke();
-    ctx.setLineDash([]);
-  } else {
-    ctx.rotate(o.ang);
-    ctx.globalAlpha = blink ? 0.35 : 1;
-    ctx.lineWidth = 2.2;
-    mpHullPath(charIdx);
-    ctx.fillStyle = rgba(col, 0.22); ctx.strokeStyle = col;
-    ctx.fill(); ctx.stroke();
-    // a ring the player's own ship never wears, so the two never swap places
-    ctx.globalAlpha = 0.5;
-    ctx.rotate(-o.ang);
-    ctx.beginPath(); ctx.arc(0, 0, 19, 0, TAU);
-    ctx.strokeStyle = rgba(WING_COL, 0.55); ctx.lineWidth = 1.2; ctx.stroke();
-  }
-  ctx.restore();
-
-  // nameplate + health, above the hull
-  const bx = o.x - 26, by = o.y - 34;
-  ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = 'rgba(3,6,12,0.62)';
-  ctx.fillRect(bx - 2, by - 12, 56, 18);
-  ctx.fillStyle = rgba(col, 0.9);
-  ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.textAlign = 'left';
-  ctx.fillText(String(label || '').slice(0, 12).toUpperCase(), bx, by - 4);
-  ctx.fillStyle = 'rgba(15,23,42,0.9)';
-  ctx.fillRect(bx, by, 52, 3.5);
-  const f = clamp(hp / (maxHp || 1), 0, 1);
-  ctx.fillStyle = down ? '#7f1d1d' : (f < 0.3 ? '#f87171' : col);
-  ctx.fillRect(bx, by, 52 * f, 3.5);
-  if (down) {
-    ctx.textAlign = 'center';
-    ctx.font = "800 9px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = rgba('#fca5a5', 0.6 + Math.sin(uiTime * 4) * 0.35);
-    ctx.fillText('DOWN', o.x, o.y + 4);
-  }
-  ctx.restore();
-}
-
-// Called from render(): whichever ship is not the one you are flying.
-function mpDrawCoopShip() {
-  if (!MP.on || !Wing.live) return;
-  mpDrawOther(Wing, Wing.charIdx, (CHARS[Wing.charIdx] || CHARS[0]).col,
-              MP.role === 'host' ? (MP.peerName || 'WINGMAN') : 'YOU', Wing.hp, Wing.maxHp, Wing.down);
 }
 
 /* ------------------------------- co-op HUD -------------------------------- */
@@ -58640,9 +58568,11 @@ function mpDrawHud() {
     return;
   }
 
-  const partnerHp = MP.role === 'host' ? Wing.hp : P.hp;
-  const partnerMax = MP.role === 'host' ? Wing.maxHp : P.maxHp;
-  const down = MP.role === 'host' ? Wing.down : !!P.down;
+  // the other pilot (the HUD is drawn as this machine's)
+  const other = PILOTS.length > 1 ? pilotP(PILOT.on === 0 ? 1 : 0) : null;
+  const partnerHp = other ? other.hp : 0;
+  const partnerMax = other ? other.maxHp : 1;
+  const down = !!(other && other.down);
   const label = MP.peerName || (MP.role === 'host' ? 'WINGMAN' : 'HOST');
   const col = down ? '#f87171' : WING_COL;
 
@@ -58868,7 +58798,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar,
+    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0,
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 

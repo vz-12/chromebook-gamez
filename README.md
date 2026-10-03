@@ -235,12 +235,24 @@ the guest's machine also freezes for almost two seconds, and two players
 whose saves disagree. Both scripts load the game through
 `scripts/lib/game-vm.mjs`.
 
+Each player flies a whole pilot of their own: their character, weapon,
+build, level and kit (TWO PILOTS in the game). The game was written for one
+pilot, `P`, so each pilot's state lives in `PILOT_VARS`: P itself, its kit's
+state, its cards, its gear, its sentries and its colours. Each part of a step
+runs as the pilot it belongs to (`pilotUse`, `pilotsEach`, `pilotDo`): its
+input, movement, weapons and kit, the bullets it fired, and the hits it
+takes. The world (waves, enemies, the floor) runs once. Each machine draws
+and listens as its own pilot (`pilotMine`). XP is shared, so both pilots
+level together, and each picks from its own cards.
+
 Menus are input too. A choice on a screen (a card, gear, the shop, the
 planetarium, the library, the talks, the founder's choice, pause) goes
 through `ui()`. Alone it acts at once. In lockstep it rides the input record
-and lands on the same step on both machines. The host makes the run's
-choices; either player can pause or resume the shared game, and can open the
-codex, settings or graphics over the pause on their own machine. The host's
+and lands on the same step on both machines, as the chooser's pilot. Each
+player picks their own cards and gear and buys for their own ship; the host
+makes the run's other choices. Either player can pause or resume the shared
+game, and can open the codex, settings or graphics over the pause on their
+own machine. The host's
 bot plays every screen through `handleKey`, and the guest's bot presses keys
 on the host's screens, which must change nothing. Both pause, resume and
 open their own screens over the pause, and the run must cover all of it.

@@ -113,7 +113,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
   // a player: only ever its own machine's input record
   let sampled = -1;
   LS.source = rec => {
-    const S = '${role}' === 'host' ? P : Wing, k = sampled = Math.max(sampled + 1, LS.delay);   // the step this record is for
+    const S = P, k = sampled = Math.max(sampled + 1, LS.delay);   // the step this record is for; P is this machine's own pilot here
     menus(k);
     let ix = 0, iy = 0;
     const [g, gd] = near(gems.concat(drops), S);
@@ -125,12 +125,12 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
     rec.trig = true; rec.lmb = true; rec.auto = k % 600 > 300; rec.dash = k % 97 === 0;
     rec.touch = false; rec.taim = null;
     rec.press = [];
-    if ('${role}' === 'host' && ${!!kit}) {
+    if (${!!kit}) {                  // its own pilot's kit, on either side
       if (k % 900 === 70) rec.press.push(P.charId === 'melee' ? 'v' : 'f');
       if (k % 75 === 40) rec.press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) rec.press.push('f');
     }
-    if ('${role}' === 'host' && gearNear && k % 30 === 0) rec.press.push('e');   // THE VAGRANT: a look at what is on the floor
+    if (gearNear && k % 30 === 0) rec.press.push('e');   // THE VAGRANT: a look at what is on the floor
   };
   const r = v => typeof v === 'number' ? (Number.isFinite(v) ? +v.toPrecision(12) : String(v)) : (v === undefined ? null : v);
   const pk = (o, ks) => ks.map(k => r(o[k]));
@@ -140,7 +140,8 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
   // every menu choice that lands, counted where it lands (pause and resume are counted from LS.paused)
   globalThis.__acts = {};
   let __was = false;
-  for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { __acts[a] = (__acts[a] || 0) + 1; f(i); }; }
+  // (counted by whose pilot made it: the guest's own cards, gear and buys are its own)
+  for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { const n = a + (PILOT.on ? '·guest' : ''); __acts[n] = (__acts[n] || 0) + 1; f(i); }; }
   globalThis.OPENERS_LEFT = () => OPENERS.map(o => o[0]);
   const OPENERS = [
     [1500, () => openPlanetarium()],
@@ -155,12 +156,12 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
     const t = LS.tick;
     // a nudge on this machine alone: its roll and its enemies' hulls, as a desync would leave them (once: a replay passes here again)
     if (PARTS.includes(t) && !parted.has(t)) { parted.add(t); simRngState = (simRngState ^ 0x5bd1e995) >>> 0; for (const e of enemies) e.hp *= 0.93; }
-    if (t === 1) { P.maxHp = P.hp = 60000; P.dmg *= 3; Wing.maxHp = Wing.hp = 60000; }
-    if (${!!kitRun} && t % 900 === 60) {
+    if (t === 1) pilotsEach(() => { P.maxHp = P.hp = 60000; P.dmg *= 3; });
+    if (${!!kitRun} && t % 900 === 60) pilotsEach(() => {   // every pilot's kit, charged
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
       else if (P.charId === 'ember') P.vent = VENT_MAX;
       else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
-    }
+    });
     // the rarer screens, opened on both machines at once when the run is in play; the host's bot answers them
     const shared = LS.paused ? 'pause' : state;
     __seen.add(state);
@@ -172,12 +173,13 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // k
     if (TR && t >= TR[0] && t <= TR[1]) (globalThis.__full || (globalThis.__full = new Map())).set(t, JSON.stringify({ rng: simRngState, simTick, wave, state: shared, elapsed: r(elapsed),
       P: pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'parryT', 'parryCd', 'swingT', 'roninT', 'chain']),
       in: P.in && [P.in.mx, P.in.my, P.in.ax, P.in.ay, P.in.trig, P.in.dash, P.in.press.join('')],
-      W: pk(Wing, ['x', 'y', 'vx', 'vy', 'hp', 'dashCh', 'ang', 'down']), Win: [Wing.in.mx, Wing.in.my, Wing.in.ang, Wing.in.fire, Wing.in.dash],
+      W: pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'kills']),
       E: enemies.filter(e => !e.dead).map(e => [e.type, ...pk(e, ['x', 'y', 'hp', 'id'])]),
       B: bullets.length, EB: ebullets.length, G: gems.length, D: drops.length, RUN: RUN_FLAGS.map(k => r(RUN[k])) }));
     if (t % 60 === 0) __prints.set(t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
-      pk(Wing, ['x', 'y', 'vx', 'vy', 'hp', 'dashCh', 'ang', 'down']),
+      pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT']),
+      Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),
       bullets.map(b => pk(b, ['x', 'y'])), ebullets.map(b => pk(b, ['x', 'y'])),
       gems.map(g => pk(g, ['x', 'y'])), drops.map(d => [d.kind, ...pk(d, ['x', 'y'])]),
@@ -190,7 +192,7 @@ function play(sc) {
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720 }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640 }), hz: sc.guestHz };
   H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest), 'setup-guest');
+  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest), 'setup-guest');   // its own pilot, awake too when the scenario has kits
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
@@ -252,7 +254,7 @@ function play(sc) {
     resyncs: [H.g.run('LS.resyncs'), G.g.run('LS.resyncs')],
     replayed: G.g.run('LS.replayed'),
     // each player's own kills: the host's ship and the wingman, and what each machine would record
-    kills: { host: H.g.run('P.kills'), wing: H.g.run('Wing.kills'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') },
+    kills: { host: H.g.run('P.kills'), wing: H.g.run('pilotP(1).kills'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') },
     wave: H.g.run('__stat.waves'), bosses: H.g.run('[...__stat.bosses]'),
     wait: [H.waitFrames / Math.max(1, H.frames), G.waitFrames / Math.max(1, G.frames)],
     kbps: [H.g.run('Net.tx') / 1024 / secs, G.g.run('Net.tx') / 1024 / secs],
@@ -277,6 +279,7 @@ for (const sc of SCENARIOS) {
      in the full run). */
   const [ah, ag] = r.acts, miss = [];
   if (!ah.pick && !ah.gearTake && !SHORT) miss.push('no card or gear chosen');   // THE VAGRANT has loot, not cards, and may find none in a minute
+  if (!ah['pick·guest'] && !ah['gearTake·guest'] && !SHORT) miss.push("the guest's pilot never chose its own card or gear");
   if (!ah.pause || !ah.resume) miss.push('no shared pause');
   if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
   if (!SHORT && !r.seen[0].includes('gfx')) miss.push('host never opened graphics over the pause');
