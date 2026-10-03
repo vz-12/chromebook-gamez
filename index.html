@@ -105,10 +105,12 @@ const runView = { w: 1280, h: 720 };
 let runViewNext = null;
 // the pilot, and whether it is awake: handed in by a co-op header, else this machine's own
 let runCharNext = null, runAwakeNext = null;
-/* Game time, counted (step 3). simTick is the step the run is on. simAfter(s, f)
-   runs f s seconds of play later on the step clock, not the wall clock
-   (setTimeout), so a delayed game over or a rite taking you lands on the same
-   step on every machine, and it waits through a pause instead of firing into it. */
+/* Game time, counted (step 3). simTick is the step the run is on. simAfter(s,
+   act, arg) runs SIM_AFTER[act](arg) s seconds of play later on the step clock,
+   not the wall clock (setTimeout), so a delayed game over or a rite taking you
+   lands on the same step on every machine, and it waits through a pause
+   instead of firing into it. An act by name, not a closure, so a co-op
+   snapshot can carry a timer that is still running (RUN SNAPSHOTS). */
 /* The run's settings, frozen (step 4). The flags in a save that decide what a
    run contains (escalation, the story so far, what has been unlocked) are
    copied here when the run starts: from this machine's save, or handed in
@@ -144,11 +146,16 @@ function runTake() {
 function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; }
 let simTick = 0;
 const simTimers = [];
-function simAfter(sec, f) { simTimers.push({ t: sec, f }); }
+const SIM_AFTER = {
+  sitDown: () => { if (state === 'play') gameOver(true); },              // the founder's choice: you sat down
+  rite:    id => { if (state === 'play') enterRite(id); },               // a rite takes you
+  chalEnd: c => { if (Chal.on === c && state === 'play') chalEnd(true); },   // a challenge's goal, met
+};
+function simAfter(sec, act, arg) { simTimers.push({ t: sec, act, arg }); }
 function simTimersTick(dt) {
   for (let i = 0; i < simTimers.length; i++) {
     const tm = simTimers[i];
-    if ((tm.t -= dt) <= 0) { simTimers.splice(i--, 1); tm.f(); }
+    if ((tm.t -= dt) <= 0) { simTimers.splice(i--, 1); SIM_AFTER[tm.act](tm.arg); }
   }
 }
 function freshSeed() {
@@ -4646,28 +4653,32 @@ const SHOPKEEP_MAXMUL = 5;
 let shopkeepTake = 0;          // what he is holding, returned when he drops
 const PRICE = { common: 32, rare: 58, epic: 95, legend: 150 };
 
-function shopServices() {
-  return [
-    { kind: 'svc', name: 'Repair Bay',     desc: 'Restore 60% of max HP',      rar: 'common', cost: 45,
+/* The services, once. An item on the counter is data pointing at one of these
+   (svc), so the counter can travel in a co-op snapshot; shopRun does the rest. */
+const SHOP_SVC = [
+    { name: 'Repair Bay',     desc: 'Restore 60% of max HP',      rar: 'common', cost: 45,
       ok: () => P.hp < P.maxHp * 0.95 && !chalNoHeal(),
       run: () => { const a = Math.round(P.maxHp * 0.6); P.hp = Math.min(P.maxHp, P.hp + a);
                    floatText(P.x, P.y - 30, '+' + a + ' HP', COL.hp, 17); Audio_.heal(); } },
-    { kind: 'svc', name: 'Hull Plating',   desc: '+30 max HP, fully repaired', rar: 'rare',   cost: 88,
+    { name: 'Hull Plating',   desc: '+30 max HP, fully repaired', rar: 'rare',   cost: 88,
       ok: () => !(Chal.on && (Chal.on.m.oneShot || Chal.on.m.noHeal)),
       run: () => { P.maxHp += 30; P.hp = P.maxHp; Audio_.heal(); } },
-    { kind: 'svc', name: 'Phase Cell',     desc: '+1 dash charge',             rar: 'epic',   cost: 132,
+    { name: 'Phase Cell',     desc: '+1 dash charge',             rar: 'epic',   cost: 132,
       ok: () => P.dashMax < 4,
       run: () => { P.dashMax++; P.dashCh = P.dashMax; } },
-    { kind: 'svc', name: 'Barrier Node',   desc: '+1 regenerating shield',     rar: 'epic',   cost: 120,
+    { name: 'Barrier Node',   desc: '+1 regenerating shield',     rar: 'epic',   cost: 120,
       ok: () => P.shieldMax < 4 && !(Chal.on && Chal.on.m.oneShot),
       run: () => { P.shieldMax++; P.shield++; } },
-    { kind: 'svc', name: 'Data Injection', desc: 'Gain a level immediately',   rar: 'legend', cost: 145,
+    { name: 'Data Injection', desc: 'Gain a level immediately',   rar: 'legend', cost: 145,
       ok: () => !chalNoLevel(),
       run: () => { P.xp += P.xpNext; } },
-    { kind: 'svc', name: 'Coolant Flush',  desc: '+12% fire rate permanently', rar: 'rare',   cost: 76,
+    { name: 'Coolant Flush',  desc: '+12% fire rate permanently', rar: 'rare',   cost: 76,
       ok: () => true,
       run: () => { P.fireRate *= 1.12; } }
-  ].filter(s => s.ok());
+];
+function shopServices() {
+  return SHOP_SVC.filter(s => s.ok())
+    .map(s => ({ kind: 'svc', svc: s, name: s.name, desc: s.desc, rar: s.rar, cost: s.cost }));
 }
 
 /* ------------------------------ THE RECORD CHIP ----------------------------
@@ -4755,16 +4766,20 @@ function recordChipItem() {
     kind: 'chip', name: 'The Record Chip', rar: 'legend', cost: 100,
     // kept to two lines: the shop card has room for that and no more
     desc: 'All later upgrades suit your hull. Rarity stops applying.',
-    ok: () => true,
-    run: () => {
-      P.chip = true;
-      banner('THE RECORD CHIP', CHIP_COL, 4.0);
-      drawFlashT = 0.28; shake(0.7);
-      ringFx(P.x, P.y, 10, 420, CHIP_COL, 0.9, 7);
-      burst(P.x, P.y, 60, CHIP_COL, 360, 4, 1.0);
-      Audio_.levelup(); Audio_.crit();
-    }
   };
+}
+// buying something that is not a card: a service, a piece of gear, the chip
+function shopRun(it) {
+  if (it.kind === 'svc') it.svc.run();
+  else if (it.kind === 'gear') { const old = gearEquip(it.gear); gearSaid(it.gear, old ? 'SWAPPED' : 'WORN'); }
+  else if (it.kind === 'chip') {
+    P.chip = true;
+    banner('THE RECORD CHIP', CHIP_COL, 4.0);
+    drawFlashT = 0.28; shake(0.7);
+    ringFx(P.x, P.y, 10, 420, CHIP_COL, 0.9, 7);
+    burst(P.x, P.y, 60, CHIP_COL, 360, 4, 1.0);
+    Audio_.levelup(); Audio_.crit();
+  }
 }
 
 /* One item, dressed as something the counter can sell. Buying is equipping
@@ -4783,11 +4798,6 @@ function gearShopItem(it) {
     desc: (slot ? slot.n + ': ' : '') + lines.slice(0, 3).join(' · '),
     cost: Math.round(PRICE[it.rar] * 1.15 * (1 + stageAbs * 0.15) * hardPrice()
                      * (P.insider ? 0.65 : 1)),
-    ok: () => true,
-    run: () => {
-      const old = gearEquip(it);
-      gearSaid(it, old ? 'SWAPPED' : 'WORN');
-    }
   };
 }
 
@@ -4868,7 +4878,7 @@ function buyShop(i) {
   it.sold = true;
   shopTouched = true;
   if (it.kind === 'up') applyUpgrade(it.up);
-  else { it.run(); Audio_.select(); }
+  else { shopRun(it); Audio_.select(); }
   shopMsg = it.name.toUpperCase() + '  ACQUIRED';
   shopMsgT = 1.5;
 }
@@ -14552,7 +14562,7 @@ function choiceAnswer(openIt) {
     Save.profile.conformed = true;
     Save.writeLocal(); Save.flush();
     banner('YOU SIT DOWN', FOUND_COL, 5.0);
-    simAfter(3.6, () => { if (state === 'play') gameOver(true); });
+    simAfter(3.6, 'sitDown');
     return;
   }
   startTurning();          // he has something to say about it first
@@ -24272,7 +24282,7 @@ function riteTakesYou() {
   banner('IT IS TIME', COLD_COL, 3.2);
   drawFlashT = 0.5; shake(1.8);
   Audio_.boss();
-  simAfter(1.4, () => { if (state === 'play') enterRite(id); });
+  simAfter(1.4, 'rite', id);
 }
 
 /* The mid-run door is gone. It was a portal that turned up after a boss and
@@ -57027,7 +57037,7 @@ const NET_STALE  = 14000;        // silence from a live peer before we call it
 /* Bumped when the wire format changes. Two builds that disagree would trade
    plausible-looking nonsense for a while and then diverge, so they refuse
    each other at the handshake instead. */
-const NET_PROTO = 4;                     // 4: lockstep input records carry menu choices
+const NET_PROTO = 5;                     // 4: lockstep input records carry menu choices; 5: and fingerprints, and snapshots
 const NET_SIG = () => NET_PROTO + '.' + Object.keys(ETYPE).length + '.' +
                       Object.keys(BOSSES).length + '.' + STAGES.length;
 
@@ -57330,7 +57340,7 @@ async function netJoin(code) {
 /* One preallocated buffer per direction. Snapshots go out thirty times a
    second for the length of a run; allocating a fresh one each time would hand
    the collector a megabyte a minute to sweep up mid-fight. */
-const MSG = { HELLO: 1, INPUT: 2, SNAP: 3, EVT: 4, PING: 5, PONG: 6, LSIN: 7 };   // LSIN: lockstep input records
+const MSG = { HELLO: 1, INPUT: 2, SNAP: 3, EVT: 4, PING: 5, PONG: 6, LSIN: 7, LSSTATE: 8 };   // LSIN: lockstep input records; LSSTATE: a run snapshot, in pieces
 
 const _nb = new ArrayBuffer(192 * 1024);
 const _nv = new DataView(_nb);
@@ -57387,6 +57397,7 @@ function netOnMessage(data) {
   if (type === MSG.SNAP)       mpReadSnapshot();
   else if (type === MSG.INPUT) mpReadInput();
   else if (type === MSG.LSIN)  lsRecv();
+  else if (type === MSG.LSSTATE) lsStateRecv();
   else if (type === MSG.PING) {
     const stamp = r32();
     wSeek(0); w8(MSG.PONG); w32(stamp);
@@ -57965,7 +57976,7 @@ function mpStartRun() {
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0,
+  netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0, build: LS_WANT ? buildId() : '',
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -57981,7 +57992,14 @@ function mpOnEvent(m) {
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
       MP.ready = true;
-      MP.ls = LS_WANT && !!m.ls;          // lockstep, only if both ask for it
+      // lockstep, only if both ask for it, and only between two copies of one build: any difference parts them
+      MP.ls = LS_WANT && !!m.ls && m.build === buildId();
+      MP.lsNote = LS_WANT && m.ls && !MP.ls ? 'lockstep needs the same build: reload both pages' : '';
+      break;
+
+    case 'lsagain':
+      // host: the guest could not take the last snapshot; send it a fresh one
+      if (MP.role === 'host' && LS.on) { LS.resyncT = 0; lsResync(); }
       break;
 
     case 'lsrun':
@@ -58078,6 +58096,292 @@ function mpQuit() {
 }
 
 /* ===========================================================================
+   RUN SNAPSHOTS (3 Oct 2026: the seeded rework, Phase 2 step 3)
+   The whole run as data, so that another copy of the game can take it over
+   at the same step. It is lockstep's safety net: when the two machines'
+   fingerprints part, the host writes one of these and the guest becomes the
+   host's game again (see LOCKSTEP CO-OP).
+
+   What is in it: every top-level let in this script, except the ones that
+   are this machine's own (SNAP_LOCAL: the screen, the menus, the link, the
+   settings), and the containers the run writes into: every top-level const
+   that starts out empty ([], {}, new Map(), new Set()) and the objects named
+   in SNAP_OBJS, except this machine's own (SNAP_LOCAL_OBJS). The names come
+   from this script's own text (snapScan), so a variable added later is in it
+   without anyone listing it. scripts/determinism.mjs checks the scan against
+   a real parse, and restores a snapshot into a fresh copy of the game in
+   every scenario, to prove nothing the run needs was left out.
+
+   What travels: plain data, arrays, Maps, Sets and typed arrays, with shared
+   and circular references kept. Anything from the game's own tables (an
+   upgrade, a boss, a book, a function) goes as where to find it, because the
+   other copy has the same tables and the game compares them by identity.
+   What cannot travel at all (a closure made during the run, a canvas) is
+   counted in the snapshot's own report, and the test fails on it.
+   ========================================================================= */
+const SNAP_SRC = (() => { try { return (document.currentScript && document.currentScript.text) || ''; } catch (e) { return ''; } })();
+const SNAP = { build: null, names: null, roots: null, index: null, statics: null };
+// lets that are this machine's own: never written, never taken over
+const SNAP_LOCAL = new Set([
+  // the next run's hand-offs, used up by resetGame
+  'runSeedNext', 'runViewNext', 'runCharNext', 'runAwakeNext', 'runFlagsNext',
+  // the screen, the frame and the camera's zoom
+  'W', 'H', 'DPR', 'fpsAvg', 'frameMs', 'lastDT', 'last', 'acc', 'frameErrors', 'pageDead',
+  'bufScene', 'cScene', 'bufChan', 'cChan', 'grainTile', 'scanTile', 'vigGrad', 'vigKey',
+  '_vx0', '_vy0', '_vx1', '_vy1', 'camZoom', 'camZoomT', 'uiTime', 'uiHotT', 'hudBotY', 'holeArt',
+  // the devices, settings and graphics
+  'autoFire', 'inputSource', 'selectedChar', 'fxLevel', 'fxMeasuring', 'fxMeasureI', 'fxMeasureKeep', 'fxNoise',
+  'gfxSel', 'gfxFirstRun', 'gfxReturn', 'volRect', 'volDrag', 'sensRect', 'sensDrag',
+  // menus and screens of one's own
+  'uiArm', 'offerHover', 'nameBuf', 'lastStats', 'codexTab', 'codexSel', 'codexScroll', 'codexFrom',
+  'setFrom', 'setSel', 'logReturn', 'logAuto', 'logScroll', 'logSince', 'logAutoDone', 'logWaitT', 'logDrag',
+  'dailyFrom', 'dailySel', 'rushFrom', 'skinSel', 'skinScroll', 'skinFrom', 'skinDrag', 'skinDevOpen', 'skinSliderRects',
+  'chalPassArm', 'chalPassNote', 'chalSel', 'chalScroll', 'chalFrom', 'chalPassRect', 'chalRows', 'chalStartRect',
+  'freeOpen', 'freeSel',
+  'devLogUser', 'devLogName', 'devLogBuf', 'devLogMsg', 'devLogBusy', 'devLogSkip',
+  // what only the drawing shows, made with the unseeded roll: each machine keeps its own
+  'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
+  // the link
+  'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'mpInSeq', 'mpInT', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
+]);
+// objects the run writes into that do not start out empty
+const SNAP_OBJS = ['RUN', 'runView', 'Wing', 'Chal', 'Rush', 'Daily', 'arena', 'suHead', 'con', 'SUI', 'VRA', 'VRI', 'RKA', 'RKC', 'RC',
+                   'rsSIM', 'rsSpark', 'rsBlow', 'rsPlume', 'rsCam', 'odPlume', 'HL', 'Vigil', 'vig', 'hubState', 'hub', 'hubTut'];
+// and containers that are this machine's own
+const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
+  'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP',
+  // what the drawing keeps: canvases and sprites, made again wherever they are missing
+  'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
+  'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
+  'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages']);
+// containers that start empty and are filled as the script loads: tables, not the run
+const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL']);
+const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
+
+// this build, for the hello: two different builds part in lockstep however careful the game is
+function buildId() {
+  if (SNAP.build == null) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < SNAP_SRC.length; i++) { h ^= SNAP_SRC.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    SNAP.build = SNAP_SRC.length.toString(36) + '.' + h.toString(36);
+  }
+  return SNAP.build;
+}
+
+/* The top-level names, read off this script's text: a declaration starts a
+   line, and the names it declares are the identifiers at depth zero, first
+   and after each comma. A comma that ends a line carries the declaration on
+   to the next, as in "let enemies = [], bullets = [], ..." and its three
+   lines more. */
+function snapDecls(src, i) {
+  const out = [];
+  let depth = 0, want = true;
+  while (i < src.length) {
+    if (want && depth === 0) {
+      const m = /^[ \t\r\n]*([A-Za-z_$][\w$]*)/.exec(src.slice(i, i + 200));
+      if (!m) break;                                  // a destructuring pattern: the test's parse says so
+      const j = i + m[0].length;
+      out.push({ name: m[1], empty: /^\s*=\s*(\[\]|\{\}|new (Map|Set)\(\))\s*[,;\n]/.test(src.slice(j, j + 40)) });
+      i = j; want = false; continue;
+    }
+    const c = src[i];
+    if (c === '"' || c === "'" || c === '`') { i++; while (i < src.length && src[i] !== c) i += src[i] === '\\' ? 2 : 1; i++; continue; }
+    if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 2; continue; }
+    if (c === '\n' && !(want && depth === 0)) break;   // the line ends the statement, or a long initializer starts: the names so far are all
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) want = true;
+    else if (c === ';' && depth === 0) break;
+    i++;
+  }
+  return out;
+}
+function snapScan() {
+  if (SNAP.names) return SNAP.names;
+  const lets = [], consts = [], empty = new Set(), fns = [];
+  for (const m of SNAP_SRC.matchAll(/^(let|const|var|function\*?|async function\*?|class) +/gm)) {
+    const at = m.index + m[0].length;
+    if (m[1] === 'let' || m[1] === 'var' || m[1] === 'const') {
+      for (const d of snapDecls(SNAP_SRC, at)) {
+        if (m[1] !== 'const') lets.push(d.name);
+        else { consts.push(d.name); if (d.empty) empty.add(d.name); }
+      }
+    } else { const n = /^\*?\s*([A-Za-z_$][\w$]*)/.exec(SNAP_SRC.slice(at, at + 80)); if (n) fns.push(n[1]); }
+  }
+  return (SNAP.names = { lets, consts, empty, fns });
+}
+// the roots, and functions that read and write them by name
+function snapRoots() {
+  if (SNAP.roots) return SNAP.roots;
+  const { lets, consts, empty, fns } = snapScan();
+  // a line in a comment or a string can look like a declaration; only names that exist count
+  const real = n => { try { new Function('"use strict"; ' + n + ';')(); return true; } catch (e) { return false; } };
+  const vars = [...new Set(lets)].filter(n => !SNAP_LOCAL.has(n) && real(n));
+  const objs = [...new Set(consts)].filter(n => (empty.has(n) || SNAP_OBJS.includes(n)) && !SNAP_LOCAL_OBJS.has(n) && !SNAP_TABLES.has(n) && real(n));
+  const isObj = new Set(objs);
+  const statics = [...new Set(consts.concat(fns))].filter(n => !isObj.has(n) && !SNAP_LOCAL_OBJS.has(n) && real(n));
+  return (SNAP.roots = {
+    vars, objs, statics,
+    get: new Function('return [' + vars.join(',') + ']'),
+    set: new Function('v', vars.map((n, i) => n + ' = v[' + i + ']').join(';')),
+    getObjs: new Function('return [' + objs.join(',') + ']'),
+    getStatics: new Function('return [' + statics.join(',') + ']'),
+  });
+}
+const snapPlain = v => { const p = Object.getPrototypeOf(v); return p === Object.prototype || p === null; };
+const snapTyped = v => ArrayBuffer.isView(v) && !(v instanceof DataView);
+/* Everything the game's own tables hold, to the depth the run points into
+   them, by where it is: [table, key, key...]. Taken once, at the first
+   snapshot of a page; the tables are the same in every copy of this build. */
+function snapStatic() {
+  if (SNAP.index) return SNAP.index;
+  const R = snapRoots(), vals = R.getStatics(), idx = new Map();
+  SNAP.statics = new Map(R.statics.map((n, i) => [n, vals[i]]));
+  const walk = (v, path, d) => {
+    if (v === null || (typeof v !== 'object' && typeof v !== 'function') || idx.has(v)) return;
+    idx.set(v, path);
+    if (d >= SNAP_DEPTH || typeof v === 'function') return;
+    if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) walk(v[i], path.concat(i), d + 1); }
+    else if (snapPlain(v)) for (const k of Object.keys(v)) walk(v[k], path.concat(k), d + 1);
+  };
+  R.statics.forEach(n => walk(SNAP.statics.get(n), [n], 0));
+  // and the methods of the run's own objects (Daily.use, Vigil.load): the other copy has them too
+  const objVals = R.getObjs();
+  R.objs.forEach((n, i) => {
+    const o = objVals[i];
+    if (!o || Array.isArray(o) || !snapPlain(o)) return;
+    SNAP.statics.set(n, o);
+    for (const k of Object.keys(o)) if (typeof o[k] === 'function' && !idx.has(o[k])) idx.set(o[k], [n, k]);
+  });
+  return (SNAP.index = idx);
+}
+
+/* A snapshot: { vars: [...], objs: [...], bad: n, badAt: [...] }, every value
+   encoded so it survives JSON:
+     number, string, true/false, null   as they are
+     { n: 'NaN' | 'Infinity' | '-Infinity' | '-0' }, { u: 1 } for undefined
+     { a: id, v: [...] }  { o: id, v: {...} }  { m: id, v: [[k, v]...] }  { s: id, v: [...] }  { t: type, i: id, v: [...] }
+     { r: id }            an object already written
+     { c: name }          one of the run's containers (filled in place, never replaced)
+     { k: [table, key...] } something from the game's own tables
+     { x: what }          something that cannot travel */
+function snapWrite() {
+  const R = snapRoots(), idx = snapStatic();
+  const seen = new Map(), badAt = [];
+  let nid = 0, bad = 0;
+  const objVals = R.getObjs();
+  objVals.forEach((o, i) => seen.set(o, { c: R.objs[i] }));
+  const enc = (v, path) => {
+    switch (typeof v) {
+      case 'number': return Number.isFinite(v) ? (Object.is(v, -0) ? { n: '-0' } : v) : { n: String(v) };
+      case 'string': case 'boolean': return v;
+      case 'undefined': return { u: 1 };
+      case 'bigint': return { x: 'bigint' };
+      case 'symbol': return { x: 'symbol' };
+    }
+    if (v === null) return null;
+    const had = seen.get(v);
+    if (had) return had;
+    const k = idx.get(v);
+    if (k) return { k };
+    if (typeof v === 'function') { bad++; if (badAt.length < 40) badAt.push(path + ' (a function made during the run)'); return { x: 'function' }; }
+    if (v instanceof WeakMap || v instanceof WeakSet) return { x: 'weak' };   // a cache by nature: the other side keeps its own
+    const id = nid++;
+    if (Array.isArray(v)) {
+      seen.set(v, { r: id });
+      const out = new Array(v.length);
+      for (let i = 0; i < v.length; i++) out[i] = enc(v[i], path + '[' + i + ']');
+      return { a: id, v: out };
+    }
+    if (v instanceof Map) {
+      seen.set(v, { r: id });
+      const out = [];
+      for (const [a, b] of v) out.push([enc(a, path + '.key'), enc(b, path + '.get()')]);
+      return { m: id, v: out };
+    }
+    if (v instanceof Set) {
+      seen.set(v, { r: id });
+      const out = [];
+      for (const a of v) out.push(enc(a, path + '.has()'));
+      return { s: id, v: out };
+    }
+    if (snapTyped(v)) { seen.set(v, { r: id }); return { t: v.constructor.name, i: id, v: Array.from(v, x => enc(x, path)) }; }
+    if (snapPlain(v)) {
+      seen.set(v, { r: id });
+      const out = {};
+      for (const key of Object.keys(v)) out[key] = enc(v[key], path + '.' + key);
+      return { o: id, v: out };
+    }
+    bad++;
+    if (badAt.length < 40) badAt.push(path + ' (' + ((v.constructor && v.constructor.name) || 'object') + ')');
+    return { x: (v.constructor && v.constructor.name) || 'object' };
+  };
+  const vals = R.get();
+  const vars = R.vars.map((n, i) => enc(vals[i], n));
+  // a container goes as its contents, and is filled in place on the other side
+  const objs = R.objs.map((n, i) => {
+    const o = objVals[i];
+    if (Array.isArray(o)) return { a: -1, v: o.map((x, j) => enc(x, n + '[' + j + ']')) };
+    if (o instanceof Map) return { m: -1, v: [...o].map(([a, b]) => [enc(a, n + '.key'), enc(b, n + '.get()')]) };
+    if (o instanceof Set) return { s: -1, v: [...o].map(a => enc(a, n + '.has()')) };
+    const out = {};
+    for (const key of Object.keys(o)) out[key] = enc(o[key], n + '.' + key);
+    return { o: -1, v: out };
+  });
+  return { build: buildId(), names: [R.vars, R.objs], vars, objs, bad, badAt };
+}
+// and taking one over: the run becomes the snapshot's, this machine's own things stay as they are
+function snapRead(snap) {
+  const R = snapRoots();
+  snapStatic();
+  if (snap.build !== buildId()) throw new Error('a snapshot from another build');
+  const [vn, on] = snap.names;
+  const byId = new Map(), objVals = R.getObjs(), byName = new Map(R.objs.map((n, i) => [n, objVals[i]]));
+  const KEEP = SNAP;                      // what could not travel: kept as this machine has it, where it has it
+  const look = path => { let v = SNAP.statics.get(path[0]); for (let i = 1; i < path.length && v != null; i++) v = v[path[i]]; return v; };
+  const dec = e => {
+    if (e === null || typeof e !== 'object') return e;
+    if (e.n !== undefined) return e.n === '-0' ? -0 : Number(e.n);
+    if (e.u) return undefined;
+    if (e.r !== undefined) return byId.get(e.r);
+    if (e.c !== undefined) return byName.get(e.c);
+    if (e.k !== undefined) return look(e.k);
+    if (e.x !== undefined) return KEEP;
+    const one = x => { const v = dec(x); return v === KEEP ? undefined : v; };
+    if (e.a !== undefined) { const out = []; byId.set(e.a, out); for (const x of e.v) out.push(one(x)); return out; }
+    if (e.o !== undefined) { const out = {}; byId.set(e.o, out); for (const key of Object.keys(e.v)) out[key] = one(e.v[key]); return out; }
+    if (e.m !== undefined) { const out = new Map(); byId.set(e.m, out); for (const [a, b] of e.v) out.set(one(a), one(b)); return out; }
+    if (e.s !== undefined) { const out = new Set(); byId.set(e.s, out); for (const a of e.v) out.add(one(a)); return out; }
+    if (e.t !== undefined) { const C = globalThis[e.t]; const out = new C(e.v.length); byId.set(e.i, out); e.v.forEach((x, i) => { out[i] = one(x); }); return out; }
+    return undefined;
+  };
+  // read in the order it was written: an object is written out where it is first met, and pointed at after
+  const vals = snap.vars.map(dec);
+  const objs = snap.objs.map(e => {
+    if (e.a !== undefined) return e.v.map(dec);
+    if (e.m !== undefined) return e.v.map(([a, b]) => [dec(a), dec(b)]);
+    if (e.s !== undefined) return e.v.map(dec);
+    const out = {}; for (const key of Object.keys(e.v)) out[key] = dec(e.v[key]); return out;
+  });
+  // the containers are filled in place, so whatever points at them still does
+  on.forEach((n, i) => {
+    const o = byName.get(n), v = objs[i];
+    if (!o) return;
+    if (Array.isArray(o)) { o.length = 0; for (const x of v) o.push(x); }
+    else if (o instanceof Map) { o.clear(); for (const [a, b] of v) o.set(a, b); }
+    else if (o instanceof Set) { o.clear(); for (const a of v) o.add(a); }
+    else {
+      for (const key of Object.keys(o)) if (!(key in v)) delete o[key];
+      for (const key of Object.keys(v)) if (v[key] !== KEEP) o[key] = v[key];
+    }
+  });
+  const have = new Map(vn.map((n, i) => [n, vals[i]]));
+  const cur = R.get();
+  R.set(R.vars.map((n, i) => (have.has(n) && have.get(n) !== KEEP ? have.get(n) : cur[i])));
+}
+
+/* ===========================================================================
    LOCKSTEP CO-OP (2 Oct 2026: the seeded rework, Phase 2 step 1)
    Both machines run the whole game. The host hands the guest the run's
    header once (the seed, the view, the run's settings, both pilots and the
@@ -58107,6 +58411,12 @@ const LS_DELAY_MIN = 3, LS_DELAY_MAX = 8;
 const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e'];   // the keys that act, as they travel
 const LS_UI_GUEST = new Set(['pause', 'resume']);   // the guest's choices; every other is the host's
 const LS_HOST_SCREENS = ['levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk'];
+// screens one player can open over the shared pause, which a snapshot leaves open
+const LS_OVER_PAUSE = ['codex', 'settings', 'gfx', 'changelog', 'skin'];
+const LS_CHECK = 60;                  // the game is fingerprinted every second of it
+const LS_PAST = 600;                  // and the last ten seconds of records are kept, to play again after a snapshot
+const LS_CHUNK = 15000;               // a snapshot travels in pieces this size: every browser's channel takes them
+const LS_RESYNC_GAP = 2;              // seconds between two snapshots, at least
 const LS = {
   on: false, run: 0, tick: 0, delay: LS_DELAY_MIN, acc: 0,
   mine: new Map(), theirs: new Map(),   // step → input record
@@ -58118,6 +58428,12 @@ const LS = {
   paused: false, pausedBy: '',          // the shared pause, and whose it was
   uiQ: [],                              // our menu choices, waiting for the next record: act, index, ...
   uiBusy: -1,                           // the step our last choice lands on: one at a time
+  // the safety net: see lsCheck
+  epoch: 0,                             // which game the fingerprints are of: one more with every snapshot
+  ckMine: new Map(), ckTheirs: new Map(),   // step -> fingerprint, ours and the partner's waiting for ours
+  ckAt: 0, ckHash: 0,                   // our latest, sent with every packet
+  past: new Map(),                      // step -> the records it was played with
+  resyncT: 0, resyncs: 0, replayed: 0, syncNote: 0, inbound: null,
   after: null                           // and a test's hook, run after every step
 };
 // this machine runs the co-op world: the host always, the guest when in lockstep
@@ -58169,12 +58485,15 @@ function lsBegin(run, delay) {
   LS.hi = delay - 1; LS.peerNeed = 0;
   LS.waitT = 0; LS.resendT = 0; LS.cur = null;
   LS.paused = false; LS.pausedBy = ''; LS.uiQ.length = 0; LS.uiBusy = -1;
+  LS.epoch = 0; LS.ckMine.clear(); LS.ckTheirs.clear(); LS.ckAt = 0; LS.ckHash = 0; LS.past.clear();
+  LS.resyncT = 0; LS.resyncs = 0; LS.replayed = 0; LS.syncNote = 0; LS.inbound = null;
+  snapStatic();                          // what a snapshot needs to know about the game, ready before one is: it takes a moment
   inputQueue.length = 0;
   inputSource = lsHostInput;
 }
 function lsEnd() {
   LS.on = false; LS.cur = null;
-  LS.mine.clear(); LS.theirs.clear();
+  LS.mine.clear(); LS.theirs.clear(); LS.past.clear(); LS.inbound = null;
   inputSource = inputSample;
   MP.stalled = false;
 }
@@ -58207,13 +58526,15 @@ function lsSend() {
   if (first > LS.hi) return;
   wSeek(0);
   w8(MSG.LSIN); w16(LS.run); w32(lsNeed()); w32(first); w8(last - first + 1);
+  w16(LS.epoch); w32(LS.ckAt); w32(LS.ckHash);   // and our latest fingerprint: see lsCheck
   for (let s = first; s <= last; s++) lsWrite(LS.mine.get(s));
   netSend(wOut(), false);
   LS.resendT = LS_RESEND;
 }
 function lsRecv() {
-  const run = r16(), need = r32(), first = r32(), n = r8();
+  const run = r16(), need = r32(), first = r32(), n = r8(), epoch = r16(), ckAt = r32(), ckHash = r32();
   if (!LS.on || run !== LS.run) return;          // a packet from another run, or before ours began
+  lsCompare(epoch, ckAt, ckHash);
   if (need > LS.peerNeed) {
     LS.peerNeed = need;
     // ours can go once both machines are past it: the partner may be ahead of us, and we still play these
@@ -58229,19 +58550,28 @@ const lsReady = () => LS.mine.has(LS.tick) && LS.theirs.has(LS.tick);
 function lsNeed() { let s = LS.tick; while (LS.theirs.has(s)) s++; return s; }
 function lsStep() {
   const t = LS.tick, me = LS.mine.get(t), them = LS.theirs.get(t);
-  LS.cur = MP.role === 'host' ? { host: me, wing: them } : { host: them, wing: me };
-  lsUiApply(LS.cur.host, 'host');           // the step's menu choices first, the host's before the guest's
-  lsUiApply(LS.cur.wing, 'guest');
-  update(STEP);
+  lsPlay(MP.role === 'host' ? { host: me, wing: them } : { host: them, wing: me });
   LS.theirs.delete(t);
   if (t < LS.peerNeed) LS.mine.delete(t);    // the partner has it, and now so have we
+}
+// one step of the shared game, with both pilots' records for it
+function lsPlay(cur) {
+  const t = LS.tick;
+  LS.cur = cur;
+  lsUiApply(cur.host, 'host');              // the step's menu choices first, the host's before the guest's
+  lsUiApply(cur.wing, 'guest');
+  update(STEP);
+  LS.past.set(t, cur); LS.past.delete(t - LS_PAST);   // kept a while: a guest may have to play it again (lsAdopt)
   LS.tick++;
+  lsCheck();
   if (LS.after) LS.after();               // a test's hook: the same moment on both machines
 }
 /* The frame, in lockstep: play the steps owed while both inputs are in hand,
    and when the partner's are late, wait for them. Waiting long enough says so
    on the screen (MP.stalled). */
 function lsFrame(dt) {
+  if (LS.resyncT > 0) LS.resyncT -= dt;
+  if (LS.syncNote > 0) LS.syncNote -= dt;
   LS.acc = Math.min(LS.acc + dt, ACC_MAX);
   let n = 0;
   while (LS.on && LS.acc >= STEP && n < STEPS_PER_FRAME) {
@@ -58254,6 +58584,105 @@ function lsFrame(dt) {
   LS.waitT = waiting ? LS.waitT + dt : 0;
   MP.stalled = LS.waitT > 0.3;
   if (waiting && (LS.resendT -= dt) <= 0) lsSend();
+}
+
+/* The safety net (step 3). Every second of the shared game each machine
+   fingerprints it (lsHash) and sends the fingerprint with its inputs. When the
+   partner's differs from ours for the same step, the games have parted, and
+   the host's is the one that counts: it writes a snapshot of its run
+   (RUN SNAPSHOTS) and sends it, and the guest takes it over (lsAdopt). The
+   epoch keeps fingerprints of a game since replaced out of the comparison.
+   With one build on both sides and a deterministic game this never fires;
+   it is there for what slips through anyway (two browsers' Math.sin, say). */
+const lsHB = new Float64Array(1), lsHU = new Uint32Array(lsHB.buffer);
+function lsHash() {
+  let h = 2166136261 >>> 0;
+  const n = v => { lsHB[0] = +v || 0; h = Math.imul(h ^ lsHU[0], 16777619) >>> 0; h = Math.imul(h ^ lsHU[1], 16777619) >>> 0; };
+  const st = LS.paused ? 'pause' : state;
+  for (let i = 0; i < st.length; i++) h = Math.imul(h ^ st.charCodeAt(i), 16777619) >>> 0;
+  n(simRngState); n(simTick); n(wave); n(elapsed); n(credits);
+  n(P.x); n(P.y); n(P.hp); n(P.maxHp); n(P.level); n(P.xp);
+  n(Wing.x); n(Wing.y); n(Wing.hp);
+  n(enemies.length);
+  for (const e of enemies) { n(e.id); n(e.x); n(e.y); n(e.hp); }
+  n(bullets.length); n(ebullets.length); n(gems.length); n(drops.length);
+  return h;
+}
+function lsCheck() {
+  if (LS.tick % LS_CHECK) return;
+  const h = lsHash();
+  LS.ckMine.set(LS.tick, h); LS.ckMine.delete(LS.tick - LS_CHECK * 16);
+  LS.ckAt = LS.tick; LS.ckHash = h;
+  const theirs = LS.ckTheirs.get(LS.tick);
+  if (theirs !== undefined) { LS.ckTheirs.delete(LS.tick); if (theirs !== h) lsParted(LS.tick); }
+}
+// the partner's latest fingerprint, against ours for the same step (or kept until we get there)
+function lsCompare(epoch, at, hash) {
+  if (epoch !== LS.epoch || !at) return;
+  const mine = LS.ckMine.get(at);
+  if (mine !== undefined) { if (mine !== hash) lsParted(at); return; }
+  if (at >= LS.tick) {
+    LS.ckTheirs.set(at, hash);
+    if (LS.ckTheirs.size > 32) LS.ckTheirs.delete(LS.ckTheirs.keys().next().value);
+  }
+}
+function lsParted(at) {
+  LS.partedAt = at;
+  if (MP.role === 'host') lsResync();
+}
+// host: the run as it is now, to the guest, in pieces over the reliable channel
+function lsResync() {
+  if (LS.resyncT > 0 || !netLive()) return;
+  LS.resyncT = LS_RESYNC_GAP;
+  LS.epoch = (LS.epoch + 1) & 0xffff;
+  LS.ckTheirs.clear();
+  LS.resyncs++; LS.syncNote = 2.5;
+  const mine = state;
+  if (LS.paused) state = 'pause';          // the shared state, not a screen this machine has open over it
+  const snap = snapWrite();
+  state = mine;
+  snap.ls = { paused: LS.paused, pausedBy: LS.pausedBy };
+  const bytes = new TextEncoder().encode(JSON.stringify(snap));
+  for (let off = 0; off < bytes.length; off += LS_CHUNK) {
+    const n = Math.min(LS_CHUNK, bytes.length - off);
+    wSeek(0);
+    w8(MSG.LSSTATE); w16(LS.run); w16(LS.epoch); w32(LS.tick); w32(bytes.length); w32(off);
+    new Uint8Array(_nb, _np, n).set(bytes.subarray(off, off + n)); _np += n;
+    netSend(wOut(), true);
+  }
+}
+// guest: a piece of the host's snapshot; the last piece hands it over
+function lsStateRecv() {
+  const run = r16(), epoch = r16(), at = r32(), total = r32(), off = r32();
+  if (!LS.on || run !== LS.run || MP.role !== 'guest') return;
+  if (off === 0) LS.inbound = { epoch, at, buf: new Uint8Array(total), got: 0 };
+  const b = LS.inbound;
+  if (!b || b.epoch !== epoch || b.at !== at) return;
+  const n = rLeft();
+  b.buf.set(new Uint8Array(_rv.buffer, _rv.byteOffset + _rp, n), off);
+  b.got += n;
+  if (b.got >= total) { LS.inbound = null; lsAdopt(at, epoch, new TextDecoder().decode(b.buf)); }
+}
+/* guest: the host's run, as it was at step 'at', becomes this one. Steps
+   already played past it are played again from it, with the records both
+   machines played them with; steps not yet reached are in the snapshot. */
+function lsAdopt(at, epoch, json) {
+  const was = LS.tick;
+  for (let t = at; t < was; t++) if (!LS.past.has(t)) { netEvent({ t: 'lsagain' }); return; }   // too far past it: ask again
+  const snap = JSON.parse(json);
+  const mine = state, keep = LS.paused && snap.ls && snap.ls.paused && LS_OVER_PAUSE.includes(mine);
+  snapRead(snap);
+  if (keep) state = mine;                  // a screen this machine had open over the shared pause stays open
+  LS.paused = !!(snap.ls && snap.ls.paused); LS.pausedBy = (snap.ls && snap.ls.pausedBy) || '';
+  LS.epoch = epoch; LS.ckMine.clear(); LS.ckTheirs.clear(); LS.ckAt = 0; LS.ckHash = 0;
+  LS.tick = at;
+  const again = [];
+  for (let t = at; t < was; t++) again.push(LS.past.get(t));
+  for (const cur of again) lsPlay(cur);
+  LS.replayed += again.length;
+  for (const k of [...LS.mine.keys()]) if (k < LS.tick) LS.mine.delete(k);
+  for (const k of [...LS.theirs.keys()]) if (k < LS.tick) LS.theirs.delete(k);
+  LS.resyncs++; LS.syncNote = 2.5;
 }
 
 // P plays the host's record, on both machines (the inputSource while lockstep runs)
@@ -58312,23 +58741,27 @@ function lsUiApply(rec, who) {
     } else UI_ACTS[act](rec.ui[j + 1]);
   }
 }
-// who has the screen: the host's choices on the guest's machine, and whose pause it is
+// who has the screen: the host's choices on the guest's machine, whose pause it is, and a resync
 function lsDrawHint() {
   if (!LS.on) return;
   const peer = (MP.peerName || (MP.role === 'host' ? 'YOUR WINGMAN' : 'THE HOST')).toUpperCase();
   let msg = '';
   if (state === 'pause') msg = (LS.pausedBy === MP.role ? 'YOU PAUSED' : peer + ' PAUSED') + '  ·  EITHER OF YOU CAN RESUME';
   else if (MP.role === 'guest' && (LS_HOST_SCREENS.includes(state) || (choice && state === 'play'))) msg = peer + ' IS CHOOSING';
-  if (!msg) return;
+  if (msg) lsPill(msg, state === 'pause' ? H / 2 + 140 : H - 34, WING_COL);
+  if (LS.syncNote > 0) lsPill('BACK IN STEP WITH ' + peer, 92, '#fbbf24', Math.min(1, LS.syncNote));
+}
+function lsPill(msg, y, col, a = 1) {
   ctx.save();
+  ctx.globalAlpha = a;
   ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = 'center';
-  const w = ctx.measureText(msg).width + 36, y = state === 'pause' ? H / 2 + 140 : H - 34;
+  const w = ctx.measureText(msg).width + 36;
   ctx.fillStyle = 'rgba(3,5,10,0.82)';
   roundRect(W / 2 - w / 2, y - 15, w, 26, 13); ctx.fill();
-  ctx.strokeStyle = rgba(WING_COL, 0.5); ctx.lineWidth = 1;
+  ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
   roundRect(W / 2 - w / 2, y - 15, w, 26, 13); ctx.stroke();
-  ctx.fillStyle = WING_COL;
+  ctx.fillStyle = col;
   ctx.fillText(msg, W / 2, y + 2);
   ctx.restore();
 }
@@ -59113,7 +59546,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0,
+    netEvent({ t: 'hello', sig: NET_SIG(), char: selectedChar, ls: LS_WANT ? 1 : 0, build: LS_WANT ? buildId() : '',
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 
@@ -59238,7 +59671,8 @@ function lanPilots(y) {
 function lanStatusLine(y) {
   const phase = Net.phase;
   const txt = phase === 'failed' ? Net.note || 'connection failed'
-            : phase === 'live'   ? 'connected  ·  ' + (Net.relayed ? 'relayed  ·  ' : '') + (Net.ping || 0) + 'ms'
+            : phase === 'live'   ? 'connected  ·  ' + (Net.relayed ? 'relayed  ·  ' : '') + (Net.ping || 0) + 'ms' +
+                                   (MP.ls ? '  ·  lockstep' : MP.lsNote ? '  ·  ' + MP.lsNote : '')
             : phase === 'connecting' ? 'handshaking…'
             : phase === 'waiting' ? 'waiting for a wingman…'
             : phase === 'signalling' ? (Net.note || 'connecting…')
@@ -60801,7 +61235,7 @@ function chalCheckGoal(key) {
     setTimeout(() => { if (state === 'play') banner('UNLOCKED   ' + rw.n, RARITY[rw.rar], 4.0); }, 2200);
 
   // the run is over the moment the named boss is down: that is the whole deal
-  simAfter(3.6, () => { if (Chal.on === c && state === 'play') chalEnd(true); });
+  simAfter(3.6, 'chalEnd', c);
 }
 
 function chalEnd(won) {

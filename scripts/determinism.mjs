@@ -17,16 +17,27 @@
    (Math.random, the camera, the window, the devices, the drawing, the live
    save) makes B part from A, and the test names the second it happened.
 
+     run C   a second copy of the game, loaded on its own, takes over a
+             snapshot of run A a third of the way in (RUN SNAPSHOTS: what
+             lockstep's safety net sends) and plays the rest as run B does
+
+   C must match A from the snapshot on, and nothing in the snapshot may be
+   something that cannot travel. If C parts, the snapshot left out something
+   the run needs: --restore name prints the first field that differs. With
+   Node's --expose-internals (npm test), the snapshot's reading of the
+   game's own text is also held to a real parse.
+
    No browser and no dependencies: the game's script is loaded into a bare
    context where the canvas, audio, storage and network are stubs.
 
-     node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name]
+     node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name] [--restore name]
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadGame, canvasCalls } from './lib/game-vm.mjs';
+import { createRequire } from 'node:module';
+import { loadGame, canvasCalls, gameScript } from './lib/game-vm.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -39,13 +50,13 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 const { win, ctx, loadMs } = g;
 
 /* --------------------- the harness, inside the game's scope --------------------- */
-vm.runInContext(`(() => {
+const HARNESS = `(() => {
   pageDead = true;
   const STEP = 1 / 60;
   Save.profile.gfxSeen = GFX_VER;
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;   // THE VAGRANT unlocked
-  const SNAP = JSON.stringify(Save.profile), FX0 = JSON.stringify(FXO);
-  const restore = () => { const o = JSON.parse(SNAP); for (const k of Object.keys(Save.profile)) delete Save.profile[k]; Object.assign(Save.profile, o); Codex.load(); };   // the codex too: runs write sightings into it
+  const SAVE0 = JSON.stringify(Save.profile), FX0 = JSON.stringify(FXO);
+  const restore = () => { const o = JSON.parse(SAVE0); for (const k of Object.keys(Save.profile)) delete Save.profile[k]; Object.assign(Save.profile, o); Codex.load(); };   // the codex too: runs write sightings into it
   const r = v => typeof v === 'number' ? (Number.isFinite(v) ? +v.toPrecision(12) : String(v)) : (v === undefined ? null : v);
   const pk = (o, ks) => ks.map(k => r(o[k]));
   // what the game is, at a moment: everything a desync would show up in
@@ -115,11 +126,13 @@ vm.runInContext(`(() => {
     if (o.kit) P.awake = 1;
     P.maxHp = P.hp = 60000; P.dmg *= 3;
     inputSource = bot;
-    run = { o, k: 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null };
+    if (o.from) snapRead(JSON.parse(o.from));     // run C: the run so far is another copy's, taken over here
+    run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null };
   }
   function play(o) {
     start(o);
     for (; run.k < o.steps; run.k++) {
+      if (o.snapAt === run.k) { const s = snapWrite(); run.snap = JSON.stringify(s); run.snapBad = s.badAt; }
       if (state === 'pause') state = 'play';
       if (state === 'levelup') { uiArm = 0; handleKey('1'); }
       else if (state !== 'play' && state !== 'dead') state = 'play';
@@ -128,13 +141,22 @@ vm.runInContext(`(() => {
       if (o.b && o.b.draw && run.k % 5 === 0) { try { render(); } catch (err) { run.drawErrors++; if (!run.firstDrawError) run.firstDrawError = String(err && err.stack || err).split('\\n').slice(0, 3).join(' | '); } }
       run.maxWave = Math.max(run.maxWave, wave);
       for (const e of enemies) if (e.boss) run.bosses.add(e.boss);
-      if ((run.k + 1) % 60 === 0) run.prints.push(fnv(fingerprint()));
+      if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
-    return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError };
+    return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
+             snap: run.snap, snapBad: run.snapBad };
   }
   globalThis.__det = { play };
-})();`, ctx, { filename: 'determinism-harness' });
+})();`;
+vm.runInContext(HARNESS, ctx, { filename: 'determinism-harness' });
+/* Run C's copy of the game: loaded on its own, at another size, it takes over
+   run A's snapshot partway through and has to play the rest the same. */
+let C = null;
+const copyC = () => {
+  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); }
+  return C;
+};
 
 /* ------------------------------ the scenarios ------------------------------ */
 const L = QUICK ? 0.4 : 1;                       // --quick plays each for 40% as long
@@ -156,16 +178,36 @@ const S = [
   { name: 'patch',      char: 'runner', seed: 114, steps: 7200,  starter: "hlAreaStart('patch')" },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
-const play = (sc, b) => {
+const play = (sc, b, more, G) => {
+  const { win, ctx } = G || g;
   if (b === true) b = ALL;
   if (b) b = Object.assign({ junk: b.devices || b.save }, b);
   win.innerWidth = b && b.window ? 800 : 1280; win.innerHeight = b && b.window ? 600 : 720;
   vm.runInContext('resize()', ctx);
   const o = Object.assign({}, sc, { steps: Math.round(sc.steps * L), view: VIEW, b,
-    starter: sc.starter ? vm.runInContext('() => { ' + sc.starter + '; }', ctx) : null });
+    starter: sc.starter ? vm.runInContext('() => { ' + sc.starter + '; }', ctx) : null }, more);
   return ctx.__det.play(o);
 };
+// where run A is snapshotted for run C: a third of the way in, on a second
+const snapAt = sc => Math.max(60, Math.round(sc.steps * L / 3 / 60) * 60);
 
+/* --restore name: where run C (the snapshot taken over by another copy) first
+   parts from run A, field by field */
+const RDIAG = (() => { const i = args.indexOf('--restore'); return i >= 0 ? args[i + 1] : null; })();
+if (RDIAG) {
+  const sc = S.find(x => x.name === RDIAG), at = snapAt(sc);
+  ctx.__raw = true; copyC().ctx.__raw = true;
+  const a = play(sc, false, { snapAt: at }), c = play(sc, true, { from: a.snap, fromK: at }, copyC());
+  const from = at / 60, j = c.prints.findIndex((h, k) => h !== a.prints[from + k]);
+  if (j < 0) { console.log('restore ' + RDIAG + ': same from ' + from + 's on'); process.exit(0); }
+  const A = JSON.parse(a.prints[from + j]), Cc = JSON.parse(c.prints[j]);
+  const names = ['rng', 'simTick', 'wave', 'elapsed', 'credits', 'state', 'P', 'enemies', 'bullets', 'ebullets', 'gems', 'drops', 'hazards', 'up', 'RUN'];
+  console.log('restore ' + RDIAG + ': snapshot at ' + from + 's, first parts at ' + (from + j) + 's');
+  A.forEach((x, k) => { const y = Cc[k], sx = JSON.stringify(x), sy = JSON.stringify(y); if (sx !== sy) {
+    let i = 0; while (i < sx.length && sx[i] === sy[i]) i++;
+    console.log('  ' + (names[k] || k) + '\n    A …' + sx.slice(Math.max(0, i - 160), i + 160) + '\n    C …' + sy.slice(Math.max(0, i - 160), i + 160)); } });
+  process.exit(1);
+}
 const DIAG = (() => { const i = args.indexOf('--diagnose'); return i >= 0 ? args[i + 1] : null; })();
 if (DIAG) {
   const sc = S.find(x => x.name === DIAG);
@@ -188,21 +230,66 @@ if (DIAG) {
   }
   process.exit(0);
 }
+/* The snapshot finds the run's variables by reading the game's own text
+   (snapScan). Hold that reading to a real parse of the same text: Node keeps
+   a parser inside (acorn), which a script can reach when Node is started with
+   --expose-internals (npm test does). Without it, this check is skipped. */
+function namesCheck() {
+  let acorn;
+  try { acorn = createRequire(import.meta.url)('internal/deps/acorn/acorn/dist/acorn'); } catch (e) { return null; }
+  const ast = acorn.parse(gameScript(IDX).code, { ecmaVersion: 'latest', sourceType: 'script' });
+  const want = { lets: [], consts: [], fns: [] };
+  const names = (p, out) => {
+    if (!p) return;
+    if (p.type === 'Identifier') out.push(p.name);
+    else if (p.type === 'ObjectPattern') p.properties.forEach(q => names(q.value || q.argument, out));
+    else if (p.type === 'ArrayPattern') p.elements.forEach(e => names(e, out));
+    else if (p.type === 'AssignmentPattern') names(p.left, out);
+    else if (p.type === 'RestElement') names(p.argument, out);
+  };
+  for (const st of ast.body) {
+    if (st.type === 'VariableDeclaration') st.declarations.forEach(d => names(d.id, st.kind === 'const' ? want.consts : want.lets));
+    else if ((st.type === 'FunctionDeclaration' || st.type === 'ClassDeclaration') && st.id) want.fns.push(st.id.name);
+  }
+  const got = vm.runInContext('(() => { const n = snapScan(); return JSON.stringify({ lets: n.lets, consts: n.consts, fns: n.fns }); })()', ctx);
+  const g2 = JSON.parse(got), miss = [];
+  for (const k of Object.keys(want)) { const have = new Set(g2[k]); for (const n of want[k]) if (!have.has(n)) miss.push(k.slice(0, -1) + ' ' + n); }
+  return { miss, counts: Object.fromEntries(Object.keys(want).map(k => [k, want[k].length])) };
+}
 console.log(`VOIDRUNNER determinism · ${path.relative(process.cwd(), IDX) || IDX} · loaded in ${loadMs} ms${QUICK ? ' · quick' : ''}\n`);
 let failed = 0;
 const pad = (s, n) => String(s).padEnd(n);
+{
+  const nc = namesCheck();
+  if (!nc) console.log(`${pad('names', 12)} skipped  (start Node with --expose-internals to hold the snapshot's scan to a real parse)`);
+  else {
+    if (nc.miss.length) failed++;
+    console.log(`${pad('names', 12)} ${nc.miss.length ? 'MISSED ' + nc.miss.length + ': ' + nc.miss.slice(0, 12).join(', ') : 'all found'}` +
+      `  the snapshot's scan against a parse: ${nc.counts.lets} lets, ${nc.counts.consts} consts, ${nc.counts.fns} functions and classes`);
+  }
+}
 for (const sc of S) {
   if (ONLY && !ONLY.has(sc.name)) continue;
   const t = Date.now();
-  let a, b, err = null;
+  let a, b, c, err = null;
   let drawn = 0;
-  try { a = play(sc, false); const c0 = canvasCalls(); b = play(sc, true); drawn = canvasCalls() - c0; } catch (e) { err = e; }
+  const at = snapAt(sc);
+  try {
+    a = play(sc, false, { snapAt: at }); const c0 = canvasCalls(); b = play(sc, true); drawn = canvasCalls() - c0;
+    c = play(sc, true, { from: a.snap, fromK: at }, copyC());          // run C: run A's snapshot, taken over by another copy
+  } catch (e) { err = e; }
   if (err) { failed++; console.log(`${pad(sc.name, 12)} ERROR  ${String(err && err.stack || err).split('\n').slice(0, 4).join(' | ')}`); continue; }
   const i = a.prints.findIndex((h, j) => h !== b.prints[j]);
   const ok = i < 0 && a.prints.length === b.prints.length && a.prints.length > 0;
-  if (!ok) failed++;
+  // run C against run A, from the snapshot on
+  const from = at / 60, ci = c.prints.findIndex((h, j) => h !== a.prints[from + j]);
+  const okC = ci < 0 && c.prints.length === a.prints.length - from && !(a.snapBad && a.snapBad.length);
+  if (!ok || !okC) failed++;
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}`);
+  const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
+    : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
+      (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}`);
 }
 if (!ONLY) {
   // a seed must matter

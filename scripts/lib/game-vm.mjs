@@ -106,11 +106,13 @@ export function makeWindow(w, h, search = '') {
 }
 
 const cache = new Map();
-function gameScript(idx) {
+// the game's script, compiled once, and its text (the game reads its own: buildId, snapScan)
+export function gameScript(idx) {
   if (!cache.has(idx)) {
     const html = fs.readFileSync(idx, 'utf8').replace(/\r\n/g, '\n');
     const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-    cache.set(idx, new vm.Script(scripts.reduce((a, b) => (b.length > a.length ? b : a)), { filename: 'index.html' }));
+    const code = scripts.reduce((a, b) => (b.length > a.length ? b : a));
+    cache.set(idx, { code, script: new vm.Script(code, { filename: 'index.html' }) });
   }
   return cache.get(idx);
 }
@@ -119,6 +121,9 @@ export function loadGame(idx, { w = 1280, h = 720, search = '' } = {}) {
   const win = makeWindow(w, h, search);
   const ctx = vm.createContext(win);
   const t0 = Date.now();
-  gameScript(idx).runInContext(ctx);
+  const g = gameScript(idx);
+  win.document.currentScript = { text: g.code, textContent: g.code };   // as a browser has it while the script runs
+  g.script.runInContext(ctx);
+  win.document.currentScript = null;
   return { win, ctx, loadMs: Date.now() - t0, run: (code, name) => vm.runInContext(code, ctx, { filename: name || 'test' }) };
 }

@@ -154,10 +154,11 @@ D1, not the real database. To try ALL HALLOWS outside its dates:
 ## The determinism test
 
 ```sh
-npm test                                   # about 3 minutes
-node scripts/determinism.mjs --quick       # about a minute
+npm test                                   # about 5 minutes
+node scripts/determinism.mjs --quick       # about 2 minutes
 node scripts/determinism.mjs --only rush,keeper
 node scripts/determinism.mjs --diagnose hacker --fields
+node scripts/determinism.mjs --restore amalgam
 ```
 
 Co-op is moving to lockstep: both machines run the same game and send only
@@ -169,6 +170,22 @@ canvas with every effect on, at another window size, while the keyboard,
 mouse, autofire and the save's flags are scrambled every step. The two must
 match at every second of game time. It also checks that a different seed
 changes the run, and that a planted unseeded roll is caught.
+
+Run C checks the snapshots that lockstep's safety net sends. A second copy
+of the game, loaded on its own, takes over a snapshot of run A a third of
+the way in and plays the rest like run B. It must match run A from there on.
+A snapshot holds every top-level `let` in the game and every container the
+run writes into, apart from what is each machine's own (`SNAP_LOCAL`,
+`SNAP_LOCAL_OBJS`: the screen, the menus, the link, the save, the drawing's
+caches and particles). The game finds those names by reading its own script
+(`snapScan`), so a new variable is included without being listed. `npm test`
+starts Node with `--expose-internals` so the test can hold that reading to a
+real parse.
+
+If run C parts, the snapshot left out something the run needs.
+`--restore name` prints the first field that differs. A value that cannot
+travel (a closure made during the run, a canvas) fails the scenario and is
+named.
 
 It needs only Node, with no browser and no packages: the game's script runs
 in a bare context with the canvas, audio, storage and network stubbed out.
@@ -190,6 +207,9 @@ The rules it holds the game to:
 - **The save:** the save's flags are read from `RUN`, frozen when the run
   starts. Progress goes through `runSet`. Each run zeroes its counters in
   `resetGame`.
+- **State is data:** the run keeps no closures. A delayed act is a name
+  (`simAfter(sec, 'sitDown')`), and a shop item points at its table
+  (`SHOP_SVC`). A table filled as the script loads goes in `SNAP_TABLES`.
 
 ## The lockstep test
 
@@ -222,6 +242,16 @@ bot plays every screen through `handleKey`, and the guest's bot presses keys
 on the host's screens, which must change nothing. Both pause, resume and
 open their own screens over the pause, and the run must cover all of it.
 Each scenario's seed is fixed, so a failure replays exactly.
+
+The safety net: every second, both machines hash the game and send the hash
+with their inputs. If the hashes for the same step differ, the host sends a
+snapshot of its run, in 15 KB pieces over the reliable channel. The guest
+takes it over and replays any steps it had already played past that point,
+using the inputs they were first played with. A clean run must never need
+it. The `parted` scenario knocks each machine out of step once, on purpose,
+and both must be back in step within seconds. The `builds` check confirms
+two different builds refuse lockstep: the hello carries a hash of each
+side's script.
 
 ## Limits worth knowing (Workers Free plan)
 

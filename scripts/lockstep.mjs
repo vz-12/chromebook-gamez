@@ -8,6 +8,11 @@
    nothing but the run's header and those inputs. Every second of game time
    both fingerprint the game, and the two must be identical: the same run,
    step for step, on two machines that were only ever told each other's input.
+   A clean run must never need the safety net (the game's own fingerprints and
+   the host's snapshots); 'parted' nudges each machine out of step once, on
+   purpose, and the two must find it and be the same again within seconds,
+   with the guest playing again the steps it was past the snapshot. 'builds'
+   checks two different builds refuse lockstep.
 
      node scripts/lockstep.mjs [path/to/index.html] [--only name,name] [--short]
 
@@ -32,6 +37,9 @@ const SCENARIOS = [
                       freeze: { at: 40000, ms: 1800 } },
   { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
                       guestSave: true },
+  // the safety net: each machine nudges its own game once, out of step; both must find it and come back
+  { name: 'parted', seed: 205,   lat: 40,  jit: 20, loss: 0.05, hostHz: 60, guestHz: 72,  host: 'ember',  wing: 'runner', kit: true,
+                      part: { guest: [1500], host: [6000] } },
 ];
 const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 
@@ -39,7 +47,7 @@ const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 let ls = 12345;
 const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 4294967296; };
 
-const SETUP = (role, char, kit, scramble, kitRun, yes) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines)
+const SETUP = (role, char, kit, scramble, kitRun, yes, part) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
@@ -142,8 +150,11 @@ const SETUP = (role, char, kit, scramble, kitRun, yes) => `(() => {   // kit: th
     [6000, () => openShop()],
   ];
   // the same moment on both machines: test conditions, menus, and the fingerprint
+  const PARTS = ${JSON.stringify(part || [])}, parted = new Set();
   LS.after = () => {
     const t = LS.tick;
+    // a nudge on this machine alone: its roll and its enemies' hulls, as a desync would leave them (once: a replay passes here again)
+    if (PARTS.includes(t) && !parted.has(t)) { parted.add(t); simRngState = (simRngState ^ 0x5bd1e995) >>> 0; for (const e of enemies) e.hp *= 0.93; }
     if (t === 1) { P.maxHp = P.hp = 60000; P.dmg *= 3; Wing.maxHp = Wing.hp = 60000; }
     if (${!!kitRun} && t % 900 === 60) {
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
@@ -178,8 +189,8 @@ function play(sc) {
   ls = 12345;
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720, search: '?lockstep=1' }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640, search: '?lockstep=1' }), hz: sc.guestHz };
-  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit, sc.yes), 'setup-guest');
+  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host), 'setup-host');
+  G.g.run(SETUP('guest', sc.wing, false, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest), 'setup-guest');
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
@@ -189,7 +200,7 @@ function play(sc) {
     const out = m.g.run('__out.splice(0)');
     for (const { d, r } of out) {
       if (!r && lr() < sc.loss) continue;    // the unreliable channel drops
-      let at = now + sc.lat + lr() * sc.jit;
+      let at = now + sc.lat + (r ? 0 : lr() * sc.jit);   // the reliable channel keeps no jitter: how many pieces a snapshot takes must not move the rest
       if (r) { at = Math.max(at, m.lastRel + 0.01); m.lastRel = at; }   // the reliable one keeps its order
       m.peer.inbox.push({ at, d });
     }
@@ -233,10 +244,13 @@ function play(sc) {
   if (process.env.LSDEBUG) for (const m of [H, G]) console.log(m.name, 'inbox', m.inbox.length, m.g.run("JSON.stringify({ on: LS.on, run: LS.run, tick: LS.tick, hi: LS.hi, delay: LS.delay, peerNeed: LS.peerNeed, acc: +LS.acc.toFixed(3), waitT: +LS.waitT.toFixed(2), mine: [...LS.mine.keys()].slice(0, 8), mineN: LS.mine.size, theirs: [...LS.theirs.keys()].slice(0, 8), theirsN: LS.theirs.size, state, MPon: MP.on, role: MP.role, frameErrors })"));
   const ph = H.g.run('[...__prints]'), pg = new Map(G.g.run('[...__prints]'));
   let compared = 0, firstDiff = null;
-  for (const [t, h] of ph) { if (!pg.has(t)) continue; compared++; if (pg.get(t) !== h && firstDiff == null) firstDiff = t; }
+  const diffs = [];
+  for (const [t, h] of ph) { if (!pg.has(t)) continue; compared++; if (pg.get(t) !== h) { diffs.push(t); if (firstDiff == null) firstDiff = t; } }
   const secs = now / 1000;
   return {
-    compared, firstDiff, ticks: [tick(H), tick(G)],
+    compared, firstDiff, diffs, ticks: [tick(H), tick(G)],
+    resyncs: [H.g.run('LS.resyncs'), G.g.run('LS.resyncs')],
+    replayed: G.g.run('LS.replayed'),
     wave: H.g.run('__stat.waves'), bosses: H.g.run('[...__stat.bosses]'),
     wait: [H.waitFrames / Math.max(1, H.frames), G.waitFrames / Math.max(1, G.frames)],
     kbps: [H.g.run('Net.tx') / 1024 / secs, G.g.run('Net.tx') / 1024 / secs],
@@ -265,18 +279,55 @@ for (const sc of SCENARIOS) {
   if (!r.seen[1].includes('codex')) miss.push('guest never opened the codex over the pause');
   if (!SHORT && !r.seen[0].includes('gfx')) miss.push('host never opened graphics over the pause');
   const same = JSON.stringify(Object.entries(ah).sort()) === JSON.stringify(Object.entries(ag).sort());
-  const ok = r.firstDiff == null && r.compared >= TICKS / 60 - 2 && !miss.length;
+  /* In step: every fingerprint the same, and the safety net never needed. Where
+     a machine was nudged out of step on purpose, the two may part only for a
+     moment after each nudge (the net finds it, the host's snapshot puts it
+     right), and must be the same everywhere else. */
+  const parts = [...((sc.part || {}).host || []), ...((sc.part || {}).guest || [])].filter(t => t < TICKS).sort((a, b) => a - b);
+  const BACK = 600;                           // ten seconds to find it and put it right, at most
+  const within = t => parts.find(p => t >= p && t < p + BACK);
+  const stray = r.diffs.filter(t => within(t) == null);
+  let verdict;
+  if (r.compared < TICKS / 60 - 2) verdict = 'STALLED';
+  else if (stray.length) verdict = 'DIFFER at ' + (stray[0] / 60).toFixed(0) + 's';
+  else if (!parts.length && r.resyncs[0] + r.resyncs[1]) verdict = 'RESYNCED ×' + r.resyncs[1] + ' (nothing should part a clean run)';
+  else if (parts.length && r.resyncs[1] < parts.length) verdict = 'NEVER CAUGHT (' + r.resyncs[1] + ' of ' + parts.length + ' nudges put right)';
+  else if (parts.length && !r.replayed) verdict = 'NOTHING PLAYED AGAIN (the guest was never past a snapshot: that path went untested)';
+  else verdict = parts.length ? 'back in step' : 'same';
+  const ok = /^(same|back in step)$/.test(verdict) && !miss.length;
   if (!ok) failed++;
-  console.log(`${sc.name.padEnd(9)} ${ok ? 'same' : r.firstDiff != null ? 'DIFFER at ' + (r.firstDiff / 60).toFixed(0) + 's' : 'STALLED'}` +
+  const net = parts.length ? '\n          ' + parts.map(p => {
+    const d = r.diffs.filter(t => within(t) === p), last = d.length ? d[d.length - 1] : null;
+    return `nudged at ${(p / 60).toFixed(0)}s: ${last == null ? 'never parted' : 'parted, the same again by ' + ((last + 60) / 60).toFixed(0) + 's'}`;
+  }).join(' · ') + ` · ${r.resyncs[1]} snapshot${r.resyncs[1] === 1 ? '' : 's'} taken, ${r.replayed} steps played again` : '';
+  console.log(`${sc.name.padEnd(9)} ${verdict}` +
     `  ${r.compared}s compared · delay ${r.delay} · game ran at ${(r.speed * 100).toFixed(0)}% of real time` +
     ` · ${r.kbps[0].toFixed(1)}/${r.kbps[1].toFixed(1)} KB/s · wave ${r.wave} ${r.bosses.join(',')} · ${((Date.now() - t0) / 1000).toFixed(1)}s` +
     `  [${sc.lat}±${sc.jit} ms, ${(sc.loss * 100).toFixed(0)}% loss, ${sc.hostHz}/${sc.guestHz} Hz${sc.freeze ? ', guest froze ' + sc.freeze.ms + ' ms' : ''}${sc.guestSave ? ', saves differ' : ''}]` +
-    `
-          menus: ${Object.entries(ah).sort().map(([k, n]) => k + ' ' + n).join(' · ')}${same ? '' : '  (the guest saw a different count: it may have stopped a step behind)'}` +
-    (r.left.length ? `
-          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +
-    (miss.length ? `
-          NOT COVERED: ${miss.join('; ')}` : ''));
+    `\n          menus: ${Object.entries(ah).sort().map(([k, n]) => k + ' ' + n).join(' · ')}${same ? '' : '  (the guest saw a different count: it may have stopped a step behind)'}` +
+    net +
+    (r.left.length ? `\n          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +
+    (miss.length ? `\n          NOT COVERED: ${miss.join('; ')}` : ''));
+}
+
+/* Two different builds must not try lockstep at all: the smallest change to
+   the game parts them. The hello carries each side's build, and both fall back
+   to the picture stream, saying why. */
+function buildsCheck() {
+  const H = loadGame(IDX, { w: 1280, h: 720, search: '?lockstep=1' }), G = loadGame(IDX, { w: 900, h: 640, search: '?lockstep=1' });
+  for (const [m, role] of [[H, 'host'], [G, 'guest']])
+    m.run(`pageDead = true; Save.profile.gfxSeen = GFX_VER; globalThis.__out = [];
+           netSend = function (buf) { __out.push(buf); return true; }; Net.phase = 'live'; Net.role = '${role}';`);
+  G.run("buildId = () => 'another build'");
+  H.run('mpOnOpen()'); G.run('mpOnOpen()');
+  const pass = (a, b) => { for (const d of a.run('__out.splice(0)')) { b.ctx.__msg = d; b.run('netOnMessage(__msg)'); } };
+  pass(H, G); pass(G, H);
+  return { host: H.run('MP.ls'), guest: G.run('MP.ls'), note: H.run('MP.lsNote') || '' };
+}
+if (!ONLY || ONLY.has('builds')) {
+  const b = buildsCheck(), ok = !b.host && !b.guest && !!b.note;
+  if (!ok) failed++;
+  console.log(`${'builds'.padEnd(9)} ${ok ? 'refused' : 'NOT REFUSED'}  two different builds stay on the picture stream${b.note ? ': "' + b.note + '"' : ''}`);
 }
 console.log(failed ? `\n${failed} FAILED` : '\nall in step');
 process.exit(failed ? 1 : 0);
