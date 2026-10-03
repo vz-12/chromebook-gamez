@@ -13,6 +13,9 @@
      THE BOARDS       season (and past ones), all-time, the daily (and past
                       days), and PvP when it opens. 50 to a page.
 
+   Every picture on the page is a hook in art.js (window.LB_ART), which
+   lists them. This file only places the canvases and calls the hooks.
+
    The address keeps the board you are on (#season/2026-10/50), so a link to
    a page is a link to that page. Text from the server only ever goes in as
    text.
@@ -37,6 +40,61 @@
   const seasonLabel = id => MON[+id.slice(5, 7) - 1] + ' ' + id.slice(0, 4);
   const dayLabel = d => +d.slice(8, 10) + ' ' + MON[+d.slice(5, 7) - 1] + ' ' + d.slice(0, 4);
   const dateOf = t => (t ? dayLabel(new Date(t).toISOString().slice(0, 10)) : '—');
+
+  /* -------------------------------- the art --------------------------------
+     Sizes each hook's canvas for the screen, keeps the clock, calls the hook
+     every frame while its canvas is on the page, and keeps a hook that
+     throws from taking anything else with it. A hook art.js does not define
+     gets no canvas at all. */
+  const ART = window.LB_ART || {};
+  const STILL = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const T0 = performance.now();
+  const clockNow = () => (STILL ? 0 : (performance.now() - T0) / 1000);
+  const painted = new Set(), broken = new Set();
+
+  function paint(p, t) {
+    const r = p.cv.getBoundingClientRect();
+    const w = Math.round(r.width), h = Math.round(r.height);
+    if (!w || !h) return;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (p.cv.width !== bw || p.cv.height !== bh) { p.cv.width = bw; p.cv.height = bh; }
+    const g = p.g || (p.g = p.cv.getContext('2d'));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.save();
+    try { ART[p.hook](g, w, h, t, ...p.data); }
+    catch (e) {
+      if (!broken.has(p.hook)) { broken.add(p.hook); console.error('leaderboard art: LB_ART.' + p.hook + ' threw', e); }
+    }
+    g.restore();
+  }
+  // a canvas drawn by one of the hooks, or null when there is no such hook
+  function art(hook, cls, ...data) {
+    if (typeof ART[hook] !== 'function') return null;
+    const cv = document.createElement('canvas');
+    cv.className = 'art ' + cls;
+    cv.setAttribute('aria-hidden', 'true');
+    const p = { cv, hook, data, seen: false };
+    cv.art = p;
+    painted.add(p);
+    return cv;
+  }
+  function frame() {
+    const t = clockNow();
+    for (const p of painted) {
+      if (!p.cv.isConnected) { if (p.seen) painted.delete(p); continue; }
+      p.seen = true;
+      paint(p, t);
+    }
+    if (!STILL) requestAnimationFrame(frame);
+  }
+  // still, each picture is drawn once, and again when the window changes size
+  if (STILL) addEventListener('resize', () => requestAnimationFrame(frame));
+  for (const [k, v] of Object.entries(ART.theme || {}))
+    if (/^[\w-]+$/.test(k) && typeof v === 'string') document.documentElement.style.setProperty('--' + k, v);
+
+  const LEAGUES = [['bronze', 'BRONZE'], ['silver', 'SILVER'], ['gold', 'GOLD'], ['platinum', 'PLATINUM'], ['void', 'VOID']];
 
   // what is showing: the tab, which season or day, and how far down
   const S = { tab: 'season', id: '', from: 0, cal: null, seasons: [], mark: null, busy: 0 };
@@ -118,10 +176,15 @@
     } else sel.hidden = true;
   }
 
-  function note(text, bad) {
+  // the board's message, with LB_ART.empty's scene over it (kind: loading | empty | error)
+  function note(text, bad, kind) {
     $('rows').textContent = '';
+    $('podium').hidden = true;
     const n = $('note');
-    n.textContent = text;
+    n.textContent = '';
+    const cv = art('empty', 'empty-art', kind || (bad ? 'error' : 'empty'));
+    if (cv) n.append(cv);
+    n.append(el('span', null, text));
     n.className = 'note' + (bad ? ' bad' : '');
     n.hidden = false;
   }
@@ -130,7 +193,12 @@
     const tr = el('tr');
     if (r.rank <= 3) tr.className = 'p' + r.rank;
     if (S.mark && S.mark.name === r.name && S.mark.score === r.score) tr.classList.add('mark');
-    tr.append(el('td', 'r', String(r.rank)));
+    const rk = el('td', 'r');
+    const medal = r.rank <= 3 ? art('medal', 'medal', r.rank) : null;
+    // the medal shows the number; the text stays for screen readers and copying
+    if (medal) rk.append(medal, el('span', 'sr', String(r.rank)));
+    else rk.textContent = String(r.rank);
+    tr.append(rk);
     const who = el('td');
     who.append(el('span', 'name', r.name));
     if (r.account) {
@@ -149,13 +217,14 @@
     tabs();
     writeHash();
     const pvp = S.tab === 'pvp';
+    $('podium').hidden = true;
     $('pvp').hidden = !pvp;
     $('tableWrap').hidden = pvp;
     $('pager').hidden = true;
     $('count').textContent = '';
     if (pvp) { $('which').hidden = true; return; }
     picker();
-    note('LOADING…');
+    note('LOADING…', false, 'loading');
     const ticket = ++S.busy;
     let d;
     try {
@@ -179,6 +248,12 @@
     const body = $('rows');
     body.textContent = '';
     for (const r of d.rows) body.append(row(r));
+    // the podium: the first page's top three
+    if (PODIUM && S.from === 0) {
+      PODIUM.art.data = [d.rows.slice(0, 3).map(r => ({ rank: r.rank, name: r.name, score: r.score,
+                                                         wave: r.wave, account: r.account })), S.tab];
+      $('podium').hidden = false;
+    }
     const pg = $('pager');
     pg.hidden = d.total <= PAGE;
     $('prev').disabled = S.from <= 0;
@@ -266,6 +341,8 @@
     for (const key of d.boards.slice(0, 3)) {
       const b = me.boards[key];
       const card = el(b ? 'button' : 'div', 'card' + (b ? '' : ' none'));
+      const back = art('card', 'card-art', { board: placeOf(key).tab, rank: b ? b.rank : 0, of: b ? b.of : 0 });
+      if (back) card.append(back);
       card.append(el('div', 'k', nameOf(key)));
       if (b) {
         card.type = 'button';
@@ -282,6 +359,24 @@
   }
 
   /* --------------------------------- start --------------------------------- */
+  // the pictures that stay put: the backdrop, the crest, the podium's canvas, the PvP tab's
+  const BACK = art('backdrop', 'art-bg');
+  if (BACK) document.body.prepend(BACK);
+  const CREST = art('crest', 'crest');
+  if (CREST) $('crestSlot').append(CREST);
+  const PODIUM = art('podium', 'podium-art', [], 'season');
+  if (PODIUM) $('podium').append(PODIUM);
+  const duel = art('empty', 'empty-art', 'pvp');
+  if (duel) $('pvpArt').append(duel);
+  for (const [id, label] of LEAGUES) {
+    const f = el('figure');
+    const c = art('league', 'league', id);
+    if (c) f.append(c);
+    f.append(el('figcaption', null, label));
+    $('leagues').append(f);
+  }
+  requestAnimationFrame(frame);
+
   document.getElementById('tabs').addEventListener('click', e => {
     const b = e.target.closest('button[data-tab]');
     if (b && b.dataset.tab !== S.tab) go(b.dataset.tab);

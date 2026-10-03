@@ -177,6 +177,16 @@ from under its GLOBAL TOP 5.
   - A guest who signs in brings their rows into the account.
 - **`/api/boards`:** a page of a board, a search, or a player's own
   placement. Profile ids and account ids never leave the Worker.
+- **The art is `leaderboard/art.js`.** Every picture on the page is a named
+  hook in it, drawn on a canvas each frame. The hooks are `backdrop`,
+  `crest`, `podium`, `medal`, `card`, `empty` and `league`, plus `theme`,
+  the colours the stylesheet reads. The file's header lists what each is
+  handed and how big it is.
+  - Redraw a hook in place: the page picks it up on the next load, with
+    nothing to lift.
+  - A hook that throws is reported once in the console and leaves only its
+    own canvas blank.
+  - Reduced motion freezes the clock.
 
 ```sh
 npm run test:boards                        # a few seconds
