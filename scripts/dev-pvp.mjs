@@ -14,9 +14,11 @@
    ========================================================================= */
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// the play page first, from the game as it is now: restart this after editing index.html
+execFileSync(process.execPath, [join(ROOT, 'scripts', 'pvp-build.mjs')], { stdio: 'inherit' });
 // the address the Worker sees in request.url is the one the browser is on (scripts/dev.mjs)
 const child = spawn('npx', ['--yes', 'wrangler', 'dev', '-c', 'pvp/wrangler.jsonc', '--port', '8788',
                             '--local-upstream', '127.0.0.1:8788',

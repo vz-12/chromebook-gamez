@@ -198,8 +198,12 @@ PvP.
    `vz-12/chromebook-gamez`.
 2. Worker name **`voidrunner-pvp`**. Root directory `/`. Production branch
    `main`.
-3. Build: deploy command **`npx wrangler deploy -c pvp/wrangler.jsonc`**.
-   Build watch paths: include `pvp/*`, `src/auth.js` and `src/account.js`.
+3. Build: build command **`node scripts/pvp-build.mjs`** (it makes PvP's
+   play page from the game's engine; without it `/play/` is missing), and
+   deploy command **`npx wrangler deploy -c pvp/wrangler.jsonc`**. Build
+   watch paths: include `pvp/*`, `src/auth.js`, `src/account.js`,
+   `index.html` and `scripts/pvp-build.mjs`, so a change to the game
+   redeploys PvP's copy of it too.
 4. On the game's own Worker (`voidrunner`), add `pvp/*` to the build watch
    paths' **exclude** list, so a PvP-only change doesn't redeploy the game.
 
@@ -212,7 +216,20 @@ npm run test:pvp                           # under a second
 
 Open the local game at `http://localhost:8787` and PvP at
 `http://127.0.0.1:8788`. The two host names keep two cookie jars, as the
-real sites do.
+real sites do. `npm run dev:pvp` makes the play page first; restart it after
+editing `index.html`.
+
+**PvP runs the game's engine** (PVP-PLAN.md, Phase 3).
+`scripts/pvp-build.mjs` copies the game's script byte for byte into
+`pvp/site/play/index.html`, with PvP's own scripts (`pvp/site/js/`) in
+front. The page is generated, never edited or committed. PvP's scripts set
+`window.VR_PVP`, which boots the engine sealed (`PVP` and `pvpSeal` in
+`index.html`):
+- no saves, leaderboard, daily, account sync, awards, event, ads or menus;
+- a profile made in memory from the account;
+- PvP's own hooks for which pilots there are, what spawns, and its screens.
+
+In the game `PVP` is null and every hook does nothing.
 
 ## The leaderboard page
 

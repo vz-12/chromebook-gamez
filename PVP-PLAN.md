@@ -23,9 +23,10 @@ keeps it off the public site.
 - **Queues stay general.** Ranked and casual are two entries in one queue
   table, and leagues are a table too. Ads, entry rules and rewards are hooks,
   so later queues (events, tournaments, sponsored) are config, not new code.
-- **Standalone by nature.** PvP's code lives in its own small files, and the
-  main game's code is split into small files too (Phase 3). Nothing PvP adds
-  a section to `index.html`.
+- **Standalone by nature.** PvP's code lives in its own small files, read
+  by topic, in `pvp/site/js/`. It runs the game's engine as it is, from a copy
+  made at deploy (Phase 3); `index.html` is not split, and PvP adds no
+  section to it, only one-line hooks that do nothing in the game.
 - **A standalone leaderboard page** where anyone can search for any player's
   placement and scores, with a PVP tab.
 
@@ -35,8 +36,12 @@ keeps it off the public site.
 2. **Leagues:** in higher leagues everything goes. In low leagues only the
    base pilots, but unlocked upgrades stay.
 3. **Address:** the Worker's own URL, with a redirect button on the main page.
-4. **Files:** the split files become the source we edit. PvP is standalone:
-   no new section in the main file.
+4. **Files:** PvP is standalone: no new section in the main file. (4 Oct,
+   revised:) `index.html` is not split. PvP's own files are sectioned by
+   topic, so they are easy to read, and hold only what PvP needs. If
+   rebuilding the engine is harder than using it, PvP uses the game's engine
+   as it is, as long as nothing PvP doesn't use is loaded or run (no lag, no
+   latency). See Phase 3.
 5. **Leaderboard:** a PVP tab. Also a standalone leaderboard page where you
    can search everyone's placement and scores (Phase 1, step 2).
 
@@ -328,50 +333,110 @@ does, the PVP button would lead nowhere.
      has BACK TO VOIDRUNNER.
    - Signed-out players are asked to sign in first, with the same panel.
 
-### Phase 3 — One engine, small files, two sites
+### Phase 3 — PvP runs the game's engine, sealed
 
-The match has to run the *same* simulation on both machines, and lockstep
-refuses two different builds (`buildId`). So the PvP page loads the game's
-own code, not a copy that drifts.
+**Why not rebuild it (4 Oct).** PvP needs the pilots, every kit and
+awakening, the upgrades, THE HACKER's army and two-player lockstep. The
+engine already has all of that: TWO PILOTS runs two complete pilots in one
+seeded simulation, and LOCKSTEP CO-OP keeps two machines on it. Those systems
+are tens of thousands of lines, with their art, and a rebuild would take
+weeks and then drift from the game. So PvP uses the engine as it is, and
+makes sure nothing it doesn't use is fetched or run.
 
-- **The split. These files become the source we edit.**
-  - The game's inline script is cut, once, at its own block banners, into
-    ordered classic scripts: `game/01-core.js`, `game/02-chars.js`, …,
-    `game/NN-accounts.js`.
-  - They stay in global scope, so nothing changes in behaviour.
-  - `index.html` becomes the page and a list of files.
-- **What has to change with it:**
-  - `SNAP_SRC` / `snapScan` read `document.currentScript.text`, which is
-    empty for an external script. They'll read the files' text instead.
-  - `buildId` becomes a hash of every file the page loaded.
-  - `scripts/lib/game-vm.mjs` loads the files in order.
-  - Every tool that patches `index.html` gets pointed at the files.
-- **The proof:** `npm test` and `npm run test:lockstep` give the same results
-  before and after the split.
-- **PvP stays out of the game's files.** The PvP page loads the game's files,
-  then its own `pvp/site/*.js`.
-  - Not from voidrunner.online: school filters block `.online`. They come
-    from an address every player can reach. The PvP Worker can serve them
-    itself, built from the same files, or they load from
-    `voidrunner.play101.workers.dev`.
-  - PvP plugs in through a small, named set of hooks that the engine calls
-    and that do nothing in the main game: rules, damage between pilots, and
-    round start and end.
+- **How the engine reaches PvP.**
+  - At deploy, `scripts/pvp-build.mjs` writes `pvp/site/play/index.html` from
+    the game's `index.html`.
+  - The engine script is copied byte for byte, so the snapshot scan and
+    `buildId`, which read the script's own text, work unchanged. PvP's own
+    scripts go in front of it.
+  - The game's head extras are dropped: the AdSense tag and the www
+    redirect.
+  - The copy is generated and never committed or edited.
+  - It is served by the PvP Worker itself, so it works wherever PvP does,
+    schools included.
+- **PvP mode.** PvP's scripts set `window.VR_PVP` before the engine runs. The
+  engine reads it once (`PVP`, at the top) and boots sealed (`pvpSeal`, at
+  the foot):
+  - No cloud-save library, no local save reads or writes. The profile is
+    made in memory from the account's unlocks.
+  - No leaderboard, daily, account sync, awards or vigil requests.
+  - No ads, and ALL HALLOWS is never live.
+  - No menu, name prompt or graphics prompt: PvP's own screens instead.
+- **Named hooks, one line each in the engine, doing nothing in the game:**
+  - `PVP.start()` at the foot: PvP takes over from boot.
+  - `PVP.pilotOpen(id)` in `charOpen`: the account and league decide which
+    pilots there are.
+  - `PVP.waves(dt)` in `updateWaves`: PvP decides what spawns.
+  - `PVP.frame()` once a frame: PvP's own screens and transitions.
+  - Later steps add one per rule: pilot-versus-pilot damage, rounds.
+- **PvP's files**, sectioned by topic in `pvp/site/js/`:
+  - `mode.js`: VR_PVP, what the lobby handed in, and the hook table.
+  - `practice.js`: practice in an empty arena.
+  - Later: `rules.js` (pilots hurting pilots, rounds), `net.js` (the match
+    connection), `draft.js` (cards between rounds).
 
-### Phase 4 — PvP inside the simulation (in `pvp/site/`, not in the game's files)
+**Steps** (each pushed to `pvp`, then stop and report):
 
-- **The PvP rules:** an arena, rounds (best of N), a round timer, pilots'
-  shots hurting the other pilot, and light hazards instead of waves.
-  - Shots already carry `by`, and TWO PILOTS already runs each pilot's
-    input, weapons, kit and hits as itself.
-- **Loadout:** your account's `unlocks`, filtered by the league (Phase 6).
-  - The pilot comes from `chars`.
-  - The awakened form is allowed if the pilot is in `awake` and the league
-    allows it.
-  - The card pool includes your reward upgrades (`ups`) in every league.
-  - Between rounds each player drafts from their own cards. `ui('pick')` is
-    already per pilot.
-- **Tests:** PvP scenarios in the determinism and lockstep suites.
+1. **The engine on PvP's site, sealed. Done.**
+   - The lobby's PRACTICE opens `/play/` with your account's pilots, awake
+     forms and reward upgrades, in an empty arena.
+   - Engine hooks:
+     - `PVP`, set once from `window.VR_PVP`.
+     - `pvpSeal()`: BETA's seal, plus no local reads (the game's own
+       blank profile), board, daily, awards, vigil or account, and ads
+       marked failed.
+     - `PVP.pilotOpen` in `charOpen`, `PVP.waves` in `updateWaves`, a
+       `hlLive` guard, `PVP.frame()` per frame, and `PVP.start()` at the
+       foot.
+   - PvP's files:
+     - `js/mode.js`: what the lobby handed in through `sessionStorage`
+       `vr_pvp_play`, the account made into the profile, and the hooks.
+     - `js/practice.js`: nothing spawns; leaving or dying goes back to the
+       lobby.
+   - **Tested:**
+     - `npm run test:pvp` adds `scripts/pvp-engine.mjs` (28 checks):
+       - the page is built byte for byte;
+       - PvP mode boots in Node with every request and script load
+         recorded, and makes none;
+       - the game itself does make them, so the recorder works.
+       - Mutants that unseal the board or daily, give waves back, leave the
+         event live, skip `PVP.start`, or use the game's pilot rules are
+         all caught.
+     - The game's determinism and lockstep suites are unchanged.
+     - Browser, real page:
+       - Requests are only the fonts, `mode.js` and `practice.js`.
+       - The engine is 839 KB compressed, ready in about 1.3 s locally.
+       - Flying and firing costs about 0.1 ms to step and 1.1 ms to draw
+         each frame at 1280×720 (budget 16.7 ms).
+   - **Found and fixed:** the seal first gave the engine `{}` as the
+     profile, which crashes the death screen once anything can kill you. It
+     now gets the game's own `Save.blank()`.
+   - **Before it ships:** the PvP Worker needs the build command
+     `node scripts/pvp-build.mjs` and `index.html` in its watch paths
+     (README, PvP). Until then `/play/` is missing.
+2. **Two pilots, one match.**
+   - Two browsers in lockstep on TWO PILOTS, joined by a private code.
+   - The Match Durable Object carries the signalling, moving that part of
+     Phase 5 forward.
+3. **The PvP rules.**
+   - Pilots' shots hurt the other pilot (shots already carry `by`).
+   - Rounds, best of N, with a round timer.
+   - An arena with light hazards instead of waves. THE HACKER's army needs
+     bodies to take, so the hazards include a few it can turn.
+4. **Loadout and draft.**
+   - Your account's unlocks, filtered by the league (Phase 6). The awakened
+     form only where the league allows it.
+   - Reward upgrades in the pool in every league.
+   - Each player drafts their own cards between rounds (`ui('pick')` is
+     already per pilot).
+
+**Tests:**
+- `npm run test:pvp` grows a PvP-mode engine suite in Node.
+- The determinism and lockstep suites gain PvP scenarios.
+- The game's own suites must pass unchanged: every hook does nothing when
+  `PVP` is null.
+
+### Phase 4 — folded into Phase 3 (steps 3 and 4)
 
 ### Phase 5 — Matchmaking, the referee, results
 

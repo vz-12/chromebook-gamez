@@ -80,6 +80,14 @@
       const can = l => (l.pilots.includes(id) ? (l.awake.includes(id) ? ['YES · AWAKE', 'awake'] : ['YES', 'yes']) : ['—', 'no']);
       const own = casual.pilots.includes(id);
       tr.append(cell(n), cell(own ? 'YES' : '—', own ? 'yes' : 'no'), cell(...can(ranked)), cell(...can(casual)));
+      const act = document.createElement('td');
+      if (own) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'link practice'; b.textContent = 'PRACTICE';
+        b.addEventListener('click', () => practice(id, d));
+        act.append(b);
+      }
+      tr.append(act);
       body.append(tr);
     }
     const ups = ranked.ups.length;
@@ -87,6 +95,15 @@
       ? 'Your account has no save yet. Fly a run in VOIDRUNNER while signed in, and your unlocks arrive here.'
       : ups ? ups + ' reward upgrade' + (ups === 1 ? '' : 's') + ' come with you, in every league.'
             : 'No reward upgrades yet: clear challenges in VOIDRUNNER to earn them.';
+  }
+
+  /* PRACTICE: the play page (/play/, the game's engine in PvP mode) is
+     handed what it needs for this tab: the mode, the pilot and the account
+     as read here. pvp/site/js/mode.js takes it from there. */
+  function practice(pilot, me) {
+    try { sessionStorage.setItem('vr_pvp_play', JSON.stringify({ mode: 'practice', pilot, me })); }
+    catch (e) { return; }
+    location.href = '/play/';
   }
 
   async function load() {

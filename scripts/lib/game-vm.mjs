@@ -116,10 +116,14 @@ export function gameScript(idx) {
   }
   return cache.get(idx);
 }
-// one copy of the game, in a context of its own
-export function loadGame(idx, { w = 1280, h = 720, search = '' } = {}) {
+/* one copy of the game, in a context of its own. `before(win)` may dress the
+   window first, and `scripts` ({ code, name }) run in the context ahead of
+   the engine, as a page's earlier <script> tags would (PvP's, for one). */
+export function loadGame(idx, { w = 1280, h = 720, search = '', before = null, scripts = [] } = {}) {
   const win = makeWindow(w, h, search);
+  if (before) before(win);
   const ctx = vm.createContext(win);
+  for (const s of scripts) vm.runInContext(s.code, ctx, { filename: s.name || 'before' });
   const t0 = Date.now();
   const g = gameScript(idx);
   win.document.currentScript = { text: g.code, textContent: g.code };   // as a browser has it while the script runs

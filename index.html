@@ -73,6 +73,16 @@
    No assets, no dependencies. Everything (art, audio, physics) is generated.
    ========================================================================== */
 
+/* -------------------------------- PvP mode --------------------------------
+   PvP (pvp/, PVP-PLAN.md Phase 3) is its own site, and it runs this engine as
+   it is: its page is this file, copied at deploy by scripts/pvp-build.mjs,
+   with PvP's own scripts in front. Those set window.VR_PVP, and with it set
+   the engine boots sealed (pvpSeal, at the foot): none of the game's saves,
+   boards, account, ads, event or menus, so nothing PvP does not use is fetched
+   or run. What PvP changes goes through VR_PVP's named hooks, one line each
+   where the engine calls them; in the game PVP is null and they do nothing. */
+const PVP = (typeof window !== 'undefined' && window.VR_PVP) || null;
+
 /* ---------------------------------- math --------------------------------- */
 const TAU = Math.PI * 2;
 const rnd  = (a = 1, b = 0) => b + Math.random() * (a - b);
@@ -1331,7 +1341,7 @@ function rushReq(id) {
 function rushK(v) { return v >= 1000 ? Math.floor(v / 1000) + 'K' : String(Math.floor(v)); }
 
 /* A pilot with a `need` is not selectable until the profile satisfies it. */
-const charOpen = c => !c.need || c.need(Save.profile);
+const charOpen = c => PVP ? PVP.pilotOpen(c.id) : (!c.need || c.need(Save.profile));
 const charLocked = i => !charOpen(CHARS[i]);
 let selectedChar = 0;
 const CHAR = () => CHARS[selectedChar];
@@ -4453,6 +4463,7 @@ function startWave() {
 }
 
 function updateWaves(dt) {
+  if (PVP) { PVP.waves(dt); return; }     // PvP decides what spawns (PvP mode)
   if (awaitingPortal) return;
   waveTimer += dt;
   if (betweenWaves > 0) {
@@ -29810,6 +29821,7 @@ function frame(now) {
        rather than thrown away, so the game keeps to the wall clock (and, in
        lockstep, to the partner). Only a stall past ACC_MAX is let go. */
     if (acc > ACC_MAX) acc = ACC_MAX;
+    if (PVP) PVP.frame();     // PvP mode: its own screens and transitions
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
@@ -39996,6 +40008,7 @@ function hlEarly() {
   try { return Awards.served.includes('unlock-event'); } catch (e) { return false; }
 }
 function hlLive() {
+  if (PVP) return false;                 // PvP mode: no event, so none of its art is fetched
   if (hlEarly()) return true;
   const d = hlToday();
   return !!d && d >= HL_EVENT.from && d < HL_EVENT.to;
@@ -61917,6 +61930,27 @@ function betaUnlockAll() {
   applyChar(p.charIdx || 0);
 }
 
+/* PvP's page (PvP mode, at the top): every door this site has and PvP's does
+   not, closed before anything can open it. BETA's seal first, for every
+   write: storage, the synced store, the run record, the board. Then the
+   reads: the profile is made in memory from the account (PVP.start), so
+   nothing is read from this browser's storage either, and nothing asks a
+   server PvP does not run. No ads, and no account panel: PvP has its own. */
+function pvpSeal() {
+  betaSeal();
+  Save.readLocal = () => Save.blank();
+  Board.load = async () => {};
+  Board.backfill = async () => {};
+  Daily.load = async () => {};
+  Daily.submit = () => {};
+  Awards.sync = async () => {};
+  Vigil.load = async () => {};
+  Vigil.turnIn = async () => {};
+  Account.off = () => true;
+  Account.boot = async () => {};
+  Ads.failed = true;
+}
+
 /* Every door out of this build, closed. Called before anything can write. */
 function betaSeal() {
   Save.writeLocal = () => {};
@@ -61944,8 +61978,10 @@ function drawBetaMark() {
 /* --------------------------------- start ---------------------------------- */
 prewarmGlow();
 if (BETA) betaSeal();     // before init, so it never opens the shared store
+if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)
 Save.init();
 if (BETA) betaUnlockAll();
+if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;
 requestAnimationFrame(frame);
 </script>
