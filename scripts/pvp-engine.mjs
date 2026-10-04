@@ -233,11 +233,23 @@ const WATCH = `
   globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
                        wildMax: 0, wildClean: 0, standOut: 0 };
   let __at = '';
-  const __hurt = hurtPlayer;
+  /* What a hit took is the health it left, read where the blow lands: a
+     killing one meets Second Wind or a DEADMAN BRAKE (reviveOrDie), which
+     stands the pilot up again with health of its own. One reading per
+     hurtPlayer, innermost first, for a blow that sets off another. */
+  const __hurt = hurtPlayer, __revive = reviveOrDie, __left = [];
+  reviveOrDie = function () {
+    if (__left.length && __left[__left.length - 1] === null) __left[__left.length - 1] = P.hp;
+    return __revive.apply(this, arguments);
+  };
   hurtPlayer = function (dmg, opts) {
-    const m = RUN.pvp, before = P.hp, phase = m && m.phase, r = __hurt.apply(this, arguments);
-    if (m && opts && opts.pvp) __log.hits.push([m.clock, PILOT.on, before - Math.max(0, P.hp), P.maxHp, phase]);
-    else if (m && P.hp < before) __log.room++;
+    const m = RUN.pvp, before = P.hp, phase = m && m.phase;
+    __left.push(null);
+    let r, left;
+    try { r = __hurt.apply(this, arguments); } finally { left = __left.pop(); }
+    const after = left === null ? P.hp : left;
+    if (m && opts && opts.pvp) __log.hits.push([m.clock, PILOT.on, before - Math.max(0, after), P.maxHp, phase]);
+    else if (m && after < before) __log.room++;
     return r;
   };
   const __offers = k => (k === PILOT.on ? offers : PILOTS[k].v[PILOT_VARS.indexOf('offers')]) || [];
@@ -516,6 +528,19 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(fwd > 0 && r('__hp(1) === pilotP(1).maxHp'), 'and the other way about', fwd);
   const killed = r('__fresh(); PVP.turn(0, () => killEnemy(__S(1))); (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp');
   ok(killed > 0.1 && killed <= DUEL.killHit + 1e-9 && r('PVP.standIns().length === 2'), 'an execution lands 14% at most, and the stand-in stays', killed);
+  // a killing blow that the pilot's own Second Wind or DEADMAN BRAKE answers: what it dealt is all the pilot had, as the log saw it taken
+  const saved = r(`const out = [];
+    for (const kind of ['revive', 'deadman']) {
+      __fresh(); __m.phase = 'fight';
+      const p = pilotP(1), was = [p.revive, p.deadman, p.brakeUsed, p.brakeT], d0 = __m.dealt[0], n0 = __log.hits.length;
+      p.revive = kind === 'revive' ? 1 : 0; p.deadman = kind === 'deadman' ? 1 : 0; p.brakeUsed = false; p.hp = 3;
+      PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0));
+      out.push([kind, __m.dealt[0] - d0, __log.hits.slice(n0).filter(h => h[1] === 1).map(h => h[2]), !p.down && p.hp > 3 && __m.phase === 'fight']);
+      [p.revive, p.deadman, p.brakeUsed, p.brakeT] = was;
+    }
+    out`);
+  ok(saved.every(s => Math.abs(s[1] - 3) < 1e-9 && s[2].length === 1 && Math.abs(s[2][0] - 3) < 1e-9 && s[3]),
+     'a killing blow that Second Wind or a DEADMAN BRAKE answers dealt all the pilot had, and the round goes on', saved);
   r(`__fresh(); for (const s of PVP.standIns()) { s.burn = 0; s.psn = 0; s.leak = 0; s.leakT = 0; }   // whatever the match left on them
      __S(1).burn = 2; __S(1).burnT = 3; __S(1).burnTick = 0; PVP.as(null)`);
   const burnt = r('for (let i = 0; i < 60; i++) PVP.dots(1 / 60); pilotP(1).maxHp - __hp(1)');

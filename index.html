@@ -4289,6 +4289,8 @@ function hurtPlayer(dmg, opts) {
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
   let d = Math.max(1, dmg * P.frailty * nightMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
   if (opts && opts.pvp) d = Math.min(d, opts.pvp.cap);   // PvP mode: the duel's caps hold, whatever the build (duel.js)
+  // what the blow takes, returned: a Second Wind or a brake after it is the pilot's own health, not the blow given back (PvP counts it, duel.js)
+  const took = Math.min(d, Math.max(0, P.hp));
   P.hp -= d;
   // most of it can still be won back, but the parry chain is gone
   if (isBlade()) { bladeRallyAdd(d); bladeChainBreak('hit'); }
@@ -4298,6 +4300,7 @@ function hurtPlayer(dmg, opts) {
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
   floatText(P.x, P.y - 26, '-' + Math.round(d), '#fca5a5', 16);
   if (P.hp <= 0) reviveOrDie();
+  return took;
 }
 
 function reviveOrDie() {

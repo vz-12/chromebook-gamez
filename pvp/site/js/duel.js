@@ -136,15 +136,17 @@
     const cap = Math.min(DUEL.hitCap * p.maxHp, DUEL.burstCap * p.maxHp - took);
     const d = Math.min(raw * DUEL.scale * (DUEL.pilots[a && a.charId] || 1), cap);
     if (!(d > 0.05)) return 0;
-    const before = p.hp;
     /* A body of THE HACKER's army hits from inside its script, and the game
        lets nothing a script makes reach a pilot (hackBy, its own guard against
-       hurting yourself). Here the pilot is the other one: let it through. */
+       hurting yourself). Here the pilot is the other one: let it through.
+       What it took is hurtPlayer's word, not the health before and after: a
+       killing blow that Second Wind or a DEADMAN BRAKE answers still took all
+       the pilot had, though the pilot stands up again with more. */
     const script = hackBy;
+    let dealt = 0;
     hackBy = null;
-    try { pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap } })); }
+    try { dealt = pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap } })) || 0; }
     finally { hackBy = script; }
-    const dealt = Math.max(0, before - Math.max(0, p.hp));
     if (dealt > 0) {
       recent.push([m.clock, dealt]);
       if (m.dealt) m.dealt[by] += dealt;           // for the result screen
