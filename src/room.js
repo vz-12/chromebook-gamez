@@ -69,7 +69,10 @@ const fresh = d => d && typeof d.at === 'number' && Date.now() - d.at < TTL_MS;
 const keyFor = (code, side) => 'room/' + code + '/' + side;
 
 export default async (req, env) => {
-  const store = getStore(env, STORE);
+  /* PvP's Worker serves this too, on a store of its own (ROOM_STORE in
+     pvp/wrangler.jsonc): a code from the game's co-op never finds a PvP room,
+     nor the other way round. */
+  const store = getStore(env, env.ROOM_STORE || STORE);
   const url = new URL(req.url);
   const code = cleanCode(url.searchParams.get('code'));
 

@@ -7,7 +7,9 @@
    boots sealed, asks no server for anything and loads no script, flies the
    account's pilot with its awake form and reward upgrades, and spawns
    nothing. The same engine booted as the game, beside it, shows the recorder
-   would have caught a request.
+   would have caught a request. Then a match: two copies, host and guest,
+   linked the way scripts/lockstep.mjs links two games, each flown by a bot,
+   from the handshake through the host's start to one of them leaving.
    ========================================================================= */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -62,6 +64,20 @@ function recorder(win) {
     return el;
   };
 }
+/* And enough more DOM for PvP's waiting room (match.js): an element finds
+   what its innerHTML would have held, one stand-in per selector. */
+function rooms(win) {
+  const make = win.document.createElement;
+  win.document.createElement = tag => {
+    const el = make(tag);
+    const q = {};
+    el.querySelector = sel => q[sel] || (q[sel] = { textContent: '', hidden: false, addEventListener() {},
+                                                    classList: { toggle() {}, add() {}, remove() {} } });
+    el.__q = q;
+    return el;
+  };
+}
+const roomOf = g => g.win.document.body.children.find(c => c.id === 'pvp-room');
 const flush = () => new Promise(r => setTimeout(r, 30));
 
 const ME = {
@@ -79,6 +95,7 @@ function boot(hand) {
   return loadGame(IDX, {
     scripts: pvpScripts,
     before: win => {
+      rooms(win);
       recorder(win);
       win.location.replace = u => { win.__replaced = u; };
       if (hand) win.sessionStorage.setItem('vr_pvp_play', JSON.stringify(hand));
@@ -123,6 +140,72 @@ section('the same engine as the game, for contrast');
   ok(net.some(n => /\/api\/leaderboard/.test(n)), 'the game asks for its board: the recorder works', net);
   ok(game.run('charOpen(CHARS.find(c => c.id === "melee"))') === false && game.run('state') !== 'play',
      'and its own rules: the menu, its own unlocks');
+}
+
+section('a match: two machines, one run');
+{
+  const RIVAL = Object.assign({}, ME, { account: { name: 'rival', display: 'Rival' } });
+  const H = boot({ mode: 'match', role: 'host', pilot: 'hacker', me: ME });
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL });
+  await flush();
+  // Node has no WebRTC: each asked PvP's own server for its part of the link, and for nothing else
+  ok(H.win.__net.join() === 'fetch /api/turn', 'the host asks for the relay, and nothing else', H.win.__net);
+  ok(G.win.__net[0] === 'fetch /api/room?code=ABCD&as=guest' && G.win.__net.length === 1, 'the guest looks the room up, and nothing else', G.win.__net);
+  ok(H.run('state') === 'pvp' && G.run('state') === 'pvp', 'both wait in PvP\'s own room, where the run neither moves nor draws');
+  const still = H.run('JSON.stringify([simTick, elapsed, waveTimer, state])');
+  for (let i = 0; i < 120; i++) { H.run('update(1 / 60); render()'); H.run('handleKey("escape"); handleKey("p"); handleKey("g")'); }
+  ok(H.run('JSON.stringify([simTick, elapsed, waveTimer, state])') === still, 'two seconds in the room, keys pressed: no run moves', [still, H.run('JSON.stringify([simTick, elapsed, waveTimer, state])')]);
+  H.run('PVP.frame()'); G.run('PVP.frame()');
+  ok(roomOf(H).__q['.line'].textContent === "Couldn't connect." && !roomOf(H).hidden, 'a link that cannot be made says so', roomOf(H).__q['.line'].textContent);
+
+  // the link, as scripts/lockstep.mjs makes it: each side's sends queued, and shipped across
+  for (const [g, role] of [[H, 'host'], [G, 'guest']])
+    g.run(`globalThis.__out = []; netSend = function (buf) { __out.push(buf); return true; };
+           Net.phase = 'live'; Net.role = '${role}'; Net.code = 'ABCD'; Net.note = '';`);
+  const ship = (a, b) => { for (const d of a.run('__out.splice(0)')) { b.ctx.__msg = d; b.run('netOnMessage(__msg)'); } };
+  H.run('mpOnOpen()'); G.run('mpOnOpen()'); ship(H, G); ship(G, H);
+  ok(H.run('MP.ready') && G.run('MP.ready'), 'both said hello: the same build, the same game');
+  H.run('PVP.frame()');                 // the host's room sees them ready, and starts the run
+  ship(H, G);
+  ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
+  ok(H.run('simSeed') === G.run('simSeed'), 'one run: the same seed on both');
+  for (const g of [H, G]) g.run(`PVP.frame();
+    // a bot flies this machine's own pilot, and both machines fingerprint every half second
+    LS.source = rec => { const k = LS.hi + 1, d = Math.floor(k / 80) % 4;
+      rec.mx = [0, 1, 0, -1][d]; rec.my = [-1, 0, 1, 0][d]; rec.ax = P.x + 200; rec.ay = P.y + 40;
+      rec.trig = true; rec.lmb = true; rec.auto = false; rec.dash = k % 97 === 0;
+      rec.touch = false; rec.taim = null; rec.press = []; };
+    globalThis.__fp = new Map();
+    LS.after = () => { if (LS.tick % 30) return; const a = pilotP(0), b = pilotP(1);
+      __fp.set(LS.tick, JSON.stringify([simRngState, a.charId, a.x, a.y, a.hp, b.charId, b.x, b.y, b.hp, enemies.length, bullets.length])); };`);
+  ok(roomOf(H).hidden === true && roomOf(G).hidden === true, 'the waiting room steps aside');
+  ok(H.run('pilotP(0).charId') === 'hacker' && H.run('pilotP(1).charId') === 'ember', 'the host flies its pilot, beside the guest\'s');
+  ok(G.run('pilotP(0).charId') === 'hacker' && G.run('pilotP(1).charId') === 'ember', 'and the guest sees the same two');
+  ok(H.run('pilotP(0).awake') === 1 && H.run('pilotP(1).awake') === 1, 'each awake, as its own account is');
+  let threw = null;
+  try {
+    for (let i = 0; i < 60 * 15; i++) {
+      H.run('lsFrame(1 / 60); PVP.frame()'); ship(H, G);
+      G.run('lsFrame(1 / 60); PVP.frame()'); ship(G, H);
+      if (i % 20 === 0) { H.run('render()'); G.run('render()'); }
+    }
+  } catch (e) { threw = e; }
+  ok(!threw, 'fifteen seconds of a match, drawn on both, without an error', String(threw && threw.stack));
+  const fh = new Map(H.run('[...__fp]')), fg = new Map(G.run('[...__fp]'));
+  const both = [...fh.keys()].filter(t => fg.has(t));
+  ok(both.length >= 20, 'both played the same steps', both.length);
+  ok(both.every(t => fh.get(t) === fg.get(t)), 'and they are the same game, step for step',
+     both.filter(t => fh.get(t) !== fg.get(t)).slice(0, 3));
+  ok(H.run('LS.resyncs') === 0 && G.run('LS.resyncs') === 0, 'without the safety net ever needed');
+  ok(H.run('enemies.length') === 0 && G.run('enemies.length') === 0 && H.run('bullets.length') > 0, 'nothing spawned; both fired');
+  ok(H.win.__net.length === 1 && G.win.__net.length === 1, 'and not one more request', [H.win.__net, G.win.__net]);
+
+  // the guest quits from the game's own pause screen; the host is told
+  G.run('quitToMenu()'); ship(G, H);
+  H.run('update(1 / 60); PVP.frame()'); G.run('PVP.frame()');
+  ok(H.run('state') === 'pvp' && roomOf(H).__q['.line'].textContent === 'Your opponent left.', 'the host: the match is over, and why', roomOf(H).__q['.line'].textContent);
+  ok(H.run('PILOTS.length') <= 1 && !H.run('LS.on'), 'its lockstep and the second pilot gone', [H.run('PILOTS.length'), H.run('LS.on')]);
+  ok(G.win.location.href === '/', 'the one who quit is back in the lobby', G.win.location.href);
 }
 
 section('arriving without the lobby');

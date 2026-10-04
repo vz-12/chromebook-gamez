@@ -414,11 +414,43 @@ makes sure nothing it doesn't use is fetched or run.
    - **Before it ships:** the PvP Worker needs the build command
      `node scripts/pvp-build.mjs` and `index.html` in its watch paths
      (README, PvP). Until then `/play/` is missing.
-2. **Two pilots, one match.**
-   - Two browsers in lockstep on TWO PILOTS, joined by a private code.
-   - The Match Durable Object carries the signalling, moving that part of
-     Phase 5 forward.
-3. **The PvP rules.**
+2. **Two pilots, one match. Done.**
+   - **Lobby:** PLAY A FRIEND has a pilot, HOST, and a code with JOIN.
+     `/play/` gets `{ mode: 'match', role, code, pilot }`.
+   - **`js/match.js`:**
+     - The game's own `netHost` / `netJoin`, then the host starts the run
+       (`mpStartRun`) once both have said hello. LOCKSTEP CO-OP and TWO
+       PILOTS do the rest, and nothing spawns.
+     - The waiting room is HTML over the canvas, in PvP's own state
+       `'pvp'`. That state has four inert hooks in the engine, so nothing
+       moves, draws, or answers keys or clicks there. Without the key guard,
+       G opened the graphics screen over it.
+     - A quit goes back to the lobby; the other side leaving says MATCH
+       OVER.
+   - **Signalling:** the game's `src/room.js` polling rooms, on PvP's own
+     store (`ROOM_STORE`), instead of a Match Durable Object. It is proven,
+     and the DO comes with matchmaking in Phase 5.
+   - **The relay:** PvP's `/api/turn` asks the game's Worker over a service
+     binding (`GAME`), so no secrets are copied.
+   - **Tested:**
+     - `npm run test:pvp`: the server part is 75 checks (rooms kept apart
+       both ways, the relay passed on as the player); the engine part is 49
+       checks.
+     - A whole match between two engines in Node: the handshake, the host's
+       start, the same seed, each its own pilot and awake form, 15 s of
+       bots drawn on both with identical fingerprints, no resyncs, no
+       requests, then the guest's quit and the host's MATCH OVER.
+     - Mutants that let the run move while waiting, let keys through, never
+       start, miss a leave, miss a quit, share rooms, or drop or overshare
+       the relay's headers are all caught.
+     - Browser: two real tabs over real WebRTC through a local PvP Worker.
+       - The host opened a room; the guest joined as EMBER beside the
+         host's VOIDRUNNER on one seed.
+       - About 125 steps were driven by script, since the pane was hidden
+         and ran no frames. The fingerprints were identical at step 120,
+         with no resyncs.
+       - The guest's quit put it in the lobby and the host on MATCH OVER.
+3. **The PvP rules. ← next. How a fight plays is yours to say first.**
    - Pilots' shots hurt the other pilot (shots already carry `by`).
    - Rounds, best of N, with a round timer.
    - An arena with light hazards instead of waves. THE HACKER's army needs

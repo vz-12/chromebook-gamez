@@ -84,12 +84,23 @@
       if (own) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'link practice'; b.textContent = 'PRACTICE';
-        b.addEventListener('click', () => practice(id, d));
+        b.addEventListener('click', () => practice(id));
         act.append(b);
       }
       tr.append(act);
       body.append(tr);
     }
+    // the match's pilot: any one owned, said with AWAKE where it is
+    me = d;
+    const sel = $('matchPilot'), was = sel.value;
+    sel.textContent = '';
+    for (const id of casual.pilots) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = d.pilots[id] + (casual.awake.includes(id) ? ' · AWAKE' : '');
+      sel.append(o);
+    }
+    if (casual.pilots.includes(was)) sel.value = was;
     const ups = ranked.ups.length;
     $('ups').textContent = d.unlocks === null
       ? 'Your account has no save yet. Fly a run in VOIDRUNNER while signed in, and your unlocks arrive here.'
@@ -97,14 +108,24 @@
             : 'No reward upgrades yet: clear challenges in VOIDRUNNER to earn them.';
   }
 
-  /* PRACTICE: the play page (/play/, the game's engine in PvP mode) is
-     handed what it needs for this tab: the mode, the pilot and the account
-     as read here. pvp/site/js/mode.js takes it from there. */
-  function practice(pilot, me) {
-    try { sessionStorage.setItem('vr_pvp_play', JSON.stringify({ mode: 'practice', pilot, me })); }
-    catch (e) { return; }
+  /* The play page (/play/, the game's engine in PvP mode) is handed what it
+     needs for this tab: the mode, the pilot, a match's side and code, and
+     the account as read here. pvp/site/js/mode.js takes it from there. */
+  let me = null;
+  function play(hand) {
+    try { sessionStorage.setItem('vr_pvp_play', JSON.stringify(Object.assign({ me }, hand))); }
+    catch (e) { $('matchMsg').textContent = "THIS BROWSER WON'T KEEP THE MATCH: TRY ANOTHER"; return; }
     location.href = '/play/';
   }
+  const practice = pilot => play({ mode: 'practice', pilot });
+
+  $('host').addEventListener('click', () => play({ mode: 'match', role: 'host', pilot: $('matchPilot').value }));
+  $('joinForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const code = $('code').value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4}$/.test(code)) { $('matchMsg').textContent = 'A CODE IS FOUR LETTERS AND NUMBERS'; return; }
+    play({ mode: 'match', role: 'guest', code, pilot: $('matchPilot').value });
+  });
 
   async function load() {
     const r = await call('GET', '/api/pvp/me');

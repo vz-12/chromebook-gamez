@@ -201,9 +201,9 @@ PvP.
 3. Build: build command **`node scripts/pvp-build.mjs`** (it makes PvP's
    play page from the game's engine; without it `/play/` is missing), and
    deploy command **`npx wrangler deploy -c pvp/wrangler.jsonc`**. Build
-   watch paths: include `pvp/*`, `src/auth.js`, `src/account.js`,
-   `index.html` and `scripts/pvp-build.mjs`, so a change to the game
-   redeploys PvP's copy of it too.
+   watch paths: include `pvp/*`, `src/*`, `index.html` and
+   `scripts/pvp-build.mjs`. PvP uses the shared accounts and rooms code in
+   `src/`, and its copy of the game is made from `index.html`.
 4. On the game's own Worker (`voidrunner`), add `pvp/*` to the build watch
    paths' **exclude** list, so a PvP-only change doesn't redeploy the game.
 
@@ -230,6 +230,14 @@ front. The page is generated, never edited or committed. PvP's scripts set
 - PvP's own hooks for which pilots there are, what spawns, and its screens.
 
 In the game `PVP` is null and every hook does nothing.
+
+**A match with a friend** (PLAY A FRIEND, in the PvP page). One player
+hosts and reads out a code, and the other joins with it. It is the game's
+own co-op as it is: lockstep, each player flying their own pilot.
+- **Rooms:** the PvP Worker serves `/api/room` from `src/room.js`, on a
+  store of its own (`ROOM_STORE`), so game and PvP codes never meet.
+- **Relay:** `/api/turn` asks the game's Worker through a service binding
+  (`GAME`), so the TURN secrets stay where they are.
 
 ## The leaderboard page
 

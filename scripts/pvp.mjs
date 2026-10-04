@@ -12,6 +12,7 @@
    ========================================================================= */
 import { makeD1 } from './lib/d1-sqlite.mjs';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const main = (await import('../src/index.js')).default;
 const pvp = (await import('../pvp/src/index.js')).default;
@@ -21,7 +22,8 @@ const { loadout, LEAGUES, CASUAL } = await import('../pvp/src/rules.js');
 const DB = makeD1();
 const asset = new Response('asset');
 const envMain = { DB, ASSETS: { fetch: () => asset.clone() } };
-const envPvp = { DB, SIGNUP: 'off', ASSETS: { fetch: () => new Response('pvp page') } };
+// PvP's Worker as pvp/wrangler.jsonc sets it up (checked against the file below)
+const envPvp = { DB, SIGNUP: 'off', ROOM_STORE: 'voidrunner-pvp-rooms', ASSETS: { fetch: () => new Response('pvp page') } };
 
 const GAME = 'https://voidrunner.online', SCHOOL = 'https://voidrunner.play101.workers.dev';
 const PVP = 'https://voidrunner-pvp.play101.workers.dev';
@@ -200,6 +202,46 @@ section('the daily sweep');
   DB.sql.prepare('UPDATE handoffs SET expires = ?').run(Date.now() - 1);
   await pruneAuth(envMain);
   ok(one('SELECT COUNT(*) AS n FROM handoffs').n === 0, 'lapsed codes are swept', h.status);
+}
+
+section('match rooms: PvP\'s own');
+{
+  const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
+  ok(/"ROOM_STORE":\s*"voidrunner-pvp-rooms"/.test(cfg), 'the Worker is set up with its own room store, as tested here');
+  ok(/"binding":\s*"GAME",\s*"service":\s*"voidrunner"/.test(cfg), 'and bound to the game\'s Worker for the relay');
+  const host = tab(PVP, '198.51.100.70');
+  const r = await host.call('POST', '/api/room', { offer: 'v=0 pvp-offer' });
+  ok(r.status === 200 && /^[A-Z0-9]{4}$/.test(r.d.code), 'a PvP host opens a room', r);
+  const g = await tab(PVP, '198.51.100.71').call('GET', '/api/room?code=' + r.d.code + '&as=guest');
+  ok(g.status === 200 && g.d.peer && g.d.peer.offer === 'v=0 pvp-offer', 'a PvP guest finds it by its code', g.d);
+  const m = await tab(GAME).call('GET', '/api/room?code=' + r.d.code + '&as=guest');
+  ok(m.status === 404, 'the game\'s co-op never finds it', m.status);
+  const gr = await tab(GAME).call('POST', '/api/room', { offer: 'v=0 game-offer' });
+  ok(gr.status === 200, 'a co-op room in the game', gr.status);
+  const p = await tab(PVP).call('GET', '/api/room?code=' + gr.d.code + '&as=guest');
+  ok(p.status === 404, 'nor does PvP find the game\'s', p.status);
+}
+
+section('the relay, asked of the game\'s Worker');
+{
+  ok((await tab(PVP).call('GET', '/api/turn')).status === 503, 'no binding (a local dev on its own): no relay, and the engine connects directly');
+  const seen = [];
+  envPvp.GAME = { fetch: async req => {
+    seen.push({ url: req.url, ip: req.headers.get('cf-connecting-ip'), cookie: req.headers.get('cookie') });
+    return new Response(JSON.stringify({ ok: true, iceServers: [{ urls: ['turn:turn.example:3478'], username: 'u', credential: 'c' }], ttl: 43200 }),
+                        { headers: { 'content-type': 'application/json' } });
+  } };
+  const pl = tab(PVP, '203.0.113.99');
+  await pl.op('login', { name: 'duelist', pass: 'a fine password' });
+  const r = await pl.call('GET', '/api/turn');
+  ok(r.status === 200 && r.d.iceServers[0].username === 'u', 'the game\'s answer, passed on', r.d);
+  ok(seen.length === 1 && seen[0].url === 'https://voidrunner.online/api/turn' && seen[0].ip === '203.0.113.99',
+     'asked as the player, from their own address, so the game\'s cap counts them', seen);
+  ok(!seen[0].cookie, 'and no session of PvP\'s goes with it', seen[0]);
+  envPvp.GAME = { fetch: async () => { throw new Error('down'); } };
+  ok((await tab(PVP).call('GET', '/api/turn')).status === 502, 'the game unreachable: 502');
+  ok((await tab(PVP).call('POST', '/api/turn', {})).status === 405, 'only GET');
+  delete envPvp.GAME;
 }
 
 section('PvP signs in and out on its own');

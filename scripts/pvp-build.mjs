@@ -25,7 +25,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const PLAY = join(ROOT, 'pvp', 'site', 'play', 'index.html');
 
 // PvP's own files, in the order they run: all of them before the engine
-export const PVP_SCRIPTS = ['/js/mode.js', '/js/practice.js'];
+export const PVP_SCRIPTS = ['/js/mode.js', '/js/practice.js', '/js/match.js'];
 
 const ADS_META = /<!-- AdSense:[^\n]*-->\n<meta name="google-adsense-account"[^>]*>\n/;
 const REDIRECT = /<script>\n  \/\* A save belongs to the address it was made on[\s\S]*?<\/script>\n/;

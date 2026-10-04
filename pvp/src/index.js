@@ -8,6 +8,9 @@
      /api/account     the game's own accounts code (../../src/account.js), on
                       this address's own cookie; no sign-ups here (SIGNUP)
      /api/pvp/me      who you are, what you have unlocked, your league
+     /api/room        a match's signalling, by private code: the game's own
+                      co-op rooms (../../src/room.js), on PvP's own store
+     /api/turn        the relay's credentials, asked of the game's Worker
      /api/pvp/queue   \  matchmaking and the referee: Durable Objects,
      /api/pvp/match   /  Phase 5 (objects.js); not yet
      everything else  pvp/site
@@ -16,7 +19,9 @@
    the same way (src/account.js, hand-offs).
    ========================================================================= */
 import account from '../../src/account.js';
+import room from '../../src/room.js';
 import me from './me.js';
+import turn from './turn.js';
 
 export { Matchmaker, Match } from './objects.js';
 
@@ -26,7 +31,7 @@ const json = (body, status) =>
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
   });
 
-const ROUTES = { '/api/account': account, '/api/pvp/me': me };
+const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn };
 const LATER = new Set(['/api/pvp/queue', '/api/pvp/match']);
 
 export default {
