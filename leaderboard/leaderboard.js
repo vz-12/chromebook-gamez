@@ -123,7 +123,7 @@
   /* What is showing: the tab ('u' for a profile, whose account name is
      `user`), which season or day, and how far down; `back` is the board a
      profile was opened from. */
-  const S = { tab: 'season', id: '', from: 0, user: '', back: '#season', cal: null, seasons: [], mark: null, busy: 0 };
+  const S = { tab: 'season', id: '', from: 0, user: '', back: '#season', cal: null, seasons: [], mark: null, busy: 0, pin: null };
 
   function keyOf(tab, id) {
     if (tab === 'all') return 'all';
@@ -509,6 +509,15 @@
      with the latest matches. Each picture is a hook of art.js's (THE
      PROFILE); the opponents' names lead to their own pages. */
   const ORD = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'TH' : ({ 1: 'ST', 2: 'ND', 3: 'RD' })[n % 10] || 'TH');
+  // how long ago, the way osu! dates a score; the full date is in its title
+  function ago(t) {
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return 'JUST NOW';
+    if (s < 3600) return Math.floor(s / 60) + ' MIN AGO';
+    if (s < 86400) return Math.floor(s / 3600) + ' H AGO';
+    const d = Math.floor(s / 86400);
+    return d < 30 ? d + (d === 1 ? ' DAY AGO' : ' DAYS AGO') : dateOf(t);
+  }
 
   function tile(kind, label, rank, of, big, small, open, league) {
     const t = el(open ? 'button' : 'div', 'ptile' + (rank ? '' : ' none'));
@@ -519,79 +528,214 @@
     return t;
   }
 
+  /* Where they stand in their league, the way osu! shows a level: a bar to
+     the next one. Still being placed, the bar is the placement matches. */
+  function progress(lad, pv) {
+    const box = el('div', 'pprog');
+    const L = pv.leagues || [];
+    let k = 0, left, right = '', note;
+    if (lad && lad.league) {
+      const i = L.findIndex(l => l.id === lad.league), cur = L[i], next = L[i + 1];
+      box.classList.add('pp-' + lad.league);
+      left = LEAGUE_N[lad.league] || lad.league.toUpperCase();
+      if (cur && next) {
+        k = (lad.rating - cur.from) / (next.from - cur.from);
+        right = LEAGUE_N[next.id] + ' AT ' + fmt(next.from);
+        note = fmt(Math.max(1, next.from - lad.rating)) + ' RATING TO ' + LEAGUE_N[next.id];
+      } else if (cur) { k = 1; note = 'THE TOP LEAGUE'; }
+      else note = fmt(lad.rating) + ' RATING';
+    } else if (lad && lad.placing) {
+      const n = pv.placements || lad.games + lad.left;
+      k = lad.games / n;
+      left = 'PLACEMENT';
+      right = lad.games + ' OF ' + n;
+      note = lad.left + (lad.left === 1 ? ' RANKED MATCH' : ' RANKED MATCHES') + ' TO A LEAGUE';
+    } else {
+      left = 'UNRANKED';
+      note = pv.placements ? pv.placements + ' RANKED MATCHES PLACE A PILOT' : 'NO RANKED MATCHES THIS SEASON';
+    }
+    const top = el('div', 'pp-top');
+    top.append(el('b', null, left), el('span', null, right));
+    const bar = el('div', 'pbar');
+    const fill = el('i');
+    fill.style.setProperty('--k', (Math.max(0, Math.min(1, k)) * 100).toFixed(1) + '%');
+    bar.append(fill);
+    box.append(top, bar, el('small', null, note));
+    return box;
+  }
+
+  // the season podiums, counted, as osu! counts a player's grades
+  function podiumCount(list) {
+    const box = el('div', 'ppods');
+    box.append(el('span', 'pk', 'SEASON PODIUMS'));
+    const row = el('div', 'ppods-row');
+    for (const rank of [1, 2, 3]) {
+      const f = el('span', 'ppod');
+      f.title = ORD(rank) + ' PLACE';
+      const cv = art('medal', 'ppod-art', rank);
+      if (cv) f.append(cv);
+      const n = list.filter(a => a.rank === rank).length;
+      f.append(el('b', n ? null : 'zero', '×' + fmt(n)));
+      row.append(f);
+    }
+    box.append(row);
+    return box;
+  }
+
+  // their best run on the all-time board, listed the way osu! lists a player's numbers
+  function bestRun(b) {
+    const box = el('div', 'pbest');
+    box.append(el('span', 'pk', 'BEST RUN'));
+    if (!b) { box.append(el('p', 'pnone', 'No runs on the boards yet.')); return box; }
+    const dl = el('dl', 'pkv');
+    for (const [k, v] of [['SCORE', fmt(b.score)], ['WAVE', fmt(b.wave)], ['SECTOR', b.sector || '—'],
+                          ['LEVEL', fmt(b.level)], ['KILLS', fmt(b.kills)], ['TIME', clock(b.time)]]) {
+      const r = el('div');
+      r.append(el('dt', null, k), el('dd', null, v));
+      dl.append(r);
+    }
+    box.append(dl);
+    return box;
+  }
+
+  /* A match, after osu!'s score rows: the result on a plate at the left,
+     who it was against with the queue and when under it, both pilots (the
+     way osu! shows a score's mods), and the score on a panel at the right. */
   function matchLi(m, names) {
-    const li = el('li', 'pmatch ' + (m.won === true ? 'won' : m.won === false ? 'lost' : 'nc'));
+    const res = m.won === true ? 'won' : m.won === false ? 'lost' : 'nc';
+    const li = el('li', 'pmatch ' + res);
     const bg = art('matchRow', 'pmatch-art', { won: m.won, verdict: m.verdict, queue: m.queue });
     if (bg) li.append(bg);
-    li.append(el('span', 'pm-res', m.verdict === 'void' ? 'NO CONTEST'
-      : (m.won ? 'WIN' : 'LOSS') + (m.verdict === 'forfeit' ? ' · FORFEIT' : '')));
+    const r = el('span', 'pm-res');
+    r.append(el('b', null, res === 'won' ? 'WIN' : res === 'lost' ? 'LOSS' : 'N/C'));
+    if (res === 'nc') r.title = 'NO CONTEST';
+    if (m.verdict === 'forfeit') r.append(el('small', null, 'FORFEIT'));
     const vs = el('span', 'pm-vs');
-    vs.append('VS ', nameEl(m.them.name, m.them.user, 'pm-name'), el('small', null, names[m.them.pilot] || m.them.pilot));
-    li.append(vs,
-      el('span', 'pm-me', names[m.pilot] || m.pilot),
-      el('span', 'pm-score', m.score ? m.score[0] + '–' + m.score[1] : '—'),
-      el('span', 'pm-q', (QUEUE_N[m.queue] || String(m.queue).toUpperCase()) + (m.league ? ' · ' + (LEAGUE_N[m.league] || '') : '')),
-      el('span', 'pm-at', dateOf(m.at)));
+    const who = el('span', 'pm-who');
+    who.append(el('i', null, 'VS '), nameEl(m.them.name, m.them.user, 'pm-name'));
+    // the queue, the league, how long a match, and when (the · between them is leaderboard.css's)
+    const when = el('small', 'pm-meta');
+    when.append(el('span', null, QUEUE_N[m.queue] || String(m.queue).toUpperCase()));
+    if (m.league) when.append(el('span', null, LEAGUE_N[m.league] || String(m.league).toUpperCase()));
+    if (m.bestOf) when.append(el('span', 'pm-bo', 'BEST OF ' + m.bestOf));
+    when.append(el('span', null, ago(m.at)));
+    when.title = dateOf(m.at);
+    vs.append(who, when);
+    const ps = el('span', 'pm-pilots');
+    const pn = id => names[id] || String(id || '?').toUpperCase();
+    ps.title = 'YOU FLEW ' + pn(m.pilot) + ' · THEY FLEW ' + pn(m.them.pilot);
+    [m.pilot, m.them.pilot].forEach((id, i) => {
+      if (i) ps.append(el('i', null, 'VS'));
+      const f = el('span', 'pm-pilot');
+      const cv = art('pilotBadge', 'pm-badge', { id, owned: true, awake: false });
+      if (cv) f.append(cv);
+      f.append(el('small', null, pn(id)));
+      ps.append(f);
+    });
+    li.append(r, vs, ps, el('span', 'pm-score', m.score ? m.score[0] + '–' + m.score[1] : '—'));
     return li;
+  }
+
+  // a section of the profile, which the bar under the header leads to
+  function section(cls, key, title) {
+    const s = el('section', cls);
+    s.id = 'p-' + key;
+    s.dataset.sec = key;
+    s.append(el('h3', null, title));
+    return s;
   }
 
   function renderProfile(box, d) {
     const lad = d.pvp.ladder, placed = !!(lad && lad.league);
     const names = Object.fromEntries(d.game.pilots.map(p => [p.id, p.name]));
+    const league = placed ? lad.league : null, last = d.pvp.recent[0] ? d.pvp.recent[0].pilot : null;
 
-    // the header: who, since when, and their league
+    /* The header, after osu!'s: a title bar, the cover, the emblem standing
+       half over it beside the name, and under them the league's progress,
+       the podiums counted and the best run. */
     const head = el('header', 'phead');
-    const banner = art('profileBanner', 'pbanner', { display: d.user.display, user: d.user.name,
-      league: placed ? lad.league : null, rating: placed ? lad.rating : null, rank: placed ? lad.rank : null, joined: d.user.joined });
-    if (banner) head.append(banner);
+    const bar = el('div', 'ptitle');
+    bar.append(el('b', null, 'PILOT INFO'), el('span', null, 'SEASON ' + seasonLabel(d.season || d.pvp.season)));
+    const cover = el('div', 'pcover');
+    const banner = art('profileBanner', 'pbanner', { display: d.user.display, user: d.user.name, league,
+      rating: placed ? lad.rating : null, rank: placed ? lad.rank : null, joined: d.user.joined, pilot: last });
+    if (banner) cover.append(banner);
+    const det = el('div', 'pdet');
     const id = el('div', 'pid');
-    const av = art('avatar', 'pavatar', { display: d.user.display, league: placed ? lad.league : null,
-      pilot: d.pvp.recent[0] ? d.pvp.recent[0].pilot : null });
+    const av = art('avatar', 'pavatar', { display: d.user.display, user: d.user.name, league, pilot: last });
     if (av) id.append(av);
     const nm = el('div', 'pnm');
     nm.append(el('h2', 'pname', d.user.display));
     const sub = el('p', 'psub');
-    sub.append(el('span', 'acct', '◆ ' + d.user.name), 'JOINED ' + dateOf(d.user.joined));
-    if (d.game.callsign && d.game.callsign.toLowerCase() !== d.user.display.toLowerCase())
-      sub.append(' · FLIES AS ', el('b', null, d.game.callsign));
+    sub.append(el('span', 'acct', '◆ ' + d.user.name), el('span', null, 'JOINED ' + dateOf(d.user.joined)));
+    if (d.game.callsign && d.game.callsign.toLowerCase() !== d.user.display.toLowerCase()) {
+      const fl = el('span');
+      fl.append('FLIES AS ', el('b', null, d.game.callsign));
+      sub.append(fl);
+    }
     nm.append(sub);
     id.append(nm);
     const lg = el('div', 'plg');
     if (placed) {
       const crest = art('league', 'plg-crest', lad.league);
       if (crest) lg.append(crest);
-      const t = el('div', 'plg-t');
-      t.append(el('b', 'lg-' + lad.league, LEAGUE_N[lad.league] || lad.league.toUpperCase()),
-               el('span', null, fmt(lad.rating) + ' · #' + fmt(lad.rank) + ' OF ' + fmt(lad.of)));
-      lg.append(t);
-    } else {
-      const t = el('div', 'plg-t');
-      t.append(el('b', null, lad && lad.placing ? 'BEING PLACED' : 'UNRANKED'),
-               el('span', null, lad && lad.placing ? lad.games + ' OF ' + (lad.games + lad.left) + ' MATCHES' : 'NO RANKED MATCHES THIS SEASON'));
-      lg.append(t);
     }
-    head.append(id, lg);
+    const lt = el('div', 'plg-t');
+    if (placed) {
+      lt.append(el('b', 'lg-' + lad.league, LEAGUE_N[lad.league] || lad.league.toUpperCase()),
+                el('strong', null, fmt(lad.rating)), el('span', null, '#' + fmt(lad.rank) + ' OF ' + fmt(lad.of) + ' ON THE LADDER'));
+    } else {
+      lt.append(el('b', null, lad && lad.placing ? 'BEING PLACED' : 'UNRANKED'),
+                el('span', null, lad && lad.placing ? lad.games + ' OF ' + (lad.games + lad.left) + ' MATCHES' : 'NO RANKED MATCHES THIS SEASON'));
+    }
+    lg.append(lt);
+    det.append(id, lg);
+    const info = el('div', 'pinfo');
+    info.append(progress(lad, d.pvp), podiumCount(d.game.podiums), bestRun(d.game.boards.all));
+    head.append(bar, cover, det, info);
     box.append(head);
 
+    // the bar that leads to each section, held at the top as the page scrolls (osu!'s page tabs)
+    const SECS = [['place', 'PLACEMENTS'], ['hangar', 'HANGAR'], ['awards', 'AWARDS'], ['pvp', 'PVP']];
+    const nav = el('nav', 'pnav');
+    nav.setAttribute('aria-label', 'Profile sections');
+    for (const [key, label] of SECS) {
+      const b = el('button', null, label);
+      b.type = 'button';
+      b.dataset.sec = key;
+      b.addEventListener('click', () => {
+        const s = $('p-' + key);
+        if (!s) return;
+        S.pin = { key, until: performance.now() + 1000, y: scrollY };
+        s.scrollIntoView({ behavior: STILL ? 'auto' : 'smooth' });
+        litSection();
+      });
+      nav.append(b);
+    }
+    box.append(nav);
+
     // the four placements
+    const place = section('psec', 'place', 'PLACEMENTS');
     const tiles = el('div', 'pstats');
     const [kS, kA, kD] = d.boards;
     for (const [key, kind, label] of [[kS, 'season', 'SEASON · ' + seasonLabel(kS.slice(7))], [kA, 'all', 'ALL-TIME'], [kD, 'day', 'TODAY\'S DAILY']]) {
       const b = d.game.boards[key];
       tiles.append(tile(kind, label, b ? b.rank : 0, b ? b.of : 0,
         b ? '#' + fmt(b.rank) : kind === 'day' ? 'NOT FLOWN' : 'NOT PLACED',
-        b ? 'OF ' + fmt(b.of) + ' · BEST ' + fmt(b.score) : '\u00a0', b ? () => jump(key, b) : null));
+        b ? 'OF ' + fmt(b.of) + ' · BEST ' + fmt(b.score) : ' ', b ? () => jump(key, b) : null));
     }
     tiles.append(tile('pvp', 'PVP · ' + seasonLabel(d.pvp.season), placed ? lad.rank : 0, placed ? lad.of : 0,
       placed ? '#' + fmt(lad.rank) : lad && lad.placing ? 'PLACING' : 'UNRANKED',
-      placed ? 'OF ' + fmt(lad.of) + ' · ' + fmt(lad.rating) : lad && lad.placing ? lad.left + ' TO GO' : '\u00a0',
-      placed ? () => go('pvp', '', Math.floor((lad.rank - 1) / PAGE) * PAGE, { user: d.user.name }) : null, placed ? lad.league : null));
-    box.append(tiles);
+      placed ? 'OF ' + fmt(lad.of) + ' · ' + fmt(lad.rating) : lad && lad.placing ? lad.left + ' TO GO' : ' ',
+      placed ? () => go('pvp', '', Math.floor((lad.rank - 1) / PAGE) * PAGE, { user: d.user.name }) : null, league));
+    place.append(tiles);
+    box.append(place);
 
     // the hangar and the podiums
     const grid = el('div', 'pgrid');
-    const hangar = el('section', 'pcard');
-    hangar.append(el('h3', null, 'HANGAR'));
+    const hangar = section('pcard', 'hangar', 'HANGAR');
+    const owned = d.game.pilots.filter(p => p.owned).length, woke = d.game.pilots.filter(p => p.awake).length;
+    hangar.querySelector('h3').append(el('small', null, owned + ' OF ' + d.game.pilots.length + ' UNLOCKED' + (woke ? ' · ' + woke + ' AWAKENED' : '')));
     const ps = el('div', 'ppilots');
     for (const p of d.game.pilots) {
       const f = el('figure', 'ppilot' + (p.owned ? '' : ' locked') + (p.awake ? ' awake' : ''));
@@ -601,8 +745,7 @@
       ps.append(f);
     }
     hangar.append(ps);
-    const awards = el('section', 'pcard');
-    awards.append(el('h3', null, 'AWARDS'));
+    const awards = section('pcard', 'awards', 'AWARDS');
     if (!d.game.podiums.length) awards.append(el('p', 'pnone', 'No season podiums yet. The top three of each season are kept here.'));
     else {
       const ul = el('ul', 'pawards');
@@ -610,9 +753,7 @@
         const li = el('li');
         const cv = art('award', 'paward', { season: a.season, rank: a.rank, score: a.score });
         if (cv) li.append(cv);
-        const t = el('div');
-        t.append(el('b', null, ORD(a.rank) + ' · SEASON ' + seasonLabel(a.season)), el('span', null, fmt(a.score)));
-        li.append(t);
+        li.append(el('b', null, ORD(a.rank) + ' · ' + seasonLabel(a.season)), el('span', null, fmt(a.score)));
         ul.append(li);
       }
       awards.append(ul);
@@ -620,15 +761,22 @@
     grid.append(hangar, awards);
     box.append(grid);
 
-    // PvP: the record, and the latest matches
-    const pv = el('section', 'pcard ppvp');
-    pv.append(el('h3', null, 'PVP'));
+    // PvP: the record, wins against losses, and the latest matches
+    const pv = section('pcard ppvp', 'pvp', 'PVP');
     const rec = el('div', 'precord');
     const nums = [['MATCHES', fmt(d.pvp.played)], ['WINS', fmt(d.pvp.wins)], ['LOSSES', fmt(d.pvp.losses)],
                   ['WIN RATE', d.pvp.played ? Math.round(d.pvp.wins / d.pvp.played * 100) + '%' : '—']];
     if (lad) nums.push(['RANKED · ' + seasonLabel(d.pvp.season), lad.wins + '–' + lad.losses]);
     for (const [k, v] of nums) { const n = el('div', 'pnum'); n.append(el('b', null, v), el('span', null, k)); rec.append(n); }
     pv.append(rec);
+    if (d.pvp.played) {
+      const wl = el('div', 'pwl');
+      wl.title = fmt(d.pvp.wins) + ' WON · ' + fmt(d.pvp.losses) + ' LOST';
+      const i = el('i');
+      i.style.setProperty('--k', (d.pvp.wins / d.pvp.played * 100).toFixed(1) + '%');
+      wl.append(i);
+      pv.append(wl);
+    }
     if (!d.pvp.recent.length) pv.append(el('p', 'pnone', 'No matches yet.'));
     else {
       pv.append(el('h4', null, 'LATEST MATCHES'));
@@ -637,7 +785,37 @@
       pv.append(ol);
     }
     box.append(pv);
+    S.pin = null;
+    litSection();
   }
+
+  /* The section on screen, lit in the bar under the header: the lowest one
+     whose top has passed 40% of the window (the first of two side by side),
+     the last at the foot of the page, or the one just asked for, while the
+     page scrolls to it and until it is scrolled away from. */
+  function litSection() {
+    const nav = S.tab === 'u' && document.querySelector('.pnav');
+    if (!nav) return;
+    const line = innerHeight * 0.4;
+    const foot = innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+    let on = null, top = -Infinity;
+    if (S.pin) {
+      // held while the page scrolls there, and after, until it is scrolled 60 px from where it stopped
+      if (performance.now() < S.pin.until) S.pin.y = scrollY;
+      if (Math.abs(scrollY - S.pin.y) < 60) on = S.pin.key;
+      else S.pin = null;
+    }
+    if (!on) {
+      for (const b of nav.children) {
+        const s = $('p-' + b.dataset.sec);
+        if (!s) continue;
+        const y = s.getBoundingClientRect().top;
+        if (foot || (y < line && y > top + 1)) { on = b.dataset.sec; top = y; }
+      }
+    }
+    for (const b of nav.children) b.setAttribute('aria-current', String(b.dataset.sec === on));
+  }
+  addEventListener('scroll', litSection, { passive: true });
 
   async function profileLoad() {
     const box = $('profile');

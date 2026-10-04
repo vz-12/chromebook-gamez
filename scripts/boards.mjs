@@ -224,6 +224,8 @@ section('the PvP ladder and players\' profiles');
   const v = p.d.pvp;
   ok(v.ladder && v.ladder.rank === 1 && v.ladder.of === 2 && v.ladder.league === 'gold' && v.ladder.rating === 1600, 'its place on the ladder', v.ladder);
   ok(v.played === 2 && v.wins === 1 && v.losses === 1, 'its record: a no contest counts for nobody', v);
+  ok(v.placements === 5 && v.leagues.length === 5 && v.leagues[0].id === 'bronze' && v.leagues[0].from === 0
+     && v.leagues.every((l, i) => !i || l.from > v.leagues[i - 1].from), 'the leagues\' cutoffs, lowest first, and the placement matches', v.leagues);
   ok(v.recent.length === 3 && v.recent[0].queue === 'friend' && v.recent[0].won === false && v.recent[0].verdict === 'forfeit'
      && v.recent[1].won === null && v.recent[2].won === true && v.recent[2].score.join() === '2,1' && v.recent[2].pilot === 'hacker'
      && v.recent[2].them.name === 'PvpOnly' && v.recent[2].them.user === 'pvponly' && v.recent[2].them.pilot === 'ember',

@@ -19,7 +19,7 @@
    ========================================================================= */
 import { STORE, ARCHIVE, seasonOf } from './season.js';
 import { getStore } from './store.js';
-import { PILOTS, BASE_PILOTS, PLACEMENTS } from '../pvp/src/rules.js';
+import { PILOTS, BASE_PILOTS, PLACEMENTS, LEAGUES } from '../pvp/src/rules.js';
 
 export const isUser = v => typeof v === 'string' && /^[a-z0-9_-]{3,16}$/.test(v);
 
@@ -114,8 +114,10 @@ export async function profile(db, env, user, boards, standings) {
     podiums.sort((x, y) => (x.season < y.season ? 1 : x.season > y.season ? -1 : x.rank - y.rank));
   }
 
-  // PvP: the ladder this season, every recorded match, the latest ones
-  let pvp = { season, ladder: null, wins: 0, losses: 0, played: 0, recent: [] };
+  // PvP: the ladder this season, every recorded match, the latest ones, and
+  // the leagues' cutoffs and the placement matches, for the page's progress bar
+  let pvp = { season, ladder: null, wins: 0, losses: 0, played: 0, recent: [],
+              leagues: LEAGUES.map(l => ({ id: l.id, from: l.from })), placements: PLACEMENTS };
   if (await hasPvp(db)) {
     pvp.ladder = (await ladderStandings(db, [a.id], season)).get(a.id) || null;
     const t = await db.prepare(

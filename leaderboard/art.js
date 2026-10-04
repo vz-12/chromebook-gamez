@@ -40,31 +40,38 @@
                                     76 × 76 on the strip, 22 × 22 in a row,
                                     64 × 64 on a profile (drawn on a 64 grid)
 
-   THE PROFILE (#u/<account name>), one player's page. Placeholders until
-   they are drawn; ?hooks in the address outlines every canvas with its
-   hook's name and size.
-     profileBanner(g, w, h, t, p)   behind the header. p = { display, user,
-                                    league (an id, or null while still being
-                                    placed or never ranked), rating (or null),
-                                    rank (on the ladder, or null), joined
-                                    (ms) }    full width × 172, taller when the
-                                    header wraps on a narrow window
-     avatar(g, w, h, t, p)          the player's emblem. p = { display,
-                                    league, pilot (the one they flew last in
-                                    PvP, or null) }                    104 × 104
+   THE PROFILE (#u/<account name>), one player's page, after osu!'s. ?hooks
+   in the address outlines every canvas with its hook's name and size.
+     profileBanner(g, w, h, t, p)   the cover across the top. p = { display,
+                                    user, league (an id, or null while still
+                                    being placed or never ranked), rating (or
+                                    null), rank (on the ladder, or null),
+                                    joined (ms), pilot (the one they flew
+                                    last in PvP, or null) }
+                                             full width × 200 (130 on a phone)
+     avatar(g, w, h, t, p)          the player's emblem, half over the cover.
+                                    p = { display, user, league, pilot }
+                                                   128 × 128 (88 on a phone)
      statCard(g, w, h, t, s)        behind each placement tile. s = { kind:
                                     'season' | 'all' | 'day' | 'pvp', rank
                                     (0 = not placed), of, league (pvp) }
-                                                                       tile size
-     pilotBadge(g, w, h, t, b)      a pilot in the hangar. b = { id: 'runner'
-                                    | 'ember' | 'hacker' | 'melee', owned,
-                                    awake }                              64 × 64
+                                                                   tile size
+     pilotBadge(g, w, h, t, b)      a pilot: in the hangar, and either side of
+                                    each match. b = { id: 'runner' | 'ember'
+                                    | 'hacker' | 'melee', owned, awake }
+                                    84 × 84 in the hangar (64 on a phone),
+                                    30 × 30 in a match
      award(g, w, h, t, a)           a season podium. a = { season:
-                                    '2026-09', rank: 1 | 2 | 3, score } 40 × 40
+                                    '2026-09', rank: 1 | 2 | 3, score } 64 × 64
      matchRow(g, w, h, t, m)        behind each recent match. m = { won: true
                                     | false | null (no contest), verdict:
                                     'played' | 'forfeit' | 'void', queue:
-                                    'ranked' | 'casual' | 'friend' }   row size
+                                    'ranked' | 'casual' | 'friend' }
+                                    row size: the result's plate is its first
+                                    72 px, the score's panel its last 84
+   The profile shows two of the board's hooks as well: league beside the
+   name (76 × 76, 56 on a phone), and medal counting the season podiums
+   (28 × 28).
 
    THE LOOK, after osu!'s leaderboard: everything sits on rounded panels,
    arrives with a quick ease that settles slowly (OutQuint), one thing after
@@ -502,6 +509,344 @@
     void:     { tier: 4, M: METAL.void }
   };
 
+  // a league's crest at the crest's own scale (a 64 grid), for any hook that wants one
+  const crestOf = (g, id, t, age) => {
+    const L = LEAGUE[id] || LEAGUE.bronze;
+    if (id === 'void') voidCrest(g, t, age, L.M);
+    else if (id === 'platinum') gemCrest(g, t, age, L.M);
+    else hexCrest(g, t, age, L.M, L.tier);
+  };
+
+  /* ------------------------------ the profile ------------------------------ */
+  // a name to a seed, the same every time: each player's cover and emblem are their own
+  const seedOf = s => {
+    let h = 2166136261;
+    for (const c of String(s || '')) { h ^= c.codePointAt(0); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % 2147483646 + 1;
+  };
+  // the game's colours, for a player's own pair
+  const HUES = ['#67e8f9', '#a78bfa', '#f472b6', '#a3e635', '#fbbf24', '#f87171', '#a5b4fc', '#38bdf8', '#34d399', '#fb923c'].map(rgb);
+  const metalOf = id => (id && LEAGUE[id] ? LEAGUE[id].M : METAL.cyan);
+  const COLD = metal('#94a3b8', '#475569', '#1e293b');       // locked, unplaced: no metal yet
+
+  /* The pilots, by the game's ids (CHARS in index.html): each hull's outline
+     as the game's hullPath() draws it (nose along +x, in the game's pixels),
+     its colour and engines, and what it burns when awake: EMBER's IFRIT in
+     fire, THE HACKER's SUPERUSER in gold, THE VAGRANT's RONIN in red. A pilot
+     added to the game is a line here; one this file doesn't know flies as
+     VOIDRUNNER. */
+  const PILOT = {
+    runner: { col: '#67e8f9', hi: '#e0f2fe', fire: '#a5f3fc', awake: null, eye: 8, eng: [[-6.5, 3.2], [-6.5, -3.2]],
+              hull: [[18, 0], [9, 3.4], [5.5, 8.5], [-5, 13], [-8.5, 9.5], [-6, 4.2], [-10.5, 3.2], [-6.5, 0],
+                     [-10.5, -3.2], [-6, -4.2], [-8.5, -9.5], [-5, -13], [5.5, -8.5], [9, -3.4]] },
+    ember:  { col: '#f87171', hi: '#fecaca', fire: '#fb923c', awake: '#fb923c', eye: 9, eng: [[-9, 0]],
+              hull: [[22, 0], [13, 2.6], [9, 7], [2, 13.5], [-7, 12], [-5, 4.6], [-12, 3.2], [-9, 0],
+                     [-12, -3.2], [-5, -4.6], [-7, -12], [2, -13.5], [9, -7], [13, -2.6]] },
+    hacker: { col: '#a3e635', hi: '#ecfccb', fire: '#d9f99d', awake: '#fbbf24', eye: 8, eng: [[-9, 0]],
+              hull: [[18, 0], [4, 6], [10, 13], [-4, 11], [-9, 0], [-4, -11], [10, -13], [4, -6]] },
+    melee:  { col: '#a5b4fc', hi: '#e0e7ff', fire: '#c7d2fe', awake: '#ef4444', eye: 7, eng: [[-12.8, 0]],
+              hull: [[12.6, 0], [10.4, 4.4], [11.4, 10.2], [2.4, 13.2], [-6.4, 12], [-9.2, 6], [-15, 4], [-12.8, 0],
+                     [-15, -4], [-9.2, -6], [-6.4, -12], [2.4, -13.2], [11.4, -10.2], [10.4, -4.4]] }
+  };
+  for (const [id, P] of Object.entries(PILOT)) {
+    const xs = P.hull.map(p => p[0]);
+    P.id = id; P.x0 = Math.min(...xs); P.x1 = Math.max(...xs);
+    P.cx = (P.x0 + P.x1) / 2; P.len = P.x1 - P.x0;
+    P.M = { hi: rgb(P.hi), mid: rgb(P.col), lo: lerp(rgb(P.col), [6, 8, 16], 0.72) };
+  }
+  const pilotOf = id => PILOT[id] || PILOT.runner;
+
+  /* A pilot's ship, nose up, centred on (x, y) and `size` long, turned by
+     o.rot: its engines burning, its hull in its colour with the game's
+     furniture on it (after hullDetail()), and an eye lit when o.awake.
+     o.dark draws it locked: a cold shadow of itself. */
+  const pilotShip = (g, P, x, y, size, t, o = {}) => {
+    const k = size / P.len;
+    g.save();
+    g.translate(x, y); g.rotate((o.rot || 0) - Math.PI / 2); g.scale(k, k); g.translate(-P.cx, 0);
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    const outline = () => {
+      g.beginPath();
+      P.hull.forEach(([a, b], i) => (i ? g.lineTo(a, b) : g.moveTo(a, b)));
+      g.closePath();
+    };
+    if (o.dark) {
+      outline();
+      g.fillStyle = '#111827'; g.fill();
+      g.strokeStyle = 'rgba(71, 85, 105, .95)'; g.lineWidth = 1.3; g.stroke();
+      g.restore();
+      return;
+    }
+    const fl = STILL ? 0.85 : 0.7 + 0.3 * Math.sin(t * 22 + (o.phase || 0));
+    for (const [ex, ey] of P.eng) {
+      glow(g, ex - 4, ey, 10 * fl, rgb(P.fire), 0.5);
+      g.fillStyle = 'rgba(240, 249, 255, .7)';
+      g.beginPath(); g.moveTo(ex + 0.5, ey + 2.3); g.lineTo(ex - 9 - 7 * fl, ey); g.lineTo(ex + 0.5, ey - 2.3); g.closePath(); g.fill();
+    }
+    outline();
+    const body = g.createLinearGradient(P.x1, 0, P.x0, 0);
+    body.addColorStop(0, P.hi); body.addColorStop(0.5, P.col); body.addColorStop(1, css(P.M.lo));
+    g.save();
+    g.shadowColor = P.col; g.shadowBlur = o.glow === undefined ? 10 : o.glow;
+    g.fillStyle = body; g.fill();
+    g.restore();
+    // the furniture, inside the outline the way the game keeps it
+    g.save();
+    outline(); g.clip();
+    const dark = 'rgba(9, 15, 28, .72)', bright = css(P.M.hi, 0.75);
+    if (P.id === 'ember') {
+      g.strokeStyle = dark; g.lineWidth = 3.4;
+      g.beginPath(); g.moveTo(3, 0); g.lineTo(18, 0); g.stroke();
+      g.strokeStyle = bright; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(4, -2); g.lineTo(17.5, -2); g.moveTo(4, 2); g.lineTo(17.5, 2); g.stroke();
+      g.strokeStyle = dark; g.lineWidth = 1.6;
+      g.beginPath();
+      for (let i = 0; i < 3; i++) {
+        const vx = 4.4 - i * 3.6;
+        g.moveTo(vx, 6.6 + i * 1.1); g.lineTo(vx - 2.6, 11.8);
+        g.moveTo(vx, -6.6 - i * 1.1); g.lineTo(vx - 2.6, -11.8);
+      }
+      g.stroke();
+    } else {
+      g.strokeStyle = dark; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(-5, 0); g.lineTo(15, 0); g.moveTo(-1.8, -5.8); g.lineTo(-1.8, 5.8); g.stroke();
+      g.strokeStyle = bright; g.lineWidth = 1.1;
+      g.beginPath();
+      if (P.id === 'runner') {
+        g.moveTo(5.4, 8.2); g.lineTo(-4.6, 11.8); g.moveTo(5.4, -8.2); g.lineTo(-4.6, -11.8);
+        g.moveTo(2.6, 4.2); g.lineTo(-3.6, 9.2); g.moveTo(2.6, -4.2); g.lineTo(-3.6, -9.2);
+      } else { g.moveTo(4, 4.5); g.lineTo(-4, 7.2); g.moveTo(4, -4.5); g.lineTo(-4, -7.2); }
+      g.stroke();
+      if (P.id === 'runner') { g.fillStyle = dark; g.fillRect(6.4, 2.2, 4.6, 1.5); g.fillRect(6.4, -3.7, 4.6, 1.5); }
+      if (P.id === 'hacker' && !o.awake) {         // a terminal in the bay, its cursor blinking
+        g.fillStyle = 'rgba(6, 12, 4, .85)'; g.fillRect(4.6, -2.4, 6.4, 4.8);
+        if (STILL || Math.sin(t * 6.5) > -0.2) { g.fillStyle = P.hi; g.fillRect(6, -1.5, 2, 3); }
+      }
+      if (P.id === 'melee') { g.fillStyle = dark; g.fillRect(6.2, -3.8, 2.4, 7.6); }   // the visor slit
+    }
+    g.restore();
+    // awake: the form's eye, lit
+    if (o.awake) {
+      const ec = P.awake ? rgb(P.awake) : radiant(t * 0.2), ex = P.eye;
+      glow(g, ex, 0, 9, ec, 0.9);
+      g.fillStyle = '#fff';
+      g.beginPath(); g.ellipse(ex, 0, 1.3, 2.8, 0, 0, TAU); g.fill();
+    }
+    outline();
+    g.strokeStyle = css(P.M.hi, 0.85); g.lineWidth = 0.9; g.stroke();
+    g.restore();
+  };
+
+  /* What an awakened pilot's badge burns with, round a hexagon of radius R:
+     IFRIT's flames, SUPERUSER's gold ring of bits, RONIN's red crescents and
+     the cut they make, VOIDRUNNER's light in every colour of the void. */
+  const aura = (g, P, t, R, small) => {
+    const c = P.awake ? rgb(P.awake) : radiant(t * 0.1);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    glow(g, 0, 0, R + 12, c, 0.3);
+    if (small) {
+      g.strokeStyle = css(c, 0.8); g.lineWidth = 2;
+      g.beginPath(); g.arc(0, 0, R + 3.5, 0, TAU); g.stroke();
+      g.restore();
+      return;
+    }
+    if (P.id === 'ember') {
+      for (const [n, al, len] of [[16, 0.5, 1], [11, 0.55, 0.6]]) {
+        for (let i = 0; i < n; i++) {
+          const a = (i + (len < 1 ? 0.5 : 0)) / n * TAU;
+          const f = STILL ? 0.7 : 0.55 + 0.45 * Math.sin(t * 8.7 + i * 2.3) * Math.sin(t * 5.1 + i * 1.7);
+          const up = 0.5 + 0.5 * Math.max(0, -Math.sin(a));    // taller over the top
+          const r0 = R - 3, r1 = R + (3 + 6 * f) * up * len + 2;
+          const ax = Math.cos(a), ay = Math.sin(a), bw = 2.8 * len + 1;
+          const tx = ax * r1 + Math.sin(t * 3 + i) * 0.8, ty = ay * r1 - 2.5 * up;
+          g.beginPath();
+          g.moveTo(ax * r0 - ay * bw, ay * r0 + ax * bw);
+          g.quadraticCurveTo(ax * (r0 + 3) - ay * bw * 0.4, ay * (r0 + 3) + ax * bw * 0.4 - up, tx, ty);
+          g.quadraticCurveTo(ax * (r0 + 3) + ay * bw * 0.4, ay * (r0 + 3) - ax * bw * 0.4 - up, ax * r0 + ay * bw, ay * r0 - ax * bw);
+          g.closePath();
+          g.fillStyle = len < 1 ? 'rgba(253, 224, 71, ' + al + ')' : 'rgba(249, 115, 22, ' + al + ')';
+          g.fill();
+        }
+      }
+    } else if (P.id === 'hacker') {
+      g.strokeStyle = css(c, 0.85); g.lineWidth = 1.4;
+      g.setLineDash([5, 3.2]); g.lineDashOffset = STILL ? 0 : -t * 12;
+      g.beginPath(); g.arc(0, 0, R + 4.5, 0, TAU); g.stroke();
+      g.setLineDash([]);
+      g.font = "700 6px 'JetBrains Mono', monospace";
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * TAU - t * 0.5, flick = Math.floor(t * 4 + i * 7) % 5;
+        g.fillStyle = css(c, flick ? 0.75 : 0.25);
+        g.fillText((i * 7 + Math.floor(t * 2)) % 3 ? '1' : '0', Math.cos(a) * (R + 9), Math.sin(a) * (R + 9));
+      }
+    } else if (P.id === 'melee') {
+      for (let i = 0; i < 2; i++) {
+        const a = t * 1.3 + i * Math.PI;
+        g.fillStyle = css(c, 0.85);
+        g.beginPath();
+        g.arc(0, 0, R + 6.5, a, a + 1.1);
+        g.arc(Math.cos(a + 0.55) * 2.2, Math.sin(a + 0.55) * 2.2, R + 5, a + 1.1, a, true);
+        g.closePath(); g.fill();
+      }
+      if (!STILL) {                                    // the cut, now and then
+        const u = (t % 2.8) / 0.32;
+        if (u < 1) {
+          const e = outQuint(u), L = R + 10;
+          g.strokeStyle = 'rgba(255, 228, 230, ' + (1 - u) + ')'; g.lineWidth = 2.4 * (1 - u) + 0.4;
+          g.beginPath(); g.moveTo(-L, L * 0.55); g.lineTo(-L + 2 * L * e, L * 0.55 - 1.1 * L * e); g.stroke();
+          g.strokeStyle = css(c, 0.7 * (1 - u)); g.lineWidth = 5 * (1 - u);
+          g.stroke();
+        }
+      }
+    } else {
+      for (let i = 0; i < 24; i++) {
+        const a = i / 24 * TAU + t * 0.6;
+        g.strokeStyle = css(radiant(i / 24 + t * 0.1), 0.85); g.lineWidth = 2;
+        g.beginPath(); g.arc(0, 0, R + 4.5, a, a + TAU / 24 - 0.05); g.stroke();
+      }
+      for (let i = 0; i < 3; i++) {
+        const a = -t * 1.4 + i * TAU / 3;
+        g.fillStyle = '#fff';
+        g.beginPath(); g.arc(Math.cos(a) * (R + 4.5), Math.sin(a) * (R + 4.5), 1.4, 0, TAU); g.fill();
+      }
+    }
+    g.restore();
+  };
+
+  // a padlock, centred on (x, y), s across
+  const padlock = (g, x, y, s) => {
+    g.lineWidth = s * 0.16; g.strokeStyle = '#64748b';
+    g.beginPath(); g.arc(x, y - s * 0.12, s * 0.3, Math.PI, 0); g.stroke();
+    rrect(g, x - s * 0.45, y - s * 0.12, s * 0.9, s * 0.68, s * 0.14);
+    g.fillStyle = '#475569'; g.fill();
+    g.fillStyle = '#0b1220';
+    g.beginPath(); g.arc(x, y + s * 0.16, s * 0.1, 0, TAU); g.fill();
+  };
+
+  /* The placement tiles' watermarks: each board's sign, in lines, filling a
+     circle of radius r round (0, 0). */
+  const MARK = {
+    // the season: a dial, its month going round
+    season(g, r, t) {
+      g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke();
+      g.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * TAU, r0 = i % 3 ? r * 0.84 : r * 0.7;
+        g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r * 0.93, Math.sin(a) * r * 0.93);
+      }
+      const a = t * 0.12 - Math.PI / 2;
+      g.moveTo(0, 0); g.lineTo(Math.cos(a) * r * 0.6, Math.sin(a) * r * 0.6);
+      g.stroke();
+      g.beginPath(); g.arc(0, 0, r * 0.07, 0, TAU); g.fill();
+    },
+    // all-time: a star in a wreath
+    all(g, r, t) {
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + i * Math.PI / 5 + (STILL ? 0 : Math.sin(t * 0.5) * 0.05), rr = i % 2 ? r * 0.2 : r * 0.46;
+        pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+      }
+      roundPath(g, pts, r * 0.03); g.stroke();
+      for (const sd of [-1, 1]) {
+        g.beginPath(); g.arc(0, 0, r * 0.8, Math.PI / 2 + sd * 0.35, Math.PI / 2 + sd * 2.5, sd < 0); g.stroke();
+        for (let i = 0; i < 6; i++) {
+          const a = Math.PI / 2 + sd * (0.55 + i * 0.36), x = Math.cos(a) * r * 0.8, y = Math.sin(a) * r * 0.8;
+          g.save(); g.translate(x, y); g.rotate(a + sd * 0.9);
+          g.beginPath(); g.ellipse(0, -r * 0.1, r * 0.05, r * 0.11, 0, 0, TAU); g.fill();
+          g.restore();
+        }
+      }
+    },
+    // the daily: a sun, turning
+    day(g, r, t) {
+      g.beginPath(); g.arc(0, 0, r * 0.4, 0, TAU); g.stroke();
+      g.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * TAU + t * 0.15, r0 = r * 0.56, r1 = i % 2 ? r * 0.78 : r * 0.95;
+        g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+      }
+      g.stroke();
+    },
+    // PvP, unplaced: two ships nose to nose
+    pvp(g, r, t) {
+      for (const sd of [-1, 1]) {
+        g.save();
+        g.translate(sd * r * 0.5, STILL ? 0 : Math.sin(t * 1.4 + sd) * r * 0.05);
+        g.rotate(-sd * Math.PI / 2);
+        ship(g, 0, 0, r * 0.36); g.stroke();
+        g.restore();
+      }
+    }
+  };
+
+  // a world for a cover: a lit planet with bands, or for the void a black hole
+  const planetRing = (g, x, y, R, M, front) => {
+    g.save();
+    g.translate(x, y); g.rotate(-0.28);
+    g.beginPath();
+    if (front) g.ellipse(0, 0, R * 1.75, R * 0.34, 0, 0, Math.PI);
+    else g.ellipse(0, 0, R * 1.75, R * 0.34, 0, Math.PI, TAU);
+    g.strokeStyle = css(M.hi, front ? 0.55 : 0.25); g.lineWidth = Math.max(2, R * 0.06); g.stroke();
+    g.strokeStyle = css(M.mid, front ? 0.35 : 0.15); g.lineWidth = Math.max(5, R * 0.16); g.stroke();
+    g.restore();
+  };
+  const planet = (g, x, y, R, M, t, seed, ringed) => {
+    glow(g, x, y, R * 1.7, M.mid, 0.2);
+    if (ringed) planetRing(g, x, y, R, M, false);
+    g.save();
+    g.beginPath(); g.arc(x, y, R, 0, TAU); g.clip();
+    const body = g.createRadialGradient(x - R * 0.45, y - R * 0.5, R * 0.05, x, y, R * 1.05);
+    body.addColorStop(0, css(lit(M, 0.8))); body.addColorStop(0.45, css(lit(M, 0.38))); body.addColorStop(1, css(lerp(M.lo, [0, 0, 0], 0.55)));
+    g.fillStyle = body; g.fillRect(x - R, y - R, R * 2, R * 2);
+    const rr = seeded(seed);
+    for (let i = 0; i < 8; i++) {                 // its bands, sliding slowly round
+      const by = y - R + rr() * 2 * R, bh = R * (0.03 + rr() * 0.1);
+      g.fillStyle = css(i % 2 ? M.hi : M.lo, 0.1 + rr() * 0.12);
+      g.beginPath(); g.ellipse(x + (STILL ? 0 : Math.sin(t * 0.04 + i) * R * 0.08), by, R * 1.2, bh, -0.28, 0, TAU); g.fill();
+    }
+    const night = g.createLinearGradient(x - R * 0.7, y - R * 0.7, x + R * 0.75, y + R * 0.75);
+    night.addColorStop(0, 'rgba(2,3,8,0)'); night.addColorStop(0.5, 'rgba(2,3,8,0.3)'); night.addColorStop(1, 'rgba(2,3,8,0.94)');
+    g.fillStyle = night; g.fillRect(x - R, y - R, R * 2, R * 2);
+    g.restore();
+    g.beginPath(); g.arc(x, y, R - 0.75, Math.PI * 0.8, Math.PI * 1.75);
+    g.strokeStyle = css(M.hi, 0.75); g.lineWidth = 1.5; g.stroke();
+    if (ringed) planetRing(g, x, y, R, M, true);
+  };
+  const blackHole = (g, x, y, R, t) => {
+    glow(g, x, y, R * 2.4, radiant(t * 0.05), 0.22);
+    const disc = front => {
+      for (let i = 0; i < 4; i++) {
+        g.save();
+        g.translate(x, y); g.rotate(-0.22);
+        g.beginPath();
+        const rx = R * (1.5 + i * 0.28), ry = rx * 0.2;
+        if (front) g.ellipse(0, 0, rx, ry, 0, 0, Math.PI); else g.ellipse(0, 0, rx, ry, 0, Math.PI, TAU);
+        const gr = g.createLinearGradient(-rx, 0, rx, 0);
+        for (let j = 0; j <= 4; j++) gr.addColorStop(j / 4, css(radiant(j / 4 + i * 0.12 + t * 0.06), (front ? 0.8 : 0.4) * (1 - i * 0.2)));
+        g.strokeStyle = gr; g.lineWidth = Math.max(1.5, R * (0.11 - i * 0.02)); g.stroke();
+        g.restore();
+      }
+    };
+    disc(false);
+    g.save();
+    g.shadowColor = css(radiant(t * 0.08)); g.shadowBlur = R * 0.5;
+    g.beginPath(); g.arc(x, y, R * 1.04, 0, TAU);
+    g.strokeStyle = css(radiant(t * 0.08 + 0.3), 0.9); g.lineWidth = Math.max(1.5, R * 0.05); g.stroke();
+    g.restore();
+    g.fillStyle = '#000';
+    g.beginPath(); g.arc(x, y, R, 0, TAU); g.fill();
+    // the far side of the disc, bent up over the top of the hole
+    for (const [wd, al] of [[R * 0.22, 0.25], [R * 0.08, 0.85]]) {
+      g.beginPath(); g.ellipse(x, y - R * 0.06, R * 1.22, R * 1.12, 0, Math.PI * 1.04, Math.PI * 1.96);
+      const gr = g.createLinearGradient(x - R, 0, x + R, 0);
+      for (let j = 0; j <= 4; j++) gr.addColorStop(j / 4, css(radiant(j / 4 + t * 0.06 + 0.5), al));
+      g.strokeStyle = gr; g.lineWidth = Math.max(1.2, wd); g.stroke();
+    }
+    disc(true);
+  };
+
   window.LB_ART = {
 
     /* The page's colours, fonts and corner radius. Each key is a CSS variable
@@ -878,68 +1223,375 @@
     },
 
     /* ============================ THE PROFILE ============================
-       A player's page (#u/<account name>). These six are placeholders:
-       plain, in the page's colours, so the page reads well before they are
-       drawn. Each is yours to replace; the data each is handed is in the
-       header above. Open the page with ?hooks in the address
-       (/leaderboard/?hooks#u/notz) to see every canvas outlined with its
-       hook's name and size. */
+       A player's page (#u/<account name>), after osu!'s: a cover across the
+       top, the emblem standing half over it, the numbers under that, and the
+       rest on rounded panels. The data each hook is handed is in the header
+       above; ?hooks in the address (/leaderboard/?hooks#u/notz) outlines
+       every canvas with its hook's name and size. */
 
-    // behind the header: the name, the league and the rating sit over it
+    /* The cover, a world of the player's own: their name seeds where its
+       nebulae hang, the colour beside the league's, and the planet's place
+       and size. The planet is in their league's metal (gold and platinum
+       ringed; the void a black hole), the arena's grid runs away to the
+       horizon under it, three of the pilot they last flew cross the sky, and
+       osu!'s triangles rise through it all. It fades up from the dark when it
+       first shows, and down to the panel at the foot, where the name sits. */
     profileBanner(g, w, h, t, p) {
-      const M = (p.league && LEAGUE[p.league] && LEAGUE[p.league].M) || METAL.cyan;
-      const wash = g.createLinearGradient(0, 0, w, h);
-      wash.addColorStop(0, css(M.mid, 0.14)); wash.addColorStop(0.7, css(M.mid, 0.02));
-      g.fillStyle = wash; g.fillRect(0, 0, w, h);
-      triangles(g, w * 0.45, 0, w * 0.55, h, t, { n: 16, lo: 8, hi: 34, speed: 6, col: M.mid, alpha: 0.08, seed: 41 });
+      const M = metalOf(p.league), seed = seedOf(p.user || p.display), r = seeded(seed);
+      const accent = HUES[Math.floor(r() * HUES.length)];
+      const age = life(g, t, p.user);
+      const sky = g.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, '#04060d'); sky.addColorStop(1, css(lerp([7, 10, 20], M.lo, 0.3)));
+      g.fillStyle = sky; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 4; i++) {                 // nebulae, drifting
+        const nx = r(), ny = r(), nr = 0.22 + r() * 0.3;
+        glow(g, nx * w + (STILL ? 0 : Math.sin(t * 0.05 + i * 2) * w * 0.04), ny * h * 0.8, nr * Math.max(w, h * 3),
+             i % 2 ? accent : M.mid, 0.11 + 0.035 * Math.sin(t * 0.4 + i));
+      }
+      const sr = seeded(seed + 7);
+      for (let i = 0; i < 110; i++) {               // stars, the near ones drifting faster
+        const sx = sr(), sy = sr(), z = 0.2 + sr() * 0.8, ph = sr() * TAU;
+        const x = ((sx * w - t * 6 * z) % w + w) % w, y = sy * h * 0.8;
+        g.fillStyle = 'rgba(226,232,240,' + (0.15 + 0.55 * z * (0.6 + 0.4 * Math.sin(t * 1.5 + ph))) + ')';
+        const s = z > 0.85 ? 1.6 : 1;
+        g.fillRect(x - s / 2, y - s / 2, s, s);
+      }
+      const hz = Math.round(h * 0.7);
+      // the world, rising behind the horizon
+      const R = h * (0.36 + r() * 0.22), px = w * (0.6 + r() * 0.24), py = hz - R * (0.25 + r() * 0.55);
+      if (p.league === 'void') blackHole(g, px, py - R * 0.1, R * 0.58, t);
+      else planet(g, px, py, R, M, t, seed, p.league === 'gold' || p.league === 'platinum');
+      triangles(g, 0, 0, w, hz, t, { n: 22, lo: 10, hi: Math.min(70, h * 0.4), speed: 9, col: M.mid, alpha: 0.07, seed: seed % 64, line: 3 });
+      // three of their pilot crossing the sky
+      const P = pilotOf(p.pilot), lane = h * (0.16 + r() * 0.16), span = w + 260;
+      const fx = STILL ? w * 0.3 : ((t * 22 + r() * span) % span) - 130;
+      for (const [dx, dy, s] of [[0, 0, 15], [-26, -13, 11], [-26, 13, 11]]) {
+        const x = fx + dx, y = lane + dy + (STILL ? 0 : Math.sin(t * 1.1 + dx) * 2);
+        const trail = g.createLinearGradient(x - 70, 0, x - 8, 0);
+        trail.addColorStop(0, css(P.M.mid, 0)); trail.addColorStop(1, css(P.M.mid, 0.4));
+        g.strokeStyle = trail; g.lineWidth = s * 0.16;
+        g.beginPath(); g.moveTo(x - 70, y); g.lineTo(x - 8, y); g.stroke();
+        pilotShip(g, P, x, y, s, t, { rot: Math.PI / 2, glow: 6, phase: dx });
+      }
+      // the floor: the arena's grid running to the horizon, its lines coming on
+      g.save();
+      g.beginPath(); g.rect(0, hz, w, h - hz); g.clip();
+      const floor = g.createLinearGradient(0, hz, 0, h);
+      floor.addColorStop(0, css(lerp([6, 9, 18], M.lo, 0.25))); floor.addColorStop(1, '#060a14');
+      g.fillStyle = floor; g.fillRect(0, hz, w, h - hz);
+      const vx = w * 0.5, fh = h - hz;
+      g.lineWidth = 1;
+      for (let i = -24; i <= 24; i++) {
+        const x1 = vx + i * Math.max(w, 600) * 0.08;
+        const lg = g.createLinearGradient(0, hz, 0, h);
+        lg.addColorStop(0, css(M.mid, 0)); lg.addColorStop(1, css(M.mid, 0.32));
+        g.strokeStyle = lg;
+        g.beginPath(); g.moveTo(vx + i * w * 0.012, hz); g.lineTo(x1, h); g.stroke();
+      }
+      const sp = STILL ? 0.5 : (t * 0.45) % 1;
+      for (let j = 0; j < 14; j++) {
+        const d = j + 1 - sp, y = hz + fh * 0.8 / d;
+        if (y > h + 1) continue;
+        g.strokeStyle = css(M.mid, 0.34 * clamp01((y - hz) / fh * 2.4));
+        g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+      }
+      g.restore();
+      const line = g.createLinearGradient(0, 0, w, 0);
+      line.addColorStop(0, css(M.hi, 0)); line.addColorStop(0.5, css(M.hi, 0.7)); line.addColorStop(1, css(M.hi, 0));
+      g.fillStyle = line; g.fillRect(0, hz - 0.5, w, 1.2);
+      glow(g, vx, hz, w * 0.35, M.mid, 0.08);
+      // down to the panel at the foot, and up from the dark when it first shows
+      const foot = g.createLinearGradient(0, h * 0.45, 0, h);
+      foot.addColorStop(0, 'rgba(9,14,25,0)'); foot.addColorStop(1, 'rgba(9,14,25,0.92)');
+      g.fillStyle = foot; g.fillRect(0, 0, w, h);
+      glint(g, age + 0.6, 9, () => { g.beginPath(); g.rect(0, 0, w, h); }, 0, w, 0, h, 0.05);
+      const dark = 1 - outQuint(age / 1.4);
+      if (dark > 0) { g.fillStyle = 'rgba(5,6,10,' + dark + ')'; g.fillRect(0, 0, w, h); }
     },
 
-    // the player's emblem, beside their name
+    /* The player's emblem, a rounded square the way osu! cuts its avatars:
+       a pattern of triangles grown from their name (mirrored, so it reads as
+       a sign), in a pair of the game's colours picked by it, their initial
+       lit in the middle, the pilot they last flew in the corner, and a rim
+       in their league's metal. The triangles pop in from the middle out. */
     avatar(g, w, h, t, p) {
-      const M = (p.league && LEAGUE[p.league] && LEAGUE[p.league].M) || METAL.cyan;
-      const s = Math.min(w, h) - 4, x0 = (w - s) / 2, y0 = (h - s) / 2;
-      rrect(g, x0, y0, s, s, s * 0.22);
-      g.fillStyle = '#0c1321'; g.fill();
-      g.strokeStyle = css(M.mid, 0.7); g.lineWidth = 2; g.stroke();
-      g.font = '700 ' + Math.round(s * 0.46) + "px 'Chakra Petch', sans-serif";
+      const S = Math.min(w, h) - 2, x0 = (w - S) / 2, y0 = (h - S) / 2, cr = S * 0.2;
+      const M = metalOf(p.league), r = seeded(seedOf(p.user || p.display));
+      const i1 = Math.floor(r() * HUES.length), i2 = (i1 + 2 + Math.floor(r() * (HUES.length - 3))) % HUES.length;
+      const c1 = HUES[i1], c2 = HUES[i2];
+      const age = life(g, t, p.user || p.display);
+      const k = outBack(age / 0.7);
+      g.translate(w / 2, h / 2); g.scale(0.85 + 0.15 * k, 0.85 + 0.15 * k); g.translate(-w / 2, -h / 2);
+      g.globalAlpha = clamp01(age / 0.25);
+      const box = () => rrect(g, x0, y0, S, S, cr);
+      g.save();
+      box(); g.clip();
+      const bg = g.createLinearGradient(x0, y0, x0 + S, y0 + S);
+      bg.addColorStop(0, css(lerp(c1, [6, 8, 16], 0.5))); bg.addColorStop(1, css(lerp(c2, [6, 8, 16], 0.78)));
+      g.fillStyle = bg; g.fillRect(x0, y0, S, S);
+      const n = 5, cs = S / n;
+      for (let row = 0; row < n; row++) {
+        for (let col = 0; col < 3; col++) {
+          const v = r(), kind = r();
+          if (v < 0.4) continue;
+          const pop = outBack((age - 0.15 - (2 - col + Math.abs(row - 2)) * 0.06) / 0.5);
+          if (pop <= 0) continue;
+          for (const cc of col === 2 ? [2] : [col, n - 1 - col]) {
+            const cx = x0 + (cc + 0.5) * cs, cy = y0 + (row + 0.5) * cs, s = cs * 0.5 * pop, f = cc > 2 ? -1 : 1;
+            g.beginPath();
+            if (kind < 0.5) { g.moveTo(cx, cy - s); g.lineTo(cx + s, cy + s); g.lineTo(cx - s, cy + s); }
+            else { g.moveTo(cx - s * f, cy - s); g.lineTo(cx + s * f, cy); g.lineTo(cx - s * f, cy + s); }
+            g.closePath();
+            g.fillStyle = css(v > 0.82 ? c2 : c1, 0.14 + (v - 0.4) * 0.5);
+            g.fill();
+          }
+        }
+      }
+      triangles(g, x0, y0, S, S, t, { n: 8, lo: S * 0.06, hi: S * 0.2, speed: 6, col: [255, 255, 255], alpha: 0.06, seed: 50 });
+      const vg = g.createRadialGradient(w / 2, h / 2, S * 0.1, w / 2, h / 2, S * 0.75);
+      vg.addColorStop(0, 'rgba(4,6,12,0.55)'); vg.addColorStop(1, 'rgba(4,6,12,0)');
+      g.fillStyle = vg; g.fillRect(x0, y0, S, S);
+      // the initial
+      g.font = '700 ' + Math.round(S * 0.5) + "px 'Chakra Petch', sans-serif";
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillStyle = css(M.hi);
-      g.fillText(String(p.display || '?').slice(0, 1).toUpperCase(), w / 2, h / 2 + s * 0.03);
+      const ink = g.createLinearGradient(0, y0 + S * 0.25, 0, y0 + S * 0.75);
+      ink.addColorStop(0, '#ffffff'); ink.addColorStop(1, css(lerp(c1, [255, 255, 255], 0.3)));
+      g.save();
+      g.shadowColor = css(c1); g.shadowBlur = S * 0.12;
+      g.fillStyle = ink;
+      g.fillText(String(p.display || '?').slice(0, 1).toUpperCase(), w / 2, h / 2 + S * 0.03);
+      g.restore();
+      glint(g, age + 0.2, 6.5, box, x0, x0 + S, y0, y0 + S, 0.22);
+      g.restore();
+      // the pilot they last flew, in the corner
+      if (p.pilot) {
+        const cs2 = S * 0.32, cx = x0 + S - cs2 * 0.62, cy = y0 + S - cs2 * 0.62;
+        const pk = outBack((age - 0.6) / 0.5);
+        if (pk > 0) {
+          g.save();
+          g.translate(cx, cy); g.scale(pk, pk);
+          rrect(g, -cs2 / 2, -cs2 / 2, cs2, cs2, cs2 * 0.3);
+          g.fillStyle = 'rgba(5,7,14,0.88)'; g.fill();
+          g.strokeStyle = css(pilotOf(p.pilot).M.mid, 0.7); g.lineWidth = 1.2; g.stroke();
+          pilotShip(g, pilotOf(p.pilot), 0, cs2 * 0.04, cs2 * 0.62, t, { glow: 5 });
+          g.restore();
+        }
+      }
+      // the rim, in the league's metal
+      rrect(g, x0 + 1.25, y0 + 1.25, S - 2.5, S - 2.5, cr - 1.25);
+      const rim = g.createLinearGradient(x0, y0, x0 + S * 0.4, y0 + S);
+      rim.addColorStop(0, css(M.hi)); rim.addColorStop(0.5, css(M.mid)); rim.addColorStop(1, css(M.lo));
+      g.strokeStyle = rim; g.lineWidth = 2.5; g.stroke();
+      if (!STILL && p.league && g.createConicGradient) {     // a light running round it, placed players only
+        const run = g.createConicGradient(t * 0.8, w / 2, h / 2);
+        run.addColorStop(0, css(M.hi, 0)); run.addColorStop(0.06, css(M.hi, 0.9)); run.addColorStop(0.12, css(M.hi, 0));
+        run.addColorStop(1, css(M.hi, 0));
+        g.strokeStyle = run; g.lineWidth = 2.5; g.stroke();
+      }
     },
 
-    // behind each of the four placement tiles: SEASON, ALL-TIME, DAILY, PVP
+    /* Behind each placement tile: a wash of its metal (the place's on the
+       game's boards, the league's on PvP), the board's sign big on the right
+       (a dial for the season, a starred wreath for all-time, a sun for the
+       daily, the league's own crest for PvP) drifting in as the tile lands,
+       a bar down the left, and along the foot how much of the board is
+       behind them, with TOP n% over it when the tile is wide enough. */
     statCard(g, w, h, t, s) {
-      const M = s.kind === 'pvp' ? (s.league && LEAGUE[s.league] && LEAGUE[s.league].M) || METAL.cyan
-        : PLACE[s.rank] || METAL.cyan;
-      const wash = g.createLinearGradient(0, 0, w, 0);
-      wash.addColorStop(0, css(M.mid, s.rank ? 0.1 : 0.03)); wash.addColorStop(1, css(M.mid, 0));
+      const placed = s.rank > 0, pvp = s.kind === 'pvp';
+      const M = !placed ? COLD : pvp ? metalOf(s.league) : PLACE[s.rank] || METAL.cyan;
+      const age = life(g, t, s);
+      const wash = g.createLinearGradient(0, 0, w, h);
+      wash.addColorStop(0, css(M.mid, placed ? 0.17 : 0.04)); wash.addColorStop(0.75, css(M.mid, 0));
       g.fillStyle = wash; g.fillRect(0, 0, w, h);
+      triangles(g, w * 0.4, 0, w * 0.6, h, t, { n: 10, lo: 6, hi: 24, speed: 7, col: M.mid, alpha: placed ? 0.1 : 0.04,
+                                                seed: { season: 5, all: 17, day: 29, pvp: 43 }[s.kind] || 0 });
+      const r = h * 0.34, k = outQuint((age - 0.15) / 1.1);
+      g.save();
+      g.translate(w - r - 14 + (1 - k) * 34, h * 0.58);
+      if (pvp && placed && LEAGUE[s.league]) {
+        g.globalAlpha = 0.42 * k;
+        g.scale(r / 30, r / 30);
+        crestOf(g, s.league, t, age);
+      } else if (MARK[s.kind]) {
+        g.globalAlpha = (placed ? 0.3 : 0.1) * k;
+        g.strokeStyle = css(M.hi); g.fillStyle = css(M.hi);
+        g.lineWidth = 1.6; g.lineCap = 'round'; g.lineJoin = 'round';
+        MARK[s.kind](g, r, t);
+      }
+      g.restore();
+      if (!placed) return;
+      const kb = outQuint((age - 0.2) / 0.6);
+      g.save();
+      g.shadowColor = css(M.mid); g.shadowBlur = 8;
+      rrect(g, 6, h / 2 - (h / 2 - 12) * kb, 3, (h - 24) * kb, 1.5);
+      g.fillStyle = css(M.mid); g.fill();
+      g.restore();
+      const share = s.of > 1 ? 1 - (s.rank - 1) / (s.of - 1) : 1;
+      const bw = w - 28, fill = Math.max(3, bw * share * outQuint((age - 0.3) / 1.3));
+      rrect(g, 14, h - 7, bw, 3, 1.5);
+      g.fillStyle = 'rgba(255,255,255,0.07)'; g.fill();
+      rrect(g, 14, h - 7, fill, 3, 1.5);
+      const bar = g.createLinearGradient(14, 0, 14 + bw, 0);
+      bar.addColorStop(0, css(M.lo)); bar.addColorStop(1, css(M.hi));
+      g.fillStyle = bar; g.fill();
+      if (w >= 200) {
+        const pct = s.rank / Math.max(1, s.of) * 100;
+        g.font = "700 10px 'Chakra Petch', sans-serif";
+        if ('letterSpacing' in g) g.letterSpacing = '1.5px';
+        g.textAlign = 'right'; g.textBaseline = 'middle';
+        g.fillStyle = css(M.hi, 0.9 * clamp01((age - 0.5) / 0.4));
+        g.fillText(s.rank === 1 ? 'TOP SPOT' : 'TOP ' + (pct < 1 ? '<1' : Math.ceil(pct)) + '%', w - 13, 17);
+      }
     },
 
-    // a pilot in the hangar: unlocked or not, awakened or not
+    /* A pilot in the hangar, or beside a match: a beveled hexagon in the
+       pilot's colour with its ship in it, the game's own hull. Locked, the
+       hexagon is cold slate with the ship a shadow and a padlock on it.
+       Awakened, the form shows round it: EMBER's IFRIT in flames, THE
+       HACKER's SUPERUSER in a gold ring of bits, THE VAGRANT's RONIN in red
+       crescents and a cut across now and then, and its eye lit. The four
+       pop in one after another. Drawn on a 64 grid: under 44 px across it
+       keeps to the hexagon, the ship and a ring. */
     pilotBadge(g, w, h, t, b) {
-      const x = w / 2, y = h / 2, r = Math.min(w, h) / 2 - 3;
-      roundPath(g, ngon(x, y, r, 6, -Math.PI / 2), r * 0.18);
-      g.fillStyle = b.owned ? '#0c1321' : 'rgba(12, 19, 33, .5)'; g.fill();
-      g.strokeStyle = b.awake ? 'rgba(244, 114, 182, .85)' : b.owned ? 'rgba(103, 232, 249, .55)' : 'rgba(51, 65, 85, .7)';
-      g.lineWidth = 2; g.stroke();
-      ship(g, x, y + r * 0.04, r * 0.46);
-      g.fillStyle = b.awake ? '#f472b6' : b.owned ? '#67e8f9' : '#334155'; g.fill();
+      const P = pilotOf(b.id), S = Math.min(w, h), small = S < 44;
+      const order = Math.max(0, Object.keys(PILOT).indexOf(b.id));
+      const age = life(g, t, b.id) - (small ? 0.3 : 0.25 + order * 0.09);
+      if (age <= 0) return;
+      const k = outBack(age / 0.6);
+      g.translate(w / 2, h / 2);
+      g.scale(S / 64 * k, S / 64 * k);
+      g.globalAlpha = clamp01(age / 0.2);
+      const owned = !!b.owned, awake = owned && !!b.awake, M = owned ? P.M : COLD;
+      const R = awake ? 23 : 26, ri = R - 4.8, cr = 3.6;
+      if (awake) aura(g, P, t, R, small);
+      else if (owned) glow(g, 0, 0, 34, P.M.mid, 0.14 + (STILL ? 0 : 0.04 * Math.sin(t * 1.6 + order)));
+      const out = ngon(0, 0, R, 6, -Math.PI / 2), inn = ngon(0, 0, ri, 6, -Math.PI / 2);
+      bevel(g, out, inn, cr, M.mid, (i, kk) => lit(M, owned ? kk : kk * 0.7));
+      face(g, inn, cr * 0.6, M);
+      if (owned && !small) {
+        g.save();
+        roundPath(g, inn, cr * 0.6); g.clip();
+        triangles(g, -ri, -ri, ri * 2, ri * 2, t, { n: 7, lo: 3, hi: 9, speed: 5, col: P.M.mid, alpha: 0.22, seed: 11 + order * 9 });
+        g.restore();
+      }
+      pilotShip(g, P, 0, 1.5, ri * 1.42, t, { dark: !owned, awake, glow: 7, phase: order });
+      if (!owned && !small) padlock(g, ri * 0.52, ri * 0.5, 9);
+      if (owned) glint(g, age + order * 0.8, 5.5, () => roundPath(g, out, cr), -R, R, -R, R, 0.4);
     },
 
-    // one season podium the player stood on
+    /* One season podium, a medal on a ribbon: the ribbon in the game's cyan
+       and pink, the medal in the place's metal with a milled edge, a wreath
+       round the number and a glint across it. It drops in, swings, and
+       settles to a slow sway. Drawn on a 64 grid, hung from the top. */
     award(g, w, h, t, a) {
-      badge(g, w / 2, h / 2, Math.min(w, h) - 2, PLACE[a.rank] || METAL.cyan, String(a.rank), life(g, t), a.rank);
+      const M = PLACE[a.rank] || METAL.cyan, S = Math.min(w, h);
+      const age = life(g, t, a.season + ':' + a.rank) - 0.25;
+      if (age <= 0) return;
+      const drop = outQuint(age / 0.7);
+      const swing = STILL ? 0 : Math.sin(age * 5.5) * Math.exp(-age * 2.4) * 0.35 + Math.sin(t * 1.2 + a.rank) * 0.03;
+      g.translate(w / 2, (h - S) / 2);
+      g.scale(S / 64, S / 64);
+      g.globalAlpha = clamp01(age / 0.2);
+      g.translate(0, -18 * (1 - drop));
+      g.rotate(swing);
+      // the ribbon: two straps meeting behind the medal
+      for (const [sd, c] of [[-1, '#67e8f9'], [1, '#f472b6']]) {
+        g.beginPath();
+        g.moveTo(sd * 15, 0); g.lineTo(sd * 5, 0); g.lineTo(-sd * 3, 30); g.lineTo(sd * 6, 30);
+        g.closePath();
+        const gr = g.createLinearGradient(sd * 15, 0, 0, 30);
+        gr.addColorStop(0, c); gr.addColorStop(1, css(lerp(rgb(c), [5, 8, 16], 0.55)));
+        g.fillStyle = gr; g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 0.8;
+        g.beginPath(); g.moveTo(sd * 12.5, 0); g.lineTo(sd * 4.2, 28); g.stroke();
+      }
+      const cy = 42, R = 18.5;
+      g.save();
+      g.shadowColor = css(M.mid, 0.6); g.shadowBlur = 8;
+      // the milled edge
+      g.beginPath();
+      for (let i = 0; i < 48; i++) {
+        const an = i / 48 * TAU, rr = i % 2 ? R : R - 1.3;
+        i ? g.lineTo(Math.cos(an) * rr, cy + Math.sin(an) * rr) : g.moveTo(Math.cos(an) * rr, cy + Math.sin(an) * rr);
+      }
+      g.closePath();
+      const body = g.createLinearGradient(-R, cy - R, R * 0.4, cy + R);
+      body.addColorStop(0, css(M.hi)); body.addColorStop(0.5, css(M.mid)); body.addColorStop(1, css(M.lo));
+      g.fillStyle = body; g.fill();
+      g.restore();
+      // the face, sunk a step
+      const disc = () => { g.beginPath(); g.arc(0, cy, R - 4, 0, TAU); };
+      disc();
+      const f = g.createRadialGradient(-4, cy - 6, 1, 0, cy, R - 4);
+      f.addColorStop(0, css(lit(M, 0.85))); f.addColorStop(1, css(lit(M, 0.3)));
+      g.fillStyle = f; g.fill();
+      g.strokeStyle = css(M.lo, 0.8); g.lineWidth = 1; g.stroke();
+      // the wreath
+      g.fillStyle = css(lerp(M.lo, [8, 10, 18], 0.3), 0.55);
+      for (const sd of [-1, 1]) {
+        for (let i = 0; i < 5; i++) {
+          const an = Math.PI / 2 + sd * (0.5 + i * 0.36), x = Math.cos(an) * (R - 7.5), y = cy + Math.sin(an) * (R - 7.5);
+          g.save(); g.translate(x, y); g.rotate(an + sd * 1.2);
+          g.beginPath(); g.ellipse(0, 0, 1.1, 2.6, 0, 0, TAU); g.fill();
+          g.restore();
+        }
+      }
+      g.font = "700 15px 'Chakra Petch', 'JetBrains Mono', sans-serif";
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = 'rgba(255,255,255,0.55)';
+      g.fillText(String(a.rank), 0, cy + 1.6);
+      g.fillStyle = css(lerp(M.lo, [8, 10, 18], 0.55));
+      g.fillText(String(a.rank), 0, cy + 0.8);
+      glint(g, age + a.rank * 0.7, 4.8, () => { g.beginPath(); g.arc(0, cy, R, 0, TAU); }, -R, R, cy - R, cy + R, 0.6);
     },
 
-    // behind each recent match: won, lost, or no contest
+    /* Behind each recent match, after osu!'s score rows: a plate on the left
+       in the result's colour (green a win, red a loss, slate no contest;
+       striped when it was a forfeit, triangles rising in a win), its edge
+       slanted, and on the right a darker slanted panel for the score, a
+       stripe on top in the queue's colour (ranked cyan, casual violet, a
+       friend's pink). The plate is the row's first 72 px and the panel its
+       last 84 (leaderboard.css lays the row on the same); both slide in. */
     matchRow(g, w, h, t, m) {
-      const col = m.won === true ? [134, 239, 172] : m.won === false ? [248, 113, 113] : [100, 116, 139];
-      const wash = g.createLinearGradient(0, 0, w * 0.5, 0);
-      wash.addColorStop(0, css(col, 0.1)); wash.addColorStop(1, css(col, 0));
+      const col = m.won === true ? rgb('#4ade80') : m.won === false ? rgb('#f87171') : rgb('#64748b');
+      const q = rgb({ ranked: '#67e8f9', casual: '#a78bfa', friend: '#f472b6' }[m.queue] || '#67e8f9');
+      const PL = 72, PN = 84, sk = h * 0.3;
+      const age = life(g, t, m), k = outQuint((age - 0.45) / 0.8);
+      const wash = g.createLinearGradient(0, 0, w * 0.6, 0);
+      wash.addColorStop(0, css(col, 0.12)); wash.addColorStop(1, css(col, 0));
       g.fillStyle = wash; g.fillRect(0, 0, w, h);
-      rrect(g, 0, 0, 3, h, 1.5);
-      g.fillStyle = css(col, 0.8); g.fill();
+      // the plate
+      const pw = (PL + sk / 2) * k;
+      const plate = () => { g.beginPath(); g.moveTo(0, 0); g.lineTo(pw, 0); g.lineTo(pw - sk, h); g.lineTo(0, h); g.closePath(); };
+      plate();
+      const pg = g.createLinearGradient(0, 0, 0, h);
+      pg.addColorStop(0, css(lerp(col, [255, 255, 255], 0.2), 0.95)); pg.addColorStop(1, css(lerp(col, [5, 8, 16], 0.3), 0.95));
+      g.fillStyle = pg; g.fill();
+      g.save();
+      plate(); g.clip();
+      if (m.won === true) triangles(g, 0, 0, PL, h, t, { n: 6, lo: 5, hi: 16, speed: 8, col: [255, 255, 255], alpha: 0.28, seed: 33 });
+      if (m.verdict === 'forfeit' || m.verdict === 'void') {
+        g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 4;
+        g.beginPath();
+        for (let x = -h; x < PL + h; x += 10) { g.moveTo(x, h); g.lineTo(x + h, 0); }
+        g.stroke();
+      }
+      g.fillStyle = 'rgba(255,255,255,0.4)'; g.fillRect(0, 0, pw, 1);
+      g.restore();
+      // the score's panel
+      const x0 = w - (PN + sk / 2) * k;
+      const panel = () => { g.beginPath(); g.moveTo(x0 + sk, 0); g.lineTo(w, 0); g.lineTo(w, h); g.lineTo(x0, h); g.closePath(); };
+      panel();
+      g.fillStyle = 'rgba(2,5,12,0.55)'; g.fill();
+      g.save();
+      panel(); g.clip();
+      const qg = g.createLinearGradient(x0, 0, w, 0);
+      qg.addColorStop(0, css(q, 0.9)); qg.addColorStop(1, css(q, 0.3));
+      g.fillStyle = qg; g.fillRect(x0, 0, w - x0, 2);
+      glint(g, age + 1, 7, panel, x0, w, 0, h, 0.08);
+      g.restore();
+      g.strokeStyle = css(q, 0.45); g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x0 + sk, 0); g.lineTo(x0, h); g.stroke();
     }
   };
 })();
