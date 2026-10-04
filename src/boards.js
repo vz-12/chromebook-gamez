@@ -102,7 +102,7 @@ function absorbStmts(db, account) {
 /* Who a submission belongs to: the session's account, else the account this
    profile is linked to, else the callsign. */
 async function whoFor(db, req, env, e) {
-  const s = await sessionOf(req, env).catch(() => null);
+  const s = await sessionOf(req, env, { peek: true }).catch(() => null);
   if (s) return { who: 'a:' + s.account.id, account: s.account.id };
   if (isPid(e.pid)) {
     const row = await db.prepare('SELECT account FROM account_pids WHERE pid = ?1').bind(e.pid).first();
@@ -261,7 +261,7 @@ export default async (req, env) => {
     try { b = await req.json(); } catch (e) { return json({ error: 'bad json' }, 400); }
     if (!b || b.op !== 'me') return json({ error: 'no such op' }, 400);
     const boards = boardsParam(Array.isArray(b.boards) ? b.boards.join(',') : b.boards);
-    const s = await sessionOf(req, env).catch(() => null);
+    const s = await sessionOf(req, env, { peek: true }).catch(() => null);
     const whos = new Set();
     if (s) whos.add('a:' + s.account.id);
     else if (isPid(b.pid)) {

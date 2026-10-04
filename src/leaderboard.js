@@ -14,6 +14,7 @@
    ========================================================================= */
 import { getStore } from './store.js';
 import { scorePut } from './boards.js';
+import { sessionOf, accountPids } from './auth.js';
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 
 /* The season rule lives in one place, shared with the scheduled closer. */
@@ -62,19 +63,24 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
    A pid is a bearer token: whoever holds the string collects what is
    addressed to it. That is fine for a handout and is exactly why podium
    places are addressed the same way and never displayed in the game. */
-/* ------------------------------ dev accounts -----------------------------
-   A login that hands a profile every skin at once.
+/* ---------------------------- account perks ------------------------------
+   What an account is given by hand: `accounts.perks`, a JSON list (auth.js).
+   Signing in to the account is the login. Every device signed in to it
+   collects the list on its next awards sync, along with everything any of
+   the account's profiles holds (awardsFor).
 
-   The password is not in this file and never travels to a browser. What is
-   here is a scrypt hash of it under a random per-account salt, so somebody
-   who reads this source — or an old backup of it — still has no password.
-   Comparison is constant-time, and an unknown user is made to cost the same
-   as a known one so the endpoint cannot be used to learn which names exist.
+   An entry is one of:
+     'dev'          every skin and every perk below, read live, so a skin
+                    added to ALL_SKINS later reaches the account by itself
+     'skin:<id>'    one skin
+     anything else  one perk id: 'unlock-all', 'evo-ember', …
+   DEV_PIDS below speak the same language.
 
-   TO ADD AN ACCOUNT: run  node C:/.claude/devpass.mjs  and paste the line it
-   prints. It takes the password on stdin and never writes it anywhere.
-   TO REVOKE: delete the line here AND the profile's row from the `grants`
-   blob — the login is what grants, but the grant outlives the login.
+   TO GIVE AN ACCOUNT PERKS, in the D1 console (or `wrangler d1 execute`):
+     UPDATE accounts SET perks = '["dev"]' WHERE name = 'somebody';
+   TO TAKE THEM BACK: set it to '[]'. As with every grant, what a profile has
+   already banked stays banked there (Awards.sync only ever adds); what goes
+   is everything still to come.
 -------------------------------------------------------------------------- */
 const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
                    'redaction', 'redaction-open', 'draft',
@@ -95,19 +101,53 @@ const ALL_PERKS = ['unlock-all', 'unlock-evo', 'unlock-event'];
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 const KEYLEN = 32;
 
-const DEV_ACCOUNTS = {
+/* An account's perk list, as the skins and perks it stands for. */
+function perksGive(list) {
+  const skins = [], perks = [];
+  for (const v of Array.isArray(list) ? list : []) {
+    if (typeof v !== 'string' || !v) continue;
+    if (v === 'dev') { skins.push(...ALL_SKINS); perks.push(...ALL_PERKS); }
+    else if (v.startsWith('skin:')) skins.push(v.slice(5));
+    else perks.push(v);
+  }
+  return { skins, perks };
+}
+
+/* ------------------------- the old dev logins ----------------------------
+   Before accounts, a dev login was a name and a password typed at the
+   callsign prompt, and it bound the account's skins to that one profile
+   (the `grants` blob, still read below). Accounts replace it: a login here
+   is now only a claim ticket for the account of the same name.
+
+   Signing up with one of these names takes its password, checked against
+   the scrypt hash, and the account is born with its `perks` (account.js).
+   Nobody else can take the name. Once the account exists on the live site,
+   its line here can go: the name is then simply the account's, and the
+   hash leaves the repository.
+
+   Exported so scripts/awards.mjs can add a login of its own; no browser
+   ever sees this file.
+-------------------------------------------------------------------------- */
+export const DEV_ACCOUNTS = {
 
    notz: { salt: '291e5059855b9b6a9119e44d9d23ac37',
         hash: '8ae86433b090a5c06a779dad1a018ef608f0c90042b741bb16b80ba099722ee2',
-        skins: ALL_SKINS, perks: ALL_PERKS },
+        perks: ['dev'] },
 };
-// reserved as account names (account.js), so no account can pass itself off as one
-export const DEV_LOGINS = Object.keys(DEV_ACCOUNTS);
+// reserved as account names (account.js): claimed only with the login's password
+export const isDevLogin = name => hasOwn(DEV_ACCOUNTS, name);
+/* The perks a claim of this login brings, or null for a wrong password. An
+   unknown name costs the same scrypt as a known one. */
+export function devClaim(name, pass) {
+  const a = hasOwn(DEV_ACCOUNTS, name) ? DEV_ACCOUNTS[name] : null;
+  return passOk(a, String(pass || '')) ? (a.perks || ['dev']).slice() : null;
+}
 
-/* Dev accounts with no login: the profile is the key. Each gets what a
-   DEV_ACCOUNTS login binds, read on every sync the way awardsFor reads an
-   account, so there is no grants row behind it — delete the line and the
-   next sync takes it all back. A pid is a bearer token (see SKIN_GRANTS).
+/* Dev accounts with no login: the profile is the key, and `perks` reads as
+   an account's does. Read on every sync, so there is no grants row behind
+   it: delete the line and the next sync gives nothing new. Once the pid is
+   linked to an account, every device signed in to that account collects it
+   as well (awardsFor). A pid is a bearer token (see SKIN_GRANTS).
 
    `callsign` hands the pid out by name (WELCOME BACK): on the new address
    a player has a new pid, and typing any spelling of the callsign that
@@ -116,8 +156,7 @@ export const DEV_LOGINS = Object.keys(DEV_ACCOUNTS);
    boards. (The one listed here before, f55ca552, was NOT Z's, from a run
    posted once as "mario"; it keeps everything through its notz login.) */
 const DEV_PIDS = {
-  'ecd8c7a3671b4582f6b62ee1106510c8': { who: 'mario', callsign: 'mario',
-                                        skins: ALL_SKINS, perks: ALL_PERKS },
+  'ecd8c7a3671b4582f6b62ee1106510c8': { who: 'mario', callsign: 'mario', perks: ['dev'] },
 };
 
 /* A stand-in used when the named account does not exist, so a wrong user and
@@ -154,65 +193,10 @@ const clientIp = req =>
    (req.headers.get('x-forwarded-for') || '').split(',')[0] || '').trim().slice(0, 45)
   || 'unknown';
 
-const GRANTS = 'grants';      // { byPid: { '<pid>': { user, skins, at } } }
-const GATE = 'gate';          // { byIp: { '<ip>': { fails, until } } }
-const LOCK_AFTER = 6, LOCK_MS = 15 * 60 * 1000;
-
-/* Reads, prunes and writes the attempt log in one pass. Pruning on the way
-   past is what stops a blob that only ever grows — an expired lock is not a
-   record of anything. */
-async function gateBump(store, ip, failed) {
-  for (let i = 0; i < RETRIES; i++) {
-    const res = await store.getWithMetadata(GATE, { type: 'json', consistency: 'strong' })
-      .catch(() => null);
-    const now = Date.now();
-    const byIp = {};
-    const src = (res && res.data && res.data.byIp) || {};
-    for (const k of Object.keys(src))
-      if (src[k] && src[k].until > now) byIp[k] = src[k];
-    const cur = byIp[ip] || { fails: 0, until: 0 };
-    if (!failed) delete byIp[ip];
-    else {
-      cur.fails = (cur.fails || 0) + 1;
-      if (cur.fails >= LOCK_AFTER) { cur.until = now + LOCK_MS; cur.fails = 0; }
-      else cur.until = now + LOCK_MS;      // the window the count lives in
-      byIp[ip] = cur;
-    }
-    const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
-    const wrote = await store.setJSON(GATE, { byIp }, opts).catch(() => ({ modified: false }));
-    if (wrote && wrote.modified) return cur;
-  }
-  return { fails: 0, until: 0 };
-}
-
-/* Locked out? Read-only, so a lookup never costs a write. */
-async function gateLocked(store, ip) {
-  const doc = await store.get(GATE, { type: 'json' }).catch(() => null);
-  const rec = doc && doc.byIp && doc.byIp[ip];
-  if (!rec || !rec.until || rec.until <= Date.now()) return 0;
-  // only a completed lockout blocks; a partial count just accumulates
-  return rec.fails === 0 ? Math.ceil((rec.until - Date.now()) / 1000) : 0;
-}
-
-/* Binds an account's skins to the profile that logged in. Additive: logging
-   in twice, or into a second account, never takes anything away. */
-async function grantTo(store, pid, user, skins, perks) {
-  for (let i = 0; i < RETRIES; i++) {
-    const res = await store.getWithMetadata(GRANTS, { type: 'json', consistency: 'strong' })
-      .catch(() => null);
-    const byPid = Object.assign({}, (res && res.data && res.data.byPid) || {});
-    const had = (byPid[pid] && byPid[pid].skins) || [];
-    const hadP = (byPid[pid] && byPid[pid].perks) || [];
-    byPid[pid] = { user, at: Date.now(),
-                   skins: [...new Set([...had, ...skins])],
-                   perks: [...new Set([...hadP, ...(perks || [])])] };
-    const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
-    const wrote = await store.setJSON(GRANTS, { byPid }, opts)
-      .catch(() => ({ modified: false }));
-    if (wrote && wrote.modified) return byPid[pid].skins;
-  }
-  return skins;
-}
+/* { byPid: { '<pid>': { user, skins, perks, at } } }: what each old dev
+   login bound to the profile it was typed on. Nothing writes it any more;
+   it is read, so those profiles keep what they were given. */
+const GRANTS = 'grants';
 
 /* =============================== ALL HALLOWS ================================
    THE VIGIL: one number every profile adds to. A quest is paid once per
@@ -244,20 +228,33 @@ const vigilKey = id => 'vigil:' + id;
 const vigilOpen = (ev, day) =>
   !!(typeof process !== 'undefined' && process.env && process.env.VIGIL_ANYTIME) ||
   (day >= ev.from && day <= ev.to);
-function vigilView(ev, doc, pid) {
+/* `pids` is one profile, or every profile of the account the request is
+   signed in to: an account's share is all of theirs together. */
+function vigilView(ev, doc, pids) {
   const total = (doc && doc.total) || 0;
-  const mine = pid && doc && doc.byPid && doc.byPid[pid];
-  return { total, marks: ev.marks, reached: ev.marks.filter(m => total >= m),
-           lit: mine ? mine.n || 0 : 0, done: mine ? mine.q || [] : [] };
+  let lit = 0;
+  const done = new Set();
+  for (const p of pids) {
+    const mine = doc && doc.byPid && hasOwn(doc.byPid, p) ? doc.byPid[p] : null;
+    if (!mine) continue;
+    lit += mine.n || 0;
+    for (const q of mine.q || []) done.add(q);
+  }
+  return { total, marks: ev.marks, reached: ev.marks.filter(m => total >= m), lit, done: [...done] };
 }
-async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
+/* `others` are the rest of the signed-in account's profiles. A quest pays
+   once per account: the account's save carries its story to every device,
+   and each device would otherwise report it again under its own pid. */
+async function vigilTurnIn(store, id, ev, quest, pid, ip, today, others = []) {
   for (let i = 0; i < RETRIES; i++) {
     const res = await store.getWithMetadata(vigilKey(id), { type: 'json', consistency: 'strong' })
       .catch(() => null);
     const doc = (res && res.data) || { total: 0, byPid: {}, byIp: {} };
     doc.byPid = doc.byPid || {}; doc.byIp = doc.byIp || {};
+    const all = [pid, ...others];
+    if (all.some(p => hasOwn(doc.byPid, p) && (doc.byPid[p].q || []).includes(quest)))
+      return { view: vigilView(ev, doc, all), already: true };
     const me = doc.byPid[pid];
-    if (me && (me.q || []).includes(quest)) return { view: vigilView(ev, doc, pid), already: true };
     if (!me) {
       // a new profile, counted against the address for the day
       const a = doc.byIp[ip] && doc.byIp[ip].day === today ? doc.byIp[ip] : { day: today, n: 0 };
@@ -274,7 +271,7 @@ async function vigilTurnIn(store, id, ev, quest, pid, ip, today) {
     doc.total = (doc.total || 0) + ev.pay[quest];
     const opts = res && res.etag ? { onlyIfMatch: res.etag } : { onlyIfNew: true };
     const wrote = await store.setJSON(vigilKey(id), doc, opts).catch(() => ({ modified: false }));
-    if (wrote && wrote.modified) return { view: vigilView(ev, doc, pid) };
+    if (wrote && wrote.modified) return { view: vigilView(ev, doc, all) };
     await backoff(i);
   }
   return { error: 'busy' };
@@ -361,6 +358,14 @@ async function handGiven(store, pid) {
   if (hasOwn(DEV_PIDS, pid) || hasOwn(SKIN_GRANTS, pid) || hasOwn(PERK_GRANTS, pid)) return true;
   const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
   return !!(g && hasOwn(g.byPid, pid));
+}
+
+/* Whether any of these profiles has claimed the gift. Read only: the rest
+   of a signed-in account's profiles bring theirs along, and only the profile
+   asking may make a new claim (comebackClaim). */
+async function comebackHeld(store, pids) {
+  const doc = await store.get(CLAIMS_KEY, { type: 'json' }).catch(() => null);
+  return !!(doc && doc.byPid && pids.some(p => hasOwn(doc.byPid, p)));
 }
 
 /* { has, adopt }: whether this profile has the gift, and the old pid it is
@@ -507,16 +512,21 @@ function mergeBoard(entries, entry) {
    "only submit your first run" is not a thing a client can be relied on for. */
 
 
-/* Every podium finish this profile has ever held, newest season first. The
-   archive holds one small record a month, so a scan is cheaper than an index
-   and cannot fall out of step with what was actually filed. */
-async function awardsFor(store, pid) {
+/* Every award these profiles hold, newest season first: one profile, or
+   every profile of the account the request is signed in to, together with
+   that account's own perks (`acctPerks`, accounts.perks). So a podium won on
+   one device lands on all of them, and the account is the dev login.
+
+   The archive holds one small record a month, so a scan is cheaper than an
+   index and cannot fall out of step with what was actually filed. */
+async function awardsFor(store, pids, acctPerks) {
+  const mine = new Set(pids);
   const doc = await store.get(ARCHIVE, { type: 'json' }).catch(() => null);
   const list = (doc && doc.list) || {};
   const out = [];
   for (const id of Object.keys(list)) {
     for (const row of (list[id].top3 || [])) {
-      if (row.pid && row.pid === pid) out.push({ season: id, rank: row.rank, name: row.name });
+      if (row.pid && mine.has(row.pid)) out.push({ season: id, rank: row.rank, name: row.name });
     }
   }
   out.sort((a, b) => (a.season < b.season ? 1 : -1));
@@ -524,33 +534,39 @@ async function awardsFor(store, pid) {
      season to be ordered by. Own-property only, so a pid of `constructor`
      or `__proto__` cannot pull something off the prototype — isPid already
      refuses both, and this does not depend on it having. */
-  const given = [];
-  if (Object.prototype.hasOwnProperty.call(SKIN_GRANTS, pid))
-    given.push(...SKIN_GRANTS[pid]);
-  // and whatever a dev login has bound to this profile
   const g = await store.get(GRANTS, { type: 'json' }).catch(() => null);
-  const row = g && g.byPid && Object.prototype.hasOwnProperty.call(g.byPid, pid)
-    ? g.byPid[pid] : null;
-  /* Read through the account as well as off the row. The row is what the
-     account held at the moment of login, so anything added to the account
-     since — a new skin, a new perk — reaches every profile already signed in
-     to it on its next sync, without a second login. An account deleted from
-     DEV_ACCOUNTS stops adding anything; what its logins banked stays on their
-     rows, exactly as before. */
-  const acct = row && typeof row.user === 'string'
-    && Object.prototype.hasOwnProperty.call(DEV_ACCOUNTS, row.user) ? DEV_ACCOUNTS[row.user] : null;
-  if (row && Array.isArray(row.skins)) given.push(...row.skins);
-  if (acct) given.push(...(acct.skins || ALL_SKINS));
-  // and a dev account addressed by this profile rather than by a login
-  const dp = Object.prototype.hasOwnProperty.call(DEV_PIDS, pid) ? DEV_PIDS[pid] : null;
-  if (dp) given.push(...(dp.skins || ALL_SKINS));
+  const given = [], perks = [];
+  const take = got => { given.push(...got.skins); perks.push(...got.perks); };
+  for (const pid of mine) {
+    if (hasOwn(SKIN_GRANTS, pid)) given.push(...SKIN_GRANTS[pid]);
+    if (hasOwn(PERK_GRANTS, pid)) perks.push(...PERK_GRANTS[pid]);
+    // whatever an old dev login bound to this profile
+    const row = g && g.byPid && hasOwn(g.byPid, pid) ? g.byPid[pid] : null;
+    if (row && Array.isArray(row.skins)) given.push(...row.skins);
+    if (row && Array.isArray(row.perks)) perks.push(...row.perks);
+    /* and read through the login while it is still listed, so whatever its
+       perks stand for today reaches the profiles it was typed on. Once its
+       line goes (it is an account by then), what they banked stays. */
+    if (row && typeof row.user === 'string' && hasOwn(DEV_ACCOUNTS, row.user))
+      take(perksGive(DEV_ACCOUNTS[row.user].perks));
+    // a dev account addressed by this profile rather than by a login
+    if (hasOwn(DEV_PIDS, pid)) take(perksGive(DEV_PIDS[pid].perks));
+  }
+  take(perksGive(acctPerks));
   for (const id of [...new Set(given)]) out.push({ skin: id, via: 'GRANTED' });
-  const perks = [...(hasOwn(PERK_GRANTS, pid) ? PERK_GRANTS[pid] : []),
-                 ...(row && Array.isArray(row.perks) ? row.perks : []),
-                 ...(acct ? (acct.perks || ALL_PERKS) : []),
-                 ...(dp ? (dp.perks || ALL_PERKS) : [])];
   for (const id of [...new Set(perks)]) out.push({ perk: id, via: 'GRANTED' });
   return out;
+}
+
+/* The account this request is signed in to: its perks, and every profile
+   it has played on. Null for a guest, who costs one cookie lookup. Peeks,
+   so the session's lifetime is left to /api/account (auth.js). */
+async function signedIn(req, env) {
+  if (!env || !env.DB) return null;
+  const s = await sessionOf(req, env, { peek: true }).catch(() => null);
+  if (!s) return null;
+  const pids = await accountPids(env.DB, s.account.id).catch(() => []);
+  return { perks: s.account.perks, pids };
 }
 
 function mergeFirst(entries, entry) {
@@ -663,19 +679,25 @@ export default async (req, env) => {
       const ev = Object.prototype.hasOwnProperty.call(VIGIL, vid) ? VIGIL[vid] : null;
       if (!ev) return json({ error: 'no such vigil' }, 404);
       const vp = q.get('pid');
+      const acct = await signedIn(req, env);
+      const pids = [...new Set([...(isPid(vp) ? [vp] : []), ...(acct ? acct.pids : [])])];
       const doc = await store.get(vigilKey(vid), { type: 'json' }).catch(() => null);
       return json(Object.assign({ vigil: vid, open: vigilOpen(ev, today) },
-                                vigilView(ev, doc, isPid(vp) ? vp : null), meta));
+                                vigilView(ev, doc, pids), meta));
     }
 
     /* Which podiums a profile holds. Answered by pid and never by name, so
-       the reply cannot be used to enumerate who won what. */
+       the reply cannot be used to enumerate who won what. Signed in, it is
+       every profile of the account, and the account's own perks. */
     const pid = q.get('awards');
     if (pid !== null) {
       if (!isPid(pid)) return json({ error: 'bad pid' }, 400);
-      const awards = await awardsFor(store, pid);
+      const acct = await signedIn(req, env);
+      const others = acct ? acct.pids.filter(p => p !== pid) : [];
+      const awards = await awardsFor(store, [pid, ...others], acct ? acct.perks : []);
       const back = await comebackClaim(store, pid, q.get('name'));
-      if (back.has) awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
+      if (back.has || (others.length && await comebackHeld(store, others)))
+        awards.push({ perk: 'comeback', via: 'WELCOME BACK' });
       /* the old pid this profile is to become; only ever told to the
          profile that claimed it */
       const out = back.adopt && back.adopt !== pid ? { awards, adopt: back.adopt } : { awards };
@@ -725,7 +747,9 @@ export default async (req, env) => {
     if (!Object.prototype.hasOwnProperty.call(ev.pay, quest)) return json({ error: 'bad quest' }, 400);
     if (!vigilOpen(ev, today)) return json({ error: 'the vigil is closed' }, 409);
     try {
-      const r = await vigilTurnIn(store, vid, ev, quest, pid, clientIp(req), today);
+      const acct = await signedIn(req, env);
+      const others = acct ? acct.pids.filter(p => p !== pid) : [];
+      const r = await vigilTurnIn(store, vid, ev, quest, pid, clientIp(req), today, others);
       if (r.error) return json({ error: r.error }, r.error === 'busy' ? 503 : 429);
       return json(Object.assign({ vigil: vid, already: !!r.already }, r.view, meta));
     } catch (e) {
@@ -733,30 +757,10 @@ export default async (req, env) => {
     }
   }
 
-  /* A dev login. Answers 'no' to every kind of wrong — unknown user, wrong
-     password, malformed anything — so the reply never says which part was
-     wrong, and the attempt is counted against the address either way. */
-  if (body && body.devAuth) {
-    const ip = clientIp(req);
-    const wait = await gateLocked(store, ip);
-    if (wait) return json({ error: 'too many attempts', retryIn: wait }, 429);
-
-    const pid = body.pid;
-    const user = String((body.devAuth && body.devAuth.user) || '')
-      .toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
-    const acct = Object.prototype.hasOwnProperty.call(DEV_ACCOUNTS, user)
-      ? DEV_ACCOUNTS[user] : null;
-    const ok = isPid(pid) && passOk(acct, String((body.devAuth && body.devAuth.pass) || ''));
-    if (!ok) {
-      await gateBump(store, ip, true);
-      return json({ error: 'no' }, 401);
-    }
-    await gateBump(store, ip, false);          // a good login clears the count
-    const skins = await grantTo(store, pid, user, acct.skins || ALL_SKINS,
-                                acct.perks || ALL_PERKS);
-    return json({ ok: true, user, skins: skins.length,
-                  perks: (acct.perks || ALL_PERKS).length });
-  }
+  /* The old dev login, from a page loaded before accounts. It is an account
+     now: sign up or in with the same name and password. */
+  if (body && body.devAuth)
+    return json({ error: 'dev logins are accounts now: use ACCOUNT in the menu' }, 410);
 
   const entry = {
     name:   cleanName(body.name) || 'ANON',

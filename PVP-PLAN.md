@@ -166,16 +166,54 @@ when you say so.
   - Signed-in players carry a mark beside their name. It works on phones.
 - **In the game:** a FULL LEADERBOARD link where the game shows its board.
 
-**Step 3: awards and dev perks by account. ← next**
+**Step 3: awards and dev perks by account. Done.**
 
-- `?awards` when signed in: podiums, grants, vigil and WELCOME BACK are read
-  across every pid linked to the account, so a podium won on one device
-  lands on all of them.
-- `DEV_ACCOUNTS` / `DEV_PIDS` become `perks` on real accounts. The dev login
-  becomes signing in to that account, and the scrypt lines in
-  `leaderboard.js` go.
+- **Signed in, awards are the whole account's.** `?awards` reads podiums,
+  hand-outs (`SKIN_GRANTS`, `PERK_GRANTS`, `DEV_PIDS`, old dev-login grants)
+  and WELCOME BACK across every pid linked to the account. A podium won on
+  one device lands on all of them.
+  - Only the profile asking can make a new WELCOME BACK claim or take up an
+    old pid. The rest of the account's profiles bring theirs along read-only.
+  - Signed out, or with a dead cookie, it's one profile, exactly as before.
+  - A pid already linked to another account stays with that account.
+- **The vigil pays a quest once per account.** The account's save carries
+  the story to every device, and each device would otherwise report it
+  again under its own pid. An account's `lit` and `done` are all its
+  profiles together.
+- **Account perks.** `accounts.perks` is a JSON list: `'dev'` (every skin and
+  perk, read live), `'skin:<id>'`, or a perk id. Every device signed in to
+  the account collects them. `DEV_PIDS` speak the same language. To give
+  perks, run this in the D1 console:
+  `UPDATE accounts SET perks = '["dev"]' WHERE name = '…'`.
+- **The dev login is signing in.** The DEV ACCOUNT window and `devAuth` are
+  gone (old pages get a 410 pointing at ACCOUNT). Typing `notz` at the
+  callsign prompt just takes the name.
+  - **Claiming:** signing up as `notz` with the old dev password makes the
+    account, born with `['dev']`. A wrong password counts as a failed
+    sign-in and answers "name taken". The password isn't judged for
+    strength again, since it was already the login's.
+  - **The scrypt line goes after the claim.** Once `notz` exists on the live
+    site, its `DEV_ACCOUNTS` line can be deleted, and the hash leaves the
+    repo. Until then it is the only proof of who may take the name.
+- **Fixed on the way:** `/api/leaderboard` and `/api/boards` now only *peek*
+  at a session (`sessionOf(…, { peek: true })`). Before, filing a run could
+  extend the session row without the cookie being sent again. The browser's
+  cookie would then run out on its old lifetime while the database thought
+  it fresh.
+- **Tested:**
+  - `npm run test:awards`: 83 checks. Mutants that drop the union, the
+    account perks, the comeback union, the vigil rule, the peek, or the
+    claim's password or lockout are all caught.
+  - The account, boards, determinism and lockstep suites still pass.
+  - Browser, on a local Worker with two origins as two devices: a podium
+    seeded on one device reaches the other only with the cookie. The
+    account's `dev` perk unlocks every pilot and evo on the next sync.
+    Typing notz takes the name.
 
-**Step 4: hardening.**
+**Step 4: hardening. ← next**
+
+- When the account `notz` exists on the live site, delete its
+  `DEV_ACCOUNTS` line (and with it the last scrypt hash in the repo).
 
 - **Turnstile on sign-up.** It's off until you create a site key, the way
   TURN and ads waited for theirs.
@@ -338,7 +376,7 @@ Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like
   and the referee keep ranked matches honest, since a modified simulation
   splits from the honest one.
 
-## Still open (none block step 2)
+## Still open (none block step 4)
 
 1. **"Base pilots" in low leagues:** I've read it as VOIDRUNNER and EMBER,
    and not awakened. Should EMBER's evo be allowed down there?
@@ -346,3 +384,6 @@ Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like
    real matches to tune them on.
 3. **The in-game board:** should it switch over to the new `scores` table
    (so it agrees with the page exactly), or keep its top-100 document?
+4. **Mario (`DEV_PIDS`):** his perks stay keyed by his pid, since he has no
+   account yet. If he makes one on that pid, every device he signs in on gets
+   them. Once he has one, it can carry `['dev']` itself and his line can go.

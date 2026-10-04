@@ -122,8 +122,12 @@ export function originOk(req) {
 const parseList = t => { try { const v = JSON.parse(t); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
 
 /* Who this request is, or null. `renew` says the session was just extended,
-   so the caller should send the cookie again with a fresh lifetime. */
-export async function sessionOf(req, env) {
+   so the caller should send the cookie again with a fresh lifetime.
+
+   `peek` asks without extending. Only /api/account sends the cookie again,
+   so any other route that extended the row would leave the browser's cookie
+   to run out on its old lifetime while the database thought it fresh. */
+export async function sessionOf(req, env, { peek = false } = {}) {
   const token = cookieOf(req);
   if (!token || token.length > 100) return null;
   await ensureAuth(env.DB);
@@ -138,7 +142,7 @@ export async function sessionOf(req, env) {
     return null;
   }
   let renew = false;
-  if (now - row.seen > DAY) {
+  if (!peek && now - row.seen > DAY) {
     await env.DB.prepare('UPDATE sessions SET seen = ?1, expires = ?2 WHERE id = ?3')
       .bind(now, now + SESSION_MS, sid).run();
     renew = true;
@@ -146,6 +150,14 @@ export async function sessionOf(req, env) {
   return { sid, token, renew,
            account: { id: row.id, name: row.name, display: row.display, created: row.created,
                       pid: row.pid || null, perks: parseList(row.perks) } };
+}
+
+/* Every profile id the account has played on, oldest first. Podiums, grants
+   and the vigil are addressed to pids, so this is how they reach the account. */
+export async function accountPids(db, accountId) {
+  const res = await db.prepare('SELECT pid FROM account_pids WHERE account = ?1 ORDER BY linked LIMIT 200')
+    .bind(accountId).all();
+  return ((res && res.results) || []).map(r => r.pid);
 }
 
 /* What an account looks like to the account's own player. The id never

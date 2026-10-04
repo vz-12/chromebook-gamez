@@ -22,16 +22,17 @@
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
          publicAccount, SESSION_MS, MAX_SESSIONS } from './auth.js';
-import { DEV_LOGINS } from './leaderboard.js';
+import { isDevLogin, devClaim } from './leaderboard.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
 const LOGIN_RE = /^[A-Za-z0-9_-]{3,16}$/;
 const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
 
-/* Names nobody may take: the dev logins, so an account cannot pass itself
-   off as one, and the handful of words that would read as the game talking. */
-const RESERVED = new Set([...DEV_LOGINS, 'admin', 'administrator', 'root', 'system', 'support',
+/* Names nobody may take: the handful of words that would read as the game
+   talking. The old dev logins are held as well, for whoever knows their
+   password (register). */
+const RESERVED = new Set(['admin', 'administrator', 'root', 'system', 'support',
   'staff', 'mod', 'moderator', 'official', 'voidrunner', 'anon', 'null', 'undefined']);
 
 /* The passwords every list of leaked passwords starts with. Not a strength
@@ -182,18 +183,36 @@ const OPS = {
     if (!LOGIN_RE.test(display)) return no('name: 3 to 16 letters, digits, _ or -', 400);
     const name = display.toLowerCase();
     if (RESERVED.has(name)) return no('name taken', 409);
-    const bad = passProblem(b.pass, name);
-    if (bad) return no(bad, 400);
     const wait = await gateWait(db, [['new:' + ip, LIMITS.signup]]);
     if (wait) return locked(wait);
-    // asked first so a taken name costs no password hash
-    if (await accountByName(db, name)) return no('name taken', 409);
+    /* An old dev login is claimed as the account of the same name, with its
+       own password, and the account is born with the login's perks. That
+       password is a sign-in attempt: a wrong one counts like one and answers
+       like any taken name. It was the login's already, so it is not judged
+       again here; change it afterwards like any other. */
+    let perks = [];
+    if (isDevLogin(name)) {
+      const pair = 'f:' + ip + ':' + name, all = 'f:' + ip;
+      const waitF = await gateWait(db, [[pair, LIMITS.pair], [all, LIMITS.ip]]);
+      if (waitF) return locked(waitF);
+      if (await accountByName(db, name)) return no('name taken', 409);
+      const got = devClaim(name, b.pass);
+      if (!got) { await gateBump(db, [pair, all]); return no('name taken', 409); }
+      await gateClear(db, pair);
+      perks = got;
+    } else {
+      const bad = passProblem(b.pass, name);
+      if (bad) return no(bad, 400);
+      // asked first so a taken name costs no password hash
+      if (await accountByName(db, name)) return no('name taken', 409);
+    }
 
     const id = newId(), code = newCode(), now = Date.now();
     const res = await db.prepare(
-      `INSERT INTO accounts (id, name, display, pass, recovery, pid, created, updated)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) ON CONFLICT (name) DO NOTHING`)
-      .bind(id, name, display, hashPass(b.pass), codeHash(code), isPid(b.pid) ? b.pid : null, now).run();
+      `INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8) ON CONFLICT (name) DO NOTHING`)
+      .bind(id, name, display, hashPass(String(b.pass)), codeHash(code), isPid(b.pid) ? b.pid : null,
+            JSON.stringify(perks), now).run();
     if (!(res && res.meta && res.meta.changes > 0)) return no('name taken', 409);
     await gateBump(db, ['new:' + ip], 60 * 60 * 1000);
     await linkPid(db, id, b.pid);

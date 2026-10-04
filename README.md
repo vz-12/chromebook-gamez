@@ -194,9 +194,22 @@ npm run test:boards                        # a few seconds
 
 ## Dev accounts
 
-Dev logins (`DEV_ACCOUNTS`), profile handouts (`DEV_PIDS`, `SKIN_GRANTS`) and
-how to add or revoke them are documented in `src/leaderboard.js`. A profile
-that signed in on Netlify keeps its grants through the sync above.
+A dev account is an ordinary account with perks: `accounts.perks` in D1,
+for example `["dev"]` for everything. Every device signed in to it collects
+them. To give some, run this in the D1 console:
+
+```sql
+UPDATE accounts SET perks = '["dev"]' WHERE name = 'somebody';
+```
+
+The perk language, the profile handouts (`DEV_PIDS`, `SKIN_GRANTS`,
+`PERK_GRANTS`) and the old dev logins (`DEV_ACCOUNTS`, claimed by signing up
+with the same name and password) are documented in `src/leaderboard.js`. A
+profile that signed in on Netlify keeps its grants through the sync above.
+
+```sh
+npm run test:awards                        # about a second
+```
 
 ## Ads
 
