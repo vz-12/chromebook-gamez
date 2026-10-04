@@ -1,10 +1,15 @@
 /* ===========================================================================
    POST /api/pvp/queue — matchmaking (PVP-PLAN.md, Phase 5 step 2).
 
-     { op: 'join', queue, pilot }   -> { state: 'waiting', waited }
-     { op: 'poll', queue }          -> the same, { state: 'matched', match },
-                                       or { state: 'none' } once the ticket has gone
-     { op: 'leave', queue }         -> { state: 'left' } (or the match, if one was found)
+     { op: 'join', queue, pilot, tab }  -> { state: 'waiting', waited }
+     { op: 'poll', queue, tab }         -> the same, { state: 'matched', match },
+                                           { state: 'none' } once the ticket has gone,
+                                           or { state: 'elsewhere' } (below)
+     { op: 'leave', queue, tab }        -> { state: 'left' } (or the match, if one was found)
+
+   An account has one ticket per queue. `tab` is the lobby tab's own mark: a
+   second tab or device searching as the same account takes the ticket over,
+   and the first is told 'elsewhere' rather than searching on for nobody.
 
    A player polls every couple of seconds while queued; a ticket nobody polls
    is dropped (objects.js, MM.STALE). Signed in only, and the ticket is made
@@ -38,7 +43,8 @@ export default async function queue(req, env) {
   if (!Object.prototype.hasOwnProperty.call(QUEUES, b.queue)) return reply({ error: 'unknown queue' }, 400);
   if (!['join', 'poll', 'leave'].includes(b.op)) return reply({ error: 'unknown op' }, 400);
 
-  const body = { queue: b.queue, acct: s.account.id };
+  if (b.tab !== undefined && !(typeof b.tab === 'string' && /^[0-9a-f]{16}$/.test(b.tab))) return reply({ error: 'bad tab' }, 400);
+  const body = { queue: b.queue, acct: s.account.id, tab: b.tab || null };
   if (b.op === 'join') {
     const pilot = typeof b.pilot === 'string' && Object.prototype.hasOwnProperty.call(PILOTS, b.pilot) ? b.pilot : null;
     if (!pilot) return reply({ error: 'bad pilot' }, 400);

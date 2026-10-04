@@ -169,8 +169,9 @@ const windowOf = (queue, waited) => {
   return Math.min(most, from + per * waited / 1000);
 };
 // what a player polling is told: still waiting, or the match found (held for KEEP once first collected)
-function status(t, now) {
+function status(t, now, tab) {
   if (!t) return { state: 'none' };
+  if (tab && t.tab && t.tab !== tab) return { state: 'elsewhere' };    // the account searches from another tab now
   if (!t.match) return { state: 'waiting', waited: now - t.since };
   if (!t.got) t.got = now;
   return { state: 'matched', match: t.match };
@@ -197,20 +198,21 @@ export class Matchmaker extends Serial {
       // a match found and not yet collected stays found; anything else starts again
       if (!(t && t.match && !t.got)) {
         if (t) q.tickets.splice(q.tickets.indexOf(t), 1);
-        t = Object.assign({}, b.ticket, { acct: b.acct, since: now, seen: now, match: null, at: 0, got: 0 });
+        t = Object.assign({}, b.ticket, { acct: b.acct, tab: b.tab || null, since: now, seen: now, match: null, at: 0, got: 0 });
         q.tickets.push(t);
-      }
+      } else t.tab = b.tab || t.tab;
     } else if (op === 'poll') {
-      if (t) t.seen = now;
+      if (t && !(b.tab && t.tab && t.tab !== b.tab)) t.seen = now;
     } else if (op === 'leave') {
-      if (t && !t.match) { q.tickets.splice(q.tickets.indexOf(t), 1); t = null; }
+      // only the tab holding the ticket gives it up
+      if (t && !t.match && !(b.tab && t.tab && t.tab !== b.tab)) { q.tickets.splice(q.tickets.indexOf(t), 1); t = null; }
       await this.store(q, now);
-      return reply(t ? status(t, now) : { state: 'left' });
+      return reply(t ? status(t, now, b.tab) : { state: 'left' });
     } else {
       return reply({ error: 'unknown op' }, 404);
     }
     await this.pair(q, now);
-    const out = status(t, now);
+    const out = status(t, now, b.tab);
     await this.store(q, now);
     return reply(out);
   }

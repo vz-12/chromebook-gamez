@@ -144,8 +144,11 @@
      both sides) goes to the play page, which connects the two by the room
      code the match passes along. A ticket nobody polls is dropped, so a
      closed tab leaves the queue by itself; leaving says so at once. */
-  const Q = { queue: null, t0: 0, poll: 0, clock: 0 };
-  const queueCall = (op, extra) => call('POST', '/api/pvp/queue', Object.assign({ op, queue: Q.queue }, extra));
+  /* `tab` marks this tab's ticket: the same account searching from another
+     tab or device takes the ticket over, and this one is told so. */
+  const Q = { queue: null, tab: '', t0: 0, poll: 0, clock: 0 };
+  const queueCall = (op, extra) => call('POST', '/api/pvp/queue', Object.assign({ op, queue: Q.queue, tab: Q.tab }, extra));
+  const newTab = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), x => x.toString(16).padStart(2, '0')).join('');
   const mmss = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
   function searching(on, what) {
@@ -156,7 +159,8 @@
     if (!on) return;
     $('searchWhat').textContent = what;
     $('searchClock').textContent = '0:00';
-    $('searchNote').textContent = 'Looking for an opponent near your rating. The search widens the longer you wait.';
+    $('searchNote').textContent = 'Searching as ' + (me ? me.account.display : 'you') +
+      '. Looking for an opponent near your rating; the search widens the longer you wait.';
     $('cancel').hidden = false;
     Q.clock = setInterval(() => { $('searchClock').textContent = mmss(Date.now() - Q.t0); }, 500);
   }
@@ -171,6 +175,11 @@
     if (r.status === 401) { stopQueue(); show('signin'); return; }
     if (!r.ok || !r.d) { Q.poll = setTimeout(pollQueue, 3000); return; }       // a blip: try again
     if (r.d.state === 'matched') { found(r.d.match); return; }
+    if (r.d.state === 'elsewhere') {
+      stopQueue((me ? me.account.display.toUpperCase() : 'THIS ACCOUNT') + ' STARTED SEARCHING IN ANOTHER TAB OR ON ANOTHER DEVICE. ' +
+                'TWO PLAYERS NEED TWO ACCOUNTS.');
+      return;
+    }
     if (r.d.state !== 'waiting') { stopQueue('YOUR PLACE IN THE QUEUE WAS LOST: TRY AGAIN'); return; }
     Q.poll = setTimeout(pollQueue, 2000);
   }
@@ -180,7 +189,7 @@
     if (Q.queue) return;
     const pilot = $(queue + 'Pilot').value;
     $('queueMsg').textContent = '';
-    Q.queue = queue; Q.t0 = Date.now();
+    Q.queue = queue; Q.tab = newTab(); Q.t0 = Date.now();
     searching(true, 'SEARCHING ' + (queue === 'ranked' ? 'RANKED' : 'CASUAL'));
     const r = await queueCall('join', { pilot });
     if (r.ok || r.status === 401) { heard(r); return; }
@@ -253,6 +262,35 @@
 
   /* Back to the game, signed in there too: a hand-off the other way. Signed
      out here, it is only a link. */
+  /* Arrived from the game as one account, with this browser signed in to PvP
+     as another: say so, and let the player choose. The code waits a minute. */
+  function asking(code, here, as) {
+    const box = $('switch');
+    box.textContent = '';
+    const p = document.createElement('p');
+    p.append('You came from VOIDRUNNER as ', b(as), ', but PvP in this browser is signed in as ', b(here), '.');
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'go'; go.textContent = 'PLAY AS ' + as.toUpperCase();
+    const stay = document.createElement('button');
+    stay.type = 'button'; stay.className = 'link'; stay.textContent = 'STAY AS ' + here.toUpperCase();
+    const msg = document.createElement('p');
+    msg.className = 'msg';
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      const r = await call('POST', '/api/account', { op: 'handoff-take', code, switch: true });
+      if (r.ok) { box.hidden = true; await load(); return; }
+      go.disabled = false;
+      msg.textContent = r.status === 401 ? 'THAT LINK HAS RUN OUT: GO BACK TO VOIDRUNNER AND PRESS PVP AGAIN' : 'SOMETHING WENT WRONG (' + r.status + ')';
+    });
+    stay.addEventListener('click', () => { box.hidden = true; });
+    const row = document.createElement('div');
+    row.className = 'pair';
+    row.append(go, stay);
+    box.append(p, row, msg);
+    box.hidden = false;
+  }
+  function b(text) { const e = document.createElement('b'); e.textContent = text; return e; }
+
   $('back').addEventListener('click', async () => {
     const to = game();
     const r = await call('POST', '/api/account', { op: 'handoff', to });
@@ -261,7 +299,10 @@
   $('privacy').href = game() + '/privacy';
 
   (async () => {
-    if (code) await call('POST', '/api/account', { op: 'handoff-take', code });
+    if (code) {
+      const r = await call('POST', '/api/account', { op: 'handoff-take', code });
+      if (r.status === 409 && r.d && r.d.as) asking(code, r.d.here, r.d.as);
+    }
     await load();
   })();
 })();

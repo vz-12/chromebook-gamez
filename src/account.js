@@ -170,6 +170,11 @@ async function humanOk(env, token, ip) {
    never reaches a server log, and the other site trades it for a session of
    its own ('handoff-take').
 
+   Arriving signed in there as somebody else (two accounts on one browser),
+   the code is left unspent and the answer names both, so the page asks the
+   player which to be; `switch: true` while the code lives ends the session
+   there and starts the code's. Nothing changes without that choice.
+
    Where a code may go: one of SITES (auth.js), never the address asking. A
    local `wrangler dev` may hand off between its own localhost addresses, and
    only from one of them. */
@@ -347,17 +352,29 @@ const OPS = {
   async 'handoff-take'(req, env, b, s) {
     const code = String(b.code || '');
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(code)) return no('no', 401);
-    const row = await env.DB.prepare('DELETE FROM handoffs WHERE id = ?1 RETURNING account, target, expires')
-      .bind(sha256(code)).first();
-    if (!row || row.expires <= Date.now() || row.target !== new URL(req.url).origin) return no('no', 401);
-    if (s) return s.account.id === row.account
-      ? reply({ account: publicAccount(s.account), already: true })
-      : no('signed in as somebody else', 409);
+    const id = sha256(code), here = new URL(req.url).origin;
+    const live = r => r && r.expires > Date.now() && r.target === here;
+    if (s) {
+      // signed in here already: as them, the code is simply spent; as somebody else, ask first (above)
+      const held = await env.DB.prepare('SELECT account, target, expires FROM handoffs WHERE id = ?1').bind(id).first();
+      if (!live(held)) return no('no', 401);
+      if (held.account === s.account.id) {
+        await env.DB.prepare('DELETE FROM handoffs WHERE id = ?1').bind(id).run();
+        return reply({ account: publicAccount(s.account), already: true });
+      }
+      if (b.switch !== true) {
+        const them = await env.DB.prepare('SELECT display FROM accounts WHERE id = ?1').bind(held.account).first();
+        return no('signed in as somebody else', 409, { here: s.account.display, as: them ? them.display : null });
+      }
+    }
+    const row = await env.DB.prepare('DELETE FROM handoffs WHERE id = ?1 RETURNING account, target, expires').bind(id).first();
+    if (!live(row)) return no('no', 401);
     const a = await env.DB.prepare('SELECT id, name, display, created FROM accounts WHERE id = ?1')
       .bind(row.account).first();
     if (!a) return no('no', 401);
+    if (s) await env.DB.prepare('DELETE FROM sessions WHERE id = ?1').bind(s.sid).run();   // the switch: who was here signs out
     const token = await startSession(env.DB, a.id, req);
-    return reply({ account: publicAccount(a) }, 200, sessionCookie(req, token));
+    return reply({ account: publicAccount(a), switched: !!s }, 200, sessionCookie(req, token));
   },
 
   /* Every device signed in to the account, most recently seen first. A

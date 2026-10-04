@@ -159,8 +159,17 @@ section('every way a code is refused');
   ok((await other.op('register', { name: 'someone_else', pass: 'a fine password' })).status === 201, 'another player');
   let h = await duel.op('handoff', { to: GAME });
   let t = await other.op('handoff-take', { code: h.d.code });
-  ok(t.status === 409, 'signed in there as somebody else: refused', t);
+  ok(t.status === 409 && t.d.here === 'someone_else' && t.d.as === 'Duelist' && !t.cookie,
+     'signed in there as somebody else: not taken, and the answer names both, for the page to ask', t);
   ok((await other.call('GET', '/api/account')).d.account.name === 'someone_else', 'and they stay who they were');
+  ok(one(`SELECT COUNT(*) AS n FROM handoffs WHERE id = '${sha(h.d.code)}'`).n === 1, 'the code is left unspent');
+  const otherSessions = () => one("SELECT COUNT(*) AS n FROM sessions s JOIN accounts a ON a.id = s.account WHERE a.name = 'someone_else'").n;
+  const was = otherSessions();
+  t = await other.op('handoff-take', { code: h.d.code, switch: true });
+  ok(t.status === 200 && t.d.switched === true && t.d.account.name === 'duelist' && /vr_s=/.test(t.cookie), 'asked to switch: signed in as the code\'s account', t);
+  ok((await other.call('GET', '/api/account')).d.account.name === 'duelist' && otherSessions() === was - 1,
+     'and the one who was there is signed out of this browser, not elsewhere', [otherSessions(), was]);
+  ok((await other.op('handoff-take', { code: h.d.code, switch: true })).status === 401, 'a switch spends the code');
 
   h = await home.op('handoff', { to: PVP });
   t = await tab(SCHOOL).op('handoff-take', { code: h.d.code });
@@ -556,6 +565,17 @@ section('matchmaking: the queues, the pairing, and the ratings');
   ok((await qq(ace, { op: 'leave', queue: 'ranked' })).d.state === 'left' && (await poll(ace, 'ranked')).d.state === 'none', 'leaving the queue drops the ticket');
   later(MM.STALE + 1000); await envPvp.MATCHMAKER.alarms();
   ok((await poll(stranger, 'ranked')).d.state === 'none', 'a ticket nobody polls for ' + MM.STALE / 1000 + ' s is gone');
+
+  // one account searching from two tabs (or two devices): the second takes the ticket, the first is told
+  const ta = 'a1'.repeat(8), tb = 'b2'.repeat(8);
+  ok((await qq(bolt, { op: 'join', queue: 'casual', pilot: 'runner', tab: 'not a tab' })).status === 400, 'a tab mark is a tab mark');
+  await qq(bolt, { op: 'join', queue: 'casual', pilot: 'runner', tab: ta });
+  ok((await qq(bolt, { op: 'join', queue: 'casual', pilot: 'ember', tab: tb })).d.state === 'waiting', 'the same account joins again from another tab');
+  ok((await qq(bolt, { op: 'poll', queue: 'casual', tab: ta })).d.state === 'elsewhere',
+     'the first tab is told its account searches elsewhere now, rather than searching on for nobody');
+  ok((await qq(bolt, { op: 'leave', queue: 'casual', tab: ta })).d.state === 'elsewhere'
+     && (await qq(bolt, { op: 'poll', queue: 'casual', tab: tb })).d.state === 'waiting', 'and its leaving does not take the other tab\'s ticket');
+  ok((await qq(bolt, { op: 'leave', queue: 'casual', tab: tb })).d.state === 'left', 'which leaves when it says so');
 
   // casual: unrated, each flies what they own
   await join(ace, 'casual', 'melee'); await join(bolt, 'casual', 'runner');
