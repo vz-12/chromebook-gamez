@@ -15,6 +15,7 @@
 import { getStore } from './store.js';
 import { scorePut } from './boards.js';
 import { sessionOf, accountPids } from './auth.js';
+import { podiumAwards } from './pvp-podiums.js';
 
 /* The season rule lives in one place, shared with the scheduled closer. */
 import { STORE, KEY, RETRIES, backoff, SEASON_DAY, META, ARCHIVE, seasonKey, isSeason,
@@ -508,7 +509,7 @@ async function signedIn(req, env) {
   const s = await sessionOf(req, env, { peek: true }).catch(() => null);
   if (!s) return null;
   const pids = await accountPids(env.DB, s.account.id).catch(() => []);
-  return { perks: s.account.perks, pids };
+  return { id: s.account.id, perks: s.account.perks, pids };
 }
 
 function mergeFirst(entries, entry) {
@@ -637,6 +638,8 @@ export default async (req, env) => {
       const acct = await signedIn(req, env);
       const others = acct ? acct.pids.filter(p => p !== pid) : [];
       const awards = await awardsFor(store, [pid, ...others], acct ? acct.perks : []);
+      // PvP's season podiums, by account, and what each place is worth (pvp-podiums.js)
+      if (acct) awards.push(...await podiumAwards(env.DB, acct.id).catch(() => []));
       const back = await comebackClaim(store, pid, q.get('name'));
       if (back.has || (others.length && await comebackHeld(store, others)))
         awards.push({ perk: 'comeback', via: 'WELCOME BACK' });

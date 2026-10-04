@@ -13,7 +13,11 @@
      /api/turn        the relay's credentials, asked of the game's Worker
      /api/pvp/match   a match's referee: the Match object (match.js, objects.js)
      /api/pvp/queue   matchmaking: the Matchmaker object, one per queue (queue.js, objects.js)
+     /api/pvp/flags   the referee's flags, for dev accounts to review (flags.js)
      everything else  pvp/site
+
+   A daily cron (wrangler.jsonc) files each finished season's ranked podium
+   (seasons.js).
 
    A player arrives signed in from the game by a hand-off code, and goes back
    the same way (src/account.js, hand-offs).
@@ -24,6 +28,8 @@ import me from './me.js';
 import turn from './turn.js';
 import match from './match.js';
 import queue from './queue.js';
+import flags from './flags.js';
+import { closeSeasons } from './seasons.js';
 
 export { Matchmaker, Match } from './objects.js';
 
@@ -34,7 +40,7 @@ const json = (body, status) =>
   });
 
 const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn,
-                 '/api/pvp/match': match, '/api/pvp/queue': queue };
+                 '/api/pvp/match': match, '/api/pvp/queue': queue, '/api/pvp/flags': flags };
 
 export default {
   async fetch(req, env) {
@@ -49,5 +55,13 @@ export default {
       console.error(path, e && e.stack || e);
       return json({ error: 'server error: ' + String((e && e.message) || e).slice(0, 120) }, 500);
     }
+  },
+
+  // once a day: any finished season's ranked podium, filed (seasons.js)
+  async scheduled(event, env, ctx) {
+    if (!env.DB) return;
+    ctx.waitUntil(closeSeasons(env.DB)
+      .then(f => console.log(f.length ? 'pvp podiums filed: ' + f.join(', ') : 'pvp: no season to close'))
+      .catch(e => console.error('pvp seasons', e && e.stack || e)));
   }
 };

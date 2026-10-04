@@ -15,6 +15,7 @@
    ========================================================================= */
 import { sessionOf, originOk, newId } from '../../src/auth.js';
 import { PILOTS } from './rules.js';
+import { limited, tooMany } from './limits.js';
 
 const MAX_BODY = 16 * 1024;
 const reply = (body, status = 200) =>
@@ -32,6 +33,8 @@ export default async function match(req, env) {
   if (!b || typeof b !== 'object') return reply({ error: 'bad json' }, 400);
   const s = await sessionOf(req, env, { peek: true });
   if (!s) return reply({ error: 'signed out' }, 401);
+  const wait = limited('match', s.account.id) || (b.op === 'open' ? limited('open', s.account.id) : 0);
+  if (wait) return tooMany(wait);
   if (!env.MATCH) return reply({ error: 'no referee: bind the Match object as MATCH' }, 503);
 
   const who = { acct: s.account.id, name: s.account.display };

@@ -269,6 +269,30 @@ own co-op as it is: lockstep, each player flying their own pilot.
     `/play/?preview=result` (`preview.js`: buttons for every outcome,
     ranked and casual). Locally, `npm run dev:pvp` first.
 
+**Seasons** (PVP-PLAN.md, Phase 5 step 4). Ratings are kept per season,
+the game's own (the 6th to the 6th).
+- The PvP Worker's daily cron (00:20 UTC, `pvp/wrangler.jsonc`) files each
+  finished season's ranked top three (`pvp/src/seasons.js`). With the
+  game's two, that is three of the Free plan's five cron triggers.
+- A podium reaches the player through the game's awards and shows on their
+  profile. What each place is worth is `PODIUM_REWARDS` in
+  `src/pvp-podiums.js` (the game's own skin and perk ids), empty until
+  decided.
+- A new season starts each player from last season's rating, halfway back
+  to 1500, with the placement matches to play again.
+
+**Hardening.**
+- Per-account rate limits on the queue, the referee and opening friend's
+  matches (`pvp/src/limits.js`).
+- Dev accounts can review the referee's flags at
+  `https://voidrunner-pvp.play101.workers.dev/api/pvp/flags`: accounts
+  ordered by how many different opponents they were flagged against. Or
+  straight from the database:
+
+```sh
+npx wrangler d1 execute voidrunner --remote --command "SELECT a.name, COUNT(*) AS flags, COUNT(DISTINCT CASE WHEN m.a = f.account THEN m.b ELSE m.a END) AS opponents FROM pvp_flags f JOIN accounts a ON a.id = f.account LEFT JOIN pvp_matches m ON m.id = f.match GROUP BY f.account ORDER BY opponents DESC, flags DESC LIMIT 20"
+```
+
 ## The leaderboard page
 
 `voidrunner.online/leaderboard/` lists every player on every board. That

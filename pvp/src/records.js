@@ -16,6 +16,7 @@
 import { seasonOf } from '../../src/season.js';
 import { START, rateMatch } from './glicko.js';
 import { leagueOf } from './rules.js';
+import { carried } from './seasons.js';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS pvp_matches (
@@ -78,11 +79,14 @@ export async function ensurePvp(db) {
   ready.add(db);
 }
 
-// an account's rating row in a queue and season, or null before its first rated match there
+/* An account's rating row in a queue and season. Before its first rated
+   match there: last season's, carried softly (seasons.js), or null for a
+   newcomer. */
 export async function ratingOf(db, acct, queue, season = seasonOf()) {
   await ensurePvp(db);
-  return db.prepare('SELECT rating, rd, vol, games, wins, losses, league FROM pvp_ratings WHERE account = ?1 AND queue = ?2 AND season = ?3')
+  const row = await db.prepare('SELECT rating, rd, vol, games, wins, losses, league FROM pvp_ratings WHERE account = ?1 AND queue = ?2 AND season = ?3')
     .bind(acct, queue, season).first();
+  return row || carried(db, acct, queue, season);
 }
 
 /* A recorded match's ratings, once: both players rated from their ratings

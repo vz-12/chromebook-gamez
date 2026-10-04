@@ -710,10 +710,42 @@ plain requests and use alarms for their timers.
        hull) and the kind of match, from each player's own side.
      - `/play/?preview=belt` and `?preview=result` show both with sample
        data on the real engine, asking the network for nothing.
-4. **Seasons and hardening.**
-   - A season close pays PvP podiums through the existing awards, and
-     resets ratings softly.
-   - Rate limits on queueing and reports; a query to review flags.
+4. **Seasons and hardening. Done.** Built beside the framework, not in it
+   (user, 4 Oct: another session was fixing a bug in the match code).
+   - **The podium** (`pvp/src/seasons.js`). A PvP season is the game's own
+     (the 6th to the 6th). The PvP Worker's daily cron (00:20 UTC, after
+     the game's 00:05) files each finished season's ranked top three into
+     `pvp_podiums`.
+     - Placed players only, in the ladder's order: a tie goes to whoever
+       got there first.
+     - Any finished season not yet filed is caught up, so a missed day
+       costs nothing. Filing twice changes nothing.
+   - **What a podium gives** (`src/pvp-podiums.js`). Signed in, the game's
+     awards carry each PvP podium as `{ pvp: { season, rank, rating,
+     league } }`, a shape the game's parser skips, so it is never mistaken
+     for one of the game's own season podiums.
+     - `PODIUM_REWARDS` (skins and perks per place) is empty until decided.
+       It lives in `src/` because the game's Worker does not redeploy on
+       `pvp/` changes.
+     - Profiles list a player's PvP podiums (`pvp.podiums`).
+   - **The soft reset.** Ratings are per season. A player's first rating of
+     a new season is last season's pulled halfway back to 1500, with a
+     deviation of at least 200, and the placement matches to play again.
+     `ratingOf` (records.js) falls back on it, so the queue, the lobby and
+     the first rated match all see it.
+   - **Rate limits** (`pvp/src/limits.js`), per account:
+     - queue 90 a minute; referee 120 a minute; friend's matches opened, 30
+       in ten minutes. Honest clients ask every 1.5 s at most.
+     - Counted in each Worker instance's memory: no storage, approximate.
+       Enough to stop a stuck or hostile client before it costs a Durable
+       Object request or a database read. A dashboard rate-limiting rule is
+       the next layer if one is ever needed.
+   - **Flags for review**: `GET /api/pvp/flags`, dev accounts only. Accounts
+     ordered by how many different opponents they were flagged against,
+     with reasons and matches played, and the latest no-contests. The same
+     account flagged against many opponents is the one to look at.
+   - **Tested:** the server suite is 226 checks. 15 mutants, one per rule,
+     all caught.
 
 **D1** (made on first use, like the rest):
 - `pvp_matches`: id, queue, league, rated, both accounts and pilots, the

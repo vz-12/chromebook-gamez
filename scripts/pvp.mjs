@@ -11,7 +11,7 @@
    No packages and no network. A few seconds, most of it scrypt.
    ========================================================================= */
 import { makeD1 } from './lib/d1-sqlite.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { makeNamespace } from './lib/do-fake.mjs';
 
@@ -22,6 +22,12 @@ const { loadout, LEAGUES, CASUAL } = await import('../pvp/src/rules.js');
 const { Match, Matchmaker, MM } = await import('../pvp/src/objects.js');
 const { seasonOf } = await import('../src/season.js');
 const { REF } = await import('../pvp/src/referee.js');
+const { closeSeasons, seasonBefore, SOFT } = await import('../pvp/src/seasons.js');
+const { PODIUM_REWARDS } = await import('../src/pvp-podiums.js');
+const { ratingOf, applyRating } = await import('../pvp/src/records.js');
+const { START, rateMatch } = await import('../pvp/src/glicko.js');
+const { PLACEMENTS } = await import('../pvp/src/rules.js');
+const { LIMITS, forget } = await import('../pvp/src/limits.js');
 
 const DB = makeD1();
 const asset = new Response('asset');
@@ -623,6 +629,166 @@ section('matchmaking: the queues, the pairing, and the ratings');
   const expect = (MM.REGION - MM.WINDOW.ranked[0]) / MM.WINDOW.ranked[1];
   ok(at + 2 >= expect && at <= expect + 4, 'but paired once the window has grown to cover it (' + expect + ' s)', at + 2);
   Date.now = real;
+}
+
+section('seasons: the podium at the turn, and the soft reset');
+{
+  const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
+  const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
+  ok(/"triggers":\s*\{\s*"crons":\s*\["20 0 \* \* \*"\]\s*\}/.test(cfg) && typeof pvp.scheduled === 'function', 'the PvP Worker has its daily cron');
+  ok(seasonBefore('2026-10') === '2026-09' && seasonBefore('2026-01') === '2025-12', 'the season before, across a year too');
+  const now = Date.now(), cur = seasonOf(now), prev = seasonBefore(cur), older = seasonBefore(prev), oldest = seasonBefore(older);
+  const mk = name => {
+    const id = randomBytes(16).toString('hex');
+    DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+      .run(id, name.toLowerCase(), name, '-', '-', '[]', now, now);
+    return id;
+  };
+  const P = { ace: mk('S_Ace'), bea: mk('S_Bea'), cal: mk('S_Cal'), dee: mk('S_Dee'), eve: mk('S_Eve'), fay: mk('S_Fay') };
+  const rate = (acct, season, rating, league, updated, rd = 60, games = 20, queue = 'ranked') =>
+    DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+                    VALUES (?, ?, ?, ?, ?, 0.06, ?, 10, 10, ?, ?)`).run(acct, queue, season, rating, rd, games, league, updated);
+  // last season: Eve rated highest but was never placed; Bea and Cal tied, and Cal got there first
+  rate(P.eve, prev, 2400, null, 1, 300, 3);
+  rate(P.ace, prev, 2210, 'void', 5);
+  rate(P.bea, prev, 1990, 'platinum', 9);
+  rate(P.cal, prev, 1990, 'platinum', 7);
+  rate(P.dee, prev, 1700, 'gold', 3);
+  rate(P.fay, prev, 3000, 'void', 1, 60, 20, 'casual');      // casual has no podium
+  rate(P.dee, older, 1600, 'gold', 2);                        // the season before that: Dee alone
+  rate(P.cal, cur, 1880, 'gold', 6);                          // and this season, already placed: not filed while it runs
+  const filed = await closeSeasons(DB, now);
+  const pod = s => DB.sql.prepare('SELECT rank, account, rating, league FROM pvp_podiums WHERE season = ? ORDER BY rank').all(s);
+  ok(filed.join() === [older, prev].join(), 'every finished season with ratings filed, oldest first, and the running one not', filed);
+  ok(pod(prev).map(r => r.account).join() === [P.ace, P.cal, P.bea].join() && pod(prev)[0].league === 'void' && pod(prev)[0].rating === 2210,
+     'the top three placed, in the ladder\'s order: a tie goes to whoever got there first', pod(prev));
+  ok(!pod(prev).some(r => r.account === P.eve || r.account === P.fay), 'never a player still being placed, nor casual, whatever the rating');
+  ok(pod(older).length === 1 && pod(older)[0].account === P.dee, 'one placed player: a podium of one', pod(older));
+  ok(pod(cur).length === 0, 'the season still running has none');
+  ok((await closeSeasons(DB, now)).length === 0 && pod(prev).length === 3, 'run again: nothing more filed, nothing changed');
+  // a season the cron missed is caught up by the next run
+  rate(P.bea, oldest, 1800, 'gold', 4);
+  const jobs = [];
+  await pvp.scheduled({ cron: '20 0 * * *' }, envPvp, { waitUntil: p => jobs.push(p) });
+  const quiet = console.log; console.log = () => {};
+  await Promise.all(jobs);
+  console.log = quiet;
+  ok(pod(oldest).length === 1 && pod(oldest)[0].account === P.bea, 'the daily cron files a season missed before', pod(oldest));
+
+  // the game's awards: a PvP podium in its own shape, never the game's own crowns, and what it is worth
+  const me = acct('duelist');
+  DB.sql.prepare("INSERT INTO pvp_podiums (season, queue, rank, account, rating, league, filed) VALUES ('2026-05', 'ranked', 1, ?, 2301.4, 'void', ?)").run(me, now);
+  const aw = async () => (await home.call('GET', '/api/leaderboard?awards=' + 'a'.repeat(32))).d.awards || [];
+  let got = await aw();
+  const medal = got.find(x => x.pvp);
+  ok(medal && medal.pvp.season === '2026-05' && medal.pvp.rank === 1 && medal.pvp.rating === 2301 && medal.pvp.league === 'void'
+     && medal.via === 'PVP 2026-05 #1', 'signed in, the game\'s awards carry the account\'s PvP podium', medal);
+  ok(got.filter(x => x.pvp).every(x => !('season' in x) && !('rank' in x)),
+     'in a shape the game does not read as one of its own season podiums (no top-level season or rank)');
+  ok(!got.some(x => x.skin || x.perk && /^PVP/.test(x.via || '')), 'and nothing granted for it while the rewards are undecided');
+  PODIUM_REWARDS[1].skins.push('test-crown'); PODIUM_REWARDS[1].perks.push('test-perk');
+  got = await aw();
+  PODIUM_REWARDS[1].skins.pop(); PODIUM_REWARDS[1].perks.pop();
+  ok(got.some(x => x.skin === 'test-crown' && x.via === 'PVP 2026-05 #1') && got.some(x => x.perk === 'test-perk' && x.via === 'PVP 2026-05 #1'),
+     'once a place is worth something, it is granted with it', got.filter(x => /^PVP/.test(x.via || '')));
+  const guest = (await tab(GAME, '198.51.100.120').call('GET', '/api/leaderboard?awards=' + 'a'.repeat(32))).d.awards || [];
+  ok(!guest.some(x => x.pvp), 'asked as a guest (a pid, no account): no PvP podium');
+  const prof = (await tab(GAME).call('GET', '/api/boards?user=duelist')).d;
+  ok(prof && prof.pvp && prof.pvp.podiums.length === 1 && prof.pvp.podiums[0].season === '2026-05' && prof.pvp.podiums[0].rank === 1,
+     'and the profile shows it', prof && prof.pvp && prof.pvp.podiums);
+  const ace = (await tab(GAME).call('GET', '/api/boards?user=s_ace')).d;
+  ok(ace.pvp.podiums.length === 1 && ace.pvp.podiums[0].season === prev && ace.pvp.podiums[0].league === 'void', 'everyone\'s, as filed', ace.pvp.podiums);
+  ok(!JSON.stringify(prof).includes(me), 'with no account ids');
+
+  // the soft reset: last season's rating, halfway back to 1500, a little less sure, placements again
+  const ca = await ratingOf(DB, P.ace, 'ranked', cur), ce = await ratingOf(DB, P.eve, 'ranked', cur);
+  ok(ca && ca.carried && ca.rating === 1500 + 710 * SOFT.pull && ca.rd === SOFT.rd && ca.games === 0 && ca.league === null,
+     'a player with no rating yet this season starts from last season\'s, pulled halfway back', ca);
+  ok(ce.rating === 1500 + 900 * SOFT.pull && ce.rd === 300, 'an uncertain one keeps its larger deviation', ce);
+  ok(await ratingOf(DB, mk('S_Gus'), 'ranked', cur) === null, 'a newcomer: nothing to carry, the newcomer\'s 1500');
+  ok((await ratingOf(DB, acct('duelist'), 'ranked', cur)).carried === undefined, 'a player already rated this season keeps that rating');
+  const tokenAce = randomBytes(32).toString('base64url');
+  DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)').run(sha(tokenAce), P.ace, now, now, now + 864e5);
+  const aceTab = tab(PVP, '198.51.100.121'); aceTab.cookie = tokenAce;
+  const meAce = (await aceTab.me()).d;
+  ok(meAce.league.provisional === true && meAce.league.left === PLACEMENTS, 'their league waits on the placement matches again', meAce.league);
+  const mid = randomBytes(16).toString('hex');
+  DB.sql.prepare(`INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season)
+                  VALUES (?, 'ranked', 'bronze', 1, ?, ?, 'runner', 'ember', 0, 2, 1, 3, 'played', NULL, ?, ?, ?)`).run(mid, P.ace, P.bea, now, now, cur);
+  const cb = await ratingOf(DB, P.bea, 'ranked', cur);
+  const [na, nb] = rateMatch(ca, cb, true);
+  const applied = await applyRating(DB, mid);
+  const nowAce = DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(P.ace, cur);
+  const nowBea = DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(P.bea, cur);
+  ok(applied.moved && Math.abs(nowAce.rating - na.rating) < 1e-9 && Math.abs(nowBea.rating - nb.rating) < 1e-9 && nowAce.games === 1 && nowAce.league === null,
+     'their first match of the season rates from the carried rating, not from 1500', [nowAce.rating, na.rating, nowBea.rating, nb.rating]);
+  ok(nowAce.rating > rateMatch(START, START, true)[0].rating, 'so a strong player stays ahead of a newcomer who won the same match');
+}
+
+section('hardening: per-account limits on the busy routes');
+{
+  forget();
+  const real = Date.now;
+  let clock = real();
+  Date.now = () => clock;
+  const q = t => t.call('POST', '/api/pvp/queue', { op: 'poll', queue: 'casual' });
+  let first = null;
+  for (let i = 0; i < LIMITS.queue.n; i++) { const r = await q(duel); if (r.status === 429) { first = i; break; } }
+  ok(first === null, 'a queue poll a second and more, the whole minute: never turned away', first);
+  const over = await q(duel);
+  ok(over.status === 429 && over.d.wait > 0 && over.d.wait <= 60, 'past the limit: 429, and how long to wait', over);
+  const rival = tab(PVP, '198.51.100.90');
+  await rival.op('login', { name: 'rival', pass: 'a fine password' });
+  ok((await q(rival)).status !== 429, 'another account is not held up by it');
+  clock += 61000;
+  ok((await q(duel)).status !== 429, 'and a minute on, the first is let back');
+  for (let i = 0; i < LIMITS.match.n; i++) await duel.call('POST', '/api/pvp/match', { op: 'report', id: 'nope' });
+  const m = await duel.call('POST', '/api/pvp/match', { op: 'report', id: 'nope' });
+  ok(m.status === 429, 'the referee\'s route too, past its own limit', m.status);
+  clock += 61000;
+  forget();
+  let opened = 0;
+  for (let i = 0; i < LIMITS.open.n + 1; i++) {
+    const r = await duel.call('POST', '/api/pvp/match', { op: 'open', kind: 'friend', pilot: 'runner' });
+    if (r.status === 200) opened++;
+    else { ok(r.status === 429 && i === LIMITS.open.n, 'friend\'s matches opened: the thirty-first in ten minutes is refused', [i, r.status]); break; }
+  }
+  ok(opened === LIMITS.open.n, 'thirty opened before that', opened);
+  Date.now = real;
+  forget();
+}
+
+section('hardening: the flags, for review');
+{
+  const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
+  const now = Date.now();
+  ok((await tab(PVP).call('GET', '/api/pvp/flags')).status === 401, 'signed out: 401');
+  ok((await duel.call('GET', '/api/pvp/flags')).status === 403, 'a player\'s account: 403');
+  // a cheater: one account flagged against three different opponents
+  const ids = ['s_eve', 's_ace', 's_bea', 's_cal'].map(n => acct(n));
+  for (const other of ids.slice(1)) {
+    const id = randomBytes(16).toString('hex');
+    DB.sql.prepare(`INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season)
+                    VALUES (?, 'ranked', 'gold', 1, ?, ?, 'runner', 'ember', NULL, NULL, NULL, 3, 'void', 'fingerprints', ?, ?, ?)`).run(id, ids[0], other, now, now, seasonOf(now));
+    for (const a of [ids[0], other])
+      DB.sql.prepare("INSERT INTO pvp_flags (account, match, reason, at) VALUES (?, ?, 'fingerprints', ?)").run(a, id, now);
+  }
+  DB.sql.prepare("UPDATE accounts SET perks = '[\"dev\"]' WHERE name = 'stranger'").run();
+  const stranger = tab(PVP, '198.51.100.91');
+  await stranger.op('login', { name: 'stranger', pass: 'a fine password' });
+  const r = await stranger.call('GET', '/api/pvp/flags');
+  ok(r.status === 200 && Array.isArray(r.d.accounts) && Array.isArray(r.d.recent), 'a dev account: the list', r.status);
+  const a = r.d.accounts;
+  ok(a[0].name === 's_eve' && a[0].opponents === 3 && a[0].flags === 3 && a[0].reasons.fingerprints === 3,
+     'the account flagged against the most different opponents comes first', a[0]);
+  const ace = a.find(x => x.name === 's_ace');
+  ok(ace && ace.opponents === 1, 'each of its opponents was flagged against just the one', ace);
+  const du = a.find(x => x.name === 'duelist');
+  ok(du && du.reasons.fingerprints >= 1 && du.reasons.parted >= 1 && du.reasons.results >= 1 && du.reasons.dropped >= 1 && du.played >= du.flags,
+     'the referee\'s no-contests from earlier, by reason, beside the matches played', du);
+  ok(r.d.recent.length >= 3 && r.d.recent.every(x => x.players.length === 2 && x.reason), 'and the latest no-contests, by name', r.d.recent.slice(0, 2));
+  ok(!/[0-9a-f]{32}/.test(JSON.stringify(r.d)), 'with no account or match ids');
+  DB.sql.prepare("UPDATE accounts SET perks = '[]' WHERE name = 'stranger'").run();
 }
 
 section('PvP signs in and out on its own');

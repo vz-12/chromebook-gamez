@@ -22,6 +22,7 @@ import { sessionOf, originOk } from '../../src/auth.js';
 import { QUEUES, CASUAL, PILOTS, loadout, leagueOf, bracketOf } from './rules.js';
 import { ratingOf } from './records.js';
 import { START } from './glicko.js';
+import { limited, tooMany } from './limits.js';
 
 const MAX_BODY = 4 * 1024;
 const MAX_UPS = 64;
@@ -39,6 +40,8 @@ export default async function queue(req, env) {
   if (!b || typeof b !== 'object') return reply({ error: 'bad json' }, 400);
   const s = await sessionOf(req, env, { peek: true });
   if (!s) return reply({ error: 'signed out' }, 401);
+  const wait = limited('queue', s.account.id);
+  if (wait) return tooMany(wait);
   if (!env.MATCHMAKER || !env.MATCH) return reply({ error: 'no matchmaking: bind the Matchmaker and Match objects' }, 503);
   if (!Object.prototype.hasOwnProperty.call(QUEUES, b.queue)) return reply({ error: 'unknown queue' }, 400);
   if (!['join', 'poll', 'leave'].includes(b.op)) return reply({ error: 'unknown op' }, 400);
