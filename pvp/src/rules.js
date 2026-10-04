@@ -29,11 +29,13 @@ export const CASUAL = { id: 'casual', n: 'CASUAL', pilots: 'own', awake: true, b
 
 /* The queues matchmaking runs (Phase 5 step 2), one Matchmaker each. Ranked
    is rated (Glicko-2, per season) and played by league; casual is neither,
-   and flies whatever each player owns. Phase 6 adds who may enter, what
-   comes between matches, and the rewards. */
+   and flies whatever each player owns. Phase 6: who may enter (`entry`,
+   the gates in gates.js). */
 export const QUEUES = {
-  ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true },
-  casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false }
+  ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true,
+            entry: ['signedIn', 'accountAge:24h', 'runs:10'] },
+  casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false,
+            entry: ['signedIn'] }
 };
 
 /* A new player's first ranked matches place them: until PLACEMENTS are

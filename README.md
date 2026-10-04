@@ -281,6 +281,11 @@ the game's own (the 6th to the 6th).
 - A new season starts each player from last season's rating, halfway back
   to 1500, with the placement matches to play again.
 
+**Who may queue** (PVP-PLAN.md, Phase 6). Each queue in `pvp/src/rules.js`
+names its entry gates (`pvp/src/gates.js`). Ranked needs an account a day
+old and 10 runs of the game; casual only a sign-in. Dev accounts skip the
+gates. The lobby turns a shut queue's button off and says why.
+
 **Hardening.**
 - Per-account rate limits on the queue, the referee and opening friend's
   matches (`pvp/src/limits.js`).

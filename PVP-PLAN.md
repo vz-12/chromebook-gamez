@@ -762,38 +762,63 @@ flagged against many different opponents does.
 
 ### Phase 6 — Leagues, ranked, casual, and the gateways
 
-Two tables, so a new kind of play or a new league is an entry, not code:
+Most of the leagues came with matchmaking (Phase 5 steps 2 and 4): a
+league from the ranked rating after five placement matches, ranked flying
+its league's pilots and length, casual flying everything owned, and the
+season's podium. The queues are a table in `pvp/src/rules.js` (`QUEUES`),
+so a new kind of play is an entry, and each entry names its hooks:
 
 ```js
-// base pilots: VOIDRUNNER and EMBER, the two with nothing to unlock
-const LEAGUES = [
-  { id: 'bronze',   from: 0,    pilots: 'base', awake: false },
-  { id: 'silver',   from: 1200, pilots: 'base', awake: false },
-  { id: 'gold',     from: 1500, pilots: 'base', awake: false },
-  { id: 'platinum', from: 1800, pilots: 'own',  awake: true  },   // everything goes from here
-  { id: 'void',     from: 2100, pilots: 'own',  awake: true  },
-];                     // upgrades: your own unlocked ones in every league
-
-const QUEUES = {
-  casual: { rated: false, leagues: false, pilots: 'own', awake: true,
-            entry: ['signedIn'], after: ['adBreak'], rewards: [] },
-  ranked: { rated: true, rating: 'glicko2', leagues: true, season: true,
-            entry: ['signedIn', 'accountAge:24h', 'runs:10'],
-            after: [], rewards: ['seasonPodium', 'leagueBadge'] },
+export const QUEUES = {
+  ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true,
+            entry: ['signedIn', 'accountAge:24h', 'runs:10'] },
+  casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false,
+            entry: ['signedIn'] }
 };
 ```
 
-- **The league's rules decide the loadout in ranked.** Casual uses your own
-  unlocks.
-- **New players** start in the lowest league after a few placement matches.
-- **`entry`:** gates the Worker checks before a ticket is accepted: signed
-  in, account age, runs played. Later: a ticket, a pass, or an event code.
-- **`after`:** what happens between matches. `adBreak` reuses the main
-  game's ad rules (`ADS.every`, never mid-play). Ranked carries none.
-- **`rewards`:** season podiums and league badges, paid as perks or skins
-  through the awards list the game already understands.
-- **The ad and money gateways hang off these hooks.** A new one is a new hook
-  id, not a change to matchmaking.
+**Steps** (each pushed to `pvp`, then stop and report):
+
+1. **Entry gates. Done.** `pvp/src/gates.js`: each name in a queue's
+   `entry` is a check, and a new gate is one more.
+   - `signedIn`; `accountAge:<n>h` (or `d`); `runs:<n>` (the runs in the
+     account's save, the game's own profile).
+   - Ranked asks a day and ten runs, so a fresh account can't be thrown
+     into the ladder to throw matches. Casual asks only to be signed in.
+     Dev accounts pass every gate, to test with.
+   - Joining a shut queue is refused (403) with the reason.
+     `/api/pvp/me` says which queues are open and why not, and the lobby
+     turns PLAY RANKED off with that line: "RANKED opens after 10 runs of
+     VOIDRUNNER: 3 to go".
+   - An unknown gate shuts its queue; it never opens it.
+   - Tested: the server suite is 240 checks; 7 mutants, all caught.
+2. **League badges and the rewards hook.** At the season's turn, beside
+   the podium, every placed player is filed a badge for the league they
+   finished in. A queue's `rewards` names what it pays (ranked:
+   `seasonPodium`, `leagueBadge`). What a podium or a badge is worth comes
+   with the cosmetics (Phase 7).
+3. **Between matches (`after`).** What the lobby runs when a player comes
+   back from a match: casual's `adBreak` (the game's ad rules, never mid
+   match, inert until ads are set up for PvP's address), and the gateways
+   that come later. A new one is a new hook id, not a change to
+   matchmaking.
+
+### Phase 7 — Cosmetics, a shop and a currency (user, 4 Oct: not yet)
+
+"Now that we have profiles, we can set up banners and profile decals along
+with skins as rewards, and even add a main shop for cosmetics that can use
+a currency you get from some sort of progression or playtime achievements.
+Don't build it yet."
+
+- **Rewards are cosmetics:** banners, profile decals and skins. Season
+  podiums (`PODIUM_REWARDS` in `src/pvp-podiums.js`) and league badges pay
+  these.
+- **A main shop** for cosmetics, bought with a currency.
+- **The currency** comes from progression and playtime achievements.
+- **Profiles** show a player's banner and decals.
+- Open, for when it is planned: what earns the currency and how much; the
+  prices; whether the shop is in the game, in PvP or both (accounts are
+  shared, so either can sell and either can show).
 
 ## The shared data (D1)
 

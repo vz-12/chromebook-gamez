@@ -28,6 +28,8 @@ const { ratingOf, applyRating } = await import('../pvp/src/records.js');
 const { START, rateMatch } = await import('../pvp/src/glicko.js');
 const { PLACEMENTS } = await import('../pvp/src/rules.js');
 const { LIMITS, forget } = await import('../pvp/src/limits.js');
+const { entryFor } = await import('../pvp/src/gates.js');
+const { QUEUES } = await import('../pvp/src/rules.js');
 
 const DB = makeD1();
 const asset = new Response('asset');
@@ -467,6 +469,15 @@ section('matchmaking: the queues, the pairing, and the ratings');
   const ace = await login('ace', '198.51.100.92'), bolt = await login('bolt', '198.51.100.93');
   const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
   const ids = ['duelist', 'rival', 'stranger', 'ace', 'bolt'].map(acct);
+  /* Everyone here has played the game a while, so ranked's gates (a day,
+     ten runs; tested on their own below) let them in: their accounts a
+     couple of days old, and runs in their saves (a save with no unlocks is
+     the same as none to the queue). */
+  DB.sql.prepare('UPDATE accounts SET created = created - 2 * 86400000').run();
+  for (const id of ids) {
+    DB.sql.prepare("UPDATE saves SET data = json_set(data, '$.runs', 25) WHERE account = ?").run(id);
+    DB.sql.prepare("INSERT OR IGNORE INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{\"runs\":25}', 'null', ?)").run(id, Date.now());
+  }
   const qq = (t, b) => t.call('POST', '/api/pvp/queue', b);
   const join = (t, queue, pilot) => qq(t, { op: 'join', queue, pilot });
   const poll = (t, queue) => qq(t, { op: 'poll', queue });
@@ -629,6 +640,64 @@ section('matchmaking: the queues, the pairing, and the ratings');
   const expect = (MM.REGION - MM.WINDOW.ranked[0]) / MM.WINDOW.ranked[1];
   ok(at + 2 >= expect && at <= expect + 4, 'but paired once the window has grown to cover it (' + expect + ' s)', at + 2);
   Date.now = real;
+}
+
+section('entry: who may join a queue');
+{
+  const now = Date.now(), H = 3600 * 1000;
+  // a player made `age` ago, with `runs` in a save (or no save), signed in at PvP
+  let n = 0;
+  const player = (age, runs, perks = '[]', data) => {
+    const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), name = 'gate_' + (++n);
+    DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+      .run(id, name, name, '-', '-', perks, now - age, now);
+    if (runs !== null || data) DB.sql.prepare("INSERT INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, ?, 'null', ?)")
+      .run(id, data || JSON.stringify({ runs }), now);
+    DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)').run(sha(token), id, now, now, now + 864e5);
+    const t = tab(PVP, '198.51.100.' + (130 + n)); t.cookie = token;
+    return t;
+  };
+  const join = (t, queue) => t.call('POST', '/api/pvp/queue', { op: 'join', queue, pilot: 'runner' });
+  const leave = (t, queue) => t.call('POST', '/api/pvp/queue', { op: 'leave', queue });
+
+  const fresh = player(0, null);
+  const fm = (await fresh.me()).d;
+  ok(fm.queues.ranked.open === false && fm.queues.ranked.why === 'RANKED opens when your account is 1 day old: in 24 hours',
+     'a brand-new account: ranked is shut, and the lobby is told why', fm.queues.ranked);
+  ok(fm.queues.casual.open === true && fm.queues.casual.why === null, 'casual is open to it');
+  const fj = await join(fresh, 'ranked');
+  ok(fj.status === 403 && fj.d.error === fm.queues.ranked.why && fj.d.gates.map(g => g.gate).join() === 'accountAge:24h,runs:10',
+     'joining ranked anyway: refused, with every gate still shut', fj.d);
+  const fc = await join(fresh, 'casual');
+  ok(fc.status === 200 && fc.d.state === 'waiting', 'joining casual: in the queue', fc.d);
+  await leave(fresh, 'casual');
+
+  const young = player(20 * H, 30);
+  ok((await young.me()).d.queues.ranked.why === 'RANKED opens when your account is 1 day old: in 4 hours', 'twenty hours old: four hours to go');
+  const nosave = player(48 * H, null);
+  ok((await nosave.me()).d.queues.ranked.why === 'RANKED opens after 10 runs of VOIDRUNNER: 10 to go', 'old enough, no save: ten runs to go');
+  const seven = player(48 * H, 7);
+  ok((await seven.me()).d.queues.ranked.why === 'RANKED opens after 10 runs of VOIDRUNNER: 3 to go', 'seven runs: three to go');
+  const junk = player(48 * H, null, '[]', '{not json');
+  ok((await junk.me()).d.queues.ranked.why === 'RANKED opens after 10 runs of VOIDRUNNER: 10 to go', 'a save that will not parse counts no runs');
+  const ready = player(25 * H, 10);
+  const rm = (await ready.me()).d;
+  ok(rm.queues.ranked.open === true, 'a day old and ten runs: ranked is open', rm.queues.ranked);
+  const rj = await join(ready, 'ranked');
+  ok(rj.status === 200 && rj.d.state === 'waiting', 'and in the queue', rj.d);
+  await leave(ready, 'ranked');
+  const dev = player(0, null, '["dev"]');
+  ok((await dev.me()).d.queues.ranked.open === true && (await join(dev, 'ranked')).status === 200, 'a dev account goes straight in, to test with');
+  await leave(dev, 'ranked');
+
+  // a gate nobody wrote is a shut door, said plainly, not an open one
+  QUEUES.casual.entry.push('nope:1');
+  const odd = await entryFor(DB, { id: 'x', created: 0, perks: [] }, 'casual');
+  QUEUES.casual.entry.pop();
+  ok(odd.open === false && /misconfigured/.test(odd.why), 'an unknown gate shuts the queue', odd);
+  ok((await entryFor(DB, { id: 'x', created: 0, perks: [] }, 'nope')).open === false, 'and so does an unknown queue');
+  const page = readFileSync(new URL('../pvp/site/index.html', import.meta.url), 'utf8'), js = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8');
+  ok(/id="rankedGate"/.test(page) && /id="casualGate"/.test(page) && /d\.queues/.test(js), 'the lobby shows a shut queue\'s reason and turns its button off');
 }
 
 section('seasons: the podium at the turn, and the soft reset');

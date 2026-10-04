@@ -114,8 +114,10 @@ envPvp.MATCHMAKER = makeNamespace(Matchmaker, envPvp);
 await ensureAuth(DB);
 function signedIn(name) {
   const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), now = Date.now();
+  // a player of a while (ranked's gates: a day old, ten runs; pvp.mjs tests them)
   DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
-    .run(id, name.toLowerCase(), name, '-', '-', '[]', now, now);
+    .run(id, name.toLowerCase(), name, '-', '-', '[]', now - 30 * 864e5, now);
+  DB.sql.prepare("INSERT INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{\"runs\":25}', 'null', ?)").run(id, now);
   DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)')
     .run(sha256(token), id, now, now, now + 30 * 864e5);
   return { id, token };
@@ -677,7 +679,7 @@ section('a queued match: the server pairs them, and its rules fly');
   const now = Date.now(), season = seasonOf(now);
   await ensurePvp(DB);
   DB.sql.prepare('INSERT OR REPLACE INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, ?, ?, ?)')
-    .run(DUELIST.id, '{}', JSON.stringify({ chars: ['runner', 'ember', 'hacker'], awake: ['ember', 'hacker'], chal: [], ups: ['u1'] }), now);
+    .run(DUELIST.id, '{"runs":25}', JSON.stringify({ chars: ['runner', 'ember', 'hacker'], awake: ['ember', 'hacker'], chal: [], ups: ['u1'] }), now);
   for (const a of [DUELIST, RIVAL_ACCT])
     DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
                     VALUES (?, 'ranked', ?, 1550, 80, 0.06, 5, 3, 2, 'gold', ?)`).run(a.id, season, now);

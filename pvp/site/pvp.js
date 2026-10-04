@@ -92,6 +92,13 @@
     const { ranked, casual } = d.loadouts;
     pilotList($('rankedPilot'), ranked, d.pilots);
     pilotList($('casualPilot'), casual, d.pilots);
+    // a queue whose gates are shut (a fresh account, too few runs): said, and its button off
+    for (const [q, btn] of [['ranked', 'playRanked'], ['casual', 'playCasual']]) {
+      const g = (d.queues && d.queues[q]) || { open: true };
+      $(btn).disabled = !g.open;
+      $(q + 'Gate').hidden = g.open;
+      $(q + 'Gate').textContent = g.open ? '' : String(g.why || '').toUpperCase();
+    }
     const body = $('pilots');
     body.textContent = '';
     for (const [id, n] of Object.entries(d.pilots)) {
@@ -193,7 +200,7 @@
     searching(true, 'SEARCHING ' + (queue === 'ranked' ? 'RANKED' : 'CASUAL'));
     const r = await queueCall('join', { pilot });
     if (r.ok || r.status === 401) { heard(r); return; }
-    stopQueue(r.status === 400 && r.d && r.d.error ? String(r.d.error).toUpperCase()
+    stopQueue((r.status === 400 || r.status === 403 || r.status === 429) && r.d && r.d.error ? String(r.d.error).toUpperCase()
       : r.status ? 'SOMETHING WENT WRONG (' + r.status + ')' : 'CAN\'T REACH THE SERVER');
   }
 

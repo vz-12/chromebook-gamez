@@ -23,6 +23,7 @@ import { QUEUES, CASUAL, PILOTS, loadout, leagueOf, bracketOf } from './rules.js
 import { ratingOf } from './records.js';
 import { START } from './glicko.js';
 import { limited, tooMany } from './limits.js';
+import { entryFor } from './gates.js';
 
 const MAX_BODY = 4 * 1024;
 const MAX_UPS = 64;
@@ -51,6 +52,9 @@ export default async function queue(req, env) {
   if (b.op === 'join') {
     const pilot = typeof b.pilot === 'string' && Object.prototype.hasOwnProperty.call(PILOTS, b.pilot) ? b.pilot : null;
     if (!pilot) return reply({ error: 'bad pilot' }, 400);
+    // the queue's gates (gates.js): a fresh account, say, waits for ranked
+    const gate = await entryFor(env.DB, s.account, b.queue);
+    if (!gate.open) return reply({ error: gate.why, gates: gate.gates }, 403);
     const row = await env.DB.prepare('SELECT unlocks FROM saves WHERE account = ?1').bind(s.account.id).first();
     let unlocks = null;
     try { unlocks = row ? JSON.parse(row.unlocks) : null; } catch (e) {}

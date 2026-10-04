@@ -11,6 +11,7 @@
 import { sessionOf, sessionCookie, publicAccount } from '../../src/auth.js';
 import { PILOTS, CASUAL, loadout, leagueOf } from './rules.js';
 import { ratingOf } from './records.js';
+import { entryFor } from './gates.js';
 
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -28,6 +29,12 @@ export default async function me(req, env) {
   try { unlocks = row ? JSON.parse(row.unlocks) : null; } catch (e) {}
   const r = await ratingOf(env.DB, s.account.id, 'ranked');
   const league = leagueOf(r);
+  // whether each queue's gates let this player in, and if not why (gates.js)
+  const queues = {};
+  for (const q of ['ranked', 'casual']) {
+    const e = await entryFor(env.DB, s.account, q);
+    queues[q] = { open: e.open, why: e.why };
+  }
   // a session just extended takes its cookie again, as /api/account does
   return reply({
     account: publicAccount(s.account),
@@ -36,6 +43,7 @@ export default async function me(req, env) {
               provisional: league.provisional, left: league.left,
               rating: r ? Math.round(r.rating) : null, games: r ? r.games : 0, wins: r ? r.wins : 0, losses: r ? r.losses : 0 },
     pilots: PILOTS,
-    loadouts: { ranked: loadout(league, unlocks), casual: loadout(CASUAL, unlocks) }
+    loadouts: { ranked: loadout(league, unlocks), casual: loadout(CASUAL, unlocks) },
+    queues
   }, 200, s.renew ? sessionCookie(req, s.token) : undefined);
 }
