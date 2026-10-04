@@ -14,6 +14,15 @@
   --silver: #cbd5e1;
   --bronze: #d97706;
   --bad: #f87171;
+  --pink: #f472b6;
+  --platinum: #67e8f9;
+  --void: #c084fc;
+  /* the rows' panels: solid, since a see-through cell shows a seam where it meets the next */
+  --row: #0c1321;
+  --row-hi: #16213a;
+  --radius: 12px;
+  /* osu!'s OutQuint: off quickly, settling slowly */
+  --out: cubic-bezier(.22, 1, .36, 1);
   --mono: 'JetBrains Mono', ui-monospace, monospace;
   --head: 'Chakra Petch', Barlow, system-ui, sans-serif;
 }
@@ -52,10 +61,15 @@ h2 { font: 700 11px var(--head); letter-spacing: .2em; color: var(--dim); margin
 .mine { margin-top: 16px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
 .card {
-  text-align: left; cursor: pointer; padding: 12px 14px; border-radius: 10px;
+  text-align: left; cursor: pointer; padding: 12px 14px; border-radius: calc(var(--radius) + 4px);
   background: var(--panel); border: 1px solid var(--line);
+  transition: transform .4s var(--out), border-color .2s;
+  animation: lb-rise .8s var(--out) backwards;
 }
+.cards > :nth-child(2) { animation-delay: 70ms; }
+.cards > :nth-child(3) { animation-delay: 140ms; }
 .card:hover { border-color: var(--line-hi); }
+button.card:hover { transform: translateY(-2px); }
 .card .k { font: 700 10px var(--head); letter-spacing: .16em; color: var(--dim); }
 .card .v { font: 700 24px var(--mono); color: var(--ink); margin-top: 2px; }
 .card .v small { font-size: 12px; color: var(--dim); font-weight: 500; }
@@ -66,18 +80,23 @@ h2 { font: 700 11px var(--head); letter-spacing: .2em; color: var(--dim); margin
 /* search */
 .find { display: flex; gap: 8px; margin-top: 18px; }
 .find input {
-  flex: 1; min-width: 0; padding: 11px 12px; border-radius: 8px; outline: none;
+  flex: 1; min-width: 0; padding: 11px 14px; border-radius: var(--radius); outline: none;
   background: rgba(2, 6, 14, .9); border: 1px solid var(--line); color: var(--ink);
   font: 600 14px var(--mono);
 }
 .find input:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(103, 232, 249, .14); }
 .find button, .pager button {
-  padding: 0 16px; border-radius: 8px; cursor: pointer; background: rgba(103, 232, 249, .14);
+  padding: 0 18px; border-radius: var(--radius); cursor: pointer; background: rgba(103, 232, 249, .14);
   border: 1px solid rgba(103, 232, 249, .65); color: var(--cyan); font: 700 11px var(--head); letter-spacing: .14em;
 }
 .find button:hover, .pager button:hover:not(:disabled) { background: rgba(103, 232, 249, .24); }
 .found { margin-top: 10px; display: grid; gap: 8px; }
-.player { padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+.player {
+  padding: 10px 12px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line);
+  animation: lb-rise .7s var(--out) backwards;
+}
+.player:nth-child(2) { animation-delay: 50ms; } .player:nth-child(3) { animation-delay: 100ms; }
+.player:nth-child(n+4) { animation-delay: 150ms; }
 .player .who { font: 700 15px var(--mono); color: var(--ink); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .chip {
@@ -94,27 +113,44 @@ h2 { font: 700 11px var(--head); letter-spacing: .2em; color: var(--dim); margin
         scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button {
-  padding: 10px 14px; background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+  position: relative; padding: 10px 14px 12px; background: none; border: 0; cursor: pointer;
   font: 700 12px var(--head); letter-spacing: .16em; color: var(--dim); white-space: nowrap;
+  transition: color .2s;
+}
+/* under the chosen tab, a rounded bar that grows out from its middle */
+.tabs button::after {
+  content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 3px; border-radius: 3px;
+  background: var(--cyan); box-shadow: 0 0 10px rgba(103, 232, 249, .6);
+  transform: scaleX(0); opacity: 0; transition: transform .45s var(--out), opacity .2s;
 }
 .tabs button:hover { color: var(--text); }
-.tabs button[aria-selected="true"] { color: var(--cyan); border-bottom-color: var(--cyan); }
+.tabs button[aria-selected="true"] { color: var(--cyan); }
+.tabs button[aria-selected="true"]::after { transform: none; opacity: 1; }
 .bar { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; min-height: 34px; }
 .bar select {
-  padding: 7px 10px; border-radius: 8px; background: rgba(2, 6, 14, .9); border: 1px solid var(--line);
+  padding: 7px 12px; border-radius: var(--radius); background: rgba(2, 6, 14, .9); border: 1px solid var(--line);
   font: 600 12px var(--mono); color: var(--ink);
 }
 .count { font: 500 11px var(--mono); color: var(--dim); margin-left: auto; }
 
-/* the board */
-.wrap { border-radius: 10px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
-.board { width: 100%; border-collapse: collapse; font-size: 14px; }
+/* the board, osu!-style: every row its own rounded panel, floating over the
+   backdrop rather than boxed in a table */
+.board { width: 100%; border-collapse: separate; border-spacing: 0 5px; margin-top: -5px; font-size: 14px; }
 .board th {
-  text-align: left; padding: 10px 10px 8px; font: 700 10px var(--head); letter-spacing: .16em;
-  color: var(--dim); border-bottom: 1px solid var(--line);
+  text-align: left; padding: 6px 12px 0; font: 700 10px var(--head); letter-spacing: .16em; color: var(--dim);
 }
-.board td { padding: 8px 10px; border-bottom: 1px solid rgba(51, 65, 85, .35); white-space: nowrap; }
-.board tr:last-child td { border-bottom: 0; }
+.board tr { --cell: var(--row); }
+/* each cell reaches a hair under the next one (--fill): at a zoom, or on a
+   125% screen, cells sit on fractions of a pixel and would show a seam where
+   they meet. The row's last cell doesn't, so its corners stay round. */
+.board td {
+  --fill: 1.5px 0 0 var(--cell);
+  padding: 10px 12px; white-space: nowrap; background-color: var(--cell); box-shadow: var(--fill);
+  transition: background-color .25s, box-shadow .25s;
+}
+.board td:last-child { box-shadow: none; }
+.board td:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.board td:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .board .r { width: 52px; text-align: right; font-family: var(--mono); color: var(--dim); }
 .board .n { text-align: right; font-family: var(--mono); }
 .board td.score { color: var(--ink); font-weight: 700; }
@@ -122,21 +158,26 @@ h2 { font: 700 11px var(--head); letter-spacing: .2em; color: var(--dim); margin
 .board tr.p1 .r { color: var(--gold); } .board tr.p1 .name { color: var(--gold); }
 .board tr.p2 .r { color: var(--silver); }
 .board tr.p3 .r { color: var(--bronze); }
-.board tr.mark td { background: rgba(103, 232, 249, .1); }
 .board tr.mark .name { color: var(--cyan); }
 .acct {
   display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; vertical-align: 1px;
   border: 1px solid rgba(103, 232, 249, .4); color: var(--cyan); font: 600 10px var(--mono);
 }
-.note { padding: 26px 16px; text-align: center; color: var(--dim); }
+.note {
+  padding: 26px 16px; text-align: center; color: var(--dim); border-radius: calc(var(--radius) + 4px);
+  background: var(--row); animation: lb-fade .4s backwards;
+}
 .note.bad { color: var(--bad); }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; }
-.pager button { height: 34px; }
+.pager button { height: 34px; border-radius: 999px; }
 .pager button:disabled { opacity: .35; cursor: default; }
 .pager span { font: 500 12px var(--mono); color: var(--dim); }
 
-.pvp { margin-top: 6px; padding: 24px 20px; border-radius: 10px; background: var(--panel); border: 1px dashed var(--line); }
+.pvp {
+  margin-top: 6px; padding: 24px 20px; border-radius: calc(var(--radius) + 6px); background: var(--panel);
+  border: 1px solid var(--line); animation: lb-rise .8s var(--out) backwards;
+}
 .pvp h2 { color: var(--cyan); }
 .pvp p { max-width: 60ch; color: var(--text); }
 
@@ -159,16 +200,66 @@ footer {
 .card-art { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 .note .empty-art { display: block; width: 160px; height: 90px; margin: 0 auto 10px; }
 #pvpArt .empty-art { display: block; width: 160px; height: 90px; margin: 0 auto 8px; }
-.leagues { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 22px; margin-top: 18px; }
+.leagues { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 18px; margin-top: 20px; }
 .leagues figure { text-align: center; }
-.leagues .league { display: block; width: 64px; height: 64px; margin: 0 auto 4px; }
-.leagues figcaption { font: 700 10px var(--head); letter-spacing: .16em; color: var(--dim); }
+.leagues .league { display: block; width: 76px; height: 76px; margin: 0 auto 6px; }
+.leagues figcaption { font: 700 10px var(--head); letter-spacing: .18em; color: var(--dim); animation: lb-fade .5s backwards; }
+/* each league's name in its own metal, arriving with its crest */
+.leagues figure:nth-child(1) figcaption { color: var(--bronze); animation-delay: .25s; }
+.leagues figure:nth-child(2) figcaption { color: var(--silver); animation-delay: .34s; }
+.leagues figure:nth-child(3) figcaption { color: var(--gold); animation-delay: .43s; }
+.leagues figure:nth-child(4) figcaption { color: var(--platinum); animation-delay: .52s; }
+.leagues figure:nth-child(5) figcaption {
+  animation-delay: .61s; background: linear-gradient(90deg, var(--cyan), var(--void), var(--pink));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 
-/* the rows: a lift under the pointer, and the podium places in their metal */
-.board tbody tr:hover td { background: rgba(103, 232, 249, .045); }
-.board tr.p1 { background: linear-gradient(90deg, rgba(251, 191, 36, .12), transparent 55%); }
-.board tr.p2 { background: linear-gradient(90deg, rgba(203, 213, 225, .08), transparent 55%); }
-.board tr.p3 { background: linear-gradient(90deg, rgba(217, 119, 6, .1), transparent 55%); }
+/* the rows: brighter under the pointer, the podium places washed in their
+   metal, the row you jumped to in cyan (osu! marks your own score the same
+   way), each of those with a bar of its colour down the left. --cell is the
+   row's colour, --accent the bar's. The bar is a background, not an inset
+   shadow: on a fraction of a pixel an inset shadow leaves a hairline down
+   the far side of its cell. */
+.board tr.p1 { --cell: color-mix(in srgb, var(--gold) 9%, var(--row)); --accent: var(--gold); }
+.board tr.p2 { --cell: color-mix(in srgb, var(--silver) 7%, var(--row)); --accent: var(--silver); }
+.board tr.p3 { --cell: color-mix(in srgb, var(--bronze) 9%, var(--row)); --accent: var(--bronze); }
+.board tr.mark { --cell: color-mix(in srgb, var(--cyan) 16%, var(--row)); --accent: var(--cyan); }
+.board tbody tr:hover { --cell: var(--row-hi); }
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .board tr.p1, .board tr.p2, .board tr.p3, .board tr.mark { --cell: var(--row); }
+}
+.board tr.p1 td:first-child, .board tr.p2 td:first-child, .board tr.p3 td:first-child, .board tr.mark td:first-child {
+  background-image: linear-gradient(var(--accent), var(--accent));
+  background-size: 3px 100%; background-repeat: no-repeat;
+}
+
+/* a new page comes in the way osu!'s leaderboard does: each row rises into
+   place a beat after the one above it (--i is its place on the page, set by
+   leaderboard.js), its name slides in from the right just behind it, and its
+   numbers fade up last */
+@keyframes lb-rise { from { opacity: 0; transform: translateY(24px); } }
+@keyframes lb-slide { from { opacity: 0; transform: translateX(40px); } }
+@keyframes lb-fade { from { opacity: 0; } }
+@keyframes lb-ink { from { color: transparent; } }
+.board tbody tr { --d: calc(min(var(--i, 0), 18) * 45ms); }
+.board tbody td { animation: lb-rise .8s var(--out) backwards; animation-delay: var(--d); }
+.board tbody td .name { display: inline-block; }      /* so it can slide; .acct already is a box */
+.board tbody td .name, .board tbody td .acct {
+  animation: lb-slide .5s var(--out) backwards; animation-delay: calc(var(--d) + 100ms);
+}
+.board tbody td.n, .board tbody td.opt {
+  animation: lb-rise .8s var(--out) backwards, lb-ink .35s linear backwards;
+  animation-delay: var(--d), calc(var(--d) + 320ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* a narrow window: the date goes first, and each row's panel ends at the time */
+@media (max-width: 860px) {
+  .board th:nth-child(9), .board td:nth-child(9) { display: none; }
+  .board td:nth-child(8) { border-radius: 0 var(--radius) var(--radius) 0; box-shadow: none; }
+}
 
 /* a phone: the columns that matter, and the rest out of the way */
 @media (max-width: 640px) {
@@ -176,6 +267,8 @@ footer {
   .back { position: static; display: inline-block; }
   h1 { margin-top: 10px; }
   .board td, .board th { padding-left: 8px; padding-right: 8px; }
+  /* the wave is the last column showing: the row's panel ends there */
+  .board td:nth-child(4) { border-radius: 0 var(--radius) var(--radius) 0; box-shadow: none; }
   .board .r { width: 40px; }
   .acct { display: block; margin: 2px 0 0; width: max-content; }
   footer { flex-direction: column; }

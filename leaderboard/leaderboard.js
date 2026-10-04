@@ -247,7 +247,8 @@
     $('note').hidden = true;
     const body = $('rows');
     body.textContent = '';
-    for (const r of d.rows) body.append(row(r));
+    // each row's place on the page, for the stagger as they come in (leaderboard.css)
+    d.rows.forEach((r, i) => { const tr = row(r); tr.style.setProperty('--i', i); body.append(tr); });
     // the podium: the first page's top three
     if (PODIUM && S.from === 0) {
       PODIUM.art.data = [d.rows.slice(0, 3).map(r => ({ rank: r.rank, name: r.name, score: r.score,
