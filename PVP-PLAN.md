@@ -680,6 +680,25 @@ plain requests and use alarms for their timers.
      - PvP: wins, losses, rating, recent matches.
      - Only what the boards already show publicly: no pids, devices or
        anything from the save beyond the unlocks summary.
+   - **As built (4 Oct):**
+     - `src/profiles.js` on the game's Worker, read through `/api/boards`:
+       `board=pvp[&id=<season>]` is the ladder (placed players only, by
+       rating, with each league's count), `user=<account name>` is a
+       profile. It finds PvP's tables on the shared D1 and reads them as
+       empty until the PvP Worker has made them.
+     - A profile is found by account name (the display name in lower
+       case, which search already matched). Rows, search results and
+       YOUR PLACEMENT carry it as `user`, so every account's name on the
+       page links to `#u/<name>`. Search also finds accounts with no runs,
+       and shows each account's place on the ladder.
+     - Awards are season podiums, matched by the profile ids the account
+       owns. PvP podiums come with step 4.
+     - **Art (user, 4 Oct: "leave art hooks for the profile pages, I'll
+       fill those in myself"):** `profileBanner`, `avatar`, `statCard`,
+       `pilotBadge`, `award` and `matchRow` in `leaderboard/art.js`, with
+       plain placeholders and their data in the file's header. Add `?hooks`
+       to the address to outline every canvas with its hook and size.
+     - The PvP lobby links to the player's own profile.
 4. **Seasons and hardening.**
    - A season close pays PvP podiums through the existing awards, and
      resets ratings softly.

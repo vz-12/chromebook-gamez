@@ -34,9 +34,37 @@
                                     (rank 0 = not placed there)       card size
      empty(g, w, h, t, kind)        above the board's message. kind =
                                     'loading' | 'empty' | 'error' | 'pvp'   160 × 90
-     league(g, w, h, t, id)         a league's crest, on the PVP tab. id =
-                                    'bronze' | 'silver' | 'gold' |
-                                    'platinum' | 'void'      76 × 76 (drawn on a 64 grid)
+     league(g, w, h, t, id)         a league's crest: the PVP tab's strip, the
+                                    ladder's rows, a profile. id = 'bronze' |
+                                    'silver' | 'gold' | 'platinum' | 'void'
+                                    76 × 76 on the strip, 22 × 22 in a row,
+                                    64 × 64 on a profile (drawn on a 64 grid)
+
+   THE PROFILE (#u/<account name>), one player's page. Placeholders until
+   they are drawn; ?hooks in the address outlines every canvas with its
+   hook's name and size.
+     profileBanner(g, w, h, t, p)   behind the header. p = { display, user,
+                                    league (an id, or null while still being
+                                    placed or never ranked), rating (or null),
+                                    rank (on the ladder, or null), joined
+                                    (ms) }    full width × 172, taller when the
+                                    header wraps on a narrow window
+     avatar(g, w, h, t, p)          the player's emblem. p = { display,
+                                    league, pilot (the one they flew last in
+                                    PvP, or null) }                    104 × 104
+     statCard(g, w, h, t, s)        behind each placement tile. s = { kind:
+                                    'season' | 'all' | 'day' | 'pvp', rank
+                                    (0 = not placed), of, league (pvp) }
+                                                                       tile size
+     pilotBadge(g, w, h, t, b)      a pilot in the hangar. b = { id: 'runner'
+                                    | 'ember' | 'hacker' | 'melee', owned,
+                                    awake }                              64 × 64
+     award(g, w, h, t, a)           a season podium. a = { season:
+                                    '2026-09', rank: 1 | 2 | 3, score } 40 × 40
+     matchRow(g, w, h, t, m)        behind each recent match. m = { won: true
+                                    | false | null (no contest), verdict:
+                                    'played' | 'forfeit' | 'void', queue:
+                                    'ranked' | 'casual' | 'friend' }   row size
 
    THE LOOK, after osu!'s leaderboard: everything sits on rounded panels,
    arrives with a quick ease that settles slowly (OutQuint), one thing after
@@ -847,6 +875,71 @@
       if (id === 'void') voidCrest(g, t, age, M);
       else if (id === 'platinum') gemCrest(g, t, age, M);
       else hexCrest(g, t, age, M, L.tier);
+    },
+
+    /* ============================ THE PROFILE ============================
+       A player's page (#u/<account name>). These six are placeholders:
+       plain, in the page's colours, so the page reads well before they are
+       drawn. Each is yours to replace; the data each is handed is in the
+       header above. Open the page with ?hooks in the address
+       (/leaderboard/?hooks#u/notz) to see every canvas outlined with its
+       hook's name and size. */
+
+    // behind the header: the name, the league and the rating sit over it
+    profileBanner(g, w, h, t, p) {
+      const M = (p.league && LEAGUE[p.league] && LEAGUE[p.league].M) || METAL.cyan;
+      const wash = g.createLinearGradient(0, 0, w, h);
+      wash.addColorStop(0, css(M.mid, 0.14)); wash.addColorStop(0.7, css(M.mid, 0.02));
+      g.fillStyle = wash; g.fillRect(0, 0, w, h);
+      triangles(g, w * 0.45, 0, w * 0.55, h, t, { n: 16, lo: 8, hi: 34, speed: 6, col: M.mid, alpha: 0.08, seed: 41 });
+    },
+
+    // the player's emblem, beside their name
+    avatar(g, w, h, t, p) {
+      const M = (p.league && LEAGUE[p.league] && LEAGUE[p.league].M) || METAL.cyan;
+      const s = Math.min(w, h) - 4, x0 = (w - s) / 2, y0 = (h - s) / 2;
+      rrect(g, x0, y0, s, s, s * 0.22);
+      g.fillStyle = '#0c1321'; g.fill();
+      g.strokeStyle = css(M.mid, 0.7); g.lineWidth = 2; g.stroke();
+      g.font = '700 ' + Math.round(s * 0.46) + "px 'Chakra Petch', sans-serif";
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = css(M.hi);
+      g.fillText(String(p.display || '?').slice(0, 1).toUpperCase(), w / 2, h / 2 + s * 0.03);
+    },
+
+    // behind each of the four placement tiles: SEASON, ALL-TIME, DAILY, PVP
+    statCard(g, w, h, t, s) {
+      const M = s.kind === 'pvp' ? (s.league && LEAGUE[s.league] && LEAGUE[s.league].M) || METAL.cyan
+        : PLACE[s.rank] || METAL.cyan;
+      const wash = g.createLinearGradient(0, 0, w, 0);
+      wash.addColorStop(0, css(M.mid, s.rank ? 0.1 : 0.03)); wash.addColorStop(1, css(M.mid, 0));
+      g.fillStyle = wash; g.fillRect(0, 0, w, h);
+    },
+
+    // a pilot in the hangar: unlocked or not, awakened or not
+    pilotBadge(g, w, h, t, b) {
+      const x = w / 2, y = h / 2, r = Math.min(w, h) / 2 - 3;
+      roundPath(g, ngon(x, y, r, 6, -Math.PI / 2), r * 0.18);
+      g.fillStyle = b.owned ? '#0c1321' : 'rgba(12, 19, 33, .5)'; g.fill();
+      g.strokeStyle = b.awake ? 'rgba(244, 114, 182, .85)' : b.owned ? 'rgba(103, 232, 249, .55)' : 'rgba(51, 65, 85, .7)';
+      g.lineWidth = 2; g.stroke();
+      ship(g, x, y + r * 0.04, r * 0.46);
+      g.fillStyle = b.awake ? '#f472b6' : b.owned ? '#67e8f9' : '#334155'; g.fill();
+    },
+
+    // one season podium the player stood on
+    award(g, w, h, t, a) {
+      badge(g, w / 2, h / 2, Math.min(w, h) - 2, PLACE[a.rank] || METAL.cyan, String(a.rank), life(g, t), a.rank);
+    },
+
+    // behind each recent match: won, lost, or no contest
+    matchRow(g, w, h, t, m) {
+      const col = m.won === true ? [134, 239, 172] : m.won === false ? [248, 113, 113] : [100, 116, 139];
+      const wash = g.createLinearGradient(0, 0, w * 0.5, 0);
+      wash.addColorStop(0, css(col, 0.1)); wash.addColorStop(1, css(col, 0));
+      g.fillStyle = wash; g.fillRect(0, 0, w, h);
+      rrect(g, 0, 0, 3, h, 1.5);
+      g.fillStyle = css(col, 0.8); g.fill();
     }
   };
 })();

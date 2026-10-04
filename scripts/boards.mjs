@@ -13,7 +13,7 @@ import { makeD1 } from './lib/d1-sqlite.mjs';
 const worker = (await import('../src/index.js')).default;
 const { foldBoards } = await import('../src/boards.js');
 const { getStore } = await import('../src/store.js');
-const { STORE, seasonOf } = await import('../src/season.js');
+const { STORE, ARCHIVE, seasonOf } = await import('../src/season.js');
 
 const DB = makeD1();
 const env = { DB, ASSETS: { fetch: () => new Response('asset') } };
@@ -165,6 +165,83 @@ section('me');
   ok(evil.status === 403, 'another site cannot ask', evil.status);
   const which = await device('10.0.0.7').req('POST', '/api/boards', { op: 'me', pid: pid(5000), boards: ['all', 'nonsense'] });
   ok(JSON.stringify(which.d.boards) === '["all"]', 'only real boards are asked about', which.d.boards);
+}
+
+section('the PvP ladder and players\' profiles');
+{
+  const d = device('10.0.0.10');
+  const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
+  // before the PvP Worker has made its tables: an empty ladder, and profiles with no PvP
+  const e = await d.get('board=pvp');
+  ok(e.status === 200 && e.d.board === 'pvp:' + SEASON && e.d.total === 0 && e.d.rows.length === 0, 'no PvP tables yet: an empty ladder, not an error', e.d);
+  const p0 = await d.get('user=ace_one');
+  ok(p0.status === 200 && p0.d.pvp.ladder === null && p0.d.pvp.played === 0 && p0.d.pvp.recent.length === 0, 'and a profile with no PvP in it', p0.d.pvp);
+
+  // the PvP Worker's tables, with a season under way: two placed, one still being placed, a few matches
+  const { ensurePvp } = await import('../pvp/src/records.js');
+  await ensurePvp(DB);
+  const reg = await device('10.0.0.11').req('POST', '/api/account', { op: 'register', name: 'PvpOnly', pass: 'only the arena', pid: pid(4242) });
+  ok(reg.status === 201, 'an account that has only ever played PvP');
+  const now = Date.now();
+  const rate = (n, rating, games, wins, league) => DB.sql.prepare(
+    `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+     VALUES (?, 'ranked', ?, ?, 80, 0.06, ?, ?, ?, ?, ?)`).run(acct(n), SEASON, rating, games, wins, games - wins, league, now);
+  rate('ace_one', 1600.4, 6, 4, 'gold');
+  rate('pvponly', 1310, 5, 3, 'silver');
+  rate('rookie_acct', 1450, 2, 1, null);
+  const match = (id, a, b, winner, sa, sb, verdict, queue, ended) => DB.sql.prepare(
+    `INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season)
+     VALUES (?, ?, ?, ?, ?, ?, 'hacker', 'ember', ?, ?, ?, 3, ?, NULL, ?, ?, ?)`)
+    .run(id, queue, queue === 'ranked' ? 'gold' : null, queue === 'ranked' ? 1 : 0, acct(a), acct(b), winner, sa, sb, verdict, ended - 1, ended, SEASON);
+  match('a'.repeat(32), 'ace_one', 'pvponly', 0, 2, 1, 'played', 'ranked', now - 3000);
+  match('b'.repeat(32), 'pvponly', 'ace_one', null, null, null, 'void', 'casual', now - 2000);
+  match('c'.repeat(32), 'pvponly', 'ace_one', 0, null, null, 'forfeit', 'friend', now - 1000);
+  // ACE flew to second place in a past season, on the profile its account was made with
+  await getStore(env, STORE).setJSON(ARCHIVE, { list: { '2026-08': { top3: [
+    { rank: 1, name: 'SOMEONE', score: 9000, pid: pid(31337) }, { rank: 2, name: 'ACE', score: 8000, pid: pid(42) }], closedAt: 1 } } });
+  DB.sql.prepare("INSERT OR REPLACE INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{}', ?, ?)")
+    .run(acct('ace_one'), JSON.stringify({ chars: ['hacker'], awake: ['hacker', 'melee'], chal: [], ups: [] }), now);
+
+  // the ladder
+  const l = await d.get('board=pvp');
+  ok(l.d.total === 2 && l.d.rows.length === 2, 'the ladder holds the placed only', l.d);
+  const [r1, r2] = l.d.rows;
+  ok(r1.rank === 1 && r1.name === 'Ace_One' && r1.user === 'ace_one' && r1.league === 'gold' && r1.rating === 1600 && r1.wins === 4 && r1.losses === 2
+     && r2.rank === 2 && r2.user === 'pvponly' && r2.league === 'silver', 'best rating first, with league, rating, wins and losses', l.d.rows);
+  ok(l.d.leagues.gold === 1 && l.d.leagues.silver === 1 && !l.d.leagues.bronze, 'and how many in each league', l.d.leagues);
+  ok(!leaks(l.d), 'no ids on the ladder');
+  ok((await d.get('board=pvp&id=2020-01')).d.total === 0, 'a past season nobody played is empty');
+
+  // a profile
+  const p = await d.get('user=Ace_One');
+  ok(p.status === 200 && p.d.user.display === 'Ace_One' && p.d.user.name === 'ace_one' && p.d.user.joined > 0, 'found by account name, any case', p.d.user);
+  ok(p.d.game.boards.all && p.d.game.boards.all.score === 4000 && p.d.game.callsign === 'ACE RENAMED', 'where it stands on the game\'s boards, and the callsign it flies', p.d.game);
+  const pl = Object.fromEntries(p.d.game.pilots.map(x => [x.id, x]));
+  ok(pl.runner.owned && pl.ember.owned && pl.hacker.owned && pl.hacker.awake && !pl.melee.owned && !pl.melee.awake && !pl.ember.awake && pl.hacker.name === 'THE HACKER',
+     'its hangar: the base pilots, what its save has unlocked and awakened (never a pilot it does not own)', p.d.game.pilots);
+  ok(p.d.game.podiums.length === 1 && p.d.game.podiums[0].season === '2026-08' && p.d.game.podiums[0].rank === 2 && p.d.game.podiums[0].score === 8000,
+     'its season podiums, from the profiles its account owns', p.d.game.podiums);
+  const v = p.d.pvp;
+  ok(v.ladder && v.ladder.rank === 1 && v.ladder.of === 2 && v.ladder.league === 'gold' && v.ladder.rating === 1600, 'its place on the ladder', v.ladder);
+  ok(v.played === 2 && v.wins === 1 && v.losses === 1, 'its record: a no contest counts for nobody', v);
+  ok(v.recent.length === 3 && v.recent[0].queue === 'friend' && v.recent[0].won === false && v.recent[0].verdict === 'forfeit'
+     && v.recent[1].won === null && v.recent[2].won === true && v.recent[2].score.join() === '2,1' && v.recent[2].pilot === 'hacker'
+     && v.recent[2].them.name === 'PvpOnly' && v.recent[2].them.user === 'pvponly' && v.recent[2].them.pilot === 'ember',
+     'its latest matches, newest first, each from its own side', v.recent);
+  ok(!leaks(p.d), 'no account, profile or match id anywhere in it');
+  const placing = await d.get('user=rookie_acct');
+  ok(placing.d.pvp.ladder && placing.d.pvp.ladder.placing === true && placing.d.pvp.ladder.left === 3, 'a player still being placed, and how many to go', placing.d.pvp.ladder);
+  ok((await d.get('user=straggler')).status === 404, 'a guest\'s callsign has no profile');
+  ok((await d.get('user=nobody_here')).status === 404 && (await d.get('user=no%20way!')).status === 404, 'nor does a name nobody has');
+
+  // the boards and search lead to it
+  const all = await d.get('board=all');
+  ok(all.d.rows.some(x => x.user === 'ace_one') && all.d.rows.some(x => x.user === null && !x.account), 'an account\'s row carries its name for the link; a guest\'s does not');
+  const s = await d.get('q=ace_');
+  ok(s.d.players[0].user === 'ace_one' && s.d.players[0].pvp && s.d.players[0].pvp.rank === 1, 'search: the account, and its place on the ladder', s.d.players[0]);
+  const only = await d.get('q=pvpon');
+  ok(only.d.players.length === 1 && only.d.players[0].user === 'pvponly' && only.d.players[0].pvp.league === 'silver'
+     && Object.keys(only.d.players[0].boards).length === 0, 'an account with no runs is found too, for the ladder and its profile', only.d.players);
 }
 
 section('the rest');

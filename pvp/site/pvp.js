@@ -73,6 +73,8 @@
 
   function render(d) {
     $('name').textContent = d.account.display;
+    // their page on the game's leaderboard, at the address they came from (the school one, at school)
+    $('profileLink').href = game() + '/leaderboard/#u/' + encodeURIComponent(d.account.name);
     const lg = d.league;
     $('league').textContent = lg.n;
     const sm = document.createElement('small');

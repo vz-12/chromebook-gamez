@@ -8,6 +8,9 @@
    POST /api/boards { op: 'me', pid, boards }
                                        -> the same, for this player (signed in, or this device)
    GET  /api/boards?list=1             -> the seasons there are
+   GET  /api/boards?board=pvp[&id=2026-10][&from=0&n=50]
+                                       -> the ranked PvP ladder (profiles.js)
+   GET  /api/boards?user=<account name> -> a player's profile (profiles.js)
 
    The boards in leaderboard.js are one document each, holding the top 100,
    which is all a board in the game ever shows. That is why a run outside the
@@ -25,9 +28,12 @@
 
    The rules are the boards' own: season and all-time keep the better run, a
    day keeps the first one flown. Ranks are competition ranks (1, 2, 2, 4).
-   Profile ids never leave the Worker, and neither do account ids.
+   Profile ids never leave the Worker, and neither do account ids: a row or
+   a player that is an account's carries its account name (`user`), which is
+   what its profile is found by.
    ========================================================================= */
 import { ensureAuth, sessionOf, originOk } from './auth.js';
+import { ladder, ladderStandings, profile, isUser } from './profiles.js';
 import { STORE, ARCHIVE, seasonOf, isSeason } from './season.js';
 import { getStore } from './store.js';
 
@@ -172,13 +178,14 @@ async function foldIfDue(env) {
 }
 
 /* ------------------------------- reading -------------------------------- */
-const pub = r => ({ name: r.name, account: r.acct || null, score: r.score, wave: r.wave,
+const pub = r => ({ name: r.name, account: r.acct || null, user: r.uname || null, score: r.score, wave: r.wave,
                     sector: r.sector, loop: r.loop, level: r.level, kills: r.kills, time: r.time, at: r.at });
 
 function boardKey(kind, id) {
   if (kind === 'all') return 'all';
   if (kind === 'season') return 'season:' + (isSeason(id) ? id : seasonOf());
   if (kind === 'day') return 'day:' + (isDay(id) ? id : utcDay());
+  if (kind === 'pvp') return 'pvp:' + (isSeason(id) ? id : seasonOf());
   return null;
 }
 
@@ -192,7 +199,7 @@ const count = async (db, board) =>
 
 async function page(db, board, from, n) {
   const rows = (await db.prepare(
-    `SELECT s.name, s.score, s.wave, s.sector, s.loop, s.level, s.kills, s.time, s.at, a.display AS acct
+    `SELECT s.name, s.score, s.wave, s.sector, s.loop, s.level, s.kills, s.time, s.at, a.display AS acct, a.name AS uname
        FROM scores s LEFT JOIN accounts a ON a.id = s.account
       WHERE s.board = ?1 ORDER BY s.score DESC, s.at ASC LIMIT ?2 OFFSET ?3`).bind(board, n, from).all()).results || [];
   let rank = 0;
@@ -207,13 +214,15 @@ async function page(db, board, from, n) {
   return { total: await count(db, board), from, rows: out };
 }
 
-/* Where each of these players stands on each of these boards. */
+/* Where each of these players stands on each of these boards, and an
+   account on the PvP ladder too. An account with no runs is still a player
+   (it has a profile, and may be on the ladder). */
 async function standings(db, whos, boards) {
   if (!whos.length) return [];
   const ph = (list, at) => list.map((_, i) => '?' + (at + i)).join(',');
   const res = (await db.prepare(
     `SELECT s.board, s.who, s.name, s.score, s.wave, s.sector, s.loop, s.level, s.kills, s.time, s.at,
-            a.display AS acct,
+            a.display AS acct, a.name AS uname,
             (SELECT COUNT(*) FROM scores t WHERE t.board = s.board AND t.score > s.score) + 1 AS rank
        FROM scores s LEFT JOIN accounts a ON a.id = s.account
       WHERE s.board IN (${ph(boards, 1)}) AND s.who IN (${ph(whos, boards.length + 1)})`)
@@ -224,12 +233,20 @@ async function standings(db, whos, boards) {
   for (const w of whos) byWho.set(w, null);
   for (const r of res) {
     let p = byWho.get(r.who);
-    if (!p) { p = { name: r.name, account: r.acct || null, boards: {}, best: 0 }; byWho.set(r.who, p); }
+    if (!p) { p = { name: r.name, account: r.acct || null, user: r.uname || null, boards: {}, best: 0 }; byWho.set(r.who, p); }
     p.boards[r.board] = Object.assign({ rank: r.rank, of: totals[r.board] }, pub(r));
     // the name shown is the one on the player's best run among these boards
     if (r.score > p.best) { p.best = r.score; p.name = r.name; }
   }
-  return [...byWho.values()].filter(Boolean).map(({ best, ...p }) => p);
+  const accts = whos.filter(w => w.startsWith('a:')).map(w => w.slice(2));
+  for (const id of accts) {
+    if (byWho.get('a:' + id)) continue;
+    const a = await db.prepare('SELECT name, display FROM accounts WHERE id = ?1').bind(id).first();
+    if (a) byWho.set('a:' + id, { name: a.display, account: a.display, user: a.name, boards: {}, best: 0 });
+  }
+  const pvp = await ladderStandings(db, accts);
+  return [...byWho.entries()].filter(([, p]) => p).map(([who, { best, ...p }]) =>
+    (who.startsWith('a:') ? Object.assign(p, { pvp: pvp.get(who.slice(2)) || null }) : p));
 }
 
 function boardsParam(v) {
@@ -284,6 +301,15 @@ export default async (req, env) => {
     return json(Object.assign({ seasons }, meta), 200, 'public, max-age=60');
   }
 
+  if (q.get('user') !== null) {
+    const user = String(q.get('user')).trim().toLowerCase();
+    if (!isUser(user)) return json({ error: 'no such pilot' }, 404);
+    const boards = ['season:' + meta.season, 'all', 'day:' + meta.day];
+    const p = await profile(db, env, user, boards, standings);
+    if (!p) return json({ error: 'no such pilot' }, 404);
+    return json(Object.assign(p, { boards }, meta), 200, 'public, max-age=20');
+  }
+
   if (q.get('q') !== null) {
     const term = String(q.get('q')).trim().toLowerCase().slice(0, 16);
     if (!term) return json({ error: 'empty search' }, 400);
@@ -295,5 +321,7 @@ export default async (req, env) => {
   if (!board) return json({ error: 'no such board' }, 400);
   const from = Math.min(Math.max(0, Math.floor(Number(q.get('from')) || 0)), 1e6);
   const n = Math.min(Math.max(1, Math.floor(Number(q.get('n')) || PAGE)), PAGE_MAX);
+  if (board.startsWith('pvp:'))
+    return json(Object.assign({ board }, await ladder(db, board.slice(4), from, n), meta), 200, 'public, max-age=10');
   return json(Object.assign({ board }, await page(db, board, from, n), meta), 200, 'public, max-age=10');
 };
