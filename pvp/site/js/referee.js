@@ -4,13 +4,18 @@
    The server's Match object (pvp/src/objects.js) decides what a match comes
    to from both machines' reports; this is one machine's side of that.
 
-     open     the host opens the match before its room, so the match's id
-              can ride to the guest in the game's own hello
+     open     a friend's match: the host opens it before its room, so the
+              match's id can ride to the guest in the game's own hello
      join     the guest, on that hello, joins it as itself
+     take     a queued match: the queue made it, both sides in it, and the
+              lobby handed this machine its id and side (match.js)
+     code     a queued match's room: the host leaves its code with the
+              match, the guest asks for it
      tick     every five seconds of play (from the frame, so a hidden tab
               falls quiet as its game stalls): the lockstep fingerprints made
               since the last report, whether the game ever parted, whether
-              the link is gone
+              the link is gone, and whether the match broke its rules (a
+              ranked host's start flying what the server did not allow)
      finish   the result, the moment the match is decided, and every report
               after it until the verdict comes back
 
@@ -24,7 +29,7 @@
 
   const EVERY = 5000;            // ms between reports
   const AFTER = 3 * 60 * 1000;   // and how long to keep asking for the verdict once it is over or alone
-  const R = M.ref = { id: null, side: -1, verdict: null, onVerdict: null, live: false,
+  const R = M.ref = { id: null, side: -1, verdict: null, onVerdict: null, live: false, broke: false,
                       result: null, parted: false, sent: -1, epoch: -1, next: 0, busy: false, done: false, until: 0 };
 
   async function api(body) {
@@ -45,6 +50,15 @@
     const d = await Promise.race([api({ op: 'open', kind: 'friend', pilot }),
                                   new Promise(res => setTimeout(() => res(null), 4000))]);
     if (d && typeof d.id === 'string' && d.side === 0) { R.id = d.id; R.side = 0; }
+  };
+
+  // a queued match: already made, with this machine in it
+  R.take = match => { R.id = match.id; R.side = match.side; };
+  // its room's code: left by the host (`code`), asked for by the guest; null until there is one
+  R.code = async code => {
+    if (!R.id) return null;
+    const d = await api(code ? { op: 'code', id: R.id, code } : { op: 'code', id: R.id });
+    return d && d.ok ? d : null;
   };
 
   // the hello: the host's carries the match, and the guest joins it
@@ -73,7 +87,7 @@
     const alone = !left && !(LS.on && MP.on);
     if ((alone || R.result) && !R.until) R.until = Date.now() + AFTER;
     R.busy = true;
-    api({ op: 'report', id: R.id, report: { fps, parted: R.parted, alone, left: !!left, tick: LS.tick, result: R.result } }).then(d => {
+    api({ op: 'report', id: R.id, report: { fps, parted: R.parted, alone, left: !!left, broke: R.broke, tick: LS.tick, result: R.result } }).then(d => {
       R.busy = false;
       if (d && d.verdict) {
         R.verdict = d.verdict; R.done = true;

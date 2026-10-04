@@ -1,9 +1,10 @@
 /* ===========================================================================
-   VOIDRUNNER PvP — a match with a friend (PVP-PLAN.md, Phase 3 step 2)
+   VOIDRUNNER PvP — a match: with a friend (PVP-PLAN.md, Phase 3 step 2), or
+   one the queue found (Phase 5 step 2)
 
    Two players, two machines, one run, on the game's own co-op stack as it
    is. The host opens a room and is given a code; the guest typed it in the
-   lobby. The engine's netHost / netJoin connect them through PvP's Worker
+   lobby, or, in a queued match, asks the server's match for it. The engine's netHost / netJoin connect them through PvP's Worker
    (/api/room for the handshake, /api/turn for the relay, so it works on any
    network), both say hello, and the host starts the run: LOCKSTEP CO-OP,
    each machine flying its own pilot (TWO PILOTS), in an empty arena.
@@ -24,6 +25,42 @@
   if (!M) return;
 
   let box = null, started = false, over = '';
+
+  /* A match the queue found (pvp.js): the server made it with both sides in
+     it, so its id, this machine's side, the rules it flies (the league's
+     pilots and length) and both players' upgrades are the server's. The host
+     opens a room and leaves its code with the match; the guest asks for it
+     there, so nobody types one. A match not under way by CONNECT never will
+     be: nothing is recorded, and both go back to queue again. */
+  const Q = M.hand && M.hand.match && Array.isArray(M.hand.match.sides) ? M.hand.match : null;
+  const CONNECT = 75 * 1000;
+  let armed = 0, codeSent = '', codeBusy = false, codeNext = 0, joined = false, checked = false;
+  const themName = () => (Q ? Q.sides[1 - Q.side].name : 'your opponent');
+
+  /* The host puts the guest's pilot in the air as the server has it, whatever
+     the guest's hello says: its start carries both pilots, and the guest's
+     machine flies what the start says. */
+  if (Q) {
+    const heard = M.peerHello;
+    M.peerHello = d => {
+      heard(d);
+      if (M.hand.role !== 'host') return;
+      const s = Q.sides[1], i = CHARS.findIndex(c => c.id === s.pilot);
+      if (i >= 0) MP.peerChar = i;
+      MP.peerAwake = !!s.awake;
+    };
+  }
+  /* The run has begun: both pilots as the server has them? A host that put
+     anything else in the air broke the match's rules; this side says so to
+     the referee, and the match is no contest (pvp/src/referee.js). */
+  function check() {
+    if (checked || !Q) return;
+    checked = true;
+    for (let k = 0; k < 2; k++) {
+      const p = pilotP(k), s = Q.sides[k];
+      if (!p || p.charId !== s.pilot || !!p.awake !== !!s.awake) { M.ref.broke = true; return; }
+    }
+  }
 
   const CSS = `
 #pvp-room{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
@@ -100,16 +137,53 @@
   }
   M.ref.onVerdict = told;
 
+  // a queued match that never got under way: nothing to record, back to the queue
+  function noShow() {
+    over = 'gone';
+    M.ref.stop();
+    try { netHangUp(true); Net.phase = 'off'; } catch (e) {}
+    say('NO MATCH', '', themName() + ' didn\'t connect.', 'Nothing was recorded. Queue again from the lobby.', true);
+  }
+
+  /* A queued match's waiting room: the host's room code to the match, the
+     guest's ask for it, and what each sees meanwhile. False: stop here. */
+  function queued(host) {
+    if (Date.now() - armed > CONNECT) { noShow(); return false; }
+    const rule = (Q.league ? Q.league.n : 'CASUAL') + '  ·  best of ' + Q.bestOf;
+    if (Net.phase === 'failed') { say('MATCH FOUND', '', 'Couldn\'t connect.', Net.note, true); return false; }
+    if (host) {
+      if (Net.code && Net.code !== codeSent && !codeBusy) {
+        const code = Net.code;
+        codeBusy = true;
+        M.ref.code(code).then(d => { codeBusy = false; if (d) codeSent = code; });
+      }
+      say('MATCH FOUND', '', !Net.code ? 'Opening a room…' : MP.ready ? 'Connected. Starting the match…' : 'Waiting for ' + themName() + '…', rule);
+    } else {
+      if (!joined && !codeBusy && Date.now() >= codeNext) {
+        codeBusy = true;
+        codeNext = Date.now() + 1500;
+        M.ref.code().then(d => {
+          codeBusy = false;
+          if (d && d.code && !joined && !over) { joined = true; netJoin(d.code); }
+        });
+      }
+      say('MATCH FOUND', '', !joined ? 'Waiting for ' + themName() + '\'s room…'
+        : MP.ready ? 'Connected. ' + themName() + ' is starting the match…' : 'Connecting to ' + themName() + '…', rule);
+    }
+    return true;
+  }
+
   // what the waiting room says, from where the link has got to
   function waiting() {
     if (over) return;
     const host = M.hand.role === 'host';
-    if (Net.phase === 'failed') {
+    if (Q) { if (!queued(host)) return; }
+    else if (Net.phase === 'failed') {
       say(host ? 'HOSTING' : 'JOINING', host ? Net.code : M.hand.code,
           'Couldn\'t connect.', Net.note, true);
       return;
     }
-    if (host) {
+    else if (host) {
       if (!Net.code) say('HOSTING', '', 'Opening a room…', Net.note);
       else if (Net.phase === 'waiting') say('YOUR CODE', Net.code, 'Send it to your opponent. They type it under JOIN.', 'waiting for them…');
       else say('YOUR CODE', Net.code, 'Your opponent is joining…', Net.note || 'connecting');
@@ -138,8 +212,13 @@
     loadout: 'casual',
     start() {
       state = 'pvp';
-      // the host opens the referee's match first, so its id rides in the hello (referee.js)
-      if (M.hand.role === 'host') { const go = () => netHost(); M.ref.open(M.hand.pilot).then(go, go); }
+      armed = Date.now();
+      if (Q) {
+        M.ref.take(Q);                   // the queue made the referee's match, with this machine in it
+        if (M.hand.role === 'host') netHost();
+      }
+      // a friend's: the host opens the referee's match first, so its id rides in the hello (referee.js)
+      else if (M.hand.role === 'host') { const go = () => netHost(); M.ref.open(M.hand.pilot).then(go, go); }
       else netJoin(M.hand.code);
       waiting();
     },
@@ -151,6 +230,7 @@
       if (!live && !started && state === 'pvp') { waiting(); return; }
       if (live && !over) {
         started = true;
+        check();
         if (box && !box.hidden) box.hidden = true;
         const m = RUN.pvp;
         if (m && m.run === LS.run && m.phase === 'over') { result(m); return; }
@@ -162,7 +242,7 @@
          is shown its lost screen ('lan'); a match is simply over. A host
          that was down between rounds as they went is 'dead' by now
          (mpPeerGone): theirs is the leaving, not this player's. */
-      if (started && !MP.on) { end(M.hand.role === 'host' ? 'Your opponent left.' : 'The host left.'); return; }
+      if (started && !MP.on) { end(M.hand.role === 'host' || Q ? 'Your opponent left.' : 'The host left.'); return; }
       if (state === 'dead') back();
     }
   };

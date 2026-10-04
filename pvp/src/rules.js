@@ -27,6 +27,36 @@ export const LEAGUES = [
 // casual: everything the account has unlocked, awake included; a match with a friend is best of three
 export const CASUAL = { id: 'casual', n: 'CASUAL', pilots: 'own', awake: true, bestOf: 3 };
 
+/* The queues matchmaking runs (Phase 5 step 2), one Matchmaker each. Ranked
+   is rated (Glicko-2, per season) and played by league; casual is neither,
+   and flies whatever each player owns. Phase 6 adds who may enter, what
+   comes between matches, and the rewards. */
+export const QUEUES = {
+  ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true },
+  casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false }
+};
+
+/* A new player's first ranked matches place them: until PLACEMENTS are
+   played their league is not shown, and they fly the lowest league's rules. */
+export const PLACEMENTS = 5;
+
+/* A player's league from their ranked rating row (pvp_ratings), or the
+   lowest, provisional, before they have one or while still being placed. */
+export function leagueOf(row) {
+  if (!row || row.games < PLACEMENTS) return Object.assign({}, LEAGUES[0], { provisional: true, left: PLACEMENTS - (row ? row.games : 0) });
+  let lg = LEAGUES[0];
+  for (const l of LEAGUES) if (row.rating >= l.from) lg = l;
+  return Object.assign({}, lg, { provisional: false, left: 0 });
+}
+
+/* Leagues whose rules fly the same pilots the same way: a ticket is only
+   ever paired inside its own, since its pilot was picked before the queue. */
+export const bracketOf = rule => rule.pilots + (rule.awake ? '+awake' : '');
+
+// two leagues met in ranked: the match is played to the lower one's rules
+export const lowerLeague = (a, b) =>
+  LEAGUES[Math.min(LEAGUES.findIndex(l => l.id === a), LEAGUES.findIndex(l => l.id === b))] || LEAGUES[0];
+
 /* What a player may bring under a rule: the pilots, which of them may fly
    awake, and the reward upgrades. `unlocks` is the summary the account's save
    carries (src/account.js), or null before its first save. */

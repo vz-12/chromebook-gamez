@@ -19,7 +19,8 @@ const main = (await import('../src/index.js')).default;
 const pvp = (await import('../pvp/src/index.js')).default;
 const { pruneAuth } = await import('../src/auth.js');
 const { loadout, LEAGUES, CASUAL } = await import('../pvp/src/rules.js');
-const { Match } = await import('../pvp/src/objects.js');
+const { Match, Matchmaker, MM } = await import('../pvp/src/objects.js');
+const { seasonOf } = await import('../src/season.js');
 const { REF } = await import('../pvp/src/referee.js');
 
 const DB = makeD1();
@@ -86,7 +87,7 @@ section('PvP signed out');
   const up = await p.op('register', { name: 'pvp_only', pass: 'a fine password' });
   ok(up.status === 403 && /VOIDRUNNER/.test(up.d.error), 'no accounts are made here', up);
   ok(one("SELECT COUNT(*) AS n FROM accounts WHERE name = 'pvp_only'").n === 0, 'none was');
-  ok((await p.call('GET', '/api/pvp/queue')).status === 501, '/api/pvp/queue: not yet');
+  ok((await p.call('GET', '/api/pvp/queue')).status === 405, '/api/pvp/queue answers (POST only)');
   ok((await p.call('GET', '/api/nope')).status === 404, 'an unknown API path');
   ok((await p.call('GET', '/api/account/save')).status === 404, 'the save is the game\'s, not PvP\'s');
 }
@@ -287,7 +288,7 @@ section('the referee: a match, both sides, and what it comes to');
   // who may ask, and how
   ok((await tab(PVP).call('POST', '/api/pvp/match', { op: 'open', kind: 'friend', pilot: 'runner' })).status === 401, 'signed out: 401');
   ok((await duel.call('GET', '/api/pvp/match')).status === 405, 'only POST');
-  ok((await tab(PVP).call('GET', '/api/pvp/queue')).status === 501, 'matchmaking: not yet');
+  ok((await tab(PVP).call('POST', '/api/pvp/queue', { op: 'join', queue: 'casual', pilot: 'runner' })).status === 401, 'matchmaking, signed out: 401');
   ok((await mt(duel, { op: 'open', kind: 'ranked', pilot: 'runner' })).status === 400, 'a player opens only a friend\'s match');
   ok((await mt(duel, { op: 'open', kind: 'friend', pilot: 'nobody' })).status === 400, 'with a real pilot');
   ok((await mt(duel, { op: 'join', id: 'nope', pilot: 'runner' })).status === 400, 'a match id is a match id');
@@ -345,6 +346,11 @@ section('the referee: a match, both sides, and what it comes to');
   await rep(duel, dp, { alone: true });
   const dv = await rep(rival, dp, { alone: true });
   ok(dv.d.verdict.v === 'void' && rows(dp)[0].reason === 'dropped' && flags(dp).length === 2, 'both lost the link: no contest, flagged as dropped', dv.d);
+  const kp = await pair();
+  later(5000); await rep(duel, kp, { fps: fps(0, 300) });
+  const kv = await rep(rival, kp, { fps: fps(0, 300), broke: true });
+  ok(kv.d.verdict.v === 'void' && rows(kp)[0].reason === 'rules' && flags(kp).length === 2,
+     'a side that saw the match break its rules (a ranked guest, of the host\'s start): no contest, both flagged', kv.d);
 
   // leaving
   const lp = await pair();
@@ -357,17 +363,20 @@ section('the referee: a match, both sides, and what it comes to');
   const ap = await pair();
   later(1000); await rep(rival, ap, { fps: fps(0, 300) });
   later(40000); await rep(rival, ap, { fps: fps(360, 600), alone: true });
-  later(6000);
+  later(6000); await envPvp.MATCH.alarms();
+  ok(rows(ap).length === 0, 'a side yet to report has longer than the grace: its connect time', rows(ap));
+  later(40000); await rep(rival, ap, { fps: fps(660, 900), alone: true });
+  later(5000);
   const fired = await envPvp.MATCH.alarms();
   ok(fired >= 1 && rows(ap)[0] && rows(ap)[0].verdict === 'forfeit' && rows(ap)[0].winner === 1,
-     'with nobody reporting, the object\'s alarm decides it: the quiet host forfeits', rows(ap));
+     'with nobody reporting, the object\'s alarm decides it: the host that never reported forfeits once that is out', rows(ap));
   const op = await pair();
   later(5000); await rep(rival, op, { fps: fps(0, 300) });
   await rep(duel, op, { fps: fps(0, 300), result: won });
   later(46000); await envPvp.MATCH.alarms();
   ok(rows(op)[0] && rows(op)[0].verdict === 'played' && rows(op)[0].reason === 'one result', 'one result, and the other left without saying: it stands', rows(op));
   const bp = await pair();
-  later(46000); await envPvp.MATCH.alarms();
+  later(REF.CONNECT + 1000); await envPvp.MATCH.alarms();
   ok(rows(bp).length === 0, 'both quiet: abandoned, and nothing recorded');
   const qp = await pair();
   later(5000); await rep(duel, qp, { fps: fps(0, 300) }); await rep(rival, qp, { fps: fps(0, 300) });
@@ -411,6 +420,185 @@ section('the referee: a match, both sides, and what it comes to');
   ok(wv.d.verdict.v === 'played' && rows(wp).length === 0, 'decided, but the write failed', wv.d);
   later(16000); await envPvp.MATCH.alarms();
   ok(rows(wp).length === 1 && rows(wp)[0].verdict === 'played', 'and the next look writes it', rows(wp));
+  Date.now = real;
+}
+
+section('matchmaking: the queues, the pairing, and the ratings');
+{
+  const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
+  ok(/"name":\s*"MATCHMAKER",\s*"class_name":\s*"Matchmaker"/.test(cfg), 'the Worker binds the Matchmaker as MATCHMAKER, as tested here');
+  envPvp.MATCHMAKER = makeNamespace(Matchmaker, envPvp);
+  const real = Date.now;
+  let clock = real();
+  Date.now = () => clock;
+  const later = ms => { clock += ms; };
+
+  /* The players: the duelist (HACKER unlocked, EMBER and HACKER awake), the
+     rival and the stranger (no save: the base pilots only), and two made
+     here, ACE with everything and BOLT with nothing. */
+  for (const [name, ip, pid, unlocks] of [
+    ['Ace', '198.51.100.92', 'd', { chars: ['runner', 'ember', 'hacker', 'melee'], awake: ['hacker', 'melee'], chal: [], ups: ['u9'] }],
+    ['Bolt', '198.51.100.93', 'e', null]]) {
+    const g = tab(GAME, ip);
+    ok((await g.op('register', { name, pass: 'a fine password', pid: pid.repeat(32) })).status === 201, name + ' signed up in the game');
+    if (unlocks) ok((await g.call('PUT', '/api/account/save', { rev: 0, save: { best: 1 }, pid: pid.repeat(32), unlocks })).status === 200, name + ' saved, with unlocks');
+  }
+  const login = async (name, ip) => {
+    const t = tab(PVP, ip);
+    ok((await t.op('login', { name, pass: 'a fine password' })).status === 200, name + ' signs in at PvP');
+    return t;
+  };
+  const rival = await login('rival', '198.51.100.90'), stranger = await login('stranger', '198.51.100.91');
+  const ace = await login('ace', '198.51.100.92'), bolt = await login('bolt', '198.51.100.93');
+  const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
+  const ids = ['duelist', 'rival', 'stranger', 'ace', 'bolt'].map(acct);
+  const qq = (t, b) => t.call('POST', '/api/pvp/queue', b);
+  const join = (t, queue, pilot) => qq(t, { op: 'join', queue, pilot });
+  const poll = (t, queue) => qq(t, { op: 'poll', queue });
+  const mt = (t, b) => t.call('POST', '/api/pvp/match', b);
+  const rating = n => DB.sql.prepare('SELECT * FROM pvp_ratings WHERE account = ? AND queue = ? AND season = ?').get(acct(n), 'ranked', seasonOf(clock));
+  const setRating = (n, r, games) => DB.sql.prepare(
+    `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+     VALUES (?, 'ranked', ?, ?, 80, 0.06, ?, ?, 0, NULL, ?)
+     ON CONFLICT (account, queue, season) DO UPDATE SET rating = excluded.rating, rd = 80, games = excluded.games, wins = excluded.wins`)
+    .run(acct(n), seasonOf(clock), r, games, games, clock);
+  const row = id => DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get(id);
+  const hash = s => (s * 2654435761) >>> 0;
+  const won0 = { winner: 0, score: [2, 0], bestOf: 3 };
+  // a queued match, to its verdict: the same fingerprints from both, then the same result
+  const playOut = async (h, g, id, result) => {
+    later(5000);
+    for (const t of [h, g]) await mt(t, { op: 'report', id, report: { fps: [[0, 60, hash(60)], [0, 120, hash(120)]], tick: 120 } });
+    later(5000);
+    await mt(h, { op: 'report', id, report: { result } });
+    return mt(g, { op: 'report', id, report: { result } });
+  };
+  // both poll every four seconds, as the lobby does, until both are matched or `secs` is up
+  const wait = async (a, b, queue, secs) => {
+    let ra, rb;
+    for (let s = 0; s <= secs; s += 4) {
+      ra = await poll(a, queue); rb = await poll(b, queue);
+      if (ra.d.state === 'matched' && rb.d.state === 'matched') return [ra.d.match, rb.d.match, s];
+      later(4000); await envPvp.MATCHMAKER.alarms();
+    }
+    return [null, null, secs, ra.d, rb.d];
+  };
+
+  // who may queue, and with what
+  ok((await duel.call('GET', '/api/pvp/queue')).status === 405, 'only POST');
+  ok((await qq(duel, { op: 'join', queue: 'arena', pilot: 'runner' })).status === 400, 'an unknown queue');
+  ok((await qq(duel, { op: 'dance', queue: 'ranked' })).status === 400, 'an unknown op');
+  ok((await join(duel, 'ranked', 'nobody')).status === 400, 'a real pilot');
+  const hk = await join(duel, 'ranked', 'hacker');
+  ok(hk.status === 400 && /BRONZE/.test(hk.d.error), 'ranked flies the league\'s pilots: still being placed, that is BRONZE\'s base two', hk.d);
+  const rh = await join(rival, 'casual', 'hacker');
+  ok(rh.status === 400 && /unlocked/.test(rh.d.error), 'casual flies what the account owns, and no more', rh.d);
+
+  // two in ranked, both still to be placed: paired at once, the older one hosting
+  const w = await join(duel, 'ranked', 'ember');
+  ok(w.status === 200 && w.d.state === 'waiting', 'the first waits', w.d);
+  later(1000);
+  const j = await join(rival, 'ranked', 'runner');
+  ok(j.d.state === 'matched' && j.d.match.role === 'guest' && j.d.match.side === 1, 'the second is paired with them at once, as the guest', j.d);
+  const p0 = await join(duel, 'ranked', 'ember');
+  const M = p0.d.match;
+  ok(p0.d.state === 'matched' && M.role === 'host' && M.side === 0 && M.id === j.d.match.id,
+     'the first, queueing again before it collected the match, is given that match, as the host', p0.d);
+  ok(M.queue === 'ranked' && M.rated === true && M.league.id === 'bronze' && M.bestOf === 3 && M.league.pilots === 'base' && M.league.awake === false,
+     'a rated match, to BRONZE\'s rules: best of three, base pilots, nobody awake', M);
+  ok(M.sides[0].name === 'Duelist' && M.sides[0].pilot === 'ember' && M.sides[0].awake === false && M.sides[0].ups.join() === 'u1,u2,u3'
+     && M.sides[1].name === 'Rival' && M.sides[1].pilot === 'runner' && M.sides[1].ups.length === 0,
+     'both sides as the server has them: the pilot, not awake here though the duelist\'s EMBER is, and each one\'s own reward upgrades', M.sides);
+  ok(!ids.some(a => JSON.stringify(p0.d).includes(a)), 'never an account id');
+  const held = envPvp.MATCH.instances.get(M.id).data.get('m');
+  ok(held && held.sides.length === 2 && held.started > 0 && held.rated === true && held.league === 'bronze', 'the referee\'s match holds both sides from the start', held);
+  ok((await poll(duel, 'ranked')).d.match.id === M.id, 'asked again, the same match');
+
+  // the room's code passes through the match: nobody types it
+  ok((await mt(rival, { op: 'code', id: M.id })).d.code === null, 'the guest asks for the room before there is one: not yet');
+  ok((await mt(duel, { op: 'code', id: M.id, code: 'k7' })).status === 400, 'a code is a room code');
+  ok((await mt(duel, { op: 'code', id: M.id, code: 'K7XQ' })).d.code === 'K7XQ', 'the host leaves its room\'s code');
+  ok((await mt(rival, { op: 'code', id: M.id })).d.code === 'K7XQ', 'and the guest finds it there');
+  ok((await mt(rival, { op: 'code', id: M.id, code: 'ZZZZ' })).status === 403, 'only the host has a room');
+  ok((await mt(stranger, { op: 'code', id: M.id })).status === 403, 'nor can a stranger read it');
+
+  // played out: the ratings move, once
+  const fin = await playOut(duel, rival, M.id, won0);
+  ok(fin.d.verdict && fin.d.verdict.v === 'played', 'played to the end, both agreeing', fin.d);
+  const rd = rating('duelist'), rr = rating('rival');
+  ok(rd && rr && rd.rating > 1500 && rr.rating < 1500 && rd.games === 1 && rd.wins === 1 && rr.losses === 1 && rd.rd < 350,
+     'the winner\'s rating rises and the loser\'s falls, each surer of itself', [rd, rr]);
+  ok(rd.league === null && row(M.id).applied === 1, 'still being placed: no league yet; the match marked as rated', [rd.league, row(M.id).applied]);
+  await envPvp.MATCHMAKER.get(envPvp.MATCHMAKER.idFromName('ranked')).fetch('https://do/rate', { method: 'POST', body: JSON.stringify({ id: M.id }) });
+  ok(rating('duelist').games === 1 && rating('duelist').rating === rd.rating, 'rated twice, it counts once');
+  const me1 = await duel.me();
+  ok(me1.d.league.provisional === true && me1.d.league.left === 4 && me1.d.league.rating === Math.round(rd.rating) && me1.d.league.wins === 1,
+     '/api/pvp/me: the rating, and four placement matches left', me1.d.league);
+
+  // placed: the league, and the length that comes with it
+  setRating('duelist', 1550, 5);
+  const me2 = await duel.me();
+  ok(me2.d.league.id === 'gold' && me2.d.league.provisional === false && me2.d.league.bestOf === 5 && me2.d.loadouts.ranked.pilots.join() === 'runner,ember',
+     'five matches in at 1550: GOLD, best of five, still the base pilots', me2.d.league);
+  // GOLD meets a player still being placed: not at once, then to the lower league's rules
+  await join(duel, 'ranked', 'runner'); await join(rival, 'ranked', 'ember');
+  const [gh, gg, took] = await wait(duel, rival, 'ranked', 120);
+  ok(gh && gg && gh.id === gg.id && took >= 40, 'two leagues and some rating apart: paired once both have waited a while', [took, gh]);
+  ok(gh && gh.league.id === 'bronze' && gh.bestOf === 3 && gg.bestOf === 3, 'and played to the lower league\'s rules: best of three, not GOLD\'s five', gh && gh.league);
+
+  // everything-goes meets the base pilots: never, however long they wait
+  setRating('ace', 1900, 10);
+  const aj = await join(ace, 'ranked', 'hacker');
+  ok(aj.d.state === 'waiting', 'PLATINUM flies its own pilots in ranked, awake', aj.d);
+  await join(stranger, 'ranked', 'runner');
+  const [nh, , , da, db] = await wait(ace, stranger, 'ranked', 300);
+  ok(!nh && da.state === 'waiting' && db.state === 'waiting', 'PLATINUM and a player on the base pilots are never paired, five minutes in', [da, db]);
+  ok((await qq(ace, { op: 'leave', queue: 'ranked' })).d.state === 'left' && (await poll(ace, 'ranked')).d.state === 'none', 'leaving the queue drops the ticket');
+  later(MM.STALE + 1000); await envPvp.MATCHMAKER.alarms();
+  ok((await poll(stranger, 'ranked')).d.state === 'none', 'a ticket nobody polls for ' + MM.STALE / 1000 + ' s is gone');
+
+  // casual: unrated, each flies what they own
+  await join(ace, 'casual', 'melee'); await join(bolt, 'casual', 'runner');
+  const [C, Cg, ct] = await wait(ace, bolt, 'casual', 60);
+  ok(C && Cg && C.id === Cg.id && C.rated === false && C.league.id === 'casual' && C.bestOf === 3 && ct > 0 && ct <= 20,
+     'casual pairs a rating 400 apart within seconds: unrated, best of three', [ct, C]);
+  ok(C && C.sides[0].pilot === 'melee' && C.sides[0].awake === true && C.sides[0].ups.join() === 'u9', 'flying what the account owns, awake where it is', C && C.sides[0]);
+  const cf = await playOut(ace, bolt, C.id, won0);
+  ok(cf.d.verdict.v === 'played' && row(C.id).rated === 0 && !DB.sql.prepare("SELECT 1 FROM pvp_ratings WHERE queue = 'casual'").get(),
+     'played and recorded, and no rating moves', row(C.id));
+
+  // ranked, no contest: nobody's rating moves
+  await join(stranger, 'ranked', 'runner'); await join(bolt, 'ranked', 'ember');
+  const [vh] = await wait(stranger, bolt, 'ranked', 8);
+  later(5000);
+  await mt(stranger, { op: 'report', id: vh.id, report: { fps: [[0, 60, 1]] } });
+  const vv = await mt(bolt, { op: 'report', id: vh.id, report: { fps: [[0, 60, 2]] } });
+  ok(vv.d.verdict.v === 'void' && !rating('stranger') && !rating('bolt'), 'the games disagree: no contest, and no rating moves', vv.d);
+  // a quit moves both; the rating fails once (the queue's object out of reach), and is asked again at the next look
+  later(31000);
+  await join(stranger, 'ranked', 'runner'); await join(bolt, 'ranked', 'ember');
+  const [fh] = await wait(stranger, bolt, 'ranked', 8);
+  later(5000);
+  await mt(stranger, { op: 'report', id: fh.id, report: { fps: [[0, 60, 1]] } });
+  const mmReal = envPvp.MATCHMAKER;
+  envPvp.MATCHMAKER = { idFromName: n => n, get: () => ({ fetch: async () => new Response('{}', { status: 500 }) }) };
+  const cerr = console.error; console.error = () => {};
+  const fq = await mt(bolt, { op: 'report', id: fh.id, report: { left: true } });
+  envPvp.MATCHMAKER = mmReal; console.error = cerr;
+  ok(fq.d.verdict.v === 'forfeit' && row(fh.id).applied === 0 && !rating('stranger'), 'a quit is a forfeit, but its ratings could not be written yet', [fq.d, row(fh.id).applied]);
+  later(16000); await envPvp.MATCH.alarms();
+  ok(row(fh.id).applied === 1 && rating('stranger').wins === 1 && rating('bolt').losses === 1, 'the next look writes them: a quit moves both', [rating('stranger'), rating('bolt')]);
+
+  // the pairing's own costs, on an object of its own: a continent apart waits for the window to cover it
+  const mmT = envPvp.MATCHMAKER.get(envPvp.MATCHMAKER.idFromName('region-test'));
+  const tk = region => ({ name: 'x', pilot: 'runner', awake: false, ups: [], rating: 1500, league: 'bronze', bracket: 'base', region });
+  const mmq = (op, who, ticket) => mmT.fetch('https://do/' + op, { method: 'POST', body: JSON.stringify({ queue: 'ranked', acct: who, ticket }) }).then(r => r.json());
+  await mmq('join', 'r1', tk('EU'));
+  ok((await mmq('join', 'r2', tk('NA'))).state === 'waiting', 'a continent apart: not at once');
+  let at = 0;
+  for (; at < 60; at += 2) { later(2000); await mmq('poll', 'r1'); if ((await mmq('poll', 'r2')).state === 'matched') break; }
+  const expect = (MM.REGION - MM.WINDOW.ranked[0]) / MM.WINDOW.ranked[1];
+  ok(at + 2 >= expect && at <= expect + 4, 'but paired once the window has grown to cover it (' + expect + ' s)', at + 2);
   Date.now = real;
 }
 

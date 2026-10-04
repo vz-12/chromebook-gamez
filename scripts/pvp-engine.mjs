@@ -22,7 +22,9 @@ import { randomBytes } from 'node:crypto';
 import { makeD1 } from './lib/d1-sqlite.mjs';
 import { makeNamespace } from './lib/do-fake.mjs';
 const pvpWorker = (await import('../pvp/src/index.js')).default;
-const { Match } = await import('../pvp/src/objects.js');
+const { Match, Matchmaker } = await import('../pvp/src/objects.js');
+const { ensurePvp } = await import('../pvp/src/records.js');
+const { seasonOf } = await import('../src/season.js');
 const { ensureAuth, sha256 } = await import('../src/auth.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,6 +110,7 @@ const DB = makeD1();
 const PVP_ORIGIN = 'https://voidrunner-pvp.play101.workers.dev';
 const envPvp = { DB, SIGNUP: 'off', ROOM_STORE: 'voidrunner-pvp-rooms', ASSETS: { fetch: () => new Response('') } };
 envPvp.MATCH = makeNamespace(Match, envPvp);
+envPvp.MATCHMAKER = makeNamespace(Matchmaker, envPvp);
 await ensureAuth(DB);
 function signedIn(name) {
   const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), now = Date.now();
@@ -539,10 +542,10 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const sc = spawned(false), si = spawned(true);
   ok(sc[0] === 0, 'a clean map sends nothing, a minute long', sc);
   ok(si[0] === 6 && si[1] === 0, 'an infested one sends, six at most, and never on top of a pilot', si);
-  ok(r(`const was = [PVP.hand.queue, PVP.hand.me.league]; PVP.hand.queue = 'ranked'; PVP.hand.me.league = { id: 'gold', bestOf: 5 };
-        const out = PVP.bestOf(); [PVP.hand.queue, PVP.hand.me.league] = was; out`) === 5, 'a ranked match at gold and up: best of five');
-  ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'silver', bestOf: 3 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
-     'and a match with a friend stays best of three whatever the league');
+  ok(r(`PVP.hand.match = { bestOf: 5 }; const out = PVP.bestOf(); delete PVP.hand.match; out`) === 5,
+     'a match the server made best of five (ranked, gold and up) is best of five');
+  ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'gold', bestOf: 5 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
+     'and a match with a friend stays best of three whatever the league: the length is never this machine\'s own to say');
 }
 
 section('a match left part way');
@@ -588,6 +591,110 @@ section('a match left part way');
   const row = matchRows().find(x => x.id === id);
   ok(row && row.verdict === 'forfeit' && row.reason === 'quit' && row.winner === 0 && row.a_pilot === 'melee' && row.b_pilot === 'runner', 'recorded as a quit', row);
   ok(roomOf(H).__q['.note'].textContent === 'a win by forfeit  ·  recorded', 'and the host is told', roomOf(H).__q['.note'].textContent);
+}
+
+section('a queued match: the server pairs them, and its rules fly');
+{
+  // the duelist's account owns EMBER awake and a reward upgrade; both have played their placements into GOLD
+  const now = Date.now(), season = seasonOf(now);
+  await ensurePvp(DB);
+  DB.sql.prepare('INSERT OR REPLACE INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, ?, ?, ?)')
+    .run(DUELIST.id, '{}', JSON.stringify({ chars: ['runner', 'ember', 'hacker'], awake: ['ember', 'hacker'], chal: [], ups: ['u1'] }), now);
+  for (const a of [DUELIST, RIVAL_ACCT])
+    DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+                    VALUES (?, 'ranked', ?, 1550, 80, 0.06, 5, 3, 2, 'gold', ?)`).run(a.id, season, now);
+  const rat = a => DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(a.id, season);
+  const flagsOf = id => DB.sql.prepare('SELECT * FROM pvp_flags WHERE match = ?').all(id);
+  // the lobby's part (pvp.js): queue both, and hand each engine the match the server found
+  const lobby = (who, body) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/queue', { method: 'POST', body: JSON.stringify(body),
+    headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN, 'content-type': 'application/json' } }), envPvp).then(r => r.json());
+  const queuePair = async () => {
+    await lobby(DUELIST, { op: 'join', queue: 'ranked', pilot: 'ember' });
+    const g = (await lobby(RIVAL_ACCT, { op: 'join', queue: 'ranked', pilot: 'runner' })).match;
+    const h = (await lobby(DUELIST, { op: 'poll', queue: 'ranked' })).match;
+    return [h, g];
+  };
+  const bootPair = ([mh, mg]) => [
+    boot({ mode: 'match', role: 'host', queue: 'ranked', pilot: 'ember', me: ME, match: mh }, DUELIST),
+    boot({ mode: 'match', role: 'guest', queue: 'ranked', pilot: 'runner', me: RIVAL, match: mg }, RIVAL_ACCT)];
+
+  const [mh, mg] = await queuePair();
+  ok(mh && mg && mh.id === mg.id && mh.role === 'host' && mg.role === 'guest' && mh.league.id === 'gold' && mh.bestOf === 5,
+     'the lobby queues both: one match, GOLD, best of five', mh);
+  ok(mh.sides[0].pilot === 'ember' && mh.sides[0].awake === false && mh.sides[0].ups.join() === 'u1',
+     'the duelist flies EMBER, not awake in GOLD though the account has it so', mh.sides[0]);
+  const [H, G] = bootPair([mh, mg]);
+  await flush();
+  ok(H.run('PVP.ref.id') === mh.id && H.run('PVP.ref.side') === 0 && G.run('PVP.ref.id') === mh.id && G.run('PVP.ref.side') === 1,
+     'both machines have the referee\'s match from the lobby: nothing opened, nothing joined');
+  ok(H.run('CHARS[selectedChar].id') === 'ember' && H.run('PVP.pilotOpen("hacker")') === false, 'the host has its EMBER picked, and only that open', H.run('CHARS[selectedChar].id'));
+  ok(!G.win.__net.some(n => n.startsWith('fetch /api/room')) && roomOf(G).__q.h2.textContent === 'MATCH FOUND'
+     && roomOf(G).__q['.line'].textContent === 'Waiting for Duelist\'s room…', 'the guest waits for the host\'s room, with no code to type',
+     [G.win.__net, roomOf(G).__q['.line'].textContent]);
+
+  // the host's room opens (Node has no WebRTC: its code is set by hand), and the code passes through the match
+  H.run("Net.phase = 'waiting'; Net.code = 'K7XQ'; Net.note = ''; PVP.frame()");
+  await flush();
+  ok(envPvp.MATCH.instances.get(mh.id).data.get('m').code === 'K7XQ', 'the host leaves its room\'s code with the match');
+  G.run('__wall += 2000; PVP.frame()');
+  await flush();
+  ok(G.win.__net.includes('fetch /api/room?code=K7XQ&as=guest'), 'and the guest, asking the match, joins that room', G.win.__net);
+
+  // the guest's hello says more than its account has: its pilot awake, every upgrade going
+  G.run("Save.profile.awakened = { runner: true }; PVP.hello = () => ({ v: 1, ups: ['u1', 'u2', 'u3'] })");
+  const ship = link(H, G);
+  ok(H.run('MP.peerAwake') === false, 'the host takes the guest as the server has it, not as its hello says');
+  H.run('PVP.frame()'); ship(H, G);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  ok(H.run('pilotP(0).charId') === 'ember' && G.run('pilotP(1).charId') === 'runner'
+     && [H.run('pilotP(0).awake'), H.run('pilotP(1).awake'), G.run('pilotP(0).awake'), G.run('pilotP(1).awake')].join() === '0,0,0,0',
+     'both pilots on both machines as the server has them: nobody awake in GOLD');
+  ok(H.run('JSON.stringify(PVP.upsOf(1))') === '[]' && G.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && G.run('JSON.stringify(PVP.upsOf(1))') === '[]',
+     'each side\'s upgrades are the server\'s, on both machines, not what a hello claims');
+  ok(G.run('PVP.ref.broke') === false && H.run('PVP.ref.broke') === false, 'the start kept the rules: nothing to tell the referee');
+  await play(H, G, ship, 60 * 20, () => H.run('!!RUN.pvp'));
+  ok(H.run('RUN.pvp.bestOf') === 5 && G.run('RUN.pvp.bestOf') === 5, 'GOLD\'s length on both machines, from the server\'s match: best of five');
+
+  // the guest quits: a rated forfeit, and both ratings move
+  G.run('quitToMenu()'); ship(G, H);
+  H.run('update(1 / 60); PVP.frame()'); G.run('PVP.frame()');
+  for (let i = 0; i < 60 * 12 && !H.run('!!PVP.ref.verdict'); i++) {
+    H.run('__wall += 1000 / 60; update(1 / 60); PVP.frame()');
+    if (i % 30 === 0) await settle();
+  }
+  ok(roomOf(H).__q['.line'].textContent === 'Your opponent left.', 'the host is told its opponent left', roomOf(H).__q['.line'].textContent);
+  const row = matchRows().find(x => x.id === mh.id);
+  ok(row && row.queue === 'ranked' && row.rated === 1 && row.league === 'gold' && row.verdict === 'forfeit' && row.reason === 'quit'
+     && row.winner === 0 && row.applied === 1, 'recorded: a rated GOLD match, the guest\'s quit, its ratings written', row);
+  ok(rat(DUELIST).rating > 1550 && rat(DUELIST).wins === 4 && rat(RIVAL_ACCT).rating < 1550 && rat(RIVAL_ACCT).losses === 3,
+     'up for the one who stayed, down for the one who quit', [rat(DUELIST), rat(RIVAL_ACCT)]);
+
+  // a modified host puts its own EMBER in the air awake: the guest sees the start break GOLD's rules
+  const before = [rat(DUELIST).rating, rat(RIVAL_ACCT).rating];
+  const pair2 = await queuePair();
+  const [H2, G2] = bootPair(pair2);
+  await flush();
+  H2.run('Save.profile.awakened = { ember: true }');
+  const ship2 = link(H2, G2);
+  H2.run('PVP.frame()'); ship2(H2, G2);
+  for (const g of [H2, G2]) g.run('PVP.frame();' + BOT + WATCH);
+  ok(H2.run('pilotP(0).awake') === 1 && G2.run('pilotP(0).awake') === 1, 'the host flies it awake, and its start takes the guest along');
+  ok(G2.run('PVP.ref.broke') === true, 'the guest sees the start break the match\'s rules');
+  await play(H2, G2, ship2, 60 * 12, () => G2.run('!!PVP.ref.verdict'));
+  const v2 = G2.run('PVP.ref.verdict');
+  const row2 = matchRows().find(x => x.id === pair2[0].id);
+  ok(v2 && v2.v === 'void' && row2 && row2.verdict === 'void' && row2.reason === 'rules' && flagsOf(pair2[0].id).length === 2,
+     'at its next report: no contest, both flagged', [v2, row2]);
+  ok(rat(DUELIST).rating === before[0] && rat(RIVAL_ACCT).rating === before[1], 'and no rating moves');
+
+  // a host that never opens its room: the guest gives up after the connect time, and nothing is recorded
+  const pair3 = await queuePair();
+  const G3 = boot({ mode: 'match', role: 'guest', queue: 'ranked', pilot: 'runner', me: RIVAL, match: pair3[1] }, RIVAL_ACCT);
+  await flush();
+  G3.run('__wall += 76000; PVP.frame()');
+  ok(roomOf(G3).__q.h2.textContent === 'NO MATCH' && roomOf(G3).__q['.line'].textContent === 'Duelist didn\'t connect.',
+     'a guest whose host never opened a room: NO MATCH, after the connect time', roomOf(G3).__q['.line'].textContent);
+  ok(G3.run('PVP.ref.done') === true && !matchRows().some(x => x.id === pair3[0].id), 'nothing more said to the referee, nothing recorded');
 }
 
 section('arriving without the lobby');

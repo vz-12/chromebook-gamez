@@ -13,7 +13,9 @@
 
    plus each player's own reward upgrades, from their own account, never the
    host's: the handshake carries both lists (hello), so both machines deal
-   from the same pool, card for card.
+   from the same pool, card for card. A queued match has both lists from the
+   server instead (the match the lobby was handed), so nobody can say they
+   have more than their account does.
 
    Nothing here is the whole of fairness: the duel's caps (duel.js) are what
    make sure no card, or pile of cards, wins a round in one blow.
@@ -41,9 +43,16 @@
   const match = () => (typeof RUN !== 'undefined' && RUN.pvp) || null;
   const clean = v => (Array.isArray(v) ? v.filter(s => typeof s === 'string' && /^[\w-]{1,40}$/.test(s)).slice(0, 512) : []);
 
-  // each player's reward upgrades: this machine's from its account's loadout for the mode, the other's from its hello
+  /* Each player's reward upgrades: in a queued match, both from the server;
+     otherwise this machine's from its account's loadout for the mode, and
+     the other's from its hello. */
   const own = () => clean(M.loadout().ups);
-  M.upsOf = k => (k === pilotMine() ? own() : clean(M.peer && M.peer.ups));
+  const served = () => (M.hand && M.hand.match && Array.isArray(M.hand.match.sides) ? M.hand.match.sides : null);
+  M.upsOf = k => {
+    const s = served();
+    if (s) return clean(s[k] && s[k].ups);
+    return k === pilotMine() ? own() : clean(M.peer && M.peer.ups);
+  };
   M.hello = () => ({ v: 1, ups: own() });
   M.peerHello = d => { M.peer = { ups: clean(d && d.ups) }; };
 

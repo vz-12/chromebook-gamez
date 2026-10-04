@@ -22,9 +22,11 @@
 (() => {
   'use strict';
 
-  /* What the lobby chose for this tab: { mode, pilot, me, role?, code? },
-     where `me` is /api/pvp/me as the lobby read it (the account, its unlocks,
-     its loadouts). Arriving here any other way goes to the lobby first; the
+  /* What the lobby chose for this tab: { mode, pilot, me, role?, code?,
+     queue?, match? }, where `me` is /api/pvp/me as the lobby read it (the
+     account, its unlocks, its loadouts) and `match` the one the queue found
+     (pvp/src/objects.js, Matchmaker: its id, this side, its rules, both
+     sides). Arriving here any other way goes to the lobby first; the
      engine still boots sealed meanwhile, so it fetches nothing on the way. */
   let hand = null;
   try { hand = JSON.parse(sessionStorage.getItem('vr_pvp_play') || 'null'); } catch (e) {}
@@ -33,8 +35,12 @@
 
   const modes = {};
   const mode = () => (ok && Object.prototype.hasOwnProperty.call(modes, hand.mode) ? modes[hand.mode] : null);
-  // the loadout this mode flies under: casual's (everything owned) unless the mode says
+  /* The loadout this mode flies under: casual's (everything owned) unless the
+     mode says. A queued match flies exactly what the server put in it for
+     this side: its pilot, awake or not, and its reward upgrades. */
   const loadout = () => {
+    const q = ok && hand.match && Array.isArray(hand.match.sides) ? hand.match.sides[hand.match.side] : null;
+    if (q) return { pilots: [q.pilot], awake: q.awake ? [q.pilot] : [], ups: Array.isArray(q.ups) ? q.ups : [] };
     const m = mode(), L = ok ? hand.me.loadouts : null;
     return (L && L[(m && m.loadout) || 'casual']) || { pilots: ['runner'], awake: [], ups: [] };
   };

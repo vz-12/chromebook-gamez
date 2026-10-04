@@ -4,11 +4,14 @@
      { op: 'open', kind: 'friend', pilot }        -> { id, side: 0 }
      { op: 'join', id, pilot }                    -> { id, side: 1, peer }
      { op: 'report', id, report }                 -> { verdict | null }
+     { op: 'code', id, code? }                    -> { code | null }
+         a queued match's room: the host leaves its code, the guest asks
 
    Signed in only; the account is the session's, handed to the Match object
    (objects.js) beside the body, so a player can only ever speak for
    themselves. A friend's match is opened by its host, who passes its id to
-   the guest in the game's hello; matchmaking (step 2) will open them itself.
+   the guest in the game's hello; a queued one is made by its Matchmaker
+   (objects.js), with both sides in it, and its room code passes through it.
    ========================================================================= */
 import { sessionOf, originOk, newId } from '../../src/auth.js';
 import { PILOTS } from './rules.js';
@@ -48,6 +51,10 @@ export default async function match(req, env) {
     if (!isId(b.id)) return reply({ error: 'bad id' }, 400);
     id = b.id;
     body = Object.assign({ report: b.report }, who);
+  } else if (b.op === 'code') {
+    if (!isId(b.id)) return reply({ error: 'bad id' }, 400);
+    id = b.id;
+    body = Object.assign(b.code !== undefined ? { code: b.code } : {}, who);
   } else {
     return reply({ error: 'unknown op' }, 400);
   }

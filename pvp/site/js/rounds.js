@@ -37,10 +37,12 @@
   const match = () => (typeof RUN !== 'undefined' && RUN.pvp) || null;
   const inMatch = () => !!(M.hand && M.hand.mode === 'match' && PILOTS.length > 1 && LS.on);
   /* Best of three below gold, five from there: a ranked match plays to its
-     league's length. A match with a friend is casual: three. */
+     league's length (the lower league's, when two meet), as the server's
+     match says, so both machines play the same match. A match with a friend,
+     or a casual one, is best of three. */
   M.bestOf = () => {
-    const L = M.hand && M.hand.queue === 'ranked' && M.hand.me && M.hand.me.league;
-    return (L && L.bestOf) || 3;
+    const b = M.hand && M.hand.match && M.hand.match.bestOf;
+    return b === 5 ? 5 : 3;
   };
   const toWin = m => Math.ceil(m.bestOf / 2);
   // each pilot's player, by name, as this machine knows them

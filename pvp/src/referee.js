@@ -12,6 +12,9 @@
      parted   its game and the other's ever disagreed (the safety net fired)
      alone    its link to the other is gone
      left     this player quit mid-match (its last word, on the way out)
+     broke    the match broke its rules: a ranked guest saw the host's start
+              put a pilot in the air that the league or the queue did not
+              allow (pvp/site/js/match.js)
      result   at the end: the winner (0 the host, 1 the guest) and the score
 
    A modified client changes only its own copy of the game, which parts from
@@ -21,6 +24,7 @@
 
 export const REF = {
   GRACE: 45 * 1000,          // quiet this long mid-match, while the other stays: a forfeit
+  CONNECT: 90 * 1000,        // a side yet to report (its game not on yet) gets this long to connect
   OPEN_TTL: 30 * 60 * 1000,  // a friend's match nobody joined is let go after this
   MAX_MATCH: 45 * 60 * 1000, // and one that never ends, after this
   KEEP: 10 * 60 * 1000,      // a verdict is kept this long for late reports, then the object empties
@@ -34,7 +38,7 @@ const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
    and a malformed part is refused rather than half read. */
 export function cleanReport(b) {
   if (!b || typeof b !== 'object') return null;
-  const out = { fps: [], parted: b.parted === true, alone: b.alone === true, left: b.left === true, result: null,
+  const out = { fps: [], parted: b.parted === true, alone: b.alone === true, left: b.left === true, broke: b.broke === true, result: null,
                 tick: int(b.tick, 0, 1e9) ? b.tick : 0 };
   if (b.fps !== undefined) {
     if (!Array.isArray(b.fps) || b.fps.length > REF.MAX_FPS) return null;
@@ -57,7 +61,7 @@ export function cleanReport(b) {
 
 // a fresh side of a match: who, flying what, and what it has said
 export const newSide = (acct, name, pilot, now) =>
-  ({ acct, name, pilot, seen: now, fps: {}, order: [], result: null, parted: false, alone: false, left: false, tick: 0 });
+  ({ acct, name, pilot, seen: now, fps: {}, order: [], result: null, parted: false, alone: false, left: false, broke: false, reported: false, tick: 0 });
 
 /* One side's report, into the match: when it was last heard from, its
    fingerprints (each held up against the other side's for the same step),
@@ -65,9 +69,11 @@ export const newSide = (acct, name, pilot, now) =>
 export function take(m, side, rep, now) {
   const me = m.sides[side], other = m.sides[1 - side];
   me.seen = now;
+  me.reported = true;
   me.tick = Math.max(me.tick, rep.tick);
   if (rep.parted) me.parted = true;
   if (rep.left) me.left = true;
+  if (rep.broke) me.broke = true;
   me.alone = rep.alone;
   if (rep.result && !me.result) me.result = rep.result;
   for (const [epoch, step, hash] of rep.fps) {
@@ -89,7 +95,8 @@ const sameResult = (a, b) => a.winner === b.winner && a.score[0] === b.score[0] 
                 or never said and the match ran out its time)
      forfeit    one side quit, or went quiet mid-match while the other stayed
      void       no contest: the games parted, the fingerprints or the results
-                disagree, or both lost the link; both sides are flagged
+                disagree, the match broke its rules, or both lost the link;
+                both sides are flagged
      abandoned  both went quiet, or it never ended: nothing to record
      expired    nobody joined: nothing to record */
 export function decide(m, now) {
@@ -99,11 +106,13 @@ export function decide(m, now) {
   const flag = reason => ({ v: 'void', reason, flag: [0, 1] });
   if (m.mismatch) return flag('fingerprints');
   if (A.parted || B.parted) return flag('parted');
+  if (A.broke || B.broke) return flag('rules');
   if (A.result && B.result)
     return sameResult(A.result, B.result)
       ? { v: 'played', winner: A.result.winner, score: A.result.score, bestOf: A.result.bestOf }
       : flag('results');
-  const quiet = s => now - s.seen > REF.GRACE;
+  // a side that has reported is quiet after the grace; one whose game is not on yet, after the connect time
+  const quiet = s => now - s.seen > (s.reported ? REF.GRACE : REF.CONNECT);
   if (A.result || B.result) {
     const [r, other] = A.result ? [A.result, B] : [B.result, A];
     /* The other was there to the end and left without saying: the one result
@@ -134,7 +143,8 @@ export function nextLook(m, now) {
   if (m.verdict) return m.verdict.at + REF.KEEP;
   const [A, B] = m.sides;
   if (!B) return m.created + REF.OPEN_TTL + 1000;
-  return Math.max(now + 1000, Math.min(Math.min(A.seen, B.seen) + REF.GRACE + 1000, m.started + REF.MAX_MATCH + 1000));
+  const due = s => s.seen + (s.reported ? REF.GRACE : REF.CONNECT) + 1000;
+  return Math.max(now + 1000, Math.min(due(A), due(B), m.started + REF.MAX_MATCH + 1000));
 }
 
 // a verdict worth a row in pvp_matches

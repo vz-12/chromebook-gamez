@@ -12,7 +12,7 @@
                       co-op rooms (../../src/room.js), on PvP's own store
      /api/turn        the relay's credentials, asked of the game's Worker
      /api/pvp/match   a match's referee: the Match object (match.js, objects.js)
-     /api/pvp/queue   matchmaking: the Matchmaker object, Phase 5 step 2; not yet
+     /api/pvp/queue   matchmaking: the Matchmaker object, one per queue (queue.js, objects.js)
      everything else  pvp/site
 
    A player arrives signed in from the game by a hand-off code, and goes back
@@ -23,6 +23,7 @@ import room from '../../src/room.js';
 import me from './me.js';
 import turn from './turn.js';
 import match from './match.js';
+import queue from './queue.js';
 
 export { Matchmaker, Match } from './objects.js';
 
@@ -32,15 +33,14 @@ const json = (body, status) =>
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
   });
 
-const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn, '/api/pvp/match': match };
-const LATER = new Set(['/api/pvp/queue']);
+const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn,
+                 '/api/pvp/match': match, '/api/pvp/queue': queue };
 
 export default {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
     if (!path.startsWith('/api/')) return env.ASSETS.fetch(req);
     if (!env.DB) return json({ error: 'no database: bind a D1 database as DB' }, 503);
-    if (LATER.has(path)) return json({ error: 'matchmaking arrives in a later update' }, 501);
     const route = Object.prototype.hasOwnProperty.call(ROUTES, path) ? ROUTES[path] : null;
     if (!route) return json({ error: 'not found' }, 404);
     try {

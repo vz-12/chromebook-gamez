@@ -58,21 +58,38 @@
     return td;
   }
 
+  // a pilot picker, from a loadout: its pilots, said with AWAKE where they fly it; the choice kept across renders
+  function pilotList(sel, lo, names) {
+    const was = sel.value;
+    sel.textContent = '';
+    for (const id of lo.pilots) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = names[id] + (lo.awake.includes(id) ? ' · AWAKE' : '');
+      sel.append(o);
+    }
+    if (lo.pilots.includes(was)) sel.value = was;
+  }
+
   function render(d) {
     $('name').textContent = d.account.display;
     const lg = d.league;
     $('league').textContent = lg.n;
-    if (lg.provisional) {
-      const sm = document.createElement('small');
-      sm.textContent = 'TO BE PLACED';
-      $('league').append(sm);
-    }
+    const sm = document.createElement('small');
+    sm.textContent = lg.provisional ? 'TO BE PLACED' : lg.rating + ' · ' + lg.wins + 'W ' + lg.losses + 'L';
+    $('league').append(sm);
+    const flies = lg.pilots === 'base' || lg.provisional ? 'base pilots only, not awake' : 'every pilot you own, awake where it is';
     $('leagueNote').textContent = lg.provisional
-      ? 'Ratings start when matchmaking opens. Until your placement matches, ranked puts you in ' +
-        lg.n + ': base pilots only, not awake. Your reward upgrades count in every league.'
-      : '';
+      ? 'Play ' + lg.left + ' more ranked match' + (lg.left === 1 ? '' : 'es') + ' to be placed in a league. Until then ranked puts you in ' +
+        lg.n + ': ' + flies + '. Your reward upgrades count in every league.'
+      : lg.n + ' flies ' + flies + ', best of ' + lg.bestOf + '. Your reward upgrades count in every league.';
     $('rankedHead').textContent = 'RANKED · ' + lg.n;
+    $('rankedHead2').textContent = 'RANKED · ' + lg.n;
+    $('rankedRule').textContent = 'Rated, in leagues. ' + (lg.provisional ? lg.left + ' placement match' + (lg.left === 1 ? '' : 'es') + ' to go. ' : '') +
+      'Best of ' + lg.bestOf + ', ' + flies + '.';
     const { ranked, casual } = d.loadouts;
+    pilotList($('rankedPilot'), ranked, d.pilots);
+    pilotList($('casualPilot'), casual, d.pilots);
     const body = $('pilots');
     body.textContent = '';
     for (const [id, n] of Object.entries(d.pilots)) {
@@ -90,17 +107,9 @@
       tr.append(act);
       body.append(tr);
     }
-    // the match's pilot: any one owned, said with AWAKE where it is
+    // a friend's match: any pilot owned
     me = d;
-    const sel = $('matchPilot'), was = sel.value;
-    sel.textContent = '';
-    for (const id of casual.pilots) {
-      const o = document.createElement('option');
-      o.value = id;
-      o.textContent = d.pilots[id] + (casual.awake.includes(id) ? ' · AWAKE' : '');
-      sel.append(o);
-    }
-    if (casual.pilots.includes(was)) sel.value = was;
+    pilotList($('matchPilot'), casual, d.pilots);
     const ups = ranked.ups.length;
     $('ups').textContent = d.unlocks === null
       ? 'Your account has no save yet. Fly a run in VOIDRUNNER while signed in, and your unlocks arrive here.'
@@ -125,6 +134,87 @@
     const code = $('code').value.trim().toUpperCase();
     if (!/^[A-Z0-9]{4}$/.test(code)) { $('matchMsg').textContent = 'A CODE IS FOUR LETTERS AND NUMBERS'; return; }
     play({ mode: 'match', role: 'guest', code, pilot: $('matchPilot').value });
+  });
+
+  /* The queues (/api/pvp/queue): join with a pilot, then poll every two
+     seconds until the server pairs this player with someone. The match it
+     hands back (its id, this player's side and role, the rules it flies and
+     both sides) goes to the play page, which connects the two by the room
+     code the match passes along. A ticket nobody polls is dropped, so a
+     closed tab leaves the queue by itself; leaving says so at once. */
+  const Q = { queue: null, t0: 0, poll: 0, clock: 0 };
+  const queueCall = (op, extra) => call('POST', '/api/pvp/queue', Object.assign({ op, queue: Q.queue }, extra));
+  const mmss = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+  function searching(on, what) {
+    $('queues').hidden = on;
+    $('searching').hidden = !on;
+    $('searching').classList.remove('found');
+    clearInterval(Q.clock);
+    if (!on) return;
+    $('searchWhat').textContent = what;
+    $('searchClock').textContent = '0:00';
+    $('searchNote').textContent = 'Looking for an opponent near your rating. The search widens the longer you wait.';
+    $('cancel').hidden = false;
+    Q.clock = setInterval(() => { $('searchClock').textContent = mmss(Date.now() - Q.t0); }, 500);
+  }
+  function stopQueue(msg) {
+    Q.queue = null;
+    clearTimeout(Q.poll);
+    searching(false);
+    $('queueMsg').textContent = msg || '';
+  }
+  function heard(r) {
+    if (!Q.queue) return;
+    if (r.status === 401) { stopQueue(); show('signin'); return; }
+    if (!r.ok || !r.d) { Q.poll = setTimeout(pollQueue, 3000); return; }       // a blip: try again
+    if (r.d.state === 'matched') { found(r.d.match); return; }
+    if (r.d.state !== 'waiting') { stopQueue('YOUR PLACE IN THE QUEUE WAS LOST: TRY AGAIN'); return; }
+    Q.poll = setTimeout(pollQueue, 2000);
+  }
+  async function pollQueue() { if (Q.queue) heard(await queueCall('poll')); }
+
+  async function joinQueue(queue) {
+    if (Q.queue) return;
+    const pilot = $(queue + 'Pilot').value;
+    $('queueMsg').textContent = '';
+    Q.queue = queue; Q.t0 = Date.now();
+    searching(true, 'SEARCHING ' + (queue === 'ranked' ? 'RANKED' : 'CASUAL'));
+    const r = await queueCall('join', { pilot });
+    if (r.ok || r.status === 401) { heard(r); return; }
+    stopQueue(r.status === 400 && r.d && r.d.error ? String(r.d.error).toUpperCase()
+      : r.status ? 'SOMETHING WENT WRONG (' + r.status + ')' : 'CAN\'T REACH THE SERVER');
+  }
+
+  // paired: who against, a moment to read it, then the match
+  function found(match) {
+    const queue = Q.queue;
+    Q.queue = null;
+    clearTimeout(Q.poll); clearInterval(Q.clock);
+    const them = match.sides[1 - match.side];
+    $('searching').classList.add('found');
+    $('searchWhat').textContent = 'MATCH FOUND';
+    $('searchClock').textContent = '';
+    $('searchNote').textContent = 'Against ' + them.name + ', flying ' + ((me && me.pilots[them.pilot]) || them.pilot) +
+      (them.awake ? ' (awake)' : '') + '. ' + match.league.n + ', best of ' + match.bestOf + '.';
+    $('cancel').hidden = true;
+    setTimeout(() => play({ mode: 'match', role: match.role, queue, pilot: match.sides[match.side].pilot, match }), 1200);
+  }
+
+  $('playRanked').addEventListener('click', () => joinQueue('ranked'));
+  $('playCasual').addEventListener('click', () => joinQueue('casual'));
+  $('cancel').addEventListener('click', async () => {
+    if (!Q.queue) return;
+    const r = await queueCall('leave');
+    if (r.ok && r.d && r.d.state === 'matched') { found(r.d.match); return; }    // too late: already paired
+    stopQueue();
+  });
+  addEventListener('pagehide', () => {
+    if (!Q.queue) return;
+    try {
+      fetch('/api/pvp/queue', { method: 'POST', keepalive: true, credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'leave', queue: Q.queue }) });
+    } catch (e) {}
   });
 
   async function load() {
@@ -154,6 +244,7 @@
   });
 
   $('out').addEventListener('click', async () => {
+    if (Q.queue) { await queueCall('leave'); stopQueue(); }
     await call('POST', '/api/account', { op: 'logout' });
     show('signin');
   });

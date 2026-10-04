@@ -645,6 +645,29 @@ plain requests and use alarms for their timers.
    - Ranked flies the league's loadout and length (best of five from
      gold); `/api/pvp/me` gives the league from the rating.
    - The lobby gets PLAY RANKED and PLAY CASUAL.
+   - **As built (4 Oct):**
+     - Pairing is by cost: rating apart, plus 300 for another continent
+       and 400 for another league (ranked). It pairs once the cost fits a
+       window that starts at 100 and grows 8 a second, up to 1500 (casual:
+       200, 15 a second, up to 3000). Casual matches on the ranked rating
+       too, unrated.
+     - **Brackets:** the base-pilot leagues (bronze to gold) and the
+       everything-goes ones (platinum, void) are never paired with each
+       other, since the pilot is picked before queueing. When two leagues
+       meet, the match flies the lower one's rules and length (my call).
+     - The ticket is made on the server from the account's save and
+       rating: the pilot must be allowed, and its awake form and reward
+       upgrades come from the account, never the browser. Both machines fly
+       the server's lists (the host puts the guest's pilot in the air as
+       the server has it; the guest checks the host's start, and reports
+       `broke` if it is wrong, which voids the match).
+     - Five placement matches (`PLACEMENTS`); until then, the lowest
+       league's rules, and no league is shown.
+     - Only the queue's Matchmaker writes its ratings, one match at a time;
+       a match marked `applied` is never rated twice.
+     - A queued match not under way in 75 s is let go on the client;
+       the referee gives a side that has not reported yet 90 s
+       (`CONNECT`) before calling it quiet.
 3. **The ladder and user profiles.**
    - The leaderboard page's PVP tab: the ladder by league and rating, with
      search, from the same D1 (`/api/boards` on the game's Worker).
