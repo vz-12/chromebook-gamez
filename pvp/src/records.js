@@ -89,7 +89,8 @@ export async function ratingOf(db, acct, queue, season = seasonOf()) {
    before it (glicko.js), in the match's season, and the match marked applied
    in the same batch, so a retry changes nothing. Only a rated match that was
    played or forfeited moves a rating; no contest leaves both where they were.
-   The caller (the queue's Matchmaker) makes sure two never run at once. */
+   The caller (the queue's Matchmaker) makes sure two never run at once.
+   Returns each side's rating before and after, for the result screen. */
 export async function applyRating(db, id) {
   await ensurePvp(db);
   const m = await db.prepare('SELECT * FROM pvp_matches WHERE id = ?1').bind(id).first();
@@ -99,9 +100,12 @@ export async function applyRating(db, id) {
   const [ra, rb] = await Promise.all([ratingOf(db, m.a, m.queue, m.season), ratingOf(db, m.b, m.queue, m.season)]);
   const [na, nb] = rateMatch(ra || START, rb || START, m.winner === 0);
   const now = Date.now();
+  const told = [];
   const put = (acct, old, n, won) => {
     const games = (old ? old.games : 0) + 1;
     const lg = leagueOf({ rating: n.rating, games });
+    told.push({ before: Math.round(old ? old.rating : START.rating), after: Math.round(n.rating), games,
+                league: lg.provisional ? null : lg.id, left: lg.left });
     return db.prepare(
       `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -113,7 +117,7 @@ export async function applyRating(db, id) {
   };
   await db.batch([put(m.a, ra, na, m.winner === 0), put(m.b, rb, nb, m.winner === 1),
                   db.prepare('UPDATE pvp_matches SET applied = 1 WHERE id = ?1').bind(id)]);
-  return { ok: true, moved: true };
+  return { ok: true, moved: true, ratings: told };
 }
 
 /* A decided match, and its flags, in one batch. Written once: a second try

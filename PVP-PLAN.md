@@ -699,6 +699,17 @@ plain requests and use alarms for their timers.
        plain placeholders and their data in the file's header. Add `?hooks`
        to the address to outline every canvas with its hook and size.
      - The PvP lobby links to the player's own profile.
+   - **Art hooks for the belt and the ending screens** (user, 4 Oct: "the
+     victory and loss screen looks a bit plain"), for the user to redraw:
+     - `PVP_ART.result` draws the end of a match: VICTORY, DEFEAT, OPPONENT
+       LEFT, NO CONTEST. The match now keeps each round (its winner, when,
+       the winner's health) and the damage each pilot dealt. The referee's
+       verdict carries the rating before and after. The HTML room steps
+       aside to its button when the hook exists.
+     - `PVP_ART.belt` also gets both pilots (name, pilot, colour, awake,
+       hull) and the kind of match, from each player's own side.
+     - `/play/?preview=belt` and `?preview=result` show both with sample
+       data on the real engine, asking the network for nothing.
 4. **Seasons and hardening.**
    - A season close pays PvP podiums through the existing awards, and
      resets ratings softly.

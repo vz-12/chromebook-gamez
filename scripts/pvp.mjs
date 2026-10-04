@@ -534,6 +534,9 @@ section('matchmaking: the queues, the pairing, and the ratings');
   // played out: the ratings move, once
   const fin = await playOut(duel, rival, M.id, won0);
   ok(fin.d.verdict && fin.d.verdict.v === 'played', 'played to the end, both agreeing', fin.d);
+  const told = fin.d.verdict.rating;
+  ok(told && told.before === 1500 && told.after < 1500 && told.games === 1 && told.league === null && told.left === 4,
+     'the verdict tells the side asking its own rating, before and after, for its result screen', told);
   const rd = rating('duelist'), rr = rating('rival');
   ok(rd && rr && rd.rating > 1500 && rr.rating < 1500 && rd.games === 1 && rd.wins === 1 && rr.losses === 1 && rd.rd < 350,
      'the winner\'s rating rises and the loser\'s falls, each surer of itself', [rd, rr]);

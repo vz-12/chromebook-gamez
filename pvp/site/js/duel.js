@@ -145,7 +145,10 @@
     try { pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap } })); }
     finally { hackBy = script; }
     const dealt = Math.max(0, before - Math.max(0, p.hp));
-    if (dealt > 0) recent.push([m.clock, dealt]);
+    if (dealt > 0) {
+      recent.push([m.clock, dealt]);
+      if (m.dealt) m.dealt[by] += dealt;           // for the result screen
+    }
     return dealt;
   }
   M.land = land;

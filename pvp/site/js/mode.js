@@ -14,6 +14,8 @@
      rounds.js   down, levelUp, hud, draw,     the match: rounds, picks, the HUD
                  idle, hash
      practice.js, match.js                     the kinds of play (`modes`)
+     preview.js                                the art hooks with sample data
+                                               (/play/?preview=belt or =result)
 
    The engine's names (resetGame, P, state, Save, CHARS, applyChar…) are its
    own globals. They are read only from inside the hooks, which the engine
@@ -29,7 +31,15 @@
      sides). Arriving here any other way goes to the lobby first; the
      engine still boots sealed meanwhile, so it fetches nothing on the way. */
   let hand = null;
-  try { hand = JSON.parse(sessionStorage.getItem('vr_pvp_play') || 'null'); } catch (e) {}
+  const preview = (/[?&]preview=(belt|result)(?:&|$)/.exec(location.search) || [])[1];
+  if (preview) {
+    // the art previews (preview.js): no lobby, no account, nothing fetched
+    const all = { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: [], ups: [] };
+    hand = { mode: 'preview', preview, pilot: 'runner',
+             me: { account: { name: 'preview', display: 'YOU' }, unlocks: null, loadouts: { casual: all, ranked: all } } };
+  } else {
+    try { hand = JSON.parse(sessionStorage.getItem('vr_pvp_play') || 'null'); } catch (e) {}
+  }
   const ok = !!(hand && hand.me && hand.me.loadouts && typeof hand.mode === 'string');
   if (!ok) location.replace('/');
 

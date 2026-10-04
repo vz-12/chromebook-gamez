@@ -76,7 +76,12 @@
 #pvp-room .note.bad{color:#f87171}
 #pvp-room button{margin-top:16px;padding:10px 18px;border-radius:7px;cursor:pointer;background:rgba(103,232,249,.12);
   border:1px solid rgba(103,232,249,.6);color:#67e8f9;font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
-#pvp-room button:hover{background:rgba(103,232,249,.22)}`;
+#pvp-room button:hover{background:rgba(103,232,249,.22)}
+#pvp-room.result{align-items:flex-end;background:transparent;pointer-events:none}
+#pvp-room.result .card{width:auto;max-width:none;padding:0 0 5vh;background:none;border:0;box-shadow:none;pointer-events:auto}
+#pvp-room.result h2,#pvp-room.result .code,#pvp-room.result .line,#pvp-room.result .note{position:absolute;width:1px;height:1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+#pvp-room.result button{margin:0;background:rgba(8,13,22,.82)}`;
 
   function room() {
     if (box) return box;
@@ -115,9 +120,66 @@
     M.leave();
   }
 
+  /* ------------------------------- the result -------------------------------
+     What art.js's PVP_ART.result is handed (rounds.js draws it every frame,
+     under the room's button): taken the moment the match ends and kept up to
+     date as the referee answers (the verdict, and in ranked the rating).
+     When the other side went, the engine has already let the second pilot
+     go (mpPeerGone), so this side is the referee's (or the link's role), and
+     the pilots are the server's match or the handshake's, not the air's.
+     With the hook drawn, the room steps aside to its button; its words
+     stay, for a screen reader. */
+  M.shown = null;
+  const CHAR = id => CHARS.find(c => c.id === id) || null;
+  const mySide = () => (M.ref.side >= 0 ? M.ref.side : MP.role === 'guest' ? 1 : 0);
+  // pilot k as this side sees it: its player's name, which pilot, its colour, awake or not
+  function pilotOf(k, me) {
+    const p = PILOTS.length > 1 ? pilotP(k) : null, mine = k === me;
+    const id = p ? p.charId : Q ? Q.sides[k].pilot : ((mine ? CHARS[selectedChar] : CHARS[MP.peerChar]) || CHARS[0]).id;
+    const c = CHAR(id);
+    const name = mine ? Save.profile.name || 'YOU' : MP.peerName || (Q ? Q.sides[k].name : 'RIVAL');
+    const awake = p ? !!p.awake : Q ? !!Q.sides[k].awake : mine ? isAwake(id) : !!MP.peerAwake;
+    return { name: String(name).toUpperCase(), pilot: id, pilotName: c ? c.n : '', col: c ? c.col : '#67e8f9', awake };
+  }
+  /* Who is fighting, from this side, and what kind of match: what the belt
+     (rounds.js) and the result are both handed beside their own data. */
+  M.versus = () => {
+    const m = (typeof RUN !== 'undefined' && RUN.pvp) || null;
+    const me = mySide(), them = 1 - me;
+    return {
+      me: pilotOf(me, me), them: pilotOf(them, me),
+      bestOf: m ? m.bestOf : M.bestOf(),
+      queue: Q ? Q.queue : 'friend',
+      league: Q && Q.queue === 'ranked' && Q.league ? { id: Q.league.id, n: Q.league.n } : null,
+      rated: !!(Q && Q.rated),
+      hull: id => hullPath(id)
+    };
+  };
+  function scene(outcome) {
+    const m = (typeof RUN !== 'undefined' && RUN.pvp) || null;
+    const me = mySide(), them = 1 - me;
+    const b = m ? M.maps.belt(m) : null;
+    return Object.assign(M.versus(), {
+      outcome,                                   // 'won' | 'lost' | 'left' (the other side went) | 'void'
+      score: m ? [m.score[me], m.score[them]] : [0, 0],
+      time: m ? m.clock : 0,
+      rounds: m && m.log ? m.log.map(r => ({ won: r.w === me, at: r.at, left: r.left })) : [],
+      dealt: m && m.dealt ? [Math.round(m.dealt[me]), Math.round(m.dealt[them])] : [0, 0],
+      map: b ? b.maps[b.pick] : null,
+      infested: !!(m && m.infested),
+      verdict: null,
+      rating: null
+    });
+  }
+  function show(outcome) {
+    M.shown = { at: Date.now(), r: scene(outcome) };
+    if (window.PVP_ART && typeof PVP_ART.result === 'function') room().classList.add('result');
+  }
+
   // the match is over for this machine: say why, and stay put until they go back
   function end(why) {
     over = why;
+    show('left');
     try { if (LS.on) lsLeave(); pilotsEnd(); } catch (e) {}
     state = 'pvp';
     say('MATCH OVER', '', why, '', false);
@@ -125,10 +187,19 @@
   }
 
   /* What the referee made of it (referee.js), under whichever screen is up:
-     the result, or the other side leaving. */
+     the result, or the other side leaving. Whose win it was is by the
+     referee's side, which stays put when the second pilot has gone. */
   function told(v) {
-    if (!v || !box) return;
-    const me = pilotMine(), m = typeof RUN !== 'undefined' && RUN.pvp;
+    if (!v) return;
+    const me = mySide();
+    if (M.shown) {
+      const r = M.shown.r;
+      r.verdict = { v: v.v, won: v.winner === null || v.winner === undefined ? null : v.winner === me };
+      r.rating = v.rating || null;
+      if (v.v === 'void') r.outcome = 'void';
+    }
+    if (!box) return;
+    const m = typeof RUN !== 'undefined' && RUN.pvp;
     const line = v.v === 'played' ? (m ? 'best of ' + m.bestOf + '  ·  ' : '') + 'recorded'
       : v.v === 'forfeit' ? (v.winner === me ? 'a win by forfeit' : 'a loss by forfeit') + '  ·  recorded'
       : v.v === 'void' ? 'no contest: the two games disagreed'
@@ -202,6 +273,7 @@
   function result(m) {
     const me = pilotMine(), them = 1 - me, won = m.winner === me;
     over = won ? 'won' : 'lost';
+    show(over);
     say(won ? 'VICTORY' : 'DEFEAT', '', M.nameOf(me) + '  ' + m.score[me] + ' — ' + m.score[them] + '  ' + M.nameOf(them),
         'best of ' + m.bestOf, false);
     M.ref.finish(m);

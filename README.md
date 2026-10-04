@@ -256,9 +256,18 @@ own co-op as it is: lockstep, each player flying their own pilot.
 - **Maps** (`maps.js`): one of seven sectors, clean or infested. Infested
   sends the sector's enemies, six at a time at most. Even odds; 75% infested
   with one HACKER in the fight, always with two.
-- **Art hook** (`art.js`): `PVP_ART.belt(g, w, h, t, d)` draws the map draw
-  at the start of a match. Its header says what it is handed; redraw it
-  without touching anything else.
+- **Art hooks** (`art.js`), each drawn every frame onto the game's canvas;
+  the file's header says what each is handed. Redraw them without touching
+  anything else:
+  - `PVP_ART.belt(g, w, h, t, d)`: the map draw at the start of a match,
+    with both pilots and the kind of match.
+  - `PVP_ART.result(g, w, h, t, r)`: the end of a match (victory, defeat,
+    opponent left, no contest), with the rounds, the damage, the referee's
+    verdict and, in ranked, the rating change. The lobby button sits along
+    the bottom.
+  - To see them without playing, open `/play/?preview=belt` or
+    `/play/?preview=result` (`preview.js`: buttons for every outcome,
+    ranked and casual). Locally, `npm run dev:pvp` first.
 
 ## The leaderboard page
 

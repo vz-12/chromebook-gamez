@@ -45,11 +45,14 @@ class Serial {
 
 /* --------------------------------- MATCH --------------------------------- */
 
-// what a side is told of the match: never the other side's account or fingerprints
+/* What a side is told of the match: never the other side's account or
+   fingerprints. With a rated verdict, once written, its own rating before
+   and after (the result screen's). */
 const view = (m, side) => ({
   ok: true, id: m.id, side, queue: m.queue,
   peer: m.sides[1 - side] ? { name: m.sides[1 - side].name, pilot: m.sides[1 - side].pilot } : null,
-  verdict: m.verdict ? { v: m.verdict.v, winner: m.verdict.winner ?? null, score: m.verdict.score || null } : null
+  verdict: m.verdict ? { v: m.verdict.v, winner: m.verdict.winner ?? null, score: m.verdict.score || null,
+                         rating: (m.verdict.ratings && m.verdict.ratings[side]) || null } : null
 });
 const isCode = v => typeof v === 'string' && /^[A-Z0-9]{4}$/.test(v);
 
@@ -137,8 +140,11 @@ export class Match extends Serial {
       try {
         const mm = this.env.MATCHMAKER;
         const r = await post(mm.get(mm.idFromName(m.queue)), 'rate', { id: m.id });
-        if (r.ok) v.rated = true;
-        else console.error('pvp rating', m.id, r.status);
+        if (r.ok) {
+          v.rated = true;
+          const d = await r.json().catch(() => null);
+          if (d && Array.isArray(d.ratings) && d.ratings.length === 2) v.ratings = d.ratings;
+        } else console.error('pvp rating', m.id, r.status);
       } catch (e) { console.error('pvp rating', m.id, e && e.message); }
     }
     await this.ctx.storage.put('m', m);

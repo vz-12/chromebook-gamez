@@ -56,7 +56,9 @@
       v: 1, run: LS.run, phase: 'belt', t: 0, clock: 0, nextPick: ROUNDS.pickEvery,
       round: 0, bestOf: M.bestOf(), score: [0, 0], winner: -1, loser: -1, owed: [0, 0],
       map: map.index, infested: map.infested, odds: map.odds, hackers: map.hackers,
-      spawnT: 2.5, hits: [[], []]
+      spawnT: 2.5, hits: [[], []],
+      log: [],              // each round as it ends: { w: its winner, at: the match clock, left: the winner's health, 0 to 1 }
+      dealt: [0, 0]         // the health each pilot has taken off the other (duel.js), for the result screen
     };
     /* A run never fights at wave 0: its first wave is 1. The game's curves
        start there too, and below it an enemy is born with negative health
@@ -163,6 +165,7 @@
     m.score[m.winner]++;
     m.phase = 'end'; m.t = 0;
     const w = pilotP(m.winner);
+    if (m.log) m.log.push({ w: m.winner, at: m.clock, left: w && w.maxHp ? Math.max(0, w.hp) / w.maxHp : 0 });
     if (w) w.iframe = Math.max(w.iframe, ROUNDS.endT + 1);   // nothing the room does now takes the round back
     const over = m.score[m.winner] >= toWin(m);
     banner((over ? 'MATCH TO ' : 'ROUND TO ') + M.nameOf(m.winner), m.winner === pilotMine() ? '#86efac' : '#f87171', ROUNDS.endT);
@@ -191,15 +194,27 @@
   };
 
   /* -------------------------------- drawing ------------------------------- */
-  // PvP's own screen: the belt, while the map is drawn (art.js)
-  let artErr = false;
-  M.draw = () => {
-    const m = match();
-    if (!m || m.phase !== 'belt' || !window.PVP_ART || !PVP_ART.belt) return;
+  /* PvP's own screen (the engine's 'pvp' state), drawn by art.js's hooks:
+     the result once a match is over or left (match.js sets M.shown), the belt
+     while the map is drawn, or either with sample data on /play/?preview=
+     (preview.js sets M.preview). A hook that throws is logged once. */
+  const artErr = new Set();
+  function paint(hook, t, d) {
+    if (!window.PVP_ART || typeof PVP_ART[hook] !== 'function') return false;
     ctx.save();
-    try { PVP_ART.belt(ctx, W, H, m.t, Object.assign({ dur: ROUNDS.beltT }, M.maps.belt(m))); }
-    catch (e) { if (!artErr) { artErr = true; console.error('PVP_ART.belt', e); } }
+    try { PVP_ART[hook](ctx, W, H, t, d); }
+    catch (e) { if (!artErr.has(hook)) { artErr.add(hook); console.error('PVP_ART.' + hook, e); } }
     ctx.restore();
+    return true;
+  }
+  // what the belt is handed (art.js): the draw, and who is fighting (match.js, M.versus)
+  M.beltData = m => Object.assign({ dur: ROUNDS.beltT }, M.maps.belt(m), M.versus ? M.versus() : null);
+  M.draw = () => {
+    const since = s => (Date.now() - s.at) / 1000;
+    if (M.shown && paint('result', since(M.shown), M.shown.r)) return;
+    if (M.preview && M.preview.belt) { paint('belt', since(M.preview), M.preview.belt); return; }
+    const m = match();
+    if (m && m.phase === 'belt') paint('belt', m.t, M.beltData(m));
   };
 
   /* The HUD's right-hand column, where a run shows its score: the round, the

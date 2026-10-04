@@ -20,6 +20,50 @@
                hackers    how many of the two pilots are THE HACKER (0, 1, 2),
                           which is what tipped the odds
                dur        the belt's length in seconds (4.8)
+             and who is fighting, from this player's side (the same fields
+             PVP_ART.result gets):
+               me, them   { name, pilot, pilotName, col, awake }
+               bestOf     3 or 5
+               queue      'ranked' | 'casual' | 'friend'
+               league     { id, n } in ranked, else null
+               rated      whether a rating moves
+               hull(id)   that pilot's real hull as a path on g (see below)
+
+   PVP_ART.result(g, w, h, t, r)
+     The end of a match, from this player's side: called every frame from
+     the moment it ends until they leave, onto the game's own canvas, the
+     same way as the belt. t is seconds since it appeared. The room's one
+     button (BACK TO THE LOBBY) sits centred along the bottom: leave about
+     90 px there. r:
+
+       outcome   'won' | 'lost' | 'left' (the other player went before the
+                 end: a win by forfeit, once the referee says so) | 'void'
+                 (the referee found the two games disagreed: no contest).
+                 It can turn to 'void' a moment after it first shows.
+       score     [mine, theirs] rounds          bestOf  3 or 5
+       time      the match's fighting time, in seconds
+       me, them  { name, pilot: 'runner' | 'ember' | 'hacker' | 'melee',
+                   pilotName, col (the pilot's colour, '#rrggbb'), awake }
+       rounds    each round in order: { won (mine?), at (match clock, s),
+                 left (the winner's health when it ended, 0 to 1) }
+       dealt     [mine, theirs]: health each took off the other
+       map       { name, tag, accent, bg, grid, wall }, as on the belt
+       infested  true or false
+       queue     'ranked' | 'casual' | 'friend'
+       league    { id, n } in ranked ('bronze' … 'void'), else null
+       rated     whether a rating moves
+       verdict   null until the referee answers (a second or so, longer if
+                 the other side went quiet), then { v: 'played' | 'forfeit'
+                 | 'void', won (true | false | null) }
+       rating    ranked, once written: { before, after, games, league (an
+                 id, or null while still being placed), left (placement
+                 matches to go) }, else null
+       hull(id)  builds that pilot's real hull as a path on g, nose to the
+                 right, about 36 px long: translate, rotate and scale first,
+                 then fill or stroke
+
+   Both hooks can be seen without playing: /play/?preview=belt and
+   /play/?preview=result (with buttons for each outcome; preview.js).
 
    The background is already painted (the game's own dark). A throw is
    logged once and leaves the screen blank; the match carries on regardless.
@@ -64,6 +108,27 @@
       g.fillStyle = '#64748b';
       g.font = "700 12px 'Chakra Petch', Barlow, sans-serif";
       g.fillText('THE ARENA', cx, cy - ch / 2 - 40);
+
+      // who is fighting: each player and their pilot, facing each other
+      if (d.me && d.them) {
+        const vy = Math.max(48, cy - ch / 2 - 120), off = Math.min(250, w * 0.3);
+        const side = (p, x, dir) => {
+          g.save(); g.translate(x - dir * 34, vy); g.rotate(dir < 0 ? Math.PI : 0); g.scale(1.3, 1.3);
+          d.hull(p.pilot); g.fillStyle = p.col; g.fill(); g.restore();
+          g.textAlign = dir > 0 ? 'left' : 'right';
+          g.fillStyle = '#e2e8f0'; g.font = "700 15px 'JetBrains Mono', monospace";
+          g.fillText(p.name, x, vy - 8);
+          g.fillStyle = p.col; g.font = "600 10px 'Chakra Petch', Barlow, sans-serif";
+          g.fillText(p.pilotName + (p.awake ? '  ·  AWAKE' : ''), x, vy + 10);
+        };
+        side(d.me, cx - off, 1);
+        side(d.them, cx + off, -1);
+        g.textAlign = 'center';
+        g.fillStyle = '#f472b6'; g.font = "800 18px 'Chakra Petch', Barlow, sans-serif";
+        g.fillText('VS', cx, vy - 6);
+        g.fillStyle = '#64748b'; g.font = "600 10px 'Chakra Petch', Barlow, sans-serif";
+        g.fillText((d.league ? d.league.n + '  ·  ' : d.queue === 'casual' ? 'CASUAL  ·  ' : '') + 'BEST OF ' + d.bestOf, cx, vy + 14);
+      }
 
       // the belt: a long run of the list, easing to a stop with the drawn one in the middle
       const laps = 4, target = (laps * n + d.pick) * step;
@@ -112,6 +177,79 @@
           : d.infested ? 'The room fights too.' : 'Just the two of you.';
         g.fillText(why, cx, y + 50);
       }
+    },
+
+    /* A first pass: the outcome, the two pilots either side of the score,
+       a pill per round, the numbers, and the referee's word. */
+    result(g, w, h, t, r) {
+      const COL = { won: '#86efac', lost: '#f87171', left: '#67e8f9', void: '#94a3b8' }[r.outcome] || '#94a3b8';
+      const TITLE = { won: 'VICTORY', lost: 'DEFEAT', left: 'OPPONENT LEFT', void: 'NO CONTEST' }[r.outcome] || '';
+      const cx = w / 2, top = Math.max(40, h * 0.12), k = ease(t / 0.7);
+      const glow = g.createRadialGradient(cx, top + 40, 10, cx, top + 40, Math.max(w, h) * 0.6);
+      glow.addColorStop(0, COL + '22'); glow.addColorStop(1, 'rgba(5,6,10,0)');
+      g.fillStyle = glow; g.fillRect(0, 0, w, h);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.globalAlpha = k;
+      g.fillStyle = COL;
+      g.font = "800 " + Math.round(Math.min(64, w * 0.09)) + "px 'Chakra Petch', Barlow, sans-serif";
+      g.fillText(TITLE, cx, top + 30 * (1 - k) + 20);
+
+      // the pilots, either side of the score
+      const y = top + 150;
+      const side = (p, x, dir, mine) => {
+        g.save();
+        g.translate(x, y);
+        g.rotate(dir < 0 ? Math.PI : 0);
+        g.scale(2.2, 2.2);
+        r.hull(p.pilot);
+        g.fillStyle = p.col + (mine ? 'ee' : '99'); g.fill();
+        g.restore();
+        g.fillStyle = '#e2e8f0';
+        g.font = "700 15px 'JetBrains Mono', monospace";
+        g.fillText(p.name, x, y + 62);
+        g.fillStyle = p.col;
+        g.font = "600 10px 'Chakra Petch', Barlow, sans-serif";
+        g.fillText(p.pilotName + (p.awake ? ' · AWAKE' : ''), x, y + 80);
+      };
+      const off = Math.min(260, w * 0.3);
+      side(r.me, cx - off, 1, true);
+      side(r.them, cx + off, -1, false);
+      g.fillStyle = '#e2e8f0';
+      g.font = "800 48px 'JetBrains Mono', monospace";
+      g.fillText(r.score[0] + ' — ' + r.score[1], cx, y);
+      g.fillStyle = '#64748b';
+      g.font = "600 11px 'Chakra Petch', Barlow, sans-serif";
+      g.fillText('BEST OF ' + r.bestOf, cx, y + 36);
+
+      // a pill per round, in order
+      const pw = 34, gap = 8, n = r.rounds.length, x0 = cx - (n * pw + (n - 1) * gap) / 2, py = y + 120;
+      r.rounds.forEach((rd, i) => {
+        const a = ease((t - 0.4 - i * 0.12) / 0.4);
+        rr(g, x0 + i * (pw + gap), py - 7, pw, 14, 7);
+        g.fillStyle = (rd.won ? '#86efac' : '#f87171') + (a > 0 ? Math.round(40 + 160 * a).toString(16).padStart(2, '0') : '00');
+        g.fill();
+      });
+
+      // the numbers
+      g.globalAlpha = k;
+      g.fillStyle = '#94a3b8';
+      g.font = "600 12px 'JetBrains Mono', monospace";
+      const clock = Math.floor(r.time / 60) + ':' + String(Math.floor(r.time % 60)).padStart(2, '0');
+      g.fillText(r.dealt[0].toLocaleString('en-US') + ' DEALT  ·  ' + r.dealt[1].toLocaleString('en-US') + ' TAKEN  ·  ' + clock +
+                 (r.map ? '  ·  ' + r.map.name + ' ' + (r.infested ? 'INFESTED' : 'CLEAN') : ''), cx, py + 34);
+
+      // the referee, and in ranked the rating
+      let word = r.verdict ? (r.verdict.v === 'void' ? 'NO CONTEST: THE TWO GAMES DISAGREED' : 'RECORDED')
+        : 'TELLING THE REFEREE' + '...'.slice(0, 1 + Math.floor(t * 2) % 3);
+      if (r.rating) {
+        const d = r.rating.after - r.rating.before;
+        word = (r.rating.league ? r.rating.league.toUpperCase() + '  ·  ' : 'PLACEMENT ' + r.rating.games + ' OF ' + (r.rating.games + r.rating.left) + '  ·  ')
+          + r.rating.after + '  (' + (d >= 0 ? '+' : '') + d + ')';
+      }
+      g.fillStyle = r.verdict && r.verdict.v === 'void' ? '#f87171' : '#cbd5e1';
+      g.font = "700 13px 'Chakra Petch', Barlow, sans-serif";
+      g.fillText(word, cx, py + 64);
+      g.globalAlpha = 1;
     }
   };
 })();

@@ -279,6 +279,20 @@ async function play(H, G, ship, frames, done) {
   return i;
 }
 const matchRows = () => DB.sql.prepare('SELECT * FROM pvp_matches ORDER BY ended').all();
+/* art.js's hooks, called straight onto the page's canvas at a few moments
+   of their life with whatever the page is showing, then a whole frame: any
+   throw comes back as its message ('' for none). Straight, because a frame
+   logs a hook's fault only once and draws on. */
+const drawErrs = g => g.run(`(() => {
+  const out = [], hook = (name, d) => { for (const t of [0, 0.3, 1, 2.5, 6]) {
+    ctx.save();
+    try { PVP_ART[name](ctx, W, H, t, d); } catch (e) { out.push(name + ' at ' + t + ': ' + e); } finally { ctx.restore(); } } };
+  if (PVP.shown) hook('result', PVP.shown.r);
+  if (PVP.preview && PVP.preview.belt) hook('belt', PVP.preview.belt);
+  if (typeof RUN !== 'undefined' && RUN.pvp && !PVP.shown) hook('belt', Object.assign({ dur: PVP.ROUNDS.beltT }, PVP.maps.belt(RUN.pvp)));
+  try { render(); } catch (e) { out.push('render: ' + e); }
+  return out.join(' | ');
+})()`);
 const sameGame = (H, G) => {
   const fh = new Map(H.run('[...__fp]')), fg = new Map(G.run('[...__fp]'));
   const both = [...fh.keys()].filter(t => fg.has(t));
@@ -338,6 +352,15 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const beltData = H.run('JSON.stringify(PVP.maps.belt(RUN.pvp))');
   ok(/"maps":\[\{"name":/.test(beltData) && /"infested":(true|false)/.test(beltData) && /"odds":0\.75/.test(beltData) && /"hackers":1/.test(beltData),
      'the art hook is handed every sector, the pick, the variation, the odds and why', beltData.slice(0, 200));
+  // and who is fighting, from each side (match.js, M.versus)
+  const bh = JSON.parse(H.run('JSON.stringify(PVP.beltData(RUN.pvp))')), bg = JSON.parse(G.run('JSON.stringify(PVP.beltData(RUN.pvp))'));
+  ok(bh.me.pilot === 'hacker' && bh.them.pilot === 'ember' && bg.me.pilot === 'ember' && bg.them.pilot === 'hacker'
+     && bh.me.name === 'DUELIST' && bh.them.name === 'RIVAL' && bg.me.name === 'RIVAL' && bh.me.pilotName === 'THE HACKER'
+     && /^#[0-9a-f]{6}$/.test(bh.them.col) && bh.me.awake === true,
+     'the belt is handed both pilots, each machine from its own side', [bh.me, bh.them, bg.me]);
+  ok(bh.bestOf === 3 && bh.queue === 'friend' && bh.league === null && bh.rated === false && H.run('typeof PVP.beltData(RUN.pvp).hull') === 'function',
+     'what kind of match, and the hulls to draw', [bh.bestOf, bh.queue]);
+  ok(drawErrs(H) === '' && drawErrs(G) === '', 'and it draws at every moment without a fault', [drawErrs(H), drawErrs(G)]);
 
   // the whole match, bots at the sticks
   let threw = null, frames = 0;
@@ -432,6 +455,32 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(roomOf(H).__q['.line'].textContent === `DUELIST  ${last.score[0]} — ${last.score[1]}  RIVAL`
      && roomOf(G).__q['.line'].textContent === `RIVAL  ${last.score[1]} — ${last.score[0]}  DUELIST`, 'with the score, each from its own side',
      [roomOf(H).__q['.line'].textContent, roomOf(G).__q['.line'].textContent]);
+
+  // the result screen's own picture (art.js, PVP_ART.result): what it is handed, from each side
+  const shownOf = g => JSON.parse(g.run('JSON.stringify(PVP.shown && PVP.shown.r)'));
+  const sh = shownOf(H), sg = shownOf(G);
+  ok(sh && sg && sh.outcome === (won ? 'won' : 'lost') && sg.outcome === (won ? 'lost' : 'won')
+     && sh.score.join() === last.score.join() && sg.score.join() === [last.score[1], last.score[0]].join(),
+     'the result screen is handed the outcome and the score, each from its own side', [sh && sh.outcome, sg && sg.outcome]);
+  ok(sh.rounds.length === last.score[0] + last.score[1] && sh.rounds.every((rd, i) => rd.won === !sg.rounds[i].won && rd.left > 0 && rd.at > 0),
+     'every round in order, the other side\'s the mirror of it', [sh.rounds, sg.rounds]);
+  ok(sh.me.pilot === 'hacker' && sh.them.pilot === 'ember' && sg.me.pilot === 'ember' && sh.me.pilotName === 'THE HACKER'
+     && sh.me.name === 'DUELIST' && sh.them.name === 'RIVAL' && /^#[0-9a-f]{6}$/.test(sh.me.col), 'both pilots, named and coloured', [sh.me, sh.them]);
+  ok(sh.dealt[0] === sg.dealt[1] && sh.dealt[1] === sg.dealt[0] && sh.dealt[0] + sh.dealt[1] > 0 && sh.time > 0
+     && sh.map && sh.map.name === H.run('PVP.maps.list()[RUN.pvp.map].name') && sh.infested === belt.infested,
+     'the damage each dealt, the fighting time, the map', [sh.dealt, sg.dealt, sh.time, sh.map]);
+  ok(sh.queue === 'friend' && sh.rated === false && sh.league === null && sh.verdict && sh.verdict.v === 'played' && sh.verdict.won === won
+     && sh.rating === null, 'a friend\'s match: the referee\'s word, and no rating', [sh.queue, sh.verdict, sh.rating]);
+  ok(H.run('typeof PVP.shown.r.hull') === 'function', 'with the pilots\' hulls to draw');
+  // the damage is each dealer's: what the host dealt is what the guest took, hit by hit (the log, WATCH)
+  const took = k => log.hits.filter(x => x[1] === k).reduce((a, x) => a + x[2], 0);
+  ok(Math.abs(sh.dealt[0] - took(1)) <= 1 && Math.abs(sh.dealt[1] - took(0)) <= 1,
+     'what each dealt is what the other took, hit for hit', [sh.dealt, Math.round(took(1)), Math.round(took(0))]);
+  ok(drawErrs(H) === '' && drawErrs(G) === '', 'and the screen draws without a fault', [drawErrs(H), drawErrs(G)]);
+  // a verdict of no contest, arriving after the screen is up, turns it (checked on a copy: the real one is kept)
+  const turned = JSON.parse(H.run(`(() => { const keep = PVP.shown; PVP.shown = { at: keep.at, r: Object.assign({}, keep.r) };
+    PVP.ref.onVerdict({ v: 'void', winner: null }); const r = PVP.shown.r; PVP.shown = keep; return JSON.stringify(r); })()`));
+  ok(turned.outcome === 'void' && turned.verdict.v === 'void' && turned.verdict.won === null, 'a no contest from the referee turns the screen to NO CONTEST', turned.verdict);
 
   /* The rules on their own, on the host's copy, now that the two have been
      compared: a round put back on, both pilots fresh. */
@@ -591,6 +640,10 @@ section('a match left part way');
   const row = matchRows().find(x => x.id === id);
   ok(row && row.verdict === 'forfeit' && row.reason === 'quit' && row.winner === 0 && row.a_pilot === 'melee' && row.b_pilot === 'runner', 'recorded as a quit', row);
   ok(roomOf(H).__q['.note'].textContent === 'a win by forfeit  ·  recorded', 'and the host is told', roomOf(H).__q['.note'].textContent);
+  const left = JSON.parse(H.run('JSON.stringify(PVP.shown.r)'));
+  ok(left.outcome === 'left' && left.verdict && left.verdict.v === 'forfeit' && left.verdict.won === true
+     && left.me.pilot === 'melee' && left.them.pilot === 'runner' && left.me.name === 'DUELIST',
+     'its result screen: the other side went, a win by forfeit, both pilots though the second has gone', left);
 }
 
 section('a queued match: the server pairs them, and its rules fly');
@@ -668,6 +721,30 @@ section('a queued match: the server pairs them, and its rules fly');
      && row.winner === 0 && row.applied === 1, 'recorded: a rated GOLD match, the guest\'s quit, its ratings written', row);
   ok(rat(DUELIST).rating > 1550 && rat(DUELIST).wins === 4 && rat(RIVAL_ACCT).rating < 1550 && rat(RIVAL_ACCT).losses === 3,
      'up for the one who stayed, down for the one who quit', [rat(DUELIST), rat(RIVAL_ACCT)]);
+  const rr = JSON.parse(H.run('JSON.stringify(PVP.shown.r)'));
+  ok(rr.outcome === 'left' && rr.queue === 'ranked' && rr.rated && rr.league && rr.league.id === 'gold' && rr.bestOf === 5
+     && rr.rating && rr.rating.before === 1550 && rr.rating.after === Math.round(rat(DUELIST).rating) && rr.rating.league === 'gold',
+     'the host\'s result screen has its rating, before and after, once the referee wrote it', rr.rating);
+
+  // the host walks out of the next one, and the guest is the one told it won
+  const pair4 = await queuePair();
+  const [H4, G4] = bootPair(pair4);
+  await flush();
+  const ship4 = link(H4, G4);
+  H4.run('PVP.frame()'); ship4(H4, G4);
+  for (const g of [H4, G4]) g.run('PVP.frame();' + BOT + WATCH);
+  await play(H4, G4, ship4, 60 * 6);
+  H4.run('quitToMenu()'); ship4(H4, G4);
+  H4.run('PVP.frame()'); G4.run('PVP.frame()');      // the host's page sees it has quit (a frame, as a browser's next would)
+  for (let i = 0; i < 60 * 12 && !G4.run('!!PVP.ref.verdict'); i++) {
+    G4.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()');
+    if (i % 30 === 0) await settle();
+  }
+  const g4 = JSON.parse(G4.run('JSON.stringify(PVP.shown && PVP.shown.r)'));
+  ok(roomOf(G4).__q['.note'].textContent === 'a win by forfeit  ·  recorded',
+     'the guest, left alone by the host, is told it won by forfeit (its own side, though the host\'s pilot is gone)', roomOf(G4).__q['.note'].textContent);
+  ok(g4 && g4.outcome === 'left' && g4.verdict.won === true && g4.me.name === 'RIVAL' && g4.me.pilot === 'runner' && g4.them.pilot === 'ember'
+     && g4.rating && g4.rating.after > g4.rating.before, 'and its result screen is its own: its pilot, its win, its rating up', g4);
 
   // a modified host puts its own EMBER in the air awake: the guest sees the start break GOLD's rules
   const before = [rat(DUELIST).rating, rat(RIVAL_ACCT).rating];
@@ -695,6 +772,46 @@ section('a queued match: the server pairs them, and its rules fly');
   ok(roomOf(G3).__q.h2.textContent === 'NO MATCH' && roomOf(G3).__q['.line'].textContent === 'Duelist didn\'t connect.',
      'a guest whose host never opened a room: NO MATCH, after the connect time', roomOf(G3).__q['.line'].textContent);
   ok(G3.run('PVP.ref.done') === true && !matchRows().some(x => x.id === pair3[0].id), 'nothing more said to the referee, nothing recorded');
+}
+
+section('the art previews: /play/?preview=result and ?preview=belt');
+{
+  const pv = which => loadGame(IDX, { search: '?preview=' + which, scripts: pvpScripts, before: win => { rooms(win); recorder(win); } });
+  const R = pv('result');
+  await flush();
+  ok(R.run('state') === 'pvp' && R.run('PVP.hand.mode') === 'preview' && !R.win.__replaced, 'the result preview boots on the engine, with no lobby', [R.run('state'), R.win.__replaced]);
+  const r0 = JSON.parse(R.run('JSON.stringify(PVP.shown.r)'));
+  ok(r0.outcome === 'won' && r0.queue === 'ranked' && r0.bestOf === 5 && r0.me.pilotName === 'THE HACKER' && r0.map && r0.map.name && r0.rounds.length === 4,
+     'sample data, on the game\'s own sectors and pilots', r0);
+  R.run('PVP.shown.at -= 2000; PVP.frame()');
+  const r1 = JSON.parse(R.run('JSON.stringify(PVP.shown.r)'));
+  ok(r1.verdict && r1.verdict.v === 'played' && r1.rating && r1.rating.after > r1.rating.before, 'the referee\'s word arrives a moment later, as in a match', r1);
+  for (const k of ['lost', 'left', 'void']) {
+    R.run(`PVP.previewShow('${k}')`);
+    ok(R.run('PVP.shown.r.outcome') === k && drawErrs(R) === '', 'each outcome shows, and draws without a fault: ' + k);
+  }
+  R.run("PVP.previewShow('queue', 'casual')");
+  ok(R.run('PVP.shown.r.queue') === 'casual' && R.run('PVP.shown.r.bestOf') === 3 && R.run('PVP.shown.r.league') === null, 'and casual');
+  const slotOf = g => g.win.document.body.children.find(c => c.id === 'pvp-preview-slot');
+  ok(slotOf(R) && slotOf(R).style.display === '', 'the match\'s button marked where it sits on the result');
+  const B = pv('belt');
+  await flush();
+  const b0 = JSON.parse(B.run('JSON.stringify(PVP.preview.belt)'));
+  ok(b0.maps.length === 7 && b0.pick >= 0 && b0.pick < 7 && b0.dur === 4.8 && drawErrs(B) === '', 'the belt preview spins the real sectors', b0);
+  let fair = true;
+  for (let i = 0; i < 40; i++) {
+    B.run('PVP.preview.at -= 7000; PVP.frame()');
+    const b = JSON.parse(B.run('JSON.stringify(PVP.preview.belt)'));
+    const hackers = [b.me, b.them].filter(x => x.pilot === 'hacker').length;
+    if (!b.me || !b.them || b.hackers !== hackers || b.odds !== [0.5, 0.75, 1][hackers]) fair = false;
+  }
+  ok(fair, 'with two sample pilots each spin, and odds that match how many are THE HACKER');
+  ok(slotOf(B) && slotOf(B).style.display === 'none', 'and not on the belt, where a match has no button');
+  B.run("PVP.previewShow('queue', 'casual')");
+  ok(B.run('PVP.preview && PVP.preview.belt.queue') === 'casual' && B.run('PVP.preview.belt.bestOf') === 3, 'RANKED and CASUAL switch the belt too, and stay on it');
+  B.run('PVP.preview.at -= 7000; PVP.frame()');
+  ok(B.run('Date.now() - PVP.preview.at') < 1000, 'and starts again once it has landed');
+  ok(R.win.__net.length === 0 && B.win.__net.length === 0, 'neither asks the network for anything', [R.win.__net, B.win.__net]);
 }
 
 section('arriving without the lobby');
