@@ -22,7 +22,6 @@
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
          publicAccount, SESSION_MS, MAX_SESSIONS } from './auth.js';
-import { isDevLogin, devClaim } from './leaderboard.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -30,8 +29,7 @@ const LOGIN_RE = /^[A-Za-z0-9_-]{3,16}$/;
 const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
 
 /* Names nobody may take: the handful of words that would read as the game
-   talking. The old dev logins are held as well, for whoever knows their
-   password (register). */
+   talking. */
 const RESERVED = new Set(['admin', 'administrator', 'root', 'system', 'support',
   'staff', 'mod', 'moderator', 'official', 'voidrunner', 'anon', 'null', 'undefined']);
 
@@ -130,6 +128,39 @@ async function gateBump(db, keys, windowMs = WINDOW) {
 
 const gateClear = (db, k) => db.prepare('DELETE FROM auth_gate WHERE k = ?1').bind(k).run();
 
+/* ------------------------------- Turnstile -------------------------------
+   Sign-up asks Cloudflare Turnstile whether a person is there, once the
+   Worker has both halves of a widget's keys: TURNSTILE_SITE_KEY, which the
+   page is handed (GET /api/account), and TURNSTILE_SECRET. Both are set as
+   Worker secrets, since a deploy clears plain variables; the site key is
+   public all the same. Until both are set sign-up works as it always has,
+   the way TURN and the ads waited for theirs. Only sign-up: signing in is what a
+   classroom does all day, and its failures are already counted.
+
+   The widget is told its action is 'signup', and the answer must say so, so
+   a token earned on some other page with the same keys cannot be spent here.
+   Cloudflare's testing keys answer with no action at all (and say they are
+   testing keys); they pass everybody anyway, so nothing is lost by letting
+   them, and a local `wrangler dev` can use them. A check that cannot be made
+   refuses: no account is better than a bot's. */
+const SITEVERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+// the site key, once both halves are set; null means off
+const turnstileKey = env => (env && env.TURNSTILE_SECRET && env.TURNSTILE_SITE_KEY) || null;
+
+async function humanOk(env, token, ip) {
+  if (!turnstileKey(env)) return true;
+  if (typeof token !== 'string' || !token || token.length > 2048) return false;
+  try {
+    const r = await fetch(SITEVERIFY, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: env.TURNSTILE_SECRET, response: token, remoteip: ip })
+    });
+    const d = await r.json();
+    const testing = !!(d && d.metadata && d.metadata.result_with_testing_key === true);
+    return !!(d && d.success === true && (d.action === 'signup' || testing));
+  } catch (e) { return false; }
+}
+
 /* -------------------------------- replies -------------------------------- */
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -152,11 +183,25 @@ async function bodyOf(req, max) {
 }
 
 /* ------------------------------- sessions -------------------------------- */
-async function startSession(db, accountId) {
+/* What the device list calls a session: the browser and the system, read off
+   the User-Agent once at sign-in. Only the two words are kept, never the
+   header itself. Order matters: Edge and Opera say Chrome too, Chrome says
+   Safari, and an iPad asking for the desktop site says Macintosh. */
+const BROWSERS = [[/Edg\//, 'Edge'], [/OPR\/|Opera/, 'Opera'], [/SamsungBrowser/, 'Samsung Internet'],
+                  [/Firefox\/|FxiOS/, 'Firefox'], [/Chrome\/|CriOS/, 'Chrome'], [/Safari\//, 'Safari']];
+const SYSTEMS = [[/CrOS/, 'ChromeOS'], [/Android/, 'Android'], [/iPhone/, 'iPhone'], [/iPad/, 'iPad'],
+                 [/Windows/, 'Windows'], [/Macintosh|Mac OS X/, 'Mac'], [/Linux/, 'Linux']];
+export function deviceOf(req) {
+  const ua = String(req.headers.get('user-agent') || '');
+  const pick = (list, none) => (list.find(([re]) => re.test(ua)) || [null, none])[1];
+  return pick(BROWSERS, 'A browser') + ' on ' + pick(SYSTEMS, 'some device');
+}
+
+async function startSession(db, accountId, req) {
   const token = newToken(), now = Date.now();
   await db.batch([
-    db.prepare('INSERT INTO sessions (id, account, created, seen, expires) VALUES (?1, ?2, ?3, ?3, ?4)')
-      .bind(sha256(token), accountId, now, now + SESSION_MS),
+    db.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?1, ?2, ?3, ?3, ?4, ?5)')
+      .bind(sha256(token), accountId, now, now + SESSION_MS, deviceOf(req)),
     // the oldest go once an account is on too many devices, and the expired always
     db.prepare(`DELETE FROM sessions WHERE account = ?1 AND (expires <= ?2 OR id NOT IN
                   (SELECT id FROM sessions WHERE account = ?1 ORDER BY seen DESC LIMIT ?3))`)
@@ -185,38 +230,22 @@ const OPS = {
     if (RESERVED.has(name)) return no('name taken', 409);
     const wait = await gateWait(db, [['new:' + ip, LIMITS.signup]]);
     if (wait) return locked(wait);
-    /* An old dev login is claimed as the account of the same name, with its
-       own password, and the account is born with the login's perks. That
-       password is a sign-in attempt: a wrong one counts like one and answers
-       like any taken name. It was the login's already, so it is not judged
-       again here; change it afterwards like any other. */
-    let perks = [];
-    if (isDevLogin(name)) {
-      const pair = 'f:' + ip + ':' + name, all = 'f:' + ip;
-      const waitF = await gateWait(db, [[pair, LIMITS.pair], [all, LIMITS.ip]]);
-      if (waitF) return locked(waitF);
-      if (await accountByName(db, name)) return no('name taken', 409);
-      const got = devClaim(name, b.pass);
-      if (!got) { await gateBump(db, [pair, all]); return no('name taken', 409); }
-      await gateClear(db, pair);
-      perks = got;
-    } else {
-      const bad = passProblem(b.pass, name);
-      if (bad) return no(bad, 400);
-      // asked first so a taken name costs no password hash
-      if (await accountByName(db, name)) return no('name taken', 409);
-    }
+    const bad = passProblem(b.pass, name);
+    if (bad) return no(bad, 400);
+    // asked first so a taken name costs no password hash, nor a Turnstile token
+    if (await accountByName(db, name)) return no('name taken', 409);
+    if (!(await humanOk(env, b.turnstile, ip)))
+      return no("couldn't check you're a person: try again", 400, { turnstile: true });
 
     const id = newId(), code = newCode(), now = Date.now();
     const res = await db.prepare(
-      `INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8) ON CONFLICT (name) DO NOTHING`)
-      .bind(id, name, display, hashPass(String(b.pass)), codeHash(code), isPid(b.pid) ? b.pid : null,
-            JSON.stringify(perks), now).run();
+      `INSERT INTO accounts (id, name, display, pass, recovery, pid, created, updated)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) ON CONFLICT (name) DO NOTHING`)
+      .bind(id, name, display, hashPass(b.pass), codeHash(code), isPid(b.pid) ? b.pid : null, now).run();
     if (!(res && res.meta && res.meta.changes > 0)) return no('name taken', 409);
     await gateBump(db, ['new:' + ip], 60 * 60 * 1000);
     await linkPid(db, id, b.pid);
-    const token = await startSession(db, id);
+    const token = await startSession(db, id, req);
     return reply({ account: publicAccount({ name, display, created: now }), recovery: code },
                  201, sessionCookie(req, token));
   },
@@ -236,7 +265,7 @@ const OPS = {
     }
     await gateClear(db, pair);
     await linkPid(db, row.id, b.pid);
-    const token = await startSession(db, row.id);
+    const token = await startSession(db, row.id, req);
     return reply({ account: publicAccount(row) }, 200, sessionCookie(req, token));
   },
 
@@ -262,13 +291,40 @@ const OPS = {
       db.prepare('DELETE FROM sessions WHERE account = ?1').bind(row.id)
     ]);
     await linkPid(db, row.id, b.pid);
-    const token = await startSession(db, row.id);
+    const token = await startSession(db, row.id, req);
     return reply({ account: publicAccount(row), recovery: code }, 200, sessionCookie(req, token));
   },
 
   async logout(req, env, b, s) {
     if (s) await env.DB.prepare('DELETE FROM sessions WHERE id = ?1').bind(s.sid).run();
     return reply({ ok: true }, 200, sessionCookie(req, '', 0));
+  },
+
+  /* Every device signed in to the account, most recently seen first. A
+     session is named by the start of its id: enough to sign it out with,
+     and nothing that signs anybody in (the id is the token's hash). `seen`
+     moves at most once a day (auth.js), so it says which day, no closer. */
+  async devices(req, env, b, s) {
+    if (!s) return no('signed out', 401);
+    const res = await env.DB.prepare(
+      'SELECT id, device, created, seen FROM sessions WHERE account = ?1 AND expires > ?2 ORDER BY seen DESC')
+      .bind(s.account.id, Date.now()).all();
+    return reply({ devices: ((res && res.results) || []).map(r => ({
+      id: r.id.slice(0, 16), device: r.device || 'A device signed in before this list',
+      created: r.created, seen: r.seen, current: r.id === s.sid })) });
+  },
+
+  /* One other device, signed out. Not this one: signing out here pushes the
+     save first, and only the game can do that (Account.signOut). */
+  async 'logout-device'(req, env, b, s) {
+    if (!s) return no('signed out', 401);
+    const id = String(b.id || '');
+    if (!/^[0-9a-f]{16}$/.test(id)) return no('bad device', 400);
+    if (s.sid.startsWith(id)) return no('that is this device', 400);
+    const res = await env.DB.prepare('DELETE FROM sessions WHERE account = ?1 AND substr(id, 1, 16) = ?2 AND id != ?3')
+      .bind(s.account.id, id, s.sid).run();
+    if (!(res && res.meta && res.meta.changes > 0)) return no('no such device', 404);
+    return reply({ ok: true });
   },
 
   async 'logout-others'(req, env, b, s) {
@@ -387,7 +443,9 @@ export default async (req, env) => {
 
   if (new URL(req.url).pathname === '/api/account/save') return renew(await saveRoute(req, env, s));
 
-  if (req.method === 'GET') return renew(reply({ account: s ? publicAccount(s.account) : null }));
+  // the Turnstile widget's public key goes with it, for the sign-up form
+  if (req.method === 'GET')
+    return renew(reply({ account: s ? publicAccount(s.account) : null, turnstile: turnstileKey(env) }));
   if (req.method !== 'POST') return no('method not allowed', 405);
   const { v: b, err } = await bodyOf(req, 4096);
   if (err) return no('bad request', err);

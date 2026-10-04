@@ -210,14 +210,46 @@ when you say so.
     account's `dev` perk unlocks every pilot and evo on the next sync.
     Typing notz takes the name.
 
-**Step 4: hardening. ← next**
+**Shipped to `main` on 4 Oct (50a8d49).** `notz` was claimed on the live site
+at 02:43 UTC, born with `["dev"]`.
 
-- When the account `notz` exists on the live site, delete its
-  `DEV_ACCOUNTS` line (and with it the last scrypt hash in the repo).
+**Step 4: hardening. Done.**
 
-- **Turnstile on sign-up.** It's off until you create a site key, the way
-  TURN and ads waited for theirs.
-- A list of signed-in devices.
+- **The last dev-login hash is gone.** `DEV_ACCOUNTS`, its claim path in
+  sign-up and the scrypt check in `leaderboard.js` are deleted. `notz` is an
+  ordinary account with perks. Old grant rows still pay what they banked.
+- **Turnstile on sign-up, off until it has keys.** Both `TURNSTILE_SITE_KEY`
+  and `TURNSTILE_SECRET` must be set as Worker secrets (README).
+  - The answer must say the action was `signup`, so a token earned elsewhere
+    can't be spent here. Cloudflare's testing keys name no action and are
+    let through, so `wrangler dev` can use them.
+  - A check that can't be made refuses. A taken name is answered before any
+    token is spent, and sign-in is never asked.
+  - The game loads Cloudflare's script only when the sign-up form opens. A
+    failed try resets the widget for a fresh token.
+  - When PvP serves `account.js` on workers.dev, its hostname has to be
+    added to the widget.
+- **Signed-in devices.** ACCOUNT → DEVICES lists each session as "Chrome on
+  ChromeOS" or similar, read from the User-Agent once at sign-in. Only those
+  words are kept.
+  - Any other device can be signed out from the list. This device signs out
+    with SIGN OUT, which saves first.
+  - A session is named by the first 16 hex characters of its id, which is
+    the token's hash, so it can't sign anybody in.
+  - The new `sessions.device` column is added to existing databases on
+    first use (`ADDED` in `auth.js`).
+- **Tested:**
+  - `npm run test:account`: 148 checks. Mutants that skip Turnstile, drop the
+    action check, sign out another account's device, skip the column, or
+    lose the "this device" mark are caught.
+  - The awards, boards, determinism and lockstep suites still pass.
+  - Browser, on `wrangler dev` with the testing keys:
+    - The widget renders dark and passes.
+    - A refused try gets a fresh token, and sign-up then works.
+    - The device list names both sessions, and one tab signs the other out.
+    - Step 3's local database gained the column without errors.
+
+Phase 1 is complete. Next is Phase 2, standing up the PvP Worker.
 
 ### Phase 2 — The PvP Worker, standing up
 
@@ -376,7 +408,7 @@ Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like
   and the referee keep ranked matches honest, since a modified simulation
   splits from the honest one.
 
-## Still open (none block step 4)
+## Still open (none block Phase 2)
 
 1. **"Base pilots" in low leagues:** I've read it as VOIDRUNNER and EMBER,
    and not awakened. Should EMBER's evo be allowed down there?

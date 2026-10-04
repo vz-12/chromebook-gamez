@@ -15,7 +15,6 @@
 import { getStore } from './store.js';
 import { scorePut } from './boards.js';
 import { sessionOf, accountPids } from './auth.js';
-import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 
 /* The season rule lives in one place, shared with the scheduled closer. */
 import { STORE, KEY, RETRIES, backoff, SEASON_DAY, META, ARCHIVE, seasonKey, isSeason,
@@ -81,6 +80,10 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
    TO TAKE THEM BACK: set it to '[]'. As with every grant, what a profile has
    already banked stays banked there (Awards.sync only ever adds); what goes
    is everything still to come.
+
+   This replaced the dev logins (a name and a password typed at the callsign
+   prompt, checked against a scrypt hash kept here). The one there was, notz,
+   was claimed as an account on 4 Oct 2026, and the hash left the repo.
 -------------------------------------------------------------------------- */
 const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
                    'redaction', 'redaction-open', 'draft',
@@ -98,8 +101,6 @@ const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
    on a real device. The vigil's count still refuses what is reported outside
    its window, so a test run lights no real candles. */
 const ALL_PERKS = ['unlock-all', 'unlock-evo', 'unlock-event'];
-const SCRYPT = { N: 16384, r: 8, p: 1 };
-const KEYLEN = 32;
 
 /* An account's perk list, as the skins and perks it stands for. */
 function perksGive(list) {
@@ -111,36 +112,6 @@ function perksGive(list) {
     else perks.push(v);
   }
   return { skins, perks };
-}
-
-/* ------------------------- the old dev logins ----------------------------
-   Before accounts, a dev login was a name and a password typed at the
-   callsign prompt, and it bound the account's skins to that one profile
-   (the `grants` blob, still read below). Accounts replace it: a login here
-   is now only a claim ticket for the account of the same name.
-
-   Signing up with one of these names takes its password, checked against
-   the scrypt hash, and the account is born with its `perks` (account.js).
-   Nobody else can take the name. Once the account exists on the live site,
-   its line here can go: the name is then simply the account's, and the
-   hash leaves the repository.
-
-   Exported so scripts/awards.mjs can add a login of its own; no browser
-   ever sees this file.
--------------------------------------------------------------------------- */
-export const DEV_ACCOUNTS = {
-
-   notz: { salt: '291e5059855b9b6a9119e44d9d23ac37',
-        hash: '8ae86433b090a5c06a779dad1a018ef608f0c90042b741bb16b80ba099722ee2',
-        perks: ['dev'] },
-};
-// reserved as account names (account.js): claimed only with the login's password
-export const isDevLogin = name => hasOwn(DEV_ACCOUNTS, name);
-/* The perks a claim of this login brings, or null for a wrong password. An
-   unknown name costs the same scrypt as a known one. */
-export function devClaim(name, pass) {
-  const a = hasOwn(DEV_ACCOUNTS, name) ? DEV_ACCOUNTS[name] : null;
-  return passOk(a, String(pass || '')) ? (a.perks || ['dev']).slice() : null;
 }
 
 /* Dev accounts with no login: the profile is the key, and `perks` reads as
@@ -158,30 +129,6 @@ export function devClaim(name, pass) {
 const DEV_PIDS = {
   'ecd8c7a3671b4582f6b62ee1106510c8': { who: 'mario', callsign: 'mario', perks: ['dev'] },
 };
-
-/* A stand-in used when the named account does not exist, so a wrong user and
-   a wrong password take the same time and the same shape of answer. Its salt
-   is fresh per isolate and its hash is of nothing anybody knows. Made on first
-   use, not at load: a Worker may not generate random values in global scope. */
-let DUMMY = null;
-const dummy = () => DUMMY || (DUMMY = { salt: randomBytes(16).toString('hex'),
-                                        hash: randomBytes(KEYLEN).toString('hex') });
-
-function passOk(account, password) {
-  const a = account || dummy();
-  if (typeof password !== 'string' || !password || password.length > 200) {
-    // still pay the cost, so a blank password is not measurably faster
-    try { scryptSync('x', Buffer.from(dummy().salt, 'hex'), KEYLEN, SCRYPT); } catch (e) {}
-    return false;
-  }
-  let want, got;
-  try {
-    want = Buffer.from(a.hash, 'hex');
-    got = scryptSync(password, Buffer.from(a.salt, 'hex'), KEYLEN, SCRYPT);
-  } catch (e) { return false; }
-  if (want.length !== got.length) return false;
-  return timingSafeEqual(want, got) && !!account;
-}
 
 /* Attempts are counted against the source address rather than the profile id:
    a pid is chosen by the client and rotating it is free, an address is not.
@@ -544,11 +491,6 @@ async function awardsFor(store, pids, acctPerks) {
     const row = g && g.byPid && hasOwn(g.byPid, pid) ? g.byPid[pid] : null;
     if (row && Array.isArray(row.skins)) given.push(...row.skins);
     if (row && Array.isArray(row.perks)) perks.push(...row.perks);
-    /* and read through the login while it is still listed, so whatever its
-       perks stand for today reaches the profiles it was typed on. Once its
-       line goes (it is an account by then), what they banked stays. */
-    if (row && typeof row.user === 'string' && hasOwn(DEV_ACCOUNTS, row.user))
-      take(perksGive(DEV_ACCOUNTS[row.user].perks));
     // a dev account addressed by this profile rather than by a login
     if (hasOwn(DEV_PIDS, pid)) take(perksGive(DEV_PIDS[pid].perks));
   }

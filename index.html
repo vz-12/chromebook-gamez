@@ -56062,6 +56062,7 @@ const Account = {
   at: 0,                // when the last push landed
   last: 0,              // when the last push left
   timer: 0, busy: false, again: false,
+  turnstile: undefined, // the sign-up check's site key: null when it is off, undefined until asked
 
   off: () => BETA || location.protocol === 'file:',
 
@@ -56122,6 +56123,7 @@ const Account = {
     const r = await Account.call('GET');
     if (!r.ok || !r.d) { Account.status = 'offline'; return; }
     Account.me = r.d.account || null;
+    Account.turnstile = r.d.turnstile || null;
     Account.status = '';
     if (Account.me) await Account.pull();
   },
@@ -56224,8 +56226,8 @@ const Account = {
     return { ok: true };
   },
 
-  async signUp(name, pass) {
-    const r = await Account.call('POST', '', { op: 'register', name, pass, pid: myPid() });
+  async signUp(name, pass, turnstile) {
+    const r = await Account.call('POST', '', { op: 'register', name, pass, pid: myPid(), turnstile });
     if (!r.ok || !r.d) return Account.why(r);
     Account.begin(r.d.account);
     Account.push();                    // this device's progress is the account's first save
@@ -56248,6 +56250,17 @@ const Account = {
   async others() {
     const r = await Account.call('POST', '', { op: 'logout-others' });
     return r.ok ? { ok: true } : Account.why(r);
+  },
+
+  // every device signed in to the account: { id, device, created, seen, current }
+  async devices() {
+    const r = await Account.call('POST', '', { op: 'devices' });
+    return r.ok && r.d ? { ok: true, list: r.d.devices || [] } : Account.why(r);
+  },
+
+  async dropDevice(id) {
+    const r = await Account.call('POST', '', { op: 'logout-device', id });
+    return r.ok ? { ok: true } : r.status === 404 ? { ok: true } : Account.why(r);
   },
 
   /* Pushes first, and will not sign out until the account holds this
@@ -56332,7 +56345,34 @@ const ACCT_CSS = `
   text-align:center;color:#e2e8f0;font:800 19px 'JetBrains Mono',ui-monospace,monospace;
   letter-spacing:.06em;user-select:all;-webkit-user-select:all}
 #acct .fine{margin-top:8px;font-size:12px;line-height:1.45;color:#64748b;text-align:center}
-#acct .state{margin-top:2px;font:600 11px 'JetBrains Mono',ui-monospace,monospace;color:#64748b;text-align:center}`;
+#acct .state{margin-top:2px;font:600 11px 'JetBrains Mono',ui-monospace,monospace;color:#64748b;text-align:center}
+#acct .ts{display:flex;justify-content:center;margin-top:12px}
+#acct .ts:empty{display:none}
+#acct .devs{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+#acct .dev{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(103,232,249,.18);
+  border-radius:7px;background:rgba(2,6,14,.6)}
+#acct .dev.me{border-color:rgba(103,232,249,.55)}
+#acct .dev div{flex:1;min-width:0}
+#acct .dn{font:600 13px Barlow,'Segoe UI',sans-serif;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#acct .dw{margin-top:2px;font:600 10px 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.04em;color:#64748b}
+#acct .dev.me .dw{color:#67e8f9}
+#acct .devs .none{font-size:12px;color:#64748b;text-align:center}`;
+
+/* Cloudflare Turnstile's script, fetched once and only when the sign-up form
+   needs it. Explicit render: the widget is placed by AcctUI.tsMount. */
+let tsLoading = null;
+function tsLoad() {
+  if (window.turnstile) return Promise.resolve();
+  if (!tsLoading) tsLoading = new Promise((ok, fail) => {
+    window.acctTsReady = () => ok();
+    const sc = document.createElement('script');
+    sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=acctTsReady';
+    sc.async = true;
+    sc.onerror = () => { tsLoading = null; sc.remove(); fail(new Error('turnstile')); };
+    document.head.appendChild(sc);
+  });
+  return tsLoading;
+}
 
 const ACCT_NAME_IN = '<label>NAME<input name="username" autocomplete="username" maxlength="16" required ' +
                 'spellcheck="false" autocapitalize="off" autocorrect="off"></label>';
@@ -56348,7 +56388,7 @@ const ACCT_VIEWS = {
       'What you\'ve unlocked on this device goes into the account.</p>' +
       ACCT_NAME_IN.replace('NAME', 'NAME <span style="color:#475569">· 3–16 letters, digits, _ or -</span>') +
       acctPassIn('PASSWORD · AT LEAST 8 CHARACTERS', 'new-password') + acctPassIn('PASSWORD AGAIN', 'new-password', 'again') +
-      '<div class="msg"></div><button class="go" type="submit">CREATE ACCOUNT</button>' +
+      '<div class="ts"></div><div class="msg"></div><button class="go" type="submit">CREATE ACCOUNT</button>' +
       '<div class="row"><button type="button" class="link" data-go="in">I HAVE ONE · SIGN IN</button></div>',
   code: '<h2>YOUR RECOVERY CODE</h2><p class="sub">If you forget your password, this code is the only ' +
         'way back in. Nobody can send it to you, so write it down or save it somewhere safe.</p>' +
@@ -56363,6 +56403,7 @@ const ACCT_VIEWS = {
       '<div class="msg"></div><button class="go" type="submit">SIGN OUT</button>' +
       '<p class="fine">Signing out leaves this device with a fresh guest save. Your progress stays in your account.</p>' +
       '<div class="row"><button type="button" class="link" data-go="pass">CHANGE PASSWORD</button>' +
+      '<button type="button" class="link" data-go="dev">DEVICES</button>' +
       '<button type="button" class="link" data-act="others">SIGN OUT OTHER DEVICES</button>' +
       '<button type="button" class="link danger" data-go="del">DELETE ACCOUNT</button></div>',
   pass: '<h2>CHANGE PASSWORD</h2><p class="sub">Every other device will be signed out.</p>' +
@@ -56371,6 +56412,9 @@ const ACCT_VIEWS = {
         acctPassIn('NEW PASSWORD AGAIN', 'new-password', 'again') +
         '<div class="msg"></div><button class="go" type="submit">CHANGE PASSWORD</button>' +
         '<div class="row"><button type="button" class="link" data-go="me">BACK</button></div>',
+  dev: '<h2>DEVICES</h2><p class="sub">Everywhere this account is signed in. Sign out any you don\'t ' +
+       'recognise, then change your password.</p><div class="devs"></div><div class="msg"></div>' +
+       '<div class="row"><button type="button" class="link" data-go="me">BACK</button></div>',
   del: '<h2>DELETE ACCOUNT</h2><p class="sub">This deletes the account and its saved progress from the ' +
        'server, for good. This device keeps its own progress as a guest save.</p>' +
        acctPassIn('PASSWORD', 'current-password') +
@@ -56380,6 +56424,7 @@ const ACCT_VIEWS = {
 
 const AcctUI = {
   el: null, on: false, view: '', busy: false, code: '', tick: 0,
+  tsId: null, tsToken: '',  // the sign-up form's Turnstile widget, and the token it last gave
 
   build() {
     const st = document.createElement('style');
@@ -56421,11 +56466,13 @@ const AcctUI = {
     if (!AcctUI.on || (AcctUI.busy && !force) || (AcctUI.view === 'code' && !force)) return;
     AcctUI.on = false; AcctUI.view = ''; AcctUI.code = '';
     clearInterval(AcctUI.tick);
+    AcctUI.tsDrop();
     AcctUI.el.hidden = true;
     AcctUI.el.innerHTML = '';
   },
 
   show(view, msg, good) {
+    AcctUI.tsDrop();
     AcctUI.view = view;
     AcctUI.el.innerHTML = '<form novalidate>' + (view === 'code' ? '' :
       '<button type="button" class="x" data-act="close" aria-label="Close">×</button>') + ACCT_VIEWS[view] + '</form>';
@@ -56437,6 +56484,64 @@ const AcctUI = {
     AcctUI.state();
     const first = q('input:not([hidden])');
     if (first && !isTouch) first.focus();
+    if (view === 'up') AcctUI.tsMount();
+    if (view === 'dev') AcctUI.devLoad();
+  },
+
+  /* Turnstile, on the sign-up form only, and only once the Worker has its
+     keys (account.js). Cloudflare's script is fetched the first time the form
+     is opened, never on a page that does not sign anybody up. */
+  async tsMount() {
+    if (Account.turnstile === undefined) {          // asked before boot had the answer
+      const r = await Account.call('GET');
+      if (r.ok && r.d) Account.turnstile = r.d.turnstile || null;
+    }
+    const key = Account.turnstile, box = AcctUI.el && AcctUI.el.querySelector('.ts');
+    if (!key || !box) return;
+    try { await tsLoad(); }
+    catch (e) { AcctUI.say('COULDN\'T LOAD THE PERSON CHECK · RELOAD AND TRY AGAIN'); return; }
+    if (AcctUI.view !== 'up' || !box.isConnected || AcctUI.tsId !== null) return;
+    AcctUI.tsId = window.turnstile.render(box, {
+      sitekey: key, action: 'signup', theme: 'dark', size: 'flexible',
+      callback: t => { AcctUI.tsToken = t; },
+      'expired-callback': () => { AcctUI.tsToken = ''; },
+      'error-callback': () => { AcctUI.tsToken = ''; }
+    });
+  },
+  tsDrop() {
+    if (AcctUI.tsId !== null) { try { window.turnstile.remove(AcctUI.tsId); } catch (e) {} }
+    AcctUI.tsId = null; AcctUI.tsToken = '';
+  },
+  // a token is spent by the check it was sent to, so a failed try earns a new one
+  tsReset() {
+    if (AcctUI.tsId !== null) { try { window.turnstile.reset(AcctUI.tsId); } catch (e) {} }
+    AcctUI.tsToken = '';
+  },
+
+  async devLoad() {
+    const box = AcctUI.el.querySelector('.devs');
+    box.innerHTML = '<p class="none">LOADING…</p>';
+    const r = await Account.devices();
+    if (AcctUI.view !== 'dev') return;
+    box.innerHTML = '';
+    if (!r.ok) { AcctUI.say(r.msg); return; }
+    const DAY = 864e5;
+    for (const d of r.list) {
+      const row = document.createElement('div');
+      row.className = 'dev' + (d.current ? ' me' : '');
+      const days = Math.floor((Date.now() - d.seen) / DAY);
+      row.innerHTML = '<div><p class="dn"></p><p class="dw"></p></div>';
+      row.querySelector('.dn').textContent = d.device;
+      row.querySelector('.dw').textContent = d.current ? 'THIS DEVICE'
+        : 'SEEN ' + (days < 1 ? 'TODAY' : days < 2 ? 'YESTERDAY' : days + ' DAYS AGO');
+      if (!d.current) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'link danger'; b.textContent = 'SIGN OUT';
+        b.dataset.act = 'drop:' + d.id;
+        row.appendChild(b);
+      }
+      box.appendChild(row);
+    }
   },
 
   say(msg, good) {
@@ -56476,6 +56581,14 @@ const AcctUI = {
       AcctUI.wait(false);
       AcctUI.say(r.ok ? 'EVERY OTHER DEVICE IS SIGNED OUT' : r.msg, r.ok);
     }
+    if (a.startsWith('drop:')) {
+      AcctUI.wait(true);
+      const r = await Account.dropDevice(a.slice(5));
+      AcctUI.wait(false);
+      if (AcctUI.view !== 'dev') return;
+      await AcctUI.devLoad();
+      AcctUI.say(r.ok ? 'SIGNED OUT' : r.msg, r.ok);
+    }
   },
 
   async submit() {
@@ -56488,16 +56601,22 @@ const AcctUI = {
       { AcctUI.say('THE TWO PASSWORDS DON\'T MATCH'); return; }
     if (v !== 'me' && [...f.querySelectorAll('input[required]')].some(i => !i.value))
       { AcctUI.say('FILL IN EVERY BOX'); return; }
+    if (v === 'up' && Account.turnstile && !AcctUI.tsToken)
+      { AcctUI.say('ONE MOMENT · CHECKING YOU\'RE A PERSON'); return; }
     AcctUI.wait(true);
     let r;
     if (v === 'in') r = await Account.signIn(val('username').trim(), val('password'));
-    else if (v === 'up') r = await Account.signUp(val('username').trim(), val('password'));
+    else if (v === 'up') r = await Account.signUp(val('username').trim(), val('password'), AcctUI.tsToken || undefined);
     else if (v === 'rec') r = await Account.recover(val('username').trim(), val('code'), val('password'));
     else if (v === 'pass') r = await Account.password(val('password'), val('next'));
     else if (v === 'del') r = await Account.remove(val('password'));
     else if (v === 'me') r = await Account.signOut();      // reloads when it works
     AcctUI.wait(false);
-    if (!r || !r.ok) { AcctUI.say((r && r.msg) || 'SOMETHING WENT WRONG'); return; }
+    if (!r || !r.ok) {
+      if (v === 'up') AcctUI.tsReset();
+      AcctUI.say((r && r.msg) || 'SOMETHING WENT WRONG');
+      return;
+    }
     if (r.code) { AcctUI.code = r.code; AcctUI.show('code'); return; }
     if (v === 'in') AcctUI.show('me', 'SIGNED IN', true);
     else if (v === 'pass') AcctUI.show('me', 'PASSWORD CHANGED · OTHER DEVICES SIGNED OUT', true);
@@ -58218,6 +58337,7 @@ const SNAP_LOCAL = new Set([
   'dailyFrom', 'dailySel', 'rushFrom', 'skinSel', 'skinScroll', 'skinFrom', 'skinDrag', 'skinDevOpen', 'skinSliderRects',
   'chalPassArm', 'chalPassNote', 'chalSel', 'chalScroll', 'chalFrom', 'chalPassRect', 'chalRows', 'chalStartRect',
   'freeOpen', 'freeSel',
+  'tsLoading',                            // the account panel's Turnstile script, loading
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
   'RKA', 'RKC',                          // RONIN's art layers (a WeakMap of wounds, draw closures)

@@ -132,7 +132,29 @@ and to PvP (see `PVP-PLAN.md`).
 - **Not uploaded:** graphics settings, measured costs, volume, aim, the last
   pilot picked, and the profile id stay on each device.
 - **Signing out** leaves the device a fresh guest save.
+- **Devices:** ACCOUNT → DEVICES lists everywhere the account is signed in
+  (browser and system, e.g. "Chrome on ChromeOS") and signs out any one of
+  them.
 - **Accounts are off in the beta build.**
+
+### Turnstile on sign-up (off until it has keys)
+
+Sign-up can ask Cloudflare Turnstile whether a person is there. Sign-in is
+never asked. It stays off until the Worker has both keys:
+
+1. Cloudflare dashboard → **Turnstile → Add widget**. Hostnames
+   `voidrunner.online` and `www.voidrunner.online`, mode **Managed**. Note the
+   **Site Key** and the **Secret Key**.
+2. Workers & Pages → `voidrunner` → **Settings → Variables and Secrets**.
+   Add both as type **Secret** (a deploy clears plain variables, never
+   secrets): `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`.
+3. Add a line about it to `privacy.html`: Turnstile is Cloudflare checking
+   the browser at sign-up.
+
+The game is handed the site key by `GET /api/account` and loads Cloudflare's
+script only when the sign-up form opens. To try it locally, Cloudflare's
+testing keys always pass:
+`npm run dev -- --var TURNSTILE_SITE_KEY:1x00000000000000000000AA --var TURNSTILE_SECRET:1x0000000000000000000000000000000AA`.
 
 ```sh
 npm run test:account                       # about 5 seconds
@@ -150,6 +172,8 @@ and out of an account:
 - the save's compare-and-swap
 - writes from another site being refused
 - deleting the account
+- Turnstile, with Cloudflare's answer stubbed
+- the device list, and signing out one device from another
 
 ## The leaderboard page
 
@@ -376,7 +400,8 @@ both machines as it goes, so a drawing error fails it too.
 - **D1:** 5 GB, 5 million rows read and 100,000 rows written a day. Stale co-op
   rooms are swept out automatically.
 - **CPU:** 10 ms per request. Ordinary API calls are light: mostly waiting on
-  the database, and waiting does not count. The exception is a dev login,
-  whose scrypt password check takes about 45 ms. Cloudflare allows occasional
-  overruns. If dev logins ever fail with *Error 1102*, Workers Paid
-  ($5/month) lifts the limit.
+  the database, and waiting does not count. The exception is signing in or
+  up, whose scrypt password check takes about 45 ms. Cloudflare allows
+  occasional overruns, and sign-ins are rare next to everything else (live
+  sign-ins answered in about 0.25 s on 4 Oct 2026). If they ever fail with
+  *Error 1102*, Workers Paid ($5/month) lifts the limit.

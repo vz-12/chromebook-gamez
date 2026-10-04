@@ -5,18 +5,17 @@
    way scripts/account.mjs runs it. Plays what an account changes about the
    awards: a podium, a handout or WELCOME BACK held by any profile of an
    account reaching every device signed in to it, the account's own perks,
-   the vigil paying a quest once per account, an old dev login claimed as an
-   account by its password, and sessions only peeked at by these routes.
+   the vigil paying a quest once per account, and sessions only peeked at by
+   these routes.
 
    No packages and no network. A few seconds, most of it scrypt.
    ========================================================================= */
 import { makeD1 } from './lib/d1-sqlite.mjs';
-import { scryptSync, randomBytes } from 'node:crypto';
 
 process.env.VIGIL_ANYTIME = '1';         // the vigil open whatever today is
 
 const worker = (await import('../src/index.js')).default;
-const { DEV_ACCOUNTS, COMEBACK_KEY } = await import('../src/leaderboard.js');
+const { COMEBACK_KEY } = await import('../src/leaderboard.js');
 const { getStore } = await import('../src/store.js');
 const { STORE, ARCHIVE } = await import('../src/season.js');
 
@@ -200,11 +199,11 @@ section('handouts by pid reach the account');
   ok((await g2.op('login', { name: 'old_dev', pass: PASS })).status === 200, 'its account on another machine');
   const gr = await g2.awards();
   ok(skins(gr).includes('laurel') && perks(gr).includes('unlock-all'), 'what the login banked follows', gr.d);
-  ok(skins(gr).includes('hl-lostsoul') && perks(gr).includes('unlock-event'),
-     'and, while notz is still listed, all it stands for', gr.d);
+  ok(!skins(gr).includes('hl-lostsoul') && !perks(gr).includes('unlock-event'),
+     'and only that: the old login is an account now, and adds nothing', gr.d);
   const h = await device('198.51.100.42', H).awards();
   ok(skins(h).join() === 'standard' && perks(h).join() === 'unlock-evo',
-     'a login no longer listed: only what it banked', h.d);
+     'a profile with only a banked row keeps exactly that', h.d);
 }
 
 section('WELCOME BACK across an account');
@@ -246,42 +245,6 @@ section('the vigil: a quest pays once per account');
   ok(r.d.lit === 15 && r.d.done.join() === 'q2', 'signed out, the second device is only itself', r.d);
   const v = await store.get('vigil:hallows-2026', { type: 'json' });
   ok(!(v.byPid[C].q || []).includes('q1'), 'q1 was never filed under the second pid', v.byPid[C]);
-}
-
-section('an old dev login becomes an account');
-{
-  const devPass = 'shrt12';               // the login's own: not judged again
-  const salt = randomBytes(16);
-  DEV_ACCOUNTS.testdev = { salt: salt.toString('hex'), perks: ['dev'],
-    hash: scryptSync(devPass, salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex') };
-  const d = device('192.0.2.50', pid('9'));
-
-  let r = await d.op('register', { name: 'testdev', pass: 'not the password' });
-  ok(r.status === 409 && !r.cookie, 'a wrong password: taken, like any name', r);
-  ok((one("SELECT n FROM auth_gate WHERE k = 'f:192.0.2.50:testdev'") || {}).n === 1, 'and it counts as a failed sign-in');
-  ok(one("SELECT COUNT(*) AS n FROM accounts WHERE name = 'testdev'").n === 0, 'no account made');
-
-  r = await d.op('register', { name: 'TestDev', pass: devPass });
-  ok(r.status === 201 && /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/.test(r.d.recovery), 'the right password claims it, with a recovery code', r.d);
-  ok(one("SELECT perks FROM accounts WHERE name = 'testdev'").perks === '["dev"]', 'born with the login\'s perks');
-  ok(!one("SELECT k FROM auth_gate WHERE k = 'f:192.0.2.50:testdev'"), 'and the failed try is forgotten');
-  const a = await d.awards();
-  ok(perks(a).includes('unlock-all') && skins(a).includes('laurel'), 'everything, on the next sync', a.d);
-
-  const again = device('192.0.2.51', pid('1'));
-  r = await again.op('register', { name: 'testdev', pass: devPass });
-  ok(r.status === 409, 'claimed once: the name is the account\'s now', r.status);
-  r = await again.op('login', { name: 'testdev', pass: devPass });
-  ok(r.status === 200, 'and it signs in like any account', r.status);
-
-  r = await device('192.0.2.52', pid('2')).op('register', { name: 'NotZ', pass: 'a guess at it' });
-  ok(r.status === 409 && one("SELECT COUNT(*) AS n FROM accounts WHERE name = 'notz'").n === 0,
-     'notz: still nobody\'s without its password', r.status);
-
-  const brute = device('192.0.2.53', pid('3'));
-  for (let i = 0; i < 8; i++) await brute.op('register', { name: 'notz', pass: 'guess ' + i });
-  r = await brute.op('register', { name: 'notz', pass: 'guess 9' });
-  ok(r.status === 429, 'guessing it locks out like signing in', r.status);
 }
 
 section('the old dev login answers that it is gone');

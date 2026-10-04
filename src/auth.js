@@ -46,7 +46,8 @@ const SCHEMA = [
      account  TEXT    NOT NULL,
      created  INTEGER NOT NULL,
      seen     INTEGER NOT NULL,
-     expires  INTEGER NOT NULL)`,
+     expires  INTEGER NOT NULL,
+     device   TEXT)                        -- "Chrome on ChromeOS", for the device list`,
   `CREATE INDEX IF NOT EXISTS sessions_account ON sessions (account)`,
   /* Every profile id an account has been signed in from. A pid is what the
      boards, podiums and grants are addressed to, so this is how they find
@@ -71,11 +72,25 @@ const SCHEMA = [
      until    INTEGER NOT NULL)`
 ];
 
+/* Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS
+   leaves a table that is already there as it was, so each is added here if
+   it is missing. Two isolates may race to add one; the loser's "duplicate
+   column" is the answer it wanted. */
+const ADDED = [['sessions', 'device', 'TEXT']];
+
 /* Once per isolate: after the first success every later call is a resolved
    promise. */
 let ready = null;
 export function ensureAuth(db) {
-  if (!ready) ready = db.batch(SCHEMA.map(s => db.prepare(s))).catch(e => { ready = null; throw e; });
+  if (!ready) ready = (async () => {
+    await db.batch(SCHEMA.map(s => db.prepare(s)));
+    for (const [table, col, type] of ADDED) {
+      const cols = ((await db.prepare(`PRAGMA table_info(${table})`).all()).results || []).map(r => r.name);
+      if (!cols.includes(col))
+        await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`).run()
+          .catch(e => { if (!/duplicate column/i.test(String(e && e.message))) throw e; });
+    }
+  })().catch(e => { ready = null; throw e; });
   return ready;
 }
 

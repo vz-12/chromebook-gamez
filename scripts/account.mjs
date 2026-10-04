@@ -33,11 +33,12 @@ function device(o = {}) {
   d.call = async (method, path, body, extra = {}) => {
     const headers = { 'cf-connecting-ip': d.ip };
     if (d.origin) headers.origin = d.origin;
+    if (o.ua) headers['user-agent'] = o.ua;
     if (d.cookie) headers.cookie = 'other=1; vr_s=' + d.cookie;
     if (body !== undefined) headers['content-type'] = extra.ctype || 'application/json';
     const res = await worker.fetch(new Request(d.base + path, {
       method, headers, body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body))
-    }), env);
+    }), o.env || env);
     const sc = res.headers.get('set-cookie') || '';
     const m = /^vr_s=([^;]*)/.exec(sc);
     if (m) d.cookie = m[1];
@@ -74,7 +75,6 @@ section('sign up: the rules');
     ['ab', 'long enough pass', 400, 'too short a name'],
     ['has space', 'long enough pass', 400, 'a space'],
     ['x'.repeat(17), 'long enough pass', 400, 'too long a name'],
-    ['notz', 'long enough pass', 409, 'a dev login is reserved'],
     ['Admin', 'long enough pass', 409, 'reserved, in any case'],
     ['pilotx', 'short', 400, 'a short password'],
     ['pilotx', 'password', 400, 'a famous password'],
@@ -304,6 +304,132 @@ section('delete');
   ok(back.status === 401, 'it cannot be signed in to', back.status);
   const reuse = await device({ ip: '192.0.2.201' }).op('register', { name: 'Pilot_1', pass: 'brand new one' });
   ok(reuse.status === 201, 'and the name is free again', reuse.status);
+}
+
+section('Turnstile on sign-up');
+{
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url: String(url), body });
+    if (body.response === 'throw') throw new Error('network down');
+    const answer = { good: { success: true, action: 'signup' }, other: { success: true, action: 'login' },
+                     bad: { success: false, 'error-codes': ['invalid-input-response'] },
+                     bare: { success: true },
+                     testkey: { success: true, metadata: { result_with_testing_key: true } } }[body.response];
+    return new Response(JSON.stringify(answer || { success: false }));
+  };
+  const envT = Object.assign({}, env, { TURNSTILE_SITE_KEY: '0xSITE', TURNSTILE_SECRET: '0xSECRET' });
+  const T = device({ ip: '198.51.100.90', env: envT });
+
+  const off = await device({ ip: '198.51.100.91' }).call('GET', '/api/account');
+  ok(off.d.turnstile === null, 'no keys: no widget', off.d);
+  const half = await device({ ip: '198.51.100.91', env: Object.assign({}, env, { TURNSTILE_SITE_KEY: '0xSITE' }) })
+    .call('GET', '/api/account');
+  ok(half.d.turnstile === null, 'a site key without its secret is still off', half.d);
+  const on = await T.call('GET', '/api/account');
+  ok(on.d.turnstile === '0xSITE', 'both keys: the page is handed the site key', on.d);
+
+  let r = await T.op('register', { name: 'ts_none', pass: 'a fine password' });
+  ok(r.status === 400 && r.d.turnstile === true && /person/.test(r.d.error), 'no token: refused', r);
+  ok(calls.length === 0, 'and Cloudflare is not asked about nothing');
+  for (const [tok, why] of [['bad', 'a failed check'], ['other', 'a token earned for another action'],
+                            ['bare', 'a pass that names no action'], ['throw', 'a check that cannot be made']]) {
+    r = await T.op('register', { name: 'ts_' + tok, pass: 'a fine password', turnstile: tok });
+    ok(r.status === 400 && r.d.turnstile === true, why + ': refused', r);
+  }
+  ok(count('accounts', "name IN ('ts_none', 'ts_bad', 'ts_other', 'ts_bare', 'ts_throw')") === 0, 'none of them made an account');
+  r = await T.op('register', { name: 'ts_testkey', pass: 'a fine password', turnstile: 'testkey' });
+  ok(r.status === 201, "Cloudflare's testing keys pass, as they would anywhere", r);
+  r = await T.op('register', { name: 'ts_good', pass: 'a fine password', turnstile: 'good' });
+  ok(r.status === 201, 'a person: signed up', r);
+  const last = calls[calls.length - 1] || { body: {} };
+  ok(last.url === 'https://challenges.cloudflare.com/turnstile/v0/siteverify' && last.body.secret === '0xSECRET' &&
+     last.body.response === 'good' && last.body.remoteip === '198.51.100.90',
+     'asked with the secret, the token and the address', last);
+  const before = calls.length;
+  r = await device({ ip: '198.51.100.92', env: envT }).op('register', { name: 'TS_GOOD', pass: 'a fine password', turnstile: 'good' });
+  ok(r.status === 409 && calls.length === before, 'a taken name spends no token', r.status);
+  r = await device({ ip: '198.51.100.93', env: envT }).op('login', { name: 'ts_good', pass: 'a fine password' });
+  ok(r.status === 200 && calls.length === before, 'signing in is never asked', r.status);
+  r = await device({ ip: '198.51.100.94' }).op('register', { name: 'ts_off', pass: 'a fine password' });
+  ok(r.status === 201, 'and with no keys, sign-up works as it did', r.status);
+  globalThis.fetch = realFetch;
+}
+
+section('the device list');
+{
+  const { deviceOf } = await import('../src/account.js');
+  const UA = {
+    cros: 'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    edge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'
+  };
+  const label = ua => deviceOf(new Request('https://x/', { headers: ua ? { 'user-agent': ua } : {} }));
+  for (const [ua, want] of [
+    [UA.cros, 'Chrome on ChromeOS'], [UA.iphone, 'Safari on iPhone'], [UA.edge, 'Edge on Windows'],
+    ['Mozilla/5.0 (Android 14; Mobile; rv:121.0) Gecko/121.0 Firefox/121.0', 'Firefox on Android'],
+    ['Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36', 'Samsung Internet on Android'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0', 'Opera on Windows'],
+    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15', 'Safari on Mac'],
+    ['Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0 Mobile/15E148 Safari/604.1', 'Chrome on iPad'],
+    ['', 'A browser on some device']])
+    ok(label(ua) === want, 'called "' + want + '"', label(ua));
+
+  const A = device({ ip: '192.0.2.150', ua: UA.cros }), B = device({ ip: '192.0.2.151', ua: UA.iphone });
+  const C = device({ ip: '192.0.2.152', ua: UA.edge });
+  ok((await A.op('register', { name: 'many_devices', pass: 'a fine password' })).status === 201, 'signed up on a Chromebook');
+  ok((await B.op('login', { name: 'many_devices', pass: 'a fine password' })).status === 200, 'in on an iPhone');
+  ok((await C.op('login', { name: 'many_devices', pass: 'a fine password' })).status === 200, 'and on Windows');
+  let r = await A.op('devices');
+  const list = (r.d && r.d.devices) || [];
+  ok(r.status === 200 && list.length === 3, 'three devices', r.d);
+  ok(list.filter(x => x.current).length === 1 && (list.find(x => x.current) || {}).device === 'Chrome on ChromeOS',
+     'this one is marked', list);
+  ok(['Safari on iPhone', 'Edge on Windows'].every(n => list.some(x => x.device === n && !x.current)), 'the others by name', list);
+  ok(list.every(x => /^[0-9a-f]{16}$/.test(x.id) && x.seen && x.created), 'each with a short handle and its dates', list);
+  const sids = DB.sql.prepare(`SELECT s.id FROM sessions s JOIN accounts a ON a.id = s.account
+                               WHERE a.name = 'many_devices'`).all().map(x => x.id);
+  ok(!sids.some(full => JSON.stringify(r.d).includes(full)), 'never a whole session id');
+
+  const iphone = list.find(x => x.device === 'Safari on iPhone') || {};
+  r = await A.op('logout-device', { id: iphone.id });
+  ok(r.status === 200, 'the iPhone signed out from the Chromebook', r);
+  ok((await B.call('GET', '/api/account')).d.account === null, 'and the iPhone knows it');
+  ok((await C.call('GET', '/api/account')).d.account !== null, 'Windows is untouched');
+  r = await A.op('logout-device', { id: (list.find(x => x.current) || {}).id });
+  ok(r.status === 400, 'this device is signed out with SIGN OUT, not from the list', r.status);
+  r = await A.op('logout-device', { id: 'zz' });
+  ok(r.status === 400, 'a bad handle', r.status);
+  r = await A.op('logout-device', { id: iphone.id });
+  ok(r.status === 404, 'a device already gone', r.status);
+
+  const other = device({ ip: '192.0.2.153' });
+  ok((await other.op('register', { name: 'someone_else', pass: 'a fine password' })).status === 201, 'another account');
+  const win = list.find(x => x.device === 'Edge on Windows') || {};
+  r = await other.op('logout-device', { id: win.id });
+  ok(r.status === 404 && (await C.call('GET', '/api/account')).d.account !== null,
+     'which cannot sign out this account\'s devices', r.status);
+  r = await device({ ip: '192.0.2.154' }).op('devices');
+  ok(r.status === 401, 'signed out: no list', r.status);
+}
+
+section('a sessions table from before the device list');
+{
+  const old = makeD1();
+  old.sql.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, account TEXT NOT NULL, created INTEGER NOT NULL,
+                seen INTEGER NOT NULL, expires INTEGER NOT NULL)`);
+  old.sql.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?)').run('f'.repeat(64), 'acct', 1, 1, Date.now() + 1e9);
+  const fresh = await import('../src/auth.js?before-devices');     // its own once-per-isolate flag
+  await fresh.ensureAuth(old);
+  const cols = old.sql.prepare('PRAGMA table_info(sessions)').all().map(c => c.name);
+  ok(cols.includes('device'), 'the device column is added', cols);
+  ok(old.sql.prepare('SELECT COUNT(*) AS n FROM sessions').get().n === 1, 'and the session in it kept');
+  const again = await import('../src/auth.js?before-devices-2');
+  let threw = null;
+  try { await again.ensureAuth(old); } catch (e) { threw = e; }
+  ok(!threw, 'asking again is harmless', String(threw));
 }
 
 section('the rest of the Worker is untouched');
