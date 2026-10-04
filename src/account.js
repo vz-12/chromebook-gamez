@@ -21,7 +21,7 @@
    ========================================================================= */
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
-         publicAccount, SESSION_MS, MAX_SESSIONS } from './auth.js';
+         publicAccount, SESSION_MS, MAX_SESSIONS, SITES } from './auth.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -161,6 +161,30 @@ async function humanOk(env, token, ip) {
   } catch (e) { return false; }
 }
 
+/* ------------------------------- hand-offs --------------------------------
+   The game and PvP are two sites (PVP-PLAN.md): a workers.dev address is a
+   different site to the browser, so a cookie set on one never reaches the
+   other. A signed-in player crossing over asks for a hand-off code: random,
+   single use, alive for a minute, kept only as its hash, and good only at
+   the address it was asked for. The page carries it after the '#', which
+   never reaches a server log, and the other site trades it for a session of
+   its own ('handoff-take').
+
+   Where a code may go: one of SITES (auth.js), never the address asking. A
+   local `wrangler dev` may hand off between its own localhost addresses, and
+   only from one of them. */
+const HANDOFF_MS = 60 * 1000;
+const localHost = h => h === 'localhost' || h === '127.0.0.1';
+function handoffTarget(req, to) {
+  let u;
+  try { u = new URL(String(to || '')); } catch (e) { return null; }
+  if (u.origin !== String(to)) return null;          // an origin, and nothing after it
+  const here = new URL(req.url);
+  if (u.origin === here.origin) return null;
+  if (SITES.includes(u.origin)) return u.origin;
+  return localHost(here.hostname) && localHost(u.hostname) ? u.origin : null;
+}
+
 /* -------------------------------- replies -------------------------------- */
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -223,6 +247,8 @@ const accountByName = (db, name) =>
 /* -------------------------------- the ops -------------------------------- */
 const OPS = {
   async register(req, env, b) {
+    // PvP's Worker shares this file but makes no accounts: they are made in the game
+    if (env.SIGNUP === 'off') return no('make your account in VOIDRUNNER', 403);
     const db = env.DB, ip = clientIp(req);
     const display = String(b.name || '').trim();
     if (!LOGIN_RE.test(display)) return no('name: 3 to 16 letters, digits, _ or -', 400);
@@ -298,6 +324,40 @@ const OPS = {
   async logout(req, env, b, s) {
     if (s) await env.DB.prepare('DELETE FROM sessions WHERE id = ?1').bind(s.sid).run();
     return reply({ ok: true }, 200, sessionCookie(req, '', 0));
+  },
+
+  // a code for crossing to another of our sites, signed in (see hand-offs)
+  async handoff(req, env, b, s) {
+    if (!s) return no('signed out', 401);
+    const to = handoffTarget(req, b.to);
+    if (!to) return no('bad destination', 400);
+    const code = newToken(), now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM handoffs WHERE expires <= ?1').bind(now),
+      env.DB.prepare('INSERT INTO handoffs (id, account, target, expires) VALUES (?1, ?2, ?3, ?4)')
+        .bind(sha256(code), s.account.id, to, now + HANDOFF_MS)
+    ]);
+    return reply({ code, to, expires: now + HANDOFF_MS });
+  },
+
+  /* A code traded for a session here. Spent whatever the answer, by the one
+     statement that reads it. Already signed in here as the same account,
+     nothing changes; as somebody else, this site is left as it is: swapping
+     accounts under a save is the game's to do, by signing out first. */
+  async 'handoff-take'(req, env, b, s) {
+    const code = String(b.code || '');
+    if (!/^[A-Za-z0-9_-]{32,64}$/.test(code)) return no('no', 401);
+    const row = await env.DB.prepare('DELETE FROM handoffs WHERE id = ?1 RETURNING account, target, expires')
+      .bind(sha256(code)).first();
+    if (!row || row.expires <= Date.now() || row.target !== new URL(req.url).origin) return no('no', 401);
+    if (s) return s.account.id === row.account
+      ? reply({ account: publicAccount(s.account), already: true })
+      : no('signed in as somebody else', 409);
+    const a = await env.DB.prepare('SELECT id, name, display, created FROM accounts WHERE id = ?1')
+      .bind(row.account).first();
+    if (!a) return no('no', 401);
+    const token = await startSession(env.DB, a.id, req);
+    return reply({ account: publicAccount(a) }, 200, sessionCookie(req, token));
   },
 
   /* Every device signed in to the account, most recently seen first. A

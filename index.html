@@ -29424,6 +29424,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuDailyRect())) { openDaily('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
+    if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
       return;
@@ -50341,6 +50342,7 @@ function renderMenu() {
   drawMenuDaily();
   drawMenuRush();
   drawMenuAcct();
+  drawMenuPvp();
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
@@ -56064,6 +56066,11 @@ function skinAwardClick(g) {
 const ACCT_URL = '/api/account';
 // the game's address on school networks that block .online (the menu says so)
 const SCHOOL_HOST = 'voidrunner.play101.workers.dev';
+/* PvP's own site (PVP-PLAN.md), on workers.dev, which school filters let
+   through too. Under `wrangler dev` it is `npm run dev:pvp`, on another host
+   name than the game's so the two keep two cookie jars, as the real ones do. */
+const PVP_ORIGIN = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://127.0.0.1:8788'
+                                                                        : 'https://voidrunner-pvp.play101.workers.dev';
 const ACCT_DEVICE = ['pid', 'adopted', 'gfx', 'gfxCosts', 'gfxSeen', 'fx', 'vol', 'muted', 'sens', 'charIdx'];
 const ACCT_EVERY = 30000;              // ms between pushes, at most
 const ACCT_RETRY = 60000;              // and after one that could not get through
@@ -56134,14 +56141,49 @@ const Account = {
   },
 
   async boot() {
+    const code = Account.handoffIn();
     if (Account.off()) return;
     await Save.connected;              // both local stores first, so the merge sees all of it
+    // back from PvP signed in there: the code makes this site's session too (account.js)
+    if (code) await Account.call('POST', '', { op: 'handoff-take', code });
     const r = await Account.call('GET');
     if (!r.ok || !r.d) { Account.status = 'offline'; return; }
     Account.me = r.d.account || null;
     Account.turnstile = r.d.turnstile || null;
     Account.status = '';
     if (Account.me) await Account.pull();
+  },
+
+  /* A hand-off code after the '#' (PvP's BACK TO VOIDRUNNER), read and gone
+     from the address bar at once, so it is never bookmarked or shared. */
+  handoffIn() {
+    const m = /^#h=([A-Za-z0-9_-]{32,64})$/.exec(location.hash || '');
+    if (!m) return '';
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    return m[1];
+  },
+
+  /* Through the PVP door: the save goes up first, since PvP reads the
+     account's unlocks, then a hand-off code carries the session across. The
+     address this page is on goes along, so PvP's way back leads here: the
+     school address for a player on a school network. */
+  async toPvp() {
+    if (Account.off() || PvpDoor.busy) return;
+    if (!Account.me) {
+      AcctUI.open('in');
+      AcctUI.say('SIGN IN FIRST · PVP PLAYS ON YOUR ACCOUNT', true);
+      return;
+    }
+    PvpDoor.busy = true; PvpDoor.note = '';
+    await Account.push();
+    const r = await Account.call('POST', '', { op: 'handoff', to: PVP_ORIGIN });
+    PvpDoor.busy = false;
+    if (r.status === 401) { Account.lost(); AcctUI.open('in'); return; }
+    if (!r.ok || !r.d || !r.d.code) {
+      PvpDoor.note = r.status ? 'COULDN\'T OPEN PVP · TRY AGAIN' : 'CAN\'T REACH THE SERVER';
+      return;
+    }
+    location.href = PVP_ORIGIN + '/#h=' + r.d.code + '&from=' + encodeURIComponent(location.origin);
   },
 
   async pull() {
@@ -56670,6 +56712,41 @@ function drawMenuAcct() {
     : Account.status === 'saving' ? 'SAVING…'
     : Account.status === 'offline' ? 'OFFLINE  ·  WILL RETRY'
     : 'SAVED TO YOUR ACCOUNT';
+  ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* The PVP door: under ACCOUNT, since it is the account that goes through it
+   (Account.toPvp). PvP is its own site; this is only the way in. */
+const PvpDoor = { busy: false, note: '' };
+function menuPvpRect() { return { x: 18, y: 254, w: 176, h: 34 }; }
+
+function drawMenuPvp() {
+  const r = menuPvpRect(), col = '#f472b6';
+  const hot = !AcctUI.on && !Account.off() && inRect(mouse.x, mouse.y, r);
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(244,114,182,0.16)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('◆  PVP', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = PvpDoor.note ? '#f87171' : hot ? '#94a3b8' : '#64748b';
+  const sub = Account.off() ? 'NEEDS AN ACCOUNT'
+    : PvpDoor.busy ? 'OPENING…'
+    : PvpDoor.note ? PvpDoor.note
+    : !Account.me ? 'SIGN IN TO PLAY'
+    : 'ONE ON ONE  ·  ITS OWN PAGE  ↗';
   ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
   ctx.restore();
   ctx.restore();

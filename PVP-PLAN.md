@@ -84,7 +84,8 @@ keeps it off the public site.
   this:
   - Name `voidrunner-pvp`. Root directory `/`.
   - Deploy command `npx wrangler deploy -c pvp/wrangler.jsonc`.
-  - Build watch paths `pvp/*`, `src/auth.js`, `src/account.js`.
+  - Build watch paths `pvp/*`, `src/auth.js`, `src/account.js`. (PvP's code
+    imports only those two from `src/`.)
   - The main Worker gets watch paths that exclude `pvp/*`, so a PvP change
     doesn't redeploy the game.
 
@@ -228,8 +229,8 @@ at 02:43 UTC, born with `["dev"]`.
   - The game loads Cloudflare's script only when the sign-up form opens. A
     failed try resets the widget for a fresh token.
   - The widget's hostnames must include `voidrunner.play101.workers.dev`,
-    the address school networks reach when they block `.online`. When PvP
-    serves `account.js` on its own workers.dev address, that one too.
+    the address school networks reach when they block `.online`. PvP's
+    address doesn't need adding: PvP takes no sign-ups (`SIGNUP: "off"`).
 - **Signed-in devices.** ACCOUNT → DEVICES lists each session as "Chrome on
   ChromeOS" or similar, read from the User-Agent once at sign-in. Only those
   words are kept.
@@ -252,7 +253,66 @@ at 02:43 UTC, born with `["dev"]`.
 
 Phase 1 is complete. Next is Phase 2, standing up the PvP Worker.
 
-### Phase 2 — The PvP Worker, standing up
+### Phase 2 — The PvP Worker, standing up. Done.
+
+**What was built:**
+- **`pvp/`:**
+  - `wrangler.jsonc`: `voidrunner-pvp`, on workers.dev only, with the
+    game's D1. `SIGNUP: "off"`, so accounts are only ever made in the game,
+    and PvP can't be used to skip Turnstile.
+  - `src/index.js` routes `/api/account` (the shared `src/account.js`),
+    `/api/pvp/me`, and 501s for `/api/pvp/queue` and `/api/pvp/match`.
+  - `src/me.js` returns who you are, the account's `unlocks`, your league
+    (bronze, to be placed, until ratings exist), and your ranked and casual
+    loadouts.
+  - `src/rules.js` holds the LEAGUES table, CASUAL and `loadout()`.
+    `PILOTS` mirrors the game's CHARS until Phase 3.
+  - `src/objects.js` has Matchmaker and Match, SQLite Durable Objects that
+    are declared but answer 501.
+  - `site/` is the page: sign-in (no sign-up), who you are, league, pilots,
+    and BACK TO VOIDRUNNER.
+- **Hand-offs** (`src/account.js`, ops `handoff` and `handoff-take`, table
+  `handoffs`):
+  - A code is 32 random bytes, kept as its SHA-256, single use (spent by
+    the `DELETE … RETURNING` that reads it), alive 60 s, and good only at
+    the origin it was asked for.
+  - Destinations are `SITES` in `auth.js`: the game, its school address,
+    and PvP; never the asker, never www. A local `wrangler dev` may hand
+    off between localhost addresses, and only from one.
+  - If the target is already signed in as the same account, nothing
+    changes. If it's signed in as somebody else, the code is refused
+    (409): swapping accounts under a save is the game's job, by signing
+    out first.
+- **The doors:**
+  - The game's menu has a pink PVP button under ACCOUNT. It pushes the save
+    first, so PvP reads current unlocks, then hands off to PvP with
+    `&from=<this address>`. Signed out, it opens the account panel with a
+    note.
+  - PvP's BACK TO VOIDRUNNER hands off to that `from`: the school address
+    for a school player, `.online` otherwise. The game takes `#h=` at
+    `Account.boot`.
+- **Local dev:**
+  - `npm run dev:pvp` serves PvP at 127.0.0.1:8788, on the same local D1 as
+    `npm run dev`.
+  - Both scripts now pass `--local-upstream`. Without it, wrangler
+    reported the game's request URL as `voidrunner.online`, and every local
+    hand-off was refused.
+- **Tested:**
+  - `npm run test:pvp`: 62 checks across both Workers on one database.
+    Mutants that let any address take a code, let PvP make accounts,
+    allow the asking address, reuse codes, allow localhost from the real
+    site, swap accounts silently, or allow paths are all caught.
+  - The other suites still pass.
+  - Browser, both Workers locally:
+    - PVP while signed out opens the sign-in prompt.
+    - PVP signed in lands on PvP signed in, with the code gone from the
+      address bar.
+    - BACK, with the game signed out, signs the game back in.
+
+**Before it ships:** the PvP Worker has to exist. See README, PvP. Until it
+does, the PVP button would lead nowhere.
+
+**The original outline:**
 
 1. **The `pvp/` skeleton:**
    - `pvp/wrangler.jsonc`: name `voidrunner-pvp`, the same D1
@@ -288,8 +348,12 @@ own code, not a copy that drifts.
   - Every tool that patches `index.html` gets pointed at the files.
 - **The proof:** `npm test` and `npm run test:lockstep` give the same results
   before and after the split.
-- **PvP stays out of the game's files.** The PvP page loads the game's files
-  from voidrunner.online, then its own `pvp/site/*.js`.
+- **PvP stays out of the game's files.** The PvP page loads the game's files,
+  then its own `pvp/site/*.js`.
+  - Not from voidrunner.online: school filters block `.online`. They come
+    from an address every player can reach. The PvP Worker can serve them
+    itself, built from the same files, or they load from
+    `voidrunner.play101.workers.dev`.
   - PvP plugs in through a small, named set of hooks that the engine calls
     and that do nothing in the main game: rules, damage between pilots, and
     round start and end.

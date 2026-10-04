@@ -30,6 +30,13 @@ export const MAX_SESSIONS = 20;          // devices one account may be signed in
    Worker (it talks only to itself), workers.dev and a local `wrangler dev`. */
 const ORIGINS = ['https://voidrunner.online', 'https://www.voidrunner.online'];
 
+/* Every address a signed-in player can be handed to (account.js, hand-offs):
+   the game, the game's school address (filters that block .online let
+   workers.dev through), and PvP. Not www: that address only ever forwards
+   to the bare one, before anything runs. */
+export const SITES = ['https://voidrunner.online', 'https://voidrunner.play101.workers.dev',
+                      'https://voidrunner-pvp.play101.workers.dev'];
+
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
      id       TEXT    PRIMARY KEY,
@@ -69,7 +76,14 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS auth_gate (
      k        TEXT    PRIMARY KEY,
      n        INTEGER NOT NULL,
-     until    INTEGER NOT NULL)`
+     until    INTEGER NOT NULL)`,
+  /* One-time codes that carry a session from one site to the other
+     (account.js). Kept as the code's hash, and good at one address only. */
+  `CREATE TABLE IF NOT EXISTS handoffs (
+     id       TEXT    PRIMARY KEY,         -- sha-256 of the code
+     account  TEXT    NOT NULL,
+     target   TEXT    NOT NULL,            -- the origin that may take it
+     expires  INTEGER NOT NULL)`
 ];
 
 /* Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS
@@ -179,14 +193,15 @@ export async function accountPids(db, accountId) {
    leaves the Worker. */
 export const publicAccount = a => a && { name: a.name, display: a.display, created: a.created };
 
-/* The daily sweep (index.js, on the season-close cron): expired sessions and
-   spent rate-limit counters are nobody's business. */
+/* The daily sweep (index.js, on the season-close cron): expired sessions,
+   spent rate-limit counters and lapsed hand-off codes are nobody's business. */
 export async function pruneAuth(env) {
   if (!env || !env.DB) return;
   await ensureAuth(env.DB);
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE expires <= ?1').bind(now),
-    env.DB.prepare('DELETE FROM auth_gate WHERE until <= ?1').bind(now)
+    env.DB.prepare('DELETE FROM auth_gate WHERE until <= ?1').bind(now),
+    env.DB.prepare('DELETE FROM handoffs WHERE expires <= ?1').bind(now)
   ]);
 }

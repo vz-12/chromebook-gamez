@@ -1,0 +1,51 @@
+/* VOIDRUNNER PvP on Cloudflare Workers (PVP-PLAN.md).
+   Its own Worker, so a PvP bug can never take the game down, on the game's
+   own D1 database, so both read the same accounts. Deployed by its own
+   Workers Build from this repo: deploy command
+   `npx wrangler deploy -c pvp/wrangler.jsonc` (README, PvP). Paths below are
+   relative to this file. */
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  // must match the Worker's name in the Cloudflare dashboard
+  "name": "voidrunner-pvp",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // node:crypto, for the shared accounts code's scrypt
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  /* No custom domain: PvP lives at voidrunner-pvp.play101.workers.dev, which
+     school filters that block .online let through. */
+  "workers_dev": true,
+
+  // the game's database: accounts, sessions and saves are read from here
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "voidrunner",
+      "database_id": "c2fde46d-3e3d-4354-92b9-e70338f22cfa"
+    }
+  ],
+
+  /* Matchmaking (Phase 5): one Matchmaker per queue, one Match per match.
+     SQLite-backed, so they run on the Free plan. */
+  "durable_objects": {
+    "bindings": [
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" },
+      { "name": "MATCH", "class_name": "Match" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Matchmaker", "Match"] }
+  ],
+
+  // accounts are made in the game, never here (src/account.js, register)
+  "vars": { "SIGNUP": "off" },
+
+  "observability": { "enabled": true }
+}

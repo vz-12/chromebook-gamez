@@ -182,6 +182,38 @@ and out of an account:
 - Turnstile, with Cloudflare's answer stubbed
 - the device list, and signing out one device from another
 
+## PvP
+
+PvP is its own Worker, `voidrunner-pvp`, at
+`https://voidrunner-pvp.play101.workers.dev`, on the game's D1 database
+(`pvp/`, and `PVP-PLAN.md` for the whole plan). The game's menu has a PVP
+button under ACCOUNT. It carries the signed-in player across with a one-time
+hand-off code. PvP's BACK TO VOIDRUNNER brings them back the same way, to
+whichever address they came from. Accounts are made in the game, never on
+PvP.
+
+**Setting up the second Worker (dashboard, once, before PvP ships):**
+
+1. Workers & Pages → **Create → Import a repository** →
+   `vz-12/chromebook-gamez`.
+2. Worker name **`voidrunner-pvp`**. Root directory `/`. Production branch
+   `main`.
+3. Build: deploy command **`npx wrangler deploy -c pvp/wrangler.jsonc`**.
+   Build watch paths: include `pvp/*`, `src/auth.js` and `src/account.js`.
+4. On the game's own Worker (`voidrunner`), add `pvp/*` to the build watch
+   paths' **exclude** list, so a PvP-only change doesn't redeploy the game.
+
+Its first build fails until `pvp/` is on `main`; that's harmless.
+
+```sh
+npm run dev:pvp                            # PvP at http://127.0.0.1:8788, beside npm run dev
+npm run test:pvp                           # under a second
+```
+
+Open the local game at `http://localhost:8787` and PvP at
+`http://127.0.0.1:8788`. The two host names keep two cookie jars, as the
+real sites do.
+
 ## The leaderboard page
 
 `voidrunner.online/leaderboard/` lists every player on every board. That

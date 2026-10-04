@@ -27,6 +27,15 @@ mkdirSync(SITE, { recursive: true });
 for (const name of readdirSync(ROOT))
   if (!SKIP.has(name)) cpSync(join(ROOT, name), join(SITE, name), { recursive: true });
 
-const child = spawn('npx', ['--yes', 'wrangler', 'dev', '--assets', SITE, ...process.argv.slice(2)],
+/* The address the Worker sees in request.url: the one the browser is on.
+   Left alone, wrangler puts the production route there (voidrunner.online),
+   and a hand-off to PvP (src/account.js), which compares the two, would
+   refuse every local code. */
+const args = process.argv.slice(2);
+const portArg = args.find((a, i) => a.startsWith('--port=') || args[i - 1] === '--port');
+const port = portArg ? portArg.replace('--port=', '') : '8787';
+const upstream = args.some(a => a.startsWith('--local-upstream')) ? [] : ['--local-upstream', 'localhost:' + port];
+
+const child = spawn('npx', ['--yes', 'wrangler', 'dev', '--assets', SITE, ...upstream, ...args],
                     { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' });
 child.on('exit', code => process.exit(code ?? 0));
