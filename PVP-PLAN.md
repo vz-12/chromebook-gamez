@@ -227,8 +227,9 @@ at 02:43 UTC, born with `["dev"]`.
     token is spent, and sign-in is never asked.
   - The game loads Cloudflare's script only when the sign-up form opens. A
     failed try resets the widget for a fresh token.
-  - When PvP serves `account.js` on workers.dev, its hostname has to be
-    added to the widget.
+  - The widget's hostnames must include `voidrunner.play101.workers.dev`,
+    the address school networks reach when they block `.online`. When PvP
+    serves `account.js` on its own workers.dev address, that one too.
 - **Signed-in devices.** ACCOUNT → DEVICES lists each session as "Chrome on
   ChromeOS" or similar, read from the User-Agent once at sign-in. Only those
   words are kept.

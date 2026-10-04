@@ -65,9 +65,14 @@ the certificate.
 - **www.voidrunner.online** is attached as well. The game sends anyone who
   lands there to `voidrunner.online` before loading anything, because a save
   belongs to the address it was made on.
-- **The workers.dev address** (`voidrunner.play101.workers.dev`)
-  stays up as a fallback (`workers_dev` in `wrangler.jsonc`). Saves made there
-  stay there.
+- **The workers.dev address** (`voidrunner.play101.workers.dev`) stays up
+  (`workers_dev` in `wrangler.jsonc`), and it is **the address for school
+  networks**: filters such as Cisco Umbrella often block `.online` but let
+  `workers.dev` through. Everything works there: the game, `/leaderboard/`,
+  accounts, co-op. Every link and API call is relative, so nothing sends a
+  player back to `.online`; keep it that way, and never redirect this address.
+  Saves made there stay there, but signing in to an account carries progress
+  between the two addresses.
 
 The `CNAME` file is not used by Cloudflare and is not published.
 
@@ -142,9 +147,11 @@ and to PvP (see `PVP-PLAN.md`).
 Sign-up can ask Cloudflare Turnstile whether a person is there. Sign-in is
 never asked. It stays off until the Worker has both keys:
 
-1. Cloudflare dashboard → **Turnstile → Add widget**. Hostnames
-   `voidrunner.online` and `www.voidrunner.online`, mode **Managed**. Note the
-   **Site Key** and the **Secret Key**.
+1. Cloudflare dashboard → **Turnstile → Add widget**, mode **Managed**, with
+   all three hostnames: `voidrunner.online`, `www.voidrunner.online` and
+   `voidrunner.play101.workers.dev` (the school-network address; leave it
+   out and nobody can sign up there). Note the **Site Key** and the
+   **Secret Key**.
 2. Workers & Pages → `voidrunner` → **Settings → Variables and Secrets**.
    Add both as type **Secret** (a deploy clears plain variables, never
    secrets): `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`.
