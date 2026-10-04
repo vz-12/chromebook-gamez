@@ -368,12 +368,17 @@ makes sure nothing it doesn't use is fetched or run.
     pilots there are.
   - `PVP.waves(dt)` in `updateWaves`: PvP decides what spawns.
   - `PVP.frame()` once a frame: PvP's own screens and transitions.
-  - Later steps add one per rule: pilot-versus-pilot damage, rounds.
+  - Step 3 adds one per rule (listed there): pilot-versus-pilot damage,
+    whose turn it is, levels, cards, downs, the HUD, the fingerprint.
 - **PvP's files**, sectioned by topic in `pvp/site/js/`:
   - `mode.js`: VR_PVP, what the lobby handed in, and the hook table.
   - `practice.js`: practice in an empty arena.
-  - Later: `rules.js` (pilots hurting pilots, rounds), `net.js` (the match
-    connection), `draft.js` (cards between rounds).
+  - `match.js`: the connection, the waiting room, the result.
+  - `rounds.js`: the match, start to finish.
+  - `duel.js`: pilots hurting pilots.
+  - `cards.js`: what can be dealt.
+  - `maps.js`: the sectors, clean or infested.
+  - `art.js`: the map draw's belt, to be redrawn.
 
 **Steps** (each pushed to `pvp`, then stop and report):
 
@@ -450,17 +455,139 @@ makes sure nothing it doesn't use is fetched or run.
          and ran no frames. The fingerprints were identical at step 120,
          with no resyncs.
        - The guest's quit put it in the lobby and the host on MATCH OVER.
-3. **The PvP rules. ← next. How a fight plays is yours to say first.**
-   - Pilots' shots hurt the other pilot (shots already carry `by`).
-   - Rounds, best of N, with a round timer.
-   - An arena with light hazards instead of waves. THE HACKER's army needs
-     bodies to take, so the hazards include a few it can turn.
-4. **Loadout and draft.**
-   - Your account's unlocks, filtered by the league (Phase 6). The awakened
-     form only where the league allows it.
-   - Reward upgrades in the pool in every league.
-   - Each player drafts their own cards between rounds (`ui('pick')` is
-     already per pilot).
+3. **The PvP rules. Done.** Your rules (4 Oct), as played:
+   - **The match** (`js/rounds.js`). The whole state is `RUN.pvp`, so run
+     snapshots carry it and both machines step it together.
+     - **belt:** the map is drawn on PvP's own screen (4.8 s).
+     - **picks:** three upgrades each to start. The room holds while
+       either player chooses.
+     - **fight:** both pilots start from their own side at full health,
+       with 1.5 s of grace. Every 30 s of fighting deals both another
+       upgrade.
+     - **end:** a pilot is down, and the round is the other's. Whoever
+       lost is dealt one more upgrade before the next round.
+     - **over:** best of three until gold, best of five from there.
+       `bestOf` is on each league in `pvp/src/rules.js` and comes with
+       `/api/pvp/me`. A match with a friend is best of three.
+     - Builds carry over; health, the floor and the room reset each round.
+     - A match is fought at wave 1 and stays there. At wave 0 the game's
+       health curve gives bodies negative health, so THE HACKER's takes
+       died the moment they stood up.
+   - **Every ability hurts the other pilot** (`js/duel.js`).
+     - Each pilot has a stand-in: an invisible body in the game's enemy
+       list. Whatever a pilot's shots, blasts, beams, blades, kit, drones,
+       fields or army do to enemies, they do to the rival's stand-in.
+     - At the one line where the engine takes health off a body, the hit
+       comes to `VR_PVP.hit` instead. Crits, damage cards and marks
+       (DEEP WOUND, a Brand) still apply. An execution or a delete
+       (`killEnemy`) lands a capped blow instead.
+     - Whose turn it is decides who is hitting. The engine's `pilotsEach`
+       and `pilotDo` run each pilot's turn. What the world runs for a pilot
+       (its army, napalm, mortars, volatile wrecks) records an owner and
+       runs as that pilot. A pilot's own stand-in is off the map on its own
+       turn, so nobody hurts themselves. Outside any turn both are off the
+       map, so the room's own enemies hurt pilots the game's own way.
+     - Burns, poison and leaks on a stand-in tick on the rival.
+   - **Scaled to a pilot and capped, so nothing wins a round in one blow.**
+     - A hit on an enemy is 22% of that on a pilot (`DUEL.scale`).
+     - No single hit takes more than 14% of max health, and nothing takes
+       more than 34% in any one second.
+     - It goes through `hurtPlayer`, so a parry, i-frames, STILL WATER, a
+       shield, armour and frailty all answer it. The caps are applied after
+       all of them, in the engine.
+     - THE HACKER's army hits from inside a body's script, where the game
+       blocks damage to pilots (`hackBy`). The duel lets it through for the
+       rival only.
+     - `DUEL.pilots` sets each pilot's damage. All are 1 for now; see
+       "Balance" below.
+   - **Cards** (`js/cards.js`).
+     - The game's pool, less the instant kills (Executioner's Mark,
+       Erasure). Also out: cards that break without waves, credits, drops,
+       experience and boss cards (`BANNED`).
+     - No card is offered that would put a fifth bullet in a shot
+       (barrels × count + rear).
+     - Each player's own reward upgrades, from their loadout: the hello
+       carries both lists, so both machines deal from the same pools.
+     - Experience from kills on an infested map pays nothing. A level is
+       paid only when the match owes one.
+   - **Maps** (`js/maps.js`).
+     - One of seven sectors (the five of the rotation, ARCHIVE and MIRROR),
+       in a 1600×1050 arena with no terrain hazards.
+     - Clean: nothing else. Infested: the sector's own enemies, at least
+       380 px from both pilots, six at a time at most. A splitter's or a
+       brood's young come on top of that.
+     - Even odds; 75% infested with one HACKER in the fight, 100% with two.
+       The roll is the run's seeded one, so both machines draw the same.
+   - **Art hook** (`js/art.js`): `PVP_ART.belt(g, w, h, t, d)`, documented in
+     its header, gets every sector's colours, the pick, clean or infested,
+     the odds and how many HACKERs. A first pass is there to draw over. A
+     throw is logged once, and the match carries on.
+   - **HUD:** the score from your side, both names, the round, FIRST TO,
+     the next upgrade's countdown, and the map with CLEAN or INFESTED.
+     The result says VICTORY or DEFEAT with the score.
+   - **Engine hooks added** (each does nothing when `PVP` is null):
+     - `damageEnemy` → `PVP.hit`; `killEnemy` → `PVP.kill`.
+     - Stand-ins are skipped by the enemy loop, the enemy draw and damage
+       numbers.
+     - Owners: `PVP.turn` in `pilotDo` and `pilotsEach`; `PVP.as` around
+       enemies, hazards, mortars and wrecks; `pid` on hazards, mortars and
+       wrecks; `hackPid` on taken bodies. A body stands up only on a
+       pilot's turn.
+     - `hurtPlayer` takes `opts.pvp` (mercy i-frames, armour scale, cap).
+     - `PVP.down` in `reviveOrDie`, `PVP.levelUp` in `checkLevel`,
+       `PVP.cards` in `offerPool`.
+     - `PVP.hello` / `PVP.peerHello` in the hello, `PVP.hash` in the
+       fingerprint, `PVP.idle` / `PVP.draw` in the `'pvp'` state, and
+       `PVP.hud` in place of the score.
+   - **Tested:** `npm run test:pvp`. The server part gains league lengths
+     (77 checks). The engine part is 121 checks, a few seconds:
+     - A whole match between two engines in Node, bots at the sticks: the
+       belt, three cards each, the rounds, the end.
+       - Every upgrade is accounted for.
+       - Hits went both ways, only in rounds, each within 14%, within 34% a
+         second.
+       - No banned card was dealt, and never more than four bullets a shot.
+       - Clean rooms sent nothing.
+       - Fingerprints were identical throughout, with no resyncs and no
+         requests. Both sides get the right result.
+     - The rules one at a time: never self, never the room, the 22% scale
+       through armour and frailty, the caps, an execution, a burn, nothing
+       between rounds.
+       - THE HACKER's army hurts the rival, never its own pilot, including
+         a blast from inside a body's script.
+       - The card filters, the odds (4,000 draws each), the spawner, and the
+         match length by league.
+     - A VAGRANT match (levels in place of cards), then a quit part way.
+     - 30 mutants, one per rule; 29 caught. The one missed (an execution
+       for a billion) behaves the same, because the 14% cap holds it.
+     - The game's determinism, lockstep, account, boards and awards suites
+       pass unchanged.
+   - **Balance** (open, yours to playtest). Bots can't settle it. A bot
+     round-robin of 36 matches went:
+     - bots aiming where the rival was: EMBER 18–0, the rest about even. The
+       lance hits at once; bullets miss a strafing target.
+     - bots leading their shots: VOIDRUNNER 13, EMBER 13, HACKER 6,
+       VAGRANT 3. The bots can't parry or herd an army.
+     - Raw damage a second against a still target, after three cards:
+       EMBER 170–325 at lance range, VAGRANT 81, VOIDRUNNER about 50, HACKER
+       about 25 from its gun (its army is its weapon).
+     - Some bot matches between the long-range pilots ran past ten minutes.
+       A sudden death (say, the arena closing in after a few minutes) would
+       end those. It isn't in, since you didn't ask for it.
+   - **Known gaps in this version:**
+     - Slows, stuns and knockback on a stand-in don't carry over to its
+       pilot. Damage and damage over time do.
+     - Two HACKERs' armies ignore each other and go for the pilots.
+     - Second Wind and DEADMAN BRAKE save a pilot once per match, not once
+       per round.
+     - The 30 s upgrades stop the fight while they're chosen, as a level-up
+       stops a run.
+4. **Loadout and draft.** Most of it came with step 3:
+   - Done: each player is dealt and picks their own cards, with their own
+     reward upgrades in every league. The loadout for the mode comes from
+     `/api/pvp/me`.
+   - Left: ranked uses the league's loadout (base pilots, no awake form
+     below platinum) once matchmaking can say a match is ranked (Phase 5).
 
 **Tests:**
 - `npm run test:pvp` grows a PvP-mode engine suite in Node.

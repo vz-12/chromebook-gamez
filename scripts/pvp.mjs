@@ -113,6 +113,7 @@ section('/api/pvp/me');
   ok(r.status === 200 && r.d.account.display === 'Duelist', 'who you are', r.d);
   ok(r.d.unlocks && r.d.unlocks.chars.includes('hacker'), 'what you have unlocked, from the game\'s save', r.d.unlocks);
   ok(r.d.league.id === 'bronze' && r.d.league.provisional === true, 'the lowest league, to be placed', r.d.league);
+  ok(r.d.league.bestOf === 3, 'whose ranked matches are best of three', r.d.league);
   const { ranked, casual } = r.d.loadouts;
   ok(ranked.pilots.join() === 'runner,ember' && ranked.awake.length === 0, 'bronze: the base pilots, none awake', ranked);
   ok(ranked.ups.join() === 'u1,u2,u3', 'and the reward upgrades, in every league', ranked.ups);
@@ -130,6 +131,8 @@ section('the league tables');
   const none = loadout(CASUAL, null);
   ok(none.pilots.join() === 'runner,ember' && !none.ups.length, 'no save yet: the base pilots', none);
   ok(LEAGUES.every((l, i) => !i || l.from > LEAGUES[i - 1].from), 'the leagues climb');
+  ok(LEAGUES.map(l => l.id + ':' + l.bestOf).join() === 'bronze:3,silver:3,gold:5,platinum:5,void:5' && CASUAL.bestOf === 3,
+     'best of three until gold, five from there; casual three', LEAGUES.map(l => l.bestOf));
 }
 
 section('back through the door: PvP to wherever the player came from');

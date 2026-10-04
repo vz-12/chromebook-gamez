@@ -8,8 +8,9 @@
    network), both say hello, and the host starts the run: LOCKSTEP CO-OP,
    each machine flying its own pilot (TWO PILOTS), in an empty arena.
 
-   This step is the connection only. How a fight plays (pilots hurting each
-   other, rounds, what spawns) is step 3's, and is decided before it is built.
+   The match itself, from the map's draw to the last round, is rounds.js's;
+   this file is the connection around it, the waiting room before it and the
+   result after it.
 
    Until the run starts, the engine sits in PvP's own state, 'pvp', where the
    run neither moves nor draws; this file shows the waiting room over it, in
@@ -106,6 +107,14 @@
     }
   }
 
+  // the result, once the match is decided (rounds.js: phase 'over')
+  function result(m) {
+    const me = pilotMine(), them = 1 - me, won = m.winner === me;
+    over = won ? 'won' : 'lost';
+    say(won ? 'VICTORY' : 'DEFEAT', '', M.nameOf(me) + '  ' + m.score[me] + ' — ' + m.score[them] + '  ' + M.nameOf(them),
+        'best of ' + m.bestOf, false);
+  }
+
   M.modes.match = {
     loadout: 'casual',
     start() {
@@ -114,13 +123,16 @@
       else netJoin(M.hand.code);
       waiting();
     },
-    // nothing spawns (step 3 decides what a fight is)
-    waves() {},
+    // the match's step (rounds.js)
+    waves(dt) { M.rounds.tick(dt); },
     frame() {
-      if (state === 'pvp') { waiting(); return; }
-      if (state === 'play' && !over) {
+      const live = LS.on && MP.on;
+      if (!live && !started && state === 'pvp') { waiting(); return; }
+      if (live && !over) {
         started = true;
         if (box && !box.hidden) box.hidden = true;
+        const m = RUN.pvp;
+        if (m && m.run === LS.run && m.phase === 'over') { result(m); return; }
       }
       if (over) return;
       // this player quit, from the game's own pause screen: back to the lobby

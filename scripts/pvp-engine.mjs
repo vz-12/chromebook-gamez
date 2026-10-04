@@ -143,8 +143,99 @@ section('the same engine as the game, for contrast');
 }
 
 section('a match: two machines, one run');
+const RIVAL = Object.assign({}, ME, { account: { name: 'rival', display: 'Rival' },
+  loadouts: { ranked: ME.loadouts.ranked, casual: Object.assign({}, ME.loadouts.casual, { ups: ['u2'] }) } });
+/* The link, as scripts/lockstep.mjs makes it: each side's sends queued, and
+   shipped across. Both say hello; the host's waiting room starts the run. */
+function link(H, G) {
+  for (const [g, role] of [[H, 'host'], [G, 'guest']])
+    g.run(`globalThis.__out = []; netSend = function (buf) { __out.push(buf); return true; };
+           Net.phase = 'live'; Net.role = '${role}'; Net.code = 'ABCD'; Net.note = '';`);
+  const ship = (a, b) => { for (const d of a.run('__out.splice(0)')) { b.ctx.__msg = d; b.run('netOnMessage(__msg)'); } };
+  H.run('mpOnOpen()'); G.run('mpOnOpen()'); ship(H, G); ship(G, H);
+  return ship;
+}
+/* A bot flies this machine's own pilot at the other one: it closes in and
+   circles, shoots at it, dashes, uses its kit and its awake form, and takes
+   whichever card or piece of gear it is dealt. */
+const BOT = `
+  LS.source = rec => {
+    const k = LS.hi + 1, foe = pilotP(1 - pilotMine());
+    if (k % 9 === 0 && state === 'levelup' && offers.length) handleKey(String(1 + (k / 9 | 0) % offers.length));
+    if (k % 9 === 0 && state === 'gear' && gearOffer) handleKey(['1', '2', 'x'][(k / 9 | 0) % 3]);
+    const dx = foe.x - P.x, dy = foe.y - P.y, d = Math.hypot(dx, dy) || 1;
+    const reach = P.weapon === 'laser' ? [130, 210] : P.weapon === 'blade' ? [45, 95] : [200, 430];   // its own weapon's range
+    const turn = Math.floor(k / 140) % 2 ? 1 : -1, close = d > reach[1] ? 1 : d < reach[0] ? -1 : 0.2;
+    const vx = close * dx / d - turn * dy / d, vy = close * dy / d + turn * dx / d;
+    rec.mx = Math.abs(vx) > 0.35 ? Math.sign(vx) : 0; rec.my = Math.abs(vy) > 0.35 ? Math.sign(vy) : 0;
+    const lead = P.weapon === 'bullet' ? d / (P.bspeed || 700) : 0;     // a gun leads its target, as a player would
+    rec.ax = foe.x + foe.vx * lead + Math.sin(k * 0.05) * 30; rec.ay = foe.y + foe.vy * lead + Math.cos(k * 0.04) * 30;
+    rec.trig = true; rec.lmb = true; rec.auto = false; rec.dash = k % 97 === 0;
+    rec.touch = false; rec.taim = null; rec.press = [];
+    if (k % 900 === 70) rec.press.push(P.charId === 'melee' ? 'v' : 'f');
+    if (k % 75 === 40) rec.press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
+    if (P.charId === 'melee' && k % 23 === 0) rec.press.push('f');
+  };`;
+/* What each machine writes down, at the end of every step of the shared
+   game (the same moment on both): the match's phases, every hit one pilot
+   lands on the other (hurtPlayer with opts.pvp, and what it really took),
+   every card dealt, the most bullets in a shot, the room's own enemies, where
+   the stand-ins wait, and a fingerprint every half second. */
+const WATCH = `
+  globalThis.__fp = new Map();
+  globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
+                       wildMax: 0, wildClean: 0, standOut: 0 };
+  let __at = '';
+  const __hurt = hurtPlayer;
+  hurtPlayer = function (dmg, opts) {
+    const m = RUN.pvp, before = P.hp, phase = m && m.phase, r = __hurt.apply(this, arguments);
+    if (m && opts && opts.pvp) __log.hits.push([m.clock, PILOT.on, before - Math.max(0, P.hp), P.maxHp, phase]);
+    else if (m && P.hp < before) __log.room++;
+    return r;
+  };
+  const __offers = k => (k === PILOT.on ? offers : PILOTS[k].v[PILOT_VARS.indexOf('offers')]) || [];
+  LS.after = () => {
+    const m = RUN.pvp;
+    if (!m) return;
+    const a = pilotP(0), b = pilotP(1);
+    if (!__log.belt) __log.belt = { tick: LS.tick, state, map: m.map, maps: PVP.maps.list().length, odds: m.odds,
+                                    hackers: m.hackers, infested: m.infested, bestOf: m.bestOf, lv: [a.level, b.level] };
+    if (m.phase + m.round !== __at) {
+      __at = m.phase + m.round;
+      __log.phases.push({ tick: LS.tick, phase: m.phase, round: m.round, score: m.score.slice(), winner: m.winner,
+                          loser: m.loser, lv: [a.level, b.level], owed: m.owed.slice(), clock: m.clock, state });
+    }
+    __log.shots = Math.max(__log.shots, PVP.shots(a), PVP.shots(b));
+    for (let k = 0; k < 2; k++) for (const u of __offers(k)) { __log.offered.add(u.id); if (PVP.BANNED.has(u.id)) __log.banned.push(u.id); }
+    let wild = 0;
+    for (const e of enemies) {
+      if (e.pvpPilot != null) { if (e.x !== -1e5 || e.y !== -1e5) __log.standOut++; }
+      else if (!e.hacked) wild++;
+    }
+    __log.wildMax = Math.max(__log.wildMax, wild);
+    if (!m.infested && wild) __log.wildClean++;
+    if (LS.tick % 30 === 0)
+      __fp.set(LS.tick, JSON.stringify([simRngState, m.phase, m.round, m.score, m.owed, a.charId, a.x, a.y, a.hp, a.level,
+                                        b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length]));
+  };`;
+// both machines, a frame at a time, until `done` (or the cap); drawn now and then
+function play(H, G, ship, frames, done) {
+  let i = 0;
+  for (; i < frames; i++) {
+    H.run('lsFrame(1 / 60); PVP.frame()'); ship(H, G);
+    G.run('lsFrame(1 / 60); PVP.frame()'); ship(G, H);
+    if (i % 20 === 0) { H.run('render()'); G.run('render()'); }
+    if (done && i % 30 === 0 && done()) break;
+  }
+  return i;
+}
+const sameGame = (H, G) => {
+  const fh = new Map(H.run('[...__fp]')), fg = new Map(G.run('[...__fp]'));
+  const both = [...fh.keys()].filter(t => fg.has(t));
+  return { n: both.length, parted: both.filter(t => fh.get(t) !== fg.get(t)).slice(0, 3) };
+};
+const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
 {
-  const RIVAL = Object.assign({}, ME, { account: { name: 'rival', display: 'Rival' } });
   const H = boot({ mode: 'match', role: 'host', pilot: 'hacker', me: ME });
   const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL });
   await flush();
@@ -158,47 +249,252 @@ section('a match: two machines, one run');
   H.run('PVP.frame()'); G.run('PVP.frame()');
   ok(roomOf(H).__q['.line'].textContent === "Couldn't connect." && !roomOf(H).hidden, 'a link that cannot be made says so', roomOf(H).__q['.line'].textContent);
 
-  // the link, as scripts/lockstep.mjs makes it: each side's sends queued, and shipped across
-  for (const [g, role] of [[H, 'host'], [G, 'guest']])
-    g.run(`globalThis.__out = []; netSend = function (buf) { __out.push(buf); return true; };
-           Net.phase = 'live'; Net.role = '${role}'; Net.code = 'ABCD'; Net.note = '';`);
-  const ship = (a, b) => { for (const d of a.run('__out.splice(0)')) { b.ctx.__msg = d; b.run('netOnMessage(__msg)'); } };
-  H.run('mpOnOpen()'); G.run('mpOnOpen()'); ship(H, G); ship(G, H);
+  const ship = link(H, G);
   ok(H.run('MP.ready') && G.run('MP.ready'), 'both said hello: the same build, the same game');
   H.run('PVP.frame()');                 // the host's room sees them ready, and starts the run
   ship(H, G);
   ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
   ok(H.run('simSeed') === G.run('simSeed'), 'one run: the same seed on both');
-  for (const g of [H, G]) g.run(`PVP.frame();
-    // a bot flies this machine's own pilot, and both machines fingerprint every half second
-    LS.source = rec => { const k = LS.hi + 1, d = Math.floor(k / 80) % 4;
-      rec.mx = [0, 1, 0, -1][d]; rec.my = [-1, 0, 1, 0][d]; rec.ax = P.x + 200; rec.ay = P.y + 40;
-      rec.trig = true; rec.lmb = true; rec.auto = false; rec.dash = k % 97 === 0;
-      rec.touch = false; rec.taim = null; rec.press = []; };
-    globalThis.__fp = new Map();
-    LS.after = () => { if (LS.tick % 30) return; const a = pilotP(0), b = pilotP(1);
-      __fp.set(LS.tick, JSON.stringify([simRngState, a.charId, a.x, a.y, a.hp, b.charId, b.x, b.y, b.hp, enemies.length, bullets.length])); };`);
+  ok(H.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && H.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]'
+     && G.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && G.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]',
+     'the hellos carried each player\'s own reward upgrades, so both machines deal from the same pools',
+     [H.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])'), G.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
   ok(roomOf(H).hidden === true && roomOf(G).hidden === true, 'the waiting room steps aside');
   ok(H.run('pilotP(0).charId') === 'hacker' && H.run('pilotP(1).charId') === 'ember', 'the host flies its pilot, beside the guest\'s');
   ok(G.run('pilotP(0).charId') === 'hacker' && G.run('pilotP(1).charId') === 'ember', 'and the guest sees the same two');
   ok(H.run('pilotP(0).awake') === 1 && H.run('pilotP(1).awake') === 1, 'each awake, as its own account is');
-  let threw = null;
+
+  // the map's draw: the belt, on PvP's own screen
+  play(H, G, ship, 10);
+  const belt = H.run('__log.belt');
+  ok(belt && belt.state === 'pvp' && G.run('state') === 'pvp', 'the match opens on the map\'s draw, on PvP\'s own screen', belt);
+  ok(belt.map >= 0 && belt.map < belt.maps && belt.maps === 7, 'one of the seven sectors', belt);
+  ok(belt.hackers === 1 && belt.odds === 0.75, 'one HACKER in the fight: three in four infested', belt);
+  ok(belt.bestOf === 3, 'a match with a friend: best of three', belt.bestOf);
+  ok(H.run('JSON.stringify(RUN.pvp)') === G.run('JSON.stringify(RUN.pvp)'), 'both drew the same map, the same way');
+  let artThrew = null;
   try {
-    for (let i = 0; i < 60 * 15; i++) {
-      H.run('lsFrame(1 / 60); PVP.frame()'); ship(H, G);
-      G.run('lsFrame(1 / 60); PVP.frame()'); ship(G, H);
-      if (i % 20 === 0) { H.run('render()'); G.run('render()'); }
+    for (const t of [0, 0.4, 1.5, 2.8, 2.9, 3.0, 3.6, 4.3, 4.8, 6])
+      H.run(`PVP_ART.belt(ctx, W, H, ${t}, Object.assign({ dur: PVP.ROUNDS.beltT }, PVP.maps.belt(RUN.pvp)))`);
+  } catch (e) { artThrew = e; }
+  ok(!artThrew, 'the belt draws, start to finish, without an error', String(artThrew));
+  const beltData = H.run('JSON.stringify(PVP.maps.belt(RUN.pvp))');
+  ok(/"maps":\[\{"name":/.test(beltData) && /"infested":(true|false)/.test(beltData) && /"odds":0\.75/.test(beltData) && /"hackers":1/.test(beltData),
+     'the art hook is handed every sector, the pick, the variation, the odds and why', beltData.slice(0, 200));
+
+  // the whole match, bots at the sticks
+  let threw = null, frames = 0;
+  const over = () => H.run('!!(RUN.pvp && RUN.pvp.phase === "over")') && G.run('!!(RUN.pvp && RUN.pvp.phase === "over")');
+  try { frames = play(H, G, ship, 60 * 900, over); }
+  catch (e) { threw = e; }
+  ok(!threw, 'a whole match, drawn on both, without an error', String(threw && threw.stack));
+  ok(over(), 'and it came to an end', [frames, H.run('JSON.stringify(RUN.pvp && [RUN.pvp.phase, RUN.pvp.round, RUN.pvp.score, RUN.pvp.owed])'), H.run('state')]);
+  const log = H.run('__log');
+  const ph = log.phases, fights = ph.filter(p => p.phase === 'fight'), ends = ph.filter(p => p.phase === 'end');
+  const last = ph[ph.length - 1];
+  console.log(`    (${(frames / 60).toFixed(0)} s: ${fights.length} rounds, ${last.score.join('–')}, ${log.hits.length} hits, ` +
+              `${belt.infested ? 'infested, ' + log.wildMax + ' of the room\'s at most' : 'clean'}, ${log.offered.size} different cards dealt)`);
+
+  // picks: three each, before anything else
+  const firstPicks = ph.find(p => p.phase === 'picks');
+  ok(firstPicks && Math.abs(firstPicks.tick - belt.tick - 288) <= 2 && firstPicks.state === 'play',
+     'the belt runs its 4.8 s, then the cards', firstPicks && [firstPicks.tick - belt.tick, firstPicks.state]);
+  ok(fights[0] && fights[0].lv[0] === belt.lv[0] + 3 && fights[0].lv[1] === belt.lv[1] + 3, 'three upgrades each before the first round', [belt.lv, fights[0] && fights[0].lv]);
+  ok(fights.length >= 2 && fights.length <= 3 && fights.every((f, i) => f.round === i + 1), 'two or three rounds, numbered', fights.map(f => f.round));
+  ok(last.phase === 'over' && Math.max(...last.score) === 2 && Math.min(...last.score) < 2 && last.score[0] + last.score[1] === fights.length,
+     'best of three: the first to two rounds takes it', last.score);
+  ok(ends.length === fights.length && ends.every((e, i) => e.score[0] + e.score[1] === i + 1 && e.winner === 1 - e.loser),
+     'every round went to one pilot, and only one', ends.map(e => [e.winner, e.score]));
+  // the loser of a round is dealt one more than the winner before the next
+  const bonus = fights.slice(1).map((f, i) => {
+    const prev = fights[i], l = ends[i].loser, w = ends[i].winner;
+    return (f.lv[l] - prev.lv[l]) - (f.lv[w] - prev.lv[w]);
+  });
+  ok(bonus.length >= 1 && bonus.every(b => b === 1), 'whoever lost the round is dealt one more upgrade than the winner', bonus);
+  // the clock: one more each per thirty seconds of fighting, the whole match through
+  const P0 = H.run('[pilotP(0).level, pilotP(1).level]'), owed = H.run('RUN.pvp.owed.slice()'), clock = H.run('RUN.pvp.clock');
+  const lost = [0, 1].map(k => ends.slice(0, -1).filter(e => e.loser === k).length);
+  ok([0, 1].every(k => P0[k] + owed[k] === belt.lv[k] + 3 + Math.floor(clock / 30) + lost[k]),
+     'every upgrade accounted for: three, one per thirty seconds fought, one per round lost',
+     { lv: P0, owed, clock, lost, start: belt.lv });
+  ok(fights.every((f, i) => (ends[i].tick - f.tick) / 60 >= 2.5), 'no round over in less than two and a half seconds',
+     fights.map((f, i) => ((ends[i].tick - f.tick) / 60).toFixed(1)));
+
+  // the hits: both ways, only in a fight, each capped, and capped together
+  ok([0, 1].every(k => log.hits.some(h => h[1] === k && h[2] > 0)), 'each pilot hurt the other', [0, 1].map(k => log.hits.filter(h => h[1] === k).length));
+  ok(log.hits.every(h => h[4] === 'fight'), 'and only while a round is on', log.hits.filter(h => h[4] !== 'fight').slice(0, 3));
+  const big = log.hits.filter(h => h[2] > DUEL.hitCap * h[3] + 1e-6);
+  ok(big.length === 0, 'no hit took more than 14% of a pilot\'s health', big.slice(0, 3));
+  let worst = 0;
+  for (const k of [0, 1]) {
+    const hs = log.hits.filter(h => h[1] === k);
+    for (const h of hs) {
+      const sum = hs.filter(o => o[0] > h[0] - 1 && o[0] <= h[0]).reduce((s, o) => s + o[2], 0) / h[3];
+      worst = Math.max(worst, sum);
     }
-  } catch (e) { threw = e; }
-  ok(!threw, 'fifteen seconds of a match, drawn on both, without an error', String(threw && threw.stack));
-  const fh = new Map(H.run('[...__fp]')), fg = new Map(G.run('[...__fp]'));
-  const both = [...fh.keys()].filter(t => fg.has(t));
-  ok(both.length >= 20, 'both played the same steps', both.length);
-  ok(both.every(t => fh.get(t) === fg.get(t)), 'and they are the same game, step for step',
-     both.filter(t => fh.get(t) !== fg.get(t)).slice(0, 3));
+  }
+  ok(worst <= DUEL.burstCap + 1e-6, 'nor all of them in any one second more than 34%', worst.toFixed(3));
+  ok(log.banned.length === 0 && log.offered.size >= 6, 'not one banned card dealt, of the many that were', { banned: log.banned, n: log.offered.size });
+  ok(![...log.offered].some(id => id === 'u2'), 'nor a reward upgrade that is not the pilot\'s own');
+  ok(log.shots <= 4, 'never more than four bullets in a shot', log.shots);
+  ok(log.standOut === 0, 'between turns both stand-ins wait off the map', log.standOut);
+  // (the room sends six at most, below; a splitter's or a brood's young come on top of that)
+  ok(belt.infested ? log.wildMax > 0 : log.wildMax === 0, belt.infested ? 'infested: the room sent its own' : 'clean: the room sent nothing', log.wildMax);
+  ok(log.wildClean === 0, 'never an enemy of the room\'s on a clean map', log.wildClean);
+
+  // the same game on both, start to finish
+  const same = sameGame(H, G);
+  ok(same.n >= 40, 'both played the same steps', same.n);
+  ok(same.parted.length === 0, 'and they are the same game, step for step', same.parted);
   ok(H.run('LS.resyncs') === 0 && G.run('LS.resyncs') === 0, 'without the safety net ever needed');
-  ok(H.run('enemies.length') === 0 && G.run('enemies.length') === 0 && H.run('bullets.length') > 0, 'nothing spawned; both fired');
   ok(H.win.__net.length === 1 && G.win.__net.length === 1, 'and not one more request', [H.win.__net, G.win.__net]);
+
+  // the result: the room says who won, and by how much
+  const won = last.winner === 0;
+  ok(!roomOf(H).hidden && roomOf(H).__q['h2'].textContent === (won ? 'VICTORY' : 'DEFEAT')
+     && roomOf(G).__q['h2'].textContent === (won ? 'DEFEAT' : 'VICTORY'), 'each side is told how it went', [roomOf(H).__q['h2'].textContent, roomOf(G).__q['h2'].textContent]);
+  ok(roomOf(H).__q['.line'].textContent === `DUELIST  ${last.score[0]} — ${last.score[1]}  RIVAL`
+     && roomOf(G).__q['.line'].textContent === `RIVAL  ${last.score[1]} — ${last.score[0]}  DUELIST`, 'with the score, each from its own side',
+     [roomOf(H).__q['.line'].textContent, roomOf(G).__q['.line'].textContent]);
+  ok(roomOf(H).__q['.note'].textContent === 'best of 3', 'and the length', roomOf(H).__q['.note'].textContent);
+
+  /* The rules on their own, on the host's copy, now that the two have been
+     compared: a round put back on, both pilots fresh. */
+  section('the duel\'s rules, one at a time');
+  const r = c => H.run('{' + c + '\n}');    // a block each, so their names stay their own
+  r(`globalThis.__m = RUN.pvp; __m.phase = 'fight'; __m.hits = [[], []]; state = 'play';
+     globalThis.__S = k => PVP.standIns().find(s => s.pvpPilot === k);
+     globalThis.__fresh = () => { for (const k of [0, 1]) { const p = pilotP(k); p.down = false; p.hp = p.maxHp; p.iframe = 0; p.shield = 0; p.shellUp = false; p.dashT = 0; p.vx = 0; p.vy = 0; } __m.hits = [[], []]; };
+     globalThis.__hp = k => pilotP(k).hp;
+     PVP.as(null); __fresh();`);
+  ok(r('PVP.standIns().length') === 2, 'one stand-in per pilot');
+  ok(r('PVP.turn(0, () => [__S(0).x, __S(1).x === pilotP(1).x && __S(1).y === pilotP(1).y])').join() === '-100000,true',
+     'on pilot 0\'s turn, its own stand-in is off the map and the other is on pilot 1');
+  ok(r('__S(0).x === -1e5 && __S(1).x === -1e5'), 'and after it, both are off the map again');
+  r('__fresh(); PVP.turn(0, () => damageEnemy(__S(0), 500, false, __S(0).x, __S(0).y))');
+  ok(r('__hp(0) === pilotP(0).maxHp && __hp(1) === pilotP(1).maxHp'), 'a pilot never hurts itself');
+  r('__fresh(); damageEnemy(__S(1), 20, false, 0, 0)');
+  ok(r('__hp(1) === pilotP(1).maxHp'), 'nor does anything outside a pilot\'s turn (the room)');
+  const small = r('__fresh(); PVP.turn(0, () => damageEnemy(__S(1), 20, false, 0, 0)); pilotP(1).maxHp - __hp(1)');
+  const expect = r('const p = pilotP(1); Math.min(0.14 * p.maxHp, Math.max(1, 20 * 0.22 * p.frailty - p.armor * 0.22))');
+  ok(small > 0 && Math.abs(small - expect) < 1e-6, 'pilot 0\'s hit on pilot 1, scaled to a pilot: 22%, through its frailty, less its armour, scaled too', [small, expect]);
+  const huge = r('__fresh(); PVP.turn(0, () => damageEnemy(__S(1), 1e7, true, 0, 0)); (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp');
+  ok(huge > 0.1 && huge <= DUEL.hitCap + 1e-9, 'a hit of ten million: 14% of the pilot\'s health, no more', huge);
+  const frail = r(`__fresh(); const p = pilotP(1), was = p.frailty; p.frailty = 3;
+    PVP.turn(0, () => damageEnemy(__S(1), 1e7, true, 0, 0)); p.frailty = was; (p.maxHp - __hp(1)) / p.maxHp`);
+  ok(frail > 0.1 && frail <= DUEL.hitCap + 1e-9, 'and on a pilot built frail (three times the damage taken): still 14%', frail);
+  const burst = r(`__fresh(); for (let i = 0; i < 40; i++) { pilotP(1).iframe = 0; PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); }
+                   (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp`);
+  ok(Math.abs(burst - DUEL.burstCap) < 0.01, 'forty of them in one moment: 34% in all', burst);
+  const later = r(`__m.clock += 1.01; pilotP(1).iframe = 0; const was = __hp(1); PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); was - __hp(1)`);
+  ok(later > 0, 'and a second later they land again', later);
+  const fwd = r('__fresh(); PVP.turn(1, () => damageEnemy(__S(0), 20, false, 0, 0)); pilotP(0).maxHp - __hp(0)');
+  ok(fwd > 0 && r('__hp(1) === pilotP(1).maxHp'), 'and the other way about', fwd);
+  const killed = r('__fresh(); PVP.turn(0, () => killEnemy(__S(1))); (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp');
+  ok(killed > 0.1 && killed <= DUEL.killHit + 1e-9 && r('PVP.standIns().length === 2'), 'an execution lands 14% at most, and the stand-in stays', killed);
+  r(`__fresh(); for (const s of PVP.standIns()) { s.burn = 0; s.psn = 0; s.leak = 0; s.leakT = 0; }   // whatever the match left on them
+     __S(1).burn = 2; __S(1).burnT = 3; __S(1).burnTick = 0; PVP.as(null)`);
+  const burnt = r('for (let i = 0; i < 60; i++) PVP.dots(1 / 60); pilotP(1).maxHp - __hp(1)');
+  ok(burnt > 0 && r('__hp(0) === pilotP(0).maxHp'), 'a burn on a stand-in burns its pilot, for the one who lit it', burnt);
+  r('__S(1).burn = 0;');
+  r('__fresh(); __m.phase = "picks"; PVP.turn(0, () => damageEnemy(__S(1), 50, false, 0, 0))');
+  ok(r('__hp(1) === pilotP(1).maxHp'), 'between rounds, nothing lands');
+  ok(r('pilotDo(1, () => { P.hp = 0; return PVP.down() && P.hp >= 1 && !P.down; })'), 'and nothing between rounds puts a pilot down');
+  r('__fresh(); __m.phase = "fight";');
+  // THE HACKER's army: a body taken on a pilot's turn is that pilot's; outside a turn, none is taken
+  const army = r(`const e = spawnEnemy('grunt', arena.x0 + 100, arena.y0 + 100, { elite: false }); e.hp = 0;
+                  const outside = hackTake(e);
+                  const mine = pilotDo(0, () => hackTake(e)) !== false && e.hacked;
+                  [outside, !!mine, e.hackPid]`);
+  ok(army[0] === false, 'outside a pilot\'s turn, no body stands back up', army);
+  ok(army[1] && army[2] === 0, 'one taken on THE HACKER\'s turn marches for that pilot', army);
+  // set beside the rival, it goes for the rival, and what it lands counts (capped like the rest)
+  const marched = r(`__fresh(); __m.hits = [[], []];
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
+    const p1 = pilotP(1), e = spawnEnemy('grunt', p1.x + p1.r + 14, p1.y, { elite: false }); e.hp = 0;
+    pilotDo(0, () => hackTake(e));
+    const rival = pilotP(1).hp, own = pilotP(0).hp;
+    for (let i = 0; i < 120; i++) { pilotP(1).iframe = 0; updateEnemies(1 / 60); PVP.as(null); e.x = pilotP(1).x + pilotP(1).r + 14; e.y = pilotP(1).y; }
+    [e.hacked && e.hackPid, rival - pilotP(1).hp, own - pilotP(0).hp]`);
+  ok(marched[0] === 0 && marched[1] > 0 && marched[2] === 0, 'set beside the rival, THE HACKER\'s army hurts the rival, and never its own pilot', marched);
+  // a blow from inside a taken body's own script (a bomber going up, say), which the game keeps off its pilot
+  const blast = r(`__fresh(); const e = enemies.find(z => z.hacked); PVP.as(0);
+    const was = hackBy; hackBy = e; damageEnemy(__S(1), 40, false, 0, 0); hackBy = was; PVP.as(null);
+    [!!e, pilotP(1).maxHp - __hp(1)]`);
+  ok(blast[0] && blast[1] > 0, 'a blast from inside its script reaches the rival too', blast);
+
+  // the cards
+  section('the cards');
+  const pool = (count, parallel, back, ids) => r(`pilotDo(0, () => { const was = [P.count, P.parallel, P.back];
+    P.count = ${count}; P.parallel = ${parallel}; P.back = ${back};
+    const out = PVP.cards(UPGRADES.filter(u => ${JSON.stringify(ids)}.includes(u.id))).map(u => u.id);
+    [P.count, P.parallel, P.back] = was; return out.sort().join(); })`);
+  ok(pool(1, 0, 0, ['multi', 'para', 'back']) === 'back,multi,para', 'one bullet a shot: more is on offer');
+  ok(pool(3, 0, 0, ['multi', 'para', 'back']) === 'back,multi', 'three: a fourth, but not a second barrel (six)');
+  ok(pool(2, 1, 0, ['multi', 'para', 'back']) === '', 'four: no more, of any kind');
+  ok(pool(1, 0, 3, ['multi', 'para', 'back']) === '', 'four the other way (one ahead, three behind): none either');
+  const banned = r('JSON.stringify([...PVP.BANNED].filter(id => UPGRADES.some(u => u.id === id)))');
+  ok(pool(1, 0, 0, JSON.parse(banned)) === '', 'every banned card stays out of the pool', banned);
+  ok(r('["exec", "u_unwritten"].every(id => PVP.BANNED.has(id))'), 'the instant kills first of all');
+  ok(r('PVP.MAX_SHOTS') === 4, 'four bullets a shot');
+  const locked = r('JSON.stringify(UPGRADES.filter(u => u.lock || u.need).map(u => u.id).slice(0, 2))');
+  ok(JSON.parse(locked).length === 2 && pool(1, 0, 0, JSON.parse(locked)) === '', 'a reward upgrade the player has not earned stays out', locked);
+  const outside = r(`const m = RUN.pvp; RUN.pvp = null; const out = PVP.cards(UPGRADES); RUN.pvp = m; out`);
+  ok(outside === null, 'outside a match (practice) the game\'s own pool deals');
+  // a level is paid only when one is owed
+  ok(r(`pilotDo(0, () => { const was = [P.level, state]; __m.owed[0] = 0; P.xp = P.xpNext * 3; checkLevel();
+        const out = P.level === was[0] && !offers.length && P.xp === 0; state = was[1]; return out; })`), 'experience from anything else pays nothing');
+
+  section('the maps');
+  ok(r('[PVP.maps.odds(0), PVP.maps.odds(1), PVP.maps.odds(2)].join()') === '0.5,0.75,1', 'even odds; three in four with a HACKER; always with two');
+  const draw = (a, b) => r(`const was = [pilotP(0).charId, pilotP(1).charId]; pilotP(0).charId = '${a}'; pilotP(1).charId = '${b}';
+    let inf = 0; const seen = new Set();
+    for (let i = 0; i < 4000; i++) { const p = PVP.maps.pick(); if (p.infested) inf++; seen.add(p.index); }
+    pilotP(0).charId = was[0]; pilotP(1).charId = was[1]; [inf / 4000, seen.size]`);
+  const d0 = draw('runner', 'ember'), d1 = draw('ember', 'hacker'), d2 = draw('hacker', 'hacker');
+  ok(Math.abs(d0[0] - 0.5) < 0.03, 'no HACKER: about half the draws infested', d0);
+  ok(Math.abs(d1[0] - 0.75) < 0.03, 'one: about three in four', d1);
+  ok(d2[0] === 1, 'two: every one', d2);
+  ok(d0[1] === 7 && d1[1] === 7, 'and every sector comes up', [d0[1], d1[1]]);
+  const spawned = inf => r(`const m = RUN.pvp, was = m.infested; m.infested = ${inf}; m.spawnT = 0;
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
+    let near = 0;
+    for (let i = 0; i < 60 * 60; i++) {
+      const n = enemies.length; PVP.maps.spawn(m, 1 / 60);
+      for (let j = n; j < enemies.length; j++) for (const k of [0, 1]) if (len(enemies[j].x - pilotP(k).x, enemies[j].y - pilotP(k).y) < 380) near++;
+    }
+    m.infested = was; [enemies.filter(e => e.pvpPilot == null).length, near]`);
+  const sc = spawned(false), si = spawned(true);
+  ok(sc[0] === 0, 'a clean map sends nothing, a minute long', sc);
+  ok(si[0] === 6 && si[1] === 0, 'an infested one sends, six at most, and never on top of a pilot', si);
+  ok(r(`const was = [PVP.hand.queue, PVP.hand.me.league]; PVP.hand.queue = 'ranked'; PVP.hand.me.league = { id: 'gold', bestOf: 5 };
+        const out = PVP.bestOf(); [PVP.hand.queue, PVP.hand.me.league] = was; out`) === 5, 'a ranked match at gold and up: best of five');
+  ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'silver', bestOf: 3 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
+     'and a match with a friend stays best of three whatever the league');
+}
+
+section('a match left part way');
+{
+  // THE VAGRANT, whose upgrades are levels and gear, against VOIDRUNNER: no HACKER, even odds
+  const VAG = Object.assign({}, ME, { loadouts: { ranked: ME.loadouts.ranked, casual: { pilots: ['runner', 'melee'], awake: [], ups: [] } } });
+  const H = boot({ mode: 'match', role: 'host', pilot: 'melee', me: VAG });
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'runner', me: RIVAL });
+  await flush();
+  const ship = link(H, G);
+  H.run('PVP.frame()'); ship(H, G);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  ok(H.run('pilotP(0).charId') === 'melee' && G.run('pilotP(0).charId') === 'melee', 'THE VAGRANT, on both');
+  let threw = null;
+  try { play(H, G, ship, 60 * 120, () => H.run('RUN.pvp && RUN.pvp.round >= 1 && RUN.pvp.phase === "fight" && RUN.pvp.t > 6')); }
+  catch (e) { threw = e; }
+  ok(!threw, 'into the first round without an error', String(threw && threw.stack));
+  const belt = H.run('__log.belt');
+  ok(belt.hackers === 0 && belt.odds === 0.5, 'no HACKER: even odds', belt);
+  const f = H.run('__log.phases').find(p => p.phase === 'fight');
+  ok(f && f.lv[0] === belt.lv[0] + 3 && f.lv[1] === belt.lv[1] + 3, 'THE VAGRANT\'s three are levels, like the others\' cards', [belt.lv, f && f.lv]);
+  const same = sameGame(H, G);
+  ok(same.n >= 10 && same.parted.length === 0 && H.run('LS.resyncs') === 0, 'the same game on both', same);
 
   // the guest quits from the game's own pause screen; the host is told
   G.run('quitToMenu()'); ship(G, H);

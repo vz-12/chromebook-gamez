@@ -4,8 +4,9 @@
 
    Ranked puts everybody in a league by rating. The low leagues fly the base
    pilots only, never awake; from platinum up everything goes. Reward upgrades
-   count in every league. The cutoffs are placeholders until there are real
-   matches to tune them on (PVP-PLAN.md, still open).
+   count in every league. A ranked match is best of three below gold and best
+   of five from there (bestOf). The cutoffs are placeholders until there are
+   real matches to tune them on (PVP-PLAN.md, still open).
    ========================================================================= */
 
 /* The game's pilots, by the ids its save uses (CHARS in index.html). A pilot
@@ -16,15 +17,15 @@ export const PILOTS = { runner: 'VOIDRUNNER', ember: 'EMBER', hacker: 'THE HACKE
 export const BASE_PILOTS = ['runner', 'ember'];
 
 export const LEAGUES = [
-  { id: 'bronze',   n: 'BRONZE',   from: 0,    pilots: 'base', awake: false },
-  { id: 'silver',   n: 'SILVER',   from: 1200, pilots: 'base', awake: false },
-  { id: 'gold',     n: 'GOLD',     from: 1500, pilots: 'base', awake: false },
-  { id: 'platinum', n: 'PLATINUM', from: 1800, pilots: 'own',  awake: true },
-  { id: 'void',     n: 'VOID',     from: 2100, pilots: 'own',  awake: true }
+  { id: 'bronze',   n: 'BRONZE',   from: 0,    pilots: 'base', awake: false, bestOf: 3 },
+  { id: 'silver',   n: 'SILVER',   from: 1200, pilots: 'base', awake: false, bestOf: 3 },
+  { id: 'gold',     n: 'GOLD',     from: 1500, pilots: 'base', awake: false, bestOf: 5 },
+  { id: 'platinum', n: 'PLATINUM', from: 1800, pilots: 'own',  awake: true,  bestOf: 5 },
+  { id: 'void',     n: 'VOID',     from: 2100, pilots: 'own',  awake: true,  bestOf: 5 }
 ];
 
-// casual: everything the account has unlocked, awake included
-export const CASUAL = { id: 'casual', n: 'CASUAL', pilots: 'own', awake: true };
+// casual: everything the account has unlocked, awake included; a match with a friend is best of three
+export const CASUAL = { id: 'casual', n: 'CASUAL', pilots: 'own', awake: true, bestOf: 3 };
 
 /* What a player may bring under a rule: the pilots, which of them may fly
    awake, and the reward upgrades. `unlocks` is the summary the account's save

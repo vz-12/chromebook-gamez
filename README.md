@@ -211,7 +211,7 @@ Its first build fails until `pvp/` is on `main`; that's harmless.
 
 ```sh
 npm run dev:pvp                            # PvP at http://127.0.0.1:8788, beside npm run dev
-npm run test:pvp                           # under a second
+npm run test:pvp                           # a few seconds: plays a whole match
 ```
 
 Open the local game at `http://localhost:8787` and PvP at
@@ -238,6 +238,27 @@ own co-op as it is: lockstep, each player flying their own pilot.
   store of its own (`ROOM_STORE`), so game and PvP codes never meet.
 - **Relay:** `/api/turn` asks the game's Worker through a service binding
   (`GAME`), so the TURN secrets stay where they are.
+
+**How a match plays** (PVP-PLAN.md, Phase 3 step 3; all of it in
+`pvp/site/js/`, run inside the shared lockstep simulation):
+- **The match** (`rounds.js`): best of three, and best of five for ranked
+  from gold up (`bestOf` in `pvp/src/rules.js`). Three upgrades each to
+  start, one more each per 30 seconds of fighting, and one more for whoever
+  lost the round. Builds carry over; health and the floor reset each round.
+- **Damage** (`duel.js`): every weapon and ability hurts the other pilot,
+  through an invisible stand-in for each pilot in the game's enemy list.
+  A hit is scaled to a pilot (`DUEL.scale`) and capped: 14% of max health a
+  hit, 34% in any one second, so no card wins a round in one blow.
+  `DUEL.pilots` tunes each pilot's damage (all 1 for now).
+- **Cards** (`cards.js`): the game's pool, less instant kills, cards that
+  break without waves, and economy cards (`BANNED`), never more than four
+  bullets a shot, and each player's own reward upgrades.
+- **Maps** (`maps.js`): one of seven sectors, clean or infested. Infested
+  sends the sector's enemies, six at a time at most. Even odds; 75% infested
+  with one HACKER in the fight, always with two.
+- **Art hook** (`art.js`): `PVP_ART.belt(g, w, h, t, d)` draws the map draw
+  at the start of a match. Its header says what it is handed; redraw it
+  without touching anything else.
 
 ## The leaderboard page
 

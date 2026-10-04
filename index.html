@@ -3951,14 +3951,15 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     dmg = endgameThrottle(root, dmg);
     if (dmg <= 0) return;
   }
-  e.hp -= dmg;
+  if (e.pvpPilot != null) PVP.hit(e, dmg, crit, srcX, srcY, opts);   // PvP mode: a pilot's stand-in (duel.js)
+  else e.hp -= dmg;
   // a floor holds a boss alive for a scripted finale instead of dying to it
   if (e.floor !== undefined && e.hp < e.floor) e.hp = e.floor;
   e.flash = Math.min(1, e.flash + 0.65);
   // secondary hits (chain / drones / blasts) only show numbers sometimes,
   // otherwise a dense crowd turns into an unreadable pile of digits
   if (opts.hlKick) hlKickNum(e, dmg);        // ALL HALLOWS: what his own pile took, in gold
-  else if (!opts.silent || rnd() < 0.34)
+  else if (e.pvpPilot == null && (!opts.silent || rnd() < 0.34))   // PvP mode: the pilot hit says its own number
     floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5 + rnd(10, -10), Math.round(dmg),
       opts.hlDull ? '#64748b' : crit ? COL.crit : '#e2e8f0', opts.hlDull ? 11 : crit ? 19 : 13, crit ? -70 : -46);
   if (crit) { Audio_.crit(); shake(0.05); } else if (!opts.silent) Audio_.hit();
@@ -4051,6 +4052,7 @@ function playerBlast(x, y, radius, dmg, color) {
 
 function killEnemy(e, ang = 0) {
   if (e.dead) return;
+  if (e.pvpPilot != null) { PVP.kill(e); return; }   // PvP mode: a stand-in never dies; it lands a blow
   // one of yours, put down by the side it left: nothing is paid out twice
   if (e.hacked) { hackDown(e); return; }
   /* What this death sets off — a splitter's halves, a revenant, a bomber's
@@ -4091,7 +4093,7 @@ function killBody(e, ang) {
      further, so the blast can be walked into a crowd instead of going off
      wherever the thing happened to die. */
   const volat = P.volatile > 0;
-  corpses.push({ x: e.x, y: e.y, r: e.r, sides: e.sides, ang: e.ang,
+  corpses.push({ x: e.x, y: e.y, r: e.r, sides: e.sides, ang: e.ang, pid: PVP ? PVP.owner() : 0,
                  col: e.burn > 0 ? '#57534e' : e.col,
                  life: volat ? 0.85 : 0.42, max: volat ? 0.85 : 0.42,
                  vol: volat ? P.volatile : 0,
@@ -4285,11 +4287,12 @@ function hurtPlayer(dmg, opts) {
     return;
   }
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
-  const d = Math.max(1, dmg * P.frailty * nightMul - P.armor);
+  let d = Math.max(1, dmg * P.frailty * nightMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
+  if (opts && opts.pvp) d = Math.min(d, opts.pvp.cap);   // PvP mode: the duel's caps hold, whatever the build (duel.js)
   P.hp -= d;
   // most of it can still be won back, but the parry chain is gone
   if (isBlade()) { bladeRallyAdd(d); bladeChainBreak('hit'); }
-  P.iframe = 0.62; P.hurtFlash = 1;
+  P.iframe = opts && opts.pvp ? opts.pvp.mercy : 0.62; P.hurtFlash = 1;
   onRewardHurt(d, opts && opts.src);   // after the guard, never before it
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
@@ -4351,6 +4354,7 @@ function reviveOrDie() {
     /* Co-op: your ship is only lost if there is nobody else left holding the
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
+    if (PVP && PVP.down()) return;       // PvP mode: the round is lost (rounds.js)
     if (coopCanDown()) { hostDown(); return; }
     if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
@@ -4764,9 +4768,9 @@ function offerPool() {
     const p = chipPool();
     if (p.length) return { pool: p, flat: true };
   }
-  return { pool: chalFilterPool(UPGRADES.filter(u =>
-             (P.up[u.id] || 0) < u.max && weaponOK(u))),
-           flat: false };
+  const base = UPGRADES.filter(u => (P.up[u.id] || 0) < u.max && weaponOK(u));
+  // PvP mode: its own pool, with each player's own rewards and only fair cards (cards.js)
+  return { pool: (PVP && PVP.cards(base)) || chalFilterPool(base), flat: false };
 }
 
 function pickFromPool(pool, flat) {
@@ -29699,6 +29703,7 @@ function checkLevel() {
      one mid-line turned `hack 12` into picking the first card and then the
      second. The rite ends at the menu, so nothing waits long. */
   if (rootOut || outro || intrusion || amalCut || rootRite) return;
+  if (PVP && !PVP.levelUp(P)) { P.xp = 0; return; }   // PvP mode: picks are dealt by the clock (rounds.js)
   if (chalNoLevel()) { P.xp = 0; return; }    // this sheet offers nothing, ever
   /* THE VAGRANT is never dealt a card, because choosing is what the loot is
      for. A level is flat growth — the RPG half of the bargain — and every third
@@ -29851,7 +29856,7 @@ function update(dt) {
   // the link is kept alive on its own clock, whatever the game is doing
   netTick(dt);
   if (MP.lostT > 0) MP.lostT -= dt;
-  if (state === 'pvp') return;            // PvP mode's own screen: nothing of a run moves
+  if (state === 'pvp') { if (PVP) PVP.idle(dt); return; }   // PvP mode's own screens: nothing of a run moves
 
   if (state === 'menu' || state === 'name') {
     updateMenu(dt);
@@ -30041,11 +30046,13 @@ function update(dt) {
   replay.push({ x: P.x, y: P.y, ang: P.ang });
   if (replay.length > 260) replay.shift();
   updateEnemies(wdt);
+  if (PVP) PVP.as(null);                 // the world is no pilot's again (PvP mode)
   hlTick(dt, wdt);           // ALL HALLOWS: the areas, THE BACKLOG's pile, the barks
   pilotsEach(() => odRingHold(wdt));   // COMBO 1's wall, once the room has moved
   updateStageAmbient(dt);
   updateHazards(wdt);
   updateMortars(wdt);
+  if (PVP) PVP.as(null);                 // the world is no pilot's again (PvP mode)
   updateCages(dt);
   pilotsEach(() => updateBullets(dt));  // co-op: each pilot's shots, as that pilot
   updateEBullets(wdt);
@@ -30581,6 +30588,8 @@ function updateEnemies(dt) {
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
     hackBy = null;                     // a script that ended on a `continue` does not leak
+    if (e.pvpPilot != null) continue;  // PvP mode: a pilot's stand-in is no body (duel.js)
+    if (PVP) PVP.as(e.hacked ? e.hackPid : null);   // and a taken body fights as the pilot who took it
     if (e.dead) { cull.push(i); continue; }
     e.t += dt;
     // THE GOURD (medal): left alive long enough, it ripens
@@ -30888,7 +30897,7 @@ function updateEnemies(dt) {
           // leads the target, so standing still is what gets punished
           mortars.push({ x: TG.x + TG.vx * 0.34 + simRnd(46, -46),
                          y: TG.y + TG.vy * 0.34 + simRnd(46, -46),
-            r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col, ally: !!e.hacked });
+            r: 76, t: 1.5, max: 1.5, dmg: e.dmg * 1.3, col: e.col, ally: !!e.hacked, pid: PVP ? PVP.owner() : 0 });
           Audio_.tone(230, 0.2, 'triangle', 0.09, 95);
           burst(e.x, e.y, 6, e.col, 165, 2.6, 0.3);
         }
@@ -31238,7 +31247,7 @@ function bossForge(e, dt, ux, uy, d, ph) {
     case 3:                              // slam: telegraphed crater on your head
       e.atk = 2; e.slamX = foe(e).x; e.slamY = foe(e).y; e.atkT = 1.0;
       mortars.push({ x: e.slamX, y: e.slamY, r: 168, t: 1.0, max: 1.0,
-        dmg: e.dmg * 1.5, col: e.hacked ? HACK_COL : '#fbbf24', big: true, ally: !!e.hacked });
+        dmg: e.dmg * 1.5, col: e.hacked ? HACK_COL : '#fbbf24', big: true, ally: !!e.hacked, pid: PVP ? PVP.owner() : 0 });
       Audio_.tone(90, 0.6, 'square', 0.16, 50);
       break;
   }
@@ -36170,6 +36179,7 @@ function addHazard(kind, x, y, life = 8, opts = {}) {
   }
   hazards.push({
     kind, x, y, life, max: life, t: 0, tick: 0, friendly: !!opts.friendly || ally, ally,
+    pid: PVP ? PVP.owner() : 0,          // PvP mode: whose it is
     r: opts.r || (kind === 'well' ? 240 : kind === 'vent' ? 74
        : kind === 'mirror' ? 58 : kind === 'delete' ? 105 : 76),
     ang: opts.ang !== undefined ? opts.ang : simRnd(TAU),
@@ -36222,6 +36232,7 @@ function updateHazards(dt) {
     if (i >= hazards.length) { i = hazards.length; continue; }
     const h = hazards[i];
     if (!h) continue;
+    if (PVP) PVP.as(h.friendly ? h.pid : null);   // PvP mode: whose ground it is (duel.js)
     h.t += dt;
     if (h.kind !== 'vent' && h.kind !== 'well') {
       h.life -= dt;
@@ -36457,6 +36468,7 @@ function updateMortars(dt) {
   for (let i = mortars.length - 1; i >= 0; i--) {
     const m = mortars[i];
     m.t -= dt;
+    if (PVP) PVP.as(m.mine || m.ally ? m.pid : null);   // PvP mode: whose shell it is
     if (m.t <= 0) {
       // Payload Counter calls these in too, and a shell you asked for does
       // not get to bill you for landing where you aimed it
@@ -37030,6 +37042,7 @@ function updateParticles(dt) {
     if (r.life <= 0) rings.splice(i, 1);
   }
   updateCorpses(dt);
+  if (PVP) PVP.as(null);
 }
 
 /* ================================ RENDER ================================== */
@@ -37039,7 +37052,7 @@ function render() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = COL.bg;
   ctx.fillRect(0, 0, W, H);
-  if (state === 'pvp') return;            // PvP mode's own screen is HTML, over an empty canvas
+  if (state === 'pvp') { if (PVP) PVP.draw(); return; }    // PvP mode's own screens, over an empty canvas
   // whichever overlay draws the slider re-publishes it; otherwise it is gone
   if (!volDrag) volRect = null;
   if (!sensDrag) sensRect = null;
@@ -45637,6 +45650,7 @@ function drawEnemiesBody() {
   for (const e of enemies) {
     if (e.dead) continue;
     if (e.roninHide) continue;          // RONIN's C: an execution's art has the body
+    if (e.pvpPilot != null) continue;   // PvP mode: a stand-in, under a pilot already drawn
     // bosses stay drawn: their telegraphs reach well past their own body
     if (e.type !== 'boss' && !e.amalPart && !inView(e.x, e.y, e.r * 3 + 40)) continue;
     // intangible enemies fade out; they can't be hit while faint
@@ -46176,6 +46190,7 @@ function updateCorpses(dt) {
   for (let i = corpses.length - 1; i >= 0; i--) {
     const c = corpses[i];
     c.life -= dt;
+    if (PVP) PVP.as(c.vol ? c.pid : null);   // PvP mode: whose fuse it is
     if (c.vol) {
       // it slides, and anything that hits it shoves it further
       c.x += c.vx * dt; c.y += c.vy * dt;
@@ -48979,6 +48994,8 @@ function drawHUD() {
   ly = drawBladeHUD(pad, bw, ly);
 
   /* --- score / wave --- */
+  if (PVP && PVP.hud()) ctx.textAlign = 'right';   // PvP mode: the match in its place (rounds.js)
+  else {
   ctx.textAlign = 'right';
   /* This column has to hold a nine-digit score, a looped sector name and a
      five-figure credit count without ever reaching across into the health bar,
@@ -49027,6 +49044,7 @@ function drawHUD() {
     ctx.fillStyle = rgba('#f87171', 0.5 + Math.sin(uiTime * 1.6) * 0.14);
     ctx.fillText('⚠ ESCALATED', W - pad, pad + 110);
     ctx.restore();
+  }
   }
 
   /* --- boss bar --- */
@@ -58063,16 +58081,16 @@ function pilotUse(k) {
 }
 // fn, as pilot k (and then back to whoever was flying)
 function pilotDo(k, fn) {
-  if (PILOTS.length < 2 || k === PILOT.on || !PILOTS[k]) return fn();
+  if (PILOTS.length < 2 || k === PILOT.on || !PILOTS[k]) return PVP ? PVP.turn(k, fn) : fn();
   const was = PILOT.on;
   pilotUse(k);
-  try { return fn(); } finally { pilotUse(was); }
+  try { return PVP ? PVP.turn(k, fn) : fn(); } finally { pilotUse(was); }   // PvP mode: whose turn (duel.js)
 }
 // fn once per pilot, as each; a false back stops the round. Solo: once, as P.
 function pilotsEach(fn) {
   if (PILOTS.length < 2) { fn(); return; }
   const was = PILOT.on;
-  for (let k = 0; k < PILOTS.length; k++) { pilotUse(k); if (fn() === false) break; }
+  for (let k = 0; k < PILOTS.length; k++) { pilotUse(k); if ((PVP ? PVP.turn(k, fn) : fn()) === false) break; }
   pilotUse(was);
 }
 // a drawing pass for every pilot: the others first, then whoever is drawing, on top
@@ -58321,7 +58339,7 @@ function mpStartRun() {
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(),
+  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(), pvp: PVP ? PVP.hello() : undefined,
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -58341,6 +58359,7 @@ function mpOnEvent(m) {
       MP.peerAwake = !!m.awake;
       MP.peerSkin = { doc: skinClean(m.skin), equip: String(m.equip || '').slice(0, 40) };   // how to draw their pilot
       MP.ready = true;
+      if (PVP) PVP.peerHello(m.pvp);     // PvP mode: the other player's account, for their cards
       break;
 
     case 'lsagain':
@@ -58934,6 +58953,7 @@ function lsHash() {
   n(enemies.length);
   for (const e of enemies) { n(e.id); n(e.x); n(e.y); n(e.hp); }
   n(bullets.length); n(ebullets.length); n(gems.length); n(drops.length);
+  if (PVP) PVP.hash(n);                  // PvP mode: the match itself (rounds.js)
   return h;
 }
 function lsCheck() {
@@ -59385,7 +59405,7 @@ function lanCycleChar() {
   Audio_.select();
   // the other side draws your hull, so tell it which one you are flying
   if (netLive())
-    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(),
+    netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(), pvp: PVP ? PVP.hello() : undefined,
                name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
 }
 
@@ -60197,7 +60217,7 @@ function onPlayerShot(mx, my, ang) {
       const tx = clamp(P.in.ax, arena.x0 + 40, arena.x1 - 40);
       const ty = clamp(P.in.ay, arena.y0 + 40, arena.y1 - 40);
       mortars.push({ x: tx, y: ty, r: 96 + 22 * P.tick10, t: 0.9, max: 0.9,
-                     dmg: (P.dmg * 4 + 22) * P.tick10, col: COL.crit, mine: true });
+                     dmg: (P.dmg * 4 + 22) * P.tick10, col: COL.crit, mine: true, pid: PVP ? PVP.owner() : 0 });
       Audio_.tone(150, 0.18, 'triangle', 0.09, 70);
     }
   }
@@ -60522,6 +60542,7 @@ function hackable(e) {
    score, its experience and its drops. This is what happens to the body
    afterwards. Returns true if it was kept. */
 function hackTake(e, typed) {
+  if (PVP && PVP.owner() == null) return false;   // PvP mode: only a pilot's own kill stands back up
   if (rootRite && !typed) return false;   // the rite: only the console takes one
   if (!hackable(e)) return false;
   const boss = e.type === 'boss';
@@ -60540,6 +60561,7 @@ function hackTake(e, typed) {
   e.hacked = true;
   e.hackKin = false;
   e.hackId = ++hackSerial;
+  if (PVP) e.hackPid = PVP.owner();     // PvP mode: whose army it joins (duel.js)
   e.hp = e.maxHp * (boss ? 0.35 : 0.6);
   hackTurn(e);
 
@@ -60563,6 +60585,7 @@ function hackKin(e) {
   e.hacked = true;
   e.hackKin = true;
   e.hackId = ++hackSerial;
+  if (PVP) e.hackPid = PVP.owner();     // PvP mode: whose army it joins (duel.js)
   hackTurn(e);
 }
 

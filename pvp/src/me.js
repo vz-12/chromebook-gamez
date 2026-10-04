@@ -29,7 +29,7 @@ export default async function me(req, env) {
   return reply({
     account: publicAccount(s.account),
     unlocks, saved: row ? row.updated : null,
-    league: { id: league.id, n: league.n, provisional: true },
+    league: { id: league.id, n: league.n, bestOf: league.bestOf, provisional: true },
     pilots: PILOTS,
     loadouts: { ranked: loadout(league, unlocks), casual: loadout(CASUAL, unlocks) }
   }, 200, s.renew ? sessionCookie(req, s.token) : undefined);
