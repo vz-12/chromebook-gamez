@@ -496,6 +496,13 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
     PVP.ref.onVerdict({ v: 'void', winner: null }); const r = PVP.shown.r; PVP.shown = keep; return JSON.stringify(r); })()`));
   ok(turned.outcome === 'void' && turned.verdict.v === 'void' && turned.verdict.won === null, 'a no contest from the referee turns the screen to NO CONTEST', turned.verdict);
 
+  // the host leaves after the end, before the guest presses BACK: the guest stays on its result (not the game's co-op screens)
+  G.run('mpPeerGone(); PVP.frame()');
+  ok(G.run('state') === 'pvp' && !roomOf(G).hidden && roomOf(G).__q['h2'].textContent === (won ? 'DEFEAT' : 'VICTORY'),
+     'the other side leaving after the end leaves the result where it is, under its button', [G.run('state'), roomOf(G).__q['h2'].textContent]);
+  G.run('render(); render()');
+  ok(G.run('state') === 'pvp' && G.run('PVP.shown && PVP.shown.r.outcome') === (won ? 'lost' : 'won'), 'drawn as the result, frame after frame');
+
   /* The rules on their own, on the host's copy, now that the two have been
      compared: a round put back on, both pilots fresh. */
   section('the duel\'s rules, one at a time');

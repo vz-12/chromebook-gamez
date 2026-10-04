@@ -307,7 +307,11 @@
         const m = RUN.pvp;
         if (m && m.run === LS.run && m.phase === 'over') { result(m); return; }
       }
-      if (over) return;
+      /* Decided, and on screen: whatever the link does now, this page stays
+         on its result until the player leaves by its button. The other side
+         going after the end takes the engine to its own co-op screens (the
+         guest's 'lan' lost screen, mpPeerGone), under the result's button. */
+      if (over) { if (state !== 'pvp') state = 'pvp'; return; }
       // this player quit, from the game's own pause screen: back to the lobby, a forfeit
       if (state === 'menu') { back(true); return; }
       /* The other side went. In co-op the host plays on alone and the guest
