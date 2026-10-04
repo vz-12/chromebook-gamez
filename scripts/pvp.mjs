@@ -23,7 +23,7 @@ const { Match, Matchmaker, MM } = await import('../pvp/src/objects.js');
 const { seasonOf } = await import('../src/season.js');
 const { REF } = await import('../pvp/src/referee.js');
 const { closeSeasons, seasonBefore, SOFT } = await import('../pvp/src/seasons.js');
-const { PODIUM_REWARDS } = await import('../src/pvp-podiums.js');
+const { PODIUM_REWARDS, BADGE_REWARDS } = await import('../src/pvp-rewards.js');
 const { ratingOf, applyRating } = await import('../pvp/src/records.js');
 const { START, rateMatch } = await import('../pvp/src/glicko.js');
 const { PLACEMENTS } = await import('../pvp/src/rules.js');
@@ -744,29 +744,73 @@ section('seasons: the podium at the turn, and the soft reset');
   console.log = quiet;
   ok(pod(oldest).length === 1 && pod(oldest)[0].account === P.bea, 'the daily cron files a season missed before', pod(oldest));
 
+  // league badges: every placed player, the league they finished in (QUEUES.ranked.rewards: leagueBadge)
+  const badge = s2 => DB.sql.prepare('SELECT account, league, rating FROM pvp_badges WHERE season = ? ORDER BY rating DESC').all(s2);
+  const lb = badge(prev);
+  const want = [P.ace + ':void', P.bea + ':platinum', P.cal + ':platinum', P.dee + ':gold'];
+  ok(lb.length === 4 && want.every(k => lb.some(r => r.account + ':' + r.league === k)),
+     'every placed player of last season badged with the league they finished in', lb);
+  ok(!lb.some(r => r.account === P.eve || r.account === P.fay), 'never one still being placed, nor casual');
+  ok(badge(older).length === 1 && badge(older)[0].league === 'gold' && badge(oldest).length === 1 && badge(oldest)[0].account === P.bea,
+     'and the seasons before, the cron\'s too', [badge(older), badge(oldest)]);
+  ok(badge(cur).length === 0, 'none for the season still running');
+  // a queue pays what its rewards name: a reward added later is caught up for seasons already closed
+  const ancient = seasonBefore(oldest);
+  rate(P.ace, ancient, 1650, 'gold', 1);
+  const was = QUEUES.ranked.rewards.slice();
+  QUEUES.ranked.rewards.splice(0, QUEUES.ranked.rewards.length, 'seasonPodium');
+  ok((await closeSeasons(DB, now)).join() === ancient && pod(ancient).length === 1 && badge(ancient).length === 0,
+     'a queue whose rewards name only the podium files only the podium', [pod(ancient), badge(ancient)]);
+  QUEUES.ranked.rewards.splice(0, QUEUES.ranked.rewards.length, ...was);
+  ok((await closeSeasons(DB, now)).join() === ancient && badge(ancient).length === 1 && pod(ancient).length === 1,
+     'and once it names the badge too, the next run files the badges it missed, the podium not twice', [pod(ancient), badge(ancient)]);
+  // a big season: every one of its placed players badged, in batches
+  const big = seasonBefore(ancient);
+  for (let i = 0; i < 120; i++) rate('bulk-' + i, big, 1500 + i, 'silver', i);
+  await closeSeasons(DB, now);
+  ok(badge(big).length === 120 && pod(big).length === 3 && pod(big)[0].account === 'bulk-119', 'a season of 120 placed players: 120 badges, one podium', [badge(big).length, pod(big).length]);
+  QUEUES.casual.rewards.push('nope');
+  let threw = null;
+  try { await closeSeasons(DB, now); } catch (e) { threw = e; }
+  QUEUES.casual.rewards.pop();
+  ok(!threw, 'a reward nobody wrote is passed by', String(threw));
+
   // the game's awards: a PvP podium in its own shape, never the game's own crowns, and what it is worth
   const me = acct('duelist');
-  DB.sql.prepare("INSERT INTO pvp_podiums (season, queue, rank, account, rating, league, filed) VALUES ('2026-05', 'ranked', 1, ?, 2301.4, 'void', ?)").run(me, now);
+  DB.sql.prepare("INSERT INTO pvp_podiums (season, queue, rank, account, rating, league, filed) VALUES ('2025-11', 'ranked', 1, ?, 2301.4, 'void', ?)").run(me, now);
+  DB.sql.prepare("INSERT INTO pvp_badges (season, queue, account, league, rating, filed) VALUES ('2025-11', 'ranked', ?, 'void', 2301.4, ?)").run(me, now);
+  DB.sql.prepare("INSERT INTO pvp_badges (season, queue, account, league, rating, filed) VALUES ('2025-10', 'ranked', ?, 'gold', 1611, ?)").run(me, now);
   const aw = async () => (await home.call('GET', '/api/leaderboard?awards=' + 'a'.repeat(32))).d.awards || [];
   let got = await aw();
   const medal = got.find(x => x.pvp);
-  ok(medal && medal.pvp.season === '2026-05' && medal.pvp.rank === 1 && medal.pvp.rating === 2301 && medal.pvp.league === 'void'
-     && medal.via === 'PVP 2026-05 #1', 'signed in, the game\'s awards carry the account\'s PvP podium', medal);
+  ok(medal && medal.pvp.season === '2025-11' && medal.pvp.rank === 1 && medal.pvp.rating === 2301 && medal.pvp.league === 'void'
+     && medal.via === 'PVP 2025-11 #1', 'signed in, the game\'s awards carry the account\'s PvP podium', medal);
   ok(got.filter(x => x.pvp).every(x => !('season' in x) && !('rank' in x)),
      'in a shape the game does not read as one of its own season podiums (no top-level season or rank)');
   ok(!got.some(x => x.skin || x.perk && /^PVP/.test(x.via || '')), 'and nothing granted for it while the rewards are undecided');
   PODIUM_REWARDS[1].skins.push('test-crown'); PODIUM_REWARDS[1].perks.push('test-perk');
   got = await aw();
   PODIUM_REWARDS[1].skins.pop(); PODIUM_REWARDS[1].perks.pop();
-  ok(got.some(x => x.skin === 'test-crown' && x.via === 'PVP 2026-05 #1') && got.some(x => x.perk === 'test-perk' && x.via === 'PVP 2026-05 #1'),
+  ok(got.some(x => x.skin === 'test-crown' && x.via === 'PVP 2025-11 #1') && got.some(x => x.perk === 'test-perk' && x.via === 'PVP 2025-11 #1'),
      'once a place is worth something, it is granted with it', got.filter(x => /^PVP/.test(x.via || '')));
   const guest = (await tab(GAME, '198.51.100.120').call('GET', '/api/leaderboard?awards=' + 'a'.repeat(32))).d.awards || [];
   ok(!guest.some(x => x.pvp), 'asked as a guest (a pid, no account): no PvP podium');
+  got = await aw();
+  const badges = got.filter(x => x.pvpBadge);
+  ok(badges.length === 2 && badges[0].pvpBadge.season === '2025-11' && badges[0].pvpBadge.league === 'void' && badges[0].via === 'PVP 2025-11 VOID'
+     && badges[1].pvpBadge.league === 'gold', 'the account\'s league badges, newest first', badges);
+  ok(badges.every(x => !('season' in x) && !('rank' in x)), 'in their own shape too, never read as the game\'s podiums');
+  BADGE_REWARDS.gold.perks.push('test-gold');
+  got = await aw();
+  BADGE_REWARDS.gold.perks.pop();
+  ok(got.some(x => x.perk === 'test-gold' && x.via === 'PVP 2025-10 GOLD') && !got.some(x => x.perk === 'test-gold' && x.via === 'PVP 2025-11 VOID'),
+     'what a league is worth goes with its badge, and only that league\'s', got.filter(x => /^PVP/.test(x.via || '')));
   const prof = (await tab(GAME).call('GET', '/api/boards?user=duelist')).d;
-  ok(prof && prof.pvp && prof.pvp.podiums.length === 1 && prof.pvp.podiums[0].season === '2026-05' && prof.pvp.podiums[0].rank === 1,
+  ok(prof && prof.pvp && prof.pvp.podiums.length === 1 && prof.pvp.podiums[0].season === '2025-11' && prof.pvp.podiums[0].rank === 1,
      'and the profile shows it', prof && prof.pvp && prof.pvp.podiums);
+  ok(prof.pvp.badges.length === 2 && prof.pvp.badges[0].league === 'void' && prof.pvp.badges[1].season === '2025-10', 'and the badges', prof.pvp.badges);
   const ace = (await tab(GAME).call('GET', '/api/boards?user=s_ace')).d;
-  ok(ace.pvp.podiums.length === 1 && ace.pvp.podiums[0].season === prev && ace.pvp.podiums[0].league === 'void', 'everyone\'s, as filed', ace.pvp.podiums);
+  ok(ace.pvp.podiums.length === 2 && ace.pvp.podiums[0].season === prev && ace.pvp.podiums[0].league === 'void' && ace.pvp.podiums[1].season === ancient, 'everyone\'s, as filed', ace.pvp.podiums);
   ok(!JSON.stringify(prof).includes(me), 'with no account ids');
 
   // the soft reset: last season's rating, halfway back to 1500, a little less sure, placements again

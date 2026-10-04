@@ -720,7 +720,7 @@ plain requests and use alarms for their timers.
        got there first.
      - Any finished season not yet filed is caught up, so a missed day
        costs nothing. Filing twice changes nothing.
-   - **What a podium gives** (`src/pvp-podiums.js`). Signed in, the game's
+   - **What a podium gives** (`src/pvp-rewards.js`). Signed in, the game's
      awards carry each PvP podium as `{ pvp: { season, rank, rating,
      league } }`, a shape the game's parser skips, so it is never mistaken
      for one of the game's own season podiums.
@@ -771,9 +771,11 @@ so a new kind of play is an entry, and each entry names its hooks:
 ```js
 export const QUEUES = {
   ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true,
-            entry: ['signedIn', 'accountAge:24h', 'runs:10'] },
+            entry: ['signedIn', 'accountAge:24h', 'runs:10'],
+            rewards: ['seasonPodium', 'leagueBadge'] },
   casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false,
-            entry: ['signedIn'] }
+            entry: ['signedIn'],
+            rewards: [] }
 };
 ```
 
@@ -792,16 +794,35 @@ export const QUEUES = {
      VOIDRUNNER: 3 to go".
    - An unknown gate shuts its queue; it never opens it.
    - Tested: the server suite is 240 checks; 7 mutants, all caught.
-2. **League badges and the rewards hook.** At the season's turn, beside
-   the podium, every placed player is filed a badge for the league they
-   finished in. A queue's `rewards` names what it pays (ranked:
-   `seasonPodium`, `leagueBadge`). What a podium or a badge is worth comes
-   with the cosmetics (Phase 7).
-3. **Between matches (`after`).** What the lobby runs when a player comes
-   back from a match: casual's `adBreak` (the game's ad rules, never mid
-   match, inert until ads are set up for PvP's address), and the gateways
-   that come later. A new one is a new hook id, not a change to
-   matchmaking.
+2. **League badges and the rewards hook. Done.**
+   - A queue's `rewards` names what a finished season pays it, and the
+     season close (`pvp/src/seasons.js`, `REWARDS`) files exactly those.
+     Ranked pays `seasonPodium` (the top three, `pvp_podiums`) and
+     `leagueBadge`. Casual pays nothing.
+   - `leagueBadge`: every placed player gets the league they finished
+     the season in (`pvp_badges`), filed in batches.
+   - A reward added to a queue later is caught up for the seasons already
+     closed, and nothing is filed twice. An unknown reward is passed by.
+   - The game's awards carry badges as `{ pvpBadge: { season, league,
+     rating } }`, beside podiums as `{ pvp: {...} }`. Neither is ever read
+     as one of the game's own podiums. Profiles list both (`pvp.badges`).
+   - What each is worth: `PODIUM_REWARDS` and `BADGE_REWARDS` (per league)
+     in `src/pvp-rewards.js` (renamed from `pvp-podiums.js`). Both are
+     empty until the cosmetics (Phase 7).
+   - Tested: the server suite is 252 checks; 9 mutants, all caught.
+3. **Between matches (`after`): the suggestions.** User, 4 Oct: "it's not an
+   ad break, it's just a suggestion, you can watch an ad to get 2 more
+   upgrades to start or something like that."
+   - An offer the lobby shows before a queue, never a break: watch an ad,
+     start the next match with, say, 2 more upgrades. Take it or not.
+   - The bonus has to be the server's, not the browser's word: both
+     machines must deal the same starting upgrades (lockstep), so the
+     Matchmaker writes it into the match's sides, like the reward upgrades.
+     A watched ad is recorded server-side and spent by one match.
+   - Casual only. A ranked match stays even; open: whether friend matches
+     get it.
+   - Inert until ads are set up for PvP's address. A new kind of offer is
+     a new hook id, not a change to matchmaking.
 
 ### Phase 7 — Cosmetics, a shop and a currency (user, 4 Oct: not yet)
 
@@ -811,7 +832,7 @@ a currency you get from some sort of progression or playtime achievements.
 Don't build it yet."
 
 - **Rewards are cosmetics:** banners, profile decals and skins. Season
-  podiums (`PODIUM_REWARDS` in `src/pvp-podiums.js`) and league badges pay
+  podiums and league badges (`PODIUM_REWARDS`, `BADGE_REWARDS` in `src/pvp-rewards.js`) pay
   these.
 - **A main shop** for cosmetics, bought with a currency.
 - **The currency** comes from progression and playtime achievements.

@@ -20,7 +20,7 @@
 import { STORE, ARCHIVE, seasonOf } from './season.js';
 import { getStore } from './store.js';
 import { PILOTS, BASE_PILOTS, PLACEMENTS, LEAGUES } from '../pvp/src/rules.js';
-import { podiumsOf } from './pvp-podiums.js';
+import { podiumsOf, badgesOf } from './pvp-rewards.js';
 
 export const isUser = v => typeof v === 'string' && /^[a-z0-9_-]{3,16}$/.test(v);
 
@@ -117,10 +117,11 @@ export async function profile(db, env, user, boards, standings) {
 
   // PvP: the ladder this season, every recorded match, the latest ones, and
   // the leagues' cutoffs and the placement matches, for the page's progress bar
-  let pvp = { season, ladder: null, wins: 0, losses: 0, played: 0, recent: [], podiums: [],
+  let pvp = { season, ladder: null, wins: 0, losses: 0, played: 0, recent: [], podiums: [], badges: [],
               leagues: LEAGUES.map(l => ({ id: l.id, from: l.from })), placements: PLACEMENTS };
   if (await hasPvp(db)) {
     pvp.podiums = await podiumsOf(db, a.id);   // each finished season's ranked top three (pvp/src/seasons.js)
+    pvp.badges = await badgesOf(db, a.id);     // and the league they finished each season in
     pvp.ladder = (await ladderStandings(db, [a.id], season)).get(a.id) || null;
     const t = await db.prepare(
       `SELECT COUNT(*) AS played,

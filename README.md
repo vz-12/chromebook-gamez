@@ -272,12 +272,14 @@ own co-op as it is: lockstep, each player flying their own pilot.
 **Seasons** (PVP-PLAN.md, Phase 5 step 4). Ratings are kept per season,
 the game's own (the 6th to the 6th).
 - The PvP Worker's daily cron (00:20 UTC, `pvp/wrangler.jsonc`) files each
-  finished season's ranked top three (`pvp/src/seasons.js`). With the
+  finished season's rewards (`pvp/src/seasons.js`). With the
   game's two, that is three of the Free plan's five cron triggers.
-- A podium reaches the player through the game's awards and shows on their
-  profile. What each place is worth is `PODIUM_REWARDS` in
-  `src/pvp-podiums.js` (the game's own skin and perk ids), empty until
-  decided.
+- Each queue's `rewards` (`pvp/src/rules.js`) names what a finished season
+  pays. Ranked pays a podium (the top three) and a league badge (every
+  placed player, the league they finished in).
+- Both reach the player through the game's awards and show on their
+  profile. What each is worth is `PODIUM_REWARDS` and `BADGE_REWARDS` in
+  `src/pvp-rewards.js`, empty until the cosmetics (PVP-PLAN.md, Phase 7).
 - A new season starts each player from last season's rating, halfway back
   to 1500, with the placement matches to play again.
 

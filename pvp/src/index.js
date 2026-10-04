@@ -16,8 +16,8 @@
      /api/pvp/flags   the referee's flags, for dev accounts to review (flags.js)
      everything else  pvp/site
 
-   A daily cron (wrangler.jsonc) files each finished season's ranked podium
-   (seasons.js).
+   A daily cron (wrangler.jsonc) files each finished season's rewards: the
+   ranked podium and league badges (seasons.js).
 
    A player arrives signed in from the game by a hand-off code, and goes back
    the same way (src/account.js, hand-offs).
@@ -57,11 +57,11 @@ export default {
     }
   },
 
-  // once a day: any finished season's ranked podium, filed (seasons.js)
+  // once a day: any finished season's rewards, filed (seasons.js)
   async scheduled(event, env, ctx) {
     if (!env.DB) return;
     ctx.waitUntil(closeSeasons(env.DB)
-      .then(f => console.log(f.length ? 'pvp podiums filed: ' + f.join(', ') : 'pvp: no season to close'))
+      .then(f => console.log(f.length ? 'pvp season rewards filed: ' + f.join(', ') : 'pvp: no season to close'))
       .catch(e => console.error('pvp seasons', e && e.stack || e)));
   }
 };
