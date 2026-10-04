@@ -392,6 +392,8 @@
     else { $('found').hidden = true; $('found').textContent = ''; }
   });
   addEventListener('hashchange', () => { readHash(); load(); });
+  // school filters often block .online; the same page is on workers.dev (README)
+  $('school').hidden = location.hostname !== 'voidrunner.online';
 
   (async () => {
     readHash();
