@@ -13,11 +13,14 @@
 import { makeD1 } from './lib/d1-sqlite.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { makeNamespace } from './lib/do-fake.mjs';
 
 const main = (await import('../src/index.js')).default;
 const pvp = (await import('../pvp/src/index.js')).default;
 const { pruneAuth } = await import('../src/auth.js');
 const { loadout, LEAGUES, CASUAL } = await import('../pvp/src/rules.js');
+const { Match } = await import('../pvp/src/objects.js');
+const { REF } = await import('../pvp/src/referee.js');
 
 const DB = makeD1();
 const asset = new Response('asset');
@@ -83,10 +86,7 @@ section('PvP signed out');
   const up = await p.op('register', { name: 'pvp_only', pass: 'a fine password' });
   ok(up.status === 403 && /VOIDRUNNER/.test(up.d.error), 'no accounts are made here', up);
   ok(one("SELECT COUNT(*) AS n FROM accounts WHERE name = 'pvp_only'").n === 0, 'none was');
-  for (const path of ['/api/pvp/queue', '/api/pvp/match']) {
-    const q = await p.call('GET', path);
-    ok(q.status === 501, path + ': not yet', q.status);
-  }
+  ok((await p.call('GET', '/api/pvp/queue')).status === 501, '/api/pvp/queue: not yet');
   ok((await p.call('GET', '/api/nope')).status === 404, 'an unknown API path');
   ok((await p.call('GET', '/api/account/save')).status === 404, 'the save is the game\'s, not PvP\'s');
 }
@@ -245,6 +245,173 @@ section('the relay, asked of the game\'s Worker');
   ok((await tab(PVP).call('GET', '/api/turn')).status === 502, 'the game unreachable: 502');
   ok((await tab(PVP).call('POST', '/api/turn', {})).status === 405, 'only GET');
   delete envPvp.GAME;
+}
+
+section('the referee: a match, both sides, and what it comes to');
+{
+  const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
+  ok(/"name":\s*"MATCH",\s*"class_name":\s*"Match"/.test(cfg), 'the Worker binds the Match object as MATCH, as tested here');
+  envPvp.MATCH = makeNamespace(Match, envPvp);
+  // a second player and a stranger, each signed in at PvP
+  for (const [name, ip] of [['Rival', '198.51.100.90'], ['Stranger', '198.51.100.91']]) {
+    const r = await tab(GAME, ip).op('register', { name, pass: 'a fine password', pid: (name === 'Rival' ? 'b' : 'c').repeat(32) });
+    ok(r.status === 201, name + ' signed up in the game', r.status);
+  }
+  const rival = tab(PVP, '198.51.100.90'), stranger = tab(PVP, '198.51.100.91');
+  ok((await rival.op('login', { name: 'rival', pass: 'a fine password' })).status === 200
+     && (await stranger.op('login', { name: 'stranger', pass: 'a fine password' })).status === 200, 'and at PvP');
+  const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
+  const ids = [acct('duelist'), acct('rival'), acct('stranger')];
+  const mt = (t, b) => t.call('POST', '/api/pvp/match', b);
+  const rep = (t, id, report) => mt(t, { op: 'report', id, report });
+  // fingerprints for steps from..to, one a second; `bent` changes the hash at one step
+  const fps = (from, to, bent = -1) => {
+    const out = [];
+    for (let s = from; s <= to; s += 60) out.push([0, s, (s * 2654435761 + (s === bent ? 1 : 0)) >>> 0]);
+    return out;
+  };
+  const real = Date.now;
+  let clock = real();
+  Date.now = () => clock;
+  const later = ms => { clock += ms; };
+  const rows = id => DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').all(id);
+  const flags = id => DB.sql.prepare('SELECT account, reason FROM pvp_flags WHERE match = ? ORDER BY account').all(id);
+  const won = { winner: 0, score: [2, 1], bestOf: 3 };
+  // a match, opened by the duelist and joined by the rival
+  const pair = async () => {
+    const o = await mt(duel, { op: 'open', kind: 'friend', pilot: 'hacker' });
+    const j = await mt(rival, { op: 'join', id: o.d.id, pilot: 'ember' });
+    return o.d.id;
+  };
+
+  // who may ask, and how
+  ok((await tab(PVP).call('POST', '/api/pvp/match', { op: 'open', kind: 'friend', pilot: 'runner' })).status === 401, 'signed out: 401');
+  ok((await duel.call('GET', '/api/pvp/match')).status === 405, 'only POST');
+  ok((await tab(PVP).call('GET', '/api/pvp/queue')).status === 501, 'matchmaking: not yet');
+  ok((await mt(duel, { op: 'open', kind: 'ranked', pilot: 'runner' })).status === 400, 'a player opens only a friend\'s match');
+  ok((await mt(duel, { op: 'open', kind: 'friend', pilot: 'nobody' })).status === 400, 'with a real pilot');
+  ok((await mt(duel, { op: 'join', id: 'nope', pilot: 'runner' })).status === 400, 'a match id is a match id');
+  ok((await mt(duel, { op: 'join', id: 'f'.repeat(32), pilot: 'runner' })).status === 404, 'a match nobody opened');
+
+  // a match played to the end, both sides agreeing
+  const o = await mt(duel, { op: 'open', kind: 'friend', pilot: 'hacker' });
+  ok(o.status === 200 && /^[0-9a-f]{32}$/.test(o.d.id) && o.d.side === 0 && o.d.peer === null, 'the host opens one, and waits', o.d);
+  const id = o.d.id;
+  const self = await mt(duel, { op: 'join', id, pilot: 'hacker' });
+  ok(self.status === 200 && self.d.side === 0 && self.d.peer === null, 'the host joining its own is still the host, still alone', self.d);
+  const j = await mt(rival, { op: 'join', id, pilot: 'ember' });
+  ok(j.status === 200 && j.d.side === 1 && j.d.peer.name === 'Duelist' && j.d.peer.pilot === 'hacker', 'the guest joins, and sees who it is up against', j.d);
+  ok(!ids.some(a => JSON.stringify(j.d).includes(a)), 'never their account');
+  ok((await mt(stranger, { op: 'join', id, pilot: 'runner' })).status === 409, 'a third: the match is full');
+  ok((await rep(stranger, id, {})).status === 403, 'nor can a stranger report on it');
+  for (const bad of [{ fps: 'x' }, { fps: [[0, 1]] }, { fps: Array(61).fill([0, 1, 1]) },
+                     { result: { winner: 0, score: [1, 2], bestOf: 3 } }, { result: { winner: 1, score: [0, 3], bestOf: 3 } },
+                     { result: { winner: 0, score: [2, 0], bestOf: 4 } }])
+    ok((await rep(duel, id, bad)).status === 400, 'a malformed report is refused: ' + JSON.stringify(bad).slice(0, 50));
+  for (let t = 0; t < 4; t++) {
+    later(5000);
+    const a = await rep(duel, id, { fps: fps(t * 300, t * 300 + 299), tick: t * 300 + 299 });
+    const b = await rep(rival, id, { fps: fps(t * 300, t * 300 + 299), tick: t * 300 + 299 });
+    if (a.d.verdict || b.d.verdict) ok(false, 'nothing decided mid-match', [a.d, b.d]);
+  }
+  later(5000);
+  const r1 = await rep(duel, id, { fps: fps(1200, 1400), result: won });
+  ok(r1.status === 200 && r1.d.verdict === null, 'one result: waiting for the other', r1.d);
+  const r2 = await rep(rival, id, { fps: fps(1200, 1400), result: won });
+  ok(r2.d.verdict && r2.d.verdict.v === 'played' && r2.d.verdict.winner === 0 && r2.d.verdict.score.join() === '2,1', 'both agree: the result stands', r2.d);
+  const r3 = await rep(duel, id, { result: { winner: 1, score: [0, 2], bestOf: 3 } });
+  ok(r3.d.verdict.v === 'played' && r3.d.verdict.winner === 0, 'and nothing said afterwards changes it', r3.d.verdict);
+  const row = rows(id)[0];
+  ok(row && row.verdict === 'played' && row.winner === 0 && row.score_a === 2 && row.score_b === 1 && row.best_of === 3, 'recorded: the winner and the score', row);
+  ok(row.a === ids[0] && row.b === ids[1] && row.a_pilot === 'hacker' && row.b_pilot === 'ember', 'who played whom, flying what', row);
+  ok(row.queue === 'friend' && row.rated === 0 && /^\d{4}-\d{2}$/.test(row.season) && row.ended >= row.started, 'a friend\'s match, unrated, in its season', row);
+  ok(flags(id).length === 0, 'and nobody flagged');
+
+  // the ways it is no contest
+  const fp = await pair();
+  later(5000); await rep(duel, fp, { fps: fps(0, 600) });
+  const fv = await rep(rival, fp, { fps: fps(0, 600, 360) });
+  ok(fv.d.verdict && fv.d.verdict.v === 'void', 'the fingerprints differ at one step: no contest', fv.d);
+  ok(rows(fp)[0].reason === 'fingerprints' && flags(fp).map(f => f.account).join() === [ids[0], ids[1]].sort().join(), 'recorded, and both flagged', [rows(fp)[0], flags(fp)]);
+  const pp = await pair();
+  later(5000); await rep(duel, pp, { fps: fps(0, 300) });
+  const pv = await rep(rival, pp, { fps: fps(0, 300), parted: true });
+  ok(pv.d.verdict.v === 'void' && rows(pp)[0].reason === 'parted' && flags(pp).length === 2, 'a side whose game parted: no contest', pv.d);
+  const rp = await pair();
+  await rep(duel, rp, { result: won });
+  const rv = await rep(rival, rp, { result: { winner: 1, score: [1, 2], bestOf: 3 } });
+  ok(rv.d.verdict.v === 'void' && rows(rp)[0].reason === 'results', 'the two results disagree: no contest', rv.d);
+  const dp = await pair();
+  await rep(duel, dp, { alone: true });
+  const dv = await rep(rival, dp, { alone: true });
+  ok(dv.d.verdict.v === 'void' && rows(dp)[0].reason === 'dropped' && flags(dp).length === 2, 'both lost the link: no contest, flagged as dropped', dv.d);
+
+  // leaving
+  const lp = await pair();
+  later(5000); await rep(duel, lp, { fps: fps(0, 300) }); await rep(rival, lp, { fps: fps(0, 300) });
+  for (let t = 0; t < 9; t++) { later(5000); await rep(duel, lp, { fps: fps(360 + t * 300, 600 + t * 300), alone: t > 0 }); }
+  later(5000);
+  const lv = await rep(duel, lp, { alone: true });
+  ok(lv.d.verdict && lv.d.verdict.v === 'forfeit' && lv.d.verdict.winner === 0, 'the guest went quiet mid-match and the host stayed: the guest forfeits', lv.d);
+  ok(rows(lp)[0].verdict === 'forfeit' && rows(lp)[0].winner === 0 && flags(lp).length === 0, 'recorded as a forfeit, nobody flagged', rows(lp)[0]);
+  const ap = await pair();
+  later(1000); await rep(rival, ap, { fps: fps(0, 300) });
+  later(40000); await rep(rival, ap, { fps: fps(360, 600), alone: true });
+  later(6000);
+  const fired = await envPvp.MATCH.alarms();
+  ok(fired >= 1 && rows(ap)[0] && rows(ap)[0].verdict === 'forfeit' && rows(ap)[0].winner === 1,
+     'with nobody reporting, the object\'s alarm decides it: the quiet host forfeits', rows(ap));
+  const op = await pair();
+  later(5000); await rep(rival, op, { fps: fps(0, 300) });
+  await rep(duel, op, { fps: fps(0, 300), result: won });
+  later(46000); await envPvp.MATCH.alarms();
+  ok(rows(op)[0] && rows(op)[0].verdict === 'played' && rows(op)[0].reason === 'one result', 'one result, and the other left without saying: it stands', rows(op));
+  const bp = await pair();
+  later(46000); await envPvp.MATCH.alarms();
+  ok(rows(bp).length === 0, 'both quiet: abandoned, and nothing recorded');
+  const qp = await pair();
+  later(5000); await rep(duel, qp, { fps: fps(0, 300) }); await rep(rival, qp, { fps: fps(0, 300) });
+  later(2000);
+  const qv = await rep(rival, qp, { fps: fps(360, 420), left: true });
+  ok(qv.d.verdict && qv.d.verdict.v === 'forfeit' && qv.d.verdict.winner === 0, 'a player who quits says so on the way out: a forfeit at once', qv.d);
+  ok(rows(qp)[0].verdict === 'forfeit' && rows(qp)[0].reason === 'quit' && flags(qp).length === 0, 'recorded as a quit, nobody flagged', rows(qp)[0]);
+  const sp = await pair();
+  later(5000); await rep(duel, sp, { fps: fps(0, 300) }); await rep(rival, sp, { fps: fps(0, 300) });
+  later(5000); await rep(duel, sp, { fps: fps(360, 600), alone: true });
+  later(46000); await envPvp.MATCH.alarms();
+  ok(rows(sp)[0] && rows(sp)[0].verdict === 'forfeit' && rows(sp)[0].winner === 0,
+     'the guest went without a word, the host saw it and went too: still the guest\'s forfeit', rows(sp));
+  const hp = await pair();
+  later(5000); await rep(duel, hp, { fps: fps(0, 300) }); await rep(rival, hp, { fps: fps(0, 300) });
+  later(5000); await rep(duel, hp, { fps: fps(360, 600), result: won });
+  for (let t = 0; t < 12; t++) { later(5000); await rep(rival, hp, { fps: fps(660 + t * 300, 900 + t * 300) }); }
+  ok(rows(hp).length === 0, 'one result, the other still playing a minute on: it does not stand early');
+  later(REF.MAX_MATCH); await rep(rival, hp, {});
+  ok(rows(hp)[0] && rows(hp)[0].verdict === 'played' && rows(hp)[0].reason === 'one result',
+     'but holding the other result back forever does not hold the verdict: it stands once the match runs out its time', rows(hp));
+
+  // nobody came, and tidying up
+  const ep = (await mt(duel, { op: 'open', kind: 'friend', pilot: 'runner' })).d.id;
+  later(31 * 60 * 1000 + 2000); await envPvp.MATCH.alarms();
+  ok((await mt(rival, { op: 'join', id: ep, pilot: 'ember' })).status === 404, 'a friend\'s match nobody joined in half an hour is let go');
+  later(2000); await envPvp.MATCH.alarms();
+  ok(envPvp.MATCH.instances.get(ep).data.size === 0 && rows(ep).length === 0, 'its object emptied, nothing recorded');
+  later(11 * 60 * 1000); await envPvp.MATCH.alarms();
+  ok(envPvp.MATCH.instances.get(id).data.size === 0, 'a verdict is kept ten minutes for late reports, then the object empties');
+  ok((await rep(duel, id, {})).status === 404, 'after which the match is gone; its row stays');
+
+  // a database hiccup at the verdict: written at the next look
+  const wp = await pair();
+  const batch = DB.batch;
+  DB.batch = async () => { throw new Error('D1 down'); };
+  const cerr = console.error; console.error = () => {};    // the object logs the failed write; expected here
+  await rep(duel, wp, { result: won });
+  const wv = await rep(rival, wp, { result: won });
+  DB.batch = batch; console.error = cerr;
+  ok(wv.d.verdict.v === 'played' && rows(wp).length === 0, 'decided, but the write failed', wv.d);
+  later(16000); await envPvp.MATCH.alarms();
+  ok(rows(wp).length === 1 && rows(wp)[0].verdict === 'played', 'and the next look writes it', rows(wp));
+  Date.now = real;
 }
 
 section('PvP signs in and out on its own');

@@ -597,31 +597,83 @@ makes sure nothing it doesn't use is fetched or run.
 
 ### Phase 4 — folded into Phase 3 (steps 3 and 4)
 
-### Phase 5 — Matchmaking, the referee, results
+### Phase 5 — Matchmaking, the referee, results, profiles
 
-- **The Matchmaker Durable Object, one per queue:**
-  - Players hold a WebSocket. Tickets are paired within a league first,
-    then by rating, and the window widens the longer someone waits.
-  - Region comes from `request.cf`.
-- **The Match Durable Object, one per match:**
-  - It's the signalling for WebRTC over the socket, replacing the
-    `/api/room` polling. TURN credentials come the same way.
-  - **The referee.** Both sides send their `lsHash` fingerprint every second
-    and their result at the end.
-    - The fingerprints agree: the result stands.
-    - They differ: the match is void and both are flagged (`pvp_flags`).
-    - Someone leaves: they forfeit after a grace period.
-  - Lockstep makes this strong. A modified simulation splits from the honest
-    one, and the referee sees it.
-- **Inputs stay peer-to-peer over TURN**, as in co-op. A relay through the
-  Durable Object is the fallback.
-- **D1:**
-  - `pvp_matches`.
-  - `pvp_ratings`: Glicko-2 per account per queue per season, plus the
-    league. Seasons reuse `season.js`'s calendar.
-- **On the boards:** `/api/pvp/ladder` feeds the leaderboard page's PVP tab
-  and its search. A season close pays PvP podiums through the existing
-  awards.
+**How the two machines talk to the server: plain HTTP, polled.** The plan
+first said WebSockets. Polling is what the game's rooms already use, and it
+is proven through school filters. It is also easy to test in Node. The
+traffic is small: a report every few seconds while a match is on, and a
+poll every couple of seconds while queued. Both Durable Objects answer
+plain requests and use alarms for their timers.
+
+**Steps** (each pushed to `pvp`, then stop and report):
+
+1. **The referee and match records.** The Match Durable Object, one per
+   match, at `/api/pvp/match`.
+   - Each side opens or joins it as its own signed-in account; the server
+     knows who is who, never the client.
+   - Every five seconds each side reports its fingerprints (the lockstep
+     checks it already makes every second), whether its game ever parted,
+     and whether it is alone. At the end it reports the result.
+   - Nothing is reported until the game is on: a long wait for a friend,
+     or a link that never forms, is nobody's fault.
+   - **The verdict:**
+     - Both results agree, and nothing parted: the result stands.
+     - The fingerprints differ, the game parted, or the results differ:
+       no contest (`void`), and both are flagged (`pvp_flags`).
+     - A player who quits mid-match says so on the way out: a forfeit at
+       once (`quit`).
+     - One side goes quiet mid-match while the other stays: the quiet one
+       forfeits after a grace period. If the one who stayed goes too before
+       the grace is up, the one who went first still forfeits.
+     - One result, and the other side never sends its own: it stands once
+       the other goes quiet, or the match runs out its time (45 minutes).
+       Holding a loss back only delays it.
+     - Both say the other is gone (a dropped link): no contest, flagged
+       `dropped`, so a player who keeps dropping shows up.
+   - Results go to `pvp_matches` in D1, with the season.
+   - Friend matches use it first, unrated, so they count on profiles.
+2. **Matchmaking and ratings.** The Matchmaker Durable Object, one per
+   queue (casual, ranked), at `/api/pvp/queue`.
+   - A ticket waits in its league first, then by rating; the window widens
+     the longer it waits. Region comes from `request.cf`.
+   - A pair gets a Match (step 1) and a role each. The host's room code
+     reaches the guest through the Match, so nobody types a code.
+   - `pvp_ratings`: Glicko-2 per account per queue per season, and the
+     league from the rating. New players are provisional for a few
+     placement matches.
+   - Ranked flies the league's loadout and length (best of five from
+     gold); `/api/pvp/me` gives the league from the rating.
+   - The lobby gets PLAY RANKED and PLAY CASUAL.
+3. **The ladder and user profiles.**
+   - The leaderboard page's PVP tab: the ladder by league and rating, with
+     search, from the same D1 (`/api/boards` on the game's Worker).
+   - **Profiles** (user, 4 Oct): any player with an account is clickable on
+     the leaderboard, on every board, and opens a page of their stats,
+     osu!-style like the rest of the page. Guests (a callsign with no
+     account) have no profile.
+     - The header: display name, league crest and rating, ranks, joined.
+     - The game: best on each board, pilots unlocked and awake, awards.
+     - PvP: wins, losses, rating, recent matches.
+     - Only what the boards already show publicly: no pids, devices or
+       anything from the save beyond the unlocks summary.
+4. **Seasons and hardening.**
+   - A season close pays PvP podiums through the existing awards, and
+     resets ratings softly.
+   - Rate limits on queueing and reports; a query to review flags.
+
+**D1** (made on first use, like the rest):
+- `pvp_matches`: id, queue, league, rated, both accounts and pilots, the
+  winner, the score, the verdict, started/ended, season.
+- `pvp_flags`: account, match, reason, when.
+- `pvp_ratings` (step 2): account, queue, season, rating, deviation,
+  volatility, league, wins, losses.
+
+**Why the referee works:** in lockstep each machine runs both pilots from
+the inputs. A modified client changes only its own copy, which then parts
+from the honest one. The honest side sees the part and reports it, and the
+match is void. One void proves nothing about who cheated; the same account
+flagged against many different opponents does.
 
 ### Phase 6 — Leagues, ranked, casual, and the gateways
 

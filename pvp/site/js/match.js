@@ -10,7 +10,8 @@
 
    The match itself, from the map's draw to the last round, is rounds.js's;
    this file is the connection around it, the waiting room before it and the
-   result after it.
+   result after it. The server's referee hears from referee.js, which this
+   file starts, ticks and tells when the match is decided or left.
 
    Until the run starts, the engine sits in PvP's own state, 'pvp', where the
    run neither moves nor draws; this file shows the waiting room over it, in
@@ -69,8 +70,10 @@
     n.classList.toggle('bad', !!bad);
   }
 
-  // leaving, from the room's button or a finished match: the link goes first
-  function back() {
+  /* Leaving, from the room's button or a finished match: the link goes first.
+     `quit`: this player walked out mid-match, which the referee counts. */
+  function back(quit) {
+    M.ref.stop(quit === true);
     try { if (MP.on || MP.ready) mpQuit(); else { netHangUp(true); Net.phase = 'off'; } } catch (e) {}
     M.leave();
   }
@@ -81,7 +84,21 @@
     try { if (LS.on) lsLeave(); pilotsEnd(); } catch (e) {}
     state = 'pvp';
     say('MATCH OVER', '', why, '', false);
+    told(M.ref.verdict);
   }
+
+  /* What the referee made of it (referee.js), under whichever screen is up:
+     the result, or the other side leaving. */
+  function told(v) {
+    if (!v || !box) return;
+    const me = pilotMine(), m = typeof RUN !== 'undefined' && RUN.pvp;
+    const line = v.v === 'played' ? (m ? 'best of ' + m.bestOf + '  ·  ' : '') + 'recorded'
+      : v.v === 'forfeit' ? (v.winner === me ? 'a win by forfeit' : 'a loss by forfeit') + '  ·  recorded'
+      : v.v === 'void' ? 'no contest: the two games disagreed'
+      : '';
+    if (line) box.querySelector('.note').textContent = line;
+  }
+  M.ref.onVerdict = told;
 
   // what the waiting room says, from where the link has got to
   function waiting() {
@@ -113,19 +130,23 @@
     over = won ? 'won' : 'lost';
     say(won ? 'VICTORY' : 'DEFEAT', '', M.nameOf(me) + '  ' + m.score[me] + ' — ' + m.score[them] + '  ' + M.nameOf(them),
         'best of ' + m.bestOf, false);
+    M.ref.finish(m);
+    told(M.ref.verdict);
   }
 
   M.modes.match = {
     loadout: 'casual',
     start() {
       state = 'pvp';
-      if (M.hand.role === 'host') netHost();
+      // the host opens the referee's match first, so its id rides in the hello (referee.js)
+      if (M.hand.role === 'host') { const go = () => netHost(); M.ref.open(M.hand.pilot).then(go, go); }
       else netJoin(M.hand.code);
       waiting();
     },
     // the match's step (rounds.js)
     waves(dt) { M.rounds.tick(dt); },
     frame() {
+      M.ref.tick();                      // the referee hears from a playing machine, not a hidden one
       const live = LS.on && MP.on;
       if (!live && !started && state === 'pvp') { waiting(); return; }
       if (live && !over) {
@@ -135,11 +156,14 @@
         if (m && m.run === LS.run && m.phase === 'over') { result(m); return; }
       }
       if (over) return;
-      // this player quit, from the game's own pause screen: back to the lobby
-      if (state === 'menu' || state === 'dead') { back(); return; }
+      // this player quit, from the game's own pause screen: back to the lobby, a forfeit
+      if (state === 'menu') { back(true); return; }
       /* The other side went. In co-op the host plays on alone and the guest
-         is shown its lost screen ('lan'); a match is simply over. */
-      if (started && !MP.on) end(M.hand.role === 'host' ? 'Your opponent left.' : 'The host left.');
+         is shown its lost screen ('lan'); a match is simply over. A host
+         that was down between rounds as they went is 'dead' by now
+         (mpPeerGone): theirs is the leaving, not this player's. */
+      if (started && !MP.on) { end(M.hand.role === 'host' ? 'Your opponent left.' : 'The host left.'); return; }
+      if (state === 'dead') back();
     }
   };
 })();

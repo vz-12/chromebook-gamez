@@ -26,7 +26,7 @@ export const PLAY = join(ROOT, 'pvp', 'site', 'play', 'index.html');
 
 // PvP's own files, in the order they run: all of them before the engine
 export const PVP_SCRIPTS = ['/js/mode.js', '/js/art.js', '/js/cards.js', '/js/maps.js', '/js/duel.js',
-                            '/js/rounds.js', '/js/practice.js', '/js/match.js'];
+                            '/js/rounds.js', '/js/referee.js', '/js/practice.js', '/js/match.js'];
 
 const ADS_META = /<!-- AdSense:[^\n]*-->\n<meta name="google-adsense-account"[^>]*>\n/;
 const REDIRECT = /<script>\n  \/\* A save belongs to the address it was made on[\s\S]*?<\/script>\n/;

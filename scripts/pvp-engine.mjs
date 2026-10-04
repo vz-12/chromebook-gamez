@@ -9,13 +9,21 @@
    nothing. The same engine booted as the game, beside it, shows the recorder
    would have caught a request. Then a match: two copies, host and guest,
    linked the way scripts/lockstep.mjs links two games, each flown by a bot,
-   from the handshake through the host's start to one of them leaving.
+   from the handshake through the host's start to one of them leaving. Each
+   engine talks to PvP's own Worker and its referee (the Match object) as its
+   own signed-in player, on a SQLite D1, and the match ends recorded.
    ========================================================================= */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadGame, gameScript } from './lib/game-vm.mjs';
 import { buildPlay, PVP_SCRIPTS } from './pvp-build.mjs';
+import { randomBytes } from 'node:crypto';
+import { makeD1 } from './lib/d1-sqlite.mjs';
+import { makeNamespace } from './lib/do-fake.mjs';
+const pvpWorker = (await import('../pvp/src/index.js')).default;
+const { Match } = await import('../pvp/src/objects.js');
+const { ensureAuth, sha256 } = await import('../src/auth.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const IDX = join(ROOT, 'index.html');
@@ -91,12 +99,48 @@ const ME = {
   }
 };
 const pvpScripts = PVP_SCRIPTS.map(s => ({ name: s, code: readFileSync(join(SITE, s), 'utf8') }));
-function boot(hand) {
+
+/* PvP's own Worker and its referee (the Match object, pvp/src/objects.js), on
+   a SQLite D1, with two players signed in. An engine signed in as one of them
+   sends /api/pvp/match there, with that player's cookie; anything else goes
+   to the recorder as before. */
+const DB = makeD1();
+const PVP_ORIGIN = 'https://voidrunner-pvp.play101.workers.dev';
+const envPvp = { DB, SIGNUP: 'off', ROOM_STORE: 'voidrunner-pvp-rooms', ASSETS: { fetch: () => new Response('') } };
+envPvp.MATCH = makeNamespace(Match, envPvp);
+await ensureAuth(DB);
+function signedIn(name) {
+  const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), now = Date.now();
+  DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+    .run(id, name.toLowerCase(), name, '-', '-', '[]', now, now);
+  DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)')
+    .run(sha256(token), id, now, now, now + 30 * 864e5);
+  return { id, token };
+}
+const DUELIST = signedIn('Duelist'), RIVAL_ACCT = signedIn('Rival');
+function referee(win, who) {
+  const rec = win.fetch;
+  win.fetch = (u, init = {}) => {
+    if (String(u) !== '/api/pvp/match') return rec(u, init);
+    win.__net.push('fetch /api/pvp/match');
+    return pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/match', {
+      method: init.method || 'GET', body: init.body,
+      headers: Object.assign({}, init.headers, { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN }) }), envPvp);
+  };
+}
+/* The page's wall clock, as game time: it moves a sixtieth of a second with
+   each frame play() runs, so the referee's five-second reports come every
+   five seconds of the match however fast Node plays it. The page's own Date,
+   not Node's (which game-vm's window shares), so the server's clock is left
+   alone. */
+const WALL = { name: 'wall-clock', code: 'globalThis.__wall = Date.now(); globalThis.Date = class extends Date { static now() { return __wall; } };' };
+function boot(hand, who) {
   return loadGame(IDX, {
-    scripts: pvpScripts,
+    scripts: who ? [WALL].concat(pvpScripts) : pvpScripts,
     before: win => {
       rooms(win);
       recorder(win);
+      if (who) referee(win, who);
       win.location.replace = u => { win.__replaced = u; };
       if (hand) win.sessionStorage.setItem('vr_pvp_play', JSON.stringify(hand));
     }
@@ -218,17 +262,20 @@ const WATCH = `
       __fp.set(LS.tick, JSON.stringify([simRngState, m.phase, m.round, m.score, m.owed, a.charId, a.x, a.y, a.hp, a.level,
                                         b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length]));
   };`;
-// both machines, a frame at a time, until `done` (or the cap); drawn now and then
-function play(H, G, ship, frames, done) {
+/* Both machines, a frame at a time, until `done` (or the cap); drawn now and
+   then. Every half second it lets the server's answers in (the referee). */
+const settle = () => new Promise(r => setImmediate(r));
+async function play(H, G, ship, frames, done) {
   let i = 0;
   for (; i < frames; i++) {
-    H.run('lsFrame(1 / 60); PVP.frame()'); ship(H, G);
-    G.run('lsFrame(1 / 60); PVP.frame()'); ship(G, H);
+    H.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); ship(H, G);
+    G.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); ship(G, H);
     if (i % 20 === 0) { H.run('render()'); G.run('render()'); }
-    if (done && i % 30 === 0 && done()) break;
+    if (i % 30 === 0) { await settle(); if (done && done()) break; }
   }
   return i;
 }
+const matchRows = () => DB.sql.prepare('SELECT * FROM pvp_matches ORDER BY ended').all();
 const sameGame = (H, G) => {
   const fh = new Map(H.run('[...__fp]')), fg = new Map(G.run('[...__fp]'));
   const both = [...fh.keys()].filter(t => fg.has(t));
@@ -236,11 +283,12 @@ const sameGame = (H, G) => {
 };
 const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
 {
-  const H = boot({ mode: 'match', role: 'host', pilot: 'hacker', me: ME });
-  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL });
+  const H = boot({ mode: 'match', role: 'host', pilot: 'hacker', me: ME }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
   await flush();
   // Node has no WebRTC: each asked PvP's own server for its part of the link, and for nothing else
-  ok(H.win.__net.join() === 'fetch /api/turn', 'the host asks for the relay, and nothing else', H.win.__net);
+  ok(H.win.__net.join() === 'fetch /api/pvp/match,fetch /api/turn', 'the host opens its match with the referee, then asks for the relay', H.win.__net);
+  ok(H.run('PVP.ref.side') === 0 && /^[0-9a-f]{32}$/.test(H.run('PVP.ref.id')), 'the referee gave it a match, as its host', H.run('[PVP.ref.id, PVP.ref.side]'));
   ok(G.win.__net[0] === 'fetch /api/room?code=ABCD&as=guest' && G.win.__net.length === 1, 'the guest looks the room up, and nothing else', G.win.__net);
   ok(H.run('state') === 'pvp' && G.run('state') === 'pvp', 'both wait in PvP\'s own room, where the run neither moves nor draws');
   const still = H.run('JSON.stringify([simTick, elapsed, waveTimer, state])');
@@ -248,6 +296,9 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(H.run('JSON.stringify([simTick, elapsed, waveTimer, state])') === still, 'two seconds in the room, keys pressed: no run moves', [still, H.run('JSON.stringify([simTick, elapsed, waveTimer, state])')]);
   H.run('PVP.frame()'); G.run('PVP.frame()');
   ok(roomOf(H).__q['.line'].textContent === "Couldn't connect." && !roomOf(H).hidden, 'a link that cannot be made says so', roomOf(H).__q['.line'].textContent);
+  await flush();
+  ok(H.win.__net.filter(n => n === 'fetch /api/pvp/match').length === 1 && H.run('PVP.ref.until') === 0 && H.run('PVP.ref.live') === false,
+     'a wait for the friend is nobody leaving: nothing said to the referee, and no clock started, until the game is on', H.win.__net);
 
   const ship = link(H, G);
   ok(H.run('MP.ready') && G.run('MP.ready'), 'both said hello: the same build, the same game');
@@ -266,7 +317,9 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(H.run('pilotP(0).awake') === 1 && H.run('pilotP(1).awake') === 1, 'each awake, as its own account is');
 
   // the map's draw: the belt, on PvP's own screen
-  play(H, G, ship, 10);
+  await play(H, G, ship, 10);
+  ok(G.run('PVP.ref.id') === H.run('PVP.ref.id') && G.run('PVP.ref.side') === 1, 'the match rode in the host\'s hello, and the guest joined it as itself',
+     G.run('[PVP.ref.id, PVP.ref.side]'));
   const belt = H.run('__log.belt');
   ok(belt && belt.state === 'pvp' && G.run('state') === 'pvp', 'the match opens on the map\'s draw, on PvP\'s own screen', belt);
   ok(belt.map >= 0 && belt.map < belt.maps && belt.maps === 7, 'one of the seven sectors', belt);
@@ -286,7 +339,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   // the whole match, bots at the sticks
   let threw = null, frames = 0;
   const over = () => H.run('!!(RUN.pvp && RUN.pvp.phase === "over")') && G.run('!!(RUN.pvp && RUN.pvp.phase === "over")');
-  try { frames = play(H, G, ship, 60 * 900, over); }
+  try { frames = await play(H, G, ship, 60 * 900, over); }
   catch (e) { threw = e; }
   ok(!threw, 'a whole match, drawn on both, without an error', String(threw && threw.stack));
   ok(over(), 'and it came to an end', [frames, H.run('JSON.stringify(RUN.pvp && [RUN.pvp.phase, RUN.pvp.round, RUN.pvp.score, RUN.pvp.owed])'), H.run('state')]);
@@ -348,7 +401,26 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(same.n >= 40, 'both played the same steps', same.n);
   ok(same.parted.length === 0, 'and they are the same game, step for step', same.parted);
   ok(H.run('LS.resyncs') === 0 && G.run('LS.resyncs') === 0, 'without the safety net ever needed');
-  ok(H.win.__net.length === 1 && G.win.__net.length === 1, 'and not one more request', [H.win.__net, G.win.__net]);
+  const others = g => g.win.__net.filter(n => n !== 'fetch /api/pvp/match');
+  ok(others(H).join() === 'fetch /api/turn' && others(G).join() === 'fetch /api/room?code=ABCD&as=guest',
+     'and not one more request but the referee\'s', [others(H), others(G)]);
+  ok(H.win.__net.length > 10 && G.win.__net.length > 10, 'which heard from both all match long', [H.win.__net.length, G.win.__net.length]);
+
+  // the referee: both machines' fingerprints held up against each other, both results, one verdict
+  await play(H, G, ship, 60 * 12, () => H.run('!!PVP.ref.verdict') && G.run('!!PVP.ref.verdict'));
+  const vh = H.run('PVP.ref.verdict'), vg = G.run('PVP.ref.verdict');
+  ok(vh && vg && vh.v === 'played' && vg.v === 'played' && vh.winner === last.winner && vh.score.join() === last.score.join(),
+     'the referee: the result stands, as both saw it', [vh, vg, last.winner, last.score]);
+  const held = envPvp.MATCH.instances.get(H.run('PVP.ref.id')).data.get('m');
+  ok(held.mismatch === null && held.sides.every(sd => sd.order.length >= 20 && !sd.parted),
+     'having compared a fingerprint a second from each, and found them the same', held.sides.map(sd => sd.order.length));
+  const row = matchRows().find(x => x.id === H.run('PVP.ref.id'));
+  ok(row && row.verdict === 'played' && row.queue === 'friend' && row.a === DUELIST.id && row.b === RIVAL_ACCT.id
+     && row.a_pilot === 'hacker' && row.b_pilot === 'ember' && row.winner === last.winner
+     && row.score_a === last.score[0] && row.score_b === last.score[1] && row.best_of === 3,
+     'recorded: who played whom, flying what, and how it went', row);
+  ok(roomOf(H).__q['.note'].textContent === 'best of 3  ·  recorded' && roomOf(G).__q['.note'].textContent === 'best of 3  ·  recorded',
+     'and both screens say so', [roomOf(H).__q['.note'].textContent, roomOf(G).__q['.note'].textContent]);
 
   // the result: the room says who won, and by how much
   const won = last.winner === 0;
@@ -357,7 +429,6 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(roomOf(H).__q['.line'].textContent === `DUELIST  ${last.score[0]} — ${last.score[1]}  RIVAL`
      && roomOf(G).__q['.line'].textContent === `RIVAL  ${last.score[1]} — ${last.score[0]}  DUELIST`, 'with the score, each from its own side',
      [roomOf(H).__q['.line'].textContent, roomOf(G).__q['.line'].textContent]);
-  ok(roomOf(H).__q['.note'].textContent === 'best of 3', 'and the length', roomOf(H).__q['.note'].textContent);
 
   /* The rules on their own, on the host's copy, now that the two have been
      compared: a round put back on, both pilots fresh. */
@@ -478,15 +549,15 @@ section('a match left part way');
 {
   // THE VAGRANT, whose upgrades are levels and gear, against VOIDRUNNER: no HACKER, even odds
   const VAG = Object.assign({}, ME, { loadouts: { ranked: ME.loadouts.ranked, casual: { pilots: ['runner', 'melee'], awake: [], ups: [] } } });
-  const H = boot({ mode: 'match', role: 'host', pilot: 'melee', me: VAG });
-  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'runner', me: RIVAL });
+  const H = boot({ mode: 'match', role: 'host', pilot: 'melee', me: VAG }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'runner', me: RIVAL }, RIVAL_ACCT);
   await flush();
   const ship = link(H, G);
   H.run('PVP.frame()'); ship(H, G);
   for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
   ok(H.run('pilotP(0).charId') === 'melee' && G.run('pilotP(0).charId') === 'melee', 'THE VAGRANT, on both');
   let threw = null;
-  try { play(H, G, ship, 60 * 120, () => H.run('RUN.pvp && RUN.pvp.round >= 1 && RUN.pvp.phase === "fight" && RUN.pvp.t > 6')); }
+  try { await play(H, G, ship, 60 * 120, () => H.run('RUN.pvp && RUN.pvp.round >= 1 && RUN.pvp.phase === "fight" && RUN.pvp.t > 6')); }
   catch (e) { threw = e; }
   ok(!threw, 'into the first round without an error', String(threw && threw.stack));
   const belt = H.run('__log.belt');
@@ -502,6 +573,21 @@ section('a match left part way');
   ok(H.run('state') === 'pvp' && roomOf(H).__q['.line'].textContent === 'Your opponent left.', 'the host: the match is over, and why', roomOf(H).__q['.line'].textContent);
   ok(H.run('PILOTS.length') <= 1 && !H.run('LS.on'), 'its lockstep and the second pilot gone', [H.run('PILOTS.length'), H.run('LS.on')]);
   ok(G.win.location.href === '/', 'the one who quit is back in the lobby', G.win.location.href);
+  ok(G.run('PVP.ref.done') === true, 'and says nothing more to the referee');
+
+  /* The host stays, alone. The guest said it quit on its way out, so the
+     host's next report hears the verdict: no grace to wait out (the Match
+     object's clock is left where it is). */
+  const id = H.run('PVP.ref.id');
+  for (let i = 0; i < 60 * 12 && !H.run('!!PVP.ref.verdict'); i++) {
+    H.run('__wall += 1000 / 60; update(1 / 60); PVP.frame()');
+    if (i % 30 === 0) await settle();
+  }
+  const v = H.run('PVP.ref.verdict');
+  ok(v && v.v === 'forfeit' && v.winner === 0, 'the referee: the guest forfeits, at once', v);
+  const row = matchRows().find(x => x.id === id);
+  ok(row && row.verdict === 'forfeit' && row.reason === 'quit' && row.winner === 0 && row.a_pilot === 'melee' && row.b_pilot === 'runner', 'recorded as a quit', row);
+  ok(roomOf(H).__q['.note'].textContent === 'a win by forfeit  ·  recorded', 'and the host is told', roomOf(H).__q['.note'].textContent);
 }
 
 section('arriving without the lobby');
