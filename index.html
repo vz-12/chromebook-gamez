@@ -24730,7 +24730,8 @@ function roninExecEndFx(x) {
    (lifted from ronin-v-art/): the grave, the vow on the hull, the cut-in, the
    vow's Z, X and C, and SKY CLEAR; and RONIN's own drawRoninUnder,
    drawRoninHull and vraKatana take the vow's look (their lines marked V).
-   The HUD hooks and the other fx hooks here are still placeholders.
+   The HUD hooks have their art too (V: the HUD, just below); the other fx
+   hooks here are still placeholders.
 
    Called from:
      drawRoninGrave()                 world, floor layer (each pilot's pass): the grave marker
@@ -24782,77 +24783,280 @@ function roninExecEndFx(x) {
 let RKV = { beginAt: -9, cutAt: -9, hitAt: -9, hitTextAt: -9, undeadAt: -9 };
 const RKV_RED = '#dc2626', RKV_STONE = '#57534e', RKV_BONE = '#e7e5e4';
 
-// the V key: dark until his health is low enough, red while the vow is up
+/* ------------------------------ V: the HUD (art) ------------------------------
+   The vow's HUD in the vow art's language (crimson, bone, ash, and a seal for
+   each name), sized to sit in RONIN's own column under its clock.
+     drawRoninVowKey      V in RONIN's key row. Dark while he is too well, with
+                          a sliver filling toward the 30% line as his health
+                          falls. Lit, it beats like a heart. Through the cut-in
+                          it is white-hot; through the vow it burns down like
+                          incense, an ember at its edge; through SKY CLEAR it
+                          shows 天晴. In a duel it is struck through.
+     drawRoninVowHud      the vow: a 誓 seal and an incense stick for its clock,
+                          the ember eating toward the end (SKY CLEAR: a 天晴
+                          seal, its eight dashes as pips and the cut as a
+                          diamond). Under it the grave: its post, its health
+                          with a ghost of what it just lost, a flash and a
+                          shiver when it is hit, crimson and beating under
+                          30%, gold while it is sealed.
+     drawRoninBrokenHud   the broken minute, in ash: the post snapped, the
+                          minute burning out, and what it costs him.
+   Its own state is RKV.hud (the grave's ghost), art only.
+------------------------------------------------------------------------------- */
+const RKV_ASH = '#78716c';
+// a heartbeat: lub-dub, once a period; 0 to 1
+function rkvHeart(t, period) {
+  const p = ((t % period) + period) % period / period;
+  const b = d => Math.exp(-(d * d) / 0.0018);
+  return Math.max(b(p), 0.6 * b(p - 0.19));
+}
+// a seal: a square of crimson (or ash) with its kanji in bone; w wide for two characters
+function rkvSeal(x, y, s, kj, fill, ink, a, w) {
+  const sw = w || s;
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y); ctx.lineTo(x + sw - 0.5, y + 0.6); ctx.lineTo(x + sw, y + s - 1);
+  ctx.lineTo(x + sw - 1.2, y + s); ctx.lineTo(x + 0.4, y + s - 0.4); ctx.lineTo(x, y + 1.2);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 ' + Math.round(s * 0.78) + 'px ' + VKZ_JP;
+  ctx.fillText(kj, x + sw / 2, y + s / 2 + 0.5);
+  ctx.restore();
+}
+// the grave post, small: a wooden post with a pointed head and a red cloth tied round it.
+// (x, y) is its foot; broken: snapped, its head fallen beside it
+function rkvPost(x, y, h, broken, a) {
+  ctx.save();
+  ctx.globalAlpha *= a;
+  const w = 4, top = y - h;
+  ctx.fillStyle = broken ? '#57534e' : '#7c5a3c';
+  if (!broken) {
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y); ctx.lineTo(x - w / 2, top + 2); ctx.lineTo(x, top); ctx.lineTo(x + w / 2, top + 2); ctx.lineTo(x + w / 2, y);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = VKZ_CRIM; ctx.fillRect(x - w / 2 - 0.5, top + h * 0.32, w + 1, 2);
+    ctx.fillRect(x + w / 2, top + h * 0.32 + 1, 2.5, 1);              // the cloth's tail
+  } else {
+    const snap = y - h * 0.45;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y); ctx.lineTo(x - w / 2, snap); ctx.lineTo(x - 0.5, snap - 1.5); ctx.lineTo(x + 0.6, snap + 0.6);
+    ctx.lineTo(x + w / 2, snap - 1); ctx.lineTo(x + w / 2, y); ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.translate(x + 5, y - 1.5); ctx.rotate(1.25);    // the head, fallen
+    ctx.fillRect(-w / 2, -h * 0.5, w, h * 0.5);
+    ctx.fillStyle = rgba(RKV_ASH, 0.9); ctx.fillRect(-w / 2 - 0.5, -h * 0.32, w + 1, 1.6);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+// an incense stick burning down from the right: k of it left, its ember at the edge
+function rkvIncense(x, y, w, k, a, quick) {
+  const t = uiTime, e = x + w * clamp(k, 0, 1);
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.fillStyle = 'rgba(148,163,184,0.14)'; ctx.fillRect(x, y - 1.5, w, 3);          // where it was
+  ctx.fillStyle = rgba(RKV_ASH, 0.55);                                                  // the ash it left, broken off in flakes
+  for (let s = e + 2; s < x + w; s += 4) ctx.fillRect(s, y - 0.5, 2, 1);
+  const g = ctx.createLinearGradient(x, 0, e, 0);
+  g.addColorStop(0, rgba(VKZ_DEEP, 0.9)); g.addColorStop(1, rgba(VKZ_CRIM, 1));
+  ctx.fillStyle = g; ctx.fillRect(x, y - 1.5, Math.max(0, e - x), 3);
+  if (k > 0) {
+    const fl = 0.75 + 0.25 * Math.sin(t * (quick ? 31 : 17));
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(e, y, 9 + 3 * fl, VKZ_CRIM, 0.55 * fl);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = VKZ_HOT; ctx.fillRect(e - 1.5, y - 2, 3, 4);
+    ctx.fillStyle = VKZ_PALE; ctx.fillRect(e - 0.5, y - 1, 1.5, 2);
+    // a thread of smoke off the ember
+    ctx.strokeStyle = rgba('#d6d3d1', 0.22); ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let i = 0; i <= 8; i++) {
+      const u = i / 8, sx = e + Math.sin(t * 2.2 + u * 5) * 2.5 * u, sy = y - 2 - u * 9;
+      ctx[i ? 'lineTo' : 'moveTo'](sx, sy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// the V key: dark and filling toward the line; lit, a heartbeat; in the vow, incense
 function drawRoninVowKey(x, y, kw, kh) {
   const k = vowKey(), t = uiTime;
   ctx.save();
   ctx.textAlign = 'center';
-  if (k.on) {
-    const f = k.cut ? clamp(k.left / VOW_LEN, 0, 1) : 1;
+  ctx.fillStyle = 'rgba(5,6,10,0.88)'; roundRect(x, y, kw, kh, 3); ctx.fill();
+  let label = 'V', ink = '#475569', name = 'rgba(100,116,139,0.8)';
+  if (k.on && !k.cut) {                                // the cut-in: white-hot
+    const q = vowPhase(), h = q ? q.lead : 1;
+    ctx.fillStyle = rgba(VKZ_CRIM, 0.55 + 0.35 * h); roundRect(x, y, kw, kh, 3); ctx.fill();
+    ctx.fillStyle = rgba(VKZ_PALE, 0.5 * rkvHeart(t, 0.45)); roundRect(x, y, kw, kh, 3); ctx.fill();
+    ctx.shadowColor = rgba(VKZ_HOT, 1); ctx.shadowBlur = 14;
+    ctx.strokeStyle = VKZ_PALE; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ink = VKZ_VOID; name = rgba(VKZ_HOT, 1);
+  } else if (k.on) {
+    const sc = skyClearPhase();
     ctx.save(); roundRect(x, y, kw, kh, 3); ctx.clip();
-    ctx.fillStyle = rgba(RKV_RED, 0.35); ctx.fillRect(x, y, kw * f, kh);
+    if (sc) {                                          // SKY CLEAR: all of it at once
+      ctx.fillStyle = rgba(VKZ_CRIM, 0.8); ctx.fillRect(x, y, kw, kh);
+    } else {                                           // the vow: incense burning down to the left
+      const f = clamp(k.left / VOW_LEN, 0, 1), e = x + kw * f, last = k.left < 5;
+      const beat = last ? rkvHeart(t, 0.5) : 0;
+      ctx.fillStyle = rgba(VKZ_DEEP, 0.95); ctx.fillRect(x, y, kw * f, kh);
+      ctx.fillStyle = rgba(VKZ_CRIM, 0.55 + 0.4 * beat); ctx.fillRect(x, y + kh - 3, kw * f, 3);
+      ctx.fillStyle = rgba(VKZ_HOT, 0.9); ctx.fillRect(e - 1, y, 2, kh);
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(e, y + kh / 2, 10, VKZ_CRIM, 0.6);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     ctx.restore();
-    ctx.shadowColor = rgba(RKV_RED, 0.8); ctx.shadowBlur = 8;
-    ctx.strokeStyle = RKV_RED; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    ctx.shadowColor = rgba(VKZ_CRIM, 0.9); ctx.shadowBlur = 8;
+    ctx.strokeStyle = VKZ_HOT; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
     ctx.shadowBlur = 0;
-  } else if (k.lit) {
-    const beat = 0.5 + 0.5 * Math.sin(t * 5);
-    ctx.fillStyle = rgba(RKV_RED, 0.18 + 0.2 * beat); roundRect(x, y, kw, kh, 3); ctx.fill();
-    ctx.shadowColor = rgba(RKV_RED, 0.9); ctx.shadowBlur = 6 + 8 * beat;
-    ctx.strokeStyle = RKV_RED; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    if (sc) label = '';
+    else label = k.left >= 10 ? Math.ceil(k.left) + '' : k.left.toFixed(1);
+    ink = VKZ_BONE; name = rgba(VKZ_HOT, 1);
+    if (sc) {
+      ctx.font = '900 9px ' + VKZ_JP; ctx.textBaseline = 'middle'; ctx.fillStyle = VKZ_BONE;
+      ctx.fillText('天晴', x + kw / 2, y + kh / 2 + 0.5); ctx.textBaseline = 'alphabetic';
+    }
+  } else if (k.lit) {                                  // ready: it beats
+    const b = rkvHeart(t, 0.9), p = ((t % 0.9) / 0.9);
+    ctx.fillStyle = rgba(VKZ_CRIM, 0.28 + 0.5 * b); roundRect(x, y, kw, kh, 3); ctx.fill();
+    ctx.shadowColor = rgba(VKZ_CRIM, 1); ctx.shadowBlur = 6 + 10 * b;
+    ctx.strokeStyle = VKZ_HOT; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
     ctx.shadowBlur = 0;
-  } else {
-    ctx.strokeStyle = 'rgba(148,163,184,0.3)'; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    if (p < 0.5) {                                     // the beat goes out from it
+      const q = p / 0.5, gr = 8 * vraOut(q);
+      ctx.strokeStyle = rgba(VKZ_HOT, 0.7 * (1 - q)); ctx.lineWidth = 1;
+      roundRect(x - gr, y - gr, kw + gr * 2, kh + gr * 2, 3 + gr); ctx.stroke();
+    }
+    ctx.fillStyle = rgba(VKZ_PALE, 0.35); ctx.fillRect(x + 3, y + 1.5, kw - 6, 0.8);
+    ink = VKZ_BONE; name = rgba(VKZ_HOT, 0.95);
+  } else {                                             // out of reach
+    ctx.strokeStyle = 'rgba(148,163,184,0.28)'; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    if (k.why === 'LOW HEALTH ONLY') {                 // how near the line he is: it fills as he falls
+      const f = clamp((1 - P.hp / P.maxHp) / (1 - VOW_HP), 0, 1);
+      ctx.save(); roundRect(x, y, kw, kh, 3); ctx.clip();
+      ctx.fillStyle = rgba(VKZ_DEEP, 0.85); ctx.fillRect(x, y + kh - 3, kw * f, 3);
+      ctx.fillStyle = rgba(VKZ_CRIM, 0.8); ctx.fillRect(x + kw * f - 1, y + kh - 3, 1, 3);
+      ctx.restore();
+    } else {                                           // spent, or a duel: struck through
+      ctx.strokeStyle = rgba(RKV_ASH, 0.7); ctx.beginPath(); ctx.moveTo(x + 4, y + kh - 3); ctx.lineTo(x + kw - 4, y + 3); ctx.stroke();
+    }
   }
-  ctx.font = "700 9px " + VRA_DISP;
-  ctx.fillStyle = k.on ? RKV_BONE : k.lit ? VRA_IVORY : '#475569';
-  ctx.fillText(k.on && k.cut ? (k.left >= 10 ? Math.ceil(k.left) + '' : k.left.toFixed(1)) : 'V', x + kw / 2, y + kh - 4);
+  if (label) {
+    ctx.font = "700 9px " + VRA_DISP;
+    ctx.fillStyle = ink;
+    ctx.fillText(label, x + kw / 2, y + kh - 4);
+  }
   ctx.font = "700 7px " + VRA_FONT; ctx.letterSpacing = '0.08em';
-  ctx.fillStyle = k.on || k.lit ? rgba(RKV_RED, 0.95) : 'rgba(100,116,139,0.8)';
+  ctx.fillStyle = name;
   ctx.fillText('VOW', x + kw / 2, y + kh + 9);
   ctx.letterSpacing = '0em';
   ctx.restore();
 }
 
-// while the vow is up: its clock, then the grave's health
+// while the vow is up: its clock (or SKY CLEAR's dashes), then the grave
 function drawRoninVowHud(pad, bw, ly) {
-  const q = vowPhase(), g = P.roninGrave;
+  const q = vowPhase(), g = P.roninGrave, t = uiTime;
   if (!q) return ly;
+  const bx = pad + 56, bl = 78;                        // under RONIN's own bar
+  const hs = RKV.hud || (RKV.hud = { ghost: 1, at: -9, last: 1, for: -1 });
   ctx.save();
-  ctx.font = '700 10px ' + VRA_DISP; ctx.letterSpacing = '0.16em';
-  ctx.fillStyle = RKV_RED; ctx.shadowColor = rgba(RKV_RED, 0.6); ctx.shadowBlur = 6;
-  ctx.fillText(q.sky ? 'SKY CLEAR' : 'LAST VOW', pad, ly);
-  ctx.shadowBlur = 0; ctx.letterSpacing = '0em';
-  const bx = pad + 78, bl = 60, k = q.cut ? clamp(q.left / VOW_LEN, 0, 1) : 1;
-  ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(bx, ly - 3, bl, 5, 1.5); ctx.fill();
-  ctx.fillStyle = RKV_RED; roundRect(bx, ly - 3, Math.max(2, bl * k), 5, 1.5); ctx.fill();
-  ctx.fillText(Math.ceil(q.left) + 's', bx + bl + 6, ly);
-  ly += 15;
-  if (g) {
-    const gk = clamp(g.hp / g.maxHp, 0, 1);
-    ctx.font = '700 9px ' + VRA_FONT; ctx.letterSpacing = '0.14em';
-    ctx.fillStyle = rgba(RKV_BONE, 0.85); ctx.fillText('GRAVE', pad, ly);
+  ctx.textBaseline = 'alphabetic';
+  // row one: the vow
+  const sc = skyClearPhase();
+  if (sc) {
+    rkvSeal(pad, ly - 9, 11, '天晴', VKZ_CRIM, VKZ_BONE, 1, 22);
+    ctx.font = '700 8px ' + VRA_DISP; ctx.letterSpacing = '0.12em';
+    ctx.fillStyle = rgba(VKZ_PALE, 0.9); ctx.fillText('CLEAR', pad + 25, ly);
     ctx.letterSpacing = '0em';
-    ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(bx, ly - 3, bl, 5, 1.5); ctx.fill();
-    ctx.fillStyle = gk < 0.3 ? RKV_RED : RKV_BONE; roundRect(bx, ly - 3, Math.max(2, bl * gk), 5, 1.5); ctx.fill();
-    ctx.fillText(Math.ceil(gk * 100) + '%', bx + bl + 6, ly);
+    const n = SC_DASHES, pw = 7, gap = (bl - 10 - n * pw) / n;
+    const done = sc.stage === 'rise' ? 0 : sc.stage === 'storm' ? sc.i : n;
+    for (let i = 0; i < n; i++) {
+      const px = bx + i * (pw + gap), lit = i < done;
+      ctx.fillStyle = lit ? VKZ_CRIM : 'rgba(148,163,184,0.18)'; ctx.fillRect(px, ly - 4, pw, 4);
+      if (lit) { ctx.fillStyle = rgba(VKZ_PALE, 0.7); ctx.fillRect(px, ly - 4, pw, 1); }
+    }
+    const cut = sc.stage === 'clear' || sc.stage === 'out', dx = bx + bl - 4;   // the cut, last
+    const ca = cut ? (sc.stage === 'clear' ? 0.5 + 0.5 * clamp(sc.st / SC_HOLD, 0, 1) : 1) : 0.2;
+    ctx.fillStyle = cut ? rgba(VKZ_PALE, ca) : 'rgba(148,163,184,0.25)';
+    ctx.beginPath(); ctx.moveTo(dx, ly - 7); ctx.lineTo(dx + 4, ly - 2); ctx.lineTo(dx, ly + 3); ctx.lineTo(dx - 4, ly - 2); ctx.closePath(); ctx.fill();
+  } else {
+    const lead = q.cut ? 1 : q.lead, k = q.cut ? clamp(q.left / VOW_LEN, 0, 1) : lead, last = q.cut && q.left < 5;
+    const beat = last ? rkvHeart(t, 0.5) : 0;
+    rkvSeal(pad, ly - 9, 11, '誓', VKZ_CRIM, VKZ_BONE, 1);
+    ctx.font = '700 10px ' + VRA_DISP; ctx.letterSpacing = '0.16em';
+    ctx.shadowColor = rgba(VKZ_CRIM, 0.7); ctx.shadowBlur = 6 + 8 * beat;
+    ctx.fillStyle = rgba(VKZ_HOT, 0.85 + 0.15 * beat); ctx.fillText('VOW', pad + 15, ly);
+    ctx.shadowBlur = 0; ctx.letterSpacing = '0em';
+    rkvIncense(bx, ly - 2, bl, k, 1, last);
+    ctx.font = '700 10px ' + VRA_DISP;
+    ctx.fillStyle = rgba(VKZ_HOT, 0.85 + 0.15 * beat);
+    ctx.fillText(q.cut ? Math.ceil(q.left) + 's' : '', bx + bl + 6, ly);
+  }
+  ly += 15;
+  // row two: the grave
+  if (g) {
+    const k = clamp(g.hp / g.maxHp, 0, 1);
+    if (hs.for !== RKV.beginAt) { hs.for = RKV.beginAt; hs.ghost = k; hs.last = k; }
+    const dt = clamp(t - (hs.t || t), 0, 0.1); hs.t = t;
+    if (k < hs.last) hs.at = t;                          // just lost some: the ghost holds a moment, then follows
+    hs.last = k;
+    if (hs.ghost < k) hs.ghost = k;
+    else if (t - hs.at > 0.35) hs.ghost = Math.max(k, hs.ghost - 0.6 * dt);
+    const hit = clamp(1 - (t - RKV.hitAt) / 0.25, 0, 1), low = k < 0.3, lb = low ? rkvHeart(t, 0.7) : 0;
+    const sx = hit > 0 ? Math.sin(t * 90) * 1.4 * hit : 0;
+    rkvPost(pad + 5 + sx, ly + 2, 12, false, 1);
+    ctx.font = '700 9px ' + VRA_FONT; ctx.letterSpacing = '0.14em';
+    ctx.fillStyle = low ? rgba(VKZ_HOT, 0.75 + 0.25 * lb) : rgba(VKZ_BONE, 0.85);
+    ctx.fillText('GRAVE', pad + 13, ly);
+    ctx.letterSpacing = '0em';
+    const by = ly - 4, bh = 5, x0 = bx + sx;
+    ctx.fillStyle = 'rgba(148,163,184,0.16)'; roundRect(x0, by, bl, bh, 1.5); ctx.fill();
+    ctx.fillStyle = rgba(VKZ_PALE, 0.55); roundRect(x0, by, Math.max(0, bl * hs.ghost), bh, 1.5); ctx.fill();   // what it just lost
+    ctx.fillStyle = low ? rgba(VKZ_CRIM, 0.75 + 0.25 * lb) : '#d6c7b0';
+    roundRect(x0, by, Math.max(1.5, bl * k), bh, 1.5); ctx.fill();
+    if (!low) { ctx.fillStyle = rgba('#7c5a3c', 0.6); for (let s = x0 + 7; s < x0 + bl * k - 2; s += 9) ctx.fillRect(s, by, 1, bh); }   // the grain of the post
+    if (hit > 0) { ctx.fillStyle = rgba('#ffffff', 0.7 * hit); roundRect(x0, by, Math.max(1.5, bl * k), bh, 1.5); ctx.fill(); }
+    if (g.sealed) {                                    // can't be hit: gold round it
+      ctx.shadowColor = rgba(VRA_GOLD, 0.8); ctx.shadowBlur = 6;
+      ctx.strokeStyle = rgba(VRA_GOLD, 0.9); ctx.lineWidth = 1; roundRect(x0 - 1.5, by - 1.5, bl + 3, bh + 3, 2.5); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    ctx.font = '700 9px ' + VRA_FONT;
+    ctx.fillStyle = low ? rgba(VKZ_HOT, 0.8 + 0.2 * lb) : rgba(VKZ_BONE, 0.85);
+    ctx.fillText(Math.ceil(k * 100) + '%', bx + bl + 6, ly);
     ly += 15;
   }
   ctx.restore();
   return ly + 2;
 }
 
-// the minute after the grave broke
+// the minute after the grave broke: ash, the post snapped, the minute burning out
 function drawRoninBrokenHud(pad, bw, ly) {
+  const bx = pad + 56, bl = 78, k = clamp(P.roninBroken / VOW_BROKEN_T, 0, 1), t = uiTime;
   ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  rkvPost(pad + 5, ly + 2, 12, true, 1);
   ctx.font = '700 10px ' + VRA_DISP; ctx.letterSpacing = '0.16em';
-  ctx.fillStyle = rgba(RKV_RED, 0.55 + 0.25 * Math.sin(uiTime * 3));
-  ctx.fillText('BROKEN', pad, ly);
+  ctx.fillStyle = rgba('#a8a29e', 0.75 + 0.15 * Math.sin(t * 2));
+  ctx.fillText('BROKEN', pad + 13, ly);
   ctx.letterSpacing = '0em';
-  ctx.fillStyle = 'rgba(168,162,158,0.9)';
-  ctx.fillText(Math.ceil(P.roninBroken) + 's · HALF DAMAGE · HURT MORE', pad + 64, ly);
+  ctx.fillStyle = 'rgba(148,163,184,0.14)'; roundRect(bx, ly - 4, bl, 4, 1.5); ctx.fill();
+  ctx.fillStyle = rgba(RKV_ASH, 0.85); roundRect(bx, ly - 4, Math.max(1.5, bl * k), 4, 1.5); ctx.fill();
+  ctx.fillStyle = rgba(VKZ_CRIM, 0.6); ctx.fillRect(bx + bl * k - 1, ly - 4, 1, 4);   // a last coal at its edge
+  ctx.font = '700 10px ' + VRA_DISP; ctx.fillStyle = 'rgba(168,162,158,0.9)';
+  ctx.fillText(Math.ceil(P.roninBroken) + 's', bx + bl + 6, ly);
+  ly += 12;
+  ctx.font = '600 7px ' + VRA_FONT; ctx.letterSpacing = '0.12em';
+  ctx.fillStyle = 'rgba(168,162,158,0.7)';
+  ctx.fillText('HALF DAMAGE  ·  HURT MORE', pad + 13, ly);
+  ctx.letterSpacing = '0em';
   ctx.restore();
-  return ly + 17;
+  return ly + 12;
 }
 
 function roninVowFx(V, g) {
