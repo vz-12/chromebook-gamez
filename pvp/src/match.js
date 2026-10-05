@@ -16,6 +16,7 @@
 import { sessionOf, originOk, newId } from '../../src/auth.js';
 import { PILOTS } from './rules.js';
 import { limited, tooMany } from './limits.js';
+import { isHidden, mayFly } from './hidden.js';
 
 const MAX_BODY = 16 * 1024;
 const reply = (body, status = 200) =>
@@ -38,18 +39,20 @@ export default async function match(req, env) {
   if (!env.MATCH) return reply({ error: 'no referee: bind the Match object as MATCH' }, 503);
 
   const who = { acct: s.account.id, name: s.account.display };
-  const pilot = typeof b.pilot === 'string' && Object.prototype.hasOwnProperty.call(PILOTS, b.pilot) ? b.pilot : null;
+  // one of the game's pilots, or a hidden one this account holds (hidden.js)
+  const pilot = typeof b.pilot === 'string' && (Object.prototype.hasOwnProperty.call(PILOTS, b.pilot) ||
+    (isHidden(b.pilot) && await mayFly(env.DB, s.account, b.pilot))) ? b.pilot : null;
   let id, body;
   if (b.op === 'open') {
     if (b.kind !== 'friend') return reply({ error: 'only a friend\'s match is opened by a player' }, 400);
     if (!pilot) return reply({ error: 'bad pilot' }, 400);
     id = newId();
-    body = Object.assign({ id, queue: 'friend', rated: false, pilot }, who);
+    body = Object.assign({ id, queue: 'friend', rated: false, pilot, hidden: isHidden(pilot) }, who);
   } else if (b.op === 'join') {
     if (!isId(b.id)) return reply({ error: 'bad id' }, 400);
     if (!pilot) return reply({ error: 'bad pilot' }, 400);
     id = b.id;
-    body = Object.assign({ pilot }, who);
+    body = Object.assign({ pilot, hidden: isHidden(pilot) }, who);
   } else if (b.op === 'report') {
     if (!isId(b.id)) return reply({ error: 'bad id' }, 400);
     id = b.id;

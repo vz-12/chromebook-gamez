@@ -27,6 +27,10 @@ export const LEAGUES = [
 // casual: everything the account has unlocked, awake included; a match with a friend is best of three
 export const CASUAL = { id: 'casual', n: 'CASUAL', pilots: 'own', awake: true, bestOf: 3 };
 
+/* A ranked match against a hidden pilot (hidden.js): its own rules, one long
+   duel, named for nobody. Never rated, never recorded (objects.js). */
+export const HIDDEN = { id: 'hidden', n: '???', pilots: 'own', awake: true, bestOf: 1 };
+
 /* The queues matchmaking runs (Phase 5 step 2), one Matchmaker each. Ranked
    is rated (Glicko-2, per season) and played by league; casual is neither,
    and flies whatever each player owns. Phase 6: who may enter (`entry`,

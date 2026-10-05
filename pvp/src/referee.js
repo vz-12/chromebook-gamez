@@ -50,7 +50,7 @@ export function cleanReport(b) {
   if (b.result !== undefined && b.result !== null) {
     const r = b.result;
     if (!r || (r.winner !== 0 && r.winner !== 1) || !Array.isArray(r.score) || r.score.length !== 2
-        || !int(r.score[0], 0, 9) || !int(r.score[1], 0, 9) || (r.bestOf !== 3 && r.bestOf !== 5)) return null;
+        || !int(r.score[0], 0, 9) || !int(r.score[1], 0, 9) || ![1, 3, 5].includes(r.bestOf)) return null;
     // a result must be one: the winner has the rounds to have won it
     const need = Math.ceil(r.bestOf / 2);
     if (r.score[r.winner] !== need || r.score[1 - r.winner] >= need) return null;

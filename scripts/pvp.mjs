@@ -21,7 +21,7 @@ const { pruneAuth } = await import('../src/auth.js');
 const { loadout, LEAGUES, CASUAL } = await import('../pvp/src/rules.js');
 const { Match, Matchmaker, MM } = await import('../pvp/src/objects.js');
 const { seasonOf } = await import('../src/season.js');
-const { REF } = await import('../pvp/src/referee.js');
+const { REF, cleanReport } = await import('../pvp/src/referee.js');
 const { closeSeasons, seasonBefore, SOFT } = await import('../pvp/src/seasons.js');
 const { PODIUM_REWARDS, BADGE_REWARDS } = await import('../src/pvp-rewards.js');
 const { ratingOf, applyRating } = await import('../pvp/src/records.js');
@@ -324,8 +324,10 @@ section('the referee: a match, both sides, and what it comes to');
   ok((await rep(stranger, id, {})).status === 403, 'nor can a stranger report on it');
   for (const bad of [{ fps: 'x' }, { fps: [[0, 1]] }, { fps: Array(61).fill([0, 1, 1]) },
                      { result: { winner: 0, score: [1, 2], bestOf: 3 } }, { result: { winner: 1, score: [0, 3], bestOf: 3 } },
-                     { result: { winner: 0, score: [2, 0], bestOf: 4 } }])
+                     { result: { winner: 0, score: [2, 0], bestOf: 4 } }, { result: { winner: 0, score: [2, 0], bestOf: 1 } }])
     ok((await rep(duel, id, bad)).status === 400, 'a malformed report is refused: ' + JSON.stringify(bad).slice(0, 50));
+  // one long round against a hidden pilot in ranked (rules.js, HIDDEN)
+  ok((cleanReport({ result: { winner: 1, score: [0, 1], bestOf: 1 } }) || {}).result?.bestOf === 1, 'a one-round match\'s result is a result');
   for (let t = 0; t < 4; t++) {
     later(5000);
     const a = await rep(duel, id, { fps: fps(t * 300, t * 300 + 299), tick: t * 300 + 299 });

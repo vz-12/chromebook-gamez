@@ -379,6 +379,7 @@ and put them from there:
 
 ```sh
 npm run vault -- put <id> <file> --remote  # a new revision; the page re-fetches it by its hash
+                                           #   (--name NAME: what its holders see it called)
 npm run vault -- give <account> <id> --remote
 npm run vault -- list --remote             # also: drop, take, who, hash
 npm run test:vault                         # a few seconds: the store and the route
@@ -387,6 +388,19 @@ npm run test:outside                       # a few seconds: the loader, in the g
 
 Without `--remote` (or `--local` for `npm run dev`'s database) it only prints
 what it would do. `src/vault.js` explains how an entry is stored.
+
+In PvP an outside pilot is a hidden pilot (`pvp/src/hidden.js`). Its holders
+can fly it in a friend's match, by code, or in ranked, where it is paired with
+the season's #1 and nobody else, for one long round. It never goes in casual,
+and its matches are never rated or recorded. Its opponent's machine fetches it
+from `GET /api/pvp/pilot`, naming the match, and both machines check they run
+the same text before the match starts. It may bring its own duel caps
+(`def.duel`, read by `pvp/site/js/duel.js`). To fly a real one through the PvP
+engine test in place of the stand-in:
+
+```sh
+node scripts/pvp-engine.mjs --outside path/to/module.js
+```
 
 ## Ads
 

@@ -15,7 +15,7 @@
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
 import { START, rateMatch } from './glicko.js';
-import { leagueOf } from './rules.js';
+import { leagueOf, PLACEMENTS } from './rules.js';
 import { carried } from './seasons.js';
 
 const SCHEMA = [
@@ -87,6 +87,16 @@ export async function ratingOf(db, acct, queue, season = seasonOf()) {
   const row = await db.prepare('SELECT rating, rd, vol, games, wins, losses, league FROM pvp_ratings WHERE account = ?1 AND queue = ?2 AND season = ?3')
     .bind(acct, queue, season).first();
   return row || carried(db, acct, queue, season);
+}
+
+/* The account at the top of a queue's ladder this season: the highest
+   rating among the placed (PLACEMENTS played), the earliest there on a tie.
+   Null while nobody is placed. A hidden pilot is paired with it (objects.js). */
+export async function topOf(db, queue, season = seasonOf()) {
+  await ensurePvp(db);
+  const row = await db.prepare('SELECT account FROM pvp_ratings WHERE queue = ?1 AND season = ?2 AND games >= ?3 ORDER BY rating DESC, updated ASC LIMIT 1')
+    .bind(queue, season, PLACEMENTS).first();
+  return row ? row.account : null;
 }
 
 /* A recorded match's ratings, once: both players rated from their ratings

@@ -16,8 +16,8 @@
    two reports at once can never each write over the other.
    ========================================================================= */
 import { REF, cleanReport, newSide, take, decide, nextLook, recorded } from './referee.js';
-import { recordMatch, applyRating } from './records.js';
-import { QUEUES, CASUAL, lowerLeague } from './rules.js';
+import { recordMatch, applyRating, topOf } from './records.js';
+import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -63,7 +63,7 @@ export class Match extends Serial {
     if (op === 'open') {
       if (m) return reply({ error: 'that match exists' }, 409);
       m = { v: 1, id: b.id, queue: b.queue, rated: !!b.rated, league: b.league || null, created: now, started: 0,
-            sides: [newSide(b.acct, b.name, b.pilot, now)], mismatch: null, verdict: null, code: null };
+            sides: [newSide(b.acct, b.name, b.pilot, now)], mismatch: null, verdict: null, code: null, hidden: !!b.hidden };
       return this.save(m, now, view(m, 0));
     }
     /* A queued match, from its Matchmaker: both sides at once, so it starts
@@ -75,7 +75,7 @@ export class Match extends Serial {
       if (!a || !c) return reply({ error: 'two sides' }, 400);
       m = { v: 1, id: b.id, queue: b.queue, rated: !!b.rated, league: b.league || null, created: now, started: now,
             sides: [newSide(a.acct, a.name, a.pilot, now), newSide(c.acct, c.name, c.pilot, now)],
-            mismatch: null, verdict: null, code: null };
+            mismatch: null, verdict: null, code: null, hidden: !!b.hidden };
       return this.save(m, now, { ok: true, id: m.id });
     }
     if (!m || m.verdict && m.verdict.v === 'expired') return reply({ error: 'no such match' }, 404);
@@ -86,6 +86,7 @@ export class Match extends Serial {
       if (m.sides[1]) return reply({ error: 'that match is full' }, 409);
       if (m.verdict) return reply({ error: 'that match is over' }, 409);
       m.sides[1] = newSide(b.acct, b.name, b.pilot, now);
+      m.hidden = m.hidden || !!b.hidden;    // a hidden pilot on either side (hidden.js)
       m.started = now;
       m.sides[0].seen = now;          // the host has been in its waiting room: its clock starts now
       return this.save(m, now, view(m, 1));
@@ -97,6 +98,13 @@ export class Match extends Serial {
       if (!rep) return reply({ error: 'bad report' }, 400);
       if (!m.verdict) take(m, side, rep, now);
       return this.save(m, now, null, side);
+    }
+    /* Who the other side flies, for the Worker handing a hidden pilot's code
+       to its opponent (hidden.js). Only the Worker asks this. */
+    if (op === 'peer') {
+      if (side < 0) return reply({ error: 'not your match' }, 403);
+      const other = m.sides[1 - side];
+      return reply({ ok: true, side, peerPilot: other ? other.pilot : null });
     }
     /* A queued match's room: the host opens one and leaves its code here,
        and the guest asks for it, so nobody types a code. */
@@ -132,6 +140,10 @@ export class Match extends Serial {
     const d = decide(m, now);
     if (d) m.verdict = Object.assign({ at: now }, d);
     const v = m.verdict;
+    /* A match with a hidden pilot in it is decided like any other, for the
+       result screen, and written nowhere: no ladder, profile or history
+       shows it to anyone (hidden.js). It counts as written, so nothing waits on it. */
+    if (v && m.hidden) { v.written = true; v.rated = true; }
     if (v && recorded(v.v) && !v.written) {
       try { await recordMatch(this.env.DB, m, v); v.written = true; }
       catch (e) { console.error('pvp record', m.id, e && e.message); }
@@ -245,6 +257,17 @@ export class Matchmaker extends Serial {
   async pair(q, now) {
     const queue = q.queue, open = q.tickets.filter(t => !t.match).sort((a, b) => a.since - b.since);
     const taken = new Set(), pairs = [];
+    /* A hidden pilot's ticket (hidden.js) is paired with the season's #1 and
+       nobody else, before anybody else is paired: never across any window,
+       never with another hidden one. */
+    const hiddenT = open.filter(t => t.hidden);
+    if (hiddenT.length) {
+      const top = await topOf(this.env.DB, queue).catch(() => null);
+      const one = top && open.find(u => !u.hidden && u.acct === top);
+      const t = hiddenT[0];
+      if (one && one.acct !== t.acct) { taken.add(t); taken.add(one); pairs.push([t, one]); }
+      for (const h of hiddenT) taken.add(h);              // the rest wait, and nobody else is theirs
+    }
     for (const t of open) {
       if (taken.has(t)) continue;
       const room = windowOf(queue, now - t.since);
@@ -257,11 +280,12 @@ export class Matchmaker extends Serial {
       if (best) { taken.add(t); taken.add(best); pairs.push([t, best]); }
     }
     for (const [t, u] of pairs) {
-      const def = QUEUES[queue];
-      const rule = def.leagues ? lowerLeague(t.league, u.league) : CASUAL;
+      const def = QUEUES[queue], hidden = !!(t.hidden || u.hidden);
+      // a hidden pilot's match: its own rules, unrated (rules.js, HIDDEN)
+      const rule = hidden ? HIDDEN : def.leagues ? lowerLeague(t.league, u.league) : CASUAL;
       const id = newId();
       const res = await post(this.env.MATCH.get(this.env.MATCH.idFromName(id)), 'create', {
-        id, queue, rated: def.rated, league: def.leagues ? rule.id : null,
+        id, queue, rated: def.rated && !hidden, league: def.leagues ? rule.id : null, hidden,
         sides: [t, u].map(x => ({ acct: x.acct, name: x.name, pilot: x.pilot }))
       }).catch(e => { console.error('pvp match create', e && e.message); return null; });
       if (!res || !res.ok) continue;      // both wait on, and are tried again at the next beat
@@ -269,7 +293,7 @@ export class Matchmaker extends Serial {
       const sides = [t, u].map(x => ({ name: x.name, pilot: x.pilot, awake: !!x.awake, ups: x.ups || [] }));
       const league = { id: rule.id, n: rule.n, bestOf: rule.bestOf, pilots: rule.pilots, awake: rule.awake };
       for (const [side, x] of [[0, t], [1, u]]) {
-        x.match = { id, side, role: side ? 'guest' : 'host', queue, rated: def.rated, league, bestOf: rule.bestOf, sides };
+        x.match = { id, side, role: side ? 'guest' : 'host', queue, rated: def.rated && !hidden, league, bestOf: rule.bestOf, sides };
         x.at = now;
       }
     }

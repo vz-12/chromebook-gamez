@@ -23,7 +23,7 @@
              and who is fighting, from this player's side (the same fields
              PVP_ART.result gets):
                me, them   { name, pilot, pilotName, col, awake, bonus }
-               bestOf     3 or 5
+               bestOf     3 or 5 (1: one round, against a hidden pilot)
                queue      'ranked' | 'casual' | 'friend'
                league     { id, n } in ranked, else null
                rated      whether a rating moves
@@ -745,7 +745,7 @@
     num(g, String(r.score[0]), -18, 0, big, INK, 'right');
     text(g, '–', 0, -2, FONT(700, 40), FAINT);
     num(g, String(r.score[1]), 18, 0, big, 'rgba(241,245,249,0.7)', 'left');
-    text(g, 'BEST OF ' + (r.bestOf || 3), 0, 42, FONT(800, 11), DIM, 'center', 3);
+    text(g, r.bestOf === 1 ? 'ONE ROUND' : 'BEST OF ' + (r.bestOf || 3), 0, 42, FONT(800, 11), DIM, 'center', 3);
     g.restore();
   }
 
@@ -861,7 +861,7 @@
         : { label: d.rated ? 'RATED' : 'UNRATED', col: '#94a3b8' };
       const lw = chip(g, 0, 0, left.label, left.col, Object.assign({ measure: true }, left.o));
       chip(g, cx - 40 - lw, vy, left.label, left.col, left.o || {});
-      chip(g, cx + 40, vy, 'BEST OF ' + (d.bestOf || 3), '#e2e8f0', { fill: 'rgba(226,232,240,0.1)' });
+      chip(g, cx + 40, vy, d.bestOf === 1 ? 'ONE ROUND' : 'BEST OF ' + (d.bestOf || 3), '#e2e8f0', { fill: 'rgba(226,232,240,0.1)' });
       const vs = outBack((t - 0.25) / 0.5);
       g.save(); g.translate(cx, vy); g.scale(vs, vs);
       circle(g, 0, 0, 25); g.fillStyle = PINK; g.fill();

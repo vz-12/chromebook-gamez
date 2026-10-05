@@ -68,7 +68,8 @@
     peerHello(d);
     if (!M.hand || M.hand.role !== 'guest' || R.id || !d || typeof d.match !== 'string' || !/^[0-9a-f]{32}$/.test(d.match)) return;
     R.id = d.match;
-    api({ op: 'join', id: d.match, pilot: M.hand.pilot }).then(r => {
+    // kept, so whatever waits on this side being in the match can (mode.js: a hidden pilot's code)
+    R.joining = api({ op: 'join', id: d.match, pilot: M.hand.pilot }).then(r => {
       if (r && r.side === 1) R.side = 1;
       else R.id = null;                    // no referee for this one: it plays all the same
     });

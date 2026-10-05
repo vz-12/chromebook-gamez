@@ -24,6 +24,7 @@ import { ratingOf } from './records.js';
 import { START } from './glicko.js';
 import { limited, tooMany } from './limits.js';
 import { entryFor } from './gates.js';
+import { isHidden, mayFly } from './hidden.js';
 
 const MAX_BODY = 4 * 1024;
 const MAX_UPS = 64;
@@ -50,6 +51,17 @@ export default async function queue(req, env) {
   if (b.tab !== undefined && !(typeof b.tab === 'string' && /^[0-9a-f]{16}$/.test(b.tab))) return reply({ error: 'bad tab' }, 400);
   const body = { queue: b.queue, acct: s.account.id, tab: b.tab || null };
   if (b.op === 'join') {
+    /* A hidden pilot (hidden.js), for its holders, in ranked only: its ticket
+       waits for the season's #1, whoever else is queued (objects.js). */
+    if (isHidden(b.pilot)) {
+      if (!QUEUES[b.queue].leagues || !(await mayFly(env.DB, s.account, b.pilot))) return reply({ error: 'bad pilot' }, 400);
+      body.ticket = { name: s.account.display, pilot: b.pilot, awake: true, ups: [], rating: START.rating, league: 'hidden',
+                      bracket: 'hidden', hidden: true, region: 'XX' };
+      const mm = env.MATCHMAKER;
+      const res = await mm.get(mm.idFromName(b.queue)).fetch('https://do/join', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return reply(await res.json(), res.status);
+    }
     const pilot = typeof b.pilot === 'string' && Object.prototype.hasOwnProperty.call(PILOTS, b.pilot) ? b.pilot : null;
     if (!pilot) return reply({ error: 'bad pilot' }, 400);
     // the queue's gates (gates.js): a fresh account, say, waits for ranked

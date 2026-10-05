@@ -14,6 +14,8 @@
      /api/pvp/match   a match's referee: the Match object (match.js, objects.js)
      /api/pvp/queue   matchmaking: the Matchmaker object, one per queue (queue.js, objects.js)
      /api/pvp/flags   the referee's flags, for dev accounts to review (flags.js)
+     /api/pvp/pilot   a hidden pilot's code, to its holders and its opponents (hidden.js)
+     /api/vault       the game's vault, as the game has it (../../src/vault.js)
      everything else  pvp/site
 
    A daily cron (wrangler.jsonc) files each finished season's rewards: the
@@ -29,6 +31,8 @@ import turn from './turn.js';
 import match from './match.js';
 import queue from './queue.js';
 import flags from './flags.js';
+import pilot from './hidden.js';
+import vault from '../../src/vault.js';
 import { closeSeasons } from './seasons.js';
 
 export { Matchmaker, Match } from './objects.js';
@@ -40,7 +44,8 @@ const json = (body, status) =>
   });
 
 const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn,
-                 '/api/pvp/match': match, '/api/pvp/queue': queue, '/api/pvp/flags': flags };
+                 '/api/pvp/match': match, '/api/pvp/queue': queue, '/api/pvp/flags': flags,
+                 '/api/pvp/pilot': pilot, '/api/vault': vault };
 
 export default {
   async fetch(req, env) {

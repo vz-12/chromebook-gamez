@@ -51,11 +51,12 @@
   M.bonusOf = k => (k === pilotMine() ? ownBonus() : (M.peerBonus || 0));
   /* Best of three below gold, five from there: a ranked match plays to its
      league's length (the lower league's, when two meet), as the server's
-     match says, so both machines play the same match. A match with a friend,
-     or a casual one, is best of three. */
+     match says, so both machines play the same match; against a hidden pilot
+     it is one long round. A match with a friend, or a casual one, is best of
+     three. */
   M.bestOf = () => {
     const b = M.hand && M.hand.match && M.hand.match.bestOf;
-    return b === 5 ? 5 : 3;
+    return b === 5 || b === 1 ? b : 3;
   };
   const toWin = m => Math.ceil(m.bestOf / 2);
   // each pilot's player, by name, as this machine knows them
@@ -251,7 +252,7 @@
     ctx.fillStyle = '#5b6b82';
     ctx.fillText(who, x, pad + 31);
     const round = m.phase === 'picks' ? 'CHOOSING UPGRADES'
-      : 'ROUND ' + Math.max(1, m.round) + '   ·   FIRST TO ' + toWin(m)
+      : (m.bestOf === 1 ? 'ONE ROUND' : 'ROUND ' + Math.max(1, m.round) + '   ·   FIRST TO ' + toWin(m))
         + (m.phase === 'fight' ? '   ·   UPGRADE IN ' + Math.max(0, Math.ceil(m.nextPick - m.clock)) + 'S' : '');
     fitFont(round, rMax, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#94a3b8';

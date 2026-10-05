@@ -72,6 +72,7 @@
   }
 
   function render(d) {
+    const names = Object.assign({}, d.pilots);
     $('name').textContent = d.account.display;
     // their page on the game's leaderboard, at the address they came from (the school one, at school)
     $('profileLink').href = game() + '/leaderboard/#u/' + encodeURIComponent(d.account.name);
@@ -90,8 +91,14 @@
     $('rankedRule').textContent = 'Rated, in leagues. ' + (lg.provisional ? lg.left + ' placement match' + (lg.left === 1 ? '' : 'es') + ' to go. ' : '') +
       'Best of ' + lg.bestOf + ', ' + flies + '.';
     const { ranked, casual } = d.loadouts;
-    pilotList($('rankedPilot'), ranked, d.pilots);
-    pilotList($('casualPilot'), casual, d.pilots);
+    /* The hidden pilots this account holds (pvp/src/hidden.js): only ever in
+       this account's own reply, flown in a friend's match or in ranked, where
+       the server pairs them with the season's #1 and nobody else. */
+    const hidden = Array.isArray(d.hidden) ? d.hidden : [];
+    for (const h of hidden) names[h.id] = h.n || h.id;
+    const withHidden = lo => (hidden.length ? Object.assign({}, lo, { pilots: lo.pilots.concat(hidden.map(h => h.id)) }) : lo);
+    pilotList($('rankedPilot'), withHidden(ranked), names);
+    pilotList($('casualPilot'), casual, names);
     // a queue whose gates are shut (a fresh account, too few runs): said, and its button off
     for (const [q, btn] of [['ranked', 'playRanked'], ['casual', 'playCasual']]) {
       const g = (d.queues && d.queues[q]) || { open: true };
@@ -118,7 +125,7 @@
     }
     // a friend's match: any pilot owned
     me = d;
-    pilotList($('matchPilot'), casual, d.pilots);
+    pilotList($('matchPilot'), withHidden(casual), names);
     const ups = ranked.ups.length;
     $('ups').textContent = d.unlocks === null
       ? 'Your account has no save yet. Fly a run in VOIDRUNNER while signed in, and your unlocks arrive here.'
@@ -130,8 +137,21 @@
      needs for this tab: the mode, the pilot, a match's side and code, and
      the account as read here. pvp/site/js/mode.js takes it from there. */
   let me = null;
-  function play(hand) {
-    try { sessionStorage.setItem('vr_pvp_play', JSON.stringify(Object.assign({ me }, hand))); }
+  /* A hidden pilot flown from this tab: its code from the vault (the game's
+     /api/vault, served here too), handed to the play page, which boots sealed
+     and fetches nothing itself. Only ever this account's own. */
+  async function outsideFor(id) {
+    const h = me && Array.isArray(me.hidden) ? me.hidden.find(x => x.id === id) : null;
+    if (!h) return [];
+    const r = await fetch('/api/vault?id=' + encodeURIComponent(id) + '&h=' + encodeURIComponent(h.h || ''), { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('vault');
+    return [{ id, n: h.n, h: h.h, text: await r.text() }];
+  }
+  async function play(hand) {
+    let outside = [];
+    try { outside = await outsideFor(hand.match ? hand.match.sides[hand.match.side].pilot : hand.pilot); }
+    catch (e) { $('matchMsg').textContent = "COULDN'T LOAD THAT PILOT: TRY AGAIN"; return; }
+    try { sessionStorage.setItem('vr_pvp_play', JSON.stringify(Object.assign({ me, outside }, hand))); }
     catch (e) { $('matchMsg').textContent = "THIS BROWSER WON'T KEEP THE MATCH: TRY ANOTHER"; return; }
     location.href = '/play/';
   }
@@ -229,8 +249,8 @@
     $('searching').classList.add('found');
     $('searchWhat').textContent = 'MATCH FOUND';
     $('searchClock').textContent = '';
-    $('searchNote').textContent = 'Against ' + them.name + ', flying ' + ((me && me.pilots[them.pilot]) || them.pilot) +
-      (them.awake ? ' (awake)' : '') + '. ' + match.league.n + ', best of ' + match.bestOf + '.';
+    $('searchNote').textContent = 'Against ' + them.name + ', flying ' + ((me && me.pilots[them.pilot]) || '???') +
+      (them.awake ? ' (awake)' : '') + '. ' + match.league.n + ', ' + (match.bestOf === 1 ? 'one round' : 'best of ' + match.bestOf) + '.';
     $('cancel').hidden = true;
     setTimeout(() => play({ mode: 'match', role: match.role, queue, pilot: match.sides[match.side].pilot, match }), 1200);
   }

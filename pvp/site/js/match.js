@@ -201,8 +201,10 @@
     }
     if (!box) return;
     const m = typeof RUN !== 'undefined' && RUN.pvp;
-    const line = v.v === 'played' ? (m ? 'best of ' + m.bestOf + '  ·  ' : '') + 'recorded'
-      : v.v === 'forfeit' ? (v.winner === me ? 'a win by forfeit' : 'a loss by forfeit') + '  ·  recorded'
+    // a match with a hidden pilot in it is written nowhere (pvp/src/hidden.js)
+    const kept = ((CHARS[selectedChar] || {}).outside || (CHARS[MP.peerChar] || {}).outside) ? 'not recorded' : 'recorded';
+    const line = v.v === 'played' ? (m ? M.said(m.bestOf) + '  ·  ' : '') + kept
+      : v.v === 'forfeit' ? (v.winner === me ? 'a win by forfeit' : 'a loss by forfeit') + '  ·  ' + kept
       : v.v === 'void' ? 'no contest: the two games disagreed'
       : '';
     if (line) box.querySelector('.note').textContent = line;
@@ -221,7 +223,7 @@
      guest's ask for it, and what each sees meanwhile. False: stop here. */
   function queued(host) {
     if (Date.now() - armed > CONNECT) { noShow(); return false; }
-    const rule = (Q.league ? Q.league.n : 'CASUAL') + '  ·  best of ' + Q.bestOf;
+    const rule = (Q.league ? Q.league.n : 'CASUAL') + '  ·  ' + M.said(Q.bestOf);
     if (Net.phase === 'failed') { say('MATCH FOUND', '', 'Couldn\'t connect.', Net.note, true); return false; }
     if (host) {
       if (Net.code && Net.code !== codeSent && !codeBusy) {
@@ -276,7 +278,7 @@
     over = won ? 'won' : 'lost';
     show(over);
     say(won ? 'VICTORY' : 'DEFEAT', '', M.nameOf(me) + '  ' + m.score[me] + ' — ' + m.score[them] + '  ' + M.nameOf(them),
-        'best of ' + m.bestOf, false);
+        M.said(m.bestOf), false);
     M.ref.finish(m);
     told(M.ref.verdict);
   }

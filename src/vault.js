@@ -46,8 +46,12 @@ const SCHEMA = [
      parts    INTEGER NOT NULL,
      size     INTEGER NOT NULL,            -- bytes of the whole text
      hash     TEXT    NOT NULL,            -- sha-256 of the whole text, hex
-     updated  INTEGER NOT NULL)`
+     updated  INTEGER NOT NULL,
+     name     TEXT                         -- what its holders see it called (npm run vault -- put ... --name)
+   )`
 ];
+// columns added after the table first shipped, as src/auth.js does
+const ADDED = [['vault_heads', 'name', 'TEXT']];
 // the same tables, for scripts/vault.mjs to put ahead of its own SQL: one line each, comments out
 export const VAULT_SCHEMA = SCHEMA.map(s => s.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';').join('\n');
 
@@ -55,8 +59,16 @@ export const VAULT_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const PERK = id => 'vault:' + id;
 
 let ready = null;
-function ensureVault(db) {
-  if (!ready) ready = db.batch(SCHEMA.map(s => db.prepare(s))).catch(e => { ready = null; throw e; });
+export function ensureVault(db) {
+  if (!ready) ready = (async () => {
+    await db.batch(SCHEMA.map(s => db.prepare(s)));
+    for (const [table, col, type] of ADDED) {
+      const cols = ((await db.prepare(`PRAGMA table_info(${table})`).all()).results || []).map(r => r.name);
+      if (!cols.includes(col))
+        await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`).run()
+          .catch(e => { if (!/duplicate column/i.test(String(e && e.message))) throw e; });
+    }
+  })().catch(e => { ready = null; throw e; });
   return ready;
 }
 
@@ -64,22 +76,23 @@ function ensureVault(db) {
 export const vaultIds = perks => (Array.isArray(perks) ? perks : [])
   .filter(p => typeof p === 'string' && p.startsWith('vault:')).map(p => p.slice(6)).filter(id => VAULT_ID.test(id));
 
-/* What a signed-in account may load: [{ id, h, size }], only entries that
-   exist, or null when there is nothing (the reply then carries no field). */
+/* What a signed-in account may load: [{ id, h, size, n }] (n its name, for
+   its holders' eyes), only entries that exist, or null when there is nothing
+   (the reply then carries no field). */
 export async function vaultList(db, account) {
   const ids = vaultIds(account && account.perks);
   if (!ids.length) return null;
   await ensureVault(db);
-  const res = await db.prepare(`SELECT id, hash, size FROM vault_heads WHERE id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')}) ORDER BY id`)
+  const res = await db.prepare(`SELECT id, hash, size, name FROM vault_heads WHERE id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')}) ORDER BY id`)
     .bind(...ids).all();
-  const out = ((res && res.results) || []).map(r => ({ id: r.id, h: r.hash, size: r.size }));
+  const out = ((res && res.results) || []).map(r => Object.assign({ id: r.id, h: r.hash, size: r.size }, r.name ? { n: r.name } : {}));
   return out.length ? out : null;
 }
 
 /* One entry's text, put back together. Kept for as long as the isolate
    lives, per revision, so a page load costs two small reads, not the parts. */
 const cache = new Map();                 // id -> { rev, text }
-async function vaultText(db, id) {
+export async function vaultText(db, id) {
   await ensureVault(db);
   const head = await db.prepare('SELECT rev, parts, size, hash FROM vault_heads WHERE id = ?1').bind(id).first();
   if (!head) return null;
@@ -97,7 +110,7 @@ async function vaultText(db, id) {
   return { text, hash: head.hash };
 }
 
-const nothing = () => new Response(JSON.stringify({ error: 'not found' }), {
+export const nothing = () => new Response(JSON.stringify({ error: 'not found' }), {
   status: 404, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 export default async (req, env) => {

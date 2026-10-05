@@ -3,8 +3,9 @@
    THE VAULT, BY HAND — `npm run vault -- <command>`  (the store: src/vault.js)
 
      put <id> <file>          the file becomes the entry's text (a new revision;
-                              the page asks for it by its hash, so a changed file
-                              is fetched again and an unchanged one never is)
+         [--name NAME]        the page asks for it by its hash, so a changed file
+                              is fetched again and an unchanged one never is);
+                              NAME is what its holders see it called, nobody else
      list                     every entry: its revision, parts, size and hash
      drop <id>                the entry, gone
      give <account> <id>      the account may load the entry ('vault:<id>' perk)
@@ -29,7 +30,7 @@ import { putSql, listSql, headSql, dropSql, giveSql, takeSql, whoSql, accountSql
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
 const opt = f => { const i = args.indexOf(f); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v; };
-const REMOTE = flag('--remote'), LOCAL = flag('--local'), PERSIST = opt('--persist-to');
+const REMOTE = flag('--remote'), LOCAL = flag('--local'), PERSIST = opt('--persist-to'), NAME = opt('--name');
 const die = m => { console.error('vault: ' + m); process.exit(1); };
 const where = REMOTE ? ' (live)' : ' (local)';
 
@@ -71,7 +72,7 @@ try {
       checkId(a1);
       if (!a2) die('put <id> <file>');
       const bytes = readFileSync(a2);
-      const p = putSql(a1, bytes);
+      const p = putSql(a1, bytes, undefined, NAME);
       if (!live()) {
         console.log(`put ${a1}: ${bytes.length} bytes in ${p.parts} part${p.parts === 1 ? '' : 's'}, sha-256 ${p.hash}`);
         console.log('(nothing sent: add --remote for the live database, --local for wrangler dev\'s)');

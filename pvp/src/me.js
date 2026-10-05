@@ -12,6 +12,7 @@ import { sessionOf, sessionCookie, publicAccount } from '../../src/auth.js';
 import { PILOTS, CASUAL, loadout, leagueOf } from './rules.js';
 import { ratingOf } from './records.js';
 import { entryFor } from './gates.js';
+import { hiddenOf } from './hidden.js';
 
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -35,8 +36,10 @@ export default async function me(req, env) {
     const e = await entryFor(env.DB, s.account, q);
     queues[q] = { open: e.open, why: e.why };
   }
+  // the hidden pilots it may fly, only for whoever may (hidden.js): the field is missing for everybody else
+  const hidden = await hiddenOf(env.DB, s.account);
   // a session just extended takes its cookie again, as /api/account does
-  return reply({
+  return reply(Object.assign({
     account: publicAccount(s.account),
     unlocks, saved: row ? row.updated : null,
     league: { id: league.id, n: league.n, bestOf: league.bestOf, pilots: league.pilots, awake: league.awake,
@@ -45,5 +48,5 @@ export default async function me(req, env) {
     pilots: PILOTS,
     loadouts: { ranked: loadout(league, unlocks), casual: loadout(CASUAL, unlocks) },
     queues
-  }, 200, s.renew ? sessionCookie(req, s.token) : undefined);
+  }, hidden.length ? { hidden: hidden.map(h => ({ id: h.id, n: h.n || h.id, h: h.h })) } : {}), 200, s.renew ? sessionCookie(req, s.token) : undefined);
 }

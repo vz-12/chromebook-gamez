@@ -12,6 +12,11 @@
    from the handshake through the host's start to one of them leaving. Each
    engine talks to PvP's own Worker and its referee (the Match object) as its
    own signed-in player, on a SQLite D1, and the match ends recorded.
+
+     node scripts/pvp-engine.mjs [--outside path/to/module.js]
+
+   --outside flies the hidden-pilot duel with that module in place of the
+   tests' stand-in (OUTSIDE PILOTS), under whatever duel rules it brings.
    ========================================================================= */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -28,6 +33,7 @@ const { seasonOf } = await import('../src/season.js');
 const { ensureAuth, sha256 } = await import('../src/auth.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const OUTSIDE_ARG = (() => { const i = process.argv.indexOf('--outside'); return i >= 0 ? process.argv[i + 1] : null; })();
 const IDX = join(ROOT, 'index.html');
 const SITE = join(ROOT, 'pvp', 'site');
 
@@ -126,9 +132,11 @@ const DUELIST = signedIn('Duelist'), RIVAL_ACCT = signedIn('Rival');
 function referee(win, who) {
   const rec = win.fetch;
   win.fetch = (u, init = {}) => {
-    if (String(u) !== '/api/pvp/match') return rec(u, init);
-    win.__net.push('fetch /api/pvp/match');
-    return pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/match', {
+    // the referee, and a hidden pilot's code for the other side of its match (pvp/src/hidden.js)
+    const path = String(u);
+    if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?')) return rec(u, init);
+    win.__net.push('fetch ' + path);
+    return pvpWorker.fetch(new Request(PVP_ORIGIN + path, {
       method: init.method || 'GET', body: init.body,
       headers: Object.assign({}, init.headers, { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN }) }), envPvp);
   };
@@ -875,6 +883,122 @@ section('the art previews: /play/?preview=result and ?preview=belt');
   B.run('PVP.preview.at -= 7000; PVP.frame()');
   ok(B.run('Date.now() - PVP.preview.at') < 1000, 'and starts again once it has landed');
   ok(R.win.__net.length === 0 && B.win.__net.length === 0, 'neither asks the network for anything', [R.win.__net, B.win.__net]);
+}
+
+section('a duel against a hidden pilot: the guest is handed it through the Worker, it flies in step, its own caps hold, nothing is recorded');
+{
+  /* The tests' stand-in outside pilot (scripts/fixtures/outside-pilot.js),
+     with duel rules of its own, put in the vault and given to the host's
+     account only (pvp/src/hidden.js). The guest has never had it. */
+  const { putSql, giveSql } = await import('./lib/vault-sql.mjs');
+  const MOD = OUTSIDE_ARG ? readFileSync(OUTSIDE_ARG, 'utf8') : readFileSync(join(ROOT, 'scripts', 'fixtures', 'outside-pilot.js'), 'utf8')
+    .replace('hp: 110, speed: 270, dmg: 10, rate: 4.8,',
+             'hp: 110, speed: 270, dmg: 10, rate: 4.8,\n  duel: { deal: { hitCap: 0.05, burstCap: 0.1 }, take: { hitCap: 0.02, burstCap: 0.04 } },');
+  DB.sql.exec(putSql('x0', Buffer.from(MOD)).sql);
+  DB.sql.exec(giveSql('duelist', 'x0'));
+  const OTHER = signedIn('Onlooker');
+  const ask = (who, q) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/pilot?' + q,
+    { headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN } }), envPvp);
+
+  // the lobby hands the holder's own code in (pvp.js, outsideFor); the guest's hand has nothing of it
+  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', me: ME, outside: [{ id: 'x0', n: 'TEST', h: '', text: MOD }] }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
+  await flush();
+  ok(H.run('CHAR().id') === 'x0' && H.run('CHAR().outside === true'), 'the host flies it, run from what the lobby handed in');
+  ok(H.run('PVP.ref.side') === 0, 'the Worker let its holder open a match flying it');
+  ok(!G.run('CHARS.some(c => c.id === "x0")'), 'the guest has never had it');
+  const mid = H.run('PVP.ref.id');
+  ok((await ask(OTHER, 'id=x0&match=' + mid)).status === 404 && (await ask(RIVAL_ACCT, 'id=x0')).status === 404,
+     'nobody else is handed it: not an onlooker naming the match, not the guest before it is in it');
+
+  const ship = link(H, G);
+  ok(!H.run('MP.ready'), 'the host waits: the guest has not got its pilot yet');
+  for (let i = 0; i < 10 && !G.run('CHARS.some(c => c.id === "x0")'); i++) await flush();
+  ok(G.run('CHARS.some(c => c.id === "x0")'), 'the guest fetched it, once in the match, as its other side');
+  ok(G.win.__net.some(n => n === 'fetch /api/pvp/pilot?id=x0&match=' + mid), 'from PvP\'s Worker, naming the match', G.win.__net);
+  ok(G.run('OUTSIDE.sig.x0') === H.run('OUTSIDE.sig.x0'), 'the same text on both');
+  ship(G, H);                                     // the guest's hello again, now with it
+  ok(H.run('MP.ready') && G.run('MP.ready'), 'both ready now');
+  H.run('PVP.frame()'); ship(H, G);
+  ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
+  ok(H.run('pilotP(0).charId') === 'x0' && G.run('pilotP(0).charId') === 'x0' && G.run('pilotP(1).charId') === 'ember',
+     'the guest sees it fly, beside its own');
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  let threw = null;
+  try { await play(H, G, ship, 60 * 60, () => H.run('RUN.pvp && RUN.pvp.phase === "fight" && RUN.pvp.t > 30')); }
+  catch (e) { threw = e; }
+  ok(!threw, 'thirty seconds of the duel, drawn on both, without an error', String(threw && threw.stack));
+  const same = sameGame(H, G);
+  ok(same.n >= 10 && !same.parted.length && H.run('LS.resyncs') === 0, 'the same game on both', same);
+  ok(H.run('JSON.stringify(OUTSIDE.errs)') === '{}' && G.run('JSON.stringify(OUTSIDE.errs)') === '{}', 'its hooks threw nowhere',
+     [H.run('JSON.stringify(OUTSIDE.errs)'), G.run('JSON.stringify(OUTSIDE.errs)')]);
+  // its own rules: what it dealt held to its deal cap, what it took to its take cap (duel.js, duelRule)
+  const log = H.run('__log');
+  const rules = JSON.parse(H.run('JSON.stringify(CHARS.find(c => c.id === "x0").duel || {})'));
+  const dealCap = (rules.deal && rules.deal.hitCap) || DUEL.hitCap, takeCap = (rules.take && rules.take.hitCap) || DUEL.hitCap;
+  const onGuest = log.hits.filter(h => h[1] === 1 && h[2] > 0), onIt = log.hits.filter(h => h[1] === 0 && h[2] > 0);
+  ok(onGuest.length > 0 && onGuest.every(h => h[2] <= dealCap * h[3] + 1e-6), 'its blows held to its own cap: ' + (dealCap * 100) + '% a hit',
+     { n: onGuest.length, most: Math.max(0, ...onGuest.map(h => h[2] / h[3])) });
+  ok(onIt.every(h => h[2] <= takeCap * h[3] + 1e-6), 'blows on it held to its take cap: ' + (takeCap * 100) + '% a hit',
+     { n: onIt.length, most: Math.max(0, ...onIt.map(h => h[2] / h[3])) });
+  /* Its cut-in holds the other pilot's hull and blows too (outsideCutAny). On
+     the host alone, last, since it parts the two machines from here on. */
+  H.run('globalThis.__cut = OUTSIDE.by.get("x0").cut; OUTSIDE.by.get("x0").cut = () => true');   // whatever module flies: a cut-in is on
+  const g0 = H.run('pilotP(1).x');
+  H.run('pilotDo(1, () => { P.in.mx = 1; P.in.my = 0; P.vx = 400; updatePlayer(1 / 60); })');
+  ok(Math.abs(H.run('pilotP(1).x') - g0) < 0.5, 'its cut-in holds the other pilot\'s hull too', H.run('pilotP(1).x') - g0);
+  ok(H.run('pilotDo(1, () => { const hp = P.hp; P.iframe = 0; hurtPlayer(5); return P.hp === hp; })') === true, 'and no blow lands on it meanwhile');
+  H.run('OUTSIDE.by.get("x0").cut = __cut');
+
+  // the guest leaves; the verdict comes, and is written nowhere
+  G.run('quitToMenu()'); ship(G, H);
+  H.run('update(1 / 60); PVP.frame()'); G.run('PVP.frame()');
+  for (let i = 0; i < 60 * 12 && !H.run('!!PVP.ref.verdict'); i++) {
+    H.run('__wall += 1000 / 60; update(1 / 60); PVP.frame()');
+    if (i % 30 === 0) await settle();
+  }
+  const v = H.run('PVP.ref.verdict');
+  // (a module flown by --outside may have won it outright before the guest left)
+  ok(v && (v.v === 'forfeit' && v.winner === 0 || OUTSIDE_ARG && v.v === 'played'), 'the referee decides it like any other', v);
+  ok(!matchRows().some(r => r.id === mid || r.a_pilot === 'x0' || r.b_pilot === 'x0'), 'and it is recorded nowhere: no ladder, profile or history');
+  const note = roomOf(H).__q['.note'].textContent;
+  ok(note === (v && v.v === 'played' ? 'best of ' + H.run('RUN.pvp.bestOf') : 'a win by forfeit') + '  ·  not recorded', 'the host is told so', note);
+}
+
+section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody else');
+{
+  const season = seasonOf();
+  const ask = (who, q) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/pilot?' + q,
+    { headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN } }), envPvp);
+  const TOP = signedIn('Topdog'), NEXT = signedIn('Runnerup');
+  DB.sql.prepare("INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated) VALUES (?, 'ranked', ?, ?, 60, 0.06, 20, 15, 5, 'void', ?)")
+    .run(TOP.id, season, 2400, Date.now());
+  DB.sql.prepare("INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated) VALUES (?, 'ranked', ?, ?, 60, 0.06, 20, 12, 8, 'void', ?)")
+    .run(NEXT.id, season, 2300, Date.now());
+  const q = (who, body) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/queue', { method: 'POST', body: JSON.stringify(Object.assign({ queue: 'ranked' }, body)),
+    headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN, 'content-type': 'application/json' } }), envPvp).then(r => r.json());
+  const casual = await pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/queue', { method: 'POST',
+    body: JSON.stringify({ queue: 'casual', op: 'join', pilot: 'x0' }),
+    headers: { cookie: 'vr_s=' + DUELIST.token, origin: PVP_ORIGIN, 'content-type': 'application/json' } }), envPvp);
+  ok(casual.status === 400, 'never in casual');
+  ok((await q(RIVAL_ACCT, { op: 'join', pilot: 'x0' })).error === 'bad pilot', 'not for an account without it');
+  ok((await q(DUELIST, { op: 'join', pilot: 'x0' })).state === 'waiting', 'its holder queues it in ranked');
+  ok((await q(NEXT, { op: 'join', pilot: 'runner' })).state === 'waiting', 'the #2 queues');
+  ok((await q(DUELIST, { op: 'poll' })).state === 'waiting' && (await q(NEXT, { op: 'poll' })).state === 'waiting', 'nobody pairs the #2 with it');
+  ok((await q(TOP, { op: 'join', pilot: 'runner' })).state === 'matched' || (await q(TOP, { op: 'poll' })).state === 'matched', 'the #1 queues: paired with it at once');
+  const got = await q(DUELIST, { op: 'poll' }), top = await q(TOP, { op: 'poll' });
+  ok(got.state === 'matched' && top.state === 'matched' && got.match.id === top.match.id, 'the two of them, in one match', [got.state, top.state]);
+  const m = top.match;
+  ok(m.rated === false && m.league.id === 'hidden' && m.league.n === '???' && m.bestOf === 1, 'unrated, its own rules, named for nobody', m);
+  ok(m.sides.some(s => s.pilot === 'x0'), 'the #1 is told the pilot only by its id', m.sides);
+  // the #1's machine may now fetch it, as the other side of that match
+  ok((await ask(TOP, 'id=x0&match=' + m.id)).status === 200 && (await ask(NEXT, 'id=x0&match=' + m.id)).status === 404,
+     'handed to the #1 for that match, and to nobody else');
+  ok((await q(NEXT, { op: 'poll' })).state === 'waiting', 'and the #2 waits on, for anyone but it');
+  await q(NEXT, { op: 'leave' });
+  // the #1's page plays the server's match: one long round
+  const T = boot({ mode: 'match', role: top.match.role, queue: 'ranked', pilot: 'runner', me: RIVAL, match: top.match }, TOP);
+  ok(T.run('PVP.bestOf()') === 1 && T.run('PVP.said(1)') === 'one round', 'the #1\'s page plays it as one round');
 }
 
 section('arriving without the lobby');

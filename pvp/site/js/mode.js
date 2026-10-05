@@ -52,8 +52,17 @@
     const q = ok && hand.match && Array.isArray(hand.match.sides) ? hand.match.sides[hand.match.side] : null;
     if (q) return { pilots: [q.pilot], awake: q.awake ? [q.pilot] : [], ups: Array.isArray(q.ups) ? q.ups : [] };
     const m = mode(), L = ok ? hand.me.loadouts : null;
-    return (L && L[(m && m.loadout) || 'casual']) || { pilots: ['runner'], awake: [], ups: [] };
+    const lo = (L && L[(m && m.loadout) || 'casual']) || { pilots: ['runner'], awake: [], ups: [] };
+    // and the hidden pilots this account holds, which the lobby brought along (outside, below)
+    return Object.assign({}, lo, { pilots: lo.pilots.concat(outside().map(o => o.id)) });
   };
+  /* Hidden pilots (OUTSIDE PILOTS in the engine; pvp/src/hidden.js): the
+     lobby fetched this account's own from the vault and handed their code in
+     ({ id, n, h, text }), since this page boots sealed and fetches nothing on
+     its own; they are run before a pilot is picked (start). An opponent's is
+     fetched when its hello names it (outsideFetch), once this side is in the
+     match, which is what lets the Worker hand it over. */
+  const outside = () => (ok && Array.isArray(hand.outside) ? hand.outside.filter(o => o && typeof o.id === 'string' && typeof o.text === 'string') : []);
 
   const M = window.VR_PVP = {
     hand: ok ? hand : null,
@@ -63,11 +72,15 @@
     // charOpen: the loadout decides which pilots there are
     pilotOpen: id => loadout().pilots.includes(id),
 
+    // a match's length, said: one round against a hidden pilot in ranked (pvp/src/rules.js, HIDDEN)
+    said: n => (n === 1 ? 'one round' : 'best of ' + n),
+
     /* The engine has booted sealed, with a blank profile in memory. It is made
        the account's here: its name, which pilots are awake, and the cleared
        challenges, which put its reward upgrades in the card pool. */
     start() {
       if (!ok || !mode()) return;
+      for (const o of outside()) if (!OUTSIDE.by.has(o.id)) { try { Outside.run(o.id, o.text); } catch (e) { console.error('pvp: pilot ' + o.id, e); } }
       const p = Save.profile, L = loadout(), me = hand.me;
       p.name = me.account.display;
       p.awakened = {};
@@ -101,6 +114,19 @@
     hash() {},                         // the match, into lockstep's fingerprint (rounds.js)
     hello: () => ({}),                 // what this player's handshake carries (cards.js)
     peerHello() {},                    // and the other's (cards.js)
+
+    // the other side's hidden pilot: its code, from the Worker, once this side is in the match (referee.js)
+    async outsideFetch(id) {
+      const R = M.ref;
+      if (R && R.joining) await R.joining.catch(() => {});
+      const mid = R && R.id;
+      const r = await fetch('/api/pvp/pilot?id=' + encodeURIComponent(id) + (mid ? '&match=' + mid : ''), { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) throw new Error('no such pilot to fetch');
+      const text = await r.text();
+      const want = r.headers.get('x-vault-hash'), got = await Outside.hash(text);
+      if (want && got && want !== got) throw new Error('not the text the Worker sent');
+      return text;
+    },
 
     // back to the lobby, once
     leave() {

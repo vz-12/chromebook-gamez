@@ -119,6 +119,16 @@
     if (p) land(e.pvpPilot, (DUEL.killHit * p.maxHp) / DUEL.scale, by);
   };
 
+  /* A pilot from outside the game's file may bring its own rules to a duel
+     (its def.duel, OUTSIDE PILOTS in the engine): `deal` for its blows,
+     `take` for the blows it takes. Each `scale` multiplies DUEL's; on the
+     caps the one taking a blow has the say, then the one dealing it, then
+     DUEL. */
+  const duelRule = (pilot, side) => {
+    const c = pilot && CHARS.find(x => x.id === pilot.charId);
+    return (c && c.outside && c.duel && c.duel[side]) || {};
+  };
+
   /* A pilot's hit on another, `raw` in the game's own figures. Through
      hurtPlayer, so a parry, a dash's i-frames, STILL WATER and a shield all
      answer it as they answer anything, and the victim's own build (armour,
@@ -129,12 +139,15 @@
     if (!m || m.phase !== 'fight') return 0;
     const p = pilotP(victim), a = pilotP(by);
     if (!p || p.down) return 0;
+    const dl = duelRule(a, 'deal'), tk = duelRule(p, 'take');
+    const hitCap = tk.hitCap ?? dl.hitCap ?? DUEL.hitCap, burstCap = tk.burstCap ?? dl.burstCap ?? DUEL.burstCap;
+    const scale = DUEL.scale * (dl.scale ?? 1) * (tk.scale ?? 1);
     const recent = m.hits[victim];
     while (recent.length && recent[0][0] <= m.clock - DUEL.window) recent.shift();
     let took = 0;
     for (const h of recent) took += h[1];
-    const cap = Math.min(DUEL.hitCap * p.maxHp, DUEL.burstCap * p.maxHp - took);
-    const d = Math.min(raw * DUEL.scale * (DUEL.pilots[a && a.charId] || 1), cap);
+    const cap = Math.min(hitCap * p.maxHp, burstCap * p.maxHp - took);
+    const d = Math.min(raw * scale * (DUEL.pilots[a && a.charId] || 1), cap);
     if (!(d > 0.05)) return 0;
     /* A body of THE HACKER's army hits from inside its script, and the game
        lets nothing a script makes reach a pilot (hackBy, its own guard against

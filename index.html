@@ -1351,7 +1351,7 @@ const CHAR = () => CHARS[selectedChar];
    only on a machine allowed them: see OUTSIDE PILOTS. Declared up here
    because newPlayer() and hullPath() ask after them, and both run long
    before that block is reached. */
-const OUTSIDE = { by: new Map(), errs: {}, loading: new Set() };   // loading: the ids on their way
+const OUTSIDE = { by: new Map(), errs: {}, loading: new Set(), sig: {} };   // loading: the ids on their way; sig: each module's text, hashed
 let outsideWorld = {};                   // the run's own share of an outside pilot's state: plain data, emptied by resetGame
 // the keys an outside pilot's kit is played in a run (pressed: playKey), and the ones it may also read held (P.in.held)
 const OUTSIDE_KEYS = ['1', '2', '3', '4', 'q', 'e', 'f', 'z', 'x', 'c', 'v'];
@@ -4262,7 +4262,7 @@ function hurtPlayer(dmg, opts) {
   if (P.down) return;                    // a wreck cannot be hurt further
   if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
-  if (outsideCut()) return;                // nor while an outside pilot's has it (OUTSIDE PILOTS)
+  if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
   /* THE VAGRANT's parry. This function is the funnel every source of damage
@@ -36813,7 +36813,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || outsideCut()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -43888,6 +43888,11 @@ function render() {
   if (roninShown()) drawRoninScreen(roninW());
   { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
   outsideDraw('screen');      // an outside pilot's cut-ins, over the frame and its HUD (OUTSIDE PILOTS)
+  // and in a duel against one (PvP), its cut-ins on this screen too: what this screen may see of it is the module's to say
+  if (PILOTS.length > 1) for (let k = 0; k < PILOTS.length; k++) {
+    const q = pilotP(k);
+    if (k !== PILOT.on && q && q.outside) pilotDo(k, () => outsideDraw('screen'));
+  }
   halDeathHud();
   if (P.patchT > 0) {                  // the whole book is a timer, so show it
     ctx.save();
@@ -43931,7 +43936,7 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   lsDrawHint();         // lockstep: who is choosing, who paused
-  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCut()) {   // not over a cut-in
+  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
   }
@@ -63523,6 +63528,16 @@ function outsideDrawFor(id, name, ...a) {
 }
 // a cut-in of the pilot's own has the screen (cut())
 const outsideCut = () => !!(P.outside && outsideCall(P.charId, 'cut'));
+/* Any pilot's cut-in: with two pilots in a run (a PvP duel; co-op never flies
+   one), a cut-in of the outside pilot's holds the other's hull and blows too. */
+function outsideCutAny() {
+  if (PILOTS.length < 2) return outsideCut();
+  for (let k = 0; k < PILOTS.length; k++) {
+    const q = pilotP(k);
+    if (q && q.outside && pilotDo(k, outsideCut)) return true;
+  }
+  return false;
+}
 // the room's clock while the pilot slows it (slow()): 1 when it does not
 function outsideSlow() {
   const s = outsideCall(P.charId, 'slow');
@@ -63550,6 +63565,16 @@ function outsidePilot(id, def) {
               col: String(def.col || '#e2e8f0'), bullet: String(def.bullet || def.col || '#f8fafc'),
               tag: String(def.tag || ''), d: String(def.d || ''),
               hp: def.hp, speed: def.speed, dmg: def.dmg, rate: def.rate, outside: true };
+  /* def.duel, its own rules in a PvP duel (duel.js): { deal: {...}, take: {...} },
+     each any of scale, hitCap, burstCap, numbers over 0. Kept only if they hold up. */
+  if (def.duel && typeof def.duel === 'object') {
+    const pick = o => {
+      const out = {};
+      if (o && typeof o === 'object') for (const k of ['scale', 'hitCap', 'burstCap']) if (Number.isFinite(o[k]) && o[k] > 0) out[k] = o[k];
+      return out;
+    };
+    c.duel = { deal: pick(def.duel.deal), take: pick(def.duel.take) };
+  }
   const hooks = {};
   for (const h of OUTSIDE_HOOKS) if (typeof def[h] === 'function') hooks[h] = def[h];
   const at = CHARS.findIndex(x => x.id === id);
@@ -63613,8 +63638,29 @@ const Outside = {
   run(id, text) {
     const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def) });
     new Function('VR', text)(VR);
+    // its text's mark, so two machines in one match can tell they run the same one (mpOnEvent, hello)
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    OUTSIDE.sig[id] = text.length.toString(36) + '.' + h.toString(36);
+  },
+
+  /* A match's other machine flies a pilot from outside that this one has not
+     got. Only PvP can fetch one (its page asks its Worker for the opponent's
+     pilot: PVP.outsideFetch); then it is run here as there, and `then` goes
+     on with the match. Once per id; false when there is no way to fetch. */
+  need(id, then) {
+    if (OUTSIDE.by.has(id)) { then(); return true; }
+    if (!(PVP && PVP.outsideFetch)) return false;
+    if (OUTSIDE.loading.has(id)) return true;
+    OUTSIDE.loading.add(id);
+    PVP.outsideFetch(id).then(text => {
+      if (typeof text === 'string') { try { Outside.run(id, text); } catch (e) { console.error('outside pilot ' + id + ':', e); } }
+    }, e => console.error('outside pilot ' + id + ':', e)).finally(() => { OUTSIDE.loading.delete(id); then(); });
+    return true;
   }
 };
+// the outside pilots this machine has run: [id, mark] each, for the hello
+const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE.sig[id]]);
 
 /* ===========================================================================
    LINK DIAGNOSTIC
@@ -65164,10 +65210,45 @@ function mpStartRun() {
   lsHostStart();                          // see LOCKSTEP CO-OP
 }
 
+/* A pilot the other machine named: by its id where it gave one, since a pilot
+   from outside need not sit at the same place in both lists; else its place. */
+function mpPeerChar(id, at) {
+  const i = typeof id === 'string' ? CHARS.findIndex(c => c.id === id) : -1;
+  return i >= 0 ? i : clamp(at | 0, 0, CHARS.length - 1);
+}
+/* OUTSIDE PILOTS in a two-machine match: both run every pilot in it, and the
+   same text of each. The other's pilot, if this machine lacks it, is fetched
+   (Outside.need: PvP only), and this machine says hello again with it, so the
+   other side learns it is here; until then neither is ready. A mark that
+   differs is a different build: the match does not happen. */
+let mpHelloKept = null;
+function mpOutsideReady(m) {
+  mpHelloKept = m;
+  const outs = new Map(Array.isArray(m.outs) ? m.outs.filter(x => Array.isArray(x) && typeof x[0] === 'string').map(x => [x[0], String(x[1])]) : []);
+  const theirs = typeof m.cid === 'string' ? m.cid : null;
+  if (theirs && !CHARS.some(c => c.id === theirs)) {
+    if (!outs.has(theirs)) { netFail(new Error('the other player flies a pilot this game does not know')); return false; }
+    const asked = Outside.need(theirs, () => {
+      if (!CHARS.some(c => c.id === theirs)) { netFail(new Error('could not load the other player\'s pilot')); return; }
+      mpOnOpen();                                     // hello again: now with it
+      if (mpHelloKept) mpOnEvent(mpHelloKept);        // and their hello read again, the pilot now known
+    });
+    if (!asked) netFail(new Error('the other player flies a pilot this game cannot load'));
+    return false;
+  }
+  for (const id of [theirs, CHARS[selectedChar].id]) {
+    if (!id || !OUTSIDE.sig[id]) continue;
+    if (!outs.has(id)) return false;                  // theirs has not got it yet: their next hello will say
+    if (outs.get(id) !== OUTSIDE.sig[id]) { netFail(new Error('the other player has a different version of a pilot: reload both pages')); return false; }
+  }
+  return true;
+}
+
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
   netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(), pvp: PVP ? PVP.hello() : undefined,
+             cid: CHARS[selectedChar].id, outs: outsideOuts(),   // the pilot by its id, and the outside pilots run here (OUTSIDE PILOTS)
              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
   Audio_.select && Audio_.select();
 }
@@ -65183,11 +65264,11 @@ function mpOnEvent(m) {
         return;
       }
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
-      MP.peerChar = clamp(m.char | 0, 0, CHARS.length - 1);
+      MP.peerChar = mpPeerChar(m.cid, m.char);
       MP.peerAwake = !!m.awake;
       MP.peerSkin = { doc: skinClean(m.skin), equip: String(m.equip || '').slice(0, 40) };   // how to draw their pilot
-      MP.ready = true;
       if (PVP) PVP.peerHello(m.pvp);     // PvP mode: the other player's account, for their cards
+      MP.ready = mpOutsideReady(m);      // and an outside pilot on either side run on both (OUTSIDE PILOTS)
       break;
 
     case 'lsagain':
@@ -65199,7 +65280,7 @@ function mpOnEvent(m) {
       // guest: the host has started a lockstep run; the header is the whole of it
       if (Net.role !== 'guest') break;
       MP.on = true; MP.role = 'guest';
-      MP.peerChar = clamp(m.host | 0, 0, CHARS.length - 1);
+      MP.peerChar = mpPeerChar(m.hostId, m.host);
       MP.peerName = String(m.name || '').slice(0, 14) || 'HOST';
       lsGuestStart(m);
       break;
@@ -65958,6 +66039,7 @@ function lsHostStart() {
   lsBegin(run, delay);
   netEvent({ t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
              awake: P.awake ? 1 : 0, host: selectedChar, wing: MP.peerChar, wingAwake: MP.peerAwake ? 1 : 0, delay,
+             hostId: CHARS[selectedChar].id, wingId: (CHARS[MP.peerChar] || CHARS[0]).id,   // by id: see mpPeerChar
              name: Save.profile.name || '' });
   banner('CO-OP ENGAGED', WING_COL, 2.0);
 }
@@ -65968,10 +66050,10 @@ function lsGuestStart(h) {
   runSeedNext = (h.seed >>> 0);
   runViewNext = { w: +v.w || 1280, h: +v.h || 720 };
   runFlagsNext = h.flags && typeof h.flags === 'object' ? h.flags : {};
-  runCharNext = clamp(h.host | 0, 0, CHARS.length - 1);   // the host's pilot is P here too, earned here or not
+  runCharNext = mpPeerChar(h.hostId, h.host);   // the host's pilot is P here too, earned here or not
   runAwakeNext = !!h.awake;
   resetGame();
-  pilotsBegin(clamp(h.wing | 0, 0, CHARS.length - 1), !!h.wingAwake);   // its own pilot: the second
+  pilotsBegin(mpPeerChar(h.wingId, h.wing), !!h.wingAwake);   // its own pilot: the second
   state = 'play';
   lsBegin((h.run | 0) & 0xffff, clamp(h.delay | 0, LS_DELAY_MIN, LS_DELAY_MAX));
   banner('CO-OP ENGAGED', WING_COL, 2.0);

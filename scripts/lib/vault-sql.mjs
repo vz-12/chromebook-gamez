@@ -19,15 +19,15 @@ export function checkId(id) {
 /* Putting one entry in: every part under a new revision, everything older
    than the revision readers have now swept away, and only then the head
    moved to the new one. */
-export function putSql(id, bytes, rev = Date.now()) {
+export function putSql(id, bytes, rev = Date.now(), name = null) {
   checkId(id);
   const out = [VAULT_SCHEMA];
   let n = 0;
   for (let at = 0; at < bytes.length || n === 0; at += PART_BYTES, n++)
     out.push(`INSERT OR REPLACE INTO vault_parts (id, rev, part, body) VALUES (${q(id)}, ${rev}, ${n}, '${bytes.subarray(at, at + PART_BYTES).toString('base64')}');`);
   out.push(`DELETE FROM vault_parts WHERE id = ${q(id)} AND rev <> ${rev} AND rev <> COALESCE((SELECT rev FROM vault_heads WHERE id = ${q(id)}), -1);`);
-  out.push(`INSERT INTO vault_heads (id, rev, parts, size, hash, updated) VALUES (${q(id)}, ${rev}, ${n}, ${bytes.length}, ${q(sha256(bytes))}, ${Date.now()}) ` +
-           `ON CONFLICT (id) DO UPDATE SET rev = excluded.rev, parts = excluded.parts, size = excluded.size, hash = excluded.hash, updated = excluded.updated;`);
+  out.push(`INSERT INTO vault_heads (id, rev, parts, size, hash, updated, name) VALUES (${q(id)}, ${rev}, ${n}, ${bytes.length}, ${q(sha256(bytes))}, ${Date.now()}, ${name ? q(String(name).slice(0, 40)) : 'NULL'}) ` +
+           `ON CONFLICT (id) DO UPDATE SET rev = excluded.rev, parts = excluded.parts, size = excluded.size, hash = excluded.hash, updated = excluded.updated, name = excluded.name;`);
   return { sql: out.join('\n'), rev, parts: n, hash: sha256(bytes) };
 }
 
