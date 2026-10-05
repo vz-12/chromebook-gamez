@@ -8,7 +8,8 @@
      GET /api/boards?user=<account name>
          a player's profile: who they are, where they stand on the game's
          boards and the ladder, the pilots they have unlocked and awakened,
-         their season podiums, and their PvP record with the latest matches
+         their season podiums, their PvP record with the latest matches, and
+         the look they wear (banner, picture, decals: looks.js)
 
    PvP's tables (pvp_ratings, pvp_matches) are made by the PvP Worker
    (pvp/src/records.js) on the same D1; until it has run they are not there,
@@ -17,10 +18,10 @@
    id, or anything from a save beyond its unlocks summary. A guest (a
    callsign with no account) has no profile.
    ========================================================================= */
-import { STORE, ARCHIVE, seasonOf } from './season.js';
-import { getStore } from './store.js';
+import { seasonOf } from './season.js';
 import { PILOTS, BASE_PILOTS, PLACEMENTS, LEAGUES } from '../pvp/src/rules.js';
 import { podiumsOf, badgesOf } from './pvp-rewards.js';
+import { gamePodiums, publicLook } from './looks.js';
 
 export const isUser = v => typeof v === 'string' && /^[a-z0-9_-]{3,16}$/.test(v);
 
@@ -92,7 +93,7 @@ const RECENT = 10;
    account. `standings` is boards.js's: the account's placement on each of
    `boards`. */
 export async function profile(db, env, user, boards, standings) {
-  const a = await db.prepare('SELECT id, name, display, created FROM accounts WHERE name = ?1').bind(user).first();
+  const a = await db.prepare('SELECT id, name, display, created, perks FROM accounts WHERE name = ?1').bind(user).first();
   if (!a) return null;
   const season = seasonOf();
 
@@ -105,15 +106,7 @@ export async function profile(db, env, user, boards, standings) {
   const owned = new Set([...BASE_PILOTS, ...list('chars')]), awake = new Set(list('awake'));
   const pilots = Object.entries(PILOTS).map(([id, name]) => ({ id, name, owned: owned.has(id), awake: owned.has(id) && awake.has(id) }));
   // a season's podium is filed with the profile ids that flew it (season.js); the account's are its own
-  const pids = new Set(((await db.prepare('SELECT pid FROM account_pids WHERE account = ?1').bind(a.id).all()).results || []).map(r => r.pid));
-  const podiums = [];
-  if (pids.size) {
-    const doc = await getStore(env, STORE).get(ARCHIVE, { type: 'json' }).catch(() => null);
-    for (const [id, s] of Object.entries((doc && doc.list) || {}))
-      for (const e of (s && s.top3) || [])
-        if (e && e.pid && pids.has(e.pid)) podiums.push({ season: id, rank: e.rank, score: e.score });
-    podiums.sort((x, y) => (x.season < y.season ? 1 : x.season > y.season ? -1 : x.rank - y.rank));
-  }
+  const podiums = await gamePodiums(db, env, a.id);
 
   // PvP: the ladder this season, every recorded match, the latest ones, and
   // the leagues' cutoffs and the placement matches, for the page's progress bar
@@ -148,9 +141,12 @@ export async function profile(db, env, user, boards, standings) {
       };
     });
   }
+  let perks = [];
+  try { perks = JSON.parse(a.perks || '[]'); } catch (e) {}
   return {
     user: { name: a.name, display: a.display, joined: a.created },
     game: { boards: (placed && placed.boards) || {}, callsign: (placed && placed.name) || null, pilots, podiums },
-    pvp
+    pvp,
+    look: await publicLook(db, env, a.id, perks)    // what the profile wears: each pick still owned, or the default
   };
 }

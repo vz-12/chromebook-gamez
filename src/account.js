@@ -445,6 +445,8 @@ const OPS = {
       db.prepare('DELETE FROM sessions WHERE account = ?1').bind(id),
       db.prepare('DELETE FROM account_pids WHERE account = ?1').bind(id),
       db.prepare('DELETE FROM saves WHERE account = ?1').bind(id),
+      db.prepare('DELETE FROM looks WHERE account = ?1').bind(id),
+      db.prepare('DELETE FROM look_grants WHERE account = ?1').bind(id),
       db.prepare('DELETE FROM accounts WHERE id = ?1').bind(id)
     ]);
     return reply({ ok: true }, 200, sessionCookie(req, '', 0));

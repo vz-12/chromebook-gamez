@@ -863,6 +863,66 @@ Don't build it yet."
   prices; whether the shop is in the game, in PvP or both (accounts are
   shared, so either can sell and either can show).
 
+#### Part 1 — profile looks (user, 5 Oct: go)
+
+"Since we need more things to give as rewards, we need gates to be able to
+switch out banners and profile pictures, along with profile decals that we
+can grant server-side."
+
+Branch `profiles`. The shop and the currency stay for later.
+
+- **Three kinds of look:** a profile's **banner** (the cover), its
+  **picture** (the emblem), and **decals** (small badges in a row under the
+  name, up to 4 shown).
+- **One catalog** (`src/looks.js`) lists every item: its id, its name and
+  its **gate**, which says who owns it. The server decides; the page only
+  draws what it's told.
+- **Gates** (my starting set):
+
+  | Gate | Owned by |
+  | --- | --- |
+  | `free` | every account |
+  | `grant` | only an account given it by hand |
+  | `pilot:<id>` | an account with that pilot unlocked |
+  | `awake:<id>` | an account with that pilot awakened |
+  | `runs:<n>` | an account with at least n runs flown |
+  | `podium` | an account on any season's podium (the game's boards) |
+  | `pvp-league:<id>` | finished a PvP season in that league or higher |
+  | `pvp-podium` | on any PvP season's ranked podium |
+
+  An unknown gate opens for nobody. Any item can also be granted by hand,
+  whatever its gate, and a `dev` account owns everything.
+- **Granting server-side:** a `look_grants` table (account, item, why,
+  when). `npm run grant -- <account> <kind>:<id> "<why>"` adds a row
+  (`--remote` for the live database, `--take` to take it back). The why
+  shows on the profile, beside the decal.
+- **Choosing:** each account's picks live in a `looks` table, checked
+  against what it owns whenever they're saved and whenever they're shown.
+  A pick it no longer owns (a grant taken back) shows as the default.
+  - `GET /api/account/look`: the catalog, each item owned or not (and what
+    opens it), and the current picks. Signed in only.
+  - `PUT /api/account/look {banner, picture, decals}`: saves picks the
+    account owns; anything else is refused.
+  - A profile (`/api/boards?user=`) carries its picks, public like the rest.
+- **The page:** a signed-in player's own profile has a CUSTOMIZE button,
+  opening a panel with three tabs (BANNER, PICTURE, DECALS). Each item is
+  drawn live as a preview; a locked one says what opens it.
+- **The art:** `profileBanner` and `avatar` get the chosen id (`p.banner`,
+  `p.picture`), and a new hook, `decal(g, w, h, t, d)`, draws decals. Today's
+  seeded cover and identicon become the free defaults. The rest get my
+  first pass, for you to redraw.
+- **Steps:**
+  1. The server: catalog, gates, grants, picks, the API, the grant tool,
+     and a test suite (`npm run test:looks`).
+  2. The page: the profile drawn with its picks, the decal row, and the
+     CUSTOMIZE panel, with the first-pass art.
+- **Open:**
+  - The starting catalog (in step 1) is mine: which items, and their gates.
+  - Whether the game itself shows any of it (the account chip, co-op name
+    tags), and whether PvP's belt and result do.
+  - Whether `PODIUM_REWARDS` / `BADGE_REWARDS` should name items too, or
+    whether gates (`pvp-podium`, `pvp-league:`) are enough.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

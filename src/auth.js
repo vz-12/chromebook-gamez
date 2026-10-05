@@ -83,7 +83,24 @@ const SCHEMA = [
      id       TEXT    PRIMARY KEY,         -- sha-256 of the code
      account  TEXT    NOT NULL,
      target   TEXT    NOT NULL,            -- the origin that may take it
-     expires  INTEGER NOT NULL)`
+     expires  INTEGER NOT NULL)`,
+  /* A profile's look (looks.js): the banner, the picture and the decals its
+     player picked, checked against what the account owns whenever they are
+     saved or shown. */
+  `CREATE TABLE IF NOT EXISTS looks (
+     account  TEXT    PRIMARY KEY,
+     banner   TEXT,
+     picture  TEXT,
+     decals   TEXT    NOT NULL DEFAULT '[]',
+     updated  INTEGER NOT NULL)`,
+  /* Looks given by hand, server-side (npm run grant): '<kind>:<id>', why,
+     and when. */
+  `CREATE TABLE IF NOT EXISTS look_grants (
+     account  TEXT    NOT NULL,
+     item     TEXT    NOT NULL,
+     why      TEXT,
+     at       INTEGER NOT NULL,
+     PRIMARY KEY (account, item))`
 ];
 
 /* Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS

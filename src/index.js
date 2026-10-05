@@ -13,6 +13,8 @@
                         what a session is lives in auth.js, shared with PvP)
      /api/boards        every player's row on every board: ranks, pages, search
                         (boards.js; the page is /leaderboard/)
+     /api/account/look  a profile's banner, picture and decals: what the account
+                        owns and what it has picked (looks.js)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
@@ -24,6 +26,7 @@ import leaderboard from './leaderboard.js';
 import room from './room.js';
 import turn from './turn.js';
 import account from './account.js';
+import looks from './looks.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
@@ -39,7 +42,8 @@ const json = (body, status) =>
   });
 
 const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
-                 '/api/account': account, '/api/account/save': account, '/api/boards': boards };
+                 '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
+                 '/api/boards': boards };
 
 export default {
   async fetch(req, env) {
