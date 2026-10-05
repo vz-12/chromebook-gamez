@@ -72,7 +72,8 @@ section('the loader runs what the vault sent, as the id it was sent under');
   const c = JSON.parse(run(g, 'JSON.stringify(CHARS[CHARS.length - 1])'));
   ok(c.id === 'x0' && c.outside === true && c.n === 'TEST PILOT' && c.weapon === 'bullet' && c.hp === 110,
      'a CHARS entry, marked as from outside, its name in capitals', c);
-  ok(run(g, "Object.keys(OUTSIDE.by.get('x0')).sort().join()") === 'floor,fx,hud,hull,init,key,over,step,under', 'every hook kept');
+  ok(run(g, "Object.keys(OUTSIDE.by.get('x0')).sort().join()") === run(g, 'OUTSIDE_HOOKS.slice().sort().join()'), 'every hook kept',
+     run(g, "Object.keys(OUTSIDE.by.get('x0')).sort().join()"));
   await boot(g, [item('x0', FIXTURE)]);
   ok(g.vault().length === 1 && run(g, 'CHARS.length') === base + 1, 'booted again: not fetched or added twice');
   ok(!g.errors.length, 'nothing logged', g.errors);
@@ -105,31 +106,133 @@ await boot(G, [item('x0', FIXTURE)]);
 {
   fly(G, 'x0');
   ok(run(G, "P.charId === 'x0' && P.outside === 1 && P.weapon === 'bullet' && P.maxHp > 0"), 'a pilot of its own');
-  ok(run(G, 'JSON.stringify(P.ox)') === '{"charge":0,"pulses":0,"mode":0,"keys":0}', 'init put its state on the pilot', run(G, 'JSON.stringify(P.ox)'));
+  ok(run(G, 'P.ox && P.ox.pulses === 0 && P.ox.guard === 2 && P.ox.ev.run === 1'), 'init put its state on the pilot, and the run was heard',
+     run(G, 'JSON.stringify(P.ox)'));
   ok(run(G, 'JSON.stringify(outsideWorld)') === '{}', 'the run\'s share starts empty');
   steps(G, 400);
   ok(run(G, 'P.ox.pulses') >= 2 && run(G, 'outsideWorld.test && outsideWorld.test.ticks') > 0, 'step ran, every step', run(G, 'JSON.stringify(P.ox)'));
-  run(G, "inputPress('z'); inputPress('v')");
+  run(G, "inputPress('z')");
   steps(G, 1);
-  ok(run(G, 'P.ox.mode') === 1 && run(G, 'P.ox.keys') === 2, 'key: Z taken by the pilot, V offered to it first', run(G, 'JSON.stringify(P.ox)'));
+  ok(run(G, 'P.ox.mode') === 1 && run(G, 'P.ox.keys') === 1, 'key: Z taken by the pilot', run(G, 'JSON.stringify(P.ox)'));
   // drawing: every layer, as the pilot, and the canvas handed back as it was
-  const hits = run(G, `(() => { const h = OUTSIDE.by.get('x0'), n = {}, keep = {};
-    for (const k of ['floor', 'under', 'over', 'fx', 'hud', 'hull']) { keep[k] = h[k]; h[k] = (...a) => { n[k] = (n[k] || 0) + 1; return keep[k](...a); }; }
-    render(); Object.assign(h, keep); return JSON.stringify(n); })()`);
-  // the hull's outline is drawn by every pass that needs it (glow, body, edge), so at least once
-  const n = JSON.parse(hits);
-  ok(n.floor === 1 && n.under === 1 && n.over === 1 && n.fx === 1 && n.hud === 1 && n.hull >= 1,
-     'render: floor, under, over, fx and the HUD once each, and the hull outline', hits);
+  const draws = () => JSON.parse(run(G, `(() => { const h = OUTSIDE.by.get('x0'), n = {}, keep = {};
+    for (const k of ['back', 'floor', 'under', 'over', 'fx', 'hud', 'hull', 'screen', 'cursor', 'bullet']) { keep[k] = h[k]; h[k] = (...a) => { n[k] = (n[k] || 0) + 1; return keep[k](...a); }; }
+    const t = ctx.getTransform ? 0 : 0; render(); Object.assign(h, keep); return JSON.stringify(n); })()`));
+  run(G, 'mouse.down = true'); steps(G, 20); run(G, 'mouse.down = false');
+  const n = draws();
+  // the hull's outline is drawn by every pass that needs it (glow, body, edge), so at least once; a round each, in view
+  ok(n.back === 1 && n.floor === 1 && n.under === 1 && n.over === 1 && n.fx === 1 && n.hud === 1 && n.screen === 1 && n.cursor === 1 &&
+     n.hull >= 1 && n.bullet >= 1, 'render: the room, floor, under, over, fx, the HUD, the screen and the cursor once each; the hull; its rounds', n);
   ok(run(G, "JSON.stringify(OUTSIDE.errs)") === '{}', 'and none of it threw');
-  // the menu draws every hull, this one by its own outline
-  const menu = run(G, `(() => { const h = OUTSIDE.by.get('x0'), keep = h.hull; let n = 0; h.hull = () => { n++; keep(); };
-    const was = state; state = 'menu'; render(); state = was; h.hull = keep; return n; })()`);
-  ok(menu >= 1, 'the menu draws its hull through hull()', menu);
+  // the menu: its place in the row, and the menu while it is chosen
+  const menu = JSON.parse(run(G, `(() => { const h = OUTSIDE.by.get('x0'), keep = { hangar: h.hangar, menu: h.menu, hull: h.hull }, n = {};
+    for (const k in keep) h[k] = (...a) => { n[k] = (n[k] || 0) + 1; return keep[k](...a); };
+    const was = state; state = 'menu'; render(); state = was; Object.assign(h, keep); return JSON.stringify(n); })()`));
+  ok(menu.hangar === 1 && menu.menu === 1 && !menu.hull, 'the menu: hangar() in the row, menu() as the one chosen, its hull left to them', menu);
+}
+
+/* ---------------------------------------------------------------------- */
+section('its keys: every one its kit answers, through the game\'s own way in, and what is held');
+{
+  fly(G, 'x0');
+  const mode = () => run(G, 'P.ox.mode');
+  run(G, "handleKey('3')"); steps(G, 1);
+  ok(mode() === 2 && run(G, 'P.ox.keys') === 1, 'a number key in a run: queued, then played to it', run(G, 'JSON.stringify(P.ox)'));
+  run(G, "for (const k of ['1', 'e', 'f', 'x', 'c', '4']) handleKey(k)"); steps(G, 1);
+  ok(run(G, 'P.ox.keys') === 7 && mode() === 0, 'and the rest of them, every one', run(G, 'P.ox.keys'));
+  run(G, "keys['1'] = false; keys['e'] = false; keys['f'] = false; keys['x'] = false; keys['c'] = false; keys['4'] = false; keys['3'] = false");
+  // held: from the devices into the record, and the kit reads only the record
+  run(G, "keys['q'] = true; keys['x'] = true"); steps(G, 3);
+  ok(run(G, 'P.in.held') === 'qx' && run(G, 'P.ox.held') === 3, 'held keys: in the record, in the order kept (qx)', run(G, 'P.in.held'));
+  run(G, "keys['q'] = false; keys['x'] = false"); steps(G, 1);
+  ok(run(G, 'P.in.held') === '' && run(G, 'P.ox.held') === 3, 'let go: nothing held');
+  // the game's own pilots: neither the number keys nor anything held
+  fly(G, 'runner');
+  run(G, "inputQueue.length = 0; handleKey('2'); keys['q'] = true");
+  ok(run(G, 'inputQueue.length') === 0, 'VOIDRUNNER: a number key in a run is nobody\'s');
+  steps(G, 1);
+  ok(run(G, 'P.in.held') === '', 'and nothing held is kept for it');
+  run(G, "keys['q'] = false; keys['2'] = false");
+  // the wire: what lockstep sends keeps the number keys and what is held, and costs nothing when there is nothing held
+  const wire = JSON.parse(run(G, `(() => {
+    const a = Object.assign(newInput(), { held: 'qzx4', press: ['1', '4', 'e', 'parry'], ax: 300, ay: 200 });
+    const b = Object.assign(newInput(), { press: ['q'], ax: 300, ay: 200 });
+    const ra = lsCanon(a), rb = lsCanon(b);
+    return JSON.stringify({ ra: [ra.held, ra.press], rb: [rb.held, rb.press] });
+  })()`));
+  ok(wire.ra[0] === '4qzx' && wire.ra[1].join() === '1,4,e,parry', 'on the wire: the number keys, and what is held in the record order', wire);
+  ok(wire.rb[0] === '' && wire.rb[1].join() === 'q', 'nothing held: none read back', wire);
+}
+
+/* ---------------------------------------------------------------------- */
+section('its weapon, its blink, and the blow: its own');
+{
+  fly(G, 'x0');
+  // a body to shoot, straight ahead of the hull
+  run(G, "inputSource = rec => { inputSample(rec); rec.ax = P.x + 300; rec.ay = P.y; }; spawnEnemy('brute', P.x + 160, P.y)");
+  const ours = () => run(G, 'bullets.filter(b => b.ox !== undefined).length');
+  run(G, 'mouse.down = true'); steps(G, 30); run(G, 'mouse.down = false');
+  ok(run(G, 'P.ox.shots') > 0 && ours() > 0, 'fire(): the trigger, its own rounds, tagged', run(G, 'P.ox.shots'));
+  steps(G, 30);
+  ok(run(G, 'P.ox.hits') > 0, 'hit(): told where its rounds landed', run(G, 'JSON.stringify(P.ox)'));
+  run(G, 'inputSource = inputSample');
+  // the blink, on space: moved the whole way, and the press spent
+  const x0 = run(G, 'P.x');
+  run(G, "keys[' '] = true; P.iframe = 0"); steps(G, 1);
+  ok(run(G, 'P.ox.blinks') === 1 && Math.abs(run(G, 'P.x') - x0) > 100 && run(G, "!keys[' ']"), 'dash(): its blink in place of the dash, the press spent',
+     { blinks: run(G, 'P.ox.blinks'), moved: run(G, 'P.x') - x0 });
+  // the blow: two guards take it whole, then half lands
+  run(G, 'enemies.length = 0; ebullets.length = 0');
+  const hp0 = run(G, 'P.hp = P.maxHp = 1000');
+  const blow = () => run(G, 'P.iframe = 0; hurtPlayer(40); P.hp');
+  ok(blow() === 1000 && blow() === 1000 && run(G, 'P.ox.blocked') === 2, 'hurt(): true takes a blow whole', run(G, 'JSON.stringify(P.ox)'));
+  ok(blow() === 980 && run(G, 'P.ox.halved') === 1, 'and a number is what lands instead (half of 40)', run(G, 'P.hp'));
+}
+
+/* ---------------------------------------------------------------------- */
+section('its cut-in holds the room, the hull and every blow, and hides the crosshair');
+{
+  fly(G, 'x0');
+  run(G, "enemies.length = 0; ebullets.length = 0; spawnEnemy('grunt', P.x + 400, P.y)");
+  run(G, "handleKey('v'); keys['v'] = false"); steps(G, 1);
+  ok(run(G, 'outsideCut()') === true && run(G, 'slowmo') === 0.1, 'cut(): on, and the room at slow() (0.1)', run(G, 'slowmo'));
+  const x0 = run(G, 'P.x'), hp0 = run(G, 'P.hp');
+  run(G, "keys['d'] = true"); steps(G, 10); run(G, "keys['d'] = false");
+  ok(run(G, 'P.x') === x0, 'the hull stands still', run(G, 'P.x') - x0);
+  run(G, 'P.iframe = 0; hurtPlayer(50)');
+  ok(run(G, 'P.hp') === hp0 && run(G, 'P.ox.blocked') === 0, 'nothing lands, nothing even reaches hurt()');
+  const n = JSON.parse(run(G, `(() => { const h = OUTSIDE.by.get('x0'), n = {}, keep = { screen: h.screen, cursor: h.cursor };
+    for (const k in keep) h[k] = (...a) => { n[k] = (n[k] || 0) + 1; return keep[k](...a); };
+    render(); Object.assign(h, keep); return JSON.stringify(n); })()`));
+  ok(n.screen === 1 && !n.cursor, 'its screen drawn, no crosshair at all', n);
+  steps(G, 60);
+  ok(run(G, 'outsideCut()') === false && run(G, 'slowmo') === 1, 'over: the room\'s clock back', run(G, 'slowmo'));
+  run(G, "keys['d'] = true"); steps(G, 10); run(G, "keys['d'] = false");
+  ok(run(G, 'P.x') > x0, 'and the hull flies again');
+}
+
+/* ---------------------------------------------------------------------- */
+section('it hears the run: a floor, a kill, a level, the end');
+{
+  fly(G, 'x0');
+  const ev = () => JSON.parse(run(G, 'JSON.stringify(P.ox.ev)'));
+  ok(ev().run === 1 && !ev().stage, 'a run begins: run, and no floor yet', ev());
+  // the first wave enters the first floor
+  for (let i = 0; i < 600 && !ev().stage; i++) steps(G, 1);
+  ok(ev().stage === 1, 'stage: the first floor', ev());
+  const k0 = ev().kill || 0;
+  run(G, "const e = spawnEnemy('grunt', P.x + 300, P.y); damageEnemy(e, 1e6, false, P.x, P.y)");
+  ok(ev().kill === k0 + 1, 'kill: a body dies', ev());
+  run(G, 'P.xp = P.xpNext; checkLevel(); if (state === "levelup") { offers = []; state = "play"; }');
+  ok(ev().level === 1, 'level: a level dealt', ev());
+  run(G, 'gameOver(true)');
+  ok(ev().dead === 1, 'dead: the end', ev());
 }
 
 /* ---------------------------------------------------------------------- */
 section('a hook that throws is logged once, skipped, and the run goes on');
 {
+  fly(G, 'x0');
   const before = G.errors.length;
   run(G, "OUTSIDE.by.get('x0').__step = OUTSIDE.by.get('x0').step; OUTSIDE.by.get('x0').step = () => { throw new Error('broken on purpose'); }");
   const t0 = run(G, 'simTick');

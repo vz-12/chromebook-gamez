@@ -31,6 +31,11 @@
    context where the canvas, audio, storage and network are stubs.
 
      node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name] [--restore name]
+                                  [--outside path/to/module.js]
+
+   --outside flies the 'outside' scenario with that module (OUTSIDE PILOTS)
+   in place of the tests' stand-in, so a pilot kept out of this repo can be
+   held to the same rules from wherever it is kept.
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
 import vm from 'node:vm';
@@ -45,6 +50,8 @@ const args = process.argv.slice(2);
 const QUICK = args.includes('--quick');
 const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? new Set(args[i + 1].split(',')) : null; })();
 const IDX = args.find(a => a.endsWith('.html')) || path.join(here, '..', 'index.html');
+// the module the 'outside' scenario flies: the tests' stand-in, unless one is named
+const OUTSIDE_FILE = (() => { const i = args.indexOf('--outside'); return i >= 0 ? path.resolve(args[i + 1]) : path.join(here, 'fixtures', 'outside-pilot.js'); })();
 
 /* ------------------------------ load the game ------------------------------ */
 const g = loadGame(IDX, { w: 1280, h: 720 });
@@ -77,6 +84,15 @@ const HARNESS = `(() => {
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
   let run = null;
+  /* An outside pilot's hooks, each counted as it is called: kept here, out of
+     the run, so counting cannot change it. */
+  let oxCalls = {};
+  function oxWrap(id) {
+    const h = OUTSIDE.by.get(id);
+    if (!h || h.__counted) return;
+    for (const name of Object.keys(h)) { const f = h[name]; h[name] = (...a) => { oxCalls[name] = (oxCalls[name] || 0) + 1; return f(...a); }; }
+    Object.defineProperty(h, '__counted', { value: true });
+  }
   // a player, written straight into the input record
   function bot(rec) {
     const k = run.k;
@@ -105,6 +121,17 @@ const HARNESS = `(() => {
       if (P.charId === 'melee' && k % 61 === 0) press.push('parry');
     }
     if (k % 400 === 200) press.push('q');
+    /* An outside pilot (OUTSIDE PILOTS): every key its kit is played, pressed
+       in a cycle that gets round them all, and one held now and then for a
+       while, pressed as it goes down, the cursor moving as it is held. */
+    rec.held = '';
+    if (P.outside) {
+      const K = OUTSIDE_KEYS, hk = K[Math.floor(k / 240) % K.length];
+      if (k % 37 === 5) press.push(K[Math.floor(k / 37) % K.length]);
+      if (k % 151 === 9) press.push('parry');
+      if (k % 240 === 0) press.push(hk);
+      if (k % 240 < 70) { rec.held = hk; const a = k * 0.09; rec.ax = P.x + Math.cos(a) * 180; rec.ay = P.y + Math.sin(a * 1.7) * 140; }
+    }
     rec.press = press;
   }
   // run B's noise: everything the game must not hear
@@ -112,7 +139,7 @@ const HARNESS = `(() => {
   const FLAGS_JUNK = ['hardened', 'keeperDone', 'rootDone', 'altPath', 'deepFracture', 'malware', 'planetarium', 'amalgamDone', 'tribunalDone', 'metFounder', 'keyEver', 'devTalkDue', 'trueEnd'];
   function junk(b) {
     if (b.devices) {
-      for (const key of ['w', 'a', 's', 'd', ' ', 'shift', 'j', 'z', 'x', 'c', 'v', 'f', 'q', 'e']) keys[key] = rnd() < 0.5;
+      for (const key of ['w', 'a', 's', 'd', ' ', 'shift', 'j', 'z', 'x', 'c', 'v', 'f', 'q', 'e', '1', '2', '3', '4']) keys[key] = rnd() < 0.5;
       mouse.down = rnd() < 0.5; mouse.x = rnd(W); mouse.y = rnd(H); autoFire = rnd() < 0.5;
       // and the cursor's world point, which only the drawing may read (CLEAR SKY aimed at it once)
       mouse.wx = rnd(4000) - 2000; mouse.wy = rnd(4000) - 2000;
@@ -123,6 +150,7 @@ const HARNESS = `(() => {
     for (const [f, n] of [['otherKills', 9], ['unwrittenDeaths', 9], ['clears', 9], ['campVisits', 5]]) if (!only || only === f) Save.profile[f] = rndi(n);
   }
   function start(o) {
+    oxCalls = {};                 // from the very start: a new pilot's init counts
     restore();
     const fx = JSON.parse(FX0);
     for (const k of Object.keys(fx)) fx[k] = o.b && o.b.fx ? 1 : 0;
@@ -163,16 +191,21 @@ const HARNESS = `(() => {
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad, vow: run.vow, outsideErrs: Object.keys(OUTSIDE.errs).join(','), ox: P.ox ? JSON.stringify(P.ox) : '' };
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow, outsideErrs: Object.keys(OUTSIDE.errs).join(','),
+             oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '' };
   }
-  globalThis.__det = { play };
+  globalThis.__det = { play, oxWrap };
 })();`;
 vm.runInContext(HARNESS, ctx, { filename: 'determinism-harness' });
-/* An outside pilot (OUTSIDE PILOTS): the tests' stand-in, run the way the
-   loader runs a module from the vault, in every copy of the game. */
+/* An outside pilot (OUTSIDE PILOTS): the tests' stand-in, or the module named
+   by --outside, run the way the loader runs a module from the vault, in every
+   copy of the game, with its hooks counted. */
 const OUTSIDE_ID = 'x0';
-const outsideIn = c => vm.runInContext('Outside.run(' + JSON.stringify(OUTSIDE_ID) + ', ' +
-  JSON.stringify(fs.readFileSync(path.join(here, 'fixtures', 'outside-pilot.js'), 'utf8')) + ')', c, { filename: 'outside-pilot' });
+const OUTSIDE_TEXT = fs.readFileSync(OUTSIDE_FILE, 'utf8');
+const outsideIn = c => {
+  vm.runInContext('Outside.run(' + JSON.stringify(OUTSIDE_ID) + ', ' + JSON.stringify(OUTSIDE_TEXT) + ')', c, { filename: 'outside-pilot' });
+  vm.runInContext('__det.oxWrap(' + JSON.stringify(OUTSIDE_ID) + ')', c);
+};
 outsideIn(ctx);
 /* Run C's copy of the game: loaded on its own, at another size, it takes over
    run A's snapshot partway through and has to play the rest the same. */
@@ -312,12 +345,22 @@ for (const sc of S) {
   const okC = ci < 0 && c.prints.length === a.prints.length - from && !(a.snapBad && a.snapBad.length);
   // the vagrant run has to have taken RONIN's V, both of the ways it ends included, or it proved nothing about it
   const vowCover = sc.name !== 'vagrant' || (a.vow.vows > 0 && a.vow.skyClears > 0 && a.vow.broken > 0);
-  // the outside pilot's run has to have used its hooks, and none of them may have thrown (they are skipped if they do)
-  const ox = sc.name === 'outside' ? JSON.parse(a.ox || '{}') : null;
-  const outsideOk = !ox || (ox.pulses > 0 && ox.keys > 0 && !a.outsideErrs && !b.outsideErrs && !c.outsideErrs);
+  /* The outside pilot's run has to have played its kit (its step and its keys
+     at the least), and none of its hooks may have thrown: they are skipped if
+     they do, so a broken one would otherwise pass unseen. */
+  let ox = null, outsideOk = true;
+  if (sc.name === 'outside') {
+    const calls = {};
+    for (const r of [a, b, c]) for (const [k, n] of Object.entries(JSON.parse(r.oxCalls || '{}'))) calls[k] = (calls[k] || 0) + n;
+    const hooks = (a.oxHooks || '').split(',').filter(Boolean);
+    ox = { calls, hooks, unused: hooks.filter(h => !calls[h]), errs: [a.outsideErrs, b.outsideErrs, c.outsideErrs].filter(Boolean).join(' / ') };
+    outsideOk = calls.step > 0 && calls.key > 0 && !ox.errs;
+  }
   if (!ok || !okC || !vowCover || !outsideOk) failed++;
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
-  const oxNote = ox ? `  · outside: ${ox.pulses} pulses, ${ox.keys} keys` + (outsideOk ? '' : ` (HOOKS FAILED: ${[a.outsideErrs, b.outsideErrs, c.outsideErrs].filter(Boolean).join(' / ') || 'none used'})`) : '';
+  const oxNote = ox ? `  · outside: ${path.basename(OUTSIDE_FILE)}, ${ox.hooks.length - ox.unused.length}/${ox.hooks.length} hooks used` +
+    (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
+    (outsideOk ? '' : ` (HOOKS FAILED: ${ox.errs || 'step or key never played'})`) : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +

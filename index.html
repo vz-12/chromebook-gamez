@@ -1084,9 +1084,10 @@ let autoFire = false;
      dash     space or shift held
      touch    a touch screen;  taim: the right stick's pull, or null
      press    the keys that act, pressed since the last step
+     held     an outside pilot's keys held down (OUTSIDE_HELD), as a string: '' for everyone else
      local    sampled from this machine's own devices */
 const newInput = () => ({ mx: 0, my: 0, ax: 0, ay: 0, trig: false, lmb: false, auto: false,
-                          dash: false, touch: false, taim: null, press: [], local: true });
+                          dash: false, touch: false, taim: null, press: [], held: '', local: true });
 const inputQueue = [];
 const inputPress = k => { inputQueue.push(k); };
 function inputSample(rec) {
@@ -1112,6 +1113,7 @@ function inputSample(rec) {
   rec.touch = isTouch;
   rec.taim = touchUI.aim ? { dx: touchUI.aim.x - touchUI.aim.ox, dy: touchUI.aim.y - touchUI.aim.oy } : null;
   rec.press = inputQueue.splice(0);
+  rec.held = P.outside ? OUTSIDE_HELD.filter(k => keys[k]).join('') : '';   // only an outside pilot reads keys held (OUTSIDE PILOTS)
   rec.local = true;
 }
 let inputSource = inputSample;           // the devices; a replay, the test, later a partner stand in here
@@ -1351,6 +1353,9 @@ const CHAR = () => CHARS[selectedChar];
    before that block is reached. */
 const OUTSIDE = { by: new Map(), errs: {}, loading: new Set() };   // loading: the ids on their way
 let outsideWorld = {};                   // the run's own share of an outside pilot's state: plain data, emptied by resetGame
+// the keys an outside pilot's kit is played in a run (pressed: playKey), and the ones it may also read held (P.in.held)
+const OUTSIDE_KEYS = ['1', '2', '3', '4', 'q', 'e', 'f', 'z', 'x', 'c', 'v'];
+const OUTSIDE_HELD = OUTSIDE_KEYS;
 
 /* ------------------------------ the awakening -----------------------------
    A hull that has been through its own rite and come back out of it. The flag
@@ -4077,6 +4082,7 @@ function killEnemy(e, ang = 0) {
 
 function killBody(e, ang) {
   e.dead = true;
+  outsideEv('kill', e);                  // an outside pilot's kit hears every death (OUTSIDE PILOTS)
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
   P.kills++;                             // to whoever landed it: in co-op, the pilot it was resolved as
@@ -4256,6 +4262,7 @@ function hurtPlayer(dmg, opts) {
   if (P.down) return;                    // a wreck cannot be hurt further
   if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
+  if (outsideCut()) return;                // nor while an outside pilot's has it (OUTSIDE PILOTS)
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
   /* THE VAGRANT's parry. This function is the funnel every source of damage
@@ -4280,6 +4287,13 @@ function hurtPlayer(dmg, opts) {
     return;
   }
   if (P.iframe > 0) return;
+  /* An outside pilot's kit sees the blow first: true takes it whole, a number
+     is what lands instead (OUTSIDE PILOTS). */
+  if (P.outside) {
+    const h = outsideCall(P.charId, 'hurt', dmg, opts);
+    if (h === true) return;
+    if (typeof h === 'number' && Number.isFinite(h)) { if (h <= 0) return; dmg = h; }
+  }
   // CANCER: outside your shell, movement is what gets you hurt
   if (P.molt && len(P.vx, P.vy) > 60) dmg *= 2.2;
   if (P.shield > 0) {
@@ -4407,6 +4421,7 @@ function enterStage(def) {
   seedDeepNodes(def);
   arenaReset(true);
   mortars.length = 0; portals.length = 0; cages.length = 0;
+  outsideEv('stage', def);              // an outside pilot's kit hears the floor change (OUTSIDE PILOTS)
 }
 
 // Kept for the pre-portal path: walk the normal rotation by absolute index.
@@ -35536,6 +35551,7 @@ function resetGame() {
   eid = 0; hackSerial = 0; roninCleaveId = 0; roninSplitId = 0; odRingId = 0; hlHeldSeq = 0;
   shopkeepTake = 0; waveTimer = 0; spawnT = 0; ambientT = 3;
   inputQueue.length = 0;
+  outsideEv('run');                      // an outside pilot's kit hears that a run begins (OUTSIDE PILOTS)
 }
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
@@ -35558,6 +35574,7 @@ function gameOver(quiet) {
      no stats, no best, no board, no ladder, no day, no codex — a sandbox,
      like freeplay (see OUTSIDE PILOTS). */
   if (coopMine().outside) {
+    outsideEv('dead', quiet);            // and its kit hears the end
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false, outside: true };
     if (!quiet) {
@@ -35866,6 +35883,8 @@ function handleKey(k) {
     return;
   }
   if (state === 'amalcut') return;         // it does not take input
+  // an outside pilot: every key its kit answers is played on the next step, like the rest (OUTSIDE PILOTS)
+  if (state === 'play' && P.outside && !inHub && !inVigil && OUTSIDE_KEYS.includes(k)) { inputPress(k); return; }
   if (k === 'q') { inputPress(k); return; }   // the keys that act are played on the next step: playKey
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
      and ventFire() already refuses anything that is not holding a lance. */
@@ -36285,6 +36304,7 @@ function checkLevel() {
     P.level++;
     P.xpNext = Math.round(8 + P.level * 5 + Math.pow(P.level, 1.65) * 1.6);
     offers = offerUpgrades();
+    outsideEv('level', P.level);         // an outside pilot's kit hears the level (OUTSIDE PILOTS)
     // Blood Price is charged when the extra card is dealt, not when it is taken
     if (P.bloodP && offers.length > 3) {
       const cost = Math.max(1, Math.round(P.maxHp * 0.12));
@@ -36533,6 +36553,8 @@ function update(dt) {
     if (P.roninSkyClear && P.roninSkyClear.slow) sl = Math.min(sl, SC_SLOW);
     // and SUPERUSER's, the same way
     if (suCutIn()) sl = Math.min(sl, SU_SLOW);
+    // and an outside pilot's, however its kit says (OUTSIDE PILOTS): the room, never the hull
+    if (P.outside) sl = Math.min(sl, outsideSlow());
     slowmo = Math.min(slowmo, sl);
   });
   const wdt = dt * slowmo;
@@ -36723,7 +36745,10 @@ function updatePlayer(dt) {
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
-  if (P.malware && wantDash && P.dashCh > 0 && P.dashT <= 0) {
+  if (P.outside && outsideHas(P.charId, 'dash')) {
+    // an outside pilot's own blink, on its own clock: true when it took the press (OUTSIDE PILOTS)
+    if (wantDash && !outsideCut() && outsideCall(P.charId, 'dash', ix, iy) === true) inputDashTaken();
+  } else if (P.malware && wantDash && P.dashCh > 0 && P.dashT <= 0) {
     inputDashTaken();
     P.dashCh--;
     burst(P.x, P.y, 16, P.malware.col, 240, 3, 0.4);
@@ -36788,7 +36813,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || outsideCut()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -36852,7 +36877,11 @@ function updatePlayer(dt) {
   odKitTick(dt);
   roninKitTick(dt);          // RONIN's kit: its cooldowns, the cleaves and their scores, the wounds
 
-  if (P.weapon === 'laser' && P.diaryT <= 0) {
+  if (P.outside && outsideHas(P.charId, 'fire')) {
+    /* An outside pilot fires its own way (OUTSIDE PILOTS): told whether the
+       trigger is down, the step, and the game's own rate bonuses. */
+    if (!outsideCut()) outsideCall(P.charId, 'fire', firing && P.diaryT <= 0, dt, rateMul);
+  } else if (P.weapon === 'laser' && P.diaryT <= 0) {
     updateLance(dt);
     // The beam has to go out before the next charge starts, so fire rate buys
     // uptime: at the 250% floor the gap is short enough to read as autofire.
@@ -43355,6 +43384,8 @@ function updateBullets(dt) {
       b.hit = true;
       // a stolen body's rounds fly in your array, so say whose they are
       damageEnemy(e, dmg, b.crit, b.px, b.py, b.hacked ? { hacked: true } : undefined);
+      // a round an outside pilot tagged (b.ox): its kit hears where it landed (OUTSIDE PILOTS)
+      if (b.ox !== undefined && P.outside) outsideCall(P.charId, 'hit', e, b, dmg);
       // SCORPIO: inject venom that builds with every sting
       if (b.venom && !e.dead) {
         e.psn = Math.min(12, (e.psn || 0) + b.venom);
@@ -43676,6 +43707,7 @@ function render() {
   drawGrid(ox, oy);
   drawArena();
   hlDrawFloor();              // ALL HALLOWS: an area's floor
+  pilotsDraw(() => outsideDraw('back'));   // an outside pilot's: what it makes of the room itself (OUTSIDE PILOTS)
   drawHazards();
   drawDeepNodes();
   drawTear();
@@ -43855,6 +43887,7 @@ function render() {
   { const vq = vowPhase(); if (vq) drawRoninVowScreen(vq); }       // RONIN's V: its cut-in, then the vow's edge
   if (roninShown()) drawRoninScreen(roninW());
   { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
+  outsideDraw('screen');      // an outside pilot's cut-ins, over the frame and its HUD (OUTSIDE PILOTS)
   halDeathHud();
   if (P.patchT > 0) {                  // the whole book is a timer, so show it
     ctx.save();
@@ -43898,7 +43931,10 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   lsDrawHint();         // lockstep: who is choosing, who paused
-  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn()) drawCrosshair();   // not over a cut-in
+  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCut()) {   // not over a cut-in
+    if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
+    else drawCrosshair();
+  }
   // every other screen has no system cursor either, so it carries the pointer
   if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
   // his ending outlives his body, but it is not drawn over a screen the
@@ -53505,6 +53541,8 @@ function drawBullets() {
     if (!inView(b.x, b.y, 40)) continue;
     // co-op: each pilot's pass draws its own shots, in its colours and its skin
     if (PILOTS.length > 1 && ((b.by && b.by.pid) || 0) !== PILOT.on) continue;
+    // a round an outside pilot tagged, in its own look (OUTSIDE PILOTS)
+    if (b.ox !== undefined && P.outside && outsideHas(P.charId, 'bullet')) { outsideDrawAs('bullet', b); continue; }
     // zodiac rounds read differently at a glance
     const c = b.hacked ? HACK_COL
             : b.arrow ? '#fcd34d' : b.venom ? '#a3e635' : b.solar ? '#fb923c'
@@ -56703,6 +56741,8 @@ function renderMenu() {
       drawGlow(0, 0, 42, ch.col, 0.45);
       ctx.globalCompositeOperation = 'source-over';
     }
+    // an outside pilot draws its own place in the row (OUTSIDE PILOTS)
+    if (ch.outside && outsideHas(ch.id, 'hangar')) { outsideDrawFor(ch.id, 'hangar', on, shut); ctx.restore(); return; }
     ctx.rotate(-Math.PI / 2);
     ctx.globalAlpha = shut ? 0.14 : (on ? 1 : 0.32);
     ctx.lineWidth = 2.2;
@@ -56722,6 +56762,7 @@ function renderMenu() {
       ctx.fillText('LOCKED  ' + (ch.lock ? ch.lock(Save.profile) : ''), hx, selY + 24);
     }
   });
+  if (C.outside) outsideDrawFor(C.id, 'menu', cxp, selY);   // and the menu, while it is the one chosen
   ctx.font = "800 15px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = C.col;
   ctx.fillText(C.n, cxp, selY + 46);
@@ -63402,18 +63443,40 @@ function drawMenuPvp() {
    VR.pilot(def) makes it a pilot. def is a CHARS entry: its id (the one the
    vault gave the module, and no other), n, col, bullet, tag, d, hp, speed,
    dmg, rate, and weapon, one of the game's own: 'bullet', 'laser' or
-   'blade'. Then its hooks, every one of them optional:
+   'blade'. Then its hooks, every one of them optional. The run's:
      init(p)     a new pilot: its state goes on p.ox
      step(dt)    each play step, as the pilot (P), once it has moved and fired
-     key(k)      a key queued for this step (q f z x c v e, or 'parry'),
-                 before the game sees it: true takes it
-     hull()      the hull's outline, nose along +x (hullPath: the menu draws it too)
-     floor()     drawn in the room, with the marks on the floor
+     key(k)      a key queued for this step, before the game sees it: true
+                 takes it. In a run every key of OUTSIDE_KEYS (1 2 3 4 q e f
+                 z x c v) is queued for it, and the right button as 'parry'.
+                 What is held down of those is P.in.held, a string ('qx').
+     fire(on, dt, rateMul)   the weapon, in its place: `on` is the trigger
+                 (the left button, J, autofire), rateMul the game's rate bonuses.
+                 A round it fires with fireBullet and tags (b.ox = anything)
+                 is reported by hit() and drawn by bullet().
+     hit(e, b, dmg)          a tagged round of its own landed on e
+     dash(mx, my)            space or shift, with charges or not, in place of
+                 the game's dash: true when it took the press
+     hurt(dmg, opts)         a blow about to land, past the game's i-frames:
+                 true takes it whole, a number is what lands instead
+     slow()      the room's clock, 0 to 1, while it is slowing it (the hull never is)
+     cut()       true while a cut-in of its own has the screen: the room is held
+                 at slow(), the hull stands still, nothing lands on it, no crosshair
+     ev(name, ...)           what happens in the run: 'run' (a run begins),
+                 'stage' (def: the floor changes), 'kill' (e), 'level' (n), 'dead'
+   And the drawing's, each run as its pilot with the canvas saved around it:
+     back()      the room itself, over its floor and under everything on it
+     floor()     in the room, with the marks on the floor
      under()     just under the hull
+     hull()      the hull's outline, nose along +x (hullPath: the menu draws it too)
      over()      just over it
      fx()        with the weapons, in the room's additive pass
+     bullet(b)   one of its tagged rounds, in place of the game's look
      hud()       on the screen, beside the HUD
-   The drawing hooks run as their pilot, with the canvas saved around them.
+     screen()    on the screen, over the frame and the HUD: its cut-ins
+     cursor()    the crosshair, in place of the game's
+     hangar(on, shut)        its place in the menu's row of hulls, centred on it
+     menu(x, y)  the menu, while it is the pilot chosen (x, y: the row's centre)
    A hook that throws is logged once and skipped, and the run goes on.
 
    What it never does is count. A run flown by an outside pilot is recorded
@@ -63423,7 +63486,8 @@ function drawMenuPvp() {
    copy of it, nor PvP, whose page never loads it.
    ========================================================================= */
 const OUTSIDE_URL = '/api/vault';
-const OUTSIDE_HOOKS = ['init', 'step', 'key', 'hull', 'floor', 'under', 'over', 'fx', 'hud'];
+const OUTSIDE_HOOKS = ['init', 'step', 'key', 'fire', 'hit', 'dash', 'hurt', 'slow', 'cut', 'ev',
+                       'back', 'floor', 'under', 'hull', 'over', 'fx', 'bullet', 'hud', 'screen', 'cursor', 'hangar', 'menu'];
 const OUTSIDE_WEAPONS = ['bullet', 'laser', 'blade'];
 
 const outsideHas = (id, name) => { const O = OUTSIDE.by.get(id); return !!(O && O[name]); };
@@ -63445,6 +63509,32 @@ function outsideDraw(name) {
   if (!P.outside || !outsideHas(P.charId, name)) return;
   ctx.save();
   try { outsideCall(P.charId, name); } finally { ctx.restore(); }
+}
+// the same, handed something to draw (a round)
+function outsideDrawAs(name, ...a) {
+  ctx.save();
+  try { outsideCall(P.charId, name, ...a); } finally { ctx.restore(); }
+}
+// a drawing hook of a pilot by its id, flying or not: the menu's
+function outsideDrawFor(id, name, ...a) {
+  if (!outsideHas(id, name)) return;
+  ctx.save();
+  try { outsideCall(id, name, ...a); } finally { ctx.restore(); }
+}
+// a cut-in of the pilot's own has the screen (cut())
+const outsideCut = () => !!(P.outside && outsideCall(P.charId, 'cut'));
+// the room's clock while the pilot slows it (slow()): 1 when it does not
+function outsideSlow() {
+  const s = outsideCall(P.charId, 'slow');
+  return typeof s === 'number' && s >= 0 && s < 1 ? s : 1;
+}
+// something happened in the run: each outside pilot's kit hears it, as that pilot
+function outsideEv(name, ...a) {
+  if (PILOTS.length < 2) { if (P.outside) outsideCall(P.charId, 'ev', name, ...a); return; }
+  for (let k = 0; k < PILOTS.length; k++) {
+    const q = pilotP(k);
+    if (q && q.outside) pilotDo(k, () => outsideCall(P.charId, 'ev', name, ...a));
+  }
 }
 
 /* VR.pilot: the def checked, made a CHARS entry, and its hooks kept. `id` is
@@ -65492,7 +65582,7 @@ const LS_RESEND = 0.05;               // while waiting, our inputs go out again 
    it lands, and inputs already sampled behind it must still fall inside the
    dash's own 0.17 s or a second dash would follow the first. */
 const LS_DELAY_MIN = 3, LS_DELAY_MAX = 8;
-const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e'];   // the keys that act, as they travel
+const LS_KEYS = ['parry', 'q', 'f', 'z', 'x', 'c', 'v', 'e', '1', '2', '3', '4'];   // the keys that act, as they travel
 // the guest's choices: the shared pause, and what is its own pilot's (its cards, its gear, what it buys); every other is the host's
 const LS_UI_GUEST = new Set(['pause', 'resume', 'pick', 'gearTake', 'gearLeave', 'gearBack', 'buy']);
 const LS_UI_PAUSE = new Set(['pause', 'resume']);   // and the ones that are not a choice: no waiting on them
@@ -65533,8 +65623,12 @@ function lsWrite(r) {
   wI(Math.round(r.mx * 1000)); wI(Math.round(r.my * 1000));
   wPos(r.ax); wPos(r.ay);
   const u = r.ui && r.ui.length ? r.ui : null;
-  w8((r.trig ? 1 : 0) | (r.lmb ? 2 : 0) | (r.auto ? 4 : 0) | (r.dash ? 8 : 0) | (r.touch ? 16 : 0) | (r.taim ? 32 : 0) | (u ? 64 : 0));
+  // an outside pilot's held keys, as a bit each of OUTSIDE_HELD (no bytes at all for anyone else)
+  let held = 0;
+  for (const c of r.held || '') { const i = OUTSIDE_HELD.indexOf(c); if (i >= 0) held |= 1 << i; }
+  w8((r.trig ? 1 : 0) | (r.lmb ? 2 : 0) | (r.auto ? 4 : 0) | (r.dash ? 8 : 0) | (r.touch ? 16 : 0) | (r.taim ? 32 : 0) | (u ? 64 : 0) | (held ? 128 : 0));
   if (r.taim) { wI(Math.round(r.taim.dx)); wI(Math.round(r.taim.dy)); }
+  if (held) wI(held);
   const p = (r.press || []).map(k => LS_KEYS.indexOf(k)).filter(i => i >= 0);
   w8(p.length); for (const i of p) w8(i);
   if (u) { w8(u.length >> 1); for (const v of u) w8(v); }   // menu choices: act, index
@@ -65546,6 +65640,7 @@ function lsRead() {
   const b = r8();
   r.trig = !!(b & 1); r.lmb = !!(b & 2); r.auto = !!(b & 4); r.dash = !!(b & 8); r.touch = !!(b & 16);
   r.taim = b & 32 ? { dx: rI(), dy: rI() } : null;
+  if (b & 128) { const h = rI(); r.held = OUTSIDE_HELD.filter((c, i) => h & (1 << i)).join(''); }
   const n = r8();
   r.press = [];
   for (let i = 0; i < n; i++) { const k = LS_KEYS[r8()]; if (k) r.press.push(k); }
@@ -65779,7 +65874,7 @@ function lsHostInput(rec) {
   if (!h) { Object.assign(rec, newInput()); return; }
   rec.mx = h.mx; rec.my = h.my; rec.ax = h.ax; rec.ay = h.ay;
   rec.trig = h.trig; rec.lmb = h.lmb; rec.auto = h.auto; rec.dash = h.dash;
-  rec.touch = h.touch; rec.taim = h.taim; rec.press = h.press.slice();
+  rec.touch = h.touch; rec.taim = h.taim; rec.press = h.press.slice(); rec.held = h.held || '';
   rec.local = (MP.role === 'guest') === (PILOT.on === 1);   // the keys it spends are this machine's
 }
 /* A menu choice, in lockstep: into our next record, not into the game. The
