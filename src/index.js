@@ -15,6 +15,8 @@
                         (boards.js; the page is /leaderboard/)
      /api/account/look  a profile's banner, picture and decals: what the account
                         owns and what it has picked (looks.js)
+     /api/vault         code kept out of this public repo, handed only to the
+                        accounts allowed it (vault.js)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
@@ -27,6 +29,7 @@ import room from './room.js';
 import turn from './turn.js';
 import account from './account.js';
 import looks from './looks.js';
+import vault from './vault.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
@@ -43,7 +46,7 @@ const json = (body, status) =>
 
 const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
                  '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
-                 '/api/boards': boards };
+                 '/api/boards': boards, '/api/vault': vault };
 
 export default {
   async fetch(req, env) {

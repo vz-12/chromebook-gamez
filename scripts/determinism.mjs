@@ -34,6 +34,7 @@
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
 import vm from 'node:vm';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -69,7 +70,9 @@ const HARNESS = `(() => {
       bullets.map(b => pk(b, ['x', 'y', 'vx', 'vy'])), ebullets.map(b => pk(b, ['x', 'y', 'vx', 'vy'])),
       gems.map(g => pk(g, ['x', 'y', 'v'])), drops.map(d => [d.kind, ...pk(d, ['x', 'y'])]),
       hazards.map(h => [h.kind, ...pk(h, ['x', 'y', 'r'])]), Object.entries(P.up || {}).sort(),
-      RUN_FLAGS.map(k => r(RUN[k]))]);
+      RUN_FLAGS.map(k => r(RUN[k])),
+      // an outside pilot's own state, on the pilot and the run's share (OUTSIDE PILOTS)
+      P.ox || null, outsideWorld]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -160,16 +163,22 @@ const HARNESS = `(() => {
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad, vow: run.vow };
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow, outsideErrs: Object.keys(OUTSIDE.errs).join(','), ox: P.ox ? JSON.stringify(P.ox) : '' };
   }
   globalThis.__det = { play };
 })();`;
 vm.runInContext(HARNESS, ctx, { filename: 'determinism-harness' });
+/* An outside pilot (OUTSIDE PILOTS): the tests' stand-in, run the way the
+   loader runs a module from the vault, in every copy of the game. */
+const OUTSIDE_ID = 'x0';
+const outsideIn = c => vm.runInContext('Outside.run(' + JSON.stringify(OUTSIDE_ID) + ', ' +
+  JSON.stringify(fs.readFileSync(path.join(here, 'fixtures', 'outside-pilot.js'), 'utf8')) + ')', c, { filename: 'outside-pilot' });
+outsideIn(ctx);
 /* Run C's copy of the game: loaded on its own, at another size, it takes over
    run A's snapshot partway through and has to play the rest the same. */
 let C = null;
 const copyC = () => {
-  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); }
+  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); outsideIn(C.ctx); }
   return C;
 };
 
@@ -191,6 +200,8 @@ const S = [
   { name: 'rite-hacker',char: 'hacker', seed: 112, steps: 7200,  kit: true, starter: "enterRite('hacker')" },
   { name: 'rite-melee', char: 'melee',  seed: 113, steps: 7200,  kit: true, starter: "enterRite('melee')" },
   { name: 'patch',      char: 'runner', seed: 114, steps: 7200,  starter: "hlAreaStart('patch')" },
+  // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
+  { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
@@ -301,13 +312,17 @@ for (const sc of S) {
   const okC = ci < 0 && c.prints.length === a.prints.length - from && !(a.snapBad && a.snapBad.length);
   // the vagrant run has to have taken RONIN's V, both of the ways it ends included, or it proved nothing about it
   const vowCover = sc.name !== 'vagrant' || (a.vow.vows > 0 && a.vow.skyClears > 0 && a.vow.broken > 0);
-  if (!ok || !okC || !vowCover) failed++;
+  // the outside pilot's run has to have used its hooks, and none of them may have thrown (they are skipped if they do)
+  const ox = sc.name === 'outside' ? JSON.parse(a.ox || '{}') : null;
+  const outsideOk = !ox || (ox.pulses > 0 && ox.keys > 0 && !a.outsideErrs && !b.outsideErrs && !c.outsideErrs);
+  if (!ok || !okC || !vowCover || !outsideOk) failed++;
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
+  const oxNote = ox ? `  · outside: ${ox.pulses} pulses, ${ox.keys} keys` + (outsideOk ? '' : ` (HOOKS FAILED: ${[a.outsideErrs, b.outsideErrs, c.outsideErrs].filter(Boolean).join(' / ') || 'none used'})`) : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}`);
 }
 if (!ONLY) {
   // a seed must matter

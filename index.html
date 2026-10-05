@@ -1345,6 +1345,12 @@ const charOpen = c => PVP ? PVP.pilotOpen(c.id) : (!c.need || c.need(Save.profil
 const charLocked = i => !charOpen(CHARS[i]);
 let selectedChar = 0;
 const CHAR = () => CHARS[selectedChar];
+/* Pilots whose code is not in this file join CHARS while the page runs, and
+   only on a machine allowed them: see OUTSIDE PILOTS. Declared up here
+   because newPlayer() and hullPath() ask after them, and both run long
+   before that block is reached. */
+const OUTSIDE = { by: new Map(), errs: {}, loading: new Set() };   // loading: the ids on their way
+let outsideWorld = {};                   // the run's own share of an outside pilot's state: plain data, emptied by resetGame
 
 /* ------------------------------ the awakening -----------------------------
    A hull that has been through its own rite and come back out of it. The flag
@@ -1535,8 +1541,9 @@ function applyChar(i, force) {
 /* --------------------------------- player -------------------------------- */
 function newPlayer() {
   const C = CHAR();
-  return {
+  const p = {
     weapon: C.weapon, charId: C.id, rate0: C.rate,
+    outside: C.outside ? 1 : 0,          // its code is not in this file: see OUTSIDE PILOTS
     in: newInput(),                      // what it is told to do: see the input record
     hacker: C.id === 'hacker' ? 1 : 0,   // what it kills, it keeps
     fly: C.id === 'ember' ? 1 : 0,       // EMBER holds its lance inside the crowd
@@ -1640,6 +1647,8 @@ function newPlayer() {
     rootCmd: 0, rootCmdT: 0, key: 0,
     salvageUsed: false, lastTarget: null
   };
+  if (p.outside) outsideCall(C.id, 'init', p);   // and its own state, on p.ox
+  return p;
 }
 let P = newPlayer();
 
@@ -35461,6 +35470,7 @@ function resetGame() {
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
   applyChar(runCharNext != null ? runCharNext : selectedChar, runCharNext != null);
+  outsideWorld = {};                     // before the pilot: an outside pilot's init may set up its share of the run
   P = newPlayer();
   runCharNext = null; runAwakeNext = null;
   gearStart();                           // returns at once for the other three
@@ -35544,6 +35554,19 @@ function gameOver(quiet) {
      to the death screen cannot both claim it. */
   /* A rush is scored on its own ladder and nowhere else — like the daily it
      leaves your best, the board and the escalation window alone. */
+  /* An outside pilot's run counts for nothing, whatever kind of run it was:
+     no stats, no best, no board, no ladder, no day, no codex — a sandbox,
+     like freeplay (see OUTSIDE PILOTS). */
+  if (coopMine().outside) {
+    lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                  sector: stage.name, loop: loopNum, isRecord: false, outside: true };
+    if (!quiet) {
+      explode(P.x, P.y, 180, 0, COL.player);
+      burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
+      shake(1); Audio_.over();
+    }
+    return;
+  }
   if (Chal.on && Chal.on.rush) {
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false,
@@ -35628,6 +35651,7 @@ function gameOver(quiet) {
    on (inputStep), so in lockstep a press is part of the same step on both
    machines. Each is weighed again here, against the game as it is now. */
 function playKey(k) {
+  if (P.outside && outsideCall(P.charId, 'key', k)) return;   // an outside pilot's kit takes its keys first
   if (k === 'parry') { bladeParry(); return; }        // the right button
   if (k === 'q') { useBook(); return; }
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
@@ -36524,6 +36548,7 @@ function update(dt) {
     updatePlayer(dt);
     if (!P.down) updateDrones(dt);   // your escort does not fight over your wreck
     updateSentries(dt);
+    if (P.outside) outsideCall(P.charId, 'step', dt);   // an outside pilot's kit: see OUTSIDE PILOTS
   });
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
      the boss shell never calls the AI again, so the check has to live somewhere
@@ -43674,6 +43699,7 @@ function render() {
     drawRoninGrave();          // RONIN's V: the grave marker
     { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
     { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
+    outsideDraw('floor');      // an outside pilot's, on the floor
   });
 
   // --- additive layer: glows -------------------------------------------
@@ -43725,7 +43751,11 @@ function render() {
   drawRoninDashTrail();       // RONIN's X: where the hull has been on a dash
   drawRoninStillUnder();      // RONIN's C: the stance, under the hull
   hlWrWorldUnder();          // ALL HALLOWS: a prize skin's trail, and what it sheds under the ship
-  if (state !== 'dead' && !P.odStrike && !(P.roninExec && P.roninExec.hull === false)) { drawRiteUnderHull(); drawPlayer(); drawRiteOverHull(); }
+  if (state !== 'dead' && !P.odStrike && !(P.roninExec && P.roninExec.hull === false)) {
+    drawRiteUnderHull(); outsideDraw('under');
+    drawPlayer();
+    drawRiteOverHull(); outsideDraw('over');
+  }
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) mpDrawTag();   // the other pilot, named
   });
   hlDrawWorldOver();          // ALL HALLOWS: the light pass, when the art lights the room
@@ -43750,6 +43780,7 @@ function render() {
     drawRoninCleaves();         // RONIN's Z: the strokes
     drawRoninSky();             // RONIN's X: the paths, and the sky clearing along them
     drawRoninVowWorld();        // RONIN's V: the vow on the hull, and its line to the grave
+    outsideDraw('fx');          // an outside pilot's kit, in the room
   });
   drawMalFx();
   drawParticles();
@@ -43802,6 +43833,7 @@ function render() {
   }
   drawChalFog();      // over the world, under everything you need to read
   drawHUD();
+  outsideDraw('hud');   // an outside pilot's, beside the HUD
   mpDrawHud();
   drawChalHud();
   drawHackHud();
@@ -53001,6 +53033,7 @@ function drawLance() {
    never be redrawn in one of them and left stale in the others. */
 function hullPath(id) {
   ctx.beginPath();
+  if (outsideHas(id, 'hull')) { outsideCall(id, 'hull'); return; }   // an outside pilot draws its own (OUTSIDE PILOTS)
   if (id === 'hacker') {
     // a splayed fork: two prongs and an open bay where a barrel would be
     ctx.moveTo(18, 0);
@@ -62699,11 +62732,12 @@ const Account = {
   },
 
   /* What PvP reads, worked out from a profile: the pilots open to it, the
-     ones awake, the challenges cleared, and the reward upgrades that leaves. */
+     ones awake, the challenges cleared, and the reward upgrades that leaves.
+     Never an outside pilot: profiles show these to anybody. */
   unlocks(p) {
     const has = (f, x) => { try { return !!f(x); } catch (e) { return false; } };
     return {
-      chars: CHARS.filter(c => !c.need || has(c.need, p)).map(c => c.id),
+      chars: CHARS.filter(c => !c.outside && (!c.need || has(c.need, p))).map(c => c.id),
       awake: Object.keys(p.awakened || {}).filter(k => p.awakened[k]),
       chal: (p.chal || []).slice(),
       ups: UPGRADES.filter(u => (u.lock || u.need) && (!u.lock || (p.chal || []).includes(u.lock))
@@ -62739,6 +62773,7 @@ const Account = {
     Account.me = r.d.account || null;
     Account.turnstile = r.d.turnstile || null;
     Account.status = '';
+    if (Account.me && r.d.vault) Outside.boot(r.d.vault);   // what the vault holds for this account (OUTSIDE PILOTS)
     if (Account.me) await Account.pull();
   },
 
@@ -62862,6 +62897,7 @@ const Account = {
     /* Signed in, the awards are the whole account's: every profile it has
        played on, and its own perks (a dev account's are everything). */
     Awards.sync();
+    Outside.ask();                     // and whatever the vault holds for it (OUTSIDE PILOTS)
   },
 
   async signIn(name, pass) {
@@ -63340,6 +63376,155 @@ function drawMenuPvp() {
   ctx.restore();
   ctx.textAlign = 'center';
 }
+
+/* ===========================================================================
+   OUTSIDE PILOTS
+
+   A pilot whose code is not in this file. The game, its Worker and its site
+   are all public, so a pilot meant to stay out of sight is kept in the vault
+   instead (src/vault.js): the Worker hands its module only to the accounts
+   allowed it, and GET /api/account names what this one may load. Fetched
+   and run here, it joins CHARS on this machine, and on no other.
+
+   The module is the body of a function run in the page's own global scope,
+   handed one argument, VR. It reads and calls the game by the game's own
+   names (P, enemies, fireBullet, damageEnemy, simRand...), and it lives by
+   the game's rules, because lockstep and the run snapshots hold it to them
+   exactly as they hold everything else:
+   - every roll that changes the run is simRand/simRnd/simRndi/simPick;
+     rnd/rndi/pick only for what nothing but the drawing reads;
+   - the run never reads what the drawing writes;
+   - its state is plain data, kept where the snapshot already looks: on the
+     pilot, as P.ox (made by init; in co-op each pilot carries its own), and
+     the run's share in outsideWorld, which resetGame empties. Nothing kept
+     in either may be a function, or point into the module.
+
+   VR.pilot(def) makes it a pilot. def is a CHARS entry: its id (the one the
+   vault gave the module, and no other), n, col, bullet, tag, d, hp, speed,
+   dmg, rate, and weapon, one of the game's own: 'bullet', 'laser' or
+   'blade'. Then its hooks, every one of them optional:
+     init(p)     a new pilot: its state goes on p.ox
+     step(dt)    each play step, as the pilot (P), once it has moved and fired
+     key(k)      a key queued for this step (q f z x c v e, or 'parry'),
+                 before the game sees it: true takes it
+     hull()      the hull's outline, nose along +x (hullPath: the menu draws it too)
+     floor()     drawn in the room, with the marks on the floor
+     under()     just under the hull
+     over()      just over it
+     fx()        with the weapons, in the room's additive pass
+     hud()       on the screen, beside the HUD
+   The drawing hooks run as their pilot, with the canvas saved around them.
+   A hook that throws is logged once and skipped, and the run goes on.
+
+   What it never does is count. A run flown by an outside pilot is recorded
+   nowhere (gameOver), so no board, ladder or day hears of it; its id never
+   goes into the unlocks an account keeps (Account.unlocks), which profiles
+   show to anybody; and it flies neither co-op, whose other machine has no
+   copy of it, nor PvP, whose page never loads it.
+   ========================================================================= */
+const OUTSIDE_URL = '/api/vault';
+const OUTSIDE_HOOKS = ['init', 'step', 'key', 'hull', 'floor', 'under', 'over', 'fx', 'hud'];
+const OUTSIDE_WEAPONS = ['bullet', 'laser', 'blade'];
+
+const outsideHas = (id, name) => { const O = OUTSIDE.by.get(id); return !!(O && O[name]); };
+
+// a hook, if there is one: what it answers. One that throws is logged once and skipped.
+function outsideCall(id, name, ...a) {
+  const O = OUTSIDE.by.get(id);
+  if (!O || !O[name]) return undefined;
+  try { return O[name](...a); }
+  catch (e) {
+    const k = id + '.' + name;
+    if (!OUTSIDE.errs[k]) console.error('outside pilot ' + k + ':', e);
+    OUTSIDE.errs[k] = (OUTSIDE.errs[k] || 0) + 1;
+    return undefined;
+  }
+}
+// a drawing hook, as the pilot being drawn, with the canvas left as it was found
+function outsideDraw(name) {
+  if (!P.outside || !outsideHas(P.charId, name)) return;
+  ctx.save();
+  try { outsideCall(P.charId, name); } finally { ctx.restore(); }
+}
+
+/* VR.pilot: the def checked, made a CHARS entry, and its hooks kept. `id` is
+   what the vault called the module being run; a def under any other id is
+   refused, so a module can never stand in for a pilot it is not. */
+function outsidePilot(id, def) {
+  if (!def || def.id !== id) throw new Error('an outside pilot is the id it was loaded as: ' + id);
+  if (CHARS.some(c => c.id === id && !c.outside)) throw new Error(id + ' is one of the game\'s own pilots');
+  if (!OUTSIDE_WEAPONS.includes(def.weapon)) throw new Error(id + ': no weapon called ' + def.weapon);
+  for (const k of ['hp', 'speed', 'dmg', 'rate'])
+    if (!(Number.isFinite(def[k]) && def[k] > 0)) throw new Error(id + ': ' + k + ' is a number over 0');
+  const c = { id, n: String(def.n || id).toUpperCase(), weapon: def.weapon,
+              col: String(def.col || '#e2e8f0'), bullet: String(def.bullet || def.col || '#f8fafc'),
+              tag: String(def.tag || ''), d: String(def.d || ''),
+              hp: def.hp, speed: def.speed, dmg: def.dmg, rate: def.rate, outside: true };
+  const hooks = {};
+  for (const h of OUTSIDE_HOOKS) if (typeof def[h] === 'function') hooks[h] = def[h];
+  const at = CHARS.findIndex(x => x.id === id);
+  if (at >= 0) CHARS[at] = c; else CHARS.push(c);    // run again, it takes its own place
+  OUTSIDE.by.set(id, hooks);
+  // the pilot this machine flew last, if it was this one (charIdx never leaves the device: ACCT_DEVICE)
+  const i = CHARS.indexOf(c);
+  if (state === 'menu' && Save.profile.charIdx === i) applyChar(i);
+  return c;
+}
+
+const Outside = {
+  /* What the account reply named ({ id, h, size } each), fetched and run in
+     turn. Not in PvP, which plays only the pilots its rules list. */
+  async boot(list) {
+    if (PVP || !Array.isArray(list)) return;
+    // one already here, or already on its way (the boot and a sign-in can both ask), is not fetched again
+    for (const it of list)
+      if (it && typeof it.id === 'string' && !OUTSIDE.by.has(it.id) && !OUTSIDE.loading.has(it.id)) await Outside.load(it);
+  },
+
+  // signed in on this page: the account reply again, for what it names
+  async ask() {
+    if (PVP || Account.off()) return;
+    const r = await Account.call('GET');
+    if (r.ok && r.d && r.d.vault) await Outside.boot(r.d.vault);
+  },
+
+  /* Asked for by its hash, so this browser keeps it until it changes (the
+     Worker says so only for that), and run only if the text is the text the
+     Worker meant: a copy damaged anywhere on the way is never run. */
+  async load(it) {
+    OUTSIDE.loading.add(it.id);
+    try {
+      const r = await fetch(OUTSIDE_URL + '?id=' + encodeURIComponent(it.id) + '&h=' + encodeURIComponent(it.h || ''),
+                            { credentials: 'same-origin' });
+      if (!r.ok) return false;
+      const text = await r.text();
+      const want = r.headers.get('x-vault-hash') || it.h, got = await Outside.hash(text);
+      if (want && got && got !== want) {
+        console.error('outside pilot ' + it.id + ': not the text the vault sent');
+        return false;
+      }
+      Outside.run(it.id, text);
+      return true;
+    } catch (e) {
+      console.error('outside pilot ' + it.id + ':', e);
+      return false;
+    } finally { OUTSIDE.loading.delete(it.id); }
+  },
+
+  // sha-256, hex; null where the page has no subtle crypto (an insecure address), which skips the check
+  async hash(text) {
+    const s = globalThis.crypto && globalThis.crypto.subtle;
+    if (!s) return null;
+    const d = new Uint8Array(await s.digest('SHA-256', new TextEncoder().encode(text)));
+    return Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
+  },
+
+  // the module, run: VR is all it is handed, and the page is all it reads
+  run(id, text) {
+    const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def) });
+    new Function('VR', text)(VR);
+  }
+};
 
 /* ===========================================================================
    LINK DIAGNOSTIC
@@ -65035,6 +65220,7 @@ const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'V
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
   'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
+  'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
@@ -65874,6 +66060,9 @@ function openLan() {
   lanView = 'home';
   lanCode = '';
   uiArm = 0.18;
+  /* An outside pilot flies alone, for now: the other machine has no copy of
+     it to run (OUTSIDE PILOTS). Into the lobby as the first pilot open. */
+  if (CHAR().outside) { applyChar(0); Save.profile.charIdx = selectedChar; Save.writeLocal(); }
   if (Net.phase !== 'live') { netHangUp(true); Net.phase = 'off'; Net.note = ''; }
   netIceConfig();             // the relay's credentials, asked for while a side is picked
   Audio_.select();
@@ -65951,7 +66140,7 @@ function lanCycleChar() {
   let n = selectedChar;
   for (let k = 0; k < CHARS.length; k++) {
     n = (n + 1) % CHARS.length;
-    if (charOpen(CHARS[n])) break;
+    if (charOpen(CHARS[n]) && !CHARS[n].outside) break;   // an outside pilot flies alone, for now (OUTSIDE PILOTS)
   }
   applyChar(n);
   Save.profile.charIdx = selectedChar;
@@ -67632,7 +67821,8 @@ function chalCheckGoal(key) {
   if (key !== c.goal) return;
   Chal.won = true;
 
-  const first = !chalDone(c.id);
+  // an outside pilot's clear is never kept: it counts for nothing (OUTSIDE PILOTS)
+  const first = !chalDone(c.id) && !coopMine().outside;
   if (first) {
     Save.profile.chal = [...new Set([...(Save.profile.chal || []), c.id])];
     RUN.chal = [...new Set([...(RUN.chal || []), c.id])];

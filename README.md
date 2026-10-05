@@ -368,6 +368,26 @@ profile that signed in on Netlify keeps its grants through the sync above.
 npm run test:awards                        # about a second
 ```
 
+### The vault
+
+Code that must stay out of this public repo, such as an outside pilot (OUTSIDE
+PILOTS in `index.html`), is kept in D1 instead and handed by `GET /api/vault`
+only to an account holding its `vault:<id>` perk. Everyone else, signed in or
+not, gets the same 404 as a missing id. An id is opaque: the name and
+everything else are in the text. Keep the files themselves outside the repo
+and put them from there:
+
+```sh
+npm run vault -- put <id> <file> --remote  # a new revision; the page re-fetches it by its hash
+npm run vault -- give <account> <id> --remote
+npm run vault -- list --remote             # also: drop, take, who, hash
+npm run test:vault                         # a few seconds: the store and the route
+npm run test:outside                       # a few seconds: the loader, in the game, end to end
+```
+
+Without `--remote` (or `--local` for `npm run dev`'s database) it only prints
+what it would do. `src/vault.js` explains how an entry is stored.
+
 ## Ads
 
 The game has room for one Google AdSense banner. It sits across the top of the
