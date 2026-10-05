@@ -179,6 +179,9 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life) => `(() => { 
       else if (P.charId === 'ember') P.vent = VENT_MAX;
       else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
     });
+    // RONIN's V: low enough for it to light (the bot's presses then take it), and now and then a grave one blow from breaking
+    if (${!!kitRun} && t % 900 === 300) pilotsEach(() => { if (P.charId === 'melee' && P.roninT > 0) P.hp = Math.min(P.hp, P.maxHp * 0.25); });
+    if (${!!kitRun} && t % 1800 === 700) pilotsEach(() => { if (P.charId === 'melee' && P.roninGrave) P.roninGrave.hp = 1; });
     // the rarer screens, opened on both machines at once when the run is in play; the host's bot answers them
     const shared = LS.paused ? 'pause' : state;
     __seen.add(state);
@@ -196,6 +199,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life) => `(() => { 
     if (t % 60 === 0) __prints.set(LS.run * 1e6 + t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
       pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT']),
+      [P, pilotP(1) || {}].map(o => [o.roninVow ? r(o.roninVow.t) : null, o.roninGrave ? r(o.roninGrave.hp) : null, o.roninSkyClear ? o.roninSkyClear.stage + o.roninSkyClear.i : null, r(o.roninBroken)]),   // RONIN's V
       Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),
       bullets.map(b => pk(b, ['x', 'y'])), ebullets.map(b => pk(b, ['x', 'y'])),

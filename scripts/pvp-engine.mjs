@@ -652,6 +652,9 @@ section('a match left part way');
   ok(f && f.lv[0] === belt.lv[0] + 3 && f.lv[1] === belt.lv[1] + 3, 'THE VAGRANT\'s three are levels, like the others\' cards', [belt.lv, f && f.lv]);
   const same = sameGame(H, G);
   ok(same.n >= 10 && same.parted.length === 0 && H.run('LS.resyncs') === 0, 'the same game on both', same);
+  // RONIN's V needs the room to go for its grave, and a duel has no room: it is not in PvP (RONIN-V-PLAN.md)
+  ok(H.run('pilotDo(0, () => { const was = [P.hp, P.roninVowUsed]; P.hp = 1; P.roninVowUsed = false; const why = vowWhy(); [P.hp, P.roninVowUsed] = was; return why; })') === 'NOT IN A DUEL',
+     'RONIN\'s V is refused in a duel, however low the pilot is');
 
   // the guest quits from the game's own pause screen; the host is told
   G.run('quitToMenu()'); ship(G, H);

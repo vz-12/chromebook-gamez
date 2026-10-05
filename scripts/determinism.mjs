@@ -62,7 +62,9 @@ const HARNESS = `(() => {
   // what the game is, at a moment: everything a desync would show up in
   function fingerprint() {
     return JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), state,
-      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'maxHp', 'level', 'xp', 'dmg', 'fireRate', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
+      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'maxHp', 'level', 'xp', 'dmg', 'fireRate', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'roninBroken']),
+      // RONIN's V: the vow's clock, its grave, SKY CLEAR
+      [P.roninVow ? r(P.roninVow.t) : null, P.roninGrave ? r(P.roninGrave.hp) : null, P.roninSkyClear ? P.roninSkyClear.stage + P.roninSkyClear.i : null],
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'atkT', 'cd', 'state', 'ang', 'id'])]),
       bullets.map(b => pk(b, ['x', 'y', 'vx', 'vy'])), ebullets.map(b => pk(b, ['x', 'y', 'vx', 'vy'])),
       gems.map(g => pk(g, ['x', 'y', 'v'])), drops.map(d => [d.kind, ...pk(d, ['x', 'y'])]),
@@ -91,6 +93,10 @@ const HARNESS = `(() => {
         else if (P.charId === 'ember') { P.vent = VENT_MAX; press.push('f'); }
         else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
       }
+      // RONIN's V: low enough for it to light (the cycle of presses below then takes it), and now and
+      // then a grave one blow from breaking
+      if (P.charId === 'melee' && P.roninT > 0 && k % 900 === 300) P.hp = Math.min(P.hp, P.maxHp * 0.25);
+      if (P.charId === 'melee' && P.roninGrave && k % 1800 === 700) P.roninGrave.hp = 1;
       if (k % 75 === 40) press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) press.push('f');
       if (P.charId === 'melee' && k % 61 === 0) press.push('parry');
@@ -127,7 +133,8 @@ const HARNESS = `(() => {
     P.maxHp = P.hp = 60000; P.dmg *= 3;
     inputSource = bot;
     if (o.from) snapRead(JSON.parse(o.from));     // run C: the run so far is another copy's, taken over here
-    run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null };
+    run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null,
+            vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0] };
   }
   function play(o) {
     start(o);
@@ -140,12 +147,20 @@ const HARNESS = `(() => {
       update(STEP);
       if (o.b && o.b.draw && run.k % 5 === 0) { try { render(); } catch (err) { run.drawErrors++; if (!run.firstDrawError) run.firstDrawError = String(err && err.stack || err).split('\\n').slice(0, 3).join(' | '); } }
       run.maxWave = Math.max(run.maxWave, wave);
+      // RONIN's V, counted as it happens: the vow taken, SKY CLEAR played, a grave broken
+      if (typeof vowOn === 'function') {
+        const w = run.was, v = !!P.roninVow, s = !!P.roninSkyClear, br = P.roninBroken || 0;
+        if (v && !w[0]) run.vow.vows++;
+        if (s && !w[1]) run.vow.skyClears++;
+        if (br > w[2]) run.vow.broken++;
+        run.was = [v, s, br];
+      }
       for (const e of enemies) if (e.boss) run.bosses.add(e.boss);
       if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad };
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow };
   }
   globalThis.__det = { play };
 })();`;
@@ -284,12 +299,15 @@ for (const sc of S) {
   // run C against run A, from the snapshot on
   const from = at / 60, ci = c.prints.findIndex((h, j) => h !== a.prints[from + j]);
   const okC = ci < 0 && c.prints.length === a.prints.length - from && !(a.snapBad && a.snapBad.length);
-  if (!ok || !okC) failed++;
+  // the vagrant run has to have taken RONIN's V, both of the ways it ends included, or it proved nothing about it
+  const vowCover = sc.name !== 'vagrant' || (a.vow.vows > 0 && a.vow.skyClears > 0 && a.vow.broken > 0);
+  if (!ok || !okC || !vowCover) failed++;
+  const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}`);
 }
 if (!ONLY) {
   // a seed must matter

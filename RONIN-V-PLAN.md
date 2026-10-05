@@ -4,6 +4,12 @@ Branch: `ronin-v`. Nothing here reaches `main` (and so voidrunner.online)
 until you say ship. This file is `.md`, so `.assetsignore` keeps it off the
 public site. All art is placeholder, behind named hooks, as with Z, X and C.
 
+## Status (4 Oct)
+
+All five steps are built on `ronin-v`, with placeholder art, and every test
+suite passes. Nothing is shipped. The numbers below are drafts for you to
+tune, and the questions at the end are still open.
+
 ## Your brief (4 Oct)
 
 - **Who he is.** RONIN is an undead samurai who left his master to chase a
@@ -139,13 +145,14 @@ Each step is a commit on `ronin-v`, tested before the next one starts.
      everything that can hit it, breaking it and the weak minute, undead,
      RONIN held and then ended.
    - Also: the V key's look on the HUD, placeholder art hooks, and admin
-     buttons (VOW, BREAK GRAVE, LOW HP).
+     buttons in the local dev panel (VOW, SPEND VOW, GRAVE 10%, BREAK GRAVE).
 2. **No restraint:** damage, cooldowns, chains of 5, wounding hits.
 3. **The vow's moves:** the 16 versions above.
 4. **SKY CLEAR.**
 5. **Tests:**
    - the determinism and lockstep suites press V, so the whole vow is
-     checked for staying in step;
+     checked for staying in step. The determinism run fails if THE VAGRANT
+     never takes the vow, never plays SKY CLEAR, or never breaks a grave;
    - in-game runs through the test harness;
    - PvP refuses V.
 
