@@ -137,13 +137,29 @@
   }
   const practice = pilot => play({ mode: 'practice', pilot });
 
-  $('host').addEventListener('click', () => play({ mode: 'match', role: 'host', pilot: $('matchPilot').value }));
+  /* A friend's match takes the bonus a watched ad earned (ads.js), once;
+     online matches never carry one. */
+  const bonus = () => (window.PvpAds ? PvpAds.take() : 0);
+  $('host').addEventListener('click', () => play({ mode: 'match', role: 'host', pilot: $('matchPilot').value, bonus: bonus() }));
   $('joinForm').addEventListener('submit', e => {
     e.preventDefault();
     const code = $('code').value.trim().toUpperCase();
     if (!/^[A-Z0-9]{4}$/.test(code)) { $('matchMsg').textContent = 'A CODE IS FOUR LETTERS AND NUMBERS'; return; }
-    play({ mode: 'match', role: 'guest', code, pilot: $('matchPilot').value });
+    play({ mode: 'match', role: 'guest', code, pilot: $('matchPilot').value, bonus: bonus() });
   });
+
+  /* The ad suggestion (ads.js): off until ads are set up for this address.
+     It shows only while an ad is ready, and says so once one is watched. */
+  const adGot = () => { $('adGot').hidden = !(window.PvpAds && PvpAds.pending()); };
+  if (window.PvpAds) {
+    PvpAds.start({
+      offer: ready => { $('adOffer').hidden = !ready || PvpAds.pending(); },
+      earned: () => { $('adOffer').hidden = true; adGot(); },
+      skipped: () => { $('adOffer').hidden = true; }
+    });
+    $('adWatch').addEventListener('click', () => PvpAds.watch());
+    adGot();
+  }
 
   /* The queues (/api/pvp/queue): join with a pilot, then poll every two
      seconds until the server pairs this player with someone. The match it

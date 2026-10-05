@@ -22,7 +22,7 @@
                dur        the belt's length in seconds (4.8)
              and who is fighting, from this player's side (the same fields
              PVP_ART.result gets):
-               me, them   { name, pilot, pilotName, col, awake }
+               me, them   { name, pilot, pilotName, col, awake, bonus }
                bestOf     3 or 5
                queue      'ranked' | 'casual' | 'friend'
                league     { id, n } in ranked, else null
@@ -43,7 +43,9 @@
        score     [mine, theirs] rounds          bestOf  3 or 5
        time      the match's fighting time, in seconds
        me, them  { name, pilot: 'runner' | 'ember' | 'hacker' | 'melee',
-                   pilotName, col (the pilot's colour, '#rrggbb'), awake }
+                   pilotName, col (the pilot's colour, '#rrggbb'), awake,
+                   bonus (upgrades a watched ad added to their start: 0,
+                   or 2 in a friend match; the lobby's ads.js) }
        rounds    each round in order: { won (mine?), at (match clock, s),
                  left (the winner's health when it ended, 0 to 1) }
        dealt     [mine, theirs]: health each took off the other

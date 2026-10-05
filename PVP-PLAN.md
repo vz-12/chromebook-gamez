@@ -810,19 +810,41 @@ export const QUEUES = {
      in `src/pvp-rewards.js` (renamed from `pvp-podiums.js`). Both are
      empty until the cosmetics (Phase 7).
    - Tested: the server suite is 252 checks; 9 mutants, all caught.
-3. **Between matches (`after`): the suggestions.** User, 4 Oct: "it's not an
-   ad break, it's just a suggestion, you can watch an ad to get 2 more
-   upgrades to start or something like that."
-   - An offer the lobby shows before a queue, never a break: watch an ad,
-     start the next match with, say, 2 more upgrades. Take it or not.
-   - The bonus has to be the server's, not the browser's word: both
-     machines must deal the same starting upgrades (lockstep), so the
-     Matchmaker writes it into the match's sides, like the reward upgrades.
-     A watched ad is recorded server-side and spent by one match.
-   - Casual only. A ranked match stays even; open: whether friend matches
-     get it.
-   - Inert until ads are set up for PvP's address. A new kind of offer is
-     a new hook id, not a change to matchmaking.
+3. **The ad suggestion. Done, as groundwork: off until ads are approved.**
+   User, 4 Oct: "it's not an ad break, it's just a suggestion, you can watch
+   an ad to get 2 more upgrades to start". Then: "only friendly matches
+   (online matches with ads would feel a bit forced in my opinion) and only
+   short ads, nothing unskippable (the site is still awaiting approval, so
+   lay the groundwork and leave it at that)".
+   - **The offer** (`pvp/site/ads.js`, in PLAY A FRIEND): "Watch a short ad
+     and your next friend match starts with 2 more upgrades." It shows only
+     while an ad is ready, and plays only if the player presses WATCH.
+     Closing the ad early just means no bonus.
+   - **The provider:** Google's Ad Placement API, rewarded placement
+     (`adBreak` type `reward`: `beforeReward`, `adViewed`, `adDismissed`,
+     `adBreakDone`). With `PVP_ADS.client` empty, as shipped, nothing is
+     loaded, shown or asked for. Google picks the ad: ask for short,
+     skippable ones in AdSense.
+   - **The bonus:** a watched ad waits in the tab for the next friend match,
+     which takes it once (HOST or JOIN). The engine accepts exactly 2, only
+     in a friend match (`ROUNDS.adBonus`, rounds.js). Each machine says its
+     own in the hello, so both deal the same opening picks. Queued matches
+     never carry one.
+   - **Trust:** it is the browser's word. No web ad can be verified by a
+     server, and a friend match is unrated. A hello claiming any other
+     number counts as nothing.
+   - **To switch it on:**
+     1. PvP's own address (voidrunner-pvp.play101.workers.dev) approved in
+        AdSense, with H5 games ads (the Ad Placement API) enabled.
+     2. The publisher id in `PVP_ADS.client`. `test: true` shows Google's
+        test ads first.
+     3. The site's child-directed treatment set in AdSense: the audience is
+        young.
+   - The belt and result art hooks get each pilot's `bonus`.
+   - Tested: server suite 270 (`ads.js` in Node against a stand-in for
+     Google's API); engine suite 192 (a friend match with the bonus, both
+     games agreeing, a false claim, a queued match without it). 11
+     mutants, all caught.
 
 ### Phase 7 — Cosmetics, a shop and a currency (user, 4 Oct: not yet)
 

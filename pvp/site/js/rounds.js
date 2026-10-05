@@ -30,12 +30,25 @@
     pickEvery: 30,       // seconds of fighting per upgrade, for both
     loserPicks: 1,       // and one more for whoever lost the round
     spawnIframe: 1.5,    // a round's opening grace
-    spawnAt: 0.32        // how far out from the middle each side starts, as a share of the arena's width
+    spawnAt: 0.32,       // how far out from the middle each side starts, as a share of the arena's width
+    adBonus: 2           // what a watched ad adds to a friend match's start (the lobby's ads.js): exactly this, or nothing
   };
   const PHASES = ['belt', 'picks', 'fight', 'end', 'over'];
 
   const match = () => (typeof RUN !== 'undefined' && RUN.pvp) || null;
   const inMatch = () => !!(M.hand && M.hand.mode === 'match' && PILOTS.length > 1 && LS.on);
+
+  /* The ad suggestion's bonus (PVP-PLAN.md, Phase 6 step 3): a friend's
+     match only (a queued one carries a server's match, M.hand.match, and
+     never a bonus), and only exactly ROUNDS.adBonus. Each machine says its
+     own in the hello, so both deal the same opening picks (lockstep). */
+  const friendly = () => !!(M.hand && M.hand.mode === 'match' && !M.hand.match);
+  const ownBonus = () => (friendly() && M.hand.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0);
+  const hello = M.hello, peerHello = M.peerHello;
+  M.hello = () => Object.assign(hello(), { bonus: ownBonus() });
+  M.peerHello = d => { peerHello(d); M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0; };
+  // pilot k's bonus, the same on both machines
+  M.bonusOf = k => (k === pilotMine() ? ownBonus() : (M.peerBonus || 0));
   /* Best of three below gold, five from there: a ranked match plays to its
      league's length (the lower league's, when two meet), as the server's
      match says, so both machines play the same match. A match with a friend,
@@ -144,9 +157,10 @@
     m.t += dt;
     if (m.t < ROUNDS.beltT) return;
     m.phase = 'picks'; m.t = 0;
-    m.owed = [ROUNDS.startPicks, ROUNDS.startPicks];
+    m.bonus = [M.bonusOf(0), M.bonusOf(1)];          // a watched ad's, in a friend's match
+    m.owed = [ROUNDS.startPicks + m.bonus[0], ROUNDS.startPicks + m.bonus[1]];
     state = 'play';
-    banner('CHOOSE ' + ROUNDS.startPicks + ' UPGRADES', '#fde047', 2.2);
+    banner('CHOOSE ' + m.owed[pilotMine()] + ' UPGRADES', '#fde047', 2.2);
   };
 
   /* A pilot out of health (reviveOrDie, as that pilot, after Second Wind and

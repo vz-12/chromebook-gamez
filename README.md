@@ -288,6 +288,14 @@ names its entry gates (`pvp/src/gates.js`). Ranked needs an account a day
 old and 10 runs of the game; casual only a sign-in. Dev accounts skip the
 gates. The lobby turns a shut queue's button off and says why.
 
+**The ad suggestion** (PVP-PLAN.md, Phase 6 step 3), off until ads are
+approved. In PLAY A FRIEND, while an ad is ready, the lobby offers: "Watch a
+short ad and your next friend match starts with 2 more upgrades." To switch
+it on, approve PvP's address in AdSense with H5 games ads (the Ad Placement
+API), set child-directed treatment, then put the publisher id in
+`PVP_ADS.client` in `pvp/site/ads.js` (`test: true` for Google's test ads
+first). Friend matches only; queued matches never carry the bonus.
+
 **Hardening.**
 - Per-account rate limits on the queue, the referee and opening friend's
   matches (`pvp/src/limits.js`).

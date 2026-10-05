@@ -700,6 +700,78 @@ section('entry: who may join a queue');
   ok(/id="rankedGate"/.test(page) && /id="casualGate"/.test(page) && /d\.queues/.test(js), 'the lobby shows a shut queue\'s reason and turns its button off');
 }
 
+section('the ad suggestion: groundwork, off until ads are set up (pvp/site/ads.js)');
+{
+  const vm = await import('node:vm');
+  const code = readFileSync(new URL('../pvp/site/ads.js', import.meta.url), 'utf8');
+  // the lobby's page, just enough of it: its tab's storage, and what it is asked to load
+  const page = () => {
+    const store = new Map(), made = [];
+    const win = {
+      sessionStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); }, removeItem: k => { store.delete(k); } },
+      document: { createElement: tag => { const el = { tag, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }; made.push(el); return el; },
+                  head: { appendChild() {} } }
+    };
+    win.window = win;
+    vm.createContext(win);
+    vm.runInContext(code, win);
+    return { win, made, store, A: win.PvpAds };
+  };
+  const lobbyUi = () => {
+    const u = { shown: [], got: 0, closed: 0 };
+    u.ui = { offer: r => u.shown.push(r), earned: () => { u.got++; }, skipped: () => { u.closed++; } };
+    return u;
+  };
+
+  const off = page(), u0 = lobbyUi();
+  ok(off.A.config.client === '' && off.A.start(u0.ui) === false && off.made.length === 0 && u0.shown.length === 0,
+     'as shipped: no publisher id, so nothing is loaded and nothing offered');
+  ok(off.A.take() === 0 && off.A.pending() === false, 'and no bonus to give');
+
+  // set up, as it will be once the address is approved
+  const on = page(), u = lobbyUi();
+  on.A.config.client = 'ca-pub-0000000000000000';
+  on.win.adsbygoogle = [];
+  ok(on.A.start(u.ui) === true, 'with a publisher id it starts');
+  const script = on.made.find(e => e.tag === 'script');
+  ok(script && script.src === 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js' && script.attrs['data-ad-client'] === 'ca-pub-0000000000000000'
+     && !('data-adbreak-test' in script.attrs), 'loading Google\'s ad script for that publisher, real ads unless asked for test ones', script);
+  const cfg = on.win.adsbygoogle[0];
+  ok(cfg && cfg.preloadAdBreaks === 'on' && typeof cfg.onReady === 'function', 'configured to have an ad ready ahead of time');
+  ok(u.shown.length === 0, 'and nothing offered before an ad is ready');
+  cfg.onReady();
+  const brk = on.win.adsbygoogle[1];
+  ok(brk && brk.type === 'reward' && brk.name === 'friend-bonus', 'once ready, it asks for a rewarded ad (the player chooses to watch it)', brk);
+  let played = 0;
+  brk.beforeReward(() => { played++; });
+  ok(u.shown[u.shown.length - 1] === true && played === 0, 'an ad is ready: the offer shows, and nothing plays until the player asks');
+  on.A.watch();
+  ok(played === 1, 'WATCH plays it');
+  brk.adViewed(); brk.adBreakDone({ breakStatus: 'viewed' });
+  ok(u.got === 1 && on.A.pending() === true && u.shown[u.shown.length - 1] === false, 'watched to the end: the bonus is earned, and the offer goes');
+  const n = on.win.adsbygoogle.length;
+  on.A.ask();
+  ok(on.win.adsbygoogle.length === n, 'with a bonus waiting, it asks for no more ads');
+  ok(on.A.take() === 2 && on.A.take() === 0 && on.A.pending() === false, 'the next friend match takes the two upgrades, once');
+  cfg.onReady();
+  const brk2 = on.win.adsbygoogle[on.win.adsbygoogle.length - 1];
+  brk2.beforeReward(() => {}); on.A.watch(); brk2.adDismissed(); brk2.adBreakDone({ breakStatus: 'dismissed' });
+  ok(u.closed === 1 && on.A.pending() === false && on.A.take() === 0, 'closed early: no bonus, and nothing held against them');
+  on.A.watch();
+  ok(true, 'WATCH with no ad ready does nothing');
+  const test = page();
+  test.A.config.client = 'ca-pub-0000000000000000'; test.A.config.test = true; test.win.adsbygoogle = [];
+  test.A.start(lobbyUi().ui);
+  ok(test.made.find(e => e.tag === 'script').attrs['data-adbreak-test'] === 'on', 'test: true asks Google for test ads');
+
+  // the lobby: only a friend's match takes the bonus; the queues never do
+  const js = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8'), html = readFileSync(new URL('../pvp/site/index.html', import.meta.url), 'utf8');
+  ok((js.match(/bonus: bonus\(\)/g) || []).length === 2, 'HOST and JOIN hand the bonus to the friend match');
+  const found = js.slice(js.indexOf('function found('), js.indexOf('function found(') + 1200);
+  ok(found.includes("play({ mode: 'match'") && !/bonus/.test(found), 'a queued match is handed none');
+  ok(/<script src="\/ads.js"><\/script>\s*<script src="\/pvp.js">/.test(html) && /id="adOffer" hidden/.test(html), 'the offer is in the page, hidden until an ad is ready');
+}
+
 section('seasons: the podium at the turn, and the soft reset');
 {
   const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;

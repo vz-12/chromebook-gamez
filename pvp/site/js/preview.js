@@ -24,7 +24,7 @@
 
   const pilot = (id, name, awake) => {
     const c = CHARS.find(x => x.id === id) || CHARS[0];
-    return { name, pilot: c.id, pilotName: c.n, col: c.col, awake };
+    return { name, pilot: c.id, pilotName: c.n, col: c.col, awake, bonus: 0 };
   };
   // who is fighting and what kind of match (match.js's M.versus), as samples
   const versus = (a, b) => ({

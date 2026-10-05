@@ -139,7 +139,8 @@
     const c = CHAR(id);
     const name = mine ? Save.profile.name || 'YOU' : MP.peerName || (Q ? Q.sides[k].name : 'RIVAL');
     const awake = p ? !!p.awake : Q ? !!Q.sides[k].awake : mine ? isAwake(id) : !!MP.peerAwake;
-    return { name: String(name).toUpperCase(), pilot: id, pilotName: c ? c.n : '', col: c ? c.col : '#67e8f9', awake };
+    return { name: String(name).toUpperCase(), pilot: id, pilotName: c ? c.n : '', col: c ? c.col : '#67e8f9', awake,
+             bonus: M.bonusOf ? M.bonusOf(k) : 0 };       // upgrades a watched ad added to the start (friend matches)
   }
   /* Who is fighting, from this side, and what kind of match: what the belt
      (rounds.js) and the result are both handed beside their own data. */

@@ -680,6 +680,30 @@ section('a match left part way');
      'its result screen: the other side went, a win by forfeit, both pilots though the second has gone', left);
 }
 
+section('a friend match with a watched ad: two more upgrades to start');
+{
+  // the host watched an ad in the lobby (ads.js); the guest's hand claims 7, and its hello claims 5: neither is an ad's
+  const H = boot({ mode: 'match', role: 'host', pilot: 'runner', me: ME, bonus: 2 }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL, bonus: 7 }, RIVAL_ACCT);
+  await flush();
+  G.run('const __hello = PVP.hello; PVP.hello = () => Object.assign(__hello(), { bonus: 5 });');
+  const ship = link(H, G);
+  H.run('PVP.frame()'); ship(H, G);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  ok(H.run('[PVP.bonusOf(0), PVP.bonusOf(1)].join()') === '2,0' && G.run('[PVP.bonusOf(0), PVP.bonusOf(1)].join()') === '2,0',
+     'both games agree: two for the host, who watched; none for the guest, whatever its hand or hello claimed',
+     [H.run('[PVP.bonusOf(0), PVP.bonusOf(1)].join()'), G.run('[PVP.bonusOf(0), PVP.bonusOf(1)].join()')]);
+  await play(H, G, ship, 60 * 60, () => H.run('RUN.pvp && RUN.pvp.phase === "fight" && RUN.pvp.t > 1'));
+  const belt = H.run('__log.belt'), f = H.run('__log.phases').find(x => x.phase === 'fight');
+  ok(f && f.lv[0] === belt.lv[0] + 5 && f.lv[1] === belt.lv[1] + 3, 'the host starts the first round with five upgrades, the guest with three', [belt.lv, f && f.lv]);
+  ok(H.run('JSON.stringify(RUN.pvp.bonus)') === '[2,0]' && G.run('JSON.stringify(RUN.pvp.bonus)') === '[2,0]', 'kept in the match, on both');
+  const same = sameGame(H, G);
+  ok(same.n >= 10 && same.parted.length === 0 && H.run('LS.resyncs') === 0 && G.run('LS.resyncs') === 0, 'and the same game on both, step for step', same);
+  ok(H.run('PVP.beltData(RUN.pvp).me.bonus') === 2 && H.run('PVP.beltData(RUN.pvp).them.bonus') === 0
+     && G.run('PVP.beltData(RUN.pvp).me.bonus') === 0 && G.run('PVP.beltData(RUN.pvp).them.bonus') === 2,
+     'the art hooks are told who has it, each from its own side');
+}
+
 section('a queued match: the server pairs them, and its rules fly');
 {
   // the duelist's account owns EMBER awake and a reward upgrade; both have played their placements into GOLD
@@ -741,6 +765,8 @@ section('a queued match: the server pairs them, and its rules fly');
   ok(G.run('PVP.ref.broke') === false && H.run('PVP.ref.broke') === false, 'the start kept the rules: nothing to tell the referee');
   await play(H, G, ship, 60 * 20, () => H.run('!!RUN.pvp'));
   ok(H.run('RUN.pvp.bestOf') === 5 && G.run('RUN.pvp.bestOf') === 5, 'GOLD\'s length on both machines, from the server\'s match: best of five');
+  ok(H.run('PVP.hand.bonus = 2, PVP.bonusOf(0) + PVP.bonusOf(1)') === 0 && G.run('PVP.hand.bonus = 2, PVP.bonusOf(0) + PVP.bonusOf(1)') === 0,
+     'a queued match never carries an ad\'s bonus, whatever the hand says');
 
   // the guest quits: a rated forfeit, and both ratings move
   G.run('quitToMenu()'); ship(G, H);
