@@ -47,10 +47,16 @@
                                     being placed or never ranked), rating (or
                                     null), rank (on the ladder, or null),
                                     joined (ms), pilot (the one they flew
-                                    last in PvP, or null) }
+                                    last in PvP, or null), banner (the one
+                                    the player picked: 'world' is the default;
+                                    the rest are in src/looks.js and drawn in
+                                    BANNER, THE LOOKS) }
                                              full width × 200 (130 on a phone)
      avatar(g, w, h, t, p)          the player's emblem, half over the cover.
-                                    p = { display, user, league, pilot }
+                                    p = { display, user, league, pilot,
+                                    picture (the one the player picked:
+                                    'sigil' is the default; the rest in
+                                    PICTURE, THE LOOKS) }
                                                    128 × 128 (88 on a phone)
      statCard(g, w, h, t, s)        behind each placement tile. s = { kind:
                                     'season' | 'all' | 'day' | 'pvp', rank
@@ -63,6 +69,11 @@
                                     30 × 30 in a match
      award(g, w, h, t, a)           a season podium. a = { season:
                                     '2026-09', rank: 1 | 2 | 3, score } 64 × 64
+     decal(g, w, h, t, d)           one of the profile's decals, in the row
+                                    under the name, and in CUSTOMIZE. d = {
+                                    id (the catalog's, src/looks.js), n (its
+                                    name), i (its place in the row, from 0) }
+                                                   40 × 40 (34 on a phone)
      matchRow(g, w, h, t, m)        behind each recent match. m = { won: true
                                     | false | null (no contest), verdict:
                                     'played' | 'forfeit' | 'void', queue:
@@ -847,6 +858,332 @@
     disc(true);
   };
 
+  /* ------------------------------- THE LOOKS --------------------------------
+     What a profile wears (src/looks.js; PVP-PLAN.md, Phase 7 part 1), each
+     by the catalog's id: the banner (profileBanner's p.banner), the picture
+     (avatar's p.picture) and the decals (the decal hook's d.id). 'world' and
+     'sigil', the cover and the emblem below, are the free defaults and stay
+     exactly as they were drawn; everything here is a first pass, to be
+     redrawn. An id this file does not know draws the default. */
+
+  // the arena's floor in a metal, from the horizon down, its lines running at the eye
+  const coverFloor = (g, w, h, t, hz, M) => {
+    g.save();
+    g.beginPath(); g.rect(0, hz, w, h - hz); g.clip();
+    const floor = g.createLinearGradient(0, hz, 0, h);
+    floor.addColorStop(0, css(lerp([6, 9, 18], M.lo, 0.25))); floor.addColorStop(1, '#060a14');
+    g.fillStyle = floor; g.fillRect(0, hz, w, h - hz);
+    const vx = w * 0.5, fh = h - hz;
+    g.lineWidth = 1;
+    for (let i = -24; i <= 24; i++) {
+      const x1 = vx + i * Math.max(w, 600) * 0.08;
+      const lg = g.createLinearGradient(0, hz, 0, h);
+      lg.addColorStop(0, css(M.mid, 0)); lg.addColorStop(1, css(M.mid, 0.3));
+      g.strokeStyle = lg;
+      g.beginPath(); g.moveTo(vx + i * w * 0.012, hz); g.lineTo(x1, h); g.stroke();
+    }
+    const sp = STILL ? 0.5 : (t * 0.45) % 1;
+    for (let j = 0; j < 14; j++) {
+      const d = j + 1 - sp, y = hz + fh * 0.8 / d;
+      if (y > h + 1) continue;
+      g.strokeStyle = css(M.mid, 0.32 * clamp01((y - hz) / fh * 2.4));
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+    }
+    g.restore();
+    const line = g.createLinearGradient(0, 0, w, 0);
+    line.addColorStop(0, css(M.hi, 0)); line.addColorStop(0.5, css(M.hi, 0.7)); line.addColorStop(1, css(M.hi, 0));
+    g.fillStyle = line; g.fillRect(0, hz - 0.5, w, 1.2);
+  };
+  /* A banner's stage: the sky in its metal, nebulae and stars, o.back behind
+     the horizon, the floor, o.front over it, then the fades every cover has
+     (down to the panel at the foot, up from the dark as it first shows). */
+  const coverStage = (g, w, h, t, p, o) => {
+    const M = o.M, key = (p.user || p.display || '') + ':' + o.id, seed = seedOf(key), r = seeded(seed);
+    const age = life(g, t, key);
+    const sky = g.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, o.top || '#04060d'); sky.addColorStop(1, css(lerp([7, 10, 20], M.lo, o.tint === undefined ? 0.35 : o.tint)));
+    g.fillStyle = sky; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 3; i++)
+      glow(g, r() * w, r() * h * 0.7, (0.22 + r() * 0.3) * Math.max(w, h * 3), i % 2 ? M.hi : M.mid, 0.08 + 0.03 * Math.sin(t * 0.4 + i));
+    const sr = seeded(seed + 7);
+    for (let i = 0; i < (o.stars === undefined ? 80 : o.stars); i++) {
+      const sx = sr(), sy = sr(), z = 0.2 + sr() * 0.8, ph = sr() * TAU;
+      const x = ((sx * w - t * 5 * z) % w + w) % w, y = sy * h * 0.75;
+      g.fillStyle = 'rgba(226,232,240,' + (0.12 + 0.5 * z * (0.6 + 0.4 * Math.sin(t * 1.5 + ph))) + ')';
+      g.fillRect(x - 0.5, y - 0.5, z > 0.85 ? 1.6 : 1, z > 0.85 ? 1.6 : 1);
+    }
+    const hz = Math.round(h * 0.7);
+    if (o.back) o.back(g, w, h, t, hz, r, age);
+    coverFloor(g, w, h, t, hz, M);
+    if (o.front) o.front(g, w, h, t, hz, r, age);
+    const foot = g.createLinearGradient(0, h * 0.45, 0, h);
+    foot.addColorStop(0, 'rgba(9,14,25,0)'); foot.addColorStop(1, 'rgba(9,14,25,0.92)');
+    g.fillStyle = foot; g.fillRect(0, 0, w, h);
+    glint(g, age + 0.6, 9, () => { g.beginPath(); g.rect(0, 0, w, h); }, 0, w, 0, h, 0.05);
+    const dark = 1 - outQuint(age / 1.2);
+    if (dark > 0) { g.fillStyle = 'rgba(5,6,10,' + dark + ')'; g.fillRect(0, 0, w, h); }
+  };
+  // a pilot flying big across a cover, its trail behind it
+  const heroShip = (g, w, h, t, hz, P, awake) => {
+    const s = h * 0.42, bob = STILL ? 0 : Math.sin(t * 0.9) * h * 0.02;
+    const x = w * 0.72 + (STILL ? 0 : Math.sin(t * 0.3) * w * 0.015), y = hz - h * 0.36 + bob, a = -0.32;
+    const tr = g.createLinearGradient(x - Math.cos(a) * w * 0.45, 0, x, 0);
+    tr.addColorStop(0, css(P.M.mid, 0)); tr.addColorStop(1, css(P.M.mid, 0.5));
+    g.strokeStyle = tr; g.lineWidth = s * 0.12; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x - Math.cos(a) * w * 0.45, y - Math.sin(a) * w * 0.45); g.lineTo(x - Math.cos(a) * s * 0.4, y - Math.sin(a) * s * 0.4); g.stroke();
+    if (awake) glow(g, x, y, s * 1.3, rgb(P.awake || P.col), 0.28);
+    pilotShip(g, P, x, y, s, t, { rot: Math.PI / 2 + a, glow: 10, awake });
+  };
+  // embers rising from the floor
+  const embers = (g, w, h, t, hz, col, n) => {
+    const r = seeded(91);
+    for (let i = 0; i < n; i++) {
+      const x0 = r() * w, sp = 12 + r() * 30, ph = r() * 40, sz = 0.8 + r() * 1.8;
+      const y = hz - ((t * sp + ph * 10) % (hz + 20)), x = x0 + Math.sin(t * 1.3 + i) * 8;
+      g.fillStyle = css(col, 0.35 + 0.45 * r());
+      g.fillRect(x, y, sz, sz);
+    }
+  };
+  // a falling rain of code in columns, each column's head bright
+  const codeRain = (g, w, hz, t, col, a, step) => {
+    const r = seeded(17), GL = '01ABCDEF#$<>/';
+    g.font = "600 10px 'JetBrains Mono', monospace";
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let x = step / 2; x < w; x += step) {
+      const sp = 30 + r() * 50, off = r() * 400, len = 5 + Math.floor(r() * 6);
+      const head = ((t * sp + off) % (hz + len * 12));
+      for (let j = 0; j < len; j++) {
+        const y = head - j * 12;
+        if (y < 0 || y > hz) continue;
+        g.fillStyle = css(j ? col : [255, 255, 255], a * (1 - j / len));
+        g.fillText(GL[(Math.floor(t * 6 + x + j * 3)) % GL.length], x, y);
+      }
+    }
+  };
+  // sakura, drifting
+  const petals = (g, w, h, t, col, n) => {
+    const r = seeded(33);
+    for (let i = 0; i < n; i++) {
+      const sp = 14 + r() * 26, x = ((r() * w + t * sp) % (w + 20)) - 10, y = ((r() * h + t * sp * 0.4) % (h * 0.8));
+      g.save(); g.translate(x, y); g.rotate(t * (1 + r()) + i);
+      g.fillStyle = css(col, 0.5 + 0.4 * r());
+      g.beginPath(); g.ellipse(0, 0, 2.6, 1.4, 0, 0, TAU); g.fill();
+      g.restore();
+    }
+  };
+  const metalHex = (hi, mid, lo) => metal(hi, mid, lo);
+  const FIRE = metalHex('#ffedd5', '#fb923c', '#7c2d12'), GOLDEN = METAL.gold;
+  const BLOOD = metalHex('#fee2e2', '#ef4444', '#450a0a'), CODE = metalHex('#ecfccb', '#a3e635', '#1a2e05');
+  const VIOLET = metalHex('#ede9fe', '#a78bfa', '#2e1065'), PINK = metalHex('#fce7f3', '#f472b6', '#500724');
+
+  const BANNER = {
+    // VOIDRUNNER: rings pulsing out over the grid, and the ship
+    runner: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'runner', M: pilotOf('runner').M, back: (g, w, h, t, hz) => {
+      const cx = w * 0.3, cy = hz - h * 0.18;
+      for (let i = 0; i < 5; i++) {
+        const q = STILL ? i / 5 : ((t * 0.25 + i / 5) % 1);
+        g.strokeStyle = css(pilotOf('runner').M.mid, 0.4 * (1 - q)); g.lineWidth = 1.5;
+        g.beginPath(); g.ellipse(cx, cy, q * w * 0.4, q * h * 0.5, 0, 0, TAU); g.stroke();
+      }
+      glow(g, cx, cy, h * 0.3, pilotOf('runner').M.hi, 0.25);
+      heroShip(g, w, h, t, hz, pilotOf('runner'), false);
+    } }),
+    // EMBER: the horizon burning, embers rising
+    ember: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'ember', M: pilotOf('ember').M, back: (g, w, h, t, hz) => {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      for (let x = 0; x < w; x += 10) {
+        const f = 0.5 + 0.5 * Math.sin(x * 0.07 + t * 3) * Math.sin(x * 0.031 - t * 1.7), fh = h * (0.08 + 0.18 * f);
+        const gr = g.createLinearGradient(0, hz - fh, 0, hz);
+        gr.addColorStop(0, 'rgba(251,146,60,0)'); gr.addColorStop(1, 'rgba(251,146,60,0.35)');
+        g.fillStyle = gr; g.fillRect(x, hz - fh, 10, fh);
+      }
+      g.restore();
+      embers(g, w, h, t, hz, rgb('#fdba74'), 50);
+      heroShip(g, w, h, t, hz, pilotOf('ember'), false);
+    } }),
+    // THE HACKER: code falling behind the ship
+    hacker: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'hacker', M: CODE, stars: 30, back: (g, w, h, t, hz) => {
+      codeRain(g, w, hz, t, CODE.mid, 0.4, 16);
+      heroShip(g, w, h, t, hz, pilotOf('hacker'), false);
+    } }),
+    // THE VAGRANT: a pale moon, sakura, and the ship
+    vagrant: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'vagrant', M: pilotOf('melee').M, back: (g, w, h, t, hz) => {
+      const mx = w * 0.26, my = hz - h * 0.38, mr = h * 0.24;
+      glow(g, mx, my, mr * 2.4, rgb('#e0e7ff'), 0.25);
+      g.fillStyle = '#e0e7ff'; g.beginPath(); g.arc(mx, my, mr, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(165,180,252,0.35)'; g.beginPath(); g.arc(mx - mr * 0.3, my - mr * 0.2, mr * 0.2, 0, TAU); g.arc(mx + mr * 0.25, my + mr * 0.3, mr * 0.13, 0, TAU); g.fill();
+      petals(g, w, h, t, rgb('#f9a8d4'), 26);
+      heroShip(g, w, h, t, hz, pilotOf('melee'), false);
+    } }),
+    // OVERDRIVE: a fire's heart behind the horizon, flames reaching up from it
+    overdrive: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'overdrive', M: FIRE, top: '#1a0702', tint: 0.6, back: (g, w, h, t, hz) => {
+      const cx = w * 0.35, cy = hz;
+      glow(g, cx, cy, h * 1.1, FIRE.mid, 0.45);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 18; i++) {
+        const a = Math.PI + (i + 0.5) / 18 * Math.PI, f = STILL ? 0.7 : 0.55 + 0.45 * Math.sin(t * 6 + i * 2.1);
+        const L = h * (0.35 + 0.35 * f);
+        g.strokeStyle = css(lit(FIRE, 0.4 + 0.5 * f), 0.35); g.lineWidth = 6; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(cx + Math.cos(a) * h * 0.12, cy + Math.sin(a) * h * 0.12);
+        g.quadraticCurveTo(cx + Math.cos(a) * L * 0.6 + Math.sin(t * 3 + i) * 6, cy + Math.sin(a) * L * 0.6, cx + Math.cos(a) * L, cy + Math.sin(a) * L);
+        g.stroke();
+      }
+      g.restore();
+      embers(g, w, h, t, hz, rgb('#fed7aa'), 70);
+      heroShip(g, w, h, t, hz, pilotOf('ember'), true);
+    } }),
+    // SUPERUSER: gold rings of bits turning round a seal, gold code behind
+    superuser: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'superuser', M: GOLDEN, top: '#120c02', tint: 0.5, stars: 40, back: (g, w, h, t, hz) => {
+      codeRain(g, w, hz, t, GOLDEN.mid, 0.22, 18);
+      const cx = w * 0.3, cy = hz - h * 0.3;
+      glow(g, cx, cy, h * 0.5, GOLDEN.mid, 0.3);
+      for (let k = 0; k < 3; k++) {
+        const R = h * (0.16 + k * 0.1), n = 18 + k * 8, sp = (k % 2 ? -1 : 1) * (0.4 - k * 0.08);
+        g.strokeStyle = css(GOLDEN.hi, 0.35); g.lineWidth = 1;
+        g.beginPath(); g.ellipse(cx, cy, R * 1.6, R, 0, 0, TAU); g.stroke();
+        for (let i = 0; i < n; i++) {
+          const a = i / n * TAU + t * sp;
+          g.fillStyle = css(GOLDEN.hi, i % 3 ? 0.4 : 0.9);
+          g.fillRect(cx + Math.cos(a) * R * 1.6 - 1, cy + Math.sin(a) * R - 1, 2, 2);
+        }
+      }
+      heroShip(g, w, h, t, hz, pilotOf('hacker'), true);
+    } }),
+    // RONIN: a blood moon, red petals, crescents cut through the sky
+    ronin: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'ronin', M: BLOOD, top: '#120203', tint: 0.55, back: (g, w, h, t, hz) => {
+      const mx = w * 0.26, my = hz - h * 0.36, mr = h * 0.26;
+      glow(g, mx, my, mr * 2.6, BLOOD.mid, 0.4);
+      const mg = g.createRadialGradient(mx - mr * 0.3, my - mr * 0.3, mr * 0.1, mx, my, mr);
+      mg.addColorStop(0, '#fca5a5'); mg.addColorStop(1, '#991b1b');
+      g.fillStyle = mg; g.beginPath(); g.arc(mx, my, mr, 0, TAU); g.fill();
+      for (let i = 0; i < 3; i++) {
+        const q = STILL ? 0.5 : ((t * 0.3 + i / 3) % 1), a = 1 - Math.abs(q * 2 - 1);
+        g.strokeStyle = 'rgba(254,226,226,' + 0.6 * a + ')'; g.lineWidth = 2;
+        g.beginPath(); g.arc(w * (0.45 + i * 0.18), hz - h * (0.3 + i * 0.12), h * 0.3, -2.4 + q, -1.2 + q); g.stroke();
+      }
+      petals(g, w, h, t, rgb('#fca5a5'), 30);
+      heroShip(g, w, h, t, hz, pilotOf('melee'), true);
+    } }),
+    // THE CROWN: a star in a wreath, rays turning behind it
+    crown: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'crown', M: GOLDEN, top: '#0c0802', tint: 0.45, back: (g, w, h, t, hz) => {
+      const cx = w * 0.5, cy = hz - h * 0.34;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * TAU + t * 0.08;
+        g.fillStyle = css(GOLDEN.mid, 0.07);
+        g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, w, a, a + 0.12); g.closePath(); g.fill();
+      }
+      g.restore();
+      glow(g, cx, cy, h * 0.5, GOLDEN.hi, 0.3);
+      g.save(); g.translate(cx, cy);
+      g.strokeStyle = css(GOLDEN.hi, 0.9); g.fillStyle = css(GOLDEN.hi, 0.9); g.lineWidth = 2;
+      MARK.all(g, h * 0.3, t);
+      g.restore();
+    } }),
+    // THE LADDER: the player's league crest, lifted on beams (gold until they have one)
+    ladder: (g, w, h, t, p) => {
+      const id = p.league || 'gold', M = metalOf(id);
+      coverStage(g, w, h, t, p, { id: 'ladder', M, back: (g, w, h, t, hz, r, age) => {
+        const cx = w * 0.5, cy = hz - h * 0.36;
+        g.save(); g.globalCompositeOperation = 'lighter';
+        for (let i = -3; i <= 3; i++) {
+          const bx = cx + i * w * 0.09, bw = 10 + Math.abs(i) * 2;
+          const gr = g.createLinearGradient(0, 0, 0, hz);
+          gr.addColorStop(0, css(M.mid, 0)); gr.addColorStop(1, css(M.mid, 0.16 / (1 + Math.abs(i))));
+          g.fillStyle = gr; g.fillRect(bx - bw / 2, 0, bw, hz);
+        }
+        g.restore();
+        g.save(); g.translate(cx, cy); g.scale(h / 64 * 0.62, h / 64 * 0.62);
+        crestOf(g, id, t, age + 1);
+        g.restore();
+      } });
+    }
+  };
+
+  /* A picture: the sigil's cut (a rounded square that pops in) with o.inner
+     drawn in it on its own colours and triangles, a glint, and the rim in the
+     player's league metal, lit by a running light once they are placed. */
+  const pictureFrame = (g, w, h, t, p, o) => {
+    const S = Math.min(w, h) - 2, x0 = (w - S) / 2, y0 = (h - S) / 2, cr = S * 0.2, M = metalOf(p.league);
+    const age = life(g, t, (p.user || p.display || '') + ':' + o.id), k = outBack(age / 0.7);
+    g.save();
+    g.translate(w / 2, h / 2); g.scale(0.85 + 0.15 * k, 0.85 + 0.15 * k); g.translate(-w / 2, -h / 2);
+    g.globalAlpha = clamp01(age / 0.25);
+    const box = () => rrect(g, x0, y0, S, S, cr);
+    g.save();
+    box(); g.clip();
+    const bg = g.createLinearGradient(x0, y0, x0 + S, y0 + S);
+    bg.addColorStop(0, css(lerp(o.M.mid, [6, 8, 16], 0.55))); bg.addColorStop(1, css(lerp(o.M.lo, [6, 8, 16], 0.6)));
+    g.fillStyle = bg; g.fillRect(x0, y0, S, S);
+    triangles(g, x0, y0, S, S, t, { n: 10, lo: S * 0.06, hi: S * 0.22, speed: 6, col: o.M.hi, alpha: 0.08, seed: 21 });
+    o.inner(g, w / 2, h / 2, S, t, age);
+    const vg = g.createRadialGradient(w / 2, h / 2, S * 0.3, w / 2, h / 2, S * 0.78);
+    vg.addColorStop(0, 'rgba(4,6,12,0)'); vg.addColorStop(1, 'rgba(4,6,12,0.5)');
+    g.fillStyle = vg; g.fillRect(x0, y0, S, S);
+    glint(g, age + 0.2, 6.5, box, x0, x0 + S, y0, y0 + S, 0.22);
+    g.restore();
+    rrect(g, x0 + 1.25, y0 + 1.25, S - 2.5, S - 2.5, cr - 1.25);
+    const rim = g.createLinearGradient(x0, y0, x0 + S * 0.4, y0 + S);
+    rim.addColorStop(0, css(M.hi)); rim.addColorStop(0.5, css(M.mid)); rim.addColorStop(1, css(M.lo));
+    g.strokeStyle = rim; g.lineWidth = 2.5; g.stroke();
+    if (!STILL && p.league && g.createConicGradient) {
+      const run = g.createConicGradient(t * 0.8, w / 2, h / 2);
+      run.addColorStop(0, css(M.hi, 0)); run.addColorStop(0.06, css(M.hi, 0.9)); run.addColorStop(0.12, css(M.hi, 0));
+      run.addColorStop(1, css(M.hi, 0));
+      g.strokeStyle = run; g.lineWidth = 2.5; g.stroke();
+    }
+    g.restore();
+  };
+  // a pilot's picture: its ship big in the middle, and awake, its aura round it
+  const pilotPicture = (pid, awake) => (g, w, h, t, p) => {
+    const P = pilotOf(pid);
+    pictureFrame(g, w, h, t, p, { id: (awake ? 'awake-' : '') + pid, M: awake ? metal(P.awake === '#fbbf24' ? '#fff5c4' : '#fee2e2', P.awake, '#1c0a04') : P.M,
+      inner: (g, cx, cy, S, t) => {
+        g.save(); g.translate(cx, cy); g.scale(S / 64, S / 64);
+        if (awake) aura(g, P, t, 23, false);
+        else glow(g, 0, 0, 30, P.M.mid, 0.25);
+        pilotShip(g, P, 0, 1.5, 34, t, { glow: 8, awake });
+        g.restore();
+      } });
+  };
+  // a league's picture: its crest
+  const leaguePicture = id => (g, w, h, t, p) => pictureFrame(g, w, h, t, p, { id: 'league-' + id, M: metalOf(id),
+    inner: (g, cx, cy, S, t, age) => { g.save(); g.translate(cx, cy + S * 0.02); g.scale(S / 64 * 0.82, S / 64 * 0.82); crestOf(g, id, t, age + 0.5); g.restore(); } });
+  const PICTURE = {
+    runner: pilotPicture('runner'), ember: pilotPicture('ember'), hacker: pilotPicture('hacker'), vagrant: pilotPicture('melee'),
+    overdrive: pilotPicture('ember', true), superuser: pilotPicture('hacker', true), ronin: pilotPicture('melee', true),
+    bronze: leaguePicture('bronze'), silver: leaguePicture('silver'), gold: leaguePicture('gold'),
+    platinum: leaguePicture('platinum'), void: leaguePicture('void')
+  };
+
+  /* The decals: a beveled hexagon in a metal with a mark sunk in its face,
+     each by the catalog's id. On a 40 grid. */
+  const GLYPH = {
+    ship(g) { ship(g, 0, 0.5, 8.5); g.fill(); },
+    check(g) { g.lineWidth = 2.6; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); g.moveTo(-6, 0.5); g.lineTo(-1.5, 5); g.lineTo(6.5, -5); g.stroke(); },
+    crown(g) { roundPath(g, [[-8, 5], [-8, -4], [-4, 0], [0, -7], [4, 0], [8, -4], [8, 5]], 0.8); g.fill(); },
+    code(g) { g.font = "700 9px 'Chakra Petch', 'JetBrains Mono', monospace"; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('</>', 0, 0.5); },
+    wreath(g, t) { g.lineWidth = 1.2; MARK.all(g, 10, t); },
+    duel(g, t) { g.lineWidth = 1.6; MARK.pvp(g, 10, t); },
+    chevrons(g, t, M) { g.save(); g.scale(0.85, 0.85); chevrons(g, 3, M); g.restore(); },
+    eye(g, t) {
+      g.beginPath(); g.moveTo(-8, 0); g.quadraticCurveTo(0, -7, 8, 0); g.quadraticCurveTo(0, 7, -8, 0); g.closePath(); g.fill();
+      g.fillStyle = '#7f1d1d'; g.beginPath(); g.arc(0, 0, 3.2, 0, TAU); g.fill();
+      g.fillStyle = '#fee2e2'; g.beginPath(); g.arc(-1, -1, 0.9, 0, TAU); g.fill();
+    },
+    star(g) { sparkle(g, 0, 0, 8); g.fill(); }
+  };
+  const DECAL = {
+    founder:   { M: METAL.cyan, glyph: 'ship' },
+    tester:    { M: VIOLET, glyph: 'check' },
+    champion:  { M: METAL.gold, glyph: 'crown' },
+    developer: { M: METAL.void, glyph: 'code' },
+    crown:     { M: METAL.gold, glyph: 'wreath' },
+    duelist:   { M: PINK, glyph: 'duel' },
+    veteran:   { M: METAL.silver, glyph: 'chevrons' },
+    awakened:  { M: BLOOD, glyph: 'eye' }
+  };
+
   window.LB_ART = {
 
     /* The page's colours, fonts and corner radius. Each key is a CSS variable
@@ -1237,6 +1574,7 @@
        osu!'s triangles rise through it all. It fades up from the dark when it
        first shows, and down to the panel at the foot, where the name sits. */
     profileBanner(g, w, h, t, p) {
+      if (p.banner && p.banner !== 'world' && BANNER[p.banner]) return BANNER[p.banner](g, w, h, t, p);   // another banner (THE LOOKS)
       const M = metalOf(p.league), seed = seedOf(p.user || p.display), r = seeded(seed);
       const accent = HUES[Math.floor(r() * HUES.length)];
       const age = life(g, t, p.user);
@@ -1315,6 +1653,7 @@
        lit in the middle, the pilot they last flew in the corner, and a rim
        in their league's metal. The triangles pop in from the middle out. */
     avatar(g, w, h, t, p) {
+      if (p.picture && p.picture !== 'sigil' && PICTURE[p.picture]) return PICTURE[p.picture](g, w, h, t, p);   // another picture (THE LOOKS)
       const S = Math.min(w, h) - 2, x0 = (w - S) / 2, y0 = (h - S) / 2, cr = S * 0.2;
       const M = metalOf(p.league), r = seeded(seedOf(p.user || p.display));
       const i1 = Math.floor(r() * HUES.length), i2 = (i1 + 2 + Math.floor(r() * (HUES.length - 3))) % HUES.length;
@@ -1543,6 +1882,31 @@
       g.fillStyle = css(lerp(M.lo, [8, 10, 18], 0.55));
       g.fillText(String(a.rank), 0, cy + 0.8);
       glint(g, age + a.rank * 0.7, 4.8, () => { g.beginPath(); g.arc(0, cy, R, 0, TAU); }, -R, R, cy - R, cy + R, 0.6);
+    },
+
+    /* A decal (src/looks.js), one of the small badges in the row under the
+       name: a beveled hexagon in its metal, its mark sunk in the face. Each
+       pops in a beat after the one before it (d.i), and a glint crosses it
+       now and then. On a 40 grid. */
+    decal(g, w, h, t, d) {
+      const D = DECAL[d.id] || { M: METAL.cyan, glyph: 'star' }, M = D.M, S = Math.min(w, h), i = d.i || 0;
+      const age = life(g, t, d.id) - 0.35 - i * 0.08;
+      if (age <= 0) return;
+      const k = outBack(age / 0.55);
+      g.translate(w / 2, h / 2); g.scale(S / 40 * k, S / 40 * k);
+      g.globalAlpha = clamp01(age / 0.2);
+      glow(g, 0, 0, 22, M.mid, 0.18 + (STILL ? 0 : 0.05 * Math.sin(t * 1.7 + i)));
+      const out = ngon(0, 0, 17, 6, -Math.PI / 2), inn = ngon(0, 0, 13, 6, -Math.PI / 2);
+      bevel(g, out, inn, 2.6, M.mid, (j, kk) => lit(M, kk));
+      face(g, inn, 1.6, M);
+      g.save();
+      g.shadowColor = css(M.mid, 0.8); g.shadowBlur = 5;
+      const ink = g.createLinearGradient(0, -9, 0, 9);
+      ink.addColorStop(0, css(M.hi)); ink.addColorStop(1, css(lit(M, 0.55)));
+      g.fillStyle = ink; g.strokeStyle = ink;
+      (GLYPH[D.glyph] || GLYPH.star)(g, t, M);
+      g.restore();
+      glint(g, age + i * 0.6, 5, () => roundPath(g, out, 2.6), -17, 17, -17, 17, 0.45);
     },
 
     /* Behind each recent match, after osu!'s score rows: a plate on the left

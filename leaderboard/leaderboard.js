@@ -645,10 +645,27 @@
     return s;
   }
 
+  // a profile's decals, in a row: each its art, its name and why on a hover
+  function decalRow(list) {
+    const row = el('div', 'pdecals');
+    list.forEach((x, i) => {
+      const s = el('span', 'pdecal');
+      s.title = x.n + (x.why ? ' · ' + x.why : '');
+      s.setAttribute('role', 'img');
+      s.setAttribute('aria-label', s.title);
+      const cv = art('decal', 'pdecal-art', { id: x.id, n: x.n, i });
+      if (cv) s.append(cv);
+      row.append(s);
+    });
+    return row;
+  }
+
   function renderProfile(box, d) {
     const lad = d.pvp.ladder, placed = !!(lad && lad.league);
     const names = Object.fromEntries(d.game.pilots.map(p => [p.id, p.name]));
     const league = placed ? lad.league : null, last = d.pvp.recent[0] ? d.pvp.recent[0].pilot : null;
+    // what the profile wears (src/looks.js): its picks, or the defaults from a server that has none
+    const look = d.look || { banner: 'world', picture: 'sigil', decals: [] };
 
     /* The header, after osu!'s: a title bar, the cover, the emblem standing
        half over it beside the name, and under them the league's progress,
@@ -658,11 +675,11 @@
     bar.append(el('b', null, 'PILOT INFO'), el('span', null, 'SEASON ' + seasonLabel(d.season || d.pvp.season)));
     const cover = el('div', 'pcover');
     const banner = art('profileBanner', 'pbanner', { display: d.user.display, user: d.user.name, league,
-      rating: placed ? lad.rating : null, rank: placed ? lad.rank : null, joined: d.user.joined, pilot: last });
+      rating: placed ? lad.rating : null, rank: placed ? lad.rank : null, joined: d.user.joined, pilot: last, banner: look.banner });
     if (banner) cover.append(banner);
     const det = el('div', 'pdet');
     const id = el('div', 'pid');
-    const av = art('avatar', 'pavatar', { display: d.user.display, user: d.user.name, league, pilot: last });
+    const av = art('avatar', 'pavatar', { display: d.user.display, user: d.user.name, league, pilot: last, picture: look.picture });
     if (av) id.append(av);
     const nm = el('div', 'pnm');
     nm.append(el('h2', 'pname', d.user.display));
@@ -674,6 +691,7 @@
       sub.append(fl);
     }
     nm.append(sub);
+    if (look.decals && look.decals.length) nm.append(decalRow(look.decals));
     id.append(nm);
     const lg = el('div', 'plg');
     if (placed) {
@@ -842,6 +860,158 @@
     wait.remove();
     renderProfile(box, d);
     document.title = d.user.display + ' · VOIDRUNNER';
+    lookMine(box, d, ticket);
+  }
+
+  /* ------------------------------ CUSTOMIZE ---------------------------------
+     A signed-in player's own page gets a button that changes what it wears
+     (src/looks.js; PVP-PLAN.md, Phase 7 part 1): a banner, a picture and up
+     to maxDecals decals, each drawn live by its art hook. The server says
+     what is theirs and what opens the rest, and refuses anything else. */
+  const LOOK_API = '/api/account/look';
+  async function lookMine(box, d, ticket) {
+    let L = null;
+    try {
+      const r = await fetch(LOOK_API, { cache: 'no-store' });
+      if (r.ok) L = await r.json();
+    } catch (e) { return; }
+    if (!L || L.account !== d.user.name || ticket !== S.busy || !box.isConnected) return;
+    const b = el('button', 'pedit', 'CUSTOMIZE');
+    b.type = 'button';
+    b.addEventListener('click', () => lookPanel(L, d));
+    const bar = box.querySelector('.ptitle');
+    if (bar) bar.append(b);
+  }
+
+  function lookPanel(L, d) {
+    const pick = { banner: L.look.banner, picture: L.look.picture, decals: L.look.decals.slice() };
+    const lad = d.pvp.ladder, league = lad && lad.league ? lad.league : null;
+    const base = { display: d.user.display, user: d.user.name, league, pilot: d.pvp.recent[0] ? d.pvp.recent[0].pilot : null,
+                   rating: null, rank: null, joined: d.user.joined };
+    const KINDS = [['banner', 'BANNER'], ['picture', 'PICTURE'], ['decal', 'DECALS']];
+    const HOOK = { banner: 'profileBanner', picture: 'avatar', decal: 'decal' };
+    const dataOf = (kind, id, i) => kind === 'decal' ? { id, n: (L.items.decal.find(x => x.id === id) || {}).n || id, i: i || 0 }
+                                                   : Object.assign({}, base, { [kind]: id });
+    let tab = 'banner';
+    const opener = document.activeElement;
+
+    const dlg = el('div', 'lookdlg');
+    const box = el('div', 'lookbox');
+    box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Customize your profile');
+    const head = el('header', 'lookhead');
+    const x = el('button', 'lookx', '×');
+    x.type = 'button'; x.setAttribute('aria-label', 'Close');
+    head.append(el('b', null, 'CUSTOMIZE PROFILE'), x);
+    const prev = el('div', 'lookprev'), tabs = el('nav', 'looktabs'), grid = el('div', 'lookgrid');
+    const foot = el('footer', 'lookfoot'), msg = el('span', 'lookmsg');
+    msg.setAttribute('aria-live', 'polite');
+    const cancel = el('button', 'lookbtn', 'CANCEL'), save = el('button', 'lookbtn go', 'SAVE');
+    cancel.type = save.type = 'button';
+    foot.append(msg, cancel, save);
+    box.append(head, prev, tabs, grid, foot);
+    dlg.append(box);
+
+    // what the profile will wear, as it is picked
+    function drawPrev() {
+      prev.textContent = '';
+      const cv = art('profileBanner', 'lookprev-banner', dataOf('banner', pick.banner));
+      if (cv) prev.append(cv);
+      const row = el('div', 'lookprev-row');
+      const av = art('avatar', 'lookprev-avatar', dataOf('picture', pick.picture));
+      if (av) row.append(av);
+      const nm = el('div', 'lookprev-name');
+      nm.append(el('b', null, d.user.display));
+      nm.append(decalRow(pick.decals.map(id => L.items.decal.find(i => i.id === id)).filter(Boolean)));
+      row.append(nm);
+      prev.append(row);
+    }
+    function drawTabs() {
+      tabs.textContent = '';
+      for (const [k, label] of KINDS) {
+        const b = el('button', null, label);
+        if (k === 'decal') b.append(el('small', null, ' ' + pick.decals.length + '/' + L.maxDecals));
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(k === tab));
+        b.addEventListener('click', () => { tab = k; msg.textContent = ''; drawTabs(); drawGrid(); });
+        tabs.append(b);
+      }
+    }
+    function drawGrid() {
+      grid.textContent = '';
+      grid.className = 'lookgrid ' + tab;
+      const owned = L.items[tab].filter(i => i.owned).length;
+      grid.append(el('p', 'looknote', owned + ' OF ' + L.items[tab].length + ' UNLOCKED' +
+        (tab === 'decal' ? ' · PICK UP TO ' + L.maxDecals + ', IN THE ORDER THEY SHOW' : '')));
+      for (const it of L.items[tab]) {
+        const on = tab === 'decal' ? pick.decals.includes(it.id) : pick[tab] === it.id;
+        const b = el('button', 'looktile' + (it.owned ? '' : ' locked') + (on ? ' on' : ''));
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(on));
+        if (!it.owned) b.setAttribute('aria-disabled', 'true');
+        const cv = art(HOOK[tab], 'looktile-art', dataOf(tab, it.id));
+        if (cv) b.append(cv);
+        const tx = el('span', 'looktx');
+        tx.append(el('b', null, it.n), el('small', null, it.owned ? (it.why || 'YOURS') : it.lock));
+        b.append(tx);
+        if (tab === 'decal' && on) b.append(el('i', 'looknum', String(pick.decals.indexOf(it.id) + 1)));
+        b.title = it.n + ' · ' + (it.owned ? (it.why || 'yours') : it.lock);
+        b.addEventListener('click', () => {
+          if (!it.owned) { msg.textContent = it.n + ': ' + it.lock; return; }
+          if (tab === 'decal') {
+            const at = pick.decals.indexOf(it.id);
+            if (at >= 0) pick.decals.splice(at, 1);
+            else if (pick.decals.length >= L.maxDecals) { msg.textContent = 'A PROFILE SHOWS ' + L.maxDecals + ' DECALS: TAKE ONE OFF FIRST'; return; }
+            else pick.decals.push(it.id);
+          } else pick[tab] = it.id;
+          msg.textContent = '';
+          drawTabs(); drawGrid(); drawPrev();
+          const again = grid.querySelectorAll('.looktile')[L.items[tab].indexOf(it)];
+          if (again) again.focus();
+        });
+        grid.append(b);
+      }
+    }
+    function close() {
+      dlg.remove();
+      removeEventListener('keydown', onKey, true);
+      document.documentElement.classList.remove('lookopen');
+      if (opener && opener.isConnected) opener.focus();
+    }
+    // Escape closes it; Tab goes round inside it
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...box.querySelectorAll('button:not([disabled])')];
+      if (!f.length) return;
+      const first = f[0], end = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); end.focus(); }
+      else if (!e.shiftKey && document.activeElement === end) { e.preventDefault(); first.focus(); }
+    }
+    addEventListener('keydown', onKey, true);
+    x.addEventListener('click', close);
+    cancel.addEventListener('click', close);
+    dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      msg.textContent = 'SAVING…';
+      let r = null;
+      try {
+        r = await fetch(LOOK_API, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(pick) });
+      } catch (e) {}
+      save.disabled = false;
+      if (!r || !r.ok) {
+        msg.textContent = r && r.status === 401 ? 'SIGNED OUT · SIGN IN IN THE GAME AND TRY AGAIN'
+          : r && r.status === 403 ? "SOME OF THAT ISN'T YOURS ANY MORE" : "COULDN'T SAVE · TRY AGAIN";
+        return;
+      }
+      close();
+      profileLoad();                         // the page again, wearing it
+    });
+
+    document.body.append(dlg);
+    document.documentElement.classList.add('lookopen');
+    drawPrev(); drawTabs(); drawGrid();
+    x.focus();
   }
 
   /* --------------------------------- start --------------------------------- */

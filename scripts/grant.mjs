@@ -20,6 +20,9 @@
    D1 console in Cloudflare's dashboard as it is.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
+import { writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { LOOKS, KINDS, itemOf } from '../src/looks.js';
 
 const args = process.argv.slice(2);
@@ -60,12 +63,25 @@ if (!REMOTE && !LOCAL) {
 }
 // a name with no account runs without error and changes nothing, so say whether it exists
 const check = `SELECT COUNT(*) AS n FROM accounts WHERE name = ${q(name.toLowerCase())};`;
+/* The SQL goes to wrangler as a file: on Windows npx has to run through the
+   shell, which would split a --command at its spaces. Its JSON answer is the
+   word on whether it worked: on Windows wrangler can crash on its way out (a
+   libuv assertion) after it has done its work. */
 const run = cmd => {
-  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', '--command', cmd, '--json'];
+  const file = join(tmpdir(), 'vr-grant-' + process.pid + '-' + Date.now() + '.sql');
+  writeFileSync(file, cmd);
+  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', '--file', file, '--json', '--yes'];
   if (PERSIST) a.push('--persist-to', PERSIST);
-  const r = spawnSync('npx', a, { encoding: 'utf8', shell: process.platform === 'win32' });
-  if (r.status !== 0) die((r.stderr || r.stdout || 'wrangler failed').trim().split('\n').slice(-6).join('\n'));
-  try { return JSON.parse(r.stdout); } catch (e) { return r.stdout; }
+  const r = process.platform === 'win32'
+    ? spawnSync(['npx', ...a].map(s => (/[\s"]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s)).join(' '), { encoding: 'utf8', shell: true })
+    : spawnSync('npx', a, { encoding: 'utf8' });
+  rmSync(file, { force: true });
+  const at = (r.stdout || '').indexOf('[');
+  let out = null;
+  try { out = at < 0 ? null : JSON.parse(r.stdout.slice(at)); } catch (e) {}
+  if (!Array.isArray(out) || !out.every(x => x && x.success !== false))
+    die((r.stderr || r.stdout || 'wrangler failed').trim().split('\n').slice(-6).join('\n'));
+  return out;
 };
 const found = run(check);
 const n = Array.isArray(found) && found[0] && found[0].results && found[0].results[0] ? found[0].results[0].n : null;

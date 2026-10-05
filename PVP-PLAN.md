@@ -912,10 +912,14 @@ Branch `profiles`. The shop and the currency stay for later.
   seeded cover and identicon become the free defaults. The rest get my
   first pass, for you to redraw.
 - **Steps:**
-  1. The server: catalog, gates, grants, picks, the API, the grant tool,
-     and a test suite (`npm run test:looks`).
-  2. The page: the profile drawn with its picks, the decal row, and the
-     CUSTOMIZE panel, with the first-pass art.
+  1. **Done (e7fc6ea on `profiles`):** the server: catalog, gates, grants,
+     picks, the API, the grant tool, and a test suite (`npm run
+     test:looks`, 70 checks; 5 mutants, all caught).
+  2. **Done:** the page: the profile drawn with its picks, the decal row,
+     and the CUSTOMIZE panel, with the first-pass art. Tried on a local
+     Worker: signed in on your own page, picked and saved, seen by a
+     signed-out visitor, at phone width. The grant tool tried against a
+     local database (give, give again, a missing account, list).
 - **Open:**
   - The starting catalog (in step 1) is mine: which items, and their gates.
   - Whether the game itself shows any of it (the account chip, co-op name
