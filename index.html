@@ -3567,7 +3567,7 @@ function updateBladeEchoes(dt) {
 
 /* ------------------------------- the parry -------------------------------- */
 function bladeParry() {
-  if (!isBlade() || P.parryCd > 0 || P.parryT > 0 || roninCutIn()) return;
+  if (!isBlade() || P.parryCd > 0 || P.parryT > 0 || roninCutIn() || P.roninSkyClear) return;
   P.parryT = bladeParryWin();
   P.parryAge = 0;                        // the perfect part is the opening of it
   P.parryTook = 0;
@@ -19841,7 +19841,7 @@ function roninChainClose() {
 }
 
 function roninAbility(i) {
-  if (state !== 'play' || P.charId !== 'melee' || vrRite || roninCutIn()) return;
+  if (state !== 'play' || P.charId !== 'melee' || vrRite || roninCutIn() || P.roninSkyClear) return;
   const a = RONIN_KIT[i];
   if (!a) return;                              // not written yet
   if (!roninOn()) {
@@ -20434,6 +20434,7 @@ function roninKitTick(dt) {
   }
   for (const e of enemies) if (e.woundT > 0) e.woundT = Math.max(0, e.woundT - dt);
   if (P.roninGrave) graveTick(P.roninGrave, dt);
+  if (P.roninSkyClear) skyClearTick(P.roninSkyClear, dt);
   if (P.roninBroken > 0) P.roninBroken = Math.max(0, P.roninBroken - dt);
 }
 
@@ -20558,9 +20559,12 @@ function vowTick(dt) {
   if (P.roninSkyClear) return;                 // the final technique keeps its own clock
   if (V.t >= VOW_T_CUT + VOW_LEN) vowSpend(V);
 }
-// the vow is spent: the final technique
+// the vow is spent: the final technique. A dash or an execution in hand finishes first
 function vowSpend(V) {
-  vowEnd('spent');
+  if (P.roninSkyClear || P.roninDash || P.roninExec) return;   // the clock asks again next step
+  if (P.roninStill) { const st = P.roninStill; P.roninStill = null; roninStillEndFx(st); }
+  roninChainClose();
+  skyClearBegin();
 }
 // the grave broken: the vow ends at once, and the minute after it is a weak one
 function vowBreak() {
@@ -20743,6 +20747,150 @@ function vowArcs(sp, cut, dmg) {
     skyCut(sp, best, dmg, true);
   }
 }
+/* ------------------------------- SKY CLEAR --------------------------------
+   The vow's final technique (user, 4 Oct): "the secret full sequence of
+   CLEAR SKY", a full sequence of attacks, on destruction where CLEAR SKY was
+   peace. My sequence, about 4 s, the hull untouchable and the grave sealed
+   throughout:
+     THE SKY BREAKS  he rises, the room slowed (SC_RISE)
+     STORM           SC_DASHES dashes, each to the nearest body he has not
+                     been to (or round the grave, with none left), each path
+                     splitting as he lands and leaping on to the bodies beside
+     THE FALL        down at the grave, and the whole web splits again
+     CLEAR           a held breath, then one cut through the room: everything
+                     takes SC_CUT_DMG, and bodies left at SC_EXEC or less die
+                     (never a boss: C stays the move that executes bosses)
+   then the grave sinks and RONIN ends (vowEnd 'spent').
+--------------------------------------------------------------------------- */
+const SC_RISE     = 0.5;       // THE SKY BREAKS
+const SC_DASHES   = 8;         // STORM: how many
+const SC_DASH_T   = 0.16;      // each one's flight
+const SC_DASH_DMG = 3;         // each path's split, in swings
+const SC_W        = 30;        // a path's half width, for hitting
+const SC_LEAP_N   = 2, SC_LEAP_R = 220, SC_LEAP_MUL = 0.75;   // each split leaps on: how many, how far, how hard
+const SC_STAR_R   = 320;       // with no body left to go to, the dashes star round the grave this far out
+const SC_FALL_T   = 0.3;       // THE FALL
+const SC_WEB_MUL  = 2;         // the web's second split, on SC_DASH_DMG
+const SC_HOLD     = 0.6;       // CLEAR: the held breath
+const SC_CUT_DMG  = 6;         // the last cut, in swings
+const SC_EXEC     = 0.3;       // and what it leaves at this share or less dies
+const SC_OUT      = 0.6;       // the grave sinking
+const SC_SLOW     = 0.25;      // the room, as the sky breaks and through the held breath
+
+function skyClearBegin() {
+  const g = P.roninGrave;
+  if (g) g.sealed = true;
+  P.roninDash = null;
+  const sc = P.roninSkyClear = { t: 0, st: 0, stage: 'rise', slow: true, i: 0,
+                                 x0: P.x, y0: P.y, x1: P.x, y1: P.y, segs: [], been: [] };
+  Audio_.tone(90, 1.0, 'sawtooth', 0.08, 40);
+  roninSkyClearFx(sc, 'rise');
+}
+function skyClearStage(sc, stage) {
+  sc.stage = stage; sc.st = 0;
+  sc.slow = stage === 'rise' || stage === 'clear';
+  roninSkyClearFx(sc, stage);
+}
+const scTarget = e => !e.dead && !e.hacked && !e.phased && !e.vrFounder && !e.roninExec && e.pvpPilot == null;
+// the next dash: to the nearest body not yet been to, or a point of the star round the grave
+function skyClearAim(sc) {
+  let best = null, bd = Infinity;
+  for (const e of enemies) {
+    if (!scTarget(e) || sc.been.includes(e.id)) continue;
+    const d = (e.x - P.x) * (e.x - P.x) + (e.y - P.y) * (e.y - P.y);
+    if (d < bd) { bd = d; best = e; }
+  }
+  let to;
+  if (best) { sc.been.push(best.id); to = skyPt(best.x, best.y); }
+  else {
+    const g = P.roninGrave || { x: P.x, y: P.y }, a = sc.i * TAU * 3 / 8 - Math.PI / 2;
+    to = skyPt(g.x + Math.cos(a) * SC_STAR_R, g.y + Math.sin(a) * SC_STAR_R);
+  }
+  sc.x0 = P.x; sc.y0 = P.y; sc.x1 = to.x; sc.y1 = to.y;
+}
+// everything on a line, cut for dmg; returns the set it cut
+function skyClearLine(sc, s, dmg, cut) {
+  rootHitSeg(s.x1, s.y1, s.x2, s.y2, SC_W);
+  if (cages.length) cageStrikeSeg(s.x1, s.y1, s.x2, s.y2, dmg);
+  for (const e of enemies.slice()) {
+    if (!scTarget(e) || cut.has(e) || !segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + SC_W)) continue;
+    cut.add(e);
+    skyClearHit(sc, e, dmg);
+  }
+  return cut;
+}
+function skyClearHit(sc, e, dmg) {
+  const crit = simRand() < bladeCrit();
+  bladeDeal(e, dmg * (crit ? bladeCritM() : 1), crit, P.x, P.y);
+  roninSkyClearHitFx(e, sc);
+}
+function skyClearTick(sc, dt) {
+  sc.t += dt; sc.st += dt;
+  P.vx = 0; P.vy = 0;
+  const g = P.roninGrave;
+  if (sc.stage === 'rise') {
+    if (sc.st >= SC_RISE) { skyClearStage(sc, 'storm'); skyClearAim(sc); }
+  } else if (sc.stage === 'storm') {
+    const k = Math.min(1, sc.st / SC_DASH_T);
+    P.x = lerp(sc.x0, sc.x1, k); P.y = lerp(sc.y0, sc.y1, k);
+    if (k < 1) return;
+    // landed: the path splits, and leaps on to what is beside what it cut
+    const s = { x1: sc.x0, y1: sc.y0, x2: sc.x1, y2: sc.y1 };
+    sc.segs.push(s);
+    const dmg = bladeSwingDmg() * SC_DASH_DMG, cut = skyClearLine(sc, s, dmg, new Set());
+    let n = 0;
+    for (const a of [...cut]) {
+      if (n >= SC_LEAP_N) break;
+      let best = null, bd = SC_LEAP_R * SC_LEAP_R;
+      for (const e of enemies) {
+        if (!scTarget(e) || cut.has(e)) continue;
+        const d = (e.x - a.x) * (e.x - a.x) + (e.y - a.y) * (e.y - a.y);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (!best) continue;
+      cut.add(best); n++;
+      skyClearHit(sc, best, dmg * SC_LEAP_MUL);
+    }
+    Audio_.noise(0.14, 0.12, 3600, 500, 2);
+    hitStop = Math.max(hitStop, 0.03);
+    roninSkyClearLandFx(sc, s, cut.size);
+    sc.i++;
+    if (sc.i >= SC_DASHES) {
+      skyClearStage(sc, 'fall');
+      sc.x0 = P.x; sc.y0 = P.y; sc.x1 = g ? g.x : P.x; sc.y1 = g ? g.y + 24 : P.y;
+    } else { sc.st = 0; skyClearAim(sc); }
+  } else if (sc.stage === 'fall') {
+    const k = Math.min(1, sc.st / SC_FALL_T);
+    P.x = lerp(sc.x0, sc.x1, k); P.y = lerp(sc.y0, sc.y1, k);
+    if (k < 1) return;
+    // down at the grave: the whole web splits again at once
+    const dmg = bladeSwingDmg() * SC_DASH_DMG * SC_WEB_MUL, cut = new Set();
+    for (const s of sc.segs) skyClearLine(sc, s, dmg, cut);
+    shake(0.8); Audio_.boom();
+    hitStop = Math.max(hitStop, 0.06);
+    skyClearStage(sc, 'clear');
+  } else if (sc.stage === 'clear') {
+    if (sc.st < SC_HOLD) return;
+    // the last cut: through the whole room
+    const dmg = bladeSwingDmg() * SC_CUT_DMG;
+    for (const e of enemies.slice()) if (scTarget(e)) skyClearHit(sc, e, dmg);
+    for (const e of enemies.slice()) {
+      if (!scTarget(e) || e.type === 'boss' || roninFinaleOf(e) || !stillCanExec(e)) continue;
+      if (e.hp > e.maxHp * SC_EXEC) continue;
+      e.floor = undefined; e.hp = 0; killEnemy(e, -Math.PI / 2);
+    }
+    rootHitSeg(arena.x0, P.y, arena.x1, P.y, 40);
+    hitStop = Math.max(hitStop, 0.1);
+    shake(1.4); Audio_.boom(); Audio_.noise(0.6, 0.3, 4000, 200, 2);
+    roninSkyClearCutFx(sc);
+    skyClearStage(sc, 'out');
+  } else if (sc.stage === 'out') {
+    if (sc.st >= SC_OUT) vowEnd('spent');
+  }
+}
+// what the art reads while SKY CLEAR plays
+const skyClearPhase = () => P.roninSkyClear;
+
 // the vow's counter has landed: what it spills onto the rest
 function vowStillLand(x) {
   const v = x.vow, spill = x.dmg * VOW_SPILL;
@@ -24275,6 +24423,18 @@ function roninExecEndFx(x) {
    drawRoninVowWorld also draws the vow's tears (a cleave with c.vow.tear, while c.t < c.end)
    and CHAIN LIGHTNING's leaps (sp.arcAt on a split, after it lands).
 
+   SKY CLEAR, the final technique:
+     drawRoninSkyClear(sc)            world, additive, from drawRoninVowWorld: the web, the dash
+     drawRoninSkyClearScreen(sc)      screen, from drawRoninVowScreen: the sky breaking, the held
+                                      breath, the last cut
+     roninSkyClearFx(sc, stage)       a stage begins: 'rise' 'storm' 'fall' 'clear' 'out'
+     roninSkyClearLandFx(sc, s, n)    a storm dash lands: s its path { x1, y1, x2, y2 }, n bodies cut
+     roninSkyClearHitFx(e, sc)        a body is cut by it (any stage)
+     roninSkyClearCutFx(sc)           the last cut
+     sc = skyClearPhase(): { t, st (s into the stage), stage, slow, i (dashes landed),
+          x0, y0 → x1, y1 (the dash or fall in flight), segs (every path so far) }
+     SC_RISE, SC_DASHES, SC_DASH_T, SC_FALL_T, SC_HOLD, SC_OUT
+
    WHAT THEY ARE HANDED
      vowPhase()    { t (s since V), cut, lead (0 to 1, the press to the cut), age (s since
                    the cut, -1 before), left (s of the vow left), sky (SKY CLEAR is
@@ -24288,7 +24448,7 @@ function roninExecEndFx(x) {
 
    Art-side state lives in RKV and changes nothing of the logic's.
 --------------------------------------------------------------------------- */
-let RKV = { beginAt: -9, cutAt: -9, hitAt: -9, hitTextAt: -9, undeadAt: -9 };
+let RKV = { beginAt: -9, cutAt: -9, hitAt: -9, hitTextAt: -9, undeadAt: -9, scAt: {}, scCutAt: -9 };
 const RKV_RED = '#dc2626', RKV_BLOOD = '#7f1d1d', RKV_STONE = '#57534e', RKV_BONE = '#e7e5e4';
 
 // the marker: a stone standing on the floor, cracking as it is hurt
@@ -24338,6 +24498,8 @@ function drawRoninGrave() {
 function drawRoninVowWorld() {
   rkvTears();
   rkvArcs();
+  const sc = skyClearPhase();
+  if (sc) drawRoninSkyClear(sc);
   const q = vowPhase(), g = P.roninGrave;
   if (!q || !q.cut) return;
   const t = uiTime, last = q.left < 5, beat = 0.5 + 0.5 * Math.sin(t * (last ? 14 : 6));
@@ -24398,6 +24560,8 @@ function rkvArcs() {
 // the cut-in (bars, the room dimmed, the name), then the vow's red edge
 function drawRoninVowScreen(q) {
   const t = uiTime;
+  const sc = skyClearPhase();
+  if (sc) { drawRoninSkyClearScreen(sc); return; }
   ctx.save();
   if (!q.cut) {
     const k = vraOut(clamp(q.lead / 0.3, 0, 1)), bar = H * 0.13 * k;
@@ -24542,6 +24706,81 @@ function roninUndeadFx() {
   RKV.undeadAt = t;
   floatText(P.x, P.y - 36, 'UNDEAD', RKV_RED, 14);
   ringFx(P.x, P.y, P.r, 70, RKV_RED, 0.35, 3);
+}
+// SKY CLEAR: the web of paths in red, the one in flight in white
+function drawRoninSkyClear(sc) {
+  const t = uiTime, web = sc.stage === 'clear' || sc.stage === 'out';
+  const fallAt = RKV.scAt.clear || -9, flash = clamp(1 - (t - fallAt) / 0.35, 0, 1);
+  const fade = sc.stage === 'out' ? clamp(1 - sc.st / SC_OUT, 0, 1) : 1;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const q of sc.segs) {
+    ctx.strokeStyle = rgba(RKV_RED, (web ? 0.5 : 0.75) * fade + flash * 0.4); ctx.lineWidth = 4 + flash * 6;
+    ctx.beginPath(); ctx.moveTo(q.x1, q.y1); ctx.lineTo(q.x2, q.y2); ctx.stroke();
+    ctx.strokeStyle = rgba('#fff7ed', (0.45 + flash * 0.5) * fade); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(q.x1, q.y1); ctx.lineTo(q.x2, q.y2); ctx.stroke();
+  }
+  if (sc.stage === 'storm' || sc.stage === 'fall') {
+    ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = 3; ctx.shadowColor = rgba(RKV_RED, 1); ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.moveTo(sc.x0, sc.y0); ctx.lineTo(P.x, P.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+// SKY CLEAR on the screen: the sky tearing, red over the storm, the held breath, the cut
+function drawRoninSkyClearScreen(sc) {
+  const t = uiTime;
+  ctx.save();
+  const rise = sc.stage === 'rise' ? clamp(sc.st / SC_RISE, 0, 1) : 1;
+  const out = sc.stage === 'out' ? clamp(1 - sc.st / SC_OUT, 0, 1) : 1;
+  ctx.fillStyle = rgba(RKV_BLOOD, (0.2 + 0.25 * (1 - rise)) * out); ctx.fillRect(0, 0, W, H);
+  // the tears across the sky: fixed jagged lines from the top, opening as it rises
+  ctx.strokeStyle = rgba('#fecaca', 0.55 * out); ctx.lineWidth = 2;
+  ctx.shadowColor = rgba(RKV_RED, 0.9 * out); ctx.shadowBlur = 12;
+  for (let k = 0; k < 5; k++) {
+    let x = W * (0.12 + k * 0.19), y = 0;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    const reach = H * 0.5 * vraOut(rise);
+    for (let j = 1; j <= 8 && y < reach; j++) {
+      x += ((k * 37 + j * 53) % 41 - 20) * 1.6; y = Math.min(reach, j * H * 0.07);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  if (sc.stage === 'clear') {                    // the held breath: the room darkens, a line draws across
+    const k = clamp(sc.st / SC_HOLD, 0, 1);
+    ctx.fillStyle = 'rgba(5,6,10,' + (0.5 * k) + ')'; ctx.fillRect(0, 0, W, H);
+    const lw = W * vraOut(k);
+    ctx.fillStyle = rgba('#ffffff', 0.85); ctx.fillRect(W / 2 - lw / 2, H / 2 - 0.75, lw, 1.5);
+  }
+  if (sc.stage === 'out') {                      // the cut: a flash, and the name
+    const f = clamp(1 - sc.st / 0.3, 0, 1);
+    if (f > 0) { ctx.fillStyle = rgba('#fff1f2', 0.7 * f); ctx.fillRect(0, 0, W, H); }
+    ctx.textAlign = 'center';
+    ctx.font = "700 40px " + VRA_DISP; ctx.letterSpacing = '0.45em';
+    ctx.fillStyle = rgba('#ffffff', out); ctx.shadowColor = rgba(RKV_RED, out); ctx.shadowBlur = 20;
+    ctx.fillText('SKY CLEAR', W / 2 + 9, H / 2 - 18);
+    ctx.letterSpacing = '0em';
+  }
+  ctx.restore();
+}
+function roninSkyClearFx(sc, stage) {
+  RKV.scAt[stage] = uiTime;
+  if (stage === 'rise') { ringFx(P.x, P.y, P.r, 260, RKV_RED, 0.6, 4); burst(P.x, P.y, 40, RKV_RED, 420, 3, 0.7); }
+  if (stage === 'clear') {
+    const g = P.roninGrave;
+    if (g) { ringFx(g.x, g.y, 10, 520, RKV_RED, 0.7, 6); burst(g.x, g.y, 50, RKV_STONE, 480, 4, 0.9); }
+  }
+}
+function roninSkyClearLandFx(sc, s, n) {
+  ringFx(s.x2, s.y2, 8, 120, '#fecaca', 0.3, 3);
+  burst(s.x2, s.y2, 14, RKV_RED, 320, 2.6, 0.35);
+}
+function roninSkyClearHitFx(e, sc) {
+  burst(e.x, e.y, 10, RKV_RED, 300, 2.8, 0.4);
+}
+function roninSkyClearCutFx(sc) {
+  RKV.scCutAt = uiTime;
 }
 function roninVowNameFx(n, x, y) {
   floatText(x, y - 44, n, RKV_RED, 16, -26);
@@ -30720,6 +30959,8 @@ function update(dt) {
     if (P.roninExec && P.roninExec.exec) sl = Math.min(sl, EXEC_SLOW);
     // and its lead-in, while the cut-in has the screen
     if (roninCutIn()) sl = Math.min(sl, RN_SLOW);
+    // and SKY CLEAR, as the sky breaks and before the last cut
+    if (P.roninSkyClear && P.roninSkyClear.slow) sl = Math.min(sl, SC_SLOW);
     // and SUPERUSER's, the same way
     if (suCutIn()) sl = Math.min(sl, SU_SLOW);
     slowmo = Math.min(slowmo, sl);
@@ -30907,7 +31148,7 @@ function updatePlayer(dt) {
     P.dashRe += dt;
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = inp.dash && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !roninCutIn() && !suCutIn() && !vrDuelLock();
+  const wantDash = inp.dash && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -30976,7 +31217,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || roninCutIn() || suCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -31075,7 +31316,7 @@ function updatePlayer(dt) {
        never cut short an arc that is already travelling and owes damage to
        bodies it has not reached yet. P.fireT is only the gap between swings. */
     updateBlade(dt);
-    if (firing && P.swingT <= 0 && P.fireT <= 0 && !P.roninStill && !P.roninExec && !roninCutIn()) {
+    if (firing && P.swingT <= 0 && P.fireT <= 0 && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn()) {
       P.fireT = 1 / (bladeRate() * rateMul);
       bladeStart();
     }
