@@ -259,6 +259,12 @@ section('it counts for nothing: no record, no best, no board, no ladder');
   run(G, 'score = 1234567; gameOver(true)');
   let r1 = rec();
   ok(r1.runs === r0.runs + 1 && r1.best === 1234567 && posts() === p0 + 1, 'VOIDRUNNER: recorded and sent to the board (the test can see one)', { r0, r1 });
+  const sent = JSON.parse(G.asked.filter(a => a.method === 'POST' && /leaderboard/.test(a.url)).pop().body);
+  ok(sent.pilot === 'runner' && run(G, 'Save.profile.bestRun.pilot') === 'runner', 'naming its pilot, which the server ranks (and kept with the best, for a replay)', sent);
+  // the server ranks the game's own pilots by its own list (pvp/src/rules.js): the two must be the same
+  const { PILOTS } = await import('../pvp/src/rules.js');
+  const own = run(G, 'CHARS.filter(c => !c.outside).map(c => c.id).sort().join()');
+  ok(own === Object.keys(PILOTS).sort().join(), 'the game\'s pilots are the server\'s PILOTS: a new one goes in both, or its runs are refused', [own, Object.keys(PILOTS)]);
   // now the outside pilot, a far better run
   fly(G, 'x0'); steps(G, 60);
   r0 = rec(); p0 = posts();
@@ -389,6 +395,17 @@ section('end to end: the real Worker and database, the game signing in through t
   ok(row && !/"x0"/.test(row.data) && !JSON.parse(row.unlocks).chars.includes('x0'), 'the save pushed: no trace of the pilot, nor in its unlocks',
      row && JSON.parse(row.unlocks).chars);
   ok(row && !row.data.includes('777777'), 'nor the run');
+
+  // and should a page send one of its runs all the same, the boards refuse it
+  run(A, "Save.profile.name = 'VAULTDEV'; Board.submit({ score: 777777, wave: 9, sector: 'S', loop: 0, level: 5, kills: 10, time: 60, pilot: 'x0' })");
+  ok(await until(A, "Board.note !== ''"), 'a page sending its run anyway is answered');
+  // (the scores table is made by the first run filed: none at all is nothing written)
+  const filed = DB.sql.prepare("SELECT name FROM sqlite_master WHERE name = 'scores'").get()
+    ? DB.sql.prepare("SELECT COUNT(*) AS n FROM scores WHERE name = 'VAULTDEV'").get().n : 0;
+  ok(run(A, 'Board.note') === 'that pilot is not ranked' && filed === 0,
+     'refused by the Worker, and written to no board', run(A, 'Board.note'));
+  run(A, "Daily.from = 'server'; Daily.day = new Date().toISOString().slice(0, 10); Daily.note = ''; Daily.submit({ score: 777777, wave: 9, sector: 'S', loop: 0, level: 5, kills: 10, time: 60, pilot: 'x0' })");
+  ok(await until(A, "Daily.note !== ''") && run(A, 'Daily.note') === 'THAT PILOT IS NOT RANKED', 'the day\'s board too', run(A, 'Daily.note'));
 
   // an account without the perk: no field, no request, no pilot
   const C = plain.page();

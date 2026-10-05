@@ -154,10 +154,11 @@ section('the cloud save');
   const u = JSON.parse(one('SELECT unlocks FROM saves').unlocks);
   ok(JSON.stringify(u) === JSON.stringify({ v: 1, chars: [], awake: [], chal: [], ups: [] }), 'unlocks cleaned to the known lists', u);
   const p3 = await A.call('PUT', '/api/account/save', { rev: 2, save: { best: 13 },
-    unlocks: { chars: ['runner', 'ember', '<script>', 'ember'], awake: ['ember'], chal: ['ch_glass'], ups: ['u_glass'], junk: [1] } });
+    unlocks: { chars: ['runner', 'ember', '<script>', 'ember', 'x0'], awake: ['ember', 'x0'], chal: ['ch_glass'], ups: ['u_glass'], junk: [1] } });
   const u3 = JSON.parse(one('SELECT unlocks FROM saves').unlocks);
+  // x0: the tests' stand-in for a pilot from outside the game's file (OUTSIDE PILOTS, the vault)
   ok(p3.status === 200 && JSON.stringify(u3) === JSON.stringify({ v: 1, chars: ['runner', 'ember'], awake: ['ember'], chal: ['ch_glass'], ups: ['u_glass'] }),
-     'unlocks: ids only, once each', u3);
+     'unlocks: ids only, once each, and only the game\'s own pilots', u3);
   for (const [body, want, why] of [
     [{ rev: -1, save: {} }, 400, 'a negative revision'],
     [{ rev: 3, save: [] }, 400, 'a save that is a list'],

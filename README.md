@@ -389,6 +389,13 @@ npm run test:outside                       # a few seconds: the loader, in the g
 Without `--remote` (or `--local` for `npm run dev`'s database) it only prints
 what it would do. `src/vault.js` explains how an entry is stored.
 
+An outside pilot's runs count for nothing. The page records none of them, and
+the server holds to that too: a run names its pilot, and `/api/leaderboard`
+refuses any pilot that isn't one of the game's own (`PILOTS` in
+`pvp/src/rules.js`), on every board. An account's unlocks keep only those
+pilots. A new pilot goes in `PILOTS` as well as the game, or its runs are
+refused; `npm run test:outside` checks the two lists match.
+
 In PvP an outside pilot is a hidden pilot (`pvp/src/hidden.js`). Its holders
 can fly it in a friend's match, by code, or in ranked, where it is paired with
 the season's #1 and nobody else, for one long round. It never goes in casual,

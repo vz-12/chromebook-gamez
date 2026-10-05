@@ -23,6 +23,7 @@ import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES } from './auth.js';
 import { vaultList } from './vault.js';
+import { PILOTS } from '../pvp/src/rules.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -455,13 +456,19 @@ const OPS = {
 };
 
 /* ------------------------------- the save -------------------------------- */
-/* The facts PvP reads. Ids only, each list capped; anything else is dropped. */
+/* The facts PvP reads. Ids only, each list capped; anything else is dropped.
+   The pilots in them are only ever the game's own (PILOTS): a pilot from
+   outside the game's file (the vault, vault.js) is never unlocked on an
+   account, whatever a page sends. */
 const UNLOCK_LISTS = { chars: 32, awake: 32, chal: 256, ups: 512 };
+const PILOT_LISTS = ['chars', 'awake'];
+const gamePilot = s => Object.prototype.hasOwnProperty.call(PILOTS, s);
 function cleanUnlocks(u) {
   const out = { v: 1 };
   for (const [k, max] of Object.entries(UNLOCK_LISTS)) {
     const src = u && Array.isArray(u[k]) ? u[k] : [];
-    out[k] = [...new Set(src.filter(s => typeof s === 'string' && /^[\w-]{1,40}$/.test(s)))].slice(0, max);
+    out[k] = [...new Set(src.filter(s => typeof s === 'string' && /^[\w-]{1,40}$/.test(s) &&
+                                         (!PILOT_LISTS.includes(k) || gamePilot(s))))].slice(0, max);
   }
   return out;
 }

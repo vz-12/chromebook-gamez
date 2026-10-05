@@ -16,6 +16,7 @@ import { getStore } from './store.js';
 import { scorePut } from './boards.js';
 import { sessionOf, accountPids } from './auth.js';
 import { pvpAwards } from './pvp-rewards.js';
+import { PILOTS } from '../pvp/src/rules.js';
 
 /* The season rule lives in one place, shared with the scheduled closer. */
 import { STORE, KEY, RETRIES, backoff, SEASON_DAY, META, ARCHIVE, seasonKey, isSeason,
@@ -707,6 +708,17 @@ export default async (req, env) => {
      now: sign up or in with the same name and password. */
   if (body && body.devAuth)
     return json({ error: 'dev logins are accounts now: use ACCOUNT in the menu' }, 410);
+
+  /* A run names the pilot it was flown with, and only the game's own are
+     ranked, on any board, the day's included. A pilot from outside the
+     game's file (OUTSIDE PILOTS in the game; its code in the vault,
+     vault.js) records nothing anywhere: the page keeps its runs to itself,
+     and this holds the boards to that whatever a page sends. Every other id
+     gets the one answer, which says nothing of whether it exists. A page
+     from before runs named their pilot sends none, and could not fly one. */
+  const pilot = body && body.pilot;
+  if (pilot !== undefined && !(typeof pilot === 'string' && Object.prototype.hasOwnProperty.call(PILOTS, pilot)))
+    return json({ error: 'that pilot is not ranked' }, 403);
 
   const entry = {
     name:   cleanName(body.name) || 'ANON',

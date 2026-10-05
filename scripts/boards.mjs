@@ -152,6 +152,26 @@ section('a replay from an old season goes to all-time only');
   ok(count("who = 'n:REPLAYER' AND board = 'all'") === 1 && count("who = 'n:REPLAYER' AND board LIKE 'season:%'") === 0, 'all-time, not the season');
 }
 
+section('a run names its pilot: only the game\'s own are ranked');
+{
+  const D = device('10.0.0.7');
+  ok((await D.run('PILOTED', pid(71), 800, { pilot: 'melee' })).status === 200, 'one of the game\'s pilots: filed');
+  ok(count("who = 'n:PILOTED'") === 2, 'on the season and all-time', count("who = 'n:PILOTED'"));
+  // x0: the tests' stand-in for a pilot from outside the game's file (OUTSIDE PILOTS, the vault)
+  const hid = await D.run('OUTSIDER', pid(72), 900000, { pilot: 'x0' });
+  ok(hid.status === 403 && hid.d.error === 'that pilot is not ranked', 'a pilot from outside the game: refused', hid);
+  const day = await D.run('OUTSIDER', pid(72), 900000, { pilot: 'x0', day: TODAY });
+  const back = await D.run('OUTSIDER', pid(72), 900000, { pilot: 'x0', backfill: 1, forSeason: SEASON });
+  ok(day.status === 403 && back.status === 403, 'on the day\'s board too, and replayed', [day.status, back.status]);
+  ok(count("who = 'n:OUTSIDER'") === 0, 'and written nowhere');
+  const docs = await Promise.all(['top', 'season:' + SEASON, 'day:' + TODAY].map(k => getStore(env, STORE).get(k, { type: 'json' })));
+  ok(!docs.some(d => d && (d.entries || []).some(e => e.name === 'OUTSIDER')), 'not in any board\'s document either');
+  const made = await D.run('OUTSIDER', pid(72), 900000, { pilot: 'nobody-at-all' });
+  ok(made.status === hid.status && JSON.stringify(made.d.error) === JSON.stringify(hid.d.error),
+     'an id nobody has gets the same answer: it says nothing of whether one exists', made);
+  ok((await D.run('OUTSIDER', pid(72), 900000, { pilot: 7 })).status === 403, 'nor anything that is not an id');
+}
+
 section('me');
 {
   const g = await device('10.0.0.7').req('POST', '/api/boards', { op: 'me', pid: pid(5000) });
