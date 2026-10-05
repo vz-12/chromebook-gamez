@@ -129,6 +129,10 @@ touched while it plays.
    left at 30% or less die; bosses take the cut but aren't executed (C stays
    the move that executes bosses).
 
+**Its price (your nerf, 4 Oct):** if SKY CLEAR cuts something but kills
+nothing, from the first dash to the last cut, he's left at 1 health as it
+ends. A kill, or an empty room, costs nothing.
+
 ## PvP
 
 V is refused in a duel ("NOT IN A DUEL"). A duel has no bodies to go for the

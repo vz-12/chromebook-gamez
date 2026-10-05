@@ -20761,6 +20761,10 @@ function vowArcs(sp, cut, dmg) {
                      takes SC_CUT_DMG, and bodies left at SC_EXEC or less die
                      (never a boss: C stays the move that executes bosses)
    then the grave sinks and RONIN ends (vowEnd 'spent').
+   Its price (user, 4 Oct: "if sky clear doesn't kill but does land, ronin
+   gets set to 1hp"): if it cut anything and killed nothing, the whole of it
+   from the first dash to the last cut, he is left at 1 health as it ends.
+   A kill, or an empty room, costs nothing.
 --------------------------------------------------------------------------- */
 const SC_RISE     = 0.5;       // THE SKY BREAKS
 const SC_DASHES   = 8;         // STORM: how many
@@ -20782,7 +20786,8 @@ function skyClearBegin() {
   if (g) g.sealed = true;
   P.roninDash = null;
   const sc = P.roninSkyClear = { t: 0, st: 0, stage: 'rise', slow: true, i: 0,
-                                 x0: P.x, y0: P.y, x1: P.x, y1: P.y, segs: [], been: [] };
+                                 x0: P.x, y0: P.y, x1: P.x, y1: P.y, segs: [], been: [],
+                                 landed: 0, kills: 0 };   // for its price: what it cut, and what it killed
   Audio_.tone(90, 1.0, 'sawtooth', 0.08, 40);
   roninSkyClearFx(sc, 'rise');
 }
@@ -20822,6 +20827,8 @@ function skyClearLine(sc, s, dmg, cut) {
 function skyClearHit(sc, e, dmg) {
   const crit = simRand() < bladeCrit();
   bladeDeal(e, dmg * (crit ? bladeCritM() : 1), crit, P.x, P.y);
+  sc.landed++;
+  if (e.dead) sc.kills++;
   roninSkyClearHitFx(e, sc);
 }
 function skyClearTick(sc, dt) {
@@ -20878,6 +20885,7 @@ function skyClearTick(sc, dt) {
       if (!scTarget(e) || e.type === 'boss' || roninFinaleOf(e) || !stillCanExec(e)) continue;
       if (e.hp > e.maxHp * SC_EXEC) continue;
       e.floor = undefined; e.hp = 0; killEnemy(e, -Math.PI / 2);
+      sc.kills++;
     }
     rootHitSeg(arena.x0, P.y, arena.x1, P.y, 40);
     hitStop = Math.max(hitStop, 0.1);
@@ -20885,7 +20893,10 @@ function skyClearTick(sc, dt) {
     roninSkyClearCutFx(sc);
     skyClearStage(sc, 'out');
   } else if (sc.stage === 'out') {
-    if (sc.st >= SC_OUT) vowEnd('spent');
+    if (sc.st < SC_OUT) return;
+    // its price: it landed and killed nothing, so it took what he had left
+    if (sc.landed > 0 && sc.kills === 0) { P.hp = Math.min(P.hp, 1); roninSkyClearPriceFx(sc); }
+    vowEnd('spent');
   }
 }
 // what the art reads while SKY CLEAR plays
@@ -24431,6 +24442,7 @@ function roninExecEndFx(x) {
      roninSkyClearLandFx(sc, s, n)    a storm dash lands: s its path { x1, y1, x2, y2 }, n bodies cut
      roninSkyClearHitFx(e, sc)        a body is cut by it (any stage)
      roninSkyClearCutFx(sc)           the last cut
+     roninSkyClearPriceFx(sc)         it ends having cut something and killed nothing: he is left at 1
      sc = skyClearPhase(): { t, st (s into the stage), stage, slow, i (dashes landed),
           x0, y0 → x1, y1 (the dash or fall in flight), segs (every path so far) }
      SC_RISE, SC_DASHES, SC_DASH_T, SC_FALL_T, SC_HOLD, SC_OUT
@@ -24781,6 +24793,10 @@ function roninSkyClearHitFx(e, sc) {
 }
 function roninSkyClearCutFx(sc) {
   RKV.scCutAt = uiTime;
+}
+function roninSkyClearPriceFx(sc) {
+  floatText(P.x, P.y - 40, 'NOTHING FELL', RKV_RED, 15);
+  ringFx(P.x, P.y, P.r, 90, RKV_RED, 0.5, 3);
 }
 function roninVowNameFx(n, x, y) {
   floatText(x, y - 44, n, RKV_RED, 16, -26);
