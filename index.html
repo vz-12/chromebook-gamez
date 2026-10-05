@@ -1573,6 +1573,8 @@ function newPlayer() {
     roninCd: [0, 0, 0, 0],                         // its Z X C V: see RONIN'S KIT
     roninChain: null, roninDash: null,             // the chain in hand, and X's dash
     roninStill: null, roninExec: null, roninExecN: 0,   // C's stance, its counter or execution, and whose turn
+    roninVow: null, roninGrave: null, roninVowUsed: false,   // V: the vow, its grave, and whether this RONIN has had it
+    roninSkyClear: null, roninBroken: 0,           // its final technique, and the minute after a broken grave
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
        throwaway P, thousands of lines above where gearBlank() is declared, and
@@ -3238,7 +3240,7 @@ const bladeChainHold = () => CHAIN_HOLD * gearStat('combo') * (gearOn('metro') ?
    chain on it — the unit a lunge, a batted bomber and a counter are all
    measured in. */
 const bladeSwingDmg = () => P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul() * rewardShotMul()
-                          * bladeChainMul();
+                          * bladeChainMul() * roninVowMul();   // RONIN's V: the vow, or the broken minute
 /* How long a perfect parry holds the room: one figure for the trigger, the
    overlay and the card. */
 const bladeStillT = () => STILL_T * (gearOn('still') ? 1.8 : 1);
@@ -3352,6 +3354,7 @@ function bladeDeal(e, dmg, crit, sx, sy) {
   const cuts = e.dmgCap ? clamp(Math.ceil(dmg / e.dmgCap), 1, 3) : 1;
   for (let k = 0; k < cuts && !e.dead; k++)
     damageEnemy(e, dmg / cuts, crit, sx, sy, k ? { silent: true } : undefined);
+  if (!e.dead && vowOn()) roninWound(e);   // RONIN's V: in the vow, everything the blade touches is wounded
 }
 
 /* One body, struck once. Every core effect in the game lives in this function
@@ -4242,7 +4245,7 @@ function hurtPlayer(dmg, opts) {
   if (state !== 'play') return;
   if (hackBy) return;                    // THE HACKER: a script of yours cannot reach you
   if (P.down) return;                    // a wreck cannot be hurt further
-  if (P.roninDash || P.roninExec || roninCutIn()) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while its cut-in has the screen
+  if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
@@ -4264,7 +4267,7 @@ function hurtPlayer(dmg, opts) {
   if (opts && opts.pure) {
     P.hp -= Math.max(0.5, dmg);
     P.hurtFlash = Math.max(P.hurtFlash, 0.5);
-    if (P.hp <= 0) reviveOrDie();
+    if (P.hp <= 0) { if (P.roninVow) vowUndead(); else reviveOrDie(); }   // RONIN's V: the dead do not die twice
     return;
   }
   if (P.iframe > 0) return;
@@ -4287,7 +4290,8 @@ function hurtPlayer(dmg, opts) {
     return;
   }
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
-  let d = Math.max(1, dmg * P.frailty * nightMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
+  const brokenMul = P.roninBroken > 0 ? VOW_BROKEN_HURT : 1;   // RONIN's V: the minute after the grave broke
+  let d = Math.max(1, dmg * P.frailty * nightMul * brokenMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
   if (opts && opts.pvp) d = Math.min(d, opts.pvp.cap);   // PvP mode: the duel's caps hold, whatever the build (duel.js)
   // what the blow takes, returned: a Second Wind or a brake after it is the pilot's own health, not the blow given back (PvP counts it, duel.js)
   const took = Math.min(d, Math.max(0, P.hp));
@@ -4299,7 +4303,7 @@ function hurtPlayer(dmg, opts) {
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
   floatText(P.x, P.y - 26, '-' + Math.round(d), '#fca5a5', 16);
-  if (P.hp <= 0) reviveOrDie();
+  if (P.hp <= 0) { if (P.roninVow) vowUndead(); else reviveOrDie(); }   // RONIN's V: the dead do not die twice
   return took;
 }
 
@@ -17241,7 +17245,8 @@ const RN_T_SETTLE = 0.9;                      // after the cut: the room comes b
 const RN_T_OUT = 1.2;                         // RONIN's last seconds, for its look to let go
 const RN_SLOW = 0.04;                         // the room, while the cut-in has the screen
 const roninShown = () => roninOn() && !(P.roninIntro && !P.roninIntro.cut);
-const roninCutIn = () => !!(P.roninIntro && !P.roninIntro.cut);
+// V's own cut-in (the grave going in) holds everything the same way: see V: LAST VOW
+const roninCutIn = () => !!(P.roninIntro && !P.roninIntro.cut) || vowCutIn();
 function roninPhase() {
   const I = P.roninIntro;
   if (!I && !roninOn()) return null;
@@ -17293,6 +17298,7 @@ function roninFire(rite) {
   P.roninT = RONIN_LEN;
   P.roninCd = [0, 0, 0, 0];               // RONIN'S KIT: every key ready
   P.roninChain = null;
+  P.roninVowUsed = false;                 // and V, once in each RONIN
   const I = P.roninIntro = { t: rite ? RN_T_CUT : 0, rite: !!rite, cut: false };
   if (!rite) Audio_.tone(330, 0.7, 'sine', 0.05, 150);   // the room going quiet
   roninIntroFx(I);
@@ -17305,10 +17311,16 @@ function roninCheck(perfect) {
 }
 function roninTick(dt) {
   roninIntroTick(dt);
+  vowTick(dt);                            // V: LAST VOW, which keeps its own clock
   if (!(P.roninT > 0)) return;
-  if (roninCutIn()) return;               // the cut-in is not spent from the minute
+  if (roninCutIn() || P.roninVow) return;   // the cut-ins are not spent from the minute, and nor is the vow
   P.roninT = Math.max(0, P.roninT - dt);
-  if (P.roninT === 0) { floatText(P.x, P.y - 48, 'RONIN ENDS', '#94a3b8', 13); roninEndFx(); }
+  if (P.roninT === 0) roninEnd();
+}
+function roninEnd() {
+  P.roninT = 0;
+  floatText(P.x, P.y - 48, 'RONIN ENDS', '#94a3b8', 13);
+  roninEndFx();
 }
 
 /* ------------------------------ the draw seams ------------------------------ */
@@ -19731,8 +19743,10 @@ function roninIntroCutFx(I) {
        all four are cleared when RONIN wakes;
      - a move already in the open chain can go again in it, cooldown or not,
        so every sequence can be reached.
-   V is still to be named. If it is a mode, X reads SKY_V while it is on
-   (roninVMode); until then that table is empty.
+   V — LAST VOW (user, 4 Oct; the name is mine, a stand-in): the last resort,
+   at low health. A mode: while the vow is on, every move reads its own vow
+   table first (ZV, SKY_V, WATER_V; roninVMode). See its own section below,
+   and RONIN-V-PLAN.md.
 
    DEEP WOUND (e.woundT): a wounded body takes WOUND_MUL times the damage from
    everything. It is applied in damageEnemy before the caps, so a boss's
@@ -19796,6 +19810,7 @@ const WATER_ZOOM   = 1.35;     // and the camera, come in
 
 const RONIN_CHAIN_WIN = 1.0;   // after a move finishes, how long the next has to follow it
 const RONIN_CHAIN_MAX = 3;
+const roninChainMax = () => vowOn() ? VOW_CHAIN_MAX : RONIN_CHAIN_MAX;   // V: the vow's chains run longer
 
 let roninCleaves = [];       // every cleave still on the floor, oldest first
 let roninCleaveId = 0;
@@ -19808,10 +19823,11 @@ const RONIN_KIT = [
   { n: 'LUNAR CLEAVE', hud: 'CLEAVE', cd: LUNAR_CD, start: lunarCleave },
   { n: 'CLEAR SKY',    hud: 'SKY',    cd: SKY_CD,   start: clearSky },
   { n: 'STILL WATER',  hud: 'STILL',  cd: WATER_CD, start: stillWater },
+  { n: 'LAST VOW',     hud: 'VOW',    cd: 0,        start: lastVow },   // no cooldown: once in each RONIN, at low health
 ];
 
-// V has not been named: this is where its mode will answer
-const roninVMode = () => false;
+// V's mode: the vow, from its cut to its end (not while the grave goes in)
+const roninVMode = () => vowOn();
 
 /* --------------------------------- chains -------------------------------- */
 const roninChainNew = () => ({ keys: [], used: [], busyT: 0, openT: 0, q: -1, closing: false,
@@ -19819,7 +19835,8 @@ const roninChainNew = () => ({ keys: [], used: [], busyT: 0, openT: 0, q: -1, cl
 function roninChainClose() {
   const ch = P.roninChain;
   if (!ch) return;
-  for (const i of ch.used) if (RONIN_KIT[i]) P.roninCd[i] = RONIN_KIT[i].cd * (ch.cdMul[i] || 1);
+  const vow = vowOn() ? VOW_CD : 1;            // V: in the vow, a quarter as long
+  for (const i of ch.used) if (RONIN_KIT[i]) P.roninCd[i] = RONIN_KIT[i].cd * (ch.cdMul[i] || 1) * vow;
   P.roninChain = roninChainNew();
 }
 
@@ -19851,7 +19868,7 @@ function roninGo(i) {
   if (!free) ch.used.push(i);
   ch.busyT = busy;
   ch.openT = RONIN_CHAIN_WIN;
-  if (ch.keys.length >= RONIN_CHAIN_MAX) ch.closing = true;
+  if (ch.keys.length >= roninChainMax()) ch.closing = true;
 }
 
 function roninChainTick(dt) {
@@ -20312,6 +20329,212 @@ function roninKitTick(dt) {
     if (sp.merged || sp.t >= sp.at + 1) roninSplits.splice(i, 1);
   }
   for (const e of enemies) if (e.woundT > 0) e.woundT = Math.max(0, e.woundT - dt);
+  if (P.roninGrave) graveTick(P.roninGrave, dt);
+  if (P.roninBroken > 0) P.roninBroken = Math.max(0, P.roninBroken - dt);
+}
+
+/* --------------------------------- V: LAST VOW ------------------------------
+   The user's V (4 Oct 2026). RONIN is undead: he left his master for a goal
+   of his own, someone who mattered to him died on the way, and he guards
+   their grave. V is his last resort, everything he has given to protecting
+   it: it lights only when his health is low, and in it he is far stronger
+   than any other evolution, because he has the grave to lose. The user's
+   rules: the moves combine into new ones while it lasts; the grave marker
+   gives nothing, but if the room breaks it the vow ends early and he is
+   weaker for a whole minute; the final technique is SKY CLEAR, the secret
+   full sequence of CLEAR SKY, built on destruction where CLEAR SKY was peace.
+
+   How I built it (my numbers and calls, RONIN-V-PLAN.md):
+     - V, while RONIN is on, at VOW_HP of max health or less, once in each
+       RONIN, never in a duel. The grave goes into the floor where he stands,
+       in a cut-in that holds the room as RONIN's own lead-in does
+       (roninCutIn) and is spent from no clock.
+     - From the cut the vow lasts VOW_LEN. RONIN's minute is held through it.
+       Every move reads its vow table first, the chains run to VOW_CHAIN_MAX,
+       cooldowns are VOW_CD of themselves and he deals VOW_DMG.
+     - The grave is a thing in the room with VOW_GRAVE_HP of his health. A
+       body that is nearer it than him (the grave counted VOW_PULL as far
+       away) goes for it instead (graveAim); bosses do not, though their
+       rounds can still hit it. Touching it (once every VOW_TOUCH_CD a body),
+       a round crossing it and a shell landing on it all hurt it.
+     - Undead: from the press to the end he cannot fall below 1 health. The
+       grave is the only way to lose the vow.
+     - It ends in SKY CLEAR when its time is up, or when V is pressed again
+       VOW_MIN into it; then the grave sinks and RONIN ends. If the grave
+       breaks first, it ends at once with no SKY CLEAR, RONIN ends, and for
+       VOW_BROKEN_T he deals VOW_BROKEN_DMG and takes VOW_BROKEN_HURT.
+--------------------------------------------------------------------------- */
+const VOW_HP          = 0.30;    // V lights at this share of max health, or less
+const VOW_T_CUT       = 1.6;     // the press to the vow: the grave going in, the room held
+const VOW_LEN         = 20;      // the vow, from the cut
+const VOW_MIN         = 3;       // this far into it, V again spends it early
+const VOW_GRAVE_HP    = 1.5;     // the grave's health, in his max health
+const VOW_GRAVE_R     = 20;
+const VOW_PULL        = 0.75;    // a body weighs the grave at this much of its real distance
+const VOW_TOUCH_CD    = 0.8;     // a body leaning on the grave hurts it at most this often
+const VOW_BROKEN_T    = 60;      // the grave broken: how long he is weaker
+const VOW_BROKEN_DMG  = 0.5;     // what he deals meanwhile
+const VOW_BROKEN_HURT = 1.25;    // and what he takes
+const VOW_DMG         = 1.5;     // no restraint: everything he deals, through the vow
+const VOW_CD          = 0.25;    // his cooldowns, through the vow
+const VOW_CHAIN_MAX   = 5;       // and how long a chain runs
+
+function vowCutIn() { return !!(P.roninVow && !P.roninVow.cut); }
+function vowOn() { return !!(P.roninVow && P.roninVow.cut); }
+// what everything he deals is multiplied by: the vow's strength, or the broken minute's weakness
+function roninVowMul() {
+  return vowOn() ? VOW_DMG : P.roninBroken > 0 ? VOW_BROKEN_DMG : 1;
+}
+// why V would not answer now, or '' if it would
+function vowWhy() {
+  if (PVP) return 'NOT IN A DUEL';
+  if (P.roninVowUsed) return 'SPENT';
+  if (P.hp > P.maxHp * VOW_HP) return 'LOW HEALTH ONLY';
+  return '';
+}
+// for the HUD's V: { lit, on, left (s), why }
+function vowKey() {
+  const V = P.roninVow;
+  if (V) return { lit: true, on: true, cut: V.cut, left: V.cut ? Math.max(0, VOW_T_CUT + VOW_LEN - V.t) : VOW_LEN, why: '' };
+  const why = vowWhy();
+  return { lit: !why, on: false, cut: false, left: 0, why };
+}
+// what the art reads: null when there is no vow
+function vowPhase() {
+  const V = P.roninVow;
+  if (!V) return null;
+  return { t: V.t, cut: V.cut, lead: clamp(V.t / VOW_T_CUT, 0, 1), age: V.cut ? V.t - VOW_T_CUT : -1,
+           left: V.cut ? Math.max(0, VOW_T_CUT + VOW_LEN - V.t) : VOW_LEN, sky: !!P.roninSkyClear, grave: P.roninGrave };
+}
+
+// V's start: the vow, or inside it SKY CLEAR early. It never joins a chain: it returns false
+function lastVow(prefix, ch) {
+  const V = P.roninVow;
+  if (V) {
+    if (V.cut && !P.roninSkyClear && V.t >= VOW_T_CUT + VOW_MIN) vowSpend(V);
+    return false;
+  }
+  const why = vowWhy();
+  if (why) {
+    floatText(P.x, P.y - 42, why, '#94a3b8', 12);
+    Audio_.tone(160, 0.08, 'square', 0.05, 110);
+    return false;
+  }
+  if (P.roninDash || P.roninStill || P.roninExec) return false;
+  vowBegin();
+  return false;
+}
+
+function vowBegin() {
+  roninChainClose();                           // the chain in hand ends here
+  P.roninVowUsed = true;
+  const g = P.roninGrave = { grave: true, owner: P.pid || 0, sealed: true,
+    x: clamp(P.x, arena.x0 + 40, arena.x1 - 40), y: clamp(P.y, arena.y0 + 40, arena.y1 - 40),
+    r: VOW_GRAVE_R, vx: 0, vy: 0, hp: P.maxHp * VOW_GRAVE_HP, maxHp: P.maxHp * VOW_GRAVE_HP };
+  const V = P.roninVow = { t: 0, cut: false };
+  Audio_.tone(220, 0.9, 'sine', 0.06, 110);    // the room going quiet
+  roninVowFx(V, g);
+}
+// the cut: the grave is in, and the vow begins
+function vowCut(V) {
+  V.cut = true;
+  P.roninCd = [0, 0, 0, 0];
+  P.roninChain = null;
+  if (P.roninGrave) P.roninGrave.sealed = false;
+  shake(1.2); Audio_.boom();
+  Audio_.tone(70, 0.9, 'square', 0.1, 40);
+  roninVowCutFx(V, P.roninGrave);
+}
+function vowTick(dt) {
+  const V = P.roninVow;
+  if (!V) return;
+  if (!roninOn()) { vowEnd('gone'); return; }
+  V.t += dt;
+  if (!V.cut) { if (V.t >= VOW_T_CUT) vowCut(V); return; }
+  if (P.roninSkyClear) return;                 // the final technique keeps its own clock
+  if (V.t >= VOW_T_CUT + VOW_LEN) vowSpend(V);
+}
+// the vow is spent: the final technique
+function vowSpend(V) {
+  vowEnd('spent');
+}
+// the grave broken: the vow ends at once, and the minute after it is a weak one
+function vowBreak() {
+  const g = P.roninGrave;
+  P.roninBroken = VOW_BROKEN_T;
+  banner('THE GRAVE IS BROKEN', '#f87171', 2.6);
+  Audio_.noise(0.6, 0.25, 900, 120, 1.6); Audio_.boom();
+  shake(1);
+  roninGraveBreakFx(g);
+  vowEnd('broken');
+}
+// the vow over, however it went: the grave goes, and so does RONIN
+function vowEnd(why) {
+  const V = P.roninVow, g = P.roninGrave;
+  P.roninVow = null; P.roninGrave = null; P.roninSkyClear = null;
+  if (P.roninChain) roninChainClose();
+  roninVowEndFx(V, g, why);
+  if (why !== 'gone' && P.roninT > 0) roninEnd();
+}
+// from hurtPlayer: a blow that would have killed him leaves him standing
+function vowUndead() {
+  P.hp = 1;
+  roninUndeadFx();
+}
+
+/* The grave in the room. Every pilot's, in co-op: each VAGRANT has his own. */
+function vowGraves() {
+  if (PILOTS.length < 2) return P.roninGrave ? [P.roninGrave] : null;
+  let out = null;
+  for (let k = 0; k < PILOTS.length; k++) {
+    const p = pilotP(k);
+    if (p && p.roninGrave) (out || (out = [])).push(p.roninGrave);
+  }
+  return out;
+}
+// what a body goes for instead of pilot p: a grave nearer to it than p is, or null
+function graveAim(e, p) {
+  if (e.type === 'boss' || e.amalPart || e.vrFounder) return null;
+  const gs = vowGraves();
+  if (!gs) return null;
+  let best = null, bd = (p.x - e.x) * (p.x - e.x) + (p.y - e.y) * (p.y - e.y);
+  for (const g of gs) {
+    if (g.sealed) continue;
+    const d = ((g.x - e.x) * (g.x - e.x) + (g.y - e.y) * (g.y - e.y)) * VOW_PULL * VOW_PULL;
+    if (d < bd) { bd = d; best = g; }
+  }
+  return best;
+}
+function graveHit(g, dmg, src) {
+  if (g.sealed || !(g.hp > 0) || !(dmg > 0)) return;
+  g.hp = Math.max(0, g.hp - dmg);
+  roninGraveHitFx(g, dmg, src);
+  if (g.hp === 0) pilotDo(g.owner, () => { if (P.roninGrave === g) vowBreak(); });
+}
+// from updateEnemies: a body that went for the grave and reached it
+function graveTouch(g, e, dmg) {
+  if (e.graveAt !== undefined && elapsed - e.graveAt < VOW_TOUCH_CD) return;
+  e.graveAt = elapsed;
+  graveHit(g, dmg, e);
+}
+// from updateEBullets: a round that crosses a grave stops in it
+function graveShot(b) {
+  const gs = vowGraves();
+  if (!gs) return false;
+  for (const g of gs) {
+    if (g.sealed || len(b.x - g.x, b.y - g.y) >= b.r + g.r) continue;
+    graveHit(g, b.dmg, b.owner);
+    return true;
+  }
+  return false;
+}
+// from updateMortars: a shell that lands on a grave
+function graveShell(m) {
+  const gs = vowGraves();
+  if (gs) for (const g of gs) if (len(g.x - m.x, g.y - m.y) < m.r + g.r) graveHit(g, m.dmg, null);
+}
+function graveTick(g, dt) {
+  g.vx = 0; g.vy = 0;                          // a body leaning on it does not move it
 }
 
 /* ======================= RONIN'S KIT — art hooks ==========================
@@ -20791,6 +21014,7 @@ function drawRoninKeys(pad, bw, ly) {
   for (let i = 0; i < 4; i++) {
     const x = pad + i * (kw + 4), a = RONIN_KIT[i], cd = a ? P.roninCd[i] : 0;
     if (a && a.hud) named = true;
+    if (i === 3 && a) { drawRoninVowKey(x, y, kw, kh); continue; }   // V draws its own (V: LAST VOW)
     if (a && RKA.prevCd[i] > 0 && !(cd > 0)) RKA.readyAt[i] = t;
     RKA.prevCd[i] = cd;
     const rq = (t - RKA.readyAt[i]) / 0.4, ready = a && !(cd > 0);
@@ -20828,7 +21052,7 @@ function drawRoninKeys(pad, bw, ly) {
   if (named) {
     ctx.font = "700 7px " + VRA_FONT; ctx.letterSpacing = '0.08em';
     for (let i = 0; i < 4; i++) {
-      const a = RONIN_KIT[i]; if (!a || !a.hud) continue;
+      const a = RONIN_KIT[i]; if (!a || !a.hud || i === 3) continue;
       const x = pad + i * (kw + 4), cd = P.roninCd[i];
       ctx.fillStyle = cd > 0 ? 'rgba(168,162,158,0.8)' : rgba(VRA_GOLD, 0.9);
       ctx.fillText(String(a.hud).toUpperCase(), x + kw / 2, y + kh + 9);
@@ -23802,6 +24026,254 @@ function roninExecKillFx(x) {
 function roninExecEndFx(x) {
   RKC.last = x; RKC.endAt = uiTime; RKC.x = null;
   if (x.exec) { rkcRip(P.x, P.y, 12, 110, 0.6, RKC_SHEEN, 1.2); vraInk(P.x, P.y, 4, 70, 5, 0.4); }
+}
+/* ------------------------ V: LAST VOW (placeholders) -------------------------
+   Placeholder art for V, to be drawn over. The logic calls these and reads
+   nothing back from them.
+
+   Called from:
+     drawRoninGrave()                 world, floor layer (each pilot's pass): the grave marker
+     drawRoninVowWorld()              world, additive (each pilot's pass): the vow on the hull,
+                                      and the line from him to the grave
+     drawRoninVowScreen(q)            screen, over the HUD: the cut-in while q.cut is false,
+                                      then the vow's grade
+     drawRoninVowKey(x, y, kw, kh)    the HUD's V key, in drawRoninKeys' row, with its name under it
+     drawRoninVowHud(pad, bw, ly)     HUD rows while the vow is up: its clock and the grave's
+                                      health; returns the next row's y
+     drawRoninBrokenHud(pad, bw, ly)  a HUD row through the broken minute; returns the next row's y
+     roninVowFx(V, g)                 V pressed: the grave goes in, and the cut-in begins
+     roninVowCutFx(V, g)              the cut: the vow begins
+     roninGraveHitFx(g, dmg, src)     the grave is hit (src: the body, a round's owner, or null)
+     roninGraveBreakFx(g)             the grave is broken
+     roninVowEndFx(V, g, why)         the vow is over: why is 'spent', 'broken' or 'gone'
+     roninUndeadFx()                  a blow that would have killed him left him at 1
+
+   WHAT THEY ARE HANDED
+     vowPhase()    { t (s since V), cut, lead (0 to 1, the press to the cut), age (s since
+                   the cut, -1 before), left (s of the vow left), sky (SKY CLEAR is
+                   playing), grave }
+     vowKey()      { lit (V would answer now), on (the vow is up), cut, left,
+                   why: '' | 'SPENT' | 'LOW HEALTH ONLY' | 'NOT IN A DUEL' }
+     P.roninGrave  { x, y, r, hp, maxHp, sealed (can't be hit: going in, or through
+                   SKY CLEAR) }
+     P.roninBroken seconds left of the broken minute
+     VOW_T_CUT, VOW_LEN, VOW_BROKEN_T
+
+   Art-side state lives in RKV and changes nothing of the logic's.
+--------------------------------------------------------------------------- */
+let RKV = { beginAt: -9, cutAt: -9, hitAt: -9, hitTextAt: -9, undeadAt: -9 };
+const RKV_RED = '#dc2626', RKV_BLOOD = '#7f1d1d', RKV_STONE = '#57534e', RKV_BONE = '#e7e5e4';
+
+// the marker: a stone standing on the floor, cracking as it is hurt
+function drawRoninGrave() {
+  const g = P.roninGrave;
+  if (!g) return;
+  const q = vowPhase(), t = uiTime;
+  const drop = q && !q.cut ? vraOut(clamp((q.lead - 0.35) / 0.4, 0, 1)) : 1;   // it comes down into the floor
+  if (drop <= 0) return;
+  const hurt = 1 - g.hp / g.maxHp, flash = clamp(1 - (t - RKV.hitAt) / 0.18, 0, 1);
+  const w = 22, h = 34, x = g.x, y = g.y - (1 - drop) * 120;
+  ctx.save();
+  ctx.globalAlpha = drop;
+  ctx.fillStyle = rgba(VRA_INK, 0.45);                       // its shadow
+  ctx.beginPath(); ctx.ellipse(g.x, g.y + 3, w * 0.8, 6, 0, 0, TAU); ctx.fill();
+  ctx.beginPath();                                           // the stone
+  ctx.moveTo(x - w / 2, y + 2); ctx.lineTo(x - w / 2, y - h + 8);
+  ctx.quadraticCurveTo(x - w / 2, y - h, x, y - h);
+  ctx.quadraticCurveTo(x + w / 2, y - h, x + w / 2, y - h + 8);
+  ctx.lineTo(x + w / 2, y + 2); ctx.closePath();
+  ctx.fillStyle = RKV_STONE; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(VRA_GOLD, 0.7); ctx.stroke();
+  ctx.strokeStyle = rgba(VRA_GOLD, 0.8); ctx.lineWidth = 1.2;   // a mark cut into it
+  ctx.beginPath(); ctx.moveTo(x, y - h + 7); ctx.lineTo(x, y - 6); ctx.moveTo(x - 5, y - h + 14); ctx.lineTo(x + 5, y - h + 14); ctx.stroke();
+  if (hurt > 0.05) {                                         // cracks, more of them the more it has taken
+    ctx.strokeStyle = rgba(VRA_INK, 0.85); ctx.lineWidth = 1;
+    const n = Math.ceil(hurt * 6);
+    for (let i = 0; i < n; i++) {
+      const a = i * 2.4, sx = x + Math.cos(a) * 6, sy = y - h * 0.55 + Math.sin(a * 1.7) * 9;
+      ctx.beginPath(); ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + Math.cos(a + 1) * 7, sy + Math.sin(a + 1) * 7);
+      ctx.lineTo(sx + Math.cos(a + 0.4) * 12, sy + Math.sin(a + 0.4) * 12); ctx.stroke();
+    }
+  }
+  if (flash > 0) { ctx.globalAlpha = drop * flash * 0.7; ctx.fillStyle = '#ffffff'; ctx.fillRect(x - w / 2, y - h, w, h + 2); }
+  ctx.globalAlpha = drop;
+  if (q && q.cut) {                                          // its health, over it
+    const bw = 46, by = y - h - 12, k = clamp(g.hp / g.maxHp, 0, 1);
+    ctx.fillStyle = 'rgba(5,6,10,0.75)'; ctx.fillRect(x - bw / 2 - 1, by - 1, bw + 2, 6);
+    ctx.fillStyle = k < 0.3 ? RKV_RED : rgba(RKV_BONE, 0.9); ctx.fillRect(x - bw / 2, by, bw * k, 4);
+    if (g.sealed) { ctx.strokeStyle = rgba(VRA_GOLD, 0.8); ctx.lineWidth = 1; ctx.strokeRect(x - bw / 2 - 1.5, by - 1.5, bw + 3, 7); }
+  }
+  ctx.restore();
+}
+
+// the vow on the hull: a red edge that breathes, and the line back to the grave
+function drawRoninVowWorld() {
+  const q = vowPhase(), g = P.roninGrave;
+  if (!q || !q.cut) return;
+  const t = uiTime, last = q.left < 5, beat = 0.5 + 0.5 * Math.sin(t * (last ? 14 : 6));
+  drawGlow(P.x, P.y, P.r * 3.4, RKV_RED, 0.22 + 0.16 * beat);
+  ctx.save();
+  ctx.strokeStyle = rgba(RKV_RED, 0.55 + 0.3 * beat); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 10 + 3 * beat, 0, TAU); ctx.stroke();
+  if (g) {
+    ctx.setLineDash([6, 8]); ctx.lineDashOffset = -t * 30;
+    ctx.strokeStyle = rgba(RKV_RED, 0.22); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(g.x, g.y - 16); ctx.stroke();
+    ctx.setLineDash([]);
+    const hit = clamp(1 - (t - RKV.hitAt) / 0.4, 0, 1);       // it calls out while it is being hurt
+    if (hit > 0) drawGlow(g.x, g.y - 16, 60, RKV_RED, 0.5 * hit);
+  }
+  ctx.restore();
+}
+
+// the cut-in (bars, the room dimmed, the name), then the vow's red edge
+function drawRoninVowScreen(q) {
+  const t = uiTime;
+  ctx.save();
+  if (!q.cut) {
+    const k = vraOut(clamp(q.lead / 0.3, 0, 1)), bar = H * 0.13 * k;
+    ctx.fillStyle = 'rgba(5,6,10,' + (0.55 * k) + ')'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = VRA_INK; ctx.fillRect(0, 0, W, bar); ctx.fillRect(0, H - bar, W, bar);
+    const tk = clamp((q.lead - 0.25) / 0.35, 0, 1);
+    ctx.textAlign = 'center';
+    ctx.font = "700 34px " + VRA_DISP; ctx.letterSpacing = '0.4em';
+    ctx.fillStyle = rgba(RKV_RED, tk); ctx.shadowColor = rgba(RKV_RED, 0.8 * tk); ctx.shadowBlur = 18;
+    ctx.fillText('LAST VOW', W / 2 + 7, H / 2);
+    ctx.shadowBlur = 0;
+    ctx.font = "600 12px " + VRA_FONT; ctx.letterSpacing = '0.3em';
+    ctx.fillStyle = rgba(RKV_BONE, 0.8 * clamp((q.lead - 0.5) / 0.3, 0, 1));
+    ctx.fillText('THE GRAVE WILL NOT FALL', W / 2 + 4, H / 2 + 28);
+    ctx.letterSpacing = '0em';
+    const rl = W * 0.4 * vraOut(clamp((q.lead - 0.7) / 0.3, 0, 1));
+    ctx.fillStyle = rgba(RKV_RED, 0.9); ctx.fillRect(W / 2 - rl / 2, H / 2 + 12, rl, 1.5);
+  } else {
+    const flash = clamp(1 - q.age / 0.5, 0, 1);
+    if (flash > 0) { ctx.fillStyle = rgba(RKV_RED, 0.35 * flash); ctx.fillRect(0, 0, W, H); }
+    const beat = 0.5 + 0.5 * Math.sin(t * (q.left < 5 ? 12 : 4));
+    const edge = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.75);
+    edge.addColorStop(0, 'rgba(127,29,29,0)');
+    edge.addColorStop(1, 'rgba(127,29,29,' + (0.32 + 0.14 * beat) + ')');
+    ctx.fillStyle = edge; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
+
+// the V key: dark until his health is low enough, red while the vow is up
+function drawRoninVowKey(x, y, kw, kh) {
+  const k = vowKey(), t = uiTime;
+  ctx.save();
+  ctx.textAlign = 'center';
+  if (k.on) {
+    const f = k.cut ? clamp(k.left / VOW_LEN, 0, 1) : 1;
+    ctx.save(); roundRect(x, y, kw, kh, 3); ctx.clip();
+    ctx.fillStyle = rgba(RKV_RED, 0.35); ctx.fillRect(x, y, kw * f, kh);
+    ctx.restore();
+    ctx.shadowColor = rgba(RKV_RED, 0.8); ctx.shadowBlur = 8;
+    ctx.strokeStyle = RKV_RED; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else if (k.lit) {
+    const beat = 0.5 + 0.5 * Math.sin(t * 5);
+    ctx.fillStyle = rgba(RKV_RED, 0.18 + 0.2 * beat); roundRect(x, y, kw, kh, 3); ctx.fill();
+    ctx.shadowColor = rgba(RKV_RED, 0.9); ctx.shadowBlur = 6 + 8 * beat;
+    ctx.strokeStyle = RKV_RED; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.strokeStyle = 'rgba(148,163,184,0.3)'; ctx.lineWidth = 1; roundRect(x + 0.5, y + 0.5, kw - 1, kh - 1, 3); ctx.stroke();
+  }
+  ctx.font = "700 9px " + VRA_DISP;
+  ctx.fillStyle = k.on ? RKV_BONE : k.lit ? VRA_IVORY : '#475569';
+  ctx.fillText(k.on && k.cut ? (k.left >= 10 ? Math.ceil(k.left) + '' : k.left.toFixed(1)) : 'V', x + kw / 2, y + kh - 4);
+  ctx.font = "700 7px " + VRA_FONT; ctx.letterSpacing = '0.08em';
+  ctx.fillStyle = k.on || k.lit ? rgba(RKV_RED, 0.95) : 'rgba(100,116,139,0.8)';
+  ctx.fillText('VOW', x + kw / 2, y + kh + 9);
+  ctx.letterSpacing = '0em';
+  ctx.restore();
+}
+
+// while the vow is up: its clock, then the grave's health
+function drawRoninVowHud(pad, bw, ly) {
+  const q = vowPhase(), g = P.roninGrave;
+  if (!q) return ly;
+  ctx.save();
+  ctx.font = '700 10px ' + VRA_DISP; ctx.letterSpacing = '0.16em';
+  ctx.fillStyle = RKV_RED; ctx.shadowColor = rgba(RKV_RED, 0.6); ctx.shadowBlur = 6;
+  ctx.fillText(q.sky ? 'SKY CLEAR' : 'LAST VOW', pad, ly);
+  ctx.shadowBlur = 0; ctx.letterSpacing = '0em';
+  const bx = pad + 78, bl = 60, k = q.cut ? clamp(q.left / VOW_LEN, 0, 1) : 1;
+  ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(bx, ly - 3, bl, 5, 1.5); ctx.fill();
+  ctx.fillStyle = RKV_RED; roundRect(bx, ly - 3, Math.max(2, bl * k), 5, 1.5); ctx.fill();
+  ctx.fillText(Math.ceil(q.left) + 's', bx + bl + 6, ly);
+  ly += 15;
+  if (g) {
+    const gk = clamp(g.hp / g.maxHp, 0, 1);
+    ctx.font = '700 9px ' + VRA_FONT; ctx.letterSpacing = '0.14em';
+    ctx.fillStyle = rgba(RKV_BONE, 0.85); ctx.fillText('GRAVE', pad, ly);
+    ctx.letterSpacing = '0em';
+    ctx.fillStyle = 'rgba(148,163,184,0.18)'; roundRect(bx, ly - 3, bl, 5, 1.5); ctx.fill();
+    ctx.fillStyle = gk < 0.3 ? RKV_RED : RKV_BONE; roundRect(bx, ly - 3, Math.max(2, bl * gk), 5, 1.5); ctx.fill();
+    ctx.fillText(Math.ceil(gk * 100) + '%', bx + bl + 6, ly);
+    ly += 15;
+  }
+  ctx.restore();
+  return ly + 2;
+}
+
+// the minute after the grave broke
+function drawRoninBrokenHud(pad, bw, ly) {
+  ctx.save();
+  ctx.font = '700 10px ' + VRA_DISP; ctx.letterSpacing = '0.16em';
+  ctx.fillStyle = rgba(RKV_RED, 0.55 + 0.25 * Math.sin(uiTime * 3));
+  ctx.fillText('BROKEN', pad, ly);
+  ctx.letterSpacing = '0em';
+  ctx.fillStyle = 'rgba(168,162,158,0.9)';
+  ctx.fillText(Math.ceil(P.roninBroken) + 's · HALF DAMAGE', pad + 64, ly);
+  ctx.restore();
+  return ly + 17;
+}
+
+function roninVowFx(V, g) {
+  RKV.beginAt = uiTime;
+  ringFx(P.x, P.y, P.r, 160, RKV_RED, 0.6, 3);
+}
+function roninVowCutFx(V, g) {
+  RKV.cutAt = uiTime;
+  if (g) {
+    ringFx(g.x, g.y, 10, 420, RKV_RED, 0.8, 5);
+    burst(g.x, g.y, 40, RKV_STONE, 380, 3.5, 0.8);
+    burst(g.x, g.y, 24, RKV_RED, 300, 2.6, 0.6);
+  }
+  burst(P.x, P.y, 30, RKV_RED, 420, 3, 0.6);
+}
+function roninGraveHitFx(g, dmg, src) {
+  const t = uiTime;
+  RKV.hitAt = t;
+  burst(g.x + rnd(8, -8), g.y - 14 + rnd(8, -8), 5, RKV_STONE, 160, 2.4, 0.35);
+  if (t - RKV.hitTextAt > 0.25) {
+    RKV.hitTextAt = t;
+    floatText(g.x, g.y - 52, '-' + Math.round(dmg), '#d6d3d1', 12, -30);
+  }
+}
+function roninGraveBreakFx(g) {
+  if (!g) return;
+  ringFx(g.x, g.y, 8, 300, RKV_RED, 0.7, 6);
+  burst(g.x, g.y - 14, 60, RKV_STONE, 420, 4, 1.0);
+  burst(g.x, g.y - 14, 30, RKV_RED, 300, 3, 0.8);
+  floatText(g.x, g.y - 60, 'BROKEN', RKV_RED, 18, -24);
+}
+function roninVowEndFx(V, g, why) {
+  if (g && why === 'spent') {
+    ringFx(g.x, g.y, 6, 140, RKV_BONE, 0.6, 3);
+    burst(g.x, g.y, 18, RKV_STONE, 120, 3, 0.9);
+    floatText(g.x, g.y - 48, 'IT IS GUARDED', RKV_BONE, 13, -20);
+  }
+}
+function roninUndeadFx() {
+  const t = uiTime;
+  if (t - RKV.undeadAt < 0.8) return;
+  RKV.undeadAt = t;
+  floatText(P.x, P.y - 36, 'UNDEAD', RKV_RED, 14);
+  ringFx(P.x, P.y, P.r, 70, RKV_RED, 0.35, 3);
 }
 /* ====================== end of RONIN'S KIT art hooks ====================== */
 
@@ -30725,7 +31197,8 @@ function updateEnemies(dt) {
     /* Co-op: everything below steers, aims and lands contact damage on this
        one target, so aggro is decided once, here, by proximity. Solo this is
        P and nothing changes. A downed wingman is not in the running. */
-    const TG = e.hacked ? foe(e) : mpAim(e.x, e.y);   // yours aim at what they picked
+    let TG = e.hacked ? foe(e) : mpAim(e.x, e.y);     // yours aim at what they picked
+    if (!e.hacked) TG = graveAim(e, TG) || TG;        // RONIN's V: or the grave, if it is nearer
     const dx = TG.x - e.x, dy = TG.y - e.y;
     const d = len(dx, dy) || 1;
     const ux = dx / d, uy = dy / d;
@@ -31045,9 +31518,10 @@ function updateEnemies(dt) {
     if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost && !(e.stagger > 0) && !suPinned(e)) {
       const cd = e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
                        * (e.rage === 1 ? 2.2 : 1);
-      if (TG === P) hurtPlayer(cd, { src: e });
+      if (TG.grave) graveTouch(TG, e, cd);   // RONIN's V: it reached the grave
+      else if (TG === P) hurtPlayer(cd, { src: e });
       else if (TG.pid != null) pilotDo(TG.pid, () => hurtPlayer(cd, { src: e }));   // the other pilot, as itself
-      if (P.thorns && e.hitCd <= 0) {
+      if (P.thorns && e.hitCd <= 0 && !TG.grave) {
         e.hitCd = 0.3;
         damageEnemy(e, (16 + P.dmg * 1.2) * P.thorns, false, TG.x, TG.y, { silent: true });
       }
@@ -36482,6 +36956,7 @@ function updateMortars(dt) {
       if (len(P.x - m.x, P.y - m.y) < m.r + P.r) hurtPlayer(m.dmg);
       const wgm = mpPilots();
       if (wgm && len(wgm.x - m.x, wgm.y - m.y) < m.r + wgm.r) hurtWing(m.dmg);
+      graveShell(m);                       // RONIN's V: and the grave, if it is under it
       if (m.big) {
         const v = onScreen(m.x, m.y, m.r);
         shake(0.7 * v);
@@ -36924,6 +37399,12 @@ function updateEBullets(dt) {
       pilotDo(wg.pid, () => hurtPlayer(b.dmg, { src: b.owner, shot: b }));
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);
+      continue;
+    }
+    // RONIN's V: the grave is in the way of whatever crosses it (a pilot standing over it takes it first)
+    if (graveShot(b)) {
+      burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
+      ebullets.splice(i, 1);
     }
   }
 }
@@ -37126,6 +37607,7 @@ function render() {
     drawOdStrikeMarks();       // C: the X to be cut, and what is left of it to trace
     drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
     drawRoninScores();         // RONIN's Z: the X it leaves in the floor
+    drawRoninGrave();          // RONIN's V: the grave marker
     { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
     { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
   });
@@ -37203,6 +37685,7 @@ function render() {
     drawBladeWaves();
     drawRoninCleaves();         // RONIN's Z: the strokes
     drawRoninSky();             // RONIN's X: the paths, and the sky clearing along them
+    drawRoninVowWorld();        // RONIN's V: the vow on the hull, and its line to the grave
   });
   drawMalFx();
   drawParticles();
@@ -37273,6 +37756,7 @@ function render() {
   drawTribunalHud();
   drawVrScreen();       // THE VAGRANT'S RITE: the entrance, the duel's letterbox and prompts
   { const rq = roninPhase(); if (rq) drawRoninIntroScreen(rq); }   // RONIN's lead-in, over the frame
+  { const vq = vowPhase(); if (vq) drawRoninVowScreen(vq); }       // RONIN's V: its cut-in, then the vow's edge
   if (roninShown()) drawRoninScreen(roninW());
   { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
   halDeathHud();
@@ -48490,6 +48974,8 @@ function drawBladeHUD(pad, bw, ly) {
   ctx.lineTo(dx0 + 4, ly + 4); ctx.lineTo(dx0, ly - 0.5); ctx.closePath(); ctx.fill();
   ly += 17;
   if (roninOn()) ly = drawRoninHud(pad, bw, ly);   // RONIN's clock
+  if (P.roninVow) ly = drawRoninVowHud(pad, bw, ly);   // V: the vow's clock, and the grave's health
+  if (P.roninBroken > 0) ly = drawRoninBrokenHud(pad, bw, ly);   // and the minute after a broken grave
   if (roninOn() && !vrRite) ly = drawRoninKeys(pad, bw, ly);   // and its keys
   /* The chain: its multiplier, then a pip for every parry in the row, the last
      one flickering once it is about to come off. Then a chevron for each
@@ -58064,7 +58550,7 @@ const PILOT_VARS = ['P', 'selectedChar', 'pilotSkin', 'IMP_STATE', 'offers', 'ge
   'od', 'odFlash', 'odShake', 'odSeeded', 'odPools', 'odTrail', 'odRing', 'odScorchLitAt', 'odScorchEndAt',
   'odFusionLitAt', 'odFusionOutAt', 'odFusionThrow', 'odPlume', 'odPyros', 'odScars', 'odStars', 'odStarBooms',
   'suImp', 'suAscGone', 'suHead', 'suZones', 'suPieces', 'suFx', 'SUI',
-  'roninCleaves', 'roninSplits', 'RKA', 'RKC', 'bladeEchoes', 'bladeWaves'];
+  'roninCleaves', 'roninSplits', 'RKA', 'RKC', 'RKV', 'bladeEchoes', 'bladeWaves'];
 // each pilot's own while another is flying: { v: PILOT_VARS' values, col: [COL.player, COL.bullet] }
 const PILOTS = [];
 const PILOT = { on: 0, get: null, set: null };
@@ -58472,7 +58958,7 @@ const SNAP_LOCAL = new Set([
   'tsLoading',                            // the account panel's Turnstile script, loading
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
-  'RKA', 'RKC',                          // RONIN's art layers (a WeakMap of wounds, draw closures)
+  'RKA', 'RKC', 'RKV',                   // RONIN's art layers (a WeakMap of wounds, draw closures; V's)
   'pilotSkin', 'IMP_STATE',              // and how a pilot is dressed: each machine's own idea of it
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
