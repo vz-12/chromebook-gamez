@@ -19893,28 +19893,38 @@ function roninChainTick(dt) {
 function lunarCleave(prefix, ch) {
   const dx = P.in.ax - P.x, dy = P.in.ay - P.y;
   const ang = Math.atan2(dy, dx), r = Math.min(Math.hypot(dx, dy), LUNAR_RANGE);
-  const x = clamp(P.x + Math.cos(ang) * r, arena.x0 + 24, arena.x1 - 24);
-  const y = clamp(P.y + Math.sin(ang) * r, arena.y0 + 24, arena.y1 - 24);
-  const c = { id: ++roninCleaveId, x, y, ang, t: 0, strokes: [],
-              end: LUNAR_WIND + LUNAR_GAP + LUNAR_SCORE_T };
-  for (let i = 0; i < 2; i++) {
-    const a = ang + (i ? -1 : 1) * Math.PI / 4, h = LUNAR_LEN / 2;
+  // V: in the vow it is the vow's cleave (ZV), and that may lay the cross somewhere else
+  const pick = roninVMode() && ch ? vowPick(ZV, prefix, ch) : null, o = pick ? pick.plan : null;
+  const at = o && o.at ? o.at : { x: P.x + Math.cos(ang) * r, y: P.y + Math.sin(ang) * r };
+  const x = clamp(at.x, arena.x0 + 24, arena.x1 - 24);
+  const y = clamp(at.y, arena.y0 + 24, arena.y1 - 24);
+  const n = o ? o.strokes : 2, h = (o ? o.len : LUNAR_LEN) / 2;
+  const c = { id: ++roninCleaveId, x, y, ang, t: 0, strokes: [], end: 0, mul: o ? o.mul : 1,
+              vow: o ? { key: pick.key, n: pick.n, tear: !!o.tear, blasts: o.blasts || null, blasted: false, cut: {} } : null };
+  for (let i = 0; i < n; i++) {                // crossed on the aim: two make an X, three a star
+    const a = ang + Math.PI / 4 - i * Math.PI / n;
     c.strokes.push({ a, at: LUNAR_WIND + i * LUNAR_GAP, done: false, hits: 0,
                      x1: x - Math.cos(a) * h, y1: y - Math.sin(a) * h,
                      x2: x + Math.cos(a) * h, y2: y + Math.sin(a) * h });
   }
+  if (o && o.fault) for (const f of o.fault)   // FAULT LINE: the path run before opens with it
+    c.strokes.push({ a: Math.atan2(f.y2 - f.y1, f.x2 - f.x1), at: LUNAR_WIND + n * LUNAR_GAP, done: false, hits: 0,
+                     fault: true, x1: f.x1, y1: f.y1, x2: f.x2, y2: f.y2 });
+  const last = c.strokes[c.strokes.length - 1].at;
+  c.end = last + (o ? VOW_TEAR_T : LUNAR_SCORE_T);
   roninCleaves.push(c);
   if (roninCleaves.length > 8) roninCleaves.shift();
   if (ch) ch.cleaves.push(c);
   Audio_.tone(900, 0.06, 'sawtooth', 0.04, 2400);
   roninCleaveFx(c);
-  return LUNAR_WIND + LUNAR_GAP + 0.02;
+  if (o) roninVowNameFx(pick.n, x, y);
+  return last + 0.02;
 }
 
 // one stroke lands: everything on its line is cut once, and what lives is wounded
 function lunarStroke(c, s) {
   s.done = true;
-  const dmg = bladeSwingDmg() * LUNAR_DMG;
+  const dmg = bladeSwingDmg() * LUNAR_DMG * (c.mul || 1);
   // ROOT's line and THE CURATOR's rings only ever answered to bullets
   rootHitSeg(s.x1, s.y1, s.x2, s.y2, LUNAR_W);
   if (cages.length) cageStrikeSeg(s.x1, s.y1, s.x2, s.y2, dmg);
@@ -19930,6 +19940,7 @@ function lunarStroke(c, s) {
   if (s.hits && s === c.strokes[1]) hitStop = Math.max(hitStop, 0.04);
   Audio_.noise(0.12, 0.12, 2400, 600, 2);      // the shake is the art's (roninStrokeFx)
   roninStrokeFx(c, s);
+  if (c.vow && !c.vow.blasted && c.strokes.every(q => q.done)) vowCleaveDone(c);   // V: what it sets off
 }
 
 function roninWound(e) {
@@ -19952,9 +19963,9 @@ const skyStrokes = c => c.strokes.map(s => ({ x1: s.x1, y1: s.y1, x2: s.x2, y2: 
 const skyNear = (p, far) => Math.hypot(p.x - P.x, p.y - P.y) <= (far || SKY_RANGE * SKY_REACH);
 // the chain's k-th newest cross, if it is still on the floor
 const skyCross = (ch, k) => { const c = ch.cleaves[ch.cleaves.length - 1 - (k || 0)]; return c && roninCleaves.includes(c) ? c : null; };
-function skyAim() {
+function skyAim(range) {
   const dx = P.in.ax - P.x, dy = P.in.ay - P.y, d = Math.hypot(dx, dy);   // the pilot's aim: never this machine's cursor
-  const a = d > 1 ? Math.atan2(dy, dx) : P.ang, r = clamp(d, SKY_MIN, SKY_RANGE);
+  const a = d > 1 ? Math.atan2(dy, dx) : P.ang, r = clamp(d, SKY_MIN, range || SKY_RANGE);
   return skyPt(P.x + Math.cos(a) * r, P.y + Math.sin(a) * r);
 }
 
@@ -20014,8 +20025,82 @@ const SKY = {
     return { pts, segs: skySegs(pts).concat(skyStrokes(c1), skyStrokes(c2)), mul: 1.5, wound: true };
   } },
 };
-// X in V's mode: its own version of every one of the above, once V exists
-const SKY_V = {};
+/* X in the vow (V): its own version of each, built on destruction where
+   these are sky and water (user, 4 Oct). The names and shapes are mine. A
+   plan here may also carry: w (the split's half width), delay (arriving to
+   splitting), arcs ({ n, r, mul }: the cut leaps from body to body). */
+const VOW_SKY_DELAY = 0.04;    // in the vow a path splits as he lands
+const VOW_SKY_RANGE = 1.5;     // and runs this much farther, in SKY_RANGEs
+const VOW_CRATER_R  = 220;     // METEOR's crater and ECLIPSE's ring
+const VOW_BAND_W    = 90;      // half of TECTONIC's band
+const VOW_RUPTURE_R = 400;     // RUPTURE: how far from where he lands a wounded body bursts
+const SKY_V = {
+  // X: THUNDERCLAP. Farther, twice as wide, harder; it splits as he lands, and wounds
+  '': { n: 'THUNDERCLAP', plan: () => {
+    const pts = [skyHere(), skyAim(SKY_RANGE * VOW_SKY_RANGE)];
+    return { pts, segs: skySegs(pts), mul: 2, wound: true, w: SKY_W * 2, delay: VOW_SKY_DELAY };
+  } },
+  // X X: CHAIN LIGHTNING. Both paths split together, and the cut leaps from body to body
+  'x': { n: 'CHAIN LIGHTNING', plan: ch => {
+    const prev = ch.sky[ch.sky.length - 1];
+    if (!prev) return null;
+    const pts = [skyHere(), skyAim(SKY_RANGE * VOW_SKY_RANGE)];
+    if (!prev.split.done) { prev.split.done = true; prev.split.merged = true; }
+    return { pts, segs: skySegs(pts).concat(prev.split.segs), mul: 2, wound: true, w: SKY_W * 1.5,
+             delay: VOW_SKY_DELAY, arcs: { n: 10, r: 260, mul: 0.75 } };
+  } },
+  // X X X: THE SKY FALLS. The triangle closes, and everything inside it is crushed
+  'xx': { n: 'THE SKY FALLS', plan: ch => {
+    const a = ch.sky[ch.sky.length - 2], b = ch.sky[ch.sky.length - 1];
+    if (!a || !b || !skyNear(a.from, SKY_RANGE * 3)) return null;
+    const A = a.from, B = a.to, C = skyHere(), pts = [C, A];
+    return { pts, segs: skySegs([A, B, C, A]), area: { kind: 'poly', pts: [A, B, C] }, mul: 4, wound: true,
+             w: SKY_W * 1.5, delay: VOW_SKY_DELAY };
+  } },
+  // Z X: METEOR. To the cross, which craters
+  'z': { n: 'METEOR', plan: ch => {
+    const c = skyCross(ch);
+    if (!c || !skyNear(c)) return null;
+    const pts = [skyHere(), skyPt(c.x, c.y)];
+    return { pts, segs: skySegs(pts).concat(skyStrokes(c)), area: { kind: 'circle', x: c.x, y: c.y, r: VOW_CRATER_R },
+             mul: 3.5, wound: true, delay: VOW_SKY_DELAY };
+  } },
+  // Z X X: ECLIPSE. FULL MOON's ring, wider and harder
+  'zx': { n: 'ECLIPSE', plan: ch => {
+    const c = skyCross(ch);
+    if (!c || !skyNear(c)) return null;
+    const a0 = Math.hypot(P.x - c.x, P.y - c.y) < 20 ? P.ang : Math.atan2(P.y - c.y, P.x - c.x);
+    const ring = [];
+    for (let i = 0; i <= 32; i++) {
+      const an = a0 + i / 32 * TAU;
+      ring.push(skyPt(c.x + Math.cos(an) * VOW_CRATER_R, c.y + Math.sin(an) * VOW_CRATER_R));
+    }
+    return { pts: [skyHere()].concat(ring), segs: skySegs(ring),
+             area: { kind: 'circle', x: c.x, y: c.y, r: VOW_CRATER_R }, mul: 4, wound: true, delay: VOW_SKY_DELAY };
+  } },
+  // X Z X: STARFALL. To the cross, and the sky comes down on every wounded body in the room
+  'xz': { n: 'STARFALL', plan: ch => {
+    const c = skyCross(ch);
+    if (!c || !skyNear(c)) return null;
+    const pts = [skyHere(), skyPt(c.x, c.y)];
+    return { pts, segs: skySegs(pts), mul: 2.5, wound: true, delay: VOW_SKY_DELAY, stars: { x: c.x, y: c.y, r: 1e5 } };
+  } },
+  // Z Z X: TECTONIC. Cross to cross; both open again, and the ground between them splits
+  'zz': { n: 'TECTONIC', plan: ch => {
+    const c1 = skyCross(ch, 1), c2 = skyCross(ch);
+    if (!c1 || !c2 || !skyNear(c1)) return null;
+    const pts = [skyHere(), skyPt(c1.x, c1.y), skyPt(c2.x, c2.y)];
+    const a = Math.atan2(c2.y - c1.y, c2.x - c1.x), nx = -Math.sin(a) * VOW_BAND_W, ny = Math.cos(a) * VOW_BAND_W;
+    const band = [{ x: c1.x + nx, y: c1.y + ny }, { x: c2.x + nx, y: c2.y + ny }, { x: c2.x - nx, y: c2.y - ny }, { x: c1.x - nx, y: c1.y - ny }];
+    return { pts, segs: skySegs(pts).concat(skyStrokes(c1), skyStrokes(c2)), area: { kind: 'poly', pts: band },
+             mul: 2.5, wound: true, delay: VOW_SKY_DELAY };
+  } },
+  // C X: RUPTURE. Out of the stance, and every wounded body near where he lands bursts
+  'c': { n: 'RUPTURE', plan: () => {
+    const to = skyAim(SKY_RANGE * VOW_SKY_RANGE), pts = [skyHere(), to];
+    return { pts, segs: skySegs(pts), mul: 3, wound: true, delay: VOW_SKY_DELAY, stars: { x: to.x, y: to.y, r: VOW_RUPTURE_R } };
+  } },
+};
 
 function skyPick(prefix, ch) {
   const tables = roninVMode() ? [SKY_V, SKY] : [SKY];
@@ -20038,7 +20123,8 @@ function clearSky(prefix, ch) {
   const len = cum[cum.length - 1], T = Math.max(0.06, len / SKY_SPD);
   const sp = { id: ++roninSplitId, key: pick.key, n: pick.n, segs: plan.segs, area: plan.area || null,
                mul: plan.mul, wound: !!plan.wound, stars: plan.stars || null, starAt: [],
-               t: 0, at: T + SKY_DELAY, done: false, merged: false, hits: 0 };
+               w: plan.w || SKY_W, arcs: plan.arcs || null, arcAt: [],
+               t: 0, at: T + (plan.delay !== undefined ? plan.delay : SKY_DELAY), done: false, merged: false, hits: 0 };
   roninSplits.push(sp);
   const d = P.roninDash = { key: pick.key, n: pick.n, pts, cum, len, t: 0, T, split: sp };
   ch.sky.push({ from: pts[0], to: pts[pts.length - 1], split: sp });
@@ -20068,7 +20154,7 @@ function skyInPoly(x, y, pts) {
   return inside;
 }
 function skyTouches(sp, e) {
-  for (const s of sp.segs) if (segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + SKY_W)) return true;
+  for (const s of sp.segs) if (segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + (sp.w || SKY_W))) return true;
   const A = sp.area;
   if (A && A.kind === 'circle') return Math.hypot(e.x - A.x, e.y - A.y) < A.r + e.r;
   if (A && A.kind === 'poly') return skyInPoly(e.x, e.y, A.pts);
@@ -20087,7 +20173,7 @@ function skySplitLand(sp) {
   sp.done = true;
   const dmg = bladeSwingDmg() * SKY_DMG * sp.mul;
   for (const s of sp.segs) {
-    rootHitSeg(s.x1, s.y1, s.x2, s.y2, SKY_W);
+    rootHitSeg(s.x1, s.y1, s.x2, s.y2, sp.w || SKY_W);
     if (cages.length) cageStrikeSeg(s.x1, s.y1, s.x2, s.y2, dmg);
   }
   const cut = new Set();
@@ -20102,6 +20188,7 @@ function skySplitLand(sp) {
     sp.starAt.push({ x: e.x, y: e.y });
     skyCut(sp, e, dmg, true);
   }
+  if (sp.arcs) vowArcs(sp, cut, dmg * sp.arcs.mul);   // V: CHAIN LIGHTNING
   if (sp.hits) hitStop = Math.max(hitStop, 0.05);
   Audio_.noise(0.18, 0.14, 3200, 500, 2);
   roninSplitFx(sp);
@@ -20133,7 +20220,10 @@ function skySplitLand(sp) {
 --------------------------------------------------------------------------- */
 function stillWater(prefix, ch) {
   if (P.roninStill || P.roninExec || P.roninDash) return false;
-  const s = P.roninStill = { t: 0, T: WATER_MAX, x: P.x, y: P.y };
+  // V: in the vow it is the vow's stance (WATER_V): it executes higher, and keeps catching
+  const pick = roninVMode() && ch ? vowPick(WATER_V, prefix, ch) : null;
+  const vow = pick ? Object.assign({ key: pick.key, n: pick.n, caught: 0 }, pick.plan) : null;
+  const s = P.roninStill = { t: 0, T: vow ? VOW_WATER_MAX : WATER_MAX, x: P.x, y: P.y, vow };
   if (ch) ch.cdMul[2] = 1;
   Audio_.tone(420, 0.25, 'sine', 0.05, 260);
   roninStillFx(s);
@@ -20179,17 +20269,18 @@ function roninFinaleEnd(key, e, ang) {
   else if (key === 'founder') { if (tribunal && tribunal.hal) tribunal.hal.hp = 0; }
 }
 
-// does this counter leave the body at WATER_EXEC or under? An estimate: the kill itself is certain
-function stillExecutes(e, dmg) {
+// does this counter leave the body at WATER_EXEC (or the vow's th) or under? An estimate: the kill itself is certain
+function stillExecutes(e, dmg, th) {
+  const at = th || WATER_EXEC;
   const f = roninFinaleOf(e);
   if (f) {                                     // a finale's damage is throttled: the bucket is the most it takes
     const est = f.bucket && f.bucket.tok !== undefined ? Math.min(dmg, Math.max(0, f.bucket.tok)) : dmg;
-    return f.maxHp > 0 && f.hp - est <= f.maxHp * WATER_EXEC;
+    return f.maxHp > 0 && f.hp - est <= f.maxHp * at;
   }
   if (!stillCanExec(e)) return false;
   let est = dmg * (e.woundT > 0 ? WOUND_MUL : 1) * (e.vuln || 1) * (1 - (e.dr || 0));
   if (e.dmgCap !== undefined) est = Math.min(est, e.dmgCap * 3);
-  return e.hp - est <= e.maxHp * WATER_EXEC;
+  return e.hp - est <= e.maxHp * at;
 }
 // who threw it: the attacker, or the body a round came from along its own line
 function stillFind(opts) {
@@ -20213,6 +20304,7 @@ function stillFind(opts) {
 
 // from hurtPlayer, while the stance waits: the blow is caught, and answered
 function stillCatch(amount, opts) {
+  const st = P.roninStill, vow = st && st.vow;  // V: the vow's stance, and what is left of it
   P.roninStill = null;
   const src = opts && opts.src, shot = opts && opts.shot;
   const blow = src && src.x !== undefined ? { x: src.x, y: src.y } : shot ? { x: shot.x, y: shot.y } : { x: P.x, y: P.y };
@@ -20222,7 +20314,9 @@ function stillCatch(amount, opts) {
   if (crit) dmg *= bladeCritM();
   const from = { x: P.x, y: P.y }, e = stillFind(opts);
   const x = { kind: 'wave', exec: false, boss: false, e, t: 0, T: WATER_STRIKE_T, kill: WATER_STRIKE_KILL,
-              killed: false, dmg, crit, from, to: from, ang: P.ang, blow, tx: P.x, ty: P.y, hull: true, finale: null };
+              killed: false, dmg, crit, from, to: from, ang: P.ang, blow, tx: P.x, ty: P.y, hull: true, finale: null,
+              vow: vow || null, left: vow ? Math.max(0, st.T - st.t) : 0 };
+  if (vow) { vow.caught++; roninVowNameFx(vow.n, P.x, P.y); }
   if (!e) {
     // nobody within reach: it goes back the way it came
     const ang = shot && (shot.vx || shot.vy) ? Math.atan2(-shot.vy, -shot.vx) : P.ang;
@@ -20235,7 +20329,7 @@ function stillCatch(amount, opts) {
     P.x = to.x; P.y = to.y; P.vx = 0; P.vy = 0;
     Object.assign(x, { to, ang, tx: e.x, ty: e.y });
     e.roninExec = true; e.vx = 0; e.vy = 0;
-    if (stillExecutes(e, dmg)) {
+    if (stillExecutes(e, dmg, vow ? vow.exec : 0)) {
       x.exec = true;
       const fin = roninFinaleOf(e), key = fin ? fin.key : e.type === 'boss' && e.boss ? e.boss : null;
       if (key) {
@@ -20270,6 +20364,7 @@ function stillLand(x) {
       else { e.floor = undefined; e.hp = 0; killEnemy(e, x.ang); }
     }
   }
+  if (x.vow) vowStillLand(x);                   // V: what the vow's counter sets off besides
   hitStop = Math.max(hitStop, x.exec ? 0.08 : 0.05);
   Audio_.noise(0.3, 0.2, 2600, 300, 2);
   if (x.exec) Audio_.boom();
@@ -20285,7 +20380,7 @@ function stillTick(dt) {
     P.vx = 0; P.vy = 0;
     if (s.t >= s.T || !roninOn()) {
       P.roninStill = null;
-      if (ch && ch.keys.length) ch.cdMul[2] = WATER_WHIFF;
+      if (ch && ch.keys.length && !(s.vow && s.vow.caught)) ch.cdMul[2] = WATER_WHIFF;
       roninStillEndFx(s);
     }
     return;
@@ -20299,6 +20394,11 @@ function stillTick(dt) {
     if (x.e && !x.e.dead) { x.e.roninExec = false; x.e.roninHide = false; }
     P.roninExec = null;
     roninExecEndFx(x);
+    // V: the vow's stance takes up again for what is left of it, until it has caught its fill
+    if (x.vow && x.left > 0.05 && x.vow.caught < x.vow.catches && vowOn()) {
+      const s2 = P.roninStill = { t: 0, T: x.left, x: P.x, y: P.y, vow: x.vow };
+      roninStillFx(s2);
+    }
   }
 }
 
@@ -20314,11 +20414,15 @@ function roninKitTick(dt) {
     c.t += dt;
     for (const s of c.strokes) if (!s.done && c.t >= s.at) lunarStroke(c, s);
     if (c.t >= c.end) { roninCleaves.splice(i, 1); continue; }
-    // the score: whatever crosses it while it lasts is wounded
-    for (const e of enemies) {
+    // the score: whatever crosses it while it lasts is wounded (V: in the vow it is a tear, and cuts too)
+    for (const e of (c.vow && c.vow.tear ? enemies.slice() : enemies)) {
       if (e.dead || e.hacked || e.phased || e.vrFounder) continue;
       for (const s of c.strokes)
-        if (s.done && segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r)) { roninWound(e); break; }
+        if (s.done && segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r)) {
+          roninWound(e);
+          if (c.vow && c.vow.tear) vowTearCut(c, e);
+          break;
+        }
     }
   }
   for (let i = roninSplits.length - 1; i >= 0; i--) {
@@ -20535,6 +20639,125 @@ function graveShell(m) {
 }
 function graveTick(g, dt) {
   g.vx = 0; g.vy = 0;                          // a body leaning on it does not move it
+}
+
+/* ------------------------------ the vow's moves -----------------------------
+   In the vow every move is a new one (user: "all the moves should be able
+   to synergize into new ones"), and which depends on the move before it,
+   the way CLEAR SKY's variations always have: each table is keyed by the
+   chain's earlier keys, oldest first, and falls back by dropping keys from
+   the front. Nothing says what comes next; a landed move's name shows. The
+   names and shapes are mine, built on destruction (user: where CLEAR SKY
+   was water and wind, these are violent). X's are SKY_V, beside SKY.
+--------------------------------------------------------------------------- */
+const VOW_TEAR_T    = 6;       // the vow's cleaves tear the floor this long
+const VOW_TEAR_TICK = 0.5;     // and cut whatever stands in the tear this often
+const VOW_TEAR_DMG  = 1;       // in swings
+const VOW_BLAST_R   = 220;     // SHATTER's and AFTERSHOCK's blasts
+const VOW_BLAST_DMG = 4;       // in swings
+const VOW_WATER_MAX = 3;       // the vow's stance waits this long
+const VOW_EYE_R     = 320;     // EYE OF THE STORM
+const VOW_SPILL     = 0.5;     // what a vow counter spills onto the rest, of the counter itself
+
+// Z in the vow. A plan: strokes, len, mul (on each stroke), tear, at (the cross's centre, if
+// not the aim), blasts ([{ x, y } | { self }] when every stroke is in), fault (segs to open again)
+const ZV = {
+  // Z: SUNDER. Three strokes, longer and harder, and the floor stays torn
+  '':  { n: 'SUNDER', plan: () => ({ strokes: 3, len: 300, mul: 1.6, tear: true }) },
+  // Z Z: SHATTER. The new cross and the last one both blow apart
+  'z': { n: 'SHATTER', plan: ch => {
+    const c = skyCross(ch);
+    return c ? { strokes: 2, len: LUNAR_LEN, mul: 1.6, tear: true, blasts: [{ x: c.x, y: c.y }, { self: true }] } : null;
+  } },
+  // X Z: FAULT LINE. The path just run tears open again, and the cross lands besides
+  'x': { n: 'FAULT LINE', plan: ch => {
+    const q = ch.sky[ch.sky.length - 1];
+    return q ? { strokes: 2, len: LUNAR_LEN, mul: 1.6, tear: true, fault: q.split.segs.map(f => ({ x1: f.x1, y1: f.y1, x2: f.x2, y2: f.y2 })) } : null;
+  } },
+  // C Z: AFTERSHOCK. A huge star cut on himself, and a blast at its heart
+  'c': { n: 'AFTERSHOCK', plan: () => ({ strokes: 3, len: 420, mul: 2, tear: true, at: skyHere(), blasts: [{ self: true }] }) },
+};
+// C in the vow. A plan: exec (the share it executes at), catches, eye (a radius the counter
+// also lands in), quake (the id of a cross it sets off)
+const WATER_V = {
+  // C: WRATH. It executes at 30%, and the stance keeps catching while it lasts
+  '':  { n: 'WRATH', plan: () => ({ exec: 0.3, catches: 3 }) },
+  // Z C: QUAKE. The catch also sets the last cross off: everything on it takes half the counter
+  'z': { n: 'QUAKE', plan: ch => { const c = skyCross(ch); return c ? { exec: 0.3, catches: 3, quake: c.id } : null; } },
+  // X C: EYE OF THE STORM. The counter lands on everything round him too
+  'x': { n: 'EYE OF THE STORM', plan: () => ({ exec: 0.3, catches: 3, eye: VOW_EYE_R }) },
+  // C C: NO MERCY. It executes at 50%
+  'c': { n: 'NO MERCY', plan: () => ({ exec: 0.5, catches: 3 }) },
+};
+
+// the vow's version of a move for this chain: the longest of its keys a table answers to
+function vowPick(tb, prefix, ch) {
+  for (let k = 0; k <= prefix.length; k++) {
+    const key = prefix.slice(k), v = tb[key];
+    if (!v) continue;
+    const plan = v.plan(ch);
+    if (plan) return { key: 'v' + key, n: v.n, plan };
+  }
+  return null;
+}
+// everything within r of a point, cut for dmg (and so wounded, in the vow); skip is spared
+function vowBlast(x, y, r, dmg, skip, tag) {
+  for (const e of enemies.slice()) {
+    if (e === skip || e.dead || e.hacked || e.phased || e.vrFounder || e.roninExec) continue;
+    if (Math.hypot(e.x - x, e.y - y) > r + e.r) continue;
+    const crit = simRand() < bladeCrit();
+    bladeDeal(e, dmg * (crit ? bladeCritM() : 1), crit, x, y);
+  }
+  hitStop = Math.max(hitStop, 0.05);
+  Audio_.boom();
+  roninVowBlastFx(x, y, r, tag);
+}
+// a vow cleave's strokes are all in: what it sets off
+function vowCleaveDone(c) {
+  c.vow.blasted = true;
+  if (c.vow.blasts) for (const b of c.vow.blasts)
+    vowBlast(b.self ? c.x : b.x, b.self ? c.y : b.y, VOW_BLAST_R, bladeSwingDmg() * VOW_BLAST_DMG, null, c.vow.n);
+}
+// a body standing in a vow cleave's tear is cut, once every VOW_TEAR_TICK
+function vowTearCut(c, e) {
+  const last = c.vow.cut[e.id];
+  if (last !== undefined && c.t - last < VOW_TEAR_TICK) return;
+  c.vow.cut[e.id] = c.t;
+  bladeDeal(e, bladeSwingDmg() * VOW_TEAR_DMG, false, e.x, e.y);
+}
+// CHAIN LIGHTNING: from every body the split cut, on to the nearest it did not, up to arcs.n
+function vowArcs(sp, cut, dmg) {
+  const from = [...cut];
+  let n = 0;
+  for (let i = 0; i < from.length && n < sp.arcs.n; i++) {
+    const a = from[i];
+    let best = null, bd = sp.arcs.r * sp.arcs.r;
+    for (const e of enemies) {
+      if (e.dead || e.hacked || e.phased || e.vrFounder || cut.has(e)) continue;
+      const d = (e.x - a.x) * (e.x - a.x) + (e.y - a.y) * (e.y - a.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best) continue;
+    cut.add(best); from.push(best); n++;
+    sp.arcAt.push({ x1: a.x, y1: a.y, x2: best.x, y2: best.y });
+    skyCut(sp, best, dmg, true);
+  }
+}
+// the vow's counter has landed: what it spills onto the rest
+function vowStillLand(x) {
+  const v = x.vow, spill = x.dmg * VOW_SPILL;
+  if (v.eye) vowBlast(P.x, P.y, v.eye, spill, x.e, v.n);
+  if (v.quake) {
+    const c = roninCleaves.find(q => q.id === v.quake);
+    if (!c) return;
+    for (const e of enemies.slice()) {
+      if (e === x.e || e.dead || e.hacked || e.phased || e.vrFounder || e.roninExec) continue;
+      if (!c.strokes.some(s => segCircle(s.x1, s.y1, s.x2, s.y2, e.x, e.y, e.r + LUNAR_W))) continue;
+      bladeDeal(e, spill, false, c.x, c.y);
+    }
+    Audio_.boom();
+    roninVowBlastFx(c.x, c.y, LUNAR_LEN / 2, v.n);
+  }
 }
 
 /* ======================= RONIN'S KIT — art hooks ==========================
@@ -24047,6 +24270,10 @@ function roninExecEndFx(x) {
      roninGraveBreakFx(g)             the grave is broken
      roninVowEndFx(V, g, why)         the vow is over: why is 'spent', 'broken' or 'gone'
      roninUndeadFx()                  a blow that would have killed him left him at 1
+     roninVowNameFx(n, x, y)          a vow move landed (Z's and C's; X's names are X's own art)
+     roninVowBlastFx(x, y, r, tag)    a vow blast: SHATTER, AFTERSHOCK, EYE OF THE STORM, QUAKE
+   drawRoninVowWorld also draws the vow's tears (a cleave with c.vow.tear, while c.t < c.end)
+   and CHAIN LIGHTNING's leaps (sp.arcAt on a split, after it lands).
 
    WHAT THEY ARE HANDED
      vowPhase()    { t (s since V), cut, lead (0 to 1, the press to the cut), age (s since
@@ -24109,6 +24336,8 @@ function drawRoninGrave() {
 
 // the vow on the hull: a red edge that breathes, and the line back to the grave
 function drawRoninVowWorld() {
+  rkvTears();
+  rkvArcs();
   const q = vowPhase(), g = P.roninGrave;
   if (!q || !q.cut) return;
   const t = uiTime, last = q.left < 5, beat = 0.5 + 0.5 * Math.sin(t * (last ? 14 : 6));
@@ -24125,6 +24354,45 @@ function drawRoninVowWorld() {
     if (hit > 0) drawGlow(g.x, g.y - 16, 60, RKV_RED, 0.5 * hit);
   }
   ctx.restore();
+}
+
+// a vow cleave's tear: the strokes stay open and burn
+function rkvTears() {
+  for (const c of roninCleaves) {
+    if (!c.vow || !c.vow.tear) continue;
+    const left = c.end - c.t, a = clamp(left / 1, 0, 1) * (0.55 + 0.25 * Math.sin(uiTime * 9 + c.id));
+    if (a <= 0) continue;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const s of c.strokes) {
+      if (!s.done) continue;
+      ctx.strokeStyle = rgba(RKV_RED, a); ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.strokeStyle = rgba('#fde68a', a * 0.7); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+// CHAIN LIGHTNING: a jagged leap from body to body, for a moment after the split
+function rkvArcs() {
+  for (const sp of roninSplits) {
+    if (!sp.arcAt || !sp.arcAt.length || !sp.done) continue;
+    const age = sp.t - sp.at, a = clamp(1 - age / 0.45, 0, 1);
+    if (a <= 0) continue;
+    ctx.save();
+    ctx.strokeStyle = rgba('#fecaca', a); ctx.lineWidth = 2; ctx.shadowColor = rgba(RKV_RED, a); ctx.shadowBlur = 10;
+    for (const q of sp.arcAt) {
+      const dx = q.x2 - q.x1, dy = q.y2 - q.y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+      ctx.beginPath(); ctx.moveTo(q.x1, q.y1);
+      for (let i = 1; i < 6; i++) {
+        const k = i / 6, j = (((i * 7919 + sp.id * 31) % 13) / 13 - 0.5) * 28;
+        ctx.lineTo(q.x1 + dx * k + nx * j, q.y1 + dy * k + ny * j);
+      }
+      ctx.lineTo(q.x2, q.y2); ctx.stroke();
+    }
+    ctx.restore();
+  }
 }
 
 // the cut-in (bars, the room dimmed, the name), then the vow's red edge
@@ -24274,6 +24542,15 @@ function roninUndeadFx() {
   RKV.undeadAt = t;
   floatText(P.x, P.y - 36, 'UNDEAD', RKV_RED, 14);
   ringFx(P.x, P.y, P.r, 70, RKV_RED, 0.35, 3);
+}
+function roninVowNameFx(n, x, y) {
+  floatText(x, y - 44, n, RKV_RED, 16, -26);
+}
+function roninVowBlastFx(x, y, r, tag) {
+  ringFx(x, y, 10, r, RKV_RED, 0.5, 5);
+  burst(x, y, 34, RKV_RED, 420, 3.2, 0.55);
+  burst(x, y, 20, RKV_STONE, 300, 3.5, 0.7);
+  shake(0.35);
 }
 /* ====================== end of RONIN'S KIT art hooks ====================== */
 
