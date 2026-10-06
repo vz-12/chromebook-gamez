@@ -2376,6 +2376,12 @@ const ETYPE = {
   jack:    { r: 17, hp: 44,  spd: 64,  dmg: 12, col: '#f97316', xp: 4, score: 40, sides: 5 },
   creeper: { r: 15, hp: 34,  spd: 70,  dmg: 8,  col: '#4ade80', xp: 4, score: 42, sides: 6 },
   scarecrow:{r: 18, hp: 60,  spd: 150, dmg: 20, col: '#d6d3d1', xp: 5, score: 55, sides: 4 },
+  // --- ALL HALLOWS: THE HOUSE. A sheet's health and size come from what is under it (hlSpawned) ---
+  sheet:   { r: 18, hp: 30,  spd: 66,  dmg: 10, col: '#e2e8f0', xp: 1, score: 14, sides: 6 },
+  lurker:  { r: 15, hp: 38,  spd: 120, dmg: 16, col: '#818cf8', xp: 4, score: 44, sides: 3 },
+  poltergeist:{r: 15, hp: 36, spd: 78, dmg: 14, col: '#c4b5fd', xp: 4, score: 46, sides: 7 },
+  // DEAD GAME's LAST SEEN marks: decoys, worth nothing (hlDecoyHit), never in the codex
+  lastseen:{ r: 14, hp: 26,  spd: 0,   dmg: 0,  col: '#64748b', xp: 0, score: 0,  sides: 3 },
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
@@ -2406,7 +2412,10 @@ const CODEX_E = {
   gourd:    { n: 'GOURD',       d: 'Does not move and does not attack. Left alone it ripens and splits into a jack, and every one still standing hurries everything else in the patch along.' },
   jack:     { n: 'JACK',        d: 'Keeps its distance and lobs seeds. Up close it winds up and breathes flame down one heading. Hit it in the face: that doubles, and the first one puts the candle out.' },
   creeper:  { n: 'CREEPER',     d: 'Throws a vine. One that lands slows you and reels you in until it is cut, dashed through, or lets go.' },
-  scarecrow:{ n: 'SCARECROW',   d: 'Perfectly still while your aim is on it. It only moves while you are looking somewhere else, and it is quick when it does.' }
+  scarecrow:{ n: 'SCARECROW',   d: 'Perfectly still while your aim is on it. It only moves while you are looking somewhere else, and it is quick when it does.' },
+  sheet:    { n: 'SHEET',       d: 'A sheet over something else. The sheet takes the first part of the punishment, and when it tears, whatever was under it is out and fighting.' },
+  lurker:   { n: 'LURKER',      d: 'Lives in the dark and strikes from it. Caught in the light it runs, and it takes twice the damage while it is lit.' },
+  poltergeist:{ n: 'POLTERGEIST', d: 'Never attacks directly. It lifts what is lying about, the wreckage and the dead, and throws it.' }
 };
 
 /* His marginalia. Once he has handed the record back, every entry he had an
@@ -2539,6 +2548,7 @@ const KEEPER_NOTES = {
 
 const CODEX_B = {
   backlog:    { d: 'Buys everything and finishes nothing. Every attack it starts, it abandons partway, and the abandoned thing waits exactly where it stopped until something finishes it: you, or a binge.' },
+  deadgame:   { d: 'Says nobody comes here any more, and comes here every day to say it. He is only solid while the room is alive: every death in it brings him back into it, and an empty room makes him a rumour. He sends the others away himself, to keep it empty.' },
   warden:     { d: 'The first thing that was built to stop you rather than to inconvenience you. Straightforward, and much harder than what came before it.' },
   forgeheart: { d: 'Turns four armour plates around itself, sealing every approach but the gaps between them. The gaps rotate.' },
   broodmother:{ d: 'Submerges where nothing can reach her and lays while she is under. Everything you do to the floor she is beneath is wasted.' },
@@ -2573,12 +2583,13 @@ const CODEX_B = {
    written; the rest are step 5's four batches. Page I of an enemy or a boss
    is null here, since its codex line stands.
 
-   STILL UNWRITTEN, ON PURPOSE: THE LOST SOUL's pages II and III and the
-   house's (THE HOUSE AND THE PATCH, page III). They are ALL HALLOWS chapters
-   II and III, which open on 14 and 23 Oct, and anything in this file can be
-   read in the page's source: they go in when their chapter is live, never
-   before. VOIDRUNNER's page III and THE OUTSIDER's are held for deeds that
-   are not built yet.
+   STILL UNWRITTEN, ON PURPOSE: THE LOST SOUL's pages II and III, the
+   house's (THE HOUSE AND THE PATCH, page III), and pages II and III of the
+   house's three bodies and DEAD GAME. They are ALL HALLOWS chapters II and
+   III, which open on 14 and 23 Oct, and anything in this file can be read in
+   the page's source: they go in when their chapter is live, never before.
+   VOIDRUNNER's page III and THE OUTSIDER's are held for deeds that are not
+   built yet.
 --------------------------------------------------------------------------- */
 const TALE_TEXT = {
   /* ---- THE HACKER, and SUPERUSER ---- */
@@ -3590,6 +3601,9 @@ const BOSSES = {
   // ALL HALLOWS: THE PATCH's, in no rotation
   backlog:     { name: 'THE BACKLOG', col: '#fb923c', r: 64, sides: 9, hpMul: 1.5, spd: 40,
                  ai: bossBacklog, secret: true },
+  // and THE HOUSE's
+  deadgame:    { name: 'DEAD GAME', col: '#cbd5e1', r: 52, sides: 4, hpMul: 1.1, spd: 74,
+                 ai: bossDeadGame, secret: true },
   // the man himself, once there is nobody left to swing for him
   founder:     { name: 'THE FOUNDER', col: '#fcd34d', r: 24, sides: 3, hpMul: 2.6,
                  spd: 178, ai: () => {}, secret: true, endgame: true }
@@ -3731,6 +3745,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   // Set at spawn, not lazily in the AI: the floor has to exist before the
   // first point of damage can land, whatever order things tick in.
   if (bKey === 'theother') e.floor = 10;
+  if (type === 'sheet') hlSpawned(e, opts);   // ALL HALLOWS: what is under a sheet, and a sheet the size of it
   enemies.push(e);
   if (hackBy) hackKin(e);                // called up by one of yours: kin
   tale('spawn', e);                      // FORGOTTEN TALES: a fight's clock starts, read only
@@ -4815,6 +4830,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.dead) return;
   // a hacked body is only reachable by the side it used to be on
   if (e.hacked && !opts.enemy) return;
+  if (e.type === 'lastseen') { hlDecoyHit(e, dmg); return; }   // ALL HALLOWS: DEAD GAME's decoys are worth nothing
   // ROOT'S RITE: nothing you fire reaches its health — see rrStruck
   if (rootRite && e.boss === 'root') { rrStruck(e, opts, srcX, srcY); return; }
   // THE VAGRANT'S RITE: nothing but a counter reaches him (vrCountered)
@@ -4841,6 +4857,8 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   }
   if (e.type === 'jack' && !opts.enemy) dmg = hlJackFace(e, dmg, srcX, srcY);   // THE PATCH: the face
   if (e.boss === 'backlog' && !opts.hlKick) { dmg *= hlHeapTakes(e); opts = hlHeapHit(e, srcX, srcY, opts); }   // his heap: only his own gets through
+  if (e.type === 'lurker' && e.hlLit && !opts.enemy) dmg *= LURK_LIT_MUL;        // THE HOUSE: the light burns it
+  if (P.hlGhost && !opts.enemy && !opts.hacked) dmg *= GHOST_DMG;               // STILL HERE: a ghost hits half as hard
   dmg *= (e.vuln || 1);        // stunned enemies take extra
   if (e.woundT > 0) dmg *= WOUND_MUL;   // RONIN's DEEP WOUND: see RONIN'S KIT
   dmg *= rewardTargetMul(e);   // brands, tags, conduction, slipknot marks
@@ -5219,6 +5237,7 @@ function hurtPlayer(dmg, opts) {
   if (state !== 'play') return;
   if (hackBy) return;                    // THE HACKER: a script of yours cannot reach you
   if (P.down) return;                    // a wreck cannot be hurt further
+  if (P.hlGhost) return;                 // STILL HERE: a ghost has nothing left to hit (ALL HALLOWS)
   if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
   if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
@@ -5345,6 +5364,7 @@ function reviveOrDie() {
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
     if (PVP && PVP.down()) return;       // PvP mode: the round is lost (rounds.js)
+    if (hlStillHere()) return;           // ALL HALLOWS: STILL HERE, once a run
     if (coopCanDown()) { hostDown(); return; }
     if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
@@ -5477,12 +5497,12 @@ function updateWaves(dt) {
   // trickle spawns
   spawnT -= dt;
   const hlB = hlBossWave();                                              // ALL HALLOWS: his fight is his
-  const cap = hlB ? HL_BOSS_LIVE + 1 : 24 + wave * 3;                   // (+1: he counts himself)
+  const cap = hlB ? hlBossLive() + 1 : 24 + wave * 3;                   // (+1: he counts himself)
   if (spawnBudget > 0 && spawnT <= 0 && hlWaveThreats() < cap) {      // a gourd holds nothing
     const batch = Math.min(spawnBudget, hlB ? 1 : 1 + simRndi(Math.min(4, 1 + wave / 3)));
     for (let i = 0; i < batch; i++) spawnRing(pickEnemyType());
     spawnBudget -= batch;
-    spawnT = hlB ? HL_BOSS_TRICKLE : Math.max(0.24, 1.5 - wave * 0.05);
+    spawnT = hlB ? hlBossTrickle() : Math.max(0.24, 1.5 - wave * 0.05);
   }
   if (stage.deep && !nodesDone) return;      // the door is still held shut
   if (spawnBudget <= 0 && hlWaveThreats() === 0 && !bossAlive) {
@@ -31690,6 +31710,7 @@ const Codex = {
   see(set, k) {
     if (freeRun) return;                 // a sandbox writes nothing down
     if (!k) return;
+    if (set === 'e' && !CODEX_E[k] && !BOSSES[k]) return;   // nothing with no entry: DEAD GAME's decoys (ALL HALLOWS)
     if (RUN.codex && RUN.codex[set]) RUN.codex[set].add(k);   // the run's own copy: see RUN (gear is not in it)
     if (Codex[set].has(k)) return;
     Codex[set].add(k); Codex.dirty = true;
@@ -31899,7 +31920,10 @@ const TALE_DEED_E = {
   gourd:     { how: 'break 30 before they ripen', c: ['x:gourd', 30] },
   jack:      { how: 'put out 10 candles', c: ['x:candle', 10] },
   creeper:   { how: 'cut 10 vines', c: ['x:vine', 10] },
-  scarecrow: { how: 'fell one while it moves' }
+  scarecrow: { how: 'fell one while it moves' },
+  sheet:     { how: 'fell what was under one inside a second' },
+  lurker:    { how: 'fell one mid-strike' },
+  poltergeist: { how: 'fell one before it lets go' }
 };
 // and of each boss: mastering it, one way per boss, picked to suit it
 const TALE_DEED_B = {
@@ -31913,7 +31937,8 @@ const TALE_DEED_B = {
   unwritten:   'close it on the first attempt, no time rewound',
   amalgam:     'pass EMBER\'s rite',
   root:        'pass THE HACKER\'s rite',
-  backlog:     'defeat him without a binge going off'
+  backlog:     'defeat him without a binge going off',
+  deadgame:    'defeat him with nobody sent away'
 };
 const TALE_BOSS_II = { unwritten: 'close it', amalgam: 'finish it', root: 'delete it' };
 
@@ -32003,6 +32028,7 @@ function talesRunNew() {
     died: new WeakMap(),                   // a revenant -> when it died the first time
     blinks: new WeakMap(),                 // a phaser -> when it last blinked in
     born: new WeakMap(),                   // a prism -> when it arrived
+    torn: new WeakMap(),                   // what was under a sheet -> when the sheet tore (ALL HALLOWS)
     mirror: new WeakSet(),                 // rounds a prism threw back
     mirrorAt: -1,                          // when one of them last hit you
     last: null,                            // what last hurt you, and when: { k, t }
@@ -32154,6 +32180,8 @@ const Tales = {
       case 'one':   R.one = a; return;
       case 'brood': if (R.fights.broodmother) R.fights.broodmother.dives++; return;
       case 'binge': if (R.fights.backlog) R.fights.backlog.binges++; return;
+      case 'cull':  if (R.fights.deadgame) R.fights.deadgame.culls = (R.fights.deadgame.culls | 0) + 1; return;
+      case 'torn':  R.torn.set(b, elapsed); return;
       case 'rewind': if (R.fights.unwritten) R.fights.unwritten.rew++; return;
       case 'kill':  if (talesMine()) Tales.kill(a, R); return;
       case 'blast':
@@ -32261,7 +32289,12 @@ const Tales = {
       case 'prism':    { const at = R.born.get(e); if (at !== undefined && R.mirrorAt < at) deed(); break; }
       case 'gourd':    if (!e.hlRipe && Tales.add('x:gourd') >= 30) deed(); break;
       case 'scarecrow': if (!e.hlWatched) deed(); break;
+      case 'lurker':   if (e.state === 2 && !e.hacked) deed(); break;
+      case 'poltergeist': if (e.hlHold) deed(); break;
     }
+    // what was under a sheet, felled inside a second of it tearing: the sheet's deed
+    const tornAt = R.torn.get(e);
+    if (tornAt !== undefined && elapsed - tornAt <= 1) Tales.open('e:sheet', 2, true);
   },
 
   // a boss defeated: the run's, so both machines of a co-op run count it
@@ -32283,6 +32316,7 @@ const Tales = {
       case 'archivist':   deed((mine.kills | 0) >= 300); break;
       case 'curator':     deed(mine.charId === 'melee'); break;
       case 'backlog':     deed(f && !f.binges); break;
+      case 'deadgame':    deed(f && !f.culls); break;
       case 'shopkeeper':  Tales.open('n:shopkeeper', 1, true); break;
     }
     if (e.virus) Tales.open('b:theother', 2, true);
@@ -38362,7 +38396,7 @@ function updatePlayer(dt) {
 
   // dash
   if (P.dashCh < P.dashMax) {
-    P.dashRe += dt;
+    P.dashRe += dt * (HL.eq.sheet ? SHEET_RECHARGE : 1);   // ALL HALLOWS: SHEET comes back slower
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
   const wantDash = inp.dash && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !vrDuelLock();
@@ -38383,6 +38417,7 @@ function updatePlayer(dt) {
     inputDashTaken();
     P.dashCh--;
     P.dashT = 0.17; P.iframe = Math.max(P.iframe, 0.28);
+    if (HL.eq.sheet) hlSheetDash();       // ALL HALLOWS: SHEET keeps you out of it longer
     let dx = ix, dy = iy;
     if (!il) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); }
     P.dashDX = dx; P.dashDY = dy;
@@ -39226,6 +39261,9 @@ function updateEnemies(dt) {
       // ALL HALLOWS: THE PATCH's four
       case 'gourd': case 'jack': case 'creeper': case 'scarecrow':
         hlEnemyAI(e, dt, ux, uy, d, sp, dx, dy); break;
+      // and THE HOUSE's
+      case 'sheet': case 'lurker': case 'poltergeist': case 'lastseen':
+        hlHouseAI(e, dt, ux, uy, d, sp, dx, dy); break;
     }
     hackBy = null;
 
@@ -39256,7 +39294,7 @@ function updateEnemies(dt) {
        where the bodies are, and being shoved and chipped by every hull it
        touches is the one thing that made that position unholdable. Bullets and
        hazards still land on it, so no boss telegraph gets any easier. */
-    const tgGhost = (TG === P || TG.pid != null) && ((TG.ghost && TG.dashT > 0) || TG.fly);
+    const tgGhost = (TG === P || TG.pid != null) && ((TG.ghost && TG.dashT > 0) || TG.fly || TG.hlSheetT > 0 || TG.hlGhost);
     // ...and no touching: a reeling body is not leaning on anybody
     if (d < e.r + TG.r + 2 && !e.phased && e.dmg > 0 && !tgGhost && !(e.stagger > 0) && !suPinned(e)) {
       const cd = e.dmg * (e.type === 'dasher' && e.state === 2 ? 1.5 : 1)
@@ -45498,6 +45536,7 @@ function render() {
     ctx.fillRect(0, 0, W, H);
   }
   drawChalFog();      // over the world, under everything you need to read
+  hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
   drawHUD();
   outsideDraw('hud');   // an outside pilot's, beside the HUD
   mpDrawHud();
@@ -48055,23 +48094,26 @@ const HL_EVENT = {
 const HL_QUESTS = [
   { id: 'q1', n: 'THE REST OF IT',  ch: 0, area: 'patch', kind: 'errand', need: 3, candles: 10, medal: 'gourd' },
   { id: 'q2', n: 'ON SALE',         ch: 0, area: 'patch', kind: 'boss', boss: 'backlog', candles: 15, medal: 'oneday', ascend: 1 },
-  { id: 'q3', n: 'LAST MESSAGE',    ch: 1, area: 'house', kind: 'errand', need: 3, candles: 10, medal: 'sheet', later: true },
-  { id: 'q4', n: 'STILL HERE',      ch: 1, area: 'house', kind: 'boss', boss: 'deadgame', candles: 15, medal: 'stillhere', ascend: 2, later: true },
+  { id: 'q3', n: 'LAST MESSAGE',    ch: 1, area: 'house', kind: 'errand', need: 3, candles: 10, medal: 'sheet' },
+  { id: 'q4', n: 'STILL HERE',      ch: 1, area: 'house', kind: 'boss', boss: 'deadgame', candles: 15, medal: 'stillhere', ascend: 2 },
   { id: 'q5', n: 'WHERE HE PUT ME', ch: 2, area: 'yard',  kind: 'errand', need: 3, candles: 10, medal: 'grave', later: true },
   { id: 'q6', n: 'GG',              ch: 2, area: 'yard',  kind: 'boss', boss: 'ragequit', candles: 20, medal: 'lag', ascend: 3, later: true },
   { id: 'q7', n: 'PAST NINETEEN',   ch: 2, area: null,    kind: 'run', wave: 20, candles: 20, medal: 'lantern', later: true }
 ];
 
-/* Two worn at a time. Only the first two do anything yet; the rest are
-   listed so the stand knows how many hooks it has. */
+/* Two worn at a time. The first four do something (THE GOURD and ONE DAY in
+   Act I, SHEET and STILL HERE in Act II); the rest are listed so the stand
+   knows how many hooks it has. */
 const HL_EQUIP_MAX = 2;
 const HL_MEDALS = [
   { id: 'gourd',     n: 'THE GOURD',
     d: 'Anything left alive for fifteen seconds ripens: half as much health again, and double the experience and credits when it dies.' },
   { id: 'oneday',    n: 'ONE DAY',
     d: 'Experience from bodies is put aside instead of paid, then paid all at once, plus half again, when a boss dies.' },
-  { id: 'sheet',     n: 'SHEET',         later: true, d: '' },
-  { id: 'stillhere', n: 'STILL HERE',    later: true, d: '' },
+  { id: 'sheet',     n: 'SHEET',
+    d: 'The dash keeps you out of reach a third of a second longer, and you pass through bodies while it lasts. It comes back a quarter slower.' },
+  { id: 'stillhere', n: 'STILL HERE',
+    d: 'Once a run, the blow that would end it leaves you a ghost for eight seconds: nothing touches you, and you hit half as hard. Fell ten before it ends and you stand back up. Fewer, and the run is over.' },
   { id: 'grave',     n: 'SHALLOW GRAVE', later: true, d: '' },
   { id: 'lag',       n: 'LAG',           later: true, d: '' },
   { id: 'lantern',   n: 'THE LANTERN',   later: true, d: '' }
@@ -48113,9 +48155,30 @@ const HL_SAY = {
     ['soul', "wave nineteen. hull at four percent. that's where i am. that's where i've been."],
     ['soul', "i can go up now. there's a house."],
     ['outsider', 'He was never going to play it. Nobody plays all of them.']],
-  /* not in the draft: what is said while the next floor is still shut */
+  q3Give: [
+    ['soul', "...someone said something before it stopped. it's in the house."],
+    ['outsider', 'The house keeps whatever was said in it last. It is written on the underside of the sheets. I would not have looked.']],
+  q3Done: [
+    ['soul', 'ez. wait. brb.'],
+    ['soul', "that's him. that's all he said."],
+    ['outsider', 'Three words. People have been left with less.']],
+  q4Give: [
+    ['soul', "...there's someone in the house who says nobody's coming back."],
+    ['outsider', 'He has been telling it that since before I found it. He tells everyone. He is always here to say it.']],
+  q4Done: [
+    ['soul', "He's wrong. Someone said he'd be right back. I'm going to go and get him."],
+    ['outsider', "He said 'still here'. I say that."],
+    ['outsider', 'I did not like hearing it from him.']],
+  /* On the menu, the first time after a chapter opens, once the floor below
+     it is done (hlChapterBeatDue). Keyed by the chapter's index. */
+  ch1: [
+    ['outsider', 'It has gone up a floor. It is asking for you.']],
+  /* not in the draft: what is said while the next floor is still shut,
+     by the floor (hlWaitLines) */
   wait: [
     ['outsider', 'The house is not open yet. It will wait. It is good at that.']],
+  waitYard: [
+    ['outsider', 'The yard is not open yet. Everything up there is already buried. It will keep.']],
   idle: [
     'It is still here.',
     'It does not sleep. I do not much, either.',
@@ -48153,6 +48216,37 @@ const HL_SAY = {
     general: [
       ['soul', "...he's only a heap. heaps come apart."],
       ['outsider', 'He has had years to get like this. You have had an afternoon.']]
+  },
+  /* …and after a death in DEAD GAME's (hlHintThemeDG). The soul has come back
+     a landing by then: lowercase still, but whole sentences. */
+  hintDG: {
+    // he was a ghost for most of it
+    ghost: [
+      ['outsider', 'He is only there while the room is. An empty room, and he is a rumour.'],
+      ['soul', 'he gets thinner when nothing happens. when something falls he has to stand there and watch it.'],
+      ['outsider', 'Every one that falls brings him back into the room. Keep them falling.']],
+    // he sent a great many away
+    cull: [
+      ['soul', 'he sent them away before you got to them. he wants it empty.'],
+      ['outsider', 'When he says they left, he means he is about to make them. Get there first.'],
+      ['soul', 'the grey goes out from him. whatever it reaches is gone, and you get nothing for it.']],
+    // spent a lot on the grey ones
+    decoy: [
+      ['soul', "the grey ones aren't anyone. they left a long time ago."],
+      ['outsider', 'He fills the room with people who are not there. Shooting at them is listening to him.']],
+    // nearly had him
+    close: [
+      ['outsider', 'Nearly. He will say it was always going to end like that.'],
+      ['soul', 'he was almost gone. even he was almost gone.']],
+    // went down in the dark at the end
+    dark: [
+      ['outsider', 'At the end he puts the lights out. He thinks that settles it.'],
+      ['soul', 'it was dark, but every time something fell i could see again.'],
+      ['outsider', 'In the dark the only light is what you knock down. Keep knocking.']],
+    // none of the above
+    general: [
+      ['soul', "he's only loud. loud isn't the same as there."],
+      ['outsider', 'He has said it every day for years. Saying it is what keeps him here.']]
   }
 };
 /* how evenly the soul types, by how much of it has come back (hlSoulShown) */
@@ -48165,6 +48259,15 @@ const HL_BARK = {
     gourd: 'Another one. For later.',
     binge: 'Fine. FINE. All of it. Now.',
     death: '...I was going to play that one.'
+  },
+  /* Keep his lines about staying, never about leaving (THE NEXT THING, in the
+     drafts, is the one who drifts off and never cared). */
+  deadgame: {
+    enter: ["Oh. Someone's here. Weird.", 'Dead game.', 'Nobody plays this anymore.', 'It was better before.', 'Look around. Nobody.'],
+    cull: 'They left.',
+    fade: ['See? Nothing.', 'Why are you even still here?'],
+    soul: "Nobody's coming back for you.",
+    death: '...still here, though.'
   }
 };
 
@@ -48184,10 +48287,26 @@ const HL_AREAS = {
              // your dash and your eyes.
              bossPool: [['jack', 60], ['gourd', 40]],
              boss: 'backlog' }
+  },
+  /* An empty lobby: a house where every room is a menu somebody left open.
+     The lights are on a timer, and nobody is left to reset it (THE QUIET).
+     His wave keeps coming while he is up (bossKeep): the room has to stay
+     alive for him to be there at all, so it is never allowed to run dry. */
+  house: {
+    id: 'house', ch: 1, waveFrom: 11, errand: 'q3', bossQ: 'q4',
+    waveMul: 0.75,                       // a sheet is two bodies: the waves send fewer
+    bossLive: 5, bossTrickle: 1.3, bossAdds: 6, bossKeep: true,
+    stage: { name: 'THE HOUSE', tag: 'all hallows · ii', hl: 'house',
+             bg: '#06060c', grid: '#13111f', grid2: '#1d1930', wall: '#4c1d95',
+             glow: 'rgba(196,181,253,0.10)', accent: '#c4b5fd', hazard: null,
+             pool: [['sheet', 40], ['lurker', 28], ['poltergeist', 22]],
+             // his: sheets, which are two deaths each, and fewer of the dark
+             bossPool: [['sheet', 50], ['poltergeist', 26], ['lurker', 18]],
+             boss: 'deadgame' }
   }
 };
-const HL_ETYPES = { gourd: 1, jack: 1, creeper: 1, scarecrow: 1 };
-const HL_BOSSES = { backlog: 1 };
+const HL_ETYPES = { gourd: 1, jack: 1, creeper: 1, scarecrow: 1, sheet: 1, lurker: 1, poltergeist: 1, lastseen: 1 };
+const HL_BOSSES = { backlog: 1, deadgame: 1 };
 
 /* ------------------------------- the numbers -------------------------------
    Every figure the Act I rules run on. The art reads some of them (timers,
@@ -48589,6 +48708,7 @@ function hlMenuTick(dt) {
   hlPartsTick(dt);
   if (HL.pro) HL.pro.tick(dt);
   else if (hlProDue()) hlProStart();
+  else { const ch = hlChapterBeatDue(); if (ch >= 0) hlChapterBeat(ch); }   // ACT II: a floor has opened
   if (hlHatchUp()) hlArtTick(dt, 'menu');
   // the count, now and then, while it is on
   if (hlLive() && Date.now() - HL.lastLoad > 5 * 60000) { HL.lastLoad = Date.now(); Vigil.load(); }
@@ -48710,6 +48830,7 @@ function hlSoulSpeaks() {
     const lines = HL_SAY[q.id + 'Done'] || [];
     const tell = () => {
       hlSee(q.id + ':shown');
+      hlChapterHeard(q);                 // the next floor is told here, so the menu need not knock for it
       vig.change = { stage: hlSoulShown(), t: 0 };
       hlSoulChangeFx(hlSoulShown());
       hlTalk(lines, () => hlSee(q.id + ':done'));
@@ -48776,7 +48897,7 @@ function vigilInteract() {
         // what it said after the last time he put you down, said again, once
         if (HL.lastHint && HL.lastHint.who === 'soul') { hlTalk([['soul', HL.lastHint.text]]); HL.lastHint = null; }
         else if (c && HL_SAY[c.id + 'Give']) hlTalk([HL_SAY[c.id + 'Give'][0]]);
-        else hlTalk(HL_SAY.wait);
+        else hlTalk(hlWaitLines());
       }
       return true;
     case 'outsider': {
@@ -48855,11 +48976,12 @@ function hlAreaStart(id) {
   wave = A.waveFrom - 1;
   stageAbs = Math.floor((A.waveFrom - 1) / 5);   // shop prices scale on this
   enterStage(A.stage);
+  if (id === 'house') hlHouseStart();    // ACT II: the light, and what is lying about
   betweenWaves = 2.6;
   state = 'play'; uiArm = 0.3;
   hlPartsClear();
   banner(A.stage.name, A.stage.accent, 3.0);
-  hlAreaEnterFx(A);
+  if (id === 'house') hlHouseEnterFx(A); else hlAreaEnterFx(A);
   Audio_.select();
 }
 const hlAreaDef = () => hlArea && HL_AREAS[hlArea.id];
@@ -48881,20 +49003,21 @@ function hlAreaWave() {
     Audio_.boss();
     const boss = spawnRing('boss', { boss: A.stage.boss });
     hlArea.boss = boss;
-    HL.fight = { kicks: 0, binges: 0, bingeAt: -99, eaten: 0 };   // for the word after, if it goes badly
+    HL.fight = hlFightNew(boss);           // for the word after, if it goes badly
     // what was left standing is his: every gourd slides to him, one after another
     const pile = hlPileGourds();
     pile.forEach((g, k) => { g.hlReel = { d: 0.7 + k * 0.09, v: 0 }; g.hlHatch = undefined; });
     hlArea.pileTaken = 0;                  // counted as each one reaches him
     if (pile.length) hlPileArriveFx(boss, pile.length);
-    spawnBudget = Math.round(HL_BOSS_ADDS * chalBudget() * hardBudget());
+    spawnBudget = Math.round((A.bossAdds || HL_BOSS_ADDS) * chalBudget() * hardBudget());
     spawnT = 2;
+    if (A.id === 'house') hlHouseBossIn(boss);
   } else {
     // what you left lit last wave comes open now
     if (hlArea.n > 1) for (const g of hlPileGourds()) if (g.hlGrow >= GOURD_LIT - 1e-6) g.hlHatch = 0;
     banner(hlArea.n === 1 ? A.stage.name : 'WAVE ' + hlArea.n + '  /  5', A.stage.accent);
     Audio_.wave();
-    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * chalBudget() * hardBudget());
+    spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5) * (A.waveMul || 1) * chalBudget() * hardBudget());
     // the errand's piece for this wave, while one is owed
     const q = hlQuest(A.errand);
     if (!hlQDone(q.id) && hlArea.n >= 2 && hlProgress(q.id) + hlArea.coldLive < q.need)
@@ -48931,10 +49054,11 @@ function hlBossDown(e) {
   score += Math.round(500 * (stageAbs + 1) * hardScore());
   credits += Math.round((70 + wave * 6) * P.credMul * hardCred());
   hlArea.death = { boss: e.boss, x: e.x, y: e.y, r: e.r, t: 0 };
+  if (A.id === 'house') hlHouseBossDown(e);
   hlComplete(A.bossQ);
   banner(BOSSES[e.boss].name + '   DESTROYED', COL.crit);
   drawFlashT = 0.3; shake(1.6);
-  hlBossDeathFx(e);
+  if (e.boss === 'deadgame') hlHouseBossDeathFx(e); else hlBossDeathFx(e);
   hlAreaEnd('win');
 }
 /* ---- after a death in his fight: a word from one of them. What went wrong
@@ -48946,11 +49070,14 @@ function hlOnDeath() {
   HL.deadSay = null;
   const A = hlAreaDef(), e = hlArea && hlArea.boss, F = HL.fight;
   if (!A || !e || e.dead || !F || hlArea.end || hlQDone(A.bossQ)) return;
-  const theme = hlHintTheme(e, F), lines = HL_SAY.hint[theme];
+  // THE BACKLOG's themes keep their old keys; DEAD GAME's are hint:dg:<theme>:<i>
+  const dg = e.boss === 'deadgame';
+  const theme = dg ? hlHintThemeDG(e, F) : hlHintTheme(e, F), lines = (dg ? HL_SAY.hintDG : HL_SAY.hint)[theme];
+  const key = (dg ? 'hint:dg:' : 'hint:') + theme + ':';
   let i = 0;
-  while (i < lines.length && hlSeen('hint:' + theme + ':' + i)) i++;
+  while (i < lines.length && hlSeen(key + i)) i++;
   if (i >= lines.length) i = rndi(lines.length);
-  hlSee('hint:' + theme + ':' + i);
+  hlSee(key + i);
   const [who, text] = lines[i];
   HL.deadSay = { who, text, at: uiTime, cue: {}, theme };
   HL.lastHint = { who, text };
@@ -48987,8 +49114,13 @@ function hlChipGoal() {
 function hlTick(dt, wdt) {
   hlArtEnsure();
   hlMedalSync();
+  // ACT II: SHEET's dash and STILL HERE's ghost, in any run, for every pilot (true: it ended the run)
+  let hlEnded = false;
+  pilotsEach(() => { if (hlMedalTick(wdt)) hlEnded = true; return !hlEnded; });
+  if (hlEnded) return;
   hlPartsTick(dt);
   if (inVigil || hlAreaOn()) hlArtTick(dt, inVigil ? 'vigil' : hlArea.id);
+  if (hlHouseOn()) hlHouseArtTick(dt);
   // barks age out whatever else is going on
   for (let i = hlBarks.length - 1; i >= 0; i--) {
     const b = hlBarks[i];
@@ -49009,11 +49141,13 @@ function hlTick(dt, wdt) {
   hlPile = 0;
   if (A.id === 'patch')
     for (const g of enemies) if (!g.dead && g.type === 'gourd' && !g.hacked) hlPile++;
-  // the errand's cold gourd, some seconds into its wave
+  // the errand's piece (a cold gourd, a marked sheet), some seconds into its wave
   if (hlArea.coldDue > 0) {
     hlArea.coldDue -= wdt;
-    if (hlArea.coldDue <= 0) hlColdSprout();
+    // still owed when it comes due (a piece only ever comes for an errand that is open)
+    if (hlArea.coldDue <= 0 && !hlQDone(A.errand)) { if (A.id === 'house') hlMarkSprout(); else hlColdSprout(); }
   }
+  if (A.id === 'house') hlHouseTick(dt, wdt);   // ACT II: THE QUIET, the wreckage, DEAD GAME's room
   hlTeleTick(dt);
   hlKickCheck();
   hlHeldTick(wdt);
@@ -49191,7 +49325,7 @@ const hlPileGourds = () => enemies.filter(g => !g.dead && g.type === 'gourd' && 
 /* Gourds never hold a wave: the pile is whatever is left standing between them. */
 function hlWaveThreats() {
   let n = 0;
-  for (const e of enemies) if (isThreat(e) && e.type !== 'gourd') n++;
+  for (const e of enemies) if (isThreat(e) && e.type !== 'gourd' && e.type !== 'lastseen') n++;
   return n;
 }
 function hlGourdRipe(e) {
@@ -49267,6 +49401,7 @@ function hlVineSeg(e) {
 
 /* On any death (from killEnemy): the cold gourds are pieces. */
 function hlOnKill(e) {
+  hlHouseKill(e);                        // ACT II: the light, the meter, the wreckage, what was under a sheet
   if (e.type === 'creeper' && e.hlVine) e.hlVine = null;
   if (!e.hlCold || e.hlCounted) return;
   e.hlCounted = true;
@@ -49878,7 +50013,8 @@ function hlBark(e, text) {
    transform; the screen pass is not. */
 function hlOwnsBody(e) { return !!(HL_ETYPES[e.type] || HL_BOSSES[e.boss]); }
 function hlDrawFloor() {
-  if (hlAreaOn()) drawHlAreaFloor(hlAreaDef());
+  if (hlHouseOn()) { drawHlHouseFloor(hlAreaDef()); for (const w of hlArea.wreck) if (!w.by) drawHlHouseWreck(w); }
+  else if (hlAreaOn()) drawHlAreaFloor(hlAreaDef());
 }
 function hlDrawWorldUnder() {
   if (inVigil) drawVigilWorld();
@@ -49889,24 +50025,28 @@ function hlDrawWorldOver() {
   if (!(inVigil || hlAreaOn())) return;
   /* The light pass: only if the art has lit the room this frame. */
   hlL.lights.length = 0; hlL.occ.length = 0;
-  if (hlLights(inVigil ? 'vigil' : hlArea.id)) { hlWrLightsTap(); hlLightRender(); }   // + a prize skin's own light
+  const lit = hlHouseOn() ? hlHouseLights() : hlLights(inVigil ? 'vigil' : hlArea.id);   // THE HOUSE lights itself
+  if (lit) { hlWrLightsTap(); hlLightRender(); }   // + a prize skin's own light
+  if (hlHouseOn()) for (const w of hlArea.wreck) if (w.by) drawHlHouseWreck(w);   // lifted: over the bodies
 }
 function hlDrawWorldGlow() {
   if (!(inVigil || hlAreaOn())) return;
   for (const p of hlHeld) if (p.kind === 'sweep') hlQuietDraw(p, drawHlSweep);
   for (const e of enemies) if (!e.dead && e.hlVine) drawHlVine(e, e.hlVine);
   hlPartsDraw('glow');
-  drawHlGlow(inVigil ? 'vigil' : hlArea.id);
-  if (hlArea && hlArea.death) drawHlBossDeath(hlArea.death);
-  for (const b of hlBarks) drawHlBark(b);
+  if (hlHouseOn()) drawHlHouseGlow(); else drawHlGlow(inVigil ? 'vigil' : hlArea.id);
+  if (hlArea && hlArea.death) { if (hlArea.death.boss === 'deadgame') drawHlHouseBossDeath(hlArea.death); else drawHlBossDeath(hlArea.death); }
+  if (!hlHouseOn()) for (const b of hlBarks) drawHlBark(b);   // THE HOUSE's are said over its dark (hlDrawQuiet)
 }
 /* over the world, in plain paint: the telegraph marks (drawHlTele) */
 function hlDrawWorldTele() {
+  if (hlHouseOn() && !hlArea.end) { drawHlHouseTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null); return; }
   if (!hlAreaOn() || hlArea.end || !(hlHeld.length || hlArea.boss)) return;
   drawHlTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null, HL.teach);
 }
 function hlDrawScreen() {
-  if (hlAreaOn()) drawHlAreaHud(hlAreaDef(), hlArea);
+  if (hlHouseOn()) hlHouseScreen();
+  else if (hlAreaOn()) drawHlAreaHud(hlAreaDef(), hlArea);
   if (hlAreaOn() && hlArea.id === 'patch' && !hlArea.end) {
     // the gourds' line, until he has them all; then the line is his unfinished pile
     const e = hlArea.boss;
@@ -49923,6 +50063,7 @@ function hlDrawScreen() {
     if (vig.stand) drawHlStandUi(vig.stand, hlP());
   }
   if (state === 'play' && (inVigil || hlAreaOn())) drawHlMedalHud(hlP().equip, P.hlBank || 0);
+  if (state === 'play' && P.hlGhost) drawHlGhostHud(P.hlGhost);   // STILL HERE, in any run
 }
 function hlDrawMenu() {
   if (!hlHatchUp()) return;
@@ -49935,6 +50076,755 @@ function hlDrawMenu() {
 }
 
 /* ===========================================================================
+   ALL HALLOWS — BOOK I: THE LOST SOUL · ACT II
+   THE HOUSE (chapter II, opens 14 Oct): THE QUIET, its three bodies — the
+   SHEET, the LURKER and the POLTERGEIST — and DEAD GAME; quests 3 and 4, the
+   medals SHEET and STILL HERE, and the menu's line once the floor opens.
+
+   Its rows are in Act I's tables (HL_QUESTS, HL_MEDALS, HL_SAY, HL_BARK,
+   HL_AREAS.house, HL_ETYPES, HL_BOSSES). This block is the machinery the
+   house needs that the patch did not. Everything it shows is drawn through
+   the ACT II hooks at the foot of the art hooks block, and
+   HALLOWS-HOUSE-HOOKS.md says what each is handed. Act I's hooks are the
+   patch's, and the art drawn on them draws the patch, so THE HOUSE never
+   goes through them: the seams below pick one set or the other.
+=========================================================================== */
+
+/* ------------------------------- the numbers -------------------------------
+   First drafts, for tuning in play, like Act I's. */
+/* THE QUIET. The light round the hull closes while nothing dies, and every
+   death throws it back out. The fog (hlDrawQuiet) IS the dark: the art may
+   light the room however it likes and never has to be what makes it dark.
+     max    px of light with the deaths coming      hold   s at max after one
+     dark   s after one: dark past your hull        hull   …which is this much
+     min    and it keeps closing to this            minT   …by this long after
+     grace  s of light at a wave's start, before anything has come to kill */
+const QUIET       = { max: 540, hold: 1.2, dark: 4, hull: 95, min: 55, minT: 9, grace: 2.5 };
+const QUIET_BLACK = { max: 360, hold: 0.4, dark: 1.6, hull: 70, min: 40, minT: 4, grace: 0 };   // DEAD GAME's last phase
+const QUIET_OPEN  = 10;       // how fast a death throws it back out (eased, per s)
+const QUIET_LAST  = 3;        // this few left in a wave, and nothing more coming: they are pointed out
+
+const SHEET_SOAK  = 0.4;      // a sheet takes the first 40% of what the whole takes
+// what can be under one: the main roster, weighted
+const SHEET_UNDER = [['brute', 3], ['spitter', 3], ['dasher', 3], ['splitter', 2], ['bomber', 2],
+                     ['sentinel', 2], ['wraith', 2], ['healer', 1], ['artillery', 1], ['grunt', 1]];
+const MARK_HP     = 1.6;      // a marked sheet's health, against a plain sheet with nothing under it
+const MARK_SPD    = 150;      // px/s it runs from you at
+const MARK_NEAR   = 520;      // closer than this, it runs
+const MARK_FAR    = 760;      // further than this, it drifts back, so it stays findable
+const MARK_ESCAPE = 18;       // s before it slips out, to come up again next attempt
+const HL_LAST_CHAT = ['ez', 'wait', 'brb'];   // under the marked sheets, in the order they are torn
+
+const LURK_LIT    = 0.8;      // the share of the light's radius that lights a lurker
+const LURK_LIT_MUL = 2;       // what it takes while lit
+const LURK_EDGE   = 40;       // px past the light it waits at
+const LURK_REACH  = 300;      // it strikes from no further than this
+const LURK_WIND   = 0.45;     // s its eyes are open before it goes
+const LURK_STRIKE_T = 0.5;    // s it comes in for…
+const LURK_DASH   = 640;      // …at this, down a locked heading
+const LURK_FLEE   = 1.7;      // its speed, running from the light
+const LURK_FLEE_T = 1.1;      // s it runs after a strike
+const LURK_CD     = [2.4, 4];
+
+const POLT_REACH  = 460;      // how far it looks for something to lift
+const POLT_LIFT   = 0.8;      // s from lifting a thing to letting it go: the tell
+const POLT_SPD    = 440;      // px/s a thrown thing goes at…
+const POLT_FLY    = 1.5;      // …for this long, and comes down where it got to
+const POLT_CD     = [2.6, 3.8];
+const WRECK_MAX   = 16;       // pieces lying about at once
+const WRECK_LIFE  = 30;       // s the dead lie there (the junk stays)
+const WRECK_JUNK  = 7;        // what is lying about when the lights first go on
+
+/* DEAD GAME. ONLINE is the room: every death in it puts some back, and it
+   drains all the time. Over the line he is in the room and can be hurt; under
+   it he is a ghost — nothing touches him, he drifts, and he mends. */
+const DG_ONLINE0  = 0.3;      // where the meter stands as he arrives
+const DG_KILL     = 0.22;     // each death (yours, one of yours, anything's)
+const DG_DRAIN    = 0.05;     // per s
+const DG_LINE     = 0.4;      // at or over it: solid
+const DG_FADE_T   = 0.35;     // s to come into the room or go out of it (e.hlSolidK, for the art)
+const DG_HEAL     = 0.006;    // of his health per s, while a ghost (never in the dark at the end)
+const DG_ATK      = [1.8, 2.6];   // s between his own moves, while solid
+const DG_WIND     = 0.45;     // s of wind-up before each
+const DG_THREAD_N = 7, DG_THREAD_GAP = 0.11, DG_REPLY_SPD = 300;   // A THREAD: replies, one after another
+const DG_RATIO_N  = 18, DG_RATIO_SPD = 210;                         // RATIO: a ring of them
+const DG_CULL_CD  = [12, 16]; // THEY LEFT: s between
+const DG_CULL_N   = 3;        // …and only with this many of his about to take
+const DG_CULL_WARN = 1.2;     // s from the call to the grey going out
+const DG_CULL_SPD = 460;      // px/s it goes out at…
+const DG_CULL_R   = 560;      // …this far: what is further from him than that, he cannot reach
+const DG_DECOY_T  = 2.2;      // s between LAST SEEN marks, while a ghost
+const DG_DECOY_MAX = 6, DG_DECOY_LIFE = 14;
+const DG_DARK_AT  = 0.34;     // at this much health the house goes fully dark
+
+const SHEET_IFRAME   = 0.35;  // SHEET (medal): s more out of reach after a dash
+const SHEET_RECHARGE = 0.8;   // …and the dash comes back at this rate
+const GHOST_T     = 8;        // STILL HERE: s a ghost
+const GHOST_KILLS = 10;       // …to fell in them
+const GHOST_HP    = 0.3;      // …to stand back up at this much hull
+const GHOST_DMG   = 0.5;      // what a ghost's fire is worth
+
+const HL_HOUSE_BODIES = { sheet: 1, lurker: 1, poltergeist: 1, lastseen: 1 };
+const HL_HOUSE_ROUNDS = { wreck: 1, reply: 1 };
+const hlHouseOn = () => hlAreaOn() && hlArea.id === 'house';
+
+/* ================================ the house ================================= */
+/* hlArea, in the house, also carries:
+     quiet    { t, r, dark, wave }  seconds since the last death (negative in a
+              wave's grace), the light's radius now, and whether it is dark
+              past the hull
+     wreck    what is lying about, for a poltergeist: [{ id, x, y, r, col,
+              sides, kind ('junk'|'body'), junk, type, t, by, lift }]
+     online   DEAD GAME's meter, 0..1; null until he comes
+     cull     THEY LEFT going out: { x, y, t, r, warn }, or null
+     blackout his last phase: the house fully dark
+     last     the last few of a wave, nothing more coming: the dark stops at
+              the hull, and the HUD points at what is left */
+function hlHouseStart() {
+  const A = hlArea;
+  A.quiet = { t: 0, r: QUIET.max, dark: false, wave: 0 };
+  A.wreck = []; A.wreckSeq = 0;
+  A.online = null; A.cull = null; A.blackout = false;
+  // what was left lying about when the lights went on their timer
+  const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
+  for (let i = 0; i < WRECK_JUNK; i++) {
+    let x = cx, y = cy;
+    for (let k = 0; k < 12; k++) {
+      x = simRnd(arena.x1 - 120, arena.x0 + 120); y = simRnd(arena.y1 - 120, arena.y0 + 120);
+      if (len(x - cx, y - cy) > 320) break;
+    }
+    hlWreckAdd({ x, y, r: simRnd(20, 13), col: '#94a3b8', sides: 4, kind: 'junk', junk: i % 6, type: null });
+  }
+}
+function hlHouseTick(dt, wdt) {
+  const A = hlArea;
+  A.last = !bossAlive && spawnBudget <= 0 && betweenWaves <= 0 && A.n > 0 && hlWaveThreats() <= QUIET_LAST;
+  hlQuietTick(wdt);
+  // the dead lie about only so long
+  for (let i = A.wreck.length - 1; i >= 0; i--) {
+    const w = A.wreck[i];
+    w.t += wdt;
+    if (w.kind === 'body' && !w.by && w.t > WRECK_LIFE) A.wreck.splice(i, 1);
+  }
+  // a thrown thing comes down where it got to, and is something to throw again
+  for (let i = ebullets.length - 1; i >= 0; i--) {
+    const b = ebullets[i];
+    if (b.hlKind !== 'wreck' || b.frozen > 0 || b.life - wdt > 0) continue;
+    ebullets.splice(i, 1);
+    const W0 = b.hlWreck;
+    hlWreckLandFx(hlWreckAdd({ x: clamp(b.x, arena.x0 + 20, arena.x1 - 20), y: clamp(b.y, arena.y0 + 20, arena.y1 - 20),
+                               r: W0.r, col: W0.col, sides: W0.sides, kind: W0.kind, junk: W0.junk, type: W0.type }));
+  }
+  const e = A.boss;
+  if (!e || e.dead || A.online === null) return;
+  // his fight: the room drains, the grey goes out, and the room is never let run dry
+  A.online = Math.max(0, A.online - DG_DRAIN * wdt);
+  if (A.cull) hlCullTick(e, wdt);
+  if (HL.fight) { if (e.hlSolid) HL.fight.solidT += wdt; else HL.fight.ghostT += wdt; }
+  if (hlAreaDef().bossKeep && spawnBudget < 2) spawnBudget = 2;
+}
+/* the boss wave of an area: its trickle (updateWaves) */
+const hlBossLive    = () => (hlAreaDef() && hlAreaDef().bossLive) || HL_BOSS_LIVE;
+const hlBossTrickle = () => (hlAreaDef() && hlAreaDef().bossTrickle) || HL_BOSS_TRICKLE;
+function hlHouseBossIn(e) {
+  const A = hlArea;
+  A.online = DG_ONLINE0; A.cull = null; A.blackout = false;
+}
+function hlHouseBossDown(e) {
+  const A = hlArea;
+  A.cull = null; A.blackout = false;
+  A.quiet.t = 0;                         // the lights come back up on it
+}
+/* what a boss's fight is read for afterwards (THE WORD AFTER) */
+function hlFightNew(e) {
+  if (e.boss === 'deadgame') return { boss: 'deadgame', solidT: 0, ghostT: 0, culled: 0, popped: 0, darkAt: -1, kills: 0 };
+  return { kicks: 0, binges: 0, bingeAt: -99, eaten: 0 };
+}
+
+/* ------------------------------- THE QUIET -------------------------------- */
+function hlQuietCurve(t, C) {
+  if (t <= C.hold) return C.max;
+  if (t <= C.dark) return lerp(C.max, C.hull, hlEase('in', (t - C.hold) / (C.dark - C.hold)));
+  return lerp(C.hull, C.min, clamp((t - C.dark) / (C.minT - C.dark), 0, 1));
+}
+function hlQuietTick(dt) {
+  const A = hlArea, Q = A.quiet;
+  if (Q.wave !== A.n) { Q.wave = A.n; Q.t = -QUIET.grace; }         // a wave's start: a moment of light
+  if (betweenWaves > 0 || A.end || A.n === 0) Q.t = Math.min(Q.t, 0);   // between waves the lights are on
+  else Q.t += dt;
+  const C = A.blackout ? QUIET_BLACK : QUIET;
+  // the last few of a wave: the dark stops at the hull, so they can still be found (hlArea.last)
+  const want = A.last ? Math.max(hlQuietCurve(Q.t, C), C.hull) : hlQuietCurve(Q.t, C);
+  // out fast, eased; in along the curve itself
+  Q.r = want > Q.r ? Q.r + (want - Q.r) * (1 - Math.exp(-QUIET_OPEN * dt)) : want;
+  const dark = Q.r <= C.hull + 0.5;
+  if (dark && !Q.dark) hlQuietDarkFx();
+  Q.dark = dark;
+}
+/* the light's radius round the hull, in world px: 0 outside THE HOUSE */
+const hlQuietR = () => (hlHouseOn() && hlArea.quiet ? hlArea.quiet.r : 0);
+/* how dark it is, 0 (the light at its widest) … 1 (closed right in) */
+function hlQuietK() {
+  if (!hlHouseOn() || !hlArea.quiet) return 0;
+  const C = hlArea.blackout ? QUIET_BLACK : QUIET;
+  return 1 - clamp((hlArea.quiet.r - C.min) / (QUIET.max - C.min), 0, 1);
+}
+/* is (x, y) in the light: never, outside THE HOUSE (nothing there is dark) */
+const hlInLight = (x, y) => hlHouseOn() && len(x - P.x, y - P.y) < hlQuietR() * LURK_LIT;
+/* The dark itself, drawn the way the challenges' fog is: over the finished
+   world, under the HUD, round the hull. Then the art's dressing of its edge,
+   and DEAD GAME's lines, which are heard whether or not he can be seen. */
+function hlDrawQuiet() {
+  if (!hlHouseOn() || !hlArea.quiet || state === 'menu' || state === 'chal' || state === 'dead') return;
+  const z = camZoom, r = hlArea.quiet.r * z;
+  const sx = (P.x - cam.x) * z + W / 2 + cam.sx, sy = (P.y - cam.y) * z + H / 2 + cam.sy;
+  const g = ctx.createRadialGradient(sx, sy, r * 0.6, sx, sy, r * 1.45);
+  g.addColorStop(0, 'rgba(3,4,9,0)');
+  g.addColorStop(0.45, 'rgba(3,4,9,0.82)');
+  g.addColorStop(1, 'rgba(3,4,9,0.985)');
+  ctx.save();
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  ctx.save();
+  drawHlHouseQuiet(sx, sy, r, hlQuietK());
+  ctx.restore();
+  if (hlBarks.length) {
+    ctx.save();
+    ctx.translate(W / 2 + cam.sx, H / 2 + cam.sy); ctx.scale(z, z); ctx.translate(-cam.x, -cam.y);
+    for (const b of hlBarks) drawHlHouseBark(b);
+    ctx.restore();
+  }
+}
+
+/* ------------------------------ what is lying about ------------------------ */
+function hlWreckAdd(w) {
+  const L = hlArea.wreck;
+  w.id = ++hlArea.wreckSeq; w.t = 0; w.by = 0; w.lift = 0;
+  L.push(w);
+  // too much lying about: the oldest of the dead goes, never anything lifted
+  while (L.length > WRECK_MAX) {
+    const i = L.findIndex(o => !o.by && o.kind === 'body');
+    if (i < 0) break;
+    L.splice(i, 1);
+  }
+  return w;
+}
+const hlWreckById = id => (id && hlHouseOn() ? hlArea.wreck.find(w => w.id === id) || null : null);
+function hlWreckNear(x, y, R) {
+  if (!hlHouseOn()) return null;
+  let best = null, bd = R;
+  for (const w of hlArea.wreck) {
+    if (w.by) continue;
+    const d = len(w.x - x, w.y - y);
+    if (d < bd) { bd = d; best = w; }
+  }
+  return best;
+}
+
+/* ============================ the house's bodies ============================
+   Called from updateEnemies' switch for the four types. sp is the body's
+   speed this frame. */
+function hlHouseAI(e, dt, ux, uy, d, sp, dx, dy) {
+  switch (e.type) {
+    /* SHEET: a sheet over something else, drifting at you. The sheet takes the
+       first part of what the whole takes; torn, what was under it is out
+       (hlSheetTear). A marked one has nothing under it but a line of the
+       lobby's last chat, and it runs. */
+    case 'sheet': {
+      if (e.hlMarked) { hlMarkRun(e, dt, ux, uy, d); break; }
+      e.wob += dt * 1.6;
+      const s = Math.sin(e.wob) * 0.55;
+      steer(e, (ux - uy * s) * sp, (uy + ux * s) * sp, 1.8, dt);
+      e.ang = Math.atan2(e.vy, e.vx);
+      break;
+    }
+    case 'lurker': hlLurkAI(e, dt, ux, uy, d, sp, dx, dy); break;
+    case 'poltergeist': hlPoltAI(e, dt, ux, uy, d, sp, dx, dy); break;
+    /* LAST SEEN: the grey shape of one who left. It drifts to a stop where it
+       was left, does nothing, and is gone after a while. */
+    case 'lastseen':
+      steer(e, 0, 0, 1.5, dt);
+      if (e.t > DG_DECOY_LIFE) { e.dead = true; hlDecoyPopFx(e, false); }
+      break;
+  }
+}
+
+/* -------------------------------- the sheet -------------------------------- */
+/* From spawnEnemy, for a sheet: what is under it, and a sheet the size of it. */
+function hlSpawned(e, opts) {
+  if (opts.hlMarked) {
+    e.hlMarked = true; e.hlUnder = null;
+    e.maxHp *= MARK_HP; e.hp = e.maxHp; e.dmg = 0;
+    return;
+  }
+  const k = opts.under && ETYPE[opts.under] ? opts.under : hlRollUnder();
+  const t = ETYPE[k], s = ETYPE.sheet;
+  e.hlUnder = k;
+  e.maxHp *= t.hp / s.hp * SHEET_SOAK / (1 - SHEET_SOAK); e.hp = e.maxHp;
+  e.r = Math.max(s.r, t.r * 1.12) * (opts.rs || 1) * (e.elite ? 1.28 : 1);
+  e.dmg *= t.dmg / s.dmg * 0.7;
+}
+function hlRollUnder() {
+  let tot = 0;
+  for (const p of SHEET_UNDER) tot += p[1];
+  let r = simRand() * tot;
+  for (const p of SHEET_UNDER) { r -= p[1]; if (r <= 0) return p[0]; }
+  return SHEET_UNDER[0][0];
+}
+/* Torn: what was under it is out, moving the way the sheet was. THE HACKER's
+   tear stands it up on your side instead, as kin — the sheet itself is cloth,
+   and there is nothing of it to take. */
+function hlSheetTear(e) {
+  const k = e.hlUnder;
+  let o = null;
+  if (k && ETYPE[k]) {
+    const make = () => spawnEnemy(k, e.x, e.y, { elite: e.elite });
+    o = P.hacker && state === 'play' ? hackAs(e, make) : make();
+    o.vx = e.vx; o.vy = e.vy;
+    o.cd = Math.max(o.cd, 0.6);          // a moment to find its feet
+    o.hlUnsheeted = true;
+    tale('torn', e, o);
+  }
+  hlSheetTearFx(e, o);
+}
+
+/* the errand's piece: in front of you, not on top of you */
+function hlMarkSprout() {
+  let x = P.x, y = P.y;
+  for (let tries = 0; tries < 20; tries++) {
+    const a = P.ang + simRnd(1.1, -1.1), d = simRnd(560, 380);
+    x = clamp(P.x + Math.cos(a) * d, arena.x0 + 60, arena.x1 - 60);
+    y = clamp(P.y + Math.sin(a) * d, arena.y0 + 60, arena.y1 - 60);
+    if (len(x - P.x, y - P.y) > 300) break;
+  }
+  const s = spawnEnemy('sheet', x, y, { elite: false, hlMarked: true });
+  hlArea.coldLive++;
+  hlMarkSproutFx(s);
+}
+/* It keeps away from you, swaying along a wall rather than into it, and comes
+   back toward you if it gets too far to find. Then it slips out. */
+function hlMarkRun(e, dt, ux, uy, d) {
+  e.wob += dt * 2.2;
+  const s = Math.sin(e.wob) * 0.6, k = d < MARK_NEAR ? -1 : d > MARK_FAR ? 0.5 : 0;
+  const v = MARK_SPD * (1 - (e.slow || 0));
+  steer(e, (ux * k - uy * s) * v, (uy * k + ux * s) * v, 2.4, dt);
+  e.ang = Math.atan2(e.vy, e.vx);
+  if (e.t > MARK_ESCAPE) hlMarkLost(e);
+}
+function hlMarkLost(e) {
+  e.dead = true;
+  if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+  banner('IT SLIPPED OUT', '#a5f3fc', 2.4);
+  hlMarkLostFx(e);
+}
+function hlMarkTorn(e) {
+  if (e.hlCounted) return;
+  e.hlCounted = true;
+  if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+  const q = hlQuest('q3');
+  if (!q || hlQDone(q.id)) return;
+  const n = hlProgAdd(q.id), line = HL_LAST_CHAT[Math.min(n, HL_LAST_CHAT.length) - 1];
+  hlMarkTornFx(e, n, line);
+  if (n >= q.need) {
+    hlComplete(q.id);
+    banner(q.n + '   ·   DONE', '#a5f3fc', 3.2);
+  }
+}
+
+/* -------------------------------- the lurker -------------------------------
+   e.state  0 waiting in the dark, at the edge of the light · 1 eyes open (the
+   wind-up) · 2 the strike, down a locked heading · 3 back into the dark.
+   In the light it runs, and takes double (damageEnemy). One of yours fights
+   with no light to fear. */
+function hlLurkAI(e, dt, ux, uy, d, sp, dx, dy) {
+  const lit = !e.hacked && hlInLight(e.x, e.y);
+  if (lit && !e.hlLit) hlLurkBurnFx(e);
+  e.hlLit = lit;
+  e.hlDark = hlHouseOn() && !lit && !e.hacked;   // for the art: past the light, it is not seen
+  switch (e.state) {
+    case 0: {
+      if (lit) { e.state = 3; e.atkT = LURK_FLEE_T; break; }
+      const want = e.hacked ? 150 : Math.max(hlQuietR() * LURK_LIT + LURK_EDGE, 120);
+      const push = d < want - 30 ? -1 : d > want + 50 ? 1 : 0, side = e.id % 2 ? 0.6 : -0.6;
+      steer(e, (ux * push - uy * side) * sp, (uy * push + ux * side) * sp, 3, dt);
+      e.ang = Math.atan2(dy, dx);
+      e.cd -= dt;
+      if (e.cd <= 0 && d < LURK_REACH) { e.state = 1; e.atkT = LURK_WIND; hlLurkWindFx(e); }
+      break;
+    }
+    case 1:
+      steer(e, 0, 0, 8, dt);
+      e.ang = Math.atan2(dy, dx);
+      e.atkT -= dt;
+      if (e.atkT <= 0) { e.state = 2; e.atkT = LURK_STRIKE_T; e.hlStrikeAng = e.ang; hlLurkStrikeFx(e); }
+      break;
+    case 2:
+      e.vx = Math.cos(e.hlStrikeAng) * LURK_DASH; e.vy = Math.sin(e.hlStrikeAng) * LURK_DASH;
+      e.atkT -= dt;
+      if (e.atkT <= 0) { e.state = 3; e.atkT = LURK_FLEE_T; e.cd = simRnd(LURK_CD[1], LURK_CD[0]); }
+      break;
+    default:
+      steer(e, -ux * sp * LURK_FLEE, -uy * sp * LURK_FLEE, 4, dt);
+      e.ang = Math.atan2(-dy, -dx);
+      e.atkT -= dt;
+      if (e.atkT <= 0 && !lit) e.state = 0;
+  }
+}
+
+/* ------------------------------ the poltergeist ----------------------------
+   e.state 0 keeping its distance, looking for something to lift · 1 lifting
+   it (e.hlHold is the wreck's id) and bringing it round, POLT_LIFT s: the
+   tell · then it throws, and the thing comes down where it gets to. It never
+   attacks with anything of its own. */
+function hlPoltAI(e, dt, ux, uy, d, sp, dx, dy) {
+  if (e.state === 1) {
+    const w = hlWreckById(e.hlHold);
+    if (!w) { e.state = 0; e.hlHold = 0; e.cd = 0.6; return; }
+    steer(e, 0, 0, 4, dt);
+    e.ang = Math.atan2(dy, dx);
+    e.atkT -= dt;
+    w.lift = clamp(1 - e.atkT / POLT_LIFT, 0, 1);
+    // up beside it, on the side away from what it is going to throw at
+    const hx = e.x - ux * (e.r + w.r + 10), hy = e.y - uy * (e.r + w.r + 10), f = 1 - Math.exp(-5 * dt);
+    w.x += (hx - w.x) * f; w.y += (hy - w.y) * f;
+    if (e.atkT <= 0) hlPoltThrow(e, w);
+    return;
+  }
+  const push = d < 260 ? -0.8 : d > 400 ? 0.8 : 0;
+  steer(e, (ux * push + uy * 0.5) * sp, (uy * push - ux * 0.5) * sp, 2, dt);
+  e.ang = Math.atan2(dy, dx);
+  e.cd -= dt;
+  if (e.cd > 0) return;
+  const w = hlWreckNear(e.x, e.y, POLT_REACH);
+  if (!w) { e.cd = 0.6; return; }        // nothing to hand: it looks again shortly
+  e.state = 1; e.atkT = POLT_LIFT; e.hlHold = w.id;
+  w.by = e.id; w.lift = 0;
+  hlPoltLiftFx(e, w);
+}
+function hlPoltThrow(e, w) {
+  const T = foe(e), ang = Math.atan2(T.y - w.y, T.x - w.x);
+  const L = hlArea.wreck, i = L.indexOf(w);
+  if (i >= 0) L.splice(i, 1);
+  // from where the thing is, not from the poltergeist (eshoot starts a body's radius out)
+  const b = eshoot(e, ang, POLT_SPD, e.dmg * (0.8 + w.r / 40), clamp(w.r * 0.7, 8, 18),
+                   w.x - Math.cos(ang) * e.r, w.y - Math.sin(ang) * e.r);
+  if (!e.hacked) {
+    b.hlKind = 'wreck'; b.life = POLT_FLY;
+    b.hlWreck = { r: w.r, col: w.col, sides: w.sides, kind: w.kind, junk: w.junk, type: w.type };
+  }
+  e.state = 0; e.hlHold = 0; e.cd = simRnd(POLT_CD[1], POLT_CD[0]);
+  hlPoltThrowFx(e, w, b);
+}
+/* it was put down, or taken, with something up: it falls where it is */
+function hlLetGo(e) {
+  const w = hlWreckById(e.hlHold);
+  if (w) { w.by = 0; w.lift = 0; }
+  e.hlHold = 0;
+}
+
+/* -------------------------------- every death -------------------------------
+   From hlOnKill (killEnemy): a sheet tearing, a poltergeist letting go, and in
+   THE HOUSE the light thrown back out, the room coming back for DEAD GAME,
+   and the body left lying about. */
+function hlHouseKill(e) {
+  if (e.type === 'poltergeist' && e.hlHold) hlLetGo(e);
+  if (e.type === 'sheet') { if (e.hlMarked) hlMarkTorn(e); else hlSheetTear(e); }
+  if (!hlHouseOn()) return;
+  const A = hlArea;
+  A.quiet.t = Math.min(A.quiet.t, 0);
+  hlQuietFlareFx(e.x, e.y);
+  if (A.online !== null && A.boss && !A.boss.dead && e !== A.boss) {
+    A.online = Math.min(1, A.online + DG_KILL);
+    if (HL.fight) HL.fight.kills++;
+  }
+  if (e.type !== 'boss' && e.type !== 'sheet')
+    hlWreckAdd({ x: e.x, y: e.y, r: clamp(e.r, 10, 26), col: e.col, sides: e.sides, kind: 'body', junk: 0, type: e.type });
+}
+
+/* ================================= DEAD GAME ================================
+   The commenter who calls it dead after every update, and is here every day
+   to say so. He cares too much to leave and is too proud to play.
+
+   ONLY SOLID WHILE THE ROOM IS ALIVE. hlArea.online is the room: every death
+   in it raises it, and it drains all the time. At DG_LINE or over he is in the
+   room — solid, and he can be hurt. Under it he is a ghost: nothing touches
+   him (invuln, phased), he drifts, he mends, and he leaves LAST SEEN marks,
+   the grey shapes of the ones who left: decoys, worth nothing.
+
+   THEY LEFT. Now and then he culls his own: a grey wave goes out from him,
+   and whatever of his it reaches is gone, paying nothing — to starve you of
+   deaths. Kill them before he takes them back; keep some alive for when you
+   need the meter.
+
+   His own moves, only while solid: A THREAD (replies, one after another, at
+   you) and RATIO (a ring of them). At DG_DARK_AT the house goes fully dark,
+   and only deaths light it (QUIET_BLACK).
+=========================================================================== */
+function bossDeadGame(e, dt, ux, uy, d, ph) {
+  const A = hlHouseOn() ? hlArea : null;
+  if (!e.hlInit) {
+    e.hlInit = true;
+    e.lockPhase = 0;                     // the shell's phase novas are not his
+    e.hlSolid = true; e.hlSolidK = 1;    // settled from the meter below
+    e.hlSayT = 7; e.hlDecoyT = 1; e.hlDrift = simRnd(TAU); e.hlDriftT = 0;
+    e.hlCullT = simRnd(DG_CULL_CD[1], DG_CULL_CD[0]) * 0.6;
+    e.hlWind = null; e.hlThread = null;
+    e.atkT = 2.2;
+    hlBark(e, HL_BARK.deadgame.enter[0]);
+  }
+  // the room decides whether he is in it (outside THE HOUSE there is no meter: he is)
+  const solid = A ? A.online >= DG_LINE : true;
+  if (solid !== e.hlSolid) {
+    e.hlSolid = solid;
+    e.hlWind = null; e.hlThread = null;
+    if (!solid) hlBark(e, pick(HL_BARK.deadgame.fade));
+    hlDgSolidFx(e, solid);
+  }
+  e.invuln = solid ? 0 : 1; e.phased = !solid;
+  e.hlSolidK = clamp((e.hlSolidK || 0) + (solid ? 1 : -1) * dt / DG_FADE_T, 0, 1);
+
+  // the last of him: the house goes fully dark
+  if (A && !A.blackout && e.hp / e.maxHp <= DG_DARK_AT) {
+    A.blackout = true;
+    if (HL.fight) HL.fight.darkAt = elapsed;
+    hlBark(e, HL_BARK.deadgame.soul);
+    hlDgDarkFx(e);
+  }
+
+  if (solid) {
+    const push = d < 280 ? -0.7 : d > 400 ? 0.8 : 0;
+    steer(e, (ux * push - uy * 0.45) * e.spd, (uy * push + ux * 0.45) * e.spd, 1.6, dt);
+  } else {
+    // a ghost drifts where it likes, mends (not in the dark at the end), and leaves
+    // the shapes of the ones who left
+    if (!(A && A.blackout)) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * DG_HEAL * dt);
+    e.hlDriftT -= dt;
+    if (e.hlDriftT <= 0) { e.hlDrift = simRnd(TAU); e.hlDriftT = simRnd(3, 1.6); }
+    steer(e, Math.cos(e.hlDrift) * e.spd * 0.55, Math.sin(e.hlDrift) * e.spd * 0.55, 0.9, dt);
+    e.hlDecoyT -= dt;
+    if (A && e.hlDecoyT <= 0) { e.hlDecoyT = DG_DECOY_T; hlDgDecoy(e); }
+  }
+  e.ang = Math.atan2(uy, ux);
+
+  e.hlSayT -= dt;
+  if (e.hlSayT <= 0) { e.hlSayT = rnd(12, 8); if (solid) hlBark(e, pick(HL_BARK.deadgame.enter.slice(1))); }
+
+  // THEY LEFT
+  if (A) {
+    e.hlCullT -= dt;
+    if (!A.cull && e.hlCullT <= 0) {
+      let n = 0;
+      for (const o of enemies) if (hlCullable(o) && len(o.x - e.x, o.y - e.y) < DG_CULL_R) n++;
+      if (n >= DG_CULL_N) {
+        A.cull = { x: e.x, y: e.y, t: 0, r: 0, warn: DG_CULL_WARN };
+        e.hlCullT = simRnd(DG_CULL_CD[1], DG_CULL_CD[0]);
+        hlBark(e, HL_BARK.deadgame.cull);
+        hlDgCullFx(e);
+      } else e.hlCullT = 1;
+    }
+  }
+
+  // his own moves, only while he is in the room
+  if (!solid) return;
+  if (e.hlWind) {
+    e.hlWind.t += dt;
+    if (e.hlWind.t >= DG_WIND) {
+      const k = e.hlWind.kind;
+      e.hlWind = null;
+      if (k === 'thread') e.hlThread = { n: DG_THREAD_N + (A && A.blackout ? 3 : 0), t: 0 };
+      else hlDgRatio(e);
+    }
+    return;
+  }
+  if (e.hlThread) {
+    const T = e.hlThread;
+    T.t -= dt;
+    if (T.t <= 0) { T.t = DG_THREAD_GAP; hlDgReply(e); if (--T.n <= 0) e.hlThread = null; }
+    return;
+  }
+  if (e.atkT > 0 || (A && A.cull && A.cull.t < A.cull.warn)) return;   // nothing new while he gathers the grey
+  const kind = simPick(['thread', 'thread', 'ratio']);
+  e.hlWind = { kind, t: 0 };
+  e.atkT = simRnd(DG_ATK[1], DG_ATK[0]) * (A && A.blackout ? 0.8 : 1);
+  hlDgWindFx(e, kind);
+}
+function hlDgReply(e) {
+  const T = foe(e);
+  const b = eshoot(e, Math.atan2(T.y - e.y, T.x - e.x) + simRnd(0.06, -0.06), DG_REPLY_SPD, e.dmg * 0.45, 6);
+  b.hlKind = 'reply';
+}
+function hlDgRatio(e) {
+  const a0 = simRnd(TAU);
+  for (let i = 0; i < DG_RATIO_N; i++) {
+    const b = eshoot(e, a0 + i * TAU / DG_RATIO_N, DG_RATIO_SPD, e.dmg * 0.45, 7);
+    b.hlKind = 'reply'; b.hlRatio = true;
+  }
+}
+/* what THEY LEFT can take: his, alive, and somebody */
+const hlCullable = o => !o.dead && !o.hacked && o.type !== 'boss' && o.type !== 'lastseen' && !o.hlMarked;
+function hlCullTick(e, dt) {
+  const C = hlArea.cull;
+  C.t += dt;
+  if (C.t < C.warn) { C.x = e.x; C.y = e.y; return; }   // he gathers it where he is
+  C.r += DG_CULL_SPD * dt;
+  for (const o of enemies)
+    if (hlCullable(o) && len(o.x - C.x, o.y - C.y) < C.r + o.r) hlCullTake(o);
+  if (C.r >= DG_CULL_R) hlArea.cull = null;
+}
+/* taken back: gone, paying nothing, and lighting nothing */
+function hlCullTake(o) {
+  if (o.type === 'poltergeist' && o.hlHold) hlLetGo(o);
+  o.dead = true;
+  if (HL.fight) HL.fight.culled++;
+  tale('cull');
+  hlDgTakeFx(o);
+}
+function hlDgDecoy(e) {
+  let n = 0;
+  for (const o of enemies) if (!o.dead && o.type === 'lastseen') n++;
+  if (n >= DG_DECOY_MAX) return;
+  const m = spawnEnemy('lastseen', e.x + simRnd(30, -30), e.y + simRnd(30, -30), { elite: false });
+  m.ang = simRnd(TAU); m.vx = simRnd(40, -40); m.vy = simRnd(40, -40);
+  hlDgDecoyFx(m);
+}
+/* From damageEnemy: a decoy soaks what is spent on it, and when it is gone
+   it is gone. No death: nothing paid, nothing lit, nothing for him. */
+function hlDecoyHit(e, dmg) {
+  if (e.dead) return;
+  e.hp -= dmg;
+  e.flash = Math.min(1, e.flash + 0.65);
+  if (e.hp > 0) return;
+  e.dead = true;
+  if (HL.fight && HL.fight.popped !== undefined) HL.fight.popped++;
+  hlDecoyPopFx(e, true);
+}
+/* the word after a death in his fight, most basic first */
+function hlHintThemeDG(e, F) {
+  const all = F.solidT + F.ghostT;
+  if (all > 0 && F.solidT / all < 0.3) return 'ghost';   // he was hardly ever there
+  if (F.culled >= 6) return 'cull';                        // he took a great many back
+  if (F.popped >= 4) return 'decoy';                       // spent on the grey ones
+  if (e.hp / e.maxHp < 0.15) return 'close';
+  if (F.darkAt >= 0) return 'dark';                        // went down at the end, in the dark
+  return 'general';
+}
+
+/* ================================== medals ================================== */
+/* SHEET: the dash keeps you out of it longer, and through bodies while it lasts. */
+function hlSheetDash() {
+  P.iframe = Math.max(P.iframe, 0.28 + SHEET_IFRAME);
+  P.hlSheetT = 0.17 + SHEET_IFRAME;
+  hlSheetDashFx();
+}
+/* STILL HERE: from reviveOrDie, the last thing before the run ends. Once a
+   run, the blow that would have ended it leaves you a ghost instead
+   (P.hlGhost { t, T, k0, kills, need }): nothing touches you, your fire is
+   worth half, and the run is decided by what you fell before it is over. */
+function hlStillHere() {
+  if (!HL.eq.stillhere || P.hlGhostUsed || P.hlGhost || state !== 'play') return false;
+  P.hlGhostUsed = true;
+  P.hlGhost = { t: 0, T: GHOST_T, k0: P.kills, kills: 0, need: GHOST_KILLS };
+  P.hp = 1; P.hurtFlash = 0;
+  hlGhostFx('start');
+  return true;
+}
+function hlMedalTick(dt) {
+  if (P.hlSheetT > 0) P.hlSheetT = Math.max(0, P.hlSheetT - dt);
+  const G = P.hlGhost;
+  if (!G || state !== 'play') return false;
+  G.t += dt;
+  G.kills = P.kills - G.k0;
+  if (G.kills >= G.need) {
+    P.hlGhost = null;
+    P.hp = Math.max(P.hp, P.maxHp * GHOST_HP);
+    P.iframe = Math.max(P.iframe, 1.5);
+    hlGhostFx('up');
+  } else if (G.t >= G.T) {
+    P.hlGhost = null;
+    P.hp = 0;
+    hlGhostFx('gone');
+    if (coopCanDown()) hostDown(); else gameOver();
+    return true;
+  }
+  return false;
+}
+
+/* ========================== the floors opening (the menu) ===================
+   The first menu after a chapter opens, once the floor under it is finished:
+   the hatch knocks and he says so (HL_SAY.ch<i>). It plays through the
+   prologue's own seam, HL.pro, so the hatch's art plays it the way it plays
+   the knock (the tracks stall, open — held open — and rise, and three knock
+   cues at the prologue's times), and [ESC] skips it. A floor the soul already announced in the vigil, with the
+   chapter open, needs no knock (hlChapterHeard). */
+function hlChapterBeatDue() {
+  if (state !== 'menu' || !hlLive() || !hlSeen('prologue') || HL.pro || arrival ||
+      outsiderArrivalDue() || (Save.profile.logSeen || 0) < LOG_VER) return -1;
+  for (let i = 1; i < HL_EVENT.chapters.length; i++) {
+    const c = HL_EVENT.chapters[i];
+    if (!HL_SAY['ch' + i] || !HL_AREAS[c.area] || !hlChapterOpen(i) || hlSeen('ch:' + i)) continue;
+    const below = HL_QUESTS.filter(q => q.ch === i - 1 && q.ascend);
+    if (below.length && below.every(q => hlQDone(q.id))) return i;
+  }
+  return -1;
+}
+function hlChapterBeat(i) {
+  // the knocks at the prologue's own times (1.0, 1.7, 2.4 s): the hatch's art keys its thuds to them
+  const cues = [
+    { at: 1.0, shake: 0.5, call: () => hlKnockFx(0) },
+    { at: 1.7, shake: 0.6, call: () => hlKnockFx(1) },
+    { at: 2.4, shake: 0.8, call: () => hlKnockFx(2) }
+  ];
+  let t = 4.0;
+  for (const [who, text] of HL_SAY['ch' + i]) {
+    const dur = text.length / 26 + 1.9;
+    cues.push({ at: t, say: who, text, dur });
+    t += dur + 0.15;
+  }
+  const end = t + 0.6;
+  HL.pro = hlTimeline({
+    name: 'chapter', len: end + 0.7,
+    tracks: {
+      stall: [[0, 0], [0.5, 1, 'out3'], [end, 1], [end + 0.7, 0, 'inOut']],
+      open:  [[0, 1]],
+      rise:  [[2.8, 0], [3.6, 1, 'out3'], [t, 1], [end, 0, 'in3']]
+    },
+    cues,
+    onEnd: () => { HL.pro = null; hlSee('ch:' + i); }
+  });
+}
+function hlChapterHeard(q) {
+  if (!q.ascend) return;
+  const i = q.ch + 1;
+  if (HL_EVENT.chapters[i] && hlChapterOpen(i)) hlSee('ch:' + i);
+}
+/* what he says while the next floor is still shut, by which floor it is */
+function hlWaitLines() {
+  const q = HL_QUESTS.find(x => !hlQDone(x.id));
+  return q && q.ch >= 2 ? HL_SAY.waitYard : HL_SAY.wait;
+}
+
+/* ================================ the seams =================================
+   Which set of hooks draws a thing: THE HOUSE's (Act II) or Act I's. */
+function hlDrawBody(e, ea) {
+  if (HL_HOUSE_BODIES[e.type] || e.boss === 'deadgame') drawHlHouseBody(e, ea);
+  else drawHlBody(e, ea);
+}
+function hlDrawEBullet(b) {
+  if (HL_HOUSE_ROUNDS[b.hlKind]) drawHlHouseEBullet(b);
+  else drawHlEBullet(b);
+}
+function hlDrawBossBar(e, x, y, w) {
+  if (e.boss === 'deadgame') drawHlDeadGameBar(e, x, y, w);
+  else if (e.boss === 'backlog') drawHlBossBar(e, x, y, w);
+}
+function hlHouseScreen() {
+  const A = hlArea, e = A.boss;
+  drawHlHouseHud(hlAreaDef(), A);
+  if (e && !e.dead && A.online !== null && !A.end) drawHlOnlineHud(A.online, DG_LINE, e.hlSolidK || 0, A);
+}
+
+/* ===========================================================================
    ALL HALLOWS · ACT I — art hooks
    PLACEHOLDERS. Nothing here is the look; it is the least that keeps Act I
    playable and its telegraphs readable while the art is made. The whole
@@ -49944,6 +50834,8 @@ function hlDrawMenu() {
 
    HALLOWS-GUIDE.txt is the contract: every hook below, when it is called,
    what it is handed, which layer it draws in, and what it must not touch.
+   ACT II's (THE HOUSE) are at the foot of this block, before the end line,
+   and HALLOWS-HOUSE-HOOKS.md is theirs.
    The kit (THE KIT — ALL HALLOWS, above) is there for the art to use:
    light and shadow, cloth and rope, rigs, the timeline, dialogue, particles.
 =========================================================================== */
@@ -50409,6 +51301,251 @@ function hlSkinPlayer(s) { return false; }        // true: drawn, skip the stock
 function hlSkinBullet(b, c, s) { return false; }  // true: drawn, skip the stock round
 function hlSkinPart(p, t, rad, s) { return false; }
 function hlSkinEnemy(e, ea, s) {}
+/* ---------------------------------------------------------------------------
+   ACT II: THE HOUSE — art hooks
+   PLACEHOLDERS, in the same block as Act I's so the lift treats them as hooks.
+   The least that keeps THE HOUSE playable and its telegraphs readable; none
+   of it is the look. HALLOWS-HOUSE-HOOKS.md is the contract for each: when
+   it is called, what it is handed, what it may read. THE HOUSE never calls
+   Act I's hooks (those draw the patch); everything it shows comes through
+   these. The dark itself is not a hook: it is the fog (hlDrawQuiet), drawn
+   before drawHlHouseQuiet, so the art can light the room and never has to
+   make it dark.
+--------------------------------------------------------------------------- */
+/* once a frame in THE HOUSE, after hlArtTick(dt, 'house'): step cloth and
+   ropes, run art timers, spawn ambient particles here */
+function hlHouseArtTick(dt) {}
+
+/* ---- effect hooks: called once, at the moment ---- */
+function hlHouseEnterFx(A) {}
+function hlQuietFlareFx(x, y) {}                  // a death threw the light back out
+function hlQuietDarkFx() { Audio_.tone(90, 0.4, 'sine', 0.05, 60); }   // dark past the hull
+function hlSheetTearFx(e, inner) { burst(e.x, e.y, 18, '#e2e8f0', 220, 3, 0.5); }
+function hlMarkSproutFx(e) { ringFx(e.x, e.y, 6, 80, '#a5f3fc', 0.5, 3); }
+function hlMarkTornFx(e, n, line) {
+  burst(e.x, e.y, 24, '#a5f3fc', 240, 3, 0.6);
+  floatText(e.x, e.y - 34, '“' + line + '”', '#a5f3fc', 22, -30);
+  Audio_.gem();
+}
+function hlMarkLostFx(e) { burst(e.x, e.y, 16, '#a5f3fc', 160, 2.4, 0.5); }
+function hlLurkWindFx(e) {}
+function hlLurkStrikeFx(e) { Audio_.tone(220, 0.12, 'sawtooth', 0.05, 90); }
+function hlLurkBurnFx(e) { burst(e.x, e.y, 6, '#c7d2fe', 140, 2, 0.3); }
+function hlPoltLiftFx(e, w) {}
+function hlPoltThrowFx(e, w, b) {}
+function hlWreckLandFx(w) { burst(w.x, w.y, 6, '#94a3b8', 120, 2, 0.3); }
+function hlDgSolidFx(e, solid) { ringFx(e.x, e.y, e.r, e.r * 2, solid ? '#e2e8f0' : '#475569', 0.35, 3); }
+function hlDgWindFx(e, kind) {}
+function hlDgCullFx(e) { Audio_.tone(130, DG_CULL_WARN, 'sine', 0.06, 70); }   // THEY LEFT is called
+function hlDgTakeFx(o) { burst(o.x, o.y, 10, '#64748b', 140, 2.2, 0.4); }    // one taken back by it
+function hlDgDecoyFx(m) {}
+function hlDecoyPopFx(m, shot) { burst(m.x, m.y, shot ? 8 : 4, '#64748b', 100, 2, 0.3); }
+function hlDgDarkFx(e) { Audio_.boom(); }
+function hlHouseBossDeathFx(e) { burst(e.x, e.y, 60, e.col, 420, 4, 0.9); }
+// medals, in any run
+function hlSheetDashFx() {}
+function hlGhostFx(stage) {                       // 'start' | 'up' | 'gone'
+  if (stage === 'start') banner('STILL HERE   ·   FELL ' + GHOST_KILLS, '#cbd5e1', 2.4);
+  else if (stage === 'up') banner('BACK UP', '#e2e8f0', 2.0);
+}
+
+/* ---- the world ---- */
+/* the room's lights (hlLightBegin, hlLight, hlOcc*): true to run the light
+   pass. Read hlQuietR() for the light round the hull. */
+function hlHouseLights() { return false; }
+function drawHlHouseFloor(A) {}
+/* a piece of what is lying about (hlArea.wreck): on the floor, or lifted by a
+   poltergeist (w.by, w.lift 0..1) */
+function drawHlHouseWreck(w) {
+  ctx.save();
+  const up = (w.lift || 0) * 18;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.arc(w.x, w.y + 4, w.r * 0.8, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(w.col, w.by ? 0.9 : 0.5); ctx.lineWidth = 1.5;
+  poly(w.x, w.y - up, w.r * 0.8, w.sides || 4, w.id);
+  ctx.stroke();
+  ctx.restore();
+}
+/* the house's bodies and DEAD GAME, in place of the generic polygon */
+function drawHlHouseBody(e, ea) {
+  ctx.save();
+  let a = ea;
+  if (e.type === 'lurker' && e.hlDark) a *= e.state === 1 || e.state === 2 ? 0.5 : 0.08;   // past the light it is not seen
+  if (e.boss === 'deadgame') a *= 0.25 + 0.75 * (e.hlSolidK || 0);
+  ctx.globalAlpha = a;
+  const col = e.hlMarked ? '#a5f3fc' : e.col;
+  ctx.lineWidth = e.type === 'boss' ? 4 : 2.2;
+  ctx.fillStyle = rgba(col, 0.16 + e.flash * 0.46);
+  ctx.strokeStyle = e.flash > 0.5 ? '#ffffff' : col;
+  if (e.type === 'lastseen' || (e.boss === 'deadgame' && !e.hlSolid)) ctx.setLineDash([5, 5]);
+  poly(e.x, e.y, e.r, e.sides, e.ang);
+  ctx.fill(); ctx.stroke();
+  ctx.setLineDash([]);
+  if (e.type === 'lurker' && (e.state === 1 || e.state === 2)) {   // its eyes
+    ctx.globalAlpha = ea;
+    ctx.fillStyle = '#e0e7ff';
+    for (const s of [-1, 1]) {
+      const a2 = e.ang + s * 0.5;
+      ctx.beginPath(); ctx.arc(e.x + Math.cos(a2) * e.r * 0.5, e.y + Math.sin(a2) * e.r * 0.5, 2.2, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = a;
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'center'; ctx.fillStyle = rgba('#e2e8f0', 0.8);
+  const label = e.boss === 'deadgame' ? 'DEAD GAME' + (e.hlSolid ? '' : ' · GHOST')
+              : e.type === 'lastseen' ? 'LAST SEEN'
+              : e.type === 'sheet' ? (e.hlMarked ? 'SHEET · MARKED' : 'SHEET')
+              : e.type.toUpperCase();
+  ctx.fillText(label, e.x, e.y - e.r - 8);
+  ctx.restore();
+}
+/* the house's enemy rounds: b.hlKind 'wreck' (a thrown thing; b.hlWreck is
+   what it was) or 'reply' (DEAD GAME's; b.hlRatio for the ring) */
+function drawHlHouseEBullet(b) {
+  ctx.save();
+  if (b.hlKind === 'wreck') {
+    const W0 = b.hlWreck || {};
+    ctx.strokeStyle = W0.col || '#94a3b8'; ctx.fillStyle = rgba(W0.col || '#94a3b8', 0.3); ctx.lineWidth = 2;
+    poly(b.x, b.y, b.r, W0.sides || 4, uiTime * 6);
+    ctx.fill(); ctx.stroke();
+  } else {
+    ctx.fillStyle = '#e2e8f0';
+    roundRect(b.x - b.r, b.y - b.r * 0.7, b.r * 2, b.r * 1.4, b.r * 0.5); ctx.fill();
+  }
+  ctx.restore();
+}
+/* additive, after the bodies and the light */
+function drawHlHouseGlow() {}
+/* plain paint over the world: the telegraphs. e is DEAD GAME, or null. */
+function drawHlHouseTele(e) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const o of enemies) {
+    if (o.dead || o.hacked) continue;
+    // a lurker's eyes are open: where it is about to come
+    if (o.type === 'lurker' && o.state === 1) {
+      ctx.strokeStyle = rgba('#ef4444', 0.5); ctx.lineWidth = 1.5; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(o.x + Math.cos(o.ang) * LURK_REACH, o.y + Math.sin(o.ang) * LURK_REACH); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // a poltergeist has something up: where it is going to go
+    if (o.type === 'poltergeist' && o.state === 1) {
+      const w = hlWreckById(o.hlHold);
+      if (w) {
+        ctx.strokeStyle = rgba('#ef4444', 0.25 + 0.5 * w.lift); ctx.lineWidth = 1.5; ctx.setLineDash([4, 8]);
+        ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(P.x, P.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+  const C = hlArea && hlArea.cull;
+  if (C) {
+    // THEY LEFT: gathered round him, then going out; who it is about to take
+    ctx.strokeStyle = rgba('#94a3b8', 0.7); ctx.lineWidth = 3;
+    if (C.t < C.warn) {
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath(); ctx.arc(C.x, C.y, 30 + 60 * (C.t / C.warn), 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.beginPath(); ctx.arc(C.x, C.y, C.r, 0, TAU); ctx.stroke();
+    }
+    for (const o of enemies) {
+      if (!hlCullable(o)) continue;
+      const dd = len(o.x - C.x, o.y - C.y) - C.r;
+      if (dd > 300) continue;
+      ctx.strokeStyle = rgba('#94a3b8', 0.8); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + 6, 0, TAU); ctx.stroke();
+    }
+  }
+  if (e && e.hlWind) {
+    ctx.strokeStyle = rgba('#ef4444', 0.8); ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 10, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(e.hlWind.t / DG_WIND, 0, 1)); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawHlHouseBossDeath(d) {}
+/* a line said in THE HOUSE (DEAD GAME's): world space, drawn over the dark */
+function drawHlHouseBark(b) {
+  const k = clamp(Math.min(b.t / 0.2, (b.life - b.t) / 0.4), 0, 1);
+  ctx.save();
+  ctx.globalAlpha = k;
+  ctx.textAlign = 'center';
+  ctx.font = "600 15px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(b.text, b.x, b.y - b.r - 30);
+  ctx.restore();
+}
+
+/* ---- the screen ---- */
+/* over the fog, round the light: x, y its centre and r its radius in screen
+   px; k how dark the room is, 0..1 */
+function drawHlHouseQuiet(x, y, r, k) {}
+function drawHlHouseHud(A, area) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = A.stage.accent;
+  ctx.fillText(A.stage.name + '   ·   WAVE ' + Math.max(1, Math.min(5, area.n)) + ' / 5   ·   ' + hlChipGoal(), W / 2, 68);
+  // what the sheets have said so far
+  const n = Math.min(hlProgress('q3'), HL_LAST_CHAT.length);
+  if (n && !hlQDone('q3')) {
+    ctx.fillStyle = '#a5f3fc';
+    ctx.fillText(HL_LAST_CHAT.slice(0, n).join('  ·  '), W / 2, 86);
+  }
+  // where the marked ones are (and, with the last few of a wave, everything left):
+  // off the screen, or out in the dark
+  for (const e of enemies) {
+    if (e.dead || !(e.hlMarked || (area.last && isThreat(e) && e.type !== 'lastseen'))) continue;
+    const sx = (e.x - cam.x) * camZoom + W / 2, sy = (e.y - cam.y) * camZoom + H / 2;
+    ctx.fillStyle = e.hlMarked ? '#a5f3fc' : '#c4b5fd';
+    if (sx > 0 && sx < W && sy > 0 && sy < H) {
+      if (len(e.x - P.x, e.y - P.y) > hlQuietR() * 0.8) {
+        ctx.beginPath(); ctx.moveTo(sx, sy - 7); ctx.lineTo(sx + 7, sy); ctx.lineTo(sx, sy + 7); ctx.lineTo(sx - 7, sy); ctx.closePath(); ctx.fill();
+      }
+      continue;
+    }
+    const a = Math.atan2(sy - H / 2, sx - W / 2);
+    const px = W / 2 + Math.cos(a) * Math.min(W, H) * 0.42, py = H / 2 + Math.sin(a) * Math.min(W, H) * 0.42;
+    ctx.beginPath(); ctx.arc(px, py, 6, 0, TAU); ctx.fill();
+  }
+  if (area.end) {
+    ctx.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(area.end.why === 'win' ? 'BACK TO THE VIGIL' : 'THE HOUSE LETS YOU GO', W / 2, H / 2 + 120);
+  }
+  ctx.restore();
+}
+/* DEAD GAME's fight: the room's meter. v 0..1, line where he comes into the
+   room, k 0..1 how far he is in it now, area the area */
+function drawHlOnlineHud(v, line, k, area) {
+  const w = 260, x = W / 2 - w / 2, y = 102;
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,12,20,0.75)'; ctx.fillRect(x, y, w, 8);
+  ctx.fillStyle = v >= line ? '#e2e8f0' : '#475569'; ctx.fillRect(x, y, w * clamp(v, 0, 1), 8);
+  ctx.fillStyle = '#fca5a5'; ctx.fillRect(x + w * line - 1, y - 3, 2, 14);
+  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'right'; ctx.fillStyle = '#94a3b8'; ctx.fillText('ONLINE', x - 10, y + 8);
+  ctx.textAlign = 'left'; ctx.fillText(k > 0.5 ? 'HE IS HERE' : 'NOBODY', x + w + 10, y + 8);
+  ctx.restore();
+}
+/* his health bar (x, y, w; 14 tall), already drawn: mark it */
+function drawHlDeadGameBar(e, x, y, w) {
+  ctx.save();
+  ctx.fillStyle = '#fecaca';
+  ctx.fillRect(x + 2 + (w - 4) * DG_DARK_AT - 1, y - 3, 2, 20);
+  if (!e.hlSolid) { ctx.fillStyle = 'rgba(15,23,42,0.6)'; roundRect(x, y, w, 14, 7); ctx.fill(); }
+  ctx.restore();
+}
+/* STILL HERE: the ghost, on the screen, in any run. g { t, T, kills, need } */
+function drawHlGhostHud(g) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(148,163,184,0.12)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText('STILL HERE   ·   ' + g.kills + ' / ' + g.need + '   ·   ' + Math.max(0, g.T - g.t).toFixed(1) + 's', W / 2, H - 96);
+  ctx.restore();
+}
 /* ===================== end of ALL HALLOWS · ACT I art hooks ===================== */
 
 /* ========================= THE ONE YOU LET IN =============================
@@ -54069,7 +55206,7 @@ function drawEnemiesBody() {
     }
 
     // ALL HALLOWS: its bodies are drawn by their own hooks
-    if (hlOwnsBody(e)) { drawHlBody(e, ea); continue; }
+    if (hlOwnsBody(e)) { hlDrawBody(e, ea); continue; }
 
     ctx.save();
     ctx.globalAlpha = ea;
@@ -55278,7 +56415,7 @@ function drawBullets() {
 function drawEBullets() {
   for (const b of ebullets) {
     if (!inView(b.x, b.y, b.r * 4)) continue;
-    if (b.hlKind) { b.hlPiece ? hlQuietDraw(b.hlPiece, drawHlEBullet, b) : drawHlEBullet(b); continue; }   // ALL HALLOWS: its rounds draw themselves
+    if (b.hlKind) { b.hlPiece ? hlQuietDraw(b.hlPiece, drawHlEBullet, b) : hlDrawEBullet(b); continue; }   // ALL HALLOWS: its rounds draw themselves
     if (FXO.bglow) drawGlow(b.x, b.y, b.r * 3, b.col, 0.55);
     motionStreak(b.x, b.y, b.vx, b.vy, b.r * 1.5, b.col, 0.85);
     const r = b.r;
@@ -57330,7 +58467,7 @@ function drawHUD() {
     roundRect(x2 + 2, y2 + 2, Math.max(0, (w2 - 4) * clamp(boss.hp / boss.maxHp, 0, 1)), 10, 5); ctx.fill();
     ctx.strokeStyle = rgba(bcol, 0.5); ctx.lineWidth = 1;
     roundRect(x2, y2, w2, 14, 7); ctx.stroke();
-    if (boss.boss === 'backlog' && hlAreaOn()) drawHlBossBar(boss, x2, y2, w2);   // ALL HALLOWS: where he binges
+    if (hlAreaOn() && HL_BOSSES[boss.boss]) hlDrawBossBar(boss, x2, y2, w2);   // ALL HALLOWS: where he binges, or whether he is there
     // armour is invisible otherwise: the player just sees smaller numbers
     const unwCut = boss.boss === 'unwritten'
       ? (UNW_DR[P.weapon] !== undefined ? UNW_DR[P.weapon] : 0.95) : 0;
@@ -71015,6 +72152,7 @@ function hackable(e) {
   if (e.suRipped) return false;            // torn in four by SUPERUSER: nothing left to stand up
   if (state !== 'play') return false;
   if (e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd') return false;
+  if (e.type === 'sheet' || e.type === 'lastseen') return false;   // cloth, and nobody: what was under a sheet is (hlSheetTear)
   if (e.shadow > 0 || e.amalPart || e.virus || e.founder) return false;
   if (e.boss === 'unwritten' || e.boss === 'amalgam') return false;
   if (e.boss === 'root' || e.boss === 'founder' || e.boss === 'shopkeeper' || HL_BOSSES[e.boss]) return false;

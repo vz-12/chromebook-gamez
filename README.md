@@ -443,6 +443,13 @@ D1, not the real database. To try ALL HALLOWS outside its dates:
 `npm run dev -- --test-scheduled`, then open
 `http://localhost:8787/__scheduled?cron=5+0+*+*+*`.
 
+ALL HALLOWS' chapter II, THE HOUSE, has its own test. Its art hooks are listed
+in `HALLOWS-HOUSE-HOOKS.md`:
+
+```sh
+npm run test:hallows                       # under a minute: THE HOUSE, DEAD GAME, the medals, the hooks
+```
+
 ## The determinism test
 
 ```sh
@@ -455,13 +462,14 @@ node scripts/determinism.mjs --restore amalgam
 
 Co-op is moving to lockstep: both machines run the same game and send only
 their inputs. That only works if the same seed, inputs and run settings give
-the same game, step for step, on any machine. The test plays 14 scenarios
-twice: the four pilots, Boss Rush, the finales, the rites and ALL HALLOWS'
-area. Run A is never drawn and has every effect off. Run B is drawn to a stub
-canvas with every effect on, at another window size, while the keyboard,
-mouse, autofire and the save's flags are scrambled every step. The two must
-match at every second of game time. It also checks that a different seed
-changes the run, and that a planted unseeded roll is caught.
+the same game, step for step, on any machine. The test plays 17 scenarios
+twice: the four pilots, Boss Rush, the finales, the rites, ALL HALLOWS' two
+areas and DEAD GAME, and an outside pilot. Run A is never drawn and has every
+effect off. Run B is drawn to a stub canvas with every effect on, at another
+window size, while the keyboard, mouse, autofire and the save's flags are
+scrambled every step. The two must match at every second of game time. It also
+checks that a different seed changes the run, and that a planted unseeded roll
+is caught.
 
 Run C checks the snapshots that lockstep's safety net sends. A second copy
 of the game, loaded on its own, takes over a snapshot of run A a third of

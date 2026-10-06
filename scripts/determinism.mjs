@@ -233,6 +233,11 @@ const S = [
   { name: 'rite-hacker',char: 'hacker', seed: 112, steps: 7200,  kit: true, starter: "enterRite('hacker')" },
   { name: 'rite-melee', char: 'melee',  seed: 113, steps: 7200,  kit: true, starter: "enterRite('melee')" },
   { name: 'patch',      char: 'runner', seed: 114, steps: 7200,  starter: "hlAreaStart('patch')" },
+  // ALL HALLOWS chapter II: THE HOUSE's waves (THE QUIET, sheets, lurkers, poltergeists), and DEAD GAME's
+  // fight flown by THE HACKER, so what is under a sheet, and the house's bodies, also fight for you
+  { name: 'house',      char: 'runner', seed: 116, steps: 7200,  starter: "hlAreaStart('house')" },
+  { name: 'deadgame',   char: 'hacker', seed: 117, steps: 7200,  kit: true,
+    starter: "hlP().q.q3 = 2; hlAreaStart('house'); hlArea.n = 4; wave = HL_AREAS.house.waveFrom + 3; betweenWaves = 0.5" },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
   { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
 ];

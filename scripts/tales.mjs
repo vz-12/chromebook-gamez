@@ -63,7 +63,7 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   const L = talesAll();
-  chk(L.length === 64, 'every entry: 22 enemies, 11 bosses and 3 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 6 people', L.length);
+  chk(L.length === 68, 'every entry: 25 enemies, 12 bosses and 3 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 6 people', L.length);
   chk(!L.some(e => /SERAPH/i.test(e.n)), 'no outside pilot is in it');
   chk(L.filter(e => e.pages.some(p => p.sealed)).map(e => e.key).sort().join() === 'a:melee,n:founder,p:ember', 'the sealed pages are hinted where the bible puts them');
   chk(Object.keys(TALE_TEXT).every(k => !TALE_TEXT[k][3]), 'no sealed text in the game');
@@ -116,6 +116,18 @@ take(g.run(`(() => { ${KIT}
   for (let i = 0; i < 10; i++) tale('vine'); chk(has('e:creeper', 2), 'ten vines cut');
   { const e = spawnAt('scarecrow', 200); e.hlWatched = true; down(e); chk(!has('e:scarecrow', 2), 'a scarecrow felled while watched');
     const f = spawnAt('scarecrow', 200); f.hlWatched = false; down(f); chk(has('e:scarecrow', 2), 'a scarecrow felled while it moves'); }
+  // THE HOUSE (chapter II)
+  { const s = spawnAt('sheet', 200, 0, { under: 'brute' }); down(s);
+    const b = enemies.find(o => !o.dead && o.hlUnsheeted && o.type === 'brute');
+    chk(!!b, 'a sheet torn lets out what was under it (the game\\'s own)');
+    elapsed += 1.5; down(b); chk(!has('e:sheet', 2), 'what was under a sheet, a second and a half after');
+    const s2 = spawnAt('sheet', 200, 0, { under: 'grunt' }); down(s2);
+    const g2 = enemies.find(o => !o.dead && o.hlUnsheeted && o.type === 'grunt');
+    elapsed += 0.5; down(g2); chk(has('e:sheet', 2), 'what was under a sheet, felled inside a second'); }
+  { const l = spawnAt('lurker', 200); l.state = 0; down(l); chk(!has('e:lurker', 2), 'a lurker felled waiting');
+    const m = spawnAt('lurker', 200); m.state = 2; down(m); chk(has('e:lurker', 2), 'a lurker felled mid-strike'); }
+  { const p = spawnAt('poltergeist', 200); down(p); chk(!has('e:poltergeist', 2), 'a poltergeist felled with nothing up');
+    const q = spawnAt('poltergeist', 200); q.hlHold = 1; down(q); chk(has('e:poltergeist', 2), 'a poltergeist felled before it lets go'); }
   { const b = spawnAt('bomber', 600, 0); for (let i = 0; i < 3; i++) { const o = spawnAt('grunt', 600 + i * 6, 6); o.hp = 1; }
     down(b); chk(has('e:bomber', 2), 'three others caught in one bomber\\'s blast'); }
   wave++; tale('hurt'); for (let i = 0; i < 5; i++) fell('artillery'); chk(!has('e:artillery', 2), 'five artillery in a wave you were hit in');
@@ -128,7 +140,9 @@ take(g.run(`(() => { ${KIT}
 section("the tales (step 5): the bible's rules");
 take(g.run(`(() => { ${KIT}
   // ALL HALLOWS chapters II and III are not live yet, and the page source is public: these wait for them
-  const LATER = ['r:patch 3', 'n:soul 2', 'n:soul 3'];
+  // (THE HOUSE's three bodies and DEAD GAME are chapter II's: their pages II and III too)
+  const LATER = ['e:sheet 2', 'e:sheet 3', 'e:lurker 2', 'e:lurker 3', 'e:poltergeist 2', 'e:poltergeist 3',
+                 'b:deadgame 2', 'b:deadgame 3', 'r:patch 3', 'n:soul 2', 'n:soul 3'];
   const miss = [], all = [];
   for (const en of talesAll()) {
     if (en.link) continue;
@@ -189,6 +203,8 @@ take(g.run(`(() => { ${KIT}
     boss('unwritten'); tale('unw'); chk(has('b:unwritten', 2), 'THE UNWRITTEN closed on the first attempt'); }
   { const b = boss('backlog'); tale('binge'); down(b); chk(!has('b:backlog', 2), 'THE BACKLOG, a binge gone off');
     const c = boss('backlog'); down(c); chk(has('b:backlog', 2), 'THE BACKLOG, no binge'); }
+  { const d = boss('deadgame'); tale('cull'); down(d); chk(has('b:deadgame', 1) && !has('b:deadgame', 2), 'DEAD GAME, with some sent away');
+    const f = boss('deadgame'); down(f); chk(has('b:deadgame', 2), 'DEAD GAME, with nobody sent away'); }
   tale('library'); chk(has('n:keeper', 0) && has('r:library', 0), 'a library: the Bookkeeper met, and the room');
   tale('book'); chk(has('r:library', 1), 'a book taken');
   tale('buy'); chk(has('n:shopkeeper', 0), 'bought from him');
