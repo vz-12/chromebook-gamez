@@ -40,16 +40,16 @@ const where = REMOTE ? ' (live)' : ' (local)';
    work (scripts/grant.mjs says the same). A put is checked by reading the
    head back instead, since a long file can go through D1's import, which
    answers in its own words. */
-function run(sql, { json = true } = {}) {
-  const file = join(tmpdir(), 'vr-vault-' + process.pid + '-' + Date.now() + '.sql');
-  writeFileSync(file, sql);
-  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', '--file', file, '--yes'];
+function run(sql, { json = true, command = false } = {}) {
+  const file = command ? null : join(tmpdir(), 'vr-vault-' + process.pid + '-' + Date.now() + '.sql');
+  if (file) writeFileSync(file, sql);
+  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', ...(file ? ['--file', file] : ['--command', sql]), '--yes'];
   if (json) a.push('--json');
   if (PERSIST) a.push('--persist-to', PERSIST);
   const r = process.platform === 'win32'
     ? spawnSync(['npx', ...a].map(s => (/[\s"]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s)).join(' '), { encoding: 'utf8', shell: true, maxBuffer: 64 << 20 })
     : spawnSync('npx', a, { encoding: 'utf8', maxBuffer: 64 << 20 });
-  rmSync(file, { force: true });
+  if (file) rmSync(file, { force: true });
   if (!json) return r;
   const at = (r.stdout || '').indexOf('[');
   let out = null;
@@ -57,6 +57,17 @@ function run(sql, { json = true } = {}) {
   if (!Array.isArray(out) || !out.every(x => x && x.success !== false))
     die((r.stderr || r.stdout || 'wrangler failed').trim().split('\n').slice(-6).join('\n'));
   return out.flatMap(x => x.results || []);
+}
+/* What a read answers: its rows. The live database takes a --file through
+   D1's import, which answers with a count of what it ran and never the rows,
+   so there a read goes as --command (one line, as the shell is handed it:
+   no double quote or percent sign in it, which the reads here never have;
+   every name and id in them is checked against a plain pattern first). */
+function read(sql) {
+  if (!REMOTE) return run(sql);
+  const line = sql.replace(/\s+/g, ' ').trim();
+  if (/["%]/.test(line)) die('a read with a double quote or a percent sign cannot go on the command line');
+  return run(line, { command: true });
 }
 const live = () => REMOTE || LOCAL;
 function show(sql) {
@@ -79,14 +90,14 @@ try {
         break;
       }
       run(p.sql, { json: false });
-      const head = run(headSql(a1))[0];
+      const head = read(headSql(a1))[0];
       if (!head || head.hash !== p.hash) die(`the put did not land: the head reads ${head ? head.hash : 'nothing'}`);
       console.log(`put ${a1}${where}: ${bytes.length} bytes in ${p.parts} part${p.parts === 1 ? '' : 's'}, sha-256 ${p.hash.slice(0, 16)}…`);
       break;
     }
     case 'list': {
       if (!live()) show(listSql());
-      const rows = run(listSql());
+      const rows = read(listSql());
       if (!rows.length) console.log('the vault is empty' + where);
       for (const r of rows) console.log(r.id.padEnd(12) + String(r.size).padStart(9) + ' bytes  ' + String(r.parts).padStart(3) + ' parts  ' + r.hash.slice(0, 16) + '…  ' + r.put);
       break;
@@ -102,15 +113,15 @@ try {
       checkId(a2);
       const sql = cmd === 'give' ? giveSql(a1, a2) : takeSql(a1, a2);
       if (!live()) show(sql);
-      if (!run(accountSql(a1)).length) die(`no account named "${a1}"`);
+      if (!read(accountSql(a1)).length) die(`no account named "${a1}"`);
       run(sql);
-      const row = run(accountSql(a1))[0];
+      const row = read(accountSql(a1))[0];
       console.log((cmd === 'give' ? 'gave ' : 'took ') + a2 + (cmd === 'give' ? ' to ' : ' from ') + a1 + where + ': perks ' + row.perks);
       break;
     }
     case 'who': {
       if (!live()) show(whoSql(a1));
-      const rows = run(whoSql(a1));
+      const rows = read(whoSql(a1));
       console.log(rows.length ? rows.map(r => r.name).join('\n') : 'nobody may load ' + a1 + where);
       break;
     }
