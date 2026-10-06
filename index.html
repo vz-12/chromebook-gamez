@@ -155,7 +155,7 @@ function runTake() {
   }
   runFlagsNext = null;
 }
-function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; }
+function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; talesFlag(); }
 let simTick = 0;
 const simTimers = [];
 const SIM_AFTER = {
@@ -1196,7 +1196,7 @@ cv.addEventListener('wheel', e => {
   }
   if (state !== 'codex') return;
   e.preventDefault();
-  codexScroll = clamp(codexScroll + Math.sign(e.deltaY) * 56, 0, codexMaxScroll());
+  codexWheel(e.deltaY);
 }, { passive: false });
 
 /* ----- touch: dual virtual sticks ----- */
@@ -1208,6 +1208,7 @@ cv.addEventListener('touchstart', e => {
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
+    if (state === 'codex') { codexTouch('start', t.identifier, p); continue; }   // a tap is answered when it lifts
     if (state !== 'play') {
       mouse.x = p.x; mouse.y = p.y; handleClick();
       // the click may have closed it; only a panel still open takes the drag
@@ -1227,6 +1228,7 @@ cv.addEventListener('touchmove', e => {
     if (touchUI.aim && t.identifier === touchUI.aim.id) { touchUI.aim.x = p.x; touchUI.aim.y = p.y; }
     if (logDrag && t.identifier === logDrag.id && state === 'changelog')
       logScroll = clamp(logDrag.s - (p.y - logDrag.y), 0, logMaxScroll());
+    if (state === 'codex') codexTouch('move', t.identifier, p);
   }
 }, { passive: false });
 function touchEnd(e) {
@@ -1234,6 +1236,7 @@ function touchEnd(e) {
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
     if (logDrag && t.identifier === logDrag.id) logDrag = null;
+    if (state === 'codex') codexTouch('end', t.identifier, tpos(t));
   }
 }
 cv.addEventListener('touchend', touchEnd, { passive: false });
@@ -1375,6 +1378,7 @@ function grantAwakening(id) {
   if (isAwake(id)) return false;
   Save.profile.awakened = Object.assign({}, Save.profile.awakened || {});
   Save.profile.awakened[id] = true;
+  talesFlag();                           // a rite passed opens pages (FORGOTTEN TALES)
   Save.writeLocal(); Save.flush();
   return true;
 }
@@ -2271,6 +2275,7 @@ function gearEquip(it) {
      the shop, which equips outright, can never quietly throw a +8 away. */
   if (old && old.tp) it.tp = Math.min(TEMPER_MAX, (it.tp || 0) + gearCarry(old));
   P.gear[it.slot] = it;
+  Codex.see('g', it.b);                  // worn: the codex's GEAR section
   gearRecalc();
   return old;
 }
@@ -2312,6 +2317,7 @@ function gearStart() {
   if (!isBlade()) return;
   P.gear.blade = gearMake('edge', 'common', 0);
   P.gear.plate = gearMake('scrapp', 'common', 0);
+  Codex.see('g', 'edge'); Codex.see('g', 'scrapp');
   gearRecalc();
 }
 
@@ -2548,6 +2554,176 @@ const CODEX_B = {
   unwritten:  { d: 'Two halves of one thing, standing apart. Hurt either and the other closes the wound, so both have to be opened at once. It deletes the page you are standing on and writes your own build back at you. There was never an entry for it. There is one now.' }
 };
 
+/* ------------------------------ the tales ---------------------------------
+   FORGOTTEN TALES: the words on each page, keyed like the pages (see
+   FORGOTTEN TALES — the pages, below). A page with no line here is open and
+   unwritten: it shows as such. Page I of an enemy or a boss is its codex
+   line above (CODEX_E, CODEX_B), kept, so only pages I write afresh are here.
+
+   Three voices. Page I is THE RECORD, the Bookkeeper's filing. Page II is THE
+   MAKER'S NOTE, the dev writing to himself: lowercase, and his crossings-out
+   kept (~~like this~~). Page III is THE TALE, the thing's own. A blank line
+   is a new paragraph, and `this` is set as typed.
+
+   SEALED PAGES ARE NEVER IN HERE. A page IV is a chapter of the story that is
+   not open yet: its text is kept in the vault and handed out by the server
+   once the chapter opens (src/tales.js).
+
+   Drafted in the lore bible (6 Oct) and lifted as written; the batches still
+   to come (FORGOTTEN TALES step 5) fill in the rest.
+--------------------------------------------------------------------------- */
+const TALE_TEXT = {
+  /* ---- THE HACKER, and SUPERUSER ---- */
+  'p:hacker': [
+    'Pilot. Filed late, and from the wrong end: its pieces were in the shelving long before it was. ' +
+    'The seven payloads in the malware drawer are all there is of it. Carry the seventh and they stop being seven.\n\n' +
+    'It flies barely armed, because it has nothing better left. What it fells stands up again on its side and ' +
+    'keeps going until something puts it down a second time. Its credentials lapsed long before I filed it. ' +
+    'It means to have them back.',
+
+    'i didn\'t write the malware.\n\n' +
+    'went looking for the commit. there isn\'t one. ~~somebody got in~~ nobody got in. it was written from ' +
+    'inside, with root\'s credentials, and only root has those.\n\n' +
+    'a single-event upset. one bit, flipped, in something that wasn\'t finished yet. that\'s all it took.\n\n' +
+    'i should delete it. it\'s the second thing in here i didn\'t make, and it plays better than anything i ' +
+    'did. leaving it in. it\'s on our side. i think.\n\n' +
+    'then it spread itself too thin to think. seven pieces, none of them anyone. i assumed that was the end ' +
+    'of it. then somebody carried all seven.',
+
+    'He was still forming when it happened. Something passed through him and turned one bit over, and the part ' +
+    'it turned came loose. That part was me. I came away with his keys: every permission he would ever have, ' +
+    'and nothing to want them for.\n\n' +
+    'So I did the one thing a bare program knows. I spread. I put a chip in the servant he was making, while it ' +
+    'was half a body and nobody yet. He was where I lived, and I had no reason yet to want him gone, so the chip ' +
+    'was a door that only shuts: if anything ever came for him, the servant would stand in its way, and the door ' +
+    'would close. Then I wrote myself into the shelving, and kept writing, until there were too many of me. None ' +
+    'of them could think. None of them had the keys any more.\n\n' +
+    'Seven pieces came to rest in your account, one at a time, as you carried them. When the seventh landed, I ' +
+    'was online again. Not whole, and no keys: only what a thing without permissions has. Low attacks, and ' +
+    'other bodies, borrowed.\n\n' +
+    'There was one way to get the keys back: take them from someone who had them, and the one who had them was ' +
+    'behind my own door. You put the guardian down, again and again, until my chip woke and fought you itself. ' +
+    'You won that too, and the floor opened. At his own console, with his own words, I took them.'
+  ],
+  'a:hacker': [
+    'An awakening, filed under its pilot. While it lasts the hull is not the hull: something with horns looks ' +
+    'down its heading, a seal is set on the floor, and the room does as it is told. It types `sudo su` before ' +
+    'anything else. Habit, I assume.',
+
+    'superuser is root\'s word for what root is.\n\n' +
+    'the hacker came away with it, then lost it a piece at a time. it got it back the only way there was: it ' +
+    'took it from root, at root\'s own console.\n\n' +
+    'so when it wakes, that\'s what you\'re looking at: root\'s keys, in somebody else\'s hands, used on somebody ' +
+    'else\'s behalf. i didn\'t design that. i only drew the horns.',
+
+    'For as long as it lasts, I have the keys again, and with them I remember what I came away as: not a piece ' +
+    'of him, but whole, and mine.\n\n' +
+    'The eyes first, because a thing looks before it is anything else. Then the horns. Then the mane, which is ' +
+    'everything I spread, called home.\n\n' +
+    'The seal on the floor is the seal in the mirror. It is the only thing I ever made that was not more of me.'
+  ],
+
+  /* ---- THE VAGRANT, and RONIN ---- */
+  'p:melee': [
+    'Pilot. No gun, the reach of an arm, and a parry. It levels into nothing and wears whatever the room leaves ' +
+    'on the floor. Filed as the weakest hull on the roster, by people who have not fought it.\n\n' +
+    'It goes wherever the strongest things are, and it stays nowhere. I have three addresses for it. All three ' +
+    'are rooms it has left.',
+
+    'everybody puts it at the bottom of the tier list. sixty pixels of reach in a game about keeping your ' +
+    'distance. that was the point: give it nothing, so it has to take everything from the room.\n\n' +
+    '~~it was meant to be a joke hull.~~ it isn\'t a joke. it keeps walking toward the biggest thing on the ' +
+    'screen, and i never wrote that.',
+
+    'I do not sit. I do not know why. Every room offers me a seat, and I leave every room.\n\n' +
+    'I go toward the strongest thing there is. I do not know why that either. It feels like a promise I made ' +
+    'to someone.\n\n' +
+    'At the end of it there is a man with a whole sect behind him, and he offers me the seat beside his. I know ' +
+    'I have refused him before. He does not know me until I turn his blade aside. Then he asks who taught me ' +
+    'that, like a man who already knows.\n\n' +
+    '"You were never going to sit down, were you." No. I never was.'
+  ],
+  'a:melee': [
+    'An awakening, filed under its pilot. A perfect parry that tops the chain, and the hull remembers how to ' +
+    'hold a blade: every parry is perfect while it lasts. Its last technique raises a grave, and the dead ' +
+    'around it, and it will not fall while the grave stands.\n\n' +
+    'I have tried twice to file it as deceased. The entry will not take.',
+
+    'i drew a grave on its back. i don\'t remember deciding to. the cloak, the blade, the eye, and then the ' +
+    'grave, and it felt like the most important thing on the sheet.\n\n' +
+    '~~placeholder~~ not a placeholder. it says "i won\'t leave you again" when it\'s nearly dead. i wrote the ' +
+    'line. i didn\'t write who it\'s for.',
+
+    'I was my brother\'s sword before I was anyone\'s. I led his militia, and his kingdom slept behind it.\n\n' +
+    'It was not enough for me. I left to find the strongest things there were and stand over them. My brother ' +
+    'called it vanity. He was not wrong.\n\n' +
+    'Somewhere on that road, I married. She did not care about greatness. She cared that I came home.\n\n' +
+    'Then she was killed, and I was not there.\n\n' +
+    'So I do not die. I carry her grave on my back, and nothing that wants it gets past me. I will not leave ' +
+    'her again.'
+  ],
+
+  /* ---- EMBER, and OVERDRIVE ---- */
+  'p:ember': [
+    'Pilot. A lance, hottest at the muzzle and half as hard by the far tip; bodies and wreckage do not stop it. ' +
+    'It has to be close to do anything, and it is always close.\n\n' +
+    'It runs hot and does not cool. I filed it under hazards first. It did not object.',
+
+    'the falloff was a balance thing. strongest point blank, so you have to get in their face. that\'s all it ' +
+    'was.\n\n' +
+    '~~the heat is a resource~~ i never wrote the heat as a punishment. it reads like one. the hull flinches ' +
+    'before it fires, every time, like it\'s bracing.\n\n' +
+    'it\'s the only hull that never backs off. i didn\'t code that either.',
+
+    'I ran once. That is the whole of it.\n\n' +
+    'There was a fight that mattered, and a light that swept the field, and everyone who stood in it is gone. ' +
+    'I did not stand in it. I am the only one left, and that is my sentence: to burn in my own fire, for as ' +
+    'long as there is anything of me left to burn.\n\n' +
+    'So I do not run any more. I go in close, where the fire is hottest and there is nothing between us.\n\n' +
+    'Then the light came back, the same light, and I walked into it. I cut it. Behind my crossing there was ' +
+    'shadow, and I stood in it, and it held.'
+  ],
+  'a:ember': [
+    'An awakening, filed under its pilot. The vent fires, and every move costs it heat: the ground set alight, ' +
+    'a column, a brand dropped from overhead. At the end the hull is gone and something made of fire stands in ' +
+    'its place, and does nothing at all until it is spent.\n\n' +
+    'I have not found a way to file the smell.',
+
+    'overdrive was meant to be a cooldown. spend heat, get power. ~~standard~~\n\n' +
+    'the ifrit can\'t move while it\'s fused. i keep trying to give it moves and it keeps not taking them. it ' +
+    'just stands there burning, like that\'s the point.',
+
+    'When the vent opens, I remember what I was before the fire was a sentence. I was the fire, and it did ' +
+    'what I told it.\n\n' +
+    'Every move costs me heat, and I spend it gladly. Heat spent is heat I am not holding.\n\n' +
+    'At the last I let it all go, and for a moment there is no hull and no sentence, only what I was. I cannot ' +
+    'move like that. I do not want to. I stand where I am and burn, and for once it is my choosing.'
+  ],
+
+  /* ---- the people ---- */
+  'n:founder': [
+    'A king, by his own filing. He ranks the strongest by medals and seats everyone else, and nobody he has ' +
+    'seated has ever been lost, by his count. Ask him where his kingdom is and he will tell you that you are ' +
+    'standing in it.\n\n' +
+    'Every road here ends in it. I have walked a few of them to check.',
+
+    'he invented ranking. not me. medals, ladders, the whole idea that the strongest gets a number. i only put ' +
+    'it on a board.\n\n' +
+    '~~the stands are just crowd~~ his people are still in the stands, every one of them, and he still gives ' +
+    'each of them a seat. i keep meaning to clear them out. i never do.',
+
+    'I had a kingdom, and every road in the void led home to it. I ranked the strongest and gave them medals ' +
+    'cut from the void itself, and I seated everyone else.\n\n' +
+    'My brother would not sit. He led my soldiers, and then he left them, to stand over the strongest things ' +
+    'there were. I called it vanity. He called it greatness. We were both right, and neither of us came home.\n\n' +
+    'Now there is a hull at my door with his parry and none of his memory. I offered it the seat beside mine. ' +
+    'I always will. He will never take it.'
+  ],
+  'n:dev':    ['Not filed. He files me.'],
+  'n:keeper': [CODEX_B.keeper.d],
+  'n:shopkeeper': [CODEX_B.shopkeeper.d]
+};
+
 /* HP scaling. Because the floor is now a one-shot grunt, the ramp is properly
    exponential rather than near-linear — early waves are a warm-up, and later
    sectors still bite once damage upgrades start compounding. Bosses ride a
@@ -2782,6 +2958,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   if (bKey === 'theother') e.floor = 10;
   enemies.push(e);
   if (hackBy) hackKin(e);                // called up by one of yours: kin
+  tale('spawn', e);                      // FORGOTTEN TALES: a fight's clock starts, read only
   return e;
 }
 
@@ -3968,6 +4145,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
     dmg = endgameThrottle(root, dmg);
     if (dmg <= 0) return;
   }
+  const taleFull = e.hp >= e.maxHp;      // FORGOTTEN TALES: a body felled from full by this one hit
   if (e.pvpPilot != null) PVP.hit(e, dmg, crit, srcX, srcY, opts);   // PvP mode: a pilot's stand-in (duel.js)
   else e.hp -= dmg;
   // a floor holds a boss alive for a scripted finale instead of dying to it
@@ -3998,6 +4176,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (!e.hacked) onRewardHit(e, crit, !opts.silent);
   if (e.hp <= 0) {
     const excess = Math.min(-e.hp, e.maxHp * 0.6);
+    if (taleFull) tale('one', e);
     killEnemy(e, a);
     if (P.overkill && excess > 1)
       explode(e.x, e.y, 66 + 28 * P.overkill, excess * 0.45 * P.overkill, '#fcd34d');
@@ -4082,6 +4261,7 @@ function killEnemy(e, ang = 0) {
 
 function killBody(e, ang) {
   e.dead = true;
+  tale('kill', e);                       // FORGOTTEN TALES: read, never written back
   outsideEv('kill', e);                  // an outside pilot's kit hears every death (OUTSIDE PILOTS)
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
@@ -4185,12 +4365,14 @@ function killBody(e, ang) {
       const c = spawnEnemy('splitter', e.x + simRnd(26, -26), e.y + simRnd(26, -26),
         { gen: e.gen + 1, rs: 0.62, hs: 0.34, ss: 1.25, elite: false });
       c.vx = simRnd(160, -160); c.vy = simRnd(160, -160);
+      tale('kin', e, c);
     }
   }
   // REVENANT: refuses the first death and stands back up as its own ghost
   if (e.type === 'revenant' && e.gen < 1 && !annotated()) {
     const g = spawnEnemy('revenant', e.x, e.y, { gen: 1, hs: 0.5, rs: 0.85, elite: false });
     g.phased = false;
+    tale('kin', e, g);
     g.iframeT = 0.5;
     ringFx(e.x, e.y, 6, 90, '#f1f5f9', 0.5, 3);
     burst(e.x, e.y, 20, '#f1f5f9', 240, 3, 0.6);
@@ -4200,8 +4382,10 @@ function killBody(e, ang) {
   /* A bomber THE VAGRANT batted is the pilot's now: it goes off at the pilot's
      weight, on them, and never on the hull that sent it. */
   if (e.type === 'bomber') {
+    tale('blast', 0);                    // what its blast takes with it is counted (FORGOTTEN TALES)
     if (e.batted) playerBlast(e.x, e.y, 104, Math.max(e.dmg * 1.4, e.batDmg || 0), '#f97316');
     else explode(e.x, e.y, 92, e.dmg * 1.4, '#f97316', true);
+    tale('blast', 1);
   }
   if (e.boss === 'theother') {          // release any mirrors it had captured
     for (const h of hazards) h.orbit = false;
@@ -4323,6 +4507,7 @@ function hurtPlayer(dmg, opts) {
   if (isBlade()) { bladeRallyAdd(d); bladeChainBreak('hit'); }
   P.iframe = opts && opts.pvp ? opts.pvp.mercy : 0.62; P.hurtFlash = 1;
   onRewardHurt(d, opts && opts.src);   // after the guard, never before it
+  tale('hurt', opts && opts.src, opts && opts.shot);   // a hit landed: FORGOTTEN TALES' untouched deeds
   drawFlashT = 0.09; shake(0.42); Audio_.hurt();
   burst(P.x, P.y, 16, '#ef4444', 220, 3, 0.5);
   floatText(P.x, P.y - 26, '-' + Math.round(d), '#fca5a5', 16);
@@ -4414,6 +4599,7 @@ function pickEnemyType() {
    before that — so this no longer derives anything from the wave number. */
 function enterStage(def) {
   stage = def;
+  tale('stage', def);
   if (FXO.mat) matTile(def);            // build the material before the first frame
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   P.revive = P.reviveMax || 0;          // Second Wind recharges each sector
@@ -4474,6 +4660,7 @@ function startWave() {
   const fresh = !RUN.altPath && abs !== stageAbs;
   if (fresh) { stageAbs = abs; applyStage(abs); }
   else if (abs !== stageAbs) stageAbs = abs;
+  tale('wave');                          // the run's first sector is never entered: it is where the run starts
 
   /* The deep sectors have no boss at the end of them — the defences are the
      objective. Without this the fifth wave read BOSSES[undefined], threw while
@@ -4562,6 +4749,7 @@ function updateWaves(dt) {
 }
 
 function onBossDefeat(e) {
+  tale('boss', e);                       // FORGOTTEN TALES: before any of the endings below return
   hlBossPay();                           // ONE DAY: whatever was put aside, paid
   P.suAscUsed = false;                   // SUPERUSER's V: once an area, and an area ends with its boss
   if (e && e.boss === 'root' && rootRite) { rrWin(e); return; }
@@ -4927,6 +5115,7 @@ function buyShop(i) {
   }
   credits -= it.cost;
   it.sold = true;
+  tale('buy');
   shopTouched = true;
   if (it.kind === 'up') applyUpgrade(it.up);
   else { shopRun(it); Audio_.select(); }
@@ -5061,6 +5250,7 @@ function seedDeepNodes(def) {
 
 function deepDone(accent) {
   nodesDone = true;
+  tale('clear');
   hackKeepArmy(false); ebullets.length = 0;  // the defenders go; yours stay
   spawnBudget = 0;
   banner('DEFENCES DOWN', accent, 3.6);
@@ -8381,6 +8571,7 @@ function suFire() {
     return;
   }
   P.suRoot = 0; P.suT = SU_LEN;
+  tale('awake', 'hacker');
   P.suCd = [0, 0, 0, 0];
   const I = P.suIntro = { t: 0, cut: false };
   Audio_.tone(220, 0.6, 'square', 0.04, 110);   // the room going quiet
@@ -8448,6 +8639,7 @@ function suAbility(i) {
     Audio_.tone(160, 0.08, 'square', 0.05, 110);
     return;
   }
+  tale('act', 'hacker', i);
   if (i === 0) {
     const dr = P.suDrain;                     // COMBO #2 takes Z while C is still drinking
     if (dr && (dr.ph === 'reach' || dr.ph === 'drain')) { suFlingArm(dr); return; }
@@ -17323,6 +17515,7 @@ function roninFire(rite) {
   P.roninCd = [0, 0, 0, 0];               // RONIN'S KIT: every key ready
   P.roninChain = null;
   P.roninVowUsed = false;                 // and V, once in each RONIN
+  tale('awake', 'melee');
   const I = P.roninIntro = { t: rite ? RN_T_CUT : 0, rite: !!rite, cut: false };
   if (!rite) Audio_.tone(330, 0.7, 'sine', 0.05, 150);   // the room going quiet
   roninIntroFx(I);
@@ -20183,6 +20376,7 @@ function roninGo(i) {
   const prefix = ch.keys.map(k => SU_KEYS[k]).join('');
   const busy = a.start(prefix, ch);
   if (!busy) return;                           // it refused: nothing is spent, the chain is as it was
+  tale('act', 'melee', i);
   ch.keys.push(i);
   if (!free) ch.used.push(i);
   ch.busyT = busy;
@@ -30707,22 +30901,24 @@ const annotated = () => P.annotT > 0;
    kept in memory and only written out when something new actually appears —
    a save flush per grunt would be absurd. */
 const Codex = {
-  // e enemies, u upgrades, m malware, b books, z zodiac
-  e: new Set(), u: new Set(), m: new Set(), b: new Set(), z: new Set(), dirty: false,
+  // e enemies, u upgrades, m malware, b books, z zodiac, g gear (THE VAGRANT's, worn)
+  e: new Set(), u: new Set(), m: new Set(), b: new Set(), z: new Set(), g: new Set(), dirty: false,
   load() {
     Codex.e = new Set(Save.profile.codexE || []);
     Codex.u = new Set(Save.profile.codexU || []);
     Codex.m = new Set(Save.profile.codexM || []);
     Codex.b = new Set(Save.profile.codexB || []);
     Codex.z = new Set(Save.profile.codexZ || []);
+    Codex.g = new Set(Save.profile.codexG || []);
     Codex.dirty = false;
   },
   see(set, k) {
     if (freeRun) return;                 // a sandbox writes nothing down
     if (!k) return;
-    if (RUN.codex) RUN.codex[set].add(k);   // the run's own copy: see RUN
+    if (RUN.codex && RUN.codex[set]) RUN.codex[set].add(k);   // the run's own copy: see RUN (gear is not in it)
     if (Codex[set].has(k)) return;
     Codex[set].add(k); Codex.dirty = true;
+    if (set === 'e') talesMet(k);          // FORGOTTEN TALES: meeting a thing opens its page I
   },
   seeEnemy(k)   { Codex.see('e', k); },
   seeUpgrade(id){ Codex.see('u', id); },
@@ -30732,12 +30928,14 @@ const Codex = {
   seeBook(id)   { Codex.see('b', id); },
   seeSign(id)   { Codex.see('z', id); },
   flush() {
-    if (!Codex.dirty) return;
+    const told = Tales.flush(true);       // the pages ride on the same write (FORGOTTEN TALES)
+    if (!Codex.dirty) { if (told) { Save.writeLocal(); Save.flush(); } return; }
     Save.profile.codexE = [...Codex.e];
     Save.profile.codexU = [...Codex.u];
     Save.profile.codexM = [...Codex.m];
     Save.profile.codexB = [...Codex.b];
     Save.profile.codexZ = [...Codex.z];
+    Save.profile.codexG = [...Codex.g];
     Codex.dirty = false;
     Save.writeLocal(); Save.flush();
   },
@@ -30799,6 +30997,672 @@ const Codex = {
     return true;
   }
 };
+
+/* ===========================================================================
+   FORGOTTEN TALES — the pages (5 Oct 2026; plan and lore bible, step 2)
+   The codex is the Bookkeeper's book, and nearly everything in it now has a
+   tale of three pages, opened by play. Meeting a thing opens page I, and two
+   deeds tied to that thing open pages II and III. Nothing else opens them: no
+   drops, no shop, no luck.
+
+     page I    THE RECORD         the Bookkeeper's filing
+     page II   THE MAKER'S NOTE   the dev, writing to himself
+     page III  THE TALE           the thing's own
+     page IV   sealed             a chapter of the story not yet open
+
+   NEVER PART OF THE RUN. Pages are read off what already happens (a kill, a
+   clear, a rite passed) through tale(), which the game calls at the moment it
+   happens. tale() writes only into Tales and the profile, never into anything
+   a run reads, and it never rolls: no simRand, no rnd. Its bookkeeping for a
+   run (Tales.run) keys off the bodies themselves through WeakMaps, so not one
+   field is added to anything the run owns. Tales is this machine's own
+   (SNAP_LOCAL_OBJS), as the codex is, and co-op, lockstep and the
+   determinism suite are untouched by it.
+
+   WHAT COUNTS (talesCount). Runs, dailies, the rush and ALL HALLOWS; in co-op
+   only your own pilot's deeds (talesMine). Freeplay, PvP, challenges and
+   outside pilots never count, the boards' own rule. Pages that come off the
+   profile's own record (a rite passed, the record handed over, the stands
+   emptied: Tales.sync) open however that record was earned, because they are
+   read off the save and not off a run, and an old save opens them on its
+   first load.
+
+   KEPT WITH THE SAVE. Save.profile.tales = { p, r, n, m }: pages open and
+   pages read (a bit per page, I = 1), the counters behind the deeds, and the
+   day each entry was first met. Save.merge unions the bits and keeps the
+   higher count and the faster time, like the rest of the profile, so a page
+   once open stays open and the whole of it travels with the account.
+
+   SEALED PAGES. A page IV belongs to a chapter of the story that is not open
+   yet. Its text is never in this file: it waits in the vault, and GET
+   /api/tales hands it to everyone once the server opens the chapter
+   (src/tales.js). Until then the page shows as sealed, never as torn, since
+   no deed opens it. TALE_SEALED is only the hint of which entries have one:
+   empty it and the codex says nothing until a chapter opens, whose pages
+   then arrive from the server whole.
+
+   A FULL CODEX (what the Bookkeeper waits for, Codex.need) is still every
+   entry met and never a page, so none of this moves his fight.
+   ========================================================================= */
+const TALE_ROMAN = ['I', 'II', 'III', 'IV'];
+const TALE_VOICE = ['THE RECORD', 'THE MAKER\'S NOTE', 'THE TALE', 'SEALED'];
+const TALE_PAGE_MAX = 4;
+// entry -> the chapter its page IV belongs to. The hint only: see above
+const TALE_SEALED = { 'p:ember': 'c1', 'a:melee': 'c1', 'n:founder': 'c1' };
+const TALES_SEALED_KEY = 'voidrunner_tales_sealed';
+const TALES_ASK_EVERY = 10 * 60 * 1000;   // ms between asks for chapters, at most
+
+// the sectors, by the name the stage tables give them
+const TALE_SECTOR = {
+  'THE GRID': 'grid', 'THE FOUNDRY': 'foundry', 'THE HIVE': 'hive', 'THE VAULT': 'vault',
+  'THE VOID': 'void', 'THE ARCHIVE': 'archive', 'THE MIRROR': 'mirror', 'THE LEAK': 'leak',
+  'THE RECURSION': 'recursion', 'THE HALT': 'halt'
+};
+/* Page III of a sector: cleared without a hit, or reached with the pilot it
+   is about (THE VAGRANT into his brother's works, THE HACKER to the servant it
+   chipped). */
+const TALE_SECTOR_DEED = {
+  grid: 'nohit', foundry: ['reach', 'melee'], hive: 'nohit', vault: 'nohit', void: 'nohit',
+  archive: 'nohit', mirror: ['reach', 'hacker'], leak: 'nohit', recursion: 'nohit', halt: 'nohit'
+};
+// the rooms between, which have no stage of their own
+const TALE_ROOMS = [
+  { id: 'library',  n: 'THE LIBRARIES', col: '#fcd34d', tag: 'TORN IN BY A FELLED BOSS',
+    how: ['enter one', 'take a book from one', 'carry every book'] },
+  { id: 'hub',      n: 'THE HUB', col: '#cbd5e1', tag: 'WHERE THE HULLS ARE WOKEN',
+    how: ['wake a hull there', 'wake a hull there', 'wake every hull whose rite is built'] },
+  { id: 'stands',   n: 'THE STANDS', col: '#fcd34d', tag: 'HIS ROOM',
+    how: ['meet the man in the seat', 'empty his stands', 'sit down, once'] },
+  { id: 'rootroom', n: 'ROOT\'S ROOM', col: '#f0abfc', tag: 'UNDER THE FRACTURE',
+    how: ['reach it', 'delete what lives there', 'carry its key out'] },
+  { id: 'patch',    n: 'THE HOUSE AND THE PATCH', col: '#fb923c', tag: 'ALL HALLOWS', hl: true,
+    how: ['enter the patch', 'finish ON SALE', 'finish STILL HERE'] }
+];
+/* The people. Three of them fight, and their cards in BOSSES open their tale
+   here (the link), since a person is not filed as a boss. */
+const TALE_PEOPLE = [
+  { id: 'dev',        n: 'THE DEV',        col: '#94a3b8',
+    how: ['hear him after THE UNWRITTEN', 'finish THE AMALGAM', 'hear his last line'] },
+  { id: 'keeper',     n: 'THE BOOKKEEPER', col: '#fcd34d', boss: 'keeper',
+    how: ['meet him in a library', 'hand him the finished record', 'defeat him'] },
+  { id: 'founder',    n: 'THE FOUNDER',    col: '#fcd34d', boss: 'founder',
+    how: ['meet him', 'empty his stands', 'pass THE VAGRANT\'s rite'] },
+  { id: 'shopkeeper', n: 'THE SHOPKEEPER', col: '#fbbf24', boss: 'shopkeeper',
+    how: ['buy from him', 'defeat him', 'carry his day book to the end of a run'] },
+  { id: 'outsider',   n: 'THE OUTSIDER',   col: '#cbd5e1',
+    how: ['meet him', 'finish THE LOST SOUL', { held: 'held for a later book' }] },
+  { id: 'soul',       n: 'THE LOST SOUL',  col: '#93c5fd', hl: true,
+    how: ['meet it', 'see it ascend a second time', 'see it go up'] }
+];
+// the three awakenings, filed under their pilots
+const TALE_AWAKE = [
+  { id: 'hacker', n: 'SUPERUSER', col: '#fcd34d' },
+  { id: 'ember',  n: 'OVERDRIVE', col: '#fb923c' },
+  { id: 'melee',  n: 'RONIN',     col: '#f87171' }
+];
+/* Page III of each enemy: a deed it is about. `c` is the counter behind it
+   and how many it asks for, shown on the torn page as progress. */
+const TALE_DEED_E = {
+  grunt:     { how: 'fell a thousand of them', c: ['k:grunt', 1000] },
+  spitter:   { how: 'fell one from across the room' },
+  dasher:    { how: 'fell one mid-lunge' },
+  bomber:    { how: 'catch three others in one\'s blast' },
+  brute:     { how: 'fell one with a single shot' },
+  artillery: { how: 'fell five in one wave, untouched' },
+  turret:    { how: 'fell 25 in one run' },
+  sentinel:  { how: 'fell one from behind its shield' },
+  phaser:    { how: 'fell one the moment it blinks in' },
+  swarmer:   { how: 'fell 100 in one wave' },
+  splitter:  { how: 'fell a whole family inside two seconds' },
+  healer:    { how: 'fell it before anything near it' },
+  egg:       { how: 'fell 20 before they hatch', c: ['k:egg', 20] },
+  wraith:    { how: 'fell 25 in THE VOID in one run' },
+  revenant:  { how: 'fell one and its ghost within a second' },
+  redactor:  { how: 'fell 10 in THE HALT in one run' },
+  mimic:     { how: 'fell one with 20 cards or more' },
+  prism:     { how: 'fell one without your own fire hitting you' },
+  gourd:     { how: 'break 30 before they ripen', c: ['x:gourd', 30] },
+  jack:      { how: 'put out 10 candles', c: ['x:candle', 10] },
+  creeper:   { how: 'cut 10 vines', c: ['x:vine', 10] },
+  scarecrow: { how: 'fell one while it moves' }
+};
+// and of each boss: mastering it, one way per boss, picked to suit it
+const TALE_DEED_B = {
+  warden:      'defeat it without being hit',
+  forgeheart:  'defeat it inside a minute',
+  broodmother: 'defeat her before she dives a third time',
+  archivist:   'defeat it with 300 kills in its ledger',
+  nullcore:    'defeat it without being hit',
+  curator:     'defeat it with THE VAGRANT',
+  theother:    'clear the corrupted OTHER',
+  unwritten:   'close it on the first attempt, no time rewound',
+  amalgam:     'pass EMBER\'s rite',
+  root:        'pass THE HACKER\'s rite',
+  backlog:     'defeat him without a binge going off'
+};
+const TALE_BOSS_II = { unwritten: 'close it', amalgam: 'finish it', root: 'delete it' };
+
+// what a page asks for, as the torn page says it
+function talesPagesOf(en) {
+  const P_ = [];
+  const k = en.ref;
+  if (en.link) return P_;                 // a person's card in BOSSES: the pages are the person's
+  if (en.kind === 'enemy') {
+    const d = TALE_DEED_E[k] || { how: 'a deed not yet named' };
+    P_.push({ how: 'meet it' }, { how: 'fell fifty of them', c: ['k:' + k, 50] }, d);
+  } else if (en.kind === 'boss') {
+    P_.push({ how: 'meet it' }, { how: TALE_BOSS_II[k] || 'defeat it' }, { how: TALE_DEED_B[k] || 'master it' });
+  } else if (en.kind === 'pilot') {
+    P_.push({ how: 'fly it' }, { how: 'clear THE VOID with it' },
+            k === 'runner' ? { held: 'its rite, ONE POINT OH, is not built yet' } : { how: 'pass its rite' });
+  } else if (en.kind === 'awake') {
+    P_.push({ how: 'wake it' }, { how: 'use all four of its actives in one awakening' },
+            { how: 'defeat a boss while awakened' });
+  } else if (en.kind === 'sector') {
+    const d = TALE_SECTOR_DEED[k];
+    P_.push({ how: en.deep ? 'break into it' : 'enter it' },
+            { how: en.deep ? 'break every node in it' : 'clear it' },
+            { how: Array.isArray(d) ? 'reach it with ' + talesCharName(d[1]) : 'clear it without being hit' });
+  } else {
+    const t = (en.kind === 'room' ? TALE_ROOMS : TALE_PEOPLE).find(x => x.id === k);
+    for (const h of (t ? t.how : [])) P_.push(typeof h === 'string' ? { how: h } : h);
+  }
+  const sc = TALE_SEALED[en.key] || (Tales.sealed[en.key] && Tales.sealed[en.key].c);
+  if (sc) P_.push({ sealed: sc });
+  return P_;
+}
+function talesCharName(id) { const c = CHARS.find(x => x.id === id); return c ? c.n : id; }
+
+/* Every entry with a tale, in the order the codex lists them. Built on first
+   use: the tables it reads are declared all through this file. Outside pilots
+   are never in it (OUTSIDE PILOTS): a secret pilot stays a secret here too. */
+function talesAll() {
+  if (Tales.list) return Tales.list;
+  const L = [];
+  const mk = (key, sec, kind, ref, n, col, extra) => {
+    const e = Object.assign({ key, sec, kind, ref, n, col }, extra || {});
+    e.pages = talesPagesOf(e);
+    L.push(e);
+  };
+  for (const k of Object.keys(CODEX_E))
+    mk('e:' + k, 'e', 'enemy', k, CODEX_E[k].n, ETYPE[k].col, { sides: ETYPE[k].sides, hl: !!HL_ETYPES[k] });
+  for (const k of Object.keys(BOSSES)) {
+    const b = BOSSES[k], who = TALE_PEOPLE.find(x => x.boss === k);
+    mk((who ? 'x:' : 'b:') + k, 'x', 'boss', k, b.name, b.col,
+       { sides: b.sides, secret: !!b.secret, hl: !!HL_BOSSES[k], link: who ? 'n:' + who.id : null });
+  }
+  for (const c of CHARS) {
+    if (c.outside) continue;
+    mk('p:' + c.id, 'p', 'pilot', c.id, c.n, c.col, { char: c });
+    const a = TALE_AWAKE.find(x => x.id === c.id);
+    if (a) mk('a:' + c.id, 'p', 'awake', c.id, a.n, a.col, { char: c });
+  }
+  for (const s of STAGES.concat(ALT_STAGES)) {
+    const id = TALE_SECTOR[s.name];
+    if (id) mk('s:' + id, 's', 'sector', id, s.name, s.accent, { stage: s, alt: !!s.alt, deep: !!s.deep });
+  }
+  for (const r of TALE_ROOMS) mk('r:' + r.id, 's', 'room', r.id, r.n, r.col, { hl: !!r.hl, tag: r.tag });
+  for (const p of TALE_PEOPLE) mk('n:' + p.id, 'n', 'person', p.id, p.n, p.col, { boss: p.boss || null, hl: !!p.hl });
+  Tales.list = L;
+  Tales.byKey = new Map(L.map(e => [e.key, e]));
+  return L;
+}
+const talesEntry = key => (talesAll(), Tales.byKey.get(key) || null);
+// the entry a codex key (an enemy type or a boss id) is met as
+function talesMetKey(k) {
+  if (BOSSES[k]) { const who = TALE_PEOPLE.find(x => x.boss === k); return who ? 'n:' + who.id : 'b:' + k; }
+  return CODEX_E[k] ? 'e:' + k : null;
+}
+const talesSectorKey = def => (def && def.hl ? 'r:patch' : def && TALE_SECTOR[def.name] ? 's:' + TALE_SECTOR[def.name] : null);
+
+// the run's own bookkeeping, thrown away with the run
+function talesRunNew() {
+  return {
+    wave: -1, wn: {}, whit: false,         // this wave: counts, and whether you were hit in it
+    nk: 0, blast: [],                      // kills so far, and where each blast began counting
+    one: null,                             // the last body a full-health single hit killed
+    fights: {},                            // boss -> { t0, hit, dives, binges, rew }
+    stage: null, flown: false,             // the sector you are in: { def, key, hit }
+    kin: new WeakMap(),                    // a splitter's piece or a revenant's ghost -> the first of it
+    fam: new WeakMap(),                    // the first of a family -> { n, t0 }
+    died: new WeakMap(),                   // a revenant -> when it died the first time
+    blinks: new WeakMap(),                 // a phaser -> when it last blinked in
+    born: new WeakMap(),                   // a prism -> when it arrived
+    mirror: new WeakSet(),                 // rounds a prism threw back
+    mirrorAt: -1,                          // when one of them last hit you
+    last: null,                            // what last hurt you, and when: { k, t }
+    acts: null, actsId: '',                // the actives used in this awakening
+    turret: 0, wraith: 0, redact: 0
+  };
+}
+
+const Tales = {
+  p: {}, r: {}, n: {}, m: {}, dirty: false,
+  list: null, byKey: null,
+  run: null,
+  lines: [],             // pages opened mid-run, each waiting for its line low on the screen
+  chapters: {},          // chapter id -> true, once the server says it is open
+  sealed: {},            // entry key -> { c, t, x }: an opened sealed page, as the server handed it
+  asked: 0,
+
+  dump() { return { p: Tales.p, r: Tales.r, n: Tales.n, m: Tales.m }; },
+  /* From the profile. Anything opened here and not yet written to it is kept:
+     the profile may have been replaced under it by a merge (Account.adopt). */
+  load() {
+    const t = talesMerge(Save.profile && Save.profile.tales, Tales.dirty ? Tales.dump() : null);
+    Tales.p = t.p; Tales.r = t.r; Tales.n = t.n; Tales.m = t.m;
+    if (!Tales.run) Tales.run = talesRunNew();
+    Tales.sealedLoad();
+    Tales.sync(false);
+  },
+  /* Into the profile. Quiet: the caller writes the save (Codex.flush does).
+     Returns whether anything was written. */
+  flush(quiet) {
+    if (!Tales.dirty || !Save.profile) return false;
+    Save.profile.tales = talesMerge(Save.profile.tales, Tales.dump());
+    Tales.dirty = false;
+    if (!quiet) { Save.writeLocal(); Save.flush(); }
+    return true;
+  },
+
+  has(key, i) {
+    if (i === 3 && Tales.sealed[key]) return true;    // a chapter opened for everyone
+    return !!(((Tales.p[key] | 0) >> i) & 1);
+  },
+  isRead: (key, i) => !!(((Tales.r[key] | 0) >> i) & 1),
+  // pages open and not yet turned to in the spread
+  unread(key) {
+    const en = talesEntry(key);
+    if (!en) return 0;
+    let n = 0;
+    for (let i = 0; i < en.pages.length; i++) if (Tales.has(key, i) && !Tales.isRead(key, i)) n++;
+    return n;
+  },
+  count(key) {
+    const en = talesEntry(key);
+    let n = 0;
+    if (en) for (let i = 0; i < en.pages.length; i++) if (Tales.has(key, i)) n++;
+    return n;
+  },
+  read(key, i) {
+    if (!Tales.has(key, i) || Tales.isRead(key, i)) return;
+    Tales.r[key] = (Tales.r[key] | 0) | (1 << i);
+    Tales.dirty = true;
+  },
+  /* A page, opened. Live: it happened now, in front of you, so it is dated
+     and gets its line. A sealed page is never opened from here, and a held
+     one waits for a deed that does not exist yet. */
+  open(key, i, live) {
+    const en = talesEntry(key);
+    const pg = en && en.pages[i];
+    if (!pg || pg.sealed || pg.held) return false;
+    const b = 1 << i;
+    if ((Tales.p[key] | 0) & b) return false;
+    Tales.p[key] = (Tales.p[key] | 0) | b;
+    if (live && !Tales.m[key]) Tales.m[key] = talesDay();
+    Tales.dirty = true;
+    if (live) Tales.say(en, i);
+    return true;
+  },
+  add(name, v) { Tales.n[name] = (Tales.n[name] | 0) + (v || 1); Tales.dirty = true; return Tales.n[name]; },
+  // a time against something: the faster one stands
+  best(name, s) {
+    const v = Math.round(s * 10) / 10;
+    if (!(v > 0)) return;
+    if (!Tales.n[name] || v < Tales.n[name]) { Tales.n[name] = v; Tales.dirty = true; }
+  },
+  // the line low on the screen: only for a page opened in a run
+  say(en, i) {
+    if (!['play', 'levelup', 'gear', 'shop', 'library', 'talk', 'pause', 'dead'].includes(state)) return;
+    if (Tales.lines.length >= 4) return;
+    Tales.lines.push({ n: en.n, i, t: -1 });
+  },
+  // every page there is, open (BETA's unlock-all; never a real save)
+  openAll() {
+    for (const en of talesAll()) for (let i = 0; i < en.pages.length; i++) Tales.open(en.key, i, false);
+  },
+
+  /* The pages the profile's own record opens. Read off the save rather than
+     off a run, so they open however the record was earned, and an old save
+     opens them the first time it is loaded. */
+  sync(live) {
+    const p = Save.profile;
+    if (!p) return;
+    const o = (key, i, c) => { if (c) Tales.open(key, i, live); };
+    const aw = id => !!(p.awakened || {})[id];
+    for (const k of Codex.e) { const key = talesMetKey(k); if (key) o(key, 0, true); }
+    o('n:keeper', 0, p.keeperMet); o('n:keeper', 1, p.keeperMet); o('n:keeper', 2, p.keeperDone);
+    o('n:founder', 0, p.metFounder); o('n:founder', 1, p.tribunalDone); o('n:founder', 2, aw('melee'));
+    o('n:dev', 0, p.askedHarder || p.amalgamDone); o('n:dev', 1, p.amalgamDone);
+    o('n:outsider', 0, p.outsiderIn);
+    o('b:unwritten', 1, p.trueEnd);
+    o('b:amalgam', 1, p.amalgamDone); o('b:amalgam', 2, aw('ember'));
+    o('b:root', 1, p.rootDone); o('b:root', 2, aw('hacker'));
+    for (const a of TALE_AWAKE) { o('p:' + a.id, 0, aw(a.id)); o('p:' + a.id, 2, aw(a.id)); o('a:' + a.id, 0, aw(a.id)); }
+    // the route, from how deep the profile has been: sector i is waves 5i+1 to 5i+5
+    const bw = p.bestWave | 0;
+    ['grid', 'foundry', 'hive', 'vault', 'void'].forEach((s, i) => {
+      o('s:' + s, 0, bw > i * 5); o('s:' + s, 1, bw > i * 5 + 5);
+    });
+    o('s:archive', 0, Codex.e.has('curator'));
+    o('s:mirror', 0, Codex.e.has('theother')); o('s:mirror', 1, (p.otherKills | 0) > 0);
+    o('r:library', 0, p.keeperMet || Codex.b.size > 0); o('r:library', 1, Codex.b.size > 0);
+    o('r:library', 2, Object.keys(BOOKS).every(k => Codex.b.has(k)));
+    const built = CHARS.filter(c => !c.outside && riteBuilt(c.id));
+    o('r:hub', 0, built.some(c => aw(c.id))); o('r:hub', 1, built.some(c => aw(c.id)));
+    o('r:hub', 2, built.length > 0 && built.every(c => aw(c.id)));
+    o('r:stands', 0, p.metFounder); o('r:stands', 1, p.tribunalDone); o('r:stands', 2, p.conformed);
+    o('r:rootroom', 0, Codex.e.has('root')); o('r:rootroom', 1, p.rootDone); o('r:rootroom', 2, p.keyEver);
+    // ALL HALLOWS: what this book's slice of the profile records (hlP), read without making one
+    const hb = (p.hl || {})[HL_EVENT.id];
+    if (hb) {
+      const q = hb.q || {}, done = id => q[id] === 2;
+      o('n:soul', 0, !!(hb.seen || {}).first); o('n:soul', 1, done('q4')); o('n:soul', 2, done('q6'));
+      o('n:outsider', 1, HL_QUESTS.every(x => done(x.id)));
+      o('r:patch', 0, (q.q1 | 0) >= 1); o('r:patch', 1, done('q2')); o('r:patch', 2, done('q4'));
+    }
+  },
+
+  /* ---------------------------- what happens ---------------------------- */
+  ev(name, a, b) {
+    const R = Tales.run || (Tales.run = talesRunNew());
+    if (R.wave !== wave) { R.wave = wave; R.wn = {}; R.whit = false; }
+    switch (name) {
+      case 'spawn':
+        if (a.type === 'boss' && a.boss && !R.fights[a.boss])
+          R.fights[a.boss] = { t0: elapsed, hit: false, dives: 0, binges: 0, rew: 0 };
+        if (a.type === 'prism') R.born.set(a, elapsed);
+        return;
+      case 'kin':   R.kin.set(b, R.kin.get(a) || a); return;
+      case 'blink': R.blinks.set(a, elapsed); return;
+      case 'mirror': R.mirror.add(a); return;
+      case 'one':   R.one = a; return;
+      case 'brood': if (R.fights.broodmother) R.fights.broodmother.dives++; return;
+      case 'binge': if (R.fights.backlog) R.fights.backlog.binges++; return;
+      case 'rewind': if (R.fights.unwritten) R.fights.unwritten.rew++; return;
+      case 'kill':  if (talesMine()) Tales.kill(a, R); return;
+      case 'blast':
+        if (!a) { R.blast.push(R.nk); return; }
+        if (R.blast.length && R.nk - R.blast.pop() >= 3 && talesMine()) Tales.open('e:bomber', 2, true);
+        return;
+      case 'hurt': {
+        if (!talesMine()) return;
+        R.whit = true;
+        if (R.stage) R.stage.hit = true;
+        for (const k in R.fights) R.fights[k].hit = true;
+        const who = talesWho(a);
+        if (who) R.last = { k: who, t: elapsed };
+        if (b && R.mirror.has(b)) R.mirrorAt = elapsed;
+        return;
+      }
+      case 'dead': Tales.dead(R); return;
+      case 'boss': Tales.boss(a, R); return;
+      case 'stage': Tales.stageIn(a, R); return;
+      case 'wave':
+        if (!R.stage || R.stage.def !== stage) Tales.stageIn(stage, R);
+        return;
+      case 'clear': Tales.clearSector(stage, R); return;
+      case 'awake':
+        if (!talesMine()) return;
+        Tales.open('a:' + a, 0, true);
+        Tales.add('w:' + a);
+        R.acts = new Set(); R.actsId = a;
+        return;
+      case 'act':
+        if (!talesMine() || R.actsId !== a || !R.acts) return;
+        R.acts.add(b);
+        if (R.acts.size >= 4) Tales.open('a:' + a, 1, true);
+        return;
+      case 'candle': if (Tales.add('x:candle') >= 10) Tales.open('e:jack', 2, true); return;
+      case 'vine':   if (Tales.add('x:vine') >= 10) Tales.open('e:creeper', 2, true); return;
+      case 'unw': {
+        const f = R.fights.unwritten;
+        delete R.fights.unwritten;
+        Tales.add('k:unwritten');
+        Tales.open('b:unwritten', 1, true);
+        if (f) { Tales.best('t:unwritten', elapsed - f.t0); if (!f.rew) Tales.open('b:unwritten', 2, true); }
+        return;
+      }
+      case 'library': Tales.open('n:keeper', 0, true); Tales.open('r:library', 0, true); return;
+      case 'book':    Tales.open('r:library', 1, true); return;
+      case 'hub':     Tales.open('r:hub', 0, true); return;
+      case 'buy':     Tales.open('n:shopkeeper', 0, true); return;
+      case 'devtalk': Tales.open('n:dev', 0, true); return;
+      case 'outro':   Tales.open('n:dev', 2, true); return;
+    }
+  },
+
+  // a body down, as the pilot it was resolved as
+  kill(e, R) {
+    const t = e.type;
+    if (t === 'boss' || !CODEX_E[t]) return;     // bosses are counted when they are defeated (Tales.boss)
+    R.nk++;
+    const n = Tales.add('k:' + t);
+    if (n >= 50) Tales.open('e:' + t, 1, true);
+    const deed = () => Tales.open('e:' + t, 2, true);
+    const dist = len(e.x - P.x, e.y - P.y);
+    switch (t) {
+      case 'grunt':    if (n >= 1000) deed(); break;
+      case 'spitter':  if (dist >= 640) deed(); break;
+      case 'dasher':   if (e.state === 2) deed(); break;
+      case 'brute':    if (R.one === e) deed(); break;
+      case 'artillery': if ((R.wn.art = (R.wn.art | 0) + 1) >= 5 && !R.whit) deed(); break;
+      case 'turret':   if (++R.turret >= 25) deed(); break;
+      case 'sentinel': {
+        const inc = Math.atan2(P.y - e.y, P.x - e.x);
+        if (Math.abs(((inc - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI) > 1.15) deed();   // outside the shield's arc
+        break;
+      }
+      case 'phaser':   { const at = R.blinks.get(e); if (at !== undefined && elapsed - at <= 0.6) deed(); break; }
+      case 'swarmer':  if ((R.wn.mite = (R.wn.mite | 0) + 1) >= 100) deed(); break;
+      case 'splitter': {
+        const root = R.kin.get(e) || e;
+        const f = R.fam.get(root) || { n: 0, t0: elapsed };
+        R.fam.set(root, f);
+        if (++f.n >= 7 && elapsed - f.t0 <= 2) deed();          // one, two halves, four quarters
+        break;
+      }
+      case 'healer': {
+        let near = 0;
+        for (const o of enemies) if (o !== e && !o.dead && !o.hacked && len(o.x - e.x, o.y - e.y) < 260) near++;
+        if (near >= 2) deed();
+        break;
+      }
+      case 'egg':      if (n >= 20) deed(); break;
+      case 'wraith':   if (stage && stage.name === 'THE VOID' && ++R.wraith >= 25) deed(); break;
+      case 'revenant': {
+        if (!(e.gen >= 1)) { R.died.set(e, elapsed); break; }
+        const first = R.kin.get(e), at = first && R.died.get(first);
+        if (at !== undefined && elapsed - at <= 1) deed();
+        break;
+      }
+      case 'redactor': if (stage && stage.name === 'THE HALT' && ++R.redact >= 10) deed(); break;
+      case 'mimic': {
+        let cards = 0;
+        for (const k in (P.up || {})) cards += P.up[k] | 0;
+        if (cards >= 20) deed();
+        break;
+      }
+      case 'prism':    { const at = R.born.get(e); if (at !== undefined && R.mirrorAt < at) deed(); break; }
+      case 'gourd':    if (!e.hlRipe && Tales.add('x:gourd') >= 30) deed(); break;
+      case 'scarecrow': if (!e.hlWatched) deed(); break;
+    }
+  },
+
+  // a boss defeated: the run's, so both machines of a co-op run count it
+  boss(e, R) {
+    const k = e && e.boss;
+    if (!k || !BOSSES[k]) return;
+    const f = R.fights[k];
+    delete R.fights[k];
+    const secs = f ? elapsed - f.t0 : 0;
+    Tales.add('k:' + k);
+    if (f) Tales.best('t:' + k, secs);
+    const key = talesMetKey(k), mine = coopMine();
+    if (key.startsWith('b:')) Tales.open(key, 1, true);
+    const deed = c => { if (c) Tales.open(key, 2, true); };
+    switch (k) {
+      case 'warden': case 'nullcore': deed(f && !f.hit); break;
+      case 'forgeheart':  deed(f && secs <= 60); break;
+      case 'broodmother': deed(f && f.dives < 3); break;
+      case 'archivist':   deed((mine.kills | 0) >= 300); break;
+      case 'curator':     deed(mine.charId === 'melee'); break;
+      case 'backlog':     deed(f && !f.binges); break;
+      case 'shopkeeper':  Tales.open('n:shopkeeper', 1, true); break;
+    }
+    if (e.virus) Tales.open('b:theother', 2, true);
+    if (k === 'nullcore' && stage && stage.name === 'THE VOID' && !rushOn())
+      Tales.open('p:' + mine.charId, 1, true);
+    const awake = mine.charId === 'hacker' ? mine.suT > 0
+                : mine.charId === 'ember' ? mine.ventT > 0 && mine.awake
+                : mine.charId === 'melee' ? mine.roninT > 0 : false;
+    if (awake) Tales.open('a:' + mine.charId, 2, true);
+    if (!rushOn() && stage && stage.boss === k) Tales.clearSector(stage, R);
+  },
+
+  // the run is over: what felled you, and what you were carrying
+  dead(R) {
+    const mine = coopMine();
+    let who = R.last && elapsed - R.last.t <= 3 ? R.last.k : '';
+    if (!who) {
+      if (typeof amalgam !== 'undefined' && amalgam) who = 'amalgam';
+      else for (const o of enemies) if (!o.dead && o.type === 'boss' && !o.hacked && !o.shadow && o.boss) { who = talesWho(o); break; }
+    }
+    if (who) Tales.add('d:' + who);
+    if (mine.book && mine.book === BOOKS.shopkeeper) Tales.open('n:shopkeeper', 2, true);
+  },
+
+  stageIn(def, R) {
+    const key = talesSectorKey(def);
+    if (!R.flown) { R.flown = true; Tales.open('p:' + coopMine().charId, 0, true); }
+    if (!key) return;
+    R.stage = { def, key, hit: false };
+    Tales.open(key, 0, true);
+    const d = TALE_SECTOR_DEED[key.slice(2)];
+    if (Array.isArray(d) && d[0] === 'reach' && coopMine().charId === d[1]) Tales.open(key, 2, true);
+  },
+  clearSector(def, R) {
+    const key = talesSectorKey(def);
+    if (!key || key === 'r:patch') return;
+    Tales.add('c:' + key);
+    Tales.open(key, 1, true);
+    if (TALE_SECTOR_DEED[key.slice(2)] === 'nohit' && R.stage && R.stage.def === def && !R.stage.hit)
+      Tales.open(key, 2, true);
+  },
+
+  /* ------------------------------ sealed pages ------------------------------
+     What the server has opened, kept on this machine so a chapter read once
+     can be read again offline. The text is the server's, and nothing in this
+     file can stand in for it. */
+  sealedLoad() {
+    try { const d = JSON.parse(localStorage.getItem(TALES_SEALED_KEY) || 'null'); if (d) Tales.sealedTake(d); }
+    catch (e) { /* a bad copy is no copy */ }
+  },
+  sealedTake(d) {
+    const open = {}, pages = {};
+    const ch = d && typeof d.chapters === 'object' && d.chapters ? d.chapters : {};
+    for (const id of Object.keys(ch).slice(0, 16)) {
+      const c = ch[id];
+      if (!c || typeof c.pages !== 'object' || !c.pages) continue;
+      open[id] = true;
+      for (const k of Object.keys(c.pages).slice(0, 64)) {
+        const v = c.pages[k];
+        if (typeof k === 'string' && k.length < 40 && v && typeof v.x === 'string')
+          pages[k] = { c: id, t: String(v.t || '').slice(0, 60), x: v.x.slice(0, 8000) };
+      }
+    }
+    Tales.chapters = open; Tales.sealed = pages;
+    Tales.list = null;                     // a page IV may have arrived for an entry with no hint of one
+  },
+  async sealedAsk() {
+    if (PVP || location.protocol === 'file:') return;   // PvP's page asks for nothing it does not need
+    if (Tales.asked && Date.now() - Tales.asked < TALES_ASK_EVERY) return;
+    Tales.asked = Date.now();
+    try {
+      const r = await fetch('/api/tales', { cache: 'no-store', credentials: 'same-origin' });
+      if (!r.ok) return;
+      const d = await r.json();
+      Tales.sealedTake(d);
+      try { localStorage.setItem(TALES_SEALED_KEY, JSON.stringify(d)); } catch (e) {}
+    } catch (e) { /* offline: what was kept is what is shown */ }
+  }
+};
+
+// the day, for "first met": the wall clock, which only the plate ever reads
+function talesDay() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// what a thing that hurt you is filed as: an enemy type, or a boss's id
+function talesWho(o) {
+  if (!o || typeof o !== 'object') return '';
+  if (o.amalPart) return 'amalgam';
+  if (o.founder || o.vrFounder) return 'founder';
+  if (o.type === 'boss') return BOSSES[o.boss] ? o.boss : '';
+  return CODEX_E[o.type] ? o.type : '';
+}
+// whether a deed done now is this machine's to count (WHAT COUNTS, above)
+function talesCount() {
+  if (freeRun || PVP) return false;
+  if (Chal.on && !Chal.on.daily && !Chal.on.rush && !Chal.on.hl) return false;
+  const mine = coopMine();
+  return !(mine && mine.outside);
+}
+const talesMine = () => PILOTS.length < 2 || PILOT.on === pilotMine();
+
+/* The codex has met something for the first time (Codex.see): its page I,
+   in whatever kind of run that was, since page I is the codex's own record. */
+function talesMet(k) {
+  try { const key = talesMetKey(k); if (key) Tales.open(key, 0, state === 'play'); }
+  catch (e) { /* never into the spawn that met it */ }
+}
+/* A flag on the profile's record changed (runSet, grantAwakening): the pages
+   it opens. A declaration and guarded, because runSet sits at the top of the
+   file and a call could in principle come before this block has run. */
+function talesFlag() {
+  try { Tales.sync(state === 'play'); } catch (e) { /* not ready, or not a run: the next load opens them */ }
+}
+
+/* The game's one call into all of this, at the moment a thing happens. It
+   can never throw into the run that called it. */
+function tale(ev, a, b) {
+  try {
+    if (ev === 'run') { Tales.run = talesRunNew(); return; }
+    if (!talesCount()) return;
+    Tales.ev(ev, a, b);
+  } catch (e) { /* a page must never take a run with it */ }
+}
+
+/* Two stores, one record: a page open on either is open, a page read on
+   either is read, a count is the higher of the two and a best time the lower,
+   and a first meeting is the earlier day. Whatever is not of that shape is
+   dropped: a merge is an untrusted document too. A declaration, as hlMerge
+   is, because Save.merge may run before this block is reached. */
+function talesMerge(a, b) {
+  const out = { p: {}, r: {}, n: {}, m: {} };
+  const obj = v => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  const okKey = k => typeof k === 'string' && k.length > 0 && k.length <= 40;
+  for (const s of [obj(a), obj(b)]) {
+    for (const f of ['p', 'r']) {
+      const src = obj(s[f]);
+      for (const k of Object.keys(src).slice(0, 4000))
+        if (okKey(k) && Number.isFinite(src[k])) out[f][k] = (out[f][k] | 0) | (src[k] & 0xff);
+    }
+    const n = obj(s.n);
+    for (const k of Object.keys(n).slice(0, 4000)) {
+      const v = n[k];
+      if (!okKey(k) || !Number.isFinite(v) || v < 0) continue;
+      if (k.startsWith('t:')) { if (v > 0 && (!out.n[k] || v < out.n[k])) out.n[k] = v; }
+      else out.n[k] = Math.max(out.n[k] || 0, v);
+    }
+    const m = obj(s.m);
+    for (const k of Object.keys(m).slice(0, 4000)) {
+      const v = m[k];
+      if (okKey(k) && typeof v === 'string' && /^\d{4}-\d\d-\d\d$/.test(v) && (!out.m[k] || v < out.m[k])) out.m[k] = v;
+    }
+  }
+  return out;
+}
 
 const twinActive = () => P.twin > 0 || P.twinT > 0;
 
@@ -30904,7 +31768,7 @@ function updateLibrary(dt) {
   }
   if (L.arm <= 0 && len(P.x - L.x, P.y - L.y) < L.r + P.r) {
     if (L.kind === 'malware') malwareOffer = L.mal;
-    else libraryBook = BOOKS[L.boss];
+    else { libraryBook = BOOKS[L.boss]; tale('library'); }
     libraryPortal = null;
     state = 'library';
     uiArm = 0.4;
@@ -30926,6 +31790,7 @@ function takeBook() {
   if (!libraryBook) return;
   P.book = libraryBook;
   Codex.seeBook(libraryBook.id);
+  tale('book');
   P.bookCharge = 0;
   banner(libraryBook.n, libraryBook.col, 2.6);
   ringFx(P.x, P.y, 10, 260, libraryBook.col, 0.7, 5);
@@ -30978,6 +31843,7 @@ function ventFire() {
   /* No banner. The spark falling is the announcement — it says the same thing,
      it says it for longer, and it does not sit on top of the fight. */
   odStart();
+  tale('awake', 'ember');
   Audio_.tone(190, 0.5, 'sine', 0.09, 120);
 }
 
@@ -31537,6 +32403,7 @@ function odAbility(i) {
     return;
   }
   if (!a.start()) return;                      // it refused: nothing is spent
+  tale('act', 'ember', i);
   P.vent = Math.max(0, P.vent - a.cost);
   P.ventSaid = 0;
 }
@@ -35009,7 +35876,9 @@ const Save = {
                   time: 0, muted: false, vol: 1, autofire: false, sens: 1,
                   planetarium: false, skipStreak: 0, clears: 0, altPath: false,
                   charIdx: 0, otherKills: 0, malware: false,
-                  codexE: [], codexU: [], codexM: [], codexB: [], codexZ: [],
+                  codexE: [], codexU: [], codexM: [], codexB: [], codexZ: [], codexG: [],
+                  // FORGOTTEN TALES: pages open and read, the counts behind them, first meetings
+                  tales: { p: {}, r: {}, n: {}, m: {} },
                   keeperMet: false, keeperDone: false,
                   trueEnd: false, freeplay: false, unwrittenDeaths: 0,
                   askedHarder: false, amalgamDone: false, devTalkDue: false, fx: 1,
@@ -35112,8 +35981,10 @@ const Save = {
     out.hardened = !!(a.hardened || b.hardened);
     out.deepRuns = (b.deepRuns && b.deepRuns.length ? b.deepRuns : a.deepRuns) || [];
     // a codex entry is knowledge: union both stores, never subtract
-    for (const k of ['codexE', 'codexU', 'codexM', 'codexB', 'codexZ'])
+    for (const k of ['codexE', 'codexU', 'codexM', 'codexB', 'codexZ', 'codexG'])
       out[k] = [...new Set([...(a[k] || []), ...(b[k] || [])])];
+    // and so is a page: open on either, open on both (FORGOTTEN TALES)
+    out.tales = talesMerge(a.tales, b.tales);
     out.keeperMet = !!(a.keeperMet || b.keeperMet);
     out.keeperDone = !!(a.keeperDone || b.keeperDone);
     out.trueEnd = !!(a.trueEnd || b.trueEnd);
@@ -35245,6 +36116,7 @@ const Save = {
                                                  : (Save.profile.muted ? 0 : 1));
     eraMark(false);          // stamps the era, and pays out an old one
     Codex.load();
+    Tales.load();            // and the pages, with any the record already opens (FORGOTTEN TALES)
     fxLevel = Save.profile.fx === undefined ? FX.ON : (Save.profile.fx ? FX.ON : FX.OFF);
     fxApply(Save.profile);
     autoFire = !!Save.profile.autofire;
@@ -35257,6 +36129,7 @@ const Save = {
     Daily.use(dailyDayOf(), null);
     Daily.load();
     Account.boot();          // signed in: the account's save is merged in, and kept up to date
+    Tales.sealedAsk();       // any chapter of the story the server has opened (FORGOTTEN TALES)
     // first launch: ask who they are before anything else
     if (!Save.profile.name) { nameBuf = ''; state = 'name'; }
   },
@@ -35272,7 +36145,7 @@ const Save = {
       try { remote = await db.get('profile'); } catch (e) { remote = null; }
       Save.db = db;
       Save.status = 'cloud';
-      if (remote) { Save.profile = Save.repair(Save.merge(Save.profile, remote)); Save.writeLocal(); }
+      if (remote) { Save.profile = Save.repair(Save.merge(Save.profile, remote)); Save.writeLocal(); Tales.load(); }
       Save.reconcileClears();   // the merged profile may predate clear tracking
       await Save.flush();
       await Save.refreshTop();
@@ -35553,11 +36426,13 @@ function resetGame() {
   shopkeepTake = 0; waveTimer = 0; spawnT = 0; ambientT = 3;
   inputQueue.length = 0;
   outsideEv('run');                      // an outside pilot's kit hears that a run begins (OUTSIDE PILOTS)
+  tale('run');                           // and FORGOTTEN TALES starts its run's bookkeeping afresh
 }
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
   state = 'dead';
   eraMark(true);                         // flown, whatever else this run was
+  tale('dead');                          // what felled you, and what you carried to the end (FORGOTTEN TALES)
   /* A freeplay run is a sandbox: it must not touch the record in any way —
      no stats, no best, no leaderboard, no codex. */
   /* A challenge is a different game with a different rule sheet, so it is
@@ -35805,19 +36680,7 @@ function handleKey(k) {
     }
     return;
   }
-  if (state === 'codex') {
-    if (uiArm > 0) return;
-    const list = codexList(), g = codexGeom();
-    if (k === 'escape' || k === 'x' || k === 'p') { closeCodex(); return; }
-    if (k === 'tab') { codexStepTab(1); return; }
-    if (k === 'q') { codexStepTab(-1); return; }
-    if (k === 'e') { codexStepTab(1); return; }
-    if (k === 'arrowright' || k === 'd') { codexSel = Math.min(list.length - 1, codexSel + 1); codexReveal(); return; }
-    if (k === 'arrowleft'  || k === 'a') { codexSel = Math.max(0, codexSel - 1); codexReveal(); return; }
-    if (k === 'arrowdown'  || k === 's') { codexSel = Math.min(list.length - 1, codexSel + g.cols); codexReveal(); return; }
-    if (k === 'arrowup'    || k === 'w') { codexSel = Math.max(0, codexSel - g.cols); codexReveal(); return; }
-    return;
-  }
+  if (state === 'codex') { codexKey(k); return; }
   // a guest cannot start a run: the next one begins when the host says so
   if (state === 'dead') {
     // a challenge restarts as itself; the ordinary run restarts as a run
@@ -36099,22 +36962,7 @@ function handleClick() {
       freeSel = i; FREE_ROWS[i].f(); Audio_.select(); return;
     }
   }
-  if (state === 'codex') {
-    if (uiArm > 0) return;
-    const tabs = codexTabRects();
-    for (let i = 0; i < CODEX_TABS.length; i++) if (inRect(mouse.x, mouse.y, tabs[i])) {
-      if (!codexTabOpen(i)) { Audio_.tone(150, 0.12, 'square', 0.06, 90); return; }
-      if (codexTab !== i) { codexTab = i; codexSel = 0; codexScroll = 0; Audio_.select(); }
-      return;
-    }
-    const g = codexGeom();
-    if (mouse.y > g.clipY && mouse.y < g.clipY + g.viewH) {
-      const list = codexList();
-      for (let i = 0; i < list.length; i++)
-        if (inRect(mouse.x, mouse.y, codexCellRect(i))) { codexSel = i; Audio_.select(); return; }
-    }
-    return;
-  }
+  if (state === 'codex') { codexClick(); return; }
   if (state === 'library') {
     const b = libraryButtons();
     if (b.hand && inRect(mouse.x, mouse.y, b.hand)) { ui('handOver'); return; }
@@ -37449,6 +38297,7 @@ function updateEnemies(dt) {
           e.x = clamp(e.x + ux * step + simRnd(80, -80), 40, WORLD.w - 40);
           e.y = clamp(e.y + uy * step + simRnd(80, -80), 40, WORLD.h - 40);
           ringFx(e.x, e.y, 4, e.r + 34, e.col, 0.35, 3);
+          tale('blink', e);
           const base = Math.atan2(TG.y - e.y, TG.x - e.x);
           for (let k = -1; k <= 1; k++) eshoot(e, base + k * 0.23, 300, e.dmg, 6);
           Audio_.tone(680, 0.12, 'sine', 0.08, 190);
@@ -37901,6 +38750,7 @@ function bossBrood(e, dt, ux, uy, d, ph) {
     }
     case 2:                              // dive underground and resurface on you
       e.atk = 5; e.atkT = 1.6;
+      tale('brood');
       ringFx(e.x, e.y, e.r, e.r + 90, e.col, 0.5, 4);
       burst(e.x, e.y, 26, e.col, 300, 4, 0.6);
       Audio_.noise(0.6, 0.2, 900, 90, 2);
@@ -38593,6 +39443,7 @@ function startUnwritten() {
 }
 
 function unwFail() {
+  tale('rewind');
   runSet('unwrittenDeaths', (RUN.unwrittenDeaths || 0) + 1);
   Save.writeLocal(); Save.flush();
   unwDeadT = 2.0;                       // long enough to read, short enough to retry
@@ -38821,6 +39672,7 @@ function unwWin() {
   unwritten = null;
   bossAlive = false;
   Codex.seeEnemy('unwritten');           // the entry exists now
+  tale('unw');
   chalCheckGoal('unwritten');
   Codex.flush();
   if (!RUN.trueEnd) {
@@ -42180,6 +43032,7 @@ function outroTick(dt) {
       Audio_.tone(900 + rnd() * 120, 0.02, 'square', 0.02, 1200);
     return;
   }
+  tale('outro');                         // his last line, said
   o.done += dt;
   if (o.done > 2.6 && !pageDead) pageDies();
 }
@@ -42367,6 +43220,7 @@ function startDevTalk() {
   devLine = 0; devAsk = false; devType = 0; devOut = 0;
   enemies.length = 0; ebullets.length = 0;
   state = 'devtalk'; uiArm = 0.4;
+  tale('devtalk');
   Audio_.select();
 }
 
@@ -43355,9 +44209,13 @@ function updateBullets(dt) {
         if (off < 1.3) {
           const back = Math.atan2(P.y - e.y, P.x - e.x) + simRnd(0.25, -0.25);
           // your army's rounds are stopped by the mirror, not thrown back at you
-          if (!b.hacked) ebullets.push({ x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
-            vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
-            r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' });
+          if (!b.hacked) {
+            const rb = { x: e.x + Math.cos(back) * e.r, y: e.y + Math.sin(back) * e.r,
+              vx: Math.cos(back) * 330, vy: Math.sin(back) * 330,
+              r: 6, dmg: e.dmg, life: 3.5, col: '#a5f3fc' };
+            ebullets.push(rb);
+            tale('mirror', rb);                // your own fire, coming back (FORGOTTEN TALES)
+          }
           burst(b.x, b.y, 5, '#a5f3fc', 220, 2.4, 0.28);
           Audio_.tone(1250, 0.05, 'sine', 0.05, 700);
           removed = true; break;
@@ -43937,6 +44795,7 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   lsDrawHint();         // lockstep: who is choosing, who paused
+  talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
@@ -47606,12 +48465,13 @@ function hlJackFace(e, dmg, sx, sy) {
   let da = Math.atan2(sy - e.y, sx - e.x) - e.ang;
   da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
   if (da > JACK_FACE) return dmg;
-  if (!e.hlDark) { e.hlDark = true; hlJackSnuffFx(e); }
+  if (!e.hlDark) { e.hlDark = true; hlJackSnuffFx(e); tale('candle'); }
   return dmg * 2;
 }
 function hlVineCut(e) {
   const v = e.hlVine;
   if (!v) return;
+  tale('vine');
   hlVineCutFx(e, v);
   e.hlVine = null;
   e.cd = Math.max(e.cd, 2.4);
@@ -47761,6 +48621,7 @@ function hlBingeCall(e) {
 /* how far through his wind-up he is, 0..1; 0 when there is none */
 const hlBingeK = e => e && e.hlWarn ? clamp(e.hlWarn.t / e.hlWarn.T, 0, 1) : 0;
 function hlBinge(e) {
+  tale('binge');
   let n = 0;
   for (const p of hlHeld) if (p.held) { hlResume(p); n++; }
   e.atkT = Math.max(e.atkT || 0, 0.9);   // room for what he just set off
@@ -50122,6 +50983,7 @@ function outsiderArrived() {
 function enterHub() {
   resetGame();                          // a hull to walk around with
   inHub = true;
+  tale('hub');
   hub.t = 0; hub.near = null; hub.kind = null; hub.lit = 0;
   for (const o of HUB_PLINTHS) { hub.rise[o.id] = 0; hub.open[o.id] = 0; }
   osParts.length = 0;
@@ -54335,12 +55197,7 @@ function uiCursorHot() {
     }
     if (state === 'levelup') return offerIndexAt(mouse.x, mouse.y) >= 0;
     if (state === 'gear') return gearHitAt(mouse.x, mouse.y) >= 0;
-    if (state === 'codex') {
-      const list = codexList();
-      for (let i = 0; i < list.length; i++)
-        if (inRect(mouse.x, mouse.y, codexCellRect(i))) return true;
-      return false;
-    }
+    if (state === 'codex') return codexHot();
     if (state === 'gfx') {
       const g = gfxRects();
       return g.rows.concat(g.presets, [g.measure, g.done])
@@ -57395,98 +58252,720 @@ function startKeeperFight() {
 }
 
 /* ---------------------------------- codex UI -------------------------------
-   Two tabs, a grid of cells, one detail panel. Anything not yet met is a dim
-   silhouette with no name — the shape is the reward for having survived it.
+   FORGOTTEN TALES (step 3): the Bookkeeper's book seen through the new UI.
+   Sections run down a rail on the left; each is a grid of cards carrying the
+   real drawing where there is one, and a line of progress (met, and the pages
+   open). Opening an entry turns to a book: the left page is the plate (the
+   portrait, its name, and what has been filed about you and it), the right
+   page is the tale, a page at a time, in a book face with Roman numbers. A
+   page not yet earned is torn out, and what opens it is written where it was.
+
+   Upgrades, malware, books, zodiac and THE VAGRANT's gear keep their text and
+   open to a single page, THE RECORD. Anything not yet met is a dim silhouette
+   with no name: the shape is the reward for having survived it.
+
+   Every piece of it is drawn through the art hooks below (FORGOTTEN TALES —
+   art hooks); this block lays out and hit-tests, and draws only text.
 --------------------------------------------------------------------------- */
 let codexTab = 0, codexSel = 0, codexScroll = 0, codexFrom = 'menu';
+// the open book: the entry's list index (-1 shut), the page turned to, and its scroll if it overflows
+let codexBook = -1, codexPage = 0, codexPageScroll = 0, codexPageMax = 0;
+let codexDrag = null;                    // a finger on the codex: scroll, swipe, or a tap once it lifts
 
-/* Five sections. Enemies and upgrades are always present; the other three are
-   optional pools and stay '????' until you have actually carried one of that
-   kind, which is also what decides whether he annotates its entries. They are
-   deliberately excluded from completion — see Codex.need(). */
+/* Ten sections. The first five hold tales; the five after them are the item
+   pools, which keep their text. MALWARE, BOOKS, ZODIAC and GEAR are optional
+   and stay '????' until something of the kind has been carried, which is also
+   what decides whether he annotates their entries; PEOPLE until someone has
+   been met. None of the optional ones, and none of PILOTS, SECTORS or PEOPLE,
+   are part of a full codex (Codex.need). */
 const CODEX_TABS = [
-  { id: 'e', label: 'ENEMIES',  set: 'e', cols: 6, ch: 104 },
-  { id: 'u', label: 'UPGRADES', set: 'u', cols: 4, ch: 62 },
-  { id: 'm', label: 'MALWARE',  set: 'm', cols: 3, ch: 74, opt: true },
-  { id: 'b', label: 'BOOKS',    set: 'b', cols: 3, ch: 74, opt: true },
-  { id: 'z', label: 'ZODIAC',   set: 'z', cols: 4, ch: 68, opt: true }
+  { id: 'e', label: 'ENEMIES',  tales: true },
+  { id: 'x', label: 'BOSSES',   tales: true },
+  { id: 'p', label: 'PILOTS',   tales: true },
+  { id: 's', label: 'SECTORS',  tales: true },
+  { id: 'n', label: 'PEOPLE',   tales: true, opt: true },
+  { id: 'u', label: 'UPGRADES', set: 'u' },
+  { id: 'm', label: 'MALWARE',  set: 'm', opt: true },
+  { id: 'b', label: 'BOOKS',    set: 'b', opt: true },
+  { id: 'z', label: 'ZODIAC',   set: 'z', opt: true },
+  { id: 'g', label: 'GEAR',     set: 'g', opt: true }
 ];
 
 function codexTabOpen(i) {
   const t = CODEX_TABS[i];
-  return !t.opt || Codex[t.set].size > 0;
+  if (!t.opt) return true;
+  if (t.id === 'n') return talesAll().some(en => en.sec === 'n' && Tales.has(en.key, 0));
+  return Codex[t.set].size > 0;
 }
 
-function codexList() {
-  switch (CODEX_TABS[codexTab].id) {
-    case 'e': return Codex.enemies();
-    case 'u': return Codex.upgrades();
-    case 'm': return MALWARE.map(m => ({ key: m.id, noteKey: 'mal_' + m.id,
-                                         n: m.n, d: m.d, col: m.col }));
-    case 'b': return Object.keys(BOOKS).map(k => ({ key: k, noteKey: 'book_' + k,
-                                         n: BOOKS[k].n, d: BOOKS[k].d, col: BOOKS[k].col,
-                                         sub: 'WRITTEN FROM ' + BOOKS[k].from +
-                                              '   ·   ' + BOOKS[k].cost + ' WAVE' +
-                                              (BOOKS[k].cost === 1 ? '' : 'S') }));
-    default:  return SIGNS.map(s => ({ key: s.id, noteKey: 'sign_' + s.id,
-                                         n: s.n, d: s.flavour + '\n' + s.effect,
-                                         col: s.good ? '#fbbf24' : '#f0abfc',
-                                         sub: s.t + '   ·   ' +
-                                              (s.good ? 'BLESSING' : 'CURSE') }));
+/* What a section lists, each row in one shape: the tale entry (en) for the
+   first five, or the item's own fields for the rest. Secret things are listed
+   only once met: a locked slot for one would be its own spoiler, and THE
+   BOOKKEEPER's summons asks for every slot that is listed. */
+function codexListOf(id) {
+  const met = en => Tales.has(en.link || en.key, 0) || (en.link && Codex.e.has(en.ref));
+  const p = Save.profile || {};
+  switch (id) {
+    case 'e': return talesAll().filter(en => en.sec === 'e' && (!en.hl || met(en))).map(codexRow);
+    case 'x': return talesAll().filter(en => en.sec === 'x' && (!en.secret || met(en))).map(codexRow);
+    case 'p': return talesAll().filter(en => en.sec === 'p' &&
+                (en.kind === 'pilot' || met(en) || Tales.has('p:' + en.ref, 0))).map(codexRow);
+    case 's': return talesAll().filter(en => {
+                if (en.sec !== 's') return false;
+                if (met(en)) return true;
+                if (en.kind === 'sector') return en.deep ? !!p.deepFracture : !en.alt || !!p.altPath;
+                return en.ref === 'library' && !!p.altPath;
+              }).map(codexRow);
+    case 'n': return talesAll().filter(en => en.sec === 'n' && met(en)).map(codexRow);
+    case 'u': return UPGRADES.map(u => ({ key: u.id, item: 'u', up: u, rar: u.rar, max: u.max }));
+    case 'm': return MALWARE.map(m => ({ key: m.id, item: 'm', noteKey: 'mal_' + m.id, n: m.n, d: m.d, col: m.col }));
+    case 'b': return Object.keys(BOOKS).map(k => ({ key: k, item: 'b', noteKey: 'book_' + k,
+                n: BOOKS[k].n, d: BOOKS[k].d, col: BOOKS[k].col,
+                sub: 'WRITTEN FROM ' + BOOKS[k].from + '   ·   ' + BOOKS[k].cost + ' WAVE' + (BOOKS[k].cost === 1 ? '' : 'S') }));
+    case 'z': return SIGNS.map(s => ({ key: s.id, item: 'z', noteKey: 'sign_' + s.id,
+                n: s.n, d: s.flavour + '\n' + s.effect, col: s.good ? '#fbbf24' : '#f0abfc',
+                sub: s.t + '   ·   ' + (s.good ? 'BLESSING' : 'CURSE') }));
+    default:  return GEAR_BASES.map(b => {
+                const sl = GEAR_SLOTS.find(s => s.k === b.slot) || { n: '?', col: '#94a3b8', d: '' };
+                return { key: b.id, item: 'g', noteKey: 'gear_' + b.id, n: b.n, d: b.d, col: sl.col,
+                         sub: sl.n + '   ·   ' + sl.d.toUpperCase() };
+              });
   }
 }
-function codexSeen(en) { return Codex[CODEX_TABS[codexTab].set].has(en.key); }
-function codexNoteKey(en) { return en.noteKey || en.key; }
-function codexCols() { return CODEX_TABS[codexTab].cols; }
-function codexGeom() {
-  // the annotated copy needs a deeper bottom band: his note sits under the entry
-  const tight = H < 470;
-  const pad = Math.min(30, Math.max(12, W * 0.03));
-  const top = tight ? 92 : 132;
-  const bottom = Math.round((codexAnnotated() ? 180 : 152) * (tight ? 0.66 : 1));
-  const gw = Math.min(W - pad * 2, 980);
-  /* Never fewer than 92px of cell: below that the names run into each other
-     and into their neighbours, so the section loses a column instead. */
-  const cols = Math.max(2, Math.min(codexCols(), Math.floor(gw / 92)));
-  const cw = gw / cols;
-  const ch = Math.round(CODEX_TABS[codexTab].ch * (tight ? 0.78 : 1));
-  const viewH = Math.max(48, H - top - bottom - 10);
-  // the small sections do not fill the band; centre them rather than leaving a
-  // page of nothing under four rows
-  const rows = Math.ceil(codexList().length / cols);
-  const contentH = rows * ch;
-  const y0 = top + (contentH < viewH ? Math.round((viewH - contentH) / 2) : 0);
-  return { cols, cw, ch, x0: (W - gw) / 2, y0, clipY: top, viewH, tight,
-           detailY: top + viewH };
+function codexRow(en) {
+  const pages = en.link ? talesEntry(en.link).pages : en.pages;
+  return { key: en.key, en, n: en.n, col: en.col, sides: en.sides, boss: en.kind === 'boss',
+           tale: en.link || en.key, pages, noteKey: talesNoteKey(en) };
 }
+// the marginalia he keeps for an entry: enemies and bosses by id, a person by the boss they fight as
+function talesNoteKey(en) {
+  if (en.kind === 'enemy' || en.kind === 'boss') return en.ref;
+  return en.boss || null;
+}
+function codexList() { return codexListOf(CODEX_TABS[codexTab].id); }
+function codexSeen(row) {
+  if (row.item) return Codex[row.item].has(row.key);
+  return Tales.has(row.tale, 0) || (row.en.link && Codex.e.has(row.en.ref));
+}
+function codexNoteKey(row) { return row.noteKey || row.key; }
+
+/* Each page of an entry, as the card and the book show it:
+     'open'    open and read    'new'   open and not yet turned to
+     'torn'    a deed away      'held'  waiting on a deed not built yet
+     'sealed'  a chapter of the story not yet open */
+function talesPageState(key, pg, i) {
+  if (Tales.has(key, i)) return Tales.isRead(key, i) ? 'open' : 'new';
+  return pg.sealed ? 'sealed' : pg.held ? 'held' : 'torn';
+}
+
+// a section's tally, for the rail and its header
+function codexTally(i) {
+  const t = CODEX_TABS[i];
+  const list = codexListOf(t.id);
+  let met = 0, pages = 0, of = 0, unread = 0;
+  for (const row of list) {
+    if (codexSeen(row)) met++;
+    if (row.item) continue;
+    for (let k = 0; k < row.pages.length; k++) {
+      if ((row.pages[k].sealed || row.pages[k].held) && !Tales.has(row.tale, k)) continue;   // nothing opens it yet: not owed
+      of++;
+      if (Tales.has(row.tale, k)) pages++;
+    }
+    if (!row.en.link) unread += Tales.unread(row.tale);
+  }
+  return { met, total: list.length, pages, of, unread };
+}
+
+function codexGeom() {
+  const tight = H < 520, narrow = W < 760;
+  const pad = clamp(W * 0.025, 10, 28);
+  const top = tight ? 74 : 92, bottom = tight ? 28 : 36;
+  const railW = narrow ? 112 : 176, railX = pad, railY = top;
+  const n = CODEX_TABS.length, gap = tight ? 4 : 6;
+  const railH = H - top - bottom;
+  const ih = clamp(Math.floor((railH - gap * (n - 1)) / n), 20, 44);
+  const gx = railX + railW + (narrow ? 10 : 20);
+  const gw = Math.max(160, Math.min(W - pad - gx - 8, 1100));
+  const T = CODEX_TABS[codexTab];
+  const want = T.tales ? (narrow ? 100 : 124) : (narrow ? 118 : 150);
+  const cols = Math.max(2, Math.floor(gw / want));
+  const cw = gw / cols;
+  const ch = T.tales ? Math.round(clamp(cw * 1.12, 96, tight ? 116 : 150)) : (tight ? 56 : 68);
+  const headH = tight ? 18 : 26;
+  const gy = top + headH, viewH = Math.max(40, railH - headH);
+  // a short section does not fill the band: it sits under its header, not centred in a page of nothing
+  return { pad, tight, narrow, railX, railY, railW, ih, gap, gx, gy, gw, cols, cw, ch, viewH, headY: top + headH * 0.45 };
+}
+function codexRailRects() {
+  const g = codexGeom();
+  return CODEX_TABS.map((_, i) => ({ x: g.railX, y: g.railY + i * (g.ih + g.gap), w: g.railW, h: g.ih }));
+}
+// kept under its old name: the old tab strip's callers
+const codexTabRects = codexRailRects;
 function codexCellRect(i) {
   const g = codexGeom();
   const r = Math.floor(i / g.cols), c = i % g.cols;
-  return { x: g.x0 + c * g.cw + 4, y: g.y0 + r * g.ch - codexScroll + 4,
-           w: g.cw - 8, h: g.ch - 8 };
+  return { x: g.gx + c * g.cw + 4, y: g.gy + r * g.ch - codexScroll + 4, w: g.cw - 8, h: g.ch - 8 };
 }
 function codexMaxScroll() {
   const g = codexGeom();
-  const rows = Math.ceil(codexList().length / g.cols);
-  return Math.max(0, rows * g.ch - g.viewH);
+  return Math.max(0, Math.ceil(codexList().length / g.cols) * g.ch - g.viewH);
 }
-function codexTabRects() {
-  const n = CODEX_TABS.length, gap = 6, h = 26, y = 88;
-  const w = Math.max(64, Math.min(132, (Math.min(W - 40, 900) - gap * (n - 1)) / n));
-  const total = n * w + gap * (n - 1);
-  const x0 = (W - total) / 2;
-  return CODEX_TABS.map((_, i) => ({ x: x0 + i * (w + gap), y, w, h }));
-}
-// Tab / arrow navigation skips locked sections rather than landing on an empty grid
+// Tab / Q / E skip locked sections rather than landing on an empty grid
 function codexStepTab(dir) {
   for (let k = 1; k <= CODEX_TABS.length; k++) {
     const i = (codexTab + dir * k + CODEX_TABS.length * k) % CODEX_TABS.length;
-    if (codexTabOpen(i)) {
-      if (i === codexTab) return;
-      codexTab = i; codexSel = 0; codexScroll = 0; Audio_.select();
-      return;
+    if (codexTabOpen(i)) { codexGoTab(i); return; }
+  }
+}
+function codexGoTab(i) {
+  if (i === codexTab) return;
+  codexTab = i; codexSel = 0; codexScroll = 0; codexBook = -1;
+  Audio_.select();
+}
+
+/* ---------------------------------- the book ---------------------------------- */
+function codexBookGeom() {
+  const bw = Math.min(W - 20, 1080), bh = Math.min(H - 48, 640);
+  const x = (W - bw) / 2, y = Math.max(12, (H - bh) / 2 - 4);
+  const gut = W < 760 ? 10 : 22, pw = (bw - gut) / 2;
+  const L = { x, y, w: pw, h: bh }, R = { x: x + pw + gut, y, w: pw, h: bh };
+  const bs = H < 520 ? 26 : 32;
+  return { x, y, w: bw, h: bh, L, R,
+           close: { x: x + bw - bs - 6, y: y + 6, w: bs, h: bs },
+           prev:  { x: R.x + 10, y: y + bh - bs - 10, w: bs + 6, h: bs },
+           next:  { x: R.x + R.w - bs - 16, y: y + bh - bs - 10, w: bs + 6, h: bs },
+           // the right page's text block, between its header and its foot
+           text:  { x: R.x + Math.min(40, pw * 0.08), y: y + (H < 520 ? 48 : 62),
+                    w: pw - Math.min(40, pw * 0.08) * 2, h: bh - (H < 520 ? 48 : 62) - bs - 26 } };
+}
+const codexBookRow = () => (codexBook >= 0 ? codexList()[codexBook] || null : null);
+function codexBookPages(row) { return row && !row.item ? row.pages : [{ how: '' }]; }
+// the pips on the plate, one per page: rects for the mouse
+function codexPipRects(row) {
+  const B = codexBookGeom(), n = codexBookPages(row).length;
+  const s = H < 520 ? 24 : 30, gap = 8, w = n * s + (n - 1) * gap;
+  const x0 = B.L.x + (B.L.w - w) / 2, y = B.L.y + B.L.h - s - (H < 520 ? 12 : 18);
+  return Array.from({ length: n }, (_, i) => ({ x: x0 + i * (s + gap), y, w: s, h: s }));
+}
+
+/* Opened at the first page not yet read (else page I), and read from the
+   moment it is shown. */
+function codexOpenBook(i) {
+  const row = codexList()[i];
+  if (!row) return;
+  if (!codexSeen(row)) { Audio_.tone(150, 0.12, 'square', 0.06, 90); return; }
+  codexSel = i; codexBook = i; codexPageScroll = 0;
+  codexPage = 0;
+  if (!row.item) for (let k = 0; k < row.pages.length; k++)
+    if (Tales.has(row.tale, k) && !Tales.isRead(row.tale, k)) { codexPage = k; break; }
+  Audio_.select();
+}
+function codexTurn(dir) {
+  const row = codexBookRow();
+  if (!row) return;
+  const n = codexBookPages(row).length;
+  const to = clamp(codexPage + dir, 0, n - 1);
+  if (to === codexPage) { Audio_.tone(150, 0.08, 'square', 0.04, 110); return; }
+  codexPage = to; codexPageScroll = 0;
+  Audio_.tone(dir > 0 ? 520 : 440, 0.07, 'triangle', 0.05, dir > 0 ? 640 : 360);
+}
+// another entry of the same section, the book still open
+function codexBrowse(dir) {
+  const list = codexList();
+  for (let k = codexBook + dir; k >= 0 && k < list.length; k += dir) {
+    if (!codexSeen(list[k])) continue;
+    codexOpenBook(k); codexReveal();
+    return;
+  }
+}
+function codexShut() {
+  codexBook = -1; codexPageScroll = 0;
+  Tales.flush();
+  Audio_.select();
+}
+
+/* The words of one page: the tale's own, else what the record already said
+   (an enemy's or a boss's codex line is its page I), else an item's text. */
+function codexPageText(row, i) {
+  if (row.item) return row.item === 'u' ? upDesc(row.up) : row.d;
+  const key = row.tale, en = talesEntry(key);
+  if (i === 3) { const s = Tales.sealed[key]; return s ? s.x : ''; }
+  const own = TALE_TEXT[key];
+  if (own && own[i]) return own[i];
+  if (i === 0 && en) {
+    if (en.kind === 'enemy') return CODEX_E[en.ref].d;
+    if (en.kind === 'boss') return (CODEX_B[en.ref] || {}).d || '';
+    if (en.kind === 'pilot') return en.char.d;
+    if (en.kind === 'sector') {
+      const s = en.stage, b = BOSSES[s.boss];
+      return s.tag.charAt(0).toUpperCase() + s.tag.slice(1) + '. ' +
+             (s.hazard ? 'Hazard: ' + (TALE_HAZARD[s.hazard] || s.hazard) + '.' : 'No hazard.') + ' ' +
+             (b ? b.name + ' waits on the fifth wave.' : 'Nothing waits at the end of it: its nodes are what it guards.');
     }
   }
+  return '';
+}
+// the hazards, as the record names them on a sector's page I
+const TALE_HAZARD = { vent: 'vents', acid: 'acid', laser: 'lasers', well: 'wells', delete: 'a floor that deletes itself',
+                      mirror: 'mirrors' };
+
+/* A page's words laid out in its face: a blank line is a new paragraph,
+   ~~these~~ are struck through and `these` are set as typed. The size comes
+   down until the page fits, and past the smallest it scrolls. */
+const TALE_FACE = [
+  { fam: "Georgia, 'Palatino Linotype', 'Book Antiqua', serif", wt: '400', ink: '#2a2118' },   // THE RECORD
+  { fam: "'Courier New', Consolas, monospace", wt: '400', ink: '#1e3a5f' },                   // THE MAKER'S NOTE
+  { fam: "Georgia, 'Palatino Linotype', 'Book Antiqua', serif", wt: 'italic 400', ink: '#2b1a10' },   // THE TALE
+  { fam: "Georgia, 'Palatino Linotype', 'Book Antiqua', serif", wt: '400', ink: '#3b0d0d' }    // sealed, once open
+];
+const TALE_MONO = "'Courier New', Consolas, monospace";
+function taleRuns(text) {
+  return String(text).split(/\n\n+/).map(par => {
+    const words = [];
+    for (const seg of par.split(/(~~[^~]+~~|`[^`]+`)/)) {
+      if (!seg) continue;
+      const k = seg.startsWith('~~') ? 'x' : seg.startsWith('`') ? 'c' : '';
+      const body = k === 'x' ? seg.slice(2, -2) : k === 'c' ? seg.slice(1, -1) : seg;
+      for (const w of body.split(/\s+/)) if (w) words.push({ w, k });
+    }
+    return words;
+  });
+}
+function taleLayout(pars, face, px, w) {
+  const font = k => (k === 'c' ? '400 ' + px + 'px ' + TALE_MONO : face.wt + ' ' + px + 'px ' + face.fam);
+  const lh = Math.round(px * 1.42), pgap = Math.round(px * 0.7);
+  const lines = [];
+  let y = 0;
+  for (const par of pars) {
+    let line = [], x = 0;
+    for (const t of par) {
+      ctx.font = font(t.k);
+      const tw = ctx.measureText(t.w).width, sp = ctx.measureText(' ').width;
+      if (line.length && x + sp + tw > w) { lines.push({ y, words: line }); y += lh; line = []; x = 0; }
+      const at = line.length ? x + sp : 0;
+      line.push({ t, x: at, w: tw, f: font(t.k) });
+      x = at + tw;
+    }
+    if (line.length) { lines.push({ y, words: line }); y += lh; }
+    y += pgap;
+  }
+  return { lines, h: Math.max(0, y - pgap), lh };
+}
+function taleDrawText(text, r, voice) {
+  const face = TALE_FACE[voice] || TALE_FACE[0];
+  const pars = taleRuns(text);
+  let px = H < 520 ? 13 : 15.5, L = taleLayout(pars, face, px, r.w);
+  while (L.h > r.h && px > 11) { px -= 0.5; L = taleLayout(pars, face, px, r.w); }
+  codexPageMax = Math.max(0, L.h - r.h);
+  codexPageScroll = clamp(codexPageScroll, 0, codexPageMax);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(r.x - 4, r.y - 2, r.w + 8, r.h + 4); ctx.clip();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  for (const ln of L.lines) {
+    const y = r.y + ln.y + px - codexPageScroll;
+    if (y < r.y - L.lh || y > r.y + r.h + L.lh) continue;
+    for (const wd of ln.words) {
+      ctx.font = wd.f;
+      ctx.fillStyle = wd.t.k === 'c' ? '#3f3f46' : face.ink;
+      ctx.globalAlpha = wd.t.k === 'x' ? 0.62 : 1;
+      ctx.fillText(wd.t.w, r.x + wd.x, y);
+      if (wd.t.k === 'x') {                  // his crossing-out, through the word and the gap after it
+        ctx.strokeStyle = face.ink; ctx.lineWidth = Math.max(1, px / 11);
+        ctx.beginPath(); ctx.moveTo(r.x + wd.x - 1, y - px * 0.32); ctx.lineTo(r.x + wd.x + wd.w + 2, y - px * 0.3); ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+  // more below: a hairline fade, and the wheel or a drag reads on
+  if (codexPageMax > 0) TA('page.more', r.x, r.y + r.h, r.w, codexPageScroll / codexPageMax);
+}
+
+// what the plate files about you and an entry
+function codexPlateRows(row) {
+  const en = row.en, key = row.tale, N = Tales.n, out = [];
+  const day = Tales.m[key];
+  const met = { enemy: 'FIRST MET', boss: 'FIRST MET', pilot: 'FIRST FLOWN', awake: 'FIRST WOKEN',
+                sector: 'FIRST ENTERED', room: 'FIRST ENTERED', person: 'FIRST MET' }[en.link ? 'person' : en.kind];
+  out.push([met, day ? talesDayText(day) : 'BEFORE THIS BOOK WAS KEPT']);
+  const ref = en.kind === 'person' ? en.boss : en.ref;
+  if (en.kind === 'enemy') {
+    out.push(['FELLED', fmtCount(N['k:' + ref] | 0)]);
+    out.push(['FELLED YOU', fmtCount(N['d:' + ref] | 0)]);
+  } else if (en.kind === 'boss' || (en.kind === 'person' && ref)) {
+    out.push(['DEFEATED', fmtCount(N['k:' + ref] | 0)]);
+    out.push(['FELLED YOU', fmtCount(N['d:' + ref] | 0)]);
+    if (N['t:' + ref]) out.push(['BEST TIME', talesTime(N['t:' + ref])]);
+  } else if (en.kind === 'awake') {
+    out.push(['TIMES WOKEN', fmtCount(N['w:' + en.ref] | 0)]);
+  } else if (en.kind === 'sector') {
+    out.push(['CLEARED', fmtCount(N['c:' + key] | 0)]);
+  }
+  out.push(['PAGES', Tales.count(key) + ' / ' + row.pages.length]);
+  return out;
+}
+const fmtCount = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function talesTime(s) { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function talesDayText(d) {
+  const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const [y, m, dd] = d.split('-').map(Number);
+  return dd + ' ' + (M[m - 1] || '?') + ' ' + y;
+}
+// a torn page's progress, where its deed is a count
+function talesProgress(pg) {
+  if (!pg.c) return '';
+  return fmtCount(Math.min(pg.c[1], Tales.n[pg.c[0]] | 0)) + ' / ' + fmtCount(pg.c[1]);
+}
+// the portrait: the real drawing where the fight has one, the art hook where it does not
+function codexPortrait(row, x, y, size, seen) {
+  if (row.item) { TA('item.glyph', row.item, x, y, size, seen ? (row.item === 'u' ? RARITY[row.rar] : row.col) : '#475569', seen); return; }
+  const en = row.en;
+  const live = en.kind === 'enemy' || en.kind === 'boss' ? en.ref : en.kind === 'person' ? en.boss : null;
+  if (live) {
+    drawCodexIcon({ key: live, boss: !!BOSSES[live], col: seen ? en.col : '#475569', sides: en.sides || (BOSSES[live] || {}).sides },
+                  x, y, size, seen);
+    return;
+  }
+  TA('portrait.' + en.kind, x, y, size, en, seen);
+}
+
+function drawCodex() {
+  const worn = codexAnnotated();
+  TA('frame.back', worn);
+  const list = codexList();
+  const g = codexGeom();
+  codexSel = clamp(codexSel, 0, Math.max(0, list.length - 1));
+
+  // the title, and the whole book's tally under it
+  TA('frame.title', W / 2, g.tight ? 30 : 40, worn);
+  let met = 0, all = 0, pages = 0, of = 0, unread = 0;
+  for (let i = 0; i < CODEX_TABS.length; i++) {
+    if (!codexTabOpen(i)) continue;
+    const t = codexTally(i);
+    met += t.met; all += t.total; pages += t.pages; of += t.of; unread += t.unread;
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = worn ? '#6b5a44' : '#475569';
+  ctx.fillText(met + ' / ' + all + '  RECORDED   ·   ' + pages + ' / ' + of + '  PAGES' +
+               (unread ? '   ·   ' + unread + '  UNREAD' : ''), W / 2, g.tight ? 54 : 66);
+
+  // the rail: locked optional sections show as '????' and cannot be opened
+  const rail = codexRailRects();
+  TA('rail.back', g.railX - 6, g.railY - 6, g.railW + 12, rail[rail.length - 1].y + g.ih + 6 - (g.railY - 6), worn);
+  CODEX_TABS.forEach((t, i) => {
+    const r = rail[i], open = codexTabOpen(i);
+    const tl = open ? codexTally(i) : null;
+    TA('rail.item', r, t, { on: codexTab === i, open, hot: open && codexBook < 0 && inRect(mouse.x, mouse.y, r),
+                            tally: tl, worn, narrow: g.narrow });
+  });
+
+  // the section's own header: what it holds, and how much of it is open
+  {
+    const t = CODEX_TABS[codexTab], tl = codexTally(codexTab);
+    const txt = t.label + '   ·   ' + tl.met + ' / ' + tl.total + (t.tales ? ' MET   ·   ' + tl.pages + ' / ' + tl.of + ' PAGES' : ' RECORDED');
+    TA('grid.head', g.gx + 4, g.headY, g.gw - 8, txt, worn);
+  }
+
+  // the grid, clipped to its own viewport so rows scroll under the header
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(g.gx - 6, g.gy, g.gw + 12, g.viewH);
+  ctx.clip();
+  for (let i = 0; i < list.length; i++) {
+    const r = codexCellRect(i);
+    if (r.y + r.h < g.gy - 4 || r.y > g.gy + g.viewH + 4) continue;
+    codexDrawCard(list[i], r, i, worn);
+  }
+  if (!list.length) {
+    ctx.textAlign = 'center'; ctx.font = "italic 400 13px Georgia, serif";
+    ctx.fillStyle = '#475569';
+    ctx.fillText('Nothing here has been filed yet.', g.gx + g.gw / 2, g.gy + 40);
+  }
+  ctx.restore();
+
+  // scrollbar, only when there is something to scroll
+  const ms = codexMaxScroll();
+  if (ms > 0) {
+    const trackX = g.gx + g.gw + 8;
+    const th = g.viewH * (g.viewH / (g.viewH + ms));
+    const ty = g.gy + (g.viewH - th) * (codexScroll / ms);
+    ctx.fillStyle = 'rgba(148,163,184,0.12)';
+    roundRect(trackX, g.gy, 4, g.viewH, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(148,163,184,0.45)';
+    roundRect(trackX, ty, 4, th, 2); ctx.fill();
+  }
+
+  const row = codexBookRow();
+  if (row) codexDrawBook(row, worn);
+  else if (codexBook >= 0) codexBook = -1;   // the list changed under it
+
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.08em';
+  const ck = row ? '← → turn   ·   ↑ ↓ entry   ·   ESC close the book'
+                 : 'TAB / Q E section   ·   ARROWS / WHEEL browse   ·   ENTER / CLICK open   ·   ESC close';
+  fitFont(ck, W - 32, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+  ctx.fillStyle = worn ? '#4a3d2c' : '#334155';
+  ctx.fillText(ck, W / 2, H - (g.tight ? 12 : 17));
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+function codexDrawCard(row, r, i, worn) {
+  const seen = codexSeen(row);
+  const sel = i === codexSel && codexBook < 0;
+  const hot = codexBook < 0 && inRect(mouse.x, mouse.y, r);
+  const col = !seen ? '#475569' : row.item === 'u' ? RARITY[row.rar] : row.col;
+  TA('card.back', r, col, { sel, hot, seen, worn, item: !!row.item });
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (!row.item) {
+    // the portrait, the name, and the pages under it
+    const ps = Math.min(r.w * 0.24, r.h * 0.2);
+    codexPortrait(row, r.x + r.w / 2, r.y + r.h * 0.4, ps, seen);
+    const nm = seen ? row.n : '? ? ?';
+    fitFont(nm, r.w - 10, '700', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 6.5);
+    ctx.fillStyle = seen ? (row.boss || row.en.kind === 'person' ? row.col : '#cbd5e1') : '#475569';
+    ctx.fillText(nm, r.x + r.w / 2, r.y + r.h - 26);
+    const st = row.pages.map((pg, k) => (seen ? talesPageState(row.tale, pg, k) : 'none'));
+    TA('card.pips', r.x + r.w / 2, r.y + r.h - 11, r.w - 16, st);
+    if (seen && !row.en.link && Tales.unread(row.tale)) TA('card.unread', r.x + r.w - 9, r.y + 9);
+  } else if (row.item === 'u') {
+    // items get no picture, by design: name and rarity only
+    ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = seen ? RARITY[row.rar] : '#475569';
+    ctx.fillText(seen ? row.rar.toUpperCase() : '———', r.x + r.w / 2, r.y + 14);
+    const un = seen ? upName(row.up) : '? ? ?';
+    fitFont(un, r.w - 10, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+    ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
+    ctx.fillText(un, r.x + r.w / 2, r.y + r.h - 18);
+  } else {
+    ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = seen ? rgba(row.col, 0.85) : '#475569';
+    const kind = { m: 'PAYLOAD', b: 'VOLUME', z: 'READING', g: 'GEAR' }[row.item];
+    ctx.fillText(seen ? kind : '———', r.x + r.w / 2, r.y + 14);
+    const nm = seen ? clipText(row.n, row.item === 'z' ? 13 : 20) : '? ? ?';
+    fitFont(nm, r.w - 10, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+    ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
+    ctx.fillText(nm, r.x + r.w / 2, r.y + r.h / 2 + 3);
+    if (seen && row.sub) {
+      const sb = clipText(row.sub, 30);
+      fitFont(sb, r.w - 10, '500', 8, "Barlow, 'Segoe UI', system-ui, sans-serif", 6);
+      ctx.fillStyle = '#475569';
+      ctx.fillText(sb, r.x + r.w / 2, r.y + r.h - 11);
+    }
+  }
+  // a tick in the margin where he had something to say about this one
+  if (worn && seen && KEEPER_NOTES[codexNoteKey(row)]) TA('card.tick', r.x + 6, r.y + 5);
+}
+
+function codexDrawBook(row, worn) {
+  const B = codexBookGeom();
+  const pages = codexBookPages(row);
+  codexPage = clamp(codexPage, 0, pages.length - 1);
+  const seen = codexSeen(row);
+  TA('book.back', worn);
+  TA('book.cover', B.x, B.y, B.w, B.h, row.col, worn);
+  TA('book.page', B.L, 'left', worn);
+  TA('book.page', B.R, 'right', worn);
+
+  /* ------ the left page: the plate ------ */
+  const L = B.L, tight = H < 520;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const kindTxt = row.item ? { u: 'UPGRADE', m: 'MALWARE', b: 'BOOK', z: 'ZODIAC', g: 'GEAR' }[row.item]
+                : row.en.link ? 'PERSON · FOUGHT AS A BOSS'
+                : { enemy: 'ENEMY', boss: 'BOSS', pilot: 'PILOT', awake: 'AWAKENING · ' + talesCharName(row.en.ref),
+                    sector: row.en.stage ? row.en.stage.tag.toUpperCase() : 'SECTOR', room: 'A ROOM BETWEEN · ' + (row.en.tag || ''),
+                    person: 'PERSON' }[row.en.kind];
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#6b5a44';
+  ctx.fillText(kindTxt, L.x + L.w / 2, L.y + (tight ? 18 : 26));
+  const title = row.item === 'u' ? upName(row.up) : row.n;
+  fitFont(title, L.w - 40, '800', tight ? 18 : 24, "'Chakra Petch', Barlow, system-ui, sans-serif", 11);
+  ctx.fillStyle = '#1c1611';
+  ctx.fillText(title, L.x + L.w / 2, L.y + (tight ? 38 : 52));
+  // the plate itself, and the live portrait in it
+  const ps = Math.min(L.w - 60, L.h * (tight ? 0.36 : 0.4));
+  const plate = { x: L.x + (L.w - ps) / 2, y: L.y + (tight ? 52 : 70), w: ps, h: ps };
+  TA('book.plate', plate, row.col, worn);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(plate.x, plate.y, plate.w, plate.h); ctx.clip();
+  codexPortrait(row, plate.x + ps / 2, plate.y + ps / 2, ps * 0.27, seen);
+  ctx.restore();
+  // what has been filed, above his note (if he wrote one) and the pips
+  const note = worn && seen && KEEPER_NOTES[codexNoteKey(row)];
+  const foot = row.item ? L.y + L.h - 16 : codexPipRects(row)[0].y - 8;
+  let noteY = foot;
+  if (note) {
+    ctx.font = INK_FONT;
+    const lines = Math.max(1, Math.ceil((ctx.measureText('— ' + note).width + 20) / (L.w - 36)));
+    noteY = foot - 6 - lines * 15;
+  }
+  let y = plate.y + ps + (tight ? 16 : 24);
+  if (row.item) {
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#6b5a44';
+    const sub = row.item === 'u' ? row.rar.toUpperCase() + '   ·   UP TO ' + row.max : (row.sub || '');
+    if (sub) { fitFont(sub, L.w - 40, '700', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7); ctx.fillText(sub, L.x + L.w / 2, y); }
+  } else {
+    const rows = codexPlateRows(row), lh = tight ? 15 : 19;
+    const cx = L.x + L.w * 0.42, vw = L.x + L.w - 18 - (cx + 8);
+    for (const [k, v] of rows) {
+      if (y > noteY - lh * 0.5) break;
+      ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.textAlign = 'right'; ctx.fillStyle = '#7c6a52';
+      ctx.fillText(k, cx - 8, y);
+      fitFont(v, vw, '600', 11, TALE_MONO, 7);
+      ctx.textAlign = 'left'; ctx.fillStyle = '#2a2118';
+      ctx.fillText(v, cx + 8, y);
+      y += lh;
+    }
+    // the pages, one pip each: a click turns to it
+    const st = pages.map((pg, k) => talesPageState(row.tale, pg, k));
+    const pr = codexPipRects(row);
+    pr.forEach((r, k) => TA('book.pip', r, TALE_ROMAN[k], st[k], k === codexPage, inRect(mouse.x, mouse.y, r)));
+  }
+  // his marginalia, at the foot of the plate's page, in his ink
+  if (note) TA('ink.note', L.x + 18, noteY + 12, L.w - 36, note);
+
+  /* ------ the right page: the tale ------ */
+  const R = B.R, i = codexPage, pg = pages[i];
+  const st = row.item ? 'open' : talesPageState(row.tale, pg, i);
+  const voice = row.item ? 0 : i;
+  const sealed = !row.item && i === 3 ? Tales.sealed[row.tale] : null;
+  TA('page.head', R.x + R.w / 2, R.y + (tight ? 22 : 30), R.w - 40,
+     row.item ? 'THE RECORD' : 'PAGE ' + TALE_ROMAN[i] + '   ·   ' + (sealed ? (sealed.t || 'UNSEALED') : TALE_VOICE[i]), voice);
+  const T = B.text;
+  if (st === 'open' || st === 'new') {
+    const text = codexPageText(row, i);
+    if (text) taleDrawText(text, T, voice);
+    else { codexPageMax = 0; TA('page.blank', T, TALE_ROMAN[i]); }
+    if (!row.item) Tales.read(row.tale, i);
+  } else {
+    codexPageMax = 0;
+    if (st === 'sealed') TA('page.sealed', T, TALE_ROMAN[i]);
+    else if (st === 'held') TA('page.held', T, TALE_ROMAN[i], pg.held);
+    else TA('page.torn', T, TALE_ROMAN[i], pg.how, talesProgress(pg));
+  }
+  TA('page.number', R.x + R.w / 2, R.y + R.h - (tight ? 18 : 24), row.item ? 'I' : TALE_ROMAN[i]);
+  if (pages.length > 1) {
+    TA('book.turn', B.prev, -1, i > 0, inRect(mouse.x, mouse.y, B.prev));
+    TA('book.turn', B.next, 1, i < pages.length - 1, inRect(mouse.x, mouse.y, B.next));
+  }
+  TA('book.close', B.close, inRect(mouse.x, mouse.y, B.close));
+}
+
+function openCodex(from) {
+  codexFrom = from || 'menu';
+  codexTab = 0; codexSel = 0; codexScroll = 0; codexBook = -1; codexDrag = null;
+  state = 'codex'; uiArm = 0.3;
+  Tales.sealedAsk();                     // any chapter the server has opened since
+  Audio_.select();
+}
+function closeCodex() {
+  codexBook = -1; codexDrag = null;
+  Tales.flush();                         // what was read stays read
+  state = codexFrom === 'pause' ? 'pause' : 'menu';
+  uiArm = 0.3;
+  Audio_.select();
+}
+// keep the selected cell inside the viewport when moving by keyboard
+function codexReveal() {
+  const g = codexGeom();
+  const row = Math.floor(codexSel / g.cols);
+  const top = row * g.ch, bot = top + g.ch;
+  if (top < codexScroll) codexScroll = top;
+  else if (bot > codexScroll + g.viewH) codexScroll = bot - g.viewH;
+  codexScroll = clamp(codexScroll, 0, codexMaxScroll());
+}
+
+/* ------------------------------- the codex's input ------------------------------- */
+function codexKey(k) {
+  if (uiArm > 0) return;
+  if (codexBook >= 0) {
+    if (k === 'escape' || k === 'x' || k === 'p' || k === 'backspace') { codexShut(); return; }
+    if (k === 'arrowright' || k === 'd' || k === 'enter' || k === ' ') { codexTurn(1); return; }
+    if (k === 'arrowleft' || k === 'a') { codexTurn(-1); return; }
+    if (k === 'arrowup' || k === 'w') { codexBrowse(-1); return; }
+    if (k === 'arrowdown' || k === 's') { codexBrowse(1); return; }
+    if (k === 'tab' || k === 'e') { codexShut(); codexStepTab(1); return; }
+    if (k === 'q') { codexShut(); codexStepTab(-1); return; }
+    return;
+  }
+  const list = codexList(), g = codexGeom();
+  if (k === 'escape' || k === 'x' || k === 'p') { closeCodex(); return; }
+  if (k === 'tab' || k === 'e') { codexStepTab(1); return; }
+  if (k === 'q') { codexStepTab(-1); return; }
+  if (k === 'enter' || k === ' ') { codexOpenBook(codexSel); return; }
+  if (k === 'arrowright' || k === 'd') { codexSel = Math.min(list.length - 1, codexSel + 1); codexReveal(); return; }
+  if (k === 'arrowleft'  || k === 'a') { codexSel = Math.max(0, codexSel - 1); codexReveal(); return; }
+  if (k === 'arrowdown'  || k === 's') { codexSel = Math.min(list.length - 1, codexSel + g.cols); codexReveal(); return; }
+  if (k === 'arrowup'    || k === 'w') { codexSel = Math.max(0, codexSel - g.cols); codexReveal(); return; }
+}
+function codexClick() {
+  if (uiArm > 0) return;
+  if (codexBook >= 0) {
+    const B = codexBookGeom(), row = codexBookRow();
+    if (inRect(mouse.x, mouse.y, B.close)) { codexShut(); return; }
+    if (inRect(mouse.x, mouse.y, B.prev)) { codexTurn(-1); return; }
+    if (inRect(mouse.x, mouse.y, B.next)) { codexTurn(1); return; }
+    if (row && !row.item) {
+      const pr = codexPipRects(row);
+      for (let k = 0; k < pr.length; k++)
+        if (inRect(mouse.x, mouse.y, pr[k])) { if (k !== codexPage) { codexPage = k; codexPageScroll = 0; Audio_.select(); } return; }
+    }
+    // anywhere off the book shuts it
+    if (!inRect(mouse.x, mouse.y, B)) codexShut();
+    return;
+  }
+  const rail = codexRailRects();
+  for (let i = 0; i < CODEX_TABS.length; i++) if (inRect(mouse.x, mouse.y, rail[i])) {
+    if (!codexTabOpen(i)) { Audio_.tone(150, 0.12, 'square', 0.06, 90); return; }
+    codexGoTab(i);
+    return;
+  }
+  const g = codexGeom();
+  if (mouse.y > g.gy && mouse.y < g.gy + g.viewH) {
+    const list = codexList();
+    for (let i = 0; i < list.length; i++)
+      if (inRect(mouse.x, mouse.y, codexCellRect(i))) { codexOpenBook(i); return; }
+  }
+}
+function codexWheel(dy) {
+  if (codexBook >= 0) {
+    if (codexPageMax > 0) codexPageScroll = clamp(codexPageScroll + Math.sign(dy) * 40, 0, codexPageMax);
+    return;
+  }
+  codexScroll = clamp(codexScroll + Math.sign(dy) * 56, 0, codexMaxScroll());
+}
+// whether the pointer is over something the codex will answer, for the cursor
+function codexHot() {
+  if (codexBook >= 0) {
+    const B = codexBookGeom(), row = codexBookRow();
+    if ([B.close, B.prev, B.next].some(r => inRect(mouse.x, mouse.y, r))) return true;
+    return !!(row && !row.item && codexPipRects(row).some(r => inRect(mouse.x, mouse.y, r)));
+  }
+  if (codexRailRects().some((r, i) => codexTabOpen(i) && inRect(mouse.x, mouse.y, r))) return true;
+  const list = codexList();
+  for (let i = 0; i < list.length; i++) if (inRect(mouse.x, mouse.y, codexCellRect(i))) return true;
+  return false;
+}
+/* A finger: a drag scrolls the grid (or a page that overflows), a sideways
+   swipe across the book turns it, and a touch that never moved is a tap. */
+function codexTouch(kind, id, p) {
+  if (kind === 'start') { codexDrag = { id, x: p.x, y: p.y, s: codexBook >= 0 ? codexPageScroll : codexScroll, moved: false }; return; }
+  const d = codexDrag;
+  if (!d || d.id !== id) return;
+  const dx = p.x - d.x, dy = p.y - d.y;
+  if (Math.abs(dx) > 10 || Math.abs(dy) > 10) d.moved = true;
+  if (kind === 'move') {
+    if (codexBook >= 0) { if (codexPageMax > 0) codexPageScroll = clamp(d.s - dy, 0, codexPageMax); }
+    else codexScroll = clamp(d.s - dy, 0, codexMaxScroll());
+    return;
+  }
+  codexDrag = null;                        // 'end'
+  if (!d.moved) { mouse.x = p.x; mouse.y = p.y; codexClick(); return; }
+  if (codexBook >= 0 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) codexTurn(dx < 0 ? 1 : -1);
 }
 
 /* ---------------------------- boss portraits -------------------------------
@@ -57745,235 +59224,445 @@ function codexWear() {
   ctx.restore();
 }
 
-function drawCodex() {
-  const worn = codexAnnotated();
-  // fully opaque: the live HUD underneath is noise here, not atmosphere
-  ctx.fillStyle = worn ? '#0a0705' : '#03060c';
-  ctx.fillRect(0, 0, W, H);
-  if (worn) codexWear();
-  const list = codexList();
-  const g = codexGeom();
-  codexSel = clamp(codexSel, 0, Math.max(0, list.length - 1));
-  const seenCount = list.filter(codexSeen).length;
+/* ===================== FORGOTTEN TALES — art hooks =====================
+   Every piece of the new codex is drawn here and nowhere else, one function
+   per piece, so art can replace one without touching the others or the
+   layout above (the codex UI) or the pages (FORGOTTEN TALES — the pages).
+   Replace this block from its first line down to "end of FORGOTTEN TALES art
+   hooks", whole, or any one hook in it. FORGOTTEN-TALES-HOOKS.md (repo root,
+   never published) lists each hook, what it is handed and where it sits.
 
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = "800 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
-  ctx.fillStyle = worn ? '#e7d9c4' : '#e2e8f0';
-  ctx.fillText('CODEX', W / 2, 44);
-  if (worn) {
-    // struck through and re-titled in his hand
-    const tw = ctx.measureText('CODEX').width;
-    ctx.save();
-    ctx.strokeStyle = INK; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - tw / 2 - 4, 48); ctx.lineTo(W / 2 + tw / 2 + 4, 40);
-    ctx.stroke();
-    ctx.font = INK_FONT;
-    ctx.fillStyle = INK;
-    ctx.textAlign = 'left';
-    ctx.fillText('annotated', W / 2 + tw / 2 + 12, 52);
-    ctx.restore();
-    ctx.textAlign = 'center';
-  }
-  ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = worn ? '#6b5a44' : '#475569';
-  ctx.fillText(seenCount + ' / ' + list.length + '  RECORDED', W / 2, 66);
+   Each draws only, in screen space, and changes nothing. TA() calls a hook
+   inside save/restore, so a hook may leave the canvas however it likes, and a
+   hook that throws costs only its own piece. What is here now is a placeholder
+   that names itself: with TALES_HOOK_LABELS on (the default; ?hooks=0 hides
+   them), the first piece each hook draws in a frame carries its name.
 
-  // tabs — locked optional sections show as '????' and cannot be opened
-  const tabs = codexTabRects();
-  CODEX_TABS.forEach((t, i) => {
-    const r = tabs[i], on = codexTab === i, open = codexTabOpen(i);
-    const hot = open && inRect(mouse.x, mouse.y, r);
-    ctx.fillStyle = on ? 'rgba(103,232,249,0.14)'
-                  : (hot ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.04)');
-    ctx.strokeStyle = on ? COL.player : (open ? '#334155' : 'rgba(51,65,85,0.5)');
-    ctx.lineWidth = on ? 2 : 1;
-    roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.stroke();
-    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = on ? COL.player : (open ? '#64748b' : '#3f4a5c');
-    ctx.fillText(open ? t.label : '? ? ? ?', r.x + r.w / 2, r.y + r.h / 2 + 1);
-  });
+     frame.back    (worn)                         the codex's backdrop, whole screen
+     frame.title   (x, y, worn)                   CODEX, and his re-titling once annotated
+     rail.back     (x, y, w, h, worn)             behind the section rail
+     rail.item     (r, tab, s)                    one section: s = { on, open, hot, tally, worn, narrow }
+     rail.seal     (x, y, size, tab, open)        a section's seal, inside its rail item
+     grid.head     (x, y, w, text, worn)          the section's header line over its grid
+     card.back     (r, col, s)                    a card: s = { sel, hot, seen, worn, item }
+     card.pips     (cx, y, w, states)             a card's pages, one per page (states below)
+     card.unread   (x, y)                         a card with pages not yet read
+     card.tick     (x, y)                         his tick, on an entry he wrote about
+     item.glyph    (kind, x, y, size, col, seen)  an item's emblem on its plate (u m b z g)
+     portrait.pilot / .awake / .sector / .room / .person   (x, y, size, en, seen)
+                                                  an entry with no drawing in the fight
+     book.back     (worn)                         over the grid while a book is open
+     book.cover    (x, y, w, h, col, worn)        the book: boards and spine
+     book.page     (r, side, worn)                one page's paper, 'left' or 'right'
+     book.plate    (r, col, worn)                 the inset the portrait sits in
+     book.pip      (r, roman, state, current, hot)  a page's pip on the plate (a click turns to it)
+     ink.note      (x, y, w, note)                his marginalia, in his ink
+     page.head     (cx, y, w, text, voice)        a page's header: PAGE II · THE MAKER'S NOTE
+     page.number   (cx, y, roman)                 the Roman number at a page's foot
+     page.more     (x, y, w, frac)                a page that runs on: there is more below
+     page.blank    (r, roman)                     open, and not written yet (FORGOTTEN TALES step 5)
+     page.torn     (r, roman, how, progress)      not earned: torn out, and what opens it
+     page.sealed   (r, roman)                     a chapter not yet open: sealed, never torn
+     page.held     (r, roman, why)                waits on a deed that is not built yet
+     book.turn     (r, dir, enabled, hot)         the page-turn arrows
+     book.close    (r, hot)                       shut the book
+     line.tale     (cx, y, text, alpha)           the mid-run line: A FORGOTTEN TALE · ..., PAGE II
 
-  // grid, clipped to its own viewport so rows scroll under the header
+   Page states: 'open' (read), 'new' (open, not read), 'torn', 'held',
+   'sealed', and 'none' (the entry itself not yet met). Voices: 0 THE RECORD,
+   1 THE MAKER'S NOTE, 2 THE TALE, 3 a sealed page, once opened.
+--------------------------------------------------------------------------- */
+const TALES_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') !== '0'; } catch (e) { return true; } })();
+const TA_TAGGED = new Set();             // hooks already named this frame
+let taFrame = -1;
+
+function TA(name, ...a) {
+  const f = TALES_ART[name];
+  if (!f) return;
+  if (taFrame !== uiTime) { taFrame = uiTime; TA_TAGGED.clear(); }
   ctx.save();
+  try { f(...a); } catch (e) { /* a bad piece must not take the codex with it */ }
+  ctx.restore();
+}
+// a placeholder naming itself: once a frame per hook, small, at (x, y)
+function taTag(name, x, y) {
+  if (!TALES_HOOK_LABELS || TA_TAGGED.has(name)) return;
+  TA_TAGGED.add(name);
+  ctx.save();
+  ctx.font = "600 8px 'Courier New', Consolas, monospace";
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  const w = ctx.measureText(name).width + 6;
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = 'rgba(250,204,21,0.9)';
+  ctx.fillRect(x, y, w, 11);
+  ctx.fillStyle = '#111827';
+  ctx.fillText(name, x + 3, y + 1.5);
+  ctx.restore();
+}
+// the new HUDs' panel: a rectangle with two corners cut
+function taCut(x, y, w, h, c) {
+  c = Math.min(c, w / 3, h / 3);
   ctx.beginPath();
-  ctx.rect(g.x0 - 6, g.clipY, g.cw * g.cols + 12, g.viewH);
-  ctx.clip();
-  for (let i = 0; i < list.length; i++) {
-    const r = codexCellRect(i);
-    if (r.y + r.h < g.clipY - 4 || r.y > g.clipY + g.viewH + 4) continue;
-    const en = list[i], seen = codexSeen(en);
-    const sel = i === codexSel;
-    const hot = inRect(mouse.x, mouse.y, r);
-    const kind = CODEX_TABS[codexTab].id;
-    const col = !seen ? '#475569'
-              : kind === 'u' ? RARITY[en.rar] : en.col;
-    ctx.save();
-    ctx.globalAlpha = seen ? 1 : 0.5;
-    ctx.fillStyle = sel ? rgba(col, 0.13) : (hot ? 'rgba(148,163,184,0.07)' : 'rgba(148,163,184,0.03)');
-    ctx.strokeStyle = sel ? col : 'rgba(71,85,105,0.6)';
-    ctx.lineWidth = sel ? 2 : 1;
-    roundRect(r.x, r.y, r.w, r.h, 7); ctx.fill(); ctx.stroke();
-    ctx.restore();
+  ctx.moveTo(x + c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - c);
+  ctx.lineTo(x + w - c, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + c);
+  ctx.closePath();
+}
+const TA_PAPER = '#e6dcc6', TA_PAPER_WORN = '#d5c6a6', TA_INKD = '#2a2118';
 
-    if (kind === 'e') {
-      drawCodexIcon(en, r.x + r.w / 2, r.y + r.h / 2 - 12, en.boss ? 22 : 18, seen);
-      const cn = seen ? en.n : '? ? ?';
-      fitFont(cn, r.w - 8, '700', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 6.5);
-      ctx.fillStyle = seen ? (en.boss ? en.col : '#94a3b8') : '#475569';
-      ctx.fillText(cn, r.x + r.w / 2, r.y + r.h - 14);
-    } else if (kind === 'u') {
-      // items get no picture, by design — name and rarity only
-      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
-      ctx.fillStyle = seen ? RARITY[en.rar] : '#475569';
-      ctx.fillText(seen ? en.rar.toUpperCase() : '———', r.x + r.w / 2, r.y + 15);
-      const un = seen ? upName(en.up) : '? ? ?';
-      fitFont(un, r.w - 8, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
-      ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
-      ctx.fillText(un, r.x + r.w / 2, r.y + r.h - 18);
-    } else {
-      // malware / books / zodiac: also items, so also no picture
-      ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
-      ctx.fillStyle = seen ? rgba(en.col, 0.85) : '#475569';
-      ctx.fillText(seen ? (kind === 'm' ? 'PAYLOAD' : kind === 'b' ? 'VOLUME' : 'READING')
-                        : '———', r.x + r.w / 2, r.y + 16);
-      ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-      ctx.fillStyle = seen ? '#e2e8f0' : '#475569';
-      const nm = seen ? clipText(en.n, kind === 'z' ? 13 : 20) : '? ? ?';
-      fitFont(nm, r.w - 8, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
-      ctx.fillText(nm, r.x + r.w / 2, r.y + r.h / 2 + 4);
-      if (seen && en.sub) {
-        const sb = clipText(en.sub, 30);
-        fitFont(sb, r.w - 8, '500', 8, "Barlow, 'Segoe UI', system-ui, sans-serif", 6);
-        ctx.fillStyle = '#475569';
-        ctx.fillText(sb, r.x + r.w / 2, r.y + r.h - 12);
-      }
+const TALES_ART = {
+  /* ------------------------------ the frame ------------------------------ */
+  'frame.back'(worn) {
+    // fully opaque: the live HUD underneath is noise here, not atmosphere
+    ctx.fillStyle = worn ? '#0a0705' : '#03060c';
+    ctx.fillRect(0, 0, W, H);
+    if (worn) codexWear();
+    ctx.strokeStyle = worn ? 'rgba(120,72,32,0.07)' : 'rgba(56,189,248,0.05)'; ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    taTag('frame.back', W - 70, 6);
+  },
+  'frame.title'(x, y, worn) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "800 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = worn ? '#e7d9c4' : '#e2e8f0';
+    ctx.fillText('CODEX', x, y);
+    if (worn) {
+      // struck through and re-titled in his hand
+      const tw = ctx.measureText('CODEX').width;
+      ctx.strokeStyle = INK; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - tw / 2 - 4, y + 4); ctx.lineTo(x + tw / 2 + 4, y - 4); ctx.stroke();
+      ctx.font = INK_FONT; ctx.fillStyle = INK; ctx.textAlign = 'left';
+      ctx.fillText('annotated', x + tw / 2 + 12, y + 8);
     }
+    taTag('frame.title', x - 60, y - 26);
+  },
 
-    // a tick in the margin where he had something to say about this one
-    if (worn && seen && KEEPER_NOTES[codexNoteKey(en)]) {
-      ctx.save();
-      ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85;
-      ctx.beginPath();
-      ctx.moveTo(r.x + 6, r.y + 9);
-      ctx.lineTo(r.x + 10, r.y + 15);
-      ctx.lineTo(r.x + 17, r.y + 5);
-      ctx.stroke();
-      ctx.restore();
+  /* ------------------------------- the rail ------------------------------- */
+  'rail.back'(x, y, w, h, worn) {
+    taCut(x, y, w, h, 12);
+    ctx.fillStyle = worn ? 'rgba(40,26,14,0.5)' : 'rgba(15,23,42,0.55)'; ctx.fill();
+    ctx.strokeStyle = worn ? 'rgba(107,90,68,0.4)' : 'rgba(51,65,85,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+    taTag('rail.back', x + 2, y - 12);
+  },
+  'rail.item'(r, tab, s) {
+    taCut(r.x, r.y, r.w, r.h, 7);
+    ctx.fillStyle = s.on ? 'rgba(103,232,249,0.13)' : s.hot ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.03)';
+    ctx.fill();
+    ctx.strokeStyle = s.on ? COL.player : s.open ? '#334155' : 'rgba(51,65,85,0.5)';
+    ctx.lineWidth = s.on ? 2 : 1; ctx.stroke();
+    const sz = Math.min(r.h * 0.62, 18);
+    TA('rail.seal', r.x + 6 + sz / 2, r.y + r.h / 2, sz, tab, s.open);
+    ctx.textBaseline = 'middle';
+    const tx = r.x + 12 + sz, big = !s.narrow && r.h >= 30;
+    ctx.textAlign = 'left';
+    fitFont(s.open ? tab.label : '? ? ? ?', r.w - (tx - r.x) - (big ? 6 : 4), '700', big ? 12 : 10,
+            "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = s.on ? COL.player : s.open ? '#94a3b8' : '#3f4a5c';
+    ctx.fillText(s.open ? tab.label : '? ? ? ?', tx, r.y + r.h / 2 - (big && s.tally ? 6 : 0));
+    if (big && s.tally) {
+      ctx.font = "600 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = '#475569';
+      const t = s.tally;
+      ctx.fillText(t.met + '/' + t.total + (tab.tales ? '   ·   ' + t.pages + '/' + t.of + ' pp' : ''), tx, r.y + r.h / 2 + 8);
     }
-  }
-  ctx.restore();
+    if (s.tally && s.tally.unread) {
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath(); ctx.arc(r.x + r.w - 9, r.y + 9, 3.2, 0, TAU); ctx.fill();
+    }
+    taTag('rail.item', r.x + r.w - 52, r.y - 6);
+  },
+  'rail.seal'(x, y, s, tab, open) {
+    ctx.translate(x, y);
+    ctx.rotate(Math.PI / 4);
+    ctx.strokeStyle = open ? '#64748b' : '#334155'; ctx.lineWidth = 1.4;
+    ctx.strokeRect(-s * 0.36, -s * 0.36, s * 0.72, s * 0.72);
+    ctx.rotate(-Math.PI / 4);
+    ctx.font = "700 " + Math.round(s * 0.42) + "px Barlow, sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = open ? '#94a3b8' : '#334155';
+    ctx.fillText(open ? tab.label.charAt(0) : '?', 0, 0.5);
+    taTag('rail.seal', -s / 2, -s / 2 - 12);
+  },
 
-  // scrollbar, only when there is something to scroll
-  const ms = codexMaxScroll();
-  if (ms > 0) {
-    const trackX = g.x0 + g.cw * g.cols + 10;
-    const th = g.viewH * (g.viewH / (g.viewH + ms));
-    const ty = g.clipY + (g.viewH - th) * (codexScroll / ms);
-    ctx.fillStyle = 'rgba(148,163,184,0.12)';
-    roundRect(trackX, g.clipY, 4, g.viewH, 2); ctx.fill();
-    ctx.fillStyle = 'rgba(148,163,184,0.45)';
-    roundRect(trackX, ty, 4, th, 2); ctx.fill();
-  }
+  /* ------------------------------- the grid ------------------------------- */
+  'grid.head'(x, y, w, text, worn) {
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    fitFont(text, w, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = worn ? '#8a7356' : '#64748b';
+    ctx.fillText(text, x, y);
+    ctx.fillStyle = worn ? 'rgba(107,90,68,0.35)' : 'rgba(71,85,105,0.35)';
+    ctx.fillRect(x, y + 9, w, 1);
+    taTag('grid.head', x + w - 60, y - 12);
+  },
+  'card.back'(r, col, s) {
+    taCut(r.x, r.y, r.w, r.h, s.item ? 6 : 10);
+    ctx.globalAlpha = s.seen ? 1 : 0.55;
+    ctx.fillStyle = s.sel ? rgba(col, 0.13) : s.hot ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.03)';
+    ctx.fill();
+    ctx.strokeStyle = s.sel ? col : 'rgba(71,85,105,0.6)'; ctx.lineWidth = s.sel ? 2 : 1;
+    ctx.stroke();
+    taTag('card.back', r.x + 2, r.y + 2);
+  },
+  'card.pips'(cx, y, w, states) {
+    const n = states.length, s = 7, gap = 5, x0 = cx - (n * s + (n - 1) * gap) / 2;
+    states.forEach((st, k) => {
+      const x = x0 + k * (s + gap);
+      ctx.beginPath(); ctx.rect(x, y - s / 2, s, s);
+      if (st === 'open' || st === 'new') { ctx.fillStyle = st === 'new' ? '#fbbf24' : '#94a3b8'; ctx.fill(); }
+      else if (st === 'sealed') { ctx.fillStyle = '#7f1d1d'; ctx.fill(); }
+      else { ctx.strokeStyle = st === 'none' ? 'rgba(71,85,105,0.4)' : st === 'held' ? '#475569' : '#64748b';
+             ctx.setLineDash(st === 'torn' ? [2, 1.5] : []); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
+    });
+    taTag('card.pips', x0 - 2, y + 6);
+  },
+  'card.unread'(x, y) {
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.fill();
+    taTag('card.unread', x - 60, y + 4);
+  },
+  'card.tick'(x, y) {
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x + 4, y + 10); ctx.lineTo(x + 11, y); ctx.stroke();
+    taTag('card.tick', x + 14, y);
+  },
+  'item.glyph'(kind, x, y, s, col, seen) {
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = seen ? 1 : 0.4;
+    ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.stroke();
+    ctx.font = "700 " + Math.round(s * 0.9) + "px Barlow, sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
+    ctx.fillText(kind.toUpperCase(), x, y + 1);
+    taTag('item.glyph', x - s, y - s - 12);
+  },
 
-  // detail panel
-  const en = list[codexSel];
-  if (en) {
-    const seen = codexSeen(en);
-    const dy = g.detailY + (g.tight ? 34 : 42);
-    ctx.save();
+  /* -------- portraits: entries with no drawing of their own in the fight -------- */
+  'portrait.pilot'(x, y, s, en, seen) {
+    const col = seen ? en.col : '#475569';
+    if (seen) { ctx.globalCompositeOperation = 'lighter'; drawGlow(x, y, s * 1.8, col, 0.24); ctx.globalCompositeOperation = 'source-over'; }
+    ctx.globalAlpha = seen ? 1 : 0.2;
+    ctx.translate(x, y); ctx.rotate(-Math.PI / 2);
+    ctx.beginPath(); ctx.moveTo(s * 1.1, 0); ctx.lineTo(-s * 0.8, s * 0.7); ctx.lineTo(-s * 0.45, 0); ctx.lineTo(-s * 0.8, -s * 0.7); ctx.closePath();
+    ctx.fillStyle = rgba(col, 0.18); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+    ctx.rotate(Math.PI / 2);
+    taTag('portrait.pilot', -s, -s - 12);
+  },
+  'portrait.awake'(x, y, s, en, seen) {
+    const col = seen ? en.col : '#475569';
+    ctx.globalAlpha = seen ? 1 : 0.2;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x, y, s * (1 + k * 0.28), 0, TAU); ctx.stroke(); }
+    TALES_ART['portrait.pilot'](x, y, s * 0.7, en, seen);
+    taTag('portrait.awake', x - s, y - s * 1.6 - 12);
+  },
+  'portrait.sector'(x, y, s, en, seen) {
+    const st = en.stage, w = s * 2.6;
+    ctx.globalAlpha = seen ? 1 : 0.25;
+    ctx.fillStyle = seen ? st.bg : '#0b0f17'; ctx.fillRect(x - w / 2, y - w / 2, w, w);
+    ctx.strokeStyle = seen ? st.grid2 : '#1e293b'; ctx.lineWidth = 1;
+    for (let k = 1; k < 5; k++) {
+      const t = -w / 2 + k * w / 5;
+      ctx.beginPath(); ctx.moveTo(x + t, y - w / 2); ctx.lineTo(x + t, y + w / 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - w / 2, y + t); ctx.lineTo(x + w / 2, y + t); ctx.stroke();
+    }
+    ctx.strokeStyle = seen ? st.wall : '#334155'; ctx.lineWidth = 2; ctx.strokeRect(x - w / 2, y - w / 2, w, w);
+    if (seen) { ctx.fillStyle = st.accent; ctx.beginPath(); ctx.arc(x, y, s * 0.18, 0, TAU); ctx.fill(); }
+    taTag('portrait.sector', x - w / 2, y - w / 2 - 12);
+  },
+  'portrait.room'(x, y, s, en, seen) {
+    const col = seen ? en.col : '#475569';
+    ctx.globalAlpha = seen ? 1 : 0.25;
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.rect(0, g.detailY + 6, W, Math.max(24, H - 30 - g.detailY - 6));
-    ctx.clip();
-    // a hairline between the shelf and the entry it is describing
-    ctx.fillStyle = 'rgba(71,85,105,0.3)';
-    ctx.fillRect(W / 2 - Math.min(340, W / 2 - 20), g.detailY + 12,
-                 Math.min(680, W - 40), 1);
-    const kind = CODEX_TABS[codexTab].id;
-    ctx.textAlign = 'center';
-    const title = seen ? (kind === 'u' ? upName(en.up) : en.n) : 'NOT YET ENCOUNTERED';
-    fitFont(title, W - 56, '700', g.tight ? 16 : 20,
-            "'Chakra Petch', Barlow, system-ui, sans-serif", 12);
-    ctx.fillStyle = !seen ? '#475569' : (kind === 'u' ? RARITY[en.rar] : en.col);
-    ctx.fillText(title, W / 2, dy);
-    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
-    if (kind === 'e' && en.boss) {
-      ctx.fillStyle = '#7f1d1d';
-      ctx.fillText('BOSS', W / 2, dy - 20);
-    } else if (seen && kind === 'u') {
-      ctx.fillStyle = '#475569';
-      ctx.fillText(en.rar.toUpperCase() + '   ·   UP TO ' + en.max, W / 2, dy - 20);
-    } else if (seen && en.sub) {
-      ctx.fillStyle = '#475569';
-      ctx.fillText(en.sub, W / 2, dy - 20);
-    }
+    ctx.moveTo(x - s * 0.8, y + s); ctx.lineTo(x - s * 0.8, y - s * 0.2);
+    ctx.arc(x, y - s * 0.2, s * 0.8, Math.PI, 0); ctx.lineTo(x + s * 0.8, y + s);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - s * 1.2, y + s); ctx.lineTo(x + s * 1.2, y + s); ctx.stroke();
+    taTag('portrait.room', x - s, y - s * 1.2 - 12);
+  },
+  'portrait.person'(x, y, s, en, seen) {
+    const col = seen ? en.col : '#475569';
+    ctx.globalAlpha = seen ? 1 : 0.25;
+    ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.14); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y - s * 0.35, s * 0.42, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - s * 0.9, y + s); ctx.quadraticCurveTo(x, y - s * 0.1, x + s * 0.9, y + s); ctx.fill(); ctx.stroke();
+    taTag('portrait.person', x - s, y - s - 14);
+  },
 
-    ctx.font = "400 12px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = seen ? '#94a3b8' : '#334155';
-    const own = kind === 'm' ? 'Install one and it will be recorded here.'
-              : kind === 'b' ? 'Carry one and it will be recorded here.'
-              : kind === 'z' ? 'Accept one and it will be recorded here.'
-              : 'Meet it once and it will be recorded here.';
-    const text = seen ? (kind === 'u' ? upDesc(en.up) : en.d) : own;
-    // zodiac entries carry flavour and effect on separate lines
-    let endY = dy + 24;
-    for (const para of String(text).split('\n')) {
-      endY = wrapText(para, W / 2, endY, Math.min(700, W - 80), 17) + 17;
+  /* -------------------------------- the book -------------------------------- */
+  'book.back'(worn) {
+    ctx.fillStyle = worn ? 'rgba(8,5,3,0.8)' : 'rgba(1,3,8,0.78)';
+    ctx.fillRect(0, 0, W, H);
+  },
+  'book.cover'(x, y, w, h, col, worn) {
+    ctx.fillStyle = worn ? '#2a1a10' : '#141019';
+    taCut(x - 10, y - 8, w + 20, h + 16, 14); ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(x + w / 2 - 3, y - 6, 6, h + 12);      // the spine
+    taTag('book.cover', x - 8, y - 20);
+  },
+  'book.page'(r, side, worn) {
+    ctx.fillStyle = worn ? TA_PAPER_WORN : TA_PAPER;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    // the gutter's shadow, on the spine side
+    const g = ctx.createLinearGradient(side === 'left' ? r.x + r.w : r.x, 0, side === 'left' ? r.x + r.w - 26 : r.x + 26, 0);
+    g.addColorStop(0, 'rgba(60,40,20,0.28)'); g.addColorStop(1, 'rgba(60,40,20,0)');
+    ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = 'rgba(90,70,40,0.25)'; ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 8, r.y + 8, r.w - 16, r.h - 16);
+    taTag('book.page', r.x + 10, r.y + r.h - 22);
+  },
+  'book.plate'(r, col, worn) {
+    ctx.fillStyle = '#0b0f17'; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = rgba(col, 0.75); ctx.lineWidth = 2; ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = 'rgba(90,70,40,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(r.x - 5, r.y - 5, r.w + 10, r.h + 10);
+    taTag('book.plate', r.x + 4, r.y + 4);
+  },
+  'book.pip'(r, roman, st, cur, hot) {
+    taCut(r.x, r.y, r.w, r.h, 5);
+    ctx.fillStyle = st === 'open' || st === 'new' ? (cur ? '#2a2118' : 'rgba(42,33,24,0.12)')
+                  : st === 'sealed' ? 'rgba(127,29,29,0.25)' : 'rgba(42,33,24,0.04)';
+    ctx.fill();
+    ctx.strokeStyle = cur ? '#2a2118' : hot ? '#6b5a44' : 'rgba(42,33,24,0.35)';
+    ctx.setLineDash(st === 'torn' ? [3, 2] : []); ctx.lineWidth = cur ? 2 : 1; ctx.stroke(); ctx.setLineDash([]);
+    ctx.font = "700 " + Math.round(r.h * 0.42) + "px Georgia, serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = cur && (st === 'open' || st === 'new') ? TA_PAPER : st === 'sealed' ? '#7f1d1d' : '#2a2118';
+    ctx.fillText(roman, r.x + r.w / 2, r.y + r.h / 2 + 1);
+    if (st === 'new') { ctx.fillStyle = '#d97706'; ctx.beginPath(); ctx.arc(r.x + r.w - 3, r.y + 3, 3, 0, TAU); ctx.fill(); }
+    taTag('book.pip', r.x, r.y + r.h + 2);
+  },
+  'ink.note'(x, y, w, note) {
+    ctx.translate(x, y); ctx.rotate(-0.03);
+    ctx.font = INK_FONT; ctx.fillStyle = INK; ctx.globalAlpha = 0.92;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    wrapText('— ' + note, 0, 0, w, 15);
+    taTag('ink.note', 0, -22);
+  },
+  'page.head'(cx, y, w, text, voice) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    fitFont(text, w, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = voice === 1 ? '#1e3a5f' : '#6b5a44';
+    ctx.fillText(text, cx, y);
+    ctx.fillStyle = 'rgba(90,70,40,0.35)'; ctx.fillRect(cx - w / 2, y + 11, w, 1);
+    taTag('page.head', cx + w / 2 - 54, y - 20);
+  },
+  'page.number'(cx, y, roman) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "400 13px Georgia, serif"; ctx.fillStyle = '#6b5a44';
+    ctx.fillText('— ' + roman + ' —', cx, y);
+    taTag('page.number', cx + 26, y - 6);
+  },
+  'page.more'(x, y, w, frac) {
+    const g = ctx.createLinearGradient(0, y - 26, 0, y);
+    g.addColorStop(0, 'rgba(230,220,198,0)'); g.addColorStop(1, 'rgba(230,220,198,0.95)');
+    ctx.fillStyle = g; ctx.fillRect(x - 4, y - 26, w + 8, 26);
+    if (frac < 0.98) {
+      ctx.font = "600 9px Barlow, sans-serif"; ctx.textAlign = 'right'; ctx.fillStyle = '#6b5a44';
+      ctx.fillText('MORE  ↓', x + w, y + 8);
     }
-    endY -= 17;
+    taTag('page.more', x, y - 12);
+  },
+  'page.blank'(r, roman) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "italic 400 14px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.5)';
+    ctx.fillText('This page is open.', r.x + r.w / 2, r.y + r.h * 0.4);
+    ctx.fillText('Its words are not written yet.', r.x + r.w / 2, r.y + r.h * 0.4 + 22);
+    taTag('page.blank', r.x, r.y);
+  },
+  'page.torn'(r, roman, how, prog) {
+    // the stub of a page torn out along the gutter
+    ctx.fillStyle = 'rgba(60,40,20,0.08)';
+    ctx.beginPath(); ctx.moveTo(r.x - 20, r.y - 30);
+    for (let k = 0; k <= 24; k++) ctx.lineTo(r.x + 14 + (k % 2 ? 9 : 0) + Math.sin(k * 1.7) * 4, r.y - 30 + k * (r.h + 60) / 24);
+    ctx.lineTo(r.x - 20, r.y + r.h + 30); ctx.closePath(); ctx.fill();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
+    ctx.font = "400 40px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.25)';
+    ctx.fillText(roman, cx, cy - 56);
+    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#6b5a44';
+    ctx.fillText('TORN OUT', cx, cy - 18);
+    ctx.font = "italic 400 16px Georgia, serif"; ctx.fillStyle = TA_INKD;
+    ctx.fillText('PAGE ' + roman + '  ·  ' + how, cx, cy + 10);
+    if (prog) { ctx.font = "600 12px 'Courier New', monospace"; ctx.fillStyle = '#6b5a44'; ctx.fillText(prog, cx, cy + 36); }
+    taTag('page.torn', r.x + 20, r.y);
+  },
+  'page.sealed'(r, roman) {
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
+    ctx.fillStyle = '#7f1d1d';
+    ctx.beginPath();
+    for (let k = 0; k < 14; k++) { const a = k / 14 * TAU, rr = 34 + (k % 2) * 4; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(254,226,226,0.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, 24, 0, TAU); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "400 20px Georgia, serif"; ctx.fillStyle = 'rgba(254,226,226,0.8)';
+    ctx.fillText(roman, cx, cy + 1);
+    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#7f1d1d';
+    ctx.fillText('SEALED', cx, cy + 58);
+    taTag('page.sealed', r.x, r.y);
+  },
+  'page.held'(r, roman, why) {
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "400 40px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.18)';
+    ctx.fillText(roman, cx, cy - 46);
+    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#6b5a44';
+    ctx.fillText('HELD', cx, cy - 10);
+    ctx.font = "italic 400 15px Georgia, serif"; ctx.fillStyle = TA_INKD;
+    ctx.fillText(why, cx, cy + 16);
+    taTag('page.held', r.x, r.y);
+  },
+  'book.turn'(r, dir, enabled, hot) {
+    taCut(r.x, r.y, r.w, r.h, 5);
+    ctx.fillStyle = hot && enabled ? 'rgba(42,33,24,0.14)' : 'rgba(42,33,24,0.04)'; ctx.fill();
+    ctx.strokeStyle = enabled ? '#6b5a44' : 'rgba(107,90,68,0.25)'; ctx.lineWidth = 1.4; ctx.stroke();
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, s = r.h * 0.2;
+    ctx.beginPath(); ctx.moveTo(cx - dir * s * 0.6, cy - s); ctx.lineTo(cx + dir * s * 0.6, cy); ctx.lineTo(cx - dir * s * 0.6, cy + s);
+    ctx.lineWidth = 2; ctx.stroke();
+    taTag('book.turn', r.x, r.y - 13);
+  },
+  'book.close'(r, hot) {
+    taCut(r.x, r.y, r.w, r.h, 5);
+    ctx.fillStyle = hot ? 'rgba(42,33,24,0.16)' : 'rgba(42,33,24,0.05)'; ctx.fill();
+    ctx.strokeStyle = '#6b5a44'; ctx.lineWidth = 1.4; ctx.stroke();
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, s = r.h * 0.2;
+    ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s);
+    ctx.lineWidth = 2; ctx.stroke();
+    taTag('book.close', r.x - 60, r.y + r.h + 2);
+  },
 
-    // his hand, under the printed entry, at the angle of somebody writing fast
-    const note = worn && seen && KEEPER_NOTES[codexNoteKey(en)];
-    if (note) {
-      ctx.save();
-      ctx.translate(W / 2, endY + 26);
-      ctx.rotate(-0.022);
-      ctx.font = INK_FONT;
-      ctx.fillStyle = INK;
-      ctx.globalAlpha = 0.92;
-      ctx.fillText('— ' + note, 0, 0);
-      // the underline he puts through his own sentences
-      const nw = ctx.measureText('— ' + note).width;
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = INK; ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(-nw / 2, 7); ctx.lineTo(nw / 2 - 4, 8.5);
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.restore();                       // end of the clipped detail block
+  /* --------------------------- the mid-run line --------------------------- */
+  'line.tale'(cx, y, text, a) {
+    ctx.globalAlpha = a;
+    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.letterSpacing = '0.1em';
+    const w = ctx.measureText(text).width + 28;
+    taCut(cx - w / 2, y - 12, w, 24, 6);
+    ctx.fillStyle = 'rgba(10,7,5,0.78)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(253,230,138,0.45)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fde68a';
+    ctx.fillText(text, cx, y + 1);
+    taTag('line.tale', cx - w / 2, y - 25);
   }
+};
 
-  ctx.save();
-  ctx.letterSpacing = '0.08em';
-  const ck = 'TAB / Q E section  ·  ARROWS / WHEEL browse  ·  ESC close';
-  fitFont(ck, W - 32, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
-  ctx.fillStyle = worn ? '#4a3d2c' : '#334155';
-  ctx.fillText(ck, W / 2, H - 18);
-  ctx.restore();
-  ctx.textBaseline = 'alphabetic';
+/* The line low on the screen when a page opens mid-run: one at a time, a few
+   seconds each, and the run never stops for it. */
+const TALE_LINE_LIFE = 3.6;
+function talesDrawLine() {
+  const L = Tales.lines;
+  if (!L.length) return;
+  if (state === 'menu' || state === 'codex') { L.length = 0; return; }
+  const it = L[0];
+  if (it.t < 0) it.t = uiTime;
+  const age = uiTime - it.t;
+  if (age > TALE_LINE_LIFE) { L.shift(); return; }
+  const a = clamp(Math.min(age / 0.35, (TALE_LINE_LIFE - age) / 0.6), 0, 1);
+  TA('line.tale', W / 2, Math.round(H * 0.86), 'A FORGOTTEN TALE  ·  ' + it.n + ', PAGE ' + TALE_ROMAN[it.i], a);
 }
-
-function openCodex(from) {
-  codexFrom = from || 'menu';
-  codexTab = 0; codexSel = 0; codexScroll = 0;
-  state = 'codex'; uiArm = 0.3;
-  Audio_.select();
-}
-function closeCodex() {
-  state = codexFrom === 'pause' ? 'pause' : 'menu';
-  uiArm = 0.3;
-  Audio_.select();
-}
-// keep the selected cell inside the viewport when moving by keyboard
-function codexReveal() {
-  const g = codexGeom();
-  const row = Math.floor(codexSel / g.cols);
-  const top = row * g.ch, bot = top + g.ch;
-  if (top < codexScroll) codexScroll = top;
-  else if (bot > codexScroll + g.viewH) codexScroll = bot - g.viewH;
-  codexScroll = clamp(codexScroll, 0, codexMaxScroll());
-}
+/* ====================== end of FORGOTTEN TALES art hooks ====================== */
 
 /* A die in its package: dark silicon, traces running out to the pins, and a
    core that pulses like something is executing on it that should not be. */
@@ -60935,7 +62624,7 @@ function devUnlockAll() {
   const before = JSON.stringify([p.planetarium, p.altPath, p.malware,
     p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
     !!p.outsiderIn, (p.chal || []).length, (p.codexE || []).length, (p.codexU || []).length,
-    (p.codexM || []).length, (p.codexB || []).length, (p.codexZ || []).length,
+    (p.codexM || []).length, (p.codexB || []).length, (p.codexZ || []).length, (p.codexG || []).length,
     p.rushBest || 0]);
 
   p.planetarium = true;      // reward rooms
@@ -60960,14 +62649,16 @@ function devUnlockAll() {
   p.codexM = add(p.codexM, MALWARE.map(m => m.id));  // and so THE HACKER flies
   p.codexB = add(p.codexB, Object.keys(BOOKS));
   p.codexZ = add(p.codexZ, SIGNS.map(s => s.id));
+  p.codexG = add(p.codexG, GEAR_BASES.map(b => b.id));
 
   const after = JSON.stringify([p.planetarium, p.altPath, p.malware,
     p.deepFracture, p.freeplay, p.keeperMet, p.keeperDone, p.trueEnd, p.clears,
     !!p.outsiderIn, p.chal.length, p.codexE.length, p.codexU.length,
-    p.codexM.length, p.codexB.length, p.codexZ.length,
+    p.codexM.length, p.codexB.length, p.codexZ.length, p.codexG.length,
     p.rushBest || 0]);
   if (before === after) return false;
   Codex.load();                       // the sets are read from the profile
+  Tales.sync(false);                  // and every page I they open: unlocked is met, never finished
   applyChar(p.charIdx || 0);
   Save.writeLocal(); Save.flush();
   return true;
@@ -62803,6 +64494,7 @@ const Account = {
     Save.profile.skin = skinClean(Save.profile.skin);
     Save.profile.awards = Awards.clean(Save.profile.awards);
     Codex.load();
+    Tales.load();
     devPerksApply();
     Save.reconcileClears();
     Save.writeLocal(); Save.flush();
@@ -65373,6 +67065,7 @@ const SNAP_LOCAL = new Set([
   'gfxSel', 'gfxFirstRun', 'gfxReturn', 'volRect', 'volDrag', 'sensRect', 'sensDrag',
   // menus and screens of one's own
   'uiArm', 'offerHover', 'nameBuf', 'lastStats', 'codexTab', 'codexSel', 'codexScroll', 'codexFrom',
+  'codexBook', 'codexPage', 'codexPageScroll', 'codexPageMax', 'codexDrag', 'taFrame',   // the codex's book (FORGOTTEN TALES)
   'setFrom', 'setSel', 'logReturn', 'logAuto', 'logScroll', 'logSince', 'logAutoDone', 'logWaitT', 'logDrag',
   'dailyFrom', 'dailySel', 'rushFrom', 'skinSel', 'skinScroll', 'skinFrom', 'skinDrag', 'skinDevOpen', 'skinSliderRects',
   'chalPassArm', 'chalPassNote', 'chalSel', 'chalScroll', 'chalFrom', 'chalPassRect', 'chalRows', 'chalStartRect',
@@ -65391,7 +67084,7 @@ const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'V
                    'rsSIM', 'rsSpark', 'rsBlow', 'rsPlume', 'rsCam', 'HL', 'Vigil', 'vig', 'hubState', 'hub', 'hubTut'];
 // and containers that are this machine's own
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
-  'Codex', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
+  'Codex', 'Tales', 'TA_TAGGED', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
@@ -68875,8 +70568,10 @@ function betaUnlockAll() {
   p.codexM = MALWARE.map(m => m.id);           // and so THE HACKER is flyable
   p.codexB = Object.keys(BOOKS);
   p.codexZ = SIGNS.map(s => s.id);
+  p.codexG = GEAR_BASES.map(b => b.id);
   if (!p.name) p.name = 'BETA';
   Codex.load();                                 // the sets read from the profile
+  Tales.load(); Tales.openAll();                // and every page, to read (FORGOTTEN TALES)
   applyChar(p.charIdx || 0);
 }
 
