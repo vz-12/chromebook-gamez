@@ -341,7 +341,16 @@ section('the account');
 section('the frame');
 take(g.run(`(() => { ${KIT}
   state = 'menu';
+  // every hook, watched: how often it is drawn, and whether it ever throws (TA swallows that)
+  const calls = {}, thrown = {};
+  for (const k of Object.keys(TALES_ART)) {
+    const f = TALES_ART[k];
+    TALES_ART[k] = function (...a) { calls[k] = (calls[k] | 0) + 1; try { return f.apply(this, a); } catch (e) { thrown[k] = thrown[k] || e.message; throw e; } };
+  }
   Tales.openAll();
+  // one of each item carried, so the item sections open and their books are drawn
+  Codex.u.add(UPGRADES[0].id); Codex.m.add(MALWARE[0].id); Codex.b.add(Object.keys(BOOKS)[0]);
+  Codex.z.add(SIGNS[0].id); Codex.g.add(GEAR_BASES[0].id);
   for (const [w, h] of [[1280, 720], [1366, 768], [800, 600], [640, 360]]) {
     W = w; H = h;
     const errs = [];
@@ -366,6 +375,10 @@ take(g.run(`(() => { ${KIT}
     chk(B.x >= 0 && B.y >= 0 && B.x + B.w <= W && B.y + B.h <= H, 'the book fits at ' + w + 'x' + h, B);
   }
   W = 1280; H = 720;
+  // a torn page and a fresh copy too: openAll leaves none torn, and the record was handed back above
+  { const keep = Save.profile.keeperDone; Save.profile.keeperDone = false;
+    Tales.p['e:grunt'] = 1; codexTab = 0; codexBook = 0; codexPage = 2; drawCodex();
+    codexBook = -1; drawCodex(); Save.profile.keeperDone = keep; }
   closeCodex(); chk(state === 'menu', 'Esc from the grid closes the codex');
   // keys
   openCodex('menu'); uiArm = 0;
@@ -405,6 +418,9 @@ take(g.run(`(() => { ${KIT}
     chk(Tales.lines.length === 1 && Tales.lines[0].i === 0, 'meeting something in a run: its line', Tales.lines);
     let threw = false; try { talesDrawLine(); uiTime += 5; talesDrawLine(); } catch (e) { threw = true; }
     chk(!threw && Tales.lines.length === 0, 'drawn, and gone after a few seconds'); }
+  chk(!Object.keys(thrown).length, 'no art hook throws', thrown);
+  const never = Object.keys(TALES_ART).filter(k => !calls[k]);
+  chk(Object.keys(TALES_ART).length === 32 && !never.length, 'all 32 art hooks are drawn somewhere', never);
   return JSON.stringify(C);
 })()`));
 

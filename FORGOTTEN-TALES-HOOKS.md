@@ -1,9 +1,10 @@
 # FORGOTTEN TALES: the codex's art hooks
 
-Every visual piece of the new codex is a placeholder that names itself: with
-hook labels on (the default; add `?hooks=0` to the address to hide them), the
-first piece each hook draws in a frame carries its name in a small yellow tag.
-Draw over them one at a time, in any order.
+Every visual piece of the new codex is drawn by one of these hooks. The art
+was drawn over them on 6 Oct 2026 (the block's own header, "THE LOOK", says how
+it reads). Add `?hooks=1` to the address to tag each piece with its hook's
+name: the first piece each hook draws in a frame carries it in a small yellow
+tag.
 
 All the hooks are in one block of `index.html`, from
 `FORGOTTEN TALES — art hooks` down to `end of FORGOTTEN TALES art hooks`, as
@@ -13,6 +14,12 @@ entries of the `TALES_ART` object. Replace the block whole, or any one entry.
 - **Sandboxed.** `TA(name, ...)` calls the hook inside `ctx.save()` /
   `ctx.restore()`, so a hook can leave the canvas however it likes.
 - **Fails alone.** A hook that throws loses only its own piece, not the codex.
+  `npm run test:tales` draws every hook and fails if one throws or is never
+  drawn.
+- **Its own caches.** A top-level `let` or a cache that starts empty (`new
+  Map()`, `[]`) must be listed in `SNAP_LOCAL` / `SNAP_LOCAL_OBJS` (RUN
+  SNAPSHOTS in `index.html`), or the run snapshots try to carry it. The art's
+  are: `taWorn`, `_taMix`, `_taBack`.
 - **Your call on text.** The layout around the hooks (`codex UI` in
   `index.html`) draws the names, the plate's figures and the tale text itself.
   A hook may draw its own text instead, where it is handed it (`page.head`,
@@ -101,6 +108,6 @@ its own colours); `seen` is false for a silhouette.
 
 ## Seeing every hook at once
 
-On a local server, open `/?beta=1`. That build unlocks everything, every page
-included, and has the Bookkeeper's annotations. Then open the codex (X at the
-menu).
+On a local server, open `/?beta=1&hooks=1`. That build unlocks everything,
+every page included, and has the Bookkeeper's annotations. Then open the codex
+(X at the menu).

@@ -58317,7 +58317,7 @@ function codexListOf(id) {
                 return en.ref === 'library' && !!p.altPath;
               }).map(codexRow);
     case 'n': return talesAll().filter(en => en.sec === 'n' && met(en)).map(codexRow);
-    case 'u': return UPGRADES.map(u => ({ key: u.id, item: 'u', up: u, rar: u.rar, max: u.max }));
+    case 'u': return UPGRADES.map(u => ({ key: u.id, item: 'u', up: u, rar: u.rar, max: u.max, col: RARITY[u.rar] }));
     case 'm': return MALWARE.map(m => ({ key: m.id, item: 'm', noteKey: 'mal_' + m.id, n: m.n, d: m.d, col: m.col }));
     case 'b': return Object.keys(BOOKS).map(k => ({ key: k, item: 'b', noteKey: 'book_' + k,
                 n: BOOKS[k].n, d: BOOKS[k].d, col: BOOKS[k].col,
@@ -59234,9 +59234,8 @@ function codexWear() {
 
    Each draws only, in screen space, and changes nothing. TA() calls a hook
    inside save/restore, so a hook may leave the canvas however it likes, and a
-   hook that throws costs only its own piece. What is here now is a placeholder
-   that names itself: with TALES_HOOK_LABELS on (the default; ?hooks=0 hides
-   them), the first piece each hook draws in a frame carries its name.
+   hook that throws costs only its own piece. ?hooks=1 tags each piece with
+   its hook's name, the first time it is drawn in a frame.
 
      frame.back    (worn)                         the codex's backdrop, whole screen
      frame.title   (x, y, worn)                   CODEX, and his re-titling once annotated
@@ -59271,8 +59270,18 @@ function codexWear() {
    Page states: 'open' (read), 'new' (open, not read), 'torn', 'held',
    'sealed', and 'none' (the entry itself not yet met). Voices: 0 THE RECORD,
    1 THE MAKER'S NOTE, 2 THE TALE, 3 a sealed page, once opened.
+
+   THE LOOK (6 Oct 2026). Flat geometry, drawn once and kept still: layered
+   surfaces of one slate family, hairline rules, and the game's own shapes
+   (hexagons, the hulls' real outlines). Three marks mean the same thing
+   everywhere they appear:
+     a corner cut off      every panel, card and pip is dog-eared at its top right
+     the fold filled gold  pages there are not yet read (rail, card, pip)
+     a diamond             a page: filled once read, dashed while torn, wax once sealed
+   Each section has its own hue (TA_HUE). His copy, once the Bookkeeper hands
+   it back, is the same drawing in sepia, with his red ink over it.
 --------------------------------------------------------------------------- */
-const TALES_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') !== '0'; } catch (e) { return true; } })();
+const TALES_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') === '1'; } catch (e) { return false; } })();
 const TA_TAGGED = new Set();             // hooks already named this frame
 let taFrame = -1;
 
@@ -59284,13 +59293,14 @@ function TA(name, ...a) {
   try { f(...a); } catch (e) { /* a bad piece must not take the codex with it */ }
   ctx.restore();
 }
-// a placeholder naming itself: once a frame per hook, small, at (x, y)
+// a piece naming itself: once a frame per hook, small, at (x, y). Off unless ?hooks=1
 function taTag(name, x, y) {
   if (!TALES_HOOK_LABELS || TA_TAGGED.has(name)) return;
   TA_TAGGED.add(name);
   ctx.save();
   ctx.font = "600 8px 'Courier New', Consolas, monospace";
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.letterSpacing = '0px';
   const w = ctx.measureText(name).width + 6;
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = 'rgba(250,204,21,0.9)';
@@ -59307,344 +59317,1408 @@ function taCut(x, y, w, h, c) {
   ctx.lineTo(x + w - c, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + c);
   ctx.closePath();
 }
-const TA_PAPER = '#e6dcc6', TA_PAPER_WORN = '#d5c6a6', TA_INKD = '#2a2118';
+
+/* ------------------------------ the palette ------------------------------
+   One family of surfaces per copy, darkest first. The fresh copy is a cool
+   slate; his annotated copy is the same set of roles in sepia. */
+const TA_TONE = [
+  { bg0: '#070910', bg1: '#0c0f1c', s1: '#10142a', s2: '#151a33', s3: '#1d2343',
+    line: '#262e52', line2: '#3a447a', txt: '#e8ebf7', dim: '#97a0c4', mute: '#5f6992',
+    faint: '#343c60', paper: '#e6e1d6', plate: '#0a0d18' },
+  { bg0: '#0b0806', bg1: '#120d09', s1: '#18110c', s2: '#1f1710', s3: '#2b2016',
+    line: '#3a2b1d', line2: '#5a442e', txt: '#f0e3cc', dim: '#b29a76', mute: '#7d6649',
+    faint: '#47372a', paper: '#d8caab', plate: '#120d09' }
+];
+const taT = worn => TA_TONE[worn ? 1 : 0];
+let taWorn = false;                      // the copy being drawn this frame: frame.back and book.page set it
+// each section's hue, by CODEX_TABS id
+const TA_HUE = { e: '#fb7185', x: '#f59e0b', p: '#67e8f9', s: '#a78bfa', n: '#e2e8f0',
+                 u: '#60a5fa', m: '#a3e635', b: '#fcd34d', z: '#f0abfc', g: '#2dd4bf' };
+const TA_GOLD = '#fbbf24', TA_WAX = '#8f1d24', TA_WAX_HI = '#fecdd3', TA_DIM = '#64748b';
+const TA_INK = '#2a2118';                // the book's own ink, on its paper (not his: that is INK)
+// the voices' colours, for their headers: THE RECORD, THE MAKER'S NOTE, THE TALE, sealed
+const TA_VOICE = ['#6b5a44', '#1e3a5f', '#5b2333', '#7f1d1d'];
+const TA_FONT = {
+  disp: "'Chakra Petch', Barlow, system-ui, sans-serif",
+  ui:   "Barlow, 'Segoe UI', system-ui, sans-serif",
+  mono: "'JetBrains Mono', Consolas, monospace",
+  book: "Georgia, 'Palatino Linotype', 'Book Antiqua', serif"
+};
+// kept for anything that still reads them
+const TA_PAPER = TA_TONE[0].paper, TA_PAPER_WORN = TA_TONE[1].paper, TA_INKD = TA_INK;
+
+const _taMix = new Map();
+function taMix(a, b, t) {
+  const k = a + b + t;
+  let v = _taMix.get(k);
+  if (v) return v;
+  const A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16);
+  const ch = s => Math.round(((A >> s) & 255) * (1 - t) + ((B >> s) & 255) * t);
+  v = '#' + ((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1);
+  _taMix.set(k, v);
+  return v;
+}
+// a section's hue; his copy pulls every hue toward the sepia
+const taHue = (id, worn) => { const h = TA_HUE[id] || '#94a3b8'; return worn ? taMix(h, '#c9a676', 0.45) : h; };
+const taAged = (col, worn) => (worn && col && col[0] === '#' ? taMix(col, '#c9a676', 0.4) : col);
+// wear and scatter from a fixed hash, so nothing crawls from frame to frame
+const taHash = n => { const x = Math.sin(n * 12.9898 + 4.1) * 43758.5453; return x - Math.floor(x); };
+
+/* -------------------------------- shapes -------------------------------- */
+// how far in from the gutter the layout set a page's text block: min(40, 8% of the page)
+const taInset = r => Math.min(40, r.w * 0.08 / 0.84);
+// a dog-eared rectangle: its top-right corner folded away
+function taDog(x, y, w, h, c) {
+  c = Math.min(c, w / 3, h / 3);
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + w - c, y); ctx.lineTo(x + w, y + c);
+  ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h);
+  ctx.closePath();
+}
+// the fold itself, filled: on a dog-ear, pages there not yet read
+function taFold(x, y, w, h, c, col) {
+  c = Math.min(c, w / 3, h / 3);
+  ctx.beginPath();
+  ctx.moveTo(x + w - c, y); ctx.lineTo(x + w, y + c); ctx.lineTo(x + w - c, y + c);
+  ctx.closePath();
+  ctx.fillStyle = col; ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x + w - c, y + c); ctx.lineTo(x + w, y + c); ctx.stroke();
+}
+function taDiamond(x, y, r) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y);
+  ctx.closePath();
+}
+function taStar(x, y, n, ro, ri, rot) {
+  ctx.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = rot + i * Math.PI / n, rr = i % 2 ? ri : ro;
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+}
+// four corner brackets around a box
+function taBrackets(x, y, w, h, l) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + l); ctx.lineTo(x, y); ctx.lineTo(x + l, y);
+  ctx.moveTo(x + w - l, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + l);
+  ctx.moveTo(x + w, y + h - l); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - l, y + h);
+  ctx.moveTo(x + l, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - l);
+  ctx.stroke();
+}
+// letter-spaced text, placed by its real width (the spacing after the last letter left out)
+function taSpaced(t, x, y, ls, align) {
+  ctx.letterSpacing = ls + 'px';
+  const w = Math.max(0, ctx.measureText(t).width - ls);
+  ctx.textAlign = 'left';
+  ctx.fillText(t, align === 'center' ? x - w / 2 : align === 'right' ? x - w : x, y);
+  ctx.letterSpacing = '0px';
+  return w;
+}
+function taSpacedW(t, ls) {
+  ctx.letterSpacing = ls + 'px';
+  const w = Math.max(0, ctx.measureText(t).width - ls);
+  ctx.letterSpacing = '0px';
+  return w;
+}
+// drawGlow leaves globalAlpha at 1 and the composite as it found it: keep both ours
+function taGlow(x, y, r, col, a) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, r, col, a);
+  ctx.restore();
+}
+// centred lines of text inside a width, top line at y; hands back the last line's y
+function taWrapC(text, cx, y, w, lh) {
+  const words = String(text).split(' ');
+  let line = '', yy = y;
+  for (const wd of words) {
+    const t = line ? line + ' ' + wd : wd;
+    if (line && ctx.measureText(t).width > w) { ctx.fillText(line, cx, yy); line = wd; yy += lh; }
+    else line = t;
+  }
+  if (line) ctx.fillText(line, cx, yy);
+  return yy;
+}
+
+/* The hulls, off hullPath()'s own points (x forward, y to starboard), so a
+   pilot's portrait is its hull and not a drawing of one. */
+const TA_HULL = {
+  runner: [18, 0, 9, 3.4, 5.5, 8.5, -5, 13, -8.5, 9.5, -6, 4.2, -10.5, 3.2, -6.5, 0, -10.5, -3.2, -6, -4.2, -8.5, -9.5, -5, -13, 5.5, -8.5, 9, -3.4],
+  ember:  [22, 0, 13, 2.6, 9, 7, 2, 13.5, -7, 12, -5, 4.6, -12, 3.2, -9, 0, -12, -3.2, -5, -4.6, -7, -12, 2, -13.5, 9, -7, 13, -2.6],
+  hacker: [18, 0, 4, 6, 10, 13, -4, 11, -9, 0, -4, -11, 10, -13, 4, -6],
+  melee:  [12.6, 0, 10.4, 4.4, 11.4, 10.2, 2.4, 13.2, -6.4, 12, -9.2, 6, -15, 4, -12.8, 0, -15, -4, -9.2, -6, -6.4, -12, 2.4, -13.2, 11.4, -10.2, 10.4, -4.4]
+};
+// a hull nose up, k pixels to a hull unit, its hull origin at (x, y)
+function taHullPath(id, x, y, k) {
+  const p = TA_HULL[id] || TA_HULL.runner;
+  ctx.beginPath();
+  for (let i = 0; i < p.length; i += 2) {
+    const px = x + p[i + 1] * k, py = y - p[i] * k;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/* The backdrop's still part, drawn once per size and copy and blitted after:
+   a whole-screen pass of points every frame would cost more than the codex. */
+const _taBack = new Map();
+function taBackdrop(worn) {
+  const d = typeof DPR === 'number' ? DPR : 1;
+  const key = W + 'x' + H + '@' + d + (worn ? 'w' : '');
+  let c = _taBack.get(key);
+  if (c) return c;
+  if (_taBack.size >= 4) _taBack.clear();
+  c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(W * d)); c.height = Math.max(1, Math.ceil(H * d));
+  const g = c.getContext('2d'), T = taT(worn);
+  g.scale(d, d);
+  const head = H < 520 ? 66 : 82;
+  // the floor darkens away from the header band, which is the lightest layer
+  g.fillStyle = T.bg0; g.fillRect(0, 0, W, H);
+  const gr = g.createLinearGradient(0, head, 0, H);
+  gr.addColorStop(0, T.bg1); gr.addColorStop(1, T.bg0);
+  g.fillStyle = gr; g.fillRect(0, head, W, H - head);
+  g.fillStyle = T.s1; g.fillRect(0, 0, W, head);
+  g.fillStyle = T.line; g.fillRect(0, head, W, 1);
+  // a triangular lattice of points under everything, the book's ruling
+  g.fillStyle = T.line2;
+  const sx = 24, sy = sx * 0.866;
+  let row = 0;
+  for (let y = head + 14; y < H; y += sy, row++) {
+    for (let x = (row % 2) * sx / 2 + 6, i = 0; x < W; x += sx, i++) {
+      const h = taHash(row * 97 + i * 7.31);
+      if (worn && h < 0.28) continue;                // his copy has lost some
+      g.globalAlpha = 0.16 + h * 0.14;
+      g.fillRect(x - 0.6, y - 0.6, 1.2, 1.2);
+    }
+  }
+  g.globalAlpha = 1;
+  // the watermark: three hexagons nested behind the grid
+  const cx = W * 0.8, cy = H * 0.6, R = Math.max(W, H) * 0.42;
+  g.strokeStyle = T.line; g.lineWidth = 1;
+  for (let k = 0; k < 3; k++) {
+    const r = R * (1 - k * 0.22), a0 = -Math.PI / 2 + k * Math.PI / 6;
+    g.globalAlpha = 0.55 - k * 0.12;
+    g.beginPath();
+    for (let i = 0; i < 6; i++) { const a = a0 + i * Math.PI / 3; i ? g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r) : g.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
+    g.closePath(); g.stroke();
+  }
+  g.globalAlpha = 1;
+  if (worn) {
+    // his wear, kept to clean shapes: a cup set down twice, a fold, the edges gone dark
+    g.strokeStyle = 'rgba(140,86,38,0.2)'; g.lineWidth = 5;
+    g.beginPath(); g.arc(W * 0.86, H * 0.25, 52, 0, Math.PI * 2); g.stroke();
+    g.lineWidth = 1.5;
+    g.beginPath(); g.arc(W * 0.86 + 9, H * 0.25 + 4, 46, 0.5, 5.1); g.stroke();
+    g.beginPath(); g.arc(W * 0.12, H * 0.82, 40, 2.2, 6.0); g.stroke();
+    g.strokeStyle = 'rgba(255,236,200,0.05)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, H * 0.57); g.lineTo(W, H * 0.5); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,0.3)';
+    g.beginPath(); g.moveTo(0, H * 0.57 + 1.5); g.lineTo(W, H * 0.5 + 1.5); g.stroke();
+    const v = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
+    g.fillStyle = v; g.fillRect(0, 0, W, H);
+  }
+  _taBack.set(key, c);
+  return c;
+}
 
 const TALES_ART = {
   /* ------------------------------ the frame ------------------------------ */
   'frame.back'(worn) {
+    taWorn = !!worn;
     // fully opaque: the live HUD underneath is noise here, not atmosphere
-    ctx.fillStyle = worn ? '#0a0705' : '#03060c';
-    ctx.fillRect(0, 0, W, H);
-    if (worn) codexWear();
-    ctx.strokeStyle = worn ? 'rgba(120,72,32,0.07)' : 'rgba(56,189,248,0.05)'; ctx.lineWidth = 1;
-    for (let x = 0; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-    for (let y = 0; y < H; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.drawImage(taBackdrop(worn), 0, 0, W, H);
+    // one ring of the watermark turns, slowly enough to notice only once
+    ctx.strokeStyle = worn ? 'rgba(201,166,118,0.1)' : 'rgba(103,232,249,0.07)';
+    ctx.lineWidth = 1; ctx.setLineDash([2, 12]);
+    poly(W * 0.8, H * 0.6, Math.max(W, H) * 0.25, 6, -Math.PI / 2 + uiTime * 0.012);
+    ctx.stroke();
     taTag('frame.back', W - 70, 6);
   },
   'frame.title'(x, y, worn) {
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = "800 30px 'Chakra Petch', Barlow, system-ui, sans-serif";
-    ctx.fillStyle = worn ? '#e7d9c4' : '#e2e8f0';
-    ctx.fillText('CODEX', x, y);
+    const T = taT(worn), hue = taHue('p', worn);
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 26px ' + TA_FONT.disp;
+    ctx.fillStyle = T.txt;
+    const tw = taSpaced('CODEX', x, y + 1, 9, 'center');
+    // its rule: out to each side from a hexagon, fading
+    for (const d of [-1, 1]) {
+      const hx = x + d * (tw / 2 + 18);
+      ctx.fillStyle = hue;
+      poly(hx, y, 4, 6, -Math.PI / 2); ctx.fill();
+      const x0 = hx + d * 9, x1 = hx + d * 90;
+      const g = ctx.createLinearGradient(x0, 0, x1, 0);
+      g.addColorStop(0, rgba(hue, 0.7)); g.addColorStop(1, rgba(hue, 0));
+      ctx.fillStyle = g; ctx.fillRect(Math.min(x0, x1), y - 0.5, Math.abs(x1 - x0), 1);
+    }
     if (worn) {
       // struck through and re-titled in his hand
-      const tw = ctx.measureText('CODEX').width;
-      ctx.strokeStyle = INK; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x - tw / 2 - 4, y + 4); ctx.lineTo(x + tw / 2 + 4, y - 4); ctx.stroke();
+      ctx.strokeStyle = INK; ctx.lineCap = 'round';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.moveTo(x - tw / 2 - 8, y + 5); ctx.quadraticCurveTo(x, y + 1, x + tw / 2 + 8, y - 4); ctx.stroke();
+      ctx.lineWidth = 1.2; ctx.globalAlpha = 0.6;
+      ctx.beginPath(); ctx.moveTo(x - tw / 2 - 2, y + 8); ctx.quadraticCurveTo(x + 4, y + 3, x + tw / 2 + 12, y - 1); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.translate(x + tw / 2 + 20, y + 13); ctx.rotate(-0.07);
       ctx.font = INK_FONT; ctx.fillStyle = INK; ctx.textAlign = 'left';
-      ctx.fillText('annotated', x + tw / 2 + 12, y + 8);
+      ctx.fillText('annotated', 0, 0);
     }
     taTag('frame.title', x - 60, y - 26);
   },
 
   /* ------------------------------- the rail ------------------------------- */
   'rail.back'(x, y, w, h, worn) {
-    taCut(x, y, w, h, 12);
-    ctx.fillStyle = worn ? 'rgba(40,26,14,0.5)' : 'rgba(15,23,42,0.55)'; ctx.fill();
-    ctx.strokeStyle = worn ? 'rgba(107,90,68,0.4)' : 'rgba(51,65,85,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+    const T = taT(worn);
+    taDog(x, y, w, h, 14);
+    ctx.fillStyle = rgba(T.s1, 0.92); ctx.fill();
+    ctx.strokeStyle = T.line; ctx.lineWidth = 1; ctx.stroke();
     taTag('rail.back', x + 2, y - 12);
   },
   'rail.item'(r, tab, s) {
-    taCut(r.x, r.y, r.w, r.h, 7);
-    ctx.fillStyle = s.on ? 'rgba(103,232,249,0.13)' : s.hot ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.03)';
+    const T = taT(s.worn), hue = taHue(tab.id, s.worn), c = Math.min(9, r.h * 0.3);
+    const big = !s.narrow && r.h >= 32, t = s.tally, my = r.y + r.h / 2;
+    taDog(r.x, r.y, r.w, r.h, c);
+    ctx.fillStyle = s.on ? taMix(T.s2, hue, 0.15) : s.hot ? T.s3 : s.open ? T.s2 : T.s1;
     ctx.fill();
-    ctx.strokeStyle = s.on ? COL.player : s.open ? '#334155' : 'rgba(51,65,85,0.5)';
-    ctx.lineWidth = s.on ? 2 : 1; ctx.stroke();
-    const sz = Math.min(r.h * 0.62, 18);
-    TA('rail.seal', r.x + 6 + sz / 2, r.y + r.h / 2, sz, tab, s.open);
-    ctx.textBaseline = 'middle';
-    const tx = r.x + 12 + sz, big = !s.narrow && r.h >= 30;
-    ctx.textAlign = 'left';
-    fitFont(s.open ? tab.label : '? ? ? ?', r.w - (tx - r.x) - (big ? 6 : 4), '700', big ? 12 : 10,
-            "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
-    ctx.fillStyle = s.on ? COL.player : s.open ? '#94a3b8' : '#3f4a5c';
-    ctx.fillText(s.open ? tab.label : '? ? ? ?', tx, r.y + r.h / 2 - (big && s.tally ? 6 : 0));
-    if (big && s.tally) {
-      ctx.font = "600 9px Barlow, 'Segoe UI', system-ui, sans-serif";
-      ctx.fillStyle = '#475569';
-      const t = s.tally;
-      ctx.fillText(t.met + '/' + t.total + (tab.tales ? '   ·   ' + t.pages + '/' + t.of + ' pp' : ''), tx, r.y + r.h / 2 + 8);
+    if (s.open) { ctx.strokeStyle = s.on ? hue : s.hot ? T.line2 : T.line; ctx.lineWidth = s.on ? 1.5 : 1; }
+    else { ctx.strokeStyle = T.faint; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); }
+    ctx.stroke(); ctx.setLineDash([]);
+    if (s.on) {
+      // a pointer from the open section into its grid
+      ctx.fillStyle = hue;
+      ctx.beginPath(); ctx.moveTo(r.x + r.w + 1, my - 5); ctx.lineTo(r.x + r.w + 7, my); ctx.lineTo(r.x + r.w + 1, my + 5);
+      ctx.closePath(); ctx.fill();
     }
-    if (s.tally && s.tally.unread) {
-      ctx.fillStyle = '#fbbf24';
-      ctx.beginPath(); ctx.arc(r.x + r.w - 9, r.y + 9, 3.2, 0, TAU); ctx.fill();
+    // the seal, on a chip of its hue while the section is open
+    const sz = Math.min(r.h * 0.62, 18), sx = r.x + 6 + sz / 2;
+    if (s.on) { ctx.fillStyle = rgba(hue, 0.2); poly(sx, my, sz * 0.74, 6, -Math.PI / 2); ctx.fill(); }
+    TA('rail.seal', sx, my, sz, tab, s.open);
+    // the name, and under it how much of the section is met
+    const tx = r.x + 12 + sz, room = r.x + r.w - tx - (t && t.unread ? c + 10 : 6);
+    const label = s.open ? tab.label : '? ? ? ?';
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.letterSpacing = '1px';
+    fitFont(label, room, '700', big ? 12 : 10, TA_FONT.ui, 7);
+    ctx.fillStyle = s.on || (s.open && s.hot) ? T.txt : s.open ? T.dim : T.faint;
+    ctx.fillText(label, tx, my - (big && t ? 5 : 0));
+    ctx.letterSpacing = '0px';
+    if (big && t) {
+      ctx.font = '500 9px ' + TA_FONT.mono;
+      let txt = t.met + '/' + t.total + (tab.tales ? '  ·  ' + t.pages + '/' + t.of + ' pp' : '');
+      if (ctx.measureText(txt).width > room) txt = t.met + '/' + t.total;
+      ctx.fillStyle = s.on ? rgba(hue, 0.9) : T.mute;
+      ctx.fillText(txt, tx, my + 8);
+    }
+    if (t && t.total) {
+      const lx = tx, lw = r.x + r.w - 8 - lx, ly = r.y + r.h - 3;
+      ctx.fillStyle = T.line; ctx.fillRect(lx, ly, lw, 1);
+      ctx.fillStyle = s.on ? hue : rgba(hue, 0.5); ctx.fillRect(lx, ly - 0.5, lw * t.met / t.total, 2);
+    }
+    // pages not yet read: the corner folded in gold, and how many
+    if (t && t.unread) {
+      taFold(r.x, r.y, r.w, r.h, c, TA_GOLD);
+      if (!s.narrow) {
+        ctx.font = '700 9px ' + TA_FONT.mono; ctx.fillStyle = TA_GOLD; ctx.textAlign = 'right';
+        ctx.fillText(String(t.unread), r.x + r.w - c - 3, r.y + Math.max(6, c * 0.6));
+      }
     }
     taTag('rail.item', r.x + r.w - 52, r.y - 6);
   },
   'rail.seal'(x, y, s, tab, open) {
+    const u = s * 0.5, col = open ? taHue(tab.id, taWorn) : taT(taWorn).faint;
     ctx.translate(x, y);
-    ctx.rotate(Math.PI / 4);
-    ctx.strokeStyle = open ? '#64748b' : '#334155'; ctx.lineWidth = 1.4;
-    ctx.strokeRect(-s * 0.36, -s * 0.36, s * 0.72, s * 0.72);
-    ctx.rotate(-Math.PI / 4);
-    ctx.font = "700 " + Math.round(s * 0.42) + "px Barlow, sans-serif";
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = open ? '#94a3b8' : '#334155';
-    ctx.fillText(open ? tab.label.charAt(0) : '?', 0, 0.5);
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    ctx.lineWidth = Math.max(1.2, s * 0.075); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    if (!open) {
+      // locked: a dashed hexagon with a padlock in it
+      ctx.setLineDash([2, 2]); poly(0, 0, u, 6, -Math.PI / 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillRect(-u * 0.34, -u * 0.04, u * 0.68, u * 0.52);
+      ctx.beginPath(); ctx.arc(0, -u * 0.04, u * 0.23, Math.PI, 0); ctx.stroke();
+      return;
+    }
+    switch (tab.id) {
+      case 'e':                          // ENEMIES: a hostile shape, point down
+        poly(0, 0, u, 6, -Math.PI / 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-u * 0.44, -u * 0.24); ctx.lineTo(u * 0.44, -u * 0.24); ctx.lineTo(0, u * 0.5); ctx.closePath(); ctx.fill();
+        break;
+      case 'x':                          // BOSSES: a crown
+        ctx.beginPath();
+        ctx.moveTo(-u * 0.86, u * 0.55); ctx.lineTo(-u * 0.86, -u * 0.3); ctx.lineTo(-u * 0.42, u * 0.08);
+        ctx.lineTo(0, -u * 0.78); ctx.lineTo(u * 0.42, u * 0.08); ctx.lineTo(u * 0.86, -u * 0.3); ctx.lineTo(u * 0.86, u * 0.55);
+        ctx.closePath();
+        ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1; ctx.stroke();
+        break;
+      case 'p':                          // PILOTS: VOIDRUNNER's own hull
+        taHullPath('runner', 0, u * 0.28, u / 14.5);
+        ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1; ctx.stroke();
+        break;
+      case 's':                          // SECTORS: a map tile, one quarter of it lit
+        taDiamond(0, 0, u); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-u / 2, -u / 2); ctx.lineTo(u / 2, u / 2); ctx.moveTo(u / 2, -u / 2); ctx.lineTo(-u / 2, u / 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -u); ctx.lineTo(u / 2, -u / 2); ctx.lineTo(0, 0); ctx.lineTo(-u / 2, -u / 2); ctx.closePath(); ctx.fill();
+        break;
+      case 'n':                          // PEOPLE: a figure
+        ctx.beginPath(); ctx.arc(0, -u * 0.4, u * 0.3, 0, TAU); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, u * 0.82, u * 0.7, Math.PI, 0); ctx.stroke();
+        break;
+      case 'u':                          // UPGRADES: two steps up
+        for (let k = 0; k < 2; k++) {
+          const y0 = -u * 0.25 + k * u * 0.52;
+          ctx.beginPath(); ctx.moveTo(-u * 0.64, y0 + u * 0.32); ctx.lineTo(0, y0 - u * 0.3); ctx.lineTo(u * 0.64, y0 + u * 0.32); ctx.stroke();
+        }
+        break;
+      case 'm': {                        // MALWARE: a hexagon split and slipped
+        ctx.save(); ctx.beginPath(); ctx.rect(-u * 1.3, -u * 1.3, u * 1.3, u * 2.6); ctx.clip();
+        poly(-u * 0.1, -u * 0.1, u, 6, -Math.PI / 2); ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.beginPath(); ctx.rect(0, -u * 1.3, u * 1.3, u * 2.6); ctx.clip();
+        poly(u * 0.1, u * 0.1, u, 6, -Math.PI / 2); ctx.stroke(); ctx.restore();
+        ctx.fillRect(-u * 0.42, -u * 0.12, u * 0.84, u * 0.24);
+        break;
+      }
+      case 'b':                          // BOOKS: open
+        for (const d of [-1, 1]) {
+          ctx.beginPath(); ctx.moveTo(0, -u * 0.46); ctx.lineTo(d * u * 0.92, -u * 0.64); ctx.lineTo(d * u * 0.92, u * 0.5); ctx.lineTo(0, u * 0.68); ctx.closePath();
+          ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1; ctx.stroke();
+        }
+        break;
+      case 'z':                          // ZODIAC: a ring, a star, a body on its orbit
+        ctx.beginPath(); ctx.arc(0, 0, u * 0.86, 0, TAU); ctx.stroke();
+        taStar(0, 0, 4, u * 0.56, u * 0.17, -Math.PI / 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(Math.cos(-0.8) * u * 0.86, Math.sin(-0.8) * u * 0.86, u * 0.16, 0, TAU); ctx.fill();
+        break;
+      default: {                         // GEAR: a cog
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const a = i * TAU / 8;
+          const p = [[a - TAU / 18, u * 0.7], [a - TAU / 40, u], [a + TAU / 40, u], [a + TAU / 18, u * 0.7]];
+          for (const [aa, rr] of p) ctx.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
+        }
+        ctx.closePath(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, u * 0.28, 0, TAU); ctx.stroke();
+      }
+    }
     taTag('rail.seal', -s / 2, -s / 2 - 12);
   },
 
   /* ------------------------------- the grid ------------------------------- */
   'grid.head'(x, y, w, text, worn) {
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    fitFont(text, w, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
-    ctx.fillStyle = worn ? '#8a7356' : '#64748b';
-    ctx.fillText(text, x, y);
-    ctx.fillStyle = worn ? 'rgba(107,90,68,0.35)' : 'rgba(71,85,105,0.35)';
-    ctx.fillRect(x, y + 9, w, 1);
+    const T = taT(worn), parts = String(text).split(/\s+·\s+/);
+    const tab = typeof CODEX_TABS !== 'undefined' ? CODEX_TABS.find(t => t.label === parts[0]) : null;
+    const hue = taHue(tab ? tab.id : '', worn);
+    ctx.textBaseline = 'middle';
+    // the rule under it, the section's hue under its own name
+    ctx.fillStyle = T.line; ctx.fillRect(x, y + 11, w, 1);
+    ctx.fillStyle = hue; poly(x + 5, y, 4.5, 6, -Math.PI / 2); ctx.fill();
+    ctx.font = '700 14px ' + TA_FONT.disp; ctx.fillStyle = T.txt;
+    const lw = taSpaced(parts[0], x + 16, y + 1, 2.5, 'left');
+    ctx.fillStyle = hue; ctx.fillRect(x, y + 10.5, lw + 16, 2);
+    // the figures, each on a chip: the count bright, its word quiet
+    let cx = x + 16 + lw + 14;
+    for (let i = 1; i < parts.length; i++) {
+      const m = /^([\d,]+\s*\/\s*[\d,]+)\s*(.*)$/.exec(parts[i]);
+      const num = m ? m[1] : parts[i], word = m ? m[2] : '';
+      ctx.font = '600 10px ' + TA_FONT.mono;
+      const nw = ctx.measureText(num).width;
+      ctx.font = '700 9px ' + TA_FONT.ui;
+      const ww = word ? taSpacedW(word, 1) + 6 : 0;
+      const cw = nw + ww + 16;
+      if (cx + cw > x + w) break;
+      taDog(cx, y - 8, cw, 16, 5);
+      ctx.fillStyle = T.s2; ctx.fill();
+      ctx.strokeStyle = T.line; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = '600 10px ' + TA_FONT.mono; ctx.fillStyle = T.txt; ctx.textAlign = 'left';
+      ctx.fillText(num, cx + 8, y + 0.5);
+      if (word) { ctx.font = '700 9px ' + TA_FONT.ui; ctx.fillStyle = T.mute; taSpaced(word, cx + 8 + nw + 6, y + 0.5, 1, 'left'); }
+      cx += cw + 6;
+    }
     taTag('grid.head', x + w - 60, y - 12);
   },
   'card.back'(r, col, s) {
-    taCut(r.x, r.y, r.w, r.h, s.item ? 6 : 10);
-    ctx.globalAlpha = s.seen ? 1 : 0.55;
-    ctx.fillStyle = s.sel ? rgba(col, 0.13) : s.hot ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.03)';
+    const T = taT(s.worn), c = s.item ? 7 : 11, cx = r.x + r.w / 2;
+    col = taAged(col, s.worn);
+    taDog(r.x, r.y, r.w, r.h, c);
+    ctx.fillStyle = s.sel ? taMix(T.s2, col, 0.12) : s.hot ? T.s3 : s.seen ? T.s2 : T.s1;
     ctx.fill();
-    ctx.strokeStyle = s.sel ? col : 'rgba(71,85,105,0.6)'; ctx.lineWidth = s.sel ? 2 : 1;
-    ctx.stroke();
+    ctx.save(); ctx.clip();
+    if (!s.item) {
+      // the band the name and the pages sit on
+      const by = r.y + r.h - 38;
+      ctx.fillStyle = rgba(T.bg0, 0.42); ctx.fillRect(r.x, by, r.w, 38);
+      ctx.fillStyle = s.seen ? rgba(col, s.sel ? 0.55 : 0.22) : T.line; ctx.fillRect(r.x, by, r.w, 1);
+      // the portrait's ground: a hexagon in its colour, where it sits
+      if (s.seen) {
+        const py = r.y + r.h * 0.4, pr = Math.min(r.w * 0.24, r.h * 0.2) * 1.62;
+        poly(cx, py, pr, 6, -Math.PI / 2);
+        ctx.fillStyle = rgba(col, s.sel ? 0.1 : 0.05); ctx.fill();
+        ctx.strokeStyle = rgba(col, s.sel ? 0.36 : 0.15); ctx.lineWidth = 1; ctx.stroke();
+      }
+    } else {
+      // an item's stone, by its kind line
+      taDiamond(r.x + 11, r.y + 14, 3.2); ctx.fillStyle = s.seen ? col : T.faint; ctx.fill();
+      ctx.fillStyle = s.seen ? rgba(col, 0.18) : T.line; ctx.fillRect(r.x, r.y + r.h - 1.5, r.w, 1.5);
+    }
+    ctx.restore();
+    taDog(r.x, r.y, r.w, r.h, c);
+    ctx.strokeStyle = s.sel ? col : s.hot ? T.line2 : s.seen ? T.line : T.faint;
+    ctx.lineWidth = s.sel ? 1.6 : 1; ctx.stroke();
+    if (s.sel) {
+      // locked on: brackets just outside it, breathing
+      const k = 3.5 + Math.sin(uiTime * 4) * 1;
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      taBrackets(r.x - k, r.y - k, r.w + 2 * k, r.h + 2 * k, 8);
+    }
     taTag('card.back', r.x + 2, r.y + 2);
   },
   'card.pips'(cx, y, w, states) {
-    const n = states.length, s = 7, gap = 5, x0 = cx - (n * s + (n - 1) * gap) / 2;
+    const T = taT(taWorn), n = states.length, step = Math.min(14, (w - 8) / Math.max(1, n - 1));
+    const x0 = cx - (n - 1) * step / 2;
+    if (n > 1) { ctx.fillStyle = T.line; ctx.fillRect(x0, y - 0.5, (n - 1) * step, 1); }
     states.forEach((st, k) => {
-      const x = x0 + k * (s + gap);
-      ctx.beginPath(); ctx.rect(x, y - s / 2, s, s);
-      if (st === 'open' || st === 'new') { ctx.fillStyle = st === 'new' ? '#fbbf24' : '#94a3b8'; ctx.fill(); }
-      else if (st === 'sealed') { ctx.fillStyle = '#7f1d1d'; ctx.fill(); }
-      else { ctx.strokeStyle = st === 'none' ? 'rgba(71,85,105,0.4)' : st === 'held' ? '#475569' : '#64748b';
-             ctx.setLineDash(st === 'torn' ? [2, 1.5] : []); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
+      const x = x0 + k * step;
+      if (st === 'sealed') {                 // a chapter: wax, not paper
+        ctx.beginPath(); ctx.arc(x, y, 3.7, 0, TAU);
+        ctx.fillStyle = TA_WAX; ctx.fill();
+        ctx.strokeStyle = rgba(TA_WAX_HI, 0.55); ctx.lineWidth = 1; ctx.stroke();
+        return;
+      }
+      if (st === 'new') taGlow(x, y, 10, TA_GOLD, 0.3 + 0.15 * Math.sin(uiTime * 3));
+      taDiamond(x, y, 4.2);
+      if (st === 'open' || st === 'new') { ctx.fillStyle = st === 'new' ? TA_GOLD : T.dim; ctx.fill(); return; }
+      ctx.fillStyle = T.s1; ctx.fill();
+      ctx.strokeStyle = st === 'none' ? T.faint : T.mute; ctx.lineWidth = 1;
+      if (st === 'torn') ctx.setLineDash([1.6, 1.6]);
+      ctx.stroke(); ctx.setLineDash([]);
+      if (st === 'held') { ctx.fillStyle = T.mute; ctx.fillRect(x - 1, y - 1, 2, 2); }
     });
     taTag('card.pips', x0 - 2, y + 6);
   },
   'card.unread'(x, y) {
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.fill();
+    // the card's corner folded down in gold (its cut sits 11 px in from the corner)
+    const X = x + 9, Y = y - 9, c = 11;
+    taGlow(X - c * 0.4, Y + c * 0.4, 16, TA_GOLD, 0.22 + 0.12 * Math.sin(uiTime * 3));
+    taFold(X - 120, Y, 120, 120, c, TA_GOLD);
     taTag('card.unread', x - 60, y + 4);
   },
   'card.tick'(x, y) {
-    ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85;
-    ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x + 4, y + 10); ctx.lineTo(x + 11, y); ctx.stroke();
+    // his tick, made fast: a dot where the nib landed, and the stroke away from it
+    ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(x + 0.5, y + 4.5, 1.1, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, y + 4.5); ctx.quadraticCurveTo(x + 2.5, y + 7.5, x + 4, y + 10.5);
+    ctx.quadraticCurveTo(x + 6.5, y + 3.5, x + 13, y - 1.5); ctx.stroke();
     taTag('card.tick', x + 14, y);
   },
   'item.glyph'(kind, x, y, s, col, seen) {
-    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = seen ? 1 : 0.4;
-    ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.stroke();
-    ctx.font = "700 " + Math.round(s * 0.9) + "px Barlow, sans-serif";
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
-    ctx.fillText(kind.toUpperCase(), x, y + 1);
+    col = taAged(col, taWorn);
+    const lw = Math.max(1.4, s * 0.055);
+    if (seen) taGlow(x, y, s * 1.7, col, 0.18);
+    ctx.globalAlpha = seen ? 1 : 0.32;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // the construction ring every emblem is drawn on, turning
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = rgba(col, 0.3);
+    ctx.beginPath(); ctx.arc(x, y, s * 1.25, 0, TAU); ctx.stroke();
+    for (let i = 0; i < 24; i++) {
+      const a = i * TAU / 24 + uiTime * 0.08, r0 = s * (i % 6 ? 1.25 : 1.17);
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * s * 1.32, y + Math.sin(a) * s * 1.32); ctx.stroke();
+    }
+    ctx.strokeStyle = col; ctx.lineWidth = lw;
+    const fillSoft = () => { ctx.save(); ctx.globalAlpha *= 0.14; ctx.fill(); ctx.restore(); };
+    if (kind === 'u') {
+      // an upgrade: three steps up inside a hexagon, the top one filled
+      poly(x, y, s * 0.92, 6, -Math.PI / 2); fillSoft(); ctx.stroke();
+      for (let k = 0; k < 3; k++) {
+        const yy = y - s * 0.38 + k * s * 0.34;
+        ctx.beginPath(); ctx.moveTo(x - s * 0.46, yy + s * 0.24); ctx.lineTo(x, yy - s * 0.12); ctx.lineTo(x + s * 0.46, yy + s * 0.24);
+        if (k === 0) { ctx.lineTo(x + s * 0.46, yy + s * 0.36); ctx.lineTo(x, yy); ctx.lineTo(x - s * 0.46, yy + s * 0.36); ctx.closePath(); ctx.fill(); }
+        else ctx.stroke();
+      }
+    } else if (kind === 'm') {
+      // a payload: a hexagon split along a fault, the halves slipped, scanlines through it
+      for (const d of [-1, 1]) {
+        ctx.save(); ctx.beginPath(); ctx.rect(d < 0 ? x - s * 1.2 : x, y - s * 1.2, s * 1.2, s * 2.4); ctx.clip();
+        poly(x + d * s * 0.08, y + d * s * 0.07, s * 0.92, 6, -Math.PI / 2); fillSoft(); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.beginPath(); ctx.moveTo(x, y - s * 0.9); ctx.lineTo(x - s * 0.12, y - s * 0.35); ctx.lineTo(x + s * 0.14, y + s * 0.05); ctx.lineTo(x - s * 0.1, y + s * 0.5); ctx.lineTo(x, y + s * 0.9);
+      ctx.lineWidth = lw * 0.6; ctx.stroke();
+      ctx.globalAlpha *= 0.55;
+      for (let k = 0; k < 4; k++) ctx.fillRect(x - s * 0.62 + (k % 2) * s * 0.18, y - s * 0.42 + k * s * 0.26, s * (k % 2 ? 0.7 : 1.05), Math.max(1.5, s * 0.05));
+    } else if (kind === 'b') {
+      // a book, open, its lines ruled
+      for (const d of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(x, y - s * 0.55); ctx.lineTo(x + d * s * 1.0, y - s * 0.72); ctx.lineTo(x + d * s * 1.0, y + s * 0.58); ctx.lineTo(x, y + s * 0.76);
+        ctx.closePath(); fillSoft(); ctx.stroke();
+        ctx.lineWidth = Math.max(1, lw * 0.5);
+        for (let k = 0; k < 4; k++) {
+          const t0 = 0.18, yy = -0.42 + k * 0.26;
+          ctx.beginPath(); ctx.moveTo(x + d * s * t0, y + s * (yy - 0.02 * t0 * 6)); ctx.lineTo(x + d * s * (k === 3 ? 0.55 : 0.82), y + s * (yy - 0.1)); ctx.stroke();
+        }
+        ctx.lineWidth = lw;
+      }
+      ctx.beginPath(); ctx.moveTo(x, y - s * 0.55); ctx.lineTo(x, y + s * 0.76); ctx.stroke();
+    } else if (kind === 'z') {
+      // a reading: the ring of twelve, a star in it, and one body on its way round
+      ctx.beginPath(); ctx.arc(x, y, s * 0.9, 0, TAU); fillSoft(); ctx.stroke();
+      ctx.lineWidth = Math.max(1, lw * 0.6);
+      for (let i = 0; i < 12; i++) {
+        const a = i * TAU / 12;
+        ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * s * 0.74, y + Math.sin(a) * s * 0.74); ctx.lineTo(x + Math.cos(a) * s * 0.9, y + Math.sin(a) * s * 0.9); ctx.stroke();
+      }
+      taStar(x, y, 4, s * 0.52, s * 0.14, -Math.PI / 2); ctx.fill();
+      taStar(x, y, 4, s * 0.3, s * 0.1, -Math.PI / 4); ctx.globalAlpha *= 0.5; ctx.fill(); ctx.globalAlpha = seen ? 1 : 0.32;
+      const a = uiTime * 0.4;
+      ctx.beginPath(); ctx.arc(x + Math.cos(a) * s * 0.9, y + Math.sin(a) * s * 0.9, s * 0.09, 0, TAU); ctx.fill();
+    } else {
+      // gear: a cog with a hexagon bored through it
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = i * TAU / 10 + uiTime * 0.05;
+        for (const [aa, rr] of [[a - TAU / 22, s * 0.7], [a - TAU / 50, s * 0.95], [a + TAU / 50, s * 0.95], [a + TAU / 22, s * 0.7]])
+          ctx.lineTo(x + Math.cos(aa) * rr, y + Math.sin(aa) * rr);
+      }
+      ctx.closePath(); fillSoft(); ctx.stroke();
+      poly(x, y, s * 0.3, 6, -Math.PI / 2 + uiTime * 0.05); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, s * 0.52, 0, TAU); ctx.lineWidth = Math.max(1, lw * 0.5); ctx.stroke();
+    }
     taTag('item.glyph', x - s, y - s - 12);
   },
 
   /* -------- portraits: entries with no drawing of their own in the fight -------- */
   'portrait.pilot'(x, y, s, en, seen) {
-    const col = seen ? en.col : '#475569';
-    if (seen) { ctx.globalCompositeOperation = 'lighter'; drawGlow(x, y, s * 1.8, col, 0.24); ctx.globalCompositeOperation = 'source-over'; }
-    ctx.globalAlpha = seen ? 1 : 0.2;
-    ctx.translate(x, y); ctx.rotate(-Math.PI / 2);
-    ctx.beginPath(); ctx.moveTo(s * 1.1, 0); ctx.lineTo(-s * 0.8, s * 0.7); ctx.lineTo(-s * 0.45, 0); ctx.lineTo(-s * 0.8, -s * 0.7); ctx.closePath();
-    ctx.fillStyle = rgba(col, 0.18); ctx.fill();
-    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
-    ctx.rotate(Math.PI / 2);
-    taTag('portrait.pilot', -s, -s - 12);
+    const col = seen ? taAged(en.col, taWorn) : TA_DIM, id = en.ref, k = s / 15, lw = Math.max(1.3, s * 0.07);
+    if (seen) taGlow(x, y, s * 1.9, col, 0.2);
+    ctx.globalAlpha = seen ? 1 : 0.24;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // its frame: a hexagon, which its own motif breaks out of
+    ctx.strokeStyle = rgba(col, seen ? 0.35 : 0.7); ctx.lineWidth = Math.max(1, s * 0.035);
+    poly(x, y, s * 1.3, 6, -Math.PI / 2); ctx.stroke();
+    const hy = y + 3 * k;                    // the hull's origin, so the hull sits centred
+    if (seen) {
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
+      if (id === 'ember') {
+        // the lance: hottest at the muzzle, thinning to nothing at the far tip
+        const my = hy - 22 * k;
+        ctx.beginPath(); ctx.moveTo(x - s * 0.1, my); ctx.lineTo(x, y - s * 1.55); ctx.lineTo(x + s * 0.1, my); ctx.closePath();
+        ctx.globalAlpha = 0.9; ctx.fill();
+        taGlow(x, my, s * 0.55, col, 0.55);
+        // and the heat it does not shed, rising off the back
+        for (let i = 0; i < 3; i++) {
+          const yy = y + s * (0.62 + i * 0.22);
+          ctx.globalAlpha = 0.85 - i * 0.25;
+          ctx.beginPath(); ctx.moveTo(x - s * 0.3, yy + s * 0.13); ctx.lineTo(x, yy); ctx.lineTo(x + s * 0.3, yy + s * 0.13); ctx.stroke();
+        }
+      } else if (id === 'hacker') {
+        // what it felled, on its side now: three bodies in its orbit
+        for (let i = 0; i < 3; i++) {
+          const a = uiTime * 0.6 + i * TAU / 3, px = x + Math.cos(a) * s * 1.08, py = y + Math.sin(a) * s * 1.08;
+          ctx.globalAlpha = 0.9;
+          poly(px, py, s * 0.17, 3, a + Math.PI); ctx.save(); ctx.globalAlpha = 0.3; ctx.fill(); ctx.restore(); ctx.stroke();
+        }
+        // the open bay where a barrel would be
+        ctx.globalAlpha = 0.8; ctx.lineWidth = lw * 0.7;
+        ctx.beginPath(); ctx.moveTo(x - s * 0.12, hy - 9 * k); ctx.lineTo(x, hy - 14 * k); ctx.lineTo(x + s * 0.12, hy - 9 * k); ctx.stroke();
+      } else if (id === 'melee') {
+        // the parry: a crescent across its blunt stub, the blow coming back
+        ctx.beginPath();
+        ctx.arc(x, y + s * 0.15, s * 1.2, -Math.PI * 0.83, -Math.PI * 0.17);
+        ctx.arc(x, y + s * 0.38, s * 1.12, -Math.PI * 0.2, -Math.PI * 0.8, true);
+        ctx.closePath(); ctx.globalAlpha = 0.85; ctx.fill();
+        for (const d of [-1, 1]) {
+          const a = -Math.PI / 2 + d * Math.PI * 0.36;
+          taDiamond(x + Math.cos(a) * s * 1.32, y + s * 0.15 + Math.sin(a) * s * 1.32, s * 0.08); ctx.fill();
+        }
+      } else {
+        // VOIDRUNNER: nothing but speed, streaming off the tail
+        ctx.globalAlpha = 0.75;
+        for (const d of [-1, 0, 1]) {
+          ctx.beginPath(); ctx.moveTo(x + d * s * 0.3, y + s * (d ? 0.75 : 0.62)); ctx.lineTo(x + d * s * 0.3, y + s * (d ? 1.25 : 1.4)); ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+    // the hull, nose up, the pilot's own outline
+    taHullPath(id, x, hy, k);
+    ctx.fillStyle = rgba(col, seen ? 0.2 : 0.3); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.stroke();
+    if (seen) { ctx.fillStyle = col; taDiamond(x, hy - 3 * k, Math.max(1.5, s * 0.08)); ctx.fill(); }
+    taTag('portrait.pilot', x - s, y - s - 12);
   },
   'portrait.awake'(x, y, s, en, seen) {
-    const col = seen ? en.col : '#475569';
-    ctx.globalAlpha = seen ? 1 : 0.2;
-    ctx.strokeStyle = col; ctx.lineWidth = 1.4;
-    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x, y, s * (1 + k * 0.28), 0, TAU); ctx.stroke(); }
-    TALES_ART['portrait.pilot'](x, y, s * 0.7, en, seen);
+    const col = seen ? taAged(en.col, taWorn) : TA_DIM, lw = Math.max(1.3, s * 0.065);
+    if (seen) taGlow(x, y, s * 2, col, 0.22);
+    ctx.globalAlpha = seen ? 1 : 0.24;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // the seal it sets on the floor, turning under it
+    ctx.strokeStyle = rgba(col, 0.32); ctx.lineWidth = Math.max(1, s * 0.03);
+    ctx.beginPath(); ctx.arc(x, y, s * 1.36, 0, TAU); ctx.stroke();
+    ctx.setLineDash([s * 0.07, s * 0.13]); ctx.lineDashOffset = -uiTime * s * 0.25;
+    ctx.beginPath(); ctx.arc(x, y, s * 1.22, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    const dark = 'rgba(4,5,10,0.78)';
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
+    if (en.ref === 'hacker') {
+      // SUPERUSER: the seal, the hood, the horns, and the eyes it looks down its heading with
+      ctx.save(); ctx.globalAlpha *= 0.28; ctx.lineWidth = Math.max(1, s * 0.035);
+      poly(x, y, s * 1.05, 3, -Math.PI / 2 + uiTime * 0.1); ctx.stroke();
+      poly(x, y, s * 1.05, 3, Math.PI / 2 + uiTime * 0.1); ctx.stroke();
+      ctx.restore();
+      for (const d of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x + d * s * 0.3, y - s * 0.55);
+        ctx.quadraticCurveTo(x + d * s * 0.8, y - s * 0.88, x + d * s * 0.66, y - s * 1.34);
+        ctx.quadraticCurveTo(x + d * s * 0.52, y - s * 0.96, x + d * s * 0.12, y - s * 0.74);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.moveTo(x - s * 0.8, y + s * 1.0);
+      ctx.quadraticCurveTo(x - s * 0.84, y - s * 0.36, x, y - s * 0.96);
+      ctx.quadraticCurveTo(x + s * 0.84, y - s * 0.36, x + s * 0.8, y + s * 1.0);
+      ctx.closePath();
+      if (seen) { ctx.fillStyle = dark; ctx.fill(); }
+      ctx.stroke();
+      if (seen) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath(); ctx.ellipse(x, y - s * 0.12, s * 0.42, s * 0.5, 0, 0, TAU); ctx.fill();
+        for (const d of [-1, 1]) {
+          ctx.strokeStyle = col; ctx.lineWidth = lw * 1.15;
+          ctx.beginPath(); ctx.moveTo(x + d * s * 0.28, y - s * 0.24); ctx.lineTo(x + d * s * 0.08, y - s * 0.14); ctx.stroke();
+          taGlow(x + d * s * 0.18, y - s * 0.19, s * 0.3, col, 0.6);
+        }
+        ctx.fillStyle = col; taDiamond(x, y - s * 0.62, s * 0.07); ctx.fill();
+      }
+    } else if (en.ref === 'ember') {
+      // OVERDRIVE: IFRIT, all flame, a white core, its heat ticking round it
+      ctx.lineWidth = Math.max(1, s * 0.04);
+      for (let i = 0; i < 16; i++) {
+        const a = i * TAU / 16 + uiTime * 0.2;
+        ctx.globalAlpha = (seen ? 1 : 0.24) * (i % 2 ? 0.45 : 0.9);
+        ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * s * 1.02, y + Math.sin(a) * s * 1.02); ctx.lineTo(x + Math.cos(a) * s * 1.14, y + Math.sin(a) * s * 1.14); ctx.stroke();
+      }
+      ctx.globalAlpha = seen ? 1 : 0.24; ctx.lineWidth = lw;
+      const base = y + s * 0.78;
+      const tongue = (cx, h, w) => {
+        ctx.beginPath(); ctx.moveTo(cx - w, base);
+        ctx.quadraticCurveTo(cx - w * 0.7, base - h * 0.55, cx, base - h);
+        ctx.quadraticCurveTo(cx + w * 0.7, base - h * 0.55, cx + w, base);
+        ctx.closePath();
+      };
+      const fl = i => (seen ? Math.sin(uiTime * 7 + i * 1.9) * s * 0.05 : 0);
+      for (const [dx, h, w, i] of [[-0.66, 0.8, 0.22, 0], [0.66, 0.8, 0.22, 1], [-0.36, 1.3, 0.3, 2], [0.36, 1.3, 0.3, 3], [0, 1.9, 0.42, 4]]) {
+        tongue(x + dx * s, h * s + fl(i), w * s);
+        ctx.save(); ctx.globalAlpha *= 0.28; ctx.fill(); ctx.restore(); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(x - s * 0.95, base); ctx.lineTo(x + s * 0.95, base); ctx.stroke();
+      if (seen) {
+        taGlow(x, y + s * 0.18, s * 0.6, col, 0.7);
+        ctx.fillStyle = '#fff7ed'; ctx.beginPath(); ctx.arc(x, y + s * 0.2, s * 0.17, 0, TAU); ctx.fill();
+        for (const d of [-1, 1]) { taDiamond(x + d * s * 0.15, y - s * 0.32, s * 0.06); ctx.fill(); }
+      }
+    } else {
+      // RONIN: the moon behind, the blade across it, the hat, and the one red eye
+      ctx.save(); ctx.globalAlpha *= 0.9;
+      ctx.beginPath(); ctx.arc(x + s * 0.22, y - s * 0.36, s * 0.78, 0, TAU);
+      ctx.fillStyle = rgba(col, 0.08); ctx.fill(); ctx.strokeStyle = rgba(col, 0.32); ctx.lineWidth = Math.max(1, s * 0.035); ctx.stroke();
+      ctx.restore();
+      const bx0 = x - s * 1.15, by0 = y + s * 0.95, bx1 = x + s * 1.12, by1 = y - s * 1.05;
+      const at = t => [bx0 + (bx1 - bx0) * t, by0 + (by1 - by0) * t];
+      ctx.strokeStyle = seen ? '#e2e8f0' : col; ctx.lineWidth = Math.max(1, lw * 0.6);
+      ctx.beginPath(); ctx.moveTo(...at(0.26)); ctx.lineTo(bx1, by1); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = lw * 1.6;
+      ctx.beginPath(); ctx.moveTo(bx0, by0); ctx.lineTo(...at(0.24)); ctx.stroke();
+      const [tx, ty] = at(0.25), na = Math.atan2(by1 - by0, bx1 - bx0) + Math.PI / 2;
+      ctx.lineWidth = lw * 1.2;
+      ctx.beginPath(); ctx.moveTo(tx + Math.cos(na) * s * 0.13, ty + Math.sin(na) * s * 0.13); ctx.lineTo(tx - Math.cos(na) * s * 0.13, ty - Math.sin(na) * s * 0.13); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.moveTo(x - s * 0.95, y + s * 1.02); ctx.lineTo(x - s * 0.4, y - s * 0.02); ctx.lineTo(x + s * 0.4, y - s * 0.02); ctx.lineTo(x + s * 0.95, y + s * 1.02); ctx.closePath();
+      if (seen) { ctx.fillStyle = dark; ctx.fill(); }
+      ctx.stroke();
+      if (seen) { ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - s * 0.3, y - s * 0.28, s * 0.6, s * 0.3); }
+      ctx.beginPath(); ctx.moveTo(x - s * 1.02, y - s * 0.2); ctx.lineTo(x, y - s * 0.74); ctx.lineTo(x + s * 1.02, y - s * 0.2);
+      ctx.quadraticCurveTo(x, y - s * 0.04, x - s * 1.02, y - s * 0.2); ctx.closePath();
+      if (seen) { ctx.fillStyle = dark; ctx.fill(); }
+      ctx.stroke();
+      if (seen) {
+        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = lw * 1.1;
+        ctx.beginPath(); ctx.moveTo(x + s * 0.08, y - s * 0.09); ctx.lineTo(x + s * 0.25, y - s * 0.14); ctx.stroke();
+        taGlow(x + s * 0.17, y - s * 0.11, s * 0.32, '#ef4444', 0.7);
+      }
+    }
     taTag('portrait.awake', x - s, y - s * 1.6 - 12);
   },
   'portrait.sector'(x, y, s, en, seen) {
-    const st = en.stage, w = s * 2.6;
-    ctx.globalAlpha = seen ? 1 : 0.25;
-    ctx.fillStyle = seen ? st.bg : '#0b0f17'; ctx.fillRect(x - w / 2, y - w / 2, w, w);
-    ctx.strokeStyle = seen ? st.grid2 : '#1e293b'; ctx.lineWidth = 1;
-    for (let k = 1; k < 5; k++) {
-      const t = -w / 2 + k * w / 5;
-      ctx.beginPath(); ctx.moveTo(x + t, y - w / 2); ctx.lineTo(x + t, y + w / 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - w / 2, y + t); ctx.lineTo(x + w / 2, y + t); ctx.stroke();
+    const st = en.stage || { bg: '#05060a', grid2: '#16243c', wall: '#1d3557', accent: en.col || '#67e8f9' };
+    const R = s * 1.38, A = seen ? taAged(st.accent, taWorn) : TA_DIM, lw = Math.max(1.2, s * 0.055);
+    if (seen) taGlow(x, y, R * 1.35, A, 0.16);
+    ctx.globalAlpha = seen ? 1 : 0.3;
+    // a window onto the sector: a hexagon of its own floor
+    poly(x, y, R, 6, -Math.PI / 2);
+    ctx.fillStyle = seen ? st.bg : '#0b0f17'; ctx.fill();
+    if (seen) {
+      ctx.save(); ctx.clip();
+      ctx.strokeStyle = st.grid2; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let k = -3; k <= 3; k++) {
+        const t = k * R * 0.32;
+        ctx.moveTo(x + t, y - R); ctx.lineTo(x + t, y + R);
+        ctx.moveTo(x - R, y + t); ctx.lineTo(x + R, y + t);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = A; ctx.fillStyle = A; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      const art = TA_SECTOR_ART[en.ref];
+      if (art) art(x, y, R, A, st, lw);
+      ctx.restore();
     }
-    ctx.strokeStyle = seen ? st.wall : '#334155'; ctx.lineWidth = 2; ctx.strokeRect(x - w / 2, y - w / 2, w, w);
-    if (seen) { ctx.fillStyle = st.accent; ctx.beginPath(); ctx.arc(x, y, s * 0.18, 0, TAU); ctx.fill(); }
-    taTag('portrait.sector', x - w / 2, y - w / 2 - 12);
+    poly(x, y, R, 6, -Math.PI / 2);
+    ctx.strokeStyle = seen ? st.wall : '#1e293b'; ctx.lineWidth = lw * 1.7; ctx.stroke();
+    poly(x, y, R + lw * 2, 6, -Math.PI / 2);
+    ctx.strokeStyle = rgba(seen ? A : '#334155', 0.45); ctx.lineWidth = 1; ctx.stroke();
+    taTag('portrait.sector', x - R, y - R - 12);
   },
   'portrait.room'(x, y, s, en, seen) {
-    const col = seen ? en.col : '#475569';
+    const col = seen ? taAged(en.col, taWorn) : TA_DIM, lw = Math.max(1.2, s * 0.06);
+    const hw = s * 0.82, top = y - s * 1.05, bot = y + s * 1.12;
+    if (seen) taGlow(x, y, s * 1.8, col, 0.15);
     ctx.globalAlpha = seen ? 1 : 0.25;
-    ctx.strokeStyle = col; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x - s * 0.8, y + s); ctx.lineTo(x - s * 0.8, y - s * 0.2);
-    ctx.arc(x, y - s * 0.2, s * 0.8, Math.PI, 0); ctx.lineTo(x + s * 0.8, y + s);
-    ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x - s * 1.2, y + s); ctx.lineTo(x + s * 1.2, y + s); ctx.stroke();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // a room between is a door first: every one of them is drawn through one
+    const arch = () => {
+      ctx.beginPath(); ctx.moveTo(x - hw, bot); ctx.lineTo(x - hw, top + hw);
+      ctx.arc(x, top + hw, hw, Math.PI, 0); ctx.lineTo(x + hw, bot); ctx.closePath();
+    };
+    arch(); ctx.fillStyle = rgba(col, seen ? 0.07 : 0.1); ctx.fill();
+    if (seen) {
+      ctx.save(); arch(); ctx.clip();
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw * 0.8;
+      const art = TA_ROOM_ART[en.ref];
+      if (art) art(x, y, s, col, hw, top, bot, lw);
+      ctx.restore();
+    }
+    arch(); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - hw * 1.5, bot); ctx.lineTo(x + hw * 1.5, bot); ctx.stroke();
+    ctx.lineWidth = 1; ctx.globalAlpha *= 0.5;
+    ctx.beginPath(); ctx.moveTo(x - hw * 1.2, bot + lw * 2.2); ctx.lineTo(x + hw * 1.2, bot + lw * 2.2); ctx.stroke();
     taTag('portrait.room', x - s, y - s * 1.2 - 12);
   },
   'portrait.person'(x, y, s, en, seen) {
-    const col = seen ? en.col : '#475569';
+    const col = seen ? taAged(en.col, taWorn) : TA_DIM, lw = Math.max(1.2, s * 0.065);
+    if (seen) taGlow(x, y, s * 1.8, col, 0.16);
     ctx.globalAlpha = seen ? 1 : 0.25;
-    ctx.strokeStyle = col; ctx.fillStyle = rgba(col, 0.14); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y - s * 0.35, s * 0.42, 0, TAU); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x - s * 0.9, y + s); ctx.quadraticCurveTo(x, y - s * 0.1, x + s * 0.9, y + s); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const dark = 'rgba(4,5,10,0.75)';
+    if (en.ref === 'dev') {
+      // THE DEV: at his desk, lit by the one screen
+      ctx.beginPath(); ctx.arc(x, y - s * 0.5, s * 0.3, 0, TAU); ctx.save(); ctx.globalAlpha *= 0.2; ctx.fill(); ctx.restore(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y + s * 0.55, s * 0.72, Math.PI, 0); ctx.stroke();
+      if (seen) taGlow(x, y - s * 0.2, s * 0.7, col, 0.25);
+      const mx = x - s * 0.82, my = y + s * 0.06, mw = s * 1.64, mh = s * 0.86;
+      ctx.fillStyle = seen ? dark : 'rgba(0,0,0,0.3)'; ctx.fillRect(mx, my, mw, mh);
+      ctx.strokeRect(mx, my, mw, mh);
+      ctx.beginPath(); ctx.moveTo(x - s * 0.22, y + s * 1.14); ctx.lineTo(x - s * 0.12, my + mh); ctx.lineTo(x + s * 0.12, my + mh); ctx.lineTo(x + s * 0.22, y + s * 1.14); ctx.stroke();
+      if (seen) {
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.55;
+        ctx.fillRect(mx + s * 0.14, my + s * 0.16, s * 0.7, Math.max(1.2, s * 0.06));
+        ctx.fillRect(mx + s * 0.28, my + s * 0.32, s * 0.9, Math.max(1.2, s * 0.06));
+        ctx.fillRect(mx + s * 0.28, my + s * 0.48, s * 0.46, Math.max(1.2, s * 0.06));
+        ctx.globalAlpha = 1;
+        if (uiTime % 1.1 < 0.62) ctx.fillRect(mx + s * 0.14, my + s * 0.62, s * 0.12, s * 0.12);
+      }
+    } else if (en.ref === 'outsider') {
+      // THE OUTSIDER: tall, cloaked, a broken halo, a lantern held out
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * 1.2);
+      ctx.quadraticCurveTo(x + s * 0.36, y - s * 0.92, x + s * 0.3, y - s * 0.45);
+      ctx.lineTo(x + s * 0.62, y + s * 1.15); ctx.lineTo(x - s * 0.62, y + s * 1.15); ctx.lineTo(x - s * 0.3, y - s * 0.45);
+      ctx.quadraticCurveTo(x - s * 0.36, y - s * 0.92, x, y - s * 1.2);
+      ctx.closePath();
+      if (seen) { ctx.fillStyle = dark; ctx.fill(); }
+      ctx.stroke();
+      if (seen) { ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.beginPath(); ctx.ellipse(x, y - s * 0.66, s * 0.14, s * 0.2, 0, 0, TAU); ctx.fill(); }
+      ctx.save(); ctx.globalAlpha *= 0.6; ctx.lineWidth = Math.max(1, lw * 0.6);
+      ctx.beginPath(); ctx.arc(x, y - s * 0.78, s * 0.46, -Math.PI * 0.95, -Math.PI * 0.62); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y - s * 0.78, s * 0.46, -Math.PI * 0.5, -Math.PI * 0.05); ctx.stroke();
+      ctx.restore();
+      const lx = x + s * 0.92, ly = y + s * 0.34, lc = seen ? '#fcd34d' : col;
+      ctx.beginPath(); ctx.moveTo(x + s * 0.4, y - s * 0.08); ctx.lineTo(lx, y - s * 0.02); ctx.lineTo(lx, ly - s * 0.16); ctx.stroke();
+      if (seen) taGlow(lx, ly, s * 0.75, lc, 0.55);
+      ctx.fillStyle = lc; taDiamond(lx, ly, s * 0.14); ctx.fill();
+    } else {
+      // THE LOST SOUL: a flame with eyes, the motes of it rising
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * 1.05);
+      ctx.bezierCurveTo(x + s * 0.22, y - s * 0.55, x + s * 0.74, y - s * 0.12, x + s * 0.62, y + s * 0.42);
+      ctx.arc(x, y + s * 0.42, s * 0.62, 0, Math.PI);
+      ctx.bezierCurveTo(x - s * 0.74, y - s * 0.12, x - s * 0.22, y - s * 0.55, x, y - s * 1.05);
+      ctx.closePath();
+      if (seen) taGlow(x, y + s * 0.2, s * 1.2, col, 0.4);
+      ctx.save(); ctx.globalAlpha *= 0.22; ctx.fill(); ctx.restore(); ctx.stroke();
+      if (seen) {
+        ctx.fillStyle = '#eff6ff';
+        for (const d of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + d * s * 0.2, y + s * 0.3, s * 0.07, s * 0.12, 0, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = col;
+        for (let i = 0; i < 4; i++) {
+          const t = (uiTime * 0.35 + i * 0.25) % 1;
+          ctx.globalAlpha = (1 - t) * 0.9;
+          taDiamond(x + Math.sin(i * 2.3 + t * 3) * s * 0.4, y - s * 0.7 - t * s * 0.75, s * 0.06 * (1 - t * 0.5)); ctx.fill();
+        }
+      }
+    }
     taTag('portrait.person', x - s, y - s - 14);
   },
 
   /* -------------------------------- the book -------------------------------- */
   'book.back'(worn) {
-    ctx.fillStyle = worn ? 'rgba(8,5,3,0.8)' : 'rgba(1,3,8,0.78)';
+    ctx.fillStyle = rgba(taT(worn).bg0, 0.84);
     ctx.fillRect(0, 0, W, H);
   },
   'book.cover'(x, y, w, h, col, worn) {
-    ctx.fillStyle = worn ? '#2a1a10' : '#141019';
-    taCut(x - 10, y - 8, w + 20, h + 16, 14); ctx.fill();
-    ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(x + w / 2 - 3, y - 6, 6, h + 12);      // the spine
+    const T = taT(worn), cc = taAged(col, worn);
+    const bx = x - 12, by = y - 10, bw = w + 24, bh = h + 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx + 6, by + 8, bw, bh);
+    ctx.fillStyle = T.s1; ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = rgba(cc, 0.5); ctx.lineWidth = 1.5; ctx.strokeRect(bx + 0.75, by + 0.75, bw - 1.5, bh - 1.5);
+    // corner pieces, as a ledger has
+    ctx.fillStyle = rgba(cc, 0.85);
+    const k = Math.min(22, w * 0.022);
+    for (const [cx, cy, dx, dy] of [[bx, by, 1, 1], [bx + bw, by, -1, 1], [bx, by + bh, 1, -1], [bx + bw, by + bh, -1, -1]]) {
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + dx * k, cy); ctx.lineTo(cx, cy + dy * k); ctx.closePath(); ctx.fill();
+    }
+    // the spine, down the gutter
+    ctx.fillStyle = T.bg0; ctx.fillRect(x + w / 2 - 7, by, 14, bh);
+    ctx.fillStyle = rgba(cc, 0.6); ctx.fillRect(x + w / 2 - 7, by, 1, bh); ctx.fillRect(x + w / 2 + 6, by, 1, bh);
+    // a ribbon left in at this entry, hanging out of the foot (clear of the key line under the book)
+    const rx = x + w / 2 + 26, ry = y + h - 12, re = Math.min(by + bh + 14, H - (H < 520 ? 12 : 17) - 9);
+    ctx.fillStyle = cc;
+    ctx.beginPath(); ctx.moveTo(rx - 4, ry); ctx.lineTo(rx + 4, ry); ctx.lineTo(rx + 4, re); ctx.lineTo(rx, re - 5); ctx.lineTo(rx - 4, re); ctx.closePath(); ctx.fill();
     taTag('book.cover', x - 8, y - 20);
   },
   'book.page'(r, side, worn) {
-    ctx.fillStyle = worn ? TA_PAPER_WORN : TA_PAPER;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    // the gutter's shadow, on the spine side
-    const g = ctx.createLinearGradient(side === 'left' ? r.x + r.w : r.x, 0, side === 'left' ? r.x + r.w - 26 : r.x + 26, 0);
-    g.addColorStop(0, 'rgba(60,40,20,0.28)'); g.addColorStop(1, 'rgba(60,40,20,0)');
-    ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = 'rgba(90,70,40,0.25)'; ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 8, r.y + 8, r.w - 16, r.h - 16);
+    taWorn = !!worn;
+    const T = taT(worn), left = side === 'left';
+    // the block of pages under this one, stepped out at the fore-edge
+    for (let i = 3; i >= 1; i--) {
+      ctx.fillStyle = taMix(T.paper, '#000000', 0.12 + i * 0.07);
+      ctx.fillRect(r.x + (left ? -i * 2 : i * 2), r.y + i, r.w, r.h - i * 2);
+    }
+    ctx.fillStyle = T.paper; ctx.fillRect(r.x, r.y, r.w, r.h);
+    // the gutter, shaded in flat steps rather than a blur
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(42,33,24,' + (0.075 - i * 0.017) + ')';
+      ctx.fillRect(left ? r.x + r.w - (i + 1) * 7 : r.x + i * 7, r.y, 7, r.h);
+    }
+    // the margin, ruled once, with registration marks at its corners
+    const m = 14;
+    ctx.strokeStyle = 'rgba(42,33,24,0.14)'; ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + m + 0.5, r.y + m + 0.5, r.w - m * 2 - 1, r.h - m * 2 - 1);
+    ctx.strokeStyle = 'rgba(42,33,24,0.42)';
+    taBrackets(r.x + m - 4.5, r.y + m - 4.5, r.w - m * 2 + 9, r.h - m * 2 + 9, 8);
+    if (worn) {
+      // his copy: foxed, a ring where a cup stood, a crease across
+      const o = left ? 0 : 50;
+      for (let i = 0; i < 12; i++) {
+        ctx.fillStyle = 'rgba(120,80,30,' + (0.06 + taHash(i + o + 7) * 0.08) + ')';
+        ctx.beginPath(); ctx.arc(r.x + taHash(i + o) * r.w, r.y + taHash(i + o + 20) * r.h, 1 + taHash(i + o + 40) * 3, 0, TAU); ctx.fill();
+      }
+      if (!left) {
+        ctx.strokeStyle = 'rgba(120,72,32,0.18)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(r.x + r.w * 0.8, r.y + r.h * 0.2, 34, 0, TAU); ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(r.x + r.w * 0.8 + 5, r.y + r.h * 0.2 + 3, 30, 0.6, 4.6); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(r.x, r.y + r.h * 0.68); ctx.lineTo(r.x + r.w, r.y + r.h * (left ? 0.66 : 0.64)); ctx.stroke();
+      ctx.strokeStyle = 'rgba(60,40,20,0.14)';
+      ctx.beginPath(); ctx.moveTo(r.x, r.y + r.h * 0.68 + 1.5); ctx.lineTo(r.x + r.w, r.y + r.h * (left ? 0.66 : 0.64) + 1.5); ctx.stroke();
+    }
     taTag('book.page', r.x + 10, r.y + r.h - 22);
   },
   'book.plate'(r, col, worn) {
-    ctx.fillStyle = '#0b0f17'; ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = rgba(col, 0.75); ctx.lineWidth = 2; ctx.strokeRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = 'rgba(90,70,40,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(r.x - 5, r.y - 5, r.w + 10, r.h + 10);
+    const T = taT(worn), cc = taAged(col, worn), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    // the mat: a hairline frame stepped out from the plate
+    ctx.strokeStyle = 'rgba(42,33,24,0.5)'; ctx.lineWidth = 1;
+    ctx.strokeRect(r.x - 6.5, r.y - 6.5, r.w + 13, r.h + 13);
+    ctx.fillStyle = T.plate; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+    // rings of hexagons around the specimen, and a lattice of points to measure it on
+    ctx.lineWidth = 1;
+    for (let k = 1; k <= 4; k++) {
+      poly(cx, cy, r.w * 0.17 * k, 6, -Math.PI / 2);
+      ctx.strokeStyle = rgba(cc, 0.13 - k * 0.022); ctx.stroke();
+    }
+    ctx.fillStyle = rgba(cc, 0.16);
+    const st = r.w / 12;
+    for (let i = 1; i < 12; i++) for (let j = 1; j < 12; j++) ctx.fillRect(r.x + i * st - 0.6, r.y + j * st - 0.6, 1.2, 1.2);
+    ctx.restore();
+    ctx.strokeStyle = rgba(cc, 0.55); ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.beginPath();
+    ctx.moveTo(cx, r.y); ctx.lineTo(cx, r.y + 7); ctx.moveTo(cx, r.y + r.h); ctx.lineTo(cx, r.y + r.h - 7);
+    ctx.moveTo(r.x, cy); ctx.lineTo(r.x + 7, cy); ctx.moveTo(r.x + r.w, cy); ctx.lineTo(r.x + r.w - 7, cy);
+    ctx.stroke();
+    ctx.strokeStyle = cc; ctx.lineWidth = 1.6;
+    taBrackets(r.x + 6, r.y + 6, r.w - 12, r.h - 12, 12);
     taTag('book.plate', r.x + 4, r.y + 4);
   },
   'book.pip'(r, roman, st, cur, hot) {
-    taCut(r.x, r.y, r.w, r.h, 5);
-    ctx.fillStyle = st === 'open' || st === 'new' ? (cur ? '#2a2118' : 'rgba(42,33,24,0.12)')
-                  : st === 'sealed' ? 'rgba(127,29,29,0.25)' : 'rgba(42,33,24,0.04)';
-    ctx.fill();
-    ctx.strokeStyle = cur ? '#2a2118' : hot ? '#6b5a44' : 'rgba(42,33,24,0.35)';
-    ctx.setLineDash(st === 'torn' ? [3, 2] : []); ctx.lineWidth = cur ? 2 : 1; ctx.stroke(); ctx.setLineDash([]);
-    ctx.font = "700 " + Math.round(r.h * 0.42) + "px Georgia, serif";
+    const paper = taT(taWorn).paper, c = Math.max(5, r.w * 0.26);
+    const open = st === 'open' || st === 'new';
+    taDog(r.x, r.y, r.w, r.h, c);
+    if (st === 'sealed') { ctx.fillStyle = cur ? TA_WAX : rgba(TA_WAX, 0.16); ctx.fill(); }
+    else if (cur && open) { ctx.fillStyle = TA_INK; ctx.fill(); }
+    else if (hot) { ctx.fillStyle = 'rgba(42,33,24,0.1)'; ctx.fill(); }
+    ctx.strokeStyle = st === 'sealed' ? TA_WAX : cur ? TA_INK : hot ? 'rgba(42,33,24,0.7)' : open ? 'rgba(42,33,24,0.45)' : 'rgba(42,33,24,0.28)';
+    ctx.lineWidth = cur ? 2 : 1;
+    if (st === 'torn' || st === 'held') ctx.setLineDash([3, 2]);
+    ctx.stroke(); ctx.setLineDash([]);
+    if (st === 'new') taFold(r.x, r.y, r.w, r.h, c, TA_GOLD);
+    ctx.font = '700 ' + Math.round(r.h * 0.4) + 'px ' + TA_FONT.book;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = cur && (st === 'open' || st === 'new') ? TA_PAPER : st === 'sealed' ? '#7f1d1d' : '#2a2118';
+    ctx.fillStyle = cur && (open || st === 'sealed') ? paper : st === 'sealed' ? TA_WAX : open ? TA_INK : 'rgba(42,33,24,0.38)';
     ctx.fillText(roman, r.x + r.w / 2, r.y + r.h / 2 + 1);
-    if (st === 'new') { ctx.fillStyle = '#d97706'; ctx.beginPath(); ctx.arc(r.x + r.w - 3, r.y + 3, 3, 0, TAU); ctx.fill(); }
+    if (cur) { taDiamond(r.x + r.w / 2, r.y + r.h + 6, 2.5); ctx.fillStyle = st === 'sealed' ? TA_WAX : TA_INK; ctx.fill(); }
     taTag('book.pip', r.x, r.y + r.h + 2);
   },
   'ink.note'(x, y, w, note) {
-    ctx.translate(x, y); ctx.rotate(-0.03);
+    ctx.translate(x, y); ctx.rotate(-0.025);
     ctx.font = INK_FONT; ctx.fillStyle = INK; ctx.globalAlpha = 0.92;
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    wrapText('— ' + note, 0, 0, w, 15);
+    const last = wrapText('— ' + note, 0, 0, w, 15);
+    // and his bracket down the margin beside it, in one stroke
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.moveTo(-4, -12); ctx.quadraticCurveTo(-9, -12, -9, -6);
+    ctx.lineTo(-9, last - 2); ctx.quadraticCurveTo(-9, last + 4, -3, last + 4); ctx.stroke();
     taTag('ink.note', 0, -22);
   },
   'page.head'(cx, y, w, text, voice) {
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    fitFont(text, w, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
-    ctx.fillStyle = voice === 1 ? '#1e3a5f' : '#6b5a44';
-    ctx.fillText(text, cx, y);
-    ctx.fillStyle = 'rgba(90,70,40,0.35)'; ctx.fillRect(cx - w / 2, y + 11, w, 1);
+    const col = TA_VOICE[voice] || TA_VOICE[0];
+    const parts = String(text).split(/\s+·\s+/);
+    const tag = parts.length > 1 ? parts[0] : '', name = parts.length > 1 ? parts.slice(1).join(' · ') : parts[0];
+    ctx.textBaseline = 'middle';
+    // what it costs, to centre it: [PAGE II] mark VOICE
+    let ls = 2;
+    ctx.font = '700 9px ' + TA_FONT.ui;
+    const tagW = tag ? taSpacedW(tag, 1.5) + 14 : 0;
+    ctx.font = '700 11px ' + TA_FONT.ui;
+    let nameW = taSpacedW(name, ls);
+    const fixed = tagW + (tag ? 10 : 0) + 18;
+    if (fixed + nameW > w - 24) { ls = 0.5; nameW = taSpacedW(name, ls); }
+    const total = fixed + nameW;
+    let x = cx - total / 2;
+    if (tag) {
+      taDog(x, y - 8, tagW, 16, 5);
+      ctx.strokeStyle = 'rgba(42,33,24,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = '700 9px ' + TA_FONT.ui; ctx.fillStyle = 'rgba(42,33,24,0.8)';
+      taSpaced(tag, x + 7, y + 0.5, 1.5, 'left');
+      x += tagW + 10;
+    }
+    // the voice's own mark
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const mx = x + 6;
+    if (voice === 1) {                      // the dev: a prompt
+      ctx.beginPath(); ctx.moveTo(mx - 4, y - 4); ctx.lineTo(mx, y); ctx.lineTo(mx - 4, y + 4); ctx.moveTo(mx + 1, y + 4.5); ctx.lineTo(mx + 6, y + 4.5); ctx.stroke();
+    } else if (voice === 2) {               // the thing itself
+      taDiamond(mx, y, 5); ctx.stroke(); ctx.beginPath(); ctx.arc(mx, y, 1.6, 0, TAU); ctx.fill();
+    } else if (voice === 3) {               // a chapter, sealed
+      taStar(mx, y, 8, 5.5, 4.2, 0); ctx.fill();
+    } else {                                // the Bookkeeper: a ledger's ruled square
+      ctx.strokeRect(mx - 4.5, y - 4.5, 9, 9); ctx.beginPath(); ctx.moveTo(mx - 4.5, y); ctx.lineTo(mx + 4.5, y); ctx.stroke();
+    }
+    x += 18;
+    ctx.font = '700 11px ' + TA_FONT.ui; ctx.fillStyle = col;
+    taSpaced(name, x, y + 0.5, ls, 'left');
+    // the rule across the page, the voice's colour under its words
+    ctx.fillStyle = 'rgba(42,33,24,0.22)'; ctx.fillRect(cx - w / 2, y + 14, w, 1);
+    ctx.fillStyle = col; ctx.fillRect(cx - total / 2, y + 13.5, total, 2);
+    ctx.fillStyle = 'rgba(42,33,24,0.4)';
+    taDiamond(cx - w / 2, y + 14.5, 2.6); ctx.fill(); taDiamond(cx + w / 2, y + 14.5, 2.6); ctx.fill();
     taTag('page.head', cx + w / 2 - 54, y - 20);
   },
   'page.number'(cx, y, roman) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = "400 13px Georgia, serif"; ctx.fillStyle = '#6b5a44';
-    ctx.fillText('— ' + roman + ' —', cx, y);
+    ctx.font = '400 13px ' + TA_FONT.book; ctx.fillStyle = '#6b5a44';
+    ctx.fillText(roman, cx, y);
+    const tw = ctx.measureText(roman).width;
+    ctx.fillStyle = 'rgba(107,90,68,0.55)';
+    for (const d of [-1, 1]) {
+      const x0 = cx + d * (tw / 2 + 8);
+      ctx.fillRect(d < 0 ? x0 - 18 : x0, y - 0.5, 18, 1);
+      taDiamond(x0 + d * 21, y, 2); ctx.fill();
+    }
     taTag('page.number', cx + 26, y - 6);
   },
   'page.more'(x, y, w, frac) {
-    const g = ctx.createLinearGradient(0, y - 26, 0, y);
-    g.addColorStop(0, 'rgba(230,220,198,0)'); g.addColorStop(1, 'rgba(230,220,198,0.95)');
-    ctx.fillStyle = g; ctx.fillRect(x - 4, y - 26, w + 8, 26);
+    const paper = taT(taWorn).paper;
+    const g = ctx.createLinearGradient(0, y - 30, 0, y);
+    g.addColorStop(0, rgba(paper, 0)); g.addColorStop(1, rgba(paper, 1));
+    ctx.fillStyle = g; ctx.fillRect(x - 4, y - 30, w + 8, 32);
+    // the reader's place in it, along a hairline under the text
+    ctx.fillStyle = 'rgba(42,33,24,0.15)'; ctx.fillRect(x, y + 5, w, 1);
+    ctx.fillStyle = '#6b5a44'; ctx.fillRect(x, y + 4.5, Math.max(8, w * frac), 2);
     if (frac < 0.98) {
-      ctx.font = "600 9px Barlow, sans-serif"; ctx.textAlign = 'right'; ctx.fillStyle = '#6b5a44';
-      ctx.fillText('MORE  ↓', x + w, y + 8);
+      ctx.font = '700 9px ' + TA_FONT.ui; ctx.fillStyle = '#6b5a44'; ctx.textBaseline = 'middle';
+      const tw = taSpaced('MORE', x + w - 14, y - 6, 1.5, 'right');
+      const ax = x + w - 5, ay = y - 6 + Math.sin(uiTime * 4) * 1;
+      ctx.strokeStyle = '#6b5a44'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(ax - 3.5, ay - 2); ctx.lineTo(ax, ay + 1.5); ctx.lineTo(ax + 3.5, ay - 2); ctx.stroke();
+      void tw;
     }
     taTag('page.more', x, y - 12);
   },
   'page.blank'(r, roman) {
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.34, fw = Math.min(r.w * 0.62, 230), fh = 70;
+    // an empty frame where the words will go, a caret waiting in it
+    ctx.strokeStyle = 'rgba(42,33,24,0.3)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.strokeRect(cx - fw / 2 + 0.5, cy - fh / 2 + 0.5, fw - 1, fh - 1); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(42,33,24,0.1)';
+    const lw = [0.92, 0.74, 0.38];
+    for (let i = 0; i < 3; i++) ctx.fillRect(cx - fw / 2 + 16, cy - 16 + i * 14, (fw - 32) * lw[i], 3);
+    if (uiTime % 1.1 < 0.62) { ctx.fillStyle = 'rgba(42,33,24,0.6)'; ctx.fillRect(cx - fw / 2 + 16 + (fw - 32) * lw[2] + 4, cy + 6, 1.5, 12); }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = "italic 400 14px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.5)';
-    ctx.fillText('This page is open.', r.x + r.w / 2, r.y + r.h * 0.4);
-    ctx.fillText('Its words are not written yet.', r.x + r.w / 2, r.y + r.h * 0.4 + 22);
+    ctx.font = 'italic 400 14px ' + TA_FONT.book; ctx.fillStyle = 'rgba(42,33,24,0.55)';
+    ctx.fillText('This page is open.', cx, cy + fh / 2 + 26);
+    ctx.fillText('Its words are not written yet.', cx, cy + fh / 2 + 47);
     taTag('page.blank', r.x, r.y);
   },
   'page.torn'(r, roman, how, prog) {
-    // the stub of a page torn out along the gutter
-    ctx.fillStyle = 'rgba(60,40,20,0.08)';
-    ctx.beginPath(); ctx.moveTo(r.x - 20, r.y - 30);
-    for (let k = 0; k <= 24; k++) ctx.lineTo(r.x + 14 + (k % 2 ? 9 : 0) + Math.sin(k * 1.7) * 4, r.y - 30 + k * (r.h + 60) / 24);
-    ctx.lineTo(r.x - 20, r.y + r.h + 30); ctx.closePath(); ctx.fill();
+    const paper = taT(taWorn).paper, cx = r.x + r.w / 2, cy = r.y + r.h * 0.38;
+    // the stub left in the gutter, its edge torn into even teeth. The text sits
+    // min(40, 8% of the page) in from the gutter, so the gutter is found from it
+    const ins = taInset(r), sx = r.x - ins + 3, top = r.y - 26, bot = r.y + r.h + 4, step = 7;
+    const tx = sx + Math.max(8, ins - 18);
+    const edge = [];
+    for (let k = 0, yy = top; yy <= bot; yy += step, k++) edge.push([tx + (k % 2 ? 7 : 0) + (taHash(k * 3.1) - 0.5) * 3, yy]);
+    ctx.beginPath(); ctx.moveTo(sx, top);
+    for (const [ex, ey] of edge) ctx.lineTo(ex, ey);
+    ctx.lineTo(sx, bot); ctx.closePath();
+    ctx.fillStyle = taMix(paper, '#ffffff', 0.18); ctx.fill();
+    ctx.strokeStyle = 'rgba(42,33,24,0.12)'; ctx.lineWidth = 2;
+    ctx.beginPath(); edge.forEach(([ex, ey], i) => (i ? ctx.lineTo(ex + 2, ey + 1) : ctx.moveTo(ex + 2, ey + 1))); ctx.stroke();
+    ctx.strokeStyle = 'rgba(42,33,24,0.38)'; ctx.lineWidth = 1;
+    ctx.beginPath(); edge.forEach(([ex, ey], i) => (i ? ctx.lineTo(ex, ey) : ctx.moveTo(ex, ey))); ctx.stroke();
+    // the page it was: its number, hollow
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
-    ctx.font = "400 40px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.25)';
-    ctx.fillText(roman, cx, cy - 56);
-    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#6b5a44';
-    ctx.fillText('TORN OUT', cx, cy - 18);
-    ctx.font = "italic 400 16px Georgia, serif"; ctx.fillStyle = TA_INKD;
-    ctx.fillText('PAGE ' + roman + '  ·  ' + how, cx, cy + 10);
-    if (prog) { ctx.font = "600 12px 'Courier New', monospace"; ctx.fillStyle = '#6b5a44'; ctx.fillText(prog, cx, cy + 36); }
+    ctx.font = '400 58px ' + TA_FONT.book; ctx.strokeStyle = 'rgba(42,33,24,0.24)'; ctx.lineWidth = 1;
+    ctx.strokeText(roman, cx, cy - 58);
+    ctx.font = '700 10px ' + TA_FONT.ui; ctx.fillStyle = '#6b5a44';
+    const lw = taSpaced('TORN OUT', cx, cy - 16, 3, 'center');
+    ctx.fillStyle = 'rgba(107,90,68,0.5)';
+    ctx.fillRect(cx - lw / 2 - 30, cy - 16, 20, 1); ctx.fillRect(cx + lw / 2 + 10, cy - 16, 20, 1);
+    // what opens it, in the book's hand
+    ctx.textAlign = 'center';
+    ctx.font = 'italic 400 17px ' + TA_FONT.book; ctx.fillStyle = TA_INK;
+    let yy = taWrapC(how, cx, cy + 14, Math.min(r.w - 30, 320), 23);
+    // and how far along, where its deed is a count
+    const m = /([\d,]+)\s*\/\s*([\d,]+)/.exec(prog || '');
+    if (m) {
+      const a = +m[1].replace(/,/g, ''), b = +m[2].replace(/,/g, '');
+      const bw = Math.min(r.w * 0.62, 240), bx = cx - bw / 2, by = yy + 26, f = b ? Math.min(1, a / b) : 0;
+      if (b <= 60) {
+        const g = 2, sw = (bw - g * (b - 1)) / b;
+        for (let i = 0; i < b; i++) {
+          ctx.fillStyle = i < a ? TA_INK : 'rgba(42,33,24,0.14)';
+          ctx.fillRect(bx + i * (sw + g), by, sw, 7);
+        }
+      } else {
+        ctx.fillStyle = 'rgba(42,33,24,0.14)'; ctx.fillRect(bx, by, bw, 7);
+        ctx.fillStyle = TA_INK; ctx.fillRect(bx, by, bw * f, 7);
+        ctx.fillStyle = 'rgba(42,33,24,0.3)';
+        for (let i = 1; i < 10; i++) ctx.fillRect(bx + bw * i / 10, by + 8, 1, 3);
+      }
+      ctx.font = '600 12px ' + TA_FONT.mono; ctx.fillStyle = '#6b5a44';
+      ctx.fillText(prog, cx, by + 24);
+    }
     taTag('page.torn', r.x + 20, r.y);
   },
   'page.sealed'(r, roman) {
-    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
-    ctx.fillStyle = '#7f1d1d';
-    ctx.beginPath();
-    for (let k = 0; k < 14; k++) { const a = k / 14 * TAU, rr = 34 + (k % 2) * 4; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(254,226,226,0.35)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(cx, cy, 24, 0, TAU); ctx.stroke();
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.4;
+    // the band it is sealed with, the width of the page
+    const ins = taInset(r);
+    ctx.fillStyle = rgba(TA_WAX, 0.86); ctx.fillRect(r.x - ins, cy - 11, r.w + ins * 2, 22);
+    ctx.fillStyle = rgba(TA_WAX_HI, 0.3);
+    ctx.fillRect(r.x - ins, cy - 8, r.w + ins * 2, 1); ctx.fillRect(r.x - ins, cy + 7, r.w + ins * 2, 1);
+    // the seal: wax pressed into a star of its own, a hexagon struck in it
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; taStar(cx + 2, cy + 3, 18, 42, 37, 0); ctx.fill();
+    taStar(cx, cy, 18, 42, 37, 0); ctx.fillStyle = TA_WAX; ctx.fill();
+    ctx.strokeStyle = rgba(TA_WAX_HI, 0.45); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, 29, 0, TAU); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = rgba(TA_WAX_HI, 0.3);
+    poly(cx, cy, 23, 6, -Math.PI / 2); ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = "400 20px Georgia, serif"; ctx.fillStyle = 'rgba(254,226,226,0.8)';
+    ctx.font = '400 20px ' + TA_FONT.book; ctx.fillStyle = 'rgba(254,226,226,0.9)';
     ctx.fillText(roman, cx, cy + 1);
-    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#7f1d1d';
-    ctx.fillText('SEALED', cx, cy + 58);
+    ctx.font = '700 10px ' + TA_FONT.ui; ctx.fillStyle = TA_WAX;
+    taSpaced('SEALED', cx, cy + 66, 4, 'center');
     taTag('page.sealed', r.x, r.y);
   },
   'page.held'(r, roman, why) {
-    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.42;
+    const cx = r.x + r.w / 2, cy = r.y + r.h * 0.34, sw = Math.min(r.w * 0.56, 210), sh = 88;
+    // a slip clipped in where the page will go: kept, not yet written
+    ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.fillRect(cx - sw / 2, cy - sh / 2, sw, sh);
+    ctx.strokeStyle = 'rgba(42,33,24,0.36)'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.strokeRect(cx - sw / 2 + 0.5, cy - sh / 2 + 0.5, sw - 1, sh - 1); ctx.setLineDash([]);
+    const kx = cx - sw / 2 + 28, ky = cy - sh / 2;
+    ctx.strokeStyle = '#5b6170'; ctx.lineWidth = 1.6;
+    roundRect(kx - 6, ky - 13, 12, 32, 6); ctx.stroke();
+    roundRect(kx - 3, ky - 8, 6, 22, 3); ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = "400 40px Georgia, serif"; ctx.fillStyle = 'rgba(42,33,24,0.18)';
-    ctx.fillText(roman, cx, cy - 46);
-    ctx.font = "700 11px Barlow, sans-serif"; ctx.fillStyle = '#6b5a44';
-    ctx.fillText('HELD', cx, cy - 10);
-    ctx.font = "italic 400 15px Georgia, serif"; ctx.fillStyle = TA_INKD;
-    ctx.fillText(why, cx, cy + 16);
+    ctx.font = '400 30px ' + TA_FONT.book; ctx.fillStyle = 'rgba(42,33,24,0.2)';
+    ctx.fillText(roman, cx, cy - 8);
+    ctx.font = '700 10px ' + TA_FONT.ui; ctx.fillStyle = '#6b5a44';
+    taSpaced('HELD', cx, cy + 24, 4, 'center');
+    ctx.textAlign = 'center';
+    ctx.font = 'italic 400 15px ' + TA_FONT.book; ctx.fillStyle = TA_INK;
+    taWrapC(why, cx, cy + sh / 2 + 28, Math.min(r.w - 30, 320), 21);
     taTag('page.held', r.x, r.y);
   },
   'book.turn'(r, dir, enabled, hot) {
-    taCut(r.x, r.y, r.w, r.h, 5);
-    ctx.fillStyle = hot && enabled ? 'rgba(42,33,24,0.14)' : 'rgba(42,33,24,0.04)'; ctx.fill();
-    ctx.strokeStyle = enabled ? '#6b5a44' : 'rgba(107,90,68,0.25)'; ctx.lineWidth = 1.4; ctx.stroke();
-    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, s = r.h * 0.2;
-    ctx.beginPath(); ctx.moveTo(cx - dir * s * 0.6, cy - s); ctx.lineTo(cx + dir * s * 0.6, cy); ctx.lineTo(cx - dir * s * 0.6, cy + s);
-    ctx.lineWidth = 2; ctx.stroke();
+    const paper = taT(taWorn).paper, t = Math.min(10, r.w * 0.3), on = enabled && hot;
+    const x = r.x, y = r.y, w = r.w, h = r.h;
+    ctx.beginPath();
+    if (dir > 0) { ctx.moveTo(x, y); ctx.lineTo(x + w - t, y); ctx.lineTo(x + w, y + h / 2); ctx.lineTo(x + w - t, y + h); ctx.lineTo(x, y + h); }
+    else { ctx.moveTo(x + w, y); ctx.lineTo(x + t, y); ctx.lineTo(x, y + h / 2); ctx.lineTo(x + t, y + h); ctx.lineTo(x + w, y + h); }
+    ctx.closePath();
+    if (on) { ctx.fillStyle = TA_INK; ctx.fill(); }
+    ctx.strokeStyle = enabled ? 'rgba(42,33,24,0.62)' : 'rgba(42,33,24,0.18)'; ctx.lineWidth = 1.3; ctx.stroke();
+    const cx = x + w / 2 - dir * t * 0.15, cy = y + h / 2, s = h * 0.2;
+    ctx.strokeStyle = on ? paper : enabled ? TA_INK : 'rgba(42,33,24,0.22)';
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - dir * s * 0.6, cy - s); ctx.lineTo(cx + dir * s * 0.6, cy); ctx.lineTo(cx - dir * s * 0.6, cy + s); ctx.stroke();
     taTag('book.turn', r.x, r.y - 13);
   },
   'book.close'(r, hot) {
-    taCut(r.x, r.y, r.w, r.h, 5);
-    ctx.fillStyle = hot ? 'rgba(42,33,24,0.16)' : 'rgba(42,33,24,0.05)'; ctx.fill();
-    ctx.strokeStyle = '#6b5a44'; ctx.lineWidth = 1.4; ctx.stroke();
-    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, s = r.h * 0.2;
-    ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s);
-    ctx.lineWidth = 2; ctx.stroke();
+    const paper = taT(taWorn).paper;
+    taDog(r.x, r.y, r.w, r.h, 7);
+    ctx.fillStyle = hot ? TA_INK : 'rgba(42,33,24,0.05)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(42,33,24,0.62)'; ctx.lineWidth = 1.3; ctx.stroke();
+    const cx = r.x + r.w / 2 - 1, cy = r.y + r.h / 2 + 1, s = r.h * 0.19;
+    ctx.strokeStyle = hot ? paper : TA_INK; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s); ctx.stroke();
     taTag('book.close', r.x - 60, r.y + r.h + 2);
   },
 
   /* --------------------------- the mid-run line --------------------------- */
   'line.tale'(cx, y, text, a) {
+    const parts = String(text).split(/\s+·\s+/);
+    const lead = parts.length > 1 ? parts[0] : '', main = parts.length > 1 ? parts.slice(1).join(' · ') : parts[0];
     ctx.globalAlpha = a;
-    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.letterSpacing = '0.1em';
-    const w = ctx.measureText(text).width + 28;
-    taCut(cx - w / 2, y - 12, w, 24, 6);
-    ctx.fillStyle = 'rgba(10,7,5,0.78)'; ctx.fill();
-    ctx.strokeStyle = 'rgba(253,230,138,0.45)'; ctx.lineWidth = 1; ctx.stroke();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fde68a';
-    ctx.fillText(text, cx, y + 1);
-    taTag('line.tale', cx - w / 2, y - 25);
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 9px ' + TA_FONT.ui;
+    const lw = lead ? taSpacedW(lead, 2) : 0;
+    ctx.font = '700 12px ' + TA_FONT.ui;
+    const mw = taSpacedW(main, 1.5);
+    const h = 30, e = 11, icon = 18, pad = 18;
+    const w = pad + icon + 12 + (lead ? lw + 25 : 0) + mw + pad;
+    const x0 = cx - w / 2;
+    // a band with pointed ends: a hexagon drawn out to the length of the line
+    ctx.beginPath();
+    ctx.moveTo(x0, y); ctx.lineTo(x0 + e, y - h / 2); ctx.lineTo(x0 + w - e, y - h / 2);
+    ctx.lineTo(x0 + w, y); ctx.lineTo(x0 + w - e, y + h / 2); ctx.lineTo(x0 + e, y + h / 2);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(8,10,18,0.86)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(251,191,36,0.42)'; ctx.lineWidth = 1; ctx.stroke();
+    // a gold line runs out along its top as it arrives
+    ctx.fillStyle = TA_GOLD;
+    ctx.fillRect(x0 + e, y - h / 2 - 0.5, (w - e * 2) * a, 1.5);
+    // a book, open, at its head
+    const ix = x0 + pad + icon / 2;
+    ctx.strokeStyle = TA_GOLD; ctx.lineWidth = 1.4; ctx.lineJoin = 'round';
+    for (const d of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(ix, y - 4.5); ctx.lineTo(ix + d * 8.5, y - 6.5); ctx.lineTo(ix + d * 8.5, y + 5); ctx.lineTo(ix, y + 7); ctx.closePath(); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(ix, y - 4.5); ctx.lineTo(ix, y + 7); ctx.stroke();
+    let tx = ix + icon / 2 + 12;
+    if (lead) {
+      ctx.font = '700 9px ' + TA_FONT.ui; ctx.fillStyle = 'rgba(251,191,36,0.72)';
+      taSpaced(lead, tx, y + 0.5, 2, 'left');
+      tx += lw + 12;
+      ctx.fillStyle = 'rgba(251,191,36,0.35)'; ctx.fillRect(tx, y - 7, 1, 14);
+      tx += 13;
+    }
+    ctx.font = '700 12px ' + TA_FONT.ui; ctx.fillStyle = '#fde68a';
+    taSpaced(main, tx, y + 0.5, 1.5, 'left');
+    taTag('line.tale', x0, y - 28);
+  }
+};
+
+/* The ten sectors, each seen through its window in its own colours: what the
+   place is built around, in a few strokes. (x, y) is the window's centre and
+   R its radius; the window clips them. */
+const TA_SECTOR_ART = {
+  grid(x, y, R, A) {                     // the first floor: a lit node where the lines cross
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(x - R, y); ctx.lineTo(x + R, y); ctx.moveTo(x, y - R); ctx.lineTo(x, y + R); ctx.stroke();
+    ctx.globalAlpha = 1;
+    for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.strokeRect(x + dx * R * 0.32 - R * 0.07, y + dy * R * 0.32 - R * 0.07, R * 0.14, R * 0.14);
+    taGlow(x, y, R * 0.6, A, 0.5);
+    ctx.beginPath(); ctx.arc(x, y, R * 0.12, 0, TAU); ctx.fill();
+  },
+  foundry(x, y, R, A) {                  // a furnace mouth, its vents glowing
+    taGlow(x, y + R * 0.05, R * 0.55, A, 0.45);
+    ctx.beginPath(); ctx.moveTo(x - R * 0.46, y + R * 0.52); ctx.lineTo(x - R * 0.46, y - R * 0.04);
+    ctx.arc(x, y - R * 0.04, R * 0.46, Math.PI, 0); ctx.lineTo(x + R * 0.46, y + R * 0.52); ctx.stroke();
+    ctx.globalAlpha = 0.85;
+    for (let i = 0; i < 3; i++) ctx.fillRect(x - R * 0.3, y + R * (0.06 + i * 0.14), R * 0.6, R * 0.055);
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.moveTo(x - R * 0.8, y + R * 0.52); ctx.lineTo(x + R * 0.8, y + R * 0.52); ctx.stroke();
+  },
+  hive(x, y, R, A) {                     // the comb, one cell full, acid dripping off it
+    const r = R * 0.2, d = r * Math.sqrt(3);
+    const cells = [[0, 0]];
+    for (let i = 0; i < 6; i++) cells.push([Math.cos(i * Math.PI / 3) * d, Math.sin(i * Math.PI / 3) * d]);
+    cells.forEach(([dx, dy], i) => {
+      poly(x + dx, y + dy - R * 0.08, r * 0.9, 6, -Math.PI / 2);
+      if (i === 0) ctx.fill(); else if (i === 4) { ctx.save(); ctx.globalAlpha = 0.4; ctx.fill(); ctx.restore(); ctx.stroke(); } else ctx.stroke();
+    });
+    ctx.globalAlpha = 0.8;
+    for (const dx of [-0.18, 0.22]) { ctx.beginPath(); ctx.arc(x + R * dx, y + R * 0.7, R * 0.05, 0, TAU); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  },
+  vault(x, y, R, A, st) {                // a door of squares inside squares, lasers across it
+    for (let k = 0; k < 3; k++) {
+      const h = R * (0.56 - k * 0.17);
+      ctx.strokeStyle = k % 2 ? st.wall : A;
+      ctx.strokeRect(x - h, y - h, h * 2, h * 2);
+    }
+    ctx.strokeStyle = A; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1, R * 0.025);
+    ctx.beginPath(); ctx.moveTo(x - R, y - R * 0.3); ctx.lineTo(x + R, y + R * 0.2); ctx.moveTo(x - R, y + R * 0.45); ctx.lineTo(x + R, y - R * 0.05); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(x, y, R * 0.06, 0, TAU); ctx.fill();
+  },
+  void(x, y, R, A) {                     // a well: rings drawn in tighter toward the middle
+    for (let k = 0; k < 6; k++) {
+      ctx.globalAlpha = 0.9 - k * 0.13;
+      ctx.beginPath(); ctx.arc(x, y, R * 0.12 + R * 0.75 * Math.pow(k / 5, 1.6), 0, TAU); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x, y, R * 0.11, 0, TAU); ctx.fill();
+    ctx.fillStyle = A;
+    for (let i = 0; i < 9; i++) {
+      const a = taHash(i + 3) * TAU, d = R * (0.3 + taHash(i + 11) * 0.6);
+      ctx.fillRect(x + Math.cos(a) * d - 0.8, y + Math.sin(a) * d - 0.8, 1.6, 1.6);
+    }
+  },
+  archive(x, y, R, A) {                  // shelves of files, one of them gone
+    for (let row = 0; row < 3; row++) {
+      const yy = y - R * 0.5 + row * R * 0.38;
+      ctx.beginPath(); ctx.moveTo(x - R, yy + R * 0.3); ctx.lineTo(x + R, yy + R * 0.3); ctx.stroke();
+      for (let i = 0; i < 5; i++) {
+        const xx = x - R * 0.6 + i * R * 0.26, h = R * (0.2 + taHash(row * 5 + i) * 0.08);
+        if (row === 1 && i === 2) { ctx.setLineDash([2, 2]); ctx.strokeRect(xx, yy + R * 0.3 - h, R * 0.18, h); ctx.setLineDash([]); continue; }
+        ctx.globalAlpha = row === 0 && i === 3 ? 1 : 0.45;
+        ctx.fillRect(xx, yy + R * 0.3 - h, R * 0.18, h);
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+  mirror(x, y, R, A) {                   // a shape, and the shape that answers it
+    ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, y - R); ctx.lineTo(x, y + R); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x - R * 0.72, y - R * 0.38); ctx.lineTo(x - R * 0.14, y); ctx.lineTo(x - R * 0.72, y + R * 0.38); ctx.closePath();
+    ctx.save(); ctx.globalAlpha = 0.35; ctx.fill(); ctx.restore(); ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.setLineDash([3, 2]);
+    ctx.beginPath(); ctx.moveTo(x + R * 0.72, y - R * 0.38); ctx.lineTo(x + R * 0.14, y); ctx.lineTo(x + R * 0.72, y + R * 0.38); ctx.closePath(); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  },
+  leak(x, y, R, A) {                     // a pipe split open, and three nodes under the drip
+    for (const yy of [-0.42, -0.16]) {
+      ctx.beginPath(); ctx.moveTo(x - R, y + R * yy); ctx.lineTo(x - R * 0.1, y + R * yy);
+      ctx.moveTo(x + R * 0.1, y + R * yy); ctx.lineTo(x + R, y + R * yy); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(x - R * 0.1, y - R * 0.42); ctx.lineTo(x - R * 0.02, y - R * 0.3); ctx.lineTo(x - R * 0.1, y - R * 0.16);
+    ctx.moveTo(x + R * 0.1, y - R * 0.42); ctx.lineTo(x + R * 0.03, y - R * 0.3); ctx.lineTo(x + R * 0.1, y - R * 0.16); ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const t = (uiTime * 0.6 + i / 3) % 1;
+      ctx.globalAlpha = 1 - t * 0.7;
+      taDiamond(x, y - R * 0.05 + t * R * 0.5, R * 0.05); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const dx of [-0.48, 0, 0.48]) { poly(x + R * dx, y + R * 0.66, R * 0.09, 6, -Math.PI / 2); ctx.stroke(); }
+  },
+  recursion(x, y, R, A) {                // a square inside itself, all the way down
+    for (let i = 0; i < 7; i++) {
+      const h = R * 0.62 * Math.pow(0.78, i);
+      ctx.globalAlpha = 1 - i * 0.12;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(i * 0.26); ctx.strokeRect(-h, -h, h * 2, h * 2); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { ctx.beginPath(); ctx.arc(x + dx * R * 0.78, y + dy * R * 0.78, R * 0.045, 0, TAU); ctx.fill(); }
+  },
+  halt(x, y, R, A) {                     // a stop: the octagon, the bar, and five nodes round it
+    poly(x, y, R * 0.52, 8, Math.PI / 8); ctx.stroke();
+    ctx.fillRect(x - R * 0.32, y - R * 0.07, R * 0.64, R * 0.14);
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + i * TAU / 5;
+      poly(x + Math.cos(a) * R * 0.76, y + Math.sin(a) * R * 0.76, R * 0.06, 6, 0); ctx.fill();
+    }
+  }
+};
+
+/* The rooms between: what is in each, seen through its door. (x, y) is the
+   portrait's centre, s its size, hw the door's half width; the door clips. */
+const TA_ROOM_ART = {
+  library(x, y, s, col, hw, top, bot) {  // shelves of books, one leaning
+    for (const sy of [y - s * 0.12, y + s * 0.6]) {
+      ctx.beginPath(); ctx.moveTo(x - hw, sy); ctx.lineTo(x + hw, sy); ctx.stroke();
+      let bx = x - hw + s * 0.1, i = 0;
+      while (bx < x + hw - s * 0.12) {
+        const bw = s * (0.1 + taHash(sy + i) * 0.08), bh = s * (0.34 + taHash(sy * 2 + i) * 0.2);
+        ctx.save();
+        if (i === 3) { ctx.translate(bx, sy); ctx.rotate(0.3); ctx.translate(-bx, -sy); }
+        ctx.globalAlpha = i % 3 === 1 ? 0.95 : 0.4;
+        ctx.fillRect(bx, sy - bh, bw, bh);
+        ctx.restore();
+        bx += bw + s * 0.04; i++;
+      }
+    }
+  },
+  hub(x, y, s, col, hw, top, bot) {      // the ring the hulls are woken in, four of them round it
+    ctx.beginPath(); ctx.arc(x, y + s * 0.1, s * 0.3, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.ellipse(x, bot - s * 0.18, s * 0.66, s * 0.12, 0, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
+    for (let i = 0; i < 4; i++) {
+      const a = i * TAU / 4 + Math.PI / 4, px = x + Math.cos(a) * s * 0.58, py = y + s * 0.1 + Math.sin(a) * s * 0.58;
+      poly(px, py, s * 0.13, 3, a + Math.PI); ctx.save(); ctx.globalAlpha = 0.35; ctx.fill(); ctx.restore(); ctx.stroke();
+    }
+    taGlow(x, y + s * 0.1, s * 0.4, col, 0.4);
+  },
+  stands(x, y, s, col, hw, top, bot) {   // tiers of empty seats, and the one that is not
+    for (let i = 0; i < 4; i++) {
+      const w = hw * 2 - i * s * 0.26, yy = bot - (i + 1) * s * 0.3;
+      ctx.save(); ctx.globalAlpha = 0.22; ctx.fillRect(x - w / 2, yy, w, s * 0.16); ctx.restore();
+      ctx.strokeRect(x - w / 2, yy, w, s * 0.16);
+    }
+    const sy = bot - 4 * s * 0.3 - s * 0.2;
+    taGlow(x, sy + s * 0.08, s * 0.4, col, 0.6);
+    ctx.fillRect(x - s * 0.08, sy, s * 0.16, s * 0.16);
+  },
+  rootroom(x, y, s, col, hw, top, bot) { // its roots coming down, and the key under them
+    const branch = (bx, by, a, len, d) => {
+      const ex = bx + Math.cos(a) * len, ey = by + Math.sin(a) * len;
+      ctx.lineWidth = Math.max(0.8, d * s * 0.03);
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+      if (d > 1) { branch(ex, ey, a - 0.45, len * 0.7, d - 1); branch(ex, ey, a + 0.4, len * 0.7, d - 1); }
+    };
+    branch(x, top, Math.PI / 2, s * 0.5, 4);
+    const ky = bot - s * 0.32;
+    taGlow(x, ky, s * 0.45, col, 0.5);
+    ctx.lineWidth = Math.max(1.2, s * 0.05);
+    ctx.beginPath(); ctx.arc(x - s * 0.24, ky, s * 0.12, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - s * 0.12, ky); ctx.lineTo(x + s * 0.34, ky); ctx.moveTo(x + s * 0.2, ky); ctx.lineTo(x + s * 0.2, ky + s * 0.1); ctx.moveTo(x + s * 0.32, ky); ctx.lineTo(x + s * 0.32, ky + s * 0.13); ctx.stroke();
+  },
+  patch(x, y, s, col, hw, top, bot) {    // the house on the rise, the patch sewn on, a gourd
+    ctx.beginPath(); ctx.moveTo(x - s * 0.3, y - s * 0.12); ctx.lineTo(x - s * 0.3, y - s * 0.45); ctx.lineTo(x, y - s * 0.7); ctx.lineTo(x + s * 0.3, y - s * 0.45); ctx.lineTo(x + s * 0.3, y - s * 0.12); ctx.stroke();
+    ctx.fillRect(x - s * 0.07, y - s * 0.42, s * 0.14, s * 0.12);
+    ctx.save(); ctx.setLineDash([2, 2]); ctx.translate(x - s * 0.42, y + s * 0.18); ctx.rotate(-0.2); ctx.strokeRect(-s * 0.14, -s * 0.14, s * 0.28, s * 0.28); ctx.restore();
+    const gy = bot - s * 0.3;
+    taGlow(x + s * 0.12, gy, s * 0.5, col, 0.35);
+    ctx.save(); ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.ellipse(x + s * 0.12, gy, s * 0.42, s * 0.28, 0, 0, TAU); ctx.fill(); ctx.restore();
+    ctx.beginPath(); ctx.ellipse(x + s * 0.12, gy, s * 0.42, s * 0.28, 0, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x + s * 0.12, gy, s * 0.18, s * 0.28, 0, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + s * 0.12, gy - s * 0.28); ctx.lineTo(x + s * 0.18, gy - s * 0.4); ctx.stroke();
   }
 };
 
@@ -67065,7 +68139,7 @@ const SNAP_LOCAL = new Set([
   'gfxSel', 'gfxFirstRun', 'gfxReturn', 'volRect', 'volDrag', 'sensRect', 'sensDrag',
   // menus and screens of one's own
   'uiArm', 'offerHover', 'nameBuf', 'lastStats', 'codexTab', 'codexSel', 'codexScroll', 'codexFrom',
-  'codexBook', 'codexPage', 'codexPageScroll', 'codexPageMax', 'codexDrag', 'taFrame',   // the codex's book (FORGOTTEN TALES)
+  'codexBook', 'codexPage', 'codexPageScroll', 'codexPageMax', 'codexDrag', 'taFrame', 'taWorn',   // the codex's book and its art (FORGOTTEN TALES)
   'setFrom', 'setSel', 'logReturn', 'logAuto', 'logScroll', 'logSince', 'logAutoDone', 'logWaitT', 'logDrag',
   'dailyFrom', 'dailySel', 'rushFrom', 'skinSel', 'skinScroll', 'skinFrom', 'skinDrag', 'skinDevOpen', 'skinSliderRects',
   'chalPassArm', 'chalPassNote', 'chalSel', 'chalScroll', 'chalFrom', 'chalPassRect', 'chalRows', 'chalStartRect',
@@ -67084,7 +68158,7 @@ const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'V
                    'rsSIM', 'rsSpark', 'rsBlow', 'rsPlume', 'rsCam', 'HL', 'Vigil', 'vig', 'hubState', 'hub', 'hubTut'];
 // and containers that are this machine's own
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
-  'Codex', 'Tales', 'TA_TAGGED', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
+  'Codex', 'Tales', 'TA_TAGGED', '_taMix', '_taBack', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
