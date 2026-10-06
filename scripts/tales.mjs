@@ -125,6 +125,33 @@ take(g.run(`(() => { ${KIT}
   return JSON.stringify(C);
 })()`));
 
+section("the tales (step 5): the bible's rules");
+take(g.run(`(() => { ${KIT}
+  // ALL HALLOWS chapters II and III are not live yet, and the page source is public: these wait for them
+  const LATER = ['r:patch 3', 'n:soul 2', 'n:soul 3'];
+  const miss = [], all = [];
+  for (const en of talesAll()) {
+    if (en.link) continue;
+    en.pages.forEach((pg, i) => {
+      if (pg.sealed || pg.held) return;
+      const text = codexPageText({ tale: en.key, en }, i);
+      if (!text) miss.push(en.key + ' ' + (i + 1)); else all.push([en.key, i, text]);
+    });
+  }
+  chk(JSON.stringify(miss) === JSON.stringify(LATER), 'every page that can open has its words, but the ALL HALLOWS chapters not yet live', miss);
+  chk(all.length >= 178, 'and that is every other page', all.length);
+  chk(!all.some(([, , x]) => x.includes('!')), 'no exclamation marks', all.filter(([, , x]) => x.includes('!')).map(([k, i]) => k + ' ' + (i + 1)));
+  const sealedWords = /\\b(raids?|heavens?|seraphs?|seraphim|wars?|atomi[sz]ed)\\b/i;
+  chk(!all.some(([, , x]) => sealedWords.test(x)), 'nothing of the sealed chapter in a public page', all.filter(([, , x]) => sealedWords.test(x)).map(([k, i]) => k + ' ' + (i + 1)));
+  // only the dev (every page II, and his own entry) and ROOT say it plainly
+  const plain = /\\b(game|games|player|players|code)\\b/i;
+  const said = all.filter(([k, i, x]) => i !== 1 && k !== 'n:dev' && k !== 'b:root' && plain.test(x)).map(([k, i]) => k + ' ' + (i + 1));
+  chk(!said.length, 'nobody but the dev and ROOT says game, player or code', said);
+  // and the two rules above can catch something
+  chk(sealedWords.test('the second raid') && plain.test('a game'), 'those two rules are live');
+  return JSON.stringify(C);
+})()`));
+
 section('the bosses');
 take(g.run(`(() => { ${KIT}
   run();
