@@ -444,7 +444,8 @@ D1, not the real database. To try ALL HALLOWS outside its dates:
 `http://localhost:8787/__scheduled?cron=5+0+*+*+*`.
 
 ALL HALLOWS' chapter II, THE HOUSE, has its own test. Its art hooks are listed
-in `HALLOWS-HOUSE-HOOKS.md`:
+in `HALLOWS-HOUSE-HOOKS.md`, and its art is in `hl-art.js` (the test draws the
+house on the placeholders and on the art):
 
 ```sh
 npm run test:hallows                       # under a minute: THE HOUSE, DEAD GAME, the medals, the hooks

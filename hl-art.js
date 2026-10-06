@@ -1231,6 +1231,7 @@ function hlAscendFx(n) {
   hlEmit('wisp', s.x, s.y, 30, { spread: 20, vy: -30 });
 }
 function hlAreaEnterFx(A) {
+  hlUnbake('hl-house-floor');            // one area's floor in memory at a time
   HL_ART_S.batT = 0.6;
   hlEmit('bat', cam.x - W / 2 / camZoom - 30, cam.y - 120, 7, { ang: 0.2, spread: 60, life: 9 });
 }
@@ -3018,17 +3019,1809 @@ function hlSkinDeathFx(me) {
    hook will ask for, key and size, or the draw simply bakes it again. ---- */
 function hlArtPreload() {
   const vx = WORLD.w / 2 - VIG_SIZE.w / 2, vy = WORLD.h / 2 - VIG_SIZE.h / 2;
+  // one area's floor, not both (each is the whole arena): the house's once it
+  // is open and the patch is behind you, the patch's until then
+  let house = false;
+  try { house = hlChapterOpen(1) && hlQDone('q2'); } catch (err) { house = false; }
   return [
     // the vigil's room: drawVigilWorld bakes it about the room's centre
     () => hlBakePrep('hl-vigil-room', vx, vy, VIG_SIZE.w, VIG_SIZE.h, g => hlArtVigilBake(g, vx, vy)),
-    // the patch's field: the whole arena, as drawHlAreaFloor bakes it
-    () => hlBakePrep('hl-patch-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtPatchFloor(g, 0, 0, WORLD.w, WORLD.h)),
+    // the area's floor: the whole arena, as drawHlAreaFloor / drawHlHouseFloor bake it
+    house ? () => hlBakePrep('hl-house-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtHsFloorBake(g, 0, 0, WORLD.w, WORLD.h))
+          : () => hlBakePrep('hl-patch-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtPatchFloor(g, 0, 0, WORLD.w, WORLD.h)),
     // every light's falloff, and the glows
     () => hlSpritePrep(['#fb923c', '#a5f3fc', '#fed7aa', '#f97316', '#fbbf24', '#64748b', '#94a3b8',
                         '#c2410c', '#e0f2fe', '#fde68a', '#84cc16', '#ea580c', '#f59e0b', '#cbd5e1',
                         '#ef4444']),
+    // and the house's
+    () => { if (house) hlSpritePrep(['#ece7ff', '#7dd3fc', '#ddd6fe', '#c4b5fd', '#e2e8f0', '#93c5fd', '#e9d5ff',
+                                     '#e0e7ff', '#fca5a5', '#818cf8', '#a5b4fc', '#ede9fe', '#f8fafc', '#4ade80']); },
     // where the candles stand, for today's count
     () => hlArtCandles(Math.min(260, Math.floor(Vigil.shown() / 10)))
   ];
 }
+/* ===========================================================================
+   ALL HALLOWS · ACT II: THE HOUSE — the look
+   Drawn over the ACT II placeholders, hook for hook, on the contract in
+   HALLOWS-HOUSE-HOOKS.md. Helpers are hlArtHs*, constants HL_ART_HS*. What is
+   kept for a body between frames (a sheet's cloth, a poltergeist's tail, his
+   thread of replies) lives in WeakMaps here, never on the body, so a run's
+   snapshot never carries it and a restored body simply grows a new one.
+
+   The grammar, in one paragraph: an empty lobby in an old house. Dark boards
+   and worn rugs, and round the walls the rooms somebody left with the menu
+   still open: a set on a stand, a couch facing it, the pads where they were
+   dropped. The screens never go off. The lamps are on a timer: they go down
+   with THE QUIET, come back up on a death, and die for good when DEAD GAME
+   puts the house out. The fog is still the dark; the lamps only make the
+   light worth having. Violet (#c4b5fd) is the house and what it lifts. Cold
+   (#a5f3fc) is the soul's, as in the patch: the marked sheets and what they
+   said. Grey is DEAD GAME's, and everyone of his who left. Red is only ever
+   what is about to hit you.
+=========================================================================== */
+
+const HL_ART_HS_C = {
+  board: '#3d2d36', boardHi: '#4d3a45', boardLo: '#2a1f26', gap: '#0d090c',
+  paper: '#2b2242', paperHi: '#382d55', paperLo: '#1d1730', wain: '#21182b', wainHi: '#33253f', trim: '#120c16',
+  velvet: '#3b2a4d', velvetHi: '#52406b', velvetLo: '#21172e', throw_: '#5b1f33',
+  plastic: '#26262f', plasticHi: '#3a3a46', plasticLo: '#121218', glass: '#0a0f1c',
+  wood: '#5c4330', woodHi: '#7a5a40', woodLo: '#2e2118', brass: '#a08349', shade: '#8a6a4a', shadeHi: '#c4a27a',
+  sheet: '#e2e8f0', sheetLo: '#3b4659', coldSheet: '#dff7fb', coldLo: '#2c6170',
+  cold: '#a5f3fc', lurk: '#818cf8', lurkMid: '#1c1a46', lurkDeep: '#06051a', lurkEye: '#e0e7ff',
+  polt: '#c4b5fd', poltHi: '#ede9fe', poltLo: '#6d28d9', poltDeep: '#2e1065',
+  dg: '#e2e8f0', dgHi: '#f8fafc', dgLo: '#94a3b8', dgDeep: '#334155', grey: '#64748b', greyHi: '#94a3b8',
+  screen: '#93c5fd', screenHi: '#dbeafe', lamp: '#fbbf24', lampHi: '#fef3c7',
+  hurt: '#ef4444', hurtHi: '#fca5a5', ink: '#e2e8f0', dim: '#64748b', online: '#4ade80'
+};
+/* what a sheet's head does over each thing that can be under it: w, h its
+   size; sq how square; bumps [where along the top -1..1, how high, how wide,
+   'aim' to follow you round]; fuse a bomber's, through a hole */
+const HL_ART_HS_UNDER = {
+  brute:     { w: 1.2, h: 0.9, sq: 0.6, bumps: [[-0.62, 0.2, 0.42], [0.62, 0.2, 0.42]] },
+  spitter:   { w: 0.95, h: 1, bumps: [[0, 0.34, 0.22, 'aim']] },
+  dasher:    { w: 0.88, h: 1.06, bumps: [[0, 0.4, 0.16, 'aim']] },
+  splitter:  { w: 1.14, h: 0.9, bumps: [[-0.42, 0.24, 0.4], [0.42, 0.24, 0.4]] },
+  bomber:    { w: 1.02, h: 1, fuse: true },
+  sentinel:  { w: 1.04, h: 0.94, sq: 1.2 },
+  wraith:    { w: 0.94, h: 1.08, bumps: [[-0.5, 0.26, 0.1], [0, 0.34, 0.1], [0.5, 0.26, 0.1]] },
+  healer:    { w: 1, h: 1, bumps: [[0, 0.22, 0.16], [-0.3, 0.1, 0.18], [0.3, 0.1, 0.18]] },
+  artillery: { w: 1.06, h: 0.88, bumps: [[0, 0.46, 0.12, 'aim']] },
+  grunt:     { w: 1, h: 1 }
+};
+/* the menus left open, one per set: [title, the line, the button] */
+const HL_ART_HS_MENUS = [
+  () => ['WAITING FOR PLAYERS', '1 / 8', 'START'],
+  () => ['SEARCHING FOR MATCH', hlArtHsClock(), 'CANCEL'],
+  () => ['READY CHECK', '1 / 4', 'READY'],
+  () => ['', 'PRESS START', ''],
+  () => ['LOBBY', '0 ONLINE', 'INVITE']
+];
+/* the ones who left: what LAST SEEN is called over each of them */
+const HL_ART_HS_NAMES = ['xX_n0sc0pe_Xx', 'brb_food', 'gg_ez', 'teammate', 'sweatlord99', 'afk_bob', 'Player 2',
+                         'lagswitch', 'mom_im_winning', 'quit_4_real', 'the_host', 'duo_partner'];
+/* art-side state: what lies torn on the floor, the flares, the pops; nothing the logic reads */
+const HL_ART_HS = {
+  cloth: new WeakMap(), trail: new WeakMap(), thread: new WeakMap(),
+  torn: [], flares: [], chats: [], takes: [],
+  lampV: 1, enterAt: -9, darkAt: -9, blackAt: -9, moteT: 0, rooms: null, roomsKey: ''
+};
+
+/* ================================ small tools ============================== */
+function hlArtHsEll(g, x, y, rx, ry, rot = 0) { g.beginPath(); g.ellipse(x, y, Math.max(0.01, rx), Math.max(0.01, ry), rot, 0, TAU); }
+function hlArtHsClock() {
+  const s = Math.floor(31536000 + 8 * 3600 + uiTime), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+/* world → screen, the way the HUD needs it */
+function hlArtHsScr(x, y) { return [(x - cam.x) * camZoom + W / 2 + (cam.sx || 0), (y - cam.y) * camZoom + H / 2 + (cam.sy || 0)]; }
+/* a speech bubble: rounded box with a tail to (tx, ty) from its bottom edge at bx */
+function hlArtHsBubble(x, y, w, h, rad, bx, tx, ty) {
+  const r = Math.min(rad, h / 2, w / 2), x1 = x + w, y1 = y + h, tw = Math.min(w * 0.12, 12);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x1 - r, y); ctx.quadraticCurveTo(x1, y, x1, y + r);
+  ctx.lineTo(x1, y1 - r); ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
+  if (bx !== undefined) { ctx.lineTo(bx + tw, y1); ctx.lineTo(tx, ty); ctx.lineTo(bx - tw * 0.2, y1); }
+  ctx.lineTo(x + r, y1); ctx.quadraticCurveTo(x, y1, x, y1 - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+/* the lamps: 1 lit … 0 out, and how each one stutters on the way */
+function hlArtHsLampK(L) {
+  const v = HL_ART_HS.lampV;
+  if (v <= 0.001) return 0;
+  if (v >= 0.999) return 1;
+  return clamp(v * (0.55 + 0.45 * hlFlicker(uiTime * 1.6, L.seed, 1)) * (hlNoise(uiTime * 9 + L.seed * 7, 3) > 0.86 - 0.3 * (1 - v) ? 0.25 : 1), 0, 1);
+}
+
+/* =================================== the rooms ===============================
+   Where the menus were left open: five sets round the walls, each with its
+   couch, its lamp and its rug. One list, read by the floor, the light and the
+   glow, so the three always agree. */
+function hlArtHsRooms() {
+  const X = arena.x0, Y = arena.y0, w = arena.x1 - X, h = arena.y1 - Y, key = X + ',' + Y + ',' + w + ',' + h, S = HL_ART_HS;
+  if (S.roomsKey === key && S.rooms) return S.rooms;
+  const spots = [[0.14, 150], [0.5, 138], [0.86, 150], [0.2, h - 330], [0.8, h - 330]];
+  S.rooms = spots.map(([u, dy], i) => {
+    const x = X + w * u, y = Y + dy, side = i % 2 ? -1 : 1;
+    return { i, x, y, menu: i, seed: i * 2.71 + 1.3,
+             lamp: { x: x + side * 112, y: y + 58, seed: i * 1.93 + 0.4 },
+             couch: { x, y: y + 156 }, rug: { x, y: y + 92, rot: (hlHash(i + 3.3) - 0.5) * 0.12 } };
+  });
+  S.roomsKey = key;
+  return S.rooms;
+}
+
+/* ================================ the floor ================================ */
+function hlArtHsFloorBake(g, X, Y, w, h) {
+  const C = HL_ART_HS_C, R = hlArtRng(0x4a11);
+  // the boards: long rows, staggered joints, each its own shade
+  g.fillStyle = C.gap; g.fillRect(X, Y, w, h);
+  const BH = 24;
+  for (let y = Y, row = 0; y < Y + h; y += BH, row++) {
+    let x = X - R() * 160;
+    while (x < X + w) {
+      const L = 110 + R() * 190, k = R();
+      g.fillStyle = k < 0.33 ? C.boardLo : k < 0.8 ? C.board : C.boardHi;
+      g.fillRect(x + 1, y + 1, L - 2, BH - 2);
+      // grain
+      g.strokeStyle = 'rgba(16,10,14,0.35)'; g.lineWidth = 1;
+      for (let j = 0; j < 3; j++) {
+        const gy = y + 4 + R() * (BH - 8);
+        g.beginPath(); g.moveTo(x + 4, gy);
+        g.bezierCurveTo(x + L * 0.3, gy + (R() - 0.5) * 4, x + L * 0.6, gy + (R() - 0.5) * 4, x + L - 4, gy + (R() - 0.5) * 2); g.stroke();
+      }
+      if (R() < 0.25) { g.fillStyle = 'rgba(16,10,14,0.5)'; hlArtHsEll(g, x + R() * L, y + BH / 2, 3 + R() * 3, 1.6, 0); g.fill(); }   // a knot
+      g.fillStyle = 'rgba(255,240,230,0.04)'; g.fillRect(x + 1, y + 1, L - 2, 2);                                    // the lit edge
+      g.fillStyle = 'rgba(120,108,100,0.6)';
+      for (const nx of [x + 6, x + L - 7]) { g.fillRect(nx, y + 6, 1.6, 1.6); g.fillRect(nx, y + BH - 8, 1.6, 1.6); }   // nails
+      x += L;
+    }
+  }
+  // the big rug in the middle, worn bald where everyone stood
+  const cx = X + w / 2, cy = Y + h / 2;
+  hlArtHsRug(g, cx, cy, Math.min(780, w * 0.36), Math.min(470, h * 0.3), 0, ['#2f1a3d', '#4a2846', '#c9b48a'], R);
+  // the rooms
+  for (const Rm of hlArtHsRooms()) {
+    const pal = [['#1f2f45', '#2f4664', '#9fb4c8'], ['#3b1f2a', '#5b2a3a', '#d0b48a'], ['#263322', '#3a4a30', '#b8b48a'],
+                 ['#2d2440', '#463863', '#c4b5fd'], ['#3a2a1d', '#5a4028', '#d6b98a']][Rm.i % 5];
+    hlArtHsRug(g, Rm.rug.x, Rm.rug.y, 250, 168, Rm.rug.rot, pal, R);
+    hlArtHsCables(g, Rm, R);
+    hlArtHsSet(g, Rm);
+    hlArtHsCouch(g, Rm);
+    hlArtHsLampFoot(g, Rm.lamp);
+    hlArtHsLitter(g, Rm, R);
+  }
+  // dust, scuffs, and the drag of something long over the boards
+  for (let i = 0; i < w * h / 1400; i++) {
+    g.fillStyle = R() < 0.6 ? 'rgba(200,190,210,0.06)' : 'rgba(0,0,0,0.18)';
+    g.fillRect(X + R() * w, Y + R() * h, 1 + R() * 1.5, 1 + R() * 1.5);
+  }
+  for (let i = 0; i < w * h / 60000; i++) {
+    const x = X + R() * w, y = Y + R() * h, a = R() * TAU, l = 20 + R() * 60;
+    g.strokeStyle = 'rgba(220,210,235,0.05)'; g.lineWidth = 6 + R() * 10; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 0.5) * l * 0.6, y + Math.sin(a + 0.5) * l * 0.6, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+  hlArtHsWalls(g, X, Y, w, h, R);
+}
+/* a rug: field, border, a pattern of diamonds, fringe at the ends, bald patches */
+function hlArtHsRug(g, x, y, w, h, rot, pal, R) {
+  g.save(); g.translate(x, y); g.rotate(rot);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
+  g.fillStyle = pal[1]; g.fillRect(-w / 2, -h / 2, w, h);
+  const b = Math.min(w, h) * 0.12;
+  g.fillStyle = pal[0]; g.fillRect(-w / 2 + b, -h / 2 + b, w - b * 2, h - b * 2);
+  g.strokeStyle = rgba(pal[2], 0.35); g.lineWidth = 1.5;
+  g.strokeRect(-w / 2 + b * 0.35, -h / 2 + b * 0.35, w - b * 0.7, h - b * 0.7);
+  g.strokeRect(-w / 2 + b, -h / 2 + b, w - b * 2, h - b * 2);
+  // the border's diamonds
+  g.fillStyle = rgba(pal[2], 0.22);
+  const dg = b * 0.9;
+  for (let t = -w / 2 + b; t < w / 2 - b * 0.6; t += dg) for (const yy of [-h / 2 + b * 0.68, h / 2 - b * 0.68]) {
+    g.beginPath(); g.moveTo(t, yy - b * 0.22); g.lineTo(t + dg * 0.35, yy); g.lineTo(t, yy + b * 0.22); g.lineTo(t - dg * 0.35, yy); g.fill();
+  }
+  // the medallion
+  g.strokeStyle = rgba(pal[2], 0.2); g.lineWidth = 2;
+  hlArtHsEll(g, 0, 0, (w - b * 2) * 0.3, (h - b * 2) * 0.32); g.stroke();
+  hlArtHsEll(g, 0, 0, (w - b * 2) * 0.18, (h - b * 2) * 0.2); g.stroke();
+  g.fillStyle = rgba(pal[2], 0.12);
+  for (let i = 0; i < 8; i++) { const a = i * TAU / 8; hlArtHsEll(g, Math.cos(a) * (w - b * 2) * 0.24, Math.sin(a) * (h - b * 2) * 0.26, 6, 3, a); g.fill(); }
+  // fringe
+  g.strokeStyle = rgba(pal[2], 0.4); g.lineWidth = 1;
+  for (let t = -h / 2 + 3; t < h / 2 - 2; t += 4) for (const s of [-1, 1]) {
+    g.beginPath(); g.moveTo(s * w / 2, t); g.lineTo(s * (w / 2 + 5 + R() * 3), t + (R() - 0.5) * 2); g.stroke();
+  }
+  // where it is worn through
+  for (let i = 0; i < 5; i++) {
+    const px = (R() - 0.5) * w * 0.6, py = (R() - 0.5) * h * 0.5;
+    const gr = g.createRadialGradient(px, py, 0, px, py, 20 + R() * 30);
+    gr.addColorStop(0, 'rgba(140,120,130,0.16)'); gr.addColorStop(1, 'rgba(140,120,130,0)');
+    g.fillStyle = gr; g.fillRect(px - 50, py - 50, 100, 100);
+  }
+  g.restore();
+}
+/* the wall along the top (we see its face) and the skirting round the rest */
+function hlArtHsWalls(g, X, Y, w, h, R) {
+  const C = HL_ART_HS_C, WH = 66;
+  g.fillStyle = C.paper; g.fillRect(X, Y, w, WH);
+  // stripes and a small damask
+  for (let x = X; x < X + w; x += 24) { g.fillStyle = C.paperHi; g.fillRect(x, Y, 8, WH - 22); }
+  g.fillStyle = 'rgba(196,181,253,0.07)';
+  for (let x = X + 16; x < X + w; x += 24) for (let y = Y + 8; y < Y + WH - 24; y += 14) {
+    g.beginPath(); g.moveTo(x, y - 3); g.lineTo(x + 2.5, y); g.lineTo(x, y + 3); g.lineTo(x - 2.5, y); g.fill();
+  }
+  // where the pictures hung, paler than the rest; and the ones still up
+  for (const u of [0.07, 0.24, 0.39, 0.61, 0.76, 0.93]) {
+    const x = X + w * u, y = Y + 12, k = hlHash(u * 91);
+    if (k < 0.45) { g.fillStyle = 'rgba(160,150,200,0.1)'; g.fillRect(x - 18, y, 36, 26); g.fillStyle = '#0c0a10'; g.fillRect(x - 1, y - 6, 2, 3); continue; }
+    g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(x - 17, y + 2, 36, 28);
+    g.fillStyle = C.brass; g.fillRect(x - 19, y, 38, 28);
+    g.fillStyle = '#15121c'; g.fillRect(x - 15, y + 4, 30, 20);
+    // four of them, once
+    g.fillStyle = 'rgba(148,163,184,0.35)';
+    for (let i = 0; i < 4; i++) { const px = x - 10 + i * 6.6; hlArtHsEll(g, px, y + 13, 2, 2.2); g.fill(); g.fillRect(px - 2.6, y + 16, 5.2, 6); }
+    if (k > 0.75) { g.strokeStyle = 'rgba(226,232,240,0.35)'; g.lineWidth = 0.8; g.beginPath(); g.moveTo(x - 12, y + 6); g.lineTo(x + 2, y + 15); g.lineTo(x - 4, y + 22); g.stroke(); }
+  }
+  // doors into the rest of the house: dark, and nobody in them
+  for (const u of [0.31, 0.69]) {
+    const x = X + w * u;
+    g.fillStyle = C.trim; g.fillRect(x - 30, Y, 60, WH);
+    g.fillStyle = '#040306'; g.fillRect(x - 24, Y + 4, 48, WH - 4);
+    const gr = g.createLinearGradient(0, Y + WH, 0, Y + 4);
+    gr.addColorStop(0, 'rgba(30,24,44,0.6)'); gr.addColorStop(1, 'rgba(30,24,44,0)');
+    g.fillStyle = gr; g.fillRect(x - 24, Y + 4, 48, WH - 4);
+    g.fillStyle = C.wood; g.fillRect(x - 30, Y, 6, WH); g.fillRect(x + 24, Y, 6, WH);
+    // a timer switch beside it: the dial is what turns the lights off
+    g.fillStyle = '#d6cfc0'; g.fillRect(x + 36, Y + 30, 10, 15);
+    g.fillStyle = '#3b3530'; g.beginPath(); g.arc(x + 41, Y + 37.5, 3.2, 0, TAU); g.fill();
+    g.strokeStyle = '#ef4444'; g.lineWidth = 1; g.beginPath(); g.moveTo(x + 41, Y + 37.5); g.lineTo(x + 43, Y + 35); g.stroke();
+  }
+  // the wainscot, its panels, the rail and the skirting
+  g.fillStyle = C.wain; g.fillRect(X, Y + WH - 22, w, 22);
+  g.strokeStyle = C.wainHi; g.lineWidth = 1;
+  for (let x = X + 8; x < X + w - 40; x += 64) g.strokeRect(x, Y + WH - 18, 54, 13);
+  g.fillStyle = C.woodLo; g.fillRect(X, Y + WH - 24, w, 3);
+  g.fillStyle = C.trim; g.fillRect(X, Y + WH - 3, w, 4);
+  // its shadow on the boards
+  const sg = g.createLinearGradient(0, Y + WH, 0, Y + WH + 30);
+  sg.addColorStop(0, 'rgba(0,0,0,0.55)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sg; g.fillRect(X, Y + WH, w, 30);
+  // the other three walls, from above: the top of a skirting and a dark edge
+  g.fillStyle = C.trim; g.fillRect(X, Y + h - 14, w, 14); g.fillRect(X, Y, 14, h); g.fillRect(X + w - 14, Y, 14, h);
+  g.fillStyle = C.wainHi; g.fillRect(X, Y + h - 14, w, 2); g.fillRect(X + 12, Y + WH, 2, h - WH); g.fillRect(X + w - 14, Y + WH, 2, h - WH);
+  for (const [x0, y0, x1, y1] of [[X + 14, 0, X + 44, 0], [X + w - 14, 0, X + w - 44, 0]]) {
+    const gr = g.createLinearGradient(x0, 0, x1, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,0.45)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(Math.min(x0, x1), Y + WH, 30, h - WH - 14);
+  }
+}
+/* a set on its stand. The screen itself is lit in the glow (hlArtHsScreens). */
+function hlArtHsSet(g, Rm) {
+  const C = HL_ART_HS_C, x = Rm.x, y = Rm.y;
+  g.fillStyle = 'rgba(0,0,0,0.45)'; hlArtHsEll(g, x, y + 3, 50, 8); g.fill();
+  // the stand
+  g.fillStyle = C.woodLo; g.fillRect(x - 44, y - 18, 88, 20);
+  g.fillStyle = C.wood; g.fillRect(x - 44, y - 24, 88, 7);
+  g.strokeStyle = C.woodHi; g.lineWidth = 1; g.strokeRect(x - 40, y - 14, 38, 12); g.strokeRect(x + 2, y - 14, 38, 12);
+  g.fillStyle = C.brass; g.fillRect(x - 6, y - 9, 3, 2); g.fillRect(x + 4, y - 9, 3, 2);
+  // a console under it, its light long off
+  g.fillStyle = C.plasticLo; g.fillRect(x - 34, y - 12, 26, 8);
+  g.fillStyle = '#3f1d1d'; g.fillRect(x - 12, y - 10, 2, 2);
+  // the set
+  g.fillStyle = C.plasticLo; g.beginPath(); g.roundRect(x - 34, y - 66, 68, 44, 5); g.fill();
+  g.fillStyle = C.plastic; g.beginPath(); g.roundRect(x - 32, y - 66, 64, 40, 5); g.fill();
+  g.fillStyle = C.plasticHi; g.fillRect(x - 30, y - 64, 60, 2);
+  g.fillStyle = C.glass; g.beginPath(); g.roundRect(x - 25, y - 60, 50, 30, 6); g.fill();
+  g.fillStyle = 'rgba(147,197,253,0.08)'; g.beginPath(); g.roundRect(x - 23, y - 58, 46, 26, 5); g.fill();
+  g.fillStyle = '#4b4b58'; for (let i = 0; i < 3; i++) g.fillRect(x + 18 - i * 5, y - 28.5, 3, 1.4);
+  // the rabbit ears
+  g.strokeStyle = '#6b6b78'; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(x - 2, y - 66); g.lineTo(x - 18, y - 92); g.moveTo(x + 2, y - 66); g.lineTo(x + 14, y - 94); g.stroke();
+  g.fillStyle = '#9ca3af'; g.beginPath(); g.arc(x - 18, y - 92, 1.6, 0, TAU); g.arc(x + 14, y - 94, 1.6, 0, TAU); g.fill();
+}
+/* the couch, from behind: whoever sat in it was looking at the set */
+function hlArtHsCouch(g, Rm) {
+  const C = HL_ART_HS_C, x = Rm.couch.x, y = Rm.couch.y;
+  g.fillStyle = 'rgba(0,0,0,0.5)'; hlArtHsEll(g, x, y + 18, 84, 14); g.fill();
+  // the seat cushions, just showing over the back
+  for (let i = 0; i < 3; i++) {
+    g.fillStyle = i === 1 ? C.velvet : C.velvetHi;
+    g.beginPath(); g.roundRect(x - 62 + i * 42, y - 36, 40, 14, 5); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x - 60 + i * 42, y - 26, 36, 3);
+  }
+  // the back and the arms
+  g.fillStyle = C.velvetLo; g.beginPath(); g.roundRect(x - 74, y - 30, 18, 46, 6); g.fill(); g.beginPath(); g.roundRect(x + 56, y - 30, 18, 46, 6); g.fill();
+  g.fillStyle = C.velvet; g.beginPath(); g.roundRect(x - 64, y - 24, 128, 38, 6); g.fill();
+  g.fillStyle = C.velvetHi; g.fillRect(x - 60, y - 24, 120, 3);
+  g.fillStyle = C.velvetLo;
+  for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(x - 45 + i * 30, y - 6, 1.8, 0, TAU); g.fill(); }
+  g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(x - 64, y + 8, 128, 6);
+  // a throw over one arm
+  const s = Rm.i % 2 ? -1 : 1;
+  g.fillStyle = C.throw_;
+  g.beginPath(); g.moveTo(x + s * 40, y - 34); g.quadraticCurveTo(x + s * 68, y - 40, x + s * 76, y - 22);
+  g.lineTo(x + s * 74, y + 10); g.quadraticCurveTo(x + s * 60, y + 18, x + s * 50, y + 8); g.lineTo(x + s * 46, y - 20); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(255,220,220,0.12)'; g.lineWidth = 1;
+  for (let k = 0; k < 4; k++) { g.beginPath(); g.moveTo(x + s * (48 + k * 6), y - 30 + k); g.lineTo(x + s * (52 + k * 6), y + 10); g.stroke(); }
+}
+/* the lamp's foot and pole: the shade is drawn live, so it can be lit */
+function hlArtHsLampFoot(g, L) {
+  const C = HL_ART_HS_C;
+  g.fillStyle = 'rgba(0,0,0,0.45)'; hlArtHsEll(g, L.x, L.y + 2, 16, 5); g.fill();
+  g.fillStyle = C.brass; hlArtHsEll(g, L.x, L.y, 11, 4); g.fill();
+  g.fillStyle = '#6b5530'; hlArtHsEll(g, L.x, L.y + 1, 11, 3); g.fill();
+  g.fillStyle = C.brass; g.fillRect(L.x - 1.5, L.y - 76, 3, 76);
+  g.fillStyle = 'rgba(255,240,200,0.35)'; g.fillRect(L.x - 1.5, L.y - 76, 1, 76);
+}
+/* the pads where they were dropped, their cords back to the set, the cans */
+function hlArtHsCables(g, Rm, R) {
+  const x = Rm.x, y = Rm.y;
+  const pads = [[x - 34 + R() * 10, y + 64 + R() * 10, R() - 0.5], [x + 30 + R() * 10, y + 80 + R() * 10, R() - 0.5]];
+  for (const [px, py] of pads) {
+    g.strokeStyle = '#0b0b10'; g.lineWidth = 2.2; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x - 20, y - 6);
+    g.bezierCurveTo(x - 20 + (px - x) * 0.2, y + 30, px + (R() - 0.5) * 60, py - 30, px, py); g.stroke();
+    g.strokeStyle = 'rgba(160,160,180,0.12)'; g.lineWidth = 0.8; g.stroke();
+  }
+  // and the set's own cord, to the wall
+  g.strokeStyle = '#0b0b10'; g.lineWidth = 2.6;
+  g.beginPath(); g.moveTo(x + 30, y - 20);
+  const wy = Rm.y < arena.y0 + (arena.y1 - arena.y0) / 2 ? arena.y0 + 66 : y - 70;
+  g.bezierCurveTo(x + 60, y - 10, x + 70, wy + 20, x + 64 + R() * 30, wy); g.stroke();
+  for (const [px, py, rot] of pads) hlArtHsPad(g, px, py, rot);
+}
+function hlArtHsPad(g, x, y, rot) {
+  g.save(); g.translate(x, y); g.rotate(rot);
+  g.fillStyle = 'rgba(0,0,0,0.4)'; hlArtHsEll(g, 1, 3, 13, 6); g.fill();
+  g.fillStyle = '#2a2a33';
+  g.beginPath(); g.moveTo(-12, -3); g.quadraticCurveTo(-12, -7, -6, -7); g.lineTo(6, -7); g.quadraticCurveTo(12, -7, 12, -3);
+  g.quadraticCurveTo(14, 6, 9, 7); g.quadraticCurveTo(5, 7, 4, 2); g.lineTo(-4, 2); g.quadraticCurveTo(-5, 7, -9, 7); g.quadraticCurveTo(-14, 6, -12, -3); g.fill();
+  g.fillStyle = '#4b4b58'; g.fillRect(-9, -4, 5, 1.6); g.fillRect(-7.2, -5.8, 1.6, 5);
+  g.fillStyle = '#7f1d1d'; g.beginPath(); g.arc(6, -4.5, 1.2, 0, TAU); g.fill();
+  g.fillStyle = '#1e3a8a'; g.beginPath(); g.arc(8.5, -2.5, 1.2, 0, TAU); g.fill();
+  g.restore();
+}
+function hlArtHsLitter(g, Rm, R) {
+  const x = Rm.couch.x, y = Rm.couch.y;
+  for (let i = 0; i < 3; i++) {
+    const cx = x + (R() - 0.5) * 150, cy = y + 26 + R() * 18, down = R() < 0.6;
+    g.fillStyle = 'rgba(0,0,0,0.35)'; hlArtHsEll(g, cx, cy + 2, 5, 2); g.fill();
+    g.fillStyle = ['#9f1239', '#1d4ed8', '#15803d'][i % 3];
+    if (down) { g.save(); g.translate(cx, cy); g.rotate(R() * TAU); g.fillRect(-5, -2.5, 10, 5); g.fillStyle = '#cbd5e1'; g.fillRect(4, -2.5, 1.5, 5); g.restore(); }
+    else { g.fillRect(cx - 2.5, cy - 8, 5, 8); g.fillStyle = '#cbd5e1'; hlArtHsEll(g, cx, cy - 8, 2.5, 1); g.fill(); }
+  }
+  // a pizza box, long empty
+  const bx = x + (Rm.i % 2 ? 90 : -96), by = Rm.y + 40;
+  g.save(); g.translate(bx, by); g.rotate((R() - 0.5) * 0.5);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(-16, -12, 34, 28);
+  g.fillStyle = '#b08a5a'; g.fillRect(-18, -14, 34, 26);
+  g.fillStyle = '#8a6a44'; g.fillRect(-15, -11, 28, 20);
+  g.fillStyle = 'rgba(120,40,20,0.35)'; hlArtHsEll(g, -2, -1, 8, 6); g.fill();
+  g.restore();
+}
+
+/* ============================ what is lying about ===========================
+   Drawn round (0, 0), upright in the 3/4 view, the base about r * 0.4 down.
+   junk 0 a chair on its side · 1 a side table · 2 a dead set · 3 a stack of
+   games · 4 a box of cables · 5 the photo of the four of them */
+function hlArtHsJunk(k, r) {
+  const C = HL_ART_HS_C, s = r / 18;
+  ctx.save(); ctx.scale(s, s);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (k === 0) {
+    ctx.strokeStyle = C.woodLo; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-12, 4); ctx.lineTo(-18, 10); ctx.moveTo(-2, 4); ctx.lineTo(-6, 11); ctx.stroke();
+    ctx.fillStyle = C.wood; ctx.beginPath(); ctx.moveTo(-14, -2); ctx.lineTo(2, -2); ctx.lineTo(6, 5); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.woodHi; ctx.fillRect(-13, -2, 15, 2);
+    ctx.fillStyle = C.wood; ctx.beginPath(); ctx.moveTo(2, -2); ctx.lineTo(18, -14); ctx.lineTo(21, -10); ctx.lineTo(6, 5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = C.woodLo; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(5 + i * 4, -3 - i * 3); ctx.lineTo(8 + i * 4, 1 - i * 3); ctx.stroke(); }
+  } else if (k === 1) {
+    ctx.strokeStyle = C.woodLo; ctx.lineWidth = 2.6;
+    for (const x of [-10, -3, 4, 11]) { ctx.beginPath(); ctx.moveTo(x, -4); ctx.lineTo(x * 1.1, 10 - Math.abs(x) * 0.2); ctx.stroke(); }
+    ctx.fillStyle = C.woodLo; hlArtEll(0, -3, 16, 6.5); ctx.fill();
+    ctx.fillStyle = C.wood; hlArtEll(0, -5, 16, 6.5); ctx.fill();
+    ctx.fillStyle = 'rgba(226,232,240,0.55)'; hlArtEll(0, -5, 9, 3.6); ctx.fill();          // the doily
+    ctx.fillStyle = '#7c2d12'; ctx.fillRect(3, -13, 5, 7); ctx.fillStyle = '#9a3412'; hlArtEll(5.5, -13, 2.5, 1); ctx.fill();   // a mug
+  } else if (k === 2) {
+    ctx.fillStyle = C.plasticLo; ctx.beginPath(); ctx.roundRect(-15, -14, 30, 24, 3); ctx.fill();
+    ctx.fillStyle = C.plastic; ctx.beginPath(); ctx.roundRect(-14, -15, 28, 22, 3); ctx.fill();
+    ctx.fillStyle = C.glass; ctx.beginPath(); ctx.roundRect(-11, -12, 20, 15, 4); ctx.fill();
+    ctx.strokeStyle = 'rgba(226,232,240,0.35)'; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(-6, -11); ctx.lineTo(-2, -5); ctx.lineTo(-7, 0); ctx.moveTo(-2, -5); ctx.lineTo(5, -7); ctx.stroke();
+    ctx.fillStyle = 'rgba(147,197,253,0.12)'; ctx.fillRect(-9, -11, 6, 3);
+    ctx.fillStyle = '#4b4b58'; ctx.fillRect(10, -2, 2, 2);
+  } else if (k === 3) {
+    const cols = ['#5b21b6', '#0f766e', '#9f1239', '#a16207', '#1e3a8a'];
+    for (let i = 0; i < 5; i++) {
+      const y = 6 - i * 4.4, sh = (hlHash(i * 3.1) - 0.5) * 5;
+      ctx.fillStyle = '#0c0a10'; ctx.fillRect(-12 + sh, y - 3.6, 24, 4.4);
+      ctx.fillStyle = cols[i]; ctx.fillRect(-12 + sh, y - 3.6, 24, 3.4);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(-9 + sh, y - 2.4, 8, 1);
+    }
+  } else if (k === 4) {
+    ctx.fillStyle = '#7a5a36'; ctx.fillRect(-13, -8, 26, 18);
+    ctx.fillStyle = '#9a7448'; ctx.beginPath(); ctx.moveTo(-13, -8); ctx.lineTo(13, -8); ctx.lineTo(9, -13); ctx.lineTo(-9, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5c4126'; ctx.beginPath(); ctx.moveTo(-13, -8); ctx.lineTo(-19, -15); ctx.lineTo(-12, -14); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(13, -8); ctx.lineTo(18, -16); ctx.lineTo(11, -13); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#0b0b10'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(-4, -11); ctx.bezierCurveTo(-8, -22, 6, -20, 3, -12); ctx.moveTo(4, -11); ctx.quadraticCurveTo(14, -6, 16, 8); ctx.stroke();
+    ctx.fillStyle = 'rgba(216,195,154,0.7)'; ctx.fillRect(-2, -8, 4, 18);
+  } else {
+    ctx.fillStyle = C.brass; ctx.save(); ctx.rotate(-0.12); ctx.fillRect(-15, -12, 30, 22);
+    ctx.fillStyle = '#15121c'; ctx.fillRect(-12, -9, 24, 16);
+    ctx.fillStyle = 'rgba(148,163,184,0.5)';
+    for (let i = 0; i < 4; i++) {
+      const px = -8 + i * 5.4;
+      ctx.globalAlpha = i === 2 ? 0.25 : 1;              // one of them is hardly there
+      hlArtEll(px, -3, 1.8, 2); ctx.fill(); ctx.fillRect(px - 2.3, -0.5, 4.6, 6);
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(226,232,240,0.45)'; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(-11, -8); ctx.lineTo(1, -1); ctx.lineTo(-3, 6); ctx.moveTo(1, -1); ctx.lineTo(11, -4); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+/* a body left lying: its shape gone grey and flat */
+function hlArtHsHusk(w, upright) {
+  const r = w.r, col = /^#[0-9a-f]{6}$/i.test(w.col || '') ? w.col : '#94a3b8';
+  ctx.save();
+  ctx.scale(1, upright ? 0.9 : 0.6);
+  ctx.fillStyle = hlMix(col, '#0f172a', 0.72);
+  poly(0, 0, r * 0.85, w.sides || 5, hlHash(w.id || 1) * TAU); ctx.fill();
+  ctx.strokeStyle = hlMix(col, '#475569', 0.6, 0.7); ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.strokeStyle = 'rgba(2,3,8,0.6)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(-r * 0.4, -r * 0.2); ctx.lineTo(r * 0.05, r * 0.05); ctx.lineTo(-r * 0.1, r * 0.4); ctx.moveTo(r * 0.05, r * 0.05); ctx.lineTo(r * 0.45, -r * 0.1); ctx.stroke();
+  ctx.restore();
+}
+function hlArtHsPiece(W0, r, flash) {
+  if (W0.kind === 'junk') hlArtHsJunk(W0.junk | 0, r);
+  else hlArtHsHusk(Object.assign({}, W0, { r }), true);
+  if (flash > 0) { ctx.globalAlpha *= flash; ctx.fillStyle = '#ffffff'; hlArtEll(0, -r * 0.1, r * 0.8, r * 0.6); ctx.fill(); }
+}
+
+/* ================================== sheets ================================= */
+const HL_ART_HS_SHEET = { cols: 7, rows: 5 };
+function hlArtHsSheetGeo(e) {
+  const r = e.r, sd = hlArtSeed(e), U = e.hlMarked ? HL_ART_HS_UNDER.grunt : (HL_ART_HS_UNDER[e.hlUnder] || HL_ART_HS_UNDER.grunt);
+  const bob = Math.sin(uiTime * 2.1 + sd) * r * 0.07;
+  return { hx: e.x, hy: e.y - r * 0.62 + bob, hw: r * 0.6 * U.w, hh: r * 0.52 * U.h, U, sd, floor: e.y + r * 0.82 };
+}
+function hlArtHsSheetPin(b, G) {
+  const n = b.cols;
+  for (let c = 0; c < n; c++) {
+    const th = Math.PI - c / (n - 1) * Math.PI;
+    hlVPin(b, c, G.hx + Math.cos(th) * G.hw * 0.96, G.hy + Math.sin(th) * G.hh * 0.42);
+  }
+}
+function hlArtHsSheetCloth(e) {
+  let b = HL_ART_HS.cloth.get(e);
+  if (b) return b;
+  const G = hlArtHsSheetGeo(e), { cols, rows } = HL_ART_HS_SHEET, seg = G.hw * 2 * 1.3 / (cols - 1);
+  b = hlCloth(G.hx - seg * (cols - 1) / 2, G.hy, cols, rows, seg, { gy: 620, damp: 0.93, iters: 5, pin: 'top' });
+  hlArtHsSheetPin(b, G);
+  for (let rr = 1; rr < rows; rr++) for (let c = 0; c < cols; c++) {
+    const q = b.p[rr * cols + c], top = b.p[c];
+    q.x = q.px = top.x + (c - (cols - 1) / 2) * seg * 0.3 * rr / (rows - 1);
+    q.y = q.py = top.y + rr * seg * 0.95;
+  }
+  b.artLast = uiTime;
+  HL_ART_HS.cloth.set(e, b);
+  return b;
+}
+function hlArtHsSheetStep(e, dt) {
+  const b = hlArtHsSheetCloth(e), G = hlArtHsSheetGeo(e), sd = G.sd, vx = e.vx || 0, vy = e.vy || 0;
+  hlArtHsSheetPin(b, G);
+  hlVStep(b, dt, (x, y) => [-vx * 3.2 + (hlNoise(uiTime * 1.7 + y * 0.05 + sd, 5) - 0.5) * 240 + (x - G.hx) * 7,
+                            -vy * 1.2 + (hlNoise(uiTime * 1.3 + x * 0.05 + sd, 6) - 0.5) * 110]);
+  b.artLast = uiTime;
+}
+/* its head: a dome, and the shape of what is under it pushing up through it */
+function hlArtHsHeadPath(G, face) {
+  const { hx, hy, hw, hh, U } = G, N = 36, p = U.sq ? 1 / (1 + U.sq * 1.4) : 1;
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const th = i / N * TAU, c = Math.cos(th), s = Math.sin(th);
+    let x = hw * Math.sign(c) * Math.pow(Math.abs(c), p), y = hh * Math.sign(s) * Math.pow(Math.abs(s), p);
+    if (U.bumps && s < 0.25) for (const [off, sz, sig, aim] of U.bumps) {
+      const at = -Math.PI / 2 + (aim ? clamp(Math.cos(face), -1, 1) * 0.85 : off) * Math.PI / 2;
+      let d = th - at; d = Math.atan2(Math.sin(d), Math.cos(d));
+      const add = sz * hh * Math.exp(-(d * d) / (sig * sig));
+      x += Math.cos(th) * add; y += Math.sin(th) * add;
+    }
+    i ? ctx.lineTo(hx + x, hy + y) : ctx.moveTo(hx + x, hy + y);
+  }
+  ctx.closePath();
+}
+function hlArtHsSheet(e, ea) {
+  const C = HL_ART_HS_C, r = e.r, mk = !!e.hlMarked, G = hlArtHsSheetGeo(e), b = hlArtHsSheetCloth(e);
+  if (uiTime - (b.artLast || 0) > 0.05) hlArtHsSheetStep(e, Math.min(1 / 30, uiTime - (b.artLast || uiTime) || 1 / 60));
+  const face = Math.atan2(P.y - e.y, P.x - e.x), fl = e.flash || 0;
+  let a = ea;
+  // a marked one slipping out thins and stutters in its last seconds
+  if (mk) { const left = MARK_ESCAPE - (e.t || 0); if (left < 4) a *= lerp(0.3, 1, clamp(left / 4, 0, 1)) * (0.7 + 0.3 * Math.sin(uiTime * 22)); }
+  ctx.save();
+  ctx.globalAlpha = ea * 0.5; ctx.fillStyle = '#020308'; hlArtEll(e.x, G.floor, r * 0.95, r * 0.26); ctx.fill();
+  // the skirt, and its scalloped hem
+  hlDrawCloth(b, { col: mk ? C.coldSheet : C.sheet, dark: mk ? C.coldLo : C.sheetLo, hi: '#ffffff', bias: fl * 0.5, a, frayCol: mk ? C.cold : C.sheet });
+  const n = b.cols, base = (b.rows - 1) * n, Q = b.p;
+  ctx.globalAlpha = a;
+  ctx.fillStyle = mk ? '#c8eef6' : '#c9d2de';
+  ctx.beginPath(); ctx.moveTo(Q[base].x, Q[base].y);
+  for (let c = 0; c < n - 1; c++) {
+    const p0 = Q[base + c], p1 = Q[base + c + 1];
+    ctx.quadraticCurveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2 + b.seg * 0.55, p1.x, p1.y);
+  }
+  for (let c = n - 1; c >= 0; c--) ctx.lineTo(Q[base + c].x, Q[base + c].y - 0.5);
+  ctx.closePath(); ctx.fill();
+  if (mk) { ctx.strokeStyle = rgba(C.cold, 0.8); ctx.lineWidth = 1.2; ctx.stroke(); }
+  // the head
+  hlArtHsHeadPath(G, face);
+  const g = ctx.createRadialGradient(G.hx - G.hw * 0.35, G.hy - G.hh * 0.5, 1, G.hx, G.hy, G.hw * 1.3);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, mk ? '#e6f9fc' : '#e3e8f0'); g.addColorStop(1, mk ? '#6fb3c2' : '#8390a6');
+  ctx.fillStyle = g; ctx.fill();
+  if (mk) { ctx.strokeStyle = rgba(C.cold, 0.95); ctx.lineWidth = 1.8; ctx.stroke(); }
+  // where it folds over the top of it
+  ctx.strokeStyle = 'rgba(71,85,105,0.32)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(G.hx - G.hw * 0.15, G.hy - G.hh * 0.85); ctx.quadraticCurveTo(G.hx - G.hw * 0.55, G.hy - G.hh * 0.2, G.hx - G.hw * 0.7, G.hy + G.hh * 0.45);
+  ctx.moveTo(G.hx + G.hw * 0.25, G.hy - G.hh * 0.8); ctx.quadraticCurveTo(G.hx + G.hw * 0.6, G.hy - G.hh * 0.1, G.hx + G.hw * 0.62, G.hy + G.hh * 0.5);
+  ctx.stroke();
+  if (e.elite && !mk) {
+    // patched where something tore it once
+    ctx.save(); ctx.translate(G.hx + G.hw * 0.32, G.hy - G.hh * 0.38); ctx.rotate(0.3);
+    ctx.fillStyle = '#b8c2d2'; ctx.fillRect(-4, -3, 8, 6);
+    ctx.strokeStyle = '#475569'; ctx.lineWidth = 0.8;
+    for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(i * 2.6 - 1, -4.5); ctx.lineTo(i * 2.6 + 1, -2.5); ctx.moveTo(i * 2.6 + 1, -4.5); ctx.lineTo(i * 2.6 - 1, -2.5); ctx.stroke(); }
+    ctx.restore();
+  }
+  if (G.U.fuse) {
+    const fx = G.hx + G.hw * 0.1, fy = G.hy - G.hh * 0.95;
+    ctx.fillStyle = '#0b0d14'; hlArtEll(fx, fy + 1, 2.6, 1.3); ctx.fill();
+    ctx.strokeStyle = '#3f3a33'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(fx, fy + 1); ctx.quadraticCurveTo(fx + 3, fy - 6, fx + 7, fy - 7); ctx.stroke();
+  }
+  // the eyes, turned to you; from behind there are none
+  const front = clamp((Math.sin(face) + 0.75) / 0.5, 0, 1);
+  if (front > 0) {
+    const ex = Math.cos(face) * G.hw * 0.22, ey = G.hh * 0.06 + Math.sin(face) * G.hh * 0.1;
+    for (const s of [-1, 1]) {
+      ctx.globalAlpha = a * front;
+      ctx.fillStyle = mk ? '#0e3a44' : '#0b0d14';
+      hlArtEll(G.hx + ex + s * G.hw * 0.3, G.hy + ey, G.hw * 0.13, G.hh * 0.24, -s * 0.18); ctx.fill();
+      if (mk) { ctx.fillStyle = C.cold; hlArtEll(G.hx + ex + s * G.hw * 0.3, G.hy + ey + G.hh * 0.05, G.hw * 0.05, G.hh * 0.08); ctx.fill(); }
+    }
+  }
+  if (fl > 0) {
+    ctx.globalAlpha = a * fl * 0.6; ctx.fillStyle = '#ffffff';
+    hlArtHsHeadPath(G, face); ctx.fill();
+  }
+  ctx.restore();
+}
+/* torn: the cloth rips in two and is flung off what was under it, the head
+   folds in on itself, and what is left of it lies crumpled on the boards */
+function hlArtHsTear(e, cold) {
+  const b = hlArtHsSheetCloth(e), G = hlArtHsSheetGeo(e), n = b.cols, seg = b.seg;
+  const cx = (b.p[(n - 1) >> 1].x + b.p[n >> 1].x) / 2;
+  // a rip down the middle, and a nick or two off it
+  for (let rr = 0; rr < b.rows; rr++) { const q = b.p[rr * n + ((n - 1) >> 1)]; hlVTear(b, q.x + seg * 0.5, q.y, seg * 0.62); }
+  for (let i = 0; i < 2; i++) hlVTear(b, cx + (Math.random() - 0.5) * seg * 4, G.hy + seg * (1 + Math.random() * 2.5), seg * 0.5);
+  for (const q of b.p) {
+    q.pin = false;
+    const s = q.x < cx ? -1 : 1;
+    q.px = q.x - s * (2.4 + Math.random() * 2.2); q.py = q.y + 2.6 + Math.random() * 1.8;   // out, and up off it
+  }
+  b.gy = 520; b.damp = 0.93;
+  HL_ART_HS.cloth.delete(e);
+  const T = HL_ART_HS.torn;
+  T.push({ b, t0: uiTime, head: G, cold, up: false, heap: { x: G.hx, y: G.floor - 3, w: G.hw * 3, seed: Math.random() * 99 } });
+  while (T.length > 24) T.shift();
+  return b;
+}
+/* a marked one slipping out: it lets go of the floor and rises out of the room */
+function hlArtHsLose(e) {
+  const b = hlArtHsSheetCloth(e), G = hlArtHsSheetGeo(e);
+  for (const q of b.p) q.pin = false;
+  b.gy = -260; b.damp = 0.95;
+  HL_ART_HS.cloth.delete(e);
+  HL_ART_HS.torn.push({ b, t0: uiTime, head: G, cold: true, up: true, heap: null });
+}
+function hlArtHsTornStep(dt) {
+  const T = HL_ART_HS.torn;
+  for (let i = T.length - 1; i >= 0; i--) {
+    const o = T[i], age = uiTime - o.t0;
+    if (age > (o.up ? 1.6 : 3.6)) { T.splice(i, 1); continue; }
+    if (age < (o.up ? 1.6 : 0.9)) hlVStep(o.b, dt, o.up ? (x, y) => [(hlNoise(uiTime * 2 + y * 0.05, 7) - 0.5) * 300, 0] : null);
+  }
+}
+/* one half of a torn sheet, flung: its outline, smoothed, and a fold down it */
+function hlArtHsHalf(b, c0, c1, cold, a) {
+  const P = b.p, n = b.cols, rows = b.rows, ring = [];
+  for (let c = c0; c <= c1; c++) ring.push(P[c]);
+  for (let r = 1; r < rows; r++) ring.push(P[r * n + c1]);
+  for (let c = c1 - 1; c >= c0; c--) ring.push(P[(rows - 1) * n + c]);
+  for (let r = rows - 2; r >= 1; r--) ring.push(P[r * n + c0]);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.beginPath();
+  const L = ring.length, mid = (i) => [(ring[i].x + ring[(i + 1) % L].x) / 2, (ring[i].y + ring[(i + 1) % L].y) / 2];
+  let m0 = mid(L - 1); ctx.moveTo(m0[0], m0[1]);
+  for (let i = 0; i < L; i++) { const m1 = mid(i); ctx.quadraticCurveTo(ring[i].x, ring[i].y, m1[0], m1[1]); }
+  ctx.closePath();
+  const top = P[c0], bot = P[(rows - 1) * n + c1], g = ctx.createLinearGradient(top.x, top.y, bot.x, bot.y);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(1, cold ? '#7cc4d2' : '#8d99ad');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = cold ? rgba(HL_ART_HS_C.cold, 0.9) : 'rgba(100,116,139,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+  const q0 = P[((c0 + c1) >> 1)], q1 = P[(rows - 1) * n + ((c0 + c1 + 1) >> 1)];
+  ctx.strokeStyle = 'rgba(71,85,105,0.35)'; ctx.beginPath(); ctx.moveTo(q0.x, q0.y); ctx.lineTo(q1.x, q1.y); ctx.stroke();
+  ctx.restore();
+}
+/* what is left of a sheet on the floor: a crumpled heap, its folds, and the
+   two holes it looked out of */
+function hlArtHsHeap(H, a, cold) {
+  const C = HL_ART_HS_C, R = hlArtRng(H.seed * 1000), w = H.w;
+  ctx.save();
+  ctx.globalAlpha = a * 0.45; ctx.fillStyle = '#020308'; hlArtEll(H.x, H.y + 2, w * 0.62, w * 0.16); ctx.fill();
+  ctx.globalAlpha = a;
+  const col = cold ? '#bfe9f1' : '#c3cbd8', lo = cold ? '#5b98a6' : '#6b778c';
+  for (let i = 0; i < 4; i++) {
+    const ox = (R() - 0.5) * w * 0.6, oy = (R() - 0.5) * w * 0.08 - w * 0.05, rx = w * (0.22 + R() * 0.16), ry = w * (0.09 + R() * 0.06);
+    ctx.fillStyle = i % 2 ? col : hlMix(col, lo, 0.35); hlArtEll(H.x + ox, H.y + oy, rx, ry, (R() - 0.5) * 0.5); ctx.fill();
+  }
+  ctx.strokeStyle = rgba(lo, 0.7); ctx.lineWidth = 1; ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const x0 = H.x + (R() - 0.5) * w * 0.7, y0 = H.y + (R() - 0.5) * w * 0.1;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(x0 + w * 0.08, y0 - w * 0.05, x0 + w * (0.1 + R() * 0.12), y0 + (R() - 0.5) * w * 0.05); ctx.stroke();
+  }
+  // its eyes, empty now, askew
+  const ex = H.x + (R() - 0.5) * w * 0.2, ey = H.y - w * 0.04, tilt = (R() - 0.5) * 0.6;
+  ctx.fillStyle = cold ? '#0e3a44' : '#141822';
+  for (const s of [-1, 1]) { hlArtEll(ex + s * w * 0.09, ey + s * tilt * w * 0.06, w * 0.04, w * 0.026, tilt); ctx.fill(); }
+  ctx.restore();
+}
+function hlArtHsTornDraw() {
+  const C = HL_ART_HS_C;
+  for (const o of HL_ART_HS.torn) {
+    const age = uiTime - o.t0;
+    if (o.heap) {
+      const ha = clamp((age - 0.25) / 0.35, 0, 1) * clamp((3.6 - age) / 1, 0, 1);
+      if (ha > 0) hlArtHsHeap(o.heap, ha, o.cold);
+    }
+    const a = o.up ? clamp(1 - age / 1.6, 0, 1) : clamp((0.9 - age) / 0.45, 0, 1);
+    if (a > 0) {
+      const m = (o.b.cols - 1) >> 1;
+      if (o.up) hlDrawCloth(o.b, { col: C.coldSheet, dark: C.coldLo, hi: '#ffffff', a, frayCol: C.cold });
+      else { hlArtHsHalf(o.b, 0, m, o.cold, a); hlArtHsHalf(o.b, m + 1, o.b.cols - 1, o.cold, a); }
+    }
+    // the head goes in on itself over a fifth of a second
+    const u = clamp(age / 0.22, 0, 1), H = o.head;
+    if (u < 1) {
+      ctx.save(); ctx.globalAlpha = 1 - u;
+      ctx.fillStyle = o.cold ? '#dff7fb' : '#dfe5ee';
+      hlArtEll(H.hx, lerp(H.hy, H.floor - 3, HL_EASE.in(u)), H.hw * (1 + u * 0.3), H.hh * (1 - u * 0.85)); ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+/* ================================== lurker ================================= */
+function hlArtHsLurkPose(e) {
+  const st = e.state | 0, ang = st === 2 && e.hlStrikeAng !== undefined ? e.hlStrikeAng : (e.ang || 0);
+  const wind = st === 1 ? clamp(1 - (e.atkT || 0) / LURK_WIND, 0, 1) : st === 2 ? 1 : 0;
+  const stretch = st === 2 ? 1.45 : st === 1 ? 0.84 - 0.06 * wind : st === 3 ? 0.9 : 1;
+  return { st, ang, wind, stretch };
+}
+/* where its eyes are and how open: world space */
+function hlArtHsLurkEyes(e, L) {
+  const r = e.r, ca = Math.cos(L.ang), sa = Math.sin(L.ang), f = r * 0.66 * L.stretch;
+  const hx = e.x + ca * f, hy = e.y + sa * f - r * 0.18;
+  const open = L.st === 2 ? 1 : L.st === 1 ? 0.35 + 0.65 * HL_EASE.out3(L.wind) : L.st === 3 ? 0.08 : 0.16;
+  return { hx, hy, px: -sa * r * 0.19, py: ca * r * 0.19 * 0.6, open, s: r * 0.13 };
+}
+function hlArtHsEyePair(E, sc, a, hot) {
+  ctx.save();
+  for (const k of [-1, 1]) {
+    const x = E.hx + E.px * k * sc, y = E.hy + E.py * k * sc, w = E.s * 1.15 * sc, h = Math.max(0.6, E.s * 0.8 * E.open * sc);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = HL_ART_HS_C.lurkEye;
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - h * 1.6, x + w, y); ctx.quadraticCurveTo(x, y + h * 1.6, x - w, y); ctx.fill();
+    if (E.open > 0.3) { ctx.fillStyle = hot ? '#b91c1c' : '#312e81'; ctx.beginPath(); ctx.arc(x, y, Math.min(h, w) * 0.55, 0, TAU); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function hlArtHsLurkArms(r, L, sd) {
+  const C = HL_ART_HS_C;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of [-1, 1]) {
+    const sx = r * 0.18, sy = s * r * 0.48;
+    let hx, hy;
+    if (L.st === 1) { hx = -r * 0.15 - L.wind * r * 0.35; hy = s * r * (1.05 + 0.25 * L.wind); }
+    else if (L.st === 2) { hx = r * 1.95; hy = s * r * 0.42; }
+    else if (L.st === 3) { hx = r * 0.35; hy = s * r * 0.32; }
+    else { const tw = Math.sin(uiTime * 3.1 + sd + s * 1.7) * 0.16; hx = r * (1.15 + tw); hy = s * r * 0.86; }
+    const k = hlIK(sx, sy, hx, hy, r * 0.82, r * 0.88, -s);
+    ctx.strokeStyle = rgba(C.lurk, 0.55);
+    ctx.lineWidth = r * 0.24 + 2; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(k.ex, k.ey); ctx.stroke();
+    ctx.lineWidth = r * 0.16 + 2; ctx.beginPath(); ctx.moveTo(k.ex, k.ey); ctx.lineTo(k.hx, k.hy); ctx.stroke();
+    ctx.strokeStyle = C.lurkDeep;
+    ctx.lineWidth = r * 0.24; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(k.ex, k.ey); ctx.stroke();
+    ctx.lineWidth = r * 0.16; ctx.beginPath(); ctx.moveTo(k.ex, k.ey); ctx.lineTo(k.hx, k.hy); ctx.stroke();
+    ctx.strokeStyle = rgba(C.lurk, 0.25); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(k.ex, k.ey); ctx.lineTo(k.hx, k.hy); ctx.stroke();
+    // the fingers: long, and too many joints
+    const ha = Math.atan2(k.hy - k.ey, k.hx - k.ex);
+    ctx.strokeStyle = C.lurkDeep; ctx.lineWidth = r * 0.08;
+    for (let j = -1; j <= 1; j++) {
+      const a1 = ha + j * (L.st === 2 ? 0.45 : 0.3), l = r * (L.st === 2 ? 0.42 : 0.32);
+      ctx.beginPath(); ctx.moveTo(k.hx, k.hy);
+      ctx.quadraticCurveTo(k.hx + Math.cos(a1) * l * 0.7, k.hy + Math.sin(a1) * l * 0.7, k.hx + Math.cos(a1 + s * 0.5) * l, k.hy + Math.sin(a1 + s * 0.5) * l);
+      ctx.stroke();
+    }
+  }
+}
+function hlArtHsLurkBlob(r, L, sd, burn) {
+  const C = HL_ART_HS_C, sq = L.st === 1 ? 1.12 : L.st === 2 ? 0.74 : 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 26; i++) {
+    const th = i / 26 * TAU, n = hlNoise(i * 0.83 + uiTime * (burn ? 7 : 1.7) + sd, 2);
+    const rr = r * (0.74 + 0.36 * n) * (Math.cos(th) > 0 ? 1 : 0.9);
+    const x = Math.cos(th) * rr * L.stretch, y = Math.sin(th) * rr * sq * 0.82;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath();
+}
+function hlArtHsLurker(e, ea) {
+  const C = HL_ART_HS_C, r = e.r, sd = hlArtSeed(e), L = hlArtHsLurkPose(e);
+  // past the light it is not seen: nothing of it but, winding or striking, its eyes
+  if (e.hlDark) { if (L.st === 1 || L.st === 2) hlArtHsEyePair(hlArtHsLurkEyes(e, L), 1, ea, L.st === 2); return; }
+  const burn = e.hlLit ? 1 : 0;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.6; ctx.fillStyle = '#020208'; hlArtEll(e.x, e.y + r * 0.3, r * 1.4 * L.stretch, r * 0.45); ctx.fill();
+  // a strike leaves copies of it down the line it took
+  if (L.st === 2) for (let k = 3; k >= 1; k--) {
+    ctx.save();
+    ctx.globalAlpha = ea * 0.13 * (4 - k);
+    ctx.translate(e.x - Math.cos(L.ang) * r * 0.7 * k, e.y - Math.sin(L.ang) * r * 0.7 * k); ctx.rotate(L.ang);
+    hlArtHsLurkBlob(r, L, sd + k, 0); ctx.fillStyle = C.lurkMid; ctx.fill();
+    ctx.restore();
+  }
+  ctx.globalAlpha = ea * (burn ? 0.82 + 0.18 * Math.sin(uiTime * 41 + sd) : 1);
+  ctx.translate(e.x, e.y); ctx.rotate(L.ang);
+  hlArtHsLurkArms(r, L, sd);
+  hlArtHsLurkBlob(r, L, sd, burn);
+  const g = ctx.createRadialGradient(r * 0.25, -r * 0.25, 1, 0, 0, r * 1.15);
+  g.addColorStop(0, C.lurkMid); g.addColorStop(1, C.lurkDeep);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = rgba(burn ? '#c7d2fe' : C.lurk, burn ? 0.95 : 0.7); ctx.lineWidth = burn ? 2.2 : 1.6; ctx.stroke();
+  // the ridge of its back
+  ctx.strokeStyle = rgba(C.lurk, 0.55); ctx.lineWidth = 1.4;
+  for (let i = 0; i < 5; i++) {
+    const x = -r * 0.55 + i * r * 0.26 * L.stretch;
+    ctx.beginPath(); ctx.moveTo(x, -r * 0.08); ctx.lineTo(x - r * 0.12, -r * 0.3 - hlHash(i + sd) * r * 0.12); ctx.stroke();
+  }
+  // its head, low and forward
+  const f = r * 0.66 * L.stretch;
+  ctx.fillStyle = C.lurkDeep; hlArtEll(f, -r * 0.08, r * 0.36, r * 0.3); ctx.fill();
+  ctx.strokeStyle = rgba(C.lurk, 0.5); ctx.lineWidth = 1; ctx.stroke();
+  if (L.st === 1 || L.st === 2) {
+    // the mouth: open, under the eyes
+    ctx.fillStyle = '#000000'; hlArtEll(f + r * 0.18, r * 0.06, r * 0.1, r * 0.16 * (0.4 + 0.6 * L.wind)); ctx.fill();
+  }
+  if (e.flash > 0) { ctx.globalAlpha = ea * e.flash * 0.55; ctx.fillStyle = '#ffffff'; hlArtHsLurkBlob(r, L, sd, burn); ctx.fill(); }
+  ctx.restore();
+  hlArtHsEyePair(hlArtHsLurkEyes(e, L), 1, ea, L.st === 2);
+}
+
+/* =============================== poltergeist =============================== */
+function hlArtHsPoltPose(e) {
+  const r = e.r, sd = hlArtSeed(e), hov = r * 1.05 + Math.sin(uiTime * 2.3 + sd) * r * 0.14;
+  return { x: e.x + Math.sin(uiTime * 1.3 + sd) * r * 0.08, y: e.y - hov, hov, sd };
+}
+function hlArtHsTrailStep(e, dt) {
+  let T = HL_ART_HS.trail.get(e);
+  if (!T) { T = { pts: [], acc: 0, last: uiTime }; HL_ART_HS.trail.set(e, T); }
+  T.acc += dt; T.last = uiTime;
+  if (T.acc >= 0.035 || !T.pts.length) { T.acc = 0; T.pts.unshift([e.x, e.y]); if (T.pts.length > 9) T.pts.pop(); }
+}
+/* its hands: at its sides, or reaching up under what it has */
+function hlArtHsPoltHands(e, Q) {
+  const r = e.r, w = e.state === 1 ? hlWreckById(e.hlHold) : null, lift = w ? (w.lift || 0) : 0;
+  return [-1, 1].map(s => {
+    let x = Q.x + s * r * 1.05, y = Q.y + r * 0.3 + Math.sin(uiTime * 3.2 + s + Q.sd) * r * 0.12;
+    if (w) {
+      const wy = w.y - lift * (22 + 6 * Math.sin(uiTime * 5 + w.id));
+      x = lerp(x, w.x + s * w.r * 0.6, 0.4 * lift); y = lerp(y, wy + w.r * 0.2, 0.4 * lift);
+    }
+    return [x, y];
+  });
+}
+function hlArtHsPolt(e, ea) {
+  const C = HL_ART_HS_C, r = e.r, Q = hlArtHsPoltPose(e);
+  let T = HL_ART_HS.trail.get(e);
+  if (!T || uiTime - T.last > 0.1) hlArtHsTrailStep(e, 1 / 30);
+  T = HL_ART_HS.trail.get(e);
+  const hold = e.state === 1 ? hlWreckById(e.hlHold) : null, lift = hold ? (hold.lift || 0) : 0;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.3; ctx.fillStyle = '#05030c'; hlArtEll(e.x, e.y + r * 0.35, r * 0.7, r * 0.2); ctx.fill();
+  // the tail: where it has been, drooping, waving
+  const pts = [[Q.x, Q.y + r * 0.2]];
+  for (let i = 1; i < T.pts.length; i++) {
+    const [hx, hy] = T.pts[i];
+    pts.push([hx + Math.sin(uiTime * 4 + i * 0.9 + Q.sd) * r * 0.12 * i / 8, hy - Q.hov + r * 0.2 + i * r * 0.17]);
+  }
+  if (pts.length > 2) {
+    const Lp = [], Rp = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a0 = pts[Math.max(0, i - 1)], a1 = pts[Math.min(pts.length - 1, i + 1)];
+      let tx = a1[0] - a0[0], ty = a1[1] - a0[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const wv = r * 0.62 * (1 - i / (pts.length - 1));
+      Lp.push([pts[i][0] - ty * wv, pts[i][1] + tx * wv]); Rp.push([pts[i][0] + ty * wv, pts[i][1] - tx * wv]);
+    }
+    ctx.beginPath(); ctx.moveTo(Lp[0][0], Lp[0][1]);
+    for (let i = 1; i < Lp.length; i++) ctx.lineTo(Lp[i][0], Lp[i][1]);
+    for (let i = Rp.length - 1; i >= 0; i--) ctx.lineTo(Rp[i][0], Rp[i][1]);
+    ctx.closePath();
+    const end = pts[pts.length - 1], tg = ctx.createLinearGradient(Q.x, Q.y, end[0], end[1]);
+    tg.addColorStop(0, rgba(C.polt, 0.75)); tg.addColorStop(1, rgba(C.poltLo, 0));
+    ctx.globalAlpha = ea; ctx.fillStyle = tg; ctx.fill();
+  }
+  // the things it cannot help moving, round and round it: the far side first
+  hlArtHsOrbit(Q, r, ea, true);
+  // the head
+  const g = ctx.createRadialGradient(Q.x - r * 0.2, Q.y - r * 0.25, 1, Q.x, Q.y, r * 0.8);
+  g.addColorStop(0, rgba(C.poltHi, 0.98)); g.addColorStop(0.6, rgba(C.polt, 0.85)); g.addColorStop(1, rgba(C.poltLo, 0.55));
+  ctx.globalAlpha = ea; ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(Q.x, Q.y, r * 0.74, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(C.poltHi, 0.5); ctx.lineWidth = 1; ctx.stroke();
+  // the face: hollow, and howling while it lifts
+  const fx = clamp(Math.cos(Math.atan2(P.y - e.y, P.x - e.x)), -1, 1) * r * 0.12;
+  ctx.fillStyle = C.poltDeep;
+  for (const s of [-1, 1]) { hlArtEll(Q.x + fx + s * r * 0.24, Q.y - r * 0.1, r * 0.12, r * 0.2, s * 0.25); ctx.fill(); }
+  const open = hold ? 0.4 + 0.6 * lift : 0.25 + 0.12 * Math.sin(uiTime * 2.7 + Q.sd);
+  hlArtEll(Q.x + fx, Q.y + r * 0.3, r * 0.11 + r * 0.04 * open, r * 0.08 + r * 0.16 * open); ctx.fill();
+  // its hands
+  for (const [hx, hy] of hlArtHsPoltHands(e, Q)) {
+    ctx.fillStyle = rgba(C.poltHi, 0.85); ctx.beginPath(); ctx.arc(hx, hy, r * 0.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(C.poltHi, 0.7); ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+    for (let j = -1; j <= 1; j++) { const a = -Math.PI / 2 + j * 0.45; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(a) * r * 0.32, hy + Math.sin(a) * r * 0.32); ctx.stroke(); }
+  }
+  hlArtHsOrbit(Q, r, ea, false);
+  if (e.flash > 0) { ctx.globalAlpha = ea * e.flash * 0.6; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(Q.x, Q.y, r * 0.74, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+function hlArtHsOrbit(Q, r, ea, back) {
+  for (let i = 0; i < 3; i++) {
+    const a = uiTime * (1.6 + i * 0.3) + i * TAU / 3 + Q.sd, ox = Math.cos(a) * r * 1.35, oy = Math.sin(a) * r * 0.5;
+    if ((oy < 0) !== back) continue;
+    ctx.save(); ctx.translate(Q.x + ox, Q.y + oy); ctx.rotate(a * 2);
+    ctx.globalAlpha = ea * (back ? 0.45 : 0.95);
+    ctx.fillStyle = ['#9ca3af', '#7a5a40', '#c4b5fd'][i]; ctx.fillRect(-2, -1.5, 4, 3);
+    ctx.restore();
+  }
+}
+
+/* ================================ LAST SEEN ================================ */
+function hlArtHsDecoy(e, ea) {
+  const C = HL_ART_HS_C, sd = hlArtSeed(e), t = e.t || 0;
+  const k = clamp(t / 0.6, 0, 1) * clamp((DG_DECOY_LIFE - t) / 1.5, 0, 1);
+  const drop = hlNoise(uiTime * 5 + sd * 10, 3) > 0.8 ? 0.3 : 1;        // the connection, coming and going
+  const a = ea * k * drop * (0.75 + 0.15 * Math.sin(uiTime * 3 + sd));
+  if (a <= 0.01) return;
+  const hulls = ['runner', 'ember', 'melee', 'hacker'], hid = hulls[Math.floor(hlHash(sd) * 4) % 4];
+  ctx.save();
+  ctx.globalAlpha = a * 0.5; ctx.fillStyle = '#020308'; hlArtEll(e.x, e.y + e.r * 0.6, e.r * 0.9, e.r * 0.25); ctx.fill();
+  ctx.globalAlpha = a;
+  ctx.save(); ctx.translate(e.x + (drop < 1 ? (hlHash(Math.floor(uiTime * 20)) - 0.5) * 6 : 0), e.y); ctx.rotate(e.ang || 0); ctx.scale(e.r / 12, e.r / 12);
+  hullPath(hid);
+  ctx.fillStyle = rgba(C.greyHi, 0.5); ctx.fill();
+  ctx.setLineDash([3, 3]); ctx.lineDashOffset = -uiTime * 8;
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.6 * 12 / e.r; ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+  // who it was, and when
+  const name = HL_ART_HS_NAMES[Math.floor(hlHash(sd * 3.7) * HL_ART_HS_NAMES.length) % HL_ART_HS_NAMES.length];
+  const ago = 1 + Math.floor(hlHash(sd * 5.1) * 5);
+  ctx.globalAlpha = a * 0.9;
+  ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(e.x - name.length * 2.6 - 7, e.y - e.r - 16, 2.2, 0, TAU); ctx.fill();
+  hlArtText(name, e.x, e.y - e.r - 13, { px: 9, w: 600, al: 'center', col: '#cbd5e1', a: a * 0.95, mono: true });
+  hlArtText('LAST SEEN ' + ago + 'Y AGO', e.x, e.y - e.r - 3, { px: 7, ls: '0.18em', al: 'center', col: C.greyHi, a: a * 0.85 });
+  if (e.flash > 0) { ctx.globalAlpha = a * e.flash; ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.ang || 0); ctx.scale(e.r / 12, e.r / 12); hullPath(hid); ctx.fillStyle = '#e2e8f0'; ctx.fill(); ctx.restore(); }
+  ctx.restore();
+}
+
+/* ================================= DEAD GAME ===============================
+   A comment that will not go away: a speech bubble with a face, his name and
+   how long ago he first said it, the votes it got, and a thread of replies
+   trailing behind him on a rope. In the room, solid; out of it, a scanned,
+   dashed ghost of a post. */
+function hlArtHsDgGeo(e) {
+  const r = e.r, sd = hlArtSeed(e), bob = Math.sin(uiTime * 1.6 + sd) * r * 0.06;
+  let puff = 1;
+  if (e.hlWind && e.hlWind.kind === 'ratio') puff = 1 + 0.1 * HL_EASE.out3(clamp(e.hlWind.t / DG_WIND, 0, 1));
+  const bw = r * 2.3 * puff, bh = r * 1.6 * puff, bx = e.x, by = e.y - r * 0.6 + bob;
+  return { r, sd, bw, bh, bx, by, x0: bx - bw / 2, y0: by - bh / 2, tipX: bx - bw * 0.3, tipY: by + bh / 2 + r * 0.42 };
+}
+function hlArtHsThreadRope(e) {
+  let R = HL_ART_HS.thread.get(e);
+  if (R) return R;
+  const G = hlArtHsDgGeo(e);
+  R = hlRope(G.tipX, G.tipY, 14, e.r * 0.2, { gy: 200, damp: 0.9, iters: 6, ang: Math.PI * 0.6 });
+  R.artLast = uiTime;
+  HL_ART_HS.thread.set(e, R);
+  return R;
+}
+function hlArtHsThreadStep(e, dt) {
+  const R = hlArtHsThreadRope(e), G = hlArtHsDgGeo(e), sd = G.sd;
+  hlVPin(R, 0, G.tipX, G.tipY);
+  hlVStep(R, dt, (x, y) => [-(e.vx || 0) * 3 + (hlNoise(uiTime * 1.2 + y * 0.03 + sd, 8) - 0.5) * 260, -(e.vy || 0) * 2 + 40]);
+  R.artLast = uiTime;
+}
+/* his face: the eyes follow you, and it says what he is about to do */
+function hlArtHsDgFace(e, G, a) {
+  const C = HL_ART_HS_C, r = G.r, K = e.hlSolidK === undefined ? 1 : e.hlSolidK;
+  const fy = G.by + G.bh * 0.02, lx = clamp((P.x - e.x) / 400, -1, 1) * r * 0.07, ly = clamp((P.y - e.y) / 400, -1, 1) * r * 0.05;
+  const wind = e.hlWind, thread = !!e.hlThread, ghost = K < 0.5, dark = hlHouseOn() && hlArea.blackout;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = C.dgDeep; ctx.fillStyle = C.dgDeep; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1.5, r * 0.05);
+  for (const s of [-1, 1]) {
+    const ex = G.bx + s * G.bw * 0.17, ey = fy - G.bh * 0.06;
+    if (ghost) { ctx.beginPath(); ctx.moveTo(ex - r * 0.1, ey); ctx.quadraticCurveTo(ex, ey + r * 0.06, ex + r * 0.1, ey); ctx.stroke(); continue; }
+    const wide = wind && wind.kind === 'ratio' ? 0.4 : wind || thread ? 1.25 : 1;
+    ctx.fillStyle = dark ? '#0f172a' : '#f8fafc'; hlArtEll(ex, ey, r * 0.15, r * 0.11 * wide); ctx.fill();
+    ctx.strokeStyle = C.dgDeep; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.fillStyle = dark ? '#f8fafc' : '#0f172a'; ctx.beginPath(); ctx.arc(ex + lx, ey + ly + r * 0.02, r * 0.055, 0, TAU); ctx.fill();
+    // the lid: half down, he has seen it all before
+    if (!wind && !thread) { ctx.fillStyle = '#cbd5e1'; ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.16, r * 0.12, 0, Math.PI, TAU); ctx.fill(); ctx.strokeStyle = C.dgDeep; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(ex - r * 0.16, ey); ctx.lineTo(ex + r * 0.16, ey); ctx.stroke(); }
+    // the brows: one up, unimpressed; both down, winding up
+    ctx.strokeStyle = C.dgDeep; ctx.lineWidth = Math.max(1.6, r * 0.05);
+    const up = wind || thread ? -s * 0.3 : s > 0 ? -0.35 : 0.05;
+    ctx.beginPath(); ctx.moveTo(ex - r * 0.14, ey - r * 0.2 + up * r * 0.3 * s); ctx.lineTo(ex + r * 0.14, ey - r * 0.2 - up * r * 0.3 * s); ctx.stroke();
+  }
+  const mx = G.bx, my = fy + G.bh * 0.2;
+  if (wind && wind.kind === 'thread') {
+    // the dots: he is typing
+    for (let i = 0; i < 3; i++) {
+      const j = Math.max(0, Math.sin(uiTime * 12 - i * 0.9)) * r * 0.06;
+      ctx.fillStyle = C.dgDeep; ctx.beginPath(); ctx.arc(mx + (i - 1) * r * 0.16, my - j, r * 0.05, 0, TAU); ctx.fill();
+    }
+  } else if (wind && wind.kind === 'ratio') {
+    ctx.fillStyle = '#0f172a'; hlArtEll(mx, my, r * 0.06, r * 0.07); ctx.fill();
+    ctx.fillStyle = 'rgba(248,113,113,0.35)'; for (const s of [-1, 1]) { hlArtEll(mx + s * G.bw * 0.27, my - r * 0.05, r * 0.1, r * 0.06); ctx.fill(); }
+  } else if (thread) {
+    ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.roundRect(mx - r * 0.2, my - r * 0.08, r * 0.4, r * 0.17, r * 0.06); ctx.fill();
+  } else if (ghost) {
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(mx + (i - 1) * r * 0.12, my, r * 0.03, 0, TAU); ctx.fill(); }
+  } else {
+    ctx.strokeStyle = C.dgDeep; ctx.lineWidth = Math.max(1.6, r * 0.05);
+    ctx.beginPath(); ctx.moveTo(mx - r * 0.2, my + r * 0.03); ctx.quadraticCurveTo(mx, my - r * 0.04, mx + r * 0.2, my + r * 0.05); ctx.stroke();
+  }
+  ctx.restore();
+}
+function hlArtHsDeadGame(e, ea) {
+  const C = HL_ART_HS_C, G = hlArtHsDgGeo(e), r = G.r, K = e.hlSolidK === undefined ? 1 : e.hlSolidK, fl = e.flash || 0;
+  const R = hlArtHsThreadRope(e);
+  if (uiTime - (R.artLast || 0) > 0.05) hlArtHsThreadStep(e, Math.min(1 / 30, uiTime - (R.artLast || uiTime) || 1 / 60));
+  const a = ea * (0.24 + 0.76 * K);
+  const jx = K < 1 ? (hlNoise(uiTime * 14 + G.sd, 4) - 0.5) * 6 * (1 - K) : 0;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.45 * (0.3 + 0.7 * K); ctx.fillStyle = '#020308'; hlArtEll(e.x, e.y + r * 0.62, r * 1.2, r * 0.26); ctx.fill();
+  // the thread of replies, behind him
+  ctx.globalAlpha = a * 0.9;
+  const pts = hlDrawRope(R, { w0: 2.4, w1: 1.2, col: rgba(C.dgLo, 0.9) });
+  if (pts) [4, 9, 14].forEach((k, i) => {
+    const p = pts[Math.min(pts.length - 1, k)];
+    if (!p) return;
+    const w = r * 0.62, h = r * 0.34, sw = Math.sin(uiTime * 2 + i + G.sd) * 0.12;
+    ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(sw);
+    ctx.strokeStyle = rgba(C.dgLo, 0.9); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, h * 0.25); ctx.stroke();
+    ctx.translate(0, h * 0.75);
+    const lit = e.hlThread ? 0.5 + 0.5 * Math.sin(uiTime * 18 - i * 1.4) : 0;
+    hlArtHsBubble(-w / 2, -h / 2, w, h, h * 0.4);
+    ctx.fillStyle = hlMix('#cbd5e1', '#f8fafc', lit); ctx.fill();
+    ctx.strokeStyle = C.dgDeep; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = 'rgba(51,65,85,0.6)'; ctx.fillRect(-w * 0.34, -h * 0.12, w * 0.68, 1.6); ctx.fillRect(-w * 0.34, h * 0.12, w * 0.4, 1.6);
+    ctx.restore();
+  });
+  // the post
+  ctx.save(); ctx.translate(jx, 0);
+  ctx.globalAlpha = a;
+  hlArtHsBubble(G.x0, G.y0, G.bw, G.bh, r * 0.26, G.bx - G.bw * 0.22, G.tipX, G.tipY);
+  const g = ctx.createLinearGradient(0, G.y0, 0, G.y0 + G.bh);
+  g.addColorStop(0, K < 0.5 ? '#94a3b8' : C.dgHi); g.addColorStop(1, K < 0.5 ? '#64748b' : '#cbd5e1');
+  ctx.fillStyle = g; ctx.fill();
+  if (K < 0.99) { ctx.setLineDash([7, 5]); ctx.lineDashOffset = -uiTime * 20; }
+  ctx.strokeStyle = K < 0.5 ? '#cbd5e1' : C.dgDeep; ctx.lineWidth = 2.4; ctx.stroke();
+  ctx.setLineDash([]);
+  // a ghost of a post: scanned, as if loading forever
+  if (K < 1) {
+    ctx.save(); hlArtHsBubble(G.x0, G.y0, G.bw, G.bh, r * 0.26); ctx.clip();
+    ctx.fillStyle = 'rgba(15,23,42,' + (0.28 * (1 - K)) + ')';
+    const off = (uiTime * 30) % 4;
+    for (let y = G.y0 + off; y < G.y0 + G.bh; y += 4) ctx.fillRect(G.x0, y, G.bw, 1.6);
+    ctx.restore();
+  }
+  // his name, and how long he has been saying it
+  const hy = G.y0 + r * 0.24;
+  ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(G.x0 + r * 0.26, hy, r * 0.12, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.arc(G.x0 + r * 0.26, hy - r * 0.03, r * 0.05, 0, TAU); ctx.fill();
+  hlArtText('DEAD GAME', G.x0 + r * 0.46, hy + 3.5, { px: Math.round(r * 0.19), w: 800, ls: '0.06em', col: '#0f172a', a });
+  hlArtText('· 6y', G.x0 + r * 0.46 + r * 1.32, hy + 3.5, { px: Math.round(r * 0.17), w: 600, col: '#64748b', a });
+  ctx.strokeStyle = 'rgba(100,116,139,0.35)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(G.x0 + r * 0.14, hy + r * 0.17); ctx.lineTo(G.x0 + G.bw - r * 0.14, hy + r * 0.17); ctx.stroke();
+  hlArtHsDgFace(e, G, a);
+  // what it got: nothing, and a reply button nobody presses
+  const fy = G.y0 + G.bh - r * 0.17;
+  hlArtText('▲ 0   ▼   REPLY', G.x0 + r * 0.24, fy, { px: Math.round(r * 0.15), w: 700, ls: '0.08em', col: '#64748b', a });
+  if (fl > 0) {
+    ctx.globalAlpha = a * fl * 0.6; ctx.fillStyle = '#ffffff';
+    hlArtHsBubble(G.x0, G.y0, G.bw, G.bh, r * 0.26); ctx.fill();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+/* coming apart: the post bursts, his letters spill, the thread drops; and a
+   small one is left on the floor, still typing */
+function drawHlHouseBossDeath(d) {
+  const C = HL_ART_HS_C, t = d.t, r = d.r || 52, Rn = hlArtRng(0xdeadc0);
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  const by = d.y - r * 0.6;
+  // the shell of the post, swelling and then gone
+  if (t < 0.45) {
+    const u = t / 0.45, s = 1 + 0.12 * Math.sin(u * Math.PI * 6) * (1 - u) + u * 0.15;
+    ctx.globalAlpha = 1 - HL_EASE.in3(u);
+    hlArtHsBubble(d.x - r * 1.15 * s, by - r * 0.8 * s, r * 2.3 * s, r * 1.6 * s, r * 0.26, d.x - r * 0.5, d.x - r * 0.7, by + r * 1.25);
+    ctx.fillStyle = C.dgHi; ctx.fill();
+    ctx.strokeStyle = C.dgDeep; ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.strokeStyle = 'rgba(15,23,42,0.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(d.x - r * 0.4, by - r * 0.6); ctx.lineTo(d.x - r * 0.05, by - r * 0.1); ctx.lineTo(d.x - r * 0.3, by + r * 0.3);
+    ctx.moveTo(d.x - r * 0.05, by - r * 0.1); ctx.lineTo(d.x + r * 0.5, by - r * 0.2); ctx.stroke();
+  }
+  // the pieces of it, and the letters of his name
+  const word = 'DEADGAMEDEADGAME';
+  for (let i = 0; i < 16; i++) {
+    const a = Rn() * TAU, D = r * (0.8 + Rn() * 2.2), spd = 2 + Rn() * 2.5, v = 1 - Math.exp(-Math.max(0, t - 0.3) * spd);
+    const up = Math.max(0, Math.sin(Math.min(1, Math.max(0, t - 0.3) / (0.55 + Rn() * 0.3)) * Math.PI)) * r * (0.5 + Rn() * 0.7);
+    const x = d.x + Math.cos(a) * D * v, gy = d.y + Math.sin(a) * D * v * 0.6, y = gy - up - (1 - v) * r * 0.6;
+    const fade = clamp((3.2 - t) / 1, 0, 1), rot = (Rn() - 0.5) * 6 * v;
+    if (t < 0.3 || fade <= 0) continue;
+    ctx.globalAlpha = 0.4 * fade; ctx.fillStyle = '#020308'; hlArtEll(x, gy + 4, 7, 2.2); ctx.fill();
+    ctx.globalAlpha = fade;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+    if (i % 2) {
+      ctx.fillStyle = C.dgHi; ctx.beginPath(); ctx.moveTo(-8, -5); ctx.lineTo(7, -6); ctx.lineTo(9, 4); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = C.dgDeep; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      hlArtText(word[i], 0, 5, { px: 15, w: 800, al: 'center', col: '#0f172a', a: fade });
+      hlArtText(word[i], -1, 4, { px: 15, w: 800, al: 'center', col: '#e2e8f0', a: fade });
+    }
+    ctx.restore();
+  }
+  // something of the soul's was in there: cold, it rises out of what is left
+  const u = clamp((t - 0.8) / 2.2, 0, 1);
+  if (u > 0) {
+    ctx.globalCompositeOperation = 'lighter';
+    const sx = d.x + Math.sin(u * 5) * 10, sy = d.y - r * 0.5 - HL_EASE.out3(u) * r * 1.4;
+    drawGlow(sx, sy, 40 + 8 * Math.sin(uiTime * 3), C.cold, 0.5 * (1 - u * 0.5));
+    drawGlow(sx, sy, 10, '#ffffff', 0.7 * (1 - u * 0.5));
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // and him, small, on the floor: still here, though
+  const k = clamp((t - 1.4) / 0.6, 0, 1);
+  if (k > 0) {
+    const x = d.x + r * 0.2, y = d.y + r * 0.3;
+    ctx.globalAlpha = k * 0.5; ctx.fillStyle = '#020308'; hlArtEll(x, y + 10, 20, 5); ctx.fill();
+    ctx.globalAlpha = k;
+    hlArtHsBubble(x - 18, y - 10, 36, 20, 7, x - 8, x - 12, y + 16);
+    ctx.fillStyle = '#94a3b8'; ctx.fill(); ctx.strokeStyle = '#475569'; ctx.lineWidth = 1.2; ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const on = Math.floor(uiTime * 2.5) % 4 > i;
+      ctx.fillStyle = on ? '#1e293b' : 'rgba(30,41,59,0.3)'; ctx.beginPath(); ctx.arc(x + (i - 1) * 7, y, 2.2, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/* ================================= the rounds ================================
+   Additive layer: each draws its own glow, then its body in plain paint. */
+function drawHlHouseEBullet(b) {
+  const C = HL_ART_HS_C, r = b.r, ang = Math.atan2(b.vy || 0, b.vx || 1), ca = Math.cos(ang), sa = Math.sin(ang);
+  ctx.save();
+  if (b.hlKind === 'wreck') {
+    const W0 = b.hlWreck || { kind: 'junk', junk: 0, r: 16 };
+    drawGlow(b.x, b.y, r * 3.2, C.polt, 0.35);
+    ctx.strokeStyle = rgba(C.polt, 0.4); ctx.lineWidth = r * 1.1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ca * r * 4.5, b.y - sa * r * 4.5); ctx.stroke();
+    ctx.strokeStyle = rgba(C.hurt, 0.45); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(b.x, b.y, r + 3, 0, TAU); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.translate(b.x, b.y); ctx.rotate(uiTime * 7 + b.x * 0.01);
+    hlArtHsPiece(W0, Math.max(r * 1.15, (W0.r || r) * 0.8), 0);
+  } else {
+    // a reply: his, a little bubble with a line in it; RATIO's carry the thumbs he did not get
+    drawGlow(b.x, b.y, r * 3.4, '#f8fafc', 0.28);
+    drawGlow(b.x, b.y, r * 2, C.hurt, 0.18);
+    ctx.globalCompositeOperation = 'source-over';
+    const w = r * 2.8, h = r * 1.9;
+    ctx.translate(b.x, b.y);
+    hlArtHsBubble(-w / 2, -h / 2, w, h, h * 0.45, -ca * w * 0.2, -ca * w * 0.5 - sa * 2, h * 0.85);
+    ctx.fillStyle = '#f8fafc'; ctx.fill();
+    ctx.strokeStyle = C.hurt; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.fillStyle = '#334155';
+    if (b.hlRatio) {
+      ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.25); ctx.lineTo(r * 0.5, -r * 0.25); ctx.lineTo(0, r * 0.45); ctx.closePath(); ctx.fill();
+    } else {
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc((i - 1) * r * 0.6, 0, r * 0.2, 0, TAU); ctx.fill(); }
+    }
+  }
+  ctx.restore();
+}
+
+/* ============================================================================
+   THE HOUSE'S HOOKS
+============================================================================ */
+
+/* ---- the clock: once a frame, in the house ---- */
+function hlHouseArtTick(dt) {
+  if (dt <= 0) return;
+  const S = HL_ART_HS, A = typeof hlArea !== 'undefined' ? hlArea : null;
+  // the lamps, on their timer: lit at a wave's start and between, going as THE QUIET goes, out for good in the dark at the end
+  let want = 1;
+  if (A && A.blackout) want = 0;
+  else if (A && !A.end && A.n > 0 && betweenWaves <= 0) want = clamp((0.82 - hlQuietK()) / 0.55, 0, 1);
+  if (uiTime - S.enterAt < 1.2) want *= clamp((uiTime - S.enterAt - 0.3) / 0.9, 0, 1);
+  S.lampV += (want - S.lampV) * (1 - Math.exp(-dt * (want > S.lampV ? 7 : 2.2)));
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.type === 'sheet') hlArtHsSheetStep(e, dt);
+    else if (e.type === 'poltergeist') {
+      hlArtHsTrailStep(e, dt);
+      const w = e.state === 1 ? hlWreckById(e.hlHold) : null;
+      if (w && Math.random() < dt * 18) hlEmit('wisp', w.x + rnd(-w.r, w.r), w.y - (w.lift || 0) * 22 + rnd(-w.r, w.r) * 0.5, 1, { col: '#c4b5fd', size: 0.7, vy: -10 });
+    } else if (e.boss === 'deadgame') {
+      hlArtHsThreadStep(e, dt);
+      if ((e.hlSolidK || 0) < 0.5 && Math.random() < dt * 6) hlEmit('wisp', e.x + rnd(-e.r, e.r), e.y - e.r * 0.4, 1, { col: '#94a3b8', size: 1.2, vy: -20 });
+    } else if (e.type === 'lurker' && e.hlLit && !e.hlDark && Math.random() < dt * 26) {
+      hlEmit('smoke', e.x + rnd(-e.r, e.r) * 0.7, e.y - e.r * 0.2, 1, { col: '#1e1b4b', a: 0.3, size: 1.1, speed: 1.4 });
+      if (Math.random() < 0.4) hlEmit('ember', e.x + rnd(-e.r, e.r) * 0.6, e.y - e.r * 0.3, 1, { col: '#a5b4fc', size: 0.8 });
+    }
+  }
+  hlArtHsTornStep(dt);
+  S.flares = S.flares.filter(f => uiTime - f.t < 0.6);
+  S.chats = S.chats.filter(c => uiTime - c.t < 2.8);
+  S.takes = S.takes.filter(c => uiTime - c.t < 1.4);
+  // dust, turning in the light round the hull
+  S.moteT -= dt;
+  if (S.moteT <= 0 && typeof P !== 'undefined') {
+    S.moteT = 0.12;
+    const q = Math.max(120, hlQuietR() * 0.8), a = rnd(TAU), d = Math.sqrt(Math.random()) * q;
+    hlEmit('mote', P.x + Math.cos(a) * d, P.y + Math.sin(a) * d, 1, { col: '#e9d5ff' });
+  }
+}
+
+/* ---- effect hooks ---- */
+function hlHouseEnterFx(A) {
+  const S = HL_ART_HS;
+  S.torn.length = 0; S.flares.length = 0; S.chats.length = 0; S.takes.length = 0;
+  S.enterAt = uiTime; S.lampV = 0; S.darkAt = -9; S.blackAt = -9;
+  hlUnbake('hl-patch-floor');           // one area's floor in memory at a time
+  HL_ART_S.batT = 1.2;
+  if (typeof P !== 'undefined') hlEmit('mote', P.x, P.y, 24, { spread: 160, col: '#e9d5ff' });
+}
+function hlQuietFlareFx(x, y) {
+  const F = HL_ART_HS.flares;
+  F.push({ x, y, t: uiTime });
+  if (F.length > 10) F.shift();
+}
+function hlQuietDarkFx() { Audio_.tone(90, 0.4, 'sine', 0.05, 60); HL_ART_HS.darkAt = uiTime; }
+function hlSheetTearFx(e, inner) {
+  hlArtHsTear(e, false);
+  hlEmit('clod', e.x, e.y - e.r * 0.4, 7, { col: '#cbd5e1', speed: 0.55, size: 0.9 });
+  if (inner) {
+    const col = /^#[0-9a-f]{6}$/i.test(inner.col || '') ? inner.col : '#e2e8f0';
+    ringFx(inner.x, inner.y, inner.r, inner.r * 2.4, col, 0.32, 2);
+    burst(inner.x, inner.y, 8, col, 140, 2, 0.3);
+  }
+}
+function hlMarkSproutFx(e) {
+  ringFx(e.x, e.y, 6, 80, '#a5f3fc', 0.5, 3);
+  hlEmit('wisp', e.x, e.y, 14, { spread: e.r, vy: -40 });
+}
+function hlMarkTornFx(e, n, line) {
+  hlArtHsTear(e, true);
+  hlEmit('wisp', e.x, e.y - e.r * 0.5, 22, { spread: e.r * 0.8, vy: -50 });
+  ringFx(e.x, e.y, 10, 110, '#a5f3fc', 0.6, 2);
+  HL_ART_HS.chats.push({ x: e.x, y: e.y - e.r * 1.4, t: uiTime, line: String(line || ''), n });
+  Audio_.gem();
+}
+function hlMarkLostFx(e) {
+  hlArtHsLose(e);
+  hlEmit('wisp', e.x, e.y, 18, { spread: e.r, vy: -70, life: 1.3 });
+}
+function hlLurkWindFx(e) {}
+function hlLurkStrikeFx(e) {
+  Audio_.tone(220, 0.12, 'sawtooth', 0.05, 90);
+  if (!e.hlDark) hlEmit('smoke', e.x, e.y, 4, { col: '#1e1b4b', a: 0.35, spread: e.r * 0.5, size: 1.2 });
+}
+function hlLurkBurnFx(e) {
+  hlEmit('smoke', e.x, e.y - e.r * 0.2, 6, { col: '#1e1b4b', a: 0.35, spread: e.r * 0.6, size: 1.3, speed: 1.6 });
+  hlEmit('ember', e.x, e.y, 8, { col: '#c7d2fe', spread: e.r * 0.6 });
+}
+function hlPoltLiftFx(e, w) { hlEmit('wisp', w.x, w.y, 8, { col: '#c4b5fd', spread: w.r * 0.7, vy: -45 }); }
+function hlPoltThrowFx(e, w, b) {
+  hlEmit('wisp', w.x, w.y, 8, { col: '#ddd6fe', spread: 6, vx: (b.vx || 0) * 0.12, vy: (b.vy || 0) * 0.12 });
+  hlEmit('smoke', w.x, w.y, 2, { col: '#a8a29e', a: 0.08, size: 1.2 });
+}
+function hlWreckLandFx(w) {
+  hlEmit('clod', w.x, w.y, 8, { col: '#57534e', speed: 0.6, size: 0.8 });
+  hlEmit('smoke', w.x, w.y, 3, { col: '#a8a29e', a: 0.09, spread: w.r * 0.6, size: 1.3 });
+  ringFx(w.x, w.y, w.r * 0.6, w.r * 1.8, '#94a3b8', 0.25, 1.5);
+}
+function hlDgSolidFx(e, solid) {
+  if (solid) {
+    ringFx(e.x, e.y - e.r * 0.6, e.r, e.r * 2.2, '#f8fafc', 0.35, 3);
+    burst(e.x, e.y - e.r * 0.6, 14, '#e2e8f0', 220, 2.4, 0.35);
+  } else {
+    ringFx(e.x, e.y - e.r * 0.6, e.r * 2, e.r, '#475569', 0.4, 3);
+    hlEmit('wisp', e.x, e.y - e.r * 0.6, 16, { col: '#94a3b8', spread: e.r, vy: -40 });
+  }
+}
+function hlDgWindFx(e, kind) {}
+function hlDgCullFx(e) { Audio_.tone(130, DG_CULL_WARN, 'sine', 0.06, 70); }
+function hlDgTakeFx(o) {
+  const col = /^#[0-9a-f]{6}$/i.test(o.col || '') ? o.col : '#94a3b8';
+  HL_ART_HS.takes.push({ x: o.x, y: o.y, r: o.r, col, sides: o.sides || 5, ang: o.ang || 0, t: uiTime });
+  hlEmit('wisp', o.x, o.y, 8, { col: '#94a3b8', spread: o.r * 0.6, vy: -50 });
+}
+function hlDgDecoyFx(m) { hlEmit('wisp', m.x, m.y, 6, { col: '#94a3b8', spread: 12, vy: -20 }); }
+function hlDecoyPopFx(m, shot) {
+  hlEmit('wisp', m.x, m.y, shot ? 10 : 5, { col: '#94a3b8', spread: m.r * 0.6, vy: -30 });
+  if (shot) burst(m.x, m.y, 6, '#64748b', 100, 2, 0.3);
+}
+function hlDgDarkFx(e) {
+  Audio_.boom();
+  HL_ART_HS.blackAt = uiTime;
+  for (const L of hlArtHsRooms().map(R => R.lamp)) hlEmit('ember', L.x, L.y - 84, 7, { col: '#fde68a', spread: 6, vy: 30 });
+}
+function hlHouseBossDeathFx(e) {
+  burst(e.x, e.y - e.r * 0.6, 60, '#e2e8f0', 420, 4, 0.9);
+  hlEmit('wisp', e.x, e.y - e.r * 0.6, 26, { col: '#cbd5e1', spread: e.r, vy: -40 });
+}
+// medals, in any run: the game's own effects, since the event's particles are only drawn in its rooms
+function hlSheetDashFx() {
+  ringFx(P.x, P.y, 8, 44, '#e2e8f0', 0.3, 2);
+  burst(P.x, P.y, 6, '#cbd5e1', 90, 2.2, 0.35);
+}
+function hlGhostFx(stage) {
+  if (stage === 'start') {
+    banner('STILL HERE   ·   FELL ' + GHOST_KILLS, '#cbd5e1', 2.4);
+    ringFx(P.x, P.y, 60, 10, '#94a3b8', 0.5, 3);
+  } else if (stage === 'up') {
+    banner('BACK UP', '#e2e8f0', 2.0);
+    ringFx(P.x, P.y, 10, 120, '#f8fafc', 0.5, 3);
+    burst(P.x, P.y, 20, '#f8fafc', 260, 3, 0.5);
+  }
+}
+
+/* ---- the world ---- */
+/* The light pass. The light round the hull is the last light on the timer,
+   and it is yours; the lamps go with THE QUIET; the screens never go off;
+   a death throws a flash of light out where it happened. */
+function hlHouseLights() {
+  const C = HL_ART_HS_C, S = HL_ART_HS, A = hlArea, rooms = hlArtHsRooms();
+  hlLightBegin('#2a2338', 1);
+  const q = hlQuietR();
+  hlLight({ x: P.x, y: P.y, r: Math.max(220, q * 1.35), col: '#efeaff', a: 0.62, z: 140, size: 10 });
+  hlLight({ x: P.x, y: P.y, r: Math.max(170, q * 1.1), col: '#f5f3ff', a: 0.42, shadow: false });
+  for (const Rm of rooms) {
+    const L = Rm.lamp, k = hlArtHsLampK(L);
+    if (k > 0.02) hlLight({ x: L.x, y: L.y + 6, r: 400, col: C.lamp, a: 0.8 * k, z: 90, shadow: false });
+    const f = 0.8 + 0.2 * hlNoise(uiTime * 8 + Rm.seed, 2);
+    hlLight({ x: Rm.x, y: Rm.y + 4, r: 300, col: '#7dd3fc', a: 0.6 * f, z: 26, shadow: false, cone: { ang: Math.PI / 2, spread: 0.85, soft: 0.6 } });
+    hlOccSeg(Rm.couch.x - 70, Rm.couch.y - 10, Rm.couch.x + 70, Rm.couch.y - 10, 30);
+    hlOccSeg(Rm.x - 40, Rm.y - 10, Rm.x + 40, Rm.y - 10, 44);
+  }
+  for (const f of S.flares) {
+    const u = (uiTime - f.t) / 0.55;
+    if (u < 1) hlLight({ x: f.x, y: f.y, r: 340 * (0.55 + 0.45 * HL_EASE.out3(u)), col: '#ddd6fe', a: 1.2 * (1 - u), shadow: false });
+  }
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.type === 'sheet') {
+      if (e.hlMarked) hlLight({ x: e.x, y: e.y - e.r * 0.3, r: 150, col: C.cold, a: 0.6, shadow: false });
+    } else if (e.type === 'poltergeist') {
+      hlLight({ x: e.x, y: e.y, r: 110, col: C.polt, a: 0.35, shadow: false });
+      const w = e.state === 1 ? hlWreckById(e.hlHold) : null;
+      if (w) hlLight({ x: w.x, y: w.y, r: 150, col: C.polt, a: 0.6 * (w.lift || 0), shadow: false });
+    } else if (e.boss === 'deadgame') {
+      const K = e.hlSolidK === undefined ? 1 : e.hlSolidK;
+      if (K > 0.05) hlLight({ x: e.x, y: e.y - e.r * 0.3, r: 240, col: '#e2e8f0', a: 0.45 * K, shadow: false });
+    }
+  }
+  for (const w of A.wreck) if (!w.by && w.kind === 'junk') hlOccCircle(w.x, w.y, w.r * 0.6, 14);
+  return true;
+}
+function drawHlHouseFloor(A) {
+  const X = arena.x0, Y = arena.y0, w = Math.round(arena.x1 - arena.x0), h = Math.round(arena.y1 - arena.y0);
+  hlBake('hl-house-floor', X, Y, w, h, g => hlArtHsFloorBake(g, X, Y, w, h));
+  const C = HL_ART_HS_C;
+  ctx.save();
+  // the lamps' shades: lit from inside when they are on
+  for (const Rm of hlArtHsRooms()) {
+    const L = Rm.lamp, k = hlArtHsLampK(L), x = L.x, y = L.y - 76;
+    ctx.fillStyle = hlMix(C.shade, C.shadeHi, k);
+    ctx.beginPath(); ctx.moveTo(x - 9, y - 20); ctx.lineTo(x + 9, y - 20); ctx.lineTo(x + 15, y); ctx.lineTo(x - 15, y); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#3a2a1c'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x - 15, y - 2, 30, 2);
+  }
+  hlArtHsTornDraw();
+  ctx.restore();
+}
+function drawHlHouseWreck(w) {
+  const C = HL_ART_HS_C, up = clamp(w.lift || 0, 0, 1), lifted = !!w.by, rot = (hlHash(w.id * 7.3) - 0.5) * 0.7;
+  const hgt = lifted ? up * (22 + 6 * Math.sin(uiTime * 5 + w.id)) : 0;
+  const wob = lifted ? Math.sin(uiTime * 9 + w.id) * 0.22 * up : 0;
+  const fade = w.kind === 'body' ? clamp((WRECK_LIFE - (w.t || 0)) / 3, 0, 1) * clamp((w.t || 0) / 0.3, 0, 1) : 1;
+  if (fade <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = fade * (0.42 - up * 0.2); ctx.fillStyle = '#020308';
+  hlArtEll(w.x, w.y + w.r * 0.42, w.r * (0.95 - up * 0.35), w.r * 0.3 * (1 - up * 0.3)); ctx.fill();
+  if (lifted && up > 0) {
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(w.x, w.y - hgt, w.r * 2.4, C.polt, 0.4 * up);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = fade;
+  ctx.translate(w.x, w.y - hgt); ctx.rotate((w.kind === 'junk' ? rot * 0.4 : rot) + wob);
+  if (w.kind === 'junk') hlArtHsJunk(w.junk | 0, w.r);
+  else hlArtHsHusk(w, lifted);
+  if (lifted && up > 0) {
+    ctx.strokeStyle = rgba(C.poltHi, 0.6 * up); ctx.lineWidth = 1.2; ctx.setLineDash([3, 4]); ctx.lineDashOffset = -uiTime * 20;
+    ctx.beginPath(); ctx.arc(0, -w.r * 0.1, w.r * 1.05, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+function drawHlHouseBody(e, ea) {
+  ctx.save();
+  if (e.boss === 'deadgame') hlArtHsDeadGame(e, ea);
+  else if (e.type === 'sheet') hlArtHsSheet(e, ea);
+  else if (e.type === 'lurker') hlArtHsLurker(e, ea);
+  else if (e.type === 'poltergeist') hlArtHsPolt(e, ea);
+  else if (e.type === 'lastseen') hlArtHsDecoy(e, ea);
+  else {
+    ctx.globalAlpha = ea; ctx.fillStyle = rgba(e.col, 0.2); ctx.strokeStyle = e.col; ctx.lineWidth = 2;
+    poly(e.x, e.y, e.r, e.sides, e.ang); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+/* the menus left open, on every set: never off, whatever the timer says */
+function hlArtHsScreens() {
+  const C = HL_ART_HS_C;
+  for (const Rm of hlArtHsRooms()) {
+    const x = Rm.x, y = Rm.y - 45, f = 0.82 + 0.18 * hlNoise(uiTime * 8 + Rm.seed, 2), roll = (uiTime * 14 + Rm.seed * 20) % 30;
+    const blink = hlNoise(uiTime * 0.7 + Rm.seed, 5) > 0.9 ? 0.4 : 1;
+    drawGlow(x, y, 46, C.screen, 0.22 * f * blink);
+    ctx.globalAlpha = 0.16 * f * blink; ctx.fillStyle = C.screen; ctx.fillRect(x - 23, y - 13, 46, 26);
+    ctx.globalAlpha = 0.1 * blink; ctx.fillStyle = C.screenHi; ctx.fillRect(x - 23, y - 13 + roll * 0.85, 46, 3);
+    const [t1, t2, t3] = HL_ART_HS_MENUS[Rm.menu % HL_ART_HS_MENUS.length]();
+    if (t1) hlArtText(t1, x, y - 5, { px: 4.6, w: 700, ls: '0.08em', al: 'center', col: C.screenHi, a: 0.75 * f * blink });
+    const pulse = Rm.menu === 3 ? (Math.floor(uiTime * 1.6 + Rm.seed) % 2 ? 0.25 : 1) : 1;
+    hlArtText(t2, x, y + 3.5, { px: t1 ? 7 : 6.4, w: 700, al: 'center', col: '#ffffff', a: 0.9 * f * blink * pulse, mono: !!t1 });
+    if (t3) {
+      ctx.globalAlpha = 0.5 * f * blink; ctx.strokeStyle = C.screenHi; ctx.lineWidth = 0.6;
+      ctx.strokeRect(x - 10, y + 6, 20, 5.6);
+      hlArtText(t3, x, y + 10.2, { px: 3.8, w: 700, ls: '0.1em', al: 'center', col: C.screenHi, a: 0.75 * f * blink });
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+/* additive, after the bodies and the light */
+function drawHlHouseGlow() {
+  const C = HL_ART_HS_C, S = HL_ART_HS;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  hlArtHsScreens();
+  for (const Rm of hlArtHsRooms()) {
+    const L = Rm.lamp, k = hlArtHsLampK(L);
+    if (k > 0.02) { drawGlow(L.x, L.y - 80, 40, C.lamp, 0.45 * k); drawGlow(L.x, L.y - 72, 16, C.lampHi, 0.5 * k); }
+  }
+  // a death's flash: where the light came back from
+  for (const f of S.flares) {
+    const u = (uiTime - f.t) / 0.55;
+    if (u >= 1) continue;
+    drawGlow(f.x, f.y, 70 * (1 - u * 0.4), '#ddd6fe', 0.45 * (1 - u));
+    ctx.globalAlpha = 0.5 * (1 - u); ctx.strokeStyle = '#ede9fe'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(f.x, f.y, 14 + 110 * HL_EASE.out3(u), 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.type === 'sheet') {
+      if (e.hlMarked) drawGlow(e.x, e.y - e.r * 0.4, e.r * 3, C.cold, 0.24 + 0.08 * Math.sin(uiTime * 3));
+      else {
+        const U = e.hlUnder && ETYPE[e.hlUnder], col = U && /^#[0-9a-f]{6}$/i.test(U.col) ? U.col : '#e2e8f0';
+        drawGlow(e.x, e.y + e.r * 0.62, e.r * 1.25, col, 0.14 + 0.05 * Math.sin(uiTime * 2 + hlArtSeed(e)));
+        if (e.hlUnder === 'bomber') { const G = hlArtHsSheetGeo(e); drawGlow(G.hx + G.hw * 0.1 + 7, G.hy - G.hh * 0.95 - 7, 6 + Math.random() * 3, '#fb923c', 0.8); }
+      }
+    } else if (e.type === 'lurker') {
+      const L = hlArtHsLurkPose(e);
+      if ((L.st === 1 || L.st === 2) && !e.hlDark) {
+        const E = hlArtHsLurkEyes(e, L);
+        drawGlow(E.hx, E.hy, e.r * 0.9, L.st === 2 ? '#fca5a5' : C.lurkEye, 0.5);
+      }
+      if (e.hlLit && !e.hlDark) drawGlow(e.x, e.y, e.r * 2, '#a5b4fc', 0.12 + 0.08 * Math.sin(uiTime * 40));
+    } else if (e.type === 'poltergeist') {
+      const Q = hlArtHsPoltPose(e), w = e.state === 1 ? hlWreckById(e.hlHold) : null;
+      drawGlow(Q.x, Q.y, e.r * 2.2, C.polt, 0.28);
+      const hands = hlArtHsPoltHands(e, Q);
+      for (const [hx, hy] of hands) drawGlow(hx, hy, e.r * 0.7, C.poltHi, 0.3);
+      if (w) {
+        const up = w.lift || 0, wy = w.y - up * (22 + 6 * Math.sin(uiTime * 5 + w.id));
+        ctx.strokeStyle = rgba(C.poltHi, 0.55 * up); ctx.lineWidth = 1.4;
+        for (const [hx, hy] of hands) {
+          ctx.beginPath(); ctx.moveTo(hx, hy);
+          const mx = (hx + w.x) / 2 + Math.sin(uiTime * 11 + hx) * 8, my = (hy + wy) / 2 + Math.cos(uiTime * 9 + hy) * 8;
+          ctx.quadraticCurveTo(mx, my, w.x, wy); ctx.stroke();
+        }
+      }
+    } else if (e.type === 'lastseen') {
+      drawGlow(e.x, e.y, e.r * 2, '#64748b', 0.12);
+    } else if (e.boss === 'deadgame') {
+      const G = hlArtHsDgGeo(e), K = e.hlSolidK === undefined ? 1 : e.hlSolidK;
+      drawGlow(G.bx, G.by, e.r * 2.6, '#e2e8f0', 0.1 + 0.12 * K);
+      if (hlArea && hlArea.blackout && K > 0.5) for (const s of [-1, 1]) drawGlow(G.bx + s * G.bw * 0.17, G.by - G.bh * 0.04, e.r * 0.35, '#f8fafc', 0.6);
+      // THEY LEFT, gathering: the grey drawn in to him
+      const Cu = hlArea && hlArea.cull;
+      if (Cu && Cu.t < Cu.warn) {
+        const u = Cu.t / Cu.warn;
+        ctx.strokeStyle = rgba('#94a3b8', 0.5 * u); ctx.lineWidth = 1.5;
+        for (let i = 0; i < 12; i++) {
+          const a = i * TAU / 12 + uiTime * 2, d0 = e.r * (3.4 - 2.2 * ((uiTime * 1.5 + i * 0.37) % 1));
+          ctx.beginPath(); ctx.arc(e.x, e.y - e.r * 0.3, d0, a, a + 0.5); ctx.stroke();
+        }
+      }
+    }
+  }
+  // what THEY LEFT took: grey, and going
+  for (const o of S.takes) {
+    const u = (uiTime - o.t) / 1.4;
+    ctx.globalAlpha = 0.6 * (1 - u); ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]);
+    poly(o.x, o.y - u * 20, o.r * (1 + u * 0.3), o.sides, o.ang); ctx.stroke(); ctx.setLineDash([]);
+    hlArtText('LEFT', o.x, o.y - o.r - 10 - u * 24, { px: 9, w: 800, ls: '0.24em', al: 'center', col: '#94a3b8', a: 0.8 * (1 - u) });
+  }
+  ctx.restore();
+}
+/* plain paint over the world: the telegraphs. One loud thing at a time:
+   the quiet ones first, so what hurts now is drawn over them. e is DEAD GAME, or null. */
+function drawHlHouseTele(e) {
+  const C = HL_ART_HS_C;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // 3. what you can do now: he is in the room
+  if (e && e.hlSolid && !e.hlWind && !e.hlThread) {
+    const G = hlArtHsDgGeo(e), k = 0.35 + 0.15 * Math.sin(uiTime * 5);
+    hlArtBrackets(G.bx, G.by, Math.max(G.bw, G.bh) * 0.58, '#f8fafc', k);
+  }
+  // 2. THEY LEFT: gathering round him, then going out; and who it is about to take
+  const Cu = hlArea && hlArea.cull;
+  if (Cu) {
+    if (Cu.t < Cu.warn) {
+      const u = Cu.t / Cu.warn;
+      ctx.strokeStyle = rgba('#cbd5e1', 0.4 + 0.5 * u); ctx.lineWidth = 2.5; ctx.setLineDash([10, 7]); ctx.lineDashOffset = uiTime * 40;
+      ctx.beginPath(); ctx.arc(Cu.x, Cu.y, 40 + 70 * (1 - u), 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = rgba('#94a3b8', 0.25 * u); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(Cu.x, Cu.y, DG_CULL_R, 0, TAU); ctx.stroke();
+      hlArtText('THEY LEFT', Cu.x, Cu.y + (e ? e.r : 50) + 26, { px: 11, w: 800, ls: '0.3em', al: 'center', col: '#cbd5e1', a: 0.6 + 0.4 * u });
+    } else {
+      const k = clamp(Cu.r / DG_CULL_R, 0, 1);
+      ctx.strokeStyle = rgba('#94a3b8', 0.85 * (1 - k * 0.6)); ctx.lineWidth = 5 * (1 - k) + 2;
+      ctx.beginPath(); ctx.arc(Cu.x, Cu.y, Cu.r, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = rgba('#e2e8f0', 0.4 * (1 - k)); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(Cu.x, Cu.y, Math.max(0, Cu.r - 14), 0, TAU); ctx.stroke();
+    }
+    for (const o of enemies) {
+      if (!hlCullable(o)) continue;
+      const dd = len(o.x - Cu.x, o.y - Cu.y) - (Cu.t < Cu.warn ? 0 : Cu.r);
+      if (dd > 300 || dd > DG_CULL_R) continue;
+      const k = 1 - clamp(dd / 300, 0, 1);
+      hlArtBrackets(o.x, o.y, o.r + 7, '#cbd5e1', 0.35 + 0.55 * k);
+    }
+  }
+  if (e && e.hlWind) {
+    // his wind-up: a ring filling, and where it is going
+    const u = clamp(e.hlWind.t / DG_WIND, 0, 1), G = hlArtHsDgGeo(e);
+    ctx.strokeStyle = rgba(C.hurt, 0.85); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(G.bx, G.by, Math.max(G.bw, G.bh) * 0.62, -Math.PI / 2, -Math.PI / 2 + TAU * u); ctx.stroke();
+    if (e.hlWind.kind === 'thread') {
+      const a = Math.atan2(P.y - e.y, P.x - e.x);
+      ctx.strokeStyle = rgba(C.hurt, 0.25 + 0.45 * u); ctx.lineWidth = 2; ctx.setLineDash([8, 8]); ctx.lineDashOffset = -uiTime * 60;
+      ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r); ctx.lineTo(e.x + Math.cos(a) * (e.r + 240 * u), e.y + Math.sin(a) * (e.r + 240 * u)); ctx.stroke(); ctx.setLineDash([]);
+      hlArtText('DEAD GAME IS TYPING…', G.bx, G.y0 - 12, { px: 10, w: 700, ls: '0.12em', al: 'center', col: C.hurtHi, a: 0.6 + 0.4 * u });
+    } else {
+      ctx.strokeStyle = rgba(C.hurt, 0.3 + 0.5 * u); ctx.lineWidth = 2;
+      for (let i = 0; i < DG_RATIO_N; i++) {
+        const a = i * TAU / DG_RATIO_N, d0 = e.r + 14, d1 = d0 + 10 + 18 * u;
+        ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a) * d0, e.y + Math.sin(a) * d0); ctx.lineTo(e.x + Math.cos(a) * d1, e.y + Math.sin(a) * d1); ctx.stroke();
+      }
+    }
+  }
+  // 2 and 1: what is about to come, and what is coming
+  for (const o of enemies) {
+    if (o.dead || o.hacked) continue;
+    if (o.type === 'poltergeist' && o.state === 1) {
+      const w = hlWreckById(o.hlHold);
+      if (!w) continue;
+      const up = w.lift || 0, wy = w.y - up * 22, a = Math.atan2(P.y - wy, P.x - w.x), D = Math.min(len(P.x - w.x, P.y - wy), POLT_SPD * POLT_FLY);
+      ctx.strokeStyle = rgba(C.hurt, 0.2 + 0.55 * up); ctx.lineWidth = 1.6; ctx.setLineDash([4, 9]); ctx.lineDashOffset = -uiTime * 50;
+      ctx.beginPath(); ctx.moveTo(w.x, wy); ctx.lineTo(w.x + Math.cos(a) * D, wy + Math.sin(a) * D); ctx.stroke(); ctx.setLineDash([]);
+      // and you, in its sights, closing as it lets go
+      const rr = 34 - 18 * up;
+      ctx.strokeStyle = rgba(C.hurt, 0.3 + 0.6 * up); ctx.lineWidth = 2;
+      for (let i = 0; i < 4; i++) { const b0 = i * Math.PI / 2 + uiTime * 1.5; ctx.beginPath(); ctx.arc(P.x, P.y, rr, b0, b0 + 0.7); ctx.stroke(); }
+    }
+    if (o.type === 'lurker' && (o.state === 1 || o.state === 2)) {
+      const L = hlArtHsLurkPose(o), ca = Math.cos(L.ang), sa = Math.sin(L.ang);
+      if (o.state === 1) {
+        const D = LURK_REACH * (0.35 + 0.65 * L.wind);
+        ctx.strokeStyle = rgba(C.hurt, 0.35 + 0.45 * L.wind); ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(o.x + ca * o.r, o.y + sa * o.r); ctx.lineTo(o.x + ca * D, o.y + sa * D); ctx.stroke(); ctx.setLineDash([]);
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 2; i++) { const d = o.r + 20 + i * 14 + ((uiTime * 50) % 14); ctx.strokeStyle = rgba(C.hurt, 0.8 - i * 0.3); hlArtChev(o.x + ca * d, o.y + sa * d, L.ang, 9); }
+      } else {
+        ctx.strokeStyle = rgba(C.hurt, 0.4); ctx.lineWidth = o.r * 0.5;
+        ctx.beginPath(); ctx.moveTo(o.x - ca * o.r * 4, o.y - sa * o.r * 4); ctx.lineTo(o.x - ca * o.r * 1.2, o.y - sa * o.r * 1.2); ctx.stroke();
+        ctx.strokeStyle = rgba(C.hurt, 0.85); ctx.lineWidth = 2;
+        hlArtChev(o.x + ca * (o.r * 2.2), o.y + sa * (o.r * 2.2), L.ang, 10);
+      }
+    }
+  }
+  ctx.restore();
+}
+/* a line said in THE HOUSE: his, as a comment, over the dark */
+function drawHlHouseBark(b) {
+  const k = clamp(Math.min(b.t / 0.18, (b.life - b.t) / 0.4), 0, 1);
+  if (k <= 0) return;
+  const pop = HL_EASE.outBack(clamp(b.t / 0.3, 0, 1)), ghost = b.e && b.e.hlSolid === false;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  const A = k * (ghost ? 0.75 : 1);
+  ctx.globalAlpha = A;
+  ctx.font = '600 14px ' + HL_ART_FONT;
+  const tw = ctx.measureText(b.text).width, w = Math.max(tw, 104) + 26, h = 44;
+  const x = b.x + b.r * 1.3 + w / 2 + 16, y = b.y - b.r * 1.15, rot = -0.03 + Math.sin(uiTime * 1.4 + b.text.length) * 0.02;
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(pop, pop);
+  hlArtHsBubble(-w / 2, -h / 2, w, h, 8, -w / 2 + 22, -w / 2 - 14, h / 2 + 6);
+  ctx.fillStyle = ghost ? 'rgba(51,65,85,0.92)' : 'rgba(248,250,252,0.97)'; ctx.fill();
+  if (ghost) ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = ghost ? '#94a3b8' : '#334155'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(-w / 2 + 14, -h / 2 + 12, 5, 0, TAU); ctx.fill();
+  hlArtText('DEAD GAME', -w / 2 + 24, -h / 2 + 15.5, { px: 9, w: 800, ls: '0.08em', col: ghost ? '#cbd5e1' : '#0f172a', a: A });
+  hlArtText('· just now', -w / 2 + 88, -h / 2 + 15.5, { px: 9, w: 600, col: '#64748b', a: A });
+  hlArtText(b.text, -w / 2 + 13, h / 2 - 9, { px: 14, w: 600, col: ghost ? '#e2e8f0' : '#0f172a', a: A });
+  ctx.restore();
+}
+
+/* ---- the screen ---- */
+/* over the fog, round the light: the dark creeping in at its edge, the dust
+   turning where the light gives out, and a lurker's eyes, which are all of it
+   anyone sees out there */
+function drawHlHouseQuiet(x, y, r, k) {
+  const C = HL_ART_HS_C;
+  ctx.save();
+  // fingers of the dark, reaching in further the darker the room is
+  if (k > 0.2) {
+    const n = 18, kk = clamp((k - 0.2) / 0.8, 0, 1);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < n; i++) {
+      const a = i * TAU / n + hlNoise(uiTime * 0.3 + i, 4) * 0.8, reach = r * (1.25 - 0.45 * kk * hlNoise(uiTime * 0.6 + i * 3.1, 5));
+      const a2 = a + (hlNoise(uiTime * 0.5 + i, 6) - 0.5) * 0.5;
+      ctx.strokeStyle = 'rgba(3,4,9,' + (0.55 * kk) + ')'; ctx.lineWidth = 10 + 16 * hlHash(i);
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 1.6, y + Math.sin(a) * r * 1.6);
+      ctx.quadraticCurveTo(x + Math.cos(a2) * r * 1.35, y + Math.sin(a2) * r * 1.35, x + Math.cos(a) * reach, y + Math.sin(a) * reach); ctx.stroke();
+    }
+  }
+  // the edge of the light, faint, and the dust in it
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = rgba('#c4b5fd', 0.05 + 0.07 * (1 - k)); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x, y, r * 0.98, 0, TAU); ctx.stroke();
+  for (let i = 0; i < 40; i++) {
+    const a = i * 2.3999 + uiTime * (0.05 + 0.04 * hlHash(i)) * (i % 2 ? 1 : -1), d = r * (0.85 + 0.3 * hlNoise(uiTime * 0.4 + i, 9));
+    const tw = 0.5 + 0.5 * Math.sin(uiTime * 2 + i * 1.7);
+    ctx.globalAlpha = 0.18 * tw * (1 - k * 0.5); ctx.fillStyle = '#e9d5ff';
+    ctx.fillRect(x + Math.cos(a) * d, y + Math.sin(a) * d, 1.4, 1.4);
+  }
+  ctx.globalAlpha = 1;
+  // the lurkers' eyes, out in the dark: the only warning there is
+  if (typeof enemies !== 'undefined') for (const e of enemies) {
+    if (e.dead || e.type !== 'lurker' || !(e.state === 1 || e.state === 2)) continue;
+    const L = hlArtHsLurkPose(e), E = hlArtHsLurkEyes(e, L), [sx, sy] = hlArtHsScr(E.hx, E.hy);
+    if (sx < -40 || sy < -40 || sx > W + 40 || sy > H + 40) continue;
+    const z = camZoom;
+    drawGlow(sx, sy, e.r * 2.2 * z, L.st === 2 ? '#ef4444' : C.lurk, 0.4 + 0.3 * L.wind);
+    ctx.globalCompositeOperation = 'source-over';
+    hlArtHsEyePair({ hx: sx, hy: sy, px: E.px * z, py: E.py * z, open: E.open, s: E.s * z }, 1.6, 0.95, L.st === 2);   // bigger than life: they are all there is to see
+    ctx.globalCompositeOperation = 'lighter';
+  }
+  ctx.restore();
+}
+function drawHlHouseHud(A, area) {
+  const C = HL_ART_HS_C, acc = A.stage.accent, n = Math.max(1, Math.min(5, area.n)), y = 68, S = HL_ART_HS;
+  ctx.save();
+  // the room and its five waves; the fifth is his, a post
+  hlArtText(A.stage.name, W / 2 - 12, y, { px: 11, ls: '0.3em', al: 'right', col: acc });
+  for (let i = 0; i < 5; i++) {
+    const x = W / 2 + 6 + i * 16, on = i < n;
+    if (i === 4) {
+      ctx.globalAlpha = on ? 1 : 0.5;
+      hlArtHsBubble(x - 4, y - 10, 15, 10, 3, x - 1, x - 3, y + 3);
+      ctx.fillStyle = on ? '#e2e8f0' : 'rgba(196,181,253,0.1)'; ctx.fill();
+      ctx.strokeStyle = acc; ctx.lineWidth = 1; ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = on ? acc : 'rgba(196,181,253,0.18)';
+      ctx.beginPath(); ctx.arc(x, y - 4, on && i === n - 1 ? 3.6 : 2.6, 0, TAU); ctx.fill();
+    }
+  }
+  // the errand, as the lobby's chat: what the marked sheets have said so far
+  if (!area.boss) {
+    const goal = hlChipGoal(), m = /(\d+)\s*\/\s*(\d+)/.exec(goal);
+    const label = m ? goal.replace(/\s*\d+\s*\/\s*\d+\s*$/, '') : goal;
+    if (m && /LAST MESSAGE/.test(goal)) {
+      ctx.font = '700 10px ' + HL_ART_MONO;
+      const need = +m[2], have = +m[1], words = [];
+      for (let i = 0; i < need; i++) words.push(i < have ? HL_LAST_CHAT[i] || '?' : '···');
+      const ws = words.map(t => ctx.measureText(t).width + 16), tot = ws.reduce((s, v) => s + v + 6, 0);
+      ctx.font = '700 10px ' + HL_ART_FONT; ctx.letterSpacing = '0.24em';
+      const lw = ctx.measureText(label).width; ctx.letterSpacing = '0em';
+      let x = W / 2 - (lw + 14 + tot) / 2;
+      hlArtText(label, x, y + 22, { px: 10, ls: '0.24em', col: C.ink, a: 0.8 });
+      x += lw + 14;
+      words.forEach((t, i) => {
+        const got = i < have, w = ws[i];
+        hlArtHsBubble(x, y + 10, w, 16, 5, x + 6, x + 3, y + 30);
+        ctx.fillStyle = got ? 'rgba(165,243,252,0.18)' : 'rgba(15,23,42,0.6)'; ctx.fill();
+        ctx.strokeStyle = got ? C.cold : 'rgba(165,243,252,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+        hlArtText(t, x + w / 2, y + 22, { px: 10, mono: true, al: 'center', col: got ? C.cold : '#475569' });
+        x += w + 6;
+      });
+    } else if (label) hlArtText(label + (m ? '   ' + m[1] + ' / ' + m[2] : ''), W / 2, y + 22, { px: 10, ls: '0.24em', al: 'center', col: C.ink, a: 0.8 });
+  }
+  // where they are: the marked ones always, off the screen or out in the dark,
+  // and while the last few of a wave are left, whatever is left
+  for (const e of enemies) {
+    if (e.dead || !(e.hlMarked || (area.last && isThreat(e) && e.type !== 'lastseen'))) continue;
+    const [sx, sy] = hlArtHsScr(e.x, e.y), col = e.hlMarked ? C.cold : acc, pu = 0.7 + 0.3 * Math.sin(uiTime * 4);
+    if (sx > 0 && sx < W && sy > 0 && sy < H) {
+      if (len(e.x - P.x, e.y - P.y) <= hlQuietR() * 0.8) continue;
+      const s = 7 + Math.sin(uiTime * 5) * 1.2;
+      ctx.globalCompositeOperation = 'lighter'; drawGlow(sx, sy, 22, col, 0.3 * pu); ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(sx, sy - s); ctx.lineTo(sx + s, sy); ctx.lineTo(sx, sy + s); ctx.lineTo(sx - s, sy); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, sy, 2, 0, TAU); ctx.fill();
+      continue;
+    }
+    const a = Math.atan2(sy - H / 2, sx - W / 2), R0 = Math.min(W, H) * 0.42;
+    const px = W / 2 + Math.cos(a) * R0, py = H / 2 + Math.sin(a) * R0;
+    ctx.globalCompositeOperation = 'lighter'; drawGlow(px, py, 26, col, 0.25 * pu); ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(px + Math.cos(a) * 20, py + Math.sin(a) * 20);
+    ctx.lineTo(px + Math.cos(a + 2.6) * 11, py + Math.sin(a + 2.6) * 11); ctx.lineTo(px + Math.cos(a - 2.6) * 11, py + Math.sin(a - 2.6) * 11); ctx.closePath(); ctx.fill();
+    if (e.hlMarked) {
+      // a little sheet, and how long it has before it slips out
+      ctx.beginPath(); ctx.arc(px, py - 1, 5, Math.PI, 0); ctx.lineTo(px + 5, py + 5);
+      for (let i = 0; i < 4; i++) ctx.lineTo(px + 5 - (i + 0.5) * 2.5, py + (i % 2 ? 5 : 3));
+      ctx.lineTo(px - 5, py + 5); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = rgba(C.cold, 0.9); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px, py, 11, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(1 - (e.t || 0) / MARK_ESCAPE, 0, 1)); ctx.stroke();
+    } else { ctx.beginPath(); ctx.arc(px, py, 4, 0, TAU); ctx.fill(); }
+  }
+  // what a torn one said, rising out of where it was
+  for (const c of S.chats) {
+    const u = (uiTime - c.t) / 2.8, [sx, sy] = hlArtHsScr(c.x, c.y), py = sy - 46 * HL_EASE.out3(u);
+    const a = clamp(Math.min(u / 0.08, (1 - u) / 0.3), 0, 1), pop = HL_EASE.outBack(clamp(u / 0.12, 0, 1));
+    ctx.font = '700 15px ' + HL_ART_MONO;
+    const tw = ctx.measureText(c.line).width, w = tw + 54, h = 28;
+    ctx.save(); ctx.translate(sx, py); ctx.scale(pop, pop);
+    ctx.globalAlpha = a;
+    hlArtHsBubble(-w / 2, -h / 2, w, h, 7, -w * 0.15, -w * 0.2, h / 2 + 9);
+    ctx.fillStyle = 'rgba(8,22,28,0.92)'; ctx.fill();
+    ctx.strokeStyle = C.cold; ctx.lineWidth = 1.5; ctx.stroke();
+    hlArtText(c.n + '/3', -w / 2 + 10, 4, { px: 9, mono: true, col: '#67b8c4', a });
+    hlArtText(c.line, -w / 2 + 38, 5.5, { px: 15, w: 700, mono: true, col: C.cold, a });
+    ctx.restore();
+  }
+  if (area.end) {
+    const k = clamp(area.end.t / HL_END_T, 0, 1), win = area.end.why === 'win';
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+    vg.addColorStop(0, 'rgba(3,4,9,0)'); vg.addColorStop(1, 'rgba(3,4,9,' + (0.85 * HL_EASE.in(k)) + ')');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    const a = clamp((area.end.t - 0.6) / 0.8, 0, 1);
+    hlArtText(win ? 'BACK TO THE VIGIL' : 'THE HOUSE LETS YOU GO', W / 2, H / 2 + 120, { px: 13, ls: '0.34em', al: 'center', col: win ? '#e2e8f0' : C.cold, a });
+    hlArtText(win ? 'NOBODY LEFT TO TURN THE LIGHTS OFF' : 'IT HEARD WHAT THEY SAID', W / 2, H / 2 + 142, { px: 9, ls: '0.3em', al: 'center', col: '#94a3b8', a: a * 0.7 });
+  }
+  ctx.restore();
+}
+/* his fight: the room, as a lobby's player count. He is only there over the line. */
+function drawHlOnlineHud(v, line, k, area) {
+  const C = HL_ART_HS_C, PW = 480, x0 = W / 2 - PW / 2, y = 102, bx = x0 + 100, w = 228, on = v >= line, segs = 16;
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,10,18,0.78)'; ctx.beginPath(); ctx.roundRect(x0, y - 8, PW, 24, 12); ctx.fill();
+  ctx.strokeStyle = rgba(on ? '#e2e8f0' : '#475569', 0.35); ctx.lineWidth = 1; ctx.stroke();
+  // the dot: someone is on
+  const pu = 0.6 + 0.4 * Math.sin(uiTime * 4);
+  if (on) { ctx.globalCompositeOperation = 'lighter'; drawGlow(x0 + 16, y + 4, 12, C.online, 0.5 * pu); ctx.globalCompositeOperation = 'source-over'; }
+  ctx.fillStyle = on ? C.online : '#475569'; ctx.beginPath(); ctx.arc(x0 + 16, y + 4, 3.5, 0, TAU); ctx.fill();
+  hlArtText('ONLINE', x0 + 26, y + 8, { px: 10, w: 800, ls: '0.22em', col: on ? '#e2e8f0' : '#94a3b8' });
+  // the bar, in seats
+  ctx.fillStyle = 'rgba(30,41,59,0.9)'; ctx.fillRect(bx, y, w, 8);
+  const g = ctx.createLinearGradient(bx, 0, bx + w, 0);
+  g.addColorStop(0, on ? '#cbd5e1' : '#334155'); g.addColorStop(1, on ? '#f8fafc' : '#64748b');
+  ctx.fillStyle = g; ctx.fillRect(bx, y, w * clamp(v, 0, 1), 8);
+  ctx.fillStyle = 'rgba(8,10,18,0.9)';
+  for (let i = 1; i < segs; i++) ctx.fillRect(bx + i * w / segs - 0.75, y, 1.5, 8);
+  // the line: where he comes into the room
+  const lx = bx + w * line;
+  ctx.fillStyle = C.hurtHi; ctx.fillRect(lx - 1, y - 4, 2, 16);
+  hlArtHsBubble(lx - 6, y - 15, 12, 8, 2.5, lx - 2, lx - 1, y - 5);
+  ctx.fillStyle = on ? '#f8fafc' : '#475569'; ctx.fill();
+  // and the seats taken
+  const seats = Math.round(clamp(v, 0, 1) * segs);
+  hlArtText(seats + '/' + segs, bx + w + 12, y + 8, { px: 10, w: 700, mono: true, col: on ? '#e2e8f0' : '#64748b' });
+  hlArtText(k > 0.5 ? 'HE IS HERE' : 'NOBODY', x0 + PW - 14, y + 8, { px: 9, w: 800, ls: '0.2em', al: 'right', col: k > 0.5 ? '#f8fafc' : '#64748b', a: 0.6 + 0.4 * k });
+  ctx.restore();
+}
+/* his health bar, already drawn (14 tall): where the lights go out, and the grey of him when he is not there */
+function drawHlDeadGameBar(e, x, y, w) {
+  const C = HL_ART_HS_C, K = e.hlSolidK === undefined ? 1 : e.hlSolidK, dark = hlArea && hlArea.blackout;
+  const nx = x + 2 + (w - 4) * DG_DARK_AT;
+  ctx.save();
+  ctx.fillStyle = dark ? '#475569' : C.lampHi; ctx.fillRect(nx - 1, y - 3, 2, 20);
+  // a bulb over the notch: lit, or gone
+  ctx.beginPath(); ctx.arc(nx, y - 10, 4.2, Math.PI * 0.8, Math.PI * 2.2); ctx.lineTo(nx + 2, y - 5); ctx.lineTo(nx - 2, y - 5); ctx.closePath();
+  ctx.fillStyle = dark ? '#1e293b' : C.lamp; ctx.fill();
+  ctx.strokeStyle = dark ? '#64748b' : '#78350f'; ctx.lineWidth = 1; ctx.stroke();
+  if (!dark) { ctx.globalCompositeOperation = 'lighter'; drawGlow(nx, y - 10, 12, C.lamp, 0.35); ctx.globalCompositeOperation = 'source-over'; }
+  if (K < 1) {
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(x, y, w, 14, 7); ctx.clip();
+    ctx.globalAlpha = 1 - K;
+    ctx.fillStyle = 'rgba(15,23,42,0.6)'; ctx.fillRect(x, y, w, 14);
+    ctx.strokeStyle = 'rgba(148,163,184,0.45)'; ctx.lineWidth = 3;
+    const off = (uiTime * 16) % 10;
+    for (let sx = x - 20 + off; sx < x + w + 20; sx += 10) { ctx.beginPath(); ctx.moveTo(sx, y + 14); ctx.lineTo(sx + 12, y); ctx.stroke(); }
+    ctx.restore();
+    hlArtText('GHOST', x + w - 8, y + 10.5, { px: 9, w: 800, ls: '0.24em', al: 'right', col: '#e2e8f0', a: 1 - K });
+  }
+  ctx.restore();
+}
+/* STILL HERE: you, a ghost, in any run. g { t, T, kills, need } */
+function drawHlGhostHud(g) {
+  const C = HL_ART_HS_C, left = clamp(1 - g.t / g.T, 0, 1), urgent = left < 0.3;
+  ctx.save();
+  // the world goes grey
+  ctx.globalCompositeOperation = 'saturation';
+  ctx.fillStyle = 'rgba(128,128,128,0.85)'; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'source-over';
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+  vg.addColorStop(0, 'rgba(148,163,184,0)'); vg.addColorStop(1, 'rgba(148,163,184,' + (0.2 + (urgent ? 0.1 * Math.sin(uiTime * 10) : 0)) + ')');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  // the count: a ring of ten
+  const cx = W / 2, cy = H - 205, R = 26;
+  ctx.fillStyle = 'rgba(8,10,18,0.7)'; ctx.beginPath(); ctx.arc(cx, cy, R + 10, 0, TAU); ctx.fill();
+  for (let i = 0; i < g.need; i++) {
+    const a = -Math.PI / 2 + i * TAU / g.need, got = i < g.kills;
+    ctx.fillStyle = got ? '#f8fafc' : 'rgba(148,163,184,0.25)';
+    ctx.beginPath(); ctx.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, got ? 3.6 : 2.6, 0, TAU); ctx.fill();
+  }
+  ctx.strokeStyle = urgent ? C.hurtHi : '#cbd5e1'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(cx, cy, R + 8, -Math.PI / 2, -Math.PI / 2 + TAU * left); ctx.stroke();
+  hlArtText(String(Math.max(0, g.need - g.kills)), cx, cy + 6, { px: 17, w: 800, mono: true, al: 'center', col: '#f8fafc' });
+  hlArtText('STILL HERE', cx, cy - R - 20, { px: 12, w: 800, ls: '0.36em', al: 'center', col: '#e2e8f0' });
+  hlArtText('FELL ' + Math.max(0, g.need - g.kills) + ' MORE   ·   ' + Math.max(0, g.T - g.t).toFixed(1) + 's', cx, cy + R + 26, { px: 10, w: 700, ls: '0.2em', al: 'center', col: urgent ? C.hurtHi : '#94a3b8' });
+  ctx.restore();
+}
+
 /* ===================== end of ALL HALLOWS · ACT I art hooks ===================== */

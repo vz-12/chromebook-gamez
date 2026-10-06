@@ -29,6 +29,7 @@
    The determinism suite (npm test) flies the house and DEAD GAME too, and
    holds them to the run's rules (seeded, snapshot-safe).
    ========================================================================= */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadGame } from './lib/game-vm.mjs';
@@ -447,10 +448,14 @@ take(g.run(`(() => { ${KIT}
 })()`));
 
 /* ================================ the hooks =============================== */
-section('the hooks');
-{
+/* Twice: on the placeholders in the page, and on the art in hl-art.js, which
+   the game fetches beside it and which replaces them by name. */
+const ART = path.join(path.dirname(IDX), 'hl-art.js');
+function flyHooks(art) {
   const h = loadGame(IDX, { w: 1280, h: 720 });
   h.run(SETUP);
+  // the art file, as the page loads it: its hooks replace the placeholders by name
+  if (art) { h.run(fs.readFileSync(ART, 'utf8')); ok(h.run('HL_ART_HS_C !== undefined && drawHlHouseBody.toString().includes("hlArtHs")'), 'hl-art.js draws the house'); }
   // hooks are global function declarations: replace them by name from outside, as the art file does
   const ACT2 = ['hlHouseArtTick', 'hlHouseEnterFx', 'hlQuietFlareFx', 'hlQuietDarkFx', 'hlSheetTearFx', 'hlMarkSproutFx',
     'hlMarkTornFx', 'hlMarkLostFx', 'hlLurkWindFx', 'hlLurkStrikeFx', 'hlLurkBurnFx', 'hlPoltLiftFx', 'hlPoltThrowFx',
@@ -513,6 +518,10 @@ section('the hooks');
   ok(!Object.keys(errs).length, 'and none throws', errs);
   ok(!Object.keys(act1).length, 'Act I\'s hooks (the patch\'s) are never asked to draw the house', act1);
 }
+section('the hooks');
+flyHooks(false);
+section('the art (hl-art.js)');
+flyHooks(true);
 
 console.log('\n' + passes + ' passed, ' + fails + ' failed');
 process.exit(fails ? 1 : 0);

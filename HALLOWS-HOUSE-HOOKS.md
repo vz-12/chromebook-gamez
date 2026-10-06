@@ -1,9 +1,53 @@
 # ALL HALLOWS · ACT II: THE HOUSE — the art hooks
 
-Chapter II of Book I (opens 14 Oct 2026, by `HL_EVENT.chapters`). The logic is
-built and plays end to end under **blank placeholder hooks**: shapes and labels,
-just enough to play it and read its telegraphs. This file is the contract for
-drawing over them, the way `HALLOWS-GUIDE.txt` (on `beta`) is for Act I.
+Chapter II of Book I (opens 14 Oct 2026, by `HL_EVENT.chapters`). The logic
+plays end to end under placeholder hooks in `index.html` (shapes and labels,
+just enough to play it), and **the art is drawn over them in `hl-art.js`**, in
+the section `ALL HALLOWS · ACT II: THE HOUSE — the look` at the foot of the
+file. This file is the contract both keep, the way `HALLOWS-GUIDE.txt` (on
+`beta`) is for Act I.
+
+## The look (hl-art.js)
+
+An empty lobby in an old house. Dark boards and worn rugs; along the walls, five
+rooms somebody left with the menu still open (a set on a stand showing
+WAITING FOR PLAYERS, SEARCHING FOR MATCH with its clock still counting, READY
+CHECK, PRESS START, 0 ONLINE; a couch facing it, the pads where they were
+dropped, a floor lamp). The screens never go off; the lamps are on THE QUIET's
+timer, come back up on a death, and die for good in DEAD GAME's dark. Violet is
+the house and what it lifts, cold (`#a5f3fc`) the soul's, grey DEAD GAME's, red
+only what is about to hit you.
+
+- **SHEET**: a verlet cloth skirt under a dome, the hem trailing as it moves.
+  The head takes the shape of what is under it (a brute's shoulders, a dasher's
+  prow, a spitter's nozzle turned at you, a bomber's lit fuse…), and the hem
+  leaks the colour of it. Torn, it rips in two and leaves a crumpled sheet on
+  the floor with its two eye holes. A marked one is cold-edged with light in its
+  eyes, and thins out in its last four seconds before it slips out; what it said
+  rises as a chat line.
+- **LURKER**: a ragged heap of the dark on long arms. Past the light only its
+  eyes, drawn over the fog (`drawHlHouseQuiet`) so they are seen at all; lit, it
+  smokes and burns.
+- **POLTERGEIST**: a howling violet wisp with a tail of where it has been, hands
+  that reach up under what it lifts, threads to it, and a red line and reticle to
+  you while it winds up. The wreckage: a chair, a side table, a dead set, a stack
+  of games, a box of cables, the photo of the four of them; the dead as flat grey
+  husks.
+- **DEAD GAME**: a comment that will not go away: a speech bubble with a face,
+  his name and `· 6y`, `▲ 0 ▼ REPLY`, and a thread of replies hanging off it on a
+  rope. A ghost of a post when he is out of the room (scanned, dashed). His
+  wind-ups are on his face: `DEAD GAME IS TYPING…` before A THREAD, cheeks puffed
+  before RATIO. His barks are comments. LAST SEEN: grey dashed hulls under the
+  names of the ones who left. He bursts into his own letters, and a small grey
+  bubble is left on the floor, still typing.
+- **The screen**: the errand as lobby chat chips (`ez` `wait` `···`), the room's
+  meter as an ONLINE player count, a bulb on his bar where the lights go out,
+  and STILL HERE greys the world with a ring of ten.
+
+One floor in memory at a time: entering either area drops the other's baked
+floor, and the menu's preload bakes the house's once it is open and the patch
+is done. `npm run test:hallows` flies the house on the placeholders and again
+with `hl-art.js` loaded (every hook called, none throwing).
 
 ## What is built
 
