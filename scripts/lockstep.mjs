@@ -29,10 +29,11 @@ const SHORT = args.includes('--short');
 
 /* lat / jit: one-way latency and its spread, ms. loss: share of the unreliable
    packets (the inputs) that never arrive. hz: each machine's frame rate.
-   freeze: the guest's machine stops for a while, the way a laptop does. */
+   freeze: the guest's machine stops for a while, the way a laptop does.
+   loot: a piece of gear is put at a blade guest's feet early on (OPENERS). */
 const SCENARIOS = [
   { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember', end: 'host leaves' },
-  { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true },
+  { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true, loot: true },
   { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
                       freeze: { at: 40000, ms: 1800 } },
   { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
@@ -51,7 +52,7 @@ const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 let ls = 12345;
 const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 4294967296; };
 
-const SETUP = (role, char, kit, scramble, kitRun, yes, part, life) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
+const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
   // each player in a skin of their own, and wearing an award: each machine draws the other pilot in it
@@ -156,6 +157,14 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life) => `(() => { 
   for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { const n = a + (PILOT.on ? '·guest' : ''); __acts[n] = (__acts[n] || 0) + 1; f(i); }; }
   globalThis.OPENERS_LEFT = () => OPENERS.map(o => o[0]);
   const OPENERS = [
+    /* A blade guest (THE VAGRANT) has loot, not cards, and a piece only falls
+       to its own kills: whether one lands where its bot will walk is luck,
+       and luck that moves with every change to the run (RONIN's V's longer
+       cut-in took it away in 'internet'). Where the scenario says so (loot),
+       one is put at its feet, on both machines at the same step, so the
+       guest's own gear screen is always met. Only there: a piece more is a
+       different run, and 'lifecycle' needs its pilots to go down. */
+    [900, () => { if (${!!loot}) pilotDo(PILOTS.length > 1 ? 1 : 0, () => { if (isBlade()) gearDrop(P.x + 24, P.y, 1); }); }],
     [1500, () => openPlanetarium()],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],
@@ -212,8 +221,8 @@ function play(sc) {
   ls = 12345;
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720 }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640 }), hz: sc.guestHz };
-  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host, sc.life), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest, sc.life), 'setup-guest');   // its own pilot, awake too when the scenario has kits
+  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host, sc.life, sc.loot), 'setup-host');
+  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest, sc.life, sc.loot), 'setup-guest');   // its own pilot, awake too when the scenario has kits
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
