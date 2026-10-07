@@ -1,6 +1,6 @@
 /* ===========================================================================
    VOIDRUNNER — accounts
-   GET  /api/account                 -> { account | null, turnstile, vault? }
+   GET  /api/account                 -> { account | null, turnstile, vault?, challenge? }
    POST /api/account  { op, ... }    -> sign up, sign in, sign out, and the rest
    GET  /api/account/save            -> { rev, save, unlocks }
    PUT  /api/account/save { rev, save, unlocks, pid }  -> { rev } | 409 { rev, save, unlocks }
@@ -24,6 +24,7 @@ import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newTo
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES } from './auth.js';
 import { vaultList } from './vault.js';
 import { PILOTS } from '../pvp/src/rules.js';
+import { challengeWaits } from '../pvp/src/challenge.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -531,12 +532,15 @@ export default async (req, env) => {
   if (new URL(req.url).pathname === '/api/account/save') return renew(await saveRoute(req, env, s));
 
   /* The Turnstile widget's public key goes with it, for the sign-up form, and
-     for an account the vault holds something for, what that is (vault.js):
-     the field is missing for everybody else. */
+     for an account the vault holds something for, what that is (vault.js);
+     for one PvP has sent a challenge to, only that it has, for the menu's
+     PVP door (../pvp/src/challenge.js). Each field is missing for everybody
+     else. */
   if (req.method === 'GET') {
     const vault = s ? await vaultList(env.DB, s.account) : null;
+    const challenge = s ? await challengeWaits(env.DB, s.account.id) : false;
     return renew(reply(Object.assign({ account: s ? publicAccount(s.account) : null, turnstile: turnstileKey(env) },
-                                     vault ? { vault } : {})));
+                                     vault ? { vault } : {}, challenge ? { challenge: true } : {})));
   }
   if (req.method !== 'POST') return no('method not allowed', 405);
   const { v: b, err } = await bodyOf(req, 4096);

@@ -6,13 +6,16 @@
    (src/account.js, saves.unlocks), so they are as current as the game's last
    push; the game pushes before it opens PvP. The league comes from the
    ranked rating this season (records.js, pvp_ratings): the lowest, still to
-   be placed, until the first few ranked matches are played (rules.js).
+   be placed, until the first few ranked matches are played (rules.js). A
+   challenge sent to this account (challenge.js) comes too, and the field is
+   missing for everybody else.
    ========================================================================= */
 import { sessionOf, sessionCookie, publicAccount } from '../../src/auth.js';
 import { PILOTS, CASUAL, loadout, leagueOf } from './rules.js';
 import { ratingOf } from './records.js';
 import { entryFor } from './gates.js';
 import { hiddenOf } from './hidden.js';
+import { challengeFor } from './challenge.js';
 
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -38,6 +41,9 @@ export default async function me(req, env) {
   }
   // the hidden pilots it may fly, only for whoever may (hidden.js): the field is missing for everybody else
   const hidden = await hiddenOf(env.DB, s.account);
+  // a challenge sent to this account, shown now (challenge.js): one that cannot be read waits for the next visit
+  const challenge = await challengeFor(env.DB, s.account.id, { seen: true })
+    .catch(e => { console.error('pvp challenge', e && e.message); return null; });
   // a session just extended takes its cookie again, as /api/account does
   return reply(Object.assign({
     account: publicAccount(s.account),
@@ -48,5 +54,6 @@ export default async function me(req, env) {
     pilots: PILOTS,
     loadouts: { ranked: loadout(league, unlocks), casual: loadout(CASUAL, unlocks) },
     queues
-  }, hidden.length ? { hidden: hidden.map(h => ({ id: h.id, n: h.n || h.id, h: h.h })) } : {}), 200, s.renew ? sessionCookie(req, s.token) : undefined);
+  }, hidden.length ? { hidden: hidden.map(h => ({ id: h.id, n: h.n || h.id, h: h.h })) } : {},
+     challenge ? { challenge } : {}), 200, s.renew ? sessionCookie(req, s.token) : undefined);
 }

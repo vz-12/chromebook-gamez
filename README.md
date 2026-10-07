@@ -409,6 +409,21 @@ engine test in place of the stand-in:
 node scripts/pvp-engine.mjs --outside path/to/module.js
 ```
 
+A hidden pilot can also send a challenge (`pvp/src/challenge.js`). It does
+nothing until you arm it by hand. Once it's armed, the first player placed in
+VOID, ranked's highest league, trips it, and it goes at once to that season's
+#1. That player's PvP lobby shows the challenge's words, kept in the vault and
+given to nobody, and the game's PVP door tells them one is waiting. From then
+on, the pilot's ranked ticket waits for that player rather than whoever is #1
+by then. The pilot's own holders never trip it and are never sent it.
+
+```sh
+npm run vault -- put <words> <file> --remote   # { "t": "title", "x": "text" }, kept outside the repo
+npm run challenge -- arm <pilot> <words> --remote
+npm run challenge -- date <pilot> 2026-11-14T18:00Z --remote   # or none
+npm run challenge -- list --remote             # tripped by whom, sent to whom, seen yet; also: cancel
+```
+
 ## Ads
 
 The game has room for one Google AdSense banner. It sits across the top of the

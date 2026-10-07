@@ -67452,6 +67452,7 @@ const Account = {
   last: 0,              // when the last push left
   timer: 0, busy: false, again: false,
   turnstile: undefined, // the sign-up check's site key: null when it is off, undefined until asked
+  challenge: false,     // PvP has sent this account a challenge: the PVP door says so (pvp/src/challenge.js)
 
   off: () => BETA || location.protocol === 'file:',
 
@@ -67519,6 +67520,7 @@ const Account = {
     Account.me = r.d.account || null;
     Account.turnstile = r.d.turnstile || null;
     Account.status = '';
+    Account.challenge = !!(Account.me && r.d.challenge);
     if (Account.me && r.d.vault) Outside.boot(r.d.vault);   // what the vault holds for this account (OUTSIDE PILOTS)
     if (Account.me) await Account.pull();
   },
@@ -67621,7 +67623,7 @@ const Account = {
      changed somewhere else. The save here is the player's, so it stays. */
   lost() {
     Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = '';
-    Account.due = false; Account.status = 'out';
+    Account.due = false; Account.status = 'out'; Account.challenge = false;
   },
 
   // what went wrong, in the panel's words
@@ -68089,7 +68091,8 @@ function drawMenuAcct() {
 }
 
 /* The PVP door: under ACCOUNT, since it is the account that goes through it
-   (Account.toPvp). PvP is its own site; this is only the way in. */
+   (Account.toPvp). PvP is its own site; this is only the way in. A challenge
+   PvP has sent this account is read there; the door only says one waits. */
 const PvpDoor = { busy: false, note: '' };
 function menuPvpRect() { return { x: 18, y: 254, w: 176, h: 34 }; }
 
@@ -68111,11 +68114,13 @@ function drawMenuPvp() {
   ctx.fillText('◆  PVP', r.x + 12, r.y + 15);
   ctx.letterSpacing = '0.1em';
   ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = PvpDoor.note ? '#f87171' : hot ? '#94a3b8' : '#64748b';
+  const called = !Account.off() && !!Account.me && Account.challenge && !PvpDoor.busy && !PvpDoor.note;
+  ctx.fillStyle = PvpDoor.note ? '#f87171' : called ? '#fde68a' : hot ? '#94a3b8' : '#64748b';
   const sub = Account.off() ? 'NEEDS AN ACCOUNT'
     : PvpDoor.busy ? 'OPENING…'
     : PvpDoor.note ? PvpDoor.note
     : !Account.me ? 'SIGN IN TO PLAY'
+    : called ? 'A CHALLENGE WAITS FOR YOU  ↗'
     : 'ONE ON ONE  ·  ITS OWN PAGE  ↗';
   ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
   ctx.restore();
@@ -68296,10 +68301,11 @@ const Outside = {
       if (it && typeof it.id === 'string' && !OUTSIDE.by.has(it.id) && !OUTSIDE.loading.has(it.id)) await Outside.load(it);
   },
 
-  // signed in on this page: the account reply again, for what it names
+  // signed in on this page: the account reply again, for what it names (and a challenge, for the PVP door)
   async ask() {
     if (PVP || Account.off()) return;
     const r = await Account.call('GET');
+    if (r.ok && r.d) Account.challenge = !!(Account.me && r.d.challenge);
     if (r.ok && r.d && r.d.vault) await Outside.boot(r.d.vault);
   },
 
