@@ -241,7 +241,7 @@ const BOT = `
 const WATCH = `
   globalThis.__fp = new Map();
   globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
-                       wildMax: 0, wildClean: 0, standOut: 0 };
+                       wildMax: 0, wildClean: 0, standOut: 0, tales: 0 };
   let __at = '';
   /* What a hit took is the health it left, read where the blow lands: a
      killing one meets Second Wind or a DEADMAN BRAKE (reviveOrDie), which
@@ -282,6 +282,7 @@ const WATCH = `
       else if (!e.hacked) wild++;
     }
     __log.wildMax = Math.max(__log.wildMax, wild);
+    __log.tales = Math.max(__log.tales, Tales.lines.length);
     if (!m.infested && wild) __log.wildClean++;
     if (LS.tick % 30 === 0)
       __fp.set(LS.tick, JSON.stringify([simRngState, m.phase, m.round, m.score, m.owed, a.charId, a.x, a.y, a.hp, a.level,
@@ -443,6 +444,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   // (the room sends six at most, below; a splitter's or a brood's young come on top of that)
   ok(belt.infested ? log.wildMax > 0 : log.wildMax === 0, belt.infested ? 'infested: the room sent its own' : 'clean: the room sent nothing', log.wildMax);
   ok(log.wildClean === 0, 'never an enemy of the room\'s on a clean map', log.wildClean);
+  ok(log.tales === 0, 'and not one FORGOTTEN TALE line queued, all match long', log.tales);
 
   // the same game on both, start to finish
   const same = sameGame(H, G);
@@ -633,6 +635,14 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const sc = spawned(false), si = spawned(true);
   ok(sc[0] === 0, 'a clean map sends nothing, a minute long', sc);
   ok(si[0] === 6 && si[1] === 0, 'an infested one sends, six at most, and never on top of a pilot', si);
+  // the same room on a codex that has met nothing: each first meeting opens its page I (FORGOTTEN TALES), and not one says so over the duel
+  const met = r(`const m = RUN.pvp, was = [m.infested, Codex.e, Tales.p, Tales.lines]; m.infested = true; m.spawnT = 0;
+    Codex.e = new Set(); Tales.p = {}; Tales.lines = [];
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
+    for (let i = 0; i < 60 * 60; i++) PVP.maps.spawn(m, 1 / 60);
+    const out = [Codex.e.size, Object.keys(Tales.p).filter(k => k.startsWith('e:')).length, Tales.lines.length];
+    [m.infested, Codex.e, Tales.p, Tales.lines] = was; out`);
+  ok(met[0] > 0 && met[1] > 0 && met[2] === 0, 'the room\'s first meetings open their pages, and no FORGOTTEN TALE line is queued during the match', met);
   ok(r(`PVP.hand.match = { bestOf: 5 }; const out = PVP.bestOf(); delete PVP.hand.match; out`) === 5,
      'a match the server made best of five (ranked, gold and up) is best of five');
   ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'gold', bestOf: 5 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
