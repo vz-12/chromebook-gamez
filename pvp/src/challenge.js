@@ -34,6 +34,16 @@
    words of their own in the vault, named by `npm run challenge -- announce
    <pilot> <words>`, JSON { "t": "title", "x": "text", "as": "the pilot's
    name, shown", "named": false to keep the other player's name off it }.
+
+   FROM ABOVE: from the moment a challenge is sent until its fight is fought
+   out, the game's runs are hunted (index.html, FROM ABOVE), and /api/live
+   says so (`above`). Fought out is a match played to its end, whoever won
+   it: the referee's verdict notes when (`decided`) and which way
+   (`outcome`: 'lost' or 'won', the challenged account's side of it). A
+   match one side walked out of decides nothing by itself, and the queue
+   makes it again; the dev may decide it by hand, or take a decision back
+   (`npm run challenge -- decide`), and may hold the hunt at any time
+   (`npm run challenge -- calm`).
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
 import { vaultText, PERK } from '../../src/vault.js';
@@ -57,10 +67,14 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      match       TEXT,                     -- the match the queue made between the two, the latest
      started     INTEGER,                  -- when it was made
      ended       INTEGER,                  -- when the referee decided it
-     announce    TEXT                      -- the vault entry its announcement is kept in
+     announce    TEXT,                     -- the vault entry its announcement is kept in
+     decided     INTEGER,                  -- when its fight was fought out (played to its end), or decided by hand
+     outcome     TEXT,                     -- which way: 'lost' or 'won', as it went for the account it was sent to
+     calm        INTEGER                   -- when the hunt was held, by hand (FROM ABOVE); NULL while it is not
    )`;
 // columns added after the table first shipped, as records.js does
-const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT']];
+const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
+               ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -162,16 +176,27 @@ export async function challengeBegun(db, pilot, target, match, now = Date.now())
   await db.prepare('UPDATE pvp_challenges SET match = ?3, started = ?4, ended = NULL WHERE pilot = ?1 AND target = ?2')
     .bind(pilot, target, match, now).run();
 }
-// and the referee has decided it (objects.js, Match): off air
-export async function challengeEnded(db, match, now = Date.now()) {
+/* And the referee has decided it (objects.js, Match): off air. `winner` is
+   the account that won a match played to its end, and null for any other
+   verdict (a walk-out, a void, nobody there). A match played out decides
+   the challenge, once, whichever way it went (an UPDATE reads the row as it
+   was: one already decided keeps its decision). */
+export async function challengeEnded(db, match, now = Date.now(), winner = null) {
   await ensureChallenges(db);
-  await db.prepare('UPDATE pvp_challenges SET ended = ?2 WHERE match = ?1 AND ended IS NULL').bind(match, now).run();
+  await db.prepare(
+    `UPDATE pvp_challenges SET ended = ?2,
+            decided = CASE WHEN ?3 IS NULL OR decided IS NOT NULL THEN decided ELSE ?2 END,
+            outcome = CASE WHEN ?3 IS NULL OR decided IS NOT NULL THEN outcome WHEN ?3 = target THEN 'won' ELSE 'lost' END
+      WHERE match = ?1 AND ended IS NULL`).bind(match, now, winner).run();
 }
 
 /* For the game's public GET /api/live (src/live.js), which never makes
    PvP's tables: what is on now, and how long before it is worth asking
    again.
-     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every }
+     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every, above }
+   `above` is whether the game's runs are hunted now (FROM ABOVE): a
+   challenge has been sent, its fight has not been fought out, and the hunt
+   is not held.
    `every` (seconds) is short while a challenge is on or due: one has been
    sent and not yet fought out (or was, within the last few hours: a match
    that never got going is made again), and its date, if it has one, is
@@ -180,13 +205,19 @@ export async function challengeEnded(db, match, now = Date.now()) {
    words: the match is still on, under a plain title. */
 export async function liveNow(db, now = Date.now()) {
   let rows = [];
+  const sent = cols => db.prepare(
+    `SELECT c.pilot, c.match, c.started, c.ended, c.due, c.target, c.announce${cols}, a.display AS them
+       FROM pvp_challenges c LEFT JOIN accounts a ON a.id = c.target WHERE c.target IS NOT NULL`).all();
   try {
-    rows = (await db.prepare(
-      `SELECT c.pilot, c.match, c.started, c.ended, c.due, c.target, c.announce, a.display AS them
-         FROM pvp_challenges c LEFT JOIN accounts a ON a.id = c.target WHERE c.target IS NOT NULL`).all()).results || [];
+    rows = (await sent(', c.decided, c.calm')).results || [];
   } catch (e) {
-    return { live: null, every: LIVE.IDLE };              // no table yet (or no columns): nothing has ever been on
+    /* A table from before those two columns (PvP's Worker adds them on its
+       first use; the game's never does): nothing in it was ever decided or
+       held, so its rows read true without them. */
+    try { rows = (await sent('')).results || []; }
+    catch (e2) { return { live: null, every: LIVE.IDLE, above: false }; }   // no table yet (or no columns): nothing has ever been on
   }
+  const above = rows.some(r => !r.decided && !r.calm);
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
     if (r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
@@ -198,7 +229,7 @@ export async function liveNow(db, now = Date.now()) {
     const wait = (r.due - LIVE.SOON - now) / 1000;
     if (now < r.due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
   }
-  if (!on) return { live: null, every };
+  if (!on) return { live: null, every, above };
   let w = null;
   try {
     const got = on.announce ? await vaultText(db, on.announce) : null;
@@ -211,6 +242,6 @@ export async function liveNow(db, now = Date.now()) {
   return {
     live: { match: on.match, since: on.started, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
             names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
-    every: LIVE.ASK
+    every: LIVE.ASK, above
   };
 }

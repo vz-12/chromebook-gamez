@@ -79,7 +79,9 @@ const HARNESS = `(() => {
       hazards.map(h => [h.kind, ...pk(h, ['x', 'y', 'r'])]), Object.entries(P.up || {}).sort(),
       RUN_FLAGS.map(k => r(RUN[k])),
       // an outside pilot's own state, on the pilot and the run's share (OUTSIDE PILOTS)
-      P.ox || null, outsideWorld]);
+      P.ox || null, outsideWorld,
+      // and what is coming for the run (FROM ABOVE): its stream, its clock, its marks
+      [aboveRng, r(aboveNext), aboveMarks.map(m => pk(m, ['x', 'y', 't', 'after', 'k', 'took']))]]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -240,6 +242,13 @@ const S = [
     starter: "hlP().q.q3 = 2; hlAreaStart('house'); hlArea.n = 4; wave = HL_AREAS.house.waveFrom + 3; betweenWaves = 0.5" },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
   { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
+  /* A run that is hunted (FROM ABOVE): from its first sector and every few
+     seconds here, aimed at where the hull is, so that many are aimed and
+     land in five minutes and the bot, which never stands still for long,
+     mostly lives through them. (The numbers stay changed in this copy of
+     the game; no other scenario's run is hunted, so none reads them.) */
+  { name: 'above',      char: 'runner', seed: 118, steps: 18000,
+    starter: 'RUN.above = true; ABOVE.from = 1; ABOVE.gap = [4, 9]; ABOVE.lead = 0; aboveBegin()' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {

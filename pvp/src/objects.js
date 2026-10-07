@@ -148,11 +148,13 @@ export class Match extends Serial {
        shows it to anyone (hidden.js). It counts as written, so nothing waits on it. */
     if (v && m.hidden) { v.written = true; v.rated = true; }
     /* And a hidden pilot's challenge, if this was its match, goes off air
-       (challenge.js): once, whatever the verdict. A failed write leaves it to
-       the live flag's own limit (LIVE.MAX). */
+       (challenge.js): once, whatever the verdict. A match played to its end
+       also decides it, for whoever won. A failed write leaves it to the
+       live flag's own limit (LIVE.MAX). */
     if (v && m.hidden && !v.aired) {
       v.aired = true;
-      await challengeEnded(this.env.DB, m.id, now).catch(e => console.error('pvp challenge end', m.id, e && e.message));
+      const won = v.v === 'played' && m.sides[v.winner] ? m.sides[v.winner].acct : null;
+      await challengeEnded(this.env.DB, m.id, now, won).catch(e => console.error('pvp challenge end', m.id, e && e.message));
     }
     if (v && recorded(v.v) && !v.written) {
       try { await recordMatch(this.env.DB, m, v); v.written = true; }
