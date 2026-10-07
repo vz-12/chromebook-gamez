@@ -424,6 +424,40 @@ npm run challenge -- date <pilot> 2026-11-14T18:00Z --remote   # or none
 npm run challenge -- list --remote             # tripped by whom, sent to whom, seen yet; also: cancel
 ```
 
+**Live spectating** (the challenge's match, watched in-game; the trailer's
+replay). Viewers get the fighters' inputs, not video. Each viewer's own copy
+of the game plays the fight, as the two fighters' machines already do in
+lockstep.
+- **The relay** is a `Broadcast` Durable Object per match
+  (`pvp/src/broadcast.js`, migration `v2` in `pvp/wrangler.jsonc`). It keeps
+  the header, both pilots' inputs in batches with the game's fingerprints,
+  a snapshot of the whole fight now and then, and the end. It never deletes
+  any of it: the stored log is the replay.
+- **`/api/pvp/watch`** (`pvp/src/watch.js`): only the account flying the
+  hidden pilot in that match may feed it. Anyone may watch (`GET
+  ?match=<id>&from=<step>`), with no account. Viewers poll, and the relay
+  tells each how long to wait: a second, longer once there are more than
+  60 viewers.
+- **On air:** when the queue makes the challenge's match, `pvp_challenges`
+  notes it, and the referee's verdict ends it. Meanwhile the game Worker's
+  public `GET /api/live` (`src/live.js`) names the match and gives the
+  announcement. It also tells the game how often to ask: every minute while
+  a challenge is out and near its date, otherwise every 15 minutes. The
+  announcement's words are a vault entry of their own, kept out of the repo:
+
+```sh
+npm run vault -- put <entry> <file> --remote     # { "t": "title", "x": "text", "as": "the pilot's name as shown", "named": false hides the other player's name }
+npm run challenge -- announce <pilot> <entry> --remote   # or none
+```
+
+- **The pilot's code goes public** once its match is on air. Anyone naming
+  the broadcast is handed it (`/api/pvp/pilot?id=<id>&watch=<match>`),
+  because every viewer's game has to run it.
+- **The replay:** `GET /api/pvp/watch?match=<id>&replay=1` downloads the
+  whole log as a file, for dev accounts and the pilot's holders only. It
+  only plays on the exact build it was recorded on, so tag the commit on
+  fight day.
+
 ## Ads
 
 The game has room for one Google AdSense banner. It sits across the top of the
@@ -595,6 +629,14 @@ both machines as it goes, so a drawing error fails it too.
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the
   100,000 Worker requests a day. Co-op rooms poll about every 0.6 s while two
   players are connecting, so co-op is the heaviest user of that allowance.
+- **A live broadcast is the biggest single use of it.** Every viewer polls
+  `/api/pvp/watch`, and each poll is one Worker request and one Durable
+  Object request (the Free plan allows 100,000 of each a day, for the whole
+  account). The relay holds all its viewers together to about 60 requests
+  a second (up to 300 viewers, each then asking every 5 s), so a 10-minute
+  fight costs about 36,000 of each. If the daily limit runs out, every `/api/*` call on the account
+  fails with Error 1027 until midnight UTC, the match's own referee
+  included. Workers Paid ($5/month) has no daily limit.
 - **D1:** 5 GB, 5 million rows read and 100,000 rows written a day. Stale co-op
   rooms are swept out automatically.
 - **CPU:** 10 ms per request. Ordinary API calls are light: mostly waiting on

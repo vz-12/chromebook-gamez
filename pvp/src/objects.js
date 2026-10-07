@@ -18,7 +18,7 @@
 import { REF, cleanReport, newSide, take, decide, nextLook, recorded } from './referee.js';
 import { recordMatch, applyRating, topOf } from './records.js';
 import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
-import { TOP_LEAGUE, tripChallenges, targetOf } from './challenge.js';
+import { TOP_LEAGUE, tripChallenges, targetOf, challengeBegun, challengeEnded } from './challenge.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -26,8 +26,8 @@ const reply = (body, status = 200) =>
 const post = (stub, path, body) =>
   stub.fetch('https://do/' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-// an object's changes, one after another, whatever each waits on
-class Serial {
+// an object's changes, one after another, whatever each waits on (the relay's too: broadcast.js)
+export class Serial {
   constructor(ctx, env) { this.ctx = ctx; this.env = env; this.chain = Promise.resolve(); }
   one(f) {
     const p = this.chain.then(f);
@@ -101,11 +101,13 @@ export class Match extends Serial {
       return this.save(m, now, null, side);
     }
     /* Who the other side flies, for the Worker handing a hidden pilot's code
-       to its opponent (hidden.js). Only the Worker asks this. */
+       to its opponent (hidden.js); and what this side flies, for the relay
+       taking a broadcast only from the side flying a hidden pilot (watch.js).
+       Only the Worker asks this. */
     if (op === 'peer') {
       if (side < 0) return reply({ error: 'not your match' }, 403);
       const other = m.sides[1 - side];
-      return reply({ ok: true, side, peerPilot: other ? other.pilot : null });
+      return reply({ ok: true, side, pilot: m.sides[side].pilot, peerPilot: other ? other.pilot : null });
     }
     /* A queued match's room: the host opens one and leaves its code here,
        and the guest asks for it, so nobody types a code. */
@@ -145,6 +147,13 @@ export class Match extends Serial {
        result screen, and written nowhere: no ladder, profile or history
        shows it to anyone (hidden.js). It counts as written, so nothing waits on it. */
     if (v && m.hidden) { v.written = true; v.rated = true; }
+    /* And a hidden pilot's challenge, if this was its match, goes off air
+       (challenge.js): once, whatever the verdict. A failed write leaves it to
+       the live flag's own limit (LIVE.MAX). */
+    if (v && m.hidden && !v.aired) {
+      v.aired = true;
+      await challengeEnded(this.env.DB, m.id, now).catch(e => console.error('pvp challenge end', m.id, e && e.message));
+    }
     if (v && recorded(v.v) && !v.written) {
       try { await recordMatch(this.env.DB, m, v); v.written = true; }
       catch (e) { console.error('pvp record', m.id, e && e.message); }
@@ -296,6 +305,11 @@ export class Matchmaker extends Serial {
         sides: [t, u].map(x => ({ acct: x.acct, name: x.name, pilot: x.pilot }))
       }).catch(e => { console.error('pvp match create', e && e.message); return null; });
       if (!res || !res.ok) continue;      // both wait on, and are tried again at the next beat
+      // a hidden pilot's match with the one its challenge went to: that challenge is on air (challenge.js)
+      if (hidden) {
+        const [h, o] = t.hidden ? [t, u] : [u, t];
+        await challengeBegun(this.env.DB, h.pilot, o.acct, id, now).catch(e => console.error('pvp challenge on', id, e && e.message));
+      }
       // the match as each player is told it: the rules it flies, and both sides, never an account
       const sides = [t, u].map(x => ({ name: x.name, pilot: x.pilot, awake: !!x.awake, ups: x.ups || [] }));
       const league = { id: rule.id, n: rule.n, bestOf: rule.bestOf, pilots: rule.pilots, awake: rule.awake };

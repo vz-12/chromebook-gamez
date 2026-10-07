@@ -10,8 +10,12 @@
      - in ranked it is paired with the season's #1 and nobody else (objects.js)
      - its matches are never rated nor recorded (objects.js): no ladder,
        profile or history shows it to anyone who has not faced it
+     - once a match it flies in is on air (broadcast.js), everybody watching
+       runs it too: from then on its text goes to anyone, signed in or not,
+       who names that broadcast (`watch`). This is the moment its code stops
+       being secret, and it cannot be otherwise: every viewer's game plays it.
 
-     GET /api/pvp/pilot?id=<id>[&match=<match id>]
+     GET /api/pvp/pilot?id=<id>[&match=<match id>][&watch=<match id>]
          -> the module's text (text/javascript, x-vault-hash), or the 404 a
             missing id gets, to everyone else alike
    ========================================================================= */
@@ -30,6 +34,14 @@ export default async function pilot(req, env) {
   if (req.method !== 'GET') return nothing();
   const u = new URL(req.url), id = u.searchParams.get('id') || '', mid = u.searchParams.get('match') || '';
   if (!isHidden(id)) return nothing();
+  // a broadcast of a match it flies in: its viewers, whoever they are (broadcast.js, info)
+  const wid = u.searchParams.get('watch') || '';
+  if (/^[0-9a-f]{32}$/.test(wid) && env.BROADCAST) {
+    const res = await env.BROADCAST.get(env.BROADCAST.idFromName(wid)).fetch('https://broadcast/info', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const d = res.ok ? await res.json().catch(() => null) : null;
+    return d && d.on && d.pilot === id ? text(env, id) : nothing();
+  }
   const s = await sessionOf(req, env, { peek: true });
   if (!s) return nothing();
   // its holders; or the other side of a match it flies in, asked of that match itself
@@ -41,6 +53,10 @@ export default async function pilot(req, env) {
     ok = !!(d && d.peerPilot === id);
   }
   if (!ok) return nothing();
+  return text(env, id);
+}
+
+async function text(env, id) {
   const got = await vaultText(env.DB, id);
   if (!got) return nothing();
   return new Response(got.text, {

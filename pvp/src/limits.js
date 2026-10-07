@@ -1,7 +1,8 @@
 /* ===========================================================================
    Per-account request limits on PvP's busy routes (PVP-PLAN.md, Phase 5
    step 4): the queue (/api/pvp/queue), the referee (/api/pvp/match), and
-   opening a friend's match.
+   opening a friend's match; and a broadcast's feed and its viewers, by
+   address, since they have no account (/api/pvp/watch).
 
    Counted in this Worker instance's memory: free, no storage, approximate.
    Each Cloudflare location and instance counts on its own, and a restart
@@ -15,7 +16,13 @@
 export const LIMITS = {
   queue: { n: 90, ms: 60 * 1000 },        // join, poll, leave
   match: { n: 120, ms: 60 * 1000 },       // open, join, report, code
-  open: { n: 30, ms: 10 * 60 * 1000 }     // friend's matches opened (each is a new object)
+  open: { n: 30, ms: 10 * 60 * 1000 },    // friend's matches opened (each is a new object)
+  /* A broadcast's feed (watch.js), from the one machine allowed it: a batch
+     every half second and a snapshot every fifteen, with room to catch up. */
+  feed: { n: 600, ms: 60 * 1000 },
+  /* And its viewers, who have no account: by address. A viewer asks about
+     once a second, and a school's Chromebooks can share one address. */
+  view: { n: 1200, ms: 60 * 1000 }
 };
 const MAX_KEYS = 5000;
 const seen = new Map();

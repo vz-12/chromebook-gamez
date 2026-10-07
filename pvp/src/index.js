@@ -14,7 +14,10 @@
      /api/pvp/match   a match's referee: the Match object (match.js, objects.js)
      /api/pvp/queue   matchmaking: the Matchmaker object, one per queue (queue.js, objects.js)
      /api/pvp/flags   the referee's flags, for dev accounts to review (flags.js)
-     /api/pvp/pilot   a hidden pilot's code, to its holders and its opponents (hidden.js)
+     /api/pvp/pilot   a hidden pilot's code, to its holders, its opponents and
+                      the viewers of a match it flies in (hidden.js)
+     /api/pvp/watch   a match on air: the feed in, viewers out, the replay
+                      (watch.js; the log is the Broadcast object, broadcast.js)
      /api/vault       the game's vault, as the game has it (../../src/vault.js)
      everything else  pvp/site
 
@@ -33,11 +36,13 @@ import match from './match.js';
 import queue from './queue.js';
 import flags from './flags.js';
 import pilot from './hidden.js';
+import watch from './watch.js';
 import vault from '../../src/vault.js';
 import { closeSeasons } from './seasons.js';
 import { tripChallenges } from './challenge.js';
 
 export { Matchmaker, Match } from './objects.js';
+export { Broadcast } from './broadcast.js';
 
 const json = (body, status) =>
   new Response(JSON.stringify(body), {
@@ -47,7 +52,7 @@ const json = (body, status) =>
 
 const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn,
                  '/api/pvp/match': match, '/api/pvp/queue': queue, '/api/pvp/flags': flags,
-                 '/api/pvp/pilot': pilot, '/api/vault': vault };
+                 '/api/pvp/pilot': pilot, '/api/pvp/watch': watch, '/api/vault': vault };
 
 export default {
   async fetch(req, env) {

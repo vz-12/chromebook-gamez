@@ -1047,6 +1047,217 @@ section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOI
   tool(cancelSql('x8'));
 }
 
+section('live spectating: a challenge\'s match on air, its relay, /api/live and the replay');
+{
+  const { Broadcast, KEEP, VIEW } = await import('../pvp/src/broadcast.js');
+  const { armSql, dateSql, cancelSql, announceSql, columnsSql, addedSql, challengesSql } = await import('./lib/challenge-sql.mjs');
+  const { putSql } = await import('./lib/vault-sql.mjs');
+  const { tripChallenges, ensureChallenges, liveNow, LIVE, CHALLENGE_ADDED } = await import('../pvp/src/challenge.js');
+  const { forgetLive } = await import('../src/live.js');
+  const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
+  ok(/"name":\s*"BROADCAST",\s*"class_name":\s*"Broadcast"/.test(cfg) && /"tag":\s*"v2",\s*"new_sqlite_classes":\s*\["Broadcast"\]/.test(cfg),
+     'the Worker binds the Broadcast object as BROADCAST, SQLite-backed, in a migration of its own (v2)');
+  envPvp.BROADCAST = makeNamespace(Broadcast, envPvp);
+  const tool = sql => {
+    let rows = [];
+    for (const s of sql.split(/;\s*\n/).map(x => x.replace(/;\s*$/, '').trim()).filter(Boolean)) {
+      const st = DB.sql.prepare(s);
+      rows = /^(SELECT|PRAGMA)/i.test(s) ? st.all() : (st.run(), []);
+    }
+    return rows;
+  };
+  const now = Date.now(), cur = seasonOf(now);
+  let n = 0;
+  const mk = (name, perks = []) => {
+    const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), ip = '198.51.100.' + (170 + n++);
+    DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+      .run(id, name.toLowerCase(), name, '-', '-', JSON.stringify(perks), now - 3 * 864e5, now);
+    DB.sql.prepare("INSERT INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{\"runs\":25}', 'null', ?)").run(id, now);
+    DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)').run(sha(token), id, now, now, now + 864e5);
+    const p = tab(PVP, ip);
+    p.cookie = token;
+    return { id, pvp: p };
+  };
+  const H = mk('L_Holder', ['vault:x7']), T = mk('L_Top'), S = mk('L_Stranger'), D = mk('L_Dev', ['dev']);
+  DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+                  VALUES (?, 'ranked', ?, 3000, 60, 0.06, 30, 25, 5, 'void', ?)`).run(T.id, cur, now - 60000);
+  const pilotCode = '/* the hidden pilot, as the vault keeps it */';
+  tool(putSql('x7', Buffer.from(pilotCode)).sql);
+  tool(putSql('x7-words', Buffer.from(JSON.stringify({ t: 'A CHALLENGE', x: 'Come and find out.' }))).sql);
+  tool(putSql('x7-air', Buffer.from(JSON.stringify({ t: 'ON AIR', x: 'The first to VOID meets it.', as: 'THE GUEST' }))).sql);
+  const row = () => DB.sql.prepare("SELECT * FROM pvp_challenges WHERE pilot = 'x7'").get() || null;
+  const gameLive = async () => {
+    forgetLive();
+    const res = await main.fetch(new Request(GAME + '/api/live', { headers: { 'cf-connecting-ip': '203.0.113.9' } }), envMain);
+    return { status: res.status, cache: res.headers.get('cache-control'), d: await res.json() };
+  };
+  const anon = tab(PVP, '203.0.113.60');
+
+  // before anything is sent: nothing on, and nothing to ask about for a quarter of an hour
+  let g = await gameLive();
+  ok(g.status === 200 && g.d.live === null && g.d.every === LIVE.IDLE && /public, max-age=30/.test(g.cache),
+     '/api/live, open to anyone: nothing on air, ask again in fifteen minutes; cached thirty seconds', g);
+  tool(armSql('x7', 'x7-words'));
+  await tripChallenges(DB);
+  ok(row().target === T.id, 'a challenge armed and sent, to the top of ranked', row());
+  g = await gameLive();
+  ok(g.d.live === null && g.d.every === LIVE.ASK, 'sent, with no date yet: the game asks every minute', g.d);
+  tool(dateSql('x7', now + 3 * 864e5));
+  ok((await liveNow(DB, now)).every === LIVE.IDLE, 'its date days away: every fifteen minutes');
+  ok((await liveNow(DB, now + 3 * 864e5 - 40 * 60e3)).every === 600, 'forty minutes before it: until half an hour before it');
+  ok((await liveNow(DB, now + 3 * 864e5 - 10 * 60e3)).every === LIVE.ASK, 'within half an hour of it: every minute');
+  ok((await liveNow(DB, now + 3 * 864e5 + 7 * 3600e3)).every === LIVE.IDLE, 'and long past it, never fought: back to fifteen');
+  tool(dateSql('x7', null));
+
+  // the queue makes the challenge's match: on air from then
+  const q = (who, b) => who.pvp.call('POST', '/api/pvp/queue', Object.assign({ queue: 'ranked' }, b));
+  ok((await q(H, { op: 'join', pilot: 'x7' })).d.state === 'waiting', 'its holder queues it');
+  const tj = await q(T, { op: 'join', pilot: 'runner' });
+  const hp = await q(H, { op: 'poll' }), tp = tj.d.state === 'matched' ? tj : await q(T, { op: 'poll' });
+  const mid = hp.d.match && hp.d.match.id;
+  ok(mid && tp.d.match && tp.d.match.id === mid && hp.d.match.side === 0, 'the one it went to queues: their match, the pilot\'s side hosting', [hp.d, tp.d]);
+  ok(row().match === mid && row().started > 0 && row().ended === null, 'and the challenge notes it: which match, since when', row());
+  g = await gameLive();
+  ok(g.d.live && g.d.live.match === mid && g.d.live.t === '' && g.d.live.x === '' && g.d.live.names.join() === '???,L_Top' && g.d.every === LIVE.ASK,
+     'on air, though nothing announced yet: the match, both sides (the pilot\'s unnamed), a plain title', g.d);
+  ok(tool(announceSql('x7', 'x7-air')) && row().announce === 'x7-air', 'announced by hand (npm run challenge -- announce)');
+  g = await gameLive();
+  ok(g.d.live.t === 'ON AIR' && g.d.live.x === 'The first to VOID meets it.' && g.d.live.names.join() === 'THE GUEST,L_Top' && g.d.live.since === row().started,
+     'now with its words, and the pilot named as the words name it', g.d.live);
+  ok(!JSON.stringify(g.d).includes(T.id) && !JSON.stringify(g.d).includes(H.id) && !JSON.stringify(g.d).includes('x7'),
+     'and nothing more: no account, not the pilot\'s id');
+  tool(putSql('x7-air', Buffer.from(JSON.stringify({ t: 'ON AIR', x: 'Unnamed.', as: 'THE GUEST', named: false }))).sql);
+  ok((await liveNow(DB)).live.names.join() === 'THE GUEST,', 'words saying named: false keep the other player\'s name off it');
+  ok(tool(columnsSql()).map(r => r.name).join().includes('announce') && addedSql(tool(columnsSql()).map(r => r.name)) === '',
+     'the tool finds every column there');
+
+  // the pilot's code: nobody watching yet, so nobody is handed it
+  const code = (who, qs) => who.call('GET', '/api/pvp/pilot?' + qs);
+  ok((await code(anon, 'id=x7&watch=' + mid)).status === 404, 'before the match is on air, naming it hands nobody the pilot');
+
+  // the feed: only the side flying the hidden pilot
+  const head = { v: 1, match: { queue: 'ranked', bestOf: 1, sides: [{ name: 'L_Holder', pilot: 'x7' }, { name: 'L_Top', pilot: 'runner' }] }, run: { seed: 7 } };
+  const feed = (who, b) => who.call('POST', '/api/pvp/watch', Object.assign({ match: mid }, b));
+  ok((await feed(anon, { op: 'head', head, build: 'b1.x' })).status === 401, 'signed out: refused');
+  ok((await feed(S.pvp, { op: 'head', head, build: 'b1.x' })).status === 403, 'not in the match: refused');
+  ok((await feed(T.pvp, { op: 'head', head, build: 'b1.x' })).status === 403, 'the other side, flying one of the game\'s pilots: refused');
+  ok((await feed(H.pvp, { op: 'head', head, build: 'not a build!' })).status === 400, 'a malformed build: refused');
+  const h1 = await feed(H.pvp, { op: 'head', head, build: 'b1.x' });
+  ok(h1.status === 200 && h1.d.next === 0, 'the side flying the hidden pilot, its own to fly: on air', h1);
+  ok((await feed(H.pvp, { op: 'head', head, build: 'b1.x' })).d.next === 0, 'the same header again is no change');
+  const got = await code(anon, 'id=x7&watch=' + mid);
+  ok(got.status === 200 && got.d === pilotCode, 'from now on its code goes to anybody watching, signed in or not', got.status);
+  ok((await code(anon, 'id=x8&watch=' + mid)).status === 404 && (await code(anon, 'id=x7&watch=' + 'f'.repeat(32))).status === 404,
+     'but only that pilot, and only for a broadcast it flies in');
+
+  // batches: in order, nothing skipped, each taken once
+  const recs = steps => Buffer.alloc(steps * 22, 7).toString('base64');
+  const fpsOf = (from, steps) => { const o = []; for (let s = Math.ceil(from / 60) * 60; s < from + steps; s += 60) if (s) o.push([0, s, (s * 2654435761) >>> 0]); return o; };
+  const put = (from, steps, who = H) => feed(who.pvp, { op: 'in', from, n: steps, recs: recs(steps), fps: fpsOf(from, steps) });
+  ok((await put(0, 30, T)).status === 403, 'the other side cannot add to it');
+  let r = await put(0, 30);
+  ok(r.status === 200 && r.d.next === 30, 'a batch: thirty steps', r);
+  ok((await put(0, 30)).d.next === 30, 'sent twice, taken once');
+  r = await put(60, 30);
+  ok(r.status === 409 && r.d.need === 30, 'one that skips steps is refused, with where to start', r);
+  ok((await feed(H.pvp, { op: 'in', from: 30, n: 30, recs: 'not base64!', fps: [] })).status === 400
+     && (await feed(H.pvp, { op: 'in', from: 30, n: 30, recs: recs(30), fps: [[0, 999, 1]] })).status === 400
+     && (await feed(H.pvp, { op: 'in', from: 30, n: 30, recs: recs(30 * 10), fps: [] })).status === 400, 'malformed records or fingerprints: refused');
+  for (let s = 30; s < 2400; s += 30) await put(s, 30);
+  ok((await feed(H.pvp, { op: 'snap', at: 9999, epoch: 0, json: '{}' })).status === 400, 'a snapshot of a step not yet sent: refused');
+  const big = JSON.stringify({ fight: 'x'.repeat(KEEP.PART * 2 + 500) });
+  ok((await feed(H.pvp, { op: 'snap', at: 900, epoch: 0, json: '{"early":1}' })).status === 200
+     && (await feed(H.pvp, { op: 'snap', at: 2100, epoch: 0, json: big })).status === 200, 'snapshots, one bigger than a stored piece');
+  ok((await feed(H.pvp, { op: 'snap', at: 1500, epoch: 0, json: '{}' })).status === 409, 'and never one older than the last');
+
+  // viewers: anyone, no account
+  const look = async (qs, ip = '203.0.113.61') => {
+    const res = await pvp.fetch(new Request(PVP + '/api/pvp/watch?match=' + mid + qs, { headers: { 'cf-connecting-ip': ip } }), envPvp);
+    return { status: res.status, d: await res.json() };
+  };
+  let v = await look('&v=' + '1'.repeat(16));
+  ok(v.status === 200 && JSON.stringify(v.d.head) === JSON.stringify(head) && v.d.snap && v.d.snap.at === 2100 && v.d.snap.json === big,
+     'a newcomer: the header and the latest snapshot, whole again', [v.status, v.d.snap && v.d.snap.at]);
+  ok(v.d.from === 2100 && v.d.batches[0].from <= 2100 && v.d.batches[0].from + v.d.batches[0].n > 2100
+     && v.d.batches[v.d.batches.length - 1].from + v.d.batches[v.d.batches.length - 1].n - 1 === 2399 && v.d.last === 2399 && v.d.end === null,
+     'and the steps from there to the latest', [v.d.from, v.d.batches.length, v.d.last]);
+  ok(v.d.every === VIEW.BASE_MS, 'asked to come back in a second', v.d.every);
+  v = await look('&from=2300');
+  ok(!v.d.head && !v.d.snap && v.d.batches[0].from === 2280 && v.d.batches.length === 4 && v.d.batches.every(b => b.fps.every(f => f[1] >= b.from && f[1] < b.from + b.n)),
+     'one keeping up: only the steps since, with their fingerprints', v.d.batches.map(b => b.from));
+  v = await look('&from=200');
+  ok(v.d.snap && v.d.snap.at === 2100 && v.d.from === 2100, 'one far behind the latest snapshot is given it', v.d.from);
+  v = await look('&from=1000');
+  ok(!v.d.snap && v.d.from === 1000 && v.d.batches.reduce((a, b) => a + b.n, 0) <= VIEW.MOST + 30, 'one a little behind plays on, a stretch at a time', v.d.batches.length);
+  v = await look('&from=2350&snap=1');
+  ok(v.d.snap && v.d.snap.at === 2100, 'and one whose game parted from the fight asks for the snapshot', v.d.from);
+  ok((await look('&from=nonsense')).d.head, 'a nonsense step is a newcomer');
+  ok((await look('')).status === 200 && (await pvp.fetch(new Request(PVP + '/api/pvp/watch?match=nope'), envPvp)).status === 400, 'a malformed match: refused');
+  const none = await pvp.fetch(new Request(PVP + '/api/pvp/watch?match=' + 'e'.repeat(32)), envPvp);
+  ok(none.status === 404, 'a match not on air: nothing to watch', none.status);
+
+  // a crowd: each viewer told to wait longer, so all of them together ask about PER times a second
+  for (let i = 0; i < VIEW.PER + 5; i++) await look('&from=2390&v=' + i.toString(16).padStart(16, 'a'));
+  v = await look('&from=2390');
+  ok(v.d.every === VIEW.BASE_MS * 2, VIEW.PER + 6 + ' viewers: every two seconds', v.d.every);
+  // all from memory: a hundred polls read nothing from storage
+  const reads = envPvp.BROADCAST.reads;
+  for (let i = 0; i < 100; i++) await look('&from=' + (2000 + i));
+  ok(envPvp.BROADCAST.reads === reads, 'a hundred polls, no storage read', envPvp.BROADCAST.reads - reads);
+  // and gone out of memory, it reads its log back, the same
+  const before = await look('&from=-1');
+  envPvp.BROADCAST.evict(mid);
+  const after = await look('&from=-1');
+  delete before.d.every; delete after.d.every;
+  ok(JSON.stringify(before.d) === JSON.stringify(after.d) && envPvp.BROADCAST.reads > reads, 'woken again, it reads its log back and answers the same');
+
+  // the end, and the referee: off air
+  ok((await feed(H.pvp, { op: 'end', at: 2400, result: { winner: 0, score: [1, 0] } })).status === 200, 'the end');
+  v = await look('&from=2390');
+  ok(v.d.end && v.d.end.at === 2400 && v.d.end.result.winner === 0 && v.d.end.result.score.join() === '1,0', 'the viewers are told', v.d.end);
+  ok((await H.pvp.call('POST', '/api/pvp/match', { op: 'report', id: mid, report: { left: true } })).status === 200, 'the holder leaves the match');
+  ok(row().ended > 0, 'the referee decides it, and the challenge notes it', row());
+  g = await gameLive();
+  ok(g.d.live === null, 'off air', g.d);
+  ok((await code(anon, 'id=x7&watch=' + mid)).status === 200, 'its broadcast stays, and with it the pilot for whoever watches it back');
+
+  // the replay: the whole log, to dev accounts and the pilot's holders
+  const keep = async who => {
+    const res = await pvp.fetch(new Request(PVP + '/api/pvp/watch?match=' + mid + '&replay=1',
+      { headers: who ? { cookie: 'vr_s=' + who.pvp.cookie } : {} }), envPvp);
+    return { status: res.status, file: res.headers.get('content-disposition') || '', d: await res.json().catch(() => null) };
+  };
+  ok((await keep(null)).status === 401 && (await keep(T)).status === 403 && (await keep(S)).status === 403, 'nobody else: not signed out, not its opponent, not a stranger');
+  const rh = await keep(H), rd = await keep(D);
+  ok(rh.status === 200 && /attachment; filename="voidrunner-[0-9a-f]{8}\.replay\.json"/.test(rh.file), 'its holder downloads it, as a file', rh.file);
+  ok(rh.d.batches.length === 80 && rh.d.batches[79].from === 2370 && rh.d.snaps.length === 2 && rh.d.snaps[1].json === big
+     && rh.d.end.at === 2400 && rh.d.build === 'b1.x' && rh.d.pilot === 'x7' && JSON.stringify(rh.d.head) === JSON.stringify(head),
+     'the whole of it: header, every batch and snapshot, the end, the build it plays on', [rh.d.batches.length, rh.d.snaps.length]);
+  ok(rd.status === 200 && rd.d.batches.length === 80, 'and so does a dev account');
+
+  // a log has a size it stops at
+  const was = KEEP.MAX;
+  KEEP.MAX = 0;
+  ok((await put(2400, 30)).status === 413, 'full: refused');
+  KEEP.MAX = was;
+
+  // made again (the last never got going): the new match takes its place
+  const { challengeBegun } = await import('../pvp/src/challenge.js');
+  await challengeBegun(DB, 'x7', T.id, 'a'.repeat(32));
+  ok(row().match === 'a'.repeat(32) && row().ended === null, 'a challenge\'s match made again is the one on air');
+  ok(tool(challengesSql()).find(x => x.pilot === 'x7').announce === 'x7-air', 'and the tool lists it with its announcement and match');
+
+  // a table made before the columns: PvP's Worker adds them, and the tool can too
+  const { makeD1 } = await import('./lib/d1-sqlite.mjs');
+  const old = makeD1();
+  old.sql.exec('CREATE TABLE pvp_challenges (pilot TEXT PRIMARY KEY, words TEXT NOT NULL, armed INTEGER NOT NULL, due INTEGER, tripped INTEGER, reached_by TEXT, season TEXT, target TEXT, seen INTEGER)');
+  const have = () => old.sql.prepare('PRAGMA table_info(pvp_challenges)').all().map(c => c.name);
+  ok(addedSql(have()).split('\n').length === CHALLENGE_ADDED.length, 'an old table lacks the new columns: the tool would add every one');
+  await ensureChallenges(old);
+  ok(CHALLENGE_ADDED.every(([c]) => have().includes(c)), 'PvP\'s Worker adds them on its own first use');
+  tool(cancelSql('x7'));
+}
+
 section('hardening: per-account limits on the busy routes');
 {
   forget();

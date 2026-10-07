@@ -11,19 +11,25 @@
                               Armed again, only the words change.
      date <pilot> <when>      the date it names, ISO with its zone
                               (2026-11-14T18:00Z), or none
+     announce <pilot> <words> what the game's menu says while its match is
+                              on air (src/live.js), from a vault entry of
+                              its own, or none
      cancel <pilot>           gone, sent or not; arm it again to start over
      list                     every challenge: armed, tripped by whom, sent
-                              to whom, seen yet
+                              to whom, seen yet, its announcement, its match
+                              on air and when
 
    As with `npm run chapter`, nothing runs without --remote (the live
    database) or --local (wrangler dev's; add --persist-to <dir> if yours
    lives elsewhere): without either, the SQL is printed.
 
-   The words' file is JSON, { "t": "title", "x": "text" }. It never belongs
-   in this repo: the repo is public, and so would the words be.
+   The words' file is JSON, { "t": "title", "x": "text" }; an announcement's
+   is { "t", "x", "as": the pilot's name as the menu shows it, "named": false
+   to keep the other player's name off it }. Neither belongs in this repo:
+   the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, checkPilot, checkWords, checkDate } from './lib/challenge-sql.mjs';
+import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, columnsSql, addedSql, checkPilot, checkWords, checkDate } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
@@ -54,6 +60,11 @@ function run(sql) {
   return rows;
 }
 const live = () => REMOTE || LOCAL;
+// a table made before its newer columns gets them first (PvP's Worker does the same on first use)
+function columns() {
+  const add = addedSql(run(columnsSql()).map(r => r.name));
+  if (add) run(add);
+}
 function show(sql) {
   console.log(sql);
   console.log('\n(printed only: add --remote for the live database, --local for wrangler dev\'s)');
@@ -83,6 +94,17 @@ try {
       console.log(a1 + where + ': ' + (a2 === 'none' ? 'no date' : new Date(checkDate(a2)).toISOString()));
       break;
     }
+    case 'announce': {
+      if (!a1 || !a2) die('announce <pilot> <words | none>');
+      const words = a2 === 'none' ? null : a2;
+      const sql = announceSql(a1, words);
+      if (!live()) show(sql);
+      if (words && !run(inVaultSql([words])).length) die('the vault' + where + ' holds no ' + words + ': put it first');
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (words ? 'announced from vault entry ' + words : 'no announcement'));
+      break;
+    }
     case 'cancel': {
       const sql = cancelSql(a1);
       if (!live()) show(sql);
@@ -92,14 +114,16 @@ try {
     }
     case 'list': {
       if (!live()) show(challengesSql());
+      columns();
       const rows = run(challengesSql());
       if (!rows.length) console.log('no challenges' + where);
       for (const r of rows)
         console.log([r.pilot, 'words ' + r.words, 'armed ' + r.armed, 'due ' + r.due, 'tripped ' + r.tripped,
-                     'by ' + r.reached_by, 'season ' + r.season, 'sent to ' + r.target, 'seen ' + r.seen].join('  ·  '));
+                     'by ' + r.reached_by, 'season ' + r.season, 'sent to ' + r.target, 'seen ' + r.seen,
+                     'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | cancel <pilot> | list   [--remote | --local]');
+      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }
