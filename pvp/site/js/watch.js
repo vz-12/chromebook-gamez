@@ -377,7 +377,7 @@
     return box;
   }
   const CARD = {
-    pick: ['OPEN A REPLAY', 'Choose the file (….replay.json) from the PvP lobby\'s REPLAYS card.'],
+    pick: ['OPEN A REPLAY', 'Choose the file (….replay.json) downloaded from the PvP lobby\'s REPLAYS card.'],
     wait: ['WAITING FOR THE FIGHT', 'It starts here the moment it goes on air.'],
     load: ['LOADING THE FIGHT', ''],
     over: ['THE FIGHT IS OVER', '']
@@ -428,9 +428,10 @@
       }, { capture: true, passive: t !== 'contextmenu' });
   }
 
-  /* A replay (/play/?replay=<file>): the file from /replays/ beside the
-     page (put there by hand, on the build it was recorded on: replay.js),
-     or, without it there, the file chosen. */
+  /* A replay (/play/?replay=1, on the build it was recorded on: replay.js):
+     its file, chosen on the page and read here. Never fetched: the file
+     holds a hidden pilot's code, so it has no place in the site's folder,
+     which is what a deploy uploads. */
   function open(log) {
     // (a file that is no replay leaves the page asking, saying so)
     if (!log || log.v !== 1 || !log.head || !Array.isArray(log.batches) || !Array.isArray(log.snaps)) {
@@ -444,15 +445,6 @@
     V.play(log);
     say();
   }
-  async function load(name) {
-    try {
-      const r = await fetch('/replays/' + encodeURIComponent(name), { cache: 'no-store' });
-      if (r.ok) return open(await r.json());
-    } catch (e) {}
-    V.phase = 'pick';
-    say();
-  }
-
   M.modes.watch = {
     loadout: 'casual',
     start() {
@@ -460,7 +452,7 @@
       V.v = viewerId();
       state = 'pvp';
       deaf();
-      if (M.hand.replay) { V.phase = 'load'; load(M.hand.replay); }
+      if (M.hand.replay) V.phase = 'pick';       // a replay: its file, asked for
       say();
     },
     // the match's step (rounds.js), as a fighter's machine runs it

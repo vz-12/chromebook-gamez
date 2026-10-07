@@ -1,9 +1,10 @@
 /* ===========================================================================
    VOIDRUNNER PvP — a replay, for the trailer (live spectating, step 4)
 
-   /play/?replay=<file>: a broadcast's whole log (the relay's replay, from
-   the lobby's REPLAYS card), played by watch.js's own player from its first
-   step, with controls made for capturing it:
+   /play/?replay=1: a broadcast's whole log (the relay's replay, downloaded
+   from the lobby's REPLAYS card and chosen on the page), played by
+   watch.js's own player from its first step, with controls made for
+   capturing it:
 
      Space        pause, play
      - / +        slower, faster: 1/4, 1/2, 1, 2, 4
@@ -23,9 +24,9 @@
    A replay plays only on the build it was recorded on, since any change to
    the engine plays the same inputs differently: the log carries its build,
    and the page refuses any other (watch.js). Check out the commit the fight
-   was played on (tag it on the day), run `npm run dev:pvp`, put the file in
-   pvp/site/replays/ and open /play/?replay=<file> there. Without the file
-   there, the page asks for it instead.
+   was played on (tag it on the day), run `npm run dev:pvp`, open
+   /play/?replay=1 there and choose the file. Keep the file out of the
+   game's folder: the hidden pilot's code is in it.
    ========================================================================= */
 (() => {
   'use strict';

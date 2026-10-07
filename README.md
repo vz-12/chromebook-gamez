@@ -483,9 +483,9 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   REPLAYS card (`?list=1`, from the `pvp_broadcasts` table), each a
   download.
 - **The replay page** (`pvp/site/js/replay.js`), for the trailer:
-  `/play/?replay=<file>` plays a downloaded log with no account and no
-  Worker, in a fixed 16:9 frame drawn at 1920x1080 (record the tab with
-  OBS). Space pauses; `-` and `+` set the speed (¼× to 4×); `←` `→` and the
+  `/play/?replay=1` asks for a downloaded log and plays it with no account
+  and no Worker, in a fixed 16:9 frame drawn at 1920x1080 (record the tab
+  with OBS). Space pauses; `-` and `+` set the speed (¼× to 4×); `←` `→` and the
   bar go to a snapshot, Home to the start; `1` `2` put the camera on a
   fighter, `3` frames both, `4` frees it (drag, wheel); `E` switches whose
   eyes it is seen through (the other fighter's own screen: their HUD, and
@@ -494,9 +494,10 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
 - **A replay plays only on the build it was recorded on**, since any change
   to the engine plays the same inputs differently: the log carries its
   build and the page refuses any other, saying so. Tag the commit on fight
-  day; to play it, check that commit out, run `npm run dev:pvp`, put the
-  file in `pvp/site/replays/` (never committed) and open
-  `/play/?replay=<its name>`. Without the file there, the page asks for it.
+  day; to play it, check that commit out, run `npm run dev:pvp`, open
+  `/play/?replay=1` and choose the file. The file is only ever chosen on
+  the page, never fetched: the hidden pilot's code is in it, so keep it out
+  of this folder, which is what a deploy uploads.
 
 ## Ads
 

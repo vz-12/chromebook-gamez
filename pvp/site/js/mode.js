@@ -43,9 +43,10 @@
     hand = { mode: 'preview', preview, pilot: 'runner',
              me: { account: { name: 'preview', display: 'YOU' }, unlocks: null, loadouts: { casual: all, ranked: all } } };
   } else if (watching || replaying) {
-    /* A match watched (watch.js), or a replay of one (replay.js: a file from
-       /replays/, on the build it was recorded on): no lobby and no account
-       either. What it flies, and who, comes from the match's own broadcast. */
+    /* A match watched (watch.js), or a replay of one (replay.js: its file,
+       chosen on the page, on the build it was recorded on): no lobby and no
+       account either. What it flies, and who, comes from the match's own
+       broadcast. */
     const all = { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: [], ups: [] };
     hand = { mode: 'watch', watch: watching || null, replay: replaying || null, pilot: 'runner',
              me: { account: { name: 'viewer', display: 'VIEWER' }, unlocks: null, loadouts: { casual: all, ranked: all } } };

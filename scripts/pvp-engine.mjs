@@ -1227,25 +1227,31 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   ok(same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length && R.run('PVP.watch.adopted') === (nudged.fight >= 0 ? 1 : 0),
      'to the same fingerprints as the fight itself', [same, R.run('PVP.watch.adopted'), R.run('PVP.watch.parted')]);
 
-  /* The replay page, for the trailer (replay.js): /play/?replay=<file>, the
-     downloaded log beside the page in /replays/, played with the controls
-     made for capture. Its fingerprints after all of them are still the
-     fight's own. */
-  section('the replay page: /play/?replay=<file>, for the trailer');
-  const FILE = 'fight.replay.json';
-  const replayPage = (file, body) => loadGame(IDX, { search: '?replay=' + file, scripts: [WALL].concat(pvpScripts),
-    before: win => { rooms(win); recorder(win); const rec = win.fetch;
-      win.fetch = (u, init) => (String(u) === '/replays/' + FILE && body ? (win.__net.push('fetch ' + u), Promise.resolve(new Response(body)))
-                                                                         : rec(u, init)); } });
-  const RP = replayPage(FILE, JSON.stringify(log));
+  /* The replay page, for the trailer (replay.js): /play/?replay=1, the
+     downloaded log chosen on the page (never fetched: the hidden pilot's
+     code is in it, so it is kept out of the site's folder), played with the
+     controls made for capture. Its fingerprints after all of them are still
+     the fight's own. */
+  section('the replay page: /play/?replay=1, for the trailer');
+  const replayPage = () => loadGame(IDX, { search: '?replay=1', scripts: [WALL].concat(pvpScripts), before: win => { rooms(win); recorder(win); } });
+  // a file chosen on the page, read (the page's own chooser hands it the same way)
+  const chosen = (page, file) => { page.ctx.__log = JSON.parse(JSON.stringify(file)); page.run('PVP.watch.open(__log)'); };
+  const RP = replayPage();
   RP.run(KEEP_CK);
   const key = k => RP.run(`PVP.watch.onKey({ key: ${JSON.stringify(k)} })`);
   const frames = async n => { for (let i = 0; i < n; i++) { RP.run(VIEW_FRAME); if (i % 30 === 0) await settle(); } };
   await flush();
+  await frames(10);
+  ok(RP.run('PVP.watch.phase') === 'pick' && !RP.run('LS.on'), 'the page asks for the replay\'s file, and plays nothing meanwhile', RP.run('PVP.watch.phase'));
+  RP.run('PVP.watch.open({ hello: 1 })');
+  ok(RP.run('PVP.watch.phase') === 'pick' && /isn't a replay/.test(RP.run('PVP.watch.why')) && !RP.run('LS.on'),
+     'a chosen file that is no replay: it says so, and still asks', [RP.run('PVP.watch.phase'), RP.run('PVP.watch.why')]);
+  chosen(RP, log);
+  await flush();
   await frames(120);
-  ok(RP.run('PVP.watch.phase') === 'on' && RP.run('PVP.watch.file === null') === false && RP.run('LS.tick') > 60,
-     'the page fetches the file from /replays/ and plays it', [RP.run('PVP.watch.phase'), RP.run('LS.tick')]);
-  ok(RP.win.__net.join() === 'fetch /replays/' + FILE, 'and asks nothing else of anybody: the pilot\'s code is in the file', RP.win.__net);
+  ok(RP.run('PVP.watch.phase') === 'on' && RP.run('PVP.watch.why') === '' && RP.run('LS.tick') > 60,
+     'the replay chosen: it plays', [RP.run('PVP.watch.phase'), RP.run('LS.tick')]);
+  ok(RP.win.__net.length === 0, 'asking nothing of anybody: the file is never fetched, and the pilot\'s code is in it', RP.win.__net);
   ok(RP.run('[W, H, DPR].join()') === '1280,720,1.5', 'in a fixed 16:9 frame, drawn at 1920x1080, whatever the window', RP.run('[W, H, DPR].join()'));
   key(' ');
   const held = RP.run('LS.tick');
@@ -1307,26 +1313,16 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   same = sameBut(H, RP);
   ok(RP.run('PVP.watch.phase') === 'over' && same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length,
      'played to the end after every control: the same fingerprints as the fight', [RP.run('PVP.watch.phase'), same]);
-  // another build refuses it, saying what to do; and without the file, the page asks for it
-  const other = replayPage(FILE, JSON.stringify(Object.assign({}, log, { build: 'zz.other', head: Object.assign({}, log.head, { build: 'zz.other' }) })));
+  // another build refuses it, saying what to do
+  const other = replayPage();
+  await flush();
+  chosen(other, Object.assign({}, log, { build: 'zz.other', head: Object.assign({}, log.head, { build: 'zz.other' }) }));
   await flush();
   for (let i = 0; i < 10; i++) { other.run(VIEW_FRAME); await settle(); }
   ok(other.run('PVP.watch.phase') === 'off' && /another version of the game \(zz\.other; this page is .+\)\. Check out the commit/.test(other.run('PVP.watch.why')),
      'a replay from another build is refused, with the way to play it', other.run('PVP.watch.why'));
-  const none = replayPage(FILE, null);
-  await flush();
-  for (let i = 0; i < 10; i++) { none.run(VIEW_FRAME); await settle(); }
-  ok(none.run('PVP.watch.phase') === 'pick', 'no file beside the page: it asks for one', none.run('PVP.watch.phase'));
-  // the file chosen: one that is no replay leaves it asking; the replay itself plays
-  none.run('PVP.watch.open({ hello: 1 })');
-  ok(none.run('PVP.watch.phase') === 'pick' && /isn't a replay/.test(none.run('PVP.watch.why')) && !none.run('LS.on'),
-     'a chosen file that is no replay: it says so, and still asks', [none.run('PVP.watch.phase'), none.run('PVP.watch.why')]);
-  none.ctx.__log = JSON.parse(JSON.stringify(log));
-  none.run('PVP.watch.open(__log)');
-  await flush();
-  for (let i = 0; i < 90; i++) { none.run(VIEW_FRAME); if (i % 30 === 0) await settle(); }
-  ok(none.run('PVP.watch.phase') === 'on' && none.run('LS.tick') > 30 && none.run('PVP.watch.why') === '' && none.run('[W, H].join()') === '1280,720',
-     'the replay chosen: it plays, in the same fixed frame', [none.run('PVP.watch.phase'), none.run('LS.tick')]);
+  // and the site's folder has no place for one: nothing in the page's scripts fetches a replay
+  ok(!/\/replays\//.test(pvpScripts.map(s => s.code).join('\n')), 'no replay is ever fetched from the site: the file is only chosen');
 }
 
 section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody else');
