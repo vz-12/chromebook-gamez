@@ -92,7 +92,7 @@ function rooms(win) {
   win.document.createElement = tag => {
     const el = make(tag);
     const q = {};
-    el.querySelector = sel => q[sel] || (q[sel] = { textContent: '', hidden: false, addEventListener() {},
+    el.querySelector = sel => q[sel] || (q[sel] = { textContent: '', hidden: false, addEventListener() {}, style: {}, appendChild() {},
                                                     classList: { toggle() {}, add() {}, remove() {} } });
     el.__q = q;
     return el;
@@ -932,6 +932,7 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   ok(G.run('OUTSIDE.sig.x0') === H.run('OUTSIDE.sig.x0'), 'the same text on both');
   ship(G, H);                                     // the guest's hello again, now with it
   ok(H.run('MP.ready') && G.run('MP.ready'), 'both ready now');
+  H.run('runSeedNext = 9061');                 // the fight's seed, fixed: now and then an unseeded one was won outright before the guest could leave
   H.run('PVP.frame()'); ship(H, G);
   ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
   ok(H.run('pilotP(0).charId') === 'x0' && G.run('pilotP(0).charId') === 'x0' && G.run('pilotP(1).charId') === 'ember',
@@ -1056,6 +1057,16 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   try { await air(H, G, ship, [V1], 60 * 25); } catch (e) { threw = e; }
   ok(!threw && fightOn(), 'twenty-five seconds on air, watched, without an error', String(threw && threw.stack));
 
+  /* What a viewer's screen draws of the hidden pilot: noted from here on,
+     layer by layer, on its opponent's machine and on the viewer's (each of
+     the pilot's own drawing hooks, as the engine calls them, with the step
+     of the fight it was drawn at: the viewer is three seconds behind). */
+  const DRAWS = ['back', 'floor', 'under', 'hull', 'over', 'fx', 'bullet', 'hud', 'screen', 'cursor'];
+  const NOTE_DRAWS = `globalThis.__drawn = {}; { const O = OUTSIDE.by.get('x0');
+    for (const n of ${JSON.stringify(DRAWS)}) { const was = O && O[n]; if (was) O[n] = function (...a) { (__drawn[n] || (__drawn[n] = [])).push(LS.tick); return was.apply(this, a); }; } }`;
+  for (const v of [G, V1]) v.run(NOTE_DRAWS);
+  const drawnFrom = G.run('LS.tick');
+
   // a viewer arriving now starts from the latest snapshot, and catches up while the fight goes on
   const L = watcher(mid);
   L.run(KEEP_CK);
@@ -1083,6 +1094,17 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   // the viewer, three seconds behind and in step all the way
   ok(V1.run('PVP.watch.phase') === 'on' && V1.run('pilotP(0).charId') === 'x0' && V1.run('pilotP(1).charId') === 'ember',
      'the viewer plays the fight: both pilots, the hidden one fetched for it', [V1.run('PVP.watch.phase'), V1.run('PILOTS.length')]);
+  /* And draws it: every layer of the hidden pilot's art that its opponent's
+     own screen draws (its hull and what it puts in the room among them),
+     none of its hooks throwing; of what only its own player sees (its HUD,
+     its crosshair), nothing, as on its opponent's. */
+  const drawnTo = V1.run('LS.tick'), world = ['back', 'floor', 'under', 'hull', 'over', 'fx'];
+  const drew = v => { const d = v.run('__drawn'), out = {}; for (const n in d) { const k = d[n].filter(t => t >= drawnFrom && t <= drawnTo).length; if (k) out[n] = k; } return out; };
+  const drewG = drew(G), drewV = drew(V1);   // over the same steps of the fight, on each
+  ok(drawnTo - drawnFrom > 300 && world.every(n => drewG[n] > 0) && Object.keys(drewG).every(n => drewV[n] > 0),
+     'the viewer\'s screen draws the hidden pilot\'s art, layer for layer what its opponent\'s screen draws', [drawnFrom, drawnTo, drewG, drewV]);
+  ok(!Object.keys(V1.run('OUTSIDE.errs')).length && !Object.keys(G.run('OUTSIDE.errs')).length && !drewV.hud && !drewV.cursor && !drewG.hud && !drewG.cursor,
+     'with none of its hooks throwing, and nothing of what only its own player sees', [V1.run('OUTSIDE.errs'), drewV]);
   ok(V1.win.__net.includes('fetch /api/pvp/pilot?id=x0&watch=' + mid), 'its code from PvP\'s Worker, for a broadcast it flies in', V1.win.__net.filter(n => n.includes('pilot')));
   ok(V1.win.__net.every(n => /^fetch \/api\/pvp\/(watch\?match=|pilot\?id=x0&watch=)/.test(n)), 'and nothing else asked, nothing sent', V1.win.__net.filter(n => !/^fetch \/api\/pvp\/(watch|pilot)/.test(n)));
   ok(V1.run('MP.role') === 'guest' && V1.run('pilotMine()') === 1, 'through the challenger\'s eyes, not the hidden pilot\'s');
@@ -1204,6 +1226,107 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   // (the fighters' parting is in the log too: the replay takes the same snapshot the viewers did, and nothing more)
   ok(same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length && R.run('PVP.watch.adopted') === (nudged.fight >= 0 ? 1 : 0),
      'to the same fingerprints as the fight itself', [same, R.run('PVP.watch.adopted'), R.run('PVP.watch.parted')]);
+
+  /* The replay page, for the trailer (replay.js): /play/?replay=<file>, the
+     downloaded log beside the page in /replays/, played with the controls
+     made for capture. Its fingerprints after all of them are still the
+     fight's own. */
+  section('the replay page: /play/?replay=<file>, for the trailer');
+  const FILE = 'fight.replay.json';
+  const replayPage = (file, body) => loadGame(IDX, { search: '?replay=' + file, scripts: [WALL].concat(pvpScripts),
+    before: win => { rooms(win); recorder(win); const rec = win.fetch;
+      win.fetch = (u, init) => (String(u) === '/replays/' + FILE && body ? (win.__net.push('fetch ' + u), Promise.resolve(new Response(body)))
+                                                                         : rec(u, init)); } });
+  const RP = replayPage(FILE, JSON.stringify(log));
+  RP.run(KEEP_CK);
+  const key = k => RP.run(`PVP.watch.onKey({ key: ${JSON.stringify(k)} })`);
+  const frames = async n => { for (let i = 0; i < n; i++) { RP.run(VIEW_FRAME); if (i % 30 === 0) await settle(); } };
+  await flush();
+  await frames(120);
+  ok(RP.run('PVP.watch.phase') === 'on' && RP.run('PVP.watch.file === null') === false && RP.run('LS.tick') > 60,
+     'the page fetches the file from /replays/ and plays it', [RP.run('PVP.watch.phase'), RP.run('LS.tick')]);
+  ok(RP.win.__net.join() === 'fetch /replays/' + FILE, 'and asks nothing else of anybody: the pilot\'s code is in the file', RP.win.__net);
+  ok(RP.run('[W, H, DPR].join()') === '1280,720,1.5', 'in a fixed 16:9 frame, drawn at 1920x1080, whatever the window', RP.run('[W, H, DPR].join()'));
+  key(' ');
+  const held = RP.run('LS.tick');
+  await frames(60);
+  ok(RP.run('LS.tick') === held && RP.run('PVP.watch.paused'), 'Space holds it still', [held, RP.run('LS.tick')]);
+  key(' '); key('+'); key('+');
+  const t4 = RP.run('LS.tick');
+  await frames(60);
+  ok(RP.run('PVP.watch.speed') === 4 && RP.run('LS.tick') - t4 >= 230, '+ plays it faster: four times', [RP.run('PVP.watch.speed'), RP.run('LS.tick') - t4]);
+  key('-'); key('-');
+  await frames(60 * 20);
+  const snapsAt = log.snaps.map(s => s.at), before = RP.run('LS.tick');
+  key('ArrowLeft');
+  const back = RP.run('LS.tick');
+  ok(snapsAt.includes(back) && back < before - 60, '← goes back to the snapshot before', [before, back, snapsAt]);
+  key('ArrowRight');
+  ok(snapsAt.includes(RP.run('LS.tick')) && RP.run('LS.tick') > back, '→ on to the one after', RP.run('LS.tick'));
+  key('Home');
+  ok(RP.run('LS.tick') === 0 && RP.run('PVP.watch.phase') === 'on', 'Home: the very start, the run built again from the header', RP.run('LS.tick'));
+  // on into the fight itself (the belt at the start has no world to frame, and no HUD to take off)
+  await frames(60);
+  key('ArrowRight');
+  ok(RP.run('state') === 'play', 'on to a snapshot in the fight', RP.run('state'));
+  // the camera: both framed, then free, moved and zoomed by hand
+  key('3');
+  const mid3 = RP.run('const a = pilotP(0), b = pilotP(1), s = PVP.cam(); [s.x + 60 - (a.x + b.x) / 2, s.y - (a.y + b.y) / 2]');
+  ok(Math.abs(mid3[0]) < 1e-6 && Math.abs(mid3[1]) < 1e-6 && RP.run('PVP.zoom(1)') <= 1.2, '3 frames both pilots, zoomed to fit', mid3);
+  key('4');
+  RP.run(`PVP.watch.onPointer({ type: 'mousedown', target: cv }); PVP.watch.onPointer({ type: 'mousemove', movementX: 50, movementY: -20 });
+          PVP.watch.onPointer({ type: 'mouseup' }); PVP.watch.onPointer({ type: 'wheel', deltaY: -300 });`);
+  const free = RP.run('JSON.stringify(PVP.replay.free)'), cam0 = JSON.parse(free);
+  ok(RP.run("PVP.replay.mode") === 'free' && cam0.zoom > 1 && RP.run('PVP.zoom(1)') === cam0.zoom, '4 frees it: dragged and zoomed by hand', free);
+  await frames(90);
+  // (the game keeps its camera inside the world, as it does a pilot's)
+  const there = RP.run(`[clamp(${cam0.x}, W / 2 - 120, WORLD.w - W / 2 + 120), clamp(${cam0.y}, H / 2 - 120, WORLD.h - H / 2 + 120)]`);
+  ok(Math.abs(RP.run('camZoom') - cam0.zoom) < 0.05 && Math.hypot(RP.run('cam.x') - there[0], RP.run('cam.y') - there[1]) < 3,
+     'and the game\'s own camera goes there, as close as it was told', [RP.run('camZoom'), cam0.zoom, RP.run('[cam.x, cam.y]'), there]);
+  /* Whose eyes: the challenger's to begin with, as a live viewer's are; E,
+     the hidden pilot's own screen, with what only its own player is shown
+     (its HUD). Left there to the end: the fight plays the same from either. */
+  const hudOf = () => RP.run(`(() => { const O = OUTSIDE.by.get('x0'), was = O.hud; let n = 0; O.hud = function () { n++; return was.apply(this, arguments); };
+                                       try { render(); } finally { O.hud = was; } return n; })()`);
+  const eyes0 = [RP.run('pilotMine()'), hudOf()];
+  key('e');
+  const eyes1 = [RP.run('pilotMine()'), hudOf()];
+  ok(eyes0.join() === '1,0' && eyes1.join() === '0,1' && RP.run('PVP.watch.eyes') === 0 && RP.run('MP.role') === 'host' && RP.run('MP.peerName') === RP.run('PVP.watch.names[1]'),
+     'E looks through the other fighter\'s eyes: the hidden pilot\'s own screen, its own HUD drawn', [eyes0, eyes1, RP.run('MP.peerName')]);
+  // the HUD off, then the page's own controls off: a clean frame
+  key('u');
+  const huds = RP.run(`(() => { let n = 0; const was = drawHUD; drawHUD = () => { n++; }; try { render(); } finally { drawHUD = was; } return n; })()`);
+  key('u');
+  const hudsOn = RP.run(`(() => { let n = 0; const was = drawHUD; drawHUD = () => { n++; }; try { render(); } finally { drawHUD = was; } return n; })()`);
+  ok(huds === 0 && hudsOn === 1, 'U takes the game\'s HUD off, and puts it back', [huds, hudsOn]);
+  key('h');
+  ok(RP.run('PVP.replay.ui') === false, 'H takes the page\'s own controls and tags off');
+  key('h'); key('1');
+  // played out after all of that: the fight's own fingerprints
+  for (let i = 0; i < 60 * 100 && RP.run('PVP.watch.phase') !== 'over'; i++) { RP.run(VIEW_FRAME); if (i % 30 === 0) await settle(); }
+  same = sameBut(H, RP);
+  ok(RP.run('PVP.watch.phase') === 'over' && same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length,
+     'played to the end after every control: the same fingerprints as the fight', [RP.run('PVP.watch.phase'), same]);
+  // another build refuses it, saying what to do; and without the file, the page asks for it
+  const other = replayPage(FILE, JSON.stringify(Object.assign({}, log, { build: 'zz.other', head: Object.assign({}, log.head, { build: 'zz.other' }) })));
+  await flush();
+  for (let i = 0; i < 10; i++) { other.run(VIEW_FRAME); await settle(); }
+  ok(other.run('PVP.watch.phase') === 'off' && /another version of the game \(zz\.other; this page is .+\)\. Check out the commit/.test(other.run('PVP.watch.why')),
+     'a replay from another build is refused, with the way to play it', other.run('PVP.watch.why'));
+  const none = replayPage(FILE, null);
+  await flush();
+  for (let i = 0; i < 10; i++) { none.run(VIEW_FRAME); await settle(); }
+  ok(none.run('PVP.watch.phase') === 'pick', 'no file beside the page: it asks for one', none.run('PVP.watch.phase'));
+  // the file chosen: one that is no replay leaves it asking; the replay itself plays
+  none.run('PVP.watch.open({ hello: 1 })');
+  ok(none.run('PVP.watch.phase') === 'pick' && /isn't a replay/.test(none.run('PVP.watch.why')) && !none.run('LS.on'),
+     'a chosen file that is no replay: it says so, and still asks', [none.run('PVP.watch.phase'), none.run('PVP.watch.why')]);
+  none.ctx.__log = JSON.parse(JSON.stringify(log));
+  none.run('PVP.watch.open(__log)');
+  await flush();
+  for (let i = 0; i < 90; i++) { none.run(VIEW_FRAME); if (i % 30 === 0) await settle(); }
+  ok(none.run('PVP.watch.phase') === 'on' && none.run('LS.tick') > 30 && none.run('PVP.watch.why') === '' && none.run('[W, H].join()') === '1280,720',
+     'the replay chosen: it plays, in the same fixed frame', [none.run('PVP.watch.phase'), none.run('LS.tick')]);
 }
 
 section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody else');

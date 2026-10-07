@@ -187,6 +187,8 @@ let W = 0, H = 0, DPR = 1;
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth; H = window.innerHeight;
+  const f = PVP && PVP.frameSize();      // PvP mode: a replay drawn in a fixed frame, for capture (replay.js)
+  if (f) { W = f.w; H = f.h; DPR = f.dpr; }
   cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.imageSmoothingEnabled = true;
@@ -38285,6 +38287,7 @@ function update(dt) {
     if (odStrikePov()) camZoomT = Math.min(camZoomT, odStrikeZoom());
     // RONIN's executions come in close, from whatever framing the fight had (THE AMALGAM's is wide)
     if (P.roninExec && P.roninExec.exec) camZoomT *= WATER_ZOOM;
+    if (PVP) camZoomT = PVP.zoom(camZoomT);   // PvP mode: a replay's camera frames both, or wherever it is put (replay.js)
     camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
   });
   updateArena(dt);
@@ -45541,9 +45544,12 @@ function render() {
   }
   drawChalFog();      // over the world, under everything you need to read
   hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
-  drawHUD();
-  outsideDraw('hud');   // an outside pilot's, beside the HUD
-  mpDrawHud();
+  const bare = !!(PVP && PVP.bare());   // PvP mode: a replay captured with the HUD off (replay.js)
+  if (!bare) {
+    drawHUD();
+    outsideDraw('hud');   // an outside pilot's, beside the HUD
+    mpDrawHud();
+  }
   drawChalHud();
   drawHackHud();
   drawConsole();
@@ -45586,8 +45592,8 @@ function render() {
   drawUnwrittenOverlay();
   drawLibraryPointer();
   if (isTouch && state === 'play') drawTouchSticks();
-  if (state === 'levelup' && offers.length) drawLevelUp();   // co-op: only the cards dealt to this pilot
-  if (state === 'gear' && gearOffer) drawGearOffer();
+  if (state === 'levelup' && offers.length && !bare) drawLevelUp();   // co-op: only the cards dealt to this pilot
+  if (state === 'gear' && gearOffer && !bare) drawGearOffer();
   if (state === 'shop') drawShop();
   if (state === 'planet') drawPlanetarium();
   odDrawGrade();
@@ -45612,10 +45618,10 @@ function render() {
   if (state === 'pause') drawPause();
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
-  lsDrawHint();         // lockstep: who is choosing, who paused
+  if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
-  if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
+  if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
   }

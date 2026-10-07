@@ -105,9 +105,37 @@
   }
   live();
 
+  /* The broadcasts this account may keep (pvp/src/watch.js, ?list=1): dev
+     accounts and a hidden pilot's holders, told so by /api/pvp/me. Each is a
+     download of the whole log, the hidden pilot's code in it. */
+  async function replays(on) {
+    $('replays').hidden = true;
+    if (!on) return;
+    const r = await call('GET', '/api/pvp/watch?list=1');
+    const list = r.ok && r.d && Array.isArray(r.d.broadcasts) ? r.d.broadcasts : [];
+    const ul = $('replayList');
+    ul.textContent = '';
+    for (const b of list) {
+      const li = document.createElement('li');
+      const who = document.createElement('span');
+      who.textContent = (b.names || []).join('  VS  ');
+      const when = document.createElement('small');
+      when.textContent = new Date(b.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).toUpperCase();
+      const get = document.createElement('a');
+      get.href = '/api/pvp/watch?match=' + b.match + '&replay=1';
+      get.download = 'voidrunner-' + b.match.slice(0, 8) + '.replay.json';
+      get.textContent = 'DOWNLOAD';
+      li.append(who, when, get);
+      ul.append(li);
+    }
+    if (!list.length) { const li = document.createElement('li'); li.textContent = 'Nothing has been on air yet.'; ul.append(li); }
+    $('replays').hidden = false;
+  }
+
   function render(d) {
     const names = Object.assign({}, d.pilots);
     renderChallenge(d.challenge || null);
+    replays(!!d.replays);
     $('name').textContent = d.account.display;
     // their page on the game's leaderboard, at the address they came from (the school one, at school)
     $('profileLink').href = game() + '/leaderboard/#u/' + encodeURIComponent(d.account.name);

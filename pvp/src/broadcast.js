@@ -37,6 +37,7 @@
    no storage reads at all.
    ========================================================================= */
 import { Serial } from './objects.js';
+import { vaultText } from '../../src/vault.js';
 
 export const KEEP = {
   MAX: 48 * 1024 * 1024,      // a broadcast's whole log, at most (a long fight is a few MB)
@@ -143,12 +144,18 @@ export class Broadcast extends Serial {
       return reply(out);
     }
 
+    /* The whole log, and the hidden pilot's code with it (the vault's, as it
+       is now: the build check in the replay is what says whether it still
+       plays), so the file plays anywhere with no account and no Worker. */
     if (op === 'replay') {
       if (!m) return reply({ error: 'not on air' }, 404);
       const snaps = [];
       for (let k = 0; k < m.snaps.length; k++) snaps.push({ at: m.snaps[k].at, epoch: m.snaps[k].epoch, json: await this.snapText(k) });
+      const pilots = {};
+      const got = this.env && this.env.DB ? await vaultText(this.env.DB, m.pilot).catch(() => null) : null;
+      if (got) pilots[m.pilot] = got.text;
       return reply({ v: 1, match: m.match, pilot: m.pilot, build: m.build, at: m.at, head: this.head,
-                     batches: this.batches, snaps, end: m.end, last: m.last });
+                     batches: this.batches, snaps, end: m.end, last: m.last, pilots });
     }
 
     // the rest is the feed: from the Worker, for the one account that may feed it (watch.js)

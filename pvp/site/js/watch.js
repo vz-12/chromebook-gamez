@@ -24,6 +24,8 @@
 
    The same player plays a log already in hand (VR_PVP.watch.play(log): the
    relay's replay, whole), fed from it instead of from polls, from its start.
+   A replay, kept by the hidden pilot's own holders, may look through either
+   side's eyes (VR_PVP.watch.look; replay.js gives it a key).
    ========================================================================= */
 (() => {
   'use strict';
@@ -44,7 +46,9 @@
   const V = M.watch = { id: null, v: '', phase: 'wait', why: '', head: null, names: ['', ''], eyes: 0, cam: 0, primed: false,
                         recs: new Map(), fps: new Map(), want: -1, last: -1, end: null, every: 1000, next: 0, busy: false,
                         askSnap: false, askedAt: 0, lastSnap: null, adrift: false, acc: 0, checked: 0, parted: 0, adopted: 0,
-                        took: [], file: null, idleSince: 0 };
+                        took: [], file: null, idleSince: 0,
+                        speed: 1, paused: false,           // a replay's (replay.js): how fast, and held still
+                        onKey: null, onPointer: null };    // and its controls, which hear what the game is never told
   const viewerId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
   const clean = v => (Array.isArray(v) ? v.filter(s => typeof s === 'string' && /^[\w-]{1,40}$/.test(s)).slice(0, 512) : []);
 
@@ -139,7 +143,10 @@
   async function begin(h) {
     if (!h || h.v !== 1 || !h.run || !Array.isArray(h.hellos) || h.hellos.length !== 2 || !h.hellos[0] || !h.hellos[1])
       return stop('This broadcast can\'t be read.');
-    if (h.build !== buildId()) return stop('This fight is being played on another version of the game. Reload the page.');
+    if (h.build !== buildId())
+      return stop(V.file ? 'This replay was recorded on another version of the game (' + h.build + '; this page is ' + buildId() + '). ' +
+                           'Check out the commit it was played on, run npm run dev:pvp, and open it there.'
+                         : 'This fight is being played on another version of the game. Reload the page.');
     V.head = h;
     V.phase = 'load';
     say();
@@ -167,28 +174,44 @@
     } catch (e) { return null; }
   }
 
-  function build(h) {
-    const hl = h.hellos, run = h.run;
-    const pilotIx = k => mpPeerChar(k ? run.wingId : run.hostId, k ? run.wing : run.host);
-    const outsideK = k => !!(CHARS[pilotIx(k)] || {}).outside;
-    // the eyes: the side that is not flying from outside (the host's, if neither or both are)
-    V.eyes = outsideK(0) && !outsideK(1) ? 1 : 0;
-    V.cam = V.eyes;
-    V.names = hl.map(x => String((x && x.name) || '').slice(0, 14).toUpperCase());
-    M.hand.match = h.match && Array.isArray(h.match.sides) ? h.match : null;
-    const me = V.eyes, them = 1 - me;
-    Save.profile.name = V.names[me];
-    MP.on = true; MP.ready = true; MP.role = me ? 'guest' : 'host';
+  /* Whose eyes the fight is seen through: side k's, as that player's own
+     machine draws it (its HUD and cards, and of the other pilot only what
+     its opponent sees). Drawing only: which pilot is this machine's
+     (pilotMine, from MP.role) never reaches the game itself, as the two
+     fighters' machines, which differ in just this, stay in step. */
+  const pilotIx = k => mpPeerChar(k ? V.head.run.wingId : V.head.run.hostId, k ? V.head.run.wing : V.head.run.host);
+  V.look = k => {
+    if (!V.head || (k !== 0 && k !== 1)) return;
+    const hl = V.head.hellos, run = V.head.run, them = 1 - k;
+    V.eyes = k;
+    Save.profile.name = V.names[k];
+    MP.role = k ? 'guest' : 'host';
     MP.peerName = V.names[them];
     MP.peerChar = pilotIx(them);
     MP.peerAwake = !!(them ? run.wingAwake : run.awake);
     MP.peerSkin = { doc: skinClean(hl[them].skin), equip: String(hl[them].equip || '').slice(0, 40) };
+  };
+
+  function build(h) {
+    const hl = h.hellos, run = h.run;
+    const outsideK = k => !!(CHARS[pilotIx(k)] || {}).outside;
+    V.names = hl.map(x => String((x && x.name) || '').slice(0, 14).toUpperCase());
+    M.hand.match = h.match && Array.isArray(h.match.sides) ? h.match : null;
+    MP.on = true; MP.ready = true;
+    // the eyes: the side that is not flying from outside (the host's, if neither or both are); a replay may look through either (replay.js)
+    V.look(outsideK(0) && !outsideK(1) ? 1 : 0);
+    V.cam = V.eyes;
     lsGuestStart(run);
     // each pilot in its own player's skin, as their handshakes have it
     for (const k of [0, 1])
       pilotDo(k, () => { pilotSkin = { doc: skinClean(hl[k].skin), equip: String(hl[k].equip || '').slice(0, 40) }; applyChar(selectedChar, true); });
     V.phase = 'on';
     V.acc = 0;
+    // a replay keeps its first step as a snapshot of its own, to go back to (seek): exact, as building it again is not promised to be
+    if (V.file && !V.zero) {
+      try { V.zero = { at: 0, epoch: 0, json: JSON.stringify(Object.assign(snapWrite(), { ls: { paused: false, pausedBy: '' } })) }; }
+      catch (e) { console.error('watch: the replay\'s start', e); }
+    }
     say();
   }
 
@@ -211,6 +234,12 @@
   M.steps = dt => {
     if (!watching()) return false;
     if (V.phase !== 'on') return true;
+    // a replay held still: nothing plays, and the camera (its own, not the game's) still moves
+    if (V.paused) {
+      updateCamera(dt);
+      camZoom += (M.zoom(camZoomT) - camZoom) * (1 - Math.exp(-2.4 * dt));
+      return true;
+    }
     if (V.end && LS.tick >= V.end.at) { over(); return true; }
     const held = V.last - LS.tick + 1;
     const keep = Math.max(SEE.KEEP, SEE.KEEP_POLLS * V.every / 1000) * 60;
@@ -218,7 +247,7 @@
     if (!V.primed && (V.file || V.end || held >= keep)) V.primed = true;
     if (!V.primed) return true;
     if (!V.file && held > SEE.FAR * 60 && !V.askSnap) { V.askSnap = true; V.next = 0; }
-    const speed = V.file ? 1 : held > keep + 300 ? SEE.FAST[1] : held > keep + 60 ? SEE.FAST[0] : 1;
+    const speed = V.file ? V.speed : held > keep + 300 ? SEE.FAST[1] : held > keep + 60 ? SEE.FAST[0] : 1;
     V.acc = Math.min(V.acc + dt * speed, 0.5);
     let n = 0;
     while (V.acc >= STEP && n < STEPS_PER_FRAME * 2) {
@@ -277,6 +306,22 @@
     say();
   }
 
+  /* A replay sought: to snapshot k of its log (-1: its very start, as it
+     was kept when the run was first built), and on from there. Asked for,
+     so taken even if it is one taken before. */
+  V.seek = k => {
+    const L = V.file;
+    if (!L || !V.head || (V.phase !== 'on' && V.phase !== 'over')) return;
+    const s = k < 0 ? V.zero : L.snaps[k];
+    if (!s) return;
+    M.shown = null;
+    V.phase = 'on';
+    adopt(s);
+    take(L.batches.filter(b => b.from + b.n > LS.tick));
+    V.idleSince = 0;
+    say();
+  };
+
   function stop(why) {
     V.phase = 'off';
     V.why = why;
@@ -314,14 +359,25 @@
     document.head.appendChild(st);
     box = document.createElement('div');
     box.id = 'pvp-watch';
+    box.setAttribute('data-pvp-ui', '');
     box.innerHTML = '<div class="bar"><span class="live"><i></i><b>LIVE</b></span><span class="who"></span>' +
                     '<button class="x" type="button" title="Close" aria-label="Close">✕</button></div>' +
-                    '<div class="cam"></div><div class="card"><h2></h2><p></p></div>';
+                    '<div class="cam"></div><div class="card"><h2></h2><p></p><input type="file" accept=".json,application/json" hidden></div>';
     box.querySelector('.x').addEventListener('click', close);
+    // a replay this page could not fetch: the file itself, chosen
+    box.querySelector('.card input').addEventListener('change', async e => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      let log = null;
+      try { log = JSON.parse(await file.text()); } catch (err) {}
+      e.target.value = '';                 // so the same file can be chosen again
+      open(log);
+    });
     document.body.appendChild(box);
     return box;
   }
   const CARD = {
+    pick: ['OPEN A REPLAY', 'Choose the file (….replay.json) from the PvP lobby\'s REPLAYS card.'],
     wait: ['WAITING FOR THE FIGHT', 'It starts here the moment it goes on air.'],
     load: ['LOADING THE FIGHT', ''],
     over: ['THE FIGHT IS OVER', '']
@@ -330,17 +386,20 @@
   function say() {
     const b = page();
     b.querySelector('.who').textContent = V.head ? V.names[0] + '  VS  ' + V.names[1] : '';
-    b.querySelector('.live').classList.toggle('done', V.phase === 'over' || !!V.file);
-    b.querySelector('.live b').textContent = V.file ? 'REPLAY' : V.phase === 'over' ? 'ENDED' : 'LIVE';
+    const kept = !!V.file || !!(M.hand && M.hand.replay);          // a replay, or its page still waiting for the file
+    b.querySelector('.live').classList.toggle('done', V.phase === 'over' || kept);
+    b.querySelector('.live b').textContent = kept ? 'REPLAY' : V.phase === 'over' ? 'ENDED' : 'LIVE';
     const cam = b.querySelector('.cam');
     cam.hidden = V.phase !== 'on';
     cam.textContent = 'CAMERA: ' + (V.names[V.cam] || '') + '   ·   TAB TO SWITCH';
     // the result screen has the end, when it is drawn (art.js); the card has everything else
     const card = b.querySelector('.card');
     card.hidden = V.phase === 'on' || (V.phase === 'over' && !!M.shown && !!window.PVP_ART && typeof PVP_ART.result === 'function');
-    const [h2, p] = V.phase === 'off' ? ['CAN\'T WATCH THIS ONE', V.why] : CARD[V.phase] || ['', ''];
+    const [h2, p] = V.phase === 'off' ? ['CAN\'T WATCH THIS ONE', V.why]
+                  : V.phase === 'pick' && V.why ? [CARD.pick[0], V.why + ' ' + CARD.pick[1]] : CARD[V.phase] || ['', ''];
     b.querySelector('.card h2').textContent = h2;
     b.querySelector('.card p').textContent = p;
+    b.querySelector('.card input').hidden = V.phase !== 'pick';
   }
 
   function close() {
@@ -351,16 +410,47 @@
   /* Nothing reaches the game: a viewer has no pilot. Tab moves the camera;
      the page's own button still works. */
   function deaf() {
-    const ours = e => !!(box && e.target && typeof box.contains === 'function' && box.contains(e.target));
+    // the page's own panels (this one, a replay's controls) keep their clicks
+    const ours = e => !!(e.target && typeof e.target.closest === 'function' && e.target.closest('[data-pvp-ui]'));
     for (const t of ['keydown', 'keyup', 'keypress'])
       addEventListener(t, e => {
         if (t === 'keydown' && e.key === 'Tab') { V.cam = 1 - V.cam; say(); }
+        if (t === 'keydown' && V.onKey) V.onKey(e);
         if (e.key === 'Tab' || e.key === ' ') e.preventDefault();
         e.stopImmediatePropagation();
       }, true);
     for (const t of ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'wheel', 'contextmenu',
                      'touchstart', 'touchmove', 'touchend', 'touchcancel', 'pointerdown', 'pointerup'])
-      addEventListener(t, e => { if (!ours(e)) e.stopImmediatePropagation(); }, true);
+      addEventListener(t, e => {
+        if (ours(e)) return;
+        if (V.onPointer) V.onPointer(e);
+        e.stopImmediatePropagation();
+      }, { capture: true, passive: t !== 'contextmenu' });
+  }
+
+  /* A replay (/play/?replay=<file>): the file from /replays/ beside the
+     page (put there by hand, on the build it was recorded on: replay.js),
+     or, without it there, the file chosen. */
+  function open(log) {
+    // (a file that is no replay leaves the page asking, saying so)
+    if (!log || log.v !== 1 || !log.head || !Array.isArray(log.batches) || !Array.isArray(log.snaps)) {
+      V.phase = 'pick';
+      V.why = 'That file isn\'t a replay.';
+      return say();
+    }
+    V.why = '';
+    V.id = typeof log.match === 'string' ? log.match : '';
+    V.phase = 'load';
+    V.play(log);
+    say();
+  }
+  async function load(name) {
+    try {
+      const r = await fetch('/replays/' + encodeURIComponent(name), { cache: 'no-store' });
+      if (r.ok) return open(await r.json());
+    } catch (e) {}
+    V.phase = 'pick';
+    say();
   }
 
   M.modes.watch = {
@@ -370,12 +460,13 @@
       V.v = viewerId();
       state = 'pvp';
       deaf();
+      if (M.hand.replay) { V.phase = 'load'; load(M.hand.replay); }
       say();
     },
     // the match's step (rounds.js), as a fighter's machine runs it
     waves(dt) { M.rounds.tick(dt); },
     frame() {
-      if (V.phase === 'off') return;
+      if (V.phase === 'off' || V.phase === 'pick' || (M.hand.replay && !V.file)) return;
       const due = V.file ? !V.head || V.askSnap : V.phase !== 'over' && Date.now() >= V.next;
       if (due && !V.busy) poll();
       if (V.phase === 'on' && state === 'play') {
@@ -392,4 +483,5 @@
 
   // a log in hand, played as if it were on air, from its start (the replay; the tests)
   V.play = log => { V.file = log; V.next = 0; };
+  V.open = open;       // and a replay's file, read: checked first (the page's own file chooser; the tests)
 })();

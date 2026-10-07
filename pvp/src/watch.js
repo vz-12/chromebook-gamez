@@ -17,8 +17,16 @@
             account (broadcast.js, view). Polled; `every` (ms) is how long
             the relay asks each viewer to wait before the next.
      GET ?match=<id>&replay=1
-         -> the whole log, as a file: dev accounts, and the accounts that
-            hold the pilot it shows (the trailer's; nobody else's)
+         -> the whole log, as a file, with the hidden pilot's code in it:
+            dev accounts, and the accounts that hold the pilot it shows (the
+            trailer's; nobody else's)
+     GET ?list=1
+         -> { broadcasts: [{ match, at, names }] }: the ones the same
+            accounts may keep, newest first (pvp_broadcasts, below), for the
+            lobby's REPLAYS card
+
+   pvp_broadcasts notes every match put on air, once, when its header is
+   taken: the broadcast itself is the object, which cannot be listed.
    ========================================================================= */
 import { sessionOf, originOk, clientIp } from '../../src/auth.js';
 import { vaultIds } from '../../src/vault.js';
@@ -35,6 +43,23 @@ const ask = (env, match, op, body) =>
 const passOn = async res => new Response(await res.text(), { status: res.status,
   headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
+const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_broadcasts (
+     match    TEXT    PRIMARY KEY,
+     pilot    TEXT    NOT NULL,           -- the hidden pilot it shows: its vault id
+     by       TEXT    NOT NULL,           -- the account that put it on air
+     started  INTEGER NOT NULL,
+     names    TEXT    NOT NULL            -- the two players, as their handshakes named them (JSON)
+   )`;
+const ready = new WeakSet();
+async function ensureBroadcasts(db) {
+  if (ready.has(db)) return;
+  await db.batch([db.prepare(SCHEMA), db.prepare('CREATE INDEX IF NOT EXISTS pvp_broadcasts_started ON pvp_broadcasts (started)')]);
+  ready.add(db);
+}
+// who may keep a broadcast's log: dev accounts, and the accounts that hold its pilot
+const keeps = (account, pilot) => (account.perks || []).includes('dev') || vaultIds(account.perks).includes(pilot);
+export const mayKeepAny = account => (account.perks || []).includes('dev') || vaultIds(account.perks).length > 0;
+
 export default async function watch(req, env) {
   if (!env.BROADCAST) return reply({ error: 'no relay: bind the Broadcast object as BROADCAST' }, 503);
   if (req.method === 'GET') return view(req, env);
@@ -44,14 +69,23 @@ export default async function watch(req, env) {
 
 async function view(req, env) {
   const u = new URL(req.url), match = u.searchParams.get('match') || '';
+  if (u.searchParams.get('list') === '1') {
+    const s = await sessionOf(req, env, { peek: true });
+    if (!s) return reply({ error: 'signed out' }, 401);
+    if (!mayKeepAny(s.account)) return reply({ error: 'not yours to keep' }, 403);
+    await ensureBroadcasts(env.DB);
+    const rows = ((await env.DB.prepare('SELECT match, pilot, started, names FROM pvp_broadcasts ORDER BY started DESC LIMIT 200').all()).results || [])
+      .filter(r => keeps(s.account, r.pilot)).slice(0, 50);
+    const names = t => { try { const v = JSON.parse(t); return Array.isArray(v) ? v.map(String) : []; } catch (e) { return []; } };
+    return reply({ broadcasts: rows.map(r => ({ match: r.match, at: r.started, names: names(r.names) })) });
+  }
   if (!isId(match)) return reply({ error: 'bad match' }, 400);
   if (u.searchParams.get('replay') === '1') {
     const s = await sessionOf(req, env, { peek: true });
     if (!s) return reply({ error: 'signed out' }, 401);
     const info = await (await ask(env, match, 'info', {})).json();
     if (!info.on) return reply({ error: 'not on air' }, 404);
-    const perks = s.account.perks || [];
-    if (!perks.includes('dev') && !vaultIds(perks).includes(info.pilot)) return reply({ error: 'not yours to keep' }, 403);
+    if (!keeps(s.account, info.pilot)) return reply({ error: 'not yours to keep' }, 403);
     const res = await ask(env, match, 'replay', {});
     if (!res.ok) return passOn(res);
     return new Response(await res.text(), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store',
@@ -91,7 +125,16 @@ async function feed(req, env) {
     const d = res.ok ? await res.json().catch(() => null) : null;
     if (!d || !d.ok || !isHidden(d.pilot) || !(await mayFly(env.DB, s.account, d.pilot)))
       return reply({ error: 'only the side flying a hidden pilot puts a match on air' }, 403);
-    return passOn(await ask(env, b.match, 'head', { acct, match: b.match, pilot: d.pilot, head: b.head, build: b.build }));
+    const aired = await ask(env, b.match, 'head', { acct, match: b.match, pilot: d.pilot, head: b.head, build: b.build });
+    // on air: noted once, for the lobby's list of what may be kept
+    if (aired.ok) {
+      const hl = Array.isArray(b.head.hellos) ? b.head.hellos : [];
+      const names = JSON.stringify([0, 1].map(k => String((hl[k] && hl[k].name) || '').slice(0, 24)));
+      await ensureBroadcasts(env.DB);
+      await env.DB.prepare('INSERT OR IGNORE INTO pvp_broadcasts (match, pilot, by, started, names) VALUES (?1, ?2, ?3, ?4, ?5)')
+        .bind(b.match, d.pilot, acct, Date.now(), names).run().catch(e => console.error('pvp broadcast note', e && e.message));
+    }
+    return passOn(aired);
   }
   if (b.op === 'in') return passOn(await ask(env, b.match, 'in', { acct, from: b.from, n: b.n, recs: b.recs, fps: b.fps }));
   if (b.op === 'snap') return passOn(await ask(env, b.match, 'snap', { acct, at: b.at, epoch: b.epoch, json: b.json }));

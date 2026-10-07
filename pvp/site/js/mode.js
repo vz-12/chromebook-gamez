@@ -16,6 +16,7 @@
      practice.js, match.js                     the kinds of play (`modes`)
      onair.js    played                        a match on air: its fight, to the relay
      watch.js    steps, played, cam            a match watched (/play/?watch=<match>)
+     replay.js   zoom, bare, frameSize         a replay, for the trailer (/play/?replay=<file>)
      preview.js                                the art hooks with sample data
                                                (/play/?preview=belt or =result)
 
@@ -35,16 +36,18 @@
   let hand = null;
   const preview = (/[?&]preview=(belt|result)(?:&|$)/.exec(location.search) || [])[1];
   const watching = (/[?&]watch=([0-9a-f]{32})(?:&|$)/.exec(location.search) || [])[1];
+  const replaying = (/[?&]replay=([\w.-]{1,80})(?:&|$)/.exec(location.search) || [])[1];
   if (preview) {
     // the art previews (preview.js): no lobby, no account, nothing fetched
     const all = { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: [], ups: [] };
     hand = { mode: 'preview', preview, pilot: 'runner',
              me: { account: { name: 'preview', display: 'YOU' }, unlocks: null, loadouts: { casual: all, ranked: all } } };
-  } else if (watching) {
-    /* A match watched (watch.js): no lobby and no account either. What it
-       flies, and who, comes from the match's own broadcast. */
+  } else if (watching || replaying) {
+    /* A match watched (watch.js), or a replay of one (replay.js: a file from
+       /replays/, on the build it was recorded on): no lobby and no account
+       either. What it flies, and who, comes from the match's own broadcast. */
     const all = { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: [], ups: [] };
-    hand = { mode: 'watch', watch: watching, pilot: 'runner',
+    hand = { mode: 'watch', watch: watching || null, replay: replaying || null, pilot: 'runner',
              me: { account: { name: 'viewer', display: 'VIEWER' }, unlocks: null, loadouts: { casual: all, ranked: all } } };
   } else {
     try { hand = JSON.parse(sessionStorage.getItem('vr_pvp_play') || 'null'); } catch (e) {}
@@ -126,6 +129,9 @@
     steps: () => false,                // the frame's steps, played by PvP itself: false leaves them to lockstep (watch.js)
     played() {},                       // a step of the shared game just played, with both records (onair.js, watch.js)
     cam: () => null,                   // the pilot the camera follows, or null for the game's own choice (watch.js)
+    zoom: z => z,                      // the camera's zoom, as the game would have it, or a replay's own (replay.js)
+    bare: () => false,                 // a replay captured with the HUD off (replay.js)
+    frameSize: () => null,             // a replay's fixed frame, { w, h, dpr }, or null for the window's (replay.js)
 
     // the other side's hidden pilot: its code, from the Worker, once this side is in the match (referee.js)
     async outsideFetch(id) {

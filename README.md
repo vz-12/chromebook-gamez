@@ -477,9 +477,26 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   the broadcast is handed it (`/api/pvp/pilot?id=<id>&watch=<match>`),
   because every viewer's game has to run it.
 - **The replay:** `GET /api/pvp/watch?match=<id>&replay=1` downloads the
-  whole log as a file, for dev accounts and the pilot's holders only. It
-  only plays on the exact build it was recorded on, so tag the commit on
-  fight day.
+  whole log as a file, for dev accounts and the pilot's holders only, with
+  the hidden pilot's code in it (the vault's, as it is at the download: take
+  it on fight day). The PvP lobby lists what an account may keep on a
+  REPLAYS card (`?list=1`, from the `pvp_broadcasts` table), each a
+  download.
+- **The replay page** (`pvp/site/js/replay.js`), for the trailer:
+  `/play/?replay=<file>` plays a downloaded log with no account and no
+  Worker, in a fixed 16:9 frame drawn at 1920x1080 (record the tab with
+  OBS). Space pauses; `-` and `+` set the speed (¼× to 4×); `←` `→` and the
+  bar go to a snapshot, Home to the start; `1` `2` put the camera on a
+  fighter, `3` frames both, `4` frees it (drag, wheel); `E` switches whose
+  eyes it is seen through (the other fighter's own screen: their HUD, and
+  what only they are shown of their pilot); `U` takes the game's HUD off,
+  `H` the page's own controls.
+- **A replay plays only on the build it was recorded on**, since any change
+  to the engine plays the same inputs differently: the log carries its
+  build and the page refuses any other, saying so. Tag the commit on fight
+  day; to play it, check that commit out, run `npm run dev:pvp`, put the
+  file in `pvp/site/replays/` (never committed) and open
+  `/play/?replay=<its name>`. Without the file there, the page asks for it.
 
 ## Ads
 

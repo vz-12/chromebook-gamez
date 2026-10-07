@@ -1144,7 +1144,8 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok((await code(anon, 'id=x7&watch=' + mid)).status === 404, 'before the match is on air, naming it hands nobody the pilot');
 
   // the feed: only the side flying the hidden pilot
-  const head = { v: 1, match: { queue: 'ranked', bestOf: 1, sides: [{ name: 'L_Holder', pilot: 'x7' }, { name: 'L_Top', pilot: 'runner' }] }, run: { seed: 7 } };
+  const head = { v: 1, match: { queue: 'ranked', bestOf: 1, sides: [{ name: 'L_Holder', pilot: 'x7' }, { name: 'L_Top', pilot: 'runner' }] }, run: { seed: 7 },
+                 hellos: [{ name: 'L_Holder' }, { name: 'L_Top' }] };
   const feed = (who, b) => who.call('POST', '/api/pvp/watch', Object.assign({ match: mid }, b));
   ok((await feed(anon, { op: 'head', head, build: 'b1.x' })).status === 401, 'signed out: refused');
   ok((await feed(S.pvp, { op: 'head', head, build: 'b1.x' })).status === 403, 'not in the match: refused');
@@ -1242,6 +1243,26 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
      && rh.d.end.at === 2400 && rh.d.build === 'b1.x' && rh.d.pilot === 'x7' && JSON.stringify(rh.d.head) === JSON.stringify(head),
      'the whole of it: header, every batch and snapshot, the end, the build it plays on', [rh.d.batches.length, rh.d.snaps.length]);
   ok(rd.status === 200 && rd.d.batches.length === 80, 'and so does a dev account');
+  ok(rh.d.pilots && rh.d.pilots.x7 === pilotCode && Object.keys(rh.d.pilots).join() === 'x7',
+     'with the hidden pilot\'s code in it, so the file plays with no account and no Worker (the replay page)', Object.keys(rh.d.pilots || {}));
+  // the lobby's REPLAYS card: what the same accounts may keep, and only they
+  const list = async who => { const r = await (who ? who.pvp : anon).call('GET', '/api/pvp/watch?list=1'); return r; };
+  const lh = await list(H), ld = await list(D);
+  ok(lh.status === 200 && lh.d.broadcasts.length === 1 && lh.d.broadcasts[0].match === mid && lh.d.broadcasts[0].names.join() === 'L_Holder,L_Top'
+     && lh.d.broadcasts[0].at > 0 && !JSON.stringify(lh.d).includes(H.id), 'the holder\'s list: the broadcast, when, and who fought', lh.d);
+  ok(ld.status === 200 && ld.d.broadcasts.some(b => b.match === mid), 'a dev account\'s too');
+  ok((await list(null)).status === 401 && (await list(T)).status === 403 && (await list(S)).status === 403, 'nobody else\'s: not signed out, not its opponent, not a stranger');
+  ok((await H.pvp.me()).d.replays === true && (await D.pvp.me()).d.replays === true && !('replays' in (await T.pvp.me()).d),
+     'the lobby is told who may keep replays, and the field is missing for everybody else');
+  const O = mk('L_Other', ['vault:x9']), lo = await list(O);
+  ok(lo.status === 200 && lo.d.broadcasts.length === 0 && (await O.pvp.call('GET', '/api/pvp/watch?match=' + mid + '&replay=1')).status === 403,
+     'another hidden pilot\'s holder has a list of their own, without this one in it, and may not keep it', [lo.status, lo.d]);
+  await feed(H.pvp, { op: 'head', head, build: 'b1.x' });
+  ok(DB.sql.prepare('SELECT COUNT(*) AS n FROM pvp_broadcasts WHERE match = ?').get(mid).n === 1 && (await list(H)).d.broadcasts[0].at === lh.d.broadcasts[0].at,
+     'a broadcast is noted once, when it first went on air, however often its header comes');
+  const lobbyHtml = readFileSync(new URL('../pvp/site/index.html', import.meta.url), 'utf8'), lobbyScript = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8');
+  ok(/<div class="card replays" id="replays" hidden>/.test(lobbyHtml) && /replays\(!!d\.replays\)/.test(lobbyScript)
+     && /'\/api\/pvp\/watch\?match=' \+ b\.match \+ '&replay=1'/.test(lobbyScript), 'the lobby lists them for whoever may keep them, each a download');
 
   // a log has a size it stops at
   const was = KEEP.MAX;
