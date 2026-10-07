@@ -1126,6 +1126,14 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
      'now with its words, and the pilot named as the words name it', g.d.live);
   ok(!JSON.stringify(g.d).includes(T.id) && !JSON.stringify(g.d).includes(H.id) && !JSON.stringify(g.d).includes('x7'),
      'and nothing more: no account, not the pilot\'s id');
+  // PvP's lobby asks its own Worker the same (pvp.js, live): one answer, from either address
+  forgetLive();
+  const pl = await anon.call('GET', '/api/live');
+  ok(pl.status === 200 && JSON.stringify(pl.d) === JSON.stringify(g.d), 'PvP\'s Worker gives its lobby the same answer', pl.d);
+  const lobby = readFileSync(new URL('../pvp/site/index.html', import.meta.url), 'utf8'), lobbyJs = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8');
+  ok(/<section class="card live" id="live" hidden>/.test(lobby) && lobby.indexOf('id="live"') < lobby.indexOf('id="loading"')
+     && /call\('GET', '\/api\/live'\)/.test(lobbyJs) && /'\/play\/\?watch=' \+ on\.match/.test(lobbyJs),
+     'the lobby has a LIVE card at the top, for everybody, that watches the match');
   tool(putSql('x7-air', Buffer.from(JSON.stringify({ t: 'ON AIR', x: 'Unnamed.', as: 'THE GUEST', named: false }))).sql);
   ok((await liveNow(DB)).live.names.join() === 'THE GUEST,', 'words saying named: false keep the other player\'s name off it');
   ok(tool(columnsSql()).map(r => r.name).join().includes('announce') && addedSql(tool(columnsSql()).map(r => r.name)) === '',

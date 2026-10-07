@@ -1131,6 +1131,7 @@ function inputDashTaken() {
 addEventListener('keydown', e => {
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
+  if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
   if (state === 'name') { nameKey(e); return; }
   // ROOT'S RITE: the console takes every key, so WASD and dash never land
   if (con.open) { conKey(e); return; }
@@ -37696,6 +37697,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
+    if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
       return;
@@ -38072,6 +38074,7 @@ function frame(now) {
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
+    try { Live.tick(); } catch (e) {}  // a PvP challenge on air, put in front of everybody (ON AIR)
   } catch (err) {
     // A thrown frame used to kill the rAF loop outright and freeze the
     // game mid-run. Drop the frame, keep the loop alive; losing a
@@ -45611,6 +45614,7 @@ function render() {
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   lsDrawHint();         // lockstep: who is choosing, who paused
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
+  drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
   if (!isTouch && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
@@ -59782,6 +59786,7 @@ function renderMenu() {
   drawMenuRush();
   drawMenuAcct();
   drawMenuPvp();
+  drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
@@ -68127,6 +68132,178 @@ function drawMenuPvp() {
   ctx.restore();
   ctx.restore();
   ctx.textAlign = 'center';
+}
+
+/* ===========================================================================
+   ON AIR (live spectating, step 3): a PvP challenge being fought, put in
+   front of everybody, signed in or not. The game asks its Worker's public
+   GET /api/live (src/live.js) when it starts and then as often as the
+   answer says: every minute while a challenge is on or near its date, every
+   quarter of an hour otherwise. A hidden tab asks nothing (the frame is
+   what asks). While one is on air:
+
+     the menu    a card over the whole of it: the announcement, both names,
+                 WATCH LIVE and NOT NOW. Once per broadcast per browser
+                 (LIVE_SEEN); put away, a LIVE strip pulses across the foot
+                 of the menu until the fight ends, and a click on it watches
+     a run       one line low on the screen when it goes on, and no pause
+                 (as a FORGOTTEN TALE's page is said)
+
+   WATCH opens PvP's watch page (/play/?watch=<match>, watch.js there) in a
+   tab of its own, so this game stays where it is. Not on PvP's page, which
+   has its own card (pvp.js), nor in BETA or a file.
+   ========================================================================= */
+const LIVE_URL = '/api/live';
+const LIVE_SEEN = 'voidrunner_live_seen';       // the broadcasts whose card this browser has been shown
+const LIVE_LINE = 6;                            // seconds the run's line stays
+const LIVE_CSS = `
+#live{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(4,6,12,.86);overflow:auto;cursor:auto;font-family:Barlow,'Segoe UI',system-ui,sans-serif;color:#cbd5e1}
+#live[hidden]{display:none}
+#live .card{width:100%;max-width:440px;margin:auto;padding:24px 22px 18px;text-align:center;background:rgba(8,13,22,.97);
+  border:1px solid rgba(248,113,113,.55);border-radius:12px;box-shadow:0 0 54px rgba(248,113,113,.14)}
+#live .tag{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;background:rgba(127,29,29,.88);
+  color:#fecaca;font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.18em}
+#live .tag i{width:8px;height:8px;border-radius:50%;background:#f87171;box-shadow:0 0 8px #f87171;animation:livePulse 1.2s ease-in-out infinite}
+@keyframes livePulse{50%{opacity:.25}}
+#live h2{margin-top:14px;font:800 19px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.1em;color:#fecaca}
+#live .vs{margin-top:8px;font:700 15px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.12em;color:#e2e8f0;overflow-wrap:anywhere}
+#live .x{margin-top:10px;font-size:14px;line-height:1.5;color:#94a3b8;white-space:pre-line}
+#live .x:empty{display:none}
+#live .go{display:block;width:100%;margin-top:18px;padding:12px;border-radius:7px;cursor:pointer;background:rgba(248,113,113,.16);
+  border:1px solid rgba(248,113,113,.8);color:#fecaca;font:700 13px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.16em}
+#live .go:hover{background:rgba(248,113,113,.28)}
+#live .no{margin-top:8px;padding:8px;background:none;border:0;cursor:pointer;color:#64748b;
+  font:600 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
+#live .no:hover{color:#94a3b8}`;
+
+const Live = {
+  on: null,                    // { match, since, t, x, names } while one is on air
+  next: 0,                     // when to ask again (performance.now, ms)
+  busy: false,
+  el: null,                    // the menu's card
+  line: null,                  // the run's line while it is up: { t }, the uiTime it was first drawn (null until it is)
+
+  off: () => !!PVP || BETA || location.protocol === 'file:',
+
+  // once a frame: asked when due, and the card put up at the menu when it should be
+  tick() {
+    if (Live.off()) return;
+    const now = performance.now();
+    if (!Live.busy && now >= Live.next) Live.ask();
+    if (Live.on && state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Live.seen(Live.on.match)) Live.show();
+    if (Live.el && !Live.el.hidden && (!Live.on || state !== 'menu')) Live.hide();
+  },
+
+  async ask() {
+    Live.busy = true;
+    let d = null;
+    try {
+      const r = await fetch(LIVE_URL);
+      d = r.ok ? await r.json() : null;
+    } catch (e) {}
+    Live.busy = false;
+    const every = d && Number.isFinite(d.every) ? d.every : 300;    // can't be read: five minutes
+    Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
+    if (!d) return;
+    const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
+    const was = Live.on;
+    Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
+                     names: [0, 1].map(k => String((Array.isArray(on.names) && on.names[k]) || '')) } : null;
+    // it has just gone on: a run in progress hears of it in one line, and goes on
+    if (Live.on && (!was || was.match !== Live.on.match) && state !== 'menu') Live.line = { t: null };
+  },
+
+  // a broadcast's card shown in this browser already? (and noted when it is)
+  seen(match) {
+    try { return (localStorage.getItem(LIVE_SEEN) || '').split(',').includes(match); } catch (e) { return false; }
+  },
+  saw(match) {
+    try {
+      const had = (localStorage.getItem(LIVE_SEEN) || '').split(',').filter(Boolean).filter(m => m !== match);
+      localStorage.setItem(LIVE_SEEN, had.slice(-9).concat(match).join(','));
+    } catch (e) {}
+  },
+
+  vs: () => (Live.on.names[0] || '???') + '  VS  ' + (Live.on.names[1] || 'THE #1'),
+
+  build() {
+    const st = document.createElement('style');
+    st.textContent = LIVE_CSS;
+    document.head.appendChild(st);
+    const el = document.createElement('div');
+    el.id = 'live'; el.hidden = true;
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    el.innerHTML = '<div class="card"><p class="tag"><i></i>LIVE NOW</p><h2></h2><p class="vs"></p><p class="x"></p>' +
+                   '<button type="button" class="go">WATCH LIVE  ↗</button><button type="button" class="no">NOT NOW</button></div>';
+    // pressed here is the card's, never the game's
+    for (const t of ['keydown', 'keyup', 'keypress']) el.addEventListener(t, e => {
+      e.stopPropagation();
+      if (t === 'keydown' && e.key === 'Escape') { e.preventDefault(); Live.later(); }
+    });
+    el.addEventListener('mousedown', e => e.stopPropagation());
+    el.querySelector('.go').addEventListener('click', () => Live.watch());
+    el.querySelector('.no').addEventListener('click', () => Live.later());
+    document.body.appendChild(el);
+    Live.el = el;
+  },
+  show() {
+    if (!Live.el) Live.build();
+    Live.el.querySelector('h2').textContent = Live.on.t || 'A CHALLENGE, LIVE';
+    Live.el.querySelector('.vs').textContent = Live.vs();
+    Live.el.querySelector('.x').textContent = Live.on.x;
+    Live.el.hidden = false;
+    if (!isTouch) Live.el.querySelector('.go').focus();
+    Live.saw(Live.on.match);
+    Audio_.select && Audio_.select();
+  },
+  hide() { if (Live.el) Live.el.hidden = true; },
+  up: () => !!(Live.el && !Live.el.hidden),
+  later() { Live.hide(); },
+
+  // the fight, in a tab of its own (PvP's watch page): this game stays where it is
+  watch() {
+    if (!Live.on) return;
+    window.open(PVP_ORIGIN + '/play/?watch=' + Live.on.match, '_blank', 'noopener');
+    Live.hide();
+  }
+};
+
+/* The menu's LIVE strip: across the foot of it, pulsing, while one is on air
+   and its card has been put away. */
+function liveStripRect() { return { x: 0, y: H - 34, w: W, h: 26 }; }
+function drawMenuLive() {
+  if (!Live.on || Live.up()) return;
+  const r = liveStripRect(), hot = !AcctUI.on && inRect(mouse.x, mouse.y, r), pulse = 0.5 + 0.5 * Math.sin(uiTime * 4);
+  ctx.save();
+  ctx.fillStyle = hot ? 'rgba(127,29,29,0.92)' : 'rgba(69,10,10,' + (0.72 + 0.12 * pulse).toFixed(3) + ')';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = rgba('#f87171', 0.35 + 0.45 * pulse);
+  ctx.fillRect(r.x, r.y, r.w, 1.5);
+  ctx.fillRect(r.x, r.y + r.h - 1.5, r.w, 1.5);
+  const msg = 'LIVE NOW   ·   ' + Live.vs() + (Live.on.t ? '   ·   ' + Live.on.t : '') + '   ·   WATCH  ↗';
+  ctx.textAlign = 'center';
+  ctx.letterSpacing = '0.14em';
+  fitFont(msg, W - 80, '700', 11, "'Chakra Petch', Barlow, system-ui, sans-serif", 7);
+  const tw = ctx.measureText(msg).width;
+  ctx.fillStyle = '#fecaca';
+  ctx.fillText(msg, W / 2 + 7, r.y + r.h / 2 + 4);
+  ctx.beginPath();
+  ctx.arc(W / 2 - tw / 2 - 6, r.y + r.h / 2, 3.4, 0, TAU);
+  ctx.fillStyle = rgba('#f87171', 0.4 + 0.6 * pulse);
+  ctx.fill();
+  ctx.restore();
+}
+// and the run's line, low on the screen, once, as it goes on air
+function drawLiveLine() {
+  const L = Live.line;
+  if (!L || !Live.on) { Live.line = null; return; }
+  if (state === 'menu') { Live.line = null; return; }
+  if (L.t === null) L.t = uiTime;
+  const age = uiTime - L.t;
+  if (age > LIVE_LINE) { Live.line = null; return; }
+  const a = clamp(Math.min(age / 0.35, (LIVE_LINE - age) / 0.6), 0, 1);
+  lsPill('LIVE NOW  ·  ' + Live.vs() + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
 }
 
 /* ===========================================================================

@@ -465,6 +465,14 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   eyes of the side that is not the hidden pilot (that player's HUD), so the
   broadcast shows nothing the challenger couldn't see. Tab switches the
   camera between the fighters; no key or click reaches the game.
+- **In the game** (ON AIR in `index.html`, `npm run test:live`): while one
+  is on air, a card covers the menu with the announcement, both names,
+  WATCH LIVE and NOT NOW, once per broadcast per browser. After that a LIVE
+  strip pulses across the foot of the menu until the fight ends; clicking it
+  watches. A run in progress gets one line low on the screen and no pause.
+  WATCH opens the fight in a tab of its own. The PvP lobby has a LIVE card
+  at the top for everybody, signed in or not (PvP's Worker serves
+  `/api/live` too).
 - **The pilot's code goes public** once its match is on air. Anyone naming
   the broadcast is handed it (`/api/pvp/pilot?id=<id>&watch=<match>`),
   because every viewer's game has to run it.

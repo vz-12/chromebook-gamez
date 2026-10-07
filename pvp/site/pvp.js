@@ -85,6 +85,26 @@
       : 'THE DAY IS STILL TO BE SET';
   }
 
+  /* A challenge on air (src/live.js, which the game's menu asks too): a card
+     at the top for everybody here, signed in or not, while it is on. Asked
+     again as often as the answer says; WATCH opens the fight in a tab of
+     its own (watch.js). */
+  const liveName = (s, k) => s || (k ? 'THE #1' : '???');
+  async function live() {
+    const r = await call('GET', '/api/live');
+    const on = r.ok && r.d && r.d.live && /^[0-9a-f]{32}$/.test(r.d.live.match) ? r.d.live : null;
+    $('live').hidden = !on;
+    if (on) {
+      $('liveHead').textContent = on.t || 'A CHALLENGE, LIVE';
+      $('liveVs').textContent = liveName(on.names[0], 0) + '  VS  ' + liveName(on.names[1], 1);
+      $('liveWords').textContent = on.x || '';
+      $('liveWatch').href = '/play/?watch=' + on.match;
+    }
+    const every = r.ok && r.d && Number.isFinite(r.d.every) ? r.d.every : 300;
+    setTimeout(live, Math.min(3600, Math.max(30, every)) * 1000);
+  }
+  live();
+
   function render(d) {
     const names = Object.assign({}, d.pilots);
     renderChallenge(d.challenge || null);
