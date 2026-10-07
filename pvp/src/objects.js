@@ -18,6 +18,7 @@
 import { REF, cleanReport, newSide, take, decide, nextLook, recorded } from './referee.js';
 import { recordMatch, applyRating, topOf } from './records.js';
 import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
+import { TOP_LEAGUE, tripChallenges, targetOf } from './challenge.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -205,6 +206,9 @@ export class Matchmaker extends Serial {
   async handle(op, b, now) {
     if (op === 'rate') {
       const r = await applyRating(this.env.DB, b.id);
+      // somebody placed in VOID by it: an armed challenge goes out now (challenge.js); the rating stands either way
+      if (r.moved && r.ratings.some(x => x.league === TOP_LEAGUE))
+        await tripChallenges(this.env.DB).catch(e => console.error('pvp challenge', e && e.message));
       return reply(r, r.ok ? 200 : 404);
     }
     if (!Object.prototype.hasOwnProperty.call(QUEUES, b.queue)) return reply({ error: 'unknown queue' }, 400);
@@ -259,12 +263,15 @@ export class Matchmaker extends Serial {
     const taken = new Set(), pairs = [];
     /* A hidden pilot's ticket (hidden.js) is paired with the season's #1 and
        nobody else, before anybody else is paired: never across any window,
-       never with another hidden one. */
+       never with another hidden one. Once it has sent its challenge
+       (challenge.js) it waits for the account it sent it to instead, #1 by
+       then or not; and if that cannot be read, for nobody this beat. */
     const hiddenT = open.filter(t => t.hidden);
     if (hiddenT.length) {
-      const top = await topOf(this.env.DB, queue).catch(() => null);
-      const one = top && open.find(u => !u.hidden && u.acct === top);
       const t = hiddenT[0];
+      let top = null;
+      try { top = (await targetOf(this.env.DB, t.pilot)) || (await topOf(this.env.DB, queue)); } catch (e) {}
+      const one = top && open.find(u => !u.hidden && u.acct === top);
       if (one && one.acct !== t.acct) { taken.add(t); taken.add(one); pairs.push([t, one]); }
       for (const h of hiddenT) taken.add(h);              // the rest wait, and nobody else is theirs
     }

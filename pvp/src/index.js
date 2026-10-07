@@ -19,7 +19,8 @@
      everything else  pvp/site
 
    A daily cron (wrangler.jsonc) files each finished season's rewards: the
-   ranked podium and league badges (seasons.js).
+   ranked podium and league badges (seasons.js). Then it sends any armed
+   challenge somebody in VOID has already tripped (challenge.js).
 
    A player arrives signed in from the game by a hand-off code, and goes back
    the same way (src/account.js, hand-offs).
@@ -34,6 +35,7 @@ import flags from './flags.js';
 import pilot from './hidden.js';
 import vault from '../../src/vault.js';
 import { closeSeasons } from './seasons.js';
+import { tripChallenges } from './challenge.js';
 
 export { Matchmaker, Match } from './objects.js';
 
@@ -62,11 +64,14 @@ export default {
     }
   },
 
-  // once a day: any finished season's rewards, filed (seasons.js)
+  // once a day: any finished season's rewards, filed (seasons.js); then any challenge due, sent (challenge.js)
   async scheduled(event, env, ctx) {
     if (!env.DB) return;
     ctx.waitUntil(closeSeasons(env.DB)
       .then(f => console.log(f.length ? 'pvp season rewards filed: ' + f.join(', ') : 'pvp: no season to close'))
-      .catch(e => console.error('pvp seasons', e && e.stack || e)));
+      .catch(e => console.error('pvp seasons', e && e.stack || e))
+      .then(() => tripChallenges(env.DB))
+      .then(s => { if (s.length) console.log('pvp challenges sent: ' + s.length); })
+      .catch(e => console.error('pvp challenges', e && e.stack || e)));
   }
 };

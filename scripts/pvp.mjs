@@ -912,6 +912,141 @@ section('seasons: the podium at the turn, and the soft reset');
   ok(nowAce.rating > rateMatch(START, START, true)[0].rating, 'so a strong player stays ahead of a newcomer who won the same match');
 }
 
+section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOID, sent to the top of ranked');
+{
+  const { armSql, dateSql, cancelSql, inVaultSql, challengesSql, checkDate, checkPilot } = await import('./lib/challenge-sql.mjs');
+  const { putSql } = await import('./lib/vault-sql.mjs');
+  const { tripChallenges, targetOf, TOP_LEAGUE } = await import('../pvp/src/challenge.js');
+  // what `npm run challenge` and `npm run vault` would send, run statement by statement as they do
+  const tool = sql => {
+    let rows = [];
+    for (const s of sql.split(/;\s*\n/).map(x => x.replace(/;\s*$/, '').trim()).filter(Boolean)) {
+      const st = DB.sql.prepare(s);
+      rows = /^SELECT/i.test(s) ? st.all() : (st.run(), []);
+    }
+    return rows;
+  };
+  const now = Date.now(), cur = seasonOf(now);
+  const row = p => DB.sql.prepare('SELECT * FROM pvp_challenges WHERE pilot = ?').get(p) || null;
+  // players of a few days, with runs, each signed in at PvP and in the game
+  let n = 0;
+  const mk = (name, perks = []) => {
+    const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), ip = '198.51.100.' + (130 + n++);
+    DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+      .run(id, name.toLowerCase(), name, '-', '-', JSON.stringify(perks), now - 3 * 864e5, now);
+    DB.sql.prepare("INSERT INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{\"runs\":25}', 'null', ?)").run(id, now);
+    DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)').run(sha(token), id, now, now, now + 864e5);
+    const p = tab(PVP, ip), g = tab(GAME, ip);
+    p.cookie = g.cookie = token;
+    return { id, pvp: p, game: g };
+  };
+  const rate = (who, rating, league, updated) => DB.sql.prepare(
+    `INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+     VALUES (?, 'ranked', ?, ?, 100, 0.06, 20, 10, 10, ?, ?)`).run(who.id, cur, rating, league, updated);
+  // the dev flies both test pilots, from the top of the ladder
+  const H = mk('C_Holder', ['vault:x9', 'vault:x8']), T = mk('C_Top'), U = mk('C_Climb'), L = mk('C_Low');
+  rate(H, 2600, 'void', now - 5000);
+  rate(T, 2098, 'platinum', now - 4000);
+  rate(U, 2050, 'platinum', now - 3000);
+  rate(L, 1600, 'gold', now - 2000);
+  const words = { t: 'TEST WORDS', x: 'Line one.\n\nLine two.' };
+  tool(putSql('x9', Buffer.from('/* a stand-in */')).sql);
+  tool(putSql('x9-words', Buffer.from(JSON.stringify(words))).sql);
+
+  ok(TOP_LEAGUE === 'void', 'the league that trips it is the highest: VOID');
+  ok((await tripChallenges(DB)).length === 0 && !row('x9'), 'nothing armed: nothing goes out, though the holder sits in VOID');
+  let threw = 0;
+  for (const p of ['runner', 'Not An Id', '']) { try { checkPilot(p); } catch (e) { threw++; } }
+  ok(threw === 3, 'the tool arms only a hidden pilot\'s vault id: never one of the game\'s own pilots');
+  ok(tool(inVaultSql(['x9', 'x9-words', 'nope'])).map(r => r.id).sort().join() === 'x9,x9-words', 'and finds what the vault holds before it arms anything');
+  tool(armSql('x9', 'x9-words', now));
+  ok(row('x9') && row('x9').armed === now && row('x9').tripped === null && row('x9').target === null, 'armed by hand', row('x9'));
+  ok((await tripChallenges(DB)).length === 0 && row('x9').tripped === null, 'the pilot\'s own holder in VOID trips nothing');
+  ok(!('challenge' in (await T.pvp.me()).d), 'nobody has it yet');
+
+  // rated matches, through the queue's Matchmaker as the referee sends them
+  const rateVia = async (a, b, winner) => {
+    const id = randomBytes(16).toString('hex');
+    DB.sql.prepare(`INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season)
+                    VALUES (?, 'ranked', 'platinum', 1, ?, ?, 'runner', 'ember', ?, 3, 1, 5, 'played', NULL, ?, ?, ?)`).run(id, a.id, b.id, winner, Date.now(), Date.now(), cur);
+    const mm = envPvp.MATCHMAKER;
+    return (await mm.get(mm.idFromName('ranked')).fetch('https://do/rate', { method: 'POST', body: JSON.stringify({ id }) })).json();
+  };
+  const r1 = await rateVia(U, L, 0);
+  ok(r1.moved && !r1.ratings.some(x => x.league === TOP_LEAGUE) && row('x9').tripped === null, 'a rated match that places nobody in VOID: still armed', r1.ratings);
+  const r2 = await rateVia(T, U, 0);
+  ok(r2.moved && r2.ratings[0].league === TOP_LEAGUE && r2.ratings[1].league !== TOP_LEAGUE, 'then one that does: the winner past 2100, into VOID', r2.ratings);
+  const c = row('x9');
+  ok(c.tripped > 0 && c.reached_by === T.id && c.season === cur, 'and the Matchmaker trips it there and then: when, by whom, in which season', c);
+  ok(c.target === T.id, 'sent to the top of ranked, passing over the holder above: the pilot does not challenge its own', c.target);
+  ok((await tripChallenges(DB)).length === 0 && row('x9').target === T.id && row('x9').tripped === c.tripped, 'tripped again: nothing more goes out');
+
+  // the lobby: the words, for the one it was sent to and nobody else
+  const mt = (await T.pvp.me()).d;
+  ok(mt.challenge && mt.challenge.t === words.t && mt.challenge.x === words.x && mt.challenge.due === null, 'their lobby has it: the words, and no date yet', mt.challenge);
+  ok(Object.keys(mt.challenge).sort().join() === 'due,t,x' && !JSON.stringify(mt).includes(T.id), 'and nothing else of it: not the pilot, not an account');
+  const seen = row('x9').seen;
+  ok(seen > 0, 'its first showing noted');
+  await T.pvp.me();
+  ok(row('x9').seen === seen, 'once');
+  for (const [who, said] of [[U, 'the #2'], [H, 'the holder'], [L, 'anybody else']])
+    ok(!('challenge' in (await who.pvp.me()).d), 'never in ' + said + '\'s lobby');
+  const page = readFileSync(new URL('../pvp/site/index.html', import.meta.url), 'utf8'), js = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8');
+  ok(/id="challenge" hidden/.test(page) && /renderChallenge\(d\.challenge/.test(js), 'the lobby has a place for it, hidden until there is one');
+  // the game's account reply: only that one waits, for the menu's PVP door
+  const ga = (await T.game.call('GET', '/api/account')).d;
+  ok(ga.challenge === true && ga.account.name === 'c_top' && Object.keys(ga).every(k => ['account', 'turnstile', 'challenge'].includes(k)),
+     'the game\'s account reply says one waits, and no more', ga);
+  ok(!('challenge' in (await U.game.call('GET', '/api/account')).d) && !('challenge' in (await tab(GAME, '198.51.100.150').call('GET', '/api/account')).d),
+     'and nothing for anybody else, signed in or not');
+
+  // the date: the tool's to set, in ISO with its zone
+  threw = 0;
+  for (const s of ['tomorrow', '2026-11-14T18:00', '2026-13-01T00:00Z']) { try { checkDate(s); } catch (e) { threw++; } }
+  ok(threw === 3 && checkDate('none') === null && checkDate('2026-11-14T13:00-05:00') === Date.UTC(2026, 10, 14, 18), 'a date is ISO with its zone, or none');
+  tool(dateSql('x9', checkDate('2026-11-14T18:00Z')));
+  ok((await T.pvp.me()).d.challenge.due === Date.UTC(2026, 10, 14, 18), 'set after it has gone out, the lobby has it');
+
+  // ranked: the pilot waits for the one it was sent to, though somebody else is #1 by now
+  rate(U, 2400, 'void', Date.now() + 1000);
+  const q = (who, b) => who.pvp.call('POST', '/api/pvp/queue', Object.assign({ queue: 'ranked' }, b));
+  ok((await q(H, { op: 'join', pilot: 'x9' })).d.state === 'waiting', 'its holder queues it in ranked');
+  ok((await q(U, { op: 'join', pilot: 'runner' })).d.state === 'waiting', 'the new #2 among the rest queues');
+  ok((await q(H, { op: 'poll' })).d.state === 'waiting' && (await q(U, { op: 'poll' })).d.state === 'waiting', 'and is not who it waits for');
+  const tj = await q(T, { op: 'join', pilot: 'runner' });
+  const hp = await q(H, { op: 'poll' }), tp = tj.d.state === 'matched' ? tj : await q(T, { op: 'poll' });
+  ok(hp.d.state === 'matched' && tp.d.state === 'matched' && hp.d.match.id === tp.d.match.id && tp.d.match.league.id === 'hidden',
+     'the one it was sent to queues: the two of them, in one match, to its own rules', [hp.d, tp.d]);
+  ok((await q(U, { op: 'poll' })).d.state === 'waiting', 'and the other waits on');
+  await q(U, { op: 'leave' });
+  tool(cancelSql('x9'));
+  ok(!row('x9') && (await targetOf(DB, 'x9')) === null && !('challenge' in (await T.pvp.me()).d), 'cancelled: gone, from the lobby too');
+
+  // armed after somebody is already in VOID: the daily cron sends it
+  tool(putSql('x8', Buffer.from('/* another */')).sql);
+  tool(putSql('x8-words', Buffer.from(JSON.stringify({ x: 'Other words.' }))).sql);
+  tool(armSql('x8', 'x8-words'));
+  ok(row('x8').tripped === null, 'armed while two are already in VOID: nothing until somebody looks');
+  const jobs = [], quiet = console.log;
+  console.log = () => {};
+  await pvp.scheduled({ cron: '20 0 * * *' }, envPvp, { waitUntil: p => jobs.push(p) });
+  await Promise.all(jobs);
+  console.log = quiet;
+  const c8 = row('x8');
+  ok(c8.tripped > 0 && c8.reached_by === T.id && c8.target === U.id,
+     'the daily cron sends it: tripped by the first one there, sent to whoever is on top now', c8);
+  const m8 = (await U.pvp.me()).d.challenge;
+  ok(m8 && m8.t === '' && m8.x === 'Other words.', 'their lobby has it; a title left out is the lobby\'s to fill', m8);
+  tool(armSql('x8', 'x9-words'));
+  ok(row('x8').words === 'x9-words' && row('x8').target === U.id && row('x8').tripped === c8.tripped, 'armed again once sent: only its words change');
+  const ls = tool(challengesSql());
+  ok(ls.length === 1 && ls[0].pilot === 'x8' && ls[0].reached_by === 'c_top' && ls[0].target === 'c_climb' && ls[0].seen !== '-' && ls[0].due === '-',
+     'the tool lists it, by name, never an id', ls);
+  DB.sql.prepare("UPDATE pvp_challenges SET words = 'gone' WHERE pilot = 'x8'").run();
+  ok(!('challenge' in (await U.pvp.me()).d), 'words the vault no longer holds: no challenge in the lobby, never half of one');
+  tool(cancelSql('x8'));
+}
+
 section('hardening: per-account limits on the busy routes');
 {
   forget();

@@ -71,8 +71,23 @@
     if (lo.pilots.includes(was)) sel.value = was;
   }
 
+  /* A challenge the server has sent this account (pvp/src/challenge.js): its
+     words as written, and its date in the player's own time once it has one.
+     It is answered in ranked, where the server pairs the two. */
+  function renderChallenge(c) {
+    $('challenge').hidden = !c;
+    if (!c) return;
+    $('challengeHead').textContent = c.t || 'A CHALLENGE';
+    $('challengeWords').textContent = c.x;
+    $('challengeWhen').textContent = c.due
+      ? new Date(c.due).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
+          .toUpperCase() + '  ·  PLAY RANKED THEN TO ANSWER IT'
+      : 'THE DAY IS STILL TO BE SET';
+  }
+
   function render(d) {
     const names = Object.assign({}, d.pilots);
+    renderChallenge(d.challenge || null);
     $('name').textContent = d.account.display;
     // their page on the game's leaderboard, at the address they came from (the school one, at school)
     $('profileLink').href = game() + '/leaderboard/#u/' + encodeURIComponent(d.account.name);
