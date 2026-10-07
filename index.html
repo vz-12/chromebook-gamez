@@ -38059,7 +38059,7 @@ function frame(now) {
     // freeplay can scale time; the step itself stays fixed so physics is intact
     const reps = freeRun && freeSpd > 1 ? Math.round(freeSpd) : 1;
     const slow = freeRun && freeSpd < 1 ? freeSpd : 1;
-    if (LS.on) lsFrame(dt);                // co-op in lockstep: see LOCKSTEP CO-OP
+    if (LS.on) { if (!(PVP && PVP.steps(dt))) lsFrame(dt); }   // co-op in lockstep: see LOCKSTEP CO-OP (PvP mode: a match watched plays its own)
     else while (acc >= STEP && guard++ < STEPS_PER_FRAME) {
       for (let k = 0; k < reps; k++) update(STEP * slow);
       acc -= STEP;
@@ -69794,7 +69794,8 @@ const MP = {
   ready: false,            // handshake done, both sides in the lobby
   name: '', peerName: '', peerChar: 0,
   lostT: 0,                // banner timer after a wingman drops
-  stalled: false           // waiting on the partner's input (lsFrame)
+  stalled: false,          // waiting on the partner's input (lsFrame)
+  said: null, heard: null  // the two hellos, ours and theirs, as they went (PvP mode: a match on air sends them on)
 };
 
 const mpHost  = () => MP.on && MP.role === 'host';
@@ -69803,6 +69804,8 @@ const mpGuest = () => MP.on && MP.role === 'guest';
 /* Who the camera is watching. Your own ship, unless it is on the floor and
    your partner is not — then theirs, because that is where the run is. */
 function mpCamSubject() {
+  const w = PVP && PILOTS.length > 1 && PVP.cam();   // PvP mode: a match watched follows whichever pilot it is told (watch.js)
+  if (w) return w;
   if (PILOTS.length < 2 || !P.down) return P;   // updateCamera runs as this machine's pilot
   return mpPilots() || P;
 }
@@ -69954,9 +69957,10 @@ function mpOutsideReady(m) {
 /* ------------------------------ shared events ----------------------------- */
 function mpOnOpen() {
   MP.role = Net.role;
-  netEvent({ t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(), pvp: PVP ? PVP.hello() : undefined,
-             cid: CHARS[selectedChar].id, outs: outsideOuts(),   // the pilot by its id, and the outside pilots run here (OUTSIDE PILOTS)
-             name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') });
+  MP.said = { t: 'hello', sig: NET_SIG(), build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(), pvp: PVP ? PVP.hello() : undefined,
+              cid: CHARS[selectedChar].id, outs: outsideOuts(),   // the pilot by its id, and the outside pilots run here (OUTSIDE PILOTS)
+              name: Save.profile.name || (Net.role === 'host' ? 'HOST' : 'WINGMAN') };
+  netEvent(MP.said);
   Audio_.select && Audio_.select();
 }
 
@@ -69970,6 +69974,7 @@ function mpOnEvent(m) {
         netFail(new Error('the other player has a different version of the game: reload both pages'));
         return;
       }
+      MP.heard = m;
       MP.peerName = String(m.name || '').slice(0, 14) || 'WINGMAN';
       MP.peerChar = mpPeerChar(m.cid, m.char);
       MP.peerAwake = !!m.awake;
@@ -70091,6 +70096,7 @@ const SNAP_LOCAL = new Set([
   'pilotSkin', 'IMP_STATE',              // and how a pilot is dressed: each machine's own idea of it
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
+  'mpHelloKept',                          // the other player's hello, read again once their outside pilot is here
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
@@ -70399,6 +70405,7 @@ const LS = {
   ckAt: 0, ckHash: 0,                   // our latest, sent with every packet
   past: new Map(),                      // step -> the records it was played with
   resyncT: 0, resyncs: 0, replayed: 0, syncNote: 0, inbound: null,
+  head: null,                           // the run's header, as the host sent it (PvP mode: a match on air sends it on)
   after: null                           // and a test's hook, run after every step
 };
 // this machine runs the co-op world: in lockstep, both do
@@ -70534,6 +70541,7 @@ function lsPlay(cur) {
   LS.past.set(t, cur); LS.past.delete(t - LS_PAST);   // kept a while: a guest may have to play it again (lsAdopt)
   LS.tick++;
   lsCheck();
+  if (PVP) PVP.played(cur, t);           // PvP mode: a match on air, and a match watched (onair.js, watch.js)
   if (LS.after) LS.after();               // a test's hook: the same moment on both machines
 }
 /* The frame, in lockstep: play the steps owed while both inputs are in hand,
@@ -70745,15 +70753,17 @@ function lsHostStart() {
   state = 'play';
   const delay = clamp(LS_DELAY_MIN + Math.ceil((Net.ping || 0) / 2 / (STEP * 1000)), LS_DELAY_MIN, LS_DELAY_MAX);
   lsBegin(run, delay);
-  netEvent({ t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
-             awake: P.awake ? 1 : 0, host: selectedChar, wing: MP.peerChar, wingAwake: MP.peerAwake ? 1 : 0, delay,
-             hostId: CHARS[selectedChar].id, wingId: (CHARS[MP.peerChar] || CHARS[0]).id,   // by id: see mpPeerChar
-             name: Save.profile.name || '' });
+  LS.head = { t: 'lsrun', run, seed: simSeed, view: { w: runView.w, h: runView.h }, flags: runPack(),
+              awake: P.awake ? 1 : 0, host: selectedChar, wing: MP.peerChar, wingAwake: MP.peerAwake ? 1 : 0, delay,
+              hostId: CHARS[selectedChar].id, wingId: (CHARS[MP.peerChar] || CHARS[0]).id,   // by id: see mpPeerChar
+              name: Save.profile.name || '' };
+  netEvent(LS.head);
   banner('CO-OP ENGAGED', WING_COL, 2.0);
 }
 // guest: the same run, from the header
 function lsGuestStart(h) {
   if (MP.myChar == null) MP.myChar = selectedChar;
+  LS.head = h;
   const v = h.view || {};
   runSeedNext = (h.seed >>> 0);
   runViewNext = { w: +v.w || 1280, h: +v.h || 720 };

@@ -6,7 +6,7 @@
      POST { op: 'head', match, head, build }     -> { ok, next }
      POST { op: 'in', match, from, n, recs, fps } -> { ok, next } | 409 { need }
      POST { op: 'snap', match, at, epoch, json }  -> { ok }
-     POST { op: 'end', match, at, result }        -> { ok }
+     POST { op: 'end', match, at, result, left }  -> { ok }
          the feed: only from the account flying a hidden pilot in that match,
          one it holds (hidden.js), asked of the match itself as hidden.js
          does. The header settles who; the rest must come from the same
@@ -95,6 +95,6 @@ async function feed(req, env) {
   }
   if (b.op === 'in') return passOn(await ask(env, b.match, 'in', { acct, from: b.from, n: b.n, recs: b.recs, fps: b.fps }));
   if (b.op === 'snap') return passOn(await ask(env, b.match, 'snap', { acct, at: b.at, epoch: b.epoch, json: b.json }));
-  if (b.op === 'end') return passOn(await ask(env, b.match, 'end', { acct, at: b.at, result: b.result }));
+  if (b.op === 'end') return passOn(await ask(env, b.match, 'end', { acct, at: b.at, result: b.result, left: b.left }));
   return reply({ error: 'unknown op' }, 400);
 }

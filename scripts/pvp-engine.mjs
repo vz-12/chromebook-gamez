@@ -36,6 +36,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTSIDE_ARG = (() => { const i = process.argv.indexOf('--outside'); return i >= 0 ? process.argv[i + 1] : null; })();
 const IDX = join(ROOT, 'index.html');
 const SITE = join(ROOT, 'pvp', 'site');
+/* The hidden pilot the duels fly: the module given, or the tests' stand-in
+   (scripts/fixtures/outside-pilot.js) with duel rules of its own. */
+const HIDDEN_MOD = OUTSIDE_ARG ? readFileSync(OUTSIDE_ARG, 'utf8') : readFileSync(join(ROOT, 'scripts', 'fixtures', 'outside-pilot.js'), 'utf8')
+  .replace('hp: 110, speed: 270, dmg: 10, rate: 4.8,',
+           'hp: 110, speed: 270, dmg: 10, rate: 4.8,\n  duel: { deal: { hitCap: 0.05, burstCap: 0.1 }, take: { hitCap: 0.02, burstCap: 0.04 } },');
 
 let fails = 0, passes = 0;
 function ok(cond, what, extra) {
@@ -132,9 +137,9 @@ const DUELIST = signedIn('Duelist'), RIVAL_ACCT = signedIn('Rival');
 function referee(win, who) {
   const rec = win.fetch;
   win.fetch = (u, init = {}) => {
-    // the referee, and a hidden pilot's code for the other side of its match (pvp/src/hidden.js)
+    // the referee, a hidden pilot's code for the other side of its match (pvp/src/hidden.js), and a match on air (onair.js)
     const path = String(u);
-    if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?')) return rec(u, init);
+    if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?') && path !== '/api/pvp/watch') return rec(u, init);
     win.__net.push('fetch ' + path);
     return pvpWorker.fetch(new Request(PVP_ORIGIN + path, {
       method: init.method || 'GET', body: init.body,
@@ -901,9 +906,7 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
      with duel rules of its own, put in the vault and given to the host's
      account only (pvp/src/hidden.js). The guest has never had it. */
   const { putSql, giveSql } = await import('./lib/vault-sql.mjs');
-  const MOD = OUTSIDE_ARG ? readFileSync(OUTSIDE_ARG, 'utf8') : readFileSync(join(ROOT, 'scripts', 'fixtures', 'outside-pilot.js'), 'utf8')
-    .replace('hp: 110, speed: 270, dmg: 10, rate: 4.8,',
-             'hp: 110, speed: 270, dmg: 10, rate: 4.8,\n  duel: { deal: { hitCap: 0.05, burstCap: 0.1 }, take: { hitCap: 0.02, burstCap: 0.04 } },');
+  const MOD = HIDDEN_MOD;
   DB.sql.exec(putSql('x0', Buffer.from(MOD)).sql);
   DB.sql.exec(giveSql('duelist', 'x0'));
   const OTHER = signedIn('Onlooker');
@@ -973,6 +976,234 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   ok(!matchRows().some(r => r.id === mid || r.a_pilot === 'x0' || r.b_pilot === 'x0'), 'and it is recorded nowhere: no ladder, profile or history');
   const note = roomOf(H).__q['.note'].textContent;
   ok(note === (v && v.v === 'played' ? 'best of ' + H.run('RUN.pvp.bestOf') : 'a win by forfeit') + '  ·  not recorded', 'the host is told so', note);
+}
+
+section('live spectating: a hidden pilot\'s match on air, watched from the start, joined late, and kept');
+{
+  /* The duelist's machine flies the hidden pilot (x0, given to its account
+     above), so it puts the match on air (onair.js); viewers with no account
+     play it from the relay (watch.js) on copies of their own. */
+  const { Broadcast } = await import('../pvp/src/broadcast.js');
+  envPvp.BROADCAST = makeNamespace(Broadcast, envPvp);
+  // a viewer: no account, no cookie; it asks only the relay, and PvP's Worker for the pilot
+  const viewerNet = win => {
+    const rec = win.fetch;
+    win.fetch = (u, init = {}) => {
+      const path = String(u);
+      if (!path.startsWith('/api/pvp/watch') && !path.startsWith('/api/pvp/pilot?')) return rec(u, init);
+      win.__net.push((init.method && init.method !== 'GET' ? init.method + ' ' : 'fetch ') + path);
+      return pvpWorker.fetch(new Request(PVP_ORIGIN + path, { method: init.method || 'GET', body: init.body,
+        headers: Object.assign({}, init.headers, { 'cf-connecting-ip': '203.0.113.99' }) }), envPvp);
+    };
+  };
+  const watcher = (mid, dress) => loadGame(IDX, { search: '?watch=' + mid, scripts: [WALL].concat(pvpScripts),
+    before: win => { rooms(win); recorder(win); viewerNet(win); win.location.replace = u => { win.__replaced = u; }; if (dress) dress(win); } });
+  // every engine keeps its fingerprints, one a second, for the whole fight (lockstep keeps only the last few)
+  const KEEP_CK = `globalThis.__ck = new Map(); { const was = LS.after;
+    LS.after = () => { if (was) was(); if (LS.tick % 60 === 0) __ck.set(LS.tick, LS.ckMine.get(LS.tick)); }; }`;
+  const VIEW_FRAME = '__wall += 1000 / 60; if (LS.on) { if (!PVP.steps(1 / 60)) lsFrame(1 / 60); } PVP.frame();';
+  // and one viewer through the engine's own frame (its steps handed to PVP.steps there), drawn every time, as a browser's is
+  const REAL_FRAME = '__wall += 1000 / 60; frame(last + 1000 / 60);';
+  const step = v => v.run(v.real ? REAL_FRAME : VIEW_FRAME);
+  const sameAs = (a, b, from = 0) => {
+    const ka = new Map(a.run('[...__ck]')), kb = new Map(b.run('[...__ck]'));
+    const both = [...ka.keys()].filter(t => t >= from && kb.has(t));
+    return { n: both.length, parted: both.filter(t => ka.get(t) !== kb.get(t)).slice(0, 3) };
+  };
+  async function air(H, G, ship, views, frames, done) {
+    let i = 0;
+    for (; i < frames; i++) {
+      H.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); ship(H, G);
+      G.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); ship(G, H);
+      for (const v of views) step(v);
+      if (i % 30 === 0) { H.run('render()'); G.run('render()'); for (const v of views) if (!v.real) v.run('render()'); }
+      if (i % 10 === 0) { await settle(); if (done && done()) break; }
+    }
+    return i;
+  }
+  const relay = mid => envPvp.BROADCAST.instances.get(mid);
+  const meta = mid => relay(mid) && relay(mid).data.get('m');
+
+  /* Each fighter with real reward upgrades of its own, so the cards dealt
+     depend on whose they are: a viewer dealing from any pool but theirs
+     parts from the fight at the first card (cards.js; watch.js, upsOf). */
+  const rewards = g.run('UPGRADES.filter(u => u.lock || u.need).map(u => u.id)');
+  const withUps = (me, ups) => Object.assign({}, me, { loadouts: { ranked: me.loadouts.ranked, casual: Object.assign({}, me.loadouts.casual, { ups }) } });
+  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', me: withUps(ME, rewards.slice(0, 3)), outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: withUps(RIVAL, rewards.slice(3, 6)) }, RIVAL_ACCT);
+  await flush();
+  const mid = H.run('PVP.ref.id');
+  // a viewer arrives before the fight: it waits
+  const V1 = watcher(mid);
+  V1.real = true;
+  V1.run(KEEP_CK);
+  for (let i = 0; i < 90; i++) step(V1);
+  await flush();
+  ok(V1.run('PVP.hand.mode') === 'watch' && !V1.win.__replaced && V1.run('state') === 'pvp' && V1.run('PVP.watch.phase') === 'wait',
+     'a viewer opens /play/?watch=<match> with no lobby and no account, and waits for the fight', [V1.run('PVP.watch.phase'), V1.win.__replaced]);
+  ok(V1.win.__net.length >= 1 && V1.win.__net.every(n => n.startsWith('fetch /api/pvp/watch?match=' + mid + '&from=-1')), 'asking the relay, which has nothing yet', V1.win.__net);
+
+  const ship = link(H, G);
+  for (let i = 0; i < 10 && !G.run('CHARS.some(c => c.id === "x0")'); i++) await flush();
+  ship(G, H);
+  H.run('runSeedNext = 9061');                 // the fight's seed, fixed, so a failing run can be played again
+  H.run('PVP.frame()'); ship(H, G);
+  ok(H.run('state') === 'play' && G.run('state') === 'play', 'the duel starts');
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH + KEEP_CK);
+  // (the fight may end on its own: the hidden pilot can win its rounds before anybody leaves)
+  const fightOn = () => !!H.run('LS.on && !(RUN.pvp && RUN.pvp.phase === "over")');
+  let threw = null;
+  try { await air(H, G, ship, [V1], 60 * 25); } catch (e) { threw = e; }
+  ok(!threw && fightOn(), 'twenty-five seconds on air, watched, without an error', String(threw && threw.stack));
+
+  // a viewer arriving now starts from the latest snapshot, and catches up while the fight goes on
+  const L = watcher(mid);
+  L.run(KEEP_CK);
+  const joinedAt = H.run('LS.tick');
+  try {
+    await air(H, G, ship, [V1, L], 60 * 40,
+      () => !fightOn() || (L.run('PVP.watch.adopted') > 0 && H.run('LS.tick') - L.run('LS.tick') <= 360));
+  } catch (e) { threw = e; }
+  ok(!threw && L.run('PVP.watch.adopted') === 1, 'a late viewer is handed the latest snapshot, and takes it over', [String(threw), L.run('PVP.watch.adopted')]);
+  const lagL = H.run('LS.tick') - L.run('LS.tick'), caught = (H.run('LS.tick') - joinedAt) / 60;
+  ok(fightOn() && lagL >= 150 && lagL <= 400 && caught < 30, 'and catches up to three seconds behind live, ' + Math.round(caught) + ' s after arriving', [lagL, caught]);
+
+  // the feed: the hidden pilot's side, and only it
+  const m = meta(mid);
+  ok(m && m.pilot === 'x0' && m.by === DUELIST.id && m.build === H.run('buildId()') && m.n > 20 && m.last > 60 * 28,
+     'the hidden pilot\'s machine put it on air: its build, a batch every half second', m && [m.pilot, m.n, m.last]);
+  ok(m.snaps.length >= 2 && m.snaps[0].at === 900 && m.snaps[1].at === 1800, 'and a snapshot every fifteen seconds of the fight', m.snaps.map(s => s.at));
+  const head = relay(mid).data.get('h');
+  ok(head && head.run && head.run.t === 'lsrun' && head.run.seed === H.run('simSeed') && head.hellos.length === 2
+     && head.hellos[0].cid === 'x0' && head.hellos[1].cid === 'ember' && head.match === null,
+     'its header: the run as the guest was handed it, both handshakes, the host\'s first; a friend\'s match has no record', head && head.hellos.map(x => x.cid));
+  ok(!JSON.stringify(head).includes(DUELIST.id) && !JSON.stringify(head).includes(RIVAL_ACCT.id), 'with no account in it');
+  ok(!G.win.__net.some(n => n.includes('/api/pvp/watch')), 'the other side, flying one of the game\'s pilots, sends nothing', G.win.__net.filter(n => n.includes('watch')));
+
+  // the viewer, three seconds behind and in step all the way
+  ok(V1.run('PVP.watch.phase') === 'on' && V1.run('pilotP(0).charId') === 'x0' && V1.run('pilotP(1).charId') === 'ember',
+     'the viewer plays the fight: both pilots, the hidden one fetched for it', [V1.run('PVP.watch.phase'), V1.run('PILOTS.length')]);
+  ok(V1.win.__net.includes('fetch /api/pvp/pilot?id=x0&watch=' + mid), 'its code from PvP\'s Worker, for a broadcast it flies in', V1.win.__net.filter(n => n.includes('pilot')));
+  ok(V1.win.__net.every(n => /^fetch \/api\/pvp\/(watch\?match=|pilot\?id=x0&watch=)/.test(n)), 'and nothing else asked, nothing sent', V1.win.__net.filter(n => !/^fetch \/api\/pvp\/(watch|pilot)/.test(n)));
+  ok(V1.run('MP.role') === 'guest' && V1.run('pilotMine()') === 1, 'through the challenger\'s eyes, not the hidden pilot\'s');
+  ok(rewards.length >= 6 && [0, 1].every(k => V1.run(`JSON.stringify(PVP.upsOf(${k}))`) === H.run(`JSON.stringify(PVP.upsOf(${k}))`))
+     && H.run('JSON.stringify(PVP.upsOf(0))') === JSON.stringify(rewards.slice(0, 3)),
+     'dealing from each fighter\'s own reward upgrades, as their handshakes have them', [V1.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
+  const lag = H.run('LS.tick') - V1.run('LS.tick');
+  ok(lag >= 150 && lag <= 400, 'about three seconds behind live', lag);
+  let same = sameAs(H, V1);
+  const secs = Math.floor(V1.run('LS.tick') / 60);
+  ok(same.n >= secs - 1 && !same.parted.length, 'every second the same fingerprint as the fighters\' own', [same, secs]);
+  ok(V1.run('PVP.watch.checked') >= secs - 3 && V1.run('PVP.watch.parted') === 0 && V1.run('PVP.watch.adopted') === 0,
+     'held up against the relay\'s every second, and never once needing a snapshot', [V1.run('PVP.watch.checked'), V1.run('PVP.watch.parted')]);
+  ok(sameGame(H, G).parted.length === 0 && H.run('LS.resyncs') === 0 && G.run('LS.resyncs') === 0, 'and the fighters\' own game none the worse for it');
+  // the camera: on the challenger, then on the hidden pilot
+  ok(V1.run('PVP.cam() === pilotP(1)'), 'the camera starts on the challenger');
+  V1.run('PVP.watch.cam = 0');
+  await air(H, G, ship, [V1], 90);
+  ok(V1.run('Math.hypot(cam.x - pilotP(0).x, cam.y - pilotP(0).y)') < 260 && V1.run('pilotMine()') === 1,
+     'switched (Tab), it follows the hidden pilot, through the same eyes', V1.run('Math.hypot(cam.x - pilotP(0).x, cam.y - pilotP(0).y)'));
+
+  same = sameAs(H, L);
+  ok(same.n >= 8 && !same.parted.length && L.run('PVP.watch.parted') === 0 && L.run('PVP.watch.checked') >= 8,
+     'the late viewer, from the snapshot on: the same fingerprints as the fighters\'', same);
+
+  // a viewer on another build is told so, and plays nothing
+  const B = watcher(mid);
+  B.run("buildId = () => 'another.build'");
+  for (let i = 0; i < 30; i++) { B.run(VIEW_FRAME); if (i % 10 === 0) await settle(); }
+  await flush();
+  ok(B.run('PVP.watch.phase') === 'off' && /another version/.test(B.run('PVP.watch.why')) && !B.run('LS.on'),
+     'a viewer on another build refuses it and plays nothing', [B.run('PVP.watch.phase'), B.run('PVP.watch.why')]);
+
+  /* The safety net. A viewer whose own game parts from the fight (nudged here
+     as lockstep.mjs nudges a machine) finds it at its next fingerprint, takes
+     the latest snapshot over, and is the fight again; and when the fighters'
+     own games part, the host puts the guest back in step and the hidden
+     pilot's machine sends a snapshot of the new epoch at once, which every
+     viewer takes. */
+  const NUDGE = 'simRngState = (simRngState ^ 0x5bd1e995) >>> 0; for (const e of enemies) e.hp *= 0.93;';
+  let nudged = { viewer: -1, fight: -1 };
+  /* And a viewer whose own copy can never agree (its fingerprints planted
+     wrong, as a browser whose sums came out differently would leave them):
+     it takes each snapshot once and plays on from it, never the same one
+     again, since from it the same steps only part the same way. */
+  const Z = watcher(mid);
+  Z.run(KEEP_CK);
+  for (let i = 0; i < 120; i++) { step(Z); if (i % 10 === 0) await settle(); }
+  Z.run('{ const real = lsHash; lsHash = () => (real() ^ 1) >>> 0; }');
+  if (fightOn()) {
+    nudged.viewer = L.run('LS.tick');
+    L.run(NUDGE);
+    await air(H, G, ship, [V1, L, Z], 60 * 8);
+    const back = sameAs(H, L, nudged.viewer + 60 * 6);
+    ok(L.run('PVP.watch.parted') >= 1 && L.run('PVP.watch.adopted') === 2 && back.n >= 1 && !back.parted.length,
+       'a viewer that parts from the fight finds it at once, takes a snapshot, and is the fight again', [L.run('PVP.watch.parted'), L.run('PVP.watch.adopted'), back]);
+  }
+  if (fightOn()) {
+    const snaps = meta(mid).snaps.length, v1 = V1.run('PVP.watch.adopted');
+    nudged.fight = H.run('LS.tick');
+    H.run(NUDGE);
+    await air(H, G, ship, [V1, L, Z], 60 * 14);
+    const s = meta(mid).snaps;
+    ok(G.run('LS.resyncs') >= 1 && s.length > snaps && s.some(x => x.epoch >= 1 && x.at >= nudged.fight && x.at < nudged.fight + 300),
+       'the fighters part: the guest is put back in step, and a snapshot of the new epoch goes out at once', s.map(x => [x.at, x.epoch]));
+    const back = sameAs(H, V1, nudged.fight + 60 * 8);
+    ok(V1.run('PVP.watch.adopted') > v1 && V1.run('LS.epoch') >= 1 && back.n >= 1 && !back.parted.length,
+       'and a viewer takes it, back in step with the fight within seconds', [V1.run('PVP.watch.adopted'), back]);
+  }
+
+  const took = Z.run('PVP.watch.took.slice()');
+  ok(Z.run('PVP.watch.parted') >= 10 && took.length >= 1 && new Set(took).size === took.length && Z.run('PVP.watch.phase') === 'on',
+     'a viewer that can never agree takes each snapshot once, never the same one twice, and plays on', [Z.run('PVP.watch.parted'), took]);
+
+  /* The end: the guest leaves, unless the hidden pilot has already won it.
+     Either way the hidden pilot's machine says so, and every viewer plays to it. */
+  const quit = fightOn();
+  if (quit) { G.run('quitToMenu()'); ship(G, H); H.run('update(1 / 60); PVP.frame()'); G.run('PVP.frame()'); }
+  for (let i = 0; i < 60 * 20 && !(V1.run('PVP.watch.phase') === 'over' && L.run('PVP.watch.phase') === 'over'); i++) {
+    H.run('__wall += 1000 / 60; if (LS.on) lsFrame(1 / 60); else update(1 / 60); PVP.frame()');
+    if (!quit) { ship(H, G); G.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); ship(G, H); }
+    for (const v of [V1, L]) step(v);
+    if (i % 10 === 0) await settle();
+  }
+  const end = meta(mid).end, won = H.run('RUN.pvp && RUN.pvp.phase === "over" ? [RUN.pvp.winner, RUN.pvp.score[0], RUN.pvp.score[1]] : null');
+  ok(end && end.at === meta(mid).last + 1 && (quit ? end.result === null && end.left === 1
+     : !!won && end.result && end.result.winner === won[0] && end.result.score.join() === won.slice(1).join() && end.left === null),
+     'on air, the end: every step sent, then the end, ' + (quit ? 'with no result and who walked out (the guest)' : 'with the result'), [end, won]);
+  ok(V1.run('PVP.watch.phase') === 'over' && V1.run('LS.tick') === end.at && L.run('PVP.watch.phase') === 'over' && L.run('LS.tick') === end.at,
+     'every viewer plays to the very end', [V1.run('LS.tick'), L.run('LS.tick'), end.at]);
+  const outcome = quit ? 'left' : won[0] === 1 ? 'won' : 'lost';
+  console.log(`    (${(end.at / 60).toFixed(0)} s on air, ${quit ? 'ended by the guest leaving' : 'won ' + won.slice(1).join('–') + ' outright'}; ` +
+              `the late viewer caught up in ${caught.toFixed(0)} s; ${V1.run('PVP.watch.checked')} fingerprints held up, ${meta(mid).snaps.length} snapshots)`);
+  ok(V1.run('state') === 'pvp' && V1.run('PVP.shown && PVP.shown.r.outcome') === outcome && drawErrs(V1) === '',
+     'and shows the result screen: ' + outcome, [V1.run('PVP.shown && PVP.shown.r.outcome'), drawErrs(V1)]);
+  // fought out, from the challenger's side; walked out of by the challenger, from the side that stayed (the hidden pilot's)
+  ok(V1.run('PVP.shown.r.me.pilot') === (quit ? 'x0' : 'ember') && V1.run('PVP.shown.r.them.pilot') === (quit ? 'ember' : 'x0'),
+     quit ? 'from the side that stayed, as its own screen has it' : 'from the challenger\'s side', V1.run('[PVP.shown.r.me.pilot, PVP.shown.r.them.pilot]'));
+  // (but for the seconds after the fighters were nudged apart, before the snapshot that put everybody back)
+  const outside = t => !(nudged.fight >= 0 && t >= nudged.fight && t < nudged.fight + 60 * 8);
+  const sameBut = (a, b) => { const r = sameAs(a, b); r.parted = r.parted.filter(outside); return r; };
+  same = sameBut(H, V1);
+  ok(same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length && V1.run('frameErrors') === 0,
+     'the same fight as the fighters\', from the first second to the last, through the engine\'s own frame', [same, end.at, V1.run('frameErrors')]);
+
+  // the replay: the whole log, downloaded by the pilot's holder, played back on another copy
+  const res = await pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/watch?match=' + mid + '&replay=1',
+    { headers: { cookie: 'vr_s=' + DUELIST.token, origin: PVP_ORIGIN } }), envPvp);
+  const log = await res.json();
+  ok(res.status === 200 && log.batches.length === meta(mid).n && log.end && log.end.at === end.at, 'the holder downloads the replay', res.status);
+  const R = watcher(mid);
+  R.run(KEEP_CK);
+  R.ctx.__log = Object.assign(log, { pilots: { x0: HIDDEN_MOD } });   // the replay page brings the pilot's code (step 4)
+  R.run('PVP.watch.play(__log)');
+  for (let i = 0; i < 60 * 150 && R.run('PVP.watch.phase') !== 'over'; i++) { R.run(VIEW_FRAME); if (i % 30 === 0) await settle(); }
+  same = sameBut(H, R);
+  ok(R.run('PVP.watch.phase') === 'over' && R.run('LS.tick') === end.at && !R.win.__net.some(n => n.includes('/api/pvp/')),
+     'a replay plays from its first step to its last, asking nothing of anybody', [R.run('PVP.watch.phase'), R.run('LS.tick')]);
+  // (the fighters' parting is in the log too: the replay takes the same snapshot the viewers did, and nothing more)
+  ok(same.n >= Math.floor(end.at / 60) - 1 && !same.parted.length && R.run('PVP.watch.adopted') === (nudged.fight >= 0 ? 1 : 0),
+     'to the same fingerprints as the fight itself', [same, R.run('PVP.watch.adopted'), R.run('PVP.watch.parted')]);
 }
 
 section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody else');

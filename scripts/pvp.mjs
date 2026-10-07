@@ -1214,7 +1214,7 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   // the end, and the referee: off air
   ok((await feed(H.pvp, { op: 'end', at: 2400, result: { winner: 0, score: [1, 0] } })).status === 200, 'the end');
   v = await look('&from=2390');
-  ok(v.d.end && v.d.end.at === 2400 && v.d.end.result.winner === 0 && v.d.end.result.score.join() === '1,0', 'the viewers are told', v.d.end);
+  ok(v.d.end && v.d.end.at === 2400 && v.d.end.result.winner === 0 && v.d.end.result.score.join() === '1,0' && v.d.end.left === null, 'the viewers are told', v.d.end);
   ok((await H.pvp.call('POST', '/api/pvp/match', { op: 'report', id: mid, report: { left: true } })).status === 200, 'the holder leaves the match');
   ok(row().ended > 0, 'the referee decides it, and the challenge notes it', row());
   g = await gameLive();

@@ -172,6 +172,7 @@
       rating: null
     });
   }
+  M.scene = scene;                       // a match watched shows the same screen at its end (watch.js)
   function show(outcome) {
     M.shown = { at: Date.now(), r: scene(outcome) };
     if (window.PVP_ART && typeof PVP_ART.result === 'function') room().classList.add('result');

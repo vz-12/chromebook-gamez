@@ -36,13 +36,15 @@
   const PHASES = ['belt', 'picks', 'fight', 'end', 'over'];
 
   const match = () => (typeof RUN !== 'undefined' && RUN.pvp) || null;
-  const inMatch = () => !!(M.hand && M.hand.mode === 'match' && PILOTS.length > 1 && LS.on);
+  // a match: played, or watched (watch.js), whose copy of the game plays the very same one
+  const matchy = () => !!(M.hand && (M.hand.mode === 'match' || M.hand.mode === 'watch'));
+  const inMatch = () => matchy() && PILOTS.length > 1 && LS.on;
 
   /* The ad suggestion's bonus (PVP-PLAN.md, Phase 6 step 3): a friend's
      match only (a queued one carries a server's match, M.hand.match, and
      never a bonus), and only exactly ROUNDS.adBonus. Each machine says its
      own in the hello, so both deal the same opening picks (lockstep). */
-  const friendly = () => !!(M.hand && M.hand.mode === 'match' && !M.hand.match);
+  const friendly = () => matchy() && !M.hand.match;
   const ownBonus = () => (friendly() && M.hand.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0);
   const hello = M.hello, peerHello = M.peerHello;
   M.hello = () => Object.assign(hello(), { bonus: ownBonus() });

@@ -450,6 +450,21 @@ npm run vault -- put <entry> <file> --remote     # { "t": "title", "x": "text", 
 npm run challenge -- announce <pilot> <entry> --remote   # or none
 ```
 
+- **On air, from your machine** (`pvp/site/js/onair.js`): a match where
+  this side flies a hidden pilot is sent to the relay as it is played: the
+  header once, both pilots' inputs every half second with the game's
+  fingerprints, a snapshot every 15 seconds and whenever this machine's game
+  is put back in step, and the end. The other side sends nothing. If the
+  relay can't be reached, viewers wait; the match plays on regardless.
+- **Watching** (`pvp/site/js/watch.js`): `/play/?watch=<match>` on the PvP
+  address, with no lobby and no account. It builds the run from the header,
+  as a guest does, and plays it about 3 seconds behind live, faster when it
+  falls behind. Every second it checks its fingerprint against the
+  fighter's; if they differ, or it has fallen far behind, it takes the
+  latest snapshot over. A late viewer starts from one. It sees through the
+  eyes of the side that is not the hidden pilot (that player's HUD), so the
+  broadcast shows nothing the challenger couldn't see. Tab switches the
+  camera between the fighters; no key or click reaches the game.
 - **The pilot's code goes public** once its match is on air. Anyone naming
   the broadcast is handed it (`/api/pvp/pilot?id=<id>&watch=<match>`),
   because every viewer's game has to run it.

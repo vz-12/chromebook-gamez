@@ -26,7 +26,8 @@
      snap    the whole fight at a step, as snapWrite writes it ({ at, epoch,
              json }), kept in pieces (KEEP.PART), every one of them: a replay
              seeks by them
-     end     the fight is over: { at, result }
+     end     the fight is over: { at, result }, or with no result, the side that
+             walked out (left)
      view    a viewer's poll, open to anyone (view(), below)
      replay  the whole log at once (watch.js says to whom)
      info    whether there is a broadcast, and of which pilot (hidden.js)
@@ -211,7 +212,8 @@ export class Broadcast extends Serial {
         const r = b.result && typeof b.result === 'object' ? b.result : null;
         m.end = { at: int(b.at, 0, 1e9) ? b.at : m.last + 1, t: now,
                   result: r && (r.winner === 0 || r.winner === 1) && Array.isArray(r.score) && r.score.length === 2
-                    && int(r.score[0], 0, 9) && int(r.score[1], 0, 9) ? { winner: r.winner, score: [r.score[0], r.score[1]] } : null };
+                    && int(r.score[0], 0, 9) && int(r.score[1], 0, 9) ? { winner: r.winner, score: [r.score[0], r.score[1]] } : null,
+                  left: b.left === 0 || b.left === 1 ? b.left : null };   // with no result: the side that walked out, if known
         await S.put('m', m);
       }
       return reply({ ok: true });
