@@ -38206,6 +38206,7 @@ function update(dt) {
   if (state === 'menu' || state === 'name') {
     updateMenu(dt);
     // updateMenu can move us elsewhere; the notes only belong on the menu
+    if (state === 'menu') linksTick();   // a co-op room someone sent, first (LINKS)
     if (state === 'menu') logAutoTick(dt);
     return;
   }
@@ -59547,6 +59548,17 @@ function drawDead() {
     ctx.fillText(d, CENTER, y + 30);
   });
 
+  // the challenge someone sent, beaten by this run (LINKS)
+  if (s.vsBeat) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    const t = '⚔  YOU BEAT ' + clipText(s.vsBeat.n.toUpperCase(), 14) + "'S " + s.vsBeat.s.toLocaleString() + '  —  SHARE IT';
+    fitFont(t, wide, '700', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText(t, CENTER, y + 12);
+    ctx.restore();
+  });
+
   // what this pilot carried, as the cards it took (AFTER THE RUN)
   const chips = chipLayout(recap.build, Math.min(560, W - 56), 3);
   if (chips.length) row(24 + chips.length * CHIP_LINE, y => {
@@ -59609,7 +59621,7 @@ function renderMenu() {
      the prompt, the run totals. On a short window it used to run straight
      through the footer and off the bottom edge, so it now scales and centres
      itself in the room left between the corner badges and the footer. */
-  const COL_TOP = -152, COL_BOT = 238;
+  const COL_TOP = -152, COL_BOT = QOL.vs ? 262 : 238;   // and a line more for a challenge (LINKS)
   /* Below this the footer is decoration standing between the column and the
      bottom of the screen, so it stands down and the column takes the room. */
   const roomy = H >= 430, tiny = H < 340;
@@ -59720,6 +59732,7 @@ function renderMenu() {
     ctx.fillStyle = '#475569';
     ctx.fillText(totals, cxp, cyp + 224);
   }
+  drawVsLine(cxp, cyp + 248, (W - 40) / menuScale);   // LINKS
   ctx.restore();                     // end of the scaled centre column
 
   // leaderboard — the global board when it's reachable, your own runs otherwise
@@ -59786,7 +59799,7 @@ function renderMenu() {
     if (global) boardLink(px, py + all.length * 17 + 8);
     ctx.textAlign = 'center';
   } else {
-    const ly = cyp + 250 * menuScale;
+    const ly = cyp + (QOL.vs ? 274 : 250) * menuScale;
     const room = (FOOT_TOP - 22) - (ly + 18);  // 22px of air above the footer
     const fits = room < 0 ? 0
                : Math.max(0, Math.min(all.length, Math.floor(room / rowGap) + 1));
@@ -63541,7 +63554,8 @@ const TIPS = [
   'The DAILY RUN [D] is the same run for everyone today. Only your first try is ranked.',
   'Clearing a CHALLENGE [K] puts its card in your pool for every run after.',
   'BOSS RUSH [B] is the bosses back to back, on a ladder of its own.',
-  'CO-OP [L]: two ships, one run. One of you hosts and reads out a code.',
+  'CO-OP [L]: two ships, one run. Host it and COPY INVITE LINK: your friend opens it and is in.',
+  'SHARE RUN sends a link that challenges a friend to beat your score, and tells you when they do.',
   'A BOMBER goes off when it dies, even when you kill it. Shoot it early, from far off.',
   'A SPLITTER breaks into smaller pieces. Kill it away from the crowd.',
   'A LANCER winds up before it lunges, and it commits. Step aside and it goes past.',
@@ -63573,7 +63587,7 @@ function deadRecap(s) {
   const p = coopMine(), C = CHARS.find(c => c.id === p.charId);
   const r = { by: p.hp <= 0 ? (p.hitBy || '') : '', build: runBuild(p), pilot: C ? C.n : '',
               tip: s === lastStats ? qolTip(p.charId) : '' };
-  if (s === lastStats) s.recap = r;
+  if (s === lastStats) { s.recap = r; vsCheck(s); }   // and the challenge someone sent (LINKS)
   return r;
 }
 
@@ -63599,7 +63613,8 @@ function shareText(s) {
   bits.push(n(s.kills) + ' kills', fmtTime(s.time));
   const lines = [head, bits.join(' · ')];
   if (Board.rank && !s.chal) lines.push('#' + Board.rank + ' on the global board');
-  lines.push('Can you beat it? ' + shareUrl());
+  if (s.vsBeat) lines.push('Beat ' + s.vsBeat.n + "'s " + n(s.vsBeat.s) + '. Your move');
+  lines.push('Can you beat it? ' + shareLink(s));
   return lines.join('\n');
 }
 function qolSay(t) { QOL.said = t; QOL.saidT = uiTime + 2.6; }
@@ -63941,6 +63956,106 @@ function drawRunNote() {
   ctx.restore();
 }
 
+
+/* LINKS (8 Oct 2026). The game travels by word of mouth, so a link carries
+   what a friend would say out loud:
+     ?vs=NAME&s=SCORE[&d=DAY]   "beat this". The menu puts the score up as a
+                                target, and the report says when it falls.
+                                With d, it was the daily of that day: on that
+                                day it is the same run for both, so the menu
+                                points at it.
+     ?join=CODE                 a co-op room. Straight into it, once a name
+                                has been given.
+   Both are read once as the page opens and taken off the address, so a
+   reload does not do them again. The challenge is kept (VS_KEY) until a
+   newer one replaces it; it says nothing to anyone else. */
+const VS_KEY = 'voidrunner_vs_v1';
+const LINK_NAME = /^[A-Za-z0-9 _.\-]{1,14}$/;        // what a callsign may be (nameKey, NAME_MAX)
+Object.assign(QOL, {
+  vs: null,             // { n, s, d, beat } the challenge this player was sent
+  joinCode: '',         // a co-op room to go into as soon as the menu is up
+  inviteSaid: '', inviteT: 0
+});
+function linksRead() {
+  if (PVP || BETA) return;
+  try { QOL.vs = JSON.parse(localStorage.getItem(VS_KEY) || 'null'); } catch (e) { QOL.vs = null; }
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (e) { return; }
+  const vs = (q.get('vs') || '').trim(), s = Math.floor(+q.get('s')), d = q.get('d') || '';
+  if (LINK_NAME.test(vs) && s > 0 && s < 1e11 && vs.toLowerCase() !== (Save.profile.name || '').toLowerCase()) {
+    QOL.vs = { n: vs, s, d: /^\d{4}-\d\d-\d\d$/.test(d) ? d : '', beat: 0 };
+    vsKeep();
+  }
+  const j = (q.get('join') || '').toUpperCase();
+  if (/^[A-Z0-9]{4}$/.test(j)) QOL.joinCode = j;
+  if (q.has('vs') || q.has('s') || q.has('d') || q.has('join')) {
+    for (const k of ['vs', 's', 'd', 'join']) q.delete(k);
+    const rest = q.toString();
+    try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash); } catch (e) { /* the address keeps them */ }
+  }
+}
+function vsKeep() { try { localStorage.setItem(VS_KEY, JSON.stringify(QOL.vs)); } catch (e) { /* kept for this visit only */ }
+}
+// a daily challenge is live only on its own day; another day's is just a score
+const vsDaily = () => !!(QOL.vs && QOL.vs.d && QOL.vs.d === Daily.day);
+/* Whether a run that just ended beat the challenge: on its day, a daily's
+   is beaten on that daily; otherwise by an ordinary run (the rush and the
+   challenges are scored as other games). */
+function vsCheck(s) {
+  const v = QOL.vs;
+  if (!v || v.beat || !s || s.freeplay || s.outside) return false;
+  const fair = vsDaily() ? !!(s.chal && s.chal.daily) : !s.chal;
+  if (!fair || s.score <= v.s) return false;
+  v.beat = s.score; vsKeep();
+  s.vsBeat = { n: v.n, s: v.s };
+  return true;
+}
+// once a frame at the menu: a room to join, once the player has a name
+function linksTick() {
+  if (!QOL.joinCode || state !== 'menu' || runCardUp() || hlProOn()) return;
+  const code = QOL.joinCode;
+  QOL.joinCode = '';
+  openLan();
+  lanView = 'join'; lanCode = code;
+  netJoin(code);
+}
+// what SHARE RUN links to: the game, carrying this run as a challenge when it can be one
+function shareLink(s) {
+  const name = Save.profile.name || '';
+  let u = shareUrl();
+  if (!s || !LINK_NAME.test(name) || !(s.score > 0)) return u;
+  if (s.chal && s.chal.daily) return u + '?vs=' + encodeURIComponent(name) + '&s=' + s.score + '&d=' + (Daily.day || '');
+  if (s.chal) return u;
+  return u + '?vs=' + encodeURIComponent(name) + '&s=' + s.score;
+}
+// the host's room, as a link: the wingman opens it and is in
+function lanInvite() {
+  if (!Net.code) return;
+  const url = shareUrl() + '?join=' + Net.code;
+  const said = t => { QOL.inviteSaid = t; QOL.inviteT = uiTime + 3; };
+  Audio_.select();
+  if (isTouch && navigator.share) {
+    navigator.share({ title: 'VOIDRUNNER', text: 'Fly with me in VOIDRUNNER: ' + url }).then(() => said('SENT'), () => {});
+    return;
+  }
+  qolCopy(url).then(ok => said(ok ? 'LINK COPIED — SEND IT TO YOUR WINGMAN' : 'COULD NOT COPY: THE CODE IS ' + Net.code));
+}
+// the challenge on the menu, under the run totals
+function drawVsLine(cx, y, maxW) {
+  const v = QOL.vs;
+  if (!v) return;
+  const n = clipText(v.n.toUpperCase(), 14), sc = v.s.toLocaleString();
+  const t = v.beat ? '✓  YOU BEAT ' + n + "'S " + sc + '   ·   SHARE YOUR RUN TO SEND ONE BACK'
+          : vsDaily() ? '⚔  ' + n + ' SCORED ' + sc + ' ON TODAY\'S DAILY   ·   PRESS D TO TAKE IT ON'
+          : v.d ? '⚔  ' + n + ' CHALLENGES YOU   ·   BEAT ' + sc + ' IN A RUN'
+          : '⚔  ' + n + ' CHALLENGES YOU   ·   BEAT ' + sc;
+  ctx.save();
+  ctx.letterSpacing = '0.1em';
+  fitFont(t, maxW, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+  ctx.fillStyle = v.beat ? '#4ade80' : rgba('#fbbf24', 0.75 + Math.sin(uiTime * 3) * 0.25);
+  ctx.fillText(t, cx, y);
+  ctx.restore();
+}
 
 /* ===========================================================================
    FIRST FLIGHT (8 Oct 2026)
@@ -64324,6 +64439,11 @@ function drawPauseAssist() {
    ========================================================================= */
 const CHANGELOG = [
   { id: 10, v: '1.5.2', date: '8 OCT 2026', lines: [
+    ['new', 'Challenge a friend. The link SHARE RUN copies now carries your score: whoever opens it '
+          + 'sees it on their menu as a score to beat, and their run report says when they have. '
+          + 'Share a daily and on that day it is the same run for both of you.'],
+    ['new', 'Co-op invite links. Host a run and press COPY INVITE LINK [I]: your wingman opens the '
+          + 'link and lands straight in your room, no code to type.'],
     ['new', 'FIRST FLIGHT. A new player\'s first run can be assisted, until THE WARDEN falls: tips '
           + 'on screen as you play, its attacks called out as they come, a softer first sector, a '
           + 'slower and weaker WARDEN, and one save from a blow that would end the run. PLAY offers '
@@ -72338,6 +72458,7 @@ function lanKey(k) {
 
   if (lanView === 'host') {
     if (k === 'c') { lanCycleChar(); return; }
+    if (k === 'i' && Net.code) { qolOnLift(lanInvite); return; }   // the room as a link (LINKS)
     return;
   }
 
@@ -72569,6 +72690,13 @@ function drawLan() {
     if (Net.phase === 'failed') {
       lanStatusLine(H / 2 + 112);
       lanButton('TRY AGAIN', 'h', cx - 90, H / 2 + 120, 180, 38, WING_COL);
+    } else if (Net.code) {
+      /* Or send it: the wingman opens the link and is in (LINKS). The status
+         moves up a line to make room inside the frame. */
+      lanStatusLine(H / 2 + 104);
+      const said = QOL.inviteSaid && uiTime < QOL.inviteT;
+      lanButton(said ? QOL.inviteSaid : isTouch ? 'SEND INVITE LINK' : 'COPY INVITE LINK   [I]', 'i',
+                cx - 140, H / 2 + 114, 280, 30, said ? '#4ade80' : WING_COL);
     } else {
       lanStatusLine(H / 2 + 124);
     }
@@ -74973,6 +75101,7 @@ if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)
 Save.init();
 runSaveLoad();            // a run left in progress, offered back at the menu (CONTINUE)
+linksRead();              // a challenge or a co-op room someone sent (LINKS)
 if (BETA) betaUnlockAll();
 if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;

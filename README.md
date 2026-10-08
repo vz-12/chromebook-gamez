@@ -547,6 +547,18 @@ Small things that help the game travel:
 - **SHARE RUN** on the run report copies a few lines about the run and a
   link to wherever it is being played (a phone gets its share sheet). Nothing
   is sent anywhere by the game.
+- **Links** (LINKS in `index.html`), read once as the page opens and taken
+  off the address:
+  - `?vs=NAME&s=SCORE` is a challenge: the menu shows the score to beat, and
+    the run report says when an ordinary run beats it. SHARE RUN's link
+    carries the player's own. Kept in the browser (`voidrunner_vs_v1`) until
+    a newer one comes.
+  - `&d=YYYY-MM-DD` makes it a daily's: on that day only that day's daily
+    beats it, so both play the same run.
+  - `?join=CODE` goes straight into a co-op room once the player has a name.
+    The host's COPY INVITE LINK [I] makes one.
+  - Both use the address the sender is on, so a link sent from the school
+    address works at school.
 
 ## Continuing a run
 
