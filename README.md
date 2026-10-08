@@ -8,6 +8,7 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | Piece | What it is |
 | --- | --- |
 | `index.html`, `check.html`, `privacy.html`, `hl-art.js` | The game, the deployment check page, the privacy page, and the ALL HALLOWS art. Served as static files. |
+| `icon.svg`, `icon-*.png`, `manifest.webmanifest`, `og.jpg` | The game's icon, what makes it installable as an app, and the picture a pasted link shows. See "Sharing and installing" below. |
 | `leaderboard/` | The standalone leaderboard page at `/leaderboard/`: every board, every pilot, and a search. Its own small files, not part of the game's. |
 | `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins), `/api/room` (LAN co-op signalling), `/api/turn` (the co-op relay) and `/api/account` (accounts and cloud saves). Never served to players. |
 | D1 database `voidrunner` | Where the leaderboard, co-op rooms and accounts are stored. |
@@ -498,6 +499,33 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   `/play/?replay=1` and choose the file. The file is only ever chosen on
   the page, never fetched: the hidden pilot's code is in it, so keep it out
   of this folder, which is what a deploy uploads.
+
+## Sharing and installing
+
+Small things that help the game travel:
+
+- **Link previews.** `index.html`'s head has a description and Open Graph
+  tags, so a link pasted into Discord, iMessage or a search result shows the
+  title, a line about the game and `og.jpg` (1200×630). The image and
+  `og:url` are absolute (`https://voidrunner.online/...`) because previews
+  are fetched by other sites. Keep `og.jpg` under about 300 KB: some chat
+  apps skip bigger ones.
+- **The icon.** `icon.svg` is the menu's emblem held still. The PNGs
+  (`icon-192.png`, `icon-512.png`, `icon-180.png` for iOS, and
+  `icon-maskable-512.png`, which has the emblem inside the safe circle on a
+  full-bleed background) are renders of it. Redraw the SVG and render it
+  again at those sizes.
+- **Installing.** `manifest.webmanifest` makes the game installable. Its
+  paths are relative to the address it is served from, so an install from
+  the school address stays on the school address. When Chrome offers to
+  install, the game keeps the offer and shows INSTALL AS AN APP at the top
+  right of the menu (INSTALL, under AFTER THE RUN in `index.html`). On a
+  Chromebook that puts it on the shelf in its own window. There is no
+  service worker, on purpose: an installed copy loads the current build like
+  the tab does, so co-op never meets a stale build.
+- **SHARE RUN** on the run report copies a few lines about the run and a
+  link to wherever it is being played (a phone gets its share sheet). Nothing
+  is sent anywhere by the game.
 
 ## Ads
 
