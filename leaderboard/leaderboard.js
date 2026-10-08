@@ -870,20 +870,69 @@
      what is theirs and what opens the rest, and refuses anything else. */
   const LOOK_API = '/api/account/look';
   async function lookMine(box, d, ticket) {
-    let L = null;
+    let L = null, pat = null;
     try {
-      const r = await fetch(LOOK_API, { cache: 'no-store' });
+      const [r, p] = await Promise.all([fetch(LOOK_API, { cache: 'no-store' }),
+                                        fetch(PAT_API, { cache: 'no-store' }).catch(() => null)]);
       if (r.ok) L = await r.json();
-    } catch (e) { return; }
-    if (!L || L.account !== d.user.name || ticket !== S.busy || !box.isConnected) return;
+      if (p && p.ok) pat = await p.json().catch(() => null);
+    } catch (e) { patTold(); return; }
+    if (!L || L.account !== d.user.name || ticket !== S.busy || !box.isConnected) { if (ticket === S.busy) patTold(); return; }
+    L.patreon = pat;
     const b = el('button', 'pedit', 'CUSTOMIZE');
     b.type = 'button';
     b.addEventListener('click', () => lookPanel(L, d));
     const bar = box.querySelector('.ptitle');
     if (bar) bar.append(b);
+    // back from Patreon: the panel the link was started from, saying how it went
+    if (PAT.back) { const how = PAT.back; PAT.back = null; lookPanel(L, d, how); }
   }
 
-  function lookPanel(L, d) {
+  /* ----------------------------- the Patreon link ---------------------------
+     A supporter links their own Patreon from CUSTOMIZE (src/patreon.js):
+     LINK PATREON goes to Patreon's "allow?" screen and Patreon sends them
+     back to /leaderboard/?patreon=<how>#u/<name>. The answer is read once,
+     taken off the address, and shown in the panel it was started from, or
+     as a notice where there is no panel to show it in. */
+  const PAT_API = '/api/patreon', PAT_PAGE = 'https://www.patreon.com/VOIDRUNNER';
+  const PAT_SAYS = {
+    linked: 'PATREON LINKED · THE SUPPORTER LOOKS ARE YOURS. THANK YOU!',
+    notpatron: 'PATREON LINKED · NO PLEDGE FOUND YET. ONE OF $1 OR MORE OPENS THE SUPPORTER LOOKS BY ITSELF',
+    denied: 'NOT LINKED · PATREON WAS TOLD NO',
+    expired: 'THAT LINK TOOK TOO LONG, OR WAS USED ALREADY · TRY AGAIN',
+    failed: "COULDN'T REACH PATREON · TRY AGAIN IN A MOMENT",
+    off: "LINKING PATREON ISN'T SWITCHED ON YET",
+    signedout: 'SIGN IN IN THE GAME FIRST, THEN LINK PATREON FROM CUSTOMIZE ON YOUR PROFILE',
+    elsewhere: 'LINK PATREON FROM VOIDRUNNER.ONLINE',
+    unlinked: 'PATREON UNLINKED'
+  };
+  // gold for the good word, pink for the ones where something went wrong, plain for the rest
+  const patTone = how => (how === 'linked' ? ' good' : ['notpatron', 'unlinked'].includes(how) ? '' : ' bad');
+  const PAT = { back: null };
+  {
+    const q = new URLSearchParams(location.search), how = q.get('patreon');
+    if (how !== null) {
+      if (Object.prototype.hasOwnProperty.call(PAT_SAYS, how) && how !== 'unlinked') PAT.back = how;
+      q.delete('patreon');
+      history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+    }
+  }
+  // the answer from Patreon, where no panel can show it
+  function patTold() {
+    if (!PAT.back) return;
+    const how = PAT.back;
+    PAT.back = null;
+    const t = el('div', 'lbtoast' + patTone(how));
+    t.setAttribute('role', 'status');
+    const x = el('button', 'lbtoast-x', '×');
+    x.type = 'button'; x.setAttribute('aria-label', 'Dismiss');
+    x.addEventListener('click', () => t.remove());
+    t.append(el('span', null, PAT_SAYS[how]), x);
+    document.body.append(t);
+    setTimeout(() => t.remove(), 12000);
+  }
+
+  function lookPanel(L, d, told) {
     const pick = { banner: L.look.banner, picture: L.look.picture, decals: L.look.decals.slice() };
     const lad = d.pvp.ladder, league = lad && lad.league ? lad.league : null;
     const base = { display: d.user.display, user: d.user.name, league, pilot: d.pvp.recent[0] ? d.pvp.recent[0].pilot : null,
@@ -903,13 +952,70 @@
     x.type = 'button'; x.setAttribute('aria-label', 'Close');
     head.append(el('b', null, 'CUSTOMIZE PROFILE'), x);
     const prev = el('div', 'lookprev'), tabs = el('nav', 'looktabs'), grid = el('div', 'lookgrid');
+    const pat = el('div', 'lookpat');
+    pat.setAttribute('aria-live', 'polite');
     const foot = el('footer', 'lookfoot'), msg = el('span', 'lookmsg');
     msg.setAttribute('aria-live', 'polite');
     const cancel = el('button', 'lookbtn', 'CANCEL'), save = el('button', 'lookbtn go', 'SAVE');
     cancel.type = save.type = 'button';
     foot.append(msg, cancel, save);
-    box.append(head, prev, tabs, grid, foot);
+    box.append(head, prev, tabs, pat, grid, foot);
     dlg.append(box);
+    let changed = false;                     // the account's looks changed under the page (an unlink)
+
+    /* The supporter strip: how this account stands with Patreon, and what
+       to do about it. `said` is a word just back from Patreon (or an
+       unlink), shown in place of the standing until the panel closes. */
+    function drawPat(said) {
+      pat.textContent = '';
+      const P = L.patreon;
+      pat.hidden = !P;
+      if (!P) return;
+      pat.className = 'lookpat' + (said ? patTone(said) : P.supporter || P.flagged ? ' good' : '');
+      const tx = el('span', 'lookpat-tx');
+      tx.textContent = said ? PAT_SAYS[said]
+        : P.supporter ? 'PATREON LINKED · SUPPORTER. THANK YOU!'
+        : P.linked ? (P.flagged ? 'PATREON LINKED · SUPPORTER, GIVEN BY HAND. THANK YOU!'
+                                : 'PATREON LINKED · NO PLEDGE YET: ONE OF $1 OR MORE OPENS THE SUPPORTER LOOKS')
+        : P.flagged ? 'SUPPORTER · THANK YOU!'
+        : 'SUPPORT VOIDRUNNER ON PATREON FOR THE SUPPORTER LOOKS';
+      pat.append(tx);
+      if (!P.supporter && !P.flagged) {
+        const page = el('a', 'lookbtn small', 'PATREON PAGE ↗');
+        page.href = PAT_PAGE; page.target = '_blank'; page.rel = 'noopener';
+        pat.append(page);
+      }
+      if (P.linked) {
+        const un = el('button', 'lookbtn small', 'UNLINK');
+        un.type = 'button';
+        un.addEventListener('click', () => unlink(un));
+        pat.append(un);
+      } else if (P.on && location.hostname === 'voidrunner.online') {
+        const go = el('a', 'lookbtn small pat', 'LINK PATREON');
+        go.href = PAT_API + '/link';
+        pat.append(go);
+      } else if (P.on && !P.flagged) pat.append(el('small', 'lookpat-where', 'LINK IT FROM VOIDRUNNER.ONLINE'));
+    }
+    // UNLINK asks once more, then forgets the link and redraws what the account owns now
+    async function unlink(b) {
+      if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'UNLINK? CLICK AGAIN'; return; }
+      b.disabled = true;
+      let r = null;
+      try { r = await fetch(PAT_API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'unlink' }) }); } catch (e) {}
+      if (!r || !r.ok) { b.disabled = false; msg.textContent = "COULDN'T UNLINK · TRY AGAIN"; return; }
+      L.patreon = await r.json().catch(() => Object.assign({}, L.patreon, { linked: false, supporter: false }));
+      try {
+        const f = await fetch(LOOK_API, { cache: 'no-store' });
+        if (f.ok) { const n = await f.json(); L.items = n.items; L.look = n.look; }
+      } catch (e) {}
+      const own = (k, id) => (L.items[k].find(i => i.id === id) || {}).owned;
+      if (!own('banner', pick.banner)) pick.banner = L.look.banner;
+      if (!own('picture', pick.picture)) pick.picture = L.look.picture;
+      pick.decals = pick.decals.filter(id => own('decal', id));
+      changed = true;
+      msg.textContent = '';
+      drawPat('unlinked'); drawTabs(); drawGrid(); drawPrev();
+    }
 
     // what the profile will wear, as it is picked
     function drawPrev() {
@@ -975,13 +1081,14 @@
       dlg.remove();
       removeEventListener('keydown', onKey, true);
       document.documentElement.classList.remove('lookopen');
+      if (changed) { profileLoad(); return; }   // the page again, wearing what is still its own
       if (opener && opener.isConnected) opener.focus();
     }
     // Escape closes it; Tab goes round inside it
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); close(); return; }
       if (e.key !== 'Tab') return;
-      const f = [...box.querySelectorAll('button:not([disabled])')];
+      const f = [...box.querySelectorAll('button:not([disabled]), a[href]')];
       if (!f.length) return;
       const first = f[0], end = f[f.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); end.focus(); }
@@ -1010,7 +1117,7 @@
 
     document.body.append(dlg);
     document.documentElement.classList.add('lookopen');
-    drawPrev(); drawTabs(); drawGrid();
+    drawPrev(); drawTabs(); drawPat(told); drawGrid();
     x.focus();
   }
 
@@ -1052,6 +1159,7 @@
 
   (async () => {
     readHash();
+    if (S.tab !== 'u') patTold();          // back from Patreon to the boards (signed out, say)
     try {
       const d = await api('list=1');
       calendar(d);

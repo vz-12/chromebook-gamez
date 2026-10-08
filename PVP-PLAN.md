@@ -940,6 +940,16 @@ Branch `profiles`. The shop and the currency stay for later.
     `npm run test:patreon` (73 checks against a Patreon of its own; 11
     mutants, all caught). Step 1 is the server; step 2 is the page's LINK
     PATREON button and the `?patreon=` message it comes back to.
+  - **Step 2, the page (8 Oct):** CUSTOMIZE has a supporter strip under
+    its tabs: SUPPORT VOIDRUNNER ON PATREON with PATREON PAGE ↗ and LINK
+    PATREON; once linked, where the account stands and UNLINK (asked twice);
+    a supporter, gold thanks. LINK PATREON shows on voidrunner.online only
+    (elsewhere it says to link from there). Back from Patreon, the panel
+    opens again with how it went in the strip (gold, plain or pink), or a
+    notice where no panel can open (signed out, on the boards); the word is
+    read once and taken off the address. Tried in a browser on the real
+    Worker's replies: back linked, no pledge, denied, signed out, given by
+    hand, switched off, the unlink, and at phone width.
 - **Open:**
   - The starting catalog (in step 1) is mine: which items, and their gates.
   - Whether the game itself shows any of it (the account chip, co-op name
