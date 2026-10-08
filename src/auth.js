@@ -100,7 +100,24 @@ const SCHEMA = [
      item     TEXT    NOT NULL,
      why      TEXT,
      at       INTEGER NOT NULL,
-     PRIMARY KEY (account, item))`
+     PRIMARY KEY (account, item))`,
+  /* The Patreon user an account linked (patreon.js), and whether they
+     support the game now, kept current by Patreon's webhook. Patreon's user
+     id and that answer only: no token, no name, no email. */
+  `CREATE TABLE IF NOT EXISTS patreon_links (
+     account  TEXT    PRIMARY KEY,
+     patreon  TEXT    NOT NULL UNIQUE,     -- Patreon's user id
+     active   INTEGER NOT NULL,            -- 1: pledged SUPPORTER_CENTS or more, now
+     status   TEXT,                        -- patron_status as Patreon last gave it
+     cents    INTEGER NOT NULL DEFAULT 0,
+     linked   INTEGER NOT NULL,
+     checked  INTEGER NOT NULL)`,
+  /* A link on its way through Patreon and back: the state's hash and the
+     account whose session sent it. Ten minutes, used once. */
+  `CREATE TABLE IF NOT EXISTS patreon_states (
+     id       TEXT    PRIMARY KEY,         -- sha-256 of the state
+     account  TEXT    NOT NULL,
+     expires  INTEGER NOT NULL)`
 ];
 
 /* Columns added after their table first shipped. CREATE TABLE IF NOT EXISTS
@@ -211,7 +228,8 @@ export async function accountPids(db, accountId) {
 export const publicAccount = a => a && { name: a.name, display: a.display, created: a.created };
 
 /* The daily sweep (index.js, on the season-close cron): expired sessions,
-   spent rate-limit counters and lapsed hand-off codes are nobody's business. */
+   spent rate-limit counters, lapsed hand-off codes and Patreon trips never
+   finished are nobody's business. */
 export async function pruneAuth(env) {
   if (!env || !env.DB) return;
   await ensureAuth(env.DB);
@@ -219,6 +237,7 @@ export async function pruneAuth(env) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE expires <= ?1').bind(now),
     env.DB.prepare('DELETE FROM auth_gate WHERE until <= ?1').bind(now),
-    env.DB.prepare('DELETE FROM handoffs WHERE expires <= ?1').bind(now)
+    env.DB.prepare('DELETE FROM handoffs WHERE expires <= ?1').bind(now),
+    env.DB.prepare('DELETE FROM patreon_states WHERE expires <= ?1').bind(now)
   ]);
 }

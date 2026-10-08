@@ -20,6 +20,8 @@
      /api/tales         the codex's sealed chapters, to everyone, once the
                         story opens them (tales.js)
      /api/live          a PvP challenge on air, for the menu to announce (live.js)
+     /api/patreon       a player's own Patreon link: /link off to Patreon, /back
+                        home again, /hook Patreon's webhook (patreon.js)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
@@ -35,6 +37,7 @@ import looks from './looks.js';
 import vault from './vault.js';
 import tales from './tales.js';
 import live from './live.js';
+import patreon from './patreon.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
@@ -51,7 +54,9 @@ const json = (body, status) =>
 
 const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
                  '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
-                 '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live };
+                 '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live,
+                 '/api/patreon': patreon, '/api/patreon/link': patreon, '/api/patreon/back': patreon,
+                 '/api/patreon/hook': patreon };
 
 export default {
   async fetch(req, env) {

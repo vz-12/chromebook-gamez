@@ -929,6 +929,17 @@ Branch `profiles`. The shop and the currency stay for later.
   stay. Locked, they say SUPPORT VOIDRUNNER ON PATREON. No art yet (you
   said not yet): the page draws the defaults in their place.
   `npm run test:looks` covers it (90 checks; 5 more mutants, all caught).
+  - **The Patreon link (8 Oct, you: "how do we get a supporter's account
+    name without asking directly?"):** a signed-in player links their own
+    Patreon (`src/patreon.js`): `/api/patreon/link` → Patreon's "allow?"
+    screen (scope `identity` only) → `/api/patreon/back`, which keeps their
+    Patreon user id and whether they pledge $1+ to the campaign, and opens
+    the gate. Patreon's webhook (`/api/patreon/hook`, HMAC-MD5 signed)
+    follows pledges made, changed and ended; a deleted pledge closes the
+    looks at once. One Patreon links one account (linking again moves it).
+    `npm run test:patreon` (73 checks against a Patreon of its own; 11
+    mutants, all caught). Step 1 is the server; step 2 is the page's LINK
+    PATREON button and the `?patreon=` message it comes back to.
 - **Open:**
   - The starting catalog (in step 1) is mine: which items, and their gates.
   - Whether the game itself shows any of it (the account chip, co-op name

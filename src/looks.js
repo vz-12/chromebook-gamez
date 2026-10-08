@@ -25,9 +25,10 @@
      'podium'             on a season's podium, on the game's boards
      'pvp-league:<id>'    finished a PvP season in that league or higher
      'pvp-podium'         on a PvP season's ranked podium
-     'supporter'          the account's supporter flag: 'supporter' in its
-                          perks (accounts.perks), given by hand to a Patreon
-                          supporter (`npm run supporter`)
+     'supporter'          a Patreon supporter: an account that linked its
+                          Patreon and pledges to the campaign (patreon.js),
+                          or one flagged by hand, 'supporter' in its perks
+                          (accounts.perks; `npm run supporter`)
    A gate this file does not know opens for nobody. Whatever its gate, an
    item can also be given by hand (look_grants, `npm run grant`), and an
    account with the 'dev' perk owns every one.
@@ -41,6 +42,7 @@ import { STORE, ARCHIVE } from './season.js';
 import { getStore } from './store.js';
 import { PILOTS, BASE_PILOTS, LEAGUES } from '../pvp/src/rules.js';
 import { podiumsOf, badgesOf } from './pvp-rewards.js';
+import { linkedSupporter } from './patreon.js';
 
 export const KINDS = ['banner', 'picture', 'decal'];
 export const MAX_DECALS = 4;
@@ -136,6 +138,7 @@ export async function factsOf(db, env, acct, perks) {
   f.podiums = (await gamePodiums(db, env, acct)).length;
   f.pvpPodiums = (await podiumsOf(db, acct)).length;
   for (const b of await badgesOf(db, acct)) if (hasOwn(LEAGUE_AT, b.league)) f.league = Math.max(f.league, LEAGUE_AT[b.league]);
+  if (!f.supporter) f.supporter = await linkedSupporter(db, acct);
   return f;
 }
 

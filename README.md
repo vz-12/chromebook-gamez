@@ -183,6 +183,27 @@ and out of an account:
 - Turnstile, with Cloudflare's answer stubbed
 - the device list, and signing out one device from another
 
+### Patreon supporters
+
+A pledge of $1 or more to patreon.com/VOIDRUNNER opens the SUPPORTER profile
+looks. A signed-in player links their own Patreon (`src/patreon.js`), so
+nobody has to send a name, and Patreon's webhook keeps it current. A
+supporter can also be flagged by hand: `npm run supporter -- <account>
+--remote` (`--take` takes it back).
+
+1. Patreon → **Clients & API Keys** (patreon.com/portal/registration/register-clients)
+   → the app → **Edit Client**: the redirect URI
+   `https://voidrunner.online/api/patreon/back`, exactly.
+2. Add the app's `PATREON_CLIENT_ID` and `PATREON_CLIENT_SECRET` as Worker
+   secrets (`npx wrangler secret put <NAME> --name voidrunner`). Until both
+   are there, the link says it is off.
+3. Once the link is live: Patreon → **Webhooks**, pointed at
+   `https://voidrunner.online/api/patreon/hook`, with the member and pledge
+   triggers, and its secret as `PATREON_WEBHOOK_SECRET`. Without it a pledge
+   made or ended after linking is not heard of.
+
+`npm run test:patreon` runs the whole trip against a Patreon of its own.
+
 ## PvP
 
 PvP is its own Worker, `voidrunner-pvp`, at
