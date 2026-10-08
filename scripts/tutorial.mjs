@@ -24,6 +24,12 @@
                      storage; with neither, the page remembers
      the lessons     each waits for what it asks; THE WARDEN's calls; the
                      first hand of cards; all of it drawn without a throw
+     the tour        FLY ASSISTED opens on the HUD, part by part, with the
+                     run held: next, back, ESC, SKIP and a click; every part
+                     on screen and drawn; once, and never for NO THANKS
+     ALL HALLOWS     the knock waits while a new browser's first flight has
+                     the menu, and knocks once a run is filed; a veteran, or a
+                     browser that said no, is knocked at once
 
    The determinism suite (npm test) flies an assisted run too ('assist'), and
    holds the help to the run's rules (seeded, snapshot-safe).
@@ -84,7 +90,8 @@ const KIT = `
   var near = (a, b) => Math.abs(a - b) < 1e-6;
   // the game and the lessons, a second at a time (frame() runs both; the test has no rAF)
   var tick = (sec, f) => { for (let i = 0; i < Math.round(sec * 60); i++) { update(STEP); tutTick(STEP); if (f) f(); } };
-  var assisted = () => { state = 'menu'; handleKey('enter'); if (tutCardUp()) handleKey('enter'); };
+  // FLY ASSISTED (the card's, the first time), and past the tour if it opens
+  var assisted = () => { state = 'menu'; handleKey('enter'); if (tutCardUp()) handleKey('enter'); if (state === 'tour') handleKey('escape'); };
   // nothing can hurt the pilot, and the wave is held where it is: something still owed, nothing sent
   var calm = () => { P.iframe = 1e9; P.maxHp = P.hp = 1e6; betweenWaves = 0; spawnBudget = 5; spawnT = 1e9;
                      for (const e of enemies) e.dead = true; ebullets.length = 0; };
@@ -273,7 +280,7 @@ section('storage');
 
   const n = fresh({ keeps: false, noStore: true });
   take(n.run(`(() => { ${KIT}
-    handleKey('enter'); handleKey('enter');
+    handleKey('enter'); handleKey('enter'); handleKey('escape');
     chk(state === 'play' && assist && tutGet() === 'on', 'with nowhere to keep it, the page remembers', tutGet());
     P.iframe = 0; P.revive = 0; P.hp = 1; hurtPlayer(1e6); P.iframe = 0; hurtPlayer(1e6);
     uiArm = 0; handleKey('enter');
@@ -349,6 +356,119 @@ section('the lessons');
     quitToMenu(); tutSet(''); localStorage.removeItem('voidrunner_tut'); Tut.mem = ''; handleKey('enter'); draw();
     chk(tutCardUp(), 'the card, drawn');
     chk(!threw, 'nothing drawn threw', threw);
+    return JSON.stringify(C);
+  })()`));
+}
+
+/* ================================ the tour ================================ */
+section('the tour');
+{
+  const g = fresh();
+  take(g.run(`(() => { ${KIT}
+    handleKey('enter'); handleKey('enter');
+    chk(state === 'tour' && Tut.tour && Tut.tour.i === 0, 'FLY ASSISTED opens the run on the tour', state);
+    if (!Tut.tour) return JSON.stringify(C);
+    chk(assist && !assist.saved && wave === 0, 'the run is built and assisted, and has not begun', [wave, assist]);
+    const t0 = simTick, r0 = simRngState, e0 = elapsed;
+    for (let i = 0; i < 120; i++) update(STEP);
+    chk(simTick === t0 && simRngState === r0 && elapsed === e0 && wave === 0 && state === 'tour',
+        'held: two seconds of the tour move nothing', [simTick, elapsed, wave, state]);
+    chk(!runSave(), 'and nothing is kept for CONTINUE while it is up');
+    render();
+    const parts = [...new Set(TUT_TOUR.flatMap(s => s.at))];
+    const off = parts.filter(k => { const r = tourRect(k); return !r || !(r.w > 0 && r.h > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= W && r.y + r.h <= H); });
+    chk(!off.length, 'every part it points at is somewhere on screen', off.map(k => [k, tourRect(k)]));
+    chk(near(tourRect('hp').w, HUD_AT.hp.w) && tourRect('score').x > W / 2, 'and where the HUD drew it', [HUD_AT.hp, HUD_AT.score]);
+
+    handleKey('enter');
+    chk(Tut.tour.i === 1, '[ENTER]: the next part', Tut.tour.i);
+    handleKey('arrowleft');
+    chk(Tut.tour.i === 0, '[←]: back', Tut.tour.i);
+    handleKey('arrowleft');
+    chk(state === 'tour' && Tut.tour.i === 0, 'and nothing before the first');
+    mouse.x = 4; mouse.y = H - 4; handleClick();
+    chk(Tut.tour.i === 1, 'a click: the next part', Tut.tour.i);
+
+    let threw = null, n = 0;
+    const seen = [];
+    while (state === 'tour' && n++ < 40) {
+      seen.push(Tut.tour.i);
+      try { render(); } catch (e) { threw = threw || String(e.stack || e); }
+      handleKey('enter');
+    }
+    chk(!threw, 'every part drawn without a throw', threw);
+    chk(seen.join() === tourShown().slice(1).join() && tourShown().length === TUT_TOUR.length,
+        'every part once, in order (here, with a keyboard, all ' + TUT_TOUR.length + ')', seen);
+    chk(state === 'play' && !Tut.tour, 'past the last: the run begins', state);
+    tick(1);
+    chk(simTick > t0 && wave === 1, 'and moves', [simTick, wave]);
+    return JSON.stringify(C);
+  })()`));
+
+  const h = fresh();
+  take(h.run(`(() => { ${KIT}
+    handleKey('enter'); handleKey('enter'); handleKey('enter');
+    handleKey('escape');
+    chk(state === 'play' && !Tut.tour && assist, '[ESC] ends it, and the assisted run begins', state);
+    P.iframe = 0; P.revive = 0; P.hp = 1; hurtPlayer(1e9); P.iframe = 0; hurtPlayer(1e9);
+    uiArm = 0; handleKey('enter');
+    chk(state === 'play' && assist, 'the next assisted run starts at once: the tour is shown once', state);
+    return JSON.stringify(C);
+  })()`));
+
+  const k = fresh();
+  take(k.run(`(() => { ${KIT}
+    handleKey('enter'); handleKey('enter'); render();
+    const b = Tut.tourBtns.skip; mouse.x = b.x + b.w / 2; mouse.y = b.y + b.h / 2; handleClick();
+    chk(state === 'play' && !Tut.tour, 'SKIP, clicked (or tapped), ends it', state);
+    return JSON.stringify(C);
+  })()`));
+
+  const m = fresh();
+  take(m.run(`(() => { ${KIT}
+    handleKey('enter'); handleKey('n');
+    chk(state === 'play' && !Tut.tour, 'NO THANKS: no tour', state);
+    return JSON.stringify(C);
+  })()`));
+}
+
+/* =============================== ALL HALLOWS =============================== */
+section('ALL HALLOWS');
+{
+  const g = fresh();
+  take(g.run(`(() => { ${KIT}
+    HL.force = true;
+    chk(hlLive() && !hlSeen('prologue'), 'the event is on, and this profile has not heard the knock');
+    for (let i = 0; i < 30; i++) update(STEP);
+    chk(!hlProOn() && tutHoldsMenu(), 'a new browser: the knock waits', [hlProOn(), tutHoldsMenu()]);
+    handleKey('enter');
+    chk(tutCardUp(), 'so PLAY is answered, with FIRST FLIGHT\\'s card');
+    handleKey('enter'); handleKey('escape');
+    chk(state === 'play' && assist, 'into the first flight', state);
+    P.iframe = 0; P.revive = 0; P.hp = 1; hurtPlayer(1e9); P.iframe = 0; hurtPlayer(1e9);
+    chk(state === 'dead' && Save.profile.runs === 1, 'the run ends, and is filed', [state, Save.profile.runs]);
+    uiArm = 0; handleKey('m');
+    for (let i = 0; i < 5; i++) update(STEP);
+    chk(state === 'menu' && !tutHoldsMenu() && hlProOn(), 'back at the menu with a run behind it: the knock', [state, hlProOn()]);
+    chk(tutGet() === 'on', 'and the help is still on for the next run');
+    handleKey('escape');
+    chk(!hlProOn() && hlSeen('prologue'), '[ESC] skips it, as it always has');
+    return JSON.stringify(C);
+  })()`));
+
+  const v = fresh();
+  take(v.run(`(() => { ${KIT}
+    HL.force = true; Save.profile.runs = 12; Save.profile.bestWave = 14;
+    update(STEP);
+    chk(hlProOn(), 'a veteran is knocked at once, as before');
+    return JSON.stringify(C);
+  })()`));
+
+  const d = fresh();
+  take(d.run(`(() => { ${KIT}
+    HL.force = true; tutSet('off');
+    update(STEP);
+    chk(hlProOn(), 'and so is a browser that said no to the help');
     return JSON.stringify(C);
   })()`));
 }
