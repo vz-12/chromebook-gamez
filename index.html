@@ -37510,6 +37510,7 @@ function handleKey(k) {
   if (state === 'pvp') return;            // PvP mode's own screen takes no keys of the game's
   // co-op: this machine's keys are its own pilot's (its cards, its gear)
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), () => handleKey(k)); return; }
+  if (state === 'tour') { tourKey(k); return; }   // FIRST FLIGHT: the HUD, part by part
   // volume lives on the slider now, so M is free for the way out
   if (k === 'm' && (state === 'pause' || state === 'dead')) {
     // straight back to the ladder, which is where you were going anyway
@@ -37766,6 +37767,7 @@ function quitToMenu() {
 function handleClick() {
   if (state === 'pvp') return;            // nor clicks
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), handleClick); return; }
+  if (state === 'tour') { tourClick(); return; }   // FIRST FLIGHT
   if (choice) {
     const b = choiceButtons();
     if (inRect(mouse.x, mouse.y, b.stay)) { ui('stay'); return; }
@@ -38239,7 +38241,7 @@ function update(dt) {
     if (uiArm > 0) uiArm -= dt;
     return;
   }
-  if (state === 'pause') return;
+  if (state === 'pause' || state === 'tour') return;   // FIRST FLIGHT's tour holds the run as pause does
   if (state === 'play') simTimersTick(dt);   // the game's own delays: see simAfter
   /* Ahead of the wave ticker on purpose: it clears the floor, and if the
      spawner still ran the room would quietly refill behind the moment. */
@@ -45730,6 +45732,7 @@ function render() {
   if (state === 'changelog') drawChangelog();
   if (state === 'skin') drawSkins();
   if (state === 'pause') drawPause();
+  if (state === 'tour') drawTour();      // FIRST FLIGHT: the HUD, part by part
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
@@ -48791,11 +48794,12 @@ function hlClaimPrizes() {
 
 /* ============================ the knock (the menu) ==========================
    Once per profile, on the menu, the first time it loads with the event live
-   — after the outsider's own arrival if that is still owed, and after any
-   unread notes. The menu does not answer while it plays; [ESC] skips it. */
+   — after the outsider's own arrival if that is still owed, after any unread
+   notes, and after a new browser's first run (tutHoldsMenu: FIRST FLIGHT's
+   PLAY comes first). The menu does not answer while it plays; [ESC] skips it. */
 function hlProDue() {
   return state === 'menu' && hlLive() && !hlSeen('prologue') && !arrival &&
-         !outsiderArrivalDue() && (Save.profile.logSeen || 0) >= LOG_VER;
+         !outsiderArrivalDue() && (Save.profile.logSeen || 0) >= LOG_VER && !tutHoldsMenu();
 }
 const hlProOn = () => !!HL.pro;
 function hlProStart() {
@@ -57198,7 +57202,7 @@ function drawVignette() {
    it answers when it is over something you can press — the ring closes and the
    head brightens, so hit targets announce themselves before you click.
    ========================================================================= */
-const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx',
+const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx', 'tour',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
                           'daily', 'rush', 'skin'];
@@ -57338,6 +57342,9 @@ function roundRect(x, y, w, h, r) {
 }
 
 let hudBotY = 0;                   // next free baseline in the bottom-left column
+/* Where drawHUD drew each of its parts this frame, by name, for whatever
+   points at them (FIRST FLIGHT's tour). The drawing's own: SNAP_LOCAL_OBJS. */
+const HUD_AT = {};
 
 /* ========================= THE VAGRANT, DRAWN ============================
    Scrap-knight pass (Vagrant redesign v1). The frame is what the pilot is
@@ -58366,6 +58373,7 @@ function drawHUD() {
   fitFont(hpStr, bw - 18, '600', 10.5, "'JetBrains Mono', ui-monospace, monospace", 7);
   ctx.fillStyle = hf > 0.34 ? '#06111f' : '#e2e8f0';
   ctx.fillText(hpStr, pad + 9, pad + bh / 2 + 0.5);
+  HUD_AT.hp = { x: pad, y: pad, w: bw, h: bh };
 
   /* --- xp bar --- */
   const yb = pad + bh + 7;
@@ -58373,6 +58381,7 @@ function drawHUD() {
   roundRect(pad, yb, bw, 9, 5); ctx.fill();
   ctx.fillStyle = COL.xp;
   roundRect(pad + 1.5, yb + 1.5, Math.max(0, (bw - 3) * clamp(P.xp / P.xpNext, 0, 1)), 6, 3); ctx.fill();
+  HUD_AT.xp = { x: pad, y: yb, w: bw, h: 9 };
 
   /* --- level + dash pips --- */
   ctx.save();
@@ -58380,6 +58389,7 @@ function drawHUD() {
   ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
   ctx.fillStyle = '#7dd3fc';
   ctx.fillText('LV ' + P.level, pad, yb + 26);
+  HUD_AT.lv = { x: pad, y: yb + 18, w: ctx.measureText('LV ' + P.level).width, h: 16 };
   ctx.restore();
 
   let dx = pad + 58;
@@ -58394,6 +58404,7 @@ function drawHUD() {
     }
     dx += 26;
   }
+  HUD_AT.dash = { x: pad + 58, y: yb + 20, w: Math.max(0, dx - pad - 62), h: 6 };
   if (P.shieldMax) {
     for (let i = 0; i < P.shieldMax; i++) {
       ctx.fillStyle = i < P.shield ? COL.shield : 'rgba(129,140,248,0.2)';
@@ -58532,12 +58543,15 @@ function drawHUD() {
   fitFont(scoreStr, rMax, '800', 27, "'JetBrains Mono', ui-monospace, monospace", 13);
   ctx.fillStyle = '#e2e8f0';
   ctx.fillText(scoreStr, W - pad, pad + 12);
+  let hw0 = ctx.measureText(scoreStr).width;
 
   ctx.letterSpacing = '0.12em';
   const bestStr = 'BEST ' + Math.max(Save.profile.best, score).toLocaleString();
   fitFont(bestStr, rMax, '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
   ctx.fillStyle = '#5b6b82';
   ctx.fillText(bestStr, W - pad, pad + 31);
+  hw0 = Math.max(hw0, ctx.measureText(bestStr).width);
+  HUD_AT.score = { x: W - pad - hw0, y: pad - 3, w: hw0, h: 42 };
   ctx.restore();
 
   ctx.save();
@@ -58549,6 +58563,7 @@ function drawHUD() {
   fitFont(runStr, rMax, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
   ctx.fillStyle = '#94a3b8';
   ctx.fillText(runStr, W - pad, pad + 50);
+  let hw1 = ctx.measureText(runStr).width;
 
   ctx.letterSpacing = '0.09em';
   const secStr = rushOn() ? rushHudLine()
@@ -58557,12 +58572,15 @@ function drawHUD() {
   fitFont(secStr, rMax, '600', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
   ctx.fillStyle = stage.accent;
   ctx.fillText(secStr, W - pad, pad + 70);
+  hw1 = Math.max(hw1, ctx.measureText(secStr).width);
+  HUD_AT.wave = { x: W - pad - hw1, y: pad + 42, w: hw1, h: 36 };
   ctx.restore();
 
   const credStr = '◈ ' + credits;
   fitFont(credStr, rMax, '800', 15, "'JetBrains Mono', ui-monospace, monospace", 10);
   ctx.fillStyle = '#fbbf24';
   ctx.fillText(credStr, W - pad, pad + 92);
+  { const hw2 = ctx.measureText(credStr).width; HUD_AT.cred = { x: W - pad - hw2, y: pad + 83, w: hw2, h: 18 }; }
   if (hardOn()) {
     ctx.save();
     ctx.letterSpacing = '0.14em';
@@ -58581,6 +58599,7 @@ function drawHUD() {
      instead of the pool. */
   const boss = amalgam ? null
     : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow && !e.hacked);
+  { const bw2 = Math.min(560, W * 0.62); HUD_AT.boss = { x: (W - bw2) / 2, y: 22, w: bw2, h: 36 }; }   // where its bar goes, up or not
   if (amalgam) drawAmalgamBar();
   else if (boss) {
     const w2 = Math.min(560, W * 0.62), x2 = (W - w2) / 2, y2 = 22;
@@ -58657,6 +58676,7 @@ function drawHUD() {
   }
 
   /* --- build chips (owned upgrades) — hidden under full-screen overlays --- */
+  HUD_AT.build = { x: pad, y: H - pad - 16, w: Math.min(W - pad * 2, 380), h: 16 };   // where the first row starts
   const owned = state === 'play' ? Object.keys(P.up) : [];
   if (owned.length) {
     ctx.textAlign = 'left';
@@ -64094,6 +64114,11 @@ function drawVsLine(cx, y, maxW) {
    card and the hints are this machine's (Tut, runAssistNext). The hints are
    subtitles, low on the screen, that wait for what they ask and give up if
    it does not come, then call out THE WARDEN's attacks as it starts each.
+
+   FLY ASSISTED opens the run on a tour of the HUD (TUT_TOUR), held until it
+   is done. And nothing else takes the menu first: ALL HALLOWS' knock, which
+   holds the menu for twenty seconds, waits until a first flight has a run
+   on the record (tutHoldsMenu).
    ========================================================================= */
 const ASSIST = { hurt: 0.6, bossHp: 0.65, bossPace: 0.75, bossShot: 0.85, saveHp: 0.6 };
 const TUT_COOKIE = 'vr_tut', TUT_KEY = 'voidrunner_tut';
@@ -64109,7 +64134,8 @@ const Tut = {
   tell: '', tellT: 0, tellHot: false,          // THE WARDEN's attack, being called out
   said: {}, atk: null, ph: 0, met: false,      // which calls, how often, and what it was doing last
   last: '', lastT: 0, lastCol: '',             // a word that outranks the rest: the save, the boss down
-  shown: '', shownAt: 0                        // the line on screen, for its fade
+  shown: '', shownAt: 0,                       // the line on screen, for its fade
+  tour: null, tourBtns: null                   // the HUD tour: { i, at } while it is up, and its buttons
 };
 
 function tutCookie() {
@@ -64151,6 +64177,17 @@ function tutWant() {
   return v === 'on' ? 'on' : 'ask';
 }
 
+/* Whether a first flight still has the menu: never asked, or flying, and no
+   ordinary run on the record yet. ALL HALLOWS' knock waits on it (hlProDue):
+   it holds the menu for twenty seconds, and on a first visit those are the
+   seconds PLAY is pressed in. Once a run is filed, the next visit to the menu
+   knocks as it always did. */
+function tutHoldsMenu() {
+  if (PVP || Save.profile.runs > 0) return false;
+  const v = tutGet();
+  return v !== 'off' && v !== 'done';
+}
+
 // PLAY, from the menu or the run report: an ordinary run, assisted on a first flight
 function startRun() {
   const w = tutWant();
@@ -64168,6 +64205,7 @@ function tutChoose(on) {
   Tut.card = false;
   runAssistNext = on;
   resetGame(); state = 'play';
+  if (on) tourStart();                   // the first assisted run opens on its HUD, held (the tour)
   Audio_.select();
 }
 
@@ -64263,7 +64301,7 @@ function tutSay(t, col, dur) { Tut.last = t; Tut.lastCol = col; Tut.lastT = dur;
 function tutRunStart() {
   Object.assign(Tut, { card: false, i: 0, t: 0, gap: 1.4, moved: 0, px: NaN, py: NaN, dashed: false, lvlUp: 0,
                        tell: '', tellT: 0, tellHot: false, said: {}, atk: null, ph: 0, met: false,
-                       last: '', lastT: 0, shown: '' });
+                       last: '', lastT: 0, shown: '', tour: null });
 }
 
 /* The lessons, in order. Each waits for what it asks (done) for at least
@@ -64354,6 +64392,8 @@ function tutLine() {
 }
 /* Low on the screen, above FORGOTTEN TALES' line (a first run opens a page
    with nearly everything it meets), in a plate the width of what it says. */
+const TUT_PLATE_H = 46;
+const tutPlateY = () => Math.round(H * 0.86) - 34 - TUT_PLATE_H;
 function drawTut() {
   if (PVP) return;
   if (state === 'levelup' && Tut.lvlUp === 1 && offers.length) {
@@ -64377,8 +64417,8 @@ function drawTut() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   fitFont(L.t, W - 72, '600', 15, fam, 9);
   const tw = ctx.measureText(L.t).width, font = ctx.font;
-  const pw = Math.min(W - 24, tw + 48), ph = 46;
-  const px = (W - pw) / 2, py = Math.round(H * 0.86) - 34 - ph;
+  const pw = Math.min(W - 24, tw + 48), ph = TUT_PLATE_H;
+  const px = (W - pw) / 2, py = tutPlateY();
   const pulse = L.hot ? 0.55 + Math.sin(uiTime * 18) * 0.35 : 0.35;
   ctx.fillStyle = L.hot ? 'rgba(40,6,10,0.88)' : 'rgba(4,6,11,0.84)';
   roundRect(px, py, pw, ph, 10); ctx.fill();
@@ -64393,6 +64433,160 @@ function drawTut() {
   ctx.fillStyle = L.hot ? '#fee2e2' : '#e2e8f0';
   ctx.fillText(L.t, W / 2, py + 30);
   ctx.restore();
+}
+
+/* ---- the tour: the HUD, part by part ----
+   Once, on the run FLY ASSISTED starts. The run is built and held (state
+   'tour', which update() treats as pause) while each part of the HUD is lit
+   in turn and said in a few words; the run's first step is taken when it
+   ends, so the tour never moves the game. [ENTER] or a click goes on, [←]
+   goes back, [ESC] or SKIP ends it. drawHUD says where it drew each part
+   (HUD_AT), so the tour points at the HUD as it is drawn on this screen; what
+   is not up yet (the boss's bar, the build, the tips) is shown as a ghost. */
+const TUT_TOUR = [
+  { at: ['ship'], head: 'YOUR SHIP', say: () => isTouch
+      ? 'This is you. Drag on the left half of the screen to fly. You fire at whatever is nearest, or drag on the right half to aim.'
+      : isBlade() ? 'This is you. WASD flies it, and it swings toward the crosshair.'
+      : 'This is you. WASD flies it, and it fires at the crosshair.' },
+  { at: ['hp'], head: 'HEALTH', say: () => 'When it runs out, the run is over. It turns yellow, then red, as it gets low.' },
+  { at: ['xp', 'lv'], head: 'EXPERIENCE AND LEVEL',
+    say: () => 'What you kill drops experience, and this bar fills with it. When it is full you level up and choose an upgrade.' },
+  { at: ['dash'], head: 'DASH', skip: () => isTouch || !P.dashMax,
+    say: () => 'Your dash charges. SPACE spends one, and each one fills again on its own.' },
+  { at: ['score'], head: 'SCORE', say: () => 'This run\'s score, and under it your best.' },
+  { at: ['wave'], head: 'WAVE AND SECTOR',
+    say: () => 'The wave, your kills and the time, then the sector and how far through it you are. The fifth wave of every sector is a boss.' },
+  { at: ['cred'], head: 'CREDITS', say: () => 'Clearing a wave pays credits. After each boss there is a shop to spend them in.' },
+  { at: ['boss'], ghost: 'THE BOSS\'S HEALTH', head: 'BOSS', say: () => 'When a boss arrives, its health bar runs across the top here.' },
+  { at: ['build'], ghost: 'YOUR UPGRADES', head: 'YOUR BUILD',
+    say: () => 'Every upgrade you take is listed down here, with how many times you have taken it.' },
+  { at: ['tips'], ghost: 'TIPS', head: 'TIPS', say: () => isTouch ? 'Tips come up here as you play.'
+      : 'Tips come up here as you play. [P] pauses the game, and the pause screen can turn the help off.' }
+];
+const tourShown = () => TUT_TOUR.map((s, i) => i).filter(i => !(TUT_TOUR[i].skip && TUT_TOUR[i].skip()));
+function tourStart() {
+  Tut.tour = { i: 0, at: uiTime };
+  state = 'tour';
+  tourGo(0, 1);
+}
+// to step i, past any that are skipped, going dir; past the last is the end
+function tourGo(i, dir) {
+  while (i >= 0 && i < TUT_TOUR.length && TUT_TOUR[i].skip && TUT_TOUR[i].skip()) i += dir;
+  if (i >= TUT_TOUR.length) { tourEnd(); return; }
+  if (i < 0 || !Tut.tour) return;        // nothing before the first
+  if (i !== Tut.tour.i) Audio_.select();
+  Tut.tour.i = i; Tut.tour.at = uiTime;
+}
+function tourEnd() {
+  Tut.tour = null;
+  if (state === 'tour') state = 'play';
+  Audio_.select();
+}
+function tourKey(k) {
+  if (!Tut.tour || k === 'escape') tourEnd();
+  else if (k === 'enter' || k === ' ' || k === 'arrowright') tourGo(Tut.tour.i + 1, 1);
+  else if (k === 'arrowleft' || k === 'backspace') tourGo(Tut.tour.i - 1, -1);
+}
+function tourClick() {
+  const b = Tut.tourBtns;
+  if (!Tut.tour || (b && inRect(mouse.x, mouse.y, b.skip))) tourEnd();
+  else tourGo(Tut.tour.i + 1, 1);
+}
+// where a part is on screen now; the ship and the tips are the tour's to place
+function tourRect(k) {
+  if (k === 'ship') {
+    const sx = (P.x - cam.x) * camZoom + W / 2, sy = (P.y - cam.y) * camZoom + H / 2;
+    return { x: sx - 34, y: sy - 34, w: 68, h: 68 };
+  }
+  if (k === 'tips') { const w = Math.min(W - 24, 460); return { x: (W - w) / 2, y: tutPlateY(), w, h: TUT_PLATE_H }; }
+  return HUD_AT[k] || null;
+}
+// a rounded rectangle added to the path being built (roundRect starts its own)
+function tourHole(r, k) {
+  ctx.moveTo(r.x + k, r.y);
+  ctx.arcTo(r.x + r.w, r.y, r.x + r.w, r.y + r.h, k);
+  ctx.arcTo(r.x + r.w, r.y + r.h, r.x, r.y + r.h, k);
+  ctx.arcTo(r.x, r.y + r.h, r.x, r.y, k);
+  ctx.arcTo(r.x, r.y, r.x + r.w, r.y, k);
+  ctx.closePath();
+}
+function drawTour() {
+  const T = Tut.tour;
+  if (!T) return;
+  const s = TUT_TOUR[T.i], fam = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  const at = s.at.map(tourRect).filter(Boolean);
+  const lit = at.map(r => ({ x: r.x - 7, y: r.y - 7, w: r.w + 14, h: r.h + 14 }));
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  // the room dimmed, with a hole over what is being said
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  for (const r of lit) tourHole(r, 9);
+  ctx.fillStyle = 'rgba(3,5,10,0.78)';
+  ctx.fill('evenodd');
+  // what is not up yet, as a ghost of where it will be
+  if (s.ghost) for (const r of at) {
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(148,163,184,0.55)'; ctx.lineWidth = 1.2;
+    roundRect(r.x, r.y, r.w, r.h, 7); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '0.2em';
+    ctx.font = "700 9px " + fam;
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(s.ghost, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+    ctx.letterSpacing = '0em';
+  }
+  ctx.strokeStyle = rgba(COL.player, 0.55 + Math.sin(uiTime * 4) * 0.3); ctx.lineWidth = 1.6;
+  for (const r of lit) { roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke(); }
+
+  // the card: under what it is about when that is high on the screen, over it when low
+  const shown = tourShown(), n = shown.indexOf(T.i) + 1, last = n === shown.length;
+  const cw = Math.min(400, W - 24);
+  ctx.font = "500 13px " + fam;
+  const lines = wrapLines(s.say(), cw - 36);
+  const ch = 92 + lines.length * 18;
+  const b = lit.length ? lit.reduce((u, r) => {
+    const x0 = Math.min(u.x, r.x), y0 = Math.min(u.y, r.y);
+    return { x: x0, y: y0, w: Math.max(u.x + u.w, r.x + r.w) - x0, h: Math.max(u.y + u.h, r.y + r.h) - y0 };
+  }) : { x: W / 2, y: H / 2, w: 0, h: 0 };
+  const below = b.y + b.h / 2 < H / 2;
+  const cy = clamp(below ? b.y + b.h + 12 : b.y - 12 - ch, 12, H - ch - 12);
+  const cx = clamp(b.x + b.w / 2 - cw / 2, 12, W - cw - 12);
+  ctx.globalAlpha = clamp((uiTime - T.at) / 0.25, 0, 1);
+  ctx.fillStyle = 'rgba(8,13,22,0.97)';
+  roundRect(cx, cy, cw, ch, 12); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.55); ctx.lineWidth = 1.4;
+  roundRect(cx, cy, cw, ch, 12); ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 9px " + fam;
+  ctx.fillStyle = rgba(COL.player, 0.8);
+  ctx.fillText('FIRST FLIGHT  ·  ' + n + ' / ' + shown.length, cx + 18, cy + 20);
+  // SKIP, top right
+  const sk = isTouch ? 'SKIP' : 'SKIP  [ESC]';
+  ctx.letterSpacing = '0.14em';
+  const skw = ctx.measureText(sk).width;
+  const skip = { x: cx + cw - skw - 30, y: cy + 8, w: skw + 18, h: 24 };
+  const hot = inRect(mouse.x, mouse.y, skip);
+  ctx.fillStyle = hot ? '#e2e8f0' : '#64748b';
+  ctx.fillText(sk, skip.x + 9, cy + 20);
+  ctx.letterSpacing = '0.04em';
+  fitFont(s.head, cw - 36, '700', 17, "'Chakra Petch', Barlow, system-ui, sans-serif", 11);
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(s.head, cx + 18, cy + 44);
+  ctx.letterSpacing = '0em';
+  ctx.font = "500 13px " + fam;
+  ctx.fillStyle = '#cbd5e1';
+  lines.forEach((l, i) => ctx.fillText(l, cx + 18, cy + 68 + i * 18));
+  const foot = isTouch ? (last ? 'tap to start the run' : 'tap for the next')
+             : (last ? '[ENTER] start the run' : '[ENTER] next') + (n > 1 ? '   ·   [←] back' : '');
+  ctx.font = "600 10px " + fam;
+  ctx.letterSpacing = '0.1em';
+  ctx.fillStyle = last ? COL.player : '#64748b';
+  ctx.fillText(foot, cx + 18, cy + ch - 16);
+  ctx.restore();
+  Tut.tourBtns = { skip, card: { x: cx, y: cy, w: cw, h: ch } };
 }
 
 // the pause screen's way out of it, under MAIN MENU
@@ -71546,6 +71740,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'QOL',                                  // the run report's buttons and tip, SHARE, INSTALL (AFTER THE RUN)
   'Tut',                                  // FIRST FLIGHT's card and hints: the run's part of it is `assist`
+  'HUD_AT',                               // where the HUD drew each thing this frame (the tour points at them)
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own

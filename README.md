@@ -602,6 +602,14 @@ stuck. So a browser's first flight is offered help: FIRST FLIGHT, in
   last longer) and its shots fly at 85% speed. One save per run: the first
   blow that would end the run leaves the pilot at 60% instead, after the
   pilot's own revives.
+- **The tour.** FLY ASSISTED opens the run on a tour of the HUD (`TUT_TOUR`):
+  the ship, health, experience and level, the dash, score, wave and sector,
+  credits, and, as ghosts of where they will be, the boss's bar, the build
+  and the tips. Each part is lit in turn with a line about it. [ENTER] or a
+  click goes on, [←] goes back, [ESC] or SKIP ends it. The run is held while
+  it is up (state `tour`, which `update()` treats as pause), so it never moves
+  the game. `drawHUD` publishes where it drew each part (`HUD_AT`), and the
+  tour points there. It is shown once, on the run FLY ASSISTED starts.
 - **The hints** are subtitles low on the screen. They teach moving, aiming
   and firing, experience, the cards and the dash, each waiting for the player
   to do it (and giving up after a while), then call out each of THE WARDEN's
@@ -610,6 +618,12 @@ stuck. So a browser's first flight is offered help: FIRST FLIGHT, in
   pause screen. Either is remembered.
 - **Only ordinary solo runs.** Never the daily, the rush, a challenge, co-op,
   freeplay, the hub or an outside pilot.
+- **Nothing takes the menu first.** ALL HALLOWS' knock holds the menu for
+  about twenty seconds, which on a first visit is when PLAY gets pressed. It
+  waits while a first flight has the menu (`tutHoldsMenu`: never asked, or
+  flying, and no ordinary run on the record yet), and knocks on the next
+  visit to the menu once a run is filed. Veterans, and browsers that said
+  NO THANKS, are knocked at once, as before.
 
 It is decided by a **cookie, `vr_tut`**, on this browser, not by the save or the
 account, and nothing about it is uploaded:
