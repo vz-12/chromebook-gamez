@@ -47,8 +47,7 @@ import { linkedSupporter } from './patreon.js';
 export const KINDS = ['banner', 'picture', 'decal'];
 export const MAX_DECALS = 4;
 
-/* The catalog. Ids are the art's (leaderboard/art.js draws each by its id); names are shown.
-   The three SUPPORTER items have no art yet, so the page draws the default in their place. */
+/* The catalog. Ids are the art's (leaderboard/art.js draws each by its id); names are shown. */
 export const LOOKS = {
   banner: [
     { id: 'world',     n: 'YOUR WORLD',  gate: 'free' },

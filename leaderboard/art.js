@@ -976,6 +976,130 @@
   const BLOOD = metalHex('#fee2e2', '#ef4444', '#450a0a'), CODE = metalHex('#ecfccb', '#a3e635', '#1a2e05');
   const VIOLET = metalHex('#ede9fe', '#a78bfa', '#2e1065'), PINK = metalHex('#fce7f3', '#f472b6', '#500724');
 
+  /* SUPPORTER, a Patreon supporter's looks (the 'supporter' gate): the void's
+     light turned warm, coral, amber and rose going round; lanterns rising,
+     every one a supporter's; and a heart cut like a stone, which the picture
+     and the decal both carry, beating. */
+  const KINDLE = ['#ff7a66', '#fcd34d', '#f472b6'].map(rgb);
+  const kindled = u => {
+    u = (((u % 1) + 1) % 1) * 3;
+    const i = Math.floor(u);
+    return lerp(KINDLE[i], KINDLE[(i + 1) % 3], u - i);
+  };
+  // the supporter's metal: rose gold, coral at heart
+  const PATRON = metalHex('#fff4ee', '#ff8a70', '#5e1a24');
+  // a metal out of the warm light at u, for a facet
+  const warmTint = u => { const c = kindled(u); return { hi: lerp(c, [255, 255, 255], 0.72), mid: c, lo: lerp(c, [36, 4, 16], 0.72) }; };
+  // a heart's beat, lub-dub, every 1.2 s: 1 on the first, 0.6 on the second, 0 between
+  const BEAT = 1.2;
+  const heartbeat = t => {
+    if (STILL) return 0;
+    const ph = (t % BEAT) / BEAT, kick = (at, len) => (ph < at ? 0 : Math.pow(1 - Math.min(1, (ph - at) / len), 3));
+    return Math.max(kick(0, 0.16), 0.6 * kick(0.2, 0.2));
+  };
+  // a sky lantern, (x, y) its middle, s tall, in colour c: paper lit by the flame in its mouth
+  const lantern = (g, x, y, s, c, a, f) => {
+    glow(g, x, y + s * 0.15, s * 1.6, c, 0.32 * a * f);
+    if (s < 4) {
+      g.fillStyle = css(lerp(c, [255, 250, 235], 0.35), a);
+      g.fillRect(x - s * 0.3, y - s * 0.5, s * 0.6, s);
+      return;
+    }
+    const top = s * 0.34, foot = s * 0.24, hh = s * 0.5;
+    g.beginPath();
+    g.moveTo(x - foot, y + hh);
+    g.lineTo(x - top, y - hh + s * 0.1);
+    g.quadraticCurveTo(x, y - hh - s * 0.08, x + top, y - hh + s * 0.1);
+    g.lineTo(x + foot, y + hh);
+    g.closePath();
+    const paper = g.createLinearGradient(0, y - hh, 0, y + hh);
+    paper.addColorStop(0, css(lerp(c, [60, 12, 24], 0.45), a));
+    paper.addColorStop(0.62, css(c, a));
+    paper.addColorStop(1, css(lerp(c, [255, 250, 235], 0.65), a));
+    g.fillStyle = paper; g.fill();
+    if (s > 9) {                                     // its ribs
+      g.strokeStyle = css(lerp(c, [40, 8, 16], 0.5), 0.35 * a); g.lineWidth = 0.7;
+      g.beginPath();
+      for (const k of [-0.36, 0.36]) { g.moveTo(x + top * k, y - hh + s * 0.04); g.lineTo(x + foot * k, y + hh); }
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(255,248,230,' + 0.95 * a * f + ')';     // the flame, a bead in its mouth
+    g.beginPath(); g.ellipse(x, y + hh - s * 0.03, foot * 0.55, Math.max(0.6, s * 0.05), 0, 0, TAU); g.fill();
+  };
+  /* o.n lanterns rising from y0 up to `top` across x0 to x0 + w, drifting on
+     a slow wind and swaying; z is how near (o.z0 to o.z1): nearer ones
+     bigger, brighter and quicker. o.sc scales them (1 on a 200-tall cover). */
+  const lanterns = (g, x0, y0, w, top, t, o) => {
+    const r = seeded(o.seed || 5), sc = o.sc || 1;
+    for (let i = 0; i < o.n; i++) {
+      const z = o.z0 + (o.z1 - o.z0) * r(), xr = r(), ph = r(), u = r();
+      const s = sc * (2 + 10 * z), sp = sc * (2.5 + 9 * z), span = y0 - top + s * 2;
+      const y = y0 + s - ((ph * span + t * sp) % span);
+      const wide = w + s * 4, x = x0 - s * 2 + ((xr * wide + t * sc * 1.6 * z) % wide) + Math.sin(t * 0.5 + ph * TAU) * sc * 3 * z;
+      const a = (0.4 + 0.5 * Math.min(1, z)) * clamp01((y0 - y) / (s * 3)) * clamp01((y - top) / ((y0 - top) * 0.35));
+      if (a <= 0.01) continue;
+      const f = STILL ? 1 : 0.82 + 0.18 * Math.sin(t * (6 + 3 * z) + i * 1.7);
+      lantern(g, x, y, s, kindled(u + t * 0.02), a, f);
+    }
+  };
+  // the heart, cut like a stone: 12 corners clockwise from the notch, 32 across on a 40 grid
+  const HEART = [[0, -8], [5, -14], [11, -14.5], [15.5, -10], [16, -4], [12, 3.5], [0, 14.5],
+                 [-12, 3.5], [-16, -4], [-15.5, -10], [-11, -14.5], [-5, -14]];
+  const HEART_R = [0.6, 2.4, 2.8, 2.8, 2.4, 2, 1.2, 2, 2.4, 2.8, 2.8, 2.4];
+  const HEART_IN = HEART.map(([x, y]) => [x * 0.5, y * 0.5 - 1.6]);
+  /* Its facets lit from up and to the left as it sways, each in its own part
+     of the warm light, which drifts round; the table on top catches the
+     light; a glint now and then and a sparkle hopping over it. */
+  const heartGem = (g, t, age) => {
+    const drift = STILL ? 0 : t * 0.05, sway = STILL ? 0 : Math.sin(t * 0.8) * 0.3, n = HEART.length;
+    const outline = () => roundPath(g, HEART, HEART_R);
+    outline();
+    g.fillStyle = css(PATRON.mid); g.fill();
+    g.save();
+    outline(); g.clip();
+    for (let i = 0; i < n; i++) {
+      const a = HEART[i], b = HEART[(i + 1) % n], c = HEART_IN[(i + 1) % n], d = HEART_IN[i];
+      const k = facing(Math.atan2(-(b[0] - a[0]), b[1] - a[1]) + sway), M = warmTint(i / n * 0.5 + drift);
+      for (const [p, q, rr, dk] of [[a, b, d, 0.09], [b, c, d, -0.09]]) {
+        g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.lineTo(rr[0], rr[1]); g.closePath();
+        g.fillStyle = css(lit(M, clamp01(k + dk))); g.fill();
+      }
+    }
+    roundPath(g, HEART_IN, 1);
+    const T = warmTint(drift + 0.25), tb = g.createLinearGradient(-6, -10, 6, 7);
+    tb.addColorStop(0, css(T.hi)); tb.addColorStop(1, css(lit(T, 0.55 + sway * 0.3)));
+    g.fillStyle = tb; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 0.5;
+    g.beginPath();
+    for (let i = 0; i < n; i++) { g.moveTo(HEART_IN[i][0], HEART_IN[i][1]); g.lineTo(HEART[i][0], HEART[i][1]); }
+    g.stroke();
+    g.restore();
+    outline();
+    g.strokeStyle = css(PATRON.hi, 0.8); g.lineWidth = 0.8; g.stroke();
+    glint(g, age + 1.2, 4.6, outline, -16, 16, -15, 15, 0.6);
+    if (!STILL) {
+      const spots = [[-9, -9], [8, -3], [-2, 7]], j = Math.floor(t / 1.6) % 3, u = (t % 1.6) / 1.6;
+      g.save();
+      g.globalAlpha *= Math.sin(u * Math.PI);
+      sparkle(g, spots[j][0], spots[j][1], 3.4);
+      g.fillStyle = '#fff'; g.fill();
+      g.restore();
+    }
+  };
+  // the heart's outline going out on each beat, two at a time as they fade
+  const heartRipples = (g, t, a) => {
+    if (STILL) return;
+    const ph = (t % BEAT) / BEAT;
+    for (let j = 0; j < 2; j++) {
+      const k = (ph + j) / 2, sc = 1.04 + outQuint(k) * 0.75;
+      g.save(); g.scale(sc, sc);
+      roundPath(g, HEART, HEART_R);
+      g.strokeStyle = css(kindled(t * 0.05 + 0.3), 0.5 * (1 - k) * a); g.lineWidth = 1.5 / sc;
+      g.stroke();
+      g.restore();
+    }
+  };
+
   const BANNER = {
     // VOIDRUNNER: rings pulsing out over the grid, and the ship
     runner: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'runner', M: pilotOf('runner').M, back: (g, w, h, t, hz) => {
@@ -1097,7 +1221,66 @@
         crestOf(g, id, t, age + 1);
         g.restore();
       } });
-    }
+    },
+    /* SUPPORTER: a beacon on the horizon, its beam swinging slowly over the
+       sky, lanterns rising past the player's own ship (the one they last
+       flew), the far ones from behind the horizon and a few near ones off
+       the floor. */
+    supporter: (g, w, h, t, p) => coverStage(g, w, h, t, p, { id: 'supporter', M: PATRON, top: '#12060c', tint: 0.5, stars: 70,
+      back: (g, w, h, t, hz) => {
+        const sc = h / 200, bx = w * 0.2, by = hz - h * 0.44, warm = kindled(t * 0.03);
+        // the beam
+        const ang = -Math.PI / 2 + (STILL ? -0.55 : Math.sin(t * 0.32) * 1.05), L = Math.hypot(w, h);
+        g.save();
+        g.globalCompositeOperation = 'lighter';
+        const bg = g.createRadialGradient(bx, by, 0, bx, by, L * 0.75);
+        bg.addColorStop(0, css(warm, 0.22)); bg.addColorStop(1, css(warm, 0));
+        g.fillStyle = bg;
+        for (const sp of [0.12, 0.04]) {
+          g.beginPath(); g.moveTo(bx, by); g.arc(bx, by, L, ang - sp, ang + sp); g.closePath(); g.fill();
+        }
+        g.restore();
+        // the far lanterns, rising from behind the horizon
+        g.save();
+        g.beginPath(); g.rect(0, 0, w, hz); g.clip();
+        lanterns(g, 0, hz, w, 0, t, { n: Math.round(14 + 20 * Math.min(1, w / 1200)), z0: 0.2, z1: 0.75, sc, seed: 11 });
+        g.restore();
+        // the beacon: a dark spire lit down its left edge, bands of light up it, the lamp at its top
+        const b0 = Math.max(4, h * 0.032), b1 = Math.max(1.4, h * 0.009), lampY = by + h * 0.03;
+        g.beginPath();
+        g.moveTo(bx - b0, hz); g.lineTo(bx - b1, lampY); g.lineTo(bx + b1, lampY); g.lineTo(bx + b0, hz);
+        g.closePath();
+        const sg = g.createLinearGradient(bx - b0, 0, bx + b0, 0);
+        sg.addColorStop(0, css(lerp(PATRON.mid, [12, 4, 10], 0.5))); sg.addColorStop(0.42, '#16080f'); sg.addColorStop(1, '#07030a');
+        g.fillStyle = sg; g.fill();
+        for (let j = 1; j <= 3; j++) {
+          const k = j / 4.2, y = hz - (hz - lampY) * k, half = b0 + (b1 - b0) * k;
+          g.fillStyle = css(PATRON.hi, 0.18 + 0.1 * j); g.fillRect(bx - half, y, half * 2, Math.max(1, sc));
+        }
+        g.fillStyle = '#0c050a';                     // its cap
+        g.beginPath(); g.moveTo(bx - b1 * 2.4, by - h * 0.018); g.lineTo(bx, by - h * 0.07); g.lineTo(bx + b1 * 2.4, by - h * 0.018); g.closePath(); g.fill();
+        const pulse = STILL ? 0.8 : 0.7 + 0.3 * Math.sin(t * 2.2);
+        glow(g, bx, by, h * 0.5, warm, 0.34 * pulse);
+        glow(g, bx, by, h * 0.12, [255, 244, 230], 0.8);
+        g.save();
+        g.globalCompositeOperation = 'lighter';
+        sparkle(g, bx, by, h * 0.1 * (0.8 + 0.2 * pulse));
+        g.fillStyle = css(lerp(warm, [255, 255, 255], 0.6), 0.6); g.fill();
+        g.restore();
+        g.fillStyle = '#fff7ed';
+        g.beginPath(); g.arc(bx, by, Math.max(1.8, h * 0.016), 0, TAU); g.fill();
+        heroShip(g, w, h, t, hz, pilotOf(p.pilot), false);
+      },
+      front: (g, w, h, t, hz) => {
+        const sc = h / 200, bx = w * 0.2;
+        // the beacon's light, pooled on the floor at its foot
+        g.save();
+        g.translate(bx, hz); g.scale(1, 0.28);
+        glow(g, 0, 0, h * 0.45, kindled(t * 0.03), 0.3);
+        g.restore();
+        // a few near lanterns, off the floor
+        lanterns(g, 0, h + 24 * sc, w, 0, t, { n: Math.round(3 + 3 * Math.min(1, w / 1200)), z0: 1.1, z1: 1.6, sc, seed: 29 });
+      } })
   };
 
   /* A picture: the sigil's cut (a rounded square that pops in) with o.inner
@@ -1153,7 +1336,22 @@
     runner: pilotPicture('runner'), ember: pilotPicture('ember'), hacker: pilotPicture('hacker'), vagrant: pilotPicture('melee'),
     overdrive: pilotPicture('ember', true), superuser: pilotPicture('hacker', true), ronin: pilotPicture('melee', true),
     bronze: leaguePicture('bronze'), silver: leaguePicture('silver'), gold: leaguePicture('gold'),
-    platinum: leaguePicture('platinum'), void: leaguePicture('void')
+    platinum: leaguePicture('platinum'), void: leaguePicture('void'),
+    // SUPPORTER: the heart, beating, its outline going out on each beat, lanterns rising behind it
+    supporter: (g, w, h, t, p) => pictureFrame(g, w, h, t, p, { id: 'supporter', M: PATRON,
+      inner: (g, cx, cy, S, t, age) => {
+        const on = clamp01((age - 0.5) / 0.4), beat = heartbeat(t) * on;
+        g.save();
+        g.translate(cx, cy); g.scale(S / 64, S / 64);
+        lanterns(g, -32, 40, 64, -34, t, { n: 7, z0: 0.2, z1: 0.5, sc: 0.9, seed: 7 });
+        glow(g, 0, 1, 36, kindled(t * 0.05), 0.3 + 0.18 * beat);
+        g.translate(0, 1.5);
+        g.scale(1.12, 1.12);
+        heartRipples(g, t, on);
+        g.scale(1 + 0.05 * beat, 1 + 0.05 * beat);
+        heartGem(g, t, age);
+        g.restore();
+      } })
   };
 
   /* The decals: a beveled hexagon in a metal with a mark sunk in its face,
@@ -1171,7 +1369,22 @@
       g.fillStyle = '#7f1d1d'; g.beginPath(); g.arc(0, 0, 3.2, 0, TAU); g.fill();
       g.fillStyle = '#fee2e2'; g.beginPath(); g.arc(-1, -1, 0.9, 0, TAU); g.fill();
     },
-    star(g) { sparkle(g, 0, 0, 8); g.fill(); }
+    star(g) { sparkle(g, 0, 0, 8); g.fill(); },
+    // SUPPORTER: the heart, beating, its table catching the light and its cuts showing
+    heart(g, t, M) {
+      const k = 0.5 * (1 + 0.08 * heartbeat(t));
+      g.save();
+      g.scale(k, k);
+      roundPath(g, HEART, HEART_R); g.fill();
+      g.shadowBlur = 0;
+      roundPath(g, HEART_IN, 1);
+      g.fillStyle = 'rgba(255,255,255,0.3)'; g.fill();
+      g.strokeStyle = css(M.lo, 0.4); g.lineWidth = 1.1;
+      g.beginPath();
+      for (let i = 0; i < HEART.length; i++) { g.moveTo(HEART_IN[i][0], HEART_IN[i][1]); g.lineTo(HEART[i][0], HEART[i][1]); }
+      g.stroke();
+      g.restore();
+    }
   };
   const DECAL = {
     founder:   { M: METAL.cyan, glyph: 'ship' },
@@ -1181,7 +1394,8 @@
     crown:     { M: METAL.gold, glyph: 'wreath' },
     duelist:   { M: PINK, glyph: 'duel' },
     veteran:   { M: METAL.silver, glyph: 'chevrons' },
-    awakened:  { M: BLOOD, glyph: 'eye' }
+    awakened:  { M: BLOOD, glyph: 'eye' },
+    supporter: { M: PATRON, glyph: 'heart' }
   };
 
   window.LB_ART = {

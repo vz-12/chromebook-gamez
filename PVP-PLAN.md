@@ -926,8 +926,10 @@ Branch `profiles`. The shop and the currency stay for later.
   (`'supporter'` in `accounts.perks`) opens all three. `npm run supporter
   -- <account>` gives it (`--take` takes it back, `--remote` for the live
   database); it adds or removes only that entry, so `dev` and the rest
-  stay. Locked, they say SUPPORT VOIDRUNNER ON PATREON. No art yet (you
-  said not yet): the page draws the defaults in their place.
+  stay. Locked, they say SUPPORT VOIDRUNNER ON PATREON. The art (art.js,
+  SUPPORTER): a beacon swinging its beam over rising lanterns past the
+  player's ship, and a heart cut like a stone, beating, as the picture and
+  the decal.
   `npm run test:looks` covers it (90 checks; 5 more mutants, all caught).
   - **The Patreon link (8 Oct, you: "how do we get a supporter's account
     name without asking directly?"):** a signed-in player links their own
