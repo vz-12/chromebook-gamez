@@ -93,7 +93,8 @@ async function answer(g, body) {
   frame(g);
 }
 
-const SETUP = `pageDead = true; Save.profile.gfxSeen = GFX_VER; Save.profile.name = 'LIVE'; state = 'menu';`;
+// a browser that has answered FIRST FLIGHT already, so a click on the menu is a run
+const SETUP = `pageDead = true; Save.profile.gfxSeen = GFX_VER; Save.profile.name = 'LIVE'; state = 'menu'; tutSet('off');`;
 
 section('asking');
 const g = boot();

@@ -547,6 +547,18 @@ Small things that help the game travel:
 - **SHARE RUN** on the run report copies a few lines about the run and a
   link to wherever it is being played (a phone gets its share sheet). Nothing
   is sent anywhere by the game.
+- **Links** (LINKS in `index.html`), read once as the page opens and taken
+  off the address:
+  - `?vs=NAME&s=SCORE` is a challenge: the menu shows the score to beat, and
+    the run report says when an ordinary run beats it. SHARE RUN's link
+    carries the player's own. Kept in the browser (`voidrunner_vs_v1`) until
+    a newer one comes.
+  - `&d=YYYY-MM-DD` makes it a daily's: on that day only that day's daily
+    beats it, so both play the same run.
+  - `?join=CODE` goes straight into a co-op room once the player has a name.
+    The host's COPY INVITE LINK [I] makes one.
+  - Both use the address the sender is on, so a link sent from the school
+    address works at school.
 
 ## Continuing a run
 
@@ -572,6 +584,59 @@ costs seconds, not the run. CONTINUE, in `index.html`, has the details:
 
 A new top-level variable reaches the snapshot without being listed, as it
 does for co-op; anything that is this machine's own goes in `SNAP_LOCAL`.
+
+## First flight (the assisted first run)
+
+THE WARDEN, the boss at the end of the first sector, is where new players got
+stuck. So a browser's first flight is offered help: FIRST FLIGHT, in
+`index.html`.
+
+- **Asked once, at PLAY.** The first time PLAY is pressed on a browser, a card
+  asks: FLY ASSISTED [ENTER] or NO THANKS [N]. [ESC] puts it down and asks
+  again next time.
+- **It lasts until THE WARDEN falls,** not for exactly one run, so a first run
+  lost on wave 3 does not use it up before the boss. Dying keeps it on for the
+  next run, with a fresh save.
+- **What it does** (`ASSIST`): every hit on the pilot lands at 60%. The boss
+  comes in with 65% of its health, attacks at 75% of its pace (so its tells
+  last longer) and its shots fly at 85% speed. One save per run: the first
+  blow that would end the run leaves the pilot at 60% instead, after the
+  pilot's own revives.
+- **The hints** are subtitles low on the screen. They teach moving, aiming
+  and firing, experience, the cards and the dash, each waiting for the player
+  to do it (and giving up after a while), then call out each of THE WARDEN's
+  attacks as it starts it.
+- **Opting out:** NO THANKS on the card, or TURN OFF THE ASSIST [O] on the
+  pause screen. Either is remembered.
+- **Only ordinary solo runs.** Never the daily, the rush, a challenge, co-op,
+  freeplay, the hub or an outside pilot.
+
+It is decided by a **cookie, `vr_tut`**, on this browser, not by the save or the
+account, and nothing about it is uploaded:
+
+| Value | Means |
+| --- | --- |
+| (none) | Never asked: PLAY shows the card. |
+| `on` | Assisted, until THE WARDEN falls. |
+| `off` | Declined, on the card or from the pause screen. |
+| `done` | THE WARDEN fell with the help, or this device's save has been past wave 5. |
+
+A save that has been past wave 5 is never asked, and PLAY marks the browser
+`done` when it sees one, so a veteran who later signs out (and gets a fresh
+guest save) is not asked either. A save that keeps dying at THE WARDEN is asked: it is who this is for.
+The cookie lasts 400 days (Chrome's limit) and is written again on every
+visit. Where cookies are not kept (`file://`), the same value goes in local
+storage (`voidrunner_tut`), and where neither is, it lasts as long as the page.
+
+The run never reads the cookie. PLAY (`startRun`) hands the answer to the run
+the way the seed is handed over (`runAssistNext`), and the run keeps its own
+`assist`, so a continued run is still assisted and the determinism test holds.
+To see the card again, delete the `vr_tut` cookie for the site (and the
+`voidrunner_tut` local storage key, if it is there).
+
+```sh
+npm run test:tutorial                      # a few seconds
+```
 
 ## Memory under fire
 
@@ -640,14 +705,14 @@ node scripts/determinism.mjs --restore amalgam
 
 Co-op is moving to lockstep: both machines run the same game and send only
 their inputs. That only works if the same seed, inputs and run settings give
-the same game, step for step, on any machine. The test plays 17 scenarios
+the same game, step for step, on any machine. The test plays 18 scenarios
 twice: the four pilots, Boss Rush, the finales, the rites, ALL HALLOWS' two
-areas and DEAD GAME, and an outside pilot. Run A is never drawn and has every
-effect off. Run B is drawn to a stub canvas with every effect on, at another
-window size, while the keyboard, mouse, autofire and the save's flags are
-scrambled every step. The two must match at every second of game time. It also
-checks that a different seed changes the run, and that a planted unseeded roll
-is caught.
+areas and DEAD GAME, an assisted first flight, and an outside pilot. Run A is
+never drawn and has every effect off. Run B is drawn to a stub canvas with
+every effect on, at another window size, while the keyboard, mouse, autofire
+and the save's flags are scrambled every step. The two must match at every
+second of game time. It also checks that a different seed changes the run,
+and that a planted unseeded roll is caught.
 
 Run C checks the snapshots that lockstep's safety net sends. A second copy
 of the game, loaded on its own, takes over a snapshot of run A a third of

@@ -174,6 +174,12 @@ function runTake() {
   runFlagsNext = null;
 }
 function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; talesFlag(); }
+/* FIRST FLIGHT: whether this run is assisted, handed in by PLAY (startRun)
+   and used up by resetGame like the seed. The game never reads the cookie
+   that decides it; it reads `assist`, the run's own, until the first boss
+   falls or the player turns it off. See FIRST FLIGHT. */
+let runAssistNext = false;
+let assist = null;                       // { saved }: the one save, once spent; null when the run is on its own
 let simTick = 0;
 const simTimers = [];
 const SIM_AFTER = {
@@ -3769,7 +3775,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   const bArmor = type === 'boss' ? bossArmorCurve(w) : 0;
   const bDR    = type === 'boss' ? bossDRCurve(w) : 0;
   const bd = bKey ? BOSSES[bKey] : null;
-  const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul : hpCurve(w)) * curseHpMul;
+  const hpScale = (type === 'boss' ? bossHpCurve(w) * bd.hpMul * (assist ? ASSIST.bossHp : 1) : hpCurve(w)) * curseHpMul;   // FIRST FLIGHT: a lighter first boss
   const canElite = type !== 'boss' && type !== 'egg';
   const eliteChance = Math.max(chalElite(),
                       Math.min(0.22, 0.02 + w * 0.011) * (1 + P.luck * 0.45) + hardElite());
@@ -5348,7 +5354,8 @@ function hurtPlayer(dmg, opts) {
   }
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
   const brokenMul = P.roninBroken > 0 ? VOW_BROKEN_HURT : 1;   // RONIN's V: the minute after the grave broke
-  let d = Math.max(1, dmg * P.frailty * nightMul * brokenMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
+  const assistMul = assist ? ASSIST.hurt : 1;                  // FIRST FLIGHT: the first sector hits softer
+  let d = Math.max(1, dmg * P.frailty * nightMul * brokenMul * assistMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
   if (opts && opts.pvp) d = Math.min(d, opts.pvp.cap);   // PvP mode: the duel's caps hold, whatever the build (duel.js)
   // what the blow takes, returned: a Second Wind or a brake after it is the pilot's own health, not the blow given back (PvP counts it, duel.js)
   const took = Math.min(d, Math.max(0, P.hp));
@@ -5417,6 +5424,9 @@ function reviveOrDie() {
       }
       return;
     }
+    /* FIRST FLIGHT: one save a run while the assist lasts. After the pilot's
+       own (the brake, Second Wind), so it never spends itself ahead of them. */
+    if (assist && !assist.saved) { assistSave(); return; }
     /* Co-op: your ship is only lost if there is nobody else left holding the
        room. With a wingman still standing this is a knockdown, not the end —
        clearing the wave puts you back on your feet. */
@@ -5602,6 +5612,7 @@ function updateWaves(dt) {
 
 function onBossDefeat(e) {
   tale('boss', e);                       // FORGOTTEN TALES: before any of the endings below return
+  if (assist) assistEnd('done');         // FIRST FLIGHT: the first boss down is where the help ends
   hlBossPay();                           // ONE DAY: whatever was put aside, paid
   P.suAscUsed = false;                   // SUPERUSER's V: once an area, and an area ends with its boss
   if (e && e.boss === 'root' && rootRite) { rrWin(e); return; }
@@ -37239,6 +37250,10 @@ function resetGame() {
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
+  // and whether it is assisted (FIRST FLIGHT): only ever for one pilot on its own
+  assist = runAssistNext && !MP.on && !LS.on ? { saved: false } : null;
+  runAssistNext = false;
+  tutRunStart();                         // and the hints that go with it, this machine's own
   applyChar(runCharNext != null ? runCharNext : selectedChar, runCharNext != null);
   outsideWorld = {};                     // before the pilot: an outside pilot's init may set up its share of the run
   P = newPlayer();
@@ -37484,6 +37499,7 @@ const UI_ACTS = {
   open:      () => { if (choice) choiceAnswer(true); },
   pause:     () => { if (state === 'play') state = 'pause'; },
   resume:    () => { if (state === 'pause') state = 'play'; },
+  assistOff: () => { if (state === 'pause' && assist) assistEnd('off'); },   // FIRST FLIGHT, turned off
 };
 const UI_NAMES = Object.keys(UI_ACTS);          // an act's number on the wire is its place here
 function ui(act, i) {
@@ -37533,6 +37549,7 @@ function handleKey(k) {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
     if (runCardUp()) { runCardKey(k); return; }   // a run left in progress is answered first (CONTINUE)
+    if (tutCardUp()) { tutCardKey(k); return; }   // and FIRST FLIGHT's question, once PLAY has asked it
     if (k === 'v' && hlOpenVigil()) return;
     if (k === 'h' && Save.profile.outsiderIn) { enterHub(); return; }
     if (k === 'l') { openLan(); return; }
@@ -37560,7 +37577,7 @@ function handleKey(k) {
       // than stranding the other side in a game it cannot see
       if (mpGuest()) return;
       if (netLive() && Net.role === 'host' && MP.ready) { mpStartRun(); return; }
-      resetGame(); state = 'play';
+      startRun();
     }
     return;
   }
@@ -37581,7 +37598,7 @@ function handleKey(k) {
     if (mpGuest() || !(k === ' ' || k === 'enter' || k === 'r')) return;
     // still hosting: the next run is the wingman's too, not a solo restart
     if (mpHost()) { mpStartRun(); return; }
-    resetGame(); state = 'play';
+    startRun();
     return;
   }
   if (state === 'levelup') {
@@ -37658,6 +37675,7 @@ function handleKey(k) {
   }
   if (state === 'pause' && k === 'x') { openCodex('pause'); return; }
   if (state === 'pause' && k === 's') { openSettings('pause'); return; }
+  if (state === 'pause' && k === 'o' && assist) { ui('assistOff'); return; }   // FIRST FLIGHT: on your own from here
   if (state === 'gfx') {
     if (uiArm > 0) return;
     if (k === 'g' || k === 'escape' || k === 'enter' || k === ' ') { closeGfx(); return; }
@@ -37765,6 +37783,7 @@ function handleClick() {
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
+    if (tutCardUp()) { tutCardClick(); return; }   // FIRST FLIGHT
     if (hlHatchUp() && inRect(mouse.x, mouse.y, hlHatchRect())) { hlOpenVigil(); return; }
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
@@ -37780,7 +37799,7 @@ function handleClick() {
       return;
     }
     if (QOL.installRect && inRect(mouse.x, mouse.y, QOL.installRect)) { qolOnLift(installApp); return; }
-    resetGame(); state = 'play'; return;
+    startRun(); return;
   }
   if (state === 'dead') {
     if (uiArm > 0) return;               // the moment of the crash (DEAD_ARM)
@@ -37791,7 +37810,7 @@ function handleClick() {
     if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
     if (mpGuest()) return;
     if (mpHost()) { mpStartRun(); return; }
-    resetGame(); state = 'play'; return;
+    startRun(); return;
   }
   if (state === 'gfx') {
     if (uiArm > 0) return;
@@ -37809,6 +37828,7 @@ function handleClick() {
   }
   if (state === 'pause') {
     if (inRect(mouse.x, mouse.y, pauseSetRect())) { openSettings('pause'); return; }
+    if (assist && inRect(mouse.x, mouse.y, pauseAssistRect())) { ui('assistOff'); return; }
     ui('resume'); return;
   }
   if (uiArm > 0) return;                 // overlay just opened — swallow it
@@ -38151,6 +38171,7 @@ function frame(now) {
        lockstep, to the partner). Only a stall past ACC_MAX is let go. */
     if (acc > ACC_MAX) acc = ACC_MAX;
     runSaveTick(dt);          // the run in progress, kept now and then (CONTINUE)
+    tutTick(dt);              // FIRST FLIGHT's lessons, read off the run
     if (PVP) PVP.frame();     // PvP mode: its own screens and transitions
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
@@ -38185,6 +38206,7 @@ function update(dt) {
   if (state === 'menu' || state === 'name') {
     updateMenu(dt);
     // updateMenu can move us elsewhere; the notes only belong on the menu
+    if (state === 'menu') linksTick();   // a co-op room someone sent, first (LINKS)
     if (state === 'menu') logAutoTick(dt);
     return;
   }
@@ -39417,6 +39439,7 @@ function steer(e, tvx, tvy, rate, dt) {
 function eshoot(e, ang, spd, dmg, r = 6, ox, oy) {
   // one of yours: its fire flies in your array, at a weight that hurts its own side
   if (e.hacked) return hackShot(e, ang, spd, hackDmg(dmg), r, ox, oy);
+  if (assist && e.type === 'boss') spd *= ASSIST.bossShot;   // FIRST FLIGHT: its shots come slower
   const bx = (ox === undefined ? e.x : ox) + Math.cos(ang) * e.r;
   const by = (oy === undefined ? e.y : oy) + Math.sin(ang) * e.r;
   const b = {
@@ -39457,7 +39480,7 @@ function updateBoss(e, dt, ux, uy, d) {
     for (let i = 0; i < 26; i++) eshoot(e, i * TAU / 26, 190, e.dmg * 0.5);
     banner('PHASE ' + (ph + 1), e.col);
   }
-  e.atkT -= dt;
+  e.atkT -= dt * (assist ? ASSIST.bossPace : 1);   // FIRST FLIGHT: longer between attacks, and longer tells
   if (e.atk === 6) bossSalvo(e, dt);
   (BOSSES[e.boss] || BOSSES.warden).ai(e, dt, ux, uy, d, ph);
 }
@@ -45710,6 +45733,7 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
   if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
+  drawTut();            // FIRST FLIGHT: a lesson, or THE WARDEN's next move, above the tales' line
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
   if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
@@ -59297,6 +59321,7 @@ function drawPause() {
   ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
   ctx.fillText('this run is saved to your record before you leave', W / 2, H / 2 + 110);
+  drawPauseAssist();     // FIRST FLIGHT: the way to turn it off
 }
 
 /* The run report. Every line here is optional — a challenge win, a reward, a
@@ -59523,6 +59548,17 @@ function drawDead() {
     ctx.fillText(d, CENTER, y + 30);
   });
 
+  // the challenge someone sent, beaten by this run (LINKS)
+  if (s.vsBeat) row(26, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    const t = '⚔  YOU BEAT ' + clipText(s.vsBeat.n.toUpperCase(), 14) + "'S " + s.vsBeat.s.toLocaleString() + '  —  SHARE IT';
+    fitFont(t, wide, '700', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText(t, CENTER, y + 12);
+    ctx.restore();
+  });
+
   // what this pilot carried, as the cards it took (AFTER THE RUN)
   const chips = chipLayout(recap.build, Math.min(560, W - 56), 3);
   if (chips.length) row(24 + chips.length * CHIP_LINE, y => {
@@ -59585,7 +59621,7 @@ function renderMenu() {
      the prompt, the run totals. On a short window it used to run straight
      through the footer and off the bottom edge, so it now scales and centres
      itself in the room left between the corner badges and the footer. */
-  const COL_TOP = -152, COL_BOT = 238;
+  const COL_TOP = -152, COL_BOT = QOL.vs ? 262 : 238;   // and a line more for a challenge (LINKS)
   /* Below this the footer is decoration standing between the column and the
      bottom of the screen, so it stands down and the column takes the room. */
   const roomy = H >= 430, tiny = H < 340;
@@ -59696,6 +59732,7 @@ function renderMenu() {
     ctx.fillStyle = '#475569';
     ctx.fillText(totals, cxp, cyp + 224);
   }
+  drawVsLine(cxp, cyp + 248, (W - 40) / menuScale);   // LINKS
   ctx.restore();                     // end of the scaled centre column
 
   // leaderboard — the global board when it's reachable, your own runs otherwise
@@ -59762,7 +59799,7 @@ function renderMenu() {
     if (global) boardLink(px, py + all.length * 17 + 8);
     ctx.textAlign = 'center';
   } else {
-    const ly = cyp + 250 * menuScale;
+    const ly = cyp + (QOL.vs ? 274 : 250) * menuScale;
     const room = (FOOT_TOP - 22) - (ly + 18);  // 22px of air above the footer
     const fits = room < 0 ? 0
                : Math.max(0, Math.min(all.length, Math.floor(room / rowGap) + 1));
@@ -59943,6 +59980,7 @@ function renderMenu() {
 
   drawRunNote();         // CONTINUE: a word about a saved run
   if (runCardUp()) drawRunCard();   // and the run itself, waiting, over everything
+  else if (tutCardUp()) drawTutCard();   // FIRST FLIGHT: assisted, or not
   drawVignette();
 }
 
@@ -63516,7 +63554,8 @@ const TIPS = [
   'The DAILY RUN [D] is the same run for everyone today. Only your first try is ranked.',
   'Clearing a CHALLENGE [K] puts its card in your pool for every run after.',
   'BOSS RUSH [B] is the bosses back to back, on a ladder of its own.',
-  'CO-OP [L]: two ships, one run. One of you hosts and reads out a code.',
+  'CO-OP [L]: two ships, one run. Host it and COPY INVITE LINK: your friend opens it and is in.',
+  'SHARE RUN sends a link that challenges a friend to beat your score, and tells you when they do.',
   'A BOMBER goes off when it dies, even when you kill it. Shoot it early, from far off.',
   'A SPLITTER breaks into smaller pieces. Kill it away from the crowd.',
   'A LANCER winds up before it lunges, and it commits. Step aside and it goes past.',
@@ -63548,7 +63587,7 @@ function deadRecap(s) {
   const p = coopMine(), C = CHARS.find(c => c.id === p.charId);
   const r = { by: p.hp <= 0 ? (p.hitBy || '') : '', build: runBuild(p), pilot: C ? C.n : '',
               tip: s === lastStats ? qolTip(p.charId) : '' };
-  if (s === lastStats) s.recap = r;
+  if (s === lastStats) { s.recap = r; vsCheck(s); }   // and the challenge someone sent (LINKS)
   return r;
 }
 
@@ -63574,7 +63613,8 @@ function shareText(s) {
   bits.push(n(s.kills) + ' kills', fmtTime(s.time));
   const lines = [head, bits.join(' · ')];
   if (Board.rank && !s.chal) lines.push('#' + Board.rank + ' on the global board');
-  lines.push('Can you beat it? ' + shareUrl());
+  if (s.vsBeat) lines.push('Beat ' + s.vsBeat.n + "'s " + n(s.vsBeat.s) + '. Your move');
+  lines.push('Can you beat it? ' + shareLink(s));
   return lines.join('\n');
 }
 function qolSay(t) { QOL.said = t; QOL.saidT = uiTime + 2.6; }
@@ -63843,6 +63883,20 @@ function runCardClick() {
   if (inRect(mouse.x, mouse.y, b.go)) runContinue();
   else if (inRect(mouse.x, mouse.y, b.end)) runAbandon();
 }
+// a button on a card over the menu (CONTINUE, FIRST FLIGHT); strong is the one ENTER presses
+function cardBtn(r, label, col, strong) {
+  const hot = inRect(mouse.x, mouse.y, r);
+  ctx.fillStyle = strong ? rgba(col, hot ? 0.3 : 0.18) : hot ? rgba(col, 0.16) : 'rgba(255,255,255,0.04)';
+  roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
+  ctx.strokeStyle = rgba(col, hot || strong ? 0.9 : 0.4); ctx.lineWidth = strong ? 1.8 : 1.3;
+  roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+  ctx.save();
+  ctx.letterSpacing = '0.1em';
+  fitFont(label, r.w - 16, '800', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = hot || strong ? '#f8fafc' : col;
+  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+  ctx.restore();
+}
 function drawRunCard() {
   const m = QOL.run, w = Math.min(470, W - 32), h = 214;
   const x = (W - w) / 2, y = clamp(H / 2 - h / 2, 12, H - h - 12);
@@ -63881,21 +63935,8 @@ function drawRunCard() {
   const go = { x: cx - bw - 6, y: by, w: bw, h: bh }, end = { x: cx + 6, y: by, w: bw, h: bh };
   QOL.runBtns = { go, end };
   const asking = QOL.runAsk >= uiTime;
-  const btn = (r, label, col, strong) => {
-    const hot = inRect(mouse.x, mouse.y, r);
-    ctx.fillStyle = strong ? rgba(col, hot ? 0.3 : 0.18) : hot ? rgba(col, 0.16) : 'rgba(255,255,255,0.04)';
-    roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
-    ctx.strokeStyle = rgba(col, hot || strong ? 0.9 : 0.4); ctx.lineWidth = strong ? 1.8 : 1.3;
-    roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
-    ctx.save();
-    ctx.letterSpacing = '0.1em';
-    fitFont(label, r.w - 16, '800', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
-    ctx.fillStyle = hot || strong ? '#f8fafc' : col;
-    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
-    ctx.restore();
-  };
-  btn(go, isTouch ? 'CONTINUE' : 'CONTINUE   [ENTER]', COL.player, true);
-  btn(end, asking ? 'AGAIN TO END IT' : isTouch ? 'ABANDON' : 'ABANDON   [ESC]', '#f87171', asking);
+  cardBtn(go, isTouch ? 'CONTINUE' : 'CONTINUE   [ENTER]', COL.player, true);
+  cardBtn(end, asking ? 'AGAIN TO END IT' : isTouch ? 'ABANDON' : 'ABANDON   [ESC]', '#f87171', asking);
   ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = asking ? '#fca5a5' : '#475569';
   ctx.fillText(asking ? 'it ends here and is filed to your record, as a quit would be'
@@ -63912,6 +63953,468 @@ function drawRunNote() {
   fitFont(QOL.runNote, W - 40, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
   ctx.fillStyle = '#fbbf24';
   ctx.fillText(QOL.runNote, W / 2, H - 132);
+  ctx.restore();
+}
+
+
+/* LINKS (8 Oct 2026). The game travels by word of mouth, so a link carries
+   what a friend would say out loud:
+     ?vs=NAME&s=SCORE[&d=DAY]   "beat this". The menu puts the score up as a
+                                target, and the report says when it falls.
+                                With d, it was the daily of that day: on that
+                                day it is the same run for both, so the menu
+                                points at it.
+     ?join=CODE                 a co-op room. Straight into it, once a name
+                                has been given.
+   Both are read once as the page opens and taken off the address, so a
+   reload does not do them again. The challenge is kept (VS_KEY) until a
+   newer one replaces it; it says nothing to anyone else. */
+const VS_KEY = 'voidrunner_vs_v1';
+const LINK_NAME = /^[A-Za-z0-9 _.\-]{1,14}$/;        // what a callsign may be (nameKey, NAME_MAX)
+Object.assign(QOL, {
+  vs: null,             // { n, s, d, beat } the challenge this player was sent
+  joinCode: '',         // a co-op room to go into as soon as the menu is up
+  inviteSaid: '', inviteT: 0
+});
+function linksRead() {
+  if (PVP || BETA) return;
+  try { QOL.vs = JSON.parse(localStorage.getItem(VS_KEY) || 'null'); } catch (e) { QOL.vs = null; }
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (e) { return; }
+  const vs = (q.get('vs') || '').trim(), s = Math.floor(+q.get('s')), d = q.get('d') || '';
+  if (LINK_NAME.test(vs) && s > 0 && s < 1e11 && vs.toLowerCase() !== (Save.profile.name || '').toLowerCase()) {
+    QOL.vs = { n: vs, s, d: /^\d{4}-\d\d-\d\d$/.test(d) ? d : '', beat: 0 };
+    vsKeep();
+  }
+  const j = (q.get('join') || '').toUpperCase();
+  if (/^[A-Z0-9]{4}$/.test(j)) QOL.joinCode = j;
+  if (q.has('vs') || q.has('s') || q.has('d') || q.has('join')) {
+    for (const k of ['vs', 's', 'd', 'join']) q.delete(k);
+    const rest = q.toString();
+    try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash); } catch (e) { /* the address keeps them */ }
+  }
+}
+function vsKeep() { try { localStorage.setItem(VS_KEY, JSON.stringify(QOL.vs)); } catch (e) { /* kept for this visit only */ }
+}
+// a daily challenge is live only on its own day; another day's is just a score
+const vsDaily = () => !!(QOL.vs && QOL.vs.d && QOL.vs.d === Daily.day);
+/* Whether a run that just ended beat the challenge: on its day, a daily's
+   is beaten on that daily; otherwise by an ordinary run (the rush and the
+   challenges are scored as other games). */
+function vsCheck(s) {
+  const v = QOL.vs;
+  if (!v || v.beat || !s || s.freeplay || s.outside) return false;
+  const fair = vsDaily() ? !!(s.chal && s.chal.daily) : !s.chal;
+  if (!fair || s.score <= v.s) return false;
+  v.beat = s.score; vsKeep();
+  s.vsBeat = { n: v.n, s: v.s };
+  return true;
+}
+// once a frame at the menu: a room to join, once the player has a name
+function linksTick() {
+  if (!QOL.joinCode || state !== 'menu' || runCardUp() || hlProOn()) return;
+  const code = QOL.joinCode;
+  QOL.joinCode = '';
+  openLan();
+  lanView = 'join'; lanCode = code;
+  netJoin(code);
+}
+// what SHARE RUN links to: the game, carrying this run as a challenge when it can be one
+function shareLink(s) {
+  const name = Save.profile.name || '';
+  let u = shareUrl();
+  if (!s || !LINK_NAME.test(name) || !(s.score > 0)) return u;
+  if (s.chal && s.chal.daily) return u + '?vs=' + encodeURIComponent(name) + '&s=' + s.score + '&d=' + (Daily.day || '');
+  if (s.chal) return u;
+  return u + '?vs=' + encodeURIComponent(name) + '&s=' + s.score;
+}
+// the host's room, as a link: the wingman opens it and is in
+function lanInvite() {
+  if (!Net.code) return;
+  const url = shareUrl() + '?join=' + Net.code;
+  const said = t => { QOL.inviteSaid = t; QOL.inviteT = uiTime + 3; };
+  Audio_.select();
+  if (isTouch && navigator.share) {
+    navigator.share({ title: 'VOIDRUNNER', text: 'Fly with me in VOIDRUNNER: ' + url }).then(() => said('SENT'), () => {});
+    return;
+  }
+  qolCopy(url).then(ok => said(ok ? 'LINK COPIED — SEND IT TO YOUR WINGMAN' : 'COULD NOT COPY: THE CODE IS ' + Net.code));
+}
+// the challenge on the menu, under the run totals
+function drawVsLine(cx, y, maxW) {
+  const v = QOL.vs;
+  if (!v) return;
+  const n = clipText(v.n.toUpperCase(), 14), sc = v.s.toLocaleString();
+  const t = v.beat ? '✓  YOU BEAT ' + n + "'S " + sc + '   ·   SHARE YOUR RUN TO SEND ONE BACK'
+          : vsDaily() ? '⚔  ' + n + ' SCORED ' + sc + ' ON TODAY\'S DAILY   ·   PRESS D TO TAKE IT ON'
+          : v.d ? '⚔  ' + n + ' CHALLENGES YOU   ·   BEAT ' + sc + ' IN A RUN'
+          : '⚔  ' + n + ' CHALLENGES YOU   ·   BEAT ' + sc;
+  ctx.save();
+  ctx.letterSpacing = '0.1em';
+  fitFont(t, maxW, '700', 12, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+  ctx.fillStyle = v.beat ? '#4ade80' : rgba('#fbbf24', 0.75 + Math.sin(uiTime * 3) * 0.25);
+  ctx.fillText(t, cx, y);
+  ctx.restore();
+}
+
+/* ===========================================================================
+   FIRST FLIGHT (8 Oct 2026)
+   THE WARDEN, at the end of the first sector, is where new players stopped:
+   four waves of warm-up, then a boss with three phases, a charge and an
+   escort, and nothing in between to say what any of it means. So the first
+   flight on a browser is offered help, and the help lasts until that boss
+   falls, not for exactly one run: a first run lost on wave three would
+   otherwise spend it before the wall it is for.
+
+   What decides it is a cookie on this browser, vr_tut, and not the save or
+   the account. It is the browser that is new to the game, and a cookie is
+   kept out of the save's merge, so an account never carries it anywhere:
+     (none)  never asked: PLAY puts up the card
+     on      assisted: every ordinary run is, until the first boss falls
+     off     declined, on the card or from the pause screen
+     done    the first boss fell with the help, or this device's save has
+             been past wave 5 (a veteran, or a signed-out account's guest)
+   Where a cookie is not kept at all (file://) the same word goes in local
+   storage, and where neither is, it lasts as long as the page.
+
+   What the help is (ASSIST), while `assist` holds:
+     - every hit on the pilot lands at 60%
+     - a boss comes in with 65% of its health, attacks at 75% of its pace
+       (so its tells last longer), and its shots fly at 85% speed
+     - one save: the first blow that would end the run leaves the pilot at
+       60% instead, after the pilot's own (the brake, Second Wind)
+   Only an ordinary run with one pilot is assisted: PLAY from the menu or
+   from the report (startRun). Never the daily, the rush, a challenge,
+   co-op, freeplay, the hub or an outside pilot. An assisted run is filed to
+   the record and the board like any other: the help is over by wave 6, and
+   a save that has been past wave 5 is never offered it again.
+
+   `assist` is the run's (a top-level let, so it is in the snapshot and a
+   continued run keeps it), and the game reads only that. The cookie, the
+   card and the hints are this machine's (Tut, runAssistNext). The hints are
+   subtitles, low on the screen, that wait for what they ask and give up if
+   it does not come, then call out THE WARDEN's attacks as it starts each.
+   ========================================================================= */
+const ASSIST = { hurt: 0.6, bossHp: 0.65, bossPace: 0.75, bossShot: 0.85, saveHp: 0.6 };
+const TUT_COOKIE = 'vr_tut', TUT_KEY = 'voidrunner_tut';
+const TUT_KEEP = 400 * 86400;            // seconds: the longest Chrome keeps a cookie, so it is written again each visit
+const Tut = {
+  mem: '',              // the word, when neither a cookie nor local storage will keep it
+  card: false,          // PLAY asked, and the card waits for an answer
+  btns: null,           // the card's buttons as last drawn
+  // the lessons: which, for how long, and the gap before the next
+  i: 0, t: 0, gap: 0,
+  moved: 0, px: NaN, py: NaN, dashed: false,   // what the pilot has done, as read off the run
+  lvlUp: 0,             // the first hand of cards: 1 while it is up, 2 once it has been
+  tell: '', tellT: 0, tellHot: false,          // THE WARDEN's attack, being called out
+  said: {}, atk: null, ph: 0, met: false,      // which calls, how often, and what it was doing last
+  last: '', lastT: 0, lastCol: '',             // a word that outranks the rest: the save, the boss down
+  shown: '', shownAt: 0                        // the line on screen, for its fade
+};
+
+function tutCookie() {
+  try {
+    const m = /(?:^|;\s*)vr_tut=([a-z]+)/.exec(document.cookie || '');
+    return m ? m[1] : '';
+  } catch (e) { return ''; }
+}
+// the word on this browser: the cookie, else wherever it had to be kept instead
+function tutGet() {
+  const c = tutCookie();
+  if (c) return c;
+  try { const v = localStorage.getItem(TUT_KEY); if (v) return v; } catch (e) { /* none */ }
+  return Tut.mem;
+}
+function tutSet(v) {
+  Tut.mem = v;
+  if (PVP) return;                       // PvP's page is not the game's, and keeps none of it
+  try {
+    document.cookie = TUT_COOKIE + '=' + v + '; Max-Age=' + TUT_KEEP + '; Path=/; SameSite=Lax'
+                    + (location.protocol === 'https:' ? '; Secure' : '');
+  } catch (e) { /* refused */ }
+  try {
+    if (tutCookie() === v) localStorage.removeItem(TUT_KEY);
+    else localStorage.setItem(TUT_KEY, v);   // file://, or cookies blocked
+  } catch (e) { /* memory, then */ }
+}
+// kept for as long as the browser keeps visiting
+{ const v = tutCookie(); if (v) tutSet(v); }
+
+/* What PLAY does about it: 'ask', 'on' or 'off'. A save that has been past
+   THE WARDEN has nothing to learn here, cookie or not, and the browser is
+   marked so: a veteran who signs out gets a fresh guest save, not a lesson. */
+function tutWant() {
+  if (PVP || CHAR().outside) return 'off';   // an outside pilot's run is a sandbox (OUTSIDE PILOTS)
+  const v = tutGet();
+  if (v === 'off' || v === 'done') return 'off';
+  if ((Save.profile.bestWave || 0) > 5) { tutSet('done'); return 'off'; }
+  return v === 'on' ? 'on' : 'ask';
+}
+
+// PLAY, from the menu or the run report: an ordinary run, assisted on a first flight
+function startRun() {
+  const w = tutWant();
+  if (w === 'ask') {
+    if (state === 'dead') quitToMenu();  // the card is the menu's
+    Tut.card = true;
+    Audio_.select();
+    return;
+  }
+  runAssistNext = w === 'on';
+  resetGame(); state = 'play';
+}
+function tutChoose(on) {
+  tutSet(on ? 'on' : 'off');
+  Tut.card = false;
+  runAssistNext = on;
+  resetGame(); state = 'play';
+  Audio_.select();
+}
+
+const tutCardUp = () => Tut.card && state === 'menu' && !runCardUp() && !arrival && !hlProOn();
+function tutCardKey(k) {
+  if (k === 'enter' || k === ' ') tutChoose(true);
+  else if (k === 'n') tutChoose(false);
+  else if (k === 'escape' || k === 'backspace') { Tut.card = false; Audio_.select(); }   // not now: asked again at PLAY
+}
+function tutCardClick() {
+  const b = Tut.btns;
+  if (!b) return;
+  if (inRect(mouse.x, mouse.y, b.yes)) tutChoose(true);
+  else if (inRect(mouse.x, mouse.y, b.no)) tutChoose(false);
+  else if (!inRect(mouse.x, mouse.y, b.card)) Tut.card = false;
+}
+function drawTutCard() {
+  const w = Math.min(500, W - 32), h = 270;
+  const x = (W - w) / 2, y = clamp(H / 2 - h / 2, 12, H - h - 12);
+  ctx.save();
+  ctx.fillStyle = 'rgba(3,5,10,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(8,13,22,0.97)';
+  roundRect(x, y, w, h, 12); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.55); ctx.lineWidth = 1.5;
+  roundRect(x, y, w, h, 12); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cx = W / 2;
+  drawEyebrow('FIRST FLIGHT', cx, y + 24, COL.player);
+  const head = 'WANT A HAND WITH YOUR FIRST RUN?';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  fitFont(head, w - 40, '700', 20, "'Chakra Petch', Barlow, system-ui, sans-serif", 11);
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(head, cx, y + 54);
+  ctx.restore();
+  // what it is, in three lines
+  const what = ['Tips on screen as you play, and the first boss\'s attacks called out as they come',
+                'The first sector hits softer, and THE WARDEN, its boss, is slower and weaker',
+                'One save: the first blow that would end the run leaves you standing'];
+  ctx.textAlign = 'left';
+  what.forEach((t, i) => {
+    const ly = y + 90 + i * 22;
+    ctx.fillStyle = COL.player;
+    ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText('◆', x + 26, ly);
+    fitFont(t, w - 70, '500', 12.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(t, x + 42, ly);
+  });
+  ctx.textAlign = 'center';
+  const note = 'It lasts until THE WARDEN falls. You can turn it off from the pause screen.';
+  fitFont(note, w - 40, '500', 10.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(note, cx, y + 166);
+  const bw = Math.min(200, (w - 52) / 2), bh = 40, by = y + 186;
+  const yes = { x: cx - bw - 6, y: by, w: bw, h: bh }, no = { x: cx + 6, y: by, w: bw, h: bh };
+  Tut.btns = { yes, no, card: { x, y, w, h } };
+  cardBtn(yes, isTouch ? 'FLY ASSISTED' : 'FLY ASSISTED   [ENTER]', COL.player, true);
+  cardBtn(no, isTouch ? 'NO THANKS' : 'NO THANKS   [N]', '#94a3b8', false);
+  const foot = 'this browser remembers the answer' + (isTouch ? '' : '   ·   [ESC] back');
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText(foot, cx, y + h - 20);
+  ctx.restore();
+}
+
+/* The one save (reviveOrDie): Second Wind's, with no room cleared but the
+   shots in the air. Part of the run, like any revive. */
+function assistSave() {
+  assist.saved = true;
+  P.hp = P.maxHp * ASSIST.saveHp;
+  P.iframe = 2.2; P.hurtFlash = 0;
+  banner('SAVED   ·   FIRST FLIGHT', COL.player);
+  ringFx(P.x, P.y, 10, 340, COL.player, 0.9, 6);
+  burst(P.x, P.y, 64, COL.player, 430, 4, 1.0);
+  drawFlashT = 0.18; shake(0.9);
+  Audio_.heal(); Audio_.levelup();
+  ebullets.length = 0;
+  tutSay('That was your one save. The next blow like that ends the run.', '#fbbf24', 6);
+}
+/* The help ends: 'done' when the first boss falls, 'off' from the pause
+   screen. The run is on its own from here, and the browser is not asked again. */
+function assistEnd(why) {
+  assist = null;
+  tutSet(why);
+  if (why === 'done') tutSay('THE WARDEN is down, and the help ends here. From now on, it is the real game.', COL.player, 7);
+}
+// a word that outranks the lessons, said once the run is back in play
+function tutSay(t, col, dur) { Tut.last = t; Tut.lastCol = col; Tut.lastT = dur; }
+
+// a run begins: the card has been answered, and the lessons start from the top
+function tutRunStart() {
+  Object.assign(Tut, { card: false, i: 0, t: 0, gap: 1.4, moved: 0, px: NaN, py: NaN, dashed: false, lvlUp: 0,
+                       tell: '', tellT: 0, tellHot: false, said: {}, atk: null, ph: 0, met: false,
+                       last: '', lastT: 0, shown: '' });
+}
+
+/* The lessons, in order. Each waits for what it asks (done) for at least
+   `min` seconds and gives up after `max`: a hint not taken is not a door the
+   run waits behind. `skip` passes one by; `when` holds one back until the
+   run gets there. Past wave 3 the first four have nothing left to teach. */
+const TUT_STEPS = [
+  { say: () => isTouch ? 'Drag on the left half of the screen to fly.' : 'WASD flies the ship.',
+    skip: () => wave >= 4, done: () => Tut.moved > 320, max: 12 },
+  { say: () => isTouch ? 'You fire at whatever is nearest. Drag on the right half to aim yourself.'
+             : isBlade() ? 'The mouse aims. Hold the button to swing.'
+             : 'The mouse aims. Hold the button to fire, or press [T] to fire on its own.',
+    skip: () => wave >= 4, done: () => P.kills >= 5, max: 18 },
+  { say: () => 'What you kill drops experience. Fly over it to pick it up and level up.',
+    skip: () => wave >= 4, done: () => P.level >= 2, max: 18 },
+  { say: () => isBlade() ? 'SPACE lunges. Lunge through a gap in the shots, not back from them.'
+                         : 'SPACE dashes, and nothing can hit you mid-dash. Dash through shots, not away.',
+    skip: () => isTouch || wave >= 4, done: () => Tut.dashed, max: 22 },
+  { say: () => 'Wave 5 is the first boss: THE WARDEN.',
+    when: () => wave >= 4, min: 4, max: 4 },
+  { say: () => 'On this run it is slower and softer, and one blow that would end the run will not.',
+    when: () => wave >= 4, min: 6, max: 6 }
+];
+/* THE WARDEN's attacks (bossWarden), keyed by e.atk as each one starts. The
+   charge's wind-up is the one that kills, so it is said every time it comes
+   (but not twice in five seconds); the rest twice each, then left to you. */
+const TUT_TELLS = {
+  meet: 'THE WARDEN. Keep moving, keep your distance, keep firing.',
+  0: 'A ring of shots. There are gaps in it: slip through one, or dash through.',
+  1: 'An aimed fan. It is fired at where you are, so keep moving sideways.',
+  6: 'A spiral. Circle the way it turns, and its arms go past you.',
+  4: 'Escorts. Clear the ones in your way, but keep your fire on THE WARDEN.',
+  '-2': 'It is winding up a charge. Dash sideways, now.',
+  ph1: 'Phase 2: it fires more, and from now on it charges.',
+  ph2: 'Phase 3. Nearly there.'
+};
+const TUT_TOUCH = { 0: 'A ring of shots. There are gaps in it: slip through one.',
+                    '-2': 'It is winding up a charge. Get out of its line, now.' };
+function tutTell(k, dur, hot) {
+  const s = Tut.said[k] || (Tut.said[k] = { n: 0, at: -99 });
+  if (hot ? uiTime - s.at < 5 : s.n >= 2 || uiTime - s.at < 12) return;
+  s.n++; s.at = uiTime;
+  Tut.tell = (isTouch && TUT_TOUCH[k]) || TUT_TELLS[k];
+  Tut.tellT = dur; Tut.tellHot = !!hot;
+}
+function tutTells(dt) {
+  if (Tut.tellT > 0) Tut.tellT -= dt;
+  const b = enemies.find(e => e.boss === 'warden' && !e.dead && !e.shadow);
+  if (!b) { Tut.atk = null; return; }
+  if (!Tut.met) { Tut.met = true; Tut.ph = b.phase; tutTell('meet', 4); }
+  if (b.phase !== Tut.ph) { Tut.ph = b.phase; if (b.phase > 0) tutTell('ph' + b.phase, 3.4); }
+  if (b.atk === Tut.atk) return;
+  Tut.atk = b.atk;
+  if (b.atk === -2) tutTell('-2', 1.8, true);
+  else if (TUT_TELLS[b.atk] && Tut.tellT <= 1) tutTell(String(b.atk), 3.4);   // not over one still being read
+}
+
+/* Once a frame, between steps (frame). It reads the run and never writes
+   it: what it keeps is this machine's, and only the drawing reads that. */
+function tutTick(dt) {
+  if (PVP) return;
+  if (state === 'levelup') { if (assist && !Tut.lvlUp) Tut.lvlUp = 1; return; }
+  if (state !== 'play') return;
+  if (Tut.lvlUp === 1) Tut.lvlUp = 2;
+  if (Tut.lastT > 0) Tut.lastT -= dt;
+  if (!assist) return;
+  if (Number.isFinite(Tut.px)) Tut.moved += len(P.x - Tut.px, P.y - Tut.py);
+  Tut.px = P.x; Tut.py = P.y;
+  if (P.dashT > 0) Tut.dashed = true;
+  tutTells(dt);
+  if (bossAlive) Tut.i = TUT_STEPS.length;   // the fight has the screen from here
+  while (Tut.i < TUT_STEPS.length && TUT_STEPS[Tut.i].skip && TUT_STEPS[Tut.i].skip()) { Tut.i++; Tut.t = 0; }
+  const s = TUT_STEPS[Tut.i];
+  if (!s || (s.when && !s.when())) return;
+  if (Tut.gap > 0) { Tut.gap -= dt; return; }   // a breath between lessons
+  Tut.t += dt;
+  if (Tut.t >= s.max || (Tut.t >= (s.min || 2.5) && s.done && s.done())) { Tut.i++; Tut.t = 0; Tut.gap = 0.8; }
+}
+
+// the line on screen now, if any, and how it is said
+function tutLine() {
+  if (Tut.lastT > 0) return { t: Tut.last, col: Tut.lastCol, head: 'FIRST FLIGHT' };
+  if (!assist) return null;
+  if (Tut.tellT > 0) return { t: Tut.tell, col: Tut.tellHot ? '#f87171' : '#fca5a5', head: 'THE WARDEN', hot: Tut.tellHot };
+  const s = TUT_STEPS[Tut.i];
+  if (!s || Tut.gap > 0 || (s.when && !s.when())) return null;
+  return { t: s.say(), col: COL.player, head: 'FIRST FLIGHT' };
+}
+/* Low on the screen, above FORGOTTEN TALES' line (a first run opens a page
+   with nearly everything it meets), in a plate the width of what it says. */
+function drawTut() {
+  if (PVP) return;
+  if (state === 'levelup' && Tut.lvlUp === 1 && offers.length) {
+    const rs = cardRects(), t = 'A card is yours for the rest of the run, and taking one again stacks it.';
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    fitFont(t, W - 40, '600', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = rgba(COL.player, 0.75 + Math.sin(uiTime * 3) * 0.2);
+    ctx.fillText(t, W / 2, Math.min(H - 14, rs[0].y + rs[0].h + 56));
+    ctx.restore();
+    return;
+  }
+  if (state !== 'play') return;
+  const L = tutLine();
+  if (!L) { Tut.shown = ''; return; }
+  if (L.t !== Tut.shown) { Tut.shown = L.t; Tut.shownAt = uiTime; }
+  const a = clamp((uiTime - Tut.shownAt) / 0.3, 0, 1) * (Tut.lastT > 0 ? clamp(Tut.lastT / 0.6, 0, 1) : 1);
+  const fam = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  fitFont(L.t, W - 72, '600', 15, fam, 9);
+  const tw = ctx.measureText(L.t).width, font = ctx.font;
+  const pw = Math.min(W - 24, tw + 48), ph = 46;
+  const px = (W - pw) / 2, py = Math.round(H * 0.86) - 34 - ph;
+  const pulse = L.hot ? 0.55 + Math.sin(uiTime * 18) * 0.35 : 0.35;
+  ctx.fillStyle = L.hot ? 'rgba(40,6,10,0.88)' : 'rgba(4,6,11,0.84)';
+  roundRect(px, py, pw, ph, 10); ctx.fill();
+  ctx.strokeStyle = rgba(L.col, pulse); ctx.lineWidth = L.hot ? 1.8 : 1.2;
+  roundRect(px, py, pw, ph, 10); ctx.stroke();
+  ctx.letterSpacing = '0.26em';
+  ctx.font = "700 9px " + fam;
+  ctx.fillStyle = rgba(L.col, 0.7);
+  ctx.fillText(L.head, W / 2, py + 13);
+  ctx.letterSpacing = '0em';
+  ctx.font = font;
+  ctx.fillStyle = L.hot ? '#fee2e2' : '#e2e8f0';
+  ctx.fillText(L.t, W / 2, py + 30);
+  ctx.restore();
+}
+
+// the pause screen's way out of it, under MAIN MENU
+function pauseAssistRect() { return { x: W / 2 - 130, y: H / 2 + 130, w: 260, h: 30 }; }
+function drawPauseAssist() {
+  if (!assist) return;
+  const r = pauseAssistRect(), hot = inRect(mouse.x, mouse.y, r);
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = hot ? 'rgba(148,163,184,0.16)' : 'rgba(255,255,255,0.04)';
+  roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.strokeStyle = hot ? 'rgba(226,232,240,0.7)' : 'rgba(148,163,184,0.35)'; ctx.lineWidth = 1.2;
+  roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#f1f5f9' : '#94a3b8';
+  ctx.fillText(isTouch ? 'TURN OFF THE ASSIST' : 'TURN OFF THE ASSIST   [O]', W / 2, r.y + r.h / 2 + 0.5);
+  ctx.letterSpacing = '0em';
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#475569';
+  ctx.fillText('FIRST FLIGHT helps until THE WARDEN falls' + (assist.saved ? ', and its one save is spent' : ''),
+               W / 2, r.y + r.h + 14);
   ctx.restore();
 }
 
@@ -63935,6 +64438,19 @@ function drawRunNote() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 10, v: '1.5.2', date: '8 OCT 2026', lines: [
+    ['new', 'Challenge a friend. The link SHARE RUN copies now carries your score: whoever opens it '
+          + 'sees it on their menu as a score to beat, and their run report says when they have. '
+          + 'Share a daily and on that day it is the same run for both of you.'],
+    ['new', 'Co-op invite links. Host a run and press COPY INVITE LINK [I]: your wingman opens the '
+          + 'link and lands straight in your room, no code to type.'],
+    ['new', 'FIRST FLIGHT. A new player\'s first run can be assisted, until THE WARDEN falls: tips '
+          + 'on screen as you play, its attacks called out as they come, a softer first sector, a '
+          + 'slower and weaker WARDEN, and one save from a blow that would end the run. PLAY offers '
+          + 'it once, and TURN OFF THE ASSIST [O] on the pause screen ends it.'],
+    ['note', 'If you have been past wave 5 on this device you will not be asked. If THE WARDEN has '
+           + 'been stopping you, PLAY will offer it next time.']
+  ] },
   { id: 9, v: '1.5.1', date: '8 OCT 2026', lines: [
     ['new', 'CONTINUE. The run you are playing is kept on this device as you play, and whenever '
           + 'you pause or leave the tab. If the page closes or crashes, the menu offers it back, '
@@ -70996,7 +71512,7 @@ const SNAP = { build: null, names: null, roots: null, index: null, statics: null
 // lets that are this machine's own: never written, never taken over
 const SNAP_LOCAL = new Set([
   // the next run's hand-offs, used up by resetGame
-  'runSeedNext', 'runViewNext', 'runCharNext', 'runAwakeNext', 'runFlagsNext',
+  'runSeedNext', 'runViewNext', 'runCharNext', 'runAwakeNext', 'runFlagsNext', 'runAssistNext',
   // the screen, the frame and the camera's zoom
   'W', 'H', 'DPR', 'fpsAvg', 'frameMs', 'lastDT', 'last', 'acc', 'frameErrors', 'pageDead',
   'bufScene', 'cScene', 'bufChan', 'cChan', 'grainTile', 'scanTile', 'vigGrad', 'vigKey',
@@ -71029,6 +71545,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'Codex', 'Tales', 'TA_TAGGED', '_taMix', '_taBack', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'QOL',                                  // the run report's buttons and tip, SHARE, INSTALL (AFTER THE RUN)
+  'Tut',                                  // FIRST FLIGHT's card and hints: the run's part of it is `assist`
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
@@ -71941,6 +72458,7 @@ function lanKey(k) {
 
   if (lanView === 'host') {
     if (k === 'c') { lanCycleChar(); return; }
+    if (k === 'i' && Net.code) { qolOnLift(lanInvite); return; }   // the room as a link (LINKS)
     return;
   }
 
@@ -72172,6 +72690,13 @@ function drawLan() {
     if (Net.phase === 'failed') {
       lanStatusLine(H / 2 + 112);
       lanButton('TRY AGAIN', 'h', cx - 90, H / 2 + 120, 180, 38, WING_COL);
+    } else if (Net.code) {
+      /* Or send it: the wingman opens the link and is in (LINKS). The status
+         moves up a line to make room inside the frame. */
+      lanStatusLine(H / 2 + 104);
+      const said = QOL.inviteSaid && uiTime < QOL.inviteT;
+      lanButton(said ? QOL.inviteSaid : isTouch ? 'SEND INVITE LINK' : 'COPY INVITE LINK   [I]', 'i',
+                cx - 140, H / 2 + 114, 280, 30, said ? '#4ade80' : WING_COL);
     } else {
       lanStatusLine(H / 2 + 124);
     }
@@ -74576,6 +75101,7 @@ if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)
 Save.init();
 runSaveLoad();            // a run left in progress, offered back at the menu (CONTINUE)
+linksRead();              // a challenge or a co-op room someone sent (LINKS)
 if (BETA) betaUnlockAll();
 if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;

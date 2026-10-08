@@ -78,6 +78,7 @@ const HARNESS = `(() => {
       gems.map(g => pk(g, ['x', 'y', 'v'])), drops.map(d => [d.kind, ...pk(d, ['x', 'y'])]),
       hazards.map(h => [h.kind, ...pk(h, ['x', 'y', 'r'])]), Object.entries(P.up || {}).sort(),
       RUN_FLAGS.map(k => r(RUN[k])),
+      assist ? (assist.saved ? 2 : 1) : 0,   // FIRST FLIGHT: helped, its save spent, or on its own
       // an outside pilot's own state, on the pilot and the run's share (OUTSIDE PILOTS)
       P.ox || null, outsideWorld]);
   }
@@ -238,6 +239,8 @@ const S = [
   { name: 'house',      char: 'runner', seed: 116, steps: 7200,  starter: "hlAreaStart('house')" },
   { name: 'deadgame',   char: 'hacker', seed: 117, steps: 7200,  kit: true,
     starter: "hlP().q.q3 = 2; hlAreaStart('house'); hlArea.n = 4; wave = HL_AREAS.house.waveFrom + 3; betweenWaves = 0.5" },
+  // FIRST FLIGHT: an assisted run, through THE WARDEN and out the other side of the help
+  { name: 'assist',     char: 'runner', seed: 118, steps: 18000, starter: 'runAssistNext = true; resetGame()' },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
   { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
 ];
