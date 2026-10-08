@@ -7,6 +7,24 @@
 <!-- AdSense: proves the site is this publisher's. Loads nothing; the one ad is ADS. -->
 <meta name="google-adsense-account" content="ca-pub-3461416270406814">
 <title>VOIDRUNNER</title>
+<!-- What a search result and a pasted link say about the game. The image and
+     the address are absolute because link previews are fetched from elsewhere;
+     the icons and the manifest are relative, so the school address keeps its own. -->
+<meta name="description" content="A free neon roguelite arena shooter in your browser. Pick a pilot, build a run from upgrade cards, beat the bosses. Daily runs, boss rush, challenges and two-player co-op. No download.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="VOIDRUNNER">
+<meta property="og:title" content="VOIDRUNNER — survive the arena">
+<meta property="og:description" content="A free neon roguelite arena shooter in your browser. Daily runs, boss rush, challenges and co-op. No download.">
+<meta property="og:url" content="https://voidrunner.online/">
+<meta property="og:image" content="https://voidrunner.online/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="VOIDRUNNER: a neon ship in a dark arena">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
 <script>
   /* A save belongs to the address it was made on, so the game keeps to one:
      www.voidrunner.online is sent on to voidrunner.online as the page
@@ -840,11 +858,40 @@ function platedBody(e, hot) {
    Tiny WebAudio synth: all SFX are oscillator/noise blips, plus a scheduled
    music bed that gets busier as the run heats up.
 --------------------------------------------------------------------------- */
+// effects sounding at once, at most, and the shortest gap between two of a kind (Audio_.room, .gate)
+const SFX_VOICES = 40;
+const SFX_GAP = { shoot: 0.045, hit: 0.035, crit: 0.05, kill: 0.05, boom: 0.08, gem: 0.04 };
 const Audio_ = {
   ac: null, master: null, musicGain: null, sfxGain: null,
   // vol is the slider, 0..1. muted is kept in sync so the cheap early-outs
   // scattered through the sound calls keep working unchanged.
   muted: false, vol: 1, noiseBuf: null, ready: false,
+  /* (8 Oct 2026) Sound was what ran pages out of memory. Every effect is a few
+     audio nodes, and Chrome lets them go only after they have played: at full
+     fire rate into a crowd the game asked for six thousand a second, faster
+     than they could be let go, and the tab grew by hundreds of megabytes a
+     minute until it was killed. So nothing starts while SFX_VOICES are still
+     sounding (ends: when each of those stops), and the effects that come in
+     floods wait SFX_GAP between starts (gapT). A hundred identical clicks a
+     second already blurred into one; this is that one. Music is never held. */
+  ends: [], gapT: Object.create(null),
+  room(end) {
+    const now = this.ac.currentTime, e = this.ends;
+    let n = 0;
+    for (let i = 0; i < e.length; i++) if (e[i] > now) e[n++] = e[i];
+    e.length = n;
+    if (n >= SFX_VOICES) return false;
+    e.push(end);
+    return true;
+  },
+  // whether an effect that comes in floods may start now (SFX_GAP)
+  gate(k) {
+    if (!this.ready || this.muted) return false;
+    const now = this.ac.currentTime;
+    if ((this.gapT[k] || 0) > now) return false;
+    this.gapT[k] = now + SFX_GAP[k];
+    return true;
+  },
   setVol(v) {
     this.vol = clamp(v, 0, 1);
     this.muted = this.vol <= 0.005;
@@ -874,6 +921,7 @@ const Audio_ = {
   tone(freq, dur, type = 'square', vol = 0.3, to = null, delay = 0, dest = null) {
     if (!this.ready || this.muted) return;
     const ac = this.ac, t = ac.currentTime + delay;
+    if (!dest && !this.room(t + dur + 0.02)) return;   // an effect, with no voice free
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t);
     if (to) o.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + dur);
@@ -883,9 +931,10 @@ const Audio_ = {
     o.connect(g); g.connect(dest || this.sfxGain);
     o.start(t); o.stop(t + dur + 0.02);
   },
-  noise(dur, vol = 0.3, f0 = 3000, f1 = 200, q = 1, delay = 0) {
+  noise(dur, vol = 0.3, f0 = 3000, f1 = 200, q = 1, delay = 0, dest = null) {
     if (!this.ready || this.muted) return;
     const ac = this.ac, t = ac.currentTime + delay;
+    if (!dest && !this.room(t + dur + 0.02)) return;
     const s = ac.createBufferSource(); s.buffer = this.noiseBuf;
     const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = q;
     f.frequency.setValueAtTime(f0, t);
@@ -893,18 +942,18 @@ const Audio_ = {
     const g = ac.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f); f.connect(g); g.connect(this.sfxGain);
+    s.connect(f); f.connect(g); g.connect(dest || this.sfxGain);
     s.start(t); s.stop(t + dur + 0.02);
   },
 
-  shoot()   { this.tone(660 + rnd(90), 0.07, 'square', 0.10, 200); },
-  hit()     { this.noise(0.05, 0.16, 2600, 700, 1); },
-  crit()    { this.tone(1400, 0.09, 'sawtooth', 0.11, 500); this.noise(0.06, 0.14, 5000, 900); },
-  kill()    { this.noise(0.18, 0.20, 1500, 90, 2); this.tone(180, 0.14, 'triangle', 0.10, 60); },
-  boom()    { this.noise(0.5, 0.34, 900, 40, 3); this.tone(90, 0.4, 'sine', 0.20, 30); },
+  shoot()   { if (this.gate('shoot')) this.tone(660 + rnd(90), 0.07, 'square', 0.10, 200); },
+  hit()     { if (this.gate('hit')) this.noise(0.05, 0.16, 2600, 700, 1); },
+  crit()    { if (this.gate('crit')) { this.tone(1400, 0.09, 'sawtooth', 0.11, 500); this.noise(0.06, 0.14, 5000, 900); } },
+  kill()    { if (this.gate('kill')) { this.noise(0.18, 0.20, 1500, 90, 2); this.tone(180, 0.14, 'triangle', 0.10, 60); } },
+  boom()    { if (this.gate('boom')) { this.noise(0.5, 0.34, 900, 40, 3); this.tone(90, 0.4, 'sine', 0.20, 30); } },
   dash()    { this.noise(0.22, 0.14, 5200, 500, 4); },
   hurt()    { this.tone(190, 0.28, 'sawtooth', 0.22, 55); this.noise(0.2, 0.14, 900, 120); },
-  gem()     { this.tone(880 + rnd(200), 0.05, 'sine', 0.055, 1500); },
+  gem()     { if (this.gate('gem')) this.tone(880 + rnd(200), 0.05, 'sine', 0.055, 1500); },
   heal()    { [0, 4, 7, 12].forEach((s, i) => this.tone(523.25 * Math.pow(2, s / 12), 0.16, 'sine', 0.10, null, i * 0.05)); },
   levelup() { [0, 5, 7, 12, 16].forEach((s, i) => this.tone(392 * Math.pow(2, s / 12), 0.3, 'triangle', 0.13, null, i * 0.06)); },
   wave()    { [0, 7, 12].forEach((s, i) => this.tone(261.6 * Math.pow(2, s / 12), 0.5, 'sine', 0.10, null, i * 0.09)); },
@@ -940,7 +989,7 @@ const Audio_ = {
       const n = scale[(s * 3 + this.step) % scale.length];
       this.tone(f(n, 3), 0.13, 'square', 0.030 + this.intensity * 0.022, null, t - this.ac.currentTime, g);
     }
-    if (this.intensity > 0.5 && s % 4 === 2) this.noise(0.05, 0.05, 8000, 4000, 1, t - this.ac.currentTime);
+    if (this.intensity > 0.5 && s % 4 === 2) this.noise(0.05, 0.05, 8000, 4000, 1, t - this.ac.currentTime, this.sfxGain);   // named, so the voice cap leaves it be
   }
 };
 
@@ -1213,7 +1262,8 @@ cv.addEventListener('touchstart', e => {
     const p = tpos(t);
     if (state === 'codex') { codexTouch('start', t.identifier, p); continue; }   // a tap is answered when it lifts
     if (state !== 'play') {
-      mouse.x = p.x; mouse.y = p.y; handleClick();
+      mouse.x = p.x; mouse.y = p.y;
+      QOL.tap = true; handleClick(); QOL.tap = false;   // a tap, for what has to wait for the lift (qolOnLift)
       // the click may have closed it; only a panel still open takes the drag
       if (state === 'changelog' && !logDrag)
         logDrag = { id: t.identifier, y: p.y, s: logScroll };
@@ -1235,6 +1285,7 @@ cv.addEventListener('touchmove', e => {
   }
 }, { passive: false });
 function touchEnd(e) {
+  if (QOL.onLift) { const f = QOL.onLift; QOL.onLift = null; if (e.type === 'touchend') f(); }
   for (const t of e.changedTouches) {
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
@@ -1557,6 +1608,7 @@ function newPlayer() {
     weapon: C.weapon, charId: C.id, rate0: C.rate,
     outside: C.outside ? 1 : 0,          // its code is not in this file: see OUTSIDE PILOTS
     in: newInput(),                      // what it is told to do: see the input record
+    hitBy: '',                           // the codex's name for the last thing that hurt it (AFTER THE RUN)
     hacker: C.id === 'hacker' ? 1 : 0,   // what it kills, it keeps
     fly: C.id === 'ember' ? 1 : 0,       // EMBER holds its lance inside the crowd
     awake: (runAwakeNext != null ? runAwakeNext : isAwake(C.id)) ? 1 : 0,   // been through its rite (or the co-op host's was)
@@ -5263,6 +5315,7 @@ function hurtPlayer(dmg, opts) {
   if (freeGod) return;
   if (opts && opts.pure) {
     P.hp -= Math.max(0.5, dmg);
+    P.hitBy = '';                        // the floor, or the pilot's own build: nobody to name
     P.hurtFlash = Math.max(P.hurtFlash, 0.5);
     if (P.hp <= 0) { if (P.roninVow) vowUndead(); else reviveOrDie(); }   // RONIN's V: the dead do not die twice
     return;
@@ -5300,6 +5353,7 @@ function hurtPlayer(dmg, opts) {
   // what the blow takes, returned: a Second Wind or a brake after it is the pilot's own health, not the blow given back (PvP counts it, duel.js)
   const took = Math.min(d, Math.max(0, P.hp));
   P.hp -= d;
+  P.hitBy = hitName(opts && opts.src);   // what the report names, if this one is the last (AFTER THE RUN)
   // most of it can still be won back, but the parry chain is gone
   if (isBlade()) { bladeRallyAdd(d); bladeChainBreak('hit'); }
   P.iframe = opts && opts.pvp ? opts.pvp.mercy : 0.62; P.hurtFlash = 1;
@@ -36686,7 +36740,7 @@ const Save = {
   top: [],                // best runs, for the menu leaderboard
 
   blank: () => ({ name: '', best: 0, bestWave: 0, bestSector: '—', runs: 0, kills: 0,
-                  time: 0, muted: false, vol: 1, autofire: false, sens: 1,
+                  time: 0, muted: false, vol: 1, autofire: false, sens: 1, shake: 1,
                   planetarium: false, skipStreak: 0, clears: 0, altPath: false,
                   charIdx: 0, otherKills: 0, malware: false,
                   codexE: [], codexU: [], codexM: [], codexB: [], codexZ: [], codexG: [],
@@ -36765,7 +36819,14 @@ const Save = {
     return p;
   },
   writeLocal() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(Save.profile)); } catch (e) {}
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(Save.profile)); }
+    catch (e) {
+      // storage full: a run kept for CONTINUE gives way to the record itself
+      try {
+        localStorage.removeItem(RUN_SNAP_KEY); localStorage.removeItem(RUN_META_KEY);
+        localStorage.setItem(SAVE_KEY, JSON.stringify(Save.profile));
+      } catch (e2) { /* nothing more to give */ }
+    }
   },
 
   // Same device may have written to either store; keep the better of each.
@@ -36780,6 +36841,7 @@ const Save = {
     out.vol = b.vol !== undefined ? b.vol : (a.vol !== undefined ? a.vol : 1);
     out.autofire = b.autofire !== undefined ? b.autofire : a.autofire;
     out.sens = b.sens !== undefined ? b.sens : (a.sens !== undefined ? a.sens : 1);
+    out.shake = b.shake !== undefined ? b.shake : (a.shake !== undefined ? a.shake : 1);
     // an unlock is permanent: if either store has it, it stays earned
     out.planetarium = !!(a.planetarium || b.planetarium);
     out.altPath = !!(a.altPath || b.altPath);
@@ -37165,6 +37227,12 @@ function promptName() {
 }
 
 function resetGame() {
+  // a new run lets the saved one go, unless this is the frame it is being put back into (CONTINUE)
+  if (!QOL.resuming) {
+    runSaveClear();
+    QOL.runId = Date.now().toString(36) + rndi(1e9).toString(36);   // the unseeded roll: it is this machine's, not the run's
+    QOL.runN = 0; QOL.runT = 0;
+  }
   pilotsEnd();                           // one pilot: a co-op run adds the second straight after (pilotsBegin)
   seedSim(runSeedNext != null ? runSeedNext : freshSeed());   // the run's stream starts here
   runSeedNext = null;
@@ -37244,6 +37312,8 @@ function resetGame() {
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
   state = 'dead';
+  runSaveClear();                        // an ended run is not continued (CONTINUE)
+  if (!quiet) uiArm = DEAD_ARM;          // a press meant for the fight is not "again" (AFTER THE RUN)
   eraMark(true);                         // flown, whatever else this run was
   tale('dead');                          // what felled you, and what you carried to the end (FORGOTTEN TALES)
   /* A freeplay run is a sandbox: it must not touch the record in any way —
@@ -37462,6 +37532,7 @@ function handleKey(k) {
   if (state === 'menu') {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
+    if (runCardUp()) { runCardKey(k); return; }   // a run left in progress is answered first (CONTINUE)
     if (k === 'v' && hlOpenVigil()) return;
     if (k === 'h' && Save.profile.outsiderIn) { enterHub(); return; }
     if (k === 'l') { openLan(); return; }
@@ -37496,6 +37567,8 @@ function handleKey(k) {
   if (state === 'codex') { codexKey(k); return; }
   // a guest cannot start a run: the next one begins when the host says so
   if (state === 'dead') {
+    if (uiArm > 0) return;               // the moment of the crash (DEAD_ARM)
+    if (k === 'c') { shareRun(); return; }
     // a challenge restarts as itself; the ordinary run restarts as a run
     if (Chal.on && (k === ' ' || k === 'enter' || k === 'r')) {
       /* A daily restarts as the daily. startDaily re-reads the profile,
@@ -37664,6 +37737,7 @@ function quitToMenu() {
   inVigil = false;
   hlPartsClear();
   if (state !== 'dead' && wave > 0 && score > 0) gameOver(true);
+  runSaveClear();                       // and one with nothing in it yet (CONTINUE)
   if (MP.on || netLive()) mpQuit();     // hang up before the menu, not after
   chalQuit();
   state = 'menu';
@@ -37690,6 +37764,7 @@ function handleClick() {
   if (state === 'skin') { skinClick(); return; }
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
+    if (runCardUp()) { runCardClick(); return; }   // CONTINUE
     if (hlHatchUp() && inRect(mouse.x, mouse.y, hlHatchRect())) { hlOpenVigil(); return; }
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
@@ -37704,9 +37779,12 @@ function handleClick() {
       window.open('/leaderboard/', '_blank', 'noopener');
       return;
     }
+    if (QOL.installRect && inRect(mouse.x, mouse.y, QOL.installRect)) { qolOnLift(installApp); return; }
     resetGame(); state = 'play'; return;
   }
   if (state === 'dead') {
+    if (uiArm > 0) return;               // the moment of the crash (DEAD_ARM)
+    if (deadButtonClick()) return;       // SHARE and MAIN MENU; anywhere else is "again"
     if (Chal.on && Chal.on.hl) { const id = Chal.on.hl; chalQuit(); hlAreaStart(id); return; }
     if (Chal.on && Chal.on.rush) { chalQuit(); startRush(); return; }
     if (Chal.on && Chal.on.daily) { chalQuit(); startDaily(); return; }
@@ -38072,6 +38150,7 @@ function frame(now) {
        rather than thrown away, so the game keeps to the wall clock (and, in
        lockstep, to the partner). Only a stall past ACC_MAX is let go. */
     if (acc > ACC_MAX) acc = ACC_MAX;
+    runSaveTick(dt);          // the run in progress, kept now and then (CONTINUE)
     if (PVP) PVP.frame();     // PvP mode: its own screens and transitions
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
     render();
@@ -38093,7 +38172,7 @@ function update(dt) {
   // paused, so overlay animations never freeze
   uiTime += dt;
   cam.trauma = Math.max(0, cam.trauma - dt * 1.5);
-  const tr = cam.trauma * cam.trauma;
+  const tr = cam.trauma * cam.trauma * shakeMul();   // SCREEN SHAKE, in settings
   cam.sx = rnd(1, -1) * 26 * tr;
   cam.sy = rnd(1, -1) * 26 * tr;
   drawFlashT = Math.max(0, drawFlashT - dt);
@@ -38167,8 +38246,8 @@ function update(dt) {
     cam.x = lerp(cam.x, b.x, k);
     cam.y = lerp(cam.y, b.y - 20, k);
     cam.trauma = Math.max(0, cam.trauma - dt * 1.4);
-    cam.sx = rnd(1, -1) * cam.trauma * 26;
-    cam.sy = rnd(1, -1) * cam.trauma * 26;
+    cam.sx = rnd(1, -1) * cam.trauma * 26 * shakeMul();
+    cam.sy = rnd(1, -1) * cam.trauma * 26 * shakeMul();
     camZoomT = 0.6;
     camZoom += (camZoomT - camZoom) * (1 - Math.exp(-2.4 * dt));
     updateParticles(dt); ashTick(dt);
@@ -44883,7 +44962,14 @@ function updateBeams(dt) {
 }
 
 /* -------------------------------- bullets --------------------------------- */
+/* (8 Oct 2026) Fire rate is the one thing with no ceiling: a volley a step,
+   seventeen barrels to a volley, ricochets and fragments on top. Past
+   BULLET_MAX shots in the air the oldest are retired first, once a step:
+   the ones near the end of their life, or bouncing round the walls. An
+   ordinary strong build keeps a few hundred up and never meets it. */
+const BULLET_MAX = 2000;
 function updateBullets(dt) {
+  if (bullets.length > BULLET_MAX) bullets.splice(0, bullets.length - BULLET_MAX);
   for (let i = bullets.length - 1; i >= 0; i--) {
     // co-op: each pilot's pass takes only its own shots, so they land with its upgrades
     if (PILOTS.length > 1 && ((bullets[i].by && bullets[i].by.pid) || 0) !== PILOT.on) continue;
@@ -45302,6 +45388,7 @@ function updatePickups(dt) {
 }
 
 /* ------------------------------- particles -------------------------------- */
+const ARC_MAX = 200, RING_MAX = 160;
 function updateParticles(dt) {
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
@@ -45317,6 +45404,10 @@ function updateParticles(dt) {
     f.y += f.vy * dt; f.vy *= Math.pow(0.05, dt);
     if (f.life <= 0) floats.splice(i, 1);
   }
+  /* Arcs and rings are only drawn, so they are kept to the newest that can be
+     seen. A chain build at full fire rate was holding nine thousand arcs. */
+  if (arcs.length > ARC_MAX) arcs.splice(0, arcs.length - ARC_MAX);
+  if (rings.length > RING_MAX) rings.splice(0, rings.length - RING_MAX);
   for (let i = arcs.length - 1; i >= 0; i--) { arcs[i].life -= dt; if (arcs[i].life <= 0) arcs.splice(i, 1); }
   for (let i = rings.length - 1; i >= 0; i--) {
     const r = rings[i]; r.life -= dt;
@@ -59279,6 +59370,18 @@ function drawDead() {
     ctx.restore();
   });
 
+  // what put you down: the codex's name for the last thing that landed (AFTER THE RUN)
+  const recap = deadRecap(s);
+  if (recap.by && !cw) row(22, y => {
+    ctx.save();
+    ctx.letterSpacing = '0.14em';
+    const t = 'DOWNED BY   ' + recap.by;
+    fitFont(t, wide, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#fca5a5';
+    ctx.fillText(t, CENTER, y + 10);
+    ctx.restore();
+  });
+
   /* Four figures on one rule, so they read as a set rather than four sentences.
      The columns take an equal share of the width they are allowed. */
   row(64, y => {
@@ -59420,6 +59523,14 @@ function drawDead() {
     ctx.fillText(d, CENTER, y + 30);
   });
 
+  // what this pilot carried, as the cards it took (AFTER THE RUN)
+  const chips = chipLayout(recap.build, Math.min(560, W - 56), 3);
+  if (chips.length) row(24 + chips.length * CHIP_LINE, y => {
+    drawEyebrow('YOUR BUILD', CENTER, y + 10);
+    drawChips(chips, CENTER, y + 30);
+  });
+  row(46, y => drawDeadButtons(y + 6, CENTER, s, sc));
+
   row(30, y => {
     const t = s.chal ? (isTouch ? 'TAP TO RUN IT AGAIN'
                                 : 'SPACE RUN IT AGAIN   ·   M ' +
@@ -59431,9 +59542,18 @@ function drawDead() {
     ctx.save();
     ctx.letterSpacing = '0.12em';
     fitFont(t, wide, '700', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 9);
-    ctx.fillStyle = rgba(COL.player, 0.6 + Math.sin(uiTime * 4) * 0.4);
+    // it comes up as the report stops holding still (DEAD_ARM)
+    const armK = clamp(1 - uiArm / DEAD_ARM, 0, 1);
+    ctx.fillStyle = rgba(COL.player, (0.6 + Math.sin(uiTime * 4) * 0.4) * armK);
     ctx.fillText(t, CENTER, y + 16);
     ctx.restore();
+  });
+
+  if (recap.tip) row(26, y => {
+    const t = 'TIP   ' + recap.tip;
+    fitFont(t, wide, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = '#5b6b82';
+    ctx.fillText(t, CENTER, y + 14);
   });
 
   const total = rows.reduce((a, r) => a + r.h, 0);
@@ -59756,13 +59876,31 @@ function renderMenu() {
      the whole game is too (README, Publishing). Said here, where a player
      sees it at home before they need it at school; not on that address,
      where it is no news. */
-  if (location.hostname === 'voidrunner.online') {
+  const school = location.hostname === 'voidrunner.online';
+  if (school) {
     const y = 22 + badges.length * 16, lead = 'BLOCKED AT SCHOOL?  ', addr = SCHOOL_HOST.toUpperCase();
     fitFont(lead + addr, Math.max(80, W / 2 - 40), '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
     ctx.fillStyle = '#94a3b8';
     ctx.fillText(addr, W - 18, y);
     ctx.fillStyle = '#475569';
     ctx.fillText(lead, W - 18 - ctx.measureText(addr).width, y);
+  }
+  /* The browser's offer to install the game, while it stands (INSTALL, in
+     AFTER THE RUN): on a Chromebook, a place on the shelf. */
+  QOL.installRect = null;
+  if (QOL.install) {
+    const y = 22 + (badges.length + (school ? 1 : 0)) * 16 + 4, t = '↓  INSTALL AS AN APP';
+    fitFont(t, Math.max(80, W / 2 - 40), '700', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    const tw = ctx.measureText(t).width;
+    const r = { x: W - 18 - tw - 8, y: y - 12, w: tw + 16, h: 17 };   // the text sits on its baseline
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = hot ? rgba(COL.player, 0.16) : 'rgba(8,13,22,0.6)';
+    lanRect(r.x, r.y, r.w, r.h, 6); ctx.fill();
+    ctx.strokeStyle = rgba(COL.player, hot ? 0.85 : 0.35); ctx.lineWidth = 1;
+    lanRect(r.x, r.y, r.w, r.h, 6); ctx.stroke();
+    ctx.fillStyle = hot ? '#f1f5f9' : COL.player;
+    ctx.fillText(t, W - 18, y);
+    QOL.installRect = r;
   }
   ctx.restore();
   ctx.textAlign = 'center';
@@ -59803,6 +59941,8 @@ function renderMenu() {
 
   drawMenuSet();
 
+  drawRunNote();         // CONTINUE: a word about a saved run
+  if (runCardUp()) drawRunCard();   // and the run itself, waiting, over everything
   drawVignette();
 }
 
@@ -62940,19 +63080,21 @@ function closeSettings() {
   Audio_.select();
 }
 
+const SET_ROWS = 4;                      // volume, sensitivity, autofire, screen shake
+const SET_N = SET_ROWS + 4;              // and the three doors, and DONE
 function settingsRects() {
   const w = Math.min(520, W - 56), x = (W - w) / 2;
-  const rowH = Math.min(46, Math.max(34, H * 0.075)), gap = 9;
-  const bodyH = 3 * (rowH + gap) + 52 + 46 + 46 + 46;   // + notes, + skins
+  const rowH = Math.min(46, Math.max(34, H * 0.068)), gap = 9;
+  const bodyH = SET_ROWS * (rowH + gap) + 52 + 46 + 46 + 46;   // + notes, + skins
   const top = clamp(H / 2 - (bodyH + 70) / 2, 60, H - bodyH - 78);
   const rows = [];
-  for (let i = 0; i < 3; i++) rows.push({ x, y: top + 64 + i * (rowH + gap), w, h: rowH, i });
-  const by = top + 64 + 3 * (rowH + gap) + 8;
+  for (let i = 0; i < SET_ROWS; i++) rows.push({ x, y: top + 64 + i * (rowH + gap), w, h: rowH, i });
+  const by = top + 64 + SET_ROWS * (rowH + gap) + 8;
   return { x, w, top, rowH, rows,
-    gfx:  { x, y: by, w, h: 40, i: 3 },
-    log:  { x, y: by + 46, w, h: 40, i: 4 },
-    skin: { x, y: by + 92, w, h: 40, i: 5 },
-    done: { x: x + w / 2 - 92, y: by + 142, w: 184, h: 40, i: 6 } };
+    gfx:  { x, y: by, w, h: 40, i: SET_ROWS },
+    log:  { x, y: by + 46, w, h: 40, i: SET_ROWS + 1 },
+    skin: { x, y: by + 92, w, h: 40, i: SET_ROWS + 2 },
+    done: { x: x + w / 2 - 92, y: by + 142, w: 184, h: 40, i: SET_ROWS + 3 } };
 }
 
 /* The sensitivity slider. Its own rect and its own drag, so it and the volume
@@ -63070,6 +63212,25 @@ function drawSettings() {
   ctx.fillStyle = autoFire ? '#062f36' : '#94a3b8';
   ctx.beginPath(); ctx.arc(sx + (autoFire ? 22 : 8), sy, 5, 0, TAU); ctx.fill();
 
+  /* --- screen shake: three stops, because "a bit less" is the usual ask --- */
+  b = g.rows[3];
+  rowBox(b);
+  label(b, 'SCREEN SHAKE', shakeMul() ? 'the camera kicks when things hit hard'
+                                      : 'off — the camera holds still, whatever lands');
+  {
+    const cur = SHAKE_STEPS.indexOf(shakeMul());
+    shakePills(b).forEach((r, i) => {
+      const on = i === cur;
+      ctx.fillStyle = on ? rgba(COL.player, 0.22) : 'rgba(255,255,255,0.04)';
+      roundRect(r.x, r.y, r.w, r.h, 5); ctx.fill();
+      ctx.strokeStyle = on ? COL.player : 'rgba(148,163,184,0.25)'; ctx.lineWidth = 1.2;
+      roundRect(r.x, r.y, r.w, r.h, 5); ctx.stroke();
+      ctx.font = "700 10px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = on ? COL.player : '#64748b';
+      ctx.fillText(SHAKE_NAMES[i], r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+    });
+  }
+
   /* --- the effects panel, one door further in --- */
   const gb = g.gfx, gh = inRect(mouse.x, mouse.y, gb) || setSel === gb.i;
   ctx.fillStyle = gh ? 'rgba(103,232,249,0.16)' : 'rgba(255,255,255,0.05)';
@@ -63144,18 +63305,19 @@ function drawSettings() {
 function settingsKey(k) {
   if (uiArm > 0) return;
   if (k === 's' || k === 'escape' || k === 'enter') {
-    if (k === 'enter' && setSel === 3) { openGfx('settings'); return; }
-    if (k === 'enter' && setSel === 4) { openLog('settings'); return; }
-    if (k === 'enter' && setSel === 5) { openSkins('settings'); return; }
+    if (k === 'enter' && setSel === SET_ROWS)     { openGfx('settings'); return; }
+    if (k === 'enter' && setSel === SET_ROWS + 1) { openLog('settings'); return; }
+    if (k === 'enter' && setSel === SET_ROWS + 2) { openSkins('settings'); return; }
     closeSettings(); return;
   }
-  if (k === 'arrowdown') { setSel = (setSel + 1) % 7; Audio_.select(); return; }
-  if (k === 'arrowup')   { setSel = (setSel + 6) % 7; Audio_.select(); return; }
+  if (k === 'arrowdown') { setSel = (setSel + 1) % SET_N; Audio_.select(); return; }
+  if (k === 'arrowup')   { setSel = (setSel + SET_N - 1) % SET_N; Audio_.select(); return; }
   const step = (k === 'arrowright' || k === 'd') ? 1 : (k === 'arrowleft' || k === 'a') ? -1 : 0;
   if (!step) return;
   if (setSel === 0) { Audio_.setVol(Audio_.vol + step * 0.05); Save.savePrefs(); }
   else if (setSel === 1) { setSens(aimSens() + step * 0.05); Save.savePrefs(); }
   else if (setSel === 2) { autoFire = !autoFire; Save.savePrefs(); Audio_.select(); }
+  else if (setSel === 3) shakeCycle(step);
 }
 
 function settingsClick() {
@@ -63163,6 +63325,11 @@ function settingsClick() {
   const g = settingsRects();
   if (inRect(mouse.x, mouse.y, g.rows[2])) {
     autoFire = !autoFire; Save.savePrefs(); Audio_.select(); return;
+  }
+  if (inRect(mouse.x, mouse.y, g.rows[3])) {
+    const i = shakePills(g.rows[3]).findIndex(r => inRect(mouse.x, mouse.y, r));
+    if (i >= 0) shakeSet(SHAKE_STEPS[i]); else shakeCycle(1);
+    return;
   }
   if (inRect(mouse.x, mouse.y, g.gfx))  { openGfx('settings'); return; }
   if (inRect(mouse.x, mouse.y, g.log))  { openLog('settings'); return; }
@@ -63200,6 +63367,556 @@ function drawMenuSet() {
 }
 
 /* ===========================================================================
+   AFTER THE RUN (8 Oct 2026)
+   What the report says besides the numbers, and what a player can do there
+   besides run again: what put them down, what they were carrying, a tip, a
+   way to tell someone, and a way back to the menu that a touchscreen can
+   reach. With it, the comfort setting that was missing (screen shake) and
+   the browser's offer to install the game.
+
+   None of it is the run's. lastStats and QOL are this machine's own
+   (SNAP_LOCAL, SNAP_LOCAL_OBJS); the one thing a step writes is P.hitBy, from
+   the same objects on both machines in co-op, so it travels with the pilot.
+   ========================================================================= */
+
+/* SCREEN SHAKE. A comfort setting, so it is the player's and travels with the
+   account, as autofire does. Only the drawing reads it: the camera's kick is
+   cam.sx and cam.sy, which are this machine's own. */
+const SHAKE_STEPS = [1, 0.5, 0];
+const SHAKE_NAMES = ['FULL', 'HALF', 'OFF'];
+function shakeMul() {
+  const v = Save.profile && Save.profile.shake;
+  return v === 0 || v === 0.5 ? v : 1;
+}
+function shakeSet(v) { Save.profile.shake = v; Save.savePrefs(); Audio_.select(); }
+function shakeCycle(dir) {
+  const i = SHAKE_STEPS.indexOf(shakeMul());
+  shakeSet(SHAKE_STEPS[(i + (dir < 0 ? 2 : 1)) % 3]);
+}
+// the three stops, along the right of their row in SETTINGS
+function shakePills(b) {
+  const pw = 46, ph = 20, x0 = b.x + b.w - 16 - pw * 3 - 8, y = b.y + b.h / 2 - ph / 2;
+  return SHAKE_STEPS.map((v, i) => ({ x: x0 + i * (pw + 4), y, w: pw, h: ph }));
+}
+
+// what the screens below keep between frames
+const QOL = {
+  tap: false,           // the click being handled is a touch going down
+  onLift: null,         // and what it asked for, to be done as it lifts (qolOnLift)
+  tipN: -1,             // the tip the last report showed; each report shows the next
+  btns: null,           // the report's buttons as last drawn, in screen space
+  said: '', saidT: 0,   // what SHARE answered, and until when it says so
+  install: null,        // the browser's standing offer to install the game
+  installRect: null,    // where the menu last drew it
+};
+
+/* The run report holds still for a moment. Death comes mid-dash and mid-
+   volley, and SPACE is the dash: a press meant for the fight used to restart
+   the run before the report had been seen. */
+const DEAD_ARM = 0.8;
+
+/* What a blow that landed is filed under: the codex's name for whatever threw
+   it, or '' when it names nothing (a hazard, the floor, the pilot's own
+   build). hurtPlayer keeps it on the pilot, so the last one is what put it
+   down. */
+function hitName(o) {
+  const k = talesWho(o);
+  if (!k) return '';
+  if (o.type === 'boss' || k === 'amalgam' || k === 'founder') return BOSSES[k] ? BOSSES[k].name : '';
+  return CODEX_E[k] ? CODEX_E[k].n : '';
+}
+
+/* What a pilot is carrying: its cards in the order they were taken, and THE
+   VAGRANT's gear, which is its build in place of cards. */
+function runBuild(p) {
+  const out = [];
+  if (!p) return out;
+  for (const id of Object.keys(p.up || {})) {
+    const u = UPGRADES.find(z => z.id === id);
+    if (u) out.push({ t: upName(u) + (p.up[id] > 1 ? ' ×' + p.up[id] : ''), c: RARITY[u.rar] || '#94a3b8' });
+  }
+  if (p.gear) for (const sl of GEAR_SLOTS) {
+    const it = p.gear[sl.k];
+    if (it) out.push({ t: gearName(it), c: RARITY[it.rar] || sl.col });
+  }
+  return out;
+}
+
+/* A build as rows of chips: laid out first and drawn second, so a screen can
+   ask how tall it is before giving it room. Cut to `max` lines; the last line
+   gives up chips from its end until "+N MORE" fits. */
+const CHIP_FONT = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+const CHIP_GAP = 5, CHIP_H = 16, CHIP_LINE = 20;
+function chipLayout(items, maxW, max) {
+  ctx.save();
+  ctx.font = CHIP_FONT;
+  const cw = t => Math.min(maxW, ctx.measureText(t).width + 14);
+  const lw = cs => cs.reduce((a, c) => a + c.w, 0) + CHIP_GAP * Math.max(0, cs.length - 1);
+  const lines = [];
+  let line = [], i = 0;
+  for (; i < items.length && max > 0; i++) {
+    const c = { t: items[i].t, c: items[i].c, w: cw(items[i].t) };
+    if (line.length && lw(line) + CHIP_GAP + c.w > maxW) {
+      lines.push(line);
+      line = [];
+      if (lines.length === max) break;
+    }
+    line.push(c);
+  }
+  if (line.length && lines.length < max) lines.push(line);
+  if (i < items.length && lines.length) {
+    const last = lines[lines.length - 1];
+    let left = items.length - i;
+    for (;;) {
+      const t = '+' + left + ' MORE', more = { t, c: '#64748b', w: cw(t) };
+      if (!last.length || lw(last) + CHIP_GAP + more.w <= maxW) { last.push(more); break; }
+      last.pop(); left++;
+    }
+  }
+  ctx.restore();
+  return lines.map(cs => ({ chips: cs, w: lw(cs) }));
+}
+function drawChips(lines, cx, y) {
+  ctx.save();
+  ctx.font = CHIP_FONT;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((ln, j) => {
+    let x = cx - ln.w / 2;
+    const yy = y + j * CHIP_LINE;
+    for (const c of ln.chips) {
+      ctx.fillStyle = rgba(c.c, 0.1);
+      roundRect(x, yy - CHIP_H / 2, c.w, CHIP_H, 4); ctx.fill();
+      ctx.strokeStyle = rgba(c.c, 0.34); ctx.lineWidth = 1;
+      roundRect(x, yy - CHIP_H / 2, c.w, CHIP_H, 4); ctx.stroke();
+      ctx.fillStyle = c.c;
+      ctx.fillText(c.t, x + c.w / 2, yy + 0.5);
+      x += c.w + CHIP_GAP;
+    }
+  });
+  ctx.restore();
+}
+// a small spaced heading over a block, as the menu's GLOBAL TOP 5 has
+function drawEyebrow(t, cx, y, col) {
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.18em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = col || '#475569';
+  ctx.fillText(t, cx, y);
+  ctx.restore();
+}
+
+/* One tip per report, in turn, starting somewhere different for each player.
+   Every one of them is something the game does today; a tip that has gone
+   stale is worse than none, so change these with the thing they describe. */
+const TIPS = [
+  'SPACE is a dash, and a dash is i-frames: go through a volley, not away from it.',
+  '[T] turns on autofire and leaves it on, so both hands are free for moving.',
+  'Every enemy has a tell. [X] opens the codex, even paused, and says what each one does.',
+  'The DAILY RUN [D] is the same run for everyone today. Only your first try is ranked.',
+  'Clearing a CHALLENGE [K] puts its card in your pool for every run after.',
+  'BOSS RUSH [B] is the bosses back to back, on a ladder of its own.',
+  'CO-OP [L]: two ships, one run. One of you hosts and reads out a code.',
+  'A BOMBER goes off when it dies, even when you kill it. Shoot it early, from far off.',
+  'A SPLITTER breaks into smaller pieces. Kill it away from the crowd.',
+  'A LANCER winds up before it lunges, and it commits. Step aside and it goes past.',
+  'A fight that will not end has a MENDER at the back of it. Find that one first.',
+  'A SENTINEL is shielded across its face and turns slowly. Get round the side.',
+  'ARTILLERY marks where its shells will land. Keep moving and it never hits.',
+  'Stuttering? [G] opens EFFECTS & PERFORMANCE, and FASTEST is one click.',
+  '[S] is SETTINGS: volume, aim sensitivity, screen shake and skins.',
+  'An ACCOUNT carries your progress to any device you sign in on.',
+  'Leaving a run from the pause screen still saves it to your record.'
+];
+// and a few for the pilot that was flying, mixed in with the rest
+const TIPS_PILOT = {
+  ember: ['EMBER\'s lance is hottest at the muzzle. Get close; it was built for the crowd.',
+          'EMBER: when VENT READY shows, [F] opens the vent.'],
+  hacker: ['THE HACKER keeps what it kills: every body it drops stands back up on its side.'],
+  melee: ['THE VAGRANT: [F] or right-click parries. In a row they add damage; just before a hit, they counter it.',
+          'THE VAGRANT: stand on gear and press [E] to look. What you do not want tempers what you wear.']
+};
+function qolTip(charId) {
+  const list = TIPS.concat(TIPS_PILOT[charId] || []);
+  QOL.tipN = (QOL.tipN < 0 ? (Save.profile.runs || 0) : QOL.tipN + 1) % list.length;
+  return list[QOL.tipN];
+}
+
+// what the report adds to the numbers, worked out once per report
+function deadRecap(s) {
+  if (s.recap) return s.recap;
+  const p = coopMine(), C = CHARS.find(c => c.id === p.charId);
+  const r = { by: p.hp <= 0 ? (p.hitBy || '') : '', build: runBuild(p), pilot: C ? C.n : '',
+              tip: s === lastStats ? qolTip(p.charId) : '' };
+  if (s === lastStats) s.recap = r;
+  return r;
+}
+
+/* SHARE. A run is worth telling somebody about, and a link in a group chat is
+   how a game like this finds its next player. The address is wherever this
+   copy is being played, so a friend at the same school gets the address that
+   works there. */
+const shareUrl = () => (/^https?:$/.test(location.protocol) ? location.origin + '/' : 'https://voidrunner.online/');
+const shareable = s => !!s && !s.freeplay && !s.outside;
+function shareText(s) {
+  const r = deadRecap(s), n = v => (v || 0).toLocaleString();
+  const head = s.chal && s.chal.daily
+      ? 'VOIDRUNNER DAILY ' + (Daily.day || '') + ' · ' + n(s.score) + ' pts'
+        + (s.dailyRanked && Daily.rank ? ' · #' + Daily.rank + ' today' : '')
+    : s.chal && s.chal.rush
+      ? 'VOIDRUNNER BOSS RUSH · ' + s.rushDown + ' boss' + (s.rushDown === 1 ? '' : 'es') + ' down · ' + n(s.score) + ' pts'
+    : s.chal && !s.chal.hl
+      ? 'VOIDRUNNER · ' + (s.chalWon ? 'cleared ' : 'took on ') + s.chal.n
+    : 'VOIDRUNNER · ' + n(s.score) + ' pts' + (s.isRecord && s.score > 0 ? ', a new best' : '');
+  const bits = [];
+  if (r.pilot) bits.push('as ' + r.pilot);
+  if (s.sector) bits.push('reached ' + s.sector + ' wave ' + s.wave + (s.loop ? ' ×' + (s.loop + 1) : ''));
+  bits.push(n(s.kills) + ' kills', fmtTime(s.time));
+  const lines = [head, bits.join(' · ')];
+  if (Board.rank && !s.chal) lines.push('#' + Board.rank + ' on the global board');
+  lines.push('Can you beat it? ' + shareUrl());
+  return lines.join('\n');
+}
+function qolSay(t) { QOL.said = t; QOL.saidT = uiTime + 2.6; }
+async function qolCopy(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
+  try {
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(t);
+    t.select();
+    const ok = document.execCommand('copy');
+    t.remove();
+    return !!ok;
+  } catch (e) { return false; }
+}
+// a phone gets its own share sheet; everything else, the text on the clipboard
+function shareRun() {
+  const s = lastStats;
+  if (!shareable(s)) return;
+  const text = shareText(s);
+  Audio_.select();
+  if (isTouch && navigator.share) {
+    navigator.share({ title: 'VOIDRUNNER', text }).then(() => qolSay('SHARED'), () => {});
+    return;
+  }
+  qolCopy(text).then(ok => qolSay(ok ? 'COPIED — PASTE IT ANYWHERE' : 'COULD NOT COPY'));
+}
+
+/* The report's two buttons, under the build: SHARE, and MAIN MENU, which a
+   touchscreen had no way to reach (a tap anywhere was always "again"). Laid
+   out in the report's own space and kept in screen space for the click, since
+   the report scales itself to fit. */
+function drawDeadButtons(y, cx, s, sc) {
+  const bw = 168, bh = 32, gap = 12;
+  const share = shareable(s);
+  const list = share ? ['share', 'menu'] : ['menu'];
+  const x0 = cx - (list.length * bw + (list.length - 1) * gap) / 2;
+  const toScreen = (x, yy, w, h) => ({ x: cx + (x - cx) * sc, y: H / 2 + (yy - H / 2) * sc, w: w * sc, h: h * sc });
+  const armed = uiArm <= 0;
+  QOL.btns = {};
+  list.forEach((k, i) => {
+    const x = x0 + i * (bw + gap);
+    const r = toScreen(x, y, bw, bh);
+    QOL.btns[k] = r;
+    const hot = armed && inRect(mouse.x, mouse.y, r);
+    const said = k === 'share' && QOL.said && uiTime < QOL.saidT;
+    const col = k === 'share' ? COL.player : '#94a3b8';
+    ctx.save();
+    ctx.globalAlpha = armed ? 1 : 0.45;
+    ctx.fillStyle = hot ? rgba(col, 0.18) : 'rgba(255,255,255,0.04)';
+    roundRect(x, y, bw, bh, 8); ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.85 : 0.35); ctx.lineWidth = 1.4;
+    roundRect(x, y, bw, bh, 8); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.1em';
+    const t = said ? QOL.said
+            : k === 'share' ? (isTouch ? 'SHARE RUN' : 'SHARE RUN   [C]')
+            : (isTouch ? 'MAIN MENU' : 'MAIN MENU   [M]');
+    fitFont(t, bw - 16, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+    ctx.fillStyle = said ? '#4ade80' : hot ? '#f1f5f9' : col;
+    ctx.fillText(t, x + bw / 2, y + bh / 2 + 0.5);
+    ctx.restore();
+  });
+}
+/* The share sheet, the clipboard and the install prompt each want the player's
+   own act behind them, and a browser does not count a touch going down as
+   one: only its lift. A tap reaches the game as it goes down (touchstart), so
+   whatever needs that is done as it lifts instead. A click or a key is
+   already the player's act, and acts at once. */
+function qolOnLift(f) { if (QOL.tap) QOL.onLift = f; else f(); }
+
+// a click on the report: a button if it was on one, true if it was taken
+function deadButtonClick() {
+  const b = QOL.btns;
+  if (!b) return false;
+  if (b.share && inRect(mouse.x, mouse.y, b.share)) { qolOnLift(shareRun); return true; }
+  if (b.menu && inRect(mouse.x, mouse.y, b.menu)) { handleKey('m'); return true; }
+  return false;
+}
+
+/* INSTALL. With a manifest (manifest.webmanifest) Chrome offers to install
+   the game, and says so with this event; on a Chromebook that puts it on the
+   shelf, in a window of its own. The offer is kept and made from the menu,
+   top right, for as long as it stands. Never on PvP's page, which is not this
+   game to install. */
+if (!PVP) {
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); QOL.install = e; });
+  addEventListener('appinstalled', () => { QOL.install = null; QOL.installRect = null; });
+}
+function installApp() {
+  const e = QOL.install;
+  QOL.install = null; QOL.installRect = null;
+  if (!e) return;
+  Audio_.select();
+  try { e.prompt(); } catch (err) { /* the offer had already lapsed */ }
+}
+
+/* CONTINUE (8 Oct 2026). The run in progress is kept on this machine, so a
+   tab that crashes, a battery that dies or a page closed by mistake costs a
+   few seconds rather than the run. It is the co-op safety net's snapshot
+   (RUN SNAPSHOTS), the same one scripts/determinism.mjs restores into a fresh
+   copy of the game in every scenario, written to local storage:
+     - every RUN_SAVE_EVERY seconds of a run, between steps (runSaveTick);
+     - the moment the run is paused, and when the tab is hidden or closed;
+     - never once the run has ended: a death, a quit or a new run clears it.
+   The menu offers it back (CONTINUE or ABANDON) before anything else. A run
+   comes back paused, exactly where it was saved.
+
+   What is kept: ordinary runs, the daily, the rush and the challenges, alone.
+   Not co-op (two machines), freeplay, outside pilots, ALL HALLOWS' areas, the
+   hub, a scene that is playing, PvP or the beta. A snapshot belongs to the
+   build that wrote it, so one from before an update is let go.
+
+   RUN_CONTINUES per run: a crash takes the run back to its last save, at
+   most RUN_SAVE_EVERY seconds, and a limit keeps that from becoming a way to
+   play a bad moment again and again. Pausing and closing is not a rewind:
+   that saves the moment itself.
+
+   Two tabs: each run has an id. A run that ends leaves its id behind
+   (ended), and a save naming this run with more continues spent than this
+   tab knows of was written by a later copy of it. Either way this tab's copy
+   is behind, and it writes nothing. */
+const RUN_META_KEY = 'voidrunner_run_v1', RUN_SNAP_KEY = 'voidrunner_run_v1_snap';
+const RUN_SAVE_EVERY = 20;
+const RUN_CONTINUES = 3;
+const RUN_SAVE_MAX = 1000000;            // characters; a bigger one is skipped rather than crowd out the save itself
+Object.assign(QOL, {
+  run: null,            // the saved run's card: what it was, as the menu shows it
+  runId: '',            // this run's, so another tab's copy of it can tell it is behind
+  runN: 0,              // continues this run has used
+  runT: 0,              // seconds of the run since it was last saved
+  runPaused: false,     // whether the last frame was paused, so a pause saves once
+  resuming: false,      // resetGame is building the frame a saved run is put back into
+  runAsk: 0,            // ABANDON pressed once: until when the second press ends it
+  runBtns: null,        // the card's buttons as last drawn
+  runNote: '', runNoteT: 0
+});
+
+function runSaveable() {
+  if (PVP || BETA || freeRun || MP.on || LS.on || netLive() || PILOTS.length > 1) return false;
+  if (state !== 'play' && state !== 'pause') return false;
+  if (P.outside || inHub || inVigil || (Chal.on && Chal.on.hl)) return false;
+  if (intrusion || amalOpen || choice || campVisit || turning || con.open || arrival) return false;
+  return QOL.runN < RUN_CONTINUES;
+}
+// the run as it stands, kept; true if it was
+function runSave() {
+  if (!runSaveable()) return false;
+  QOL.runT = 0;
+  let snap;
+  try { snap = snapWrite(); } catch (e) { return false; }
+  if (snap.bad) return false;            // something in it cannot travel: no save beats a broken one
+  try {
+    const was = JSON.parse(localStorage.getItem(RUN_META_KEY) || 'null');
+    if (was && (was.ended === QOL.runId || (was.id === QOL.runId && (was.n || 0) > QOL.runN))) return false;
+  } catch (e) { /* unreadable: write over it */ }
+  const json = JSON.stringify(snap);
+  if (json.length > RUN_SAVE_MAX) return false;
+  const C = Chal.on;
+  const meta = { v: 1, id: QOL.runId, build: snap.build, at: Date.now(), n: QOL.runN, pilot: P.charId,
+                 score, wave, sector: stage.name, loop: loopNum, time: elapsed, kills: P.kills,
+                 kind: C ? (C.daily ? 'DAILY RUN' : C.rush ? 'BOSS RUSH' : C.n) : '' };
+  try {
+    localStorage.setItem(RUN_SNAP_KEY, json);
+    localStorage.setItem(RUN_META_KEY, JSON.stringify(meta));
+    return true;
+  } catch (e) { runSaveClear(); return false; }
+}
+function runSaveClear() {
+  QOL.run = null; QOL.runAsk = 0;
+  if (PVP || BETA) return;               // neither keeps a run, nor touches this storage
+  try {
+    localStorage.removeItem(RUN_SNAP_KEY);
+    // the run that ended leaves its id, so a stale tab of it cannot write it back (above)
+    if (QOL.runId) localStorage.setItem(RUN_META_KEY, JSON.stringify({ ended: QOL.runId }));
+    else localStorage.removeItem(RUN_META_KEY);
+  } catch (e) { /* nothing kept */ }
+}
+// once a frame, between steps: the clock, and a pause saves the moment it begins
+function runSaveTick(dt) {
+  const paused = state === 'pause';
+  if (paused && !QOL.runPaused) runSave();
+  QOL.runPaused = paused;
+  if (state !== 'play') return;
+  QOL.runT += dt;
+  if (QOL.runT >= RUN_SAVE_EVERY) runSave();
+}
+// the tab going away is the last chance to keep the run exactly where it is
+function runSaveNow() { if (state === 'play' || state === 'pause') runSave(); }
+if (!PVP) {
+  addEventListener('visibilitychange', () => { if (document.hidden) runSaveNow(); });
+  addEventListener('pagehide', runSaveNow);
+}
+function runNote(t) { QOL.runNote = t; QOL.runNoteT = uiTime + 6; }
+
+// at boot: a run left behind, if it can still be played on this build
+function runSaveLoad() {
+  if (PVP || BETA) return;
+  let m = null;
+  try { m = JSON.parse(localStorage.getItem(RUN_META_KEY) || 'null'); } catch (e) { m = null; }
+  if (!m || typeof m !== 'object' || m.ended) return;   // nothing, or a run that has ended
+  if (m.build !== buildId() || !CHARS.some(c => c.id === m.pilot)) {
+    runSaveClear();
+    runNote('YOUR LAST RUN WAS SAVED BY AN OLDER VERSION OF THE GAME, SO IT COULD NOT BE KEPT');
+    return;
+  }
+  QOL.run = m;
+}
+/* Back into the run: the frame a run is built in, then the run itself on top
+   of it, as run C does in scripts/determinism.mjs. It comes back paused. */
+function runRestore() {
+  const m = QOL.run;
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem(RUN_SNAP_KEY) || 'null'); } catch (e) { snap = null; }
+  if (!m || !snap || snap.build !== buildId()) { runSaveClear(); runNote('THAT RUN COULD NOT BE FOUND'); return false; }
+  QOL.resuming = true;
+  try {
+    applyChar(CHARS.findIndex(c => c.id === m.pilot));
+    resetGame();
+    snapRead(snap);
+  } catch (e) {
+    console.error('VOIDRUNNER: the saved run could not be restored.', e);
+    QOL.resuming = false;
+    runSaveClear();
+    state = 'menu';
+    runNote('THAT RUN COULD NOT BE RESTORED');
+    return false;
+  }
+  QOL.resuming = false;
+  QOL.run = null; QOL.runAsk = 0;
+  QOL.runId = m.id || '';
+  QOL.runN = (m.n || 0) + 1;
+  state = 'pause'; QOL.runPaused = true;
+  cam.x = P.x; cam.y = P.y; cam.trauma = 0;
+  uiArm = 0.4;
+  return true;
+}
+function runContinue() {
+  if (!runRestore()) return;
+  Audio_.levelup();
+  /* The continue is spent at once, so a crash straight after keeps the run.
+     If it cannot be written (the last continue, or no room), the save it
+     came from goes: left behind, it would offer the same moment again. */
+  if (!runSave()) runSaveClear();
+}
+/* ABANDON: the run ends as if it had been quit from the pause screen, which
+   files it to the record like any other. Asked twice, because it cannot be
+   taken back. */
+function runAbandon() {
+  if (QOL.runAsk < uiTime) { QOL.runAsk = uiTime + 3; Audio_.select(); return; }
+  if (!runRestore()) return;
+  quitToMenu();
+  runNote('THE RUN WAS ENDED AND FILED TO YOUR RECORD');
+}
+
+// the card, over the menu, while a saved run waits
+const runCardUp = () => state === 'menu' && !!QOL.run && !arrival && !hlProOn();
+function runCardKey(k) {
+  if (k === 'enter' || k === ' ') runContinue();
+  else if (k === 'escape' || k === 'backspace' || k === 'delete') runAbandon();
+}
+function runCardClick() {
+  const b = QOL.runBtns;
+  if (!b) return;
+  if (inRect(mouse.x, mouse.y, b.go)) runContinue();
+  else if (inRect(mouse.x, mouse.y, b.end)) runAbandon();
+}
+function drawRunCard() {
+  const m = QOL.run, w = Math.min(470, W - 32), h = 214;
+  const x = (W - w) / 2, y = clamp(H / 2 - h / 2, 12, H - h - 12);
+  ctx.save();
+  ctx.fillStyle = 'rgba(3,5,10,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(8,13,22,0.97)';
+  roundRect(x, y, w, h, 12); ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.55); ctx.lineWidth = 1.5;
+  roundRect(x, y, w, h, 12); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cx = W / 2;
+  drawEyebrow('A RUN IS STILL IN PROGRESS', cx, y + 24, COL.player);
+  const C = CHARS.find(c => c.id === m.pilot);
+  const head = (m.kind ? m.kind + '   ·   ' : '') + (m.sector || '—') + (m.loop ? ' ×' + (m.loop + 1) : '') + '   ·   WAVE ' + m.wave;
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  fitFont(head, w - 40, '700', 20, "'Chakra Petch', Barlow, system-ui, sans-serif", 11);
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(head, cx, y + 56);
+  ctx.restore();
+  const ago = Math.max(0, Math.round((Date.now() - (m.at || 0)) / 60000));
+  const sub = (C ? C.n + '   ·   ' : '') + (m.score || 0).toLocaleString() + ' PTS   ·   ' + fmtTime(m.time || 0)
+            + '   ·   SAVED ' + (ago < 1 ? 'JUST NOW' : ago < 60 ? ago + ' MIN AGO' : ago < 1440 ? Math.round(ago / 60) + ' H AGO' : Math.round(ago / 1440) + ' D AGO');
+  fitFont(sub, w - 40, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = C ? C.col : '#94a3b8';
+  ctx.fillText(sub, cx, y + 84);
+  const left = RUN_CONTINUES - (m.n || 0) - 1;
+  const note = left > 0 ? 'continuing comes back paused, where it was saved   ·   ' + left + ' more after this'
+                        : 'this is its last continue: from here it plays to the end';
+  fitFont(note, w - 40, '500', 10.5, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(note, cx, y + 106);
+  // the two ways out
+  const bw = Math.min(190, (w - 52) / 2), bh = 40, by = y + 128;
+  const go = { x: cx - bw - 6, y: by, w: bw, h: bh }, end = { x: cx + 6, y: by, w: bw, h: bh };
+  QOL.runBtns = { go, end };
+  const asking = QOL.runAsk >= uiTime;
+  const btn = (r, label, col, strong) => {
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = strong ? rgba(col, hot ? 0.3 : 0.18) : hot ? rgba(col, 0.16) : 'rgba(255,255,255,0.04)';
+    roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
+    ctx.strokeStyle = rgba(col, hot || strong ? 0.9 : 0.4); ctx.lineWidth = strong ? 1.8 : 1.3;
+    roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+    ctx.save();
+    ctx.letterSpacing = '0.1em';
+    fitFont(label, r.w - 16, '800', 13, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
+    ctx.fillStyle = hot || strong ? '#f8fafc' : col;
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+    ctx.restore();
+  };
+  btn(go, isTouch ? 'CONTINUE' : 'CONTINUE   [ENTER]', COL.player, true);
+  btn(end, asking ? 'AGAIN TO END IT' : isTouch ? 'ABANDON' : 'ABANDON   [ESC]', '#f87171', asking);
+  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = asking ? '#fca5a5' : '#475569';
+  ctx.fillText(asking ? 'it ends here and is filed to your record, as a quit would be'
+                      : 'abandoning ends it and files it to your record', cx, y + h - 20);
+  ctx.restore();
+}
+// a word about a saved run, low on the menu, for a few seconds
+function drawRunNote() {
+  if (!QOL.runNote || uiTime > QOL.runNoteT) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.12em';
+  ctx.globalAlpha = clamp(QOL.runNoteT - uiTime, 0, 1);
+  fitFont(QOL.runNote, W - 40, '700', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText(QOL.runNote, W / 2, H - 132);
+  ctx.restore();
+}
+
+
+/* ===========================================================================
    CHANGELOG
    What changed, and a promise that it is said once. The whole of the state
    behind that promise is a single number on the profile — the id of the newest
@@ -63218,6 +63935,29 @@ function drawMenuSet() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 9, v: '1.5.1', date: '8 OCT 2026', lines: [
+    ['new', 'CONTINUE. The run you are playing is kept on this device as you play, and whenever '
+          + 'you pause or leave the tab. If the page closes or crashes, the menu offers it back, '
+          + 'paused where it was. A run can be continued three times; ABANDON files it to your '
+          + 'record like a quit. Co-op, freeplay and ALL HALLOWS are not kept, and an update to '
+          + 'the game lets a kept run go.'],
+    ['fix', 'Very high fire rate could crash the tab by running it out of memory: every shot and '
+          + 'every hit started its own sound, thousands a second. Sounds that come in floods are '
+          + 'thinned out now, and you will not hear the difference.'],
+    ['balance', 'At most 2,000 of your shots are in the air at once. Past that the oldest go first. '
+              + 'Only the most extreme fire-rate builds ever reach it.'],
+    ['new', 'The run report says what put you down, shows the build you were carrying, '
+          + 'and ends with a tip.'],
+    ['new', 'SHARE RUN on the report [C] copies a line about your run and a link to the game, '
+          + 'ready to paste anywhere. On a phone it opens the share sheet.'],
+    ['new', 'MAIN MENU on the report, so a touchscreen can get back to the menu without '
+          + 'starting another run.'],
+    ['new', 'SETTINGS has SCREEN SHAKE: full, half or off.'],
+    ['new', 'Install it. Where the browser offers, INSTALL AS AN APP sits at the top right of '
+          + 'the menu and puts VOIDRUNNER on your shelf, in a window of its own.'],
+    ['fix', 'Pressing SPACE to dash just as you died started the next run before the report '
+          + 'could be read. The report now holds still for a moment first.']
+  ] },
   { id: 8, v: '1.5', date: '6 OCT 2026', lines: [
     ['new', 'FORGOTTEN TALES. The codex is rebuilt as the Bookkeeper\'s book: its sections run down '
           + 'the left, everything you have met has a card, and every card opens as a book.'],
@@ -70288,6 +71028,7 @@ const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'V
 const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue', 'partPool', 'fxSamples', '_matCache', 'Save', 'Board',
   'Codex', 'Tales', 'TA_TAGGED', '_taMix', '_taBack', 'Audio_', 'FXO', 'COL', 'Net', 'NetDiag', 'NetFix', 'NetTurn', 'MP', 'LS', 'Season', 'Awards', 'HUB_ORIGIN', 'HL_ART', 'SNAP', 'PILOT',
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
+  'QOL',                                  // the run report's buttons and tip, SHARE, INSTALL (AFTER THE RUN)
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
@@ -72929,6 +73670,8 @@ function chalEnd(won) {
                 sector: stage.name, loop: loopNum, isRecord: false,
                 chal: c, chalWon: won, reward: Chal.reward };
   state = 'dead';
+  uiArm = DEAD_ARM;
+  runSaveClear();
   Codex.flush();
   if (won) Audio_.levelup();
   else { explode(P.x, P.y, 180, 0, COL.player); shake(1); Audio_.over(); }
@@ -73832,6 +74575,7 @@ prewarmGlow();
 if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)
 Save.init();
+runSaveLoad();            // a run left in progress, offered back at the menu (CONTINUE)
 if (BETA) betaUnlockAll();
 if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;
