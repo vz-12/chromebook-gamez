@@ -527,6 +527,44 @@ Small things that help the game travel:
   link to wherever it is being played (a phone gets its share sheet). Nothing
   is sent anywhere by the game.
 
+## Continuing a run
+
+The run being played is kept in the browser's local storage
+(`voidrunner_run_v1` and `voidrunner_run_v1_snap`), so a crash or a closed tab
+costs seconds, not the run. CONTINUE, in `index.html`, has the details:
+
+- It is the co-op safety net's snapshot (RUN SNAPSHOTS: `snapWrite` and
+  `snapRead`), the one `npm test` restores into a fresh copy of the game in
+  every scenario. Continuing builds a run's frame (`resetGame`) and reads the
+  snapshot over it, as run C does.
+- It is written every 20 seconds of play between steps, when the run pauses,
+  and when the tab is hidden or closed. A run that ends (death, quit, a new
+  run) clears it.
+- The menu offers it back before anything else: CONTINUE, which comes back
+  paused, or ABANDON, which files it like a quit.
+- A run can be continued three times (`RUN_CONTINUES`), so killing the tab is
+  not a way to replay a bad moment.
+- A snapshot belongs to the build that wrote it: after a deploy a kept run is
+  let go, and the menu says so.
+- Not kept: co-op, freeplay, outside pilots, ALL HALLOWS' areas, the hub, a
+  scene in progress, PvP and the beta. Nothing is uploaded.
+
+A new top-level variable reaches the snapshot without being listed, as it
+does for co-op; anything that is this machine's own goes in `SNAP_LOCAL`.
+
+## Memory under fire
+
+Very high fire rate used to crash the tab: every shot and hit started its own
+Web Audio nodes, thousands a second, faster than Chrome frees them. Now:
+
+- Sound effects wait their turn (`SFX_GAP`), and at most `SFX_VOICES` play at
+  once. Music is never held back.
+- Lightning arcs and rings are kept to the newest `ARC_MAX` and `RING_MAX`
+  (only the drawing reads them, as with particles).
+- At most `BULLET_MAX` (2,000) player shots are in the air. Past that the
+  oldest go first. This one changes the game, so it is in the run (it holds
+  in co-op and the determinism test).
+
 ## Ads
 
 The game has room for one Google AdSense banner. It sits across the top of the
