@@ -15,6 +15,7 @@ const worker = (await import('../src/index.js')).default;
 const { getStore } = await import('../src/store.js');
 const { STORE, ARCHIVE } = await import('../src/season.js');
 const { LOOKS, KINDS, MAX_DECALS } = await import('../src/looks.js');
+const { flagSql, readSql } = await import('./supporter.mjs');
 
 const DB = makeD1();
 const env = { DB, ASSETS: { fetch: () => new Response('asset') } };
@@ -73,7 +74,7 @@ section('the catalog: every item named once, every gate one the server knows');
     const ids = LOOKS[k].map(i => i.id);
     ok(new Set(ids).size === ids.length, k + ': ids are unique', ids);
     ok(LOOKS[k].every(i => /^[a-z0-9-]+$/.test(i.id) && typeof i.n === 'string' && i.n), k + ': ids and names are well formed');
-    ok(LOOKS[k].every(i => /^(free|grant|podium|pvp-podium|pilot:\w+|awake:\w+|runs:\d+|pvp-league:\w+)$/.test(i.gate)), k + ': every gate is in the language', LOOKS[k].map(i => i.gate));
+    ok(LOOKS[k].every(i => /^(free|grant|podium|pvp-podium|supporter|pilot:\w+|awake:\w+|runs:\d+|pvp-league:\w+)$/.test(i.gate)), k + ': every gate is in the language', LOOKS[k].map(i => i.gate));
   }
   ok(LOOKS.banner.some(i => i.id === 'world' && i.gate === 'free') && LOOKS.picture.some(i => i.id === 'sigil' && i.gate === 'free'), 'the defaults are free');
 }
@@ -196,6 +197,48 @@ section('a dev account owns everything');
   const r = await wear(D, { banner: 'crown', picture: 'void', decals: ['developer', 'champion'] });
   ok(r.status === 200, 'and may wear any of it', r);
   ok((await profile('dev_one')).d.look.picture === 'void', 'on its profile');
+}
+
+section('the supporter flag: `npm run supporter`\'s own SQL opens the SUPPORTER looks, and takes them back');
+{
+  const S = await signUp('Sup_One', pid(11));
+  const perksOf = name => JSON.parse(DB.sql.prepare(readSql(name)).get().perks);
+  const SUP = [['banner', 'supporter'], ['picture', 'supporter'], ['decal', 'supporter']];
+  ok(SUP.every(([k, id]) => LOOKS[k].some(i => i.id === id && i.gate === 'supporter')), 'a SUPPORTER banner, picture and decal, behind the flag');
+  let L = await look(S);
+  ok(SUP.every(([k, id]) => !item(L, k, id).owned && item(L, k, id).lock === 'SUPPORT VOIDRUNNER ON PATREON'), 'locked, and they say how to open them', SUP.map(([k, id]) => item(L, k, id)));
+  ok((await wear(S, { decals: ['supporter'] })).status === 403, 'not worn before the flag');
+
+  sql("UPDATE accounts SET perks = '[\"skin:laurel\"]' WHERE id = ?", S.id);
+  ok(sql(flagSql('SUP_ONE')).changes === 1, 'flagged, by any spelling of the name');
+  ok(JSON.stringify(perksOf('sup_one')) === '["skin:laurel","supporter"]', 'added to the perks, the rest kept', perksOf('sup_one'));
+  ok(sql(flagSql('sup_one')).changes === 0 && perksOf('sup_one').length === 2, 'flagging again changes nothing');
+  L = await look(S);
+  ok(SUP.every(([k, id]) => item(L, k, id).owned && item(L, k, id).why === 'A PATREON SUPPORTER'), 'all three open at once, and say why', SUP.map(([k, id]) => item(L, k, id)));
+  ok(!item(L, 'decal', 'founder').owned && !item(L, 'banner', 'hacker').owned, 'and nothing else opens with them');
+  ok(!item(await look(A), 'decal', 'supporter').owned, 'only for the flagged account');
+  const r = await wear(S, { banner: 'supporter', picture: 'supporter', decals: ['supporter'] });
+  ok(r.status === 200, 'worn', r);
+  let P = await profile('sup_one');
+  ok(P.d.look.banner === 'supporter' && P.d.look.picture === 'supporter', 'the profile wears them', P.d.look);
+  ok(JSON.stringify(P.d.look.decals) === '[{"id":"supporter","n":"SUPPORTER","why":"A PATREON SUPPORTER"}]', 'the decal, with its name and why', P.d.look.decals);
+  const aw = await S.call('GET', '/api/leaderboard?awards=' + pid(11));
+  const got = (aw.d && aw.d.awards) || [];
+  ok(aw.status === 200 && JSON.stringify(got.filter(a => a.perk).map(a => a.perk)) === '["supporter"]'
+     && JSON.stringify(got.filter(a => a.skin).map(a => a.skin)) === '["laurel"]',
+     'the game\'s awards carry the flag and nothing more (the game drops a perk it does not know)', aw);
+
+  ok(sql(flagSql('sup_one', true)).changes === 1, 'taken back');
+  ok(JSON.stringify(perksOf('sup_one')) === '["skin:laurel"]', 'only the flag leaves the perks', perksOf('sup_one'));
+  ok(sql(flagSql('sup_one', true)).changes === 0, 'taking it again changes nothing');
+  P = await profile('sup_one');
+  ok(JSON.stringify(P.d.look) === JSON.stringify({ banner: 'world', picture: 'sigil', decals: [] }), 'off the profile on its next view, the defaults in their place', P.d.look);
+
+  sql(flagSql('dev_one'));
+  ok(JSON.stringify(perksOf('dev_one')) === '["dev","supporter"]', 'a dev account flagged keeps dev', perksOf('dev_one'));
+  sql(flagSql('dev_one', true));
+  ok(JSON.stringify(perksOf('dev_one')) === '["dev"]', 'and taken back, keeps dev still', perksOf('dev_one'));
+  ok(sql(flagSql('nobody_here')).changes === 0, 'a name with no account changes nothing');
 }
 
 section('what a profile shows: nothing private');

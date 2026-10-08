@@ -889,6 +889,7 @@ Branch `profiles`. The shop and the currency stay for later.
   | `podium` | an account on any season's podium (the game's boards) |
   | `pvp-league:<id>` | finished a PvP season in that league or higher |
   | `pvp-podium` | on any PvP season's ranked podium |
+  | `supporter` | an account with the supporter flag (below) |
 
   An unknown gate opens for nobody. Any item can also be granted by hand,
   whatever its gate, and a `dev` account owns everything.
@@ -920,6 +921,14 @@ Branch `profiles`. The shop and the currency stay for later.
      Worker: signed in on your own page, picked and saved, seen by a
      signed-out visitor, at phone width. The grant tool tried against a
      local database (give, give again, a missing account, list).
+- **Supporters (8 Oct, the Patreon's $1 tier):** a SUPPORTER banner,
+  picture and decal, all gated `supporter`: one flag on the account
+  (`'supporter'` in `accounts.perks`) opens all three. `npm run supporter
+  -- <account>` gives it (`--take` takes it back, `--remote` for the live
+  database); it adds or removes only that entry, so `dev` and the rest
+  stay. Locked, they say SUPPORT VOIDRUNNER ON PATREON. No art yet (you
+  said not yet): the page draws the defaults in their place.
+  `npm run test:looks` covers it (90 checks; 5 more mutants, all caught).
 - **Open:**
   - The starting catalog (in step 1) is mine: which items, and their gates.
   - Whether the game itself shows any of it (the account chip, co-op name

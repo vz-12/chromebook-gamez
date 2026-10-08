@@ -74,6 +74,9 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
      'dev'          every skin and every perk below, read live, so a skin
                     added to ALL_SKINS later reaches the account by itself
      'skin:<id>'    one skin
+     'supporter'    the supporter flag: opens the profile looks gated
+                    'supporter' (src/looks.js; `npm run supporter`), and the
+                    game, which does not know it, drops it
      anything else  one perk id: 'unlock-all', 'evo-ember', …
    DEV_PIDS below speak the same language.
 

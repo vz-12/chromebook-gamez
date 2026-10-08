@@ -25,6 +25,9 @@
      'podium'             on a season's podium, on the game's boards
      'pvp-league:<id>'    finished a PvP season in that league or higher
      'pvp-podium'         on a PvP season's ranked podium
+     'supporter'          the account's supporter flag: 'supporter' in its
+                          perks (accounts.perks), given by hand to a Patreon
+                          supporter (`npm run supporter`)
    A gate this file does not know opens for nobody. Whatever its gate, an
    item can also be given by hand (look_grants, `npm run grant`), and an
    account with the 'dev' perk owns every one.
@@ -42,7 +45,8 @@ import { podiumsOf, badgesOf } from './pvp-rewards.js';
 export const KINDS = ['banner', 'picture', 'decal'];
 export const MAX_DECALS = 4;
 
-// the catalog. Ids are the art's (leaderboard/art.js draws each by its id); names are shown
+/* The catalog. Ids are the art's (leaderboard/art.js draws each by its id); names are shown.
+   The three SUPPORTER items have no art yet, so the page draws the default in their place. */
 export const LOOKS = {
   banner: [
     { id: 'world',     n: 'YOUR WORLD',  gate: 'free' },
@@ -54,7 +58,8 @@ export const LOOKS = {
     { id: 'superuser', n: 'SUPERUSER',   gate: 'awake:hacker' },
     { id: 'ronin',     n: 'RONIN',       gate: 'awake:melee' },
     { id: 'crown',     n: 'THE CROWN',   gate: 'podium' },
-    { id: 'ladder',    n: 'THE LADDER',  gate: 'pvp-league:gold' }
+    { id: 'ladder',    n: 'THE LADDER',  gate: 'pvp-league:gold' },
+    { id: 'supporter', n: 'SUPPORTER',   gate: 'supporter' }
   ],
   picture: [
     { id: 'sigil',     n: 'SIGIL',       gate: 'free' },
@@ -69,7 +74,8 @@ export const LOOKS = {
     { id: 'silver',    n: 'SILVER',      gate: 'pvp-league:silver' },
     { id: 'gold',      n: 'GOLD',        gate: 'pvp-league:gold' },
     { id: 'platinum',  n: 'PLATINUM',    gate: 'pvp-league:platinum' },
-    { id: 'void',      n: 'VOID',        gate: 'pvp-league:void' }
+    { id: 'void',      n: 'VOID',        gate: 'pvp-league:void' },
+    { id: 'supporter', n: 'SUPPORTER',   gate: 'supporter' }
   ],
   decal: [
     { id: 'founder',   n: 'FOUNDER',     gate: 'grant' },
@@ -79,7 +85,8 @@ export const LOOKS = {
     { id: 'crown',     n: 'SEASON PODIUM', gate: 'podium' },
     { id: 'duelist',   n: 'PVP PODIUM',  gate: 'pvp-podium' },
     { id: 'veteran',   n: 'VETERAN',     gate: 'runs:100' },
-    { id: 'awakened',  n: 'AWAKENED',    gate: 'awake:any' }
+    { id: 'awakened',  n: 'AWAKENED',    gate: 'awake:any' },
+    { id: 'supporter', n: 'SUPPORTER',   gate: 'supporter' }
   ]
 };
 // what every profile wears until its player picks something else
@@ -112,7 +119,8 @@ export async function gamePodiums(db, env, acct) {
 }
 
 export async function factsOf(db, env, acct, perks) {
-  const f = { dev: Array.isArray(perks) && perks.includes('dev'), pilots: new Set(BASE_PILOTS), awake: new Set(),
+  const f = { dev: Array.isArray(perks) && perks.includes('dev'), supporter: Array.isArray(perks) && perks.includes('supporter'),
+              pilots: new Set(BASE_PILOTS), awake: new Set(),
               runs: 0, podiums: 0, league: -1, pvpPodiums: 0, granted: new Map() };
   const save = await db.prepare("SELECT unlocks, json_extract(data, '$.runs') AS runs FROM saves WHERE account = ?1")
     .bind(acct).first().catch(() => null);
@@ -142,6 +150,7 @@ function gateOpen(gate, f) {
     case 'podium': return f.podiums > 0;
     case 'pvp-league': return hasOwn(LEAGUE_AT, v) && f.league >= LEAGUE_AT[v];
     case 'pvp-podium': return f.pvpPodiums > 0;
+    case 'supporter': return f.supporter;
     default: return false;                    // 'grant', and anything unknown
   }
 }
@@ -156,6 +165,7 @@ function gateLock(gate, f) {
     case 'podium': return 'FINISH A SEASON IN THE TOP 3';
     case 'pvp-league': return 'FINISH A PVP SEASON IN ' + leagueName(v) + (v === 'void' ? '' : ' OR HIGHER');
     case 'pvp-podium': return 'FINISH A PVP SEASON IN THE TOP 3';
+    case 'supporter': return 'SUPPORT VOIDRUNNER ON PATREON';
     default: return 'NOT YET AVAILABLE';
   }
 }
@@ -169,6 +179,7 @@ function gateEarned(gate) {
     case 'podium': return 'A SEASON IN THE TOP 3';
     case 'pvp-league': return 'A PVP SEASON IN ' + leagueName(v) + (v === 'void' ? '' : ' OR HIGHER');
     case 'pvp-podium': return 'A PVP SEASON IN THE TOP 3';
+    case 'supporter': return 'A PATREON SUPPORTER';
     default: return '';
   }
 }
