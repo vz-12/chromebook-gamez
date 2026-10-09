@@ -13,7 +13,7 @@
      maps.js     maps                          the arena, clean or infested
      rounds.js   down, levelUp, hud, draw,     the match: rounds, picks, the HUD
                  idle, hash
-     practice.js, match.js                     the kinds of play (`modes`)
+     practice.js, match.js, bot.js             the kinds of play (`modes`)
      onair.js    played                        a match on air: its fight, to the relay
      watch.js    steps, played, cam            a match watched (/play/?watch=<match>)
      replay.js   zoom, bare, frameSize         a replay, for the trailer (/play/?replay=<file>)
@@ -28,10 +28,11 @@
   'use strict';
 
   /* What the lobby chose for this tab: { mode, pilot, me, role?, code?,
-     queue?, match? }, where `me` is /api/pvp/me as the lobby read it (the
-     account, its unlocks, its loadouts) and `match` the one the queue found
-     (pvp/src/objects.js, Matchmaker: its id, this side, its rules, both
-     sides). Arriving here any other way goes to the lobby first; the
+     queue?, match?, bot?, search? }, where `me` is /api/pvp/me as the lobby
+     read it (the account, its unlocks, its loadouts), `match` the one the
+     queue found (pvp/src/objects.js, Matchmaker: its id, this side, its
+     rules, both sides), and `bot` and `search` the bot it found instead
+     while it had nobody, and the ticket still waiting (bot.js). Arriving here any other way goes to the lobby first; the
      engine still boots sealed meanwhile, so it fetches nothing on the way. */
   let hand = null;
   const preview = (/[?&]preview=(belt|result)(?:&|$)/.exec(location.search) || [])[1];

@@ -9,7 +9,8 @@
                   object once the verdict has been kept long enough.
      Matchmaker   one per queue (rules.js, QUEUES): the tickets waiting, the
                   pairing, and the queue's ratings, which only it writes, one
-                  match at a time (records.js, applyRating).
+                  match at a time (records.js, applyRating). A ticket nobody
+                  could be paired with for a while is found a bot (bots.js).
 
    The platform hands an object a new request while it waits on D1 or on
    another object, so each runs its changes one at a time itself (`one`):
@@ -19,6 +20,7 @@ import { REF, cleanReport, newSide, take, decide, nextLook, recorded } from './r
 import { recordMatch, applyRating, topOf } from './records.js';
 import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
 import { TOP_LEAGUE, tripChallenges, targetOf, challengeBegun, challengeEnded } from './challenge.js';
+import { BOTS, botFor } from './bots.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -196,11 +198,13 @@ const windowOf = (queue, waited) => {
   const [from, per, most] = MM.WINDOW[queue];
   return Math.min(most, from + per * waited / 1000);
 };
-// what a player polling is told: still waiting, or the match found (held for KEEP once first collected)
+/* What a player polling is told: still waiting (with a bot to fly
+   meanwhile, once it has one: bots.js), or the match found (held for KEEP
+   once first collected). */
 function status(t, now, tab) {
   if (!t) return { state: 'none' };
   if (tab && t.tab && t.tab !== tab) return { state: 'elsewhere' };    // the account searches from another tab now
-  if (!t.match) return { state: 'waiting', waited: now - t.since };
+  if (!t.match) return t.bot ? { state: 'waiting', waited: now - t.since, bot: t.bot } : { state: 'waiting', waited: now - t.since };
   if (!t.got) t.got = now;
   return { state: 'matched', match: t.match };
 }
@@ -210,7 +214,13 @@ function status(t, now, tab) {
    ticket is paired first, with whoever is nearest within how long it has
    waited (cost, windowOf), never across brackets (rules.js, bracketOf),
    never with itself. A pair is given a Match (above), the older ticket
-   hosts, and each player finds it at their next poll. */
+   hosts, and each player finds it at their next poll.
+
+   Bots (bots.js) come after all of that, never before it: a ticket still
+   unpaired once the real players have been, that has waited BOTS.after
+   (or BOTS.again since its last bot), is given one to fly while it waits.
+   It stays in the queue, as pairable as ever: a real player who can be
+   paired with it is, bot or no bot. */
 export class Matchmaker extends Serial {
   async handle(op, b, now) {
     if (op === 'rate') {
@@ -229,11 +239,16 @@ export class Matchmaker extends Serial {
       // a match found and not yet collected stays found; anything else starts again
       if (!(t && t.match && !t.got)) {
         if (t) q.tickets.splice(q.tickets.indexOf(t), 1);
-        t = Object.assign({}, b.ticket, { acct: b.acct, tab: b.tab || null, since: now, seen: now, match: null, at: 0, got: 0 });
+        t = Object.assign({}, b.ticket, { acct: b.acct, tab: b.tab || null, since: now, seen: now, match: null, at: 0, got: 0,
+                                          bot: null, botAt: now + BOTS.after[b.queue] });
         q.tickets.push(t);
       } else t.tab = b.tab || t.tab;
     } else if (op === 'poll') {
-      if (t && !(b.tab && t.tab && t.tab !== b.tab)) t.seen = now;
+      if (t && !(b.tab && t.tab && t.tab !== b.tab)) {
+        t.seen = now;
+        // its player is done with its bot: another only after a while more with nobody
+        if (t.bot && b.botOver === t.bot.id) { t.bot = null; t.botAt = now + BOTS.again; }
+      }
     } else if (op === 'leave') {
       // only the tab holding the ticket gives it up
       if (t && !t.match && !(b.tab && t.tab && t.tab !== b.tab)) { q.tickets.splice(q.tickets.indexOf(t), 1); t = null; }
@@ -316,7 +331,13 @@ export class Matchmaker extends Serial {
       for (const [side, x] of [[0, t], [1, u]]) {
         x.match = { id, side, role: side ? 'guest' : 'host', queue, rated: def.rated && !hidden, league, bestOf: rule.bestOf, sides };
         x.at = now;
+        x.bot = null;
       }
+    }
+    // only now, with every real pairing made: a bot for whoever has waited long enough with nobody (bots.js)
+    for (const t of open) {
+      if (t.match || taken.has(t) || t.hidden || t.bot) continue;
+      if (now >= (t.botAt || t.since + BOTS.after[queue])) t.bot = botFor(t);
     }
   }
 }

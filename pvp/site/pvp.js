@@ -252,7 +252,13 @@
      closed tab leaves the queue by itself; leaving says so at once. */
   /* `tab` marks this tab's ticket: the same account searching from another
      tab or device takes the ticket over, and this one is told so. */
-  const Q = { queue: null, tab: '', t0: 0, poll: 0, clock: 0 };
+  /* Nobody to pair with for a while, the queue finds a bot to fly meanwhile
+     (pvp/src/bots.js), after every real pairing and never in place of one:
+     the play page flies it (js/bot.js) and keeps the ticket, with this tab's
+     mark, and a real opponent found there takes the player straight to them.
+     Back here, the search carries on where it left off (resume). */
+  const Q = { queue: null, tab: '', t0: 0, poll: 0, clock: 0, pilot: '', again: false };
+  const SEARCH = 'vr_pvp_search';
   const queueCall = (op, extra) => call('POST', '/api/pvp/queue', Object.assign({ op, queue: Q.queue, tab: Q.tab }, extra));
   const newTab = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), x => x.toString(16).padStart(2, '0')).join('');
   const mmss = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -266,7 +272,8 @@
     $('searchWhat').textContent = what;
     $('searchClock').textContent = '0:00';
     $('searchNote').textContent = 'Searching as ' + (me ? me.account.display : 'you') +
-      '. Looking for an opponent near your rating; the search widens the longer you wait.';
+      '. Looking for an opponent near your rating; the search widens the longer you wait. ' +
+      'If nobody\'s around, you\'ll fight a bot meanwhile, still in the queue.';
     $('cancel').hidden = false;
     Q.clock = setInterval(() => { $('searchClock').textContent = mmss(Date.now() - Q.t0); }, 500);
   }
@@ -286,16 +293,59 @@
                 'TWO PLAYERS NEED TWO ACCOUNTS.');
       return;
     }
+    if (r.d.state === 'none' && Q.again) { Q.again = false; rejoin(); return; }   // back from a bot match, the ticket gone meanwhile
     if (r.d.state !== 'waiting') { stopQueue('YOUR PLACE IN THE QUEUE WAS LOST: TRY AGAIN'); return; }
+    Q.again = false;
+    if (botOk(r.d.bot)) { botFound(r.d.bot); return; }
     Q.poll = setTimeout(pollQueue, 2000);
   }
-  async function pollQueue() { if (Q.queue) heard(await queueCall('poll')); }
+  async function pollQueue(extra) { if (Q.queue) heard(await queueCall('poll', extra)); }
+  const botOk = b => !!(b && typeof b.id === 'string' && /^[0-9a-f]{8}$/.test(b.id) && me && Object.prototype.hasOwnProperty.call(me.pilots, b.pilot));
+  async function rejoin() {
+    const r = await queueCall('join', { pilot: Q.pilot });
+    if (r.ok || r.status === 401) { heard(r); return; }
+    stopQueue('YOUR PLACE IN THE QUEUE WAS LOST: TRY AGAIN');
+  }
+
+  /* The queue found a bot: who, and that the search goes on, then the play
+     page. From here the play page polls, so this page going is not the
+     player leaving the queue. */
+  function botFound(bot) {
+    const search = { queue: Q.queue, tab: Q.tab, t0: Q.t0 }, pilot = Q.pilot;
+    Q.queue = null;
+    clearTimeout(Q.poll); clearInterval(Q.clock);
+    $('searching').classList.add('found');
+    $('searchWhat').textContent = 'NOBODY YET';
+    $('searchClock').textContent = '';
+    $('searchNote').textContent = 'Nobody near your rating is searching right now, so you\'ll fight ' + bot.name + ', flying ' +
+      me.pilots[bot.pilot] + (bot.awake ? ' (awake)' : '') + ', meanwhile. You\'re still in the queue: the moment a real pilot ' +
+      'is found, you\'re taken to them.';
+    $('cancel').hidden = true;
+    setTimeout(() => play({ mode: 'bot', pilot, bot, search }), 1600);
+  }
+
+  /* Back from a bot match (js/bot.js): the search it left, carried on with
+     the same ticket, and the bot it was done with said so, so the next is a
+     while off. Only straight back: an old note is let go. */
+  function resume() {
+    let s = null;
+    try { s = JSON.parse(sessionStorage.getItem(SEARCH) || 'null'); sessionStorage.removeItem(SEARCH); } catch (e) {}
+    if (!s || (s.queue !== 'ranked' && s.queue !== 'casual') || typeof s.tab !== 'string' || !/^[0-9a-f]{16}$/.test(s.tab)
+        || !(Date.now() - s.at < 30000) || Q.queue) return;
+    const sel = $(s.queue + 'Pilot');
+    if (![...sel.options].some(o => o.value === s.pilot)) return;
+    sel.value = s.pilot;
+    Q.queue = s.queue; Q.tab = s.tab; Q.t0 = Number.isFinite(s.t0) ? s.t0 : Date.now(); Q.pilot = s.pilot; Q.again = true;
+    $('queueMsg').textContent = '';
+    searching(true, 'SEARCHING ' + (s.queue === 'ranked' ? 'RANKED' : 'CASUAL'));
+    pollQueue(typeof s.botOver === 'string' && /^[0-9a-f]{8}$/.test(s.botOver) ? { botOver: s.botOver } : undefined);
+  }
 
   async function joinQueue(queue) {
     if (Q.queue) return;
     const pilot = $(queue + 'Pilot').value;
     $('queueMsg').textContent = '';
-    Q.queue = queue; Q.tab = newTab(); Q.t0 = Date.now();
+    Q.queue = queue; Q.tab = newTab(); Q.t0 = Date.now(); Q.pilot = pilot; Q.again = false;
     searching(true, 'SEARCHING ' + (queue === 'ranked' ? 'RANKED' : 'CASUAL'));
     const r = await queueCall('join', { pilot });
     if (r.ok || r.status === 401) { heard(r); return; }
@@ -344,6 +394,7 @@
     }
     render(r.d);
     show('me');
+    resume();
   }
 
   $('form').addEventListener('submit', async e => {

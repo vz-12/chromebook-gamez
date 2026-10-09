@@ -2,10 +2,15 @@
    POST /api/pvp/queue — matchmaking (PVP-PLAN.md, Phase 5 step 2).
 
      { op: 'join', queue, pilot, tab }  -> { state: 'waiting', waited }
-     { op: 'poll', queue, tab }         -> the same, { state: 'matched', match },
+     { op: 'poll', queue, tab, botOver? } -> the same, { state: 'matched', match },
                                            { state: 'none' } once the ticket has gone,
                                            or { state: 'elsewhere' } (below)
      { op: 'leave', queue, tab }        -> { state: 'left' } (or the match, if one was found)
+
+   Nobody to pair with for a while, 'waiting' comes with a bot to fly
+   meanwhile (bots.js): { state: 'waiting', waited, bot }. The ticket waits
+   on as before. `botOver` names the bot its player is done with, and
+   another comes only after a while more with nobody.
 
    An account has one ticket per queue. `tab` is the lobby tab's own mark: a
    second tab or device searching as the same account takes the ticket over,
@@ -25,6 +30,7 @@ import { START } from './glicko.js';
 import { limited, tooMany } from './limits.js';
 import { entryFor } from './gates.js';
 import { isHidden, mayFly } from './hidden.js';
+import { BOT_ID } from './bots.js';
 
 const MAX_BODY = 4 * 1024;
 const MAX_UPS = 64;
@@ -49,7 +55,9 @@ export default async function queue(req, env) {
   if (!['join', 'poll', 'leave'].includes(b.op)) return reply({ error: 'unknown op' }, 400);
 
   if (b.tab !== undefined && !(typeof b.tab === 'string' && /^[0-9a-f]{16}$/.test(b.tab))) return reply({ error: 'bad tab' }, 400);
+  if (b.botOver !== undefined && !(typeof b.botOver === 'string' && BOT_ID.test(b.botOver))) return reply({ error: 'bad bot' }, 400);
   const body = { queue: b.queue, acct: s.account.id, tab: b.tab || null };
+  if (b.op === 'poll' && b.botOver) body.botOver = b.botOver;
   if (b.op === 'join') {
     /* A hidden pilot (hidden.js), for its holders, in ranked only: its ticket
        waits for the season's #1, whoever else is queued (objects.js). */

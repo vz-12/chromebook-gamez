@@ -36,8 +36,8 @@
   const PHASES = ['belt', 'picks', 'fight', 'end', 'over'];
 
   const match = () => (typeof RUN !== 'undefined' && RUN.pvp) || null;
-  // a match: played, or watched (watch.js), whose copy of the game plays the very same one
-  const matchy = () => !!(M.hand && (M.hand.mode === 'match' || M.hand.mode === 'watch'));
+  // a match: played, watched (watch.js), whose copy of the game plays the very same one, or against a bot (bot.js)
+  const matchy = () => !!(M.hand && (M.hand.mode === 'match' || M.hand.mode === 'watch' || M.hand.mode === 'bot'));
   const inMatch = () => matchy() && PILOTS.length > 1 && LS.on;
 
   /* The ad suggestion's bonus (PVP-PLAN.md, Phase 6 step 3): a friend's
