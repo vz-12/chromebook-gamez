@@ -6,6 +6,9 @@
                                            { state: 'none' } once the ticket has gone,
                                            or { state: 'elsewhere' } (below)
      { op: 'leave', queue, tab }        -> { state: 'left' } (or the match, if one was found)
+     { op: 'bot', queue, tab, id, as: 'start' | 'over' | 'quit', score? }
+                                        -> a bot match's start ({ ok, rated }) and end
+                                           ({ ok, rated, rating }): objects.js, botOp
 
    Nobody to pair with for a while, 'waiting' comes with a bot to fly
    meanwhile (bots.js): { state: 'waiting', waited, bot }. The ticket waits
@@ -52,12 +55,18 @@ export default async function queue(req, env) {
   if (wait) return tooMany(wait);
   if (!env.MATCHMAKER || !env.MATCH) return reply({ error: 'no matchmaking: bind the Matchmaker and Match objects' }, 503);
   if (!Object.prototype.hasOwnProperty.call(QUEUES, b.queue)) return reply({ error: 'unknown queue' }, 400);
-  if (!['join', 'poll', 'leave'].includes(b.op)) return reply({ error: 'unknown op' }, 400);
+  if (!['join', 'poll', 'leave', 'bot'].includes(b.op)) return reply({ error: 'unknown op' }, 400);
 
   if (b.tab !== undefined && !(typeof b.tab === 'string' && /^[0-9a-f]{16}$/.test(b.tab))) return reply({ error: 'bad tab' }, 400);
   if (b.botOver !== undefined && !(typeof b.botOver === 'string' && BOT_ID.test(b.botOver))) return reply({ error: 'bad bot' }, 400);
   const body = { queue: b.queue, acct: s.account.id, tab: b.tab || null };
   if (b.op === 'poll' && b.botOver) body.botOver = b.botOver;
+  if (b.op === 'bot') {
+    if (!(typeof b.id === 'string' && BOT_ID.test(b.id)) || !['start', 'over', 'quit'].includes(b.as)) return reply({ error: 'bad bot' }, 400);
+    if (b.as === 'over' && !(Array.isArray(b.score) && b.score.length === 2 && b.score.every(n => Number.isInteger(n) && n >= 0 && n <= 9)))
+      return reply({ error: 'bad score' }, 400);
+    Object.assign(body, { id: b.id, as: b.as }, b.as === 'over' ? { score: b.score } : {});
+  }
   if (b.op === 'join') {
     /* A hidden pilot (hidden.js), for its holders, in ranked only: its ticket
        waits for the season's #1, whoever else is queued (objects.js). */

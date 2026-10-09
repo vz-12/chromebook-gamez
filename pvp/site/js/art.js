@@ -57,8 +57,10 @@
        rated     whether a rating moves
        verdict   null until the referee answers (a second or so, longer if
                  the other side went quiet), then { v: 'played' | 'forfeit'
-                 | 'void', won (true | false | null) }; against a bot, at
-                 once, { v: 'bot', won }: nothing refereed, nothing kept
+                 | 'void', won (true | false | null) }. Against a bot
+                 (queue 'bot'): unrated (casual), at once { v: 'bot', won },
+                 NOT RECORDED; rated (ranked), null while the queue rates it,
+                 then { v: 'played', won } with the rating below
        rating    ranked, once written: { before, after, games, league (an
                  id, or null while still being placed), left (placement
                  matches to go) }, else null
@@ -768,7 +770,7 @@
         arc(g, px0 + 9, y, 7, a, a + Math.PI * (1 + 0.5 * Math.sin(T * 2.5)));
         g.strokeStyle = TEXT; g.lineWidth = 2.5; g.lineCap = 'round'; g.stroke();
       });
-      word('TELLING THE REFEREE', TEXT);
+      word(r.queue === 'bot' ? 'RATING THE MATCH' : 'TELLING THE REFEREE', TEXT);
     } else if (v.v === 'void') {
       since = st.verdictAt; edge = rgba(LOSS, 0.5);
       icon(20, px0 => {
@@ -778,7 +780,7 @@
       word('NO CONTEST', LOSS);
       word('THE TWO GAMES DISAGREED', 'rgba(251,113,133,0.7)', 11);
     } else if (v.v === 'bot') {
-      // a bot's match (bot.js): nobody to referee, nothing kept
+      // a bot's match, unrated (bot.js): nobody to referee, nothing kept
       since = st.verdictAt;
       word('AGAINST A BOT', TEXT);
       word('NOT RECORDED', '#94a3b8', 11);

@@ -124,13 +124,16 @@ export async function profile(db, env, user, boards, standings) {
     pvp.wins = (t && t.wins) || 0;
     pvp.losses = pvp.played - pvp.wins;
     const rows = (await db.prepare(
-      `SELECT m.queue, m.league, m.a, m.a_pilot, m.b_pilot, m.winner, m.score_a, m.score_b, m.best_of, m.verdict, m.reason, m.ended,
+      `SELECT m.queue, m.league, m.a, m.b, m.a_pilot, m.b_pilot, m.winner, m.score_a, m.score_b, m.best_of, m.verdict, m.reason, m.ended,
               oa.display AS a_name, oa.name AS a_user, ob.display AS b_name, ob.name AS b_user
          FROM pvp_matches m LEFT JOIN accounts oa ON oa.id = m.a LEFT JOIN accounts ob ON ob.id = m.b
         WHERE m.a = ?1 OR m.b = ?1 ORDER BY m.ended DESC LIMIT ${RECENT}`).bind(a.id).all()).results || [];
+    // a rated bot match (pvp/src/bots.js) names its bot in place of an account: 'bot:BOT KESTREL'
+    const botName = id => (typeof id === 'string' && id.startsWith('bot:') ? id.slice(4) : null);
     pvp.recent = rows.map(m => {
       const me = m.a === a.id ? 0 : 1;
-      const them = me ? { name: m.a_name, user: m.a_user, pilot: m.a_pilot } : { name: m.b_name, user: m.b_user, pilot: m.b_pilot };
+      const them = me ? { name: m.a_name || botName(m.a), user: m.a_user, pilot: m.a_pilot }
+                      : { name: m.b_name || botName(m.b), user: m.b_user, pilot: m.b_pilot };
       const decided = m.verdict === 'played' || m.verdict === 'forfeit';
       return {
         at: m.ended, queue: m.queue, league: m.league, verdict: m.verdict, reason: m.reason, bestOf: m.best_of,

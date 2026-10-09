@@ -23,9 +23,13 @@
                  with the lobby's own tab mark. A real opponent found, the bot
                  match is let go and the real one joined at once. Leaving goes
                  back to the lobby still searching
+     the rating  in ranked, the queue is told the match has started, and then
+                 how it ended: the score, or that the player walked out (a
+                 loss), and the rating it comes to is on the result screen
+                 (pvp/src/objects.js, botOp). In casual nothing is sent
 
-   Nothing about a bot match is sent anywhere or kept: no referee, no
-   rating, no record. Its own dice are its own (BRAIN.rng), never the run's.
+   Nothing referees a bot match: no other machine plays it. Its own dice are
+   its own (B.rng), never the run's.
    ========================================================================= */
 (() => {
   'use strict';
@@ -33,19 +37,23 @@
   if (!M) return;
   const botting = () => !!(M.hand && M.hand.mode === 'bot');
 
-  /* How a bot flies, between skill 0 and skill 1: [at 0, at 1]. */
+  /* How a bot flies, between skill 0 and skill 1: [at 0, at 1]. Hard in
+     general (user, 9 Oct: "make them more difficult"): even the gentlest
+     leads its shots a little and dodges now and then. */
   const BRAIN = M.BRAIN = {
-    react: [20, 4],         // steps it sees its rival late by (on top of LS.delay)
-    wobble: [64, 6],        // px its aim wanders, either way
-    lead: [0.35, 1],        // how much of a moving target's path it leads
-    dodge: [0.06, 0.8],     // the chance it sidesteps a shot it sees coming
-    dashDodge: 0.45,        // from this skill it dashes out of the way too
-    parry: [0.04, 0.6],     // THE VAGRANT: the chance it parries one instead
-    trigger: [0.55, 0.97],  // the share of the time it keeps firing
-    kit: [11, 3],           // seconds between its kit's moves
-    think: [1.7, 0.45],     // seconds it weighs a card
-    rare: [0, 0.85],        // the chance it takes the rarest card on offer, not any
-    retreat: 0.55           // from this skill it backs off when low
+    react: [16, 2],         // steps it sees its rival late by (on top of LS.delay)
+    wobble: [52, 3],        // px its aim wanders, either way
+    lead: [0.5, 1],         // how much of a moving target's path it leads
+    dodge: [0.15, 0.92],    // the chance it sidesteps a shot it sees coming
+    dashDodge: 0.3,         // from this skill it dashes out of the way too
+    parry: [0.1, 0.75],     // THE VAGRANT: the chance it parries one instead
+    trigger: [0.7, 1],      // the share of the time it keeps firing
+    kit: [8, 2.5],          // seconds between its kit's moves
+    think: [1.3, 0.35],     // seconds it weighs a card
+    rare: [0.25, 0.95],     // the chance it takes the rarest card on offer, not any
+    retreat: 0.35,          // from this skill it backs off when low
+    press: 0.5,             // and from this one it closes on a rival that is low, and never lets off the trigger
+    pressAt: 0.35           // what "low" is: this share of health or less
   };
   const lerp = (a, s) => a[0] + (a[1] - a[0]) * s;
   const RANK = { common: 0, rare: 1, epic: 2, legendary: 3 };
@@ -69,7 +77,9 @@
     seen: [], turn: 1, turnAt: 0, fireOn: true, fireAt: 0, kitAt: 0, uiAt: -1e9, thinkAt: -1, judged: new WeakMap(), ph: 0,
     human: null,             // this player's own record: null for the devices (a test stands in here)
     search: null,            // the ticket, waiting on: { queue, tab, t0, pilot, on, why, next, busy, botSeen, found, foundAt }
-    done: false, handing: false, box: null
+    done: false, handing: false, box: null,
+    rated: false,            // the queue said it rates this one (ranked)
+    over: false              // and has been told how it ended, or that the player walked out
   };
 
   /* The bot as the server described it, made safe: a pilot of the game's
@@ -155,8 +165,10 @@
     let [near, far] = me.weapon === 'laser' ? [110, 195] : me.weapon === 'blade' ? [40, 85] : [210, 420];
     // a gun keeps clear of a lance's or a blade's reach, the better the bot the further
     if (me.weapon === 'bullet' && foe.weapon !== 'bullet') near = Math.max(near, lerp([170, 270], s));
-    const low = me.maxHp ? me.hp / me.maxHp : 1;
-    if (s >= BRAIN.retreat && low < 0.3 && me.weapon !== 'blade') { near += 120; far += 140; }
+    const low = me.maxHp ? me.hp / me.maxHp : 1, theirs = foe.maxHp ? foe.hp / foe.maxHp : 1;
+    const pressing = s >= BRAIN.press && theirs <= BRAIN.pressAt && low > theirs;
+    if (pressing) { near *= 0.6; far *= 0.75; }
+    else if (s >= BRAIN.retreat && low < 0.3 && me.weapon !== 'blade') { near += 120; far += 140; }
 
     // circling: one way, then the other
     if (k >= B.turnAt) { B.turn = R() < 0.5 ? -B.turn : B.turn; B.turnAt = k + Math.round(60 * (1 + R() * 2.6)); }
@@ -202,7 +214,7 @@
     // the trigger: held most of the time, the better the bot the more
     if (k >= B.fireAt) { B.fireOn = R() < lerp(BRAIN.trigger, s); B.fireAt = k + 18 + Math.floor(R() * 42); }
     const reach = me.weapon === 'blade' ? 150 : me.weapon === 'laser' ? 320 : 700;
-    rec.trig = rec.lmb = B.fireOn && (td < reach || !!e);
+    rec.trig = rec.lmb = (B.fireOn || pressing) && (td < reach || !!e);
 
     // the kit: an awake pilot's moves, EMBER's vent, now and then
     if (k >= B.kitAt) {
@@ -225,9 +237,9 @@
 
   /* -------------------------------- the queue ------------------------------ */
   const mmss = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-  async function q(body) {
+  async function q(body, keepalive) {
     try {
-      const r = await fetch('/api/pvp/queue', { method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      const r = await fetch('/api/pvp/queue', { method: 'POST', cache: 'no-store', credentials: 'same-origin', keepalive: !!keepalive,
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       return { ok: r.ok, status: r.status, d: await r.json().catch(() => null) };
     } catch (e) { return { ok: false, status: 0, d: null }; }
@@ -275,10 +287,32 @@
     B.handing = true; M.leaving = true;
     location.href = '/play/';
   }
+  /* The rating's side of it (ranked). The start, so the queue keeps this
+     match; its end, told until the queue has it; or the player walking out,
+     a loss, said as the page goes (keepalive outlives it). */
+  const botCall = (as, extra, keep) => q(Object.assign({ op: 'bot', queue: B.search.queue, tab: B.search.tab, id: B.spec.id, as }, extra), keep);
+  async function rate(score) {
+    B.over = true;
+    let r = null;
+    for (let i = 0; i < 4; i++) {
+      r = await botCall('over', { score }, true);
+      if (r.ok || (r.status && r.status !== 503 && r.status !== 429)) break;     // asked again only when it could not be written
+      await new Promise(res => setTimeout(res, 1500));
+    }
+    return r && r.ok && r.d && r.d.rated ? r.d.rating || null : null;
+  }
+  function walkOut() {
+    if (!B.rated || B.over || B.done || (B.search && B.search.found)) return;
+    B.over = true;
+    botCall('quit', {}, true);
+  }
+
   /* Back to the lobby, still searching: the ticket, and the bot it's done
-     with, so the lobby carries on where this left off. */
+     with, so the lobby carries on where this left off. Mid-match, in ranked,
+     that is walking out: a loss. */
   function back() {
     if (M.leaving) return;
+    walkOut();
     const S = B.search;
     if (S && (S.on || S.found)) {
       try {
@@ -315,11 +349,14 @@
     return drew;
   };
 
-  // what kind of match, for the belt and the result (art.js): a bot's, unrated
+  /* What kind of match, for the belt and the result (art.js): a bot's, rated
+     in ranked once the queue has said so, in the player's league once placed. */
   const versus = M.versus;
   M.versus = () => {
     const v = versus();
-    return botting() ? Object.assign(v, { queue: 'bot', league: null, rated: false }) : v;
+    if (!botting()) return v;
+    const lg = M.hand.me && M.hand.me.league;
+    return Object.assign(v, { queue: 'bot', rated: B.rated, league: B.rated && lg && !lg.provisional && lg.id ? { id: lg.id, n: lg.n } : null });
   };
 
   const CSS = `
@@ -354,13 +391,24 @@
   }
   function finish(m) {
     B.done = true;
-    const won = m.winner === pilotMine();
-    if (M.scene) {
-      M.shown = { at: Date.now(), r: M.scene(won ? 'won' : 'lost') };
-      M.shown.r.verdict = { v: 'bot', won };                           // nothing to referee: art.js says NOT RECORDED
-    }
+    const me = pilotMine(), won = m.winner === me, score = [m.score[me], m.score[1 - me]];
+    const r = M.scene ? M.scene(won ? 'won' : 'lost') : null;
+    if (r) M.shown = { at: Date.now(), r };
     state = 'pvp';
-    overlay((won ? 'VICTORY  ' : 'DEFEAT  ') + m.score[pilotMine()] + ' — ' + m.score[1 - pilotMine()]);
+    const title = (won ? 'VICTORY  ' : 'DEFEAT  ') + score[0] + ' — ' + score[1];
+    overlay(title);
+    /* Unrated (casual): said at once, NOT RECORDED. Rated: the queue is told,
+       and its answer is the rating, rolling on the result (art.js); a match
+       it would not rate says NOT RECORDED after all. */
+    if (!B.rated) { if (r) r.verdict = { v: 'bot', won }; return; }
+    rate(score).then(told => {
+      if (r) {
+        r.verdict = told ? { v: 'played', won } : { v: 'bot', won };
+        r.rating = told;
+        if (!told) Object.assign(r, { rated: false, league: null });
+      }
+      if (told && B.box) B.box.querySelector('h2').textContent = title + '   ·   ' + told.before + ' → ' + told.after;
+    });
   }
 
   /* -------------------------------- the mode ------------------------------- */
@@ -381,14 +429,15 @@
       lsHostStart();
       B.hi = LS.delay - 1;                 // lsBegin filled both pilots' first steps with nothing pressed
       LS.source = feed;
-      // closing the tab: the ticket goes with it, so nobody is paired with a page that's gone
+      // ranked: the queue keeps this match, to rate it (or casual's: it says it doesn't)
+      if (B.search && spec.id) botCall('start').then(r => { if (r.ok && r.d && r.d.rated) B.rated = true; });
+      /* Closing the tab: walking out of a rated match, a loss; and the ticket
+         goes with it, so nobody is paired with a page that's gone. */
       addEventListener('pagehide', () => {
         const S = B.search;
-        if (!S || !S.on || B.handing) return;
-        try {
-          fetch('/api/pvp/queue', { method: 'POST', keepalive: true, credentials: 'same-origin',
-            headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'leave', queue: S.queue, tab: S.tab }) });
-        } catch (e) {}
+        if (!S || B.handing) return;
+        walkOut();
+        if (S.on) q({ op: 'leave', queue: S.queue, tab: S.tab }, true);
       });
     },
     // the match's step (rounds.js)

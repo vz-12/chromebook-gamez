@@ -318,8 +318,8 @@
     $('searchWhat').textContent = 'NOBODY YET';
     $('searchClock').textContent = '';
     $('searchNote').textContent = 'Nobody near your rating is searching right now, so you\'ll fight ' + bot.name + ', flying ' +
-      me.pilots[bot.pilot] + (bot.awake ? ' (awake)' : '') + ', meanwhile. You\'re still in the queue: the moment a real pilot ' +
-      'is found, you\'re taken to them.';
+      me.pilots[bot.pilot] + (bot.awake ? ' (awake)' : '') + ', meanwhile.' + (search.queue === 'ranked' ? ' It counts for your rating.' : '') +
+      ' You\'re still in the queue: the moment a real pilot is found, you\'re taken to them.';
     $('cancel').hidden = true;
     setTimeout(() => play({ mode: 'bot', pilot, bot, search }), 1600);
   }

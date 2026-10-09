@@ -964,7 +964,8 @@ Branch `profiles`. The shop and the currency stay for later.
 "The pvp lobbies are pretty empty right now, we need to introduce bot
 lobbies but not make it intrusive." Then: "Don't offer bots, just don't push
 bots over regular players, also make them better the higher rated the player
-going against them."
+going against them." Then: "you can rate bot matches too but make them more
+difficult in general."
 
 - **Nobody is offered a bot or asked.** The queue finds one by itself, the
   way it finds a match, and only when it has nobody:
@@ -979,17 +980,18 @@ going against them."
     `botOver: <its id>`, and another comes only after `BOTS.again` (15 s)
     more with nobody.
   - A hidden pilot's ticket never gets one: it waits for the #1.
-- **Better against a better player.** The bot's skill (0 to 1) comes from
-  the player's ranked rating, the one both queues match on: `BOTS.curve`,
-  1000 or below is 0.1, 1500 (a new player) is 0.45, 2100 (VOID) and up is
-  1. Skill is judgement only (`BRAIN` in `pvp/site/js/bot.js`): how late it
-  sees its rival, how far its aim wanders, how much it leads, how often it
-  sidesteps or parries, how often it uses its kit, how long it weighs a card
-  and whether it takes the rarest. It never gets more health, damage or
-  upgrades than a player would.
+- **Better against a better player, and hard in general.** The bot's skill
+  (0 to 1) comes from the player's ranked rating, the one both queues match
+  on: `BOTS.curve`, 900 or below is 0.25, 1500 (a new player) is 0.65, 2000
+  and up is 1. Skill is judgement only (`BRAIN` in `pvp/site/js/bot.js`):
+  how late it sees its rival, how far its aim wanders, how much it leads,
+  how often it sidesteps or parries, how often it uses its kit, how long it
+  weighs a card and whether it takes the rarest; and from 0.5, closing on a
+  rival that is low and never letting off the trigger. It never gets more
+  health, damage or upgrades than a player would.
 - **What it flies.** By the ticket's bracket: in ranked below platinum, a
   base pilot, never awake; from platinum, any pilot, awake where it has a
-  form; in casual, any pilot, awake from skill 0.5. No reward upgrades.
+  form; in casual, any pilot, awake from skill 0.6. No reward upgrades.
   Its name is `BOT ` and a callsign, so it never passes for a person.
 - **How it plays** (`pvp/site/js/bot.js`, mode `bot`). On the player's own
   machine, in the game's own lockstep with no second machine: the player's
@@ -1004,35 +1006,76 @@ going against them."
   (BACK TO THE LOBBY, or quitting from the pause screen): the lobby carries
   the search on with the same ticket and clock (`vr_pvp_search`), joining
   again if the ticket went meanwhile. Closing the tab leaves the queue.
-- **Nothing kept.** No referee, no rating, no record, no profile line. The
-  result screen says BOT MATCH, UNRATED and NOT RECORDED (`art.js`: queue
-  `'bot'`, verdict `{ v: 'bot', won }`).
+- **Rated in ranked** (the Matchmaker's `bot` op, `objects.js`; `recordBot`
+  in `records.js`). Nothing referees a bot match, since no other machine
+  plays it, so its result is the player's word. What a word can get is
+  kept small:
+  - Its page says `start` for the bot its ticket was handed; only then is
+    the match kept (`q.bots`, apart from the ticket, so a ticket dropped
+    meanwhile loses nothing), and only once is it rated.
+  - Then `over` with the score, no sooner than `BOTS.least` (15 s) after
+    the start and only as a best of three; or `quit`, a loss, which the page
+    sends when the player walks out (BACK TO THE LOBBY or the pause screen
+    mid-match, or closing the tab). A started match that says nothing of its
+    end for `BOTS.expire` (20 min) is a loss too (`quiet`).
+  - A real opponent found mid-match lets it go, unrated.
+  - The bot is an opponent at the rating its skill stands for (the player's,
+    kept within the curve) plus `BOTS.edge` (100), at a deviation of
+    `BOTS.rd` (150), so a bot moves a rating a little less than a settled
+    player does. It is nobody's row.
+  - **A win against a bot never lifts a rating past `BOTS.ceiling`, VOID's
+    line (2100).** A rating already past it stays where it was; a loss counts
+    in full. VOID, and the season's podium and the hidden pilots' challenges
+    with it, are earned against people.
+  - Recorded in `pvp_matches` like any match (`id` 'bot' and its id, `b`
+    'bot:' and its name, `reason` bot, quit or quiet). Profiles show the bot
+    by name, linking nowhere (`src/profiles.js`). It counts for placements.
+  - The result screen says RATING THE MATCH, then rolls the rating from
+    before to after (`art.js`: verdict `{ v: 'played', won }` and `rating`),
+    in the player's league once placed.
+  - Casual bot matches are never rated or recorded: BOT MATCH, UNRATED, NOT
+    RECORDED (`{ v: 'bot', won }`).
+- **The open risk:** a modified page can still claim wins. The limits above
+  (only handed and started bots, once, a plausible time and score, about
+  one bot per 35 s per ticket, nothing past VOID's line) cap what that buys:
+  at most a place below VOID. A daily cap on rated bot matches is the next
+  lever if it is ever needed.
 - **Tested:**
-  - `npm run test:pvp`, server part 415 checks: the curve, what a bot flies
-    by bracket, the Matchmaker's order (a real player first, one past its
-    wait included), two far apart meeting while both fly bots, `botOver`
-    and `BOTS.again`, ranked's longer wait, a hidden pilot never getting
-    one. The lobby's own script runs in Node against the Worker: a search,
-    the bot found, the play page handed it with the search, the queue not
-    left, the search carried on when back, a real player found from there,
-    a lost ticket joined again, an old note ignored.
-  - The engine part, 316 checks: a whole bot match on the real engine, the
+  - `npm run test:pvp`, server part 436 checks: the curve, the bot's rating,
+    what a bot flies by bracket, the Matchmaker's order (a real player first,
+    one past its wait included), two far apart meeting while both fly bots,
+    `botOver` and `BOTS.again`, ranked's longer wait, a hidden pilot never
+    getting one. Rated: only the handed bot started by its own player, too
+    soon refused, a score that is no best of three refused, won and lost
+    each rated once against the bot's rating (checked against Glicko-2
+    itself), walking out a loss, a real opponent voiding it, going quiet a
+    loss after the expiry, the ceiling (stopping at VOID's line, lifting
+    nobody past it, a loss counting in full), casual never kept, the route's
+    checks. The lobby's own script runs in Node against the Worker: a
+    search, the bot found, the play page handed it with the search, the queue
+    not left, the search carried on when back, a real player found from
+    there, a lost ticket joined again, an old note ignored.
+  - The engine part, 323 checks: a whole bot match on the real engine, the
     player's pilot flown by the test bot. The bot picks every card it is
     owed, its hits go through the same caps, nothing piles up, and the only
-    requests are the queue's polls with the lobby's tab. The result is a
-    bot match, unrated, NOT RECORDED. A real player queues mid-match, and
-    the page joins them. Quitting returns to the lobby still searching; a
-    ranked search flies ranked's loadout; a badly described bot is still a
-    game pilot named BOT. And skill shows: against a pilot that never moves,
-    on a clean map, the best bot wins in under half the gentlest's time
-    (about 25 s against 80–120 s).
-  - 26 mutants, one per rule; 25 caught. The one missed (a hidden pilot's
+    requests are the queue's. Casual: unrated, NOT RECORDED. Ranked: the
+    page says it started, the belt says RATED in GOLD, and at the end the
+    rating rolls from before to after exactly as the database has it; then
+    walking out of one is a loss. A real player queues mid-match, and the
+    page joins them. A ranked search flies ranked's loadout; a badly
+    described bot is still a game pilot named BOT. And skill shows: against
+    a pilot that never moves, on a clean map, the best bot wins far sooner
+    than the gentlest (about 25 s against 65–135 s).
+  - `npm run test:boards` (74): a bot match on a profile, named.
+  - 43 mutants, one per rule; 42 caught. The one missed (a hidden pilot's
     ticket given a bot) behaves the same, since hidden tickets are already
     kept out of every pairing.
-- **Balance** (open, yours to playtest): `BOTS.after`, `BOTS.again` and
-  `BOTS.curve` in `pvp/src/bots.js`, and `BRAIN` in `pvp/site/js/bot.js`.
-  Against the tests' own bot (which always leads its shots), skill 0.1 does
-  almost nothing, 0.45 takes a round now and then, 0.7 is even, and 1 wins.
+- **Balance** (open, yours to playtest): `BOTS.after`, `BOTS.again`,
+  `BOTS.curve`, `BOTS.edge`, `BOTS.rd` and `BOTS.ceiling` in
+  `pvp/src/bots.js`, and `BRAIN` in `pvp/site/js/bot.js`. Against the tests'
+  own bot (which always leads its shots), on a clean map: skill 0.25 (900
+  and below) takes a fair bite out of it without winning, 0.65 (1500) wins,
+  and from 0.86 (1800) up it wins 2–0.
 
 ## The shared data (D1)
 

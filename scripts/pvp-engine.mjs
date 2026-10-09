@@ -31,6 +31,7 @@ const { Match, Matchmaker } = await import('../pvp/src/objects.js');
 const { ensurePvp } = await import('../pvp/src/records.js');
 const { seasonOf } = await import('../src/season.js');
 const { ensureAuth, sha256 } = await import('../src/auth.js');
+const { forget: forgetLimits } = await import('../pvp/src/limits.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTSIDE_ARG = (() => { const i = process.argv.indexOf('--outside'); return i >= 0 ? process.argv[i + 1] : null; })();
@@ -1375,13 +1376,18 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   const TAB = 'b0b0b0b0b0b0b0b0';
   const botPage = (search, extra) => boot(Object.assign({ mode: 'bot', pilot: 'runner', me: ME, bot: SPEC,
                                                           search: search && Object.assign({ t0: Date.now() - 25000 }, search) }, extra), DUELIST);
+  /* The page's frames. Node plays them far faster than the wall clock the
+     queue's per-account limit counts by (pvp/src/limits.js): a long match's
+     polls, every two seconds of the page's time, would all land in one real
+     minute. So the count is let go as it goes. */
   const frames = async (g, n, done) => {
     let i = 0;
     for (; i < n; i++) {
       g.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()');
       if (i % 20 === 0) g.run('render()');
-      if (i % 30 === 0) { await settle(); if (done && done()) break; }
+      if (i % 30 === 0) { await settle(); if (i % 1800 === 0) forgetLimits(); if (done && done()) break; }
     }
+    forgetLimits();
     return i;
   };
   const botEl = g => g.win.document.body.children.find(c => c.id === 'pvp-bot');
@@ -1421,11 +1427,12 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   ok(B.run('LS.mine.size + LS.theirs.size') <= 2 * (B.run('LS.delay') + 2), 'and with nobody to send them to, no input piles up', B.run('[LS.mine.size, LS.theirs.size]'));
 
   // what it asked of the server: the queue, as the lobby would, and nothing else
-  const asked = B.win.__net, polls = B.win.__queue;
+  const asked = B.win.__net, polls = B.win.__queue.filter(b => b.op !== 'bot');
   ok(asked.length > 0 && asked.every(a => a === 'fetch /api/pvp/queue'), 'not one request but the queue\'s: no referee, no relay, no room', [...new Set(asked)]);
   ok(polls.every(b => b.op === 'poll' && b.queue === 'casual' && b.tab === TAB) && Math.abs(polls.length - (n0 + n) / 120) <= 2,
      'polled every two seconds with the lobby\'s own tab, so the ticket waits on', [polls.length, (n0 + n) / 120]);
-  ok((await qOf(DUELIST, { op: 'poll', queue: 'casual', tab: TAB })).state === 'waiting', 'still in the queue at the end');
+  const atEnd = await qOf(DUELIST, { op: 'poll', queue: 'casual', tab: TAB });
+  ok(atEnd.state === 'waiting', 'still in the queue at the end', atEnd);
   ok(matchRows().length === rowsBefore, 'and nothing recorded', [rowsBefore, matchRows().length]);
 
   // the result: a bot's, unrated, nothing refereed (art.js)
@@ -1442,7 +1449,8 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
      'BACK TO THE LOBBY: there, still searching, done with this bot', note);
 
   // a real player comes while the bot match is on: let go, and straight to them
-  ok((await qOf(DUELIST, { op: 'join', queue: 'casual', pilot: 'runner', tab: TAB })).state === 'waiting', 'searching again');
+  const again = await qOf(DUELIST, { op: 'join', queue: 'casual', pilot: 'runner', tab: TAB });
+  ok(again.state === 'waiting', 'searching again', again);
   const B2 = botPage({ queue: 'casual', tab: TAB });
   B2.run(HUMAN);
   await frames(B2, 60 * 8);
@@ -1476,6 +1484,46 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   ok(BJ.run('MP.peerName') === 'BOT' && BJ.run('pilotP(1).charId') === 'runner' && BJ.run('PVP.botMatch.skill') === 1 && !BJ.run('PVP.botMatch.search'),
      'a bot the server described badly: one of the game\'s pilots, named BOT, its skill kept within 0 to 1, and no search', BJ.run('[MP.peerName, pilotP(1).charId]'));
 
+  /* Ranked: the queue rates a bot match. Its waits are let go here, so the
+     page's fast clock needn't wait out the real one (pvp.mjs holds the queue
+     to them). */
+  const { BOTS } = await import('../pvp/src/bots.js');
+  const kept = { after: BOTS.after.ranked, least: BOTS.least, again: BOTS.again };
+  Object.assign(BOTS, { least: 0, again: 0 }); BOTS.after.ranked = 0;
+  const RTAB = 'babababababababa', GOLD = Object.assign({}, ME, { league: { id: 'gold', n: 'GOLD', provisional: false } });
+  const ratingNow = () => DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(DUELIST.id, seasonOf(Date.now()));
+  const jr = await qOf(DUELIST, { op: 'join', queue: 'ranked', pilot: 'runner', tab: RTAB });
+  ok(jr.state === 'waiting' && jr.bot && /^BOT /.test(jr.bot.name) && ['runner', 'ember'].includes(jr.bot.pilot), 'ranked, with nobody: a bot, to GOLD\'s rules', jr);
+  const before = ratingNow();
+  const BX = boot({ mode: 'bot', pilot: 'runner', me: GOLD, bot: jr.bot, search: { queue: 'ranked', tab: RTAB, t0: Date.now() } }, DUELIST);
+  await flush(); await settle();
+  ok(BX.run('PVP.botMatch.rated') === true && BX.win.__queue[0].op === 'bot' && BX.win.__queue[0].as === 'start' && BX.win.__queue[0].id === jr.bot.id,
+     'its page says it has started, and the queue says it rates it', BX.win.__queue[0]);
+  const bv = BX.run('(() => { const v = PVP.versus(); return { queue: v.queue, rated: v.rated, league: v.league }; })()');
+  ok(bv.queue === 'bot' && bv.rated === true && bv.league && bv.league.id === 'gold', 'the belt says so: a bot match, rated, GOLD', bv);
+  BX.run(HUMAN);
+  await frames(BX, 60 * 600, () => BX.run('!!(PVP.shown && PVP.shown.r.rating)'));
+  const rr = BX.run('PVP.shown.r'), after = ratingNow(), brow = DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get('bot' + jr.bot.id);
+  ok(rr.verdict && rr.verdict.v === 'played' && rr.rated === true && rr.rating && rr.rating.before === Math.round(before ? before.rating : 1500)
+     && rr.rating.after === Math.round(after.rating) && after.games === (before ? before.games : 0) + 1,
+     'over: rated, and the result rolls the rating from before to after', [rr.verdict, rr.rating]);
+  ok(brow && brow.b === 'bot:' + jr.bot.name && brow.rated === 1 && brow.verdict === 'played' && (brow.winner === 0) === rr.verdict.won
+     && brow.score_a === rr.score[0] && brow.score_b === rr.score[1], 'recorded against the bot by name, as the page saw it', brow);
+  ok(drawErrs(BX) === '', 'and the rating draws');
+  // walking out of one mid-match: a loss
+  const jr2 = await qOf(DUELIST, { op: 'poll', queue: 'ranked', tab: RTAB });
+  const BQ = boot({ mode: 'bot', pilot: 'runner', me: GOLD, bot: jr2.bot, search: { queue: 'ranked', tab: RTAB, t0: Date.now() } }, DUELIST);
+  await flush(); await settle();
+  await frames(BQ, 60 * 3);
+  const g0 = ratingNow().games;
+  BQ.run('quitToMenu(); PVP.frame()');
+  await flush(); await settle();
+  const qrow = DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get('bot' + jr2.bot.id);
+  ok(BQ.win.__queue.some(b => b.op === 'bot' && b.as === 'quit') && qrow && qrow.verdict === 'forfeit' && qrow.reason === 'quit' && qrow.winner === 1
+     && ratingNow().games === g0 + 1, 'walked out mid-match: the page says so as it goes, and it is a loss', qrow);
+  await qOf(DUELIST, { op: 'leave', queue: 'ranked', tab: RTAB });
+  Object.assign(BOTS, { least: kept.least, again: kept.again }); BOTS.after.ranked = kept.after;
+
   /* Better against a better player: against a pilot that never moves, on a
      clean map (nothing of the room's to help), the best finishes it far
      sooner than the gentlest. */
@@ -1487,7 +1535,7 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   };
   const lo = await time(0.05), hi = await time(1);
   ok(lo.won === 1 && hi.won === 1, 'even the gentlest bot can win', [lo, hi]);
-  ok(hi.t * 2 < lo.t, 'and the best does it in under half the time: ' + hi.t.toFixed(0) + ' s of fighting against ' + lo.t.toFixed(0) + ' s', [lo.t, hi.t]);
+  ok(hi.t * 1.8 < lo.t, 'and the best does it far sooner: ' + hi.t.toFixed(0) + ' s of fighting against ' + lo.t.toFixed(0) + ' s', [lo.t, hi.t]);
   await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
