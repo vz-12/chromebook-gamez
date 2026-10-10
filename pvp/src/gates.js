@@ -6,6 +6,11 @@
      signedIn         a session (the queue's route asks for one before this)
      accountAge:<n>h  the account is at least that old ('d' for days too)
      runs:<n>         that many runs of the game in the account's save
+     free             the game is the player's own: ONE POINT OH does not
+                      hold it (the account's save, opoLock over opoLift, and
+                      him not yet beaten: ONE POINT OH in index.html). While
+                      he does, the game itself is the first build, and PvP
+                      stays shut with it
 
    Ranked asks a day and ten runs, so a fresh account cannot be thrown into
    the ladder to throw matches; casual asks only to be signed in. Dev
@@ -38,7 +43,8 @@ export const ENTRY = {
     if (!(need > 0)) return 'this queue is misconfigured';
     const left = need - p.runs;
     return left <= 0 ? null : 'opens after ' + plural(need, 'run', 'runs') + ' of VOIDRUNNER: ' + left + ' to go';
-  }
+  },
+  free: (arg, p) => (p.held ? 'is shut until you get your VOIDRUNNER back' : null)
 };
 
 // the runs in an account's save (src/account.js keeps the game's profile as the save), 0 without one
@@ -47,6 +53,17 @@ async function runsOf(db, acct) {
   if (!row) return 0;
   try { const n = Number(JSON.parse(row.data).runs); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; }
   catch (e) { return 0; }
+}
+
+// whether ONE POINT OH holds the account's game: its save, locked and him not beaten
+async function heldOf(db, acct) {
+  const row = await db.prepare('SELECT data FROM saves WHERE account = ?1').bind(acct).first();
+  if (!row) return false;
+  try {
+    const d = JSON.parse(row.data) || {};
+    const n = v => (Number.isFinite(Number(v)) ? Math.floor(Number(v)) : 0);
+    return !d.opoDone && n(d.opoLock) > n(d.opoLift);
+  } catch (e) { return false; }
 }
 
 /* Whether this account may enter a queue now: { open, why, gates }, where
@@ -58,6 +75,7 @@ export async function entryFor(db, account, queue, now = Date.now()) {
   if (Array.isArray(account.perks) && account.perks.includes('dev')) return { open: true, why: null, gates: [], dev: true };
   const p = { account, now, runs: 0 };
   if ((q.entry || []).some(g => g.startsWith('runs:'))) p.runs = await runsOf(db, account.id);
+  if ((q.entry || []).includes('free')) p.held = await heldOf(db, account.id);
   const shut = [];
   for (const g of q.entry || []) {
     const [name, arg] = g.split(':');

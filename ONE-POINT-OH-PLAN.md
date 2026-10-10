@@ -458,6 +458,29 @@ we are doing now. Part two is the rite and the form.
 
 ### Part one: the route
 
+**As built (10 Oct).** Phases 1 to 4 are in, with Phase 5's art left as blank
+hooks (`OPO_ART`, listed in `ONE-POINT-OH-HOOKS.md`). The route plays end to
+end on the placeholders, in Node (`npm run test:opo`, and `npm test`'s
+`opo-route` and `onepointoh` scenarios) and in a real Chromium. What was
+decided on the way, all of it easy to change:
+- **The first build has a dash.** `3af8b6d` dashes on SPACE or SHIFT, with
+  i-frames, so "no dash" above is not true of 1.0. The old side's no-dash
+  rule is built as written (`opoNoDash`, one line); say if it should follow
+  the first build instead.
+- **The lock is two counters,** `opoLock` and `opoLift`, not a flag: locked
+  while the first is higher and he is not beaten. A merge takes the higher of
+  each, so a lock holds while either side has one and a lift travels too, and
+  no device's clock decides it.
+- **PvP is shut** while the lock holds through a queue gate (`free`, ranked
+  and casual). A friend's match by code is not shut yet.
+- **The admin panel** is `opoJump(name)`, from the console: there is no panel
+  in this repo to add rows to.
+- **His tale** (pages I and II) and his remarks on each date are stand-ins
+  until Phase 0's lore pass. Page III is held for the rite.
+- **The fight's pacing**: the record moves at most over 150 s, each phase
+  shows itself for at least 14 s, and the view pulls out to 0.74 so he stays
+  on screen. About three and a half to four minutes, start to finish.
+
 **Phase 0: the brief.** No code.
 - Answer the questions below, or keep the defaults.
 - Add him to the lore bible: his tale (pages I to III), where he sits in the

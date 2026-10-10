@@ -63,7 +63,7 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   const L = talesAll();
-  chk(L.length === 68, 'every entry: 25 enemies, 12 bosses and 3 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 6 people', L.length);
+  chk(L.length === 70, 'every entry: 25 enemies, 12 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people', L.length);
   chk(!L.some(e => /SERAPH/i.test(e.n)), 'no outside pilot is in it');
   chk(L.filter(e => e.pages.some(p => p.sealed)).map(e => e.key).sort().join() === 'a:melee,n:founder,p:ember', 'the sealed pages are hinted where the bible puts them');
   chk(Object.keys(TALE_TEXT).every(k => !TALE_TEXT[k][3]), 'no sealed text in the game');
@@ -229,6 +229,11 @@ take(g.run(`(() => { ${KIT}
   grantAwakening('ember'); chk(has('b:amalgam', 2) && has('p:ember', 2), 'EMBER\\'s rite');
   grantAwakening('hacker'); chk(has('b:root', 2) && has('p:hacker', 2), 'THE HACKER\\'s rite');
   chk(has('r:hub', 2), 'every hull whose rite is built, awake');
+  // ONE POINT OH (VOIDRUNNER's finale): met in the shatter, beaten when the record is back to today
+  chk(!has('n:onepointoh', 0) && talesEntry('x:onepointoh').link === 'n:onepointoh', 'ONE POINT OH: a person, linked from his card');
+  runSet('opoMet', true); chk(has('n:onepointoh', 0), 'met: his page I');
+  runSet('opoDone', true); chk(has('n:onepointoh', 1), 'the record brought back to today: his page II');
+  chk(!has('n:onepointoh', 2) && talesEntry('n:onepointoh').pages[2].held, 'his page III is held for VOIDRUNNER\\'s rite');
   // a full codex is still entries met, never pages
   chk(!('tales' in Codex.need()), 'a full codex asks nothing of the pages');
   return JSON.stringify(C);
