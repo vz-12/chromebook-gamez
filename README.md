@@ -16,6 +16,7 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | Cron trigger `*/15 * * * *` | Merges in the old Netlify leaderboard store (see below). |
 | Custom domain `voidrunner.online` | Where players go. `www` redirects to it. |
 | `wrangler.jsonc` | All of the above, as config. |
+| `onepointoh/` | ONE POINT OH's copy of the first build (`first.html`, made by `scripts/opo-build.mjs`), its seal and its hooks. Served as static files, in a frame. See "ONE POINT OH" below. |
 | `.assetsignore` | Files that must never be uploaded as part of the site. |
 | `_headers` | Response headers for the static files. |
 
@@ -617,6 +618,61 @@ costs seconds, not the run. CONTINUE, in `index.html`, has the details:
 A new top-level variable reaches the snapshot without being listed, as it
 does for co-op; anything that is this machine's own goes in `SNAP_LOCAL`.
 
+## ONE POINT OH (VOIDRUNNER's finale, part one: the route)
+
+ONE POINT OH wants the game back the way it was the day he arrived: the first
+upload, `3af8b6d` (7 Aug 2026). `ONE-POINT-OH-PLAN.md` is the whole plan; ONE
+POINT OH in `index.html` is the code.
+
+- **The coaxing.** Once THE FRACTURE is open, a voice in each portal room, one
+  line a room, counted on the profile (`opoCoax`). Only ordinary solo runs:
+  never a daily, a challenge, the rush, freeplay, ALL HALLOWS, co-op, a rite
+  or a run committed at a statue.
+- **The old door.** Then a third gate, apart from the two, slow to arm. Walking
+  in is the choice. The profile is locked (`opoLock`), the game comes apart
+  newest first as he quotes it, and the run you left is filed.
+- **The lock.** While `opoLock` is over `opoLift` and he is not beaten, the
+  page boots into the first build, in a frame over the game (`OpoLock`), with
+  none of today's menu or overlays. It syncs with the account, so it holds on
+  every device; PvP's queues are shut while it holds (the `free` gate,
+  `pvp/src/gates.js`).
+- **The crack.** Every locked run has a crack in the top wall. Fire into it
+  (about 20 s) and it gives; what you did is kept on the lock's save, and it
+  widens by itself each locked run.
+- **The fight.** VOIDRUNNER, carrying the cards that run took, against him:
+  the floor split between the two renderers, his bar the record itself, five
+  phases to today. Nothing in it is recorded. Beaten, the lock lifts
+  (`opoLift`) and `opoDone` is set; left or lost, the lock holds.
+- **The way out for real trouble.** A copy that does not start within 15 s
+  lifts the lock. A dev account can lift one by hand: `[\]` in the lock
+  (the `opo-lift` perk, which `["dev"]` includes).
+
+**The copy** is `onepointoh/first.html`: the first build's page with its
+script byte for byte, made once from git by `npm run build:opo` and committed
+(the game's Worker has no build step). Around the script:
+- `onepointoh/seal.js` runs first: the first build saves under keys of the
+  lock's own (never `voidrunner_save_v1`), its leaderboard post is answered
+  in the frame from the lock's own runs, and nothing else is fetched. The
+  page's Content-Security-Policy refuses Fireproof from esm.sh.
+- `onepointoh/lock.js` runs after: it wraps the few functions the crack needs
+  (`resetGame`, `update`, `updateBullets`, `gameOver`, `drawArena`, `render`)
+  by name, without changing a line of the first build.
+
+**The art is blank.** Every visual piece of the route is a hook in `OPO_ART`
+(`ONE POINT OH — art hooks` in `index.html`), with placeholders just enough to
+play it. `ONE-POINT-OH-HOOKS.md` lists what each is handed.
+
+```sh
+npm run test:opo                           # about a minute: the copy, the seals, the whole route
+```
+
+The test checks the copy is `3af8b6d` byte for byte, boots it and plays it
+(no write to today's key, nothing fetched), and plays the route end to end:
+the coaxing, the door, the lock and the account carrying it, a copy that
+fails, the crack, the fight to today, a fight left and a fight lost, and every
+hook. `npm test` plays the portal rooms and the fight for determinism
+(`opo-route`, `onepointoh`).
+
 ## First flight (the assisted first run)
 
 THE WARDEN, the boss at the end of the first sector, is where new players got
@@ -751,9 +807,10 @@ node scripts/determinism.mjs --restore amalgam
 
 Co-op is moving to lockstep: both machines run the same game and send only
 their inputs. That only works if the same seed, inputs and run settings give
-the same game, step for step, on any machine. The test plays 18 scenarios
+the same game, step for step, on any machine. The test plays 20 scenarios
 twice: the four pilots, Boss Rush, the finales, the rites, ALL HALLOWS' two
-areas and DEAD GAME, an assisted first flight, and an outside pilot. Run A is
+areas and DEAD GAME, an assisted first flight, an outside pilot, and ONE POINT
+OH's route (the portal rooms with his voice and door, and his fight). Run A is
 never drawn and has every effect off. Run B is drawn to a stub canvas with
 every effect on, at another window size, while the keyboard, mouse, autofire
 and the save's flags are scrambled every step. The two must match at every

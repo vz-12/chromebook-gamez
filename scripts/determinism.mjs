@@ -80,7 +80,11 @@ const HARNESS = `(() => {
       RUN_FLAGS.map(k => r(RUN[k])),
       assist ? (assist.saved ? 2 : 1) : 0,   // FIRST FLIGHT: helped, its save spent, or on its own
       // an outside pilot's own state, on the pilot and the run's share (OUTSIDE PILOTS)
-      P.ox || null, outsideWorld]);
+      P.ox || null, outsideWorld,
+      // ONE POINT OH: the fight's record, phase and front, and the old door
+      typeof opo !== 'undefined' && opo ? [opo.stage, opo.ph, r(opo.pos), opo.cells.map(c => c < 0.5 ? 0 : 1).join(''),
+        opo.panes.length, opo.sweeps.length, opo.restores.length, Object.keys(P.up).length] : null,
+      typeof opoDoor !== 'undefined' && opoDoor ? pk(opoDoor, ['x', 'y', 'in']) : null]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -101,6 +105,11 @@ const HARNESS = `(() => {
     const [g, gd] = near(gems.concat(drops));
     if (g && gd < 900 * 900) { ix = g.x > P.x + 6 ? 1 : g.x < P.x - 6 ? -1 : 0; iy = g.y > P.y + 6 ? 1 : g.y < P.y - 6 ? -1 : 0; }
     else { const d = Math.floor(k / 80) % 4; ix = [0, 1, 0, -1][d]; iy = [-1, 0, 1, 0][d]; }
+    // a portal room (o.gates): on through the ordinary gate, never anything else standing in the room
+    if (run.o.gates && awaitingPortal && portals.length) {
+      const p = portals.find(q => q.kind === 'normal') || portals[0];
+      ix = p.x > P.x + 6 ? 1 : p.x < P.x - 6 ? -1 : 0; iy = p.y > P.y + 6 ? 1 : p.y < P.y - 6 ? -1 : 0;
+    }
     rec.mx = ix; rec.my = iy;
     const [e] = near(enemies, o => !o.dead && !o.hacked);
     if (e) { rec.ax = e.x; rec.ay = e.y; } else { const a = k * 0.03; rec.ax = P.x + Math.cos(a) * 200; rec.ay = P.y + Math.sin(a) * 150; }
@@ -166,7 +175,8 @@ const HARNESS = `(() => {
     inputSource = bot;
     if (o.from) snapRead(JSON.parse(o.from));     // run C: the run so far is another copy's, taken over here
     run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null,
-            vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0] };
+            vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0],
+            opo: { lines: [], door: false, phases: [], done: false }, opoLast: null };
   }
   function play(o) {
     start(o);
@@ -174,6 +184,7 @@ const HARNESS = `(() => {
       if (o.snapAt === run.k) { const s = snapWrite(); run.snap = JSON.stringify(s); run.snapBad = s.badAt; }
       if (state === 'pause') state = 'play';
       if (state === 'levelup') { uiArm = 0; handleKey('1'); }
+      else if (state === 'shop' && o.shops) { uiArm = 0; ui('shopOut'); }   // o.shops: out of the shop the way a player leaves, so the portal room comes
       else if (state !== 'play' && state !== 'dead') state = 'play';
       if (o.b && o.b.junk) junk(o.b);
       update(STEP);
@@ -188,11 +199,18 @@ const HARNESS = `(() => {
         run.was = [v, s, br];
       }
       for (const e of enemies) if (e.boss) run.bosses.add(e.boss);
+      // ONE POINT OH, counted as it happens: his lines, the door, the fight's phases, and out
+      if (typeof opo !== 'undefined') {
+        if (opoLine && opoLine !== run.opoLast) { run.opo.lines.push(opoLine.kind); run.opoLast = opoLine; }
+        if (opoDoor) run.opo.door = true;
+        if (opo && opo.stage === 'fight' && !run.opo.phases.includes(opo.ph)) run.opo.phases.push(opo.ph);
+        if (RUN.opoDone) run.opo.done = true;
+      }
       if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad, vow: run.vow, outsideErrs: Object.keys(OUTSIDE.errs).join(','),
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, outsideErrs: Object.keys(OUTSIDE.errs).join(','),
              oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '' };
   }
   globalThis.__det = { play, oxWrap };
@@ -243,6 +261,10 @@ const S = [
   { name: 'assist',     char: 'runner', seed: 118, steps: 18000, starter: 'runAssistNext = true; resetGame()' },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
   { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
+  // ONE POINT OH: the portal rooms past THE FRACTURE, his voice in them and the old door walked past,
+  // and his fight, from the shatter to today (the route's own test, npm run test:opo, takes the door)
+  { name: 'opo-route',  char: 'runner', seed: 119, steps: 21600, shops: true, gates: true, starter: 'RUN.altPath = true; RUN.opoCoax = 4' },
+  { name: 'onepointoh', char: 'runner', seed: 120, steps: 18000, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
@@ -353,6 +375,9 @@ for (const sc of S) {
   const okC = ci < 0 && c.prints.length === a.prints.length - from && !(a.snapBad && a.snapBad.length);
   // the vagrant run has to have taken RONIN's V, both of the ways it ends included, or it proved nothing about it
   const vowCover = sc.name !== 'vagrant' || (a.vow.vows > 0 && a.vow.skyClears > 0 && a.vow.broken > 0);
+  // and ONE POINT OH's: the route has to have heard him and passed his door; the fight has to reach today
+  const opoCover = sc.name === 'opo-route' ? a.opo.lines.includes('coax') && a.opo.door
+                 : sc.name === 'onepointoh' ? a.opo.phases.length === 5 && a.opo.done : true;
   /* The outside pilot's run has to have played its kit (its step and its keys
      at the least), and none of its hooks may have thrown: they are skipped if
      they do, so a broken one would otherwise pass unseen. */
@@ -364,7 +389,9 @@ for (const sc of S) {
     ox = { calls, hooks, unused: hooks.filter(h => !calls[h]), errs: [a.outsideErrs, b.outsideErrs, c.outsideErrs].filter(Boolean).join(' / ') };
     outsideOk = calls.step > 0 && calls.key > 0 && !ox.errs;
   }
-  if (!ok || !okC || !vowCover || !outsideOk) failed++;
+  if (!ok || !okC || !vowCover || !outsideOk || !opoCover) failed++;
+  const opoNote = sc.name === 'opo-route' ? `  · his lines ${a.opo.lines.join(',') || 'none'}, door ${a.opo.door ? 'passed' : 'NOT SEEN'}`
+                : sc.name === 'onepointoh' ? `  · phases ${a.opo.phases.join('') || '-'}, ${a.opo.done ? 'out' : 'NOT ENDED'}` : '';
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
   const oxNote = ox ? `  · outside: ${path.basename(OUTSIDE_FILE)}, ${ox.hooks.length - ox.unused.length}/${ox.hooks.length} hooks used` +
     (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
@@ -373,7 +400,7 @@ for (const sc of S) {
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}`);
 }
 if (!ONLY) {
   // a seed must matter

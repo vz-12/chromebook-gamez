@@ -150,7 +150,8 @@ let runCharNext = null, runAwakeNext = null;
    and the save keeps it. Menus and the records still read the save itself. */
 const RUN_FLAGS = ['hardened', 'keeperDone', 'rootDone', 'altPath', 'clears', 'deepFracture', 'malware',
                    'planetarium', 'skipStreak', 'otherKills', 'unwrittenDeaths', 'amalgamDone',
-                   'tribunalDone', 'metFounder', 'keyEver', 'campVisits', 'devTalkDue', 'trueEnd'];
+                   'tribunalDone', 'metFounder', 'keyEver', 'campVisits', 'devTalkDue', 'trueEnd',
+                   'opoCoax', 'opoMet', 'opoDone'];
 const RUN = {};
 let runFlagsNext = null;
 function runTake() {
@@ -2518,6 +2519,7 @@ const KEEPER_NOTES = {
   shopkeeper:  'You turned his stock over and over. I would have shut the counter sooner.',
   root:        'I cannot file a thing that edits the file. This is my third attempt.',
   founder:     'He kept no records at all. He simply remembered them. I find that unbearable.',
+  onepointoh:  'He has the first page by heart. He would like everyone to stop at it.',
 
   /* ---- upgrades ---- */
   rate:   'They always take this one first.',
@@ -2619,6 +2621,7 @@ const CODEX_B = {
   theother:   { d: 'Mirrors you through the centre of the room, then stops pretending: it heals to full, grows legs, and charges blind until it hits a wall. Reduce it far enough and it takes the mirrors — unless something else gets to it first.' },
   keeper:     { d: 'He was in every library, behind the desk, saying very little. He wanted the finished record and he was patient about getting it. Given it, he reads: he writes your own upgrades onto himself, calls out anything you ever logged, and works through the ledger one section at a time.' },
   shopkeeper: { d: 'He does not mind you buying. He minds you standing at the counter turning the stock over and over until it shows you what you wanted, and he has been counting how many times you did it. What he takes he takes all at once, and he is heavier for holding it — every credit you were saving is weight he is now swinging at you. Put him down and it is yours again. Exactly what it was. He does not charge interest and he does not pay it.' },
+  onepointoh: { d: 'Wants the game back the way it was the day he arrived, and holds it there until you break out. He is not hostile. He is loyal, and he will not let it change. His bar is the record: every date you take back, he quotes, and tries to undo.' },
   founder:    { d: 'He has never been outside this room and does not believe there is one. What he has is people, and they are not a bodyguard, they are the whole of him — turn them and he is smaller, and you turn them by bleeding in front of them instead of taking the door he keeps open for you. Empty the stands and he does not die. He reaches behind the seat for something he has never needed, and it turns out he is very good with it.' },
   root:       { d: 'Nobody wrote it. It is what settles at the bottom of a game this easy to edit: an idea the room has of a player who will not lose, holding every power you would hand yourself from a console. It cannot be touched while it is idle, and it knows it — the only moment it is open is the moment it is entering something. The line arrives as loose characters on the floor, and breaking them before it finishes is the whole of the fight. It will tell you that this does not count. It is, in fairness, a child about it.' },
   amalgam:    { d: 'He did not build anything new. He took the ones he already had, cut them up and bolted them into the shape of a person — two wardens for arms, two broodmothers for legs, the thing that held no ink for a spine — and he talked the whole time he was doing it. It shakes the floor when it walks. You are not permitted to die to it; every killing blow just moves your decimal point one place to the right.' },
@@ -3295,6 +3298,18 @@ const TALE_TEXT = {
     'switched it on.'
   ],
 
+  /* ONE POINT OH: stand-ins until the lore bible has his tale (ONE-POINT-OH-PLAN.md,
+     Phase 0). Page III waits for VOIDRUNNER's rite. */
+  'n:onepointoh': [
+    'Visitor. Arrived on the first upload, the day there was one ship and five rooms, and has not left. He ' +
+    'keeps no ledger. He has the first page by heart, and would like everyone to stop at it.\n\n' +
+    'He is not hostile. I asked. He says he is the only one here who remembers it properly.',
+
+    'he\'s a player. he came in on the first upload, the same way i came in at the end. he has never once ' +
+    'said the game is bad.\n\n' +
+    '~~put it back~~ he\'s right that it could win back then. he\'s wrong that it was better.'
+  ],
+
   'n:outsider': [
     'Guide. At the hub, and under the floor in October. He tells you what a thing costs and where it ' +
     'is, and never that you are welcome.\n\n' +
@@ -3667,7 +3682,11 @@ const BOSSES = {
                  ai: bossDeadGame, secret: true },
   // the man himself, once there is nobody left to swing for him
   founder:     { name: 'THE FOUNDER', col: '#fcd34d', r: 24, sides: 3, hpMul: 2.6,
-                 spd: 178, ai: () => {}, secret: true, endgame: true }
+                 spd: 178, ai: () => {}, secret: true, endgame: true },
+  /* VOIDRUNNER's finale. Not fought as a boss shell: the body carries the
+     record and takes hits, the fight is opoTick's (ONE POINT OH). */
+  onepointoh:  { name: 'ONE POINT OH', col: '#e2e8f0', r: 40, sides: 8, hpMul: 1,
+                 spd: 0, ai: () => {}, secret: true, endgame: true }
 };
 
 /* -------------------------------- stages ---------------------------------
@@ -4989,6 +5008,9 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
      the rest of the function. Taking the damage here and returning skipped
      everything below — including the block that marks a thing dead, so it
      could be worn to nothing and simply keep going. */
+  /* ONE POINT OH: his bar is the record. Whatever delivered it moves the
+     date (opoHit), and the body itself never comes apart: he is not killed. */
+  if (e.opo) { opoHit(e, dmg, crit); return; }
   if (e.founder && typeof tribunal !== 'undefined' && tribunal && tribunal.hal) {
     const h = tribunal.hal;
     dmg = endgameThrottle(h, dmg);
@@ -9407,7 +9429,7 @@ function suPower() {
    that a held body would break — ROOT, THE AMALGAM and its limbs, THE
    UNWRITTEN's halves, THE FOUNDER — so the drill only hurts them. */
 function suCanPin(e) {
-  if (!e || e.dead || e.hacked || e.amalPart || e.founder || e.shadow > 0 || e.virus) return false;
+  if (!e || e.dead || e.hacked || e.amalPart || e.founder || e.opo || e.shadow > 0 || e.virus) return false;
   if (typeof unwritten !== 'undefined' && unwritten && (e === unwritten.a || e === unwritten.b)) return false;
   const bd = e.boss && BOSSES[e.boss];
   return !(bd && bd.endgame);
@@ -21636,6 +21658,9 @@ function roninFinaleOf(e) {
     return { key: 'root', hp: e.hp, maxHp: e.maxHp, bucket: root };
   if (e.founder && tribunal && tribunal.hal && !tribunal.over)
     return { key: 'founder', hp: tribunal.hal.hp, maxHp: tribunal.hal.maxHp, bucket: tribunal.hal };
+  // ONE POINT OH: the record is the health, and today is the end of it
+  if (e.opo && opo && opo.stage === 'fight')
+    return { key: 'onepointoh', hp: opo.maxHp - opo.pos, maxHp: opo.maxHp, bucket: opo };
   return null;
 }
 // a finale is held still while its execution plays, up to the beat
@@ -21646,6 +21671,7 @@ function roninFinaleEnd(key, e, ang) {
   else if (key === 'unwritten') { if (unwritten) unwWin(); }
   else if (key === 'root') { e.floor = undefined; e.hp = 0; killEnemy(e, ang); }
   else if (key === 'founder') { if (tribunal && tribunal.hal) tribunal.hal.hp = 0; }
+  else if (key === 'onepointoh') { if (opo) opoToday(); }
 }
 
 // does this counter leave the body at WATER_EXEC (or the vow's th) or under? An estimate: the kill itself is certain
@@ -31491,6 +31517,7 @@ function openPortalRoom() {
     banner('CHOOSE A GATE', '#e2e8f0', 3.0);
   }
   Audio_.tone(180, 1.1, 'sine', 0.12, 520);
+  opoPortalRoom(ox, oy, R, a);           // ONE POINT OH: the moment the game makes you choose, he speaks
 }
 
 /* Keeps the library door out from under the gates and out of the walls. */
@@ -31541,6 +31568,7 @@ function takePortal(p) {
   portals.length = 0;
   awaitingPortal = false;
   libraryPortal = null;            // the door belonged to the room you just left
+  opoDoor = null;                  // and so did his
   if (p.kind === 'alt') advanceAlt(); else advanceNormal();
   // step through: recentre in the new arena so you arrive somewhere safe
   P.x = WORLD.w / 2; P.y = WORLD.h / 2; P.vx = P.vy = 0;
@@ -31956,6 +31984,8 @@ const TALE_PEOPLE = [
     how: ['meet him', 'empty his stands', 'pass THE VAGRANT\'s rite'] },
   { id: 'shopkeeper', n: 'THE SHOPKEEPER', col: '#fbbf24', boss: 'shopkeeper',
     how: ['buy from him', 'defeat him', 'carry his day book to the end of a run'] },
+  { id: 'onepointoh', n: 'ONE POINT OH',   col: '#e2e8f0', boss: 'onepointoh',
+    how: ['meet him', 'bring the record back to today', { held: 'held for VOIDRUNNER\'s rite' }] },
   { id: 'outsider',   n: 'THE OUTSIDER',   col: '#cbd5e1',
     how: ['meet him', 'finish THE LOST SOUL', { held: 'held for a later book' }] },
   { id: 'soul',       n: 'THE LOST SOUL',  col: '#93c5fd', hl: true,
@@ -32208,6 +32238,7 @@ const Tales = {
     o('n:founder', 0, p.metFounder); o('n:founder', 1, p.tribunalDone); o('n:founder', 2, aw('melee'));
     o('n:dev', 0, p.askedHarder || p.amalgamDone); o('n:dev', 1, p.amalgamDone);
     o('n:outsider', 0, p.outsiderIn);
+    o('n:onepointoh', 0, p.opoMet); o('n:onepointoh', 1, p.opoDone);   // ONE POINT OH: met, and the record brought back
     o('b:unwritten', 1, p.trueEnd);
     o('b:amalgam', 1, p.amalgamDone); o('b:amalgam', 2, aw('ember'));
     o('b:root', 1, p.rootDone); o('b:root', 2, aw('hacker'));
@@ -36766,6 +36797,11 @@ const Save = {
                   deepFracture: false, rootDone: false, keyEver: false,
                   metFounder: false, conformed: false, tribunalDone: false,
                   campVisits: 0,
+                  /* ONE POINT OH (VOIDRUNNER's finale): the coaxing's lines and
+                     doors so far, the times he has taken the game and the times
+                     it was let go (locked while opoLock > opoLift), and whether
+                     he has been met and beaten. See ONE POINT OH. */
+                  opoCoax: 0, opoLock: 0, opoLift: 0, opoMet: false, opoDone: false,
                   /* Which hulls have been through their rite, keyed by charId.
                      A map rather than a flag: each pilot is woken separately,
                      by its own boss, and waking one says nothing about the
@@ -36830,6 +36866,9 @@ const Save = {
      exactly that state, so re-arm him. */
   repair(p) {
     if (p.trueEnd && !p.amalgamDone && !p.askedHarder) p.devTalkDue = true;
+    // ONE POINT OH's counters are counts: anything else on disk is nothing
+    for (const k of ['opoCoax', 'opoLock', 'opoLift'])
+      p[k] = Number.isFinite(p[k]) && p[k] > 0 ? Math.min(1e6, Math.floor(p[k])) : 0;
     return p;
   },
   writeLocal() {
@@ -36888,6 +36927,14 @@ const Save = {
     out.conformed = !!(a.conformed || b.conformed);
     out.tribunalDone = !!(a.tribunalDone || b.tribunalDone);
     out.campVisits = Math.max(a.campVisits || 0, b.campVisits || 0);
+    /* ONE POINT OH: counts and marks, the higher and the union. The lock is
+       two counters, so the higher of each keeps a lock while either side holds
+       one and lifts it once either side has let it go; beaten, it is gone. */
+    out.opoCoax = Math.max(a.opoCoax | 0, b.opoCoax | 0);
+    out.opoLock = Math.max(a.opoLock | 0, b.opoLock | 0);
+    out.opoLift = Math.max(a.opoLift | 0, b.opoLift | 0);
+    out.opoMet = !!(a.opoMet || b.opoMet);
+    out.opoDone = !!(a.opoDone || b.opoDone);
     /* A hull woken on either machine is awake on both. Union, never a
        replacement — the other store may know about a pilot this one has
        never flown. */
@@ -37285,6 +37332,7 @@ function resetGame() {
   root = null; intrusion = null; rootDeath = null; rootOut = null;
   amalOpen = null; tear = null; choice = null; tribunal = null; campVisit = null;
   turning = null;
+  opo = null; opoDoor = null; opoRevert = null; opoLine = null;   // ONE POINT OH: nothing of his carries from the last run
   /* Once you have been let in, the door is there on every run until he is put
      down — the key opens the amalgam once, and it would be a poor reward if
      the whole way back through ROOT had to be walked again to finish talking
@@ -37331,6 +37379,9 @@ function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
   state = 'dead';
   runSaveClear();                        // an ended run is not continued (CONTINUE)
+  /* ONE POINT OH: the fight is no run. Nothing is recorded, and the lock
+     holds: a beat, then the first build's menu again. */
+  if (opo) { opoLost(quiet); return; }
   if (!quiet) uiArm = DEAD_ARM;          // a press meant for the fight is not "again" (AFTER THE RUN)
   eraMark(true);                         // flown, whatever else this run was
   tale('dead');                          // what felled you, and what you carried to the end (FORGOTTEN TALES)
@@ -37511,6 +37562,8 @@ function ui(act, i) {
 }
 function handleKey(k) {
   if (state === 'pvp') return;            // PvP mode's own screen takes no keys of the game's
+  if (state === 'opolock') { OpoLock.focus(); return; }   // ONE POINT OH: the keys are the first build's, in its frame
+  if (state === 'dead' && lastStats && lastStats.opo) return;   // and a lost fight is no run to start again: the lock takes it back
   // co-op: this machine's keys are its own pilot's (its cards, its gear)
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), () => handleKey(k)); return; }
   if (state === 'tour') { tourKey(k); return; }   // FIRST FLIGHT: the HUD, part by part
@@ -37755,6 +37808,8 @@ function volFromMouse() {
 /* Leaving mid-run is deliberate, so the run still counts — abandoning a good
    score by accident is exactly the failure the freeze bug already caused. */
 function quitToMenu() {
+  // ONE POINT OH: a fight left is a fight lost, and the lock holds
+  if (opo && OpoLock.on) { if (state !== 'dead') gameOver(true); return; }
   rsCard = null;
   inVigil = false;
   hlPartsClear();
@@ -37769,6 +37824,8 @@ function quitToMenu() {
 
 function handleClick() {
   if (state === 'pvp') return;            // nor clicks
+  if (state === 'opolock') { OpoLock.focus(); return; }   // nor in ONE POINT OH's lock
+  if (state === 'dead' && lastStats && lastStats.opo) return;
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), handleClick); return; }
   if (state === 'tour') { tourClick(); return; }   // FIRST FLIGHT
   if (choice) {
@@ -38207,8 +38264,12 @@ function update(dt) {
   netTick(dt);
   if (MP.lostT > 0) MP.lostT -= dt;
   if (state === 'pvp') { if (PVP) PVP.idle(dt); return; }   // PvP mode's own screens: nothing of a run moves
+  if (OpoLock.on) OpoLock.tick(dt);      // ONE POINT OH: the copy has to come up, and a lost fight goes back to it
+  if (state === 'opolock') return;       // the lock: the first build has the screen, in its frame
 
   if (state === 'menu' || state === 'name') {
+    opoBootCheck();                      // a profile he holds goes straight into the lock, on any device
+    if (state === 'opolock') return;
     updateMenu(dt);
     // updateMenu can move us elsewhere; the notes only belong on the menu
     if (state === 'menu') linksTick();   // a co-op room someone sent, first (LINKS)
@@ -38254,6 +38315,8 @@ function update(dt) {
   const held = state === 'gfx';
   if (intrusion && !held) { intrusionTick(dt); return; }
   if (amalOpen && !held) { amalOpenTick(dt); return; }
+  if (opoRevert && !held) { opoRevertTick(dt); return; }   // ONE POINT OH: the lock's way in holds the room
+  if (opoHeld() && !held) { opoHeldTick(dt); return; }     // and the shatter, the cascade and his last word
   if (choice && !held)   { choiceTick(dt); return; }
   if (campVisit && !held) { campVisitTick(dt); return; }
   if (turning && !held)   { turningTick(dt); return; }
@@ -38370,6 +38433,8 @@ function update(dt) {
   if (tribunal) tribunalTick(dt);
   if (vrRite) vrTick(dt, wdt);          // THE VAGRANT'S RITE
   if (tear) tearTick(dt);
+  opoLineTick(dt);                       // ONE POINT OH: his voice
+  if (opo) opoTick(dt, wdt);             // and the version war
   if (rootOut) rootOutroTick(dt);
   if (outro) outroTick(dt);
   /* startDevTalk() empties the floor, so he may only take his word when there
@@ -38388,7 +38453,7 @@ function update(dt) {
   }
   // pull the view out for the amalgam, ease back afterwards
   pilotDo(pilotMine(), () => {            // the view is this machine's pilot's
-    camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : 1;   // the duel comes in close
+    camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : opo ? OPO.zoom : 1;   // the duel comes in close; ONE POINT OH's room is wide
     // and all the way out for C, while the view is EMBER's (the cut snaps it there and back)
     if (odStrikePov()) camZoomT = Math.min(camZoomT, odStrikeZoom());
     // RONIN's executions come in close, from whatever framing the fight had (THE AMALGAM's is wide)
@@ -38399,6 +38464,7 @@ function update(dt) {
   updateArena(dt);
   updateDeepNodes(dt);
   updatePortals(dt);
+  opoDoorTick(dt);                       // ONE POINT OH: the old door
   updateLibrary(dt);
   replay.push({ x: P.x, y: P.y, ang: P.ang });
   if (replay.length > 260) replay.shift();
@@ -38512,7 +38578,7 @@ function updatePlayer(dt) {
     P.dashRe += dt * (HL.eq.sheet ? SHEET_RECHARGE : 1);   // ALL HALLOWS: SHEET comes back slower
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = inp.dash && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !vrDuelLock();
+  const wantDash = inp.dash && !opoNoDash() && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -40816,6 +40882,1267 @@ const AMAL_CUT_STEPS = [
    it to build the other fight: same body, different room, and the only version
    of it that ends with a hull awake. */
 let amalRite = false;
+
+/* =============================== ONE POINT OH ===============================
+   VOIDRUNNER's finale. Part one: the route (ONE-POINT-OH-PLAN.md).
+
+   A person, like every finale: the fandom that wants the game frozen. He
+   loves it sincerely, and that is the trap. He is not hostile but loyal, and
+   he will strangle the game to keep it exactly as it was the day he arrived:
+   the first upload, 3af8b6d (7 Aug 2026), the first thing anyone has a
+   record of. He came in from outside on it and never left.
+
+     1. THE COAXING   once THE FRACTURE is open, a voice in the portal rooms,
+                      one line a room, counted on the profile (opoCoax)
+     2. THE OLD DOOR  then a third gate, apart from the two, slow to arm. Walk
+                      in and that is the choice: there is no button
+     3. THE LOCK      the game comes apart newest first as he quotes it (the
+                      revert), and the profile is locked (opoLock): the page
+                      boots into the first build, in a frame of its own, on
+                      every device the account is on
+     4. THE CRACK     in the lock, every run has a crack in the edge of the
+                      room. Turn your back on the loop and fire into it
+                      (onepointoh/lock.js, in the frame)
+     5. FACE TO FACE  it gives, the first build shatters, and he is standing in
+                      the gap, holding the old screen's frame
+     6. THE FIGHT     the version war: the floor split between the first
+                      build's look and today's, his bar the record itself
+     7. OUT           the record restores, the lock lifts (opoLift), and he is
+                      left holding an empty frame. opoMet, opoDone
+
+   On the profile (Save.blank, Save.merge):
+     opoCoax  lines heard, then doors shown, across runs (a RUN flag)
+     opoLock  times he has taken the game; opoLift, times it has been let go.
+              Locked while opoLock > opoLift and he is not beaten: counters,
+              not clocks, so two devices' clocks never decide it, and a merge
+              that takes the higher of each keeps a lock while either side
+              holds one, and a lift once either side has made one.
+     opoMet   met him (his page I); opoDone, beat him (page II). Beaten, he
+              never comes back: no voice, no door, no lock.
+
+   THE COPY. onepointoh/first.html is the first build, its script byte for
+   byte, made from git by scripts/opo-build.mjs, with ONE POINT OH's seal in
+   front (onepointoh/seal.js: its own save keys, a board of its own, nothing
+   fetched) and his hooks behind (onepointoh/lock.js: the crack). The game
+   hosts it in a frame (OpoLock) and talks to it through OPO_HOST. A copy
+   that does not start lifts the lock rather than leave a blank page, and a
+   dev account can lift one by hand ([\] in the lock: the 'opo-lift' perk).
+
+   THE RULES IT KEEPS. Only ordinary solo runs are coaxed: never a daily, a
+   challenge, the rush, freeplay, ALL HALLOWS, co-op, a rite, or a run
+   committed at a statue. Everything in the run is data, rolled from simRand
+   (the determinism suite plays the portal rooms and the fight: 'opo-route'
+   and 'onepointoh'). The fight records nothing: the real save is never
+   touched while he holds it, beyond the two flags that are his story.
+
+   Every visual piece is a hook in OPO_ART ("ONE POINT OH — art hooks",
+   below), blank for now: a WHAT THEY ARE HANDED header says what each is
+   given. ONE-POINT-OH-HOOKS.md lists them.
+
+   FOR THE ADMIN PANEL, by name from the console (a dev's own save only):
+     opoJump('coax' | 'door' | 'revert' | 'lock' | 'crack' | 'fight' | 0..4 | 'cascade' | 'out' | 'lift')
+   ========================================================================= */
+const OPO_COL = '#e2e8f0';               // his: the first build's own white, flat and unlit
+const OPO_COPY_URL = 'onepointoh/first.html';
+const OPO = {
+  doorOdds: 0.5,         // after its first showing, the old door is in about half the portal rooms
+  doorArm: 3.2,          // seconds before it can be entered at all
+  doorDwell: 0.7,        // and how long you stand in it before it takes you: nobody walks in by accident
+  doorR: 46,
+  revertSecs: 8,         // the lock's way in: the record, read backwards
+  bootSecs: 15,          // the copy has this long to say it is up, or the lock lifts
+  backSecs: 2.6,         // a fight lost: this long, then the lock again
+  openSecs: 4.4,         // face to face: the shatter, and him in the gap
+  arenaW: 1900, arenaH: 1300,   // the fight's room
+  zoom: 0.74,            // and the view pulled out over it, so he is on screen upfield of you
+  cols: 16, rows: 10,    // the floor, in cells: each is the first build's (0) or today's (1)
+  oldBelow: 0.5,         // a cell under this is the first build's
+  fightSecs: 150,        // the most the record moves, all of it, over this long (endgameThrottle): about 3 minutes in all
+  perHit: 0.013,         // dates a round of yours moves it, at your own damage
+  oldHit: 0.5,           // and from the first build's side: its numbers
+  push: 0.014,           // a round of yours over the first build's floor takes this much of a cell back
+  phaseMin: 14,          // a phase cannot end before it has shown what it is (VR_SEQ_MIN's figure)
+  seam: 1.4,             // and a breath between them
+  pane:  { every: [2.4, 1.5], fly: 1.35, hp: 3, r: 32, reach: 1.25, dmg: 14 },
+  sweep: { every: [5.4, 3.4], tell: 1.1, spd: 470, lanes: 3, edge: 26, dmg: 18 },
+  volley:{ every: [2.6, 1.8], n: 3, spd: 300, spread: 0.16 },
+  paint: { secs: 3.6, hitBack: 0.06, settle: 5.0, reach: 1.6 },
+  hollowEvery: 3.2,      // HOLLOW: a card off your ship this often
+  chase: 205, touch: 16, touchCd: 0.8,
+  base:  { every: [2.3, 1.5], ring: 18, spd: 220, aimed: 3 },
+  cascadeSecs: 3.8, outSecs: 5.6
+};
+
+/* His lines (your drafts' where they exist, stand-ins elsewhere). A table so
+   THE NEXT THING can add to it: he is built to stand on your side later. */
+const OPO_SAY = {
+  coax:  ['There were no doors. The next room just came.',
+          'There was one ship. Everyone flew it.',
+          'Five rooms, then round again. You always knew what was next.',
+          'Nobody needed a book to know what anything was.',
+          'It can be like that again.'],
+  door:  'Just go in. You will see.',
+  still: ['Still here.', 'It is not far.'],
+  crack: ['Leave that.', 'It is fine as it is.', 'Come away from there.'],
+  face:  'Put it back.',
+  since: ['And that.', 'That too.', 'And that.'],
+  paint: ['No.', 'Not that one.', 'Back.'],
+  peel:  ['You do not need that.', 'Or that.', 'There.'],
+  lost:  'There. Like it was.',
+  out:   'It was better.',
+  later: 'Someone has to stay and remember it.'
+};
+/* The five phases. `to` is the date each runs to; the last runs to today.
+   `say` is what he says as it opens. */
+const OPO_PHASES = [
+  { id: 'putitback',     n: 'PUT IT BACK',     to: '14 AUG', say: 'Put it back.' },
+  { id: 'thiswasbetter', n: 'THIS WAS BETTER', to: '8 SEP',  say: 'This was better.' },
+  { id: 'nobodyasked',   n: 'NOBODY ASKED',    to: '22 SEP', say: 'You changed it. Nobody asked you to change it.' },
+  { id: 'hollow',        n: 'HOLLOW',          to: '6 OCT',  say: 'You do not need any of it.' },
+  { id: 'baseship',      n: 'THE BASE SHIP',   to: null,     say: 'There. Now it is fair.' }
+];
+/* THE RECORD (git, main): what each date brought back. `q` is the record's
+   name for it, as he quotes it ("'Bullet glow.' You did not need that.");
+   `say` is the rest of his line. Everything after 6 Oct is read from the
+   CHANGELOG (opoRecord), so every update joins the fight. */
+const OPO_RECORD_BASE = [
+  { d: '7 AUG',  key: 'first',    n: 'THE FIRST BUILD',                         q: 'Version one',     say: '' },
+  { d: '8 AUG',  key: 'fracture', n: 'THE FRACTURE',                            q: 'THE FRACTURE',    say: 'There was one way through. It was enough.' },
+  { d: '9 AUG',  key: 'ember',    n: 'EMBER, the malware',                      q: 'EMBER',           say: 'It did not need another pilot.' },
+  { d: '12 AUG', key: 'codex',    n: 'the codex',                               q: 'The codex',       say: 'Nobody needed a book.' },
+  { d: '14 AUG', key: 'amalgam',  n: 'THE AMALGAM, and the graphics switches',  q: 'Bullet glow',     say: 'You did not need that.' },
+  { d: '16 AUG', key: 'coop',     n: 'co-op',                                   q: 'Co-op',           say: 'It was one ship.' },
+  { d: '19 AUG', key: 'hacker',   n: 'THE HACKER',                              q: 'THE HACKER',      say: 'Nobody cheated, before.' },
+  { d: '23 AUG', key: 'root',     n: 'ROOT, THE FOUNDER',                       q: 'ROOT',            say: 'It was finished. You kept going.' },
+  { d: '8 SEP',  key: 'patch',    n: 'the patch notes, the dailies, the skins', q: 'Skins',           say: 'It looked fine.' },
+  { d: '20 SEP', key: 'vagrant',  n: 'THE VAGRANT, the awakenings, the hub',    q: 'Daily runs',      say: '' },
+  { d: '22 SEP', key: 'rush',     n: 'BOSS RUSH',                               q: 'BOSS RUSH',       say: 'You could already fight them. In order.' },
+  { d: '1 OCT',  key: 'ronin',    n: 'RONIN',                                   q: 'RONIN',           say: 'It was a ship.' },
+  { d: '3 OCT',  key: 'pvp',      n: 'PvP',                                     q: 'PvP',             say: 'Against each other. Why would you.' },
+  { d: '6 OCT',  key: 'tales',    n: 'FORGOTTEN TALES',                         q: 'FORGOTTEN TALES', say: 'Everyone already knew what everything was.' }
+];
+const OPO_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+/* The whole record, built on first use (the CHANGELOG is declared further
+   down this file): the base, then a date for every day the CHANGELOG has
+   after the last of it, then TODAY, which is the last hit. */
+let opoRecordList = null;
+function opoRecord() {
+  if (opoRecordList) return opoRecordList;
+  const L = OPO_RECORD_BASE.map(r => Object.assign({}, r));
+  const day = s => { const m = /^(\d+)\s+([A-Z]{3})\s+(\d{4})$/.exec(String(s || '').trim()); return m ? (+m[3]) * 400 + OPO_MONTHS.indexOf(m[2]) * 32 + (+m[1]) : 0; };
+  const last = day('6 OCT 2026');
+  const days = new Map();
+  try {
+    for (const c of CHANGELOG.slice().reverse()) {
+      const d = day(c.date);
+      if (d <= last) continue;
+      const k = c.date.replace(/\s+\d{4}$/, '');
+      if (!days.has(k)) days.set(k, { d: k, at: d, vs: [] });
+      days.get(k).vs.push(c.v);
+    }
+  } catch (e) { /* asked before the CHANGELOG exists: the base alone */ }
+  [...days.values()].sort((a, b) => a.at - b.at).forEach((x, i) => L.push({
+    d: x.d, key: 'since', n: 'v' + x.vs.join(', '), q: x.vs.join(', '), say: OPO_SAY.since[i % OPO_SAY.since.length] }));
+  L.push({ d: 'TODAY', key: 'today', n: 'everything', q: 'Today', say: '' });
+  opoRecordList = L;
+  return L;
+}
+const opoRecIdx = d => { const L = opoRecord(); if (!d) return L.length - 1; const i = L.findIndex(r => r.d === d); return i < 0 ? L.length - 1 : i; };
+// a date, quoted and remarked on: "'Bullet glow.' You did not need that."
+const opoQuote = r => '‘' + r.q + '.’' + (r.say ? ' ' + r.say : '');
+
+/* ------------------------------- the profile ------------------------------ */
+const opoOff = () => !!PVP;
+function opoLocked(p) {
+  p = p || Save.profile;
+  return !opoOff() && !!p && !p.opoDone && (p.opoLock | 0) > (p.opoLift | 0);
+}
+function opoLockSet() {
+  const p = Save.profile;
+  p.opoLock = Math.max(p.opoLock | 0, p.opoLift | 0) + 1;
+  Save.writeLocal(); Save.flush();
+}
+function opoLiftSet() {
+  const p = Save.profile;
+  p.opoLift = Math.max(p.opoLift | 0, p.opoLock | 0);
+  Save.writeLocal(); Save.flush();
+}
+
+/* ------------------------------ 1. the coaxing ----------------------------
+   Run state: the old door (opoDoor), the revert (opoRevert), the fight
+   (opo), each null when not in play; and the voice's line on screen (opoLine). */
+let opoDoor = null, opoRevert = null, opo = null, opoLine = null;
+
+// only ordinary solo runs, past THE FRACTURE, and never once he is beaten
+function opoCoaxOn() {
+  if (opoOff() || !RUN.altPath || RUN.opoDone || opo) return false;
+  if (Chal.on || rushOn() || freeRun || MP.on || LS.on || PILOTS.length > 1) return false;
+  if (riteRun || amalRite || rootRite || vrRite || inHub || inVigil || hlArea) return false;
+  if (P.outside) return false;
+  return true;
+}
+// a line from him, low on the screen (OPO_ART.voice). Kind: coax door still fight
+function opoSay(text, kind, life) {
+  opoLine = { text, kind: kind || 'fight', t: 0, life: life || Math.max(2.6, 1.2 + text.length * 0.06) };
+  OA('saySound', Audio_, opoLine);
+}
+function opoLineTick(dt) {
+  if (opoLine && (opoLine.t += dt) > opoLine.life) opoLine = null;
+}
+
+/* The portal room, the moment the game makes you choose (openPortalRoom):
+   a line from the coaxing while there are lines, then the old door. */
+function opoPortalRoom(ox, oy, R, a) {
+  if (!opoCoaxOn()) return;
+  const L = OPO_SAY.coax, n = RUN.opoCoax | 0;
+  if (n < L.length) {
+    opoSay(L[n], 'coax');
+    runSet('opoCoax', n + 1);
+    Save.writeLocal(); Save.flush();
+    return;
+  }
+  // the first time after the fifth line it is always there; after that, about half the rooms
+  const first = n === L.length;
+  if (!first && simRand() >= OPO.doorOdds) return;
+  opoDoorPlace(ox, oy, R, a);
+  opoSay(first ? OPO_SAY.door : OPO_SAY.still[(n - L.length - 1) % OPO_SAY.still.length], first ? 'door' : 'still');
+  runSet('opoCoax', n + 1);
+  Save.writeLocal(); Save.flush();
+}
+
+/* ------------------------------ 2. the old door ----------------------------
+   A third gate standing apart from the two, square to the line between them
+   and further out, clear of the library's door. It arms slowly, and you have
+   to stand in it a moment before it takes you. */
+function opoDoorPlace(ox, oy, R, a) {
+  const pad = OPO.doorR + 110;
+  const fits = (x, y) => {
+    const px = clamp(x, arena.x0 + pad, arena.x1 - pad), py = clamp(y, arena.y0 + pad, arena.y1 - pad);
+    if (!portals.every(p => len(px - p.x, py - p.y) > p.r + OPO.doorR + 120)) return null;
+    if (libraryPortal && len(px - libraryPortal.x, py - libraryPortal.y) < libraryPortal.r + OPO.doorR + 90) return null;
+    if (hazards.some(h => h.kind === 'mirror' && len(px - h.x, py - h.y) < h.r + OPO.doorR + 10)) return null;
+    return { x: px, y: py };
+  };
+  let at = null;
+  for (const side of [-1, 1]) {
+    const ang = a + side * Math.PI / 2;
+    at = fits(ox + Math.cos(ang) * R * 1.7, oy + Math.sin(ang) * R * 1.7);
+    if (at) break;
+  }
+  for (let k = 0; !at && k < 16; k++) {
+    const ang = a + Math.PI / 4 + k * TAU / 16;
+    at = fits(ox + Math.cos(ang) * R * 2.1, oy + Math.sin(ang) * R * 2.1);
+  }
+  if (!at) at = { x: clamp(ox, arena.x0 + pad, arena.x1 - pad), y: clamp(oy + R * 1.7, arena.y0 + pad, arena.y1 - pad) };
+  opoDoor = { x: at.x, y: at.y, r: OPO.doorR, t: 0, arm: OPO.doorArm, in: 0 };
+}
+function opoDoorTick(dt) {
+  const d = opoDoor;
+  if (!d) return;
+  if (!awaitingPortal) { opoDoor = null; return; }   // a gate was taken: the door belonged to that room
+  d.t += dt;
+  d.arm = Math.max(0, d.arm - dt);
+  const inside = d.arm <= 0 && len(P.x - d.x, P.y - d.y) < d.r + P.r;
+  d.in = inside ? d.in + dt : Math.max(0, d.in - dt * 2);
+  if (d.in >= OPO.doorDwell) opoDoorTake();
+}
+/* Walked in: that is the choice. The lock is on the profile from this step,
+   so a reload in the middle of the revert still comes back to it. */
+function opoDoorTake() {
+  opoDoor = null;
+  portals.length = 0; awaitingPortal = false; libraryPortal = null;
+  ebullets.length = 0;
+  opoLockSet();
+  opoRevert = { t: 0, i: -1, T: OPO.revertSecs };
+  opoLine = null;
+  Audio_.tone(196, 1.2, 'sine', 0.1, 98);
+}
+
+/* ------------------------------ 3. the revert -----------------------------
+   The way in, all at once: the game comes apart newest first, and he quotes
+   each piece as it goes, the record read backwards to the first build's menu.
+   The room is held while it plays (update). */
+function opoRevertList() { return opoRecord().slice(1, -1).reverse(); }
+function opoRevertTick(dt) {
+  const r = opoRevert;
+  r.t += dt;
+  opoLineTick(dt);
+  const L = opoRevertList();
+  const i = Math.min(L.length - 1, Math.floor(r.t / (r.T * 0.86) * L.length));
+  if (i > r.i) { r.i = i; opoSay('‘' + L[i].q + '.’', 'revert', 1.4); }
+  updateParticles(dt);
+  if (r.t >= r.T) { opoRevert = null; opoLockNow(); }
+}
+// the run you walked out of ends quietly, filed as it stood; then the lock
+function opoLockNow() {
+  opoLine = null;
+  if (state === 'play' || state === 'pause') gameOver(true);
+  OpoLock.enter('door');
+}
+
+/* ------------------------------ 4. the lock -------------------------------
+   The page, not the run: the first build in a frame over the game's canvas
+   (OpoLock.el), every one of today's buttons and overlays gone (state
+   'opolock' draws nothing of the menu, and the ad, the LIVE card and the
+   account panel keep to the menu). The game's own loop goes on underneath,
+   doing nothing but wait for the copy. */
+const OpoLock = {
+  on: false, el: null, copy: null, ready: false, mode: 'copy',   // copy | fight
+  t: 0, backT: 0, why: '', boots: 0,
+  enter(why) {
+    if (this.on || opoOff()) return;
+    this.on = true; this.why = why || ''; this.mode = 'copy';
+    this.ready = false; this.copy = null; this.t = 0; this.backT = 0;
+    state = 'opolock';
+    try { if (AcctUI.on) AcctUI.close(); } catch (e) {}
+    try { Live.hide(); } catch (e) {}
+    try { Ads.close(); } catch (e) {}
+    this.mount();
+  },
+  // the frame, from scratch: the first build boots to its menu
+  mount() {
+    this.boots++;
+    this.ready = false; this.copy = null; this.t = 0;
+    if (typeof document === 'undefined') return;
+    try {
+      if (this.el) this.el.remove();
+      const f = document.createElement('iframe');
+      f.title = 'VOIDRUNNER';
+      f.src = OPO_COPY_URL;                // a new frame each time: the first build boots to its menu
+      Object.assign(f.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh',
+                               border: '0', margin: '0', zIndex: '4', background: '#05060a', display: 'block' });
+      f.addEventListener('load', () => { this.focus(); });
+      f.addEventListener('error', () => opoLockFail('the copy did not load'));
+      document.body.appendChild(f);
+      this.el = f;
+    } catch (e) { opoLockFail('the copy could not be framed'); }
+  },
+  focus() {
+    try { if (this.el && this.mode === 'copy') { this.el.focus(); this.el.contentWindow.focus(); } } catch (e) {}
+  },
+  // the first build's canvas, for the art to draw from (a live texture), or null
+  tex() {
+    try { return this.copy && this.copy.canvas && this.copy.canvas.width ? this.copy.canvas : null; } catch (e) { return null; }
+  },
+  // once a frame, from update: the copy has to come up, and a lost fight goes back to it
+  tick(dt) {
+    this.t += dt;
+    if (this.mode === 'copy' && !this.ready && this.t > OPO.bootSecs) opoLockFail('the copy did not start');
+    if (state === 'dead') opoLineTick(dt);           // his word over a lost fight
+    if (this.backT > 0 && (this.backT -= dt) <= 0) this.back();
+  },
+  // into the fight: today's canvas over the frame, which plays on underneath for the art
+  fight() {
+    this.mode = 'fight';
+    if (this.el) { this.el.style.zIndex = '-1'; this.el.style.pointerEvents = 'none'; this.el.tabIndex = -1; }
+    try { this.el && this.el.blur(); window.focus(); } catch (e) {}
+  },
+  // a fight lost or left: the lock again, from the first build's menu
+  back() {
+    this.backT = 0;
+    if (!this.on) return;
+    opo = null; opoLine = null; bossAlive = false;
+    enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+    if (!opoLocked()) { this.leave(); state = 'menu'; return; }
+    this.mode = 'copy';
+    state = 'opolock';
+    if (this.el) { this.el.style.zIndex = '4'; this.el.style.pointerEvents = 'auto'; this.el.tabIndex = 0; }
+    this.mount();
+  },
+  leave() {
+    this.on = false; this.copy = null; this.ready = false; this.mode = 'copy'; this.backT = 0;
+    try { if (this.el) this.el.remove(); } catch (e) {}
+    this.el = null;
+  }
+};
+// the lock lets go: beaten, by hand, or because the copy could not run
+function opoLockLift(why) {
+  opoLiftSet();
+  OpoLock.leave();
+  opo = null; opoLine = null; opoRevert = null; opoDoor = null;
+  state = 'menu'; uiArm = 0.4;
+  if (why && why !== 'done') console.warn('ONE POINT OH: the lock lifted (' + why + ')');
+}
+function opoLockFail(why) {
+  if (!OpoLock.on) return;
+  opoLockLift(why);
+  try { runNote('THE OLD VERSION COULD NOT START, SO IT LET YOU GO'); } catch (e) {}
+}
+/* What the copy's frame may call (seal.js, lock.js). Everything it hands in is
+   checked: the frame is ours, but its save is a browser's to tamper with. */
+const OPO_HOST = {
+  ready(copy) { if (!OpoLock.on) return; OpoLock.copy = copy || null; OpoLock.ready = true; OpoLock.focus(); },
+  broke(info) { if (OpoLock.on && OpoLock.mode === 'copy' && opoLocked()) opoBreak(info); },
+  art(name, ...a) { OA(name, ...a); },
+  name() { return (Save.profile && Save.profile.name) || ''; },
+  lines(kind) { const l = OPO_SAY[kind]; return Array.isArray(l) ? l.slice() : []; },
+  devLift() { if (OpoLock.on && OpoLock.mode === 'copy' && devPerk('opo-lift')) opoLockLift('dev'); }
+};
+if (typeof window !== 'undefined' && !PVP) window.OPO_HOST = OPO_HOST;
+// from update, every frame the menu is up: a locked profile goes straight into the lock
+function opoBootCheck() {
+  if (!OpoLock.on && (state === 'menu' || state === 'name') && opoLocked()) OpoLock.enter('boot');
+}
+// the cards a run in the copy took, by id: only today's upgrades that exist by that id, at most their max
+function opoCards(up) {
+  const out = {};
+  if (!up || typeof up !== 'object') return out;
+  for (const id of Object.keys(up)) {
+    const u = UPGRADES.find(z => z.id === id);
+    const n = Math.floor(Number(up[id]));
+    if (!u || u.lock || u.need || !(n > 0)) continue;
+    out[id] = Math.min(n, u.max || n);
+  }
+  return out;
+}
+
+/* ------------------------------ 5. face to face ---------------------------
+   The crack gives (OPO_HOST.broke): a run of its own, flying VOIDRUNNER,
+   carrying the cards taken in the run you broke out of. */
+function opoBreak(info) {
+  const up = opoCards(info && info.up);
+  OpoLock.fight();
+  runCharNext = CHARS.findIndex(c => c.id === 'runner'); runAwakeNext = false;
+  resetGame();
+  state = 'play';
+  opoOpen({ up });
+}
+// the box he fights in, and its floor's cells
+function opoBox() {
+  const x0 = clamp(WORLD.w / 2 - OPO.arenaW / 2, 0, WORLD.w - OPO.arenaW);
+  const y0 = clamp(WORLD.h / 2 - OPO.arenaH / 2, 0, WORLD.h - OPO.arenaH);
+  return { x0, y0, x1: x0 + OPO.arenaW, y1: y0 + OPO.arenaH, cw: OPO.arenaW / OPO.cols, ch: OPO.arenaH / OPO.rows };
+}
+/* The fight, opened: the room cleared and taken to his size, the cards put on
+   the ship (today's, by the same ids), him spawned in the gap. Run state
+   only, so a starter can open it straight (the 'onepointoh' scenario). */
+function opoOpen(info) {
+  enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+  portals.length = 0; hazards.length = 0; mortars.length = 0;
+  libraryPortal = null; libraryBook = null; malwareOffer = null;
+  awaitingPortal = false; betweenWaves = 1e9; spawnBudget = 0;
+  opoDoor = null; opoRevert = null; opoLine = null;
+  const B = opoBox();
+  arenaReset(true);
+  arenaShrinkTo((B.x0 + B.x1) / 2, (B.y0 + B.y1) / 2, OPO.arenaW, OPO.arenaH);
+  arena.x0 = arena.tx0; arena.y0 = arena.ty0; arena.x1 = arena.tx1; arena.y1 = arena.ty1;
+  P.x = (B.x0 + B.x1) / 2; P.y = B.y1 - OPO.arenaH * 0.3; P.vx = P.vy = 0;
+  cam.x = P.x; cam.y = P.y - 120;
+  const up = opoCards(info && info.up);
+  for (const id of Object.keys(up)) {
+    const u = UPGRADES.find(z => z.id === id);
+    for (let k = 0; k < up[id]; k++) { P.up[id] = (P.up[id] || 0) + 1; u.f(P); }
+  }
+  const N = opoRecord().length;
+  opo = {
+    stage: 'open', st: 0, t: 0, box: B,
+    pos: 0, passed: 0, tok: 0, maxHp: N - 1,   // the record, and the throttle's bucket over it
+    ph: 0, phT: 0, seam: 0, said: 0,
+    hx: (B.x0 + B.x1) / 2, hy: B.y0 + OPO.arenaH * 0.32, tx: 0, ty: 0, moveT: 0, ang: Math.PI / 2,
+    cells: new Array(OPO.cols * OPO.rows).fill(1),
+    panes: [], sweeps: [], restores: [], cards: [], burst: [],
+    paneT: 2.0, sweepT: 4.0, volleyT: 2.4, baseT: 2.0, touchCd: 0, hollowT: OPO.hollowEvery, peeled: 0, hollow: false,
+    painting: null, light: false, up0: up, e: null, cascade: 0, out: 0, gone: false
+  };
+  opo.tx = opo.hx; opo.ty = opo.hy;
+  const e = spawnEnemy('boss', opo.hx, opo.hy, { boss: 'onepointoh' });
+  if (e) {
+    e.opo = true;
+    e.armor = 0; e.absorb = 0; e.dr = 0; e.floor = undefined; e.spd = 0;
+    e.hp = e.maxHp;
+    opo.e = e;
+  }
+  bossAlive = true;
+  runSet('opoMet', true);
+  Save.writeLocal(); Save.flush();
+  drawFlashT = 0.5; shake(1.6);
+  Audio_.boss();
+  state = 'play';
+}
+
+/* ------------------------------ 6. the fight ------------------------------
+   THE FRONT is the floor's cells, and it is game state: a cell under
+   OPO.oldBelow is the first build's. There, the first build's rules hold
+   (no dash; rounds at its numbers). His reverts take bands of it back; your
+   rounds over it push it the other way. The mask the art draws from it is
+   only drawing.
+
+   HIS BAR IS THE RECORD: `pos` is a date, 0 (7 AUG) to the last (TODAY).
+   Hurting him moves it forward, no faster than OPO.fightSecs allows for the
+   whole of it, and each date passed restores what it brought. */
+const opoCellAt = (x, y) => {
+  const B = opo && opo.box;
+  if (!B) return -1;
+  const c = Math.floor((x - B.x0) / B.cw), r = Math.floor((y - B.y0) / B.ch);
+  return c < 0 || r < 0 || c >= OPO.cols || r >= OPO.rows ? -1 : r * OPO.cols + c;
+};
+function opoOldAt(x, y) {
+  if (!opo || opo.stage !== 'fight') return false;
+  const i = opoCellAt(x, y);
+  return i >= 0 && opo.cells[i] < OPO.oldBelow;
+}
+// the first build had no dash on its floor (ONE-POINT-OH-PLAN.md, "the old side")
+const opoNoDash = () => !!(opo && opo.stage === 'fight' && opoOldAt(P.x, P.y));
+const opoPhase = () => OPO_PHASES[Math.min(OPO_PHASES.length - 1, opo.ph)];
+const opoPhaseTo = i => opoRecIdx(OPO_PHASES[i].to);
+// held: nothing in the room moves while the shatter, the cascade or his last word plays
+const opoHeld = () => !!(opo && opo.stage !== 'fight');
+
+/* A hit on him, from damageEnemy: whatever delivered it, in record units at
+   your own damage, throttled. A phase holds at its last date until it has
+   shown what it is. */
+function opoHit(e, dmg, crit) {
+  const o = opo;
+  if (!o || o.stage !== 'fight' || o.seam > 0) return;
+  let u = OPO.perHit * clamp(dmg / Math.max(1, P.dmg), 0.25, 3);
+  if (opoOldAt(P.x, P.y)) u *= OPO.oldHit;
+  if (o.painting) o.painting.paint = Math.max(0, o.painting.paint - OPO.paint.hitBack);   // hitting him interrupts the paint
+  u = endgameThrottle(o, u);
+  if (u <= 0) return;
+  const cap = o.phT < OPO.phaseMin ? opoPhaseTo(o.ph) : opoRecord().length - 1;
+  o.pos = Math.min(cap, o.pos + u);
+  e.flash = Math.min(1, e.flash + 0.5);
+  e.hp = e.maxHp * (1 - o.pos / o.maxHp);
+  if (crit) shake(0.04);
+}
+
+function opoTick(dt, wdt) {
+  const o = opo;
+  o.t += dt; o.st += dt;
+  if (o.stage === 'open') {
+    if (o.st > 1.5 && !o.said) { o.said = 1; opoSay(OPO_SAY.face, 'face', 2.6); }
+    if (o.st >= OPO.openSecs) { o.stage = 'fight'; o.st = 0; opoPhaseOpen(0); }
+    return;
+  }
+  if (o.stage === 'cascade') {
+    // the whole record at once: every era flooding back, the front swept off
+    const k = clamp(o.st / OPO.cascadeSecs, 0, 1);
+    for (let i = 0; i < o.cells.length; i++) if ((i * 7919 % o.cells.length) / o.cells.length < k) o.cells[i] = 1;
+    o.cascade = k;
+    if (o.st >= OPO.cascadeSecs) { o.stage = 'out'; o.st = 0; opoSay(OPO_SAY.out, 'out', OPO.outSecs - 0.8); }
+    return;
+  }
+  if (o.stage === 'out') {
+    o.out = clamp(o.st / OPO.outSecs, 0, 1);
+    if (o.st >= OPO.outSecs) opoDone();
+    return;
+  }
+  // --- the fight ---
+  refillThrottle(o, OPO.fightSecs, dt);
+  o.phT += dt;
+  if (o.seam > 0) o.seam = Math.max(0, o.seam - dt);
+  const e = o.e;
+  if (!e || e.dead) { opoToday(); return; }
+  // dates passed: each restores what it brought
+  while (Math.floor(o.pos + 1e-9) > o.passed) opoRestore(++o.passed);
+  // the phase ends at its date, once it has shown itself
+  if (o.ph < OPO_PHASES.length - 1 && o.pos >= opoPhaseTo(o.ph) && o.phT >= OPO.phaseMin) opoPhaseOpen(o.ph + 1);
+  if (o.pos >= o.maxHp - 1e-9) { opoToday(); return; }
+  opoFloorTick(dt);
+  opoHimTick(dt);
+  opoPanesTick(dt);
+  opoSweepsTick(dt);
+  opoRestoresTick(dt);
+  opoCardsTick(dt);
+  // his body goes where he is
+  e.x = o.hx; e.y = o.hy; e.vx = 0; e.vy = 0;
+}
+
+function opoPhaseOpen(i) {
+  const o = opo;
+  o.ph = i; o.phT = 0; o.seam = OPO.seam;
+  const p = OPO_PHASES[i];
+  banner(p.n, OPO_COL, 3.0);
+  opoSay(p.say, 'phase', 3.2);
+  ringFx(o.hx, o.hy, 20, 700, OPO_COL, 0.9, 6);
+  shake(0.8); Audio_.boom();
+  if (i === 1) o.light = true;                     // the light comes back on today's side
+  if (i === 4) opoBaseShip();                      // whatever is left comes off at once
+}
+
+// your rounds over the first build's floor push it the other way
+function opoFloorTick(dt) {
+  const o = opo;
+  for (const b of bullets) {
+    const i = opoCellAt(b.x, b.y);
+    if (i >= 0 && o.cells[i] < 1) o.cells[i] = Math.min(1, o.cells[i] + OPO.push);
+  }
+}
+
+/* Him. Upfield and drifting through the first three, faster as it goes; in
+   HOLLOW he goes for you; as THE BASE SHIP he keeps his distance and fights
+   the first build's way. Flat, unlit, and he casts no shadow. */
+function opoHimTick(dt) {
+  const o = opo, B = o.box;
+  const ph = o.ph;
+  let spd = 70 + ph * 20;
+  if (ph === 3) {
+    o.tx = P.x; o.ty = P.y; spd = OPO.chase;
+  } else {
+    o.moveT -= dt;
+    if (o.moveT <= 0) {
+      o.moveT = simRnd(3.2, 1.8);
+      if (ph === 4) {
+        const a = Math.atan2(o.hy - P.y, o.hx - P.x) + simRnd(0.9, -0.9);
+        o.tx = P.x + Math.cos(a) * 340; o.ty = P.y + Math.sin(a) * 340;
+      } else {
+        // upfield of you, and within your reach: he wants you to see him
+        o.tx = P.x + simRnd(320, -320); o.ty = P.y - simRnd(440, 260);
+      }
+    }
+  }
+  o.tx = clamp(o.tx, B.x0 + 80, B.x1 - 80); o.ty = clamp(o.ty, B.y0 + 80, B.y1 - 80);
+  const dx = o.tx - o.hx, dy = o.ty - o.hy, d = len(dx, dy);
+  if (d > 4) { const s = Math.min(d, spd * dt); o.hx += dx / d * s; o.hy += dy / d * s; }
+  if (o.e) { o.e.x = o.hx; o.e.y = o.hy; }
+  o.ang = Math.atan2(P.y - o.hy, P.x - o.hx);
+  o.touchCd = Math.max(0, o.touchCd - dt);
+  if (o.touchCd <= 0 && len(P.x - o.hx, P.y - o.hy) < (o.e ? o.e.r : 40) + P.r + 4) {
+    o.touchCd = OPO.touchCd;
+    hurtPlayer(OPO.touch, { src: o.e });
+  }
+  if (ph >= 1 && ph <= 3) {
+    o.volleyT -= dt;
+    if (o.volleyT <= 0) {
+      o.volleyT = lerp(OPO.volley.every[0], OPO.volley.every[1], ph / 3);
+      const n = OPO.volley.n;
+      for (let k = 0; k < n; k++) eshoot(o.e, o.ang + (k - (n - 1) / 2) * OPO.volley.spread, OPO.volley.spd, OPO.touch * 0.7, 6);
+    }
+  }
+  if (ph === 4) {
+    // the first build's own patterns: THE WARDEN's ring, the grunts' aimed three
+    o.baseT -= dt;
+    if (o.baseT <= 0) {
+      const m = OPO.base;
+      o.baseT = lerp(m.every[0], m.every[1], clamp(o.phT / 40, 0, 1));
+      if (simRand() < 0.5) {
+        const off = simRnd(TAU);
+        for (let k = 0; k < m.ring; k++) eshoot(o.e, off + k * TAU / m.ring, m.spd, OPO.touch * 0.6, 6);
+      } else {
+        for (let k = 0; k < m.aimed; k++) eshoot(o.e, o.ang + (k - (m.aimed - 1) / 2) * 0.12, m.spd * 1.35, OPO.touch * 0.7, 6);
+      }
+    }
+  }
+  if (ph === 3) opoHollowTick(dt);
+}
+
+/* PUT IT BACK: he rebuilds the frame around you. Panes fly back, each a live
+   window of the first build; a pane that lands takes its patch of floor back
+   to 1.0. Break them. Fewer, later. */
+function opoPanesTick(dt) {
+  const o = opo, m = OPO.pane;
+  if (o.ph <= 2 && o.seam <= 0) {
+    o.paneT -= dt;
+    if (o.paneT <= 0) {
+      o.paneT = o.ph === 0 ? lerp(m.every[0], m.every[1], clamp(o.phT / 30, 0, 1)) : m.every[0] * 1.7;
+      const a = simRnd(TAU), r = simRnd(220, 40);
+      const tx = clamp(P.x + Math.cos(a) * r, o.box.x0 + 40, o.box.x1 - 40);
+      const ty = clamp(P.y + Math.sin(a) * r, o.box.y0 + 40, o.box.y1 - 40);
+      o.panes.push({ x: o.hx, y: o.hy, x0: o.hx, y0: o.hy, tx, ty, t: 0, T: m.fly, hp: m.hp, r: m.r, landed: 0, ang: simRnd(TAU) });
+    }
+  }
+  for (let i = o.panes.length - 1; i >= 0; i--) {
+    const p = o.panes[i];
+    if (p.landed) { if ((p.landed += dt) > 1.0) o.panes.splice(i, 1); continue; }
+    p.t += dt;
+    const k = clamp(p.t / p.T, 0, 1), ke = k * k * (3 - 2 * k);
+    p.x = lerp(p.x0, p.tx, ke); p.y = lerp(p.y0, p.ty, ke) - Math.sin(k * Math.PI) * 60;
+    // your rounds break it
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const b = bullets[j];
+      if (!segCircle(b.px, b.py, b.x, b.y, p.x, p.y, p.r + b.r)) continue;
+      bullets.splice(j, 1);
+      if (--p.hp <= 0) break;
+    }
+    if (p.hp <= 0) {
+      o.burst.push({ x: p.x, y: p.y, t: 0, kind: 'pane' });
+      burst(p.x, p.y, 16, OPO_COL, 260, 2.4, 0.5);
+      Audio_.tone(1200, 0.08, 'square', 0.06, 600);
+      o.panes.splice(i, 1);
+      continue;
+    }
+    if (k >= 1) {
+      // it lands, and its patch of floor is the first build's again
+      p.landed = 1e-6;
+      opoRevertCells(p.tx, p.ty, m.reach);
+      if (len(P.x - p.tx, P.y - p.ty) < p.r + P.r) hurtPlayer(m.dmg, {});
+      shake(0.25);
+    }
+  }
+}
+// every cell within `reach` cells of a point goes back to 1.0
+function opoRevertCells(x, y, reach) {
+  const o = opo, B = o.box;
+  const c0 = (x - B.x0) / B.cw, r0 = (y - B.y0) / B.ch;
+  for (let r = 0; r < OPO.rows; r++) for (let c = 0; c < OPO.cols; c++)
+    if (len(c + 0.5 - c0, r + 0.5 - r0) <= reach) o.cells[r * OPO.cols + c] = 0;
+}
+
+/* THIS WAS BETTER on: his reverts, fronts that sweep the floor and take a
+   band of it back. Told at the edge first; their leading edge hurts. */
+function opoSweepsTick(dt) {
+  const o = opo, m = OPO.sweep;
+  if (o.ph >= 1 && o.ph <= 3 && o.seam <= 0) {
+    o.sweepT -= dt;
+    if (o.sweepT <= 0) {
+      o.sweepT = lerp(m.every[0], m.every[1], clamp((o.ph - 1) / 2, 0, 1)) * (o.ph === 3 ? 1.6 : 1);
+      const vert = simRand() < 0.5, n = vert ? OPO.cols : OPO.rows;
+      const lane = simRndi(n - m.lanes + 1);
+      o.sweeps.push({ vert, dir: simRand() < 0.5 ? 1 : -1, lane, lanes: m.lanes, tell: m.tell, t: 0, pos: 0, hit: false, done: 0 });
+    }
+  }
+  const B = o.box;
+  for (let i = o.sweeps.length - 1; i >= 0; i--) {
+    const s = o.sweeps[i];
+    s.t += dt;
+    if (s.t < s.tell) continue;
+    const span = s.vert ? OPO.arenaH : OPO.arenaW;
+    s.pos = Math.min(span, (s.t - s.tell) * m.spd);
+    // the band: lanes across, the front moving along
+    const along = s.dir > 0 ? s.pos : span - s.pos;
+    const cs = s.vert ? B.cw : B.ch, ls = s.vert ? B.ch : B.cw;
+    for (let k = 0; k < s.lanes; k++) {
+      const ln = s.lane + k;
+      const cells = s.vert ? OPO.rows : OPO.cols;
+      for (let q = 0; q < cells; q++) {
+        const mid = (q + 0.5) * ls;
+        if ((s.dir > 0 && mid <= along) || (s.dir < 0 && mid >= along)) o.cells[s.vert ? q * OPO.cols + ln : ln * OPO.cols + q] = 0;
+      }
+    }
+    // its leading edge, once
+    const pa = s.vert ? P.y - B.y0 : P.x - B.x0, pl = s.vert ? (P.x - B.x0) / cs : (P.y - B.y0) / cs;
+    if (!s.hit && pl >= s.lane && pl < s.lane + s.lanes && Math.abs(pa - along) < m.edge + P.r) {
+      s.hit = true;
+      hurtPlayer(m.dmg, {});
+    }
+    if (s.pos >= span && (s.done += dt) > 0.4) o.sweeps.splice(i, 1);
+  }
+}
+
+/* Each date passed restores what it brought, in its own flourish. In NOBODY
+   ASKED he tries to paint it out in the old renderer before it settles:
+   painted out, the date is his again. Hitting him interrupts the paint. */
+function opoRestore(i) {
+  const o = opo, L = opoRecord(), r = L[i];
+  if (!r || i >= L.length - 1) return;
+  opoSay(opoQuote(r), 'fight', 3.2);
+  o.burst.push({ x: o.hx, y: o.hy, t: 0, kind: 'restore', i });
+  drawFlashT = Math.max(drawFlashT, 0.12);
+  Audio_.tone(392, 0.4, 'sine', 0.08, 784);
+  if (o.ph === 2) {
+    const B = o.box;
+    o.restores.push({ i, x: simRnd(B.x1 - 220, B.x0 + 220), y: simRnd(B.y1 - 220, B.y0 + 220), t: 0, paint: 0, settled: false, gone: 0 });
+  }
+}
+function opoRestoresTick(dt) {
+  const o = opo, m = OPO.paint;
+  o.painting = null;
+  for (let i = o.restores.length - 1; i >= 0; i--) {
+    const r = o.restores[i];
+    r.t += dt;
+    if (r.gone) { if ((r.gone += dt) > 1.2) o.restores.splice(i, 1); continue; }
+    if (r.settled) { if (r.t > m.settle + 2.5) r.gone = 1e-6; continue; }   // kept: it settles into the room
+    if (!o.painting && o.ph === 2) { o.painting = r; r.paint += dt / m.secs; }
+    if (r.paint >= 1) {
+      // painted out: the date is his again
+      r.gone = 1e-6;
+      opoRevertCells(r.x, r.y, m.reach);
+      if (o.pos >= r.i) { o.pos = r.i - 0.02; o.passed = r.i - 1; if (o.e) o.e.hp = o.e.maxHp * (1 - o.pos / o.maxHp); }
+      opoSay(OPO_SAY.paint[r.i % OPO_SAY.paint.length], 'fight', 2.0);
+      continue;
+    }
+    if (r.t >= m.settle) {
+      r.settled = true;
+      const B = o.box, c0 = (r.x - B.x0) / B.cw, r0 = (r.y - B.y0) / B.ch;
+      for (let y = 0; y < OPO.rows; y++) for (let x = 0; x < OPO.cols; x++)
+        if (len(x + 0.5 - c0, y + 0.5 - r0) <= m.reach) o.cells[y * OPO.cols + x] = 1;
+    }
+  }
+}
+
+/* HOLLOW: losing the floor, he goes for you. Your cards peel off one at a
+   time and fly into his frame, until there is nothing on your ship. What can
+   be undone is (TEARABLE, the Bookkeeper's list); THE BASE SHIP takes the
+   rest. */
+function opoHollowTick(dt) {
+  const o = opo;
+  if (o.hollow) return;
+  o.hollowT -= dt;
+  if (o.hollowT > 0) return;
+  o.hollowT = OPO.hollowEvery;
+  const ids = Object.keys(P.up).filter(id => P.up[id] > 0).sort((a, b) => (P.up[b] - P.up[a]) || (a < b ? -1 : 1));
+  if (!ids.length) { o.hollow = true; return; }
+  opoPeel(ids[0]);
+  if (o.peeled % 3 === 1) opoSay(OPO_SAY.peel[Math.floor(o.peeled / 3) % OPO_SAY.peel.length], 'fight', 1.8);
+}
+function opoPeel(id) {
+  const o = opo;
+  if (TEARABLE[id]) TEARABLE[id](P);
+  P.up[id]--;
+  if (P.up[id] <= 0) delete P.up[id];
+  o.peeled++;
+  o.cards.push({ id, x: P.x, y: P.y, t: 0, T: 1.1 });
+  Audio_.tone(330, 0.14, 'square', 0.06, 160);
+}
+function opoCardsTick(dt) {
+  const o = opo;
+  for (let i = o.cards.length - 1; i >= 0; i--) if ((o.cards[i].t += dt) >= o.cards[i].T) o.cards.splice(i, 1);
+  for (let i = o.burst.length - 1; i >= 0; i--) if ((o.burst[i].t += dt) > 1.6) o.burst.splice(i, 1);
+}
+/* THE BASE SHIP: nothing on it. Every card left comes off at once, and the
+   ship flies the base hull's numbers: the pilot's own weapon, speed and
+   kit, as a fresh one has them. Its hull keeps what it has. */
+const OPO_BASE_KEYS = ['dmg', 'fireRate', 'bspeed', 'count', 'spread', 'pierce', 'ricochet', 'homing', 'blife', 'br',
+  'crit', 'critMult', 'knock', 'drones', 'chain', 'volatile', 'cryo', 'frag', 'lifesteal', 'shockwave', 'pickupR',
+  'xpMul', 'parallel', 'back', 'berserk', 'momentum', 'steady', 'longshot', 'pointblank', 'staticF', 'thorns',
+  'bloodlust', 'tempo', 'credMul', 'luck', 'vortex', 'napalm', 'cryonova', 'ghost', 'overcharge', 'sentryUp',
+  'bullettime', 'execute', 'siphon', 'overkill', 'heavy', 'speed', 'armor', 'regen', 'dashMax', 'dashCd'];
+function opoBaseShip() {
+  const o = opo;
+  for (const id of Object.keys(P.up)) while (P.up[id] > 0) opoPeel(id);
+  const base = newPlayer();
+  for (const k of OPO_BASE_KEYS) if (k in base) P[k] = base[k];
+  P.dashCh = Math.min(P.dashCh, P.dashMax);
+  sentries.length = 0;
+  o.hollow = true;
+}
+
+/* The last hit is today: the whole record at once. He is not killed. */
+function opoToday() {
+  const o = opo;
+  if (!o || o.stage !== 'fight') return;
+  o.pos = o.maxHp; o.passed = opoRecord().length - 1;
+  o.stage = 'cascade'; o.st = 0;
+  o.panes.length = 0; o.sweeps.length = 0; o.painting = null;
+  ebullets.length = 0;
+  if (o.e) { o.e.hp = 1; o.e.flash = 1; }
+  drawFlashT = 0.6; shake(1.4);
+  Audio_.levelup(); Audio_.boom();
+}
+/* OUT. The lock lifts, on the profile and on every device with the account;
+   the real save is as it was. He is left holding an empty frame. */
+function opoDone() {
+  const o = opo;
+  if (o.e) { o.e.dead = true; o.e.floor = undefined; }
+  bossAlive = false;
+  runSet('opoDone', true);
+  opoLiftSet();
+  opo = null; opoLine = null;
+  if (OpoLock.on) opoLockLift('done');
+  else { state = 'menu'; uiArm = 0.4; }
+}
+/* Lost, or left: nothing is recorded, and the lock holds. A beat, then the
+   first build's menu again (OpoLock.back). From gameOver. */
+function opoLost(quiet) {
+  lastStats = { score: 0, wave: 0, kills: 0, level: P.level, time: elapsed, sector: '', loop: 0, isRecord: false, opo: true };
+  opoSay(OPO_SAY.lost, 'lost', OPO.backSecs);
+  if (!quiet) { explode(P.x, P.y, 180, 0, COL.player); burst(P.x, P.y, 90, COL.player, 460, 4, 1.1); shake(1); Audio_.over(); }
+  if (OpoLock.on) OpoLock.backT = quiet ? 0.05 : OPO.backSecs;
+}
+
+/* Held: the shatter, the cascade, his last word. The room does not move; the
+   fight's own clock does (update, ahead of everything that would). */
+function opoHeldTick(dt) {
+  opoTick(dt, dt);
+  opoLineTick(dt);
+  updateParticles(dt);
+  updateCamera(dt);
+  bannerT = Math.max(0, bannerT - dt);
+}
+
+/* --------------------------- the admin panel -----------------------------
+   Every beat of the route by name, for a dev's own save: from the console,
+   or the panel. Each jumps there as a fresh run would arrive at it. */
+function opoJump(what) {
+  const p = Save.profile;
+  if (what === 'lift') { if (OpoLock.on) opoLockLift('admin'); else opoLiftSet(); return; }
+  if (what === 'lock') { opoLockSet(); OpoLock.on ? OpoLock.back() : OpoLock.enter('admin'); return; }
+  if (what === 'crack') { opoLockSet(); try { localStorage.setItem('voidrunner_opo_crack_v1', JSON.stringify({ p: 0.95, w: 1, runs: 5 })); } catch (e) {} OpoLock.on ? OpoLock.back() : OpoLock.enter('admin'); return; }
+  if (what === 'fight' || typeof what === 'number' || what === 'cascade' || what === 'out') {
+    if (!OpoLock.on) { opoLockSet(); OpoLock.enter('admin'); }
+    opoBreak({ up: Object.assign({}, P.up || {}) });
+    if (typeof what === 'number' && what > 0) {
+      opo.stage = 'fight'; opo.st = 0;
+      opo.pos = what > 0 ? opoPhaseTo(what - 1) : 0; opo.passed = Math.floor(opo.pos);
+      opoPhaseOpen(clamp(what | 0, 0, OPO_PHASES.length - 1));
+    } else if (what === 'cascade' || what === 'out') {
+      opo.stage = 'fight'; opoToday();
+      if (what === 'out') { opo.stage = 'out'; opo.st = 0; opoSay(OPO_SAY.out, 'out', OPO.outSecs - 0.8); }
+    }
+    return;
+  }
+  // the in-run beats: a fresh run, THE FRACTURE open, straight to the portal room
+  p.altPath = true;
+  if (what === 'coax') p.opoCoax = Math.min(p.opoCoax | 0, OPO_SAY.coax.length - 1);
+  if (what === 'door' || what === 'revert') p.opoCoax = OPO_SAY.coax.length;
+  if (OpoLock.on) opoLockLift('admin');
+  runCharNext = CHARS.findIndex(c => c.id === 'runner'); resetGame(); state = 'play';
+  lastBossDeath = { x: P.x, y: P.y - 200 };
+  openPortalRoom();
+  if (what === 'revert' && opoDoor) { P.x = opoDoor.x; P.y = opoDoor.y; opoDoorTake(); }
+}
+
+/* ------------------------------- drawing ----------------------------------
+   Where the route's pieces are drawn from: each calls its hook in OPO_ART. */
+// in the room, on the floor: the front (under everything)
+function drawOpoFloor() {
+  if (!opo) return;
+  const o = opo, tex = OpoLock.tex();
+  OA('front', ctx, { box: o.box, cols: OPO.cols, rows: OPO.rows, cells: o.cells, oldBelow: OPO.oldBelow,
+                     light: o.light, cascade: o.cascade, t: o.t, stage: o.stage }, tex);
+  for (const s of o.sweeps) OA('sweep', ctx, { vert: s.vert, dir: s.dir, lane: s.lane, lanes: s.lanes,
+    tell: s.t < s.tell ? s.t / s.tell : 1, pos: s.pos, box: o.box, cols: OPO.cols, rows: OPO.rows });
+  for (const r of o.restores) OA('restore', ctx, { x: r.x, y: r.y, t: r.t, paint: r.paint, settled: r.settled, gone: r.gone,
+    entry: opoRecord()[r.i], settle: OPO.paint.settle });
+}
+// in the room, over the bodies: the old door, his panes, his paint, him
+function drawOpoWorld() {
+  if (opoDoor) OA('door', ctx, { x: opoDoor.x, y: opoDoor.y, r: opoDoor.r, t: opoDoor.t,
+    armed: 1 - opoDoor.arm / OPO.doorArm, in: clamp(opoDoor.in / OPO.doorDwell, 0, 1) });
+  if (!opo) return;
+  const o = opo, tex = OpoLock.tex();
+  for (const p of o.panes) OA('pane', ctx, { x: p.x, y: p.y, r: p.r, ang: p.ang, t: p.t, T: p.T, hp: p.hp, hp0: OPO.pane.hp,
+    landed: p.landed, tx: p.tx, ty: p.ty }, tex);
+  if (o.painting) OA('paint', ctx, { x0: o.hx, y0: o.hy, x1: o.painting.x, y1: o.painting.y, k: o.painting.paint });
+  OA('him', ctx, { x: o.hx, y: o.hy, r: o.e ? o.e.r : 40, ang: o.ang, ph: o.ph, stage: o.stage, st: o.st,
+    flash: o.e ? o.e.flash : 0, painting: !!o.painting, hollow: o.hollow, out: o.out, t: o.t }, tex);
+  for (const c of o.cards) {
+    const u = UPGRADES.find(z => z.id === c.id);
+    OA('card', ctx, { id: c.id, n: u ? upName(u) : c.id, col: u ? RARITY[u.rar] : OPO_COL,
+      x0: c.x, y0: c.y, x1: o.hx, y1: o.hy, k: c.t / c.T });
+  }
+}
+// over the frame and the HUD: the voice, the revert, the shatter, the record, the cascade, out
+function drawOpoScreen() {
+  const tex = OpoLock.tex();
+  if (opoRevert) {
+    const L = opoRevertList();
+    OA('revert', ctx, W, H, { t: opoRevert.t, T: opoRevert.T, k: clamp(opoRevert.t / opoRevert.T, 0, 1),
+      i: opoRevert.i, list: L, entry: L[Math.max(0, opoRevert.i)] });
+  }
+  if (opo) {
+    const o = opo, L = opoRecord();
+    if (o.stage === 'open') OA('shatter', ctx, W, H, { t: o.st, T: OPO.openSecs, k: clamp(o.st / OPO.openSecs, 0, 1) }, tex);
+    if (o.stage === 'fight' || o.stage === 'cascade') {
+      const i = Math.min(L.length - 1, Math.floor(o.pos + 1e-9));
+      OA('record', ctx, W, H, { list: L, pos: o.pos, date: L[i], next: L[Math.min(L.length - 1, i + 1)],
+        k: o.pos - i, phase: opoPhase(), ph: o.ph, phases: OPO_PHASES.map(p => ({ n: p.n, to: opoPhaseTo(OPO_PHASES.indexOf(p)) })) });
+    }
+    for (const b of o.burst) if (b.kind === 'restore') OA('restoreFx', ctx, W, H, { entry: L[b.i], i: b.i, t: b.t });
+    if (o.stage === 'cascade') OA('cascade', ctx, W, H, { t: o.st, T: OPO.cascadeSecs, k: o.cascade, list: L }, tex);
+    if (o.stage === 'out') OA('out', ctx, W, H, { t: o.st, T: OPO.outSecs, k: o.out });
+  }
+  if (opoLine) OA('voice', ctx, W, H, { text: opoLine.text, kind: opoLine.kind, age: opoLine.t, life: opoLine.life });
+}
+// the lock: today's canvas, under the frame (seen while the copy loads, and if it is ever see-through)
+function drawOpoLock() {
+  ctx.fillStyle = '#05060a';
+  ctx.fillRect(0, 0, W, H);
+  OA('lockUnder', ctx, W, H, { t: OpoLock.t, ready: OpoLock.ready, why: OpoLock.why });
+}
+// a fight lost: the beat before the first build's menu
+function drawOpoLost() {
+  OA('lost', ctx, W, H, { t: OPO.backSecs - OpoLock.backT, T: OPO.backSecs });
+  if (opoLine) OA('voice', ctx, W, H, { text: opoLine.text, kind: opoLine.kind, age: opoLine.t, life: opoLine.life });
+}
+/* ============================ end of ONE POINT OH ============================ */
+
+/* ========================= ONE POINT OH — art hooks =========================
+   Every visual piece of the route, and its sounds, by name. BLANK FOR NOW:
+   each placeholder draws the least that lets the route be played and read
+   (hairlines and plain words), and is meant to be replaced whole. The plan's
+   look is "The fight's look" in ONE-POINT-OH-PLAN.md; ONE-POINT-OH-HOOKS.md
+   is the contract, hook by hook. Replace this block, or any one entry, as a
+   drop-in: nothing outside it draws any of these pieces.
+
+   RULES (as TALES_ART's):
+     · Drawing only. A hook changes nothing of the run, rolls only rnd/rndi/
+       pick (never simRand), and keeps its own caches in its own names (list
+       any top-level `let` in SNAP_LOCAL).
+     · Sandboxed. OA(name, ...) calls it inside g.save()/g.restore(), so a
+       hook may leave the context however it likes.
+     · Fails alone. A hook that throws loses only its own piece (once noted
+       in the console), never the frame. npm run test:opo draws every hook.
+     · ?hooks=1 on the address tags each piece with its hook's name.
+
+   WHAT THEY ARE HANDED. `g` is the 2D context to draw on: the game's own
+   canvas, except the three marked [frame], which draw on the first build's
+   canvas inside the copy (onepointoh/lock.js calls them through OPO_HOST).
+   (w, h) is the screen in CSS pixels. "world" hooks are drawn under the
+   camera: coordinates are the room's. `tex` is the first build, live: the
+   copy's own canvas, still running in its frame (OpoLock.tex), or null when
+   there is no copy (a starter, a test). Draw from it with g.drawImage(tex,
+   ...): it is the real thing playing, not a picture of it.
+   OPO_FIRST is the first build's palette and type, read off 3af8b6d.
+
+   THE ROUTE
+     voice(g, w, h, line)          screen. His voice, low on the screen: the
+                                   coaxing, the door, and every line he says
+                                   in the fight. line { text, kind, age, life }
+                                   with kind coax door still revert face phase
+                                   fight paint out lost. Unseen and unnamed, in
+                                   the first build's type with no glow: the
+                                   first time the old renderer shows up in
+                                   today's.
+     door(g, d)                    world. The old door: sector 01 as it was,
+                                   flat, in the first build's colours, nothing
+                                   lit on it, standing in a lit room.
+                                   d { x, y, r, t, armed 0..1, in 0..1 }
+                                   (`in`: how far into taking you it is)
+     revert(g, w, h, r)            screen. The lock's way in, ~8 s: the game
+                                   coming apart newest first, each piece quoted
+                                   as it goes, ending on the first build's menu.
+                                   r { t, T, k 0..1, i, list, entry } — `list` is
+                                   the record read backwards ({ d, key, n, q,
+                                   say }), `entry` the piece going now.
+     lockUnder(g, w, h, s)         screen. Today's canvas under the copy's frame:
+                                   seen while the frame loads. s { t, ready, why }
+     crack(g, c)          [frame]  world (the first build's). The crack in the
+                                   top wall: today's light leaking through.
+                                   c { x0, x1, cx, y, half, w 0..1 (how wide,
+                                   by itself), p 0..1 (what fire has done),
+                                   held (under fire now), hits [{ x, age }],
+                                   broke, runs, t, world { w, h } }
+     crackSound(audio, w, p) [frame] now and then, a sound from the game it was,
+                                   through the wall. `audio` is the first
+                                   build's own Audio_ (tone, noise). Sound only.
+     lockVoice(g, w, h, line) [frame] screen. His voice in the lock, the first
+                                   time he forbids anything. line { text, age,
+                                   life, i }
+     shatter(g, w, h, s, tex)      screen. The crack gives: the first build
+                                   breaks into panes that keep playing, falling
+                                   away into today's room, lit. s { t, T, k }
+     him(g, h, tex)                world. Him: flat, polygonal, unlit and
+                                   shadowless, built from the first build's own
+                                   shapes, holding the old screen's frame, which
+                                   still plays the first build (tex).
+                                   h { x, y, r, ang, ph 0..4, stage open|fight|
+                                   cascade|out, st, flash, painting, hollow,
+                                   out 0..1, t }
+     front(g, f, tex)              world, under everything. The floor, and the
+                                   living seam between renderers: the first
+                                   build's side flat and unlit (tex may fill
+                                   it), today's lit (once f.light). f { box
+                                   { x0, y0, x1, y1, cw, ch }, cols, rows,
+                                   cells (cols*rows, row-major: under oldBelow
+                                   is the first build's), oldBelow, light,
+                                   cascade 0..1, t, stage }
+     sweep(g, s)                   world. A revert: a front sweeping a band of
+                                   floor back to 1.0. s { vert (moves along y),
+                                   dir, lane, lanes, tell 0..1 (1 once moving),
+                                   pos (px along), box, cols, rows }
+     pane(g, p, tex)               world. A pane of the old frame, flying back
+                                   to land (a live window of the first build).
+                                   p { x, y, r, ang, t, T, hp, hp0, landed, tx, ty }
+     paint(g, p)                   world. His paint, reaching for a restore.
+                                   p { x0, y0, x1, y1, k 0..1 }
+     restore(g, r)                 world. A date's restore standing in the room
+                                   (NOBODY ASKED), until it settles or he paints
+                                   it out. r { x, y, t, paint, settled, gone,
+                                   entry, settle }
+     restoreFx(g, w, h, f)         screen. A date passed: its own flourish, in
+                                   the language of what it brings back (fifteen
+                                   and more; f.entry.key names it: first fracture
+                                   ember codex amalgam coop hacker root patch
+                                   vagrant rush ronin pvp tales since today).
+                                   f { entry, i, t }
+     card(g, c)                    world. HOLLOW: a card peeling off your ship
+                                   and flying into his frame. c { id, n, col,
+                                   x0, y0, x1, y1, k 0..1 }
+     record(g, w, h, rec)          screen. His bar, which is the record: a date
+                                   at the top, from 7 AUG. rec { list, pos (a
+                                   date index, fractional), date, next, k, phase
+                                   { id, n, to, say }, ph, phases [{ n, to }] }
+     cascade(g, w, h, c, tex)      screen. The last hit is today: every era
+                                   flooding back at once, the front swept off,
+                                   today's menu built back around him.
+                                   c { t, T, k, list }
+     out(g, w, h, o)               screen. He is left holding an empty frame.
+                                   o { t, T, k }
+     lost(g, w, h, l)              screen. A fight lost: the beat before the
+                                   first build's menu again. l { t, T }
+     saySound(audio, line)         a dialogue voice for him, as each line
+                                   starts (today's Audio_). Sound only.
+   ========================================================================= */
+// the first build's palette and type (3af8b6d's COL and THE GRID), for the art to draw the old side in
+const OPO_FIRST = {
+  bg: '#05060a', grid: '#0e1626', grid2: '#16243c', wall: '#1d3557', glow: 'rgba(56,189,248,0.16)',
+  player: '#67e8f9', bullet: '#a5f3fc', accent: '#67e8f9', crit: '#fde047', enemy: '#f472b6',
+  font: "'Segoe UI', system-ui, sans-serif"
+};
+const OPO_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') === '1'; } catch (e) { return false; } })();
+const OA_TAGGED = new Set();
+let oaFrame = -1;
+const OA_FAILED = new Set();
+function OA(name, ...a) {
+  const f = OPO_ART[name];
+  if (!f) return;
+  const g = a[0] && typeof a[0].save === 'function' ? a[0] : null;
+  if (oaFrame !== uiTime) { oaFrame = uiTime; OA_TAGGED.clear(); }
+  if (g) g.save();
+  try { f(...a); }
+  catch (e) { if (!OA_FAILED.has(name)) { OA_FAILED.add(name); console.warn('ONE POINT OH art: ' + name + ' threw', e); } }
+  if (g) g.restore();
+}
+// a piece naming itself: once a frame per hook, small, at (x, y) on g. Off unless ?hooks=1
+function oaTag(g, name, x, y) {
+  if (!OPO_HOOK_LABELS || OA_TAGGED.has(name)) return;
+  OA_TAGGED.add(name);
+  g.save();
+  g.font = "600 8px 'Courier New', Consolas, monospace";
+  g.textAlign = 'left'; g.textBaseline = 'top';
+  const w = g.measureText(name).width + 6;
+  g.fillStyle = 'rgba(250,204,21,0.9)'; g.fillRect(x, y, w, 11);
+  g.fillStyle = '#111827'; g.fillText('opo.' + name, x + 3, y + 1.5);
+  g.restore();
+}
+// placeholder text: plain, in the first build's type
+function oaText(g, text, x, y, size, col, a, align) {
+  g.globalAlpha = clamp(a === undefined ? 1 : a, 0, 1);
+  g.font = '600 ' + size + 'px ' + OPO_FIRST.font;
+  g.textAlign = align || 'center'; g.textBaseline = 'middle';
+  g.fillStyle = col || OPO_COL;
+  g.fillText(text, x, y);
+  g.globalAlpha = 1;
+}
+const oaFade = (age, life) => clamp(age / 0.25, 0, 1) * clamp((life - age) / 0.5, 0, 1);
+
+const OPO_ART = {
+  voice(g, w, h, line) {
+    oaText(g, line.text, w / 2, h * 0.8, Math.round(clamp(w * 0.018, 14, 20)), OPO_COL, oaFade(line.age, line.life));
+    oaTag(g, 'voice', w / 2 - 60, h * 0.8 + 14);
+  },
+  door(g, d) {
+    g.globalAlpha = 0.35 + 0.65 * d.armed;
+    g.strokeStyle = OPO_FIRST.wall; g.lineWidth = 2;
+    g.strokeRect(d.x - d.r, d.y - d.r, d.r * 2, d.r * 2);
+    if (d.in > 0) { g.fillStyle = OPO_FIRST.grid; g.fillRect(d.x - d.r, d.y + d.r - d.r * 2 * d.in, d.r * 2, d.r * 2 * d.in); }
+    g.globalAlpha = 1;
+    oaText(g, 'SECTOR 01', d.x, d.y - d.r - 12, 10, OPO_FIRST.accent, 0.8);
+    oaTag(g, 'door', d.x - d.r, d.y + d.r + 4);
+  },
+  revert(g, w, h, r) {
+    g.fillStyle = 'rgba(5,6,10,' + (0.35 + 0.6 * r.k) + ')';
+    g.fillRect(0, 0, w, h);
+    if (r.entry) oaText(g, r.entry.d + '  ·  ' + r.entry.n, w / 2, h * 0.4, 13, '#94a3b8', 0.9);
+    oaTag(g, 'revert', 8, 8);
+  },
+  lockUnder(g, w, h, s) {
+    oaTag(g, 'lockUnder', 8, 8);
+  },
+  crack(g, c) {
+    g.strokeStyle = c.held ? '#ffffff' : '#94a3b8';
+    g.globalAlpha = 0.4 + 0.6 * Math.max(c.w, c.p);
+    g.lineWidth = 2 + 6 * c.p;
+    g.beginPath(); g.moveTo(c.x0, c.y + 2); g.lineTo(c.x1, c.y + 2); g.stroke();
+    g.globalAlpha = 1;
+    oaTag(g, 'crack', c.x0, c.y + 10);
+  },
+  crackSound(audio, w, p) { /* blank: a sound from the game it was */ },
+  lockVoice(g, w, h, line) {
+    oaText(g, line.text, w / 2, h * 0.78, 18, '#e2e8f0', oaFade(line.age, line.life));
+    oaTag(g, 'lockVoice', w / 2 - 50, h * 0.78 + 14);
+  },
+  shatter(g, w, h, s, tex) {
+    if (tex && s.k < 0.5) { g.globalAlpha = 1 - s.k * 2; g.drawImage(tex, 0, 0, w, h); g.globalAlpha = 1; }
+    oaTag(g, 'shatter', 8, 8);
+  },
+  him(g, hm, tex) {
+    g.strokeStyle = OPO_COL; g.lineWidth = 2;
+    g.globalAlpha = 1 - hm.out * 0.5;
+    g.beginPath();
+    for (let i = 0; i < 8; i++) { const q = hm.ang + i * TAU / 8; g.lineTo(hm.x + Math.cos(q) * hm.r, hm.y + Math.sin(q) * hm.r); }
+    g.closePath(); g.stroke();
+    g.strokeRect(hm.x - hm.r * 0.6, hm.y - hm.r * 0.45, hm.r * 1.2, hm.r * 0.9);   // the old screen's frame, in his hands
+    if (tex && !hm.out) g.drawImage(tex, hm.x - hm.r * 0.6, hm.y - hm.r * 0.45, hm.r * 1.2, hm.r * 0.9);
+    g.globalAlpha = 1;
+    oaTag(g, 'him', hm.x + hm.r + 4, hm.y - hm.r);
+  },
+  front(g, f, tex) {
+    const B = f.box;
+    g.strokeStyle = 'rgba(148,163,184,0.25)'; g.lineWidth = 1;
+    g.fillStyle = 'rgba(14,22,38,0.55)';
+    for (let r = 0; r < f.rows; r++) for (let c = 0; c < f.cols; c++)
+      if (f.cells[r * f.cols + c] < f.oldBelow) {
+        g.fillRect(B.x0 + c * B.cw, B.y0 + r * B.ch, B.cw, B.ch);
+        g.strokeRect(B.x0 + c * B.cw + 0.5, B.y0 + r * B.ch + 0.5, B.cw - 1, B.ch - 1);
+      }
+    oaTag(g, 'front', B.x0 + 4, B.y0 + 4);
+  },
+  sweep(g, s) {
+    const B = s.box;
+    g.strokeStyle = OPO_COL; g.lineWidth = 2;
+    g.setLineDash(s.tell < 1 ? [8, 8] : []);
+    g.globalAlpha = s.tell < 1 ? 0.5 : 0.9;
+    if (s.vert) {
+      const x0 = B.x0 + s.lane * B.cw, y = s.dir > 0 ? B.y0 + s.pos : B.y1 - s.pos;
+      g.strokeRect(x0, B.y0, s.lanes * B.cw, B.y1 - B.y0);
+      if (s.tell >= 1) { g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + s.lanes * B.cw, y); g.stroke(); }
+    } else {
+      const y0 = B.y0 + s.lane * B.ch, x = s.dir > 0 ? B.x0 + s.pos : B.x1 - s.pos;
+      g.strokeRect(B.x0, y0, B.x1 - B.x0, s.lanes * B.ch);
+      if (s.tell >= 1) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y0 + s.lanes * B.ch); g.stroke(); }
+    }
+    g.setLineDash([]); g.globalAlpha = 1;
+    oaTag(g, 'sweep', B.x0 + 4, B.y0 + 18);
+  },
+  pane(g, p, tex) {
+    g.strokeStyle = OPO_COL; g.lineWidth = 1.5;
+    g.globalAlpha = p.landed ? Math.max(0, 1 - p.landed) : 1;
+    g.strokeRect(p.x - p.r, p.y - p.r * 0.7, p.r * 2, p.r * 1.4);
+    if (!p.landed) { g.setLineDash([4, 6]); g.beginPath(); g.arc(p.tx, p.ty, p.r, 0, TAU); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = 1;
+    oaTag(g, 'pane', p.x + p.r + 2, p.y - p.r);
+  },
+  paint(g, p) {
+    g.strokeStyle = OPO_COL; g.lineWidth = 1 + 3 * p.k; g.globalAlpha = 0.6;
+    g.beginPath(); g.moveTo(p.x0, p.y0); g.lineTo(p.x1, p.y1); g.stroke();
+    g.globalAlpha = 1;
+    oaTag(g, 'paint', (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2);
+  },
+  restore(g, r) {
+    g.globalAlpha = r.gone ? Math.max(0, 1 - r.gone) : 1;
+    g.strokeStyle = r.settled ? '#67e8f9' : '#94a3b8'; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(r.x, r.y, 46, 0, TAU); g.stroke();
+    if (!r.settled && r.paint > 0) { g.beginPath(); g.arc(r.x, r.y, 52, -Math.PI / 2, -Math.PI / 2 + TAU * r.paint); g.stroke(); }
+    if (r.entry) oaText(g, r.entry.n, r.x, r.y, 10, '#cbd5e1', 0.9);
+    g.globalAlpha = 1;
+    oaTag(g, 'restore', r.x + 50, r.y - 50);
+  },
+  restoreFx(g, w, h, f) {
+    if (f.entry) oaText(g, f.entry.d + '  ·  ' + f.entry.n, w / 2, h * 0.16, 12, '#e2e8f0', clamp(1.6 - f.t, 0, 1));
+    oaTag(g, 'restoreFx', w / 2 + 120, h * 0.16);
+  },
+  card(g, c) {
+    const x = lerp(c.x0, c.x1, c.k), y = lerp(c.y0, c.y1, c.k);
+    g.strokeStyle = c.col; g.lineWidth = 1.5; g.globalAlpha = 1 - c.k * 0.5;
+    g.strokeRect(x - 12, y - 16, 24, 32);
+    g.globalAlpha = 1;
+    oaTag(g, 'card', x + 14, y - 16);
+  },
+  record(g, w, h, rec) {
+    oaText(g, rec.date.d, w / 2, 30, 18, OPO_COL, 1);
+    g.strokeStyle = 'rgba(226,232,240,0.5)'; g.lineWidth = 1;
+    const bw = Math.min(520, w * 0.6), x0 = (w - bw) / 2, n = rec.list.length - 1;
+    g.beginPath(); g.moveTo(x0, 46); g.lineTo(x0 + bw, 46); g.stroke();
+    g.fillStyle = OPO_COL; g.fillRect(x0 + bw * (rec.pos / n) - 1, 41, 2, 10);
+    oaText(g, rec.phase.n, w / 2, 60, 9, '#94a3b8', 0.8);
+    oaTag(g, 'record', x0 + bw + 6, 40);
+  },
+  cascade(g, w, h, c, tex) {
+    oaTag(g, 'cascade', 8, 8);
+  },
+  out(g, w, h, o) {
+    oaTag(g, 'out', 8, 8);
+  },
+  lost(g, w, h, l) {
+    g.fillStyle = 'rgba(5,6,10,' + clamp(l.t / l.T, 0, 1) + ')';
+    g.fillRect(0, 0, w, h);
+    oaTag(g, 'lost', 8, 8);
+  },
+  saySound(audio, line) { /* blank: a dialogue voice for him */ }
+};
+/* ======================== end of ONE POINT OH art hooks ======================== */
 
 /* ------------------------------- the rites --------------------------------
    One entry per pilot: which of the five finales is that hull's, and how its
@@ -45455,6 +46782,7 @@ function render() {
   ctx.fillStyle = COL.bg;
   ctx.fillRect(0, 0, W, H);
   if (state === 'pvp') { if (PVP) PVP.draw(); return; }    // PvP mode's own screens, over an empty canvas
+  if (state === 'opolock') { drawOpoLock(); return; }      // ONE POINT OH: the first build has the screen, in its frame
   // whichever overlay draws the slider re-publishes it; otherwise it is gone
   if (!volDrag) volRect = null;
   if (!sensDrag) sensRect = null;
@@ -45505,6 +46833,7 @@ function render() {
   drawGrid(ox, oy);
   drawArena();
   hlDrawFloor();              // ALL HALLOWS: an area's floor
+  drawOpoFloor();             // ONE POINT OH: the front, the two renderers' floor
   pilotsDraw(() => outsideDraw('back'));   // an outside pilot's: what it makes of the room itself (OUTSIDE PILOTS)
   drawHazards();
   drawDeepNodes();
@@ -45560,6 +46889,7 @@ function render() {
   pilotsDraw(drawSuUnderBodies);   // SUPERUSER: shadows under the bodies the mane has lifted
   drawCorpses();
   drawEnemies();
+  drawOpoWorld();             // ONE POINT OH: the old door, his panes and paint, him
   pilotsDraw(() => {
     drawRoninWounds();         // RONIN's DEEP WOUND, on the bodies that carry it
     drawSentries();
@@ -45684,6 +47014,7 @@ function render() {
   drawRootCmdHud();
   drawHaltBar();
   drawTribunalHud();
+  drawOpoScreen();      // ONE POINT OH: his voice, the revert, the shatter, the record, the cascade
   drawVrScreen();       // THE VAGRANT'S RITE: the entrance, the duel's letterbox and prompts
   { const rq = roninPhase(); if (rq) drawRoninIntroScreen(rq); }   // RONIN's lead-in, over the frame
   { const vq = vowPhase(); if (vq) drawRoninVowScreen(vq); }       // RONIN's V: its cut-in, then the vow's edge
@@ -45737,7 +47068,10 @@ function render() {
   if (state === 'pause') drawPause();
   if (state === 'tour') drawTour();      // FIRST FLIGHT: the HUD, part by part
   if (state === 'codex') drawCodex();
-  if (state === 'dead') { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
+  if (state === 'dead') {
+    if (lastStats && lastStats.opo) drawOpoLost();   // ONE POINT OH: a lost fight is no run, and the lock holds
+    else { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
+  }
   if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
   drawTut();            // FIRST FLIGHT: a lesson, or THE WARDEN's next move, above the tales' line
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
@@ -55201,6 +56535,7 @@ function drawEnemiesBody() {
        shape his BOSSES entry carries, so a stray triangle followed him around
        his own boss fight. */
     if (e.founder) continue;
+    if (e.opo) continue;                 // ONE POINT OH is drawn by his own hook (OPO_ART.him)
 
     // glow
     ctx.globalCompositeOperation = 'lighter';
@@ -58600,7 +59935,7 @@ function drawHUD() {
      enemies, so the finder below would label the whole fight after whichever
      piece happens to sit first in the array — and show that piece's health
      instead of the pool. */
-  const boss = amalgam ? null
+  const boss = amalgam || opo ? null       // ONE POINT OH's bar is the record (OPO_ART.record)
     : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow && !e.hacked);
   { const bw2 = Math.min(560, W * 0.62); HUD_AT.boss = { x: (W - bw2) / 2, y: 22, w: bw2, h: 36 }; }   // where its bar goes, up or not
   if (amalgam) drawAmalgamBar();
@@ -63782,6 +65117,7 @@ function runSaveable() {
   if (state !== 'play' && state !== 'pause') return false;
   if (P.outside || inHub || inVigil || (Chal.on && Chal.on.hl)) return false;
   if (intrusion || amalOpen || choice || campVisit || turning || con.open || arrival) return false;
+  if (opo || opoRevert) return false;    // ONE POINT OH: the fight and the way in are never kept
   return QOL.runN < RUN_CONTINUES;
 }
 // the run as it stands, kept; true if it was
@@ -68961,7 +70297,8 @@ const Account = {
      one is not worth the risk. Held back, it still reaches the account,
      because every push is merged over the account's copy first. */
   adopt(remote) {
-    if (!remote || state !== 'menu') return false;
+    // at the menu, or in ONE POINT OH's lock (a lift made on another device lets this one go)
+    if (!remote || (state !== 'menu' && !(state === 'opolock' && OpoLock.mode === 'copy'))) return false;
     Save.profile = Save.repair(Save.merge(Save.profile, remote));
     Save.profile.skin = skinClean(Save.profile.skin);
     Save.profile.awards = Awards.clean(Save.profile.awards);
@@ -68971,6 +70308,7 @@ const Account = {
     Save.reconcileClears();
     Save.writeLocal(); Save.flush();
     skinRefresh();
+    if (state === 'opolock' && !opoLocked()) { OpoLock.leave(); state = 'menu'; }
     return true;
   },
 
@@ -71733,6 +73071,7 @@ const SNAP_LOCAL = new Set([
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
   'mpHelloKept',                          // the other player's hello, read again once their outside pilot is here
+  'oaFrame', 'opoRecordList',             // ONE POINT OH: the art's frame, and the record, built from the CHANGELOG
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
@@ -71748,7 +73087,8 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   // what the drawing keeps: canvases and sprites, made again wherever they are missing
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
-  'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages']);
+  'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
+  'OA_TAGGED', 'OA_FAILED']);             // ONE POINT OH's art: what it tagged, and which hook has thrown
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
@@ -73818,8 +75158,8 @@ function hackable(e) {
   if (state !== 'play') return false;
   if (e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd') return false;
   if (e.type === 'sheet' || e.type === 'lastseen') return false;   // cloth, and nobody: what was under a sheet is (hlSheetTear)
-  if (e.shadow > 0 || e.amalPart || e.virus || e.founder) return false;
-  if (e.boss === 'unwritten' || e.boss === 'amalgam') return false;
+  if (e.shadow > 0 || e.amalPart || e.virus || e.founder || e.opo) return false;
+  if (e.boss === 'unwritten' || e.boss === 'amalgam' || e.boss === 'onepointoh') return false;
   if (e.boss === 'root' || e.boss === 'founder' || e.boss === 'shopkeeper' || HL_BOSSES[e.boss]) return false;
   return true;
 }

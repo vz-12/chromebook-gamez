@@ -105,7 +105,9 @@ const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
 /* unlock-event: ALL HALLOWS open to the account before its date, to try it
    on a real device. The vigil's count still refuses what is reported outside
    its window, so a test run lights no real candles. */
-const ALL_PERKS = ['unlock-all', 'unlock-evo', 'unlock-event'];
+/* opo-lift: ONE POINT OH's lock, lifted by hand ([\] in the lock), for real
+   trouble on a dev's own save. */
+const ALL_PERKS = ['unlock-all', 'unlock-evo', 'unlock-event', 'opo-lift'];
 
 /* An account's perk list, as the skins and perks it stands for. */
 function perksGive(list) {
