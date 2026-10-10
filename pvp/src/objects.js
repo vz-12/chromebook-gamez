@@ -9,16 +9,18 @@
                   object once the verdict has been kept long enough.
      Matchmaker   one per queue (rules.js, QUEUES): the tickets waiting, the
                   pairing, and the queue's ratings, which only it writes, one
-                  match at a time (records.js, applyRating).
+                  match at a time (records.js, applyRating). A ticket nobody
+                  could be paired with for a while is found a bot (bots.js).
 
    The platform hands an object a new request while it waits on D1 or on
    another object, so each runs its changes one at a time itself (`one`):
    two reports at once can never each write over the other.
    ========================================================================= */
 import { REF, cleanReport, newSide, take, decide, nextLook, recorded } from './referee.js';
-import { recordMatch, applyRating, topOf } from './records.js';
+import { recordMatch, applyRating, topOf, recordBot } from './records.js';
 import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
 import { TOP_LEAGUE, tripChallenges, targetOf, challengeBegun, challengeEnded } from './challenge.js';
+import { BOTS, botFor, botRating } from './bots.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -196,11 +198,13 @@ const windowOf = (queue, waited) => {
   const [from, per, most] = MM.WINDOW[queue];
   return Math.min(most, from + per * waited / 1000);
 };
-// what a player polling is told: still waiting, or the match found (held for KEEP once first collected)
+/* What a player polling is told: still waiting (with a bot to fly
+   meanwhile, once it has one: bots.js), or the match found (held for KEEP
+   once first collected). */
 function status(t, now, tab) {
   if (!t) return { state: 'none' };
   if (tab && t.tab && t.tab !== tab) return { state: 'elsewhere' };    // the account searches from another tab now
-  if (!t.match) return { state: 'waiting', waited: now - t.since };
+  if (!t.match) return t.bot ? { state: 'waiting', waited: now - t.since, bot: t.bot } : { state: 'waiting', waited: now - t.since };
   if (!t.got) t.got = now;
   return { state: 'matched', match: t.match };
 }
@@ -210,7 +214,17 @@ function status(t, now, tab) {
    ticket is paired first, with whoever is nearest within how long it has
    waited (cost, windowOf), never across brackets (rules.js, bracketOf),
    never with itself. A pair is given a Match (above), the older ticket
-   hosts, and each player finds it at their next poll. */
+   hosts, and each player finds it at their next poll.
+
+   Bots (bots.js) come after all of that, never before it: a ticket still
+   unpaired once the real players have been, that has waited BOTS.after
+   (or BOTS.again since its last bot), is given one to fly while it waits.
+   It stays in the queue, as pairable as ever: a real player who can be
+   paired with it is, bot or no bot. In ranked a bot match is rated (the
+   `bot` op, below): the queue keeps each one its player's page has started
+   (q.bots) until it is over, walked out of, gone quiet or let go for a real
+   opponent, apart from the tickets, so a ticket dropped meanwhile loses
+   nothing. */
 export class Matchmaker extends Serial {
   async handle(op, b, now) {
     if (op === 'rate') {
@@ -222,18 +236,31 @@ export class Matchmaker extends Serial {
     }
     if (!Object.prototype.hasOwnProperty.call(QUEUES, b.queue)) return reply({ error: 'unknown queue' }, 400);
     const q = (await this.ctx.storage.get('q')) || { queue: b.queue, tickets: [] };
+    q.bots = q.bots || [];
     this.sweep(q, now);
+    await this.expire(q, now);
     let t = q.tickets.find(x => x.acct === b.acct);
 
+    if (op === 'bot') {
+      if (t && !(b.tab && t.tab && t.tab !== b.tab)) t.seen = now;      // its page, still there
+      const [code, body] = await this.botOp(q, t, b, now);
+      await this.store(q, now);
+      return reply(body, code);
+    }
     if (op === 'join') {
       // a match found and not yet collected stays found; anything else starts again
       if (!(t && t.match && !t.got)) {
         if (t) q.tickets.splice(q.tickets.indexOf(t), 1);
-        t = Object.assign({}, b.ticket, { acct: b.acct, tab: b.tab || null, since: now, seen: now, match: null, at: 0, got: 0 });
+        t = Object.assign({}, b.ticket, { acct: b.acct, tab: b.tab || null, since: now, seen: now, match: null, at: 0, got: 0,
+                                          bot: null, botAt: now + BOTS.after[b.queue] });
         q.tickets.push(t);
       } else t.tab = b.tab || t.tab;
     } else if (op === 'poll') {
-      if (t && !(b.tab && t.tab && t.tab !== b.tab)) t.seen = now;
+      if (t && !(b.tab && t.tab && t.tab !== b.tab)) {
+        t.seen = now;
+        // its player is done with its bot: another only after a while more with nobody
+        if (t.bot && b.botOver === t.bot.id) { t.bot = null; t.botAt = now + BOTS.again; }
+      }
     } else if (op === 'leave') {
       // only the tab holding the ticket gives it up
       if (t && !t.match && !(b.tab && t.tab && t.tab !== b.tab)) { q.tickets.splice(q.tickets.indexOf(t), 1); t = null; }
@@ -248,13 +275,58 @@ export class Matchmaker extends Serial {
     return reply(out);
   }
 
-  // the beat: gone tickets dropped, and anyone who can be paired now is
+  // the beat: gone tickets dropped, bot matches gone quiet lost, and anyone who can be paired now is
   async look(now) {
     const q = await this.ctx.storage.get('q');
     if (!q) return;
+    q.bots = q.bots || [];
     this.sweep(q, now);
+    await this.expire(q, now);
     await this.pair(q, now);
     await this.store(q, now);
+  }
+
+  /* A bot match (bots.js), from its player's page. `start`: the bot this
+     ticket was handed, from this tab; in a rated queue it is kept from now
+     on, with the rating it is played against. Then `over`, with the score
+     ([the player's, the bot's], best of three), no sooner than BOTS.least
+     after the start; or `quit`, a loss. Each is rated once, and a ticket
+     dropped meanwhile changes nothing. */
+  async botOp(q, t, b, now) {
+    if (b.as === 'start') {
+      if (!t || (b.tab && t.tab && t.tab !== b.tab) || !t.bot || t.bot.id !== b.id) return [404, { error: 'no such bot' }];
+      if (!QUEUES[q.queue].rated) return [200, { ok: true, rated: false }];
+      if (!q.bots.some(x => x.id === b.id))
+        q.bots.push({ id: t.bot.id, acct: t.acct, name: t.bot.name, pilot: t.bot.pilot, mine: t.pilot, league: t.league,
+                      rating: botRating(t.rating), rd: BOTS.rd, at: now, queue: q.queue });
+      return [200, { ok: true, rated: true }];
+    }
+    const x = q.bots.find(y => y.id === b.id && y.acct === b.acct);
+    if (!x) return [404, { error: 'no such bot match' }];
+    let how;
+    if (b.as === 'quit') how = { won: false, score: null, v: 'forfeit', reason: 'quit' };
+    else {
+      if (now - x.at < BOTS.least) return [409, { error: 'too soon' }];
+      const sc = b.score;
+      if (!(Array.isArray(sc) && sc.length === 2 && sc.every(n => Number.isInteger(n) && n >= 0) && Math.max(...sc) === 2 && Math.min(...sc) <= 1))
+        return [400, { error: 'bad score' }];
+      how = { won: sc[0] === 2, score: sc, v: 'played', reason: 'bot' };
+    }
+    return this.botKept(q, x, how, now, t);
+  }
+  // a bot match's end, written and rated (records.js); a write that fails keeps it, to be asked again
+  async botKept(q, x, how, now, t) {
+    let r;
+    try { r = await recordBot(this.env.DB, x, how, now, BOTS.ceiling); }
+    catch (e) { console.error('pvp bot record', x.id, e && e.message); return [503, { error: 'not written: try again' }]; }
+    q.bots.splice(q.bots.indexOf(x), 1);
+    if (t && t.bot && t.bot.id === x.id) { t.bot = null; t.botAt = now + BOTS.again; }
+    return [200, { ok: true, rated: true, rating: r }];
+  }
+  // started bot matches that have said nothing of their end for BOTS.expire: losses
+  async expire(q, now) {
+    for (const x of q.bots.filter(y => now - y.at > BOTS.expire))
+      await this.botKept(q, x, { won: false, score: null, v: 'forfeit', reason: 'quiet' }, now, q.tickets.find(t => t.acct === x.acct));
   }
 
   sweep(q, now) {
@@ -263,7 +335,9 @@ export class Matchmaker extends Serial {
 
   async store(q, now) {
     await this.ctx.storage.put('q', q);
+    const bots = q.bots || [];
     if (q.tickets.length) await this.ctx.storage.setAlarm(now + MM.TICK);
+    else if (bots.length) await this.ctx.storage.setAlarm(Math.min(...bots.map(x => x.at)) + BOTS.expire + 1000);
     else await this.ctx.storage.deleteAlarm();
   }
 
@@ -305,6 +379,8 @@ export class Matchmaker extends Serial {
         sides: [t, u].map(x => ({ acct: x.acct, name: x.name, pilot: x.pilot }))
       }).catch(e => { console.error('pvp match create', e && e.message); return null; });
       if (!res || !res.ok) continue;      // both wait on, and are tried again at the next beat
+      // a bot match either was playing is let go, unrated: a real opponent comes first
+      if (q.bots) q.bots = q.bots.filter(x => x.acct !== t.acct && x.acct !== u.acct);
       // a hidden pilot's match with the one its challenge went to: that challenge is on air (challenge.js)
       if (hidden) {
         const [h, o] = t.hidden ? [t, u] : [u, t];
@@ -316,7 +392,13 @@ export class Matchmaker extends Serial {
       for (const [side, x] of [[0, t], [1, u]]) {
         x.match = { id, side, role: side ? 'guest' : 'host', queue, rated: def.rated && !hidden, league, bestOf: rule.bestOf, sides };
         x.at = now;
+        x.bot = null;
       }
+    }
+    // only now, with every real pairing made: a bot for whoever has waited long enough with nobody (bots.js)
+    for (const t of open) {
+      if (t.match || taken.has(t) || t.hidden || t.bot) continue;
+      if (now >= (t.botAt || t.since + BOTS.after[queue])) t.bot = botFor(t);
     }
   }
 }

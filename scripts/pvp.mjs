@@ -644,6 +644,349 @@ section('matchmaking: the queues, the pairing, and the ratings');
   Date.now = real;
 }
 
+section('bots: an empty queue, filled only after every real pairing (pvp/src/bots.js)');
+{
+  const { BOTS, skillOf, botFor, botRating } = await import('../pvp/src/bots.js');
+  const { glicko2 } = await import('../pvp/src/glicko.js');
+  const real = Date.now;
+  let clock = real() + 3600 * 1000;      // past every earlier section's tickets and limits
+  Date.now = () => clock;
+  const later = ms => { clock += ms; };
+
+  // how good: the higher the player's rating, the better the bot; flat past either end
+  const pts = [700, 900, 1200, 1500, 1800, 2000, 2700].map(skillOf);
+  ok(pts.every((s, i) => i === 0 || s >= pts[i - 1]) && pts[2] > pts[1] && pts[5] > pts[4] && pts[0] === pts[1] && pts[5] === pts[6],
+     'a bot is better the higher the rating it meets, flat past either end', pts);
+  ok(pts[0] >= 0.2 && pts[6] === 1 && skillOf(START.rating) > 0.55 && skillOf(START.rating) < 0.8 && skillOf(NaN) === pts[0],
+     'hard in general: even the gentlest is no pushover, a new player\'s 1500 meets a capable one, and 2000 the best there is',
+     [pts[0], skillOf(START.rating)]);
+  ok(botRating(1500) === 1500 + BOTS.edge && botRating(400) === BOTS.curve[0][0] + BOTS.edge && botRating(2600) === BOTS.curve[2][0] + BOTS.edge,
+     'rated, a bot stands a notch above the rating its skill stands for, within the curve', [botRating(1500), botRating(400), botRating(2600)]);
+
+  // what: by the ticket's bracket, as the queue's rules have it
+  const draw = (bracket, rating) => Array.from({ length: 400 }, () => botFor({ bracket, rating }));
+  const lo = draw('base', 1300), hi = draw('own+awake', 1900), cas = draw('casual', 1300), casTop = draw('casual', 2100);
+  ok(lo.every(b => ['runner', 'ember'].includes(b.pilot) && !b.awake) && new Set(lo.map(b => b.pilot)).size === 2,
+     'ranked below platinum: the base pilots, never awake');
+  ok(new Set(hi.map(b => b.pilot)).size === 4 && hi.some(b => b.awake) && hi.every(b => !b.awake || BOTS.awakens.includes(b.pilot)),
+     'from platinum, everything goes: any pilot, awake where it has a form', [...new Set(hi.map(b => b.pilot + (b.awake ? '+' : '')))]);
+  ok(cas.every(b => !b.awake) && casTop.some(b => b.awake) && new Set(cas.map(b => b.pilot)).size === 4,
+     'casual: any pilot, awake only once the bot is good enough to use its kit');
+  ok(lo.every(b => /^[0-9a-f]{8}$/.test(b.id) && /^BOT [A-Z]+$/.test(b.name) && b.skill === Math.round(skillOf(1300) * 100) / 100
+                   && Number.isInteger(b.seed) && b.seed >= 0) && new Set(lo.map(b => b.id)).size === lo.length,
+     'each with its own mark and dice, its skill, and a name that says BOT', lo[0]);
+  ok(!('hp' in lo[0]) && !('ups' in lo[0]) && !('dmg' in lo[0]), 'and nothing else: no health, damage or upgrades of its own');
+
+  // the Matchmaker, on an object of its own: tickets by hand
+  const mmB = envPvp.MATCHMAKER.get(envPvp.MATCHMAKER.idFromName('bot-test'));
+  const tk = (rating, extra) => Object.assign({ name: 'x', pilot: 'runner', awake: false, ups: [], rating, league: 'bronze', bracket: 'casual', region: 'EU' }, extra);
+  const mq = (op, acct, b = {}) => mmB.fetch('https://do/' + op, { method: 'POST', body: JSON.stringify(Object.assign({ queue: 'casual', acct }, b)) }).then(r => r.json());
+  const A = BOTS.after.casual;
+  // time passing, with the polls every two seconds that keep a ticket (MM.STALE)
+  const pass = async (ms, ...polls) => { for (let t = 0; t < ms; t += 2000) { later(Math.min(2000, ms - t)); for (const p of polls) await p(); } };
+
+  ok((await mq('join', 'a1', { ticket: tk(1500) })).state === 'waiting', 'alone in casual: waiting');
+  await pass(A - 2000, () => mq('poll', 'a1'));
+  ok(!('bot' in (await mq('poll', 'a1'))), 'and no bot before its wait is up');
+  later(2000);
+  const g1 = await mq('poll', 'a1');
+  ok(g1.state === 'waiting' && g1.bot && g1.bot.skill === Math.round(skillOf(1500) * 100) / 100,
+     'nobody after ' + A / 1000 + ' s: a bot to fly meanwhile, as good as its rating says, and still waiting', g1);
+  later(2000);
+  ok((await mq('poll', 'a1')).bot.id === g1.bot.id, 'the same bot, asked again');
+  // a real player arrives: paired with them, bot or no bot
+  const g2 = await mq('join', 'a2', { ticket: tk(1500) });
+  const g3 = await mq('poll', 'a1');
+  ok(g2.state === 'matched' && g3.state === 'matched' && g3.match.id === g2.match.id && !('bot' in g3) && !('bot' in g2),
+     'a real player arriving is paired with the one flying a bot, at once, and the bot is gone', [g2.state, g3]);
+
+  /* Past its wait with no bot found yet (its last poll was before the wait
+     was up), and a real player comes: the pairing runs first. */
+  later(31000);
+  await mq('join', 'b1', { ticket: tk(1500) });
+  later(A / 2 + 1000); await mq('poll', 'b1');
+  later(A / 2 + 1000);
+  const h2 = await mq('join', 'b2', { ticket: tk(1510) });
+  const h1 = await mq('poll', 'b1');
+  ok(h2.state === 'matched' && h1.state === 'matched' && !('bot' in h1), 'the real pairing first: one past its wait still gets the player, not a bot', [h1, h2]);
+
+  // two who can't be paired yet: each a bot meanwhile, then each other once the window covers them
+  later(31000);
+  await mq('join', 'c1', { ticket: tk(1000) }); await mq('join', 'c2', { ticket: tk(2000) });
+  let cAt = 0, c1, c2, bots = 0;
+  for (; cAt < 120; cAt += 2) {
+    later(2000);
+    c1 = await mq('poll', 'c1'); c2 = await mq('poll', 'c2');
+    if (c1.bot && c2.bot) bots++;
+    if (c1.state === 'matched') break;
+  }
+  const covers = (1000 - MM.WINDOW.casual[0]) / MM.WINDOW.casual[1];
+  ok(bots > 0 && c1.state === 'matched' && c2.state === 'matched' && c1.match.id === c2.match.id && cAt + 2 >= covers && cAt <= covers + 4,
+     'a thousand apart: both fly bots meanwhile, and meet the moment the window covers them (' + covers.toFixed(0) + ' s)', [cAt + 2, bots]);
+
+  // done with a bot: another only after a while more with nobody
+  later(31000);
+  await mq('join', 'd1', { ticket: tk(1800), tab: 'aaaaaaaaaaaaaaaa' });
+  const pd = () => mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa' });
+  await pass(A, pd);
+  const d1 = (await mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa' })).bot;
+  ok((await mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa', botOver: '00000000' })).bot.id === d1.id, 'done with some other bot: this one stays');
+  ok((await mq('poll', 'd1', { tab: 'bbbbbbbbbbbbbbbb', botOver: d1.id })).state === 'elsewhere'
+     && (await mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa' })).bot.id === d1.id, 'nor from another tab');
+  ok(!('bot' in (await mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa', botOver: d1.id }))), 'done with it: gone, still waiting');
+  await pass(BOTS.again - 2000, pd);
+  ok(!('bot' in (await pd())), 'and none again for a while');
+  later(2000);
+  const d2 = (await mq('poll', 'd1', { tab: 'aaaaaaaaaaaaaaaa' })).bot;
+  ok(d2 && d2.id !== d1.id && d2.skill === Math.round(skillOf(1800) * 100) / 100, 'then another, a new one', d2);
+
+  // ranked waits longer, and a hidden pilot's ticket waits for its #1 and nothing else
+  const mmR = envPvp.MATCHMAKER.get(envPvp.MATCHMAKER.idFromName('bot-test-ranked'));
+  const rq = (op, acct, b = {}) => mmR.fetch('https://do/' + op, { method: 'POST', body: JSON.stringify(Object.assign({ queue: 'ranked', acct }, b)) }).then(r => r.json());
+  later(31000);
+  await rq('join', 'e1', { ticket: tk(1500, { bracket: 'base' }) });
+  await rq('join', 'e2', { ticket: tk(1500, { bracket: 'hidden', hidden: true, league: 'hidden', pilot: 'x0' }) });
+  const pe = () => Promise.all([rq('poll', 'e1'), rq('poll', 'e2')]);
+  await pass(A, pe);
+  ok(!('bot' in (await rq('poll', 'e1'))), 'ranked: not yet at casual\'s wait');
+  await pass(BOTS.after.ranked - A, pe);
+  const e1 = await rq('poll', 'e1');
+  ok(e1.bot && ['runner', 'ember'].includes(e1.bot.pilot) && !e1.bot.awake, 'at ranked\'s own: a bot to its league\'s rules', e1.bot);
+  await pass(60000, pe);
+  const e2 = await rq('poll', 'e2');
+  ok(e2.state === 'waiting' && !('bot' in e2), 'a hidden pilot is never found a bot', e2);
+
+  /* Rated (ranked): the bot match is kept from its start, apart from the
+     ticket, until it is over, walked out of, gone quiet or let go for a real
+     opponent; once each, and never past the ceiling on a win. */
+  const mmX = envPvp.MATCHMAKER.get(envPvp.MATCHMAKER.idFromName('bot-rated'));
+  const xq = (op, acct, b = {}) => mmX.fetch('https://do/' + op, { method: 'POST', body: JSON.stringify(Object.assign({ queue: 'ranked', acct }, b)) })
+    .then(async r => Object.assign({ status: r.status }, await r.json()));
+  const kept = () => envPvp.MATCHMAKER.instances.get('bot-rated').data.get('q').bots;
+  const rowX = id => DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get('bot' + id);
+  const ratX = acct => DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(acct, seasonOf(clock));
+  const R = BOTS.after.ranked;
+  // a ticket handed a bot (waiting out ranked's wait, polled as a page would)
+  const handed = async (acct, rating, extra) => {
+    later(31000);
+    await xq('join', acct, { ticket: tk(rating, Object.assign({ bracket: 'base', league: 'bronze', pilot: 'ember' }, extra)) });
+    await pass(R, () => xq('poll', acct));
+    return (await xq('poll', acct)).bot;
+  };
+  const x1 = await handed('x1', 1500);
+  ok(x1 && (await xq('bot', 'x1', { id: '00000000', as: 'start' })).status === 404 && (await xq('bot', 'x2', { id: x1.id, as: 'start' })).status === 404,
+     'only the bot this ticket was handed can be started, and only by its own player');
+  const sx = await xq('bot', 'x1', { id: x1.id, as: 'start' });
+  const k1 = kept().find(k => k.id === x1.id);
+  ok(sx.status === 200 && sx.rated === true && k1 && k1.acct === 'x1' && k1.rating === botRating(1500) && k1.rd === BOTS.rd && k1.mine === 'ember'
+     && k1.name === x1.name && k1.pilot === x1.pilot && k1.league === 'bronze', 'started in ranked: rated, kept with the rating it is played against', [sx, k1]);
+  ok((await xq('bot', 'x1', { id: x1.id, as: 'over', score: [2, 0] })).status === 409 && !rowX(x1.id), 'a result straight away: too soon, refused');
+  await pass(BOTS.least, () => xq('poll', 'x1'));
+  ok((await xq('bot', 'x1', { id: x1.id, as: 'over', score: [3, 0] })).status === 400 && (await xq('bot', 'x1', { id: x1.id, as: 'over', score: [2, 2] })).status === 400
+     && (await xq('bot', 'x1', { id: x1.id, as: 'over', score: [1, 1] })).status === 400, 'a score that is no best of three: refused');
+  const w1 = await xq('bot', 'x1', { id: x1.id, as: 'over', score: [2, 1] });
+  const want = Math.round(glicko2(START, [{ rating: botRating(1500), rd: BOTS.rd, s: 1 }]).rating);
+  const r1x = rowX(x1.id), gx1 = ratX('x1');
+  ok(w1.status === 200 && w1.rated === true && w1.rating.before === 1500 && w1.rating.after === want && w1.rating.games === 1 && w1.rating.left === PLACEMENTS - 1,
+     'won 2–1: rated against the bot\'s rating, and the result screen told before and after', w1);
+  ok(r1x && r1x.a === 'x1' && r1x.b === 'bot:' + x1.name && r1x.rated === 1 && r1x.applied === 1 && r1x.verdict === 'played' && r1x.reason === 'bot'
+     && r1x.winner === 0 && r1x.score_a === 2 && r1x.score_b === 1 && r1x.a_pilot === 'ember' && r1x.b_pilot === x1.pilot && r1x.queue === 'ranked' && r1x.league === 'bronze',
+     'recorded: the player against the bot by name, played, rated', r1x);
+  ok(gx1 && Math.round(gx1.rating) === want && gx1.games === 1 && gx1.wins === 1 && gx1.losses === 0 && gx1.rd < START.rd, 'and the player\'s rating row moved, once', gx1);
+  ok((await xq('bot', 'x1', { id: x1.id, as: 'over', score: [2, 1] })).status === 404 && ratX('x1').games === 1, 'told again: nothing more');
+  ok(!('bot' in (await xq('poll', 'x1'))), 'and the next bot only after a while more with nobody');
+  // lost
+  const x1b = await (async () => { await pass(BOTS.again, () => xq('poll', 'x1')); return (await xq('poll', 'x1')).bot; })();
+  await xq('bot', 'x1', { id: x1b.id, as: 'start' }); await pass(BOTS.least, () => xq('poll', 'x1'));
+  const l1 = await xq('bot', 'x1', { id: x1b.id, as: 'over', score: [0, 2] });
+  ok(l1.rating.after < l1.rating.before && ratX('x1').losses === 1 && rowX(x1b.id).winner === 1 && rowX(x1b.id).score_a === 0, 'lost 0–2: down, recorded', l1.rating);
+  // walked out: a loss, at once, however soon
+  const x3 = await handed('x3', 1500);
+  await xq('bot', 'x3', { id: x3.id, as: 'start' });
+  const q3 = await xq('bot', 'x3', { id: x3.id, as: 'quit' });
+  ok(q3.status === 200 && q3.rating.after < 1500 && rowX(x3.id).verdict === 'forfeit' && rowX(x3.id).reason === 'quit' && rowX(x3.id).winner === 1,
+     'walked out: a loss by forfeit, whenever', [q3, rowX(x3.id)]);
+  // a real opponent comes mid-match: the bot match is let go, unrated
+  const x4 = await handed('x4', 1500);
+  await xq('bot', 'x4', { id: x4.id, as: 'start' });
+  const x5 = await xq('join', 'x5', { ticket: tk(1500, { bracket: 'base', league: 'bronze' }) });
+  later(BOTS.least);
+  ok(x5.state === 'matched' && !kept().some(k => k.acct === 'x4') && (await xq('bot', 'x4', { id: x4.id, as: 'over', score: [2, 0] })).status === 404
+     && !rowX(x4.id) && !ratX('x4'), 'a real opponent found mid-match: paired, and the bot match let go unrated', x5.state);
+  // gone quiet: started, and never a word of its end, is a loss once BOTS.expire is up
+  const x6 = await handed('x6', 1500);
+  await xq('bot', 'x6', { id: x6.id, as: 'start' });
+  await xq('leave', 'x6');
+  later(BOTS.expire - 1000); await envPvp.MATCHMAKER.alarms();
+  ok(!rowX(x6.id) && kept().some(k => k.acct === 'x6'), 'kept a while after the ticket has gone');
+  later(BOTS.expire); await envPvp.MATCHMAKER.alarms();
+  ok(rowX(x6.id) && rowX(x6.id).verdict === 'forfeit' && rowX(x6.id).reason === 'quiet' && ratX('x6').losses === 1 && !kept().some(k => k.acct === 'x6'),
+     'then a loss: gone quiet', rowX(x6.id));
+  // the ceiling: a win against a bot never lifts a rating into VOID
+  const seed = (acct, rating) => DB.sql.prepare(`INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+    VALUES (?, 'ranked', ?, ?, 120, 0.06, 20, 12, 8, 'platinum', ?)`).run(acct, seasonOf(clock), rating, clock);
+  seed('x7', BOTS.ceiling - 5); seed('x8', BOTS.ceiling + 150);
+  const x7 = await handed('x7', BOTS.ceiling - 5, { bracket: 'own+awake', league: 'platinum' });
+  await xq('bot', 'x7', { id: x7.id, as: 'start' });
+  const x8 = await handed('x8', BOTS.ceiling + 150, { bracket: 'own+awake', league: 'void' });
+  await xq('bot', 'x8', { id: x8.id, as: 'start' });
+  await pass(BOTS.least, () => xq('poll', 'x8'));
+  const c7 = await xq('bot', 'x7', { id: x7.id, as: 'over', score: [2, 0] }), c8 = await xq('bot', 'x8', { id: x8.id, as: 'over', score: [2, 0] });
+  ok(c7.rating.after === BOTS.ceiling && ratX('x7').rating === BOTS.ceiling && ratX('x7').wins === 13, 'a win just under VOID\'s line stops at it', c7.rating);
+  ok(c8.rating.after === BOTS.ceiling + 150 && ratX('x8').rating === BOTS.ceiling + 150 && ratX('x8').games === 21, 'and one already past it lifts it nowhere (still counted)', c8.rating);
+  const l8 = await (async () => { await pass(BOTS.again, () => xq('poll', 'x8')); const b8 = (await xq('poll', 'x8')).bot;
+    await xq('bot', 'x8', { id: b8.id, as: 'start' }); await pass(BOTS.least, () => xq('poll', 'x8')); return xq('bot', 'x8', { id: b8.id, as: 'over', score: [1, 2] }); })();
+  ok(l8.rating.after < BOTS.ceiling + 150, 'a loss counts in full', l8.rating);
+  // casual: never rated, nothing kept
+  const cq = (op, acct, b = {}) => mmB.fetch('https://do/' + op, { method: 'POST', body: JSON.stringify(Object.assign({ queue: 'casual', acct }, b)) })
+    .then(async r => Object.assign({ status: r.status }, await r.json()));
+  later(31000);
+  await cq('join', 'x9', { ticket: tk(1500) });
+  await pass(A, () => cq('poll', 'x9'));
+  const x9 = (await cq('poll', 'x9')).bot;
+  const s9 = await cq('bot', 'x9', { id: x9.id, as: 'start' });
+  later(BOTS.least);
+  ok(s9.rated === false && (await cq('bot', 'x9', { id: x9.id, as: 'over', score: [2, 0] })).status === 404 && !rowX(x9.id), 'casual: unrated, and nothing kept');
+  // these made-up players leave the ladder as they found it, for the sections after (a #1 is looked for there)
+  DB.sql.prepare("DELETE FROM pvp_ratings WHERE account IN ('x1', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9')").run();
+  DB.sql.prepare("DELETE FROM pvp_matches WHERE a IN ('x1', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9')").run();
+
+  // through the Worker: a bot's mark, or nothing
+  const qq = (t, b) => t.call('POST', '/api/pvp/queue', b);
+  const ace = await (async () => { const t = tab(PVP, '198.51.100.92'); await t.op('login', { name: 'ace', pass: 'a fine password' }); return t; })();
+  ok((await qq(ace, { op: 'poll', queue: 'casual', botOver: 'nope' })).status === 400, 'a botOver is a bot\'s mark');
+  ok((await qq(ace, { op: 'bot', queue: 'ranked', id: 'nope', as: 'start' })).status === 400 && (await qq(ace, { op: 'bot', queue: 'ranked', id: 'abcdef01', as: 'win' })).status === 400
+     && (await qq(ace, { op: 'bot', queue: 'ranked', id: 'abcdef01', as: 'over', score: [2] })).status === 400
+     && (await qq(ace, { op: 'bot', queue: 'ranked', id: 'abcdef01', as: 'over', score: [2, 'x'] })).status === 400,
+     'a bot op names a bot, what happened, and a score that is two numbers');
+  ok((await qq(ace, { op: 'bot', queue: 'ranked', id: 'abcdef01', as: 'over', score: [2, 0] })).status === 404, 'and a bot match nobody started is nobody\'s to rate');
+
+  /* The lobby itself (pvp/site/pvp.js), in Node: just enough of a page, its
+     timers on this clock. The queue finds the player a bot, and the lobby
+     hands the play page the bot and the search; back, it carries on. */
+  const vm = await import('node:vm');
+  const lobbyJs = readFileSync(new URL('../pvp/site/pvp.js', import.meta.url), 'utf8');
+  const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+  function lobby(who, ip, store) {
+    const timers = new Map(), sent = [], on = {};
+    let seq = 0;
+    const mk = (tag = 'div', id = '') => ({
+      tag: tag.toUpperCase(), id, hidden: false, disabled: false, href: '', className: '', kids: [], on: {}, _t: '', _v: null,
+      classList: { s: new Set(), add(c) { this.s.add(c); }, remove(c) { this.s.delete(c); }, toggle() {}, contains(c) { return this.s.has(c); } },
+      get textContent() { return this._t; }, set textContent(v) { this._t = String(v); this.kids = []; },
+      get value() { return this._v !== null ? this._v : this.kids[0] ? this.kids[0].value : ''; }, set value(v) { this._v = String(v); },
+      get options() { return this.kids; },
+      addEventListener(t, f) { (this.on[t] = this.on[t] || []).push(f); },
+      append(...c) { for (const x of c) if (x && typeof x === 'object') this.kids.push(x); },
+      querySelector() { return mk(); }, elements: {}, reset() {}
+    });
+    const els = new Map();
+    const win = {
+      Date, URL, URLSearchParams, JSON, Math, Promise, Object, Array, Number, String, Set, Map, Uint8Array, console,
+      crypto: globalThis.crypto,
+      location: { hash: '', pathname: '/', search: '', hostname: 'voidrunner-pvp.play101.workers.dev', href: '/' },
+      history: { replaceState() {} },
+      localStorage: { getItem: () => null, setItem() {} },
+      sessionStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); }, removeItem: k => { store.delete(k); } },
+      document: { getElementById: id => els.get(id) || (els.set(id, mk('div', id)), els.get(id)), createElement: t => mk(t) },
+      addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); },
+      setTimeout: (f, ms) => { timers.set(++seq, { at: clock + (ms || 0), f }); return seq; },
+      clearTimeout: id => timers.delete(id),
+      setInterval: () => 0, clearInterval() {},
+      fetch: async (path, opt = {}) => {
+        if (path === '/api/live') return new Response('{}', { status: 404 });
+        if (path === '/api/pvp/queue') sent.push(JSON.parse(opt.body));
+        return pvp.fetch(new Request(PVP + path, { method: opt.method || 'GET', body: opt.body,
+          headers: Object.assign({}, opt.headers, { cookie: 'vr_s=' + who.cookie, origin: PVP, 'cf-connecting-ip': ip }) }), envPvp);
+      }
+    };
+    for (const id of ['rankedPilot', 'casualPilot', 'matchPilot']) els.set(id, mk('select', id));
+    win.window = win;
+    vm.createContext(win);
+    vm.runInContext(lobbyJs, win);
+    // the page's time, moved on: whatever comes due runs, and what it asks of the Worker is answered
+    const run = async ms => {
+      const end = clock + ms;
+      for (;;) {
+        await settle();
+        const due = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        if (due[1].at > clock) clock = due[1].at;
+        due[1].f();
+      }
+      clock = end;
+      await settle();
+    };
+    return { win, $: win.document.getElementById, sent, on, run, hand: () => JSON.parse(store.get('vr_pvp_play') || 'null') };
+  }
+
+  later(31000);
+  const tabStore = new Map();
+  const L1 = lobby(ace, '198.51.100.92', tabStore);
+  await L1.run(100);
+  ok(L1.$('me').hidden === false && L1.$('casualPilot').kids.length > 0, 'the lobby, in Node, signed in as ace');
+  L1.$('casualPilot').value = 'melee';
+  L1.$('playCasual').on.click[0]();
+  await L1.run(BOTS.after.casual - 3000);
+  ok(L1.$('searching').hidden === false && !L1.hand() && L1.sent.every(b => b.op === 'join' || b.op === 'poll'),
+     'searching, and nothing but polls until its wait is up', L1.sent.map(b => b.op));
+  ok(/fight a bot meanwhile, still in the queue/.test(L1.$('searchNote').textContent), 'it says what will happen if nobody comes, and asks nothing');
+  await L1.run(4000);
+  ok(L1.$('searchWhat').textContent === 'NOBODY YET' && /^Nobody near your rating.*fight BOT [A-Z]+, flying .*still in the queue/.test(L1.$('searchNote').textContent)
+     && L1.$('cancel').hidden === true, 'the queue found a bot: the lobby says who, and that the search goes on', L1.$('searchNote').textContent);
+  await L1.run(2000);
+  const bh = L1.hand();
+  const tabId = L1.sent[0].tab;
+  ok(bh && bh.mode === 'bot' && bh.pilot === 'melee' && /^[0-9a-f]{8}$/.test(bh.bot.id) && /^BOT /.test(bh.bot.name)
+     && bh.search.queue === 'casual' && bh.search.tab === tabId && bh.search.t0 > 0 && bh.me.account.name === 'ace' && L1.win.location.href === '/play/',
+     'then the play page, with the bot, the search and its tab', bh);
+  for (const f of L1.on.pagehide || []) f();
+  await settle();
+  ok(!L1.sent.some(b => b.op === 'leave'), 'and leaving the lobby for it is not leaving the queue');
+  const still = await qq(ace, { op: 'poll', queue: 'casual', tab: tabId });
+  ok(still.d.state === 'waiting' && still.d.bot && still.d.bot.id === bh.bot.id, 'the ticket waits on, with its bot', still.d);
+
+  // back from the bot match (bot.js leaves this note): the search carries on, the bot it was done with said so
+  await pass(30000, () => qq(ace, { op: 'poll', queue: 'casual', tab: tabId }));   // the play page's polls, meanwhile
+  tabStore.delete('vr_pvp_play');
+  tabStore.set('vr_pvp_search', JSON.stringify({ queue: 'casual', tab: tabId, t0: bh.search.t0, pilot: 'melee', botOver: bh.bot.id, at: clock }));
+  const L2 = lobby(ace, '198.51.100.92', tabStore);
+  await L2.run(100);
+  ok(L2.$('searching').hidden === false && L2.$('casualPilot').value === 'melee' && !tabStore.has('vr_pvp_search')
+     && L2.sent[0] && L2.sent[0].op === 'poll' && L2.sent[0].tab === tabId && L2.sent[0].botOver === bh.bot.id,
+     'back in the lobby: still searching, the same ticket, done with that bot', L2.sent);
+  await L2.run(BOTS.again - 3000);
+  ok(!L2.hand(), 'no other bot for a while');
+  // a real player comes: straight to them
+  const boltT = tab(PVP, '198.51.100.93');
+  await boltT.op('login', { name: 'bolt', pass: 'a fine password' });
+  const bj = await qq(boltT, { op: 'join', queue: 'casual', pilot: 'runner' });
+  await L2.run(4000);
+  const rh2 = L2.hand();
+  ok(bj.d.state === 'matched' && rh2 && rh2.mode === 'match' && rh2.match.id === bj.d.match.id && rh2.match.sides[1].name === 'Bolt',
+     'a real player: paired with them, and on to the match, no bot in it', [bj.d.state, rh2 && rh2.mode]);
+
+  // the ticket went while the bot match was on (a tab asleep too long): back in the queue as the same tab
+  later(31000);
+  tabStore.clear();
+  tabStore.set('vr_pvp_search', JSON.stringify({ queue: 'casual', tab: tabId, t0: clock - 90000, pilot: 'melee', botOver: 'abcdef12', at: clock }));
+  const L3 = lobby(ace, '198.51.100.92', tabStore);
+  await L3.run(100);
+  ok(L3.sent.map(b => b.op).join() === 'poll,join' && L3.sent[1].tab === tabId && L3.sent[1].pilot === 'melee' && L3.$('searching').hidden === false
+     && (await qq(ace, { op: 'poll', queue: 'casual', tab: tabId })).d.state === 'waiting',
+     'the ticket gone meanwhile: joined again, with the same tab and pilot, still searching', L3.sent.map(b => b.op));
+  await qq(ace, { op: 'leave', queue: 'casual', tab: tabId });
+
+  // and an old note is let go
+  tabStore.clear();
+  tabStore.set('vr_pvp_search', JSON.stringify({ queue: 'casual', tab: tabId, t0: 1, pilot: 'melee', botOver: '', at: clock - 120000 }));
+  const L4 = lobby(ace, '198.51.100.92', tabStore);
+  await L4.run(100);
+  ok(!L4.sent.length && L4.$('searchClock').textContent === '', 'a note from long ago: nothing searched', L4.sent);
+  Date.now = real;
+}
+
 section('entry: who may join a queue');
 {
   const now = Date.now(), H = 3600 * 1000;

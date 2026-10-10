@@ -24,7 +24,8 @@
              PVP_ART.result gets):
                me, them   { name, pilot, pilotName, col, awake, bonus }
                bestOf     3 or 5 (1: one round, against a hidden pilot)
-               queue      'ranked' | 'casual' | 'friend'
+               queue      'ranked' | 'casual' | 'friend' | 'bot' (a bot the
+                          queue found while it had nobody: bot.js)
                league     { id, n } in ranked, else null
                rated      whether a rating moves
                hull(id)   that pilot's real hull as a path on g (see below)
@@ -51,12 +52,15 @@
        dealt     [mine, theirs]: health each took off the other
        map       { name, tag, accent, bg, grid, wall }, as on the belt
        infested  true or false
-       queue     'ranked' | 'casual' | 'friend'
+       queue     'ranked' | 'casual' | 'friend' | 'bot'
        league    { id, n } in ranked ('bronze' … 'void'), else null
        rated     whether a rating moves
        verdict   null until the referee answers (a second or so, longer if
                  the other side went quiet), then { v: 'played' | 'forfeit'
-                 | 'void', won (true | false | null) }
+                 | 'void', won (true | false | null) }. Against a bot
+                 (queue 'bot'): unrated (casual), at once { v: 'bot', won },
+                 NOT RECORDED; rated (ranked), null while the queue rates it,
+                 then { v: 'played', won } with the rating below
        rating    ranked, once written: { before, after, games, league (an
                  id, or null while still being placed), left (placement
                  matches to go) }, else null
@@ -531,7 +535,7 @@
   }
 
   /* ---------------------------- belt: its parts ---------------------------- */
-  const QUEUE = { ranked: 'RANKED MATCH', casual: 'CASUAL MATCH', friend: 'FRIEND MATCH' };
+  const QUEUE = { ranked: 'RANKED MATCH', casual: 'CASUAL MATCH', friend: 'FRIEND MATCH', bot: 'BOT MATCH' };
 
   // the times of the belt's beats, scaled to its length
   const beats = D => {
@@ -766,7 +770,7 @@
         arc(g, px0 + 9, y, 7, a, a + Math.PI * (1 + 0.5 * Math.sin(T * 2.5)));
         g.strokeStyle = TEXT; g.lineWidth = 2.5; g.lineCap = 'round'; g.stroke();
       });
-      word('TELLING THE REFEREE', TEXT);
+      word(r.queue === 'bot' ? 'RATING THE MATCH' : 'TELLING THE REFEREE', TEXT);
     } else if (v.v === 'void') {
       since = st.verdictAt; edge = rgba(LOSS, 0.5);
       icon(20, px0 => {
@@ -775,6 +779,11 @@
       });
       word('NO CONTEST', LOSS);
       word('THE TWO GAMES DISAGREED', 'rgba(251,113,133,0.7)', 11);
+    } else if (v.v === 'bot') {
+      // a bot's match, unrated (bot.js): nobody to referee, nothing kept
+      since = st.verdictAt;
+      word('AGAINST A BOT', TEXT);
+      word('NOT RECORDED', '#94a3b8', 11);
     } else if (r.rating) {
       const R = r.rating, d = R.after - R.before;
       since = st.ratingAt;
@@ -925,7 +934,7 @@
 
       // what kind of match
       g.globalAlpha = outQuint((T - 0.2) / 0.5);
-      const chips = [{ label: r.queue === 'ranked' ? 'RANKED' : r.queue === 'casual' ? 'CASUAL' : 'FRIEND MATCH', col: '#e2e8f0', o: { fill: 'rgba(226,232,240,0.1)' } }];
+      const chips = [{ label: r.queue === 'ranked' ? 'RANKED' : r.queue === 'casual' ? 'CASUAL' : r.queue === 'bot' ? 'BOT MATCH' : 'FRIEND MATCH', col: '#e2e8f0', o: { fill: 'rgba(226,232,240,0.1)' } }];
       if (r.league) chips.push({ label: r.league.n + ' LEAGUE', col: (METAL[r.league.id] || METAL.silver)[1], o: { icon: gemIcon(r.league.id)(g) } });
       chips.push({ label: r.rated ? 'RATED' : 'UNRATED', col: '#94a3b8' });
       chipRow(g, cx, 136, chips);

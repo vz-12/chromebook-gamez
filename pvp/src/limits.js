@@ -9,9 +9,10 @@
    forgets. That is enough for what it is for: a stuck or hostile client
    hammering the queue or the referee is turned away before it costs a
    Durable Object request or a database read. Honest clients ask every 1.5 s
-   at most (pvp.js polls the queue every 2 s, match.js asks for a room code
-   every 1.5 s while connecting, referee.js reports every 5 s), well inside
-   these, even with the same account in two tabs.
+   at most (pvp.js polls the queue every 2 s, and so does bot.js while a bot
+   match keeps its ticket; match.js asks for a room code every 1.5 s while
+   connecting, referee.js reports every 5 s), well inside these, even with
+   the same account in two tabs.
    ========================================================================= */
 export const LIMITS = {
   queue: { n: 90, ms: 60 * 1000 },        // join, poll, leave

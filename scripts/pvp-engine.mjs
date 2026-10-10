@@ -31,6 +31,7 @@ const { Match, Matchmaker } = await import('../pvp/src/objects.js');
 const { ensurePvp } = await import('../pvp/src/records.js');
 const { seasonOf } = await import('../src/season.js');
 const { ensureAuth, sha256 } = await import('../src/auth.js');
+const { forget: forgetLimits } = await import('../pvp/src/limits.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTSIDE_ARG = (() => { const i = process.argv.indexOf('--outside'); return i >= 0 ? process.argv[i + 1] : null; })();
@@ -92,7 +93,7 @@ function rooms(win) {
   win.document.createElement = tag => {
     const el = make(tag);
     const q = {};
-    el.querySelector = sel => q[sel] || (q[sel] = { textContent: '', hidden: false, addEventListener() {}, style: {}, appendChild() {},
+    el.querySelector = sel => q[sel] || (q[sel] = { textContent: '', hidden: false, addEventListener(t, f) { (this.__on = this.__on || {})[t] = f; }, style: {}, appendChild() {},
                                                     classList: { toggle() {}, add() {}, remove() {} } });
     el.__q = q;
     return el;
@@ -137,10 +138,13 @@ const DUELIST = signedIn('Duelist'), RIVAL_ACCT = signedIn('Rival');
 function referee(win, who) {
   const rec = win.fetch;
   win.fetch = (u, init = {}) => {
-    // the referee, a hidden pilot's code for the other side of its match (pvp/src/hidden.js), and a match on air (onair.js)
+    /* the referee, a hidden pilot's code for the other side of its match
+       (pvp/src/hidden.js), a match on air (onair.js), and the queue a bot
+       match keeps its ticket in (bot.js) */
     const path = String(u);
-    if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?') && path !== '/api/pvp/watch') return rec(u, init);
+    if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?') && path !== '/api/pvp/watch' && path !== '/api/pvp/queue') return rec(u, init);
     win.__net.push('fetch ' + path);
+    if (path === '/api/pvp/queue') (win.__queue = win.__queue || []).push(JSON.parse(init.body));
     return pvpWorker.fetch(new Request(PVP_ORIGIN + path, {
       method: init.method || 'GET', body: init.body,
       headers: Object.assign({}, init.headers, { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN }) }), envPvp);
@@ -1359,6 +1363,180 @@ section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody
   // the #1's page plays the server's match: one long round
   const T = boot({ mode: 'match', role: top.match.role, queue: 'ranked', pilot: 'runner', me: RIVAL, match: top.match }, TOP);
   ok(T.run('PVP.bestOf()') === 1 && T.run('PVP.said(1)') === 'one round', 'the #1\'s page plays it as one round');
+}
+
+section('a bot match: the queue had nobody, so the play page flies one, and the ticket waits on');
+{
+  const qOf = (who, body) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/queue', { method: 'POST', body: JSON.stringify(body),
+    headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN, 'content-type': 'application/json' } }), envPvp).then(r => r.json());
+  // this player's own pilot, flown by the test's bot as a person would (the devices' place: PVP.botMatch.human)
+  const HUMAN = BOT.replace('LS.source = rec =>', 'PVP.botMatch.human = rec =>').replace('pilotP(1 - pilotMine())', 'pilotP(1)');
+  const IDLE = 'PVP.botMatch.human = rec => { if (state === "levelup" && offers.length && LS.hi % 30 === 0) handleKey("1"); };';
+  const SPEC = { id: 'b07b07b0', name: 'BOT KESTREL', pilot: 'ember', awake: false, skill: 0.6, seed: 12345 };
+  const TAB = 'b0b0b0b0b0b0b0b0';
+  const botPage = (search, extra) => boot(Object.assign({ mode: 'bot', pilot: 'runner', me: ME, bot: SPEC,
+                                                          search: search && Object.assign({ t0: Date.now() - 25000 }, search) }, extra), DUELIST);
+  /* The page's frames. Node plays them far faster than the wall clock the
+     queue's per-account limit counts by (pvp/src/limits.js): a long match's
+     polls, every two seconds of the page's time, would all land in one real
+     minute. So the count is let go as it goes. */
+  const frames = async (g, n, done) => {
+    let i = 0;
+    for (; i < n; i++) {
+      g.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()');
+      if (i % 20 === 0) g.run('render()');
+      if (i % 30 === 0) { await settle(); if (i % 1800 === 0) forgetLimits(); if (done && done()) break; }
+    }
+    forgetLimits();
+    return i;
+  };
+  const botEl = g => g.win.document.body.children.find(c => c.id === 'pvp-bot');
+  const rowsBefore = matchRows().length;
+
+  ok((await qOf(DUELIST, { op: 'join', queue: 'casual', pilot: 'runner', tab: TAB })).state === 'waiting', 'the duelist searches casual, with nobody there');
+  const B = botPage({ queue: 'casual', tab: TAB });
+  await flush();
+  ok(B.run('LS.on && MP.on && PILOTS.length') === 2 && B.run('pilotP(0).charId') === 'runner' && B.run('pilotP(1).charId') === 'ember'
+     && B.run('MP.peerName') === 'BOT KESTREL' && B.run('pilotP(1).awake') === 0,
+     'straight into a match, on this machine alone: the player\'s pilot first, the bot\'s second, as the server described it',
+     B.run('[PILOTS.length, MP.peerName, pilotP(1) && pilotP(1).charId]'));
+  ok(B.run('PVP.botMatch.skill') === 0.6 && B.run('MP.role') === 'host' && B.run('Net.phase') !== 'live', 'its skill, and no link to anybody');
+  B.run(HUMAN + WATCH);
+  // the HUD's column says the search goes on (rounds.js draws the match, bot.js one line under it)
+  const n0 = await frames(B, 60 * 10, () => B.run('!!(RUN.pvp && RUN.pvp.phase === "fight")'));
+  const hudText = B.run('(() => { const t = [], f = ctx.fillText; ctx.fillText = (s, x, y) => { t.push([String(s), y]); }; try { PVP.hud(); } finally { ctx.fillText = f; } return t; })()');
+  const sline = hudText.find(([s]) => /^STILL SEARCHING CASUAL   ·   \d+:\d\d$/.test(s));
+  ok(sline && sline[1] > 118 + 46 && hudText.some(([s]) => /BOT KESTREL/.test(s)),
+     'in the HUD: the match against BOT KESTREL, and the search still on, below the rival\'s card', hudText);
+
+  let threw = null, n = 0;
+  const over = () => B.run('!!PVP.shown');
+  try { n = await frames(B, 60 * 600, over); } catch (e) { threw = e; }
+  ok(!threw, 'a whole match against the bot, drawn, without an error', String(threw && threw.stack));
+  const log = B.run('__log'), ph = log.phases, fights = ph.filter(p => p.phase === 'fight'), ends = ph.filter(p => p.phase === 'end');
+  const last = ph[ph.length - 1], belt = log.belt;
+  console.log(`    (${(n / 60).toFixed(0)} s: ${fights.length} rounds, ${last.score.join('–')}, ${log.hits.length} hits, ${belt.infested ? 'infested' : 'clean'})`);
+  ok(over() && last.phase === 'over' && Math.max(...last.score) === 2 && fights.length >= 2 && fights.length <= 3, 'it came to an end: best of three', last.score);
+  ok([0, 1].every(k => log.hits.some(h => h[1] === k && h[2] > 0)), 'each hurt the other, the bot\'s hits through the same duel', [0, 1].map(k => log.hits.filter(h => h[1] === k).length));
+  ok(log.hits.every(h => h[4] === 'fight' && h[2] <= DUEL.hitCap * h[3] + 1e-6), 'only in a round, and within the caps, as anyone\'s');
+  const P0 = B.run('[pilotP(0).level, pilotP(1).level]'), owed = B.run('RUN.pvp.owed.slice()'), clock = B.run('RUN.pvp.clock');
+  const lost = [0, 1].map(k => ends.slice(0, -1).filter(e => e.loser === k).length);
+  ok([0, 1].every(k => P0[k] + owed[k] === belt.lv[k] + 3 + Math.floor(clock / 30) + lost[k]),
+     'the bot picked every card it was owed, as the player did', { lv: P0, owed, clock, lost, start: belt.lv });
+  ok(log.banned.length === 0 && log.shots <= 4, 'from the same pool, under the same rules');
+  ok(B.run('LS.mine.size + LS.theirs.size') <= 2 * (B.run('LS.delay') + 2), 'and with nobody to send them to, no input piles up', B.run('[LS.mine.size, LS.theirs.size]'));
+
+  // what it asked of the server: the queue, as the lobby would, and nothing else
+  const asked = B.win.__net, polls = B.win.__queue.filter(b => b.op !== 'bot');
+  ok(asked.length > 0 && asked.every(a => a === 'fetch /api/pvp/queue'), 'not one request but the queue\'s: no referee, no relay, no room', [...new Set(asked)]);
+  ok(polls.every(b => b.op === 'poll' && b.queue === 'casual' && b.tab === TAB) && Math.abs(polls.length - (n0 + n) / 120) <= 2,
+     'polled every two seconds with the lobby\'s own tab, so the ticket waits on', [polls.length, (n0 + n) / 120]);
+  const atEnd = await qOf(DUELIST, { op: 'poll', queue: 'casual', tab: TAB });
+  ok(atEnd.state === 'waiting', 'still in the queue at the end', atEnd);
+  ok(matchRows().length === rowsBefore, 'and nothing recorded', [rowsBefore, matchRows().length]);
+
+  // the result: a bot's, unrated, nothing refereed (art.js)
+  const r = B.run('PVP.shown.r'), won = B.run('RUN.pvp.winner') === 0;
+  ok(r.queue === 'bot' && r.rated === false && r.league === null && r.verdict.v === 'bot' && r.verdict.won === won && r.outcome === (won ? 'won' : 'lost')
+     && r.them.name === 'BOT KESTREL' && r.them.pilot === 'ember', 'its result: a bot match, unrated, NOT RECORDED, against BOT KESTREL', r);
+  ok(drawErrs(B) === '', 'and it draws without a fault', drawErrs(B));
+  const box = botEl(B);
+  ok(box && /^STILL SEARCHING CASUAL   ·   \d+:\d\d$/.test(box.__q['.line'].textContent), 'under it, the search, still on', box && box.__q['.line'].textContent);
+  // back to the lobby, which carries the search on (pvp.js, resume)
+  box.__q.button.__on.click();
+  const note = JSON.parse(B.win.sessionStorage.getItem('vr_pvp_search') || 'null');
+  ok(B.win.location.href === '/' && note && note.queue === 'casual' && note.tab === TAB && note.pilot === 'runner' && note.botOver === SPEC.id && note.at > 0,
+     'BACK TO THE LOBBY: there, still searching, done with this bot', note);
+
+  // a real player comes while the bot match is on: let go, and straight to them
+  const again = await qOf(DUELIST, { op: 'join', queue: 'casual', pilot: 'runner', tab: TAB });
+  ok(again.state === 'waiting', 'searching again', again);
+  const B2 = botPage({ queue: 'casual', tab: TAB });
+  B2.run(HUMAN);
+  await frames(B2, 60 * 8);
+  ok(B2.run('state') === 'play' || B2.run('state') === 'pvp', 'flying the bot');
+  const theirs = await qOf(RIVAL_ACCT, { op: 'join', queue: 'casual', pilot: 'runner' });
+  ok(theirs.state === 'matched' && theirs.match.sides[0].name === 'Duelist', 'the rival queues: paired with the duelist, bot match or no', theirs);
+  await frames(B2, 60 * 2.2, () => B2.run('PVP.botMatch.search.found !== null'));
+  ok(B2.run('PVP.botMatch.search.found.id') === theirs.match.id && /^A PILOT WAS FOUND/.test(B2.run('bannerText')),
+     'at its next poll the page hears it: A PILOT WAS FOUND');
+  await frames(B2, 60 * 2.5, () => B2.win.location.href === '/play/');
+  const real = JSON.parse(B2.win.sessionStorage.getItem('vr_pvp_play'));
+  ok(B2.win.location.href === '/play/' && real.mode === 'match' && real.match.id === theirs.match.id && real.role === 'host'
+     && real.pilot === 'runner' && real.me.account.name === 'duelist', 'and joins the real match: the play page, again, with it', real && [real.mode, real.role]);
+  ok(B2.win.__net.every(a => a === 'fetch /api/pvp/queue'), 'having told nobody else anything');
+
+  // left from the pause screen mid-match: the lobby, still searching
+  const B3 = botPage({ queue: 'casual', tab: TAB });
+  await frames(B3, 60);
+  B3.run('quitToMenu(); PVP.frame()');
+  const n3 = JSON.parse(B3.win.sessionStorage.getItem('vr_pvp_search') || 'null');
+  ok(B3.win.location.href === '/' && n3 && n3.tab === TAB && n3.botOver === SPEC.id, 'quit mid-match: back to the lobby, still searching', n3);
+
+  // a ranked search's bot match flies what ranked would
+  const BR = boot({ mode: 'bot', pilot: 'ember', me: ME, bot: SPEC, search: { queue: 'ranked', tab: TAB, t0: Date.now() } }, DUELIST);
+  const BC = boot({ mode: 'bot', pilot: 'ember', me: ME, bot: SPEC, search: { queue: 'casual', tab: TAB, t0: Date.now() } }, DUELIST);
+  ok(BR.run('pilotP(0).awake') === 0 && BR.run('PVP.pilotOpen("hacker")') === false && BC.run('pilotP(0).awake') === 1 && BC.run('PVP.pilotOpen("hacker")') === true,
+     'a ranked search\'s: its league\'s rules (EMBER not awake); a casual one\'s: what the account owns');
+
+  // whatever the server said, a bot is one of the game's pilots, and named BOT
+  const BJ = boot({ mode: 'bot', pilot: 'runner', me: ME, bot: { id: 'zz', name: 'Totally Human', pilot: 'x0', skill: 9, seed: 'x' } }, DUELIST);
+  ok(BJ.run('MP.peerName') === 'BOT' && BJ.run('pilotP(1).charId') === 'runner' && BJ.run('PVP.botMatch.skill') === 1 && !BJ.run('PVP.botMatch.search'),
+     'a bot the server described badly: one of the game\'s pilots, named BOT, its skill kept within 0 to 1, and no search', BJ.run('[MP.peerName, pilotP(1).charId]'));
+
+  /* Ranked: the queue rates a bot match. Its waits are let go here, so the
+     page's fast clock needn't wait out the real one (pvp.mjs holds the queue
+     to them). */
+  const { BOTS } = await import('../pvp/src/bots.js');
+  const kept = { after: BOTS.after.ranked, least: BOTS.least, again: BOTS.again };
+  Object.assign(BOTS, { least: 0, again: 0 }); BOTS.after.ranked = 0;
+  const RTAB = 'babababababababa', GOLD = Object.assign({}, ME, { league: { id: 'gold', n: 'GOLD', provisional: false } });
+  const ratingNow = () => DB.sql.prepare("SELECT * FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(DUELIST.id, seasonOf(Date.now()));
+  const jr = await qOf(DUELIST, { op: 'join', queue: 'ranked', pilot: 'runner', tab: RTAB });
+  ok(jr.state === 'waiting' && jr.bot && /^BOT /.test(jr.bot.name) && ['runner', 'ember'].includes(jr.bot.pilot), 'ranked, with nobody: a bot, to GOLD\'s rules', jr);
+  const before = ratingNow();
+  const BX = boot({ mode: 'bot', pilot: 'runner', me: GOLD, bot: jr.bot, search: { queue: 'ranked', tab: RTAB, t0: Date.now() } }, DUELIST);
+  await flush(); await settle();
+  ok(BX.run('PVP.botMatch.rated') === true && BX.win.__queue[0].op === 'bot' && BX.win.__queue[0].as === 'start' && BX.win.__queue[0].id === jr.bot.id,
+     'its page says it has started, and the queue says it rates it', BX.win.__queue[0]);
+  const bv = BX.run('(() => { const v = PVP.versus(); return { queue: v.queue, rated: v.rated, league: v.league }; })()');
+  ok(bv.queue === 'bot' && bv.rated === true && bv.league && bv.league.id === 'gold', 'the belt says so: a bot match, rated, GOLD', bv);
+  BX.run(HUMAN);
+  await frames(BX, 60 * 600, () => BX.run('!!(PVP.shown && PVP.shown.r.rating)'));
+  const rr = BX.run('PVP.shown.r'), after = ratingNow(), brow = DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get('bot' + jr.bot.id);
+  ok(rr.verdict && rr.verdict.v === 'played' && rr.rated === true && rr.rating && rr.rating.before === Math.round(before ? before.rating : 1500)
+     && rr.rating.after === Math.round(after.rating) && after.games === (before ? before.games : 0) + 1,
+     'over: rated, and the result rolls the rating from before to after', [rr.verdict, rr.rating]);
+  ok(brow && brow.b === 'bot:' + jr.bot.name && brow.rated === 1 && brow.verdict === 'played' && (brow.winner === 0) === rr.verdict.won
+     && brow.score_a === rr.score[0] && brow.score_b === rr.score[1], 'recorded against the bot by name, as the page saw it', brow);
+  ok(drawErrs(BX) === '', 'and the rating draws');
+  // walking out of one mid-match: a loss
+  const jr2 = await qOf(DUELIST, { op: 'poll', queue: 'ranked', tab: RTAB });
+  const BQ = boot({ mode: 'bot', pilot: 'runner', me: GOLD, bot: jr2.bot, search: { queue: 'ranked', tab: RTAB, t0: Date.now() } }, DUELIST);
+  await flush(); await settle();
+  await frames(BQ, 60 * 3);
+  const g0 = ratingNow().games;
+  BQ.run('quitToMenu(); PVP.frame()');
+  await flush(); await settle();
+  const qrow = DB.sql.prepare('SELECT * FROM pvp_matches WHERE id = ?').get('bot' + jr2.bot.id);
+  ok(BQ.win.__queue.some(b => b.op === 'bot' && b.as === 'quit') && qrow && qrow.verdict === 'forfeit' && qrow.reason === 'quit' && qrow.winner === 1
+     && ratingNow().games === g0 + 1, 'walked out mid-match: the page says so as it goes, and it is a loss', qrow);
+  await qOf(DUELIST, { op: 'leave', queue: 'ranked', tab: RTAB });
+  Object.assign(BOTS, { least: kept.least, again: kept.again }); BOTS.after.ranked = kept.after;
+
+  /* Better against a better player: against a pilot that never moves, on a
+     clean map (nothing of the room's to help), the best finishes it far
+     sooner than the gentlest. */
+  const time = async skill => {
+    const g = boot({ mode: 'bot', pilot: 'runner', me: ME, bot: Object.assign({}, SPEC, { pilot: 'runner', skill }) }, DUELIST);
+    g.run(IDLE + WATCH + 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });');
+    await frames(g, 60 * 600, () => g.run('!!PVP.shown'));
+    return { won: g.run('RUN.pvp.winner'), t: g.run('RUN.pvp.clock') };
+  };
+  const lo = await time(0.05), hi = await time(1);
+  ok(lo.won === 1 && hi.won === 1, 'even the gentlest bot can win', [lo, hi]);
+  ok(hi.t * 1.8 < lo.t, 'and the best does it far sooner: ' + hi.t.toFixed(0) + ' s of fighting against ' + lo.t.toFixed(0) + ' s', [lo.t, hi.t]);
+  await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
 section('arriving without the lobby');

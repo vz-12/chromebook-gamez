@@ -5,6 +5,8 @@
      pvp_matches   one row per match the referee decided (referee.js): who
                    played whom, flying what, the winner, the score, the
                    verdict and the season. Profiles and the ladder read it.
+                   A rated bot match (bots.js) has a row too, its `b` the
+                   bot's name after 'bot:', which is nobody's account.
      pvp_flags     an account, a match, and why it was no contest. One proves
                    nothing; the same account against many opponents does.
      pvp_ratings   per account, queue and season: the Glicko-2 rating
@@ -14,7 +16,7 @@
                    Matchmaker (objects.js), one match at a time.
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
-import { START, rateMatch } from './glicko.js';
+import { START, rateMatch, glicko2 } from './glicko.js';
 import { leagueOf, PLACEMENTS } from './rules.js';
 import { carried } from './seasons.js';
 
@@ -25,7 +27,7 @@ const SCHEMA = [
      league   TEXT,                         -- the league it was played in (ranked)
      rated    INTEGER NOT NULL DEFAULT 0,
      a        TEXT    NOT NULL,             -- the host's account
-     b        TEXT    NOT NULL,             -- the guest's
+     b        TEXT    NOT NULL,             -- the guest's (or 'bot:' and a bot's name: bots.js)
      a_pilot  TEXT    NOT NULL,
      b_pilot  TEXT    NOT NULL,
      winner   INTEGER,                      -- 0 the host, 1 the guest, NULL none
@@ -152,4 +154,42 @@ export async function recordMatch(db, m, verdict) {
     stmts.push(db.prepare('INSERT OR IGNORE INTO pvp_flags (account, match, reason, at) VALUES (?1, ?2, ?3, ?4)')
       .bind(m.sides[k].acct, m.id, verdict.reason || 'void', verdict.at));
   await db.batch(stmts);
+}
+
+/* A rated bot match (bots.js; the Matchmaker's `bot` op, objects.js): its
+   row, and the player's rating against the bot's, which is nobody's row, in
+   one batch. A win never lifts the rating past BOTS.ceiling (a rating already
+   above it stays where it was). Written once: a match already kept is left
+   as it is. `x` is the bot as its match was started: { id, acct, name, pilot,
+   mine (the player's pilot), league, rating, rd, at, queue }; `how`: { won,
+   score ([player, bot]) or null, v ('played' | 'forfeit'), reason }.
+   Returns the player's rating before and after, for the result screen. */
+export async function recordBot(db, x, how, now, ceiling) {
+  await ensurePvp(db);
+  const id = 'bot' + x.id;
+  if (await db.prepare('SELECT 1 FROM pvp_matches WHERE id = ?1').bind(id).first()) return null;
+  const season = seasonOf(x.at);
+  const old = await ratingOf(db, x.acct, x.queue, season);
+  const was = old || START;
+  const n = glicko2(was, [{ rating: x.rating, rd: x.rd, s: how.won ? 1 : 0 }]);
+  if (how.won) n.rating = Math.min(n.rating, Math.max(was.rating, ceiling));
+  const games = (old ? old.games : 0) + 1;
+  const lg = leagueOf({ rating: n.rating, games });
+  const score = how.score || null;
+  await db.batch([
+    db.prepare(
+      `INSERT INTO pvp_matches
+         (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season, applied)
+       VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 3, ?11, ?12, ?13, ?14, ?15, 1)`).bind(
+      id, x.queue, x.league || null, x.acct, 'bot:' + x.name, x.mine, x.pilot, how.won ? 0 : 1,
+      score ? score[0] : null, score ? score[1] : null, how.v, how.reason || null, x.at, now, season),
+    db.prepare(
+      `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       ON CONFLICT (account, queue, season) DO UPDATE SET rating = excluded.rating, rd = excluded.rd, vol = excluded.vol,
+         games = excluded.games, wins = excluded.wins, losses = excluded.losses, league = excluded.league, updated = excluded.updated`)
+      .bind(x.acct, x.queue, season, n.rating, n.rd, n.vol, games,
+            (old ? old.wins : 0) + (how.won ? 1 : 0), (old ? old.losses : 0) + (how.won ? 0 : 1), lg.provisional ? null : lg.id, now)
+  ]);
+  return { before: Math.round(was.rating), after: Math.round(n.rating), games, league: lg.provisional ? null : lg.id, left: lg.left };
 }

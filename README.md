@@ -310,6 +310,27 @@ names its entry gates (`pvp/src/gates.js`). Ranked needs an account a day
 old and 10 runs of the game; casual only a sign-in. Dev accounts skip the
 gates. The lobby turns a shut queue's button off and says why.
 
+**Bots, while the queue is empty** (PVP-PLAN.md, Phase 8). Nobody is offered
+a bot and nobody is asked: real players are always paired first, and only a
+ticket still unpaired after a wait (20 s casual, 30 s ranked) is given one
+to fly meanwhile (`pvp/src/bots.js`, `BOTS`). The player stays in the queue
+the whole time: a real opponent who can be paired with them is, and the
+play page (`pvp/site/js/bot.js`) lets the bot match go and joins theirs at
+once. The bot is flown on the player's own machine and named `BOT …`. Its
+skill comes from the player's ranked rating (`BOTS.curve`), and it is hard
+in general: the higher the rating, the sooner it reacts, the straighter it
+aims, the more it dodges and the more of its kit it uses. It never gets
+more health, damage or upgrades than a player would. The brain's numbers are
+`BRAIN` in `bot.js`.
+- **Ranked bot matches are rated** (casual ones never). The result is the
+  player's word, since no second machine plays it, so only a bot the queue
+  handed out and the page started is rated, once, with a plausible time and
+  score; walking out or going quiet is a loss. The bot is rated a notch
+  above the player's level (`BOTS.edge`), and **a win against a bot never
+  lifts a rating past VOID's line** (`BOTS.ceiling`): the top, the podium
+  and the challenges are earned against people. Recorded and shown on
+  profiles like any match, the bot by name.
+
 **The ad suggestion** (PVP-PLAN.md, Phase 6 step 3), off until ads are
 approved. In PLAY A FRIEND, while an ad is ready, the lobby offers: "Watch a
 short ad and your next friend match starts with 2 more upgrades." To switch

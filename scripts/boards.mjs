@@ -253,6 +253,13 @@ section('the PvP ladder and players\' profiles');
   ok(!leaks(p.d), 'no account, profile or match id anywhere in it');
   const placing = await d.get('user=rookie_acct');
   ok(placing.d.pvp.ladder && placing.d.pvp.ladder.placing === true && placing.d.pvp.ladder.left === 3, 'a player still being placed, and how many to go', placing.d.pvp.ladder);
+  // a rated bot match (pvp/src/bots.js; records.js, recordBot): the bot named where an account would be
+  DB.sql.prepare(`INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season, applied)
+                  VALUES ('botabcdef01', 'ranked', 'bronze', 1, ?, 'bot:BOT WREN', 'runner', 'ember', 0, 2, 1, 3, 'played', 'bot', ?, ?, ?, 1)`)
+    .run(acct('rookie_acct'), now - 10, now, SEASON);
+  const rb = (await d.get('user=rookie_acct')).d.pvp.recent[0];
+  ok(rb && rb.them.name === 'BOT WREN' && rb.them.user === null && rb.them.pilot === 'ember' && rb.won === true && rb.score.join() === '2,1' && rb.queue === 'ranked',
+     'a rated bot match on a profile: the bot by its name, and nobody\'s page to link to', rb);
   ok((await d.get('user=straggler')).status === 404, 'a guest\'s callsign has no profile');
   ok((await d.get('user=nobody_here')).status === 404 && (await d.get('user=no%20way!')).status === 404, 'nor does a name nobody has');
 
