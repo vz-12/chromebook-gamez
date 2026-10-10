@@ -8,7 +8,8 @@
    else has filled it in: the game's own behaviour. The other files fill in
    what they own:
 
-     duel.js     turn, as, owner, hit, kill    the fight between two pilots
+     duel.js     turn, as, owner, hit, kill,   the fight between two pilots
+                 near, heat
      cards.js    cards, hello, peerHello       the card pool each player draws from
      maps.js     maps                          the arena, clean or infested
      rounds.js   down, levelUp, hud, draw,     the match: rounds, picks, the HUD
@@ -118,6 +119,8 @@
     as() {},                           // the world, acting for a pilot (duel.js)
     owner: () => null,                 // whose an effect made now is (duel.js)
     hit() {},                          // a stand-in struck (duel.js)
+    near: c => c,                      // how close a stand-in counts for EMBER's vent (duel.js)
+    heat: () => 0,                     // what a lance's hit on a stand-in pays EMBER's vent, as bodies (duel.js)
     kill() {},                         // a stand-in "killed" (duel.js)
     down: () => false,                 // a pilot out of health: false lets the game decide (rounds.js)
     levelUp: () => true,               // whether a level may be paid now (rounds.js)

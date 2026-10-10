@@ -24,6 +24,16 @@
 
    Burns, poison and leaks on a stand-in tick here (dots), because the
    engine's enemy loop passes stand-ins by: they are not bodies.
+
+   EMBER's vent (awake) is paid partly by the share of a body's health the
+   lance takes, the more the closer it is. A stand-in's never moves, so a hit
+   on the other pilot paid nothing, and an EMBER could win a whole match
+   without filling it. What a hit takes of the pilot is kept on the stand-in,
+   and the lance asks for it (VR_PVP.heat): DUEL.heat bodies' worth for a
+   whole pilot's health. Closer still pays more, but a rival is one body that
+   keeps away, so from anywhere the lance reaches it counts as at least
+   DUEL.heatNear close (VR_PVP.near), where a body in a crowd past 240 px
+   pays nothing, by the hit or by the second.
    ========================================================================= */
 (() => {
   'use strict';
@@ -40,6 +50,8 @@
     window: 1,         // that second
     mercy: 0.05,       // the i-frames a pilot's hit grants (an enemy's grant the game's 0.62)
     killHit: 0.14,     // what an execution or a delete lands instead, as a share of max health
+    heat: 28,          // EMBER's vent: a whole pilot's health, paid as this many bodies' (a run's vent is ~9 at the rail)
+    heatNear: 0.3,     // and the other pilot counts as at least this close (1 at the rail, 0 at 240 px) from anywhere the lance reaches
     pilots: { runner: 1, ember: 1, hacker: 1, melee: 1 }   // each pilot's damage, for tuning (below)
   };
   const FAR = -1e5;
@@ -109,7 +121,17 @@
   M.hit = (e, dmg) => {
     const by = M.owner();
     if (by == null || by === e.pvpPilot) return;
-    land(e.pvpPilot, dmg, by);
+    const took = land(e.pvpPilot, dmg, by), p = pilotP(e.pvpPilot);
+    // what this blow took of the pilot, for the lance, which asks the moment its own blow lands (M.heat)
+    e.pvpTook = took > 0 && p && p.maxHp > 0 ? took / p.maxHp : 0;
+  };
+  // how close the other pilot counts for EMBER's vent (lanceTick): never less than DUEL.heatNear
+  M.near = close => Math.max(DUEL.heatNear, close);
+  // the share of the pilot the lance's blow just took, paid as bodies' worth of heat (lanceTick), once
+  M.heat = e => {
+    const t = e.pvpTook || 0;
+    e.pvpTook = 0;
+    return t * DUEL.heat;
   };
   // something that would simply kill a body (an execution, a delete) lands a capped blow instead
   M.kill = e => {

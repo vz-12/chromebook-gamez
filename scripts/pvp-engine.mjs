@@ -1539,6 +1539,110 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
+section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s parry, forms and moves');
+{
+  const CLEAN = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });';
+  const INFESTED = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: true });';
+  // this player's pilot: held at a lance's reach (or a gun's) from the bot, aimed straight at it, firing; a card when dealt one
+  const AIMED = (near, far) => `PVP.botMatch.human = rec => {
+    const k = LS.hi + 1, foe = pilotP(1);
+    if (k % 9 === 0 && state === 'levelup' && offers.length) handleKey(String(1 + (k / 9 | 0) % offers.length));
+    if (k % 9 === 0 && state === 'gear' && gearOffer) handleKey(['1', '2', 'x'][(k / 9 | 0) % 3]);
+    const dx = foe.x - P.x, dy = foe.y - P.y, d = Math.hypot(dx, dy) || 1;
+    const turn = Math.floor(k / 140) % 2 ? 1 : -1, close = d > ${far} ? 1 : d < ${near} ? -1 : 0.2;
+    const vx = close * dx / d - turn * dy / d, vy = close * dy / d + turn * dx / d;
+    rec.mx = Math.abs(vx) > 0.35 ? Math.sign(vx) : 0; rec.my = Math.abs(vy) > 0.35 ? Math.sign(vy) : 0;
+    const lead = P.weapon === 'bullet' ? d / (P.bspeed || 700) : 0;
+    rec.ax = foe.x + foe.vx * lead; rec.ay = foe.y + foe.vy * lead;
+    rec.trig = true; rec.lmb = true; rec.press = [];
+  };`;
+  const AWAKE_ME = Object.assign({}, ME, { loadouts: Object.assign({}, ME.loadouts, {
+    casual: { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: ['ember', 'hacker', 'melee'], ups: [] } }) });
+  const bout = (pilot, bot, script) => {
+    const g = boot({ mode: 'bot', pilot, me: AWAKE_ME, bot: Object.assign({ id: 'c0ffee00', name: 'BOT WREN', seed: 99 }, bot) }, DUELIST);
+    g.run(script);
+    return g;
+  };
+  // the page's frames until `done` or the cap; what LS.after notes is read back at the end
+  const run = async (g, secs, done) => {
+    let i = 0;
+    for (; i < 60 * secs; i++) {
+      g.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()');
+      if (i % 30 === 0) { await settle(); forgetLimits(); if (done && done()) break; }
+    }
+    return i / 60;
+  };
+
+  /* EMBER's vent, awake, lancing the other pilot: one whole health bar of hits
+     comes near to filling it. The hooks put back to the game's own (a stand-in
+     paid by its own unmoving health, and only within 240 px) leave it low. */
+  const vent = async hooked => {
+    const g = bout('ember', { pilot: 'runner', awake: false, skill: 0.3 }, AIMED(130, 190) + CLEAN + (hooked ? '' : 'PVP.near = c => c; PVP.heat = () => 0;'));
+    await run(g, 60, () => g.run('!!(RUN.pvp && RUN.pvp.dealt[0] >= 100)'));
+    return { vent: g.run('pilotP(0).vent'), dealt: g.run('RUN.pvp.dealt[0]'), awake: g.run('pilotP(0).awake') };
+  };
+  const vOn = await vent(true), vOff = await vent(false);
+  ok(vOn.awake === 1 && vOn.dealt >= 100 && vOn.vent >= 60, 'an awake EMBER\'s hits on the other pilot fill its vent: one health bar, most of it', vOn);
+  ok(vOff.dealt >= 100 && vOff.vent < 35 && vOn.vent > vOff.vent * 2, 'which, paid the game\'s own way, they barely did', vOff);
+  // and from the far end of the lance's reach, where a body in a crowd pays nothing
+  const gFar = bout('ember', { pilot: 'runner', awake: false, skill: 0.3 }, AIMED(230, 290) + CLEAN);
+  await run(gFar, 60, () => gFar.run('!!(RUN.pvp && RUN.pvp.dealt[0] >= 100)'));
+  ok(gFar.run('RUN.pvp.dealt[0]') >= 100 && gFar.run('pilotP(0).vent') >= 50, 'from the far end of its reach too', gFar.run('[RUN.pvp.dealt[0], pilotP(0).vent]'));
+  ok(gFar.run('(() => { const s = enemies.find(e => e.pvpPilot === 1); s.pvpTook = 0.1; const a = PVP.heat(s), b = PVP.heat(s); return a > 0 && b === 0; })()'),
+     'each blow is paid once');
+
+  /* THE VAGRANT's parry, flown by a bot: against a gun, most of what comes is
+     turned aside, and most of that perfectly (the window opened just before
+     the round arrives: a counter). Against a lance held on it, it parries
+     too (it used to never). */
+  const PARRIES = `globalThis.__pr = { n: 0, perfect: 0, counters: 0 };
+    const __bp = bladeParried;
+    bladeParried = function () {
+      if (P.pid === 1 && P.parryTook === 0) { __pr.n++; if (P.parryAge <= bladePerfectWin()) __pr.perfect++; }
+      return __bp.apply(this, arguments);
+    };`;
+  const gP = bout('runner', { pilot: 'melee', awake: false, skill: 0.9 }, AIMED(200, 380) + CLEAN + PARRIES);
+  await run(gP, 60);
+  const pr = gP.run('__pr');
+  ok(pr.n >= 25 && pr.perfect >= pr.n * 0.6, 'a VAGRANT bot turns a gun\'s rounds aside, most of them perfectly', pr);
+  const gL = bout('ember', { pilot: 'melee', awake: false, skill: 0.9 }, AIMED(130, 190) + CLEAN + PARRIES);
+  await run(gL, 40);
+  ok(gL.run('__pr.n') >= 20, 'and a lance held on it', gL.run('__pr'));
+
+  /* RONIN wakes on a perfect parry with the chain full: held full here, the
+     bot's next perfect parry wakes it, and then it fights with RONIN's moves. */
+  const gR = bout('runner', { pilot: 'melee', awake: true, skill: 0.9 }, AIMED(200, 380) + CLEAN
+    + `globalThis.__rn = { woke: 0, moves: 0 }; LS.after = () => { const b = pilotP(1); if (!b) return;
+        if (!(b.roninT > 0) && RUN.pvp && RUN.pvp.phase === 'fight') b.chain = CHAIN_MAX;
+        if (b.roninT > 0 && !__rn.woke) __rn.woke = LS.tick;
+        if (b.roninChain && b.roninChain.keys.length > __rn.moves) __rn.moves = b.roninChain.keys.length;
+        if (b.roninCd && b.roninCd.some(c => c > 0)) __rn.moves = Math.max(__rn.moves, 1); };`);
+  await run(gR, 40, () => gR.run('__rn.woke > 0 && __rn.moves > 0'));
+  ok(gR.run('__rn.woke') > 0, 'RONIN wakes on the bot\'s perfect parry at a full chain', gR.run('__rn'));
+  ok(gR.run('__rn.moves') > 0, 'and it fights with RONIN\'s moves', gR.run('__rn'));
+
+  // OVERDRIVE: a full vent is spent once the fight is on, and its moves spend what comes after
+  const gE = bout('runner', { pilot: 'ember', awake: true, skill: 0.9 }, AIMED(200, 380) + CLEAN
+    + `globalThis.__od = { on: 0, spent: 0, moved: 0 }; LS.after = () => { const b = pilotP(1); if (!b || !RUN.pvp || RUN.pvp.phase !== 'fight') return;
+        if (!__od.on && !(b.ventT > 0) && !__od.filled) { b.vent = VENT_MAX; __od.filled = 1; }
+        if (b.ventT > 0 && !__od.on) { __od.on = LS.tick; b.vent = VENT_MAX; }
+        if (__od.on && (b.odStrike || b.odScorch || b.odFusion || odPyros.length || (__od.last != null && b.vent < __od.last - 20))) __od.moved = 1;
+        __od.last = b.vent; };`);
+  await run(gE, 30, () => gE.run('__od.on > 0 && __od.moved > 0'));
+  ok(gE.run('__od.on') > 0, 'an EMBER bot spends a full vent on OVERDRIVE', gE.run('__od'));
+  ok(gE.run('__od.moved') > 0, 'and its heat on OVERDRIVE\'s moves', gE.run('__od'));
+
+  // SUPERUSER: a full root, the same; then the mane, the zone or ROOT
+  const gH = bout('runner', { pilot: 'hacker', awake: true, skill: 0.9 }, AIMED(200, 380) + CLEAN
+    + `globalThis.__su = { on: 0, moved: 0 }; LS.after = () => { const b = pilotP(1); if (!b || !RUN.pvp || RUN.pvp.phase !== 'fight') return;
+        if (!__su.on && !(b.suT > 0)) b.suRoot = SU_MAX;
+        if (b.suT > 0 && !__su.on) __su.on = LS.tick;
+        if (__su.on && (b.suAscUsed || (b.suCd && b.suCd.some(c => c > 0)))) __su.moved = 1; };`);
+  await run(gH, 30, () => gH.run('__su.on > 0 && __su.moved > 0'));
+  ok(gH.run('__su.on') > 0, 'a HACKER bot spends a full root on SUPERUSER', gH.run('__su'));
+  ok(gH.run('__su.moved') > 0, 'and fights with its moves', gH.run('__su'));
+}
+
 section('arriving without the lobby');
 {
   const lost = boot(null);
