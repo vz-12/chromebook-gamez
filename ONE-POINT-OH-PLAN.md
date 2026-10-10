@@ -1,8 +1,10 @@
 # ONE POINT OH — the plan (VOIDRUNNER's evolution)
 
 A path to VOIDRUNNER's evolution. It is drawn from how THE AMALGAM, ROOT and
-THE FOUNDER were built, and from the FORGOTTEN TALES lore bible (5 Oct). It
-is a draft: the lore calls and the names are yours. Defaults are in, so no
+THE FOUNDER were built, from your BOSS DRAFTS (9 Sep), which settle who ONE
+POINT OH is and how it fights, and from the FORGOTTEN TALES lore bible
+(5 Oct). Where they disagree, your drafts win. It is a draft: the lore calls
+and the names are yours. Defaults are in, so no
 step waits on an answer. Nothing here reaches `main` (and so
 voidrunner.online) until you say ship. This file is `.md`, so `.assetsignore`
 keeps it off the public site. All art is placeholder, behind named hooks, as
@@ -103,86 +105,118 @@ every one of them.
 | Each route finale | from about 850 (THE AMALGAM) to about 2,700 (THE FOUNDER: the door, the camp and the tribunal) |
 | Each awakened kit | about 5,000 lines with its art |
 
-## Who ONE POINT OH is (your canon; a proposal)
+## Who ONE POINT OH is (your drafts, 9 Sep)
 
-**What is already written:**
+**Your drafts settle it.** Every finale is a person, not a metaphor, and all
+of them care too much. ONE POINT OH is the fandom that wants the thing
+frozen. It loves the game sincerely, and that is the trap: it is not hostile
+but loyal, and it will strangle the game to keep it exactly as it was the day
+it arrived. It is SOLVED's counterweight.
 
-- `RITES`: "VOIDRUNNER → ONE POINT OH: the base ship, against the boss that
-  insists the base ship was perfect."
-- The bible names ONE POINT OH as "the one who swears the first version was
-  perfect". Its reading is that the devs' first game was THE GRID, THE WARDEN
-  and VOIDRUNNER, and that "ONE POINT OH is that first version". That game
-  was "so simple it felt oddly underwhelming: three enemies, one boss, one
-  character, not even a menu."
-- VOIDRUNNER's page II, already in the game: "every build that added
-  something played worse … ~~it's boring~~ it isn't boring. it's finished.
-  it might be the only thing in here that is."
-- The bible's VOIDRUNNER: "its ghost is the conviction that nothing needs
-  adding to it. What it was is still unwritten, and ONE POINT OH is where it
-  will be found."
-- THE WARDEN, in the bible: the oldest mind in the void, "the only one that
-  remembers the game before".
-- The rules: finales are people who care too much about the game, and the
-  made things say nothing. Only the dev and ROOT say "game", "player" or
-  "code".
+- **Voice:** aggrieved, fond, unmovable. "This was better." "You changed it.
+  Nobody asked you to change it." "Put it back."
+- **Mechanic:** it reverts you, reading your own changelog aloud.
+- **Counterplay:** beat it with the ship it insists was perfect. "It is RIGHT
+  that the base ship can win. It is WRONG that it is better. Proving both at
+  once is the fight." That is VOIDRUNNER's rite, written before rites
+  existed.
+- **Route in:** hold THE REDACTION, the 1.x commemorative.
+- **Later:** it fights beside you in THE NEXT THING ("Someone has to stay and
+  remember it.").
+
+**What the lore bible adds (6 Oct), and how it fits.**
+- The bible reads the devs' first game as THE GRID, THE WARDEN and
+  VOIDRUNNER, and ONE POINT OH as "that first version". Under your drafts,
+  that first version is what it is loyal to, not what it is. It arrived on
+  the first day and wants the void kept as it was that day.
+- VOIDRUNNER's ghost, "nothing needs adding to it", is ONE POINT OH's creed
+  pointed somewhere useful. VOIDRUNNER needs nothing added; it doesn't
+  forbid it. The pairing holds.
+- VOIDRUNNER's page II, already in the game, is the line ONE POINT OH would
+  agree with: "it's finished. it might be the only thing in here that is."
+  The rite proves that wrong.
 - The game's own history: 1.0 shipped on 8 Sep. THE REDACTION is for anyone
   who flew on 1.x. The era mark stamps `verFirst` and closes for new profiles
   when 2.0 ships (`eraMark`, `index.html:67193`).
 
-**Three readings:**
-
-| Reading | What it is | Fits | Costs |
-| --- | --- | --- | --- |
-| A. The first version, woken | the one-room game itself | the bible's reading | a made thing, so it says nothing, and the finales are people |
-| **B. The first run** (my pick) | a run from the first game that never ended: the first VOIDRUNNER ever flown, still in the first room, still sure | a person, as THE LOST SOUL is. It flies the first hull, so the even duel is literal, and it is where VOIDRUNNER finds "what it was" | a new line in the order of events |
-| C. An outsider who swears by 1.0 | a player from outside, like the dev | the jokes write themselves | a third voice allowed to say "game"; it crowds the dev |
-
-**Reading B, drafted.** Before the sectors there was one room, three kinds of
-thing and one at the end, and one hull. The first run of it never ended.
-Whoever flew it is long gone outside, and the run went on: the same room, the
-same three, THE WARDEN's ring, round and round. It was enough, and it has
-never stopped saying so. When ROOT set the void evolving, everything in it
-grew, the hull included. The first run is the only thing that refused.
-VOIDRUNNER's ghost, "nothing needs adding", is the first run's creed. In the
-rite the hull meets it, and outgrows it.
+**The one thing to reconcile.** It quotes the changelog, so it knows there
+is an outside. The bible lets only the dev and ROOT know. My default is that
+ONE POINT OH came in from outside too: a player who arrived on the first
+version and never left, as the dev arrived when the game was shutting down.
+That makes three who know. It also gives it the hull it arrived in, the
+first VOIDRUNNER, to fly in the rite's last sequence. My earlier readings
+(the first version woken, or the first run) are dropped: your drafts make it
+a person who loves the game, not the game.
 
 ## The shape (draft)
 
-### The route: how anyone meets it
+### The route: how anyone meets it (your draft)
 
-**How you get there** (Question 2).
-- Default, **THE WARDEN remembers**: the second time a run reaches THE GRID
-  (waves 26–30), THE WARDEN does not come. ONE POINT OH does, in its place.
-- It comes every time until the profile has beaten it once, then a quarter
-  of the time.
-- It is not behind THE FRACTURE, because VOIDRUNNER's boss belongs to the
-  first sector. The rite stays behind the hub as every rite is: the hub opens
-  only after the tribunal (`outsiderArrivalDue`, `index.html:53017`).
+**How you get there: hold THE REDACTION** (`devHeld('redaction')`,
+`index.html:67031`). The boss of nostalgia is only for people who were
+there.
+- Until 2.0 ships, every profile that plays is stamped 1.x and collects THE
+  REDACTION (`eraMark`). So the gate keeps nobody out until 2.0, and from
+  then on keeps it to the people who were there (Question 12).
+- **Where it stands in a run:** your draft doesn't say. My default is THE
+  GRID's boss wave on the second loop (waves 26–30), where THE WARDEN, the
+  oldest mind in the void, gives way to it. It comes every time until the
+  profile beats it, then a quarter of the time.
+- The Bookkeeper's full record skips endgame bosses (`Codex.trulyFull`,
+  `index.html:31855`), so a profile that never meets it loses nothing there.
+- The rite stays open to everyone past the tribunal, as every rite is. The
+  hub opens on `tribunalDone` (`outsiderArrivalDue`, `index.html:53017`). A
+  pilot's evolution can't be kept to people who were there.
 
-**The fight: THE ROLLBACK**, for any pilot.
-- The room rolls back to the first version:
-  - THE GRID's first look;
-  - the HUD thinned to what the first game had;
-  - only the first three enemies (`grunt`, `spitter` and `dasher`: SHARD,
-    SPITTER and LANCER);
-  - THE WARDEN's one idea, the ring, perfected.
-- **Your cards come off, newest first**, one every few seconds, each with its
-  name as it goes. Your damage is read through what is left, so the longer it
-  takes, the less you have. It is a race against being unbuilt, not a damage
-  race.
-- When it falls, it gives back exactly what it took. The route goes on.
-- Its length is held by the endgame throttle (`endgameThrottle`), with a
-  target of its own, as THE AMALGAM and THE UNWRITTEN have.
+**The fight: it reverts you, using your own changelog.** For any pilot.
+- **Each phase strips one shipped feature, newest first, and quotes its
+  entry.** The line lands before the revert, or it reads as a bug. Your
+  draft's examples:
+  - "'Bullet glow.' You did not need that." The effect goes.
+  - "'Skins.' It looked fine." The hull snaps to default.
+  - "'Daily runs.'" The arena reverts to THE GRID.
+- **The script is the `CHANGELOG` itself** (`index.html:64637`), read newest
+  first at run time, so every future update is quoted too. A short list
+  covers what came before the notes began (bullet glow, skins, daily runs).
+  It skips entries that have nothing of yours to take. From today's list:
+  - "'FIRST FLIGHT.'" (1.5.2): the assist and its hints go.
+  - "'FORGOTTEN TALES.'" (1.5): no page opens in the fight.
+  - "'Evolutions.'" (1.4): an awakened pilot's form goes out.
+  - "'THE REDACTION.'" (1.1): the skin you needed to be here comes off.
+- **Fixes and safety limits are quoted and kept** (the 2,000-shot cap, the
+  sound limits): "That one can stay." Reverting those would bring back the
+  crashes they fixed.
+- **Upgrade stacks roll back a version at a time.** My reading is that each
+  phase, every stack loses a level (Question 4). The last phase takes
+  whatever is left, so you always end with nothing on your ship: HOLLOW (the
+  challenge, `noLvl`, `index.html:73030`), imposed rather than chosen.
+- **Beat it like that.** When it falls, everything comes back.
+- **Everything comes back on any exit too** (your draft's risk): a quit
+  mid-fight, a death, a closed tab.
+  - The cosmetic reverts are this machine's overrides. They are never written
+    to settings or the save.
+  - The game reverts (stacks, the form, the room) are run state, so co-op
+    and the suites see the same fight.
+- Its length is held by the endgame throttle, with a target of its own, as
+  THE AMALGAM and THE UNWRITTEN have.
 
 ### The rite: VOIDRUNNER, at the statue
 
-**The other way round.** On the route it takes from you. VOIDRUNNER has
-nothing it needs to lose, so the rollback has nothing to take, and to win the
-first run has to do the thing it swears should never have been done: it adds.
-Each sequence it bolts on more of what came after, and every addition makes
-it meaner, bigger and easier to hit: "every build that added something played
-worse". At the end it throws all of it off, and it is the first hull against
-the first hull.
+**The point is your draft's counterplay.** VOIDRUNNER is the ship it
+insists was perfect. The rite has to prove both halves: the base ship can
+win, and it is not better.
+
+**The other way round.** On the route it reads your changelog newest first
+and takes from you.
+- VOIDRUNNER arrives with nothing on it to take, so it reads the changelog
+  the other way, oldest first. It adds each entry to itself to keep up, and
+  it hates every one.
+- Each addition makes it meaner, bigger and easier to hit: "every build that
+  added something played worse".
+- It reads every entry but one. It will not read 1.4, "Evolutions", aloud.
+- At the end it throws all of it off: "Put it back." It is the ship it
+  arrived in against VOIDRUNNER, dead even, until the hull wakes. VOIDRUNNER
+  wakes by living the entry it would not read.
 
 **The rule** (the rite's one verb, the bare gun).
 - Health is `OPO_HP` (1000) in the rite's own units.
@@ -191,37 +225,40 @@ the first hull.
   refused.
 - What wins is what won in the first game: hitting, and not being hit.
 
-| # | Name (stand-in) | Runs to | What it does |
+| # | Name (stand-in, from its own lines) | Runs to | What it does |
 | --- | --- | --- | --- |
-| 1 | IT IS ENOUGH | 0.80 | The first room, its three, its ring. Honest and slow. It is small and quick, and hard to hit. |
-| 2 | IT ADDS A ROOM | 0.60 | It reaches for the sectors: vents, acid, lasers and wells laid over THE GRID, one at a time. It grows. |
-| 3 | IT TAKES A CARD | 0.40 | Upgrades on its own rounds (split, pierce, chain, bounce), each named as it takes it. Bigger again. |
-| 4 | IT TAKES EVERYTHING | 0.20 | The whole roster, and every boss's one idea at once. It is losing its shape, and becoming the kind of thing THE AMALGAM is. |
-| 5 | ONE POINT OH | 0 | It throws everything off. The first hull against the first hull. |
+| 1 | THIS WAS BETTER | 0.80 | The first room, its three enemies, THE WARDEN's ring. Honest and slow. It is small and quick, and hard to hit. |
+| 2 | NOBODY ASKED | 0.60 | It reads 1.1 and 1.2 aloud: THE REDACTION's censor-bar rounds, then a lance of its own. It grows. |
+| 3 | YOU CHANGED IT | 0.40 | 1.3: the rush (each stage boss's one idea in turn), and THE VAGRANT's parry turning your rounds back. Bigger again. |
+| 4 | IT SKIPS ONE | 0.20 | Everything after 1.4, at once. The later notes bring little to fight with, so it takes the whole roster. The room hears it pass over 1.4. It is losing its shape, and becoming the kind of thing THE AMALGAM is. |
+| 5 | PUT IT BACK | 0 | It throws everything off. The ship it arrived in, against VOIDRUNNER. |
 
 **Sequence 5, the even duel** (the cutscene, played).
-- It flies your hull at your numbers.
+- It flies the ship it arrived in, the first VOIDRUNNER, at your numbers.
+  Sequences 1 to 4 have proved it right: the base ship, with nothing that
+  counts but its gun, can win. Here every exchange ties.
 - Every round you fire, it answers on the same frame with the same round back
   down your line. The two meet and go out. While you keep firing, nothing
   lands either way.
 - Stop firing and its rounds land. Each one costs you, as a lost line does in
   ROOT's race (`RACE_HIT`).
-- Partway through, the hull wakes. From that frame `grantAwakening('runner')`
-  has fired, `P.awake` is 1, and your rounds stop meeting its rounds: they go
-  through.
+- Partway through, the hull wakes: the entry it would not read. From that
+  frame `grantAwakening('runner')` has fired, `P.awake` is 1, and your rounds
+  stop meeting its rounds: they go through. This is where it is wrong: the
+  base ship is not better.
 - It cannot keep up. Its health goes with your hits, and on the last one it
   goes out.
-- The card follows: AWAKENING · ORIGIN · VOIDRUNNER (both stand-ins), then
-  the menu.
+- The card follows: AWAKENING · ORIGIN · VOIDRUNNER, "it can win. it is not
+  better." (all stand-ins). Then the menu.
 
 ### The awakened form (working name ORIGIN)
 
 The kit's frame only. You named RONIN's moves one at a time, and the same
 goes here.
 
-- **What comes back** (the bible: an awakening is what the hull was). Under
-  reading B, the first hull as it grew once the void woke: the one character
-  of the first game, grown past its code.
+- **What comes back** (the bible: an awakening is what the hull was).
+  VOIDRUNNER was the first game's one hull, and it grew once the void woke.
+  That growth comes back: the thing ONE POINT OH forbids.
 - **Passive, awake:** `AWAKE_DMG` and `AWAKE_SPD`, EMBER's ×1.35 and ×1.20,
   as a stand-in.
 - **The meter: GRAZE** (Question 7). A round that passes close without
@@ -241,18 +278,35 @@ goes here.
   or THE VAGRANT's blade the meter needs a duel rule of its own, as EMBER's
   vent got (`DUEL.heat`).
 
-### Its voice (stand-ins, in the bible's voice)
+### Its voice (your drafts' lines, then stand-ins)
+
+Aggrieved, fond, unmovable. It never changes its mind, even falling.
 
 | When | Line |
 | --- | --- |
-| The entrance | There was one room. It was enough. |
-| IT IS ENOUGH | Three of them, and one at the end. Nobody needed more. |
-| IT ADDS A ROOM | One more room. It does not count. |
-| IT TAKES A CARD | I will put it back after. |
-| IT TAKES EVERYTHING | This is what they did to it. |
-| ONE POINT OH | Then the way it was. You and me. |
-| The wake | You were in the first one. You were not like this. |
-| The fall | It was enough. It was. |
+| Each revert, on the route | the entry, quoted, then its remark: "'Bullet glow.' You did not need that." · "'Skins.' It looked fine." · "'Daily runs.'" |
+| A fix it keeps | That one can stay. *(stand-in)* |
+| THIS WAS BETTER | This was better. |
+| NOBODY ASKED | You changed it. Nobody asked you to change it. |
+| YOU CHANGED IT | 'BOSS RUSH.' Fine. Fine. *(stand-in)* |
+| IT SKIPS ONE | We do not need that one. *(stand-in)* |
+| PUT IT BACK | Put it back. |
+| The wake | That one. I did not read that one. *(stand-in)* |
+| The fall | It was better. *(stand-in)* |
+| THE NEXT THING, later | Someone has to stay and remember it. |
+
+## Later: THE NEXT THING
+
+Your drafts end on THE NEXT THING, where the five finales fight beside you
+and ONE POINT OH is one of them. It may also be the one who restores the save
+the finale appears to wipe. Nothing in this plan builds it, but two things
+keep that door open:
+- Phase 1 builds ONE POINT OH so it can later stand on your side
+  (`e.hacked`, the machinery the finale reuses), with its lines in a table
+  the finale can add to.
+- Your drafts' order was SOLVED, ONE POINT OH, then THE NEXT THING. Building
+  ONE POINT OH first, for VOIDRUNNER, swaps only the first two. The finale
+  still waits for all five.
 
 ## The path
 
@@ -263,8 +317,9 @@ about the other three evolutions.
 
 **Phase 0: the brief.** No code.
 - Answer the questions below, or keep the defaults.
-- Add ONE POINT OH to the lore bible: its tale (pages I to III), VOIDRUNNER's
-  page III, and the awakening's three pages.
+- Add ONE POINT OH to the lore bible, from your drafts: its tale (pages I
+  to III), where it sits in the order of events, VOIDRUNNER's page III, and
+  the awakening's three pages.
 - This file is then revised to open with "Your brief", as `RONIN-V-PLAN.md`
   does.
 
@@ -273,10 +328,11 @@ about the other three evolutions.
   endgame flag already keeps every pin, star, combo and execution off a
   finale: `suCanPin` at `index.html:9409`, which `odStar` and `suComboReady`
   both read.
-- Its figure: the first hull, as it was, behind `drawOpo…` hooks with a
-  WHAT THEY ARE HANDED header.
+- Its figure: a person, and the ship it arrived in (the first VOIDRUNNER),
+  behind `drawOpo…` hooks with a WHAT THEY ARE HANDED header.
 - Its moves: the ring and the three. Seeded, with state kept as data.
 - Its lines: an `OPO_SAY` table.
+- Built so it can later fight on your side (THE NEXT THING, `e.hacked`).
 - Finale hygiene:
   - add a fifth case to `roninFinaleOf` and `roninFinaleEnd`
     (`index.html:21629`). RONIN's executions cover every finale (you,
@@ -289,20 +345,37 @@ about the other three evolutions.
   fighting it. `npm test` and `npm run test:lockstep`.
 
 **Phase 2: the route.**
-- The entry (default: THE WARDEN remembers).
+- The entry: holding THE REDACTION (`devHeld`), on THE GRID's boss wave of
+  the second loop (default).
 - Profile flags `opoMet` and `opoDone`, in:
   - `Save`'s defaults, `Save.merge` and `repair` (`index.html:36765`, `36882`,
     `36831`);
   - the run's flag list (`index.html:153`);
   - the junk-flag lists in `scripts/determinism.mjs:139-140`.
-- THE ROLLBACK: the room, the thinned HUD (hooks), cards off newest first,
-  every one given back when it falls, and a throttle target of its own.
+- `OPO_REVERTS`: the `CHANGELOG`, read newest first at run time, plus the
+  before-the-notes list.
+  - Each entry names its quote, its remark and its revert, as data and never
+    a closure: `'fx:bglow'`, `'skin'`, `'stage:grid'`, `'awake'`, `'ups'`.
+  - Fixes and safety limits are quoted and kept.
+- The fight:
+  - each quote lands before its revert;
+  - every stack drops a level each phase, and the last phase leaves you
+    HOLLOW;
+  - it has a throttle target of its own.
+- It reuses what your draft named: FXO (`index.html:236`), `skinRefresh`
+  (`index.html:66193`), the stage re-skin, and the upgrade stacks.
+- Everything is restored when it falls and on every exit: `resetGame`, a
+  death, a quit, the page closing. Cosmetic overrides never touch settings
+  or the save.
 - On a win: `Codex.seeEnemy`, `tale(…)`, and a challenge goal if finales have
   them (`chalCheckGoal`).
 - CONTINUE: the rollback's opening is a scene, so it joins `runSaveable`'s
   refusals (`index.html:63780`).
-- Tests: a determinism scenario reaching it through the real entry, and
-  `npm run test:tales` for its pages I and II.
+- Tests:
+  - a determinism scenario reaching it through the real entry;
+  - one that quits mid-fight and checks that every setting, skin, stack and
+    form is back;
+  - `npm run test:tales` for its pages I and II.
 
 **Phase 3: the rite.**
 - `RITES.runner` gets `start: opoOpen`, `seqs` and `jump`. This line alone
@@ -345,8 +418,9 @@ about the other three evolutions.
 - The suites' bots press each one.
 
 **Phase 6: everything around it.**
-- **Tales.** These depend on reading B: a person is filed in PEOPLE with a
-  card in BOSSES, as THE FOUNDER is.
+- **Tales.** ONE POINT OH is a person, so it is filed in PEOPLE with a card
+  in BOSSES, as THE FOUNDER is. Its page II (defeat it on the route) opens
+  only for those who were there (Question 8).
   - `TALE_AWAKE` gets `runner`;
   - ONE POINT OH's entry, with its `TALE_BOSS_II` and `TALE_DEED_B`;
   - `p:runner`'s page III unheld (`index.html:32028`);
@@ -406,31 +480,45 @@ these all change at once.
 | Its growth | its body grows about a quarter at each of sequences 2–4, and goes back to small for sequence 5 |
 | Even duel | a lost exchange costs 12% of max health (`RACE_HIT`'s figure) |
 | Route throttle | target 90 s (THE AMALGAM's is 100, THE UNWRITTEN's 70) |
-| THE ROLLBACK | a card off every 6 s, newest first; all given back when it falls |
+| The revert | 6 phases on its health. Each quotes one entry (newest first, the quote 1.2 s before its revert) and takes a level off every stack. The last takes what is left. All of it comes back when it falls, or on any exit |
 | Graze | a round within 26 px pays 1, a dash through one pays 4; 100 fills it |
 | The form | 60 s, as SUPERUSER and a run's OVERDRIVE |
 | Awake passive | ×1.35 damage, ×1.20 speed (EMBER's) |
 
 ## Questions for you (defaults are in, so nothing waits on these)
 
-1. **Who it is.** Reading A, B or C? My default is B, the first run.
-2. **The route entry.** THE WARDEN remembers, from the second loop (default).
-   Or: clear THE VOID taking no cards, or the fifth finale after THE FOUNDER.
+Your drafts answered who it is, its voice, its mechanic, its counterplay and
+its way in. These are what's left.
+
+1. **Does it know there is an outside?** It quotes the changelog. My default
+   is yes: a player who arrived on the first version and stayed, the third
+   who knows, after the dev and ROOT.
+2. **Where it stands in a run.** THE GRID's boss wave on the second loop, for
+   holders of THE REDACTION (default)?
 3. **The order.** Route before rite (default), or the rite first to get the
    evolution out sooner?
-4. **The rite's rule.** Does the build count for nothing (default, as ROOT
+4. **"Upgrade stacks roll back a version at a time."** Every stack loses a
+   level each phase (my reading, the default). Or did you mean each stack
+   goes back to what existed in each version?
+5. **The rite's rule.** Does the build count for nothing (default, as ROOT
    and THE FOUNDER), or for some of the pace, as in EMBER's?
-5. **The even duel.** Rounds that meet and go out, on the same frame. It sits
+6. **The rite reads the changelog forwards** and will not read "Evolutions".
+   Keep it?
+7. **The even duel.** Rounds that meet and go out, on the same frame. It sits
    near THE OTHER's mirror, but as a duel of equals rather than a
    reflection. Keep it?
-6. **Names.** The form (ORIGIN is a stand-in; also FIRST LIGHT, MASTER COPY,
-   GOLD MASTER), the five sequences, and the card's line ("nothing needed
-   adding" is a stand-in).
-7. **The meter.** Graze (default), hits landed, or kills at range?
-8. **PvP.** Awake VOIDRUNNER in duels from the start (default), or held out
-   at first, as LAST VOW is?
-9. **The version.** 1.6 (default), or 2.0? A boss that swears 1.0 was
-   perfect, arriving in 2.0, is a good joke, but 2.0 closes the era mark for
-   every new profile (`eraMark`).
-10. **Its voice.** Does it speak (default, as a person), or say nothing, as
-    the first game had no words?
+8. **Its page II.** Only for those who were there (default), or also opened
+   by passing VOIDRUNNER's rite?
+9. **Names.** The form (ORIGIN is a stand-in; also FIRST LIGHT, MASTER COPY,
+   GOLD MASTER), the five sequences, and the card's line ("it can win. it is
+   not better." is a stand-in).
+10. **The meter.** Graze (default), hits landed, or kills at range?
+11. **PvP.** Awake VOIDRUNNER in duels from the start (default), or held out
+    at first, as LAST VOW is?
+12. **The version.** Your REDACTION gate only means "someone who was there"
+    once 2.0 ships; until then every new profile still collects it.
+    - Ship ONE POINT OH as 2.0 and the gate means it from day one: a boss
+      that swears 1.0 was perfect, arriving in 2.0.
+    - Ship it as 1.6 (default) and the gate starts meaning it whenever 2.0
+      comes.
+    - Either way, 2.0 closes the era mark for every new profile.
