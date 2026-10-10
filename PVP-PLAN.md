@@ -1077,6 +1077,89 @@ difficult in general."
   and below) takes a fair bite out of it without winning, 0.65 (1500) wins,
   and from 0.86 (1800) up it wins 2–0.
 
+#### The bot's kit, and EMBER's heat in a duel (user, 10 Oct)
+
+"Improve vagrant parry logic and transformation activation logic as well as
+the move-using logic, and lastly make the heat meter fill up for evolved
+ember with player hits as well since it doesn't work for now."
+
+- **EMBER's heat, for everyone in a duel** (`duel.js`; two one-line hooks in
+  the engine's `lanceTick`, which do nothing in the game). Awake, the vent is
+  paid by closeness (by the second, and by the share of a body's health a
+  hit takes, the more the closer). A stand-in has a billion health that never
+  moves, so a hit on the other pilot paid nothing: an EMBER won a match 2–0,
+  two whole health bars, and its vent stood at 25. Now:
+  - `VR_PVP.heat(e)`: what the lance's blow just took of the pilot (the
+    duel records it on the stand-in, each blow overwriting the last, paid
+    once), as `DUEL.heat` (28) bodies' worth for a whole health bar.
+  - `VR_PVP.near(close)`: the other pilot counts as at least
+    `DUEL.heatNear` (0.3) close from anywhere the lance reaches. A rival is
+    one body that keeps away; in a crowd, past 240 px pays nothing.
+  - Measured: about one health bar of hits fills it at lance range
+    (130–190 px), about one and a half from the far end (230–290 px).
+- **The parry** (`bot.js`, `parry`):
+  - `incoming` reads what will land on the bot and when: rounds (against
+    its own heading, so a round that will pass behind it is no blow), a
+    lance (a beam across it, or the aim on it with the shot about to go), a
+    swing begun within reach (noticed `swingSee` steps late on lower skill),
+    the army leaning in.
+  - It presses so the blow lands at the window's opening: the press lands
+    `LS.delay` steps after the next one, and the opening is perfect. With
+    another blow right behind, the very first moment, so one window takes
+    both (a gun's rounds are ~0.22 s apart; the window is 0.24).
+  - A timing error drawn once a blow, smaller with skill; never on a
+    cooldown; the guard held on the rival until the window closes, so the
+    counter goes along it; the riposte swung the moment it can land.
+  - While a round is coming it holds its heading. Turning under a round
+    made the reading a lie: rounds taken for misses that landed, guards
+    raised at ones that passed.
+- **The transformations:**
+  - OVERDRIVE and SUPERUSER: a full meter, spent once the rival is within
+    650 px, a moment late on lower skill (`wake`). The old bot pressed F
+    only for an EMBER that was not awake, where it does nothing.
+  - RONIN has no key: a perfect parry at a full chain (`CHAIN_MAX`) wakes it.
+    So the bot tries hardest at a chain one to three short: likelier to
+    try, tighter timing, in close. Under a lance, a dash timed to the end
+    of a window covers the gap after it, so the beam cannot break the chain.
+- **The moves:**
+  - EMBER saves its heat for one move at a time (`planOf`: SCORCH, PYRO,
+    BRAND, FUSION, the dearer likelier with skill) and spends when the
+    rival is where that move wants it. Saving instead of always buying the
+    cheapest is what lets it reach BRAND and FUSION.
+    - PYRO is laid where the rival will be when the column rises.
+    - BRAND's mark goes where the rival will be when the foot comes down,
+      with the ring after it when hot enough.
+    - FUSION closes in, on autofire.
+  - THE HACKER: ROOT once (then fights at the jab's reach), the mane at the
+    rival, the zone where it is going, SAP when hurt with an army to drink.
+  - RONIN: LAST VOW at 30% health, STILL WATER when a blow is coming and the
+    parry is not ready for it, and the cleave then the dash (a Z-then-X
+    chain), the dash aimed through the rival.
+- **Measured** (one long match against the tests' own pilot, skill 0.85):
+  - The old VAGRANT bot never parried a lance or a swing once; against
+    VOIDRUNNER it caught 77 rounds, 50 perfect. Now it parries all three:
+    against VOIDRUNNER 110 (96 perfect), against a lance about 100 (nearly
+    all perfect).
+  - A chain of 8 and RONIN awake, against a gun.
+  - EMBER reaches OVERDRIVE 1–3 times in three minutes and uses all four
+    moves; THE HACKER, given its root, SUPERUSER with ROOT, the mane and
+    the zone.
+- **Tested:** `npm run test:pvp`, engine part 335 checks.
+  - An awake EMBER's hits fill most of its vent in one health bar (the
+    game's own reckoning, hooks off, leaves it under 35), from the far end
+    of the lance too, and each blow is paid once.
+  - The VAGRANT bot parries a gun, mostly perfectly, and a lance.
+  - RONIN wakes on its perfect parry at a full chain, then its moves.
+  - OVERDRIVE and SUPERUSER from full meters, then their moves.
+  - The game's determinism and lockstep suites are unchanged.
+  - 12 mutants, one per rule (each hook, the floor, paying once, a lance
+    read as a blow, the press and its timing, each form's waking and each
+    kit's moves), all caught.
+- **Open:** THE HACKER's root fills only from bodies its army takes, which a
+  clean map never has, so SUPERUSER needs an infested one. The same fix as
+  EMBER's (paid by hits on the pilot) is ready to make if wanted. OVERDRIVE
+  lasts its run length (60 s) in a duel too.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

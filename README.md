@@ -272,6 +272,10 @@ own co-op as it is: lockstep, each player flying their own pilot.
   A hit is scaled to a pilot (`DUEL.scale`) and capped: 14% of max health a
   hit, 34% in any one second, so no card wins a round in one blow.
   `DUEL.pilots` tunes each pilot's damage (all 1 for now).
+  An awake EMBER's vent fills from its lance's hits on the other pilot: a
+  whole health bar pays like `DUEL.heat` bodies, and the pilot counts as at
+  least `DUEL.heatNear` close from anywhere the lance reaches. About one
+  health bar of hits fills it.
 - **Cards** (`cards.js`): the game's pool, less instant kills, cards that
   break without waves, and economy cards (`BANNED`), never more than four
   bullets a shot, and each player's own reward upgrades.
@@ -330,6 +334,13 @@ more health, damage or upgrades than a player would. The brain's numbers are
   lifts a rating past VOID's line** (`BOTS.ceiling`): the top, the podium
   and the challenges are earned against people. Recorded and shown on
   profiles like any match, the bot by name.
+- **How it fights** (`bot.js`). THE VAGRANT parries: it reads what will land
+  on it and when (a round, a lance's beam or charge, a swing, the army) and
+  times the window for its perfect opening across the input delay, facing
+  its rival so the counter goes home. An awake pilot wakes its form when the
+  meter fills (OVERDRIVE, SUPERUSER; RONIN on a perfect parry at a full
+  chain), then picks each move by its cost, reach and cooldown, and lays a
+  floor move where the rival will be.
 
 **The ad suggestion** (PVP-PLAN.md, Phase 6 step 3), off until ads are
 approved. In PLAY A FRIEND, while an ad is ready, the lobby offers: "Watch a

@@ -4044,7 +4044,8 @@ function lanceTick(dt, proc, segs, ox, oy) {
       /* And during OVERDRIVE in a run, where heat is what the kit is paid in
          (see OVERDRIVE'S KIT). Only the rite's vent still shuts it out. */
       if ((P.awake || amalRite) && (P.ventT <= 0 || odKitOn())) {
-        const close = clamp(1 - d / (amalRite ? range : VENT_REACH), 0, 1);
+        const near = clamp(1 - d / (amalRite ? range : VENT_REACH), 0, 1);
+        const close = PVP && e.pvpPilot != null ? PVP.near(near) : near;   // PvP mode: the other pilot, near enough from anywhere the lance reaches (duel.js)
         if (close > heatBest) heatBest = close;
         /* And heat is bought by the work as well as by the second.
 
@@ -4061,7 +4062,9 @@ function lanceTick(dt, proc, segs, ox, oy) {
         // meter for the rest of the run — rite parts do not all carry one
         // and the rite charges on its own authored curve, not on attrition
         const mh = e.maxHp > 0 ? e.maxHp : 1;
-        if (!amalRite) heatWork += close * (dealt / mh) * VENT_WORK;
+        // PvP mode: and paid by the share of that pilot the hit took (duel.js)
+        const share = PVP && e.pvpPilot != null ? PVP.heat(e) : dealt / mh;
+        if (!amalRite) heatWork += close * share * VENT_WORK;
       }
       if (P.knock && !e.dead) {             // Kinetic Coil shoves along the beam
         const push = P.knock * dt * (e.type === 'boss' ? 0.06 : e.type === 'brute' ? 0.35 : 1);
