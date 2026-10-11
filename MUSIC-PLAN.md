@@ -243,6 +243,9 @@ is pushed until you say; `main` only when you say ship.
    boss and sound in the game, and write this file. *(done)*
 2. **The engine.** Music director, segment streaming, sample effects with
    fallback, MUSIC/EFFECTS sliders, tests. Nothing sounds different yet.
+   *(done 11 Oct: `Music` and `Sfx` in index.html after `Audio_`;
+   `npm run test:music` runs the director against a fake Web Audio clock;
+   `npm test` and `npm run test:lockstep` unchanged.)*
 3. **The studio and the first slice.** The renderer, the shared kit, and
    `grid` + `warden`, the `boss-in` sting, and four effects (VOIDRUNNER's
    shot, EMBER's laser, a hit, the codex opening). **You listen and approve
@@ -266,23 +269,97 @@ is pushed until you say; `main` only when you say ship.
 
 ## Reference analysis
 
-Four tracks from the Calamity OST, analyzed 11 Oct. "Energy" is relative
-within the track; "percussive" is the drum share of the sound (HPSS).
-Loudness is a gated RMS in dBFS, close enough to compare the tracks with
-each other.
+All 23 reference tracks (the four from Downloads and the 19 in
+`C:ef. music`) were listened to with the music-analysis skill's full
+listen and an arrangement profile of my own, 11 Oct. Loudness is a gated RMS
+in dBFS (close enough to compare the tracks with each other); "low" is the
+share of the power under 250 Hz; "air" is the share above 4 kHz; "perc" is
+the drum share (HPSS); "quiet" is the seconds spent below a quarter of the
+track's own peak energy, which is how much of it is breakdown.
 
-| track | length | tempo | key | loudness | shape | use it for |
-|---|---|---|---|---|---|---|
-| The Tale of a Cruel World | 4:21 | ~129 | C minor | −15.0, wide (0.83) | sparse keys 0:00–0:38, then full ensemble; three swells (1:08, 2:50, 4:00) falling back between; almost no drums (0.04) | `title`, `hub`, `codex`, `library`, `stands`, the start of `unwritten` |
-| wasteland | 6:21 | 129, grid-locked | D major, bittersweet | −12.1, narrow (0.24) | 20 s intro, two minutes of wall, near-silent breakdown 2:20–3:10, repeat, second breakdown 5:15–5:55; energy pumps bar by bar; 90% of the power under 250 Hz | the sector tracks: a long loop that sits under combat and breathes |
-| Guardian of The Former Seas | 4:34 | 95.7 measured (likely a ~190 double-time feel) | F minor | −10.3 | full force from the first bar, short 10 s resets at ~1:00 and ~3:00, percussion-forward passages at ~1:40 and ~3:45 | the boss tracks: no intro, resets as phase changes |
-| 1NF3$+@+!0N | 4:34 | 152, grid-locked | F♯ minor | −8.5, heavily limited (crest 9.4 dB) | a wall of sound from the start, rising sub sweeps, two drum-break breakdowns (1:52–2:10, 4:00–4:15) where the drums are left alone and then everything slams back; the brightest of the four | the hardest bosses and THE FRACTURE |
+| # | track | length | tempo | key | loud | low | air | perc | quiet |
+|---|---|---|---|---|---|---|---|---|---|
+| 1-01 | The Tale of a Cruel World | 4:21 | 129 | C minor | −15.0 | .27 | .00 | .04 | 52 s |
+| 1-02 | wasteland | 6:21 | 129 | D major | −12.1 | .90 | .00 | .10 | 132 s |
+| 1-03 | Guardian of The Former Seas | 4:34 | 96 (×2) | F minor | −10.3 | .76 | .02 | .14 | 20 s |
+| 1-04 | 1NF3$+@+!0N | 4:34 | 152 | F♯ minor | −8.5 | .86 | .03 | .18 | 8 s |
+| 1-05 | The Filthy Mind | 4:17 | 112 | D minor | −10.9 | .64 | .03 | .27 | 28 s |
+| 1-06 | Blood Coagulant | 5:04 | 123 | G♯ minor | −10.8 | .70 | .04 | .33 | 8 s |
+| 1-07 | Hadopelagic Pressure | 4:27 | 117 | E minor | −9.4 | .75 | .01 | .13 | 44 s |
+| 2-03 | Left Alone | 5:14 | 112 | D♯ minor | −10.2 | .63 | .01 | .14 | 4 s |
+| 2-05 | Silence before the storms | 3:36 | 117 | A minor | −14.6 | .77 | .00 | .04 | 164 s |
+| 2-11 | Open Frenzy | 5:00 | 112 | F minor | −8.9 | .71 | .03 | .14 | 8 s |
+| 3-02 | Murderswarm | 3:23 | 103 | A minor | −11.5 | .65 | .07 | .15 | 20 s |
+| 3-03 | Unholy Insurgency | 5:18 | 117 | G minor | −8.8 | .59 | .08 | .20 | 12 s |
+| 3-04 | Servants of The Scourge | 5:50 | 96 (×2) | G♯ minor | −9.8 | .70 | .04 | .17 | 24 s |
+| 3-05 | Feral Amalgamation | 5:18 | 89 | D major | −9.5 | .65 | .04 | .18 | 8 s |
+| 3-06 | void | 6:48 | 123 | B major | −15.2 | .40 | .00 | .05 | 176 s |
+| 3-07 | Scourge of The Universe | 7:38 | 96 (×2) | C♯ minor | −11.2 | .49 | .05 | .17 | 52 s |
+| 3-08 | UNIVERSAL COLLAPSE | 4:16 | 99 | D♯ minor | −9.5 | .52 | .05 | .14 | 8 s |
+| 3-09 | Infernal Catharsis (Rebirth) | 8:00 | 103 | E minor | −11.3 | .66 | .05 | .15 | 12 s |
+| 3-10 | Roar of The Jungle Dragon | 8:24 | 123 | C♯ minor | −12.0 | .58 | .04 | .14 | 24 s |
+| 3-11 | Stained, Brutal Calamity | 12:14 | 117 | F minor | −11.3 | .61 | .03 | .09 | 180 s |
+| 3-12 | Pest of The Cosmos | 4:07 | 129 | C♯ minor | −8.6 | .80 | .02 | .19 | 8 s |
+| 4-01 | Cosmic Disgust | 3:55 | 129 | C♯ minor | −8.9 | .73 | .02 | .17 | 32 s |
+| 4-02 | Threats of The Ocean Floor | 4:00 | 162 | E minor | −11.0 | .77 | .02 | .10 | 28 s |
 
-**More references.** You have 32 tracks from the OST to draw on. The more
-of them I can analyze, the closer each cue can get to the right one (a
-calm-biome track for the library, a mechanical one for THE FOUNDRY, a
-final-boss track for ONE POINT OH). Each cue's row will name its nearest
-reference.
+### What 23 tracks say that 4 did not
+
+- **Three weights, now confirmed.** Three tracks sit at −15 (the calm
+  ones: 1-01, 2-05, 3-06), and two of them are the only really wide ones
+  (stereo width 0.83 and 0.88; everything else is 0.25–0.57, narrow and
+  heavy). Five are −8.9 or louder and are walls from the first bar. The
+  rest sit between −12 and −9.4.
+- **Four tracks are mostly waiting.** Over 130 s below quarter energy:
+  wasteland, Silence before the storms, void, Stained Brutal Calamity.
+  Nine are walls with 12 s of rest or less. The score should have both, and
+  the sectors are where the long breaths go.
+- **The highs stay dark everywhere.** No track has more than 8% of its
+  power above 4 kHz (the brightest, Unholy Insurgency, has 8%). Dark mixes
+  with the top rolled off are the signature, not a limitation.
+- **Low end rules.** 27% under 250 Hz in the calm piece; 40–90% in the rest.
+- **Keys:** 20 of 23 are minor, and the sharp keys (C♯, D♯, F♯, G♯) are
+  nine of them. Three are major but bittersweet (wasteland, void, Feral
+  Amalgamation). Several measure at 96, 99 or 103 BPM and may be a
+  double-time feel (about 190 to 206), so a fight's "tempo" is a half-time
+  grid with fast hats.
+- **Dynamics:** crest factors run 9.3 dB (heavily limited) to 15 dB. The
+  master limiter in the studio targets about 10 dB crest for fights and
+  12–15 for sectors and calm.
+
+### The nearest reference for each cue
+
+A starting point for the studio, chosen by the measurements and the feel
+(tempo, key, weight, how much of it breathes); never copied. The title and
+the sound of a track are not why it was picked, with one exception: where a
+track's name is the cue's name, it was the obvious first listen.
+
+| cue(s) | nearest | what to take |
+|---|---|---|
+| `title`, `hub`, `codex`, `library`, `stands` | 1-01 Tale of a Cruel World | sparse keys, then the ensemble, three swells, almost no drums |
+| `planetarium`, `void` (sector) | 3-06 void | the widest and softest piece; 40% low end, no air at all; long drift |
+| `vigil`, `halt` | 2-05 Silence before the storms | three quarters of it is waiting; an ascending arc |
+| `grid` | 1-02 wasteland | grid-locked, 90% low end, two real breakdowns, the opener's template |
+| `foundry` | 1-05 The Filthy Mind | the most percussive of the area tracks; D minor, 112 |
+| `hive` | 1-06 Blood Coagulant | drum-forward and skittering; 123 against 126 |
+| `vault` | 1-07 Hadopelagic Pressure | sub-heavy and cold; 117 against 118; 44 s of rest |
+| `archive`, `recursion` | 3-10 Roar of The Jungle Dragon, 2-03 Left Alone | long restless cycles that return; a loop that never resolves |
+| `mirror`, `pvp` | 4-01 Cosmic Disgust | tight and narrow at 129; a mountain shape |
+| `leak` | 3-12 Pest of The Cosmos | the lowest energy variance of any track: relentless |
+| `rootroom`, `root` | 1-04 1NF3$+@+!0N | 152 against 150; sub sweeps, drum-break breakdowns |
+| `warden` | 1-03 Guardian of The Former Seas | full force from bar one, short resets as phase changes |
+| `forgeheart` | 3-03 Unholy Insurgency | the brightest and most percussive of the walls: brass and hammer |
+| `broodmother` | 3-02 Murderswarm | short, narrow and bright; a groove that creeps |
+| `archivist`, `other` | 4-02 Threats of The Ocean Floor | the fastest track at 162; E minor, with a double-time feel |
+| `null`, `unwritten` | 3-09 Infernal Catharsis, 1-01 Tale of a Cruel World | a mountain: it builds for minutes; the sparse start into the ensemble |
+| `curator`, `tribunal` | 3-04 Servants of The Scourge, 3-08 UNIVERSAL COLLAPSE | a slow-burning full ensemble; the steadiest of the fights (energy variance .17) |
+| `keeper` | 2-11 Open Frenzy | F minor at 112, which is 168 in the cue's feel |
+| `shopkeeper` | 1-06 Blood Coagulant | the swung, drum-forward one |
+| `amalgam` | 3-05 Feral Amalgamation | D major at 89 and 117: the slow-then-fast cue |
+| `founder` | 3-07 Scourge of The Universe | 96 in half-time, a long arc with a breakdown |
+| `onepointoh`, `rush` | 3-11 Stained, Brutal Calamity | 12 minutes and several distinct movements: a suite |
+| `ragequit` | 3-12 Pest of The Cosmos | the loudest wall |
+| ALL HALLOWS (`patch`, `house`, `yard`, `backlog`, `deadgame`) | 3-02, 3-04, 3-06, 3-09, 2-03 | in that order: swarm, slow doom, vast, finale, a loop that is left alone |
 
 Tools: the music-analysis skill's full listen (run under a venv, since
 numba crashes against numpy 2.4 on this machine), plus an arrangement
