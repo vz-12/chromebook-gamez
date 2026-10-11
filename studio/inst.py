@@ -192,3 +192,29 @@ def boom(f0=95.0, f1=32.0, secs=2.2, body=1.0, crack=0.5, seed=4):
     y = st(drive(sub + thud, 0.5)) + st(snap)
     y[:, 1] = y[:, 1] * 0.92 + np.roll(y[:, 0], 23) * 0.08
     return fade(y, 0.0003, 0.2)
+
+# ------------------------------------------------------- pitched recordings
+def sampler(table, rel=0.08, vel=1.3, pre=0.0, width=1.0):
+    """A recorded instrument played at any pitch: {root MIDI (fractions allowed, for a recording that is
+    a little sharp or flat): sound}. Each note takes the nearest recording, replays it faster or slower
+    to reach the pitch, and holds it for the note's length. pre: seconds of the recording's own attack
+    that come before the beat (a horn that swells in), so its weight lands on the note."""
+    memo = {}
+    def play(evs, n, ctx):
+        out = np.zeros((n, 2))
+        for e in evs:
+            r = min(table, key=lambda r: (abs(r - e.p), r))
+            key = (r, round(e.p - r, 3))
+            if key not in memo: memo[key] = shift(st(table[r]), e.p - r)
+            x = gate(memo[key], e.dur + pre, e.kw.get('rel', rel))
+            if width != 1.0: x = widen(x, width)
+            add(out, x, (e.t - pre) * SR, e.v ** vel)
+        return out
+    return play
+
+def steam(secs=0.35, lo=2500.0, hi=9000.0, seed=6):
+    """A valve letting go: a burst of hiss that opens fast and thins as it dies."""
+    n = int(secs * SR); t = np.arange(n) / SR
+    x = svf(noise(n, seed), hi - (hi - lo) * (t / secs) ** 0.5, 1.2, 'bp') * np.minimum(t / 0.006, 1.0) * np.exp(-t / (secs * 0.3))
+    y = st(x); y[:, 1] = np.roll(y[:, 1], 31)
+    return fade(y, 0.001, 0.02)

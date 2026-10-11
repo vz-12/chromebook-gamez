@@ -28,16 +28,47 @@ ANSWER = ['C5:4 A4:2 C5:2 F5:6 E5:2',
           'E5:2 G#5:2 B5:2 E6:2 D6:2 B5:2 G#5:2 E5:2']
 ANSWER_CH = ['F', 'G', 'Am', 'Am', 'F', 'G', 'E', 'E']
 
-_THIRD = {9: 3, 11: 3, 0: 4, 2: 3, 4: 3, 5: 4, 7: 4, 8: 3}      # a third above, inside A minor
-def third(text):
-    """A melody line a third higher, staying in the key: the harmony part."""
+_MINOR = [0, 2, 3, 5, 7, 8, 10]
+def third(text, tonic='A'):
+    """A melody line a third higher, staying in the (natural minor) key: the harmony part. A note from
+    outside the key, the raised seventh, takes a minor third."""
+    base = int(midi(tonic + '0')) % 12
     out = []
     for tok in text.split():
         name, _, d = tok.partition(':')
         if name == 'r': out.append(tok); continue
-        m = midi(name)
-        out.append(f'{int(m + _THIRD.get(int(m) % 12, 3))}:{d}')
+        m = midi(name); deg = (int(m) - base) % 12
+        if deg in _MINOR:
+            i = _MINOR.index(deg); up = (_MINOR[(i + 2) % 7] - deg) % 12
+        else: up = 3
+        out.append(f'{int(m + up)}:{d}')
     return ' '.join(out)
+
+# ---- what the metal tracks share: a riff written out, and the usual figures
+def riff(sec, bar, text, bass=True, gtr='gtr'):
+    """A bar of rhythm guitar: root:length in 16ths; * a power chord left to ring, plain a palm mute,
+    r a rest. The bass doubles it an octave down (never under E1)."""
+    step = 0.0
+    for tok in text.split():
+        name, _, d = tok.partition(':'); d = float(d)
+        if name != 'r':
+            ring = name.endswith('*'); p = midi(name.rstrip('*'))
+            sec.note(gtr, bar, step, d, p, 1.0 if ring else 0.85, kind='chord' if ring else 'chug')
+            if bass:
+                b = p - 12 if p > midi('E2') else p
+                sec.note('bass', bar, step, min(d, 2.0) * (0.95 if ring else 0.8), b, 1.0 if ring else 0.8)
+        step += d
+def gallop(sec, bar, root):
+    """Eighth and two sixteenths, four times: a chord on beats 1 and 3, mutes between."""
+    riff(sec, bar, ' '.join(f'{root}*:2 {root}:1 {root}:1 {root}:2 {root}:1 {root}:1' for _ in range(2)))
+def trem(sec, bar, root):
+    """Sixteenths all the way, a chord at the top of each beat."""
+    riff(sec, bar, ' '.join(f'{root}*:1 {root}:1 {root}:1 {root}:1' for _ in range(4)))
+def hammer(sec, bar, root):
+    """The machine: sixteenths with a chord on every 3 + 3 + 2 accent, twice a bar."""
+    riff(sec, bar, ' '.join(f'{root}*:1 {root}:1 {root}:1 {root}*:1 {root}:1 {root}:1 {root}*:1 {root}:1' for _ in range(2)))
+def tomfill(sec, bar, at=12, bus='tom'):
+    for i, semi in enumerate([7, 7, 2, -5][:16 - at]): sec.note(bus, bar, at + i, 1, 60, 0.8 + 0.06 * i, semi=semi)
 
 def hits_in(x, least=0.12):
     """A recording of one note struck several times, cut into its separate strikes."""
@@ -79,3 +110,30 @@ def kit():
     k['brass'] = sample('KSHMR_Brass_Suspense_Stab_D_E')
     k['sub1'] = sample('FF_TT_fx_boom_deep_tech_down'); k['sub2'] = sample('Soundiron_Shudder_Hits_Hard_Hit_13')
     return k
+
+_FORGE = {}
+def forge():
+    """THE FOUNDRY's metal: anvils, hammer strikes, clangs, and the low brass (its roots as measured,
+    since two of the recordings are not at the pitch their names say).
+
+    Struck metal rings at a pitch, and here it rings in D minor. The anvil as recorded rings on F sharp,
+    the one note that turns D minor major, so it is replayed four semitones lower: its ring lands on D
+    and its body on F, and it sounds like a heavier anvil. The clang is moved up onto A, the hammer
+    ticks down onto D, the stomp down onto C."""
+    if _FORGE: return _FORGE
+    f = _FORGE; K = kit()
+    f['anvil'] = [gate(shift(a, -4.11), 0.34, 0.14) for a in hits_in(sample('SPLC_Blacksmith_Anvil_Heavy'), least=0.1)]
+    ticks = hits_in(sample('ESM_Hammer_On_Metal_Seq_2', trim=False), least=0.05) + hits_in(sample('ESM_Hammer_On_Metal_Seq_4', trim=False), least=0.05)
+    f['tick'] = [gate(shift(t / max(1e-9, float(np.abs(t).max())), -1.42), 0.07, 0.03) for t in ticks]
+    f['clang'] = [gate(shift(c, 0.47), 0.8, 0.3) for c in hits_in(sample('EXA_Maine_Construction_Clangs'), least=0.5)]
+    f['stomp'] = gate(shift(sample('Soundiron_BunkerStomp_10'), -1.25), 0.5, 0.3)
+    f['bin'] = gate(sample('shs_oat_percussion_dumpster_4'), 0.22, 0.1)
+    f['low'] = gate(shift(sample('shs_mtl_percussion_low_mid_Vanat'), 0.3), 1.4, 0.8)
+    f['snare'] = layer((K['snare_m'], 0.8), (hp(f['bin'], 200.0), 0.55), (hp(f['anvil'][0], 500.0), 0.4))     # a snare with iron in it
+    f['kick'] = layer((synth_kick(f0=150.0, f1=44.0, click=1.0, length=0.34), 1.0), (lp(f['stomp'], 260.0), 0.35), (hp(lp(sample('adt_kick_death'), 2500.0), 120.0), 0.4))
+    # brass: short (a trombone's plod, B2, in tune) and long (a horn section on A2, 15 cents flat)
+    f['stab'] = {47.0: sample('OS_trombone_plod_B')}
+    f['horn'] = {44.85: sample('BOS_brass_horn_watched_A', trim=False)}
+    f['braam'] = sample('PL_cimbassi_horn_E', trim=False)          # an F, whatever its name says: a low swell, 1.4 s to its peak
+    f['howl'] = sample('MB_horn_howl_A', trim=False)               # a high A rising for 3.3 s
+    return f

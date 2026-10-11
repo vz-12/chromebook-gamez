@@ -11,7 +11,7 @@ Nearest reference: Guardian of The Former Seas (full force from bar one, short r
 """
 from daw import Song, Bus, chord, midi, hp, lp, highshelf, lowshelf, peak, drive, gate, clip
 from inst import hit, synth, guitar, amp, clips, riser, reverse, boom
-from scores._common import THEME, THEME_CH, ANSWER, ANSWER_CH, third, kit
+from scores._common import THEME, THEME_CH, ANSWER, ANSWER_CH, third, kit, riff, gallop, trem, tomfill
 
 TITLE = 'The First Wall'
 ORDER = ['p1', 'p2', 'p3', 'p3']
@@ -50,26 +50,7 @@ def song():
     s.add('fx', Bus(clips({'boom': boom(), 'short': riser(s.bar, lo=600.0), 'rev': reverse(K['crash'], 1.4),
                            'choir': gate(K['choir'], one_bar * 0.97, 0.25), 'brass': K['brass']}), gain=1.0, rev=0.3))
 
-    def riff(sec, bar, text, bass=True):
-        step = 0.0
-        for tok in text.split():
-            name, _, d = tok.partition(':'); d = float(d)
-            if name != 'r':
-                ring = name.endswith('*'); p = midi(name.rstrip('*'))
-                sec.note('gtr', bar, step, d, p, 1.0 if ring else 0.85, kind='chord' if ring else 'chug')
-                if bass:
-                    b = p - 12 if p > midi('E2') else p        # under the guitars, never under E1
-                    sec.note('bass', bar, step, min(d, 2.0) * (0.95 if ring else 0.8), b, 1.0 if ring else 0.8)
-            step += d
-    def gallop(sec, bar, root, heavy=False):
-        """Eighth and two sixteenths, four times: a chord on beats 1 and 3, mutes between."""
-        text = ' '.join(f'{root}*:2 {root}:1 {root}:1 {root}:2 {root}:1 {root}:1' for _ in range(2))
-        riff(sec, bar, text)
-    def trem(sec, bar, root):
-        """Sixteenths all the way, a chord at the top of each beat."""
-        riff(sec, bar, ' '.join(f'{root}*:1 {root}:1 {root}:1 {root}:1' for _ in range(4)))
-    def fill(sec, bar, at=12):
-        for i, semi in enumerate([7, 7, 2, -5][:16 - at]): sec.note('tom', bar, at + i, 1, 60, 0.8 + 0.06 * i, semi=semi)
+    fill = tomfill
     def choir(sec, bar, v=0.5): sec.note('fx', bar, 0, 16, 60, v, s='choir')
 
     # ---- p1: the wall. Half time; the riff alone, then the theme over it
