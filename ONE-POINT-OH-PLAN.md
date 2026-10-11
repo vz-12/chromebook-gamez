@@ -458,6 +458,45 @@ we are doing now. Part two is the rite and the form.
 
 ### Part one: the route
 
+**As built (10 Oct).** Phases 1 to 4 are in, with Phase 5's art left as blank
+hooks (`OPO_ART`, listed in `ONE-POINT-OH-HOOKS.md`). The route plays end to
+end on the placeholders, in Node (`npm run test:opo`, and `npm test`'s
+`opo-route` and `onepointoh` scenarios) and in a real Chromium. What was
+decided on the way, all of it easy to change:
+- **The first build has a dash.** `3af8b6d` dashes on SPACE or SHIFT, with
+  i-frames, so "no dash" above is not true of 1.0. The old side's no-dash
+  rule is built as written (`opoNoDash`, one line); say if it should follow
+  the first build instead.
+- **The lock is two counters,** `opoLock` and `opoLift`, not a flag: locked
+  while the first is higher and he is not beaten. A merge takes the higher of
+  each, so a lock holds while either side has one and a lift travels too, and
+  no device's clock decides it.
+- **PvP is shut** while the lock holds through a queue gate (`free`, ranked
+  and casual). A friend's match by code is not shut yet.
+- **The admin panel** is `opoJump(name)`, from the console: there is no panel
+  in this repo to add rows to.
+- **The art kit** (11 Oct). The hooks stay blank for the art, which will be
+  drawn by hand; what is built is the toolkit it draws with (`OPO_KIT`):
+  fake 3D on the 2D canvas for debris flying at the screen and striking its
+  glass, and the screen breaking, folding in on itself and peeling back. With
+  it, three every-frame layers (`worldFx`, `worldFlat`, `screenFx`, and
+  `lockFx` in the lock), an event feed of what the route just did, and an art
+  bench (`?opo=bench`, local or dev only) that plays every part of the kit.
+  `ONE-POINT-OH-HOOKS.md` has the hook map and the kit's reference.
+- **His tale** (pages I and II) and his remarks on each date are stand-ins
+  until Phase 0's lore pass. Page III is held for the rite.
+- **Returning players** (11 Oct). A veteran with THE FRACTURE open gets
+  through it all: the test plays a save from before ONE POINT OH, end to end.
+  Three things were fixed for them. A statue's run that died short of wave 25
+  used to leave its commitment on every run after (so no coaxing, and a rite
+  at wave 25 of an ordinary run): `resetGame` now clears it. The Founder's
+  tear and ROOT's key no longer follow anyone into his fight. And the old door
+  is only placed where it can be used, or not at all, with its first showing
+  still owed.
+- **The fight's pacing**: the record moves at most over 150 s, each phase
+  shows itself for at least 14 s, and the view pulls out to 0.74 so he stays
+  on screen. About three and a half to four minutes, start to finish.
+
 **Phase 0: the brief.** No code.
 - Answer the questions below, or keep the defaults.
 - Add him to the lore bible: his tale (pages I to III), where he sits in the

@@ -151,7 +151,7 @@ section('the account\'s own perks');
 
   set('["dev"]');
   r = await one1.awards();
-  for (const k of ['unlock-all', 'unlock-evo', 'unlock-event'])
+  for (const k of ['unlock-all', 'unlock-evo', 'unlock-event', 'opo-lift'])
     ok(perks(r).includes(k), 'dev: perk ' + k);
   for (const k of ['laurel', 'void-sovereign', 'rush-king', 'hl-lostsoul'])
     ok(skins(r).includes(k), 'dev: skin ' + k);

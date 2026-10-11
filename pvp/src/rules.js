@@ -38,10 +38,10 @@ export const HIDDEN = { id: 'hidden', n: '???', pilots: 'own', awake: true, best
    by seasons.js). */
 export const QUEUES = {
   ranked: { id: 'ranked', n: 'RANKED', rated: true, leagues: true,
-            entry: ['signedIn', 'accountAge:24h', 'runs:10'],
+            entry: ['signedIn', 'accountAge:24h', 'runs:10', 'free'],
             rewards: ['seasonPodium', 'leagueBadge'] },
   casual: { id: 'casual', n: 'CASUAL', rated: false, leagues: false,
-            entry: ['signedIn'],
+            entry: ['signedIn', 'free'],
             rewards: [] }
 };
 
