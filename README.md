@@ -663,12 +663,13 @@ script byte for byte, made once from git by `npm run build:opo` and committed
   (`resetGame`, `update`, `updateBullets`, `gameOver`, `drawArena`, `render`)
   by name, without changing a line of the first build.
 
-**The art is blank.** Every visual piece of the route is a hook in `OPO_ART`
-(`ONE POINT OH — art hooks` in `index.html`), with placeholders just enough to
-play it, plus three layers called every frame of the route for the art's own
-debris and effects (`worldFx`, `worldFlat`, `screenFx`; `lockFx` in the lock).
-`ONE-POINT-OH-HOOKS.md` maps where each hook is defined and called and lists
-what each is handed.
+**The art** is every visual piece of the route, as a hook in `OPO_ART`
+(`ONE POINT OH — art hooks` in `index.html`), plus three layers called every
+frame of the route for the art's own debris and effects (`worldFx`,
+`worldFlat`, `screenFx`; `lockFx` in the lock). Two renderers are kept apart:
+the first build's (flat, unlit, his) and today's (lit, glowing), and where
+they meet is drawn as a diff. `ONE-POINT-OH-HOOKS.md` maps where each hook is
+defined and called, what each is handed, and what each draws.
 
 **The art kit** (`OPO_KIT`, `ONE POINT OH — the art kit` in `index.html`) is
 what the hooks draw with: three dimensions faked on the 2D canvas. Rigid
