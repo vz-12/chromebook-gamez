@@ -483,6 +483,12 @@ decided on the way, all of it easy to change:
   `lockFx` in the lock), an event feed of what the route just did, and an art
   bench (`?opo=bench`, local or dev only) that plays every part of the kit.
   `ONE-POINT-OH-HOOKS.md` has the hook map and the kit's reference.
+- **The art** (11 Oct). Every hook is drawn ("The art, as drawn" in
+  `ONE-POINT-OH-HOOKS.md`). The first build's renderer and today's are kept
+  apart: he, his door, panes, paint and voice are flat and unlit (he and his
+  panes are drawn after bloom), and where the two meet is a diff, − and +. The
+  coaxing pops up beneath your ship a letter at a time, blue into purple, with
+  stressed words larger or shaking, after the Devourer of Gods' lines.
 - **His tale** (pages I and II) and his remarks on each date are stand-ins
   until Phase 0's lore pass. Page III is held for the rite.
 - **Returning players** (11 Oct). A veteran with THE FRACTURE open gets

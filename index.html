@@ -41949,12 +41949,12 @@ function drawOpoLost() {
 /* ============================ end of ONE POINT OH ============================ */
 
 /* ========================= ONE POINT OH — art hooks =========================
-   Every visual piece of the route, and its sounds, by name. BLANK FOR NOW:
-   each placeholder draws the least that lets the route be played and read
-   (hairlines and plain words), and is meant to be replaced whole. The plan's
-   look is "The fight's look" in ONE-POINT-OH-PLAN.md; ONE-POINT-OH-HOOKS.md
-   is the contract, hook by hook. Replace this block, or any one entry, as a
-   drop-in: nothing outside it draws any of these pieces.
+   Every visual piece of the route, and its sounds, by name, drawn (11 Oct):
+   "THE ART, as drawn", under the header, says how the two renderers are kept
+   apart. The plan's look is "The fight's look" in ONE-POINT-OH-PLAN.md;
+   ONE-POINT-OH-HOOKS.md is the contract, hook by hook. Replace this block,
+   or any one entry, as a drop-in: nothing outside it draws any of these
+   pieces.
 
    RULES (as TALES_ART's):
      · Drawing only. A hook changes nothing of the run, rolls only rnd/rndi/
@@ -42127,146 +42127,1720 @@ function oaText(g, text, x, y, size, col, a, align) {
 }
 const oaFade = (age, life) => clamp(age / 0.25, 0, 1) * clamp((life - age) / 0.5, 0, 1);
 
-const OPO_ART = {
-  voice(g, w, h, line) {
-    oaText(g, line.text, w / 2, h * 0.8, Math.round(clamp(w * 0.018, 14, 20)), OPO_COL, oaFade(line.age, line.life));
-    oaTag(g, 'voice', w / 2 - 60, h * 0.8 + 14);
-  },
-  door(g, d) {
-    g.globalAlpha = 0.35 + 0.65 * d.armed;
-    g.strokeStyle = OPO_FIRST.wall; g.lineWidth = 2;
-    g.strokeRect(d.x - d.r, d.y - d.r, d.r * 2, d.r * 2);
-    if (d.in > 0) { g.fillStyle = OPO_FIRST.grid; g.fillRect(d.x - d.r, d.y + d.r - d.r * 2 * d.in, d.r * 2, d.r * 2 * d.in); }
+/* THE ART, as drawn. Two renderers, kept apart on purpose, because the fight
+   is about two versions of the game:
+     · THE FIRST BUILD's: flat fills and 2 px strokes in OPO_FIRST's colours,
+       its type, nothing lit, nothing glowing, and steps where today eases. He
+       is drawn only in it (in worldFlat, after bloom, so nothing of today's
+       touches him), and so are his door, his panes, his paint and his voice.
+     · TODAY's: light and glow (drawn before bloom, so it blooms), Chakra Petch
+       and Barlow, each era's own colour (OA_ERA), and the kit's shading and
+       shadows on everything that falls into the room.
+   Where they meet is a diff: a red − for what 1.0 takes back, a green + for
+   what comes back. The coaxing is his voice before anyone has seen him: it
+   pops up beneath your ship a letter at a time, blue into purple, its stressed
+   words larger or shaking (the Devourer of Gods' way of speaking).
+   All of it keeps its state in OA_ST or in the kit's scenes, never the run's. */
+const OA_DISP = "'Chakra Petch', Barlow, system-ui, sans-serif";
+const OA_BODY = "Barlow, 'Segoe UI', system-ui, sans-serif";
+const OA_MONO = "'JetBrains Mono', ui-monospace, monospace";
+const OA_ADD = '#4ade80', OA_DEL = '#f87171';   // a diff's + and −
+// each date's colour, in the language of what it brought back
+const OA_ERA = { first: '#67e8f9', fracture: '#e879f9', ember: '#fb923c', codex: '#fbbf24', amalgam: '#ef4444',
+  coop: '#a78bfa', hacker: '#a3e635', root: '#f43f5e', patch: '#2dd4bf', vagrant: '#a5b4fc', rush: '#fb7185',
+  ronin: '#f8fafc', pvp: '#ec4899', tales: '#c4b5fd', since: '#94a3b8', today: '#ffffff' };
+const oaEra = key => OA_ERA[key] || '#e2e8f0';
+/* The coaxing's stressed words, by line: `bold` larger and turning colour on
+   its own, `shake` trembling. Lines not listed are said plainly. */
+const OA_STRESS = {
+  'There were no doors. The next room just came.': { bold: ['doors.'], shake: ['just', 'came.'] },
+  'There was one ship. Everyone flew it.': { bold: ['one', 'ship.'], shake: ['Everyone'] },
+  'Five rooms, then round again. You always knew what was next.': { bold: ['Five'], shake: ['always', 'knew'] },
+  'Nobody needed a book to know what anything was.': { bold: ['book'], shake: ['Nobody'] },
+  'It can be like that again.': { bold: ['again.'], shake: ['can', 'be'] },
+  'Just go in. You will see.': { bold: ['in.'], shake: ['see.'] },
+  'Still here.': { shake: ['here.'] },
+  'It is not far.': { bold: ['far.'] }
+};
+// what the hooks hand each other within a frame (his pose to the flat pass, the front to the room), and their caches
+const OA_ST = { him: null, himAt: -1, front: null, frontAt: -1, crack: null, taken: [], takenIds: new Set(),
+  panes: [], old: null, oldKey: '', cards: new Map(), lay: null, vKey: '', vx: 0, vy: 0, vT: 0, recKick: 0, recT: 0, bus: null };
+
+const oaC01 = t => t < 0 ? 0 : t > 1 ? 1 : t;
+const oaSteps = (a, n) => Math.ceil(oaC01(a) * n) / n;          // the old renderer had no easing: it steps
+const oaRGB = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function oaMix(a, b, t) {
+  const A = oaRGB(a), B = oaRGB(b), k = oaC01(t);
+  return 'rgb(' + Math.round(A[0] + (B[0] - A[0]) * k) + ',' + Math.round(A[1] + (B[1] - A[1]) * k) + ',' + Math.round(A[2] + (B[2] - A[2]) * k) + ')';
+}
+// a glow sprite on any context (drawGlow draws on today's ctx only)
+function oaGlow(g, x, y, r, col, a) {
+  if (!(a > 0.003) || !(r > 0)) return;
+  g.globalAlpha = Math.min(1, a);
+  g.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+  g.globalAlpha = 1;
+}
+// a regular polygon (the first build's poly), as a path
+function oaPoly(g, x, y, r, n, ang) {
+  g.beginPath();
+  for (let i = 0; i < n; i++) { const a = ang + i * TAU / n, px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; i ? g.lineTo(px, py) : g.moveTo(px, py); }
+  g.closePath();
+}
+// the first build's ship (its drawPlayer arrow), pointing along ang, as a path
+function oaShip(g, x, y, s, ang) {
+  const c = Math.cos(ang), n = Math.sin(ang), P = [[16, 0], [-9, 10], [-5, 0], [-9, -10]];
+  g.beginPath();
+  P.forEach(([px, py], i) => { const X = x + (px * c - py * n) * s, Y = y + (px * n + py * c) * s; i ? g.lineTo(X, Y) : g.moveTo(X, Y); });
+  g.closePath();
+}
+// a point in the room, on the screen (CSS px)
+const oaScreenOf = (x, y, z) => OPO_KIT.world().toScreen(OPO_KIT.V(x, y, z || 0));
+// a line of text, its letters spread as the whole would be (for drawing one at a time)
+function oaLetters(g, text) {
+  const out = [];
+  let x = 0;
+  for (const ch of text) { const cw = g.measureText(ch).width; out.push({ ch, x: x + cw / 2 }); x += cw; }
+  return { letters: out, w: x };
+}
+
+/* The first build's ground over a rectangle: its background, its 64 px grid
+   and every fourth line brighter (drawGrid's), aligned to (ax, ay). */
+function oaOldGround(g, x, y, w, h, ax, ay) {
+  const F = OPO_FIRST, S = 64;
+  g.fillStyle = F.bg; g.fillRect(x, y, w, h);
+  g.lineWidth = 1;
+  const lines = (step, col, a) => {
+    const x0 = ax + Math.ceil((x - ax) / step) * step, y0 = ay + Math.ceil((y - ay) / step) * step;
+    g.strokeStyle = col; g.globalAlpha = a; g.beginPath();
+    for (let gx = x0; gx < x + w; gx += step) { g.moveTo(gx + 0.5, y); g.lineTo(gx + 0.5, y + h); }
+    for (let gy = y0; gy < y + h; gy += step) { g.moveTo(x, gy + 0.5); g.lineTo(x + w, gy + 0.5); }
+    g.stroke();
+  };
+  lines(S, F.grid, 0.85);
+  lines(S * 4, F.grid2, 0.55);
+  g.globalAlpha = 1;
+}
+// the first build's screen with nothing on it, cached at this size
+function oaOldScreen(w, h) {
+  const key = w + 'x' + h + 'x' + DPR;
+  if (OA_ST.old && OA_ST.oldKey === key) return OA_ST.old;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * DPR)); c.height = Math.max(1, Math.round(h * DPR));
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  oaOldGround(g, 0, 0, w, h, w / 2, h / 2);
+  OA_ST.old = c; OA_ST.oldKey = key;
+  return c;
+}
+/* The first build's menu, as its renderMenu lays it out (less the board),
+   built up to `b` 0..1: what the revert ends on, what the lock sits under and
+   what a lost fight goes back to, so the frame's own menu lands on it exactly. */
+function oaFirstMenu(g, w, h, b, t) {
+  if (b <= 0) return;
+  const F = OPO_FIRST, cx = w / 2, cy = h / 2, font = F.font;
+  g.save();
+  // its ground: bare, as the menu's is (the grid is only ever under a run)
+  g.globalAlpha = oaC01(b * 1.4); g.fillStyle = F.bg; g.fillRect(0, 0, w, h); g.globalAlpha = 1;
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  // the emblem, a stroke at a time
+  const e = oaC01(b / 0.35);
+  g.lineWidth = 2;
+  if (e > 0) { g.strokeStyle = rgba(F.enemy, 0.7 * oaSteps(e * 3, 3)); oaPoly(g, cx, cy - 96, 56, 6, t * 0.32); g.stroke(); }
+  if (e > 0.33) { g.strokeStyle = rgba(F.player, 0.85); oaPoly(g, cx, cy - 96, 42, 3, t * 0.6); g.stroke(); }
+  if (e > 0.66) { g.strokeStyle = rgba(F.player, 0.85); oaPoly(g, cx, cy - 96, 30, 3, -t * 0.9 + 1); g.stroke(); }
+  // the title, uncovered left to right, where the real one is drawn
+  const tr = oaC01((b - 0.25) / 0.4);
+  if (tr > 0) {
+    g.font = '800 ' + Math.min(84, w * 0.13) + 'px ' + font;
+    const tw = g.measureText('VOIDRUNNER').width;
+    g.save();
+    g.beginPath(); g.rect(cx - tw / 2 - 40, 0, (tw + 80) * oaSteps(tr, 10), h); g.clip();
+    g.shadowColor = F.player; g.shadowBlur = 34; g.fillStyle = '#e0f2fe';
+    g.fillText('VOIDRUNNER', cx, cy - 6);
+    g.restore();
+  }
+  if (b > 0.7) { g.font = '600 12px ' + font; g.fillStyle = '#475569'; g.fillText('S U R V I V E   T H E   A R E N A', cx, cy + 26); }
+  if (b > 0.82) { g.font = '700 16px ' + font; g.fillStyle = rgba(F.player, 0.55 + Math.sin(t * 3.4) * 0.45); g.fillText('PRESS SPACE TO START', cx, cy + 74); }
+  if (b > 0.9) {
+    g.font = '500 11px ' + font; g.fillStyle = '#334155';
+    g.fillText('WASD move   ·   MOUSE aim   ·   HOLD to fire', cx, h - 74);
+    g.fillText('SPACE dash (i-frames)   ·   T autofire   ·   P pause   ·   M mute', cx, h - 56);
+  }
+  // and its vignette
+  const v = g.createRadialGradient(cx, cy, Math.min(w, h) * 0.35, cx, cy, Math.max(w, h) * 0.78);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,' + (0.72 * oaC01(b * 2)).toFixed(3) + ')');
+  g.fillStyle = v; g.fillRect(0, 0, w, h);
+  g.restore();
+}
+
+/* An era's emblem, in today's language: stroked in its colour, glowing.
+   Every date has one (OA_ERA's keys); the restores, their flourishes, the
+   record and the cascade all draw them. */
+function oaEmblem(g, key, x, y, s, t, a) {
+  if (a === undefined) a = 1;
+  if (a <= 0.01 || s <= 0.5) return;
+  const col = oaEra(key), glow = col === '#ffffff' || col === '#f8fafc' ? '#e2e8f0' : col;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  oaGlow(g, x, y, s * 2.4, glow, 0.32 * a);
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = a;
+  g.translate(x, y);
+  g.strokeStyle = col; g.fillStyle = col; g.lineWidth = Math.max(1.4, s * 0.1); g.lineJoin = 'round'; g.lineCap = 'round';
+  const L = (pts, close) => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0] * s, p[1] * s) : g.moveTo(p[0] * s, p[1] * s)); if (close) g.closePath(); g.stroke(); };
+  const arc = (cx, cy, r, a0, a1) => { g.beginPath(); g.arc(cx * s, cy * s, r * s, a0, a1); g.stroke(); };
+  switch (key) {
+    case 'first':
+      oaPoly(g, 0, 0, s, 8, Math.PI / 8 + t * 0.3); g.stroke();
+      oaShip(g, 0, 0, s * 0.04, -Math.PI / 2); g.stroke(); break;
+    case 'fracture':
+      L([[0, -1], [0.72, 0], [0, 1], [-0.72, 0]], true);
+      L([[0.12, -0.92], [-0.12, -0.3], [0.22, 0.08], [-0.14, 0.92]]); break;
+    case 'ember':
+      L([[0, -1.05], [0.42, -0.25], [0.62, 0.32], [0.32, 0.9], [-0.32, 0.9], [-0.62, 0.32], [-0.38, -0.1], [-0.12, -0.38]], true);
+      L([[0, -0.2], [0.24, 0.35], [0, 0.72], [-0.24, 0.35]], true); break;
+    case 'codex':
+      L([[-1, -0.62], [0, -0.45], [1, -0.62], [1, 0.72], [0, 0.88], [-1, 0.72]], true); L([[0, -0.45], [0, 0.88]]);
+      for (let k = 0; k < 3; k++) { L([[-0.78, -0.26 + k * 0.32], [-0.2, -0.16 + k * 0.32]]); L([[0.2, -0.16 + k * 0.32], [0.78, -0.26 + k * 0.32]]); } break;
+    case 'amalgam':
+      oaPoly(g, -0.25 * s, 0.05 * s, s * 0.58, 5, t * 0.8); g.stroke();
+      oaPoly(g, 0.25 * s, -0.1 * s, s * 0.52, 6, -t * 0.6); g.stroke();
+      oaPoly(g, 0, 0.3 * s, s * 0.42, 3, t * 1.2); g.stroke();
+      for (let i = 0; i < 8; i++) { const q = i * TAU / 8 + t * 0.4; L([[Math.cos(q) * 0.92, Math.sin(q) * 0.92], [Math.cos(q) * 1.18, Math.sin(q) * 1.18]]); } break;
+    case 'coop':
+      oaShip(g, -0.42 * s, 0.12 * s, s * 0.042, -Math.PI / 2); g.stroke();
+      g.strokeStyle = '#f472b6'; oaShip(g, 0.42 * s, -0.12 * s, s * 0.042, -Math.PI / 2); g.stroke(); break;
+    case 'hacker':
+      L([[-1, -0.72], [1, -0.72], [1, 0.72], [-1, 0.72]], true);
+      L([[-0.68, -0.3], [-0.32, 0], [-0.68, 0.3]]);
+      if ((t * 2.2) % 1 < 0.6) L([[-0.15, 0.34], [0.42, 0.34]]); break;
+    case 'root':
+      arc(-0.48, 0, 0.36, 0, TAU);
+      L([[-0.12, 0], [0.98, 0]]); L([[0.56, 0], [0.56, 0.32]]); L([[0.82, 0], [0.82, 0.24]]);
+      L([[-0.86, -0.62], [-0.68, -0.92], [-0.48, -0.7], [-0.28, -0.92], [-0.1, -0.62]]); break;
+    case 'patch':
+      L([[-0.66, -0.92], [0.34, -0.92], [0.7, -0.56], [0.7, 0.92], [-0.66, 0.92]], true);
+      L([[0.34, -0.92], [0.34, -0.56], [0.7, -0.56]]);
+      for (let k = 0; k < 3; k++) L([[-0.42, -0.2 + k * 0.32], [0.42, -0.2 + k * 0.32]]); break;
+    case 'vagrant':
+      L([[-0.86, 0.86], [0.72, -0.72]]); L([[0.72, -0.72], [0.96, -0.96]]);
+      L([[-0.62, 0.3], [-0.3, 0.62]]);
+      arc(0, 0, 1.0, -2.7, -0.5); break;
+    case 'rush':
+      [3, 4, 5, 6, 8].forEach((n, i) => { oaPoly(g, (-0.84 + i * 0.42) * s, Math.sin(t * 5 + i) * 0.12 * s, s * 0.19, n, t * (1 + i * 0.25)); g.stroke(); }); break;
+    case 'ronin':
+      arc(0, 0, 0.86, 0.5, TAU - 0.15);
+      g.strokeStyle = '#dc2626'; L([[-1.05, 0.55], [1.05, -0.55]]); break;
+    case 'pvp':
+      oaShip(g, -0.5 * s, 0, s * 0.036, 0); g.stroke();
+      g.strokeStyle = '#38bdf8'; oaShip(g, 0.5 * s, 0, s * 0.036, Math.PI); g.stroke();
+      g.strokeStyle = col; L([[-0.08, -0.32], [0.08, 0], [-0.08, 0.32]]); break;
+    case 'tales':
+      L([[-1, 0.1], [0, 0.28], [1, 0.1], [1, 0.86], [0, 1.02], [-1, 0.86]], true); L([[0, 0.28], [0, 1.02]]);
+      arc(0.05, -0.42, 0.42, 0.9, TAU - 0.9); break;
+    case 'since':
+      L([[-0.92, -0.44], [0.52, -0.44], [0.94, 0], [0.52, 0.44], [-0.92, 0.44]], true);
+      arc(0.5, 0, 0.1, 0, TAU); break;
+    case 'today':
+      Object.keys(OA_ERA).forEach((k, i, all) => { const q = i * TAU / all.length + t * 0.6; g.strokeStyle = OA_ERA[k];
+        L([[Math.cos(q) * 0.25, Math.sin(q) * 0.25], [Math.cos(q) * (0.95 + (i % 2) * 0.2), Math.sin(q) * (0.95 + (i % 2) * 0.2)]]); }); break;
+    default:
+      oaPoly(g, 0, 0, s, 6, t); g.stroke();
+  }
+  g.restore();
+}
+
+/* His voice before the shatter (the coaxing, the door): it pops up beneath
+   your ship a letter at a time and follows it, blue into purple (the first
+   build's own cyan and its spitters' purple), stressed words larger and
+   turning on their own, or shaking. Each letter jumps up past its size and
+   settles; going, they sink as they fade. */
+function oaCoax(g, w, h, line) {
+  const F = OPO_FIRST, size = Math.round(clamp(w * 0.021, 15, 23)), big = Math.round(size * 1.4);
+  const font = '700 ' + size + 'px ' + F.font, bigFont = '800 ' + big + 'px ' + F.font;
+  const key = line.kind + '|' + line.text + '|' + size;
+  const at = oaScreenOf(P.x, P.y);
+  const tx = at.x, ty = at.y + 58 + size;
+  if (OA_ST.vKey !== key) {
+    OA_ST.vKey = key; OA_ST.vx = tx; OA_ST.vy = ty;
+    const st = OA_STRESS[line.text] || {}, letters = [];
+    g.font = font;
+    const sp = g.measureText(' ').width;
+    let x = 0, i = 0;
+    line.text.split(' ').forEach((wd, wi) => {
+      const b = !!(st.bold && st.bold.includes(wd)), sh = !!(st.shake && st.shake.includes(wd));
+      g.font = b ? bigFont : font;
+      for (const ch of wd) { const cw = g.measureText(ch).width; letters.push({ ch, x: x + cw / 2, b, sh, wi, i: i++ }); x += cw; }
+      x += sp; i++;
+    });
+    OA_ST.lay = { letters, w: Math.max(0, x - sp) };
+  }
+  // eased after the ship
+  const dt = clamp(uiTime - OA_ST.vT, 0, 0.1); OA_ST.vT = uiTime;
+  const ease = 1 - Math.exp(-dt * 5);
+  OA_ST.vx += (tx - OA_ST.vx) * ease; OA_ST.vy += (ty - OA_ST.vy) * ease;
+  const L = OA_ST.lay, tw = L.w;
+  const cx = clamp(OA_ST.vx, tw / 2 + 18, w - tw / 2 - 18), cy = clamp(OA_ST.vy, h * 0.3, h - big);
+  const x0 = cx - tw / 2, cps = 32, out = oaC01((line.life - line.age) / 0.7);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  for (const c of L.letters) {
+    const a = line.age - c.i / cps;
+    if (a <= 0) break;
+    const pop = a < 0.17 ? OPO_KIT.ease.backOut(a / 0.17) : 1;
+    const al = oaC01(a / 0.07) * out;
+    if (al <= 0.01) continue;
+    const jx = c.sh ? rnd(-1.7, 1.7) : 0, jy = c.sh ? rnd(-1.7, 1.7) : 0;
+    const ph = c.b ? Math.sin(uiTime * 5.5 + c.wi * 1.7) : Math.sin(uiTime * 2.2 - c.i * 0.24);
+    const col = c.b ? oaMix(F.enemy, '#e0f2fe', 0.5 + 0.5 * ph) : oaMix(F.player, '#c084fc', 0.5 + 0.5 * ph);
+    const sink = (1 - out) * (8 + 10 * OPO_KIT.hash(c.i));
+    g.save();
+    g.translate(x0 + c.x + jx, cy + (1 - pop) * 12 + jy + sink);
+    g.scale(Math.max(0.01, pop), Math.max(0.01, pop));
+    g.globalAlpha = al;
+    g.font = c.b ? bigFont : font;
+    g.strokeStyle = 'rgba(5,6,10,0.92)'; g.lineWidth = 4; g.strokeText(c.ch, 0, 0);
+    g.fillStyle = col; g.fillText(c.ch, 0, 0);
+    g.restore();
+  }
+}
+/* His voice once he has been seen: plain, flat and white on a strip of the
+   old screen, drawn down a scanline at a time, named. */
+function oaSpeak(g, w, h, line) {
+  const F = OPO_FIRST, size = Math.round(clamp(w * 0.019, 14, 21)), y = h * 0.82;
+  const a = oaSteps(oaFade(line.age, line.life), 4);
+  if (a <= 0) return;
+  g.font = '600 ' + size + 'px ' + F.font;
+  const bw = g.measureText(line.text).width + 52, bh = size + 18, x0 = w / 2 - bw / 2;
+  g.save();
+  g.beginPath(); g.rect(x0, y - bh / 2, bw, bh * oaSteps(line.age / 0.16, 8)); g.clip();
+  g.globalAlpha = a * 0.8; g.fillStyle = F.bg; g.fillRect(x0, y - bh / 2, bw, bh);
+  g.globalAlpha = a; g.fillStyle = F.wall; g.fillRect(x0, y - bh / 2, bw, 1); g.fillRect(x0, y + bh / 2 - 1, bw, 1);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OPO_COL;
+  g.fillText(line.text, w / 2, y + 1);
+  g.restore();
+  if (line.kind !== 'revert') {
+    g.globalAlpha = a * 0.85; g.font = '700 9px ' + F.font; g.fillStyle = '#64748b'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('O N E   P O I N T   O H', w / 2, y - bh / 2 - 9);
     g.globalAlpha = 1;
-    oaText(g, 'SECTOR 01', d.x, d.y - d.r - 12, 10, OPO_FIRST.accent, 0.8);
-    oaTag(g, 'door', d.x - d.r, d.y + d.r + 4);
+  }
+}
+
+/* Him, in the first build's renderer: THE WARDEN's eight sides, the ship
+   everyone flew at his core, THE GRID's grunts for a crown and for hands,
+   holding out the old screen's frame tipped up toward you, which still plays
+   the first build. Flat, unlit, shadowless. From worldFlat, in the room. */
+function oaDrawHim(g, hm) {
+  const K = OPO_KIT, S = K.world(), F = OPO_FIRST, r = hm.r, t = hm.t, tex = hm.tex;
+  const open = hm.stage === 'open' ? hm.st : 99, on = d => open >= d;
+  const jit = hm.stage === 'cascade' ? 2.2 : 0;
+  const x = hm.x + (jit ? rnd(-jit, jit) : 0), y = hm.y + (jit ? rnd(-jit, jit) : 0);
+  const ca = Math.cos(hm.ang), sa = Math.sin(hm.ang), ux = -sa, uy = ca;
+  const dim = 1 - hm.out * 0.4;
+  g.lineJoin = 'miter';
+  // the crown: THE GRID's grunts, round him, faster as the fight goes on
+  const spin = t * (0.45 + hm.ph * 0.28);
+  for (let i = 0; i < 8; i++) {
+    if (!on(0.4 + i * 0.07)) break;
+    const q = spin + i * TAU / 8, rr = r * (1.45 + (hm.ph === 3 ? Math.sin(t * 6 + i) * 0.1 : 0)) + hm.out * r * 0.6 * K.hash(i);
+    oaPoly(g, x + Math.cos(q) * rr, y + Math.sin(q) * rr, r * 0.2, 3, q + t * 1.3);
+    g.globalAlpha = dim * (1 - hm.out * 0.6);
+    g.fillStyle = F.bg; g.fill(); g.strokeStyle = F.enemy; g.lineWidth = 2; g.stroke();
+  }
+  g.globalAlpha = dim;
+  // his body
+  if (on(0.1)) {
+    oaPoly(g, x, y, r, 8, hm.ang + Math.PI / 8);
+    g.fillStyle = hm.flash > 0.05 ? oaMix(F.grid, '#e2e8f0', Math.min(1, hm.flash) * 0.7) : F.grid; g.fill();
+    g.strokeStyle = OPO_COL; g.lineWidth = 2.5; g.stroke();
+    oaPoly(g, x, y, r * 0.64, 8, hm.ang); g.strokeStyle = F.grid2; g.lineWidth = 1.5; g.stroke();
+  }
+  // at his core, the one ship everyone flew
+  if (on(0.25)) { oaShip(g, x - ca * r * 0.1, y - sa * r * 0.1, r * 0.034, hm.ang); g.fillStyle = '#10313a'; g.fill(); g.strokeStyle = F.player; g.lineWidth = 2; g.stroke(); }
+  if (!on(1.0)) { g.globalAlpha = 1; return; }
+  // the frame, held out to you
+  const sc = oaSteps((open - 1.0) / 0.4, 5);
+  const d = r * (hm.painting ? 1.25 : 1.55), fw = r * 3.1 * sc, fh = r * 1.75 * sc;
+  const fx = x + ca * d, fy = y + sa * d, zTop = 70, zFoot = 22;
+  const at = (s1, s2, z) => K.V(fx + ux * s1 * fw / 2 + ca * s2 * fh / 2, fy + uy * s1 * fw / 2 + sa * s2 * fh / 2, z);
+  // its top toward him and up, its foot toward you and down
+  const pts = [at(1, -1, zTop), at(-1, -1, zTop), at(-1, 1, zFoot), at(1, 1, zFoot)];
+  const Pp = pts.map(p => S.project(p));
+  let mx = 0, my = 0;
+  for (const p of Pp) { mx += p.x / 4; my += p.y / 4; }
+  const grown = k => Pp.map(p => ({ x: mx + (p.x - mx) * k, y: my + (p.y - my) * k }));
+  // his arms: grunts from his sides to the frame's
+  for (const s1 of [1, -1]) {
+    const hand = S.project(at(s1 * 1.1, 0, (zTop + zFoot) / 2));
+    const bx = x + ux * s1 * r * 0.85, by = y + uy * s1 * r * 0.85;
+    for (let k = 1; k <= 3; k++) {
+      const q = k / 4;
+      oaPoly(g, lerp(bx, hand.x, q), lerp(by, hand.y, q), r * 0.12, 3, hm.ang + s1 * 1.2 + t * 0.6 * s1);
+      g.fillStyle = F.bg; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 1.6; g.stroke();
+    }
+  }
+  // the bezel: the first build's wall colour, flat
+  K.path(g, grown(1.12)); g.fillStyle = F.wall; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 2; g.stroke();
+  // the screen: the first build, live; empty at the end
+  const img = tex || K.first(), iw = img.width, ih = img.height;
+  const live = 1 - hm.out;
+  if (live > 0.01) {
+    g.globalAlpha = dim * oaSteps(live, 4);
+    K.polyTex(g, S, img, [Object.assign({ u: 0, v: 0 }, pts[0]), Object.assign({ u: iw, v: 0 }, pts[1]),
+                          Object.assign({ u: iw, v: ih }, pts[2]), Object.assign({ u: 0, v: ih }, pts[3])], { sub: 2 });
+  }
+  if (hm.out > 0) { g.globalAlpha = dim * oaC01(hm.out * 1.5); K.path(g, Pp); g.fillStyle = F.bg; g.fill(); }
+  g.globalAlpha = dim;
+  // the cascade: every era flooding into it at once
+  if (hm.stage === 'cascade') {
+    const keys = Object.keys(OA_ERA);
+    g.globalAlpha = 0.5; K.path(g, Pp); g.fillStyle = OA_ERA[keys[Math.floor(t * 16) % keys.length]]; g.fill();
+    g.globalAlpha = dim;
+  }
+  K.path(g, Pp); g.strokeStyle = F.grid2; g.lineWidth = 1; g.stroke();
+  // what it has taken off your ship: a notch for each card, along its foot, in the card's colour
+  const n = Math.min(OA_ST.taken.length, 24);
+  for (let i = 0; i < n; i++) {
+    const q = (i + 0.5) / 24, p = { x: lerp(Pp[3].x, Pp[2].x, q), y: lerp(Pp[3].y, Pp[2].y, q) };
+    g.fillStyle = OA_ST.taken[i]; g.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+  }
+  // his hands on it
+  for (const s1 of [1, -1]) {
+    const hand = S.project(at(s1 * 1.1, 0, (zTop + zFoot) / 2));
+    oaPoly(g, hand.x, hand.y, r * 0.17, 3, hm.ang - s1 * Math.PI / 2);
+    g.fillStyle = F.bg; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 2; g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+const OPO_ART = {
+  /* ------------------------------ the way in ------------------------------ */
+  voice(g, w, h, line) {
+    if (line.kind === 'coax' || line.kind === 'door' || line.kind === 'still') oaCoax(g, w, h, line);
+    else oaSpeak(g, w, h, line);
+    oaTag(g, 'voice', w / 2 - 60, h * 0.82 + 18);
   },
+  /* A dialogue voice for him: a blip a word, through a narrow band like an old
+     speaker, every line falling to its end (aggrieved, fond, unmovable). Before
+     he is seen it is softer and further off. */
+  saySound(audio, line) {
+    if (!audio || !audio.ready || audio.muted || !line || !line.text) return;
+    const pre = line.kind === 'coax' || line.kind === 'door' || line.kind === 'still' || line.kind === 'revert';
+    if (!OA_ST.bus || OA_ST.bus.ac !== audio.ac) {
+      try {
+        const f = audio.ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1300; f.Q.value = 0.9;
+        const v = audio.ac.createGain(); v.gain.value = 1.6;
+        f.connect(v); v.connect(audio.sfxGain);
+        OA_ST.bus = { ac: audio.ac, f, v };
+      } catch (e) { return; }
+    }
+    OA_ST.bus.v.gain.value = pre ? 1.1 : 1.7;
+    const words = line.text.split(/\s+/).filter(Boolean), n = Math.min(words.length, 14);
+    const step = pre ? 0.09 : 0.075, base = pre ? 174 : 196, seed = line.text.length * 7;
+    for (let i = 0; i < n; i++) {
+      const k = n > 1 ? i / (n - 1) : 0, wl = Math.min(words[i].length, 8);
+      const f = base * Math.pow(2, (2 - k * 6 + (OPO_KIT.hash(seed + i) - 0.5) * 3) / 12);
+      audio.tone(f, 0.05 + wl * 0.008, pre ? 'triangle' : 'square', pre ? 0.05 : 0.04, f * 0.92, i * step, OA_ST.bus.f);
+    }
+  },
+  /* The old door: a square well in today's floor, sunk into sector 01 as it
+     was. Its sides and rim are flat in the first build's colours, nothing on it
+     lit, while today's light pools on the floor around it and stops at its
+     edge. Arming, its grid draws in a line at a time and its wall closes round;
+     taking you, the well drops away and the old ground spreads out over today's. */
+  door(g, d) {
+    const K = OPO_KIT, S = K.world(), F = OPO_FIRST, r = d.r, t = d.t, arm = d.armed, tin = d.in;
+    // today's light, on the floor round it
+    g.globalCompositeOperation = 'lighter';
+    oaGlow(g, d.x, d.y, r * 3.6, '#bae6fd', 0.16 + 0.08 * Math.sin(t * 1.7));
+    g.globalCompositeOperation = 'source-over';
+    // taking you: the old ground spreads over today's, in steps
+    if (tin > 0) {
+      const R = r * (1 + 2.6 * oaSteps(tin, 6));
+      g.save(); g.beginPath(); g.rect(d.x - R, d.y - R, R * 2, R * 2); g.clip();
+      oaOldGround(g, d.x - R, d.y - R, R * 2, R * 2, 0, 0);
+      g.restore();
+      g.strokeStyle = OA_DEL; g.globalAlpha = 0.5; g.lineWidth = 1;
+      g.strokeRect(d.x - R + 0.5, d.y - R + 0.5, R * 2 - 1, R * 2 - 1);
+      g.globalAlpha = 1;
+    }
+    // the well: its floor sunk into the old sector, deeper as it arms and as it takes you
+    const D = 40 + 80 * arm + 260 * tin;
+    const rim = [K.V(d.x - r, d.y - r, 0), K.V(d.x + r, d.y - r, 0), K.V(d.x + r, d.y + r, 0), K.V(d.x - r, d.y + r, 0)];
+    const top = rim.map(p => S.project(p)), bot = rim.map(p => S.project(K.V(p.x, p.y, -D)));
+    // its walls, every one the same flat colour: nothing in the old renderer is lit
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      K.path(g, [top[i], top[j], bot[j], bot[i]]); g.fillStyle = '#0a1120'; g.fill();
+      g.strokeStyle = F.wall; g.lineWidth = 1; g.stroke();
+    }
+    // its floor: THE GRID of 1.0, playing in miniature
+    const bx = bot[0].x, by = bot[0].y, bw = bot[1].x - bot[0].x, bh = bot[3].y - bot[0].y;
+    if (bw > 2 && bh > 2) {
+      g.save();
+      g.beginPath(); g.rect(bx, by, bw, bh * oaSteps(arm, 8)); g.clip();
+      g.translate(bx, by); g.scale(bw / 200, bh / 200);
+      oaOldGround(g, 0, 0, 200, 200, 0, 0);
+      g.strokeStyle = F.wall; g.lineWidth = 4; g.strokeRect(8, 8, 184, 184);
+      // the ship, round and round, and the grunts after it
+      const zoom = 1 + tin * 1.6;
+      g.translate(100, 100); g.scale(zoom, zoom); g.translate(-100, -100);
+      const q = t * 0.9, px = 100 + Math.cos(q) * 52, py = 100 + Math.sin(q) * 52;
+      for (let i = 0; i < 4; i++) {
+        const qq = q - 0.9 - i * 0.55, gx = 100 + Math.cos(qq) * (64 + (i % 2) * 14), gy = 100 + Math.sin(qq) * (64 + (i % 2) * 14);
+        oaPoly(g, gx, gy, 7, 3, qq * 2); g.fillStyle = 'rgba(244,114,182,0.16)'; g.fill(); g.strokeStyle = F.enemy; g.lineWidth = 2; g.stroke();
+      }
+      for (let i = 0; i < 3; i++) { const bq = q + 0.3 + ((t * 2 + i / 3) % 1) * 0.9; g.fillStyle = F.bullet; g.fillRect(100 + Math.cos(bq) * 52 - 1.5, 100 + Math.sin(bq) * 52 - 1.5, 3, 3); }
+      oaShip(g, px, py, 0.9, q + Math.PI / 2); g.fillStyle = 'rgba(103,232,249,0.18)'; g.fill(); g.strokeStyle = F.player; g.lineWidth = 2.4; g.stroke();
+      g.restore();
+    }
+    // the rim, raised a little, flat; its wall drawn round as it arms
+    const lip = rim.map(p => S.project(K.V(p.x, p.y, 10)));
+    g.strokeStyle = F.grid2; g.lineWidth = 7; K.path(g, lip); g.stroke();
+    const per = 8 * r, run = per * arm;
+    g.strokeStyle = F.wall; g.lineWidth = 4; g.lineCap = 'square';
+    g.beginPath(); g.moveTo(lip[0].x, lip[0].y);
+    let left = run;
+    for (let i = 1; i <= 4 && left > 0; i++) {
+      const a = lip[i - 1], b = lip[i % 4], seg = Math.hypot(b.x - a.x, b.y - a.y), k = Math.min(1, left / Math.max(1, seg));
+      g.lineTo(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k); left -= seg;
+    }
+    g.stroke();
+    // its name, in its own type
+    const lx = (lip[0].x + lip[1].x) / 2, ly = lip[0].y - 16;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha = 0.4 + 0.6 * oaSteps(arm, 4);
+    g.font = '700 11px ' + F.font; g.fillStyle = F.accent; g.fillText('SECTOR 01', lx, ly);
+    g.font = '600 8px ' + F.font; g.fillStyle = '#64748b'; g.fillText('T H E   G R I D', lx, ly + 12);
+    g.globalAlpha = 1;
+    oaTag(g, 'door', d.x - r, d.y + r + 4);
+  },
+  /* The lock's way in. The screen as it stood is taken, cut into a piece for
+     every date in the record, and the pieces go newest first, counter-clockwise
+     (time running backwards), falling away into the screen while the record
+     is read down like a log, each date struck out as it goes. Under them is
+     the first build's empty ground, and on it, at the end, its menu draws
+     itself where the frame's own will be. */
   revert(g, w, h, r) {
-    g.fillStyle = 'rgba(5,6,10,' + (0.35 + 0.6 * r.k) + ')';
-    g.fillRect(0, 0, w, h);
-    if (r.entry) oaText(g, r.entry.d + '  ·  ' + r.entry.n, w / 2, h * 0.4, 13, '#94a3b8', 0.9);
+    const K = OPO_KIT, S = K.screen(w, h), L = r.list, n = Math.max(1, L.length);
+    K.restartOn('opoRevert', r.t);
+    const st = K.scene('opoRevert', () => {
+      const cap = K.capture('opoRevert');
+      const sites = [];
+      for (let i = 0; i < n; i++) {
+        const a = -Math.PI / 2 + (i + 0.5) / n * TAU, rr = (0.22 + 0.5 * K.hash(i * 3 + 1)) * Math.min(w, h);
+        sites.push({ x: clamp(w / 2 + Math.cos(a) * rr * (w / h) * 0.7, 8, w - 8), y: clamp(h / 2 + Math.sin(a) * rr * 0.7, 8, h - 8) });
+      }
+      const pieces = K.voronoi(K.rect(0, 0, w, h, cap.sx), n, 5, { sites });
+      // newest first, counter-clockwise from the top
+      pieces.forEach(p => { p.a = ((-Math.PI / 2 - Math.atan2(p.c.y - h / 2, p.c.x - w / 2)) % TAU + TAU) % TAU; });
+      pieces.sort((a, b) => a.a - b.a);
+      return { cap, pieces, gone: -1, sim: K.sim({ gravity: K.V(0, 700, -2400), glass: false }) };
+    });
+    st.sim.space = S;
+    // the pieces whose dates have gone, let go
+    while (st.gone < r.i && st.gone < st.pieces.length - 1) {
+      const p = st.pieces[++st.gone];
+      for (const b of K.bodiesOf([p], { img: st.cap.img, thick: 3, edgeCol: '#16243c', backCol: '#05060a', flat: true, life: 1.6, fade: 0.5,
+        kick: () => ({ vx: (p.c.x - w / 2) * 0.6, vy: -120 + rnd(-60, 60), vz: 320, wx: rnd(-3, 3), wy: rnd(-3, 3), wz: rnd(-1.5, 1.5) }) })) st.sim.add(b);
+    }
+    // under them, 1.0's empty ground
+    g.drawImage(oaOldScreen(w, h), 0, 0, w, h);
+    // what still stands of today, older by the moment
+    const next = st.pieces[st.gone + 1], each = r.T * 0.86 / n;
+    const soon = next ? oaC01(1 - ((st.gone + 1) * each - r.t) / 0.3) : 0;
+    for (let i = st.gone + 1; i < st.pieces.length; i++) {
+      const p = st.pieces[i];
+      K.polyTex(g, S, st.cap.img, p.pts.map(q => ({ x: q.x, y: q.y, z: 0, u: q.u, v: q.v })), { sub: 1 });
+      K.path(g, p.pts);
+      g.fillStyle = 'rgba(5,6,10,' + (0.1 + 0.55 * r.k).toFixed(3) + ')'; g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 1.5; g.stroke();
+      if (i === st.gone + 1 && soon > 0) { g.strokeStyle = 'rgba(226,232,240,' + (soon * (0.5 + 0.5 * Math.sin(uiTime * 40))).toFixed(3) + ')'; g.lineWidth = 2; g.stroke(); }
+    }
+    st.sim.step(); st.sim.draw(g, { sub: 1 });
+    // the record, read down: struck out as it goes
+    const fadeLog = oaC01((0.95 - r.k) / 0.08);
+    if (fadeLog > 0) {
+      const cy = h * 0.4, cx = w / 2, row = 26, cur = Math.max(0, r.i), since = r.t - Math.max(0, r.i) * each;
+      const scroll = cur + oaC01(since / 0.2) - 1;
+      g.save();
+      g.globalAlpha = fadeLog;
+      const band = g.createLinearGradient(cx - 260, 0, cx + 260, 0);
+      band.addColorStop(0, 'rgba(5,6,10,0)'); band.addColorStop(0.2, 'rgba(5,6,10,0.72)'); band.addColorStop(0.8, 'rgba(5,6,10,0.72)'); band.addColorStop(1, 'rgba(5,6,10,0)');
+      g.fillStyle = band; g.fillRect(cx - 260, cy - row * 5.5, 520, row * 10);
+      g.textBaseline = 'middle';
+      g.font = '700 9px ' + OA_DISP; g.fillStyle = '#64748b'; g.textAlign = 'center';
+      g.fillText('R E V E R T I N G   T O   1 . 0', cx, cy - row * 5);
+      for (let j = Math.max(0, cur - 4); j < Math.min(n, cur + 5); j++) {
+        const e = L[j], y = cy + (j - scroll) * row, dist = Math.abs(j - scroll);
+        const a = oaC01(1 - dist / 4.6) * fadeLog;
+        if (a <= 0.02) continue;
+        g.globalAlpha = a;
+        const gone = j <= r.i, now = j === cur;
+        g.textAlign = 'left';
+        g.font = (now ? '700 15px ' : '600 12px ') + OA_MONO;
+        g.fillStyle = gone ? OA_DEL : '#475569';
+        g.fillText(gone ? '−' : ' ', cx - 200, y);
+        g.fillStyle = gone ? (now ? '#fecaca' : 'rgba(248,113,113,0.75)') : '#64748b';
+        g.fillText(e.d, cx - 180, y);
+        g.font = (now ? '800 17px ' : '600 13px ') + OA_DISP;
+        g.fillStyle = gone ? (now ? '#ffffff' : 'rgba(248,113,113,0.75)') : '#64748b';
+        const label = e.key === 'since' ? 'v' + e.q : e.q;
+        g.fillText(label, cx - 100, y);
+        if (gone) {
+          const lw = g.measureText(label).width, k = now ? oaC01(since / 0.25) : 1;
+          g.fillStyle = OA_DEL; g.fillRect(cx - 104, y - 1, (lw + 8) * k, 2);
+        }
+        if (now) oaEmblem(g, e.key, cx - 226, y, 9, uiTime, a);
+      }
+      g.restore();
+    }
+    // and at the end, the first build's menu, where the frame's will be
+    oaFirstMenu(g, w, h, oaC01((r.k - 0.86) / 0.12), uiTime);
     oaTag(g, 'revert', 8, 8);
   },
+  // today's canvas under the copy's frame: the same menu, so a slow frame never shows anything else
   lockUnder(g, w, h, s) {
+    g.drawImage(oaOldScreen(w, h), 0, 0, w, h);
+    oaFirstMenu(g, w, h, 1, uiTime);
+    if (!s.ready && s.t > 4) {
+      g.globalAlpha = oaC01((s.t - 4) / 1.5) * (0.6 + 0.3 * Math.sin(uiTime * 3));
+      g.font = '600 11px ' + OPO_FIRST.font; g.textAlign = 'center'; g.fillStyle = '#334155';
+      g.fillText('the old version is starting', w / 2, h - 30);
+      g.globalAlpha = 1;
+    }
     oaTag(g, 'lockUnder', 8, 8);
   },
+
+  /* -------------------------------- the lock -------------------------------
+     These four draw on the first build's own canvas, inside its frame. */
+  /* The crack in the top wall. Through it, outside a world that never had an
+     outside, today: a sliver of today's floor, lit; and today's light falling
+     into the old room in rays, motes drifting in them. Fire into it knocks
+     chips off the wall, and splits run along it as it gives. */
   crack(g, c) {
-    g.strokeStyle = c.held ? '#ffffff' : '#94a3b8';
-    g.globalAlpha = 0.4 + 0.6 * Math.max(c.w, c.p);
-    g.lineWidth = 2 + 6 * c.p;
-    g.beginPath(); g.moveTo(c.x0, c.y + 2); g.lineTo(c.x1, c.y + 2); g.stroke();
+    const F = OPO_FIRST, o = Math.max(c.w, c.p), t = c.t, x0 = c.x0, x1 = c.x1, cx = c.cx, half = c.half;
+    const hot = c.broke ? 1 : c.held ? 0.75 + 0.25 * Math.sin(t * 30) : 0;
+    const R = OPO_KIT.rng(911);
+    // where it is on the screen, for the glass over it (lockFx)
+    try { const m = g.getTransform(); OA_ST.crack = { x: m.a * cx + m.c * c.y + m.e, y: m.b * cx + m.d * c.y + m.f, sx: m.a, at: uiTime }; } catch (e) {}
+    // its lips: jagged, opening wider in the middle
+    const open = 2 + 8 * o + 7 * c.p + (c.broke ? 24 : 0), N = 22, upper = [], lower = [];
+    for (let i = 0; i <= N; i++) {
+      const k = i / N, x = lerp(x0, x1, k), env = Math.sin(k * Math.PI);
+      upper.push({ x, y: -(open * Math.pow(env, 0.7) * (0.3 + 1.1 * R())) - 2 });
+      lower.push({ x, y: open * Math.pow(env, 0.7) * (0.2 + 1.0 * R()) * 0.6 + 2 });
+    }
+    // outside: today, lit, through a ragged fan widening up and away
+    const H = 40 + 170 * o;
+    g.save();
+    g.beginPath();
+    g.moveTo(x0, 0);
+    for (let i = 0; i <= 8; i++) { const k = i / 8; g.lineTo(lerp(x0 - half * 0.5, x1 + half * 0.5, k), -H * (0.55 + 0.45 * Math.sin(k * Math.PI)) * (0.8 + 0.4 * R())); }
+    g.lineTo(x1, 0); g.closePath(); g.clip();
+    try {
+      const tile = typeof matTile === 'function' && typeof STAGES !== 'undefined' ? matTile(STAGES[0]) : null;
+      if (tile) { const pat = g.createPattern(tile, 'repeat'); if (pat) { g.fillStyle = pat; g.fillRect(x0 - half, -H - 10, (x1 - x0) + half * 2, H + 12); } }
+    } catch (e) {}
+    g.globalAlpha = 1;
+    const sky = g.createLinearGradient(0, 0, 0, -H);
+    sky.addColorStop(0, 'rgba(224,242,254,' + (0.3 + 0.25 * hot).toFixed(3) + ')'); sky.addColorStop(0.35, 'rgba(167,139,250,0.08)'); sky.addColorStop(1, 'rgba(5,6,10,0.85)');
+    g.fillStyle = sky; g.fillRect(x0 - half, -H - 10, (x1 - x0) + half * 2, H + 12);
+    g.globalCompositeOperation = 'lighter';
+    ['#fb923c', '#a3e635', '#a5b4fc', '#f472b6', '#fbbf24'].forEach((col, i) => {
+      oaGlow(g, lerp(x0, x1, (i + 0.5) / 5) + Math.sin(t * 0.7 + i) * half * 0.3, -H * (0.35 + 0.3 * OPO_KIT.hash(i)), 22 + 24 * o, col, 0.45 + 0.25 * hot);
+    });
+    g.restore();
+    // the gap in the wall: today's light, white at its heart
+    g.save();
+    g.beginPath();
+    upper.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y));
+    for (let i = lower.length - 1; i >= 0; i--) g.lineTo(lower[i].x, lower[i].y);
+    g.closePath();
+    const core = g.createLinearGradient(0, -open, 0, open);
+    core.addColorStop(0, '#a5b4fc'); core.addColorStop(0.5, '#ffffff'); core.addColorStop(1, '#67e8f9');
+    g.fillStyle = core; g.globalAlpha = 0.85 + 0.15 * hot; g.fill();
+    g.globalAlpha = 1; g.strokeStyle = '#e0f2fe'; g.lineWidth = 1.2; g.stroke();
+    g.restore();
+    // its light, falling into the old room
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const Lr = 160 + 640 * o + (c.broke ? 400 : 0), rays = 7;
+    for (let i = 0; i < rays; i++) {
+      const k = (i + 0.5) / rays, sx = lerp(x0, x1, k), sway = Math.sin(t * 0.5 + i * 1.7) * 0.12;
+      const spread = (k - 0.5) * 0.9 + sway, w0 = (x1 - x0) / rays * 0.45, a = (0.022 + 0.045 * o + 0.05 * hot) * (0.6 + 0.4 * Math.sin(t * 1.3 + i * 2.1));
+      const ex = sx + spread * Lr, ey = Lr * (0.85 + 0.3 * OPO_KIT.hash(i + 4));
+      const gr = g.createLinearGradient(sx, 0, ex, ey);
+      gr.addColorStop(0, 'rgba(224,242,254,' + a.toFixed(3) + ')'); gr.addColorStop(1, 'rgba(167,139,250,0)');
+      g.fillStyle = gr;
+      g.beginPath(); g.moveTo(sx - w0 / 2, 2); g.lineTo(sx + w0 / 2, 2); g.lineTo(ex + w0 * 1.8, ey); g.lineTo(ex - w0 * 1.8, ey); g.closePath(); g.fill();
+    }
+    oaGlow(g, cx, 8, half * 1.5 + 40 * o, '#e0f2fe', 0.16 + 0.2 * o + 0.22 * hot);
+    // motes, drifting in it
+    for (let i = 0; i < 18; i++) {
+      const hx = OPO_KIT.hash(i * 5 + 1), hy = OPO_KIT.hash(i * 7 + 2), life = (t * (0.06 + 0.05 * hx) + hy) % 1;
+      const mx = lerp(x0, x1, hx) + (hx - 0.5) * Lr * 0.8 * life + Math.sin(t + i) * 12, my = 10 + life * Lr * 0.8;
+      oaGlow(g, mx, my, 5, '#e0f2fe', (0.25 + 0.4 * o) * Math.sin(life * Math.PI));
+    }
+    // a round taken in: a flash where it went
+    for (const hit of c.hits) { const k = oaC01(1 - hit.age / 0.6); oaGlow(g, hit.x, 0, 18 + 30 * k, '#ffffff', 0.7 * k); }
+    g.restore();
+    // and the wall's chips, knocked off flat
+    for (const hit of c.hits) {
+      const s = OPO_KIT.hash(Math.round(hit.x * 10));
+      for (let k = 0; k < 3; k++) {
+        const vx = (OPO_KIT.hash(s * 99 + k) - 0.5) * 260, vy = 90 + 200 * OPO_KIT.hash(s * 77 + k), a = hit.age;
+        oaPoly(g, hit.x + vx * a, 4 + vy * a + 450 * a * a, 3 + 2 * k, 3, a * 9 + k);
+        g.globalAlpha = oaC01(1 - a / 0.6); g.fillStyle = F.wall; g.fill(); g.strokeStyle = '#94a3b8'; g.lineWidth = 1; g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+    // splits running along the wall, and down into the floor, as fire takes it
+    g.strokeStyle = '#e2e8f0'; g.lineWidth = 1;
+    const splits = Math.floor(2 + 10 * c.p);
+    for (let i = 0; i < splits; i++) {
+      const side = i % 2 ? 1 : -1, from = side > 0 ? x1 : x0, len = (30 + 120 * R()) * (0.4 + c.p);
+      g.globalAlpha = 0.35 + 0.45 * c.p;
+      g.beginPath(); g.moveTo(from, 0);
+      let x = from, y = 0;
+      const down = i % 3 === 2;
+      for (let k = 0; k < 5; k++) { x += side * len / 5 * (down ? 0.3 : 1); y += down ? len / 5 : (R() - 0.5) * 6; g.lineTo(x, y); }
+      g.stroke();
+    }
     g.globalAlpha = 1;
     oaTag(g, 'crack', c.x0, c.y + 10);
   },
-  crackSound(audio, w, p) { /* blank: a sound from the game it was */ },
-  lockVoice(g, w, h, line) {
-    oaText(g, line.text, w / 2, h * 0.78, 18, '#e2e8f0', oaFade(line.age, line.life));
-    oaTag(g, 'lockVoice', w / 2 - 50, h * 0.78 + 14);
+  /* Now and then, through the wall, the game it was: muffled (sines and
+     low-passed noise, nothing bright), nearer as the crack opens. */
+  crackSound(audio, w, p) {
+    if (!audio || typeof audio.tone !== 'function') return;
+    const v = 0.04 + 0.1 * clamp(Math.max(w, p), 0.1, 1);
+    const kind = rndi(4);
+    if (kind === 0) { audio.noise(1.0, v * 1.6, 420, 45, 2); audio.tone(58, 0.9, 'sine', v * 1.3, 36); }                        // a boss going down, far off
+    else if (kind === 1) [0, 5, 7, 12, 16].forEach((s, i) => audio.tone(196 * Math.pow(2, s / 12), 0.42, 'sine', v * 0.7, null, i * 0.09));   // a level gained, through a wall
+    else if (kind === 2) for (let i = 0; i < 6; i++) audio.noise(0.07, v, 900, 180, 1, i * 0.085 + rnd(0.02));                          // fire, muffled
+    else { audio.tone(110, 1.5, 'triangle', v * 0.8, 165); audio.tone(165, 1.5, 'triangle', v * 0.5, 247, 0.25); }                 // something rising
   },
+  /* His voice in the lock: native to the first build, flat on a strip of its
+     ground, typed out without easing, shaking more the more he has to say it. */
+  lockVoice(g, w, h, line) {
+    const F = OPO_FIRST, size = Math.round(clamp(w * 0.02, 15, 22)) + Math.min(4, line.i), y = h * 0.76;
+    const a = oaSteps(oaFade(line.age, line.life), 4);
+    if (a <= 0) return;
+    const shown = line.text.slice(0, Math.ceil(line.age * 34));
+    const shake = Math.min(3, 0.6 + line.i * 0.5);
+    g.font = '700 ' + size + 'px ' + F.font;
+    const bw = g.measureText(line.text).width + 48, bh = size + 16;
+    g.globalAlpha = a * 0.8; g.fillStyle = F.bg; g.fillRect(w / 2 - bw / 2, y - bh / 2, bw, bh);
+    g.globalAlpha = a; g.fillStyle = F.wall; g.fillRect(w / 2 - bw / 2, y - bh / 2, bw, 2); g.fillRect(w / 2 - bw / 2, y + bh / 2 - 2, bw, 2);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OPO_COL;
+    const full = g.measureText(line.text).width;
+    g.textAlign = 'left';
+    g.fillText(shown, w / 2 - full / 2 + rnd(-shake, shake), y + 1 + rnd(-shake, shake));
+    g.globalAlpha = 1;
+    oaTag(g, 'lockVoice', w / 2 - 50, y + bh / 2 + 4);
+  },
+  /* Over everything the first build draws, in the lock: today's light, spilling
+     out of the crack onto the glass; the glass itself straining from the top,
+     where the crack is, a split at a time as fire takes the wall; and chips of
+     the wall thrown at it while you fire, cracking it. Nothing over its menu,
+     and nothing once it has broken: from then on this canvas is his screen. */
+  lockFx(g, w, h, s) {
+    if (!s || s.state === 'menu' || s.state === 'name' || !s.crack || (s.run && s.run.broke)) { oaTag(g, 'lockFx', w - 60, h - 20); return; }
+    const K = s.kit, o = Math.max(s.crack.w, s.crack.p), p = s.crack.p, held = !!(s.run && s.run.held);
+    const dpr = g.canvas && g.canvas.width ? g.canvas.width / Math.max(1, w) : 1;
+    const ck = OA_ST.crack && uiTime - OA_ST.crack.at < 0.25 ? { x: OA_ST.crack.x / dpr, y: OA_ST.crack.y / dpr } : null;
+    // today's light, as it reaches the glass
+    if (ck && ck.y > -400 && ck.y < h + 200) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      oaGlow(g, ck.x, Math.max(0, ck.y), 160 + 320 * o, '#a5b4fc', 0.025 + 0.05 * o + (held ? 0.04 : 0));
+      g.restore();
+    }
+    // the glass, straining from the top a split at a time (the same splits every time, each with its moment)
+    const ax = w * 0.62;
+    if (p > 0.3) {
+      const R = OPO_KIT.rng(77);
+      g.save(); g.lineJoin = 'round';
+      for (let i = 0; i < 14; i++) {
+        const ang = Math.PI * (0.08 + 0.84 * R()), full = 90 + 320 * R(), sx = ax + (R() - 0.5) * 40, bends = [R(), R(), R(), R()];
+        const grow = oaC01((p - (0.3 + 0.68 * (i / 14))) / 0.12);
+        if (grow <= 0) continue;
+        const pts = [{ x: sx, y: 0 }];
+        for (let k = 1; k <= 4; k++) { const q = ang + (bends[k - 1] - 0.5) * 0.5; pts.push({ x: pts[k - 1].x + Math.cos(q) * full * grow / 4, y: pts[k - 1].y + Math.sin(q) * full * grow / 4 }); }
+        g.beginPath(); pts.forEach((q, k) => k ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y));
+        g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 2.2; g.stroke();
+        g.translate(-0.7, -0.7); g.strokeStyle = 'rgba(226,232,240,' + (0.35 + 0.4 * p).toFixed(3) + ')'; g.lineWidth = 0.9; g.stroke(); g.translate(0.7, 0.7);
+      }
+      g.restore();
+    }
+    // chips off the wall, thrown at the glass while you fire into it
+    if (K) {
+      const fx = K.scene('opoLockChips', () => ({ sim: K.sim({ gravity: K.V(0, 900, -900) }), next: 0 }));
+      fx.sim.space = K.screen(w, h);
+      if (held && ck && uiTime > fx.next && fx.sim.bodies.length < 30) {
+        fx.next = uiTime + (FXO.parts ? 0.3 : 0.6);
+        const sx = clamp(ck.x + rnd(-40, 40), 10, w - 10), sy = clamp(ck.y, 4, h * 0.4);
+        const chip = fx.sim.add(K.body({ shape: [K.V(-5, -4), K.V(5, -3), K.V(4, 4), K.V(-4, 3)], thick: 3,
+          x: sx, y: sy, z: 6, vx: rnd(-160, 160), vy: rnd(40, 200), vz: rnd(1100, 1600), wx: rnd(-9, 9), wy: rnd(-9, 9), wz: rnd(-5, 5),
+          col: OPO_FIRST.wall, edgeCol: '#0e1626', backCol: '#16243c', flat: true, shadow: false, life: 1.6 }));
+        if (rnd() < 0.3) chip.onGlass = ev => K.glass.hit(ev.x, ev.y, 0.1 + 0.15 * rnd(), { life: 2.5 });
+        else chip.glass = 'none';
+      }
+      fx.sim.step(); fx.sim.draw(g, { sub: 1, light: false });
+      if (K.glass.hits.length) K.glass.draw(g, w, h);
+    }
+    oaTag(g, 'lockFx', w - 60, h - 20);
+  },
+
+  /* ----------------------------- face to face ------------------------------ */
+  /* The crack gives. The first build fills the screen as it was in the frame,
+     then splits from where the crack was (the top wall, OPO_CRACK.at along),
+     the splits running out across it; the pieces part, showing today's room
+     behind in slivers of light, and go, nearest first, each still playing the
+     first build: most fall back into the room and take its light as they
+     turn, a few come at you and crack the glass. */
   shatter(g, w, h, s, tex) {
-    if (tex && s.k < 0.5) { g.globalAlpha = 1 - s.k * 2; g.drawImage(tex, 0, 0, w, h); g.globalAlpha = 1; }
+    const K = OPO_KIT, S = K.screen(w, h), img = tex || K.first(), iw = img.width, ih = img.height;
+    const at = { x: w * 0.62, y: 3 }, T = s.t;
+    K.restartOn('opoShatter', T);
+    const st = K.scene('opoShatter', () => {
+      const few = FXO.parts ? 1 : 0.6;
+      const shards = K.radial([{ x: 0, y: 0, u: 0, v: 0 }, { x: w, y: 0, u: iw, v: 0 }, { x: w, y: h, u: iw, v: ih }, { x: 0, y: h, u: 0, v: ih }],
+        at, { spokes: Math.round(17 * few), rings: Math.round(7 * few), seed: 31, jag: 0.5, grow: 1.45 });
+      let far = 1;
+      for (const sh of shards) { sh.d = Math.hypot(sh.c.x - at.x, sh.c.y - at.y); far = Math.max(far, sh.d); }
+      for (const sh of shards) { sh.go = 0.62 + (sh.d / far) * 1.5 + K.hash(sh.d) * 0.25; sh.out = false; }
+      return { shards, far, sim: K.sim({ gravity: K.V(0, 1100, -1700) }), hit: false };
+    });
+    st.sim.space = S;
+    if (T > 0.05 && !st.hit) { st.hit = true; K.glass.hit(at.x, at.y + 26, 1.3, { life: 5 }); }
+    // let go, nearest first
+    for (const sh of st.shards) {
+      if (sh.out || T < sh.go) continue;
+      sh.out = true;
+      const at3 = sh.d < st.far * 0.22 && K.hash(sh.d * 3) < 0.55;    // a few, from near the break, come at you
+      const nx = (sh.c.x - at.x) / (sh.d || 1), ny = (sh.c.y - at.y) / (sh.d || 1), sp = 90 / (Math.sqrt(sh.area) + 30);   // the big ones turn slowly
+      for (const b of K.bodiesOf([sh], { img, thick: 3, edgeCol: '#1d3557', backCol: '#0e1626', flat: true, life: 2.0, fade: 0.6, glass: 'crack',
+        kick: () => at3 ? { vx: nx * 160, vy: ny * 160 - 80, vz: rnd(1200, 1700), wx: rnd(-6, 6), wy: rnd(-6, 6), wz: rnd(-3, 3) }
+                        : { vx: nx * rnd(80, 260), vy: ny * rnd(40, 160) + rnd(40, 220), vz: rnd(-260, 60), wx: rnd(-4, 4) * sp, wy: rnd(-4, 4) * sp, wz: rnd(-2, 2) * sp } })) st.sim.add(b);
+    }
+    // in today's room, they take its light
+    for (const b of st.sim.bodies) if (b.age > 0.3) b.flat = false;
+    st.sim.step();
+    const behind = st.sim.bodies.filter(b => b.p.z < 0), ahead = st.sim.bodies.filter(b => b.p.z >= 0);
+    K.drawBodies(g, S, behind, { sub: 1 });
+    // the pieces still in place, parting
+    const part = oaC01((T - 0.32) / 0.3) * 5;
+    const run = st.far * oaC01((T - 0.04) / 0.42);
+    for (const sh of st.shards) {
+      if (sh.out) continue;
+      const nx = (sh.c.x - at.x) / (sh.d || 1), ny = (sh.c.y - at.y) / (sh.d || 1), off = part * (0.4 + sh.d / st.far);
+      const pts = sh.pts.map(q => ({ x: q.x + nx * off, y: q.y + ny * off, z: 0, u: q.u, v: q.v }));
+      K.polyTex(g, S, img, pts, { sub: 1, grow: part > 0 ? 0 : 0.6 });
+      if (sh.d - Math.sqrt(sh.area) < run) {
+        K.path(g, pts);
+        g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 2; g.stroke();
+        g.strokeStyle = 'rgba(226,232,240,' + (0.85 - 0.5 * oaC01((T - 0.6) / 1)).toFixed(3) + ')'; g.lineWidth = 1; g.stroke();
+      }
+    }
+    K.drawBodies(g, S, ahead, { sub: 1 });
+    // the break itself: today's light, through
+    g.save(); g.globalCompositeOperation = 'lighter';
+    oaGlow(g, at.x, at.y, 120 + 520 * oaC01(T / 0.5), '#e0f2fe', 0.85 * oaC01(1 - (T - 0.2) / 0.9));
+    g.restore();
     oaTag(g, 'shatter', 8, 8);
   },
+  // him: today's light does not reach him, and he is drawn in the old renderer, after it (worldFlat)
   him(g, hm, tex) {
-    g.strokeStyle = OPO_COL; g.lineWidth = 2;
-    g.globalAlpha = 1 - hm.out * 0.5;
-    g.beginPath();
-    for (let i = 0; i < 8; i++) { const q = hm.ang + i * TAU / 8; g.lineTo(hm.x + Math.cos(q) * hm.r, hm.y + Math.sin(q) * hm.r); }
-    g.closePath(); g.stroke();
-    g.strokeRect(hm.x - hm.r * 0.6, hm.y - hm.r * 0.45, hm.r * 1.2, hm.r * 0.9);   // the old screen's frame, in his hands
-    if (tex && !hm.out) g.drawImage(tex, hm.x - hm.r * 0.6, hm.y - hm.r * 0.45, hm.r * 1.2, hm.r * 0.9);
-    g.globalAlpha = 1;
+    OA_ST.him = Object.assign({}, hm, { tex }); OA_ST.himAt = uiTime;
+    const sh = g.createRadialGradient(hm.x, hm.y, hm.r * 0.6, hm.x, hm.y, hm.r * 2.6);
+    sh.addColorStop(0, 'rgba(5,6,10,' + (0.65 * (1 - hm.out * 0.5)).toFixed(3) + ')'); sh.addColorStop(1, 'rgba(5,6,10,0)');
+    g.fillStyle = sh; g.fillRect(hm.x - hm.r * 2.6, hm.y - hm.r * 2.6, hm.r * 5.2, hm.r * 5.2);
     oaTag(g, 'him', hm.x + hm.r + 4, hm.y - hm.r);
   },
+
+  /* ------------------------------- the fight ------------------------------- */
+  /* The floor. The first build's side is its own ground: flat, its grid on the
+     world's 64 px, and nothing lit. A cell part-way back to today shows it in
+     scanlines, today's coming through between them. Where the two meet the
+     seam lives: today's edge glows and runs, the old side's paper lifts off it
+     and casts a shadow on today's, and the diff is marked, − on 1.0's side and
+     + on today's. Today's side is dark through PUT IT BACK (he has rebuilt the
+     frame round you) and its light comes back on with THIS WAS BETTER. */
   front(g, f, tex) {
-    const B = f.box;
-    g.strokeStyle = 'rgba(148,163,184,0.25)'; g.lineWidth = 1;
-    g.fillStyle = 'rgba(14,22,38,0.55)';
-    for (let r = 0; r < f.rows; r++) for (let c = 0; c < f.cols; c++)
-      if (f.cells[r * f.cols + c] < f.oldBelow) {
-        g.fillRect(B.x0 + c * B.cw, B.y0 + r * B.ch, B.cw, B.ch);
-        g.strokeRect(B.x0 + c * B.cw + 0.5, B.y0 + r * B.ch + 0.5, B.cw - 1, B.ch - 1);
+    const K = OPO_KIT, B = f.box, C = f.cols, R = f.rows, cells = f.cells, ob = f.oldBelow, cw = B.cw, ch = B.ch;
+    OA_ST.front = f; OA_ST.frontAt = uiTime;
+    const st = K.scene('opoFront', () => ({ prev: cells.slice(), took: new Array(C * R).fill(-9), gave: new Array(C * R).fill(-9), dark: 0, lit: f.light ? -9 : null, at: uiTime }));
+    const dt = clamp(uiTime - st.at, 0, 0.1); st.at = uiTime;
+    for (let i = 0; i < cells.length; i++) {
+      const was = st.prev[i] < ob, is = cells[i] < ob;
+      if (!was && is) st.took[i] = uiTime;
+      if (was && !is) st.gave[i] = uiTime;
+      st.prev[i] = cells[i];
+    }
+    if (f.light && st.lit === null) st.lit = uiTime;
+    // the light: off once the fight starts, back with THIS WAS BETTER, flickering on
+    let dark = f.stage === 'fight' && !f.light ? 0.5 : 0;
+    st.dark += (dark - st.dark) * (1 - Math.exp(-dt * 2.5));
+    dark = st.dark;
+    if (st.lit !== null && uiTime - st.lit < 1.1) { const q = (uiTime - st.lit) / 1.1; dark = Math.max(dark, 0.5 * (1 - q) * (K.hash(Math.floor(uiTime * 18)) < 0.55 ? 1 : 0.15)); }
+    if (dark > 0.01) { g.fillStyle = 'rgba(2,3,8,' + dark.toFixed(3) + ')'; g.fillRect(B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0); }
+    const lit = 1 - dark / 0.5;
+    // today's light, pooled on today's floor
+    if (lit > 0.02 && f.stage !== 'out') {
+      g.globalCompositeOperation = 'lighter';
+      for (let r = 0; r < R; r += 2) for (let c = 0; c < C; c += 2) {
+        const i = r * C + c;
+        if (cells[i] < ob) continue;
+        const k = K.hash(i + 3);
+        oaGlow(g, B.x0 + (c + 1) * cw, B.y0 + (r + 1) * ch, cw * 1.5, k < 0.5 ? '#bae6fd' : '#c7d2fe', lit * (0.05 + 0.025 * Math.sin(f.t * 0.8 + i)));
       }
+      g.globalCompositeOperation = 'source-over';
+    }
+    // the first build's side: whole, or in scanlines while it is being taken or pushed back
+    const band = 6;
+    g.save();
+    g.beginPath();
+    let any = false;
+    for (let i = 0; i < cells.length; i++) {
+      if (cells[i] >= ob) continue;
+      any = true;
+      const x = B.x0 + (i % C) * cw, y = B.y0 + Math.floor(i / C) * ch;
+      const cov = 1 - cells[i] / ob, inT = oaC01((uiTime - st.took[i]) / 0.3);
+      if (cov >= 0.985 && inT >= 1) { g.rect(x, y, cw, ch); continue; }
+      const nb = Math.ceil(ch / band);
+      for (let k = 0; k < nb; k++) if (K.hash(i * 37 + k) < cov && k / nb < inT) g.rect(x, y + k * band, cw, Math.min(band, ch - k * band));
+    }
+    if (any) { g.clip(); oaOldGround(g, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, 0, 0); }
+    g.restore();
+    // the seam: every edge between the two sides
+    const edges = [];
+    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+      const i = r * C + c;
+      if (cells[i] >= ob) continue;
+      const x = B.x0 + c * cw, y = B.y0 + r * ch;
+      if (c + 1 < C && cells[i + 1] >= ob) edges.push({ x0: x + cw, y0: y, x1: x + cw, y1: y + ch, nx: 1, ny: 0, i });
+      if (c > 0 && cells[i - 1] >= ob) edges.push({ x0: x, y0: y, x1: x, y1: y + ch, nx: -1, ny: 0, i });
+      if (r + 1 < R && cells[i + C] >= ob) edges.push({ x0: x, y0: y + ch, x1: x + cw, y1: y + ch, nx: 0, ny: 1, i });
+      if (r > 0 && cells[i - C] >= ob) edges.push({ x0: x, y0: y, x1: x + cw, y1: y, nx: 0, ny: -1, i });
+    }
+    if (edges.length) {
+      // 1.0's paper, lifting off today's floor: its shadow, then its lip
+      for (const e of edges) {
+        const lift = 3 + 3 * (0.5 + 0.5 * Math.sin(f.t * 2.2 + e.i * 1.3));
+        const sx = e.nx * lift, sy = e.ny * lift;
+        g.fillStyle = 'rgba(0,0,0,0.38)';
+        g.beginPath(); g.moveTo(e.x0 + sx + 3, e.y0 + sy + 5); g.lineTo(e.x1 + sx + 3, e.y1 + sy + 5);
+        g.lineTo(e.x1 - e.nx * 8 + 3, e.y1 - e.ny * 8 + 5); g.lineTo(e.x0 - e.nx * 8 + 3, e.y0 - e.ny * 8 + 5); g.closePath(); g.fill();
+        g.fillStyle = OPO_FIRST.grid2;
+        g.beginPath(); g.moveTo(e.x0 + sx, e.y0 + sy); g.lineTo(e.x1 + sx, e.y1 + sy);
+        g.lineTo(e.x1 - e.nx * 9, e.y1 - e.ny * 9); g.lineTo(e.x0 - e.nx * 9, e.y0 - e.ny * 9); g.closePath(); g.fill();
+        g.strokeStyle = '#475569'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(e.x0 + sx, e.y0 + sy); g.lineTo(e.x1 + sx, e.y1 + sy); g.stroke();
+      }
+      // today's edge: alight, and running
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      for (const e of edges) { g.moveTo(e.x0 + e.nx * 7, e.y0 + e.ny * 7); g.lineTo(e.x1 + e.nx * 7, e.y1 + e.ny * 7); }
+      g.strokeStyle = 'rgba(103,232,249,0.22)'; g.lineWidth = 8; g.stroke();
+      g.setLineDash([14, 10]); g.lineDashOffset = -f.t * 40;
+      g.strokeStyle = 'rgba(224,242,254,0.75)'; g.lineWidth = 1.5; g.stroke();
+      g.setLineDash([]);
+      g.globalCompositeOperation = 'source-over';
+      // the diff, marked
+      g.font = '700 13px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (const e of edges) {
+        if (K.hash(e.i * 3 + e.nx * 5 + e.ny * 11) > 0.45) continue;
+        const mx = (e.x0 + e.x1) / 2, my = (e.y0 + e.y1) / 2;
+        g.globalAlpha = 0.55; g.fillStyle = OA_DEL; g.fillText('−', mx - e.nx * 24, my - e.ny * 24);
+        g.globalAlpha = 0.5; g.fillStyle = OA_ADD; g.fillText('+', mx + e.nx * 26, my + e.ny * 26);
+      }
+      g.globalAlpha = 1;
+    }
+    // a cell just given back: a scan down it, in the colour of whatever gave it (every era's, in the cascade)
+    g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < cells.length; i++) {
+      const a = uiTime - st.gave[i];
+      if (a > 0.6 || cells[i] < ob) continue;
+      const x = B.x0 + (i % C) * cw, y = B.y0 + Math.floor(i / C) * ch, k = a / 0.6;
+      const keys = Object.keys(OA_ERA), col = f.cascade > 0 ? OA_ERA[keys[(i * 7) % keys.length]] : '#67e8f9';
+      g.globalAlpha = 0.5 * (1 - k); g.fillStyle = col; g.fillRect(x, y + ch * k - 6, cw, 6);
+      g.globalAlpha = 0.18 * (1 - k); g.fillRect(x, y, cw, ch);
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    // and a cell just taken: its − where the scan came in
+    g.font = '800 22px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let i = 0; i < cells.length; i++) {
+      const a = uiTime - st.took[i];
+      if (a > 0.5 || cells[i] >= ob) continue;
+      g.globalAlpha = oaSteps(1 - a / 0.5, 3); g.fillStyle = OA_DEL;
+      g.fillText('−', B.x0 + (i % C + 0.5) * cw, B.y0 + (Math.floor(i / C) + 0.5) * ch);
+    }
+    g.globalAlpha = 1;
+    // what it is, in the corner
+    g.font = '600 12px ' + OA_MONO; g.textAlign = 'left'; g.textBaseline = 'top'; g.fillStyle = '#475569';
+    g.fillText('diff --git a/1.0 b/today', B.x0 + 16, B.y0 + 14);
+    g.fillStyle = '#334155'; g.fillText('@@ -1,3799 +1,75309 @@', B.x0 + 16, B.y0 + 30);
     oaTag(g, 'front', B.x0 + 4, B.y0 + 4);
   },
+  /* A revert: a band of floor wound back. Told first, the band marked out in
+     the old renderer's dashes with rewind chevrons running the way it will go;
+     then its front, a hard white bar (its edge hurts), dragging scanlines
+     behind it and tracking noise ahead, the floor in front of it reddened. */
   sweep(g, s) {
-    const B = s.box;
-    g.strokeStyle = OPO_COL; g.lineWidth = 2;
-    g.setLineDash(s.tell < 1 ? [8, 8] : []);
-    g.globalAlpha = s.tell < 1 ? 0.5 : 0.9;
-    if (s.vert) {
-      const x0 = B.x0 + s.lane * B.cw, y = s.dir > 0 ? B.y0 + s.pos : B.y1 - s.pos;
-      g.strokeRect(x0, B.y0, s.lanes * B.cw, B.y1 - B.y0);
-      if (s.tell >= 1) { g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + s.lanes * B.cw, y); g.stroke(); }
-    } else {
-      const y0 = B.y0 + s.lane * B.ch, x = s.dir > 0 ? B.x0 + s.pos : B.x1 - s.pos;
-      g.strokeRect(B.x0, y0, B.x1 - B.x0, s.lanes * B.ch);
-      if (s.tell >= 1) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y0 + s.lanes * B.ch); g.stroke(); }
+    const B = s.box, cw = B.cw, ch = B.ch, t = uiTime;
+    let bx, by, bw, bh, along, span;
+    if (s.vert) { bx = B.x0 + s.lane * cw; bw = s.lanes * cw; by = B.y0; bh = B.y1 - B.y0; span = bh; }
+    else { by = B.y0 + s.lane * ch; bh = s.lanes * ch; bx = B.x0; bw = B.x1 - B.x0; span = bw; }
+    along = s.dir > 0 ? s.pos : span - s.pos;
+    // the band's own frame: u along its travel, v across it
+    const P = (u, v) => s.vert ? { x: bx + v, y: by + u } : { x: bx + u, y: by + v };
+    const wide = s.vert ? bw : bh;
+    if (s.tell < 1) {
+      const blink = 0.45 + 0.45 * (Math.floor(t * 8) % 2);
+      g.setLineDash([10, 8]); g.lineDashOffset = -t * 60 * s.dir;
+      g.strokeStyle = OPO_COL; g.globalAlpha = blink; g.lineWidth = 2;
+      g.strokeRect(bx + 1, by + 1, bw - 2, bh - 2);
+      g.setLineDash([]);
+      // rewind chevrons, the way it will run
+      const step = 120, off = ((t * 220) % step) * s.dir;
+      g.strokeStyle = OPO_COL; g.lineWidth = 2.5; g.lineJoin = 'miter';
+      for (let u = -step; u < span + step; u += step) {
+        const uu = u + off;
+        if (uu < 20 || uu > span - 20) continue;
+        for (const k of [0, 1]) {
+          const c = P(uu + k * 16 * s.dir, wide / 2), d = s.dir * 9, e = Math.min(26, wide * 0.12);
+          g.globalAlpha = blink * 0.6 * s.tell;
+          g.beginPath();
+          if (s.vert) { g.moveTo(c.x - e, c.y - d); g.lineTo(c.x, c.y + d); g.lineTo(c.x + e, c.y - d); }
+          else { g.moveTo(c.x - d, c.y - e); g.lineTo(c.x + d, c.y); g.lineTo(c.x - d, c.y + e); }
+          g.stroke();
+        }
+      }
+      // where it starts from
+      const a = P(s.dir > 0 ? 0 : span, 0), b = P(s.dir > 0 ? 0 : span, wide);
+      g.globalAlpha = blink; g.strokeStyle = '#ffffff'; g.lineWidth = 5;
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      g.globalAlpha = 1;
+      oaTag(g, 'sweep', B.x0 + 4, B.y0 + 18);
+      return;
     }
-    g.setLineDash([]); g.globalAlpha = 1;
+    const going = s.pos < span;
+    // the floor about to go, reddened ahead of it
+    if (going) {
+      const ahead = 90;
+      for (let k = 0; k < 6; k++) {
+        const u0 = along + s.dir * k * ahead / 6;
+        const p0 = P(u0, 0), p1 = P(u0 + s.dir * ahead / 6, wide);
+        g.globalAlpha = 0.14 * (1 - k / 6); g.fillStyle = OA_DEL;
+        g.fillRect(Math.min(p0.x, p1.x), Math.min(p0.y, p1.y), Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
+      }
+    }
+    // scanlines dragged behind it
+    for (let k = 1; k <= 7; k++) {
+      const u = along - s.dir * k * 11, p0 = P(u, 0), p1 = P(u, wide);
+      g.globalAlpha = 0.5 * (1 - k / 8); g.strokeStyle = '#e2e8f0'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(p0.x, p0.y); g.lineTo(p1.x, p1.y); g.stroke();
+    }
+    // tracking noise, ahead
+    if (going) for (let k = 0; k < 10; k++) {
+      const u = along + s.dir * rnd(4, 36), v = rnd(0, wide), l = rnd(20, 90);
+      const p0 = P(u, v), p1 = P(u, Math.min(wide, v + l));
+      g.globalAlpha = rnd(0.2, 0.6); g.strokeStyle = rnd() < 0.3 ? OA_DEL : '#cbd5e1'; g.lineWidth = rnd(1, 3);
+      g.beginPath(); g.moveTo(p0.x, p0.y); g.lineTo(p1.x, p1.y); g.stroke();
+    }
+    // the front: a hard white bar
+    const fade = going ? 1 : 0.5;
+    const e0 = P(along, -6), e1 = P(along, wide + 6);
+    g.globalAlpha = fade; g.lineCap = 'butt';
+    g.strokeStyle = '#05060a'; g.lineWidth = 12; g.beginPath(); g.moveTo(e0.x, e0.y); g.lineTo(e1.x, e1.y); g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 7; g.stroke();
+    g.globalAlpha = 1;
     oaTag(g, 'sweep', B.x0 + 4, B.y0 + 18);
   },
+  /* A pane of the old frame, thrown back to its place: a live window of the
+     first build (a piece of it, different for each), tumbling high over the
+     room and drawn where it really is, its shadow on the floor under it
+     sharpening as it comes down. Where it will land is marked in 1.0's dashes,
+     the floor it will take showing through. Shots crack it. Landed, it slams
+     flat, rings out, and sinks into the floor it has taken. */
   pane(g, p, tex) {
-    g.strokeStyle = OPO_COL; g.lineWidth = 1.5;
-    g.globalAlpha = p.landed ? Math.max(0, 1 - p.landed) : 1;
-    g.strokeRect(p.x - p.r, p.y - p.r * 0.7, p.r * 2, p.r * 1.4);
-    if (!p.landed) { g.setLineDash([4, 6]); g.beginPath(); g.arc(p.tx, p.ty, p.r, 0, TAU); g.stroke(); g.setLineDash([]); }
-    g.globalAlpha = 1;
+    const K = OPO_KIT, F = OPO_FIRST;
+    const k = oaC01(p.t / p.T), r = p.r;
+    const fr = OA_ST.front && OA_ST.front.box, reach = 1.25 * (fr ? (fr.cw + fr.ch) / 2 : 125);
+    if (!p.landed) {
+      // where it lands: the floor it will take, in 1.0's dashes
+      g.save();
+      g.beginPath(); g.arc(p.tx, p.ty, reach, 0, TAU);
+      g.globalAlpha = 0.12 + 0.3 * k * k; g.fillStyle = F.bg; g.fill();
+      g.setLineDash([6, 8]); g.lineDashOffset = uiTime * 30;
+      g.globalAlpha = 0.35 + 0.5 * k; g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.stroke();
+      g.setLineDash([]);
+      const c = r * 0.9;
+      g.globalAlpha = 0.5 + 0.5 * k; g.lineWidth = 2;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        g.beginPath(); g.moveTo(p.tx + sx * c, p.ty + sy * (c - 10)); g.lineTo(p.tx + sx * c, p.ty + sy * c); g.lineTo(p.tx + sx * (c - 10), p.ty + sy * c); g.stroke();
+      }
+      g.font = '700 10px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OA_DEL;
+      g.fillText('− 1.0', p.tx, p.ty);
+      g.restore();
+      // its shadow on today's floor, under where it is, sharpening as it comes down
+      const z = Math.sin(k * Math.PI) * 300, gy = p.y + Math.sin(k * Math.PI) * 60;
+      const blur = 1 + z / 180;
+      g.globalAlpha = 0.3 * (1 - z / 640) / Math.sqrt(blur); g.fillStyle = '#000';
+      g.save(); g.translate(p.x + z * 0.1, gy + z * 0.18); g.rotate(p.ang + k * Math.PI * 1.5);
+      for (let i = 0; i < 3; i++) { const e = 1 + i * 0.12 * blur; g.fillRect(-r * 1.3 * e, -r * 0.75 * e, r * 2.6 * e, r * 1.5 * e); }
+      g.restore(); g.globalAlpha = 1;
+    } else {
+      // landed: it rings out over the floor it took
+      const L = oaC01(p.landed);
+      g.globalAlpha = (1 - L) * 0.9; g.strokeStyle = OPO_COL; g.lineWidth = 2;
+      g.beginPath(); g.arc(p.tx, p.ty, r + reach * L, 0, TAU); g.stroke();
+      g.globalAlpha = 1;
+    }
+    // the pane itself is 1.0's: drawn in the old renderer, after bloom (worldFlat)
+    if (OA_ST.panes.length > 48) OA_ST.panes.length = 0;
+    OA_ST.panes.push(Object.assign({ tex, at: uiTime }, p));
     oaTag(g, 'pane', p.x + p.r + 2, p.y - p.r);
   },
+  /* His paint: an arm of grunts reaching out to a restore, and a flat square
+     brush at the end of it scribbling it out in the first build's ground,
+     back and forth, the strokes piling up as he goes. */
   paint(g, p) {
-    g.strokeStyle = OPO_COL; g.lineWidth = 1 + 3 * p.k; g.globalAlpha = 0.6;
-    g.beginPath(); g.moveTo(p.x0, p.y0); g.lineTo(p.x1, p.y1); g.stroke();
-    g.globalAlpha = 1;
+    const F = OPO_FIRST, k = oaC01(p.k), t = uiTime;
+    const dx = p.x1 - p.x0, dy = p.y1 - p.y0, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    // the scribble, so far
+    const R = OPO_KIT.rng(Math.round(p.x1 * 7 + p.y1 * 13)), n = 14, upto = k * n;
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const row = (i / n - 0.5) * 92, side = i % 2 ? 1 : -1;
+      pts.push({ x: p.x1 + side * 50 + (R() - 0.5) * 12, y: p.y1 + row + (R() - 0.5) * 10 });
+    }
+    g.lineCap = 'square'; g.lineJoin = 'miter';
+    const scrib = (lw, col) => {
+      g.strokeStyle = col; g.lineWidth = lw; g.beginPath();
+      for (let i = 0; i <= Math.min(n, Math.ceil(upto)); i++) {
+        let q = pts[i];
+        if (i === Math.ceil(upto) && i > 0) { const a = pts[i - 1], f = upto - (i - 1); q = { x: lerp(a.x, q.x, f), y: lerp(a.y, q.y, f) }; }
+        i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y);
+      }
+      g.stroke();
+    };
+    scrib(26, F.grid2); scrib(20, F.bg);
+    // the brush where it is now
+    const bi = Math.min(n, Math.ceil(upto)), bp = bi > 0 ? (() => { const a = pts[bi - 1], b = pts[bi], f = upto - (bi - 1); return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f) }; })() : pts[0];
+    // the arm, out to it
+    const nA = 7;
+    for (let i = 1; i <= nA; i++) {
+      const q = i / (nA + 1), wob = Math.sin(t * 7 + i) * 6;
+      const x = lerp(p.x0 + ux * 40, bp.x, q) - uy * wob, y = lerp(p.y0 + uy * 40, bp.y, q) + ux * wob;
+      oaPoly(g, x, y, 7, 3, Math.atan2(bp.y - p.y0, bp.x - p.x0));
+      g.fillStyle = F.bg; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.stroke();
+    }
+    g.fillStyle = F.bg; g.fillRect(bp.x - 11, bp.y - 11, 22, 22);
+    g.strokeStyle = OPO_COL; g.lineWidth = 2; g.strokeRect(bp.x - 11, bp.y - 11, 22, 22);
     oaTag(g, 'paint', (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2);
   },
+  /* A date's restore, standing in the room: a plinth of today's, lit, rising
+     out of the floor, and over it, in a column of light, the emblem of what it
+     brought back. A ring round its foot fills as it holds. Kept, it rings out
+     and rises away into the light; painted, its colour drains to 1.0's grey,
+     and painted out it falls flat in steps. */
   restore(g, r) {
-    g.globalAlpha = r.gone ? Math.max(0, 1 - r.gone) : 1;
-    g.strokeStyle = r.settled ? '#67e8f9' : '#94a3b8'; g.lineWidth = 1.5;
-    g.beginPath(); g.arc(r.x, r.y, 46, 0, TAU); g.stroke();
-    if (!r.settled && r.paint > 0) { g.beginPath(); g.arc(r.x, r.y, 52, -Math.PI / 2, -Math.PI / 2 + TAU * r.paint); g.stroke(); }
-    if (r.entry) oaText(g, r.entry.n, r.x, r.y, 10, '#cbd5e1', 0.9);
+    const K = OPO_KIT, S = K.world(), e = r.entry || { key: 'since', d: '', n: '', q: '' }, col = oaEra(e.key);
+    const up = oaC01(r.t / 0.6), gone = oaC01(r.gone / 1.2), out = r.gone && !r.settled;
+    const a = r.gone ? (out ? oaSteps(1 - gone, 4) : 1 - gone) : 1;
+    if (a <= 0) return;
+    const drain = oaC01(r.paint * 1.2) * (r.settled ? 0 : 1);
+    const hgt = 26 * K.ease.backOut(up) * (out ? 1 - gone : 1);
+    // the plinth: a hexagonal prism, lit from the kit's one light
+    const rad = 40, base = [], topP = [];
+    for (let i = 0; i < 6; i++) { const q = i * TAU / 6 + Math.PI / 6; base.push(K.V(r.x + Math.cos(q) * rad, r.y + Math.sin(q) * rad * 0.9, 0)); topP.push(K.V(r.x + Math.cos(q) * rad, r.y + Math.sin(q) * rad * 0.9, hgt)); }
+    const B2 = base.map(p => S.project(p)), T2 = topP.map(p => S.project(p));
+    g.globalAlpha = a;
+    // its shadow
+    g.fillStyle = 'rgba(0,0,0,0.35)'; K.path(g, B2.map(p => ({ x: p.x + 8, y: p.y + 12 }))); g.fill();
+    for (let i = 0; i < 6; i++) {
+      const j = (i + 1) % 6, mid = K.V((base[i].x + base[j].x) / 2 - r.x, (base[i].y + base[j].y) / 2 - r.y, 0);
+      const nrm = K.norm(mid);
+      if (!S.faces(nrm, K.V(r.x + mid.x, r.y + mid.y, hgt / 2))) continue;
+      K.path(g, [B2[i], B2[j], T2[j], T2[i]]);
+      g.fillStyle = oaMix('#1e293b', '#475569', K.shade(nrm) - 0.3); g.fill();
+    }
+    K.path(g, T2); g.fillStyle = oaMix('#334155', '#64748b', 0.4 + 0.2 * Math.sin(r.t * 2)); g.fill();
+    g.strokeStyle = oaMix(col, '#475569', drain); g.lineWidth = 1.5; g.stroke();
+    // the ring round its foot: how long it has held
+    const hold = oaC01(r.t / (r.settle || 5));
+    g.lineWidth = 4; g.strokeStyle = oaMix(col, '#475569', drain);
+    g.beginPath(); g.arc(r.x, r.y, rad + 16, -Math.PI / 2, -Math.PI / 2 + TAU * (r.settled ? 1 : hold)); g.stroke();
+    // its light, and its emblem in it
+    const top = S.project(K.V(r.x, r.y, hgt));
+    const rise = r.settled && r.gone ? gone * 60 : 0;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const beam = g.createLinearGradient(top.x, top.y, top.x, top.y - 150);
+    const bc = oaRGB(col);
+    beam.addColorStop(0, 'rgba(' + bc.join(',') + ',' + (0.42 * (1 - drain) * a).toFixed(3) + ')'); beam.addColorStop(1, 'rgba(' + bc.join(',') + ',0)');
+    g.fillStyle = beam; g.beginPath(); g.moveTo(top.x - 30, top.y); g.lineTo(top.x + 30, top.y); g.lineTo(top.x + 46, top.y - 150); g.lineTo(top.x - 46, top.y - 150); g.closePath(); g.fill();
+    if (r.settled && r.t < (r.settle || 5) + 0.8) { const q = (r.t - (r.settle || 5)) / 0.8; g.strokeStyle = col; g.globalAlpha = (1 - q) * a; g.lineWidth = 3; g.beginPath(); g.arc(r.x, r.y, rad + 16 + q * 120, 0, TAU); g.stroke(); }
+    g.restore();
+    const ey = top.y - 66 - 6 * Math.sin(r.t * 2.2) - rise;
+    oaEmblem(g, e.key, top.x, ey, 30 * K.ease.backOut(up), r.t, a * (1 - drain * 0.85));
+    if (drain > 0) { g.globalAlpha = drain * a * 0.8; oaPoly(g, top.x, ey, 30, 4, Math.PI / 4); g.fillStyle = OPO_FIRST.grid2; g.fill(); g.globalAlpha = a; }
+    // what it is
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '800 18px ' + OA_DISP; g.fillStyle = drain > 0.5 ? '#64748b' : col; g.fillText(e.d, top.x, ey - 50);
+    g.font = '600 12px ' + OA_BODY; g.fillStyle = '#cbd5e1'; g.fillText(e.n, top.x, B2[1].y + 34);
+    if (r.settled) { g.font = '700 12px ' + OA_MONO; g.fillStyle = OA_ADD; g.fillText('+ KEPT', top.x, B2[1].y + 50); }
     g.globalAlpha = 1;
     oaTag(g, 'restore', r.x + 50, r.y - 50);
   },
+  /* A date passed: what it brought, back on the screen in its own language,
+     for a moment. Every one gets its line under the record (the + of the
+     diff, the date, the name and its emblem) and a flourish of its own. */
   restoreFx(g, w, h, f) {
-    if (f.entry) oaText(g, f.entry.d + '  ·  ' + f.entry.n, w / 2, h * 0.16, 12, '#e2e8f0', clamp(1.6 - f.t, 0, 1));
+    const K = OPO_KIT, e = f.entry || { key: 'since', d: '', n: '', q: '' }, key = e.key, col = oaEra(key), t = f.t;
+    const a = oaC01(t / 0.12) * oaC01((1.6 - t) / 0.5), q = oaC01(t / 1.3);
+    if (a <= 0) return;
+    const R = K.rng(17 + f.i * 31);
+    g.save();
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.textBaseline = 'middle';
+    switch (key) {
+      case 'fracture': {      // the screen splits, magenta
+        g.globalCompositeOperation = 'lighter'; g.strokeStyle = col; g.globalAlpha = a;
+        g.beginPath(); let x = w * 0.15, y = 0; g.moveTo(x, y);
+        while (y < h * q) { x += (R() - 0.35) * 70; y += 30 + R() * 30; g.lineTo(x, y); }
+        g.lineWidth = 6; g.globalAlpha = a * 0.3; g.stroke(); g.lineWidth = 2; g.globalAlpha = a; g.stroke(); break;
+      }
+      case 'ember': {         // embers, up from the floor of the screen
+        g.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 36; i++) { const s = R(), y = h - (t * (180 + 260 * R()) + s * 60), x = R() * w + Math.sin(t * 3 + i) * 18;
+          oaGlow(g, x, y, 5 + 8 * R(), i % 3 ? '#fb923c' : '#fde047', a * 0.8); }
+        const heat = g.createLinearGradient(0, h, 0, h * 0.6); heat.addColorStop(0, 'rgba(249,115,22,' + (0.22 * a).toFixed(3) + ')'); heat.addColorStop(1, 'rgba(249,115,22,0)');
+        g.fillStyle = heat; g.fillRect(0, h * 0.6, w, h * 0.4); break;
+      }
+      case 'codex': {         // pages, fluttering across
+        for (let i = 0; i < 6; i++) { const s = R(), x = -80 + (w + 160) * oaC01(t * 0.8 + s * 0.3 - 0.1), y = h * (0.25 + 0.5 * R()) + Math.sin(t * 6 + i) * 20;
+          g.save(); g.translate(x, y); g.rotate(Math.sin(t * 5 + i * 2) * 0.6); g.scale(Math.cos(t * 7 + i), 1);
+          g.globalAlpha = a * 0.85; g.fillStyle = '#fef3c7'; g.fillRect(-18, -24, 36, 48); g.fillStyle = '#b45309';
+          for (let k = 0; k < 5; k++) g.fillRect(-12, -16 + k * 8, 18 + (k % 2) * 6, 2); g.restore(); }
+        break;
+      }
+      case 'amalgam': {       // the graphics switches, on one by one, and the glow coming back
+        g.globalCompositeOperation = 'lighter'; g.fillStyle = 'rgba(255,255,255,' + (0.12 * a * (1 - q)).toFixed(3) + ')'; g.fillRect(0, 0, w, h);
+        g.globalCompositeOperation = 'source-over';
+        const rows = ['Bullet glow', 'Bloom', 'Surface materials', 'Extra particles'];
+        rows.forEach((n, i) => { const on = t > 0.2 + i * 0.18, y = h * 0.36 + i * 30, x = w - 210;
+          g.globalAlpha = a; g.fillStyle = 'rgba(5,6,10,0.75)'; g.fillRect(x - 10, y - 13, 200, 26);
+          g.font = '600 12px ' + OA_BODY; g.textAlign = 'left'; g.fillStyle = '#e2e8f0'; g.fillText(n, x, y);
+          g.fillStyle = on ? OA_ADD : '#334155'; g.fillRect(x + 148, y - 7, 30, 14); g.fillStyle = '#0b1020'; g.fillRect(x + (on ? 166 : 150), y - 5, 10, 10); });
+        break;
+      }
+      case 'coop': {          // a second ship, back
+        const x = -40 + (w + 80) * K.ease.inOut(q), y = h * 0.62 - Math.sin(q * Math.PI) * h * 0.2;
+        g.globalCompositeOperation = 'lighter'; for (let k = 0; k < 8; k++) oaGlow(g, x - k * 22, y + k * 3, 14 - k, '#f472b6', a * 0.5 * (1 - k / 8));
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = a;
+        oaShip(g, x, y, 1.4, -0.2); g.fillStyle = 'rgba(244,114,182,0.3)'; g.fill(); g.strokeStyle = '#f472b6'; g.lineWidth = 2.4; g.stroke();
+        g.font = '800 11px ' + OA_DISP; g.fillStyle = '#f472b6'; g.textAlign = 'center'; g.fillText('P2', x, y - 22); break;
+      }
+      case 'hacker': {        // the console, typing itself down the left
+        const cmds = ['> ls', '> ps', '> hack', '> kill', '> sudo su'];
+        g.font = '600 14px ' + OA_MONO; g.textAlign = 'left';
+        cmds.forEach((c, i) => { const s = c.slice(0, Math.max(0, Math.floor((t - i * 0.18) * 30))); if (!s) return;
+          g.globalAlpha = a; g.fillStyle = col; g.fillText(s + ((t * 3) % 1 < 0.5 && s.length < c.length ? '_' : ''), 24, h * 0.3 + i * 22); });
+        g.globalCompositeOperation = 'lighter'; g.fillStyle = 'rgba(163,230,53,' + (0.05 * a).toFixed(3) + ')';
+        for (let y = 0; y < h; y += 4) g.fillRect(0, y, w, 1); break;
+      }
+      case 'root': {          // a root prompt, and the edges going red
+        g.globalAlpha = a; g.font = '700 15px ' + OA_MONO; g.textAlign = 'left'; g.fillStyle = col;
+        g.fillText('root@voidrunner:~# ' + ((t * 2.5) % 1 < 0.55 ? '█' : ''), 24, h - 140);
+        g.strokeStyle = col; g.lineWidth = 3; g.globalAlpha = a * (0.4 + 0.3 * Math.sin(t * 20)); g.strokeRect(4, 4, w - 8, h - 8); break;
+      }
+      case 'patch': {         // the patch notes, down from the top, and a day on the calendar
+        const y = -180 + 220 * K.ease.backOut(oaC01(t / 0.5)), x = w - 240;
+        g.globalAlpha = a; g.fillStyle = '#0b1220'; g.fillRect(x, y, 200, 170); g.strokeStyle = col; g.lineWidth = 2; g.strokeRect(x, y, 200, 170);
+        g.font = '800 13px ' + OA_DISP; g.textAlign = 'left'; g.fillStyle = col; g.fillText('PATCH NOTES 1.0', x + 14, y + 22);
+        g.fillStyle = '#475569'; for (let k = 0; k < 6; k++) g.fillRect(x + 14, y + 44 + k * 18, 120 + R() * 50, 3);
+        ['#67e8f9', '#f472b6', '#fbbf24', '#a3e635'].forEach((c, i) => { g.fillStyle = c; g.fillRect(x + 14 + i * 26, y + 152, 18, 8); }); break;
+      }
+      case 'vagrant': {       // a blade, across the screen, and the parry's flash
+        const sw = K.ease.cubicOut(oaC01(t / 0.35));
+        const fa = a * oaC01(1 - (t - 0.45) / 0.4);
+        g.globalCompositeOperation = 'lighter'; g.globalAlpha = fa; g.strokeStyle = '#e0e7ff';
+        g.beginPath(); g.arc(w * 0.5, h * 1.6, h * 1.25, -Math.PI * 0.82, -Math.PI * (0.82 - 0.64 * sw)); g.lineWidth = 2; g.stroke();
+        g.lineWidth = 10; g.globalAlpha = fa * 0.2; g.stroke();
+        oaGlow(g, w * 0.5, h * 1.6 - h * 1.25, 90, '#a5b4fc', a * oaC01(1 - Math.abs(t - 0.25) / 0.2)); break;
+      }
+      case 'rush': {          // the bosses, in order, at a run
+        [3, 4, 5, 6, 8].forEach((n, i) => { const x = -60 + (w + 120) * oaC01(t * 0.9 - i * 0.08), y = 118 + Math.sin(t * 8 + i) * 6;
+          oaPoly(g, x, y, 16, n, t * 3 + i); g.globalAlpha = a; g.fillStyle = 'rgba(251,113,133,0.2)'; g.fill(); g.strokeStyle = col; g.lineWidth = 2; g.stroke(); });
+        break;
+      }
+      case 'ronin': {         // one cut, straight across: the screen slides on it
+        const cap = K.capture('opoRonin'), y = h * 0.52, sl = 14 * Math.sin(oaC01(t / 0.9) * Math.PI) * a;
+        g.save(); g.beginPath(); g.rect(0, 0, w, y); g.clip();
+        g.drawImage(cap.img, 0, 0, cap.img.width, cap.img.height, sl, 0, w, h); g.restore();
+        g.globalCompositeOperation = 'lighter'; g.globalAlpha = a; g.fillStyle = '#ffffff'; g.fillRect(0, y - 1, w * K.ease.cubicOut(oaC01(t / 0.18)), 2);
+        g.fillStyle = 'rgba(220,38,38,' + (0.12 * a).toFixed(3) + ')'; g.fillRect(0, y - 30, w, 60); break;
+      }
+      case 'pvp': {           // one against the other
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = 'rgba(56,189,248,' + (0.08 * a).toFixed(3) + ')'; g.fillRect(0, 0, w / 2, h);
+        g.fillStyle = 'rgba(236,72,153,' + (0.08 * a).toFixed(3) + ')'; g.fillRect(w / 2, 0, w / 2, h);
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = a * oaC01(1 - (t - 0.3) / 0.6);
+        g.font = '800 64px ' + OA_DISP; g.textAlign = 'center'; g.fillStyle = '#ffffff'; g.fillText('VS', w / 2, h * 0.45); break;
+      }
+      case 'tales': {         // the moon up, and pages of a tale drifting
+        g.globalCompositeOperation = 'lighter';
+        const mx = w * 0.82, my = h * 0.32 - 40 * K.ease.out(q);
+        oaGlow(g, mx, my, 90, '#c4b5fd', a * 0.5);
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = a;
+        g.fillStyle = '#ede9fe'; g.beginPath(); g.arc(mx, my, 26, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(5,6,10,0.92)'; g.beginPath(); g.arc(mx + 11, my - 6, 23, 0, TAU); g.fill();
+        g.font = 'italic 500 13px ' + OA_BODY; g.textAlign = 'center'; g.fillStyle = col;
+        ['Once,', 'before the doors,', 'there was a grid.'].forEach((s, i) => { g.globalAlpha = a * oaC01((t - 0.2 - i * 0.2) / 0.3); g.fillText(s, w * 0.82, h * 0.44 + i * 18); });
+        break;
+      }
+      default: {              // since: a version, stamped
+        const s = 1 + 1.4 * (1 - K.ease.cubicOut(oaC01(t / 0.25)));
+        g.globalAlpha = a * 0.9; g.translate(w / 2, h * 0.3); g.scale(s, s); g.rotate(-0.08);
+        g.font = '800 30px ' + OA_DISP; g.textAlign = 'center'; g.fillStyle = col; g.fillText('v' + e.q, 0, 0);
+        g.strokeStyle = col; g.lineWidth = 2; const tw = g.measureText('v' + e.q).width; g.strokeRect(-tw / 2 - 12, -24, tw + 24, 48);
+      }
+    }
+    g.restore();
+    // its line, under the record
+    const sc = t < 0.25 ? K.ease.backOut(t / 0.25) : 1, y = 92;
+    g.save();
+    g.globalAlpha = a; g.translate(w / 2, y); g.scale(sc, sc);
+    g.textBaseline = 'middle'; g.textAlign = 'center';
+    g.font = '700 18px ' + OA_DISP;
+    const nw = g.measureText(e.n).width;
+    g.fillStyle = 'rgba(5,6,10,0.6)'; g.fillRect(-nw / 2 - 46, -24, nw + 70, 42);
+    g.fillStyle = col; g.fillText(e.n, 12, 6);
+    g.font = '700 11px ' + OA_MONO; g.fillStyle = OA_ADD; g.fillText('+ ' + e.d, 12, -12);
+    g.restore();
+    oaEmblem(g, key, w / 2 + (12 - nw / 2 - 22) * sc, y + 4, 11 * sc, uiTime, a);
     oaTag(g, 'restoreFx', w / 2 + 120, h * 0.16);
   },
+  /* HOLLOW: a card off your ship. It peels up off the hull from one edge,
+     lit, then flies tumbling into his frame, its colour draining to 1.0's
+     grey as it goes in; the frame keeps a notch of it. */
   card(g, c) {
-    const x = lerp(c.x0, c.x1, c.k), y = lerp(c.y0, c.y1, c.k);
-    g.strokeStyle = c.col; g.lineWidth = 1.5; g.globalAlpha = 1 - c.k * 0.5;
-    g.strokeRect(x - 12, y - 16, 24, 32);
-    g.globalAlpha = 1;
-    oaTag(g, 'card', x + 14, y - 16);
+    const K = OPO_KIT, S = K.world(), k = oaC01(c.k);
+    let img = OA_ST.cards.get(c.id + '|' + c.col);
+    if (!img) {
+      img = document.createElement('canvas'); img.width = 120; img.height = 168;
+      const q = img.getContext('2d');
+      q.fillStyle = '#0b1020'; q.fillRect(0, 0, 120, 168);
+      q.fillStyle = rgba(c.col.charAt(0) === '#' ? c.col : '#94a3b8', 0.22); q.fillRect(0, 0, 120, 44);
+      q.strokeStyle = c.col; q.lineWidth = 5; q.strokeRect(3, 3, 114, 162);
+      q.fillStyle = '#f8fafc'; q.textAlign = 'center'; q.textBaseline = 'middle'; q.font = '700 15px ' + OA_BODY;
+      const words = String(c.n || c.id).toUpperCase().split(' '), lines = [];
+      for (const wd of words) { const l = lines[lines.length - 1]; if (l && (l + ' ' + wd).length <= 11) lines[lines.length - 1] = l + ' ' + wd; else lines.push(wd); }
+      lines.slice(0, 4).forEach((l, i) => q.fillText(l, 60, 84 + (i - (Math.min(4, lines.length) - 1) / 2) * 19));
+      q.fillStyle = c.col; oaPoly(q, 60, 24, 10, 4, Math.PI / 4); q.fill();
+      OA_ST.cards.set(c.id + '|' + c.col, img);
+    }
+    const W2 = 26, H2 = 36, uv = [{ u: 0, v: 0 }, { u: 120, v: 0 }, { u: 120, v: 168 }, { u: 0, v: 168 }];
+    if (k < 0.22) {
+      // peeling up off the hull, from its left edge over
+      const pk = k / 0.22, sh = K.sheet({ x: c.x0 - W2, y: c.y0 - H2, w: W2 * 2, h: H2 * 2, img, uv: { u0: 0, v0: 0, su: 120 / (W2 * 2), sv: 168 / (H2 * 2) }, z: 18 });
+      const lx = c.x0 - W2 + W2 * 2 * pk;
+      sh.pose().curl(lx, c.y0 - H2 - 10, lx, c.y0 + H2 + 10, 7, { side: -1, n: 10 });
+      sh.draw(g, S, { back: '#1e293b', sub: 1 });
+    } else {
+      const u = (k - 0.22) / 0.78, ue = K.ease.inOut(u);
+      const x = lerp(c.x0, c.x1, ue), y = lerp(c.y0, c.y1, ue), z = 18 + Math.sin(u * Math.PI) * 220;
+      const sc = 1 - 0.65 * u * u;
+      const q = K.qMul(K.qAxis(K.V(0, 0, 1), u * 5 + c.id.length), K.qAxis(K.V(0, 1, 0), u * Math.PI * 3));
+      const pts = [[-W2, -H2], [W2, -H2], [W2, H2], [-W2, H2]].map(([a, b], i) => Object.assign(K.add(K.V(x, y, z), K.qRot(q, K.V(a * sc, b * sc, 0))), uv[i]));
+      const n = K.qRot(q, K.V(0, 0, 1)), front = S.faces(n, K.V(x, y, z));
+      const P2 = pts.map(p => S.project(p));
+      // its shadow
+      g.globalAlpha = 0.3 * (1 - z / 400); g.fillStyle = '#000'; K.path(g, pts.map(p => ({ x: p.x + z * 0.12, y: p.y + z * 0.2 }))); g.fill(); g.globalAlpha = 1;
+      if (front) K.polyTex(g, S, img, pts, { sub: 1 }); else { K.path(g, P2); g.fillStyle = '#1e293b'; g.fill(); }
+      // lit, while it is still today's
+      const drain = oaC01((u - 0.7) / 0.3);
+      if (drain < 1) { g.globalAlpha = 1 - drain; g.fillStyle = 'rgba(0,0,0,' + (0.55 * (1 - K.shade(front ? n : K.mul(n, -1)))).toFixed(3) + ')'; K.path(g, P2); g.fill(); }
+      if (drain > 0) { g.globalAlpha = drain; K.path(g, P2); g.fillStyle = OPO_FIRST.grid2; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.stroke(); }
+      g.globalAlpha = 1;
+      if (k > 0.86) {
+        const id = c.id + '|' + Math.round(c.x0) + '|' + Math.round(c.y0);
+        if (!OA_ST.takenIds.has(id)) { OA_ST.takenIds.add(id); OA_ST.taken.push(c.col); }
+      }
+    }
+    oaTag(g, 'card', c.x0 + 14, c.y0 - 16);
   },
+  /* His bar, which is the record: a timeline of every date, 7 AUG to TODAY.
+     What you have taken back is today's, lit in each era's colour; what is
+     still his is 1.0's, flat and grey. The date you are at is big over it, in
+     its era's colour, the next one waiting at its side; the phases are marked
+     under it. A hit on him knocks the playhead. */
   record(g, w, h, rec) {
-    oaText(g, rec.date.d, w / 2, 30, 18, OPO_COL, 1);
-    g.strokeStyle = 'rgba(226,232,240,0.5)'; g.lineWidth = 1;
-    const bw = Math.min(520, w * 0.6), x0 = (w - bw) / 2, n = rec.list.length - 1;
-    g.beginPath(); g.moveTo(x0, 46); g.lineTo(x0 + bw, 46); g.stroke();
-    g.fillStyle = OPO_COL; g.fillRect(x0 + bw * (rec.pos / n) - 1, 41, 2, 10);
-    oaText(g, rec.phase.n, w / 2, 60, 9, '#94a3b8', 0.8);
+    const K = OPO_KIT, L = rec.list, n = Math.max(1, L.length - 1), small = w < 900;
+    for (const e of K.feed('opoRecord')) if (e.kind === 'hit') OA_ST.recKick = Math.min(1, OA_ST.recKick + (e.crit ? 0.6 : 0.3));
+    const dt = clamp(uiTime - OA_ST.recT, 0, 0.1); OA_ST.recT = uiTime;
+    OA_ST.recKick *= Math.exp(-dt * 9);
+    const bw = small ? w * 0.5 : Math.min(640, w * 0.62), x0 = (w - bw) / 2, y = 50, X = j => x0 + bw * j / n, pos = clamp(rec.pos, 0, n);
+    // a dark band behind it, so it reads over the room
+    const bg = g.createLinearGradient(0, 0, 0, 72);
+    bg.addColorStop(0, 'rgba(5,6,10,0.6)'); bg.addColorStop(1, 'rgba(5,6,10,0)');
+    g.fillStyle = bg; g.fillRect(x0 - 120, 0, bw + 240, 72);
+    // still his: 1.0's line, flat
+    g.strokeStyle = OPO_FIRST.wall; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(X(pos), y); g.lineTo(x0 + bw, y); g.stroke();
+    // taken back: lit, era by era
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (let j = 0; j < Math.ceil(pos); j++) {
+      const col = oaEra(L[j + 1].key), xa = X(j), xb = X(Math.min(pos, j + 1));
+      g.strokeStyle = col; g.globalAlpha = 0.28; g.lineWidth = 7; g.beginPath(); g.moveTo(xa, y); g.lineTo(xb, y); g.stroke();
+      g.globalAlpha = 0.95; g.lineWidth = 2.5; g.stroke();
+    }
+    g.restore();
+    // the dates
+    const bounds = new Set(rec.phases.map(p => p.to));
+    for (let j = 0; j <= n; j++) {
+      const x = X(j), done = j <= pos + 1e-6, tall = bounds.has(j) || j === 0 || j === n;
+      if (done) { g.fillStyle = oaEra(L[j].key); g.fillRect(x - 2, y - (tall ? 7 : 4), 4, tall ? 14 : 8); }
+      else { g.fillStyle = '#334155'; g.fillRect(x - 1, y - (tall ? 6 : 3), 2, tall ? 12 : 6); }
+    }
+    // the phases, under it
+    g.textBaseline = 'middle'; g.textAlign = 'center';
+    if (!small) rec.phases.forEach((p, i) => {
+      const from = i ? rec.phases[i - 1].to : 0, mid = (X(from) + X(p.to)) / 2, cur = i === rec.ph;
+      g.font = (cur ? '700 ' : '600 ') + '8px ' + OA_DISP; g.fillStyle = cur ? '#e2e8f0' : '#475569';
+      g.fillText(p.n.split('').join(' '), mid, y + 16);
+    });
+    // the ends
+    g.font = '600 10px ' + OA_MONO; g.fillStyle = '#64748b';
+    g.textAlign = 'right'; g.fillText(L[0].d, x0 - 10, y);
+    g.textAlign = 'left'; g.fillText(L[n].d, x0 + bw + 10, y);
+    // the playhead
+    const kick = OA_ST.recKick, px = X(pos) + (kick > 0.01 ? rnd(-3, 3) * kick : 0), here = oaEra(rec.date.key);
+    g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, px, y, 22 + 18 * kick, here === '#ffffff' ? '#e2e8f0' : here, 0.5 + 0.4 * kick); g.restore();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(px, y - 7); g.lineTo(px + 6, y); g.lineTo(px, y + 7); g.lineTo(px - 6, y); g.closePath(); g.fill();
+    // the date, and the next
+    g.textAlign = 'center';
+    g.font = '800 ' + (small ? 20 : 26) + 'px ' + OA_DISP; g.fillStyle = here;
+    g.fillText(rec.date.d, w / 2, 22);
+    if (rec.next && rec.next !== rec.date) {
+      const dw = g.measureText(rec.date.d).width;
+      g.font = '600 12px ' + OA_DISP; g.textAlign = 'left'; g.fillStyle = '#64748b';
+      g.fillText('→ ' + rec.next.d, w / 2 + dw / 2 + 12, 24);
+      g.fillStyle = '#1e293b'; g.fillRect(w / 2 + dw / 2 + 12, 33, 44, 2);
+      g.fillStyle = oaEra(rec.next.key); g.fillRect(w / 2 + dw / 2 + 12, 33, 44 * oaC01(rec.k), 2);
+    }
+    if (small) { g.textAlign = 'center'; g.font = '700 8px ' + OA_DISP; g.fillStyle = '#94a3b8'; g.fillText(rec.phase.n.split('').join(' '), w / 2, y + 16); }
     oaTag(g, 'record', x0 + bw + 6, 40);
   },
+  /* The last hit is today: the whole record at once. A ring for every era goes
+     out from him in its own colour, each era's emblem flung out of his frame
+     to circle him, the date counting through them all to TODAY; the last
+     front is swept off the screen both ways; and today's menu comes back out
+     of his frame, piece by piece, to where it belongs. */
   cascade(g, w, h, c, tex) {
+    const K = OPO_KIT, L = c.list, n = L.length, t = c.t, hm = OA_ST.him;
+    const at = hm ? oaScreenOf(hm.x, hm.y) : { x: w / 2, y: h * 0.4 };
+    const span = 2.2, each = span / n;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = 'rgba(255,255,255,' + (0.7 * oaC01(1 - t / 0.5)).toFixed(3) + ')'; g.fillRect(0, 0, w, h);
+    const far = Math.hypot(w, h);
+    L.forEach((e, j) => {
+      const a = t - 0.15 - j * each;
+      if (a <= 0) return;
+      const rad = a * 1300, col = oaEra(e.key);
+      if (rad < far) { g.strokeStyle = col; g.globalAlpha = 0.7 * (1 - rad / far); g.lineWidth = 10 * (1 - rad / far) + 2; g.beginPath(); g.arc(at.x, at.y, rad, 0, TAU); g.stroke(); }
+    });
+    g.restore();
+    // the eras, flung out to circle him
+    L.forEach((e, j) => {
+      const a = t - 0.15 - j * each;
+      if (a <= 0) return;
+      const k = K.ease.cubicOut(oaC01(a / 0.7)), q = j * 2.39996 + t * 0.4, rr = Math.min(w, h) * 0.36 * k;
+      oaEmblem(g, e.key, at.x + Math.cos(q) * rr, at.y + Math.sin(q) * rr * 0.8, 14 * (0.4 + 0.6 * k), uiTime, oaC01(1 - (t - 3.0) / 0.8));
+    });
+    // the date, counting through them all
+    const j = clamp(Math.floor((t - 0.15) / each), 0, n - 1), e = L[j];
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha = oaC01(t / 0.2) * oaC01(1 - (t - 3.0) / 0.6);
+    g.font = '800 ' + Math.round(clamp(w * 0.05, 30, 56)) + 'px ' + OA_DISP;
+    g.fillStyle = oaEra(e.key); g.fillText('+ ' + e.d, w / 2, h * 0.24);
+    g.font = '600 13px ' + OA_BODY; g.fillStyle = '#cbd5e1'; g.fillText(e.n, w / 2, h * 0.24 + 34);
+    g.globalAlpha = 1;
+    // the last front, swept off both ways
+    const sw = oaC01((t - 1.5) / 1.0);
+    if (sw > 0 && sw < 1) for (const dir of [-1, 1]) {
+      const x = at.x + dir * sw * Math.max(at.x, w - at.x) * 1.05;
+      g.fillStyle = '#ffffff'; g.fillRect(x - 3, 0, 6, h);
+      for (let k = 0; k < 14; k++) { g.globalAlpha = rnd(0.2, 0.6); g.fillRect(x + dir * rnd(6, 40), rnd(0, h), dir * rnd(20, 70), rnd(1, 3)); }
+      g.globalAlpha = 1;
+    }
+    oaTodayMenu(g, w, h, at, oaC01((t - 2.3) / 1.3), 0.85, 0.4);
     oaTag(g, 'cascade', 8, 8);
   },
+  /* Out. He is left holding an empty frame: the room dims round him and a
+     light stays on him, the bars close in, the lock unlatches over where his
+     record was, and the screen settles onto today's menu. */
   out(g, w, h, o) {
+    const K = OPO_KIT, hm = OA_ST.him, t = o.t, k = o.k;
+    const at = hm ? oaScreenOf(hm.x, hm.y) : { x: w / 2, y: h * 0.4 };
+    const lb = h * 0.09 * K.ease.inOut(oaC01(t / 1.2));
+    const spot = g.createRadialGradient(at.x, at.y, 90, at.x, at.y, Math.max(w, h) * 0.7);
+    spot.addColorStop(0, 'rgba(5,6,10,0)'); spot.addColorStop(1, 'rgba(5,6,10,' + (0.7 * oaC01(t / 1.5)).toFixed(3) + ')');
+    g.fillStyle = spot; g.fillRect(0, 0, w, h);
+    // the lock, unlatching
+    const lk = oaC01((t - 1.2) / 1.6), ly = 40 + 30 * K.ease.in(oaC01((lk - 0.6) / 0.4));
+    if (lk > 0 && lk < 1) {
+      const F = OPO_FIRST, x = w / 2, lift = 9 * K.ease.backOut(oaC01(lk / 0.4));
+      g.globalAlpha = oaC01(lk / 0.15) * oaC01((1 - lk) / 0.3);
+      g.strokeStyle = OPO_COL; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(x - 9, ly - 3); g.lineTo(x - 9, ly - 8 - lift); g.arc(x, ly - 8 - lift, 9, Math.PI, 0); g.lineTo(x + 9, ly - 2 - lift); g.stroke();
+      g.fillStyle = F.wall; g.fillRect(x - 14, ly - 3, 28, 20); g.strokeRect(x - 14, ly - 3, 28, 20);
+      g.font = '700 8px ' + OA_DISP; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#94a3b8';
+      g.fillText('T H E   L O C K   L I F T S', x, ly + 32);
+      g.globalAlpha = 1;
+    }
+    // today's menu round him, and at the end the screen settling onto it
+    const end = oaC01((k - 0.8) / 0.2);
+    if (end > 0) { g.fillStyle = 'rgba(5,6,10,' + end.toFixed(3) + ')'; g.fillRect(0, 0, w, h); }
+    oaTodayMenu(g, w, h, at, 1, 0.85 + 0.15 * end, 0.4 + 0.6 * end);
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, lb * (1 - end)); g.fillRect(0, h - lb * (1 - end), w, lb * (1 - end));
     oaTag(g, 'out', 8, 8);
   },
+  /* A fight lost: the screen wound back. A scanline wipes down it, leaving
+     1.0's ground behind, and the first build's menu draws itself, where the
+     frame's own will be in a moment. */
   lost(g, w, h, l) {
-    g.fillStyle = 'rgba(5,6,10,' + clamp(l.t / l.T, 0, 1) + ')';
-    g.fillRect(0, 0, w, h);
+    const k = oaC01(l.t / l.T), wipe = OPO_KIT.ease.inOut(oaC01(k / 0.5)) * h;
+    g.save();
+    g.beginPath(); g.rect(0, 0, w, wipe); g.clip();
+    g.drawImage(oaOldScreen(w, h), 0, 0, w, h);
+    g.restore();
+    if (wipe < h) {
+      g.fillStyle = '#ffffff'; g.fillRect(0, wipe - 2, w, 4);
+      for (let i = 0; i < 12; i++) { g.globalAlpha = rnd(0.2, 0.6); g.fillRect(rnd(0, w), wipe + rnd(2, 26), rnd(30, 160), rnd(1, 2)); }
+      g.globalAlpha = 1;
+    }
+    oaFirstMenu(g, w, h, oaC01((k - 0.45) / 0.45), uiTime);
     oaTag(g, 'lost', 8, 8);
   },
-  saySound(audio, line) { /* blank: a dialogue voice for him */ },
-  // every frame of the route: blank until the art keeps something on screen across set pieces
-  worldFx(g, s) { oaTag(g, 'worldFx', s.S.cx - 60, s.S.cy - 60); },
-  worldFlat(g, s) { oaTag(g, 'worldFlat', s.S.cx - 60, s.S.cy - 46); },
-  screenFx(g, w, h, s) { oaTag(g, 'screenFx', w - 70, h - 20); },
-  lockFx(g, w, h, s) { oaTag(g, 'lockFx', w - 60, h - 20); }
+
+  /* ------------------------- every frame of the route ------------------------ */
+  /* In the room, lit: what falls into today's world and stays a while. A pane
+     broken in the air comes down in pieces, still playing, that turn in the
+     light, bounce and settle; a pane landing kicks up today's floor plates;
+     each date passed stands a column of its light where he was; kept restores
+     ring; the last hit floods the room. Motes drift in today's light. */
+  worldFx(g, s) {
+    const K = s.kit, S = s.S, img = s.tex || K.first(), many = FXO.parts ? 1 : 0.4;
+    const fx = K.scene('opoWorldFx', () => ({ sim: K.sim({ gravity: K.V(0, 0, -1700) }).floor(0), lights: [] }));
+    fx.sim.space = S;
+    for (const e of K.feed('opoWorldFx')) {
+      const room = fx.sim.bodies.length < 180;
+      if (e.kind === 'paneBreak' && room) {
+        const iw = img.width, ih = img.height, su = iw * 0.42, sv = ih * 0.42, u0 = K.hash(e.ang * 7.1) * (iw - su), v0 = K.hash(e.ang * 3.3) * (ih - sv);
+        const hw = e.r * 1.15, hh = e.r * 0.66;
+        const quad = [{ x: e.x - hw, y: e.y - hh, u: u0, v: v0 }, { x: e.x + hw, y: e.y - hh, u: u0 + su, v: v0 }, { x: e.x + hw, y: e.y + hh, u: u0 + su, v: v0 + sv }, { x: e.x - hw, y: e.y + hh, u: u0, v: v0 + sv }];
+        const shards = K.radial(quad, { x: e.x + rnd(-8, 8), y: e.y + rnd(-6, 6) }, { spokes: Math.round(8 * many) + 2, rings: 2, seed: (e.seq * 13) | 0 });
+        for (const b of K.bodiesOf(shards, { img, z: 160, thick: 2, edgeCol: '#1d3557', backCol: '#05060a', life: 3.2, fade: 0.8, bounce: 0.3,
+          kick: sh => ({ vx: (sh.c.x - e.x) * rnd(4, 8), vy: (sh.c.y - e.y) * rnd(4, 8), vz: rnd(200, 520), wx: rnd(-7, 7), wy: rnd(-7, 7), wz: rnd(-4, 4) }) })) fx.sim.add(b);
+      }
+      if (e.kind === 'paneLand' && room) {
+        const cells = K.voronoi(K.rect(e.x - e.r * 1.4, e.y - e.r * 1.4, e.r * 2.8, e.r * 2.8), Math.round(9 * many) + 2, (e.seq * 7) | 0, { near: { x: e.x, y: e.y }, spread: 40 });
+        for (const b of K.bodiesOf(cells, { thick: 7, col: '#1e293b', edgeCol: '#0f172a', backCol: '#0f172a', life: 1.8, fade: 0.6,
+          kick: sh => ({ vx: (sh.c.x - e.x) * 3, vy: (sh.c.y - e.y) * 3, vz: rnd(300, 640), wx: rnd(-6, 6), wy: rnd(-6, 6), wz: rnd(-3, 3) }) })) fx.sim.add(b);
+        fx.lights.push({ kind: 'dust', x: e.x, y: e.y, t0: uiTime, life: 0.7, col: '#94a3b8' });
+      }
+      if (e.kind === 'restore') fx.lights.push({ kind: 'column', x: e.x, y: e.y, t0: uiTime, life: 1.6, col: oaEra(e.entry && e.entry.key) });
+      if (e.kind === 'settle') fx.lights.push({ kind: 'ring', x: e.x, y: e.y, t0: uiTime, life: 0.9, col: OA_ADD });
+      if (e.kind === 'paintOut') fx.lights.push({ kind: 'dust', x: e.x, y: e.y, t0: uiTime, life: 0.9, col: '#475569' });
+      if (e.kind === 'today' && OA_ST.him) fx.lights.push({ kind: 'flood', x: OA_ST.him.x, y: OA_ST.him.y, t0: uiTime, life: 2.6, col: '#ffffff' });
+      if (e.kind === 'open' || e.kind === 'lock') { fx.sim.clear(); OA_ST.taken.length = 0; OA_ST.takenIds.clear(); }
+    }
+    fx.sim.step(); fx.sim.draw(g, { sub: 1 });
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (let i = fx.lights.length - 1; i >= 0; i--) {
+      const L = fx.lights[i], a = (uiTime - L.t0) / L.life;
+      if (a >= 1) { fx.lights.splice(i, 1); continue; }
+      const glow = L.col === '#ffffff' || L.col === '#f8fafc' ? '#e2e8f0' : L.col;
+      if (L.kind === 'column') { oaGlow(g, L.x, L.y, 90 + 60 * a, glow, 0.6 * (1 - a)); oaGlow(g, L.x, L.y, 30, '#ffffff', 0.5 * (1 - a));
+        g.globalAlpha = 0.35 * (1 - a); g.strokeStyle = L.col; g.lineWidth = 3; g.beginPath(); g.arc(L.x, L.y, 40 + 260 * K.ease.cubicOut(a), 0, TAU); g.stroke(); }
+      else if (L.kind === 'ring') { g.globalAlpha = 0.6 * (1 - a); g.strokeStyle = L.col; g.lineWidth = 4; g.beginPath(); g.arc(L.x, L.y, 60 + 200 * a, 0, TAU); g.stroke(); }
+      else if (L.kind === 'dust') for (let k = 0; k < 10; k++) {
+        const q = k * TAU / 10 + L.t0, rr = 30 + 120 * K.ease.cubicOut(a);
+        oaGlow(g, L.x + Math.cos(q) * rr, L.y + Math.sin(q) * rr, 26 + 30 * a, L.col, 0.16 * (1 - a));
+      }
+      else if (L.kind === 'flood') { oaGlow(g, L.x, L.y, 200 + 1600 * K.ease.cubicOut(a), '#e2e8f0', 0.6 * (1 - a)); }
+      g.globalAlpha = 1;
+    }
+    // motes in today's light, over today's floor
+    const f = OA_ST.frontAt === uiTime ? OA_ST.front : null;
+    if (f && f.light && FXO.parts) {
+      const B = f.box;
+      for (let i = 0; i < 46; i++) {
+        const hx = K.hash(i * 11 + 1), hy = K.hash(i * 17 + 5), x = B.x0 + (B.x1 - B.x0) * hx + Math.sin(uiTime * 0.3 + i) * 40, y = B.y0 + (B.y1 - B.y0) * hy + Math.cos(uiTime * 0.23 + i * 1.7) * 30;
+        const c = Math.floor((x - B.x0) / B.cw), r = Math.floor((y - B.y0) / B.ch);
+        if (c < 0 || r < 0 || c >= f.cols || r >= f.rows || f.cells[r * f.cols + c] < f.oldBelow) continue;
+        oaGlow(g, x, y, 7, '#e0f2fe', 0.22 * (0.5 + 0.5 * Math.sin(uiTime * 1.7 + i * 2.3)));
+      }
+    }
+    g.restore();
+    oaTag(g, 'worldFx', S.cx - 60, S.cy - 60);
+  },
+  /* In the room again, after bloom and the grade: the first build's renderer.
+     His panes, him, and the bits a round knocks off him: flat, unlit and
+     shadowless. */
+  worldFlat(g, s) {
+    const K = s.kit;
+    for (const p of OA_ST.panes) if (p.at === uiTime) oaDrawPane(g, p);
+    OA_ST.panes.length = 0;
+    if (OA_ST.him && OA_ST.himAt === uiTime) {
+      const fx = K.scene('opoFlat', () => ({ sim: K.sim({ gravity: K.V(0, 0, -1600) }).floor(0) }));
+      fx.sim.space = s.S;
+      const hm = OA_ST.him;
+      for (const e of K.feed('opoFlat')) if (e.kind === 'hit' && fx.sim.bodies.length < (FXO.parts ? 60 : 20)) {
+        const q = Math.atan2(e.y - hm.y, e.x - hm.x) + rnd(-0.4, 0.4) + Math.PI, sz = rnd(3, 6) * (e.crit ? 1.5 : 1);
+        fx.sim.add(K.body({ shape: [K.V(sz, 0), K.V(-sz * 0.6, sz * 0.8), K.V(-sz * 0.6, -sz * 0.8)], x: hm.x + Math.cos(q) * hm.r, y: hm.y + Math.sin(q) * hm.r, z: 30,
+          vx: Math.cos(q) * rnd(80, 220), vy: Math.sin(q) * rnd(80, 220), vz: rnd(200, 420), wx: rnd(-10, 10), wy: rnd(-10, 10), wz: rnd(-8, 8),
+          col: rnd() < 0.5 ? OPO_COL : OPO_FIRST.enemy, backCol: OPO_FIRST.grid2, flat: true, shadow: false, life: 0.9, fade: 0.3 }));
+      }
+      fx.sim.step(); fx.sim.draw(g, { sub: 1, light: false, shadows: false });
+      oaDrawHim(g, hm);
+    }
+    oaTag(g, 'worldFlat', s.S.cx - 60, s.S.cy - 46);
+  },
+  /* The glass of your screen, last of all. What strikes it cracks it, and the
+     cracks bend the picture behind them; a pane broken in the air throws a
+     few of its pieces at you; each phase passes down the screen as a scan;
+     and the last hit heals the glass. */
+  screenFx(g, w, h, s) {
+    const K = s.kit, S = s.S, img = s.tex || K.first();
+    const fx = K.scene('opoScreenFx', () => ({ sim: K.sim({ gravity: K.V(0, 1500, -1200), onGlass: ev => K.glass.hit(ev.x, ev.y, Math.min(0.35, ev.power), { life: 2.5 }) }), scan: -9, heal: -9 }));
+    fx.sim.space = S;
+    for (const e of K.feed('opoScreenFx')) {
+      if (e.kind === 'paneBreak' && fx.sim.bodies.length < 12) {
+        const at = oaScreenOf(e.x, e.y), iw = img.width, ih = img.height, m = FXO.parts ? 2 : 1;
+        for (let i = 0; i < m; i++) {
+          const u0 = rnd(0, iw * 0.8), v0 = rnd(0, ih * 0.8), sw = rnd(18, 30), sh = sw * rnd(0.5, 0.9), du = iw * 0.12, dv = ih * 0.12;
+          fx.sim.add(K.body({ shape: [K.V(-sw / 2, -sh / 2), K.V(sw / 2, -sh / 2 + rnd(-4, 4)), K.V(sw / 2, sh / 2), K.V(-sw / 2 + rnd(-5, 5), sh / 2)], thick: 4,
+            x: at.x, y: at.y, z: 30, vx: rnd(-260, 260), vy: rnd(-380, -80), vz: rnd(1300, 1800), wx: rnd(-7, 7), wy: rnd(-7, 7), wz: rnd(-3, 3),
+            img, uv: [{ u: u0, v: v0 }, { u: u0 + du, v: v0 }, { u: u0 + du, v: v0 + dv }, { u: u0, v: v0 + dv }], edgeCol: '#1d3557', backCol: '#05060a', glass: i ? 'none' : 'crack', life: 2 }));
+        }
+      }
+      if (e.kind === 'phase') fx.scan = uiTime;
+      if (e.kind === 'lock') K.glass.clear();
+      if (e.kind === 'today') { fx.heal = uiTime; for (const hit of K.glass.hits) hit.life = Math.min(hit.life, uiTime - hit.t + 0.7); }
+    }
+    fx.sim.step(); fx.sim.draw(g, { sub: 1 });
+    if (K.glass.hits.length) K.glass.draw(g, w, h, { frame: K.capture('opoGlass') });
+    // a phase opening passes down the glass
+    const sa = (uiTime - fx.scan) / 0.5;
+    if (sa >= 0 && sa < 1) {
+      const y = h * K.ease.inOut(sa);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const band = g.createLinearGradient(0, y - 60, 0, y);
+      band.addColorStop(0, 'rgba(224,242,254,0)'); band.addColorStop(1, 'rgba(224,242,254,0.14)');
+      g.fillStyle = band; g.fillRect(0, y - 60, w, 60);
+      g.fillStyle = 'rgba(255,255,255,0.7)'; g.fillRect(0, y - 1, w, 2);
+      g.restore();
+    }
+    // the last hit: the glass made whole again, a wipe of light across it
+    const ha = (uiTime - fx.heal) / 0.8;
+    if (ha >= 0 && ha < 1) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const x = (w + 400) * K.ease.inOut(ha) - 200, gl = g.createLinearGradient(x - 160, 0, x + 160, 0);
+      gl.addColorStop(0, 'rgba(255,255,255,0)'); gl.addColorStop(0.5, 'rgba(255,255,255,0.22)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gl; g.fillRect(x - 160, 0, 320, h);
+      g.restore();
+    }
+    oaTag(g, 'screenFx', w - 70, h - 20);
+  },
+  // (lockFx, with the lock's other three, is above)
 };
+/* A pane of the old frame, in the old renderer: a live window of the first
+   build (a piece of it, different for each), turning over as it flies and
+   drawn where it really is at its height; cracked by the shots it has taken.
+   Landed, it lies flat and sinks into the floor in steps. From worldFlat. */
+function oaDrawPane(g, p) {
+  const K = OPO_KIT, S = K.world(), F = OPO_FIRST, img = p.tex || K.first(), iw = img.width, ih = img.height;
+  const k = oaC01(p.t / p.T), r = p.r, hw = r * 1.3, hh = r * 0.75;
+  const su = iw * 0.42, sv = ih * 0.42, u0 = K.hash(p.ang * 7.1) * (iw - su), v0 = K.hash(p.ang * 3.3) * (ih - sv);
+  if (p.landed) {
+    const L = oaC01(p.landed), sc = 1 - 0.25 * L;
+    g.globalAlpha = oaSteps(1 - L, 5);
+    g.save(); g.translate(p.tx, p.ty); g.rotate(p.ang + Math.PI * 1.5); g.scale(sc, sc);
+    g.fillStyle = F.wall; g.fillRect(-hw * 1.12, -hh * 1.18, hw * 2.24, hh * 2.36);
+    g.drawImage(img, u0, v0, su, sv, -hw, -hh, hw * 2, hh * 2);
+    g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.strokeRect(-hw * 1.12, -hh * 1.18, hw * 2.24, hh * 2.36);
+    g.restore();
+    g.globalAlpha = 1;
+    return;
+  }
+  const z = Math.sin(k * Math.PI) * 300;
+  // turning over as it flies, flat again as it comes down
+  const q = K.qMul(K.qAxis(K.V(Math.cos(p.ang), Math.sin(p.ang), 0), Math.sin(k * Math.PI) * 0.55), K.qAxis(K.V(0, 0, 1), p.ang + k * Math.PI * 1.5));
+  // drawn where it is: its middle unprojected to its height, so it is hit where it is seen
+  const kk = S.project(K.V(p.x, p.y, z)).k, cx = S.cx + (p.x - S.cx) / kk, cy = S.cy + (p.y - S.cy) / kk;
+  const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([a, b]) => K.add(K.V(cx, cy, z), K.qRot(q, K.V(a, b, 0))));
+  const Pp = corners.map(c3 => S.project(c3));
+  let mx = 0, my = 0;
+  for (const q2 of Pp) { mx += q2.x / 4; my += q2.y / 4; }
+  K.path(g, Pp.map(q2 => ({ x: mx + (q2.x - mx) * 1.13, y: my + (q2.y - my) * 1.16 })));
+  g.fillStyle = F.wall; g.fill(); g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.stroke();
+  if (S.faces(K.qRot(q, K.V(0, 0, 1)), K.V(cx, cy, z)))
+    K.polyTex(g, S, img, corners.map((c3, i) => ({ x: c3.x, y: c3.y, z: c3.z, u: u0 + (i === 1 || i === 2 ? su : 0), v: v0 + (i >= 2 ? sv : 0) })), { sub: 1 });
+  else { K.path(g, Pp); g.fillStyle = F.bg; g.fill(); }
+  const cracks = (p.hp0 || 3) - p.hp;
+  if (cracks > 0) {
+    const R = K.rng(Math.floor(p.ang * 1000));
+    const at = (a, b) => ({ x: lerp(lerp(Pp[0].x, Pp[1].x, a), lerp(Pp[3].x, Pp[2].x, a), b), y: lerp(lerp(Pp[0].y, Pp[1].y, a), lerp(Pp[3].y, Pp[2].y, a), b) });
+    g.strokeStyle = 'rgba(226,232,240,0.95)'; g.lineWidth = 1.2;
+    for (let i = 0; i < cracks * 3; i++) {
+      const c0 = at(0.3 + R() * 0.4, 0.3 + R() * 0.4), c1 = at(R(), R() < 0.5 ? 0 : 1);
+      g.beginPath(); g.moveTo(c0.x, c0.y); g.lineTo((c0.x + c1.x) / 2 + (R() - 0.5) * 8, (c0.y + c1.y) / 2 + (R() - 0.5) * 8); g.lineTo(c1.x, c1.y); g.stroke();
+    }
+  }
+  K.path(g, Pp); g.strokeStyle = F.grid2; g.lineWidth = 1; g.stroke();
+}
+/* Today's menu, coming back out of his frame: the buttons down the left in
+   their own colours, flown from him (at) to where they live, and the title
+   where renderMenu puts it (its own band and scale, so the menu that follows
+   lands on it). `b` 0..1 is how far they have come; `a` the buttons' alpha at
+   rest, `ta` the title's. */
+const OA_TODAY_BTNS = [['◈  CO-OP', '#a78bfa'], ['◈  CHALLENGES', '#fbbf24'], ['◈  SETTINGS', '#2dd4bf'], ['◈  DAILY RUN', '#fbbf24'],
+  ['◈  BOSS RUSH', '#f43f5e'], ['○  ACCOUNT', '#22d3ee'], ['◈  PVP', '#ec4899']];
+function oaTodayMenu(g, w, h, at, b, a, ta) {
+  if (b <= 0) return;
+  const K = OPO_KIT;
+  g.save();
+  OA_TODAY_BTNS.forEach(([n, col], i) => {
+    const k = K.ease.cubicOut(oaC01((b - i * 0.07) / 0.5));
+    if (k <= 0) return;
+    const x = lerp(at.x - 88, 18, k), y = lerp(at.y - 17, 14 + i * 40, k), s = 0.3 + 0.7 * k;
+    g.save(); g.translate(x, y); g.scale(s, s);
+    g.globalAlpha = a * oaC01(k * 2);
+    g.beginPath(); g.moveTo(8, 0); g.arcTo(176, 0, 176, 34, 8); g.arcTo(176, 34, 0, 34, 8); g.arcTo(0, 34, 0, 0, 8); g.arcTo(0, 0, 176, 0, 8); g.closePath();
+    g.fillStyle = 'rgba(8,13,22,0.72)'; g.fill();
+    g.strokeStyle = rgba(col, 0.4); g.lineWidth = 1.2; g.stroke();
+    g.font = '700 11px ' + OA_DISP; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = col;
+    g.letterSpacing = '0.08em'; g.fillText(n, 12, 15); g.letterSpacing = '0px';
+    g.restore();
+  });
+  const tk = oaC01((b - 0.35) / 0.65);
+  if (tk > 0) {
+    // renderMenu's centre column: its band between the corner buttons and the footer, and its scale
+    const roomy = h >= 430, tiny = h < 340, topLimit = 96, footTop = h - (roomy ? 138 : tiny ? 72 : 92);
+    const avail = Math.max(96, footTop - topLimit), sc = clamp(avail / 390, 0.3, 1), cyp = topLimit + avail / 2 - 43 * sc;
+    g.translate(w / 2, cyp); g.scale(sc, sc); g.translate(-w / 2, -cyp);
+    g.globalAlpha = ta * tk;
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.font = '800 ' + Math.min(84, w * 0.13) + 'px ' + OA_BODY;
+    g.shadowColor = '#67e8f9'; g.shadowBlur = 30 * tk; g.fillStyle = '#e0f2fe';
+    g.fillText('VOIDRUNNER', w / 2, cyp - 6 + (1 - K.ease.cubicOut(tk)) * 30);
+    g.shadowBlur = 0;
+  }
+  g.restore();
+}
 /* ======================== end of ONE POINT OH art hooks ======================== */
 
 /* ========================== ONE POINT OH — the art kit ==========================
