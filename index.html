@@ -992,8 +992,8 @@ const Audio_ = {
   /* --- music: 16-step loop, layers unlock with intensity --- */
   nextStep: 0, step: 0, intensity: 0,
   update(intensity) {
-    // the bed is the fallback: quiet whenever a track from music/ has the room (Music)
-    if (!this.ready || this.muted || this.musicVol <= 0.005 || Music.cur) return;
+    // the bed is the fallback: quiet wherever a track from music/ has the room, or is about to (Music)
+    if (!this.ready || this.muted || this.musicVol <= 0.005 || Music.cur || Music.here()) return;
     this.intensity = lerp(this.intensity, intensity, 0.02);
     this.musicGain.gain.value = 0.5 * this.musicVol;
     const bpm = 96 + this.intensity * 34;
@@ -1030,14 +1030,17 @@ const Audio_ = {
    until its tracks exist, and a page that cannot load them (offline, an old
    browser, no Opus) never notices.
 
-   A track is short Ogg Opus files cut on bar lines by the studio, listed
-   with their lengths, grouped into sections, with the moods that pick a
-   section (calm, fight, p1..p3 for a boss's phases, race, ...). They are
-   played back to back on the AudioContext clock: loops have no gap, and a
-   new mood moves to its section on the next segment's bar line. Each file
-   runs on MUSIC_XF past its bar line into what follows it, and the two are
-   crossfaded across that overlap, so the joins are seamless in file order
-   and the codec's edges are never heard. Only the segments playing and the
+   A track is short Ogg Opus pieces cut on bar lines by the studio (studio/),
+   listed with their lengths, grouped into sections, with the moods that
+   pick a section (calm, fight, p1..p3 for a boss's phases, race, ...). They
+   are started one after another on the AudioContext clock, each exactly on
+   its bar line: loops have no gap, and a new mood moves to its section on
+   the next piece's bar line. A piece holds only the notes that begin in its
+   own bars, and goes on past its last bar line for as long as they ring (a
+   reverb, a crash); it is never cut, and rings out under whichever piece
+   comes next. So any piece can follow any other and the sum is the mix as
+   it was written. Each file opens with `pre` seconds of silence, so a
+   decoder's first samples are never music. Only the pieces playing and the
    next are ever decoded (MUSIC_DECODED): a whole track decoded would hold
    about 50 MB, the kind of growth that killed pages on 8 Oct.
 
@@ -1048,8 +1051,8 @@ const Audio_ = {
 
    The manifest:
      { v: 1,
-       tracks: { grid: { bpm: 140, gain: -1.5, xf: 0.03,
-                         segs: [{ f: 'grid/a0-1f3c.opus', s: 13.714 }, ...],   s: seconds to the bar line
+       tracks: { grid: { bpm: 140, gain: -1.5, pre: 0.01,
+                         segs: [{ f: 'grid/a0-1f3c.opus', s: 6.857 }, ...],   s: its bars, in seconds
                          sections: { intro: { segs: [0], lock: true, next: 'a' },
                                      a: { segs: [1, 2, 3, 4] }, b: { segs: [5, 6], next: 'a' } },
                          moods: { calm: 'a', fight: ['b'] }, start: 'intro' } },
@@ -1059,11 +1062,10 @@ const Audio_ = {
    when a sting lands, and the track it introduces starts there.
 --------------------------------------------------------------------------- */
 const MUSIC_DIR = '/music/';
-const MUSIC_XF = 0.03;          // the overlap two segments are crossfaded across, at most
 const MUSIC_AHEAD = 1.2;        // how far ahead a segment is scheduled
 const MUSIC_DECODED = 4;        // segments decoded at once, at most
 const MUSIC_BYTES = 12e6;       // compressed segments kept, in bytes
-const MUSIC_LEVEL = 0.75;       // the bus at MUSIC 100%
+const MUSIC_LEVEL = 0.16;       // the bus at MUSIC 100%: a mastered track sits under the effects, which are quiet
 // a run held under the pause screen: quieter and duller (not under settings, where MUSIC is being set by ear)
 const musicDucked = () => state === 'pause' || (state === 'codex' && codexFrom === 'pause');
 // the sectors' cues, by stage name (ALL HALLOWS' areas go by their own id)
@@ -1125,6 +1127,8 @@ const Music = {
   err: 0,                 // errors thrown by tick (frame logs the first)
 
   has(cue) { return !!(this.man && this.man.tracks[cue]); },
+  // whether what is on screen has a track: the synth bed asks before each note, a frame ahead of tick
+  here() { const w = musicWant(0); return !!(w && this.has(w[0])); },
 
   // fight or calm, held a few seconds so the music does not flicker with the spawns
   heat(dt) {
@@ -1269,29 +1273,24 @@ const Music = {
         if (!buf) return;
         c.at = Math.max(now + 0.05, this.stungAt + c.delay);
       }
-      if (buf) { this.play(c, seg, buf, n); c.sec = n.sec; c.i = n.i; continue; }
+      if (buf) { this.play(c, seg, buf); c.sec = n.sec; c.i = n.i; continue; }
       if (c.at - now > 0.12) break;                              // still time for it
       if (!c.last) { c.at = now + 0.1; break; }
-      this.play(c, c.last.seg, c.last.buf, null);                // late: the last phrase again
+      this.play(c, c.last.seg, c.last.buf);                      // late: the last phrase again
     }
     const n = c.done ? null : this.after(c);
     if (n) this.decoded(this.segOf(c, n).f);
   },
-  play(c, seg, buf, n) {
-    const ac = Audio_.ac, t = c.at, xf = Math.max(0, Math.min(c.tr.xf != null ? c.tr.xf : MUSIC_XF, buf.duration - seg.s));
-    const last = n && this.after(Object.assign({}, c, { sec: n.sec, i: n.i })) === null;
-    const len = Math.min(seg.s, buf.duration);
-    const s = ac.createBufferSource(), g = ac.createGain();
-    s.buffer = buf; s.connect(g); g.connect(c.g);
-    if (xf > 0.001) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + xf); }
-    if (last) s.start(t);                                        // a track's last segment rings out whole
-    else {
-      if (xf > 0.001) { g.gain.setValueAtTime(1, t + len); g.gain.linearRampToValueAtTime(0, t + len + xf); }
-      s.start(t); s.stop(t + len + xf + 0.01);
-    }
-    s.onended = () => { const k = c.src.indexOf(s); if (k >= 0) c.src.splice(k, 1); try { g.disconnect(); } catch (e) {} };
+  /* A piece, its bar line at c.at: started `pre` before it (the file's own
+     lead of silence) and left to ring out, under the next one, to its end. */
+  play(c, seg, buf) {
+    const ac = Audio_.ac, t = c.at, pre = c.tr.pre || 0;
+    const s = ac.createBufferSource();
+    s.buffer = buf; s.connect(c.g);
+    s.start(Math.max(0, t - pre));
+    s.onended = () => { const k = c.src.indexOf(s); if (k >= 0) c.src.splice(k, 1); try { s.disconnect(); } catch (e) {} };
     c.src.push(s);
-    c.at = t + len;
+    c.at = t + Math.min(seg.s, Math.max(0.05, buf.duration - pre));   // a file shorter than it says: no hole after it
     c.last = { seg, buf };
   },
 
@@ -4597,7 +4596,7 @@ function fireLance() {
   burst(P.x + Math.cos(aim) * 20, P.y + Math.sin(aim) * 20,
         heavy ? 12 : 4, heavy ? COL.crit : COL.bullet, 220, 2.8, 0.2, 0.9, aim);
   if (heavy) { Audio_.tone(190, 0.24, 'square', 0.15, 70); Audio_.crit(); }
-  else Audio_.tone(920, 0.08, 'sawtooth', 0.085, 300);
+  else if (!Audio_.sample('lance')) Audio_.tone(920, 0.08, 'sawtooth', 0.085, 300);
 }
 
 /* ------------------------------- the blade --------------------------------
@@ -65741,7 +65740,7 @@ function openCodex(from) {
   codexTab = 0; codexSel = 0; codexScroll = 0; codexBook = -1; codexDrag = null;
   state = 'codex'; uiArm = 0.3;
   Tales.sealedAsk();                     // any chapter the server has opened since
-  Audio_.select();
+  if (!Audio_.sample('codex')) Audio_.select();
 }
 function closeCodex() {
   codexBook = -1; codexDrag = null;

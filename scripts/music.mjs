@@ -7,8 +7,9 @@
    buffer as long as the fixture's bytes say, and fetch serves the manifests
    below. So what is checked is the engine's own arithmetic and decisions:
 
-     - segments follow each other exactly on their bar lines (gapless), a
-       locked intro plays through, a section loops
+     - pieces start exactly on their bar lines (gapless), each its lead of
+       silence early, and none is ever cut: it rings out under the next
+     - a locked intro plays through, a section loops
      - a new mood moves to its section on the next bar line, not mid-phrase
      - a boss: the boss-in sting, the old track cut, the boss track on the
        sting's hit, its phases on bar lines; then the boss-down sting
@@ -36,19 +37,19 @@ const t0 = Date.now();
 
 /* ----------------------------- the fixture ----------------------------- */
 const BAR = 2;                                   // 120 BPM, 4/4
-const XF = 0.03;
-const SEG = {};                                  // file → { s, d, name }
-const seg = (name, bars, ring = 0) => { const f = name + '.opus'; SEG[f] = { s: bars * BAR, d: bars * BAR + (ring || XF), name }; return { f, s: bars * BAR }; };
+const PRE = 0.01;                                // each piece's lead of silence
+const SEG = {};                                  // file → { s, d, name }: its bars, and the whole file with lead and ring
+const seg = (name, bars, ring = 1.5) => { const f = name + '.opus'; SEG[f] = { s: bars * BAR, d: PRE + bars * BAR + ring, name }; return { f, s: bars * BAR }; };
 const MANIFEST = {
   v: 1,
   tracks: {
-    title: { bpm: 120, segs: [seg('title/0', 4), seg('title/1', 4)], sections: { a: { segs: [0, 1] } } },
-    grid: { bpm: 120, gain: -2, segs: [seg('grid/intro', 2), seg('grid/a0', 4), seg('grid/a1', 4), seg('grid/b0', 4), seg('grid/b1', 4)],
+    title: { bpm: 120, pre: PRE, segs: [seg('title/0', 4), seg('title/1', 4)], sections: { a: { segs: [0, 1] } } },
+    grid: { bpm: 120, pre: PRE, gain: -2, segs: [seg('grid/intro', 2), seg('grid/a0', 4), seg('grid/a1', 4), seg('grid/b0', 4), seg('grid/b1', 4)],
             sections: { intro: { segs: [0], lock: true, next: 'a' }, a: { segs: [1, 2] }, b: { segs: [3, 4], next: 'a' } },
             moods: { calm: 'a', fight: 'b' }, start: 'intro' },
-    warden: { bpm: 160, segs: [seg('warden/p1a', 4), seg('warden/p1b', 4), seg('warden/p2', 4), seg('warden/p3', 4)],
+    warden: { bpm: 160, pre: PRE, segs: [seg('warden/p1a', 4), seg('warden/p1b', 4), seg('warden/p2', 4), seg('warden/p3', 4)],
               sections: { p1: { segs: [0, 1] }, p2: { segs: [2] }, p3: { segs: [3] } }, moods: { p1: 'p1', p2: 'p2', p3: 'p3' } },
-    codex: { bpm: 120, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
+    codex: { bpm: 120, pre: PRE, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
   },
   stings: { 'boss-in': { f: 'stings/boss-in.opus', hit: 1.5 }, 'boss-down': { f: 'stings/boss-down.opus' } }
 };
@@ -122,7 +123,11 @@ const run = code => g.run(code);
 async function tick(secs, dt = 0.05) {
   for (let t = 0; t < secs - 1e-9; t += dt) {
     A.ctx.currentTime = +(A.ctx.currentTime + dt).toFixed(9);
-    for (const s of A.src) if (!s.ended && s.t1 != null && s.t1 <= A.ctx.currentTime) { s.ended = true; if (s.onended) s.onended(); }
+    for (const s of A.src) {
+      if (s.ended) continue;
+      const end = Math.min(s.t1 != null ? s.t1 : Infinity, s.buffer && s.buffer.duration ? s.t0 + s.buffer.duration / (s.playbackRate.value || 1) : Infinity);
+      if (end <= A.ctx.currentTime) { s.ended = true; if (s.onended) s.onended(); }
+    }
     run(`Music.tick(${dt})`);
     await flush();
   }
@@ -158,8 +163,10 @@ await tick(30);
 {
   const t = named(played(), 'title/');
   const order = t.map(s => s.buffer.name).join(' ');
-  check('title: gapless loop from the menu', t.length >= 4 && !gapless(t) && order.startsWith('title/0 title/1 title/0 title/1'),
-        `${t.length} segments: ${order.slice(0, 60)}${gapless(t) ? ' · ' + gapless(t) : ''}`);
+  const cut = t.filter(s => s.t1 != null).length;
+  const rang = t.filter(s => s.ended).every(s => now() >= s.t0 + s.buffer.duration - 1e-6);
+  check('title: gapless loop from the menu, no piece cut', t.length >= 4 && !gapless(t) && order.startsWith('title/0 title/1 title/0 title/1') && cut === 0 && rang,
+        `${t.length} pieces: ${order.slice(0, 60)}${gapless(t) ? ' · ' + gapless(t) : ''} · cut ${cut} · ${run('Music.cur.src.length')} still sounding`);
 }
 
 // 2. a stage: crossfade in, the locked intro, calm, then fight on a bar line, then calm again
@@ -204,9 +211,9 @@ let boss;
   const w = named(played(T5), 'warden/');
   // stopped 0.35 s (and the 0.05 s the fade's stop allows) after the sting, the fade itself starting with it
   const cut = st ? A.src.filter(s => s.buffer && s.buffer.name.startsWith('grid/') && s.t1 != null && Math.abs(s.t1 - (st.t0 + 0.4)) < 1e-6) : [];
-  check('boss: sting, grid cut in 0.35 s, warden on the hit', st && w[0] && Math.abs(w[0].t0 - (st.t0 + 1.5)) < 1e-6
+  check('boss: sting, grid cut in 0.35 s, warden on the hit', st && w[0] && Math.abs(w[0].t0 + PRE - (st.t0 + 1.5)) < 1e-6
         && w[0].buffer.name === 'warden/p1a' && cut.length > 0,
-        st ? `sting at +${(st.t0 - T5).toFixed(2)}, warden at +${w[0] ? (w[0].t0 - T5).toFixed(2) : '-'}, grid stopped: ${cut.length}` : 'no sting');
+        st ? `sting at +${(st.t0 - T5).toFixed(2)}, warden's bar line at +${w[0] ? (w[0].t0 + PRE - T5).toFixed(2) : '-'}, grid stopped: ${cut.length}` : 'no sting');
 }
 const T6 = now();
 run(`enemies.find(e => e.boss === 'warden').phase = 1;`);
@@ -283,7 +290,7 @@ await tick(6);
   const lvl = run('Music.bus.gain.target'), lpf = run('Music.lp.frequency.target'), held = run('Music.cur.id');
   run(`state = 'play';`);
   await tick(0.5);
-  check('pause: ducked and dulled, the track held', Math.abs(lvl - 0.75 * 0.55) < 1e-9 && lpf === 900 && held === id && run('Music.lp.frequency.target') === 20000,
+  check('pause: ducked and dulled, the track held', Math.abs(lvl - run('MUSIC_LEVEL') * 0.55) < 1e-9 && lpf === 900 && held === id && run('Music.lp.frequency.target') === 20000,
         `level ${lvl}, low-pass ${lpf}, ${held}`);
 }
 

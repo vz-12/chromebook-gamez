@@ -86,7 +86,7 @@ a bar line when the boss changes phase.
 
 | cue | where | brief | start |
 |---|---|---|---|
-| `grid` | THE GRID, sector 01 | the opening statement: driving synthwave with the main theme, clean and fast | 140, A minor |
+| `grid` "Entry Vector" | THE GRID, sector 01 | the opening statement: driving synthwave with the main theme, clean and fast | 140, A minor |
 | `foundry` | THE FOUNDRY, sector 02 | industrial: anvil and metal percussion, distorted bass, steam | 132, D minor |
 | `hive` | THE HIVE, sector 03 | organic and wrong: skittering percussion, insect-wing textures, swung | 126, F♯ minor |
 | `vault` | THE VAULT, sector 04 | cold and crystalline: arpeggios, glass bells, mystery | 118, B minor |
@@ -111,7 +111,7 @@ a bar line when the boss changes phase.
 
 | cue | boss | brief | start |
 |---|---|---|---|
-| `warden` | THE WARDEN | the first wall: metal riff on the main theme, live drums | 160, A minor |
+| `warden` "The First Wall" | THE WARDEN | the first wall: metal riff on the main theme, live drums | 160, A minor |
 | `forgeheart` | FORGEHEART | furnace metal: brass hits, hammered percussion | 165, D minor |
 | `broodmother` | BROODMOTHER | nu-metal groove, a creeping choir, skittering hi-hats | 145, F♯ minor |
 | `archivist` | THE ARCHIVIST | orchestral and glitched: harpsichord, staccato strings | 170, B minor |
@@ -179,12 +179,15 @@ Tutorial, dailies and challenges reuse the sector tracks.
   and in which phase, the room (library, hub, shop, stands), the screen
   (menu, codex, game over). Replays and spectators run the same director,
   so they hear the same music.
-- **Tracks stream in bar-aligned segments.** Each track is cut into short
-  Ogg Opus pieces that the engine schedules back to back, sample-accurate.
-  Gapless loops come free, sections change on a bar line, and only about
-  three segments are decoded at once. A whole decoded 2½-minute track would
-  hold about 50 MB; this holds about 15. A manifest (`music/manifest.json`)
-  lists each track's BPM, segments, sections and loop points.
+- **Tracks stream in bar-aligned pieces.** Each track is cut into short Ogg
+  Opus pieces (two or four bars) that the engine starts one after another,
+  each exactly on its bar line. A piece holds only the notes that begin in
+  its own bars and keeps going for as long as they ring (a reverb, a crash),
+  under whichever piece comes next. So any piece can follow any other,
+  loops have no gap, sections change on a bar line, and nothing is ever cut
+  off. Only about four pieces are decoded at once (about 15 MB, where a
+  whole decoded track would hold 50). A manifest (`music/manifest.json`)
+  lists each track's BPM, pieces, sections and moods.
 - **Changes are musical.** A boss arriving cuts to its `boss-in` sting and
   the boss track on the next beat. Phases move on a bar line. Leaving a
   room crossfades.
@@ -201,12 +204,21 @@ Tutorial, dailies and challenges reuse the sector tracks.
 
 ### The studio (Step 3)
 
-- **Composing in code.** Each track is a score file I write (notes,
-  drums, sections, mix) and a renderer in Python turns into audio.
-  The renderer is a small DAW: a sequencer, a sampler (pitched Splice
-  one-shots), synths (supersaws, basses, pads, a 303), mixing, reverb and
-  a master limiter. It cuts the result into bar-aligned segments, encodes
-  Opus, and writes the manifest.
+- **Composing in code.** Each track is a score file (`studio/scores/`:
+  notes, drum patterns, sections, the mix) and a renderer in Python
+  (`studio/daw.py`, `studio/inst.py`) turns it into audio. The renderer is
+  a small DAW: oscillators and filters, a sampler for the raw one-shots,
+  guitars double-tracked from separate takes, reverb, delay, sidechain, a
+  clipper and a limiter. `studio/build.py <cue>` cuts the result into its
+  pieces, encodes Opus at about 96 kbit/s, and writes the manifest;
+  `studio/sfx.py` builds the effects.
+- **Nobody here can hear it.** I check a mix by numbers: `studio/look.py`
+  prints every instrument's level per section, the spectrum, how much is
+  left for a laptop speaker (nothing under 200 Hz), and what tempo and key
+  an analysis hears in the result. The files are also decoded again and
+  laid out as the game lays them, and have to match the mix. You are the
+  ears: `studio/listen.html` (through the worktree's static server) plays
+  the real files, with the moods, the sting and the effects on buttons.
 - **Splice supplies the real instruments.** A shared kit of one-shots
   (drums, guitar chugs and power chords, choir, strings, brass, piano,
   harpsichord, bells, impacts, risers), plus a few signature loops per
@@ -219,10 +231,28 @@ Tutorial, dailies and challenges reuse the sector tracks.
   (That is my reading of Splice's license; worth a glance at your plan's
   terms.)
 - **Credits.** Every Splice download spends one credit the first time.
-  Rough total: about 150–200 (a kit of ~40, ~2–3 signature loops per
-  track, ~30–40 for effects). I list what I want before each step's
-  downloads and you approve the batch. Each step's report says how many
-  were spent.
+  (11 Oct: you moved to a Creator plan and said to use the whole library, so
+  I no longer ask per batch; each step's report says how many were spent.
+  Splice also caps downloads at 100 a day.) Splice gives no previews through
+  the connector, so samples are chosen by their descriptions and measured
+  after download (`studio/probe.py`); a few will turn out unusable.
+
+### Levels (to settle at the mix, step 11)
+
+- The game's effects are quiet: a shot peaks about 30 dB under full scale, a
+  boom about 16. A mastered track at full level would bury them, so the
+  music bus sits at `MUSIC_LEVEL` 0.16 (a sector plays near −28 dBFS, a boss
+  near −26) and the recorded effects are set a little hotter than the blips
+  they replace. The synth effects not yet replaced sit under the music more
+  than they did under the old bed; the MUSIC slider is the remedy until
+  steps 9–10.
+- An open question for step 11: the whole game uses under half of the
+  loudness it could. Raising everything together (with a limiter on the
+  output) would help on a Chromebook's speakers, and would be a change every
+  player hears on the day it ships.
+- Chromebook speakers play nothing under about 200 Hz. Every mix is checked
+  for what is left without it (the kick's click, the bass's harmonics, the
+  guitars), and the references' "90% under 250 Hz" is not copied.
 
 ### Size and performance (school Chromebooks)
 
@@ -248,8 +278,15 @@ is pushed until you say; `main` only when you say ship.
    `npm test` and `npm run test:lockstep` unchanged.)*
 3. **The studio and the first slice.** The renderer, the shared kit, and
    `grid` + `warden`, the `boss-in` sting, and four effects (VOIDRUNNER's
-   shot, EMBER's laser, a hit, the codex opening). **You listen and approve
-   the direction before anything else is made.** (First credits: about 50.)
+   shot, EMBER's lance, a hit, the codex opening). *(done 11 Oct, 32 credits.
+   `grid` is "Entry Vector", `warden` "The First Wall". You asked for the
+   lance to be more of a laser and less of a wave: rebuilt. The player's
+   pieces changed from crossfaded cuts to pieces that ring out, see above.)*
+
+   **From here (your call, 11 Oct): the sectors first, one at a time, each
+   track named; the full determinism, lockstep and live passes run once at
+   the end, not per step.** ALL HALLOWS (below) waits for your word; its
+   chapter II opens 14 Oct.
 4. **ALL HALLOWS.** `patch`, `backlog`, `house`, `deadgame`, `vigil`, and
    `yard` + `ragequit` once chapter III is built. It's early on purpose:
    chapter II opens 14 Oct and chapter III 23 Oct.
