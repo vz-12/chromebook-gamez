@@ -665,10 +665,25 @@ script byte for byte, made once from git by `npm run build:opo` and committed
 
 **The art is blank.** Every visual piece of the route is a hook in `OPO_ART`
 (`ONE POINT OH — art hooks` in `index.html`), with placeholders just enough to
-play it. `ONE-POINT-OH-HOOKS.md` lists what each is handed.
+play it, plus three layers called every frame of the route for the art's own
+debris and effects (`worldFx`, `worldFlat`, `screenFx`; `lockFx` in the lock).
+`ONE-POINT-OH-HOOKS.md` maps where each hook is defined and called and lists
+what each is handed.
+
+**The art kit** (`OPO_KIT`, `ONE POINT OH — the art kit` in `index.html`) is
+what the hooks draw with: three dimensions faked on the 2D canvas. Rigid
+bodies that tumble and bounce under gravity, cast shadows and strike the
+screen's glass (crack, stick, bounce or pass through); textured triangles with
+perspective subdivision; fracture (radial glass, Voronoi rubble) that keeps
+each piece's part of the picture; sheets that fold along any line, fold again,
+curl, roll up and crumple, then break into bodies; the glass; scenes for state
+across frames; and an event feed of what the route just did (`opoFx`). It is
+drawing only, and the test proves the run is the same with it running hard.
+`index.html?opo=bench` on your own server (or for a dev account) opens the art
+bench (`onepointoh/bench.js`), which plays every part of the kit on its own.
 
 ```sh
-npm run test:opo                           # about a minute: the copy, the seals, the whole route
+npm run test:opo                           # about a minute: the copy, the seals, the whole route, the kit, the bench
 ```
 
 The test checks the copy is `3af8b6d` byte for byte, boots it and plays it

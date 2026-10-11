@@ -13,7 +13,8 @@
      updateBullets  rounds that reach the crack are taken into it
      gameOver     what was done to the crack is kept, every attempt counts
      drawArena    the crack itself, in the wall it is in (art: OPO_ART.crack)
-     render       his voice, over everything (art: OPO_ART.lockVoice)
+     render       his voice, over everything (art: OPO_ART.lockVoice), and the
+                  art's own screen layer, every frame (art: OPO_ART.lockFx)
 
    THE CRACK. Every locked run has a crack in the edge of the room: the top
    wall, at OPO_CRACK.at of its width. The first build's world is a box with
@@ -209,6 +210,8 @@
   render = function () {
     var out = _render.apply(this, arguments);
     if (R.line) art('lockVoice', ctx, W, H, { text: R.line.text, age: R.line.t, life: OPO_CRACK.lineLife, i: R.line.i });
+    art('lockFx', ctx, W, H, { crack: window.OPO_COPY.crack(), run: window.OPO_COPY.run(), state: state, t: uiTime,
+                               kit: host && host.kit ? host.kit() : null });
     return out;
   };
 

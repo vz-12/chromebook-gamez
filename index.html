@@ -37568,6 +37568,7 @@ function ui(act, i) {
 function handleKey(k) {
   if (state === 'pvp') return;            // PvP mode's own screen takes no keys of the game's
   if (state === 'opolock') { OpoLock.focus(); return; }   // ONE POINT OH: the keys are the first build's, in its frame
+  if (state === 'opobench') { if (window.OPO_BENCH) window.OPO_BENCH.key(k); return; }
   if (state === 'dead' && lastStats && lastStats.opo) return;   // and a lost fight is no run to start again: the lock takes it back
   // co-op: this machine's keys are its own pilot's (its cards, its gear)
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), () => handleKey(k)); return; }
@@ -37830,6 +37831,7 @@ function quitToMenu() {
 function handleClick() {
   if (state === 'pvp') return;            // nor clicks
   if (state === 'opolock') { OpoLock.focus(); return; }   // nor in ONE POINT OH's lock
+  if (state === 'opobench') { if (window.OPO_BENCH) window.OPO_BENCH.click(mouse.x, mouse.y); return; }
   if (state === 'dead' && lastStats && lastStats.opo) return;
   if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), handleClick); return; }
   if (state === 'tour') { tourClick(); return; }   // FIRST FLIGHT
@@ -38271,6 +38273,7 @@ function update(dt) {
   if (state === 'pvp') { if (PVP) PVP.idle(dt); return; }   // PvP mode's own screens: nothing of a run moves
   if (OpoLock.on) OpoLock.tick(dt);      // ONE POINT OH: the copy has to come up, and a lost fight goes back to it
   if (state === 'opolock') return;       // the lock: the first build has the screen, in its frame
+  if (state === 'opobench') { if (window.OPO_BENCH) window.OPO_BENCH.update(dt); return; }   // the art bench (?opo=bench)
 
   if (state === 'menu' || state === 'name') {
     opoBootCheck();                      // a profile he holds goes straight into the lock, on any device
@@ -41178,6 +41181,7 @@ function opoDoorTick(dt) {
 /* Walked in: that is the choice. The lock is on the profile from this step,
    so a reload in the middle of the revert still comes back to it. */
 function opoDoorTake() {
+  opoFx('door', { x: opoDoor.x, y: opoDoor.y });
   opoDoor = null;
   portals.length = 0; awaitingPortal = false; libraryPortal = null;
   ebullets.length = 0;
@@ -41198,7 +41202,7 @@ function opoRevertTick(dt) {
   opoLineTick(dt);
   const L = opoRevertList();
   const i = Math.min(L.length - 1, Math.floor(r.t / (r.T * 0.86) * L.length));
-  if (i > r.i) { r.i = i; opoSay('‘' + L[i].q + '.’', 'revert', 1.4); }
+  if (i > r.i) { r.i = i; opoSay('‘' + L[i].q + '.’', 'revert', 1.4); opoFx('revert', { i, entry: L[i] }); }
   updateParticles(dt);
   if (r.t >= r.T) { opoRevert = null; opoLockNow(); }
 }
@@ -41223,6 +41227,7 @@ const OpoLock = {
     this.on = true; this.why = why || ''; this.mode = 'copy';
     this.ready = false; this.copy = null; this.t = 0; this.backT = 0;
     state = 'opolock';
+    opoFx('lock');
     try { if (AcctUI.on) AcctUI.close(); } catch (e) {}
     try { Live.hide(); } catch (e) {}
     try { Ads.close(); } catch (e) {}
@@ -41305,12 +41310,31 @@ const OPO_HOST = {
   art(name, ...a) { OA(name, ...a); },
   name() { return (Save.profile && Save.profile.name) || ''; },
   lines(kind) { const l = OPO_SAY[kind]; return Array.isArray(l) ? l.slice() : []; },
-  devLift() { if (OpoLock.on && OpoLock.mode === 'copy' && devPerk('opo-lift')) opoLockLift('dev'); }
+  devLift() { if (OpoLock.on && OpoLock.mode === 'copy' && devPerk('opo-lift')) opoLockLift('dev'); },
+  kit() { return OPO_KIT; }
 };
 if (typeof window !== 'undefined' && !PVP) window.OPO_HOST = OPO_HOST;
 // from update, every frame the menu is up: a locked profile goes straight into the lock
 function opoBootCheck() {
   if (!OpoLock.on && (state === 'menu' || state === 'name') && opoLocked()) OpoLock.enter('boot');
+  if (OPO_BENCH_ASK && !opoBenchTried && state === 'menu' && !OpoLock.on && opoBenchAllowed()) opoBenchOpen();
+}
+/* THE ART BENCH (?opo=bench): every part of the art kit, played on its own,
+   to try things on (onepointoh/bench.js, loaded only when asked for). Only on
+   this machine's own server (npm run dev) or for a dev account, so the address
+   cannot show anyone him early. It never touches the save. */
+const OPO_BENCH_ASK = (() => { try { return new URLSearchParams(location.search).get('opo') === 'bench'; } catch (e) { return false; } })();
+let opoBenchTried = false;
+const opoBenchAllowed = () => !PVP && (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:' || devPerk('opo-lift'));
+function opoBenchOpen() {
+  opoBenchTried = true;
+  if (typeof window !== 'undefined' && window.OPO_BENCH) { window.OPO_BENCH.open(); return; }
+  try {
+    const sc = document.createElement('script');
+    sc.src = 'onepointoh/bench.js';
+    sc.onload = () => { if (window.OPO_BENCH && state === 'menu') window.OPO_BENCH.open(); };
+    document.head.appendChild(sc);
+  } catch (e) {}
 }
 // the cards a run in the copy took, by id: only today's upgrades that exist by that id, at most their max
 function opoCards(up) {
@@ -41388,6 +41412,7 @@ function opoOpen(info) {
     opo.e = e;
   }
   bossAlive = true;
+  opoFx('open');
   runSet('opoMet', true);
   Save.writeLocal(); Save.flush();
   drawFlashT = 0.5; shake(1.6);
@@ -41436,6 +41461,7 @@ function opoHit(e, dmg, crit) {
   if (u <= 0) return;
   const cap = o.phT < OPO.phaseMin ? opoPhaseTo(o.ph) : opoRecord().length - 1;
   o.pos = Math.min(cap, o.pos + u);
+  opoFx('hit', { x: e.x, y: e.y, crit: !!crit });
   e.flash = Math.min(1, e.flash + 0.5);
   e.hp = e.maxHp * (1 - o.pos / o.maxHp);
   if (crit) shake(0.04);
@@ -41454,7 +41480,7 @@ function opoTick(dt, wdt) {
     const k = clamp(o.st / OPO.cascadeSecs, 0, 1);
     for (let i = 0; i < o.cells.length; i++) if ((i * 7919 % o.cells.length) / o.cells.length < k) o.cells[i] = 1;
     o.cascade = k;
-    if (o.st >= OPO.cascadeSecs) { o.stage = 'out'; o.st = 0; opoSay(OPO_SAY.out, 'out', OPO.outSecs - 0.8); }
+    if (o.st >= OPO.cascadeSecs) { o.stage = 'out'; o.st = 0; opoFx('out'); opoSay(OPO_SAY.out, 'out', OPO.outSecs - 0.8); }
     return;
   }
   if (o.stage === 'out') {
@@ -41487,6 +41513,7 @@ function opoPhaseOpen(i) {
   const o = opo;
   o.ph = i; o.phT = 0; o.seam = OPO.seam;
   const p = OPO_PHASES[i];
+  opoFx('phase', { i, n: p.n });
   banner(p.n, OPO_COL, 3.0);
   opoSay(p.say, 'phase', 3.2);
   ringFx(o.hx, o.hy, 20, 700, OPO_COL, 0.9, 6);
@@ -41574,6 +41601,7 @@ function opoPanesTick(dt) {
       const tx = clamp(P.x + Math.cos(a) * r, o.box.x0 + 40, o.box.x1 - 40);
       const ty = clamp(P.y + Math.sin(a) * r, o.box.y0 + 40, o.box.y1 - 40);
       o.panes.push({ x: o.hx, y: o.hy, x0: o.hx, y0: o.hy, tx, ty, t: 0, T: m.fly, hp: m.hp, r: m.r, landed: 0, ang: simRnd(TAU) });
+      opoFx('pane', { x: o.hx, y: o.hy, tx, ty });
     }
   }
   for (let i = o.panes.length - 1; i >= 0; i--) {
@@ -41591,6 +41619,7 @@ function opoPanesTick(dt) {
     }
     if (p.hp <= 0) {
       o.burst.push({ x: p.x, y: p.y, t: 0, kind: 'pane' });
+      opoFx('paneBreak', { x: p.x, y: p.y, r: p.r, ang: p.ang });
       burst(p.x, p.y, 16, OPO_COL, 260, 2.4, 0.5);
       Audio_.tone(1200, 0.08, 'square', 0.06, 600);
       o.panes.splice(i, 1);
@@ -41599,6 +41628,7 @@ function opoPanesTick(dt) {
     if (k >= 1) {
       // it lands, and its patch of floor is the first build's again
       p.landed = 1e-6;
+      opoFx('paneLand', { x: p.tx, y: p.ty, r: p.r });
       opoRevertCells(p.tx, p.ty, m.reach);
       if (len(P.x - p.tx, P.y - p.ty) < p.r + P.r) hurtPlayer(m.dmg, {});
       shake(0.25);
@@ -41624,6 +41654,7 @@ function opoSweepsTick(dt) {
       const vert = simRand() < 0.5, n = vert ? OPO.cols : OPO.rows;
       const lane = simRndi(n - m.lanes + 1);
       o.sweeps.push({ vert, dir: simRand() < 0.5 ? 1 : -1, lane, lanes: m.lanes, tell: m.tell, t: 0, pos: 0, hit: false, done: 0 });
+      { const s = o.sweeps[o.sweeps.length - 1]; opoFx('sweep', { vert: s.vert, dir: s.dir, lane: s.lane, lanes: s.lanes }); }
     }
   }
   const B = o.box;
@@ -41662,6 +41693,7 @@ function opoRestore(i) {
   if (!r || i >= L.length - 1) return;
   opoSay(opoQuote(r), 'fight', 3.2);
   o.burst.push({ x: o.hx, y: o.hy, t: 0, kind: 'restore', i });
+  opoFx('restore', { i, entry: r, x: o.hx, y: o.hy });
   drawFlashT = Math.max(drawFlashT, 0.12);
   Audio_.tone(392, 0.4, 'sine', 0.08, 784);
   if (o.ph === 2) {
@@ -41681,6 +41713,7 @@ function opoRestoresTick(dt) {
     if (r.paint >= 1) {
       // painted out: the date is his again
       r.gone = 1e-6;
+      opoFx('paintOut', { x: r.x, y: r.y, i: r.i });
       opoRevertCells(r.x, r.y, m.reach);
       if (o.pos >= r.i) { o.pos = r.i - 0.02; o.passed = r.i - 1; if (o.e) o.e.hp = o.e.maxHp * (1 - o.pos / o.maxHp); }
       opoSay(OPO_SAY.paint[r.i % OPO_SAY.paint.length], 'fight', 2.0);
@@ -41688,6 +41721,7 @@ function opoRestoresTick(dt) {
     }
     if (r.t >= m.settle) {
       r.settled = true;
+      opoFx('settle', { x: r.x, y: r.y, i: r.i });
       const B = o.box, c0 = (r.x - B.x0) / B.cw, r0 = (r.y - B.y0) / B.ch;
       for (let y = 0; y < OPO.rows; y++) for (let x = 0; x < OPO.cols; x++)
         if (len(x + 0.5 - c0, y + 0.5 - r0) <= m.reach) o.cells[y * OPO.cols + x] = 1;
@@ -41717,6 +41751,7 @@ function opoPeel(id) {
   if (P.up[id] <= 0) delete P.up[id];
   o.peeled++;
   o.cards.push({ id, x: P.x, y: P.y, t: 0, T: 1.1 });
+  opoFx('peel', { id, x: P.x, y: P.y });
   Audio_.tone(330, 0.14, 'square', 0.06, 160);
 }
 function opoCardsTick(dt) {
@@ -41740,6 +41775,7 @@ function opoBaseShip() {
   P.dashCh = Math.min(P.dashCh, P.dashMax);
   sentries.length = 0;
   o.hollow = true;
+  opoFx('baseShip');
 }
 
 /* The last hit is today: the whole record at once. He is not killed. */
@@ -41748,6 +41784,7 @@ function opoToday() {
   if (!o || o.stage !== 'fight') return;
   o.pos = o.maxHp; o.passed = opoRecord().length - 1;
   o.stage = 'cascade'; o.st = 0;
+  opoFx('today');
   o.panes.length = 0; o.sweeps.length = 0; o.painting = null;
   ebullets.length = 0;
   if (o.e) { o.e.hp = 1; o.e.flash = 1; }
@@ -41770,6 +41807,7 @@ function opoDone() {
    first build's menu again (OpoLock.back). From gameOver. */
 function opoLost(quiet) {
   lastStats = { score: 0, wave: 0, kills: 0, level: P.level, time: elapsed, sector: '', loop: 0, isRecord: false, opo: true };
+  opoFx('lost');
   opoSay(OPO_SAY.lost, 'lost', OPO.backSecs);
   if (!quiet) { explode(P.x, P.y, 180, 0, COL.player); burst(P.x, P.y, 90, COL.player, 460, 4, 1.1); shake(1); Audio_.over(); }
   if (OpoLock.on) OpoLock.backT = quiet ? 0.05 : OPO.backSecs;
@@ -41847,6 +41885,30 @@ function drawOpoWorld() {
       x0: c.x, y0: c.y, x1: o.hx, y1: o.hy, k: c.t / c.T });
   }
 }
+// what every per-frame hook is handed about the route: where it stands, and the kit
+function opoFxState() {
+  return { stage: opo ? opo.stage : opoRevert ? 'revert' : opoDoor ? 'door' : OpoLock.on ? 'lock' : 'none',
+           ph: opo ? opo.ph : -1, st: opo ? opo.st : opoRevert ? opoRevert.t : 0, t: uiTime,
+           tex: OpoLock.tex(), kit: OPO_KIT };
+}
+const opoRouteOn = () => !!(opo || opoDoor || opoRevert);
+// the room, lit: the art's own debris and effects, every frame the route is on (under the camera, before bloom)
+function drawOpoFx() {
+  if (!opoRouteOn()) return;
+  const s = opoFxState(); s.S = OPO_KIT.world();
+  OA('worldFx', ctx, s);
+}
+/* The room again, after bloom, the grade and the chromatic split: the first
+   build's renderer. What is drawn here is flat and unlit (worldFlat). */
+function drawOpoFlat(z, ox, oy) {
+  if (!opoRouteOn()) return;
+  ctx.save();
+  ctx.scale(z, z);
+  ctx.translate(ox, oy);
+  const s = opoFxState(); s.S = OPO_KIT.world();
+  OA('worldFlat', ctx, s);
+  ctx.restore();
+}
 // over the frame and the HUD: the voice, the revert, the shatter, the record, the cascade, out
 function drawOpoScreen() {
   const tex = OpoLock.tex();
@@ -41868,12 +41930,16 @@ function drawOpoScreen() {
     if (o.stage === 'out') OA('out', ctx, W, H, { t: o.st, T: OPO.outSecs, k: o.out });
   }
   if (opoLine) OA('voice', ctx, W, H, { text: opoLine.text, kind: opoLine.kind, age: opoLine.t, life: opoLine.life });
+  // the last thing on the screen, every frame the route is on: the art's own (the glass, debris at it)
+  if (opoRouteOn()) { const s = opoFxState(); s.S = OPO_KIT.screen(W, H); OA('screenFx', ctx, W, H, s); }
+  OPO_KIT.frameEnd();
 }
 // the lock: today's canvas, under the frame (seen while the copy loads, and if it is ever see-through)
 function drawOpoLock() {
   ctx.fillStyle = '#05060a';
   ctx.fillRect(0, 0, W, H);
   OA('lockUnder', ctx, W, H, { t: OpoLock.t, ready: OpoLock.ready, why: OpoLock.why });
+  OPO_KIT.frameEnd();
 }
 // a fight lost: the beat before the first build's menu
 function drawOpoLost() {
@@ -41901,7 +41967,7 @@ function drawOpoLost() {
      · ?hooks=1 on the address tags each piece with its hook's name.
 
    WHAT THEY ARE HANDED. `g` is the 2D context to draw on: the game's own
-   canvas, except the three marked [frame], which draw on the first build's
+   canvas, except the four marked [frame], which draw on the first build's
    canvas inside the copy (onepointoh/lock.js calls them through OPO_HOST).
    (w, h) is the screen in CSS pixels. "world" hooks are drawn under the
    camera: coordinates are the room's. `tex` is the first build, live: the
@@ -41998,6 +42064,25 @@ function drawOpoLost() {
                                    first build's menu again. l { t, T }
      saySound(audio, line)         a dialogue voice for him, as each line
                                    starts (today's Audio_). Sound only.
+
+   EVERY FRAME (for what the art keeps across set pieces: debris, the glass,
+   the kit's scenes). Each is handed `s`: { stage (door revert open fight
+   cascade out, or lock), ph, st, t, tex, kit (OPO_KIT), S (a kit space for
+   this layer: OPO_KIT.world() or OPO_KIT.screen(w, h)) }. The run's events,
+   for answering them, are s.kit.feed('your name').
+     worldFx(g, s)                 world, lit: in the room with today's
+                                   renderer, after him and before bloom
+     worldFlat(g, s)               world, after bloom, the grade and the
+                                   chromatic split: the first build's renderer,
+                                   flat and unlit, on top of everything in the
+                                   room (the old side's own debris, panes in
+                                   the air, his screen)
+     screenFx(g, w, h, s)          screen, last of all: the glass
+                                   (s.kit.glass.draw), debris flying at it,
+                                   whatever breaks or folds the screen
+     lockFx(g, w, h, s)   [frame]  screen, in the lock, every frame of the
+                                   first build: s { crack, run, state, t, kit }
+                                   (crack and run as OPO_COPY reports them)
    ========================================================================= */
 // the first build's palette and type (3af8b6d's COL and THE GRID), for the art to draw the old side in
 const OPO_FIRST = {
@@ -42175,9 +42260,961 @@ const OPO_ART = {
     g.fillRect(0, 0, w, h);
     oaTag(g, 'lost', 8, 8);
   },
-  saySound(audio, line) { /* blank: a dialogue voice for him */ }
+  saySound(audio, line) { /* blank: a dialogue voice for him */ },
+  // every frame of the route: blank until the art keeps something on screen across set pieces
+  worldFx(g, s) { oaTag(g, 'worldFx', s.S.cx - 60, s.S.cy - 60); },
+  worldFlat(g, s) { oaTag(g, 'worldFlat', s.S.cx - 60, s.S.cy - 46); },
+  screenFx(g, w, h, s) { oaTag(g, 'screenFx', w - 70, h - 20); },
+  lockFx(g, w, h, s) { oaTag(g, 'lockFx', w - 60, h - 20); }
 };
 /* ======================== end of ONE POINT OH art hooks ======================== */
+
+/* ========================== ONE POINT OH — the art kit ==========================
+   What the route's art is drawn WITH (OPO_KIT). The hooks above (OPO_ART) are
+   the art; this is the toolkit they use: three dimensions faked on the 2D
+   canvas, for debris that tumbles and bounces and flies at the screen, and for
+   the screen itself breaking, folding in on itself and peeling back. It draws
+   nothing on its own. ONE-POINT-OH-HOOKS.md has the reference with examples;
+   the bench (onepointoh/bench.js, ?opo=bench on localhost or a dev account)
+   plays every part of it.
+
+   THE RULES. It is drawing only. It never reads or writes the run, never rolls
+   simRand (its own randomness is rnd, or OPO_KIT.rng(seed) where a pattern has
+   to come out the same twice), and keeps all of its state inside this object,
+   which the run snapshots never carry. A hook may call any of it, on either
+   canvas: every function takes the context to draw on.
+
+   THE DIORAMA (OPO_KIT.screen, OPO_KIT.world). The picture is a box seen from
+   above: its floor is the plane z = 0, the eye is at height f over its centre,
+   and the glass of your screen is between them, at z = glass. A point (x, y, z)
+   is drawn at (x, y) pulled away from the centre by k = f / (f - z): on the
+   floor k = 1 and it is where it always was; raised it grows and spreads; at
+   the glass it is about twice its size. In a screen hook the floor is the
+   screen itself (CSS px, centre mid-screen), so z > 0 is out of the screen,
+   toward you, and z < 0 is back into it. In a world hook the floor is the
+   room's floor (world px, centre where the camera looks), so z is height.
+
+   THE PARTS
+     math        V, Q, vector and quaternion helpers; rng(seed); hash, ease
+     space       screen(w, h, o) / world(o): project(p), toScreen(p), eye
+     bodies      body(o): a rigid flat shape (a shard, a pane, a card, a chunk
+                 with thickness), textured front and back, lit or flat
+     sims        sim(o): bodies under gravity, against planes (the floor, the
+                 screen's edges) with real impulses so they tumble, and the
+                 glass: what reaches it strikes it (glass.hit) and then cracks,
+                 sticks and slides, bounces, or passes. sim.draw sorts by depth,
+                 lights, shadows on the floor
+     textures    tri(g, img, ...): an image on any triangle; quad and polygon
+                 versions that subdivide where perspective needs it; capture(key)
+                 the frame as drawn so far; first() the first build, live (the
+                 copy's canvas) or a stand-in when there is no copy
+     fracture    rect, clip, split; voronoi(poly, n, seed) rubble; radial(poly,
+                 at, o) glass, spokes and rings from a point of impact; shards
+                 become bodies with their piece of the picture on them
+     sheets      sheet(o): a flat picture that can be split, folded along any
+                 line (and folded again, a stack at a time), curled back like a
+                 page, crumpled in on itself, moved, drawn two-sided, and broken
+                 into bodies at any moment of any of it
+     glass       the screen's own glass: hits that crack in spokes and rings,
+                 refracting the frame behind them, fading out
+     scenes      scene(key, make, gen): state a hook keeps across frames (hooks
+                 are called fresh every frame), dropped when not drawn for a
+                 moment
+     events      what happened in the run, for the art to answer: a pane broken,
+                 a date restored, a card peeled (feed(who))
+     debug       OPO_KIT.debug = true: wireframes, normals, velocities
+
+   PERFORMANCE. A textured triangle is a clip and a draw: a few hundred a frame
+   is fine on a Chromebook, a few thousand is not. Thin bodies are one or two
+   triangles; a sheet is one polygon per piece; subdivision is only where a
+   piece is steeply tilted or close. Shading and shadows are a fill each.
+   FXO.parts off is the art's cue to throw fewer bodies.
+   ========================================================================= */
+const OPO_KIT = (() => {
+  /* -------------------------------- math --------------------------------- */
+  const V = (x = 0, y = 0, z = 0) => ({ x, y, z });
+  const add = (a, b) => V(a.x + b.x, a.y + b.y, a.z + b.z);
+  const sub = (a, b) => V(a.x - b.x, a.y - b.y, a.z - b.z);
+  const mul = (a, s) => V(a.x * s, a.y * s, a.z * s);
+  const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+  const cross = (a, b) => V(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+  const vlen = a => Math.hypot(a.x, a.y, a.z);
+  const norm = a => { const l = vlen(a) || 1; return V(a.x / l, a.y / l, a.z / l); };
+  const Q = (w = 1, x = 0, y = 0, z = 0) => ({ w, x, y, z });
+  const qAxis = (axis, ang) => { const n = norm(axis), s = Math.sin(ang / 2); return Q(Math.cos(ang / 2), n.x * s, n.y * s, n.z * s); };
+  const qMul = (a, b) => Q(a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+                           a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+                           a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+                           a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w);
+  const qNorm = q => { const l = Math.hypot(q.w, q.x, q.y, q.z) || 1; return Q(q.w / l, q.x / l, q.y / l, q.z / l); };
+  // v rotated by q
+  const qRot = (q, v) => {
+    const tx = 2 * (q.y * v.z - q.z * v.y), ty = 2 * (q.z * v.x - q.x * v.z), tz = 2 * (q.x * v.y - q.y * v.x);
+    return V(v.x + q.w * tx + (q.y * tz - q.z * ty), v.y + q.w * ty + (q.z * tx - q.x * tz), v.z + q.w * tz + (q.x * ty - q.y * tx));
+  };
+  // a turn at angular velocity w (rad/s about each axis, the room's axes) for dt
+  const qSpin = (q, w, dt) => { const a = vlen(w) * dt; return a < 1e-9 ? q : qNorm(qMul(qAxis(w, a), q)); };
+  // the quaternion of an orthonormal basis (its columns are where x, y and z go)
+  function qBasis(ex, ey, ez) {
+    const m00 = ex.x, m11 = ey.y, m22 = ez.z, tr = m00 + m11 + m22;
+    let q;
+    if (tr > 0) { const s = Math.sqrt(tr + 1) * 2; q = Q(0.25 * s, (ey.z - ez.y) / s, (ez.x - ex.z) / s, (ex.y - ey.x) / s); }
+    else if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; q = Q((ey.z - ez.y) / s, 0.25 * s, (ey.x + ex.y) / s, (ez.x + ex.z) / s); }
+    else if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; q = Q((ez.x - ex.z) / s, (ey.x + ex.y) / s, 0.25 * s, (ez.y + ey.z) / s); }
+    else { const s = Math.sqrt(1 + m22 - m00 - m11) * 2; q = Q((ex.y - ey.x) / s, (ez.x + ex.z) / s, (ez.y + ey.z) / s, 0.25 * s); }
+    return qNorm(q);
+  }
+  // a point turned about the line through p along d, by ang
+  const turnAbout = (v, p, d, ang) => add(p, qRot(qAxis(d, ang), sub(v, p)));
+  // its own seeded stream (mulberry32): the same pattern every time, and never the run's
+  function rng(seed) {
+    let s = (seed >>> 0) || 1;
+    const r = () => { let t = s = (s + 0x6D2B79F5) >>> 0; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    r.range = (a, b) => a + r() * (b - a);
+    r.int = n => Math.floor(r() * n);
+    return r;
+  }
+  const hash = i => { let x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const ease = {
+    in: t => t * t, out: t => 1 - (1 - t) * (1 - t), inOut: t => t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t),
+    cubicOut: t => 1 - Math.pow(1 - t, 3), backOut: t => { const c = 1.70158; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); },
+    elastic: t => t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1
+  };
+  const c01 = t => t < 0 ? 0 : t > 1 ? 1 : t;
+
+  /* -------------------------------- spaces -------------------------------
+     A space projects (x, y, z) onto the context's own coordinates. */
+  function space(o) {
+    const S = {
+      kind: o.kind, f: o.f, cx: o.cx, cy: o.cy, glass: o.glass, zoom: o.zoom || 1, ox: o.ox || 0, oy: o.oy || 0,
+      sx0: o.sx0 || 0, sy0: o.sy0 || 0,
+      eye: V(o.cx, o.cy, o.f),
+      // where p is drawn: { x, y, k (its scale), d (its distance from the eye) }
+      project(p, out) {
+        const d = S.f - p.z, k = S.f / Math.max(d, S.f * 0.02);
+        out = out || {};
+        out.x = S.cx + (p.x - S.cx) * k; out.y = S.cy + (p.y - S.cy) * k; out.k = k; out.d = d;
+        return out;
+      },
+      // where p lands on the screen, in CSS px (glass hits are screen-space)
+      toScreen(p) {
+        const q = S.project(p);
+        return S.kind === 'world' ? { x: (q.x - S.cx) * S.zoom + S.sx0, y: (q.y - S.cy) * S.zoom + S.sy0 } : { x: q.x, y: q.y };
+      },
+      // whether the eye sees the front of a face with normal n at c
+      faces: (n, c) => dot(n, sub(S.eye, c)) > 0
+    };
+    return S;
+  }
+  // a screen hook's space: the floor is the screen, the eye over its middle
+  const screen = (w, h, o = {}) => {
+    const f = o.f || 1.2 * Math.max(w, h);
+    return space({ kind: 'screen', f, cx: o.cx !== undefined ? o.cx : w / 2, cy: o.cy !== undefined ? o.cy : h / 2,
+                   glass: o.glass !== undefined ? o.glass : f * 0.5 });
+  };
+  // a world hook's space: the room's floor, the eye over where the camera looks (read here, for drawing only)
+  const world = (o = {}) => {
+    const z = typeof camZoom === 'number' && camZoom > 0 ? camZoom : 1;
+    const f = (o.f || 1.2 * Math.max(W, H)) / z;
+    const cx = cam.x - cam.sx / z, cy = cam.y - cam.sy / z;
+    return space({ kind: 'world', f, cx, cy, glass: o.glass !== undefined ? o.glass : f * 0.5, zoom: z, sx0: W / 2, sy0: H / 2 });
+  };
+
+  /* ------------------------------- lighting ------------------------------
+     One light, from up and to the left of the viewer. shade(n) is how lit a
+     face turned to n is, 0..1; a flat body is never shaded (the old renderer). */
+  const light = { dir: norm(V(-0.35, -0.55, 0.76)), amb: 0.5, dif: 0.5, spec: 0.35, shine: 18 };
+  const shade = n => light.amb + light.dif * Math.max(0, dot(n, light.dir));
+  function litFace(g, pts, n, eyeDir, o) {
+    const b = shade(n);
+    if (b < 0.999) { g.fillStyle = 'rgba(0,0,0,' + ((1 - b) * (o.dark !== undefined ? o.dark : 0.85)).toFixed(3) + ')'; path(g, pts); g.fill(); }
+    if (light.spec > 0 && o.spec !== false) {
+      const r = sub(mul(n, 2 * dot(n, light.dir)), light.dir);
+      const s = Math.pow(Math.max(0, dot(r, eyeDir)), light.shine) * light.spec;
+      if (s > 0.01) { g.globalCompositeOperation = 'lighter'; g.fillStyle = 'rgba(255,255,255,' + s.toFixed(3) + ')'; path(g, pts); g.fill(); g.globalCompositeOperation = 'source-over'; }
+    }
+  }
+  function path(g, pts) {
+    g.beginPath();
+    for (let i = 0; i < pts.length; i++) i ? g.lineTo(pts[i].x, pts[i].y) : g.moveTo(pts[i].x, pts[i].y);
+    g.closePath();
+  }
+
+  /* ------------------------------- textures ------------------------------
+     tri: img's triangle (u, v in its own pixels) drawn onto the screen
+     triangle (x, y in the context's coordinates), exactly, by an affine map.
+     Each is grown by `grow` units about its middle so neighbours meet with no
+     hairline between them. */
+  function tri(g, img, u0, v0, u1, v1, u2, v2, x0, y0, x1, y1, x2, y2, grow) {
+    const den = (u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0);
+    if (!img || Math.abs(den) < 1e-9) return;
+    const gr = grow === undefined ? 0.6 : grow;
+    if (gr) {
+      const mx = (x0 + x1 + x2) / 3, my = (y0 + y1 + y2) / 3;
+      const pull = (x, y) => { const dx = x - mx, dy = y - my, l = Math.hypot(dx, dy) || 1; return [x + dx / l * gr, y + dy / l * gr]; };
+      [x0, y0] = pull(x0, y0); [x1, y1] = pull(x1, y1); [x2, y2] = pull(x2, y2);
+    }
+    const a = ((x1 - x0) * (v2 - v0) - (x2 - x0) * (v1 - v0)) / den;
+    const b = ((y1 - y0) * (v2 - v0) - (y2 - y0) * (v1 - v0)) / den;
+    const c = ((x2 - x0) * (u1 - u0) - (x1 - x0) * (u2 - u0)) / den;
+    const d = ((y2 - y0) * (u1 - u0) - (y1 - y0) * (u2 - u0)) / den;
+    g.save();
+    g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.closePath(); g.clip();
+    g.transform(a, b, c, d, x0 - a * u0 - c * v0, y0 - b * u0 - d * v0);
+    g.drawImage(img, 0, 0);
+    g.restore();
+  }
+  /* A textured polygon in 3D: `pts` are { x, y, z, u, v } (u, v in img's own
+     pixels), drawn in space S. Fanned into triangles, and each triangle cut
+     into n x n smaller ones when the face is steep or near enough that one
+     affine map would swim (n from the depth it spans, or o.sub). */
+  function polyTex(g, S, img, pts, o = {}) {
+    if (!img || pts.length < 3) return;
+    const P = pts.map(p => S.project(p));
+    let dmin = Infinity, dmax = 0;
+    for (const p of P) { dmin = Math.min(dmin, p.d); dmax = Math.max(dmax, p.d); }
+    const n = o.sub !== undefined ? o.sub : Math.min(6, Math.max(1, Math.ceil((dmax / Math.max(1, dmin) - 1) * 10)));
+    for (let i = 1; i < pts.length - 1; i++) {
+      const A = pts[0], B = pts[i], C = pts[i + 1];
+      if (n <= 1) { const a = P[0], b = P[i], c = P[i + 1]; tri(g, img, A.u, A.v, B.u, B.v, C.u, C.v, a.x, a.y, b.x, b.y, c.x, c.y, o.grow); continue; }
+      // barycentric grid over the triangle
+      const at = (s, t) => { const r = 1 - s - t; return { x: A.x * r + B.x * s + C.x * t, y: A.y * r + B.y * s + C.y * t, z: A.z * r + B.z * s + C.z * t,
+                                                           u: A.u * r + B.u * s + C.u * t, v: A.v * r + B.v * s + C.v * t }; };
+      const grid = [];
+      for (let a = 0; a <= n; a++) { grid[a] = []; for (let b = 0; b <= n - a; b++) { const q = at(a / n, b / n); const p = S.project(q); q.px = p.x; q.py = p.y; grid[a][b] = q; } }
+      for (let a = 0; a < n; a++) for (let b = 0; b < n - a; b++) {
+        const p0 = grid[a][b], p1 = grid[a + 1][b], p2 = grid[a][b + 1];
+        tri(g, img, p0.u, p0.v, p1.u, p1.v, p2.u, p2.v, p0.px, p0.py, p1.px, p1.py, p2.px, p2.py, o.grow);
+        if (b < n - a - 1) {
+          const p3 = grid[a + 1][b + 1];
+          tri(g, img, p1.u, p1.v, p3.u, p3.v, p2.u, p2.v, p1.px, p1.py, p3.px, p3.py, p2.px, p2.py, o.grow);
+        }
+      }
+    }
+  }
+  // the frame as drawn so far this frame (or any canvas), copied for use as a texture: { img, sx } (sx: its pixels per CSS px)
+  const caps = new Map();
+  function capture(key, src, w) {
+    src = src || cv;
+    const cw = src.width, ch = src.height;
+    let c = caps.get(key || 'frame');
+    if (!c) { c = document.createElement('canvas'); caps.set(key || 'frame', c); }
+    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    const g2 = c.getContext('2d');
+    g2.setTransform(1, 0, 0, 1, 0, 0);
+    g2.clearRect(0, 0, cw, ch);
+    g2.drawImage(src, 0, 0);
+    return { img: c, sx: cw / Math.max(1, w || (src === cv ? W : cw)) };
+  }
+  const captured = key => { const c = caps.get(key || 'frame'); return c ? { img: c, sx: c.width / Math.max(1, W) } : null; };
+  /* The first build, live: the copy's own canvas while it runs in its frame
+     (OpoLock.tex), or a stand-in drawn once in its colours and type, so a
+     hook always has something to put on a pane. */
+  let standIn = null;
+  function first() {
+    const t = typeof OpoLock !== 'undefined' ? OpoLock.tex() : null;
+    if (t) return t;
+    if (!standIn) {
+      standIn = document.createElement('canvas');
+      standIn.width = 640; standIn.height = 360;
+      const g2 = standIn.getContext('2d');
+      const F = typeof OPO_FIRST !== 'undefined' ? OPO_FIRST : { bg: '#05060a', grid: '#0e1626', grid2: '#16243c', player: '#67e8f9', enemy: '#f472b6', font: 'sans-serif' };
+      g2.fillStyle = F.bg; g2.fillRect(0, 0, 640, 360);
+      g2.strokeStyle = F.grid; g2.lineWidth = 1;
+      for (let x = 0; x <= 640; x += 32) { g2.beginPath(); g2.moveTo(x + 0.5, 0); g2.lineTo(x + 0.5, 360); g2.stroke(); }
+      for (let y = 0; y <= 360; y += 32) { g2.beginPath(); g2.moveTo(0, y + 0.5); g2.lineTo(640, y + 0.5); g2.stroke(); }
+      g2.strokeStyle = F.grid2;
+      for (let x = 0; x <= 640; x += 128) { g2.beginPath(); g2.moveTo(x + 0.5, 0); g2.lineTo(x + 0.5, 360); g2.stroke(); }
+      for (let y = 0; y <= 360; y += 128) { g2.beginPath(); g2.moveTo(0, y + 0.5); g2.lineTo(640, y + 0.5); g2.stroke(); }
+      const trig = (x, y, r, a, col) => { g2.strokeStyle = col; g2.lineWidth = 2; g2.beginPath(); for (let i = 0; i < 3; i++) { const q = a + i * Math.PI * 2 / 3; g2[i ? 'lineTo' : 'moveTo'](x + Math.cos(q) * r, y + Math.sin(q) * r); } g2.closePath(); g2.stroke(); };
+      trig(320, 120, 34, 0.3, F.player); trig(320, 120, 24, 1.4, F.player);
+      for (let i = 0; i < 7; i++) trig(80 + i * 80, 300 - (i % 2) * 30, 9, i, F.enemy);
+      g2.textAlign = 'center'; g2.fillStyle = '#e0f2fe'; g2.font = '800 54px ' + F.font; g2.fillText('VOIDRUNNER', 320, 210);
+      g2.fillStyle = F.player; g2.font = '700 14px ' + F.font; g2.fillText('PRESS SPACE TO START', 320, 246);
+    }
+    return standIn;
+  }
+
+  /* -------------------------------- bodies -------------------------------
+     A rigid flat shape: `shape` is a convex polygon [{ x, y }] about its own
+     centre, lying in its own plane. Placed at p, turned by q. Thick bodies
+     (thick > 0) are slabs, with sides. A face is the img with `uv` (its
+     corners' pixels in img, one per shape point), else the colour; the back
+     is `back` (an image, the same uv) or `backCol`. */
+  function body(o) {
+    const shape = o.shape || [V(-10, -10), V(10, -10), V(10, 10), V(-10, 10)];
+    let r = 0;
+    for (const p of shape) r = Math.max(r, Math.hypot(p.x, p.y));
+    const m = o.mass || Math.max(0.2, polyArea(shape) / 400);
+    return {
+      p: V(o.x || 0, o.y || 0, o.z || 0), v: V(o.vx || 0, o.vy || 0, o.vz || 0),
+      q: o.q || Q(), w: V(o.wx || 0, o.wy || 0, o.wz || 0),
+      shape, thick: o.thick || 0, r, m, I: m * r * r * 0.4,
+      img: o.img || null, uv: o.uv || null, back: o.back || null, col: o.col || '#94a3b8', backCol: o.backCol || null, edgeCol: o.edgeCol || null,
+      stroke: o.stroke || null, lw: o.lw || 1,
+      bounce: o.bounce !== undefined ? o.bounce : 0.35, friction: o.friction !== undefined ? o.friction : 0.5,
+      drag: o.drag !== undefined ? o.drag : 0.12, spinDrag: o.spinDrag !== undefined ? o.spinDrag : 0.25,
+      life: o.life !== undefined ? o.life : Infinity, fade: o.fade !== undefined ? o.fade : 0.4, age: 0, a: o.a !== undefined ? o.a : 1,
+      flat: !!o.flat, shadow: o.shadow !== undefined ? o.shadow : true,
+      glass: o.glass || 'crack', struck: false, sleeping: false, dead: false, data: o.data || null
+    };
+  }
+  function polyArea(pts) { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2; }
+  // the body's corners in the room: its front face (and its back, for a slab)
+  function corners(b, side) {
+    const h = b.thick / 2 * (side || 1);
+    return b.shape.map(s => add(b.p, qRot(b.q, V(s.x, s.y, h))));
+  }
+
+  /* --------------------------------- sims --------------------------------
+     sim({ space, gravity, glass }): bodies that move. gravity is a vector
+     (px/s²): toward the floor in a room, (0, 0, -1600); down the screen in a
+     screen space, (0, 1800, 0). planes are what they cannot pass: plane(n, d)
+     keeps dot(n, p) >= d. The glass is the plane z = space.glass; a body that
+     reaches it strikes it once (onGlass, else glass.hit) and then, by its own
+     `glass`: 'crack' falls back, 'stick' clings and slides down it, 'bounce'
+     comes off it, 'pass' goes on through to you and is gone, 'none' ignores
+     it. step(dt) moves them (dt from the frame clock when left out); draw(g)
+     draws them, farthest first. */
+  function sim(o = {}) {
+    const S = {
+      space: o.space || null, bodies: [], planes: [], gravity: o.gravity || V(0, 0, -1600),
+      glassOn: o.glass !== false, onGlass: o.onGlass || null, at: null, maxDt: 1 / 30, h: 1 / 120,
+      bounds: o.bounds || null,
+      add(b) { if (!b.shape) b = body(b); S.bodies.push(b); return b; },
+      plane(n, d, po = {}) { S.planes.push({ n: norm(n), d, bounce: po.bounce, friction: po.friction }); return S; },
+      floor(z = 0, po) { return S.plane(V(0, 0, 1), z, po); },
+      clear() { S.bodies.length = 0; },
+      step(dt) {
+        if (dt === undefined) { dt = S.at === null ? 0 : uiTime - S.at; S.at = uiTime; }
+        dt = Math.max(0, Math.min(S.maxDt, dt));
+        while (dt > 1e-6) { const h = Math.min(S.h, dt); S.tick(h); dt -= h; }
+        for (let i = S.bodies.length - 1; i >= 0; i--) if (S.bodies[i].dead) S.bodies.splice(i, 1);
+      },
+      tick(h) {
+        const g = S.gravity, Sp = S.space;
+        for (const b of S.bodies) {
+          if (b.dead) continue;
+          b.age += h;
+          if (b.age > b.life + b.fade) { b.dead = true; continue; }
+          if (b.sleeping) continue;
+          if (b.stuck) {                       // clinging to the glass: slides down it, slowly
+            b.v.x *= 1 - 3 * h; b.v.y += 260 * h; b.v.y *= 1 - 1.5 * h; b.v.z = 0;
+            b.p.x += b.v.x * h; b.p.y += b.v.y * h;
+            if (b.age - b.stuckAt > (b.stickFor || 1.6)) { b.stuck = false; b.v.z = -120; }
+            continue;
+          }
+          b.v.x += g.x * h; b.v.y += g.y * h; b.v.z += g.z * h;
+          const dr = Math.max(0, 1 - b.drag * h);
+          b.v.x *= dr; b.v.y *= dr; b.v.z *= dr;
+          b.p.x += b.v.x * h; b.p.y += b.v.y * h; b.p.z += b.v.z * h;
+          b.q = qSpin(b.q, b.w, h);
+          const sd = Math.max(0, 1 - b.spinDrag * h);
+          b.w.x *= sd; b.w.y *= sd; b.w.z *= sd;
+          for (const pl of S.planes) contact(b, pl, h);
+          if (S.bounds) { const B = S.bounds; if (b.p.x < B.x0 - B.pad || b.p.x > B.x1 + B.pad || b.p.y < B.y0 - B.pad || b.p.y > B.y1 + B.pad) b.dead = true; }
+          if (Sp && S.glassOn && b.glass !== 'none') glassCheck(b, Sp, S);
+          if (Sp && b.p.z > Sp.f * 0.93) b.dead = true;          // past the glass and into the eye
+        }
+      },
+      draw(g, dopt = {}) { drawBodies(g, S.space, S.bodies, Object.assign({ shadows: S.planes.some(p => p.n.z > 0.9 && Math.abs(p.d) < 1e-6) }, dopt)); },
+      // the bodies still moving: a scene can let itself go once nothing is
+      busy: () => S.bodies.some(b => !b.dead && !b.sleeping)
+    };
+    return S;
+  }
+  // a body against a plane: pushed out, and an impulse at the corner that touched, so it tumbles
+  function contact(b, pl, h) {
+    let worst = 0, at = null;
+    const sides = b.thick ? [1, -1] : [1];
+    for (const sd of sides) for (const c of corners(b, sd)) {
+      const s = dot(pl.n, c) - pl.d;
+      if (s < worst) { worst = s; at = c; }
+    }
+    if (!at) return;
+    b.p = add(b.p, mul(pl.n, -worst));
+    const r = sub(add(at, mul(pl.n, -worst)), b.p);
+    const vc = add(b.v, cross(b.w, r));
+    const vn = dot(vc, pl.n);
+    if (vn < 0) {
+      // a slow knock does not bounce (or it never settles)
+      const e = vn > -40 ? 0 : (pl.bounce !== undefined ? pl.bounce : b.bounce);
+      const rn = cross(r, pl.n), invI = 1 / Math.max(1e-6, b.I);
+      const j = -(1 + e) * vn / (1 / b.m + dot(rn, rn) * invI);
+      b.v = add(b.v, mul(pl.n, j / b.m));
+      b.w = add(b.w, mul(cross(r, mul(pl.n, j)), invI));
+      // friction: the sliding part of the corner's velocity, taken away
+      const vt = sub(vc, mul(pl.n, vn)), vtl = vlen(vt);
+      if (vtl > 1e-6) {
+        const mu = pl.friction !== undefined ? pl.friction : b.friction;
+        const jt = Math.min(mu * j, vtl / (1 / b.m + 1e-9));
+        const tdir = mul(vt, -1 / vtl);
+        b.v = add(b.v, mul(tdir, jt / b.m));
+        b.w = add(b.w, mul(cross(r, mul(tdir, jt)), invI * 0.5));
+      }
+    }
+    // touching it, it rolls less; and at rest on it, it sleeps
+    const rd = Math.max(0, 1 - 3 * h);
+    b.w.x *= rd; b.w.y *= rd; b.w.z *= rd;
+    if (vlen(b.v) < 10 && vlen(b.w) < 0.6) { b.v = V(); b.w = V(); b.sleeping = true; }
+  }
+  // what reaches the glass strikes it, once
+  function glassCheck(b, Sp, sim) {
+    if (b.struck && b.glass !== 'bounce') return;
+    let top = -Infinity, at = null;
+    for (const c of corners(b, 1).concat(b.thick ? corners(b, -1) : [])) if (c.z > top) { top = c.z; at = c; }
+    if (top < Sp.glass || b.v.z <= 0) return;
+    b.struck = true;
+    const s = Sp.toScreen(at);
+    const power = c01(b.v.z / 1600) * Math.min(2, b.r / 30 + 0.4);
+    const ev = { body: b, x: s.x, y: s.y, power };
+    if (b.onGlass) b.onGlass(ev);
+    else if (sim && sim.onGlass) sim.onGlass(ev);
+    else glass.hit(s.x, s.y, power);
+    const how = b.glass;
+    if (how === 'pass') return;
+    b.p.z -= top - Sp.glass + 0.5;
+    if (how === 'stick') { b.stuck = true; b.stuckAt = b.age; b.v = V(b.v.x * 0.2, 0, 0); b.w = V(); return; }
+    b.v.z = -Math.abs(b.v.z) * (how === 'bounce' ? 0.45 : 0.15);
+    b.w = add(b.w, V((rnd() - 0.5) * 6, (rnd() - 0.5) * 6, (rnd() - 0.5) * 4));
+  }
+  /* Bodies drawn in space S, farthest face first: textured or coloured,
+     two-sided, lit unless flat, with soft shadows on the floor (z = 0) when
+     there is one. o: { shadows, shadowCol, alpha, light: false } */
+  function drawBodies(g, S, list, o = {}) {
+    if (!S) return;
+    const faces = [];
+    for (const b of list) {
+      if (b.dead) continue;
+      const fade = b.age > b.life ? c01(1 - (b.age - b.life) / Math.max(1e-3, b.fade)) : 1;
+      const a = b.a * fade * (o.alpha !== undefined ? o.alpha : 1);
+      if (a <= 0.004) continue;
+      const nrm = qRot(b.q, V(0, 0, 1));
+      const front = corners(b, 1);
+      const cF = centroid3(front);
+      const seesFront = S.faces(nrm, cF);
+      if (b.thick) {
+        const backC = corners(b, -1);
+        const cB = centroid3(backC);
+        // a slab: the face toward the eye, and the sides that face it
+        faces.push({ b, a, pts: seesFront ? front : backC.slice().reverse(), n: seesFront ? nrm : mul(nrm, -1), front: seesFront, d: depthOf(S, seesFront ? cF : cB), uvRev: !seesFront });
+        for (let i = 0; i < front.length; i++) {
+          const j = (i + 1) % front.length;
+          const quad = [front[i], front[j], backC[j], backC[i]];
+          const c = centroid3(quad);
+          const n = norm(sub(c, add(cF, mul(sub(cB, cF), 0.5))));
+          if (S.faces(n, c)) faces.push({ b, a, pts: quad, n, side: true, d: depthOf(S, c) });
+        }
+      } else {
+        faces.push({ b, a, pts: front, n: seesFront ? nrm : mul(nrm, -1), front: seesFront, d: depthOf(S, cF) });
+      }
+      if (o.shadows && b.shadow && b.p.z > 0.5) shadowOf(g, S, b, front, o);
+    }
+    faces.sort((p, q) => q.d - p.d);
+    for (const f of faces) drawFace(g, S, f, o);
+  }
+  const centroid3 = pts => { let x = 0, y = 0, z = 0; for (const p of pts) { x += p.x; y += p.y; z += p.z; } const n = pts.length || 1; return V(x / n, y / n, z / n); };
+  const depthOf = (S, c) => S.f - c.z;
+  function shadowOf(g, S, b, front, o) {
+    const hgt = b.p.z;
+    const a = 0.32 * c01(1 - hgt / (S.f * 0.6)) * b.a;
+    if (a <= 0.01) return;
+    const pts = front.map(c => ({ x: c.x + hgt * 0.18, y: c.y + hgt * 0.28 }));   // cast away from the light, longer the higher
+    g.save();
+    g.globalAlpha = a;
+    g.fillStyle = o.shadowCol || '#000';
+    path(g, pts); g.fill();
+    g.restore();
+  }
+  function drawFace(g, S, f, o) {
+    const b = f.b;
+    const P = f.pts.map(p => S.project(p));
+    g.save();
+    g.globalAlpha = f.a;
+    let img = null, uv = null;
+    if (f.side) { g.fillStyle = b.edgeCol || b.col; path(g, P); g.fill(); }
+    else {
+      img = f.front ? b.img : (b.back && typeof b.back !== 'string' ? b.back : null);
+      uv = b.uv;
+      if (img && uv) {
+        const pts = f.pts.map((p, i) => {
+          const k = f.uvRev ? f.pts.length - 1 - i : i, u = uv[k].x !== undefined ? uv[k].x : uv[k].u, v = uv[k].y !== undefined ? uv[k].y : uv[k].v;
+          return Object.assign({ x: p.x, y: p.y, z: p.z }, f.front ? { u, v } : backUv(u, v, b.img, img));
+        });
+        polyTex(g, S, img, pts, { sub: o.sub });
+      } else {
+        g.fillStyle = f.front ? b.col : (typeof b.back === 'string' ? b.back : (b.backCol || b.col));
+        path(g, P); g.fill();
+      }
+    }
+    if (!b.flat && o.light !== false) litFace(g, P, f.n, norm(sub(S.eye, centroid3(f.pts))), { dark: f.side ? 0.9 : 0.8 });
+    if (b.stroke) { g.strokeStyle = b.stroke; g.lineWidth = b.lw; path(g, P); g.stroke(); }
+    if (OPO_KIT.debug) debugFace(g, S, f, P);
+    g.restore();
+  }
+  /* A back's u, v. The u, v a piece is given are its front picture's pixels;
+     its back shows the same part of `back`, scaled to back's own size and
+     mirrored left to right, so it reads the right way round once turned over
+     sideways (turned top over bottom it is upside down: a card's back is). */
+  function backUv(u, v, front, back) {
+    const bw = back.width || back.naturalWidth || 1, bh = back.height || back.naturalHeight || 1;
+    const fw = front ? front.width || front.naturalWidth || bw : bw, fh = front ? front.height || front.naturalHeight || bh : bh;
+    return { u: (fw - u) * bw / fw, v: v * bh / fh };
+  }
+  function debugFace(g, S, f, P) {
+    g.globalAlpha = 1;
+    g.strokeStyle = f.side ? 'rgba(250,204,21,0.6)' : f.front ? 'rgba(52,211,153,0.9)' : 'rgba(248,113,113,0.9)';
+    g.lineWidth = 1; path(g, P); g.stroke();
+    if (!f.side) {
+      const c = centroid3(f.pts), a = S.project(c), e = S.project(add(c, mul(f.n, 24)));
+      g.strokeStyle = 'rgba(96,165,250,0.9)'; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(e.x, e.y); g.stroke();
+    }
+  }
+
+  /* ------------------------------- fracture ------------------------------
+     Polygons are [{ x, y, u?, v? }], convex. Every function keeps u and v
+     with the points it cuts, so a piece keeps its piece of the picture. */
+  const rect = (x, y, w, h, uvScale) => {
+    const s = uvScale || 0;
+    const p = (px, py) => s ? { x: px, y: py, u: px * s, v: py * s } : { x: px, y: py };
+    return [p(x, y), p(x + w, y), p(x + w, y + h), p(x, y + h)];
+  };
+  // what of poly lies where a·x + b·y <= c
+  function clip(poly, a, b, c) {
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      const sp = a * p.x + b * p.y - c, sq = a * q.x + b * q.y - c;
+      if (sp <= 0) out.push(p);
+      if ((sp < 0 && sq > 0) || (sp > 0 && sq < 0)) {
+        const t = sp / (sp - sq), m = {};
+        for (const k of Object.keys(p)) if (typeof p[k] === 'number' && typeof q[k] === 'number') m[k] = p[k] + (q[k] - p[k]) * t;
+        out.push(m);
+      }
+    }
+    return out;
+  }
+  // poly cut along the line through (x0, y0)-(x1, y1): [left, right], either possibly empty
+  function split(poly, x0, y0, x1, y1) {
+    const a = -(y1 - y0), b = x1 - x0, c = a * x0 + b * y0;
+    return [clip(poly, a, b, c), clip(poly, -a, -b, -c)].map(p => p.length >= 3 ? p : []);
+  }
+  const area = polyArea;
+  const centroid = pts => { let x = 0, y = 0; for (const p of pts) { x += p.x; y += p.y; } return { x: x / pts.length, y: y / pts.length }; };
+  // poly clipped to a convex poly: every edge of it, as a half-plane
+  function clipTo(poly, to) {
+    let out = poly;
+    const s = Math.sign(signedArea(to)) || 1;
+    for (let i = 0; i < to.length && out.length >= 3; i++) {
+      const p = to[i], q = to[(i + 1) % to.length];
+      // inside is to the left of each edge for a counter-clockwise poly
+      const a = (q.y - p.y) * s, b = -(q.x - p.x) * s;
+      out = clip(out, a, b, a * p.x + b * p.y);
+    }
+    return out;
+  }
+  const signedArea = pts => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; } return a / 2; };
+  /* Rubble: n Voronoi cells over poly, seeded. o.sites gives your own. A
+     shard is { pts, c (its centre), area }. */
+  function voronoi(poly, n, seed, o = {}) {
+    const r = rng(seed || 1);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of poly) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    const sites = o.sites || [];
+    for (let tries = 0; !o.sites && sites.length < n && tries < n * 20; tries++) {
+      const s = { x: r.range(x0, x1), y: r.range(y0, y1) };
+      if (o.near) { const d = Math.hypot(s.x - o.near.x, s.y - o.near.y); if (r() > Math.exp(-d / (o.spread || 200)) + 0.15) continue; }
+      if (clipTo([s, { x: s.x + 0.01, y: s.y }, { x: s.x, y: s.y + 0.01 }], poly).length < 3) continue;
+      sites.push(s);
+    }
+    const out = [];
+    for (let i = 0; i < sites.length; i++) {
+      let cell = poly;
+      const si = sites[i];
+      for (let j = 0; j < sites.length && cell.length >= 3; j++) {
+        if (i === j) continue;
+        const sj = sites[j];
+        const a = sj.x - si.x, b = sj.y - si.y;
+        cell = clip(cell, a, b, (sj.x * sj.x + sj.y * sj.y - si.x * si.x - si.y * si.y) / 2);
+      }
+      if (cell.length >= 3) out.push(shardOf(cell));
+    }
+    return out;
+  }
+  /* Glass: spokes from `at` and rings round it, the way a struck pane goes.
+     o: { spokes (12), rings (5), seed, jag (how uneven the rings are, 0..1),
+     grow (how much wider each ring is than the last, 1.6) }. The pieces near
+     the point are small and the outer ones large. */
+  function radial(poly, at, o = {}) {
+    const r = rng(o.seed || 7);
+    const n = o.spokes || 12, rings = o.rings || 5, jag = o.jag !== undefined ? o.jag : 0.35, grow = o.grow || 1.6;
+    let far = 0;
+    for (const p of poly) far = Math.max(far, Math.hypot(p.x - at.x, p.y - at.y));
+    const angs = [];
+    for (let i = 0; i < n; i++) angs.push((i + r.range(-0.35, 0.35)) / n * Math.PI * 2 + (o.turn || 0));
+    angs.sort((a, b) => a - b);
+    // ring radii: from small near the point to past the farthest corner
+    const radii = [0];
+    let rr = far / Math.pow(grow, rings - 1) * 0.35;
+    for (let k = 1; k <= rings; k++) { radii.push(k === rings ? far * 1.5 + 10 : rr); rr *= grow; }
+    const R = angs.map(() => radii.map((v, k) => k === 0 || k === rings ? v : v * (1 + r.range(-jag, jag) * 0.5)));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, a0 = angs[i], a1 = j ? angs[j] : angs[0] + Math.PI * 2;
+      for (let k = 0; k < rings; k++) {
+        const pt = (a, rad) => ({ x: at.x + Math.cos(a) * rad, y: at.y + Math.sin(a) * rad });
+        const cell = k === 0 ? [{ x: at.x, y: at.y }, pt(a0, R[i][1]), pt(a1, R[j][1])]
+                             : [pt(a0, R[i][k]), pt(a0, R[i][k + 1]), pt(a1, R[j][k + 1]), pt(a1, R[j][k])];
+        const piece = clipTo(cell, poly);
+        if (piece.length >= 3 && polyArea(piece) > 1) out.push(shardOf(withUv(piece, poly)));
+      }
+    }
+    return out;
+  }
+  // a cut piece takes its u, v from where it lies over the source, when the source had them (affine over a rect)
+  function withUv(piece, src) {
+    if (!src.length || src[0].u === undefined || piece.every(p => p.u !== undefined)) return piece;
+    const A = src[0], B = src[1], D = src[src.length - 1];
+    const ex = { x: B.x - A.x, y: B.y - A.y }, ey = { x: D.x - A.x, y: D.y - A.y };
+    const det = ex.x * ey.y - ex.y * ey.x || 1;
+    return piece.map(p => {
+      const dx = p.x - A.x, dy = p.y - A.y, s = (dx * ey.y - dy * ey.x) / det, t = (ex.x * dy - ex.y * dx) / det;
+      return { x: p.x, y: p.y, u: A.u + (B.u - A.u) * s + (D.u - A.u) * t, v: A.v + (B.v - A.v) * s + (D.v - A.v) * t };
+    });
+  }
+  function shardOf(pts) { return { pts, c: centroid(pts), area: polyArea(pts) }; }
+  /* Shards as bodies, in place (z = o.z, 0 by default), each with its piece of
+     o.img on it. o.kick(shard) returns its { vx, vy, vz, wx, wy, wz }; by
+     default they burst away from o.from (or their middle) and toward the eye.
+     Everything else in o is passed to body() for each. */
+  function bodiesOf(shards, o = {}) {
+    const from = o.from || null, power = o.power !== undefined ? o.power : 1;
+    return shards.map((s, i) => {
+      const c = s.c;
+      const shape = s.pts.map(p => V(p.x - c.x, p.y - c.y));
+      const uv = s.pts.map(p => ({ u: p.u !== undefined ? p.u : p.x * (o.uvScale || 1), v: p.v !== undefined ? p.v : p.y * (o.uvScale || 1) }));
+      let k;
+      if (o.kick) k = o.kick(s, i);
+      else {
+        const fx = from ? c.x - from.x : rnd(-1, 1), fy = from ? c.y - from.y : rnd(-1, 1), d = Math.hypot(fx, fy) || 1;
+        const sp = (120 + 520 * Math.exp(-d / 260)) * power;
+        k = { vx: fx / d * sp, vy: fy / d * sp, vz: (260 + rnd() * 380) * power,
+              wx: rnd(-1, 1) * 5 * power, wy: rnd(-1, 1) * 5 * power, wz: rnd(-1, 1) * 3 * power };
+      }
+      return body(Object.assign({}, o, { shape, uv, x: c.x, y: c.y, z: o.z || 0 }, k));
+    });
+  }
+
+  /* -------------------------------- sheets -------------------------------
+     sheet({ x, y, w, h, img, uvScale | uv: { u0, v0, su, sv }, back, z }):
+     a flat picture lying on the floor of a space (the whole screen, a panel of
+     it, a page). Every frame: pose() it flat, then cut and fold it as the
+     moment wants, then draw it. Each cut keeps u, v, so every piece shows
+     its part of the picture, and its back shows `back`.
+
+       pose()                     flat again, as made (do this first, each frame)
+       split(x0, y0, x1, y1)      cut every piece along a line (screen x, y)
+       slice(x0, y0, x1, y1, n, step)  cut along n lines parallel to it, `step` apart
+       fold(x0, y0, x1, y1, ang, { move, side, z })  fold one side of the
+                                  line up toward the eye and over, by ang (π lays
+                                  it flat on the other side), about the line at
+                                  height z. Which side: move, a point on it (the
+                                  plain way), or side 1, the line's left looking
+                                  along it as the screen shows it. Folding again
+                                  folds the stack as it lies, the way paper does.
+       curl(x0, y0, x1, y1, r, { side, roll, n, gap })  peel the part past the
+                                  line (side as fold's) up round a cylinder of
+                                  radius r standing on the line. Past half a turn
+                                  it lies flat back over the rest, a page turning;
+                                  roll: true winds it all up instead, a carpet
+                                  rolling (gap: px between turns). It slices
+                                  itself into n strips a turn for the roundness.
+       crumple(k, { seed, folds, cx, cy })  fold in on itself: k 0..1, from flat to
+                                  a wad
+       move(q, off, pivot)        turn the whole of it about pivot, and shift it
+       draw(g, S, o)              { img, back, backCol, col, flat, edge }
+       bodies(o)                  every piece, as it lies now, as a body (to sim)
+   */
+  function sheet(o) {
+    const su = o.uvScale || (o.uv && o.uv.su) || 1, sv = o.uvScale || (o.uv && o.uv.sv) || su;
+    const u0 = o.uv ? o.uv.u0 || 0 : 0, v0 = o.uv ? o.uv.v0 || 0 : 0;
+    const z = o.z || 0;
+    const mk = (x, y) => ({ x, y, z, u: u0 + (x - (o.uv ? o.x : 0)) * su, v: v0 + (y - (o.uv ? o.y : 0)) * sv });
+    const restPolys = o.polys ? o.polys.map(p => p.map(q => Object.assign({ z }, q))) :
+      [[mk(o.x, o.y), mk(o.x + o.w, o.y), mk(o.x + o.w, o.y + o.h), mk(o.x, o.y + o.h)]];
+    const Sh = {
+      img: o.img || null, back: o.back || null, polys: [], layers: [],
+      pose() { Sh.polys = restPolys.map(p => p.map(q => Object.assign({}, q))); Sh.layers = Sh.polys.map(() => 0); return Sh; },
+      split(x0, y0, x1, y1) {
+        const np = [], nl = [];
+        Sh.polys.forEach((p, i) => { for (const half of split3(p, x0, y0, x1, y1)) if (half.length >= 3) { np.push(half); nl.push(Sh.layers[i]); } });
+        Sh.polys = np; Sh.layers = nl;
+        return Sh;
+      },
+      slice(x0, y0, x1, y1, n, step) {
+        const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
+        for (let i = 1; i <= n; i++) Sh.split(x0 + nx * step * i, y0 + ny * step * i, x1 + nx * step * i, y1 + ny * step * i);
+        return Sh;
+      },
+      fold(x0, y0, x1, y1, ang, fo = {}) {
+        Sh.split(x0, y0, x1, y1);
+        const za = fo.z !== undefined ? fo.z : 0;
+        // fo.move: a point on the side that moves (the plainest way to say it); else fo.side
+        const side = fo.move ? (Math.sign((x1 - x0) * (fo.move.y - y0) - (y1 - y0) * (fo.move.x - x0)) < 0 ? 1 : -1) : (fo.side || 1);
+        const P = V(x0, y0, za), D = V(x1 - x0, y1 - y0, 0);
+        const top = Math.max(0, ...Sh.layers) + 1;
+        Sh.polys.forEach((p, i) => {
+          const c = centroid(p);
+          const s = Math.sign((x1 - x0) * (c.y - y0) - (y1 - y0) * (c.x - x0));
+          if (s !== -side) return;      // side 1 is the left of the line, as screen y runs down: cross < 0
+          for (const q of p) { const r = turnAbout(q, P, D, -ang * side); q.x = r.x; q.y = r.y; q.z = r.z; }   // up, toward the eye, and over
+          Sh.layers[i] = top + Sh.layers[i];
+        });
+        return Sh;
+      },
+      curl(x0, y0, x1, y1, r, co = {}) {
+        const side = co.side || 1;
+        const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1, tx = dx / l, ty = dy / l;
+        const nx = ty * side, ny = -tx * side;     // toward the side being curled
+        const anyPast = Sh.polys.some(p => p.some(q => (q.x - x0) * nx + (q.y - y0) * ny > 0));
+        if (!anyPast) return Sh;
+        if (!co.noSlice) {
+          if (co.roll) {
+            let far = 0;
+            for (const p of Sh.polys) for (const q of p) far = Math.max(far, (q.x - x0) * nx + (q.y - y0) * ny);
+            const step = Math.max(2, 2 * Math.PI * r / (co.n || 24));
+            Sh.slice(x0, y0, x1, y1, Math.min(co.max || 240, Math.ceil(far / step)), -side * step);
+          } else Sh.slice(x0, y0, x1, y1, co.n || 18, -side * Math.max(2, Math.PI * r / (co.n || 18)));
+        }
+        const gap = co.gap !== undefined ? co.gap : Math.max(1, r * 0.06);
+        for (const p of Sh.polys) for (const q of p) {
+          const d = (q.x - x0) * nx + (q.y - y0) * ny;
+          if (d <= 0) continue;
+          const bx = q.x - nx * d, by = q.y - ny * d;           // its foot on the line
+          let off, zz;
+          if (co.roll) {
+            // round the cylinder and on round, each turn a gap further in (the end is innermost)
+            const th = d / r, rr = Math.max(r * 0.15, r - gap * th / (2 * Math.PI));
+            off = rr * Math.sin(th); zz = r - rr * Math.cos(th);
+          } else if (d < Math.PI * r) { const th = d / r; off = r * Math.sin(th); zz = r * (1 - Math.cos(th)); }
+          else { off = -(d - Math.PI * r); zz = 2 * r; }
+          q.x = bx + nx * off; q.y = by + ny * off; q.z += zz;
+        }
+        return Sh;
+      },
+      crumple(k, co = {}) {
+        if (k <= 0) return Sh;
+        const r = rng(co.seed || 11), n = co.folds || 7;
+        for (let i = 0; i < n; i++) {
+          const c = Sh.middle(), a = r.range(0, Math.PI);
+          const off = r.range(-1, 1) * 40 * (1 - k * 0.5);
+          const px = (co.cx !== undefined ? co.cx : c.x) + Math.cos(a + Math.PI / 2) * off, py = (co.cy !== undefined ? co.cy : c.y) + Math.sin(a + Math.PI / 2) * off;
+          const amt = c01(k * n - i * 0.6) * r.range(0.75, 0.98) * Math.PI;
+          if (amt <= 0) continue;
+          Sh.fold(px - Math.cos(a) * 2000, py - Math.sin(a) * 2000, px + Math.cos(a) * 2000, py + Math.sin(a) * 2000,
+                  amt, { side: i % 2 ? 1 : -1, z: c.z });
+        }
+        return Sh;
+      },
+      move(q, off, pivot) {
+        const pv = pivot || Sh.middle();
+        for (const p of Sh.polys) for (const v of p) {
+          const r = add(qRot(q || Q(), sub(v, pv)), add(pv, off || V()));
+          v.x = r.x; v.y = r.y; v.z = r.z;
+        }
+        return Sh;
+      },
+      middle() { let x = 0, y = 0, zz = 0, n = 0; for (const p of Sh.polys) for (const v of p) { x += v.x; y += v.y; zz += v.z; n++; } return V(x / (n || 1), y / (n || 1), zz / (n || 1)); },
+      draw(g, S, dopt = {}) {
+        const img = dopt.img || Sh.img, back = dopt.back || Sh.back;
+        const list = Sh.polys.map((p, i) => {
+          const n = polyNormal(p), c = centroid3(p), fr = S.faces(n, c);
+          return { p, n: fr ? n : mul(n, -1), front: fr, d: S.f - c.z, L: Sh.layers[i] };
+        });
+        list.sort((a, b) => (b.d - a.d) || (a.L - b.L));
+        for (const it of list) {
+          const P = it.p.map(v => S.project(v));
+          g.save();
+          if (dopt.alpha !== undefined) g.globalAlpha = dopt.alpha;
+          const tex = it.front ? img : (back && typeof back !== 'string' ? back : null);
+          if (tex) polyTex(g, S, tex, it.front ? it.p : it.p.map(v => Object.assign({ x: v.x, y: v.y, z: v.z }, backUv(v.u, v.v, img, tex))), { sub: dopt.sub });
+          else { g.fillStyle = it.front ? (dopt.col || '#94a3b8') : (typeof back === 'string' ? back : (dopt.backCol || '#cbd5e1')); path(g, P); g.fill(); }
+          if (!dopt.flat) litFace(g, P, it.n, norm(sub(S.eye, centroid3(it.p))), { dark: 0.7 });
+          if (dopt.edge) { g.strokeStyle = dopt.edge; g.lineWidth = dopt.lw || 1; path(g, P); g.stroke(); }
+          if (OPO_KIT.debug) { g.strokeStyle = it.front ? 'rgba(52,211,153,0.9)' : 'rgba(248,113,113,0.9)'; g.lineWidth = 1; path(g, P); g.stroke(); }
+          g.restore();
+        }
+      },
+      bodies(bo = {}) {
+        return Sh.polys.map(p => {
+          const c = centroid3(p), n = polyNormal(p);
+          let ex = norm(sub(p[1], p[0]));
+          const ez = n, ey = cross(ez, ex);
+          ex = cross(ey, ez);
+          const q = qBasis(ex, ey, ez);
+          const shape = p.map(v => { const d = sub(v, c); return V(dot(d, ex), dot(d, ey)); });
+          const uv = p.map(v => ({ u: v.u, v: v.v }));
+          return body(Object.assign({ img: Sh.img, back: Sh.back }, bo, { shape, uv, x: c.x, y: c.y, z: c.z, q }));
+        });
+      }
+    };
+    return Sh.pose();
+  }
+  // a 3D planar polygon cut by the upright plane through a screen line (x, y only); z, u, v carried
+  function split3(p, x0, y0, x1, y1) {
+    const a = -(y1 - y0), b = x1 - x0, c = a * x0 + b * y0;
+    return [clip(p, a, b, c), clip(p, -a, -b, -c)];
+  }
+  function polyNormal(p) {
+    let n = V();
+    for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; n.x += (a.y - b.y) * (a.z + b.z); n.y += (a.z - b.z) * (a.x + b.x); n.z += (a.x - b.x) * (a.y + b.y); }
+    // a sheet as made faces the eye (+z); folded past upright, its pieces turn away
+    return norm(n);
+  }
+
+  /* -------------------------------- glass --------------------------------
+     The screen's own glass, in screen space. hit(x, y, power) cracks it: a
+     web of spokes and rings round the point, bigger with power (0..2), that
+     fades after `life` seconds. draw(g, w, h, o) is a plain rendering of the
+     hits (o.frame: a capture, to refract through the pieces; o.col); the art
+     can draw glass.hits its own way instead: each has { x, y, power, t, life,
+     geo: { spokes: [[pts]], rings: [[pts]], wedges: [[pts]] } }. */
+  const glass = {
+    hits: [], max: 24,
+    hit(x, y, power = 1, o = {}) {
+      const h = { x, y, power: Math.max(0.05, power), t: uiTime, life: o.life !== undefined ? o.life : 5 + power * 3, seed: o.seed || ((rnd() * 1e9) | 0), geo: null };
+      glass.hits.push(h);
+      if (glass.hits.length > glass.max) glass.hits.shift();
+      return h;
+    },
+    geo(h) {
+      if (h.geo) return h.geo;
+      const r = rng(h.seed), n = 7 + Math.round(h.power * 6), L = 50 + 190 * h.power;
+      const spokes = [], ends = [];
+      for (let i = 0; i < n; i++) {
+        const a = (i + r.range(-0.3, 0.3)) / n * Math.PI * 2, len = L * r.range(0.45, 1.1);
+        const pts = [{ x: h.x, y: h.y }];
+        let x = h.x, y = h.y, ang = a;
+        const steps = 4 + r.int(4);
+        for (let s = 1; s <= steps; s++) { ang += r.range(-0.22, 0.22); x += Math.cos(ang) * len / steps; y += Math.sin(ang) * len / steps; pts.push({ x, y }); }
+        spokes.push(pts); ends.push({ a, len });
+      }
+      const rings = [];
+      const nr = 1 + Math.round(h.power * 2);
+      for (let k = 1; k <= nr; k++) {
+        const f = k / (nr + 1) * r.range(0.8, 1.1);
+        const ring = spokes.map(pts => { const i = Math.min(pts.length - 1, Math.max(1, Math.round(f * (pts.length - 1)))); return pts[i]; });
+        rings.push(ring);
+      }
+      const wedges = [];
+      const outer = rings.length ? rings[rings.length - 1] : spokes.map(p => p[p.length - 1]);
+      for (let i = 0; i < spokes.length; i++) wedges.push([{ x: h.x, y: h.y }, outer[i], outer[(i + 1) % outer.length]]);
+      return (h.geo = { spokes, rings, wedges });
+    },
+    alive: h => uiTime - h.t < h.life,
+    draw(g, w, h0, o = {}) {
+      for (let i = glass.hits.length - 1; i >= 0; i--) if (!glass.alive(glass.hits[i])) glass.hits.splice(i, 1);
+      for (const h of glass.hits) {
+        const G = glass.geo(h), age = uiTime - h.t, a = c01(1 - (age - h.life + 1)) * c01(age * 20);
+        if (a <= 0) continue;
+        g.save();
+        g.globalAlpha = a;
+        if (o.frame) {                      // each wedge a hair off true: the picture breaks with the glass
+          G.wedges.forEach((wd, i) => {
+            g.save(); path(g, wd); g.clip();
+            const off = (hash(h.seed + i) - 0.5) * 3 * h.power, s = o.frame.sx;
+            g.drawImage(o.frame.img, 0, 0, o.frame.img.width, o.frame.img.height, off, off * 0.6, o.frame.img.width / s, o.frame.img.height / s);
+            g.restore();
+          });
+        }
+        g.lineJoin = 'round';
+        const line = (pts, wdt, col) => { g.strokeStyle = col; g.lineWidth = wdt; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.stroke(); };
+        for (const s of G.spokes) { line(s, 2.2, 'rgba(0,0,0,0.55)'); line(s.map(p => ({ x: p.x - 0.8, y: p.y - 0.8 })), 1, o.col || 'rgba(226,232,240,0.85)'); }
+        for (const ring of G.rings) { const loop = ring.concat([ring[0]]); line(loop, 1.6, 'rgba(0,0,0,0.45)'); line(loop, 0.8, o.col || 'rgba(226,232,240,0.6)'); }
+        g.fillStyle = 'rgba(255,255,255,' + (0.7 * a) + ')';
+        g.beginPath(); g.arc(h.x, h.y, 2 + 3 * h.power, 0, Math.PI * 2); g.fill();
+        g.restore();
+      }
+    },
+    clear() { glass.hits.length = 0; }
+  };
+
+  /* -------------------------------- scenes -------------------------------
+     A hook is called fresh every frame; a scene is what it keeps between
+     them. scene(key, make, gen) gives the same object every frame until gen
+     changes (then make() builds a new one), and drops it once it has not been
+     asked for in `OPO_KIT.keep` seconds. gen is usually the set piece's own
+     start: scene('shatter', build, s.T) — or, to restart whenever the piece's
+     clock runs backwards, restartOn(key, t). */
+  const scenes = new Map();
+  function scene(key, make, gen) {
+    let s = scenes.get(key);
+    if (!s || (gen !== undefined && s.gen !== gen)) { s = { obj: make(), gen, seen: uiTime, t0: uiTime }; scenes.set(key, s); }
+    s.seen = uiTime;
+    return s.obj;
+  }
+  function restartOn(key, t) {
+    const s = scenes.get(key);
+    if (!s) return;
+    if (s.lastT !== undefined && t < s.lastT - 1e-6) scenes.delete(key);
+    else s.lastT = t;
+  }
+  const dropScene = key => scenes.delete(key);
+  function sweep() { for (const [k, s] of scenes) if (uiTime - s.seen > kit.keep) scenes.delete(k); }
+
+  /* -------------------------------- events -------------------------------
+     What happened in the run that the art may want to answer: emitted by the
+     route as it plays (opoFx), kept a few seconds. feed(who) hands each
+     reader only what it has not seen yet, so two hooks can both listen.
+       door        the old door taken          { x, y }
+       revert      a piece of the record goes (the lock's way in) { i, entry }
+       lock        the lock engages
+       open        the shatter begins (face to face)
+       phase       a phase opens               { i, n }
+       hit         a round lands on him        { x, y, crit }
+       pane        a pane thrown               { x, y, tx, ty }
+       paneBreak   a pane broken in the air    { x, y, r, ang }
+       paneLand    a pane landed: floor lost   { x, y, r }
+       sweep       a revert sets off           { vert, dir, lane, lanes }
+       restore     a date passed               { i, entry, x, y }
+       settle      a restore kept              { x, y, i }
+       paintOut    a restore painted out       { x, y, i }
+       peel        HOLLOW takes a card         { id, x, y }
+       baseShip    nothing left on the ship
+       today       the last hit: the cascade begins
+       out         he is left holding an empty frame
+       lost        a fight lost or left
+   */
+  const evs = [], seenBy = new Map();
+  let evSeq = 0;
+  function emit(kind, data) {
+    evs.push(Object.assign({ kind, t: uiTime, seq: ++evSeq }, data || {}));
+    while (evs.length > 256 || (evs.length && uiTime - evs[0].t > 4)) evs.shift();
+  }
+  function feed(who) {
+    const last = seenBy.get(who) || 0;
+    const out = evs.filter(e => e.seq > last);
+    seenBy.set(who, evSeq);
+    return out;
+  }
+
+  // once a frame, from the route's screen pass: scenes not asked for are let go
+  function frameEnd() { sweep(); }
+
+  const kit = {
+    V, Q, add, sub, mul, dot, cross, len: vlen, norm, qAxis, qMul, qRot, qNorm, qSpin, qBasis, turnAbout, rng, hash, ease, c01,
+    space, screen, world, light, shade, path,
+    tri, polyTex, backUv, capture, captured, first,
+    body, sim, drawBodies, corners,
+    rect, clip, split, clipTo, area, centroid, voronoi, radial, bodiesOf,
+    sheet, glass, scene, restartOn, dropScene, scenes, emit, feed, frameEnd,
+    keep: 1.5, debug: false
+  };
+  return kit;
+})();
+// the route's cosmetic events, for the art (OPO_KIT.feed): never read by the run
+function opoFx(kind, data) { OPO_KIT.emit(kind, data); }
+/* ====================== end of ONE POINT OH art kit ====================== */
 
 /* ------------------------------- the rites --------------------------------
    One entry per pilot: which of the five finales is that hull's, and how its
@@ -46818,6 +47855,7 @@ function render() {
   ctx.fillRect(0, 0, W, H);
   if (state === 'pvp') { if (PVP) PVP.draw(); return; }    // PvP mode's own screens, over an empty canvas
   if (state === 'opolock') { drawOpoLock(); return; }      // ONE POINT OH: the first build has the screen, in its frame
+  if (state === 'opobench') { if (window.OPO_BENCH) window.OPO_BENCH.draw(); return; }   // and the art bench
   // whichever overlay draws the slider re-publishes it; otherwise it is gone
   if (!volDrag) volRect = null;
   if (!sensDrag) sensRect = null;
@@ -46925,6 +47963,7 @@ function render() {
   drawCorpses();
   drawEnemies();
   drawOpoWorld();             // ONE POINT OH: the old door, his panes and paint, him
+  drawOpoFx();                // and the art's own, every frame of the route (OPO_ART.worldFx)
   pilotsDraw(() => {
     drawRoninWounds();         // RONIN's DEEP WOUND, on the bodies that carry it
     drawSentries();
@@ -46992,6 +48031,7 @@ function render() {
   ctx.restore();
 
   postWorld();          // bloom, chromatic split and grade, world layer only
+  drawOpoFlat(z, ox, oy);   // ONE POINT OH: the room again, past all of that: the first build's renderer (OPO_ART.worldFlat)
 
   if (P.annotT > 0) {
     // a warm margin around the frame while the record is open

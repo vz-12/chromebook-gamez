@@ -475,6 +475,14 @@ decided on the way, all of it easy to change:
   and casual). A friend's match by code is not shut yet.
 - **The admin panel** is `opoJump(name)`, from the console: there is no panel
   in this repo to add rows to.
+- **The art kit** (11 Oct). The hooks stay blank for the art, which will be
+  drawn by hand; what is built is the toolkit it draws with (`OPO_KIT`):
+  fake 3D on the 2D canvas for debris flying at the screen and striking its
+  glass, and the screen breaking, folding in on itself and peeling back. With
+  it, three every-frame layers (`worldFx`, `worldFlat`, `screenFx`, and
+  `lockFx` in the lock), an event feed of what the route just did, and an art
+  bench (`?opo=bench`, local or dev only) that plays every part of the kit.
+  `ONE-POINT-OH-HOOKS.md` has the hook map and the kit's reference.
 - **His tale** (pages I and II) and his remarks on each date are stand-ins
   until Phase 0's lore pass. Page III is held for the rite.
 - **Returning players** (11 Oct). A veteran with THE FRACTURE open gets

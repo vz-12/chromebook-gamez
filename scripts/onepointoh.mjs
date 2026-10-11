@@ -54,6 +54,8 @@ function ok(cond, what, extra) {
   console.log('  FAIL  ' + what + (extra !== undefined ? '  ' + JSON.stringify(extra).slice(0, 500) : ''));
 }
 const section = t => console.log('· ' + t);
+// checks made inside the game come back as [[cond, what, extra], ...]
+function take(list) { for (const [c, w, x] of JSON.parse(list)) ok(c, w, x); }
 const STEP = 1 / 60;
 
 /* ================================ the copy ================================ */
@@ -539,6 +541,167 @@ section('returning players: the fight, with their own story open');
     ok(g.run(`Save.profile.metFounder === ${over.metFounder === false ? 'false' : 'true'} && !Save.profile.tribunalDone`), what + ': and their own story is where they left it');
     takeArt(g);
   }
+}
+
+/* ================================ the art kit ================================ */
+section('the art kit (OPO_KIT)');
+{
+  const g = game();
+  take(g.run(`(() => { var C = []; var chk = (c, w, x) => C.push([!!c, w, x === undefined ? null : x]);
+    const K = OPO_KIT, near = (a, b, e) => Math.abs(a - b) <= (e || 1e-6);
+    // the diorama
+    const S = K.screen(1280, 720);
+    const p0 = S.project(K.V(100, 200, 0)), pg = S.project(K.V(640 + 100, 360, S.glass));
+    chk(near(p0.x, 100) && near(p0.y, 200) && near(p0.k, 1), 'on the floor a point is where it always was', p0);
+    chk(near(pg.k, S.f / (S.f - S.glass)) && near(pg.x, 640 + 100 * pg.k) && pg.k > 1.9, 'raised to the glass it is about twice its size, spread from the middle', pg);
+    chk(S.faces(K.V(0, 0, 1), K.V(640, 360, 0)) && !S.faces(K.V(0, 0, -1), K.V(640, 360, 0)), 'the eye sees a face turned to it, not one turned away');
+    // quaternions
+    const q = K.qAxis(K.V(0, 0, 1), Math.PI / 2), r = K.qRot(q, K.V(1, 0, 0));
+    chk(near(r.x, 0) && near(r.y, 1) && near(r.z, 0), 'a quarter turn about z takes x to y', r);
+    const qb = K.qBasis(K.V(0, 1, 0), K.V(-1, 0, 0), K.V(0, 0, 1)), rb = K.qRot(qb, K.V(1, 0, 0));
+    chk(near(rb.x, 0) && near(rb.y, 1), 'a basis becomes the turn that makes it', rb);
+    // the triangle map: exactly onto the corners
+    const rec = { t: null, ops: [] };
+    const fake = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, drawImage() { rec.ops.push('img'); },
+                   transform(a, b, c, d, e, f) { rec.t = [a, b, c, d, e, f]; } };
+    K.tri(fake, {}, 0, 0, 100, 0, 0, 50, 10, 20, 210, 40, 30, 120, 0);
+    const m = rec.t, at = (u, v) => [m[0] * u + m[2] * v + m[4], m[1] * u + m[3] * v + m[5]];
+    const c0 = at(0, 0), c1 = at(100, 0), c2 = at(0, 50);
+    chk(near(c0[0], 10) && near(c0[1], 20) && near(c1[0], 210) && near(c1[1], 40) && near(c2[0], 30) && near(c2[1], 120) && rec.ops.length === 1,
+        'a picture\\'s triangle lands exactly on the screen\\'s', [c0, c1, c2]);
+    // fracture: the pieces cover the picture exactly, and carry their part of it
+    const R = K.rect(0, 0, 1280, 720, 2);
+    for (const [name, pieces] of [['radial', K.radial(R, { x: 500, y: 300 }, { spokes: 13, rings: 5, seed: 4 })], ['voronoi', K.voronoi(R, 30, 8)]]) {
+      const sum = pieces.reduce((a, s) => a + s.area, 0);
+      chk(Math.abs(sum - 1280 * 720) < 1280 * 720 * 1e-6, name + ': the pieces add up to the whole picture', [pieces.length, sum]);
+      chk(pieces.every(s => s.pts.every(p => near(p.u, p.x * 2, 1e-6) && near(p.v, p.y * 2, 1e-6))), name + ': and each piece shows its own part of it');
+    }
+    chk(K.radial(R, { x: 500, y: 300 }, { seed: 4 }).length === K.radial(R, { x: 500, y: 300 }, { seed: 4 }).length, 'a seed breaks it the same way twice');
+    // folds keep the paper rigid, and a half-turn lays a flap flat on the other half
+    const sh = K.sheet({ x: 0, y: 0, w: 400, h: 200, img: {}, uvScale: 1 });
+    sh.fold(200, 0, 200, 200, Math.PI, { move: { x: 0, y: 100 } });
+    const pts = sh.polys.flat();
+    chk(pts.every(p => p.x >= 200 - 1e-6 && near(p.z, 0, 1e-6)), 'folded in half: the left half lies flat on the right', pts.map(p => [p.x, p.z]).slice(0, 8));
+    const lens = poly => poly.map((p, i) => { const q = poly[(i + 1) % poly.length]; return Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z); });
+    sh.pose(); const flat = sh.polys.map(lens);
+    sh.fold(130, 0, 260, 200, 1.1, { side: -1 }).fold(0, 90, 400, 120, 2.0, { side: 1 });
+    chk(sh.polys.length >= 3 && sh.polys.every(p => p.every(v => isFinite(v.x) && isFinite(v.z))), 'folds on folds cut it into pieces, each still whole', sh.polys.length);
+    const sh2 = K.sheet({ x: 0, y: 0, w: 400, h: 200 }); sh2.fold(200, 0, 200, 200, 1.3, { side: 1 });
+    chk(sh2.polys.filter(p => p.some(v => v.z > 1)).every(p => p.every(v => v.x >= 200 - 1e-6)), 'side 1 is the line\\'s left looking along it as the screen shows it: down the screen, that is its right');
+    const sideL = sh2.polys.find(p => p.some(v => v.z > 1));
+    chk(sideL && sideL.every(v => v.z >= -1e-6), 'a fold comes up toward the eye', sideL && sideL.map(v => v.z));
+    chk(sh2.polys.every((p, i) => lens(p).every((l, k) => l > 0)), 'and no piece is torn');
+    // a curl rolls what is past the line round a cylinder, and back over
+    const pg2 = K.sheet({ x: 0, y: 0, w: 400, h: 100 }); pg2.curl(300, 0, 300, 100, 20, { side: -1, n: 12 });
+    const zs = pg2.polys.flat().map(v => v.z);
+    chk(Math.max(...zs) <= 40 + 1e-6 && Math.max(...zs) > 30 && pg2.polys.length > 10, 'a curl rolls up to its diameter, in strips', [Math.max(...zs), pg2.polys.length]);
+    // roll: true winds all of it up round the cylinder instead, the end innermost
+    const pg3 = K.sheet({ x: 0, y: 0, w: 600, h: 100 }); pg3.curl(300, 0, 300, 100, 20, { side: -1, roll: true });
+    const wound = pg3.polys.flat().filter(v => v.z > 1e-6), off = v => Math.hypot(v.x - 300, v.z - 20);
+    chk(wound.length && wound.every(v => off(v) <= 20 + 1e-6 && off(v) >= 3 - 1e-6 && v.z >= -1e-6) && pg3.polys.length > 50,
+        'a roll winds all of it round the cylinder, in strips', [pg3.polys.length, Math.max(...wound.map(off)), Math.min(...wound.map(off))]);
+    chk(pg3.polys.flat().filter(v => v.u > 300 + 1e-6).every(v => near(v.z, 0, 1e-9) && near(v.x, v.u, 1e-9)), 'and leaves the rest lying flat, where it was');
+    // a back is its own picture: scaled to its own size, and turned the right way round
+    const bu = K.backUv(0, 0, { width: 1280, height: 720 }, { width: 640, height: 360 }), bu2 = K.backUv(1280, 720, { width: 1280, height: 720 }, { width: 640, height: 360 });
+    chk(near(bu.u, 640) && near(bu.v, 0) && near(bu2.u, 0) && near(bu2.v, 360), 'a back maps onto its own picture, mirrored', [bu, bu2]);
+    const F = { width: 400, height: 200 }, B = { width: 100, height: 50 }, seen = [];
+    let tri3 = [], mt = null;
+    const fk = { save() {}, restore() {}, beginPath() { tri3 = []; }, moveTo(x, y) { tri3.push([x, y]); }, lineTo(x, y) { tri3.push([x, y]); }, closePath() {}, clip() {},
+                 transform(a, b, c, d, e, f) { mt = [a, b, c, d, e, f]; }, fill() {}, stroke() {},
+                 drawImage(img) { const [a, b, c, d, e, f] = mt, det = a * d - b * c;
+                                  seen.push({ img, uv: tri3.map(([x, y]) => [(d * (x - e) - c * (y - f)) / det, (a * (y - f) - b * (x - e)) / det, x, y]) }); } };
+    const fs3 = K.sheet({ x: 0, y: 0, w: 400, h: 200, img: F, back: B }); fs3.fold(200, 0, 200, 200, Math.PI, { move: { x: 0, y: 100 } });
+    fs3.draw(fk, S, { flat: true, sub: 1 });
+    const backs = seen.filter(s => s.img === B).flatMap(s => s.uv), fronts = seen.filter(s => s.img === F);
+    chk(backs.length && fronts.length && backs.every(([u, v, x, y]) => u >= -1e-6 && u <= 100 + 1e-6 && v >= -1e-6 && v <= 50 + 1e-6 && near(u, x / 4, 0.5) && near(v, y / 4, 0.5)),
+        'folded over, its back shows the back picture, inside it, reading the right way round', backs.slice(0, 4));
+    // bodies: one dropped onto the floor comes to rest on it
+    const sim = K.sim({ space: S, gravity: K.V(0, 0, -1600) }).floor(0);
+    const b = sim.add(K.body({ shape: K.rect(-30, -20, 60, 40), thick: 8, x: 600, y: 300, z: 300, wx: 3, wy: 2 }));
+    for (let i = 0; i < 60 * 8; i++) sim.step(1 / 60);
+    const low = Math.min(...K.corners(b, 1).concat(K.corners(b, -1)).map(c => c.z));
+    chk(b.sleeping && low > -0.5 && low < 1.5, 'a body dropped on the floor tumbles down and comes to rest on it', { z: b.p.z, low, sleeping: b.sleeping });
+    // the glass: what reaches it strikes it, once, and falls back
+    K.glass.clear();
+    const sim2 = K.sim({ space: S, gravity: K.V(0, 0, -400) });
+    const t = sim2.add(K.body({ shape: K.rect(-10, -10, 20, 20), x: 640, y: 360, z: 0, vz: 1800, glass: 'crack' }));
+    for (let i = 0; i < 60 * 3; i++) sim2.step(1 / 60);
+    chk(K.glass.hits.length === 1 && Math.abs(K.glass.hits[0].x - 640) < 30 && t.v.z < 0, 'a body flown at the screen cracks the glass where it struck, once, and falls back', K.glass.hits.map(h => [h.x, h.y]));
+    const sim3 = K.sim({ space: S, gravity: K.V(0, 0, 0) });
+    sim3.add(K.body({ shape: K.rect(-10, -10, 20, 20), x: 640, y: 360, vz: 2400, glass: 'pass' }));
+    for (let i = 0; i < 60 * 2; i++) sim3.step(1 / 60);
+    chk(sim3.bodies.length === 0 && K.glass.hits.length === 2, 'one that passes the glass goes on into the eye and is gone');
+    // a folded sheet let go as bodies keeps where every piece was
+    const sh3 = K.sheet({ x: 100, y: 100, w: 300, h: 200 }); sh3.fold(250, 100, 250, 300, 2.2, { side: 1 });
+    const bs = sh3.bodies();
+    const err = bs.reduce((e, bd, i) => { const cs = K.corners(bd, 1), ps = sh3.polys[i]; return Math.max(e, ...cs.map((c, k) => Math.hypot(c.x - ps[k].x, c.y - ps[k].y, c.z - ps[k].z))); }, 0);
+    chk(bs.length === sh3.polys.length && err < 1e-6, 'a folded sheet becomes bodies exactly where its pieces lie', err);
+    // scenes: kept while asked for, dropped once not
+    let made = 0; const mk = () => ({ n: ++made });
+    const a1 = K.scene('x', mk), a2 = K.scene('x', mk);
+    chk(a1 === a2 && made === 1, 'a scene is the same object frame after frame');
+    K.scene('x', mk, 2); chk(made === 2, 'and a new one when its generation changes');
+    uiTime += 5; K.frameEnd(); chk(!K.scenes.has('x'), 'and gone once nobody asks for it');
+    // events
+    opoFx('paneBreak', { x: 1, y: 2 }); opoFx('peel', { id: 'rate' });
+    const e1 = K.feed('a'), e2 = K.feed('a'), e3 = K.feed('b');
+    chk(e1.length >= 2 && !e2.length && e3.length >= 2 && e1.some(e => e.kind === 'paneBreak' && e.x === 1), 'the run\\'s events, to each reader once', [e1.length, e2.length, e3.length]);
+    return JSON.stringify(C);
+  })()`));
+
+  // drawing only: a fight with the kit working flat out in every hook plays the same as one with blank hooks
+  const fight = withKit => {
+    const h = game();
+    if (withKit) h.run(`
+      OPO_ART.worldFx = (g, s) => { const sc = s.kit.scene('wfx', () => s.kit.sim({ space: s.S }).floor(0));
+        for (const e of s.kit.feed('wfx')) if (e.kind === 'hit' || e.kind === 'paneBreak') for (let i = 0; i < 3; i++)
+          sc.add(s.kit.body({ shape: s.kit.rect(-6, -6, 12, 12), thick: 4, x: e.x, y: e.y, z: 10, vz: 600 + rnd() * 600, vx: rnd(-200, 200), vy: rnd(-200, 200), wx: rnd(-8, 8), life: 2 }));
+        sc.space = s.S; sc.step(); sc.draw(g); };
+      OPO_ART.screenFx = (g, w, h, s) => { const cap = s.kit.capture('t'); if (s.t % 3 < 0.02) s.kit.glass.hit(w / 2, h / 2, 1);
+        const sh = s.kit.sheet({ x: 0, y: 0, w, h, img: cap.img, uvScale: cap.sx }); sh.fold(w / 2, 0, w / 2, h, 0.4).crumple(0.2); sh.draw(g, s.S); s.kit.glass.draw(g, w, h, { frame: cap }); };
+      OPO_ART.worldFlat = (g, s) => { const shards = s.kit.radial(s.kit.rect(s.S.cx - 50, s.S.cy - 50, 100, 100, 1), { x: s.S.cx, y: s.S.cy }, { seed: 2 });
+        s.kit.drawBodies(g, s.S, s.kit.bodiesOf(shards, { img: s.kit.first() })); };`);
+    h.run(`runSeedNext = 77; runViewNext = { w: 1366, h: 768 }; runCharNext = 0; resetGame(); state = 'play'; opoOpen({ up: { rate: 2, multi: 1 } }); P.maxHp = P.hp = 60000; ${BOT}`);
+    const prints = [];
+    for (let s = 0; s < 70; s++) {
+      steps(h, 60, true);
+      prints.push(h.run(`JSON.stringify([simRngState, simTick, +P.x.toFixed(6), +P.y.toFixed(6), P.hp, opo && +opo.pos.toFixed(9), opo && opo.ph, ebullets.length, bullets.length, opo && opo.cells.join('')])`));
+    }
+    return prints;
+  };
+  const plain = fight(false), busy = fight(true);
+  const at = plain.findIndex((p, i) => p !== busy[i]);
+  ok(at < 0, 'the kit is drawing only: a fight with it busy in every hook plays step for step as one without', at);
+}
+
+/* ================================ the bench ================================ */
+section('the art bench (?opo=bench)');
+{
+  const g = loadGame(IDX, { w: 1280, h: 720, search: '?opo=bench' });
+  g.run(`pageDead = true; Save.profile.name = 'BENCH'; state = 'menu'; Save.profile.gfxSeen = GFX_VER;`);
+  g.run(fs.readFileSync(path.join(ROOT, 'onepointoh', 'bench.js'), 'utf8'), 'bench.js');
+  g.run(`update(${STEP})`);
+  ok(g.run(`state`) === 'opobench', 'on this machine\'s own server, ?opo=bench opens the bench', g.run(`state`));
+  const saveBefore = g.run(`localStorage.getItem('voidrunner_save_v1') || ''`);
+  const res = JSON.parse(g.run(`(() => { const out = [];
+    for (let d = 0; d < OPO_BENCH.demos.length; d++) {
+      let err = null;
+      try {
+        if (d) handleKey('arrowright');
+        for (let i = 0; i < 150; i++) { update(${STEP}); if (i % 3 === 0) render(); if (i === 40) handleClick(); }
+        handleKey('w'); for (let i = 0; i < 10; i++) { update(${STEP}); render(); } handleKey('w');
+        handleKey('l'); for (let i = 0; i < 10; i++) { update(${STEP}); render(); } handleKey('l');
+      } catch (e) { err = String(e && e.stack || e).split('\\n').slice(0, 2).join(' | '); }
+      out.push({ n: OPO_BENCH.demos[d].n, err });
+    }
+    return JSON.stringify(out); })()`));
+  ok(res.length >= 8 && res.every(r => !r.err), 'every demo plays and draws, wireframed and flat too', res.filter(r => r.err));
+  ok(g.run(`localStorage.getItem('voidrunner_save_v1') || ''`) === saveBefore, 'and the bench never touches the save');
+  g.run(`handleKey('escape')`);
+  ok(g.run(`state`) === 'menu', 'ESC goes back to the menu');
+  const shut = loadGame(IDX, { w: 1280, h: 720, search: '?opo=bench', before: win => { win.location.hostname = 'voidrunner.online'; } });
+  shut.run(`pageDead = true; Save.profile.name = 'X'; state = 'menu'; update(${STEP});`);
+  ok(shut.run(`state`) === 'menu' && !shut.run(`opoBenchTried`), 'on the real site, for anyone but a dev account, the address does nothing');
 }
 
 /* ================================ the hooks ================================ */
