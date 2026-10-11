@@ -412,6 +412,135 @@ section('left mid-fight');
   void c; void c2;
 }
 
+/* ============================ returning players ============================ */
+/* A veteran's save, as it sits in a browser from before ONE POINT OH: none of
+   his fields, the clears never counted (reconcileClears finds THE FRACTURE
+   from how deep it has been), the hub open, the Founder's story still open,
+   escalated. Everything the route touches, it has. */
+section('returning players, with THE FRACTURE open');
+const VET = {
+  name: 'VETERAN', best: 284000, bestWave: 61, bestSector: 'THE VOID', runs: 214, kills: 52000, time: 300000,
+  clears: 0, altPath: false, planetarium: true, malware: true, deepFracture: true, hardened: true,
+  keeperMet: true, keeperDone: true, trueEnd: true, askedHarder: true, amalgamDone: true,
+  rootDone: true, keyEver: true, metFounder: true, campVisits: 4, tribunalDone: false,
+  outsiderIn: true, awakened: { ember: true, hacker: true }, rushBest: 1e6, gfxSeen: 3, logSeen: 99
+};
+function veteran(over) {
+  const save = Object.assign({}, VET, over || {});
+  const g = loadGame(IDX, { w: 1280, h: 720, before: win => win.localStorage.setItem('voidrunner_save_v1', JSON.stringify(save)) });
+  g.run(`pageDead = true; state = 'menu';
+    globalThis.__art = {};
+    for (const k of Object.keys(OPO_ART)) { const f = OPO_ART[k]; OPO_ART[k] = (...a) => { __art[k] = (__art[k] || 0) + 1; return f(...a); }; }`);
+  return g;
+}
+// one run, one portal room: what he said, whether the door stood, and the count
+const roomOf = g => JSON.parse(g.run(`(() => { runCharNext = 0; resetGame(); state = 'play';
+  lastBossDeath = { x: P.x, y: P.y - 100 }; openPortalRoom();
+  return JSON.stringify({ line: opoLine && opoLine.kind, door: !!opoDoor, n: RUN.opoCoax, rite: riteRun }); })()`));
+{
+  const g = veteran();
+  const boot = JSON.parse(g.run(`JSON.stringify({ alt: Save.profile.altPath, clears: Save.profile.clears, coax: Save.profile.opoCoax, lock: Save.profile.opoLock, lift: Save.profile.opoLift, done: Save.profile.opoDone })`));
+  ok(boot.alt && boot.clears >= 2, 'an old save that never counted its clears still has THE FRACTURE', boot);
+  ok(boot.coax === 0 && boot.lock === 0 && boot.lift === 0 && boot.done === false, 'and starts the route from nothing: none of his fields were on it', boot);
+  ok(!g.run(`opoLocked()`) && (g.run(`update(${STEP}), state`) === 'menu'), 'it is not held, and boots to today\'s menu');
+
+  // a run committed at a statue is never coaxed, and one that dies there leaves nothing behind
+  g.run(`hubCommit('melee'); lastBossDeath = { x: P.x, y: P.y - 100 }; openPortalRoom();`);
+  ok(g.run(`riteRun === 'melee' && !opoLine && RUN.opoCoax === 0`), 'a statue\'s run: no voice');
+  g.run(`P.hp = 0; gameOver(); state = 'menu';`);
+  const after = roomOf(g);
+  ok(after.rite === null && after.line === 'coax' && after.n === 1, 'the next ordinary run, after a statue\'s run died short of its wave: coaxed, and no rite waiting at wave 25', after);
+
+  // the count is the profile's: four more runs, and the door, through a reload in the middle
+  for (let i = 0; i < 2; i++) roomOf(g);
+  const saved = g.run(`JSON.stringify(Save.profile)`);
+  const g2 = loadGame(IDX, { w: 1280, h: 720, before: win => win.localStorage.setItem('voidrunner_save_v1', saved) });
+  g2.run(`pageDead = true; state = 'menu';`);
+  const rooms = [roomOf(g2), roomOf(g2), roomOf(g2)];
+  ok(rooms[0].line === 'coax' && rooms[0].n === 4 && rooms[1].n === 5 && !rooms[1].door, 'a reload picks up where it left off', rooms);
+  ok(rooms[2].door && rooms[2].line === 'door', 'and the room after the fifth line has the old door', rooms[2]);
+
+  // a fresh device, signed in: the account's save brings the count and THE FRACTURE with it
+  const fresh = game();
+  ok(fresh.run(`Account.adopt(${g2.run(`JSON.stringify(Account.strip(Save.profile))`)}) && Save.profile.altPath && Save.profile.opoCoax === 6`), 'a new device signed in carries the count, at the menu');
+  const fr = roomOf(fresh);
+  ok(fr.n === 6 || fr.n === 7, 'and goes on from it', fr);
+}
+
+section('returning players: the old door in any room');
+{
+  const g = veteran({ opoCoax: 5 });
+  // the clearance it keeps from every gate, the library's door and the shards, and whether it is inside the walls
+  const check = `(() => { const d = opoDoor; if (!d) return JSON.stringify({ door: false, n: RUN.opoCoax, line: opoLine && opoLine.kind });
+    let m = Infinity;
+    for (const p of portals) m = Math.min(m, Math.hypot(d.x - p.x, d.y - p.y) - p.r - d.r);
+    if (libraryPortal) m = Math.min(m, Math.hypot(d.x - libraryPortal.x, d.y - libraryPortal.y) - libraryPortal.r - d.r);
+    for (const h of hazards) if (h.kind === 'mirror') m = Math.min(m, Math.hypot(d.x - h.x, d.y - h.y) - h.r - d.r);
+    const inside = d.x - d.r >= arena.x0 && d.x + d.r <= arena.x1 && d.y - d.r >= arena.y0 && d.y + d.r <= arena.y1;
+    return JSON.stringify({ door: true, room: m, inside, n: RUN.opoCoax }); })()`;
+  const rooms = { open: [], cramped: [], mirror: [], library: [] };
+  for (let seed = 1; seed <= 24; seed++) {
+    for (const kind of Object.keys(rooms)) {
+      const r = JSON.parse(g.run(`(() => { runSeedNext = ${seed * 7 + 3}; runCharNext = 0; resetGame(); state = 'play'; RUN.opoCoax = 5;
+        if ('${kind}' === 'cramped') { arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, 980, 760); arena.x0 = arena.tx0; arena.y0 = arena.ty0; arena.x1 = arena.tx1; arena.y1 = arena.ty1; }
+        if ('${kind}' === 'mirror') enterStage(ALT_STAGES.find(s => s.name === 'THE MIRROR'));
+        if ('${kind}' === 'library') placePortal({ kind: 'library', boss: 'warden' });
+        const a = simRnd(TAU), d = simRnd(500);
+        lastBossDeath = { x: clamp(P.x + Math.cos(a) * d, arena.x0, arena.x1), y: clamp(P.y + Math.sin(a) * d, arena.y0, arena.y1) };
+        openPortalRoom();
+        return ${check}; })()`));
+      rooms[kind].push(r);
+    }
+  }
+  const placed = Object.values(rooms).flat().filter(r => r.door);
+  ok(placed.every(r => r.inside && r.room >= 60), 'wherever it stands, it is inside the walls and well clear of every gate, the library\'s door and the shards',
+     placed.filter(r => !r.inside || r.room < 60));
+  ok(rooms.open.every(r => r.door) && rooms.mirror.every(r => r.door) && rooms.library.every(r => r.door), 'in an open room, THE MIRROR and beside a library, it always stands',
+     Object.fromEntries(['open', 'mirror', 'library'].map(k => [k, rooms[k].filter(r => !r.door).length])));
+  const skipped = Object.values(rooms).flat().filter(r => !r.door);
+  ok(skipped.every(r => r.n === 5 && !r.line), 'and in a room with nowhere it fits, it waits for the next room without a word, still owed', skipped);
+  ok(rooms.cramped.filter(r => r.door).length > 0, 'a cramped room still finds a place for it', rooms.cramped.filter(r => r.door).length);
+
+  // walked into in a cramped room: it takes you, and no gate does first
+  g.run(`runSeedNext = 41; runCharNext = 0; resetGame(); state = 'play'; RUN.opoCoax = 5;
+    arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, 980, 760); arena.x0 = arena.tx0; arena.y0 = arena.ty0; arena.x1 = arena.tx1; arena.y1 = arena.ty1;
+    lastBossDeath = { x: P.x, y: P.y }; openPortalRoom();
+    inputSource = rec => { rec.mx = 0; rec.my = 0; rec.trig = false; rec.lmb = false; rec.auto = false; rec.dash = false;
+      rec.touch = false; rec.taim = null; rec.local = false; rec.press = []; rec.held = ''; rec.ax = P.x; rec.ay = P.y - 100; };`);
+  if (g.run(`!!opoDoor`)) {
+    g.run(`P.x = opoDoor.x; P.y = opoDoor.y; for (let i = 0; i < 60 * 5 && !opoRevert; i++) { P.x = opoDoor ? opoDoor.x : P.x; P.y = opoDoor ? opoDoor.y : P.y; update(${STEP}); }`);
+    ok(g.run(`!!opoRevert && opoLocked()`), 'walked into in a cramped room, it takes you, and no gate does first', g.run(`JSON.stringify({ rev: !!opoRevert, awaiting: awaitingPortal, stage: stage.name })`));
+  } else ok(false, 'the cramped room for the walk-in had no door');
+  takeArt(g);
+}
+
+section('returning players: the fight, with their own story open');
+{
+  // the Founder's story open (the tear rides every run) and, separately, ROOT's key carried
+  for (const [what, over] of [['the Founder\'s tear', {}], ['ROOT\'s key', { metFounder: false, keyEver: true }]]) {
+    const g = veteran(Object.assign({ opoCoax: 6, opoLock: 1 }, over));
+    g.run(`update(${STEP})`);
+    ok(g.run(`state`) === 'opolock', what + ': a held veteran boots into the lock');
+    bootCopy(g.win);
+    await settle();
+    const runs0 = g.run(`Save.profile.runs`), best0 = g.run(`Save.profile.best`);
+    g.run(`OPO_HOST.broke({ up: { rate: 2, dmg: 2, multi: 1 } }); P.maxHp = P.hp = 60000; ${BOT}`);
+    ok(g.run(`!!opo && !tear && !P.key && !keyItem`), what + ': nothing of it follows you into his fight', g.run(`JSON.stringify({ tear: !!tear, key: P.key })`));
+    let strays = 0;
+    for (let s = 0; s < 420 && g.run(`!!opo`); s++) {
+      // hurt now and then, as a fight does: a tear would open for that
+      g.run(`if (opo && opo.stage === 'fight' && simTick % 600 < 60) P.hp = Math.min(P.hp, P.maxHp * 0.3);`);
+      steps(g, 60);
+      if (g.run(`!!(tribunal || campVisit || choice || amalOpen || (state === 'devtalk'))`)) strays++;
+    }
+    ok(!strays, what + ': no tear, tribunal, door or talk opens in his fight', strays);
+    ok(g.run(`state`) === 'menu' && g.run(`Save.profile.opoDone && !opoLocked()`), what + ': fought to today, and let go', g.run(`state`));
+    ok(g.run(`Save.profile.runs`) === runs0 && g.run(`Save.profile.best`) === best0, what + ': and the veteran\'s record is as it was');
+    ok(g.run(`Save.profile.metFounder === ${over.metFounder === false ? 'false' : 'true'} && !Save.profile.tribunalDone`), what + ': and their own story is where they left it');
+    takeArt(g);
+  }
+}
+
 /* ================================ the hooks ================================ */
 section('the hooks');
 {

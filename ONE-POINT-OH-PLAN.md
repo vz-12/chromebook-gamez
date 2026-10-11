@@ -477,6 +477,14 @@ decided on the way, all of it easy to change:
   in this repo to add rows to.
 - **His tale** (pages I and II) and his remarks on each date are stand-ins
   until Phase 0's lore pass. Page III is held for the rite.
+- **Returning players** (11 Oct). A veteran with THE FRACTURE open gets
+  through it all: the test plays a save from before ONE POINT OH, end to end.
+  Three things were fixed for them. A statue's run that died short of wave 25
+  used to leave its commitment on every run after (so no coaxing, and a rite
+  at wave 25 of an ordinary run): `resetGame` now clears it. The Founder's
+  tear and ROOT's key no longer follow anyone into his fight. And the old door
+  is only placed where it can be used, or not at all, with its first showing
+  still owed.
 - **The fight's pacing**: the record moves at most over 150 s, each phase
   shows itself for at least 14 s, and the view pulls out to 0.74 so he stays
   on screen. About three and a half to four minutes, start to finish.

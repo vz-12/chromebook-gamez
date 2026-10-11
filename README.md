@@ -625,11 +625,15 @@ upload, `3af8b6d` (7 Aug 2026). `ONE-POINT-OH-PLAN.md` is the whole plan; ONE
 POINT OH in `index.html` is the code.
 
 - **The coaxing.** Once THE FRACTURE is open, a voice in each portal room, one
-  line a room, counted on the profile (`opoCoax`). Only ordinary solo runs:
-  never a daily, a challenge, the rush, freeplay, ALL HALLOWS, co-op, a rite
-  or a run committed at a statue.
+  line a room, counted on the profile (`opoCoax`), so it carries across runs,
+  reloads and devices. Only ordinary solo runs: never a daily, a challenge,
+  the rush, freeplay, ALL HALLOWS, co-op, a rite or a run committed at a
+  statue (and a statue's run that dies short of its wave leaves nothing
+  behind: the next run is ordinary).
 - **The old door.** Then a third gate, apart from the two, slow to arm. Walking
-  in is the choice. The profile is locked (`opoLock`), the game comes apart
+  in is the choice. It is only placed where it can be used (inside the walls,
+  well clear of the gates, the library's door and THE MIRROR's shards); a room
+  with nowhere for it goes without, and the first showing stays owed. The profile is locked (`opoLock`), the game comes apart
   newest first as he quotes it, and the run you left is filed.
 - **The lock.** While `opoLock` is over `opoLift` and he is not beaten, the
   page boots into the first build, in a frame over the game (`OpoLock`), with
@@ -641,7 +645,8 @@ POINT OH in `index.html` is the code.
   widens by itself each locked run.
 - **The fight.** VOIDRUNNER, carrying the cards that run took, against him:
   the floor split between the two renderers, his bar the record itself, five
-  phases to today. Nothing in it is recorded. Beaten, the lock lifts
+  phases to today. Nothing in it is recorded, and nothing of the other
+  finales follows you in (the Founder's tear, ROOT's key). Beaten, the lock lifts
   (`opoLift`) and `opoDone` is set; left or lost, the lock holds.
 - **The way out for real trouble.** A copy that does not start within 15 s
   lifts the lock. A dev account can lift one by hand: `[\]` in the lock
@@ -670,7 +675,10 @@ The test checks the copy is `3af8b6d` byte for byte, boots it and plays it
 (no write to today's key, nothing fetched), and plays the route end to end:
 the coaxing, the door, the lock and the account carrying it, a copy that
 fails, the crack, the fight to today, a fight left and a fight lost, and every
-hook. `npm test` plays the portal rooms and the fight for determinism
+hook. Then all of it again for a returning player: a veteran's save from
+before ONE POINT OH (THE FRACTURE open, the hub, a statue's run that died,
+the Founder's story open, ROOT's key, escalated), the door in cramped rooms,
+beside a library and among THE MIRROR's shards. `npm test` plays the portal rooms and the fight for determinism
 (`opo-route`, `onepointoh`).
 
 ## First flight (the assisted first run)

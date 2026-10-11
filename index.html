@@ -37351,6 +37351,11 @@ function resetGame() {
   wave = 0; spawnBudget = 0; betweenWaves = 0.9; bossAlive = false;
   score = 0; elapsed = 0; credits = 0; stageAbs = -1; shopPending = false;
   // a fresh run is not an awakening run until a statue says so
+  /* ...and that includes the statue's own commitment. hubCommit sets riteRun
+     after its resetGame; any other run starts clear of it. It used to outlive
+     a statue run that died before RITE_WAVE, and the next ordinary run carried
+     it: taken into a rite at wave 25, and never coaxed (ONE POINT OH). */
+  riteRun = null;
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
   inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
@@ -40949,6 +40954,8 @@ const OPO = {
   doorArm: 3.2,          // seconds before it can be entered at all
   doorDwell: 0.7,        // and how long you stand in it before it takes you: nobody walks in by accident
   doorR: 46,
+  doorGap: 120,          // the room it would like between its rim and a gate's
+  doorMin: 60,           // and the least it is ever placed with: a hull standing in it is never near being taken by a gate
   revertSecs: 8,         // the lock's way in: the record, read backwards
   bootSecs: 15,          // the copy has this long to say it is up, or the lock lifts
   backSecs: 2.6,         // a fight lost: this long, then the lock again
@@ -41104,7 +41111,10 @@ function opoPortalRoom(ox, oy, R, a) {
   // the first time after the fifth line it is always there; after that, about half the rooms
   const first = n === L.length;
   if (!first && simRand() >= OPO.doorOdds) return;
-  opoDoorPlace(ox, oy, R, a);
+  /* A room with nowhere it can stand clear of the gates goes without it, and
+     says nothing: the count does not move, so a first showing is still owed
+     to the next room. */
+  if (!opoDoorPlace(ox, oy, R, a)) return;
   opoSay(first ? OPO_SAY.door : OPO_SAY.still[(n - L.length - 1) % OPO_SAY.still.length], first ? 'door' : 'still');
   runSet('opoCoax', n + 1);
   Save.writeLocal(); Save.flush();
@@ -41112,29 +41122,48 @@ function opoPortalRoom(ox, oy, R, a) {
 
 /* ------------------------------ 2. the old door ----------------------------
    A third gate standing apart from the two, square to the line between them
-   and further out, clear of the library's door. It arms slowly, and you have
-   to stand in it a moment before it takes you. */
+   and further out, clear of the library's door and THE MIRROR's shards. It
+   arms slowly, and you have to stand in it a moment before it takes you.
+
+   It is only ever put where it can be used: inside the room's walls, and far
+   enough from each gate that a hull standing in it is nowhere near being
+   taken by one (OPO.doorMin, past both radii). Wherever the room is, the
+   wall drawn in or a shard in the way, it looks for the spot that keeps the
+   most room around it; with none, there is no door this time (true if it was
+   placed). */
 function opoDoorPlace(ox, oy, R, a) {
-  const pad = OPO.doorR + 110;
-  const fits = (x, y) => {
-    const px = clamp(x, arena.x0 + pad, arena.x1 - pad), py = clamp(y, arena.y0 + pad, arena.y1 - pad);
-    if (!portals.every(p => len(px - p.x, py - p.y) > p.r + OPO.doorR + 120)) return null;
-    if (libraryPortal && len(px - libraryPortal.x, py - libraryPortal.y) < libraryPortal.r + OPO.doorR + 90) return null;
-    if (hazards.some(h => h.kind === 'mirror' && len(px - h.x, py - h.y) < h.r + OPO.doorR + 10)) return null;
-    return { x: px, y: py };
+  const r = OPO.doorR, pad = r + 70;
+  const x0 = arena.x0 + pad, x1 = arena.x1 - pad, y0 = arena.y0 + pad, y1 = arena.y1 - pad;
+  if (x1 <= x0 || y1 <= y0) return false;
+  // the room it has: the least gap between its rim and anything it must keep clear of
+  const room = (x, y) => {
+    let m = Infinity;
+    for (const p of portals) m = Math.min(m, len(x - p.x, y - p.y) - p.r - r);
+    const L = libraryPortal;
+    if (L) m = Math.min(m, len(x - L.x, y - L.y) - L.r - r);
+    for (const h of hazards) if (h.kind === 'mirror') m = Math.min(m, len(x - h.x, y - h.y) - h.r - r);
+    return m;
   };
-  let at = null;
-  for (const side of [-1, 1]) {
-    const ang = a + side * Math.PI / 2;
-    at = fits(ox + Math.cos(ang) * R * 1.7, oy + Math.sin(ang) * R * 1.7);
-    if (at) break;
+  const inside = (x, y) => ({ x: clamp(x, x0, x1), y: clamp(y, y0, y1) });
+  // where it would rather be: square to the gates, then a ring further out
+  const want = [];
+  for (const k of [1.7, 2.1, 1.35]) for (const side of [-1, 1])
+    want.push(inside(ox + Math.cos(a + side * Math.PI / 2) * R * k, oy + Math.sin(a + side * Math.PI / 2) * R * k));
+  for (let k = 0; k < 16; k++)
+    want.push(inside(ox + Math.cos(a + Math.PI / 4 + k * TAU / 16) * R * 2.1, oy + Math.sin(a + Math.PI / 4 + k * TAU / 16) * R * 2.1));
+  let at = want.find(q => room(q.x, q.y) >= OPO.doorGap) || null;
+  if (!at) {
+    // anywhere in the room, the spot with the most room around it
+    let best = -Infinity;
+    const step = 48;
+    for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
+      const m = room(x, y);
+      if (m > best) { best = m; at = { x, y }; }
+    }
+    if (best < OPO.doorMin) return false;
   }
-  for (let k = 0; !at && k < 16; k++) {
-    const ang = a + Math.PI / 4 + k * TAU / 16;
-    at = fits(ox + Math.cos(ang) * R * 2.1, oy + Math.sin(ang) * R * 2.1);
-  }
-  if (!at) at = { x: clamp(ox, arena.x0 + pad, arena.x1 - pad), y: clamp(oy + R * 1.7, arena.y0 + pad, arena.y1 - pad) };
-  opoDoor = { x: at.x, y: at.y, r: OPO.doorR, t: 0, arm: OPO.doorArm, in: 0 };
+  opoDoor = { x: at.x, y: at.y, r, t: 0, arm: OPO.doorArm, in: 0 };
+  return true;
 }
 function opoDoorTick(dt) {
   const d = opoDoor;
@@ -41322,6 +41351,12 @@ function opoOpen(info) {
   libraryPortal = null; libraryBook = null; malwareOffer = null;
   awaitingPortal = false; betweenWaves = 1e9; spawnBudget = 0;
   opoDoor = null; opoRevert = null; opoLine = null;
+  /* Nothing of the other finales follows you in. resetGame hands a run the
+     Founder's tear while his story is open, and ROOT's key while it is
+     carried: here the tear's fifth visit would open the tribunal in the
+     middle of his fight, and the key has no door to find. */
+  tear = null; choice = null; campVisit = null;
+  P.key = 0; keyItem = null;
   const B = opoBox();
   arenaReset(true);
   arenaShrinkTo((B.x0 + B.x1) / 2, (B.y0 + B.y1) / 2, OPO.arenaW, OPO.arenaH);
