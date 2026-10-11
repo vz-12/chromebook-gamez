@@ -489,6 +489,13 @@ decided on the way, all of it easy to change:
   panes are drawn after bloom), and where the two meet is a diff, − and +. The
   coaxing pops up beneath your ship a letter at a time, blue into purple, with
   stressed words larger or shaking, after the Devourer of Gods' lines.
+- **Him as a CRT set** (11 Oct). He is an old television, flat in 1.0's
+  colours, his face on its bulging, bending tube over the first build
+  playing, gripped by grunt hands under a crown of them. One number, his
+  temper (`oaAnger`), drives the set, his face, his voice and the
+  interference he throws into the room and onto your screen, so each phase
+  is visibly angrier than the last: fond, annoyed, angry, furious, past it.
+  It powers on at the shatter and off at the end.
 - **His tale** (pages I and II) and his remarks on each date are stand-ins
   until Phase 0's lore pass. Page III is held for the rite.
 - **Returning players** (11 Oct). A veteran with THE FRACTURE open gets

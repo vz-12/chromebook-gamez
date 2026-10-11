@@ -55,31 +55,31 @@ a hook is drawn over and under.
 
 | Hook | Defined | Called from | Render order | When |
 | --- | --- | --- | --- | --- |
-| `front` | 49483 | `drawOpoFloor` 41864 | 47909, under the bodies | the fight, every frame |
-| `sweep` | 49483 | `drawOpoFloor` 41866 | 47909 | each revert on the floor |
-| `restore` | 49483 | `drawOpoFloor` 41868 | 47909 | each restore standing in the room |
-| `door` | 49539 | `drawOpoWorld` 41873 | 47965, over the bodies | the old door, while it stands |
-| `pane` | 49539 | `drawOpoWorld` 41877 | 47965 | each pane in the air or landed |
-| `paint` | 49539 | `drawOpoWorld` 41879 | 47965 | while he paints a restore out |
-| `him` | 49539 | `drawOpoWorld` 41880 | 47965 | the fight, every frame |
-| `card` | 49539 | `drawOpoWorld` 41884 | 47965 | each card HOLLOW is peeling off |
-| `worldFx` | 49540 | `drawOpoFx` 41899 | 47966, right after `him` | every frame of the route |
-| `worldFlat` | 49608 | `drawOpoFlat` 41909 | 48034, after bloom, grade, split | every frame of the route |
-| `revert` | 49666 | `drawOpoScreen` 41917 | 48092, over the HUD | the lock's way in |
-| `shatter` | 49666 | `drawOpoScreen` 41922 | 48092 | stage `open` |
-| `record` | 49666 | `drawOpoScreen` 41925 | 48092 | stages `fight`, `cascade` |
-| `restoreFx` | 49666 | `drawOpoScreen` 41928 | 48092 | each date passed, while it plays |
-| `cascade` | 49666 | `drawOpoScreen` 41929 | 48092 | stage `cascade` |
-| `out` | 49666 | `drawOpoScreen` 41930 | 48092 | stage `out` |
-| `voice` | 42516 | `drawOpoScreen` 41932, `drawOpoLost` 41947 | 49666, 49721 | while he has a line |
-| `screenFx` | 49666 | `drawOpoScreen` 41934 | 48092, the last thing drawn | every frame of the route |
-| `lockUnder` | 49431 | `drawOpoLock` 41941 | 47857 (state `opolock`) | under the copy's frame |
-| `lost` | 49721 | `drawOpoLost` 41946 | 48147 | a fight lost or left |
-| `saySound` | 42524 | `opoSay` 41097 | (sound) | each line, as it starts |
-| `crack` **[frame]** | 42719 | `onepointoh/lock.js` 201, `drawArena` wrapper | the first build's arena | every locked run |
-| `crackSound` **[frame]** | 42813 | `onepointoh/lock.js` 148, `update` wrapper | (sound) | now and then, in a locked run |
-| `lockVoice` **[frame]** | 42824 | `onepointoh/lock.js` 212, `render` wrapper | over the first build | while he has a line |
-| `lockFx` **[frame]** | 42846 | `onepointoh/lock.js` 213, `render` wrapper | over everything in the frame | every frame of the lock |
+| `front` | 43256 | `drawOpoFloor` 41864 | 49797, under the bodies | the fight, every frame |
+| `sweep` | 43377 | `drawOpoFloor` 41866 | 49797 | each revert on the floor |
+| `restore` | 43537 | `drawOpoFloor` 41868 | 49797 | each restore standing in the room |
+| `door` | 42824 | `drawOpoWorld` 41873 | 49853, over the bodies | the old door, while it stands |
+| `pane` | 43454 | `drawOpoWorld` 41877 | 49853 | each pane in the air or landed |
+| `paint` | 43496 | `drawOpoWorld` 41879 | 49853 | while he paints a restore out |
+| `him` | 43227 | `drawOpoWorld` 41880 | 49853 | the fight, every frame |
+| `card` | 43716 | `drawOpoWorld` 41884 | 49853 | each card HOLLOW is peeling off |
+| `worldFx` | 43931 | `drawOpoFx` 41899 | 49854, right after `him` | every frame of the route |
+| `worldFlat` | 43990 | `drawOpoFlat` 41909 | 49922, after bloom, grade, split | every frame of the route |
+| `revert` | 42897 | `drawOpoScreen` 41917 | 49980, over the HUD | the lock's way in |
+| `shatter` | 43175 | `drawOpoScreen` 41922 | 49980 | stage `open` |
+| `record` | 43767 | `drawOpoScreen` 41925 | 49980 | stages `fight`, `cascade` |
+| `restoreFx` | 43588 | `drawOpoScreen` 41928 | 49980 | each date passed, while it plays |
+| `cascade` | 43837 | `drawOpoScreen` 41929 | 49980 | stage `cascade` |
+| `out` | 43881 | `drawOpoScreen` 41930 | 49980 | stage `out` |
+| `voice` | 42785 | `drawOpoScreen` 41932, `drawOpoLost` 41947 | 49980, 50035 | while he has a line |
+| `screenFx` | 44013 | `drawOpoScreen` 41934 | 49980, the last thing drawn | every frame of the route |
+| `lockUnder` | 42976 | `drawOpoLock` 41941 | 49745 (state `opolock`) | under the copy's frame |
+| `lost` | 43910 | `drawOpoLost` 41946 | 50035 | a fight lost or left |
+| `saySound` | 42793 | `opoSay` 41097 | (sound) | each line, as it starts |
+| `crack` **[frame]** | 42994 | `onepointoh/lock.js` 201, `drawArena` wrapper | the first build's arena | every locked run |
+| `crackSound` **[frame]** | 43088 | `onepointoh/lock.js` 148, `update` wrapper | (sound) | now and then, in a locked run |
+| `lockVoice` **[frame]** | 43099 | `onepointoh/lock.js` 212, `render` wrapper | over the first build | while he has a line |
+| `lockFx` **[frame]** | 43121 | `onepointoh/lock.js` 213, `render` wrapper | over everything in the frame | every frame of the lock |
 
 "The route" is the door, the revert and the fight (`opo || opoDoor ||
 opoRevert`). In the lock, today's canvas is under the frame and the frame's
@@ -204,8 +204,8 @@ of the game:
 
 | Hook | What it draws |
 | --- | --- |
-| `voice` | Before the shatter (`coax`, `door`, `still`), his lines pop up beneath your ship a letter at a time, after the Devourer of Gods' (Calamity): each letter jumps past its size and settles, the line drifts from the first build's cyan into purple, stressed words (`OA_STRESS`) are drawn larger and turn colour on their own or tremble, and going, the letters sink as they fade. From the shatter on, his lines are flat white on a strip of the old screen, drawn down a scanline at a time, under a small ONE POINT OH. |
-| `saySound` | A blip a word through a narrow band, like an old speaker, every line falling to its end; softer and lower before he is seen. |
+| `voice` | Before the shatter (`coax`, `door`, `still`), his lines pop up beneath your ship a letter at a time, after the Devourer of Gods' (Calamity): each letter jumps past its size and settles, the line drifts from the first build's cyan into purple, stressed words (`OA_STRESS`) are drawn larger and turn colour on their own or tremble, and going, the letters sink as they fade. From the shatter on, his lines are flat on a strip of the old screen, drawn down a scanline at a time, under a small ONE POINT OH, and they lose their temper with him: bigger and heavier, going red, the letters shaking, static in the strip, and at the end split in two. |
+| `saySound` | A blip a word through a narrow band, like an old speaker, every line falling to its end; softer and lower before he is seen. The angrier he is, the lower, harsher (square, then sawtooth) and quicker, falling further, crackling, with a growl under it. |
 | `door` | A square well sunk into today's floor: its walls and rim flat in the first build's colours, its floor THE GRID with the old ship and its grunts circling. Its grid draws in a line at a time and its wall closes round as it arms; taking you, the well drops and 1.0's ground spreads over today's. |
 | `revert` | The screen as it stood, cut into a piece for each date. The pieces go newest first, counter-clockwise (time running backwards), falling into the screen, while the record is read down as a log, each date struck out. It ends on the first build's menu, laid out exactly as the frame's own will be (`oaFirstMenu`). |
 | `lockUnder` | The same menu, so a slow frame never shows anything else. |
@@ -214,7 +214,7 @@ of the game:
 | `lockVoice` | Native to the first build: flat type on a strip of its ground, typed out without easing, shaking more the more he has to say it. |
 | `lockFx` | Today's light on the glass; the glass straining from the top (where the crack is) a split at a time as fire takes the wall; chips of the wall thrown at it while you fire. Nothing over the menu, and nothing once it has broken. |
 | `shatter` | The first build fills the screen, splits from where the crack was, the splits running out across it; the pieces part, showing today's room in slivers of light, then go nearest first, still playing the first build. Most fall back into the room and take its light as they turn; a few come at you and crack the glass. |
-| `him` | THE WARDEN's eight sides, the ship everyone flew at his core, THE GRID's grunts for a crown and for hands, holding out the old screen tipped up toward you, playing the first build. A notch on its foot for every card it has taken; every era flooding into it in the cascade; empty at the end. (The hook itself only darkens today's floor under him; he is drawn in `worldFlat`.) |
+| `him` | He is an old CRT set (`oaDrawHim`, in `worldFlat`): a box seen from just above, turned toward you, flat in 1.0's colours, its tube bulging and bent with his face on it in phosphor over the first build playing (`oaCrtPicture`, `oaFace`). THE GRID's grunts grip its sides and crown him; THE WARDEN's eight sides are the halo behind. Everything about it shows his temper (below). It powers on at the shatter (a dot, a line, the picture, a degauss wobble) and off at the end (the picture collapsing to a line, then a dot, then dark), leaving him holding an empty set. The hook itself darkens today's floor under him and throws his interference across it, reaching further and going red as he gets angrier. |
 | `front` | 1.0's side is its own ground, flat on the world's 64 px grid; a cell part-way back shows it in scanlines. At the seam today's edge glows and runs, 1.0's paper lifts off it and casts a shadow on today's, and the diff is marked. Today's side is dark through PUT IT BACK and its light flickers back on with THIS WAS BETTER. `diff --git a/1.0 b/today` in the corner. |
 | `sweep` | Told: the band in 1.0's dashes, rewind chevrons running the way it will go. Moving: a hard white front (its edge hurts) dragging scanlines, tracking noise ahead, the floor in front reddened. |
 | `pane` | Its landing marked in 1.0's dashes (`− 1.0`) and its shadow on today's floor, sharpening as it comes down; the pane itself (a live piece of the first build, turning over, drawn where it really is at its height, cracked by your shots) in `worldFlat`. Landed, it rings out and sinks in steps. |
@@ -227,13 +227,31 @@ of the game:
 | `out` | The room dims round him, a light stays on him, the bars close in, the lock unlatches, and the screen settles onto today's menu, laid out as `renderMenu` lays it. |
 | `lost` | A scanline wipes 1.0's ground down the screen, and the first build's menu draws itself. |
 | `worldFx` | Broken panes coming down in pieces that turn in the light and settle; today's floor plates kicked up by a landing pane; a column of light for each date passed; rings for kept restores; the room flooding at the last hit; motes in today's light. |
-| `worldFlat` | His panes, him, and the chips a round knocks off him, flat. |
-| `screenFx` | The glass: what strikes it cracks it and bends the picture behind the cracks; a broken pane throws pieces at you; each phase passes down it as a scan; the last hit heals it. |
+| `worldFlat` | His panes, him (the set), and the chips a round knocks off him, flat. |
+| `screenFx` | The glass: what strikes it cracks it and bends the picture behind the cracks; a broken pane throws pieces at you; each phase passes down it as a scan; the last hit heals it. His temper reaches it too: his scanlines over your screen once he is angry, a torn strip now and then once he is furious, static as each phase opens, and through HOLLOW and THE BASE SHIP a red pulse at its edges. |
+
+### His temper
+
+`oaAnger` gives one number, 0 to 1, that everything of his reads. It comes from
+the phase (`OA_RAGE`: 0.1, 0.32, 0.55, 0.78, 0.94), climbs through each phase as
+the record moves (`OA_ST.recFrac`, from `record`), spikes with every round that
+lands on him and surges as a phase opens, and is eased so it climbs rather than
+jumps. The open is indignant, the cascade is everything at once, and out he is
+spent.
+
+| | Fond, aggrieved (PUT IT BACK) | Annoyed (THIS WAS BETTER) | Angry (NOBODY ASKED) | Furious (HOLLOW) | Past it (THE BASE SHIP) |
+| --- | --- | --- | --- | --- | --- |
+| His face | soft eyes, drooping brows, a frown; blinks | brows down, eyes narrowing, mouth tight | eyes to slits, clenched teeth | eyes wide, red pupils, mouth open on static | burning white with a red halo, glitching off its place |
+| The picture | still, cool phosphor | the hold slipping, warming | rolling, amber, colours splitting | red, tearing in bands | red, rolling, tearing, swirling |
+| The set | true | aerials twitching | wrung out of true, heat at its seams, aerials arcing, volume knob turning up | cracked glass and casing, smoking, sparking | doubled red and cyan, one aerial bent |
+| Round him | grunts drifting, the halo an octagon | faster | the crown becomes a saw, the halo grows spikes | his hands squeezing the set, leaning in | the saw at full speed |
+| The room and your screen | | his interference on the floor | it reaches further, red; his scanlines on your screen | a torn strip now and then; a red pulse | all of it |
+| His voice | plain white | | heavier, going red | shaking, static in its strip; a growl under the blips | split in two |
 
 ## The art kit (`OPO_KIT`)
 
-`index.html`, from `ONE POINT OH — the art kit` (line 43846) to
-`end of ONE POINT OH art kit` (44791). Every hook is handed it (`s.kit`), and
+`index.html`, from `ONE POINT OH — the art kit` (line 44160) to
+`end of ONE POINT OH art kit` (45105). Every hook is handed it (`s.kit`), and
 it is a global. It is drawing only, keeps all its state inside itself, and
 every drawing function takes the context to draw on, so it works on either
 canvas.
