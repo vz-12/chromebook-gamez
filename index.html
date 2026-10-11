@@ -174,7 +174,9 @@ function runTake() {
   }
   runFlagsNext = null;
 }
-function runSet(k, v) { RUN[k] = v; if (Save.profile) Save.profile[k] = v; talesFlag(); }
+/* A freeplay run keeps what it earns to itself: the run sees it, so THE
+   FOUNDER, the key and the rest play out as usual, but the save never does. */
+function runSet(k, v) { RUN[k] = v; if (Save.profile && !freeRun) Save.profile[k] = v; talesFlag(); }
 /* FIRST FLIGHT: whether this run is assisted, handed in by PLAY (startRun)
    and used up by resetGame like the seed. The game never reads the cookie
    that decides it; it reads `assist`, the run's own, until the first boss
@@ -15690,7 +15692,7 @@ function choiceAnswer(openIt) {
   if (!choice || choice.armed > 0 || choice.said < CHOICE_LINES.length - 1) return;
   if (!openIt) {                       // you sit down
     choice = null; tear = null;
-    Save.profile.conformed = true;
+    if (!freeRun) Save.profile.conformed = true;   // a sandbox keeps nothing (freeplay)
     Save.writeLocal(); Save.flush();
     coopSay('YOU SIT DOWN', FOUND_COL, coopThem() + ' SITS DOWN', FOUND_COL, 5.0);   // the host's answer, on both screens
     simAfter(3.6, 'sitDown');
@@ -48459,7 +48461,7 @@ function devAnswer(yes) {
     Audio_.select();
     return;
   }
-  Save.profile.askedHarder = true;
+  if (!freeRun) Save.profile.askedHarder = true;   // a sandbox keeps nothing (freeplay)
   runSet('devTalkDue', false);
   Save.writeLocal(); Save.flush();
   startAmalgamCut();
@@ -64649,7 +64651,7 @@ function talkButtons() {
 
 function handOverCodex() {
   if (!keeperWants()) return;
-  Save.profile.keeperMet = true;
+  if (!freeRun) Save.profile.keeperMet = true;   // a sandbox keeps nothing (freeplay)
   Save.writeLocal(); Save.flush();
   libraryBook = null; malwareOffer = null;
   state = 'play';
@@ -78562,9 +78564,12 @@ function chalApplyShip(m) {
     const s = SIGNS.find(z => z.id === m.sign);
     if (s) { s.f(P); Codex.seeSign(s.id); planetSign = s; planetRevealed = true; }
   }
+  /* Handed over, not found, so it is not logged as carried: the malware tab is
+     what unlocks THE HACKER, and restarting this sheet until every payload had
+     come up was a way around earning it. One found in the run still counts. */
   if (m.mal && MALWARE.length) {
     const mw = MALWARE[simRndi(MALWARE.length)];
-    P.malware = mw; Codex.seeMal(mw.id);
+    P.malware = mw;
   }
 }
 
