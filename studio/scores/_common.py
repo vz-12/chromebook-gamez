@@ -170,3 +170,45 @@ def hive():
     h['choir'] = {59.85: sample('FL_Ghost_Choir_C'), 64.0: sample('FL_Ghost_Choir_E')}
     h['brood'] = shift(sample('FL_Ghost_Choir_Cm'), -6.0)                  # F sharp minor, with its ninth
     return h
+
+_VAULT = {}
+def vault():
+    """THE VAULT's and THE ARCHIVIST's sounds: glass, clockwork and paper.
+
+    Sung bowls on D and B (the D a touch sharp, the B a quarter-tone flat: their roots here are as
+    measured), a plucked zither for the arpeggios, a kitchen timer's ticks and a lock's clicks for the
+    time lock. For THE ARCHIVIST: a harpsichord (one long low C, and short notes cut out of two riffs
+    for the upper octaves), a cello's staccato, pizzicato plucks cut the same way, string stabs, a
+    kettledrum, and a typewriter: its keys for hats and its bell, moved down onto F sharp, to end a line."""
+    if _VAULT: return _VAULT
+    v = _VAULT
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    def loud(cuts, within=9.0, most=8, secs=0.07):
+        """The strikes worth having: those within `within` dB of the loudest, each cut short."""
+        top = max(float(np.abs(c).max()) for c in cuts)
+        keep = [c for c in cuts if float(np.abs(c).max()) > top * 10 ** (-within / 20)][:most]
+        return [gate(norm(c), secs, 0.02) for c in keep]
+    v['tick'] = loud(hits_in(sample('ESM_Kitchen_Timer_Tick_Tock_1', trim=False), least=0.1), most=6, secs=0.05)
+    mech = hits_in(sample('ESM_mechanism_unlock_ding_01', trim=False), least=0.03)
+    v['lock'] = loud([c for c in mech if len(c) < 0.2 * SR], most=8, secs=0.08)
+    v['ding'] = fade(norm(max(mech, key=len)), 0.001, 0.3)
+    v['ratchet'] = loud(hits_in(sample('BW_SnowGlobeWindUp', trim=False), least=0.03), within=6.0, most=8, secs=0.06)
+    v['keys'] = loud(hits_in(sample('BW_Typewriter_997', trim=False), 0.04) + hits_in(sample('BW_Typewriter_1001', trim=False), 0.04),
+                     within=8.0, most=10, secs=0.07)
+    v['bell'] = shift(norm(sample('ESM_Typewriter_Bell_Carriage_Return')), -2.17)        # from G sharp (and a bit) down to F sharp
+    v['bowl'] = {50.13: sample('GIO_bowl_medium_soft_D')}
+    v['hbowl'] = {70.72: sample('GIO_bowl_small_gentle_B')}
+    v['harp'] = {68.93: sample('GIO_harp_hit_normal_A'), 73.93: sample('GIO_harp_hit_regular_D')}
+    hv = hits_in(sample('SNS_harpsichord_vibes_E', trim=False), 0.12); hc = hits_in(sample('SNS_harpsichord_cayenne_F', trim=False), 0.1)
+    v['harpsi'] = {47.89: sample('DE_harpsichord_baroque_C'), 64.02: norm(hv[3]), 68.99: norm(hc[2]), 72.70: norm(hv[0])}
+    v['cello'] = {46.8: norm(hits_in(sample('ESM_cello_staccato_alert_Bm', trim=False), 0.08)[3])}      # the B that ends its four-note figure
+    pb = hits_in(sample('SO_MTS_pizz_blue_Cm', trim=False), 0.1); py = hits_in(sample('SO_MTS_pizz_yellow_Bb', trim=False), 0.08)
+    v['pizz'] = {55.0: norm(py[2]), 57.0: norm(pb[0]), 58.0: norm(pb[1])}
+    v['strike'] = {41.96: sample('KSHMR_string_stab_strike_Fs')}                           # F sharp in octaves, no third
+    v['major'] = {50.0: sample('SO_TS_chord_staccato_D'), 52.0: sample('SO_TS_chord_staccato_E')}   # staccato major triads, by root
+    v['timp'] = {36.37: sample('ge_hs_kettledrum'), 41.22: sample('TW_timpani_F')}       # a deep one on C, a brighter one on F: both a little sharp
+    v['shatter'] = norm(sample('ESM_crystal_shatter_celestial_01'))
+    v['tinkle'] = shift(norm(sample('ESM_crystal_tinkle_glitter_01')), -0.5)
+    v['ice'] = shift(norm(sample('ESM_ice_icepick_sparkle_01')), -1.2)                     # its cluster moved into B minor
+    v['book'] = norm(sample('BookHardcover_S08FO')); v['page'] = norm(sample('HardcoverBookPage_BW'))
+    return v

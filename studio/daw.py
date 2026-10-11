@@ -177,6 +177,11 @@ def clip(x, level=0.7):
     """A drum's first few milliseconds rounded off at `level`: the hit keeps its weight and gives up the
     spike that would otherwise set how loud the whole mix can go."""
     return level * np.tanh(x / level)
+def crush(x, bits=8, hold=6):
+    """Fewer bits and fewer samples: what a sound is like read back off a damaged record."""
+    y = np.repeat(x[::hold], hold, axis=0)[:len(x)]
+    q = 2.0 ** (bits - 1)
+    return np.round(y * q) / q
 def widen(x, amount):
     """Mid/side width: 0 is mono, 1 is as it was, above 1 is wider."""
     m = (x[:, 0] + x[:, 1]) * 0.5; s = (x[:, 0] - x[:, 1]) * 0.5 * amount
