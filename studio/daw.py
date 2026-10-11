@@ -336,10 +336,18 @@ class Section:
         self.level = level                # dB against the track's other sections, kept by the master
         self.ev = {}                      # bus name -> [Ev]
         self.len = bars * song.bar
-    def at(self, bar, step=0.0): return bar * self.song.bar + step * self.song.step
+    def at(self, bar, step=0.0):
+        """Seconds into the section. With swing, the first sixteenth of every pair is long and the second
+        short (0.5 is straight, 0.667 a triplet's swing), as a drummer would lean on it."""
+        sw = self.song.swing
+        if sw != 0.5:
+            pair = math.floor(step / 2.0); f = step - 2.0 * pair
+            step = 2.0 * pair + (f * 2.0 * sw if f < 1.0 else 2.0 * sw + (f - 1.0) * 2.0 * (1.0 - sw))
+        return bar * self.song.bar + step * self.song.step
     def note(self, bus, bar, step, dur, p, v=1.0, **kw):
         """A note on `bus` at bar:step (16ths), `dur` steps long."""
-        self.ev.setdefault(bus, []).append(Ev(self.at(bar, step), dur * self.song.step, midi(p), v, **kw))
+        t = self.at(bar, step)
+        self.ev.setdefault(bus, []).append(Ev(t, self.at(bar, step + dur) - t, midi(p), v, **kw))
     def line(self, bus, bar, text, v=1.0, octave=0, **kw):
         """A melody written out: 'A4:2 C5:2 r:4 E5:8', each note or rest (r) and its length in 16ths.
         A trailing ' after the length ties nothing; '~' before a note slides into it (kw glide)."""
@@ -367,8 +375,8 @@ class Bus:
         self.inst, self.gain, self.fx, self.rev, self.dly, self.duck, self.key = inst, gain, fx, rev, dly, duck, key
 
 class Song:
-    def __init__(self, name, bpm, beats=4, steps=16, target=-12.0, ceil=-1.2, clip=5.0, tail=4.5, room=None, echo=None, master=None):
-        self.name, self.bpm = name, bpm
+    def __init__(self, name, bpm, beats=4, steps=16, target=-12.0, ceil=-1.2, clip=5.0, tail=4.5, room=None, echo=None, master=None, swing=0.5):
+        self.name, self.bpm, self.swing = name, bpm, swing
         self.bar = 60.0 / bpm * beats; self.step = self.bar / steps; self.beat = 60.0 / bpm
         self.bus, self.sections, self.moods, self.start = {}, [], {}, None
         self.target, self.ceil, self.tail = target, ceil, tail

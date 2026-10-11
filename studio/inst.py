@@ -59,13 +59,15 @@ def layer(*parts):
 # ------------------------------------------------------------------ synths
 def synth(wave='saw', voices=1, detune=0.1, spread=0.7, sub=0.0, sq=0.0, pw=0.5, cutoff=2400.0, env=0.0,
           fdecay=0.18, res=0.9, track=0.4, a=0.004, d=0.18, s=0.7, r=0.12, dirt=0.0, vib=0.0, vibhz=5.6,
-          vibat=0.14, glide=0.045, air=0.0, octave=0, seed=1):
+          vibat=0.14, glide=0.045, air=0.0, octave=0, drift=0.0, buzz=0.0, buzzhz=85.0, seed=1):
     """A subtractive synth voice.
     voices/detune/spread: a stack of oscillators, detuned by up to `detune` semitones, fanned across the stereo field.
     sub: a sine an octave down, in the middle. sq: how much square is mixed in with the saw.
     cutoff: the filter in Hz at middle C; env: how many times higher it starts each note, falling over fdecay.
     track: how far the filter follows the pitch. vib: vibrato depth in semitones, starting vibat seconds in.
-    A note with slide=<semitones> starts that far off and bends into pitch over `glide` seconds."""
+    A note with slide=<semitones> starts that far off and bends into pitch over `glide` seconds.
+    drift: cents each oscillator wanders off pitch, slowly and each its own way (a pad that is not quite well).
+    buzz: how deeply the note is chopped at buzzhz, fast enough to be a roughness and not a wobble: a wing."""
     osc = {'saw': saw, 'square': lambda f, n, ph: square(f, n, pw, ph), 'tri': tri, 'sine': sine}[wave]
     def play(evs, n, ctx):
         out = np.zeros((n, 2))
@@ -81,8 +83,10 @@ def synth(wave='saw', voices=1, detune=0.1, spread=0.7, sub=0.0, sq=0.0, pw=0.5,
             L = np.zeros(m); R = np.zeros(m)
             for v in range(voices):
                 u = (v / (voices - 1) - 0.5) * 2.0 if voices > 1 else 0.0
-                w = osc(f * 2.0 ** (u * detune / 12.0), m, rng.random())
-                if sq: w = w * (1.0 - sq) + square(f * 2.0 ** (u * detune / 12.0), m, pw, rng.random()) * sq
+                fv = f * 2.0 ** (u * detune / 12.0)
+                if drift: fv = fv * 2.0 ** (drift / 1200.0 * np.sin(2 * math.pi * (0.17 + 0.09 * v) * (ctx['t0'] + e.t + t) + 1.7 * v))
+                w = osc(fv, m, rng.random())
+                if sq: w = w * (1.0 - sq) + square(fv, m, pw, rng.random()) * sq
                 ang = (u * spread + 1.0) * math.pi / 4.0
                 L += w * math.cos(ang); R += w * math.sin(ang)
             y = np.stack([L, R], 1) / math.sqrt(voices)
@@ -91,6 +95,7 @@ def synth(wave='saw', voices=1, detune=0.1, spread=0.7, sub=0.0, sq=0.0, pw=0.5,
             base = cutoff * 2.0 ** (track * (p - 60.0) / 12.0)
             fc = np.clip(base * (1.0 + env * np.exp(-t / fdecay)) * e.kw.get('open', 1.0), 30.0, 18000.0)
             y = svf(y, fc, res) * (env_a * e.v)[:, None]
+            if buzz: y = y * (1.0 - buzz * (0.5 + 0.5 * np.sin(2 * math.pi * buzzhz * (ctx['t0'] + e.t + t))))[:, None]
             add(out, y, e.t * SR)
         return drive(out, dirt) if dirt else out
     return play
@@ -218,3 +223,21 @@ def steam(secs=0.35, lo=2500.0, hi=9000.0, seed=6):
     x = svf(noise(n, seed), hi - (hi - lo) * (t / secs) ** 0.5, 1.2, 'bp') * np.minimum(t / 0.006, 1.0) * np.exp(-t / (secs * 0.3))
     y = st(x); y[:, 1] = np.roll(y[:, 1], 31)
     return fade(y, 0.001, 0.02)
+
+def skitter(tone=4200.0, spread=0.9, seed=5):
+    """Legs. Each note is a burst of tiny taps across its length: n of them (default 8), quickening
+    (curve under 1) or slowing (over 1), each a few milliseconds of something hard on something hollow,
+    each somewhere else between the speakers. A note's pitch moves the whole burst up or down."""
+    def play(evs, n, ctx):
+        out = np.zeros((n, 2)); rng = np.random.default_rng(seed + int(ctx['t0'] * 100))
+        for e in evs:
+            k = int(e.kw.get('n', 8)); curve = e.kw.get('curve', 1.0)
+            for i in range(k):
+                t = e.t + (i / k) ** curve * e.dur + rng.uniform(-0.004, 0.004)
+                m = int(rng.uniform(0.003, 0.009) * SR); tt = np.arange(m) / SR
+                f = tone * 2.0 ** rng.uniform(-0.6, 0.6) * 2.0 ** ((e.p - 60.0) / 12.0)
+                tap = np.sin(2 * math.pi * f * tt + rng.uniform(0, 6.28)) * np.exp(-tt / (m / SR * 0.3))
+                tap += rng.standard_normal(m) * 0.3 * np.exp(-tt / 0.001)
+                add(out, pan(tap, rng.uniform(-spread, spread)), max(0.0, t) * SR, e.v * rng.uniform(0.45, 1.0))
+        return out
+    return play

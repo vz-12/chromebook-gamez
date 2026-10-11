@@ -40,7 +40,7 @@ def third(text, tonic='A'):
         m = midi(name); deg = (int(m) - base) % 12
         if deg in _MINOR:
             i = _MINOR.index(deg); up = (_MINOR[(i + 2) % 7] - deg) % 12
-        else: up = 3
+        else: up = 3 if (deg + 3) % 12 in _MINOR or (deg + 4) % 12 not in _MINOR else 4   # whichever third lands in the key
         out.append(f'{int(m + up)}:{d}')
     return ' '.join(out)
 
@@ -137,3 +137,36 @@ def forge():
     f['braam'] = sample('PL_cimbassi_horn_E', trim=False)          # an F, whatever its name says: a low swell, 1.4 s to its peak
     f['howl'] = sample('MB_horn_howl_A', trim=False)               # a high A rising for 3.3 s
     return f
+
+_HIVE = {}
+def hive():
+    """THE HIVE's sounds: things with too many legs. Recordings of a spider walking and of something
+    scuttling are too high to carry on a laptop (they sit near 13 kHz), so they are replayed slower and
+    lower, where they sound larger; the insect chatter and the moth are left as beds. The choir is two
+    held notes (C, a shade flat, and E) and a C minor cluster dropped six semitones to F sharp minor,
+    which makes it slow and enormous."""
+    if _HIVE: return _HIVE
+    h = _HIVE
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    def cuts(x, parts):
+        n = len(x) // parts
+        return [fade(x[i * n:(i + 1) * n].copy(), 0.004, 0.03) for i in range(parts)]
+    scut = norm(shift(sample('ESM_Creature_Scuttle_2'), -8.0))            # 1.3 s becomes 2 s: four bursts
+    h['scut'] = cuts(scut[:int(1.9 * SR)], 4)
+    spider = norm(shift(sample('BU_SpiderWalkMove', trim=False), -11.0))  # 1.6 s becomes 3 s of slow, heavy steps
+    h['spider'] = cuts(spider, 3) + [fade(spider, 0.01, 0.1)]
+    h['rattle'] = [norm(sample('BU_InsectRattleShake')), norm(shift(sample('BU_InsectRattleShake'), -7.0))]
+    h['wings'] = [norm(sample('BU_InsectWingsMove_504', trim=False)), norm(sample('BU_InsectWingsMove_508', trim=False))]
+    h['chit'] = [norm(sample('BW_AlienInsectVocal')), norm(sample('BU_InsectVoiceCry'))]
+    h['swarm'] = fade(norm(sample('PHT_insects_08', trim=False)), 0.4, 0.6)                 # 5.3 s of chatter
+    h['moth'] = fade(norm(sample('EX_BUG_death_moth_scraping', trim=False))[:int(7.4 * SR)], 0.5, 0.8)
+    h['squish'] = norm(sample('BU_InsectSquish')); h['suck'] = norm(sample('BW_SquishSuction')); h['goo'] = norm(sample('ESM_Goo_Movement_12'))
+    g = sample('RARE_guiro_stroke')
+    h['guiro'] = fade(norm(g[:int(0.9 * SR)]), 0.002, 0.08)                # the scrape, whole
+    h['ridge'] = [gate(norm(r), 0.05, 0.02) for r in hits_in(g, least=0.05)[:8]] or [gate(norm(g), 0.05, 0.02)]   # its ridges, one at a time
+    h['cabasa'] = [gate(norm(sample('SS_cabasa_hit_endive')), 0.09, 0.04), gate(norm(sample('DIASPORA_cabasa_dancehall')), 0.09, 0.04)]
+    h['swish'] = gate(norm(sample('RARE_cabasa_texture')), 0.3, 0.08)
+    h['clave'] = [gate(norm(c), 0.12, 0.05) for c in hits_in(sample('TTS_perc_clav_B', trim=False), least=0.08)[:4]]
+    h['choir'] = {59.85: sample('FL_Ghost_Choir_C'), 64.0: sample('FL_Ghost_Choir_E')}
+    h['brood'] = shift(sample('FL_Ghost_Choir_Cm'), -6.0)                  # F sharp minor, with its ninth
+    return h

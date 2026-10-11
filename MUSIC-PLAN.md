@@ -88,7 +88,7 @@ a bar line when the boss changes phase.
 |---|---|---|---|
 | `grid` "Entry Vector" | THE GRID, sector 01 | the opening statement: driving synthwave with the main theme, clean and fast | 140, A minor |
 | `foundry` "The Line Never Stops" | THE FOUNDRY, sector 02 | industrial: anvil and metal percussion, distorted bass, steam | 132, D minor |
-| `hive` | THE HIVE, sector 03 | organic and wrong: skittering percussion, insect-wing textures, swung | 126, F♯ minor |
+| `hive` "The Walls Are Moving" | THE HIVE, sector 03 | infested: scuttling and legs for percussion, insect chatter, a tune that crawls by semitones, swung | 126, F♯ minor |
 | `vault` | THE VAULT, sector 04 | cold and crystalline: arpeggios, glass bells, mystery | 118, B minor |
 | `void` | THE VOID, sector 05 | vast and dark: sub bass, slow pulse, distant choir | 100 (half-time), C minor |
 | `archive` | THE ARCHIVE, fracture i | redacted: bitcrushed piano, tape-stops, deleted bars | 124, E minor |
@@ -113,7 +113,7 @@ a bar line when the boss changes phase.
 |---|---|---|---|
 | `warden` "The First Wall" | THE WARDEN | the first wall: metal riff on the main theme, live drums | 160, A minor |
 | `forgeheart` "Struck While Hot" | FORGEHEART | furnace metal: brass hits, hammered percussion | 165, D minor |
-| `broodmother` | BROODMOTHER | nu-metal groove, a creeping choir, skittering hi-hats | 145, F♯ minor |
+| `broodmother` "Mother of Thousands" | BROODMOTHER | nu-metal bounce on the hive's tune, a creeping choir, skittering hi-hats, her brood scuttling through it | 145, F♯ minor |
 | `archivist` | THE ARCHIVIST | orchestral and glitched: harpsichord, staccato strings | 170, B minor |
 | `null` | NULL | the act-one finale: full choir, orchestra and breakcore | 175, C minor |
 | `curator` | THE CURATOR | stately: string quartet over industrial | 150, E minor |
@@ -294,7 +294,13 @@ is pushed until you say; `main` only when you say ship.
    *(11 Oct: `foundry` "The Line Never Stops" and `forgeheart` "Struck While
    Hot" done, 13 more credits: anvils, hammer strikes, clangs, low brass.
    THE FOUNDRY has its own tune, a machine's 3 + 3 + 2; its struck metal is
-   retuned to ring in D minor. Next: THE HIVE and BROODMOTHER.)*
+   retuned to ring in D minor.)*
+   *(11 Oct: `hive` "The Walls Are Moving" and `broodmother` "Mother of
+   Thousands" done, 22 more credits. You asked for it more infested, with
+   scuttling: a spider's steps and a scuttle replayed lower and slower, a
+   "legs" instrument that taps in bursts, guiro and cabasa where hats would
+   be, insect chatter under everything, a ghost choir. Swing came with it
+   (`Song(swing=...)`). Next: THE VAULT and THE ARCHIVIST.)*
 6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
    `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
