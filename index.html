@@ -71986,9 +71986,10 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
    invented one cannot arrive from a save file any more than a skin can.
    'comeback' is WELCOME BACK's: THE HACKER and the challenge passes.
    'evo-<pilot>' wakes that one pilot's evolution (devPerksApply), where
-   unlock-evo wakes them all. */
+   unlock-evo wakes them all. 'passes-<n>' is n challenge passes by hand,
+   on top of any WELCOME BACK gave (PASS_PERKS). */
 const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback',
-                      'evo-ember'];
+                      'evo-ember', 'passes-20'];
 
 const Awards = {
   syncing: false,
@@ -72450,12 +72451,16 @@ function eraMark(played) {
    back. Function declarations, not consts: THE HACKER's `need` asks
    comebackHas() and can be asked before this line has run. */
 const COMEBACK_PASSES = 10;
+/* Every perk that carries passes, and how many. They add up: WELCOME BACK's
+   ten and a hand-given twenty are thirty, all spent from one passUsed. */
+const PASS_PERKS = { 'comeback': COMEBACK_PASSES, 'passes-20': 20 };
 function comebackHas(p) {
   return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
 }
 function passesLeft() {
-  if (!comebackHas()) return 0;
-  return Math.max(0, COMEBACK_PASSES - (Save.profile.passUsed || []).length);
+  let held = 0;
+  for (const a of Awards.list()) if (a && a.perk && PASS_PERKS[a.perk]) held += PASS_PERKS[a.perk];
+  return Math.max(0, held - (Save.profile.passUsed || []).length);
 }
 
 /* Banking a grant goes through Awards.clean like everything else, so a bad id
@@ -79641,8 +79646,9 @@ function chalEnd(won) {
 function chalQuit() { Chal.on = null; Chal.won = false; Chal.reward = null; }
 
 /* ------------------------------- a pass -----------------------------------
-   WELCOME BACK's challenge pass clears the selected challenge outright,
-   locked or not, exactly as beating it does: into chal, so its reward joins
+   A challenge pass (WELCOME BACK's, or given by hand: PASS_PERKS) clears the
+   selected challenge outright, locked or not, exactly as beating it does:
+   into chal, so its reward joins
    the pool and it counts toward the tiers above it. Two presses, so a stray
    key cannot spend one — the first arms it for CHAL_PASS_ARM_MS, the second
    spends it. */
