@@ -41462,6 +41462,7 @@ const OPO = {
   perHit: 0.013,         // dates a round of yours moves it, at your own damage
   oldHit: 0.5,           // and from the first build's side: its numbers
   push: 0.014,           // a round of yours over the first build's floor takes this much of a cell back
+  giftCards: 10,         // cards dealt onto the ship as the fight opens, on top of the ones carried in
   phaseMin: 14,          // a phase cannot end before it has shown what it is (VR_SEQ_MIN's figure)
   seam: 1.4,             // and a breath between them
   pane:  { every: [2.4, 1.5], fly: 1.35, hp: 3, r: 32, reach: 1.25, dmg: 14 },
@@ -41858,8 +41859,9 @@ function opoBox() {
   return { x0, y0, x1: x0 + OPO.arenaW, y1: y0 + OPO.arenaH, cw: OPO.arenaW / OPO.cols, ch: OPO.arenaH / OPO.rows };
 }
 /* The fight, opened: the room cleared and taken to his size, the cards put on
-   the ship (today's, by the same ids), him spawned in the gap. Run state
-   only, so a starter can open it straight (the 'onepointoh' scenario). */
+   the ship (today's, by the same ids) and OPO.giftCards more dealt after them,
+   him spawned in the gap. Run state only, so a starter can open it straight
+   (the 'onepointoh' scenario). */
 function opoOpen(info) {
   enemies.length = 0; ebullets.length = 0; bullets.length = 0;
   portals.length = 0; hazards.length = 0; mortars.length = 0;
@@ -41883,6 +41885,17 @@ function opoOpen(info) {
     const u = UPGRADES.find(z => z.id === id);
     for (let k = 0; k < up[id]; k++) { P.up[id] = (P.up[id] || 0) + 1; u.f(P); }
   }
+  /* A lost fight goes back to the lock, and the crack, already broken, gives
+     again the moment the next run starts: that run has taken nothing yet. So
+     every fight opens with OPO.giftCards more, drawn the way a level's offer
+     is (offerPool, simRand), a card at most up to its max. */
+  const gift = offerPool();
+  let gave = 0;
+  for (; gave < OPO.giftCards && gift.pool.length; gave++) {
+    const u = pickFromPool(gift.pool, gift.flat);
+    P.up[u.id] = (P.up[u.id] || 0) + 1; u.f(P);
+    if (P.up[u.id] >= u.max) gift.pool.splice(gift.pool.indexOf(u), 1);
+  }
   const N = opoRecord().length;
   opo = {
     stage: 'open', st: 0, t: 0, box: B,
@@ -41892,7 +41905,7 @@ function opoOpen(info) {
     cells: new Array(OPO.cols * OPO.rows).fill(1),
     panes: [], sweeps: [], restores: [], cards: [], burst: [],
     paneT: 2.0, sweepT: 4.0, volleyT: 2.4, baseT: 2.0, touchCd: 0, hollowT: OPO.hollowEvery, peeled: 0, hollow: false,
-    painting: null, light: false, up0: up, e: null, cascade: 0, out: 0, gone: false
+    painting: null, light: false, up0: up, gave, e: null, cascade: 0, out: 0, gone: false
   };
   opo.tx = opo.hx; opo.ty = opo.hy;
   const e = spawnEnemy('boss', opo.hx, opo.hy, { boss: 'onepointoh' });
@@ -41963,7 +41976,10 @@ function opoTick(dt, wdt) {
   o.t += dt; o.st += dt;
   if (o.stage === 'open') {
     if (o.st > 1.5 && !o.said) { o.said = 1; opoSay(OPO_SAY.face, 'face', 2.6); }
-    if (o.st >= OPO.openSecs) { o.stage = 'fight'; o.st = 0; opoPhaseOpen(0); }
+    if (o.st >= OPO.openSecs) {
+      o.stage = 'fight'; o.st = 0; opoPhaseOpen(0);
+      if (o.gave) floatText(P.x, P.y - 48, '+' + o.gave + ' UPGRADES', OPO_COL, 17, -30);
+    }
     return;
   }
   if (o.stage === 'cascade') {
@@ -71986,9 +72002,10 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
    invented one cannot arrive from a save file any more than a skin can.
    'comeback' is WELCOME BACK's: THE HACKER and the challenge passes.
    'evo-<pilot>' wakes that one pilot's evolution (devPerksApply), where
-   unlock-evo wakes them all. */
+   unlock-evo wakes them all. 'passes-<n>' is n challenge passes by hand,
+   on top of any WELCOME BACK gave (PASS_PERKS). */
 const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback',
-                      'evo-ember'];
+                      'evo-ember', 'passes-20'];
 
 const Awards = {
   syncing: false,
@@ -72450,12 +72467,16 @@ function eraMark(played) {
    back. Function declarations, not consts: THE HACKER's `need` asks
    comebackHas() and can be asked before this line has run. */
 const COMEBACK_PASSES = 10;
+/* Every perk that carries passes, and how many. They add up: WELCOME BACK's
+   ten and a hand-given twenty are thirty, all spent from one passUsed. */
+const PASS_PERKS = { 'comeback': COMEBACK_PASSES, 'passes-20': 20 };
 function comebackHas(p) {
   return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
 }
 function passesLeft() {
-  if (!comebackHas()) return 0;
-  return Math.max(0, COMEBACK_PASSES - (Save.profile.passUsed || []).length);
+  let held = 0;
+  for (const a of Awards.list()) if (a && a.perk && PASS_PERKS[a.perk]) held += PASS_PERKS[a.perk];
+  return Math.max(0, held - (Save.profile.passUsed || []).length);
 }
 
 /* Banking a grant goes through Awards.clean like everything else, so a bad id
@@ -79641,8 +79662,9 @@ function chalEnd(won) {
 function chalQuit() { Chal.on = null; Chal.won = false; Chal.reward = null; }
 
 /* ------------------------------- a pass -----------------------------------
-   WELCOME BACK's challenge pass clears the selected challenge outright,
-   locked or not, exactly as beating it does: into chal, so its reward joins
+   A challenge pass (WELCOME BACK's, or given by hand: PASS_PERKS) clears the
+   selected challenge outright, locked or not, exactly as beating it does:
+   into chal, so its reward joins
    the pool and it counts toward the tiers above it. Two presses, so a stray
    key cannot spend one — the first arms it for CHAL_PASS_ARM_MS, the second
    spends it. */
