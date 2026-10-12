@@ -4,7 +4,7 @@ empty lobby. It begins as it was written, for three square waves and a noise cha
 it one at a time; then the room fills and it is played by a band; and at the end, with the house fully
 dark, it is played slow and low, with an echo of itself that is breaking up. 155 BPM, G minor.
 
-  intro  4 bars, once  the screen comes on: a start-up arpeggio, an organ under the floor, the tune's
+  intro  4 bars, once  the screen comes on: a start-up arpeggio, a cathedral organ under the floor, the tune's
                        first two bars on one thin voice, PRESS START
   p1     16 bars       the title screen: the whole chip band; second time round THEY LEFT: the arpeggio
                        goes, then the bass, then the drums, and an organ and a choir take their places
@@ -19,7 +19,7 @@ THE HOUSE's music box plays this same tune, in three: the lobby's music, heard f
 import numpy as np
 from daw import SR, Song, Bus, chord, midi, hp, lp, bp, highshelf, peak, clip, crush, st, fade, noise
 from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, organ, synth_kick, synth_hat
-from scores._common import third, kit, hallows, riff, tomfill
+from scores._common import third, kit, hallows, riff, tomfill, pipes
 
 TITLE = 'One Player Online'
 ORDER = ['intro', 'p1', 'p2', 'p3', 'p3']
@@ -69,6 +69,7 @@ def song():
                        gain=0.12, dly=0.4, rev=0.3, fx=[lambda x: hp(crush(x, 5, 9), 300.0)]))
     # the house
     s.add('organ', Bus(organ(trem=0.3, tremhz=5.3), gain=0.3, rev=0.35, duck=0.15, fx=[lambda x: clip(hp(x, 110.0), 0.6)]))
+    s.add('pipes', Bus(pipes(), gain=0.5, rev=0.35, duck=0.15, fx=[lambda x: hp(x, 100.0)]))                 # the cathedral organ, on the chords' roots
     s.add('choir', Bus(sampler(H['choir'], rel=0.5), gain=0.26, rev=0.5, duck=0.2, fx=[lambda x: hp(x, 180.0)]))
     s.add('bell', Bus(sampler(H['bell'], rel=1.5), gain=0.4, rev=0.4, fx=[lambda x: hp(x, 150.0)]))
     s.add('timp', Bus(sampler(H['timp'], rel=0.5), gain=0.45, rev=0.28, fx=[lambda x: clip(x, 0.6)]))
@@ -101,6 +102,8 @@ def song():
             while m < lo: m += 12
             while m > hi: m -= 12
             sec.note(bus, bar, at, dur, m, v)
+    def pipe(sec, bar, sym, v=0.8, dur=15.5):
+        sec.note('pipes', bar, 0, dur, root(sym) + 12, v, kind='minor' if sym.endswith('m') else 'fifth')
     def chips(sec, bar, v=1.0, fill=False):
         sec.hits('ckick', bar, 'x.....x.x.......', v=v); sec.hits('csnare', bar, '....x.......x...' if not fill else '....x.....x.xxxx', v=v)
         sec.hits('chat', bar, 'x.x.x.x.x.x.x.x.', v=v)
@@ -111,7 +114,7 @@ def song():
     i.note('bell', 0, 0, 30, 58, 0.7)
     for b in range(4):
         sym = 'D' if b == 3 else ('Eb' if b == 2 else 'Gm')
-        held(i, 'organ', b, sym, 0.45 + 0.1 * b, lo=43, hi=58)
+        held(i, 'organ', b, sym, 0.3 + 0.06 * b, lo=43, hi=58); pipe(i, b, sym, 0.3 + 0.07 * b)
         if b >= 2: held(i, 'choir', b, sym, 0.6 + 0.15 * (b - 2), lo=55, hi=68)
     i.line('pulse', 1, THEME[0], 0.75); i.line('pulse', 2, THEME[1], 0.8)
     i.hits('arp', 3, 'x...x...x...x.xx', p=74, v=1.2)                                                    # PRESS START
@@ -124,7 +127,7 @@ def song():
         k = b % 8; sym = THEME_CH[k]; left = (b - 8) // 2 + 1 if b >= 8 else 0       # how many have gone: 0, then 1 to 4
         p.line('pulse', b, THEME[k], 1.0)
         if left < 1: arp(p, b, sym)
-        else: held(p, 'organ', b, sym, 0.75, lo=43, hi=60)
+        else: held(p, 'organ', b, sym, 0.4, lo=43, hi=60); pipe(p, b, sym, 0.5)
         if left < 2: walk(p, b, sym)
         else: held(p, 'choir', b, sym, 0.8, lo=55, hi=68)
         if left < 3:
@@ -150,7 +153,7 @@ def song():
             q.hits('kick', b, 'x..x..x...x.x...' if b % 2 == 0 else 'x..x..x..x..x.x.')
             q.hits('snare', b, '....x.......x...' if b != 15 else '....x.......xxxx')
             q.hits('hat', b, 'x.x.x.x.x.x.x.x.' if not second else 'xoxoxoxoxoxoxoxo', v=0.85)
-            held(q, 'organ', b, sym, 0.8)
+            held(q, 'organ', b, sym, 0.5); pipe(q, b, sym, 0.7)
             if second: held(q, 'choir', b, sym, 0.9, lo=55, hi=68)
             arp(q, b, sym, 1.2)
         q.line('pulse', b, tune, 1.0)
@@ -165,7 +168,7 @@ def song():
         second = b >= 8; k = b % 8
         sym = (LOBBY_CH if second else THEME_CH)[k]; tune = (LOBBY if second else THEME)[k]; g = ROOT[sym]
         riff(r, b, f'{g}*:6 {g}:1 {g}:1 {g}*:4 {g}:2 {g}:2' if not second else ' '.join(f'{g}*:1 {g}:1 {g}:1 {g}:1' for _ in range(4)))
-        held(r, 'organ', b, sym, 1.0, lo=43, hi=62); held(r, 'choir', b, sym, 0.85 if not second else 1.0, lo=55, hi=68)
+        pipe(r, b, sym, 0.95); held(r, 'organ', b, sym, 0.55, lo=43, hi=62); held(r, 'choir', b, sym, 0.85 if not second else 1.0, lo=55, hi=68)
         if not second:
             r.hits('kick', b, 'x.........x.....' if b % 2 == 0 else 'x.....x...x.....'); r.hits('snare', b, '........x.......' if b != 7 else '........x...xxxx')
             r.hits('china', b, 'x...x...x...x...', v=0.65)

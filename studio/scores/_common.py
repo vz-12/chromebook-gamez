@@ -5,7 +5,7 @@ pentatonic. Those four bars are its first half; the second half lifts through F 
 """
 import math
 import numpy as np
-from daw import SR, Ev, sample, shift, gate, midi, lp, hp, peak, highshelf, st, fade
+from daw import SR, Ev, sample, shift, gate, midi, lp, hp, peak, highshelf, st, fade, add
 from inst import layer, synth_kick, noise, sampler, tapestop
 
 # the main theme, a bar a line, in 16ths: note:length (r is a rest)
@@ -395,22 +395,36 @@ def mirror():
 
 _HALLOWS = {}
 def hallows():
-    """ALL HALLOWS' sounds. No new recordings: everything here was already in the library, some of it
-    never used, and the rest is made in the studio (the organ, the theremin, the wind, the door, the
-    thunder: inst.py).
+    """ALL HALLOWS' sounds: what the library already had, and seven recordings the user picked for it
+    (12 Oct), three of which are loops with the wanted sound somewhere inside them.
 
-    A tuba playing one short F, for the oom of an oom-pah. Of THE ARCHIVIST's harpsichord only two notes
-    are kept, the long low C and a short A: the other two turned out to be chords (an E with its major
-    third and seventh, a C sharp with a sixth), and a tune in a minor key played on them came out with
-    major thirds all over it. harpsichord() below plays the two clean ones over a body made here.
-    Pizzicato, kettledrums and string stabs are THE VAULT's, the ghosts' choir and the upright THE
-    VOID's. A sung bowl on F sharp (a shade flat) is the bell: its loudest overtone is a major third two
-    octaves up, so it tolls only on a note whose major third is in the key (F in D minor, B flat in G
-    minor), where bowl and overtone are two notes of the home chord. The night is a recording of insects; a key turning in a lock is cut into its clicks, for a latch; a snow globe
-    being wound is the music box's key, and a kitchen timer's ticks the lights' own timer."""
+    From the library. A tuba playing one short F, for the oom of an oom-pah. Of THE ARCHIVIST's
+    harpsichord only two notes are kept, the long low C and a short A: the other two turned out to be
+    chords (an E with its major third and seventh, a C sharp with a sixth), and a tune in a minor key
+    played on them came out with major thirds all over it. Pizzicato, kettledrums and string stabs are
+    THE VAULT's, the ghosts' choir and the upright THE VOID's. A sung bowl on F sharp (a shade flat) is
+    the bell: its loudest overtone is a major third two octaves up, so it tolls only on a note whose
+    major third is in the key (F in D minor, B flat in G minor), where bowl and overtone are two notes
+    of the home chord. The night is a recording of insects; a key turning in a lock is cut into its
+    clicks, for a latch; a snow globe being wound is the music box's key, and a kitchen timer's ticks
+    the lights' own timer.
+
+    The user's seven. A door: a short dry creak, and a second one after it. A clap of thunder. A storm
+    wind rising and falling. A crow, five calls, cut apart. And three loops:
+      a music box in F minor, one note at a time. Five of its notes are clean enough to lift (in the
+        rest the note before is still ringing loudly, and once the note is moved to another pitch that
+        ring is a wrong note: an F with a C in it put a C sharp under every F sharp), each about a third
+        of a second and a little sharp, as music boxes are: their roots here are as measured, so they
+        play in tune;
+      a cathedral organ in C minor. Its first chord is an open fifth, with no third in it, so it can
+        stand on any root under any chord; a little later it holds a C minor. Both are kept ('fifth',
+        'minor'), about eight cents flat, as measured. pipes() below holds them as long as is asked;
+      a harpsichord in C minor: a full arrangement in running sixteenths, every note ringing into the
+        next. Only its lowest notes are ever alone, and an F is kept, for the left hand."""
     if _HALLOWS: return _HALLOWS
     h = _HALLOWS; V = vault(); A = archive(); W = void(); H = hive()
     def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    def piece(x, t0, t1, a=0.002, r=0.03): return fade(norm(x[max(0, int(t0 * SR)):int(t1 * SR)].copy()), a, r)
     h['tuba'] = {41.05: gate(sample('TC_tuba_staccato_F'), 0.42, 0.14)}
     h['harpsi'] = {47.89: V['harpsi'][47.89], 68.99: V['harpsi'][68.99]}
     h['pizz'] = V['pizz']; h['low'] = A['low']; h['timp'] = V['timp']
@@ -424,17 +438,60 @@ def hallows():
     top = max(float(np.abs(c).max()) for c in lock)
     h['latch'] = [gate(norm(c), 0.09, 0.03) for c in lock if float(np.abs(c).max()) > top * 0.25][:6]
     h['cabasa'] = H['cabasa']; h['ridge'] = H['ridge']; h['guiro'] = H['guiro']
+    # the user's seven
+    h['creak'] = piece(sample('BRS_Door_Wood_Cheap_Op_Creak', trim=False), 0.05, 0.75, 0.005, 0.1)
+    h['thunder'] = piece(sample('BRS_Thunder_Clap_Med_No_Rain_1', trim=False), 0.35, 6.5, 0.01, 2.0)
+    h['storm'] = fade(norm(sample('ESM_MU_FX_wind_whoosh_storm_at_sea_heavy_winds_blowing_thunder_rain_waves_billowing_14_em', trim=False)), 0.3, 0.5)
+    crow = sample('ESM_HG_Cinematic_FX_creature_animal_bird_crow_morning_calls_05', trim=False)
+    h['crow'] = [piece(crow, a, b, 0.003, 0.06) for a, b in ((0.02, 0.74), (0.78, 1.25), (1.26, 1.88), (1.92, 2.46), (2.47, 3.12))]
+    box = sample('DBK_TRIV_82_music_box_loop_gargoyle_Fmin', trim=False)
+    h['box'] = {root: piece(box, t - 0.004, t + d, 0.001, 0.06) for root, t, d in
+                ((82.04, 0.02, 0.38), (85.07, 0.41, 0.36), (90.99, 7.72, 0.34), (92.19, 4.79, 0.36), (96.17, 4.43, 0.36))}
+    org = sample('SOUNDDOCTRINE_cathedrals_melodic_loop_tense_04_pipe_organ_chords_hard_90_bpm_Cmin', trim=False)
+    h['organ'] = {'fifth': piece(org, 0.0, 0.645, 0.004, 0.02), 'minor': piece(org, 1.69, 2.67, 0.01, 0.02)}
+    h['harpsi'][52.97] = piece(sample('PL_BA_90_Harpsi_Loop_Wood_Full_Mix_Cm', trim=False), 7.996, 8.165, 0.001, 0.02)
     return h
 
 def harpsichord():
-    """A harpsichord: the pluck is the recording's (its two clean notes), the string under it is made
-    here, a narrow pulse that is bright when struck and gone in half a second, with a quieter one an
-    octave up for the second set of strings."""
+    """A harpsichord: the pluck is a recording's (the three clean notes there are), the string under it
+    is made here, a narrow pulse that is bright when struck and gone in half a second, with a quieter
+    one an octave up for the second set of strings."""
     from inst import synth
     pluck = sampler(hallows()['harpsi'], rel=0.1)
     kw = dict(pw=0.16, voices=2, detune=0.04, spread=0.2, cutoff=3400.0, env=2.6, fdecay=0.07, res=0.8, track=0.6, a=0.001, d=0.45, s=0.0, r=0.1)
     body = synth('square', **kw); four = synth('square', octave=1, **kw)
     def play(evs, n, ctx): return pluck(evs, n, ctx) * 0.8 + body(evs, n, ctx) * 0.5 + four(evs, n, ctx) * 0.16
+    return play
+
+def sustain(x, secs, xf=0.12):
+    """A held sound made longer: past its own length its steady middle goes round again, each turn faded
+    into the one before."""
+    n = int(secs * SR)
+    if n <= len(x): return x[:n]
+    a = int(len(x) * 0.3); b = int(len(x) * 0.92); k = min(int(xf * SR), (b - a) // 2)
+    w = np.linspace(0.0, 1.0, k)[:, None]
+    out = x[:b].copy(); loop = x[a:b]
+    while len(out) < n:
+        out[-k:] = out[-k:] * np.cos(w * math.pi / 2) + loop[:k] * np.sin(w * math.pi / 2)
+        out = np.concatenate([out, loop[k:]])
+    return out[:n]
+
+def pipes(rel=0.4):
+    """The cathedral organ, from the recording. A note is a chord's root: it sounds the open fifth on
+    that root, or with kind='minor' the minor chord, for the note's length. Every root is folded into
+    the octave the recording was made in, so nothing is moved more than a fourth or so."""
+    H = hallows(); memo = {}
+    def play(evs, n, ctx):
+        out = np.zeros((n, 2))
+        for e in evs:
+            kind = 'minor' if e.kw.get('kind') == 'minor' else 'fifth'
+            p = e.p
+            while p > 54.5: p -= 12
+            while p < 42.5: p += 12
+            key = (kind, round(p, 2))
+            if key not in memo: memo[key] = shift(st(H['organ'][kind]), p - 47.92)
+            add(out, gate(sustain(memo[key], e.dur + rel), e.dur, rel), e.t * SR, e.v)
+        return out
     return play
 
 def theremin(v=0.3):
@@ -444,9 +501,13 @@ def theremin(v=0.3):
     return synth('tri', sq=0.06, cutoff=5200.0, res=0.7, track=0.5, a=0.07, d=0.2, s=0.9, r=0.16, vib=v, vibhz=5.7, vibat=0.1, glide=0.13)
 
 def musicbox(decay=0.9):
-    """A comb's teeth plucked by a drum of pins: a glassy note that is nearly all strike."""
+    """A music box. The teeth are the recording's, five of its notes; under each is a glassy ring made
+    here, since a lifted note stops where the next one began."""
     from inst import keys
-    return keys(ratio=6.0, index=0.9, decay=decay, a=0.001, bright=1.0, spread=0.25)
+    tines = sampler(hallows()['box'], rel=0.1, vel=1.0)
+    ring = keys(ratio=6.0, index=0.9, decay=decay, a=0.001, bright=1.0, spread=0.25)
+    def play(evs, n, ctx): return tines(evs, n, ctx) * 0.9 + ring(evs, n, ctx) * 0.3
+    return play
 
 def bones():
     """A xylophone, for ribs: wood, short and dry."""

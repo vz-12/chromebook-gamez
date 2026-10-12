@@ -18,8 +18,8 @@ finishing is being done for him, is the jig played whole, and its last bar comes
 "One day."
 """
 from daw import Song, Bus, chord, midi, hp, lp, highshelf, peak, clip
-from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, organ, thunder
-from scores._common import third, kit, hallows, riff, legato, bones, harpsichord
+from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, organ
+from scores._common import third, kit, hallows, riff, legato, bones, harpsichord, pipes
 from scores.patch import JIG, JIG_CH, FALL, LANTERN, ROOT, PAH
 
 TITLE = "I'll Get to It"
@@ -64,12 +64,13 @@ def song():
     s.add('harpsi', Bus(harpsichord(), gain=0.7, rev=0.2, dly=0.1, fx=[lambda x: clip(hp(x, 180.0), 0.45)]))
     s.add('bones', Bus(bones(), gain=0.32, rev=0.2, dly=0.12, fx=[lambda x: hp(x, 400.0)]))
     s.add('organ', Bus(organ(trem=0.2), gain=0.3, rev=0.3, duck=0.15, fx=[lambda x: clip(hp(x, 120.0), 0.6)]))
+    s.add('pipes', Bus(pipes(), gain=0.5, rev=0.3, duck=0.15, fx=[lambda x: hp(x, 100.0)]))                  # the cathedral organ, on the chords' roots
     s.add('lead', Bus(synth('saw', voices=3, detune=0.12, spread=0.45, sq=0.4, cutoff=2900.0, env=1.2, fdecay=0.2, res=1.2,
                             a=0.005, d=0.16, s=0.85, r=0.08, vib=0.12, vibat=0.2, glide=0.07, dirt=0.35),
                       gain=0.26, dly=0.2, rev=0.2, duck=0.1, fx=[lambda x: hp(x, 250.0)]))
     s.add('choir', Bus(sampler(H['choir'], rel=0.5), gain=0.26, rev=0.5, duck=0.2, fx=[lambda x: hp(x, 180.0)]))
     s.add('fx', Bus(clips({'boom': boom(secs=2.4), 'riser': riser(2 * s.bar, lo=300.0, hi=8000.0), 'rev': reverse(K['crash'], 1.5),
-                           'thunder': thunder(4.0)}), gain=1.0, rev=0.25, fx=[lambda x: clip(x, 0.8)]))
+                           'thunder': H['thunder']}), gain=1.0, rev=0.25, fx=[lambda x: clip(x, 0.8)]))
 
     def root(sym): return midi(ROOT[sym])
     def held(sec, bus, bar, sym, v=1.0, lo=50, hi=65, at=0, dur=11.5):
@@ -77,6 +78,8 @@ def song():
             while m < lo: m += 12
             while m > hi: m -= 12
             sec.note(bus, bar, at, dur, m, v)
+    def pipe(sec, bar, sym, v=0.8, at=0, dur=11.5):
+        sec.note('pipes', bar, at, dur, root(sym) + 12, v, kind='minor' if sym.endswith('m') else 'fifth')
     def skank(sec, bar, sym, v=1.0, at=(3, 9)):
         for a in at:
             for m in PAH[sym]: sec.note('organ', bar, a, 1.6, m, v)
@@ -96,9 +99,9 @@ def song():
     i.line('harpsi', 0, 'D5:2 A5:1 Bb5:2 A5:1 r:6', 0.9, octave=-1)
     i.line('bones', 1, 'D5:2 A5:1 Bb5:2 A5:1 F5:2 r:4', 1.0)
     i.line('lead', 2, 'D5:2 A5:1 Bb5:2 A5:1 F5:2 E5:1 r:3', 0.9)
-    riff(i, 3, 'A1*:6 A1*:3 A1:1 A1:1 A1:1'); held(i, 'organ', 3, 'A', 0.8)
+    riff(i, 3, 'A1*:6 A1*:3 A1:1 A1:1 A1:1'); held(i, 'organ', 3, 'A', 0.5); pipe(i, 3, 'A', 0.8)
     i.note('tuba', 3, 0, 2.5, 33, 0.9); i.note('timp', 3, 0, 4, 45, 0.8); i.note('timp', 3, 6, 3, 45, 0.85)
-    i.hits('kick', 3, 'x.....x..x..', v=0.85); i.hits('snare', 3, '...x..x..xxx', v=0.85)
+    i.hits('kick', 3, 'x.....x..x..', v=0.85); i.hits('snare', 3, '...x..x..xxx', v=0.7)
     i.note('fx', 2, 0, 24, 60, 0.2, s='riser'); i.note('fx', 3, 11.99, 1, 60, 0.26, s='rev', lead=1.5 - 0.01 * s.step)
 
     # ---- p1: started, and put down
@@ -114,7 +117,8 @@ def song():
             p.line('lead', b, tune, 1.0); p.line('harpsi', b, tune, 0.9, octave=-1)
             skank(p, b, sym, 0.9)
         else:                       # nobody is playing the tune: the band, in the gap
-            held(p, 'organ', b, sym, 1.0, at=0, dur=2.5); held(p, 'organ', b, sym, 0.9, at=6, dur=2.5)
+            held(p, 'organ', b, sym, 0.6, at=0, dur=2.5); held(p, 'organ', b, sym, 0.55, at=6, dur=2.5)
+            pipe(p, b, sym, 0.95, at=0, dur=2.5); pipe(p, b, sym, 0.85, at=6, dur=2.5)
             p.hits('china', b, 'x.....x.....', v=0.7)
     for b in (0, 8): p.note('crash', b, 0, 1, 60, 1.0); p.note('fx', b, 0, 1, 60, 0.16, s='boom')
     for b in (4, 12): p.note('crash', b, 0, 1, 60, 0.6)
@@ -126,8 +130,9 @@ def song():
     for b in range(16):
         k = b % 8; sym, low = FALL[k]; g = ROOT[sym]; second = b >= 8
         riff(q, b, run(g), bass=False)
-        for n in range(6): q.note('bass', b, n * 2, 1.7, midi(low), 1.0 if n % 3 == 0 else 0.82)
-        held(q, 'organ', b, sym, 0.85); held(q, 'choir', b, sym, 0.75 if not second else 0.95, lo=55, hi=68)
+        dull = dict(open=0.55) if k in (1, 3) else {}          # under a chord's third the bass is kept dull: its own overtones spell another chord
+        for n in range(6): q.note('bass', b, n * 2, 1.7, midi(low), 1.0 if n % 3 == 0 else 0.82, **dull)
+        pipe(q, b, sym, 0.85); held(q, 'organ', b, sym, 0.5); held(q, 'choir', b, sym, 0.75 if not second else 0.95, lo=55, hi=68)
         q.hits('dkick', b, 'xoxoxoxoxoxo', v=0.85, len=0.09); q.hits('kick', b, 'x.....x.....')
         q.hits('snare', b, '...x.....x..' if b != 15 else '...x..x..xxx')
         q.hits('china', b, 'x..x..x..x..', v=0.6)
@@ -152,7 +157,8 @@ def song():
         tune = 'E5:2 C#5:1 A5:3 D6:6' if last else JIG[k]
         if last:
             riff(r, b, 'A1*:2 A1:1 A1*:3 D2*:6')
-            held(r, 'organ', b, 'A', 1.0, dur=5.5); held(r, 'organ', b, 'Dm', 1.0, at=6, dur=5.5)
+            held(r, 'organ', b, 'A', 0.6, dur=5.5); held(r, 'organ', b, 'Dm', 0.6, at=6, dur=5.5)
+            pipe(r, b, 'A', 0.9, dur=5.5); pipe(r, b, 'Dm', 1.0, at=6, dur=5.5)
             held(r, 'choir', b, 'A', 0.9, lo=55, hi=68, dur=5.5); held(r, 'choir', b, 'Dm', 1.0, lo=55, hi=68, at=6, dur=5.5)
             r.note('timp', b, 0, 3, 45, 0.9); r.note('timp', b, 6, 6, 38, 1.0)
             r.hits('kick', b, 'x..x..x.....'); r.hits('snare', b, '..x..x......'); r.note('crash', b, 6, 1, 60, 1.0)
@@ -164,7 +170,7 @@ def song():
             r.hits('snare', b, '...x.....x..'); r.hits('china', b, 'x..x..x..x..', v=0.6)
         r.line('lead', b, tune, 1.0); r.line('harpsi', b, tune, 0.9, octave=-1); r.line('bones', b, tune, 0.7)
         if second: r.line('lead', b, third(tune, 'D'), 0.42)
-    for b in (0, 8): r.note('crash', b, 0, 1, 60, 1.0); r.note('fx', b, 0, 1, 60, 0.2, s='boom')
+    for b in (0, 8): r.note('crash', b, 0, 1, 60, 1.0); r.note('fx', b, 0, 1, 60, 0.2, s='boom'); pipe(r, b, 'Dm', 0.9, dur=5.5)
     for b in (4, 12): r.note('crash', b, 0, 1, 60, 0.7)
     fill(r, 7)
 

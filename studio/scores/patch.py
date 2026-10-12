@@ -3,21 +3,21 @@ ripening in it. A jig in a minor key: four beats to the bar and three to the bea
 on a harpsichord over a tuba and plucked strings, with a xylophone for the ribs and a theremin for
 whatever is standing in the field. 150 BPM, D minor, with an E flat where the vine catches.
 
-  intro  4 bars, once     the night: insects, wind, a bell; the tuba finds the beat, then the tune's
-                          first four notes
+  intro  4 bars, once     the night: insects, wind, a crow, a bell; the tuba finds the beat, then the
+                          tune's first four notes
   a      16 bars, calm    the patch between waves: tuba and pizzicato, the tune in pieces with the
                           theremin answering each, then whole on the harpsichord
   b      16 bars, fight   the jig at full tilt: the drums shuffling, guitars, an organ on the off-beats,
                           the tune doubled
   c      16 bars, fight   the scarecrow: half time, the bass walking down by semitones, one long line on
-                          the theremin over the organ and a choir; back into b
+                          the theremin over a cathedral organ and a choir; back into b
 
 The tune opens on four notes, the keynote, the fifth, the note above it and the fifth again, which every
 ALL HALLOWS track begins from.
 """
-from daw import Song, Bus, chord, midi, hp, lp, highshelf, peak, clip
-from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, organ, wind, creak, thunder
-from scores._common import third, kit, hallows, riff, legato, theremin, bones, harpsichord
+from daw import Song, Bus, chord, midi, hp, lp, highshelf, peak, clip, shift
+from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, organ
+from scores._common import third, kit, hallows, riff, legato, theremin, bones, harpsichord, pipes
 
 TITLE = 'Left to Ripen'
 ORDER = ['intro', 'a', 'b', 'c', 'b', 'a']
@@ -53,7 +53,7 @@ def song():
              echo=dict(time=beat, fb=0.3, taps=3), master=lambda x: highshelf(hp(x, 32.0), 9000.0, -1.5))
     s.add('kick', Bus(hit(K['kick_m']), gain=0.58, key=True, fx=[lambda x: clip(x, 0.7)]))
     s.add('snare', Bus(hit(K['snare_m']), gain=0.55, rev=0.14, fx=[lambda x: clip(x, 0.65)]))
-    s.add('hat', Bus(hit(K['hats'], human=0.002), gain=0.7, fx=[lambda x: clip(hp(x, 500.0), 0.3)]))
+    s.add('hat', Bus(hit(K['hats'], human=0.002), gain=1.0, fx=[lambda x: clip(hp(x, 500.0), 0.4)]))
     s.add('crash', Bus(hit(K['crash']), gain=0.3, rev=0.22, fx=[lambda x: hp(x, 300.0)]))
     s.add('tom', Bus(hit(K['tom_mid']), gain=0.55, rev=0.2, fx=[lambda x: clip(x, 0.7)]))
     s.add('clave', Bus(hit(H['clave']), gain=0.6, dly=0.2, rev=0.25, fx=[lambda x: clip(hp(x, 500.0), 0.45)]))
@@ -68,6 +68,7 @@ def song():
     s.add('harpsi', Bus(harpsichord(), gain=0.42, rev=0.24, dly=0.12, fx=[lambda x: hp(x, 180.0)]))
     s.add('bones', Bus(bones(), gain=0.3, rev=0.2, dly=0.15, fx=[lambda x: hp(x, 400.0)]))
     s.add('organ', Bus(organ(trem=0.25), gain=0.3, rev=0.3, duck=0.15, fx=[lambda x: clip(hp(x, 120.0), 0.6)]))
+    s.add('pipes', Bus(pipes(), gain=0.5, rev=0.3, duck=0.15, fx=[lambda x: hp(x, 100.0)]))                  # the cathedral organ, on the chords' roots
     s.add('ther', Bus(theremin(), gain=0.42, rev=0.35, dly=0.25, fx=[lambda x: hp(x, 250.0)]))
     s.add('lead', Bus(synth('saw', voices=2, detune=0.1, spread=0.35, sq=0.4, cutoff=2700.0, env=1.2, fdecay=0.2, res=1.2,
                             a=0.005, d=0.16, s=0.8, r=0.08, vib=0.1, dirt=0.3),
@@ -75,8 +76,8 @@ def song():
     s.add('choir', Bus(sampler(H['choir'], rel=0.5), gain=0.25, rev=0.5, duck=0.2, fx=[lambda x: hp(x, 180.0)]))
     s.add('bell', Bus(sampler(H['bell'], rel=1.5), gain=0.35, rev=0.4, fx=[lambda x: hp(x, 150.0)]))
     s.add('fx', Bus(clips({'boom': boom(secs=2.4), 'riser': riser(2 * s.bar, lo=300.0, hi=8000.0), 'rev': reverse(K['crash'], 1.5),
-                           'wind': wind(4.5), 'gust': wind(6.0, lo=320.0, hi=1700.0, gusts=4, seed=31), 'night': H['night'],
-                           'creak': creak(1.1), 'thunder': thunder(4.0), 'guiro': H['guiro']}),
+                           'wind': H['storm'], 'gust': shift(H['storm'], -4.0), 'night': H['night'], 'creak': H['creak'],
+                           'thunder': H['thunder'], 'guiro': H['guiro'], 'caw': H['crow'][0], 'caw2': H['crow'][2], 'caw3': H['crow'][4]}),
                     gain=1.0, rev=0.25, fx=[lambda x: clip(x, 0.8)]))
 
     def root(sym): return midi(ROOT[sym])
@@ -92,6 +93,8 @@ def song():
             while m < lo: m += 12
             while m > hi: m -= 12
             sec.note(bus, bar, 0, dur, m, v)
+    def pipe(sec, bar, sym, v=0.8, at=0, dur=11.5):
+        sec.note('pipes', bar, at, dur, root(sym) + 12, v, kind='minor' if sym.endswith('m') else 'fifth')
     def skank(sec, bar, sym, v=0.8):
         """The organ on the off-beats: two and four."""
         for a in (3, 9):
@@ -108,6 +111,7 @@ def song():
     i.line('harpsi', 2, 'D5:2 A5:1 Bb5:2 A5:1 r:6', 0.7, octave=-1)
     i.line('harpsi', 3, JIG[3], 0.75, octave=-1)
     i.note('timp', 3, 6, 3, 45, 0.5); i.note('timp', 3, 9, 3, 45, 0.65)
+    i.note('fx', 1, 6, 4, 60, 0.3, s='caw'); i.note('fx', 1, 10.5, 4, 60, 0.22, s='caw2')
     i.note('fx', 3, 2, 4, 60, 0.3, s='creak'); i.note('fx', 3, 11.99, 1, 60, 0.2, s='rev', lead=1.5 - 0.01 * s.step)
 
     # ---- a: calm. The patch between waves
@@ -133,7 +137,7 @@ def song():
         if b >= 4: a.line('bones', 8 + b, JIG[b], 0.55)
     a.note('bell', 0, 0, 20, 53, 0.6); a.note('bell', 8, 0, 20, 53, 0.5)
     a.note('fx', 2, 0, 1, 60, 0.3, s='wind'); a.note('fx', 10, 6, 1, 60, 0.26, s='gust')
-    a.note('fx', 7, 6, 4, 60, 0.22, s='creak')
+    a.note('fx', 7, 6, 4, 60, 0.22, s='creak'); a.note('fx', 5, 9, 4, 60, 0.2, s='caw3'); a.note('fx', 13, 6, 4, 60, 0.2, s='caw'); a.note('fx', 13, 10.5, 4, 60, 0.15, s='caw2')
     a.note('timp', 15, 6, 3, 45, 0.4); a.note('timp', 15, 9, 3, 45, 0.5)
     a.note('fx', 15, 11.99, 1, 60, 0.2, s='rev', lead=1.5 - 0.01 * s.step)
 
@@ -148,8 +152,9 @@ def song():
         f.hits('hat', b, 'x.ox.ox.ox.o', v=0.85)
         f.hits('clave', b, '.....x.....x', v=0.6)
         f.line('lead', b, JIG[k], 1.0); f.line('harpsi', b, JIG[k], 0.9, octave=-1)
+        f.note('harpsi', b, 0, 2, root(sym) + 12, 0.8)          # the left hand, on one
         if second: f.line('bones', b, JIG[k], 0.7); f.line('lead', b, third(JIG[k], 'D'), 0.42)
-    for b in (0, 8): f.note('crash', b, 0, 1, 60, 1.0); f.note('fx', b, 0, 1, 60, 0.14, s='boom')
+    for b in (0, 8): f.note('crash', b, 0, 1, 60, 1.0); f.note('fx', b, 0, 1, 60, 0.14, s='boom'); pipe(f, b, 'Dm', 0.9, dur=5.5)
     for b in (4, 12): f.note('crash', b, 0, 1, 60, 0.6)
     for n, semi in enumerate((7, 2, -5)): f.note('tom', 7, 9 + n, 1, 60, 0.8, semi=semi)
     f.note('fx', 14, 0, 24, 60, 0.16, s='riser')
@@ -160,9 +165,10 @@ def song():
     for b in range(16):
         k = b % 8; sym, low = FALL[k]; g = ROOT[sym]; second = b >= 8
         riff(c, b, f'{g}*:6 {g}*:3 {g}:1 {g}:2', bass=False)
-        c.note('bass', b, 0, 5.5, midi(low), 1.0); c.note('bass', b, 6, 2.6, midi(low), 0.85); c.note('bass', b, 9, 2.6, midi(low), 0.85)
-        oom(c, b, sym, 0.85, low=low if midi(low) >= 34 else None)
-        held(c, 'organ', b, sym, 0.8); held(c, 'choir', b, sym, 0.7 if not second else 0.9, lo=55, hi=68)
+        dull = dict(open=0.55) if k in (1, 3) else {}          # under a chord's third the bass is kept dull: its own overtones spell another chord
+        c.note('bass', b, 0, 5.5, midi(low), 1.0, **dull); c.note('bass', b, 6, 2.6, midi(low), 0.85, **dull); c.note('bass', b, 9, 2.6, midi(low), 0.85, **dull)
+        oom(c, b, sym, 0.85, low=low if midi(low) >= 34 and k not in (1, 3) else None)     # not under a chord's third: the tuba's own loud third would be a wrong note there
+        pipe(c, b, sym, 0.85); held(c, 'organ', b, sym, 0.5); held(c, 'choir', b, sym, 0.7 if not second else 0.9, lo=55, hi=68)
         c.hits('kick', b, 'x.........x.' if b % 2 == 0 else 'x....x....x.')
         c.hits('snare', b, '......x.....' if b != 15 else '......x..xxx')
         c.hits('hat', b, 'x..x..x..x..', v=0.8)

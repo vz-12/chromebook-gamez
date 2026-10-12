@@ -303,9 +303,10 @@ is pushed until you say; `main` only when you say ship.
 4. **ALL HALLOWS.** `patch`, `backlog`, `house`, `deadgame`, `vigil`, and
    `yard` + `ragequit` once chapter III is built. It's early on purpose:
    chapter II opens 14 Oct and chapter III 23 Oct.
-   *(12 Oct, on your word: the first two chapters, four tracks, built with
-   nothing new from the library. `patch` "Left to Ripen", `backlog` "I'll
-   Get to It", `house` "Lights on a Timer", `deadgame` "One Player Online".
+   *(12 Oct, on your word: the first two chapters, four tracks. `patch`
+   "Left to Ripen", `backlog` "I'll Get to It", `house` "Lights on a
+   Timer", `deadgame` "One Player Online". Built first with nothing new
+   from the library, then with the seven recordings you picked for them.
    Not shipped: they wait for a listen.*
 
    - *One opening for the whole event:* every track's tune begins on the
@@ -314,12 +315,33 @@ is pushed until you say; `main` only when you say ship.
    - *Each chapter is one tune twice:* the area's tune is its boss's. THE
      PATCH's jig is THE BACKLOG's, unfinished; DEAD GAME's title music is
      what THE HOUSE's music box plays, in three.
-   - *Made in the studio, since there were no recordings:* a pipe organ
-     (added up from sines, rank by rank), a theremin, a music box, a
-     xylophone, wind, a door's creak, thunder (`inst.py`, `_common.py`
-     `hallows()`). They are the first things to replace with recordings,
-     if any are wanted: a real creak, a real music box, thunder, a pipe
-     organ, an owl or a crow for the patch.
+   - *Your seven recordings, and where each went:* the door (THE PATCH's
+     gate, and in THE HOUSE twice: as it is for a stair, slowed for a
+     heavier door), the thunder and the storm wind (all but `deadgame`),
+     the crow (THE PATCH, calm only). The other three are loops, so the
+     sound wanted had to be lifted out of them:
+     - *the music box* plays one note at a time, so five of its notes
+       could be cut out whole; they are THE HOUSE's music box now, with a
+       ring made here under each, since a lifted note stops where the next
+       began. A sixth was dropped: the note before it was still ringing in
+       it, and moved to another pitch that ring was a wrong note.
+     - *the cathedral organ* is chords. Its first is an open fifth, with no
+       third in it, so it can stand on any root under any chord; a little
+       later it holds a minor chord. Those two are the organ under every
+       big moment of the four tracks (`pipes()`), held as long as needed
+       by letting the steady middle go round. The organ added up from
+       sines stays under it, quieter, for the chords' thirds and for tunes.
+     - *the harpsichord* is a full arrangement in running sixteenths, every
+       note ringing into the next: only its lowest notes are ever alone.
+       One, an F, is kept for a left hand in the two fights. The tunes are
+       still the old recording's one clean note over a body made here; a
+       harpsichord playing single notes would do more than this loop could.
+   - *Still made in the studio:* the theremin, the xylophone, the chip
+     band, the music box's ring and the harpsichord's body.
+   - *A bass under a chord's third is kept dull.* Where the bass has C
+     sharp under an A chord, or B under a G, its own overtones spell
+     another chord (an F, a D sharp). The tuba plays the chord's root
+     there instead, and the bass synth's filter is closed down.
    - *Two of the kit's harpsichord notes were chords* (an E with its major
      third and seventh, a C sharp with a sixth), found when a D minor tune
      came out with F sharps in it. `harpsichord()` uses the two clean
