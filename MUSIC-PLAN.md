@@ -1,8 +1,11 @@
 # VOIDRUNNER — the soundtrack and sound plan
 
-Branch: `music` (worktree `C:\chromebook-music`). Nothing reaches `main`
-(and so voidrunner.online) until you say ship. This file is `.md`, so
-`.assetsignore` keeps it off the public site.
+Branch: `music` (worktree `C:\chromebook-music`). Work reaches `main` (and
+so voidrunner.online) only when you say ship. **Disk one shipped on 12 Oct
+as 1.6** (main = f40dcf3): the engine, MUSIC and EFFECTS, four effects, and
+act one's ten tracks. This file is `.md`, so `.assetsignore` keeps it off
+the public site; the repository is public, though, so it names nothing that
+is not released.
 
 ## Where the sound is today (11 Oct, main = 47507b4)
 
@@ -317,6 +320,11 @@ is pushed until you say; `main` only when you say ship.
    long line; the subject at two notes a bar), sung by NULL's own lead and
    strings over its pulse. THE ARCHIVIST gained a four-bar intro, since it
    was too chaotic to start on. A boss track may open with one.)*
+   *(12 Oct: shipped as 1.6, "the soundtrack, disk one", at your word and
+   without the long test passes: the determinism and lockstep suites have
+   not run since step 2 and are still owed before the last ship. Checked
+   for this one: the engine test, a boot in a browser with both new boss
+   intros playing through, and the live files on both addresses.)*
 6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
    `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
