@@ -267,3 +267,65 @@ def skitter(tone=4200.0, spread=0.9, seed=5):
                 add(out, pan(tap, rng.uniform(-spread, spread)), max(0.0, t) * SR, e.v * rng.uniform(0.45, 1.0))
         return out
     return play
+
+# ------------------------------------------------------------- ALL HALLOWS
+def organ(ranks=((0.5, 0.7), (1, 1.0), (2, 0.7), (3, 0.3), (4, 0.42), (6, 0.12), (8, 0.16)), a=0.012, r=0.09, chiff=0.1,
+          cents=5.0, trem=0.0, tremhz=6.1):
+    """A pipe organ, added up. Each rank is a sine at its multiple of the note (0.5 the sixteen-foot, 1 the
+    eight, 2 the four, 3 the quint over it...), and how loud it is drawn. There are two of every pipe, a
+    few cents apart, one a side, and a breath of air as each one speaks. trem: a tremulant, how deep."""
+    def play(evs, n, ctx):
+        out = np.zeros((n, 2))
+        for e in evs:
+            m = int((e.dur + r) * SR) + 1; t = np.arange(m) / SR
+            f = hz(e.p)
+            env = np.minimum(t / a, 1.0) * np.clip((e.dur + r - t) / r, 0.0, 1.0)
+            L = np.zeros(m); R = np.zeros(m)
+            for k, g in ranks:
+                if f * k > 9000.0: continue
+                L += np.sin(2 * math.pi * f * k * 2.0 ** (-cents / 2400.0) * t + k) * g
+                R += np.sin(2 * math.pi * f * k * 2.0 ** (cents / 2400.0) * t + 2.0 * k) * g
+            y = np.stack([L, R], 1) * 0.3
+            if chiff: y += st(bp(noise(m, int(e.p * 7) + 1), f * 2.0, min(f * 6.0, 12000.0)) * np.exp(-t / 0.03)) * chiff
+            if trem: y = y * (1.0 - trem * 0.5 * (1.0 + np.sin(2 * math.pi * tremhz * (ctx['t0'] + e.t + t))))[:, None]
+            add(out, y * (env * e.v)[:, None], e.t * SR)
+        return out
+    return play
+
+def wind(secs, lo=260.0, hi=1300.0, gusts=3, seed=12):
+    """Wind round a corner: noise through a narrow filter that rises and falls with each gust."""
+    n = int(secs * SR); t = np.arange(n) / SR; rng = np.random.default_rng(seed)
+    g = np.zeros(n)
+    for k in range(gusts):
+        c = (k + rng.uniform(0.3, 0.7)) / gusts * secs; w = secs / gusts * rng.uniform(0.35, 0.6)
+        g += np.exp(-0.5 * ((t - c) / w) ** 2) * rng.uniform(0.6, 1.0)
+    g = g / g.max()
+    fc = lo * (hi / lo) ** np.clip(g * 0.85 + 0.08 * np.sin(2 * math.pi * 0.7 * t), 0.0, 1.0)
+    a = svf(noise(n, seed), fc, 5.0, 'bp') * (0.25 + 0.75 * g)
+    b = svf(noise(n, seed + 1), fc * 1.52, 4.0, 'bp') * (0.25 + 0.75 * g) * 0.5
+    y = np.stack([a + b * 0.6, a * 0.6 + b], 1)
+    return fade(y / max(1e-9, float(np.abs(y).max())), min(1.0, secs * 0.2), min(1.5, secs * 0.3))
+
+def creak(secs=1.1, f0=22.0, f1=78.0, tone=(700.0, 1500.0, 2350.0), seed=8):
+    """A door on a dry hinge: it sticks and slips, faster as it swings and slower as it comes to rest,
+    and the wood rings each time it lets go."""
+    n = int(secs * SR); t = np.arange(n) / SR; u = t / secs; rng = np.random.default_rng(seed)
+    rate = f0 * (f1 / f0) ** (np.sin(math.pi * u ** 0.8) ** 1.5) * (1.0 + 0.08 * np.sin(2 * math.pi * 3.1 * t + rng.uniform(0, 6)))
+    slips = np.diff(np.floor(np.cumsum(rate) / SR), prepend=0.0) * rng.uniform(0.6, 1.0, n)
+    x = sum(svf(slips, fc * (1.0 + 0.25 * u), 9.0, 'bp') * g for fc, g in zip(tone, (1.0, 0.7, 0.45)))
+    x = x * np.sin(math.pi * u) ** 0.6
+    y = st(x / max(1e-9, float(np.abs(x).max()))); y[:, 1] = np.roll(y[:, 1], 19)
+    return fade(y, 0.01, 0.05)
+
+def thunder(secs=4.0, seed=21):
+    """Thunder a little way off: a crack, then the rumble rolling round after it. The rumble is mostly
+    under what a laptop can play, so some of it is kept higher up, where it can be heard there too."""
+    n = int(secs * SR); t = np.arange(n) / SR; rng = np.random.default_rng(seed)
+    env = np.exp(-t / (secs * 0.3))
+    for _ in range(5):
+        c = rng.uniform(0.15, 0.7) * secs
+        env += rng.uniform(0.3, 0.7) * np.exp(-np.maximum(t - c, 0.0) / 0.5) * (t >= c)
+    rumble = lp(noise(n, seed), 160.0, 4) * env * 3.0
+    crack = bp(noise(n, seed + 1), 500.0, 5000.0) * np.exp(-t / 0.12) * 0.8 + bp(noise(n, seed + 2), 300.0, 2500.0) * env * 0.25
+    y = st(drive(rumble, 0.4) + crack); y[:, 1] = np.roll(y[:, 1], 41)
+    return fade(y / max(1e-9, float(np.abs(y).max())), 0.002, secs * 0.3)

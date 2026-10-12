@@ -20,6 +20,9 @@
      - THE SOUNDTRACK: a song picked there plays through its own running order
        with no sting, stays on over the menu and lets go when a run begins;
        and a song is kept by passing its sector or putting its boss down
+     - ALL HALLOWS: an area plays its own track, two calm sections and two
+       fights taking turns; its songs are listed once the chapter is open and
+       kept with its boss
      - a cue with no track leaves the room to the synth bed, and a cue with
        one silences it
      - a segment not decoded in time is covered by the last phrase again
@@ -59,6 +62,11 @@ const MANIFEST = {
     other: { bpm: 160, pre: PRE, segs: [seg('other/p1', 4)], sections: { p1: { segs: [0] } }, moods: { p1: 'p1' } },
     corrupt: { bpm: 176, pre: PRE, segs: [seg('corrupt/intro', 2), seg('corrupt/v1', 4)],
                sections: { intro: { segs: [0], lock: true, next: 'v1' }, v1: { segs: [1] } }, moods: { p1: 'v1' }, start: 'intro' },
+    house: { bpm: 120, pre: PRE, segs: [seg('house/a', 2), seg('house/a2', 2), seg('house/b', 2), seg('house/c', 2)],
+             sections: { a: { segs: [0], lock: true, next: 'a2' }, a2: { segs: [1], lock: true, next: 'a' },
+                         b: { segs: [2], lock: true, next: 'c' }, c: { segs: [3], lock: true, next: 'b' } },
+             moods: { calm: ['a', 'a2'], fight: ['b', 'c'] }, title: 'Lights on a Timer' },
+    deadgame: { bpm: 155, pre: PRE, segs: [seg('deadgame/p1', 4)], sections: { p1: { segs: [0] } }, moods: { p1: 'p1' }, title: 'One Player Online' },
     codex: { bpm: 120, pre: PRE, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
   },
   stings: { 'boss-in': { f: 'stings/boss-in.opus', hit: 1.5 }, 'boss-down': { f: 'stings/boss-down.opus' } }
@@ -297,6 +305,37 @@ await tick(6);
   const b = ['foundry', 'forgeheart', 'mirror', 'other', 'corrupt', 'archive'].map(open).join();
   check('the soundtrack: a song is kept by passing its sector or putting its boss down',
         a === 'true,true,false,false,false,false,false' && b === 'true,true,true,true,true,false', `past wave 5: ${a} · and then: ${b}`);
+}
+
+// 3d. ALL HALLOWS: an area has its own track; its two calm sections take turns, and so do its two fights;
+//     its songs are listed once the chapter has opened, and kept with its boss
+{
+  const T = now();
+  run(`state = 'play'; hlArea = { id: 'house' }; enemies.length = 0; betweenWaves = 0; awaitingPortal = false;`);
+  await tick(22);
+  const calm = named(played(T), 'house/').map(s => s.buffer.name.slice(6)).join(' ');
+  const Tf = now();
+  run(`for (let i = 0; i < 10; i++) enemies.push({ type: 'sheet', dead: false });`);
+  await tick(22);
+  const fight = named(played(Tf + 4), 'house/').map(s => s.buffer.name.slice(6)).join(' ');
+  run(`enemies.length = 0; hlArea = null;`);
+  await tick(8);
+  check('all hallows: an area plays its own track, and its two calm sections and its two fights take turns',
+        calm.startsWith('a a2 a a2') && /b c b c/.test(fight) && !gapless(named(played(T), 'house/')) && run('Music.cur && Music.cur.id') === 'grid',
+        `calm: ${calm} · fight: ${fight} · afterwards: ${run('Music.cur && Music.cur.id')}`);
+  const row = cue => run(`(t => ostListed(t) + '/' + ostOpen(t))(OST_TRACKS.find(t => t[0] === '${cue}'))`);
+  run(`HL.force = false; HL.day = null; Tales.n = {}; Tales.p = {}; Save.profile.hl = {};`);
+  const shut = ['house', 'deadgame', 'grid'].map(row).join(' ');
+  run(`HL.force = true;`);
+  const open = ['house', 'deadgame'].map(row).join(' ');
+  run(`HL.force = false; Tales.n['k:deadgame'] = 1;`);
+  const kept = ['house', 'deadgame'].map(row).join(' ');
+  run(`Tales.n = {}; Save.profile.hl = { [HL_EVENT.id]: { q: { q4: 2 } } };`);
+  const quest = ['house', 'deadgame'].map(row).join(' ');
+  run(`Save.profile.hl = {};`);
+  check('all hallows: its songs are listed once the chapter is open, and kept (and listed for good) with its boss',
+        shut.startsWith('false/false false/false true/') && open === 'true/false true/false' && kept === 'true/true true/true' && quest === 'true/true true/true',
+        `shut: ${shut} · open: ${open} · boss down: ${kept} · by the quest: ${quest}`);
 }
 
 // 4. the synth bed is the fallback, and only that

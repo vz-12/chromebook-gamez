@@ -68262,9 +68262,12 @@ const OST_TRACKS = [
   ['void', 's', 'THE VOID', 1],       ['null', 'b', 'nullcore', 1],
   ['amalgam', 'b', 'amalgam', 1],
   ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
-  ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2]
+  ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2],
+  // ALL HALLOWS: an area is a stage of its own (HL_AREAS), and it ends on its boss
+  ['patch', 's', 'THE PATCH', 3],     ['backlog', 'b', 'backlog', 3],
+  ['house', 's', 'THE HOUSE', 3],     ['deadgame', 'b', 'deadgame', 3]
 ];
-const OST_DISKS = { 1: 'DISK ONE', 2: 'DISK TWO   ·   CRACKS IN THE PLANE' };
+const OST_DISKS = { 1: 'DISK ONE', 2: 'DISK TWO   ·   CRACKS IN THE PLANE', 3: 'ALL HALLOWS' };
 const Ost = {
   cue: null,                          // the song picked, playing through (musicWant)
   sel: 0,                             // the row the keys are on
@@ -68272,13 +68275,15 @@ const Ost = {
   img: {}                             // cue -> its cover, once asked for
 };
 
-const ostStages = () => STAGES.concat(ALT_STAGES);
+const ostStages = () => STAGES.concat(ALT_STAGES, Object.values(HL_AREAS).map(a => a.stage));
 // has this boss ever been put down, on this record?
 function ostBeat(key) {
   const p = Save.profile || {};
   if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
   if (key === 'amalgam') return !!p.amalgamDone;
   if (key === 'theother') return (p.otherKills | 0) > 0;
+  const hl = Object.values(HL_AREAS).find(a => a.stage.boss === key);   // an area's boss: the soul's quest for him, done
+  if (hl) { const book = p.hl && p.hl[HL_EVENT.id]; return !!(book && book.q && book.q[hl.bossQ] === 2); }
   const i = STAGES.findIndex(s => s.boss === key);     // a record older than the tales: the route, by how deep it has been
   return i >= 0 && (p.bestWave | 0) > i * 5 + 5;
 }
@@ -68295,10 +68300,16 @@ function ostHint(t, st) {
   if (t[1] === 's') return 'KEPT WHEN ' + (tag || 'IT') + ' IS PASSED';
   return tag ? 'KEPT WHEN THE BOSS OF ' + tag + ' IS PUT DOWN' : 'KEPT WHEN IT IS PUT DOWN';
 }
+// an ALL HALLOWS song is listed once its chapter has opened, and for good once it is kept
+function ostListed(t) {
+  const st = ostStages().find(s => (t[1] === 's' ? s.name === t[2] : s.boss === t[2]));
+  if (!st || !st.hl) return true;
+  return ostOpen(t) || hlChapterOpen(HL_AREAS[st.hl].ch);
+}
 // the songs there are files for, in the soundtrack's order
 function ostList() {
   if (!Music.man) return [];
-  return OST_TRACKS.filter(t => Music.has(t[0])).map(t => {
+  return OST_TRACKS.filter(t => Music.has(t[0]) && ostListed(t)).map(t => {
     const st = ostStages().find(s => (t[1] === 's' ? s.name === t[2] : s.boss === t[2]));
     const boss = t[1] !== 's' ? BOSSES[t[2]] : null;
     const open = ostOpen(t);

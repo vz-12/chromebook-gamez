@@ -392,3 +392,73 @@ def mirror():
     m['pour'] = pour
     m['unpour'] = fade(pour[:int(1.7 * SR)][::-1].copy(), 0.3, 0.003)
     return m
+
+_HALLOWS = {}
+def hallows():
+    """ALL HALLOWS' sounds. No new recordings: everything here was already in the library, some of it
+    never used, and the rest is made in the studio (the organ, the theremin, the wind, the door, the
+    thunder: inst.py).
+
+    A tuba playing one short F, for the oom of an oom-pah. Of THE ARCHIVIST's harpsichord only two notes
+    are kept, the long low C and a short A: the other two turned out to be chords (an E with its major
+    third and seventh, a C sharp with a sixth), and a tune in a minor key played on them came out with
+    major thirds all over it. harpsichord() below plays the two clean ones over a body made here.
+    Pizzicato, kettledrums and string stabs are THE VAULT's, the ghosts' choir and the upright THE
+    VOID's. A sung bowl on F sharp (a shade flat) is the bell: its loudest overtone is a major third two
+    octaves up, so it tolls only on a note whose major third is in the key (F in D minor, B flat in G
+    minor), where bowl and overtone are two notes of the home chord. The night is a recording of insects; a key turning in a lock is cut into its clicks, for a latch; a snow globe
+    being wound is the music box's key, and a kitchen timer's ticks the lights' own timer."""
+    if _HALLOWS: return _HALLOWS
+    h = _HALLOWS; V = vault(); A = archive(); W = void(); H = hive()
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    h['tuba'] = {41.05: gate(sample('TC_tuba_staccato_F'), 0.42, 0.14)}
+    h['harpsi'] = {47.89: V['harpsi'][47.89], 68.99: V['harpsi'][68.99]}
+    h['pizz'] = V['pizz']; h['low'] = A['low']; h['timp'] = V['timp']
+    h['minor'] = V['strike']; h['major'] = {50.0: V['major'][50.0]}
+    h['choir'] = W['choir']; h['strings'] = W['strings']; h['piano'] = W['piano']; h['plow'] = W['plow']
+    h['bell'] = {53.79: sample('GIO_bowl_medium_strong_Fs')}
+    h['clave'] = A['clave']; h['tick'] = V['tick']; h['ratchet'] = V['ratchet']
+    h['windup'] = norm(sample('BW_SnowGlobeWindUp', trim=False))
+    h['night'] = fade(norm(sample('PHT_insects_03', trim=False)), 0.4, 0.6)
+    lock = hits_in(sample('BRS_Lock_Door_Key_Mvs_2', trim=False), least=0.03)
+    top = max(float(np.abs(c).max()) for c in lock)
+    h['latch'] = [gate(norm(c), 0.09, 0.03) for c in lock if float(np.abs(c).max()) > top * 0.25][:6]
+    h['cabasa'] = H['cabasa']; h['ridge'] = H['ridge']; h['guiro'] = H['guiro']
+    return h
+
+def harpsichord():
+    """A harpsichord: the pluck is the recording's (its two clean notes), the string under it is made
+    here, a narrow pulse that is bright when struck and gone in half a second, with a quieter one an
+    octave up for the second set of strings."""
+    from inst import synth
+    pluck = sampler(hallows()['harpsi'], rel=0.1)
+    kw = dict(pw=0.16, voices=2, detune=0.04, spread=0.2, cutoff=3400.0, env=2.6, fdecay=0.07, res=0.8, track=0.6, a=0.001, d=0.45, s=0.0, r=0.1)
+    body = synth('square', **kw); four = synth('square', octave=1, **kw)
+    def play(evs, n, ctx): return pluck(evs, n, ctx) * 0.8 + body(evs, n, ctx) * 0.5 + four(evs, n, ctx) * 0.16
+    return play
+
+def theremin(v=0.3):
+    """A hand near an aerial: one soft wave, a wide slow vibrato, and every note reached by sliding
+    (write its lines with legato(), most=12)."""
+    from inst import synth
+    return synth('tri', sq=0.06, cutoff=5200.0, res=0.7, track=0.5, a=0.07, d=0.2, s=0.9, r=0.16, vib=v, vibhz=5.7, vibat=0.1, glide=0.13)
+
+def musicbox(decay=0.9):
+    """A comb's teeth plucked by a drum of pins: a glassy note that is nearly all strike."""
+    from inst import keys
+    return keys(ratio=6.0, index=0.9, decay=decay, a=0.001, bright=1.0, spread=0.25)
+
+def bones():
+    """A xylophone, for ribs: wood, short and dry."""
+    from inst import keys
+    return keys(ratio=4.0, index=1.3, decay=0.17, a=0.001, spread=0.3)
+
+def starts(text):
+    """Where each note of a written line begins, in steps."""
+    at, out = 0.0, []
+    for tok in text.split():
+        out.append(at); at += float(tok.partition(':')[2] or 1)
+    return out
+def total(text):
+    """How many steps a written line takes."""
+    return sum(float(tok.partition(':')[2] or 1) for tok in text.split())

@@ -2,8 +2,9 @@
 
 Branch: `music` (worktree `C:\chromebook-music`). Work reaches `main` (and
 so voidrunner.online) only when you say ship. **Disk one shipped on 12 Oct
-as 1.6** (main = f40dcf3): the engine, MUSIC and EFFECTS, four effects, and
-act one's ten tracks. This file is `.md`, so `.assetsignore` keeps it off
+as 1.6** (the engine, MUSIC and EFFECTS, four effects, act one's ten
+tracks), **and 1.6.1 the same day** (main = 72b8d0d): THE AMALGAM's theme,
+disk two's first four with the corrupted OTHER's, and THE SOUNDTRACK. This file is `.md`, so `.assetsignore` keeps it off
 the public site; the repository is public, though, so it names nothing that
 is not released.
 
@@ -105,8 +106,8 @@ a bar line when the boss changes phase.
 | `stands` | THE STANDS | before the tribunal: a hall waiting for one man, koto and low drums | 70, D minor |
 | `shop` | shop and portal rooms | the shopkeeper's lounge: jazzy chiptune | 100, E♭ major |
 | `planetarium` | planetarium | celestial pads, a slow arpeggio | 72, B♭ lydian |
-| `patch` | ALL HALLOWS i, THE PATCH | spooky swing: harpsichord and organ over metal | 150 swung, D minor |
-| `house` | ALL HALLOWS ii, THE HOUSE | haunted mansion: music box, creaks, slow waltz into breakdown | 3/4, G minor |
+| `patch` "Left to Ripen" | ALL HALLOWS i, THE PATCH | a jig in a minor key, four beats of three: harpsichord over a tuba and plucked strings, a xylophone for ribs, a theremin for what is standing in the field; insects, wind, a bell. Its fight is the jig as metal with an organ on the off-beats, then half time over a bass that walks down by semitones | 150, D minor (an E flat where the vine catches) |
+| `house` "Lights on a Timer" | ALL HALLOWS ii, THE HOUSE | a waltz on a music box, with a timer ticking on every beat: `deadgame`'s tune heard from another room. Two calm sections take turns, and at the end of the second the music box runs down and a latch drops; the fight is the same waltz danced (harpsichord, tuba, organ), then a half-time breakdown under the theremin | 144 in three-four, G minor |
 | `yard` | ALL HALLOWS iii, THE YARD | graveyard: bells, choir, doom | 76, C minor |
 | `vigil` | the vigil | candlelit, waiting | 60, A minor |
 
@@ -130,8 +131,8 @@ a bar line when the boss changes phase.
 | `tribunal` | THE TRIBUNAL | he does not fight: a court of drums, tension that never releases | 90, D minor |
 | `founder` | THE FOUNDER (THE VAGRANT's rite, the duel) | the samurai: taiko, shakuhachi, koto, metal | 150, D minor |
 | `onepointoh` | ONE POINT OH | the version war: the first build's synth against the full score | 140, A minor |
-| `backlog` | THE BACKLOG (ALL HALLOWS i) | pumpkin-patch metal | 165, D minor |
-| `deadgame` | DEAD GAME (ALL HALLOWS ii) | a dead game's title music, haunted | 155, G minor |
+| `backlog` "I'll Get to It" | THE BACKLOG (ALL HALLOWS i) | THE PATCH's jig as metal, and never finished: each bar of the tune is put down one note short, then the phrases are handed from one instrument to the next half-way through. Only the last phase plays it whole, and only its last bar comes home | 165, four beats of three, D minor |
+| `deadgame` "One Player Online" | DEAD GAME (ALL HALLOWS ii) | a dead game's title music, still playing: written for two square waves, a triangle and noise, and its voices leave it one at a time; then a band under the square-wave lead; then slow and low on an organ, with a crushed echo of the lead behind it | 155, G minor |
 | `ragequit` | RAGEQUIT (ALL HALLOWS iii, when built) | furious, glitching, about to unplug | 180, C minor |
 
 ### Menus, modes, stingers
@@ -302,6 +303,37 @@ is pushed until you say; `main` only when you say ship.
 4. **ALL HALLOWS.** `patch`, `backlog`, `house`, `deadgame`, `vigil`, and
    `yard` + `ragequit` once chapter III is built. It's early on purpose:
    chapter II opens 14 Oct and chapter III 23 Oct.
+   *(12 Oct, on your word: the first two chapters, four tracks, built with
+   nothing new from the library. `patch` "Left to Ripen", `backlog` "I'll
+   Get to It", `house` "Lights on a Timer", `deadgame` "One Player Online".
+   Not shipped: they wait for a listen.*
+
+   - *One opening for the whole event:* every track's tune begins on the
+     same four notes, the keynote, the fifth, the note above it and the
+     fifth again (D A B♭ A, G D E♭ D). `vigil` and chapter III should too.
+   - *Each chapter is one tune twice:* the area's tune is its boss's. THE
+     PATCH's jig is THE BACKLOG's, unfinished; DEAD GAME's title music is
+     what THE HOUSE's music box plays, in three.
+   - *Made in the studio, since there were no recordings:* a pipe organ
+     (added up from sines, rank by rank), a theremin, a music box, a
+     xylophone, wind, a door's creak, thunder (`inst.py`, `_common.py`
+     `hallows()`). They are the first things to replace with recordings,
+     if any are wanted: a real creak, a real music box, thunder, a pipe
+     organ, an owl or a crow for the patch.
+   - *Two of the kit's harpsichord notes were chords* (an E with its major
+     third and seventh, a C sharp with a sixth), found when a D minor tune
+     came out with F sharps in it. `harpsichord()` uses the two clean
+     notes over a body made here. THE ARCHIVIST still plays the old four.
+   - *The bell tolls where its overtone fits:* the bowl's loudest overtone
+     is a major third two octaves up, so it is struck on F in D minor and
+     on B flat in G minor, where both are notes of the home chord.
+   - *A kick that rings on E* was moved a semitone down for the two G
+     minor tracks, onto E flat.
+   - *Two calm sections:* THE HOUSE is the first sector whose calm has two
+     sections that take turns (`calm: ['a', 'a2']`), as fights have had.
+   - *THE SOUNDTRACK lists them* under ALL HALLOWS: a chapter's two songs
+     once the chapter has opened, kept (and listed for good) once its boss
+     is down. No covers yet: they show their colour and number.)*
 5. **The sectors.** `foundry`, `hive`, `vault`, `void` and their bosses.
    *(11 Oct: `foundry` "The Line Never Stops" and `forgeheart` "Struck While
    Hot" done, 13 more credits: anvils, hammer strikes, clangs, low brass.
