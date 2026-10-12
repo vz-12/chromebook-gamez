@@ -4,7 +4,8 @@ Branch: `music` (worktree `C:\chromebook-music`). Work reaches `main` (and
 so voidrunner.online) only when you say ship. **Disk one shipped on 12 Oct
 as 1.6** (the engine, MUSIC and EFFECTS, four effects, act one's ten
 tracks), **and 1.6.1 the same day** (main = 72b8d0d): THE AMALGAM's theme,
-disk two's first four with the corrupted OTHER's, and THE SOUNDTRACK. This file is `.md`, so `.assetsignore` keeps it off
+disk two's first four with the corrupted OTHER's, and THE SOUNDTRACK.
+**1.6.2, also 12 Oct:** ALL HALLOWS' first four tracks and their covers. This file is `.md`, so `.assetsignore` keeps it off
 the public site; the repository is public, though, so it names nothing that
 is not released.
 
@@ -307,7 +308,7 @@ is pushed until you say; `main` only when you say ship.
    "Left to Ripen", `backlog` "I'll Get to It", `house` "Lights on a
    Timer", `deadgame` "One Player Online". Built first with nothing new
    from the library, then with the seven recordings you picked for them.
-   Not shipped: they wait for a listen.*
+   Shipped 12 Oct as 1.6.2, with their four covers.*
 
    - *One opening for the whole event:* every track's tune begins on the
      same four notes, the keynote, the fifth, the note above it and the
@@ -355,7 +356,8 @@ is pushed until you say; `main` only when you say ship.
      sections that take turns (`calm: ['a', 'a2']`), as fights have had.
    - *THE SOUNDTRACK lists them* under ALL HALLOWS: a chapter's two songs
      once the chapter has opened, kept (and listed for good) once its boss
-     is down. No covers yet: they show their colour and number.)*
+     is down. Their covers are in (`python studio/covers.py`, from the
+     `d3-` masters).)*
 5. **The sectors.** `foundry`, `hive`, `vault`, `void` and their bosses.
    *(11 Oct: `foundry` "The Line Never Stops" and `forgeheart` "Struck While
    Hot" done, 13 more credits: anvils, hammer strikes, clangs, low brass.
