@@ -90,7 +90,7 @@ a bar line when the boss changes phase.
 | `foundry` "The Line Never Stops" | THE FOUNDRY, sector 02 | industrial: anvil and metal percussion, distorted bass, steam | 132, D minor |
 | `hive` "The Walls Are Moving" | THE HIVE, sector 03 | infested: scuttling and legs for percussion, insect chatter, a tune that crawls by semitones, swung | 126, F♯ minor |
 | `vault` "Time Lock" | THE VAULT, sector 04 | cold and crystalline: sung bowls, a plucked zither's arpeggios, glass bells, a timer's ticks and a lock's clicks for the time lock | 118, B minor |
-| `void` | THE VOID, sector 05 | vast and dark: sub bass, slow pulse, distant choir | 100 (half-time), C minor |
+| `void` "Falling Upward" | THE VOID, sector 05 | vast, and pulling: a bass and chords that slide into each other, a tune that falls while every phrase starts higher, a piano, a far choir, strings, stars | 140 (half-time when calm), C minor |
 | `archive` | THE ARCHIVE, fracture i | redacted: bitcrushed piano, tape-stops, deleted bars | 124, E minor |
 | `mirror` | THE MIRROR, fracture ii | reversed sounds, a palindromic melody | 128, A minor |
 | `leak` | THE LEAK, fracture iii | acid: a squelching 303 line, toxic and relentless | 136, G minor |
@@ -115,7 +115,7 @@ a bar line when the boss changes phase.
 | `forgeheart` "Struck While Hot" | FORGEHEART | furnace metal: brass hits, hammered percussion | 165, D minor |
 | `broodmother` "Mother of Thousands" | BROODMOTHER | nu-metal bounce on the hive's tune, a creeping choir, skittering hi-hats, her brood scuttling through it | 145, F♯ minor |
 | `archivist` "Filed Under Lost" | THE ARCHIVIST | baroque and breaking: a harpsichord subject down the circle of fifths, staccato strings, a typewriter for hats, a record that skips | 170, B minor |
-| `null` | NULL | the act-one finale: full choir, orchestra and breakcore | 175, C minor |
+| `null` "The Schedule Says It Is Time" | NULL | the act-one finale: a statement with no drums, the main theme at half speed and then full, each sector's tune for four bars on its own instrument, THE VOID's tune sung under the theme's answer | 150, C minor |
 | `curator` | THE CURATOR | stately: string quartet over industrial | 150, E minor |
 | `other` | THE OTHER (+ the corrupted OTHER) | drum and bass against metal, main theme inverted | 174, A minor |
 | `keeper` | THE BOOKKEEPER | baroque metal: harpsichord and guitars, ledger ticking | 168, F minor |
@@ -304,8 +304,13 @@ is pushed until you say; `main` only when you say ship.
    *(11 Oct: `vault` "Time Lock" and `archivist` "Filed Under Lost" done, 29
    more credits: sung bowls, a zither, harpsichord, string stabs, pizzicato,
    kettledrums, a typewriter, a timer, a lock, crystal. Splice's daily cap
-   is nearly spent (4 left until about 19:40Z on 12 Oct). Next: THE VOID
-   and NULL, the act-one finale.)*
+   is nearly spent (4 left until about 19:40Z on 12 Oct).)*
+   *(11 Oct: `void` "Falling Upward" and `null` "The Schedule Says It Is
+   Time" done, the last 4 credits of the day: an octave string section and
+   three notes of an upright piano. You added a 24th reference, Galactic
+   Destruction, and asked for these two to take after it: see "The 24th
+   reference" below. Both moved off the tempos first planned (100 and
+   175). Act one is complete. Next: THE FRACTURE.)*
 6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
    `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
@@ -321,8 +326,8 @@ is pushed until you say; `main` only when you say ship.
 
 ## Reference analysis
 
-All 23 reference tracks (the four from Downloads and the 19 in
-`C:ef. music`) were listened to with the music-analysis skill's full
+All 23 first reference tracks (the four from Downloads and the 19 in
+`C:\ref. music`) were listened to with the music-analysis skill's full
 listen and an arrangement profile of my own, 11 Oct. Loudness is a gated RMS
 in dBFS (close enough to compare the tracks with each other); "low" is the
 share of the power under 250 Hz; "air" is the share above 4 kHz; "perc" is
@@ -354,6 +359,7 @@ track's own peak energy, which is how much of it is breakdown.
 | 3-12 | Pest of The Cosmos | 4:07 | 129 | C♯ minor | −8.6 | .80 | .02 | .19 | 8 s |
 | 4-01 | Cosmic Disgust | 3:55 | 129 | C♯ minor | −8.9 | .73 | .02 | .17 | 32 s |
 | 4-02 | Threats of The Ocean Floor | 4:00 | 162 | E minor | −11.0 | .77 | .02 | .10 | 28 s |
+| + | Galactic Destruction | 4:41 | 140 | B minor | −10.2 | .71 | .02 | .13 | 4 s |
 
 ### What 23 tracks say that 4 did not
 
@@ -379,6 +385,32 @@ track's own peak energy, which is how much of it is breakdown.
   master limiter in the studio targets about 10 dB crest for fights and
   12–15 for sectors and calm.
 
+### The 24th reference: Galactic Destruction
+
+Added on 11 Oct for THE VOID and NULL, and looked at more closely than the
+others (bar by bar: chords, bass, drums, and close-up pictures of five
+passages). What it does, and so what those two tracks take from it:
+
+- **It states itself before any drums.** Six bars at full power: thick
+  chords over a bass that climbs a step a bar (B, C♯, D, E), then the drums.
+  NULL opens the same way, on its own notes; THE VOID's tune climbs.
+- **Everything slides.** The bass and the chords bend from each note into
+  the next. THE VOID's hazard is gravity wells, so this became the
+  sector's sound: the synth has a `slide` on every chord change.
+- **Long notes over a busy middle.** The lead holds whole bars while a
+  syncopated figure runs under it in the middle register.
+- **A stretch with no drums in the middle** (ten bars: held, sliding chords
+  and something twinkling above them), still loud. NULL's second phase
+  starts with four such bars: the lore says it "stops the room".
+- **A peak that walks down four chords** (i, VII, VI, v) under fast runs,
+  then a climb, then ten thin bars on one note before the loop. NULL's
+  last phase ends with a run down four chords and four bars held on C.
+- **The form is a 72-bar loop** after an 8-bar opening, with phrases of 14
+  and 10 bars. Wide in the middle (side/mid 0.7 to 0.8), narrow in the sub.
+
+Nothing of its melody, bass line or drum patterns is used: the notes are
+the game's own (THE VOID's tune; the main theme, moved to C minor).
+
 ### The nearest reference for each cue
 
 A starting point for the studio, chosen by the measurements and the feel
@@ -389,7 +421,8 @@ track's name is the cue's name, it was the obvious first listen.
 | cue(s) | nearest | what to take |
 |---|---|---|
 | `title`, `hub`, `codex`, `library`, `stands` | 1-01 Tale of a Cruel World | sparse keys, then the ensemble, three swells, almost no drums |
-| `planetarium`, `void` (sector) | 3-06 void | the widest and softest piece; 40% low end, no air at all; long drift |
+| `planetarium` | 3-06 void | the widest and softest piece; 40% low end, no air at all; long drift |
+| `void`, `null` | Galactic Destruction | see above; `void`'s calm section still takes its room from 3-06 void |
 | `vigil`, `halt` | 2-05 Silence before the storms | three quarters of it is waiting; an ascending arc |
 | `grid` | 1-02 wasteland | grid-locked, 90% low end, two real breakdowns, the opener's template |
 | `foundry` | 1-05 The Filthy Mind | the most percussive of the area tracks; D minor, 112 |
@@ -403,7 +436,7 @@ track's name is the cue's name, it was the obvious first listen.
 | `forgeheart` | 3-03 Unholy Insurgency | the brightest and most percussive of the walls: brass and hammer |
 | `broodmother` | 3-02 Murderswarm | short, narrow and bright; a groove that creeps |
 | `archivist`, `other` | 4-02 Threats of The Ocean Floor | the fastest track at 162; E minor, with a double-time feel |
-| `null`, `unwritten` | 3-09 Infernal Catharsis, 1-01 Tale of a Cruel World | a mountain: it builds for minutes; the sparse start into the ensemble |
+| `unwritten` | 3-09 Infernal Catharsis, 1-01 Tale of a Cruel World | a mountain: it builds for minutes; the sparse start into the ensemble |
 | `curator`, `tribunal` | 3-04 Servants of The Scourge, 3-08 UNIVERSAL COLLAPSE | a slow-burning full ensemble; the steadiest of the fights (energy variance .17) |
 | `keeper` | 2-11 Open Frenzy | F minor at 112, which is 168 in the cue's feel |
 | `shopkeeper` | 1-06 Blood Coagulant | the swung, drum-forward one |

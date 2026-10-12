@@ -212,3 +212,76 @@ def vault():
     v['ice'] = shift(norm(sample('ESM_ice_icepick_sparkle_01')), -1.2)                     # its cluster moved into B minor
     v['book'] = norm(sample('BookHardcover_S08FO')); v['page'] = norm(sample('HardcoverBookPage_BW'))
     return v
+
+# ---- a written line, changed
+def move(text, semis):
+    """A line moved into another key, every note `semis` higher (its notes come out as numbers)."""
+    out = []
+    for tok in text.split():
+        name, _, d = tok.partition(':')
+        if name == 'r': out.append(tok); continue
+        acc = '!' if name.endswith('!') else ''
+        out.append(f"{int(midi(name.rstrip('!')) + semis)}{acc}:{d or 1}")
+    return ' '.join(out)
+def slow(text, k=2):
+    """The same line with every note k times as long: over k bars where it took one."""
+    out = []
+    for tok in text.split():
+        name, _, d = tok.partition(':')
+        out.append(f'{name}:{float(d or 1) * k:g}')
+    return ' '.join(out)
+def sing(sec, bus, bar, text, v=1.0, lo=62.0, hi=79.0):
+    """A line on a recorded section that has one good octave: the whole line is moved by octaves until
+    its top note is within reach, so it keeps its shape, and where the tune climbs past the section's
+    top the section sings it an octave lower, as players would."""
+    notes = [midi(tok.partition(':')[0].rstrip('!')) for tok in text.split() if not tok.startswith('r')]
+    if not notes: return
+    down = 0
+    while max(notes) - down > hi: down += 12
+    while min(notes) - down < lo - 12: down -= 12
+    step = 0.0
+    for tok in text.split():
+        name, _, d = tok.partition(':'); d = float(d or 1)
+        if name != 'r': sec.note(bus, bar, step, d, midi(name.rstrip('!')) - down, v)
+        step += d
+def legato(sec, bus, bar, text, v=1.0, octave=0, most=7.0, prev=None):
+    """A line sung in one breath: each note bends in from the one before it (the synth's `glide`),
+    unless that one was a rest or more than `most` semitones away. Returns its last pitch."""
+    step = 0.0
+    for tok in text.split():
+        name, _, d = tok.partition(':'); d = float(d or 1)
+        if name == 'r': prev = None
+        else:
+            acc = 1.25 if name.endswith('!') else 1.0
+            p = midi(name.rstrip('!')) + 12 * octave
+            kw = {'slide': prev - p} if prev is not None and prev != p and abs(prev - p) <= most else {}
+            sec.note(bus, bar, step, d, p, v * acc, **kw); prev = p
+        step += d
+    return prev
+
+_VOID = {}
+def void():
+    """THE VOID's and NULL's sounds: a piano in an empty room, strings, and the dark's own choir.
+
+    The piano is an upright with its felt down, a quarter-tone flat all over (its roots here are as
+    measured): one very low C, held for eighteen seconds, and two notes near the middle. The strings are
+    a section playing D in octaves. The choir is the ghosts' (a C a third of a semitone flat, and an E).
+    The kettledrum roll says C on its label and sounds an E with a minor third over it, so it is replayed
+    lower, where that E is a C and the third is E flat. The men's swell is moved from A up to C."""
+    if _VOID: return _VOID
+    v = _VOID
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    v['plow'] = {23.75: sample('SC_IP_piano_upright_note_held_low_C')}
+    v['piano'] = {61.72: sample('SC_IP_piano_upright_note_asleep_middle_D'), 64.75: sample('SC_IP_piano_upright_note_asleep_high_F')}
+    v['strings'] = {74.05: sample('SC_DS_strings_octave_hi_long_D')}
+    v['choir'] = {59.66: sample('FL_Ghost_Choir_C'), 64.15: sample('FL_Ghost_Choir_E')}
+    v['swell'] = norm(shift(sample('SO_SSW_vocal_choir_readyforwar_swell_A', trim=False), 3.05))
+    v['roll'] = norm(shift(sample('HC_timpani_roll_C'), -4.32))
+    v['timp'] = {36.37: sample('ge_hs_kettledrum'), 41.22: sample('TW_timpani_F')}
+    v['horn'] = {44.85: sample('BOS_brass_horn_watched_A', trim=False)}
+    v['stab'] = {47.0: sample('OS_trombone_plod_B')}
+    v['whoosh'] = norm(sample('ESM_PG_magic_airy_whoosh_swell_03', trim=False))
+    v['tinkle'] = shift(norm(sample('ESM_crystal_tinkle_glitter_01')), 0.5)        # its cluster moved into C minor
+    v['ice'] = shift(norm(sample('ESM_ice_icepick_sparkle_01')), -0.2)
+    v['shatter'] = norm(sample('ESM_crystal_shatter_celestial_01'))
+    return v
