@@ -523,3 +523,26 @@ def starts(text):
 def total(text):
     """How many steps a written line takes."""
     return sum(float(tok.partition(':')[2] or 1) for tok in text.split())
+
+# ---- below the mirror: BREAKING IN, one score in three pieces (leak, recursion, halt)
+# The loop all three are made of: five notes, a minor key's first, third, fourth, fifth and seventh. Each
+# piece plays it the way its room's rule works. A ring of it on each chord of a key, by the chord's name:
+def ring(names, octave=2):
+    """Five notes written out ('G Bb C D F') as MIDI, each above the one before, the first in `octave`."""
+    ns = [midi(n + str(octave)) for n in names.split()]
+    for i in range(1, len(ns)):
+        while ns[i] <= ns[i - 1]: ns[i] += 12
+    return ns
+
+def acid(cutoff=240.0, res=4.2, env=7.0):
+    """A bass line with its filter wide open on the accents and nearly shut between them, the note sliding
+    into the next: the squelch. A note's `open` is how far the filter opens on it (and its accent), its
+    `slide` how far off it starts."""
+    from inst import synth
+    return synth('saw', sq=0.35, cutoff=cutoff, env=env, fdecay=0.1, res=res, track=0.25, a=0.002, d=0.22, s=0.55, r=0.03, glide=0.05, dirt=0.85)
+
+def drip():
+    """A drop into something that is not water: a note that falls into its pitch from above (write each
+    with slide=7 or so) and is gone."""
+    from inst import synth
+    return synth('sine', cutoff=6000.0, track=0.5, a=0.001, d=0.09, s=0.0, r=0.05, glide=0.03)

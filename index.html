@@ -68263,6 +68263,7 @@ const OST_TRACKS = [
   ['amalgam', 'b', 'amalgam', 1],
   ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
   ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2],
+  ['leak', 's', 'THE LEAK', 2],       ['recursion', 's', 'THE RECURSION', 2], ['halt', 's', 'THE HALT', 2],
   // ALL HALLOWS: an area is a stage of its own (HL_AREAS), and it ends on its boss
   ['patch', 's', 'THE PATCH', 3],     ['backlog', 'b', 'backlog', 3],
   ['house', 's', 'THE HOUSE', 3],     ['deadgame', 'b', 'deadgame', 3]
@@ -68291,7 +68292,10 @@ function ostOpen(t) {
   if (t[1] === 'v') return Tales.has('b:theother', 2);
   if (t[1] === 'b') return ostBeat(t[2]);
   const st = ostStages().find(s => s.name === t[2]);
-  return !!(st && st.boss && ostBeat(st.boss));
+  if (!st) return false;
+  if (st.boss) return ostBeat(st.boss);
+  const key = talesSectorKey(st);          // no boss waits there (the deep fracture): its defences, taken down
+  return !!key && (((Tales.n || {})['c:' + key] | 0) > 0 || Tales.has(key, 1));
 }
 // what will keep a song, said without naming what has not been met
 function ostHint(t, st) {

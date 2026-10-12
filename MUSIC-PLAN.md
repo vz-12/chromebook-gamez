@@ -98,9 +98,9 @@ a bar line when the boss changes phase.
 | `void` "Falling Upward" | THE VOID, sector 05 | vast, and pulling: a bass and chords that slide into each other, a tune that falls while every phrase starts higher, a piano, a far choir, strings, stars | 140 (half-time when calm), C minor |
 | `archive` "Struck From the Record" | THE ARCHIVE, fracture i | redacted: a tune that is the same shape on every shelf (three knocks, then the piece taken down) over a ground that steps down and never arrives; notes struck out that come back once as ghosts, tape-stops, deleted beats; an old upright, paper for percussion | 124, E minor |
 | `mirror` "Once From Each Side" | THE MIRROR, fracture ii | one tune seen in a mirror three ways, all in key: upside down, backwards, and its struck glass notes played backwards; broken glass for percussion; its second fight section is its first played backwards, note for note | 128, A minor |
-| `leak` | THE LEAK, fracture iii | acid: a squelching 303 line, toxic and relentless | 136, G minor |
-| `recursion` | THE RECURSION, fracture iv | phasing loops that drift against each other, polyrhythm | 130, D♯ minor |
-| `halt` | THE HALT, fracture v | nearly still: clock ticks, stutters, freeze-frames | 90, free |
+| `leak` "Dies in Your Hands" | THE LEAK, fracture iii | BREAKING IN, i. You carry charge that dies in your hands, so the loop leaks: an acid line runs up its five notes, then four, three, two, one, the filter closing as it goes, and is filled again at the bar line; every long note of the tune sags before it ends. Four on the floor, drips | 136, G minor |
+| `recursion` "It Does Not Wait" | THE RECURSION, fracture iv | BREAKING IN, ii. A packet goes round a ring of five and a wrong turn loops it back, so the piece is in five and the loop is inside itself: its five notes in sixteenths, the bass walking the same five a beat each, the chords the same five a bar each; a second copy of the fast ring slips a sixteenth later every bar. One section is wrong turns (a bar and back, then two, three, four); the last takes the one turn that leads out | 130 in five-four, F minor |
+| `halt` "Never Both" | THE HALT, fracture v | BREAKING IN, iii. You may move or act, never both, so it is in threes of bars: two where the band moves and there is no tune, then everything stops where it stood (a held chord, a clock) and the tune acts, one bar, alone. The band and the tune are never heard together | 140, E flat minor |
 | `rootroom` | ROOT'S ROOM | a terminal: chiptune over industrial | 150, C♯ minor |
 | `library` | THE LIBRARIES | quiet: celesta, music box, dust | 80, F major / D minor |
 | `hub` | THE HUB | home: the main theme on piano and pads | 90, A minor |
@@ -402,6 +402,37 @@ is pushed until you say; `main` only when you say ship.
 6. **THE FRACTURE**, which you named disk two, "Cracks in the Plane".
    `archive`, `curator`, `mirror`, `other`, `leak`, `recursion`, `halt`,
    the `intrusion` sting, `rootroom`, `root`.
+   *(12 Oct, "a big 3 piece score for the rest, since it's the same sort of
+   loop but different execution": **BREAKING IN**, one score in three
+   pieces, for the three rooms under THE MIRROR. `leak` "Dies in Your
+   Hands", `recursion` "It Does Not Wait", `halt` "Never Both". No new
+   recordings. Not shipped: they wait for a listen. `rootroom` and `root`
+   are next, and not begun.*
+
+   - *One loop:* five notes, a minor key's first, third, fourth, fifth and
+     seventh (`ring()` in `_common.py`). Each room plays it the way its
+     rule works: it leaks away, it goes round inside itself, it winds up
+     and is switched off.
+   - *One tune* (`BREACH`, and its second strain `SINK`, in `leak.py`):
+     it picks its way up the loop and holds what it reaches. THE LEAK has
+     it sagging on every long note, THE HALT a bar at a time into the
+     stillness; THE RECURSION's tune is the loop itself, a bar a note.
+   - *Each a whole step lower than the last:* G minor, F minor, E flat
+     minor. One more step is C sharp minor, which is where this plan
+     already had ROOT.
+   - *Each is bigger than a sector's track has been:* a short opening and a
+     short calm (the room starts sending bodies at once, and a section
+     plays out before the next may begin), then three fight sections in a
+     chain, b to c to d and round, so a long break-in does not hear the
+     same sixteen bars twice running.
+   - *THE RECURSION is in five-four* (`Song(beats=5, steps=20)`), the
+     first track that is; its sections are five and ten bars. With five
+     chords in a ring and none of them the last, a first render was heard
+     as C minor: the tune now holds each bar's own note of the five, and
+     the keynote is held under every chord.
+   - *THE SOUNDTRACK lists them* after the corrupted OTHER's. No boss waits
+     in these rooms, so a song there is kept once the room's defences have
+     been taken down (the tales' count of it). No covers yet.)*
    *(12 Oct: `archive` "Struck From the Record" and `curator` "A Piece
    Short" done, with no new samples: Splice's day was spent. The studio
    learned three-four (`Song(beats=3, steps=12)`) for THE CURATOR's waltz,
