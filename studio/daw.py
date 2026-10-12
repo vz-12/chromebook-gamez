@@ -367,7 +367,7 @@ class Section:
     def hits(self, bus, bar, pattern, p=60, v=1.0, steps=None, **kw):
         """A drum line for one bar: 'x' full, 'o' softer, '-' a ghost, '.' rest; as many steps as characters."""
         pattern = pattern.replace(' ', '').replace('|', '')
-        n = steps or len(pattern); w = 16.0 / n
+        n = steps or len(pattern); w = self.song.steps / n          # a bar is the song's own steps long (12 in three-four)
         for i, ch in enumerate(pattern):
             lv = {'x': 1.0, 'X': 1.2, 'o': 0.7, '-': 0.42}.get(ch)
             if lv: self.note(bus, bar, i * w, w, p, v * lv, **kw)
@@ -382,7 +382,7 @@ class Bus:
 class Song:
     def __init__(self, name, bpm, beats=4, steps=16, target=-12.0, ceil=-1.2, clip=5.0, tail=4.5, room=None, echo=None, master=None, swing=0.5):
         self.name, self.bpm, self.swing = name, bpm, swing
-        self.bar = 60.0 / bpm * beats; self.step = self.bar / steps; self.beat = 60.0 / bpm
+        self.bar = 60.0 / bpm * beats; self.step = self.bar / steps; self.beat = 60.0 / bpm; self.steps = steps
         self.bus, self.sections, self.moods, self.start = {}, [], {}, None
         self.target, self.ceil, self.tail = target, ceil, tail
         self.clip = clip               # how far under the ceiling the clipper starts to bend, in dB

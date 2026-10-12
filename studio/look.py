@@ -3,6 +3,7 @@
   python studio/look.py grid            the balance: each bus alone, per section, in dB
   python studio/look.py grid --picture  and a picture of the play-through (spectrogram, level, sections)
   python studio/look.py grid --key      and what key and tempo an analysis hears in it
+  python studio/look.py grid --notes a A   each bar of section a: the notes sounding, and any outside A minor
 
 The balance table is how a mix is corrected here: a bus that is 10 dB over the
 rest, or missing, shows up as a number.
@@ -77,6 +78,28 @@ def key(cue, song):
     best = sorted([(float(np.corrcoef(np.roll(prof, i), ch)[0, 1]), names[i] + suf) for i in range(12) for prof, suf in ((maj, ' major'), (mnr, ' minor'))], reverse=True)
     print(f"heard: {tempo:.1f} BPM (written {song.bpm}); key {best[0][1]} ({best[0][0]:.2f}), then {best[1][1]} ({best[1][0]:.2f})")
 
+def notes(song, name, tonic):
+    """What is sounding in each bar of a section, by note name, strongest first, and how much of it lies
+    outside the key (natural minor on `tonic`, with its raised seventh allowed). A recording that carries
+    a chord of its own (a "cello" that is a major sixth, a strum that starts a tone low) shows up here as
+    a note that should not be in the bar, which is how the first ones were missed: nobody here can hear."""
+    import librosa
+    sec = next(s for s in song.sections if s.name == name)
+    n = int(np.ceil(sec.bars / sec.seg))
+    x = song._loop(sec, [song.piece(sec, k) for k in range(n)]).mean(axis=1)
+    y = librosa.resample(x, orig_sr=SR, target_sr=22050)
+    C = librosa.feature.chroma_cqt(y=y, sr=22050, hop_length=512, fmin=librosa.note_to_hz('C3'), n_octaves=4, tuning=0.0) ** 2
+    names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    t = names.index(tonic); key = {(t + k) % 12 for k in (0, 2, 3, 5, 7, 8, 10, 11)}
+    per = song.bar * 22050 / 512
+    print(f'{song.name}.{name}: each bar\'s notes from C3 up, loudest first (share of the bar), then what is outside {tonic} minor')
+    for b in range(sec.bars):
+        c = C[:, int(b * per):int((b + 1) * per)].sum(axis=1); c = c / max(c.sum(), 1e-12)
+        order = np.argsort(c)[::-1]
+        out = sum(c[i] for i in range(12) if i not in key)
+        print(f'  {b + 1:2d}  ' + '  '.join(f'{names[i]:2s} {c[i]:.2f}' for i in order[:5]) + f'   | outside {out:.2f}'
+              + (''.join(f'  {names[i]} {c[i]:.2f}' for i in order if i not in key and c[i] >= 0.04)))
+
 if __name__ == '__main__':
     cue = sys.argv[1]
     mod = importlib.import_module('scores.' + cue)
@@ -84,3 +107,5 @@ if __name__ == '__main__':
     balance(song)
     if '--picture' in sys.argv: picture(cue, song, mod)
     if '--key' in sys.argv: key(cue, song)
+    if '--notes' in sys.argv:
+        k = sys.argv.index('--notes'); notes(song, sys.argv[k + 1], sys.argv[k + 2])

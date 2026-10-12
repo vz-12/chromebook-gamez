@@ -94,7 +94,7 @@ a bar line when the boss changes phase.
 | `hive` "The Walls Are Moving" | THE HIVE, sector 03 | infested: scuttling and legs for percussion, insect chatter, a tune that crawls by semitones, swung | 126, F♯ minor |
 | `vault` "Time Lock" | THE VAULT, sector 04 | cold and crystalline: sung bowls, a plucked zither's arpeggios, glass bells, a timer's ticks and a lock's clicks for the time lock | 118, B minor |
 | `void` "Falling Upward" | THE VOID, sector 05 | vast, and pulling: a bass and chords that slide into each other, a tune that falls while every phrase starts higher, a piano, a far choir, strings, stars | 140 (half-time when calm), C minor |
-| `archive` | THE ARCHIVE, fracture i | redacted: bitcrushed piano, tape-stops, deleted bars | 124, E minor |
+| `archive` "Struck From the Record" | THE ARCHIVE, fracture i | redacted: a tune that is the same shape on every shelf (three knocks, then the piece taken down) over a ground that steps down and never arrives; notes struck out that come back once as ghosts, tape-stops, deleted beats; an old upright, paper for percussion | 124, E minor |
 | `mirror` | THE MIRROR, fracture ii | reversed sounds, a palindromic melody | 128, A minor |
 | `leak` | THE LEAK, fracture iii | acid: a squelching 303 line, toxic and relentless | 136, G minor |
 | `recursion` | THE RECURSION, fracture iv | phasing loops that drift against each other, polyrhythm | 130, D♯ minor |
@@ -119,7 +119,7 @@ a bar line when the boss changes phase.
 | `broodmother` "Mother of Thousands" | BROODMOTHER | nu-metal bounce on the hive's tune, a creeping choir, skittering hi-hats, her brood scuttling through it | 145, F♯ minor |
 | `archivist` "Filed Under Lost" | THE ARCHIVIST | baroque and breaking: a harpsichord subject down the circle of fifths, staccato strings, a typewriter for hats, a record that skips | 170, B minor |
 | `null` "The Schedule Says It Is Time" | NULL | the act-one finale: a statement with no drums, the main theme at half speed and then full, each sector's tune for four bars on its own instrument, THE VOID's tune sung under the theme's answer | 150, C minor |
-| `curator` | THE CURATOR | stately: string quartet over industrial | 150, E minor |
+| `curator` "A Piece Short" | THE CURATOR | stately: THE ARCHIVE's tune set out as a waltz, a string quartet over iron; the ground goes down by semitones in the last phase, and its last bar is not there | 150 in three-four, E minor |
 | `other` | THE OTHER (+ the corrupted OTHER) | drum and bass against metal, main theme inverted | 174, A minor |
 | `keeper` | THE BOOKKEEPER | baroque metal: harpsichord and guitars, ledger ticking | 168, F minor |
 | `shopkeeper` | THE SHOPKEEPER | jazz-metal: walking bass, ka-ching percussion | 180 swung, E♭ minor |
@@ -342,8 +342,19 @@ is pushed until you say; `main` only when you say ship.
    a hundred seconds at least and the song takes 117 to come round, so it
    plays through once in a fight; the game asks only for `p1`, and the
    sections follow each other by `next`. No new samples. Not shipped yet.)*
-6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
-   `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
+6. **THE FRACTURE**, which you named disk two, "Cracks in the Plane".
+   `archive`, `curator`, `mirror`, `other`, `leak`, `recursion`, `halt`,
+   the `intrusion` sting, `rootroom`, `root`.
+   *(12 Oct: `archive` "Struck From the Record" and `curator` "A Piece
+   Short" done, with no new samples: Splice's day was spent. The studio
+   learned three-four (`Song(beats=3, steps=12)`) for THE CURATOR's waltz,
+   and a tape-stop. You heard a guitar clashing with the tune in the calm
+   section: it was two recordings that are not what their names say, a
+   "cello" that is a major-sixth chord and a zither "open fifth" that
+   strums a major chord a tone low before it lands. Both are out of these
+   two tracks, and `look.py --notes` now lists the notes sounding in each
+   bar and flags any outside the key, so the next one is caught before you
+   hear it. Not shipped yet.)*
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
    `shopkeeper`, `planetarium`, `unwritten`, `amalgam`, `hub`, `stands`,
    `tribunal`, `founder`, `onepointoh`.

@@ -4,8 +4,8 @@ The theme grows from the first build's synth bed, whose bass went A, A, G, C und
 pentatonic. Those four bars are its first half; the second half lifts through F and G back to A.
 """
 import numpy as np
-from daw import SR, sample, shift, gate, midi, lp, hp, peak, highshelf, st, fade
-from inst import layer, synth_kick, noise
+from daw import SR, Ev, sample, shift, gate, midi, lp, hp, peak, highshelf, st, fade
+from inst import layer, synth_kick, noise, sampler, tapestop
 
 # the main theme, a bar a line, in 16ths: note:length (r is a rest)
 THEME = ['A4:2 C5:2 E5:6 D5:2 C5:4',
@@ -201,11 +201,11 @@ def vault():
     v['harp'] = {68.93: sample('GIO_harp_hit_normal_A'), 73.93: sample('GIO_harp_hit_regular_D')}
     hv = hits_in(sample('SNS_harpsichord_vibes_E', trim=False), 0.12); hc = hits_in(sample('SNS_harpsichord_cayenne_F', trim=False), 0.1)
     v['harpsi'] = {47.89: sample('DE_harpsichord_baroque_C'), 64.02: norm(hv[3]), 68.99: norm(hc[2]), 72.70: norm(hv[0])}
-    v['cello'] = {46.8: norm(hits_in(sample('ESM_cello_staccato_alert_Bm', trim=False), 0.08)[3])}      # the B that ends its four-note figure
+    v['cello'] = {46.8: norm(hits_in(sample('ESM_cello_staccato_alert_Bm', trim=False), 0.08)[3])}      # NOT one note: the figure's last hit is a chord, B with D sharp, F sharp and G sharp (heard 12 Oct). A major sixth on whatever root it is moved to
     pb = hits_in(sample('SO_MTS_pizz_blue_Cm', trim=False), 0.1); py = hits_in(sample('SO_MTS_pizz_yellow_Bb', trim=False), 0.08)
     v['pizz'] = {55.0: norm(py[2]), 57.0: norm(pb[0]), 58.0: norm(pb[1])}
-    v['strike'] = {41.96: sample('KSHMR_string_stab_strike_Fs')}                           # F sharp in octaves, no third
-    v['major'] = {50.0: sample('SO_TS_chord_staccato_D'), 52.0: sample('SO_TS_chord_staccato_E')}   # staccato major triads, by root
+    v['strike'] = {41.96: sample('KSHMR_string_stab_strike_Fs')}                           # an F sharp MINOR chord (its A is 7 to 12 dB under the F sharps): for minor chords only
+    v['major'] = {50.0: sample('SO_TS_chord_staccato_D'), 52.0: sample('SO_TS_chord_staccato_E')}   # staccato major chords: the D is a clean triad; the E carries a D sharp (a major seventh), so keep to the D
     v['timp'] = {36.37: sample('ge_hs_kettledrum'), 41.22: sample('TW_timpani_F')}       # a deep one on C, a brighter one on F: both a little sharp
     v['shatter'] = norm(sample('ESM_crystal_shatter_celestial_01'))
     v['tinkle'] = shift(norm(sample('ESM_crystal_tinkle_glitter_01')), -0.5)
@@ -285,3 +285,46 @@ def void():
     v['ice'] = shift(norm(sample('ESM_ice_icepick_sparkle_01')), -0.2)
     v['shatter'] = norm(sample('ESM_crystal_shatter_celestial_01'))
     return v
+
+_ARCHIVE = {}
+def archive():
+    """THE ARCHIVE's and THE CURATOR's sounds: paper, wood and strings.
+
+    A page turned (and four short pieces of it, each a card flicked), a book shut (cut at its thud, for
+    a stamp) and a clave for the knocks. The piano, strings, choir and kettledrums are THE VOID's; the
+    pizzicato and the string stabs THE VAULT's: 'minor' is its F sharp minor stab and 'major' its clean
+    D major one, each for chords of its own kind only.
+
+    Two recordings are NOT here, after a listen (12 Oct): THE VAULT's 'cello', which is a major-sixth
+    chord and put a G sharp under an E minor tune, and a zither's 'open E', which strums a D major chord
+    for a third of a second before it reaches its E. Under a tune both sounded like a guitar playing the
+    wrong chord. The ground's low notes are the one clean pizzicato, moved down, and bowed() below."""
+    if _ARCHIVE: return _ARCHIVE
+    a = _ARCHIVE; V = void(); T = vault()
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    a['clave'] = [gate(norm(c), 0.1, 0.04) for c in hits_in(sample('TTS_perc_clav_B', trim=False), least=0.08)[:4]]
+    page = sample('HardcoverBookPage_BW')
+    a['page'] = norm(page)
+    a['card'] = [fade(norm(page[int(t * SR):int((t + 0.07) * SR)].copy()), 0.002, 0.03) for t in (0.06, 0.3, 0.55, 0.8) if int((t + 0.07) * SR) < len(page)]
+    book = sample('BookHardcover_S08FO')
+    env = np.abs(book).max(axis=1); i = int(np.argmax(env))
+    a['book'] = norm(book)
+    a['stamp'] = fade(norm(book[max(0, i - int(0.008 * SR)):i + int(0.3 * SR)].copy()), 0.001, 0.08)
+    a['pizz'] = T['pizz']; a['low'] = {55.03: T['pizz'][55.0]}      # the G alone, with its octaves: the one to move down for a bass note
+    a['minor'] = T['strike']; a['major'] = {50.0: T['major'][50.0]}
+    for k in ('piano', 'plow', 'strings', 'choir', 'timp'): a[k] = V[k]
+    return a
+
+def stopchord(names, at=0.08, secs=0.8):
+    """A chord struck on the upright, and the tape it is on switched off under it: the notes sink and
+    stand still. `names` is the chord written out ('E3 B3 E4 G4')."""
+    n = int(2.4 * SR)
+    x = sampler(archive()['piano'], rel=0.5)([Ev(0.0, 1.8, midi(p), 0.9) for p in names.split()], n, dict(t0=0.0))
+    x = tapestop(x, at, secs)
+    return x / max(1e-9, float(np.abs(x).max()))
+
+def bowed():
+    """A cello played short, made here: there is no clean recording of one in the kit."""
+    from inst import synth
+    return synth('saw', voices=2, detune=0.05, spread=0.15, sq=0.2, cutoff=1200.0, env=1.2, fdecay=0.12, res=0.9, track=0.5,
+                 a=0.015, d=0.2, s=0.55, r=0.1, dirt=0.25)

@@ -186,6 +186,16 @@ def reverse(x, secs=None):
     y = st(x)
     if secs: y = y[:int(secs * SR)]
     return fade(y[::-1].copy(), 0.05, 0.003)
+def tapestop(x, at, secs=0.6, curve=1.5):
+    """A tape machine switched off under a sound: from `at` seconds in it plays slower and lower, and
+    stands still `secs` later. What is left of the sound after that is never heard."""
+    x = st(x); i0 = min(int(at * SR), len(x) - 2); n = int(secs * SR)
+    u = np.arange(n) / n
+    pos = i0 + np.cumsum((1.0 - u) ** curve)
+    pos = pos[pos < len(x) - 1]
+    k = pos.astype(int); f = (pos - k)[:, None]
+    tail = (x[k] * (1.0 - f) + x[k + 1] * f) * (1.0 - u[:len(pos)] ** 3)[:, None]
+    return np.concatenate([x[:i0], tail])
 def boom(f0=95.0, f1=32.0, secs=2.2, body=1.0, crack=0.5, seed=4):
     """An impact that a laptop can play too: a falling sine for the big speakers, a dull thud and a crack of
     noise above it for the small ones."""
