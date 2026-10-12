@@ -1059,7 +1059,11 @@ const Audio_ = {
        stings: { 'boss-in': { f: 'stings/boss-in-9c2e.opus', hit: 1.2 } } }
    A section loops unless it names what follows (`next`, or 'end' to stop);
    a `lock`ed one plays to its end before a new mood can move it. `hit` is
-   when a sting lands, and the track it introduces starts there.
+   when a sting lands, and the track it introduces starts there. A track may
+   also carry its name (`title`), its picture (`cover`, a file beside the
+   music) and its running order from the top (`order`, and `loop`, the place
+   in it to come round to): those are THE SOUNDTRACK's, which plays a song
+   through without asking the room anything.
 --------------------------------------------------------------------------- */
 const MUSIC_DIR = '/music/';
 const MUSIC_AHEAD = 1.2;        // how far ahead a segment is scheduled
@@ -1090,6 +1094,10 @@ const MUSIC_FIGHTS = new Set([...Object.values(MUSIC_BOSS), 'tribunal', MUSIC_VI
 function musicWant(dt) {
   if (state === 'opolock' || state === 'opobench') return null;   // the first build has the screen, and its own sound
   if (PVP) return ['pvp', Music.heat(dt)];
+  // THE SOUNDTRACK: a song picked there plays through, in its own running order, and stays on over the menu until a run begins
+  if (Ost.cue && state === 'play') Ost.cue = null;
+  if (state === 'ost') return Ost.cue ? [Ost.cue, 'calm', true] : null;
+  if (state === 'menu' && Ost.cue && !inHub) return [Ost.cue, 'calm', true];
   if (state === 'menu') return [inHub ? 'hub' : 'title', 'calm'];
   if (state === 'codex' && codexFrom !== 'pause') return ['codex', 'calm'];
   if (state === 'shop') return ['shop', 'calm'];
@@ -1190,7 +1198,7 @@ const Music = {
     const cue = want && !A.muted && A.musicVol > 0.005 && this.has(want) ? want : null;
     if (want !== this.want || cue !== (this.cur ? this.cur.id : null)) this.cueTo(cue, want);
     this.want = want;
-    if (this.cur) { this.cur.mood = w[1]; this.pump(); }
+    if (this.cur) { this.cur.mood = w[1]; this.cur.through = !!w[2]; this.pump(); }
     if (want && !MUSIC_FIGHTS.has(want) && stage.boss && state === 'play' && (this.preT -= dt) <= 0) {
       this.preT = 5;
       this.prefetch(MUSIC_BOSS[stage.boss]);
@@ -1207,7 +1215,8 @@ const Music = {
     const was = this.want;
     let out = 1.4, delay = 0;
     if (want !== was) {
-      if (MUSIC_FIGHTS.has(want) && !MUSIC_FIGHTS.has(was)) { out = 0.35; delay = this.sting('boss-in'); }
+      if (state === 'ost') out = 0.5;                              // picked from THE SOUNDTRACK: the song, and no sting
+      else if (MUSIC_FIGHTS.has(want) && !MUSIC_FIGHTS.has(was)) { out = 0.35; delay = this.sting('boss-in'); }
       else if (MUSIC_FIGHTS.has(was) && !MUSIC_FIGHTS.has(want) && state === 'play') { out = 0.3; delay = this.sting('boss-down'); }
       else if (want === MUSIC_VIRUS) out = 0.25;                   // something else gets in: a cut, and its song's own opening
       else if (state === 'dead') out = 0.6;
@@ -1222,7 +1231,7 @@ const Music = {
     const g = ac.createGain();
     g.gain.value = Math.pow(10, (tr.gain || 0) / 20);
     g.connect(this.bus);
-    const c = { id, tr, g, sec: null, i: 0, at: null, delay: delay || 0, mood: 'calm', src: [], last: null, done: false };
+    const c = { id, tr, g, sec: null, i: 0, k: 0, through: false, at: null, delay: delay || 0, mood: 'calm', src: [], last: null, done: false };
     // every segment's bytes, one after another, so looping and mood changes never wait on the network
     let k = 0;
     const next = () => { if (c.done || k >= tr.segs.length) return; this.fetchBytes(tr.segs[k++].f).then(next, next); };
@@ -1247,9 +1256,17 @@ const Music = {
     if (!s) s = m[mood === 'calm' ? 'fight' : 'calm'] || m.fight || m.p1;
     return s ? [].concat(s) : Object.keys(tr.sections);
   },
-  // what follows the segment last scheduled: { sec, i }, or null where the track ends
+  /* What follows the segment last scheduled: { sec, i }, or null where the
+     track ends. Played through (THE SOUNDTRACK), nothing is asked of the
+     room: the song goes by its own running order (`order`, the k-th section
+     of it), each section whole, and round again from `loop`. */
   after(c) {
     const tr = c.tr, want = this.moodSecs(tr, c.mood);
+    if (c.through && tr.order && tr.order.length) {
+      if (c.sec !== null && c.i + 1 < tr.sections[c.sec].segs.length) return { sec: c.sec, i: c.i + 1, k: c.k };
+      const k = c.sec === null ? 0 : c.k + 1 < tr.order.length ? c.k + 1 : Math.min(tr.loop | 0, tr.order.length - 1);
+      return { sec: tr.order[k], i: 0, k };
+    }
     if (c.sec === null) return { sec: tr.start || want[0], i: 0 };
     const sec = tr.sections[c.sec];
     if (!want.includes(c.sec) && !sec.lock) return { sec: want[0], i: 0 };
@@ -1277,7 +1294,7 @@ const Music = {
         if (!buf) return;
         c.at = Math.max(now + 0.05, this.stungAt + c.delay);
       }
-      if (buf) { this.play(c, seg, buf); c.sec = n.sec; c.i = n.i; continue; }
+      if (buf) { this.play(c, seg, buf); c.sec = n.sec; c.i = n.i; if (n.k !== undefined) c.k = n.k; continue; }
       if (c.at - now > 0.12) break;                              // still time for it
       if (!c.last) { c.at = now + 0.1; break; }
       this.play(c, c.last.seg, c.last.buf);                      // late: the last phrase again
@@ -1663,6 +1680,11 @@ cv.addEventListener('wheel', e => {
     logScroll = clamp(logScroll + Math.sign(e.deltaY) * 56, 0, logMaxScroll());
     return;
   }
+  if (state === 'ost') {
+    e.preventDefault();
+    Ost.scroll = clamp(Ost.scroll + Math.sign(e.deltaY) * 50, 0, ostMaxScroll());
+    return;
+  }
   if (state === 'chal') {
     e.preventDefault();
     chalScroll = clamp(chalScroll + Math.sign(e.deltaY) * 60, 0, chalMaxScroll());
@@ -1689,6 +1711,7 @@ cv.addEventListener('touchstart', e => {
       // the click may have closed it; only a panel still open takes the drag
       if (state === 'changelog' && !logDrag)
         logDrag = { id: t.identifier, y: p.y, s: logScroll };
+      if (state === 'ost' && !Ost.drag) Ost.drag = { id: t.identifier, y: p.y, s: Ost.scroll };
       continue;
     }
     if (p.x < W * 0.5 && !touchUI.move) touchUI.move = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
@@ -1703,6 +1726,10 @@ cv.addEventListener('touchmove', e => {
     if (touchUI.aim && t.identifier === touchUI.aim.id) { touchUI.aim.x = p.x; touchUI.aim.y = p.y; }
     if (logDrag && t.identifier === logDrag.id && state === 'changelog')
       logScroll = clamp(logDrag.s - (p.y - logDrag.y), 0, logMaxScroll());
+    if (Ost.drag && t.identifier === Ost.drag.id && state === 'ost') {       // THE SOUNDTRACK: a finger that moves is scrolling, not choosing
+      if (Math.abs(p.y - Ost.drag.y) > 8) Ost.moved = true;
+      if (Ost.moved) Ost.scroll = clamp(Ost.drag.s - (p.y - Ost.drag.y), 0, ostMaxScroll());
+    }
     if (state === 'codex') codexTouch('move', t.identifier, p);
   }
 }, { passive: false });
@@ -1712,6 +1739,7 @@ function touchEnd(e) {
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
     if (logDrag && t.identifier === logDrag.id) logDrag = null;
+    if (Ost.drag && t.identifier === Ost.drag.id) Ost.drag = null;
     if (state === 'codex') codexTouch('end', t.identifier, tpos(t));
   }
 }
@@ -38027,6 +38055,7 @@ function handleKey(k) {
   if (state === 'daily') { dailyKey(k); return; }
   if (state === 'rush') { rushKey(k); return; }
   if (state === 'skin') { skinKey(k); return; }
+  if (state === 'ost') { ostKey(k); return; }
   if (state === 'menu') {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
@@ -38039,6 +38068,7 @@ function handleKey(k) {
     if (k === 's') { openSettings('menu'); return; }
     if (k === 'd') { openDaily('menu'); return; }
     if (k === 'b') { openRush('menu'); return; }
+    if (k === 'm' && ostDoorUp()) { openOst(); return; }     // THE SOUNDTRACK
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -38305,6 +38335,7 @@ function handleClick() {
   if (state === 'daily') { dailyClick(); return; }
   if (state === 'rush') { rushClick(); return; }
   if (state === 'skin') { skinClick(); return; }
+  if (state === 'ost') { ostClick(); return; }
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
@@ -38318,6 +38349,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuRushRect())) { openRush('menu'); return; }
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
+    if (inRect(mouse.x, mouse.y, menuOstRect()) && ostDoorUp()) { openOst(); return; }   // THE SOUNDTRACK
     if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
@@ -38754,6 +38786,7 @@ function update(dt) {
     if (uiArm > 0) uiArm -= dt;
     return;
   }
+  if (state === 'ost') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // THE SOUNDTRACK, over the menu
   if (state === 'daily' || state === 'rush') {
     updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
@@ -50222,10 +50255,11 @@ function render() {
       state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
-      (state === 'skin' && skinOverMenu())) {
+      (state === 'skin' && skinOverMenu()) || state === 'ost') {
     if (state === 'chal') drawChal();
     else {
       renderMenu();
+      if (state === 'ost') drawOst();
       if (state === 'name') drawNameEntry();
       if (state === 'lan') { drawLan(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
@@ -52827,7 +52861,7 @@ function hlWrMenuish() {
   return state === 'menu' || state === 'name' || state === 'lan' ||
     state === 'chal' || state === 'daily' || state === 'rush' ||
     (state === 'settings' && setFrom === 'menu') || (state === 'changelog' && logOverMenu()) ||
-    (state === 'skin' && skinOverMenu());
+    (state === 'skin' && skinOverMenu()) || state === 'ost';
 }
 
 function hlWrFrame() {
@@ -61965,7 +61999,7 @@ function drawVignette() {
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx', 'tour',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'rush', 'skin'];
+                          'daily', 'rush', 'skin', 'ost'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -61986,6 +62020,7 @@ function uiCursorHot() {
     if (state === 'menu')
       return inRect(mouse.x, mouse.y, menuLanRect()) ||
              inRect(mouse.x, mouse.y, menuChalRect());
+    if (state === 'ost') return ostHot();
     if (state === 'lan') {
       const mx = lanMx(), my = lanMy();
       return lanBtns.some(b => inRect(mx, my, b));
@@ -64748,6 +64783,7 @@ function renderMenu() {
   drawMenuRush();
   drawMenuAcct();
   drawMenuPvp();
+  drawMenuOst();        // THE SOUNDTRACK
   drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -68194,6 +68230,391 @@ function drawMenuSet() {
   ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
   ctx.fillText('SOUND, AIM, SKINS, NOTES  —  S', r.x + 12, r.y + 27);
   ctx.restore();
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* ===========================================================================
+   THE SOUNDTRACK (12 Oct 2026)
+   A door on the menu [M] to the score: the songs of what you have been
+   through, each beside its cover, to play again. Hearing a song does not keep
+   it. A sector's is kept once the sector is passed (its boss down), and a
+   boss's once the boss is down. What is not kept yet is listed without its
+   name, and says what will keep it.
+
+   A song picked here is played through: by its own running order, every
+   section whole, and round again (Music.after), with no sting. It stays on
+   over the menu when the panel is shut, until a run begins.
+
+   The covers are pictures beside the music (music/covers/, named in the
+   manifest by studio/covers.py), asked for only once a song is kept. A song
+   with no picture yet shows its colour and its number.
+
+   All of it is this machine's own (Ost is in SNAP_LOCAL_OBJS): the record it
+   reads is the profile's and the tales', and nothing here is the run's.
+   ========================================================================= */
+// [cue, whose: 's' a sector's, 'b' a boss's, 'v' the corrupted OTHER's; the stage's name or the boss's key; disk]
+const OST_TRACKS = [
+  ['grid', 's', 'THE GRID', 1],       ['warden', 'b', 'warden', 1],
+  ['foundry', 's', 'THE FOUNDRY', 1], ['forgeheart', 'b', 'forgeheart', 1],
+  ['hive', 's', 'THE HIVE', 1],       ['broodmother', 'b', 'broodmother', 1],
+  ['vault', 's', 'THE VAULT', 1],     ['archivist', 'b', 'archivist', 1],
+  ['void', 's', 'THE VOID', 1],       ['null', 'b', 'nullcore', 1],
+  ['amalgam', 'b', 'amalgam', 1],
+  ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
+  ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2]
+];
+const OST_DISKS = { 1: 'DISK ONE', 2: 'DISK TWO   ·   CRACKS IN THE PLANE' };
+const Ost = {
+  cue: null,                          // the song picked, playing through (musicWant)
+  sel: 0,                             // the row the keys are on
+  scroll: 0, drag: null, moved: false,
+  img: {}                             // cue -> its cover, once asked for
+};
+
+const ostStages = () => STAGES.concat(ALT_STAGES);
+// has this boss ever been put down, on this record?
+function ostBeat(key) {
+  const p = Save.profile || {};
+  if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
+  if (key === 'amalgam') return !!p.amalgamDone;
+  if (key === 'theother') return (p.otherKills | 0) > 0;
+  const i = STAGES.findIndex(s => s.boss === key);     // a record older than the tales: the route, by how deep it has been
+  return i >= 0 && (p.bestWave | 0) > i * 5 + 5;
+}
+function ostOpen(t) {
+  if (t[1] === 'v') return Tales.has('b:theother', 2);
+  if (t[1] === 'b') return ostBeat(t[2]);
+  const st = ostStages().find(s => s.name === t[2]);
+  return !!(st && st.boss && ostBeat(st.boss));
+}
+// what will keep a song, said without naming what has not been met
+function ostHint(t, st) {
+  if (t[1] === 'v') return 'KEPT WHEN SOMETHING ELSE GETS IN, AND IS PUT DOWN';
+  const tag = st ? st.tag.toUpperCase() : '';
+  if (t[1] === 's') return 'KEPT WHEN ' + (tag || 'IT') + ' IS PASSED';
+  return tag ? 'KEPT WHEN THE BOSS OF ' + tag + ' IS PUT DOWN' : 'KEPT WHEN IT IS PUT DOWN';
+}
+// the songs there are files for, in the soundtrack's order
+function ostList() {
+  if (!Music.man) return [];
+  return OST_TRACKS.filter(t => Music.has(t[0])).map(t => {
+    const st = ostStages().find(s => (t[1] === 's' ? s.name === t[2] : s.boss === t[2]));
+    const boss = t[1] !== 's' ? BOSSES[t[2]] : null;
+    const open = ostOpen(t);
+    return { cue: t[0], kind: t[1], disk: t[3], open,
+      col: t[1] === 'v' ? VIRUS_COL : boss ? boss.col : st ? st.accent : COL.player,
+      title: open ? String(Music.man.tracks[t[0]].title || t[0]).toUpperCase() : '—  —  —',
+      sub: !open ? ostHint(t, st)
+         : t[1] === 's' ? (st ? st.tag.toUpperCase() + '   ·   ' : '') + t[2]
+         : 'BOSS   ·   ' + (boss ? boss.name : t[2]) + (t[1] === 'v' ? ', CORRUPTED' : '') };
+  });
+}
+// a song's cover, once it has arrived; null until then, or where there is none
+function ostCover(cue) {
+  const tr = Music.man && Music.man.tracks[cue];
+  if (!tr || !tr.cover || typeof Image === 'undefined') return null;
+  let im = Ost.img[cue];
+  if (!im) { im = Ost.img[cue] = new Image(); im.decoding = 'async'; im.src = MUSIC_DIR + tr.cover; }
+  return im.complete && im.naturalWidth ? im : null;
+}
+
+function openOst() {
+  try { Music.load(); } catch (e) {}
+  const L = ostList(), at = L.findIndex(r => r.cue === Ost.cue);
+  Ost.sel = at >= 0 ? at : Math.max(0, L.findIndex(r => r.open));
+  Ost.scroll = 0; Ost.drag = null;
+  state = 'ost';
+  uiArm = 0.25;
+  Audio_.select();
+}
+function closeOst() {
+  state = 'menu';
+  Ost.drag = null;
+  uiArm = 0.25;
+  Audio_.select();
+}
+// a row, pressed: the keys go to it, and if it is kept it plays, or stops if it was playing
+function ostToggle(i) {
+  const r = ostList()[i];
+  if (!r) return;
+  Ost.sel = i;
+  Audio_.select();
+  if (r.open) Ost.cue = Ost.cue === r.cue ? null : r.cue;
+}
+
+function ostGeom() {
+  const w = Math.min(900, W - 36), h = Math.min(560, H - 52), x = (W - w) / 2, top = (H - h) / 2;
+  const headH = 64, footH = 56, wide = w >= 640;
+  const listW = wide ? Math.round(w * 0.5) : w - 44;
+  return { x, w, top, h, headH, footH, wide, listW, listX: x + 16, listY: top + headH, viewH: h - headH - footH,
+    sideX: x + 16 + listW + 26, sideW: w - listW - 58,
+    play: { x: x + 16, y: top + h - footH + 10, w: 168, h: 36 },
+    done: { x: x + w - 16 - 150, y: top + h - footH + 10, w: 150, h: 36 } };
+}
+function ostLay() {
+  const L = ostList(), rows = [];
+  let y = 0, disk = 0, n = 0;
+  L.forEach((r, i) => {
+    if (r.disk !== disk) {
+      disk = r.disk; n = 0;
+      if (i) y += 8;
+      rows.push({ t: 'disk', label: OST_DISKS[disk] || 'DISK ' + disk, y, h: 26 }); y += 26;
+    }
+    rows.push({ t: 'song', i, r, n: ++n, y, h: 50 }); y += 50;
+  });
+  return { L, rows, contentH: y + 4 };
+}
+function ostMaxScroll() { return Math.max(0, ostLay().contentH - ostGeom().viewH); }
+// the row the keys are on, brought into view
+function ostReveal() {
+  const g = ostGeom(), row = ostLay().rows.find(r => r.t === 'song' && r.i === Ost.sel);
+  if (!row) return;
+  if (row.y - 30 < Ost.scroll) Ost.scroll = row.y - 30;
+  if (row.y + row.h > Ost.scroll + g.viewH) Ost.scroll = row.y + row.h - g.viewH;
+  Ost.scroll = clamp(Ost.scroll, 0, ostMaxScroll());
+}
+
+// a song's square: its cover, or its colour and number where there is no picture yet, or a lock
+function ostArt(x, y, s, r, n) {
+  const im = r.open ? ostCover(r.cue) : null, rad = Math.max(3, s * 0.05);
+  ctx.save();
+  roundRect(x, y, s, s, rad); ctx.clip();
+  ctx.fillStyle = '#070b14'; ctx.fillRect(x, y, s, s);
+  if (im) ctx.drawImage(im, x, y, s, s);
+  else if (r.open) {
+    const gr = ctx.createLinearGradient(x, y, x, y + s);
+    gr.addColorStop(0, rgba(r.col, 0.34)); gr.addColorStop(1, rgba(r.col, 0.05));
+    ctx.fillStyle = gr; ctx.fillRect(x, y, s, s);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "800 " + Math.round(s * 0.36) + "px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = rgba(r.col, 0.9);
+    ctx.fillText(String(n).padStart(2, '0'), x + s / 2, y + s / 2 + 1);
+  } else {
+    const u = s / 40, cx = x + s / 2, cy = y + s / 2;
+    ctx.strokeStyle = '#475569'; ctx.lineWidth = Math.max(1.2, 1.6 * u);
+    ctx.beginPath(); ctx.arc(cx, cy - 2 * u, 5 * u, Math.PI, 0); ctx.stroke();
+    ctx.fillStyle = '#334155';
+    roundRect(cx - 7.5 * u, cy - 2 * u, 15 * u, 11 * u, 2 * u); ctx.fill();
+  }
+  ctx.restore();
+  ctx.strokeStyle = rgba(r.open ? r.col : '#475569', r.open ? 0.55 : 0.4); ctx.lineWidth = 1;
+  roundRect(x, y, s, s, rad); ctx.stroke();
+}
+// three bars moving: this one is the one playing
+function ostBars(x, y, col) {
+  ctx.fillStyle = col;
+  for (let k = 0; k < 3; k++) {
+    const h = 4 + 9 * (0.5 + 0.5 * Math.sin(uiTime * (6.5 + k * 1.9) + k * 1.7));
+    ctx.fillRect(x + k * 5, y - h / 2, 3, h);
+  }
+}
+
+function drawOst() {
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = ostGeom(), lay = ostLay(), L = lay.L;
+  const ms = Math.max(0, lay.contentH - g.viewH);
+  Ost.scroll = clamp(Ost.scroll, 0, ms);
+  Ost.sel = clamp(Ost.sel, 0, Math.max(0, L.length - 1));
+  const kept = L.filter(r => r.open).length;
+  const face = "'Chakra Petch', Barlow, system-ui, sans-serif", body = "Barlow, 'Segoe UI', system-ui, sans-serif";
+
+  ctx.save();
+  lanRect(g.x, g.top, g.w, g.h, 10);
+  ctx.fillStyle = 'rgba(8,13,22,0.9)'; ctx.fill();
+  ctx.strokeStyle = rgba(COL.player, 0.30); ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = '800 22px ' + face;
+  ctx.fillStyle = COL.player;
+  ctx.fillText('THE SOUNDTRACK', W / 2, g.top + 25);
+  ctx.restore();
+  ctx.font = '500 11px ' + body;
+  ctx.fillStyle = '#94a3b8';
+  const say = !Music.man ? 'There is no music on this copy of the game.'
+    : !L.length ? 'Nothing has been written down yet.'
+    : kept + ' of ' + L.length + ' kept.  A sector’s song is kept once you pass it, a boss’s once you put it down.';
+  fitFont(say, g.w - 40, '500', 11, body, 8);
+  ctx.fillText(say, W / 2, g.top + 47);
+
+  // ---- the list
+  ctx.save();
+  ctx.beginPath(); ctx.rect(g.listX - 4, g.listY, g.listW + 8, g.viewH); ctx.clip();
+  for (const row of lay.rows) {
+    const y = g.listY + row.y - Ost.scroll;
+    if (y + row.h < g.listY - 4 || y > g.listY + g.viewH + 4) continue;
+    if (row.t === 'disk') {
+      ctx.textAlign = 'left';
+      ctx.save();
+      ctx.letterSpacing = '0.14em';
+      ctx.font = '700 10px ' + face;
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(row.label, g.listX + 2, y + 15);
+      ctx.restore();
+      ctx.fillStyle = 'rgba(148,163,184,0.14)';
+      ctx.fillRect(g.listX, y + 24, g.listW, 1);
+      continue;
+    }
+    const r = row.r, box = { x: g.listX, y: y + 2, w: g.listW, h: row.h - 4 };
+    const on = Ost.cue === r.cue, sel = Ost.sel === row.i;
+    const hot = inRect(mouse.x, mouse.y, box) && inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+    ctx.fillStyle = on ? rgba(r.col, 0.16) : (sel || hot) ? 'rgba(103,232,249,0.09)' : 'rgba(255,255,255,0.025)';
+    roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill();
+    if (sel || on) {
+      ctx.strokeStyle = rgba(on ? r.col : COL.player, on ? 0.75 : 0.45); ctx.lineWidth = 1.3;
+      roundRect(box.x, box.y, box.w, box.h, 6); ctx.stroke();
+    }
+    ostArt(box.x + 5, box.y + 4, box.h - 8, r, row.n);
+    const tx = box.x + box.h + 6, tw = box.w - box.h - 40;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.03em';
+    fitFont(r.title, tw, '700', 13, face, 9);
+    ctx.fillStyle = r.open ? '#e2e8f0' : '#475569';
+    ctx.fillText(r.title, tx, box.y + box.h / 2 - 8);
+    ctx.letterSpacing = '0.08em';
+    fitFont(r.sub, tw, '500', 9.5, body, 7);
+    ctx.fillStyle = r.open ? rgba(r.col, 0.85) : '#475569';
+    ctx.fillText(r.sub, tx, box.y + box.h / 2 + 9);
+    ctx.restore();
+    if (on) ostBars(box.x + box.w - 26, box.y + box.h / 2, r.col);
+    else if (r.open) {
+      ctx.textAlign = 'right';
+      ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = '#475569';
+      ctx.fillText(String(row.n).padStart(2, '0'), box.x + box.w - 12, box.y + box.h / 2);
+    }
+  }
+  ctx.restore();
+  if (ms > 0) {
+    const tx = g.listX + g.listW + 7;
+    ctx.fillStyle = 'rgba(148,163,184,0.14)';
+    roundRect(tx, g.listY, 3, g.viewH, 1.5); ctx.fill();
+    const th = Math.max(28, g.viewH * (g.viewH / lay.contentH));
+    ctx.fillStyle = rgba(COL.player, 0.5);
+    roundRect(tx, g.listY + (g.viewH - th) * (Ost.scroll / ms), 3, th, 1.5); ctx.fill();
+  }
+
+  // ---- beside it: the song the keys are on, large
+  const cur = L[Ost.sel];
+  if (g.wide && cur) {
+    const n = (lay.rows.find(r => r.t === 'song' && r.i === Ost.sel) || {}).n || 0;
+    const s = Math.max(96, Math.min(g.sideW, g.viewH - 86)), ax = g.sideX + (g.sideW - s) / 2, ay = g.listY + 4;
+    ostArt(ax, ay, s, cur, n);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.04em';
+    fitFont(cur.title, g.sideW, '800', 18, face, 10);
+    ctx.fillStyle = cur.open ? '#f1f5f9' : '#64748b';
+    ctx.fillText(cur.title, g.sideX + g.sideW / 2, ay + s + 22);
+    ctx.letterSpacing = '0.1em';
+    fitFont(cur.sub, g.sideW, '600', 10, body, 7);
+    ctx.fillStyle = cur.open ? rgba(cur.col, 0.9) : '#64748b';
+    ctx.fillText(cur.sub, g.sideX + g.sideW / 2, ay + s + 42);
+    ctx.restore();
+    const c = Music.cur, playing = Ost.cue === cur.cue;
+    let line = !cur.open ? '' : !playing ? 'ENTER, or click it, to play' : 'starting…';
+    if (playing && c && c.id === cur.cue && c.sec !== null) {
+      const ord = c.tr.order || [];
+      line = ord.length ? 'PLAYING   ·   PART ' + (Math.min(c.k, ord.length - 1) + 1) + ' OF ' + ord.length : 'PLAYING';
+    }
+    ctx.font = '500 10.5px ' + body;
+    ctx.fillStyle = playing ? '#cbd5e1' : '#64748b';
+    ctx.fillText(line, g.sideX + g.sideW / 2, ay + s + 62);
+  }
+
+  // ---- the foot: play or stop, a word, and the way out
+  const btn = (b, label, live, strong) => {
+    const hot = live && inRect(mouse.x, mouse.y, b);
+    ctx.fillStyle = !live ? 'rgba(255,255,255,0.03)' : hot ? 'rgba(103,232,249,0.22)' : strong ? 'rgba(103,232,249,0.10)' : 'rgba(255,255,255,0.05)';
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+    ctx.strokeStyle = live ? rgba(COL.player, strong || hot ? 1 : 0.4) : 'rgba(148,163,184,0.18)'; ctx.lineWidth = strong ? 1.8 : 1.3;
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '800 13px ' + body;
+    ctx.fillStyle = live ? COL.player : '#475569';
+    ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2);
+  };
+  btn(g.play, cur && Ost.cue === cur.cue ? 'STOP   [ENTER]' : 'PLAY   [ENTER]', !!(cur && cur.open), false);
+  btn(g.done, 'DONE   [ESC]', true, true);
+  const mid = g.done.x - (g.play.x + g.play.w) - 24;
+  if (mid > 150) {
+    const word = Ost.cue ? 'It stays on over the menu until a run begins.' : '↑ ↓ to choose';
+    fitFont(word, mid, '500', 10.5, body, 8);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(word, g.play.x + g.play.w + 12 + mid / 2, g.play.y + g.play.h / 2);
+  }
+  ctx.textBaseline = 'alphabetic';
+}
+
+function ostKey(k) {
+  if (uiArm > 0) return;
+  const n = ostList().length;
+  if (k === 'escape' || k === 'm') { closeOst(); return; }
+  if (!n) return;
+  if (k === 'arrowdown' || k === 's') { Ost.sel = (Ost.sel + 1) % n; ostReveal(); Audio_.select(); return; }
+  if (k === 'arrowup' || k === 'w')   { Ost.sel = (Ost.sel + n - 1) % n; ostReveal(); Audio_.select(); return; }
+  if (k === 'home') { Ost.sel = 0; ostReveal(); return; }
+  if (k === 'end')  { Ost.sel = n - 1; ostReveal(); return; }
+  if (k === 'enter' || k === ' ') ostToggle(Ost.sel);
+}
+/* A row plays on the click, or on a finger's lift if the finger has not moved
+   (a drag is the list being scrolled). Anywhere off the panel shuts it, as
+   the notes do: on the menu a stray click would start a run. */
+function ostClick() {
+  if (uiArm > 0) return;
+  const g = ostGeom();
+  if (inRect(mouse.x, mouse.y, g.done)) { closeOst(); return; }
+  if (inRect(mouse.x, mouse.y, g.play)) { ostToggle(Ost.sel); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.x, y: g.top, w: g.w, h: g.h })) { closeOst(); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH })) return;
+  const yy = mouse.y - g.listY + Ost.scroll;
+  const row = ostLay().rows.find(r => r.t === 'song' && yy >= r.y && yy < r.y + r.h);
+  if (!row) return;
+  Ost.moved = false;
+  qolOnLift(() => { if (!Ost.moved) ostToggle(row.i); });
+}
+function ostHot() {
+  const g = ostGeom();
+  return inRect(mouse.x, mouse.y, g.done) || inRect(mouse.x, mouse.y, g.play) ||
+         inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+}
+
+/* The way in: under the other doors, where there is a soundtrack to open.
+   The manifest is asked for here if nothing has asked yet, so the door is
+   there before the first sound is. */
+function menuOstRect() { return { x: 18, y: 294, w: 176, h: 34 }; }
+function ostDoorUp() {
+  if (PVP) return false;
+  if (Music.man === null && typeof fetch === 'function') { try { Music.load(); } catch (e) {} }
+  return !!Music.man && OST_TRACKS.some(t => Music.has(t[0]));
+}
+function drawMenuOst() {
+  if (!ostDoorUp()) return;
+  const r = menuOstRect(), col = '#c4b5fd';
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  const L = ostList(), kept = L.filter(x => x.open).length;
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(196,181,253,0.16)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('♪  SOUNDTRACK', r.x + 12, r.y + 15);
+  if (Ost.cue) ostBars(r.x + r.w - 26, r.y + 13, col);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  ctx.fillText(kept + ' OF ' + L.length + ' KEPT  —  M', r.x + 12, r.y + 27);
   ctx.restore();
   ctx.textAlign = 'center';
 }
@@ -76527,6 +76948,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'QOL',                                  // the run report's buttons and tip, SHARE, INSTALL (AFTER THE RUN)
   'Tut',                                  // FIRST FLIGHT's card and hints: the run's part of it is `assist`
+  'Ost',                                  // THE SOUNDTRACK: the song picked, the list's place, the covers
   'HUD_AT',                               // where the HUD drew each thing this frame (the tour points at them)
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
   // what the drawing keeps: canvases and sprites, made again wherever they are missing

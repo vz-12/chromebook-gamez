@@ -381,6 +381,28 @@ is pushed until you say; `main` only when you say ship.
     size and memory check on a Chromebook-class budget, the changelog, and
     ship when you say.
 
+**Also built, at your request (12 Oct): THE SOUNDTRACK**, a music selector in
+the game. A door on the menu, under PVP, and the M key.
+
+- **What it lists:** every song there are files for, in disk order, each
+  beside its cover and its name. A song is kept by going through its part of
+  the game, not by hearing it: a sector's once the sector is passed (its boss
+  down), a boss's once the boss is down, the corrupted OTHER's once that is
+  down. It reads the tales' kill counts and, for a record older than those,
+  how deep the profile has been. A song not kept is listed with a lock and no
+  name, and says what will keep it.
+- **How it plays:** a song picked is played through, by its own running
+  order (the listening copy's: `order` and `loop` in the manifest, written by
+  `build.py`), every section whole, with no boss sting. It stays on over the
+  menu after the panel is shut and lets go when a run begins.
+- **The covers** are the masters in `music-src/covers/` (never published),
+  brought down to 512 px WebP by `python studio/covers.py` into
+  `music/covers/`, about 30 KB each, and named in the manifest. Run it again
+  whenever covers are added: a master is matched to its track by its title.
+  They are fetched only for songs that are kept; a song with no picture yet
+  shows its colour and its number.
+- **When it ships** it wants a line in the CHANGELOG. Not shipped yet.
+
 ## Reference analysis
 
 All 23 first reference tracks (the four from Downloads and the 19 in

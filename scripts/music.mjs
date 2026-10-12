@@ -17,6 +17,9 @@
        sting's hit, its phases on bar lines; then the boss-down sting
      - the corrupted OTHER: the same boss with something else in it has a song
        of its own, cut to with no sting
+     - THE SOUNDTRACK: a song picked there plays through its own running order
+       with no sting, stays on over the menu and lets go when a run begins;
+       and a song is kept by passing its sector or putting its boss down
      - a cue with no track leaves the room to the synth bed, and a cue with
        one silences it
      - a segment not decoded in time is covered by the last phrase again
@@ -50,7 +53,7 @@ const MANIFEST = {
     title: { bpm: 120, pre: PRE, segs: [seg('title/0', 4), seg('title/1', 4)], sections: { a: { segs: [0, 1] } } },
     grid: { bpm: 120, pre: PRE, gain: -2, segs: [seg('grid/intro', 2), seg('grid/a0', 4), seg('grid/a1', 4), seg('grid/b0', 4), seg('grid/b1', 4)],
             sections: { intro: { segs: [0], lock: true, next: 'a' }, a: { segs: [1, 2], lock: true }, b: { segs: [3, 4], lock: true, next: 'a' } },
-            moods: { calm: 'a', fight: 'b' }, start: 'intro' },
+            moods: { calm: 'a', fight: 'b' }, start: 'intro', order: ['intro', 'a', 'b'], loop: 1, title: 'Entry Vector' },
     warden: { bpm: 160, pre: PRE, segs: [seg('warden/p1a', 4), seg('warden/p1b', 4), seg('warden/p2', 4), seg('warden/p3', 4)],
               sections: { p1: { segs: [0, 1] }, p2: { segs: [2] }, p3: { segs: [3] } }, moods: { p1: 'p1', p2: 'p2', p3: 'p3' } },
     other: { bpm: 160, pre: PRE, segs: [seg('other/p1', 4)], sections: { p1: { segs: [0] } }, moods: { p1: 'p1' } },
@@ -263,6 +266,37 @@ await tick(6);
         `other: ${o.length} pieces, then ${c.map(s => s.buffer.name).join(' ')} · other stopped: ${cut.length} · stings: ${stings}`);
   run(`enemies.find(e => e.boss === 'theother').dead = true;`);
   await tick(6);
+}
+
+// 3c. THE SOUNDTRACK: a song picked plays through, by its own running order; the menu keeps it; a run lets it go
+{
+  run(`enemies.length = 0; state = 'menu'; inHub = false;`);
+  await tick(3);
+  const T = now();
+  run(`state = 'ost'; Ost.cue = 'grid';`);
+  await tick(50);
+  const gr = named(played(T), 'grid/'), order = gr.map(s => s.buffer.name.slice(5)).join(' ');
+  const Tb = now();
+  run(`Ost.cue = 'warden';`);
+  await tick(5);
+  const w = named(played(Tb), 'warden/'), stings = named(played(T), 'sting:').length;
+  run(`state = 'menu';`);
+  await tick(2);
+  const held = run('Music.cur && Music.cur.id');
+  run(`state = 'play'; stage = STAGES[0]; enemies.length = 0; betweenWaves = 0; awaitingPortal = false;`);
+  await tick(4);
+  check('the soundtrack: a song plays through its own order, with no sting; the menu keeps it, a run lets it go',
+        order.startsWith('intro a0 a1 b0 b1 a0 a1') && !gapless(gr) && w.length > 0 && stings === 0 && held === 'warden'
+        && run('Ost.cue') === null && run('Music.cur && Music.cur.id') === 'grid',
+        `${order} · then warden: ${w.length} pieces, stings ${stings} · over the menu: ${held} · in the run: ${run('Music.cur && Music.cur.id')}`);
+  // what keeps a song: the record, not the hearing of it
+  const open = cue => run(`ostOpen(OST_TRACKS.find(t => t[0] === '${cue}'))`);
+  run(`Save.profile.bestWave = 6; Save.profile.amalgamDone = false; Save.profile.otherKills = 0; Tales.n = {}; Tales.p = {};`);
+  const a = ['grid', 'warden', 'foundry', 'forgeheart', 'amalgam', 'mirror', 'corrupt'].map(open).join();
+  run(`Tales.n['k:forgeheart'] = 1; Save.profile.otherKills = 1; Tales.p['b:theother'] = 4;`);
+  const b = ['foundry', 'forgeheart', 'mirror', 'other', 'corrupt', 'archive'].map(open).join();
+  check('the soundtrack: a song is kept by passing its sector or putting its boss down',
+        a === 'true,true,false,false,false,false,false' && b === 'true,true,true,true,true,false', `past wave 5: ${a} · and then: ${b}`);
 }
 
 // 4. the synth bed is the fallback, and only that

@@ -66,7 +66,17 @@ def describe(mod, song, entry):
     if getattr(mod, 'TITLE', None): entry['title'] = mod.TITLE          # the track's name, for a credits list one day
     if song.moods: entry['moods'] = song.moods
     if song.start: entry['start'] = song.start
+    entry['order'], entry['loop'] = running_order(mod, song)
     return entry
+def running_order(mod, song):
+    """The song from its top, for THE SOUNDTRACK in the game: the sections in the order the listening copy
+    plays them, and the place it comes round to (after an opening that is played once, the section after
+    it). Where the listening copy ends by coming back to that place, the game does that itself."""
+    by = {x.name: x for x in song.sections}
+    order = [o for o in getattr(mod, 'ORDER', [x.name for x in song.sections]) if o in by]
+    loop = 1 if len(order) > 1 and order[0] == song.start and not by[order[0]].loop else 0
+    while len(order) > loop + 1 and order[-1] == order[loop]: order.pop()
+    return order, loop
 
 def reflag(cue):
     """A built track's flags written again from its score, its pieces left as they are."""
@@ -75,7 +85,7 @@ def reflag(cue):
     names = [s.name for s in song.sections]
     if names != list(e['sections']): raise SystemExit(f'{cue}: its sections have changed ({names}): build it')
     e['sections'] = {s.name: {'segs': e['sections'][s.name]['segs'], **flags(song, s)} for s in song.sections}
-    for k in ('title', 'moods', 'start'): e.pop(k, None)
+    for k in ('title', 'moods', 'start', 'order', 'loop'): e.pop(k, None)
     describe(mod, song, e); save_manifest(m)
     print(f"{cue}: " + ', '.join(f"{k}{' (whole)' if v.get('lock') else ''}{' -> ' + v['next'] if v.get('next') else ''}" for k, v in e['sections'].items()))
 
