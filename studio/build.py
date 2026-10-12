@@ -3,6 +3,8 @@
   python studio/build.py grid warden      the named tracks
   python studio/build.py --stings         the stings (studio/scores/stings.py)
   python studio/build.py --all            everything in studio/scores/
+  python studio/build.py --flags grid     only what the manifest says of a built track's sections (lock, next,
+                                          moods, start), from its score: nothing is rendered
 
 For each track: music/<cue>/<section><k>-<hash>.opus, one file per bar-aligned
 piece, and its entry in music/manifest.json (the other tracks' entries are
@@ -46,6 +48,37 @@ def listening_copy(name, x):
         sf.write(p, x, SR, format='FLAC', subtype='PCM_16')
     return p
 
+def whole(song):
+    """Whether this track's sections each play out before another may follow. A sector's do (12 Oct, after
+    a listen): its calm and its fight used to swap at every piece, and the game's fight-or-calm turns with
+    every wave, so the music kept jumping between the two and starting each over. Now a section, once
+    begun, is heard to its last bar, and the mood is asked only there. A boss's phases are left open: a
+    new phase cuts in on the next piece, and happens once."""
+    return any(k in ('calm', 'fight') for k in (song.moods or {}))
+def flags(song, sec):
+    """What the manifest says of a section besides its pieces."""
+    d = {}
+    if sec.lock or whole(song): d['lock'] = True
+    if sec.next: d['next'] = sec.next
+    elif not sec.loop: d['next'] = 'end'
+    return d
+def describe(mod, song, entry):
+    if getattr(mod, 'TITLE', None): entry['title'] = mod.TITLE          # the track's name, for a credits list one day
+    if song.moods: entry['moods'] = song.moods
+    if song.start: entry['start'] = song.start
+    return entry
+
+def reflag(cue):
+    """A built track's flags written again from its score, its pieces left as they are."""
+    mod = importlib.import_module('scores.' + cue); song = mod.song()
+    m = load_manifest(); e = m['tracks'][cue]
+    names = [s.name for s in song.sections]
+    if names != list(e['sections']): raise SystemExit(f'{cue}: its sections have changed ({names}): build it')
+    e['sections'] = {s.name: {'segs': e['sections'][s.name]['segs'], **flags(song, s)} for s in song.sections}
+    for k in ('title', 'moods', 'start'): e.pop(k, None)
+    describe(mod, song, e); save_manifest(m)
+    print(f"{cue}: " + ', '.join(f"{k}{' (whole)' if v.get('lock') else ''}{' -> ' + v['next'] if v.get('next') else ''}" for k, v in e['sections'].items()))
+
 def build_track(cue):
     mod = importlib.import_module('scores.' + cue)
     song = mod.song()
@@ -69,16 +102,9 @@ def build_track(cue):
             size += os.path.getsize(os.path.join(MUSIC, f))
             ids.append(len(segs))
             segs.append({'f': f, 's': round(sec.seg * song.bar, 6)})
-        d = {'segs': ids}
-        if sec.lock: d['lock'] = True
-        if sec.next: d['next'] = sec.next
-        elif not sec.loop: d['next'] = 'end'
-        sections[sec.name] = d
+        sections[sec.name] = {'segs': ids, **flags(song, sec)}
     for old in stale: os.remove(old)                                  # pieces this build no longer makes
-    entry = {'bpm': song.bpm, 'pre': PRE, 'segs': segs, 'sections': sections}
-    if getattr(mod, 'TITLE', None): entry['title'] = mod.TITLE          # the track's name, for a credits list one day
-    if song.moods: entry['moods'] = song.moods
-    if song.start: entry['start'] = song.start
+    entry = describe(mod, song, {'bpm': song.bpm, 'pre': PRE, 'segs': segs, 'sections': sections})
     m = load_manifest(); m['tracks'][cue] = entry; save_manifest(m)
 
     # the track as the game would play it through, to listen to and to measure
@@ -133,4 +159,4 @@ if __name__ == '__main__':
                 if not os.path.basename(p).startswith('_') and os.path.basename(p) != 'stings.py'] + ['--stings']
     for a in args:
         if a == '--stings': build_stings()
-        elif not a.startswith('-'): build_track(a)
+        elif not a.startswith('-'): (reflag if '--flags' in args else build_track)(a)

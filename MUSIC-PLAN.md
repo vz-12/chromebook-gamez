@@ -194,6 +194,14 @@ Tutorial, dailies and challenges reuse the sector tracks.
 - **Changes are musical.** A boss arriving cuts to its `boss-in` sting and
   the boss track on the next beat. Phases move on a bar line. Leaving a
   room crossfades.
+- **A sector's calm and fight each play their section out.** The game's
+  fight-or-calm turns with every wave (it is "six or more enemies, in a
+  wave"), so when either could cut in on any piece the music kept jumping
+  between the two and starting each one over (your report, 12 Oct). Now a
+  section, once begun, is heard to its last bar (sixteen bars, about half a
+  minute), and the mood is only asked there. `studio/build.py` marks every
+  section of a calm-and-fight track `lock` in the manifest; the engine
+  already knew the word, so the game's own code did not change.
 - **Effects are small decoded files** with variations and a little random
   pitch. They go through the existing voice cap and gap.
 - **Anything without a file falls back to today's synth.** Each step can

@@ -10,7 +10,9 @@
      - pieces start exactly on their bar lines (gapless), each its lead of
        silence early, and none is ever cut: it rings out under the next
      - a locked intro plays through, a section loops
-     - a new mood moves to its section on the next bar line, not mid-phrase
+     - a sector's calm and fight (locked, as studio/build.py writes them) each
+       play their section out: a new mood waits for the last bar, so the music
+       never jumps between the two or starts one over
      - a boss: the boss-in sting, the old track cut, the boss track on the
        sting's hit, its phases on bar lines; then the boss-down sting
      - a cue with no track leaves the room to the synth bed, and a cue with
@@ -45,7 +47,7 @@ const MANIFEST = {
   tracks: {
     title: { bpm: 120, pre: PRE, segs: [seg('title/0', 4), seg('title/1', 4)], sections: { a: { segs: [0, 1] } } },
     grid: { bpm: 120, pre: PRE, gain: -2, segs: [seg('grid/intro', 2), seg('grid/a0', 4), seg('grid/a1', 4), seg('grid/b0', 4), seg('grid/b1', 4)],
-            sections: { intro: { segs: [0], lock: true, next: 'a' }, a: { segs: [1, 2] }, b: { segs: [3, 4], next: 'a' } },
+            sections: { intro: { segs: [0], lock: true, next: 'a' }, a: { segs: [1, 2], lock: true }, b: { segs: [3, 4], lock: true, next: 'a' } },
             moods: { calm: 'a', fight: 'b' }, start: 'intro' },
     warden: { bpm: 160, pre: PRE, segs: [seg('warden/p1a', 4), seg('warden/p1b', 4), seg('warden/p2', 4), seg('warden/p3', 4)],
               sections: { p1: { segs: [0, 1] }, p2: { segs: [2] }, p3: { segs: [3] } }, moods: { p1: 'p1', p2: 'p2', p3: 'p3' } },
@@ -169,7 +171,9 @@ await tick(30);
         `${t.length} pieces: ${order.slice(0, 60)}${gapless(t) ? ' · ' + gapless(t) : ''} · cut ${cut} · ${run('Music.cur.src.length')} still sounding`);
 }
 
-// 2. a stage: crossfade in, the locked intro, calm, then fight on a bar line, then calm again
+// 2. a stage: crossfade in, the locked intro, calm; then fight, and calm again, each only once the section playing has played out
+// every piece of a section is followed by its next: no section is left part-way
+const wholes = list => { for (let i = 0; i + 1 < list.length; i++) { const a = list[i].buffer.name, b = list[i + 1].buffer.name; if (/[ab]0$/.test(a) && b !== a.slice(0, -1) + '1') return a + ' then ' + b; } return null; };
 const T2 = now();
 run(`state = 'play'; stage = STAGES[0]; enemies.length = 0; betweenWaves = 0; awaitingPortal = false;`);
 await tick(14);
@@ -187,9 +191,9 @@ await tick(14);
   const gr = named(played(T3 - 6), 'grid/');
   const firstB = gr.find(s => s.buffer.name.startsWith('grid/b'));
   const prev = gr[gr.indexOf(firstB) - 1];
-  check('fight: moves to section b on the next bar line', firstB && firstB.buffer.name === 'grid/b0' && !gapless(gr)
-        && firstB.t0 - T3 <= SEC(prev.buffer.name) + 1.2 + 0.06,
-        firstB ? `b0 at +${(firstB.t0 - T3).toFixed(2)} s, after ${prev.buffer.name}` : 'no b');
+  check('fight: section a plays out to its last bar, then b', firstB && firstB.buffer.name === 'grid/b0' && !gapless(gr)
+        && prev.buffer.name === 'grid/a1' && !wholes(named(played(T2), 'grid/')),
+        firstB ? `b0 at +${(firstB.t0 - T3).toFixed(2)} s, after ${prev.buffer.name}${wholes(named(played(T2), 'grid/')) ? ' · left part-way: ' + wholes(named(played(T2), 'grid/')) : ''}` : 'no b');
 }
 const T4 = now();
 run(`enemies.length = 0;`);
@@ -197,8 +201,10 @@ await tick(16);
 {
   const gr = named(played(T4), 'grid/');
   const firstA = gr.find(s => s.buffer.name.startsWith('grid/a'));
-  check('calm again: held 4 s, then back to a on a bar line', firstA && firstA.t0 - T4 >= 4 && !gapless(named(played(T4 - 8), 'grid/')),
-        firstA ? `a at +${(firstA.t0 - T4).toFixed(2)} s` : 'no a');
+  const all = named(played(T2), 'grid/'), before = firstA && all[all.indexOf(firstA) - 1];
+  check('calm again: held 4 s, and b plays out to its last bar, then a', firstA && firstA.buffer.name === 'grid/a0' && firstA.t0 - T4 >= 4
+        && before.buffer.name === 'grid/b1' && !wholes(all) && !gapless(named(played(T4 - 8), 'grid/')),
+        firstA ? `a0 at +${(firstA.t0 - T4).toFixed(2)} s, after ${before.buffer.name}` : 'no a');
 }
 
 // 3. a boss: the sting, the cut, the track on the hit, its phases; then down
