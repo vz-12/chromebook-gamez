@@ -124,7 +124,7 @@ a bar line when the boss changes phase.
 | `keeper` | THE BOOKKEEPER | baroque metal: harpsichord and guitars, ledger ticking | 168, F minor |
 | `shopkeeper` | THE SHOPKEEPER | jazz-metal: walking bass, ka-ching percussion | 180 swung, E♭ minor |
 | `unwritten` | THE UNWRITTEN | a blank page: sparse piano that writes itself into a full orchestra | 120→180, C minor |
-| `amalgam` | THE AMALGAM (EMBER's rite) | doom metal and choir, enormous and slow, then fast | 70/140, D minor |
+| `amalgam` "Made of Favourites" | THE AMALGAM (EMBER's rite) | a suite bolted together in the order he builds the body: its own walk, then one motif from each act-one boss (THE WARDEN's riff, FORGEHEART's hammer, BROODMOTHER's long line, THE ARCHIVIST's chorale, NULL's rising statement), a quiet middle of its own, and the main theme to finish | 140 (half-time until the finale), D minor |
 | `root` | ROOT (THE HACKER's rite, the race) | hacker metal: chiptune leads, industrial drums, the race gets its own section | 170, C♯ minor |
 | `tribunal` | THE TRIBUNAL | he does not fight: a court of drums, tension that never releases | 90, D minor |
 | `founder` | THE FOUNDER (THE VAGRANT's rite, the duel) | the samurai: taiko, shakuhachi, koto, metal | 150, D minor |
@@ -333,6 +333,15 @@ is pushed until you say; `main` only when you say ship.
    not run since step 2 and are still owed before the last ship. Checked
    for this one: the engine test, a boot in a browser with both new boss
    intros playing through, and the live files on both addresses.)*
+   *(12 Oct: a bonus for disk one, at your request: `amalgam` "Made of
+   Favourites". Your brief: one well-made song out of the other boss
+   themes, with sections of its own between them; epic, not cluttered;
+   motifs, not passages. So every motif is in D minor and on this track's
+   own band (one lead, strings under it, guitars, a choir), one idea at a
+   time, and the fast forms of the tunes are left out. The fight is held to
+   a hundred seconds at least and the song takes 117 to come round, so it
+   plays through once in a fight; the game asks only for `p1`, and the
+   sections follow each other by `next`. No new samples. Not shipped yet.)*
 6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
    `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
