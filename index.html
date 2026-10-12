@@ -68264,10 +68264,12 @@ const OST_TRACKS = [
   ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
   ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2],
   ['leak', 's', 'THE LEAK', 2],       ['recursion', 's', 'THE RECURSION', 2], ['halt', 's', 'THE HALT', 2],
+  ['breakin', 'u', ['leak', 'recursion', 'halt'], 2],   // those three as one piece, end to end (no files of its own)
   // ALL HALLOWS: an area is a stage of its own (HL_AREAS), and it ends on its boss
   ['patch', 's', 'THE PATCH', 3],     ['backlog', 'b', 'backlog', 3],
   ['house', 's', 'THE HOUSE', 3],     ['deadgame', 'b', 'deadgame', 3]
 ];
+const ostPart = cue => OST_TRACKS.find(t => t[0] === cue);
 const OST_DISKS = { 1: 'DISK ONE', 2: 'DISK TWO   ·   CRACKS IN THE PLANE', 3: 'ALL HALLOWS' };
 const Ost = {
   cue: null,                          // the song picked, playing through (musicWant)
@@ -68289,6 +68291,7 @@ function ostBeat(key) {
   return i >= 0 && (p.bestWave | 0) > i * 5 + 5;
 }
 function ostOpen(t) {
+  if (t[1] === 'u') return t[2].every(c => ostOpen(ostPart(c)));     // a piece made of others: kept when they all are
   if (t[1] === 'v') return Tales.has('b:theother', 2);
   if (t[1] === 'b') return ostBeat(t[2]);
   const st = ostStages().find(s => s.name === t[2]);
@@ -68299,6 +68302,7 @@ function ostOpen(t) {
 }
 // what will keep a song, said without naming what has not been met
 function ostHint(t, st) {
+  if (t[1] === 'u') return 'KEPT WHEN THE THREE BEFORE IT ARE';
   if (t[1] === 'v') return 'KEPT WHEN SOMETHING ELSE GETS IN, AND IS PUT DOWN';
   const tag = st ? st.tag.toUpperCase() : '';
   if (t[1] === 's') return 'KEPT WHEN ' + (tag || 'IT') + ' IS PASSED';
@@ -68314,13 +68318,15 @@ function ostListed(t) {
 function ostList() {
   if (!Music.man) return [];
   return OST_TRACKS.filter(t => Music.has(t[0]) && ostListed(t)).map(t => {
-    const st = ostStages().find(s => (t[1] === 's' ? s.name === t[2] : s.boss === t[2]));
-    const boss = t[1] !== 's' ? BOSSES[t[2]] : null;
+    const whole = t[1] === 'u' ? t[2].map(c => ostStages().find(s => s.name === ostPart(c)[2])) : null;   // the stages a joined piece runs through
+    const st = whole ? whole[0] : ostStages().find(s => (t[1] === 's' ? s.name === t[2] : s.boss === t[2]));
+    const boss = t[1] === 'b' || t[1] === 'v' ? BOSSES[t[2]] : null;
     const open = ostOpen(t);
     return { cue: t[0], kind: t[1], disk: t[3], open,
       col: t[1] === 'v' ? VIRUS_COL : boss ? boss.col : st ? st.accent : COL.player,
       title: open ? String(Music.man.tracks[t[0]].title || t[0]).toUpperCase() : '—  —  —',
       sub: !open ? ostHint(t, st)
+         : whole ? 'FRACTURE ' + whole.map(s => s.tag.split(' ').pop().toUpperCase()).join(' · ') + '   ·   AS ONE PIECE'
          : t[1] === 's' ? (st ? st.tag.toUpperCase() + '   ·   ' : '') + t[2]
          : 'BOSS   ·   ' + (boss ? boss.name : t[2]) + (t[1] === 'v' ? ', CORRUPTED' : '') };
   });

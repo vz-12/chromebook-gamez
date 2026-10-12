@@ -2,6 +2,9 @@
 
   python studio/build.py grid warden      the named tracks
   python studio/build.py --stings         the stings (studio/scores/stings.py)
+  python studio/build.py breakin          a suite (a score with PARTS): other tracks' sections end to end, as one
+                                          piece. Nothing is rendered; it is also laid out again whenever one of
+                                          its tracks is built
   python studio/build.py --all            everything in studio/scores/
   python studio/build.py --flags grid     only what the manifest says of a built track's sections (lock, next,
                                           moods, start), from its score: nothing is rendered
@@ -115,7 +118,9 @@ def build_track(cue):
         sections[sec.name] = {'segs': ids, **flags(song, sec)}
     for old in stale: os.remove(old)                                  # pieces this build no longer makes
     entry = describe(mod, song, {'bpm': song.bpm, 'pre': PRE, 'segs': segs, 'sections': sections})
-    m = load_manifest(); m['tracks'][cue] = entry; save_manifest(m)
+    m = load_manifest()
+    if 'cover' in m['tracks'].get(cue, {}): entry['cover'] = m['tracks'][cue]['cover']      # its picture is not this build's to lose (covers.py)
+    m['tracks'][cue] = entry; save_manifest(m)
 
     # the track as the game would play it through, to listen to and to measure
     order = getattr(mod, 'ORDER', [s.name for s in song.sections])
@@ -142,6 +147,55 @@ def build_track(cue):
           f"width {mm['width']}, small speaker {mm['small']} dB  ->  {os.path.relpath(copy, ROOT)}")
     return rep
 
+def is_suite(name):
+    try: return hasattr(importlib.import_module('scores.' + name), 'PARTS')
+    except ModuleNotFoundError: return False
+def suites_with(cues):
+    """The suites (scores with PARTS) that are made of any of these tracks: they are laid out again whenever
+    one of their tracks is built, since a piece's file is named by its sound."""
+    here = os.path.dirname(os.path.abspath(__file__)); out = []
+    for p in sorted(glob.glob(os.path.join(here, 'scores', '*.py'))):
+        name = os.path.basename(p)[:-3]
+        if name.startswith('_') or name == 'stings' or not is_suite(name): continue
+        if any(c in cues for c, _ in importlib.import_module('scores.' + name).PARTS): out.append(name)
+    return out
+def build_suite(name):
+    """A piece made of other tracks' pieces, end to end (its score's PARTS: each track, and which of its
+    sections in which order). Nothing is rendered: its entry in the manifest names the same files, under
+    sections called track.section, each going on to the next. The listening copy is laid out from the
+    files themselves, as the game would lay them, so what is heard there is the joins as they are."""
+    mod = importlib.import_module('scores.' + name)
+    m = load_manifest(); segs, sections, order = [], {}, []
+    for cue, names in mod.PARTS:
+        tr = m['tracks'][cue]
+        for sec in names:
+            ids = []
+            for i in tr['sections'][sec]['segs']: ids.append(len(segs)); segs.append(dict(tr['segs'][i]))
+            sections[f'{cue}.{sec}'] = {'segs': ids, 'lock': True}; order.append(f'{cue}.{sec}')
+    for a, b in zip(order, order[1:] + ['end']): sections[a]['next'] = b
+    entry = {'bpm': m['tracks'][mod.PARTS[0][0]]['bpm'], 'pre': PRE, 'segs': segs, 'sections': sections, 'title': mod.TITLE,
+             'start': order[0], 'order': order, 'loop': 0, 'parts': [c for c, _ in mod.PARTS]}
+    if 'cover' in m['tracks'].get(name, {}): entry['cover'] = m['tracks'][name]['cover']
+    m['tracks'][name] = entry; save_manifest(m)
+    secs = sum(s['s'] for s in segs); mix = np.zeros((int((secs + 6.0) * SR), 2)); at = 0.0; joins = []
+    for sname in order:
+        if sname.endswith(('.intro',)) and at: joins.append(at)
+        for i in sections[sname]['segs']:
+            x, _ = sf.read(os.path.join(MUSIC, segs[i]['f']), always_2d=True)
+            daw.add(mix, x, int(round(at * SR)) - int(PRE * SR)); at += segs[i]['s']
+    # where one track's last piece rings under another's first, nothing has limited the two together (in the game
+    # the music bus is far under full scale, so nothing needs to): the copy to listen to is limited here, as a whole
+    raw = dbfs(np.abs(mix).max()); mix = mix * daw.limit_gain(mix, ceil_db=-1.0)[:, None]
+    copy = listening_copy(name, mix); mm = measure(mix)
+    print(f"{name}: \"{mod.TITLE}\", {len(order)} sections of {', '.join(c for c, _ in mod.PARTS)}, {secs / 60:.0f} min {secs % 60:02.0f} s, "
+          f"no new files; the pieces meet at {', '.join(f'{int(j // 60)}:{j % 60:04.1f}' for j in joins)}")
+    print(f"  play-through: loud {mm['loud']} dBFS, crest {mm['crest']} dB, peak {mm['peak']} dBFS (the files summed reach {raw:.1f})  ->  {os.path.relpath(copy, ROOT)}")
+    # how loud it is either side of each join: a piece that ended much louder or quieter than the next begins would show here
+    for j in joins:
+        a = mix[int((j - 4.0) * SR):int(j * SR)]; b = mix[int(j * SR):int((j + 4.0) * SR)]
+        print(f"  at {int(j // 60)}:{j % 60:04.1f}: the four seconds before {loudness(a):.1f} dBFS, the four after {loudness(b):.1f}")
+    return mix
+
 def build_stings():
     mod = importlib.import_module('scores.stings')
     m = load_manifest(); m.setdefault('stings', {})
@@ -167,6 +221,10 @@ if __name__ == '__main__':
         here = os.path.dirname(os.path.abspath(__file__))
         args = [os.path.basename(p)[:-3] for p in sorted(glob.glob(os.path.join(here, 'scores', '*.py')))
                 if not os.path.basename(p).startswith('_') and os.path.basename(p) != 'stings.py'] + ['--stings']
+    built = []
     for a in args:
         if a == '--stings': build_stings()
-        elif not a.startswith('-'): (reflag if '--flags' in args else build_track)(a)
+        elif a.startswith('-') or is_suite(a): continue
+        else: (reflag if '--flags' in args else build_track)(a); built.append(a)
+    # the suites last: the ones asked for, and any made of a track that has just been built
+    for name in dict.fromkeys([a for a in args if not a.startswith('-') and is_suite(a)] + suites_with(built)): build_suite(name)

@@ -524,7 +524,7 @@ def total(text):
     """How many steps a written line takes."""
     return sum(float(tok.partition(':')[2] or 1) for tok in text.split())
 
-# ---- below the mirror: BREAKING IN, one score in three pieces (leak, recursion, halt)
+# ---- below the mirror: BREAKING AND ENTERING, one score in three pieces (leak, recursion, halt)
 # The loop all three are made of: five notes, a minor key's first, third, fourth, fifth and seventh. Each
 # piece plays it the way its room's rule works. A ring of it on each chord of a key, by the chord's name:
 def ring(names, octave=2):

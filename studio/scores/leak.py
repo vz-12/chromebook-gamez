@@ -1,4 +1,4 @@
-"""leak: THE LEAK, fracture iii, and the first piece of BREAKING IN (MUSIC-PLAN.md): one score in three
+"""leak: THE LEAK, fracture iii, and the first piece of BREAKING AND ENTERING (MUSIC-PLAN.md): one score in three
 pieces for the three rooms under THE MIRROR, where no boss waits and the way on is a system to be worked.
 All three are made of one loop, five notes, and each room plays it the way its rule works.
 
@@ -12,20 +12,24 @@ Every long note of the tune sags before it ends. 136 BPM, G minor.
   c      16 bars, fight  charging: the line gains a note each time instead of losing one; a second
                          strain over it, with guitars
   d      16 bars, fight  the tune in octaves over everything; the last bar leaks away, and b fills it
+  out    4 bars          the way on to the next piece (only when the three are played as one)
 
-The other two pieces are recursion and halt. Each is a whole step lower than the one before: G, F, E flat.
+The other two pieces are recursion and halt, and all three keep one beat, 136 to the minute. Each is a
+whole step lower than the one before (G, F, E flat), and each has a way out into the next: its fourth
+chord turned major, which is the chord that leads into the key a step down. breakin.py lays the three end
+to end as one piece.
 """
 from daw import Song, Bus, chord, midi, hp, highshelf, peak, clip
 from inst import hit, synth, guitar, amp, sampler, keys, clips, riser, reverse, boom, steam
 from scores._common import third, kit, void, riff, ring, acid, drip
 
-TITLE = 'Dies in Your Hands'
+TITLE = 'Down the Drain'
 ORDER = ['intro', 'a', 'b', 'c', 'd']
 
 # the ground, and on each of its chords the loop's five notes
 GROUND = ['Gm', 'Gm', 'Eb', 'F', 'Gm', 'Gm', 'Cm', 'D']
-RINGS = {'Gm': 'G Bb C D F', 'Eb': 'Eb F G Bb C', 'F': 'F G A C D', 'Cm': 'C Eb F G Bb', 'D': 'D F# A C D'}
-ROOT = {'Gm': 'G2', 'Eb': 'Eb2', 'F': 'F2', 'Cm': 'C2', 'D': 'D2'}
+RINGS = {'Gm': 'G Bb C D F', 'Eb': 'Eb F G Bb C', 'F': 'F G A C D', 'Cm': 'C Eb F G Bb', 'D': 'D F# A C D', 'C': 'C E G Bb C'}
+ROOT = {'Gm': 'G2', 'Eb': 'Eb2', 'F': 'F2', 'Cm': 'C2', 'D': 'D2', 'C': 'C2'}
 # the tune all three pieces share: it picks its way up the loop and holds what it reaches. A bar a line
 BREACH = ['G4:2 Bb4:2 C5:2 D5:6 r:4',
           'D5:2 F5:2 G5:8 F5:2 D5:2',
@@ -170,7 +174,26 @@ def song():
         dying(d, 'lead', b, BREACH[k], 1.0); d.line('lead', b, BREACH[k], 0.45, octave=1)
     for b in (0, 8): d.note('crash', b, 0, 1, 60, 1.0); d.note('fx', b, 0, 1, 60, 0.16, s='boom')
     d.note('crash', 4, 0, 1, 60, 0.6); d.note('crash', 12, 0, 1, 60, 0.6)
-    d.note('fx', 15, 0, 16, 60, 0.3, s='hiss'); d.note('fx', 15, 15.99, 1, 60, 0.22, s='rev', lead=1.5 - 0.01 * s.step)
+    d.note('fx', 15, 0, 16, 60, 0.3, s='hiss'); d.note('fx', 15, 15.99, 1, 60, 0.16, s='rev', lead=1.5 - 0.01 * s.step)
+
+    # ---- out: the way on. Heard only when the three pieces are played as one (breakin.py): the key's fourth
+    #      chord, C, turns major, and a major chord on C is what leads into F minor, where the next piece is.
+    #      Two long notes here do not sag: the ones that are the way out
+    o = s.section('out', 4, loop=False, lock=True)
+    for b, sym in enumerate(['Gm', 'Eb', 'C', 'C7']):
+        base = 'C' if sym == 'C7' else sym; g = ROOT[base]; last = b == 3
+        pad(o, b, sym, 0.8 if not last else 0.55); o.note('sub', b, 0, 15, root(base), 0.9 if not last else 0.6)
+        line(o, b, base, 0.95 if not last else 0.7, 1.0 if not last else 0.4)        # the last bar drains: nothing swells into the next piece, it is let down into it
+        if b >= 2: voices(o, b, base, 0.9 if not last else 0.6)
+        if not last: riff(o, b, f'{g}*:16', bass=False)
+        if not last:
+            o.hits('kick', b, 'x...x...x...x...'); o.hits('clap', b, '....x.......x...')
+            o.hits('hat', b, 'xoxoxoxoxoxoxoxo', v=0.7); o.hits('ohat', b, '..x...x...x...x.', v=0.8)
+        else: o.hits('kick', b, 'x...............', v=0.7); drops(o, b, 'Gm', 0.8)
+    dying(o, 'lead', 0, BREACH[0], 1.0); dying(o, 'lead', 1, BREACH[2], 1.0)
+    o.line('lead', 2, 'C5:2 E5:2 G5:2 C6:10', 1.0); o.line('lead', 3, 'C6:4 Bb5:12', 0.7)
+    o.note('crash', 0, 0, 1, 60, 0.6); o.note('crash', 2, 0, 1, 60, 0.9); o.note('fx', 2, 0, 1, 60, 0.12, s='boom')
+    o.note('fx', 3, 4, 8, 60, 0.22, s='hiss')
 
     s.moods = {'calm': 'a', 'fight': ['b', 'c', 'd']}
     s.start = 'intro'

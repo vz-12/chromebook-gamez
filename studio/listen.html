@@ -85,7 +85,7 @@ function moodSecs(tr, mood) {
 }
 function after(c) {
   const tr = c.tr, want = c.only ? [c.only] : moodSecs(tr, c.mood);
-  if (c.sec === null) return { sec: c.only || tr.start || want[0], i: 0 };
+  if (c.sec === null) return { sec: c.only || c.from || tr.start || want[0], i: 0 };
   const sec = tr.sections[c.sec];
   if (!want.includes(c.sec) && !sec.lock) return { sec: want[0], i: 0 };
   if (c.i + 1 < sec.segs.length) return { sec: c.sec, i: c.i + 1 };
@@ -100,10 +100,10 @@ function stop(secs = 0.25) {
   for (const s of c.src) { try { s.stop(t + secs + 0.05); } catch (e) {} }
   paint();
 }
-function play(id, mood, startAt, only) {
+function play(id, mood, startAt, only, from) {
   audio(); stop(startAt ? 0.35 : 0.25);
   const tr = man.tracks[id], g = ac.createGain(); g.connect(mbus);
-  cur = { id, tr, g, sec: null, i: 0, at: null, mood, only: only || null, src: [], startAt: startAt || 0, marks: [] };
+  cur = { id, tr, g, sec: null, i: 0, at: null, mood, only: only || null, from: from || null, src: [], startAt: startAt || 0, marks: [] };
   pump(); paint();
 }
 let pumping = false;
@@ -185,8 +185,15 @@ async function boot() {
     const names = Object.keys(tr.moods || {});
     moods.appendChild(Object.assign(document.createElement('span'), { className: 'meta', textContent: 'as the game plays it:' }));
     for (const mood of names.length ? names : ['calm'])
-      moods.appendChild(button(mood, '', () => { if (cur && cur.id === id && !cur.only) { cur.mood = mood; paint(); } else play(id, mood); }, { track: id, mood }));
+      moods.appendChild(button(names.length ? mood : 'the whole piece, start to end', '', () => { if (cur && cur.id === id && !cur.only) { cur.mood = mood; paint(); } else play(id, mood); }, { track: id, mood }));
     card.appendChild(moods);
+    // a piece made of other tracks' sections, end to end: start it anywhere, to hear a join without the minutes before it
+    if (tr.parts) {
+      const from = document.createElement('div'); from.className = 'row'; from.style.marginTop = '8px';
+      from.appendChild(Object.assign(document.createElement('span'), { className: 'meta', textContent: 'on from:' }));
+      for (const sec of tr.order) from.appendChild(button(sec, '', () => play(id, 'calm', 0, null, sec)));
+      card.appendChild(from);
+    }
     const only = document.createElement('div'); only.className = 'row'; only.style.marginTop = '8px';
     only.appendChild(Object.assign(document.createElement('span'), { className: 'meta', textContent: 'one section, looped:' }));
     for (const sec in tr.sections) only.appendChild(button(sec, '', () => play(id, 'calm', 0, sec), { track: id, only: sec }));

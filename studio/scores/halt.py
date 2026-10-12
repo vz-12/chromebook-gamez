@@ -1,10 +1,10 @@
-"""halt: THE HALT, fracture v, and the last piece of BREAKING IN (see leak.py): the same five-note loop
+"""halt: THE HALT, fracture v, and the last piece of BREAKING AND ENTERING (see leak.py): the same five-note loop
 and the same tune, a whole step lower again, played the way this room's rule works.
 
 Here the room deadlocks: you may move or you may act, never both. So the piece is in threes of bars. For
 two bars the band moves, the loop gaining a note at a time, and there is no tune. Then everything stops
 where it stood: a chord held like a frame, a clock, and over it the tune acts, one bar of it, alone. The
-band and the tune are never heard together. 140 BPM, E flat minor.
+band and the tune are never heard together. 136 BPM (the beat all three pieces keep), E flat minor.
 
   intro  3 bars, once    a clock, for two bars; then the first held chord, and the tune's first bar
   a      6 bars, calm    two rounds, quietly: the loop on a pluck over the clock, the tune on a piano
@@ -14,6 +14,7 @@ band and the tune are never heard together. 140 BPM, E flat minor.
                          tune's second half
   d      12 bars, fight  the second strain, in octaves with a choir, guitars held under it; its third
                          round is the loop going up whole
+  end    6 bars          how the three end, when they are played as one: the room held, and not let go
 """
 import numpy as np
 from daw import SR, Ev, Song, Bus, chord, midi, hp, highshelf, peak, clip
@@ -21,7 +22,7 @@ from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom, 
 from scores._common import kit, void, vault, riff, ring, legato, move
 from scores.leak import BREACH, SINK
 
-TITLE = 'Never Both'
+TITLE = 'After You'
 ORDER = ['intro', 'a', 'b', 'c', 'd']
 
 TUNE = [move(t, -4) for t in BREACH]                  # the tune, down from G to E flat
@@ -36,8 +37,8 @@ ROUNDS = {'b': [('Ebm', TUNE[0]), ('B', TUNE[2]), ('Db', TUNE[3]), ('Bb', TUNE[7
 def song():
     K = kit(); V = void(); T = vault()
     chugs = {r: t for r, t in K['chugs'].items() if r != midi('F2')}
-    beat = 60.0 / 140
-    s = Song('halt', 140, target=-12.0, ceil=-1.5, room=dict(decay=2.6, pre=0.02, bright=6000.0, dark=1400.0),
+    beat = 60.0 / 136
+    s = Song('halt', 136, target=-12.0, ceil=-1.5, room=dict(decay=2.6, pre=0.02, bright=6000.0, dark=1400.0),
              echo=dict(time=beat * 0.75, fb=0.4, taps=5), master=lambda x: highshelf(hp(x, 32.0), 9000.0, -1.5))
     s.add('kick', Bus(hit(K['kick_m'], tune=-1.0), gain=0.7, key=True, fx=[lambda x: clip(x, 0.7)]))      # its thud moved from E onto E flat, the keynote
     s.add('dkick', Bus(hit(K['kick_m'], tune=-1.0), gain=0.55, fx=[lambda x: clip(x, 0.7)]))
@@ -80,7 +81,7 @@ def song():
         out = []
         for n in ((5, 4, 3, 2, 1) if down else (1, 2, 3, 4, 5)): out += [f'{g}*:1'] + [f'{g}:1'] * (n - 1)
         return ' '.join(out + ['r:1'])
-    def frame(sec, bar, sym, v=1.0, voices=False):
+    def frame(sec, bar, sym, v=1.0, voices=False, clock=True):
         """The room held: the chord as it stood, and nothing moving but the clock."""
         for m in chord(sym, 3):
             while m < 51: m += 12
@@ -89,7 +90,7 @@ def song():
                 while m < 56: m += 12
                 while m > 67: m -= 12
                 sec.note('choir', bar, 0, 15, m, v * 0.9)
-        sec.hits('tick', bar, 'x...x...x...x...', v=1.0)
+        if clock: sec.hits('tick', bar, 'x...x...x...x...', v=1.0)
 
     def moving(sec, bar, sym, kind, last):
         """One bar of the band. kind: 'b' winds the loop up, 'c' runs it down over both feet, 'd' does both."""
@@ -105,6 +106,7 @@ def song():
     i = s.section('intro', 3, seg=3, loop=False, next='a', lock=True)
     for b in (0, 1): i.hits('tick', b, 'x.o.x.o.x.o.x.o.', v=0.7 + 0.15 * b)
     i.note('bass', 0, 0, 31, root('Ebm'), 0.14, open=0.5)
+    i.note('piano', 0, 0, 30, midi('Eb3'), 0.65); i.note('piano', 0, 0, 30, midi('Eb2'), 0.55)          # where it begins: the keynote, low, struck once
     loop(i, 1, 'Ebm', 0.6)
     frame(i, 2, 'Ebm', 0.7); i.line('piano', 2, TUNE[0], 0.8)
     i.note('fx', 2, 0, 1, 60, 0.12, s='boom')
@@ -126,14 +128,29 @@ def song():
             b = u * 3
             moving(f, b, sym, name, False); moving(f, b + 1, sym, name, True)
             f.note('crash', b, 0, 1, 60, 1.0 if u == 0 else 0.7)
-            if u == 0: f.note('fx', b, 0, 1, 60, 0.16, s='boom')
+            if u == 0: f.note('fx', b, 0, 1, 60, 0.1, s='boom')
             # held
             frame(f, b + 2, sym, 0.75, voices=(name != 'b'))
             f.note('fx', b + 2, 0, 1, 60, 0.17, s='off' + sym)
             if name == 'd': riff(f, b + 2, f'{ROOT[sym]}*:16', bass=False)        # the guitars held too, under the choir
             legato(f, 'lead', b + 2, tune, 0.85, most=12)
             if name == 'd': f.line('lead', b + 2, tune, 0.4, octave=1)
-            f.note('fx', b + 2, 15.99, 1, 60, 0.22, s='rev', lead=1.4 - 0.01 * s.step)
+            f.note('fx', b + 2, 15.99, 1, 60, 0.15, s='rev', lead=1.4 - 0.01 * s.step)
+
+    # ---- end: how the three end, when they are played as one (breakin.py). One more round on the home
+    #      chord, the band running down; and this time the room is not let go. The clock slows, and stops
+    e = s.section('end', 6, seg=3, loop=False, lock=True)
+    moving(e, 0, 'Ebm', 'c', False); e.note('crash', 0, 0, 1, 60, 0.7)
+    loop(e, 1, 'Ebm', 1.0, down=True); riff(e, 1, accents(ROOT['Ebm'], True), bass=False)        # the second bar thins as it goes
+    for n in range(4): e.note('bass', 1, n * 2, 1.7, root('Ebm'), 1.0 if n % 2 == 0 else 0.82)
+    e.hits('kick', 1, 'x.....x.........'); e.hits('snare', 1, '....x.......x...', v=0.8); e.hits('hat', 1, 'x.x.x.x.........', v=0.8)
+    frame(e, 2, 'Ebm', 0.9, voices=True); e.note('fx', 2, 0, 1, 60, 0.17, s='offEbm')
+    legato(e, 'lead', 2, TUNE[0], 0.85, most=12); e.line('lead', 2, TUNE[0], 0.4, octave=1)
+    for b in (3, 4, 5): frame(e, b, 'Ebm', 0.8 - 0.12 * (b - 3), voices=True, clock=False)
+    for b, at in ((3, 0), (3, 4), (3, 9), (3, 15), (4, 6), (4, 14), (5, 8)): e.note('tick', b, at, 1, 60, 0.9 - 0.08 * (b - 3))
+    e.line('piano', 3, TUNE[0], 0.8)
+    e.note('piano', 4, 6, 10, midi('Bb3'), 0.7); e.note('piano', 4, 6, 10, midi('Gb3'), 0.6)
+    e.note('piano', 5, 8, 16, midi('Eb3'), 0.8); e.note('piano', 5, 8, 16, midi('Eb2'), 0.7)
 
     s.moods = {'calm': 'a', 'fight': ['b', 'c', 'd']}
     s.start = 'intro'

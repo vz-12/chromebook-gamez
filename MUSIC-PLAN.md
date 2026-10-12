@@ -98,9 +98,9 @@ a bar line when the boss changes phase.
 | `void` "Falling Upward" | THE VOID, sector 05 | vast, and pulling: a bass and chords that slide into each other, a tune that falls while every phrase starts higher, a piano, a far choir, strings, stars | 140 (half-time when calm), C minor |
 | `archive` "Struck From the Record" | THE ARCHIVE, fracture i | redacted: a tune that is the same shape on every shelf (three knocks, then the piece taken down) over a ground that steps down and never arrives; notes struck out that come back once as ghosts, tape-stops, deleted beats; an old upright, paper for percussion | 124, E minor |
 | `mirror` "Once From Each Side" | THE MIRROR, fracture ii | one tune seen in a mirror three ways, all in key: upside down, backwards, and its struck glass notes played backwards; broken glass for percussion; its second fight section is its first played backwards, note for note | 128, A minor |
-| `leak` "Dies in Your Hands" | THE LEAK, fracture iii | BREAKING IN, i. You carry charge that dies in your hands, so the loop leaks: an acid line runs up its five notes, then four, three, two, one, the filter closing as it goes, and is filled again at the bar line; every long note of the tune sags before it ends. Four on the floor, drips | 136, G minor |
-| `recursion` "It Does Not Wait" | THE RECURSION, fracture iv | BREAKING IN, ii. A packet goes round a ring of five and a wrong turn loops it back, so the piece is in five and the loop is inside itself: its five notes in sixteenths, the bass walking the same five a beat each, the chords the same five a bar each; a second copy of the fast ring slips a sixteenth later every bar. One section is wrong turns (a bar and back, then two, three, four); the last takes the one turn that leads out | 130 in five-four, F minor |
-| `halt` "Never Both" | THE HALT, fracture v | BREAKING IN, iii. You may move or act, never both, so it is in threes of bars: two where the band moves and there is no tune, then everything stops where it stood (a held chord, a clock) and the tune acts, one bar, alone. The band and the tune are never heard together | 140, E flat minor |
+| `leak` "Down the Drain" | THE LEAK, fracture iii | BREAKING AND ENTERING, i. You carry charge that dies in your hands, so the loop leaks: an acid line runs up its five notes, then four, three, two, one, the filter closing as it goes, and is filled again at the bar line; every long note of the tune sags before it ends. Four on the floor, drips | 136, G minor |
+| `recursion` "Wheels Within Wheels" | THE RECURSION, fracture iv | BREAKING AND ENTERING, ii. A packet goes round a ring of five and a wrong turn loops it back, so the piece is in five and the loop is inside itself: its five notes in sixteenths, the bass walking the same five a beat each, the chords the same five a bar each; a second copy of the fast ring slips a sixteenth later every bar. One section is wrong turns (a bar and back, then two, three, four); the last takes the one turn that leads out | 136 in five-four, F minor |
+| `halt` "After You" | THE HALT, fracture v | BREAKING AND ENTERING, iii. You may move or act, never both, so it is in threes of bars: two where the band moves and there is no tune, then everything stops where it stood (a held chord, a clock) and the tune acts, one bar, alone. The band and the tune are never heard together | 136, E flat minor |
 | `rootroom` | ROOT'S ROOM | a terminal: chiptune over industrial | 150, C♯ minor |
 | `library` | THE LIBRARIES | quiet: celesta, music box, dust | 80, F major / D minor |
 | `hub` | THE HUB | home: the main theme on piano and pads | 90, A minor |
@@ -403,11 +403,34 @@ is pushed until you say; `main` only when you say ship.
    `archive`, `curator`, `mirror`, `other`, `leak`, `recursion`, `halt`,
    the `intrusion` sting, `rootroom`, `root`.
    *(12 Oct, "a big 3 piece score for the rest, since it's the same sort of
-   loop but different execution": **BREAKING IN**, one score in three
-   pieces, for the three rooms under THE MIRROR. `leak` "Dies in Your
-   Hands", `recursion` "It Does Not Wait", `halt` "Never Both". No new
-   recordings. Not shipped: they wait for a listen. `rootroom` and `root`
-   are next, and not begun.*
+   loop but different execution": **BREAKING AND ENTERING**, one score in
+   three pieces, for the three rooms under THE MIRROR. `leak` "Down the
+   Drain", `recursion` "Wheels Within Wheels", `halt` "After You" (the
+   first names, which you called terrible, were "Dies in Your Hands", "It
+   Does Not Wait" and "Never Both"). No new recordings. Not shipped: they
+   wait for a listen. `rootroom` and `root` are next, and not begun.*
+
+   - *They join as one piece* (your second note: "make sure they can fit
+     into one big piece perfectly"). `breakin` "Breaking and Entering" is
+     the three end to end, five minutes, made of the same files:
+     `python studio/build.py breakin` lays it out, and it is laid out
+     again whenever one of the three is built. What makes the joins:
+     - *one beat:* all three are at 136 now (they were 136, 130 and 140),
+       through four beats in a bar, then five, then four;
+     - *a way out of each:* a last section its own room never plays
+       (`out`), where the key's fourth chord turns major. That chord leads
+       into the key a whole step down: G minor leaves by C for F minor, F
+       minor leaves by B flat for E flat minor. Nothing swells into the
+       next piece; each is let down into it;
+     - *a shared sound across the second join:* the second piece's way out
+       ends on a clock, and it is the third piece's clock;
+     - *an ending:* the third has no way out (`end`): the room is held,
+       the clock slows and stops. (When ROOT is written, a way out to C
+       sharp minor by A flat could replace it.)
+     Checked from the files: the notes either side of each join are the
+     chord that leads and the chord it leads to, and the level drops by
+     about six decibels into each new piece's quiet opening, as it does
+     inside each piece between a fight and a calm.
 
    - *One loop:* five notes, a minor key's first, third, fourth, fifth and
      seventh (`ring()` in `_common.py`). Each room plays it the way its
@@ -430,9 +453,12 @@ is pushed until you say; `main` only when you say ship.
      chords in a ring and none of them the last, a first render was heard
      as C minor: the tune now holds each bar's own note of the five, and
      the keynote is held under every chord.
-   - *THE SOUNDTRACK lists them* after the corrupted OTHER's. No boss waits
-     in these rooms, so a song there is kept once the room's defences have
-     been taken down (the tales' count of it). No covers yet.)*
+   - *THE SOUNDTRACK lists them* after the corrupted OTHER's, and the three
+     as one piece after them, kept once all three are. No boss waits in
+     these rooms, so a song there is kept once the room's defences have
+     been taken down (the tales' count of it). No covers yet.
+   - *The listening room* plays a joined piece whole, or on from any of
+     its sections, so a join can be heard without the minutes before it.)*
    *(12 Oct: `archive` "Struck From the Record" and `curator` "A Piece
    Short" done, with no new samples: Splice's day was spent. The studio
    learned three-four (`Song(beats=3, steps=12)`) for THE CURATOR's waltz,

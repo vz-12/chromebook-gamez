@@ -1,12 +1,12 @@
-"""recursion: THE RECURSION, fracture iv, and the second piece of BREAKING IN (see leak.py): the same
+"""recursion: THE RECURSION, fracture iv, and the second piece of BREAKING AND ENTERING (see leak.py): the same
 five-note loop, a whole step lower, played the way this room's rule works.
 
 Here a packet goes round a ring of five junctions, whether you are ready or not, and a wrong turn loops
 it back. So the piece is in five, and the loop is inside itself: its five notes go round in sixteenths,
 the bass walks the same five a beat at a time, and the chords are the same five again, a bar each. A
 second copy of the fast ring starts one sixteenth later every bar and is back in step on the sixth. Only
-one turn leads out of the ring, and the piece takes it once, at the very end. 130 BPM in five-four,
-F minor.
+one turn leads out of the ring, and the piece takes it once, at the very end. 136 BPM in five-four (the
+beat is the one all three pieces keep), F minor.
 
   intro  5 bars, once    the ring alone; its echo a step behind; the bass; the chords
   a      5 bars, calm    once round, quietly: glass for hats, a bell holding each bar's note
@@ -16,18 +16,19 @@ F minor.
                          try with more of the band
   d      10 bars, fight  round once more, and then the inward turn: where the fifth junction was, the
                          ring stops and the chord that leads home is held; b begins on home
+  out    5 bars          the way on to the next piece (only when the three are played as one)
 """
 import numpy as np
 from daw import Song, Bus, chord, midi, hp, highshelf, peak, clip
 from inst import hit, synth, guitar, amp, sampler, keys, clips, riser, reverse, boom
-from scores._common import kit, void, mirror, riff, ring, legato
+from scores._common import kit, void, vault, mirror, riff, ring, legato
 
-TITLE = 'It Does Not Wait'
+TITLE = 'Wheels Within Wheels'
 ORDER = ['intro', 'a', 'b', 'c', 'd']
 
 CELL = 'F Ab Bb C Eb'
 RINGCH = ['Fm', 'Ab', 'Bbm', 'Cm', 'Eb']               # the same five, as chords: the junctions
-ROOT = {'Fm': 'F2', 'Ab': 'Ab2', 'Bbm': 'Bb1', 'Cm': 'C2', 'Eb': 'Eb2', 'C': 'C2'}
+ROOT = {'Fm': 'F2', 'Ab': 'Ab2', 'Bbm': 'Bb1', 'Cm': 'C2', 'Eb': 'Eb2', 'C': 'C2', 'Bb': 'Bb1'}
 # the tune, a bar a junction (a bar is 20 here): three notes up into the junction's own note, held, on the
 # bar's second accent. So its held notes are the five again, a bar each; and from the fifth it tumbles back
 ROUND = ['Ab4:2 C5:2 Eb5:2 F5:8 C5:2 Ab4:4',
@@ -38,15 +39,16 @@ ROUND = ['Ab4:2 C5:2 Eb5:2 F5:8 C5:2 Ab4:4',
 OUT = 'C5:2 E5:2 G5:2 C6:14'                           # the inward turn: the one bar with an E natural in it
 
 def song():
-    K = kit(); V = void(); M = mirror()
+    K = kit(); V = void(); M = mirror(); T = vault()
     chugs = {r: t for r, t in K['chugs'].items() if r != midi('F2')}
-    beat = 60.0 / 130
-    s = Song('recursion', 130, beats=5, steps=20, target=-12.0, ceil=-1.5, room=dict(decay=2.2, pre=0.02, bright=6500.0, dark=1500.0),
+    beat = 60.0 / 136
+    s = Song('recursion', 136, beats=5, steps=20, target=-12.0, ceil=-1.5, room=dict(decay=2.2, pre=0.02, bright=6500.0, dark=1500.0),
              echo=dict(time=beat * 0.75, fb=0.34, taps=4), master=lambda x: highshelf(hp(x, 32.0), 9000.0, -1.5))
     s.add('kick', Bus(hit(K['kick_e'], tune=-1.0), gain=0.42, key=True, fx=[lambda x: clip(x, 0.75)]))
     s.add('snare', Bus(hit(K['snare_w'], tune=2.0), gain=0.6, rev=0.16, fx=[lambda x: clip(x, 0.7)]))      # it rings on E flat as recorded: moved up to F, the keynote
     s.add('hat', Bus(hit(K['hats'], human=0.002), gain=1.0, fx=[lambda x: clip(hp(x, 500.0), 0.4)]))
     s.add('shard', Bus(hit(M['shards'], human=0.003), gain=0.7, rev=0.15, fx=[lambda x: hp(x, 1500.0)]))
+    s.add('tick', Bus(hit(T['tick'], human=0.002), gain=1.3, rev=0.14, fx=[lambda x: clip(hp(x, 700.0), 0.3)]))   # the next piece's clock, for the way out
     s.add('crash', Bus(hit(K['crash']), gain=0.3, rev=0.22, fx=[lambda x: hp(x, 300.0)]))
     s.add('tom', Bus(hit(K['tom_mid']), gain=0.55, rev=0.2, fx=[lambda x: clip(x, 0.7)]))
     pluck = dict(pw=0.2, cutoff=2600.0, env=3.0, fdecay=0.05, res=1.4, track=0.4, a=0.001, d=0.08, s=0.0, r=0.05)
@@ -99,10 +101,11 @@ def song():
     # ---- intro: the ring alone; its echo; the bass; the chords
     i = s.section('intro', 5, seg=5, loop=False, next='a', lock=True)
     for b in range(5):
-        around(i, b, late=b, v=0.7 + 0.05 * b, both=(b >= 1))
+        around(i, b, late=b, v=0.88 + 0.03 * b, both=(b >= 1))
         if b >= 2: walk(i, b, b, 0.45 + 0.05 * b)
         if b >= 3: pad(i, b, RINGCH[b], 0.6 + 0.1 * (b - 3))
     i.hits('kick', 4, 'x.....x...x.........', v=0.7)
+    i.note('bell', 0, 0, 19, cell[0], 0.9); i.note('bell', 0, 0, 19, cell[0] - 12, 0.8); i.note('fx', 0, 0, 1, 60, 0.07, s='boom')      # where it begins: the keynote, struck once
     i.note('fx', 4, 0, 20, 60, 0.14, s='riser'); i.note('fx', 4, 19.99, 1, 60, 0.2, s='rev', lead=1.5 - 0.01 * s.step)
 
     # ---- a: calm. Once round, quietly
@@ -162,6 +165,25 @@ def song():
             prev = legato(d, 'lead', b, ROUND[j], 1.0, most=12, prev=prev); d.line('lead', b, ROUND[j], 0.45, octave=1)
     for b in (0, 5): d.note('crash', b, 0, 1, 60, 1.0); d.note('fx', b, 0, 1, 60, 0.16, s='boom')
     d.note('fx', 9, 19.99, 1, 60, 0.22, s='rev', lead=1.5 - 0.01 * s.step)
+
+    # ---- out: the way on. Heard only when the three pieces are played as one (breakin.py). Three junctions
+    #      round, and at the fourth the same turn the first piece took: this key's fourth chord, B flat,
+    #      goes major, which leads into E flat minor. The ring stops; a clock starts, and it is the next
+    #      piece's clock
+    o = s.section('out', 5, seg=5, loop=False, lock=True)
+    prev = None
+    for b in range(3):
+        sym = RINGCH[b]
+        around(o, b, late=b); walk(o, b, b); pad(o, b, sym, 0.8); chug(o, b, sym); drums(o, b, fill=(b == 2))
+        prev = legato(o, 'lead', b, ROUND[b], 1.0, most=12, prev=prev); o.line('lead', b, ROUND[b], 0.45, octave=1)
+    o.chordn('pad', 3, 0, 19.5, 'Bb', 3, 0.85); voices(o, 3, 'Bb', 1.0)
+    riff(o, 3, 'Bb1*:12 Bb1*:4 Bb1:2 Bb1:2', bass=False); o.note('bass', 3, 0, 19, root('Bb'), 1.0)
+    o.hits('kick', 3, 'x.....x.....x...x...'); o.hits('snare', 3, '............x...xxxx'); o.note('crash', 3, 0, 1, 60, 1.0)
+    prev = legato(o, 'lead', 3, 'Bb4:2 D5:2 F5:2 Bb5:14', 1.0, most=12, prev=prev); o.line('lead', 3, 'Bb4:2 D5:2 F5:2 Bb5:14', 0.45, octave=1)
+    o.chordn('pad', 4, 0, 19.5, 'Bb7', 3, 0.62); voices(o, 4, 'Bb', 0.6); o.note('bass', 4, 0, 19, root('Bb'), 0.6)
+    legato(o, 'lead', 4, 'Bb5:8 Ab5:12', 0.7, most=12, prev=prev)
+    o.hits('tick', 4, 'x...o...x...o...x...', v=0.9); o.hits('kick', 4, 'x...................', v=0.8)
+    o.note('fx', 0, 0, 1, 60, 0.14, s='boom'); o.note('crash', 0, 0, 1, 60, 0.8); o.note('fx', 3, 0, 1, 60, 0.14, s='boom')
 
     s.moods = {'calm': 'a', 'fight': ['b', 'c', 'd']}
     s.start = 'intro'
