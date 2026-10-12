@@ -12,7 +12,7 @@ and the sound design they share (a synthesized kick, risers, impacts).
 import math
 import numpy as np
 from daw import (SR, st, pan, fit, add, fade, saw, square, sine, tri, noise, adsr, svf, lp, hp, bp, peak,
-                 lowshelf, highshelf, drive, widen, sample, shift, gate, hz, midi, lin, reverb)
+                 lowshelf, highshelf, drive, widen, sample, shift, gate, hz, midi, lin, reverb, Ev)
 
 # ------------------------------------------------------------------- drums
 def hit(src, vel=1.6, human=0.0, tune=0.0, choke=None, seed=11):
@@ -224,6 +224,22 @@ def sampler(table, rel=0.08, vel=1.3, pre=0.0, width=1.0):
             x = gate(memo[key], e.dur + pre, e.kw.get('rel', rel))
             if width != 1.0: x = widen(x, width)
             add(out, x, (e.t - pre) * SR, e.v ** vel)
+        return out
+    return play
+
+def backwards(inner, ring=0.0, snap=0.004):
+    """An instrument heard in a mirror: each note is the inner instrument's note played backwards. It swells
+    out of nothing over the note's length and stops dead where the note ends, on what was its attack. So a
+    line written for it lands its weight on the END of every note, which is the start of the next one.
+    ring: seconds of the forward note's tail to take as well (a longer swell-in before the note's time)."""
+    def play(evs, n, ctx):
+        out = np.zeros((n, 2))
+        for e in evs:
+            m = int((e.dur + ring) * SR) + 1
+            kw = {k: v for k, v in e.kw.items() if k != 'slide'}
+            x = st(inner([Ev(0.0, e.dur + ring, e.p, e.v, **kw)], m + SR, dict(ctx, t0=0.0)))[:m][::-1].copy()
+            x = fade(x, 0.02, snap)
+            add(out, x, (e.t - ring) * SR)
         return out
     return play
 

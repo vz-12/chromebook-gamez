@@ -95,7 +95,7 @@ a bar line when the boss changes phase.
 | `vault` "Time Lock" | THE VAULT, sector 04 | cold and crystalline: sung bowls, a plucked zither's arpeggios, glass bells, a timer's ticks and a lock's clicks for the time lock | 118, B minor |
 | `void` "Falling Upward" | THE VOID, sector 05 | vast, and pulling: a bass and chords that slide into each other, a tune that falls while every phrase starts higher, a piano, a far choir, strings, stars | 140 (half-time when calm), C minor |
 | `archive` "Struck From the Record" | THE ARCHIVE, fracture i | redacted: a tune that is the same shape on every shelf (three knocks, then the piece taken down) over a ground that steps down and never arrives; notes struck out that come back once as ghosts, tape-stops, deleted beats; an old upright, paper for percussion | 124, E minor |
-| `mirror` | THE MIRROR, fracture ii | reversed sounds, a palindromic melody | 128, A minor |
+| `mirror` "Once From Each Side" | THE MIRROR, fracture ii | one tune seen in a mirror three ways, all in key: upside down, backwards, and its struck glass notes played backwards; broken glass for percussion; its second fight section is its first played backwards, note for note | 128, A minor |
 | `leak` | THE LEAK, fracture iii | acid: a squelching 303 line, toxic and relentless | 136, G minor |
 | `recursion` | THE RECURSION, fracture iv | phasing loops that drift against each other, polyrhythm | 130, D♯ minor |
 | `halt` | THE HALT, fracture v | nearly still: clock ticks, stutters, freeze-frames | 90, free |
@@ -120,7 +120,8 @@ a bar line when the boss changes phase.
 | `archivist` "Filed Under Lost" | THE ARCHIVIST | baroque and breaking: a harpsichord subject down the circle of fifths, staccato strings, a typewriter for hats, a record that skips | 170, B minor |
 | `null` "The Schedule Says It Is Time" | NULL | the act-one finale: a statement with no drums, the main theme at half speed and then full, each sector's tune for four bars on its own instrument, THE VOID's tune sung under the theme's answer | 150, C minor |
 | `curator` "A Piece Short" | THE CURATOR | stately: THE ARCHIVE's tune set out as a waltz, a string quartet over iron; the ground goes down by semitones in the last phase, and its last bar is not there | 150 in three-four, E minor |
-| `other` | THE OTHER (+ the corrupted OTHER) | drum and bass against metal, main theme inverted | 174, A minor |
+| `other` "Your Reflection" (your title) | THE OTHER | the first song, Entry Vector, in the glass and gone wrong, and less of it yours the further it goes: its opening with every other bar backwards; its fight with the theme's reflection against it; the reflection alone; then a tune of its own, a palindrome | 160, A minor |
+| `corrupt` "Your Reflection (Corrupted)" | the corrupted OTHER | the same song with something else in it: faster, every B a B flat, the leads crushed, a low voice under them that was never there, notes sticking | 176, A minor with a B flat |
 | `keeper` | THE BOOKKEEPER | baroque metal: harpsichord and guitars, ledger ticking | 168, F minor |
 | `shopkeeper` | THE SHOPKEEPER | jazz-metal: walking bass, ka-ching percussion | 180 swung, E♭ minor |
 | `unwritten` | THE UNWRITTEN | a blank page: sparse piano that writes itself into a full orchestra | 120→180, C minor |
@@ -355,6 +356,20 @@ is pushed until you say; `main` only when you say ship.
    two tracks, and `look.py --notes` now lists the notes sounding in each
    bar and flags any outside the key, so the next one is caught before you
    hear it. Not shipped yet.)*
+   *(12 Oct: `mirror` "Once From Each Side", `other` "Your Reflection" and
+   `corrupt` "Your Reflection (Corrupted)" done. Your brief: glass shard
+   effects, and play with reversing the music while keeping it pleasing;
+   then, for THE OTHER, your title, "a more chaotic version of the first
+   song that gets more unique the further it goes", and a corrupted
+   counterpart. The glass is four recordings you added to your library
+   (Splice's cap was on my side): a bottle, a vase whose pieces are cut
+   into single shards, and two of debris. Reversing is done three ways that
+   stay in key: `flip()` turns a line upside down within the scale,
+   `retro()` and `backward()` play a line or a whole section backwards, and
+   `inst.backwards()` plays an instrument's notes backwards. I took "the
+   first song" to be Entry Vector. The corrupted OTHER is the one change to
+   the game's own code: `musicWant` picks `corrupt` when the boss on the
+   floor has the virus. Not shipped yet.)*
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
    `shopkeeper`, `planetarium`, `unwritten`, `amalgam`, `hub`, `stands`,
    `tribunal`, `founder`, `onepointoh`.

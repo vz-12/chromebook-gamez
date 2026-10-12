@@ -1080,8 +1080,10 @@ const MUSIC_BOSS = {
   shopkeeper: 'shopkeeper', root: 'root', backlog: 'backlog', deadgame: 'deadgame', founder: 'founder',
   onepointoh: 'onepointoh', ragequit: 'ragequit'
 };
+// the corrupted OTHER's own song: the same boss on the floor, with something else in it (startVirus)
+const MUSIC_VIRUS = 'corrupt';
 // cues that are fights: arriving at one is a sting and a cut, not a crossfade
-const MUSIC_FIGHTS = new Set([...Object.values(MUSIC_BOSS), 'tribunal']);
+const MUSIC_FIGHTS = new Set([...Object.values(MUSIC_BOSS), 'tribunal', MUSIC_VIRUS]);
 
 /* What should be playing: [cue, mood], or null for silence, or undefined to
    keep whatever is playing (a screen over the run, or one off the menu). */
@@ -1103,7 +1105,8 @@ function musicWant(dt) {
   if (vrite) return ['founder', vrite.duel ? 'p2' : 'p1'];
   const b = Music.bossOn(dt);
   if (b) {
-    const cue = rushOn() && Music.has('rush') ? 'rush' : MUSIC_BOSS[b.boss] || 'boss';
+    const cue = rushOn() && Music.has('rush') ? 'rush'
+              : b.virus && Music.has(MUSIC_VIRUS) ? MUSIC_VIRUS : MUSIC_BOSS[b.boss] || 'boss';
     return [cue, b.boss === 'root' && rrRace ? 'race' : 'p' + ((b.phase | 0) + 1)];
   }
   if (hlArea) return [hlArea.id, Music.heat(dt)];
@@ -1206,6 +1209,7 @@ const Music = {
     if (want !== was) {
       if (MUSIC_FIGHTS.has(want) && !MUSIC_FIGHTS.has(was)) { out = 0.35; delay = this.sting('boss-in'); }
       else if (MUSIC_FIGHTS.has(was) && !MUSIC_FIGHTS.has(want) && state === 'play') { out = 0.3; delay = this.sting('boss-down'); }
+      else if (want === MUSIC_VIRUS) out = 0.25;                   // something else gets in: a cut, and its song's own opening
       else if (state === 'dead') out = 0.6;
     }
     if (cue === (this.cur ? this.cur.id : null)) return;

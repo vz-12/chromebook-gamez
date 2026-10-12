@@ -15,6 +15,8 @@
        never jumps between the two or starts one over
      - a boss: the boss-in sting, the old track cut, the boss track on the
        sting's hit, its phases on bar lines; then the boss-down sting
+     - the corrupted OTHER: the same boss with something else in it has a song
+       of its own, cut to with no sting
      - a cue with no track leaves the room to the synth bed, and a cue with
        one silences it
      - a segment not decoded in time is covered by the last phrase again
@@ -51,6 +53,9 @@ const MANIFEST = {
             moods: { calm: 'a', fight: 'b' }, start: 'intro' },
     warden: { bpm: 160, pre: PRE, segs: [seg('warden/p1a', 4), seg('warden/p1b', 4), seg('warden/p2', 4), seg('warden/p3', 4)],
               sections: { p1: { segs: [0, 1] }, p2: { segs: [2] }, p3: { segs: [3] } }, moods: { p1: 'p1', p2: 'p2', p3: 'p3' } },
+    other: { bpm: 160, pre: PRE, segs: [seg('other/p1', 4)], sections: { p1: { segs: [0] } }, moods: { p1: 'p1' } },
+    corrupt: { bpm: 176, pre: PRE, segs: [seg('corrupt/intro', 2), seg('corrupt/v1', 4)],
+               sections: { intro: { segs: [0], lock: true, next: 'v1' }, v1: { segs: [1] } }, moods: { p1: 'v1' }, start: 'intro' },
     codex: { bpm: 120, pre: PRE, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
   },
   stings: { 'boss-in': { f: 'stings/boss-in.opus', hit: 1.5 }, 'boss-down': { f: 'stings/boss-down.opus' } }
@@ -239,6 +244,25 @@ await tick(6);
   const st = named(played(T7), 'sting:boss-down')[0];
   const gr = named(played(T7), 'grid/');
   check('boss down: its sting, then the stage again', st && gr[0] && gr[0].t0 >= st.t0, st ? `grid back at +${gr[0] ? (gr[0].t0 - T7).toFixed(2) : '-'}` : 'no sting');
+}
+
+// 3b. the corrupted OTHER: the same boss on the floor, and its own song cut to when the virus has it
+{
+  const T = now();
+  run(`enemies.length = 0; enemies.push({ type: 'boss', boss: 'theother', phase: 2, dead: false });`);
+  await tick(6);
+  const o = named(played(T), 'other/');
+  const Tv = now();
+  run(`enemies.find(e => e.boss === 'theother').virus = true;`);
+  await tick(5);
+  const c = named(played(Tv), 'corrupt/');
+  const cut = A.src.filter(s => s.buffer && s.buffer.name.startsWith('other/') && s.t1 != null && s.t1 >= Tv && s.t1 <= Tv + 0.62);
+  const stings = named(played(Tv), 'sting:').length;
+  check('the corrupted OTHER: its own song, cut to, with no sting', o.length > 0 && c[0] && c[0].buffer.name === 'corrupt/intro'
+        && c[1] && c[1].buffer.name === 'corrupt/v1' && cut.length > 0 && stings === 0 && run('Music.cur.id') === 'corrupt',
+        `other: ${o.length} pieces, then ${c.map(s => s.buffer.name).join(' ')} · other stopped: ${cut.length} · stings: ${stings}`);
+  run(`enemies.find(e => e.boss === 'theother').dead = true;`);
+  await tick(6);
 }
 
 // 4. the synth bed is the fallback, and only that

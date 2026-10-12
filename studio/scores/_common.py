@@ -3,6 +3,7 @@
 The theme grows from the first build's synth bed, whose bass went A, A, G, C under an A minor
 pentatonic. Those four bars are its first half; the second half lifts through F and G back to A.
 """
+import math
 import numpy as np
 from daw import SR, Ev, sample, shift, gate, midi, lp, hp, peak, highshelf, st, fade
 from inst import layer, synth_kick, noise, sampler, tapestop
@@ -328,3 +329,66 @@ def bowed():
     from inst import synth
     return synth('saw', voices=2, detune=0.05, spread=0.15, sq=0.2, cutoff=1200.0, env=1.2, fdecay=0.12, res=0.9, track=0.5,
                  a=0.015, d=0.2, s=0.55, r=0.1, dirt=0.25)
+
+# ---- a written line, in a mirror
+_STEPS = [0, 2, 4, 5, 7, 9, 11]
+def retro(text):
+    """A line backwards: its last note first, each note keeping its own length."""
+    return ' '.join(reversed(text.split()))
+def flip(text, axis='C5', home='C'):
+    """A line in a mirror laid flat: every note as far under the axis as it was over it, counted in steps
+    of the scale (the major scale on home, which is its relative minor's as well), so the reflection stays
+    in the key. A note from outside the scale counts as the scale note under it. In A minor about C this
+    turns A to E, B to D and F to G, so an A minor chord is itself upside down, F and C change places,
+    and the dominant becomes the chord a fifth below: the reflection of a cadence is the other cadence."""
+    base = int(midi(home + '0')) % 12
+    def deg(m):
+        m = int(round(m)); rel = (m - base) % 12
+        return ((m - base) // 12) * 7 + max(i for i, s in enumerate(_STEPS) if s <= rel)
+    def note(k): return base + (k // 7) * 12 + _STEPS[k % 7]
+    a = deg(midi(axis)); out = []
+    for tok in text.split():
+        name, _, d = tok.partition(':')
+        if name == 'r': out.append(tok); continue
+        acc = '!' if name.endswith('!') else ''
+        out.append(f"{note(2 * a - deg(midi(name.rstrip('!'))))}{acc}:{d or 1}")
+    return ' '.join(out)
+def backward(src, dst, drums=(), swap=None, skip=()):
+    """Section dst made of section src played backwards, note for note. A note begins where it used to
+    end, counted from the far end (and on the sixteenth at or before that, so a short note stays on the
+    grid); a drum, which has no length, lands as far before the end as it was after the start, so the
+    bar lines stay where they were. swap renames buses on the way (a struck voice to its played-backwards
+    twin, and the other way); skip leaves buses out, for the one-off sounds written by hand."""
+    swap = swap or {}; T = src.len; step = src.song.step
+    for bus, evs in src.ev.items():
+        if bus in skip: continue
+        for e in evs:
+            t = (T - e.t) % T if bus in drums else max(0.0, math.floor((T - (e.t + e.dur)) / step + 1e-6) * step)
+            dst.ev.setdefault(swap.get(bus, bus), []).append(Ev(t, e.dur, e.p, e.v, **{k: v for k, v in e.kw.items() if k != 'slide'}))
+
+_MIRROR = {}
+def mirror():
+    """THE MIRROR's and THE OTHER's sounds: broken glass, which the user picked (12 Oct).
+
+    Four recordings. A bottle breaking: short, with a thud in it (the crack on a snare, and backwards, a
+    bottle un-breaking into a beat). A vase on cement: one big break, then five seconds of its pieces
+    coming to rest; those pieces are cut apart here into single shards, each a different clink, for
+    where hi-hats would be. Two of debris: a crash with a rattle after it, and a long pour of glass,
+    which backwards is the pieces flying back together. They ring far above any tune (3 kHz and up), so
+    they are left at the pitch they were recorded at."""
+    if _MIRROR: return _MIRROR
+    m = _MIRROR
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    bottle = sample('SPLC-0905_FX_Oneshot_Glass_Bottle_Break'); vase = sample('SPLC-0915_FX_Oneshot_Glass_Vase_Cement')
+    m['smash'] = gate(norm(bottle), 0.5, 0.2)
+    m['unsmash'] = fade(norm(bottle)[:int(0.55 * SR)][::-1].copy(), 0.1, 0.003)
+    m['break'] = gate(norm(vase), 1.1, 0.4)
+    tail = vase[int(0.95 * SR):]
+    cuts = [c for c in hits_in(tail, least=0.04) if len(c) > 0.04 * SR]
+    loud = sorted(cuts, key=lambda c: -float(np.abs(c).max()))[:14]              # the fourteen clearest pieces
+    m['shards'] = [gate(norm(hp(c, 2000.0)), 0.07, 0.04) for c in loud]
+    m['debris'] = norm(sample('SPLC-0940_FX_Oneshot_Glass_Debris_Destruction'))
+    pour = norm(sample('SPLC-0941_FX_Oneshot_Glass_Debris_Destruction'))
+    m['pour'] = pour
+    m['unpour'] = fade(pour[:int(1.7 * SR)][::-1].copy(), 0.3, 0.003)
+    return m
