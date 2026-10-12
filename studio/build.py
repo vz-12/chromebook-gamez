@@ -53,7 +53,8 @@ def build_track(cue):
     print(f'{cue}: {song.bpm} BPM, target {song.target} dBFS')
     pieces, stats = song.render()
     folder = os.path.join(MUSIC, cue)
-    for old in glob.glob(os.path.join(folder, '*.opus')): os.remove(old)
+    same = lambda q: os.path.normcase(os.path.abspath(q))
+    stale = {same(q) for q in glob.glob(os.path.join(folder, '*.opus'))}
     segs, sections, size = [], {}, 0
     pre = np.zeros((int(PRE * SR), 2))
     for sec in song.sections:
@@ -61,7 +62,10 @@ def build_track(cue):
         for k, p in enumerate(pieces[sec.name]):
             x = np.concatenate([pre, p])
             f = f'{cue}/{sec.name}{k}-{digest(x)}.opus'
-            write_opus(os.path.join(MUSIC, f), x, QUALITY)
+            # a file's name is its sound's own hash: one already there is this piece, and encoding it again
+            # would only change its bytes (the container's serial number) for git to carry
+            if same(os.path.join(MUSIC, f)) in stale: stale.discard(same(os.path.join(MUSIC, f)))
+            else: write_opus(os.path.join(MUSIC, f), x, QUALITY)
             size += os.path.getsize(os.path.join(MUSIC, f))
             ids.append(len(segs))
             segs.append({'f': f, 's': round(sec.seg * song.bar, 6)})
@@ -70,6 +74,7 @@ def build_track(cue):
         if sec.next: d['next'] = sec.next
         elif not sec.loop: d['next'] = 'end'
         sections[sec.name] = d
+    for old in stale: os.remove(old)                                  # pieces this build no longer makes
     entry = {'bpm': song.bpm, 'pre': PRE, 'segs': segs, 'sections': sections}
     if getattr(mod, 'TITLE', None): entry['title'] = mod.TITLE          # the track's name, for a credits list one day
     if song.moods: entry['moods'] = song.moods
@@ -107,9 +112,10 @@ def build_stings():
     folder = os.path.join(MUSIC, 'stings'); os.makedirs(folder, exist_ok=True)
     for name, make in mod.STINGS.items():
         x, hit = make()
-        for old in glob.glob(os.path.join(folder, name + '-*.opus')): os.remove(old)
         f = f'stings/{name}-{digest(x)}.opus'
-        write_opus(os.path.join(MUSIC, f), x, QUALITY)
+        for old in glob.glob(os.path.join(folder, name + '-*.opus')):
+            if os.path.basename(old) != os.path.basename(f): os.remove(old)
+        if not os.path.exists(os.path.join(MUSIC, f)): write_opus(os.path.join(MUSIC, f), x, QUALITY)
         d = {'f': f}
         if hit: d['hit'] = round(hit, 3)
         m['stings'][name] = d

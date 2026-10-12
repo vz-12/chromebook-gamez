@@ -311,6 +311,12 @@ is pushed until you say; `main` only when you say ship.
    Destruction, and asked for these two to take after it: see "The 24th
    reference" below. Both moved off the tempos first planned (100 and
    175). Act one is complete. Next: THE FRACTURE.)*
+   *(12 Oct, after you listened: NULL's second phase had two passages
+   that did not fit, THE HIVE's crawl by semitones and THE ARCHIVIST's
+   baroque run. Both now use the slow form of the same tunes (the brood's
+   long line; the subject at two notes a bar), sung by NULL's own lead and
+   strings over its pulse. THE ARCHIVIST gained a four-bar intro, since it
+   was too chaotic to start on. A boss track may open with one.)*
 6. **THE FRACTURE.** `archive`, `curator`, `mirror`, `other`, `leak`,
    `recursion`, `halt`, the `intrusion` sting, `rootroom`, `root`.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,

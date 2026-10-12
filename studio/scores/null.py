@@ -8,8 +8,12 @@ theme's answer, which was written over the same chords. 150 BPM, C minor.
   p1     16 bars        the sweep: the theme at half speed, long notes over a pulse and guitars
   p2     20 bars        it stops the room: four bars with the drums gone and the stars out. Then every
                         earlier trick over double kicks: THE FOUNDRY's tune on its whistle with the
-                        anvils, THE HIVE's on its buzzing lead with the legs, THE VAULT's on glass
-                        with the ticking, THE ARCHIVIST's on the harpsichord with the typewriter
+                        anvils, THE HIVE's long brood line with the legs under it, THE VAULT's on
+                        glass with the ticking, THE ARCHIVIST's subject at half speed with the
+                        harpsichord and the typewriter. The two long ones are sung by this track's
+                        own lead and strings over its own pulse, the sector's instrument beside them:
+                        the fast versions of those two tunes (a crawl by semitones, a baroque run)
+                        turned up and down in a way nothing else here does, and stuck out
   p3     24 bars        the theme at speed in octaves; its answer, with horns singing THE VOID's tune
                         against it; a run down through four chords; then four bars held on C with the
                         drums thinned out, and round again
@@ -23,9 +27,9 @@ from inst import hit, synth, keys, guitar, amp, sampler, skitter, clips, riser, 
 from scores._common import (THEME, ANSWER, third, kit, forge, vault, void, tomfill, gallop, trem, hammer,
                             move, slow, sing, legato)
 from scores.foundry import TUNE
-from scores.hive import CRAWL
+from scores.hive import BROOD
 from scores.vault import DIAL
-from scores.archivist import SUBJECT
+from scores.archivist import LONG
 from scores.void import RISE
 
 TITLE = 'The Schedule Says It Is Time'
@@ -40,9 +44,9 @@ AN_CH = ['Ab', 'Bb', 'Cm', 'Cm', 'Ab', 'Bb', 'G', 'G']
 STATE = [('Cm', 'C2', 'C5:4 Eb5:4 G5:8'), ('Bb', 'D2', 'F5:4 G5:4 Bb5:8'), ('Eb', 'Eb2', 'G5:4 Bb5:4 Eb6:8'), ('Fm', 'F2', 'F6:4 Eb6:4 D6:8')]
 # every earlier trick: whose, four bars of it in C minor, and its chords
 QUOTE = [('foundry', [move(t, -2) for t in TUNE[:4]], ['Cm', 'Cm', 'Eb', 'Bb']),
-         ('hive', [move(t, 6) for t in CRAWL[:4]], ['Cm', 'Cm', 'Db', 'Cm']),
+         ('hive', [move(t, 6) for t in BROOD[:4]], ['Cm', 'Ab', 'Fm', 'G']),
          ('vault', [move(t, 1) for t in DIAL[:4]], ['Cm', 'Cm', 'Ab', 'Ab']),
-         ('archivist', [move(t, 1) for t in SUBJECT[3:7]], ['Eb', 'Ab', 'Ddim', 'G'])]
+         ('archivist', [move(t, 1) for t in LONG[3:7]], ['Eb', 'Ab', 'Ddim', 'G'])]
 # the run: each chord broken downward in sixteenths under a top note that climbs; then up the dominant and off it
 RUN = ['C6:1 G5:1 Eb5:1 C5:1 D6:1 G5:1 Eb5:1 C5:1 Eb6:1 G5:1 Eb5:1 C5:1 G6:1 G5:1 Eb5:1 C5:1',
        'Bb5:1 F5:1 D5:1 Bb4:1 D6:1 F5:1 D5:1 Bb4:1 F6:1 F5:1 D5:1 Bb4:1 D6:1 F5:1 D5:1 Bb4:1',
@@ -220,18 +224,22 @@ def song():
             if b != 19: p.hits('snare', b, '....x.......x...')
             p.hits('china', b, 'x...x...x...x...', v=0.6)
             stack(p, b, sym, frm, 0.85); bed(p, b, sym, 0.85)
-            p.line('lead', b, text, 0.5)                            # the lead shadows whoever has the tune
+            if who in ('foundry', 'vault'): p.line('lead', b, text, 0.5)        # the lead shadows whoever has the tune
+            else:                                                   # the long ones: the lead and strings sing them, over the pulse
+                legato(p, 'lead', b, text, 0.9); sing(p, 'strings', b, text, 0.8); ost(p, b, sym, 0.8)
             if who == 'foundry':
                 hammer(p, b, g); p.line('whistle', b, text, 1.0)
                 for st_ in ACC: p.note('anvil', b, st_, 2, 60, 1.0 if st_ in (0, 8) else 0.7)
             elif who == 'hive':
-                gallop(p, b, g); legato(p, 'buzz', b, text, 1.0)
+                gallop(p, b, g); legato(p, 'buzz', b, text, 0.6)
                 p.note('legs', b, 10, 4, 60, 0.8, n=14, curve=0.75); p.note('legs', b, 2, 2, 67, 0.7, n=7)
             elif who == 'vault':
                 trem(p, b, g); p.line('glass', b, text, 1.0); p.line('glass', b, text, 0.6, octave=1)
                 p.hits('tick', b, 'xoxoxoxoxoxoxoxo', v=0.9)
             else:
-                gallop(p, b, g); p.line('harpsi', b, text, 1.0, octave=-1); p.line('quill', b, text, 1.0)
+                gallop(p, b, g); p.line('harpsi', b, text, 0.8, octave=-1); p.line('quill', b, text, 0.9)
+                for st_ in (0, 8):                                  # the harpsichord's other hand: the chord, struck twice a bar
+                    for m in chord(sym, 4): p.note('harpsi', b, st_, 3, m if m <= 71 else m - 12, 0.5)
                 p.hits('keys', b, 'xoxoxoxoxoxoxoxo', v=0.9)
             if n == 0:
                 p.note('crash', b, 0, 1, 60, 1.0 if q == 0 else 0.75); brass(p, b, sym, (0,), 0.9); p.note('timp', b, 0, 6, tp(sym), 0.85)

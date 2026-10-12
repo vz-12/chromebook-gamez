@@ -1,8 +1,11 @@
 """archivist: THE ARCHIVIST, THE VAULT's boss (MUSIC-PLAN.md). Baroque, and breaking: a harpsichord
 subject that walks down the circle of fifths in B minor (Bm, Em, A, D, G, C sharp diminished, F sharp,
 Bm), staccato strings on the beats, a typewriter for hi-hats whose bell ends every fourth bar, a
-kettledrum on the corners, and a record that skips. No intro. 170 BPM, B minor.
+kettledrum on the corners, and a record that skips. 170 BPM, B minor.
 
+  intro  4 bars, once   the room before anyone speaks: a page, one low string, a few keys of the
+               typewriter finding the beat, then the subject's bones (two notes a bar) over the cello,
+               to the dominant and the bell. Without it the subject arrived all at once, and read as noise
   p1  16 bars  the reading room: the subject on the harpsichord over a cello's staccato and a half-time
                beat; pizzicato and the bass come in at bar nine
   p2  16 bars  the two-step: the harpsichord runs in sixteenths while the strings sing the subject at
@@ -17,7 +20,7 @@ from inst import hit, synth, guitar, amp, sampler, clips, riser, reverse, boom
 from scores._common import third, kit, vault, tomfill
 
 TITLE = 'Filed Under Lost'
-ORDER = ['p1', 'p2', 'p3', 'p3']
+ORDER = ['intro', 'p1', 'p2', 'p3', 'p3']
 
 CH = ['Bm', 'Em', 'A', 'D', 'G', 'C#dim', 'F#', 'Bm']
 # the subject: every bar the same shape a step lower. Down four notes from the chord's fifth, a turn, up its arpeggio
@@ -107,6 +110,23 @@ def song():
     def timp(sec, bar, sym, at=(0,), v=0.85):
         for st_ in at: sec.note('timp', bar, st_, 4, midi(LOW[sym]) % 12 + 36, v)
 
+    # ---- intro: the room before anyone speaks. The key, the pulse, then the subject's bones
+    n = s.section('intro', 4, seg=2, loop=False, next='p1', lock=True)
+    n.note('fx', 0, 0, 4, 60, 0.4, s='page'); n.note('fx', 0, 0, 1, 60, 0.14, s='boom'); timp(n, 0, 'Bm', (0,), 0.6)
+    n.note('harpsi', 0, 0, 14, midi('B2'), 0.9); n.note('harpsi', 1, 0, 6, midi('B2'), 0.75)
+    for b, pattern in enumerate(['x.....x...x.x...', 'x.x...x.x.xxx.x.', 'xoxoxoxoxoxoxoxo', 'xoxoxoxoxoxoxoxo']): n.hits('keys', b, pattern, v=0.6 + 0.08 * b)
+    for at in (0, 8): n.note('cello', 0, at, 1.2, midi('B2'), 0.7)
+    for at in (0, 4, 8, 12): n.note('cello', 1, at, 1.2, midi('B2'), 0.75 if at % 8 else 0.9)
+    for b, sym, text in [(1, 'Bm', LONG[0]), (2, 'Em', LONG[1]), (3, 'F#', LONG[6])]:
+        line(n, b, text, 0.9)
+        for at in (2, 6, 10, 14): n.note('pizz', b, at, 1.5, chord(sym, 3)[1] + (12 if chord(sym, 3)[1] < 55 else 0), 0.6)
+    for b, sym in [(2, 'Em'), (3, 'F#')]:
+        left(n, b, sym, 0.75 if b == 2 else 0.88); n.chordn('pad', b, 0, 15.5, sym, 4, 0.7)
+        n.hits('kick', b, 'x.......x.......', v=0.85); stab(n, b, sym, (0,) if b == 2 else (0, 8), 0.7)
+        timp(n, b, sym, (0,), 0.7)
+    ding(n, 3); n.hits('snare', 3, '............x.xx', v=0.9); tomfill(n, 3, 12)
+    n.note('fx', 3, 0, 16, 60, 0.18, s='short'); n.note('fx', 3, 15.99, 1, 60, 0.3, s='rev', lead=1.4 - 0.01 * s.step)
+
     # ---- p1: the reading room. The subject, a cello, a typewriter
     a = s.section('p1', 16, seg=2)
     for b in range(16):
@@ -171,6 +191,7 @@ def song():
     tomfill(q, 15, 8); q.hits('snare', 15, 'x.x.x.x.xxxxxxxx', v=0.9)
 
     s.moods = {'p1': 'p1', 'p2': 'p2', 'p3': 'p3'}
+    s.start = 'intro'
     return s
 
 def _starts(text):
