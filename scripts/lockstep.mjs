@@ -42,7 +42,11 @@ const SCENARIOS = [
   /* A run as people play it: ordinary hulls, so pilots go down, stand back up
      and die; the host starts the next run; and the guest leaves partway
      through one, and the host plays on alone. */
-  { name: 'lifecycle', seed: 206, lat: 30, jit: 15, loss: 0.03, hostHz: 60, guestHz: 60,  host: 'runner', wing: 'melee', life: true, end: 'guest leaves' },
+  /* And hunted while they do (FROM ABOVE): on by the host's word alone, so the
+     header has to hand it to the guest; early and often here, so spears are
+     aimed, land, and take pilots within the three minutes. */
+  { name: 'lifecycle', seed: 206, lat: 30, jit: 15, loss: 0.03, hostHz: 60, guestHz: 60,  host: 'runner', wing: 'melee', life: true, end: 'guest leaves',
+                      above: true },
   { name: 'parted', seed: 205,   lat: 40,  jit: 20, loss: 0.05, hostHz: 60, guestHz: 72,  host: 'ember',  wing: 'runner', kit: true,
                       part: { guest: [1500], host: [6000] } },
 ];
@@ -52,9 +56,19 @@ const TICKS = SHORT ? 3600 : 10800;          // three minutes of game, or one
 let ls = 12345;
 const lr = () => { ls = (ls * 1664525 + 1013904223) >>> 0; return ls / 4294967296; };
 
-const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
+const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) => `(() => {   // kit: this save has woken pilots; kitRun: the run fires them (on both machines); part: steps this machine leaves the shared game on
   pageDead = true;
   Save.profile.gfxSeen = GFX_VER;
+  // FROM ABOVE, where the scenario says so: said by the host's Worker only, its numbers the same on both, and counted as it happens
+  globalThis.__above = { aimed: 0, landed: 0, took: 0 };
+  if (${!!above}) {
+    if ('${role}' === 'host') Live.above = true;
+    ABOVE.from = 1; ABOVE.gap = [10, 20];
+    const a = aboveMarkFx, l = aboveLandFx, t = aboveTakenFx;
+    aboveMarkFx = m => { __above.aimed++; a(m); };
+    aboveLandFx = m => { __above.landed++; l(m); };
+    aboveTakenFx = (p, m) => { __above.took++; t(p, m); };
+  }
   // each player in a skin of their own, and wearing an award: each machine draws the other pilot in it
   Save.profile.skin = { player: { col: '${role}' === 'host' ? '#22c55e' : '#ff00ff' }, bullet: { col: '${role}' === 'host' ? '#bbf7d0' : '#fde047' } };
   { const aw = AWARD_SKINS(); if (aw.length) Save.profile.skinEquip = aw[('${role}' === 'host' ? 0 : 1) % aw.length].id; }
@@ -221,8 +235,8 @@ function play(sc) {
   ls = 12345;
   const H = { name: 'host', g: loadGame(IDX, { w: 1280, h: 720 }), hz: sc.hostHz };
   const G = { name: 'guest', g: loadGame(IDX, { w: 900, h: 640 }), hz: sc.guestHz };
-  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host, sc.life, sc.loot), 'setup-host');
-  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest, sc.life, sc.loot), 'setup-guest');   // its own pilot, awake too when the scenario has kits
+  H.g.run(SETUP('host', sc.host, sc.kit, false, sc.kit, sc.yes, (sc.part || {}).host, sc.life, sc.loot, sc.above), 'setup-host');
+  G.g.run(SETUP('guest', sc.wing, sc.kit, sc.guestSave, sc.kit, sc.yes, (sc.part || {}).guest, sc.life, sc.loot, sc.above), 'setup-guest');   // its own pilot, awake too when the scenario has kits
   H.peer = G; G.peer = H;
   for (const m of [H, G]) { m.inbox = []; m.next = 0; m.last = 0; m.lastRel = 0; m.frames = 0; m.waitFrames = 0; }
   H.g.run(`Net.ping = ${sc.lat * 2};`);
@@ -325,6 +339,8 @@ function play(sc) {
     acts: [JSON.parse(H.g.run('JSON.stringify(__acts)')), JSON.parse(G.g.run('JSON.stringify(__acts)'))],
     seen: [H.g.run('[...__seen]'), G.g.run('[...__seen]')],
     left: H.g.run('OPENERS_LEFT()').filter(t => t < TICKS),
+    // FROM ABOVE: what each machine saw of it
+    above: [JSON.parse(H.g.run('JSON.stringify(__above)')), JSON.parse(G.g.run('JSON.stringify(__above)'))],
     drawErr: [H.g.run('__drawErr.n || 0'), G.g.run('__drawErr.n || 0'), H.g.run('__drawErr[0] || ""'), G.g.run('__drawErr[0] || ""')],
   };
 }
@@ -360,6 +376,12 @@ for (const sc of SCENARIOS) {
     if (sc.end === 'guest leaves' && !['play', 'dead', 'pause', 'levelup', 'gear', 'shop'].includes(e.stays.state)) miss.push('the host was left in ' + e.stays.state);
     if (sc.end === 'guest leaves' && e.stays.state === 'levelup' && !e.stays.offers) miss.push('the host was left waiting on cards that went with the guest');
     if (sc.end === 'host leaves' && e.stays.state !== 'lan') miss.push('the guest was left in ' + e.stays.state + ', not the lobby');
+  }
+  // hunted: spears were aimed and landed on both machines, the guest's by the header alone, and a pilot was taken
+  if (sc.above) {
+    const [a, b] = r.above;
+    if (!a.aimed || !a.landed || !b.aimed || !b.landed) miss.push(`no spear came (host ${a.aimed}/${a.landed}, guest ${b.aimed}/${b.landed})`);
+    else if (!a.took || !b.took) miss.push('no spear took a pilot');
   }
   if (r.drawErr[0] || r.drawErr[1]) miss.push(`drawing threw (host ${r.drawErr[0]}, guest ${r.drawErr[1]}): ${r.drawErr[2] || r.drawErr[3]}`);
   if (!ah.pause || !ah.resume) miss.push('no shared pause');
@@ -400,6 +422,8 @@ for (const sc of SCENARIOS) {
     net +
     (sc.life ? `
           life: ${r.life[0].downs} downs, ${r.life[0].ups} back up, ${r.life[0].deaths} runs ended and recorded on both, ${r.restarts} restarted by the host` : '') +
+    (sc.above ? `
+          from above: ${r.above[0].aimed} spears aimed, ${r.above[0].landed} landed, ${r.above[0].took} took a pilot (the guest saw ${r.above[1].aimed}, ${r.above[1].landed}, ${r.above[1].took})` : '') +
     (r.ending ? `
           ${sc.end}: the ${sc.end === 'guest leaves' ? 'host' : 'guest'} carried on (${r.ending.was.state} -> ${r.ending.stays.state}${r.ending.stays.lanView && sc.end === 'host leaves' ? ', ' + r.ending.stays.lanView : ''}), nothing thrown` : '') +
     (r.left.length ? `\n          screens never opened (the run was never back in play at the time): ${r.left.join(', ')}` : '') +

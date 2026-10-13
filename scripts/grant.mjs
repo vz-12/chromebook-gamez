@@ -67,15 +67,15 @@ const check = `SELECT COUNT(*) AS n FROM accounts WHERE name = ${q(name.toLowerC
    shell, which would split a --command at its spaces. Its JSON answer is the
    word on whether it worked: on Windows wrangler can crash on its way out (a
    libuv assertion) after it has done its work. */
-const run = cmd => {
-  const file = join(tmpdir(), 'vr-grant-' + process.pid + '-' + Date.now() + '.sql');
-  writeFileSync(file, cmd);
-  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', '--file', file, '--json', '--yes'];
+const run = (cmd, { command = false } = {}) => {
+  const file = command ? null : join(tmpdir(), 'vr-grant-' + process.pid + '-' + Date.now() + '.sql');
+  if (file) writeFileSync(file, cmd);
+  const a = ['wrangler', 'd1', 'execute', 'voidrunner', REMOTE ? '--remote' : '--local', ...(file ? ['--file', file] : ['--command', cmd]), '--json', '--yes'];
   if (PERSIST) a.push('--persist-to', PERSIST);
   const r = process.platform === 'win32'
     ? spawnSync(['npx', ...a].map(s => (/[\s"]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s)).join(' '), { encoding: 'utf8', shell: true })
     : spawnSync('npx', a, { encoding: 'utf8' });
-  rmSync(file, { force: true });
+  if (file) rmSync(file, { force: true });
   const at = (r.stdout || '').indexOf('[');
   let out = null;
   try { out = at < 0 ? null : JSON.parse(r.stdout.slice(at)); } catch (e) {}
@@ -83,10 +83,24 @@ const run = cmd => {
     die((r.stderr || r.stdout || 'wrangler failed').trim().split('\n').slice(-6).join('\n'));
   return out;
 };
-const found = run(check);
+/* A read has to answer with its rows. The live database takes a --file
+   through D1's import, which answers with a count of what it ran and never
+   the rows, so there a read goes as --command (one line, as the shell is
+   handed it: no double quote or percent sign in it, which the reads here
+   never have; the name in them is checked against a plain pattern first).
+   The same as scripts/vault.mjs. */
+const read = cmd => {
+  if (!REMOTE) return run(cmd);
+  const line = cmd.replace(/\s+/g, ' ').trim();
+  if (/["%]/.test(line)) die('a read with a double quote or a percent sign cannot go on the command line');
+  return run(line, { command: true });
+};
+const found = read(check);
 const n = Array.isArray(found) && found[0] && found[0].results && found[0].results[0] ? found[0].results[0].n : null;
+// anything but a count means the answer was not the rows: say so rather than give to nobody
+if (typeof n !== 'number') die('could not read whether "' + name + '" exists: ' + JSON.stringify(found).slice(0, 200));
 if (n === 0) die(`no account named "${name}"`);
-const out = run(sql);
+const out = LIST ? read(sql) : run(sql);
 if (LIST) {
   const rows = (Array.isArray(out) ? out : []).flatMap(r => r.results || []);
   if (!rows.length) console.log(name + ' has been given nothing by hand');

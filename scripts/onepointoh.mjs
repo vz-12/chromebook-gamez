@@ -353,8 +353,13 @@ section('the crack');
   const took = JSON.parse(g.run(`JSON.stringify(__broke.up)`));
   delete took.notacard;
   const carried = JSON.parse(g.run(`JSON.stringify(P.up)`));
-  ok(took.rate >= 2 && JSON.stringify(Object.keys(carried).sort().map(k => [k, carried[k]])) === JSON.stringify(Object.keys(took).sort().map(k => [k, took[k]])),
-     'carrying the cards the broken run took, by the same ids, and nothing that is not a card', [took, carried]);
+  const gift = g.run(`OPO.giftCards`), count = up => Object.values(up).reduce((a, n) => a + n, 0);
+  ok(took.rate >= 2 && Object.keys(took).every(k => carried[k] >= took[k]),
+     'carrying the cards the broken run took, by the same ids', [took, carried]);
+  ok(gift === 10 && count(carried) === count(took) + gift && g.run(`opo.gave`) === gift,
+     'and ten more dealt on top as the fight opens', [took, carried]);
+  ok(g.run(`Object.keys(P.up).every(id => { const u = UPGRADES.find(z => z.id === id); return u && P.up[id] <= u.max; })`),
+     'every one a card, none past its max', carried);
   ok(g.run(`P.charId`) === 'runner', 'flying VOIDRUNNER');
   ok(g.run(`Save.profile.opoMet && Tales.has('n:onepointoh', 0)`), 'met: his page I');
   ok(g.run(`OpoLock.el.style.zIndex`) === '-1', 'today\'s canvas over the frame');
@@ -403,6 +408,8 @@ section('left mid-fight');
   const c2 = bootCopy(g.win);
   await settle();
   g.run(`OPO_HOST.broke({ up: {} }); P.maxHp = P.hp = 60000; ${BOT}`);
+  ok(g.run(`Object.values(P.up).reduce((a, n) => a + n, 0)`) === g.run(`OPO.giftCards`),
+     'a retry that carries nothing still opens with the ten', g.run(`JSON.stringify(P.up)`));
   steps(g, 60 * 6);
   g.run(`P.hp = 1; hurtPlayer(1e6, { pure: true });`);
   ok(g.run(`state`) === 'dead' && g.run(`lastStats.opo`), 'lost: no run, no report');

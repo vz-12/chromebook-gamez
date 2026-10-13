@@ -554,6 +554,36 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   the page, never fetched: the hidden pilot's code is in it, so keep it out
   of this folder, which is what a deploy uploads.
 
+**From above** (FROM ABOVE in `index.html`, `npm run test:above`). From the
+moment a challenge is sent until its fight is fought out, the game's runs
+are hunted. `/api/live` says so (`above`), and a run takes that with its
+settings when it starts and keeps it to its end; a co-op guest takes the
+host's.
+- **What comes** is a spear: rare, warned, and the end of the run. It comes
+  for a run in its third sector or later, one every two to four minutes of
+  the fight. A mark shows where it will land (aimed where the hull will be
+  if it keeps its heading), for 1.8 seconds in the third sector and 12%
+  less every sector further, never under half a second. A hull still inside
+  the mark when it lands is taken, whatever it carries: no shield, i-frame,
+  parry, Second Wind or vow answers it. In co-op that pilot goes down, as
+  any death does there.
+- **Where it never comes:** freeplay, challenges, the rush, rites, finales,
+  the hub, ALL HALLOWS' rooms, PvP, and a pilot from outside.
+- **Its numbers** are `ABOVE` at the top of the block. Its rolls are a
+  seeded stream of its own, so a run with it and a run without are the same
+  run in everything else.
+- **Its art** is drawn in the hooks at the block's foot (each listed with
+  what it is handed); the public code names nothing.
+- **How it ends:** a challenge match played to its end decides it, whoever
+  won, and the referee notes which way (`outcome`: `lost` or `won`, as it
+  went for the challenged account). A match one side walked out of decides
+  nothing, and the queue makes it again.
+
+```sh
+npm run challenge -- decide <pilot> lost --remote   # or won; none takes a decision back
+npm run challenge -- calm <pilot> --remote          # hold the hunt at once; `calm <pilot> off` lets it go on
+```
+
 ## Sharing and installing
 
 Small things that help the game travel:
@@ -762,6 +792,40 @@ To see the card again, delete the `vr_tut` cookie for the site (and the
 
 ```sh
 npm run test:tutorial                      # a few seconds
+```
+
+## Achievements (the line through the game)
+
+After THE WARDEN, the game used to leave the player to find the rest of it.
+ACHIEVEMENTS (`index.html`) is one line of goals, in the order the game is
+meant to be walked, and each one says how it is done.
+
+- **Six acts, 23 goals today** (`ACHIEVEMENTS`, `ACH_ACTS`): the five sectors;
+  THE UNWRITTEN and THE AMALGAM; THE FRACTURE down to ROOT; THE FOUNDER, his
+  tribunal and the Outsider; the pilots and their rites; ONE POINT OH. A
+  pilot's rite is in the line only once it is built, so VOIDRUNNER's joins by
+  itself when `RITES.runner` has a `start`.
+- **The next goal** is the first in the line not done. The menu's door
+  (ACHIEVEMENTS, **A**, under SOUNDTRACK) names it, the run report says it and
+  how after every ordinary run, and the panel opens on it. Past it the panel
+  shows only where each goal is, not what: no spoilers.
+- **Read off the record,** the way the tales' pages are: each goal is a test of
+  the profile, so an old save, a merged account or a dev grant already has
+  whatever it has done. The profile keeps only the day each was first seen
+  done (`ach`) and which the panel has shown (`achSeen`); `Save.merge` keeps
+  the earlier day and the union.
+- **Announced once.** A goal done in a run gets a card at the top right, there
+  and then. One done anywhere else (on the menu, or merged in) is marked NEW.
+  The first look at a profile, or a look that finds more than three at once (a
+  record arriving), keeps them quietly.
+- **Never the run.** It reads and writes the save, never `simRand`, and `Ach`
+  is this machine's own. PvP's page has none of it.
+- **The art** is blank hooks (`ACH_ART`); `ACHIEVEMENTS-HOOKS.md` says where
+  each is and what it is handed. `ACH_PLAIN` draws a plain panel under them
+  until the art lands.
+
+```sh
+npm run test:ach                           # under a second
 ```
 
 ## Memory under fire

@@ -159,6 +159,7 @@ function runTake() {
   if (src) {
     for (const k of RUN_FLAGS) RUN[k] = src[k];
     RUN.hlLive = !!src.hlLive; RUN.medals = (src.medals || []).slice();
+    RUN.above = !!src.above;
     RUN.chal = (src.chal || []).slice();
     const c = src.codex || {};
     RUN.codex = { e: new Set(c.e || []), u: new Set(c.u || []), m: new Set(c.m || []), b: new Set(c.b || []), z: new Set(c.z || []) };
@@ -168,6 +169,8 @@ function runTake() {
     // ALL HALLOWS: whether the event is on, by the calendar, and the medals worn
     RUN.hlLive = hlLive();
     RUN.medals = RUN.hlLive ? (hlP().equip || []).slice() : [];
+    // whether runs are hunted, as the Worker last said (FROM ABOVE)
+    RUN.above = !!Live.above;
     // the challenges cleared (they let rewards into the pool) and the codex (THE KEEPER reads it)
     RUN.chal = (p.chal || []).slice();
     RUN.codex = { e: new Set(Codex.e), u: new Set(Codex.u), m: new Set(Codex.m), b: new Set(Codex.b), z: new Set(Codex.z) };
@@ -1685,6 +1688,11 @@ cv.addEventListener('wheel', e => {
     Ost.scroll = clamp(Ost.scroll + Math.sign(e.deltaY) * 50, 0, ostMaxScroll());
     return;
   }
+  if (state === 'ach') {
+    e.preventDefault();
+    Ach.scroll = clamp(Ach.scroll + Math.sign(e.deltaY) * 54, 0, achMaxScroll());
+    return;
+  }
   if (state === 'chal') {
     e.preventDefault();
     chalScroll = clamp(chalScroll + Math.sign(e.deltaY) * 60, 0, chalMaxScroll());
@@ -1712,6 +1720,7 @@ cv.addEventListener('touchstart', e => {
       if (state === 'changelog' && !logDrag)
         logDrag = { id: t.identifier, y: p.y, s: logScroll };
       if (state === 'ost' && !Ost.drag) Ost.drag = { id: t.identifier, y: p.y, s: Ost.scroll };
+      if (state === 'ach' && !Ach.drag) Ach.drag = { id: t.identifier, y: p.y, s: Ach.scroll };   // ACHIEVEMENTS
       continue;
     }
     if (p.x < W * 0.5 && !touchUI.move) touchUI.move = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
@@ -1730,6 +1739,10 @@ cv.addEventListener('touchmove', e => {
       if (Math.abs(p.y - Ost.drag.y) > 8) Ost.moved = true;
       if (Ost.moved) Ost.scroll = clamp(Ost.drag.s - (p.y - Ost.drag.y), 0, ostMaxScroll());
     }
+    if (Ach.drag && t.identifier === Ach.drag.id && state === 'ach') {       // ACHIEVEMENTS: the same
+      if (Math.abs(p.y - Ach.drag.y) > 8) Ach.moved = true;
+      if (Ach.moved) Ach.scroll = clamp(Ach.drag.s - (p.y - Ach.drag.y), 0, achMaxScroll());
+    }
     if (state === 'codex') codexTouch('move', t.identifier, p);
   }
 }, { passive: false });
@@ -1740,6 +1753,7 @@ function touchEnd(e) {
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
     if (logDrag && t.identifier === logDrag.id) logDrag = null;
     if (Ost.drag && t.identifier === Ost.drag.id) Ost.drag = null;
+    if (Ach.drag && t.identifier === Ach.drag.id) Ach.drag = null;
     if (state === 'codex') codexTouch('end', t.identifier, tpos(t));
   }
 }
@@ -37289,7 +37303,11 @@ const Save = {
                   // escalation: the permanent mark, and the window that earns it
                   hardened: false, deepRuns: [],
                   // full stats of the best run, so it can be re-submitted later
-                  bestRun: null }),
+                  bestRun: null,
+                  /* ACHIEVEMENTS: the day each goal was first seen done (null
+                     until the record has been looked at once), and the ones
+                     the panel has shown */
+                  ach: null, achSeen: [] }),
 
   readLocal() {
     try {
@@ -37462,6 +37480,8 @@ const Save = {
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
     const ar = a.bestRun, br = b.bestRun;
     out.bestRun = (br && br.score || 0) >= (ar && ar.score || 0) ? (br || ar) : (ar || br);
+    // a goal done is done: the earlier day of the two, and seen if seen on either (ACHIEVEMENTS)
+    Object.assign(out, achMerge(a, b));
     return out;
   },
 
@@ -37511,6 +37531,7 @@ const Save = {
     Daily.load();
     Account.boot();          // signed in: the account's save is merged in, and kept up to date
     Tales.sealedAsk();       // any chapter of the story the server has opened (FORGOTTEN TALES)
+    achScan(false);          // what the record has already done, kept (ACHIEVEMENTS)
     // first launch: ask who they are before anything else
     if (!Save.profile.name) { nameBuf = ''; state = 'name'; }
   },
@@ -37747,6 +37768,7 @@ function resetGame() {
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
+  aboveBegin();                          // and what may come for it (FROM ABOVE)
   // and whether it is assisted (FIRST FLIGHT): only ever for one pilot on its own
   assist = runAssistNext && !MP.on && !LS.on ? { saved: false } : null;
   runAssistNext = false;
@@ -38056,6 +38078,7 @@ function handleKey(k) {
   if (state === 'rush') { rushKey(k); return; }
   if (state === 'skin') { skinKey(k); return; }
   if (state === 'ost') { ostKey(k); return; }
+  if (state === 'ach') { achKey(k); return; }        // ACHIEVEMENTS
   if (state === 'menu') {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
@@ -38069,6 +38092,7 @@ function handleKey(k) {
     if (k === 'd') { openDaily('menu'); return; }
     if (k === 'b') { openRush('menu'); return; }
     if (k === 'm' && ostDoorUp()) { openOst(); return; }     // THE SOUNDTRACK
+    if (k === 'a' && !PVP) { openAch('menu'); return; }      // ACHIEVEMENTS
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -38336,6 +38360,7 @@ function handleClick() {
   if (state === 'rush') { rushClick(); return; }
   if (state === 'skin') { skinClick(); return; }
   if (state === 'ost') { ostClick(); return; }
+  if (state === 'ach') { achClick(); return; }       // ACHIEVEMENTS
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
@@ -38350,6 +38375,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
     if (inRect(mouse.x, mouse.y, menuOstRect()) && ostDoorUp()) { openOst(); return; }   // THE SOUNDTRACK
+    if (!PVP && inRect(mouse.x, mouse.y, menuAchRect())) { openAch('menu'); return; }     // ACHIEVEMENTS
     if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
@@ -38787,6 +38813,7 @@ function update(dt) {
     return;
   }
   if (state === 'ost') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // THE SOUNDTRACK, over the menu
+  if (state === 'ach') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // ACHIEVEMENTS, over the menu
   if (state === 'daily' || state === 'rush') {
     updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
@@ -38904,6 +38931,7 @@ function update(dt) {
     updateSentries(dt);
     if (P.outside) outsideCall(P.charId, 'step', dt);   // an outside pilot's kit: see OUTSIDE PILOTS
   });
+  aboveTick(dt, wdt);        // what comes for a run that has grown (FROM ABOVE)
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
      the boss shell never calls the AI again, so the check has to live somewhere
      that still runs. A dev-console room clear used to leave the fight object
@@ -41462,6 +41490,7 @@ const OPO = {
   perHit: 0.013,         // dates a round of yours moves it, at your own damage
   oldHit: 0.5,           // and from the first build's side: its numbers
   push: 0.014,           // a round of yours over the first build's floor takes this much of a cell back
+  giftCards: 10,         // cards dealt onto the ship as the fight opens, on top of the ones carried in
   phaseMin: 14,          // a phase cannot end before it has shown what it is (VR_SEQ_MIN's figure)
   seam: 1.4,             // and a breath between them
   pane:  { every: [2.4, 1.5], fly: 1.35, hp: 3, r: 32, reach: 1.25, dmg: 14 },
@@ -41858,8 +41887,9 @@ function opoBox() {
   return { x0, y0, x1: x0 + OPO.arenaW, y1: y0 + OPO.arenaH, cw: OPO.arenaW / OPO.cols, ch: OPO.arenaH / OPO.rows };
 }
 /* The fight, opened: the room cleared and taken to his size, the cards put on
-   the ship (today's, by the same ids), him spawned in the gap. Run state
-   only, so a starter can open it straight (the 'onepointoh' scenario). */
+   the ship (today's, by the same ids) and OPO.giftCards more dealt after them,
+   him spawned in the gap. Run state only, so a starter can open it straight
+   (the 'onepointoh' scenario). */
 function opoOpen(info) {
   enemies.length = 0; ebullets.length = 0; bullets.length = 0;
   portals.length = 0; hazards.length = 0; mortars.length = 0;
@@ -41883,6 +41913,17 @@ function opoOpen(info) {
     const u = UPGRADES.find(z => z.id === id);
     for (let k = 0; k < up[id]; k++) { P.up[id] = (P.up[id] || 0) + 1; u.f(P); }
   }
+  /* A lost fight goes back to the lock, and the crack, already broken, gives
+     again the moment the next run starts: that run has taken nothing yet. So
+     every fight opens with OPO.giftCards more, drawn the way a level's offer
+     is (offerPool, simRand), a card at most up to its max. */
+  const gift = offerPool();
+  let gave = 0;
+  for (; gave < OPO.giftCards && gift.pool.length; gave++) {
+    const u = pickFromPool(gift.pool, gift.flat);
+    P.up[u.id] = (P.up[u.id] || 0) + 1; u.f(P);
+    if (P.up[u.id] >= u.max) gift.pool.splice(gift.pool.indexOf(u), 1);
+  }
   const N = opoRecord().length;
   opo = {
     stage: 'open', st: 0, t: 0, box: B,
@@ -41892,7 +41933,7 @@ function opoOpen(info) {
     cells: new Array(OPO.cols * OPO.rows).fill(1),
     panes: [], sweeps: [], restores: [], cards: [], burst: [],
     paneT: 2.0, sweepT: 4.0, volleyT: 2.4, baseT: 2.0, touchCd: 0, hollowT: OPO.hollowEvery, peeled: 0, hollow: false,
-    painting: null, light: false, up0: up, e: null, cascade: 0, out: 0, gone: false
+    painting: null, light: false, up0: up, gave, e: null, cascade: 0, out: 0, gone: false
   };
   opo.tx = opo.hx; opo.ty = opo.hy;
   const e = spawnEnemy('boss', opo.hx, opo.hy, { boss: 'onepointoh' });
@@ -41963,7 +42004,10 @@ function opoTick(dt, wdt) {
   o.t += dt; o.st += dt;
   if (o.stage === 'open') {
     if (o.st > 1.5 && !o.said) { o.said = 1; opoSay(OPO_SAY.face, 'face', 2.6); }
-    if (o.st >= OPO.openSecs) { o.stage = 'fight'; o.st = 0; opoPhaseOpen(0); }
+    if (o.st >= OPO.openSecs) {
+      o.stage = 'fight'; o.st = 0; opoPhaseOpen(0);
+      if (o.gave) floatText(P.x, P.y - 48, '+' + o.gave + ' UPGRADES', OPO_COL, 17, -30);
+    }
     return;
   }
   if (o.stage === 'cascade') {
@@ -50255,11 +50299,12 @@ function render() {
       state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
-      (state === 'skin' && skinOverMenu()) || state === 'ost') {
+      (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach') {
     if (state === 'chal') drawChal();
     else {
       renderMenu();
       if (state === 'ost') drawOst();
+      if (state === 'ach') drawAch();
       if (state === 'name') drawNameEntry();
       if (state === 'lan') { drawLan(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
@@ -50323,6 +50368,7 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
 
   drawMortars();
+  aboveDrawFloor();           // a spear's mark, on the floor (FROM ABOVE)
   drawUnwritten();
   drawAmalgam();
   drawCages();
@@ -50405,6 +50451,7 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
   pilotsDraw(drawRoninExecWorld);   // RONIN's C: the counter and the executions, over everything in the room
   hlDrawWorldTele();          // ALL HALLOWS: what you can finish, and what is about to go
+  aboveDrawWorld();           // a spear coming down, and one landed, over everything in the room (FROM ABOVE)
 
   pilotsDraw(() => { if (P.odStrike && !odStrikePov()) drawOdStrikeHull(); });   // C: the hull, over everything, until the cut takes it
   drawGearTags();            // THE VAGRANT's drops say what they are
@@ -50449,6 +50496,7 @@ function render() {
   }
   drawChalFog();      // over the world, under everything you need to read
   hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
+  aboveDrawScreen();  // a spear coming: over the frame, under the HUD (FROM ABOVE)
   const bare = !!(PVP && PVP.bare());   // PvP mode: a replay captured with the HUD off (replay.js)
   if (!bare) {
     drawHUD();
@@ -50526,12 +50574,13 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') {
     if (lastStats && lastStats.opo) drawOpoLost();   // ONE POINT OH: a lost fight is no run, and the lock holds
-    else { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
+    else { drawDead(); hlDrawDead(); aboveDrawDead(); }   // ALL HALLOWS: the word after his fight; and what ended the run, if it came from above
   }
   if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
   drawTut();            // FIRST FLIGHT: a lesson, or THE WARDEN's next move, above the tales' line
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
+  achDrawCard();        // a goal done in this run: its card, top right (ACHIEVEMENTS)
   if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
@@ -52861,7 +52910,7 @@ function hlWrMenuish() {
   return state === 'menu' || state === 'name' || state === 'lan' ||
     state === 'chal' || state === 'daily' || state === 'rush' ||
     (state === 'settings' && setFrom === 'menu') || (state === 'changelog' && logOverMenu()) ||
-    (state === 'skin' && skinOverMenu()) || state === 'ost';
+    (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach';
 }
 
 function hlWrFrame() {
@@ -61999,7 +62048,7 @@ function drawVignette() {
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx', 'tour',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'rush', 'skin', 'ost'];
+                          'daily', 'rush', 'skin', 'ost', 'ach'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -62021,6 +62070,7 @@ function uiCursorHot() {
       return inRect(mouse.x, mouse.y, menuLanRect()) ||
              inRect(mouse.x, mouse.y, menuChalRect());
     if (state === 'ost') return ostHot();
+    if (state === 'ach') return achHot();
     if (state === 'lan') {
       const mx = lanMx(), my = lanMy();
       return lanBtns.some(b => inRect(mx, my, b));
@@ -64401,6 +64451,10 @@ function drawDead() {
     ctx.restore();
   });
 
+  // the next goal, said again (ACHIEVEMENTS)
+  const goal = achGoalLine(s);
+  if (goal) row(28, y => achDrawGoal(goal, CENTER, y, wide));
+
   if (recap.tip) row(26, y => {
     const t = 'TIP   ' + recap.tip;
     fitFont(t, wide, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
@@ -64784,6 +64838,7 @@ function renderMenu() {
   drawMenuAcct();
   drawMenuPvp();
   drawMenuOst();        // THE SOUNDTRACK
+  drawMenuAch();        // ACHIEVEMENTS: and the next goal
   drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -71973,6 +72028,1370 @@ const Season = {
   }
 };
 
+/* ===========================================================================
+   ACHIEVEMENTS (13 Oct 2026)
+   The way through the game, as one line of goals: each one is the next thing
+   to do, and says how. The menu's door [A] names the next one, the run report
+   says it again after every run, and a run that earns one says so in a card
+   at the top right, there and then. The panel lists the whole line, act by
+   act: what is done, the one to do now, and nothing past it but its place.
+
+   Read off the record, the way FORGOTTEN TALES' pages are (Tales.sync):
+   every goal is a test of the profile, so an old save, a merged account or a
+   dev grant has whatever it has already earned, however it was earned. What
+   the profile keeps is only when each one was first seen (ach: id -> day) and
+   which of them the panel has shown (achSeen), so a goal is announced once.
+   The first look at a profile that has never kept any keeps everything it
+   has already done, quietly: a veteran is not handed twenty cards on their
+   first load.
+
+   Announced only in a run (ACH_LIVE). One earned anywhere else (on the menu,
+   or merged in from another device) is marked NEW on the door and in the
+   panel instead.
+
+   None of it is the run's. It reads the save and the tales, and writes the
+   save; it never rolls simRand, and Ach is this machine's own
+   (SNAP_LOCAL_OBJS). PvP's page has none of it.
+
+   The art is ACH_ART (below; ACHIEVEMENTS-HOOKS.md): osu!lazer's medals.
+   ACH_PLAIN, off now, would draw a plain panel, rows, meters and card under
+   it.
+   ========================================================================= */
+// the acts, in order: what the panel groups the line under
+const ACH_ACTS = [
+  { id: 'rotation', n: 'THE ROTATION',        col: '#67e8f9' },
+  { id: 'record',   n: 'THE RECORD',          col: '#f8fafc' },
+  { id: 'fracture', n: 'CRACKS IN THE PLANE', col: '#5eead4' },
+  { id: 'founder',  n: 'THE FOUNDER',         col: '#fcd34d' },
+  { id: 'statues',  n: 'THE STATUES',         col: '#fb923c' },
+  { id: 'first',    n: 'ONE POINT OH',        col: '#e2e8f0' }
+];
+const ACH_ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+/* The line, in the order it is meant to be walked. Each is
+     id     kept on the profile: never rename one that has shipped
+     act    which ACH_ACTS it is listed under
+     n      its name
+     how    what to do, said once it is the next one
+     done   p => whether the profile has done it (p is Save.profile)
+     prog   p => [have, need, label] for a goal that is counted (optional)
+     on     () => whether it is in the line at all (optional: a rite not built yet)
+   Earned out of order is still earned; the next one is the first not done. */
+const ACHIEVEMENTS = [
+  /* ---- I. THE ROTATION: the five sectors, once through ---- */
+  { id: 'flight', act: 'rotation', n: 'FIRST FLIGHT',
+    how: 'Press SPACE on the menu and fly a run. However short it is, it counts.',
+    done: p => (p.runs | 0) > 0 },
+  { id: 'warden', act: 'rotation', n: 'THE FIRST WALL',
+    how: 'Survive the five waves of THE GRID, sector 01, and put THE WARDEN down at the end of them.',
+    done: () => achDown('warden') },
+  { id: 'forgeheart', act: 'rotation', n: 'STRUCK WHILE HOT',
+    how: 'Get through THE FOUNDRY, sector 02, and put FORGEHEART down.',
+    done: () => achDown('forgeheart') },
+  { id: 'broodmother', act: 'rotation', n: 'MOTHER OF THOUSANDS',
+    how: 'Get through THE HIVE, sector 03, and put BROODMOTHER down.',
+    done: () => achDown('broodmother') },
+  { id: 'archivist', act: 'rotation', n: 'FILED UNDER LOST',
+    how: 'Get through THE VAULT, sector 04, and put THE ARCHIVIST down.',
+    done: () => achDown('archivist') },
+  { id: 'nullcore', act: 'rotation', n: 'THE SCHEDULE SAYS',
+    how: 'Get through THE VOID, sector 05, and put NULL down: the whole rotation, in one run.',
+    done: () => achDown('nullcore') },
+
+  /* ---- II. THE RECORD: what waits past NULL ---- */
+  { id: 'unwritten', act: 'record', n: 'IT IS WRITTEN',
+    how: 'Past NULL, a boss can leave a library door behind it. Go in, hear out whoever is waiting, and say yes.',
+    done: p => !!p.trueEnd },
+  { id: 'amalgam', act: 'record', n: 'MADE OF FAVOURITES',
+    how: 'Once the entry is written, someone will ask whether you want it harder. Say yes, and see it through.',
+    done: p => !!p.amalgamDone },
+
+  /* ---- III. CRACKS IN THE PLANE: the fracture, to the bottom ---- */
+  { id: 'clears', act: 'fracture', n: 'ROUND TWICE',
+    how: 'Clear the whole rotation twice. The second time round, something reaches in.',
+    done: p => !!p.altPath || (p.clears | 0) >= 2,
+    prog: p => [Math.min(2, p.clears | 0), 2, 'CLEARS'] },
+  { id: 'curator', act: 'fracture', n: 'A PIECE SHORT',
+    how: 'Between sectors, take the other portal. Put THE CURATOR down at the end of THE ARCHIVE.',
+    done: () => achDown('curator') },
+  { id: 'theother', act: 'fracture', n: 'YOUR REFLECTION',
+    how: 'Deeper in the fracture: put THE OTHER down at the end of THE MIRROR.',
+    done: p => (p.otherKills | 0) > 0 },
+  { id: 'infection', act: 'fracture', n: 'SOMETHING ELSE GETS IN',
+    how: 'Now and then THE OTHER comes back with something else in it. Put that one down as well.',
+    done: p => !!p.deepFracture },
+  { id: 'root', act: 'fracture', n: 'DELETED',
+    how: 'Below THE MIRROR, break in: take every node down, all the way to the bottom, and delete what lives there.',
+    done: p => !!p.rootDone },
+
+  /* ---- IV. THE FOUNDER: behind THE AMALGAM ---- */
+  { id: 'founder', act: 'founder', n: 'WHO BUILT IT',
+    how: 'Carry what ROOT leaves in your hands into THE AMALGAM. Someone is waiting behind it.',
+    done: p => !!p.metFounder },
+  { id: 'tribunal', act: 'founder', n: 'THE TRIBUNAL',
+    how: 'Go inside when he asks you in, and see his tribunal through to the end.',
+    done: p => !!p.tribunalDone },
+  { id: 'outsider', act: 'founder', n: 'THE HOLE IN THE WALL',
+    how: 'Go back to the menu and wait. Someone is coming through.',
+    done: p => !!p.outsiderIn },
+
+  /* ---- V. THE STATUES: each pilot's rite, in the hub [H] ---- */
+  { id: 'overdrive', act: 'statues', n: 'OVERDRIVE',
+    how: 'In the hub [H], wake EMBER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('ember'), on: () => riteBuilt('ember') },
+  { id: 'hacker', act: 'statues', n: 'THE HACKER FLIES',
+    how: 'Carry every MALWARE at least once. Infected bosses drop them.',
+    done: () => charOpen(CHARS.find(c => c.id === 'hacker')),
+    prog: p => [MALWARE.filter(m => (p.codexM || []).includes(m.id)).length, MALWARE.length, 'MALWARE'] },
+  { id: 'superuser', act: 'statues', n: 'SUPERUSER',
+    how: 'In the hub [H], wake THE HACKER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('hacker'), on: () => riteBuilt('hacker') },
+  { id: 'vagrant', act: 'statues', n: 'THE VAGRANT FLIES',
+    how: 'Climb the BOSS RUSH [B] to the top of its ladder.',
+    done: () => charOpen(CHARS.find(c => c.id === 'melee')),
+    prog: p => [Math.min(RUSH_PEAK, p.rushBest | 0), RUSH_PEAK, 'RUSH'] },
+  { id: 'ronin', act: 'statues', n: 'RONIN',
+    how: 'In the hub [H], wake THE VAGRANT’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('melee'), on: () => riteBuilt('melee') },
+
+  /* ---- VI. ONE POINT OH: VOIDRUNNER's own ---- */
+  { id: 'opodoor', act: 'first', n: 'THE OLD DOOR',
+    how: 'With the fracture open, listen in the portal rooms. When a third gate stands apart from the two, walk through it.',
+    done: p => !!p.opoMet },
+  { id: 'opodone', act: 'first', n: 'TODAY',
+    how: 'Break out of the first build, and win the version war.',
+    done: p => !!p.opoDone },
+  // VOIDRUNNER's rite, once it is built: in the line from the day it is
+  { id: 'origin', act: 'first', n: 'VOIDRUNNER, AWAKE',
+    how: 'In the hub [H], wake VOIDRUNNER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('runner'), on: () => riteBuilt('runner') }
+];
+// the states a goal is announced in, as it is earned: a run, and its report
+const ACH_LIVE = ['play', 'levelup', 'gear', 'shop', 'planet', 'library', 'malware', 'talk',
+                  'devtalk', 'amalcut', 'pause', 'dead'];
+const ACH_LOOK = 0.5;                    // seconds between looks at the record
+const ACH_CARD = 4.6;                    // how long a card stays up
+const Ach = {
+  t: -1e9,                               // uiTime of the last look
+  cards: [],                             // { a, t } earned in a run, shown one at a time
+  sel: 0,                                // the row the keys are on (an index into achList)
+  scroll: 0, drag: null, moved: false,
+  from: 'menu'
+};
+
+// has this boss ever been put down, on this record? (as the soundtrack asks it)
+function achDown(key) {
+  const p = Save.profile || {};
+  if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
+  const i = STAGES.findIndex(s => s.boss === key);      // a record older than the tales: by how deep it has been
+  return i >= 0 && (p.bestWave | 0) > i * 5 + 5;
+}
+// a goal's own test, asked so that a bad one only ever answers no
+const achAsk = (f, p) => { try { return !!f(p); } catch (e) { return false; } };
+// the line as it stands: the goals that are in it, in order
+function achList() { return ACHIEVEMENTS.filter(a => !a.on || achAsk(a.on)); }
+const achAct = a => ACH_ACTS.find(x => x.id === a.act) || ACH_ACTS[0];
+const achKept = a => !!(Save.profile && Save.profile.ach && Save.profile.ach[a.id]);
+// done: kept, or done since the last look
+const achIs = a => achKept(a) || achAsk(a.done, Save.profile);
+// the next goal: the first in the line not done, or null once it is all done
+function achNext() { return achList().find(a => !achIs(a)) || null; }
+const achFresh = a => achKept(a) && !(Save.profile.achSeen || []).includes(a.id);
+function achProg(a) {
+  if (!a.prog) return null;
+  try { const r = a.prog(Save.profile); return r && r[1] > 0 ? r : null; } catch (e) { return null; }
+}
+// 2026-10-13 -> 13 OCT 2026
+function achDay(d) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(d || '');
+  if (!m) return '';
+  return (+m[3]) + ' ' + ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][+m[2] - 1] + ' ' + m[1];
+}
+
+/* A look at the record: whatever is done and not kept is kept, with today's
+   date. Announced with a card if `live`; marked NEW if not. The first look a
+   profile ever gets keeps what it has without a word, and so does a look
+   that finds more than ACH_BURST at once: no run earns that many in half a
+   second, so it is a record arriving (an account merged in, a grant), and a
+   veteran signing in on a new device is not handed twenty of anything. */
+const ACH_BURST = 3;
+function achScan(live) {
+  if (PVP) return 0;
+  const p = Save.profile;
+  if (!p) return 0;
+  const first = !p.ach || typeof p.ach !== 'object' || Array.isArray(p.ach);
+  if (first) p.ach = {};
+  if (!Array.isArray(p.achSeen)) p.achSeen = [];
+  const got = achList().filter(a => !p.ach[a.id] && achAsk(a.done, p));
+  const quiet = first || got.length > ACH_BURST;
+  for (const a of got) {
+    p.ach[a.id] = talesDay();
+    if (quiet) { if (!p.achSeen.includes(a.id)) p.achSeen.push(a.id); }
+    else if (live) achAnnounce(a);
+  }
+  if (first || got.length) { Save.writeLocal(); Save.flush(); }
+  return got.length;
+}
+// a look, now and then: called every frame from whatever is being drawn
+function achTick() {
+  if (PVP || !Save.profile) return;
+  if (uiTime - Ach.t < ACH_LOOK && uiTime >= Ach.t) return;
+  Ach.t = uiTime;
+  achScan(ACH_LIVE.includes(state));
+}
+function achAnnounce(a) {
+  if (Ach.cards.length >= 4) return;      // a burst says the first few; the panel has the rest
+  Ach.cards.push({ a, t: -1 });
+  try { AA('sound', Audio_, a); } catch (e) {}
+  if (ACH_PLAIN) Audio_.tone(988, 0.09, 'sine', 0.05, 1480);
+}
+/* Two stores, one line: a goal kept on either is kept, on the earlier day,
+   and one seen on either is seen. Junk is dropped: a merge is an untrusted
+   document too. Null on both is null: neither has been looked at yet. */
+function achMerge(a, b) {
+  const obj = v => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+  const A = obj(a.ach), B = obj(b.ach);
+  let ach = null;
+  if (A || B) {
+    ach = {};
+    for (const s of [A || {}, B || {}])
+      for (const k of Object.keys(s)) {
+        const d = s[k];
+        if (typeof k !== 'string' || k.length > 24 || typeof d !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(d)) continue;
+        if (!ach[k] || d < ach[k]) ach[k] = d;
+      }
+  }
+  const ok = k => typeof k === 'string' && k.length > 0 && k.length <= 24;
+  const seen = [...new Set([...(Array.isArray(a.achSeen) ? a.achSeen : []),
+                            ...(Array.isArray(b.achSeen) ? b.achSeen : [])].filter(ok))];
+  return { ach, achSeen: seen };
+}
+
+/* ------------------------------ the card ------------------------------
+   One at a time, top right, the run going on under it. */
+// under the HUD's right-hand stack (score, wave, sector, credits), which ends near 120
+function achCardRect() {
+  const w = Math.min(320, W - 32), h = 58;
+  return { x: W - w - 16, y: 132, w, h };
+}
+function achDrawCard() {
+  achTick();
+  const L = Ach.cards;
+  if (!L.length) return;
+  if (state === 'menu' || PVP) { L.length = 0; return; }
+  const c = L[0];
+  if (c.t < 0) c.t = uiTime;
+  const age = uiTime - c.t;
+  if (age > ACH_CARD) { L.shift(); return; }
+  const k = age / ACH_CARD;
+  const a = clamp(Math.min(age / 0.3, (ACH_CARD - age) / 0.5), 0, 1);
+  const r0 = achCardRect(), slide = (1 - clamp(age / 0.3, 0, 1)) * 40;
+  const r = { x: r0.x + slide, y: r0.y, w: r0.w, h: r0.h };
+  const col = achAct(c.a).col;
+  ctx.save();
+  ctx.globalAlpha = a;
+  if (ACH_PLAIN) {
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = 'rgba(8,13,22,0.92)'; ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.7); ctx.lineWidth = 1.4; ctx.stroke();
+  }
+  AA('card', r, c.a, k);
+  aaTag('card', r.x, r.y - 12);
+  const s = r.h - 16;
+  achBadge(r.x + 8, r.y + 8, s, c.a, { done: true, next: false, locked: false, fresh: true, big: false });
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = rgba(col, 0.9);
+  ctx.fillText('ACHIEVEMENT', r.x + s + 18, r.y + 19);
+  ctx.letterSpacing = '0.04em';
+  fitFont(c.a.n, r.w - s - 30, '800', 14, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillText(c.a.n, r.x + s + 18, r.y + 38);
+  ctx.restore();
+}
+
+/* ----------------------------- the menu's door ----------------------------- */
+function menuAchRect() { return { x: 18, y: 334, w: 176, h: 34 }; }
+function drawMenuAch() {
+  if (PVP) return;
+  achTick();
+  const r = menuAchRect(), col = '#fde68a';
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  const L = achList(), done = L.filter(achIs).length, nx = achNext();
+  const fresh = L.filter(achFresh).length;
+  ctx.save();
+  if (ACH_PLAIN) {
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = hot ? 'rgba(253,230,138,0.14)' : 'rgba(8,13,22,0.72)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  AA('door', r, { done, total: L.length, fresh, hot, next: nx });
+  aaTag('door', r.x + r.w + 4, r.y);
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('★  ACHIEVEMENTS', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  const sub = (nx ? 'NEXT  ' + nx.n : done + ' OF ' + L.length + '  ·  ALL DONE') + '  —  A';
+  fitFont(sub, r.w - 24 - (fresh ? 10 : 0), '500', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 6.5);
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  ctx.fillText(sub, r.x + 12, r.y + 27);
+  // something earned and not looked at yet: a dot, as the daily's
+  if (fresh) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(r.x + r.w - 11, r.y + 11, 3, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* --------------------------- the run report's goal ---------------------------
+   The next goal, said again under every ordinary run. Not under a challenge,
+   the rush or a daily: those have their own ladder. */
+function achGoalLine(s) {
+  if (PVP || (s && s.chal) || freeRun) return null;
+  return achNext();
+}
+function achDrawGoal(a, cx, y, wide) {
+  const r = { x: cx - wide / 2, y: y + 2, w: wide, h: 24 };
+  AA('goal', r, a);
+  aaTag('goal', r.x, r.y - 12);
+  const pg = achProg(a);
+  const t = 'NEXT GOAL   ' + a.n + '   ·   ' + a.how + (pg ? '   (' + achProgTxt(pg) + ')' : '');
+  ctx.save();
+  ctx.letterSpacing = '0.04em';
+  fitFont(t, wide, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+  ctx.fillStyle = rgba(achAct(a).col, 0.85);
+  ctx.fillText(t, cx, y + 14);
+  ctx.restore();
+}
+const achProgTxt = pg => (pg[2] === 'RUSH' ? rushK(pg[0]) + ' / ' + rushK(pg[1]) : pg[0] + ' / ' + pg[1]) + ' ' + pg[2];
+
+/* ------------------------------- the panel ------------------------------- */
+function openAch(from) {
+  achScan(false);
+  const L = achList(), nx = achNext();
+  Ach.sel = Math.max(0, nx ? L.indexOf(nx) : L.length - 1);
+  Ach.scroll = 0; Ach.drag = null;
+  Ach.from = from || 'menu';
+  state = 'ach';
+  uiArm = 0.25;
+  Audio_.select();
+  achReveal();
+}
+function closeAch() {
+  // what the panel has shown is seen: the door's dot goes, and the NEW marks
+  const p = Save.profile;
+  if (p && p.ach) {
+    const seen = new Set(p.achSeen || []);
+    let n = 0;
+    for (const k of Object.keys(p.ach)) if (!seen.has(k)) { seen.add(k); n++; }
+    if (n) { p.achSeen = [...seen]; Save.writeLocal(); Save.flush(); }
+  }
+  state = 'menu';
+  Ach.drag = null;
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+function achGeom() {
+  const w = Math.min(900, W - 36), h = Math.min(560, H - 52), x = (W - w) / 2, top = (H - h) / 2;
+  const headH = 64, footH = 56, wide = w >= 640;
+  const listW = wide ? Math.round(w * 0.55) : w - 44;
+  return { x, w, top, h, headH, footH, wide, listW, listX: x + 16, listY: top + headH, viewH: h - headH - footH,
+    sideX: x + 16 + listW + 26, sideW: w - listW - 58,
+    done: { x: x + w - 16 - 150, y: top + h - footH + 10, w: 150, h: 36 } };
+}
+// each goal's standing, for the rows, the badges and the side
+function achStat(a, nx) {
+  const done = achIs(a), next = a === nx;
+  return { done, next, locked: !done && !next, fresh: achFresh(a),
+           day: (Save.profile.ach || {})[a.id] || '', prog: achProg(a) };
+}
+function achLay() {
+  const L = achList(), nx = achNext(), rows = [];
+  let y = 0;
+  ACH_ACTS.forEach((act, ai) => {
+    const mine = L.filter(a => a.act === act.id);
+    if (!mine.length) return;
+    const st = mine.map(a => achStat(a, nx));
+    const open = st.some(s => s.done || s.next);
+    if (rows.length) y += 8;
+    rows.push({ t: 'act', act, i: ai, y, h: 30, open, done: st.filter(s => s.done).length, total: mine.length });
+    y += 30;
+    mine.forEach((a, k) => { rows.push({ t: 'ach', i: L.indexOf(a), a, s: st[k], y, h: 54 }); y += 54; });
+  });
+  return { L, nx, rows, contentH: y + 4 };
+}
+function achMaxScroll() { return Math.max(0, achLay().contentH - achGeom().viewH); }
+function achReveal() {
+  const g = achGeom(), row = achLay().rows.find(r => r.t === 'ach' && r.i === Ach.sel);
+  if (!row) return;
+  if (row.y - 38 < Ach.scroll) Ach.scroll = row.y - 38;
+  if (row.y + row.h > Ach.scroll + g.viewH) Ach.scroll = row.y + row.h - g.viewH;
+  Ach.scroll = clamp(Ach.scroll, 0, achMaxScroll());
+}
+// a goal's emblem: the hook's, over a plain square while the art is blank
+function achBadge(x, y, size, a, s) {
+  if (ACH_PLAIN) {
+    const col = achAct(a).col;
+    ctx.save();
+    roundRect(x, y, size, size, Math.max(3, size * 0.12));
+    ctx.fillStyle = s.done ? rgba(col, 0.18) : '#070b14'; ctx.fill();
+    ctx.strokeStyle = s.done ? rgba(col, 0.75) : s.next ? rgba(col, 0.5) : 'rgba(71,85,105,0.5)';
+    ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "800 " + Math.round(size * 0.42) + "px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = s.done ? col : s.next ? rgba(col, 0.55) : '#334155';
+    ctx.fillText(s.done ? '★' : s.next ? '☆' : '?', x + size / 2, y + size / 2 + 1);
+    ctx.restore();
+  }
+  AA('badge', x, y, size, a, s);
+  aaTag('badge', x, y - 12);
+}
+
+// a counted goal's progress: the hook's, over a plain bar while the art is blank
+function achMeter(m, pg, col) {
+  if (ACH_PLAIN) {
+    const rr = Math.min(4, m.h / 2);
+    ctx.fillStyle = 'rgba(148,163,184,0.16)';
+    roundRect(m.x, m.y, m.w, m.h, rr); ctx.fill();
+    ctx.fillStyle = rgba(col, 0.8);
+    roundRect(m.x, m.y, Math.max(m.h, m.w * clamp(pg[0] / pg[1], 0, 1)), m.h, rr); ctx.fill();
+  }
+  AA('meter', m, pg[0], pg[1], col);
+  aaTag('meter', m.x, m.y - 13);
+}
+
+function drawAch() {
+  achTick();
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = achGeom(), lay = achLay(), L = lay.L;
+  const ms = Math.max(0, lay.contentH - g.viewH);
+  Ach.scroll = clamp(Ach.scroll, 0, ms);
+  Ach.sel = clamp(Ach.sel, 0, Math.max(0, L.length - 1));
+  const done = L.filter(achIs).length;
+  const face = "'Chakra Petch', Barlow, system-ui, sans-serif", body = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  const gold = '#fde68a';
+
+  if (ACH_PLAIN) {
+    ctx.save();
+    lanRect(g.x, g.top, g.w, g.h, 10);
+    ctx.fillStyle = 'rgba(8,13,22,0.9)'; ctx.fill();
+    ctx.strokeStyle = rgba(gold, 0.30); ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.restore();
+  }
+  AA('back', g.x, g.top, g.w, g.h, { done, total: L.length });
+  aaTag('back', g.x + 6, g.top + 6);
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = '800 22px ' + face;
+  ctx.fillStyle = gold;
+  ctx.fillText('ACHIEVEMENTS', W / 2, g.top + 25);
+  ctx.restore();
+  const say = !lay.nx ? 'All ' + L.length + ' done. That is the whole of it, for now.'
+    : done + ' of ' + L.length + ' done.  Each one is the next thing to do, and says how.';
+  fitFont(say, g.w - 40, '500', 11, body, 8);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(say, W / 2, g.top + 47);
+
+  // ---- the list
+  ctx.save();
+  ctx.beginPath(); ctx.rect(g.listX - 4, g.listY, g.listW + 8, g.viewH); ctx.clip();
+  const first = lay.rows.find(r => r.t === 'ach'), last = [...lay.rows].reverse().find(r => r.t === 'ach');
+  if (first) {
+    const sx = g.listX + 5 + 21, y0 = g.listY + first.y + first.h / 2 - Ach.scroll;
+    const y1 = g.listY + last.y + last.h / 2 - Ach.scroll;
+    const at = lay.nx ? lay.rows.find(r => r.t === 'ach' && r.a === lay.nx) : last;
+    const yk = g.listY + at.y + at.h / 2 - Ach.scroll;
+    AA('spine', sx, y0, y1, yk);
+    aaTag('spine', g.listX + 2, y0 + 23);
+  }
+  for (const row of lay.rows) {
+    const y = g.listY + row.y - Ach.scroll;
+    if (y + row.h < g.listY - 4 || y > g.listY + g.viewH + 4) continue;
+    if (row.t === 'act') {
+      const r = { x: g.listX, y, w: g.listW, h: row.h };
+      AA('act', r, row.act, { i: row.i, open: row.open, done: row.done, total: row.total });
+      aaTag('act', r.x + r.w - 40, r.y);
+      ctx.textAlign = 'left';
+      ctx.save();
+      ctx.letterSpacing = '0.14em';
+      ctx.font = '700 10px ' + face;
+      ctx.fillStyle = row.open ? rgba(row.act.col, 0.85) : '#475569';
+      ctx.fillText('ACT ' + ACH_ROMAN[row.i] + '   ·   ' + (row.open ? row.act.n : '—  —  —'), g.listX + 2, y + 15);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(row.done + ' / ' + row.total, g.listX + g.listW - 2, y + 15);
+      ctx.restore();
+      if (ACH_PLAIN) { ctx.fillStyle = 'rgba(148,163,184,0.14)'; ctx.fillRect(g.listX, y + 24, g.listW, 1); }
+      continue;
+    }
+    const a = row.a, s = row.s, col = achAct(a).col;
+    const box = { x: g.listX, y: y + 2, w: g.listW, h: row.h - 4 };
+    const sel = Ach.sel === row.i;
+    const hot = inRect(mouse.x, mouse.y, box) && inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+    const rs = Object.assign({ sel, hot }, s);
+    if (ACH_PLAIN) {
+      ctx.fillStyle = s.next ? rgba(col, 0.12) : (sel || hot) ? 'rgba(253,230,138,0.07)' : 'rgba(255,255,255,0.025)';
+      roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill();
+      if (sel || s.next) {
+        ctx.strokeStyle = rgba(s.next ? col : gold, s.next ? 0.7 : 0.45); ctx.lineWidth = 1.3;
+        roundRect(box.x, box.y, box.w, box.h, 6); ctx.stroke();
+      }
+    }
+    AA('row', box, a, rs);
+    aaTag('row', box.x + box.w - 60, box.y + 2);
+    achBadge(box.x + 5, box.y + 4, box.h - 8, a, rs);
+    const tx = box.x + box.h + 6, tw = box.w - box.h - 54;
+    const title = s.locked ? '—  —  —' : a.n;
+    const sub = s.done ? (s.day ? 'DONE   ·   ' + achDay(s.day) : 'DONE')
+              : s.next ? (s.prog ? 'NEXT   ·   ' + achProgTxt(s.prog) : 'NEXT')
+              : 'LATER';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.03em';
+    fitFont(title, tw, '700', 13, face, 9);
+    ctx.fillStyle = s.done ? '#e2e8f0' : s.next ? '#f8fafc' : '#475569';
+    ctx.fillText(title, tx, box.y + box.h / 2 - 8);
+    ctx.letterSpacing = '0.08em';
+    fitFont(sub, tw, '500', 9.5, body, 7);
+    ctx.fillStyle = s.locked ? '#475569' : rgba(col, 0.85);
+    ctx.fillText(sub, tx, box.y + box.h / 2 + 9);
+    ctx.restore();
+    if (s.next && s.prog) achMeter({ x: tx, y: box.y + box.h - 7, w: Math.min(tw, 220), h: 3 }, s.prog, col);
+    if (s.fresh) {
+      ctx.textAlign = 'right';
+      ctx.save();
+      ctx.letterSpacing = '0.12em';
+      ctx.font = '700 9px ' + body;
+      ctx.fillStyle = gold;
+      ctx.fillText('NEW', box.x + box.w - 12, box.y + box.h / 2);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  if (ms > 0) {
+    const tx = g.listX + g.listW + 7;
+    ctx.fillStyle = 'rgba(148,163,184,0.14)';
+    roundRect(tx, g.listY, 3, g.viewH, 1.5); ctx.fill();
+    const th = Math.max(28, g.viewH * (g.viewH / lay.contentH));
+    ctx.fillStyle = rgba(gold, 0.5);
+    roundRect(tx, g.listY + (g.viewH - th) * (Ach.scroll / ms), 3, th, 1.5); ctx.fill();
+  }
+
+  // ---- beside it: the goal the keys are on, large, with how it is done
+  const cur = L[Ach.sel];
+  if (g.wide && cur) {
+    const s = achStat(cur, lay.nx), col = achAct(cur).col;
+    const size = Math.max(80, Math.min(g.sideW * 0.6, g.viewH - 170));
+    const bx = g.sideX + (g.sideW - size) / 2, by = g.listY + 6;
+    achBadge(bx, by, size, cur, Object.assign({ sel: true, hot: false, big: true }, s));
+    const cx = g.sideX + g.sideW / 2;
+    let y = by + size + 24;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.04em';
+    const title = s.locked ? '—  —  —' : cur.n;
+    fitFont(title, g.sideW, '800', 18, face, 10);
+    ctx.fillStyle = s.locked ? '#64748b' : '#f1f5f9';
+    ctx.fillText(title, cx, y);
+    y += 20;
+    ctx.letterSpacing = '0.12em';
+    ctx.font = '700 9px ' + body;
+    ctx.fillStyle = s.locked ? '#475569' : rgba(col, 0.9);
+    ctx.fillText('ACT ' + ACH_ROMAN[ACH_ACTS.indexOf(achAct(cur))] + (s.locked ? '' : '   ·   ' + achAct(cur).n), cx, y);
+    ctx.restore();
+    y += 22;
+    // how: said for what is done and what is next; what is further on keeps it
+    const how = s.locked ? 'Further along the line. Do the next one first.' : cur.how;
+    ctx.font = '500 11.5px ' + body;
+    ctx.fillStyle = s.locked ? '#64748b' : '#cbd5e1';
+    for (const ln of wrapLines(how, g.sideW - 8).slice(0, 5)) { ctx.fillText(ln, cx, y); y += 16; }
+    y += 8;
+    if (s.next && s.prog) {
+      achMeter({ x: g.sideX + 12, y, w: g.sideW - 24, h: 8 }, s.prog, col);
+      y += 22;
+      ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(achProgTxt(s.prog), cx, y);
+      y += 16;
+    }
+    if (s.done && s.day) {
+      ctx.save();
+      ctx.letterSpacing = '0.12em';
+      ctx.font = '600 9.5px ' + body;
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('DONE   ·   ' + achDay(s.day), cx, y + 4);
+      ctx.restore();
+    }
+  }
+
+  // ---- the foot
+  const b = g.done, bh = inRect(mouse.x, mouse.y, b);
+  ctx.fillStyle = bh ? 'rgba(253,230,138,0.2)' : 'rgba(253,230,138,0.08)';
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+  ctx.strokeStyle = rgba(gold, bh ? 1 : 0.7); ctx.lineWidth = 1.6;
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '800 13px ' + body;
+  ctx.fillStyle = gold;
+  ctx.fillText('DONE   [ESC]', b.x + b.w / 2, b.y + b.h / 2);
+  const mid = b.x - g.x - 40;
+  if (!g.wide && cur && mid > 120) {
+    // no room beside the list: the goal the keys are on says how in the foot
+    const s = achStat(cur, lay.nx);
+    const how = s.locked ? 'Further along the line. Do the next one first.'
+              : cur.how + (s.next && s.prog ? '  (' + achProgTxt(s.prog) + ')' : '');
+    ctx.font = '500 10.5px ' + body;
+    const lines = wrapLines(how, mid);
+    if (lines.length > 2) fitFont(how, mid * 2, '500', 10.5, body, 8);
+    const ls = wrapLines(how, mid).slice(0, 3), lh = 13;
+    ctx.fillStyle = s.locked ? '#64748b' : '#cbd5e1';
+    ls.forEach((ln, i) => ctx.fillText(ln, g.x + 16 + mid / 2, b.y + b.h / 2 + (i - (ls.length - 1) / 2) * lh));
+  } else if (mid > 150) {
+    const word = '↑ ↓ to look along the line';
+    fitFont(word, mid, '500', 10.5, body, 8);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(word, g.x + 16 + mid / 2, b.y + b.h / 2);
+  }
+  ctx.textBaseline = 'alphabetic';
+}
+
+function achKey(k) {
+  if (uiArm > 0) return;
+  const n = achList().length;
+  if (k === 'escape' || k === 'a') { closeAch(); return; }
+  if (!n) return;
+  if (k === 'arrowdown' || k === 's') { Ach.sel = (Ach.sel + 1) % n; achReveal(); Audio_.select(); return; }
+  if (k === 'arrowup' || k === 'w')   { Ach.sel = (Ach.sel + n - 1) % n; achReveal(); Audio_.select(); return; }
+  if (k === 'home') { Ach.sel = 0; achReveal(); return; }
+  if (k === 'end')  { Ach.sel = n - 1; achReveal(); return; }
+  if (k === 'n' || k === 'enter' || k === ' ') {     // back to the next one
+    const nx = achNext();
+    if (nx) { Ach.sel = achList().indexOf(nx); achReveal(); Audio_.select(); }
+  }
+}
+// a row is chosen on the click, or on a finger's lift that did not scroll; off the panel shuts it
+function achClick() {
+  if (uiArm > 0) return;
+  const g = achGeom();
+  if (inRect(mouse.x, mouse.y, g.done)) { closeAch(); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.x, y: g.top, w: g.w, h: g.h })) { closeAch(); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH })) return;
+  const yy = mouse.y - g.listY + Ach.scroll;
+  const row = achLay().rows.find(r => r.t === 'ach' && yy >= r.y && yy < r.y + r.h);
+  if (!row) return;
+  Ach.moved = false;
+  qolOnLift(() => { if (!Ach.moved) { Ach.sel = row.i; Audio_.select(); } });
+}
+function achHot() {
+  const g = achGeom();
+  return inRect(mouse.x, mouse.y, g.done) ||
+         inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+}
+
+/* ===========================================================================
+   ACHIEVEMENTS — art hooks
+   Every visual piece of the line is one of these, and all of them are drawn
+   (13 Oct), after osu!lazer's medals: THE LOOK, below, says how.
+   Replace the block whole, or any one entry (ACHIEVEMENTS-HOOKS.md says
+   where each is called and what it is handed). Add ?hooks=1 to the address
+   to tag each piece with its hook's name.
+
+     · Drawing only. A hook changes nothing, and never rolls simRand.
+     · Sandboxed. AA(name, ...) calls it inside ctx.save() / ctx.restore().
+     · Fails alone. A hook that throws loses only its own piece, and is named
+       once in the console. `npm run test:ach` calls every hook and fails if
+       one throws or is never called.
+     · Its own caches. A top-level let, or a const that starts empty, goes in
+       SNAP_LOCAL / SNAP_LOCAL_OBJS (RUN SNAPSHOTS).
+     · ACH_PLAIN. While true the layout draws a plain panel, plain rows, a
+       plain badge (★ done, ☆ next, ? later), a plain meter, door and card
+       under the hooks, and a plain chime on an earn. False now the art
+       draws those itself; the text is always the layout's.
+
+   WHAT THEY ARE HANDED (s, for a goal, is its standing: { done, next,
+   locked, fresh, day, prog, sel, hot, big }; `a` is its ACHIEVEMENTS entry,
+   with a.id to tell one emblem from another and achAct(a).col its act's
+   colour; a rect is { x, y, w, h }, in screen space)
+     back   (x, y, w, h, t)      the panel, behind everything on it. t { done, total }
+     act    (r, act, s)          an act's header over its goals. act is the
+                                 ACH_ACTS entry; s { i, open, done, total }
+     row    (r, a, s)            a goal's row, under its badge and its words
+     badge  (x, y, size, a, s)   a goal's emblem, in a square of `size`: in a
+                                 row, large beside the list (s.big), and on the
+                                 card. One per a.id, or one drawn by act
+     spine  (x, y0, y1, yk)      the line itself, down the list behind the
+                                 badges: from the first goal (y0) to the last
+                                 (y1), done as far as the next one (yk)
+     meter  (r, have, need, col) a counted goal's progress, beside the list
+     door   (r, s)               the menu's door. s { done, total, fresh, hot, next }
+     card   (r, a, k)            the card a goal earned in a run comes up on,
+                                 top right; k 0..1 through its life (ACH_CARD)
+     goal   (r, a)               NEXT GOAL on the run report, under its words
+     sound  (audio, a)           a goal earned, as its card comes up. audio is
+                                 Audio_ (tone, noise). Sound only.
+   ========================================================================= */
+const ACH_PLAIN = false;            // the art draws every piece (THE LOOK, below)
+const ACH_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') === '1'; } catch (e) { return false; } })();
+const AA_TAGGED = new Set();             // hooks already named this frame
+const AA_FAILED = new Set();             // hooks that have thrown, named once
+const AA_CALLED = new Set();             // hooks called at least once (the test reads it)
+let aaFrame = -1;
+function AA(name, ...a) {
+  const f = ACH_ART[name];
+  if (!f) return;
+  AA_CALLED.add(name);
+  if (aaFrame !== uiTime) { aaFrame = uiTime; AA_TAGGED.clear(); }
+  ctx.save();
+  try { f(...a); }
+  catch (e) { if (!AA_FAILED.has(name)) { AA_FAILED.add(name); console.warn('ACHIEVEMENTS art: ' + name + ' threw', e); } }
+  ctx.restore();
+}
+// a piece naming itself: once a frame per hook, small, at (x, y). Off unless ?hooks=1
+function aaTag(name, x, y) {
+  if (!ACH_HOOK_LABELS || AA_TAGGED.has(name)) return;
+  AA_TAGGED.add(name);
+  ctx.save();
+  ctx.font = "600 8px 'Courier New', Consolas, monospace";
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.letterSpacing = '0px';
+  const w = ctx.measureText('ach.' + name).width + 6;
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = 'rgba(250,204,21,0.9)';
+  ctx.fillRect(x, y, w, 11);
+  ctx.fillStyle = '#111827';
+  ctx.fillText('ach.' + name, x + 3, y + 1.5);
+  ctx.restore();
+}
+
+/* THE LOOK (13 Oct): osu!lazer's medals. Each goal is a medal on lazer's
+   splash disc: deep teal with its triangles drifting up through it, a white
+   rim once it is earned, a glow in its own colour round it, and a flat white
+   emblem that is its own. The next goal is the next note to hit: an approach
+   circle closes on it, over and over, and the line on to the rest of it runs
+   as follow points. The panel, the rows and the run report's goal are
+   lazer's slate (its overlays at the blue hue), rounded; the door leans as
+   lazer's buttons do. The card is the medal splash in small: the flash it
+   comes in on, the medal's elastic pop, the strip of light out of it and its
+   particles. Its sound is a whoosh up into a chime.
+
+   Nothing here is kept but AA_ST (SNAP_LOCAL_OBJS): the triangles, the spin
+   and the particles are where a hash and uiTime put them. */
+const AA_LZ = {
+  disc: '#05262f',                        // the medal splash's disc
+  blue: '#66ccff', gold: '#fde68a',
+  // an overlay's slate at lazer's blue hue (OverlayColourProvider, Background2..6)
+  bg2: '#454f54', bg3: '#394246', bg4: '#2e3538', bg5: '#22282a', bg6: '#171a1c'
+};
+// a goal's own colour: its boss's, its pilot's, or its act's
+const AA_OWN = { overdrive: '#fb923c', hacker: '#a3e635', superuser: '#fcd34d', vagrant: '#a5b4fc',
+                 ronin: '#f87171', origin: '#67e8f9', opodoor: '#67e8f9' };
+const aaOwn = a => AA_OWN[a.id] || (BOSSES[a.id] && BOSSES[a.id].col) || achAct(a).col;
+const AA_ST = { bigId: null, bigT: -1e9 };   // the large medal beside the list: which, and since when (its pop)
+
+// a fixed hash, 0..1: the art's randomness, the same every frame
+const aaHash = n => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const aaSeed = id => { let h = 7; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 9973; return h; };
+function aaRGB(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+// t of the way from a to b: a hex, or rgba with `al`
+function aaMix(a, b, t, al) {
+  const A = aaRGB(a), B = aaRGB(b), c = i => Math.round(A[i] + (B[i] - A[i]) * t);
+  return al === undefined ? '#' + ((1 << 24) | (c(0) << 16) | (c(1) << 8) | c(2)).toString(16).slice(1)
+                          : 'rgba(' + c(0) + ',' + c(1) + ',' + c(2) + ',' + al + ')';
+}
+// osu!framework's OutElastic and OutQuint
+const aaElastic = t => t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t - 0.075) * TAU / 0.3) + 1;
+const aaQuint = t => 1 - Math.pow(1 - clamp(t, 0, 1), 5);
+
+// lazer's edge glow: the game's glow sprite, added, under whatever alpha the caller draws at
+function aaGlow(x, y, r, col, a) {
+  if (r <= 0 || a <= 0) return;
+  const g0 = ctx.globalAlpha, op = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = g0 * Math.min(1, a);
+  ctx.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = g0;
+  ctx.globalCompositeOperation = op;
+}
+
+/* lazer's Triangles: equilateral, point up, drifting up and round again from
+   the bottom, each a shade between dark and light, about N(0.5, 0.16) in
+   scale, the small ones slower. `size` is about an average one's width.
+   Drawn across the whole rect: clip first. */
+function aaTriangles(x, y, w, h, dark, light, size, speed, seed, al) {
+  if (w <= 0 || h <= 0) return;
+  const A = aaRGB(dark), B = aaRGB(light), t = uiTime;
+  const n = clamp(Math.round(w * h / (size * size) * 3), 3, 64);
+  for (let i = 0; i < n; i++) {
+    const k = seed * 97.31 + i * 5.17;
+    const sc = clamp(0.5 + (aaHash(k) + aaHash(k + 1) - 1) * 0.4, 0.1, 1);
+    const tw = size * 2 * sc, th = tw * 0.866, span = h + th;
+    const py = y + h - ((aaHash(k + 2) * span + t * speed * Math.max(0.5, sc)) % span);
+    const px = x + aaHash(k + 3) * w, m = aaHash(k + 4);
+    ctx.fillStyle = 'rgba(' + Math.round(A[0] + (B[0] - A[0]) * m) + ',' + Math.round(A[1] + (B[1] - A[1]) * m) + ',' +
+                    Math.round(A[2] + (B[2] - A[2]) * m) + ',' + al + ')';
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tw / 2, py + th); ctx.lineTo(px - tw / 2, py + th); ctx.closePath();
+    ctx.fill();
+  }
+}
+// the splash's disc-spin: a sunburst, turning, fading to its rim
+function aaSpin(cx, cy, r, ang, col, a) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, rgba(col, a)); g.addColorStop(0.5, rgba(col, a * 0.6)); g.addColorStop(1, rgba(col, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  for (let i = 0; i < 18; i++) {
+    const q = ang + i * TAU / 18, d = TAU / 18 * 0.28;
+    ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, q - d, q + d); ctx.closePath();
+  }
+  ctx.fill();
+}
+/* The splash's particles: one born every 1/40 s from t0 (for `span` seconds,
+   or for good), flying `dist` out from the rim in a direction of its own and
+   fading as it goes, over half a second. */
+function aaSparks(cx, cy, r0, dist, col, a, t0, span) {
+  const life = 0.5, every = 1 / 40, t = uiTime - t0;
+  if (t < 0) return;
+  const dot = clamp(r0 * 0.02, 1, 2.2);
+  for (let b = Math.floor(Math.min(t, span === undefined ? t : span) / every); b >= 0; b--) {
+    const age = t - b * every;
+    if (age > life) break;
+    const k = age / life, q = aaHash(b * 3.71 + t0 * 0.37) * TAU, d = r0 + dist * k;
+    const px = cx + Math.cos(q) * d, py = cy + Math.sin(q) * d;
+    aaGlow(px, py, dot * 5, col, (1 - k) * a * 0.8);
+    ctx.fillStyle = 'rgba(255,255,255,' + ((1 - k) * a).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(px, py, dot, 0, TAU); ctx.fill();
+  }
+}
+// lazer's buttons lean (its SHEAR, 0.2): a parallelogram with its corners rounded
+function aaShear(x, y, w, h, sh, rr) {
+  const p = [[x + sh, y], [x + w, y], [x + w - sh, y + h], [x, y + h]];
+  ctx.beginPath();
+  ctx.moveTo(x + sh / 2, y + h / 2);
+  for (let i = 0; i < 4; i++) { const q = p[i], n = p[(i + 1) % 4]; ctx.arcTo(q[0], q[1], n[0], n[1], rr); }
+  ctx.closePath();
+}
+
+/* A goal's emblem: flat and white, as lazer's icons are, in a unit u about
+   half the disc's radius. `bg` is the disc under it (what is cut out of it is
+   drawn in it), `acc` the goal's own colour (what is lit in it). */
+function aaEmblem(id, cx, cy, u, ink, bg, acc) {
+  let rot = 0;
+  const X = (x, y) => cx + (x * Math.cos(rot) - y * Math.sin(rot)) * u;
+  const Y = (x, y) => cy + (x * Math.sin(rot) + y * Math.cos(rot)) * u;
+  const mv = (x, y) => ctx.moveTo(X(x, y), Y(x, y)), ln = (x, y) => ctx.lineTo(X(x, y), Y(x, y));
+  const qd = (x0, y0, x, y) => ctx.quadraticCurveTo(X(x0, y0), Y(x0, y0), X(x, y), Y(x, y));
+  const P = pts => { pts.forEach((p, i) => (i ? ln : mv)(p[0], p[1])); ctx.closePath(); };
+  const O = (x, y, r) => { ctx.moveTo(X(x, y) + r * u, Y(x, y)); ctx.arc(X(x, y), Y(x, y), r * u, 0, TAU); };
+  const Q = (x, y, w, h, r) => {
+    const c = [[x + w, y], [x + w, y + h], [x, y + h], [x, y], [x + w, y]];
+    mv(x + r, y);
+    for (let i = 0; i < 4; i++) ctx.arcTo(X(c[i][0], c[i][1]), Y(c[i][0], c[i][1]), X(c[i + 1][0], c[i + 1][1]), Y(c[i + 1][0], c[i + 1][1]), r * u);
+    ctx.closePath();
+  };
+  const F = (c, rule) => { ctx.fillStyle = c || ink; ctx.fill(rule || 'nonzero'); ctx.beginPath(); };
+  const S = (w, c, dash) => {
+    ctx.strokeStyle = c || ink; ctx.lineWidth = w * u; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (dash) ctx.setLineDash(dash.map(v => v * u));
+    ctx.stroke();
+    if (dash) ctx.setLineDash([]);
+    ctx.beginPath();
+  };
+  const L = (pts, w, c, dash) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ln : mv)(p[0], p[1])); S(w, c, dash); };
+  // in the disc's colour, through what is drawn, with no glow
+  const bare = f => { const b = ctx.shadowBlur; ctx.shadowBlur = 0; f(); ctx.shadowBlur = b; };
+  const cut = (pts, w) => bare(() => L(pts, w, bg));
+  const star = (x, y, ro, ri, n) => {
+    const pts = [];
+    for (let i = 0; i < n * 2; i++) { const q = -Math.PI / 2 + i * Math.PI / n, d = i % 2 ? ri : ro; pts.push([x + Math.cos(q) * d, y + Math.sin(q) * d]); }
+    P(pts);
+  };
+  ctx.beginPath();
+  switch (id) {
+    case 'flight':          // the ship, and its burn
+      P([[0, -1], [0.68, 0.6], [0, 0.28], [-0.68, 0.6]]); F();
+      P([[-0.17, 0.5], [0.17, 0.5], [0, 0.98]]); F(acc);
+      break;
+    case 'warden':          // the first wall: a gate, barred
+      mv(-0.74, 0.92); ln(-0.74, -0.16); ctx.arc(X(0, -0.16), Y(0, -0.16), 0.74 * u, Math.PI, 0); ln(0.74, 0.92); S(0.2);
+      for (const x of [-0.37, 0, 0.37]) {
+        const top = -0.12 - Math.sqrt(0.74 * 0.74 - x * x);
+        P([[x - 0.07, top], [x + 0.07, top], [x + 0.07, 0.62], [x, 0.9], [x - 0.07, 0.62]]);
+      }
+      Q(-0.74, -0.4, 1.48, 0.11, 0.03); Q(-0.74, 0.16, 1.48, 0.11, 0.03); F();
+      break;
+    case 'forgeheart':      // an anvil, struck
+      P([[-1, -0.3], [0.95, -0.3], [0.95, 0.02], [0.42, 0.04], [0.26, 0.4], [0.56, 0.66], [0.56, 0.86], [-0.56, 0.86],
+         [-0.56, 0.66], [-0.26, 0.4], [-0.42, 0.04], [-0.62, 0.02], [-1, -0.16]]); F();
+      star(0.22, -0.72, 0.32, 0.09, 4); O(-0.32, -0.66, 0.07); O(0.66, -0.94, 0.06); F(acc);
+      break;
+    case 'broodmother':     // a clutch
+      O(0, 0, 0.42);
+      for (let i = 0; i < 7; i++) { const q = -Math.PI / 2 + i * TAU / 7; O(Math.cos(q) * 0.8, Math.sin(q) * 0.8, 0.17); }
+      F();
+      for (let i = 0; i < 7; i++) { const q = -Math.PI / 2 + (i + 0.5) * TAU / 7; O(Math.cos(q) * 0.66, Math.sin(q) * 0.66, 0.07); }
+      F(acc);
+      break;
+    case 'archivist':       // a file, its label blank
+      P([[-1, -0.66], [-0.36, -0.66], [-0.2, -0.46], [1, -0.46], [1, 0.76], [-1, 0.76]]);
+      Q(-0.34, 0.02, 0.68, 0.22, 0.06); F(ink, 'evenodd');
+      Q(-0.34, 0.02, 0.68, 0.22, 0.06); F(acc);
+      break;
+    case 'nullcore':        // the schedule, nulled
+      O(0, 0, 0.94); O(0, 0, 0.74); F(ink, 'evenodd');
+      Q(-0.06, -0.56, 0.12, 0.62, 0.06); Q(-0.06, -0.06, 0.44, 0.12, 0.06); O(0, 0, 0.12); F();
+      cut([[-0.86, 0.86], [0.86, -0.86]], 0.34);
+      L([[-0.86, 0.86], [0.86, -0.86]], 0.15, acc);
+      break;
+    case 'unwritten':       // the quill, and what it wrote
+      mv(-0.8, 0.9); qd(-0.3, -0.12, 0.9, -0.96); qd(0.46, 0.2, -0.8, 0.9); ctx.closePath(); F();
+      cut([[-0.6, 0.7], [0.62, -0.68]], 0.06);
+      L([[-0.4, 0.94], [-0.12, 0.84], [0.16, 0.94], [0.44, 0.84], [0.74, 0.94]], 0.09, acc);
+      break;
+    case 'amalgam':         // made of favourites: three shapes, through each other
+      O(-0.4, 0.3, 0.52); Q(-0.06, -0.14, 0.98, 0.98, 0.1); P([[-0.3, -1], [0.32, 0.02], [-0.92, 0.02]]);
+      F(ink, 'evenodd');
+      break;
+    case 'clears':          // round, twice
+      for (const [a0, a1] of [[-2.9, -0.5], [0.24, 2.64]]) {
+        ctx.beginPath(); ctx.arc(cx, cy, 0.66 * u, a0, a1); S(0.2);
+        const px = Math.cos(a1) * 0.66, py = Math.sin(a1) * 0.66, dx = -Math.sin(a1), dy = Math.cos(a1);
+        const nx = Math.cos(a1), ny = Math.sin(a1);
+        P([[px + dx * 0.36, py + dy * 0.36], [px + nx * 0.28, py + ny * 0.28], [px - nx * 0.28, py - ny * 0.28]]); F();
+      }
+      break;
+    case 'curator':         // a piece short
+      Q(-0.92, -0.92, 0.84, 0.84, 0.1); Q(0.08, -0.92, 0.84, 0.84, 0.1); Q(-0.92, 0.08, 0.84, 0.84, 0.1); F();
+      Q(0.14, 0.14, 0.72, 0.72, 0.08); S(0.08, acc, [0.14, 0.12]);
+      break;
+    case 'theother':        // the triangle and its reflection
+      P([[-0.5, -0.8], [-0.06, 0.64], [-0.94, 0.64]]); F();
+      P([[0.5, -0.8], [0.94, 0.64], [0.06, 0.64]]); S(0.1, acc);
+      L([[0, -0.98], [0, 0.98]], 0.05, ink, [0.1, 0.16]);
+      break;
+    case 'infection':       // something else, in it
+      for (let i = 0; i < 8; i++) {
+        const q = 0.2 + i * TAU / 8;
+        L([[Math.cos(q) * 0.46, Math.sin(q) * 0.46], [Math.cos(q) * 0.78, Math.sin(q) * 0.78]], 0.11);
+      }
+      O(0, 0, 0.5); O(-0.16, -0.12, 0.13); O(0.18, 0.1, 0.1); O(-0.04, 0.27, 0.07); F(ink, 'evenodd');
+      for (let i = 0; i < 8; i++) { const q = 0.2 + i * TAU / 8; O(Math.cos(q) * 0.86, Math.sin(q) * 0.86, 0.13); }
+      F(acc);
+      break;
+    case 'root':            // the tree, to the bottom, and the bottom deleted
+      L([[0, -0.66], [-0.56, 0.04]], 0.12); L([[0, -0.66], [0.56, 0.04]], 0.12);
+      L([[-0.56, 0.04], [0, 0.72]], 0.08, ink, [0.08, 0.14]); L([[0.56, 0.04], [0, 0.72]], 0.08, ink, [0.08, 0.14]);
+      O(0, -0.66, 0.24); O(-0.56, 0.04, 0.19); O(0.56, 0.04, 0.19); F();
+      cut([[-0.24, 0.5], [0.24, 0.98]], 0.3); cut([[0.24, 0.5], [-0.24, 0.98]], 0.3);
+      L([[-0.2, 0.54], [0.2, 0.94]], 0.13, acc); L([[0.2, 0.54], [-0.2, 0.94]], 0.13, acc);
+      break;
+    case 'founder':         // who built it: his halberd
+      rot = Math.PI / 4;
+      P([[-0.055, -0.92], [0.055, -0.92], [0.055, 1.22], [-0.055, 1.22]]);
+      P([[0, -1.32], [0.09, -0.94], [-0.09, -0.94]]);
+      mv(0.05, -0.9); ln(0.44, -1.04); qd(0.74, -0.66, 0.44, -0.28); ln(0.05, -0.44); ctx.closePath();
+      P([[-0.05, -0.82], [-0.42, -0.7], [-0.05, -0.58]]);
+      F();
+      O(0, 1.22, 0.09); F(acc);
+      break;
+    case 'tribunal':        // the scales
+      Q(-0.06, -0.72, 0.12, 1.42, 0.03); Q(-0.5, 0.66, 1, 0.16, 0.06); Q(-0.86, -0.62, 1.72, 0.1, 0.05); F();
+      for (const sx of [-1, 1]) {
+        L([[sx * 0.78, -0.56], [sx * 1.0, 0.08]], 0.045); L([[sx * 0.78, -0.56], [sx * 0.4, 0.08]], 0.045);
+        mv(sx * 0.4, 0.08); ctx.arc(X(sx * 0.7, 0.08), Y(sx * 0.7, 0.08), 0.3 * u, 0, Math.PI); ctx.closePath(); F();
+      }
+      O(0, -0.8, 0.13); F(acc);
+      break;
+    case 'outsider': {      // the hole in the wall, and the light through it
+      const hole = [[-0.06, -0.52], [0.24, -0.36], [0.5, -0.42], [0.42, -0.06], [0.58, 0.22], [0.22, 0.3],
+                    [0.06, 0.58], [-0.18, 0.22], [-0.5, 0.12], [-0.32, -0.14]];
+      ctx.save();
+      O(0, 0, 1); ctx.clip(); ctx.beginPath();
+      for (let rw = 0; rw < 4; rw++) {
+        const y = -0.96 + rw * 0.5;
+        for (let x = -1.5 + (rw % 2) * 0.5; x < 1; x += 1) Q(x + 0.04, y, 0.92, 0.42, 0.06);
+      }
+      F();
+      bare(() => { P(hole); F(bg); });
+      P(hole.map(p => [0.04 + (p[0] - 0.04) * 0.62, 0.04 + (p[1] - 0.04) * 0.62])); F(acc);
+      ctx.restore();
+      ctx.beginPath();
+      break;
+    }
+    case 'overdrive': {     // EMBER's flame
+      const core = () => { mv(0, 0.06); qd(0.34, 0.36, 0.24, 0.62); qd(0.12, 0.82, 0, 0.82); qd(-0.24, 0.82, -0.24, 0.56); qd(-0.22, 0.3, 0, 0.06); ctx.closePath(); };
+      mv(0.06, -1); qd(0.78, -0.36, 0.64, 0.3); qd(0.52, 0.96, 0, 0.96); qd(-0.52, 0.96, -0.64, 0.3); qd(-0.7, -0.14, -0.3, -0.44);
+      qd(-0.3, -0.06, -0.08, 0.02); qd(-0.22, -0.56, 0.06, -1); ctx.closePath();
+      core(); F(ink, 'evenodd');
+      core(); F(acc);
+      break;
+    }
+    case 'hacker':          // a terminal, prompting
+      Q(-1, -0.78, 2, 1.56, 0.16); Q(-0.86, -0.5, 1.72, 1.14, 0.08); F(ink, 'evenodd');
+      bare(() => { O(-0.8, -0.64, 0.06); O(-0.62, -0.64, 0.06); O(-0.44, -0.64, 0.06); F(bg); });
+      P([[-0.62, -0.3], [-0.2, 0.02], [-0.62, 0.34], [-0.62, 0.17], [-0.42, 0.02], [-0.62, -0.13]]); F(acc);
+      if ((uiTime * 2) % 1 < 0.6) { Q(-0.12, 0.22, 0.5, 0.12, 0.03); F(acc); }
+      break;
+    case 'superuser':       // root's crown, its # cut in it
+      P([[-0.9, 0.44], [-0.96, -0.48], [-0.46, -0.04], [0, -0.72], [0.46, -0.04], [0.96, -0.48], [0.9, 0.44]]);
+      Q(-0.9, 0.56, 1.8, 0.22, 0.06); F();
+      O(-0.96, -0.6, 0.11); O(0, -0.86, 0.12); O(0.96, -0.6, 0.11); F(acc);
+      cut([[-0.14, -0.12], [-0.2, 0.36]], 0.07); cut([[0.2, -0.12], [0.14, 0.36]], 0.07);
+      cut([[-0.36, 0.02], [0.36, 0.02]], 0.07); cut([[-0.38, 0.22], [0.34, 0.22]], 0.07);
+      break;
+    case 'vagrant':         // the blade
+      rot = Math.PI / 4;
+      P([[0, -1.3], [0.11, -1.1], [0.11, 0.3], [-0.11, 0.3], [-0.11, -1.1]]); Q(-0.065, 0.42, 0.13, 0.5, 0.03); F();
+      cut([[0, -1.0], [0, 0.2]], 0.04);
+      Q(-0.42, 0.3, 0.84, 0.12, 0.06); O(0, 1.0, 0.11); F(acc);
+      break;
+    case 'ronin':           // the circle, cut
+      ctx.beginPath(); ctx.arc(cx, cy, 0.7 * u, 0.8, TAU - 0.3); S(0.24);
+      cut([[-1, 0.62], [1, -0.62]], 0.3);
+      L([[-1, 0.62], [1, -0.62]], 0.1, acc);
+      break;
+    case 'opodoor':         // the old door, ajar, the first build's light behind it
+      Q(-0.5, -0.82, 1, 1.8, 0.01); F(acc);
+      mv(-0.58, 0.98); ln(-0.58, -0.9); ln(0.58, -0.9); ln(0.58, 0.98); S(0.16);
+      P([[-0.5, -0.82], [0.12, -0.66], [0.12, 0.84], [-0.5, 0.98]]); F();
+      bare(() => { O(-0.02, 0.12, 0.06); F(bg); });
+      break;
+    case 'opodone':         // today
+      Q(-0.86, -0.7, 1.72, 1.62, 0.16); Q(-0.7, -0.3, 1.4, 1.06, 0.06); F(ink, 'evenodd');
+      Q(-0.52, -0.96, 0.16, 0.44, 0.08); Q(0.36, -0.96, 0.16, 0.44, 0.08); F();
+      star(0, 0.24, 0.4, 0.17, 5); F(acc);
+      break;
+    case 'origin':          // awake: the eye, the ship in it
+      mv(-1, 0.06); qd(0, -0.86, 1, 0.06); qd(0, 0.98, -1, 0.06); ctx.closePath(); O(0, 0.06, 0.5); F(ink, 'evenodd');
+      P([[0, -0.3], [0.27, 0.36], [0, 0.22], [-0.27, 0.36]]); F(acc);
+      L([[-0.56, -0.56], [-0.7, -0.82]], 0.1); L([[0, -0.66], [0, -0.96]], 0.1); L([[0.56, -0.56], [0.7, -0.82]], 0.1);
+      break;
+    default:                // a goal with no emblem of its own yet
+      star(0, 0.04, 0.95, 0.4, 5); F();
+  }
+}
+// what is further along the line: a lock, its name not shown
+function aaLock(cx, cy, u, ink, bg) {
+  ctx.beginPath();
+  ctx.moveTo(cx - 0.36 * u, cy); ctx.lineTo(cx - 0.36 * u, cy - 0.16 * u);
+  ctx.arc(cx, cy - 0.16 * u, 0.36 * u, Math.PI, 0); ctx.lineTo(cx + 0.36 * u, cy);
+  ctx.strokeStyle = ink; ctx.lineWidth = 0.16 * u; ctx.lineCap = 'round'; ctx.stroke();
+  lanRect(cx - 0.56 * u, cy - 0.06 * u, 1.12 * u, 0.86 * u, 0.14 * u);
+  ctx.fillStyle = ink; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy + 0.3 * u, 0.1 * u, 0, TAU);
+  ctx.fillStyle = bg; ctx.fill();
+}
+
+const ACH_ART = {
+  // the panel: lazer's slate, its header lit by drifting triangles, its foot a shade down
+  back(x, y, w, h, t) {
+    const L = AA_LZ, g = achGeom(), rr = 10;
+    ctx.save();
+    lanRect(x, y, w, h, rr);
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 32;
+    ctx.fillStyle = L.bg5; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    ctx.fillStyle = L.bg4; ctx.fillRect(x, y, w, g.headH);
+    aaTriangles(x, y, w, g.headH, L.bg5, aaMix(L.bg4, L.gold, 0.06), 46, 7, 29, 0.8);
+    ctx.fillStyle = L.bg6; ctx.fillRect(x, y + h - g.footH, w, g.footH);
+    // how far along the whole line: lazer's level bar, under the header
+    const k = t.total ? t.done / t.total : 0;
+    ctx.fillStyle = rgba(L.bg2, 0.8); ctx.fillRect(x, y + g.headH - 3, w, 3);
+    if (k > 0) {
+      ctx.shadowColor = rgba(L.gold, 0.8); ctx.shadowBlur = 8;
+      ctx.fillStyle = L.gold; ctx.fillRect(x, y + g.headH - 3, w * k, 3);
+      ctx.shadowBlur = 0;
+    }
+    // beside the list: the medal splash's stage, its teal welling up under the large medal
+    if (g.wide) {
+      const size = Math.max(80, Math.min(g.sideW * 0.6, g.viewH - 170));
+      const sx = g.sideX - 10, sw = g.sideW + 20, sy = g.listY - 4, sh = g.viewH + 4;
+      const cx = g.sideX + g.sideW / 2, cy = g.listY + 6 + size / 2;
+      roundRect(sx, sy, sw, sh, 8); ctx.fillStyle = L.bg6; ctx.fill();
+      const sg = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 1.25);
+      sg.addColorStop(0, 'rgba(10,74,90,0.55)'); sg.addColorStop(1, 'rgba(10,74,90,0)');
+      ctx.fillStyle = sg; ctx.fillRect(sx, sy, sw, sh);
+    }
+    ctx.restore();
+    lanRect(x, y, w, h, rr);
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1; ctx.stroke();
+  },
+
+  // an act's header: one pill a goal under its words, lit for each one done
+  act(r, act, s) {
+    const L = AA_LZ, n = Math.max(1, s.total), gap = 4, y = r.y + 23;
+    const sw = (r.w - gap * (n - 1)) / n, all = s.open && s.done >= s.total;
+    if (all) { ctx.shadowColor = rgba(act.col, 0.7); ctx.shadowBlur = 8; }
+    for (let i = 0; i < n; i++) {
+      roundRect(r.x + i * (sw + gap), y, sw, 3, 1.5);
+      ctx.fillStyle = s.open && i < s.done ? act.col : s.open ? L.bg3 : L.bg5;
+      ctx.fill();
+    }
+  },
+
+  // a goal's row: lazer's panel, the act's colour washing in from the medal; the next one ringed and glowing
+  row(r, a, s) {
+    const L = AA_LZ, col = achAct(a).col, rr = 8;
+    ctx.save();
+    lanRect(r.x, r.y, r.w, r.h, rr);
+    ctx.fillStyle = s.locked ? rgba(L.bg6, 0.55)
+                  : s.next ? aaMix(L.bg4, col, 0.14, 0.85)
+                  : rgba((s.sel || s.hot) ? L.bg3 : L.bg4, 0.62);
+    ctx.fill();
+    ctx.clip();
+    if (s.done) {
+      const g = ctx.createLinearGradient(r.x, 0, r.x + r.w * 0.6, 0);
+      g.addColorStop(0, rgba(col, 0.16)); g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    if (s.next) aaTriangles(r.x, r.y, r.w, r.h, aaMix(L.bg4, col, 0.08), aaMix(L.bg4, col, 0.26), r.h * 0.7, 6, 11, 0.45);
+    if (s.fresh) {
+      const g = ctx.createLinearGradient(r.x + r.w, 0, r.x + r.w * 0.7, 0);
+      g.addColorStop(0, rgba(L.gold, 0.08 + 0.06 * Math.sin(uiTime * 3))); g.addColorStop(1, rgba(L.gold, 0));
+      ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    if (s.hot) { ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+    ctx.restore();
+    if (s.next || s.sel) {
+      lanRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, rr);
+      if (s.next) { ctx.shadowColor = rgba(col, 0.6); ctx.shadowBlur = 12; }
+      ctx.lineWidth = s.next ? 2 : 1.4;
+      ctx.strokeStyle = s.next ? col : 'rgba(255,255,255,0.55)';
+      ctx.stroke();
+    }
+  },
+
+  // a goal's medal
+  badge(x, y, size, a, s) {
+    const L = AA_LZ, act = achAct(a), acc = aaOwn(a), R = size / 2, cx = x + R, cy = y + R;
+    const lit = !!s.done, big = !!s.big;
+    // its pop (OutElastic): the large one as the keys come to it, the card's as it comes up
+    let pop = 1;
+    if (big) {
+      if (AA_ST.bigId !== a.id) { AA_ST.bigId = a.id; AA_ST.bigT = uiTime; }
+      pop = 0.55 + 0.45 * aaElastic((uiTime - AA_ST.bigT) / 0.9);
+    } else {
+      const c = Ach.cards[0];
+      if (c && c.a === a && c.t >= 0 && state !== 'ach') pop = aaElastic((uiTime - c.t - 0.1) / 0.9);
+    }
+    if (pop < 0.02) return;
+    const r = R * pop, lw = Math.max(1.5, size * 0.035);
+    const base = lit ? aaMix(L.disc, act.col, 0.14) : s.next ? aaMix(L.bg6, act.col, 0.08) : '#121517';
+
+    // behind it: its glow, once earned; the outer spin, wide and faint, on the large one and a NEW one;
+    // the large one's strip of light and its particles
+    ctx.save();
+    if (big) { const g = achGeom(); ctx.beginPath(); ctx.rect(g.sideX - 10, g.listY - 4, g.sideW + 20, g.viewH + 4); ctx.clip(); }
+    if (lit) {
+      aaGlow(cx, cy, r * (big ? 1.9 : 1.55), acc, (big ? 0.42 : 0.3) + (s.hot ? 0.15 : 0));
+      if (big || s.fresh) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        aaSpin(cx, cy, r * (big ? 2.25 : 1.45), uiTime * TAU / 40, acc, big ? 0.1 : 0.14);
+        ctx.restore();
+      }
+      if (big) {
+        const sw = Math.max(1.5, size * 0.0125);
+        for (const d of [-1, 1]) {
+          const x0 = cx + d * r, x1 = cx + d * (r + R);
+          const g = ctx.createLinearGradient(x0, 0, x1, 0);
+          g.addColorStop(0, 'rgba(255,255,255,0.75)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = g; ctx.fillRect(Math.min(x0, x1), cy - sw / 2, R, sw);
+        }
+        aaSparks(cx, cy, r, R * 0.6, acc, 0.9, 0);
+      }
+    }
+
+    // the disc, its triangles, and once earned its inner spin
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+    ctx.fillStyle = base; ctx.fill();
+    ctx.clip();
+    if (lit) aaTriangles(cx - r, cy - r, r * 2, r * 2, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.24), r * 0.55, r * 0.35, aaSeed(a.id), 1);
+    else if (s.next) aaTriangles(cx - r, cy - r, r * 2, r * 2, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.12), r * 0.55, r * 0.2, aaSeed(a.id), 1);
+    else aaTriangles(cx - r, cy - r, r * 2, r * 2, '#0d0f11', '#181b1e', r * 0.55, r * 0.1, aaSeed(a.id), 1);
+    if (lit) aaSpin(cx, cy, r * 1.05, uiTime * TAU / 20, '#ffffff', big ? 0.12 : 0.08);
+    ctx.restore();
+
+    // its emblem: white and glowing once earned, a ghost of itself while it is next, a lock past that
+    const u = r * 0.44;
+    ctx.save();
+    if (lit) {
+      ctx.shadowColor = rgba(acc, 0.85); ctx.shadowBlur = Math.max(2, r * 0.25);
+      aaEmblem(a.id, cx, cy, u, '#ffffff', base, acc);
+    } else if (s.next) {
+      aaEmblem(a.id, cx, cy, u, 'rgba(226,232,240,0.4)', base, rgba(acc, 0.45));
+    } else {
+      aaLock(cx, cy, u * 0.8, s.hot ? '#4a535b' : '#363d43', base);
+    }
+    ctx.restore();
+
+    // the rim: white once earned (the splash's border), the act's while next, slate past that
+    ctx.beginPath(); ctx.arc(cx, cy, r - lw / 2, 0, TAU);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = lit ? '#ffffff' : s.next ? rgba(act.col, s.hot ? 1 : 0.75) : s.hot ? '#3d454c' : '#2a3035';
+    ctx.stroke();
+    if (s.next && s.prog) {
+      // how far a counted goal has come, round the rim from the top
+      ctx.beginPath(); ctx.arc(cx, cy, r - lw / 2, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(s.prog[0] / s.prog[1], 0, 1));
+      ctx.strokeStyle = '#ffffff'; ctx.lineCap = 'round'; ctx.stroke();
+    }
+    if (s.next) {
+      // the approach circle: closing on the next note, fading in as it comes
+      const ph = (uiTime % 1.25) / 1.25;
+      ctx.beginPath(); ctx.arc(cx, cy, r * (1 + (big ? 0.45 : 0.32) * (1 - ph)), 0, TAU);
+      ctx.lineWidth = Math.max(1.2, size * 0.03);
+      ctx.strokeStyle = rgba(act.col, (0.85 * Math.min(1, ph * 2.2) * (1 - Math.max(0, ph - 0.9) * 10)).toFixed(3));
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+
+  // the line: a rail, lit as far as the next goal with a slider ball running down it; follow points past it
+  spine(x, y0, y1, yk) {
+    const L = AA_LZ;
+    ctx.fillStyle = rgba(L.bg2, 0.5);
+    roundRect(x - 1.5, y0, 3, Math.max(3, y1 - y0), 1.5); ctx.fill();
+    if (yk > y0) {
+      ctx.save();
+      ctx.shadowColor = rgba(L.blue, 0.8); ctx.shadowBlur = 8;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      roundRect(x - 1.5, y0, 3, yk - y0, 1.5); ctx.fill();
+      ctx.restore();
+      const run = yk - y0 + 80, p = y0 + (uiTime * 140) % run;
+      if (p < yk) aaGlow(x, p, 12, L.blue, 0.7);
+    }
+    for (let yy = yk + 30, i = 0; yy < y1 - 20; yy += 15, i++) {
+      const w = 0.5 + 0.5 * Math.sin(i * 0.9 - uiTime * 4);
+      ctx.beginPath(); ctx.moveTo(x - 3.2, yy - 2); ctx.lineTo(x, yy + 1.6); ctx.lineTo(x + 3.2, yy - 2);
+      ctx.strokeStyle = 'rgba(255,255,255,' + ((0.12 + 0.4 * w) * clamp(1 - (yy - yk) / 420, 0.3, 1)).toFixed(3) + ')';
+      ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+  },
+
+  // a counted goal's progress: lazer's rounded bar, glowing where it has got to; counted out in steps when there are few
+  meter(r, have, need, col) {
+    const L = AA_LZ, k = clamp(have / need, 0, 1), rr = r.h / 2;
+    roundRect(r.x, r.y, r.w, r.h, rr); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+    if (r.h >= 5) { ctx.strokeStyle = rgba(L.bg2, 0.6); ctx.lineWidth = 1; ctx.stroke(); }
+    const fw = Math.max(r.h, r.w * k);
+    if (k > 0) {
+      ctx.save();
+      roundRect(r.x, r.y, fw, r.h, rr);
+      ctx.shadowColor = rgba(col, 0.7); ctx.shadowBlur = r.h * 1.5;
+      ctx.fillStyle = col; ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.clip();
+      if (r.h >= 6) aaTriangles(r.x, r.y, fw, r.h, aaMix(col, '#000000', 0.12), aaMix(col, '#ffffff', 0.35), r.h * 1.4, 6, 5, 0.8);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(r.x, r.y, fw, r.h * 0.45);
+      ctx.restore();
+      aaGlow(r.x + fw - rr, r.y + rr, r.h * 2.6, col, 0.5);
+    }
+    if (need <= 16 && r.w / need > 6) {
+      ctx.fillStyle = rgba(L.bg6, 0.9);
+      for (let i = 1; i < need; i++) ctx.fillRect(r.x + r.w * i / need - 0.75, r.y, 1.5, r.h);
+    }
+  },
+
+  // the menu's door: a lazer button, leaning, triangles drifting through it, the line's progress along its foot
+  door(r, s) {
+    const L = AA_LZ, gold = L.gold, sh = r.h * 0.2;
+    ctx.save();
+    aaShear(r.x, r.y, r.w, r.h, sh, 6);
+    ctx.shadowColor = s.hot ? rgba(gold, 0.45) : 'rgba(0,0,0,0.5)'; ctx.shadowBlur = s.hot ? 14 : 8;
+    ctx.fillStyle = s.hot ? aaMix(L.bg4, gold, 0.1) : rgba(L.bg5, 0.92);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    aaTriangles(r.x, r.y, r.w, r.h, aaMix(L.bg5, gold, 0.02), aaMix(L.bg4, gold, s.hot ? 0.16 : 0.08), 22, s.hot ? 9 : 4, 3, 1);
+    const k = s.total ? s.done / s.total : 0;
+    ctx.fillStyle = rgba(L.bg2, 0.6); ctx.fillRect(r.x, r.y + r.h - 3, r.w, 3);
+    ctx.fillStyle = gold; ctx.fillRect(r.x, r.y + r.h - 3, r.w * k, 3);
+    ctx.restore();
+    aaShear(r.x, r.y, r.w, r.h, sh, 6);
+    ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(gold, s.hot ? 0.9 : 0.32); ctx.stroke();
+    // NEW: the layout's dot, an approach circle closing on it
+    if (s.fresh) {
+      const ph = (uiTime % 1.1) / 1.1, dx = r.x + r.w - 11, dy = r.y + 11;
+      aaGlow(dx, dy, 9, gold, 0.5);
+      ctx.beginPath(); ctx.arc(dx, dy, 3 + 7 * (1 - ph), 0, TAU);
+      ctx.strokeStyle = rgba(gold, (0.9 * Math.min(1, ph * 2)).toFixed(3)); ctx.lineWidth = 1.3; ctx.stroke();
+    }
+  },
+
+  // the card: the medal splash, in small
+  card(r, a, k) {
+    const L = AA_LZ, act = achAct(a), acc = aaOwn(a), age = k * ACH_CARD, rr = 8;
+    const R = (r.h - 16) / 2, bx = r.x + 8 + R, by = r.y + 8 + R;
+    const base = aaMix(L.disc, act.col, 0.1);
+    ctx.save();
+    lanRect(r.x, r.y, r.w, r.h, rr);
+    ctx.shadowColor = rgba(acc, 0.5); ctx.shadowBlur = 18;
+    ctx.fillStyle = base; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    aaTriangles(r.x, r.y, r.w, r.h, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.12), 30, 10, 17, 1);
+    const g = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+    g.addColorStop(0, rgba(acc, 0.22)); g.addColorStop(0.5, rgba(acc, 0.04)); g.addColorStop(1, rgba(acc, 0));
+    ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    // the strip of light out of the medal, between its two lines of words (OutQuint)
+    const sk = aaQuint((age - 0.25) / 0.9);
+    if (sk > 0) {
+      const x0 = bx + R + 2, len = (r.x + r.w - x0) * sk, sg = ctx.createLinearGradient(x0, 0, x0 + len, 0);
+      sg.addColorStop(0, 'rgba(255,255,255,0.55)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sg; ctx.fillRect(x0, by - 0.5, len, 1);
+    }
+    // its life, running down along its foot
+    ctx.fillStyle = rgba(acc, 0.85); ctx.fillRect(r.x, r.y + r.h - 2, r.w * (1 - k), 2);
+    // the flash it comes in on: a quarter of white, gone in 0.4 s
+    if (age < 0.4) { ctx.fillStyle = 'rgba(255,255,255,' + (0.25 * (1 - age / 0.4)).toFixed(3) + ')'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+    ctx.restore();
+    // the medal lands: a ring bursting off it, and its particles for a second and a half
+    aaSparks(bx, by, R, R * 1.6, acc, 1, uiTime - age + 0.15, 1.4);
+    const bk = (age - 0.15) / 0.55;
+    if (bk > 0 && bk < 1) {
+      ctx.beginPath(); ctx.arc(bx, by, R * (1 + 0.9 * aaQuint(bk)), 0, TAU);
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.9 * (1 - bk)).toFixed(3) + ')';
+      ctx.lineWidth = 0.5 + 2.5 * (1 - bk); ctx.stroke();
+    }
+  },
+
+  // NEXT GOAL on the run report: a lazer pill, its act's colour in its triangles
+  goal(r, a) {
+    const L = AA_LZ, col = achAct(a).col, x = r.x - 12, w = r.w + 24, rr = r.h / 2;
+    ctx.save();
+    lanRect(x, r.y, w, r.h, rr);
+    ctx.fillStyle = rgba(L.bg5, 0.78); ctx.fill();
+    ctx.clip();
+    aaTriangles(x, r.y, w, r.h, aaMix(L.bg5, col, 0.02), aaMix(L.bg4, col, 0.12), 18, 5, 23, 0.9);
+    ctx.restore();
+    lanRect(x + 0.5, r.y + 0.5, w - 1, r.h - 1, rr);
+    ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 1; ctx.stroke();
+  },
+
+  // a goal earned: a whoosh up into a chime, each act a step higher than the last
+  sound(audio, a) {
+    const i = Math.max(0, ACH_ACTS.indexOf(achAct(a)));
+    const root = 523.25 * Math.pow(2, [0, 2, 4, 5, 7, 9][i % 6] / 12);
+    audio.noise(0.42, 0.07, 500, 7500, 1.2);
+    audio.tone(root / 2, 0.7, 'sine', 0.07, null, 0.1);
+    [0, 4, 7, 12, 16].forEach((st, k) => audio.tone(root * Math.pow(2, st / 12), 0.55, 'triangle', 0.06, null, 0.1 + k * 0.05));
+    audio.tone(root * 4, 0.9, 'sine', 0.025, root * 4.05, 0.32);
+  }
+};
+/* ===================== end of ACHIEVEMENTS art hooks ===================== */
+
 /* --------------------------------- awards ---------------------------------
    Held on the profile so a podium survives being offline, and re-fetched
    whenever the board is reachable so a newly closed season lands without
@@ -71998,9 +73417,10 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
    invented one cannot arrive from a save file any more than a skin can.
    'comeback' is WELCOME BACK's: THE HACKER and the challenge passes.
    'evo-<pilot>' wakes that one pilot's evolution (devPerksApply), where
-   unlock-evo wakes them all. */
+   unlock-evo wakes them all. 'passes-<n>' is n challenge passes by hand,
+   on top of any WELCOME BACK gave (PASS_PERKS). */
 const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback',
-                      'evo-ember'];
+                      'evo-ember', 'passes-20'];
 
 const Awards = {
   syncing: false,
@@ -72462,12 +73882,16 @@ function eraMark(played) {
    back. Function declarations, not consts: THE HACKER's `need` asks
    comebackHas() and can be asked before this line has run. */
 const COMEBACK_PASSES = 10;
+/* Every perk that carries passes, and how many. They add up: WELCOME BACK's
+   ten and a hand-given twenty are thirty, all spent from one passUsed. */
+const PASS_PERKS = { 'comeback': COMEBACK_PASSES, 'passes-20': 20 };
 function comebackHas(p) {
   return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
 }
 function passesLeft() {
-  if (!comebackHas()) return 0;
-  return Math.max(0, COMEBACK_PASSES - (Save.profile.passUsed || []).length);
+  let held = 0;
+  for (const a of Awards.list()) if (a && a.perk && PASS_PERKS[a.perk]) held += PASS_PERKS[a.perk];
+  return Math.max(0, held - (Save.profile.passUsed || []).length);
 }
 
 /* Banking a grant goes through Awards.clean like everything else, so a bad id
@@ -74881,6 +76305,7 @@ const LIVE_CSS = `
 
 const Live = {
   on: null,                    // { match, since, t, x, names } while one is on air
+  above: false,                // whether runs are hunted now: a run takes it when it starts (FROM ABOVE)
   next: 0,                     // when to ask again (performance.now, ms)
   busy: false,
   el: null,                    // the menu's card
@@ -74908,6 +76333,7 @@ const Live = {
     const every = d && Number.isFinite(d.every) ? d.every : 300;    // can't be read: five minutes
     Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
     if (!d) return;
+    Live.above = d.above === true;
     const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
     const was = Live.on;
     Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
@@ -75007,6 +76433,578 @@ function drawLiveLine() {
   const a = clamp(Math.min(age / 0.35, (LIVE_LINE - age) / 0.6), 0, 1);
   lsPill('LIVE NOW  ·  ' + Live.vs() + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
 }
+
+/* ===========================================================================
+   FROM ABOVE
+
+   While a hidden pilot's challenge is out (sent to the top of ranked, and
+   its fight not yet fought out: pvp/src/challenge.js), something comes for
+   the runs that have grown. The Worker's GET /api/live says whether it is
+   so (`above`: asked for ON AIR anyway), and a run takes that with the rest
+   of its settings when it starts (RUN.above: frozen for the run, and handed
+   to a co-op partner in the header, so both machines play the same).
+
+   What comes is a spear. It is rare, it is warned, and it is the end:
+     who       a run in its third sector or past it (ABOVE.from), in the
+               fight proper. Never a rule sheet of another kind (a
+               challenge, the rush), a sandbox, a rite, a finale, the hub,
+               an ALL HALLOWS area, or PvP; never a pilot from outside
+               (OUTSIDE PILOTS): theirs are not hunted.
+     when      one every two to four minutes of the fight (ABOVE.gap), on a
+               seeded stream of its own, so a run with it and a run without
+               are the same run in everything else (a daily's rule sheet
+               stays the day's).
+     the mark  aimed where the hull will be if it keeps its heading (a hull
+               that turns is clear, and one that sits still is not), and
+               shown there for the warning: ABOVE.warn seconds in the third
+               sector, shorter by ABOVE.shrink for every sector further,
+               never under ABOVE.least. The warning runs on the room's clock
+               (what slows the room slows it) and holds while a cut-in holds
+               the hulls.
+     landing   a hull still inside it is taken, whatever it carries: no
+               shield, i-frame, parry, armour, Second Wind, brake or vow
+               answers it. Solo the run ends there, as any death ends it;
+               in co-op that pilot goes down, as any death does there. Only
+               a hull that is not under it is missed: up off the floor
+               (EMBER's C), or a ghost already (ALL HALLOWS).
+
+   Nothing here names what it is. The art's hooks are at the foot of this
+   block, placeholders until they are drawn.
+   ========================================================================= */
+const ABOVE = {
+  from: 3,                    // the sector they start in, in the run's own order (five waves each)
+  gap: [120, 240],            // seconds of the fight between one and the next
+  warn: 1.8, shrink: 0.88, least: 0.5,   // the warning: at `from`, times `shrink` each sector further, never under `least`
+  r: 44,                      // what it takes, around where it lands
+  lead: 260,                  // how far ahead of a moving hull it aims, at most
+  after: 1.4                  // seconds it stands in the floor after landing (the art's)
+};
+/* The run's share of it: the stream's state, the time to the next one, the
+   marks ({ x, y, r, t: seconds to landing, max, after, k: the pilot it was
+   aimed at, took: the pilot it took, or -1 }), and where the run was ended
+   by one. Plain data, in the snapshot like everything else the run keeps. */
+let aboveRng = 0, aboveNext = 0, aboveTook = null;
+const aboveMarks = [];
+
+function aboveRand() {                   // mulberry32, as simRand: a stream of its own, so the run's is never moved by it
+  let t = aboveRng = (aboveRng + 0x6D2B79F5) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const aboveGap = () => lerp(ABOVE.gap[0], ABOVE.gap[1], aboveRand());
+// a run begins (resetGame, once its seed is set)
+function aboveBegin() {
+  aboveRng = (simSeed ^ 0x5ea0fa11) >>> 0;
+  aboveMarks.length = 0; aboveTook = null;
+  aboveNext = aboveGap();
+}
+// the sector the run is in, in its own order: five waves each, whichever road it took
+const aboveSector = () => Math.floor((Math.max(1, wave) - 1) / 5) + 1;
+// the warning, this far in
+const aboveWarn = () => Math.max(ABOVE.least, ABOVE.warn * Math.pow(ABOVE.shrink, Math.max(0, aboveSector() - ABOVE.from)));
+/* Not this run, or not here: a run that did not start under it, a rule
+   sheet of another kind, a sandbox, PvP, and every room that is a scene of
+   its own (they have their own ways of ending). */
+function aboveQuiet() {
+  return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite
+      || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
+      || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal;
+}
+// a cut-in has the screen and holds the hulls where they are: nothing is aimed, and nothing lands
+function aboveHeld() {
+  let held = outsideCutAny();
+  if (!held) pilotsEach(() => { if (roninCutIn() || suCutIn()) held = true; });
+  return held;
+}
+
+// each play step, once the pilots have moved (update)
+function aboveTick(dt, wdt) {
+  if (aboveQuiet()) { aboveMarks.length = 0; return; }
+  const held = aboveHeld();
+  for (let i = aboveMarks.length - 1; i >= 0; i--) {
+    const m = aboveMarks[i];
+    if (m.t > 0) {
+      if (held) continue;
+      m.t -= wdt;                        // the room's clock
+      if (m.t <= 0) aboveLand(m);
+    } else if ((m.after -= dt) <= 0) aboveMarks.splice(i, 1);
+  }
+  if (state !== 'play' || held || aboveSector() < ABOVE.from) return;
+  if ((aboveNext -= dt) > 0) return;
+  aboveNext = aboveGap();
+  aboveAim();
+}
+
+// one is aimed: at a pilot still flying, where it will be when the warning runs out
+function aboveAim() {
+  const can = [];
+  for (let k = 0; k < Math.max(1, PILOTS.length); k++) {
+    const q = pilotP(k);
+    if (q && !q.down && !q.outside) can.push(k);
+  }
+  if (!can.length) return;
+  const k = can[Math.floor(aboveRand() * can.length)], q = pilotP(k), warn = aboveWarn();
+  let lx = q.vx * warn, ly = q.vy * warn;
+  const d = Math.hypot(lx, ly);
+  if (d > ABOVE.lead) { lx *= ABOVE.lead / d; ly *= ABOVE.lead / d; }
+  const m = { x: clamp(q.x + lx, arena.x0 + ABOVE.r, arena.x1 - ABOVE.r), y: clamp(q.y + ly, arena.y0 + ABOVE.r, arena.y1 - ABOVE.r),
+              r: ABOVE.r, t: warn, max: warn, after: ABOVE.after, k, took: -1 };
+  aboveMarks.push(m);
+  aboveMarkFx(m);
+}
+
+// not under it, though standing there: up off the floor (EMBER's C), or a ghost already (ALL HALLOWS). As that pilot.
+const aboveMisses = () => odStrikeAir() || !!P.hlGhost;
+
+// it lands: every hull inside it is taken
+function aboveLand(m) {
+  m.t = 0;
+  aboveLandFx(m);
+  for (let k = 0; k < Math.max(1, PILOTS.length) && state === 'play'; k++) {
+    const q = pilotP(k);
+    if (!q || q.down || q.outside || Math.hypot(q.x - m.x, q.y - m.y) >= m.r + q.r) continue;
+    pilotDo(k, () => { if (!aboveMisses()) { m.took = k; aboveTake(m); } });
+  }
+}
+
+/* Taken, as the pilot it took. Nothing a build carries is asked: this never
+   goes through hurtPlayer or reviveOrDie. In co-op it is a knock-down while
+   the other pilot still holds the room, as any death is there. */
+function aboveTake(m) {
+  aboveTakenFx(P, m);
+  if (coopCanDown()) { hostDown(); return; }
+  if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
+  aboveTook = { x: P.x, y: P.y, at: simTick };
+  P.hitBy = '';                          // nothing in the room did this: the report names nobody (AFTER THE RUN)
+  P.hp = 0; gameOver();
+}
+
+// the marks, on the floor under the hulls (render, with the room's own)
+function aboveDrawFloor() {
+  for (const m of aboveMarks) {
+    if (m.t <= 0) continue;
+    ctx.save();
+    try { aboveArtMark(m, 1 - m.t / m.max); } finally { ctx.restore(); }
+  }
+}
+// what comes down toward each mark, and what has landed, over the hulls
+function aboveDrawWorld() {
+  for (const m of aboveMarks) {
+    ctx.save();
+    try {
+      if (m.t > 0) aboveArtSky(m, 1 - m.t / m.max);
+      else aboveArtSpear(m, clamp(1 - m.after / ABOVE.after, 0, 1));
+    } finally { ctx.restore(); }
+  }
+}
+// over the frame, under the HUD: one is coming, wherever the eye is
+function aboveDrawScreen() {
+  let u = -1;
+  for (const m of aboveMarks) if (m.t > 0) u = Math.max(u, 1 - m.t / m.max);
+  if (u < 0) return;
+  ctx.save();
+  try { aboveArtScreen(u); } finally { ctx.restore(); }
+}
+// and on the screen a run ends on, if that is what ended it
+function aboveDrawDead() {
+  if (!aboveTook) return;
+  ctx.save();
+  try { aboveArtDead(aboveTook); } finally { ctx.restore(); }
+}
+
+/* ===========================================================================
+   FROM ABOVE — art hooks
+   DRAWN. The spear is drawn after the Daybreak (Terraria), as asked: a
+   sun's ring behind the blade, a prong of flame either side of it, a red
+   shaft with a core of light, in five colours from white-hot to deep red
+   (ABOVE_SUN). It is pixels: ABOVE_SPEAR is the whole of it, tip first,
+   baked once into a sprite and drawn ABOVE_PX to the pixel. Everything
+   round it (the mark, the daylight, the blow) keeps to the same five.
+
+   The contract. A draw hook only draws: it is handed plain data to read,
+   runs inside ctx.save()/restore(), may use rnd/rndi/pick and uiTime, and
+   must write nothing the run reads (no simRand, nothing kept on a mark).
+   What the art keeps for itself is this machine's own: a let of its own
+   must be named in SNAP_LOCAL, a container in SNAP_LOCAL_OBJS (_aboveSpr
+   is: the baked sprites). Nothing else is kept: what moves is placed by
+   uiTime, so two frames of the same moment are the same picture.
+
+     aboveArtMark(m, u)    the floor, under the hulls, world space. The mark
+                           while it is warned: m = { x, y, r, t, max }, u
+                           from 0 (just aimed) to 1 (landing). m.r is exactly
+                           what is taken: the art must show that edge.
+     aboveArtSky(m, u)     over the hulls, world space, the same moments:
+                           what comes down toward the mark.
+     aboveArtSpear(m, a)   over the hulls, world space: it has landed, and
+                           stands. a from 0 (the blow) to 1 (gone), over
+                           ABOVE.after seconds; m.took is the pilot it took
+                           (0 or 1), or -1 for a miss. A run it ended stops
+                           there, so the last one stays on the dead screen.
+     aboveArtScreen(u)     over the frame, under the HUD, screen space (W, H):
+                           one is coming; u as above, of the nearest.
+     aboveArtDead(t)       the screen a run ended on, over it, screen space:
+                           t = { x, y, at }, where and when it was taken.
+   Effect hooks: called once, at the moment, from the run's own step. Sound,
+   shake and the game's stock bursts; nothing the run reads.
+     aboveMarkFx(m)        one has been aimed
+     aboveLandFx(m)        it has landed
+     aboveTakenFx(p, m)    it took a pilot (p)
+   ABOVE_LABELS writes each hook's name beside what it draws, for an art pass.
+=========================================================================== */
+const ABOVE_SUN = { w: '#fff6cf', y: '#ffd91a', o: '#ff8a00', r: '#f2470a', d: '#b3200e', k: '#2a0703' };   // white-hot, gold, flame, ember, deep red; and the dark it is edged with
+const ABOVE_PX = 3;                      // world pixels to one of the spear's
+const ABOVE_TILT = -0.09;                // how it leans, coming down and standing: out of the upper left
+const ABOVE_LABELS = false;
+// the spear, tip first: W Y O R D are ABOVE_SUN's five, a dot is nothing
+const ABOVE_SPEAR = [
+  '........O........',
+  '........O........',
+  '.......OYO.......',
+  '.......OWO.......',
+  '......OYWYO......',
+  '......OYWYO......',
+  '...O..OYWYO..O...',
+  '...O.OYWWWYO.O...',
+  '..OR.OYWWWYO.RO..',
+  '..OR.OYWWWYO.RO..',
+  '..ORO.OYWYO.ORO..',
+  '..DRO.OYWYO.ORD..',
+  '...DROOYWYOORD...',
+  'O...DRYW.WYRD...O',
+  'OO.ORYW...WYRO.OO',
+  '.OOOYW.....WYOOO.',
+  '..RYYW.....WYYR..',
+  '.OOOYW.....WYOOO.',
+  'OO.ORYW...WYRO.OO',
+  'O...DRYW.WYRD...O',
+  '....DROYWYORD....',
+  '...OR.DOYOD.RO...',
+  '..OR...DYD...RO..',
+  '..O....DWD....O..',
+  '.......DYD.......',
+  '.......DYD.......',
+  '......ODWDO......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......RWR.......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '......ODYDO......',
+  '.......DWD.......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......RYR.......',
+  '.......DWD.......',
+  '......ODYDO......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......DWD.......',
+  '.......RYR.......',
+  '.......DYD.......',
+  '......ODYDO......',
+  '.......DYD.......',
+  '.......DWD.......',
+  '......OOYOO......',
+  '......OYWYO......',
+  '.....OYWWWYO.....',
+  '......OYWYO......',
+  '.......OYO.......',
+  '........O........',
+];
+const ABOVE_LEN = ABOVE_SPEAR.length * ABOVE_PX;   // tip to pommel, in the world
+
+function aboveArtLabel(name, x, y) {
+  if (!ABOVE_LABELS) return;
+  ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = 'source-over';
+  ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.fillStyle = ABOVE_SUN.w;
+  ctx.fillText('ART HOOK · ' + name, x, y);
+}
+
+/* The sprite, baked point down as it stands: 'lit' in its colours with a
+   dark edge so it reads on any floor, 'hot' the same shape white-hot (the
+   blow), 'ember' the same in red (where it has just been, falling). */
+const _aboveSpr = new Map();
+function aboveSprite(kind) {
+  let s = _aboveSpr.get(kind);
+  if (s) return s;
+  const rows = ABOVE_SPEAR, n = rows.length, w = rows[0].length;
+  const at = (x, y) => { const c = rows[y] && rows[y][x]; return c && c !== '.' ? c : ''; };
+  s = document.createElement('canvas'); s.width = w + 2; s.height = n + 2;
+  const g = s.getContext('2d');
+  for (let y = -1; y <= n; y++) for (let x = -1; x <= w; x++) {
+    const c = at(x, y);
+    if (c) g.fillStyle = kind === 'lit' ? ABOVE_SUN[c.toLowerCase()] : kind === 'hot' ? ABOVE_SUN.w : ABOVE_SUN.r;
+    else if (kind === 'lit' && (at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1))) g.fillStyle = ABOVE_SUN.k;
+    else continue;
+    g.fillRect(x + 1, n - y, 1, 1);      // the tip's row is the sprite's last
+  }
+  _aboveSpr.set(kind, s);
+  return s;
+}
+// the spear, its tip h up its own line from where the frame is, px to the pixel
+function aboveSpearAt(kind, h, alpha, px = ABOVE_PX) {
+  const s = aboveSprite(kind);
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(s, -s.width * px / 2, -h - (s.height - 1) * px, s.width * px, s.height * px);
+}
+// a number that is always the same for the same i: where a spark starts, how fast it climbs
+function aboveHash(i) { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+/* Fire off the spear, in the spear's own frame and on its grid: square
+   sparks that climb and cool. Most come off the head, the rest up the shaft
+   as far as `top`. */
+function aboveFlames(n, amt, top = ABOVE_LEN) {
+  const S = ABOVE_SUN, p = ABOVE_PX;
+  for (let i = 0; i < n; i++) {
+    const h1 = aboveHash(i), h2 = aboveHash(i + 50), h3 = aboveHash(i + 100);
+    const t = (uiTime * (0.9 + h1 * 1.3) + h2) % 1;
+    const head = i % 3 !== 0;
+    const x0 = head ? (h3 - 0.5) * 44 : (h3 - 0.5) * 12;
+    const y0 = head ? -16 - h1 * 50 : -72 - h2 * (ABOVE_LEN - 84);
+    if (-y0 > top) continue;
+    const x = x0 + Math.sin(uiTime * 5 + i) * 3 * t, y = y0 - t * (head ? 36 : 22);
+    ctx.fillStyle = t < 0.25 ? S.w : t < 0.5 ? S.y : t < 0.78 ? S.o : S.r;
+    ctx.globalAlpha = amt * (1 - t);
+    ctx.fillRect(Math.round(x / p) * p, Math.round(y / p) * p, p, p);
+  }
+}
+
+function aboveArtMark(m, u) {
+  const S = ABOVE_SUN, r = m.r, p = ABOVE_PX;
+  const late = clamp((u - 0.7) / 0.3, 0, 1), beat = late > 0 ? 0.5 + 0.5 * Math.sin(uiTime * 34) : 0;
+  ctx.translate(m.x, m.y);
+  // what is taken: daylight on the floor, and the hour filling it from the middle out to its edge
+  ctx.fillStyle = S.r; ctx.globalAlpha = 0.14 + 0.12 * u;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = S.o; ctx.globalAlpha = 0.2 + 0.25 * u + 0.15 * beat;
+  ctx.beginPath(); ctx.arc(0, 0, r * u, 0, TAU); ctx.fill();
+  // a sun's teeth, turned inward: nothing of the mark lies outside what is taken
+  const n = 12, tooth = 7 + 6 * u, half = TAU / n * 0.3, spin = uiTime * 0.5;
+  ctx.fillStyle = S.y; ctx.globalAlpha = 0.5 + 0.4 * u;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a = spin + i * TAU / n;
+    ctx.moveTo(Math.cos(a - half) * r, Math.sin(a - half) * r);
+    ctx.lineTo(Math.cos(a) * (r - tooth), Math.sin(a) * (r - tooth));
+    ctx.lineTo(Math.cos(a + half) * r, Math.sin(a + half) * r);
+  }
+  ctx.fill();
+  // the edge itself, dark under bright, white-hot on the beat at the last
+  ctx.globalAlpha = 0.7; ctx.strokeStyle = S.k; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1; ctx.strokeStyle = beat > 0.5 ? S.w : S.y; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  // where the point goes in: the head's ring, small
+  ctx.globalAlpha = 0.65 + 0.35 * u;
+  ctx.fillStyle = S.w;
+  for (const [x, y] of [[0, -2], [0, 2], [-2, 0], [2, 0]]) ctx.fillRect((x - 0.5) * p, (y - 0.5) * p, p, p);
+  ctx.fillStyle = S.y;
+  for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) ctx.fillRect((x - 0.5) * p, (y - 0.5) * p, p, p);
+  // and the hour closing on the edge from outside
+  ctx.globalAlpha = 0.25 + 0.6 * (1 - u); ctx.strokeStyle = S.o; ctx.lineWidth = 1.5;
+  ctx.setLineDash([7, 5]); ctx.lineDashOffset = -uiTime * 30;
+  ctx.beginPath(); ctx.arc(0, 0, r * (3 - 2 * u), 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  aboveArtLabel('aboveArtMark', 0, r + 16);
+}
+
+function aboveArtSky(m, u) {
+  const S = ABOVE_SUN;
+  /* Its line: from over the top of the frame down to the mark. It waits up
+     there for the first half of the warning, a glint and no more, and falls
+     through the second, faster all the way. */
+  const D = Math.max(60, m.y - (cam.y - H / (2 * camZoom))) + 24;
+  const drop = clamp((u - 0.5) / 0.5, 0, 1), h = D * (1 - drop * drop);
+  ctx.translate(m.x, m.y); ctx.rotate(ABOVE_TILT);
+  ctx.globalCompositeOperation = 'lighter';
+  // daylight down the line: a thread, then a shaft most of the mark wide
+  const wide = lerp(5, m.r * 0.8, u * u);
+  let g = ctx.createLinearGradient(-wide, 0, wide, 0);
+  g.addColorStop(0, rgba(S.r, 0)); g.addColorStop(0.5, rgba(S.o, 0.07 + 0.16 * u)); g.addColorStop(1, rgba(S.r, 0));
+  ctx.fillStyle = g; ctx.fillRect(-wide, -D - 400, wide * 2, D + 400);
+  ctx.strokeStyle = S.w; ctx.globalAlpha = 0.15 + 0.5 * u; ctx.lineWidth = 1 + 3 * u * u;
+  ctx.beginPath(); ctx.moveTo(0, -D - 400); ctx.lineTo(0, 0); ctx.stroke();
+  if (drop <= 0) {
+    // the glint at the top of the frame, quickening
+    const tw = 0.6 + 0.4 * Math.sin(uiTime * (10 + 30 * u)), sz = (9 + 26 * u) * tw, y = -D + 54;
+    ctx.fillStyle = S.w; ctx.globalAlpha = 0.55 + 0.45 * tw;
+    ctx.beginPath();
+    ctx.moveTo(0, y - sz); ctx.lineTo(sz * 0.14, y - sz * 0.14); ctx.lineTo(sz * 0.7, y); ctx.lineTo(sz * 0.14, y + sz * 0.14);
+    ctx.lineTo(0, y + sz * 1.6); ctx.lineTo(-sz * 0.14, y + sz * 0.14); ctx.lineTo(-sz * 0.7, y); ctx.lineTo(-sz * 0.14, y - sz * 0.14);
+    ctx.closePath(); ctx.fill();
+    drawGlow(0, y, sz * 1.5, S.o, 0.5);
+  } else {
+    // falling: the fire it drags, where it has just been, and then the spear itself
+    const tail = 60 + 220 * drop;
+    g = ctx.createLinearGradient(0, -h - ABOVE_LEN - tail, 0, -h - 20);
+    g.addColorStop(0, rgba(S.r, 0)); g.addColorStop(0.6, rgba(S.o, 0.35)); g.addColorStop(1, rgba(S.y, 0.75));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(-10, -h - 20); ctx.lineTo(10, -h - 20); ctx.lineTo(0, -h - ABOVE_LEN - tail); ctx.closePath(); ctx.fill();
+    for (let i = 3; i >= 1; i--) aboveSpearAt('ember', h + i * (10 + 34 * drop), 0.16 * (4 - i));
+    drawGlow(0, -h - 44, 54, S.o, 0.55);
+    ctx.globalCompositeOperation = 'source-over';
+    aboveSpearAt('lit', h, 1);
+    ctx.translate(0, -h);
+    ctx.globalCompositeOperation = 'lighter';
+    aboveFlames(26, 0.9);
+  }
+  aboveArtLabel('aboveArtSky', 0, -m.r - 24);
+}
+
+function aboveArtSpear(m, a) {
+  const S = ABOVE_SUN, r = m.r, k = 1 - a, took = m.took >= 0;
+  /* The blow is spent in the first third. On the screen a run ended on, the
+     clock has stopped at the blow itself: there it is held as a sun behind
+     the head, breathing, and the spear keeps its colours. */
+  const still = state === 'dead';
+  const blow = still ? 0.8 + 0.1 * Math.sin(uiTime * 2.2) : clamp(1 - a / 0.32, 0, 1), e = still ? 0 : 1 - blow;
+  ctx.translate(m.x, m.y);
+  ctx.globalCompositeOperation = 'lighter';
+  // the floor it struck, scorched to the edge of what it took
+  ctx.fillStyle = S.r; ctx.globalAlpha = 0.2 * k * k;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = S.o; ctx.globalAlpha = 0.6 * k; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  if (blow > 0) {
+    // the sun at the point
+    const sr = r * (0.9 + 0.6 * e);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, sr);
+    g.addColorStop(0, rgba(S.w, 0.95)); g.addColorStop(0.3, rgba(S.y, 0.7)); g.addColorStop(0.65, rgba(S.o, 0.3)); g.addColorStop(1, rgba(S.r, 0));
+    ctx.fillStyle = g; ctx.globalAlpha = blow * 0.85;
+    ctx.beginPath(); ctx.arc(0, 0, sr, 0, TAU); ctx.fill();
+    // and its rays going out, long and short by turns; more of them, and further, over a hull it took
+    const n = took ? 16 : 12, reach = took ? 2.6 : 1.8, spin = uiTime * 0.35, out = 1 - Math.pow(1 - e, 3);
+    for (let i = 0; i < n; i++) {
+      const ang = spin + i * TAU / n, long = i % 2 === 0;
+      const r0 = r * 0.5, r1 = r * (1.15 + reach * out) * (long ? 1 : 0.62), hw = TAU / n * (long ? 0.34 : 0.26);
+      ctx.fillStyle = long ? S.y : S.o; ctx.globalAlpha = blow * (long ? 0.8 : 0.6);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang - hw) * r0, Math.sin(ang - hw) * r0);
+      ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+      ctx.lineTo(Math.cos(ang + hw) * r0, Math.sin(ang + hw) * r0);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  // the ring of it going out
+  ctx.strokeStyle = S.y; ctx.globalAlpha = k * 0.6; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r * (1 + 1.6 * a), 0, TAU); ctx.stroke();
+  if (took) {
+    ctx.strokeStyle = S.r; ctx.globalAlpha = k * 0.5; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, r * (1 + 2.6 * a), 0, TAU); ctx.stroke();
+  }
+  // the spear, standing: it rings in the floor from the blow, and stills
+  ctx.rotate(ABOVE_TILT + (still ? 0 : Math.sin(a * 95) * Math.exp(-a * 9) * 0.05));
+  const burn = clamp((a - 0.72) / 0.28, 0, 1), left = ABOVE_LEN * (1 - burn);   // at the last it burns away, pommel first
+  drawGlow(0, -44, 50 + 6 * Math.sin(uiTime * 11), S.o, 0.55 * clamp(k * 4, 0, 1));
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  if (burn > 0) { ctx.beginPath(); ctx.rect(-40, -left, 80, left + ABOVE_PX * 2); ctx.clip(); }
+  aboveSpearAt('lit', 0, 1);
+  if (!still && a < 0.1) { ctx.globalCompositeOperation = 'lighter'; aboveSpearAt('hot', 0, 0.8 * (1 - a / 0.1)); }   // white-hot for the instant of it
+  ctx.restore();
+  ctx.globalCompositeOperation = 'lighter';
+  aboveFlames(30, clamp(k * 4, 0, 1), left);
+  if (burn > 0 && burn < 1) {
+    drawGlow(0, -left, 22, S.y, 0.9);
+    ctx.fillStyle = S.w; ctx.globalAlpha = 0.9;
+    ctx.fillRect(-ABOVE_PX * 2, -left - ABOVE_PX, ABOVE_PX * 4, ABOVE_PX);
+  }
+  aboveArtLabel('aboveArtSpear', 0, r + 16);
+}
+
+function aboveArtScreen(u) {
+  const S = ABOVE_SUN, beat = 0.7 + 0.3 * Math.sin(uiTime * 22), lit = 0.1 + 0.3 * u * beat;
+  ctx.globalCompositeOperation = 'lighter';
+  // daybreak along the top of the frame, harder as it comes
+  let g = ctx.createLinearGradient(0, 0, 0, H * 0.26);
+  g.addColorStop(0, rgba(S.o, lit)); g.addColorStop(0.35, rgba(S.r, lit * 0.45)); g.addColorStop(1, rgba(S.d, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.26);
+  // shafts of it, leaning as the spear leans
+  for (let i = 0; i < 7; i++) {
+    const x = W * (i + 0.5 + 0.25 * Math.sin(uiTime * 0.7 + i * 2.1)) / 7;
+    const w = 14 + 22 * aboveHash(i), len = H * (0.2 + 0.25 * aboveHash(i + 9)) * (0.6 + 0.4 * u), lean = -len * Math.tan(ABOVE_TILT);
+    g = ctx.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, rgba(S.y, 0.05 + 0.12 * u)); g.addColorStop(1, rgba(S.o, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(x - w / 2, 0); ctx.lineTo(x + w / 2, 0); ctx.lineTo(x + w + lean, len); ctx.lineTo(x - w + lean, len); ctx.closePath(); ctx.fill();
+  }
+  // motes of it coming down, square as the spear's own
+  for (let i = 0; i < 18; i++) {
+    const t = (uiTime * (0.35 + 0.5 * aboveHash(i + 20)) + aboveHash(i + 40)) % 1;
+    ctx.fillStyle = i % 3 ? S.y : S.w; ctx.globalAlpha = (0.25 + 0.6 * u) * (1 - t);
+    ctx.fillRect(Math.round(W * aboveHash(i + 60) / 3) * 3, Math.round(t * H * 0.22 / 3) * 3, 3, 3);
+  }
+  // and the edge it comes over
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = rgba(S.w, 0.3 + 0.6 * u * beat); ctx.fillRect(0, 0, W, 2);
+  ctx.fillStyle = rgba(S.y, 0.2 + 0.4 * u * beat); ctx.fillRect(0, 2, W, 2);
+  aboveArtLabel('aboveArtScreen', W / 2, 18);
+}
+
+function aboveArtDead(t) {
+  const S = ABOVE_SUN, cx = W / 2, y = H - 30, line = 'TAKEN FROM ABOVE';
+  // the light it came out of, still on the frame
+  ctx.globalCompositeOperation = 'lighter';
+  let g = ctx.createLinearGradient(0, 0, 0, H * 0.2);
+  g.addColorStop(0, rgba(S.o, 0.12 + 0.03 * Math.sin(uiTime * 1.3))); g.addColorStop(1, rgba(S.d, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.2);
+  ctx.globalCompositeOperation = 'source-over';
+  // the line, in the spear's light
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  const half = ctx.measureText(line).width / 2, lead = 1.5;   // the spacing trails the last letter too: half of it back
+  g = ctx.createLinearGradient(0, y - 7, 0, y + 7);
+  g.addColorStop(0, S.w); g.addColorStop(0.55, S.y); g.addColorStop(1, S.o);
+  ctx.shadowColor = S.r; ctx.shadowBlur = 12;
+  ctx.fillStyle = g; ctx.fillText(line, cx + lead, y);
+  ctx.shadowBlur = 0;
+  // and a spear laid either side of it, pixel for pixel, points to the words
+  for (const d of [-1, 1]) {
+    ctx.save();
+    ctx.translate(cx + d * (half + 16), y); ctx.rotate(d * Math.PI / 2);
+    aboveSpearAt('lit', 0, 1, 1);
+    ctx.restore();
+  }
+  aboveArtLabel('aboveArtDead', cx, H - 12);
+}
+
+function aboveMarkFx(m) {
+  // aimed: a bright pair, rising, and a ring drawn in to the mark
+  Audio_.tone(1180, 0.24, 'sine', 0.1, 1760);
+  Audio_.tone(1770, 0.3, 'triangle', 0.05, 2640, 0.07);
+  Audio_.noise(0.3, 0.05, 6000, 1800, 2);
+  ringFx(m.x, m.y, m.r * 2.2, m.r, ABOVE_SUN.y, 0.3, 2);
+}
+function aboveLandFx(m) {
+  const S = ABOVE_SUN, v = onScreen(m.x, m.y, m.r);
+  shake(0.9 * v);
+  if (v > 0) drawFlashT = Math.max(drawFlashT, 0.14 * v);
+  // white-hot first and fastest, then the flame, then the embers
+  ringFx(m.x, m.y, 6, m.r * 2.4, S.w, 0.5, 5);
+  ringFx(m.x, m.y, 6, m.r * 3.4, S.o, 0.75, 4);
+  ringFx(m.x, m.y, 6, m.r * 4.6, S.r, 1.0, 3);
+  burst(m.x, m.y, 30, S.y, 460, 3.4, 0.7);
+  burst(m.x, m.y, 22, S.o, 300, 3.8, 0.95);
+  burst(m.x, m.y, 14, S.d, 170, 4.4, 1.2);
+  burst(m.x, m.y - 30, 16, S.w, 380, 2.6, 0.6, 0.9, ABOVE_TILT - Math.PI / 2);   // and back up the shaft
+  Audio_.boom();
+  Audio_.tone(2400, 0.5, 'triangle', 0.09, 620);   // the ring of it in the floor
+  Audio_.noise(0.7, 0.12, 4200, 300, 2, 0.04);     // and the fire catching
+}
+function aboveTakenFx(p, m) {
+  const S = ABOVE_SUN;
+  ringFx(p.x, p.y, 8, 260, '#ffffff', 0.7, 6);
+  ringFx(p.x, p.y, 8, 180, S.y, 0.9, 4);
+  ringFx(p.x, p.y, 8, 120, S.r, 1.1, 3);
+  burst(p.x, p.y, 26, S.w, 360, 3, 0.8);
+  burst(p.x, p.y, 18, S.r, 200, 4, 1.1);
+  Audio_.tone(520, 0.7, 'sawtooth', 0.1, 65);
+}
+/* end of FROM ABOVE art hooks */
 
 /* ===========================================================================
    OUTSIDE PILOTS
@@ -76977,6 +78975,7 @@ const SNAP_LOCAL = new Set([
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
   'mpHelloKept',                          // the other player's hello, read again once their outside pilot is here
   'oaFrame', 'opoRecordList',             // ONE POINT OH: the art's frame, and the record, built from the CHANGELOG
+  'aaFrame',                              // ACHIEVEMENTS: its art's frame
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
@@ -76994,7 +78993,9 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
-  'OA_TAGGED', 'OA_FAILED']);             // ONE POINT OH's art: what it tagged, and which hook has thrown
+  'OA_TAGGED', 'OA_FAILED',               // ONE POINT OH's art: what it tagged, and which hook has thrown
+  '_aboveSpr',                            // FROM ABOVE: the spear, baked
+  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
@@ -77470,6 +79471,7 @@ function lsHash() {
   n(enemies.length);
   for (const e of enemies) { n(e.id); n(e.x); n(e.y); n(e.hp); }
   n(bullets.length); n(ebullets.length); n(gems.length); n(drops.length);
+  n(aboveNext); n(aboveMarks.length);    // and what is coming for the run (FROM ABOVE)
   if (PVP) PVP.hash(n);                  // PvP mode: the match itself (rounds.js)
   return h;
 }
@@ -77626,6 +79628,7 @@ function runPack() {
   const o = {};
   for (const k of RUN_FLAGS) o[k] = RUN[k];
   o.hlLive = !!RUN.hlLive; o.medals = (RUN.medals || []).slice(); o.chal = (RUN.chal || []).slice();
+  o.above = !!RUN.above;
   o.codex = {};
   for (const k of ['e', 'u', 'm', 'b', 'z']) o.codex[k] = [...(RUN.codex ? RUN.codex[k] : [])];
   return o;
@@ -79653,8 +81656,9 @@ function chalEnd(won) {
 function chalQuit() { Chal.on = null; Chal.won = false; Chal.reward = null; }
 
 /* ------------------------------- a pass -----------------------------------
-   WELCOME BACK's challenge pass clears the selected challenge outright,
-   locked or not, exactly as beating it does: into chal, so its reward joins
+   A challenge pass (WELCOME BACK's, or given by hand: PASS_PERKS) clears the
+   selected challenge outright, locked or not, exactly as beating it does:
+   into chal, so its reward joins
    the pool and it counts toward the tiers above it. Two presses, so a stray
    key cannot spend one — the first arms it for CHAL_PASS_ARM_MS, the second
    spends it. */

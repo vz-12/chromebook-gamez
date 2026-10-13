@@ -178,6 +178,7 @@ const g = boot({ mode: 'practice', pilot: 'hacker', me: ME });
   ok(r('P.charId') === 'hacker', 'the pilot the lobby chose', r('P.charId'));
   ok(r('P.awake') === 1, 'awake, as the account is', r('P.awake'));
   ok(r('Save.profile.name') === 'Duelist', 'the account\'s name', r('Save.profile.name'));
+  ok(r('achScan(true) === 0 && !Ach.cards.length && (drawMenuAch(), achList().length > 0)'), 'no achievements on PvP\'s page (ACHIEVEMENTS)');
   ok(r('JSON.stringify(Save.profile.chal)') === JSON.stringify(ME.unlocks.chal), 'its cleared challenges, so its reward upgrades are in the pool');
   ok(r('charOpen(CHARS.find(c => c.id === "melee"))') === false, 'a pilot the account does not have is closed');
   ok(r('charOpen(CHARS.find(c => c.id === "ember"))') === true, 'one it has is open');

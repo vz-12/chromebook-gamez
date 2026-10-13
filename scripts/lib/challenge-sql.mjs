@@ -39,6 +39,21 @@ export const dateSql = (pilot, due) =>
    vault entry of its own, JSON { t, x, as, named }, or 'none'. */
 export const announceSql = (pilot, words) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET announce = ${words == null ? 'NULL' : q(checkWords(words))} WHERE pilot = ${q(checkPilot(pilot))};`;
+/* Its fight, decided by hand (FROM ABOVE: the hunt ends with it): 'lost' or
+   'won', as it went for the account it was sent to, where the referee's
+   verdict did not say (a walk-out decides nothing by itself); or 'none',
+   to take a decision back, the referee's own included. */
+export function checkOutcome(s) {
+  if (s !== 'lost' && s !== 'won' && s !== 'none') throw new Error(`"${s || ''}" is not an outcome: lost, won or none`);
+  return s;
+}
+export const decideSql = (pilot, outcome, at = Date.now()) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET ` +
+  (checkOutcome(outcome) === 'none' ? 'decided = NULL, outcome = NULL' : `decided = ${Math.round(at)}, outcome = ${q(outcome)}`) +
+  ` WHERE pilot = ${q(checkPilot(pilot))};`;
+// the hunt held, by hand, or let go again (FROM ABOVE): the challenge itself is untouched
+export const calmSql = (pilot, on, at = Date.now()) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET calm = ${on ? Math.round(at) : 'NULL'} WHERE pilot = ${q(checkPilot(pilot))};`;
 /* The columns the table has, and the ones a table made before them still
    needs (PvP's Worker adds them on its own first use; the tool may get
    there first). */
@@ -52,5 +67,6 @@ export const inVaultSql = ids => `SELECT id FROM vault_heads WHERE id IN (${ids.
 export const challengesSql = () =>
   `${CHALLENGE_SCHEMA}\nSELECT c.pilot, c.words, ${day('c.armed')} AS armed, ${day('c.due')} AS due, ${day('c.tripped')} AS tripped, ` +
   `COALESCE(r.name, '-') AS reached_by, COALESCE(c.season, '-') AS season, COALESCE(t.name, '-') AS target, ${day('c.seen')} AS seen, ` +
-  `COALESCE(c.announce, '-') AS announce, COALESCE(c.match, '-') AS match, ${day('c.started')} AS started, ${day('c.ended')} AS ended ` +
+  `COALESCE(c.announce, '-') AS announce, COALESCE(c.match, '-') AS match, ${day('c.started')} AS started, ${day('c.ended')} AS ended, ` +
+  `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm ` +
   `FROM pvp_challenges c LEFT JOIN accounts r ON r.id = c.reached_by LEFT JOIN accounts t ON t.id = c.target ORDER BY c.armed;`;
