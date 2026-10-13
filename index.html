@@ -72033,9 +72033,9 @@ const Season = {
    save; it never rolls simRand, and Ach is this machine's own
    (SNAP_LOCAL_OBJS). PvP's page has none of it.
 
-   The art is blank hooks (ACH_ART, below; ACHIEVEMENTS-HOOKS.md). Until they
-   are drawn, ACH_PLAIN keeps a plain panel, rows, meters and card under them
-   so the line can be used.
+   The art is ACH_ART (below; ACHIEVEMENTS-HOOKS.md): osu!lazer's medals.
+   ACH_PLAIN, off now, would draw a plain panel, rows, meters and card under
+   it.
    ========================================================================= */
 // the acts, in order: what the panel groups the line under
 const ACH_ACTS = [
@@ -72680,7 +72680,8 @@ function achHot() {
 
 /* ===========================================================================
    ACHIEVEMENTS — art hooks
-   Every visual piece of the line is one of these, and every one is blank.
+   Every visual piece of the line is one of these, and all of them are drawn
+   (13 Oct), after osu!lazer's medals: THE LOOK, below, says how.
    Replace the block whole, or any one entry (ACHIEVEMENTS-HOOKS.md says
    where each is called and what it is handed). Add ?hooks=1 to the address
    to tag each piece with its hook's name.
@@ -72694,8 +72695,8 @@ function achHot() {
        SNAP_LOCAL / SNAP_LOCAL_OBJS (RUN SNAPSHOTS).
      · ACH_PLAIN. While true the layout draws a plain panel, plain rows, a
        plain badge (★ done, ☆ next, ? later), a plain meter, door and card
-       under the hooks, and a plain chime on an earn. Set it false once the
-       art draws those itself; the text is always the layout's.
+       under the hooks, and a plain chime on an earn. False now the art
+       draws those itself; the text is always the layout's.
 
    WHAT THEY ARE HANDED (s, for a goal, is its standing: { done, next,
    locked, fresh, day, prog, sel, hot, big }; `a` is its ACHIEVEMENTS entry,
@@ -72719,7 +72720,7 @@ function achHot() {
      sound  (audio, a)           a goal earned, as its card comes up. audio is
                                  Audio_ (tone, noise). Sound only.
    ========================================================================= */
-const ACH_PLAIN = true;
+const ACH_PLAIN = false;            // the art draws every piece (THE LOOK, below)
 const ACH_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') === '1'; } catch (e) { return false; } })();
 const AA_TAGGED = new Set();             // hooks already named this frame
 const AA_FAILED = new Set();             // hooks that have thrown, named once
@@ -72752,27 +72753,622 @@ function aaTag(name, x, y) {
   ctx.restore();
 }
 
+/* THE LOOK (13 Oct): osu!lazer's medals. Each goal is a medal on lazer's
+   splash disc: deep teal with its triangles drifting up through it, a white
+   rim once it is earned, a glow in its own colour round it, and a flat white
+   emblem that is its own. The next goal is the next note to hit: an approach
+   circle closes on it, over and over, and the line on to the rest of it runs
+   as follow points. The panel, the rows and the run report's goal are
+   lazer's slate (its overlays at the blue hue), rounded; the door leans as
+   lazer's buttons do. The card is the medal splash in small: the flash it
+   comes in on, the medal's elastic pop, the strip of light out of it and its
+   particles. Its sound is a whoosh up into a chime.
+
+   Nothing here is kept but AA_ST (SNAP_LOCAL_OBJS): the triangles, the spin
+   and the particles are where a hash and uiTime put them. */
+const AA_LZ = {
+  disc: '#05262f',                        // the medal splash's disc
+  blue: '#66ccff', gold: '#fde68a',
+  // an overlay's slate at lazer's blue hue (OverlayColourProvider, Background2..6)
+  bg2: '#454f54', bg3: '#394246', bg4: '#2e3538', bg5: '#22282a', bg6: '#171a1c'
+};
+// a goal's own colour: its boss's, its pilot's, or its act's
+const AA_OWN = { overdrive: '#fb923c', hacker: '#a3e635', superuser: '#fcd34d', vagrant: '#a5b4fc',
+                 ronin: '#f87171', origin: '#67e8f9', opodoor: '#67e8f9' };
+const aaOwn = a => AA_OWN[a.id] || (BOSSES[a.id] && BOSSES[a.id].col) || achAct(a).col;
+const AA_ST = { bigId: null, bigT: -1e9 };   // the large medal beside the list: which, and since when (its pop)
+
+// a fixed hash, 0..1: the art's randomness, the same every frame
+const aaHash = n => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const aaSeed = id => { let h = 7; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 9973; return h; };
+function aaRGB(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+// t of the way from a to b: a hex, or rgba with `al`
+function aaMix(a, b, t, al) {
+  const A = aaRGB(a), B = aaRGB(b), c = i => Math.round(A[i] + (B[i] - A[i]) * t);
+  return al === undefined ? '#' + ((1 << 24) | (c(0) << 16) | (c(1) << 8) | c(2)).toString(16).slice(1)
+                          : 'rgba(' + c(0) + ',' + c(1) + ',' + c(2) + ',' + al + ')';
+}
+// osu!framework's OutElastic and OutQuint
+const aaElastic = t => t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t - 0.075) * TAU / 0.3) + 1;
+const aaQuint = t => 1 - Math.pow(1 - clamp(t, 0, 1), 5);
+
+// lazer's edge glow: the game's glow sprite, added, under whatever alpha the caller draws at
+function aaGlow(x, y, r, col, a) {
+  if (r <= 0 || a <= 0) return;
+  const g0 = ctx.globalAlpha, op = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = g0 * Math.min(1, a);
+  ctx.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = g0;
+  ctx.globalCompositeOperation = op;
+}
+
+/* lazer's Triangles: equilateral, point up, drifting up and round again from
+   the bottom, each a shade between dark and light, about N(0.5, 0.16) in
+   scale, the small ones slower. `size` is about an average one's width.
+   Drawn across the whole rect: clip first. */
+function aaTriangles(x, y, w, h, dark, light, size, speed, seed, al) {
+  if (w <= 0 || h <= 0) return;
+  const A = aaRGB(dark), B = aaRGB(light), t = uiTime;
+  const n = clamp(Math.round(w * h / (size * size) * 3), 3, 64);
+  for (let i = 0; i < n; i++) {
+    const k = seed * 97.31 + i * 5.17;
+    const sc = clamp(0.5 + (aaHash(k) + aaHash(k + 1) - 1) * 0.4, 0.1, 1);
+    const tw = size * 2 * sc, th = tw * 0.866, span = h + th;
+    const py = y + h - ((aaHash(k + 2) * span + t * speed * Math.max(0.5, sc)) % span);
+    const px = x + aaHash(k + 3) * w, m = aaHash(k + 4);
+    ctx.fillStyle = 'rgba(' + Math.round(A[0] + (B[0] - A[0]) * m) + ',' + Math.round(A[1] + (B[1] - A[1]) * m) + ',' +
+                    Math.round(A[2] + (B[2] - A[2]) * m) + ',' + al + ')';
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tw / 2, py + th); ctx.lineTo(px - tw / 2, py + th); ctx.closePath();
+    ctx.fill();
+  }
+}
+// the splash's disc-spin: a sunburst, turning, fading to its rim
+function aaSpin(cx, cy, r, ang, col, a) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, rgba(col, a)); g.addColorStop(0.5, rgba(col, a * 0.6)); g.addColorStop(1, rgba(col, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  for (let i = 0; i < 18; i++) {
+    const q = ang + i * TAU / 18, d = TAU / 18 * 0.28;
+    ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, q - d, q + d); ctx.closePath();
+  }
+  ctx.fill();
+}
+/* The splash's particles: one born every 1/40 s from t0 (for `span` seconds,
+   or for good), flying `dist` out from the rim in a direction of its own and
+   fading as it goes, over half a second. */
+function aaSparks(cx, cy, r0, dist, col, a, t0, span) {
+  const life = 0.5, every = 1 / 40, t = uiTime - t0;
+  if (t < 0) return;
+  const dot = clamp(r0 * 0.02, 1, 2.2);
+  for (let b = Math.floor(Math.min(t, span === undefined ? t : span) / every); b >= 0; b--) {
+    const age = t - b * every;
+    if (age > life) break;
+    const k = age / life, q = aaHash(b * 3.71 + t0 * 0.37) * TAU, d = r0 + dist * k;
+    const px = cx + Math.cos(q) * d, py = cy + Math.sin(q) * d;
+    aaGlow(px, py, dot * 5, col, (1 - k) * a * 0.8);
+    ctx.fillStyle = 'rgba(255,255,255,' + ((1 - k) * a).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(px, py, dot, 0, TAU); ctx.fill();
+  }
+}
+// lazer's buttons lean (its SHEAR, 0.2): a parallelogram with its corners rounded
+function aaShear(x, y, w, h, sh, rr) {
+  const p = [[x + sh, y], [x + w, y], [x + w - sh, y + h], [x, y + h]];
+  ctx.beginPath();
+  ctx.moveTo(x + sh / 2, y + h / 2);
+  for (let i = 0; i < 4; i++) { const q = p[i], n = p[(i + 1) % 4]; ctx.arcTo(q[0], q[1], n[0], n[1], rr); }
+  ctx.closePath();
+}
+
+/* A goal's emblem: flat and white, as lazer's icons are, in a unit u about
+   half the disc's radius. `bg` is the disc under it (what is cut out of it is
+   drawn in it), `acc` the goal's own colour (what is lit in it). */
+function aaEmblem(id, cx, cy, u, ink, bg, acc) {
+  let rot = 0;
+  const X = (x, y) => cx + (x * Math.cos(rot) - y * Math.sin(rot)) * u;
+  const Y = (x, y) => cy + (x * Math.sin(rot) + y * Math.cos(rot)) * u;
+  const mv = (x, y) => ctx.moveTo(X(x, y), Y(x, y)), ln = (x, y) => ctx.lineTo(X(x, y), Y(x, y));
+  const qd = (x0, y0, x, y) => ctx.quadraticCurveTo(X(x0, y0), Y(x0, y0), X(x, y), Y(x, y));
+  const P = pts => { pts.forEach((p, i) => (i ? ln : mv)(p[0], p[1])); ctx.closePath(); };
+  const O = (x, y, r) => { ctx.moveTo(X(x, y) + r * u, Y(x, y)); ctx.arc(X(x, y), Y(x, y), r * u, 0, TAU); };
+  const Q = (x, y, w, h, r) => {
+    const c = [[x + w, y], [x + w, y + h], [x, y + h], [x, y], [x + w, y]];
+    mv(x + r, y);
+    for (let i = 0; i < 4; i++) ctx.arcTo(X(c[i][0], c[i][1]), Y(c[i][0], c[i][1]), X(c[i + 1][0], c[i + 1][1]), Y(c[i + 1][0], c[i + 1][1]), r * u);
+    ctx.closePath();
+  };
+  const F = (c, rule) => { ctx.fillStyle = c || ink; ctx.fill(rule || 'nonzero'); ctx.beginPath(); };
+  const S = (w, c, dash) => {
+    ctx.strokeStyle = c || ink; ctx.lineWidth = w * u; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (dash) ctx.setLineDash(dash.map(v => v * u));
+    ctx.stroke();
+    if (dash) ctx.setLineDash([]);
+    ctx.beginPath();
+  };
+  const L = (pts, w, c, dash) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ln : mv)(p[0], p[1])); S(w, c, dash); };
+  // in the disc's colour, through what is drawn, with no glow
+  const bare = f => { const b = ctx.shadowBlur; ctx.shadowBlur = 0; f(); ctx.shadowBlur = b; };
+  const cut = (pts, w) => bare(() => L(pts, w, bg));
+  const star = (x, y, ro, ri, n) => {
+    const pts = [];
+    for (let i = 0; i < n * 2; i++) { const q = -Math.PI / 2 + i * Math.PI / n, d = i % 2 ? ri : ro; pts.push([x + Math.cos(q) * d, y + Math.sin(q) * d]); }
+    P(pts);
+  };
+  ctx.beginPath();
+  switch (id) {
+    case 'flight':          // the ship, and its burn
+      P([[0, -1], [0.68, 0.6], [0, 0.28], [-0.68, 0.6]]); F();
+      P([[-0.17, 0.5], [0.17, 0.5], [0, 0.98]]); F(acc);
+      break;
+    case 'warden':          // the first wall: a gate, barred
+      mv(-0.74, 0.92); ln(-0.74, -0.16); ctx.arc(X(0, -0.16), Y(0, -0.16), 0.74 * u, Math.PI, 0); ln(0.74, 0.92); S(0.2);
+      for (const x of [-0.37, 0, 0.37]) {
+        const top = -0.12 - Math.sqrt(0.74 * 0.74 - x * x);
+        P([[x - 0.07, top], [x + 0.07, top], [x + 0.07, 0.62], [x, 0.9], [x - 0.07, 0.62]]);
+      }
+      Q(-0.74, -0.4, 1.48, 0.11, 0.03); Q(-0.74, 0.16, 1.48, 0.11, 0.03); F();
+      break;
+    case 'forgeheart':      // an anvil, struck
+      P([[-1, -0.3], [0.95, -0.3], [0.95, 0.02], [0.42, 0.04], [0.26, 0.4], [0.56, 0.66], [0.56, 0.86], [-0.56, 0.86],
+         [-0.56, 0.66], [-0.26, 0.4], [-0.42, 0.04], [-0.62, 0.02], [-1, -0.16]]); F();
+      star(0.22, -0.72, 0.32, 0.09, 4); O(-0.32, -0.66, 0.07); O(0.66, -0.94, 0.06); F(acc);
+      break;
+    case 'broodmother':     // a clutch
+      O(0, 0, 0.42);
+      for (let i = 0; i < 7; i++) { const q = -Math.PI / 2 + i * TAU / 7; O(Math.cos(q) * 0.8, Math.sin(q) * 0.8, 0.17); }
+      F();
+      for (let i = 0; i < 7; i++) { const q = -Math.PI / 2 + (i + 0.5) * TAU / 7; O(Math.cos(q) * 0.66, Math.sin(q) * 0.66, 0.07); }
+      F(acc);
+      break;
+    case 'archivist':       // a file, its label blank
+      P([[-1, -0.66], [-0.36, -0.66], [-0.2, -0.46], [1, -0.46], [1, 0.76], [-1, 0.76]]);
+      Q(-0.34, 0.02, 0.68, 0.22, 0.06); F(ink, 'evenodd');
+      Q(-0.34, 0.02, 0.68, 0.22, 0.06); F(acc);
+      break;
+    case 'nullcore':        // the schedule, nulled
+      O(0, 0, 0.94); O(0, 0, 0.74); F(ink, 'evenodd');
+      Q(-0.06, -0.56, 0.12, 0.62, 0.06); Q(-0.06, -0.06, 0.44, 0.12, 0.06); O(0, 0, 0.12); F();
+      cut([[-0.86, 0.86], [0.86, -0.86]], 0.34);
+      L([[-0.86, 0.86], [0.86, -0.86]], 0.15, acc);
+      break;
+    case 'unwritten':       // the quill, and what it wrote
+      mv(-0.8, 0.9); qd(-0.3, -0.12, 0.9, -0.96); qd(0.46, 0.2, -0.8, 0.9); ctx.closePath(); F();
+      cut([[-0.6, 0.7], [0.62, -0.68]], 0.06);
+      L([[-0.4, 0.94], [-0.12, 0.84], [0.16, 0.94], [0.44, 0.84], [0.74, 0.94]], 0.09, acc);
+      break;
+    case 'amalgam':         // made of favourites: three shapes, through each other
+      O(-0.4, 0.3, 0.52); Q(-0.06, -0.14, 0.98, 0.98, 0.1); P([[-0.3, -1], [0.32, 0.02], [-0.92, 0.02]]);
+      F(ink, 'evenodd');
+      break;
+    case 'clears':          // round, twice
+      for (const [a0, a1] of [[-2.9, -0.5], [0.24, 2.64]]) {
+        ctx.beginPath(); ctx.arc(cx, cy, 0.66 * u, a0, a1); S(0.2);
+        const px = Math.cos(a1) * 0.66, py = Math.sin(a1) * 0.66, dx = -Math.sin(a1), dy = Math.cos(a1);
+        const nx = Math.cos(a1), ny = Math.sin(a1);
+        P([[px + dx * 0.36, py + dy * 0.36], [px + nx * 0.28, py + ny * 0.28], [px - nx * 0.28, py - ny * 0.28]]); F();
+      }
+      break;
+    case 'curator':         // a piece short
+      Q(-0.92, -0.92, 0.84, 0.84, 0.1); Q(0.08, -0.92, 0.84, 0.84, 0.1); Q(-0.92, 0.08, 0.84, 0.84, 0.1); F();
+      Q(0.14, 0.14, 0.72, 0.72, 0.08); S(0.08, acc, [0.14, 0.12]);
+      break;
+    case 'theother':        // the triangle and its reflection
+      P([[-0.5, -0.8], [-0.06, 0.64], [-0.94, 0.64]]); F();
+      P([[0.5, -0.8], [0.94, 0.64], [0.06, 0.64]]); S(0.1, acc);
+      L([[0, -0.98], [0, 0.98]], 0.05, ink, [0.1, 0.16]);
+      break;
+    case 'infection':       // something else, in it
+      for (let i = 0; i < 8; i++) {
+        const q = 0.2 + i * TAU / 8;
+        L([[Math.cos(q) * 0.46, Math.sin(q) * 0.46], [Math.cos(q) * 0.78, Math.sin(q) * 0.78]], 0.11);
+      }
+      O(0, 0, 0.5); O(-0.16, -0.12, 0.13); O(0.18, 0.1, 0.1); O(-0.04, 0.27, 0.07); F(ink, 'evenodd');
+      for (let i = 0; i < 8; i++) { const q = 0.2 + i * TAU / 8; O(Math.cos(q) * 0.86, Math.sin(q) * 0.86, 0.13); }
+      F(acc);
+      break;
+    case 'root':            // the tree, to the bottom, and the bottom deleted
+      L([[0, -0.66], [-0.56, 0.04]], 0.12); L([[0, -0.66], [0.56, 0.04]], 0.12);
+      L([[-0.56, 0.04], [0, 0.72]], 0.08, ink, [0.08, 0.14]); L([[0.56, 0.04], [0, 0.72]], 0.08, ink, [0.08, 0.14]);
+      O(0, -0.66, 0.24); O(-0.56, 0.04, 0.19); O(0.56, 0.04, 0.19); F();
+      cut([[-0.24, 0.5], [0.24, 0.98]], 0.3); cut([[0.24, 0.5], [-0.24, 0.98]], 0.3);
+      L([[-0.2, 0.54], [0.2, 0.94]], 0.13, acc); L([[0.2, 0.54], [-0.2, 0.94]], 0.13, acc);
+      break;
+    case 'founder':         // who built it: his halberd
+      rot = Math.PI / 4;
+      P([[-0.055, -0.92], [0.055, -0.92], [0.055, 1.22], [-0.055, 1.22]]);
+      P([[0, -1.32], [0.09, -0.94], [-0.09, -0.94]]);
+      mv(0.05, -0.9); ln(0.44, -1.04); qd(0.74, -0.66, 0.44, -0.28); ln(0.05, -0.44); ctx.closePath();
+      P([[-0.05, -0.82], [-0.42, -0.7], [-0.05, -0.58]]);
+      F();
+      O(0, 1.22, 0.09); F(acc);
+      break;
+    case 'tribunal':        // the scales
+      Q(-0.06, -0.72, 0.12, 1.42, 0.03); Q(-0.5, 0.66, 1, 0.16, 0.06); Q(-0.86, -0.62, 1.72, 0.1, 0.05); F();
+      for (const sx of [-1, 1]) {
+        L([[sx * 0.78, -0.56], [sx * 1.0, 0.08]], 0.045); L([[sx * 0.78, -0.56], [sx * 0.4, 0.08]], 0.045);
+        mv(sx * 0.4, 0.08); ctx.arc(X(sx * 0.7, 0.08), Y(sx * 0.7, 0.08), 0.3 * u, 0, Math.PI); ctx.closePath(); F();
+      }
+      O(0, -0.8, 0.13); F(acc);
+      break;
+    case 'outsider': {      // the hole in the wall, and the light through it
+      const hole = [[-0.06, -0.52], [0.24, -0.36], [0.5, -0.42], [0.42, -0.06], [0.58, 0.22], [0.22, 0.3],
+                    [0.06, 0.58], [-0.18, 0.22], [-0.5, 0.12], [-0.32, -0.14]];
+      ctx.save();
+      O(0, 0, 1); ctx.clip(); ctx.beginPath();
+      for (let rw = 0; rw < 4; rw++) {
+        const y = -0.96 + rw * 0.5;
+        for (let x = -1.5 + (rw % 2) * 0.5; x < 1; x += 1) Q(x + 0.04, y, 0.92, 0.42, 0.06);
+      }
+      F();
+      bare(() => { P(hole); F(bg); });
+      P(hole.map(p => [0.04 + (p[0] - 0.04) * 0.62, 0.04 + (p[1] - 0.04) * 0.62])); F(acc);
+      ctx.restore();
+      ctx.beginPath();
+      break;
+    }
+    case 'overdrive': {     // EMBER's flame
+      const core = () => { mv(0, 0.06); qd(0.34, 0.36, 0.24, 0.62); qd(0.12, 0.82, 0, 0.82); qd(-0.24, 0.82, -0.24, 0.56); qd(-0.22, 0.3, 0, 0.06); ctx.closePath(); };
+      mv(0.06, -1); qd(0.78, -0.36, 0.64, 0.3); qd(0.52, 0.96, 0, 0.96); qd(-0.52, 0.96, -0.64, 0.3); qd(-0.7, -0.14, -0.3, -0.44);
+      qd(-0.3, -0.06, -0.08, 0.02); qd(-0.22, -0.56, 0.06, -1); ctx.closePath();
+      core(); F(ink, 'evenodd');
+      core(); F(acc);
+      break;
+    }
+    case 'hacker':          // a terminal, prompting
+      Q(-1, -0.78, 2, 1.56, 0.16); Q(-0.86, -0.5, 1.72, 1.14, 0.08); F(ink, 'evenodd');
+      bare(() => { O(-0.8, -0.64, 0.06); O(-0.62, -0.64, 0.06); O(-0.44, -0.64, 0.06); F(bg); });
+      P([[-0.62, -0.3], [-0.2, 0.02], [-0.62, 0.34], [-0.62, 0.17], [-0.42, 0.02], [-0.62, -0.13]]); F(acc);
+      if ((uiTime * 2) % 1 < 0.6) { Q(-0.12, 0.22, 0.5, 0.12, 0.03); F(acc); }
+      break;
+    case 'superuser':       // root's crown, its # cut in it
+      P([[-0.9, 0.44], [-0.96, -0.48], [-0.46, -0.04], [0, -0.72], [0.46, -0.04], [0.96, -0.48], [0.9, 0.44]]);
+      Q(-0.9, 0.56, 1.8, 0.22, 0.06); F();
+      O(-0.96, -0.6, 0.11); O(0, -0.86, 0.12); O(0.96, -0.6, 0.11); F(acc);
+      cut([[-0.14, -0.12], [-0.2, 0.36]], 0.07); cut([[0.2, -0.12], [0.14, 0.36]], 0.07);
+      cut([[-0.36, 0.02], [0.36, 0.02]], 0.07); cut([[-0.38, 0.22], [0.34, 0.22]], 0.07);
+      break;
+    case 'vagrant':         // the blade
+      rot = Math.PI / 4;
+      P([[0, -1.3], [0.11, -1.1], [0.11, 0.3], [-0.11, 0.3], [-0.11, -1.1]]); Q(-0.065, 0.42, 0.13, 0.5, 0.03); F();
+      cut([[0, -1.0], [0, 0.2]], 0.04);
+      Q(-0.42, 0.3, 0.84, 0.12, 0.06); O(0, 1.0, 0.11); F(acc);
+      break;
+    case 'ronin':           // the circle, cut
+      ctx.beginPath(); ctx.arc(cx, cy, 0.7 * u, 0.8, TAU - 0.3); S(0.24);
+      cut([[-1, 0.62], [1, -0.62]], 0.3);
+      L([[-1, 0.62], [1, -0.62]], 0.1, acc);
+      break;
+    case 'opodoor':         // the old door, ajar, the first build's light behind it
+      Q(-0.5, -0.82, 1, 1.8, 0.01); F(acc);
+      mv(-0.58, 0.98); ln(-0.58, -0.9); ln(0.58, -0.9); ln(0.58, 0.98); S(0.16);
+      P([[-0.5, -0.82], [0.12, -0.66], [0.12, 0.84], [-0.5, 0.98]]); F();
+      bare(() => { O(-0.02, 0.12, 0.06); F(bg); });
+      break;
+    case 'opodone':         // today
+      Q(-0.86, -0.7, 1.72, 1.62, 0.16); Q(-0.7, -0.3, 1.4, 1.06, 0.06); F(ink, 'evenodd');
+      Q(-0.52, -0.96, 0.16, 0.44, 0.08); Q(0.36, -0.96, 0.16, 0.44, 0.08); F();
+      star(0, 0.24, 0.4, 0.17, 5); F(acc);
+      break;
+    case 'origin':          // awake: the eye, the ship in it
+      mv(-1, 0.06); qd(0, -0.86, 1, 0.06); qd(0, 0.98, -1, 0.06); ctx.closePath(); O(0, 0.06, 0.5); F(ink, 'evenodd');
+      P([[0, -0.3], [0.27, 0.36], [0, 0.22], [-0.27, 0.36]]); F(acc);
+      L([[-0.56, -0.56], [-0.7, -0.82]], 0.1); L([[0, -0.66], [0, -0.96]], 0.1); L([[0.56, -0.56], [0.7, -0.82]], 0.1);
+      break;
+    default:                // a goal with no emblem of its own yet
+      star(0, 0.04, 0.95, 0.4, 5); F();
+  }
+}
+// what is further along the line: a lock, its name not shown
+function aaLock(cx, cy, u, ink, bg) {
+  ctx.beginPath();
+  ctx.moveTo(cx - 0.36 * u, cy); ctx.lineTo(cx - 0.36 * u, cy - 0.16 * u);
+  ctx.arc(cx, cy - 0.16 * u, 0.36 * u, Math.PI, 0); ctx.lineTo(cx + 0.36 * u, cy);
+  ctx.strokeStyle = ink; ctx.lineWidth = 0.16 * u; ctx.lineCap = 'round'; ctx.stroke();
+  lanRect(cx - 0.56 * u, cy - 0.06 * u, 1.12 * u, 0.86 * u, 0.14 * u);
+  ctx.fillStyle = ink; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy + 0.3 * u, 0.1 * u, 0, TAU);
+  ctx.fillStyle = bg; ctx.fill();
+}
+
 const ACH_ART = {
-  // the panel, behind everything on it
-  back(x, y, w, h, t) {},
-  // an act's header band
-  act(r, act, s) {},
-  // a goal's row, under its badge and words
-  row(r, a, s) {},
-  // a goal's emblem: one per a.id, or one per act
-  badge(x, y, size, a, s) {},
-  // the line down the list, done as far as yk
-  spine(x, y0, y1, yk) {},
-  // a counted goal's progress
-  meter(r, have, need, col) {},
-  // the menu's door
-  door(r, s) {},
-  // the card a goal earned in a run comes up on
-  card(r, a, k) {},
-  // NEXT GOAL on the run report
-  goal(r, a) {},
-  // a goal earned: its sound (sound only)
-  sound(audio, a) {}
+  // the panel: lazer's slate, its header lit by drifting triangles, its foot a shade down
+  back(x, y, w, h, t) {
+    const L = AA_LZ, g = achGeom(), rr = 10;
+    ctx.save();
+    lanRect(x, y, w, h, rr);
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 32;
+    ctx.fillStyle = L.bg5; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    ctx.fillStyle = L.bg4; ctx.fillRect(x, y, w, g.headH);
+    aaTriangles(x, y, w, g.headH, L.bg5, aaMix(L.bg4, L.gold, 0.06), 46, 7, 29, 0.8);
+    ctx.fillStyle = L.bg6; ctx.fillRect(x, y + h - g.footH, w, g.footH);
+    // how far along the whole line: lazer's level bar, under the header
+    const k = t.total ? t.done / t.total : 0;
+    ctx.fillStyle = rgba(L.bg2, 0.8); ctx.fillRect(x, y + g.headH - 3, w, 3);
+    if (k > 0) {
+      ctx.shadowColor = rgba(L.gold, 0.8); ctx.shadowBlur = 8;
+      ctx.fillStyle = L.gold; ctx.fillRect(x, y + g.headH - 3, w * k, 3);
+      ctx.shadowBlur = 0;
+    }
+    // beside the list: the medal splash's stage, its teal welling up under the large medal
+    if (g.wide) {
+      const size = Math.max(80, Math.min(g.sideW * 0.6, g.viewH - 170));
+      const sx = g.sideX - 10, sw = g.sideW + 20, sy = g.listY - 4, sh = g.viewH + 4;
+      const cx = g.sideX + g.sideW / 2, cy = g.listY + 6 + size / 2;
+      roundRect(sx, sy, sw, sh, 8); ctx.fillStyle = L.bg6; ctx.fill();
+      const sg = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 1.25);
+      sg.addColorStop(0, 'rgba(10,74,90,0.55)'); sg.addColorStop(1, 'rgba(10,74,90,0)');
+      ctx.fillStyle = sg; ctx.fillRect(sx, sy, sw, sh);
+    }
+    ctx.restore();
+    lanRect(x, y, w, h, rr);
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1; ctx.stroke();
+  },
+
+  // an act's header: one pill a goal under its words, lit for each one done
+  act(r, act, s) {
+    const L = AA_LZ, n = Math.max(1, s.total), gap = 4, y = r.y + 23;
+    const sw = (r.w - gap * (n - 1)) / n, all = s.open && s.done >= s.total;
+    if (all) { ctx.shadowColor = rgba(act.col, 0.7); ctx.shadowBlur = 8; }
+    for (let i = 0; i < n; i++) {
+      roundRect(r.x + i * (sw + gap), y, sw, 3, 1.5);
+      ctx.fillStyle = s.open && i < s.done ? act.col : s.open ? L.bg3 : L.bg5;
+      ctx.fill();
+    }
+  },
+
+  // a goal's row: lazer's panel, the act's colour washing in from the medal; the next one ringed and glowing
+  row(r, a, s) {
+    const L = AA_LZ, col = achAct(a).col, rr = 8;
+    ctx.save();
+    lanRect(r.x, r.y, r.w, r.h, rr);
+    ctx.fillStyle = s.locked ? rgba(L.bg6, 0.55)
+                  : s.next ? aaMix(L.bg4, col, 0.14, 0.85)
+                  : rgba((s.sel || s.hot) ? L.bg3 : L.bg4, 0.62);
+    ctx.fill();
+    ctx.clip();
+    if (s.done) {
+      const g = ctx.createLinearGradient(r.x, 0, r.x + r.w * 0.6, 0);
+      g.addColorStop(0, rgba(col, 0.16)); g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    if (s.next) aaTriangles(r.x, r.y, r.w, r.h, aaMix(L.bg4, col, 0.08), aaMix(L.bg4, col, 0.26), r.h * 0.7, 6, 11, 0.45);
+    if (s.fresh) {
+      const g = ctx.createLinearGradient(r.x + r.w, 0, r.x + r.w * 0.7, 0);
+      g.addColorStop(0, rgba(L.gold, 0.08 + 0.06 * Math.sin(uiTime * 3))); g.addColorStop(1, rgba(L.gold, 0));
+      ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    if (s.hot) { ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+    ctx.restore();
+    if (s.next || s.sel) {
+      lanRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, rr);
+      if (s.next) { ctx.shadowColor = rgba(col, 0.6); ctx.shadowBlur = 12; }
+      ctx.lineWidth = s.next ? 2 : 1.4;
+      ctx.strokeStyle = s.next ? col : 'rgba(255,255,255,0.55)';
+      ctx.stroke();
+    }
+  },
+
+  // a goal's medal
+  badge(x, y, size, a, s) {
+    const L = AA_LZ, act = achAct(a), acc = aaOwn(a), R = size / 2, cx = x + R, cy = y + R;
+    const lit = !!s.done, big = !!s.big;
+    // its pop (OutElastic): the large one as the keys come to it, the card's as it comes up
+    let pop = 1;
+    if (big) {
+      if (AA_ST.bigId !== a.id) { AA_ST.bigId = a.id; AA_ST.bigT = uiTime; }
+      pop = 0.55 + 0.45 * aaElastic((uiTime - AA_ST.bigT) / 0.9);
+    } else {
+      const c = Ach.cards[0];
+      if (c && c.a === a && c.t >= 0 && state !== 'ach') pop = aaElastic((uiTime - c.t - 0.1) / 0.9);
+    }
+    if (pop < 0.02) return;
+    const r = R * pop, lw = Math.max(1.5, size * 0.035);
+    const base = lit ? aaMix(L.disc, act.col, 0.14) : s.next ? aaMix(L.bg6, act.col, 0.08) : '#121517';
+
+    // behind it: its glow, once earned; the outer spin, wide and faint, on the large one and a NEW one;
+    // the large one's strip of light and its particles
+    ctx.save();
+    if (big) { const g = achGeom(); ctx.beginPath(); ctx.rect(g.sideX - 10, g.listY - 4, g.sideW + 20, g.viewH + 4); ctx.clip(); }
+    if (lit) {
+      aaGlow(cx, cy, r * (big ? 1.9 : 1.55), acc, (big ? 0.42 : 0.3) + (s.hot ? 0.15 : 0));
+      if (big || s.fresh) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        aaSpin(cx, cy, r * (big ? 2.25 : 1.45), uiTime * TAU / 40, acc, big ? 0.1 : 0.14);
+        ctx.restore();
+      }
+      if (big) {
+        const sw = Math.max(1.5, size * 0.0125);
+        for (const d of [-1, 1]) {
+          const x0 = cx + d * r, x1 = cx + d * (r + R);
+          const g = ctx.createLinearGradient(x0, 0, x1, 0);
+          g.addColorStop(0, 'rgba(255,255,255,0.75)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = g; ctx.fillRect(Math.min(x0, x1), cy - sw / 2, R, sw);
+        }
+        aaSparks(cx, cy, r, R * 0.6, acc, 0.9, 0);
+      }
+    }
+
+    // the disc, its triangles, and once earned its inner spin
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+    ctx.fillStyle = base; ctx.fill();
+    ctx.clip();
+    if (lit) aaTriangles(cx - r, cy - r, r * 2, r * 2, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.24), r * 0.55, r * 0.35, aaSeed(a.id), 1);
+    else if (s.next) aaTriangles(cx - r, cy - r, r * 2, r * 2, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.12), r * 0.55, r * 0.2, aaSeed(a.id), 1);
+    else aaTriangles(cx - r, cy - r, r * 2, r * 2, '#0d0f11', '#181b1e', r * 0.55, r * 0.1, aaSeed(a.id), 1);
+    if (lit) aaSpin(cx, cy, r * 1.05, uiTime * TAU / 20, '#ffffff', big ? 0.12 : 0.08);
+    ctx.restore();
+
+    // its emblem: white and glowing once earned, a ghost of itself while it is next, a lock past that
+    const u = r * 0.44;
+    ctx.save();
+    if (lit) {
+      ctx.shadowColor = rgba(acc, 0.85); ctx.shadowBlur = Math.max(2, r * 0.25);
+      aaEmblem(a.id, cx, cy, u, '#ffffff', base, acc);
+    } else if (s.next) {
+      aaEmblem(a.id, cx, cy, u, 'rgba(226,232,240,0.4)', base, rgba(acc, 0.45));
+    } else {
+      aaLock(cx, cy, u * 0.8, s.hot ? '#4a535b' : '#363d43', base);
+    }
+    ctx.restore();
+
+    // the rim: white once earned (the splash's border), the act's while next, slate past that
+    ctx.beginPath(); ctx.arc(cx, cy, r - lw / 2, 0, TAU);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = lit ? '#ffffff' : s.next ? rgba(act.col, s.hot ? 1 : 0.75) : s.hot ? '#3d454c' : '#2a3035';
+    ctx.stroke();
+    if (s.next && s.prog) {
+      // how far a counted goal has come, round the rim from the top
+      ctx.beginPath(); ctx.arc(cx, cy, r - lw / 2, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(s.prog[0] / s.prog[1], 0, 1));
+      ctx.strokeStyle = '#ffffff'; ctx.lineCap = 'round'; ctx.stroke();
+    }
+    if (s.next) {
+      // the approach circle: closing on the next note, fading in as it comes
+      const ph = (uiTime % 1.25) / 1.25;
+      ctx.beginPath(); ctx.arc(cx, cy, r * (1 + (big ? 0.45 : 0.32) * (1 - ph)), 0, TAU);
+      ctx.lineWidth = Math.max(1.2, size * 0.03);
+      ctx.strokeStyle = rgba(act.col, (0.85 * Math.min(1, ph * 2.2) * (1 - Math.max(0, ph - 0.9) * 10)).toFixed(3));
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+
+  // the line: a rail, lit as far as the next goal with a slider ball running down it; follow points past it
+  spine(x, y0, y1, yk) {
+    const L = AA_LZ;
+    ctx.fillStyle = rgba(L.bg2, 0.5);
+    roundRect(x - 1.5, y0, 3, Math.max(3, y1 - y0), 1.5); ctx.fill();
+    if (yk > y0) {
+      ctx.save();
+      ctx.shadowColor = rgba(L.blue, 0.8); ctx.shadowBlur = 8;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      roundRect(x - 1.5, y0, 3, yk - y0, 1.5); ctx.fill();
+      ctx.restore();
+      const run = yk - y0 + 80, p = y0 + (uiTime * 140) % run;
+      if (p < yk) aaGlow(x, p, 12, L.blue, 0.7);
+    }
+    for (let yy = yk + 30, i = 0; yy < y1 - 20; yy += 15, i++) {
+      const w = 0.5 + 0.5 * Math.sin(i * 0.9 - uiTime * 4);
+      ctx.beginPath(); ctx.moveTo(x - 3.2, yy - 2); ctx.lineTo(x, yy + 1.6); ctx.lineTo(x + 3.2, yy - 2);
+      ctx.strokeStyle = 'rgba(255,255,255,' + ((0.12 + 0.4 * w) * clamp(1 - (yy - yk) / 420, 0.3, 1)).toFixed(3) + ')';
+      ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+  },
+
+  // a counted goal's progress: lazer's rounded bar, glowing where it has got to; counted out in steps when there are few
+  meter(r, have, need, col) {
+    const L = AA_LZ, k = clamp(have / need, 0, 1), rr = r.h / 2;
+    roundRect(r.x, r.y, r.w, r.h, rr); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+    if (r.h >= 5) { ctx.strokeStyle = rgba(L.bg2, 0.6); ctx.lineWidth = 1; ctx.stroke(); }
+    const fw = Math.max(r.h, r.w * k);
+    if (k > 0) {
+      ctx.save();
+      roundRect(r.x, r.y, fw, r.h, rr);
+      ctx.shadowColor = rgba(col, 0.7); ctx.shadowBlur = r.h * 1.5;
+      ctx.fillStyle = col; ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.clip();
+      if (r.h >= 6) aaTriangles(r.x, r.y, fw, r.h, aaMix(col, '#000000', 0.12), aaMix(col, '#ffffff', 0.35), r.h * 1.4, 6, 5, 0.8);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(r.x, r.y, fw, r.h * 0.45);
+      ctx.restore();
+      aaGlow(r.x + fw - rr, r.y + rr, r.h * 2.6, col, 0.5);
+    }
+    if (need <= 16 && r.w / need > 6) {
+      ctx.fillStyle = rgba(L.bg6, 0.9);
+      for (let i = 1; i < need; i++) ctx.fillRect(r.x + r.w * i / need - 0.75, r.y, 1.5, r.h);
+    }
+  },
+
+  // the menu's door: a lazer button, leaning, triangles drifting through it, the line's progress along its foot
+  door(r, s) {
+    const L = AA_LZ, gold = L.gold, sh = r.h * 0.2;
+    ctx.save();
+    aaShear(r.x, r.y, r.w, r.h, sh, 6);
+    ctx.shadowColor = s.hot ? rgba(gold, 0.45) : 'rgba(0,0,0,0.5)'; ctx.shadowBlur = s.hot ? 14 : 8;
+    ctx.fillStyle = s.hot ? aaMix(L.bg4, gold, 0.1) : rgba(L.bg5, 0.92);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    aaTriangles(r.x, r.y, r.w, r.h, aaMix(L.bg5, gold, 0.02), aaMix(L.bg4, gold, s.hot ? 0.16 : 0.08), 22, s.hot ? 9 : 4, 3, 1);
+    const k = s.total ? s.done / s.total : 0;
+    ctx.fillStyle = rgba(L.bg2, 0.6); ctx.fillRect(r.x, r.y + r.h - 3, r.w, 3);
+    ctx.fillStyle = gold; ctx.fillRect(r.x, r.y + r.h - 3, r.w * k, 3);
+    ctx.restore();
+    aaShear(r.x, r.y, r.w, r.h, sh, 6);
+    ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(gold, s.hot ? 0.9 : 0.32); ctx.stroke();
+    // NEW: the layout's dot, an approach circle closing on it
+    if (s.fresh) {
+      const ph = (uiTime % 1.1) / 1.1, dx = r.x + r.w - 11, dy = r.y + 11;
+      aaGlow(dx, dy, 9, gold, 0.5);
+      ctx.beginPath(); ctx.arc(dx, dy, 3 + 7 * (1 - ph), 0, TAU);
+      ctx.strokeStyle = rgba(gold, (0.9 * Math.min(1, ph * 2)).toFixed(3)); ctx.lineWidth = 1.3; ctx.stroke();
+    }
+  },
+
+  // the card: the medal splash, in small
+  card(r, a, k) {
+    const L = AA_LZ, act = achAct(a), acc = aaOwn(a), age = k * ACH_CARD, rr = 8;
+    const R = (r.h - 16) / 2, bx = r.x + 8 + R, by = r.y + 8 + R;
+    const base = aaMix(L.disc, act.col, 0.1);
+    ctx.save();
+    lanRect(r.x, r.y, r.w, r.h, rr);
+    ctx.shadowColor = rgba(acc, 0.5); ctx.shadowBlur = 18;
+    ctx.fillStyle = base; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.clip();
+    aaTriangles(r.x, r.y, r.w, r.h, aaMix(base, '#000000', 0.3), aaMix(base, act.col, 0.12), 30, 10, 17, 1);
+    const g = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+    g.addColorStop(0, rgba(acc, 0.22)); g.addColorStop(0.5, rgba(acc, 0.04)); g.addColorStop(1, rgba(acc, 0));
+    ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+    // the strip of light out of the medal, between its two lines of words (OutQuint)
+    const sk = aaQuint((age - 0.25) / 0.9);
+    if (sk > 0) {
+      const x0 = bx + R + 2, len = (r.x + r.w - x0) * sk, sg = ctx.createLinearGradient(x0, 0, x0 + len, 0);
+      sg.addColorStop(0, 'rgba(255,255,255,0.55)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sg; ctx.fillRect(x0, by - 0.5, len, 1);
+    }
+    // its life, running down along its foot
+    ctx.fillStyle = rgba(acc, 0.85); ctx.fillRect(r.x, r.y + r.h - 2, r.w * (1 - k), 2);
+    // the flash it comes in on: a quarter of white, gone in 0.4 s
+    if (age < 0.4) { ctx.fillStyle = 'rgba(255,255,255,' + (0.25 * (1 - age / 0.4)).toFixed(3) + ')'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+    ctx.restore();
+    // the medal lands: a ring bursting off it, and its particles for a second and a half
+    aaSparks(bx, by, R, R * 1.6, acc, 1, uiTime - age + 0.15, 1.4);
+    const bk = (age - 0.15) / 0.55;
+    if (bk > 0 && bk < 1) {
+      ctx.beginPath(); ctx.arc(bx, by, R * (1 + 0.9 * aaQuint(bk)), 0, TAU);
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.9 * (1 - bk)).toFixed(3) + ')';
+      ctx.lineWidth = 0.5 + 2.5 * (1 - bk); ctx.stroke();
+    }
+  },
+
+  // NEXT GOAL on the run report: a lazer pill, its act's colour in its triangles
+  goal(r, a) {
+    const L = AA_LZ, col = achAct(a).col, x = r.x - 12, w = r.w + 24, rr = r.h / 2;
+    ctx.save();
+    lanRect(x, r.y, w, r.h, rr);
+    ctx.fillStyle = rgba(L.bg5, 0.78); ctx.fill();
+    ctx.clip();
+    aaTriangles(x, r.y, w, r.h, aaMix(L.bg5, col, 0.02), aaMix(L.bg4, col, 0.12), 18, 5, 23, 0.9);
+    ctx.restore();
+    lanRect(x + 0.5, r.y + 0.5, w - 1, r.h - 1, rr);
+    ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 1; ctx.stroke();
+  },
+
+  // a goal earned: a whoosh up into a chime, each act a step higher than the last
+  sound(audio, a) {
+    const i = Math.max(0, ACH_ACTS.indexOf(achAct(a)));
+    const root = 523.25 * Math.pow(2, [0, 2, 4, 5, 7, 9][i % 6] / 12);
+    audio.noise(0.42, 0.07, 500, 7500, 1.2);
+    audio.tone(root / 2, 0.7, 'sine', 0.07, null, 0.1);
+    [0, 4, 7, 12, 16].forEach((st, k) => audio.tone(root * Math.pow(2, st / 12), 0.55, 'triangle', 0.06, null, 0.1 + k * 0.05));
+    audio.tone(root * 4, 0.9, 'sine', 0.025, root * 4.05, 0.32);
+  }
 };
 /* ===================== end of ACHIEVEMENTS art hooks ===================== */
 
@@ -77804,7 +78400,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
   'OA_TAGGED', 'OA_FAILED',              // ONE POINT OH's art: what it tagged, and which hook has thrown
-  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED']);   // ACHIEVEMENTS: the panel, the cards, and its art's
+  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at

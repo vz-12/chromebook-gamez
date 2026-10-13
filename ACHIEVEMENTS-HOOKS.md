@@ -1,10 +1,38 @@
 # ACHIEVEMENTS: the art hooks
 
 Every visual piece of the achievements, and their one sound, is drawn by one of
-these hooks, and **every one is blank** (13 Oct). Until the art is drawn,
-`ACH_PLAIN` (`true`) has the layout draw a plain version of each piece under
-its hook, so the line can be used now. Add `?hooks=1` to the address to tag
-each piece with its hook's name (`ach.badge`, `ach.card`...).
+these hooks, and **every one is drawn** (13 Oct), after osu!lazer's medals (THE
+LOOK, at the head of the hooks in `index.html`, says how). `ACH_PLAIN` is
+`false`: the layout no longer draws its plain version under them. Add
+`?hooks=1` to the address to tag each piece with its hook's name (`ach.badge`,
+`ach.card`...).
+
+## The look
+
+- **A medal a goal** (`badge`): lazer's medal-splash disc, deep teal tinted by
+  its act, its triangles drifting up through it. Earned: a white rim, the inner
+  sunburst turning, a glow in the goal's own colour (its boss's, its pilot's,
+  or its act's) and a flat white emblem of its own, one per `a.id`. Next: a
+  ghost of its emblem, its act's rim, the progress round the rim for a counted
+  goal, and an approach circle closing on it. Further on: a lock. The large one
+  beside the list pops in (OutElastic) as the keys come to it, with the outer
+  spin, the strip of light and the particles, all kept to its stage.
+- **The line** (`spine`): a rail lit as far as the next goal, a slider ball
+  running down it; follow points past it.
+- **The panel, its rows and acts** (`back`, `row`, `act`): lazer's overlay
+  slate at the blue hue, rounded; triangles in the header, the whole line's
+  progress under it as a level bar; one pill a goal under each act's words.
+  The next row is ringed in its act's colour and glows.
+- **The door** (`door`): a lazer button, leaning (SHEAR 0.2), triangles in it,
+  the line's progress along its foot, an approach circle on its NEW dot.
+- **The card** (`card`): the medal splash in small: a white flash, the medal's
+  elastic pop, a ring bursting off it, its particles, the strip of light out
+  between its words, its life running down along its foot.
+- **The report** (`goal`): a lazer pill with its act's triangles.
+- **The sound** (`sound`): a whoosh up into a chime, each act a step higher.
+
+The art keeps one object of its own, `AA_ST` (the large medal's pop), in
+`SNAP_LOCAL_OBJS`; everything else is a hash and `uiTime`.
 
 All the hooks are in one block of `index.html`, from
 `ACHIEVEMENTS — art hooks` down to `end of ACHIEVEMENTS art hooks`, as
@@ -25,7 +53,7 @@ The block's own header (WHAT THEY ARE HANDED) is the same list as below.
   shapes, emblems, light and motion.
 - **`ACH_PLAIN`.** While `true`, under each hook the layout draws: a plain
   panel, plain rows, a plain badge (★ done, ☆ next, ? later), a plain meter,
-  door and card, and a plain chime on an earn. Set it `false` once the art
+  door and card, and a plain chime on an earn. It is `false` now the art
   draws those itself.
 
 ## The line
