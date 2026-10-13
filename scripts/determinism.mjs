@@ -84,7 +84,9 @@ const HARNESS = `(() => {
       // ONE POINT OH: the fight's record, phase and front, and the old door
       typeof opo !== 'undefined' && opo ? [opo.stage, opo.ph, r(opo.pos), opo.cells.map(c => c < 0.5 ? 0 : 1).join(''),
         opo.panes.length, opo.sweeps.length, opo.restores.length, Object.keys(P.up).length] : null,
-      typeof opoDoor !== 'undefined' && opoDoor ? pk(opoDoor, ['x', 'y', 'in']) : null]);
+      typeof opoDoor !== 'undefined' && opoDoor ? pk(opoDoor, ['x', 'y', 'in']) : null,
+      // and what is coming for the run (FROM ABOVE): its stream, its clock, its marks
+      [aboveRng, r(aboveNext), aboveMarks.map(m => pk(m, ['x', 'y', 't', 'after', 'k', 'took']))]]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -265,6 +267,13 @@ const S = [
   // and his fight, from the shatter to today (the route's own test, npm run test:opo, takes the door)
   { name: 'opo-route',  char: 'runner', seed: 119, steps: 21600, shops: true, gates: true, starter: 'RUN.altPath = true; RUN.opoCoax = 4' },
   { name: 'onepointoh', char: 'runner', seed: 120, steps: 18000, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
+  /* A run that is hunted (FROM ABOVE): from its first sector and every few
+     seconds here, aimed at where the hull is, so that many are aimed and
+     land in five minutes and the bot, which never stands still for long,
+     mostly lives through them. (The numbers stay changed in this copy of
+     the game; no other scenario's run is hunted, so none reads them.) */
+  { name: 'above',      char: 'runner', seed: 121, steps: 18000,
+    starter: 'RUN.above = true; ABOVE.from = 1; ABOVE.gap = [4, 9]; ABOVE.lead = 0; aboveBegin()' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {

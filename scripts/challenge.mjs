@@ -14,10 +14,20 @@
      announce <pilot> <words> what the game's menu says while its match is
                               on air (src/live.js), from a vault entry of
                               its own, or none
+     decide <pilot> <how>     its fight, decided by hand: lost or won, as it
+                              went for the account it was sent to (the
+                              referee decides a match played to its end by
+                              itself; one that was walked out of, never), or
+                              none, to take a decision back. Decided, the
+                              hunt on the game's runs is over (index.html,
+                              FROM ABOVE)
+     calm <pilot> [off]       the hunt held, at once and for as long as you
+                              say, whatever else is so; off lets it go on
      cancel <pilot>           gone, sent or not; arm it again to start over
      list                     every challenge: armed, tripped by whom, sent
                               to whom, seen yet, its announcement, its match
-                              on air and when
+                              on air and when, how it was decided, and
+                              whether the hunt is held
 
    As with `npm run chapter`, nothing runs without --remote (the live
    database) or --local (wrangler dev's; add --persist-to <dir> if yours
@@ -29,7 +39,8 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, columnsSql, addedSql, checkPilot, checkWords, checkDate } from './lib/challenge-sql.mjs';
+import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, decideSql, calmSql, columnsSql, addedSql,
+         checkPilot, checkWords, checkDate, checkOutcome } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
@@ -105,6 +116,24 @@ try {
       console.log(a1 + where + ': ' + (words ? 'announced from vault entry ' + words : 'no announcement'));
       break;
     }
+    case 'decide': {
+      if (!a1 || !a2) die('decide <pilot> <lost | won | none>');
+      const sql = decideSql(a1, checkOutcome(a2));
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'not decided: the hunt goes on' : 'decided, ' + a2 + ': the hunt is over'));
+      break;
+    }
+    case 'calm': {
+      if (!a1 || (a2 && a2 !== 'off')) die('calm <pilot> [off]');
+      const sql = calmSql(a1, a2 !== 'off');
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'off' ? 'the hunt goes on' : 'the hunt is held'));
+      break;
+    }
     case 'cancel': {
       const sql = cancelSql(a1);
       if (!live()) show(sql);
@@ -120,10 +149,12 @@ try {
       for (const r of rows)
         console.log([r.pilot, 'words ' + r.words, 'armed ' + r.armed, 'due ' + r.due, 'tripped ' + r.tripped,
                      'by ' + r.reached_by, 'season ' + r.season, 'sent to ' + r.target, 'seen ' + r.seen,
-                     'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended].join('  ·  '));
+                     'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended,
+                     'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | cancel <pilot> | list   [--remote | --local]');
+      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | decide <pilot> <lost | won | none> | ' +
+          'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }

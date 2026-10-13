@@ -1393,7 +1393,7 @@ section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOI
 section('live spectating: a challenge\'s match on air, its relay, /api/live and the replay');
 {
   const { Broadcast, KEEP, VIEW } = await import('../pvp/src/broadcast.js');
-  const { armSql, dateSql, cancelSql, announceSql, columnsSql, addedSql, challengesSql } = await import('./lib/challenge-sql.mjs');
+  const { armSql, dateSql, cancelSql, announceSql, columnsSql, addedSql, challengesSql, decideSql, calmSql, checkOutcome } = await import('./lib/challenge-sql.mjs');
   const { putSql } = await import('./lib/vault-sql.mjs');
   const { tripChallenges, ensureChallenges, liveNow, LIVE, CHALLENGE_ADDED } = await import('../pvp/src/challenge.js');
   const { forgetLive } = await import('../src/live.js');
@@ -1440,11 +1440,19 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   let g = await gameLive();
   ok(g.status === 200 && g.d.live === null && g.d.every === LIVE.IDLE && /public, max-age=30/.test(g.cache),
      '/api/live, open to anyone: nothing on air, ask again in fifteen minutes; cached thirty seconds', g);
+  ok(g.d.above === false, 'and no run is hunted (FROM ABOVE)', g.d);
   tool(armSql('x7', 'x7-words'));
+  ok((await gameLive()).d.above === false, 'a challenge armed, not yet sent: still none');
   await tripChallenges(DB);
   ok(row().target === T.id, 'a challenge armed and sent, to the top of ranked', row());
   g = await gameLive();
   ok(g.d.live === null && g.d.every === LIVE.ASK, 'sent, with no date yet: the game asks every minute', g.d);
+  ok(g.d.above === true && row().decided === null && row().calm === null, 'sent: from now the game\'s runs are hunted', g.d);
+  // held by hand, at once, and let go again: the challenge itself untouched
+  tool(calmSql('x7', true));
+  ok((await gameLive()).d.above === false && row().calm > 0 && row().target === T.id, 'held by hand (npm run challenge -- calm): nothing is hunted', row());
+  tool(calmSql('x7', false));
+  ok((await gameLive()).d.above === true && row().calm === null, 'and let go again (calm off)');
   tool(dateSql('x7', now + 3 * 864e5));
   ok((await liveNow(DB, now)).every === LIVE.IDLE, 'its date days away: every fifteen minutes');
   ok((await liveNow(DB, now + 3 * 864e5 - 40 * 60e3)).every === 600, 'forty minutes before it: until half an hour before it');
@@ -1571,6 +1579,7 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok(row().ended > 0, 'the referee decides it, and the challenge notes it', row());
   g = await gameLive();
   ok(g.d.live === null, 'off air', g.d);
+  ok(row().decided === null && row().outcome === null && g.d.above === true, 'a match walked out of decides nothing: the hunt goes on', [row().decided, g.d.above]);
   ok((await code(anon, 'id=x7&watch=' + mid)).status === 200, 'its broadcast stays, and with it the pilot for whoever watches it back');
 
   // the replay: the whole log, to dev accounts and the pilot's holders
@@ -1619,14 +1628,64 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok(row().match === 'a'.repeat(32) && row().ended === null, 'a challenge\'s match made again is the one on air');
   ok(tool(challengesSql()).find(x => x.pilot === 'x7').announce === 'x7-air', 'and the tool lists it with its announcement and match');
 
+  /* Fought out (FROM ABOVE): a match played to its end decides the
+     challenge, whoever won it, and the hunt on the game's runs is over. The
+     referee's own verdict does it (objects.js): both sides report the same
+     result. */
+  const fought = async (id, winner) => {
+    await challengeBegun(DB, 'x7', T.id, id);
+    await envPvp.MATCH.get(envPvp.MATCH.idFromName(id)).fetch('https://do/create', { method: 'POST', body: JSON.stringify({
+      id, queue: 'ranked', rated: false, hidden: true,
+      sides: [{ acct: H.id, name: 'L_Holder', pilot: 'x7' }, { acct: T.id, name: 'L_Top', pilot: 'runner' }] }) });
+    const result = { winner, score: winner ? [0, 1] : [1, 0], bestOf: 1 };
+    const said = [];
+    for (const who of [H, T]) said.push((await who.pvp.call('POST', '/api/pvp/match', { op: 'report', id, report: { result } })).status);
+    return said.join();
+  };
+  ok((await gameLive()).d.above === true && row().decided === null, 'on air again, and still hunted');
+  ok(await fought('c'.repeat(32), 0) === '200,200', 'the match played to its end, the pilot\'s side winning it');
+  ok(row().ended > 0 && row().decided === row().ended && row().outcome === 'lost', 'the referee\'s verdict decides the challenge: lost, by the account it was sent to', row());
+  g = await gameLive();
+  ok(g.d.above === false && g.d.live === null, 'and the hunt is over', g.d);
+  const first = row().decided;
+  await fought('d'.repeat(32), 1);
+  ok(row().decided === first && row().outcome === 'lost' && (await gameLive()).d.above === false, 'decided once: a match after it changes nothing', row());
+  // taken back by hand, and decided the other way by the next fight
+  tool(decideSql('x7', 'none'));
+  ok(row().decided === null && row().outcome === null && (await gameLive()).d.above === true, 'a decision taken back by hand (npm run challenge -- decide none): hunted again');
+  await fought('e'.repeat(32), 1);
+  ok(row().outcome === 'won' && row().decided > 0 && (await gameLive()).d.above === false, 'the other side winning decides it too, the other way: won', row());
+  // and by hand, where the referee did not say
+  tool(decideSql('x7', 'none'));
+  tool(decideSql('x7', 'lost', 1234567));
+  ok(row().decided === 1234567 && row().outcome === 'lost' && (await gameLive()).d.above === false, 'decided by hand (decide lost)');
+  let refused = null;
+  try { checkOutcome('maybe'); } catch (e) { refused = e.message; }
+  ok(/not an outcome/.test(refused || '') && checkOutcome('won') === 'won', 'the tool takes lost, won or none, and nothing else', refused);
+  const listed = tool(challengesSql()).find(x => x.pilot === 'x7');
+  ok(listed.outcome === 'lost' && listed.decided !== '-' && listed.calm === '-', 'and lists how it was decided, and whether the hunt is held', listed);
+  ok(!JSON.stringify((await gameLive()).d).includes('lost'), 'which way it went is not the game\'s to be told');
+  tool(decideSql('x7', 'none'));
+
   // a table made before the columns: PvP's Worker adds them, and the tool can too
   const { makeD1 } = await import('./lib/d1-sqlite.mjs');
   const old = makeD1();
   old.sql.exec('CREATE TABLE pvp_challenges (pilot TEXT PRIMARY KEY, words TEXT NOT NULL, armed INTEGER NOT NULL, due INTEGER, tripped INTEGER, reached_by TEXT, season TEXT, target TEXT, seen INTEGER)');
   const have = () => old.sql.prepare('PRAGMA table_info(pvp_challenges)').all().map(c => c.name);
   ok(addedSql(have()).split('\n').length === CHALLENGE_ADDED.length, 'an old table lacks the new columns: the tool would add every one');
+  ok((await liveNow(old)).above === false && (await liveNow(old)).live === null, 'and the game\'s Worker, which never makes them, reads such a table as nothing on and nothing hunted');
   await ensureChallenges(old);
   ok(CHALLENGE_ADDED.every(([c]) => have().includes(c)), 'PvP\'s Worker adds them on its own first use');
+  /* A table from before the hunt's own columns, a challenge already sent in
+     it: nothing in it was ever decided or held, so the game's Worker reads
+     it as hunted, without the columns. */
+  const mid2 = makeD1();
+  mid2.sql.exec('CREATE TABLE accounts (id TEXT PRIMARY KEY, display TEXT)');
+  mid2.sql.exec('CREATE TABLE pvp_challenges (pilot TEXT PRIMARY KEY, words TEXT NOT NULL, armed INTEGER NOT NULL, due INTEGER, tripped INTEGER, reached_by TEXT, season TEXT, target TEXT, seen INTEGER, match TEXT, started INTEGER, ended INTEGER, announce TEXT)');
+  ok((await liveNow(mid2)).above === false, 'an older table with nothing sent: nothing hunted');
+  mid2.sql.exec("INSERT INTO pvp_challenges (pilot, words, armed, tripped, target) VALUES ('x7', 'w', 1, 2, 'somebody')");
+  const lm = await liveNow(mid2);
+  ok(lm.above === true && lm.live === null && lm.every === LIVE.ASK, 'an older table with one sent: hunted, read without the columns it lacks', lm);
   tool(cancelSql('x7'));
 }
 

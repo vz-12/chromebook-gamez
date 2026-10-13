@@ -159,6 +159,7 @@ function runTake() {
   if (src) {
     for (const k of RUN_FLAGS) RUN[k] = src[k];
     RUN.hlLive = !!src.hlLive; RUN.medals = (src.medals || []).slice();
+    RUN.above = !!src.above;
     RUN.chal = (src.chal || []).slice();
     const c = src.codex || {};
     RUN.codex = { e: new Set(c.e || []), u: new Set(c.u || []), m: new Set(c.m || []), b: new Set(c.b || []), z: new Set(c.z || []) };
@@ -168,6 +169,8 @@ function runTake() {
     // ALL HALLOWS: whether the event is on, by the calendar, and the medals worn
     RUN.hlLive = hlLive();
     RUN.medals = RUN.hlLive ? (hlP().equip || []).slice() : [];
+    // whether runs are hunted, as the Worker last said (FROM ABOVE)
+    RUN.above = !!Live.above;
     // the challenges cleared (they let rewards into the pool) and the codex (THE KEEPER reads it)
     RUN.chal = (p.chal || []).slice();
     RUN.codex = { e: new Set(Codex.e), u: new Set(Codex.u), m: new Set(Codex.m), b: new Set(Codex.b), z: new Set(Codex.z) };
@@ -37747,6 +37750,7 @@ function resetGame() {
   { const v = runViewNext || { w: W, h: H }; runView.w = v.w; runView.h = v.h; runViewNext = null; }   // see runView
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
+  aboveBegin();                          // and what may come for it (FROM ABOVE)
   // and whether it is assisted (FIRST FLIGHT): only ever for one pilot on its own
   assist = runAssistNext && !MP.on && !LS.on ? { saved: false } : null;
   runAssistNext = false;
@@ -38904,6 +38908,7 @@ function update(dt) {
     updateSentries(dt);
     if (P.outside) outsideCall(P.charId, 'step', dt);   // an outside pilot's kit: see OUTSIDE PILOTS
   });
+  aboveTick(dt, wdt);        // what comes for a run that has grown (FROM ABOVE)
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
      the boss shell never calls the AI again, so the check has to live somewhere
      that still runs. A dev-console room clear used to leave the fight object
@@ -50339,6 +50344,7 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
 
   drawMortars();
+  aboveDrawFloor();           // a spear's mark, on the floor (FROM ABOVE)
   drawUnwritten();
   drawAmalgam();
   drawCages();
@@ -50421,6 +50427,7 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
   pilotsDraw(drawRoninExecWorld);   // RONIN's C: the counter and the executions, over everything in the room
   hlDrawWorldTele();          // ALL HALLOWS: what you can finish, and what is about to go
+  aboveDrawWorld();           // a spear coming down, and one landed, over everything in the room (FROM ABOVE)
 
   pilotsDraw(() => { if (P.odStrike && !odStrikePov()) drawOdStrikeHull(); });   // C: the hull, over everything, until the cut takes it
   drawGearTags();            // THE VAGRANT's drops say what they are
@@ -50465,6 +50472,7 @@ function render() {
   }
   drawChalFog();      // over the world, under everything you need to read
   hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
+  aboveDrawScreen();  // a spear coming: over the frame, under the HUD (FROM ABOVE)
   const bare = !!(PVP && PVP.bare());   // PvP mode: a replay captured with the HUD off (replay.js)
   if (!bare) {
     drawHUD();
@@ -50542,7 +50550,7 @@ function render() {
   if (state === 'codex') drawCodex();
   if (state === 'dead') {
     if (lastStats && lastStats.opo) drawOpoLost();   // ONE POINT OH: a lost fight is no run, and the lock holds
-    else { drawDead(); hlDrawDead(); }   // ALL HALLOWS: the word after his fight
+    else { drawDead(); hlDrawDead(); aboveDrawDead(); }   // ALL HALLOWS: the word after his fight; and what ended the run, if it came from above
   }
   if (!bare) lsDrawHint();   // lockstep: who is choosing, who paused
   drawTut();            // FIRST FLIGHT: a lesson, or THE WARDEN's next move, above the tales' line
@@ -74890,6 +74898,7 @@ const LIVE_CSS = `
 
 const Live = {
   on: null,                    // { match, since, t, x, names } while one is on air
+  above: false,                // whether runs are hunted now: a run takes it when it starts (FROM ABOVE)
   next: 0,                     // when to ask again (performance.now, ms)
   busy: false,
   el: null,                    // the menu's card
@@ -74917,6 +74926,7 @@ const Live = {
     const every = d && Number.isFinite(d.every) ? d.every : 300;    // can't be read: five minutes
     Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
     if (!d) return;
+    Live.above = d.above === true;
     const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
     const was = Live.on;
     Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
@@ -75016,6 +75026,578 @@ function drawLiveLine() {
   const a = clamp(Math.min(age / 0.35, (LIVE_LINE - age) / 0.6), 0, 1);
   lsPill('LIVE NOW  ·  ' + Live.vs() + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
 }
+
+/* ===========================================================================
+   FROM ABOVE
+
+   While a hidden pilot's challenge is out (sent to the top of ranked, and
+   its fight not yet fought out: pvp/src/challenge.js), something comes for
+   the runs that have grown. The Worker's GET /api/live says whether it is
+   so (`above`: asked for ON AIR anyway), and a run takes that with the rest
+   of its settings when it starts (RUN.above: frozen for the run, and handed
+   to a co-op partner in the header, so both machines play the same).
+
+   What comes is a spear. It is rare, it is warned, and it is the end:
+     who       a run in its third sector or past it (ABOVE.from), in the
+               fight proper. Never a rule sheet of another kind (a
+               challenge, the rush), a sandbox, a rite, a finale, the hub,
+               an ALL HALLOWS area, or PvP; never a pilot from outside
+               (OUTSIDE PILOTS): theirs are not hunted.
+     when      one every two to four minutes of the fight (ABOVE.gap), on a
+               seeded stream of its own, so a run with it and a run without
+               are the same run in everything else (a daily's rule sheet
+               stays the day's).
+     the mark  aimed where the hull will be if it keeps its heading (a hull
+               that turns is clear, and one that sits still is not), and
+               shown there for the warning: ABOVE.warn seconds in the third
+               sector, shorter by ABOVE.shrink for every sector further,
+               never under ABOVE.least. The warning runs on the room's clock
+               (what slows the room slows it) and holds while a cut-in holds
+               the hulls.
+     landing   a hull still inside it is taken, whatever it carries: no
+               shield, i-frame, parry, armour, Second Wind, brake or vow
+               answers it. Solo the run ends there, as any death ends it;
+               in co-op that pilot goes down, as any death does there. Only
+               a hull that is not under it is missed: up off the floor
+               (EMBER's C), or a ghost already (ALL HALLOWS).
+
+   Nothing here names what it is. The art's hooks are at the foot of this
+   block, placeholders until they are drawn.
+   ========================================================================= */
+const ABOVE = {
+  from: 3,                    // the sector they start in, in the run's own order (five waves each)
+  gap: [120, 240],            // seconds of the fight between one and the next
+  warn: 1.8, shrink: 0.88, least: 0.5,   // the warning: at `from`, times `shrink` each sector further, never under `least`
+  r: 44,                      // what it takes, around where it lands
+  lead: 260,                  // how far ahead of a moving hull it aims, at most
+  after: 1.4                  // seconds it stands in the floor after landing (the art's)
+};
+/* The run's share of it: the stream's state, the time to the next one, the
+   marks ({ x, y, r, t: seconds to landing, max, after, k: the pilot it was
+   aimed at, took: the pilot it took, or -1 }), and where the run was ended
+   by one. Plain data, in the snapshot like everything else the run keeps. */
+let aboveRng = 0, aboveNext = 0, aboveTook = null;
+const aboveMarks = [];
+
+function aboveRand() {                   // mulberry32, as simRand: a stream of its own, so the run's is never moved by it
+  let t = aboveRng = (aboveRng + 0x6D2B79F5) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const aboveGap = () => lerp(ABOVE.gap[0], ABOVE.gap[1], aboveRand());
+// a run begins (resetGame, once its seed is set)
+function aboveBegin() {
+  aboveRng = (simSeed ^ 0x5ea0fa11) >>> 0;
+  aboveMarks.length = 0; aboveTook = null;
+  aboveNext = aboveGap();
+}
+// the sector the run is in, in its own order: five waves each, whichever road it took
+const aboveSector = () => Math.floor((Math.max(1, wave) - 1) / 5) + 1;
+// the warning, this far in
+const aboveWarn = () => Math.max(ABOVE.least, ABOVE.warn * Math.pow(ABOVE.shrink, Math.max(0, aboveSector() - ABOVE.from)));
+/* Not this run, or not here: a run that did not start under it, a rule
+   sheet of another kind, a sandbox, PvP, and every room that is a scene of
+   its own (they have their own ways of ending). */
+function aboveQuiet() {
+  return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite
+      || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
+      || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal;
+}
+// a cut-in has the screen and holds the hulls where they are: nothing is aimed, and nothing lands
+function aboveHeld() {
+  let held = outsideCutAny();
+  if (!held) pilotsEach(() => { if (roninCutIn() || suCutIn()) held = true; });
+  return held;
+}
+
+// each play step, once the pilots have moved (update)
+function aboveTick(dt, wdt) {
+  if (aboveQuiet()) { aboveMarks.length = 0; return; }
+  const held = aboveHeld();
+  for (let i = aboveMarks.length - 1; i >= 0; i--) {
+    const m = aboveMarks[i];
+    if (m.t > 0) {
+      if (held) continue;
+      m.t -= wdt;                        // the room's clock
+      if (m.t <= 0) aboveLand(m);
+    } else if ((m.after -= dt) <= 0) aboveMarks.splice(i, 1);
+  }
+  if (state !== 'play' || held || aboveSector() < ABOVE.from) return;
+  if ((aboveNext -= dt) > 0) return;
+  aboveNext = aboveGap();
+  aboveAim();
+}
+
+// one is aimed: at a pilot still flying, where it will be when the warning runs out
+function aboveAim() {
+  const can = [];
+  for (let k = 0; k < Math.max(1, PILOTS.length); k++) {
+    const q = pilotP(k);
+    if (q && !q.down && !q.outside) can.push(k);
+  }
+  if (!can.length) return;
+  const k = can[Math.floor(aboveRand() * can.length)], q = pilotP(k), warn = aboveWarn();
+  let lx = q.vx * warn, ly = q.vy * warn;
+  const d = Math.hypot(lx, ly);
+  if (d > ABOVE.lead) { lx *= ABOVE.lead / d; ly *= ABOVE.lead / d; }
+  const m = { x: clamp(q.x + lx, arena.x0 + ABOVE.r, arena.x1 - ABOVE.r), y: clamp(q.y + ly, arena.y0 + ABOVE.r, arena.y1 - ABOVE.r),
+              r: ABOVE.r, t: warn, max: warn, after: ABOVE.after, k, took: -1 };
+  aboveMarks.push(m);
+  aboveMarkFx(m);
+}
+
+// not under it, though standing there: up off the floor (EMBER's C), or a ghost already (ALL HALLOWS). As that pilot.
+const aboveMisses = () => odStrikeAir() || !!P.hlGhost;
+
+// it lands: every hull inside it is taken
+function aboveLand(m) {
+  m.t = 0;
+  aboveLandFx(m);
+  for (let k = 0; k < Math.max(1, PILOTS.length) && state === 'play'; k++) {
+    const q = pilotP(k);
+    if (!q || q.down || q.outside || Math.hypot(q.x - m.x, q.y - m.y) >= m.r + q.r) continue;
+    pilotDo(k, () => { if (!aboveMisses()) { m.took = k; aboveTake(m); } });
+  }
+}
+
+/* Taken, as the pilot it took. Nothing a build carries is asked: this never
+   goes through hurtPlayer or reviveOrDie. In co-op it is a knock-down while
+   the other pilot still holds the room, as any death is there. */
+function aboveTake(m) {
+  aboveTakenFx(P, m);
+  if (coopCanDown()) { hostDown(); return; }
+  if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
+  aboveTook = { x: P.x, y: P.y, at: simTick };
+  P.hitBy = '';                          // nothing in the room did this: the report names nobody (AFTER THE RUN)
+  P.hp = 0; gameOver();
+}
+
+// the marks, on the floor under the hulls (render, with the room's own)
+function aboveDrawFloor() {
+  for (const m of aboveMarks) {
+    if (m.t <= 0) continue;
+    ctx.save();
+    try { aboveArtMark(m, 1 - m.t / m.max); } finally { ctx.restore(); }
+  }
+}
+// what comes down toward each mark, and what has landed, over the hulls
+function aboveDrawWorld() {
+  for (const m of aboveMarks) {
+    ctx.save();
+    try {
+      if (m.t > 0) aboveArtSky(m, 1 - m.t / m.max);
+      else aboveArtSpear(m, clamp(1 - m.after / ABOVE.after, 0, 1));
+    } finally { ctx.restore(); }
+  }
+}
+// over the frame, under the HUD: one is coming, wherever the eye is
+function aboveDrawScreen() {
+  let u = -1;
+  for (const m of aboveMarks) if (m.t > 0) u = Math.max(u, 1 - m.t / m.max);
+  if (u < 0) return;
+  ctx.save();
+  try { aboveArtScreen(u); } finally { ctx.restore(); }
+}
+// and on the screen a run ends on, if that is what ended it
+function aboveDrawDead() {
+  if (!aboveTook) return;
+  ctx.save();
+  try { aboveArtDead(aboveTook); } finally { ctx.restore(); }
+}
+
+/* ===========================================================================
+   FROM ABOVE — art hooks
+   DRAWN. The spear is drawn after the Daybreak (Terraria), as asked: a
+   sun's ring behind the blade, a prong of flame either side of it, a red
+   shaft with a core of light, in five colours from white-hot to deep red
+   (ABOVE_SUN). It is pixels: ABOVE_SPEAR is the whole of it, tip first,
+   baked once into a sprite and drawn ABOVE_PX to the pixel. Everything
+   round it (the mark, the daylight, the blow) keeps to the same five.
+
+   The contract. A draw hook only draws: it is handed plain data to read,
+   runs inside ctx.save()/restore(), may use rnd/rndi/pick and uiTime, and
+   must write nothing the run reads (no simRand, nothing kept on a mark).
+   What the art keeps for itself is this machine's own: a let of its own
+   must be named in SNAP_LOCAL, a container in SNAP_LOCAL_OBJS (_aboveSpr
+   is: the baked sprites). Nothing else is kept: what moves is placed by
+   uiTime, so two frames of the same moment are the same picture.
+
+     aboveArtMark(m, u)    the floor, under the hulls, world space. The mark
+                           while it is warned: m = { x, y, r, t, max }, u
+                           from 0 (just aimed) to 1 (landing). m.r is exactly
+                           what is taken: the art must show that edge.
+     aboveArtSky(m, u)     over the hulls, world space, the same moments:
+                           what comes down toward the mark.
+     aboveArtSpear(m, a)   over the hulls, world space: it has landed, and
+                           stands. a from 0 (the blow) to 1 (gone), over
+                           ABOVE.after seconds; m.took is the pilot it took
+                           (0 or 1), or -1 for a miss. A run it ended stops
+                           there, so the last one stays on the dead screen.
+     aboveArtScreen(u)     over the frame, under the HUD, screen space (W, H):
+                           one is coming; u as above, of the nearest.
+     aboveArtDead(t)       the screen a run ended on, over it, screen space:
+                           t = { x, y, at }, where and when it was taken.
+   Effect hooks: called once, at the moment, from the run's own step. Sound,
+   shake and the game's stock bursts; nothing the run reads.
+     aboveMarkFx(m)        one has been aimed
+     aboveLandFx(m)        it has landed
+     aboveTakenFx(p, m)    it took a pilot (p)
+   ABOVE_LABELS writes each hook's name beside what it draws, for an art pass.
+=========================================================================== */
+const ABOVE_SUN = { w: '#fff6cf', y: '#ffd91a', o: '#ff8a00', r: '#f2470a', d: '#b3200e', k: '#2a0703' };   // white-hot, gold, flame, ember, deep red; and the dark it is edged with
+const ABOVE_PX = 3;                      // world pixels to one of the spear's
+const ABOVE_TILT = -0.09;                // how it leans, coming down and standing: out of the upper left
+const ABOVE_LABELS = false;
+// the spear, tip first: W Y O R D are ABOVE_SUN's five, a dot is nothing
+const ABOVE_SPEAR = [
+  '........O........',
+  '........O........',
+  '.......OYO.......',
+  '.......OWO.......',
+  '......OYWYO......',
+  '......OYWYO......',
+  '...O..OYWYO..O...',
+  '...O.OYWWWYO.O...',
+  '..OR.OYWWWYO.RO..',
+  '..OR.OYWWWYO.RO..',
+  '..ORO.OYWYO.ORO..',
+  '..DRO.OYWYO.ORD..',
+  '...DROOYWYOORD...',
+  'O...DRYW.WYRD...O',
+  'OO.ORYW...WYRO.OO',
+  '.OOOYW.....WYOOO.',
+  '..RYYW.....WYYR..',
+  '.OOOYW.....WYOOO.',
+  'OO.ORYW...WYRO.OO',
+  'O...DRYW.WYRD...O',
+  '....DROYWYORD....',
+  '...OR.DOYOD.RO...',
+  '..OR...DYD...RO..',
+  '..O....DWD....O..',
+  '.......DYD.......',
+  '.......DYD.......',
+  '......ODWDO......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......RWR.......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '......ODYDO......',
+  '.......DWD.......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......RYR.......',
+  '.......DWD.......',
+  '......ODYDO......',
+  '.......DYD.......',
+  '.......DYD.......',
+  '.......DWD.......',
+  '.......RYR.......',
+  '.......DYD.......',
+  '......ODYDO......',
+  '.......DYD.......',
+  '.......DWD.......',
+  '......OOYOO......',
+  '......OYWYO......',
+  '.....OYWWWYO.....',
+  '......OYWYO......',
+  '.......OYO.......',
+  '........O........',
+];
+const ABOVE_LEN = ABOVE_SPEAR.length * ABOVE_PX;   // tip to pommel, in the world
+
+function aboveArtLabel(name, x, y) {
+  if (!ABOVE_LABELS) return;
+  ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = 'source-over';
+  ctx.font = "600 9px 'JetBrains Mono', ui-monospace, monospace";
+  ctx.textAlign = 'center';
+  ctx.fillStyle = ABOVE_SUN.w;
+  ctx.fillText('ART HOOK · ' + name, x, y);
+}
+
+/* The sprite, baked point down as it stands: 'lit' in its colours with a
+   dark edge so it reads on any floor, 'hot' the same shape white-hot (the
+   blow), 'ember' the same in red (where it has just been, falling). */
+const _aboveSpr = new Map();
+function aboveSprite(kind) {
+  let s = _aboveSpr.get(kind);
+  if (s) return s;
+  const rows = ABOVE_SPEAR, n = rows.length, w = rows[0].length;
+  const at = (x, y) => { const c = rows[y] && rows[y][x]; return c && c !== '.' ? c : ''; };
+  s = document.createElement('canvas'); s.width = w + 2; s.height = n + 2;
+  const g = s.getContext('2d');
+  for (let y = -1; y <= n; y++) for (let x = -1; x <= w; x++) {
+    const c = at(x, y);
+    if (c) g.fillStyle = kind === 'lit' ? ABOVE_SUN[c.toLowerCase()] : kind === 'hot' ? ABOVE_SUN.w : ABOVE_SUN.r;
+    else if (kind === 'lit' && (at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1))) g.fillStyle = ABOVE_SUN.k;
+    else continue;
+    g.fillRect(x + 1, n - y, 1, 1);      // the tip's row is the sprite's last
+  }
+  _aboveSpr.set(kind, s);
+  return s;
+}
+// the spear, its tip h up its own line from where the frame is, px to the pixel
+function aboveSpearAt(kind, h, alpha, px = ABOVE_PX) {
+  const s = aboveSprite(kind);
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(s, -s.width * px / 2, -h - (s.height - 1) * px, s.width * px, s.height * px);
+}
+// a number that is always the same for the same i: where a spark starts, how fast it climbs
+function aboveHash(i) { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+/* Fire off the spear, in the spear's own frame and on its grid: square
+   sparks that climb and cool. Most come off the head, the rest up the shaft
+   as far as `top`. */
+function aboveFlames(n, amt, top = ABOVE_LEN) {
+  const S = ABOVE_SUN, p = ABOVE_PX;
+  for (let i = 0; i < n; i++) {
+    const h1 = aboveHash(i), h2 = aboveHash(i + 50), h3 = aboveHash(i + 100);
+    const t = (uiTime * (0.9 + h1 * 1.3) + h2) % 1;
+    const head = i % 3 !== 0;
+    const x0 = head ? (h3 - 0.5) * 44 : (h3 - 0.5) * 12;
+    const y0 = head ? -16 - h1 * 50 : -72 - h2 * (ABOVE_LEN - 84);
+    if (-y0 > top) continue;
+    const x = x0 + Math.sin(uiTime * 5 + i) * 3 * t, y = y0 - t * (head ? 36 : 22);
+    ctx.fillStyle = t < 0.25 ? S.w : t < 0.5 ? S.y : t < 0.78 ? S.o : S.r;
+    ctx.globalAlpha = amt * (1 - t);
+    ctx.fillRect(Math.round(x / p) * p, Math.round(y / p) * p, p, p);
+  }
+}
+
+function aboveArtMark(m, u) {
+  const S = ABOVE_SUN, r = m.r, p = ABOVE_PX;
+  const late = clamp((u - 0.7) / 0.3, 0, 1), beat = late > 0 ? 0.5 + 0.5 * Math.sin(uiTime * 34) : 0;
+  ctx.translate(m.x, m.y);
+  // what is taken: daylight on the floor, and the hour filling it from the middle out to its edge
+  ctx.fillStyle = S.r; ctx.globalAlpha = 0.14 + 0.12 * u;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = S.o; ctx.globalAlpha = 0.2 + 0.25 * u + 0.15 * beat;
+  ctx.beginPath(); ctx.arc(0, 0, r * u, 0, TAU); ctx.fill();
+  // a sun's teeth, turned inward: nothing of the mark lies outside what is taken
+  const n = 12, tooth = 7 + 6 * u, half = TAU / n * 0.3, spin = uiTime * 0.5;
+  ctx.fillStyle = S.y; ctx.globalAlpha = 0.5 + 0.4 * u;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a = spin + i * TAU / n;
+    ctx.moveTo(Math.cos(a - half) * r, Math.sin(a - half) * r);
+    ctx.lineTo(Math.cos(a) * (r - tooth), Math.sin(a) * (r - tooth));
+    ctx.lineTo(Math.cos(a + half) * r, Math.sin(a + half) * r);
+  }
+  ctx.fill();
+  // the edge itself, dark under bright, white-hot on the beat at the last
+  ctx.globalAlpha = 0.7; ctx.strokeStyle = S.k; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1; ctx.strokeStyle = beat > 0.5 ? S.w : S.y; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  // where the point goes in: the head's ring, small
+  ctx.globalAlpha = 0.65 + 0.35 * u;
+  ctx.fillStyle = S.w;
+  for (const [x, y] of [[0, -2], [0, 2], [-2, 0], [2, 0]]) ctx.fillRect((x - 0.5) * p, (y - 0.5) * p, p, p);
+  ctx.fillStyle = S.y;
+  for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) ctx.fillRect((x - 0.5) * p, (y - 0.5) * p, p, p);
+  // and the hour closing on the edge from outside
+  ctx.globalAlpha = 0.25 + 0.6 * (1 - u); ctx.strokeStyle = S.o; ctx.lineWidth = 1.5;
+  ctx.setLineDash([7, 5]); ctx.lineDashOffset = -uiTime * 30;
+  ctx.beginPath(); ctx.arc(0, 0, r * (3 - 2 * u), 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  aboveArtLabel('aboveArtMark', 0, r + 16);
+}
+
+function aboveArtSky(m, u) {
+  const S = ABOVE_SUN;
+  /* Its line: from over the top of the frame down to the mark. It waits up
+     there for the first half of the warning, a glint and no more, and falls
+     through the second, faster all the way. */
+  const D = Math.max(60, m.y - (cam.y - H / (2 * camZoom))) + 24;
+  const drop = clamp((u - 0.5) / 0.5, 0, 1), h = D * (1 - drop * drop);
+  ctx.translate(m.x, m.y); ctx.rotate(ABOVE_TILT);
+  ctx.globalCompositeOperation = 'lighter';
+  // daylight down the line: a thread, then a shaft most of the mark wide
+  const wide = lerp(5, m.r * 0.8, u * u);
+  let g = ctx.createLinearGradient(-wide, 0, wide, 0);
+  g.addColorStop(0, rgba(S.r, 0)); g.addColorStop(0.5, rgba(S.o, 0.07 + 0.16 * u)); g.addColorStop(1, rgba(S.r, 0));
+  ctx.fillStyle = g; ctx.fillRect(-wide, -D - 400, wide * 2, D + 400);
+  ctx.strokeStyle = S.w; ctx.globalAlpha = 0.15 + 0.5 * u; ctx.lineWidth = 1 + 3 * u * u;
+  ctx.beginPath(); ctx.moveTo(0, -D - 400); ctx.lineTo(0, 0); ctx.stroke();
+  if (drop <= 0) {
+    // the glint at the top of the frame, quickening
+    const tw = 0.6 + 0.4 * Math.sin(uiTime * (10 + 30 * u)), sz = (9 + 26 * u) * tw, y = -D + 54;
+    ctx.fillStyle = S.w; ctx.globalAlpha = 0.55 + 0.45 * tw;
+    ctx.beginPath();
+    ctx.moveTo(0, y - sz); ctx.lineTo(sz * 0.14, y - sz * 0.14); ctx.lineTo(sz * 0.7, y); ctx.lineTo(sz * 0.14, y + sz * 0.14);
+    ctx.lineTo(0, y + sz * 1.6); ctx.lineTo(-sz * 0.14, y + sz * 0.14); ctx.lineTo(-sz * 0.7, y); ctx.lineTo(-sz * 0.14, y - sz * 0.14);
+    ctx.closePath(); ctx.fill();
+    drawGlow(0, y, sz * 1.5, S.o, 0.5);
+  } else {
+    // falling: the fire it drags, where it has just been, and then the spear itself
+    const tail = 60 + 220 * drop;
+    g = ctx.createLinearGradient(0, -h - ABOVE_LEN - tail, 0, -h - 20);
+    g.addColorStop(0, rgba(S.r, 0)); g.addColorStop(0.6, rgba(S.o, 0.35)); g.addColorStop(1, rgba(S.y, 0.75));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(-10, -h - 20); ctx.lineTo(10, -h - 20); ctx.lineTo(0, -h - ABOVE_LEN - tail); ctx.closePath(); ctx.fill();
+    for (let i = 3; i >= 1; i--) aboveSpearAt('ember', h + i * (10 + 34 * drop), 0.16 * (4 - i));
+    drawGlow(0, -h - 44, 54, S.o, 0.55);
+    ctx.globalCompositeOperation = 'source-over';
+    aboveSpearAt('lit', h, 1);
+    ctx.translate(0, -h);
+    ctx.globalCompositeOperation = 'lighter';
+    aboveFlames(26, 0.9);
+  }
+  aboveArtLabel('aboveArtSky', 0, -m.r - 24);
+}
+
+function aboveArtSpear(m, a) {
+  const S = ABOVE_SUN, r = m.r, k = 1 - a, took = m.took >= 0;
+  /* The blow is spent in the first third. On the screen a run ended on, the
+     clock has stopped at the blow itself: there it is held as a sun behind
+     the head, breathing, and the spear keeps its colours. */
+  const still = state === 'dead';
+  const blow = still ? 0.8 + 0.1 * Math.sin(uiTime * 2.2) : clamp(1 - a / 0.32, 0, 1), e = still ? 0 : 1 - blow;
+  ctx.translate(m.x, m.y);
+  ctx.globalCompositeOperation = 'lighter';
+  // the floor it struck, scorched to the edge of what it took
+  ctx.fillStyle = S.r; ctx.globalAlpha = 0.2 * k * k;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = S.o; ctx.globalAlpha = 0.6 * k; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  if (blow > 0) {
+    // the sun at the point
+    const sr = r * (0.9 + 0.6 * e);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, sr);
+    g.addColorStop(0, rgba(S.w, 0.95)); g.addColorStop(0.3, rgba(S.y, 0.7)); g.addColorStop(0.65, rgba(S.o, 0.3)); g.addColorStop(1, rgba(S.r, 0));
+    ctx.fillStyle = g; ctx.globalAlpha = blow * 0.85;
+    ctx.beginPath(); ctx.arc(0, 0, sr, 0, TAU); ctx.fill();
+    // and its rays going out, long and short by turns; more of them, and further, over a hull it took
+    const n = took ? 16 : 12, reach = took ? 2.6 : 1.8, spin = uiTime * 0.35, out = 1 - Math.pow(1 - e, 3);
+    for (let i = 0; i < n; i++) {
+      const ang = spin + i * TAU / n, long = i % 2 === 0;
+      const r0 = r * 0.5, r1 = r * (1.15 + reach * out) * (long ? 1 : 0.62), hw = TAU / n * (long ? 0.34 : 0.26);
+      ctx.fillStyle = long ? S.y : S.o; ctx.globalAlpha = blow * (long ? 0.8 : 0.6);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang - hw) * r0, Math.sin(ang - hw) * r0);
+      ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+      ctx.lineTo(Math.cos(ang + hw) * r0, Math.sin(ang + hw) * r0);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  // the ring of it going out
+  ctx.strokeStyle = S.y; ctx.globalAlpha = k * 0.6; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r * (1 + 1.6 * a), 0, TAU); ctx.stroke();
+  if (took) {
+    ctx.strokeStyle = S.r; ctx.globalAlpha = k * 0.5; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, r * (1 + 2.6 * a), 0, TAU); ctx.stroke();
+  }
+  // the spear, standing: it rings in the floor from the blow, and stills
+  ctx.rotate(ABOVE_TILT + (still ? 0 : Math.sin(a * 95) * Math.exp(-a * 9) * 0.05));
+  const burn = clamp((a - 0.72) / 0.28, 0, 1), left = ABOVE_LEN * (1 - burn);   // at the last it burns away, pommel first
+  drawGlow(0, -44, 50 + 6 * Math.sin(uiTime * 11), S.o, 0.55 * clamp(k * 4, 0, 1));
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  if (burn > 0) { ctx.beginPath(); ctx.rect(-40, -left, 80, left + ABOVE_PX * 2); ctx.clip(); }
+  aboveSpearAt('lit', 0, 1);
+  if (!still && a < 0.1) { ctx.globalCompositeOperation = 'lighter'; aboveSpearAt('hot', 0, 0.8 * (1 - a / 0.1)); }   // white-hot for the instant of it
+  ctx.restore();
+  ctx.globalCompositeOperation = 'lighter';
+  aboveFlames(30, clamp(k * 4, 0, 1), left);
+  if (burn > 0 && burn < 1) {
+    drawGlow(0, -left, 22, S.y, 0.9);
+    ctx.fillStyle = S.w; ctx.globalAlpha = 0.9;
+    ctx.fillRect(-ABOVE_PX * 2, -left - ABOVE_PX, ABOVE_PX * 4, ABOVE_PX);
+  }
+  aboveArtLabel('aboveArtSpear', 0, r + 16);
+}
+
+function aboveArtScreen(u) {
+  const S = ABOVE_SUN, beat = 0.7 + 0.3 * Math.sin(uiTime * 22), lit = 0.1 + 0.3 * u * beat;
+  ctx.globalCompositeOperation = 'lighter';
+  // daybreak along the top of the frame, harder as it comes
+  let g = ctx.createLinearGradient(0, 0, 0, H * 0.26);
+  g.addColorStop(0, rgba(S.o, lit)); g.addColorStop(0.35, rgba(S.r, lit * 0.45)); g.addColorStop(1, rgba(S.d, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.26);
+  // shafts of it, leaning as the spear leans
+  for (let i = 0; i < 7; i++) {
+    const x = W * (i + 0.5 + 0.25 * Math.sin(uiTime * 0.7 + i * 2.1)) / 7;
+    const w = 14 + 22 * aboveHash(i), len = H * (0.2 + 0.25 * aboveHash(i + 9)) * (0.6 + 0.4 * u), lean = -len * Math.tan(ABOVE_TILT);
+    g = ctx.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, rgba(S.y, 0.05 + 0.12 * u)); g.addColorStop(1, rgba(S.o, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(x - w / 2, 0); ctx.lineTo(x + w / 2, 0); ctx.lineTo(x + w + lean, len); ctx.lineTo(x - w + lean, len); ctx.closePath(); ctx.fill();
+  }
+  // motes of it coming down, square as the spear's own
+  for (let i = 0; i < 18; i++) {
+    const t = (uiTime * (0.35 + 0.5 * aboveHash(i + 20)) + aboveHash(i + 40)) % 1;
+    ctx.fillStyle = i % 3 ? S.y : S.w; ctx.globalAlpha = (0.25 + 0.6 * u) * (1 - t);
+    ctx.fillRect(Math.round(W * aboveHash(i + 60) / 3) * 3, Math.round(t * H * 0.22 / 3) * 3, 3, 3);
+  }
+  // and the edge it comes over
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = rgba(S.w, 0.3 + 0.6 * u * beat); ctx.fillRect(0, 0, W, 2);
+  ctx.fillStyle = rgba(S.y, 0.2 + 0.4 * u * beat); ctx.fillRect(0, 2, W, 2);
+  aboveArtLabel('aboveArtScreen', W / 2, 18);
+}
+
+function aboveArtDead(t) {
+  const S = ABOVE_SUN, cx = W / 2, y = H - 30, line = 'TAKEN FROM ABOVE';
+  // the light it came out of, still on the frame
+  ctx.globalCompositeOperation = 'lighter';
+  let g = ctx.createLinearGradient(0, 0, 0, H * 0.2);
+  g.addColorStop(0, rgba(S.o, 0.12 + 0.03 * Math.sin(uiTime * 1.3))); g.addColorStop(1, rgba(S.d, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.2);
+  ctx.globalCompositeOperation = 'source-over';
+  // the line, in the spear's light
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  const half = ctx.measureText(line).width / 2, lead = 1.5;   // the spacing trails the last letter too: half of it back
+  g = ctx.createLinearGradient(0, y - 7, 0, y + 7);
+  g.addColorStop(0, S.w); g.addColorStop(0.55, S.y); g.addColorStop(1, S.o);
+  ctx.shadowColor = S.r; ctx.shadowBlur = 12;
+  ctx.fillStyle = g; ctx.fillText(line, cx + lead, y);
+  ctx.shadowBlur = 0;
+  // and a spear laid either side of it, pixel for pixel, points to the words
+  for (const d of [-1, 1]) {
+    ctx.save();
+    ctx.translate(cx + d * (half + 16), y); ctx.rotate(d * Math.PI / 2);
+    aboveSpearAt('lit', 0, 1, 1);
+    ctx.restore();
+  }
+  aboveArtLabel('aboveArtDead', cx, H - 12);
+}
+
+function aboveMarkFx(m) {
+  // aimed: a bright pair, rising, and a ring drawn in to the mark
+  Audio_.tone(1180, 0.24, 'sine', 0.1, 1760);
+  Audio_.tone(1770, 0.3, 'triangle', 0.05, 2640, 0.07);
+  Audio_.noise(0.3, 0.05, 6000, 1800, 2);
+  ringFx(m.x, m.y, m.r * 2.2, m.r, ABOVE_SUN.y, 0.3, 2);
+}
+function aboveLandFx(m) {
+  const S = ABOVE_SUN, v = onScreen(m.x, m.y, m.r);
+  shake(0.9 * v);
+  if (v > 0) drawFlashT = Math.max(drawFlashT, 0.14 * v);
+  // white-hot first and fastest, then the flame, then the embers
+  ringFx(m.x, m.y, 6, m.r * 2.4, S.w, 0.5, 5);
+  ringFx(m.x, m.y, 6, m.r * 3.4, S.o, 0.75, 4);
+  ringFx(m.x, m.y, 6, m.r * 4.6, S.r, 1.0, 3);
+  burst(m.x, m.y, 30, S.y, 460, 3.4, 0.7);
+  burst(m.x, m.y, 22, S.o, 300, 3.8, 0.95);
+  burst(m.x, m.y, 14, S.d, 170, 4.4, 1.2);
+  burst(m.x, m.y - 30, 16, S.w, 380, 2.6, 0.6, 0.9, ABOVE_TILT - Math.PI / 2);   // and back up the shaft
+  Audio_.boom();
+  Audio_.tone(2400, 0.5, 'triangle', 0.09, 620);   // the ring of it in the floor
+  Audio_.noise(0.7, 0.12, 4200, 300, 2, 0.04);     // and the fire catching
+}
+function aboveTakenFx(p, m) {
+  const S = ABOVE_SUN;
+  ringFx(p.x, p.y, 8, 260, '#ffffff', 0.7, 6);
+  ringFx(p.x, p.y, 8, 180, S.y, 0.9, 4);
+  ringFx(p.x, p.y, 8, 120, S.r, 1.1, 3);
+  burst(p.x, p.y, 26, S.w, 360, 3, 0.8);
+  burst(p.x, p.y, 18, S.r, 200, 4, 1.1);
+  Audio_.tone(520, 0.7, 'sawtooth', 0.1, 65);
+}
+/* end of FROM ABOVE art hooks */
 
 /* ===========================================================================
    OUTSIDE PILOTS
@@ -77003,7 +77585,8 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
-  'OA_TAGGED', 'OA_FAILED']);             // ONE POINT OH's art: what it tagged, and which hook has thrown
+  'OA_TAGGED', 'OA_FAILED',               // ONE POINT OH's art: what it tagged, and which hook has thrown
+  '_aboveSpr']);                          // FROM ABOVE: the spear, baked
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
@@ -77479,6 +78062,7 @@ function lsHash() {
   n(enemies.length);
   for (const e of enemies) { n(e.id); n(e.x); n(e.y); n(e.hp); }
   n(bullets.length); n(ebullets.length); n(gems.length); n(drops.length);
+  n(aboveNext); n(aboveMarks.length);    // and what is coming for the run (FROM ABOVE)
   if (PVP) PVP.hash(n);                  // PvP mode: the match itself (rounds.js)
   return h;
 }
@@ -77635,6 +78219,7 @@ function runPack() {
   const o = {};
   for (const k of RUN_FLAGS) o[k] = RUN[k];
   o.hlLive = !!RUN.hlLive; o.medals = (RUN.medals || []).slice(); o.chal = (RUN.chal || []).slice();
+  o.above = !!RUN.above;
   o.codex = {};
   for (const k of ['e', 'u', 'm', 'b', 'z']) o.codex[k] = [...(RUN.codex ? RUN.codex[k] : [])];
   return o;

@@ -60,7 +60,7 @@ const press = (target, type, e = {}) => {
 };
 
 const M1 = 'a1'.repeat(16), M2 = 'b2'.repeat(16);
-const ON = (match, names = ['SERAPHIM', 'TOPDOG'], extra = {}) =>
+const ON = (match, names = ['THE PILOT', 'TOPDOG'], extra = {}) =>
   ({ live: Object.assign({ match, since: Date.now(), t: 'ON AIR', x: 'Come and see.', names }, extra), every: 60 });
 
 function boot(store, opts = {}) {
@@ -125,7 +125,7 @@ section('the menu: the card');
   ok(g.run('Live.on && Live.on.match') === M1 && Math.round(g.run('Live.next - performance.now()') / 1000) === 60, 'on air: asked again every minute');
   ok(shown(g), 'a card over the whole menu');
   const c = card(g);
-  ok(c.querySelector('h2').textContent === 'ON AIR' && c.querySelector('.vs').textContent === 'SERAPHIM  VS  TOPDOG' && c.querySelector('.x').textContent === 'Come and see.',
+  ok(c.querySelector('h2').textContent === 'ON AIR' && c.querySelector('.vs').textContent === 'THE PILOT  VS  TOPDOG' && c.querySelector('.x').textContent === 'Come and see.',
      'with the announcement and both names', [c.querySelector('h2').textContent, c.querySelector('.vs').textContent]);
   ok(store(g).some(([k, v]) => k === 'voidrunner_live_seen' && v.split(',').includes(M1)), 'noted in this browser');
   ok(press(c, 'keydown', { key: 'p' }) && g.run('state') === 'menu', 'keys pressed over it are its own, never the game\'s');
@@ -140,7 +140,7 @@ section('the menu: the strip');
   const r = g.run('liveStripRect()');
   ok(r.y > g.run('H') - 40 && r.w === g.run('W'), 'across the foot of the menu', r);
   ok(g.run(`(() => { const calls = []; const was = ctx.fillText; ctx.fillText = function (t) { calls.push(String(t)); return was.apply(this, arguments); };
-             try { renderMenu(); } finally { ctx.fillText = was; } return calls.some(t => /LIVE NOW/.test(t) && /SERAPHIM  VS  TOPDOG/.test(t)); })()`),
+             try { renderMenu(); } finally { ctx.fillText = was; } return calls.some(t => /LIVE NOW/.test(t) && /THE PILOT  VS  TOPDOG/.test(t)); })()`),
      'drawn with the menu, naming both');
   g.run(`mouse.x = W / 2; mouse.y = liveStripRect().y + 10; handleClick();`);
   ok(JSON.stringify(g.win.__opened) === JSON.stringify([g.run('PVP_ORIGIN') + '/play/?watch=' + M1, '_blank', 'noopener']),
@@ -156,8 +156,8 @@ section('once per broadcast, per browser');
   g2.run(SETUP);
   await answer(g2, ON(M1));
   ok(g2.run('Live.on && Live.on.match') === M1 && !shown(g2), 'the same broadcast, the same browser, later: no card again, only the strip');
-  await answer(g2, ON(M2, ['SERAPHIM', '']));
-  ok(shown(g2) && card(g2).querySelector('.vs').textContent === 'SERAPHIM  VS  THE #1', 'another broadcast: the card again (and a name kept off it is THE #1)');
+  await answer(g2, ON(M2, ['THE PILOT', '']));
+  ok(shown(g2) && card(g2).querySelector('.vs').textContent === 'THE PILOT  VS  THE #1', 'another broadcast: the card again (and a name kept off it is THE #1)');
   press(card(g2).querySelector('.go'), 'click');
   ok(JSON.stringify(g2.win.__opened) === JSON.stringify([g2.run('PVP_ORIGIN') + '/play/?watch=' + M2, '_blank', 'noopener']) && !shown(g2),
      'WATCH LIVE opens it in a tab of its own, and the card goes', g2.win.__opened);

@@ -4,7 +4,10 @@
    Open to anyone, signed in or not.
 
      -> { live: { match, since, t, x, names: [the pilot's, the other's] } | null,
-          every }
+          every, above }
+
+   `above` is whether the game's runs are hunted now (index.html, FROM
+   ABOVE): true from a challenge being sent until its fight is fought out.
 
    `every` is how many seconds the game should wait before asking again: a
    minute while one is on or near, a quarter of an hour otherwise, so a game

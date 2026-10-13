@@ -554,6 +554,36 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   the page, never fetched: the hidden pilot's code is in it, so keep it out
   of this folder, which is what a deploy uploads.
 
+**From above** (FROM ABOVE in `index.html`, `npm run test:above`). From the
+moment a challenge is sent until its fight is fought out, the game's runs
+are hunted. `/api/live` says so (`above`), and a run takes that with its
+settings when it starts and keeps it to its end; a co-op guest takes the
+host's.
+- **What comes** is a spear: rare, warned, and the end of the run. It comes
+  for a run in its third sector or later, one every two to four minutes of
+  the fight. A mark shows where it will land (aimed where the hull will be
+  if it keeps its heading), for 1.8 seconds in the third sector and 12%
+  less every sector further, never under half a second. A hull still inside
+  the mark when it lands is taken, whatever it carries: no shield, i-frame,
+  parry, Second Wind or vow answers it. In co-op that pilot goes down, as
+  any death does there.
+- **Where it never comes:** freeplay, challenges, the rush, rites, finales,
+  the hub, ALL HALLOWS' rooms, PvP, and a pilot from outside.
+- **Its numbers** are `ABOVE` at the top of the block. Its rolls are a
+  seeded stream of its own, so a run with it and a run without are the same
+  run in everything else.
+- **Its art** is drawn in the hooks at the block's foot (each listed with
+  what it is handed); the public code names nothing.
+- **How it ends:** a challenge match played to its end decides it, whoever
+  won, and the referee notes which way (`outcome`: `lost` or `won`, as it
+  went for the challenged account). A match one side walked out of decides
+  nothing, and the queue makes it again.
+
+```sh
+npm run challenge -- decide <pilot> lost --remote   # or won; none takes a decision back
+npm run challenge -- calm <pilot> --remote          # hold the hunt at once; `calm <pilot> off` lets it go on
+```
+
 ## Sharing and installing
 
 Small things that help the game travel:
