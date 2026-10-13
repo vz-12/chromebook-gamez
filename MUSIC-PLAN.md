@@ -128,7 +128,7 @@ a bar line when the boss changes phase.
 | `shopkeeper` | THE SHOPKEEPER | jazz-metal: walking bass, ka-ching percussion | 180 swung, E♭ minor |
 | `unwritten` | THE UNWRITTEN | a blank page: sparse piano that writes itself into a full orchestra | 120→180, C minor |
 | `amalgam` "Made of Favourites" | THE AMALGAM (EMBER's rite) | a suite bolted together in the order he builds the body: its own walk, then one motif from each act-one boss (THE WARDEN's riff, FORGEHEART's hammer, BROODMOTHER's long line, THE ARCHIVIST's chorale, NULL's rising statement), a quiet middle of its own, and the main theme to finish | 140 (half-time until the finale), D minor |
-| `root` | ROOT (THE HACKER's rite, the race) | hacker metal: chiptune leads, industrial drums, the race gets its own section | 170, C♯ minor |
+| `root` "Child's Play" (your title) | ROOT (and THE HACKER's rite, the race) | techno and metal, and one tune: the one every playground sings at whoever is losing, five notes. He sings it, louder, higher, and then changes the rules (the whole song a semitone up, half-way through the last phase). A kick on every beat with the bass between, an acid line, a wall of saws, guitars on the taunt's rhythm; a square wave for his voice that slides up into every note; a music box; typewriter keys for hi-hats and its bell when a line is entered. The race is two typists, one a side | 170, C sharp minor |
 | `tribunal` | THE TRIBUNAL | he does not fight: a court of drums, tension that never releases | 90, D minor |
 | `founder` | THE FOUNDER (THE VAGRANT's rite, the duel) | the samurai: taiko, shakuhachi, koto, metal | 150, D minor |
 | `onepointoh` | ONE POINT OH | the version war: the first build's synth against the full score | 140, A minor |
@@ -459,6 +459,37 @@ is pushed until you say; `main` only when you say ship.
      been taken down (the tales' count of it). No covers yet.
    - *The listening room* plays a joined piece whole, or on from any of
      its sections, so a join can be heard without the minutes before it.)*
+
+   *(12 Oct: `root` "Child's Play", your title, "reflecting his
+   personality", "full techno metal". No new recordings. Not shipped.*
+
+   - *Who he is, in the game's own lines:* a child with the admin
+     password. "this is MY room." "it is not cheating if I wrote the
+     rules." "that does not count!" "I was still typing!" So the song is
+     one tune, the playground's taunt (five notes: down a third, up a
+     fourth, down a step, down a third), and nothing else: `CHILD` in
+     `root.py` is the taunt eight times, where it is, a step up, higher,
+     and a run up the dominant where he loses his temper.
+   - *The phases are his moods:* `p1` the taunt over the machine; `p2`
+     half time, the taunt said slowly, and at the end of each half he
+     mashes the keys and the power is cut; `p3` the tantrum, and half-way
+     through he changes the rules: everything goes up a semitone, to D
+     minor, and comes back for the loop as if it had not. His health is
+     his phase, and one of his cheats puts it back to full, so the song
+     goes back to `p1` with it, which is the joke.
+   - *The race* (`race`, THE HACKER's rite) is two typists, one a side:
+     runs up the key traded half a bar each, his first on every other
+     line, the bell at the end of every line.
+   - *Techno:* the kick is made here and tuned to the keynote; the bass
+     plays only between the beats. *His typing* is THE ARCHIVIST's
+     typewriter, and *the music box* is THE HOUSE's.
+   - *The key* is the next whole step down from the three rooms above
+     him: G, F, E flat, C sharp.
+   - *One drum was in the wrong key:* the snare rings on G, a tritone from
+     home here, and is moved up to G sharp.
+   - *Not done, and not asked for yet:* `rootroom` (nothing in the game
+     asks for it today: he turns up in THE HALT's own room) and the
+     `intrusion` sting.)*
    *(12 Oct: `archive` "Struck From the Record" and `curator` "A Piece
    Short" done, with no new samples: Splice's day was spent. The studio
    learned three-four (`Song(beats=3, steps=12)`) for THE CURATOR's waltz,

@@ -302,11 +302,14 @@ await tick(6);
   run(`Save.profile.bestWave = 6; Save.profile.amalgamDone = false; Save.profile.otherKills = 0; Tales.n = {}; Tales.p = {};`);
   const a = ['grid', 'warden', 'foundry', 'forgeheart', 'amalgam', 'mirror', 'corrupt', 'leak'].map(open).join();
   run(`Tales.n['k:forgeheart'] = 1; Save.profile.otherKills = 1; Tales.p['b:theother'] = 4; Tales.n['c:s:leak'] = 1;`);   // and THE LEAK's defences down: no boss waits there
-  const b = ['foundry', 'forgeheart', 'mirror', 'other', 'corrupt', 'archive', 'leak', 'halt', 'breakin'].map(open).join();
+  const b = ['foundry', 'forgeheart', 'mirror', 'other', 'corrupt', 'archive', 'leak', 'halt', 'breakin', 'root'].map(open).join();
   run(`Tales.n['c:s:recursion'] = 1; Tales.n['c:s:halt'] = 1;`);
   const whole = open('breakin');                                    // the three as one piece: kept when all three are
+  run(`Save.profile.rootDone = true;`);
+  const under = open('root');                                       // and what is under them, by the profile's own record of it
+  run(`Save.profile.rootDone = false;`);
   check('the soundtrack: a song is kept by passing its sector or putting its boss down',
-        a === 'true,true,false,false,false,false,false,false' && b === 'true,true,true,true,true,false,true,false,false' && whole === true, `past wave 5: ${a} · and then: ${b} · the three as one: ${whole}`);
+        a === 'true,true,false,false,false,false,false,false' && b === 'true,true,true,true,true,false,true,false,false,false' && whole === true && under === true, `past wave 5: ${a} · and then: ${b} · the three as one: ${whole} · ROOT: ${under}`);
 }
 
 // 3d. ALL HALLOWS: an area has its own track; its two calm sections take turns, and so do its two fights;
