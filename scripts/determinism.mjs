@@ -411,15 +411,35 @@ if (!ONLY) {
   console.log(`${pad('seed', 12)} ${okSeed ? 'matters' : 'DOES NOT MATTER'}  another seed shares ${shared}/${one.prints.length} checkpoints`);
   /* and the test must be able to see a desync: plant one gameplay roll on
      Math.random (which enemy a spawn becomes, one time in ten) and it has to
-     catch it. If this ever passes, the test has gone blind. */
-  vm.runInContext("globalThis.__pet = pickEnemyType; pickEnemyType = (...a) => { const t = __pet(...a); return rnd() < 0.1 ? 'grunt' : t; };", ctx);
+     catch it. If this ever passes, the test has gone blind.
+
+     A roll that rare, in a minute of spawns half of which are grunts already,
+     changes one or two of them a run, and a few pairs in a hundred none in
+     either: two runs that really are the same, and nothing in them to see. So
+     what the roll changed is kept (out here, out of the run, so keeping it
+     cannot change it), and a pair it changed alike says nothing and is flown
+     again. Only a pair it changed differently is a verdict; and a roll that
+     never lands, or that no spawn asks, is as much a failure as one unseen. */
+  vm.runInContext("globalThis.__pet = pickEnemyType; pickEnemyType = (...a) => { const t = __pet(...a), k = __plant.n++, hit = rnd() < 0.1; " +
+                  "if (hit && t !== 'grunt') __plant.hit.push(k + t); return hit ? 'grunt' : t; };", ctx);
   const sc = Object.assign({}, S[0], { steps: 3600 / L });
-  const ca = play(sc, false), cb = play(sc, true);
+  const flown = b => {
+    vm.runInContext('globalThis.__plant = { n: 0, hit: [] }', ctx);
+    return Object.assign(play(sc, b), { spawns: ctx.__plant.n, hits: ctx.__plant.hit.length, hit: ctx.__plant.hit.join() });
+  };
+  const PAIRS = 8;
+  let ca, cb, pairs = 0;
+  do { ca = flown(false); cb = flown(true); pairs++; } while (ca.hit === cb.hit && ca.spawns + cb.spawns > 0 && pairs < PAIRS);
   vm.runInContext('pickEnemyType = __pet;', ctx);
+  const landed = ca.hit !== cb.hit;
   const at = ca.prints.findIndex((h, j) => h !== cb.prints[j]);
-  const okCanary = at >= 0;
+  const okCanary = landed && at >= 0;
   if (!okCanary) failed++;
-  console.log(`${pad('canary', 12)} ${okCanary ? 'caught' : 'MISSED'}  a planted unseeded roll ${okCanary ? 'parted the runs at ' + at + 's' : 'went unseen'}`);
+  const again = pairs > 1 ? `  · flown ${pairs} times: it changed the two runs alike before that` : '';
+  console.log(`${pad('canary', 12)} ` + (okCanary ? `caught  a planted unseeded roll parted the runs at ${at}s${again}`
+    : landed ? `MISSED  a planted unseeded roll went unseen: it changed ${ca.hits} spawns of ${ca.spawns} in one run, ${cb.hits} of ${cb.spawns} in the other`
+    : ca.spawns + cb.spawns === 0 ? 'MISSED  the planted roll was never asked: no spawn went through pickEnemyType'
+    : `MISSED  the planted roll never landed differently in ${pairs} pairs of runs (${ca.spawns} and ${cb.spawns} spawns asked it in the last)`));
 }
 console.log(failed ? `\n${failed} FAILED` : '\nall deterministic');
 process.exit(failed ? 1 : 0);
