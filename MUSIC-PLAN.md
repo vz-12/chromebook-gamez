@@ -5,7 +5,10 @@ so voidrunner.online) only when you say ship. **Disk one shipped on 12 Oct
 as 1.6** (the engine, MUSIC and EFFECTS, four effects, act one's ten
 tracks), **and 1.6.1 the same day** (main = 72b8d0d): THE AMALGAM's theme,
 disk two's first four with the corrupted OTHER's, and THE SOUNDTRACK.
-**1.6.2, also 12 Oct:** ALL HALLOWS' first four tracks and their covers. This file is `.md`, so `.assetsignore` keeps it off
+**1.6.2, also 12 Oct:** ALL HALLOWS' first four tracks and their covers.
+**1.6.3, also 12 Oct:** the rest of disk two (the three rooms under THE
+MIRROR, the three as one piece, ROOT) and their five covers, with main's
+newer work merged in under it. This file is `.md`, so `.assetsignore` keeps it off
 the public site; the repository is public, though, so it names nothing that
 is not released.
 
@@ -398,7 +401,7 @@ is pushed until you say; `main` only when you say ship.
    time, and the fast forms of the tunes are left out. The fight is held to
    a hundred seconds at least and the song takes 117 to come round, so it
    plays through once in a fight; the game asks only for `p1`, and the
-   sections follow each other by `next`. No new samples. Not shipped yet.)*
+   sections follow each other by `next`. No new samples. Shipped in 1.6.1.)*
 6. **THE FRACTURE**, which you named disk two, "Cracks in the Plane".
    `archive`, `curator`, `mirror`, `other`, `leak`, `recursion`, `halt`,
    the `intrusion` sting, `rootroom`, `root`.
@@ -407,8 +410,8 @@ is pushed until you say; `main` only when you say ship.
    three pieces, for the three rooms under THE MIRROR. `leak` "Down the
    Drain", `recursion` "Wheels Within Wheels", `halt` "After You" (the
    first names, which you called terrible, were "Dies in Your Hands", "It
-   Does Not Wait" and "Never Both"). No new recordings. Not shipped: they
-   wait for a listen. `rootroom` and `root` are next, and not begun.*
+   Does Not Wait" and "Never Both"). No new recordings. Shipped 12 Oct in
+   1.6.3. `rootroom` is not begun; `root` follows below.*
 
    - *They join as one piece* (your second note: "make sure they can fit
      into one big piece perfectly"). `breakin` "Breaking and Entering" is
@@ -456,12 +459,13 @@ is pushed until you say; `main` only when you say ship.
    - *THE SOUNDTRACK lists them* after the corrupted OTHER's, and the three
      as one piece after them, kept once all three are. No boss waits in
      these rooms, so a song there is kept once the room's defences have
-     been taken down (the tales' count of it). No covers yet.
+     been taken down (the tales' count of it). Their covers came with 1.6.3.
    - *The listening room* plays a joined piece whole, or on from any of
      its sections, so a join can be heard without the minutes before it.)*
 
    *(12 Oct: `root` "Child's Play", your title, "reflecting his
-   personality", "full techno metal". No new recordings. Not shipped.*
+   personality", "full techno metal". No new recordings. Shipped 12 Oct in 1.6.3, with
+   its cover.*
 
    - *Who he is, in the game's own lines:* a child with the admin
      password. "this is MY room." "it is not cheating if I wrote the
@@ -499,7 +503,7 @@ is pushed until you say; `main` only when you say ship.
    strums a major chord a tone low before it lands. Both are out of these
    two tracks, and `look.py --notes` now lists the notes sounding in each
    bar and flags any outside the key, so the next one is caught before you
-   hear it. Not shipped yet.)*
+   hear it. Shipped in 1.6.1.)*
    *(12 Oct: `mirror` "Once From Each Side", `other` "Your Reflection" and
    `corrupt` "Your Reflection (Corrupted)" done. Your brief: glass shard
    effects, and play with reversing the music while keeping it pleasing;
@@ -513,7 +517,7 @@ is pushed until you say; `main` only when you say ship.
    `inst.backwards()` plays an instrument's notes backwards. I took "the
    first song" to be Entry Vector. The corrupted OTHER is the one change to
    the game's own code: `musicWant` picks `corrupt` when the boss on the
-   floor has the virus. Not shipped yet.)*
+   floor has the virus. Shipped in 1.6.1.)*
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
    `shopkeeper`, `planetarium`, `unwritten`, `amalgam`, `hub`, `stands`,
    `tribunal`, `founder`, `onepointoh`.
@@ -545,7 +549,7 @@ the game. A door on the menu, under PVP, and the M key.
   whenever covers are added: a master is matched to its track by its title.
   They are fetched only for songs that are kept; a song with no picture yet
   shows its colour and its number.
-- **When it ships** it wants a line in the CHANGELOG. Not shipped yet.
+- **When it ships** it wants a line in the CHANGELOG. Shipped in 1.6.1.
 
 ## Reference analysis
 
