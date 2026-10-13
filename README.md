@@ -764,6 +764,40 @@ To see the card again, delete the `vr_tut` cookie for the site (and the
 npm run test:tutorial                      # a few seconds
 ```
 
+## Achievements (the line through the game)
+
+After THE WARDEN, the game used to leave the player to find the rest of it.
+ACHIEVEMENTS (`index.html`) is one line of goals, in the order the game is
+meant to be walked, and each one says how it is done.
+
+- **Six acts, 23 goals today** (`ACHIEVEMENTS`, `ACH_ACTS`): the five sectors;
+  THE UNWRITTEN and THE AMALGAM; THE FRACTURE down to ROOT; THE FOUNDER, his
+  tribunal and the Outsider; the pilots and their rites; ONE POINT OH. A
+  pilot's rite is in the line only once it is built, so VOIDRUNNER's joins by
+  itself when `RITES.runner` has a `start`.
+- **The next goal** is the first in the line not done. The menu's door
+  (ACHIEVEMENTS, **A**, under SOUNDTRACK) names it, the run report says it and
+  how after every ordinary run, and the panel opens on it. Past it the panel
+  shows only where each goal is, not what: no spoilers.
+- **Read off the record,** the way the tales' pages are: each goal is a test of
+  the profile, so an old save, a merged account or a dev grant already has
+  whatever it has done. The profile keeps only the day each was first seen
+  done (`ach`) and which the panel has shown (`achSeen`); `Save.merge` keeps
+  the earlier day and the union.
+- **Announced once.** A goal done in a run gets a card at the top right, there
+  and then. One done anywhere else (on the menu, or merged in) is marked NEW.
+  The first look at a profile, or a look that finds more than three at once (a
+  record arriving), keeps them quietly.
+- **Never the run.** It reads and writes the save, never `simRand`, and `Ach`
+  is this machine's own. PvP's page has none of it.
+- **The art** is blank hooks (`ACH_ART`); `ACHIEVEMENTS-HOOKS.md` says where
+  each is and what it is handed. `ACH_PLAIN` draws a plain panel under them
+  until the art lands.
+
+```sh
+npm run test:ach                           # under a second
+```
+
 ## Memory under fire
 
 Very high fire rate used to crash the tab: every shot and hit started its own

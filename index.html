@@ -1685,6 +1685,11 @@ cv.addEventListener('wheel', e => {
     Ost.scroll = clamp(Ost.scroll + Math.sign(e.deltaY) * 50, 0, ostMaxScroll());
     return;
   }
+  if (state === 'ach') {
+    e.preventDefault();
+    Ach.scroll = clamp(Ach.scroll + Math.sign(e.deltaY) * 54, 0, achMaxScroll());
+    return;
+  }
   if (state === 'chal') {
     e.preventDefault();
     chalScroll = clamp(chalScroll + Math.sign(e.deltaY) * 60, 0, chalMaxScroll());
@@ -1712,6 +1717,7 @@ cv.addEventListener('touchstart', e => {
       if (state === 'changelog' && !logDrag)
         logDrag = { id: t.identifier, y: p.y, s: logScroll };
       if (state === 'ost' && !Ost.drag) Ost.drag = { id: t.identifier, y: p.y, s: Ost.scroll };
+      if (state === 'ach' && !Ach.drag) Ach.drag = { id: t.identifier, y: p.y, s: Ach.scroll };   // ACHIEVEMENTS
       continue;
     }
     if (p.x < W * 0.5 && !touchUI.move) touchUI.move = { id: t.identifier, ox: p.x, oy: p.y, x: p.x, y: p.y };
@@ -1730,6 +1736,10 @@ cv.addEventListener('touchmove', e => {
       if (Math.abs(p.y - Ost.drag.y) > 8) Ost.moved = true;
       if (Ost.moved) Ost.scroll = clamp(Ost.drag.s - (p.y - Ost.drag.y), 0, ostMaxScroll());
     }
+    if (Ach.drag && t.identifier === Ach.drag.id && state === 'ach') {       // ACHIEVEMENTS: the same
+      if (Math.abs(p.y - Ach.drag.y) > 8) Ach.moved = true;
+      if (Ach.moved) Ach.scroll = clamp(Ach.drag.s - (p.y - Ach.drag.y), 0, achMaxScroll());
+    }
     if (state === 'codex') codexTouch('move', t.identifier, p);
   }
 }, { passive: false });
@@ -1740,6 +1750,7 @@ function touchEnd(e) {
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
     if (logDrag && t.identifier === logDrag.id) logDrag = null;
     if (Ost.drag && t.identifier === Ost.drag.id) Ost.drag = null;
+    if (Ach.drag && t.identifier === Ach.drag.id) Ach.drag = null;
     if (state === 'codex') codexTouch('end', t.identifier, tpos(t));
   }
 }
@@ -37289,7 +37300,11 @@ const Save = {
                   // escalation: the permanent mark, and the window that earns it
                   hardened: false, deepRuns: [],
                   // full stats of the best run, so it can be re-submitted later
-                  bestRun: null }),
+                  bestRun: null,
+                  /* ACHIEVEMENTS: the day each goal was first seen done (null
+                     until the record has been looked at once), and the ones
+                     the panel has shown */
+                  ach: null, achSeen: [] }),
 
   readLocal() {
     try {
@@ -37462,6 +37477,8 @@ const Save = {
     out.skipStreak = Math.max(a.skipStreak || 0, b.skipStreak || 0);
     const ar = a.bestRun, br = b.bestRun;
     out.bestRun = (br && br.score || 0) >= (ar && ar.score || 0) ? (br || ar) : (ar || br);
+    // a goal done is done: the earlier day of the two, and seen if seen on either (ACHIEVEMENTS)
+    Object.assign(out, achMerge(a, b));
     return out;
   },
 
@@ -37511,6 +37528,7 @@ const Save = {
     Daily.load();
     Account.boot();          // signed in: the account's save is merged in, and kept up to date
     Tales.sealedAsk();       // any chapter of the story the server has opened (FORGOTTEN TALES)
+    achScan(false);          // what the record has already done, kept (ACHIEVEMENTS)
     // first launch: ask who they are before anything else
     if (!Save.profile.name) { nameBuf = ''; state = 'name'; }
   },
@@ -38056,6 +38074,7 @@ function handleKey(k) {
   if (state === 'rush') { rushKey(k); return; }
   if (state === 'skin') { skinKey(k); return; }
   if (state === 'ost') { ostKey(k); return; }
+  if (state === 'ach') { achKey(k); return; }        // ACHIEVEMENTS
   if (state === 'menu') {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
@@ -38069,6 +38088,7 @@ function handleKey(k) {
     if (k === 'd') { openDaily('menu'); return; }
     if (k === 'b') { openRush('menu'); return; }
     if (k === 'm' && ostDoorUp()) { openOst(); return; }     // THE SOUNDTRACK
+    if (k === 'a' && !PVP) { openAch('menu'); return; }      // ACHIEVEMENTS
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -38336,6 +38356,7 @@ function handleClick() {
   if (state === 'rush') { rushClick(); return; }
   if (state === 'skin') { skinClick(); return; }
   if (state === 'ost') { ostClick(); return; }
+  if (state === 'ach') { achClick(); return; }       // ACHIEVEMENTS
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
@@ -38350,6 +38371,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
     if (inRect(mouse.x, mouse.y, menuOstRect()) && ostDoorUp()) { openOst(); return; }   // THE SOUNDTRACK
+    if (!PVP && inRect(mouse.x, mouse.y, menuAchRect())) { openAch('menu'); return; }     // ACHIEVEMENTS
     if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
@@ -38787,6 +38809,7 @@ function update(dt) {
     return;
   }
   if (state === 'ost') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // THE SOUNDTRACK, over the menu
+  if (state === 'ach') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // ACHIEVEMENTS, over the menu
   if (state === 'daily' || state === 'rush') {
     updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
@@ -50271,11 +50294,12 @@ function render() {
       state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
-      (state === 'skin' && skinOverMenu()) || state === 'ost') {
+      (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach') {
     if (state === 'chal') drawChal();
     else {
       renderMenu();
       if (state === 'ost') drawOst();
+      if (state === 'ach') drawAch();
       if (state === 'name') drawNameEntry();
       if (state === 'lan') { drawLan(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
@@ -50548,6 +50572,7 @@ function render() {
   drawTut();            // FIRST FLIGHT: a lesson, or THE WARDEN's next move, above the tales' line
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
+  achDrawCard();        // a goal done in this run: its card, top right (ACHIEVEMENTS)
   if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
@@ -52877,7 +52902,7 @@ function hlWrMenuish() {
   return state === 'menu' || state === 'name' || state === 'lan' ||
     state === 'chal' || state === 'daily' || state === 'rush' ||
     (state === 'settings' && setFrom === 'menu') || (state === 'changelog' && logOverMenu()) ||
-    (state === 'skin' && skinOverMenu()) || state === 'ost';
+    (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach';
 }
 
 function hlWrFrame() {
@@ -62015,7 +62040,7 @@ function drawVignette() {
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx', 'tour',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'rush', 'skin', 'ost'];
+                          'daily', 'rush', 'skin', 'ost', 'ach'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -62037,6 +62062,7 @@ function uiCursorHot() {
       return inRect(mouse.x, mouse.y, menuLanRect()) ||
              inRect(mouse.x, mouse.y, menuChalRect());
     if (state === 'ost') return ostHot();
+    if (state === 'ach') return achHot();
     if (state === 'lan') {
       const mx = lanMx(), my = lanMy();
       return lanBtns.some(b => inRect(mx, my, b));
@@ -64417,6 +64443,10 @@ function drawDead() {
     ctx.restore();
   });
 
+  // the next goal, said again (ACHIEVEMENTS)
+  const goal = achGoalLine(s);
+  if (goal) row(28, y => achDrawGoal(goal, CENTER, y, wide));
+
   if (recap.tip) row(26, y => {
     const t = 'TIP   ' + recap.tip;
     fitFont(t, wide, '500', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
@@ -64800,6 +64830,7 @@ function renderMenu() {
   drawMenuAcct();
   drawMenuPvp();
   drawMenuOst();        // THE SOUNDTRACK
+  drawMenuAch();        // ACHIEVEMENTS: and the next goal
   drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -71977,6 +72008,774 @@ const Season = {
   }
 };
 
+/* ===========================================================================
+   ACHIEVEMENTS (13 Oct 2026)
+   The way through the game, as one line of goals: each one is the next thing
+   to do, and says how. The menu's door [A] names the next one, the run report
+   says it again after every run, and a run that earns one says so in a card
+   at the top right, there and then. The panel lists the whole line, act by
+   act: what is done, the one to do now, and nothing past it but its place.
+
+   Read off the record, the way FORGOTTEN TALES' pages are (Tales.sync):
+   every goal is a test of the profile, so an old save, a merged account or a
+   dev grant has whatever it has already earned, however it was earned. What
+   the profile keeps is only when each one was first seen (ach: id -> day) and
+   which of them the panel has shown (achSeen), so a goal is announced once.
+   The first look at a profile that has never kept any keeps everything it
+   has already done, quietly: a veteran is not handed twenty cards on their
+   first load.
+
+   Announced only in a run (ACH_LIVE). One earned anywhere else (on the menu,
+   or merged in from another device) is marked NEW on the door and in the
+   panel instead.
+
+   None of it is the run's. It reads the save and the tales, and writes the
+   save; it never rolls simRand, and Ach is this machine's own
+   (SNAP_LOCAL_OBJS). PvP's page has none of it.
+
+   The art is blank hooks (ACH_ART, below; ACHIEVEMENTS-HOOKS.md). Until they
+   are drawn, ACH_PLAIN keeps a plain panel, rows, meters and card under them
+   so the line can be used.
+   ========================================================================= */
+// the acts, in order: what the panel groups the line under
+const ACH_ACTS = [
+  { id: 'rotation', n: 'THE ROTATION',        col: '#67e8f9' },
+  { id: 'record',   n: 'THE RECORD',          col: '#f8fafc' },
+  { id: 'fracture', n: 'CRACKS IN THE PLANE', col: '#5eead4' },
+  { id: 'founder',  n: 'THE FOUNDER',         col: '#fcd34d' },
+  { id: 'statues',  n: 'THE STATUES',         col: '#fb923c' },
+  { id: 'first',    n: 'ONE POINT OH',        col: '#e2e8f0' }
+];
+const ACH_ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+/* The line, in the order it is meant to be walked. Each is
+     id     kept on the profile: never rename one that has shipped
+     act    which ACH_ACTS it is listed under
+     n      its name
+     how    what to do, said once it is the next one
+     done   p => whether the profile has done it (p is Save.profile)
+     prog   p => [have, need, label] for a goal that is counted (optional)
+     on     () => whether it is in the line at all (optional: a rite not built yet)
+   Earned out of order is still earned; the next one is the first not done. */
+const ACHIEVEMENTS = [
+  /* ---- I. THE ROTATION: the five sectors, once through ---- */
+  { id: 'flight', act: 'rotation', n: 'FIRST FLIGHT',
+    how: 'Press SPACE on the menu and fly a run. However short it is, it counts.',
+    done: p => (p.runs | 0) > 0 },
+  { id: 'warden', act: 'rotation', n: 'THE FIRST WALL',
+    how: 'Survive the five waves of THE GRID, sector 01, and put THE WARDEN down at the end of them.',
+    done: () => achDown('warden') },
+  { id: 'forgeheart', act: 'rotation', n: 'STRUCK WHILE HOT',
+    how: 'Get through THE FOUNDRY, sector 02, and put FORGEHEART down.',
+    done: () => achDown('forgeheart') },
+  { id: 'broodmother', act: 'rotation', n: 'MOTHER OF THOUSANDS',
+    how: 'Get through THE HIVE, sector 03, and put BROODMOTHER down.',
+    done: () => achDown('broodmother') },
+  { id: 'archivist', act: 'rotation', n: 'FILED UNDER LOST',
+    how: 'Get through THE VAULT, sector 04, and put THE ARCHIVIST down.',
+    done: () => achDown('archivist') },
+  { id: 'nullcore', act: 'rotation', n: 'THE SCHEDULE SAYS',
+    how: 'Get through THE VOID, sector 05, and put NULL down: the whole rotation, in one run.',
+    done: () => achDown('nullcore') },
+
+  /* ---- II. THE RECORD: what waits past NULL ---- */
+  { id: 'unwritten', act: 'record', n: 'IT IS WRITTEN',
+    how: 'Past NULL, a boss can leave a library door behind it. Go in, hear out whoever is waiting, and say yes.',
+    done: p => !!p.trueEnd },
+  { id: 'amalgam', act: 'record', n: 'MADE OF FAVOURITES',
+    how: 'Once the entry is written, someone will ask whether you want it harder. Say yes, and see it through.',
+    done: p => !!p.amalgamDone },
+
+  /* ---- III. CRACKS IN THE PLANE: the fracture, to the bottom ---- */
+  { id: 'clears', act: 'fracture', n: 'ROUND TWICE',
+    how: 'Clear the whole rotation twice. The second time round, something reaches in.',
+    done: p => !!p.altPath || (p.clears | 0) >= 2,
+    prog: p => [Math.min(2, p.clears | 0), 2, 'CLEARS'] },
+  { id: 'curator', act: 'fracture', n: 'A PIECE SHORT',
+    how: 'Between sectors, take the other portal. Put THE CURATOR down at the end of THE ARCHIVE.',
+    done: () => achDown('curator') },
+  { id: 'theother', act: 'fracture', n: 'YOUR REFLECTION',
+    how: 'Deeper in the fracture: put THE OTHER down at the end of THE MIRROR.',
+    done: p => (p.otherKills | 0) > 0 },
+  { id: 'infection', act: 'fracture', n: 'SOMETHING ELSE GETS IN',
+    how: 'Now and then THE OTHER comes back with something else in it. Put that one down as well.',
+    done: p => !!p.deepFracture },
+  { id: 'root', act: 'fracture', n: 'DELETED',
+    how: 'Below THE MIRROR, break in: take every node down, all the way to the bottom, and delete what lives there.',
+    done: p => !!p.rootDone },
+
+  /* ---- IV. THE FOUNDER: behind THE AMALGAM ---- */
+  { id: 'founder', act: 'founder', n: 'WHO BUILT IT',
+    how: 'Carry what ROOT leaves in your hands into THE AMALGAM. Someone is waiting behind it.',
+    done: p => !!p.metFounder },
+  { id: 'tribunal', act: 'founder', n: 'THE TRIBUNAL',
+    how: 'Go inside when he asks you in, and see his tribunal through to the end.',
+    done: p => !!p.tribunalDone },
+  { id: 'outsider', act: 'founder', n: 'THE HOLE IN THE WALL',
+    how: 'Go back to the menu and wait. Someone is coming through.',
+    done: p => !!p.outsiderIn },
+
+  /* ---- V. THE STATUES: each pilot's rite, in the hub [H] ---- */
+  { id: 'overdrive', act: 'statues', n: 'OVERDRIVE',
+    how: 'In the hub [H], wake EMBER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('ember'), on: () => riteBuilt('ember') },
+  { id: 'hacker', act: 'statues', n: 'THE HACKER FLIES',
+    how: 'Carry every MALWARE at least once. Infected bosses drop them.',
+    done: () => charOpen(CHARS.find(c => c.id === 'hacker')),
+    prog: p => [MALWARE.filter(m => (p.codexM || []).includes(m.id)).length, MALWARE.length, 'MALWARE'] },
+  { id: 'superuser', act: 'statues', n: 'SUPERUSER',
+    how: 'In the hub [H], wake THE HACKER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('hacker'), on: () => riteBuilt('hacker') },
+  { id: 'vagrant', act: 'statues', n: 'THE VAGRANT FLIES',
+    how: 'Climb the BOSS RUSH [B] to the top of its ladder.',
+    done: () => charOpen(CHARS.find(c => c.id === 'melee')),
+    prog: p => [Math.min(RUSH_PEAK, p.rushBest | 0), RUSH_PEAK, 'RUSH'] },
+  { id: 'ronin', act: 'statues', n: 'RONIN',
+    how: 'In the hub [H], wake THE VAGRANT’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('melee'), on: () => riteBuilt('melee') },
+
+  /* ---- VI. ONE POINT OH: VOIDRUNNER's own ---- */
+  { id: 'opodoor', act: 'first', n: 'THE OLD DOOR',
+    how: 'With the fracture open, listen in the portal rooms. When a third gate stands apart from the two, walk through it.',
+    done: p => !!p.opoMet },
+  { id: 'opodone', act: 'first', n: 'TODAY',
+    how: 'Break out of the first build, and win the version war.',
+    done: p => !!p.opoDone },
+  // VOIDRUNNER's rite, once it is built: in the line from the day it is
+  { id: 'origin', act: 'first', n: 'VOIDRUNNER, AWAKE',
+    how: 'In the hub [H], wake VOIDRUNNER’s statue. Fly the run it asks for, to its rite, and win the rite.',
+    done: () => isAwake('runner'), on: () => riteBuilt('runner') }
+];
+// the states a goal is announced in, as it is earned: a run, and its report
+const ACH_LIVE = ['play', 'levelup', 'gear', 'shop', 'planet', 'library', 'malware', 'talk',
+                  'devtalk', 'amalcut', 'pause', 'dead'];
+const ACH_LOOK = 0.5;                    // seconds between looks at the record
+const ACH_CARD = 4.6;                    // how long a card stays up
+const Ach = {
+  t: -1e9,                               // uiTime of the last look
+  cards: [],                             // { a, t } earned in a run, shown one at a time
+  sel: 0,                                // the row the keys are on (an index into achList)
+  scroll: 0, drag: null, moved: false,
+  from: 'menu'
+};
+
+// has this boss ever been put down, on this record? (as the soundtrack asks it)
+function achDown(key) {
+  const p = Save.profile || {};
+  if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
+  const i = STAGES.findIndex(s => s.boss === key);      // a record older than the tales: by how deep it has been
+  return i >= 0 && (p.bestWave | 0) > i * 5 + 5;
+}
+// a goal's own test, asked so that a bad one only ever answers no
+const achAsk = (f, p) => { try { return !!f(p); } catch (e) { return false; } };
+// the line as it stands: the goals that are in it, in order
+function achList() { return ACHIEVEMENTS.filter(a => !a.on || achAsk(a.on)); }
+const achAct = a => ACH_ACTS.find(x => x.id === a.act) || ACH_ACTS[0];
+const achKept = a => !!(Save.profile && Save.profile.ach && Save.profile.ach[a.id]);
+// done: kept, or done since the last look
+const achIs = a => achKept(a) || achAsk(a.done, Save.profile);
+// the next goal: the first in the line not done, or null once it is all done
+function achNext() { return achList().find(a => !achIs(a)) || null; }
+const achFresh = a => achKept(a) && !(Save.profile.achSeen || []).includes(a.id);
+function achProg(a) {
+  if (!a.prog) return null;
+  try { const r = a.prog(Save.profile); return r && r[1] > 0 ? r : null; } catch (e) { return null; }
+}
+// 2026-10-13 -> 13 OCT 2026
+function achDay(d) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(d || '');
+  if (!m) return '';
+  return (+m[3]) + ' ' + ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][+m[2] - 1] + ' ' + m[1];
+}
+
+/* A look at the record: whatever is done and not kept is kept, with today's
+   date. Announced with a card if `live`; marked NEW if not. The first look a
+   profile ever gets keeps what it has without a word, and so does a look
+   that finds more than ACH_BURST at once: no run earns that many in half a
+   second, so it is a record arriving (an account merged in, a grant), and a
+   veteran signing in on a new device is not handed twenty of anything. */
+const ACH_BURST = 3;
+function achScan(live) {
+  if (PVP) return 0;
+  const p = Save.profile;
+  if (!p) return 0;
+  const first = !p.ach || typeof p.ach !== 'object' || Array.isArray(p.ach);
+  if (first) p.ach = {};
+  if (!Array.isArray(p.achSeen)) p.achSeen = [];
+  const got = achList().filter(a => !p.ach[a.id] && achAsk(a.done, p));
+  const quiet = first || got.length > ACH_BURST;
+  for (const a of got) {
+    p.ach[a.id] = talesDay();
+    if (quiet) { if (!p.achSeen.includes(a.id)) p.achSeen.push(a.id); }
+    else if (live) achAnnounce(a);
+  }
+  if (first || got.length) { Save.writeLocal(); Save.flush(); }
+  return got.length;
+}
+// a look, now and then: called every frame from whatever is being drawn
+function achTick() {
+  if (PVP || !Save.profile) return;
+  if (uiTime - Ach.t < ACH_LOOK && uiTime >= Ach.t) return;
+  Ach.t = uiTime;
+  achScan(ACH_LIVE.includes(state));
+}
+function achAnnounce(a) {
+  if (Ach.cards.length >= 4) return;      // a burst says the first few; the panel has the rest
+  Ach.cards.push({ a, t: -1 });
+  try { AA('sound', Audio_, a); } catch (e) {}
+  if (ACH_PLAIN) Audio_.tone(988, 0.09, 'sine', 0.05, 1480);
+}
+/* Two stores, one line: a goal kept on either is kept, on the earlier day,
+   and one seen on either is seen. Junk is dropped: a merge is an untrusted
+   document too. Null on both is null: neither has been looked at yet. */
+function achMerge(a, b) {
+  const obj = v => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+  const A = obj(a.ach), B = obj(b.ach);
+  let ach = null;
+  if (A || B) {
+    ach = {};
+    for (const s of [A || {}, B || {}])
+      for (const k of Object.keys(s)) {
+        const d = s[k];
+        if (typeof k !== 'string' || k.length > 24 || typeof d !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(d)) continue;
+        if (!ach[k] || d < ach[k]) ach[k] = d;
+      }
+  }
+  const ok = k => typeof k === 'string' && k.length > 0 && k.length <= 24;
+  const seen = [...new Set([...(Array.isArray(a.achSeen) ? a.achSeen : []),
+                            ...(Array.isArray(b.achSeen) ? b.achSeen : [])].filter(ok))];
+  return { ach, achSeen: seen };
+}
+
+/* ------------------------------ the card ------------------------------
+   One at a time, top right, the run going on under it. */
+// under the HUD's right-hand stack (score, wave, sector, credits), which ends near 120
+function achCardRect() {
+  const w = Math.min(320, W - 32), h = 58;
+  return { x: W - w - 16, y: 132, w, h };
+}
+function achDrawCard() {
+  achTick();
+  const L = Ach.cards;
+  if (!L.length) return;
+  if (state === 'menu' || PVP) { L.length = 0; return; }
+  const c = L[0];
+  if (c.t < 0) c.t = uiTime;
+  const age = uiTime - c.t;
+  if (age > ACH_CARD) { L.shift(); return; }
+  const k = age / ACH_CARD;
+  const a = clamp(Math.min(age / 0.3, (ACH_CARD - age) / 0.5), 0, 1);
+  const r0 = achCardRect(), slide = (1 - clamp(age / 0.3, 0, 1)) * 40;
+  const r = { x: r0.x + slide, y: r0.y, w: r0.w, h: r0.h };
+  const col = achAct(c.a).col;
+  ctx.save();
+  ctx.globalAlpha = a;
+  if (ACH_PLAIN) {
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = 'rgba(8,13,22,0.92)'; ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.7); ctx.lineWidth = 1.4; ctx.stroke();
+  }
+  AA('card', r, c.a, k);
+  aaTag('card', r.x, r.y - 12);
+  const s = r.h - 16;
+  achBadge(r.x + 8, r.y + 8, s, c.a, { done: true, next: false, locked: false, fresh: true, big: false });
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.14em';
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = rgba(col, 0.9);
+  ctx.fillText('ACHIEVEMENT', r.x + s + 18, r.y + 19);
+  ctx.letterSpacing = '0.04em';
+  fitFont(c.a.n, r.w - s - 30, '800', 14, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillText(c.a.n, r.x + s + 18, r.y + 38);
+  ctx.restore();
+}
+
+/* ----------------------------- the menu's door ----------------------------- */
+function menuAchRect() { return { x: 18, y: 334, w: 176, h: 34 }; }
+function drawMenuAch() {
+  if (PVP) return;
+  achTick();
+  const r = menuAchRect(), col = '#fde68a';
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  const L = achList(), done = L.filter(achIs).length, nx = achNext();
+  const fresh = L.filter(achFresh).length;
+  ctx.save();
+  if (ACH_PLAIN) {
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = hot ? 'rgba(253,230,138,0.14)' : 'rgba(8,13,22,0.72)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  AA('door', r, { done, total: L.length, fresh, hot, next: nx });
+  aaTag('door', r.x + r.w + 4, r.y);
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('★  ACHIEVEMENTS', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  const sub = (nx ? 'NEXT  ' + nx.n : done + ' OF ' + L.length + '  ·  ALL DONE') + '  —  A';
+  fitFont(sub, r.w - 24 - (fresh ? 10 : 0), '500', 9, "Barlow, 'Segoe UI', system-ui, sans-serif", 6.5);
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  ctx.fillText(sub, r.x + 12, r.y + 27);
+  // something earned and not looked at yet: a dot, as the daily's
+  if (fresh) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(r.x + r.w - 11, r.y + 11, 3, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* --------------------------- the run report's goal ---------------------------
+   The next goal, said again under every ordinary run. Not under a challenge,
+   the rush or a daily: those have their own ladder. */
+function achGoalLine(s) {
+  if (PVP || (s && s.chal) || freeRun) return null;
+  return achNext();
+}
+function achDrawGoal(a, cx, y, wide) {
+  const r = { x: cx - wide / 2, y: y + 2, w: wide, h: 24 };
+  AA('goal', r, a);
+  aaTag('goal', r.x, r.y - 12);
+  const pg = achProg(a);
+  const t = 'NEXT GOAL   ' + a.n + '   ·   ' + a.how + (pg ? '   (' + achProgTxt(pg) + ')' : '');
+  ctx.save();
+  ctx.letterSpacing = '0.04em';
+  fitFont(t, wide, '600', 11, "Barlow, 'Segoe UI', system-ui, sans-serif", 7.5);
+  ctx.fillStyle = rgba(achAct(a).col, 0.85);
+  ctx.fillText(t, cx, y + 14);
+  ctx.restore();
+}
+const achProgTxt = pg => (pg[2] === 'RUSH' ? rushK(pg[0]) + ' / ' + rushK(pg[1]) : pg[0] + ' / ' + pg[1]) + ' ' + pg[2];
+
+/* ------------------------------- the panel ------------------------------- */
+function openAch(from) {
+  achScan(false);
+  const L = achList(), nx = achNext();
+  Ach.sel = Math.max(0, nx ? L.indexOf(nx) : L.length - 1);
+  Ach.scroll = 0; Ach.drag = null;
+  Ach.from = from || 'menu';
+  state = 'ach';
+  uiArm = 0.25;
+  Audio_.select();
+  achReveal();
+}
+function closeAch() {
+  // what the panel has shown is seen: the door's dot goes, and the NEW marks
+  const p = Save.profile;
+  if (p && p.ach) {
+    const seen = new Set(p.achSeen || []);
+    let n = 0;
+    for (const k of Object.keys(p.ach)) if (!seen.has(k)) { seen.add(k); n++; }
+    if (n) { p.achSeen = [...seen]; Save.writeLocal(); Save.flush(); }
+  }
+  state = 'menu';
+  Ach.drag = null;
+  uiArm = 0.25;
+  Audio_.select();
+}
+
+function achGeom() {
+  const w = Math.min(900, W - 36), h = Math.min(560, H - 52), x = (W - w) / 2, top = (H - h) / 2;
+  const headH = 64, footH = 56, wide = w >= 640;
+  const listW = wide ? Math.round(w * 0.55) : w - 44;
+  return { x, w, top, h, headH, footH, wide, listW, listX: x + 16, listY: top + headH, viewH: h - headH - footH,
+    sideX: x + 16 + listW + 26, sideW: w - listW - 58,
+    done: { x: x + w - 16 - 150, y: top + h - footH + 10, w: 150, h: 36 } };
+}
+// each goal's standing, for the rows, the badges and the side
+function achStat(a, nx) {
+  const done = achIs(a), next = a === nx;
+  return { done, next, locked: !done && !next, fresh: achFresh(a),
+           day: (Save.profile.ach || {})[a.id] || '', prog: achProg(a) };
+}
+function achLay() {
+  const L = achList(), nx = achNext(), rows = [];
+  let y = 0;
+  ACH_ACTS.forEach((act, ai) => {
+    const mine = L.filter(a => a.act === act.id);
+    if (!mine.length) return;
+    const st = mine.map(a => achStat(a, nx));
+    const open = st.some(s => s.done || s.next);
+    if (rows.length) y += 8;
+    rows.push({ t: 'act', act, i: ai, y, h: 30, open, done: st.filter(s => s.done).length, total: mine.length });
+    y += 30;
+    mine.forEach((a, k) => { rows.push({ t: 'ach', i: L.indexOf(a), a, s: st[k], y, h: 54 }); y += 54; });
+  });
+  return { L, nx, rows, contentH: y + 4 };
+}
+function achMaxScroll() { return Math.max(0, achLay().contentH - achGeom().viewH); }
+function achReveal() {
+  const g = achGeom(), row = achLay().rows.find(r => r.t === 'ach' && r.i === Ach.sel);
+  if (!row) return;
+  if (row.y - 38 < Ach.scroll) Ach.scroll = row.y - 38;
+  if (row.y + row.h > Ach.scroll + g.viewH) Ach.scroll = row.y + row.h - g.viewH;
+  Ach.scroll = clamp(Ach.scroll, 0, achMaxScroll());
+}
+// a goal's emblem: the hook's, over a plain square while the art is blank
+function achBadge(x, y, size, a, s) {
+  if (ACH_PLAIN) {
+    const col = achAct(a).col;
+    ctx.save();
+    roundRect(x, y, size, size, Math.max(3, size * 0.12));
+    ctx.fillStyle = s.done ? rgba(col, 0.18) : '#070b14'; ctx.fill();
+    ctx.strokeStyle = s.done ? rgba(col, 0.75) : s.next ? rgba(col, 0.5) : 'rgba(71,85,105,0.5)';
+    ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = "800 " + Math.round(size * 0.42) + "px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = s.done ? col : s.next ? rgba(col, 0.55) : '#334155';
+    ctx.fillText(s.done ? '★' : s.next ? '☆' : '?', x + size / 2, y + size / 2 + 1);
+    ctx.restore();
+  }
+  AA('badge', x, y, size, a, s);
+  aaTag('badge', x, y - 12);
+}
+
+// a counted goal's progress: the hook's, over a plain bar while the art is blank
+function achMeter(m, pg, col) {
+  if (ACH_PLAIN) {
+    const rr = Math.min(4, m.h / 2);
+    ctx.fillStyle = 'rgba(148,163,184,0.16)';
+    roundRect(m.x, m.y, m.w, m.h, rr); ctx.fill();
+    ctx.fillStyle = rgba(col, 0.8);
+    roundRect(m.x, m.y, Math.max(m.h, m.w * clamp(pg[0] / pg[1], 0, 1)), m.h, rr); ctx.fill();
+  }
+  AA('meter', m, pg[0], pg[1], col);
+  aaTag('meter', m.x, m.y - 13);
+}
+
+function drawAch() {
+  achTick();
+  ctx.fillStyle = 'rgba(4,6,12,0.93)';
+  ctx.fillRect(0, 0, W, H);
+  const g = achGeom(), lay = achLay(), L = lay.L;
+  const ms = Math.max(0, lay.contentH - g.viewH);
+  Ach.scroll = clamp(Ach.scroll, 0, ms);
+  Ach.sel = clamp(Ach.sel, 0, Math.max(0, L.length - 1));
+  const done = L.filter(achIs).length;
+  const face = "'Chakra Petch', Barlow, system-ui, sans-serif", body = "Barlow, 'Segoe UI', system-ui, sans-serif";
+  const gold = '#fde68a';
+
+  if (ACH_PLAIN) {
+    ctx.save();
+    lanRect(g.x, g.top, g.w, g.h, 10);
+    ctx.fillStyle = 'rgba(8,13,22,0.9)'; ctx.fill();
+    ctx.strokeStyle = rgba(gold, 0.30); ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.restore();
+  }
+  AA('back', g.x, g.top, g.w, g.h, { done, total: L.length });
+  aaTag('back', g.x + 6, g.top + 6);
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.letterSpacing = '0.06em';
+  ctx.font = '800 22px ' + face;
+  ctx.fillStyle = gold;
+  ctx.fillText('ACHIEVEMENTS', W / 2, g.top + 25);
+  ctx.restore();
+  const say = !lay.nx ? 'All ' + L.length + ' done. That is the whole of it, for now.'
+    : done + ' of ' + L.length + ' done.  Each one is the next thing to do, and says how.';
+  fitFont(say, g.w - 40, '500', 11, body, 8);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(say, W / 2, g.top + 47);
+
+  // ---- the list
+  ctx.save();
+  ctx.beginPath(); ctx.rect(g.listX - 4, g.listY, g.listW + 8, g.viewH); ctx.clip();
+  const first = lay.rows.find(r => r.t === 'ach'), last = [...lay.rows].reverse().find(r => r.t === 'ach');
+  if (first) {
+    const sx = g.listX + 5 + 21, y0 = g.listY + first.y + first.h / 2 - Ach.scroll;
+    const y1 = g.listY + last.y + last.h / 2 - Ach.scroll;
+    const at = lay.nx ? lay.rows.find(r => r.t === 'ach' && r.a === lay.nx) : last;
+    const yk = g.listY + at.y + at.h / 2 - Ach.scroll;
+    AA('spine', sx, y0, y1, yk);
+    aaTag('spine', g.listX + 2, y0 + 23);
+  }
+  for (const row of lay.rows) {
+    const y = g.listY + row.y - Ach.scroll;
+    if (y + row.h < g.listY - 4 || y > g.listY + g.viewH + 4) continue;
+    if (row.t === 'act') {
+      const r = { x: g.listX, y, w: g.listW, h: row.h };
+      AA('act', r, row.act, { i: row.i, open: row.open, done: row.done, total: row.total });
+      aaTag('act', r.x + r.w - 40, r.y);
+      ctx.textAlign = 'left';
+      ctx.save();
+      ctx.letterSpacing = '0.14em';
+      ctx.font = '700 10px ' + face;
+      ctx.fillStyle = row.open ? rgba(row.act.col, 0.85) : '#475569';
+      ctx.fillText('ACT ' + ACH_ROMAN[row.i] + '   ·   ' + (row.open ? row.act.n : '—  —  —'), g.listX + 2, y + 15);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(row.done + ' / ' + row.total, g.listX + g.listW - 2, y + 15);
+      ctx.restore();
+      if (ACH_PLAIN) { ctx.fillStyle = 'rgba(148,163,184,0.14)'; ctx.fillRect(g.listX, y + 24, g.listW, 1); }
+      continue;
+    }
+    const a = row.a, s = row.s, col = achAct(a).col;
+    const box = { x: g.listX, y: y + 2, w: g.listW, h: row.h - 4 };
+    const sel = Ach.sel === row.i;
+    const hot = inRect(mouse.x, mouse.y, box) && inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+    const rs = Object.assign({ sel, hot }, s);
+    if (ACH_PLAIN) {
+      ctx.fillStyle = s.next ? rgba(col, 0.12) : (sel || hot) ? 'rgba(253,230,138,0.07)' : 'rgba(255,255,255,0.025)';
+      roundRect(box.x, box.y, box.w, box.h, 6); ctx.fill();
+      if (sel || s.next) {
+        ctx.strokeStyle = rgba(s.next ? col : gold, s.next ? 0.7 : 0.45); ctx.lineWidth = 1.3;
+        roundRect(box.x, box.y, box.w, box.h, 6); ctx.stroke();
+      }
+    }
+    AA('row', box, a, rs);
+    aaTag('row', box.x + box.w - 60, box.y + 2);
+    achBadge(box.x + 5, box.y + 4, box.h - 8, a, rs);
+    const tx = box.x + box.h + 6, tw = box.w - box.h - 54;
+    const title = s.locked ? '—  —  —' : a.n;
+    const sub = s.done ? (s.day ? 'DONE   ·   ' + achDay(s.day) : 'DONE')
+              : s.next ? (s.prog ? 'NEXT   ·   ' + achProgTxt(s.prog) : 'NEXT')
+              : 'LATER';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.03em';
+    fitFont(title, tw, '700', 13, face, 9);
+    ctx.fillStyle = s.done ? '#e2e8f0' : s.next ? '#f8fafc' : '#475569';
+    ctx.fillText(title, tx, box.y + box.h / 2 - 8);
+    ctx.letterSpacing = '0.08em';
+    fitFont(sub, tw, '500', 9.5, body, 7);
+    ctx.fillStyle = s.locked ? '#475569' : rgba(col, 0.85);
+    ctx.fillText(sub, tx, box.y + box.h / 2 + 9);
+    ctx.restore();
+    if (s.next && s.prog) achMeter({ x: tx, y: box.y + box.h - 7, w: Math.min(tw, 220), h: 3 }, s.prog, col);
+    if (s.fresh) {
+      ctx.textAlign = 'right';
+      ctx.save();
+      ctx.letterSpacing = '0.12em';
+      ctx.font = '700 9px ' + body;
+      ctx.fillStyle = gold;
+      ctx.fillText('NEW', box.x + box.w - 12, box.y + box.h / 2);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  if (ms > 0) {
+    const tx = g.listX + g.listW + 7;
+    ctx.fillStyle = 'rgba(148,163,184,0.14)';
+    roundRect(tx, g.listY, 3, g.viewH, 1.5); ctx.fill();
+    const th = Math.max(28, g.viewH * (g.viewH / lay.contentH));
+    ctx.fillStyle = rgba(gold, 0.5);
+    roundRect(tx, g.listY + (g.viewH - th) * (Ach.scroll / ms), 3, th, 1.5); ctx.fill();
+  }
+
+  // ---- beside it: the goal the keys are on, large, with how it is done
+  const cur = L[Ach.sel];
+  if (g.wide && cur) {
+    const s = achStat(cur, lay.nx), col = achAct(cur).col;
+    const size = Math.max(80, Math.min(g.sideW * 0.6, g.viewH - 170));
+    const bx = g.sideX + (g.sideW - size) / 2, by = g.listY + 6;
+    achBadge(bx, by, size, cur, Object.assign({ sel: true, hot: false, big: true }, s));
+    const cx = g.sideX + g.sideW / 2;
+    let y = by + size + 24;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '0.04em';
+    const title = s.locked ? '—  —  —' : cur.n;
+    fitFont(title, g.sideW, '800', 18, face, 10);
+    ctx.fillStyle = s.locked ? '#64748b' : '#f1f5f9';
+    ctx.fillText(title, cx, y);
+    y += 20;
+    ctx.letterSpacing = '0.12em';
+    ctx.font = '700 9px ' + body;
+    ctx.fillStyle = s.locked ? '#475569' : rgba(col, 0.9);
+    ctx.fillText('ACT ' + ACH_ROMAN[ACH_ACTS.indexOf(achAct(cur))] + (s.locked ? '' : '   ·   ' + achAct(cur).n), cx, y);
+    ctx.restore();
+    y += 22;
+    // how: said for what is done and what is next; what is further on keeps it
+    const how = s.locked ? 'Further along the line. Do the next one first.' : cur.how;
+    ctx.font = '500 11.5px ' + body;
+    ctx.fillStyle = s.locked ? '#64748b' : '#cbd5e1';
+    for (const ln of wrapLines(how, g.sideW - 8).slice(0, 5)) { ctx.fillText(ln, cx, y); y += 16; }
+    y += 8;
+    if (s.next && s.prog) {
+      achMeter({ x: g.sideX + 12, y, w: g.sideW - 24, h: 8 }, s.prog, col);
+      y += 22;
+      ctx.font = "600 10px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(achProgTxt(s.prog), cx, y);
+      y += 16;
+    }
+    if (s.done && s.day) {
+      ctx.save();
+      ctx.letterSpacing = '0.12em';
+      ctx.font = '600 9.5px ' + body;
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('DONE   ·   ' + achDay(s.day), cx, y + 4);
+      ctx.restore();
+    }
+  }
+
+  // ---- the foot
+  const b = g.done, bh = inRect(mouse.x, mouse.y, b);
+  ctx.fillStyle = bh ? 'rgba(253,230,138,0.2)' : 'rgba(253,230,138,0.08)';
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+  ctx.strokeStyle = rgba(gold, bh ? 1 : 0.7); ctx.lineWidth = 1.6;
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '800 13px ' + body;
+  ctx.fillStyle = gold;
+  ctx.fillText('DONE   [ESC]', b.x + b.w / 2, b.y + b.h / 2);
+  const mid = b.x - g.x - 40;
+  if (!g.wide && cur && mid > 120) {
+    // no room beside the list: the goal the keys are on says how in the foot
+    const s = achStat(cur, lay.nx);
+    const how = s.locked ? 'Further along the line. Do the next one first.'
+              : cur.how + (s.next && s.prog ? '  (' + achProgTxt(s.prog) + ')' : '');
+    ctx.font = '500 10.5px ' + body;
+    const lines = wrapLines(how, mid);
+    if (lines.length > 2) fitFont(how, mid * 2, '500', 10.5, body, 8);
+    const ls = wrapLines(how, mid).slice(0, 3), lh = 13;
+    ctx.fillStyle = s.locked ? '#64748b' : '#cbd5e1';
+    ls.forEach((ln, i) => ctx.fillText(ln, g.x + 16 + mid / 2, b.y + b.h / 2 + (i - (ls.length - 1) / 2) * lh));
+  } else if (mid > 150) {
+    const word = '↑ ↓ to look along the line';
+    fitFont(word, mid, '500', 10.5, body, 8);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(word, g.x + 16 + mid / 2, b.y + b.h / 2);
+  }
+  ctx.textBaseline = 'alphabetic';
+}
+
+function achKey(k) {
+  if (uiArm > 0) return;
+  const n = achList().length;
+  if (k === 'escape' || k === 'a') { closeAch(); return; }
+  if (!n) return;
+  if (k === 'arrowdown' || k === 's') { Ach.sel = (Ach.sel + 1) % n; achReveal(); Audio_.select(); return; }
+  if (k === 'arrowup' || k === 'w')   { Ach.sel = (Ach.sel + n - 1) % n; achReveal(); Audio_.select(); return; }
+  if (k === 'home') { Ach.sel = 0; achReveal(); return; }
+  if (k === 'end')  { Ach.sel = n - 1; achReveal(); return; }
+  if (k === 'n' || k === 'enter' || k === ' ') {     // back to the next one
+    const nx = achNext();
+    if (nx) { Ach.sel = achList().indexOf(nx); achReveal(); Audio_.select(); }
+  }
+}
+// a row is chosen on the click, or on a finger's lift that did not scroll; off the panel shuts it
+function achClick() {
+  if (uiArm > 0) return;
+  const g = achGeom();
+  if (inRect(mouse.x, mouse.y, g.done)) { closeAch(); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.x, y: g.top, w: g.w, h: g.h })) { closeAch(); return; }
+  if (!inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH })) return;
+  const yy = mouse.y - g.listY + Ach.scroll;
+  const row = achLay().rows.find(r => r.t === 'ach' && yy >= r.y && yy < r.y + r.h);
+  if (!row) return;
+  Ach.moved = false;
+  qolOnLift(() => { if (!Ach.moved) { Ach.sel = row.i; Audio_.select(); } });
+}
+function achHot() {
+  const g = achGeom();
+  return inRect(mouse.x, mouse.y, g.done) ||
+         inRect(mouse.x, mouse.y, { x: g.listX, y: g.listY, w: g.listW, h: g.viewH });
+}
+
+/* ===========================================================================
+   ACHIEVEMENTS — art hooks
+   Every visual piece of the line is one of these, and every one is blank.
+   Replace the block whole, or any one entry (ACHIEVEMENTS-HOOKS.md says
+   where each is called and what it is handed). Add ?hooks=1 to the address
+   to tag each piece with its hook's name.
+
+     · Drawing only. A hook changes nothing, and never rolls simRand.
+     · Sandboxed. AA(name, ...) calls it inside ctx.save() / ctx.restore().
+     · Fails alone. A hook that throws loses only its own piece, and is named
+       once in the console. `npm run test:ach` calls every hook and fails if
+       one throws or is never called.
+     · Its own caches. A top-level let, or a const that starts empty, goes in
+       SNAP_LOCAL / SNAP_LOCAL_OBJS (RUN SNAPSHOTS).
+     · ACH_PLAIN. While true the layout draws a plain panel, plain rows, a
+       plain badge (★ done, ☆ next, ? later), a plain meter, door and card
+       under the hooks, and a plain chime on an earn. Set it false once the
+       art draws those itself; the text is always the layout's.
+
+   WHAT THEY ARE HANDED (s, for a goal, is its standing: { done, next,
+   locked, fresh, day, prog, sel, hot, big }; `a` is its ACHIEVEMENTS entry,
+   with a.id to tell one emblem from another and achAct(a).col its act's
+   colour; a rect is { x, y, w, h }, in screen space)
+     back   (x, y, w, h, t)      the panel, behind everything on it. t { done, total }
+     act    (r, act, s)          an act's header over its goals. act is the
+                                 ACH_ACTS entry; s { i, open, done, total }
+     row    (r, a, s)            a goal's row, under its badge and its words
+     badge  (x, y, size, a, s)   a goal's emblem, in a square of `size`: in a
+                                 row, large beside the list (s.big), and on the
+                                 card. One per a.id, or one drawn by act
+     spine  (x, y0, y1, yk)      the line itself, down the list behind the
+                                 badges: from the first goal (y0) to the last
+                                 (y1), done as far as the next one (yk)
+     meter  (r, have, need, col) a counted goal's progress, beside the list
+     door   (r, s)               the menu's door. s { done, total, fresh, hot, next }
+     card   (r, a, k)            the card a goal earned in a run comes up on,
+                                 top right; k 0..1 through its life (ACH_CARD)
+     goal   (r, a)               NEXT GOAL on the run report, under its words
+     sound  (audio, a)           a goal earned, as its card comes up. audio is
+                                 Audio_ (tone, noise). Sound only.
+   ========================================================================= */
+const ACH_PLAIN = true;
+const ACH_HOOK_LABELS = (() => { try { return new URLSearchParams(location.search).get('hooks') === '1'; } catch (e) { return false; } })();
+const AA_TAGGED = new Set();             // hooks already named this frame
+const AA_FAILED = new Set();             // hooks that have thrown, named once
+const AA_CALLED = new Set();             // hooks called at least once (the test reads it)
+let aaFrame = -1;
+function AA(name, ...a) {
+  const f = ACH_ART[name];
+  if (!f) return;
+  AA_CALLED.add(name);
+  if (aaFrame !== uiTime) { aaFrame = uiTime; AA_TAGGED.clear(); }
+  ctx.save();
+  try { f(...a); }
+  catch (e) { if (!AA_FAILED.has(name)) { AA_FAILED.add(name); console.warn('ACHIEVEMENTS art: ' + name + ' threw', e); } }
+  ctx.restore();
+}
+// a piece naming itself: once a frame per hook, small, at (x, y). Off unless ?hooks=1
+function aaTag(name, x, y) {
+  if (!ACH_HOOK_LABELS || AA_TAGGED.has(name)) return;
+  AA_TAGGED.add(name);
+  ctx.save();
+  ctx.font = "600 8px 'Courier New', Consolas, monospace";
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.letterSpacing = '0px';
+  const w = ctx.measureText('ach.' + name).width + 6;
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = 'rgba(250,204,21,0.9)';
+  ctx.fillRect(x, y, w, 11);
+  ctx.fillStyle = '#111827';
+  ctx.fillText('ach.' + name, x + 3, y + 1.5);
+  ctx.restore();
+}
+
+const ACH_ART = {
+  // the panel, behind everything on it
+  back(x, y, w, h, t) {},
+  // an act's header band
+  act(r, act, s) {},
+  // a goal's row, under its badge and words
+  row(r, a, s) {},
+  // a goal's emblem: one per a.id, or one per act
+  badge(x, y, size, a, s) {},
+  // the line down the list, done as far as yk
+  spine(x, y0, y1, yk) {},
+  // a counted goal's progress
+  meter(r, have, need, col) {},
+  // the menu's door
+  door(r, s) {},
+  // the card a goal earned in a run comes up on
+  card(r, a, k) {},
+  // NEXT GOAL on the run report
+  goal(r, a) {},
+  // a goal earned: its sound (sound only)
+  sound(audio, a) {}
+};
+/* ===================== end of ACHIEVEMENTS art hooks ===================== */
+
 /* --------------------------------- awards ---------------------------------
    Held on the profile so a podium survives being offline, and re-fetched
    whenever the board is reachable so a newly closed season lands without
@@ -76986,6 +77785,7 @@ const SNAP_LOCAL = new Set([
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
   'mpHelloKept',                          // the other player's hello, read again once their outside pilot is here
   'oaFrame', 'opoRecordList',             // ONE POINT OH: the art's frame, and the record, built from the CHANGELOG
+  'aaFrame',                              // ACHIEVEMENTS: its art's frame
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
@@ -77003,7 +77803,8 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'RKC',                                  // RONIN's executions as drawn: the art layer, with draw closures of its own
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
-  'OA_TAGGED', 'OA_FAILED']);             // ONE POINT OH's art: what it tagged, and which hook has thrown
+  'OA_TAGGED', 'OA_FAILED',              // ONE POINT OH's art: what it tagged, and which hook has thrown
+  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
