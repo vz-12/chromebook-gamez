@@ -246,7 +246,9 @@ const S = [
   { name: 'vagrant',    char: 'melee',  seed: 104, steps: 18000, kit: true },
   { name: 'rush',       char: 'ember',  seed: 105, steps: 36000, kit: true, starter: 'startRush()' },
   { name: 'keeper',     char: 'runner', seed: 106, steps: 7200,  starter: 'startKeeperFight()' },
-  { name: 'unwritten',  char: 'runner', seed: 107, steps: 7200,  starter: 'resetGame(); startUnwritten()' },
+  // THE UNWRITTEN from IT CLOSES, so every beat is on the page (the ink, the seam, the tears, the draft,
+  // the rush), and from the start again each time it rewinds
+  { name: 'unwritten',  char: 'runner', seed: 107, steps: 7200,  starter: 'resetGame(); startUnwritten(); unwJump(3)' },
   { name: 'amalgam',    char: 'ember',  seed: 108, steps: 7200,  kit: true, starter: 'resetGame(); startAmalgam()' },
   { name: 'root',       char: 'hacker', seed: 109, steps: 7200,  kit: true, starter: 'resetGame(); startRoot()' },
   { name: 'tribunal',   char: 'melee',  seed: 110, steps: 7200,  kit: true, starter: 'resetGame(); startTribunal()' },

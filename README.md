@@ -828,6 +828,45 @@ meant to be walked, and each one says how it is done.
 npm run test:ach                           # under a second
 ```
 
+## THE UNWRITTEN (the record's last entry)
+
+The fight past the library's last door, rewritten on 15 Oct 2026. The first
+cut was older than every other finale: a pool of 2.2 million behind a 95%
+cut, tears that opened under you and killed outright, and an attempt that
+sped up the longer it ran. It could not be closed without godmode. Now it is
+built the way THE AMALGAM, ROOT and THE FOUNDER are (`THE UNWRITTEN` in
+`index.html`).
+
+- **Its health is lines.** Fifteen on a first attempt. Hitting a half fills
+  its gash (shown as a ring round it); full, the half opens for three
+  seconds. Open both at once and a line is written: the only thing that
+  hurts it. The build decides how fast a gash fills, never how many lines
+  there are. A line written throws both halves off, wipes the ink in the
+  air and mends each pilot a little.
+- **Five sequences,** each with its banner, each adding a beat: A BLANK PAGE
+  (ink from each half in turn, the seam pulled taut and cut), THE PAGE TEARS
+  (the floor comes out in patterns, on a warning you can act on), IT WRITES
+  YOU BACK (an ink draft of your hull, flying your weapon and copying your
+  cards), IT CLOSES (both halves rush through you at once, then are winded)
+  and THE LAST LINE (all of it, faster). Every attack tells you, commits,
+  and leaves it out of position. What it lands is a share of your own
+  health, so the depth you opened the library at changes nothing.
+- **Dying rewinds.** Back to the start of the fight, never the end of the
+  run, and the page is a tenth shorter for every death (it was a fiftieth),
+  down to five lines. The sequences hold for less of it too, so the fight
+  gets shorter as well as lighter. Never announced; the count is on the bar.
+- **Co-op:** one pilot down is a knock-down, a line written stands it back
+  up, and the fight rewinds for both only when both are down.
+
+```sh
+npm run test:unwritten                     # about ten seconds
+```
+
+The test checks the page, the wound, the rewind, co-op and RONIN's
+execution, then flies a bot about as good as a person through it with each
+of the four pilots, and a weak build too, and every one must close it. `npm
+test` plays it from IT CLOSES for determinism (`unwritten`).
+
 ## Memory under fire
 
 Very high fire rate used to crash the tab: every shot and hit started its own
