@@ -1110,7 +1110,10 @@ function musicWant(dt) {
   if (state !== 'play') return undefined;
   // the set pieces that are not one boss on the floor
   if (opo && opo.stage === 'fight') return ['onepointoh', 'p' + ((opo.ph | 0) + 1)];
-  if (unwritten) return ['unwritten', 'p' + ((unwritten.seq | 0) + 1)];
+  // THE UNWRITTEN by its sequence, A BLANK PAGE to THE LAST LINE (p1 to p5: its track says which of its
+  // sections each one plays). A death rewinds the fight to its start, and its track with it: 'again' is
+  // asked for through the rewind and the first two seconds after it, so the next piece is the rewind's
+  if (unwritten) return ['unwritten', unwDeadT > 0 || (unwritten.t < 2 && (RUN.unwrittenDeaths | 0) > 0) ? 'again' : 'p' + ((unwritten.seq | 0) + 1)];
   if (amalgam) return ['amalgam', 'p1'];
   if (tribunal) return ['tribunal', 'p1'];
   if (vrite) return ['founder', vrite.duel ? 'p2' : 'p1'];
@@ -68907,7 +68910,7 @@ const OST_TRACKS = [
   ['hive', 's', 'THE HIVE', 1],       ['broodmother', 'b', 'broodmother', 1],
   ['vault', 's', 'THE VAULT', 1],     ['archivist', 'b', 'archivist', 1],
   ['void', 's', 'THE VOID', 1],       ['null', 'b', 'nullcore', 1],
-  ['amalgam', 'b', 'amalgam', 1],
+  ['unwritten', 'b', 'unwritten', 1], ['amalgam', 'b', 'amalgam', 1],
   ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
   ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2],
   ['leak', 's', 'THE LEAK', 2],       ['recursion', 's', 'THE RECURSION', 2], ['halt', 's', 'THE HALT', 2],
@@ -68932,6 +68935,7 @@ function ostBeat(key) {
   const p = Save.profile || {};
   if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
   if (key === 'amalgam') return !!p.amalgamDone;
+  if (key === 'unwritten') return !!p.trueEnd;            // closing it is what the true ending is
   if (key === 'theother') return (p.otherKills | 0) > 0;
   if (key === 'root') return !!p.rootDone;
   const hl = Object.values(HL_AREAS).find(a => a.stage.boss === key);   // an area's boss: the soul's quest for him, done
@@ -68953,6 +68957,7 @@ function ostOpen(t) {
 function ostHint(t, st) {
   if (t[1] === 'u') return 'KEPT WHEN THE THREE BEFORE IT ARE';
   if (t[1] === 'v') return 'KEPT WHEN SOMETHING ELSE GETS IN, AND IS PUT DOWN';
+  if (t[2] === 'unwritten') return 'KEPT WHEN IT IS CLOSED';
   const tag = st ? st.tag.toUpperCase() : '';
   if (t[1] === 's') return 'KEPT WHEN ' + (tag || 'IT') + ' IS PASSED';
   return tag ? 'KEPT WHEN THE BOSS OF ' + tag + ' IS PUT DOWN' : 'KEPT WHEN IT IS PUT DOWN';
@@ -70498,6 +70503,12 @@ function drawPauseAssist() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 15, v: '1.6.4', date: '14 OCT 2026', lines: [
+    ['new', 'THE UNWRITTEN has a song. It begins on a blank page, it is written as the fight goes on, '
+          + 'and it starts over every time you do. THE SOUNDTRACK keeps it once it is closed.'],
+    ['fix', 'EMBER\'s lance sounds like a beam instead of a buzz: warmer, steadier, and easier to hear '
+          + 'a thousand times in one run.']
+  ] },
   { id: 14, v: '1.6.3', date: '12 OCT 2026', lines: [
     ['new', 'Disk two is whole. THE LEAK, THE RECURSION and THE HALT have music of their own: one '
           + 'score in three pieces, each a step lower than the last. And ROOT has a song. '
