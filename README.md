@@ -644,9 +644,21 @@ costs seconds, not the run. CONTINUE, in `index.html`, has the details:
   let go, and the menu says so.
 - Not kept: co-op, freeplay, outside pilots, ALL HALLOWS' areas, the hub, a
   scene in progress, PvP and the beta. Nothing is uploaded.
+- A run that cannot be taken back is let go, and the menu says so: nothing
+  of it stays half-restored under the menu, and it is not offered again.
 
 A new top-level variable reaches the snapshot without being listed, as it
 does for co-op; anything that is this machine's own goes in `SNAP_LOCAL`.
+A top-level `const` object that the drawing writes the run's things into
+goes in `SNAP_LOCAL_OBJS`. Otherwise the snapshot reads it as one of the
+game's tables, writes the run's object as a pointer into it, and another
+page reads that pointer back as nothing. That is how a pilot in an ALL
+HALLOWS prize skin (`HLW.P`) once came back from CONTINUE as no pilot at
+all: an empty floor, with the same broken run offered after every reload.
+
+```sh
+npm run test:continue                      # about 30 seconds: kept, continued, abandoned, in every prize skin
+```
 
 ## ONE POINT OH (VOIDRUNNER's finale, part one: the route)
 

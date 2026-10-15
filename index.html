@@ -69722,15 +69722,22 @@ function runRestore() {
   let snap = null;
   try { snap = JSON.parse(localStorage.getItem(RUN_SNAP_KEY) || 'null'); } catch (e) { snap = null; }
   if (!m || !snap || snap.build !== buildId()) { runSaveClear(); runNote('THAT RUN COULD NOT BE FOUND'); return false; }
+  /* Everything that can fail is in here, and the run is paused only once all
+     of it has worked. A throw after it once left the run paused with no
+     pilot: every frame threw (an empty floor), and the save was neither
+     spent nor cleared, so every reload offered the same broken run again. */
   QOL.resuming = true;
   try {
     applyChar(CHARS.findIndex(c => c.id === m.pilot));
     resetGame();
     snapRead(snap);
+    if (!P || typeof P !== 'object') throw new Error('the run came back without its pilot');
+    cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   } catch (e) {
     console.error('VOIDRUNNER: the saved run could not be restored.', e);
     QOL.resuming = false;
     runSaveClear();
+    try { resetGame(); } catch (e2) { /* the menu draws without a run */ }   // nothing half-restored left under the menu
     state = 'menu';
     runNote('THAT RUN COULD NOT BE RESTORED');
     return false;
@@ -69740,7 +69747,6 @@ function runRestore() {
   QOL.runId = m.id || '';
   QOL.runN = (m.n || 0) + 1;
   state = 'pause'; QOL.runPaused = true;
-  cam.x = P.x; cam.y = P.y; cam.trauma = 0;
   uiArm = 0.4;
   return true;
 }
@@ -79604,6 +79610,11 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
   'OA_TAGGED', 'OA_FAILED',               // ONE POINT OH's art: what it tagged, and which hook has thrown
+  /* ALL HALLOWS: a prize skin's wearer, and the pilot it last dressed. It
+     holds the run's P while the skin is worn, so read as one of the game's
+     tables it had the pilot written as "HLW.P", and a page where nothing had
+     been worn yet read that back as no pilot at all (CONTINUE). */
+  'HLW',
   '_aboveSpr',                            // FROM ABOVE: the spear, baked
   'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
@@ -79794,7 +79805,16 @@ function snapRead(snap) {
   const [vn, on] = snap.names;
   const byId = new Map(), objVals = R.getObjs(), byName = new Map(R.objs.map((n, i) => [n, objVals[i]]));
   const KEEP = SNAP;                      // what could not travel: kept as this machine has it, where it has it
-  const look = path => { let v = SNAP.statics.get(path[0]); for (let i = 1; i < path.length && v != null; i++) v = v[path[i]]; return v; };
+  /* Only objects are written this way, so a path that leads nowhere here is
+     a snapshot that took something of the run for one of the game's tables.
+     It fails before anything is taken over, rather than putting nothing in
+     that thing's place. */
+  const look = path => {
+    let v = SNAP.statics.get(path[0]);
+    for (let i = 1; i < path.length && v != null; i++) v = v[path[i]];
+    if (v == null) throw new Error('a snapshot pointing at ' + path.join('.') + ', which this copy does not have');
+    return v;
+  };
   const dec = e => {
     if (e === null || typeof e !== 'object') return e;
     if (e.n !== undefined) return e.n === '-0' ? -0 : Number(e.n);
