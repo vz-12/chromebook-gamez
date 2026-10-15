@@ -70,7 +70,7 @@ const MANIFEST = {
     unwritten: { bpm: 180, pre: PRE, segs: [seg('unwritten/intro', 2), seg('unwritten/p1', 2), seg('unwritten/p2', 2), seg('unwritten/p3', 2), seg('unwritten/again', 2)],
                  sections: { intro: { segs: [0], lock: true, next: 'p1' }, p1: { segs: [1] }, p2: { segs: [2] }, p3: { segs: [3] },
                              again: { segs: [4], lock: true, next: 'p1' } },
-                 moods: { p1: 'p1', p2: 'p2', p3: 'p3', again: 'again' }, start: 'intro', title: 'Torn Pages' },
+                 moods: { p1: 'p1', p2: 'p1', p3: 'p2', p4: 'p3', p5: 'p3', again: 'again' }, start: 'intro', title: 'Torn Pages' },
     codex: { bpm: 120, pre: PRE, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
   },
   stings: { 'boss-in': { f: 'stings/boss-in.opus', hit: 1.5 }, 'boss-down': { f: 'stings/boss-down.opus' } }
@@ -347,19 +347,19 @@ await tick(6);
         `shut: ${shut} · open: ${open} · boss down: ${kept} · by the quest: ${quest}`);
 }
 
-// 3e. THE UNWRITTEN: its phases by its thirds; and a death, which rewinds the fight to its start, rewinds the
+// 3e. THE UNWRITTEN: its sections by its five sequences; and a death, which rewinds the fight to its start, rewinds the
 //     track as well: the rewind section, whole, and then the first phase
 {
   const T = now();
-  run(`state = 'play'; stage = STAGES[0]; enemies.length = 0; RUN.unwrittenDeaths = 0; unwDeadT = 0; unwritten = { phase: 0, t: 5 };`);
+  run(`state = 'play'; stage = STAGES[0]; enemies.length = 0; RUN.unwrittenDeaths = 0; unwDeadT = 0; unwritten = { seq: 0, t: 5 };`);
   await tick(12);
   const Tp = now();
-  run(`unwritten.phase = 2;`);
+  run(`unwritten.seq = 4;`);                                    // THE LAST LINE: the whole orchestra
   await tick(8);
   const Td = now();
   run(`unwDeadT = 2; RUN.unwrittenDeaths = 1;`);                 // dead: the interstitial
   await tick(2);
-  run(`unwDeadT = 0; unwritten = { phase: 0, t: 0 };`);         // rewound: the fight from its start
+  run(`unwDeadT = 0; unwritten = { seq: 0, t: 0 };`);         // rewound: the fight from its start
   await tick(2);
   run(`unwritten.t = 2.5;`);
   await tick(10);
@@ -368,7 +368,7 @@ await tick(6);
   const after = all.filter(s => s.t0 >= Td).map(name).join(' ');
   run(`unwritten = null; RUN.unwrittenDeaths = 0;`);
   await tick(6);
-  check('the unwritten: by its thirds; a death plays the rewind, whole, then the first phase',
+  check('the unwritten: by its sequences; a death plays the rewind, whole, then the first phase',
         first.startsWith('intro p1') && /p3/.test(toP3) && /^p3 again p1|^again p1/.test(after) && (after.match(/again/g) || []).length === 1 && !gapless(all),
         `${first} | then ${toP3} | after the death: ${after}`);
 }

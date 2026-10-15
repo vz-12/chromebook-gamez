@@ -329,6 +329,8 @@ def song():
     for m in ('C4', 'Eb4', 'G4'): g.note('pad', 1, 0, 23, midi(m), 0.5)
     g.note('fx', 1, 23.99, 1, 60, 0.22, s='rev', lead=1.6)
 
-    s.moods = {'p1': 'p1', 'p2': 'p2', 'p3': 'p3', 'again': 'again'}
+    # the fight's five sequences (THE UNWRITTEN, rewritten 15 Oct): A BLANK PAGE and THE PAGE TEARS are the two
+    # halves, IT WRITES YOU BACK is the copy, IT CLOSES and THE LAST LINE the whole orchestra
+    s.moods = {'p1': 'p1', 'p2': 'p1', 'p3': 'p2', 'p4': 'p3', 'p5': 'p3', 'again': 'again'}
     s.start = 'intro'
     return s

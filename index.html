@@ -1110,9 +1110,10 @@ function musicWant(dt) {
   if (state !== 'play') return undefined;
   // the set pieces that are not one boss on the floor
   if (opo && opo.stage === 'fight') return ['onepointoh', 'p' + ((opo.ph | 0) + 1)];
-  // THE UNWRITTEN by its thirds. A death rewinds the fight to its start, and its track with it: 'again' is
+  // THE UNWRITTEN by its sequence, A BLANK PAGE to THE LAST LINE (p1 to p5: its track says which of its
+  // sections each one plays). A death rewinds the fight to its start, and its track with it: 'again' is
   // asked for through the rewind and the first two seconds after it, so the next piece is the rewind's
-  if (unwritten) return ['unwritten', unwDeadT > 0 || (unwritten.t < 2 && (RUN.unwrittenDeaths | 0) > 0) ? 'again' : 'p' + ((unwritten.phase | 0) + 1)];
+  if (unwritten) return ['unwritten', unwDeadT > 0 || (unwritten.t < 2 && (RUN.unwrittenDeaths | 0) > 0) ? 'again' : 'p' + ((unwritten.seq | 0) + 1)];
   if (amalgam) return ['amalgam', 'p1'];
   if (tribunal) return ['tribunal', 'p1'];
   if (vrite) return ['founder', vrite.duel ? 'p2' : 'p1'];
@@ -3084,7 +3085,7 @@ const CODEX_B = {
   founder:    { d: 'He has never been outside this room and does not believe there is one. What he has is people, and they are not a bodyguard, they are the whole of him — turn them and he is smaller, and you turn them by bleeding in front of them instead of taking the door he keeps open for you. Empty the stands and he does not die. He reaches behind the seat for something he has never needed, and it turns out he is very good with it.' },
   root:       { d: 'Nobody wrote it. It is what settles at the bottom of a game this easy to edit: an idea the room has of a player who will not lose, holding every power you would hand yourself from a console. It cannot be touched while it is idle, and it knows it — the only moment it is open is the moment it is entering something. The line arrives as loose characters on the floor, and breaking them before it finishes is the whole of the fight. It will tell you that this does not count. It is, in fairness, a child about it.' },
   amalgam:    { d: 'He did not build anything new. He took the ones he already had, cut them up and bolted them into the shape of a person — two wardens for arms, two broodmothers for legs, the thing that held no ink for a spine — and he talked the whole time he was doing it. It shakes the floor when it walks. You are not permitted to die to it; every killing blow just moves your decimal point one place to the right.' },
-  unwritten:  { d: 'Two halves of one thing, standing apart. Hurt either and the other closes the wound, so both have to be opened at once. It deletes the page you are standing on and writes your own build back at you. There was never an entry for it. There is one now.' }
+  unwritten:  { d: 'Two halves of one thing, standing either side of you. Cut one open and the other closes it, so both have to be open at once, and every time they are, a line of it is written. It tears the page out from under you, and writes you back at yourself a card at a time. There was never an entry for it. There is one now.' }
 };
 
 /* ------------------------------ the tales ---------------------------------
@@ -5437,14 +5438,12 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (e.amalPart)
     dmg *= 1 - (AMAL_DR[P.weapon] !== undefined ? AMAL_DR[P.weapon] : 0.95);
 
-  /* THE UNWRITTEN keeps its health on the fight, not on either body: damage is
-     banked and only sticks if the twin was opened in the same window. */
+  /* THE UNWRITTEN keeps its health on the fight, in lines, not on either
+     body: a hit fills that half's gash (unwHit), and only both open at once
+     writes a line. No figures: the gash filling is the number. */
   if (e.boss === 'unwritten' && unwritten) {
     unwHit(e, dmg);
     e.flash = Math.min(1, e.flash + 0.65);
-    if (!opts.silent || rnd() < 0.34)
-      floatText(e.x + rnd(e.r * 0.7, -e.r * 0.7), e.y - e.r * 0.5, Math.round(dmg),
-                crit ? COL.crit : '#e2e8f0', crit ? 19 : 13, -46);
     if (crit) { Audio_.crit(); shake(0.05); } else if (!opts.silent) Audio_.hit();
     return;
   }
@@ -5876,9 +5875,12 @@ function reviveOrDie() {
     /* THE UNWRITTEN does not let you lose the run. It rewinds instead, and
        Second Wind is not spent doing it — the attempt simply did not happen.
        This must catch every call while the fight is live, not just the first:
-       its bodies keep dealing contact damage through the interstitial, and
-       falling through a second time would end the run for real. */
+       a blow can still land through the interstitial, and falling through a
+       second time would end the run for real. In co-op a pilot is knocked
+       down while the other holds the page (a line written stands it back
+       up), and the fight rewinds for both only when both are down. */
     if (unwritten) {
+      if (unwDeadT <= 0 && coopCanDown()) { hostDown(); return; }
       P.hp = 0;
       if (unwDeadT <= 0) unwFail();
       return;
@@ -38997,6 +38999,7 @@ function update(dt) {
   updateLibrary(dt);
   replay.push({ x: P.x, y: P.y, ang: P.ang });
   if (replay.length > 260) replay.shift();
+  if (unwritten) unwUpdate(wdt);         // THE UNWRITTEN steers its halves, then the room moves them
   updateEnemies(wdt);
   if (PVP) PVP.as(null);                 // the world is no pilot's again (PvP mode)
   hlTick(dt, wdt);           // ALL HALLOWS: the areas, THE BACKLOG's pile, the barks
@@ -40856,47 +40859,114 @@ function bossKeeper(e, dt, ux, uy, d) {
 }
 
 /* ---------------------------- THE UNWRITTEN --------------------------------
-   The last entry, and the only fight in the game you are expected to lose
-   repeatedly. Three mechanics, none of which exist anywhere else:
+   The last entry. Rewritten 15 Oct 2026 to the rules THE AMALGAM, ROOT and
+   THE FOUNDER were built to (ONE-POINT-OH-PLAN.md, "The rules all three
+   keep"), because the first cut was older than all of them and it showed: a
+   pool of 2.2 million behind a 95% cut, measured against two hulls, so a
+   modest build hit it for single figures and a maxed one for five minutes;
+   tears that opened under you on purpose and killed outright; and an attempt
+   that got faster the longer it ran. Nobody closed it without godmode, and
+   the five minutes of it were the same ten seconds over and over.
 
-   1. TWO BODIES, ONE WOUND. Both halves share a health pool. Damage to one is
-      undone by the other within LINK_HEAL seconds unless the other is also hit
-      inside that window, so every kill requires splitting your attention.
-   2. THE PAGE TEARS. Cells of the arena are deleted outright and are lethal to
-      stand in. The safe floor keeps moving and keeps shrinking.
-   3. IT WRITES YOU BACK. It copies your own upgrades and attacks with them.
+   What it is stays. What it does is new.
 
-   Dying does not end the run: time rewinds to the start of the fight and its
-   maximum health quietly drops, so attrition across attempts is the intended
-   route through. That reduction is never shown.
+     TWO HALVES, ONE WOUND   hitting a half fills its gash; full, it opens for
+                             UNW_OPEN_T. Open both at once and a line is
+                             written, which is the only thing that hurts it.
+                             Its health is lines, not damage: the build
+                             decides how fast a gash fills and never how many
+                             lines there are (unwHit).
+     THE PAGE TEARS          cells come out in rows, columns, checks and rings,
+                             on a warning long enough to act on. Falling
+                             through hurts, and puts you back on the page.
+     IT WRITES YOU BACK      a draft of your own hull, inked opposite you,
+                             flying your weapon and copying your cards.
+     DYING REWINDS           to the start of the fight, and the page is shorter
+                             each time: UNW_ATTRITION of its lines per death,
+                             down to UNW_FLOOR. Never announced. The count is
+                             there for anyone who looks.
+
+   Five sequences on health, each with its banner, each adding a beat to the
+   last, each held until it has shown itself, a breath between (the page
+   turns). Every attack is the tribunal's three beats: it tells you, it
+   commits, and it is out of position after.
+
+     A BLANK PAGE        ink thrown from each half in turn; the seam pulled
+                         taut across the page, then cut
+     THE PAGE TEARS      the floor comes out in patterns
+     IT WRITES YOU BACK  the draft
+     IT CLOSES           both halves come through you at once, from either
+                         side; winded after, and a gash fills twice as fast
+     THE LAST LINE       all of it, faster, and the tears two at a time
+
+   Every hit it lands is a share of the pilot's own health (UNW_HURT), so the
+   depth the library was opened at changes nothing.
 -------------------------------------------------------------------------- */
 const UNW_COL = '#f8fafc', UNW_INK = '#a855f7';
-const LINK_HEAL = 1.05;         // grace window in which the twin undoes damage
 const TEAR_COLS = 9, TEAR_ROWS = 6;
-const UNW_ATTRITION = 0.02;     // max HP shaved per death, silently
-const UNW_REGEN = 0.0035;       // fraction of max healed per second while untouched
-const UNW_UNTOUCHED = 1.4;      // seconds of no contact before it starts closing up
+const UNW_LINES      = 15;     // the whole entry, on the first attempt
+const UNW_ATTRITION  = 0.1;    // of those, gone for every death (the first cut's was 0.02)
+const UNW_FLOOR      = 5;      // and never fewer than this
+const UNW_OPEN_NEED  = 10;     // a gash, in hits at your own damage (unwHit)
+const UNW_OPEN_T     = 3.0;    // how long an opened half waits for the other
+const UNW_FADE_AFTER = 1.0;    // an untouched gash starts to close after this long
+const UNW_FADE       = 4;      // and loses this much of itself a second
+/* A sequence cannot end before it has shown what it is: this long on the
+   first attempt, and shorter with the page (unwSeqMin), so that dying makes
+   the fight shorter as well as lighter. Without that, a hull that could not
+   survive ninety seconds met the same ninety seconds on its tenth attempt. */
+const UNW_SEQ_MIN    = 15;
+const UNW_SEQ_MIN_LO = 6;      // the least, however short the page
+const UNW_SEAM_T     = 1.8;    // between sequences: the page turns
+const UNW_STUN       = 1.3;    // a line written knocks both halves out of position
+const UNW_WIND       = 1.6;    // a rush that has passed leaves them winded this long
+const UNW_WIND_MUL   = 2;      // and a gash fills this much faster while they are
+const UNW_INK_TELL   = 0.38;   // a half swells this long before it throws
+/* What each body reads as, for the bar and anything that asks a body how hurt
+   it is: the page's share of itself, at a size no absolute threshold reaches. */
+const UNW_BODY       = 1e6;
+// where the halves stand off from the pilot, by weapon: always inside its reach
+const UNW_REACH = { bullet: 320, laser: 215, blade: 165 };
+// what each thing it does takes, as a share of the pilot's own health
+const UNW_HURT = { ink: 0.08, seam: 0.28, fall: 0.24, rush: 0.32, touch: 0.16,
+                   draft: 0.07, lance: 0.2, slash: 0.22 };
+const UNW_MEND = 0.03;          // and a line written gives each pilot this much of its health back
 
-/* Per-hull damage reduction, applied to nothing else in the game.
+/* The sequences. `until` is the share of its lines each runs down to.
+   ink: seconds between throws (the halves take turns), rounds, arc, speed,
+   and `ring`: every so many throws is a blot instead, a slow ring all round.
+   seam: seconds between cuts. tear: seconds between patterns, the warning,
+   how long a hole stays, and how many patterns at once. rush: seconds
+   between rushes. draft: whether the draft is on the page. */
+const UNW_SEQ = [
+  { id: 'blank',  until: 0.8, n: 'A BLANK PAGE',
+    ink: { every: 1.5, n: 7, arc: 0.8, spd: 235 }, seam: 6.5 },
+  { id: 'tears',  until: 0.6, n: 'THE PAGE TEARS',
+    ink: { every: 1.7, n: 7, arc: 0.8, spd: 240, ring: 4 }, seam: 8,
+    tear: { every: 5.5, warn: 1.4, live: 3.6, layers: 1 } },
+  { id: 'draft',  until: 0.4, n: 'IT WRITES YOU BACK',
+    ink: { every: 1.9, n: 7, arc: 0.85, spd: 245, ring: 4 }, seam: 9,
+    tear: { every: 6.5, warn: 1.4, live: 3.4, layers: 1 }, draft: true },
+  { id: 'closes', until: 0.2, n: 'IT CLOSES',
+    ink: { every: 1.9, n: 8, arc: 0.9, spd: 250, ring: 3 }, seam: 10,
+    tear: { every: 7, warn: 1.35, live: 3.4, layers: 1 }, draft: true, rush: 7 },
+  { id: 'last',   until: 0,   n: 'THE LAST LINE',
+    ink: { every: 1.5, n: 8, arc: 0.95, spd: 260, ring: 3 }, seam: 7.5,
+    tear: { every: 5.8, warn: 1.25, live: 3.4, layers: 2 }, draft: true, rush: 6 }
+];
+// the tears' patterns: every one leaves a whole cell beside wherever you stand
+const UNW_TEARS = ['row', 'col', 'checker', 'ring', 'cross', 'band'];
+const UNW_SEAM  = { tell: 1.1, live: 0.22, rest: 0.5, w: 12 };
+const UNW_RUSH  = { tell: 1.1, go: 0.42, past: 260 };
+// the draft, by the weapon it copies: how often it attacks, and how long it tells you first
+const UNW_DRAFT = { bullet: { every: 1.35, tell: 0.3, spd: 300 },
+                    laser:  { every: 2.6,  tell: 0.85, live: 0.3, len: 560, w: 14 },
+                    blade:  { every: 2.4,  tell: 0.7, spd: 1100, reach: 520 },
+                    copy: 5, gap: 300 };
 
-   A maxed VOIDRUNNER measures ~136,000 DPS. A maxed EMBER measures ~68,000 at
-   the muzzle and about a fifth of that at the tip of its beam, so a single
-   figure cannot make this fight hard for one without making it impossible for
-   the other. These two land both hulls near 7,000 effective DPS, which is the
-   point: the fight is equally punishing whichever you fly — EMBER paying for
-   its share by holding a muzzle against a body that heals the instant it lets
-   go, and the far half of its beam barely paying at all. */
-const UNW_DR = { bullet: 0.95, laser: 0.88, blade: 0.86 };
-
-/* And a fixed pool rather than a wave-scaled one. It is a set piece triggered
-   from a library at whatever depth you happen to be, and with per-loop health
-   scaling a wave-derived pool would swing from trivial to a twenty-minute slog
-   depending on when you opened the conversation. */
-const UNW_POOL = 2200000;
-
-let unwritten = null;           // { a, b, ... } shared fight state
-let unwSnap = null;             // player snapshot, restored on every death
-let unwTears = [];              // deleted cells: { c, r, t, life, warn }
+let unwritten = null;           // the fight: both halves, its lines, everything it is doing
+let unwSnap = null;             // each pilot as the fight found them, by pilot: restored on every death
+let unwTears = [];              // deleted cells: { c, r, warn, w0, life }
 let unwDeadT = 0;               // death/rewind interstitial timer
 
 function unwCellRect(c, r) {
@@ -40913,55 +40983,87 @@ function unwTearAt(c, r) {
   return null;
 }
 
-function snapPlayer() {
-  const s = Object.assign({}, P);
-  s.up = Object.assign({}, P.up);       // the only nested plain object on P
+/* A pilot as it was, and put back. The nested plain objects (its cards, THE
+   VAGRANT's gear, the input record) are copied a level down, so the snapshot
+   stays as it was taken however many times it is restored. */
+const unwPlain = v => v && typeof v === 'object' && (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype);
+function unwCopyPilot(src) {
+  const s = Object.assign({}, src);
+  for (const k of Object.keys(s)) if (unwPlain(s[k])) s[k] = Array.isArray(s[k]) ? s[k].slice() : Object.assign({}, s[k]);
   s.laserSegs = []; s.twinSegs = [];
   return s;
 }
-function restorePlayer(s) {
-  P = Object.assign({}, s);
-  P.up = Object.assign({}, s.up);
-  P.laserSegs = []; P.twinSegs = [];
+const snapPlayer = () => unwCopyPilot(P);
+function restorePlayer(s) { P = unwCopyPilot(s); }
+
+/* Each pilot still standing, as itself. Solo it is P, once. */
+function unwPilots(fn) {
+  const n = Math.max(1, PILOTS.length);
+  for (let k = 0; k < n; k++) {
+    const q = PILOTS.length > 1 ? pilotP(k) : P;
+    if (!q || q.down) continue;
+    if (unwDeadT > 0 || !unwritten) return;
+    pilotDo(k, () => fn(k));
+  }
 }
+// a hit that is a share of whoever it lands on
+const unwHurt = (key, opts) => hurtPlayer(P.maxHp * UNW_HURT[key], Object.assign({ src: unwritten && unwritten.a }, opts));
+// lines on this attempt: the page is shorter for every death
+const unwLinesFor = deaths => Math.max(UNW_FLOOR, Math.ceil(UNW_LINES * (1 - deaths * UNW_ATTRITION) - 1e-9));
+// and each sequence holds for less of it
+const unwSeqMin = u => Math.max(UNW_SEQ_MIN_LO, UNW_SEQ_MIN * u.maxHp / UNW_LINES);
 
 function startUnwritten() {
-  enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+  // the room is the page's now: everything in it goes but what is yours (THE HACKER's turned bodies)
+  for (let i = enemies.length - 1; i >= 0; i--) if (!enemies[i].hacked) enemies.splice(i, 1);
+  ebullets.length = 0; bullets.length = 0;
   portals.length = 0; hazards.length = 0; mortars.length = 0;
   awaitingPortal = false; betweenWaves = 1e9; spawnBudget = 0;
   libraryPortal = null; libraryBook = null; malwareOffer = null;
   arenaReset(true);
   arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, 1500, 1050);
-  P.x = WORLD.w / 2; P.y = WORLD.h / 2; P.vx = P.vy = 0;
-  P.hp = P.maxHp;
-  unwSnap = snapPlayer();
-
-  const spawn = (side) => {
-    const e = spawnEnemy('boss', WORLD.w / 2 + side * 300, WORLD.h / 2,
-                         { boss: 'unwritten' });
-    e.unwSide = side;
-    e.floor = 0;
-    // its own reduction replaces the generic wave-scaled boss protection, so
-    // the fight is identical whatever depth you triggered it at
-    e.armor = 0; e.absorb = 0; e.dr = 0;
-    return e;
-  };
-  const a = spawn(-1), b = spawn(1);
-  // one pool, shared: hp lives on the fight, not on either body
-  const deaths = RUN.unwrittenDeaths || 0;
-  const pool = UNW_POOL * Math.max(0.35, 1 - deaths * UNW_ATTRITION);
-  unwritten = { a, b, hp: pool, maxHp: pool, t: 0,
-                tok: pool / UNW_TARGET_SEC * ENDGAME_BURST,
-                aHitT: 0, bHitT: 0, pending: 0,
-                tearT: 2.2, writeT: 6, ups: {}, atkT: 2.4, phase: 0 };
-  a.maxHp = b.maxHp = pool; a.hp = b.hp = pool;
-  unwTears = [];
-  unwDeadT = 0;
-  bossAlive = true;
+  const n = Math.max(1, PILOTS.length);
+  unwSnap = [];
+  for (let k = 0; k < n; k++) pilotDo(k, () => {
+    P.x = WORLD.w / 2 + k * 54; P.y = WORLD.h / 2 + 120; P.vx = P.vy = 0;
+    P.down = false; P.hp = P.maxHp;
+    unwSnap[k] = snapPlayer();
+  });
+  const spawn = side => spawnEnemy('boss', WORLD.w / 2 + side * 300, WORLD.h / 2 - 60, { boss: 'unwritten' });
+  unwBegin(spawn(-1), spawn(1));
   banner('THE UNWRITTEN', UNW_COL, 4.0);
   drawFlashT = 0.4; shake(1.6);
   Audio_.boss(); Audio_.boom();
   ringFx(WORLD.w / 2, WORLD.h / 2, 20, 900, UNW_INK, 1.4, 9);
+}
+
+/* The fight, around two bodies however they arrived (startUnwritten, or a
+   lone half spawned some other way: unwAdopt). */
+function unwBegin(a, b) {
+  a.unwSide = -1; b.unwSide = 1;
+  for (const e of [a, b]) {
+    e.floor = 0;                         // nothing kills a half: it ends when the lines do
+    // its health is lines, so none of the generic boss protection applies
+    e.armor = 0; e.absorb = 0; e.dr = 0;
+    e.dmg = 0;                           // and its touch is its own (unwTouch), a share of the pilot
+    e.lockPhase = 0;                     // nor the shell's three phases: the sequences pace it
+  }
+  const lines = unwLinesFor(RUN.unwrittenDeaths || 0);
+  unwritten = { a, b, hp: lines, maxHp: lines, written: 0, t: 0,
+                tok: 0,                  // nothing to throttle: RONIN reads the bucket as empty
+                seq: 0, seqT: 0, seamT: 0,
+                gash: [0, 0], open: [0, 0], quiet: [9, 9],
+                stunT: 0, windT: 0, writeFx: 0, nameT: 0,
+                orbit: 0, spin: 1, tgT: 0, tg: 0,
+                inkT: 1.6, inkSide: 0, inkN: 0,
+                seamAtkT: 4.5, seam: null,
+                tearT: 0, rushT: 0, rush: null,
+                draft: null, fallCd: [0, 0] };
+  for (const e of [a, b]) { e.maxHp = UNW_BODY; e.hp = UNW_BODY; }
+  unwTears = [];
+  unwDeadT = 0;
+  bossAlive = true;
+  unwSeqOpen(0);
 }
 
 function unwFail() {
@@ -40976,220 +41078,580 @@ function unwFail() {
 }
 
 function unwRewind() {
-  restorePlayer(unwSnap);
-  startUnwritten();                     // re-rolls the pool at the new attrition
+  const s = unwSnap || [];
+  for (let k = 0; k < s.length; k++) if (s[k]) pilotDo(k, () => restorePlayer(s[k]));
+  startUnwritten();                     // the lines again, fewer of them
   banner('AGAIN', UNW_INK, 2.4);
 }
 
-// both halves must be opened inside the same window, or the wound closes
+/* Every point of damage to either half arrives here (damageEnemy), whatever
+   delivered it, and is counted in hits at the hitter's own damage: one round
+   of yours is one, a crit a little more, a tick of EMBER's lance a sliver,
+   capped at three so nothing fills a gash in one blow. */
 function unwHit(e, dmg) {
   const u = unwritten;
-  if (!u) return;
-  // every point of damage to it arrives here, so the hull reduction lives here
-  dmg *= 1 - (UNW_DR[P.weapon] !== undefined ? UNW_DR[P.weapon] : 0.95);
-  u.touchT = 0;                   // any contact at all stops it closing up
-  const mine = e === u.a ? 'a' : 'b';
-  u[mine + 'HitT'] = LINK_HEAL;
-  const other = mine === 'a' ? 'bHitT' : 'aHitT';
-  if (u[other] > 0) {                   // both open: the damage sticks
-    // its health lives on the fight, so the rate limit belongs here too
-    u.hp = Math.max(0, u.hp - endgameThrottle(u, dmg + u.pending));
-    u.pending = 0;
-    floatText((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2 - 40, 'BOTH', UNW_INK, 16);
-  } else {
-    u.pending += dmg;                   // banked, and lost if the window lapses
+  if (!u || u.seamT > 0 || unwDeadT > 0) return;
+  const s = e === u.a ? 0 : 1;
+  u.quiet[s] = 0;
+  if (u.open[s] > 0) return;            // open: it is waiting on the other half
+  u.gash[s] += clamp(dmg / Math.max(1, P.dmg), 0, 3) * (u.windT > 0 ? UNW_WIND_MUL : 1);
+  if (u.gash[s] >= UNW_OPEN_NEED) unwOpen(s);
+}
+
+function unwOpen(s) {
+  const u = unwritten, e = s ? u.b : u.a;
+  u.gash[s] = 0;
+  u.open[s] = UNW_OPEN_T;
+  burst(e.x, e.y, 18, UNW_INK, 260, 3.2, 0.5);
+  ringFx(e.x, e.y, e.r, e.r * 2.2, UNW_INK, 0.4, 4);
+  floatText(e.x, e.y - e.r - 14, u.open[1 - s] > 0 ? 'BOTH' : 'OPEN', UNW_INK, 16);
+  Audio_.tone(330, 0.16, 'sawtooth', 0.07, 660);
+  if (u.open[1 - s] > 0) unwWrite();
+}
+
+/* Both open: a line is written. It is the only thing that hurts it, and it
+   costs it its position: both halves are thrown off, the ink in the air is
+   wiped with the line, every pilot mends a little (UNW_MEND), and a pilot on
+   the floor gets up. A sequence holds at
+   its last line until it has run its minimum (unwSeqMin). */
+function unwWrite() {
+  const u = unwritten, S = UNW_SEQ[u.seq];
+  const mx = (u.a.x + u.b.x) / 2, my = (u.a.y + u.b.y) / 2;
+  u.open = [0, 0]; u.gash = [0, 0];
+  u.stunT = UNW_STUN;
+  for (const e of [u.a, u.b]) {
+    const a = Math.atan2(e.y - my, e.x - mx);
+    e.vx = Math.cos(a) * 420; e.vy = Math.sin(a) * 420;
   }
+  if (u.seqT < unwSeqMin(u) && u.hp - 1 <= u.maxHp * S.until + 1e-9) {
+    floatText(mx, my - 50, 'THE PAGE HOLDS', '#94a3b8', 15);
+    Audio_.tone(180, 0.2, 'sine', 0.06, 140);
+    return;
+  }
+  u.hp -= 1; u.written++;
+  u.writeFx = 1;
+  ebullets.length = 0;
+  pilotsEach(() => {
+    if (P.down) { hostRevive(); return; }   // co-op: a line stands a downed pilot back up
+    P.hp = Math.min(P.maxHp, P.hp + P.maxHp * UNW_MEND);
+  });
+  floatText(mx, my - 50, 'WRITTEN', UNW_COL, 20);
+  drawFlashT = Math.max(drawFlashT, 0.12); shake(0.7);
+  Audio_.tone(196, 0.5, 'triangle', 0.12, 392); Audio_.boom();
+  ringFx(u.a.x, u.a.y, 10, 180, UNW_COL, 0.5, 4);
+  ringFx(u.b.x, u.b.y, 10, 180, UNW_COL, 0.5, 4);
+  if (u.hp <= 0) { unwWin(); return; }
+  if (u.hp <= u.maxHp * S.until + 1e-9 && u.seq < UNW_SEQ.length - 1) unwSeqOpen(u.seq + 1);
+}
+
+/* A sequence begins: the page turns (UNW_SEAM_T), everything in flight is
+   wiped, and its banner is shown. */
+function unwSeqOpen(i) {
+  const u = unwritten, S = UNW_SEQ[i];
+  u.seq = i; u.seqT = 0;
+  u.seamT = i ? UNW_SEAM_T : 2.4;      // the first one waits out the entrance
+  u.seam = null; u.rush = null;
+  u.open = [0, 0]; u.gash = [0, 0];
+  unwTears = [];                        // a new page: whole again
+  ebullets.length = 0;
+  u.inkT = u.seamT + 0.6;
+  u.seamAtkT = u.seamT + (S.seam || 99) * 0.55;
+  u.tearT = u.seamT + 1.2;
+  u.rushT = u.seamT + 3.5;
+  if (S.draft && !u.draft) unwDraftIn();
+  if (!S.draft) u.draft = null;
+  for (const e of [u.a, u.b]) if (e) e.invuln = 1;   // nothing touches it while the page turns
+  if (i) {
+    banner(S.n, UNW_COL, 2.6);
+    Audio_.tone(130, 0.6, 'sine', 0.1, 260);
+    shake(0.5);
+  } else u.nameT = 2.1;                 // the first one's name, once the boss's has been read
+}
+
+/* Admin jump: sequence i, on the lines it would start with. The dev
+   console's way to a beat, and the determinism test's. */
+function unwJump(i) {
+  const u = unwritten;
+  if (!u) return;
+  i = clamp(i | 0, 0, UNW_SEQ.length - 1);
+  u.hp = i ? Math.floor(u.maxHp * UNW_SEQ[i - 1].until + 1e-9) : u.maxHp;
+  u.written = u.maxHp - u.hp;
+  unwSeqOpen(i);
 }
 
 function unwUpdate(dt) {
-  refillThrottle(unwritten, UNW_TARGET_SEC, dt);
   const u = unwritten;
   if (!u) return;
-  u.t += dt;
   if (roninHolds('unwritten')) return;        // RONIN's C: held while its execution plays
 
   if (unwDeadT > 0) {                   // the interstitial after a failure
     unwDeadT -= dt;
+    for (const e of [u.a, u.b]) if (e) { e.vx *= 0.8; e.vy *= 0.8; }
     if (unwDeadT <= 0) unwRewind();
     return;
   }
+  u.t += dt;
+  const S = UNW_SEQ[u.seq];
+  // the bar and the death check read the bodies, so they carry the page's share of itself
+  for (const e of [u.a, u.b]) if (e && !e.dead) { e.maxHp = UNW_BODY; e.hp = Math.max(1, UNW_BODY * u.hp / u.maxHp); }
+  u.writeFx = Math.max(0, u.writeFx - dt * 1.4);
+  u.fallCd[0] = Math.max(0, u.fallCd[0] - dt); u.fallCd[1] = Math.max(0, u.fallCd[1] - dt);
 
-  /* Leave it alone and it closes up. Turtling in a safe pocket until the tears
-     rotate away was the one passive route through this, so hiding now costs
-     progress. Any contact resets the timer, landed or merely banked. */
-  u.touchT = (u.touchT || 0) + dt;
-  if (u.touchT > UNW_UNTOUCHED && u.hp < u.maxHp) {
-    u.hp = Math.min(u.maxHp, u.hp + u.maxHp * UNW_REGEN * dt);
-    if (rnd() < 0.25) {
-      const src = rnd() < 0.5 ? u.a : u.b;
-      if (src && !src.dead)
-        spawnPart(src.x + rnd(src.r, -src.r), src.y + rnd(src.r, -src.r),
-                  0, rnd(-30, -70), rnd(3, 1.6), UNW_COL, rnd(0.5, 0.25), 0.94);
+  // the halves are not to be touched while the page turns
+  const turning = u.seamT > 0;
+  for (const e of [u.a, u.b]) if (e) e.invuln = turning ? 1 : 0;
+  if (turning) {
+    u.seamT -= dt;
+    if (u.nameT > 0 && (u.nameT -= dt) <= 0) banner(UNW_SEQ[0].n, UNW_COL, 2.4);
+    unwDrift(u, dt, 0.6);
+    unwTearsTick(dt);
+    if (u.draft) unwDraftMove(u.draft, dt);
+    return;
+  }
+  u.seqT += dt;
+  if (u.hp <= u.maxHp * S.until + 1e-9 && u.seqT >= unwSeqMin(u) && u.seq < UNW_SEQ.length - 1) {
+    unwSeqOpen(u.seq + 1);
+    return;
+  }
+
+  /* --- the wound: an opened half waits, then closes; an untouched gash bleeds back --- */
+  for (let s = 0; s < 2; s++) {
+    u.quiet[s] += dt;
+    if (u.open[s] > 0) {
+      u.open[s] -= dt;
+      if (u.open[s] <= 0) {
+        u.open[s] = 0;
+        const e = s ? u.b : u.a;
+        floatText(e.x, e.y - e.r - 12, 'CLOSED', '#64748b', 14);
+        Audio_.tone(140, 0.12, 'sine', 0.05, 110);
+      }
+    } else if (u.quiet[s] > UNW_FADE_AFTER) u.gash[s] = Math.max(0, u.gash[s] - UNW_FADE * dt);
+  }
+
+  const busy = !!(u.seam || u.rush);
+  u.stunT = Math.max(0, u.stunT - dt);
+  u.windT = Math.max(0, u.windT - dt);
+
+  /* --- where the halves stand: either side of you, turning slowly --- */
+  if (u.rush) unwRushTick(u, dt);
+  else if (u.seam) unwDrift(u, dt, 0.25);      // held taut: it does not move while it cuts
+  else if (u.stunT > 0 || u.windT > 0) unwDrift(u, dt, 0.5);
+  else unwFlank(u, dt);
+  unwTouch(u);
+
+  /* --- ink: thrown from each half in turn, aimed, on a swell you can see --- */
+  if (!busy && u.stunT <= 0 && u.windT <= 0) {
+    u.inkT -= dt;
+    if (u.inkT <= 0) {
+      u.inkT = S.ink.every;
+      u.inkN++;
+      unwInk(u, u.inkSide ? u.b : u.a, S.ink, S.ink.ring && u.inkN % S.ink.ring === 0);
+      u.inkSide ^= 1;
     }
   }
 
-  /* Per-attempt escalation. u.t resets on every rewind, so an attempt that
-     drags gets steadily worse — there is no settling into a safe rhythm. */
-  const rage = Math.min(2.3, 1 + u.t / 65);
-  u.rage = rage;
-
-  u.aHitT = Math.max(0, u.aHitT - dt);
-  u.bHitT = Math.max(0, u.bHitT - dt);
-  if (u.aHitT <= 0 && u.bHitT <= 0 && u.pending > 0) {
-    floatText((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2 - 40, 'CLOSED', '#64748b', 14);
-    u.pending = 0;                      // the twin sealed it
+  /* --- the seam: pulled taut through you, then cut --- */
+  if (S.seam) {
+    if (u.seam) unwSeamTick(u, dt);
+    else if (!u.rush && u.stunT <= 0) {
+      u.seamAtkT -= dt;
+      if (u.seamAtkT <= 0) { u.seamAtkT = S.seam; unwSeamStart(u); }
+    }
   }
-
-  // both bodies mirror the shared pool so the bar and the death check agree
-  const frac = u.hp / u.maxHp;
-  for (const e of [u.a, u.b]) if (e && !e.dead) { e.hp = u.hp; e.maxHp = u.maxHp; }
-  u.phase = frac > 0.66 ? 0 : frac > 0.33 ? 1 : 2;
 
   /* --- the page tears --- */
-  u.tearT -= dt;
-  if (u.tearT <= 0) {
-    u.tearT = [0.95, 0.7, 0.5][u.phase] / rage;
-    const n = 2 + u.phase;
-    const here = unwCellAt(P.x, P.y);
-    for (let k = 0; k < n; k++) {
-      // deliberately unfair: most of them open under or beside you
-      let c, r;
-      if (simRand() < 0.62) {
-        c = clamp(here.c + simRndi(3) - 1, 0, TEAR_COLS - 1);
-        r = clamp(here.r + simRndi(3) - 1, 0, TEAR_ROWS - 1);
-      } else { c = simRndi(TEAR_COLS); r = simRndi(TEAR_ROWS); }
-      if (unwTearAt(c, r)) continue;
-      unwTears.push({ c, r, warn: [0.95, 0.8, 0.62][u.phase], life: [6, 5, 4.2][u.phase] });
-    }
-    // never delete the whole page: retire the oldest if it gets crowded
-    const cap = TEAR_COLS * TEAR_ROWS - 10;
-    while (unwTears.length > cap) unwTears.shift();
+  if (S.tear) {
+    u.tearT -= dt;
+    if (u.tearT <= 0) { u.tearT = S.tear.every; unwTearPattern(S.tear); }
   }
-  for (let i = unwTears.length - 1; i >= 0; i--) {
-    const t = unwTears[i];
-    if (t.warn > 0) t.warn -= dt; else t.life -= dt;
-    if (t.life <= 0) { unwTears.splice(i, 1); continue; }
-    if (t.warn <= 0) {
-      const rc = unwCellRect(t.c, t.r);
-      if (P.x > rc.x && P.x < rc.x + rc.w && P.y > rc.y && P.y < rc.y + rc.h)
-        hurtPlayer(9999, { pure: true });      // there is no floor there
-      // sparse: with twenty holes open, one emitter each floods the screen
-      if (rnd() < 0.06)
-        spawnPart(rc.x + rnd() * rc.w, rc.y + rnd() * rc.h,
-                  0, rnd(-40, -90), rnd(3, 1.5), UNW_INK, rnd(0.6, 0.3), 0.95);
-    }
+  unwTearsTick(dt);
+
+  /* --- it closes --- */
+  if (S.rush && !u.rush && !u.seam && u.stunT <= 0 && u.windT <= 0) {
+    u.rushT -= dt;
+    if (u.rushT <= 0) { u.rushT = S.rush; unwRushStart(u); }
   }
 
-  /* --- it writes your build back at you --- */
-  u.writeT -= dt;
-  if (u.writeT <= 0) {
-    u.writeT = [7, 5.5, 4][u.phase];
-    const owned = Object.keys(P.up).filter(id => P.up[id] > 0);
-    if (owned.length) {
-      const id = simPick(owned);
-      u.ups[id] = (u.ups[id] || 0) + 1;
-      const up = UPGRADES.find(z => z.id === id);
-      floatText((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2 - 60,
-                'COPIED  ' + (up ? upName(up) : id), UNW_COL, 14);
-      Audio_.tone(240, 0.18, 'sawtooth', 0.09, 900);
-    }
-  }
+  /* --- it writes you back --- */
+  if (u.draft) unwDraftTick(u, u.draft, dt);
 
-  /* --- movement and fire, mirrored through the arena centre --- */
-  const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
-  u.atkT -= dt;
-  const fire = u.atkT <= 0;
-  if (fire) u.atkT = [1.5, 1.15, 0.85][u.phase] / rage;
-
+  const T = unwTarget(u);
   for (const e of [u.a, u.b]) {
     if (!e || e.dead) continue;
-    e.invuln = 0;
-    e.ang = Math.atan2(P.y - e.y, P.x - e.x);
-    // one hunts you, the other holds the mirror position, and they swap roles
-    const hunting = (Math.floor(u.t / 5) % 2 === 0) === (e.unwSide < 0);
-    let tx, ty;
-    if (hunting) { tx = P.x; ty = P.y; }
-    else { tx = 2 * cx - P.x; ty = 2 * cy - P.y; }
-    steer(e, (tx - e.x) * 1.5, (ty - e.y) * 1.5, 1.6 + u.phase * 0.4, dt);
-
-    if (fire) {
-      const extra = 1 + Object.values(u.ups).reduce((s, v) => s + v, 0) * 0.06;
-      const dmg = e.dmg * 0.5 * extra;
-      const n = 6 + u.phase * 3 + (u.ups.multi || 0) + Math.floor((rage - 1) * 5);
-      const off = simRnd(TAU);
-      for (let k = 0; k < n; k++) {
-        const b = eshoot(e, off + k * TAU / n, (230 + u.phase * 40) * rage, dmg, 6);
-        if (b) { b.col = UNW_INK;
-                 if (u.ups.home) b.homeP = u.ups.home;
-                 if (u.ups.ric)  b.ricP = u.ups.ric; }
-      }
-      // and a line straight down the axis between them
-      if (u.phase >= 1 && e.unwSide < 0) {
-        const a2 = Math.atan2(u.b.y - u.a.y, u.b.x - u.a.x);
-        for (let k = -1; k <= 1; k++) {
-          const b = eshoot(e, a2 + k * 0.12, 520, dmg * 1.3, 8);
-          if (b) b.col = UNW_COL;
-        }
-      }
-    }
-    if (rnd() < 0.5) {
+    e.ang = Math.atan2(T.y - e.y, T.x - e.x);
+    if (rnd() < 0.4) {
       const a3 = rnd(TAU);
       spawnPart(e.x + Math.cos(a3) * e.r, e.y + Math.sin(a3) * e.r,
                 Math.cos(a3) * 120, Math.sin(a3) * 120, rnd(4, 2),
                 rnd() < 0.5 ? UNW_COL : UNW_INK, rnd(0.5, 0.25), 0.93);
     }
   }
+}
 
-  /* --- both halves converge on you at once, on a telegraph --- */
-  u.rushT = (u.rushT || 7) - dt;
-  if (u.rushT <= 0 && u.rushWind === undefined) {
-    u.rushWind = 0.95;                  // the tell
-    banner('IT CLOSES', UNW_INK, 1.0);
-    Audio_.noise(0.4, 0.22, 2600, 300, 3);
+/* The pilot both halves are standing either side of: the nearer of two,
+   looked at again every couple of seconds so it does not flicker. */
+function unwTarget(u) {
+  if (PILOTS.length < 2) return P;
+  const q = pilotP(u.tg);
+  return q && !q.down ? q : mpAim((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2);
+}
+function unwFlank(u, dt) {
+  u.tgT -= dt;
+  if (u.tgT <= 0 && PILOTS.length > 1) {
+    u.tgT = 2;
+    const q = mpAim((u.a.x + u.b.x) / 2, (u.a.y + u.b.y) / 2);
+    u.tg = q.pid != null ? q.pid : 0;
   }
-  if (u.rushWind !== undefined) {
-    u.rushWind -= dt;
-    if (u.rushWind <= 0) {
-      /* They trade places as they come, so whichever wound you had open is now
-         on the far side of you and the alternation you had going is broken. */
-      if (u.a && u.b && !u.a.dead && !u.b.dead) {
-        const ax = u.a.x, ay = u.a.y;
-        u.a.x = u.b.x; u.a.y = u.b.y;
-        u.b.x = ax; u.b.y = ay;
-        ringFx(u.a.x, u.a.y, 8, 160, UNW_INK, 0.4, 3);
-        ringFx(u.b.x, u.b.y, 8, 160, UNW_INK, 0.4, 3);
-      }
-      for (const e of [u.a, u.b]) {
-        if (!e || e.dead) continue;
-        const a4 = Math.atan2(P.y - e.y, P.x - e.x);
-        e.vx = Math.cos(a4) * 1500 * rage; e.vy = Math.sin(a4) * 1500 * rage;
+  const T = unwTarget(u);
+  // it turns about you, and every so often turns back the other way
+  if (Math.floor(u.t / 9) % 2 === 0) u.spin = 1; else u.spin = -1;
+  u.orbit += dt * 0.35 * u.spin * (u.seq >= 4 ? 1.4 : 1);
+  const R = UNW_REACH[T.weapon] || UNW_REACH.bullet;
+  const cx = Math.cos(u.orbit) * R, cy = Math.sin(u.orbit) * R * 0.8;
+  const pts = [[T.x - cx, T.y - cy], [T.x + cx, T.y + cy]];
+  [u.a, u.b].forEach((e, i) => {
+    if (!e) return;
+    const tx = clamp(pts[i][0], arena.x0 + e.r + 10, arena.x1 - e.r - 10);
+    const ty = clamp(pts[i][1], arena.y0 + e.r + 10, arena.y1 - e.r - 10);
+    let vx = (tx - e.x) * 2.2, vy = (ty - e.y) * 2.2;
+    const v = len(vx, vy), top = 300 + u.seq * 20;
+    if (v > top) { vx *= top / v; vy *= top / v; }
+    steer(e, vx, vy, 3, dt);
+  });
+}
+function unwDrift(u, dt, keep) {
+  for (const e of [u.a, u.b]) if (e) { e.vx *= Math.pow(keep * 0.1, dt); e.vy *= Math.pow(keep * 0.1, dt); }
+}
+// touching a half: a share, and a shove. A flier passes over it, as everywhere.
+function unwTouch(u) {
+  if (u.rush && u.rush.st === 'go') return;   // the rush lands its own
+  unwPilots(() => {
+    if (P.fly || (P.ghost && P.dashT > 0) || P.iframe > 0) return;
+    for (const e of [u.a, u.b]) {
+      if (!e || e.dead) continue;
+      const d = len(P.x - e.x, P.y - e.y);
+      if (d >= e.r + P.r + 2) continue;
+      unwHurt('touch');
+      const a = Math.atan2(P.y - e.y, P.x - e.x);
+      P.vx += Math.cos(a) * 260; P.vy += Math.sin(a) * 260;
+      return;
+    }
+  });
+}
+
+function unwInk(u, e, o, blot) {
+  if (!e || e.dead) return;
+  const T = unwTarget(u);
+  const base = Math.atan2(T.y - e.y, T.x - e.x);
+  const dmg = T.maxHp * UNW_HURT.ink;
+  if (blot) {                           // a blot: a slow ring all round, with a gap where you are
+    const n = o.n * 2 + 4;
+    for (let k = 1; k < n; k++) {
+      const b = eshoot(e, base + k * TAU / n, o.spd * 0.72, dmg, 8);
+      if (b) b.col = UNW_INK;
+    }
+    ringFx(e.x, e.y, e.r, e.r * 2.4, UNW_INK, 0.45, 4);
+    Audio_.tone(200, 0.16, 'sawtooth', 0.07, 120);
+    return;
+  }
+  for (let k = 0; k < o.n; k++) {
+    const a = base + (o.n > 1 ? (k / (o.n - 1) - 0.5) * o.arc : 0);
+    const b = eshoot(e, a, o.spd, dmg, 7);
+    if (b) b.col = UNW_INK;
+  }
+  burst(e.x + Math.cos(base) * e.r, e.y + Math.sin(base) * e.r, 10, UNW_INK, 200, 2.6, 0.3, 1.2, base);
+  Audio_.tone(260, 0.1, 'sawtooth', 0.06, 180);
+}
+
+/* The seam: the line the page was torn along, pulled taut between the halves
+   and run on across the whole page. It is drawn where it will cut for the
+   whole tell, and the halves hold still so it does not move. */
+function unwSeamStart(u) {
+  if (!u.a || !u.b) return;
+  const dx = u.b.x - u.a.x, dy = u.b.y - u.a.y, L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L, ext = 2400;
+  u.seam = { st: 'tell', t: UNW_SEAM.tell,
+             x1: u.a.x - ux * ext, y1: u.a.y - uy * ext, x2: u.b.x + ux * ext, y2: u.b.y + uy * ext, hit: [0, 0] };
+  for (const e of [u.a, u.b]) { e.vx = 0; e.vy = 0; }
+  Audio_.noise(0.5, 0.12, 1800, 400, 2);
+}
+function unwSeamTick(u, dt) {
+  const s = u.seam;
+  s.t -= dt;
+  if (s.st === 'tell' && s.t <= 0) {
+    s.st = 'live'; s.t = UNW_SEAM.live;
+    shake(0.45); Audio_.tone(900, 0.12, 'square', 0.07, 200);
+  }
+  if (s.st === 'live') {
+    unwPilots(k => {
+      if (s.hit[k] || !segCircle(s.x1, s.y1, s.x2, s.y2, P.x, P.y, UNW_SEAM.w + P.r)) return;
+      s.hit[k] = 1;
+      unwHurt('seam');
+    });
+    if (s.t <= 0) { s.st = 'rest'; s.t = UNW_SEAM.rest; }
+  } else if (s.st === 'rest' && s.t <= 0) u.seam = null;
+}
+
+/* The page tears. A pattern is chosen, written to the floor as a warning,
+   and then the cells are gone for a while. Whatever the pattern, a pilot
+   always has a whole cell in reach: if one would not, its own is spared. */
+function unwTearPattern(o) {
+  const cells = new Set();
+  const kinds = UNW_TEARS.slice();
+  const add = (c, r) => { if (c >= 0 && c < TEAR_COLS && r >= 0 && r < TEAR_ROWS) cells.add(c + r * TEAR_COLS); };
+  for (let l = 0; l < o.layers && kinds.length; l++) {
+    const kind = kinds.splice(simRndi(kinds.length), 1)[0];
+    const before = new Set(cells);
+    const c0 = simRndi(TEAR_COLS), r0 = simRndi(TEAR_ROWS), par = simRndi(2);
+    for (let c = 0; c < TEAR_COLS; c++) for (let r = 0; r < TEAR_ROWS; r++) {
+      if (kind === 'row' && (r === r0 || r === (r0 + 3) % TEAR_ROWS)) add(c, r);
+      else if (kind === 'col' && (c - c0 + TEAR_COLS) % 3 === 0) add(c, r);
+      else if (kind === 'checker' && (c + r) % 2 === par) add(c, r);
+      else if (kind === 'ring' && (c === 0 || r === 0 || c === TEAR_COLS - 1 || r === TEAR_ROWS - 1)) add(c, r);
+      else if (kind === 'cross' && (c === c0 || r === r0)) add(c, r);
+      else if (kind === 'band' && c >= c0 && c < c0 + 3) add(c, r);
+    }
+    // a second pattern may not leave the page with fewer than a third of it whole
+    if (l > 0 && TEAR_COLS * TEAR_ROWS - cells.size < 18) { cells.clear(); for (const x of before) cells.add(x); }
+  }
+  unwPilots(() => {
+    const h = unwCellAt(P.x, P.y);
+    let near = false;
+    for (let dc = -1; dc <= 1 && !near; dc++) for (let dr = -1; dr <= 1; dr++) {
+      const c = h.c + dc, r = h.r + dr;
+      if (c >= 0 && c < TEAR_COLS && r >= 0 && r < TEAR_ROWS && !cells.has(c + r * TEAR_COLS)) { near = true; break; }
+    }
+    if (!near) cells.delete(h.c + h.r * TEAR_COLS);
+  });
+  for (const x of cells) {
+    const c = x % TEAR_COLS, r = (x / TEAR_COLS) | 0;
+    if (unwTearAt(c, r)) continue;
+    unwTears.push({ c, r, warn: o.warn, w0: o.warn, life: o.live });
+  }
+  Audio_.noise(0.35, 0.1, 3200, 600, 2);
+}
+function unwTearsTick(dt) {
+  for (let i = unwTears.length - 1; i >= 0; i--) {
+    const t = unwTears[i];
+    if (t.warn > 0) {
+      t.warn -= dt;
+      if (t.warn <= 0 && i === unwTears.length - 1) Audio_.tone(120, 0.18, 'sawtooth', 0.06, 60);
+      continue;
+    }
+    t.life -= dt;
+    if (t.life <= 0) { unwTears.splice(i, 1); continue; }
+    if (rnd() < 0.05) {
+      const rc = unwCellRect(t.c, t.r);
+      spawnPart(rc.x + rnd() * rc.w, rc.y + rnd() * rc.h,
+                0, rnd(-40, -90), rnd(3, 1.5), UNW_INK, rnd(0.6, 0.3), 0.95);
+    }
+  }
+  const u = unwritten;
+  if (!u || !unwTears.length) return;
+  // there is no floor there: it hurts, and you are put back on the page
+  unwPilots(k => {
+    if (u.fallCd[k] > 0) return;
+    const h = unwCellAt(P.x, P.y), t = unwTearAt(h.c, h.r);
+    if (!t || t.warn > 0) return;
+    u.fallCd[k] = 1.0;
+    let best = null, bd = 1e18;
+    for (let c = 0; c < TEAR_COLS; c++) for (let r = 0; r < TEAR_ROWS; r++) {
+      const z = unwTearAt(c, r);
+      if (z && z.warn <= 0) continue;
+      const rc = unwCellRect(c, r);
+      const x = clamp(P.x, rc.x + 22, rc.x + rc.w - 22), y = clamp(P.y, rc.y + 22, rc.y + rc.h - 22);
+      const d = (x - P.x) ** 2 + (y - P.y) ** 2;
+      if (d < bd) { bd = d; best = { x, y }; }
+    }
+    ringFx(P.x, P.y, 30, 4, UNW_INK, 0.4, 3);
+    unwHurt('fall', { pure: true });
+    if (best && unwritten && unwDeadT <= 0) {
+      P.x = best.x; P.y = best.y; P.vx = P.vy = 0;
+      P.iframe = Math.max(P.iframe, 0.9);
+      ringFx(P.x, P.y, 4, 46, UNW_COL, 0.35, 3);
+      floatText(P.x, P.y - 34, 'NO FLOOR', UNW_INK, 14);
+    }
+  });
+}
+
+/* IT CLOSES: both halves come at you from either side at once, through where
+   you were standing when it told you, and trade sides as they pass. Then they
+   are winded, and a gash fills twice as fast. */
+function unwRushStart(u) {
+  const T = unwTarget(u);
+  const paths = [u.a, u.b].map(e => {
+    const dx = T.x - e.x, dy = T.y - e.y, L = Math.hypot(dx, dy) || 1;
+    return { x0: e.x, y0: e.y,
+             x1: clamp(T.x + dx / L * UNW_RUSH.past, arena.x0 + e.r, arena.x1 - e.r),
+             y1: clamp(T.y + dy / L * UNW_RUSH.past, arena.y0 + e.r, arena.y1 - e.r) };
+  });
+  u.rush = { st: 'tell', t: UNW_RUSH.tell, paths, hit: [0, 0] };
+  for (const e of [u.a, u.b]) { e.vx = 0; e.vy = 0; }
+  banner('IT CLOSES', UNW_INK, 1.0);
+  Audio_.noise(0.4, 0.22, 2600, 300, 3);
+}
+function unwRushTick(u, dt) {
+  const r = u.rush;
+  r.t -= dt;
+  if (r.st === 'tell') {
+    for (const e of [u.a, u.b]) { e.vx = 0; e.vy = 0; }
+    if (r.t <= 0) {
+      r.st = 'go'; r.t = UNW_RUSH.go;
+      [u.a, u.b].forEach((e, i) => {
+        const p = r.paths[i];
+        e.vx = (p.x1 - e.x) / UNW_RUSH.go; e.vy = (p.y1 - e.y) / UNW_RUSH.go;
         burst(e.x, e.y, 24, UNW_INK, 320, 3.6, 0.5);
-      }
+      });
       shake(0.6);
-      u.rushWind = undefined;
-      u.rushT = [6.5, 5, 3.8][u.phase] / rage;
+    }
+    return;
+  }
+  if (r.st === 'go') {
+    unwPilots(k => {
+      if (r.hit[k]) return;
+      for (const e of [u.a, u.b]) {
+        if (e && len(P.x - e.x, P.y - e.y) < e.r + P.r + 4) { r.hit[k] = 1; unwHurt('rush'); return; }
+      }
+    });
+    if (r.t <= 0) {
+      for (const e of [u.a, u.b]) { e.vx *= 0.1; e.vy *= 0.1; }
+      u.rush = null;
+      u.windT = UNW_WIND;
+      for (const e of [u.a, u.b]) ringFx(e.x, e.y, e.r, e.r * 1.8, '#94a3b8', 0.5, 3);
+      Audio_.tone(110, 0.3, 'sine', 0.08, 70);
+    }
+  }
+}
+
+/* ------------------------------ the draft ------------------------------------
+   IT WRITES YOU BACK: your own hull in ink, standing opposite you across the
+   page, flying the weapon you fly and copying your cards one at a time (or
+   THE VAGRANT's gear, which is its build in place of them). It cannot be hit:
+   it is only writing. It can only be outlasted.
+------------------------------------------------------------------------- */
+function unwDraftIn() {
+  const u = unwritten, T = unwTarget(u);
+  const kind = UNW_DRAFT[T.weapon] ? T.weapon : 'bullet';
+  const p = unwDraftSpot(T);
+  u.draft = { x: p.x, y: p.y, pid: T.pid != null ? T.pid : 0, kind,
+              ups: {}, names: [], n: 0, copyT: 1.5,
+              atkT: UNW_DRAFT[kind].every, tell: 0, st: 'idle', ang: 0, ax: 0, ay: 0, t: 0, hit: [0, 0] };
+  ringFx(p.x, p.y, 6, 120, UNW_INK, 0.6, 4);
+  burst(p.x, p.y, 30, UNW_INK, 260, 3, 0.6);
+  floatText(p.x, p.y - 40, 'A DRAFT OF YOU', UNW_INK, 15);
+}
+// opposite the pilot across the page, but never on top of it
+function unwDraftSpot(T) {
+  const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
+  let x = 2 * cx - T.x, y = 2 * cy - T.y;
+  const dx = x - T.x, dy = y - T.y, d = Math.hypot(dx, dy);
+  if (d < UNW_DRAFT.gap) {
+    const a = d > 1 ? Math.atan2(dy, dx) : T.ang + Math.PI;
+    x = T.x + Math.cos(a) * UNW_DRAFT.gap; y = T.y + Math.sin(a) * UNW_DRAFT.gap;
+  }
+  return { x: clamp(x, arena.x0 + 30, arena.x1 - 30), y: clamp(y, arena.y0 + 30, arena.y1 - 30) };
+}
+function unwDraftPilot(d) {
+  const q = PILOTS.length > 1 ? pilotP(d.pid) : P;
+  return q && !q.down ? q : unwTarget(unwritten);
+}
+function unwDraftMove(d, dt) {
+  if (d.st === 'dash') return;
+  const T = unwDraftPilot(d), p = unwDraftSpot(T);
+  const dx = p.x - d.x, dy = p.y - d.y, L = Math.hypot(dx, dy);
+  const step = Math.min(L, 280 * dt);
+  if (L > 0.01) { d.x += dx / L * step; d.y += dy / L * step; }
+  if (d.st === 'idle') d.ang = Math.atan2(T.y - d.y, T.x - d.x);
+}
+function unwDraftTick(u, d, dt) {
+  d.t += dt;
+  const T = unwDraftPilot(d), W0 = UNW_DRAFT[d.kind];
+  unwDraftMove(d, dt);
+
+  // it copies a card off you every few seconds, and says which
+  d.copyT -= dt;
+  if (d.copyT <= 0) {
+    d.copyT = UNW_DRAFT.copy;
+    const owned = Object.keys(T.up || {}).filter(id => T.up[id] > 0);
+    const gear = T.gear ? GEAR_SLOTS.map(s => s.k).filter(k => T.gear[k]) : [];
+    let id = null, name = null;
+    if (owned.length) { id = simPick(owned); const up = UPGRADES.find(z => z.id === id); name = up ? upName(up) : id; }
+    else if (gear.length) { const k = simPick(gear); id = 'g:' + k; name = gearName(T.gear[k]); }
+    if (id) {
+      d.ups[id] = (d.ups[id] || 0) + 1; d.n++;
+      if (d.names.length < 8) d.names.push(name);
+      floatText(d.x, d.y - 36, 'COPIED  ' + name, UNW_COL, 13);
+      Audio_.tone(240, 0.18, 'sawtooth', 0.09, 900);
     }
   }
 
-  // the tether between them cuts from the second phase on
-  if (u.phase >= 1 && u.a && u.b && !u.a.dead && !u.b.dead) {
-    if (segCircle(u.a.x, u.a.y, u.b.x, u.b.y, P.x, P.y, 15 + P.r))
-      hurtPlayer(P.maxHp * (u.phase >= 2 ? 0.42 : 0.28));
+  if (d.st === 'idle') {
+    d.atkT -= dt;
+    if (d.atkT <= 0 && u.stunT <= 0) {
+      d.st = 'tell'; d.tell = W0.tell;
+      d.ang = Math.atan2(T.y - d.y, T.x - d.x);
+      d.ax = T.x; d.ay = T.y; d.hit = [0, 0];
+    }
+    return;
   }
-  // and touching either half is most of your health
-  for (const e of [u.a, u.b]) {
-    if (!e || e.dead) continue;
-    if (len(e.x - P.x, e.y - P.y) < e.r + P.r + 2) hurtPlayer(P.maxHp * 0.38);
+  if (d.st === 'tell') {
+    if (d.kind === 'bullet') d.ang = Math.atan2(T.y - d.y, T.x - d.x);
+    d.tell -= dt;
+    if (d.tell > 0) return;
+    if (d.kind === 'bullet') {
+      // your own guns: more barrels for every Split Barrel it has, and your rounds' tricks
+      const n = 1 + Math.min(3, d.ups.multi || 0) + (d.n >= 4 ? 1 : 0);
+      const dmg = T.maxHp * UNW_HURT.draft;
+      for (let k = 0; k < n; k++) {
+        const a = d.ang + (n > 1 ? (k / (n - 1) - 0.5) * 0.14 * (n - 1) : 0);
+        const b = eshoot(u.a, a, W0.spd, dmg, 6, d.x - Math.cos(a) * (u.a.r - 16), d.y - Math.sin(a) * (u.a.r - 16));
+        if (b) { b.col = UNW_INK;
+                 if (d.ups.home) b.homeP = Math.min(2, d.ups.home);
+                 if (d.ups.ric) b.ricP = Math.min(2, d.ups.ric); }
+      }
+      d.st = 'idle'; d.atkT = Math.max(0.85, W0.every - d.n * 0.05);
+    } else if (d.kind === 'laser') {
+      d.st = 'live'; d.tell = W0.live;
+      Audio_.tone(760, 0.12, 'sawtooth', 0.06, 420);
+    } else {
+      d.st = 'dash';
+      const dx = d.ax - d.x, dy = d.ay - d.y, L = Math.min(W0.reach, Math.hypot(dx, dy) + 80);
+      d.ex = clamp(d.x + Math.cos(d.ang) * L, arena.x0 + 20, arena.x1 - 20);
+      d.ey = clamp(d.y + Math.sin(d.ang) * L, arena.y0 + 20, arena.y1 - 20);
+      Audio_.noise(0.18, 0.1, 4000, 600, 3);
+    }
+    return;
   }
-
-  if (u.hp <= 0) unwWin();
+  if (d.st === 'live') {                       // EMBER's lance, written back
+    const L = W0.len + d.n * 25;
+    const x2 = d.x + Math.cos(d.ang) * L, y2 = d.y + Math.sin(d.ang) * L;
+    unwPilots(k => {
+      if (d.hit[k] || !segCircle(d.x, d.y, x2, y2, P.x, P.y, W0.w + P.r)) return;
+      d.hit[k] = 1; unwHurt('lance');
+    });
+    d.tell -= dt;
+    if (d.tell <= 0) { d.st = 'idle'; d.atkT = Math.max(1.6, W0.every - d.n * 0.08); }
+    return;
+  }
+  if (d.st === 'dash') {                       // THE VAGRANT's lunge, written back
+    const spd = W0.spd * (1 + Math.min(0.4, d.n * 0.05));
+    const dx = d.ex - d.x, dy = d.ey - d.y, L = Math.hypot(dx, dy);
+    const step = Math.min(L, spd * dt);
+    if (L > 0.01) { d.x += dx / L * step; d.y += dy / L * step; }
+    unwPilots(k => {
+      if (d.hit[k] || len(P.x - d.x, P.y - d.y) > 30 + P.r) return;
+      d.hit[k] = 1; unwHurt('slash');
+    });
+    if (L <= step + 0.5) { d.st = 'idle'; d.atkT = Math.max(1.5, W0.every - d.n * 0.08); }
+  }
 }
 
 function unwWin() {
   const u = unwritten;
   if (!u) return;
   for (const e of [u.a, u.b]) if (e && !e.dead) { e.floor = undefined; e.dead = true; }
-  enemies.length = 0; ebullets.length = 0;
+  for (let i = enemies.length - 1; i >= 0; i--) if (!enemies[i].hacked) enemies.splice(i, 1);
+  ebullets.length = 0;
   unwTears = [];
   unwritten = null;
   bossAlive = false;
@@ -41368,10 +41830,9 @@ const AMAL_PART_HP = 400000;
    the fights are for: the amalgam has twelve lines gated on remaining health,
    and a build that deletes it in half a second throws the ending away. */
 const AMAL_TARGET_SEC = 100;    // he has twelve things to say
-const UNW_TARGET_SEC  = 70;
 const ENDGAME_BURST   = 2.5;    // seconds of damage bankable, so bursts land
 
-/* Shared by both fights: returns the damage actually allowed through. */
+/* Shared by the endgame fights: returns the damage actually allowed through. */
 function endgameThrottle(bucket, dmg) {
   if (!bucket || bucket.tok === undefined) return dmg;
   if (bucket.tok <= 0) return 0;
@@ -41385,9 +41846,9 @@ function refillThrottle(bucket, target, dt) {
   bucket.tok = Math.min(rate * ENDGAME_BURST, (bucket.tok || 0) + rate * dt);
 }
 
-/* Same per-hull reduction the unwritten uses, and for a sharper reason: nine
-   bodies standing in a cluster is the ideal target for chain, splash and
-   drones, so a maxed VOIDRUNNER puts roughly a million DPS into it and folded
+/* A per-hull reduction (THE UNWRITTEN's first cut had one too), and for a
+   sharp reason: nine bodies standing in a cluster is the ideal target for
+   chain, splash and drones, so a maxed VOIDRUNNER puts roughly a million DPS into it and folded
    the whole encounter in two seconds. He is not going to allow that twice. */
 const AMAL_DR = { bullet: 0.95, laser: 0.5, blade: 0.6 };
 
@@ -49096,28 +49557,18 @@ function unwAdopt(e) {
       clamp(2 * cy - e.y, arena.y0 + 90, arena.y1 - 90), { boss: 'unwritten' });
     if (!other) return false;
   }
-  e.unwSide = -1; other.unwSide = 1;
-  e.floor = 0; other.floor = 0;
-  for (const z of [e, other]) { z.armor = 0; z.absorb = 0; z.dr = 0; }
-  const deaths = RUN.unwrittenDeaths || 0;
-  const pool = UNW_POOL * Math.max(0.35, 1 - deaths * UNW_ATTRITION);
-  unwritten = { a: e, b: other, hp: pool, maxHp: pool, t: 0,
-                tok: pool / UNW_TARGET_SEC * ENDGAME_BURST,
-                aHitT: 0, bHitT: 0, pending: 0,
-                tearT: 2.2, writeT: 6, ups: {}, atkT: 2.4, phase: 0 };
-  e.maxHp = other.maxHp = pool; e.hp = other.hp = pool;
-  unwTears = []; unwDeadT = 0;
-  if (!unwSnap) unwSnap = snapPlayer();   // so a death here still has somewhere to rewind to
-  bossAlive = true;
+  // so a death here still has somewhere to rewind to
+  if (!unwSnap) { unwSnap = []; for (let k = 0; k < Math.max(1, PILOTS.length); k++) pilotDo(k, () => { unwSnap[k] = snapPlayer(); }); }
+  unwBegin(e, other);
   banner('THE UNWRITTEN', UNW_COL, 3.0);
   ringFx(e.x, e.y, 20, 700, UNW_INK, 1.1, 8);
   return true;
 }
 
-// the boss shell calls this per body; the fight itself is driven by unwUpdate
+/* The boss shell calls this per body, and it only ever adopts: the fight is
+   driven once a step, ahead of the room (unwUpdate, from update). */
 function bossUnwritten(e, dt) {
-  if (!unwritten && !unwAdopt(e)) return;
-  if (e === unwritten.a) unwUpdate(dt);   // drive once, from the first body
+  if (!unwritten) unwAdopt(e);
 }
 
 function bossOtherFinale(e, dt) {
@@ -58358,9 +58809,11 @@ function drawLibraryPortal() {
 
 /* THE UNWRITTEN is a page, so it is drawn as one instead of as a white
    polygon: two halves of a single sheet, torn apart, each with its ruled
-   lines printed and nothing written on them. The tear always faces its twin
-   — that is what makes the pair read as one sheet pulled in two rather than
-   as two enemies that happen to be linked. */
+   lines printed. The tear always faces its twin — that is what makes the
+   pair read as one sheet pulled in two rather than as two enemies that
+   happen to be linked. What the fight has written is on the page: a line of
+   ink across both halves for every line written, and in the margin a
+   scribble for every card the draft has copied off you. */
 const UNW_PAPER = '#f8fafc', UNW_RULE = '#94a3b8';
 
 function unwTearPts(sign, w, h, phase) {
@@ -58382,22 +58835,41 @@ function unwSheetPath(pts, sign, w, h) {
   ctx.closePath();
 }
 
-function unwSheet(e, u, open) {
+// a line of handwriting along a rule: the same scrawl for the same line, every frame
+function unwScrawl(x0, x1, y, k, amp) {
+  ctx.beginPath();
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16, xx = lerp(x0, x1, t), yy = y + Math.sin(t * 26 + k * 2.3) * amp + Math.sin(t * 61 + k) * amp * 0.4;
+    i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy);
+  }
+  ctx.stroke();
+}
+
+/* One half. `s` is which (0 is a, 1 is b): its gash and whether it is open
+   are read off the fight by it. */
+function unwSheet(e, u, s) {
   const sign = -(e.unwSide || -1);          // the tear faces the other half
   const w = e.r * 0.84, h = e.r * 1.16;
   const phase = (e.unwSide || 0) * 2.1;
   const flash = clamp(e.flash || 0, 0, 1);
   const pts = unwTearPts(sign, w, h, phase);
+  const open = (u.open && u.open[s]) || 0, gash = clamp(((u.gash && u.gash[s]) || 0) / UNW_OPEN_NEED, 0, 1);
+  const swell = !u.seamT && !u.stunT && !u.windT && !u.seam && !u.rush && u.inkSide === s && u.inkT < UNW_INK_TELL
+    ? 1 - u.inkT / UNW_INK_TELL : 0;
+  const dim = u.stunT > 0 || u.windT > 0;
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  drawGlow(e.x, e.y, e.r * 2.4, UNW_COL, 0.20 + flash * 0.3);
-  if (open > 0) drawGlow(e.x, e.y, e.r * 2.8, UNW_INK, 0.4 * (open / LINK_HEAL));
+  drawGlow(e.x, e.y, e.r * 2.4, UNW_COL, (dim ? 0.1 : 0.2) + flash * 0.3);
+  if (open > 0) drawGlow(e.x, e.y, e.r * 3, UNW_INK, 0.55);
+  if (swell > 0) drawGlow(e.x, e.y, e.r * (2.2 + swell), UNW_INK, 0.25 + swell * 0.4);
   ctx.restore();
 
   ctx.save();
   ctx.translate(e.x, e.y);
-  ctx.rotate(Math.sin(uiTime * 0.7 + phase) * 0.05);
+  ctx.rotate(Math.sin(uiTime * 0.7 + phase) * 0.05 + (dim ? Math.sin(uiTime * 5 + phase) * 0.08 : 0));
+  const sc = 1 + swell * 0.08;
+  ctx.scale(sc, sc);
 
   // it floats a little off the floor, and casts onto it
   ctx.save();
@@ -58407,14 +58879,13 @@ function unwSheet(e, u, open) {
 
   unwSheetPath(pts, sign, w, h);
   const g = ctx.createLinearGradient(0, -h, 0, h);
-  g.addColorStop(0, UNW_PAPER);
-  g.addColorStop(1, '#aeb6c2');
+  g.addColorStop(0, dim ? '#cbd5e1' : UNW_PAPER);
+  g.addColorStop(1, dim ? '#8b95a3' : '#aeb6c2');
   ctx.fillStyle = g; ctx.fill();
 
   ctx.save();
   unwSheetPath(pts, sign, w, h); ctx.clip();
   const rows = 9;
-  // the rules are printed. Nothing is on them; that is the whole entry.
   ctx.strokeStyle = rgba(UNW_RULE, 0.45); ctx.lineWidth = 1;
   for (let k = 1; k < rows; k++) {
     const y = -h + 2 * h * k / rows;
@@ -58425,28 +58896,29 @@ function unwSheet(e, u, open) {
   ctx.moveTo(-sign * w * 0.58, -h); ctx.lineTo(-sign * w * 0.58, h);
   ctx.stroke();
 
-  /* Your own build, written back at you: one line of ink per card it has
-     copied, so the page filling up IS the fight getting harder. */
-  const cop = Object.keys(u.ups || {}).length;
-  ctx.strokeStyle = rgba(UNW_INK, 0.9); ctx.lineWidth = 2;
-  for (let k = 0; k < Math.min(cop, rows - 1); k++) {
-    const y = -h + 2 * h * (k + 1) / rows - 2.5;
-    const x0 = -sign * w * 0.44, x1 = lerp(x0, sign * w * 0.9, 0.5 + ((k * 7) % 5) / 10);
-    ctx.beginPath();
-    for (let i = 0; i <= 14; i++) {
-      const t = i / 14, xx = lerp(x0, x1, t), yy = y + Math.sin(t * 24 + k * 2.3) * 1.7;
-      i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy);
-    }
-    ctx.stroke();
+  // the entry, as far as it has been written: the rules fill top to bottom
+  const wrote = u.maxHp ? Math.round((rows - 1) * clamp((u.written || 0) / u.maxHp, 0, 1)) : 0;
+  ctx.strokeStyle = 'rgba(15,10,30,0.88)'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+  for (let k = 0; k < wrote; k++) {
+    const y = -h + 2 * h * (k + 1) / rows - 3;
+    unwScrawl(-sign * w * 0.5, lerp(-sign * w * 0.5, sign * w * 0.95, 0.7 + ((k * 7) % 4) / 10), y, k + s * 5, 1.8);
+  }
+  // and in the margin, what the draft has copied off you
+  const cop = u.draft ? Math.min(u.draft.n, rows - 1) : 0;
+  ctx.strokeStyle = rgba(UNW_INK, 0.9); ctx.lineWidth = 1.4;
+  for (let k = 0; k < cop; k++) {
+    const y = -h + 2 * h * (k + 1) / rows - 3;
+    unwScrawl(-sign * w * 0.98, -sign * w * 0.64, y, k * 3 + 1, 1.2);
   }
 
-  // opened: a gash across the page with ink running out of it
-  if (open > 0) {
-    const p = clamp(open / LINK_HEAL, 0, 1);
+  // the gash: drawn as far as it has been cut, and wide open when it is
+  if (gash > 0 || open > 0) {
+    const p = open > 0 ? 1 : gash;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const slit = () => {
       ctx.beginPath();
-      for (let i = 0; i <= 8; i++) {
+      const m = Math.max(1, Math.round(8 * p));
+      for (let i = 0; i <= m; i++) {
         const t = i / 8;
         const gx = lerp(-w * 0.5, w * 0.44, t) + Math.sin(t * 17 + phase) * w * 0.06;
         const gy = lerp(-h * 0.32, h * 0.36, t) + Math.sin(t * 11 + phase) * h * 0.05;
@@ -58454,17 +58926,17 @@ function unwSheet(e, u, open) {
       }
       ctx.stroke();
     };
-    ctx.strokeStyle = 'rgba(9,7,20,0.85)'; ctx.lineWidth = 1.6 + p * 3;
+    ctx.strokeStyle = 'rgba(9,7,20,0.85)'; ctx.lineWidth = open > 0 ? 6 : 1.6 + p * 2;
     slit();
-    ctx.strokeStyle = rgba(UNW_INK, 0.8 * p); ctx.lineWidth = 1.2;
+    ctx.strokeStyle = rgba(UNW_INK, open > 0 ? 0.95 : 0.6); ctx.lineWidth = open > 0 ? 2 : 1.2;
     slit();
-    for (let k = 0; k < 4; k++) {
+    if (open > 0) for (let k = 0; k < 4; k++) {
       const t = 0.2 + k * 0.2;
       const bx = lerp(-w * 0.52, w * 0.46, t), by = lerp(-h * 0.34, h * 0.38, t);
-      ctx.strokeStyle = rgba(UNW_INK, 0.5 * p); ctx.lineWidth = 2;
+      ctx.strokeStyle = rgba(UNW_INK, 0.6); ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(bx, by);
-      ctx.lineTo(bx + Math.sin(k * 2.1) * 3, by + h * 0.5 * p);
+      ctx.lineTo(bx + Math.sin(k * 2.1) * 3, by + h * 0.5 * (1 - open / UNW_OPEN_T * 0.5));
       ctx.stroke();
     }
   }
@@ -58493,6 +58965,99 @@ function unwSheet(e, u, open) {
     ctx.stroke();
   }
   ctx.restore();
+
+  /* Round it, the wound as a gauge: the gash filling as an arc, then, open,
+     a full ring of ink running down for as long as it will wait. */
+  const R = e.r * 1.55;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(15,23,42,0.6)'; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(e.x, e.y, R, 0, TAU); ctx.stroke();
+  if (open > 0) {
+    const k = open / UNW_OPEN_T;
+    ctx.strokeStyle = rgba(UNW_INK, 0.95); ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba('#ffffff', 0.35 + Math.sin(uiTime * 12) * 0.2); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (gash > 0) {
+    ctx.strokeStyle = rgba(u.windT > 0 ? '#e9d5ff' : UNW_COL, 0.85); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(e.x, e.y, R, -Math.PI / 2, -Math.PI / 2 + TAU * gash); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* The draft: your hull cut out of the page, ruled, inked round the edge and
+   shedding ink. Its tell is drawn where it will land. */
+function unwDrawDraft(u, d) {
+  const W0 = UNW_DRAFT[d.kind];
+  ctx.save();
+  if (d.st === 'tell' && d.kind !== 'bullet') {
+    const k = 1 - clamp(d.tell / W0.tell, 0, 1);
+    const L = d.kind === 'laser' ? W0.len + d.n * 25 : Math.hypot(d.ax - d.x, d.ay - d.y) + 80;
+    ctx.globalAlpha = 0.3 + k * 0.6;
+    ctx.strokeStyle = UNW_INK; ctx.lineWidth = 1 + k * (d.kind === 'laser' ? 3 : 2);
+    ctx.setLineDash([10, 8]); ctx.lineDashOffset = -uiTime * 80;
+    ctx.beginPath(); ctx.moveTo(d.x, d.y);
+    ctx.lineTo(d.x + Math.cos(d.ang) * Math.min(L, d.kind === 'blade' ? W0.reach : L),
+               d.y + Math.sin(d.ang) * Math.min(L, d.kind === 'blade' ? W0.reach : L));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (d.st === 'live') {
+    const L = W0.len + d.n * 25;
+    const x2 = d.x + Math.cos(d.ang) * L, y2 = d.y + Math.sin(d.ang) * L;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(12,8,28,0.92)'; ctx.lineWidth = W0.w * 2;
+    ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(UNW_INK, 0.9); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.restore();
+
+  const tell = d.st === 'tell' ? 1 - clamp(d.tell / W0.tell, 0, 1) : 0;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(d.x, d.y, 54 + tell * 22, UNW_INK, 0.4 + tell * 0.45);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(d.ang);
+  const s = 21;
+  const hull = () => {
+    ctx.beginPath();
+    ctx.moveTo(s * 1.25, 0);
+    ctx.lineTo(-s * 0.85, s * 0.8);
+    ctx.lineTo(-s * 0.4, 0);
+    ctx.lineTo(-s * 0.85, -s * 0.8);
+    ctx.closePath();
+  };
+  // cut out of the page and inked: paper in the shape of your hull
+  hull();
+  const g = ctx.createLinearGradient(-s, 0, s * 1.25, 0);
+  g.addColorStop(0, '#aeb6c2'); g.addColorStop(1, UNW_PAPER);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save(); hull(); ctx.clip();
+  ctx.strokeStyle = rgba(UNW_RULE, 0.55); ctx.lineWidth = 1;
+  for (let k = -4; k <= 4; k++) { ctx.beginPath(); ctx.moveTo(k * 5, -s); ctx.lineTo(k * 5, s); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(15,10,30,0.85)'; ctx.lineWidth = 1.6;
+  // a stroke of ink across it for every card it has copied off you
+  for (let k = 0; k < Math.min(5, d.n); k++) {
+    const x = -s * 0.55 + k * 6;
+    ctx.beginPath(); ctx.moveTo(x, -s * 0.32); ctx.lineTo(x + 2, s * 0.32); ctx.stroke();
+  }
+  ctx.restore();
+  hull();
+  ctx.strokeStyle = 'rgba(15,10,30,0.95)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.strokeStyle = rgba(UNW_INK, 0.95); ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.restore();
+  if (FXO.parts && rnd() < 0.35)
+    spawnPart(d.x + rnd(10, -10), d.y + rnd(10, -10), rnd(20, -20), rnd(60, 20), rnd(2.4, 1.1), UNW_INK, rnd(0.5, 0.2), 0.94);
 }
 
 function drawUnwritten() {
@@ -58504,23 +59069,27 @@ function drawUnwritten() {
     const rc = unwCellRect(t.c, t.r);
     ctx.save();
     if (t.warn > 0) {
-      const p = 1 - t.warn / 1.1;
-      ctx.globalAlpha = 0.25 + p * 0.35;
+      const p = 1 - t.warn / (t.w0 || 1.5);
+      ctx.globalAlpha = 0.3 + p * 0.5;
       ctx.strokeStyle = UNW_INK; ctx.lineWidth = 2;
       ctx.setLineDash([9, 7]); ctx.lineDashOffset = -uiTime * 30;
-      ctx.strokeRect(rc.x + 2, rc.y + 2, rc.w - 4, rc.h - 4);
+      ctx.strokeRect(rc.x + 3, rc.y + 3, rc.w - 6, rc.h - 6);
       ctx.setLineDash([]);
-      ctx.globalAlpha = 0.1 * p;
+      // the cell is torn round from the edges in as the warning runs out
+      ctx.globalAlpha = 0.12 + p * 0.22;
       ctx.fillStyle = UNW_INK;
+      const ix = rc.w * 0.5 * (1 - p), iy = rc.h * 0.5 * (1 - p);
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+      ctx.globalAlpha = 0.25 + p * 0.4;
+      ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 2;
+      ctx.strokeRect(rc.x + ix, rc.y + iy, rc.w - 2 * ix, rc.h - 2 * iy);
     } else {
-      /* A lethal hole has to be unmistakable against a dark floor, so it is not
-         just black: it gets a bright torn rim, an inner falloff and a hatch. */
-      const fade = clamp(t.life / 1.2, 0, 1);
+      /* A hole has to be unmistakable against a dark floor, so it is not just
+         black: it gets a bright torn rim, an inner falloff and a hatch. */
+      const fade = clamp(t.life / 0.6, 0, 1);
       ctx.globalAlpha = fade;
       ctx.fillStyle = '#000';
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-      // inner falloff, so the edge reads even where the floor is nearly black
       const gr = ctx.createLinearGradient(rc.x, rc.y, rc.x, rc.y + rc.h);
       gr.addColorStop(0, 'rgba(168,85,247,0.30)');
       gr.addColorStop(0.35, 'rgba(0,0,0,0)');
@@ -58528,7 +59097,6 @@ function drawUnwritten() {
       gr.addColorStop(1, 'rgba(168,85,247,0.30)');
       ctx.fillStyle = gr;
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
-      // torn fibres across the gap
       ctx.globalAlpha = 0.28 * fade;
       ctx.strokeStyle = UNW_INK; ctx.lineWidth = 1;
       for (let k = 1; k < 5; k++) {
@@ -58538,7 +59106,6 @@ function drawUnwritten() {
         ctx.lineTo(rc.x + rc.w - 3, yy + Math.sin(k * 3.3 + t.r) * 3);
         ctx.stroke();
       }
-      // ragged rim, all four sides
       ctx.globalAlpha = fade;
       ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 3;
       ctx.beginPath();
@@ -58558,12 +59125,58 @@ function drawUnwritten() {
 
   if (!u.a || !u.b || u.a.dead || u.b.dead) return;
 
-  /* The seam: the tear the two halves were pulled apart along, held open
-     between them. It is not a straight line — it is the same ragged edge both
-     pages carry, stretched across the gap, pinned at each body and slack in the
-     middle. In the last phase ink runs down it and it cuts. Displacement is
-     driven by sin, not random, so it drifts instead of strobing. */
-  const lethal = u.phase >= 1;
+  // the seam's cut, drawn where it will land for the whole of the tell
+  if (u.seam) {
+    const s = u.seam;
+    ctx.save();
+    ctx.lineCap = 'round';
+    if (s.st === 'tell') {
+      const k = 1 - clamp(s.t / UNW_SEAM.tell, 0, 1);
+      ctx.globalAlpha = 0.25 + k * 0.6;
+      ctx.strokeStyle = UNW_INK; ctx.lineWidth = 1 + k * 3;
+      ctx.setLineDash([16, 10]); ctx.lineDashOffset = -uiTime * 120;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.08 + k * 0.12;
+      ctx.lineWidth = UNW_SEAM.w * 2 + 18;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    } else {
+      const k = s.st === 'live' ? 1 : clamp(s.t / UNW_SEAM.rest, 0, 1);
+      ctx.strokeStyle = rgba('#0b0614', 0.9 * k); ctx.lineWidth = UNW_SEAM.w * 2;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(UNW_INK, 0.9 * k); ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.strokeStyle = rgba('#ffffff', 0.7 * k); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // the rush's paths, each half through where you stood
+  if (u.rush && u.rush.st === 'tell') {
+    const k = 1 - clamp(u.rush.t / UNW_RUSH.tell, 0, 1);
+    ctx.save();
+    ctx.strokeStyle = UNW_INK; ctx.lineWidth = 2 + k * 3; ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.3 + k * 0.6;
+    for (const p of u.rush.paths) {
+      ctx.setLineDash([14, 9]); ctx.lineDashOffset = -uiTime * 160;
+      ctx.beginPath(); ctx.moveTo(p.x0, p.y0); ctx.lineTo(p.x1, p.y1); ctx.stroke();
+      ctx.setLineDash([]);
+      const a = Math.atan2(p.y1 - p.y0, p.x1 - p.x0);
+      ctx.beginPath();
+      ctx.moveTo(p.x1, p.y1);
+      ctx.lineTo(p.x1 - Math.cos(a - 0.4) * 22, p.y1 - Math.sin(a - 0.4) * 22);
+      ctx.moveTo(p.x1, p.y1);
+      ctx.lineTo(p.x1 - Math.cos(a + 0.4) * 22, p.y1 - Math.sin(a + 0.4) * 22);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* The seam between the halves: the tear they were pulled apart along, held
+     open between them, pinned at each body and slack in the middle. Ink runs
+     along it while one half is open and waiting on the other. */
   const seam = [];
   {
     const dx = u.b.x - u.a.x, dy = u.b.y - u.a.y, L = Math.hypot(dx, dy) || 1;
@@ -58573,8 +59186,7 @@ function drawUnwritten() {
       const off = (Math.sin(t * 9.1 + uiTime * 0.6) * 9 +
                    Math.sin(t * 23 + uiTime * 1.1) * 4) * env;
       seam.push({ x: lerp(u.a.x, u.b.x, t) + nx * off,
-                  y: lerp(u.a.y, u.b.y, t) + ny * off,
-                  nx, ny, env });
+                  y: lerp(u.a.y, u.b.y, t) + ny * off, nx, ny, env });
     }
   }
   const traceSeam = () => {
@@ -58583,99 +59195,71 @@ function drawUnwritten() {
     for (const p of seam) ctx.lineTo(p.x, p.y);
     ctx.stroke();
   };
+  const waiting = u.open[0] > 0 || u.open[1] > 0;
   ctx.save();
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.globalCompositeOperation = 'lighter';
-  ctx.strokeStyle = rgba(lethal ? UNW_INK : UNW_COL, lethal ? 0.22 : 0.1);
-  ctx.lineWidth = lethal ? 13 : 6;
+  ctx.strokeStyle = rgba(waiting ? UNW_INK : UNW_COL, waiting ? 0.2 : 0.08);
+  ctx.lineWidth = waiting ? 10 : 5;
   traceSeam();
-  ctx.strokeStyle = rgba(lethal ? UNW_INK : '#94a3b8', lethal ? 0.85 : 0.45);
-  ctx.lineWidth = lethal ? 4 : 1.6;
+  ctx.strokeStyle = rgba(waiting ? UNW_INK : '#94a3b8', waiting ? 0.7 : 0.3);
+  ctx.lineWidth = waiting ? 2.4 : 1.2;
   traceSeam();
-  if (lethal) {
-    ctx.strokeStyle = rgba('#ffffff', 0.5 + Math.sin(uiTime * 9) * 0.25);
-    ctx.lineWidth = 1.4;
+  if (waiting) {
+    ctx.strokeStyle = rgba(UNW_INK, 0.9); ctx.lineWidth = 2.6;
+    ctx.setLineDash([10, 26]); ctx.lineDashOffset = (u.open[0] > 0 ? -1 : 1) * uiTime * 320;
     traceSeam();
+    ctx.setLineDash([]);
   }
-  // torn fibres bridging the gap, thinning toward the middle
   ctx.lineWidth = 1;
   for (let k = 1; k < seam.length - 1; k += 2) {
     const p = seam[k], L = 7 * (1 - p.env * 0.7);
-    ctx.strokeStyle = rgba(UNW_COL, 0.4 * (1 - p.env * 0.6));
+    ctx.strokeStyle = rgba(UNW_COL, 0.3 * (1 - p.env * 0.6));
     ctx.beginPath();
     ctx.moveTo(p.x - p.nx * L, p.y - p.ny * L);
     ctx.lineTo(p.x + p.nx * L, p.y + p.ny * L);
     ctx.stroke();
   }
-  // banked damage runs along the seam looking for the other half
-  if (u.pending > 0) {
-    ctx.strokeStyle = rgba(UNW_INK, 0.9); ctx.lineWidth = 2.6;
-    ctx.setLineDash([10, 26]); ctx.lineDashOffset = -uiTime * 320;
-    traceSeam();
-    ctx.setLineDash([]);
-  }
   ctx.restore();
-  // untouched, it stitches itself shut: sutures pull in across the seam
-  if (u.touchT > UNW_UNTOUCHED) {
-    const c = clamp((u.touchT - UNW_UNTOUCHED) / 2, 0, 1);
+
+  // a line written: one stroke of ink through both halves, fading
+  if (u.writeFx > 0) {
     ctx.save();
-    ctx.strokeStyle = rgba(UNW_COL, 0.35 + c * 0.5);
-    ctx.lineWidth = 1.6;
-    for (let k = 2; k < seam.length - 2; k += 3) {
-      const p = seam[k], L = 12 * (1 - c * 0.65);
-      ctx.beginPath();
-      ctx.moveTo(p.x - p.nx * L - p.ny * 5, p.y - p.ny * L + p.nx * 5);
-      ctx.lineTo(p.x + p.nx * L + p.ny * 5, p.y + p.ny * L - p.nx * 5);
-      ctx.moveTo(p.x - p.nx * L + p.ny * 5, p.y - p.ny * L - p.nx * 5);
-      ctx.lineTo(p.x + p.nx * L - p.ny * 5, p.y + p.ny * L + p.nx * 5);
-      ctx.stroke();
-    }
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba('#0b0614', 0.85 * u.writeFx); ctx.lineWidth = 10 * u.writeFx + 2;
+    traceSeam();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(UNW_COL, 0.7 * u.writeFx); ctx.lineWidth = 2;
+    traceSeam();
     ctx.restore();
   }
 
-  // the two halves, each carrying its own tear and whatever is inked on it
-  unwSheet(u.a, u, u.aHitT);
-  unwSheet(u.b, u, u.bHitT);
-  // ink shed from a half that is currently open
+  unwSheet(u.a, u, 0);
+  unwSheet(u.b, u, 1);
   if (FXO.parts)
-    for (const [e, open] of [[u.a, u.aHitT], [u.b, u.bHitT]]) {
-      if (open <= 0 || rnd() > 0.4) continue;
+    for (const [e, s] of [[u.a, 0], [u.b, 1]]) {
+      if (u.open[s] <= 0 || rnd() > 0.4) continue;
       spawnPart(e.x + rnd(e.r * 0.6, -e.r * 0.6), e.y + rnd(e.r, 0),
                 rnd(20, -20), rnd(70, 20), rnd(2.4, 1.1), UNW_INK, rnd(0.5, 0.2), 0.94);
     }
 
-  const mx = (u.a.x + u.b.x) / 2, my = (u.a.y + u.b.y) / 2;
-  if (u.touchT > UNW_UNTOUCHED) {
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = UNW_COL;
-    ctx.globalAlpha = 0.55 + Math.sin(uiTime * 6) * 0.35;
-    ctx.fillText('CLOSING', mx, my + 34);
-    ctx.restore();
-  }
-  // banked damage: an ink blot on the seam, with the figure held in it
-  if (u.pending > 0) {
-    ctx.save();
-    ctx.textAlign = 'center';
-    const bob = Math.sin(uiTime * 8) * 0.12;
-    ctx.globalCompositeOperation = 'lighter';
-    drawGlow(mx, my - 22, 34, UNW_INK, 0.3 + bob);
-    ctx.restore();
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(12,8,28,0.85)';
-    ctx.beginPath(); ctx.ellipse(mx, my - 24, 47, 18, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = rgba(UNW_INK, 0.75); ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.ellipse(mx, my - 24, 47, 18, 0, 0, TAU); ctx.stroke();
-    ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = rgba(UNW_COL, 0.75);
-    ctx.fillText('HELD', mx, my - 28);
-    ctx.font = "700 12px 'JetBrains Mono', ui-monospace, monospace";
+  // what the halves are doing, said under them when it is not obvious
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  if (u.windT > 0) {
+    ctx.fillStyle = '#e9d5ff';
+    ctx.globalAlpha = 0.6 + Math.sin(uiTime * 8) * 0.3;
+    for (const e of [u.a, u.b]) ctx.fillText('WINDED', e.x, e.y + e.r * 1.55 + 16);
+  } else if (waiting) {
+    const s = u.open[0] > 0 ? 1 : 0, e = s ? u.b : u.a;
     ctx.fillStyle = UNW_INK;
-    ctx.fillText(String(Math.round(u.pending)), mx, my - 16);
-    ctx.restore();
+    ctx.globalAlpha = 0.65 + Math.sin(uiTime * 10) * 0.3;
+    ctx.fillText('NOW THIS ONE', e.x, e.y + e.r * 1.55 + 16);
   }
+  ctx.restore();
+
+  if (u.draft) unwDrawDraft(u, u.draft);
 }
 
 function drawUnwrittenOverlay() {
@@ -63463,15 +64047,23 @@ function drawHUD() {
     roundRect(x2, y2, w2, 14, 7); ctx.stroke();
     if (hlAreaOn() && HL_BOSSES[boss.boss]) hlDrawBossBar(boss, x2, y2, w2);   // ALL HALLOWS: where he binges, or whether he is there
     // armour is invisible otherwise: the player just sees smaller numbers
-    const unwCut = boss.boss === 'unwritten'
-      ? (UNW_DR[P.weapon] !== undefined ? UNW_DR[P.weapon] : 0.95) : 0;
-    if (boss.armor > 0 || boss.dr > 0 || unwCut > 0) {
+    /* THE UNWRITTEN's health is lines: the bar is ruled into them, and the
+       count of what is left sits where armour would. */
+    const unwBar = boss.boss === 'unwritten' && unwritten ? unwritten : null;
+    if (unwBar && unwBar.maxHp > 1) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(8,12,20,0.85)'; ctx.lineWidth = 1.5;
+      for (let k = 1; k < unwBar.maxHp; k++) {
+        const lx = x2 + 2 + (w2 - 4) * k / unwBar.maxHp;
+        ctx.beginPath(); ctx.moveTo(lx, y2 + 2); ctx.lineTo(lx, y2 + 12); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (boss.armor > 0 || boss.dr > 0 || unwBar) {
       ctx.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
-      ctx.fillStyle = unwCut ? '#c084fc' : '#94a3b8';
-      const armStr = unwCut
-        ? '⛨ −' + Math.round(unwCut * 100) + '%' +
-          (unwritten && unwritten.rage > 1.02
-            ? '   ⚠ ×' + unwritten.rage.toFixed(2) : '')
+      ctx.fillStyle = unwBar ? '#c084fc' : '#94a3b8';
+      const armStr = unwBar
+        ? '✎ ' + Math.max(0, unwBar.hp) + ' / ' + unwBar.maxHp + '   ' + UNW_SEQ[unwBar.seq].n
         : '⛨ ' + Math.round(boss.armor) +
           (boss.dr > 0 ? '  −' + Math.round(boss.dr * 100) + '%' : '');
       if (x2 + w2 + 8 + ctx.measureText(armStr).width < W - 8) {
@@ -63487,7 +64079,8 @@ function drawHUD() {
     ctx.letterSpacing = '0.1em';
     const bLabel = bname + (boss.invuln
       ? (boss.finale ? '   — OVERLOAD'
-         : boss.boss === 'broodmother' ? '   — SUBMERGED' : '   — CHANGING') : '');
+         : boss.boss === 'broodmother' ? '   — SUBMERGED'
+         : boss.boss === 'unwritten' ? '   — THE PAGE TURNS' : '   — CHANGING') : '');
     fitFont(bLabel, w2 - 12, '600', 13, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
     ctx.fillStyle = bcol;
     ctx.fillText(bLabel, W / 2, y2 + 29);
@@ -66029,13 +66622,13 @@ const CODEX_ART = {
      its own tear, with the seam that joins them between. */
   unwritten(size, col) {
     codexStage(0, 0, size, 108, () => {
-      const u = { a: null, b: null, aHitT: 0, bHitT: 0, seam: 1, t: 0 };
+      const u = { a: null, b: null, open: [0, 0], gash: [0, 0], written: 0, maxHp: 1, draft: null, t: 0 };
       const a = codexDummy(col, 58, 4, { unwSide: -1, x: -62, y: 0 });
       const b = codexDummy(col, 58, 4, { unwSide: 1, x: 62, y: 0 });
       u.a = a; u.b = b;
       unwritten = u;
       unwSheet(a, u, 0);
-      unwSheet(b, u, 0);
+      unwSheet(b, u, 1);
       // the seam, drawn the way the fight draws it: stitches between the pair
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
