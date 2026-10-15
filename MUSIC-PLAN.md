@@ -299,6 +299,14 @@ is pushed until you say; `main` only when you say ship.
    `grid` is "Entry Vector", `warden` "The First Wall". You asked for the
    lance to be more of a laser and less of a wave: rebuilt. The player's
    pieces changed from crossfaded cuts to pieces that ring out, see above.)*
+   *(14 Oct: the lance again, after a fight's worth of it: "the new one
+   sucks, and it's even worse since you hear it over and over". It is fired
+   about once a second all fight, and it was a 5 kHz zap into a hard buzz.
+   Now three takes of a designed blaster beam (3 credits): its strike run
+   straight into its body (as recorded there was a fifth of a second's gap),
+   the body levelled so it holds steady instead of swelling three to five
+   times a second, shaped like the beam on screen, with its own shut-off
+   and a short dulled fizz. Warm, no pitch of its own, nothing under 90 Hz.)*
 
    **From here (your call, 11 Oct): the sectors first, one at a time, each
    track named; the full determinism, lockstep and live passes run once at

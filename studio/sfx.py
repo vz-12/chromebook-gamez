@@ -47,34 +47,50 @@ def hit():
     return takes, dict(vol=0.16, pitch=0.07)
 
 def lance():
-    """EMBER's lance: a laser. A zap that falls from 5 kHz in a few hundredths of a second, then a tight,
-    steady beam (a hard-synced oscillator: one bright buzzing pitch, nothing wavering) that holds for the
-    beam's second, drains a little, and drops away as it shuts off."""
-    from scipy.signal import resample_poly
+    """EMBER's lance: a beam that stands for a second, fired again as soon as it goes out, so it is heard
+    about once a second for a whole fight. (The first one, a 5 kHz zap into a hard-synced buzz, was
+    tiring on repeat, 14 Oct: "the new one sucks".)
+
+    Made from a designed blaster beam (two takes of one, in its low variant): its strike, then its body,
+    warm (half of it under 250 Hz) and with no pitch of its own, so it sits under any song's key.
+    As recorded, the body only arrives a fifth of a second after the strike, and it swells and dips three
+    to five times a second. Here the strike runs straight into the body, the body is levelled sample by
+    sample (no swell left in it, so it is a beam and not a wave), and it is then shaped the way the beam
+    on screen is: a little under full as it opens, full in the middle, easing as it narrows. It ends
+    with the recording's own shut-off and a short fizz of what it left in the air."""
+    from scipy.ndimage import uniform_filter1d
     takes = []
-    for semi, seed in [(0.0, 1), (-2.0, 2)]:
-        n = int(1.2 * SR); t = np.arange(n) / SR; k = 2.0 ** (semi / 12.0)
-        out = np.zeros((n, 2))
-        # the zap
-        fz = 900.0 * k + 4300.0 * k * np.exp(-t / 0.03)
-        zap = (np.sin(2 * math.pi * np.cumsum(fz) / SR) * 0.6 + saw(fz, n) * 0.4) * np.exp(-t / 0.06)
-        # the beam, made four times oversampled so the sync's edges do not alias
-        OS = 4; to = np.arange(n * OS) / (SR * OS)
-        f0 = 392.0 * k
-        ratio = np.where(to < 1.0, 4.3 + 0.7 * (1.0 - to) + 4.0 * np.exp(-to / 0.045), 4.3 * np.exp(-(to - 1.0) / 0.09) + 1.0)
-        pm = (f0 * to) % 1.0
-        beam = resample_poly(2.0 * ((pm * ratio) % 1.0) - 1.0, 1, OS)[:n]
-        beam = beam + 0.35 * np.sin(2 * math.pi * f0 * 4.0 * t)                      # a pure whine on top
-        beam = lp(hp(beam, 300.0), 5500.0, 4)
-        hiss = bp(noise(n, seed), 4500.0, 9000.0) * 0.05
-        shape = np.minimum(t / 0.004, 1.0) * np.where(t < 1.0, 1.0 - 0.15 * t, 0.85 * np.exp(-(t - 1.0) / 0.05))
-        crack = hp(shift(sample('ESM_GW_laser_pistol_heavy_beefy_2'), 4.0 + semi), 400.0)[:int(0.12 * SR)]
-        add(out, st(zap), 0, 0.55)
-        add(out, st((beam * 0.5 + hiss) * shape), 0, 0.6)
-        add(out, crack * np.exp(-np.arange(len(crack)) / (0.03 * SR))[:, None], 0, 0.35)
-        out[:, 1] = np.roll(out[:, 1], 9)                                             # a hair of width, no detune (detune beats)
-        takes.append(norm(fade(out, 0.0003, 0.03)))
-    return takes, dict(vol=0.26, pitch=0.02)
+    for src, hit_src, semi in [('ESM_GW_blaster_beam_low_1', 'ESM_GW_blaster_beam_low_1', 0.0),
+                               ('ESM_GW_blaster_beam_low_2', 'ESM_GW_blaster_beam_low_2', 0.0),
+                               ('ESM_GW_blaster_beam_low_1', 'ESM_GW_blaster_beam_low_2', -1.2)]:
+        x = shift(sample(src), semi); h = shift(sample(hit_src), semi)
+        k = 2.0 ** (-semi / 12.0)                                   # a lower take is longer: its times stretch with it
+        on = int(0.05 * SR)                                         # where the body comes in, after the strike
+        strike = fade(h[:int(0.075 * k * SR)], 0.0003, 0.025)
+        # for a speaker that has no bass, and for an ear that hears it a thousand times: nothing under 90 Hz, a
+        # little less of the 3 kHz bite and of the top. Before the levelling, since part of the swell is in the bass
+        eq = lambda y: highshelf(peak(hp(y, 90.0, 2), 3000.0, -2.5, 0.8), 6500.0, -3.0)
+        strike = eq(strike)
+        body = eq(x[int(0.24 * k * SR):int(1.2 * k * SR)].copy())
+        # levelled: its loudness over 40 ms, divided out, so the slow swell goes and the grain stays
+        lev = np.sqrt(uniform_filter1d(body.mean(axis=1) ** 2, size=int(0.04 * SR), mode='nearest'))
+        body *= np.clip(float(np.median(lev)) / np.maximum(lev, 1e-9), 0.5, 2.0)[:, None]
+        n = len(body); t = np.arange(n) / SR
+        shape = (0.78 + 0.22 * np.sin(np.pi * np.clip(t / (n / SR), 0, 1)) ** 0.7) * np.minimum(t / 0.03, 1.0)
+        body = body * shape[:, None]
+        body[-int(0.03 * SR):] *= np.linspace(1, 0, int(0.03 * SR))[:, None]
+        # the shut-off: the recording's own release, the sparkle after it kept short and dulled
+        tail = x[int(1.2 * k * SR):int(1.55 * k * SR)].copy()
+        tail = eq(lp(tail, 6000.0, 2)) * np.exp(-np.arange(len(tail)) / (0.09 * SR))[:, None]
+        tail[:int(0.03 * SR)] *= np.linspace(0, 1, int(0.03 * SR))[:, None]
+        out = np.zeros((on + n + len(tail), 2))
+        add(out, strike, 0, 1.0)
+        add(out, body, on, 0.85)
+        add(out, tail, on + n - int(0.03 * SR), 0.85)
+        # narrower than recorded: a weapon, in the middle
+        m = out.mean(axis=1, keepdims=True); out = m + (out - m) * 0.7
+        takes.append(norm(fade(out, 0.0003, 0.05)))
+    return takes, dict(vol=0.3, pitch=0.025)
 
 def codex():
     """The codex opening: a hardcover's weight, a page, air, and three bell notes that do not resolve."""
