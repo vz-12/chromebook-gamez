@@ -129,7 +129,7 @@ a bar line when the boss changes phase.
 | `corrupt` "Your Reflection (Corrupted)" | the corrupted OTHER | the same song with something else in it: faster, every B a B flat, the leads crushed, a low voice under them that was never there, notes sticking | 176, A minor with a B flat |
 | `keeper` | THE BOOKKEEPER | baroque metal: harpsichord and guitars, ledger ticking | 168, F minor |
 | `shopkeeper` | THE SHOPKEEPER | jazz-metal: walking bass, ka-ching percussion | 180 swung, E♭ minor |
-| `unwritten` | THE UNWRITTEN | a blank page: sparse piano that writes itself into a full orchestra | 120→180, C minor |
+| `unwritten` "Torn Pages" | THE UNWRITTEN | a blank page that writes itself into a full orchestra. A tune of its own, in two halves (a question that ends open, an answer that closes it): the question first on the white keys alone, C major, with no ink; then C minor, the halves on two pianos either side; the strings copying it two bars late; holes torn in the music, a paper rip in each; the page torn through near the end, the blank question showing in the hole. Two-second bars, four beats of 120 becoming six of 180. A rewind section for a death | 120→180, C minor (C major before the ink) |
 | `amalgam` "Made of Favourites" | THE AMALGAM (EMBER's rite) | a suite bolted together in the order he builds the body: its own walk, then one motif from each act-one boss (THE WARDEN's riff, FORGEHEART's hammer, BROODMOTHER's long line, THE ARCHIVIST's chorale, NULL's rising statement), a quiet middle of its own, and the main theme to finish | 140 (half-time until the finale), D minor |
 | `root` "Child's Play" (your title) | ROOT (and THE HACKER's rite, the race) | techno and metal, and one tune: the one every playground sings at whoever is losing, five notes. He sings it, louder, higher, and then changes the rules (the whole song a semitone up, half-way through the last phase). A kick on every beat with the bass between, an acid line, a wall of saws, guitars on the taunt's rhythm; a square wave for his voice that slides up into every note; a music box; typewriter keys for hi-hats and its bell when a line is entered. The race is two typists, one a side | 170, C sharp minor |
 | `tribunal` | THE TRIBUNAL | he does not fight: a court of drums, tension that never releases | 90, D minor |
@@ -521,6 +521,17 @@ is pushed until you say; `main` only when you say ship.
 7. **The secret rooms and the story.** `library`, `keeper`, `shop`,
    `shopkeeper`, `planetarium`, `unwritten`, `amalgam`, `hub`, `stands`,
    `tribunal`, `founder`, `onepointoh`.
+   *(`unwritten` "Torn Pages" done 14 Oct, 14 credits: a piano recorded note
+   by note (nine notes, all in tune), a cello and a violin note, two paper
+   tears and a pencil. Its own tune, ASK and ANS in scores/unwritten.py, and
+   the climb, CLIMB. The grid is 180's sixteenths over two-second bars
+   (`Song(180, beats=6, steps=24)`), so 120's beat is six steps and a
+   twelve-step pattern is both 120's triplets and 180's eighths. `tear()`
+   cuts a hole in every instrument at once. The game asks for its phases by
+   the fight's thirds now (it only ever asked for p1), and for `again`
+   through a death's rewind and two seconds after, so the track starts over
+   with the fight. On THE SOUNDTRACK before THE AMALGAM, kept when it is
+   closed.)*
 8. **Menus, modes and stingers.** `title`, `codex`, `rush`, `pvp`, and the
    rest of the stings.
 9. **SFX I: combat.**

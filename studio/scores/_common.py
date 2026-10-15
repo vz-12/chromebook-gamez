@@ -514,6 +514,35 @@ def bones():
     from inst import keys
     return keys(ratio=4.0, index=1.3, decay=0.17, a=0.001, spread=0.3)
 
+_PAGE = {}
+def page():
+    """THE UNWRITTEN's sounds: a piano, a cello, a violin, paper and a pencil (14 Oct; the first piano in the
+    kit that is in tune, so nothing here is mixed with THE VOID's upright, which is a quarter-tone flat).
+
+    The piano is one instrument recorded note by note, nine of them, every third or fourth note up the
+    keyboard from the middle and further apart below it; their roots are as measured (all within ten cents).
+    Its recordings carry a little mains hum (60 Hz and its overtones), taken out on the bus. The cello holds
+    a C4 and the violin a G5, each a long bowed note. The paper: a long tear, and a short rip (a third of a
+    second of it) for a hole torn in a bar. The pencil: three seconds of writing, cut into its strokes."""
+    if _PAGE: return _PAGE
+    p = _PAGE
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    p['piano'] = {24.0: sample('SC_PM_piano_low_notes_clean_low_C'), 31.02: sample('SC_PM_piano_low_notes_clean_mid_G'),
+                  47.02: sample('SC_PM_piano_low_notes_clean_B'), 53.03: sample('SC_PM_piano_low_notes_clean_F'),
+                  61.99: sample('SC_PM_piano_clean_soft_low_D'), 67.99: sample('SC_PM_piano_clean_soft_low_G#'),
+                  71.99: sample('SC_PM_piano_clean_soft_mid_C'), 78.09: sample('SC_PM_piano_clean_soft_mid_F#'),
+                  88.09: sample('SC_PM_piano_clean_soft_high_E')}
+    p['cello'] = {60.09: sample('MNT_WC_Cello_Long_Melancholy_Dry_C')}
+    p['violin'] = {79.09: sample('MNT_SS_violin_note_mid_G')}
+    p['rip'] = fade(norm(sample('ESM_SG_fx_paper_long_tear_rip_bright_long_01')), 0.002, 0.15)
+    p['tear'] = gate(norm(sample('KREAEM_percussion_one_shot_ripped_paper')), 0.5, 0.08)
+    pencil = sample('ESM_Pencil_Writing_13_Long', trim=False)
+    p['pencil'] = fade(norm(pencil), 0.05, 0.3)
+    cuts = [c for c in hits_in(pencil, least=0.05) if len(c) > 0.05 * SR]
+    loud = sorted(cuts, key=lambda c: -float(np.abs(c).max()))[:8]                  # the eight firmest strokes
+    p['scrib'] = [gate(norm(c), 0.11, 0.05) for c in loud]
+    return p
+
 def starts(text):
     """Where each note of a written line begins, in steps."""
     at, out = 0.0, []

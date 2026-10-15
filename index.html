@@ -1110,7 +1110,9 @@ function musicWant(dt) {
   if (state !== 'play') return undefined;
   // the set pieces that are not one boss on the floor
   if (opo && opo.stage === 'fight') return ['onepointoh', 'p' + ((opo.ph | 0) + 1)];
-  if (unwritten) return ['unwritten', 'p1'];
+  // THE UNWRITTEN by its thirds. A death rewinds the fight to its start, and its track with it: 'again' is
+  // asked for through the rewind and the first two seconds after it, so the next piece is the rewind's
+  if (unwritten) return ['unwritten', unwDeadT > 0 || (unwritten.t < 2 && (RUN.unwrittenDeaths | 0) > 0) ? 'again' : 'p' + ((unwritten.phase | 0) + 1)];
   if (amalgam) return ['amalgam', 'p1'];
   if (tribunal) return ['tribunal', 'p1'];
   if (vrite) return ['founder', vrite.duel ? 'p2' : 'p1'];
@@ -68315,7 +68317,7 @@ const OST_TRACKS = [
   ['hive', 's', 'THE HIVE', 1],       ['broodmother', 'b', 'broodmother', 1],
   ['vault', 's', 'THE VAULT', 1],     ['archivist', 'b', 'archivist', 1],
   ['void', 's', 'THE VOID', 1],       ['null', 'b', 'nullcore', 1],
-  ['amalgam', 'b', 'amalgam', 1],
+  ['unwritten', 'b', 'unwritten', 1], ['amalgam', 'b', 'amalgam', 1],
   ['archive', 's', 'THE ARCHIVE', 2], ['curator', 'b', 'curator', 2],
   ['mirror', 's', 'THE MIRROR', 2],   ['other', 'b', 'theother', 2], ['corrupt', 'v', 'theother', 2],
   ['leak', 's', 'THE LEAK', 2],       ['recursion', 's', 'THE RECURSION', 2], ['halt', 's', 'THE HALT', 2],
@@ -68340,6 +68342,7 @@ function ostBeat(key) {
   const p = Save.profile || {};
   if (((Tales.n || {})['k:' + key] | 0) > 0 || Tales.has(talesMetKey(key), 1)) return true;
   if (key === 'amalgam') return !!p.amalgamDone;
+  if (key === 'unwritten') return !!p.trueEnd;            // closing it is what the true ending is
   if (key === 'theother') return (p.otherKills | 0) > 0;
   if (key === 'root') return !!p.rootDone;
   const hl = Object.values(HL_AREAS).find(a => a.stage.boss === key);   // an area's boss: the soul's quest for him, done
@@ -68361,6 +68364,7 @@ function ostOpen(t) {
 function ostHint(t, st) {
   if (t[1] === 'u') return 'KEPT WHEN THE THREE BEFORE IT ARE';
   if (t[1] === 'v') return 'KEPT WHEN SOMETHING ELSE GETS IN, AND IS PUT DOWN';
+  if (t[2] === 'unwritten') return 'KEPT WHEN IT IS CLOSED';
   const tag = st ? st.tag.toUpperCase() : '';
   if (t[1] === 's') return 'KEPT WHEN ' + (tag || 'IT') + ' IS PASSED';
   return tag ? 'KEPT WHEN THE BOSS OF ' + tag + ' IS PUT DOWN' : 'KEPT WHEN IT IS PUT DOWN';
