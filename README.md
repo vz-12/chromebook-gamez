@@ -841,8 +841,9 @@ built the way THE AMALGAM, ROOT and THE FOUNDER are (`THE UNWRITTEN` in
   its gash (shown as a ring round it); full, the half opens for three
   seconds. Open both at once and a line is written: the only thing that
   hurts it. The build decides how fast a gash fills, never how many lines
-  there are. A line written throws both halves off, wipes the ink in the
-  air and mends each pilot a little.
+  there are. A line written throws both halves off for a moment, wipes the
+  ink closest to you and mends each pilot a little. A line refused (a
+  sequence holds its last until it has run its minimum) buys nothing.
 - **Five sequences,** each with its banner, each adding a beat: A BLANK PAGE
   (ink from each half in turn, the seam pulled taut and cut), THE PAGE TEARS
   (the floor comes out in patterns, on a warning you can act on), IT WRITES
@@ -864,8 +865,10 @@ npm run test:unwritten                     # about ten seconds
 
 The test checks the page, the wound, the rewind, co-op and RONIN's
 execution, then flies a bot about as good as a person through it with each
-of the four pilots, and a weak build too, and every one must close it. `npm
-test` plays it from IT CLOSES for determinism (`unwritten`).
+of the four pilots, and a weak build too, and every one must close it: on
+the build a run brings here, usually in two or three attempts and not
+always the first. `npm test` plays it from IT CLOSES for determinism
+(`unwritten`).
 
 ## Memory under fire
 
