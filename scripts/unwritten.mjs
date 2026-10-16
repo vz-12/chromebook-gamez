@@ -16,8 +16,9 @@
                    up, and only both down rewinds the fight, for both
      RONIN         reads it as an empty bucket: it executes on the last lines
      closed        a bot that dodges about as well as a person, flying each
-                   of the four pilots, closes it; a weak build too, in a few
-                   attempts; and every sequence draws
+                   of the four pilots on the build a run brings here, closes
+                   it, though not usually first time; a weak build too, in
+                   more attempts; and every sequence draws
 
      node scripts/unwritten.mjs [path/to/index.html]
 
@@ -181,11 +182,12 @@ take(g.run(`(() => {
   chk(u.written === 1 && u.hp === u.maxHp - 1 && u.stunT > 0, 'both open at once writes one line and throws both halves off', [u.written, u.hp]);
   P.hp = P.maxHp * 0.5; u.open = [0, 0]; unwOpen(0); unwOpen(1);
   chk(Math.abs(P.hp - P.maxHp * (0.5 + UNW_MEND)) < 1e-6, 'and mends the pilot a little', P.hp / P.maxHp);
-  chk(ebullets.length === 0, 'and the ink in the air is wiped with it');
+  chk(!ebullets.some(b => len(b.x - P.x, b.y - P.y) < UNW_WIPE), 'and the ink closest to the pilot is wiped with it');
   // the sequence holds at its last line until it has shown itself
   u.seqT = 0; u.hp = Math.floor(u.maxHp * UNW_SEQ[0].until) + 1;
-  u.open = [0, 0]; unwOpen(0); unwOpen(1);
+  u.stunT = 0; u.open = [0, 0]; unwOpen(0); unwOpen(1);
   chk(u.seq === 0 && u.hp === Math.floor(u.maxHp * UNW_SEQ[0].until) + 1, 'a sequence holds its last line until it has run its minimum');
+  chk(u.stunT === 0, 'and a line refused there buys nothing: the halves are not thrown off');
   u.seqT = unwSeqMin(u); u.open = [0, 0]; unwOpen(0); unwOpen(1);
   chk(u.seq === 1 && u.seamT > 0, 'then the line is written and the page turns', [u.seq, u.seamT]);
   chk(u.a.invuln && u.b.invuln, 'and nothing touches it while it turns');
@@ -247,9 +249,10 @@ take(g.run(`(() => {
 
 section('closed');
 const R = [];
-for (const [char, cards, seed, mins] of [['runner', 12, 1, 12], ['runner', 12, 2, 12], ['ember', 12, 1, 12], ['ember', 12, 2, 12],
-                                          ['hacker', 12, 1, 12], ['hacker', 12, 2, 12], ['melee', 0, 1, 12], ['melee', 0, 2, 12],
-                                          ['ember', 6, 1, 20], ['hacker', 6, 1, 20]]) {
+// the build a run brings to the library (past NULL: thirty cards or so), then two weak ones
+for (const [char, cards, seed, mins] of [['runner', 30, 1, 25], ['runner', 30, 2, 25], ['ember', 30, 1, 25], ['ember', 30, 2, 25],
+                                          ['hacker', 30, 1, 25], ['hacker', 30, 2, 25], ['melee', 0, 1, 25], ['melee', 0, 2, 25],
+                                          ['ember', 8, 1, 40], ['hacker', 8, 1, 40]]) {
   const r = JSON.parse(g.run(`JSON.stringify(fly('${char}', ${cards}, ${seed * 31 + 7}, ${mins}))`));
   R.push(r);
   ok(r.char === char, char + ' is flown as itself', r);
@@ -257,7 +260,9 @@ for (const [char, cards, seed, mins] of [['runner', 12, 1, 12], ['runner', 12, 2
   ok(r.lines.every((n, i) => i === 0 || n < r.lines[i - 1] || n === 5), char + ': each attempt on a shorter page', r.lines);
   console.log('    ' + char.padEnd(7) + (cards ? ('c' + cards) : 'kit').padEnd(5) + ' s' + seed + '  ' + (r.won ? 'closed' : 'OPEN') + ' in ' + r.t + 's, ' + r.deaths + ' rewind' + (r.deaths === 1 ? '' : 's') + '  lines ' + r.lines.join(' '));
 }
-ok(R.filter(r => r.deaths === 0).length >= 4, 'a decent player closes it first time more often than not', R.map(r => r.deaths));
+const real = R.slice(0, 8).map(r => r.deaths);
+ok(real.filter(d => d > 0).length >= 4, 'it is not a walkover: most fights a run brings here take a rewind or more', real);
+ok(Math.max(...real) <= 8, 'nor a wall: none takes more than eight', real);
 
 take(g.run(`(() => {
   begin('ember', 12, 9);

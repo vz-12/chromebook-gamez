@@ -40907,18 +40907,26 @@ const TEAR_COLS = 9, TEAR_ROWS = 6;
 const UNW_LINES      = 15;     // the whole entry, on the first attempt
 const UNW_ATTRITION  = 0.1;    // of those, gone for every death (the first cut's was 0.02)
 const UNW_FLOOR      = 5;      // and never fewer than this
-const UNW_OPEN_NEED  = 10;     // a gash, in hits at your own damage (unwHit)
+/* Sized so a bare hull can do it: a starting VOIDRUNNER lands about four
+   rounds a second, so it fills one gash and the other inside UNW_OPEN_T with
+   a little to spare. A stronger build is quicker to the line, never past it:
+   how fast lines come is capped by the sequences' minimums. */
+const UNW_OPEN_NEED  = 8;      // a gash, in hits at your own damage (unwHit)
 const UNW_OPEN_T     = 3.0;    // how long an opened half waits for the other
 const UNW_FADE_AFTER = 1.0;    // an untouched gash starts to close after this long
 const UNW_FADE       = 4;      // and loses this much of itself a second
 /* A sequence cannot end before it has shown what it is: this long on the
    first attempt, and shorter with the page (unwSeqMin), so that dying makes
    the fight shorter as well as lighter. Without that, a hull that could not
-   survive ninety seconds met the same ninety seconds on its tenth attempt. */
-const UNW_SEQ_MIN    = 15;
+   survive ninety seconds met the same ninety seconds on its tenth attempt.
+   It is also the whole length of the fight for a build that writes quickly,
+   which is most builds that reach the library: at 15 a strong one was
+   through in ninety seconds and never felt it (the balance of 15 Oct). */
+const UNW_SEQ_MIN    = 18;
 const UNW_SEQ_MIN_LO = 6;      // the least, however short the page
 const UNW_SEAM_T     = 1.8;    // between sequences: the page turns
-const UNW_STUN       = 1.3;    // a line written knocks both halves out of position
+const UNW_STUN       = 0.8;    // a line written knocks both halves out of position
+const UNW_WIPE       = 170;    // and wipes the ink this close to each pilot
 const UNW_WIND       = 1.6;    // a rush that has passed leaves them winded this long
 const UNW_WIND_MUL   = 2;      // and a gash fills this much faster while they are
 const UNW_INK_TELL   = 0.38;   // a half swells this long before it throws
@@ -40928,41 +40936,42 @@ const UNW_BODY       = 1e6;
 // where the halves stand off from the pilot, by weapon: always inside its reach
 const UNW_REACH = { bullet: 320, laser: 215, blade: 165 };
 // what each thing it does takes, as a share of the pilot's own health
-const UNW_HURT = { ink: 0.08, seam: 0.28, fall: 0.24, rush: 0.32, touch: 0.16,
-                   draft: 0.07, lance: 0.2, slash: 0.22 };
+const UNW_HURT = { ink: 0.1, seam: 0.32, fall: 0.3, rush: 0.38, touch: 0.2,
+                   draft: 0.09, lance: 0.26, slash: 0.28 };
 const UNW_MEND = 0.03;          // and a line written gives each pilot this much of its health back
 
 /* The sequences. `until` is the share of its lines each runs down to.
    ink: seconds between throws (the halves take turns), rounds, arc, speed,
-   and `ring`: every so many throws is a blot instead, a slow ring all round.
+   `ring`: every so many throws is a blot instead, a slow ring all round, and
+   `pair`: both halves throw at once, from either side of you.
    seam: seconds between cuts. tear: seconds between patterns, the warning,
    how long a hole stays, and how many patterns at once. rush: seconds
    between rushes. draft: whether the draft is on the page. */
 const UNW_SEQ = [
   { id: 'blank',  until: 0.8, n: 'A BLANK PAGE',
-    ink: { every: 1.5, n: 7, arc: 0.8, spd: 235 }, seam: 6.5 },
+    ink: { every: 1.3, n: 8, arc: 0.9, spd: 265 }, seam: 6 },
   { id: 'tears',  until: 0.6, n: 'THE PAGE TEARS',
-    ink: { every: 1.7, n: 7, arc: 0.8, spd: 240, ring: 4 }, seam: 8,
-    tear: { every: 5.5, warn: 1.4, live: 3.6, layers: 1 } },
+    ink: { every: 1.4, n: 8, arc: 0.9, spd: 275, ring: 4 }, seam: 7,
+    tear: { every: 4.5, warn: 1.15, live: 3.8, layers: 1 } },
   { id: 'draft',  until: 0.4, n: 'IT WRITES YOU BACK',
-    ink: { every: 1.9, n: 7, arc: 0.85, spd: 245, ring: 4 }, seam: 9,
-    tear: { every: 6.5, warn: 1.4, live: 3.4, layers: 1 }, draft: true },
+    ink: { every: 1.5, n: 8, arc: 0.95, spd: 280, ring: 3 }, seam: 8,
+    tear: { every: 5.5, warn: 1.1, live: 3.6, layers: 1 }, draft: true },
   { id: 'closes', until: 0.2, n: 'IT CLOSES',
-    ink: { every: 1.9, n: 8, arc: 0.9, spd: 250, ring: 3 }, seam: 10,
-    tear: { every: 7, warn: 1.35, live: 3.4, layers: 1 }, draft: true, rush: 7 },
+    ink: { every: 1.5, n: 9, arc: 1.0, spd: 285, ring: 3 }, seam: 9,
+    tear: { every: 6, warn: 1.05, live: 3.6, layers: 1 }, draft: true, rush: 5.5 },
   { id: 'last',   until: 0,   n: 'THE LAST LINE',
-    ink: { every: 1.5, n: 8, arc: 0.95, spd: 260, ring: 3 }, seam: 7.5,
-    tear: { every: 5.8, warn: 1.25, live: 3.4, layers: 2 }, draft: true, rush: 6 }
+    ink: { every: 1.6, n: 9, arc: 1.0, spd: 295, ring: 3, pair: true }, seam: 6.5,
+    tear: { every: 5, warn: 0.95, live: 3.6, layers: 2 }, draft: true, rush: 5 }
 ];
 // the tears' patterns: every one leaves a whole cell beside wherever you stand
 const UNW_TEARS = ['row', 'col', 'checker', 'ring', 'cross', 'band'];
-const UNW_SEAM  = { tell: 1.1, live: 0.22, rest: 0.5, w: 12 };
-const UNW_RUSH  = { tell: 1.1, go: 0.42, past: 260 };
+const UNW_SEAM  = { tell: 0.9, live: 0.22, rest: 0.5, w: 12 };
+const UNW_RUSH  = { tell: 0.9, go: 0.4, past: 260 };
 // the draft, by the weapon it copies: how often it attacks, and how long it tells you first
-const UNW_DRAFT = { bullet: { every: 1.35, tell: 0.3, spd: 300 },
-                    laser:  { every: 2.6,  tell: 0.85, live: 0.3, len: 560, w: 14 },
-                    blade:  { every: 2.4,  tell: 0.7, spd: 1100, reach: 520 },
-                    copy: 5, gap: 300 };
+const UNW_DRAFT = { bullet: { every: 1.1, tell: 0.3, spd: 360 },
+                    laser:  { every: 2.1,  tell: 0.7, live: 0.3, len: 600, w: 14 },
+                    blade:  { every: 1.9,  tell: 0.6, spd: 1250, reach: 560 },
+                    copy: 4, gap: 300 };
 
 let unwritten = null;           // the fight: both halves, its lines, everything it is doing
 let unwSnap = null;             // each pilot as the fight found them, by pilot: restored on every death
@@ -41110,27 +41119,36 @@ function unwOpen(s) {
 }
 
 /* Both open: a line is written. It is the only thing that hurts it, and it
-   costs it its position: both halves are thrown off, the ink in the air is
-   wiped with the line, every pilot mends a little (UNW_MEND), and a pilot on
-   the floor gets up. A sequence holds at
-   its last line until it has run its minimum (unwSeqMin). */
+   costs it its position: both halves are thrown off for a moment, the ink
+   closest to each pilot is wiped with the line, every pilot mends a little
+   (UNW_MEND), and a pilot on the floor gets up. A sequence holds at its last
+   line until it has run its minimum (unwSeqMin), and a line refused there
+   buys nothing: no stagger and no wipe.
+
+   It used to stagger both halves and wipe all the ink every time, the
+   refused lines included. A strong build opening both every two seconds
+   kept it stunned for most of the fight and the air permanently clear,
+   which is why the first balance of the rewrite was easy (15 Oct). */
 function unwWrite() {
   const u = unwritten, S = UNW_SEQ[u.seq];
   const mx = (u.a.x + u.b.x) / 2, my = (u.a.y + u.b.y) / 2;
   u.open = [0, 0]; u.gash = [0, 0];
-  u.stunT = UNW_STUN;
-  for (const e of [u.a, u.b]) {
-    const a = Math.atan2(e.y - my, e.x - mx);
-    e.vx = Math.cos(a) * 420; e.vy = Math.sin(a) * 420;
-  }
   if (u.seqT < unwSeqMin(u) && u.hp - 1 <= u.maxHp * S.until + 1e-9) {
     floatText(mx, my - 50, 'THE PAGE HOLDS', '#94a3b8', 15);
     Audio_.tone(180, 0.2, 'sine', 0.06, 140);
     return;
   }
+  u.stunT = UNW_STUN;
+  for (const e of [u.a, u.b]) {
+    const a = Math.atan2(e.y - my, e.x - mx);
+    e.vx = Math.cos(a) * 420; e.vy = Math.sin(a) * 420;
+  }
   u.hp -= 1; u.written++;
   u.writeFx = 1;
-  ebullets.length = 0;
+  unwPilots(() => {                     // a breath round each pilot, not the whole page
+    for (let i = ebullets.length - 1; i >= 0; i--)
+      if (len(ebullets[i].x - P.x, ebullets[i].y - P.y) < UNW_WIPE) ebullets.splice(i, 1);
+  });
   pilotsEach(() => {
     if (P.down) { hostRevive(); return; }   // co-op: a line stands a downed pilot back up
     P.hp = Math.min(P.maxHp, P.hp + P.maxHp * UNW_MEND);
@@ -41225,7 +41243,8 @@ function unwUpdate(dt) {
         floatText(e.x, e.y - e.r - 12, 'CLOSED', '#64748b', 14);
         Audio_.tone(140, 0.12, 'sine', 0.05, 110);
       }
-    } else if (u.quiet[s] > UNW_FADE_AFTER) u.gash[s] = Math.max(0, u.gash[s] - UNW_FADE * dt);
+    } else if (u.quiet[s] > UNW_FADE_AFTER && !(u.open[1 - s] > 0))   // held while its twin waits on it
+      u.gash[s] = Math.max(0, u.gash[s] - UNW_FADE * dt);
   }
 
   const busy = !!(u.seam || u.rush);
@@ -41245,7 +41264,9 @@ function unwUpdate(dt) {
     if (u.inkT <= 0) {
       u.inkT = S.ink.every;
       u.inkN++;
-      unwInk(u, u.inkSide ? u.b : u.a, S.ink, S.ink.ring && u.inkN % S.ink.ring === 0);
+      const blot = S.ink.ring && u.inkN % S.ink.ring === 0;
+      unwInk(u, u.inkSide ? u.b : u.a, S.ink, blot);
+      if (S.ink.pair) unwInk(u, u.inkSide ? u.a : u.b, S.ink, blot);
       u.inkSide ^= 1;
     }
   }
