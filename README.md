@@ -277,6 +277,21 @@ own co-op as it is: lockstep, each player flying their own pilot.
   whole health bar pays like `DUEL.heat` bodies, and the pilot counts as at
   least `DUEL.heatNear` close from anywhere the lance reaches. About one
   health bar of hits fills it.
+- **Overtime** (`rounds.js`, `OVERTIME`): a round still on after 40 s goes
+  to overtime. The walls close in on the middle over 20 s, to a 480×320 box.
+  Every blow between the pilots grows 8% a second, under the same caps, and
+  nothing is won back: health only falls, and a spent shield stays spent.
+  The room stops sending, the HUD counts the last 10 s down, and the result
+  marks the round OT. A hidden pilot's one long round has no clock
+  (`OVERTIME.oneRound`).
+- **Forms end with their round**: a pilot woken in one round (OVERDRIVE,
+  SUPERUSER, RONIN) starts the next one unwoken. A meter still filling
+  carries over.
+- **The pace** (`npm run pace:pvp`, `scripts/pvp-pace.mjs`): plays whole
+  matches on the real engine, both pilots flown by the bot's brain, and says
+  how long the rounds ran and how many went to overtime. `--set
+  OVERTIME.at=50,DUEL.burstCap=0.3` tries other numbers without editing a
+  file; `--pairs`, `--skills`, `--seeds` and `--awake` choose the matches.
 - **Cards** (`cards.js`): the game's pool, less instant kills, cards that
   break without waves, and economy cards (`BANNED`), never more than four
   bullets a shot, and each player's own reward upgrades.
@@ -289,9 +304,9 @@ own co-op as it is: lockstep, each player flying their own pilot.
   - `PVP_ART.belt(g, w, h, t, d)`: the map draw at the start of a match,
     with both pilots and the kind of match.
   - `PVP_ART.result(g, w, h, t, r)`: the end of a match (victory, defeat,
-    opponent left, no contest), with the rounds, the damage, the referee's
-    verdict and, in ranked, the rating change. The lobby button sits along
-    the bottom.
+    opponent left, no contest), with the rounds (and which went to
+    overtime), the damage, the referee's verdict and, in ranked, the rating
+    change. The lobby button sits along the bottom.
   - To see them without playing, open `/play/?preview=belt` or
     `/play/?preview=result` (`preview.js`: buttons for every outcome,
     ranked and casual). Locally, `npm run dev:pvp` first.

@@ -11,7 +11,8 @@
    damage upgrades, a mark like RONIN's DEEP WOUND or a Brand. Here it becomes
    damage to the pilot: scaled to a pilot (an enemy has far more health) and
    capped, so that no single hit, and no burst within a second, can decide a
-   round by itself (DUEL).
+   round by itself (DUEL). A round in overtime makes every blow worth more by
+   the second (rounds.js, OVERTIME), under the same caps.
 
    A pilot never hits its own stand-in. While a pilot's code runs (its turn:
    VR_PVP.turn, which the engine's pilotsEach and pilotDo call), its own
@@ -169,7 +170,8 @@
     let took = 0;
     for (const h of recent) took += h[1];
     const cap = Math.min(hitCap * p.maxHp, burstCap * p.maxHp - took);
-    const d = Math.min(raw * scale * (DUEL.pilots[a && a.charId] || 1), cap);
+    // in overtime a blow is worth more by the second (rounds.js, M.surge); the caps hold over that too
+    const d = Math.min(raw * scale * (DUEL.pilots[a && a.charId] || 1) * M.surge(), cap);
     if (!(d > 0.05)) return 0;
     /* A body of THE HACKER's army hits from inside its script, and the game
        lets nothing a script makes reach a pilot (hackBy, its own guard against
