@@ -12,6 +12,8 @@
    bodies) and to certain when both are. The draw is the run's own seeded
    roll, so both machines draw the same. The arena is sized for two, in the
    middle of the sector, with no terrain hazards: the fight is the pilots'.
+   A round in overtime closes it in (rounds.js, OVERTIME), and the room sends
+   nothing more.
 
    The draw is shown as a belt (art.js, PVP_ART.belt), with this list.
    ========================================================================= */
@@ -43,6 +45,10 @@
     apply(m) {
       enterStage(maps.list()[m.map]);
       hazards.length = 0;
+      maps.open();
+    },
+    // the arena at its full size, at once: a match's start, and every round's (overtime closes it: rounds.js)
+    open() {
       arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, ARENA.w, ARENA.h);
       arena.x0 = arena.tx0; arena.y0 = arena.ty0; arena.x1 = arena.tx1; arena.y1 = arena.ty1;
     },
@@ -55,9 +61,9 @@
       };
     },
 
-    // an infested room keeps sending, away from both pilots
+    // an infested room keeps sending, away from both pilots, until a round goes to overtime
     spawn(m, dt) {
-      if (!m.infested) return;
+      if (!m.infested || M.overtime(m)) return;
       m.spawnT -= dt;
       if (m.spawnT > 0) return;
       m.spawnT = simRnd(4.2, 2.6);

@@ -251,7 +251,8 @@ const BOT = `
 const WATCH = `
   globalThis.__fp = new Map();
   globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
-                       wildMax: 0, wildClean: 0, standOut: 0, tales: 0 };
+                       wildMax: 0, wildClean: 0, standOut: 0, tales: 0,
+                       ot: { steps: 0, early: 0, narrow: 1e9, rose: 0, held: null } };
   let __at = '';
   /* What a hit took is the health it left, read where the blow lands: a
      killing one meets Second Wind or a DEADMAN BRAKE (reviveOrDie), which
@@ -292,11 +293,21 @@ const WATCH = `
       else if (!e.hacked) wild++;
     }
     __log.wildMax = Math.max(__log.wildMax, wild);
+    // overtime: never before its time, the walls closing, and the health it holds only ever falling
+    if (m.ot && m.phase === 'fight') {
+      const o = __log.ot;
+      o.steps++;
+      if (m.t < PVP.OVERTIME.at) o.early++;
+      o.narrow = Math.min(o.narrow, arena.x1 - arena.x0);
+      if (m.held && o.held && o.held.round === m.round) for (const k of [0, 1]) o.rose = Math.max(o.rose, m.held[k] - o.held.hp[k]);
+      o.held = m.held ? { round: m.round, hp: m.held.slice() } : null;
+    }
     __log.tales = Math.max(__log.tales, Tales.lines.length);
     if (!m.infested && wild) __log.wildClean++;
     if (LS.tick % 30 === 0)
       __fp.set(LS.tick, JSON.stringify([simRngState, m.phase, m.round, m.score, m.owed, a.charId, a.x, a.y, a.hp, a.level,
-                                        b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length]));
+                                        b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length,
+                                        m.ot, arena.x0, arena.y0, arena.x1, arena.y1]));
   };`;
 /* Both machines, a frame at a time, until `done` (or the cap); drawn now and
    then. Every half second it lets the server's answers in (the referee). */
@@ -361,6 +372,9 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      'the hellos carried each player\'s own reward upgrades, so both machines deal from the same pools',
      [H.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])'), G.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
   for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  /* Overtime brought forward, on both machines alike (OVERTIME in rounds.js:
+     40 s, the walls in over 20), so this match sees it, in step on both. */
+  for (const g of [H, G]) g.run('globalThis.__otFile = Object.assign({}, PVP.OVERTIME); PVP.OVERTIME.at = 12; PVP.OVERTIME.close = 8;');
   ok(roomOf(H).hidden === true && roomOf(G).hidden === true, 'the waiting room steps aside');
   ok(H.run('pilotP(0).charId') === 'hacker' && H.run('pilotP(1).charId') === 'ember', 'the host flies its pilot, beside the guest\'s');
   ok(G.run('pilotP(0).charId') === 'hacker' && G.run('pilotP(1).charId') === 'ember', 'and the guest sees the same two');
@@ -405,8 +419,10 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const log = H.run('__log');
   const ph = log.phases, fights = ph.filter(p => p.phase === 'fight'), ends = ph.filter(p => p.phase === 'end');
   const last = ph[ph.length - 1];
+  const otLog = H.run('RUN.pvp.log.map(x => x.ot)');
   console.log(`    (${(frames / 60).toFixed(0)} s: ${fights.length} rounds, ${last.score.join('–')}, ${log.hits.length} hits, ` +
-              `${belt.infested ? 'infested, ' + log.wildMax + ' of the room\'s at most' : 'clean'}, ${log.offered.size} different cards dealt)`);
+              `${belt.infested ? 'infested, ' + log.wildMax + ' of the room\'s at most' : 'clean'}, ${log.offered.size} different cards dealt, ` +
+              `${otLog.filter(x => x).length} in overtime)`);
 
   // picks: three each, before anything else
   const firstPicks = ph.find(p => p.phase === 'picks');
@@ -455,6 +471,11 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(belt.infested ? log.wildMax > 0 : log.wildMax === 0, belt.infested ? 'infested: the room sent its own' : 'clean: the room sent nothing', log.wildMax);
   ok(log.wildClean === 0, 'never an enemy of the room\'s on a clean map', log.wildClean);
   ok(log.tales === 0, 'and not one FORGOTTEN TALE line queued, all match long', log.tales);
+  // overtime, brought forward: it came, on time, closed the walls in and held the health where it fell
+  ok(otLog.some(x => x) && log.ot.steps > 60, 'a round ran past its clock and went to overtime', [otLog, log.ot.steps]);
+  ok(log.ot.early === 0, 'never before its time', log.ot.early);
+  ok(log.ot.narrow < H.run('PVP.maps.ARENA.w') - 300, 'the walls closed in', log.ot.narrow);
+  ok(log.ot.rose <= 1e-9, 'and the health it held only ever fell', log.ot.rose);
 
   // the same game on both, start to finish
   const same = sameGame(H, G);
@@ -464,7 +485,9 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const others = g => g.win.__net.filter(n => n !== 'fetch /api/pvp/match');
   ok(others(H).join() === 'fetch /api/turn' && others(G).join() === 'fetch /api/room?code=ABCD&as=guest',
      'and not one more request but the referee\'s', [others(H), others(G)]);
-  ok(H.win.__net.length > 10 && G.win.__net.length > 10, 'which heard from both all match long', [H.win.__net.length, G.win.__net.length]);
+  // a report every five seconds of the match (referee.js), and the requests that opened it
+  const reports = Math.floor(frames / 60 / 5);
+  ok(H.win.__net.length > reports && G.win.__net.length > reports, 'which heard from both all match long', [H.win.__net.length, G.win.__net.length, reports]);
 
   // the referee: both machines' fingerprints held up against each other, both results, one verdict
   await play(H, G, ship, 60 * 12, () => H.run('!!PVP.ref.verdict') && G.run('!!PVP.ref.verdict'));
@@ -498,6 +521,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      'the result screen is handed the outcome and the score, each from its own side', [sh && sh.outcome, sg && sg.outcome]);
   ok(sh.rounds.length === last.score[0] + last.score[1] && sh.rounds.every((rd, i) => rd.won === !sg.rounds[i].won && rd.left > 0 && rd.at > 0),
      'every round in order, the other side\'s the mirror of it', [sh.rounds, sg.rounds]);
+  ok(sh.rounds.every((rd, i) => rd.ot === otLog[i] && sg.rounds[i].ot === otLog[i]), 'and which of them went to overtime', [sh.rounds, otLog]);
   ok(sh.me.pilot === 'hacker' && sh.them.pilot === 'ember' && sg.me.pilot === 'ember' && sh.me.pilotName === 'THE HACKER'
      && sh.me.name === 'DUELIST' && sh.them.name === 'RIVAL' && /^#[0-9a-f]{6}$/.test(sh.me.col), 'both pilots, named and coloured', [sh.me, sh.them]);
   ok(sh.dealt[0] === sg.dealt[1] && sh.dealt[1] === sg.dealt[0] && sh.dealt[0] + sh.dealt[1] > 0 && sh.time > 0
@@ -634,7 +658,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(Math.abs(d1[0] - 0.75) < 0.03, 'one: about three in four', d1);
   ok(d2[0] === 1, 'two: every one', d2);
   ok(d0[1] === 7 && d1[1] === 7, 'and every sector comes up', [d0[1], d1[1]]);
-  const spawned = inf => r(`const m = RUN.pvp, was = m.infested; m.infested = ${inf}; m.spawnT = 0;
+  const spawned = inf => r(`const m = RUN.pvp, was = m.infested; m.infested = ${inf}; m.spawnT = 0; m.ot = false; m.t = 0; PVP.maps.open();
     for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
     let near = 0;
     for (let i = 0; i < 60 * 60; i++) {
@@ -646,7 +670,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(sc[0] === 0, 'a clean map sends nothing, a minute long', sc);
   ok(si[0] === 6 && si[1] === 0, 'an infested one sends, six at most, and never on top of a pilot', si);
   // the same room on a codex that has met nothing: each first meeting opens its page I (FORGOTTEN TALES), and not one says so over the duel
-  const met = r(`const m = RUN.pvp, was = [m.infested, Codex.e, Tales.p, Tales.lines]; m.infested = true; m.spawnT = 0;
+  const met = r(`const m = RUN.pvp, was = [m.infested, Codex.e, Tales.p, Tales.lines]; m.infested = true; m.spawnT = 0; m.t = 0; PVP.maps.open();
     Codex.e = new Set(); Tales.p = {}; Tales.lines = [];
     for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
     for (let i = 0; i < 60 * 60; i++) PVP.maps.spawn(m, 1 / 60);
@@ -657,6 +681,93 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      'a match the server made best of five (ranked, gold and up) is best of five');
   ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'gold', bestOf: 5 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
      'and a match with a friend stays best of three whatever the league: the length is never this machine\'s own to say');
+
+  /* OVERTIME (rounds.js), a rule at a time, on the file's own numbers: a
+     round on, clean, both pilots fresh, stepped by the match's own tick. */
+  section('overtime: a round with a clock');
+  r(`Object.assign(PVP.OVERTIME, __otFile); globalThis.__O = PVP.OVERTIME;
+     __m.run = LS.run; __m.phase = 'fight'; __m.bestOf = 3; __m.ot = false; __m.held = null; __m.infested = false; __m.owed = [0, 0];
+     state = 'play'; PVP.maps.open(); __fresh();
+     globalThis.__tick = (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) { PVP.rounds.tick(dt); updateArena(dt); } };
+     globalThis.__blow = () => { __fresh(); PVP.turn(0, () => damageEnemy(__S(1), 20, false, 0, 0)); return pilotP(1).maxHp - __hp(1); };
+     globalThis.__hud = () => { const t = [], f = ctx.fillText; ctx.fillText = s => { t.push(String(s)); }; try { PVP.hud(); } finally { ctx.fillText = f; }
+                                return t.find(s => /OVERTIME/.test(s)) || ''; };`);
+  ok(r('[__O.at, __O.close, __O.w, __O.h, __O.ramp, __O.oneRound].join()') === '40,20,480,320,0.08,false',
+     'forty seconds to a round, then the walls close over twenty to 480 by 320, and every blow grows 8% a second', r('JSON.stringify(__O)'));
+  r('__m.t = 29; __tick(1)');
+  ok(r('__hud()') === '' && !r('PVP.overtime(__m)'), 'thirty seconds in: nothing said yet', r('__hud()'));
+  r('__m.t = 33.1; __tick(6)');
+  ok(r('__hud()') === 'OVERTIME IN 7S', 'from ten seconds out, the HUD counts it down', r('__hud()'));
+  const before = r('__m.t = 39; __tick(1); [PVP.overtime(__m), PVP.surge(), __m.ot, arena.x1 - arena.x0, arena.y1 - arena.y0, __blow()]');
+  ok(before[0] === false && before[1] === 1 && before[2] === false && before[3] === 1600 && before[4] === 1050,
+     'before its clock runs out a round is as it ever was: no overtime, every blow as it is, the arena whole', before);
+  const enters = r('__m.t = 39.9; __tick(12); [PVP.overtime(__m), __m.ot, bannerText, Math.abs(PVP.surge() - (1 + __O.ramp * (__m.t - __O.at))) < 1e-9]');
+  ok(enters[0] && enters[1] && enters[2] === 'OVERTIME   ·   THE WALLS CLOSE' && enters[3], 'at forty: OVERTIME, said, and the blows begin to grow', enters);
+  // the blow grows before the pilot's own armour takes its share, as an upgrade to damage would
+  const surged = r('__m.t = 50; const p = pilotP(1); [PVP.surge(), __blow(), Math.max(1, 20 * 0.22 * 1.8 * p.frailty - p.armor * 0.22)]');
+  ok(Math.abs(surged[0] - 1.8) < 1e-9 && surged[1] > before[5] * 1.7 && Math.abs(surged[1] - surged[2]) < 1e-6,
+     'ten seconds in, a blow is worth 1.8 of what it was', [surged, before[5]]);
+  const capped = r(`__m.t = 70; __fresh(); PVP.turn(0, () => damageEnemy(__S(1), 1e7, true, 0, 0)); const one = (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp;
+    __fresh(); for (let i = 0; i < 40; i++) { pilotP(1).iframe = 0; PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); }
+    [PVP.surge(), one, (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp]`);
+  ok(capped[0] > 3 && capped[1] <= DUEL.hitCap + 1e-9 && Math.abs(capped[2] - DUEL.burstCap) < 0.01,
+     'and however far it has grown, the caps hold: 14% a blow, 34% a second', capped);
+  ok(r('__hud()') === 'OVERTIME   ·   BLOWS ×3.4   ·   NO HEALING', 'the HUD says so, and what a blow is worth now', r('__hud()'));
+
+  // the walls: half closed halfway, closed at twenty seconds, on the middle, and then no further
+  const half = r('__m.t = 50; __tick(1); [arena.tx1 - arena.tx0, arena.ty1 - arena.ty0]');
+  ok(Math.abs(half[0] - 1040) < 1 && Math.abs(half[1] - 685) < 1, 'halfway through closing, halfway to the box', half);
+  const shut = r('__m.t = 50; __tick(60 * 12); [arena.x1 - arena.x0, arena.y1 - arena.y0, (arena.x0 + arena.x1) / 2 - WORLD.w / 2, (arena.y0 + arena.y1) / 2 - WORLD.h / 2]');
+  ok(Math.abs(shut[0] - 480) < 2 && Math.abs(shut[1] - 320) < 2 && Math.abs(shut[2]) < 1e-6 && Math.abs(shut[3]) < 1e-6, 'closed: 480 by 320, on the middle', shut);
+  ok(r('__tick(60 * 5); Math.abs(arena.x1 - arena.x0 - 480) < 1e-3 && arena.tx1 - arena.tx0 === 480'), 'and no further', r('[arena.x1 - arena.x0, arena.tx1 - arena.tx0, __m.t]'));
+  ok(r('pilotsEach(() => { P.x = arena.x0 - 300; P.y = arena.y0 - 300; updatePlayer(1 / 60); }); [0, 1].every(k => pilotP(k).x >= arena.x0 && pilotP(k).y >= arena.y0)'),
+     'a pilot outside them is put back inside');
+  let drew = null;
+  try { H.run('PVP.arena(); render()'); } catch (e) { drew = e; }
+  ok(!drew, 'overtime\'s walls draw over the arena\'s, and the frame with them', String(drew));
+
+  // nothing won back: a heal, regeneration, a revive's health, a shield
+  const kept = r(`__fresh(); __m.held = null; __tick(1); const p = pilotP(1), out = [];
+    p.hp = 50; __tick(1); out.push(p.hp, __m.held[1]);
+    p.hp = 80; __tick(1); out.push(p.hp);
+    p.regen = 40; pilotDo(1, () => updatePlayer(1 / 60)); const up = p.hp; __tick(1); out.push(up > 50, p.hp); p.regen = 0;
+    p.hp = 30; __tick(1); out.push(p.hp, __m.held[1]);
+    p.shieldMax = 1; p.shield = 0; p.shieldT = 8.99; __tick(1); out.push(p.shieldT); p.shieldMax = 0;
+    out`);
+  ok(kept[0] === 50 && kept[1] === 50 && kept[2] === 50, 'a pilot\'s health in overtime is held where it fell: a heal is taken back', kept);
+  ok(kept[3] === true && kept[4] === 50, 'so is regeneration, at the very next step', kept);
+  ok(kept[5] === 30 && kept[6] === 30, 'and it falls as ever', kept);
+  ok(kept[7] === 0, 'a spent shield is not regrown', kept);
+  const revived = r(`const p = pilotP(1), was = p.revive; p.revive = 1; p.hp = 3; __tick(1);
+    p.iframe = 0; PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); const up = p.hp; __tick(1);
+    const out = [up > 3, p.hp, p.down, __m.phase]; p.revive = was; out`);
+  ok(revived[0] && revived[1] === 3 && !revived[2] && revived[3] === 'fight', 'Second Wind still saves a killing blow, with no health won back', revived);
+
+  // the room sends nothing more; and nothing of this in a fight's absence, or in a hidden pilot's one round
+  const quiet = r(`__m.infested = true; __m.spawnT = 0;
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
+    for (let i = 0; i < 600; i++) PVP.maps.spawn(__m, 1 / 60);
+    const n = enemies.filter(e => e.pvpPilot == null).length;
+    __m.t = 10; PVP.maps.open(); __m.spawnT = 0; for (let i = 0; i < 600; i++) PVP.maps.spawn(__m, 1 / 60);
+    const out = [n, enemies.filter(e => e.pvpPilot == null).length]; __m.infested = false; __m.t = 50; out`);
+  ok(quiet[0] === 0 && quiet[1] > 0, 'an infested room sends nothing in overtime, as it does before it', quiet);
+  ok(r(`__m.phase = 'end'; const out = [PVP.overtime(__m), PVP.surge()]; __m.phase = 'fight'; out`).join() === 'false,1', 'a round over is in no overtime');
+  ok(r(`__m.bestOf = 1; __m.t = 300; const out = [PVP.overtime(__m), PVP.surge(), __hud()]; __O.oneRound = true; out.push(PVP.overtime(__m));
+        __O.oneRound = false; __m.bestOf = 3; __m.t = 50; out`).join() === 'false,1,,true',
+     'a hidden pilot\'s one long round has no clock, unless OVERTIME.oneRound gives it one');
+
+  // the next round: the walls open at once, the clock and the hold start over, and a form woken last round ends
+  r('__m.t = 50; __tick(60 * 12)');
+  ok(r('arena.x1 - arena.x0 < 500'), 'the walls shut again, for what comes next', r('arena.x1 - arena.x0'));
+  const next = r(`__m.ot = true; __m.held = [1, 1]; pilotP(1).ventT = 30; pilotP(0).suT = 30; pilotP(0).suAsc = null;
+    __m.phase = 'picks'; __m.owed = [0, 0]; pilotsEach(() => { offers.length = 0; gearOffer = null; }); state = 'play';
+    PVP.rounds.tick(1 / 60);
+    const out = [__m.phase, __m.t, __m.ot, __m.held, arena.x1 - arena.x0, arena.y1 - arena.y0, PVP.surge(), pilotP(1).ventT <= 1e-6, pilotP(0).suT <= 1e-6];
+    pilotDo(1, () => updatePlayer(1 / 60)); pilotDo(0, () => updatePlayer(1 / 60));
+    out.push(pilotP(1).ventT, pilotP(0).suT); out`);
+  ok(next[0] === 'fight' && next[1] === 0 && next[2] === false && next[3] === null && next[6] === 1, 'the next round starts with its clock and its hold fresh', next);
+  ok(next[4] === 1600 && next[5] === 1050, 'and the walls open again, at once', next);
+  ok(next[7] && next[8] && next[9] === 0 && next[10] === 0, 'a form woken last round (OVERDRIVE, SUPERUSER) does not carry into the next: the engine ends it at once', next);
 }
 
 section('a match left part way');
@@ -1527,10 +1638,11 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
 
   /* Better against a better player: against a pilot that never moves, on a
      clean map (nothing of the room's to help), the best finishes it far
-     sooner than the gentlest. */
+     sooner than the gentlest. The round's clock is taken away (OVERTIME):
+     this times the bot, not the round. */
   const time = async skill => {
     const g = boot({ mode: 'bot', pilot: 'runner', me: ME, bot: Object.assign({}, SPEC, { pilot: 'runner', skill }) }, DUELIST);
-    g.run(IDLE + WATCH + 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });');
+    g.run(IDLE + WATCH + 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false }); PVP.OVERTIME.at = 1e9;');
     await frames(g, 60 * 600, () => g.run('!!PVP.shown'));
     return { won: g.run('RUN.pvp.winner'), t: g.run('RUN.pvp.clock') };
   };

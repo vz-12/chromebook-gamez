@@ -164,7 +164,7 @@
       outcome,                                   // 'won' | 'lost' | 'left' (the other side went) | 'void'
       score: m ? [m.score[me], m.score[them]] : [0, 0],
       time: m ? m.clock : 0,
-      rounds: m && m.log ? m.log.map(r => ({ won: r.w === me, at: r.at, left: r.left })) : [],
+      rounds: m && m.log ? m.log.map(r => ({ won: r.w === me, at: r.at, left: r.left, ot: !!r.ot })) : [],
       dealt: m && m.dealt ? [Math.round(m.dealt[me]), Math.round(m.dealt[them])] : [0, 0],
       map: b ? b.maps[b.pick] : null,
       infested: !!(m && m.infested),

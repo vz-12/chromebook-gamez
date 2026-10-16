@@ -51,7 +51,7 @@
       outcome: S.outcome,
       score: [rounds.filter(x => x).length, rounds.filter(x => !x).length], bestOf,
       time: 41.3 * rounds.length + 6.2,
-      rounds: rounds.map((x, i) => ({ won: x, at: 41.3 * (i + 1), left: 0.18 + 0.17 * i })),
+      rounds: rounds.map((x, i) => ({ won: x, at: 41.3 * (i + 1), left: 0.18 + 0.17 * i, ot: i === 1 })),
       dealt: won ? [1840, 1215] : [1215, 1840],
       map: b.maps[b.pick], infested: true,
       verdict: null, rating: null
