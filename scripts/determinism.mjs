@@ -255,6 +255,8 @@ const S = [
   { name: 'rite-ember', char: 'ember',  seed: 111, steps: 7200,  kit: true, starter: "enterRite('ember')" },
   { name: 'rite-hacker',char: 'hacker', seed: 112, steps: 7200,  kit: true, starter: "enterRite('hacker')" },
   { name: 'rite-melee', char: 'melee',  seed: 113, steps: 7200,  kit: true, starter: "enterRite('melee')" },
+  // VOIDRUNNER's: ONE POINT OH, the hull growing back under him (its own test, npm run test:opo-rite, plays it to the card)
+  { name: 'rite-runner',char: 'runner', seed: 122, steps: 7200,  starter: "enterRite('runner')" },
   { name: 'patch',      char: 'runner', seed: 114, steps: 7200,  starter: "hlAreaStart('patch')" },
   // ALL HALLOWS chapter II: THE HOUSE's waves (THE QUIET, sheets, lurkers, poltergeists), and DEAD GAME's
   // fight flown by THE HACKER, so what is under a sheet, and the house's bodies, also fight for you

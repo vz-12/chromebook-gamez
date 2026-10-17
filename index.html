@@ -1110,6 +1110,7 @@ function musicWant(dt) {
   if (state !== 'play') return undefined;
   // the set pieces that are not one boss on the floor
   if (opo && opo.stage === 'fight') return ['onepointoh', 'p' + ((opo.ph | 0) + 1)];
+  if (orite) return ['onepointoh', 'p' + (clamp(orite.seq | 0, 0, 4) + 1)];   // and his rite, by its sequence
   // THE UNWRITTEN by its sequence, A BLANK PAGE to THE LAST LINE (p1 to p5: its track says which of its
   // sections each one plays). A death rewinds the fight to its start, and its track with it: 'again' is
   // asked for through the rewind and the first two seconds after it, so the next piece is the rewind's
@@ -5378,6 +5379,8 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (rootRite && e.boss === 'root') { rrStruck(e, opts, srcX, srcY); return; }
   // THE VAGRANT'S RITE: nothing but a counter reaches him (vrCountered)
   if (e.vrFounder) return;
+  // VOIDRUNNER'S RITE: nothing but the hull's own rounds reaches him (oprStruck)
+  if (e.oprRite) return;
   // RONIN's C: held for its counter, the body answers to nothing else
   if (e.roninExec && !opts.roninExec) return;
   // Enforce invulnerability here rather than only at bullet collision —
@@ -9890,7 +9893,7 @@ function suPower() {
    that a held body would break — ROOT, THE AMALGAM and its limbs, THE
    UNWRITTEN's halves, THE FOUNDER — so the drill only hurts them. */
 function suCanPin(e) {
-  if (!e || e.dead || e.hacked || e.amalPart || e.founder || e.opo || e.shadow > 0 || e.virus) return false;
+  if (!e || e.dead || e.hacked || e.amalPart || e.founder || e.opo || e.oprRite || e.shadow > 0 || e.virus) return false;
   if (typeof unwritten !== 'undefined' && unwritten && (e === unwritten.a || e === unwritten.b)) return false;
   const bd = e.boss && BOSSES[e.boss];
   return !(bd && bd.endgame);
@@ -32516,7 +32519,7 @@ function talesPagesOf(en) {
     P_.push({ how: 'meet it' }, { how: TALE_BOSS_II[k] || 'defeat it' }, { how: TALE_DEED_B[k] || 'master it' });
   } else if (en.kind === 'pilot') {
     P_.push({ how: 'fly it' }, { how: 'clear THE VOID with it' },
-            k === 'runner' ? { held: 'its rite, ONE POINT OH, is not built yet' } : { how: 'pass its rite' });
+            k === 'runner' ? { held: 'its page is not written yet' } : { how: 'pass its rite' });
   } else if (en.kind === 'awake') {
     P_.push({ how: 'wake it' }, { how: 'use all four of its actives in one awakening' },
             { how: 'defeat a boss while awakened' });
@@ -37832,7 +37835,7 @@ function resetGame() {
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
   inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
-  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0;
+  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; oprRite = false; orite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
@@ -38966,6 +38969,7 @@ function update(dt) {
   if (tear) tearTick(dt);
   opoLineTick(dt);                       // ONE POINT OH: his voice
   if (opo) opoTick(dt, wdt);             // and the version war
+  if (oprRite) oprTick(dt, wdt);         // VOIDRUNNER'S RITE
   if (rootOut) rootOutroTick(dt);
   if (outro) outroTick(dt);
   /* startDevTalk() empties the floor, so he may only take his word when there
@@ -38984,7 +38988,8 @@ function update(dt) {
   }
   // pull the view out for the amalgam, ease back afterwards
   pilotDo(pilotMine(), () => {            // the view is this machine's pilot's
-    camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : opo ? OPO.zoom : 1;   // the duel comes in close; ONE POINT OH's room is wide
+    camZoomT = (amalgam || amalCut) ? 0.6 : vrDuelOn() ? VR_DUEL_ZOOM : opo ? OPO.zoom
+             : oprOn() ? (oprDuelOn() ? 1 : OPO.zoom) : 1;   // the duel comes in close; ONE POINT OH's room is wide, in his rite too
     // and all the way out for C, while the view is EMBER's (the cut snaps it there and back)
     if (odStrikePov()) camZoomT = Math.min(camZoomT, odStrikeZoom());
     // RONIN's executions come in close, from whatever framing the fight had (THE AMALGAM's is wide)
@@ -39048,8 +39053,11 @@ function updateCamera(dt, loose = false) {
   const wide = odStrikePov();
   // THE VAGRANT'S RITE: the duel frames the two of them, face to face
   // and before it, the view leans toward him, so his tells and his people stay in frame
-  const vd = vrOn() && !vrite.done ? vrite.h : null, vk = vrDuelOn() ? 0.5 : 0.35;
-  const gx = vd ? lerp(vrDuelOn() ? P.x : fx, vd.x, vk) : fx, gy = vd ? lerp(vrDuelOn() ? P.y : fy, vd.y, vk) : fy;
+  // VOIDRUNNER'S RITE the same: toward him, and in the duel toward his copy
+  const oprCam = oprOn() && !orite.done ? (orite.duel && orite.duel.copy ? orite.duel.copy : { x: orite.hx, y: orite.hy }) : null;
+  const vd = vrOn() && !vrite.done ? vrite.h : oprCam, vk = vrDuelOn() || oprDuelOn() ? 0.5 : 0.35;
+  const near = vrDuelOn() || oprDuelOn();
+  const gx = vd ? lerp(near ? P.x : fx, vd.x, vk) : fx, gy = vd ? lerp(near ? P.y : fy, vd.y, vk) : fy;
   cam.x = lerp(cam.x, wide ? (arena.x0 + arena.x1) / 2 : W > WORLD.w ? WORLD.w / 2 : gx, 1 - Math.exp(-k * dt));
   cam.y = lerp(cam.y, wide ? (arena.y0 + arena.y1) / 2 : H > WORLD.h ? WORLD.h / 2 : gy, 1 - Math.exp(-k * dt));
 }
@@ -39103,6 +39111,7 @@ function updatePlayer(dt) {
   // SCORCHED EARTH holds the hull on the heading it was cast along (and in place: below)
   if (P.odScorch) P.ang = P.odScorch.ang;
   if (vrDuelLock()) P.ang = vrDuelAim();  // and holds the guard on him
+  if (oprAimLock()) P.ang = oprAim();     // VOIDRUNNER'S RITE: ONE SHIP holds the hull on his copy until it wakes
   if (suCutIn()) firing = false;          // SUPERUSER's cut-in has the screen
 
   // dash
@@ -42091,7 +42100,7 @@ let opoDoor = null, opoRevert = null, opo = null, opoLine = null;
 function opoCoaxOn() {
   if (opoOff() || !RUN.altPath || RUN.opoDone || opo) return false;
   if (Chal.on || rushOn() || freeRun || MP.on || LS.on || PILOTS.length > 1) return false;
-  if (riteRun || amalRite || rootRite || vrRite || inHub || inVigil || hlArea) return false;
+  if (riteRun || amalRite || rootRite || vrRite || oprRite || inHub || inVigil || hlArea) return false;
   if (P.outside) return false;
   return true;
 }
@@ -42906,11 +42915,13 @@ function drawOpoWorld() {
 }
 // what every per-frame hook is handed about the route: where it stands, and the kit
 function opoFxState() {
-  return { stage: opo ? opo.stage : opoRevert ? 'revert' : opoDoor ? 'door' : OpoLock.on ? 'lock' : 'none',
-           ph: opo ? opo.ph : -1, st: opo ? opo.st : opoRevert ? opoRevert.t : 0, t: uiTime,
+  // VOIDRUNNER'S RITE uses the same art for him: it reads as the fight, or out
+  const rite = oprOn() && !opo ? orite : null;
+  return { stage: opo ? opo.stage : rite ? (rite.stage === 'out' ? 'out' : 'fight') : opoRevert ? 'revert' : opoDoor ? 'door' : OpoLock.on ? 'lock' : 'none',
+           ph: opo ? opo.ph : rite ? Math.max(0, rite.seq) : -1, st: opo ? opo.st : rite ? rite.st : opoRevert ? opoRevert.t : 0, t: uiTime,
            tex: OpoLock.tex(), kit: OPO_KIT };
 }
-const opoRouteOn = () => !!(opo || opoDoor || opoRevert);
+const opoRouteOn = () => !!(opo || opoDoor || opoRevert || oprOn());
 // the room, lit: the art's own debris and effects, every frame the route is on (under the camera, before bloom)
 function drawOpoFx() {
   if (!opoRouteOn()) return;
@@ -42966,6 +42977,1247 @@ function drawOpoLost() {
   if (opoLine) OA('voice', ctx, W, H, { text: opoLine.text, kind: opoLine.kind, age: opoLine.t, life: opoLine.life });
 }
 /* ============================ end of ONE POINT OH ============================ */
+/* ============================= VOIDRUNNER'S RITE =============================
+   VOIDRUNNER → ONE POINT OH (ONE-POINT-OH-RITE-PLAN.md; the user, 16 and 17
+   Oct 2026). The ship, against the only one who never left it. When the game
+   was shut down every player left but one, and in the dark he remembered the
+   ship back into its base form, a piece at a time. So the room does not change
+   in this fight. The hull does.
+
+     THE OPEN    his set powers on, and he takes everything the run gave the
+                 hull ("There. Like it was."): every card peels off into his
+                 set, and it flies its own first numbers. Nothing is saved; the
+                 rite ends the run. Then the first piece comes back by itself.
+     THE RULE    only what came back hurts him. The base round goes straight
+                 through him: it is his memory of the ship, and his memory does
+                 not hurt him. A round lands for OPR_HIT times the share of the
+                 hull that is back, whatever the build, in the rite's own units.
+     THE PIECES  come back in the order it grew them, one at the open and one
+                 at each seam, and he names each: he is the one who took it
+                 off. His reverts take the newest back; grazing them grows it
+                 again (GRAZE), and a stripped piece also comes back by itself.
+
+     HE PUTS IT BACK    his sweeps, laid across your path. The plating: one
+                        revert in OPR.guardCd lands on it instead
+     HE REMEMBERS IT    + panes of the ship as he kept it, landing where you
+                        are going. A second barrel: rounds in pairs, half each
+     HE PAINTS IT OVER  + his brush, planted where you are. The lattice: light
+                        left behind the hull, and panes and the brush break on it
+     HE KEEPS IT        + volleys, and what he takes goes into his set: shoot
+                        the set to work it loose. The core: rounds bend to him
+     ONE SHIP           the cutscene, played (THE DUEL, below): stripped, the
+                        hull against his memory of it, dead even, until it
+                        wakes; then it grows guns of its own, freely, and his
+                        copy cannot keep up.
+
+   Everything is data and rolled from simRand (the determinism suite plays it
+   as 'rite-runner'; npm run test:opo-rite plays it to the card). The art is
+   placeholder: every piece is a hook in OPR_ART ("VOIDRUNNER'S RITE — art
+   hooks", below). His set, his voice, his sweeps, panes and brush are the
+   route's own hooks (OPO_ART), handed the rite's state.
+
+   FOR THE ADMIN PANEL, from the console: oprJump(0..4)
+   ========================================================================= */
+const OPR_HP       = 1000;   // the whole of him, in the rite's own units
+const OPR_HIT      = 3;      // a round that lands, from a whole hull
+const OPR_SEQ_MIN  = 14;     // a sequence holds at its line until it has shown itself (THE FOUNDER's)
+const OPR_OPEN     = 5.2;    // the entrance: his set powering on, the build taken, the first piece back
+const OPR_TAKE_AT  = 1.2;    // when, in it, he takes the build
+const OPR_FIRST_AT = 2.7;    // and when the first piece comes back by itself
+const OPR_SEAM     = 1.6;    // between sequences: a molt
+const OPR_REGROW   = 9;      // a stripped piece comes back by itself after this long
+const OPR_GRAZE    = 40;     // grazes that grow one piece back
+const OPR = {
+  guardCd: 8,                // the plating: one revert in this long lands on it
+  catchDmg: 10,              // a revert that reaches the hull
+  touch: 16, touchCd: 0.8,   // and him, if you fly into him
+  graze: { round: 22, edge: 42, rim: 44 },        // how close counts, past where it would have hit
+  pays:  { round: 1, edge: 6, rim: 8, brush: 8, dash: 6 },
+  sweep: { every: [5.0, 3.0] },                    // the bands themselves are the route's (OPO.sweep)
+  pane:  { every: [3.4, 2.4], fly: 1.35, hp: 3, r: 32, reach: 156 },   // reach: as OPO_ART.pane marks it
+  paint: { every: [7.5, 5.5], secs: 2.6, r: 74, push: 1.6, hitBack: 0.04 },
+  volley:{ every: [2.8, 2.0], n: 3, spd: 300, spread: 0.16, dmg: 9 },
+  keepHits: 12,              // rounds on his set to work one kept piece loose
+  trail: { every: 0.07, keep: 1.1 },               // the lattice: light left behind
+  bend: 1.5,                 // the core: how fast a round turns toward him (rad/s)
+  outSecs: 4.2,              // his set powering off
+  fall: 2.0                  // and the card after it
+};
+
+/* The pieces, in the order it grew them: he took them off the other way, so
+   the first back is the last he took. `say` is his, as each returns. They are
+   not the route's rooms; what each one is drawn as is the art's (OPR_ART.hull). */
+const OPR_PIECES = [
+  { id: 'plating', n: 'PLATING',         say: 'That was the last one I took. It took the longest.' },
+  { id: 'barrel',  n: 'A SECOND BARREL', say: 'There was only ever one of it.' },
+  { id: 'lattice', n: 'THE LATTICE',     say: 'I took that one early. It kept glowing in the dark.' },
+  { id: 'core',    n: 'THE CORE',        say: 'That one went first.' }
+];
+/* The sequence table. `until` is the share of him each runs down to (the
+   admin panel reads this list, so each is jumpable); the flags are the beats
+   it runs, stacked. */
+const OPR_SEQ = [
+  { id: 'putback',  until: 0.80, n: 'HE PUTS IT BACK',   sweep: true },
+  { id: 'remember', until: 0.60, n: 'HE REMEMBERS IT',   sweep: true, panes: true },
+  { id: 'paint',    until: 0.40, n: 'HE PAINTS IT OVER', sweep: true, panes: true, paint: true },
+  { id: 'keep',     until: 0.20, n: 'HE KEEPS IT',       sweep: true, panes: true, paint: true, volley: true, keep: true },
+  { id: 'oneship',  until: 0.00, n: 'ONE SHIP' }
+];
+const OPR_DUEL_SEQ = 4;
+/* What he says. The voice is the route's: aggrieved, fond, unmovable, and in
+   this fight it comes down from fury to the gentlest he has ever been. */
+const OPR_SAY = {
+  take:     'There. Like it was.',
+  putback:  'Put it back.',
+  remember: 'I remember every inch of it.',
+  paint:    'Hold still.',
+  keep:     'I will keep it for you. I always have.',
+  caught:   ['Back.', 'There.', 'No.', 'Like it was.'],
+  kept:     ['Mine.', 'I will hold that.', 'Safe.'],
+  fair:     'There. Now it is fair.',
+  oneship:  'There was one ship. Everyone flew it.',
+  wake:     'I never saw it fly like that.',
+  fall:     'It was better.',
+  go:       'Go on, then.'
+};
+// his temper through the rite, the route's the other way round (oaAnger, `rite`)
+const OPR_RAGE = [0.9, 0.7, 0.5, 0.3, 0.1];
+
+/* ------------------------------- THE DUEL ----------------------------------
+   ONE SHIP, the rite's cutscene, played. He takes every piece back at once,
+   and his set shows the ship as he kept it; it comes out of the tube, flat:
+   his memory of VOIDRUNNER. The hull is held on it, free to move. Every round
+   you fire, his copy fires on the same frame down the same line, and the two
+   meet and go out; stop firing and his come unanswered. After OPR_DUEL.wake
+   rounds met he fires the marked one, the slow revert he made every night:
+   graze it, and the hull wakes (or after OPR_DUEL.tries, it wakes anyway).
+   Awake, the hull grows guns of its own out of its back, one after another
+   (OPR_GROWTHS), its rounds go through, and the copy cannot keep up.
+--------------------------------------------------------------------------- */
+const OPR_DUEL = {
+  take: 1.5,                 // every piece back into his set
+  out: 1.6,                  // the copy coming out of the tube
+  gap: 420,                  // face to face
+  spd: 300,                  // how fast the copy keeps up with you (px/s)
+  copyR: 18,
+  idle: 0.9,                 // stop firing this long, and his rounds come unanswered
+  answer: 0.45,              // between unanswered rounds
+  answerSpd: 520,
+  hit: 0.12,                 // an unanswered round that lands: max health, never the last of it
+  wake: 24,                  // rounds met before the marked one
+  tell: 0.85,                // the marked one, told
+  markSpd: 170, markR: 15,
+  markGap: 1.1,              // between a marked one that missed and the next tell
+  tries: 3,                  // marked ones that miss before it wakes anyway
+  cap: 45,                   // seconds before the marked one, at most, if you never answer
+  growEvery: 0.85,           // awake: a growth this often
+  copyHp: 140,               // the copy, once the hull is awake
+  back: 1.3,                 // between its rattled rounds
+  cap2: 30                   // seconds after the wake, at most
+};
+/* What it grows, once awake: guns out of its back, one after another. `kind`
+   is how each fires: shell (a round of its own), beam (an instant line, held a
+   moment), missile (turning toward him), ring (all round the hull). `side` is
+   where it sprouts: -1 left, 0 the spine, 1 right. They fire while you do.
+   What each looks like is the art's (OPR_ART.growths): free, not the route's. */
+const OPR_GROWTHS = [
+  { id: 'barrels', side: 0,  kind: 'shell',   every: 0.42, dmg: 2,   spd: 900,  r: 9 },
+  { id: 'rifle',   side: 1,  kind: 'beam',    every: 1.0,  dmg: 3,   len: 1400, w: 7, T: 0.22 },
+  { id: 'rifle',   side: -1, kind: 'beam',    every: 1.0,  dmg: 3,   len: 1400, w: 7, T: 0.22 },
+  { id: 'cannon',  side: 0,  kind: 'shell',   every: 1.5,  dmg: 7,   spd: 650,  r: 18 },
+  { id: 'gatling', side: 1,  kind: 'shell',   every: 0.09, dmg: 0.5, spd: 1000, r: 4, spread: 0.07 },
+  { id: 'rail',    side: 0,  kind: 'beam',    every: 1.3,  dmg: 5,   len: 1800, w: 4, T: 0.18 },
+  { id: 'pods',    side: -1, kind: 'missile', every: 1.8,  dmg: 1.5, spd: 520,  r: 6, n: 4, turn: 4 },
+  { id: 'crown',   side: 0,  kind: 'ring',    every: 2.2,  dmg: 1,   spd: 760,  r: 6, n: 16 }
+];
+
+let oprRite = false;
+let orite = null;
+
+const oprOn = () => !!(oprRite && orite);
+const oprFrac = () => (orite ? clamp(orite.hp / OPR_HP, 0, 1) : 1);
+const oprDuelOn = () => !!(oprOn() && orite.duel);
+// the duel holds the hull on his copy until it wakes: it is flown, not aimed
+const oprAimLock = () => !!(oprDuelOn() && orite.duel.copy && (orite.duel.ph === 'even' || orite.duel.ph === 'mark'));
+const oprAim = () => { const c = orite.duel.copy; return Math.atan2(c.y - P.y, c.x - P.x); };
+// the hull is the rite's to draw from the open to the card (OPR_ART.hull)
+const oprOwnsHull = () => oprOn() && !orite.won;
+const oprHas = (o, id) => { const i = OPR_PIECES.findIndex(p => p.id === id); return i >= 0 && !!o.have[i]; };
+// the share of the hull that is back: of the pieces due by now, how many it holds
+function oprWhole(o) {
+  const n = Math.min(OPR_PIECES.length, o.due | 0);
+  if (!n) return 0;
+  let h = 0;
+  for (let i = 0; i < n; i++) if (o.have[i]) h++;
+  return h / n;
+}
+// the rite's cosmetic events, for the art (OPO_KIT.feed): never read by the run
+function oprFx(kind, data) { OPO_KIT.emit('opr.' + kind, data); }
+
+/* ------------------------------- the opening -------------------------------
+   Opened like the other three: the room cleared and taken to the size of his
+   (the route's), the hull set off at range with him upfield, at RITE_WAVE
+   depth. His set powers on as it did at the shatter. */
+function oprOpen() {
+  oprRite = true;
+  enemies.length = 0; ebullets.length = 0; bullets.length = 0;
+  portals.length = 0; hazards.length = 0; mortars.length = 0;
+  libraryPortal = null; libraryBook = null; malwareOffer = null;
+  awaitingPortal = false; betweenWaves = 1e9; spawnBudget = 0;
+  tear = null; choice = null; campVisit = null;   // nothing of the other finales follows you in (as opoOpen)
+  P.key = 0; keyItem = null;
+  const B = opoBox();
+  arenaReset(true);
+  arenaShrinkTo((B.x0 + B.x1) / 2, (B.y0 + B.y1) / 2, OPO.arenaW, OPO.arenaH);
+  arena.x0 = arena.tx0; arena.y0 = arena.ty0; arena.x1 = arena.tx1; arena.y1 = arena.ty1;
+  const cx = (B.x0 + B.x1) / 2;
+  P.x = cx; P.y = B.y1 - OPO.arenaH * 0.3; P.vx = P.vy = 0;
+  P.hp = P.maxHp;
+  cam.x = P.x; cam.y = P.y - 120;
+  const hx = cx, hy = B.y0 + OPO.arenaH * 0.32;
+  const w = wave;
+  wave = RITE_WAVE;
+  let e = null;
+  try { e = spawnEnemy('boss', hx, hy, { boss: 'onepointoh' }); }
+  finally { wave = w; }
+  if (!e) { oprRite = false; return; }
+  e.oprRite = true;              // drawn by his own hook, and only what came back reaches him
+  e.dmg = 0; e.spd = 0; e.armor = 0; e.absorb = 0; e.dr = 0; e.floor = undefined;
+  e.lockPhase = 0;               // updateBoss's gates would ring and banner; the rite paces him
+  e.hp = e.maxHp = OPR_HP;
+  bossAlive = true;
+  orite = {
+    e, box: B, hp: OPR_HP, seq: -1, seqT: 0, stage: 'open', st: 0, t: 0, seam: 0, saidSeq: true,
+    hx, hy, tx: hx, ty: hy, moveT: 1.0, ang: Math.PI / 2, touchCd: 0,
+    have: OPR_PIECES.map(() => false), due: 0, lost: [], kept: [], keepHits: 0,
+    guardT: 0, graze: 0, trail: [], trailT: 0,
+    sweeps: [], panes: [], patch: null,
+    sweepT: 1.6, paneT: 2.0, paintT: 3.0, volleyT: 2.0,
+    cards: [], peels: [], molt: null,
+    took: false, first: false, duel: null,
+    outK: 0, saidGo: false, done: false, fallT: 0, won: false
+  };
+  opoFx('open');                 // the route's art lets go of whatever it was holding
+  oprFx('open', { x: hx, y: hy });
+  state = 'play'; uiArm = 0.3;
+  drawFlashT = 0.4; shake(1.4);
+  Audio_.boss();
+}
+
+/* He takes everything the run gave it: the cards peel off into his set, and
+   the ship flies its own first numbers (OPO_BASE_KEYS, as THE BASE SHIP). */
+function oprTakeBuild(o) {
+  let n = 0;
+  for (const id of Object.keys(P.up)) {
+    const c = P.up[id] | 0;
+    if (TEARABLE[id]) for (let k = 0; k < c; k++) TEARABLE[id](P);
+    if (o.cards.length < 24) o.cards.push({ id, x: P.x, y: P.y, t: -n * 0.05, T: 1.1 });
+    delete P.up[id];
+    n++;
+  }
+  const base = newPlayer();
+  for (const k of OPO_BASE_KEYS) if (k in base) P[k] = base[k];
+  P.dashCh = Math.min(P.dashCh, P.dashMax);
+  sentries.length = 0;
+  oprFx('take', { x: P.x, y: P.y, n });
+  Audio_.tone(330, 0.3, 'square', 0.06, 120);
+}
+
+/* Admin jump: sequence i starts where sequence i - 1 ran out, with the pieces
+   it would have back by then. */
+function oprJump(i) {
+  const o = orite;
+  if (!oprOn()) return;
+  i = clamp(i | 0, 0, OPR_SEQ.length - 1);
+  if (!o.took) oprTakeBuild(o);
+  o.took = o.first = true;
+  o.stage = 'fight'; o.st = 0; o.seam = 0; o.duel = null;
+  o.sweeps.length = 0; o.panes.length = 0; o.patch = null; o.lost.length = 0; o.kept.length = 0;
+  ebullets.length = 0;
+  o.due = Math.min(OPR_PIECES.length, i + 1);
+  for (let k = 0; k < OPR_PIECES.length; k++) o.have[k] = k < o.due;
+  const s = OPR_SEQ[i - 1];
+  o.hp = OPR_HP * (s ? s.until : 1);
+  o.seq = i - 1;                 // the tick opens sequence i, as it would arrive
+}
+
+/* ------------------------------- per frame -------------------------------- */
+function oprTick(dt, wdt) {
+  const o = orite;
+  if (!o) return;
+  const e = o.e;
+  o.t += dt; o.st += dt;
+  if (e && !e.dead) {
+    e.hp = Math.max(0.01, o.hp);            // the bar reads the rite
+    e.x = o.hx; e.y = o.hy; e.vx = e.vy = 0; e.ang = o.ang;
+    e.invuln = 0;
+    e.phased = !!o.duel;                    // in the duel the fight is with his copy, not him
+  }
+  oprAnimTick(o, dt);
+  if (o.done) {                              // he is left holding it; let it land
+    o.fallT += dt;
+    if (o.fallT > OPR.fall && !o.won) oprWin();
+    return;
+  }
+  if (o.stage === 'out') { oprOutTick(o, dt); return; }
+  if (o.stage === 'open') { oprOpenTick(o, dt); return; }
+  if (o.duel) { oprDuelTick(o, dt); return; }
+
+  // which sequence the health says it is
+  const k = oprFrac();
+  let i = OPR_SEQ.findIndex(s => k > s.until);
+  if (i < 0) i = OPR_SEQ.length - 1;
+  if (i !== o.seq) oprSeqOpen(o, i);
+  if (o.duel) return;
+  const S = OPR_SEQ[o.seq];
+
+  o.guardT = Math.max(0, o.guardT - wdt);
+  // a stripped piece comes back by itself: he cannot hold it as long as he used to
+  for (const l of o.lost) l.t -= wdt;
+  for (const l of o.lost.filter(z => z.t <= 0)) oprRegrow(o, l.k, 'time');
+  oprGrazeSpend(o);
+  oprHullTick(o, wdt);
+  oprHimTick(o, wdt);
+  if (o.seam > 0) {
+    o.seam = Math.max(0, o.seam - wdt);
+    if (o.seam <= 0 && !o.saidSeq) { o.saidSeq = true; opoSay(OPR_SAY[S.id], 'phase', 3.0); }
+  } else o.seqT += wdt;
+  oprSweepsTick(o, wdt, S);
+  oprPanesTick(o, wdt, S);
+  oprPaintTick(o, wdt, S);
+  oprVolleyTick(o, wdt, S);
+  oprGrazeRounds(o);
+}
+
+function oprOpenTick(o, dt) {
+  oprHimFace(o, dt, 3);
+  if (o.st >= OPR_TAKE_AT && !o.took) { o.took = true; oprTakeBuild(o); opoSay(OPR_SAY.take, 'face', 1.6); }
+  if (o.st >= OPR_FIRST_AT && !o.first) { o.first = true; oprMolt(o, 0); }
+  if (o.st >= OPR_OPEN) { o.stage = 'fight'; o.st = 0; }
+}
+
+function oprSeqOpen(o, i) {
+  o.seq = i; o.seqT = 0;
+  const S = OPR_SEQ[i];
+  if (i === OPR_DUEL_SEQ) { oprDuelStart(o); return; }
+  banner(S.n, OPO_COL, 3.0);
+  opoFx('phase', { i, n: S.n });             // his set surges, and the glass scans
+  ringFx(o.hx, o.hy, 20, 700, OPO_COL, 0.9, 6);
+  shake(0.8); Audio_.boom();
+  if (i > 0) {                               // a seam: the next piece comes back, and he names it
+    o.seam = OPR_SEAM; o.saidSeq = false;
+    o.patch = null;
+    oprMolt(o, i);
+  } else opoSay(OPR_SAY[S.id], 'phase', 3.0);
+}
+
+// a piece comes back at a seam (or at the open): it is due from now on
+function oprMolt(o, k) {
+  o.due = Math.max(o.due, k + 1);
+  o.have[k] = true;
+  o.lost = o.lost.filter(l => l.k !== k); o.kept = o.kept.filter(x => x !== k);
+  o.molt = { k, t: 0, T: OPR_SEAM };
+  oprFx('molt', { k, x: P.x, y: P.y });
+  opoSay(OPR_PIECES[k].say, 'fight', OPR_SEAM + 1.4);
+  burst(P.x, P.y, 18, '#e0f2fe', 260, 2.6, 0.5);
+  Audio_.tone(523, 0.35, 'sine', 0.08, 1046);
+}
+function oprRegrow(o, k, how) {
+  if (o.have[k]) return;
+  o.lost = o.lost.filter(l => l.k !== k); o.kept = o.kept.filter(x => x !== k);
+  o.have[k] = true;
+  oprFx('grow', { k, how, x: P.x, y: P.y });
+  Audio_.tone(660, 0.18, 'sine', 0.06, 990);
+}
+
+/* A revert reaches the hull. Dashed through, it is a graze; on the plating,
+   nothing; otherwise it takes the newest piece back, into his set in HE
+   KEEPS IT, and to the floor before that (it grows back by itself). */
+function oprCatch(o, how, x, y) {
+  if (P.iframe > 0 || P.dashT > 0) { oprGraze(o, OPR.pays.dash, how + '-dash', x, y); return; }
+  if (oprHas(o, 'plating') && o.guardT <= 0) {
+    o.guardT = OPR.guardCd;
+    oprFx('guard', { x: P.x, y: P.y, how });
+    Audio_.tone(900, 0.08, 'square', 0.06, 1300);
+    return;
+  }
+  hurtPlayer(OPR.catchDmg, { src: o.e });
+  let k = -1;
+  for (let i = OPR_PIECES.length - 1; i >= 0; i--) if (o.have[i]) { k = i; break; }
+  if (k < 0) return;                         // the base ship: nothing left to take
+  o.have[k] = false;
+  const keep = !!(OPR_SEQ[o.seq] && OPR_SEQ[o.seq].keep);
+  if (keep) o.kept.push(k); else o.lost.push({ k, t: OPR_REGROW });
+  o.peels.push({ k, x0: P.x, y0: P.y, t: 0, T: keep ? 1.0 : 0.8, kept: keep });
+  oprFx('peel', { k, kept: keep, how, x: P.x, y: P.y });
+  const L = keep ? OPR_SAY.kept : OPR_SAY.caught;
+  opoSay(L[(o.peels.length + k) % L.length], 'fight', 1.6);
+  Audio_.tone(330, 0.14, 'square', 0.06, 160);
+}
+
+// a near miss: GRAZE, and a full meter grows the oldest missing piece back
+function oprGraze(o, pays, src, x, y) {
+  o.graze = Math.min(OPR_GRAZE, o.graze + pays);
+  oprFx('graze', { x: x === undefined ? P.x : x, y: y === undefined ? P.y : y, src, pays });
+  oprGrazeSpend(o);
+}
+// a full meter is a piece banked: spent the moment one is missing (never on one in his set)
+function oprGrazeSpend(o) {
+  if (o.graze < OPR_GRAZE || !o.lost.length) return;
+  let k = 99;
+  for (const l of o.lost) k = Math.min(k, l.k);
+  o.graze -= OPR_GRAZE;
+  oprRegrow(o, k, 'graze');
+}
+
+/* A round of yours reaching him (the bullet loop). Returns whether it was
+   spent: the base round passes through him, unspent. */
+function oprStruck(e, b) {
+  const o = orite;
+  if (!o || o.stage !== 'fight' || o.duel || o.seam > 0) return false;
+  const whole = oprWhole(o);                 // as the round arrives: the piece it frees is not yet back
+  // HE KEEPS IT: a round on his set works a kept piece loose, whatever the hull has
+  let spent = false;
+  if (o.kept.length) {
+    spent = true;
+    if (++o.keepHits >= OPR.keepHits) { o.keepHits = 0; oprRegrow(o, Math.min(...o.kept), 'set'); }
+    oprFx('setHit', { x: b.x, y: b.y });
+  }
+  if (whole <= 0) {
+    if (!spent) oprFx('through', { x: b.x, y: b.y });
+    return spent;
+  }
+  const u = OPR_HIT * whole * (oprHas(o, 'barrel') ? 0.5 : 1);
+  const S = OPR_SEQ[Math.max(0, o.seq)];
+  const floor = o.seqT < OPR_SEQ_MIN ? OPR_HP * S.until + 0.5 : 0;   // held just above the line until it has run
+  o.hp = Math.max(Math.min(o.hp, floor), o.hp - u);
+  if (o.patch) o.patch.k = Math.max(0, o.patch.k - OPR.paint.hitBack);   // hitting him interrupts the brush
+  e.flash = Math.min(1, (e.flash || 0) + 0.5);
+  opoFx('hit', { x: b.x, y: b.y, crit: !!b.crit });   // his temper, and the chips off his set (the route's art)
+  return true;
+}
+
+/* The pieces at work: the barrel's pairs, the core's pull, the lattice's
+   light, left behind the hull. */
+function oprHullTick(o, dt) {
+  P.count = oprHas(o, 'barrel') ? 2 : 1;
+  if (oprHas(o, 'core')) {
+    for (const b of bullets) {
+      if (b.hacked) continue;
+      const cur = Math.atan2(b.vy, b.vx), want = Math.atan2(o.hy - b.y, o.hx - b.x);
+      const da = ((want - cur + Math.PI * 3) % TAU) - Math.PI;
+      const a = cur + clamp(da, -OPR.bend * dt, OPR.bend * dt), s = len(b.vx, b.vy);
+      b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
+    }
+  }
+  const lit = oprHas(o, 'lattice');
+  if (lit && (o.trailT -= dt) <= 0) { o.trailT = OPR.trail.every; o.trail.push({ x: P.x, y: P.y, t: o.t }); }
+  while (o.trail.length && (!lit || o.t - o.trail[0].t > OPR.trail.keep)) o.trail.shift();
+}
+// does the lattice's light cross this circle?
+function oprTrailCuts(o, x, y, r) {
+  const T = o.trail;
+  for (let i = 1; i < T.length; i++) if (segCircle(T[i - 1].x, T[i - 1].y, T[i].x, T[i].y, x, y, r)) return true;
+  return false;
+}
+
+/* Him: upfield and drifting, faster as it goes, wanting you to see him. Flat,
+   unlit, and he casts no shadow (the route's set). */
+function oprHimFace(o, dt, rate) {
+  const want = Math.atan2(P.y - o.hy, P.x - o.hx);
+  const da = ((want - o.ang + Math.PI * 3) % TAU) - Math.PI;
+  o.ang += da * Math.min(1, dt * rate);
+}
+function oprHimTick(o, dt) {
+  const B = o.box, spd = 70 + Math.max(0, o.seq) * 20;
+  if ((o.moveT -= dt) <= 0) {
+    o.moveT = simRnd(3.2, 1.8);
+    o.tx = P.x + simRnd(320, -320); o.ty = P.y - simRnd(440, 260);
+  }
+  o.tx = clamp(o.tx, B.x0 + 80, B.x1 - 80); o.ty = clamp(o.ty, B.y0 + 80, B.y1 - 80);
+  const dx = o.tx - o.hx, dy = o.ty - o.hy, d = len(dx, dy);
+  if (d > 4) { const s = Math.min(d, spd * dt); o.hx += dx / d * s; o.hy += dy / d * s; }
+  oprHimFace(o, dt, 6);
+  o.touchCd = Math.max(0, o.touchCd - dt);
+  if (o.touchCd <= 0 && o.e && len(P.x - o.hx, P.y - o.hy) < o.e.r + P.r + 4) {
+    o.touchCd = OPR.touchCd;
+    hurtPlayer(OPR.touch, { src: o.e });
+  }
+}
+
+/* HE PUTS IT BACK on: the route's reverts, laid across your path. Told at
+   the edge first; the front reaching the hull takes a piece; passing just
+   beside it is a graze. */
+function oprSweepsTick(o, dt, S) {
+  const m = OPO.sweep, B = o.box;
+  if (S.sweep && o.seam <= 0) {
+    o.sweepT -= dt;
+    if (o.sweepT <= 0) {
+      o.sweepT = lerp(OPR.sweep.every[0], OPR.sweep.every[1], clamp(o.seq / 3, 0, 1));
+      const vert = simRand() < 0.5, n = vert ? OPO.cols : OPO.rows;
+      const pl = vert ? Math.floor((P.x - B.x0) / B.cw) : Math.floor((P.y - B.y0) / B.ch);
+      const lane = clamp(pl - simRndi(m.lanes), 0, n - m.lanes);   // the lane you are in, mostly
+      const s = { vert, dir: simRand() < 0.5 ? 1 : -1, lane, lanes: m.lanes, tell: m.tell, t: 0, pos: 0, hit: false, grazed: false, done: 0 };
+      o.sweeps.push(s);
+      opoFx('sweep', { vert: s.vert, dir: s.dir, lane: s.lane, lanes: s.lanes });
+    }
+  }
+  for (let i = o.sweeps.length - 1; i >= 0; i--) {
+    const s = o.sweeps[i];
+    s.t += dt;
+    if (s.t < s.tell) continue;
+    const span = s.vert ? OPO.arenaH : OPO.arenaW;
+    s.pos = Math.min(span, (s.t - s.tell) * m.spd);
+    const along = s.dir > 0 ? s.pos : span - s.pos;
+    const cs = s.vert ? B.cw : B.ch;
+    const pa = s.vert ? P.y - B.y0 : P.x - B.x0;            // where the hull is along it
+    const pc = s.vert ? P.x - B.x0 : P.y - B.y0;            // and across it
+    const lo = s.lane * cs, hi = (s.lane + s.lanes) * cs;
+    const out = pc < lo ? lo - pc : pc > hi ? pc - hi : 0;   // how far outside the band
+    if (!s.hit && s.pos < span && Math.abs(pa - along) < m.edge + P.r) {
+      if (out <= 0) { s.hit = true; oprCatch(o, 'sweep'); }
+      else if (out < OPR.graze.edge && !s.grazed) { s.grazed = true; oprGraze(o, OPR.pays.edge, 'sweep'); }
+    }
+    if (s.pos >= span && (s.done += dt) > 0.4) o.sweeps.splice(i, 1);
+  }
+}
+
+/* HE REMEMBERS IT on: panes of the ship as he kept it, thrown to where you
+   are going. A pane landing on the hull takes a piece; your rounds break it,
+   and so does the lattice's light. */
+function oprPanesTick(o, dt, S) {
+  const m = OPR.pane, B = o.box;
+  if (S.panes && o.seam <= 0) {
+    o.paneT -= dt;
+    if (o.paneT <= 0) {
+      o.paneT = lerp(m.every[0], m.every[1], clamp((o.seq - 1) / 2, 0, 1));
+      const a = simRnd(TAU), r = simRnd(220, 60);
+      const tx = clamp(P.x + P.vx * 0.6 + Math.cos(a) * r, B.x0 + 40, B.x1 - 40);
+      const ty = clamp(P.y + P.vy * 0.6 + Math.sin(a) * r, B.y0 + 40, B.y1 - 40);
+      o.panes.push({ x: o.hx, y: o.hy, x0: o.hx, y0: o.hy, tx, ty, t: 0, T: m.fly, hp: m.hp, r: m.r, landed: 0, ang: simRnd(TAU) });
+      opoFx('pane', { x: o.hx, y: o.hy, tx, ty });
+    }
+  }
+  const lit = oprHas(o, 'lattice');
+  for (let i = o.panes.length - 1; i >= 0; i--) {
+    const p = o.panes[i];
+    if (p.landed) { if ((p.landed += dt) > 1.0) o.panes.splice(i, 1); continue; }
+    p.t += dt;
+    const k = clamp(p.t / p.T, 0, 1), ke = k * k * (3 - 2 * k);
+    p.x = lerp(p.x0, p.tx, ke); p.y = lerp(p.y0, p.ty, ke) - Math.sin(k * Math.PI) * 60;
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const b = bullets[j];
+      if (!segCircle(b.px, b.py, b.x, b.y, p.x, p.y, p.r + b.r)) continue;
+      bullets.splice(j, 1);
+      if (--p.hp <= 0) break;
+    }
+    if (p.hp > 0 && lit && k > 0.3 && oprTrailCuts(o, p.x, p.y, p.r)) { p.hp = 0; oprFx('cut', { x: p.x, y: p.y, what: 'pane' }); }
+    if (p.hp <= 0) {
+      opoFx('paneBreak', { x: p.x, y: p.y, r: p.r, ang: p.ang });
+      burst(p.x, p.y, 16, OPO_COL, 260, 2.4, 0.5);
+      Audio_.tone(1200, 0.08, 'square', 0.06, 600);
+      o.panes.splice(i, 1);
+      continue;
+    }
+    if (k >= 1) {
+      p.landed = 1e-6;
+      opoFx('paneLand', { x: p.tx, y: p.ty, r: p.r });
+      const d = len(P.x - p.tx, P.y - p.ty);
+      if (d < m.reach) oprCatch(o, 'pane', p.tx, p.ty);
+      else if (d < m.reach + OPR.graze.rim) oprGraze(o, OPR.pays.rim, 'pane');
+      shake(0.25);
+    }
+  }
+}
+
+/* HE PAINTS IT OVER on: his brush, planted where the hull is. Still in it
+   when the paint is done, the hull loses a piece; at its rim, a graze. The
+   lattice's light, drawn through it, scrubs it back; so does hitting him. */
+function oprPaintTick(o, dt, S) {
+  const m = OPR.paint;
+  if (S.paint && !o.patch && o.seam <= 0) {
+    o.paintT -= dt;
+    if (o.paintT <= 0) {
+      o.paintT = lerp(m.every[0], m.every[1], clamp((o.seq - 2) / 1, 0, 1));
+      o.patch = { x: P.x, y: P.y, k: 0, t: 0 };
+      oprFx('brush', { x: P.x, y: P.y });
+    }
+  }
+  const p = o.patch;
+  if (!p) return;
+  p.t += dt;
+  p.k += dt / m.secs;
+  if (oprHas(o, 'lattice') && o.trail.some(q => len(q.x - p.x, q.y - p.y) < m.r)) p.k = Math.max(0, p.k - dt * m.push / m.secs);
+  if (p.k < 1) return;
+  const d = len(P.x - p.x, P.y - p.y);
+  if (d < m.r) oprCatch(o, 'paint', p.x, p.y);
+  else if (d < m.r + OPR.graze.rim) oprGraze(o, OPR.pays.brush, 'paint');
+  oprFx('painted', { x: p.x, y: p.y });
+  o.patch = null;
+}
+
+// HE KEEPS IT: his volleys, the only rounds he fires before the duel
+function oprVolleyTick(o, dt, S) {
+  const m = OPR.volley;
+  if (!S.volley || o.seam > 0 || !o.e) return;
+  if ((o.volleyT -= dt) > 0) return;
+  o.volleyT = simRnd(m.every[0], m.every[1]);
+  for (let k = 0; k < m.n; k++) {
+    const b = eshoot(o.e, o.ang + (k - (m.n - 1) / 2) * m.spread, m.spd, m.dmg, 6);
+    if (b) b.opr = 1;
+  }
+}
+// a round of his passing close: a graze
+function oprGrazeRounds(o) {
+  for (const b of ebullets) {
+    if (!b.opr || b.grazed) continue;
+    const d = len(b.x - P.x, b.y - P.y);
+    if (d > P.r + b.r && d < P.r + b.r + OPR.graze.round) { b.grazed = 1; oprGraze(o, OPR.pays.round, 'round', b.x, b.y); }
+  }
+}
+
+// what only the drawing needs, kept with the run so a snapshot carries it
+function oprAnimTick(o, dt) {
+  for (let i = o.cards.length - 1; i >= 0; i--) if ((o.cards[i].t += dt) >= o.cards[i].T) o.cards.splice(i, 1);
+  for (let i = o.peels.length - 1; i >= 0; i--) if ((o.peels[i].t += dt) >= o.peels[i].T) o.peels.splice(i, 1);
+  if (o.molt && (o.molt.t += dt) >= o.molt.T) o.molt = null;
+  const D = o.duel;
+  if (D) {
+    if (D.copy) D.copy.hurt = Math.max(0, D.copy.hurt - dt);
+    for (let i = D.gbeams.length - 1; i >= 0; i--) if ((D.gbeams[i].t += dt) >= D.gbeams[i].T) D.gbeams.splice(i, 1);
+    if (D.broke) D.broke.t += dt;
+  }
+}
+
+/* -------------------------------- ONE SHIP -------------------------------- */
+function oprDuelStart(o) {
+  o.sweeps.length = 0; o.panes.length = 0; o.patch = null; o.trail.length = 0;
+  o.lost.length = 0; o.kept.length = 0; o.seam = 0;
+  ebullets.length = 0;
+  // he takes every piece back at once, into his set
+  for (let k = 0; k < OPR_PIECES.length; k++) {
+    if (!o.have[k]) continue;
+    o.have[k] = false;
+    o.peels.push({ k, x0: P.x, y0: P.y, t: -k * 0.12, T: 1.1, kept: true });
+  }
+  o.due = 0;
+  P.count = 1;
+  o.duel = { ph: 'take', t: 0, pt: 0, n: 0, idle: 0, answerT: 0.6, tries: 0, capT: 0, markT: 0,
+             copy: null, shots: [], awake: false, wakeAt: -1, fired: 0,
+             grow: [], growT: 0, gshots: [], gbeams: [], copyHp: OPR_DUEL.copyHp, broke: null };
+  banner(OPR_SEQ[OPR_DUEL_SEQ].n, OPO_COL, 3.0);
+  opoFx('phase', { i: OPR_DUEL_SEQ, n: OPR_SEQ[OPR_DUEL_SEQ].n });
+  opoSay(OPR_SAY.fair, 'phase', 2.8);
+  oprFx('takeAll', { x: P.x, y: P.y });
+  shake(1.0); Audio_.boom();
+}
+
+function oprDuelTick(o, dt) {
+  const D = o.duel;
+  D.t += dt; D.pt += dt; D.idle += dt;
+  D.fired = Math.max(0, D.fired - dt);
+  // he steps back to the top of the room to watch: the copy stands between you
+  { const B = o.box, tx = (B.x0 + B.x1) / 2, ty = B.y0 + 150, dx = tx - o.hx, dy = ty - o.hy, d = len(dx, dy);
+    if (d > 2) { const s = Math.min(d, 140 * dt); o.hx += dx / d * s; o.hy += dy / d * s; } }
+  oprHimFace(o, dt, 3);
+  // every round of yours is seen once, as it leaves the hull
+  for (const b of bullets) if (!b.oprSeen) { b.oprSeen = 1; if (!b.hacked) oprDuelFired(o, D, b); }
+  switch (D.ph) {
+    case 'take':
+      if (D.pt >= OPR_DUEL.take) {
+        D.ph = 'out'; D.pt = 0;
+        D.copy = { x: o.hx, y: o.hy, ang: o.ang, hurt: 0, k: 0 };
+        oprFx('copyOut', { x: o.hx, y: o.hy });
+        Audio_.tone(220, 0.4, 'square', 0.06, 440);
+      }
+      break;
+    case 'out':
+      D.copy.k = clamp(D.pt / OPR_DUEL.out, 0, 1);
+      oprCopyMove(o, D, dt, 1.4);
+      if (D.pt >= OPR_DUEL.out) { D.ph = 'even'; D.pt = 0; opoSay(OPR_SAY.oneship, 'fight', 3.4); }
+      break;
+    case 'even':
+      oprCopyMove(o, D, dt, 1);
+      D.capT += dt;
+      oprDuelAnswer(o, D, dt);
+      if (D.n >= OPR_DUEL.wake || D.capT > OPR_DUEL.cap) { D.ph = 'mark'; D.pt = 0; D.markT = OPR_DUEL.tell; D.marked = null; oprFx('markTell', { x: D.copy.x, y: D.copy.y }); }
+      break;
+    case 'mark':
+      oprCopyMove(o, D, dt, 1);
+      if (!D.marked && D.markT > 0) {
+        D.markT -= dt;
+        if (D.markT <= 0) oprDuelMark(o, D);
+      }
+      break;
+    case 'awake':
+      oprDuelAwake(o, D, dt);
+      break;
+  }
+  oprCopyShots(o, D, dt);
+  if (D.ph === 'awake') oprGrowShots(o, D, dt);
+  // before the wake your rounds that reach the copy are met at it; after, they land
+  if (D.copy && D.ph !== 'take' && D.ph !== 'out') {
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const b = bullets[j];
+      if (b.hacked || len(b.x - D.copy.x, b.y - D.copy.y) > OPR_DUEL.copyR + b.r) continue;
+      bullets.splice(j, 1);
+      if (D.ph === 'awake') { oprCopyHit(o, D, 1, b.x, b.y); if (D.ph !== 'awake') break; }
+      else oprFx('meet', { x: b.x, y: b.y, at: 'copy' });
+    }
+  }
+}
+
+// face to face: upfield of you, keeping up the way you fly; `pace` is how well
+function oprCopyMove(o, D, dt, pace) {
+  const c = D.copy, B = o.box;
+  if (!c) return;
+  const tx = clamp(D.awake ? P.x + Math.sin(D.t * 0.9) * 140 : P.x, B.x0 + 60, B.x1 - 60);
+  const ty = clamp(P.y - OPR_DUEL.gap * (D.awake ? 1.15 : 1), B.y0 + 290, B.y1 - 60);   // and never on top of his set
+  const dx = tx - c.x, dy = ty - c.y, d = len(dx, dy);
+  if (d > 2) { const s = Math.min(d, OPR_DUEL.spd * pace * dt); c.x += dx / d * s; c.y += dy / d * s; }
+  c.ang = Math.atan2(P.y - c.y, P.x - c.x);
+}
+
+// a round of yours leaves the hull: in the even duel, his copy answers it down the same line
+function oprDuelFired(o, D, b) {
+  D.idle = 0; D.fired = 0.25;
+  if (D.ph !== 'even' || !D.copy) return;
+  const c = D.copy, a = Math.atan2(P.y - c.y, P.x - c.x), spd = len(b.vx, b.vy) || 700;
+  D.shots.push({ x: c.x + Math.cos(a) * OPR_DUEL.copyR, y: c.y + Math.sin(a) * OPR_DUEL.copyR,
+                 vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: 5, pair: b, life: 2.2, mark: false, minD: 1e9 });
+}
+// stop answering, and his rounds come anyway
+function oprDuelAnswer(o, D, dt) {
+  if (D.idle < OPR_DUEL.idle) { D.answerT = 0.15; return; }
+  if ((D.answerT -= dt) > 0) return;
+  D.answerT = OPR_DUEL.answer;
+  oprCopyShoot(D, OPR_DUEL.answerSpd, 5, false);
+}
+function oprCopyShoot(D, spd, r, mark) {
+  const c = D.copy, a = Math.atan2(P.y - c.y, P.x - c.x);
+  const s = { x: c.x + Math.cos(a) * OPR_DUEL.copyR, y: c.y + Math.sin(a) * OPR_DUEL.copyR,
+              vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r, pair: null, life: mark ? 6 : 2.6, mark, minD: 1e9 };
+  D.shots.push(s);
+  Audio_.tone(mark ? 180 : 300, mark ? 0.3 : 0.05, 'square', 0.05, mark ? 90 : 160);
+  return s;
+}
+// the marked one: the slow revert he made every night
+function oprDuelMark(o, D) {
+  D.marked = oprCopyShoot(D, OPR_DUEL.markSpd, OPR_DUEL.markR, true);
+  oprFx('mark', { x: D.copy.x, y: D.copy.y });
+  opoSay(OPR_SAY.putback, 'fight', 2.2);
+}
+// it passed, or it landed: a graze wakes the hull, and so does trying long enough
+function oprMarkDone(o, D, grazed) {
+  D.marked = null;
+  if (grazed || ++D.tries >= OPR_DUEL.tries) { oprDuelWake(o, D); return; }
+  D.markT = OPR_DUEL.markGap + OPR_DUEL.tell;
+  oprFx('markMiss', { tries: D.tries });
+}
+// an unanswered round that lands: it costs, but a cutscene never takes the run
+function oprDuelHurt() {
+  if (P.iframe > 0 || P.dashT > 0) return;
+  const dmg = Math.min(P.maxHp * OPR_DUEL.hit, Math.max(0, P.hp - 1));
+  if (dmg <= 0) return;
+  P.hp -= dmg;
+  P.hurtFlash = Math.max(P.hurtFlash, 0.5);
+  P.iframe = Math.max(P.iframe, 0.35);
+  floatText(P.x, P.y - 30, '-' + Math.round(dmg), '#f87171', 14);
+  shake(0.6);
+  Audio_.noise(0.2, 0.2, 900, 200, 2);
+}
+function oprCopyShots(o, D, dt) {
+  const A = arena;
+  for (let i = D.shots.length - 1; i >= 0; i--) {
+    const s = D.shots[i];
+    s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
+    // a pair meets: both go out
+    if (s.pair) {
+      const b = s.pair;
+      if (!bullets.includes(b)) s.pair = null;
+      else {
+        const dx = b.x - s.x, dy = b.y - s.y;
+        if (dx * dx + dy * dy < (b.r + s.r + 12) * (b.r + s.r + 12) || dx * b.vx + dy * b.vy > 0) {
+          bullets.splice(bullets.indexOf(b), 1);
+          D.shots.splice(i, 1);
+          D.n++;
+          oprFx('meet', { x: (b.x + s.x) / 2, y: (b.y + s.y) / 2, n: D.n });
+          Audio_.tone(1400 + Math.min(20, D.n) * 40, 0.04, 'square', 0.05, 1000);
+          continue;
+        }
+      }
+    }
+    const d = len(P.x - s.x, P.y - s.y);
+    if (d < P.r + s.r) {
+      if (P.iframe > 0 || P.dashT > 0) {     // dashed through: it passes, and the marked one counts as grazed
+        if (s.mark) { D.shots.splice(i, 1); oprMarkDone(o, D, true); }
+        continue;
+      }
+      D.shots.splice(i, 1);
+      oprDuelHurt();
+      if (s.mark) oprMarkDone(o, D, false);
+      continue;
+    }
+    s.minD = Math.min(s.minD, d);
+    if (s.mark) {
+      const passed = (P.x - s.x) * s.vx + (P.y - s.y) * s.vy < 0;
+      if (passed || s.life <= 0) {
+        D.shots.splice(i, 1);
+        oprMarkDone(o, D, s.minD < P.r + s.r + OPR.graze.round + 8);
+      }
+      continue;
+    }
+    if (s.life <= 0 || s.x < A.x0 - 40 || s.x > A.x1 + 40 || s.y < A.y0 - 40 || s.y > A.y1 + 40) D.shots.splice(i, 1);
+  }
+}
+
+/* THE AWAKENING, in the middle of the duel, as in every rite: granted the
+   moment it happens, not at the card. Every piece comes back at once, with
+   the whole they were pieces of. */
+function oprDuelWake(o, D) {
+  D.ph = 'awake'; D.pt = 0; D.awake = true; D.wakeAt = D.t;
+  grantAwakening(P.charId);
+  P.awake = 1;
+  o.due = OPR_PIECES.length;
+  for (let k = 0; k < OPR_PIECES.length; k++) o.have[k] = true;
+  P.count = 2;
+  D.shots.length = 0;
+  D.growT = 0.4;
+  if (D.copy) { D.copy.hurt = 1; D.copy.y -= 70; }
+  opoSay(OPR_SAY.wake, 'fight', 3.2);
+  oprFx('wake', { x: P.x, y: P.y });
+  shake(2.6);                    // no white flash: the art opens on its own (as RONIN's)
+  Audio_.boom(); Audio_.boss(); Audio_.levelup();
+}
+
+function oprDuelAwake(o, D, dt) {
+  oprCopyMove(o, D, dt, 0.55);   // it cannot keep up with a ship it never saw
+  // it grows: another gun out of its back, one after another
+  if (D.grow.length < OPR_GROWTHS.length && (D.growT -= dt) <= 0) {
+    D.growT = OPR_DUEL.growEvery;
+    const i = D.grow.length, G = OPR_GROWTHS[i];
+    D.grow.push({ i, id: G.id, side: G.side, at: D.t, fireT: 0.15 });
+    oprFx('sprout', { i, id: G.id, side: G.side, x: P.x, y: P.y });
+    shake(0.35);
+    Audio_.tone(140 + i * 30, 0.25, 'sawtooth', 0.06, 70 + i * 20);
+  }
+  // they fire while you do
+  if (D.fired > 0) for (const g of D.grow) {
+    if ((g.fireT -= dt) > 0) continue;
+    g.fireT += OPR_GROWTHS[g.i].every;
+    oprGrowFire(o, D, g);
+  }
+  // his copy, rattled, still answers
+  if ((D.answerT -= dt) <= 0) { D.answerT = OPR_DUEL.back; oprCopyShoot(D, 420, 5, false); }
+  if (D.t - D.wakeAt > OPR_DUEL.cap2) oprDuelFinish(o, D);
+}
+
+// where a growth sits on the hull: hull space (forward, across) to the world
+function oprMount(side, fwd) {
+  const a = P.ang, ax = -6 + (fwd || 0), ay = side * 10;
+  return { x: P.x + Math.cos(a) * ax - Math.sin(a) * ay, y: P.y + Math.sin(a) * ax + Math.cos(a) * ay };
+}
+function oprGrowFire(o, D, g) {
+  const G = OPR_GROWTHS[g.i], c = D.copy;
+  const m = oprMount(G.side, 16);
+  if (G.kind === 'beam') {
+    const b = { x0: m.x, y0: m.y, ang: P.ang, len: G.len, w: G.w, t: 0, T: G.T, g: g.i };
+    D.gbeams.push(b);
+    if (c && segCircle(m.x, m.y, m.x + Math.cos(P.ang) * G.len, m.y + Math.sin(P.ang) * G.len, c.x, c.y, OPR_DUEL.copyR + G.w)) oprCopyHit(o, D, G.dmg, c.x, c.y);
+    Audio_.tone(1800, 0.06, 'sawtooth', 0.04, 600);
+    return;
+  }
+  const shot = (a, homing) => D.gshots.push({ x: m.x, y: m.y, vx: Math.cos(a) * G.spd, vy: Math.sin(a) * G.spd,
+                                              r: G.r, dmg: G.dmg, life: homing ? 2.4 : 1.8, g: g.i, homing: homing || 0 });
+  if (G.kind === 'shell') shot(P.ang + (G.spread ? simRnd(G.spread, -G.spread) : 0));
+  else if (G.kind === 'missile') for (let k = 0; k < G.n; k++) shot(P.ang + (k - (G.n - 1) / 2) * 0.5, G.turn);
+  else if (G.kind === 'ring') for (let k = 0; k < G.n; k++) shot(P.ang + k * TAU / G.n);
+  if (G.kind !== 'shell' || g.i % 2 === 0) Audio_.tone(G.kind === 'shell' ? 260 : 520, 0.05, 'square', 0.04, 140);
+}
+function oprGrowShots(o, D, dt) {
+  const c = D.copy, A = arena;
+  for (let i = D.gshots.length - 1; i >= 0; i--) {
+    const s = D.gshots[i];
+    if (s.homing && c) {
+      const cur = Math.atan2(s.vy, s.vx), want = Math.atan2(c.y - s.y, c.x - s.x);
+      const da = ((want - cur + Math.PI * 3) % TAU) - Math.PI, sp = len(s.vx, s.vy);
+      const a = cur + clamp(da, -s.homing * dt, s.homing * dt);
+      s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp;
+    }
+    s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
+    if (c && len(s.x - c.x, s.y - c.y) < OPR_DUEL.copyR + s.r) {
+      D.gshots.splice(i, 1);
+      oprCopyHit(o, D, s.dmg, s.x, s.y);
+      if (D.ph !== 'awake') return;
+      continue;
+    }
+    if (s.life <= 0 || s.x < A.x0 - 60 || s.x > A.x1 + 60 || s.y < A.y0 - 60 || s.y > A.y1 + 60) D.gshots.splice(i, 1);
+  }
+}
+function oprCopyHit(o, D, dmg, x, y) {
+  if (D.ph !== 'awake') return;
+  D.copyHp -= dmg;
+  if (D.copy) D.copy.hurt = 0.18;
+  o.hp = OPR_HP * OPR_SEQ[OPR_DUEL_SEQ - 1].until * clamp(D.copyHp / OPR_DUEL.copyHp, 0, 1);
+  oprFx('copyHit', { x, y, dmg });
+  if (D.copyHp <= 0) oprDuelFinish(o, D);
+}
+
+/* The copy breaks back into his set, and the set goes dark, a line, a dot.
+   He keeps his mind, and lets go. */
+function oprDuelFinish(o, D) {
+  D.ph = 'finish'; D.pt = 0;
+  o.hp = 0;
+  D.broke = D.copy ? { x: D.copy.x, y: D.copy.y, t: 0 } : null;
+  D.shots.length = 0; D.gshots.length = 0;
+  ebullets.length = 0;
+  o.stage = 'out'; o.st = 0; o.outK = 0;
+  oprFx('copyBreak', { x: D.broke ? D.broke.x : o.hx, y: D.broke ? D.broke.y : o.hy });
+  opoSay(OPR_SAY.fall, 'out', 2.6);
+  shake(2.8);
+  Audio_.boom(); Audio_.levelup();
+}
+function oprOutTick(o, dt) {
+  o.outK = clamp(o.st / OPR.outSecs, 0, 1);
+  if (o.st >= 2.6 && !o.saidGo) { o.saidGo = true; opoSay(OPR_SAY.go, 'out', 2.4); }
+  if (o.st >= OPR.outSecs + 1.2) {
+    o.done = true; o.fallT = 0;
+    if (o.e) o.e.dead = true;
+    bossAlive = false;
+  }
+}
+
+/* Won. The card, then the menu (rsCardTick). */
+function oprWin() {
+  const o = orite;
+  o.won = true;
+  enemies.length = 0; ebullets.length = 0; bullets.length = 0; hazards.length = 0;
+  betweenWaves = 999;                          // nothing spawns under the card
+  try { Codex.seeEnemy('onepointoh'); } catch (e) {}
+  P.hp = P.maxHp;
+  if (!P.awake) { grantAwakening(P.charId); P.awake = 1; }
+  const c = CHARS.find(z => z.id === P.charId);
+  rsCardOn(c ? c.n : 'VOIDRUNNER', 'IMAGO', 'it was finished. it kept going.');
+  Audio_.levelup();
+}
+
+/* -------------------------------- drawing ---------------------------------
+   Where the rite's pieces are drawn from. His set, his sweeps, panes and
+   brush are the route's hooks (OA); everything of the hull's and the duel's is
+   the rite's (OR, OPR_ART). */
+function oprHimState(o) {
+  const k = clamp(o.seqT / OPR_SEQ_MIN, 0, 1);
+  return { x: o.hx, y: o.hy, r: o.e ? o.e.r : 40, ang: o.ang, ph: Math.max(0, o.seq),
+           stage: o.stage === 'open' ? 'open' : o.stage === 'out' ? 'out' : 'fight', st: o.st,
+           flash: o.e ? o.e.flash || 0 : 0, painting: !!o.patch, hollow: false, out: o.outK, t: o.t,
+           rite: true, riteK: k };
+}
+// on the floor: his bands, his brush's patch, the lattice's light
+function drawOprFloor() {
+  if (!oprOn()) return;
+  const o = orite;
+  for (const s of o.sweeps) OA('sweep', ctx, { vert: s.vert, dir: s.dir, lane: s.lane, lanes: s.lanes,
+    tell: s.t < s.tell ? s.t / s.tell : 1, pos: s.pos, box: o.box, cols: OPO.cols, rows: OPO.rows });
+  if (o.trail.length) OR('trail', ctx, { pts: o.trail, t: o.t, keep: OPR.trail.keep });
+}
+// in the room, over the bodies: his panes and brush, him, the copy, the duel's fire
+function drawOprWorld() {
+  if (!oprOn()) return;
+  const o = orite, D = o.duel, tex = OpoLock.tex();
+  OA_ST.front = null;                       // the panes' marks, sized without the route's floor
+  for (const p of o.panes) OA('pane', ctx, { x: p.x, y: p.y, r: p.r, ang: p.ang, t: p.t, T: p.T, hp: p.hp, hp0: OPR.pane.hp,
+    landed: p.landed, tx: p.tx, ty: p.ty }, tex);
+  if (o.patch) OA('paint', ctx, { x0: o.hx, y0: o.hy, x1: o.patch.x, y1: o.patch.y, k: o.patch.k });
+  if (o.patch) OR('patch', ctx, { x: o.patch.x, y: o.patch.y, r: OPR.paint.r, k: o.patch.k });
+  OA('him', ctx, oprHimState(o), tex);       // and after out, he is left holding it, dark
+  if (o.kept.length || D) OR('kept', ctx, { x: o.hx, y: o.hy, r: o.e ? o.e.r : 40, kept: o.kept.slice(), hits: o.keepHits, of: OPR.keepHits,
+    all: !!(D && D.ph === 'take'), t: o.t });
+  for (const c of o.cards) {
+    const u = UPGRADES.find(z => z.id === c.id);
+    OA('card', ctx, { id: c.id, n: u ? upName(u) : c.id, col: u ? RARITY[u.rar] : OPO_COL,
+      x0: c.x, y0: c.y, x1: o.hx, y1: o.hy, k: clamp(c.t / c.T, 0, 1) });
+  }
+  for (const p of o.peels) OR('peel', ctx, { k: p.k, n: OPR_PIECES[p.k].n, x0: p.x0, y0: p.y0, x1: o.hx, y1: o.hy, f: clamp(p.t / p.T, 0, 1), kept: p.kept });
+  if (!D) return;
+  if (D.copy) OR('copy', ctx, { x: D.copy.x, y: D.copy.y, ang: D.copy.ang, r: OPR_DUEL.copyR, k: D.copy.k, hurt: D.copy.hurt,
+    ph: D.ph, hp: clamp(D.copyHp / OPR_DUEL.copyHp, 0, 1), mark: D.ph === 'mark' && !D.marked ? clamp(1 - D.markT / OPR_DUEL.tell, 0, 1) : 0, t: D.t });
+  for (const s of D.shots) OR('copyShot', ctx, { x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, mark: s.mark, paired: !!s.pair });
+  for (const s of D.gshots) OR('growShot', ctx, { x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, id: OPR_GROWTHS[s.g].id, kind: OPR_GROWTHS[s.g].kind });
+  for (const b of D.gbeams) OR('growBeam', ctx, { x0: b.x0, y0: b.y0, ang: b.ang, len: b.len, w: b.w, k: clamp(b.t / b.T, 0, 1), id: OPR_GROWTHS[b.g].id });
+  if (D.broke) OR('copyBreak', ctx, { x: D.broke.x, y: D.broke.y, t: D.broke.t });
+}
+// the hull: drawPlayer hands it over while the rite owns it
+function drawOprHull() {
+  const o = orite, D = o.duel;
+  const phasing = P.ghost > 0 && P.dashT > 0;
+  OR('hull', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, id: P.charId,
+    have: o.have.slice(), due: o.due, whole: oprWhole(o), guard: oprHas(o, 'plating') ? 1 - o.guardT / OPR.guardCd : 0,
+    molt: o.molt ? { k: o.molt.k, f: clamp(o.molt.t / o.molt.T, 0, 1) } : null,
+    grey: o.patch && len(P.x - o.patch.x, P.y - o.patch.y) < OPR.paint.r ? o.patch.k : 0,
+    awake: !!(D && D.awake), wakeAge: D && D.awake ? D.t - D.wakeAt : -1,
+    hurt: P.hurtFlash > 0, phasing, t: o.t });
+  if (D && D.grow.length) OR('growths', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, t: D.t,
+    list: D.grow.map(g => ({ i: g.i, id: g.id, side: g.side, k: clamp((D.t - g.at) / 0.6, 0, 1),
+      kick: clamp(1 - g.fireT / OPR_GROWTHS[g.i].every, 0, 1), kind: OPR_GROWTHS[g.i].kind })) });
+}
+// over the frame: his bar as the hull's record, the meter, the duel's prompts
+function drawOprScreen() {
+  if (!oprOn()) return;
+  const o = orite, D = o.duel;
+  OR('record', ctx, W, H, { frac: oprFrac(), seq: o.seq, seqs: OPR_SEQ.map(s => ({ n: s.n, until: s.until })),
+    pieces: OPR_PIECES.map((p, k) => ({ n: p.n, have: !!o.have[k], due: k < o.due })), awake: !!(D && D.awake), stage: o.stage });
+  if (!o.done && !o.won) OR('meter', ctx, W, H, { graze: o.graze / OPR_GRAZE, have: o.have.slice(), due: o.due,
+    lost: o.lost.map(l => ({ k: l.k, f: clamp(1 - l.t / OPR_REGROW, 0, 1) })), kept: o.kept.slice(), whole: oprWhole(o), duel: !!D });
+  OR('screen', ctx, W, H, { stage: o.stage, st: o.st, seq: o.seq, seam: o.seam, ph: D ? D.ph : null, n: D ? D.n : 0, of: OPR_DUEL.wake,
+    tries: D ? D.tries : 0, mark: !!(D && D.marked), wakeAge: D && D.awake ? D.t - D.wakeAt : -1, grown: D ? D.grow.length : 0, out: o.outK });
+}
+/* ============================ end of VOIDRUNNER'S RITE ============================ */
+
+/* ===================== VOIDRUNNER'S RITE — art hooks ======================
+   Every visual piece of the rite that is the hull's or the duel's. Each is a
+   PLACEHOLDER, plain lines and labels, for the art to replace whole: nothing
+   in the run reads them, and they keep any state of their own in OPR_ST
+   (this machine's, never the run's). OR(name, ...) calls each inside
+   ctx.save() / restore(); a hook that throws loses only its own piece, once,
+   to the console (OR_FAILED). ?hooks=1 tags each one where it draws.
+
+   The rite's cosmetic events come through OPO_KIT.feed(who), as the route's
+   do, named 'opr.<kind>':
+     open      the rite opens               { x, y }
+     take      the build taken at the open  { x, y, n }
+     molt      a piece back at a seam       { k, x, y }
+     grow      a piece grown back           { k, how: 'graze' | 'time' | 'set' }
+     peel      a revert takes a piece       { k, kept, how, x, y }
+     guard     the plating takes a revert   { x, y, how }
+     graze     a near miss                  { x, y, src, pays }
+     through   a base round through him     { x, y }
+     setHit    a round on his set (HE KEEPS IT) { x, y }
+     cut       the lattice breaks a pane    { x, y, what }
+     brush     the brush planted            { x, y }
+     painted   the brush done               { x, y }
+     takeAll   ONE SHIP: every piece back into his set
+     copyOut   the copy out of the tube     { x, y }
+     meet      two rounds meet              { x, y, n }
+     markTell  the marked one, told         { x, y }
+     mark      the marked one fired         { x, y }
+     markMiss  it missed: again             { tries }
+     wake      THE AWAKENING                { x, y }
+     sprout    a growth out of its back     { i, id, side, x, y }
+     copyHit   a hit on the copy, awake     { x, y, dmg }
+     copyBreak the copy breaks into his set { x, y }
+
+   WHAT THEY ARE HANDED (world space unless it says screen; hull space is the
+   hull's own: nose at +x, as hullPath draws it):
+     hull(g, h)        the hull at its stage. h: x, y, ang, r, id (hullPath's),
+                       have[4] (plating, barrel, lattice, core), due (pieces
+                       come back so far), whole (0-1: the share back; 0 is his
+                       memory of it, drawn flat), guard (0-1, the plating
+                       ready), molt { k, f } at a seam, grey (0-1, the brush
+                       over it), awake, wakeAge (s), hurt, phasing, t
+     growths(g, s)     awake: what has grown out of its back. s: x, y, ang, r,
+                       t, list [{ i, id, side (-1/0/1), k (0-1, growing in),
+                       kick (0-1, since it fired), kind }]
+     trail(g, s)       the lattice's light, left behind: s.pts [{ x, y, t }], t, keep
+     patch(g, p)       under his brush: p.x, y, r, k (0-1, the paint)
+     kept(g, s)        pieces in his set (HE KEEPS IT), and all four at ONE
+                       SHIP: s.x, y, r, kept [k], hits, of, all, t
+     peel(g, p)        a piece taken: p.k, n, x0, y0 (the hull), x1, y1 (his
+                       set), f (0-1), kept (to his set, or falling)
+     copy(g, c)        his memory of the ship: c.x, y, ang, r, k (0-1, out of
+                       the tube), hurt, ph, hp (0-1, awake), mark (0-1, the
+                       marked one told), t
+     copyShot(g, s)    its rounds: s.x, y, vx, vy, r, mark, paired
+     growShot(g, s)    a growth's round: s.x, y, vx, vy, r, id, kind
+     growBeam(g, b)    a growth's beam: b.x0, y0, ang, len, w, k (0-1), id
+     copyBreak(g, s)   the copy breaking back into his set: s.x, y, t
+     record(g, w, h, r)  screen. his bar as the hull's record: r.frac, seq,
+                       seqs [{ n, until }], pieces [{ n, have, due }], awake, stage
+     meter(g, w, h, m) screen. GRAZE and the pieces: m.graze (0-1), have,
+                       due, lost [{ k, f }], kept, whole, duel
+     screen(g, w, h, s) screen. the rite's own pass: s.stage, st, seq, seam,
+                       ph (the duel's), n, of (rounds met), tries, mark,
+                       wakeAge, grown, out
+   ========================================================================= */
+const OR_TAGGED = new Set();
+const OR_FAILED = new Set();
+const OPR_ST = {};                           // the art's own state: this machine's
+let orFrame = -1;
+function OR(name, ...a) {
+  const f = OPR_ART[name];
+  if (!f) return;
+  const g = a[0] && typeof a[0].save === 'function' ? a[0] : null;
+  if (orFrame !== uiTime) { orFrame = uiTime; OR_TAGGED.clear(); }
+  if (g) g.save();
+  try { f(...a); }
+  catch (e) { if (!OR_FAILED.has(name)) { OR_FAILED.add(name); console.warn('VOIDRUNNER\'s rite art: ' + name + ' threw', e); } }
+  if (g) g.restore();
+}
+function orTag(g, name, x, y) {
+  if (!OPO_HOOK_LABELS || OR_TAGGED.has(name)) return;
+  OR_TAGGED.add(name);
+  g.save();
+  g.font = "600 8px 'Courier New', Consolas, monospace";
+  g.textAlign = 'left'; g.textBaseline = 'top';
+  const w = g.measureText(name).width + 6;
+  g.fillStyle = 'rgba(103,232,249,0.9)'; g.fillRect(x, y, w, 11);
+  g.fillStyle = '#05060a'; g.fillText('opr.' + name, x + 3, y + 1.5);
+  g.restore();
+}
+const OPR_PIECE_COL = ['#94a3b8', '#e2e8f0', '#38bdf8', '#a78bfa'];   // placeholder: one colour a piece
+
+const OPR_ART = {
+  hull(g, h) {
+    const F = OPO_FIRST, lit = h.awake ? 1 : h.whole;
+    g.save();
+    g.translate(h.x, h.y); g.rotate(h.ang);
+    if (lit > 0.01) {                         // what came back is lit
+      g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = 0.25 * lit; g.lineWidth = 7; g.strokeStyle = F.player;
+      hullPath(h.id); g.stroke();
+      g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    }
+    hullPath(h.id);
+    g.fillStyle = h.hurt ? 'rgba(239,68,68,0.5)' : h.phasing ? 'rgba(167,139,250,0.12)' : F.bg;
+    g.fill();
+    g.lineWidth = 2; g.strokeStyle = h.grey > 0 ? oaMix(F.player, '#475569', h.grey) : F.player; g.stroke();
+    // the pieces it has back, one mark each
+    g.lineCap = 'round';
+    if (h.have[0]) { g.strokeStyle = OPR_PIECE_COL[0]; g.lineWidth = 3.5;   // plating: along the wings
+      g.beginPath(); g.moveTo(5.5, 8.5); g.lineTo(-5, 13); g.moveTo(5.5, -8.5); g.lineTo(-5, -13); g.stroke(); }
+    if (h.have[1]) { g.strokeStyle = OPR_PIECE_COL[1]; g.lineWidth = 3;     // a second barrel
+      g.beginPath(); g.moveTo(-6, 5); g.lineTo(-15, 5); g.moveTo(-6, -5); g.lineTo(-15, -5); g.stroke(); }
+    if (h.have[2]) { g.strokeStyle = OPR_PIECE_COL[2]; g.lineWidth = 1;     // the lattice
+      g.beginPath(); g.moveTo(3, 0); g.lineTo(-5, 12); g.moveTo(3, 0); g.lineTo(-5, -12); g.moveTo(0, 5); g.lineTo(-7, 5); g.moveTo(0, -5); g.lineTo(-7, -5); g.stroke(); }
+    if (h.have[3]) { g.fillStyle = '#05060a'; g.beginPath(); g.arc(3, 0, 3.4, 0, TAU); g.fill();   // the core
+      g.strokeStyle = OPR_PIECE_COL[3]; g.lineWidth = 1.2; g.stroke(); }
+    if (h.molt) { g.globalAlpha = 1 - h.molt.f; g.strokeStyle = '#ffffff'; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(20, 0); g.lineTo(-12, 0); g.stroke(); g.globalAlpha = 1; }
+    if (h.awake) { g.globalAlpha = 0.5 + 0.3 * Math.sin(h.t * 6); g.strokeStyle = '#fde68a'; g.lineWidth = 1;
+      g.beginPath(); g.arc(0, 0, h.r + 7, 0, TAU); g.stroke(); g.globalAlpha = 1; }
+    g.restore();
+    orTag(g, 'hull', h.x + 18, h.y - 24);
+  },
+  growths(g, s) {
+    g.save();
+    g.translate(s.x, s.y); g.rotate(s.ang);
+    g.lineCap = 'butt';
+    for (const q of s.list) {
+      const k = q.k, y = q.side * 10, back = 2 - q.kick * 3;
+      g.globalAlpha = 0.4 + 0.6 * k; g.strokeStyle = '#fde68a'; g.fillStyle = 'rgba(253,230,138,0.15)';
+      if (q.id === 'barrels') { g.lineWidth = 4; g.beginPath(); g.moveTo(-8 + back, -4); g.lineTo(-8 + back + 30 * k, -4); g.moveTo(-8 + back, 4); g.lineTo(-8 + back + 30 * k, 4); g.stroke(); }
+      else if (q.id === 'rifle') { g.lineWidth = 2; g.beginPath(); g.moveTo(-10 + back, y * 1.4); g.lineTo(-10 + back + 40 * k, y * 1.4); g.stroke(); }
+      else if (q.id === 'cannon') { g.lineWidth = 9; g.beginPath(); g.moveTo(-14 + back, 0); g.lineTo(-14 + back + 44 * k, 0); g.stroke(); }
+      else if (q.id === 'gatling') { g.lineWidth = 5; g.beginPath(); g.moveTo(-4, y * 1.8); g.lineTo(-4 + 18 * k, y * 1.8); g.stroke(); }
+      else if (q.id === 'rail') { g.lineWidth = 1.5; g.beginPath(); g.moveTo(-18, 0); g.lineTo(-18 + 64 * k, 0); g.stroke(); }
+      else if (q.id === 'pods') { g.lineWidth = 1.5; g.strokeRect(-12, y * 1.6 - 4, 10 * k, 8); }
+      else if (q.id === 'crown') { g.lineWidth = 2; for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + s.t * 0.5; g.beginPath(); g.moveTo(Math.cos(a) * 18, Math.sin(a) * 18); g.lineTo(Math.cos(a) * (18 + 8 * k), Math.sin(a) * (18 + 8 * k)); g.stroke(); } }
+    }
+    g.globalAlpha = 1;
+    g.restore();
+    orTag(g, 'growths', s.x + 18, s.y + 14);
+  },
+  trail(g, s) {
+    if (s.pts.length < 2) return;
+    g.globalCompositeOperation = 'lighter';
+    for (let i = 1; i < s.pts.length; i++) {
+      const a = s.pts[i - 1], b = s.pts[i];
+      g.globalAlpha = 0.6 * clamp(1 - (s.t - b.t) / s.keep, 0, 1);
+      g.strokeStyle = OPR_PIECE_COL[2]; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    }
+    orTag(g, 'trail', s.pts[0].x, s.pts[0].y);
+  },
+  patch(g, p) {
+    g.setLineDash([5, 6]); g.globalAlpha = 0.5 + 0.4 * p.k; g.strokeStyle = '#e2e8f0'; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(p.x, p.y, p.r, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.globalAlpha = 0.9; g.beginPath(); g.arc(p.x, p.y, p.r, -Math.PI / 2, -Math.PI / 2 + TAU * p.k); g.lineWidth = 3; g.stroke();
+    orTag(g, 'patch', p.x + p.r, p.y);
+  },
+  kept(g, s) {
+    const n = s.all ? 4 : s.kept.length;
+    for (let i = 0; i < n; i++) {
+      const k = s.all ? i : s.kept[i], x = s.x - (n - 1) * 9 + i * 18, y = s.y - s.r * 1.4;
+      g.fillStyle = OPR_PIECE_COL[k]; g.fillRect(x - 6, y - 6, 12, 12);
+    }
+    if (s.kept.length) oaText(g, s.hits + ' / ' + s.of, s.x, s.y - s.r * 1.4 - 16, 10, '#94a3b8', 0.9);
+    orTag(g, 'kept', s.x + s.r, s.y - s.r * 1.6);
+  },
+  peel(g, p) {
+    const f = p.f, x = p.kept ? lerp(p.x0, p.x1, f) : p.x0, y = p.kept ? lerp(p.y0, p.y1, f) - Math.sin(f * Math.PI) * 50 : p.y0 + f * 30;
+    g.globalAlpha = p.kept ? 1 : 1 - f; g.fillStyle = OPR_PIECE_COL[p.k]; g.fillRect(x - 5, y - 5, 10, 10);
+    oaText(g, '− ' + p.n, x, y - 14, 9, OA_DEL, (p.kept ? 1 : 1 - f));
+    orTag(g, 'peel', x + 8, y);
+  },
+  copy(g, c) {
+    const F = OPO_FIRST;
+    g.globalAlpha = 0.3 + 0.7 * c.k;
+    g.save();
+    g.translate(c.x, c.y); g.rotate(c.ang);
+    g.scale(1.3, 1.3);
+    hullPath('runner');
+    g.fillStyle = c.hurt > 0 ? '#fecaca' : F.bg; g.fill();
+    g.strokeStyle = OPO_COL; g.lineWidth = 2; g.stroke();
+    g.restore();
+    if (c.mark > 0) { g.globalAlpha = c.mark; g.strokeStyle = '#ffffff'; g.lineWidth = 3;
+      g.beginPath(); g.arc(c.x, c.y, c.r + 40 * (1 - c.mark), 0, TAU); g.stroke(); }
+    if (c.ph === 'awake') { g.globalAlpha = 1; g.fillStyle = 'rgba(8,12,20,0.75)'; g.fillRect(c.x - 30, c.y - c.r - 14, 60, 5);
+      g.fillStyle = OPO_COL; g.fillRect(c.x - 30, c.y - c.r - 14, 60 * c.hp, 5); }
+    g.globalAlpha = 1;
+    orTag(g, 'copy', c.x + c.r + 4, c.y);
+  },
+  copyShot(g, s) {
+    g.fillStyle = s.mark ? '#ffffff' : OPO_COL;
+    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+    if (s.mark) { g.setLineDash([4, 4]); g.strokeStyle = OA_DEL; g.lineWidth = 2; g.beginPath(); g.arc(s.x, s.y, s.r + 10, 0, TAU); g.stroke(); g.setLineDash([]);
+      oaText(g, 'PUT IT BACK', s.x, s.y - s.r - 14, 9, '#ffffff', 0.9); orTag(g, 'copyShot', s.x + s.r + 12, s.y); }
+  },
+  growShot(g, s) {
+    g.fillStyle = s.kind === 'missile' ? '#fb923c' : '#fde68a';
+    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+  },
+  growBeam(g, b) {
+    g.globalCompositeOperation = 'lighter'; g.globalAlpha = 1 - b.k;
+    g.strokeStyle = b.id === 'rail' ? '#e0f2fe' : '#67e8f9'; g.lineWidth = b.w;
+    g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x0 + Math.cos(b.ang) * b.len, b.y0 + Math.sin(b.ang) * b.len); g.stroke();
+    orTag(g, 'growBeam', b.x0, b.y0);
+  },
+  copyBreak(g, s) {
+    const k = clamp(s.t / 1.2, 0, 1);
+    g.globalAlpha = 1 - k; g.strokeStyle = OPO_COL; g.lineWidth = 2;
+    for (let i = 0; i < 8; i++) { const a = i * TAU / 8, r = 10 + 90 * k; g.strokeRect(s.x + Math.cos(a) * r - 4, s.y + Math.sin(a) * r - 4, 8, 8); }
+    orTag(g, 'copyBreak', s.x, s.y);
+  },
+  record(g, w, h, r) {
+    const bw = Math.min(560, w * 0.62), x = (w - bw) / 2, y = 22;
+    g.fillStyle = 'rgba(8,12,20,0.75)'; g.fillRect(x, y, bw, 12);
+    g.fillStyle = OPO_COL; g.fillRect(x + 2, y + 2, (bw - 4) * r.frac, 8);
+    for (const s of r.seqs) { const lx = x + bw * s.until; g.fillStyle = '#05060a'; g.fillRect(lx - 1, y, 2, 12); }
+    oaText(g, 'ONE POINT OH' + (r.seq >= 0 && r.seqs[r.seq] ? '   ·   ' + r.seqs[r.seq].n : ''), w / 2, y + 26, 12, OPO_COL, 1);
+    r.pieces.forEach((p, k) => oaText(g, p.due ? (p.have ? '+ ' : '− ') + p.n : '· · ·', x + bw * (k + 0.5) / 4, y + 44, 9,
+      p.due ? (p.have ? OA_ADD : OA_DEL) : '#475569', 0.9));
+    orTag(g, 'record', x, y + 54);
+  },
+  meter(g, w, h, m) {
+    const bw = 180, x = (w - bw) / 2, y = h - 64;
+    g.fillStyle = 'rgba(8,12,20,0.7)'; g.fillRect(x, y, bw, 8);
+    g.fillStyle = '#67e8f9'; g.fillRect(x + 1, y + 1, (bw - 2) * m.graze, 6);
+    oaText(g, 'GRAZE', x - 26, y + 4, 9, '#67e8f9', 0.9);
+    for (let k = 0; k < 4; k++) {
+      const bx = x + k * 46 + 6, by = y + 14, due = k < m.due, kept = m.kept.includes(k), lost = m.lost.find(l => l.k === k);
+      g.strokeStyle = due ? OPR_PIECE_COL[k] : '#334155'; g.lineWidth = 1.5; g.strokeRect(bx, by, 36, 10);
+      if (due && m.have[k]) { g.fillStyle = OPR_PIECE_COL[k]; g.fillRect(bx + 1, by + 1, 34, 8); }
+      else if (lost) { g.fillStyle = 'rgba(148,163,184,0.5)'; g.fillRect(bx + 1, by + 1, 34 * lost.f, 8); }
+      else if (kept) oaText(g, 'HIS', bx + 18, by + 5, 8, OA_DEL, 0.9);
+    }
+    orTag(g, 'meter', x, y - 14);
+  },
+  screen(g, w, h, s) {
+    if (s.ph === 'mark' || s.mark) oaText(g, 'GRAZE IT', w / 2, h * 0.62, 14, '#ffffff', 0.6 + 0.4 * Math.sin(uiTime * 8));
+    if (s.ph === 'even') oaText(g, s.n + ' / ' + s.of, w / 2, h * 0.62, 11, '#94a3b8', 0.7);
+    orTag(g, 'screen', 8, 22);
+  }
+};
+/* ===================== end of VOIDRUNNER'S RITE art hooks ===================== */
 
 /* ========================= ONE POINT OH — art hooks =========================
    Every visual piece of the route, and its sounds, by name, drawn (11 Oct):
@@ -43476,10 +44728,12 @@ function oaAnger(hm) {
     if (e.kind === 'open' || e.kind === 'lock') { OA_ST.rage = 0.15; OA_ST.spike = 0; }
   }
   let want;
-  if (hm.stage === 'open') want = 0.2;
+  // VOIDRUNNER'S RITE: the other way round, from fury down to fond (OPR_RAGE), by its own sequence clock
+  const R = hm.rite ? OPR_RAGE : OA_RAGE, f = hm.rite ? oaC01(hm.riteK) : oaC01(OA_ST.recFrac);
+  if (hm.stage === 'open') want = hm.rite ? 0.6 : 0.2;
   else if (hm.stage === 'cascade') want = 1;
   else if (hm.stage === 'out') want = 0;
-  else { const p = clamp(hm.ph | 0, 0, 4), a = OA_RAGE[p], b = OA_RAGE[Math.min(4, p + 1)]; want = a + (b - a) * 0.75 * oaC01(OA_ST.recFrac); }
+  else { const p = clamp(hm.ph | 0, 0, 4), a = R[p], b = R[Math.min(4, p + 1)]; want = a + (b - a) * 0.75 * f; }
   const dt = clamp(uiTime - OA_ST.angerT, 0, 0.1); OA_ST.angerT = uiTime;
   OA_ST.rage += (want - OA_ST.rage) * (1 - Math.exp(-dt * (hm.stage === 'out' ? 0.8 : 1.6)));
   OA_ST.spike *= Math.exp(-dt * 2.6);
@@ -46136,8 +47390,10 @@ function opoFx(kind, data) { OPO_KIT.emit(kind, data); }
 
      EMBER    \u2192 THE AMALGAM    burnout answering burnout
      THE HACKER \u2192 ROOT         two cheaters, and the better one wins
-     VOIDRUNNER \u2192 ONE POINT OH the base ship, against the boss that
-                                insists the base ship was perfect
+     VOIDRUNNER \u2192 ONE POINT OH the ship, against the only one who never
+                                left it: he stayed through the shutdown,
+                                and remembered it back into its base form
+                                (user, 16 Oct 2026)
      THE VAGRANT \u2192 THE FOUNDER the one with nowhere, against the one who built
                                 somewhere for everyone: he offers a seat, and a
                                 vagrant does not sit (user, 29 Sep 2026)
@@ -46160,7 +47416,15 @@ const RITES = {
     seqs()     { return RR_SEQ.map(s => s.id); },
     jump(i)    { rrJump(i); }
   },
-  runner: { boss: 'onepointoh', n: 'ONE POINT OH' },
+  /* VOIDRUNNER's is ONE POINT OH, the one who stayed: the room holds still and
+     the hull grows back under him, a piece at a time, until it wakes in the
+     duel against his memory of it. See VOIDRUNNER'S RITE. */
+  runner: {
+    boss: 'onepointoh', n: 'ONE POINT OH',
+    start()    { oprOpen(); },
+    seqs()     { return OPR_SEQ.map(s => s.id); },
+    jump(i)    { oprJump(i); }
+  },
   /* THE VAGRANT's is THE FOUNDER, standing, with the halberd: only a counter
      hurts him, and the last sequence is the duel. See THE VAGRANT'S RITE. */
   melee: {
@@ -50464,6 +51728,14 @@ function updateBullets(dt) {
         }
       }
 
+      // VOIDRUNNER'S RITE: a round is worth what the hull has back, whatever the build;
+      // the base round passes through him unspent (oprStruck)
+      if (e.oprRite) {
+        if (oprStruck(e, b)) { removed = true; break; }
+        (b.hits || (b.hits = new Set())).add(e.id);
+        continue;
+      }
+
       // range-dependent modifiers resolve here, using distance actually flown
       let dmg = b.dmg;
       if (P.longshot)   dmg *= 1 + P.longshot * 0.14 * clamp(b.dist / 620, 0, 1);
@@ -50807,6 +52079,7 @@ function render() {
   drawArena();
   hlDrawFloor();              // ALL HALLOWS: an area's floor
   drawOpoFloor();             // ONE POINT OH: the front, the two renderers' floor
+  drawOprFloor();             // VOIDRUNNER'S RITE: his bands, the lattice's light
   pilotsDraw(() => outsideDraw('back'));   // an outside pilot's: what it makes of the room itself (OUTSIDE PILOTS)
   drawHazards();
   drawDeepNodes();
@@ -50864,6 +52137,7 @@ function render() {
   drawCorpses();
   drawEnemies();
   drawOpoWorld();             // ONE POINT OH: the old door, his panes and paint, him
+  drawOprWorld();             // VOIDRUNNER'S RITE: his panes and brush, him, his copy, the duel's fire
   drawOpoFx();                // and the art's own, every frame of the route (OPO_ART.worldFx)
   pilotsDraw(() => {
     drawRoninWounds();         // RONIN's DEEP WOUND, on the bodies that carry it
@@ -50992,6 +52266,7 @@ function render() {
   drawRootCmdHud();
   drawHaltBar();
   drawTribunalHud();
+  drawOprScreen();      // VOIDRUNNER'S RITE: his bar as the hull's record, GRAZE, the duel's prompts
   drawOpoScreen();      // ONE POINT OH: his voice, the revert, the shatter, the record, the cascade
   drawVrScreen();       // THE VAGRANT'S RITE: the entrance, the duel's letterbox and prompts
   { const rq = roninPhase(); if (rq) drawRoninIntroScreen(rq); }   // RONIN's lead-in, over the frame
@@ -60647,7 +61922,7 @@ function drawEnemiesBody() {
        shape his BOSSES entry carries, so a stray triangle followed him around
        his own boss fight. */
     if (e.founder) continue;
-    if (e.opo) continue;                 // ONE POINT OH is drawn by his own hook (OPO_ART.him)
+    if (e.opo || e.oprRite) continue;    // ONE POINT OH is drawn by his own hook (OPO_ART.him), in his rite too
 
     // glow
     ctx.globalCompositeOperation = 'lighter';
@@ -61813,6 +63088,8 @@ function drawPlayer() {
   }
 
   if (blink) return;
+  // VOIDRUNNER'S RITE: the hull at its stage is the rite's, and no awarded skin is drawn over it
+  if (oprOwnsHull()) { drawOprHull(); return; }
   // FUSION CORE: a full reskin — the star is the hull, and no awarded skin is drawn over it
   if (odFusionOn()) { drawOdFusionHull(); return; }
   // RONIN: a full reskin once the transformation owns the hull (VRA v2)
@@ -64050,7 +65327,7 @@ function drawHUD() {
      enemies, so the finder below would label the whole fight after whichever
      piece happens to sit first in the array — and show that piece's health
      instead of the pool. */
-  const boss = amalgam || opo ? null       // ONE POINT OH's bar is the record (OPO_ART.record)
+  const boss = amalgam || opo || oprOn() ? null   // ONE POINT OH's bar is the record (OPO_ART.record; in his rite, OPR_ART.record)
     : enemies.find(e => e.type === 'boss' && !e.dead && !e.shadow && !e.hacked);
   { const bw2 = Math.min(560, W * 0.62); HUD_AT.boss = { x: (W - bw2) / 2, y: 22, w: bw2, h: 36 }; }   // where its bar goes, up or not
   if (amalgam) drawAmalgamBar();
@@ -77141,7 +78418,7 @@ const aboveWarn = () => Math.max(ABOVE.least, ABOVE.warn * Math.pow(ABOVE.shrink
    sheet of another kind, a sandbox, PvP, and every room that is a scene of
    its own (they have their own ways of ending). */
 function aboveQuiet() {
-  return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite
+  return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite || oprRite
       || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
       || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal;
 }
@@ -79609,6 +80886,7 @@ const SNAP_LOCAL = new Set([
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',
   'mpHelloKept',                          // the other player's hello, read again once their outside pilot is here
   'oaFrame', 'opoRecordList',             // ONE POINT OH: the art's frame, and the record, built from the CHANGELOG
+  'orFrame',                              // and his rite's art's frame
   'aaFrame',                              // ACHIEVEMENTS: its art's frame
 ]);
 // objects the run writes into that do not start out empty
@@ -79628,6 +80906,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'ash', 'chunks', 'smoke', 'hlParts', 'osParts',   // and the drawing's own debris
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
   'OA_TAGGED', 'OA_FAILED',               // ONE POINT OH's art: what it tagged, and which hook has thrown
+  'OR_TAGGED', 'OR_FAILED', 'OPR_ST',     // and his rite's: the same, and its own state
   '_aboveSpr',                            // FROM ABOVE: the spear, baked
   'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
@@ -81701,7 +82980,7 @@ function hackable(e) {
   if (state !== 'play') return false;
   if (e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd') return false;
   if (e.type === 'sheet' || e.type === 'lastseen') return false;   // cloth, and nobody: what was under a sheet is (hlSheetTear)
-  if (e.shadow > 0 || e.amalPart || e.virus || e.founder || e.opo) return false;
+  if (e.shadow > 0 || e.amalPart || e.virus || e.founder || e.opo || e.oprRite) return false;
   if (e.boss === 'unwritten' || e.boss === 'amalgam' || e.boss === 'onepointoh') return false;
   if (e.boss === 'root' || e.boss === 'founder' || e.boss === 'shopkeeper' || HL_BOSSES[e.boss]) return false;
   return true;
