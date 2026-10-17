@@ -43011,10 +43011,10 @@ function drawOpoLost() {
                         copy cannot keep up.
 
    Everything is data and rolled from simRand (the determinism suite plays it
-   as 'rite-runner'; npm run test:opo-rite plays it to the card). The art is
-   placeholder: every piece is a hook in OPR_ART ("VOIDRUNNER'S RITE — art
-   hooks", below). His set, his voice, his sweeps, panes and brush are the
-   route's own hooks (OPO_ART), handed the rite's state.
+   as 'rite-runner'; npm run test:opo-rite plays it to the card). Every piece
+   of the hull's and the duel's is drawn by a hook in OPR_ART ("VOIDRUNNER'S
+   RITE — art hooks", below). His set, his voice, his sweeps, panes and brush
+   are the route's own hooks (OPO_ART), handed the rite's state.
 
    FOR THE ADMIN PANEL, from the console: oprJump(0..4)
    ========================================================================= */
@@ -43974,10 +43974,10 @@ function drawOprScreen() {
 /* ============================ end of VOIDRUNNER'S RITE ============================ */
 
 /* ===================== VOIDRUNNER'S RITE — art hooks ======================
-   Every visual piece of the rite that is the hull's or the duel's. Each is a
-   PLACEHOLDER, plain lines and labels, for the art to replace whole: nothing
-   in the run reads them, and they keep any state of their own in OPR_ST
-   (this machine's, never the run's). OR(name, ...) calls each inside
+   Every visual piece of the rite that is the hull's or the duel's, drawn
+   (17 Oct: "THE ART, as drawn", under this header, says how). Nothing in the
+   run reads them, and they keep any state of their own in OPR_ST (this
+   machine's, never the run's), or in the kit's scenes. OR(name, ...) calls each inside
    ctx.save() / restore(); a hook that throws loses only its own piece, once,
    to the console (OR_FAILED). ?hooks=1 tags each one where it draws.
 
@@ -44063,157 +44063,1780 @@ function orTag(g, name, x, y) {
   g.fillStyle = '#05060a'; g.fillText('opr.' + name, x + 3, y + 1.5);
   g.restore();
 }
-const OPR_PIECE_COL = ['#94a3b8', '#e2e8f0', '#38bdf8', '#a78bfa'];   // placeholder: one colour a piece
+/* THE ART, as drawn (17 Oct). The rite keeps the route's two renderers apart
+   the same way (OPO_ART's "THE ART, as drawn"), and the hull is where they
+   meet:
+     · HIS MEMORY of the ship is the first build's: flat fills and 2 px
+       strokes in OPO_FIRST's colours, nothing lit, and it steps where today
+       eases. The base hull is drawn in it, and so is everything he keeps:
+       his copy and its rounds, the pieces in his set, the shell a molt peels
+       off, the paper it falls in. All of that but the base hull is drawn
+       after bloom and the grade (orFlat, from the record's pass, over the
+       room), so nothing of today's touches it.
+     · WHAT CAME BACK is today's: each piece lights its own part of the hull,
+       in its own accent (OPR_PC, a fifth of the hull at most), and catches
+       the kit's one light from up and to the left, turned into hull space so
+       the light stays put in the room as the ship turns (orLightIn). With all
+       four back the hull is lit, and IMAGO glows. The growths are today's
+       too: gunmetal under the same light, each firing in its own colour.
+   The silhouette carries every stage, so it reads with Surface materials
+   off: the plating thickens the wings and caps the nose, the second barrel
+   is a pair at the nose, the lattice is thin lines, the core a dark lens with
+   the edges by the canopy pulled in. The hitbox never changes: IMAGO draws
+   the base outline inside itself, one thin bright line. The diffs are the
+   route's: a red − for what he takes, a green + for what comes back.
+   Every frame's events are read once (orEv) into OPR_ST: today's light in
+   the room is drawn from the hull's pass (orLit), the old renderer's from
+   the record's (orFlat), and the diff's words from the screen's (orLabels). */
+const OPR_PC = [
+  { lit: '#f8fafc', mid: '#94a3b8', deep: '#334155', glow: '#cbd5e1' },   // PLATING: steel, catching today's light
+  { lit: '#fde68a', mid: '#f59e0b', deep: '#78350f', glow: '#fbbf24' },   // A SECOND BARREL: hot at the muzzle
+  { lit: '#ccfbf1', mid: '#2dd4bf', deep: '#134e4a', glow: '#5eead4' },   // THE LATTICE: light, branching
+  { lit: '#ede9fe', mid: '#a78bfa', deep: '#2e1065', glow: '#c4b5fd' }    // THE CORE: a dark lens, rimmed
+];
+const OPR_PIECE_COL = OPR_PC.map(p => p.mid);
+// what each growth is called as it comes, and the light it fires in
+const OPR_GROW_N = { barrels: 'TWIN BARRELS', rifle: 'A LASER RIFLE', cannon: 'A CANNON', gatling: 'A ROTARY GUN',
+  rail: 'A RAIL', pods: 'MISSILE PODS', crown: 'A CROWN OF BARRELS' };
+const OPR_GROW_COL = { barrels: '#fbbf24', rifle: '#67e8f9', cannon: '#fb923c', gatling: '#fde047', rail: '#c4b5fd', pods: '#fb923c', crown: '#a5f3fc' };
+// back to front on the hull: the crown is round everything, the rail lies on top of the spine
+const OPR_GROW_LAYER = { crown: 0, pods: 1, gatling: 2, rifle: 3, barrels: 4, cannon: 5, rail: 6 };
+// gunmetal, darker steel, bright steel: [shadow, body, the edge facing the light]
+const OPR_M_GUN = ['#111c2e', '#526077', '#f1f5f9'];
+const OPR_M_DARK = ['#0a1220', '#2c3a50', '#b6c2d4'];
+const OPR_M_STEEL = ['#1e293b', '#64748b', '#f8fafc'];
 
+/* The hull, in hull space (nose at +x). ORH_BASE is VOIDRUNNER as hullPath
+   draws it, point for point; ORH_IMAGO is the same fourteen points grown up,
+   so one can become the other. The rest are the pieces, the upper half of
+   each (mirrored for the lower): plates along the cranked wing and a cheek
+   on the nose, the lattice's branches out of the canopy, the core's notches
+   pulling the edges in by it. */
+const ORH_BASE = [[18, 0], [9, 3.4], [5.5, 8.5], [-5, 13], [-8.5, 9.5], [-6, 4.2], [-10.5, 3.2], [-6.5, 0],
+  [-10.5, -3.2], [-6, -4.2], [-8.5, -9.5], [-5, -13], [5.5, -8.5], [9, -3.4]];
+const ORH_IMAGO = [[27, 0], [13, 4.6], [8.5, 12], [-8, 22.5], [-14, 16.5], [-9.5, 6.6], [-17, 4.8], [-11, 0],
+  [-17, -4.8], [-9.5, -6.6], [-14, -16.5], [-8, -22.5], [8.5, -12], [13, -4.6]];
+const ORH_PLATES = [   // [edge from, edge to, along from, along to, in, out]
+  [[5.5, 8.5], [-5, 13], 0.0, 0.31, -0.9, 1.6], [[5.5, 8.5], [-5, 13], 0.35, 0.65, -0.9, 1.6], [[5.5, 8.5], [-5, 13], 0.69, 1.06, -0.9, 1.6],
+  [[18, 0], [9, 3.4], 0.22, 0.86, -0.7, 1.2]
+];
+const ORH_LATTICE = [
+  [[3, 0], [1.2, 2.5], [-1.4, 6.2], [-3.4, 9.6], [-4.9, 12.4]],
+  [[-1.4, 6.2], [-4.6, 7.4], [-7.6, 9.1]],
+  [[1.2, 2.5], [-2.6, 3.2], [-6.2, 3.5], [-9.6, 3.1]],
+  [[3, 0], [7.2, 1.3], [12.6, 0.8]],
+  [[-3.4, 9.6], [0.4, 9.2], [3.6, 8.1]]
+];
+const ORH_LNODES = [[1.2, 2.5], [-1.4, 6.2], [-3.4, 9.6], [7.2, 1.3]];
+const ORH_NOTCH = [[8.23, 4.52], [6.6, 5.0], [6.55, 6.97]];
+// IMAGO's veins: the lattice grown out to its new wingtips
+const ORH_VEINS = [
+  [[-1.4, 6.2], [-4.2, 13.4], [-7.4, 21.4]],
+  [[-3.4, 9.6], [-9.6, 15.2], [-13.4, 16.2]],
+  [[1.2, 2.5], [5.6, 8.4], [8, 11.6]],
+  [[-4.2, 13.4], [0.6, 12.6], [5.2, 12.4]],
+  [[-9.6, 15.2], [-10.4, 9.4], [-9.4, 6.8]]
+];
+
+Object.assign(OPR_ST, {
+  fx: [], puffs: [], labels: [], log: [], arrive: [-9, -9, -9, -9], tookAt: -1, wakeAt: -9,
+  evAt: -1, litAt: -1, flatAt: -1, fireT: 0, muzzleAt: -9, kick: [], spin: 0, spinAt: 0,
+  copy: null, copyAt: -1, shots: [], shotsAt: -1, keptS: null, keptAt: -1,
+  molt: null, moltAt: -1, moltKey: '', moltF: 9, thrown: '', brkS: null, brkAt: -1, brk: null,
+  recKick: 0, recT: 0, grazeAt: -9, meetAt: -9, missAt: -9, tries: 0, setKick: 0, setAt: -9, throughAt: -9,
+  flatTex: null, copyCells: null, chipsGone: 0, rim: 0
+});
+
+/* ------------------------------ the drawing kit ------------------------------ */
+// a point list as a path (closed), or added to the one already begun
+function orPath(g, pts) { g.beginPath(); orPathAdd(g, pts); }
+function orPathAdd(g, pts) {
+  for (let i = 0; i < pts.length; i++) i ? g.lineTo(pts[i][0], pts[i][1]) : g.moveTo(pts[i][0], pts[i][1]);
+  g.closePath();
+}
+const orMirror = pts => pts.map(([x, y]) => [x, -y]);
+const orMorph = (a, b, k) => a.map((p, i) => [p[0] + (b[i][0] - p[0]) * k, p[1] + (b[i][1] - p[1]) * k]);
+// the kit's one light (up and to the left of the viewer), as hull space sees it at this heading
+function orLightIn(ang) {
+  const lx = -0.537, ly = -0.844, c = Math.cos(-ang), s = Math.sin(-ang);
+  return { x: lx * c - ly * s, y: lx * s + ly * c };
+}
+const orTurnL = (L, a) => ({ x: L.x * Math.cos(-a) - L.y * Math.sin(-a), y: L.x * Math.sin(-a) + L.y * Math.cos(-a) });
+// a plate along the edge a→b: from `s0` to `s1` of the way along it, `o0` in from it to `o1` out
+function orEdgePlate(a, b, s0, s1, o0, o1) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = dy / l, ny = -dx / l;
+  const sg = (a[1] + b[1]) * ny >= 0 || Math.abs(ny) < 1e-6 ? 1 : -1;   // outward, away from the spine
+  const at = (s, o) => [a[0] + dx * s + nx * sg * o, a[1] + dy * s + ny * sg * o];
+  return [at(s0, o0), at(s0, o1), at(s1, o1), at(s1, o0)];
+}
+// a flat polygon shaded as the room's light finds it: bright on the side toward it
+function orPlate(g, pts, L, M, lw) {
+  let cx = 0, cy = 0, R = 0;
+  for (const p of pts) { cx += p[0] / pts.length; cy += p[1] / pts.length; }
+  for (const p of pts) R = Math.max(R, Math.hypot(p[0] - cx, p[1] - cy));
+  R = Math.max(R, 0.5);
+  orPath(g, pts);
+  const gr = g.createLinearGradient(cx + L.x * R, cy + L.y * R, cx - L.x * R, cy - L.y * R);
+  gr.addColorStop(0, M[2]); gr.addColorStop(0.42, M[1]); gr.addColorStop(1, M[0]);
+  g.fillStyle = gr; g.fill();
+  g.strokeStyle = 'rgba(2,6,12,0.9)'; g.lineWidth = lw || 0.5; g.stroke();
+  if (OPR_ST.rim) orRimLit(g);
+}
+// a growth's outline, lit in IMAGO's own cyan: it is grown, not bolted on
+function orRimLit(g) {
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = 'rgba(103,232,249,' + OPR_ST.rim.toFixed(3) + ')'; g.lineWidth = 0.55; g.stroke();
+  g.restore();
+}
+// a bar along x (a barrel, a rail): its two long edges lit as each faces the light
+function orBar(g, x0, x1, y, hw, L, M) {
+  if (x1 - x0 <= 0.01 || hw <= 0) return;
+  const top = Math.max(0, -L.y), bot = Math.max(0, L.y);
+  const gr = g.createLinearGradient(0, y - hw, 0, y + hw);
+  gr.addColorStop(0, oaMix(M[1], M[2], top)); gr.addColorStop(0.5, M[1]); gr.addColorStop(1, oaMix(M[0], M[2], bot * 0.85));
+  g.fillStyle = gr; g.fillRect(x0, y - hw, x1 - x0, hw * 2);
+  g.strokeStyle = 'rgba(2,6,12,0.9)'; g.lineWidth = Math.min(0.5, hw * 0.4); g.beginPath(); g.rect(x0, y - hw, x1 - x0, hw * 2); g.stroke();
+  if (OPR_ST.rim) orRimLit(g);
+}
+// light off a shape's own edge and outward only (drawPlayer's way): wider strokes, fainter
+function orGlowEdge(g, pts, a, col, steps, wMul) {
+  if (!(a > 0.01)) return;
+  g.save();
+  g.globalCompositeOperation = 'lighter'; g.lineJoin = 'round';
+  for (let i = steps; i >= 1; i--) {
+    g.lineWidth = 2.4 + i * 3.4 * (wMul || 1);
+    g.strokeStyle = rgba(col, Math.min(1, (0.055 * (1 - i / (steps + 1.5)) + 0.012) * a).toFixed(4));
+    orPath(g, pts); g.stroke();
+  }
+  g.restore();
+}
+// each edge of a shape lit as it faces the room's light
+function orRim(g, pts, L, a, col, lw) {
+  if (!(a > 0.01)) return;
+  let cx = 0, cy = 0;
+  for (const p of pts) { cx += p[0] / pts.length; cy += p[1] / pts.length; }
+  g.lineCap = 'round';
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length], dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1;
+    let nx = dy / l, ny = -dx / l;
+    if (nx * ((p[0] + q[0]) / 2 - cx) + ny * ((p[1] + q[1]) / 2 - cy) < 0) { nx = -nx; ny = -ny; }
+    const b = nx * L.x + ny * L.y;
+    if (b <= 0.05) continue;
+    g.globalAlpha = Math.min(1, a * b);
+    g.strokeStyle = col || '#ffffff'; g.lineWidth = lw || 0.9;
+    g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+// the point `d` along a polyline, and its length
+function orAlong(pts, d) {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (d <= l) { const f = d / (l || 1); return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
+    d -= l;
+  }
+  return pts[pts.length - 1];
+}
+function orLen(pts) { let l = 0; for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return l; }
+function orLine(g, pts) { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); }
+// him, as the route's art left him this frame (or where the rite has him)
+function orHim() {
+  if (OA_ST.him && uiTime - OA_ST.himAt < 0.1) return OA_ST.him;
+  return orite ? { x: orite.hx, y: orite.hy, r: orite.e ? orite.e.r : 40, ang: orite.ang, t: orite.t } : null;
+}
+// the tube on his set, as oaDrawHim lays it out (its face, untwisted)
+function orTube(hm) { return { x: hm.x - 0.36 * hm.r, y: hm.y, w: 1.9 * hm.r, h: 1.68 * hm.r }; }
+// hull space to the room
+function orToWorld(x, y, px, py, ang) { const c = Math.cos(ang), s = Math.sin(ang); return [px + c * x - s * y, py + s * x + c * y]; }
+
+/* A piece's mark, wherever it is shown alone (his set, the meter, a piece
+   taken): a plate, a pair of barrels, a branching, a lens. `mode` lit (its
+   own light), flat (1.0's), ghost (a red dashed outline: gone) or dim. */
+function orGlyph(g, k, x, y, s, mode, a) {
+  const F = OPO_FIRST, C = OPR_PC[k], al = a === undefined ? 1 : a;
+  if (al <= 0.01 || s <= 0.2) return;
+  g.save();
+  g.translate(x, y); g.scale(s, s);
+  g.globalAlpha = al; g.lineJoin = 'round'; g.lineCap = 'round';
+  const lit = mode === 'lit', flat = mode === 'flat', ghost = mode === 'ghost';
+  const line = flat ? F.player : ghost ? OA_DEL : mode === 'dim' ? '#334155' : C.lit;
+  const fill = flat ? F.bg : ghost || mode === 'dim' ? 'rgba(0,0,0,0)' : C.deep;
+  g.lineWidth = (flat ? 2 : 1.4) / s;
+  if (ghost) g.setLineDash([2.2 / s * 2, 2 / s * 2]);
+  if (lit) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, 0, 0, 2.2, C.glow, 0.45 * al); g.restore(); }
+  if (k === 0) {
+    orPath(g, [[-0.85, -0.75], [0.35, -0.75], [0.95, 0], [0.35, 0.75], [-0.85, 0.75], [-0.4, 0]]);
+    g.fillStyle = fill; g.fill(); g.strokeStyle = line; g.stroke();
+    if (lit) { g.fillStyle = C.lit; for (const [rx, ry] of [[-0.45, -0.42], [-0.45, 0.42], [0.3, 0]]) { g.beginPath(); g.arc(rx, ry, 0.12, 0, TAU); g.fill(); } }
+  } else if (k === 1) {
+    for (const sd of [-1, 1]) { g.beginPath(); g.rect(-0.55, sd * 0.42 - 0.17, 1.5, 0.34); g.fillStyle = fill; g.fill(); g.strokeStyle = line; g.stroke(); }
+    g.beginPath(); g.rect(-0.95, -0.8, 0.5, 1.6); g.fillStyle = fill; g.fill(); g.strokeStyle = line; g.stroke();
+    if (lit) { g.fillStyle = C.lit; for (const sd of [-1, 1]) { g.beginPath(); g.arc(0.98, sd * 0.42, 0.16, 0, TAU); g.fill(); } }
+  } else if (k === 2) {
+    g.strokeStyle = line;
+    orLine(g, [[-0.8, 0], [0.1, -0.5], [0.9, -0.85]]); g.stroke();
+    orLine(g, [[-0.8, 0], [0.1, 0.5], [0.9, 0.85]]); g.stroke();
+    orLine(g, [[-0.8, 0], [0.95, 0]]); g.stroke();
+    orLine(g, [[0.1, -0.5], [0.55, 0]]); g.stroke();
+    g.fillStyle = lit ? C.lit : line;
+    for (const [nx, ny] of [[-0.8, 0], [0.1, -0.5], [0.1, 0.5]]) { g.beginPath(); g.arc(nx, ny, 0.16, 0, TAU); g.fill(); }
+  } else {
+    g.beginPath(); g.arc(0, 0, 0.85, 0, TAU); g.fillStyle = fill; g.fill(); g.strokeStyle = line; g.stroke();
+    g.beginPath(); g.arc(0, 0, 0.5, 0, TAU); g.fillStyle = flat ? F.grid2 : ghost ? 'rgba(0,0,0,0)' : '#05030a'; g.fill();
+    if (!ghost) { g.strokeStyle = line; g.lineWidth = 0.8 / s; g.stroke(); }
+    if (lit) { g.fillStyle = '#ffffff'; g.beginPath(); g.arc(-0.2, -0.22, 0.12, 0, TAU); g.fill(); }
+  }
+  g.restore();
+}
+
+/* ------------------------------- the hull's parts -------------------------------
+   Each draws in hull space, the transform already set. `q` is how newly it
+   came back (1 just now, 0 long since): it arrives brighter, then settles. */
+function orHullToday(g, a, L, t, mat) {
+  // today's VOIDRUNNER over his memory of it: its light, its plating's tint, its engines
+  if (!(a > 0.01)) return;
+  orGlowEdge(g, ORH_BASE, a, '#67e8f9', 5, 1);
+  g.save();
+  g.globalAlpha = a;
+  orPath(g, ORH_BASE); g.fillStyle = 'rgba(103,232,249,0.16)'; g.fill();
+  if (mat) {
+    g.strokeStyle = 'rgba(9,15,28,0.8)'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(-5, 0); g.lineTo(15, 0); g.moveTo(-1.5, -5.6); g.lineTo(-1.5, 5.6); g.stroke();
+    g.strokeStyle = 'rgba(103,232,249,0.8)'; g.lineWidth = 1.1;
+    g.beginPath();
+    g.moveTo(5.4, 8.2); g.lineTo(-4.6, 11.8); g.moveTo(5.4, -8.2); g.lineTo(-4.6, -11.8);
+    g.moveTo(2.6, 4.2); g.lineTo(-3.6, 9.2); g.moveTo(2.6, -4.2); g.lineTo(-3.6, -9.2);
+    g.stroke();
+    g.fillStyle = 'rgba(9,15,28,0.8)'; g.fillRect(6.4, 2.2, 4.6, 1.5); g.fillRect(6.4, -3.7, 4.6, 1.5);
+  }
+  orPath(g, ORH_BASE); g.lineWidth = 2.4; g.lineJoin = 'miter'; g.strokeStyle = '#67e8f9'; g.stroke();
+  orRim(g, ORH_BASE, L, 0.55 * a, '#e0f2fe', 0.8);
+  g.globalAlpha = a;
+  // the engines, lit again
+  g.globalCompositeOperation = 'lighter';
+  const fl = 0.7 + Math.sin(uiTime * 22) * 0.3;
+  for (const sd of [1, -1]) {
+    oaGlow(g, -9, sd * 3.2, 8 * fl, '#a5f3fc', 0.34 * a);
+    g.fillStyle = rgba('#e0f2fe', (0.6 * a).toFixed(3));
+    g.beginPath(); g.moveTo(-6.5, sd * 4.6); g.lineTo(-17 - 5 * fl, sd * 3); g.lineTo(-6.5, sd * 1.7); g.closePath(); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = a;
+  g.fillStyle = '#e0f2fe'; g.beginPath(); g.ellipse(3, 0, 3.1, 1.9, 0, 0, TAU); g.fill();
+  g.restore();
+}
+// his memory of it: the outline flat, a flat ground in it, one barrel, the canopy a dot
+function orHullFlat(g, o) {
+  const F = OPO_FIRST;
+  o = o || {};
+  orPath(g, ORH_BASE); g.fillStyle = o.fill || '#0a1d28'; g.fill();
+  g.lineCap = 'butt';
+  g.strokeStyle = F.wall; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(-5, 0); g.lineTo(5.5, 0); g.moveTo(-1.5, -5.6); g.lineTo(-1.5, 5.6);
+  g.moveTo(4.8, 7.6); g.lineTo(-4.4, 11.6); g.moveTo(4.8, -7.6); g.lineTo(-4.4, -11.6); g.stroke();
+  // the one barrel it always had, down the spine
+  g.strokeStyle = o.barrel || '#2c4f73'; g.lineWidth = 1.6;
+  g.beginPath(); g.moveTo(6, 0); g.lineTo(15.4, 0); g.stroke();
+  orPath(g, ORH_BASE); g.lineWidth = o.lw || 2; g.lineJoin = 'miter'; g.strokeStyle = o.stroke || F.player; g.stroke();
+  g.fillStyle = o.dot || '#e0f2fe'; g.beginPath(); g.arc(3, 0, 1.9, 0, TAU); g.fill();
+}
+/* PLATING: steel along the cranked wings and a cheek on the nose, each plate
+   lit as it faces the room, its leading edge catching it. Ready to take a
+   revert, a sheen runs along them; spent, they dim until it is. */
+function orPlating(g, L, q, guard, t, mat) {
+  const C = OPR_PC[0], ready = guard >= 0.999;
+  for (const sd of [1, -1]) for (let i = 0; i < ORH_PLATES.length; i++) {
+    const [a, b, s0, s1, o0, o1] = ORH_PLATES[i];
+    let pts = orEdgePlate(a, b, s0, s1, o0, o1);
+    if (sd < 0) pts = orMirror(pts);
+    if (mat) orPlate(g, pts, L, ready ? OPR_M_STEEL : ['#0f172a', '#475569', '#cbd5e1'], 0.5);
+    else { orPath(g, pts); g.fillStyle = '#94a3b8'; g.fill(); }
+    // the outer edge, catching it
+    g.strokeStyle = ready ? C.lit : '#94a3b8'; g.lineWidth = 0.7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(pts[1][0], pts[1][1]); g.lineTo(pts[2][0], pts[2][1]); g.stroke();
+    if (mat) { g.fillStyle = '#0f172a'; const m = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]; g.beginPath(); g.arc(m[0], m[1], 0.32, 0, TAU); g.fill(); }
+  }
+  if (!mat) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (ready) {
+    // a sheen, running out along the wing
+    const k = (t * 0.7) % 1.6;
+    for (const sd of [1, -1]) {
+      const [a, b] = ORH_PLATES[0];
+      const x = a[0] + (b[0] - a[0]) * k, y = (a[1] + (b[1] - a[1]) * k + 1.2) * sd;
+      if (k < 1.06) oaGlow(g, x, y, 4.5, '#f8fafc', 0.55);
+    }
+  } else {
+    // spent: filling back up, a hairline from root to tip
+    for (const sd of [1, -1]) { g.strokeStyle = rgba('#cbd5e1', 0.5); g.lineWidth = 0.6; const [a, b] = ORH_PLATES[0]; g.beginPath(); g.moveTo(a[0], (a[1] + 2.2) * sd); g.lineTo(a[0] + (b[0] - a[0]) * guard, (a[1] + (b[1] - a[1]) * guard + 2.2) * sd); g.stroke(); }
+  }
+  if (q > 0.02) for (const sd of [1, -1]) oaGlow(g, 0, 11 * sd, 14, C.glow, 0.6 * q);
+  g.restore();
+}
+/* A SECOND BARREL: the one barrel is a pair now, either side of the nose,
+   breeches by the canopy, muzzles hot as each round leaves. */
+function orBarrels(g, L, q, heat, mat) {
+  const C = OPR_PC[1];
+  for (const sd of [1, -1]) {
+    const y = 1.75 * sd;
+    if (mat) { orPlate(g, [[6.2, y - 1.2], [9.4, y - 1.2], [9.8, y], [9.4, y + 1.2], [6.2, y + 1.2]], L, OPR_M_DARK, 0.4); orBar(g, 9, 15.4, y, 0.78, L, OPR_M_GUN); }
+    else { g.fillStyle = '#475569'; g.fillRect(6.2, y - 1.1, 9.2, 2.2); }
+    // the muzzle ring: warm metal, white hot as it fires
+    g.fillStyle = heat > 0.05 ? oaMix('#b45309', '#fffbeb', heat) : mat ? '#64748b' : '#94a3b8';
+    g.fillRect(15.0, y - 0.98, 1.0, 1.96);
+  }
+  if (!mat) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const sd of [1, -1]) {
+    const y = 1.75 * sd;
+    if (heat > 0.03) {
+      oaGlow(g, 16.6, y, 3 + heat * 7, C.glow, 0.85 * heat);
+      g.fillStyle = rgba('#fde68a', (0.8 * heat).toFixed(3));
+      g.beginPath(); g.moveTo(16, y - 0.7); g.lineTo(16 + 6 * heat, y); g.lineTo(16, y + 0.7); g.closePath(); g.fill();
+    }
+    // heat left in the steel
+    const gr = g.createLinearGradient(10, 0, 15.4, 0);
+    gr.addColorStop(0, 'rgba(245,158,11,0)'); gr.addColorStop(1, 'rgba(251,191,36,' + (0.08 + 0.4 * heat).toFixed(3) + ')');
+    g.fillStyle = gr; g.fillRect(10, y - 0.78, 5.4, 1.56);
+  }
+  if (q > 0.02) oaGlow(g, 12, 0, 12, C.glow, 0.6 * q);
+  g.restore();
+}
+/* THE LATTICE: light branching out of the canopy to the wingtips and the
+   nozzles, a node at each fork, a scan running out along it. */
+function orLattice(g, t, q, mat, scale) {
+  const C = OPR_PC[2], s = scale || 1;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const sd of [1, -1]) for (const br of ORH_LATTICE) {
+    const pts = sd > 0 ? br : orMirror(br);
+    g.strokeStyle = 'rgba(2,8,12,0.5)'; g.lineWidth = 1.0 * s; orLine(g, pts); g.stroke();
+  }
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (const sd of [1, -1]) for (const br of ORH_LATTICE) {
+    const pts = sd > 0 ? br : orMirror(br);
+    g.strokeStyle = rgba(C.mid, (0.55 + 0.4 * q).toFixed(3)); g.lineWidth = 0.75 * s; orLine(g, pts); g.stroke();
+    if (!mat) continue;
+    // the scan, out along each branch from where it starts
+    const L = orLen(pts), d = ((t * 11 + br[0][0] * 0.3) % (L + 9)) - 2;
+    if (d > 0 && d < L) { const p = orAlong(pts, d); oaGlow(g, p[0], p[1], 3.4 * s, C.lit, 0.9); }
+  }
+  g.fillStyle = C.lit;
+  for (const sd of [1, -1]) for (const [x, y] of ORH_LNODES) { g.beginPath(); g.arc(x, y * sd, 0.55 * s, 0, TAU); g.fill(); if (mat) oaGlow(g, x, y * sd, 2.4 * s, C.glow, 0.5); }
+  if (q > 0.02) oaGlow(g, -1, 0, 16, C.glow, 0.55 * q);
+  g.restore();
+}
+/* THE CORE: the edges by the canopy pulled in, and the canopy a dark lens,
+   deep, rimmed in light, the room's light caught on its glass, a slow ring
+   turning round it (it bends rounds toward him). */
+function orCore(g, L, t, q, mat, col) {
+  const C = OPR_PC[3], F = OPO_FIRST;
+  for (const sd of [1, -1]) {
+    const n = sd > 0 ? ORH_NOTCH : orMirror(ORH_NOTCH);
+    orPath(g, n); g.fillStyle = F.bg; g.fill();
+    g.strokeStyle = col || F.player; g.lineWidth = 1.6; g.lineJoin = 'miter';
+    orLine(g, n); g.stroke();
+  }
+  g.beginPath(); g.ellipse(3, 0, 3.3, 2.4, 0, 0, TAU);
+  if (mat) {
+    const rg = g.createRadialGradient(3 - L.x * 0.6, -L.y * 0.6, 0.2, 3, 0, 3.4);
+    rg.addColorStop(0, '#000000'); rg.addColorStop(0.62, '#080314'); rg.addColorStop(1, C.deep);
+    g.fillStyle = rg;
+  } else g.fillStyle = '#05030a';
+  g.fill();
+  g.strokeStyle = C.mid; g.lineWidth = 0.9; g.stroke();
+  if (!mat) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = rgba(C.lit, 0.85); g.lineWidth = 0.55;
+  g.beginPath(); g.ellipse(3, 0, 3.3, 2.4, 0, 0, TAU); g.stroke();
+  oaGlow(g, 3, 0, 7, C.glow, 0.35 + 0.4 * q);
+  // the ring round it, turning
+  g.strokeStyle = rgba(C.glow, 0.55); g.lineWidth = 0.5;
+  for (const k of [0, 1]) { const a0 = t * (k ? -1.7 : 2.3) + k * 2; g.beginPath(); g.ellipse(3, 0, 4.5 + k * 0.8, 3.3 + k * 0.6, 0, a0, a0 + 1.9); g.stroke(); }
+  // the room's light, caught on its glass
+  g.fillStyle = 'rgba(255,255,255,0.75)';
+  g.beginPath(); g.ellipse(3 + L.x * 1.7, L.y * 1.15, 0.9, 0.45, Math.atan2(L.y, L.x) + Math.PI / 2, 0, TAU); g.fill();
+  g.restore();
+}
+// a piece it should have and has not: where it was, in the diff's red, dashed
+function orGhost(g, k, t) {
+  const a = 0.25 + 0.3 * oaSteps((Math.sin(t * 5) + 1) / 2, 3);
+  g.save();
+  g.globalAlpha = a; g.strokeStyle = OA_DEL; g.lineWidth = 0.7; g.setLineDash([1.6, 1.4]);
+  if (k === 0) { for (const sd of [1, -1]) for (const pl of ORH_PLATES) { let p = orEdgePlate(...pl); if (sd < 0) p = orMirror(p); orPath(g, p); g.stroke(); } }
+  else if (k === 1) { for (const sd of [1, -1]) g.strokeRect(6.2, 1.75 * sd - 0.9, 9.8, 1.8); }
+  else if (k === 2) { for (const sd of [1, -1]) for (const br of ORH_LATTICE) { orLine(g, sd > 0 ? br : orMirror(br)); g.stroke(); } }
+  else { g.beginPath(); g.ellipse(3, 0, 3.3, 2.4, 0, 0, TAU); g.stroke(); }
+  g.restore();
+}
+
+/* IMAGO, awake: the four pieces as one body, VOIDRUNNER grown up. Its wings
+   are membranes of light between the ship it was and the one it is, the
+   lattice grown out through them to the new tips, the plating along its new
+   leading edges, the barrels laid into its nose, the core a deep lens with
+   a corona; long twin plumes; and inside all of it, one thin bright line:
+   the ship he kept, and the hitbox. On the wake it fuses: the pieces snap
+   in, the outline grows out of the old one, and the light floods it. */
+function orImago(g, h, L, t, mat) {
+  const K = OPO_KIT, wa = h.wakeAge, fuse = oaC01((wa - 0.18) / 0.8), fe = fuse < 1 ? K.ease.backOut(fuse) : 1;
+  const sh = orMorph(ORH_BASE, ORH_IMAGO, fe), flash = oaC01(1 - wa / 0.55), br = 0.5 + 0.5 * Math.sin(t * 2.6);
+  const at = i => sh[i];
+  // its light, every edge, brighter than today's
+  orGlowEdge(g, sh, 0.95 + flash * 2.4 + br * 0.3, '#67e8f9', 6, 0.8);
+  if (mat) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, 2, 0, 38 + 40 * flash, '#22d3ee', 0.1 + 0.55 * flash); g.restore(); }
+  // the body: deep, lit from the room's side
+  orPath(g, sh);
+  if (mat) {
+    const bd = g.createLinearGradient(L.x * 22, L.y * 22, -L.x * 22, -L.y * 22);
+    bd.addColorStop(0, '#14506a'); bd.addColorStop(0.5, '#082434'); bd.addColorStop(1, '#030b12');
+    g.fillStyle = bd;
+  } else g.fillStyle = '#0b2a38';
+  g.fill();
+  // the wings: light through a membrane between the ship it was and the one it is
+  for (const sd of [1, -1]) {
+    const m = [[5.5, 8.5 * sd], [-5, 13 * sd], [-8.5, 9.5 * sd], at(sd > 0 ? 4 : 10), at(sd > 0 ? 3 : 11), at(sd > 0 ? 2 : 12)];
+    orPath(g, m);
+    g.save(); g.globalCompositeOperation = 'lighter';
+    if (mat) {
+      const gr = g.createLinearGradient(0, 8 * sd, -6, 22 * sd);
+      gr.addColorStop(0, 'rgba(34,211,238,0.10)'); gr.addColorStop(1, 'rgba(165,243,252,' + (0.32 + 0.12 * br).toFixed(3) + ')');
+      g.fillStyle = gr;
+    } else g.fillStyle = 'rgba(103,232,249,0.25)';
+    g.fill();
+    g.restore();
+  }
+  // the veins: the lattice, out through them to the new tips, light running down each
+  const C2 = OPR_PC[2];
+  g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  for (const sd of [1, -1]) for (let i = 0; i < ORH_VEINS.length; i++) {
+    const v = ORH_VEINS[i].map(([x, y]) => [x * (0.6 + 0.4 * fe), y * sd * (0.55 + 0.45 * fe)]);
+    g.strokeStyle = rgba(C2.mid, 0.75); g.lineWidth = 0.75; orLine(g, v); g.stroke();
+    if (!mat) continue;
+    const l = orLen(v), d = ((t * 14 + i * 3.1) % (l + 10)) - 2;
+    if (d > 0 && d < l) { const p = orAlong(v, d); oaGlow(g, p[0], p[1], 4, C2.lit, 0.9); }
+  }
+  g.restore();
+  orLattice(g, t, 0, mat, 1);
+  // the plating, along its new leading edges, and its cheeks
+  for (const sd of [1, -1]) {
+    const A = at(sd > 0 ? 2 : 12), B = at(sd > 0 ? 3 : 11), N0 = at(0), N1 = at(sd > 0 ? 1 : 13);
+    const plates = [[A, B, 0.02, 0.27, -1.1, 1.9], [A, B, 0.3, 0.55, -1.1, 1.9], [A, B, 0.58, 0.82, -1.1, 1.9], [A, B, 0.85, 1.07, -1.1, 1.9], [N0, N1, 0.25, 0.85, -0.8, 1.3]];
+    for (const p of plates) {
+      const pts = orEdgePlate(...p);
+      if (mat) orPlate(g, pts, L, OPR_M_STEEL, 0.5); else { orPath(g, pts); g.fillStyle = '#94a3b8'; g.fill(); }
+      g.strokeStyle = OPR_PC[0].lit; g.lineWidth = 0.7; g.beginPath(); g.moveTo(pts[1][0], pts[1][1]); g.lineTo(pts[2][0], pts[2][1]); g.stroke();
+    }
+  }
+  // the spine: a crest of light from the core back
+  if (mat) {
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const gr = g.createLinearGradient(6, 0, -12, 0);
+    gr.addColorStop(0, 'rgba(224,242,254,0.9)'); gr.addColorStop(1, 'rgba(34,211,238,0)');
+    g.strokeStyle = gr; g.lineWidth = 1.2; g.beginPath(); g.moveTo(6, 0); g.lineTo(-12 * (0.6 + 0.4 * fe), 0); g.stroke();
+    g.restore();
+  }
+  // the barrels, laid into its nose
+  orBarrels(g, L, 0, oaC01(Math.exp(-(uiTime - OPR_ST.muzzleAt) * 14)), mat);
+  // the core
+  orCore(g, L, t, 0, mat, '#a5f3fc');
+  if (mat) { g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = rgba(OPR_PC[3].glow, (0.35 + 0.25 * br).toFixed(3)); g.lineWidth = 0.6;
+    for (let i = 0; i < 10; i++) { const a = i * TAU / 10 + t * 0.8; g.beginPath(); g.moveTo(3 + Math.cos(a) * 4.2, Math.sin(a) * 3.1); g.lineTo(3 + Math.cos(a) * (5.6 + 0.8 * br), Math.sin(a) * (4.1 + 0.6 * br)); g.stroke(); }
+    g.restore(); }
+  // the engines: two long plumes at its new tail
+  g.save(); g.globalCompositeOperation = 'lighter';
+  const fl = 0.75 + Math.sin(uiTime * 24) * 0.25;
+  for (const sd of [1, -1]) {
+    const n = at(sd > 0 ? 6 : 8), y = n[1] * 0.75, x = n[0] + 3;
+    oaGlow(g, x - 3, y, 13 * fl, '#67e8f9', 0.5);
+    g.fillStyle = 'rgba(224,242,254,0.75)';
+    g.beginPath(); g.moveTo(x, y + 2.2); g.lineTo(x - 15 - 9 * fl, y); g.lineTo(x, y - 2.2); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.beginPath(); g.moveTo(x, y + 1); g.lineTo(x - 8 - 4 * fl, y); g.lineTo(x, y - 1); g.closePath(); g.fill();
+  }
+  g.restore();
+  // its edge, and the room's light along it
+  orPath(g, sh); g.lineWidth = 1.7; g.lineJoin = 'miter'; g.strokeStyle = '#a5f3fc'; g.stroke();
+  orRim(g, sh, L, 0.9, '#ffffff', 0.9);
+  // and inside it, the ship he kept: one thin bright line, where it can be hit
+  g.save(); g.globalCompositeOperation = 'lighter';
+  orPath(g, ORH_BASE); g.lineWidth = 2.4; g.strokeStyle = 'rgba(224,242,254,0.25)'; g.stroke();
+  g.restore();
+  orPath(g, ORH_BASE); g.lineWidth = 0.8; g.strokeStyle = '#f0fdff'; g.stroke();
+  // the wake: a white heat through all of it, going
+  if (flash > 0) {
+    g.save(); g.globalCompositeOperation = 'lighter';
+    orPath(g, sh); g.fillStyle = 'rgba(255,255,255,' + (0.85 * flash).toFixed(3) + ')'; g.fill();
+    g.restore();
+  }
+}
+
+/* ------------------------------- the growths -------------------------------
+   Guns out of IMAGO's back, in hull space, each from `rec` (0..1, how hard it
+   is still kicking from its last shot) and `ch` (0..1, charged toward the
+   next). They are today's: gunmetal in the room's light, lit seams, and the
+   fire's colour at the muzzle. Muzzles sit by oprMount's (x 10), so what
+   they fire leaves where it is seen to. */
+const OPR_GROW = {
+  barrels(g, sd0, rec, ch, t, L, mat) {
+    const b = rec * 4;
+    orPlate(g, [[-25, -8.6], [-15, -8.6], [-12, -4], [-12, 4], [-15, 8.6], [-25, 8.6], [-27.5, 4], [-27.5, -4]], L, OPR_M_DARK, 0.6);
+    for (const sd of [-1, 1]) {
+      const y = sd * 6.2;
+      orBar(g, -21 - b, 11 - b, y, 1.9, L, OPR_M_GUN);
+      // cooling jackets
+      for (let x = -15; x <= 5; x += 3.2) { g.fillStyle = '#05080f'; g.fillRect(x - b, y - 2.35, 1.1, 4.7); g.fillStyle = 'rgba(203,213,225,0.55)'; g.fillRect(x - b, y - 2.35, 1.1, 0.6); }
+      orBar(g, 10 - b, 14 - b, y, 2.6, L, OPR_M_GUN);
+      g.fillStyle = '#05060a'; g.fillRect(11 - b, y - 2.6, 0.7, 5.2); g.fillRect(12.5 - b, y - 2.6, 0.7, 5.2);
+    }
+    if (!mat) return;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    // its seams, lit
+    g.strokeStyle = 'rgba(103,232,249,0.7)'; g.lineWidth = 0.5;
+    g.beginPath(); g.moveTo(-24, -7.6); g.lineTo(-15.5, -7.6); g.moveTo(-24, 7.6); g.lineTo(-15.5, 7.6); g.stroke();
+    for (const sd of [-1, 1]) {
+      const y = sd * 6.2, x = 14.2 - b;
+      const gr = g.createLinearGradient(-2 - b, 0, 11 - b, 0);
+      gr.addColorStop(0, 'rgba(251,146,60,0)'); gr.addColorStop(1, 'rgba(251,191,36,' + (0.1 + 0.5 * rec).toFixed(3) + ')');
+      g.fillStyle = gr; g.fillRect(-2 - b, y - 1.9, 13, 3.8);
+      if (rec > 0.04) {
+        oaGlow(g, x + 3, y, 6 + 14 * rec, '#fbbf24', rec);
+        g.fillStyle = rgba('#fffbeb', (0.9 * rec).toFixed(3));
+        for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + t * 9; g.beginPath(); g.moveTo(x + 1, y); g.lineTo(x + 1 + Math.cos(a) * 2 + 8 * rec * (k % 2 ? 0.4 : 1), y + Math.sin(a) * 4 * rec); g.lineTo(x + 1, y + 0.6); g.closePath(); g.fill(); }
+      }
+    }
+    g.restore();
+  },
+  cannon(g, sd0, rec, ch, t, L, mat) {
+    const b = rec * 6;
+    // its breech: a drum on its back
+    g.beginPath(); g.ellipse(-25 - b, 0, 7, 6.6, 0, 0, TAU);
+    const rg = g.createRadialGradient(-25 - b + L.x * 3, L.y * 3, 0.5, -25 - b, 0, 7.2);
+    rg.addColorStop(0, OPR_M_GUN[2]); rg.addColorStop(0.5, OPR_M_GUN[1]); rg.addColorStop(1, OPR_M_GUN[0]);
+    g.fillStyle = rg; g.fill(); g.strokeStyle = 'rgba(2,6,12,0.9)'; g.lineWidth = 0.6; g.stroke();
+    orBar(g, -25 - b, 8 - b, 0, 3.7, L, OPR_M_GUN);
+    for (const x of [-17, -10, -3]) orBar(g, x - b, x + 1.7 - b, 0, 4.4, L, OPR_M_DARK);
+    // the muzzle brake: wide, slotted
+    orPlate(g, [[7 - b, -5], [13.5 - b, -5.8], [13.5 - b, 5.8], [7 - b, 5]], L, OPR_M_GUN, 0.6);
+    g.fillStyle = '#05060a'; for (const x of [8.4, 10.4]) g.fillRect(x - b, -5.4, 0.9, 10.8);
+    g.beginPath(); g.arc(13.6 - b, 0, 2.2, 0, TAU); g.fillStyle = '#020306'; g.fill();
+    if (!mat) return;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    // the bore glowing as it charges, white after the shot
+    const hot = Math.max(rec, ch * 0.5);
+    oaGlow(g, 13.6 - b, 0, 4 + 8 * hot, '#fb923c', 0.4 + 0.6 * hot);
+    g.fillStyle = rgba('#fff7ed', (0.3 + 0.7 * hot).toFixed(3)); g.beginPath(); g.arc(13.6 - b, 0, 1.4, 0, TAU); g.fill();
+    const gr = g.createLinearGradient(-8 - b, 0, 8 - b, 0);
+    gr.addColorStop(0, 'rgba(234,88,12,0)'); gr.addColorStop(1, 'rgba(253,186,116,' + (0.08 + 0.55 * rec).toFixed(3) + ')');
+    g.fillStyle = gr; g.fillRect(-8 - b, -3.7, 16, 7.4);
+    if (rec > 0.05) { oaGlow(g, 20, 0, 12 + 30 * rec, '#fdba74', rec); oaGlow(g, 16, 0, 8 + 10 * rec, '#ffffff', rec * 0.9); }
+    g.restore();
+  },
+  rail(g, sd0, rec, ch, t, L, mat) {
+    const b = rec * 2.5;
+    for (const sd of [-1, 1]) orBar(g, -36 - b, 17 - b, sd * 1.55, 0.72, L, OPR_M_STEEL);
+    for (let x = -32; x <= 13; x += 4) { g.strokeStyle = oaMix('#4c1d95', '#ddd6fe', ch); g.lineWidth = 0.7; g.strokeRect(x - b, -2.5, 1.1, 5); }
+    if (!mat) return;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    // plasma crawling between the rails as it charges
+    g.strokeStyle = rgba('#ddd6fe', (0.25 + 0.7 * ch).toFixed(3)); g.lineWidth = 0.55;
+    g.beginPath(); g.moveTo(-32 - b, 0);
+    for (let x = -30; x <= 16; x += 2) g.lineTo(x - b, rnd(-1.3, 1.3) * (0.3 + ch));
+    g.stroke();
+    oaGlow(g, 17 - b, 0, 3 + 8 * ch + 16 * rec, '#c4b5fd', 0.35 + 0.6 * Math.max(ch, rec));
+    if (rec > 0.05) { g.strokeStyle = rgba('#ffffff', (0.8 * rec).toFixed(3)); g.lineWidth = 0.8; g.beginPath(); g.ellipse(18, 0, 1.4 + 3 * (1 - rec), 4 + 8 * (1 - rec), 0, 0, TAU); g.stroke(); }
+    g.restore();
+  },
+  rifle(g, sd, rec, ch, t, L, mat) {
+    const y = sd * 10, b = rec * 2.5;
+    // the strut that holds it off the hull
+    orPlate(g, [[-8, sd * 4], [-3.5, sd * 4], [-2, y - sd * 1.6], [-8.5, y - sd * 1.6]], L, OPR_M_DARK, 0.4);
+    orPlate(g, [[-19 - b, y - 1.8], [5 - b, y - 1.8], [9 - b, y - 1.1], [9 - b, y + 1.1], [5 - b, y + 1.8], [-19 - b, y + 1.8], [-21 - b, y]], L, OPR_M_GUN, 0.5);
+    orPlate(g, [[-16 - b, y - 2.9], [-4 - b, y - 2.9], [-2.5 - b, y], [-4 - b, y + 2.9], [-16 - b, y + 2.9]], L, OPR_M_DARK, 0.5);
+    orBar(g, 9 - b, 12.5 - b, y, 0.95, L, OPR_M_STEEL);
+    // its coils, charging
+    for (let i = 0; i < 4; i++) { g.fillStyle = oaMix('#0e3a46', '#a5f3fc', ch); g.fillRect(-14.5 + i * 2.7 - b, y - 2.3, 1.3, 4.6); }
+    g.fillStyle = '#05060a'; g.fillRect(-1 - b, y - 1.1, 5, 0.5);
+    if (!mat) return;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) oaGlow(g, -13.8 + i * 2.7 - b, y, 3.6, '#67e8f9', 0.15 + 0.6 * ch * (i / 3 <= ch ? 1 : 0.3));
+    // the emitter: a lens that charges and fires
+    const e = Math.max(ch * 0.6, rec);
+    oaGlow(g, 13 - b, y, 3 + 6 * e + 10 * rec, '#67e8f9', 0.4 + 0.6 * e);
+    g.fillStyle = rgba('#ecfeff', (0.5 + 0.5 * e).toFixed(3)); g.beginPath(); g.ellipse(12.8 - b, y, 0.9, 1.5, 0, 0, TAU); g.fill();
+    g.restore();
+  },
+  gatling(g, sd, rec, ch, t, L, mat) {
+    const y = sd * 16;
+    orPlate(g, [[-9, sd * 6], [-3, sd * 6], [-1, y - sd * 2.6], [-10, y - sd * 2.6]], L, OPR_M_DARK, 0.4);
+    orPlate(g, [[-14, y - 3.1], [-2, y - 3.1], [0, y - 2], [0, y + 2], [-2, y + 3.1], [-14, y + 3.1], [-16, y]], L, OPR_M_GUN, 0.5);
+    g.beginPath(); g.ellipse(-11, y + sd * 4.2, 3.4, 2.2, 0, 0, TAU); g.fillStyle = '#1e293b'; g.fill(); g.strokeStyle = 'rgba(2,6,12,0.9)'; g.lineWidth = 0.5; g.stroke();
+    // six barrels round an axis, turning (faster as it fires)
+    const sp = OPR_ST.spin, bars = [];
+    for (let i = 0; i < 6; i++) { const ph = sp + i * TAU / 6; bars.push({ y: y + Math.sin(ph) * 1.75, d: Math.cos(ph) }); }
+    bars.sort((a, c) => a.d - c.d);
+    for (const q of bars) orBar(g, 0, 14, q.y, 0.48, L, q.d > 0 ? OPR_M_STEEL : OPR_M_DARK);
+    orBar(g, 12.6, 14.2, y, 2.4, L, OPR_M_GUN);
+    orBar(g, 3, 4.2, y, 2.3, L, OPR_M_GUN);
+    if (!mat) return;
+    if (rec > 0.15) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      oaGlow(g, 16, y, 5 + 7 * rec, '#fde047', rec);
+      g.strokeStyle = rgba('#fef9c3', (0.9 * rec).toFixed(3)); g.lineWidth = 0.7;
+      for (let k = 0; k < 3; k++) { const a = rnd(-0.6, 0.6); g.beginPath(); g.moveTo(15, y); g.lineTo(15 + Math.cos(a) * rnd(3, 8), y + Math.sin(a) * rnd(3, 8)); g.stroke(); }
+      g.restore();
+    }
+  },
+  pods(g, sd, rec, ch, t, L, mat) {
+    const y = sd * 17;
+    orPlate(g, [[-10, sd * 6], [-4, sd * 6], [-3, y - sd * 3.5], [-11, y - sd * 3.5]], L, OPR_M_DARK, 0.4);
+    orPlate(g, [[-18, y - 4.6], [1, y - 4.6], [3.5, y - 3], [3.5, y + 3], [1, y + 4.6], [-18, y + 4.6]], L, OPR_M_GUN, 0.6);
+    // its hatches: four, open after a launch, the next missiles' noses in them
+    const open = oaC01(rec * 2.2);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const hx = -12 + i * 7.5, hy = y + (j ? 2.1 : -2.1);
+      g.fillStyle = '#020306'; g.fillRect(hx, hy - 1.5, 5.6, 3);
+      g.fillStyle = oaMix('#7c2d12', '#fdba74', ch); g.beginPath(); g.arc(hx + 4.4, hy, 0.9, 0, TAU); g.fill();
+      if (open < 0.98) { g.fillStyle = oaMix(OPR_M_GUN[1], OPR_M_GUN[2], Math.max(0, -L.y) * 0.6); g.fillRect(hx + 5.6 * open, hy - 1.5, 5.6 * (1 - open), 3); }
+    }
+    // the warning stripes on its end
+    g.save(); g.beginPath(); g.rect(-18, y - 4.6, 3, 9.2); g.clip();
+    for (let k = -3; k < 4; k++) { g.fillStyle = k % 2 ? '#f59e0b' : '#111827'; g.beginPath(); g.moveTo(-18, y + k * 2); g.lineTo(-15, y + k * 2 - 2); g.lineTo(-15, y + k * 2); g.lineTo(-18, y + k * 2 + 2); g.closePath(); g.fill(); }
+    g.restore();
+    if (!mat) return;
+    if (rec > 0.05) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, -4, y, 10 + 10 * rec, '#fb923c', 0.8 * rec); g.restore(); }
+  },
+  crown(g, sd, rec, ch, t, L, mat) {
+    const rot = t * 0.55, R = 27 + rec * 3;
+    // the ring, round all of it
+    g.beginPath(); g.arc(-1, 0, R, 0, TAU); g.strokeStyle = '#0b1220'; g.lineWidth = 3.2; g.stroke();
+    g.strokeStyle = '#475569'; g.lineWidth = 1.6; g.stroke();
+    if (mat) { g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = rgba('#67e8f9', (0.35 + 0.45 * ch).toFixed(3)); g.lineWidth = 0.7; g.beginPath(); g.arc(-1, 0, R, 0, TAU); g.stroke(); g.restore(); }
+    // its spokes to the hull
+    g.strokeStyle = 'rgba(71,85,105,0.8)'; g.lineWidth = 0.6;
+    for (let i = 0; i < 4; i++) { const a = rot * 0.5 + i * TAU / 4 + Math.PI / 4; g.beginPath(); g.moveTo(-1 + Math.cos(a) * 12, Math.sin(a) * 12); g.lineTo(-1 + Math.cos(a) * R, Math.sin(a) * R); g.stroke(); }
+    // twelve barrels round it, pointing out
+    for (let i = 0; i < 12; i++) {
+      const a = rot + i * TAU / 12;
+      g.save(); g.translate(-1, 0); g.rotate(a);
+      orBar(g, R - 1.6, R + 7, 0, 1.05, orTurnL(L, a), OPR_M_GUN);
+      if (mat && (rec > 0.05 || ch > 0.6)) { g.globalCompositeOperation = 'lighter'; oaGlow(g, R + 8, 0, 2.5 + 6 * rec, '#a5f3fc', Math.max(rec, (ch - 0.6) * 1.5)); }
+      g.restore();
+    }
+  }
+};
+// how hard a growth is kicking, from its own `kick` falling back to 0 as it fires
+function orRecoil(i, kick) {
+  const S = OPR_ST, r = S.kick[i] || (S.kick[i] = { prev: kick, at: -9 });
+  if (kick < r.prev - 0.15) r.at = uiTime;
+  r.prev = kick;
+  return Math.exp(-(uiTime - r.at) * 11);
+}
+
+/* ------------------------------- the frame's events -------------------------------
+   Read once a frame, whoever asks first; what each leaves is drawn by today's
+   pass (fx), the old one's (fx, flat) or the screen's (labels). */
+function orEv() {
+  const S = OPR_ST;
+  if (S.evAt === uiTime) return;
+  S.evAt = uiTime;
+  const hx = typeof P !== 'undefined' && P ? P.x : 0, hy = P ? P.y : 0;
+  for (const e of OPO_KIT.feed('oprArt')) {
+    if (e.kind === 'hit') { S.recKick = Math.min(1, S.recKick + (e.crit ? 0.6 : 0.3)); continue; }
+    if (e.kind.lastIndexOf('opr.', 0) !== 0) continue;
+    const k = e.kind.slice(4), now = uiTime;
+    const fx = (kind, life, o) => S.fx.push(Object.assign({ kind, t0: now, life, x: e.x === undefined ? hx : e.x, y: e.y === undefined ? hy : e.y, seed: (e.seq * 7.31) % 1000 }, o || {}));
+    switch (k) {
+      case 'open':
+        S.fx.length = 0; S.labels.length = 0; S.puffs.length = 0; S.log.length = 0; S.kick.length = 0;
+        S.tookAt = -1; S.arrive = [-9, -9, -9, -9]; S.wakeAt = -9; S.brk = null; S.thrown = ''; S.tries = 0; S.chipsGone = 0;
+        OPO_KIT.dropScene('oprFlat');
+        break;
+      case 'take': S.tookAt = now; fx('drain', 0.8, { hull: true }); orLabel('− ' + (e.n | 0) + ((e.n | 0) === 1 ? ' CARD' : ' CARDS'), OA_DEL, { size: 15 }); break;
+      case 'molt': S.arrive[e.k] = now; fx('molt', 1.7, { hull: true, k: e.k }); orLabel('+ ' + OPR_PIECES[e.k].n, OA_ADD, { size: 19, life: 2.6 }); break;
+      case 'grow':
+        S.arrive[e.k] = now; fx('grow', 0.8, { hull: true, k: e.k });
+        if (e.how === 'set') { const hm = orHim(); if (hm) { const tb = orTube(hm); fx('free', 0.5, { k: e.k, hull: true, fx0: tb.x, fy0: tb.y }); } }
+        orLabel('+ ' + OPR_PIECES[e.k].n, OA_ADD, { size: 15, sub: e.how === 'graze' ? 'GRAZED BACK' : e.how === 'set' ? 'SHOT LOOSE' : '' });
+        break;
+      case 'peel': fx('peelHit', 0.5, { hull: true, k: e.k }); orLabel('− ' + OPR_PIECES[e.k].n, OA_DEL, { size: 16, sub: e.kept ? 'HE KEEPS IT' : '' }); break;
+      case 'guard': fx('guard', 0.55, { hull: true }); orLabel('PLATING HELD', OPR_PC[0].lit, { size: 12 }); break;
+      case 'graze': fx('graze', 0.38, { ax: e.x, ay: e.y, hull: true, pays: e.pays }); orGrazeLabel(e.pays | 0); S.grazeAt = now; break;
+      case 'through': if (now - S.throughAt > 0.05) { S.throughAt = now; fx('through', 0.45, { flat: true }); } break;
+      case 'setHit': S.setKick = 1; S.setAt = now; fx('setHit', 0.3, { flat: true }); break;
+      case 'cut': fx('cut', 0.55); break;
+      case 'brush': fx('brush', 0.5, { flat: true }); break;
+      case 'painted': fx('painted', 0.7, { flat: true }); break;
+      case 'takeAll': fx('drain', 1.1, { hull: true, all: true }); orLabel('− EVERYTHING', OA_DEL, { size: 18, life: 2 }); break;
+      case 'meet': S.meetAt = now; fx('meet', 0.32, { n: e.n | 0 }); break;
+      case 'mark': fx('mark', 0.7, { flat: true }); break;
+      case 'markMiss': S.missAt = now; S.tries = e.tries | 0; break;
+      case 'wake': {
+        S.wakeAt = now; S.arrive = [now, now, now, now];
+        const hm = orHim(), tb = hm ? orTube(hm) : null;
+        fx('wake', 2.6, { hull: true, fx0: tb ? tb.x : hx, fy0: tb ? tb.y : hy - 400 });
+        break;
+      }
+      case 'sprout': fx('sprout', 0.6, { hull: true, id: e.id }); orLabel('+ ' + (OPR_GROW_N[e.id] || String(e.id).toUpperCase()), OA_ADD, { size: 14 }); S.log.push({ id: e.id, t0: now }); break;
+      case 'copyHit': fx('chit', 0.3, { dmg: e.dmg || 1 }); orChip(e); break;
+      case 'copyBreak': fx('break', 1.3); break;
+    }
+  }
+  while (S.fx.length > 240) S.fx.shift();
+}
+// a word of the diff, said at the hull (screen): stacked over any still rising
+const OPR_LABEL_RISE = 22;   // px a second
+function orLabel(text, col, o) {
+  o = o || {};
+  const S = OPR_ST, now = uiTime, size = o.size || 14, sub = o.sub || '';
+  // they rise at one speed, so a word stacked over another stays over it
+  let off = 0;
+  for (const l of S.labels) if (!l.graze && now - l.t0 < l.life) off = Math.max(off, l.off + OPR_LABEL_RISE * (now - l.t0) + l.tall);
+  if (off > 150) off = 0;
+  S.labels.push({ text, col, t0: now, life: o.life || 1.7, size, off, tall: size + 10 + (sub ? size * 0.6 + 6 : 0), sub });
+  if (S.labels.length > 18) S.labels.shift();
+}
+// grazes come quickly: one running sum while they do
+function orGrazeLabel(p) {
+  const S = OPR_ST, l = S.labels.find(q => q.graze && uiTime - q.t0 < 0.5);
+  if (l) { l.sum += p; l.text = '+' + l.sum; l.t0 = uiTime - 0.04; return; }
+  S.labels.push({ text: '+' + p, col: '#a5f3fc', t0: uiTime, life: 0.95, size: 13, off: 0, tall: 0, sub: 'GRAZE', graze: true, sum: p });
+}
+// a hit on the copy, awake: a flat chip of it knocked off into the room (the old renderer's)
+function orChip(e) {
+  const K = OPO_KIT, fx = K.scene('oprFlat', () => ({ sim: K.sim({ gravity: K.V(0, 0, -1600) }).floor(0) }));
+  if (fx.sim.bodies.length > (FXO.parts ? 90 : 30)) return;
+  const n = (e.dmg || 1) >= 3 ? 3 : 1;
+  for (let i = 0; i < n; i++) {
+    const sz = rnd(2.4, 5) * Math.min(2, 0.8 + (e.dmg || 1) * 0.15), a = rnd(TAU);
+    fx.sim.add(K.body({ shape: [K.V(sz, 0), K.V(-sz * 0.7, sz * 0.8), K.V(-sz * 0.5, -sz * 0.9)], x: e.x, y: e.y, z: 20,
+      vx: Math.cos(a) * rnd(120, 260), vy: Math.sin(a) * rnd(120, 260) - 80, vz: rnd(220, 480), wx: rnd(-12, 12), wy: rnd(-12, 12), wz: rnd(-9, 9),
+      col: rnd() < 0.5 ? OPO_FIRST.player : OPO_COL, backCol: OPO_FIRST.grid2, flat: true, shadow: false, life: 0.8, fade: 0.3 }));
+  }
+}
+
+/* ------------------------------- today's pass -------------------------------
+   The rite's light in the room, once a frame from the hull's hook (before
+   bloom, so it blooms): grazes, the plating holding, pieces coming back and
+   being taken, the lattice cutting a pane, rounds meeting, the wake, guns
+   growing, hits on the copy, its break, and missile smoke. */
+function orLit(g, hx, hy) {
+  const S = OPR_ST;
+  if (S.litAt === uiTime) return;
+  S.litAt = uiTime;
+  const K = OPO_KIT, many = FXO.parts ? 1 : 0.4, H2 = i => K.hash(i);
+  g.save();
+  // missile smoke: not light
+  for (let i = S.puffs.length - 1; i >= 0; i--) {
+    const p = S.puffs[i], a = (uiTime - p.t0) / p.life;
+    if (a >= 1 || a < 0) { S.puffs.splice(i, 1); continue; }
+    g.globalAlpha = 0.24 * (1 - a); g.fillStyle = a < 0.12 ? '#fdba74' : '#334155';
+    g.beginPath(); g.arc(p.x + p.vx * a, p.y + p.vy * a, 1.5 + 9 * a, 0, TAU); g.fill();
+  }
+  if (S.puffs.length > 260) S.puffs.splice(0, S.puffs.length - 260);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'lighter';
+  g.lineCap = 'round';
+  for (let i = S.fx.length - 1; i >= 0; i--) {
+    const e = S.fx[i], a = (uiTime - e.t0) / e.life;
+    if (a >= 1) { S.fx.splice(i, 1); continue; }
+    if (e.flat || a < 0) continue;
+    const x = e.hull ? hx : e.x, y = e.hull ? hy : e.y, fa = 1 - a, sd = e.seed;
+    switch (e.kind) {
+      case 'graze': {
+        // a near miss: a crescent of light swept round the hull on the side it passed
+        const q = e.ax !== undefined && Math.hypot(e.ax - hx, e.ay - hy) > 3 ? Math.atan2(e.ay - hy, e.ax - hx) : H2(sd) * TAU;
+        const R = 17 + 16 * K.ease.cubicOut(a);
+        g.strokeStyle = rgba('#67e8f9', (0.45 * fa).toFixed(3)); g.lineWidth = 7 * fa + 1;
+        g.beginPath(); g.arc(x, y, R, q - 0.95, q + 0.95); g.stroke();
+        g.strokeStyle = rgba('#f0fdff', (0.95 * fa).toFixed(3)); g.lineWidth = 2 * fa + 0.6; g.stroke();
+        for (let k = 0; k < Math.round(5 * many); k++) {
+          const sa = q + (H2(sd + k) - 0.5) * 1.8, sr = R + 26 * a * (0.5 + H2(sd + k * 3)), sx = x + Math.cos(sa) * sr, sy = y + Math.sin(sa) * sr;
+          g.strokeStyle = rgba('#e0f2fe', (0.9 * fa).toFixed(3)); g.lineWidth = 1.2;
+          g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx - Math.sin(sa) * 6 * (k % 2 ? 1 : -1), sy + Math.cos(sa) * 6 * (k % 2 ? 1 : -1)); g.stroke();
+        }
+        oaGlow(g, x + Math.cos(q) * R, y + Math.sin(q) * R, 16, '#a5f3fc', 0.55 * fa);
+        break;
+      }
+      case 'guard': {
+        // the plating takes it: a hex of steel light round the hull, cracking, sparks off it
+        const R = 22 + 8 * K.ease.cubicOut(a);
+        for (let k = 0; k < 6; k++) {
+          if (H2(sd + k + Math.floor(a * 12)) < 0.2 * a) continue;
+          const a0 = k * TAU / 6 + 0.3, a1 = a0 + TAU / 6;
+          g.strokeStyle = rgba('#f8fafc', (0.85 * fa).toFixed(3)); g.lineWidth = 2.2 * fa + 0.5;
+          g.beginPath(); g.moveTo(x + Math.cos(a0) * R, y + Math.sin(a0) * R); g.lineTo(x + Math.cos(a1) * R, y + Math.sin(a1) * R); g.stroke();
+        }
+        oaGlow(g, x, y, R * 1.6, '#cbd5e1', 0.4 * fa);
+        for (let k = 0; k < Math.round(8 * many); k++) { const sa = H2(sd + k * 5) * TAU, sr = R + 30 * a; g.fillStyle = rgba('#ffffff', fa.toFixed(3)); g.fillRect(x + Math.cos(sa) * sr - 1, y + Math.sin(sa) * sr - 1, 2, 2); }
+        break;
+      }
+      case 'molt': case 'grow': {
+        // a piece back: its light in a column on the hull, a ring going out, rays turning
+        const C = OPR_PC[e.k | 0], big = e.kind === 'molt';
+        oaGlow(g, x, y, (big ? 70 : 40) + 50 * a, C.glow, (big ? 0.55 : 0.4) * fa);
+        oaGlow(g, x, y, 20, '#ffffff', 0.6 * fa * fa);
+        g.strokeStyle = rgba(C.glow, (0.7 * fa).toFixed(3)); g.lineWidth = 3 * fa + 0.5;
+        g.beginPath(); g.arc(x, y, 18 + (big ? 170 : 80) * K.ease.cubicOut(a), 0, TAU); g.stroke();
+        if (big) for (let k = 0; k < 10; k++) {
+          const ra = k * TAU / 10 + a * 1.2, r0 = 22 + 10 * a, r1 = r0 + 40 * K.ease.cubicOut(oaC01(a * 2)) * fa;
+          g.strokeStyle = rgba(C.lit, (0.5 * fa).toFixed(3)); g.lineWidth = 1.4;
+          g.beginPath(); g.moveTo(x + Math.cos(ra) * r0, y + Math.sin(ra) * r0); g.lineTo(x + Math.cos(ra) * r1, y + Math.sin(ra) * r1); g.stroke();
+        }
+        break;
+      }
+      case 'free': {
+        // shot loose from his set: the piece, lit again, flying home along an arc
+        const u = K.ease.inOut(oaC01(a)), px = lerp(e.fx0, x, u), py = lerp(e.fy0, y, u) - Math.sin(u * Math.PI) * 60;
+        const C = OPR_PC[e.k | 0];
+        for (let k = 1; k <= 6; k++) { const v = Math.max(0, u - k * 0.04), qx = lerp(e.fx0, x, v), qy = lerp(e.fy0, y, v) - Math.sin(v * Math.PI) * 60; oaGlow(g, qx, qy, 10 - k, C.glow, 0.4 * (1 - k / 7)); }
+        g.globalCompositeOperation = 'source-over'; orGlyph(g, e.k | 0, px, py, 7, 'lit'); g.globalCompositeOperation = 'lighter';
+        break;
+      }
+      case 'peelHit': {
+        // taken: a red jolt through it, and scanlines torn off it
+        oaGlow(g, x, y, 44, '#f87171', 0.55 * fa);
+        for (let k = 0; k < Math.round(7 * many); k++) {
+          const yy = y + (H2(sd + k) - 0.5) * 40, xx = x + (H2(sd + k * 2) - 0.5) * 30 + (k % 2 ? 1 : -1) * a * 40, l = 8 + H2(sd + k * 7) * 18;
+          g.fillStyle = rgba(k % 3 ? '#f87171' : '#ffffff', (0.8 * fa).toFixed(3)); g.fillRect(xx - l / 2, yy, l, 1.5);
+        }
+        break;
+      }
+      case 'drain': {
+        // his hands on it: a grey ring closing in, taking its light
+        const R = (e.all ? 140 : 80) * (1 - K.ease.inOut(a)) + 16;
+        g.strokeStyle = rgba('#cbd5e1', (0.6 * fa).toFixed(3)); g.lineWidth = 2.5;
+        g.beginPath(); g.arc(x, y, R, 0, TAU); g.stroke();
+        oaGlow(g, x, y, R * 0.9, '#94a3b8', 0.25 * fa);
+        break;
+      }
+      case 'cut': {
+        // the lattice's light, through a pane: a teal flash, and the light branching where it broke
+        const C = OPR_PC[2];
+        oaGlow(g, x, y, 60, C.glow, 0.6 * fa);
+        g.strokeStyle = rgba(C.lit, (0.85 * fa).toFixed(3)); g.lineWidth = 1.2;
+        for (let k = 0; k < 7; k++) {
+          const ra = H2(sd + k) * TAU, r1 = 20 + 50 * K.ease.cubicOut(a), mx = x + Math.cos(ra) * r1 * 0.5, my = y + Math.sin(ra) * r1 * 0.5;
+          g.beginPath(); g.moveTo(x, y); g.lineTo(mx, my); g.lineTo(x + Math.cos(ra + 0.4) * r1, y + Math.sin(ra + 0.4) * r1); g.moveTo(mx, my); g.lineTo(x + Math.cos(ra - 0.35) * r1 * 0.85, y + Math.sin(ra - 0.35) * r1 * 0.85); g.stroke();
+          g.fillStyle = rgba(C.lit, fa.toFixed(3)); g.beginPath(); g.arc(mx, my, 1.6, 0, TAU); g.fill();
+        }
+        break;
+      }
+      case 'meet': {
+        // two rounds, the same round, meeting: his white and its cyan, gone together
+        const big = e.n > 0 && e.n % 6 === 0;
+        oaGlow(g, x, y, (big ? 34 : 20) * (1 + a), '#67e8f9', 0.6 * fa);
+        oaGlow(g, x, y, 10, '#ffffff', 0.9 * fa);
+        g.strokeStyle = rgba('#ffffff', (0.9 * fa).toFixed(3)); g.lineWidth = 1.4;
+        const w = 6 + 10 * a;
+        g.beginPath(); g.moveTo(x - w, y - 2.5); g.lineTo(x + w, y - 2.5); g.moveTo(x - w, y + 2.5); g.lineTo(x + w, y + 2.5); g.stroke();
+        if (big) { g.strokeStyle = rgba('#a5f3fc', (0.7 * fa).toFixed(3)); g.beginPath(); g.arc(x, y, 10 + 60 * a, 0, TAU); g.stroke(); }
+        break;
+      }
+      case 'wake': {
+        // THE AWAKENING: every piece back at once, out of his set, and the light it fuses in
+        if (a < 0.1) for (let k = 0; k < 4; k++) {
+          const u = K.ease.in(oaC01(a / 0.1 - k * 0.08)), C = OPR_PC[k];
+          const ox = e.fx0 + (k - 1.5) * 16, px = lerp(ox, x, u), py = lerp(e.fy0, y, u);
+          g.strokeStyle = rgba(C.glow, 0.8); g.lineWidth = 4; g.beginPath(); g.moveTo(lerp(ox, x, Math.max(0, u - 0.25)), lerp(e.fy0, y, Math.max(0, u - 0.25))); g.lineTo(px, py); g.stroke();
+          oaGlow(g, px, py, 22, C.glow, 0.9);
+        }
+        const fl = oaC01(1 - a / 0.12);
+        oaGlow(g, x, y, 380 * (0.6 + a), '#a5f3fc', 0.75 * fl + 0.18 * fa);
+        oaGlow(g, x, y, 80, '#ffffff', 0.9 * fl + 0.2 * fa);
+        for (let k = 0; k < 3; k++) {
+          const b = oaC01((a - k * 0.08) / 0.6);
+          if (b <= 0 || b >= 1) continue;
+          g.strokeStyle = rgba(k ? OPR_PC[(k + 1) % 4].glow : '#ffffff', (0.8 * (1 - b)).toFixed(3)); g.lineWidth = 6 * (1 - b) + 1;
+          g.beginPath(); g.arc(x, y, 20 + 520 * K.ease.cubicOut(b), 0, TAU); g.stroke();
+        }
+        // rays, turning, going
+        for (let k = 0; k < 18; k++) {
+          const ra = k * TAU / 18 + a * 0.8 + H2(k) * 0.2, r0 = 30, r1 = 90 + 260 * H2(k + 9) * (1 - a * 0.5);
+          g.strokeStyle = rgba(k % 3 ? '#a5f3fc' : '#ffffff', (0.32 * fa * fa).toFixed(3)); g.lineWidth = 2 + 4 * H2(k + 3);
+          g.beginPath(); g.moveTo(x + Math.cos(ra) * r0, y + Math.sin(ra) * r0); g.lineTo(x + Math.cos(ra) * r1, y + Math.sin(ra) * r1); g.stroke();
+        }
+        break;
+      }
+      case 'sprout': {
+        oaGlow(g, x, y, 34, '#fde68a', 0.6 * fa);
+        g.strokeStyle = rgba('#fef3c7', (0.7 * fa).toFixed(3)); g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, 14 + 46 * K.ease.cubicOut(a), 0, TAU); g.stroke();
+        break;
+      }
+      case 'chit': {
+        const col = (e.dmg || 1) >= 3 ? '#fde68a' : '#a5f3fc';
+        oaGlow(g, x, y, 14 + 6 * Math.min(4, e.dmg || 1), col, 0.7 * fa);
+        for (let k = 0; k < Math.round(4 * many); k++) { const sa = H2(sd + k) * TAU, sr = 4 + 26 * a; g.strokeStyle = rgba('#ffffff', fa.toFixed(3)); g.lineWidth = 1; g.beginPath(); g.moveTo(x + Math.cos(sa) * sr, y + Math.sin(sa) * sr); g.lineTo(x + Math.cos(sa) * (sr + 5), y + Math.sin(sa) * (sr + 5)); g.stroke(); }
+        break;
+      }
+      case 'break': {
+        oaGlow(g, x, y, 160 * (0.6 + a), '#e0f2fe', 0.7 * fa);
+        g.strokeStyle = rgba('#ffffff', (0.8 * fa).toFixed(3)); g.lineWidth = 3 * fa + 0.5;
+        g.beginPath(); g.arc(x, y, 20 + 240 * K.ease.cubicOut(a), 0, TAU); g.stroke();
+        break;
+      }
+    }
+  }
+  g.restore();
+}
+
+/* ------------------------------ the old renderer's pass ------------------------------
+   After bloom and the grade, over the room (from the record's hook, the first
+   of the rite's screen pass): the camera's own transform again, and on it,
+   flat, unlit and shadowless, everything of his. The shell a molt peels and
+   the paper it falls in; the pieces hanging in his tube; his copy breaking
+   back into his set; his copy and its rounds; and his marks on the floor. */
+function orFlat(g) {
+  const S = OPR_ST, K = OPO_KIT, F = OPO_FIRST;
+  if (S.flatAt === uiTime) return;
+  S.flatAt = uiTime;
+  const z = camZoom, ox = -cam.x + W / (2 * z) + cam.sx / z, oy = -cam.y + H / (2 * z) + cam.sy / z;
+  g.save();
+  g.scale(z, z); g.translate(ox, oy);
+  const Sp = K.world();
+  // the paper: a molt's shell, and the copy's chips
+  const fx = K.scene('oprFlat', () => ({ sim: K.sim({ gravity: K.V(0, 0, -1600) }).floor(0) }));
+  fx.sim.space = Sp;
+  if (S.molt && S.moltAt === uiTime) orShell(g, S.molt, Sp, fx.sim);
+  fx.sim.step(); fx.sim.draw(g, { sub: 1, light: false, shadows: false });
+  // the pieces he holds: in HE KEEPS IT, and all four from ONE SHIP until it wakes
+  const D = orite && orite.duel, hm = orHim();
+  if (hm) {
+    let list = S.keptS && S.keptAt === uiTime ? (S.keptS.all ? [0, 1, 2, 3] : S.keptS.kept) : [];
+    if (D && !D.awake && D.ph !== 'take') list = [0, 1, 2, 3];
+    if (list.length) orKeptDraw(g, hm, list, S.keptS && S.keptAt === uiTime ? S.keptS : null, !!D);
+  }
+  // his copy breaking back into his set
+  if (S.brkS && S.brkAt === uiTime) orBreakDraw(g, S.brkS, hm);
+  // his copy, then its rounds out of it
+  if (S.copy && S.copyAt === uiTime) orCopyDraw(g, S.copy, hm);
+  if (S.shotsAt === uiTime) for (const s of S.shots) orCopyShotDraw(g, s);
+  // his marks, flat: a base round through him, rounds on his set, the brush landing, a marked one fired
+  for (const e of S.fx) {
+    if (!e.flat) continue;
+    const a = (uiTime - e.t0) / e.life;
+    if (a < 0 || a >= 1) continue;
+    const st = oaSteps(a, 4), fa = 1 - st;
+    g.globalAlpha = fa; g.strokeStyle = OPO_COL; g.lineWidth = 2;
+    if (e.kind === 'through') {
+      // his memory of the ship does not hurt him: it goes through, and he says so in 1.0's type
+      g.beginPath(); g.arc(e.x, e.y, 5 + 14 * st, 0, TAU); g.stroke();
+      g.font = '700 11px ' + F.font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OPO_COL;
+      g.fillText('0', e.x + 12, e.y - 12 - 8 * st);
+    } else if (e.kind === 'setHit') {
+      g.beginPath(); for (let k = 0; k < 4; k++) { const sa = K.hash(e.seed + k) * TAU; g.moveTo(e.x, e.y); g.lineTo(e.x + Math.cos(sa) * (6 + 10 * st), e.y + Math.sin(sa) * (6 + 10 * st)); } g.stroke();
+    } else if (e.kind === 'painted' || e.kind === 'brush') {
+      g.strokeStyle = e.kind === 'painted' ? OPO_COL : F.wall;
+      g.beginPath(); g.arc(e.x, e.y, (e.kind === 'painted' ? 74 : 20) + 40 * st, 0, TAU); g.stroke();
+    } else if (e.kind === 'mark') {
+      g.lineWidth = 3; g.beginPath(); g.arc(e.x, e.y, 20 + 70 * st, 0, TAU); g.stroke();
+    }
+  }
+  g.globalAlpha = 1;
+  g.restore();
+}
+// the flat hull, once, as a picture: for the shell a molt peels off, and the copy's shards
+function orFlatTex() {
+  const S = OPR_ST;
+  if (S.flatTex) return S.flatTex;
+  const c = document.createElement('canvas'); c.width = 256; c.height = 224;
+  const q = c.getContext('2d');
+  q.setTransform(8, 0, 0, 8, 12 * 8, 14 * 8);    // hull space: u = (x + 12) * 8, v = (y + 14) * 8
+  orHullFlat(q);
+  q.setTransform(1, 0, 0, 1, 0, 0);
+  q.globalAlpha = 0.28; q.fillStyle = '#000';
+  for (let y = 0; y < 224; y += 6) q.fillRect(0, y, 256, 2);
+  return (S.flatTex = c);
+}
+const orUV = (x, y) => ({ u: (x + 12) * 8, v: (y + 14) * 8 });
+/* The molt: the shell, his memory of the hull, split down the spine and
+   peeling back off it both ways like paper, from the seam outward, to show
+   the piece lit under it; then thrown off in strips that fall. */
+function orShell(g, m, Sp, sim) {
+  const K = OPO_KIT, S = OPR_ST, img = orFlatTex(), f = m.f;
+  const key = m.k + '@' + m.key;
+  if (f < 0.06 || S.thrown === key) return;
+  const halves = [[], []];
+  for (let i = 0; i < ORH_BASE.length; i++) {
+    const a = ORH_BASE[i], b = ORH_BASE[(i + 1) % ORH_BASE.length];
+    const up = a[1] + b[1] > 0 || (a[1] === 0 && b[1] > 0) || (b[1] === 0 && a[1] > 0);
+    const tri = [[0, 0], a, b].map(([x, y]) => { const w = orToWorld(x, y, m.x, m.y, m.ang); return Object.assign({ x: w[0], y: w[1] }, orUV(x, y)); });
+    halves[up ? 0 : 1].push(tri);
+  }
+  const c = 15 * K.ease.inOut(oaC01((f - 0.06) / 0.62));
+  const sheets = halves.map((polys, i) => {
+    const sh = K.sheet({ polys, img, back: '#16243c' });
+    const sd = i ? -1 : 1, p0 = orToWorld(-16, c * sd, m.x, m.y, m.ang), p1 = orToWorld(24, c * sd, m.x, m.y, m.ang);
+    sh.pose().curl(p0[0], p0[1], p1[0], p1[1], 2.4, { side: sd, n: f > 0.68 ? 4 : 10 });
+    return sh;
+  });
+  if (f > 0.68) {
+    // thrown off: the strips fall away, flat
+    S.thrown = key;
+    for (let i = 0; i < 2; i++) for (const b of sheets[i].bodies({ flat: true, shadow: false, life: 0.7, fade: 0.45, backCol: '#16243c', glass: 'none' })) {
+      const dx = b.p.x - m.x, dy = b.p.y - m.y, d = Math.hypot(dx, dy) || 1;
+      b.v = K.V(dx / d * rnd(60, 170), dy / d * rnd(60, 170), rnd(140, 300));
+      b.w = K.V(rnd(-9, 9), rnd(-9, 9), rnd(-6, 6));
+      sim.add(b);
+    }
+    return;
+  }
+  for (const sh of sheets) sh.draw(g, Sp, { back: '#16243c', flat: true, sub: 1 });
+}
+/* The pieces he holds, hanging in his tube, flat and in 1.0's colours, each
+   on its string; rounds on the set rattle them, and crack his glass a little
+   more for each that is working one loose. */
+function orKeptDraw(g, hm, list, s, duel) {
+  const F = OPO_FIRST, S = OPR_ST, tb = orTube(hm), n = list.length;
+  const dt = clamp(uiTime - (S.setT || 0), 0, 0.1); S.setT = uiTime;
+  S.setKick *= Math.exp(-dt * 8);
+  const sz = Math.min(duel ? 7 : 10, tb.w / (n * 2.7)), jit = S.setKick * 3;
+  for (let i = 0; i < n; i++) {
+    const k = list[i], x = tb.x + (i - (n - 1) / 2) * sz * 2.6 + (jit ? rnd(-jit, jit) : 0);
+    const y = tb.y + (duel ? tb.h * 0.28 : tb.h * 0.08) + oaSteps((Math.sin(uiTime * 1.6 + i * 1.3) + 1) / 2, 3) * 2 + (jit ? rnd(-jit, jit) : 0);
+    g.strokeStyle = 'rgba(226,232,240,0.55)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, tb.y - tb.h / 2 + 2); g.lineTo(x, y - sz); g.stroke();
+    g.fillStyle = 'rgba(5,6,10,0.75)'; g.fillRect(x - sz * 1.15, y - sz * 1.15, sz * 2.3, sz * 2.3);
+    orGlyph(g, k, x, y, sz, 'flat');
+  }
+  // worked loose: his glass cracking, a line for each round it has taken
+  if (s && s.of && s.hits > 0 && !duel) {
+    const R = OPO_KIT.rng(911), m = Math.min(12, Math.round(s.hits / s.of * 12));
+    g.strokeStyle = 'rgba(226,232,240,0.85)'; g.lineWidth = 1;
+    const cx = tb.x + tb.w * 0.18, cy = tb.y - tb.h * 0.18;
+    for (let i = 0; i < m; i++) {
+      const a = R() * TAU, l = tb.w * (0.18 + 0.3 * R());
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * l * 0.5 + (R() - 0.5) * 6, cy + Math.sin(a) * l * 0.5 + (R() - 0.5) * 6); g.lineTo(cx + Math.cos(a) * l, cy + Math.sin(a) * l); g.stroke();
+    }
+    g.font = '700 10px ' + F.font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = F.bg; g.fillRect(tb.x - 22, tb.y + tb.h / 2 + 4, 44, 14);
+    g.fillStyle = OPO_COL; g.fillText(s.hits + ' / ' + s.of, tb.x, tb.y + tb.h / 2 + 11);
+  }
+}
+/* His memory of the ship, out of his tube: VOIDRUNNER as he kept it, flat in
+   1.0's colours, a size up, a picture (its scanlines show). It comes out on
+   the tube's light and is drawn down in rows, the old renderer's way. Before
+   the marked one it winds back: a rewind round it, closing. Awake, it is
+   rattled: split like his set when he is past himself, chips of it gone, and
+   its health is a bar in the first build's style. */
+function orCopyDraw(g, c, hm) {
+  const F = OPO_FIRST, K = OPO_KIT, S = OPR_ST, sc = c.r / 13, awake = c.ph === 'awake' || c.ph === 'finish', hp = awake ? oaC01(c.hp) : 1;
+  // the light it came out on, from his tube, in steps
+  if (c.k < 1 && hm) {
+    const tb = orTube(hm), b = oaSteps(1 - c.k, 5);
+    g.globalAlpha = 0.16 * b; g.fillStyle = OPO_COL;
+    g.beginPath(); g.moveTo(tb.x - tb.w / 2, tb.y + tb.h / 2); g.lineTo(tb.x + tb.w / 2, tb.y + tb.h / 2); g.lineTo(c.x + 26, c.y); g.lineTo(c.x - 26, c.y); g.closePath(); g.fill();
+    g.globalAlpha = 0.5 * b; g.strokeStyle = OPO_COL; g.lineWidth = 1.5; g.setLineDash([6, 6]); g.stroke(); g.setLineDash([]);
+    g.globalAlpha = 1;
+  }
+  const reveal = oaSteps(c.k, 9);
+  if (reveal <= 0) return;
+  const shake = awake ? (1 - hp) * 2.6 + c.hurt * 8 : c.hurt * 3;
+  const jx = shake ? rnd(-shake, shake) : 0, jy = shake ? rnd(-shake, shake) : 0;
+  g.save();
+  g.translate(c.x + jx, c.y + jy); g.rotate(c.ang); g.scale(sc, sc);
+  // drawn down in rows as it comes out
+  if (reveal < 1) { g.beginPath(); for (let r = -15; r < 15; r += 2) if (K.hash(r * 3.7 + 11) < reveal) g.rect(-14, r, 36, 2); g.clip(); }
+  // what of it is still whole
+  if (awake && hp < 1) {
+    if (!S.copyCells) S.copyCells = K.voronoi(K.rect(-12, -15, 32, 30), 22, 4242);
+    const gone = Math.floor((1 - hp) * 15);
+    g.beginPath();
+    S.copyCells.forEach((cell, i) => { if (K.hash(i * 5.1 + 2) * 15 >= gone || i === 0) orPathAdd(g, cell.pts.map(p => [p.x, p.y])); });
+    g.clip();
+  }
+  // split, when it is rattled
+  if (awake) {
+    const sp = 1.2 + (1 - hp) * 2.6 + c.hurt * 3;
+    g.globalAlpha = 0.5;
+    for (const [dy, col] of [[-sp, '#ff3b30'], [sp, '#22d3ee']]) { g.save(); g.translate(0, dy); orPath(g, ORH_BASE); g.strokeStyle = col; g.lineWidth = 2 / sc; g.stroke(); g.restore(); }
+    g.globalAlpha = 1;
+  }
+  const hurt = c.hurt > 0.05;
+  orHullFlat(g, { stroke: hurt ? '#ffffff' : c.mark > 0 ? oaMix(F.player, '#ffffff', c.mark) : F.player, fill: hurt ? '#475569' : '#0a1d28', lw: 2 / sc, dot: hurt ? '#ffffff' : '#e0f2fe' });
+  // its scanlines: it is a picture of the ship
+  g.save(); orPath(g, ORH_BASE); g.clip();
+  g.globalAlpha = 0.4; g.fillStyle = '#000';
+  const roll = oaSteps((uiTime * 0.6) % 1, 6) * 2.4;
+  for (let x = -12 + roll; x < 20; x += 2.4) g.fillRect(x, -15, 0.8, 30);
+  g.restore();
+  g.restore();
+  // the tell: it winds back, a rewind round it, closing
+  if (c.mark > 0) {
+    const m = oaSteps(c.mark, 6), R = c.r + 54 * (1 - m);
+    g.globalAlpha = 0.4 + 0.6 * m; g.strokeStyle = '#ffffff'; g.lineWidth = 3;
+    g.beginPath(); g.arc(c.x, c.y, R, 0, TAU); g.stroke();
+    g.setLineDash([5, 7]); g.lineDashOffset = uiTime * 30; g.strokeStyle = OA_DEL; g.lineWidth = 2;
+    g.beginPath(); g.arc(c.x, c.y, R + 9, 0, TAU); g.stroke(); g.setLineDash([]);
+    // rewind, toward you
+    const fx = Math.cos(c.ang), fy = Math.sin(c.ang), px = c.x + fx * (c.r + 18), py = c.y + fy * (c.r + 18);
+    g.fillStyle = '#ffffff';
+    for (const off of [0, 9]) { const bx = px + fx * off, by = py + fy * off; g.beginPath(); g.moveTo(bx - fx * 7 - fy * 6, by - fy * 7 + fx * 6); g.lineTo(bx + fx * 4, by + fy * 4); g.lineTo(bx - fx * 7 + fy * 6, by - fy * 7 - fx * 6); g.closePath(); g.fill(); }
+    g.globalAlpha = 1;
+  }
+  // awake, its health, as the first build drew a bar
+  if (awake) {
+    const bw = 52, bx = c.x - bw / 2, by = c.y - c.r - 22;
+    g.fillStyle = F.bg; g.fillRect(bx - 2, by - 2, bw + 4, 9);
+    g.strokeStyle = F.wall; g.lineWidth = 1; g.strokeRect(bx - 2, by - 2, bw + 4, 9);
+    g.fillStyle = hp < 0.35 ? OA_DEL : F.player; g.fillRect(bx, by, bw * oaSteps(hp, 26), 5);
+    g.font = '700 8px ' + F.font; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillStyle = '#64748b';
+    g.fillText('1 . 0', c.x, by - 4);
+  }
+}
+/* Its rounds: the first build's own, a flat dot and a flat ring, with where
+   it was a moment ago behind it in steps. The marked one is the slow revert
+   he made every night: flat white, a rewind on it, a red ring turning round
+   it, and round that, dashed in today's green, the band to graze it in. */
+function orCopyShotDraw(g, s) {
+  const F = OPO_FIRST, sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
+  if (!s.mark) {
+    for (let i = 3; i >= 1; i--) { g.globalAlpha = 0.16 * (4 - i); g.fillStyle = F.bullet; g.beginPath(); g.arc(s.x - ux * i * 10, s.y - uy * i * 10, s.r * (1 - i * 0.17), 0, TAU); g.fill(); }
+    g.globalAlpha = 1;
+    g.fillStyle = s.paired ? '#f8fafc' : F.bullet; g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+    g.strokeStyle = F.player; g.lineWidth = 2; g.beginPath(); g.arc(s.x, s.y, s.r + 2.5, 0, TAU); g.stroke();
+    return;
+  }
+  const band = (P ? P.r : 13) + s.r + OPR.graze.round + 4;
+  g.setLineDash([4, 6]); g.lineDashOffset = -oaSteps((uiTime * 0.8) % 1, 8) * 20;
+  g.globalAlpha = 0.75; g.strokeStyle = OA_ADD; g.lineWidth = 1.5;
+  g.beginPath(); g.arc(s.x, s.y, band, 0, TAU); g.stroke();
+  g.setLineDash([]);
+  g.font = '800 12px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OA_ADD;
+  for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + oaSteps((uiTime * 0.3) % 1, 8) * TAU; g.fillText('+', s.x + Math.cos(a) * band, s.y + Math.sin(a) * band); }
+  g.globalAlpha = 1;
+  g.setLineDash([5, 5]); g.lineDashOffset = uiTime * 40; g.strokeStyle = OA_DEL; g.lineWidth = 2.5;
+  g.beginPath(); g.arc(s.x, s.y, s.r + 8, 0, TAU); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#f8fafc'; g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+  g.strokeStyle = '#05060a'; g.lineWidth = 2; g.stroke();
+  // rewind, back the way it came
+  g.fillStyle = '#05060a';
+  for (const off of [-4, 4]) { const bx = s.x + ux * off, by = s.y + uy * off; g.beginPath(); g.moveTo(bx + ux * 4 - uy * 6, by + uy * 4 + ux * 6); g.lineTo(bx - ux * 5, by - uy * 5); g.lineTo(bx + ux * 4 + uy * 6, by + uy * 4 - ux * 6); g.closePath(); g.fill(); }
+  g.font = '700 10px ' + F.font; g.textBaseline = 'bottom'; g.fillStyle = OPO_COL;
+  g.fillText('PUT IT BACK', s.x, s.y - band - 4);
+}
+/* The copy breaking back into his set: its picture in shards, flung out and
+   then drawn back up into his tube, turning, shrinking, flat. */
+function orBreakDraw(g, s, hm) {
+  const K = OPO_KIT, S = OPR_ST, img = orFlatTex(), key = Math.round(s.x) + ',' + Math.round(s.y);
+  if (!S.brk || S.brk.key !== key) {
+    const ang = S.copy ? S.copy.ang : -Math.PI / 2, sc = S.copy ? S.copy.r / 13 : 1.4;
+    const cells = K.voronoi(K.rect(-11, -14, 30, 28), 16, 8080).filter(c => c.area > 4);
+    S.brk = { key, ang, sc, shards: cells.map((c, i) => ({ c, a: K.hash(i * 3.3) * TAU, r: 30 + 70 * K.hash(i * 7.7), spin: (K.hash(i) - 0.5) * 9, d: K.hash(i * 1.9) * 0.3 })) };
+  }
+  const B = S.brk, tb = hm ? orTube(hm) : { x: s.x, y: s.y - 400, w: 60, h: 50 };
+  for (const sh of B.shards) {
+    const t = s.t - sh.d;
+    if (t <= 0) continue;
+    const out = K.ease.cubicOut(oaC01(t / 0.35)), back = K.ease.in(oaC01((t - 0.35) / 0.85));
+    if (back >= 1) continue;
+    const fx = s.x + Math.cos(sh.a) * sh.r * out, fy = s.y + Math.sin(sh.a) * sh.r * out;
+    const x = lerp(fx, tb.x, back), y = lerp(fy, tb.y, back), k = (1 - back * 0.85) * B.sc;
+    g.save();
+    g.translate(x, y); g.rotate(B.ang + sh.spin * t); g.scale(k, k); g.translate(-sh.c.c.x, -sh.c.c.y);
+    orPath(g, sh.c.pts.map(p => [p.x, p.y])); g.save(); g.clip();
+    g.drawImage(img, -12, -14, 32, 28);
+    g.restore();
+    g.strokeStyle = OPO_COL; g.lineWidth = 1.2 / k; g.stroke();
+    g.restore();
+  }
+  // where it broke, in steps
+  const a = oaC01(s.t / 0.6);
+  if (a < 1) { g.globalAlpha = 1 - oaSteps(a, 4); g.strokeStyle = OPO_COL; g.lineWidth = 3; g.beginPath(); g.arc(s.x, s.y, 20 + 90 * oaSteps(a, 4), 0, TAU); g.stroke(); g.globalAlpha = 1; }
+}
+
+/* ------------------------------- the screen's -------------------------------
+   The words of the diff at the hull: each piece back or taken, each graze's
+   pay, each gun as it grows, rising off it and going. */
+function orLabels(g, w, h) {
+  const S = OPR_ST, K = OPO_KIT;
+  for (let i = S.labels.length - 1; i >= 0; i--) if (uiTime - S.labels[i].t0 > S.labels[i].life) S.labels.splice(i, 1);
+  if (!S.labels.length || !P) return;
+  const at = oaScreenOf(P.x, P.y);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  for (const l of S.labels) {
+    const a = uiTime - l.t0, pop = a < 0.18 ? K.ease.backOut(a / 0.18) : 1;
+    const al = oaC01(a / 0.06) * oaC01((l.life - a) / 0.45);
+    const x = clamp(at.x + (l.graze ? 46 : 0), 80, w - 80), y = clamp(at.y - (l.graze ? 10 : 44) - l.off - OPR_LABEL_RISE * (l.graze ? 0.6 : 1) * a, 60, h - 40);
+    g.save();
+    g.translate(x, y); g.scale(Math.max(0.01, pop), Math.max(0.01, pop)); g.globalAlpha = al;
+    g.font = '800 ' + l.size + 'px ' + OA_DISP;
+    g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, 0, 0, l.size * 2.4, l.col.length === 7 ? l.col : '#e2e8f0', 0.22 * al); g.restore();
+    g.strokeStyle = 'rgba(5,6,10,0.9)'; g.lineWidth = 4; g.strokeText(l.text, 0, 0);
+    g.fillStyle = l.col; g.fillText(l.text, 0, 0);
+    if (l.sub) {
+      g.font = '700 ' + Math.max(8, Math.round(l.size * 0.5)) + 'px ' + OA_MONO;
+      g.letterSpacing = '0.2em';
+      g.strokeText(l.sub, 0, l.size * 0.85); g.fillStyle = '#94a3b8'; g.fillText(l.sub, 0, l.size * 0.85);
+      g.letterSpacing = '0px';
+    }
+    g.restore();
+  }
+}
+/* THE AWAKENING's cut, over the frame: a white flash, light lines thrown out
+   from the hull, letterbox bars in, and its name written out across the
+   screen behind a scan, the four pieces' + lighting under it one by one. */
+function orWakeCut(g, w, h, wa) {
+  const K = OPO_KIT, at = P ? oaScreenOf(P.x, P.y) : { x: w / 2, y: h / 2 };
+  const fl = oaC01(1 - wa / 0.16), out = oaC01((2.9 - wa) / 0.5);
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  if (fl > 0) { g.fillStyle = 'rgba(224,250,255,' + (0.85 * fl).toFixed(3) + ')'; g.fillRect(0, 0, w, h); }
+  const ln = oaC01(1 - wa / 0.9);
+  if (ln > 0) for (let k = 0; k < 40; k++) {
+    const a = K.hash(k * 1.7) * TAU, r0 = 40 + 140 * K.hash(k * 5.1) + wa * 600, r1 = r0 + 60 + 200 * K.hash(k * 2.3);
+    g.strokeStyle = rgba(k % 4 ? '#a5f3fc' : '#ffffff', (0.5 * ln).toFixed(3)); g.lineWidth = 1 + 3 * K.hash(k * 9.1);
+    g.beginPath(); g.moveTo(at.x + Math.cos(a) * r0, at.y + Math.sin(a) * r0); g.lineTo(at.x + Math.cos(a) * r1, at.y + Math.sin(a) * r1); g.stroke();
+  }
+  g.restore();
+  // the bars
+  const bar = h * 0.075 * K.ease.inOut(oaC01(wa / 0.3)) * out;
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, bar); g.fillRect(0, h - bar, w, bar);
+  // its name
+  const tk = oaC01((wa - 0.3) / 0.45);
+  if (tk > 0 && out > 0) {
+    const size = Math.round(clamp(w * 0.075, 40, 92)), cy = h * 0.27;
+    g.save();
+    g.globalAlpha = out;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '700 ' + Math.round(size * 0.17) + 'px ' + OA_DISP; g.letterSpacing = '0.6em';
+    g.fillStyle = '#94a3b8'; g.fillText('AWAKENING', w / 2 + size * 0.05, cy - size * 0.72);
+    g.letterSpacing = '0.32em';
+    g.font = '800 ' + size + 'px ' + OA_DISP;
+    const tw = g.measureText('IMAGO').width;
+    g.save();
+    g.beginPath(); g.rect(w / 2 - tw / 2 - 30, cy - size, (tw + 60) * K.ease.cubicOut(tk), size * 2); g.clip();
+    g.shadowColor = '#22d3ee'; g.shadowBlur = 34;
+    const gr = g.createLinearGradient(0, cy - size / 2, 0, cy + size / 2);
+    gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.55, '#a5f3fc'); gr.addColorStop(1, '#22d3ee');
+    g.fillStyle = gr; g.fillText('IMAGO', w / 2 + size * 0.16, cy);
+    g.restore();
+    if (tk < 1) { const sx = w / 2 - tw / 2 - 30 + (tw + 60) * K.ease.cubicOut(tk); g.fillStyle = '#ffffff'; g.fillRect(sx - 1.5, cy - size * 0.7, 3, size * 1.4); }
+    g.letterSpacing = '0px';
+    // the four pieces, one whole
+    for (let k = 0; k < 4; k++) {
+      const pk = oaC01((wa - 0.55 - k * 0.12) / 0.2);
+      if (pk <= 0) continue;
+      const x = w / 2 + (k - 1.5) * size * 0.62, y = cy + size * 0.78;
+      g.save(); g.translate(x, y); g.scale(K.ease.backOut(pk), K.ease.backOut(pk));
+      g.font = '800 ' + Math.round(size * 0.24) + 'px ' + OA_MONO; g.fillStyle = OA_ADD; g.fillText('+', -size * 0.15, 0);
+      g.restore();
+      orGlyph(g, k, x + size * 0.06, y, size * 0.1, 'lit', pk);
+    }
+    g.restore();
+  }
+}
+/* ONE SHIP's count: a pip for each round met, its half and his, dead even. */
+function orPips(g, w, h, s) {
+  const n = s.of || 24, met = Math.min(n, s.n | 0), pw = Math.min(13, (w * 0.4) / n), cx = w / 2, y = h - 94;
+  const flash = oaC01(1 - (uiTime - OPR_ST.meetAt) / 0.25);
+  g.save();
+  // its name to the left of the row, and the count to the right: his voice is just over it
+  g.font = '700 9px ' + OA_DISP; g.textAlign = 'right'; g.textBaseline = 'middle'; g.letterSpacing = '0.3em';
+  g.fillStyle = '#64748b'; g.fillText(s.ph === 'mark' ? 'THE MARKED ONE' : 'DEAD EVEN', cx - n * pw / 2 - 10, y);
+  g.letterSpacing = '0px'; g.textAlign = 'left'; g.font = '600 10px ' + OA_MONO;
+  g.fillStyle = met >= n ? '#f8fafc' : '#94a3b8'; g.fillText(met + ' / ' + n, cx + n * pw / 2 + 10, y);
+  for (let i = 0; i < n; i++) {
+    const x = cx + (i - (n - 1) / 2) * pw, on = i < met, last = i === met - 1;
+    g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + pw * 0.32, y); g.lineTo(x, y + 5); g.lineTo(x - pw * 0.32, y); g.closePath();
+    g.fillStyle = 'rgba(8,12,20,0.8)'; g.fill(); g.strokeStyle = '#1e293b'; g.lineWidth = 1; g.stroke();
+    if (!on) continue;
+    g.save(); g.clip();
+    g.fillStyle = '#67e8f9'; g.fillRect(x - pw, y - 6, pw, 12);
+    g.fillStyle = '#f8fafc'; g.fillRect(x, y - 6, pw, 12);
+    g.restore();
+    if (last && flash > 0) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, x, y, 14, '#a5f3fc', flash); g.restore(); }
+  }
+  g.restore();
+}
+
+/* ------------------------------- the hooks ------------------------------- */
 const OPR_ART = {
   hull(g, h) {
-    const F = OPO_FIRST, lit = h.awake ? 1 : h.whole;
+    const S = OPR_ST, K = OPO_KIT, F = OPO_FIRST, mat = !!FXO.mat, t = h.t;
+    orEv();
+    orLit(g, h.x, h.y);
+    // what only the drawing tracks: a round leaving (its muzzles), a molt beginning
+    if (typeof P !== 'undefined' && P.fireT > S.fireT + 0.004) S.muzzleAt = uiTime;
+    S.fireT = P ? P.fireT : 0;
+    if (h.molt) {
+      if (h.molt.f < S.moltF - 0.05 || !S.moltKey) S.moltKey = String(uiTime);
+      S.moltF = h.molt.f;
+      S.molt = { k: h.molt.k, f: h.molt.f, x: h.x, y: h.y, ang: h.ang, key: S.moltKey }; S.moltAt = uiTime;
+    } else { S.moltF = 9; S.moltKey = ''; }
+    const n = h.have.reduce((a, b) => a + (b ? 1 : 0), 0);
+    const L = orLightIn(h.ang), heat = oaC01(Math.exp(-(uiTime - S.muzzleAt) * 13));
+    const q = k => oaC01(1 - (uiTime - S.arrive[k]) / 1.4);
+    // before he takes it, it is today's VOIDRUNNER; once he has, it drains to his memory of it, a scan down it
+    const pre = S.tookAt < 0 && h.due === 0 && t < OPR_TAKE_AT && !h.awake;
+    const drain = S.tookAt >= 0 ? oaC01((uiTime - S.tookAt) / 0.7) : pre ? 0 : 1;
     g.save();
     g.translate(h.x, h.y); g.rotate(h.ang);
-    if (lit > 0.01) {                         // what came back is lit
-      g.globalCompositeOperation = 'lighter';
-      g.globalAlpha = 0.25 * lit; g.lineWidth = 7; g.strokeStyle = F.player;
-      hullPath(h.id); g.stroke();
-      g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    if (h.phasing) g.globalAlpha = 0.55;
+    const wa = h.awake ? h.wakeAge : -1;
+    if (wa < 0 || wa < 0.45) {
+      // the hull at its stage: his memory of it, and what has come back lit over it
+      const cross = wa >= 0 ? 1 - oaC01((wa - 0.18) / 0.27) : 1;
+      g.save();
+      g.globalAlpha *= cross;
+      const all = wa >= 0, have = all ? [1, 1, 1, 1] : h.have, lit = all ? 1 : n / 4;
+      orGlowEdge(g, ORH_BASE, lit * 0.9, '#67e8f9', 5, 1);
+      orHullFlat(g, { stroke: h.grey > 0 ? oaMix(F.player, '#475569', h.grey) : F.player });
+      if (drain < 1) {
+        // today's, going behind the scan as he takes it (nose first)
+        const sx = lerp(20, -13, drain), cx = drain > 0 ? sx : 60;
+        g.save(); g.beginPath(); g.rect(-60, -60, cx + 60, 120); g.clip();
+        orHullToday(g, 1, L, t, mat);
+        g.restore();
+        if (drain > 0) {
+          g.save(); g.globalCompositeOperation = 'lighter';
+          g.fillStyle = 'rgba(255,255,255,0.9)'; g.fillRect(sx - 0.6, -15, 1.2, 30);
+          oaGlow(g, sx, 0, 12, '#e2e8f0', 0.6);
+          g.restore();
+        }
+      } else if (lit > 0) {
+        orHullToday(g, lit * 0.85, L, t, mat);
+      }
+      if (have[2]) orLattice(g, t, all ? 1 : q(2), mat);
+      if (have[0]) orPlating(g, L, all ? 1 : q(0), all ? 1 : h.guard, t, mat);
+      if (have[3]) orCore(g, L, t, all ? 1 : q(3), mat, lit > 0 ? '#67e8f9' : F.player);
+      if (have[1]) orBarrels(g, L, all ? 1 : q(1), heat, mat);
+      if (!all) for (let k = 0; k < OPR_PIECES.length; k++) if (k < h.due && !have[k]) orGhost(g, k, t);
+      // the seam, at a molt: a hairline down the spine, white, opening
+      if (h.molt && h.molt.f < 0.55) {
+        const m = h.molt.f, op = oaC01(m / 0.12), C = OPR_PC[h.molt.k];
+        g.save(); g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = 'rgba(255,255,255,' + (0.95 * (1 - m / 0.55)).toFixed(3) + ')'; g.lineWidth = 0.6 + 1.4 * op;
+        g.beginPath(); g.moveTo(lerp(3, 20, op), 0); g.lineTo(lerp(3, -12, op), 0); g.stroke();
+        oaGlow(g, 3, 0, 16 + 10 * op, C.glow, 0.7 * (1 - m / 0.55));
+        g.restore();
+      }
+      // under his brush: its colour going, and his strokes over it
+      if (h.grey > 0) {
+        g.save();
+        orPath(g, ORH_BASE); orPathAdd(g, orEdgePlate(...ORH_PLATES[2])); orPathAdd(g, orMirror(orEdgePlate(...ORH_PLATES[2])));
+        g.clip();
+        g.globalCompositeOperation = 'saturation'; g.globalAlpha = Math.min(1, h.grey * 1.2); g.fillStyle = '#808080'; g.fillRect(-16, -18, 40, 36);
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = h.grey * 0.75;
+        g.strokeStyle = F.grid2; g.lineWidth = 3.2; g.lineCap = 'square';
+        g.beginPath(); for (let i = 0; i < 7; i++) { const x = 16 - i * 4.4; g.moveTo(x, -14); g.lineTo(x - 3, 14); } g.stroke();
+        g.restore();
+      }
+      g.restore();
     }
-    hullPath(h.id);
-    g.fillStyle = h.hurt ? 'rgba(239,68,68,0.5)' : h.phasing ? 'rgba(167,139,250,0.12)' : F.bg;
-    g.fill();
-    g.lineWidth = 2; g.strokeStyle = h.grey > 0 ? oaMix(F.player, '#475569', h.grey) : F.player; g.stroke();
-    // the pieces it has back, one mark each
-    g.lineCap = 'round';
-    if (h.have[0]) { g.strokeStyle = OPR_PIECE_COL[0]; g.lineWidth = 3.5;   // plating: along the wings
-      g.beginPath(); g.moveTo(5.5, 8.5); g.lineTo(-5, 13); g.moveTo(5.5, -8.5); g.lineTo(-5, -13); g.stroke(); }
-    if (h.have[1]) { g.strokeStyle = OPR_PIECE_COL[1]; g.lineWidth = 3;     // a second barrel
-      g.beginPath(); g.moveTo(-6, 5); g.lineTo(-15, 5); g.moveTo(-6, -5); g.lineTo(-15, -5); g.stroke(); }
-    if (h.have[2]) { g.strokeStyle = OPR_PIECE_COL[2]; g.lineWidth = 1;     // the lattice
-      g.beginPath(); g.moveTo(3, 0); g.lineTo(-5, 12); g.moveTo(3, 0); g.lineTo(-5, -12); g.moveTo(0, 5); g.lineTo(-7, 5); g.moveTo(0, -5); g.lineTo(-7, -5); g.stroke(); }
-    if (h.have[3]) { g.fillStyle = '#05060a'; g.beginPath(); g.arc(3, 0, 3.4, 0, TAU); g.fill();   // the core
-      g.strokeStyle = OPR_PIECE_COL[3]; g.lineWidth = 1.2; g.stroke(); }
-    if (h.molt) { g.globalAlpha = 1 - h.molt.f; g.strokeStyle = '#ffffff'; g.lineWidth = 1.5;
-      g.beginPath(); g.moveTo(20, 0); g.lineTo(-12, 0); g.stroke(); g.globalAlpha = 1; }
-    if (h.awake) { g.globalAlpha = 0.5 + 0.3 * Math.sin(h.t * 6); g.strokeStyle = '#fde68a'; g.lineWidth = 1;
-      g.beginPath(); g.arc(0, 0, h.r + 7, 0, TAU); g.stroke(); g.globalAlpha = 1; }
+    if (wa >= 0) {
+      const sh = oaC01((wa - 0.18) / 0.27);
+      if (sh > 0) { g.save(); g.globalAlpha *= sh; orImago(g, h, L, t, mat); g.restore(); }
+    }
+    // the game's own states, over it: the hurt flash, Ghost Step's violet
+    if (h.hurt) { orPath(g, h.awake ? ORH_IMAGO : ORH_BASE); g.fillStyle = 'rgba(239,68,68,0.42)'; g.fill(); orPath(g, ORH_BASE); g.strokeStyle = '#fecaca'; g.lineWidth = 1.6; g.stroke(); }
+    if (h.phasing) { g.globalAlpha = 1; orPath(g, ORH_BASE); g.strokeStyle = '#c4b5fd'; g.lineWidth = 1.6; g.stroke(); }
     g.restore();
     orTag(g, 'hull', h.x + 18, h.y - 24);
   },
   growths(g, s) {
+    const S = OPR_ST, mat = !!FXO.mat, L = orLightIn(s.ang), t = s.t;
+    orEv();
+    // the rotary gun turns, faster while it fires
+    const dt = clamp(uiTime - S.spinAt, 0, 0.1); S.spinAt = uiTime;
+    let firing = 0;
     g.save();
     g.translate(s.x, s.y); g.rotate(s.ang);
-    g.lineCap = 'butt';
-    for (const q of s.list) {
-      const k = q.k, y = q.side * 10, back = 2 - q.kick * 3;
-      g.globalAlpha = 0.4 + 0.6 * k; g.strokeStyle = '#fde68a'; g.fillStyle = 'rgba(253,230,138,0.15)';
-      if (q.id === 'barrels') { g.lineWidth = 4; g.beginPath(); g.moveTo(-8 + back, -4); g.lineTo(-8 + back + 30 * k, -4); g.moveTo(-8 + back, 4); g.lineTo(-8 + back + 30 * k, 4); g.stroke(); }
-      else if (q.id === 'rifle') { g.lineWidth = 2; g.beginPath(); g.moveTo(-10 + back, y * 1.4); g.lineTo(-10 + back + 40 * k, y * 1.4); g.stroke(); }
-      else if (q.id === 'cannon') { g.lineWidth = 9; g.beginPath(); g.moveTo(-14 + back, 0); g.lineTo(-14 + back + 44 * k, 0); g.stroke(); }
-      else if (q.id === 'gatling') { g.lineWidth = 5; g.beginPath(); g.moveTo(-4, y * 1.8); g.lineTo(-4 + 18 * k, y * 1.8); g.stroke(); }
-      else if (q.id === 'rail') { g.lineWidth = 1.5; g.beginPath(); g.moveTo(-18, 0); g.lineTo(-18 + 64 * k, 0); g.stroke(); }
-      else if (q.id === 'pods') { g.lineWidth = 1.5; g.strokeRect(-12, y * 1.6 - 4, 10 * k, 8); }
-      else if (q.id === 'crown') { g.lineWidth = 2; for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + s.t * 0.5; g.beginPath(); g.moveTo(Math.cos(a) * 18, Math.sin(a) * 18); g.lineTo(Math.cos(a) * (18 + 8 * k), Math.sin(a) * (18 + 8 * k)); g.stroke(); } }
+    const list = s.list.slice().sort((a, b) => (OPR_GROW_LAYER[a.id] || 0) - (OPR_GROW_LAYER[b.id] || 0));
+    for (const q of list) {
+      const rec = orRecoil(q.i, q.kick), k = oaC01(q.k), ge = k < 1 ? OPO_KIT.ease.backOut(k) : 1;
+      if (q.id === 'gatling') firing = Math.max(firing, rec);
+      const draw = OPR_GROW[q.id];
+      if (!draw) continue;
+      // it grows out of its back, from the spine outward
+      const rx = -6, ry = q.side * 5;
+      g.save();
+      g.translate(rx, ry); g.scale(Math.max(0.02, ge), Math.max(0.02, ge)); g.translate(-rx, -ry);
+      g.globalAlpha = oaC01(k * 4);
+      S.rim = mat ? 0.3 + 0.25 * (0.5 + 0.5 * Math.sin(t * 2.6)) : 0;
+      draw(g, q.side, rec, oaC01(q.kick), t, L, mat);
+      S.rim = 0;
+      g.restore();
+      if (k < 1) {
+        g.save(); g.globalCompositeOperation = 'lighter';
+        oaGlow(g, rx, ry, 13, '#fde68a', 0.65 * (1 - k));
+        g.strokeStyle = rgba('#ffffff', (1 - k).toFixed(3)); g.lineWidth = 1;
+        g.beginPath(); g.moveTo(-14, ry); g.lineTo(4, ry); g.stroke();
+        g.restore();
+      }
     }
-    g.globalAlpha = 1;
     g.restore();
+    S.spin += dt * (firing > 0.1 ? 38 : 1.5);
     orTag(g, 'growths', s.x + 18, s.y + 14);
   },
   trail(g, s) {
-    if (s.pts.length < 2) return;
-    g.globalCompositeOperation = 'lighter';
-    for (let i = 1; i < s.pts.length; i++) {
-      const a = s.pts[i - 1], b = s.pts[i];
-      g.globalAlpha = 0.6 * clamp(1 - (s.t - b.t) / s.keep, 0, 1);
-      g.strokeStyle = OPR_PIECE_COL[2]; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    const C = OPR_PC[2], pts = s.pts, n = pts.length, mat = !!FXO.mat;
+    if (n < 2) return;
+    orEv();
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round'; g.lineJoin = 'round';
+    for (let i = 1; i < n; i++) {
+      const a = pts[i - 1], b = pts[i], f = oaC01(1 - (s.t - b.t) / s.keep);
+      if (f <= 0.01) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d, w = 4.5 + 2.5 * f;
+      // the light itself, soft
+      if (mat) { g.strokeStyle = rgba(C.mid, (0.13 * f).toFixed(3)); g.lineWidth = 18 * f + 4; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); }
+      // two rails, and the rungs crossing between them: the lattice, left lying on the floor
+      g.strokeStyle = rgba(C.glow, (0.7 * f).toFixed(3)); g.lineWidth = 1.1;
+      g.beginPath();
+      g.moveTo(a.x + nx * w, a.y + ny * w); g.lineTo(b.x + nx * w, b.y + ny * w);
+      g.moveTo(a.x - nx * w, a.y - ny * w); g.lineTo(b.x - nx * w, b.y - ny * w);
+      const sd = i % 2 ? 1 : -1;
+      g.moveTo(a.x + nx * w * sd, a.y + ny * w * sd); g.lineTo(b.x - nx * w * sd, b.y - ny * w * sd);
+      g.stroke();
+      if (mat && i % 2 === 0) { oaGlow(g, b.x, b.y, 9, C.glow, 0.45 * f); g.fillStyle = rgba(C.lit, f.toFixed(3)); g.beginPath(); g.arc(b.x + nx * w * sd, b.y + ny * w * sd, 1.3, 0, TAU); g.fill(); }
     }
-    orTag(g, 'trail', s.pts[0].x, s.pts[0].y);
+    const hd = pts[n - 1];
+    if (mat) oaGlow(g, hd.x, hd.y, 16, C.lit, 0.4);
+    orTag(g, 'trail', pts[0].x, pts[0].y);
   },
   patch(g, p) {
-    g.setLineDash([5, 6]); g.globalAlpha = 0.5 + 0.4 * p.k; g.strokeStyle = '#e2e8f0'; g.lineWidth = 1.5;
-    g.beginPath(); g.arc(p.x, p.y, p.r, 0, TAU); g.stroke(); g.setLineDash([]);
-    g.globalAlpha = 0.9; g.beginPath(); g.arc(p.x, p.y, p.r, -Math.PI / 2, -Math.PI / 2 + TAU * p.k); g.lineWidth = 3; g.stroke();
-    orTag(g, 'patch', p.x + p.r, p.y);
+    const F = OPO_FIRST, K = OPO_KIT, k = oaC01(p.k), r = Math.max(1, p.r);
+    // the floor under it, going back to 1.0 a row at a time
+    const rows = 16, band = (2 * r) / rows, seed = Math.round(p.x * 0.37 + p.y * 0.11);
+    g.save();
+    g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.clip();
+    g.beginPath();
+    let any = false;
+    for (let i = 0; i < rows; i++) if (K.hash(i * 7.3 + seed) < k * 1.15) { g.rect(p.x - r, p.y - r + i * band, 2 * r, band); any = true; }
+    if (any) { g.clip(); oaOldGround(g, p.x - r, p.y - r, 2 * r, 2 * r, 0, 0); }
+    g.restore();
+    // its edge in 1.0's dashes, and how far the paint has got, in steps
+    g.setLineDash([6, 6]); g.lineDashOffset = -uiTime * 20;
+    g.strokeStyle = OPO_COL; g.globalAlpha = 0.7; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.globalAlpha = 1; g.lineWidth = 4; g.strokeStyle = '#ffffff'; g.lineCap = 'butt';
+    g.beginPath(); g.arc(p.x, p.y, r + 4, -Math.PI / 2, -Math.PI / 2 + TAU * oaSteps(k, 16)); g.stroke();
+    // the rim, where you want to be: today's, a + on it
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.setLineDash([3, 9]); g.lineDashOffset = uiTime * 14;
+    g.strokeStyle = rgba('#4ade80', 0.4); g.lineWidth = 1.5; g.beginPath(); g.arc(p.x, p.y, r + 24, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.font = '800 12px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = rgba('#4ade80', 0.7);
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + uiTime * 0.4; g.fillText('+', p.x + Math.cos(a) * (r + 24), p.y + Math.sin(a) * (r + 24)); }
+    g.restore();
+    g.font = '800 ' + Math.round(18 + 14 * k) + 'px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha = 0.35 + 0.6 * k; g.fillStyle = OA_DEL; g.fillText('−', p.x, p.y);
+    g.globalAlpha = 1;
+    orTag(g, 'patch', p.x + r, p.y);
   },
   kept(g, s) {
-    const n = s.all ? 4 : s.kept.length;
-    for (let i = 0; i < n; i++) {
-      const k = s.all ? i : s.kept[i], x = s.x - (n - 1) * 9 + i * 18, y = s.y - s.r * 1.4;
-      g.fillStyle = OPR_PIECE_COL[k]; g.fillRect(x - 6, y - 6, 12, 12);
-    }
-    if (s.kept.length) oaText(g, s.hits + ' / ' + s.of, s.x, s.y - s.r * 1.4 - 16, 10, '#94a3b8', 0.9);
+    // drawn in the old renderer's pass, over his set (orFlat): held here for it
+    OPR_ST.keptS = { kept: s.kept.slice(), hits: s.hits, of: s.of, all: s.all }; OPR_ST.keptAt = uiTime;
     orTag(g, 'kept', s.x + s.r, s.y - s.r * 1.6);
   },
   peel(g, p) {
-    const f = p.f, x = p.kept ? lerp(p.x0, p.x1, f) : p.x0, y = p.kept ? lerp(p.y0, p.y1, f) - Math.sin(f * Math.PI) * 50 : p.y0 + f * 30;
-    g.globalAlpha = p.kept ? 1 : 1 - f; g.fillStyle = OPR_PIECE_COL[p.k]; g.fillRect(x - 5, y - 5, 10, 10);
-    oaText(g, '− ' + p.n, x, y - 14, 9, OA_DEL, (p.kept ? 1 : 1 - f));
-    orTag(g, 'peel', x + 8, y);
+    const K = OPO_KIT, f = oaC01(p.f), drain = oaC01(f / 0.45);
+    if (p.kept) {
+      // into his set: up, over, and down into his tube, its light gone to 1.0's on the way
+      const u = K.ease.inOut(f), x = lerp(p.x0, p.x1, u), y = lerp(p.y0, p.y1, u), z = Math.sin(f * Math.PI) * 120, s = 8 * (1 + z / 300) * (1 - 0.35 * u);
+      g.globalAlpha = 0.3 * (1 - z / 260); g.fillStyle = '#000'; g.beginPath(); g.ellipse(x + z * 0.12, y + z * 0.2, s, s * 0.6, 0, 0, TAU); g.fill(); g.globalAlpha = 1;
+      g.save(); g.translate(x, y - z * 0.45); g.rotate(f * 5 + p.k);
+      orGlyph(g, p.k, 0, 0, s, 'lit', 1 - drain);
+      orGlyph(g, p.k, 0, 0, s, 'flat', drain);
+      g.restore();
+      for (let k = 1; k <= 4 && FXO.mat; k++) { const v = Math.max(0, f - k * 0.05), uu = K.ease.inOut(v); g.globalAlpha = 0.25 * (1 - k / 5); g.fillStyle = OPO_COL; g.fillRect(lerp(p.x0, p.x1, uu) - 2, lerp(p.y0, p.y1, uu) - Math.sin(v * Math.PI) * 54 - 2, 4, 4); }
+      g.globalAlpha = 1;
+    } else {
+      // to the floor: it pops off, drains, bounces once, and sinks into the floor in steps
+      const dir = K.hash(p.k * 3.1 + Math.round(p.x0)) < 0.5 ? -1 : 1;
+      const z = f < 0.55 ? Math.sin(f / 0.55 * Math.PI) * 46 : Math.sin((f - 0.55) / 0.2 * Math.PI) * 10 * (f < 0.75 ? 1 : 0);
+      const x = p.x0 + dir * f * 34, y = p.y0 + f * 22, s = 7 * (1 + z / 200);
+      const sink = f > 0.75 ? oaSteps(1 - (f - 0.75) / 0.25, 4) : 1;
+      g.globalAlpha = 0.35 * sink; g.fillStyle = '#000'; g.beginPath(); g.ellipse(x + z * 0.12, y + z * 0.2, s, s * 0.55, 0, 0, TAU); g.fill();
+      g.save(); g.translate(x, y - z * 0.5); g.rotate(dir * f * 7);
+      orGlyph(g, p.k, 0, 0, s, 'lit', (1 - drain) * sink);
+      orGlyph(g, p.k, 0, 0, s, 'flat', drain * sink);
+      g.restore();
+    }
+    orTag(g, 'peel', p.x0 + 8, p.y0);
   },
   copy(g, c) {
-    const F = OPO_FIRST;
-    g.globalAlpha = 0.3 + 0.7 * c.k;
-    g.save();
-    g.translate(c.x, c.y); g.rotate(c.ang);
-    g.scale(1.3, 1.3);
-    hullPath('runner');
-    g.fillStyle = c.hurt > 0 ? '#fecaca' : F.bg; g.fill();
-    g.strokeStyle = OPO_COL; g.lineWidth = 2; g.stroke();
-    g.restore();
-    if (c.mark > 0) { g.globalAlpha = c.mark; g.strokeStyle = '#ffffff'; g.lineWidth = 3;
-      g.beginPath(); g.arc(c.x, c.y, c.r + 40 * (1 - c.mark), 0, TAU); g.stroke(); }
-    if (c.ph === 'awake') { g.globalAlpha = 1; g.fillStyle = 'rgba(8,12,20,0.75)'; g.fillRect(c.x - 30, c.y - c.r - 14, 60, 5);
-      g.fillStyle = OPO_COL; g.fillRect(c.x - 30, c.y - c.r - 14, 60 * c.hp, 5); }
-    g.globalAlpha = 1;
+    // his memory of the ship is drawn in the old renderer's pass (orFlat): held here for it
+    OPR_ST.copy = { x: c.x, y: c.y, ang: c.ang, r: c.r, k: c.k, hurt: c.hurt, ph: c.ph, hp: c.hp, mark: c.mark, t: c.t }; OPR_ST.copyAt = uiTime;
+    if (c.ph !== 'awake' && c.ph !== 'finish') OPR_ST.copyCells = null;
     orTag(g, 'copy', c.x + c.r + 4, c.y);
   },
   copyShot(g, s) {
-    g.fillStyle = s.mark ? '#ffffff' : OPO_COL;
-    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
-    if (s.mark) { g.setLineDash([4, 4]); g.strokeStyle = OA_DEL; g.lineWidth = 2; g.beginPath(); g.arc(s.x, s.y, s.r + 10, 0, TAU); g.stroke(); g.setLineDash([]);
-      oaText(g, 'PUT IT BACK', s.x, s.y - s.r - 14, 9, '#ffffff', 0.9); orTag(g, 'copyShot', s.x + s.r + 12, s.y); }
+    const S = OPR_ST;
+    if (S.shotsAt !== uiTime) { S.shotsAt = uiTime; S.shots.length = 0; }
+    if (S.shots.length < 80) S.shots.push({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, mark: s.mark, paired: s.paired });
+    if (s.mark) orTag(g, 'copyShot', s.x + s.r + 12, s.y);
   },
   growShot(g, s) {
-    g.fillStyle = s.kind === 'missile' ? '#fb923c' : '#fde68a';
-    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+    const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp, col = OPR_GROW_COL[s.id] || '#fde68a', r = Math.max(1, s.r);
+    g.lineCap = 'round';
+    if (s.kind === 'missile') {
+      // smoke behind it (today's pass draws it), the flame, the missile
+      if (FXO.parts && rnd() < 0.8) OPR_ST.puffs.push({ x: s.x - ux * 8, y: s.y - uy * 8, vx: -ux * 40 + rnd(-14, 14), vy: -uy * 40 + rnd(-14, 14), t0: uiTime, life: rnd(0.9, 0.45) });
+      g.save(); g.globalCompositeOperation = 'lighter';
+      oaGlow(g, s.x - ux * 7, s.y - uy * 7, 12, '#fb923c', 0.9);
+      g.fillStyle = 'rgba(254,215,170,0.9)'; g.beginPath(); g.moveTo(s.x - ux * 4 - uy * 2, s.y - uy * 4 + ux * 2); g.lineTo(s.x - ux * (12 + rnd(0, 6)), s.y - uy * (12 + rnd(0, 6))); g.lineTo(s.x - ux * 4 + uy * 2, s.y - uy * 4 - ux * 2); g.closePath(); g.fill();
+      g.restore();
+      g.save(); g.translate(s.x, s.y); g.rotate(Math.atan2(uy, ux));
+      g.fillStyle = '#e2e8f0'; g.fillRect(-5, -1.6, 8, 3.2); g.fillStyle = '#f97316'; g.beginPath(); g.moveTo(3, -1.6); g.lineTo(6.5, 0); g.lineTo(3, 1.6); g.closePath(); g.fill();
+      g.fillStyle = '#64748b'; g.beginPath(); g.moveTo(-5, -1.6); g.lineTo(-7, -3.4); g.lineTo(-3, -1.6); g.moveTo(-5, 1.6); g.lineTo(-7, 3.4); g.lineTo(-3, 1.6); g.fill();
+      g.restore();
+      return;
+    }
+    g.globalCompositeOperation = 'lighter';
+    if (s.id === 'cannon') {
+      // one huge slow shell: white heat in a gold corona, the air round it bending
+      const tr = g.createLinearGradient(s.x, s.y, s.x - ux * 90, s.y - uy * 90);
+      tr.addColorStop(0, 'rgba(253,186,116,0.7)'); tr.addColorStop(1, 'rgba(234,88,12,0)');
+      g.strokeStyle = tr; g.lineWidth = r * 1.4; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - ux * 90, s.y - uy * 90); g.stroke();
+      oaGlow(g, s.x, s.y, r * 4.2, '#fb923c', 0.6); oaGlow(g, s.x, s.y, r * 2.2, '#fde68a', 0.85);
+      g.fillStyle = '#ffffff'; g.beginPath(); g.arc(s.x, s.y, r * 0.62, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(255,237,213,0.5)'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(s.x, s.y, r * (1.15 + 0.12 * Math.sin(uiTime * 30)), 0, TAU); g.stroke();
+    } else if (s.id === 'gatling') {
+      g.strokeStyle = 'rgba(253,224,71,0.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - ux * 30, s.y - uy * 30); g.stroke();
+      oaGlow(g, s.x, s.y, 8, col, 0.6);
+      g.fillStyle = '#fefce8'; g.beginPath(); g.arc(s.x, s.y, 1.6, 0, TAU); g.fill();
+    } else if (s.id === 'crown') {
+      g.strokeStyle = 'rgba(165,243,252,0.7)'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - ux * 18, s.y - uy * 18); g.stroke();
+      oaGlow(g, s.x, s.y, 13, col, 0.75);
+      g.fillStyle = '#ffffff'; g.beginPath(); g.arc(s.x, s.y, 2.4, 0, TAU); g.fill();
+    } else {
+      // the twin barrels' heavy shells: a slug of heat with a tracer behind it
+      g.strokeStyle = 'rgba(251,191,36,0.55)'; g.lineWidth = r * 0.9; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - ux * 52, s.y - uy * 52); g.stroke();
+      oaGlow(g, s.x, s.y, r * 3, col, 0.7);
+      g.save(); g.translate(s.x, s.y); g.rotate(Math.atan2(uy, ux));
+      g.fillStyle = '#fde68a'; g.beginPath(); g.ellipse(0, 0, r * 1.3, r * 0.55, 0, 0, TAU); g.fill();
+      g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(r * 0.3, 0, r * 0.7, r * 0.3, 0, 0, TAU); g.fill();
+      g.restore();
+    }
   },
   growBeam(g, b) {
-    g.globalCompositeOperation = 'lighter'; g.globalAlpha = 1 - b.k;
-    g.strokeStyle = b.id === 'rail' ? '#e0f2fe' : '#67e8f9'; g.lineWidth = b.w;
-    g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x0 + Math.cos(b.ang) * b.len, b.y0 + Math.sin(b.ang) * b.len); g.stroke();
+    const k = oaC01(b.k), fa = 1 - k, c = Math.cos(b.ang), s = Math.sin(b.ang), x1 = b.x0 + c * b.len, y1 = b.y0 + s * b.len, w = Math.max(1, b.w);
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    const line = (lw, col) => { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(x1, y1); g.stroke(); };
+    if (b.id === 'rail') {
+      // the rail: a long thin white line, gone almost at once, rings running down it
+      line(w * 4 * fa + 1, rgba('#7c3aed', (0.3 * fa).toFixed(3)));
+      line(w * 1.6 * fa + 0.5, rgba('#c4b5fd', (0.8 * fa).toFixed(3)));
+      line(Math.max(0.6, w * 0.5), rgba('#ffffff', fa.toFixed(3)));
+      g.strokeStyle = rgba('#ede9fe', (0.7 * fa).toFixed(3)); g.lineWidth = 1.2;
+      for (let d = 40 + k * 70; d < Math.min(b.len, 1200); d += 70) {
+        g.save(); g.translate(b.x0 + c * d, b.y0 + s * d); g.rotate(b.ang);
+        g.beginPath(); g.ellipse(0, 0, 2.4, 6 + 10 * k, 0, 0, TAU); g.stroke(); g.restore();
+      }
+      oaGlow(g, b.x0, b.y0, 24, '#c4b5fd', 0.9 * fa);
+    } else {
+      // a laser rifle: cyan, held a moment, its core white, fizzing along its edge
+      line(w * 3.4, rgba('#0891b2', (0.22 * fa).toFixed(3)));
+      line(w * 1.4, rgba('#67e8f9', (0.65 * fa).toFixed(3)));
+      line(w * 0.45, rgba('#ecfeff', (0.95 * fa).toFixed(3)));
+      g.fillStyle = rgba('#e0f2fe', (0.8 * fa).toFixed(3));
+      for (let i = 0; i < 14; i++) { const d = rnd(10, Math.min(b.len, 900)), o = rnd(-w, w) * 1.2; g.fillRect(b.x0 + c * d - s * o - 1, b.y0 + s * d + c * o - 1, 2, 2); }
+      oaGlow(g, b.x0, b.y0, 20 + w * 2, '#67e8f9', 0.9 * fa);
+      oaGlow(g, b.x0, b.y0, 8, '#ffffff', fa);
+    }
     orTag(g, 'growBeam', b.x0, b.y0);
   },
   copyBreak(g, s) {
-    const k = clamp(s.t / 1.2, 0, 1);
-    g.globalAlpha = 1 - k; g.strokeStyle = OPO_COL; g.lineWidth = 2;
-    for (let i = 0; i < 8; i++) { const a = i * TAU / 8, r = 10 + 90 * k; g.strokeRect(s.x + Math.cos(a) * r - 4, s.y + Math.sin(a) * r - 4, 8, 8); }
+    // drawn in the old renderer's pass (orFlat): held here for it
+    OPR_ST.brkS = { x: s.x, y: s.y, t: s.t }; OPR_ST.brkAt = uiTime;
     orTag(g, 'copyBreak', s.x, s.y);
   },
+  /* His bar, as the hull's record: under its name (as lit as the hull is, and
+     the build it is on), a line of the fight from 1.0 to what it wakes as.
+     What the hull has taken back is lit, each sequence's stretch in the
+     colour of the piece it had; what is still his is 1.0's, flat. The five
+     sequences under it; the four pieces as the diff has them. */
   record(g, w, h, r) {
-    const bw = Math.min(560, w * 0.62), x = (w - bw) / 2, y = 22;
-    g.fillStyle = 'rgba(8,12,20,0.75)'; g.fillRect(x, y, bw, 12);
-    g.fillStyle = OPO_COL; g.fillRect(x + 2, y + 2, (bw - 4) * r.frac, 8);
-    for (const s of r.seqs) { const lx = x + bw * s.until; g.fillStyle = '#05060a'; g.fillRect(lx - 1, y, 2, 12); }
-    oaText(g, 'ONE POINT OH' + (r.seq >= 0 && r.seqs[r.seq] ? '   ·   ' + r.seqs[r.seq].n : ''), w / 2, y + 26, 12, OPO_COL, 1);
-    r.pieces.forEach((p, k) => oaText(g, p.due ? (p.have ? '+ ' : '− ') + p.n : '· · ·', x + bw * (k + 0.5) / 4, y + 44, 9,
-      p.due ? (p.have ? OA_ADD : OA_DEL) : '#475569', 0.9));
-    orTag(g, 'record', x, y + 54);
+    const S = OPR_ST, K = OPO_KIT, F = OPO_FIRST, small = w < 900;
+    orEv();
+    orFlat(g);
+    const dt = clamp(uiTime - S.recT, 0, 0.1); S.recT = uiTime; S.recKick *= Math.exp(-dt * 9);
+    const bw = small ? w * 0.5 : Math.min(640, w * 0.62), x0 = (w - bw) / 2, y = 52, X = f => x0 + bw * f;
+    let fa = 1;
+    const hm = orHim();
+    if (hm) { const at = oaScreenOf(hm.x, hm.y), reach = hm.r * 3 * camZoom; if (at.y - reach < 100 && at.x + reach > x0 - 120 && at.x - reach < x0 + bw + 120) fa = 0.45; }
+    g.globalAlpha = fa;
+    const bg = g.createLinearGradient(0, 0, 0, 84);
+    bg.addColorStop(0, 'rgba(5,6,10,0.7)'); bg.addColorStop(1, 'rgba(5,6,10,0)');
+    g.fillStyle = bg; g.fillRect(x0 - 140, 0, bw + 280, 84);
+    // the name, as lit as the hull is
+    const back = r.pieces.filter(p => p.have).length, lit = r.awake ? 1 : back / 4;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '800 ' + (small ? 17 : 22) + 'px ' + OA_DISP; g.letterSpacing = '0.22em';
+    const name = r.awake ? 'IMAGO' : 'VOIDRUNNER';
+    if (lit > 0) { g.save(); g.globalCompositeOperation = 'lighter'; g.shadowColor = '#22d3ee'; g.shadowBlur = 18 * lit; g.fillStyle = rgba('#67e8f9', (0.6 * lit * fa).toFixed(3)); g.fillText(name, w / 2, 22); g.restore(); }
+    g.fillStyle = oaMix('#475569', r.awake ? '#ffffff' : '#e0f2fe', lit); g.fillText(name, w / 2, 22);
+    const nw = g.measureText(name).width;
+    g.letterSpacing = '0px';
+    g.font = '600 11px ' + OA_MONO; g.textAlign = 'left';
+    g.fillStyle = r.awake ? OA_ADD : back ? '#94a3b8' : OA_DEL;
+    g.fillText(r.awake ? '+ AWAKE' : 'v1.' + back, w / 2 + nw / 2 + 10, 24);
+    g.textAlign = 'center';
+    // still his: 1.0's, flat
+    const taken = oaC01(1 - r.frac);
+    g.strokeStyle = F.wall; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(X(taken), y); g.lineTo(X(1), y); g.stroke();
+    // taken back: lit, each stretch in the colour of the piece the hull had then
+    g.save(); g.globalCompositeOperation = 'lighter';
+    let from = 0;
+    r.seqs.forEach((s, i) => {
+      const to = 1 - s.until, b = Math.min(to, taken);
+      if (b > from) {
+        const col = i < 4 ? OPR_PC[i].glow : '#a5f3fc';
+        g.strokeStyle = col; g.globalAlpha = 0.28 * fa; g.lineWidth = 8; g.beginPath(); g.moveTo(X(from), y); g.lineTo(X(b), y); g.stroke();
+        g.globalAlpha = 0.95 * fa; g.lineWidth = 2.6; g.stroke();
+      }
+      from = to;
+    });
+    g.restore();
+    g.globalAlpha = fa;
+    // the sequences' lines, and their names under it
+    for (const s of r.seqs) { const x = X(1 - s.until), done = 1 - s.until <= taken + 1e-6; g.fillStyle = done ? '#e2e8f0' : '#334155'; g.fillRect(x - 1.5, y - 7, 3, 14); }
+    g.fillStyle = '#64748b'; g.fillRect(X(0) - 1.5, y - 7, 3, 14);
+    if (!small) {
+      let f0 = 0;
+      r.seqs.forEach((s, i) => {
+        const f1 = 1 - s.until, cur = i === r.seq;
+        g.font = (cur ? '700 ' : '600 ') + '8px ' + OA_DISP; g.fillStyle = cur ? '#e2e8f0' : i < r.seq ? '#64748b' : '#334155';
+        g.letterSpacing = '0.2em'; g.fillText(s.n, (X(f0) + X(f1)) / 2, y + 16); g.letterSpacing = '0px';
+        f0 = f1;
+      });
+    } else if (r.seq >= 0 && r.seqs[r.seq]) { g.font = '700 8px ' + OA_DISP; g.fillStyle = '#94a3b8'; g.fillText(r.seqs[r.seq].n, w / 2, y + 16); }
+    // the ends: 1.0, and what it wakes as
+    g.font = '600 10px ' + OA_MONO; g.textAlign = 'right'; g.fillStyle = OA_DEL; g.fillText('1.0', x0 - 12, y);
+    g.textAlign = 'left'; g.fillStyle = r.awake ? '#a5f3fc' : '#475569'; g.fillText(r.awake ? 'IMAGO' : '· · ·', x0 + bw + 12, y);
+    // the playhead, knocked by every hit
+    const kick = S.recKick, px = X(taken) + (kick > 0.01 ? rnd(-3, 3) * kick : 0);
+    g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, px, y, 22 + 18 * kick, '#a5f3fc', (0.5 + 0.4 * kick) * fa); g.restore();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(px, y - 7); g.lineTo(px + 6, y); g.lineTo(px, y + 7); g.lineTo(px - 6, y); g.closePath(); g.fill();
+    // the pieces, as the diff has them
+    g.textAlign = 'center';
+    r.pieces.forEach((p, k) => {
+      const x = x0 + bw * (k + 0.5) / 4, yy = y + (small ? 30 : 32);
+      g.font = '700 ' + (small ? 8 : 9) + 'px ' + OA_MONO;
+      g.fillStyle = p.due ? (p.have ? OA_ADD : OA_DEL) : '#334155';
+      g.fillText(p.due ? (p.have ? '+ ' : '− ') + (small ? p.n.split(' ').pop() : p.n) : '· · ·', x, yy);
+    });
+    g.globalAlpha = 1;
+    orTag(g, 'record', x0 + bw + 6, 40);
   },
+  /* GRAZE, and the four pieces, under the hull: eight cells of the meter (a
+     piece is forty), lit as they fill, flashing as a graze pays; full, it is
+     a piece banked. The pieces are sockets: lit if back, grey and filling
+     back up if stripped, red and HIS if he holds it, empty if not yet due. */
   meter(g, w, h, m) {
-    const bw = 180, x = (w - bw) / 2, y = h - 64;
-    g.fillStyle = 'rgba(8,12,20,0.7)'; g.fillRect(x, y, bw, 8);
-    g.fillStyle = '#67e8f9'; g.fillRect(x + 1, y + 1, (bw - 2) * m.graze, 6);
-    oaText(g, 'GRAZE', x - 26, y + 4, 9, '#67e8f9', 0.9);
-    for (let k = 0; k < 4; k++) {
-      const bx = x + k * 46 + 6, by = y + 14, due = k < m.due, kept = m.kept.includes(k), lost = m.lost.find(l => l.k === k);
-      g.strokeStyle = due ? OPR_PIECE_COL[k] : '#334155'; g.lineWidth = 1.5; g.strokeRect(bx, by, 36, 10);
-      if (due && m.have[k]) { g.fillStyle = OPR_PIECE_COL[k]; g.fillRect(bx + 1, by + 1, 34, 8); }
-      else if (lost) { g.fillStyle = 'rgba(148,163,184,0.5)'; g.fillRect(bx + 1, by + 1, 34 * lost.f, 8); }
-      else if (kept) oaText(g, 'HIS', bx + 18, by + 5, 8, OA_DEL, 0.9);
+    const S = OPR_ST, K = OPO_KIT, small = w < 760, cx = w / 2, y = h - (small ? 44 : 56);
+    orEv();
+    const fl = oaC01(1 - (uiTime - S.grazeAt) / 0.3), ga = m.duel ? 0.3 : 1;
+    const n = 8, cw = small ? 13 : 17, gap = 3, gw = n * cw + (n - 1) * gap, gx = cx - gw / 2;
+    g.save();
+    g.globalAlpha = ga;
+    g.font = '700 9px ' + OA_DISP; g.textAlign = 'right'; g.textBaseline = 'middle'; g.letterSpacing = '0.25em';
+    g.fillStyle = '#67e8f9'; g.fillText('GRAZE', gx - 10, y);
+    g.letterSpacing = '0px';
+    for (let i = 0; i < n; i++) {
+      const x = gx + i * (cw + gap), f = oaC01(m.graze * n - i);
+      const cell = () => { g.beginPath(); g.moveTo(x + 3, y - 4.5); g.lineTo(x + cw + 3, y - 4.5); g.lineTo(x + cw - 3, y + 4.5); g.lineTo(x - 3, y + 4.5); g.closePath(); };
+      cell(); g.fillStyle = 'rgba(8,14,24,0.85)'; g.fill(); g.strokeStyle = '#164e63'; g.lineWidth = 1; g.stroke();
+      if (f > 0) {
+        g.save(); cell(); g.clip();
+        const gr = g.createLinearGradient(x, 0, x + cw, 0);
+        gr.addColorStop(0, '#22d3ee'); gr.addColorStop(1, '#e0f2fe');
+        g.fillStyle = gr; g.fillRect(x - 4, y - 5, (cw + 8) * f, 10);
+        g.restore();
+        if (f >= 1 && fl > 0) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, x + cw / 2, y, 14, '#a5f3fc', fl * 0.7); g.restore(); }
+      }
     }
-    orTag(g, 'meter', x, y - 14);
+    if (m.graze >= 0.999) {
+      g.font = '700 9px ' + OA_DISP; g.textAlign = 'left'; g.letterSpacing = '0.2em';
+      g.fillStyle = rgba('#fde68a', (0.6 + 0.4 * Math.sin(uiTime * 6)).toFixed(3)); g.fillText('BANKED', gx + gw + 10, y);
+      g.letterSpacing = '0px';
+    }
+    g.restore();
+    // the pieces
+    const sw = small ? 34 : 44, sy = y + (small ? 18 : 22);
+    for (let k = 0; k < 4; k++) {
+      const x = cx + (k - 1.5) * (sw + 8), due = k < m.due, have = due && m.have[k], kept = m.kept.includes(k), lost = m.lost.find(l => l.k === k);
+      const awake = m.duel && m.have[k];
+      const tab = () => { g.beginPath(); g.moveTo(x - sw / 2 + 5, sy - 8); g.lineTo(x + sw / 2, sy - 8); g.lineTo(x + sw / 2 - 5, sy + 8); g.lineTo(x - sw / 2, sy + 8); g.closePath(); };
+      tab(); g.fillStyle = 'rgba(8,12,20,0.85)'; g.fill();
+      g.strokeStyle = have || awake ? OPR_PC[k].mid : kept ? OA_DEL : due ? '#475569' : '#1e293b'; g.lineWidth = 1.2;
+      if (!due && !awake) g.setLineDash([3, 3]);
+      g.stroke(); g.setLineDash([]);
+      if (have || awake) {
+        const qk = oaC01(1 - (uiTime - S.arrive[k]) / 0.8);
+        if (qk > 0) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, x, sy, 30, OPR_PC[k].glow, qk); g.restore(); }
+        orGlyph(g, k, x, sy, 6.2, 'lit');
+      } else if (kept) {
+        orGlyph(g, k, x - 8, sy, 5, 'flat');
+        g.font = '800 8px ' + OA_MONO; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = OA_DEL; g.fillText('HIS', x - 1, sy + 0.5);
+      } else if (lost) {
+        orGlyph(g, k, x, sy, 6.2, 'dim');
+        g.strokeStyle = OPR_PC[k].mid; g.lineWidth = 2; g.lineCap = 'butt';
+        g.beginPath(); g.arc(x, sy, 9, -Math.PI / 2, -Math.PI / 2 + TAU * oaC01(lost.f)); g.stroke();
+      } else if (due || m.duel) {
+        orGlyph(g, k, x, sy, 6.2, 'ghost');
+      }
+    }
+    orTag(g, 'meter', gx, y - 14);
   },
+  /* The rite's own pass over the frame: the diff's words at the hull, ONE
+     SHIP's count, the marked one's prompt, again, the awakening's cut, the
+     log of what it grows, and the room going dark round him at the end. */
   screen(g, w, h, s) {
-    if (s.ph === 'mark' || s.mark) oaText(g, 'GRAZE IT', w / 2, h * 0.62, 14, '#ffffff', 0.6 + 0.4 * Math.sin(uiTime * 8));
-    if (s.ph === 'even') oaText(g, s.n + ' / ' + s.of, w / 2, h * 0.62, 11, '#94a3b8', 0.7);
+    const S = OPR_ST, K = OPO_KIT;
+    orEv();
+    orLabels(g, w, h);
+    if (s.ph === 'even' || s.ph === 'mark' || s.ph === 'out') orPips(g, w, h, s);
+    if (s.ph === 'mark' && P) {
+      // the marked one: GRAZE IT, beside the hull (its path and his voice stay clear), beating, an arrow in at it
+      const at = oaScreenOf(P.x, P.y), beat = 0.5 + 0.5 * Math.sin(uiTime * 9), size = Math.round(clamp(w * 0.02, 14, 22));
+      const right = at.x < w - 260, sd = right ? 1 : -1, x = at.x + sd * (44 + 4 * beat), y = clamp(at.y, 90, h - 150);
+      g.save();
+      g.textAlign = right ? 'left' : 'right'; g.textBaseline = 'middle';
+      g.fillStyle = OA_ADD;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + sd * 10, y - 7); g.lineTo(x + sd * 10, y + 7); g.closePath(); g.fill();
+      g.font = '800 ' + size + 'px ' + OA_DISP; g.letterSpacing = '0.24em';
+      g.strokeStyle = 'rgba(5,6,10,0.9)'; g.lineWidth = 5; g.lineJoin = 'round';
+      g.strokeText('GRAZE IT', x + sd * 18, y - 3);
+      g.fillStyle = oaMix('#4ade80', '#ffffff', beat); g.fillText('GRAZE IT', x + sd * 18, y - 3);
+      g.letterSpacing = '0.16em'; g.font = '700 9px ' + OA_MONO;
+      g.strokeText('PASS CLOSE · OR DASH', x + sd * 19, y + size * 0.72);
+      g.fillStyle = '#94a3b8'; g.fillText('PASS CLOSE · OR DASH', x + sd * 19, y + size * 0.72);
+      g.letterSpacing = '0px';
+      g.restore();
+    }
+    const miss = uiTime - S.missAt;
+    if (miss >= 0 && miss < 1.2 && s.ph === 'mark') {
+      g.save(); g.globalAlpha = oaSteps(1 - miss / 1.2, 4);
+      g.font = '700 13px ' + OPO_FIRST.font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OPO_COL;
+      g.fillText('AGAIN.   ' + S.tries + ' / ' + OPR_DUEL.tries, w / 2, h * 0.36);
+      g.restore();
+    }
+    if (s.wakeAge >= 0 && s.wakeAge < 3) orWakeCut(g, w, h, s.wakeAge);
+    // what it grows, logged as it comes
+    if ((s.ph === 'awake' || s.ph === 'finish') && S.log.length && w >= 700) {
+      const x = w - 26, y0 = h * 0.34;
+      g.save();
+      g.textAlign = 'right'; g.textBaseline = 'middle'; g.font = '600 10px ' + OA_MONO;
+      g.fillStyle = '#475569'; g.fillText('@@ IMAGO +' + S.log.length + ' @@', x, y0);
+      S.log.forEach((l, i) => {
+        const a = uiTime - l.t0, ty = y0 + 18 + i * 15, type = Math.min(1, a / 0.35);
+        const txt = '+ ' + (OPR_GROW_N[l.id] || l.id).toLowerCase();
+        g.globalAlpha = oaC01(a / 0.1);
+        g.fillStyle = a < 0.4 ? '#ecfdf5' : OA_ADD;
+        g.fillText(txt.slice(0, Math.ceil(txt.length * type)), x, ty);
+      });
+      g.restore();
+    }
+    // out: the room dark round him, a light left on him holding it
+    if (s.stage === 'out') {
+      const hm = orHim(), at = hm ? oaScreenOf(hm.x, hm.y) : { x: w / 2, y: h * 0.3 };
+      const sp = g.createRadialGradient(at.x, at.y, 80, at.x, at.y, Math.max(w, h) * 0.75);
+      sp.addColorStop(0, 'rgba(5,6,10,0)'); sp.addColorStop(1, 'rgba(5,6,10,' + (0.72 * K.ease.inOut(oaC01(s.out * 1.4))).toFixed(3) + ')');
+      g.fillStyle = sp; g.fillRect(0, 0, w, h);
+    }
     orTag(g, 'screen', 8, 22);
   }
 };

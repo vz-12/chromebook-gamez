@@ -16,8 +16,9 @@ It follows your direction of 16 and 17 Oct:
   cutscene, and none of it has to follow the route's rooms (17 Oct).
 
 **Built 17 Oct (Phase 1, on blank hooks):** the rite's logic, played end to
-end, with placeholder art. See "As built" under The path. The art is
-placeholder behind named hooks, as with RONIN and the route. This repository
+end. **Drawn 17 Oct (Phase 2):** every `OPR_ART` hook, the hull's stages,
+the molt, IMAGO and its eight growths, his copy and its rounds, and the HUD,
+in the route's two renderers. See "As built" under The path. This repository
 is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -221,8 +222,12 @@ stays to remember it.
 **The card:** AWAKENING · IMAGO · VOIDRUNNER, "it was finished. it kept
 going." (a stand-in; the other was "somebody stayed. it went on.").
 
-**His bar in the rite** is placeholder (`OPR_ART.record`): his health, the
-lines of the five sequences, and the four pieces as + (back), − (taken) or
+**His bar in the rite** is the hull's record (`OPR_ART.record`): the hull's
+name as lit as the hull is, with its build (`v1.0` and one more for every
+piece back, `+ AWAKE` once it is), and under it a line from `1.0` to what it
+wakes as. What the hull has taken back is lit, each sequence's stretch in the
+colour of the piece it had then; what is still his is 1.0's, flat. The five
+sequences are marked under it, and the four pieces as + (back), − (taken) or
 · · · (not yet). The normal boss bar stands aside, as it does for the route.
 
 ## The evolution retexture
@@ -258,8 +263,9 @@ screen, a co-op partner's view, and effects switched off.
 ### Stage by stage (a starting point for the art)
 
 Hull space, as `hullPath` draws the runner: nose at x 18, cranked wings to
-y ±13 at x −5, twin-nozzle tail at x −10.5. The placeholder draws one mark per
-piece in these places.
+y ±13 at x −5, twin-nozzle tail at x −10.5. The art draws each piece in these
+places (`ORH_*` in "VOIDRUNNER'S RITE — art hooks"), and IMAGO as the same
+fourteen points grown up (`ORH_IMAGO`), so one can become the other.
 
 | Stage | Outline | Surface and light | With effects off |
 | --- | --- | --- | --- |
@@ -322,7 +328,7 @@ could.
 
 ### Art hooks
 
-**The rite's own (`OPR_ART`, built, placeholder).** Drawing only, sandboxed by
+**The rite's own (`OPR_ART`, built, drawn).** Drawing only, sandboxed by
 `OR(name, ...)`, failing alone (`OR_FAILED`), tagged with `?hooks=1`, their
 own state in `OPR_ST`. The full WHAT THEY ARE HANDED is the header of
 "VOIDRUNNER'S RITE — art hooks" in `index.html`, with the rite's events
@@ -430,10 +436,9 @@ order of events, "Who knows"), the tales above settled.
 **Phase 1: the rite's logic, on blank hooks.** Built 17 Oct (below).
 
 **Phase 2: the retexture.** The `OPR_ART` hooks drawn (the hull's stages, the
-molt, the copy, the growths), in a harness, reviewed on an artifact page,
-lifted with a checked script (as `ronin-v-art/lift.mjs`); a browser pass at
-Chromebook sizes with effects on and off, proving every stage reads with
-`FXO.mat` off.
+molt, the copy, the growths), reviewed on an artifact page, with a browser
+pass at Chromebook sizes with effects on and off, proving every stage reads
+with `FXO.mat` off. Drawn 17 Oct (below).
 
 **Phase 3: the form's frame.** The passive, GRAZE in runs and its HUD, [F]
 for 60 s, `imagoHull` and the cut-in with lockstep's hold rule,
@@ -456,8 +461,8 @@ suite, the README, then `main`.
   open, the five sequences, the pieces, GRAZE, the duel, the wake, the free
   evolution, out and the card. Its header says the rules; the constants are
   one block (`OPR_*`, `OPR`, `OPR_DUEL`, `OPR_GROWTHS`).
-- **"VOIDRUNNER'S RITE — art hooks":** `OPR_ART`, placeholder lines and
-  labels, with the WHAT THEY ARE HANDED header.
+- **"VOIDRUNNER'S RITE — art hooks":** `OPR_ART`, with the WHAT THEY ARE
+  HANDED header, drawn in Phase 2 (below).
 - **The switch:** `RITES.runner` has `start` (`oprOpen`), `seqs` and `jump`
   (`oprJump(0..4)` from the console). The statue rises, a run committed at
   it is taken at wave 25, `unlock-evo` wakes VOIDRUNNER on dev accounts, and
@@ -475,8 +480,69 @@ suite, the README, then `main`.
   `npm test` beside the other three.
 - **A browser pass** (the dev server, Chromebook-sized window): the open, HE
   PAINTS IT OVER, the even duel and the free evolution, with no errors.
-- **Not yet:** the tales and the bible (Phase 0 and 5), the form in a run
-  (Phase 3), and all the art (Phase 2).
+- **Not yet:** the tales and the bible (Phase 0 and 5), and the form in a run
+  (Phase 3).
+
+### As drawn (17 Oct, Phase 2)
+
+The art is drawn straight into the hooks in `index.html` ("VOIDRUNNER'S RITE
+— art hooks"), so there is nothing to lift. "THE ART, as drawn", under its
+header, says how the two renderers are kept apart.
+
+- **The hull** (`hull`): today's VOIDRUNNER until he takes the build, then it
+  drains to his memory of it behind a scan, nose first: flat 1.0 fill, a 2 px
+  stroke, one barrel down the spine, the canopy a dot. Each piece lights its
+  own part in its own accent and catches the kit's one light, turned into
+  hull space so it stays put in the room as the ship turns. PLATING is steel
+  plates along the cranked wings and a cheek on the nose, with a sheen while
+  it is ready. A SECOND BARREL is a pair either side of the nose, the muzzles
+  white-hot as each round leaves. THE LATTICE is light branching from the
+  canopy to the wingtips, with a scan running out along it. THE CORE is a
+  dark lens rimmed in violet, with the edges by the canopy pulled in. A piece
+  that is due but missing leaves a red dashed outline where it was. Under his
+  brush the hull greys and his strokes cross it.
+- **The molt:** a white seam opens down the spine. The flat shell, his
+  memory of the hull, splits there and curls back off it both ways like paper
+  (`OPO_KIT.sheet`), then is thrown off in strips that fall.
+- **IMAGO, awake:** the four pieces snap in and fuse, and the outline grows
+  out of the old one in white heat. Its wings are membranes of light, the
+  lattice runs out through them, the plating lies along the new leading edges,
+  the barrels are laid into the nose, and the core is a deep lens with a
+  corona. Two long plumes trail it. Inside it, one thin bright line marks the
+  base outline and the hitbox.
+- **The growths** (`growths`, `growShot`, `growBeam`): gunmetal in the
+  room's light, rimmed in IMAGO's cyan, each growing out of its back from the
+  spine and kicking back as it fires: twin barrels (amber shells), two laser
+  rifles (cyan beams), a cannon (one huge slow shell in a gold corona), a
+  rotary gun (yellow tracers), a rail (a violet line with rings), missile
+  pods (missiles trailing smoke) and a crown of barrels (a ring of rounds).
+- **His renderer, after bloom** (`orFlat`, from the record's pass): his copy
+  coming out of the tube on its light, drawn down in rows, flat, with
+  scanlines; its tell (a rewind closing round it); rattled once the hull
+  wakes (split, chipped, its health a first-build bar); its rounds, and the
+  marked one (flat white, a rewind on it, the graze band dashed in today's
+  green); the pieces he keeps hanging in his tube, his glass cracking as
+  rounds work them loose; the copy breaking back into his set in shards; the
+  molt's paper. A base round through him leaves a flat ring and a `0`.
+- **Today's light in the room** (`orLit`, from the hull's pass): grazes
+  (a crescent on the side the threat passed), the plating holding (a hex of
+  steel light), pieces coming back and being taken, the lattice cutting a
+  pane, rounds meeting, the wake, guns sprouting, hits on the copy, its
+  break, and missile smoke. The lattice's light on the floor (`trail`) is a
+  ladder of light; the brush's patch (`patch`) takes the floor back to 1.0 a
+  row at a time, with a `+` on its rim.
+- **The screen** (`record`, `meter`, `screen`): the hull's record above;
+  GRAZE as eight cells and the four pieces as sockets below (lit, filling
+  back up, HIS, or not yet due); the diff's words rising off the hull
+  (`+ PLATING`, `− THE CORE`, `+12 GRAZE`, `PLATING HELD`, each growth); ONE
+  SHIP's count as a pip per round met; GRAZE IT beside the hull, off the
+  marked one's path; THE AWAKENING's cut (a flash, letterbox, IMAGO written
+  out behind a scan, the four pieces' `+`); a diff log of what it grows; and
+  the room going dark round him at the end.
+- **Checked:** `npm run test:opo-rite` (every hook drawn, none throwing) and
+  `npm test` (`rite-runner` and every other scenario the same, restored from
+  a snapshot). A browser pass at 1366 × 768 played every beat with no errors,
+  and close-ups of every stage were drawn with effects on and off.
 
 ## Numbers (one block in the code, all tunable)
 
