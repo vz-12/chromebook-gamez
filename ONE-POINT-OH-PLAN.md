@@ -141,9 +141,15 @@ pulled back; the first upload can. VOIDRUNNER's ghost, "nothing needs adding
 to it", is his creed pointed somewhere useful, so the pairing holds.
 
 **The one thing to reconcile.** He quotes the record, so he knows there is an
-outside, and the bible lets only the dev and ROOT know. My default is that he
+outside, and the bible lets only the dev and ROOT know. My default was that he
 came in from outside too: a player who arrived on the first upload and never
 left, as the dev arrived when the game was shutting down.
+
+**Settled 16 Oct:** he is the one who stayed. He played the old game in its
+first days, he was the only player who did not leave when it was shut down,
+and in the dark he remembered VOIDRUNNER back into its base form. 7 Aug is
+the day it came back on, exactly as he had kept it. The whole story is in
+`ONE-POINT-OH-RITE-PLAN.md`.
 
 ## The route (your direction, 10 Oct)
 
@@ -361,65 +367,12 @@ of the game.
 
 ## The rite and the form (after the route)
 
-### The rite: VOIDRUNNER, at the statue (to revisit)
-
-**One thing changed under it.** The route now ends on the base ship: you
-break out flying VOIDRUNNER and finish him hollow, which is where the rite
-was going to end. Once the route is built, the rite needs a fresh look so it
-is still "the finale fought the other way". The draft below stands until
-then.
-
-- **The point** is your draft's counterplay: the base ship can win, and it is
-  not better.
-- **The other way round.** VOIDRUNNER arrives with nothing to take, so he
-  reads the record forwards and adds each piece to himself to keep up,
-  hating every one. Each addition makes him meaner, bigger and easier to hit.
-  He will not read 1.4, "Evolutions", aloud.
-- **The rule:** `OPO_HP` (1000) in the rite's own units. Only VOIDRUNNER's
-  own rounds reach him, `OPO_HIT` each, whatever the build.
-
-| # | Name (stand-in) | Runs to | What he does |
-| --- | --- | --- | --- |
-| 1 | THIS WAS BETTER | 0.80 | The first room, its three enemies, THE WARDEN's ring. Small, quick and hard to hit. |
-| 2 | NOBODY ASKED | 0.60 | He reads the record forwards and takes what it brought: censor-bar rounds, a lance. He grows. |
-| 3 | YOU CHANGED IT | 0.40 | The rush, and THE VAGRANT's parry turning your rounds back. Bigger again. |
-| 4 | IT SKIPS ONE | 0.20 | Everything after 1.4, at once, and the room hears him pass over 1.4. |
-| 5 | PUT IT BACK | 0 | He throws everything off: the ship he arrived in, against VOIDRUNNER. |
-
-**Sequence 5, the even duel** (the cutscene, played).
-- Every round you fire, he answers on the same frame down your line. The two
-  meet and go out. Stop firing and his land (`RACE_HIT`).
-- Partway through, the hull wakes: the entry he would not read. From that
-  frame `grantAwakening('runner')` has fired and your rounds go through.
-- The card: AWAKENING · ORIGIN · VOIDRUNNER, "it can win. it is not better."
-  (all stand-ins).
-
-### The awakened form (working name ORIGIN)
-
-The kit's frame only. You named RONIN's moves one at a time, and the same
-goes here.
-
-- **What comes back** (the bible: an awakening is what the hull was).
-  VOIDRUNNER was the first game's one hull, and it grew once the void woke.
-  That growth comes back: the thing ONE POINT OH forbids.
-- **Passive, awake:** `AWAKE_DMG` and `AWAKE_SPD`, EMBER's ×1.35 and ×1.20,
-  as a stand-in.
-- **The meter: GRAZE.** A round that passes close without
-  hitting pays into it, and a dash through one pays more. It is the base
-  hull's skill turned into fuel: fast, forgiving, never hit. No other pilot
-  fills its meter by dodging.
-- **The key:** [F]. It is free for VOIDRUNNER today: `ventFire` returns for
-  any hull that is not a lance or THE HACKER (`index.html:32699`).
-- **The form:** a minute, with a cut-in, held off in the rite like the other
-  three.
-- **Four actives on Z X C V**, only in the form. A starter sketch, to throw
-  away: Z close, X across the room, C on the move, V everything. VOIDRUNNER
-  is "effective at any range", so each move owns a range and V owns them all.
-- **PvP:** VOIDRUNNER is a base pilot (`BASE_PILOTS`). Ranked from bronze to
-  gold never flies it awake. Platinum, VOID, casual and friend matches will,
-  as soon as accounts have it. Grazing needs rounds, so against EMBER's lance
-  or THE VAGRANT's blade the meter needs a duel rule of its own, as EMBER's
-  vent got (`DUEL.heat`).
+Superseded 16 Oct by `ONE-POINT-OH-RITE-PLAN.md`: the fight principles, the
+rite sequence by sequence, the evolution retexture and the form's frame. The
+draft that stood here (he reads the record forwards and adds to himself; the
+form ORIGIN) is in this file's history. Your direction changed it: VOIDRUNNER
+is regressed like every pilot, so the hull evolves through the rite, not the
+game, and he is the one who stayed.
 
 ### His voice (your drafts' lines, then stand-ins)
 
@@ -582,25 +535,9 @@ decided on the way, all of it easy to change:
 
 ### Part two: the rite and the form (after the route)
 
-- **Phase 6: the rite.** It needs its fresh look first (above). Then:
-  - `RITES.runner` gets `start`, `seqs` and `jump`, which lights the statue;
-  - `opoOpen` is copied from `rrOpen` and `vrOpen`, with the rite's units,
-    its five sequences, the wake and the card;
-  - a `rite-runner` scenario beside the other three
-    (`scripts/determinism.mjs:233-235`).
-- **Phase 7: the form's frame.** The passive; the graze meter, with its HUD
-  hook (`index.html:10929`); [F] for a minute; the cut-in; `tale('awake')`
-  and `tale('act')`; `runner` in the lockstep awakened list
-  (`scripts/lockstep.mjs:64`).
-- **Phase 8: the four actives,** named by you one at a time.
-- **Phase 9: everything around it:**
-  - tales: `TALE_AWAKE`, his entry, `p:runner`'s page III unheld
-    (`index.html:32028`), and `scripts/tales.mjs`;
-  - looks: `awake:runner` in `src/looks.js` and `leaderboard/art.js`;
-  - `evo-runner` in `DEV_PERK_IDS`;
-  - PvP: the bot, the graze duel rule, and `scripts/pvp-engine.mjs`.
-- **Phase 10: ship.** The `CHANGELOG` entry, the version, a browser pass,
-  every suite, the README, then `main`.
+Planned in full in `ONE-POINT-OH-RITE-PLAN.md` ("The path", its Phases 0
+to 6): the lore pass, the rite's logic, the evolution retexture, the form's
+frame, the four actives, everything around it, and ship.
 
 ## What lights up by itself
 
@@ -617,7 +554,8 @@ these all change at once.
 - **The hub's tale.** Its page III (`r:hub`) now asks for four hulls awake.
   Anyone who already opened it keeps it.
 - **PvP.** An awake VOIDRUNNER can appear in platinum, VOID, casual and
-  friend matches, so Phase 6's bot and duel rule have to ship with it.
+  friend matches, so the bot and the duel rule (the rite plan's Phase 5)
+  have to ship with it.
 
 ## Draft numbers (one block in the code, all tunable)
 
@@ -633,22 +571,7 @@ these all change at once.
 | The fight | 5 phases, about 3 minutes in all |
 | HOLLOW | one card off every few seconds through phase 4 |
 
-**The rite (to revisit):**
-
-| | |
-| --- | --- |
-| `OPO_HP` | 1000 rite units |
-| `OPO_HIT` | 3 a hit |
-| `OPO_SEQ_MIN` | 14 s, as THE FOUNDER's |
-| Even duel | a lost exchange costs 12% of max health (`RACE_HIT`'s figure) |
-
-**The form:**
-
-| | |
-| --- | --- |
-| Graze | a round within 26 px pays 1, a dash through one pays 4; 100 fills it |
-| The form | 60 s, as SUPERUSER and a run's OVERDRIVE |
-| Awake passive | ×1.35 damage, ×1.20 speed (EMBER's) |
+**The rite and the form:** see "Draft numbers" in `ONE-POINT-OH-RITE-PLAN.md`.
 
 ## Questions for you (defaults are in, so nothing waits on these)
 
@@ -671,3 +594,5 @@ and the break-out. These are what's left for the route.
    FRACTURE opens the coaxing, and the coaxing is the way in.
 8. **Does he know there is an outside?** He quotes the record. My default is
    yes: a player who came in on the first upload and never left.
+   *Answered 16 Oct:* yes, and more. He is the one who stayed through the
+   shutdown (`ONE-POINT-OH-RITE-PLAN.md`, "The story").
