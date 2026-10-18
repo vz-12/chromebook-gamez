@@ -9,6 +9,9 @@
                   VOIDRUNNER fills it, never in IMAGO, never in the rite
      [F]          refuses short of a full meter; a full one is a minute of
                   IMAGO, drawn as the rite's moth, and then the ship again
+     the cut-in   [F] opens on it: the room held, the hull held, nothing
+                  landing, no Z, none of the minute spent; the cut to the
+                  step, the moth from there, and a snapshot taken in it
      Z EYESPOTS   (user, 18 Oct) bombs thrown over a 130° cone along the aim,
                   every one bursting two seconds after the throw: where they
                   land, when they burst, what they hurt and how hard, one
@@ -72,6 +75,8 @@ const hpOf = (g, id) => J(g, `(enemies.find(e => e.id === ${id}) || { hp: null }
 // hold the room still: no new waves, no rounds of theirs, the bodies where they were put
 const HOLD = `for (const e of enemies) { e.vx = e.vy = 0; } ebullets.length = 0;`;
 const held = (g, n) => { for (let i = 0; i < n; i++) { g.run(HOLD); steps(g, 1); } };
+// through IMAGO's cut-in, to the room again (the room held, if asked)
+const throughCut = (g, hold, draw) => { const n = Math.round(J(g, `IM_T_CUT + IM_T_SETTLE`) / STEP) + 2; if (hold) held(g, n); else steps(g, n, draw); };
 // a round of theirs, flying past (or into) the hull: offset off its line, from the left
 const round = (g, off, spd = 500) => g.run(`(() => { const b = eshoot({ x: P.x - 200, y: P.y + ${off}, dmg: 5, r: 10, col: '#f87171' }, 0, ${spd}, 5, 6); b.x = P.x - 200; b.y = P.y + ${off}; b.owner = null; return ebullets.length; })()`);
 
@@ -120,6 +125,7 @@ section('[F]');
   ok(J(g, `P.imSpots.length`) === 0, 'Z out of IMAGO throws nothing');
   g.run(`P.imGraze = IM_MAX; handleKey('f');`); steps(g, 2);
   ok(J(g, `imOn() && P.imGraze === 0 && P.imT > IM_LEN - 0.1`), 'a full meter is IMAGO, for a minute (F, from the keyboard)', J(g, `[P.imT, P.imGraze]`));
+  throughCut(g);
   steps(g, 30, true);
   ok((J(g, `__art`).hull || 0) > 0, 'the hull is IMAGO\'s while it is on (IMAGO_ART.hull)', J(g, `__art`));
   round(g, 30); steps(g, 50);
@@ -135,12 +141,61 @@ section('[F]');
   takeArt(g);
 }
 
+/* ================================ the cut-in ================================ */
+section('the cut-in');
+{
+  const g = game();
+  enter(g, true);
+  const id = dummy(g, 200, 0);
+  g.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(g, 1);
+  ok(J(g, `imCutIn() && imOn() && !imShown()`), 'F opens on the cut-in: IMAGO is on, but not shown yet');
+  steps(g, 1);
+  ok(J(g, `slowmo`) === J(g, `IM_SLOW`), 'the room is held while it has the screen', J(g, `slowmo`));
+  const at = J(g, `[P.x, P.y]`);
+  g.run(`__dash = true; P.vx = 300;`); steps(g, 1);
+  g.run(`__aim = { x: P.x, y: P.y + 300 };`); steps(g, 20); g.run(`__aim = null;`);
+  ok(J(g, `P.dashT <= 0 && Math.hypot(P.x - ${at[0]}, P.y - ${at[1]}) < 0.5`), 'and the hull: no moving, no dashing', J(g, `[P.x - ${at[0]}, P.y - ${at[1]}, P.dashT]`));
+  g.run(`hurtPlayer(25);`);
+  ok(J(g, `P.hp`) === 60000, 'nothing lands on it');
+  g.run(`__press = ['z'];`); steps(g, 2);
+  ok(J(g, `P.imSpots.length === 0 && P.imCd[0] === 0`), 'Z does nothing, and spends nothing', J(g, `[P.imSpots.length, P.imCd[0]]`));
+  ok(J(g, `P.imT`) === J(g, `IM_LEN`), 'none of the minute is spent', J(g, `P.imT`));
+  // the cut, to the step, counting the step F was pressed on
+  let k = 25, cutAt = -1;
+  while (k < 400 && cutAt < 0) { steps(g, 1, true); k++; if (J(g, `!!(P.imIntro && P.imIntro.cut)`)) cutAt = k; }
+  ok(cutAt === Math.round(J(g, `IM_T_CUT`) / STEP), 'the cut lands IM_T_CUT after F, to the step', { step: cutAt, want: Math.round(J(g, `IM_T_CUT`) / STEP) });
+  ok(J(g, `imShown() && !imCutIn() && Math.abs(P.imAge - IM_WAKE_FROM - ${STEP}) < 1e-9`), 'from the cut the moth is in the room, still unfolding (its first step there run)', J(g, `P.imAge`));
+  steps(g, 30, true);
+  ok(J(g, `P.imT < IM_LEN - 0.4`), 'and the minute runs', J(g, `P.imT`));
+  ok(J(g, `slowmo`) === 1, 'and the room with it', J(g, `slowmo`));
+  steps(g, Math.round(J(g, `IM_T_SETTLE`) / STEP));
+  ok(J(g, `P.imIntro`) === null, 'the cut-in is over once the room has settled');
+  takeArt(g);
+}
+{
+  // a snapshot in the middle of it: the other copy is in it too, and cuts on the same step
+  const a = game(), c = game();
+  enter(a, true, 33);
+  a.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(a, 90);
+  const snap = a.run(`JSON.stringify(snapWrite())`);
+  c.run(`applyChar(CHARS.findIndex(ch => ch.id === 'runner')); resetGame(); state = 'play'; snapRead(JSON.parse(${JSON.stringify(snap)}));`);
+  ok(J(c, `imCutIn()`) && Math.abs(J(c, `P.imIntro.t`) - J(a, `P.imIntro.t`)) < 1e-9, 'a snapshot taken in the cut-in comes back in it', J(c, `P.imIntro`));
+  let ka = -1, kc = -1;
+  for (let i = 0; i < 300 && (ka < 0 || kc < 0); i++) {
+    steps(a, 1); steps(c, 1);
+    if (ka < 0 && J(a, `!!P.imIntro && P.imIntro.cut`)) ka = i;
+    if (kc < 0 && J(c, `!!P.imIntro && P.imIntro.cut`)) kc = i;
+  }
+  ok(ka >= 0 && ka === kc, 'and cuts on the same step', { ka, kc });
+}
+
 /* ================================ Z, EYESPOTS ================================ */
 section('Z — EYESPOTS');
 {
   const g = game();
   enter(g, true);
   g.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(g, 2);
+  throughCut(g);
   // the aim is +x; throw, from the keyboard, as a player does
   g.run(`handleKey('z');`); steps(g, 1);
   const n = J(g, `EYE_ROWS.reduce((s, r) => s + r[0], 0)`);
@@ -171,6 +226,7 @@ section('Z — EYESPOTS');
   const g = game();
   enter(g, true);
   g.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(g, 2);
+  throughCut(g);
   const inn = dummy(g, 150, 0), out = dummy(g, 150, Math.PI), far = dummy(g, 420, 0);
   g.run(HOLD);
   const h0 = [hpOf(g, inn), hpOf(g, out), hpOf(g, far)];
@@ -202,6 +258,7 @@ section('Z — EYESPOTS');
   const g = game();
   enter(g, true);
   g.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(g, 2);
+  throughCut(g);
   const id = dummy(g, 60, 0);
   g.run(HOLD + `__press = ['z'];`); held(g, 1);
   held(g, 20);
@@ -232,6 +289,7 @@ section('Z — EYESPOTS');
   const g = game();
   enter(g, true);
   g.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(g, 2);
+  throughCut(g);
   const id = dummy(g, 150, 0);
   g.run(HOLD + `__press = ['z'];`); held(g, 1);
   g.run(`P.imT = 0.05;`); held(g, 10);
@@ -266,6 +324,7 @@ section('a snapshot');
   const a = game(), c = game();
   enter(a, true, 21);
   a.run(`P.imGraze = IM_MAX; __press = ['f'];`); steps(a, 2);
+  throughCut(a);
   const ids = [dummy(a, 120, 0.3), dummy(a, 60, -0.2), dummy(a, 200, 0)];
   a.run(HOLD + `__press = ['z'];`); held(a, 1);
   held(a, 40);
@@ -290,6 +349,7 @@ section('the hooks');
     steps(g, 40, true);
     g.run(`P.imGraze = IM_MAX;`); steps(g, 6, true);
     g.run(`__press = ['f'];`); steps(g, 2, true);
+    throughCut(g, false, true);
     dummy(g, 70, 0); dummy(g, 180, 0.4);
     g.run(`__press = ['z'];`);
     for (let i = 0; i < 160; i++) { g.run(HOLD); steps(g, 1); if (i % 3 === 0) g.run(`render()`); }

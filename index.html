@@ -2116,6 +2116,7 @@ function newPlayer() {
     roninSkyClear: null, roninBroken: 0,           // its final technique, and the minute after a broken grave
     // VOIDRUNNER's IMAGO: GRAZE, the clock, the four cooldowns, Z's bombs (see IMAGO, IN A RUN)
     imGraze: 0, imT: 0, imAge: 0, imCd: [0, 0, 0, 0], imSpots: [],
+    imIntro: null,                                 // its cut-in, while it runs: see IMAGO's cut-in
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
        throwaway P, thousands of lines above where gearBlank() is declared, and
@@ -5789,6 +5790,7 @@ function hurtPlayer(dmg, opts) {
   if (P.hlGhost) return;                 // STILL HERE: a ghost has nothing left to hit (ALL HALLOWS)
   if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
+  if (imCutIn()) return;                   // nor while IMAGO's has it
   if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
@@ -38924,6 +38926,8 @@ function update(dt) {
     if (P.roninSkyClear && P.roninSkyClear.slow) sl = Math.min(sl, SC_SLOW);
     // and SUPERUSER's, the same way
     if (suCutIn()) sl = Math.min(sl, SU_SLOW);
+    // and IMAGO's
+    if (imCutIn()) sl = Math.min(sl, IM_SLOW);
     // and an outside pilot's, however its kit says (OUTSIDE PILOTS): the room, never the hull
     if (P.outside) sl = Math.min(sl, outsideSlow());
     slowmo = Math.min(slowmo, sl);
@@ -39117,14 +39121,14 @@ function updatePlayer(dt) {
   if (P.odScorch) P.ang = P.odScorch.ang;
   if (vrDuelLock()) P.ang = vrDuelAim();  // and holds the guard on him
   if (oprAimLock()) P.ang = oprAim();     // VOIDRUNNER'S RITE: ONE SHIP holds the hull on his copy until it wakes
-  if (suCutIn()) firing = false;          // SUPERUSER's cut-in has the screen
+  if (suCutIn() || imCutIn()) firing = false;   // SUPERUSER's cut-in has the screen, or IMAGO's
 
   // dash
   if (P.dashCh < P.dashMax) {
     P.dashRe += dt * (HL.eq.sheet ? SHEET_RECHARGE : 1);   // ALL HALLOWS: SHEET comes back slower
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = inp.dash && !opoNoDash() && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !vrDuelLock();
+  const wantDash = inp.dash && !opoNoDash() && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !imCutIn() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -39197,7 +39201,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || imCutIn() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
@@ -44025,7 +44029,8 @@ function drawOprScreen() {
                        ready), molt { k, f } at a seam, grey (0-1, the brush
                        over it), awake, wakeAge (s), hurt, phasing, t; and
                        in a run only, eyes (0-1: IMAGO's Z, its eyespots
-                       flaring as the wings throw; see IMAGO — art hooks)
+                       flaring as the wings throw) and flap (0-1: the wing
+                       beat that throws them; see IMAGO — art hooks)
      growths(g, s)     awake: what has grown out of its back. s: x, y, ang, r,
                        t, list [{ i, id, side (-1/0/1), k (0-1, growing in),
                        kick (0-1, since it fired), kind }]
@@ -44539,7 +44544,8 @@ function orWingTick(h) {
 function orImagoState(h) {
   const K = OPO_KIT, wa = h.wakeAge, Wg = orWingTick(h);
   const open = wa < 0.38 ? 0 : Math.max(0, K.ease.backOut(oaC01((wa - 0.38) / 0.75)));
-  const beat = wa > 1.05 && wa < 1.6 ? Math.sin((wa - 1.05) / 0.55 * Math.PI) : 0;   // its first beat, big
+  const first = wa > 1.05 && wa < 1.6 ? Math.sin((wa - 1.05) / 0.55 * Math.PI) : 0;   // its first beat, big
+  const beat = Math.max(first, oaC01(h.flap || 0));                                    // and in a run, the beat that throws Z
   return { wa, open, ant: K.ease.backOut(oaC01((wa - 0.55) / 0.45)), tail: oaC01((wa - 0.6) / 0.6), beat,
            body: oaC01((wa - 0.3) / 0.22), flash: oaC01(1 - wa / 0.55), eyes: oaC01(h.eyes || 0), Wg };
 }
@@ -46287,9 +46293,10 @@ const OPR_ART = {
    VOIDRUNNER fills GRAZE with near misses: a round of theirs that passes
    within IM_GRAZE_R of the hull's edge without landing pays IM_PAY, and one
    dashed through pays IM_PAY_DASH. [F] spends a full meter on IM_LEN seconds
-   of IMAGO: the moth from the rite (OPR_ART.hull, awake), hatching out of its
-   chrysalis where it stands. The passive, the cut-in and PvP's duel rule are
-   still to come (Phases 3 and 5). None of it runs in the rite, nor in PvP.
+   of IMAGO, opening on a cut-in (IMAGO's cut-in, below); on the cut the moth
+   from the rite (OPR_ART.hull, awake) hatches out of its chrysalis where it
+   stands. The passive and PvP's duel rule are still to come (Phases 3 and 5).
+   None of it runs in the rite, nor in PvP.
 
    Z — EYESPOTS (user, 18 Oct): the eyespot idea, with bombs instead of a
    flash. The wings throw small bombs out over a 130° cone along the aim, and
@@ -46325,6 +46332,8 @@ const EYE_CD   = 7;                     // from the throw
 const EYE_MAX  = 36;                    // out at once, at most
 
 const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
+const imCutIn = () => !!(P.imIntro && !P.imIntro.cut);
+const imShown = () => imOn() && !imCutIn();
 // whether near misses fill GRAZE for pilot p: awake, out of IMAGO, out of the rite and PvP
 const imFills = p => p.charId === 'runner' && !!p.awake && !p.down && !(p.imT > 0) && !oprOn() && !PVP;
 
@@ -46367,9 +46376,55 @@ function imFire() {
   P.imGraze = 0; P.imT = IM_LEN; P.imAge = 0;
   P.imCd = [0, 0, 0, 0];
   tale('awake', 'runner');
+  const I = P.imIntro = { t: 0, cut: false };
+  Audio_.tone(260, 0.7, 'sine', 0.05, 130);   // the room going quiet
+  imIntroFx(I);                                // the cut-in; IMAGO hatches at the cut (imCut)
+}
+
+/* ------------------------------ IMAGO's cut-in ------------------------------
+   Built the way RONIN's and SUPERUSER's are (user, 18 Oct: "like ronin and
+   hacker"): a clock of its own (P.imIntro), named beats, and a phase the art
+   reads (imPhase). The cut-in has the whole screen, so while it runs the room
+   is held at IM_SLOW and the hull with it (imCutIn): no moving, dashing,
+   firing, Z X C V or damage, and none of it is spent from IMAGO's minute.
+   Before the cut the stock hull shows (imShown); on the cut the moth is in
+   the room, still unfolding (P.imAge from IM_WAKE_FROM: the cut-in has
+   already shown it breaking out). What it shows is the art's
+   (IMAGO_ART.cutIn), after the plan's beats with a cocoon (user, 18 Oct):
+   his set in the dark with the ship as he kept it on the tube, a seam down
+   its spine, the tube cracking along it, the ship spun into a cocoon of
+   light, the cocoon beating and the moth breaking out of it, and the picture
+   collapsing to a dot. The rite has no cut-in: its IMAGO is the duel's. */
+const IM_T_HUSH = 0.0, IM_T_HUSH_END = 0.35;   // the room goes still, and the frame is the cut-in's
+const IM_T_CUT = 4.6;                          // the cut: the set's picture collapses onto the room, IMAGO in it
+const IM_WAKE_FROM = 0.56;                     // where the room's hatch takes up from: out of its chrysalis, unfolding
+const IM_T_SETTLE = 0.9;                       // after the cut: the room comes back
+const IM_SLOW = 0.04;                          // the room, while the cut-in has the screen
+function imPhase() {
+  const I = P.imIntro;
+  if (!I || P.charId !== 'runner') return null;
+  const t = I.t, span = (a, b) => clamp((t - a) / (b - a), 0, 1);
+  const settle = span(IM_T_CUT, IM_T_CUT + IM_T_SETTLE);
+  return { t, hush: span(IM_T_HUSH, IM_T_HUSH_END) * (1 - settle), lead: span(0, IM_T_CUT),
+           cutAge: I.cut ? t - IM_T_CUT : -1, settle };
+}
+// the cut: the moment IMAGO itself begins, as it did before it had a cut-in
+function imCut(I) {
+  I.cut = true;
+  P.imAge = IM_WAKE_FROM;
   imFx('wake', { x: P.x, y: P.y });
-  shake(0.5);
+  banner('IMAGO', IM_COL, 2.4);
+  shake(1.6);
+  Audio_.boom();
   Audio_.tone(330, 0.5, 'sine', 0.08, 990);
+}
+function imIntroTick(dt) {
+  const I = P.imIntro;
+  if (!I) return;
+  if (!(P.imT > 0) || oprOn()) { P.imIntro = null; return; }
+  I.t += dt;
+  if (!I.cut && I.t >= IM_T_CUT - 1e-9) imCut(I);              // to the step: steps of 1/60 fall just short
+  if (I.t >= IM_T_CUT + IM_T_SETTLE - 1e-9) P.imIntro = null;
 }
 
 // [Z X C V] while IMAGO is on. `cd` is the full cooldown the HUD sweeps; start() returns false if it refused
@@ -46377,7 +46432,7 @@ const IM_KIT = [
   { n: 'EYESPOTS', hud: 'EYES', cd: EYE_CD, start: imEyesThrow },
 ];
 function imAbility(i) {
-  if (state !== 'play' || P.charId !== 'runner' || oprOn()) return;
+  if (state !== 'play' || P.charId !== 'runner' || oprOn() || imCutIn()) return;
   if (!imOn()) {
     if (P.awake && !PVP) floatText(P.x, P.y - 42, 'IMAGO ONLY', '#94a3b8', 12);
     return;
@@ -46397,9 +46452,10 @@ function imAbility(i) {
 // once a frame from updatePlayer, IMAGO or not: a bomb thrown outlasts the form
 function imTick(dt) {
   if (P.charId !== 'runner') return;
+  imIntroTick(dt);
   if (P.imT > 0) {
     if (oprOn()) P.imT = 0;                    // the rite has the hull, and its own IMAGO
-    else {
+    else if (!imCutIn()) {                     // the cut-in is not spent from the minute
       P.imT -= dt; P.imAge += dt;
       if (P.imT <= 0) {
         P.imT = 0;
@@ -46515,14 +46571,20 @@ function imEyesBurst(list) {
      burst   a bomb bursts                 { x, y, i, n (bodies caught) }
 
    WHAT THEY ARE HANDED (world space unless it says screen):
+     cutIn(g, w, h, q)  screen, over the HUD: the cut-in. q is imPhase(): { t
+                   (s since [F]), hush (0-1, the room going still, back to 0
+                   as it settles), lead (0-1, [F] to the cut), cutAge (s since
+                   the cut, -1 before it), settle (0-1 after the cut) }
      hull(g, h)    IMAGO on the hull: h as OPR_ART.hull is handed it awake,
-                   wakeAge from the press, and eyes (0-1, the wings' eyespots
-                   flaring as they throw)
+                   wakeAge from the press, eyes (0-1, the wings' eyespots
+                   flaring as they throw), and thrown (s since the last
+                   throw while any of it is out, else -1)
      floor(g, s)   the bombs' reach on the floor, under the bodies: s.spots
                    (as eyes'), r (EYE_R)
      eyes(g, s)    the bombs: s.spots [{ x, y, x0, y0, tx, ty, t, k (0-1, the
-                   fuse), f (0-1, flown), on, i, n, look (the angle to the
-                   nearest body, or null) }]
+                   fuse), f (0-1, flown), on, bx, by (the body it rides, or
+                   null), i, n, look (the angle to the nearest body it is
+                   not riding, or null) }]
      fx(g, s)      what the run told the drawing: s.fx [{ kind, t0, life, ... }]
                    as above, s.now
      hud(g, x, y, w, m)  screen. GRAZE, the clock, Z X C V: m.k (0-1 GRAZE),
@@ -46530,8 +46592,8 @@ function imEyesBurst(list) {
                    keys
 =========================================================================== */
 const IM_FAILED = new Set();
-const IM_ST = { fx: [], hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
-const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.32, stick: 0.25, burst: 0.6 };
+const IM_ST = { fx: [], wings: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
+const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8 };
 function imFx(kind, o) {
   if (kind === 'wake') OPR_ST.wakeAt = uiTime;      // the moth's tails start again from the hull
   IM_ST.fx.push(Object.assign({ kind, t0: uiTime, life: IM_FX_LIFE[kind] || 0.5, seed: (IM_ST.fx.length * 7.31 + uiTime * 13) % 1000 }, o));
@@ -46552,20 +46614,21 @@ function imSpotsView() {
   return P.imSpots.map(s => {
     let look = null, bd = 300 * 300;
     for (const e of enemies) {
-      if (e.dead || e.hacked) continue;
+      if (e.dead || e.hacked || e === s.on) continue;             // one riding a body looks past it
       const d = (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y);
       if (d < bd) { bd = d; look = Math.atan2(e.y - s.y, e.x - s.x); }
     }
     return { x: s.x, y: s.y, x0: s.x0, y0: s.y0, tx: s.tx, ty: s.ty, t: s.t, k: clamp(s.t / EYE_FUSE, 0, 1),
-             f: s.landed ? 1 : clamp(s.t / EYE_FLY, 0, 1), on: !!s.on, i: s.i, n: s.n, look };
+             f: s.landed ? 1 : clamp(s.t / EYE_FLY, 0, 1), on: !!s.on, bx: s.on ? s.on.x : null, by: s.on ? s.on.y : null,
+             i: s.i, n: s.n, look };
   });
 }
 // the hull: drawPlayer hands it over while IMAGO is on
 function drawImagoHull() {
-  let eyes = 0;
-  for (const s of P.imSpots) eyes = Math.max(eyes, clamp(1 - s.t / 0.35, 0, 1));
+  let eyes = 0, thrown = -1;
+  for (const s of P.imSpots) { eyes = Math.max(eyes, clamp(1 - s.t / 0.35, 0, 1)); if (thrown < 0 || s.t < thrown) thrown = s.t; }
   IM('hull', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, id: P.charId, have: [true, true, true, true], due: OPR_PIECES.length, whole: 1,
-    guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes });
+    guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes, thrown });
 }
 // world, the floor pass: where they will burst
 function drawImagoFloor() {
@@ -46582,6 +46645,13 @@ function drawImagoFx() {
   if (!IM_ST.fx.length) return;
   IM('fx', ctx, { fx: IM_ST.fx, now: uiTime });
 }
+// screen, over the HUD: the cut-in, while it runs (this machine's pilot's only)
+function drawImagoIntro() {
+  const q = imPhase();
+  if (q) IM('cutIn', ctx, W, H, q);
+}
+// [F]: the cut-in begins
+function imIntroFx(I) { IM_ST.cut.lastS = -1; }
 // the HUD, under the dash: GRAZE, then IMAGO's clock and its keys. Returns the next free line
 function drawImagoHud(pad, ly, bw) {
   if (!P.awake || P.charId !== 'runner' || oprOn() || PVP) return ly;
@@ -46598,93 +46668,722 @@ function imRR(g, x, y, w, h, r) {
   g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
 }
 
-const IMAGO_ART = {
-  /* IMAGO, as the rite draws it awake: the luna moth hatching out of its
-     chrysalis from the press. */
-  hull(g, h) { OPR_ART.hull(g, h); },
-
-  /* Where each bomb will burst: its reach, dashed, closing in on the blast's
-     size as the fuse runs down, and filling in its last moments. Its shadow
-     under it. Lines only, so it reads with Surface materials off. */
-  floor(g, s) {
-    const r = s.r;
-    g.lineCap = 'butt';
-    for (const b of s.spots) {
-      const k = b.k, in_ = oaC01((b.t - 0.15) / 0.3), end = oaC01((k - 0.8) / 0.2);
-      if (in_ <= 0) continue;
-      if (!b.on) { g.fillStyle = 'rgba(0,0,0,' + (0.35 * in_).toFixed(3) + ')'; g.beginPath(); g.ellipse(b.x, b.y + 4, 7, 3.2, 0, 0, TAU); g.fill(); }
-      const rr = r * (1 + 0.35 * (1 - k));
-      g.setLineDash([5, 7]); g.lineDashOffset = -b.t * 18;
-      g.strokeStyle = rgba(IM_COL, ((0.1 + 0.3 * k) * in_).toFixed(3)); g.lineWidth = 1.4;
-      g.beginPath(); g.arc(b.x, b.y, rr, 0, TAU); g.stroke();
-      g.setLineDash([]);
-      if (end > 0) { g.fillStyle = rgba(IM_COL, (0.07 * end).toFixed(3)); g.beginPath(); g.arc(b.x, b.y, r, 0, TAU); g.fill(); }
+/* ------------------------- Z — EYESPOTS, as drawn -------------------------
+   The bombs are the wings' own eyespots, thrown. The wings beat, their four
+   eyespots flare and let go, and each bomb leaves from one of them (its side
+   of the aim, fore and hind by turns), lobbed, tumbling as a scale does, its
+   rings showing as it turns and a streak of scales behind it, its shadow on
+   the floor under it. It comes down with a hop and unfolds into an eye: a
+   scale of dark glass rimmed in THE CORE's blue, lids parting on an iris of
+   the moth's cyan, its pupil on the nearest body; round it a ring of twelve
+   scales is its fuse, going out one by one from the top. As the fuse runs
+   the iris whitens and the pupil narrows to a slit; in the last moments it
+   blinks faster and faster, stares, and the twelve flare white. On the
+   floor its reach closes in on it like an iris, chevrons drawn in on a
+   hairline at the blast's true edge, which fills before the burst. The burst
+   is the eyespot thrown open: a flash, its three rings out to the reach one
+   after another (white, cyan, blue), the iris's fibres, scales thrown off
+   turning, and the eyespot printed on the floor for a moment after. One
+   that lands on a body clasps it, two hooks into its edge. With materials
+   and particles off it all still reads, by its lines.
+   Where the wings' eyespots are is the hull hook's to say (IM_ST.wings, per
+   pilot, the last drawn); a bomb thrown while the hull is not drawn leaves
+   from the hull. */
+const IM_EYE_R = 8;             // an eye, landed
+const IM_EYE_N = 12;            // the scales of its fuse
+// the eyespot a bomb leaves from, this frame, or null
+const imWing = () => IM_ST.wings[PILOT.on || 0];
+function imEyeFrom(b) {
+  const W = imWing();
+  if (!W || uiTime - W.at > 0.1 || !W.pts.length) return null;
+  const side = Math.cos(W.ang) * (b.ty - b.y0) - Math.sin(W.ang) * (b.tx - b.x0) >= 0 ? 1 : -1;
+  return W.pts.find(p => p.side === side && p.fore === (b.i % 2 === 0)) || null;
+}
+// a bomb in the air at f (0-1, flown): where it is over the floor (x, y), and how high (h)
+function imLob(b, f) {
+  const q = 1 - (1 - f) * (1 - f), e = imEyeFrom(b), W = imWing();
+  let x = lerp(b.x0, b.tx, q), y = lerp(b.y0, b.ty, q);
+  if (e) { const k = 1 - OPO_KIT.ease.cubicOut(f); x += (e.x - W.x) * k; y += (e.y - W.y) * k; }
+  return { x, y, h: Math.sin(Math.PI * f) * (5 + len(b.tx - b.x0, b.ty - b.y0) * 0.06) };
+}
+// an almond, the eye's opening, as a path
+function imAlmond(g, x, y, w, h) {
+  g.beginPath(); g.moveTo(x - w, y);
+  g.quadraticCurveTo(x, y - h * 2, x + w, y); g.quadraticCurveTo(x, y + h * 2, x - w, y); g.closePath();
+}
+// a scale off the wing: a small lozenge, as a path
+function imScale(g, x, y, s, a) {
+  const c = Math.cos(a) * s, sn = Math.sin(a) * s;
+  g.beginPath(); g.moveTo(x + c, y + sn); g.lineTo(x - sn * 0.5, y + c * 0.5); g.lineTo(x - c, y - sn); g.lineTo(x + sn * 0.5, y - c * 0.5); g.closePath();
+}
+// a bomb in the air: an eyespot shed off the wing, tumbling, and its streak
+function imDrawFlying(g, b, mat, parts) {
+  const p = imLob(b, b.f), x = p.x, y = p.y - p.h;
+  g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  let pv = { x, y };
+  for (let j = 1; j <= 6; j++) {
+    const f = b.f - j * 0.045;
+    if (f <= 0) break;
+    const q = imLob(b, f), u = j / 6, qy = q.y - q.h;
+    g.strokeStyle = rgba(IM_COL, (0.6 * (1 - u)).toFixed(3)); g.lineWidth = 2.8 * (1 - u) + 0.4;
+    g.beginPath(); g.moveTo(pv.x, pv.y); g.lineTo(q.x, qy); g.stroke();
+    if (parts && j % 2 === 0) {
+      const sd = b.i * 13.7 + j * 3.1;
+      g.fillStyle = rgba('#ecfeff', (0.85 * (1 - u)).toFixed(3));
+      imScale(g, q.x + (odHash(sd) - 0.5) * 8, qy + (odHash(sd + 1) - 0.5) * 8, 1.3, b.t * 20 + j); g.fill();
     }
-  },
+    pv = { x: q.x, y: qy };
+  }
+  if (mat) oaGlow(g, x, y, 12, '#a5f3fc', 0.55);
+  // it turns over as it flies: its face (the eyespot) and its back (plain glass) by turns
+  const dir = Math.atan2(b.ty - b.y0, b.tx - b.x0) || 0, spin = Math.cos(b.t * 26 + b.i * 1.7), r = 4.4;
+  g.save(); g.translate(x, y); g.rotate(dir); g.scale(Math.max(0.2, Math.abs(spin)), 1);
+  g.globalCompositeOperation = 'source-over';
+  g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fillStyle = spin > 0 ? '#030a14' : '#0e4a5c'; g.fill();
+  g.globalCompositeOperation = 'lighter';
+  if (spin > 0) {
+    g.strokeStyle = rgba(OPR_PC[3].mid, 0.8); g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, r * 0.66, 0, TAU); g.stroke();
+    g.fillStyle = '#ecfeff'; g.beginPath(); g.arc(0, 0, r * 0.3, 0, TAU); g.fill();
+  } else { g.fillStyle = rgba(IM_COL, 0.45); g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill(); }
+  g.strokeStyle = '#a5f3fc'; g.lineWidth = 1; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke();
+  g.restore();
+}
+// a bomb down: an eye
+function imDrawEye(g, b, mat) {
+  const C3 = OPR_PC[3], k = b.k, la = b.t - EYE_FLY;                       // la: since it came down (on a body, about then)
+  const unfold = b.on ? 1 : OPO_KIT.ease.backOut(oaC01(la / 0.22));
+  const hop = b.on || la >= 0.18 ? 0 : Math.sin(Math.PI * oaC01(la / 0.18)) * 3;
+  const open = 1 - Math.pow(1 - oaC01((la - 0.05) / 0.4), 3);
+  const end = oaC01((k - 0.8) / 0.2), stare = oaC01((k - 0.955) / 0.03);
+  const shut = end > 0 && stare < 1 && Math.sin(b.t * (30 + 90 * end) + b.i) < -0.25;   // blinking, faster
+  const lid = shut ? 0 : open;
+  const r = IM_EYE_R * (0.55 + 0.45 * unfold), x = b.x, y = b.y - hop;
+  g.lineCap = 'round';
+  g.globalCompositeOperation = 'lighter';
+  if (mat) oaGlow(g, x, y, r * (2.2 + 1.8 * k), IM_COL, (0.2 + 0.45 * k) * (shut ? 0.55 : 1));
+  g.globalCompositeOperation = 'source-over';
+  // on a body: its clasp, two hooks out from under it into the body's edge
+  const clasp = b.on && b.bx !== null ? Math.atan2(b.by - y, b.bx - x) : null;
+  if (clasp !== null) {
+    g.beginPath();
+    for (const sd of [1, -1]) {
+      const a0 = clasp + sd * 0.6, a1 = clasp + sd * 0.42, a2 = clasp + sd * 0.1;
+      g.moveTo(x + Math.cos(a0) * r * 0.8, y + Math.sin(a0) * r * 0.8);
+      g.quadraticCurveTo(x + Math.cos(a1) * (r + 9), y + Math.sin(a1) * (r + 9), x + Math.cos(a2) * (r + 10), y + Math.sin(a2) * (r + 10));
+    }
+    g.strokeStyle = 'rgba(3,10,20,0.9)'; g.lineWidth = 3.2; g.stroke();
+    g.strokeStyle = '#ecfeff'; g.lineWidth = 1.5; g.stroke();
+  }
+  // the scale: dark glass, THE CORE's ring of blue in it, rimmed in light
+  g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = '#030a14'; g.fill();
+  g.strokeStyle = rgba(C3.mid, 0.7); g.lineWidth = r * 0.17; g.beginPath(); g.arc(x, y, r * 0.83, 0, TAU); g.stroke();
+  g.strokeStyle = '#a5f3fc'; g.lineWidth = 1.1; g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+  // the eye in it: lids parting on an iris, the moth's cyan going white, the pupil on the nearest body
+  const ww = r * 0.74, hh = r * 0.46 * lid;
+  if (hh > 0.35) {
+    let lx = 0, ly = 0;
+    if (b.look !== null) { lx = Math.cos(b.look) * r * 0.22; ly = Math.sin(b.look) * r * 0.14; }
+    const ir = r * 0.5, ix = x + lx, iy = y + ly;
+    g.save();
+    imAlmond(g, x, y, ww, hh); g.fillStyle = '#071923'; g.fill(); g.clip();
+    g.beginPath(); g.arc(ix, iy, ir, 0, TAU); g.fillStyle = oaMix(C3.mid, '#ffffff', 0.9 * k * k); g.fill();
+    g.beginPath(); g.arc(ix, iy, ir * 0.74, 0, TAU); g.fillStyle = oaMix('#22d3ee', '#ffffff', k * k); g.fill();
+    if (r > 6) {
+      g.strokeStyle = 'rgba(8,47,73,' + (0.55 * (1 - k)).toFixed(3) + ')'; g.lineWidth = 0.45;
+      g.beginPath();
+      for (let j = 0; j < 8; j++) { const a = j * TAU / 8 + 0.2; g.moveTo(ix + Math.cos(a) * ir * 0.4, iy + Math.sin(a) * ir * 0.4); g.lineTo(ix + Math.cos(a) * ir * 0.92, iy + Math.sin(a) * ir * 0.92); }
+      g.stroke();
+    }
+    g.beginPath(); g.ellipse(ix, iy, ir * (0.44 - 0.32 * k), ir * (0.64 - 0.1 * k), 0, 0, TAU); g.fillStyle = '#01040a'; g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.92)'; g.beginPath(); g.arc(ix - ir * 0.3, iy - ir * 0.42, Math.max(0.7, ir * 0.17), 0, TAU); g.fill();
+    g.restore();
+    g.strokeStyle = rgba('#ecfeff', (0.9 * open).toFixed(3)); g.lineWidth = 0.8;
+    imAlmond(g, x, y, ww, hh); g.stroke();
+  } else {
+    // shut: a lid, one line across it
+    g.strokeStyle = rgba('#a5f3fc', 0.8); g.lineWidth = 0.9;
+    g.beginPath(); g.moveTo(x - ww, y); g.quadraticCurveTo(x, y + r * 0.22, x + ww, y); g.stroke();
+  }
+  // its fuse: twelve scales round it, going out one by one from the top; at the end, all of them flaring white
+  const gone = IM_EYE_N - Math.ceil(IM_EYE_N * (1 - k) - 1e-6), r0 = r + 2.3;
+  g.globalCompositeOperation = 'lighter';
+  for (let j = 0; j < IM_EYE_N; j++) {
+    const a = -Math.PI / 2 + (j + 0.5) * TAU / IM_EYE_N, ca = Math.cos(a), sa = Math.sin(a);
+    if (clasp !== null && Math.abs(Math.atan2(Math.sin(a - clasp), Math.cos(a - clasp))) < 0.62) continue;   // the clasp is there
+    let r1 = r0 + 2.4, col;
+    if (end > 0) { r1 += 5 * end; col = rgba('#f0fdff', ((0.45 + 0.55 * end) * (shut ? 0.5 : 1)).toFixed(3)); }
+    else col = j < gone ? 'rgba(100,116,139,0.35)' : rgba(IM_COL, 0.9);
+    g.strokeStyle = col; g.lineWidth = j < gone && end <= 0 ? 1 : 1.5;
+    g.beginPath(); g.moveTo(x + ca * r0, y + sa * r0); g.lineTo(x + ca * r1, y + sa * r1); g.stroke();
+  }
+  // its last moments: white heat in the glass
+  if (end > 0) {
+    g.fillStyle = rgba('#ffffff', (0.55 * end * (shut ? 0.45 : 1)).toFixed(3));
+    g.beginPath(); g.arc(x, y, r * (0.35 + 0.6 * end), 0, TAU); g.fill();
+    if (mat && stare > 0) oaGlow(g, x, y, r * 3.2, '#ecfeff', 0.6 * stare);
+  }
+}
 
-  /* The bombs are eyes. Thrown, each is a mote of light off the wings with
-     its streak behind it; landed, a lens of dark glass rimmed in light, and
-     the lids part. The iris goes from the moth's cyan to white as the fuse
-     runs, the pupil narrows and watches the nearest body, and in its last
-     moments it blinks faster and fills with white. */
-  eyes(g, s) {
-    const mat = !!FXO.mat, R = 7.6;
-    for (const b of s.spots) {
-      const away = Math.atan2(b.ty - b.y0, b.tx - b.x0) || 0;
-      if (b.f < 1 && !b.on) {
-        g.globalCompositeOperation = 'lighter';
-        const tail = 24 * (1 - b.f) + 6;
-        g.strokeStyle = rgba(IM_COL, 0.55); g.lineWidth = 2.2; g.lineCap = 'round';
-        g.beginPath(); g.moveTo(b.x - Math.cos(away) * tail, b.y - Math.sin(away) * tail); g.lineTo(b.x, b.y); g.stroke();
-        if (mat) oaGlow(g, b.x, b.y, 10, '#a5f3fc', 0.8);
-        g.fillStyle = '#ecfeff'; g.beginPath(); g.arc(b.x, b.y, 2.4, 0, TAU); g.fill();
-        g.globalCompositeOperation = 'source-over';
-        continue;
-      }
-      const k = b.k, open = 1 - Math.pow(1 - oaC01((b.t - EYE_FLY) / 0.4), 3), end = oaC01((k - 0.8) / 0.2);
-      const blink = end > 0 && Math.sin(b.t * (40 + 70 * end)) < 0 ? 0.35 : 1;
-      g.save();
-      g.translate(b.x, b.y); g.rotate(away + Math.PI / 2);
-      if (mat) {
-        g.globalCompositeOperation = 'lighter';
-        oaGlow(g, 0, 0, R * (2.2 + 1.6 * k), IM_COL, (0.22 + 0.48 * k) * blink);
-        g.globalCompositeOperation = 'source-over';
-      }
-      // its lens
-      g.beginPath(); g.arc(0, 0, R, 0, TAU); g.fillStyle = '#020611'; g.fill();
-      g.strokeStyle = rgba('#a5f3fc', (0.6 + 0.4 * blink).toFixed(3)); g.lineWidth = 1.2; g.stroke();
-      // the lids parting: an almond of the eye inside it
-      const hh = R * 0.5 * open * (end > 0 ? blink : 1), ww = R * 0.96;
-      if (hh > 0.25) {
-        g.save();
-        g.beginPath(); g.moveTo(-ww, 0); g.quadraticCurveTo(0, -hh * 2, ww, 0); g.quadraticCurveTo(0, hh * 2, -ww, 0); g.closePath();
-        g.clip();
-        let lx = 0, ly = 0;
-        if (b.look !== null) { const la = b.look - away - Math.PI / 2; lx = Math.cos(la) * R * 0.24; ly = Math.sin(la) * R * 0.24; }
-        const ir = R * 0.5;
-        g.beginPath(); g.arc(lx, ly, ir, 0, TAU); g.fillStyle = oaMix('#22d3ee', '#ffffff', k * k); g.fill();
-        g.beginPath(); g.arc(lx, ly, R * (0.34 - 0.2 * k), 0, TAU); g.fillStyle = '#01040a'; g.fill();
-        g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(lx - ir * 0.38, ly - ir * 0.38, 0.9, 0, TAU); g.fill();
-        g.restore();
-        g.strokeStyle = rgba('#ecfeff', (0.8 * open).toFixed(3)); g.lineWidth = 0.7;
-        g.beginPath(); g.moveTo(-ww, 0); g.quadraticCurveTo(0, -hh * 2, ww, 0); g.quadraticCurveTo(0, hh * 2, -ww, 0); g.stroke();
-      }
-      // its last moments: white heat in the lens
-      if (end > 0) {
-        g.globalCompositeOperation = 'lighter';
-        g.fillStyle = rgba('#ffffff', (0.65 * end * blink).toFixed(3));
-        g.beginPath(); g.arc(0, 0, R * (0.45 + 0.55 * end), 0, TAU); g.fill();
+/* --------------------------- IMAGO's cut-in, drawn ---------------------------
+   The plan's beats ("The cut-in" in ONE-POINT-OH-RITE-PLAN.md), with a cocoon
+   (user, 18 Oct: "give it a cocoon phase where runner breaks out of it"), in
+   seconds from [F], the cut at IM_T_CUT:
+     0 – 0.8    the room goes dark and his set comes on: close on its tube,
+                the ship as he kept it on the old grid, still. His voice, in
+                the first build's type: "Put it back."
+     0.8 – 1.6  the ship on the tube moves on its own. A seam opens down its
+                spine, a − and a + either side of it.
+     1.6 – 2.7  the tube cracks along the seam and light pours out. The ship
+                comes out through the crack, and silk of light spins out
+                after it and winds round it, tail to nose, into a cocoon.
+     2.7 – 3.7  the cocoon hangs on its thread in front of the broken set,
+                swaying. Something inside it beats, three times, harder each
+                time; it shudders, and cracks of light run over it.
+     3.7 – 4.6  it splits down the same seam and the moth breaks out, the two
+                halves peeling back and silk thrown off; its wings unfold,
+                antennae and tails, as the camera pulls back off the set; its
+                four eyespots open and flash.
+     the cut    the set's picture collapses to a line and then a dot, onto the
+                room, where the moth is still unfolding (the hull hook, from
+                P.imAge IM_WAKE_FROM).
+   The scene has its own units: the frame between the letterbox bars is 100
+   tall. The set stands at the origin and the ship on its tube is nose up; the
+   camera is the set's (zoom z on the point x, y). Out of the glass, the ship,
+   its cocoon and the moth (the pod) are nearer than the set and are placed on
+   the screen on their own (imcPod), so the set falls away behind them as the
+   camera pulls back. What is heard is off the same clock (imcSounds), so the
+   pause holds it too. Its only state is IM_ST.cut, this machine's. */
+const IMC_BAR = 0.12;                                  // each letterbox bar, a share of the screen's height
+const IMC_OFF = 0.42;                                  // after the cut: the picture collapsing to a dot
+const IMC_T = { on: 0.22, say: 0.2, sayEnd: 1.55, move: 0.8, seam: 1.0, crack: 1.6, spin: 1.85, wrapped: 2.65,
+                beats: [2.95, 3.25, 3.5], split: 3.7, pull: 3.75, pullEnd: 4.5, flash: 4.32 };
+const IMC_SET = { x0: -68, y0: -47, x1: 68, y1: 47, r: 7 };      // the set's cabinet
+const IMC_GLASS = { x0: -56, y0: -38, x1: 34, y1: 36, r: 10 };   // its tube
+const IMC_SHIP = { x: -11, y: 0, s: 1.2 };                       // the ship on it, nose up
+const IMC_SAY = 'Put it back.';
+// the crack down the tube, along the ship's spine: the line (set space), and where its branches leave it
+const IMC_CRACK = (() => {
+  const pts = [];
+  for (let y = IMC_GLASS.y0 - 2; y <= IMC_GLASS.y1 + 2; y += 5.5) pts.push([IMC_SHIP.x + (odHash(y * 1.7 + 3) - 0.5) * 5, y]);
+  const br = [3, 5, 8, 10, 12].map((i, j) => { const p = pts[i], sd = j % 2 ? 1 : -1; return [p, [p[0] + sd * (7 + 6 * odHash(i)), p[1] - 4 + 8 * odHash(i + 9)], [p[0] + sd * (13 + 8 * odHash(i + 4)), p[1] - 6 + 12 * odHash(i + 2)]]; });
+  return { pts, br };
+})();
+/* the cocoon, in hull space (nose at +x): from its tail end to its nose end,
+   heavier at the tail as it hangs; its outline, and the cracks of light that
+   run over it as it beats (revealed a few at a beat) */
+const IMC_POD = { x0: -18, x1: 22, w: 16 };
+const imcPodW = x => { const u = clamp((x - IMC_POD.x0) / (IMC_POD.x1 - IMC_POD.x0), 0, 1); return IMC_POD.w * Math.pow(Math.sin(Math.PI * u), 0.6) * (1 - 0.3 * u); };
+const IMC_POD_PTS = (() => {
+  const a = [], b = [];
+  for (let i = 0; i <= 28; i++) { const x = lerp(IMC_POD.x0, IMC_POD.x1, i / 28), w = imcPodW(x); a.push([x, w]); b.push([x, -w]); }
+  return a.concat(b.reverse());
+})();
+const IMC_POD_CRACKS = [0, 1, 2, 3, 4, 5, 6, 7].map(i => {
+  const sd = i % 2 ? 1 : -1, x0 = lerp(-9, 15, odHash(i * 2.1 + 1)), pts = [[x0, 0]];
+  for (let k = 1; k <= 4; k++) { const x = x0 + (odHash(i * 5 + k) - 0.5) * 3.2 * k / 2, w = imcPodW(x); pts.push([x, sd * w * (k / 4) * (0.5 + 0.4 * odHash(i + k * 3))]); }
+  return pts;
+});
+
+function imcCam(s) {
+  const T = IMC_T, E = OPO_KIT.ease;
+  let z = lerp(1.62, 1.82, clamp(s / T.crack, 0, 1));
+  const ck = s - T.crack;
+  if (ck >= 0) z *= 1 + 0.08 * clamp(ck / 0.04, 0, 1) * Math.exp(-ck * 5);   // the crack: a punch in
+  const back = E.inOut(clamp((s - T.spin) / (T.wrapped - T.spin + 0.3), 0, 1));   // stepping back as it is spun in
+  const p = E.inOut(clamp((s - T.pull) / (T.pullEnd - T.pull), 0, 1));            // and off the set, once it is out
+  z = Math.exp(lerp(lerp(Math.log(z), Math.log(1.3), back), Math.log(0.58), p));
+  return { z, x: lerp(IMC_SHIP.x + 3, -2, Math.max(back * 0.5, p)), y: lerp(IMC_SHIP.y - 1, 6, p), p };
+}
+function imcFrame(w, h, q, s) {
+  const bar = h * IMC_BAR, u = (h - 2 * bar) / 100, E = OPO_KIT.ease, cam = imcCam(s);
+  const on = E.out(clamp(s / 0.2, 0, 1)), off = q.cutAge >= 0 ? E.inOut(clamp(q.cutAge / IMC_OFF, 0, 1)) : 0;
+  return { w, h, bar, barK: on * (1 - off), u, cx: w / 2, cy: h / 2, cam, k: u * cam.z };
+}
+// set space, onto the screen
+function imcXf(g, F) { g.translate(F.cx, F.cy); g.scale(F.k, F.k); g.translate(-F.cam.x, -F.cam.y); }
+const imcPt = (F, x, y) => ({ x: F.cx + (x - F.cam.x) * F.k, y: F.cy + (y - F.cam.y) * F.k });
+// how much of the crack's light is pouring out, at s
+const imcPour = s => clamp((s - IMC_T.crack) / 0.25, 0, 1) * (1 - 0.75 * clamp((s - IMC_T.wrapped) / 0.5, 0, 1));
+// the ship on the tube, moving on its own
+function imcShipMove(s) {
+  const mv = OPO_KIT.ease.inOut(clamp((s - IMC_T.move) / 0.5, 0, 1));
+  return { dx: mv * Math.sin(s * 2.2) * 1.6, dy: mv * Math.cos(s * 1.7) * 1.2, wob: mv * (Math.sin(s * 3.1) * 0.12 + Math.sin(s * 7.3) * 0.03) };
+}
+// the beats inside the cocoon: how hard the last one still is, at s
+function imcBeat(s) {
+  let b = 0;
+  IMC_T.beats.forEach((t, i) => { if (s >= t) b = Math.max(b, Math.exp(-(s - t) * 9) * (0.55 + 0.25 * i)); });
+  return b;
+}
+/* the pod out of the glass: where it is on the screen (x, y), how big (px a
+   hull unit), its sway on its thread, and the screen point its thread hangs
+   from. At the moment it leaves the glass it is exactly where the ship was. */
+function imcPod(F, s) {
+  const T = IMC_T, E = OPO_KIT.ease, u = F.u, m = imcShipMove(s);
+  const lift = E.inOut(clamp((s - T.spin) / 0.6, 0, 1)), p = E.inOut(clamp((s - T.pull) / (T.pullEnd - T.pull), 0, 1));
+  const at = imcPt(F, IMC_SHIP.x + m.dx, IMC_SHIP.y + m.dy), beat = imcBeat(s);
+  const hang = clamp((s - T.wrapped + 0.25) / 0.4, 0, 1) * (1 - clamp((s - T.split) / 0.3, 0, 1));
+  const rot = m.wob * (1 - lift) + hang * (Math.sin(s * 2.3) * 0.05 + beat * 0.07 * Math.sin(s * 41));
+  const sc = lerp(F.k * IMC_SHIP.s, 2.2 * u, lift) * lerp(1, 0.72, p) * (1 + 0.04 * beat);
+  const x = lerp(at.x, F.cx, lift), y = lerp(at.y, F.cy + 2 * u, lift);
+  return { x, y, sc, rot, hang, lift, beat, p, piv: { x, y: y - 46 * u } };
+}
+// a point of the pod's (hull space) on the screen, once it is out and still (from the split)
+const imcPodPt = (Pd, x, y) => ({ x: Pd.x + y * Pd.sc, y: Pd.y - x * Pd.sc });
+// the moth breaking out, as orImago reads it
+function imcMothI(s) {
+  const T = IMC_T, E = OPO_KIT.ease, a = s - T.split, fl = s - T.flash;
+  return { wa: 9, open: Math.max(0, E.backOut(clamp((a - 0.04) / 0.6, 0, 1))), ant: E.backOut(clamp((a - 0.18) / 0.4, 0, 1)),
+           tail: clamp((a - 0.2) / 0.5, 0, 1), beat: fl > -0.12 && fl < 0.4 ? Math.sin((fl + 0.12) / 0.52 * Math.PI) : 0,
+           body: 1, flash: clamp(1 - a / 0.35, 0, 1), eyes: fl >= 0 ? clamp(1 - fl / 0.55, 0, 1) : 0, Wg: { ph: s * 5, spd: 0, lag: 0 } };
+}
+
+/* the set: his old one, flat in the first build's colours, nothing on it lit
+   but by its own tube */
+function imcSet(g, F, s, mat) {
+  const S = IMC_SET, Gl = IMC_GLASS, Fs = OPO_FIRST;
+  g.save(); imcXf(g, F);
+  if (mat) {
+    g.globalCompositeOperation = 'lighter';
+    oaGlow(g, (Gl.x0 + Gl.x1) / 2, 0, 130, '#38bdf8', 0.16 + 0.18 * imcPour(s));
+    g.globalCompositeOperation = 'source-over';
+  }
+  imRR(g, S.x0, S.y0, S.x1 - S.x0, S.y1 - S.y0, S.r); g.fillStyle = '#0a1120'; g.fill();
+  g.strokeStyle = Fs.wall; g.lineWidth = 1.2; g.stroke();
+  g.lineWidth = 1;
+  for (const [ky, ka] of [[-26, -0.9], [-10, 0.4]]) {
+    g.beginPath(); g.arc(51, ky, 5.5, 0, TAU); g.fillStyle = '#0e1626'; g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(51, ky); g.lineTo(51 + Math.cos(ka) * 4.5, ky + Math.sin(ka) * 4.5); g.stroke();
+  }
+  g.beginPath(); for (let gy = 6; gy <= 38; gy += 4) { g.moveTo(43, gy); g.lineTo(60, gy); } g.stroke();
+  imRR(g, Gl.x0 - 3.5, Gl.y0 - 3.5, Gl.x1 - Gl.x0 + 7, Gl.y1 - Gl.y0 + 7, Gl.r + 3); g.fillStyle = '#04080f'; g.fill(); g.stroke();
+  g.restore();
+}
+// the seam down the ship's spine, opening (hull space)
+function imcSeam(g, seam, op, mat) {
+  if (!(op > 0)) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = rgba('#ffffff', (0.95 * op).toFixed(3)); g.lineWidth = 0.35 + 1.1 * seam; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(lerp(3, 18.5, seam), 0); g.lineTo(lerp(3, -10.5, seam), 0); g.stroke();
+  if (mat) oaGlow(g, 3, 0, 8 + 10 * seam, '#a5f3fc', 0.6 * op);
+  g.restore();
+}
+/* the ship as he kept it, on the tube: flat and still; then moving on its
+   own, a seam opening down its spine, a − and a + either side of it. It
+   leaves the glass at IMC_T.spin (the pod has it from there). */
+function imcShip(g, s, t, mat) {
+  const T = IMC_T, Sh = IMC_SHIP, m = imcShipMove(s), seam = clamp((s - T.seam) / 0.5, 0, 1);
+  if (s >= T.spin) return;
+  g.save();
+  g.translate(Sh.x + m.dx, Sh.y + m.dy); g.rotate(-Math.PI / 2 + m.wob); g.scale(Sh.s, Sh.s);
+  orHullFlat(g);
+  imcSeam(g, seam, seam, mat);
+  g.restore();
+  if (seam > 0 && s < T.crack + 0.2) {
+    const k = oaSteps(clamp((s - T.seam) / 0.3, 0, 1), 3) * (s > T.crack ? 1 - (s - T.crack) / 0.2 : 1) * (Math.sin(s * 40) > -0.7 ? 1 : 0.4);
+    g.font = '800 11px ' + OA_MONO; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha = k; g.fillStyle = OA_DEL; g.fillText('−', Sh.x - 21, Sh.y + 1);
+    g.fillStyle = OA_ADD; g.fillText('+', Sh.x + 21, Sh.y + 1); g.globalAlpha = 1;
+  }
+}
+/* the tube: the old grid scrolling as it always did, the ship on it, and the
+   tube's own phosphor, scanlines and curve */
+function imcTube(g, F, s, t, mat) {
+  const Gl = IMC_GLASS, Fs = OPO_FIRST, gw = Gl.x1 - Gl.x0, gh = Gl.y1 - Gl.y0, gx = (Gl.x0 + Gl.x1) / 2, gy = (Gl.y0 + Gl.y1) / 2;
+  g.save(); imcXf(g, F);
+  imRR(g, Gl.x0, Gl.y0, gw, gh, Gl.r); g.clip();
+  g.fillStyle = Fs.bg; g.fillRect(Gl.x0, Gl.y0, gw, gh);
+  const sc = (s * 7) % 8;
+  g.strokeStyle = Fs.grid; g.lineWidth = 0.7; g.beginPath();
+  for (let x = Gl.x0 + 4; x < Gl.x1; x += 8) { g.moveTo(x, Gl.y0); g.lineTo(x, Gl.y1); }
+  for (let y = Gl.y0 - 8 + sc; y < Gl.y1; y += 8) { g.moveTo(Gl.x0, y); g.lineTo(Gl.x1, y); }
+  g.stroke();
+  imcShip(g, s, t, mat);
+  g.fillStyle = 'rgba(0,0,0,0.3)'; for (let y = Gl.y0; y < Gl.y1; y += 1.5) g.fillRect(Gl.x0, y, gw, 0.55);
+  const vg = g.createRadialGradient(gx, gy, 18, gx, gy, 64);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.65)');
+  g.fillStyle = vg; g.fillRect(Gl.x0, Gl.y0, gw, gh);
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = 'rgba(186,230,253,0.06)'; g.beginPath(); g.ellipse(gx - gw * 0.22, gy - gh * 0.28, gw * 0.3, gh * 0.12, -0.35, 0, TAU); g.fill();
+  g.restore();
+}
+/* the crack, along the seam, and the light pouring out of it */
+function imcCrack(g, F, s, mat) {
+  const c = s - IMC_T.crack;
+  if (c < 0) return;
+  const C = IMC_CRACK, run = OPO_KIT.ease.out(clamp(c / 0.12, 0, 1)), pour = imcPour(s), mid = IMC_SHIP.y, X = IMC_SHIP.x;
+  g.save(); imcXf(g, F);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.globalCompositeOperation = 'lighter';
+  if (pour > 0) {
+    // a sheet of light out of the seam, and shafts thrown off it
+    const gr = g.createLinearGradient(X - 40, 0, X + 40, 0);
+    gr.addColorStop(0, 'rgba(103,232,249,0)'); gr.addColorStop(0.5, rgba('#67e8f9', (0.2 * pour).toFixed(3))); gr.addColorStop(1, 'rgba(103,232,249,0)');
+    g.fillStyle = gr; g.fillRect(X - 40, IMC_GLASS.y0 - 4, 80, IMC_GLASS.y1 - IMC_GLASS.y0 + 8);
+    for (let i = 0; i < 9; i++) {
+      const y = lerp(IMC_GLASS.y0 + 4, IMC_GLASS.y1 - 4, i / 8), sd = i % 2 ? 1 : -1, L = 50 + 60 * odHash(i * 3.3), sp = 3 + 5 * odHash(i + 7);
+      g.fillStyle = rgba('#67e8f9', (0.08 * pour * (0.6 + 0.4 * Math.sin(s * 9 + i))).toFixed(3));
+      g.beginPath(); g.moveTo(X, y - 1.5); g.lineTo(X + sd * L, y - sp - L * 0.12); g.lineTo(X + sd * L, y + sp + L * 0.12); g.lineTo(X, y + 1.5); g.closePath(); g.fill();
+    }
+    if (mat) oaGlow(g, X, mid, 60, '#67e8f9', 0.3 * pour);
+  }
+  // the line, run out from the ship both ways, and its branches
+  const up = C.pts.filter(p => p[1] <= mid).reverse(), dn = C.pts.filter(p => p[1] >= mid);
+  const line = pts => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); };
+  for (const half of [up, dn]) {
+    const n = Math.max(2, Math.ceil(half.length * run));
+    g.strokeStyle = rgba('#a5f3fc', 0.55); g.lineWidth = 2.6; line(half.slice(0, n)); g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 0.8; line(half.slice(0, n)); g.stroke();
+  }
+  if (run >= 1) {
+    const bk = clamp((c - 0.1) / 0.15, 0, 1);
+    g.strokeStyle = rgba('#e0f2fe', (0.8 * bk).toFixed(3)); g.lineWidth = 0.6;
+    for (const b of C.br) { g.beginPath(); g.moveTo(b[0][0], b[0][1]); g.lineTo(lerp(b[0][0], b[1][0], bk), lerp(b[0][1], b[1][1], bk)); g.lineTo(lerp(b[0][0], b[2][0], bk), lerp(b[0][1], b[2][1], bk)); g.stroke(); }
+  }
+  g.restore();
+}
+// the cocoon's silk, up to xf along it (hull space): glass-dark, wound with strands of light, lit from inside on a beat
+function imcSilk(g, xf, s, beat, t, mat, cracks) {
+  g.save();
+  orPath(g, IMC_POD_PTS); g.clip();
+  g.beginPath(); g.rect(IMC_POD.x0 - 2, -16, xf - IMC_POD.x0 + 2, 32); g.clip();
+  const gr = g.createLinearGradient(0, -IMC_POD.w, 0, IMC_POD.w);
+  gr.addColorStop(0, '#051a22'); gr.addColorStop(0.45, '#0d3a48'); gr.addColorStop(1, '#04141b');
+  orPath(g, IMC_POD_PTS); g.fillStyle = gr; g.fill();
+  // its strands, wound across it both ways, a weave
+  g.lineCap = 'round';
+  for (let j = 0; j < 46; j++) {
+    const x = IMC_POD.x0 + 0.4 + j * 0.8, w = imcPodW(x) + 0.5, sl = (j % 2 ? 1 : -1) * (2.2 + 1.4 * odHash(j));
+    if (x > xf) break;
+    g.strokeStyle = rgba(j % 3 ? '#67e8f9' : '#a5f3fc', (0.28 + 0.22 * odHash(j + 3)).toFixed(3)); g.lineWidth = 0.16 + 0.1 * odHash(j + 7);
+    g.beginPath(); g.moveTo(x - sl, -w); g.quadraticCurveTo(x + sl * 0.2 + 1.2, 0, x + sl, w); g.stroke();
+  }
+  // lit from inside: the beat, and the cracks it opens
+  g.globalCompositeOperation = 'lighter';
+  const live = 0.12 + 0.55 * beat;
+  if (mat) oaGlow(g, 2, 0, 22, '#67e8f9', live);
+  else { g.fillStyle = rgba('#67e8f9', (0.18 * live).toFixed(3)); orPath(g, IMC_POD_PTS); g.fill(); }
+  for (let i = 0; i < cracks; i++) {
+    const c = IMC_POD_CRACKS[i];
+    g.lineJoin = 'round';
+    g.strokeStyle = rgba('#67e8f9', (0.35 + 0.4 * beat).toFixed(3)); g.lineWidth = 0.45; orLine(g, c); g.stroke();
+    g.strokeStyle = rgba('#ffffff', (0.7 + 0.3 * beat).toFixed(3)); g.lineWidth = 0.14; orLine(g, c); g.stroke();
+  }
+  g.restore();
+}
+/* the pod: the ship out of the glass; the silk spun round it into a cocoon,
+   hanging and beating; and the moth breaking out of it */
+function imcPodDraw(g, F, s, t, mat) {
+  const T = IMC_T, E = OPO_KIT.ease;
+  if (s < T.spin) return;
+  const Pd = imcPod(F, s), sc = Pd.sc;
+  const wrap = E.inOut(clamp((s - T.spin - 0.1) / (T.wrapped - T.spin - 0.1), 0, 1)), xf = lerp(IMC_POD.x0 - 1, IMC_POD.x1 + 1, wrap);
+  const seam = 1, hard = clamp((s - T.beats[0]) / (T.split - T.beats[0]), 0, 1);
+  // its thread, up out of the frame, once it hangs
+  if (Pd.hang > 0) {
+    const top = { x: Pd.x + Math.sin(Pd.rot) * IMC_POD.x1 * sc * 0.98, y: Pd.y - Math.cos(Pd.rot) * IMC_POD.x1 * sc * 0.98 };
+    g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    g.strokeStyle = rgba('#a5f3fc', (0.6 * Pd.hang).toFixed(3)); g.lineWidth = 1.3;
+    g.beginPath(); g.moveTo(top.x, top.y); g.lineTo(Pd.piv.x, F.bar - 4); g.stroke();
+    g.restore();
+  }
+  g.save();
+  g.translate(Pd.piv.x, Pd.piv.y); g.rotate(Pd.rot); g.translate(-Pd.piv.x, -Pd.piv.y);
+  g.translate(Pd.x, Pd.y); g.rotate(-Math.PI / 2); g.scale(sc, sc);
+  if (s < T.split) {
+    // the silk being spun in: strands whipping round it at the front of the wrap, out of the light behind
+    if (wrap < 1) {
+      orHullFlat(g);
+      imcSeam(g, seam, 1 - wrap, mat);
+      g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+      for (let k = 0; k < 4; k++) {
+        const ph = s * 13 + k * 1.6, fx = Math.min(xf, IMC_POD.x1), w = imcPodW(fx) + 0.6;
+        const ox = fx + Math.cos(ph) * 9, oy = Math.sin(ph) * 30;
+        g.strokeStyle = rgba('#a5f3fc', (0.55 * (1 - wrap * 0.6)).toFixed(3)); g.lineWidth = 0.22;
+        g.beginPath(); g.moveTo(ox, oy); g.quadraticCurveTo(fx + Math.cos(ph + 1) * 4, oy * 0.4, fx, Math.sin(ph) > 0 ? w : -w); g.stroke();
       }
       g.restore();
     }
+    const cracks = s >= T.beats[2] ? 8 : s >= T.beats[1] ? 5 : s >= T.beats[0] ? 2 : 0;
+    imcSilk(g, xf, s, Pd.beat, t, mat, cracks);
+    // its rim, as far as it is wound
+    g.save(); g.beginPath(); g.rect(IMC_POD.x0 - 2, -16, xf - IMC_POD.x0 + 2, 32); g.clip();
+    orPath(g, IMC_POD_PTS); g.strokeStyle = rgba('#a5f3fc', 0.8); g.lineWidth = 0.35; g.stroke();
+    g.restore();
+    // and the seam down it, the same seam, burning brighter as it comes
+    if (wrap >= 1) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = rgba('#ffffff', (0.25 + 0.75 * hard * hard + 0.3 * Pd.beat).toFixed(3)); g.lineWidth = 0.25 + 0.5 * hard;
+      g.beginPath(); g.moveTo(IMC_POD.x0 + 3, 0); g.lineTo(IMC_POD.x1 - 3, 0); g.stroke();
+      if (mat) oaGlow(g, 3, 0, 12 + 10 * hard, '#a5f3fc', 0.25 + 0.5 * hard * hard);
+      g.restore();
+    }
+  } else {
+    // out: the moth, its tails first, unfolding where the cocoon was
+    const I = imcMothI(s), sp = clamp((s - T.split) / 0.6, 0, 1);
+    if (I.tail > 0) for (const sd of [1, -1]) {
+      const a0 = orWingXf(ORH_TAIL, sd, false, I), L = 30 * I.tail, sw = Math.sin(t * 4 + sd) * 3;
+      const c1 = [a0[0] - L * 0.5, a0[1] + sd * 4 + sw * 0.5], e = [a0[0] - L, a0[1] + sd * 9 + sw];
+      g.lineCap = 'round';
+      g.strokeStyle = 'rgba(4,18,25,0.75)'; g.lineWidth = 3.6; g.beginPath(); g.moveTo(a0[0], a0[1]); g.quadraticCurveTo(c1[0], c1[1], e[0], e[1]); g.stroke();
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = rgba('#67e8f9', 0.75); g.lineWidth = 1.6; g.stroke();
+      if (mat) oaGlow(g, e[0], e[1], 6, '#a5f3fc', 0.8);
+      g.fillStyle = '#ecfeff'; g.beginPath(); g.arc(e[0], e[1], 1.1, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'source-over';
+    }
+    orImago(g, {}, I, orLightIn(-Math.PI / 2), t, mat);
+    // the cocoon's halves, torn open down the seam and peeled back off it both ways like petals, falling away
+    if (sp < 1) for (const sd of [1, -1]) {
+      const th = Math.PI * 0.82 * E.out(clamp(sp / 0.45 - (sd > 0 ? 0 : 0.08), 0, 1)), c = Math.cos(th), hinge = IMC_POD.w * sd;
+      g.save();
+      g.globalAlpha = 1 - E.in(clamp((sp - 0.45) / 0.55, 0, 1));
+      g.translate(-14 * E.in(clamp((sp - 0.35) / 0.65, 0, 1)), sd * 5 * sp);
+      g.translate(0, hinge); g.scale(1, Math.abs(c) < 0.02 ? 0.02 * Math.sign(c || 1) : c); g.translate(0, -hinge);
+      g.beginPath(); g.rect(IMC_POD.x0 - 2, sd > 0 ? 0 : -16, IMC_POD.x1 - IMC_POD.x0 + 4, 16); g.clip();
+      imcSilk(g, IMC_POD.x1 + 1, s, 0, t, mat, c > 0 ? 8 : 0);
+      if (c < 0) { orPath(g, IMC_POD_PTS); g.fillStyle = 'rgba(2,10,14,0.4)'; g.fill(); }   // its inside, turned out
+      orPath(g, IMC_POD_PTS); g.strokeStyle = rgba('#a5f3fc', 0.7); g.lineWidth = 0.35; g.stroke();
+      g.restore();
+    }
+  }
+  g.restore();
+  // breaking out: the silk thrown off it, and a flash out of the seam
+  const so = s - T.split;
+  if (so >= 0 && so < 0.7) {
+    const k = so / 0.7, u = F.u;
+    g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    if (so < 0.2 && mat) oaGlow(g, Pd.x, Pd.y, 40 * u, '#ecfeff', 0.8 * (1 - so / 0.2));
+    if (so < 0.12) { g.fillStyle = rgba('#ffffff', (0.8 * (1 - so / 0.12)).toFixed(3)); g.fillRect(Pd.x - 1.5 * u, Pd.y - IMC_POD.x1 * sc, 3 * u, (IMC_POD.x1 - IMC_POD.x0) * sc); }
+    for (let i = 0, n = FXO.parts ? 28 : 12; i < n; i++) {
+      const a = odHash(i * 3.7) * TAU, d = (8 + 50 * odHash(i * 1.3 + 2)) * u * OPO_KIT.ease.out(k), x = Pd.x + Math.cos(a) * d, y = Pd.y + Math.sin(a) * d * 1.3 + k * k * 10 * u;
+      const r = a + k * (4 + 6 * odHash(i)), l = (1.5 + 2.5 * odHash(i + 5)) * u;
+      g.strokeStyle = rgba(i % 3 ? '#67e8f9' : '#ecfeff', (0.8 * (1 - k)).toFixed(3)); g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(x - Math.cos(r) * l, y - Math.sin(r) * l); g.quadraticCurveTo(x + Math.sin(r) * l * 0.4, y - Math.cos(r) * l * 0.4, x + Math.cos(r) * l, y + Math.sin(r) * l); g.stroke();
+    }
+    g.restore();
+  }
+}
+/* its four eyespots opening, and flashing: Z's own eyes, a streak across the frame */
+function imcFlash(g, F, s, cutAge) {
+  const f = s - IMC_T.flash;
+  if (f < 0) return;
+  const Pd = imcPod(F, s), I = imcMothI(s), rise = clamp(f / 0.035, 0, 1), k = rise * Math.exp(-Math.max(0, f - 0.035) * 4);
+  const hold = cutAge >= 0 ? clamp(1 - cutAge / 0.2, 0, 1) : 1, px = F.h / 720;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.fillStyle = rgba('#0e7490', (0.3 * k * k).toFixed(3)); g.fillRect(0, 0, F.w, F.h);
+  for (const fore of [true, false]) for (const sd of [1, -1]) {
+    const E = fore ? ORH_FEYE : ORH_HEYE, h = orWingXf(E, sd, fore, I), p = imcPodPt(Pd, h[0], h[1]), big = fore ? 1 : 1.25;
+    oaGlow(g, p.x, p.y, F.h * 0.1 * big * (0.6 + 0.6 * rise), '#a5f3fc', 0.7 * k);
+    oaGlow(g, p.x, p.y, F.h * 0.03 * big, '#ffffff', 0.95 * Math.max(k, 0.4 * hold));
+    const rq = clamp(f / 0.45, 0, 1);
+    if (rq < 1) { g.strokeStyle = rgba(IM_COL, (0.7 * (1 - rq)).toFixed(3)); g.lineWidth = (2.4 * (1 - rq) + 0.5) * px; g.beginPath(); g.arc(p.x, p.y, F.h * (0.02 + 0.22 * OPO_KIT.ease.out(rq)) * big, 0, TAU); g.stroke(); }
+    if (fore) {
+      const reach = F.w * (0.18 + 0.5 * OPO_KIT.ease.out(clamp(f / 0.14, 0, 1))), w = (1.5 + 4 * k) * px;
+      for (const [len, col, a, ww] of [[reach, IM_COL, Math.max(0.85 * k, 0.35 * hold), w], [reach * 0.65, '#ffffff', Math.max(k, 0.5 * hold), w * 0.4]]) {
+        if (a <= 0.003) continue;
+        g.fillStyle = rgba(col, clamp(a, 0, 1).toFixed(3));
+        g.beginPath(); g.moveTo(p.x - len, p.y); g.quadraticCurveTo(p.x, p.y - ww, p.x + len, p.y); g.quadraticCurveTo(p.x, p.y + ww, p.x - len, p.y); g.fill();
+      }
+    }
+  }
+  g.restore();
+}
+/* his voice, low in the frame: the first build's type, flat, no glow, a
+   letter at a time */
+function imcSay(g, F, s) {
+  const T = IMC_T, a = s - T.say;
+  if (a < 0 || s > T.sayEnd + 0.25) return;
+  const n = Math.ceil(IMC_SAY.length * clamp(a / 0.32, 0, 1)), fade = clamp(1 - (s - T.sayEnd) / 0.25, 0, 1);
+  const size = Math.round(clamp(F.w * 0.02, 15, 22));
+  g.save();
+  g.font = '700 ' + size + 'px ' + OPO_FIRST.font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '0.04em';
+  g.globalAlpha = fade;
+  const y = F.h - F.bar - size * 1.6, tw = g.measureText(IMC_SAY).width;
+  g.fillStyle = 'rgba(5,6,10,0.75)'; g.fillRect(F.cx - tw / 2 - 10, y - size * 0.8, tw + 20, size * 1.6);
+  g.fillStyle = OPO_COL; g.fillText(IMC_SAY.slice(0, n).padEnd(IMC_SAY.length, ' '), F.cx, y);
+  g.letterSpacing = '0px';
+  g.restore();
+}
+// the whole picture, at s
+function imcPlate(g, F, s, t, mat, cutAge) {
+  g.fillStyle = '#020306'; g.fillRect(0, 0, F.w, F.h);
+  imcSet(g, F, s, mat);
+  imcTube(g, F, s, t, mat);
+  imcCrack(g, F, s, mat);
+  // the set falling back behind the pod as it comes forward
+  const fwd = OPO_KIT.ease.inOut(clamp((s - IMC_T.spin) / 0.6, 0, 1)) * (1 - 0.4 * clamp((s - IMC_T.pull) / 0.7, 0, 1));
+  if (fwd > 0) { g.fillStyle = 'rgba(2,3,6,' + (0.5 * fwd).toFixed(3) + ')'; g.fillRect(0, 0, F.w, F.h); }
+  imcPodDraw(g, F, s, t, mat);
+  imcFlash(g, F, s, cutAge);
+  imcSay(g, F, s);
+}
+/* on: the tube warming, a line across the middle first, then the frame */
+function imcOn(g, F, s, plate) {
+  const k = clamp(s / IMC_T.on, 0, 1);
+  if (k >= 1) { plate(); return; }
+  const E = OPO_KIT.ease, top = F.bar, bot = F.h - F.bar, mid = (top + bot) / 2;
+  const wx = E.out(clamp(k / 0.3, 0, 1)), hy = E.out(clamp((k - 0.25) / 0.75, 0, 1));
+  const hh = Math.max(2, (bot - top) * hy), x0 = F.w / 2 - F.w / 2 * wx;
+  g.save(); g.beginPath(); g.rect(x0, mid - hh / 2, F.w * wx, hh); g.clip(); plate(); g.restore();
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.fillStyle = rgba('#e0f2fe', (0.9 * (1 - k)).toFixed(3));
+  g.fillRect(x0, mid - hh / 2 - 1, F.w * wx, 2); g.fillRect(x0, mid + hh / 2 - 1, F.w * wx, 2);
+  oaGlow(g, F.w / 2, mid, F.w * 0.35 * wx, '#38bdf8', 0.4 * (1 - k));
+  g.restore();
+}
+/* off, on the cut: the set's picture collapses as an old tube's does, to a
+   bright line and then a dot, and the dot goes out onto the room */
+function imcOff(g, F, c, plate) {
+  const E = OPO_KIT.ease, a = E.in(clamp(c / 0.15, 0, 1)), b = E.in(clamp((c - 0.13) / 0.16, 0, 1)), d = clamp((c - 0.27) / 0.15, 0, 1);
+  const top = F.bar, bot = F.h - F.bar, mid = (top + bot) / 2, hh = (bot - top) * (1 - a);
+  if (a < 1) {
+    g.save();
+    g.beginPath(); g.rect(0, mid - hh / 2, F.w, hh); g.clip();
+    g.translate(0, mid); g.scale(1, Math.max(0.01, 1 - a)); g.translate(0, -mid);
+    plate();
+    g.restore();
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.fillStyle = rgba('#e0f2fe', (0.75 * a).toFixed(3)); g.fillRect(0, mid - hh / 2, F.w, hh);
+    g.restore();
+  }
+  if (a > 0.5 && d < 1) {
+    const lw = Math.max(4, F.w * (1 - b)), lh = Math.max(2, 4 * (1 - b)) * F.h / 720;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.fillStyle = rgba('#ffffff', (1 - d).toFixed(3)); g.fillRect(F.cx - lw / 2, mid - lh / 2, lw, lh);
+    oaGlow(g, F.cx, mid, F.h * (0.05 + 0.1 * (1 - b)), '#a5f3fc', 0.9 * (1 - d));
+    g.restore();
+  }
+}
+function imcBars(g, F) {
+  const b = F.bar * F.barK;
+  if (b < 0.5) return;
+  g.fillStyle = '#020306';
+  g.fillRect(0, 0, F.w, b); g.fillRect(0, F.h - b, F.w, b);
+  g.fillStyle = rgba('#67e8f9', (0.16 * F.barK).toFixed(3));
+  g.fillRect(0, b - 1, F.w, 1); g.fillRect(0, F.h - b, F.w, 1);
+}
+/* what is heard, off the cut-in's clock: the set coming on, his voice, the
+   seam, the glass, the silk spun, the beats, the cocoon tearing, the wings,
+   the eyes, the set going off */
+function imcSounds(s) {
+  const S = IM_ST.cut, was = S.lastS;
+  S.lastS = s;
+  if (!(was >= 0) || !(s > was)) return;
+  const hit = x => was < x && s >= x, T = IMC_T;
+  if (hit(0.02)) { Audio_.tone(62, 0.5, 'sine', 0.06, 50); Audio_.noise(0.12, 0.05, 7000, 3000, 2); }
+  if (hit(T.say)) { try { OPO_ART.saySound(Audio_, { text: IMC_SAY, kind: 'still' }); } catch (e) {} }
+  if (hit(T.seam)) Audio_.tone(1320, 0.35, 'sine', 0.03, 1760);
+  if (hit(T.crack)) { Audio_.noise(0.35, 0.16, 5200, 600, 2); Audio_.tone(110, 0.5, 'sawtooth', 0.04, 55); }
+  if (hit(T.spin)) { Audio_.tone(300, 0.8, 'triangle', 0.035, 900); Audio_.noise(0.8, 0.05, 1200, 4200, 1.2); }
+  T.beats.forEach((b, i) => { if (hit(b)) { Audio_.tone(72, 0.28, 'sine', 0.1 + 0.03 * i, 44); Audio_.noise(0.08, 0.05 + 0.02 * i, 900, 200, 1); } });
+  if (hit(T.split)) { Audio_.noise(0.45, 0.16, 3200, 500, 1.6); Audio_.tone(196, 0.5, 'sine', 0.06, 392); }
+  if (hit(T.split + 0.05)) Audio_.noise(0.6, 0.12, 300, 2400, 1.4);
+  if (hit(T.flash)) { Audio_.tone(1760, 0.5, 'sine', 0.06, 2640); Audio_.tone(98, 0.6, 'sine', 0.1, 49); }
+  if (hit(IM_T_CUT)) Audio_.tone(900, 0.28, 'sine', 0.05, 90);
+}
+
+const IMAGO_ART = {
+  /* IMAGO's cut-in, over everything (see "IMAGO's cut-in, drawn", above):
+     the room going still under the tube as it comes on; the picture; and on
+     the cut, the picture collapsing to a dot onto the room. */
+  cutIn(g, w, h, q) {
+    if (q.cutAge < 0 && q.hush > 0.002) { g.fillStyle = 'rgba(2,3,6,' + (0.9 * q.hush).toFixed(3) + ')'; g.fillRect(0, 0, w, h); }
+    const s = q.t, mat = !!FXO.mat, F = imcFrame(w, h, q, s);
+    imcSounds(s);
+    if (q.cutAge < IMC_OFF) {
+      const plate = () => imcPlate(g, F, Math.min(s, IM_T_CUT), uiTime, mat, q.cutAge);
+      if (q.cutAge >= 0) imcOff(g, F, q.cutAge, plate); else imcOn(g, F, s, plate);
+    }
+    imcBars(g, F);
   },
 
-  /* What the run told the drawing. A burst is a flash, a ring out to the
-     blast's reach, and scales of light thrown off it; a graze, a crescent of
-     light round the hull on the side the round passed; the throw, an arc of
-     light across the cone; the wake and the end, a ring off the hull. */
+  /* IMAGO, as the rite draws it awake: the luna moth hatching out of its
+     chrysalis from the press. As Z throws, its wings beat and its eyespots
+     let go, each with a ring; when Z comes back, each takes its light back
+     in, a ring closing on it. It keeps where the eyespots are (IM_ST.wings),
+     so the bombs leave from them. */
+  hull(g, h) {
+    const th = h.thrown, flap = th >= 0 && th < 0.32 ? Math.sin(th / 0.32 * Math.PI) : 0;
+    const hh = flap > 0 ? Object.assign({}, h, { flap }) : h;
+    OPR_ART.hull(g, hh);
+    const I = orImagoState(hh), pk = PILOT.on || 0, W = IM_ST.wings[pk] || (IM_ST.wings[pk] = { pts: [] });
+    W.at = uiTime; W.x = h.x; W.y = h.y; W.ang = h.ang; W.pts.length = 0;
+    for (const fore of [true, false]) for (const side of [1, -1]) {
+      const E = fore ? ORH_FEYE : ORH_HEYE, p = orWingXf(E, side, fore, I), w = orToWorld(p[0], p[1], h.x, h.y, h.ang);
+      W.pts.push({ x: w[0], y: w[1], r: E[2] * (0.28 + 0.72 * Math.min(1, I.open)), side, fore });
+    }
+    if (I.open < 0.9) return;
+    const back = uiTime - IM_ST.hud.at[0], e = h.eyes || 0;
+    g.globalCompositeOperation = 'lighter'; g.lineWidth = 1.2;
+    for (const p of W.pts) {
+      if (e > 0) { g.strokeStyle = rgba('#f0fdff', (0.85 * e).toFixed(3)); g.beginPath(); g.arc(p.x, p.y, p.r + 12 * (1 - e), 0, TAU); g.stroke(); }
+      if (back >= 0 && back < 0.45) { const u = back / 0.45; g.strokeStyle = rgba(IM_COL, (0.9 * (1 - u)).toFixed(3)); g.beginPath(); g.arc(p.x, p.y, p.r + 10 * (1 - u), 0, TAU); g.stroke(); }
+    }
+  },
+
+  /* Under each bomb: in the air, its shadow; down, its shadow and a ripple
+     where it came down, and its reach, closing in on it like an iris
+     (chevrons drawn in on a hairline at the blast's true edge), the
+     hairline firming as the fuse runs and the reach filling in its last
+     moments. Lines, so it reads with materials off. */
+  floor(g, s) {
+    const R = s.r, ease = OPO_KIT.ease;
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const b of s.spots) {
+      if (b.f < 1 && !b.on) {
+        const p = imLob(b, b.f), sh = clamp(1 - p.h / 30, 0.3, 1);
+        g.fillStyle = 'rgba(0,0,0,' + (0.3 * sh).toFixed(3) + ')';
+        g.beginPath(); g.ellipse(p.x, p.y + 4, 5 * sh + 1, 2.2 * sh + 0.6, 0, 0, TAU); g.fill();
+        continue;
+      }
+      const k = b.k, la = b.t - EYE_FLY, in_ = oaC01((la + 0.1) / 0.3), end = oaC01((k - 0.8) / 0.2);
+      if (!b.on) {
+        g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(b.x, b.y + 4, 8.5, 3.4, 0, 0, TAU); g.fill();
+        if (la >= 0 && la < 0.4) {
+          const u = la / 0.4;
+          g.strokeStyle = rgba('#a5f3fc', (0.55 * (1 - u)).toFixed(3)); g.lineWidth = 1.4 * (1 - u) + 0.4;
+          g.beginPath(); g.arc(b.x, b.y, 7 + 20 * ease.cubicOut(u), 0, TAU); g.stroke();
+        }
+      }
+      if (in_ <= 0) continue;
+      if (end > 0) {
+        const gr = g.createRadialGradient(b.x, b.y, R * 0.2, b.x, b.y, R);
+        gr.addColorStop(0, rgba(IM_COL, (0.02 * end).toFixed(3))); gr.addColorStop(1, rgba(IM_COL, (0.13 * end).toFixed(3)));
+        g.fillStyle = gr; g.beginPath(); g.arc(b.x, b.y, R, 0, TAU); g.fill();
+      }
+      g.strokeStyle = rgba(IM_COL, ((0.08 + 0.32 * k) * in_).toFixed(3)); g.lineWidth = 1;
+      g.beginPath(); g.arc(b.x, b.y, R, 0, TAU); g.stroke();
+      const rr = R * (1 + 0.3 * (1 - ease.inOut(k))), spin = b.t * 0.5 + b.i * 0.7, n = 12, w = 3.4 / rr;
+      g.strokeStyle = rgba('#a5f3fc', ((0.14 + 0.46 * k) * in_).toFixed(3)); g.lineWidth = 1.3;
+      g.beginPath();
+      for (let j = 0; j < n; j++) {
+        const a = spin + j * TAU / n, ti = rr - 3.6;
+        g.moveTo(b.x + Math.cos(a - w) * rr, b.y + Math.sin(a - w) * rr);
+        g.lineTo(b.x + Math.cos(a) * ti, b.y + Math.sin(a) * ti);
+        g.lineTo(b.x + Math.cos(a + w) * rr, b.y + Math.sin(a + w) * rr);
+      }
+      g.stroke();
+    }
+  },
+
+  /* The bombs: in the air, eyespots shed off the wings; down, eyes, each
+     with its fuse round it (see "Z — EYESPOTS, as drawn", above). */
+  eyes(g, s) {
+    const mat = !!FXO.mat, parts = !!FXO.parts;
+    for (const b of s.spots) {
+      if (b.f < 1 && !b.on) imDrawFlying(g, b, mat, parts);
+      else imDrawEye(g, b, mat);
+    }
+  },
+
+  /* What the run told the drawing. A burst is the eyespot thrown open (see
+     "Z — EYESPOTS, as drawn"); a graze, a crescent of light round the hull
+     on the side the round passed; the throw, a gust of light swept out
+     across the cone to where the bombs come down; a bomb landing on a body,
+     a ring as it clasps; the wake and the end, a ring off the hull. */
   fx(g, s) {
-    const many = FXO.parts ? 1 : 0.4, now = s.now;
+    const many = FXO.parts ? 1 : 0.4, mat = !!FXO.mat, now = s.now;
     g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
     for (let i = s.fx.length - 1; i >= 0; i--) {
       const e = s.fx[i], a = (now - e.t0) / e.life;
@@ -46693,19 +47392,45 @@ const IMAGO_ART = {
       const fa = 1 - a, sd = e.seed;
       switch (e.kind) {
         case 'burst': {
-          const R = EYE_R * (0.3 + 0.7 * (1 - Math.pow(1 - a, 3)));
-          if (a < 0.25) oaGlow(g, e.x, e.y, EYE_R * 0.95, '#ecfeff', 0.85 * (1 - a / 0.25));
-          g.strokeStyle = rgba(IM_COL, (0.55 * fa).toFixed(3)); g.lineWidth = 8 * fa + 1;
-          g.beginPath(); g.arc(e.x, e.y, R, 0, TAU); g.stroke();
-          g.strokeStyle = rgba('#f0fdff', (0.9 * fa).toFixed(3)); g.lineWidth = 2 * fa + 0.5; g.stroke();
-          g.strokeStyle = rgba('#a5f3fc', (0.85 * fa).toFixed(3)); g.lineWidth = 1.3;
-          g.beginPath();
-          for (let k = 0; k < Math.round(10 * many); k++) {
-            const sa = odHash(sd + k) * TAU, sr = R * (0.55 + 0.6 * odHash(sd + k * 3 + 1));
-            g.moveTo(e.x + Math.cos(sa) * sr, e.y + Math.sin(sa) * sr);
-            g.lineTo(e.x + Math.cos(sa) * (sr + 7 * fa + 2), e.y + Math.sin(sa) * (sr + 7 * fa + 2));
+          const R = EYE_R, C3 = OPR_PC[3], open = 1 - Math.pow(1 - oaC01(a / 0.4), 3);
+          // the flash, the eye at the moment it goes
+          if (a < 0.16) {
+            const fl = 1 - a / 0.16;
+            if (mat) oaGlow(g, e.x, e.y, R * 0.7, '#a5f3fc', 0.55 * fl);
+            g.fillStyle = rgba('#ecfeff', (0.7 * fl).toFixed(3)); g.beginPath(); g.arc(e.x, e.y, IM_EYE_R + 8 * (1 - fl), 0, TAU); g.fill();
           }
-          g.stroke();
+          // its three rings, thrown out to its reach one after another: white, the moth's cyan, THE CORE's blue
+          for (const [col, lag, lw] of [['#f0fdff', 0, 2.4], [IM_COL, 0.07, 5], [C3.mid, 0.14, 3]]) {
+            const u = oaC01((a - lag) / 0.45);
+            if (u <= 0 || u >= 1) continue;
+            g.strokeStyle = rgba(col, (0.9 * (1 - u)).toFixed(3)); g.lineWidth = lw * (1 - u) + 0.6;
+            g.beginPath(); g.arc(e.x, e.y, R * (0.18 + 0.82 * (1 - Math.pow(1 - u, 3))), 0, TAU); g.stroke();
+          }
+          // the iris, for an instant: its fibres, out from the middle
+          if (a < 0.32) {
+            const fl = 1 - a / 0.32;
+            g.strokeStyle = rgba('#a5f3fc', (0.75 * fl).toFixed(3)); g.lineWidth = 1.1;
+            g.beginPath();
+            for (let k = 0; k < 16; k++) {
+              const fa2 = (k + odHash(sd + k) * 0.6) * TAU / 16, r0 = 5 + R * 0.2 * open, r1 = R * (0.42 + 0.4 * odHash(sd + k * 5 + 2)) * open + 6;
+              g.moveTo(e.x + Math.cos(fa2) * r0, e.y + Math.sin(fa2) * r0); g.lineTo(e.x + Math.cos(fa2) * r1, e.y + Math.sin(fa2) * r1);
+            }
+            g.stroke();
+          }
+          // scales thrown off it, turning as they go
+          for (let k = 0, n = Math.round(10 * many); k < n; k++) {
+            const sa = odHash(sd + k * 7.1) * TAU, sr = R * (0.2 + (0.6 + 0.55 * odHash(sd + k * 3.3)) * (1 - fa * fa));
+            g.fillStyle = rgba(k % 3 ? '#a5f3fc' : '#ffffff', (0.9 * fa).toFixed(3));
+            imScale(g, e.x + Math.cos(sa) * sr, e.y + Math.sin(sa) * sr, 2.6 * fa + 0.8, sa + a * (6 + 10 * odHash(sd + k))); g.fill();
+          }
+          // and the eyespot printed on the floor where it was, for a moment
+          if (a > 0.3) {
+            const pr = 0.24 * (1 - (a - 0.3) / 0.7);
+            g.strokeStyle = rgba(IM_COL, pr.toFixed(3)); g.lineWidth = 1;
+            g.beginPath(); g.arc(e.x, e.y, R * 0.94, 0, TAU); g.stroke();
+            g.strokeStyle = rgba(C3.mid, (pr * 0.8).toFixed(3)); g.lineWidth = 2;
+            g.beginPath(); g.arc(e.x, e.y, R * 0.5, 0, TAU); g.stroke();
+          }
           break;
         }
         case 'graze': {
@@ -46716,14 +47441,25 @@ const IMAGO_ART = {
           break;
         }
         case 'throw': {
-          const R = 22 + 40 * a;
-          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 3 * fa + 0.5;
-          g.beginPath(); g.arc(e.x, e.y, R, e.ang - EYE_CONE / 2, e.ang + EYE_CONE / 2); g.stroke();
+          // the beat that throws them: a gust of light swept out across the cone, to where they come down
+          const far = EYE_ROWS[EYE_ROWS.length - 1][1] + EYE_JIT, r1 = 26 + (far - 26) * (1 - fa * fa), r0 = Math.max(20, r1 - 40 * fa - 8);
+          const a0 = e.ang - EYE_CONE / 2, a1 = e.ang + EYE_CONE / 2;
+          const gr = g.createRadialGradient(e.x, e.y, r0, e.x, e.y, r1);
+          gr.addColorStop(0, 'rgba(103,232,249,0)'); gr.addColorStop(1, rgba(IM_COL, (0.2 * fa).toFixed(3)));
+          g.fillStyle = gr;
+          g.beginPath(); g.arc(e.x, e.y, r1, a0, a1); g.arc(e.x, e.y, r0, a1, a0, true); g.closePath(); g.fill();
+          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 1.6 * fa + 0.4;
+          g.beginPath(); g.arc(e.x, e.y, r1, a0, a1); g.stroke();
+          g.strokeStyle = rgba('#a5f3fc', (0.28 * fa).toFixed(3)); g.lineWidth = 1;
+          g.beginPath();
+          for (const q of [a0, a1]) { g.moveTo(e.x + Math.cos(q) * 24, e.y + Math.sin(q) * 24); g.lineTo(e.x + Math.cos(q) * r1, e.y + Math.sin(q) * r1); }
+          g.stroke();
           break;
         }
         case 'stick': {
-          g.strokeStyle = rgba('#ecfeff', (0.8 * fa).toFixed(3)); g.lineWidth = 1.5;
-          g.beginPath(); g.arc(e.x, e.y, 6 + 12 * a, 0, TAU); g.stroke();
+          if (mat && a < 0.4) oaGlow(g, e.x, e.y, 16, '#ecfeff', 0.7 * (1 - a / 0.4));
+          g.strokeStyle = rgba('#ecfeff', (0.85 * fa).toFixed(3)); g.lineWidth = 1.5;
+          g.beginPath(); g.arc(e.x, e.y, 6 + 14 * (1 - fa * fa), 0, TAU); g.stroke();
           break;
         }
         case 'wake': case 'out': {
@@ -54862,6 +55598,7 @@ function render() {
   { const vq = vowPhase(); if (vq) drawRoninVowScreen(vq); }       // RONIN's V: its cut-in, then the vow's edge
   if (roninShown()) drawRoninScreen(roninW());
   { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
+  drawImagoIntro();           // IMAGO's cut-in, the same way
   outsideDraw('screen');      // an outside pilot's cut-ins, over the frame and its HUD (OUTSIDE PILOTS)
   // and in a duel against one (PvP), its cut-ins on this screen too: what this screen may see of it is the module's to say
   if (PILOTS.length > 1) for (let k = 0; k < PILOTS.length; k++) {
@@ -54919,7 +55656,7 @@ function render() {
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
   achDrawCard();        // a goal done in this run: its card, top right (ACHIEVEMENTS)
-  if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !outsideCutAny()) {   // not over a cut-in
+  if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !imCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
   }
@@ -65684,7 +66421,7 @@ function drawPlayer() {
   // RONIN: a full reskin once the transformation owns the hull (VRA v2)
   if (roninShown() && vraRoninOwns()) { drawRoninHull(); return; }
   // IMAGO: a full reskin while it is on, the moth from the rite, and the skin comes back after
-  if (imOn()) { drawImagoHull(); return; }
+  if (imShown()) { drawImagoHull(); return; }
   if (SkinFx.on) SkinFx.under();
   // ALL HALLOWS: a prize that is its own hull draws it, and the stock one is skipped
   if (hlWrSwapTap()) { SkinFx.player(); return; }
@@ -81017,7 +81754,7 @@ function aboveQuiet() {
 // a cut-in has the screen and holds the hulls where they are: nothing is aimed, and nothing lands
 function aboveHeld() {
   let held = outsideCutAny();
-  if (!held) pilotsEach(() => { if (roninCutIn() || suCutIn()) held = true; });
+  if (!held) pilotsEach(() => { if (roninCutIn() || suCutIn() || imCutIn()) held = true; });
   return held;
 }
 

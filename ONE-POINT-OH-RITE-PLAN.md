@@ -20,7 +20,8 @@ end. **Drawn 17 Oct (Phase 2):** every `OPR_ART` hook, the hull's stages,
 the molt, IMAGO and its eight growths, his copy and its rounds, and the HUD,
 in the route's two renderers. **Built 18 Oct (Phases 3 and 4, begun):** IMAGO
 in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
-active, your Z: EYESPOTS. See "As built" under The path. This repository
+active, your Z: EYESPOTS. **Drawn 18 Oct:** Z's art, and the form's cut-in
+with your cocoon. See "As built" under The path. This repository
 is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -320,15 +321,23 @@ run should look like it could grow them.
 - **Looks:** `awake:runner` gates an IMAGO banner and decal in
   `src/looks.js` and `leaderboard/art.js` (Phase 5).
 
-**The cut-in** for the form in a run (Phase 3, about 3.6 s, scrubbable):
+**The cut-in** for the form in a run (built 18 Oct). It is about 5 s, with
+a cocoon phase (yours: "give it a cocoon phase where runner breaks out of
+it"). The cut is at 4.6 s, and the picture is gone by 5.0:
 
 | Beat | Time (s) | What |
 | --- | --- | --- |
-| 1 | 0 – 0.8 | Dark. A CRT's glow. On the tube, the flat base ship, still. His blip: "Put it back." |
+| 1 | 0 – 0.8 | Dark. His set comes on: close on the tube, the flat base ship on the old grid, still. His voice: "Put it back." |
 | 2 | 0.8 – 1.6 | The ship on the tube moves on its own. A hairline seam opens down its spine, − and +. |
-| 3 | 1.6 – 2.4 | The tube cracks along the same seam. Light pours out, and the flat shell peels like paper. |
-| 4 | 2.4 – 3.2 | It unfolds out of the shell, lit, and something grows out of its back. |
-| 5 | 3.2 – 3.6 | A tear back to play. Behind it, the set's picture collapses to a dot. |
+| 3 | 1.6 – 2.7 | The tube cracks along the same seam and light pours out. The ship comes out through the crack, and silk of light winds round it, tail to nose, into a cocoon. |
+| 4 | 2.7 – 3.7 | The cocoon hangs on its thread in front of the broken set, swaying. Something beats inside, three times, harder each time; it shudders and cracks of light run over it. |
+| 5 | 3.7 – 4.6 | It splits down the same seam and the moth breaks out. The halves peel back like petals, silk is thrown off, the wings unfold, the camera pulls back off the set, and its four eyespots flash. |
+| 6 | 4.6 – 5.0 | The cut: the set's picture collapses to a line, then a dot, onto the room. |
+
+It holds the room as RONIN's and SUPERUSER's do: the room at 4%, and no
+moving, firing, dashing, Z X C V or damage. None of it is spent from the
+minute. From the cut, the moth is in the room still unfolding
+(`IM_WAKE_FROM`), so the hatch is not played twice.
 
 ### Art hooks
 
@@ -363,7 +372,7 @@ person under it.
 
 **For the form in a run (`IMAGO_ART`, built 18 Oct):** `hull` (the rite's
 moth, handed `eyes` as Z throws), `floor`, `eyes` and `fx` (Z's bombs, their
-reach and their bursts), `hud`. Its cut-in (`cutIn`) is still to come.
+reach and their bursts), `hud`, and its cut-in (`cutIn`).
 
 ## The form's frame (after the rite)
 
@@ -406,13 +415,28 @@ My rules, not yours (the numbers are under Numbers):
   what the build has made of the starting damage).
 - **A cooldown, 7 s from the throw,** as SUPERUSER's and RONIN's keys have.
   Whether IMAGO's moves should spend GRAZE instead is your call (question 6).
-- **The look.** In the air each bomb is a mote of light. Landed, it is an
-  eye: a dark lens rimmed in light whose lids part, its iris going from the
-  moth's cyan to white as the fuse runs, the pupil narrowing and watching the
-  nearest body. Its reach is a dashed ring on the floor that closes in on the
-  blast's size and fills in at the end, while the eye blinks faster. The
-  burst is a flash, a ring out to its reach, and scales of light thrown off
-  it. With effects off it reads by the rings and the eyes' outlines.
+- **The look (drawn 18 Oct).** The bombs are the wings' own eyespots,
+  thrown.
+  - **The throw.** The wings beat and the four eyespots flare and let go,
+    each with a ring. A gust of light sweeps out across the cone.
+  - **In the air.** Each bomb leaves from the eyespot on its side of the
+    aim, lobbed and tumbling like a scale, with a streak of scales behind it
+    and its shadow on the floor.
+  - **Down.** It lands with a hop and a ripple, and unfolds into an eye: dark
+    glass rimmed in THE CORE's blue, its lids parting on a cyan iris. The
+    pupil watches the nearest body (one riding a body clasps it with two
+    hooks and looks past it).
+  - **The fuse** is a ring of twelve scales round it, going dark one by one
+    from the top. The iris whitens and the pupil narrows to a slit. In the
+    last fifth it blinks faster, stares, and the twelve flare white.
+  - **The reach** is a hairline at the blast's true edge, with chevrons
+    closing in on it like an iris. It fills in the last 0.4 s.
+  - **The burst** is the eyespot thrown open: a flash, its three rings out
+    to the reach (white, cyan, blue), the iris's fibres, scales thrown off,
+    and a print left on the floor.
+  - **When Z is back,** each wing eyespot takes its light back in with a
+    ring.
+  - **With effects off,** every part still reads by its lines.
 
 ## Tales (stand-ins, in the voice)
 
@@ -483,7 +507,7 @@ with `FXO.mat` off. Drawn 17 Oct (below).
 for 60 s, `imagoHull` and the cut-in with lockstep's hold rule,
 `tale('awake')` and `tale('act')`, and `runner` in the lockstep awakened
 list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
-needed (below): still to come are the passive and the cut-in.
+needed (below), and its cut-in drawn: still to come is the passive.
 
 **Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, built
 18 Oct (below). X, C and V are still to be named.
@@ -624,9 +648,9 @@ active, the frame is a stand-in, built only as far as its first active needs.
 - **[F]** spends a full meter on 60 s of IMAGO. Short of full it says NOT
   GRAZED YET and spends nothing.
 - **IMAGO in a run** is the rite's moth (`OPR_ART.hull`, awake), a full
-  reskin while it is on, as RONIN's is. It hatches out of its chrysalis where
-  it stands, as it did in the duel; that stands in for the cut-in. When the
-  minute ends it is today's VOIDRUNNER again, skin and all.
+  reskin while it is on, as RONIN's is. [F] opens on its cut-in (above). On
+  the cut the moth is in the room, still unfolding. When the minute ends it
+  is today's VOIDRUNNER again, skin and all.
 - **The HUD**, where the other forms' meters sit: GRAZE as a bar notched in
   quarters, `[F] IMAGO` when it is full, IMAGO's clock draining, and Z X C V,
   each sweeping its cooldown. Only Z has a name under it so far.
@@ -650,6 +674,12 @@ active, the frame is a stand-in, built only as far as its first active needs.
   hand so each frame is at its time: the meter, the hatch, the throw, the
   eyes, the fuse running down, the bursts, the HUD. No errors, and the same
   damage with effects on and off.
+- **Drawn (18 Oct):** Z's art and the cut-in, in `IMAGO_ART` (`cutIn`,
+  `hull`, `floor`, `eyes`, `fx`). The cut-in's logic is IMAGO's cut-in in
+  "IMAGO, IN A RUN" (`P.imIntro`, `imPhase`, `imCutIn`, `IM_SLOW`), held
+  everywhere SUPERUSER's is. `test:imago` now steps through the cut-in and
+  checks it: the room and hull held, nothing landing, no Z, the minute
+  unspent, the cut to the step, and a snapshot taken inside it.
 
 ## Numbers (one block in the code, all tunable)
 
@@ -687,6 +717,9 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 | `EYE_FLY` | 0.3 s from the wings to where it lands |
 | `EYE_R`, `EYE_DMG` | 62 px reach, 45 a blast before the damage cards |
 | `EYE_CD` | 7 s from the throw |
+| `IM_T_CUT`, `IM_T_SETTLE` | the cut-in's cut at 4.6 s; the room back 0.9 s after it |
+| `IM_SLOW` | the room at 4% while the cut-in has the screen, as RONIN's and SUPERUSER's |
+| `IM_WAKE_FROM` | 0.56: the room's moth takes up from there at the cut, out of its chrysalis |
 
 ## Questions for you (defaults are in)
 
