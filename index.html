@@ -47043,7 +47043,7 @@ function imArmShotTick(dt) {
                    FLUTTER), liveS [4] (its seconds left), and subs [4]
                    (what a key says under it instead of its name: C's gun)
 
-   C, THE ARMORY (placeholders, lines and labels: the user is to draw them):
+   C, THE ARMORY (drawn 18 Oct: see "C — THE ARMORY, as drawn"):
      armory(g, w, h, m)  screen, over the HUD: the wheel, while it is open.
                    m.cx, cy (the hull, on the screen), r (the wheel's radius,
                    px), t (s open), hover (-1: aimed at the hull), worn (the
@@ -47051,7 +47051,8 @@ function imArmShotTick(dt) {
      armMount(g, h)  world, over the moth: the gun it wears. h.x, y, ang, r,
                    id, n, hud, kind, fired (s since its last shot, or -1)
      armShot(g, s)   world: a missile, a shell or a singularity in the air.
-                   s.id, kind, x, y, vx, vy, t, and a singularity's fly, life,
+                   s.id, kind, x, y, vx, vy, t; a shell's go (px it flies),
+                   trav (px flown) and blast; a singularity's fly, life,
                    pull, core and held (bodies it is burning)
      armBeam(g, b)   world: the SOLAR LANCE, this step. b.x0, y0, x1, y1, w
      and in fx: armOpen, armShut { x, y }; armEquip { x, y, id }; armRail
@@ -47059,7 +47060,7 @@ function imArmShotTick(dt) {
      armCollapse { x, y, r }
 =========================================================================== */
 const IM_FAILED = new Set();
-const IM_ST = { fx: [], wings: {}, echo: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
+const IM_ST = { fx: [], wings: {}, echo: {}, arm: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
 const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8,
                      dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5,
                      armOpen: 0.3, armShut: 0.3, armEquip: 0.6, armRail: 0.35, armArc: 0.22, armBlast: 0.55, armCollapse: 0.6 };
@@ -47120,7 +47121,7 @@ function drawImagoKit() {
   if (P.imArmShots) for (const s of P.imArmShots) {
     const W = ARMORY_BY[s.id];
     IM('armShot', ctx, { id: s.id, kind: W.kind, x: s.x, y: s.y, vx: s.vx, vy: s.vy, t: s.t,
-      fly: W.fly, life: W.life, pull: W.pull, core: W.core, held: s.held || 0 });
+      fly: W.fly, life: W.life, pull: W.pull, core: W.core, held: s.held || 0, go: s.go || 0, trav: s.trav || 0, blast: W.blast || 0 });
   }
   if (P.imArmBeam) IM('armBeam', ctx, Object.assign({}, P.imArmBeam));
 }
@@ -47825,6 +47826,220 @@ function imcSounds(s) {
   if (hit(IM_T_CUT)) Audio_.tone(900, 0.28, 'sine', 0.05, 90);
 }
 
+/* ------------------------- C — THE ARMORY, as drawn -------------------------
+   The guns are grown, not bolted on: the rite's free evolution, on demand.
+   Each is the moth's own glass and light, out of the hull where its growth
+   comes out in the duel, and five of them are those growths (OPR_GROW): the
+   MINIGUN its rotary thorns, the RAILGUN its proboscis, SWARM PODS the eggs
+   on its forewings, the HOWITZER the bore down its body, FLAK its palps. The
+   other three are new, in the same glass: the SOLAR LANCE a small sun held
+   at its head, its forewings' lances charging it; the TESLA COIL two forked
+   prongs off its head with a ball of lightning between them; the
+   SINGULARITY a dark lens held in two horns, the light round it bent. Each
+   grows in when it is put on, kicks as it fires, and charges back to its
+   next shot.
+   In the air, SWARM PODS' missiles hatch as little moths of light that hunt.
+   The HOWITZER's shell is a white-hot slug, its landing ringed on the floor
+   and closing as it comes down. The SINGULARITY is a black lens in a ring of
+   light, with light falling into it from its reach. The lance is sunlight:
+   white at its heart, rippling, a sun at the muzzle, splashing where it
+   ends. The rail is an instant line wound in a helix of light. The coil's
+   arcs are lightning, jagged afresh every frame and flashing on every body
+   struck. The blasts are each gun's own, and the singularity closing is an
+   implosion and a flash.
+   The wheel: the room dimmed and slowed behind it, eight petals of the
+   moth's glass unfolding round the hull, each with its gun drawn small; the
+   one aimed at lifts out and lights, the worn one is ringed; its name and
+   its line under. Drawing state is this machine's: IM_ST.arm (per pilot)
+   and IM_ST.armWheel. */
+const IM_ARM_GROW = 0.35;                              // s: a gun growing in, once it is put on
+const IM_SUN = '#fde68a';                              // the lance's light: the one warm thing on the moth
+// how hard the worn gun is kicking (rec) and how far it has charged back (ch), from what the mount is handed
+function imArmKick(h) {
+  const W = ARMORY_BY[h.id];
+  if (h.kind === 'beam') return { rec: h.fired === 0 ? 0.55 + 0.25 * Math.sin(uiTime * 40) : 0, ch: 1 };
+  if (!(h.fired >= 0)) return { rec: 0, ch: 1 };
+  return { rec: Math.exp(-h.fired * 11), ch: W && W.rate ? clamp(h.fired * W.rate, 0, 1) : 1 };
+}
+// a bolt of lightning from (x0, y0) to (x1, y1): its points, jagged afresh each call, steady at both ends
+function imBolt(x0, y0, x1, y1, jag, n) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L, pts = [[x0, y0]];
+  for (let i = 1; i < n; i++) { const u = i / n, o = rnd(-jag, jag) * Math.sin(u * Math.PI); pts.push([x0 + dx * u + nx * o, y0 + dy * u + ny * o]); }
+  pts.push([x1, y1]);
+  return pts;
+}
+function imBoltDraw(g, pts, a, w, mat) {
+  if (a <= 0.01) return;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  if (mat) { g.strokeStyle = rgba('#67e8f9', (0.35 * a).toFixed(3)); g.lineWidth = w * 4; orLine(g, pts); g.stroke(); }
+  g.strokeStyle = rgba('#a5f3fc', (0.8 * a).toFixed(3)); g.lineWidth = w * 1.8; orLine(g, pts); g.stroke();
+  g.strokeStyle = rgba('#ffffff', a.toFixed(3)); g.lineWidth = w * 0.7; orLine(g, pts); g.stroke();
+}
+/* the three that are not the duel's (hull space, at the head) */
+// SOLAR LANCE: a small sun held at its head in two arms of glass, its forewings' lances charging it
+function imArmSun(g, rec, ch, t, L, mat) {
+  for (const sd of [1, -1]) orGrown(g, [[11, sd * 2.2], [16, sd * 3.6], [20.5, sd * 2.7], [20.5, sd * 1.9], [16, sd * 2.6]], L, { glow: 0.4, lw: 0.45, edge: '#a5f3fc' });
+  const r = 2.3 + 0.4 * rec, x = 22;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (mat) { oaGlow(g, x, 0, 9 + 10 * rec, IM_SUN, 0.45 + 0.4 * rec); oaGlow(g, x, 0, 4, '#ffffff', 0.8); }
+  g.strokeStyle = rgba(IM_SUN, (0.6 + 0.3 * rec).toFixed(3)); g.lineWidth = 0.4; g.lineCap = 'round';
+  g.beginPath();
+  for (let k = 0; k < 10; k++) { const a = t * 1.3 + k * TAU / 10, l = r + 1.2 + (k % 2 ? 0.8 : 1.8) * (1 + rec); g.moveTo(x + Math.cos(a) * (r + 0.4), Math.sin(a) * (r + 0.4)); g.lineTo(x + Math.cos(a) * l, Math.sin(a) * l); }
+  g.stroke();
+  g.fillStyle = '#fffbeb'; g.beginPath(); g.arc(x, 0, r, 0, TAU); g.fill();
+  g.restore();
+}
+// TESLA COIL: two forked prongs off its head, coiled at the root, a ball of lightning between their tips
+function imArmCoil(g, rec, ch, t, L, mat) {
+  for (const sd of [1, -1]) {
+    orGrown(g, [[11, sd * 1.6], [18, sd * 4.4], [23.5, sd * 5.6], [24.5, sd * 4.9], [19, sd * 3.3], [12, sd * 0.8]], L, { glow: 0.45, lw: 0.45, edge: '#bae6fd' });
+    orGrown(g, [[19.5, sd * 3.6], [23, sd * 2.8], [23.4, sd * 2.2], [20.5, sd * 2.9]], L, { glow: 0.3, lw: 0.35, edge: '#a5f3fc' });
+  }
+  for (const x of [13, 15, 17]) { g.strokeStyle = oaMix('#0e7490', '#e0f2fe', ch); g.lineWidth = 0.45; g.beginPath(); g.ellipse(x, 0, 0.6, 2 + (x - 13) * 0.35, 0, 0, TAU); g.stroke(); }
+  const bx = 25.5, br = 1.3 + 0.9 * ch + 0.6 * rec;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (mat) oaGlow(g, bx, 0, 5 + 7 * ch + 12 * rec, '#a5f3fc', 0.35 + 0.4 * ch + 0.3 * rec);
+  for (const sd of [1, -1]) for (const ty of [5.2, 2.5]) if (rnd() < 0.35 + 0.5 * ch) imBoltDraw(g, imBolt(bx, 0, 24, sd * ty, 0.8, 4), 0.5 + 0.5 * ch, 0.22, mat);
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(bx, 0, br, 0, TAU); g.fill();
+  g.restore();
+}
+// SINGULARITY: a dark lens held in two horns, the light round it bent; thrown, it grows back
+function imArmLens(g, rec, ch, t, L, mat) {
+  for (const sd of [1, -1]) orGrown(g, [[11, sd * 2], [17, sd * 5.6], [24, sd * 5.4], [27.5, sd * 3], [25.5, sd * 3.6], [19.5, sd * 4.1], [13, sd * 1]], L, { glow: 0.4, lw: 0.45, edge: '#c4b5fd' });
+  const x = 23.5, r = 3.2 * (0.25 + 0.75 * ch);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (mat) oaGlow(g, x, 0, r * 4, '#a78bfa', 0.35);
+  g.strokeStyle = rgba('#e9d5ff', 0.85); g.lineWidth = 0.5;
+  g.beginPath(); g.ellipse(x, 0, r * 2.1, r * 0.7, t * 0.8, 0, TAU); g.stroke();
+  for (let i = 0; i < 6; i++) { const u = (t * 0.6 + i / 6) % 1, a = i * 1.7 + u * 4, d = r * (1.2 + 2.6 * (1 - u)); g.fillStyle = rgba('#ecfeff', (0.8 * u).toFixed(3)); g.fillRect(x + Math.cos(a) * d - 0.2, Math.sin(a) * d - 0.2, 0.4, 0.4); }
+  g.globalCompositeOperation = 'source-over';
+  g.beginPath(); g.arc(x, 0, r, 0, TAU); g.fillStyle = '#020108'; g.fill();
+  g.strokeStyle = rgba('#f5f3ff', (0.6 + 0.4 * ch).toFixed(3)); g.lineWidth = 0.4; g.stroke();
+  g.restore();
+}
+/* in the air */
+// a missile: a moth of light, hatched, hunting; its wings beating, a streak behind it
+function imArmMoth(g, s, mat) {
+  const a = Math.atan2(s.vy, s.vx), sd = (s.x * 0.37 + s.y * 0.11) % 7, flap = 0.45 + 0.55 * Math.abs(Math.sin(s.t * 34 + sd));
+  g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  const ca = Math.cos(a), sa = Math.sin(a), L = 24;
+  g.beginPath(); g.moveTo(s.x, s.y);
+  for (let k = 1; k <= 6; k++) { const u = k / 6, w = Math.sin(s.t * 18 - u * 5 + sd) * 2.5 * u; g.lineTo(s.x - ca * L * u - sa * w, s.y - sa * L * u + ca * w); }
+  g.strokeStyle = rgba('#67e8f9', 0.45); g.lineWidth = 1.6; g.stroke();
+  if (mat) oaGlow(g, s.x, s.y, 13, '#a5f3fc', 0.6);
+  g.translate(s.x, s.y); g.rotate(a); g.scale(1.45, 1.45);
+  for (const w of [1, -1]) {
+    g.fillStyle = rgba('#67e8f9', 0.55); g.strokeStyle = rgba('#ecfeff', 0.9); g.lineWidth = 0.6;
+    g.beginPath(); g.ellipse(0.5, w * 2.6 * flap, 2.2, 3 * flap, w * 0.5, 0, TAU); g.fill(); g.stroke();
+    g.beginPath(); g.ellipse(-2, w * 2 * flap, 1.5, 2 * flap, -w * 0.4, 0, TAU); g.fill();
+  }
+  g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(0, 0, 3, 0.9, 0, 0, TAU); g.fill();
+  g.restore();
+}
+// the HOWITZER's shell: a white-hot slug and its trail, and where it comes down, ringed, closing as it comes
+function imArmShell(g, s, mat) {
+  const a = Math.atan2(s.vy, s.vx), ca = Math.cos(a), sa = Math.sin(a);
+  g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  if (s.go > 0) {
+    const left = Math.max(0, s.go - s.trav), tx = s.x + ca * left, ty = s.y + sa * left, k = clamp(s.trav / s.go, 0, 1), R = s.blast * (1 + 0.45 * (1 - k));
+    g.setLineDash([3, 6]); g.strokeStyle = rgba('#a5f3fc', 0.25); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(s.x + ca * 14, s.y + sa * 14); g.lineTo(tx, ty); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = rgba(IM_COL, (0.25 + 0.5 * k).toFixed(3)); g.lineWidth = 1.5 + 1.5 * k;
+    g.beginPath(); g.arc(tx, ty, R, 0, TAU); g.stroke();
+    g.strokeStyle = rgba('#ecfeff', (0.4 + 0.5 * k).toFixed(3)); g.lineWidth = 1.2;
+    g.beginPath();
+    for (let q = 0; q < 4; q++) { const qa = q * Math.PI / 2 + s.t * 1.5, r0 = R * 0.82, r1 = R * 1.06; g.moveTo(tx + Math.cos(qa) * r0, ty + Math.sin(qa) * r0); g.lineTo(tx + Math.cos(qa) * r1, ty + Math.sin(qa) * r1); }
+    g.stroke();
+    g.fillStyle = rgba('#ecfeff', (0.5 * k).toFixed(3)); g.beginPath(); g.arc(tx, ty, 2.5, 0, TAU); g.fill();
+  }
+  const gr = g.createLinearGradient(s.x, s.y, s.x - ca * 70, s.y - sa * 70);
+  gr.addColorStop(0, 'rgba(236,254,255,0.85)'); gr.addColorStop(0.3, 'rgba(103,232,249,0.4)'); gr.addColorStop(1, 'rgba(34,211,238,0)');
+  g.strokeStyle = gr; g.lineWidth = 7; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - ca * 70, s.y - sa * 70); g.stroke();
+  if (mat) oaGlow(g, s.x, s.y, 26, '#a5f3fc', 0.75);
+  g.translate(s.x, s.y); g.rotate(a);
+  g.fillStyle = rgba('#67e8f9', 0.7); g.beginPath(); g.ellipse(0, 0, 10, 6, 0, 0, TAU); g.fill();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(1.5, 0, 6.5, 3.4, 0, 0, TAU); g.fill();
+  g.restore();
+}
+// the SINGULARITY: a black lens in a ring of light, the room darkened round it, light falling in from its reach
+function imArmHole(g, s, mat) {
+  const fly = clamp(s.t / s.fly, 0, 1), born = OPO_KIT.ease.out(clamp(s.t / 0.35, 0, 1)), end = clamp((s.t - (s.life - 0.35)) / 0.35, 0, 1);
+  const R = (10 + 6 * born + 2 * Math.min(1, s.held / 3) * Math.sin(s.t * 18)) * (1 - 0.5 * end), reach = s.pull * born;
+  g.save();
+  g.globalCompositeOperation = 'source-over';
+  const sh = g.createRadialGradient(s.x, s.y, R, s.x, s.y, R * 4.5);
+  sh.addColorStop(0, 'rgba(2,1,8,0.85)'); sh.addColorStop(1, 'rgba(2,1,8,0)');
+  g.fillStyle = sh; g.beginPath(); g.arc(s.x, s.y, R * 4.5, 0, TAU); g.fill();
+  g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  // its reach, drawn in: a hairline, and light falling in along spirals
+  if (fly >= 1) {
+    g.strokeStyle = rgba('#c4b5fd', 0.18); g.lineWidth = 1; g.beginPath(); g.arc(s.x, s.y, reach, 0, TAU); g.stroke();
+    const rr = reach * (1 - ((s.t * 0.8) % 1));
+    g.strokeStyle = rgba('#e9d5ff', (0.22 * (1 - rr / reach)).toFixed(3)); g.beginPath(); g.arc(s.x, s.y, Math.max(R, rr), 0, TAU); g.stroke();
+  }
+  for (let i = 0; i < (FXO.parts ? 14 : 6); i++) {
+    const u = (s.t * 0.7 + i / 14) % 1, d = R + (reach - R) * Math.pow(1 - u, 1.6), a = i * 2.39 + u * 3.6;
+    const d2 = Math.max(R, d - 10 - 14 * u), a2 = a + 0.25;
+    g.strokeStyle = rgba(i % 3 ? '#a5f3fc' : '#e9d5ff', (0.7 * u * born).toFixed(3)); g.lineWidth = 1 + u;
+    g.beginPath(); g.moveTo(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d); g.lineTo(s.x + Math.cos(a2) * d2, s.y + Math.sin(a2) * d2); g.stroke();
+  }
+  // its disc of light, turning, and the ring the light is bent into
+  g.strokeStyle = rgba('#ecfeff', 0.85); g.lineWidth = 2.4;
+  g.beginPath(); g.ellipse(s.x, s.y, R * 2.3, R * 0.72, s.t * 0.6, 0, TAU); g.stroke();
+  g.strokeStyle = rgba('#a78bfa', 0.6); g.lineWidth = 5; g.stroke();
+  if (mat) oaGlow(g, s.x, s.y, R * 3, '#a78bfa', 0.45 + 0.2 * Math.min(1, s.held / 3));
+  g.strokeStyle = rgba('#ffffff', 0.9); g.lineWidth = 1.4; g.beginPath(); g.arc(s.x, s.y, R + 1.6, 0, TAU); g.stroke();
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#000000'; g.beginPath(); g.arc(s.x, s.y, R, 0, TAU); g.fill();
+  // and the near half of its disc, over the black
+  g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = rgba('#ecfeff', 0.9); g.lineWidth = 2.4;
+  g.beginPath(); g.ellipse(s.x, s.y, R * 2.3, R * 0.72, s.t * 0.6, 0, Math.PI); g.stroke();
+  g.restore();
+}
+/* the wheel's guns, drawn small: screen space, about s px either way of (x, y) */
+function imArmIcon(g, id, x, y, s, col) {
+  g.save(); g.translate(x, y); g.scale(s / 10, s / 10);
+  g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 1.4; g.lineCap = 'round'; g.lineJoin = 'round';
+  const line = (...p) => { g.beginPath(); g.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]); g.stroke(); };
+  switch (id) {
+    case 'minigun':
+      for (let i = 0; i < 6; i++) { const a = i * TAU / 6; g.beginPath(); g.arc(-5 + Math.cos(a) * 3, Math.sin(a) * 3, 1, 0, TAU); g.fill(); }
+      for (const yy of [-2.5, 0, 2.5]) line(-2, yy, 9, yy);
+      break;
+    case 'rail':
+      line(-9, -1.5, 9, -1.5); line(-9, 1.5, 9, 1.5);
+      for (const xx of [-4, 1, 6]) { g.beginPath(); g.ellipse(xx, 0, 1, 3.6, 0, 0, TAU); g.stroke(); }
+      break;
+    case 'swarm':
+      for (const [xx, yy] of [[-5, -4], [1, -6], [-2, 1], [5, -1], [2, 6], [-6, 6]]) { g.beginPath(); g.ellipse(xx, yy, 2.2, 1.5, -0.4, 0, TAU); g.stroke(); }
+      break;
+    case 'howitzer':
+      g.beginPath(); g.moveTo(-9, -4); g.lineTo(5, -3); g.lineTo(5, 3); g.lineTo(-9, 4); g.closePath(); g.stroke();
+      g.beginPath(); g.ellipse(7.5, 0, 2, 3.4, 0, 0, TAU); g.stroke();
+      g.beginPath(); g.arc(-9, 0, 1.6, 0, TAU); g.fill();
+      break;
+    case 'lance':
+      g.beginPath(); g.arc(-4, 0, 3.4, 0, TAU); g.fill();
+      for (let k = 0; k < 8; k++) { const a = k * TAU / 8; line(-4 + Math.cos(a) * 5, Math.sin(a) * 5, -4 + Math.cos(a) * 7, Math.sin(a) * 7); }
+      g.lineWidth = 2.6; line(0, 0, 10, 0);
+      break;
+    case 'flak':
+      for (let k = 0; k < 7; k++) { const a = (k / 6 - 0.5) * 1.2, d = 5 + (k % 2) * 3; g.beginPath(); g.arc(-7 + Math.cos(a) * d * 1.6, Math.sin(a) * d * 1.3, 1.1, 0, TAU); g.fill(); }
+      line(-9, 0, -5, 0);
+      break;
+    case 'tesla':
+      line(-6, -8, 1, -2, -3, 0, 5, 8);
+      line(5, 8, 5, 3); line(5, 8, 0.5, 6);
+      break;
+    case 'hole':
+      g.beginPath(); g.ellipse(0, 0, 9, 3, -0.3, 0, TAU); g.stroke();
+      g.beginPath(); g.arc(0, 0, 3.6, 0, TAU); g.fillStyle = '#020108'; g.fill(); g.strokeStyle = col; g.stroke();
+      break;
+  }
+  g.restore();
+}
+
 const IMAGO_ART = {
   /* IMAGO's cut-in, over everything (see "IMAGO's cut-in, drawn", above):
      the room going still under the tube as it comes on; the picture; and on
@@ -48075,44 +48290,111 @@ const IMAGO_ART = {
           g.beginPath(); g.arc(e.x, e.y, 16 + 60 * fa * fa, 0, TAU); g.stroke();
           break;
         }
-        // C, THE ARMORY (placeholders)
+        // C, THE ARMORY
         case 'armOpen': case 'armShut': {
-          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 1.5;
-          g.beginPath(); g.arc(e.x, e.y, e.kind === 'armOpen' ? 20 + 40 * a : 60 - 40 * a, 0, TAU); g.stroke();
+          // the wheel unfolding off the hull, or folding back into it: a ring of light, and the eight petals' points on it
+          const o = e.kind === 'armOpen', k = o ? OPO_KIT.ease.out(a) : 1 - OPO_KIT.ease.in(a), R = 18 + 46 * k;
+          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 2 * fa + 0.5;
+          g.beginPath(); g.arc(e.x, e.y, R, 0, TAU); g.stroke();
+          g.fillStyle = rgba('#ecfeff', (0.9 * fa).toFixed(3));
+          for (let j = 0; j < 8; j++) { const q = -Math.PI / 2 + j * TAU / 8; g.beginPath(); g.arc(e.x + Math.cos(q) * R, e.y + Math.sin(q) * R, 1.8, 0, TAU); g.fill(); }
+          if (o && a < 0.4 && mat) oaGlow(g, e.x, e.y, 40, '#67e8f9', 0.5 * (1 - a / 0.4));
           break;
         }
         case 'armEquip': {
-          g.strokeStyle = rgba('#ecfeff', (0.9 * fa).toFixed(3)); g.lineWidth = 2;
-          g.beginPath(); g.arc(e.x, e.y, 16 + 30 * a, 0, TAU); g.stroke();
+          // it grows in: light drawn in to the hull from all round it, and a flash as it takes
+          if (a < 0.6) {
+            const c = 1 - OPO_KIT.ease.in(a / 0.6);
+            g.strokeStyle = rgba('#a5f3fc', (0.8 * (1 - a / 0.6)).toFixed(3)); g.lineWidth = 1.4;
+            g.beginPath();
+            for (let j = 0, n = FXO.parts ? 14 : 6; j < n; j++) {
+              const q = odHash(sd + j) * TAU, d = (24 + (40 + 30 * odHash(sd + j * 3)) * c);
+              g.moveTo(e.x + Math.cos(q) * d, e.y + Math.sin(q) * d); g.lineTo(e.x + Math.cos(q) * (d + 10 * c + 2), e.y + Math.sin(q) * (d + 10 * c + 2));
+            }
+            g.stroke();
+          } else {
+            const b2 = (a - 0.6) / 0.4;
+            if (mat) oaGlow(g, e.x, e.y, 30 + 30 * b2, '#ecfeff', 0.9 * (1 - b2));
+            g.strokeStyle = rgba(IM_COL, (0.8 * (1 - b2)).toFixed(3)); g.lineWidth = 2;
+            g.beginPath(); g.arc(e.x, e.y, 18 + 40 * b2, 0, TAU); g.stroke();
+          }
           break;
         }
         case 'armRail': {
-          g.strokeStyle = rgba(IM_COL, (0.7 * fa).toFixed(3)); g.lineWidth = e.w * 2 * fa + 1;
-          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
-          g.strokeStyle = rgba('#ffffff', fa.toFixed(3)); g.lineWidth = 2;
-          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          // an instant line, wall to wall: white for a moment, then a sheath of light wound in a helix, unwinding; ions shed off it
+          const dx = e.x1 - e.x0, dy = e.y1 - e.y0, Lr = Math.hypot(dx, dy) || 1, ux = dx / Lr, uy = dy / Lr, nx = -uy, ny = ux;
+          const line = () => { g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); };
+          if (a < 0.25) { g.strokeStyle = rgba('#ffffff', (1 - a / 0.25).toFixed(3)); g.lineWidth = e.w * 1.6 * (1 - a / 0.25) + 1; line(); g.stroke(); }
+          g.strokeStyle = rgba(IM_COL, (0.55 * fa).toFixed(3)); g.lineWidth = e.w * 0.9 * fa + 1; line(); g.stroke();
+          const amp = e.w * (0.7 + 1.6 * a), turns = Lr / 38, ph = sd + a * 6;
+          g.strokeStyle = rgba('#e0f2fe', (0.7 * fa).toFixed(3)); g.lineWidth = 1.2;
+          g.beginPath();
+          for (let j = 0; j <= 120; j++) { const u = j / 120, o = Math.sin(u * turns * TAU + ph) * amp, x = e.x0 + dx * u + nx * o, y = e.y0 + dy * u + ny * o; j ? g.lineTo(x, y) : g.moveTo(x, y); }
+          g.stroke();
+          if (FXO.parts) {
+            g.fillStyle = rgba('#a5f3fc', (0.8 * fa).toFixed(3));
+            for (let j = 0; j < 24; j++) { const u = odHash(sd + j), o = (odHash(sd + j * 7) - 0.5) * 2 * (e.w + 30 * a); g.fillRect(e.x0 + dx * u + nx * o - 1, e.y0 + dy * u + ny * o - 1, 2, 2); }
+          }
+          if (mat) { oaGlow(g, e.x0, e.y0, 20 + 20 * a, '#ecfeff', 0.8 * fa); oaGlow(g, e.x1, e.y1, 26 * fa + 8, '#a5f3fc', 0.8 * fa); }
+          g.strokeStyle = rgba('#ecfeff', (0.8 * fa).toFixed(3)); g.lineWidth = 1.5;
+          g.beginPath(); g.ellipse(e.x0 + ux * 8, e.y0 + uy * 8, 3 + 6 * a, (e.w + 4) * (1 + a), Math.atan2(uy, ux), 0, TAU); g.stroke();
           break;
         }
         case 'armArc': {
-          g.strokeStyle = rgba('#e0f2fe', fa.toFixed(3)); g.lineWidth = 2;
-          g.beginPath();
-          e.pts.forEach((p, k) => {
-            if (!k) { g.moveTo(p[0], p[1]); return; }
-            const q = e.pts[k - 1], mx = (p[0] + q[0]) / 2 + (odHash(sd + k) - 0.5) * 30, my = (p[1] + q[1]) / 2 + (odHash(sd + k * 3) - 0.5) * 30;
-            g.lineTo(mx, my); g.lineTo(p[0], p[1]);
-          });
-          g.stroke();
+          // lightning, jagged afresh every frame, body to body, flashing on each it struck; it flickers as it goes
+          const fl = a < 0.5 ? 1 : rnd() < 0.6 ? Math.min(1, fa * 1.6) : 0.2;
+          for (let j = 1; j < e.pts.length; j++) {
+            const p = e.pts[j - 1], q = e.pts[j], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+            imBoltDraw(g, imBolt(p[0], p[1], q[0], q[1], Math.min(26, d * 0.12), Math.max(4, Math.round(d / 22))), fl * fa, 1.3, mat);
+            if (FXO.parts && rnd() < 0.5) { const u = rnd(0.8, 0.2), bx = lerp(p[0], q[0], u), by = lerp(p[1], q[1], u); imBoltDraw(g, imBolt(bx, by, bx + rnd(30, -30), by + rnd(30, -30), 6, 3), 0.6 * fa, 0.8, mat); }
+            if (mat) oaGlow(g, q[0], q[1], 22, '#a5f3fc', 0.9 * fa);
+            g.fillStyle = rgba('#ffffff', fa.toFixed(3)); g.beginPath(); g.arc(q[0], q[1], 3 * fa + 1, 0, TAU); g.fill();
+          }
           break;
         }
         case 'armBlast': {
-          g.strokeStyle = rgba(e.id === 'howitzer' ? '#fde68a' : IM_COL, (0.85 * fa).toFixed(3)); g.lineWidth = 4 * fa + 1;
-          g.beginPath(); g.arc(e.x, e.y, e.r * (0.3 + 0.7 * (1 - fa * fa)), 0, TAU); g.stroke();
-          if (a < 0.2) { g.fillStyle = rgba('#ffffff', (0.5 * (1 - a / 0.2)).toFixed(3)); g.beginPath(); g.arc(e.x, e.y, e.r * 0.35, 0, TAU); g.fill(); }
+          // each gun's own: the HOWITZER's huge, a missile's small, the SINGULARITY's in its violet
+          const big = e.id === 'howitzer', col = e.id === 'hole' ? '#c4b5fd' : big ? '#ecfeff' : IM_COL, R = e.r, k = 1 - fa * fa * fa;
+          if (a < 0.18) {
+            const f = 1 - a / 0.18;
+            if (mat) oaGlow(g, e.x, e.y, R * (big ? 1.2 : 0.9), big ? '#ecfeff' : '#a5f3fc', 0.85 * f);
+            g.fillStyle = rgba('#ffffff', (0.75 * f).toFixed(3)); g.beginPath(); g.arc(e.x, e.y, R * (0.25 + 0.25 * (1 - f)), 0, TAU); g.fill();
+          }
+          g.strokeStyle = rgba(col, (0.85 * fa).toFixed(3)); g.lineWidth = (big ? 9 : 4) * fa + 1;
+          g.beginPath(); g.arc(e.x, e.y, R * (0.25 + 0.75 * k), 0, TAU); g.stroke();
+          if (big) {
+            g.strokeStyle = rgba('#67e8f9', (0.5 * fa).toFixed(3)); g.lineWidth = 3 * fa + 0.5;
+            g.beginPath(); g.arc(e.x, e.y, R * (0.15 + 0.55 * k), 0, TAU); g.stroke();
+            for (let j = 0, n = FXO.parts ? 18 : 8; j < n; j++) {
+              const q = odHash(sd + j * 1.9) * TAU, d = R * (0.2 + 0.9 * odHash(sd + j * 3.1)) * k;
+              g.fillStyle = rgba(j % 3 ? '#a5f3fc' : '#ffffff', (0.9 * fa).toFixed(3));
+              imScale(g, e.x + Math.cos(q) * d, e.y + Math.sin(q) * d, 4 * fa + 1, q + a * 9); g.fill();
+            }
+          } else if (FXO.parts) {
+            g.fillStyle = rgba('#ecfeff', (0.8 * fa).toFixed(3));
+            for (let j = 0; j < 6; j++) { const q = odHash(sd + j) * TAU, d = R * k * (0.6 + 0.4 * odHash(sd + j * 2)); g.fillRect(e.x + Math.cos(q) * d - 1, e.y + Math.sin(q) * d - 1, 2, 2); }
+          }
           break;
         }
         case 'armCollapse': {
-          g.strokeStyle = rgba('#c4b5fd', (0.85 * fa).toFixed(3)); g.lineWidth = 3;
-          g.beginPath(); g.arc(e.x, e.y, e.r * fa, 0, TAU); g.stroke();
+          // the singularity closing: rings drawn in to a point, light streaking in after them, and a flash as it shuts
+          const k = OPO_KIT.ease.in(Math.min(1, a / 0.7));
+          for (let j = 0; j < 3; j++) {
+            const rr = e.r * Math.max(0, 1 - k - j * 0.15);
+            if (rr <= 1) continue;
+            g.strokeStyle = rgba(j ? '#c4b5fd' : '#ecfeff', (0.8 * (1 - k)).toFixed(3)); g.lineWidth = 2.5 - j * 0.6;
+            g.beginPath(); g.arc(e.x, e.y, rr, 0, TAU); g.stroke();
+          }
+          g.strokeStyle = rgba('#e9d5ff', (0.6 * (1 - k)).toFixed(3)); g.lineWidth = 1.2;
+          g.beginPath();
+          for (let j = 0; j < 16; j++) { const q = j * TAU / 16 + sd, d0 = e.r * (1 - k) * 1.1, d1 = d0 * 0.6; g.moveTo(e.x + Math.cos(q) * d0, e.y + Math.sin(q) * d0); g.lineTo(e.x + Math.cos(q + 0.2) * d1, e.y + Math.sin(q + 0.2) * d1); }
+          g.stroke();
+          if (a > 0.65) {
+            const f = (a - 0.65) / 0.35;
+            if (mat) oaGlow(g, e.x, e.y, 40 + 60 * f, '#ffffff', 0.9 * (1 - f));
+            g.strokeStyle = rgba('#ffffff', (0.9 * (1 - f)).toFixed(3)); g.lineWidth = 3 * (1 - f) + 0.5;
+            g.beginPath(); g.arc(e.x, e.y, 10 + 80 * f, 0, TAU); g.stroke();
+          }
           break;
         }
         case 'wake': case 'out': {
@@ -48203,66 +48485,148 @@ const IMAGO_ART = {
     }
   },
 
-  /* ------------------ C — THE ARMORY: placeholders, to be drawn ------------------
-     Lines and labels only, so it can be played: the user draws these (18 Oct:
-     "leave art hooks for this one"). WHAT THEY ARE HANDED is in this block's
-     header. Each is tagged "placeholder" where it draws. */
+  /* --------------------------- C — THE ARMORY, drawn ---------------------------
+     (see "C — THE ARMORY, as drawn", above the hooks) */
+  /* The wheel: the room dimmed behind it, eight petals of the moth's glass
+     unfolding round the hull in turn, clockwise, each with its gun drawn
+     small; the one aimed at lifts out and lights, a line out to it from the
+     hull; the worn one is ringed. Aimed at the hull, the hull's ring lights
+     and says it will shut. Its name and its line under it (over it, if the
+     hull is low on the screen). */
   armory(g, w, h, m) {
-    const n = m.list.length, R = m.r, open = Math.min(1, m.t / 0.15);
-    g.fillStyle = 'rgba(2,6,12,' + (0.45 * open).toFixed(3) + ')'; g.fillRect(0, 0, w, h);
-    g.lineWidth = 1.5;
+    const n = m.list.length, R = m.r, t = m.t, E = OPO_KIT.ease, mat = !!FXO.mat;
+    const S = IM_ST.armWheel || (IM_ST.armWheel = { lift: [], t: uiTime });
+    const dt = clamp(uiTime - S.t, 0, 0.1); S.t = uiTime;
+    const open = E.out(clamp(t / 0.18, 0, 1)), r0 = R * 0.36;
+    const vg = g.createRadialGradient(m.cx, m.cy, R * 0.5, m.cx, m.cy, Math.max(w, h) * 0.8);
+    vg.addColorStop(0, 'rgba(2,6,12,' + (0.3 * open).toFixed(3) + ')'); vg.addColorStop(1, 'rgba(2,6,12,' + (0.78 * open).toFixed(3) + ')');
+    g.fillStyle = vg; g.fillRect(0, 0, w, h);
+    g.lineJoin = 'round'; g.lineCap = 'round';
     for (let k = 0; k < n; k++) {
-      const a0 = -Math.PI / 2 + (k - 0.5) * TAU / n, a1 = a0 + TAU / n, mid = (a0 + a1) / 2, on = k === m.hover, worn = k === m.worn;
-      g.beginPath(); g.arc(m.cx, m.cy, R * open, a0 + 0.02, a1 - 0.02); g.arc(m.cx, m.cy, R * 0.38 * open, a1 - 0.02, a0 + 0.02, true); g.closePath();
-      g.fillStyle = on ? 'rgba(103,232,249,0.32)' : 'rgba(8,20,28,0.85)'; g.fill();
-      g.strokeStyle = on ? '#ecfeff' : worn ? IM_COL : '#155e75'; g.stroke();
-      const lx = m.cx + Math.cos(mid) * R * 0.7 * open, ly = m.cy + Math.sin(mid) * R * 0.7 * open;
+      const on = k === m.hover, worn = k === m.worn, it = m.list[k];
+      S.lift[k] = (S.lift[k] || 0) + ((on ? 1 : 0) - (S.lift[k] || 0)) * Math.min(1, dt * 18);
+      const lf = S.lift[k], pk = Math.max(0, E.backOut(clamp((t - k * 0.02) / 0.2, 0, 1)));
+      if (pk <= 0.01) continue;
+      const gap = 0.045, a0 = -Math.PI / 2 + (k - 0.5) * TAU / n + gap, a1 = a0 + TAU / n - gap * 2, mid = (a0 + a1) / 2;
+      const ro = (R + 12 * lf) * pk, ri = (r0 + 5 * lf) * pk, ox = Math.cos(mid) * 4 * lf, oy = Math.sin(mid) * 4 * lf, cx = m.cx + ox, cy = m.cy + oy;
+      g.beginPath(); g.arc(cx, cy, ro, a0, a1); g.arc(cx, cy, ri, a1, a0, true); g.closePath();
+      const gr = g.createRadialGradient(cx, cy, ri, cx, cy, ro);
+      gr.addColorStop(0, on ? 'rgba(14,74,92,0.92)' : 'rgba(3,12,18,0.9)'); gr.addColorStop(1, on ? 'rgba(34,130,150,0.9)' : 'rgba(8,32,42,0.9)');
+      g.fillStyle = gr; g.fill();
+      g.strokeStyle = on ? '#ecfeff' : worn ? IM_COL : 'rgba(103,232,249,0.38)'; g.lineWidth = on ? 1.8 : worn ? 1.5 : 1; g.stroke();
+      // its veins, as a wing's
+      g.strokeStyle = rgba('#a5f3fc', (on ? 0.4 : 0.16).toFixed(3)); g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(cx + Math.cos(mid) * ri, cy + Math.sin(mid) * ri); g.lineTo(cx + Math.cos(mid) * ro, cy + Math.sin(mid) * ro);
+      g.arc(cx, cy, lerp(ri, ro, 0.82), a0 + 0.06, a1 - 0.06); g.stroke();
+      if (on && mat) { g.save(); g.globalCompositeOperation = 'lighter'; oaGlow(g, cx + Math.cos(mid) * (ri + ro) / 2, cy + Math.sin(mid) * (ri + ro) / 2, R * 0.5, '#67e8f9', 0.35); g.restore(); }
+      // its gun, small, and its name
+      const ix = cx + Math.cos(mid) * (ri + ro) / 2, iy = cy + Math.sin(mid) * (ri + ro) / 2 - 4;
+      g.globalAlpha = Math.min(1, pk);
+      imArmIcon(g, it.id, ix, iy, on ? 11.5 : 9.5, on ? '#ffffff' : worn ? IM_COL : '#a5f3fc');
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.font = "700 11px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = on ? '#ffffff' : '#a5f3fc';
-      g.fillText(m.list[k].hud, lx, ly - (worn ? 5 : 0));
-      if (worn) { g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = IM_COL; g.fillText('WORN', lx, ly + 7); }
+      g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = on ? '#ecfeff' : 'rgba(165,243,252,0.7)';
+      g.fillText(it.hud, ix, iy + 15);
+      if (worn) {
+        g.fillStyle = IM_COL; g.beginPath(); g.arc(cx + Math.cos(mid) * (ro - 5), cy + Math.sin(mid) * (ro - 5), 2.2, 0, TAU); g.fill();
+        g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.fillText('WORN', ix, iy + 24);
+      }
+      g.globalAlpha = 1;
     }
-    g.textAlign = 'center'; g.textBaseline = 'alphabetic';
-    g.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = IM_COL;
-    g.fillText('THE ARMORY', m.cx, m.cy - R - 14);
-    const it = m.list[m.hover];
-    g.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = '#ecfeff';
-    g.fillText(it ? it.n : 'AIM AT A GUN', m.cx, m.cy + R + 22);
-    g.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = '#a5f3fc';
-    g.fillText(it ? it.d : 'or at the hull, and C, to shut it', m.cx, m.cy + R + 38);
-    g.fillStyle = '#64748b'; g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
-    g.fillText('C OR CLICK TO WEAR IT  ·  placeholder', m.cx, m.cy + R + 54);
+    // the hull's ring: where C shuts it; and the line out to the petal aimed at
+    const hs = m.hover < 0;
+    g.strokeStyle = hs ? '#ecfeff' : rgba('#67e8f9', (0.4 * open).toFixed(3)); g.lineWidth = hs ? 1.8 : 1;
+    g.beginPath(); g.arc(m.cx, m.cy, r0 * 0.78 * open, 0, TAU); g.stroke();
+    if (hs) {
+      g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ecfeff';
+      g.fillText('SHUT', m.cx, m.cy + r0 * 0.78 + 9);
+    } else if (m.hover >= 0) {
+      const a = -Math.PI / 2 + m.hover * TAU / n;
+      g.strokeStyle = rgba('#ecfeff', 0.7); g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(m.cx + Math.cos(a) * r0 * 0.8, m.cy + Math.sin(a) * r0 * 0.8); g.lineTo(m.cx + Math.cos(a) * (r0 + 4), m.cy + Math.sin(a) * (r0 + 4)); g.stroke();
+    }
+    // its name, and what it does
+    const it = m.list[m.hover], below = m.cy + R + 76 < h, tx = clamp(m.cx, 150, w - 150), ty = below ? m.cy + R + 30 : m.cy - R - 64;
+    g.globalAlpha = open; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '700 13px ' + OA_DISP; g.letterSpacing = '0.3em'; g.fillStyle = IM_COL;
+    g.fillText('THE ARMORY', tx, below ? m.cy - R - 26 : m.cy + R + 30);
+    g.letterSpacing = '0.08em';
+    g.font = '700 19px ' + OA_DISP; g.fillStyle = '#ecfeff';
+    g.fillText(it ? it.n : hs ? 'AS IT WAS' : 'AIM AT A GUN', tx, ty);
+    g.letterSpacing = '0px';
+    g.font = "500 12px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = '#a5f3fc';
+    g.fillText(it ? it.d : 'C, and the armory shuts with nothing changed', tx, ty + 19);
+    g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = '#64748b';
+    g.fillText('C OR CLICK TO WEAR IT', tx, ty + 36);
+    g.globalAlpha = 1;
   },
+  /* The gun worn, grown out of the moth (hull space): five of them the
+     duel's own growths, three new; growing in when put on, kicking as it
+     fires, charging back to its next shot. */
   armMount(g, h) {
-    // its name over the hull, and the gun as a box on the nose, kicking as it fires (placeholder)
-    g.textAlign = 'center'; g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = 'rgba(165,243,252,0.8)';
-    g.fillText(h.hud, h.x, h.y - h.r - 30);
+    const pk = PILOT.on || 0, S = IM_ST.arm[pk] || (IM_ST.arm[pk] = { spin: 0, t: uiTime });
+    const dt = clamp(uiTime - S.t, 0, 0.1); S.t = uiTime;
+    const { rec, ch } = imArmKick(h), mat = !!FXO.mat, t = uiTime, L = orLightIn(h.ang), G = OPR_GROW;
+    // growing in from the moment it was put on (the run's armEquip, here at the hull)
+    let grow = 1;
+    for (let i = IM_ST.fx.length - 1; i >= 0; i--) { const e = IM_ST.fx[i]; if (e.kind === 'armEquip' && e.id === h.id && len(e.x - h.x, e.y - h.y) < 40) { grow = oaC01((uiTime - e.t0) / IM_ARM_GROW); break; } }
+    const ge = grow < 1 ? Math.max(0.05, OPO_KIT.ease.backOut(grow)) : 1;
     g.translate(h.x, h.y); g.rotate(h.ang);
-    const kick = h.fired >= 0 && h.fired < 0.08 ? 3 * (1 - h.fired / 0.08) : 0;
-    g.fillStyle = 'rgba(8,20,28,0.9)'; g.strokeStyle = '#ecfeff'; g.lineWidth = 1.2;
-    g.fillRect(10 - kick, -3.5, 16, 7); g.strokeRect(10 - kick, -3.5, 16, 7);
-  },
-  armShot(g, s) {
-    const a = Math.atan2(s.vy, s.vx);
-    if (s.kind === 'orb') {
-      // a dark core, its reach dashed (placeholder)
-      g.fillStyle = '#05010d'; g.strokeStyle = '#c4b5fd'; g.lineWidth = 2;
-      g.beginPath(); g.arc(s.x, s.y, 12 + (s.held ? 3 * Math.sin(s.t * 20) : 0), 0, TAU); g.fill(); g.stroke();
-      g.setLineDash([4, 6]); g.strokeStyle = 'rgba(196,181,253,0.35)'; g.lineWidth = 1;
-      g.beginPath(); g.arc(s.x, s.y, s.pull, 0, TAU); g.stroke(); g.setLineDash([]);
-      return;
+    g.globalAlpha = Math.min(1, grow * 2.5);
+    g.scale(ge, ge);
+    switch (h.id) {
+      case 'minigun':
+        S.spin += dt * (rec > 0.2 ? 30 : 3); OPR_ST.spin = S.spin;
+        for (const sd of [1, -1]) G.gatling(g, sd, rec, ch, t, L, mat);
+        break;
+      case 'rail': G.rail(g, 0, rec, ch, t, L, mat); break;
+      case 'swarm': for (const sd of [1, -1]) G.pods(g, sd, rec, ch, t, L, mat); break;
+      case 'howitzer': G.cannon(g, 0, rec, ch, t, L, mat); break;
+      case 'flak': G.barrels(g, 0, rec, ch, t, L, mat); break;
+      case 'lance': for (const sd of [1, -1]) G.rifle(g, sd, rec * 0.6, 1, t, L, mat); imArmSun(g, rec, ch, t, L, mat); break;
+      case 'tesla': imArmCoil(g, rec, ch, t, L, mat); break;
+      case 'hole': imArmLens(g, rec, ch, t, L, mat); break;
     }
-    g.translate(s.x, s.y); g.rotate(a);
-    if (s.kind === 'shell') { g.fillStyle = '#fde68a'; g.beginPath(); g.ellipse(0, 0, 9, 6, 0, 0, TAU); g.fill(); }
-    else { g.fillStyle = '#ecfeff'; g.beginPath(); g.moveTo(6, 0); g.lineTo(-5, 3.5); g.lineTo(-5, -3.5); g.closePath(); g.fill(); }
-    g.strokeStyle = 'rgba(103,232,249,0.6)'; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(-6, 0); g.lineTo(-22, 0); g.stroke();
+    // growing in: light at its roots, going
+    if (grow < 1 && mat) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = 1; oaGlow(g, 10, 0, 26, '#a5f3fc', 0.8 * (1 - grow)); }
   },
+  /* In the air: SWARM PODS' moths, the HOWITZER's shell, the SINGULARITY. */
+  armShot(g, s) {
+    const mat = !!FXO.mat;
+    if (s.kind === 'missile') imArmMoth(g, s, mat);
+    else if (s.kind === 'shell') imArmShell(g, s, mat);
+    else if (s.kind === 'orb') imArmHole(g, s, mat);
+  },
+  /* The SOLAR LANCE: sunlight. A wide halo, the beam rippling, white at its
+     heart, light running along it, a sun at the muzzle and a splash where
+     it ends. */
   armBeam(g, b) {
+    const mat = !!FXO.mat, t = uiTime, dx = b.x1 - b.x0, dy = b.y1 - b.y0, Lb = Math.hypot(dx, dy) || 1, ux = dx / Lb, uy = dy / Lb;
+    const wob = 1 + 0.1 * Math.sin(t * 47) + 0.06 * Math.sin(t * 83);
     g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
-    g.strokeStyle = 'rgba(253,224,71,0.5)'; g.lineWidth = b.w * 2;
-    g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x1, b.y1); g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 3; g.stroke();
+    const line = () => { g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x1, b.y1); };
+    if (mat) { g.strokeStyle = rgba(IM_SUN, 0.14); g.lineWidth = b.w * 3.2 * wob; line(); g.stroke(); }
+    g.strokeStyle = rgba(IM_SUN, 0.5); g.lineWidth = b.w * 1.9 * wob; line(); g.stroke();
+    g.strokeStyle = rgba('#fef9c3', 0.85); g.lineWidth = b.w * 0.95 * wob; line(); g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = b.w * 0.35; line(); g.stroke();
+    // light running along it
+    g.setLineDash([10, 26]); g.lineDashOffset = -t * 900;
+    g.strokeStyle = rgba('#ffffff', 0.6); g.lineWidth = b.w * 0.7; line(); g.stroke();
+    g.setLineDash([]);
+    // the sun at the muzzle
+    if (mat) oaGlow(g, b.x0, b.y0, b.w * 3.2, IM_SUN, 0.9);
+    g.strokeStyle = rgba(IM_SUN, 0.7); g.lineWidth = 1.3;
+    g.beginPath();
+    for (let k = 0; k < 10; k++) { const a = t * 2 + k * TAU / 10, l = b.w * (0.8 + (k % 2 ? 0.4 : 0.9)); g.moveTo(b.x0 + Math.cos(a) * b.w * 0.6, b.y0 + Math.sin(a) * b.w * 0.6); g.lineTo(b.x0 + Math.cos(a) * l, b.y0 + Math.sin(a) * l); }
+    g.stroke();
+    // its splash where it ends
+    if (mat) oaGlow(g, b.x1, b.y1, b.w * 3.5 * wob, IM_SUN, 0.75);
+    g.strokeStyle = rgba('#fffbeb', 0.85); g.lineWidth = 1.4;
+    g.beginPath();
+    for (let k = 0; k < (FXO.parts ? 7 : 3); k++) {
+      const a = Math.atan2(-uy, -ux) + rnd(-1.3, 1.3), l = rnd(6, 22);
+      g.moveTo(b.x1, b.y1); g.lineTo(b.x1 + Math.cos(a) * l, b.y1 + Math.sin(a) * l);
+    }
+    g.stroke();
   }
 };
 /* ========================== end of IMAGO's art hooks ========================== */

@@ -537,24 +537,47 @@ My rules, not yours:
 - **What burns (the lance, a singularity) bites ten times a second,** not
   every step. Otherwise the damage numbers and the cards' on-hit effects
   would flood the screen.
-- **The art is yours to draw.** The hooks are in `IMAGO_ART`:
-  - `armory`: the wheel, on the screen;
-  - `armMount`: the gun worn, on the hull;
-  - `armShot`: a missile, shell or singularity in the air;
-  - `armBeam`: the lance;
-  - the moments, in `fx`: `armOpen`, `armShut`, `armEquip`, `armRail`,
-    `armArc`, `armBlast`, `armCollapse`.
+- **The art (drawn 18 Oct, at your word: "now the c move").** The guns are
+  grown, not bolted on: the rite's free evolution, on demand, in the moth's
+  own glass. The hooks are in `IMAGO_ART` (`armory`, `armMount`, `armShot`,
+  `armBeam`, and seven moments in `fx`).
+  - **The wheel:** the room dimmed and slowed behind it. Eight petals of
+    glass unfold round the hull in turn, each with its gun drawn small. The
+    one aimed at lifts out and lights, the worn one is ringed, and its name
+    and line sit under the wheel. Aimed at the hull, the hull's ring lights:
+    SHUT.
+  - **On the moth,** five are the duel's own growths:
+    - MINIGUN: its rotary thorns, spinning up as it fires;
+    - RAILGUN: its proboscis;
+    - SWARM PODS: the eggs on its forewings;
+    - HOWITZER: the bore down its body;
+    - FLAK: its palps.
 
-  What each hook is handed is in the art block's header. For now they are
-  placeholders, lines and labels only, each tagged "placeholder" where it
-  draws, so C can be played:
-  - the wheel's eight wedges, the gun's name and its line under them;
-  - a box on the hull's nose, with the gun's short name over it;
-  - darts and shells with streaks, and a dark core with its reach dashed;
-  - a plain beam.
+    Three are new, in the same glass:
+    - SOLAR LANCE: a small sun at its head, its forewings' lances charging
+      it;
+    - TESLA COIL: two forked prongs with a ball of lightning between them;
+    - SINGULARITY: a dark lens held in two horns.
 
-  The C key shows the worn gun's short name (MINI, RAIL, SWRM, HOWZ, SUN,
-  FLAK, ARC, HOLE).
+    Each grows in when put on (from the run's `armEquip`), kicks as it fires
+    and charges back.
+  - **In the air:**
+    - SWARM PODS' missiles hatch as little moths of light that hunt.
+    - The HOWITZER's shell is a white-hot slug. Its landing is ringed on the
+      floor, closing as it comes down.
+    - The SINGULARITY is a black lens in a ring of light. The room darkens
+      round it and light falls in from its reach.
+  - **The moments:**
+    - the lance: sunlight, with a sun at the muzzle and a splash where it
+      ends;
+    - the rail: an instant white line, then a helix of light unwinding;
+    - the coil: lightning, jagged afresh every frame;
+    - the blasts: each gun's own;
+    - the singularity closing: an implosion and a flash.
+
+    MINIGUN and FLAK fire the game's own rounds, so their rounds are the
+    hull's.
+  - **Effects off:** everything still reads by its lines.
 
 ## Tales (stand-ins, in the voice)
 
@@ -628,8 +651,8 @@ list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
 needed (below), and its cut-in drawn: still to come is the passive.
 
 **Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, and
-X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built 18 Oct with its art
-left as hooks for you (below). V is still to be named.
+X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built and drawn 18 Oct (below). V is still to be
+named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -850,9 +873,10 @@ active, the frame is a stand-in, built only as far as its first active needs.
     - the room's slow-motion;
     - `imAbility` (Z and X wait while it is open);
     - `imTick`, which calls `imArmTick`.
-  - **Its art, left as hooks** in `IMAGO_ART` (`armory`, `armMount`,
-    `armShot`, `armBeam`, and seven `fx` kinds) with placeholders, plus
-    `drawImagoArmory` in the screen pass. The C key names the gun worn.
+  - **Its art,** first left as hooks with placeholders, then drawn (above):
+    `IMAGO_ART`'s `armory`, `armMount`, `armShot`, `armBeam` and seven `fx`
+    kinds, with `drawImagoArmory` in the screen pass. The C key names the
+    gun worn.
   - **Tests:** `test:imago` has an ARMORY section (125 checks in all):
     - C opening it from the keyboard, the room slowed, and the hull held
       and silent;
