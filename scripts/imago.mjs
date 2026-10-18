@@ -17,6 +17,12 @@
                   land, when they burst, what they hurt and how hard, one
                   thrown into a body riding it, the cooldown, the form
                   ending under them
+     X FLUTTER    (user, 18 Oct) ten seconds twice as fast, every round and
+                  blow dodged, each dodge played out whole (aside and back):
+                  the speed, a round seen coming and stepped clear of, the
+                  hull home again, the round flying on, a volley, a blow,
+                  the floor still landing, a wall, a dodge never cut short,
+                  the end, the form ending under it, a snapshot mid-dodge
      the rite     none of it answers there
      a snapshot   bombs in the air come back in another copy and burst the
                   same
@@ -52,8 +58,10 @@ function game() {
     globalThis.__press = [];
     globalThis.__dash = false;
     globalThis.__aim = null;
-    inputSource = rec => { rec.mx = 0; rec.my = 0; rec.trig = false; rec.lmb = false; rec.auto = false; rec.dash = __dash; __dash = false;
-      rec.touch = false; rec.taim = null; rec.local = false; rec.press = __press.concat(inputQueue.splice(0)); __press = [];   // and what the keyboard queued (handleKey) rec.held = '';
+    globalThis.__mx = 0; globalThis.__my = 0;
+    // what the test presses, and what the keyboard queued (handleKey)
+    inputSource = rec => { rec.mx = __mx; rec.my = __my; rec.trig = false; rec.lmb = false; rec.auto = false; rec.dash = __dash; __dash = false;
+      rec.touch = false; rec.taim = null; rec.local = false; rec.press = __press.concat(inputQueue.splice(0)); __press = []; rec.held = '';
       const a = __aim || { x: P.x + 300, y: P.y }; rec.ax = a.x; rec.ay = a.y; };`);
   return g;
 }
@@ -130,9 +138,8 @@ section('[F]');
   ok((J(g, `__art`).hull || 0) > 0, 'the hull is IMAGO\'s while it is on (IMAGO_ART.hull)', J(g, `__art`));
   round(g, 30); steps(g, 50);
   ok(J(g, `P.imGraze`) === 0, 'grazes do not fill it while it is on', J(g, `P.imGraze`));
-  g.run(`__press = ['x'];`); steps(g, 1);
   g.run(`__press = ['c'];`); steps(g, 1);
-  ok(J(g, `P.imCd.every(c => c === 0) && P.imSpots.length === 0`), 'X and C are not named yet, and do nothing', J(g, `P.imCd`));
+  ok(J(g, `P.imCd.every(c => c === 0) && P.imSpots.length === 0 && P.imFlut === 0`), 'C is not named yet, and does nothing', J(g, `P.imCd`));
   g.run(`P.imT = 0.05;`); steps(g, 6);
   ok(J(g, `!imOn() && P.imT === 0`), 'the minute ends, and it is the ship again');
   const before = J(g, `__art.hull || 0`);
@@ -301,6 +308,114 @@ section('Z — EYESPOTS');
   ok(J(g, `P.imSpots.length`) === 0, 'Z does nothing once it is the ship again');
 }
 
+/* ================================ X, FLUTTER ================================ */
+section('X — FLUTTER');
+/* A quiet room, every step: nobody in it, so the only threats are the ones
+   the test sends (the held wave still sends bodies, and they fight back). */
+const qsteps = (g, n, draw) => { for (let i = 0; i < n; i++) { g.run(`for (const e of enemies) e.dead = true; enemies.length = 0; spawnT = 1e9;`); steps(g, 1, draw); } };
+// into IMAGO, past its cut-in, the room empty
+const intoImago = g => { g.run(`P.imGraze = IM_MAX; handleKey('f');`); qsteps(g, 2); throughCut(g, true); };
+// the hull's steady speed, flying flat out to the right for a second
+const speed = g => { g.run(`__mx = 1;`); qsteps(g, 60); const v = J(g, `Math.hypot(P.vx, P.vy)`); g.run(`__mx = 0;`); qsteps(g, 40); return v; };
+{
+  const g = game();
+  enter(g, true);
+  g.run(`handleKey('x');`); qsteps(g, 1);
+  ok(J(g, `P.imFlut`) === 0, 'X out of IMAGO is nothing');
+  intoImago(g);
+  const base = J(g, `P.speed`), v0 = speed(g);
+  g.run(`handleKey('x');`); qsteps(g, 1);
+  ok(J(g, `P.imFlut > FL_LEN - 0.05 && P.imCd[1] > FL_CD - 0.05`), 'X, from the keyboard: ten seconds of FLUTTER, and its cooldown', J(g, `[P.imFlut, P.imCd[1]]`));
+  const v1 = speed(g);
+  ok(Math.abs(v0 - base) < base * 0.01 && Math.abs(v1 - 2 * base) < base * 0.02, 'twice as fast while it runs', { base, v0, v1 });
+
+  // a round straight at the hull: seen coming, stepped clear of, and the hull home again
+  g.run(`P.x = (arena.x0 + arena.x1) / 2; P.y = (arena.y0 + arena.y1) / 2; P.vx = P.vy = 0;`);
+  const hp0 = J(g, `P.hp`), x0 = J(g, `[P.x, P.y]`);
+  g.run(`(() => { const b = eshoot({ x: P.x - 300, y: P.y, dmg: 30, r: 10, col: '#f87171' }, 0, 600, 30, 6); b.x = P.x - 300; b.y = P.y; b.owner = null; globalThis.__b = b; })()`);
+  let began = null, crossOff = null, maxOff = 0;
+  for (let i = 0; i < 70; i++) {
+    const before = J(g, `{ bx: __b.x, d: !!P.imDodge }`);
+    qsteps(g, 1);
+    const s = J(g, `{ x: P.x, y: P.y, d: !!P.imDodge, bx: __b.x }`);
+    const off = Math.hypot(s.x - x0[0], s.y - x0[1]);
+    maxOff = Math.max(maxOff, off);
+    if (s.d && began === null) began = x0[0] - s.bx;
+    if (crossOff === null && before.bx < x0[0] && s.bx >= x0[0]) crossOff = off;
+  }
+  const edge = J(g, `__b.r + P.r`);
+  ok(began !== null && began > edge, 'the round is seen coming: the dodge begins before it can touch', { began, edge });
+  ok(Math.abs(maxOff - J(g, `FL_STEP`)) < 0.5, 'the hull steps aside the whole way', maxOff);
+  ok(crossOff !== null && crossOff > edge, 'and is out of its line when it goes by', { crossOff, edge });
+  const back = J(g, `[P.x - ${x0[0]}, P.y - ${x0[1]}, !!P.imDodge]`);
+  ok(Math.hypot(back[0], back[1]) < 0.5 && !back[2], 'and comes all the way back', back);
+  ok(J(g, `P.hp`) === hp0, 'nothing landed', [hp0, J(g, `P.hp`)]);
+  ok(J(g, `ebullets.includes(__b) && __b.x > ${x0[0]} + 100`), 'and the round flew on past, unspent');
+
+  // a volley from all round at once, and rounds from everywhere for two seconds: nothing lands, and no dodge is cut short
+  const hp1 = J(g, `P.hp`);
+  g.run(`globalThis.__cut = 0; globalThis.__dodges = 0; globalThis.__lastD = null;
+    for (let k = 0; k < 16; k++) { const a = k * TAU / 16, b = eshoot({ x: P.x + Math.cos(a) * 260, y: P.y + Math.sin(a) * 260, dmg: 20, r: 1, col: '#f87171' }, a + Math.PI, 420, 20, 6); b.x = P.x + Math.cos(a) * 260; b.y = P.y + Math.sin(a) * 260; b.owner = null; }`);
+  for (let i = 0; i < 120; i++) {
+    if (i % 10 === 5) g.run(`(() => { const a = simRnd(TAU), b = eshoot({ x: P.x + Math.cos(a) * 240, y: P.y + Math.sin(a) * 240, dmg: 20, r: 1, col: '#f87171' }, a + Math.PI, 500, 20, 6); b.x = P.x + Math.cos(a) * 240; b.y = P.y + Math.sin(a) * 240; b.owner = null; })()`);
+    g.run(`(() => { const d = P.imDodge; if (d !== __lastD) { if (__lastD && __lastD.t < FL_DODGE - 1e-9) __cut++; if (d) __dodges++; __lastD = d; } })()`);
+    qsteps(g, 1);
+  }
+  ok(J(g, `P.hp`) === hp1, 'a volley from every side, and two seconds of rounds: nothing lands', [hp1, J(g, `P.hp`)]);
+  ok(J(g, `__dodges`) >= 3 && J(g, `__cut`) === 0, 'each dodge played out whole, never cut short', J(g, `[__dodges, __cut]`));
+
+  // a blow that is not a round: dodged, across the line from whoever threw it; the floor still lands
+  g.run(`ebullets.length = 0;`); qsteps(g, 30);           // the room clear, and the last dodge home
+  ok(J(g, `!P.imDodge`), 'and with nothing coming, it is still');
+  g.run(`hurtPlayer(50, { src: { x: P.x + 20, y: P.y } });`);
+  ok(J(g, `P.hp`) === hp1 && J(g, `!!P.imDodge && Math.abs(P.imDodge.sx) < 1e-9`), 'a blow from a body is dodged, stepping across its line', J(g, `[P.hp, P.imDodge && P.imDodge.sx]`));
+  g.run(`hurtPlayer(7, { pure: true });`);
+  ok(J(g, `P.hp`) === hp1 - 7, 'the floor and the build\'s own costs are nothing to dodge', J(g, `P.hp`));
+  qsteps(g, 30);
+
+  // against the top wall, a round along it: the step is away from the wall, and the hull stays in the room
+  g.run(`P.x = (arena.x0 + arena.x1) / 2; P.y = arena.y0 + P.r + 2; P.vx = P.vy = 0; ebullets.length = 0;
+    (() => { const b = eshoot({ x: P.x - 300, y: P.y, dmg: 30, r: 10, col: '#f87171' }, 0, 600, 30, 6); b.x = P.x - 300; b.y = P.y; b.owner = null; })()`);
+  let sy = null, inside = true;
+  for (let i = 0; i < 40; i++) { qsteps(g, 1); const s = J(g, `{ sy: P.imDodge ? P.imDodge.sy : null, y: P.y, ok: P.y >= arena.y0 + P.r - 1e-9 }`); if (sy === null && s.sy !== null) sy = s.sy; inside = inside && s.ok; }
+  ok(sy !== null && sy > 0.99 && inside, 'off a wall, it steps the other way, into the room', { sy, inside });
+
+  // the ten seconds end: a round lands again, and the hull is its own speed
+  g.run(`ebullets.length = 0; P.x = (arena.x0 + arena.x1) / 2; P.y = (arena.y0 + arena.y1) / 2;`);
+  qsteps(g, Math.round(J(g, `P.imFlut`) / STEP) + 2);
+  ok(J(g, `P.imFlut === 0 && P.imT > 0`), 'ten seconds, and it is over (IMAGO still on)', J(g, `[P.imFlut, P.imT]`));
+  const hp2 = J(g, `P.hp`);
+  round(g, 0, 500); qsteps(g, 50);
+  ok(J(g, `P.hp`) < hp2, 'a round lands again');
+  const v2 = speed(g);
+  ok(Math.abs(v2 - base) < base * 0.01, 'and the hull flies at its own speed', { base, v2 });
+}
+{
+  // IMAGO ending under it ends it
+  const g = game();
+  enter(g, true); intoImago(g);
+  g.run(`handleKey('x');`); qsteps(g, 2);
+  g.run(`P.imT = 0.05;`); qsteps(g, 6);
+  ok(J(g, `!imOn() && P.imFlut === 0`), 'IMAGO ending takes FLUTTER with it', J(g, `[P.imT, P.imFlut]`));
+  const hp = J(g, `P.hp`);
+  round(g, 0, 500); qsteps(g, 50);
+  ok(J(g, `P.hp`) < hp, 'and rounds land on the ship again');
+}
+{
+  // a snapshot taken mid-dodge: the other copy plays the rest of it the same
+  const a = game(), c = game();
+  enter(a, true, 23); intoImago(a);
+  a.run(`handleKey('x');`); qsteps(a, 2);
+  a.run(`(() => { const b = eshoot({ x: P.x - 300, y: P.y, dmg: 30, r: 10, col: '#f87171' }, 0, 600, 30, 6); b.x = P.x - 300; b.y = P.y; b.owner = null; })()`);
+  let k = 0; while (!J(a, `!!P.imDodge && P.imDodge.t > 0.08`) && k++ < 80) qsteps(a, 1);
+  const snap = a.run(`JSON.stringify(snapWrite())`);
+  c.run(`applyChar(CHARS.findIndex(ch => ch.id === 'runner')); resetGame(); state = 'play'; snapRead(JSON.parse(${JSON.stringify(snap)}));`);
+  ok(J(c, `!!P.imDodge && P.imFlut > 0`), 'a dodge and FLUTTER come back in another copy', J(c, `[!!P.imDodge, P.imFlut]`));
+  qsteps(a, 40); qsteps(c, 40);
+  const pa = J(a, `[P.x, P.y, P.hp, P.imFlut, !!P.imDodge]`), pc = J(c, `[P.x, P.y, P.hp, P.imFlut, !!P.imDodge]`);
+  ok(JSON.stringify(pa) === JSON.stringify(pc), 'and the rest of it plays the same there', { pa, pc });
+}
+
 /* ================================== the rite ================================== */
 section('the rite');
 {
@@ -313,6 +428,8 @@ section('the rite');
   ok(J(g, `P.imT === 0 && !imOn()`), 'F is not IMAGO there');
   g.run(`__press = ['z'];`); steps(g, 2);
   ok(J(g, `P.imSpots.length`) === 0, 'nor is Z anything');
+  g.run(`__press = ['x'];`); steps(g, 2);
+  ok(J(g, `P.imFlut`) === 0, 'nor X');
   g.run(`P.imGraze = 0;`);
   for (let i = 0; i < 5; i++) { round(g, 30); steps(g, 50); }
   ok(J(g, `P.imGraze`) === 0, 'and its grazes are the rite\'s, not GRAZE in a run', J(g, `P.imGraze`));
@@ -353,6 +470,11 @@ section('the hooks');
     dummy(g, 70, 0); dummy(g, 180, 0.4);
     g.run(`__press = ['z'];`);
     for (let i = 0; i < 160; i++) { g.run(HOLD); steps(g, 1); if (i % 3 === 0) g.run(`render()`); }
+    // X: FLUTTER, a round dodged, its image left behind
+    g.run(`__press = ['x'];`); steps(g, 2, true);
+    round(g, 0, 600); steps(g, 40, true);
+    g.run(`__mx = 1;`); steps(g, 20, true); g.run(`__mx = 0;`);
+    g.run(`P.imFlut = 0.02;`); steps(g, 6, true);
     g.run(`P.imT = 0.02;`); steps(g, 12, true);
     takeArt(g);
     const failed = J(g, `[...IM_FAILED, ...OR_FAILED]`);

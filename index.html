@@ -2116,6 +2116,7 @@ function newPlayer() {
     roninSkyClear: null, roninBroken: 0,           // its final technique, and the minute after a broken grave
     // VOIDRUNNER's IMAGO: GRAZE, the clock, the four cooldowns, Z's bombs (see IMAGO, IN A RUN)
     imGraze: 0, imT: 0, imAge: 0, imCd: [0, 0, 0, 0], imSpots: [],
+    imFlut: 0, imDodge: null, imDodgeSide: 1,      // X, FLUTTER: its clock, the dodge playing, the side the last one took
     imIntro: null,                                 // its cut-in, while it runs: see IMAGO's cut-in
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
@@ -5792,6 +5793,8 @@ function hurtPlayer(dmg, opts) {
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
   if (imCutIn()) return;                   // nor while IMAGO's has it
   if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
+  // IMAGO's X: FLUTTER dodges every blow, whatever it was; the floor and the build's own costs are nothing to dodge
+  if (imFlutOn() && !(opts && opts.pure)) { imDodgeAt(opts); return; }
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
   /* THE VAGRANT's parry. This function is the funnel every source of damage
@@ -39195,6 +39198,7 @@ function updatePlayer(dt) {
                  * (P.slowT > 0 ? (P.slowV || 1) : 1)
                  * (P.burrowT > 0 ? 1.8 : 1)
                  * (P.after && firing ? 1 + 0.4 * P.after : 1)
+                 * (imFlutOn() ? FL_SPD : 1)        // IMAGO's X: FLUTTER, twice as fast
                  * awakeSpd() * gearStat('spd');
     const tvx = ix * P.speed * spdMul, tvy = iy * P.speed * spdMul;
     const k = 1 - Math.exp(-16 * dt);
@@ -39204,6 +39208,7 @@ function updatePlayer(dt) {
   if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || imCutIn() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
+  if (P.imDodge) imDodgeStep(dt);        // IMAGO's X: a dodge, aside and back, on top of the flying
   if (!P.fly) collideMirrors(P, P.r);    // EMBER flies over the furniture
   P.x = clamp(P.x, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y, arena.y0 + P.r, arena.y1 - P.r);
@@ -46312,6 +46317,10 @@ const OPR_ART = {
        damage (suPower), as THE MANE's is;
      - a cooldown, EYE_CD from the throw, as SUPERUSER's and RONIN's keys
        have. Whether IMAGO's moves should spend GRAZE instead is still open.
+
+   X — FLUTTER (user, 18 Oct; the name is mine): ten seconds twice as fast,
+   and every attack and every round dodged, each dodge played out whole, the
+   hull stepping aside and back. See its own section below.
 =========================================================================== */
 const IM_MAX      = 40;      // GRAZE to fill: a piece's worth in the rite (OPR_GRAZE)
 const IM_GRAZE_R  = 26;      // how far past the hull's edge a round may pass and still be a graze
@@ -46330,6 +46339,17 @@ const EYE_R    = 62;                    // a blast's reach
 const EYE_DMG  = 45;                    // a blast, before upgrades
 const EYE_CD   = 7;                     // from the throw
 const EYE_MAX  = 36;                    // out at once, at most
+
+// X — FLUTTER (see there)
+const FL_LEN   = 10;           // seconds (user)
+const FL_SPD   = 2;            // twice as fast (user)
+const FL_STEP  = 34;           // px aside: a round on the hull's line clears it by its own width and more
+const FL_DODGE = 0.32;         // aside, held, and back
+const FL_OUT   = 0.34;         // of a dodge: stepping out,
+const FL_HOLD  = 0.5;          //   held out until here, then back
+const FL_LOOK  = 0.2;          // how far ahead a round is seen coming, s
+const FL_PAD   = 6;            // px of room it wants past the round's edge
+const FL_CD    = 22;           // from the press: ten seconds of it, twelve of waiting
 
 const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
 const imCutIn = () => !!(P.imIntro && !P.imIntro.cut);
@@ -46430,6 +46450,7 @@ function imIntroTick(dt) {
 // [Z X C V] while IMAGO is on. `cd` is the full cooldown the HUD sweeps; start() returns false if it refused
 const IM_KIT = [
   { n: 'EYESPOTS', hud: 'EYES', cd: EYE_CD, start: imEyesThrow },
+  { n: 'FLUTTER',  hud: 'FLIT', cd: FL_CD,  start: imFlutStart },
 ];
 function imAbility(i) {
   if (state !== 'play' || P.charId !== 'runner' || oprOn() || imCutIn()) return;
@@ -46467,6 +46488,14 @@ function imTick(dt) {
   }
   if (P.imCd) for (let i = 0; i < 4; i++) if (P.imCd[i] > 0) P.imCd[i] = Math.max(0, P.imCd[i] - dt);
   if (P.imSpots && P.imSpots.length) imSpotTick(dt);
+  // X: FLUTTER's clock, and the rounds it watches coming; it is IMAGO's, and goes with the form
+  if (P.imFlut > 0) {
+    if (!imOn()) imFlutEnd('form');
+    else {
+      P.imFlut = Math.max(0, P.imFlut - dt);
+      if (P.imFlut <= 0) imFlutEnd('time'); else imFlutWatch();
+    }
+  }
 }
 
 /* ------------------------------ Z — EYESPOTS -------------------------------
@@ -46556,6 +46585,123 @@ function imEyesBurst(list) {
   Audio_.boom();
 }
 
+/* ------------------------------- X — FLUTTER -------------------------------
+   (user, 18 Oct: "a passive effect that makes the player twice as fast and
+   dodge every attack and bullet for 10 seconds ... it needs to play out a
+   full dodge where runner moves aside and back to dodge"; the name is mine,
+   a stand-in, for the way a moth's flight slips what hunts it.)
+
+   For FL_LEN seconds the hull flies at FL_SPD times its speed, and nothing
+   lands on it: every blow that reaches hurtPlayer is dodged instead, and a
+   round of theirs that reaches the hull flies on past it, unspent. Each
+   dodge is played out whole: the hull steps FL_STEP aside, holds, and comes
+   back (P.imDodge, imDodgeStep), on top of its own flying, so the hull
+   really is out of the way. My rules, not the user's:
+     - a round is seen coming FL_LOOK out (against the hull's own motion),
+       so the step is made before it arrives, not after it lands;
+     - the step is across the threat's line, to the side the hull is already
+       on (dead centre: the other side from the last dodge); if that side is
+       a wall, the other. A blow that is not a round steps across the line
+       from whoever threw it;
+     - a dodge always plays out whole: anything arriving while one plays is
+       dodged in it, and the next one starts when it is back;
+     - what is no one's blow lands as it always did: the floor, and the
+       build's own costs (opts.pure);
+     - FLUTTER is IMAGO's: it ends with the form, and in the rite there is
+       none. A cooldown, FL_CD from the press, as Z's is.
+
+   What the art is handed (IMAGO's art hooks, below):
+     P.imFlut    seconds of FLUTTER left (0 when it is off)
+     P.imDodge   a dodge playing, or null: t (s since it began), sx, sy (the
+                 way it steps, a unit), o (how far out it is now, px), x0, y0
+                 (where it stood), tx, ty (where the threat came from), hit (s
+                 from the start until it got there)
+--------------------------------------------------------------------------- */
+const imFlutOn = () => P.imFlut > 0 && P.charId === 'runner' && !oprOn();
+const imFlutOnP = p => p.imFlut > 0 && p.charId === 'runner' && !oprOn();
+
+function imFlutStart() {
+  P.imFlut = FL_LEN;
+  P.imDodge = null;
+  imFx('flutter', { x: P.x, y: P.y, ang: P.ang });
+  Audio_.tone(880, 0.18, 'sine', 0.06, 1760);
+  return true;
+}
+function imFlutEnd(why) {
+  P.imFlut = 0;
+  imFx('flutterOut', { x: P.x, y: P.y, ang: P.ang });
+  if (why !== 'form') Audio_.tone(700, 0.2, 'sine', 0.05, 350);
+}
+
+// how far out a dodge is, 0 to 1, at f (0-1) of it: quick out, held, eased home
+function imDodgeK(f) {
+  if (f < FL_OUT) { const u = f / FL_OUT; return 1 - (1 - u) * (1 - u) * (1 - u); }
+  if (f < FL_HOLD) return 1;
+  const u = (f - FL_HOLD) / (1 - FL_HOLD);
+  return 0.5 + 0.5 * Math.cos(u * Math.PI);
+}
+/* A dodge begins. (dx, dy) is the threat's line, the way it is travelling;
+   (tx, ty) is where it came from, and hit how soon it gets to where the hull
+   stood (0: it is there). The step is across that line, to the side the hull
+   is on, or away from the wall. */
+function imDodgeBegin(dx, dy, tx, ty, hit) {
+  if (P.imDodge) return;
+  const l = len(dx, dy);
+  if (l < 1e-6) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); } else { dx /= l; dy /= l; }
+  let nx = -dy, ny = dx;
+  const on = (P.x - tx) * nx + (P.y - ty) * ny;
+  let side = Math.abs(on) > 1 ? Math.sign(on) : -(P.imDodgeSide || 1);
+  const fits = s => { const x = P.x + nx * s * FL_STEP, y = P.y + ny * s * FL_STEP;
+    return x > arena.x0 + P.r && x < arena.x1 - P.r && y > arena.y0 + P.r && y < arena.y1 - P.r; };
+  if (!fits(side) && fits(-side)) side = -side;
+  P.imDodgeSide = side;
+  P.imDodge = { t: 0, sx: nx * side, sy: ny * side, o: 0, x0: P.x, y0: P.y, tx, ty, hit: hit || 0 };
+  imFx('dodge', { x: P.x, y: P.y, ang: P.ang, sx: nx * side, sy: ny * side, tx, ty, hit: hit || 0 });
+  Audio_.tone(1200, 0.06, 'sine', 0.035, 1900);
+}
+// once a step, in the hull's movement: the hull goes out and comes back, on top of its own flying
+function imDodgeStep(dt) {
+  const d = P.imDodge;
+  d.t += dt;
+  const f = clamp(d.t / FL_DODGE, 0, 1), o = FL_STEP * imDodgeK(f), dd = o - d.o;
+  d.o = o;
+  P.x += d.sx * dd; P.y += d.sy * dd;
+  if (f >= 1) P.imDodge = null;
+}
+// a blow reached hurtPlayer while FLUTTER is on: it is dodged
+function imDodgeAt(opts) {
+  const b = opts && opts.shot, s = opts && opts.src;
+  if (b) { imDodgeBegin(b.vx - P.vx, b.vy - P.vy, b.x, b.y); return; }
+  if (s && Number.isFinite(s.x)) { imDodgeBegin(P.x - s.x, P.y - s.y, s.x, s.y); return; }
+  imDodgeBegin(Math.cos(P.ang), Math.sin(P.ang), P.x - Math.cos(P.ang) * 40, P.y - Math.sin(P.ang) * 40);
+}
+/* A round of theirs touching pilot p (pilot k) in updateEBullets: with
+   FLUTTER on it is dodged, and true is handed back so the round flies on
+   past, unspent, rather than landing. */
+function imFlutPass(b, p, k) {
+  if (!imFlutOnP(p)) return false;
+  pilotDo(k, () => imDodgeAt({ shot: b }));
+  return true;
+}
+/* Rounds coming (from imTick, before they move): the first that would reach
+   the hull within FL_LOOK, against its own motion, sets a dodge going. */
+function imFlutWatch() {
+  if (P.imDodge) return;
+  let best = null, bt = FL_LOOK;
+  for (const b of ebullets) {
+    if (b.frozen > 0 || b.hlHeld || b.hlTurn) continue;
+    const rx = b.x - P.x, ry = b.y - P.y, vx = b.vx - P.vx, vy = b.vy - P.vy, vv = vx * vx + vy * vy;
+    const reach = b.r + P.r + FL_PAD;
+    let t = vv > 1 ? -(rx * vx + ry * vy) / vv : 0;
+    if (t < 0) continue;                                  // going away
+    if (t > bt) continue;
+    const cx = rx + vx * t, cy = ry + vy * t;
+    if (cx * cx + cy * cy > reach * reach) continue;      // it would pass anyway
+    bt = t; best = b;
+  }
+  if (best) imDodgeBegin(best.vx - P.vx, best.vy - P.vy, best.x, best.y, bt);
+}
+
 /* ============================== IMAGO — art hooks ==============================
    IMAGO in a run, and its kit, drawn. Nothing in the run reads them; they
    keep any state of their own in IM_ST (this machine's, never the run's).
@@ -46569,6 +46715,11 @@ function imEyesBurst(list) {
      throw   Z: the wings throw            { x, y, ang }
      stick   a bomb lands on a body        { x, y }
      burst   a bomb bursts                 { x, y, i, n (bodies caught) }
+     flutter X: FLUTTER begins             { x, y, ang }
+     flutterOut  and ends                  { x, y, ang }
+     dodge   a dodge begins                { x, y, ang (where it stood), sx, sy (the
+                                             way it steps), tx, ty (where the threat came from),
+                                             hit (s until it gets there) }
 
    WHAT THEY ARE HANDED (world space unless it says screen):
      cutIn(g, w, h, q)  screen, over the HUD: the cut-in. q is imPhase(): { t
@@ -46577,8 +46728,11 @@ function imEyesBurst(list) {
                    the cut, -1 before it), settle (0-1 after the cut) }
      hull(g, h)    IMAGO on the hull: h as OPR_ART.hull is handed it awake,
                    wakeAge from the press, eyes (0-1, the wings' eyespots
-                   flaring as they throw), and thrown (s since the last
-                   throw while any of it is out, else -1)
+                   flaring as they throw), thrown (s since the last
+                   throw while any of it is out, else -1), flut (0-1,
+                   FLUTTER's seconds left, 0 when it is off), and dodge (a
+                   dodge playing, or null: f (0-1), sx, sy, x0, y0 (where it
+                   stood), o (px out))
      floor(g, s)   the bombs' reach on the floor, under the bodies: s.spots
                    (as eyes'), r (EYE_R)
      eyes(g, s)    the bombs: s.spots [{ x, y, x0, y0, tx, ty, t, k (0-1, the
@@ -46589,11 +46743,13 @@ function imEyesBurst(list) {
                    as above, s.now
      hud(g, x, y, w, m)  screen. GRAZE, the clock, Z X C V: m.k (0-1 GRAZE),
                    on, ready, T (s left), len, cd [4], kit [{ n, hud, cd } | null],
-                   keys
+                   keys, live [4] (0-1 of a move still running, X's
+                   FLUTTER) and liveS [4] (its seconds left)
 =========================================================================== */
 const IM_FAILED = new Set();
-const IM_ST = { fx: [], wings: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
-const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8 };
+const IM_ST = { fx: [], wings: {}, echo: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
+const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8,
+                     dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5 };
 function imFx(kind, o) {
   if (kind === 'wake') OPR_ST.wakeAt = uiTime;      // the moth's tails start again from the hull
   IM_ST.fx.push(Object.assign({ kind, t0: uiTime, life: IM_FX_LIFE[kind] || 0.5, seed: (IM_ST.fx.length * 7.31 + uiTime * 13) % 1000 }, o));
@@ -46627,8 +46783,11 @@ function imSpotsView() {
 function drawImagoHull() {
   let eyes = 0, thrown = -1;
   for (const s of P.imSpots) { eyes = Math.max(eyes, clamp(1 - s.t / 0.35, 0, 1)); if (thrown < 0 || s.t < thrown) thrown = s.t; }
+  const D = P.imDodge;
   IM('hull', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, id: P.charId, have: [true, true, true, true], due: OPR_PIECES.length, whole: 1,
-    guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes, thrown });
+    guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes, thrown,
+    flut: imFlutOn() ? P.imFlut / FL_LEN : 0,
+    dodge: D ? { f: clamp(D.t / FL_DODGE, 0, 1), sx: D.sx, sy: D.sy, x0: D.x0, y0: D.y0, o: D.o } : null });
 }
 // world, the floor pass: where they will burst
 function drawImagoFloor() {
@@ -46657,6 +46816,7 @@ function drawImagoHud(pad, ly, bw) {
   if (!P.awake || P.charId !== 'runner' || oprOn() || PVP) return ly;
   const on = imOn(), k = clamp((P.imGraze || 0) / IM_MAX, 0, 1);
   IM('hud', ctx, pad, ly, bw, { k, on, ready: !on && k >= 0.999, T: P.imT || 0, len: IM_LEN, cd: (P.imCd || [0, 0, 0, 0]).slice(),
+    live: [0, imFlutOn() ? P.imFlut / FL_LEN : 0, 0, 0], liveS: [0, imFlutOn() ? P.imFlut : 0, 0, 0],
     kit: [0, 1, 2, 3].map(i => IM_KIT[i] ? { n: IM_KIT[i].n, hud: IM_KIT[i].hud, cd: IM_KIT[i].cd } : null), keys: SU_KEYS });
   return ly + 52;
 }
@@ -46712,6 +46872,54 @@ function imAlmond(g, x, y, w, h) {
   g.quadraticCurveTo(x, y - h * 2, x + w, y); g.quadraticCurveTo(x, y + h * 2, x - w, y); g.closePath();
 }
 // a scale off the wing: a small lozenge, as a path
+/* --------------------------- X — FLUTTER, as drawn ---------------------------
+   IMAGO is also an image, so a dodge leaves one: where the moth stood when it
+   stepped aside, its image stays a moment, wings and body in lines of light,
+   and the round goes through that instead. The round cuts it (a hairline
+   along its line) and it comes apart into scales carried the way the round
+   was going, while the moth, already aside, slips back in a smear of light.
+   For the ten seconds it runs, the moth flies at double speed with echoes of
+   itself strung out behind it, and a quick shimmer round it. On the press its
+   image is thrown off it, growing, with a ring and scales; at the end a ring
+   closes back on it. All of it is lines first, so it reads with effects off. */
+// the moth as an image of light, at (x, y) heading ang: its four wings and the hull's line, open, still
+const IM_POSE = { open: 1, beat: 0, Wg: { ph: 1.2, spd: 0.35, lag: 0 } };
+function imMothImage(g, x, y, ang, a, o) {
+  if (a <= 0.004) return;
+  o = o || {};
+  g.save();
+  g.translate(x, y); g.rotate(ang);
+  if (o.scale) g.scale(o.scale, o.scale);
+  g.lineJoin = 'round';
+  for (const fore of [false, true]) for (const side of [1, -1]) {
+    orPath(g, (fore ? ORH_FORE : ORH_HIND).map(p => orWingXf(p, side, fore, IM_POSE)));
+    if (o.fill) { g.fillStyle = rgba(IM_COL, (o.fill * a).toFixed(3)); g.fill(); }
+    g.strokeStyle = rgba(o.col || '#a5f3fc', (0.9 * a).toFixed(3)); g.lineWidth = (o.lw || 1) / (o.scale || 1); g.stroke();
+  }
+  orPath(g, ORH_BASE);
+  if (o.fill) { g.fillStyle = rgba('#ecfeff', (o.fill * 1.5 * a).toFixed(3)); g.fill(); }
+  g.strokeStyle = rgba('#f0fdff', a.toFixed(3)); g.lineWidth = (o.lw || 1) / (o.scale || 1); g.stroke();
+  g.restore();
+}
+// FLUTTER's echoes, under the moth: where it has just been, strung out behind it (this machine's drawing, per pilot)
+function imEchoes(g, h) {
+  const pk = PILOT.on || 0, E = IM_ST.echo[pk] || (IM_ST.echo[pk] = { pts: [], x: h.x, y: h.y, at: -1 });
+  if (!(h.flut > 0)) { E.pts.length = 0; E.at = -1; return; }
+  const LIFE = 0.26;
+  if (E.at < 0 || len(h.x - E.x, h.y - E.y) > 9 || uiTime - E.at > 0.06) {
+    if (E.at >= 0 && len(h.x - E.x, h.y - E.y) > 2) E.pts.push({ x: E.x, y: E.y, ang: E.ang, t0: uiTime });
+    E.x = h.x; E.y = h.y; E.ang = h.ang; E.at = uiTime;
+  }
+  while (E.pts.length && uiTime - E.pts[0].t0 > LIFE) E.pts.shift();
+  if (E.pts.length > 12) E.pts.splice(0, E.pts.length - 12);
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (const p of E.pts) {
+    const u = 1 - (uiTime - p.t0) / LIFE;
+    imMothImage(g, p.x, p.y, p.ang, 0.32 * u * u, { lw: 0.8, fill: FXO.mat ? 0.05 : 0 });
+  }
+  g.restore();
+}
 function imScale(g, x, y, s, a) {
   const c = Math.cos(a) * s, sn = Math.sin(a) * s;
   g.beginPath(); g.moveTo(x + c, y + sn); g.lineTo(x - sn * 0.5, y + c * 0.5); g.lineTo(x - c, y - sn); g.lineTo(x + sn * 0.5, y - c * 0.5); g.closePath();
@@ -47306,6 +47514,25 @@ const IMAGO_ART = {
   hull(g, h) {
     const th = h.thrown, flap = th >= 0 && th < 0.32 ? Math.sin(th / 0.32 * Math.PI) : 0;
     const hh = flap > 0 ? Object.assign({}, h, { flap }) : h;
+    // X, FLUTTER: its echoes under it, a shimmer round it, and a dodge's slip back from the image it left
+    imEchoes(g, h);
+    if (h.flut > 0) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const sh = 0.5 + 0.5 * Math.sin(uiTime * 31);
+      if (FXO.mat) oaGlow(g, h.x, h.y, 30, '#a5f3fc', (0.12 + 0.1 * sh) * Math.min(1, h.flut * 6));
+      const d = h.dodge;
+      if (d) {
+        // the slip: three streaks from where it stood to where it is, thinning out
+        const w = Math.sin(Math.PI * Math.min(1, d.f / FL_HOLD)) * (d.f < FL_HOLD ? 1 : 1 - (d.f - FL_HOLD) / (1 - FL_HOLD));
+        const nx = -d.sy, ny = d.sx;
+        g.lineCap = 'round';
+        for (let k = -1; k <= 1; k++) {
+          g.strokeStyle = rgba(k ? '#a5f3fc' : '#ecfeff', ((k ? 0.35 : 0.6) * w).toFixed(3)); g.lineWidth = k ? 1 : 1.6;
+          g.beginPath(); g.moveTo(d.x0 + nx * k * 7, d.y0 + ny * k * 7); g.lineTo(h.x + nx * k * 7 - d.sx * 8, h.y + ny * k * 7 - d.sy * 8); g.stroke();
+        }
+      }
+      g.restore();
+    }
     OPR_ART.hull(g, hh);
     const I = orImagoState(hh), pk = PILOT.on || 0, W = IM_ST.wings[pk] || (IM_ST.wings[pk] = { pts: [] });
     W.at = uiTime; W.x = h.x; W.y = h.y; W.ang = h.ang; W.pts.length = 0;
@@ -47462,6 +47689,58 @@ const IMAGO_ART = {
           g.beginPath(); g.arc(e.x, e.y, 6 + 14 * (1 - fa * fa), 0, TAU); g.stroke();
           break;
         }
+        case 'dodge': {
+          /* X: the image it left where it stood. It holds while the moth is
+             out, the round goes through it and cuts it along its line, and it
+             comes apart into scales carried the way the round was going. */
+          // in seconds: it stands until the threat gets to it, then is cut and goes
+          const age = a * e.life, cut = clamp(e.hit || 0, 0.04, 0.3);
+          const qa = Math.atan2(e.y - e.ty, e.x - e.tx), qx = Math.cos(qa), qy = Math.sin(qa);
+          const hold = age < cut ? 1 : Math.max(0, 1 - (age - cut) / 0.2);
+          imMothImage(g, e.x, e.y, e.ang, 0.85 * hold, { lw: 1.2, fill: mat ? 0.1 : 0 });
+          // the threat's side: a crescent where it will meet the image
+          if (age < cut) {
+            const R = 20;
+            g.strokeStyle = rgba('#f0fdff', (0.7 * (1 - age / cut)).toFixed(3)); g.lineWidth = 1.6;
+            g.beginPath(); g.arc(e.x, e.y, R, qa + Math.PI - 0.8, qa + Math.PI + 0.8); g.stroke();
+          }
+          // the cut: a hairline along the round's line, through the image
+          if (age >= cut && age < cut + 0.16) {
+            const u = (age - cut) / 0.16, L = 30;
+            g.strokeStyle = rgba('#ffffff', (0.95 * (1 - u)).toFixed(3)); g.lineWidth = 1.4 * (1 - u) + 0.4;
+            g.beginPath(); g.moveTo(e.x - qx * L, e.y - qy * L); g.lineTo(e.x + qx * L * (1 + u), e.y + qy * L * (1 + u)); g.stroke();
+          }
+          // and its scales, carried on
+          if (age >= cut) {
+            const u = Math.min(1, (age - cut) / 0.26);
+            for (let k = 0, n = Math.round(9 * many); k < n; k++) {
+              const sa = odHash(sd + k * 3.7) * TAU, sr = 4 + 14 * odHash(sd + k * 1.9);
+              const x = e.x + Math.cos(sa) * sr + qx * 46 * u * (0.6 + 0.6 * odHash(sd + k)), y = e.y + Math.sin(sa) * sr + qy * 46 * u * (0.6 + 0.6 * odHash(sd + k));
+              g.fillStyle = rgba(k % 3 ? '#a5f3fc' : '#ffffff', (0.8 * (1 - u)).toFixed(3));
+              imScale(g, x, y, 2 * (1 - u) + 0.6, sa + u * 7); g.fill();
+            }
+          }
+          break;
+        }
+        case 'flutter': {
+          // X pressed: its image thrown off it, growing; a ring; scales spun out
+          imMothImage(g, e.x, e.y, e.ang, 0.7 * fa, { lw: 1.4, scale: 1 + 1.3 * (1 - fa * fa), fill: mat ? 0.08 : 0 });
+          g.strokeStyle = rgba('#ecfeff', (0.8 * fa).toFixed(3)); g.lineWidth = 2.5 * fa + 0.5;
+          g.beginPath(); g.arc(e.x, e.y, 18 + 80 * (1 - fa * fa), 0, TAU); g.stroke();
+          for (let k = 0, n = Math.round(14 * many); k < n; k++) {
+            const sa = k * TAU / 14 + a * 3, sr = 14 + 70 * (1 - fa * fa) * (0.6 + 0.5 * odHash(sd + k));
+            g.fillStyle = rgba(k % 2 ? '#a5f3fc' : '#ffffff', (0.85 * fa).toFixed(3));
+            imScale(g, e.x + Math.cos(sa) * sr, e.y + Math.sin(sa) * sr, 2.4 * fa + 0.6, sa + a * 9); g.fill();
+          }
+          if (mat && a < 0.3) oaGlow(g, e.x, e.y, 70, '#a5f3fc', 0.5 * (1 - a / 0.3));
+          break;
+        }
+        case 'flutterOut': {
+          // it is over: a ring closing back on the moth
+          g.strokeStyle = rgba(IM_COL, (0.7 * fa).toFixed(3)); g.lineWidth = 1.6;
+          g.beginPath(); g.arc(e.x, e.y, 16 + 60 * fa * fa, 0, TAU); g.stroke();
+          break;
+        }
         case 'wake': case 'out': {
           const R = (e.kind === 'wake' ? 30 : 20) + 90 * (1 - Math.pow(1 - a, 2));
           g.strokeStyle = rgba(IM_COL, (0.5 * fa).toFixed(3)); g.lineWidth = 5 * fa + 1;
@@ -47513,6 +47792,19 @@ const IMAGO_ART = {
       if (live && S.prev[i] > 0 && cd <= 0) S.at[i] = uiTime;
       S.prev[i] = cd;
       g.fillStyle = 'rgba(2,10,16,0.85)'; imRR(g, x, ky, kw, kh, 3); g.fill();
+      // a move still running (X, FLUTTER): the key lit, draining as it runs, and its seconds under it
+      const lv = (m.live && m.live[i]) || 0;
+      if (live && lv > 0) {
+        g.save(); imRR(g, x, ky, kw, kh, 3); g.clip();
+        g.fillStyle = rgba('#a5f3fc', (0.3 + 0.12 * Math.sin(uiTime * 14)).toFixed(3)); g.fillRect(x, ky + kh * (1 - lv), kw, kh * lv);
+        g.restore();
+        g.strokeStyle = '#ecfeff'; g.lineWidth = 1.2; imRR(g, x, ky, kw, kh, 3); g.stroke();
+        g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'middle'; g.fillStyle = '#ecfeff';
+        g.fillText(m.keys[i].toUpperCase(), x + kw / 2, ky + kh / 2 + 0.5);
+        g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'top';
+        g.fillText(m.liveS[i].toFixed(1), x + kw / 2, ky + kh + 3);
+        continue;
+      }
       if (live && cd > 0) {
         g.save(); imRR(g, x, ky, kw, kh, 3); g.clip();
         const cx = x + kw / 2, cyy = ky + kh / 2, f = clamp(cd / a.cd, 0, 1);
@@ -55189,7 +55481,8 @@ function updateEBullets(dt) {
     // anything you have taken is in the way, and can be shot off you
     if (hackHitByBullet(b)) { ebullets.splice(i, 1); continue; }
     imGrazeRound(b, P, PILOT.on);          // IMAGO's GRAZE: a near miss, or a dash through it
-    if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
+    // a round FLUTTER dodges flies on past the hull, unspent (imFlutPass)
+    if (len(b.x - P.x, b.y - P.y) < b.r + P.r && !imFlutPass(b, P, PILOT.on)) {
       hurtPlayer(b.dmg, { src: b.owner, shot: b });   // the shot, for a counter
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);
@@ -55198,7 +55491,7 @@ function updateEBullets(dt) {
     // the other pilot is shot at by the same rounds, on the same terms
     const wg = mpPilots();
     if (wg && !hackBy) imGrazeRound(b, wg, PILOT.on === 0 ? 1 : 0);
-    if (wg && !hackBy && len(b.x - wg.x, b.y - wg.y) < b.r + wg.r) {
+    if (wg && !hackBy && len(b.x - wg.x, b.y - wg.y) < b.r + wg.r && !imFlutPass(b, wg, wg.pid)) {
       pilotDo(wg.pid, () => hurtPlayer(b.dmg, { src: b.owner, shot: b }));
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
       ebullets.splice(i, 1);

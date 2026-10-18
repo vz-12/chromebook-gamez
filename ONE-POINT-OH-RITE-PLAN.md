@@ -21,7 +21,8 @@ the molt, IMAGO and its eight growths, his copy and its rounds, and the HUD,
 in the route's two renderers. **Built 18 Oct (Phases 3 and 4, begun):** IMAGO
 in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
 active, your Z: EYESPOTS. **Drawn 18 Oct:** Z's art, and the form's cut-in
-with your cocoon. See "As built" under The path. This repository
+with your cocoon. **Built and drawn 18 Oct:** your X, FLUTTER (ten seconds
+twice as fast, every attack dodged). See "As built" under The path. This repository
 is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -438,6 +439,54 @@ My rules, not yours (the numbers are under Numbers):
     ring.
   - **With effects off,** every part still reads by its lines.
 
+### X — FLUTTER (yours, 18 Oct; the name is mine)
+
+Your words: "a passive effect that makes the player twice as fast and dodge
+every attack and bullet for 10 seconds ... it needs to play out a full dodge
+where runner moves aside and back to dodge." The name is a stand-in, for the
+way a moth's flight slips what hunts it.
+
+- **Ten seconds, twice as fast.** Press X while IMAGO is on: for 10 s the
+  hull flies at double its speed.
+- **Every attack and every round dodged.** Nothing lands. A round of theirs
+  that reaches the hull flies on past it, unspent. Every other blow (a body,
+  a blast, a beam) is turned into a dodge too.
+- **Each dodge played out in full.** The hull really moves: 34 px aside
+  across the threat's line, held there while it goes by, and eased back to
+  where it would have been, in 0.32 s, on top of its own flying.
+
+My rules, not yours:
+
+- **It sees rounds coming** 0.2 s out (against the hull's own motion), so it
+  steps before the round arrives rather than after it lands. In the test a
+  round fired straight at the hull starts the dodge 110 px out, and the hull
+  is 32 px off its line when it passes.
+- **Which way:** across the threat's line, to the side the hull is already
+  on. Dead centre, the opposite side from the last dodge. If that side is a
+  wall, the other side. A blow that isn't a round steps across the line from
+  whoever threw it.
+- **A dodge always plays out whole.** Anything arriving while one plays is
+  dodged in it, and the next starts once the hull is back. Under a volley it
+  flutters: aside and back, aside and back.
+- **What isn't anyone's blow still lands:** the floor, and a card's own cost
+  (Blood Price, LIBRA's scales).
+- **It is IMAGO's.** It ends with the form, and there is none in the rite.
+  A cooldown of 22 s from the press: ten seconds of it, twelve of waiting.
+- **The look (`IMAGO_ART`).** IMAGO is also an image, so a dodge leaves one.
+  - **The image left behind.** Where the moth stood when it stepped aside,
+    its image stays a moment: its wings and body in lines of light.
+  - **The cut.** The round goes through the image instead, cuts it along
+    its line as it gets there, and the image comes apart into scales carried
+    the way the round was going.
+  - **The moth.** Already aside, it slips back in a smear of light.
+  - **While it runs:** echoes of the moth strung out behind it at double
+    speed, and a quick shimmer round it.
+  - **The press:** its image thrown off, growing, with a ring and scales.
+  - **The end:** a ring closes back on the moth.
+  - **The X key** lights and drains with the ten seconds, counting them
+    under it.
+  - **With effects off,** it reads by its lines.
+
 ## Tales (stand-ins, in the voice)
 
 **ONE POINT OH, page I** (the Bookkeeper; opens when you meet him):
@@ -509,8 +558,8 @@ for 60 s, `imagoHull` and the cut-in with lockstep's hold rule,
 list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
 needed (below), and its cut-in drawn: still to come is the passive.
 
-**Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, built
-18 Oct (below). X, C and V are still to be named.
+**Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, and
+X, FLUTTER, built and drawn 18 Oct (below). C and V are still to be named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -680,6 +729,30 @@ active, the frame is a stand-in, built only as far as its first active needs.
   everywhere SUPERUSER's is. `test:imago` now steps through the cut-in and
   checks it: the room and hull held, nothing landing, no Z, the minute
   unspent, the cut to the step, and a snapshot taken inside it.
+- **X, FLUTTER (18 Oct),** as above: `IM_KIT[1]`, its own section in "IMAGO,
+  IN A RUN" (`imFlutStart`, `imFlutWatch`, `imDodgeBegin`, `imDodgeStep`,
+  `imDodgeAt`, `imFlutPass`).
+  - **Wired in:** `newPlayer` (`imFlut`, `imDodge`, `imDodgeSide`); the
+    hull's speed and its movement (the dodge, after its own flying, before
+    the walls); `hurtPlayer` (every blow but the pure ones, dodged);
+    `updateEBullets` (a round touching a fluttering hull, either pilot, flies
+    on); `imTick` (its clock, the rounds it watches, its end with the form).
+  - **Drawn** in `IMAGO_ART`: `hull` (echoes, shimmer, the slip), `fx`
+    (`dodge`, `flutter`, `flutterOut`), `hud` (`live`).
+  - **Tests:** `test:imago` has a FLUTTER section (94 checks in all):
+    - the speed, measured: 516 against 258;
+    - a round seen coming and stepped clear of, the hull back within a
+      fraction of a pixel, the round flying on;
+    - a volley from every side and two seconds of rounds with nothing
+      landing and no dodge cut short;
+    - a blow, the floor still landing, a wall;
+    - the end, the form ending under it, and a snapshot mid-dodge played
+      on the same.
+
+    Removing the `hurtPlayer` guard, or the dodge's return, fails it.
+  - **In Chromium,** stepped by hand, effects on and off: the image left as a
+    round goes through it, the hull aside and home, the echoes, a volley,
+    the X key. No errors.
 
 ## Numbers (one block in the code, all tunable)
 
@@ -720,6 +793,11 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 | `IM_T_CUT`, `IM_T_SETTLE` | the cut-in's cut at 4.6 s; the room back 0.9 s after it |
 | `IM_SLOW` | the room at 4% while the cut-in has the screen, as RONIN's and SUPERUSER's |
 | `IM_WAKE_FROM` | 0.56: the room's moth takes up from there at the cut, out of its chrysalis |
+| `FL_LEN`, `FL_SPD` | 10 s, twice as fast (yours) |
+| `FL_STEP`, `FL_DODGE` | a dodge: 34 px aside, 0.32 s out and back |
+| `FL_OUT`, `FL_HOLD` | of a dodge: out by 34%, held to 50%, then eased home |
+| `FL_LOOK`, `FL_PAD` | a round seen 0.2 s out, wanting 6 px of room past its edge |
+| `FL_CD` | 22 s from the press |
 
 ## Questions for you (defaults are in)
 
@@ -737,3 +815,6 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
    EMBER's heat is (my pick: it keeps the moth flying close to rounds)?
 7. **EYESPOTS riding bodies.** A bomb thrown into a body rides it (built), or
    every bomb lands on the floor where it was thrown?
+8. **X's name.** FLUTTER (my stand-in), or yours?
+9. **FLUTTER's cooldown.** 22 s from the press (built: ten on, twelve off), so
+   at most three in one IMAGO?
