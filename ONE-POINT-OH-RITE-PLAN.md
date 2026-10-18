@@ -264,8 +264,8 @@ screen, a co-op partner's view, and effects switched off.
 
 Hull space, as `hullPath` draws the runner: nose at x 18, cranked wings to
 y ±13 at x −5, twin-nozzle tail at x −10.5. The art draws each piece in these
-places (`ORH_*` in "VOIDRUNNER'S RITE — art hooks"), and IMAGO as the same
-fourteen points grown up (`ORH_IMAGO`), so one can become the other.
+places (`ORH_*` in "VOIDRUNNER'S RITE — art hooks"); IMAGO's wings, veins
+and body are with them (`ORH_FORE`, `ORH_HIND`, `ORH_ABDO` and the rest).
 
 | Stage | Outline | Surface and light | With effects off |
 | --- | --- | --- | --- |
@@ -290,11 +290,13 @@ fourteen points grown up (`ORH_IMAGO`), so one can become the other.
 ### IMAGO, awake
 
 IMAGO is the last stage of a metamorphosis. The word also means "image",
-which suits a fight between two renderers. The look is the four pieces as one
-body, VOIDRUNNER grown up rather than something else, with a thin bright line
-inside it where the base outline (and the hitbox) is. The duel's growths are
-what IMAGO can grow when it wants to: the form in a run should look like it
-could.
+which suits a fight between two renderers. Every other awakening is a full
+reskin with a theme (RONIN's kasa, cloak and katana; SUPERUSER's oni;
+OVERDRIVE's wings of fire; FUSION CORE's star), so IMAGO is the creature the
+hull was growing into: a luna moth of light, the four pieces as one body,
+with a thin bright line inside it where the base outline (and the hitbox) is.
+The duel's growths are parts of the moth, not guns bolted on: the form in a
+run should look like it could grow them.
 
 **Where it draws** (`drawPlayer`, mirroring RONIN and FUSION CORE):
 
@@ -336,8 +338,9 @@ own state in `OPR_ST`. The full WHAT THEY ARE HANDED is the header of
 
 | Hook | Draws |
 | --- | --- |
-| `hull` | the hull at its stage: which pieces it has, how lit, the molt, the brush greying it, awake |
-| `growths` | awake: what has grown out of its back, each growing in and kicking as it fires |
+| `him` | him in his rite (in place of the route's set): the one who stayed, his temper, his set's light on the floor |
+| `hull` | the hull at its stage: which pieces it has, how lit, the molt, the brush greying it, awake (the chrysalis, then IMAGO) |
+| `growths` | awake: what has grown out of the moth, each growing in and kicking as it fires |
 | `trail` | THE LATTICE's light, left behind |
 | `patch` | under his brush |
 | `kept` | pieces hanging in his set (HE KEEPS IT), and all four at ONE SHIP |
@@ -350,9 +353,11 @@ own state in `OPR_ST`. The full WHAT THEY ARE HANDED is the header of
 | `meter` | screen: GRAZE and the four pieces |
 | `screen` | screen: the rite's own pass (the duel's count, "GRAZE IT") |
 
-**The route's, reused as drawn:** `him` (his set, powering on and off, his
-temper by `OPR_RAGE`), `voice`, `sweep`, `pane`, `paint`, `card`,
-`worldFlat`, `worldFx` and `screenFx`, handed the rite's state.
+**The route's, reused as drawn:** `voice`, `sweep`, `pane`, `paint`, `card`,
+`worldFlat`, `worldFx` and `screenFx`, handed the rite's state. His temper
+still runs through the route's `oaAnger` (by `OPR_RAGE`), which his voice
+reads, but he is the rite's own (`him`): every rite redraws its boss as the
+person under it.
 
 **For the form in a run (Phase 3):** `imagoHull`, `imagoCutIn`, `imagoHud`.
 
@@ -483,7 +488,7 @@ suite, the README, then `main`.
 - **Not yet:** the tales and the bible (Phase 0 and 5), and the form in a run
   (Phase 3).
 
-### As drawn (17 Oct, Phase 2)
+### As drawn (17–18 Oct, Phase 2)
 
 The art is drawn straight into the hooks in `index.html` ("VOIDRUNNER'S RITE
 — art hooks"), so there is nothing to lift. "THE ART, as drawn", under its
@@ -491,31 +496,56 @@ header, says how the two renderers are kept apart.
 
 - **The hull** (`hull`): today's VOIDRUNNER until he takes the build, then it
   drains to his memory of it behind a scan, nose first: flat 1.0 fill, a 2 px
-  stroke, one barrel down the spine, the canopy a dot. Each piece lights its
-  own part in its own accent and catches the kit's one light, turned into
-  hull space so it stays put in the room as the ship turns. PLATING is steel
-  plates along the cranked wings and a cheek on the nose, with a sheen while
-  it is ready. A SECOND BARREL is a pair either side of the nose, the muzzles
-  white-hot as each round leaves. THE LATTICE is light branching from the
-  canopy to the wingtips, with a scan running out along it. THE CORE is a
-  dark lens rimmed in violet, with the edges by the canopy pulled in. A piece
-  that is due but missing leaves a red dashed outline where it was. Under his
-  brush the hull greys and his strokes cross it.
+  stroke, one barrel down the spine, the canopy a dot. Nothing is plated on:
+  each piece grows back out of the hull as the hull's own cyan glass and
+  light, catching the kit's one light (turned into hull space so it stays put
+  in the room as the ship turns). PLATING is glass grown along the cranked
+  wings and a cheek on the nose, sheened while it is ready. A SECOND BARREL
+  is a pair either side of the nose, white-hot as each round leaves. THE
+  LATTICE is light branching from the canopy to the wingtips, a scan running
+  out along it. THE CORE is a dark lens rimmed in blue, the edges by the
+  canopy pulled in. A piece that is due but missing leaves a red dashed
+  outline where it was. Under his brush the hull greys and his strokes cross
+  it.
 - **The molt:** a white seam opens down the spine. The flat shell, his
   memory of the hull, splits there and curls back off it both ways like paper
   (`OPO_KIT.sheet`), then is thrown off in strips that fall.
-- **IMAGO, awake:** the four pieces snap in and fuse, and the outline grows
-  out of the old one in white heat. Its wings are membranes of light, the
-  lattice runs out through them, the plating lies along the new leading edges,
-  the barrels are laid into the nose, and the core is a deep lens with a
-  corona. Two long plumes trail it. Inside it, one thin bright line marks the
-  base outline and the hitbox.
-- **The growths** (`growths`, `growShot`, `growBeam`): gunmetal in the
-  room's light, rimmed in IMAGO's cyan, each growing out of its back from the
-  spine and kicking back as it fires: twin barrels (amber shells), two laser
-  rifles (cyan beams), a cannon (one huge slow shell in a gold corona), a
-  rotary gun (yellow tracers), a rail (a violet line with rings), missile
-  pods (missiles trailing smoke) and a crown of barrels (a ring of rounds).
+- **The wake:** a chrysalis. Cracks of light run out from the core over the
+  hull, it splits down the spine in white heat, and the wings unfold rib by
+  rib; the antennae spring, the tails unfurl, and its first beat throws light.
+- **IMAGO, awake:** a luna moth of light, a full reskin as the other
+  awakenings are. Its body is the hull, glass, with a segmented abdomen
+  behind it and two compound eyes at the nose, the brightest thing on it.
+  Its wings, two pairs, are THE LATTICE's veins (a scan running out along
+  each), PLATING's armoured leading edges, and THE CORE's eyespots. A SECOND
+  BARREL is its feathered antennae. Two long tails trail off the hindwings
+  on a cloth sim (as RONIN's do), and light is shed off its wingtips. The
+  wings beat, sweep back with speed, and lag a turn on a spring (as
+  SUPERUSER's mane does). Inside it, one thin bright line marks the base
+  outline and the hitbox.
+- **The growths** (`growths`, `growShot`, `growBeam`): parts of the moth, in
+  its own glass and light, each growing out from its root behind a lit front
+  and kicking as it fires: twin barrels as palps off its shoulders, two laser
+  rifles as lances along its forewings' roots, a cannon as a bore of light
+  down its whole body out of a mouth at its nose, a rotary gun as a thorn of
+  barrels off one forewing's edge, a rail as its proboscis, missile pods as a
+  clutch of eggs on the other forewing that hatch (the missiles are
+  hatchlings on fluttering wings, shedding light), and a crown of barrels as
+  twelve motes of light circling it. Fully grown, the moth still reads.
+- **Him** (`him`, drawn in `orFlat`): every rite redraws its boss as the
+  person under it, as THE FOUNDER is drawn. In the route ONE POINT OH is his
+  set, held up by THE GRID's grunts. In his rite you see who has been holding
+  it: the one who stayed, hunched in the dark under a blanket that is the
+  first build's own grid, hood up, an old set in his lap turned out to you,
+  his hands on its sides, its cord running back into the dark to a plug that
+  was never in anything. On the tube is the ship as he kept it, flying on the
+  old grid. It is his only light, and it is on his face and on the floor in
+  front of him, in flat steps. His temper runs the rite's way: furious at the
+  open (the set shaking in his hands, his grid going red, the picture torn
+  with static, his eyes red), fond by the duel (rocking it). The set powers
+  on at the open and off at the end, and he is left holding it, head down.
+  Rounds through him knock flat chips off it. All of it is the first build's
+  renderer, flat.
 - **His renderer, after bloom** (`orFlat`, from the record's pass): his copy
   coming out of the tube on its light, drawn down in rows, flat, with
   scanlines; its tell (a rewind closing round it); rattled once the hull
@@ -526,9 +556,9 @@ header, says how the two renderers are kept apart.
   molt's paper. A base round through him leaves a flat ring and a `0`.
 - **Today's light in the room** (`orLit`, from the hull's pass): grazes
   (a crescent on the side the threat passed), the plating holding (a hex of
-  steel light), pieces coming back and being taken, the lattice cutting a
+  glass light), pieces coming back and being taken, the lattice cutting a
   pane, rounds meeting, the wake, guns sprouting, hits on the copy, its
-  break, and missile smoke. The lattice's light on the floor (`trail`) is a
+  break, and the light IMAGO and its hatchlings shed. The lattice's light on the floor (`trail`) is a
   ladder of light; the brush's patch (`patch`) takes the floor back to 1.0 a
   row at a time, with a `+` on its rim.
 - **The screen** (`record`, `meter`, `screen`): the hull's record above;
