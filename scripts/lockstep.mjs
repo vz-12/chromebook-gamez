@@ -30,11 +30,12 @@ const SHORT = args.includes('--short');
 /* lat / jit: one-way latency and its spread, ms. loss: share of the unreliable
    packets (the inputs) that never arrive. hz: each machine's frame rate.
    freeze: the guest's machine stops for a while, the way a laptop does.
-   loot: a piece of gear is put at a blade guest's feet early on (OPENERS). */
+   loot: a piece of gear is put at a blade pilot's feet early on, host or
+   guest (OPENERS). */
 const SCENARIOS = [
   { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember', end: 'host leaves' },
   { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true, loot: true },
-  { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
+  { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true, loot: true,
                       freeze: { at: 40000, ms: 1800 } },
   { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
                       guestSave: true },
@@ -171,14 +172,16 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
   for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { const n = a + (PILOT.on ? '·guest' : ''); __acts[n] = (__acts[n] || 0) + 1; f(i); }; }
   globalThis.OPENERS_LEFT = () => OPENERS.map(o => o[0]);
   const OPENERS = [
-    /* A blade guest (THE VAGRANT) has loot, not cards, and a piece only falls
+    /* A blade pilot (THE VAGRANT) has loot, not cards, and a piece only falls
        to its own kills: whether one lands where its bot will walk is luck,
        and luck that moves with every change to the run (RONIN's V's longer
-       cut-in took it away in 'internet'). Where the scenario says so (loot),
-       one is put at its feet, on both machines at the same step, so the
-       guest's own gear screen is always met. Only there: a piece more is a
-       different run, and 'lifecycle' needs its pilots to go down. */
-    [900, () => { if (${!!loot}) pilotDo(PILOTS.length > 1 ? 1 : 0, () => { if (isBlade()) gearDrop(P.x + 24, P.y, 1); }); }],
+       cut-in took the guest's away in 'internet'; VOIDRUNNER waking in the
+       kit scenarios took the host's away in 'bad'). Where the scenario says
+       so (loot), one is put at each blade pilot's feet, host or guest, on
+       both machines at the same step, so its own gear screen is always met.
+       Only there: a piece more is a different run, and 'lifecycle' needs its
+       pilots to go down. */
+    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) gearDrop(P.x + 24, P.y, 1); }); }],
     [1500, () => openPlanetarium()],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],

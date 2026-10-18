@@ -642,7 +642,10 @@ active, the frame is a stand-in, built only as far as its first active needs.
   fuse, damage, riding a body, the cooldown, the form ending under its bombs,
   the rite, a snapshot taken mid-fuse, every hook drawn with effects on and
   off). `imago` is a new scenario in `npm test`, and VOIDRUNNER is awake in
-  lockstep's kit scenarios, its IMAGO in their fingerprints.
+  lockstep's kit scenarios, its IMAGO in their fingerprints. Waking it
+  changed the course of 'bad' enough that its blade host found no gear, so
+  lockstep's `loot` now puts a piece at a blade pilot's feet on either side,
+  as it already did for a blade guest.
 - **A browser pass** at 1366 × 768, effects on and off, the game stepped by
   hand so each frame is at its time: the meter, the hatch, the throw, the
   eyes, the fuse running down, the bursts, the HUD. No errors, and the same
