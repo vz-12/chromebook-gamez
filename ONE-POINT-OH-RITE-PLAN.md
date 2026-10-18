@@ -753,6 +753,20 @@ active, the frame is a stand-in, built only as far as its first active needs.
   - **In Chromium,** stepped by hand, effects on and off: the image left as a
     round goes through it, the hull aside and home, the echoes, a volley,
     the X key. No errors.
+  - **Lockstep, all in step.** FLUTTER moved the course of two scenarios'
+    runs, and two of its coverage checks turned out to rest on luck; both
+    are fixed in the harness, not the game:
+    - **The guest's own gear in 'internet'** was taken or left depending on
+      where its keys happened to be when the screen opened. Its bot now
+      takes the piece `loot` puts at its feet.
+    - **The kill records in 'parted'** were read on each machine wherever it
+      stopped, and the host can be a few steps on. They are now read at the
+      last step both have played.
+    - **Found on the way, and not this branch's:** a test save cannot fly
+      THE HACKER, so `applyChar('hacker')` falls back to VOIDRUNNER. That
+      means `npm test`'s `hacker`, `root`, `rite-hacker` and `deadgame`
+      scenarios, and lockstep's `internet`, have never flown THE HACKER or
+      SUPERUSER.
 
 ## Numbers (one block in the code, all tunable)
 

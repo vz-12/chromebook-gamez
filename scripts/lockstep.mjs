@@ -74,6 +74,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
   Save.profile.skin = { player: { col: '${role}' === 'host' ? '#22c55e' : '#ff00ff' }, bullet: { col: '${role}' === 'host' ? '#bbf7d0' : '#fde047' } };
   { const aw = AWARD_SKINS(); if (aw.length) Save.profile.skinEquip = aw[('${role}' === 'host' ? 0 : 1) % aw.length].id; }
   globalThis.__drawErr = [];
+  globalThis.__killsAt = new Map();
   globalThis.__draw = () => { try { render(); } catch (e) { if (__drawErr.length < 5) __drawErr.push(String(e && e.message || e) + ' @ ' + String(e && e.stack || '').split(' at ')[1]); __drawErr.n = (__drawErr.n || 0) + 1; } };
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
   ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true, runner: true };" : ''}
@@ -121,6 +122,8 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
     __seen.add(state);
     pauses(k);
     if (k % 9) return;
+    // the piece put at a blade's feet (loot, in OPENERS) is taken by its own pilot, host or guest
+    if (state === 'gear' && gearOfferDrop && gearOfferDrop.planted) { handleKey('1'); return; }
     if ('${role}' !== 'host') {
       if (HOST_SCREENS.includes(state) || choice) handleKey(['1', '2', 'e', 'enter', ' ', 'r', 'y', 'n', 'a', 'f', 'x', 'q'][(k / 9 | 0) % 12]);
       return;
@@ -178,10 +181,12 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
        cut-in took the guest's away in 'internet'; VOIDRUNNER waking in the
        kit scenarios took the host's away in 'bad'). Where the scenario says
        so (loot), one is put at each blade pilot's feet, host or guest, on
-       both machines at the same step, so its own gear screen is always met.
-       Only there: a piece more is a different run, and 'lifecycle' needs its
-       pilots to go down. */
-    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) gearDrop(P.x + 24, P.y, 1); }); }],
+       both machines at the same step, so its own gear screen is always met;
+       and its bot takes that one, rather than leaving it to where its keys
+       happen to be when the screen opens (VOIDRUNNER's FLUTTER moved that in
+       'internet'). Only there: a piece more is a different run, and
+       'lifecycle' needs its pilots to go down. */
+    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) { const d = gearDrop(P.x + 24, P.y, 1); if (d) d.planted = 1; } }); }],
     [1500, () => openPlanetarium()],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],
@@ -200,6 +205,9 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
     for (let k = 0; k < PILOTS.length; k++) { const o = pilotP(k), d = !!(o && o.down); if (d && !__life.was[k]) __life.downs++; if (!d && __life.was[k]) __life.ups++; __life.was[k] = d; }
     if (state === 'dead' && !__life.dead) __life.deaths++;
     __life.dead = state === 'dead';
+    // the kills each machine counts, this step: read at a step both have played, not wherever each stopped
+    __killsAt.set(LS.run * 1e6 + t, [pilotP(0) ? pilotP(0).kills : 0, pilotP(1) ? pilotP(1).kills : 0, coopMine().kills]);
+    if (__killsAt.size > 600) __killsAt.delete(__killsAt.keys().next().value);
     if (${!!kitRun} && t % 900 === 60) pilotsEach(() => {   // every pilot's kit, charged
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
       else if (P.charId === 'ember') P.vent = VENT_MAX;
@@ -305,8 +313,14 @@ function play(sc) {
   /* The end of the session: one side leaves. The other must carry on as it
      should, with nothing thrown: the host alone, flying its run on for ten
      seconds; the guest, back at the lobby. */
-  // each player's own kills, while both pilots are still flying
-  const kills = { host: H.g.run('pilotP(0).kills'), wing: H.g.run('pilotP(1) ? pilotP(1).kills : 0'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') };
+  /* Each player's own kills, while both pilots are still flying, read at the
+     last step both machines have played: the run stops when the slower one
+     reaches the end, and the other can be a few steps on, with a kill more. */
+  const kAt = m => new Map(m.g.run('[...__killsAt]')), kh = kAt(H), kg = kAt(G);
+  const at = [...kh.keys()].filter(k => kg.has(k)).sort((a, b) => b - a)[0];
+  const kills = at === undefined
+    ? { host: H.g.run('pilotP(0).kills'), wing: H.g.run('pilotP(1) ? pilotP(1).kills : 0'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') }
+    : { host: kh.get(at)[0], wing: kh.get(at)[1], hostRecords: kh.get(at)[2], guestRecords: kg.get(at)[2] };
   let ending = null;
   if (sc.end) {
     const [goes, stays] = sc.end === 'guest leaves' ? [G, H] : [H, G];
