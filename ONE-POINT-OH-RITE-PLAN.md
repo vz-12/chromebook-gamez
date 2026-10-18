@@ -22,7 +22,9 @@ in the route's two renderers. **Built 18 Oct (Phases 3 and 4, begun):** IMAGO
 in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
 active, your Z: EYESPOTS. **Drawn 18 Oct:** Z's art, and the form's cut-in
 with your cocoon. **Built and drawn 18 Oct:** your X, FLUTTER (ten seconds
-twice as fast, every attack dodged). See "As built" under The path. This repository
+twice as fast, every attack dodged). **Built 18 Oct, its art left as hooks:**
+your C, THE ARMORY (a wheel of eight overpowered guns). See "As built" under
+The path. This repository
 is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -487,6 +489,73 @@ My rules, not yours:
     under it.
   - **With effects off,** it reads by its lines.
 
+### C — THE ARMORY (yours, 18 Oct; the name too)
+
+Your words: "a full armory, C opens up a menu where you can equip all sorts
+of extremely overpowered weapons (leave art hooks for this one and don't
+worry about making it too balanced since the other evolutions don't do a
+good job at that either)".
+
+- **C opens it:** a wheel of eight guns round the hull. Aim at one and press
+  C again, or click, and the hull wears it in place of its own gun until
+  IMAGO ends. Open it again to change, as often as you like.
+- **None of them fair.** Each out-hits the hull's own gun at least four
+  times over, in its own way. Measured in the test, over two seconds of the
+  trigger held at three bodies: one 200 px out on the aim, one 330 px out
+  behind it, and one 60 px off the line. The hull's own gun does 99 to the
+  first in that time.
+
+  | Gun | What it does | Near / behind / off the line |
+  | --- | --- | --- |
+  | MINIGUN | a stream of the game's own rounds, 28 a second, through one body | 583 / 295 / 0 |
+  | RAILGUN | one instant line from the muzzle to the wall, everything on it hit | 616 / 616 / 0 |
+  | SWARM PODS | eight missiles fanned out, each turning on the nearest body and bursting on it | 1584 / 0 / 792 |
+  | HOWITZER | one shell to where you aim (or the first body in its way), and a 170 px blast | 660 / 660 / 660 |
+  | SOLAR LANCE | a beam held on, burning everything it crosses | 572 / 572 / 0 |
+  | FLAK | sixteen short-lived pellets in a wide cone | 524 / 0 / 554 |
+  | TESLA COIL | lightning to the nearest body, then body to body, eight jumps | 550 / 550 / 550 |
+  | SINGULARITY | an orb that flies out, stops, drags every body near it in, burns them, and closes with a burst | 713 / 686 / 713 |
+
+My rules, not yours:
+
+- **While it is open,** the room runs at 12% and the hull holds still and
+  does not fire, as it does in the cut-ins. IMAGO's minute keeps running,
+  and the hull can still be hurt: the room is slow, not stopped. In co-op it
+  slows the room for both pilots, as EMBER's C does while it aims.
+- **Aimed at the hull** (within 34 px), C shuts it and the hull keeps what it
+  wore.
+- **A click held as it opens doesn't pick.** It has to come down again while
+  the wheel is open.
+- **Z and X wait while it is open,** because the keys are the armory's.
+- **Its guns fire on the trigger,** as the hull's own does, at their own
+  rates, and faster with Bloodlust and the like. Their damage is the hull's
+  damage times theirs, so the damage cards count.
+- **The gun goes with the form.** What is still in the air when IMAGO ends
+  (missiles, shells, a singularity) finishes what it was doing.
+- **The singularity** drags every body near it in, but a boss is too heavy
+  to move. Two can be out at once.
+- **What burns (the lance, a singularity) bites ten times a second,** not
+  every step. Otherwise the damage numbers and the cards' on-hit effects
+  would flood the screen.
+- **The art is yours to draw.** The hooks are in `IMAGO_ART`:
+  - `armory`: the wheel, on the screen;
+  - `armMount`: the gun worn, on the hull;
+  - `armShot`: a missile, shell or singularity in the air;
+  - `armBeam`: the lance;
+  - the moments, in `fx`: `armOpen`, `armShut`, `armEquip`, `armRail`,
+    `armArc`, `armBlast`, `armCollapse`.
+
+  What each hook is handed is in the art block's header. For now they are
+  placeholders, lines and labels only, each tagged "placeholder" where it
+  draws, so C can be played:
+  - the wheel's eight wedges, the gun's name and its line under them;
+  - a box on the hull's nose, with the gun's short name over it;
+  - darts and shells with streaks, and a dark core with its reach dashed;
+  - a plain beam.
+
+  The C key shows the worn gun's short name (MINI, RAIL, SWRM, HOWZ, SUN,
+  FLAK, ARC, HOLE).
+
 ## Tales (stand-ins, in the voice)
 
 **ONE POINT OH, page I** (the Bookkeeper; opens when you meet him):
@@ -559,7 +628,8 @@ list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
 needed (below), and its cut-in drawn: still to come is the passive.
 
 **Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, and
-X, FLUTTER, built and drawn 18 Oct (below). C and V are still to be named.
+X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built 18 Oct with its art
+left as hooks for you (below). V is still to be named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -767,6 +837,54 @@ active, the frame is a stand-in, built only as far as its first active needs.
       means `npm test`'s `hacker`, `root`, `rite-hacker` and `deadgame`
       scenarios, and lockstep's `internet`, have never flown THE HACKER or
       SUPERUSER.
+- **C, THE ARMORY (18 Oct),** as above: `IM_KIT[2]`, its own section in
+  "IMAGO, IN A RUN" (`imArmToggle`, `imArmTick`, `imArmFire`, and a function
+  for each kind of gun). Its numbers are `ARM_*` and the `ARMORY` table, one
+  line a gun.
+  - **Wired in:**
+    - `newPlayer` (`imArm`, `imArmT`, `imArmMenu`, `imArmShots`,
+      `imArmBeam`, `imArmBite`);
+    - `updatePlayer`: the worn gun fires in the hull's own gun's place, and
+      the open armory holds the hull wherever the cut-ins do (firing, the
+      dash, its velocity);
+    - the room's slow-motion;
+    - `imAbility` (Z and X wait while it is open);
+    - `imTick`, which calls `imArmTick`.
+  - **Its art, left as hooks** in `IMAGO_ART` (`armory`, `armMount`,
+    `armShot`, `armBeam`, and seven `fx` kinds) with placeholders, plus
+    `drawImagoArmory` in the screen pass. The C key names the gun worn.
+  - **Tests:** `test:imago` has an ARMORY section (125 checks in all):
+    - C opening it from the keyboard, the room slowed, and the hull held
+      and silent;
+    - the eight wedges under the aim;
+    - aimed at the hull: nothing picked, and C shutting it;
+    - Z and X waiting while it is open;
+    - a held click not picking;
+    - each gun worn;
+    - every gun out-hitting the hull's own at least fourfold, each its own
+      way (through to the body behind, the chain, the blast, the pull);
+    - the singularity dragging a body in and closing, a boss too heavy to
+      drag;
+    - IMAGO ending with missiles in the air, which finish, and the hull's
+      own gun back;
+    - a snapshot with missiles, a shell and a singularity in the air, played
+      on the same in another copy.
+
+    The hooks section draws the wheel and six of the guns with effects on
+    and off.
+  - **`npm test`'s `imago` scenario** now wears all eight guns in its five
+    minutes. Its bot picks what the aim is on as soon as the armory opens,
+    as a player would, and the armory is in its fingerprint. It is
+    deterministic and restores from a snapshot the same.
+  - **In Chromium,** stepped by hand, effects on and off: the wheel, the
+    swarm, the rail, the lance, the lightning, the howitzer, the singularity,
+    the HUD. No errors.
+  - **Lockstep:** its bot picks a gun the same way, and the armory is in its
+    fingerprints. The armory moved `internet`'s run, and one more coverage
+    check turned out to rest on luck. The piece `loot` plants for a blade
+    pilot came in a rolled slot, and a piece for an empty slot is worn
+    without a screen. The planted piece is now a BLADE, which a blade pilot
+    always already wears, so its gear screen always opens.
 
 ## Numbers (one block in the code, all tunable)
 
@@ -812,6 +930,24 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 | `FL_OUT`, `FL_HOLD` | of a dodge: out by 34%, held to 50%, then eased home |
 | `FL_LOOK`, `FL_PAD` | a round seen 0.2 s out, wanting 6 px of room past its edge |
 | `FL_CD` | 22 s from the press |
+| `ARM_SLOW` | the room at 12% while the armory is open |
+| `ARM_DEAD` | aimed within 34 px of the hull, nothing is picked |
+| `ARM_ORBS`, `ARM_SHOTS` | two singularities out at once; 160 of its shots in the air at most |
+| `ARM_TICK` | the lance and a singularity bite every 0.1 s |
+| `ARMORY` | the eight guns, one line each: rate a second, and damage as a multiple of the hull's (so the cards count) |
+
+**`ARMORY`, gun by gun** (damage is times the hull's):
+
+| Gun | Rate | Damage | Its own |
+| --- | --- | --- | --- |
+| MINIGUN | 28 | 1.3 a round | ±0.08 rad, faster rounds (1.35), through one body |
+| RAILGUN | 1.6 | 14 a body | 2400 px, 12 px wide |
+| SWARM PODS | 1.5 volleys | 3 a hit, 3 a blast | 8 missiles, a 1.4 rad fan, 560 px/s turning 5 rad/s, 70 px blasts, 2.2 s to find one |
+| HOWITZER | 0.9 | 30 | 760 px/s, at most 1.1 s, a 170 px blast |
+| SOLAR LANCE | held | 26 a second | 950 px, 16 px wide |
+| FLAK | 2.4 | 2.8 a pellet | 16 over 0.9 rad, faster rounds (1.5) living 0.45 of a round's life |
+| TESLA COIL | 5 | 5 a body | 8 jumps: 380 px to the first, 240 px from body to body |
+| SINGULARITY | 0.45 | 8 a second to what it holds, 40 the burst | out at 300 px/s, slowing to a stop over 1.2 s; drags in at 380 px/s from 260 px, holds and burns what is within 70 px, and bursts over the 260 px at 3.2 s |
 
 ## Questions for you (defaults are in)
 
@@ -832,3 +968,9 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 8. **X's name.** FLUTTER (my stand-in), or yours?
 9. **FLUTTER's cooldown.** 22 s from the press (built: ten on, twelve off), so
    at most three in one IMAGO?
+10. **The armory's guns.** The eight above (my picks), or others? Any can be
+    swapped for another kind in `ARMORY` without touching the rest.
+11. **The room while you choose.** Slowed to 12% (built), stopped, or not
+    slowed at all? In co-op the slow is the partner's too.
+12. **How long a gun is worn.** Until IMAGO ends (built), or into the next
+    IMAGO as well, so the armory is opened only to change?

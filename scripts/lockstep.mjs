@@ -157,6 +157,11 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       if (k % 900 === 70) rec.press.push(P.charId === 'melee' ? 'v' : 'f');
       if (k % 75 === 40) rec.press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) rec.press.push('f');
+      /* IMAGO's armory, open: wear what the aim is on and get on, as a player
+         would. Left to the next C in the round above, it would hold the room
+         at ARM_SLOW for five seconds of every ten (spaced past the delay, so
+         the pick is played before it is asked again) */
+      if (P.imArmMenu && P.imArmMenu.t > 0.25 && k % 30 === 0 && !rec.press.includes('c')) rec.press.push('c');
     }
     if (gearNear && k % 30 === 0) rec.press.push('e');   // THE VAGRANT: a look at what is on the floor
   };
@@ -184,9 +189,12 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
        both machines at the same step, so its own gear screen is always met;
        and its bot takes that one, rather than leaving it to where its keys
        happen to be when the screen opens (VOIDRUNNER's FLUTTER moved that in
-       'internet'). Only there: a piece more is a different run, and
-       'lifecycle' needs its pilots to go down. */
-    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) { const d = gearDrop(P.x + 24, P.y, 1); if (d) d.planted = 1; } }); }],
+       'internet'). It is a BLADE: a piece for an empty slot is worn without a
+       screen, so the slot was the roll's to decide (IMAGO's armory moved that
+       in 'internet'), and a blade pilot starts wearing SCRAP EDGE. Only there:
+       a piece more is a different run, and 'lifecycle' needs its pilots to go
+       down. */
+    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) { const d = gearDrop(P.x + 24, P.y, 1, 'blade'); if (d) d.planted = 1; } }); }],
     [1500, () => openPlanetarium()],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],
@@ -235,6 +243,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
       pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
       [P, pilotP(1) || {}].map(o => (o.imSpots || []).map(b => pk(b, ['x', 'y', 't']))),   // IMAGO's Z
+      [P, pilotP(1) || {}].map(o => [o.imArm || '', o.imArmMenu ? 1 : 0, (o.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])]),   // its C
       [P, pilotP(1) || {}].map(o => [o.roninVow ? r(o.roninVow.t) : null, o.roninGrave ? r(o.roninGrave.hp) : null, o.roninSkyClear ? o.roninSkyClear.stage + o.roninSkyClear.i : null, r(o.roninBroken)]),   // RONIN's V
       Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),

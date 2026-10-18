@@ -2117,6 +2117,7 @@ function newPlayer() {
     // VOIDRUNNER's IMAGO: GRAZE, the clock, the four cooldowns, Z's bombs (see IMAGO, IN A RUN)
     imGraze: 0, imT: 0, imAge: 0, imCd: [0, 0, 0, 0], imSpots: [],
     imFlut: 0, imDodge: null, imDodgeSide: 1,      // X, FLUTTER: its clock, the dodge playing, the side the last one took
+    imArm: null, imArmT: 0, imArmMenu: null, imArmShots: [], imArmBeam: null, imArmBite: 0,   // C, THE ARMORY: the gun worn, its wait, the wheel, its shots, the beam and its bite
     imIntro: null,                                 // its cut-in, while it runs: see IMAGO's cut-in
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
@@ -38931,6 +38932,8 @@ function update(dt) {
     if (suCutIn()) sl = Math.min(sl, SU_SLOW);
     // and IMAGO's
     if (imCutIn()) sl = Math.min(sl, IM_SLOW);
+    // and its armory, while it is open: the room slows, and the hull holds
+    if (imArmOpen()) sl = Math.min(sl, ARM_SLOW);
     // and an outside pilot's, however its kit says (OUTSIDE PILOTS): the room, never the hull
     if (P.outside) sl = Math.min(sl, outsideSlow());
     slowmo = Math.min(slowmo, sl);
@@ -39124,14 +39127,14 @@ function updatePlayer(dt) {
   if (P.odScorch) P.ang = P.odScorch.ang;
   if (vrDuelLock()) P.ang = vrDuelAim();  // and holds the guard on him
   if (oprAimLock()) P.ang = oprAim();     // VOIDRUNNER'S RITE: ONE SHIP holds the hull on his copy until it wakes
-  if (suCutIn() || imCutIn()) firing = false;   // SUPERUSER's cut-in has the screen, or IMAGO's
+  if (suCutIn() || imCutIn() || imArmOpen()) firing = false;   // SUPERUSER's cut-in has the screen, or IMAGO's; or IMAGO's armory is open
 
   // dash
   if (P.dashCh < P.dashMax) {
     P.dashRe += dt * (HL.eq.sheet ? SHEET_RECHARGE : 1);   // ALL HALLOWS: SHEET comes back slower
     if (P.dashRe >= P.dashCd) { P.dashRe = 0; P.dashCh++; }
   }
-  const wantDash = inp.dash && !opoNoDash() && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !imCutIn() && !vrDuelLock();
+  const wantDash = inp.dash && !opoNoDash() && !P.rooted && !P.odScorch && !P.odStrike && !P.roninDash && !P.roninStill && !P.roninExec && !P.roninSkyClear && !roninCutIn() && !suCutIn() && !imCutIn() && !imArmOpen() && !vrDuelLock();
 
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
@@ -39205,7 +39208,7 @@ function updatePlayer(dt) {
     P.vx = lerp(P.vx, tvx, k);
     P.vy = lerp(P.vy, tvy, k);
   }
-  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || imCutIn() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
+  if (P.odScorch || P.odStrike || P.roninDash || P.roninStill || P.roninExec || P.roninSkyClear || roninCutIn() || suCutIn() || imCutIn() || imArmOpen() || outsideCutAny()) { P.vx = 0; P.vy = 0; }    // SCORCHED EARTH: it stands where it lit; C: it is up, or going; RONIN's X carries it
   P.x = clamp(P.x + P.vx * dt, arena.x0 + P.r, arena.x1 - P.r);
   P.y = clamp(P.y + P.vy * dt, arena.y0 + P.r, arena.y1 - P.r);
   if (P.imDodge) imDodgeStep(dt);        // IMAGO's X: a dodge, aside and back, on top of the flying
@@ -39320,6 +39323,8 @@ function updatePlayer(dt) {
       P.fireT = 1 / (JAB_RATE * suRateMul() * rateMul);
       suJabStart();
     }
+  } else if (imArmOn() && P.diaryT <= 0) {
+    imArmFire(dt, firing, rateMul);          // IMAGO's C: the armory's gun, in the hull's own gun's place
   } else if (firing && P.fireT <= 0 && P.diaryT <= 0) {
     P.fireT = 1 / (P.fireRate * rateMul);
     const muzzle = P.r + 6;
@@ -46351,6 +46356,36 @@ const FL_LOOK  = 0.2;          // how far ahead a round is seen coming, s
 const FL_PAD   = 6;            // px of room it wants past the round's edge
 const FL_CD    = 22;           // from the press: ten seconds of it, twelve of waiting
 
+// C — THE ARMORY (see there)
+const ARM_SLOW  = 0.12;        // the room, while the armory is open
+const ARM_DEAD  = 34;          // px from the hull: aimed this close, nothing is picked
+const ARM_ORBS  = 2;           // singularities out at once, at most
+const ARM_SHOTS = 160;         // its shots in the air at once, at most
+const ARM_TICK  = 0.1;         // what burns (the lance, a singularity) bites this often, not every step
+/* Its guns, none of them fair (user, 18 Oct: "don't worry about making it
+   too balanced"), on the wheel clockwise from the top. dmg, dps, bdmg and
+   burst are multiples of the hull's damage (P.dmg), so the damage cards
+   count; rate is shots a second. */
+const ARMORY = [
+  { id: 'minigun',  n: 'MINIGUN',     hud: 'MINI', kind: 'stream',  rate: 28,   dmg: 1.3, sm: 1.35, spread: 0.08, pierce: 1,
+    d: 'a stream of rounds, twenty-eight a second' },
+  { id: 'rail',     n: 'RAILGUN',     hud: 'RAIL', kind: 'rail',    rate: 1.6,  dmg: 14, len: 2400, w: 12,
+    d: 'one line through everything, wall to wall' },
+  { id: 'swarm',    n: 'SWARM PODS',  hud: 'SWRM', kind: 'missile', rate: 1.5,  shots: 8, dmg: 3, bdmg: 3, blast: 70, spd: 560, turn: 5, life: 2.2, spread: 1.4,
+    d: 'eight missiles that hunt, and burst' },
+  { id: 'howitzer', n: 'HOWITZER',    hud: 'HOWZ', kind: 'shell',   rate: 0.9,  dmg: 30, blast: 170, spd: 760, life: 1.1,
+    d: 'one shell to where you aim, and a huge blast' },
+  { id: 'lance',    n: 'SOLAR LANCE', hud: 'SUN',  kind: 'beam',    dps: 26, len: 950, w: 16,
+    d: 'a beam held on, burning everything it crosses' },
+  { id: 'flak',     n: 'FLAK',        hud: 'FLAK', kind: 'pellets', rate: 2.4,  shots: 16, dmg: 2.8, sm: 1.5, lm: 0.45, spread: 0.9,
+    d: 'sixteen pellets in a wide cone, close in' },
+  { id: 'tesla',    n: 'TESLA COIL',  hud: 'ARC',  kind: 'arc',     rate: 5,    dmg: 5, jumps: 8, reach: 380, hop: 240,
+    d: 'lightning, jumping body to body' },
+  { id: 'hole',     n: 'SINGULARITY', hud: 'HOLE', kind: 'orb',     rate: 0.45, spd: 300, fly: 1.2, life: 3.2, pull: 260, pullSpd: 380, core: 70, dps: 8, burst: 40,
+    d: 'a black hole that drags them in, and closes' },
+];
+const ARMORY_BY = Object.fromEntries(ARMORY.map(w => [w.id, w]));
+
 const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
 const imCutIn = () => !!(P.imIntro && !P.imIntro.cut);
 const imShown = () => imOn() && !imCutIn();
@@ -46451,6 +46486,7 @@ function imIntroTick(dt) {
 const IM_KIT = [
   { n: 'EYESPOTS', hud: 'EYES', cd: EYE_CD, start: imEyesThrow },
   { n: 'FLUTTER',  hud: 'FLIT', cd: FL_CD,  start: imFlutStart },
+  { n: 'ARMORY',   hud: 'ARMS', cd: 0,      start: imArmToggle },   // a menu: no cooldown
 ];
 function imAbility(i) {
   if (state !== 'play' || P.charId !== 'runner' || oprOn() || imCutIn()) return;
@@ -46458,6 +46494,7 @@ function imAbility(i) {
     if (P.awake && !PVP) floatText(P.x, P.y - 42, 'IMAGO ONLY', '#94a3b8', 12);
     return;
   }
+  if (imArmOpen() && i !== 2) return;          // the armory is open: the keys are its
   const a = IM_KIT[i];
   if (!a) return;                              // not named yet
   if (P.imCd[i] > 0) {
@@ -46488,6 +46525,7 @@ function imTick(dt) {
   }
   if (P.imCd) for (let i = 0; i < 4; i++) if (P.imCd[i] > 0) P.imCd[i] = Math.max(0, P.imCd[i] - dt);
   if (P.imSpots && P.imSpots.length) imSpotTick(dt);
+  imArmTick(dt);             // C: the armory's wheel, its gun going with the form, its shots
   // X: FLUTTER's clock, and the rounds it watches coming; it is IMAGO's, and goes with the form
   if (P.imFlut > 0) {
     if (!imOn()) imFlutEnd('form');
@@ -46702,6 +46740,264 @@ function imFlutWatch() {
   if (best) imDodgeBegin(best.vx - P.vx, best.vy - P.vy, best.x, best.y, bt);
 }
 
+/* ------------------------------ C — THE ARMORY ------------------------------
+   (user, 18 Oct: "a full armory, C opens up a menu where you can equip all
+   sorts of extremely overpowered weapons (leave art hooks for this one and
+   don't worry about making it too balanced ...)". The name is the user's.)
+
+   C opens the armory: a wheel of ARMORY's eight guns round the hull. While
+   it is open the room runs at ARM_SLOW and the hull holds still and does not
+   fire, but IMAGO's minute keeps running. Aim at a gun and press C again, or
+   click, and the hull wears it; aimed at the hull itself (inside ARM_DEAD),
+   C shuts it as it was. The gun takes the hull's own gun's place until IMAGO
+   ends, and can be changed as often as you like. My rules, not the user's:
+     - a click held as the armory opens does not pick: it has to come down
+       again while it is open;
+     - Z and X wait while it is open: the keys are the armory's;
+     - the hull can still be hurt while it chooses: the room is slow, not
+       stopped;
+     - its guns fire on the trigger, as the hull's own does, at their own
+       rates (faster with Bloodlust and the like); their damage is the hull's
+       damage times theirs, so the damage cards count;
+     - what is in the air when IMAGO ends (missiles, shells, singularities)
+       finishes what it was doing.
+   The guns, by kind:
+     stream   MINIGUN: the game's own rounds (fireBullet), a stream of them
+     rail     RAILGUN: an instant line from the muzzle to the wall; every body
+              on it is hit
+     missile  SWARM PODS: a fan of missiles that turn on the nearest body and
+              burst on it (a hit, and a blast round it)
+     shell    HOWITZER: one shell flown to the aim (or the first body in its
+              way), and a huge blast
+     beam     SOLAR LANCE: held; a line burning everything on it, a bite every
+              ARM_TICK
+     pellets  FLAK: a wide cone of the game's own rounds, short-lived
+     arc      TESLA COIL: lightning to the nearest body, then body to body
+     orb      SINGULARITY: an orb that flies out, stops, drags every body
+              round it in (bosses too heavy to move), burns what it holds, and
+              closes with a burst; two at most
+
+   What the art is handed (IMAGO's art hooks, below):
+     P.imArm       the gun worn (an ARMORY id), or null: the hull's own
+     P.imArmMenu   the armory, open, or null: t (s open), hover (which gun
+                   the aim is on, or -1)
+     P.imArmShots  missiles, shells and singularities in the air: id, x, y,
+                   vx, vy, t (s since fired); a shell's go (px to fly) and
+                   trav; a singularity's held (the bodies it holds, by count)
+     P.imArmBeam   the SOLAR LANCE this step, or null: x0, y0, x1, y1, w
+--------------------------------------------------------------------------- */
+const imArmOpen = () => !!P.imArmMenu && P.charId === 'runner';
+const imArmOn = () => !!P.imArm && imOn() && !imArmOpen();   // worn, and not choosing
+// a gun's damage: the hull's, times its, as a round of the hull's own would be
+const armDmg = m => P.dmg * (m || 0) * stanceMul() * rewardShotMul();
+
+function imArmToggle() {
+  const M = P.imArmMenu;
+  if (!M) {
+    P.imArmMenu = { t: 0, hover: imArmHover(), trig: !!(P.in && P.in.trig) };
+    P.imArmBeam = null;
+    imFx('armOpen', { x: P.x, y: P.y });
+    Audio_.tone(300, 0.12, 'square', 0.04, 600);
+    return true;
+  }
+  imArmPick(M.hover);
+  return true;
+}
+// which gun on the wheel the aim is on (from the top, clockwise), or -1: aimed at the hull
+function imArmHover() {
+  const ax = P.in ? P.in.ax : P.x, ay = P.in ? P.in.ay : P.y, dx = ax - P.x, dy = ay - P.y;
+  if (len(dx, dy) < ARM_DEAD) return -1;
+  const n = ARMORY.length, a = Math.atan2(dy, dx) + Math.PI / 2;
+  return ((Math.round(a / (TAU / n)) % n) + n) % n;
+}
+function imArmPick(k) {
+  P.imArmMenu = null;
+  const W = ARMORY[k];
+  if (!W) {
+    imFx('armShut', { x: P.x, y: P.y });
+    Audio_.tone(260, 0.1, 'square', 0.04, 200);
+    return;
+  }
+  P.imArm = W.id; P.imArmT = 0; P.imArmBeam = null;
+  imFx('armEquip', { x: P.x, y: P.y, id: W.id });
+  floatText(P.x, P.y - 46, W.n, IM_COL, 14);
+  Audio_.tone(520, 0.2, 'sawtooth', 0.05, 1040);
+}
+
+// once a step from imTick, before the hull fires: the wheel, the armory going with the form, and what is in the air
+function imArmTick(dt) {
+  P.imArmBeam = null;                          // the beam is drawn only on a step it was held
+  const M = P.imArmMenu;
+  if (M) {
+    if (!imOn()) P.imArmMenu = null;
+    else {
+      M.t += dt;
+      M.hover = imArmHover();
+      const tr = !!(P.in && P.in.trig);
+      if (tr && !M.trig) imArmPick(M.hover); else M.trig = tr;
+    }
+  }
+  if (P.imArm && !imOn()) P.imArm = null;      // the armory is IMAGO's
+  if (P.imArmShots && P.imArmShots.length) imArmShotTick(dt);
+}
+
+// the hull's gun, while one of the armory's is worn (updatePlayer, in the gun's place)
+function imArmFire(dt, firing, rateMul) {
+  const W = ARMORY_BY[P.imArm];
+  if (!W) return;
+  P.imArmT = Math.max(0, P.imArmT - dt);
+  const ca = Math.cos(P.ang), sa = Math.sin(P.ang), mx = P.x + ca * (P.r + 6), my = P.y + sa * (P.r + 6);
+  if (W.kind === 'beam') { if (firing) imArmBeamTick(W, dt, mx, my); return; }
+  if (!firing || P.imArmT > 0) return;
+  P.imArmT = 1 / (W.rate * rateMul);
+  switch (W.kind) {
+    case 'stream':
+      fireBullet(mx, my, P.ang + simRnd(W.spread, -W.spread), W.dmg, { sm: W.sm, pierce: W.pierce });
+      Audio_.shoot();
+      break;
+    case 'pellets':
+      for (let k = 0; k < W.shots; k++) fireBullet(mx, my, P.ang + (k / (W.shots - 1) - 0.5) * W.spread + simRnd(0.03, -0.03), W.dmg, { sm: W.sm, lm: W.lm });
+      Audio_.tone(140, 0.12, 'sawtooth', 0.08, 60); shake(0.12);
+      break;
+    case 'rail': imArmRail(W, mx, my); break;
+    case 'arc': imArmArc(W); break;
+    case 'missile':
+      for (let k = 0; k < W.shots; k++) imArmShot(W, mx, my, P.ang + (k / (W.shots - 1) - 0.5) * W.spread, W.spd);
+      Audio_.tone(420, 0.14, 'square', 0.05, 900);
+      break;
+    case 'shell': {
+      const tx = P.in ? P.in.ax : mx + ca * 400, ty = P.in ? P.in.ay : my + sa * 400;
+      imArmShot(W, mx, my, P.ang, W.spd, { go: clamp(len(tx - mx, ty - my), 80, W.spd * W.life), trav: 0 });
+      Audio_.tone(90, 0.3, 'sawtooth', 0.1, 50); shake(0.3);
+      break;
+    }
+    case 'orb':
+      if (P.imArmShots.filter(s => s.id === W.id).length >= ARM_ORBS) { P.imArmT = 0.2; return; }
+      imArmShot(W, mx, my, P.ang, W.spd, { held: 0 });
+      Audio_.tone(60, 0.5, 'sine', 0.1, 30);
+      break;
+  }
+  P.vx -= ca * (W.kind === 'shell' ? 140 : 18); P.vy -= sa * (W.kind === 'shell' ? 140 : 18);   // the kick
+}
+
+// every body (a threat) whose circle meets the line, a copy: a death can add bodies
+function imArmOnLine(x0, y0, x1, y1, w) {
+  return enemies.filter(e => isThreat(e) && !e.phased && segCircle(x0, y0, x1, y1, e.x, e.y, e.r + w));
+}
+// RAILGUN: an instant line to the wall, and everything on it hit
+function imArmRail(W, mx, my) {
+  const segs = [];
+  castLance(mx, my, P.ang, W.len, 0, segs);
+  const s = segs[0];
+  if (!s) return;
+  const dmg = armDmg(W.dmg);
+  for (const e of imArmOnLine(s.x1, s.y1, s.x2, s.y2, W.w)) damageEnemy(e, dmg, false, s.x1, s.y1);
+  imFx('armRail', { x0: s.x1, y0: s.y1, x1: s.x2, y1: s.y2, w: W.w });
+  Audio_.tone(1800, 0.25, 'sawtooth', 0.07, 200); shake(0.25);
+}
+// SOLAR LANCE: held, this step: everything on it burns
+function imArmBeamTick(W, dt, mx, my) {
+  const segs = [];
+  castLance(mx, my, P.ang, W.len, 0, segs);
+  const s = segs[0];
+  if (!s) return;
+  P.imArmBeam = { x0: s.x1, y0: s.y1, x1: s.x2, y1: s.y2, w: W.w };
+  P.imArmBite = (P.imArmBite || 0) + dt;
+  if (P.imArmBite < ARM_TICK - 1e-9) return;
+  P.imArmBite -= ARM_TICK;
+  const dmg = armDmg(W.dps) * ARM_TICK;
+  for (const e of imArmOnLine(s.x1, s.y1, s.x2, s.y2, W.w)) damageEnemy(e, dmg, false, s.x1, s.y1, { silent: true });
+}
+// TESLA COIL: the nearest body in reach, then the nearest to it not yet struck, and on
+function imArmArc(W) {
+  const dmg = armDmg(W.dmg), struck = [], pts = [[P.x, P.y]];
+  let fx = P.x, fy = P.y, reach = W.reach;
+  for (let j = 0; j < W.jumps; j++) {
+    let best = null, bd = reach * reach;
+    for (const e of enemies) {
+      if (!isThreat(e) || e.phased || struck.includes(e)) continue;
+      const d = (e.x - fx) * (e.x - fx) + (e.y - fy) * (e.y - fy);
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best) break;
+    struck.push(best); pts.push([best.x, best.y]);
+    damageEnemy(best, dmg, false, fx, fy);
+    fx = best.x; fy = best.y; reach = W.hop;
+  }
+  if (pts.length > 1) { imFx('armArc', { pts }); Audio_.tone(2400, 0.06, 'square', 0.04, 600); }
+}
+function imArmShot(W, x, y, a, spd, o) {
+  if (P.imArmShots.length >= ARM_SHOTS) return null;
+  const s = Object.assign({ id: W.id, x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, t: 0,
+    dmg: armDmg(W.dmg), bdmg: armDmg(W.bdmg), dps: armDmg(W.dps), burst: armDmg(W.burst) }, o || {});
+  P.imArmShots.push(s);
+  return s;
+}
+// a burst: a body struck straight on takes its hit, and everything in R the blast
+function imArmBlast(s, x, y, R, dmg, direct) {
+  if (direct && isThreat(direct)) damageEnemy(direct, s.dmg, false, x, y);
+  for (const e of enemies.filter(q => isThreat(q) && !q.phased && len(q.x - x, q.y - y) < R + q.r)) damageEnemy(e, dmg, false, x, y);
+  imFx('armBlast', { x, y, r: R, id: s.id });
+  shake(R > 120 ? 0.6 : 0.15);
+  Audio_.boom();
+}
+// the first body (a threat) touching (x, y) within pad
+function imArmTouch(x, y, pad) {
+  for (const e of enemies) if (isThreat(e) && !e.phased && len(e.x - x, e.y - y) < e.r + pad) return e;
+  return null;
+}
+const imArmOut = s => s.x < arena.x0 || s.x > arena.x1 || s.y < arena.y0 || s.y > arena.y1;
+function imArmShotTick(dt) {
+  for (let i = P.imArmShots.length - 1; i >= 0; i--) {
+    const s = P.imArmShots[i], W = ARMORY_BY[s.id];
+    s.t += dt;
+    let done = false;
+    if (W.kind === 'missile') {
+      // it turns on the nearest body, and bursts on the first it touches
+      let tgt = null, bd = 520 * 520;
+      for (const e of enemies) {
+        if (!isThreat(e) || e.phased) continue;
+        const d = (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y);
+        if (d < bd) { bd = d; tgt = e; }
+      }
+      if (tgt) {
+        const cur = Math.atan2(s.vy, s.vx), want = Math.atan2(tgt.y - s.y, tgt.x - s.x);
+        let dA = want - cur; while (dA > Math.PI) dA -= TAU; while (dA < -Math.PI) dA += TAU;
+        const a = cur + clamp(dA, -W.turn * dt, W.turn * dt);
+        s.vx = Math.cos(a) * W.spd; s.vy = Math.sin(a) * W.spd;
+      }
+      s.x += s.vx * dt; s.y += s.vy * dt;
+      const hit = imArmTouch(s.x, s.y, 6);
+      if (hit || s.t >= W.life || imArmOut(s)) { imArmBlast(s, s.x, s.y, W.blast, s.bdmg, hit); done = true; }
+    } else if (W.kind === 'shell') {
+      s.x += s.vx * dt; s.y += s.vy * dt; s.trav += len(s.vx, s.vy) * dt;
+      const hit = imArmTouch(s.x, s.y, 10);
+      if (hit || s.trav >= s.go || imArmOut(s)) { imArmBlast(s, s.x, s.y, W.blast, s.dmg, null); done = true; }
+    } else if (W.kind === 'orb') {
+      // it flies out slowing, then holds: everything round it is dragged in, and what it holds burns
+      const k = Math.max(0, 1 - s.t / W.fly);
+      s.x = clamp(s.x + s.vx * k * dt, arena.x0 + 20, arena.x1 - 20); s.y = clamp(s.y + s.vy * k * dt, arena.y0 + 20, arena.y1 - 20);
+      s.held = 0;
+      s.bite = (s.bite || 0) + dt;
+      const bite = s.bite >= ARM_TICK - 1e-9;
+      if (bite) s.bite -= ARM_TICK;
+      for (const e of enemies.slice()) {
+        if (!isThreat(e) || e.phased) continue;
+        const dx = s.x - e.x, dy = s.y - e.y, d = len(dx, dy);
+        if (d > W.pull + e.r) continue;
+        if (!e.boss && d > 4) { const step = Math.min(d - 4, W.pullSpd * dt); e.x += dx / d * step; e.y += dy / d * step; }
+        if (d < W.core + e.r) { s.held++; if (bite) damageEnemy(e, s.dps * ARM_TICK, false, s.x, s.y, { silent: true }); }
+      }
+      if (s.t >= W.life) {
+        imArmBlast(s, s.x, s.y, W.pull, s.burst, null);
+        imFx('armCollapse', { x: s.x, y: s.y, r: W.pull });
+        done = true;
+      }
+    }
+    if (done) P.imArmShots.splice(i, 1);
+  }
+}
+
 /* ============================== IMAGO — art hooks ==============================
    IMAGO in a run, and its kit, drawn. Nothing in the run reads them; they
    keep any state of their own in IM_ST (this machine's, never the run's).
@@ -46744,12 +47040,29 @@ function imFlutWatch() {
      hud(g, x, y, w, m)  screen. GRAZE, the clock, Z X C V: m.k (0-1 GRAZE),
                    on, ready, T (s left), len, cd [4], kit [{ n, hud, cd } | null],
                    keys, live [4] (0-1 of a move still running, X's
-                   FLUTTER) and liveS [4] (its seconds left)
+                   FLUTTER), liveS [4] (its seconds left), and subs [4]
+                   (what a key says under it instead of its name: C's gun)
+
+   C, THE ARMORY (placeholders, lines and labels: the user is to draw them):
+     armory(g, w, h, m)  screen, over the HUD: the wheel, while it is open.
+                   m.cx, cy (the hull, on the screen), r (the wheel's radius,
+                   px), t (s open), hover (-1: aimed at the hull), worn (the
+                   gun worn, its index, or -1), list [{ id, n, hud, kind, d }]
+     armMount(g, h)  world, over the moth: the gun it wears. h.x, y, ang, r,
+                   id, n, hud, kind, fired (s since its last shot, or -1)
+     armShot(g, s)   world: a missile, a shell or a singularity in the air.
+                   s.id, kind, x, y, vx, vy, t, and a singularity's fly, life,
+                   pull, core and held (bodies it is burning)
+     armBeam(g, b)   world: the SOLAR LANCE, this step. b.x0, y0, x1, y1, w
+     and in fx: armOpen, armShut { x, y }; armEquip { x, y, id }; armRail
+     { x0, y0, x1, y1, w }; armArc { pts [[x, y]] }; armBlast { x, y, r, id };
+     armCollapse { x, y, r }
 =========================================================================== */
 const IM_FAILED = new Set();
 const IM_ST = { fx: [], wings: {}, echo: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
 const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8,
-                     dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5 };
+                     dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5,
+                     armOpen: 0.3, armShut: 0.3, armEquip: 0.6, armRail: 0.35, armArc: 0.22, armBlast: 0.55, armCollapse: 0.6 };
 function imFx(kind, o) {
   if (kind === 'wake') OPR_ST.wakeAt = uiTime;      // the moth's tails start again from the hull
   IM_ST.fx.push(Object.assign({ kind, t0: uiTime, life: IM_FX_LIFE[kind] || 0.5, seed: (IM_ST.fx.length * 7.31 + uiTime * 13) % 1000 }, o));
@@ -46788,6 +47101,11 @@ function drawImagoHull() {
     guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes, thrown,
     flut: imFlutOn() ? P.imFlut / FL_LEN : 0,
     dodge: D ? { f: clamp(D.t / FL_DODGE, 0, 1), sx: D.sx, sy: D.sy, x0: D.x0, y0: D.y0, o: D.o } : null });
+  const A = P.imArm && ARMORY_BY[P.imArm];
+  if (A) {
+    const fired = A.kind === 'beam' ? (P.imArmBeam ? 0 : -1) : P.imArmT > 0 ? 1 / A.rate - P.imArmT : -1;
+    IM('armMount', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, id: A.id, n: A.n, hud: A.hud, kind: A.kind, fired });
+  }
 }
 // world, the floor pass: where they will burst
 function drawImagoFloor() {
@@ -46796,8 +47114,15 @@ function drawImagoFloor() {
 }
 // world, the additive pass: the bombs themselves
 function drawImagoKit() {
-  if (P.charId !== 'runner' || !P.imSpots || !P.imSpots.length) return;
-  IM('eyes', ctx, { spots: imSpotsView() });
+  if (P.charId !== 'runner') return;
+  if (P.imSpots && P.imSpots.length) IM('eyes', ctx, { spots: imSpotsView() });
+  // C: the armory's shots in the air, and the beam held this step
+  if (P.imArmShots) for (const s of P.imArmShots) {
+    const W = ARMORY_BY[s.id];
+    IM('armShot', ctx, { id: s.id, kind: W.kind, x: s.x, y: s.y, vx: s.vx, vy: s.vy, t: s.t,
+      fly: W.fly, life: W.life, pull: W.pull, core: W.core, held: s.held || 0 });
+  }
+  if (P.imArmBeam) IM('armBeam', ctx, Object.assign({}, P.imArmBeam));
 }
 // world, once a frame for every pilot: what the run told the drawing
 function drawImagoFx() {
@@ -46809,6 +47134,14 @@ function drawImagoIntro() {
   const q = imPhase();
   if (q) IM('cutIn', ctx, W, H, q);
 }
+// screen, over the HUD: C's armory, while it is open (this machine's pilot's)
+const IM_ARM_R = 128;            // the wheel's radius on the screen, px
+function drawImagoArmory() {
+  if (!imArmOpen()) return;
+  const M = P.imArmMenu, cx = (P.x - cam.x) * camZoom + W / 2 + cam.sx, cy = (P.y - cam.y) * camZoom + H / 2 + cam.sy;
+  IM('armory', ctx, W, H, { cx, cy, r: IM_ARM_R, t: M.t, hover: M.hover, worn: ARMORY.findIndex(a => a.id === P.imArm),
+    list: ARMORY.map(a => ({ id: a.id, n: a.n, hud: a.hud, kind: a.kind, d: a.d })) });
+}
 // [F]: the cut-in begins
 function imIntroFx(I) { IM_ST.cut.lastS = -1; }
 // the HUD, under the dash: GRAZE, then IMAGO's clock and its keys. Returns the next free line
@@ -46817,6 +47150,7 @@ function drawImagoHud(pad, ly, bw) {
   const on = imOn(), k = clamp((P.imGraze || 0) / IM_MAX, 0, 1);
   IM('hud', ctx, pad, ly, bw, { k, on, ready: !on && k >= 0.999, T: P.imT || 0, len: IM_LEN, cd: (P.imCd || [0, 0, 0, 0]).slice(),
     live: [0, imFlutOn() ? P.imFlut / FL_LEN : 0, 0, 0], liveS: [0, imFlutOn() ? P.imFlut : 0, 0, 0],
+    subs: [null, null, P.imArm && ARMORY_BY[P.imArm] ? ARMORY_BY[P.imArm].hud : null, null],
     kit: [0, 1, 2, 3].map(i => IM_KIT[i] ? { n: IM_KIT[i].n, hud: IM_KIT[i].hud, cd: IM_KIT[i].cd } : null), keys: SU_KEYS });
   return ly + 52;
 }
@@ -47741,6 +48075,46 @@ const IMAGO_ART = {
           g.beginPath(); g.arc(e.x, e.y, 16 + 60 * fa * fa, 0, TAU); g.stroke();
           break;
         }
+        // C, THE ARMORY (placeholders)
+        case 'armOpen': case 'armShut': {
+          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 1.5;
+          g.beginPath(); g.arc(e.x, e.y, e.kind === 'armOpen' ? 20 + 40 * a : 60 - 40 * a, 0, TAU); g.stroke();
+          break;
+        }
+        case 'armEquip': {
+          g.strokeStyle = rgba('#ecfeff', (0.9 * fa).toFixed(3)); g.lineWidth = 2;
+          g.beginPath(); g.arc(e.x, e.y, 16 + 30 * a, 0, TAU); g.stroke();
+          break;
+        }
+        case 'armRail': {
+          g.strokeStyle = rgba(IM_COL, (0.7 * fa).toFixed(3)); g.lineWidth = e.w * 2 * fa + 1;
+          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          g.strokeStyle = rgba('#ffffff', fa.toFixed(3)); g.lineWidth = 2;
+          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          break;
+        }
+        case 'armArc': {
+          g.strokeStyle = rgba('#e0f2fe', fa.toFixed(3)); g.lineWidth = 2;
+          g.beginPath();
+          e.pts.forEach((p, k) => {
+            if (!k) { g.moveTo(p[0], p[1]); return; }
+            const q = e.pts[k - 1], mx = (p[0] + q[0]) / 2 + (odHash(sd + k) - 0.5) * 30, my = (p[1] + q[1]) / 2 + (odHash(sd + k * 3) - 0.5) * 30;
+            g.lineTo(mx, my); g.lineTo(p[0], p[1]);
+          });
+          g.stroke();
+          break;
+        }
+        case 'armBlast': {
+          g.strokeStyle = rgba(e.id === 'howitzer' ? '#fde68a' : IM_COL, (0.85 * fa).toFixed(3)); g.lineWidth = 4 * fa + 1;
+          g.beginPath(); g.arc(e.x, e.y, e.r * (0.3 + 0.7 * (1 - fa * fa)), 0, TAU); g.stroke();
+          if (a < 0.2) { g.fillStyle = rgba('#ffffff', (0.5 * (1 - a / 0.2)).toFixed(3)); g.beginPath(); g.arc(e.x, e.y, e.r * 0.35, 0, TAU); g.fill(); }
+          break;
+        }
+        case 'armCollapse': {
+          g.strokeStyle = rgba('#c4b5fd', (0.85 * fa).toFixed(3)); g.lineWidth = 3;
+          g.beginPath(); g.arc(e.x, e.y, e.r * fa, 0, TAU); g.stroke();
+          break;
+        }
         case 'wake': case 'out': {
           const R = (e.kind === 'wake' ? 30 : 20) + 90 * (1 - Math.pow(1 - a, 2));
           g.strokeStyle = rgba(IM_COL, (0.5 * fa).toFixed(3)); g.lineWidth = 5 * fa + 1;
@@ -47824,9 +48198,71 @@ const IMAGO_ART = {
       g.fillStyle = live ? (cd > 0 ? '#22d3ee' : IM_COL) : a ? '#0e7490' : '#334155';
       g.fillText(m.keys[i].toUpperCase(), x + kw / 2, ky + kh / 2 + 0.5);
       g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'top';
-      const sub = a ? (live && cd > 0 ? cd.toFixed(1) : a.hud) : '';
+      const sub = a ? (live && cd > 0 ? cd.toFixed(1) : (live && m.subs && m.subs[i]) || a.hud) : '';
       if (sub) { g.fillStyle = live ? (cd > 0 ? '#0e7490' : rgba(IM_COL, 0.75)) : '#164e63'; g.fillText(sub, x + kw / 2, ky + kh + 3); }
     }
+  },
+
+  /* ------------------ C — THE ARMORY: placeholders, to be drawn ------------------
+     Lines and labels only, so it can be played: the user draws these (18 Oct:
+     "leave art hooks for this one"). WHAT THEY ARE HANDED is in this block's
+     header. Each is tagged "placeholder" where it draws. */
+  armory(g, w, h, m) {
+    const n = m.list.length, R = m.r, open = Math.min(1, m.t / 0.15);
+    g.fillStyle = 'rgba(2,6,12,' + (0.45 * open).toFixed(3) + ')'; g.fillRect(0, 0, w, h);
+    g.lineWidth = 1.5;
+    for (let k = 0; k < n; k++) {
+      const a0 = -Math.PI / 2 + (k - 0.5) * TAU / n, a1 = a0 + TAU / n, mid = (a0 + a1) / 2, on = k === m.hover, worn = k === m.worn;
+      g.beginPath(); g.arc(m.cx, m.cy, R * open, a0 + 0.02, a1 - 0.02); g.arc(m.cx, m.cy, R * 0.38 * open, a1 - 0.02, a0 + 0.02, true); g.closePath();
+      g.fillStyle = on ? 'rgba(103,232,249,0.32)' : 'rgba(8,20,28,0.85)'; g.fill();
+      g.strokeStyle = on ? '#ecfeff' : worn ? IM_COL : '#155e75'; g.stroke();
+      const lx = m.cx + Math.cos(mid) * R * 0.7 * open, ly = m.cy + Math.sin(mid) * R * 0.7 * open;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = "700 11px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = on ? '#ffffff' : '#a5f3fc';
+      g.fillText(m.list[k].hud, lx, ly - (worn ? 5 : 0));
+      if (worn) { g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = IM_COL; g.fillText('WORN', lx, ly + 7); }
+    }
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = IM_COL;
+    g.fillText('THE ARMORY', m.cx, m.cy - R - 14);
+    const it = m.list[m.hover];
+    g.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = '#ecfeff';
+    g.fillText(it ? it.n : 'AIM AT A GUN', m.cx, m.cy + R + 22);
+    g.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif"; g.fillStyle = '#a5f3fc';
+    g.fillText(it ? it.d : 'or at the hull, and C, to shut it', m.cx, m.cy + R + 38);
+    g.fillStyle = '#64748b'; g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
+    g.fillText('C OR CLICK TO WEAR IT  ·  placeholder', m.cx, m.cy + R + 54);
+  },
+  armMount(g, h) {
+    // its name over the hull, and the gun as a box on the nose, kicking as it fires (placeholder)
+    g.textAlign = 'center'; g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = 'rgba(165,243,252,0.8)';
+    g.fillText(h.hud, h.x, h.y - h.r - 30);
+    g.translate(h.x, h.y); g.rotate(h.ang);
+    const kick = h.fired >= 0 && h.fired < 0.08 ? 3 * (1 - h.fired / 0.08) : 0;
+    g.fillStyle = 'rgba(8,20,28,0.9)'; g.strokeStyle = '#ecfeff'; g.lineWidth = 1.2;
+    g.fillRect(10 - kick, -3.5, 16, 7); g.strokeRect(10 - kick, -3.5, 16, 7);
+  },
+  armShot(g, s) {
+    const a = Math.atan2(s.vy, s.vx);
+    if (s.kind === 'orb') {
+      // a dark core, its reach dashed (placeholder)
+      g.fillStyle = '#05010d'; g.strokeStyle = '#c4b5fd'; g.lineWidth = 2;
+      g.beginPath(); g.arc(s.x, s.y, 12 + (s.held ? 3 * Math.sin(s.t * 20) : 0), 0, TAU); g.fill(); g.stroke();
+      g.setLineDash([4, 6]); g.strokeStyle = 'rgba(196,181,253,0.35)'; g.lineWidth = 1;
+      g.beginPath(); g.arc(s.x, s.y, s.pull, 0, TAU); g.stroke(); g.setLineDash([]);
+      return;
+    }
+    g.translate(s.x, s.y); g.rotate(a);
+    if (s.kind === 'shell') { g.fillStyle = '#fde68a'; g.beginPath(); g.ellipse(0, 0, 9, 6, 0, 0, TAU); g.fill(); }
+    else { g.fillStyle = '#ecfeff'; g.beginPath(); g.moveTo(6, 0); g.lineTo(-5, 3.5); g.lineTo(-5, -3.5); g.closePath(); g.fill(); }
+    g.strokeStyle = 'rgba(103,232,249,0.6)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(-6, 0); g.lineTo(-22, 0); g.stroke();
+  },
+  armBeam(g, b) {
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    g.strokeStyle = 'rgba(253,224,71,0.5)'; g.lineWidth = b.w * 2;
+    g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x1, b.y1); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 3; g.stroke();
   }
 };
 /* ========================== end of IMAGO's art hooks ========================== */
@@ -55892,6 +56328,7 @@ function render() {
   if (roninShown()) drawRoninScreen(roninW());
   { const sq = suPhase(); if (sq) drawSuIntroScreen(sq); }        // SUPERUSER's cut-in, over the frame and its turn
   drawImagoIntro();           // IMAGO's cut-in, the same way
+  drawImagoArmory();          // and its armory (C), while it is open
   outsideDraw('screen');      // an outside pilot's cut-ins, over the frame and its HUD (OUTSIDE PILOTS)
   // and in a duel against one (PvP), its cut-ins on this screen too: what this screen may see of it is the module's to say
   if (PILOTS.length > 1) for (let k = 0; k < PILOTS.length; k++) {

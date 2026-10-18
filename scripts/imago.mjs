@@ -23,6 +23,12 @@
                   hull home again, the round flying on, a volley, a blow,
                   the floor still landing, a wall, a dodge never cut short,
                   the end, the form ending under it, a snapshot mid-dodge
+     C ARMORY     (user, 18 Oct) a wheel of eight overpowered guns: it opens on
+                  C, slows the room and holds the hull; the aim picks, C or a
+                  fresh click wears it, aimed at the hull it shuts; every gun
+                  out-hits the hull's own, each its own way (a line, a chain,
+                  a blast, a pull); the gun goes with the form, and what is
+                  in the air finishes; a snapshot with it all in the air
      the rite     none of it answers there
      a snapshot   bombs in the air come back in another copy and burst the
                   same
@@ -60,7 +66,8 @@ function game() {
     globalThis.__aim = null;
     globalThis.__mx = 0; globalThis.__my = 0;
     // what the test presses, and what the keyboard queued (handleKey)
-    inputSource = rec => { rec.mx = __mx; rec.my = __my; rec.trig = false; rec.lmb = false; rec.auto = false; rec.dash = __dash; __dash = false;
+    globalThis.__trig = false; globalThis.__auto = false;
+    inputSource = rec => { rec.mx = __mx; rec.my = __my; rec.trig = __trig; rec.lmb = __trig; rec.auto = __auto; rec.dash = __dash; __dash = false;
       rec.touch = false; rec.taim = null; rec.local = false; rec.press = __press.concat(inputQueue.splice(0)); __press = []; rec.held = '';
       const a = __aim || { x: P.x + 300, y: P.y }; rec.ax = a.x; rec.ay = a.y; };`);
   return g;
@@ -138,8 +145,8 @@ section('[F]');
   ok((J(g, `__art`).hull || 0) > 0, 'the hull is IMAGO\'s while it is on (IMAGO_ART.hull)', J(g, `__art`));
   round(g, 30); steps(g, 50);
   ok(J(g, `P.imGraze`) === 0, 'grazes do not fill it while it is on', J(g, `P.imGraze`));
-  g.run(`__press = ['c'];`); steps(g, 1);
-  ok(J(g, `P.imCd.every(c => c === 0) && P.imSpots.length === 0 && P.imFlut === 0`), 'C is not named yet, and does nothing', J(g, `P.imCd`));
+  g.run(`__press = ['v'];`); steps(g, 1);
+  ok(J(g, `P.imCd.every(c => c === 0) && P.imSpots.length === 0 && P.imFlut === 0 && !P.imArmMenu`), 'V is not named yet, and does nothing', J(g, `P.imCd`));
   g.run(`P.imT = 0.05;`); steps(g, 6);
   ok(J(g, `!imOn() && P.imT === 0`), 'the minute ends, and it is the ship again');
   const before = J(g, `__art.hull || 0`);
@@ -416,6 +423,118 @@ const speed = g => { g.run(`__mx = 1;`); qsteps(g, 60); const v = J(g, `Math.hyp
   ok(JSON.stringify(pa) === JSON.stringify(pc), 'and the rest of it plays the same there', { pa, pc });
 }
 
+/* ================================ C, THE ARMORY ================================ */
+section('C — THE ARMORY');
+// a body that stands where it is put and soaks, at (dx, dy) from the hull
+const bodyAt = (g, dx, dy) => g.run(`(() => { const e = spawnEnemy('grunt', P.x + ${dx}, P.y + ${dy}, { elite: false });
+  e.maxHp = e.hp = 1e7; e.spd = 0; e.dmg = 0; e.atkT = 1e9; e.cd = 1e9; e.__mine = 1; return e.id; })()`);
+// a quiet room, but for the bodies the test put there
+const asteps = (g, n) => { for (let i = 0; i < n; i++) { g.run(`spawnT = 1e9; enemies.splice(0, enemies.length, ...enemies.filter(e => e.__mine && !e.dead)); for (const e of enemies) { e.vx = e.vy = 0; } ebullets.length = 0;`); steps(g, 1); } };
+// aim at wedge k of the wheel (from the top, clockwise)
+const aimWedge = (g, k) => g.run(`(() => { const a = -Math.PI / 2 + ${k} * TAU / ARMORY.length; __aim = { x: P.x + Math.cos(a) * 200, y: P.y + Math.sin(a) * 200 }; })()`);
+// damage dealt to bodies set out ahead (on the aim, on its line further on, and off to the side) over two seconds of firing
+const volley = g => {
+  g.run(`enemies.splice(0, enemies.length); __aim = { x: P.x + 300, y: P.y };`);
+  const ids = [bodyAt(g, 200, 0), bodyAt(g, 330, 0), bodyAt(g, 200, 60)];
+  const h0 = ids.map(id => hpOf(g, id));
+  g.run(`__trig = true;`); asteps(g, 120); g.run(`__trig = false;`); asteps(g, 220);
+  return ids.map((id, k) => Math.round(h0[k] - hpOf(g, id)));
+};
+{
+  const g = game();
+  enter(g, true);
+  g.run(`handleKey('c');`); asteps(g, 2);
+  ok(J(g, `!P.imArmMenu`), 'C out of IMAGO opens nothing');
+  g.run(`P.imGraze = IM_MAX; handleKey('f');`); asteps(g, 2); throughCut(g, true);
+  const base = volley(g);
+  ok(base[0] > 0, 'the hull\'s own gun, for the measure', base);
+
+  // the wheel
+  g.run(`__aim = { x: P.x + 300, y: P.y }; handleKey('c');`); asteps(g, 2);
+  ok(J(g, `imArmOpen()`), 'C opens the armory, from the keyboard');
+  ok(J(g, `slowmo`) <= J(g, `ARM_SLOW`) + 1e-9, 'the room slows while it is open', J(g, `slowmo`));
+  const p0 = J(g, `[P.x, P.y]`), b0 = J(g, `bullets.length`);
+  g.run(`__mx = 1; __auto = true;`); asteps(g, 30); g.run(`__mx = 0; __auto = false;`);
+  const p1 = J(g, `[P.x, P.y]`);
+  ok(Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 0.5 && J(g, `bullets.length`) === b0, 'and the hull holds still, and does not fire', { moved: Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), b0, b1: J(g, `bullets.length`) });
+  const hovers = [];
+  for (let k = 0; k < 8; k++) { aimWedge(g, k); asteps(g, 1); hovers.push(J(g, `P.imArmMenu.hover`)); }
+  ok(hovers.join() === '0,1,2,3,4,5,6,7', 'the aim picks the gun it points at, round the wheel', hovers);
+  g.run(`__aim = { x: P.x + 10, y: P.y };`); asteps(g, 1);
+  ok(J(g, `P.imArmMenu.hover`) === -1, 'aimed at the hull, nothing is picked');
+  g.run(`__press = ['z'];`); asteps(g, 1);
+  g.run(`__press = ['x'];`); asteps(g, 1);
+  ok(J(g, `P.imSpots.length === 0 && P.imFlut === 0`), 'Z and X wait while it is open');
+  g.run(`handleKey('c');`); asteps(g, 1);
+  ok(J(g, `!P.imArmMenu && !P.imArm`), 'and C there shuts it, as it was');
+
+  // a click held as it opens does not pick; a fresh one does
+  g.run(`__trig = true;`); asteps(g, 1);
+  aimWedge(g, 1); g.run(`handleKey('c');`); asteps(g, 4);
+  ok(J(g, `imArmOpen() && !P.imArm`), 'a click held as it opens picks nothing');
+  g.run(`__trig = false;`); asteps(g, 1); g.run(`__trig = true;`); asteps(g, 1); g.run(`__trig = false;`);
+  ok(J(g, `!P.imArmMenu && P.imArm === 'rail'`), 'a fresh click wears the gun it points at', J(g, `P.imArm`));
+
+  // every gun, worn by C, out-hits the hull's own, its own way
+  const got = {};
+  for (let k = 0; k < 8; k++) {
+    g.run(`__trig = false; handleKey('c');`); asteps(g, 1); aimWedge(g, k); asteps(g, 1); g.run(`handleKey('c');`); asteps(g, 1);
+    const id = J(g, `P.imArm`);
+    got[id] = volley(g);
+  }
+  const ids = J(g, `ARMORY.map(a => a.id)`);
+  ok(ids.every(id => got[id]), 'C wears each of the eight', Object.keys(got));
+  ok(ids.every(id => got[id] && got[id][0] >= 4 * base[0]), 'every one out-hits the hull\'s own at least fourfold', { base: base[0], got });
+  ok(got.rail[1] > 0 && got.lance[1] > 0 && got.minigun[1] > 0, 'the rail, the lance and the minigun go through to the body behind', { rail: got.rail, lance: got.lance, minigun: got.minigun });
+  ok(got.tesla.every(d => d > 0), 'the lightning jumps to every body in reach', got.tesla);
+  ok(got.howitzer.every(d => d > 0), 'the howitzer\'s blast takes all three', got.howitzer);
+  ok(got.swarm[2] > 0 && got.flak[2] > 0, 'the missiles and the flak reach off the line', { swarm: got.swarm, flak: got.flak });
+  ok(got.hole.every(d => d > 0), 'the singularity takes all three', got.hole);
+
+  // the singularity drags bodies in
+  g.run(`enemies.splice(0, enemies.length); P.imArm = 'hole'; P.imArmT = 0; P.imArmShots.length = 0; __aim = { x: P.x + 300, y: P.y };`);
+  const far = bodyAt(g, 420, 140);
+  g.run(`__trig = true;`); asteps(g, 1); g.run(`__trig = false;`); asteps(g, 100);
+  const pulled = J(g, `(() => { const o = P.imArmShots[0], e = enemies.find(q => q.id === ${far}); return o && e ? [Math.round(Math.hypot(e.x - o.x, e.y - o.y)), Math.round(Math.hypot(P.x + 420 - o.x, P.y + 140 - o.y))] : null; })()`);
+  ok(pulled && pulled[0] < pulled[1] - 40, 'the singularity drags a body in toward it', pulled);
+  asteps(g, 200);
+  ok(J(g, `P.imArmShots.length`) === 0, 'and closes');
+  // a boss is too heavy to move
+  const bossMoves = J(g, `(() => { enemies.splice(0, enemies.length); const e = spawnEnemy('boss', P.x + 260, P.y + 80, { boss: 'warden' }); e.__mine = 1; e.spd = 0; e.atkT = 1e9; e.hp = e.maxHp = 1e8;
+    P.imArmShots.push({ id: 'hole', x: P.x + 260, y: P.y - 60, vx: 0, vy: 0, t: 2, dmg: 0, bdmg: 0, dps: 1, burst: 1, held: 0 });
+    const x0 = e.x, y0 = e.y; for (let i = 0; i < 20; i++) imArmShotTick(1 / 60); return Math.hypot(e.x - x0, e.y - y0); })()`);
+  ok(bossMoves < 1e-9, 'a boss is too heavy for it to drag', bossMoves);
+  g.run(`P.imArmShots.length = 0; enemies.splice(0, enemies.length);`);
+
+  // the gun goes with the form; what is in the air finishes
+  g.run(`P.imArm = 'swarm'; P.imArmT = 0; __aim = { x: P.x + 300, y: P.y };`);
+  const tgt = bodyAt(g, 300, 0), th = hpOf(g, tgt);
+  g.run(`__trig = true;`); asteps(g, 1); g.run(`__trig = false; P.imT = 0.02;`); asteps(g, 4);
+  ok(J(g, `!imOn() && !P.imArm && P.imArmShots.length > 0`), 'IMAGO ends: the gun goes, the missiles are still in the air', J(g, `[P.imT, P.imArm, P.imArmShots.length]`));
+  asteps(g, 120);
+  ok(hpOf(g, tgt) < th && J(g, `P.imArmShots.length`) === 0, 'and they finish what they were doing', [th, hpOf(g, tgt)]);
+  const b2 = J(g, `bullets.length`);
+  g.run(`__trig = true;`); asteps(g, 10); g.run(`__trig = false;`);
+  ok(J(g, `bullets.length`) > b2, 'and the hull\'s own gun is back');
+}
+{
+  // a snapshot with missiles, a shell and a singularity in the air: the other copy plays them out the same
+  const a = game(), c = game();
+  enter(a, true, 29);
+  a.run(`P.imGraze = IM_MAX; handleKey('f');`); asteps(a, 2); throughCut(a, true);
+  const ids = [bodyAt(a, 220, 0), bodyAt(a, 300, 90), bodyAt(a, 360, -70)];
+  a.run(`__aim = { x: P.x + 300, y: P.y };`);
+  for (const id of ['swarm', 'howitzer', 'hole']) { a.run(`P.imArm = '${id}'; P.imArmT = 0; __trig = true;`); asteps(a, 1); a.run(`__trig = false;`); }
+  asteps(a, 8);
+  const n = J(a, `P.imArmShots.length`);
+  const snap = a.run(`JSON.stringify(snapWrite())`);
+  c.run(`applyChar(CHARS.findIndex(ch => ch.id === 'runner')); resetGame(); state = 'play'; snapRead(JSON.parse(${JSON.stringify(snap)}));`);
+  ok(n > 3 && J(c, `P.imArmShots.length`) === n && J(c, `P.imArm`) === 'hole', 'the armory\'s shots, and the gun worn, come back in another copy', [n, J(c, `P.imArmShots.length`), J(c, `P.imArm`)]);
+  asteps(a, 260); asteps(c, 260);
+  const hpA = ids.map(id => hpOf(a, id)), hpC = ids.map(id => hpOf(c, id));
+  ok(JSON.stringify(hpA) === JSON.stringify(hpC) && hpA.some((h, k) => h < 1e7), 'and play out the same there', { hpA, hpC });
+}
+
 /* ================================== the rite ================================== */
 section('the rite');
 {
@@ -430,6 +549,8 @@ section('the rite');
   ok(J(g, `P.imSpots.length`) === 0, 'nor is Z anything');
   g.run(`__press = ['x'];`); steps(g, 2);
   ok(J(g, `P.imFlut`) === 0, 'nor X');
+  g.run(`__press = ['c'];`); steps(g, 2);
+  ok(J(g, `!P.imArmMenu && !P.imArm`), 'nor C');
   g.run(`P.imGraze = 0;`);
   for (let i = 0; i < 5; i++) { round(g, 30); steps(g, 50); }
   ok(J(g, `P.imGraze`) === 0, 'and its grazes are the rite\'s, not GRAZE in a run', J(g, `P.imGraze`));
@@ -475,6 +596,14 @@ section('the hooks');
     round(g, 0, 600); steps(g, 40, true);
     g.run(`__mx = 1;`); steps(g, 20, true); g.run(`__mx = 0;`);
     g.run(`P.imFlut = 0.02;`); steps(g, 6, true);
+    // C: the wheel open, then each kind of gun worn and fired, drawn as it goes
+    g.run(`ebullets.length = 0; P.imCd[2] = 0; __press = ['c'];`); steps(g, 3, true);
+    for (const id of ['swarm', 'lance', 'rail', 'tesla', 'howitzer', 'hole']) {
+      g.run(`P.imArmMenu = null; P.imArm = '${id}'; P.imArmT = 0; __auto = true;`);
+      for (let i = 0; i < 40; i++) { g.run(HOLD); steps(g, 1); if (i % 2 === 0) g.run(`render()`); }
+    }
+    g.run(`__auto = false;`);
+    for (let i = 0; i < 200; i++) { g.run(HOLD); steps(g, 1); if (i % 4 === 0) g.run(`render()`); }
     g.run(`P.imT = 0.02;`); steps(g, 12, true);
     takeArt(g);
     const failed = J(g, `[...IM_FAILED, ...OR_FAILED]`);

@@ -73,6 +73,8 @@ const HARNESS = `(() => {
       pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'maxHp', 'level', 'xp', 'dmg', 'fireRate', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'roninBroken', 'imT', 'imGraze']),
       // IMAGO's Z: its bombs, where they are and how long they have
       (P.imSpots || []).map(b => pk(b, ['x', 'y', 't'])),
+      // and its C: the gun worn, the armory open, and its shots in the air
+      [P.imArm || '', P.imArmMenu ? 1 : 0, (P.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])],
       // RONIN's V: the vow's clock, its grave, SKY CLEAR
       [P.roninVow ? r(P.roninVow.t) : null, P.roninGrave ? r(P.roninGrave.hp) : null, P.roninSkyClear ? P.roninSkyClear.stage + P.roninSkyClear.i : null],
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'atkT', 'cd', 'state', 'ang', 'id'])]),
@@ -134,6 +136,8 @@ const HARNESS = `(() => {
       if (k % 75 === 40) press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) press.push('f');
       if (P.charId === 'melee' && k % 61 === 0) press.push('parry');
+      // IMAGO's armory, open: wear what the aim is on and get on, as a player would (not five seconds of ARM_SLOW in ten)
+      if (P.imArmMenu && P.imArmMenu.t > 0.25 && k % 30 === 0 && !press.includes('c')) press.push('c');
     }
     if (k % 400 === 200) press.push('q');
     /* An outside pilot (OUTSIDE PILOTS): every key its kit is played, pressed
@@ -244,7 +248,7 @@ const L = QUICK ? 0.4 : 1;                       // --quick plays each for 40% a
 const VIEW = { w: 1366, h: 768 };
 const S = [
   { name: 'runner',     char: 'runner', seed: 101, steps: 18000 },
-  { name: 'imago',      char: 'runner', seed: 123, steps: 18000, kit: true },   // IMAGO in a run: GRAZE, [F], Z's bombs
+  { name: 'imago',      char: 'runner', seed: 123, steps: 18000, kit: true },   // IMAGO in a run: GRAZE, [F], Z's bombs, X, C's guns
   { name: 'ember',      char: 'ember',  seed: 102, steps: 18000, kit: true },
   { name: 'hacker',     char: 'hacker', seed: 103, steps: 18000, kit: true },
   { name: 'vagrant',    char: 'melee',  seed: 104, steps: 18000, kit: true },
