@@ -575,8 +575,21 @@ My rules, not yours:
     - the blasts: each gun's own;
     - the singularity closing: an implosion and a flash.
 
-    MINIGUN and FLAK fire the game's own rounds, so their rounds are the
-    hull's.
+    MINIGUN and FLAK fire the game's own rounds, drawn as IMAGO's (below).
+  - **IMAGO's rounds (18 Oct: "retexture the base shots to be smaller and
+    more impactful it gets repetative with the base shots").** While the
+    moth is shown, its rounds are its own (`IMAGO_ART.rounds`, in
+    `drawBullets`' place), each gun its own:
+    - the moth's own gun: darts of glass with a short hard streak;
+    - MINIGUN: needle tracers, every third one brighter;
+    - FLAK: shards that turn as they fly.
+
+    Every shot flashes at the muzzle, and every hit lands: a flash, sparks
+    thrown back the way it came, and a ring, gold for a crit. A round that
+    hits the wall sparks off it. It is drawing only: the hook watches the
+    rounds, and changes nothing about them. Arrows, stolen rounds and an
+    outside pilot's keep their own look. Out of IMAGO, the hull's rounds
+    are the base ship's, as before.
   - **Effects off:** everything still reads by its lines.
 
 ## Tales (stand-ins, in the voice)
