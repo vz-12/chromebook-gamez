@@ -75,7 +75,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
   globalThis.__drawErr = [];
   globalThis.__draw = () => { try { render(); } catch (e) { if (__drawErr.length < 5) __drawErr.push(String(e && e.message || e) + ' @ ' + String(e && e.stack || '').split(' at ')[1]); __drawErr.n = (__drawErr.n || 0) + 1; } };
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
-  ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true };" : ''}
+  ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true, runner: true };" : ''}
   ${scramble ? `// the guest's own save says otherwise about everything: the host's must win
     Object.assign(Save.profile, { hardened: true, keeperDone: true, altPath: true, malware: true, planetarium: true,
       deepFracture: true, otherKills: 7, unwrittenDeaths: 4, clears: 9, chal: ['ch_ascetic', 'ch_purist'] });
@@ -201,6 +201,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
       else if (P.charId === 'ember') P.vent = VENT_MAX;
       else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
+      else if (P.charId === 'runner') P.imGraze = IM_MAX;   // IMAGO
     });
     // RONIN's V: low enough for it to light (the bot's presses then take it), and now and then a grave one blow from breaking
     if (${!!kitRun} && t % 900 === 300) pilotsEach(() => { if (P.charId === 'melee' && P.roninT > 0) P.hp = Math.min(P.hp, P.maxHp * 0.25); });
@@ -220,8 +221,9 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       E: enemies.filter(e => !e.dead).map(e => [e.type, ...pk(e, ['x', 'y', 'hp', 'id'])]),
       B: bullets.length, EB: ebullets.length, G: gems.length, D: drops.length, RUN: RUN_FLAGS.map(k => r(RUN[k])) }));
     if (t % 60 === 0) __prints.set(LS.run * 1e6 + t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
-      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
-      pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT']),
+      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
+      pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
+      [P, pilotP(1) || {}].map(o => (o.imSpots || []).map(b => pk(b, ['x', 'y', 't']))),   // IMAGO's Z
       [P, pilotP(1) || {}].map(o => [o.roninVow ? r(o.roninVow.t) : null, o.roninGrave ? r(o.roninGrave.hp) : null, o.roninSkyClear ? o.roninSkyClear.stage + o.roninSkyClear.i : null, r(o.roninBroken)]),   // RONIN's V
       Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),

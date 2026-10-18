@@ -2114,6 +2114,8 @@ function newPlayer() {
     roninStill: null, roninExec: null, roninExecN: 0,   // C's stance, its counter or execution, and whose turn
     roninVow: null, roninGrave: null, roninVowUsed: false,   // V: the vow, its grave, and whether this RONIN has had it
     roninSkyClear: null, roninBroken: 0,           // its final technique, and the minute after a broken grave
+    // VOIDRUNNER's IMAGO: GRAZE, the clock, the four cooldowns, Z's bombs (see IMAGO, IN A RUN)
+    imGraze: 0, imT: 0, imAge: 0, imCd: [0, 0, 0, 0], imSpots: [],
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
        throwaway P, thousands of lines above where gearBlank() is declared, and
@@ -33207,6 +33209,7 @@ function ventFire() {
     return;
   }
   if (P.charId === 'hacker') { suFire(); return; }   // SUPERUSER, not a vent
+  if (P.charId === 'runner') { imFire(); return; }   // nor IMAGO
   if (!P.awake || P.weapon !== 'laser') return;
   if (P.ventT > 0) return;                 // already venting
   if (P.vent < VENT_MAX) {
@@ -37835,7 +37838,7 @@ function resetGame() {
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
   inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
-  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; oprRite = false; orite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0;
+  amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; oprRite = false; orite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0; IM_ST.fx.length = 0;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
@@ -37983,11 +37986,12 @@ function playKey(k) {
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
      and ventFire() already refuses anything that is not holding a lance. */
   if (k === 'f') { if (isBlade()) bladeParry(); else ventFire(); return; }
-  // the awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's and RONIN's
+  // the awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's, RONIN's and IMAGO's
   if (k === 'z' || k === 'x' || k === 'c') {
     if (P.charId === 'hacker') suAbility(SU_KEYS.indexOf(k));
     else if (P.charId === 'ember') odAbility(SU_KEYS.indexOf(k));
     else if (P.charId === 'melee') roninAbility(SU_KEYS.indexOf(k));
+    else if (P.charId === 'runner') imAbility(SU_KEYS.indexOf(k));
     return;
   }
   // THE VAGRANT: E over something on the floor is a look at it
@@ -37998,6 +38002,7 @@ function playKey(k) {
     if (P.charId === 'hacker' && suOn()) suAbility(3);
     else if (P.charId === 'ember' && odKitOn() && OD_KIT[3]) odAbility(3);
     else if (P.charId === 'melee' && roninOn() && RONIN_KIT[3]) roninAbility(3);
+    else if (P.charId === 'runner' && imOn() && IM_KIT[3]) imAbility(3);
     else useRootCmd();
   }
 }
@@ -38199,10 +38204,10 @@ function handleKey(k) {
   /* One key, two pilots: the vent is EMBER's and the parry is THE VAGRANT's,
      and ventFire() already refuses anything that is not holding a lance. */
   if (k === 'f') { inputPress(k); return; }
-  /* The awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's and RONIN's. Only in play,
+  /* The awakened kits, Z X C V: SUPERUSER's, OVERDRIVE's, RONIN's and IMAGO's. Only in play,
      because paused X is the codex, and swallowing it here kept THE HACKER out
      of the codex for as long as it was paused. */
-  if (state === 'play' && (k === 'z' || k === 'x' || k === 'c') && ['hacker', 'ember', 'melee'].includes(P.charId)) {
+  if (state === 'play' && (k === 'z' || k === 'x' || k === 'c') && ['hacker', 'ember', 'melee', 'runner'].includes(P.charId)) {
     inputPress(k); return;
   }
   if (vigilKey(k)) return;               // ALL HALLOWS: the vigil's own keys first
@@ -39255,6 +39260,7 @@ function updatePlayer(dt) {
   suTick(dt);
   odKitTick(dt);
   roninKitTick(dt);          // RONIN's kit: its cooldowns, the cleaves and their scores, the wounds
+  imTick(dt);                // IMAGO's clock, its cooldowns, and Z's bombs
 
   if (P.outside && outsideHas(P.charId, 'fire')) {
     /* An outside pilot fires its own way (OUTSIDE PILOTS): told whether the
@@ -44017,7 +44023,9 @@ function drawOprScreen() {
                        come back so far), whole (0-1: the share back; 0 is his
                        memory of it, drawn flat), guard (0-1, the plating
                        ready), molt { k, f } at a seam, grey (0-1, the brush
-                       over it), awake, wakeAge (s), hurt, phasing, t
+                       over it), awake, wakeAge (s), hurt, phasing, t; and
+                       in a run only, eyes (0-1: IMAGO's Z, its eyespots
+                       flaring as the wings throw; see IMAGO — art hooks)
      growths(g, s)     awake: what has grown out of its back. s: x, y, ang, r,
                        t, list [{ i, id, side (-1/0/1), k (0-1, growing in),
                        kick (0-1, since it fired), kind }]
@@ -44533,7 +44541,7 @@ function orImagoState(h) {
   const open = wa < 0.38 ? 0 : Math.max(0, K.ease.backOut(oaC01((wa - 0.38) / 0.75)));
   const beat = wa > 1.05 && wa < 1.6 ? Math.sin((wa - 1.05) / 0.55 * Math.PI) : 0;   // its first beat, big
   return { wa, open, ant: K.ease.backOut(oaC01((wa - 0.55) / 0.45)), tail: oaC01((wa - 0.6) / 0.6), beat,
-           body: oaC01((wa - 0.3) / 0.22), flash: oaC01(1 - wa / 0.55), Wg };
+           body: oaC01((wa - 0.3) / 0.22), flash: oaC01(1 - wa / 0.55), eyes: oaC01(h.eyes || 0), Wg };
 }
 // a wing's point (hull space, the upper side) where the wing has it now: folded back along the body until it opens, swept, beating
 function orWingXf(p, side, fore, I) {
@@ -44587,6 +44595,13 @@ function orWingDraw(g, side, fore, I, L, t, mat) {
     g.save(); g.globalCompositeOperation = 'lighter';
     oaGlow(g, ec[0], ec[1], er * 2.6, C3.glow, 0.4 * k);
     g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(ec[0] + L.x * er * 0.45, ec[1] + L.y * er * 0.45, er * 0.22, 0, TAU); g.fill();
+    g.restore();
+  }
+  // in a run, IMAGO's Z: the eyespot flaring white as the wing throws its bombs
+  if (I.eyes > 0) {
+    g.save(); g.globalCompositeOperation = 'lighter';
+    g.beginPath(); g.arc(ec[0], ec[1], er * (1 + 0.6 * I.eyes), 0, TAU); g.fillStyle = rgba('#f0fdff', (0.85 * I.eyes * k).toFixed(3)); g.fill();
+    if (mat) oaGlow(g, ec[0], ec[1], er * 5, '#a5f3fc', 0.7 * I.eyes * k);
     g.restore();
   }
   // its edge; on a forewing, the leading edge is PLATING: armoured, bright, in segments
@@ -46260,6 +46275,533 @@ const OPR_ART = {
   }
 };
 /* ===================== end of VOIDRUNNER'S RITE art hooks ===================== */
+
+/* ============================== IMAGO, IN A RUN ==============================
+   VOIDRUNNER's transformation outside its rite, and the first of the four
+   actives it opens (ONE-POINT-OH-RITE-PLAN.md, "The form's frame"). The
+   awakened kit is one passive, one transformation, and four abilities that
+   only answer while transformed, on Z X C V.
+
+   STAND-IN — how it is entered, as SUPERUSER's first was: the plan's frame,
+   built only as far as its first active needs (18 Oct). An awakened
+   VOIDRUNNER fills GRAZE with near misses: a round of theirs that passes
+   within IM_GRAZE_R of the hull's edge without landing pays IM_PAY, and one
+   dashed through pays IM_PAY_DASH. [F] spends a full meter on IM_LEN seconds
+   of IMAGO: the moth from the rite (OPR_ART.hull, awake), hatching out of its
+   chrysalis where it stands. The passive, the cut-in and PvP's duel rule are
+   still to come (Phases 3 and 5). None of it runs in the rite, nor in PvP.
+
+   Z — EYESPOTS (user, 18 Oct): the eyespot idea, with bombs instead of a
+   flash. The wings throw small bombs out over a 130° cone along the aim, and
+   every one of them bursts two seconds after the throw. My rules, not the
+   user's:
+     - EYE_ROWS: nine, in two rows across the cone, the near row between the
+       far row's bombs, so the blasts meet and it is thickest close in;
+     - a bomb thrown into a body lands on it and rides it until it bursts;
+       if the body dies first, the bomb drops where it was;
+     - a blast hurts every body in EYE_R at full weight, and a body in
+       several takes each; it hurts no pilot and cuts no rounds;
+     - its damage is scaled by what upgrades have made of the starting
+       damage (suPower), as THE MANE's is;
+     - a cooldown, EYE_CD from the throw, as SUPERUSER's and RONIN's keys
+       have. Whether IMAGO's moves should spend GRAZE instead is still open.
+=========================================================================== */
+const IM_MAX      = 40;      // GRAZE to fill: a piece's worth in the rite (OPR_GRAZE)
+const IM_GRAZE_R  = 26;      // how far past the hull's edge a round may pass and still be a graze
+const IM_PAY      = 1;       // a round grazed
+const IM_PAY_DASH = 4;       // a round dashed through
+const IM_LEN      = 60;      // seconds of IMAGO, as the other three forms
+const IM_COL      = '#67e8f9';
+
+const EYE_CONE = 130 * Math.PI / 180;   // the cone they are thrown over (user, 18 Oct)
+const EYE_FUSE = 2;                     // and every one bursts this long after the throw (user)
+// the rows across the cone: [how many, how far out (px), how much of the cone]
+const EYE_ROWS = [[4, 95, 0.75], [5, 195, 1]];
+const EYE_JIT  = 12;                    // px a bomb lands off its place, either way (seeded)
+const EYE_FLY  = 0.3;                   // seconds from the wings to where it lands
+const EYE_R    = 62;                    // a blast's reach
+const EYE_DMG  = 45;                    // a blast, before upgrades
+const EYE_CD   = 7;                     // from the throw
+const EYE_MAX  = 36;                    // out at once, at most
+
+const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
+// whether near misses fill GRAZE for pilot p: awake, out of IMAGO, out of the rite and PvP
+const imFills = p => p.charId === 'runner' && !!p.awake && !p.down && !(p.imT > 0) && !oprOn() && !PVP;
+
+/* A round of theirs near pilot p, who is pilot k (updateEBullets, before it
+   can land). It pays once, as it passes: inside the band past the hull's edge
+   it is near, and leaving the band without having landed makes it a graze. A
+   dash through it pays at once. */
+function imGrazeRound(b, p, k) {
+  if (!imFills(p)) return;
+  const bit = 1 << k;
+  if (b.imPaid & bit) return;
+  const d = len(b.x - p.x, b.y - p.y), edge = b.r + p.r;
+  if (d < edge) {
+    if (p.dashT > 0) { b.imPaid |= bit; pilotDo(k, () => imGain(IM_PAY_DASH, b.x, b.y)); }
+    return;
+  }
+  if (d < edge + IM_GRAZE_R) { b.imNear |= bit; return; }
+  if (b.imNear & bit) { b.imPaid |= bit; pilotDo(k, () => imGain(IM_PAY, b.x, b.y)); }
+}
+function imGain(n, x, y) {
+  if (!imFills(P)) return;
+  const was = P.imGraze || 0;
+  P.imGraze = Math.min(IM_MAX, was + n);
+  imFx('graze', { x, y, n, hx: P.x, hy: P.y });
+  if (was < IM_MAX && P.imGraze >= IM_MAX) {
+    floatText(P.x, P.y - 52, 'IMAGO READY', IM_COL, 15);
+    Audio_.tone(660, 0.12, 'sine', 0.07, 1320);
+  }
+}
+
+// [F], for VOIDRUNNER
+function imFire() {
+  if (state !== 'play' || oprOn() || PVP || !P.awake || P.charId !== 'runner') return;
+  if (P.imT > 0) return;
+  if ((P.imGraze || 0) < IM_MAX) {
+    floatText(P.x, P.y - 42, 'NOT GRAZED YET', '#94a3b8', 13);
+    Audio_.tone(160, 0.14, 'square', 0.07, 90);
+    return;
+  }
+  P.imGraze = 0; P.imT = IM_LEN; P.imAge = 0;
+  P.imCd = [0, 0, 0, 0];
+  tale('awake', 'runner');
+  imFx('wake', { x: P.x, y: P.y });
+  shake(0.5);
+  Audio_.tone(330, 0.5, 'sine', 0.08, 990);
+}
+
+// [Z X C V] while IMAGO is on. `cd` is the full cooldown the HUD sweeps; start() returns false if it refused
+const IM_KIT = [
+  { n: 'EYESPOTS', hud: 'EYES', cd: EYE_CD, start: imEyesThrow },
+];
+function imAbility(i) {
+  if (state !== 'play' || P.charId !== 'runner' || oprOn()) return;
+  if (!imOn()) {
+    if (P.awake && !PVP) floatText(P.x, P.y - 42, 'IMAGO ONLY', '#94a3b8', 12);
+    return;
+  }
+  const a = IM_KIT[i];
+  if (!a) return;                              // not named yet
+  if (P.imCd[i] > 0) {
+    floatText(P.x, P.y - 42, P.imCd[i].toFixed(1) + 's', '#94a3b8', 12);
+    Audio_.tone(160, 0.08, 'square', 0.05, 110);
+    return;
+  }
+  if (!a.start()) return;                      // it refused: nothing is spent
+  tale('act', 'runner', i);
+  P.imCd[i] = a.cd;
+}
+
+// once a frame from updatePlayer, IMAGO or not: a bomb thrown outlasts the form
+function imTick(dt) {
+  if (P.charId !== 'runner') return;
+  if (P.imT > 0) {
+    if (oprOn()) P.imT = 0;                    // the rite has the hull, and its own IMAGO
+    else {
+      P.imT -= dt; P.imAge += dt;
+      if (P.imT <= 0) {
+        P.imT = 0;
+        imFx('out', { x: P.x, y: P.y });
+        floatText(P.x, P.y - 42, 'VOIDRUNNER', IM_COL, 12);
+        Audio_.tone(440, 0.3, 'sine', 0.06, 220);
+      }
+    }
+  }
+  if (P.imCd) for (let i = 0; i < 4; i++) if (P.imCd[i] > 0) P.imCd[i] = Math.max(0, P.imCd[i] - dt);
+  if (P.imSpots && P.imSpots.length) imSpotTick(dt);
+}
+
+/* ------------------------------ Z — EYESPOTS -------------------------------
+   What the art is handed (IMAGO's art hooks, below):
+     P.imSpots — every bomb out, in the order thrown
+       x, y     where it is: flying, on the floor, or riding a body
+       x0, y0   where it left the hull
+       tx, ty   where it was thrown to
+       t        seconds since the throw (it bursts at EYE_FUSE)
+       on       the body it rides, or null
+       ox, oy   where on that body
+       landed   on the floor or a body, no longer flying
+       i, n     which of the throw it is, of how many
+--------------------------------------------------------------------------- */
+function imEyesThrow() {
+  if (P.imSpots.length >= EYE_MAX) return false;
+  const n = EYE_ROWS.reduce((s, r) => s + r[0], 0);
+  let i = 0;
+  for (const [m, far, part] of EYE_ROWS) {
+    for (let j = 0; j < m; j++, i++) {
+      // its place in the row, a little off it, and never outside the cone
+      const off = clamp((m > 1 ? j / (m - 1) - 0.5 : 0) * EYE_CONE * part + simRnd(0.05, -0.05), -EYE_CONE / 2, EYE_CONE / 2);
+      const a = P.ang + off;
+      const d = far + simRnd(EYE_JIT, -EYE_JIT);
+      const tx = clamp(P.x + Math.cos(a) * d, arena.x0 + 10, arena.x1 - 10);
+      const ty = clamp(P.y + Math.sin(a) * d, arena.y0 + 10, arena.y1 - 10);
+      P.imSpots.push({ x: P.x, y: P.y, x0: P.x, y0: P.y, tx, ty, t: 0, on: null, ox: 0, oy: 0, landed: false, i, n });
+    }
+  }
+  imFx('throw', { x: P.x, y: P.y, ang: P.ang });
+  Audio_.tone(520, 0.12, 'sine', 0.06, 1040);
+  return true;
+}
+
+// the first body a bomb flying from (x0, y0) to (x1, y1) this step meets
+function imSpotMeets(x0, y0, x1, y1) {
+  let best = null, bd = Infinity;
+  for (const e of enemies) {
+    if (!isThreat(e) || e.phased || e.invuln || e.oprRite) continue;
+    if (!segCircle(x0, y0, x1, y1, e.x, e.y, e.r + 5)) continue;
+    const d = (e.x - x0) * (e.x - x0) + (e.y - y0) * (e.y - y0);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+function imSpotTick(dt) {
+  let out = null;
+  for (let i = P.imSpots.length - 1; i >= 0; i--) {
+    const s = P.imSpots[i];
+    s.t += dt;
+    if (s.on && (s.on.dead || s.on.hacked)) s.on = null;       // what it rode is gone: it drops where it was
+    if (s.on) { s.x = s.on.x + s.ox; s.y = s.on.y + s.oy; }
+    else if (!s.landed) {
+      const f = clamp(s.t / EYE_FLY, 0, 1), q = 1 - (1 - f) * (1 - f);
+      const nx = lerp(s.x0, s.tx, q), ny = lerp(s.y0, s.ty, q);
+      const e = imSpotMeets(s.x, s.y, nx, ny);
+      if (e) {
+        // thrown into a body: it lands on the side it came from, and rides it
+        const a = Math.atan2(s.y - e.y, s.x - e.x);
+        s.on = e; s.ox = Math.cos(a) * e.r * 0.7; s.oy = Math.sin(a) * e.r * 0.7; s.landed = true;
+        s.x = e.x + s.ox; s.y = e.y + s.oy;
+        imFx('stick', { x: s.x, y: s.y });
+      } else {
+        s.x = nx; s.y = ny;
+        if (f >= 1) s.landed = true;
+      }
+    }
+    if (s.t >= EYE_FUSE - 1e-9) { (out || (out = [])).push(s); P.imSpots.splice(i, 1); }   // a hundred and twenty steps of 1/60 fall just short of 2
+  }
+  if (out) imEyesBurst(out);
+}
+
+// they burst: each blast takes every body in its reach, and one caught in several takes each
+function imEyesBurst(list) {
+  const dmg = EYE_DMG * suPower();
+  for (let j = list.length - 1; j >= 0; j--) {      // in the order thrown
+    const s = list[j], hit = [];
+    for (const e of enemies) {
+      if (!isThreat(e) || e.phased) continue;
+      if (len(e.x - s.x, e.y - s.y) < EYE_R + e.r) hit.push(e);
+    }
+    for (const e of hit) damageEnemy(e, dmg, false, s.x, s.y);
+    imFx('burst', { x: s.x, y: s.y, i: s.i, n: hit.length });
+  }
+  shake(0.3);
+  Audio_.boom();
+}
+
+/* ============================== IMAGO — art hooks ==============================
+   IMAGO in a run, and its kit, drawn. Nothing in the run reads them; they
+   keep any state of their own in IM_ST (this machine's, never the run's).
+   IM(name, ...) calls each inside g.save() / restore(); a hook that throws
+   loses only its own piece, once, to the console (IM_FAILED).
+
+   The run's cosmetic events come through imFx(kind, o), into IM_ST.fx:
+     graze   a near miss paid              { x, y (the round), n, hx, hy (the hull) }
+     wake    IMAGO begins                  { x, y }
+     out     and ends                      { x, y }
+     throw   Z: the wings throw            { x, y, ang }
+     stick   a bomb lands on a body        { x, y }
+     burst   a bomb bursts                 { x, y, i, n (bodies caught) }
+
+   WHAT THEY ARE HANDED (world space unless it says screen):
+     hull(g, h)    IMAGO on the hull: h as OPR_ART.hull is handed it awake,
+                   wakeAge from the press, and eyes (0-1, the wings' eyespots
+                   flaring as they throw)
+     floor(g, s)   the bombs' reach on the floor, under the bodies: s.spots
+                   (as eyes'), r (EYE_R)
+     eyes(g, s)    the bombs: s.spots [{ x, y, x0, y0, tx, ty, t, k (0-1, the
+                   fuse), f (0-1, flown), on, i, n, look (the angle to the
+                   nearest body, or null) }]
+     fx(g, s)      what the run told the drawing: s.fx [{ kind, t0, life, ... }]
+                   as above, s.now
+     hud(g, x, y, w, m)  screen. GRAZE, the clock, Z X C V: m.k (0-1 GRAZE),
+                   on, ready, T (s left), len, cd [4], kit [{ n, hud, cd } | null],
+                   keys
+=========================================================================== */
+const IM_FAILED = new Set();
+const IM_ST = { fx: [], hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
+const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.32, stick: 0.25, burst: 0.6 };
+function imFx(kind, o) {
+  if (kind === 'wake') OPR_ST.wakeAt = uiTime;      // the moth's tails start again from the hull
+  IM_ST.fx.push(Object.assign({ kind, t0: uiTime, life: IM_FX_LIFE[kind] || 0.5, seed: (IM_ST.fx.length * 7.31 + uiTime * 13) % 1000 }, o));
+  if (IM_ST.fx.length > 96) IM_ST.fx.splice(0, IM_ST.fx.length - 96);
+}
+function IM(name, ...a) {
+  const f = IMAGO_ART[name];
+  if (!f) return;
+  const g = a[0] && typeof a[0].save === 'function' ? a[0] : null;
+  if (g) g.save();
+  try { f(...a); }
+  catch (e) { if (!IM_FAILED.has(name)) { IM_FAILED.add(name); console.warn('IMAGO\'s art: ' + name + ' threw', e); } }
+  if (g) g.restore();
+}
+
+// what the hooks are handed about the bombs: the run's, and where each one is looking
+function imSpotsView() {
+  return P.imSpots.map(s => {
+    let look = null, bd = 300 * 300;
+    for (const e of enemies) {
+      if (e.dead || e.hacked) continue;
+      const d = (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y);
+      if (d < bd) { bd = d; look = Math.atan2(e.y - s.y, e.x - s.x); }
+    }
+    return { x: s.x, y: s.y, x0: s.x0, y0: s.y0, tx: s.tx, ty: s.ty, t: s.t, k: clamp(s.t / EYE_FUSE, 0, 1),
+             f: s.landed ? 1 : clamp(s.t / EYE_FLY, 0, 1), on: !!s.on, i: s.i, n: s.n, look };
+  });
+}
+// the hull: drawPlayer hands it over while IMAGO is on
+function drawImagoHull() {
+  let eyes = 0;
+  for (const s of P.imSpots) eyes = Math.max(eyes, clamp(1 - s.t / 0.35, 0, 1));
+  IM('hull', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, id: P.charId, have: [true, true, true, true], due: OPR_PIECES.length, whole: 1,
+    guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes });
+}
+// world, the floor pass: where they will burst
+function drawImagoFloor() {
+  if (P.charId !== 'runner' || !P.imSpots || !P.imSpots.length) return;
+  IM('floor', ctx, { spots: imSpotsView(), r: EYE_R });
+}
+// world, the additive pass: the bombs themselves
+function drawImagoKit() {
+  if (P.charId !== 'runner' || !P.imSpots || !P.imSpots.length) return;
+  IM('eyes', ctx, { spots: imSpotsView() });
+}
+// world, once a frame for every pilot: what the run told the drawing
+function drawImagoFx() {
+  if (!IM_ST.fx.length) return;
+  IM('fx', ctx, { fx: IM_ST.fx, now: uiTime });
+}
+// the HUD, under the dash: GRAZE, then IMAGO's clock and its keys. Returns the next free line
+function drawImagoHud(pad, ly, bw) {
+  if (!P.awake || P.charId !== 'runner' || oprOn() || PVP) return ly;
+  const on = imOn(), k = clamp((P.imGraze || 0) / IM_MAX, 0, 1);
+  IM('hud', ctx, pad, ly, bw, { k, on, ready: !on && k >= 0.999, T: P.imT || 0, len: IM_LEN, cd: (P.imCd || [0, 0, 0, 0]).slice(),
+    kit: [0, 1, 2, 3].map(i => IM_KIT[i] ? { n: IM_KIT[i].n, hud: IM_KIT[i].hud, cd: IM_KIT[i].cd } : null), keys: SU_KEYS });
+  return ly + 52;
+}
+
+// a rounded rectangle, as a path on g
+function imRR(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+const IMAGO_ART = {
+  /* IMAGO, as the rite draws it awake: the luna moth hatching out of its
+     chrysalis from the press. */
+  hull(g, h) { OPR_ART.hull(g, h); },
+
+  /* Where each bomb will burst: its reach, dashed, closing in on the blast's
+     size as the fuse runs down, and filling in its last moments. Its shadow
+     under it. Lines only, so it reads with Surface materials off. */
+  floor(g, s) {
+    const r = s.r;
+    g.lineCap = 'butt';
+    for (const b of s.spots) {
+      const k = b.k, in_ = oaC01((b.t - 0.15) / 0.3), end = oaC01((k - 0.8) / 0.2);
+      if (in_ <= 0) continue;
+      if (!b.on) { g.fillStyle = 'rgba(0,0,0,' + (0.35 * in_).toFixed(3) + ')'; g.beginPath(); g.ellipse(b.x, b.y + 4, 7, 3.2, 0, 0, TAU); g.fill(); }
+      const rr = r * (1 + 0.35 * (1 - k));
+      g.setLineDash([5, 7]); g.lineDashOffset = -b.t * 18;
+      g.strokeStyle = rgba(IM_COL, ((0.1 + 0.3 * k) * in_).toFixed(3)); g.lineWidth = 1.4;
+      g.beginPath(); g.arc(b.x, b.y, rr, 0, TAU); g.stroke();
+      g.setLineDash([]);
+      if (end > 0) { g.fillStyle = rgba(IM_COL, (0.07 * end).toFixed(3)); g.beginPath(); g.arc(b.x, b.y, r, 0, TAU); g.fill(); }
+    }
+  },
+
+  /* The bombs are eyes. Thrown, each is a mote of light off the wings with
+     its streak behind it; landed, a lens of dark glass rimmed in light, and
+     the lids part. The iris goes from the moth's cyan to white as the fuse
+     runs, the pupil narrows and watches the nearest body, and in its last
+     moments it blinks faster and fills with white. */
+  eyes(g, s) {
+    const mat = !!FXO.mat, R = 7.6;
+    for (const b of s.spots) {
+      const away = Math.atan2(b.ty - b.y0, b.tx - b.x0) || 0;
+      if (b.f < 1 && !b.on) {
+        g.globalCompositeOperation = 'lighter';
+        const tail = 24 * (1 - b.f) + 6;
+        g.strokeStyle = rgba(IM_COL, 0.55); g.lineWidth = 2.2; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(b.x - Math.cos(away) * tail, b.y - Math.sin(away) * tail); g.lineTo(b.x, b.y); g.stroke();
+        if (mat) oaGlow(g, b.x, b.y, 10, '#a5f3fc', 0.8);
+        g.fillStyle = '#ecfeff'; g.beginPath(); g.arc(b.x, b.y, 2.4, 0, TAU); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        continue;
+      }
+      const k = b.k, open = 1 - Math.pow(1 - oaC01((b.t - EYE_FLY) / 0.4), 3), end = oaC01((k - 0.8) / 0.2);
+      const blink = end > 0 && Math.sin(b.t * (40 + 70 * end)) < 0 ? 0.35 : 1;
+      g.save();
+      g.translate(b.x, b.y); g.rotate(away + Math.PI / 2);
+      if (mat) {
+        g.globalCompositeOperation = 'lighter';
+        oaGlow(g, 0, 0, R * (2.2 + 1.6 * k), IM_COL, (0.22 + 0.48 * k) * blink);
+        g.globalCompositeOperation = 'source-over';
+      }
+      // its lens
+      g.beginPath(); g.arc(0, 0, R, 0, TAU); g.fillStyle = '#020611'; g.fill();
+      g.strokeStyle = rgba('#a5f3fc', (0.6 + 0.4 * blink).toFixed(3)); g.lineWidth = 1.2; g.stroke();
+      // the lids parting: an almond of the eye inside it
+      const hh = R * 0.5 * open * (end > 0 ? blink : 1), ww = R * 0.96;
+      if (hh > 0.25) {
+        g.save();
+        g.beginPath(); g.moveTo(-ww, 0); g.quadraticCurveTo(0, -hh * 2, ww, 0); g.quadraticCurveTo(0, hh * 2, -ww, 0); g.closePath();
+        g.clip();
+        let lx = 0, ly = 0;
+        if (b.look !== null) { const la = b.look - away - Math.PI / 2; lx = Math.cos(la) * R * 0.24; ly = Math.sin(la) * R * 0.24; }
+        const ir = R * 0.5;
+        g.beginPath(); g.arc(lx, ly, ir, 0, TAU); g.fillStyle = oaMix('#22d3ee', '#ffffff', k * k); g.fill();
+        g.beginPath(); g.arc(lx, ly, R * (0.34 - 0.2 * k), 0, TAU); g.fillStyle = '#01040a'; g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(lx - ir * 0.38, ly - ir * 0.38, 0.9, 0, TAU); g.fill();
+        g.restore();
+        g.strokeStyle = rgba('#ecfeff', (0.8 * open).toFixed(3)); g.lineWidth = 0.7;
+        g.beginPath(); g.moveTo(-ww, 0); g.quadraticCurveTo(0, -hh * 2, ww, 0); g.quadraticCurveTo(0, hh * 2, -ww, 0); g.stroke();
+      }
+      // its last moments: white heat in the lens
+      if (end > 0) {
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = rgba('#ffffff', (0.65 * end * blink).toFixed(3));
+        g.beginPath(); g.arc(0, 0, R * (0.45 + 0.55 * end), 0, TAU); g.fill();
+      }
+      g.restore();
+    }
+  },
+
+  /* What the run told the drawing. A burst is a flash, a ring out to the
+     blast's reach, and scales of light thrown off it; a graze, a crescent of
+     light round the hull on the side the round passed; the throw, an arc of
+     light across the cone; the wake and the end, a ring off the hull. */
+  fx(g, s) {
+    const many = FXO.parts ? 1 : 0.4, now = s.now;
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    for (let i = s.fx.length - 1; i >= 0; i--) {
+      const e = s.fx[i], a = (now - e.t0) / e.life;
+      if (a >= 1) { s.fx.splice(i, 1); continue; }
+      if (a < 0) continue;
+      const fa = 1 - a, sd = e.seed;
+      switch (e.kind) {
+        case 'burst': {
+          const R = EYE_R * (0.3 + 0.7 * (1 - Math.pow(1 - a, 3)));
+          if (a < 0.25) oaGlow(g, e.x, e.y, EYE_R * 0.95, '#ecfeff', 0.85 * (1 - a / 0.25));
+          g.strokeStyle = rgba(IM_COL, (0.55 * fa).toFixed(3)); g.lineWidth = 8 * fa + 1;
+          g.beginPath(); g.arc(e.x, e.y, R, 0, TAU); g.stroke();
+          g.strokeStyle = rgba('#f0fdff', (0.9 * fa).toFixed(3)); g.lineWidth = 2 * fa + 0.5; g.stroke();
+          g.strokeStyle = rgba('#a5f3fc', (0.85 * fa).toFixed(3)); g.lineWidth = 1.3;
+          g.beginPath();
+          for (let k = 0; k < Math.round(10 * many); k++) {
+            const sa = odHash(sd + k) * TAU, sr = R * (0.55 + 0.6 * odHash(sd + k * 3 + 1));
+            g.moveTo(e.x + Math.cos(sa) * sr, e.y + Math.sin(sa) * sr);
+            g.lineTo(e.x + Math.cos(sa) * (sr + 7 * fa + 2), e.y + Math.sin(sa) * (sr + 7 * fa + 2));
+          }
+          g.stroke();
+          break;
+        }
+        case 'graze': {
+          const q = Math.atan2(e.y - e.hy, e.x - e.hx), R = 17 + 16 * (1 - Math.pow(1 - a, 3));
+          g.strokeStyle = rgba(IM_COL, (0.45 * fa).toFixed(3)); g.lineWidth = 7 * fa + 1;
+          g.beginPath(); g.arc(e.hx, e.hy, R, q - 0.95, q + 0.95); g.stroke();
+          g.strokeStyle = rgba('#f0fdff', (0.95 * fa).toFixed(3)); g.lineWidth = 2 * fa + 0.6; g.stroke();
+          break;
+        }
+        case 'throw': {
+          const R = 22 + 40 * a;
+          g.strokeStyle = rgba('#a5f3fc', (0.6 * fa).toFixed(3)); g.lineWidth = 3 * fa + 0.5;
+          g.beginPath(); g.arc(e.x, e.y, R, e.ang - EYE_CONE / 2, e.ang + EYE_CONE / 2); g.stroke();
+          break;
+        }
+        case 'stick': {
+          g.strokeStyle = rgba('#ecfeff', (0.8 * fa).toFixed(3)); g.lineWidth = 1.5;
+          g.beginPath(); g.arc(e.x, e.y, 6 + 12 * a, 0, TAU); g.stroke();
+          break;
+        }
+        case 'wake': case 'out': {
+          const R = (e.kind === 'wake' ? 30 : 20) + 90 * (1 - Math.pow(1 - a, 2));
+          g.strokeStyle = rgba(IM_COL, (0.5 * fa).toFixed(3)); g.lineWidth = 5 * fa + 1;
+          g.beginPath(); g.arc(e.x, e.y, R, 0, TAU); g.stroke();
+          if (a < 0.3) oaGlow(g, e.x, e.y, 60, '#a5f3fc', 0.6 * (1 - a / 0.3));
+          break;
+        }
+      }
+    }
+  },
+
+  /* GRAZE, where the other forms' meters sit: one bar, a notch every ten,
+     the moth's cyan, draining as IMAGO's minute runs; then Z X C V, each
+     sweeping its cooldown and flashing as it comes back. */
+  hud(g, pad, ly, bw, m) {
+    const S = IM_ST.hud;
+    if (m.ready && !S.wasRdy) S.rdyAt = uiTime;
+    S.wasRdy = m.ready;
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    const lab = m.on ? 'IMAGO' : m.ready ? '[F] IMAGO' : '[F] GRAZE';
+    g.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    g.fillStyle = m.on || m.ready ? IM_COL : '#0e7490';
+    if (m.ready) g.globalAlpha = 0.72 + Math.sin(uiTime * 6) * 0.28;
+    g.fillText(lab, pad, ly);
+    g.globalAlpha = 1;
+    const lw = g.measureText(lab).width;
+    g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace";
+    g.fillStyle = m.on ? rgba(IM_COL, 0.8) : '#0e7490';
+    if (!m.ready) g.fillText(m.on ? m.T.toFixed(1) + 's' : Math.floor(m.k * 100) + '%', pad + lw + 6, ly);
+
+    const barW = Math.min(77, bw - 6), cy = ly + 7, fill = m.on ? clamp(m.T / m.len, 0, 1) : m.k;
+    g.fillStyle = 'rgba(148,163,184,0.16)'; g.fillRect(pad, cy, barW, 5);
+    if (fill > 0) {
+      g.fillStyle = m.on || m.ready ? IM_COL : '#0891b2';
+      if (m.ready) g.globalAlpha = 0.65 + Math.sin(uiTime * 6) * 0.35;
+      g.fillRect(pad, cy, barW * fill, 5);
+      g.globalAlpha = 1;
+    }
+    const sweep = clamp((uiTime - S.rdyAt) / 0.45, 0, 1);
+    if (m.ready && sweep < 1) { g.fillStyle = 'rgba(236,254,255,0.85)'; g.fillRect(pad + barW * sweep - 4, cy - 1, 8, 7); }
+    g.fillStyle = 'rgba(2,6,23,0.9)';
+    for (let i = 1; i < 4; i++) g.fillRect(Math.round(pad + barW * i / 4), cy, 1, 5);
+
+    // Z X C V
+    const kw = (barW - 3 * 3) / 4, kh = 16, ky = ly + 18;
+    g.textAlign = 'center';
+    for (let i = 0; i < 4; i++) {
+      const x = pad + i * (kw + 3), a = m.kit[i], cd = m.cd[i] || 0, live = m.on && !!a;
+      if (live && S.prev[i] > 0 && cd <= 0) S.at[i] = uiTime;
+      S.prev[i] = cd;
+      g.fillStyle = 'rgba(2,10,16,0.85)'; imRR(g, x, ky, kw, kh, 3); g.fill();
+      if (live && cd > 0) {
+        g.save(); imRR(g, x, ky, kw, kh, 3); g.clip();
+        const cx = x + kw / 2, cyy = ky + kh / 2, f = clamp(cd / a.cd, 0, 1);
+        g.fillStyle = 'rgba(34,211,238,0.24)';
+        g.beginPath(); g.moveTo(cx, cyy); g.arc(cx, cyy, kw, -Math.PI / 2, -Math.PI / 2 + TAU * f); g.closePath(); g.fill();
+        g.restore();
+      } else if (live) { g.fillStyle = 'rgba(165,243,252,0.1)'; imRR(g, x, ky, kw, kh, 3); g.fill(); }
+      g.strokeStyle = live ? (cd > 0 ? '#0e7490' : IM_COL) : a ? '#164e63' : '#1e293b';
+      g.lineWidth = 1.2; imRR(g, x, ky, kw, kh, 3); g.stroke();
+      const ft = (uiTime - S.at[i]) / 0.35;
+      if (ft >= 0 && ft < 1) {
+        const gr = ft * 5;
+        g.strokeStyle = rgba(IM_COL, (1 - ft).toFixed(3)); g.lineWidth = 1.5;
+        imRR(g, x - gr, ky - gr, kw + gr * 2, kh + gr * 2, 3 + gr); g.stroke();
+      }
+      g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'middle';
+      g.fillStyle = live ? (cd > 0 ? '#22d3ee' : IM_COL) : a ? '#0e7490' : '#334155';
+      g.fillText(m.keys[i].toUpperCase(), x + kw / 2, ky + kh / 2 + 0.5);
+      g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'top';
+      const sub = a ? (live && cd > 0 ? cd.toFixed(1) : a.hud) : '';
+      if (sub) { g.fillStyle = live ? (cd > 0 ? '#0e7490' : rgba(IM_COL, 0.75)) : '#164e63'; g.fillText(sub, x + kw / 2, ky + kh + 3); }
+    }
+  }
+};
+/* ========================== end of IMAGO's art hooks ========================== */
 
 /* ========================= ONE POINT OH — art hooks =========================
    Every visual piece of the route, and its sounds, by name, drawn (11 Oct):
@@ -53910,6 +54452,7 @@ function updateEBullets(dt) {
     }
     // anything you have taken is in the way, and can be shot off you
     if (hackHitByBullet(b)) { ebullets.splice(i, 1); continue; }
+    imGrazeRound(b, P, PILOT.on);          // IMAGO's GRAZE: a near miss, or a dash through it
     if (len(b.x - P.x, b.y - P.y) < b.r + P.r) {
       hurtPlayer(b.dmg, { src: b.owner, shot: b });   // the shot, for a counter
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
@@ -53918,6 +54461,7 @@ function updateEBullets(dt) {
     }
     // the other pilot is shot at by the same rounds, on the same terms
     const wg = mpPilots();
+    if (wg && !hackBy) imGrazeRound(b, wg, PILOT.on === 0 ? 1 : 0);
     if (wg && !hackBy && len(b.x - wg.x, b.y - wg.y) < b.r + wg.r) {
       pilotDo(wg.pid, () => hurtPlayer(b.dmg, { src: b.owner, shot: b }));
       burst(b.x, b.y, 8, b.col, 200, 2.4, 0.35);
@@ -54144,6 +54688,7 @@ function render() {
     drawOdBrandNukeMark();     // COMBO 1: the giant column priming, and the floor after it
     drawRoninScores();         // RONIN's Z: the X it leaves in the floor
     drawRoninGrave();          // RONIN's V: the grave marker
+    drawImagoFloor();          // IMAGO's Z: where the bombs will burst
     { const rq = roninPhase(); if (rq) drawRoninIntroWorld(rq); }   // RONIN's lead-in, on the floor
     { const sq = suPhase(); if (sq) drawSuIntroWorld(sq); }         // SUPERUSER's cut-in, on the floor
     outsideDraw('floor');      // an outside pilot's, on the floor
@@ -54231,8 +54776,10 @@ function render() {
     drawRoninCleaves();         // RONIN's Z: the strokes
     drawRoninSky();             // RONIN's X: the paths, and the sky clearing along them
     drawRoninVowWorld();        // RONIN's V: the vow on the hull, and its line to the grave
+    drawImagoKit();             // IMAGO's Z: the bombs
     outsideDraw('fx');          // an outside pilot's kit, in the room
   });
+  drawImagoFx();              // IMAGO's: grazes, its wake, the throw and the bursts
   drawMalFx();
   drawParticles();
   drawAsh();
@@ -65136,6 +65683,8 @@ function drawPlayer() {
   if (odFusionOn()) { drawOdFusionHull(); return; }
   // RONIN: a full reskin once the transformation owns the hull (VRA v2)
   if (roninShown() && vraRoninOwns()) { drawRoninHull(); return; }
+  // IMAGO: a full reskin while it is on, the moth from the rite, and the skin comes back after
+  if (imOn()) { drawImagoHull(); return; }
   if (SkinFx.on) SkinFx.under();
   // ALL HALLOWS: a prize that is its own hull draws it, and the stock one is skipped
   if (hlWrSwapTap()) { SkinFx.player(); return; }
@@ -67284,6 +67833,7 @@ function drawHUD() {
   }
 
   ly = drawSuHud(pad, ly, bw);    // THE HACKER's root meter and Z X C V
+  ly = drawImagoHud(pad, ly, bw); // VOIDRUNNER's GRAZE, IMAGO's clock and Z X C V
 
   // the malware owns the dash, so it says so under the dash pips
   if (P.malware) {
@@ -82949,6 +83499,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'bloomTaps', '_glowCache', '_patCache', '_rsGlow', '_riteSheets', '_hlHexC', '_hlSpr', '_hlBakes', '_hlWrSpr', '_hlWrStages',
   'OA_TAGGED', 'OA_FAILED',               // ONE POINT OH's art: what it tagged, and which hook has thrown
   'OR_TAGGED', 'OR_FAILED', 'OPR_ST',     // and his rite's: the same, and its own state
+  'IM_FAILED', 'IM_ST',                   // IMAGO's art, in a run: which hook has thrown, and its own state
   '_aboveSpr',                            // FROM ABOVE: the spear, baked
   'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run

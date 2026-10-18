@@ -18,7 +18,9 @@ It follows your direction of 16 and 17 Oct:
 **Built 17 Oct (Phase 1, on blank hooks):** the rite's logic, played end to
 end. **Drawn 17 Oct (Phase 2):** every `OPR_ART` hook, the hull's stages,
 the molt, IMAGO and its eight growths, his copy and its rounds, and the HUD,
-in the route's two renderers. See "As built" under The path. This repository
+in the route's two renderers. **Built 18 Oct (Phases 3 and 4, begun):** IMAGO
+in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
+active, your Z: EYESPOTS. See "As built" under The path. This repository
 is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -359,7 +361,9 @@ still runs through the route's `oaAnger` (by `OPR_RAGE`), which his voice
 reads, but he is the rite's own (`him`): every rite redraws its boss as the
 person under it.
 
-**For the form in a run (Phase 3):** `imagoHull`, `imagoCutIn`, `imagoHud`.
+**For the form in a run (`IMAGO_ART`, built 18 Oct):** `hull` (the rite's
+moth, handed `eyes` as Z throws), `floor`, `eyes` and `fx` (Z's bombs, their
+reach and their bursts), `hud`. Its cut-in (`cutIn`) is still to come.
 
 ## The form's frame (after the rite)
 
@@ -378,7 +382,37 @@ were, so this is the frame only.
   V everything, as the last resort.
 - **PvP:** VOIDRUNNER is a base pilot, so ranked from bronze to gold never
   flies it awake. Grazing needs rounds, so against a lance or a blade the
-  meter needs a duel rule, as `PVP.heat` is for the vent.
+  meter needs a duel rule, as `PVP.heat` is for the vent. Until then GRAZE
+  does not fill in PvP and [F] does nothing there.
+
+### Z — EYESPOTS (yours, 18 Oct)
+
+From the eyespot idea, with bombs instead of a flash: **the wings throw small
+bombs out over a 130° cone along the aim, and every one of them bursts two
+seconds after the throw.** As the wings throw, the four eyespots on them
+flare white.
+
+My rules, not yours (the numbers are under Numbers):
+
+- **Nine of them, in two rows across the cone.** Four at about 95 px, five at
+  about 195 px, the near row between the far row's bombs, each a little off
+  its place. So the blasts meet, and it is thickest close in: Z is the close
+  one. They never land outside the cone or the room.
+- **A bomb thrown into a body lands on it and rides it** until it bursts. If
+  the body dies first, the bomb drops where it was and still bursts.
+- **A blast hurts every body in its reach at full weight,** and a body in
+  several takes each one. It hurts no pilot and cuts no rounds.
+- **Its damage scales with the damage cards,** as THE MANE's does (`suPower`:
+  what the build has made of the starting damage).
+- **A cooldown, 7 s from the throw,** as SUPERUSER's and RONIN's keys have.
+  Whether IMAGO's moves should spend GRAZE instead is your call (question 6).
+- **The look.** In the air each bomb is a mote of light. Landed, it is an
+  eye: a dark lens rimmed in light whose lids part, its iris going from the
+  moth's cyan to white as the fuse runs, the pupil narrowing and watching the
+  nearest body. Its reach is a dashed ring on the floor that closes in on the
+  blast's size and fills in at the end, while the eye blinks faster. The
+  burst is a flash, a ring out to its reach, and scales of light thrown off
+  it. With effects off it reads by the rings and the eyes' outlines.
 
 ## Tales (stand-ins, in the voice)
 
@@ -448,9 +482,11 @@ with `FXO.mat` off. Drawn 17 Oct (below).
 **Phase 3: the form's frame.** The passive, GRAZE in runs and its HUD, [F]
 for 60 s, `imagoHull` and the cut-in with lockstep's hold rule,
 `tale('awake')` and `tale('act')`, and `runner` in the lockstep awakened
-list (`scripts/lockstep.mjs`).
+list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
+needed (below): still to come are the passive and the cut-in.
 
-**Phase 4: the four actives,** named by you one at a time.
+**Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, built
+18 Oct (below). X, C and V are still to be named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -574,6 +610,44 @@ header, says how the two renderers are kept apart.
   a snapshot). A browser pass at 1366 × 768 played every beat with no errors,
   and close-ups of every stage were drawn with effects on and off.
 
+### As built (18 Oct, IMAGO in a run and its Z)
+
+A new block, "IMAGO, IN A RUN", after the rite's art hooks in `index.html`,
+and its own art hooks (`IMAGO_ART`) under it. As with SUPERUSER's first
+active, the frame is a stand-in, built only as far as its first active needs.
+
+- **GRAZE in a run:** an awake VOIDRUNNER fills it with near misses. A round
+  of theirs that passes within 26 px of the hull's edge pays 1 as it leaves,
+  one that lands pays nothing, and one dashed through pays 4. It fills to 40
+  and says IMAGO READY. It does not fill while IMAGO is on, in the rite, or in
+  PvP. In co-op each pilot's rounds are their own.
+- **[F]** spends a full meter on 60 s of IMAGO. Short of full it says NOT
+  GRAZED YET and spends nothing.
+- **IMAGO in a run** is the rite's moth (`OPR_ART.hull`, awake), a full
+  reskin while it is on, as RONIN's is. It hatches out of its chrysalis where
+  it stands, as it did in the duel; that stands in for the cut-in. When the
+  minute ends it is today's VOIDRUNNER again, skin and all.
+- **The HUD**, where the other forms' meters sit: GRAZE as a bar notched in
+  quarters, `[F] IMAGO` when it is full, IMAGO's clock draining, and Z X C V,
+  each sweeping its cooldown. Only Z has a name under it so far.
+- **Z, EYESPOTS,** as above. X, C and V do nothing yet.
+- **Wired in:** `newPlayer` (`imGraze`, `imT`, `imAge`, `imCd`, `imSpots`),
+  `ventFire` ([F]), `handleKey` and `playKey` (Z X C V), `updatePlayer`
+  (`imTick`), `updateEBullets` (`imGrazeRound`, both pilots), `drawPlayer`,
+  the floor and room passes, the HUD, and the snapshot's local list
+  (`IM_ST`, `IM_FAILED`). The rite's eyespots take an `eyes` flare.
+  `tale('awake')` and `tale('act')` are called, and open nothing until
+  IMAGO's pages are written.
+- **Tests:** `npm run test:imago` (new, 57 checks: GRAZE, [F], Z's cone,
+  fuse, damage, riding a body, the cooldown, the form ending under its bombs,
+  the rite, a snapshot taken mid-fuse, every hook drawn with effects on and
+  off). `imago` is a new scenario in `npm test`, and VOIDRUNNER is awake in
+  lockstep's kit scenarios, its IMAGO in their fingerprints.
+- **A browser pass** at 1366 × 768, effects on and off, the game stepped by
+  hand so each frame is at its time: the meter, the hatch, the throw, the
+  eyes, the fuse running down, the bursts, the HUD. No errors, and the same
+  damage with effects on and off.
+
 ## Numbers (one block in the code, all tunable)
 
 | | |
@@ -597,6 +671,20 @@ header, says how the two renderers are kept apart.
 Pace, from the test bot: the four sequences take about two minutes, and the
 duel about thirty seconds, from "There. Now it is fair." to the card.
 
+**IMAGO in a run** (`IM_*`, `EYE_*`; mine, to be measured against real runs):
+
+| | |
+| --- | --- |
+| `IM_MAX` | GRAZE 40 to fill (a piece's worth in the rite) |
+| `IM_GRAZE_R` | 26 px past the hull's edge is a graze |
+| `IM_PAY`, `IM_PAY_DASH` | 1 a round grazed, 4 a round dashed through |
+| `IM_LEN` | 60 s of IMAGO |
+| `EYE_CONE`, `EYE_FUSE` | 130°, 2 s (yours) |
+| `EYE_ROWS` | 4 at 95 px over three quarters of the cone, 5 at 195 px over all of it; each up to 12 px and 3° off its place |
+| `EYE_FLY` | 0.3 s from the wings to where it lands |
+| `EYE_R`, `EYE_DMG` | 62 px reach, 45 a blast before the damage cards |
+| `EYE_CD` | 7 s from the throw |
+
 ## Questions for you (defaults are in)
 
 1. **The pieces.** PLATING, A SECOND BARREL, THE LATTICE, THE CORE: the dev's
@@ -608,3 +696,8 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 4. **The growths.** The eight above, in that order, or others?
 5. **At rest.** No change while awake but not transformed (my pick), or the
    healed seam?
+6. **What IMAGO's moves cost.** A cooldown each, as SUPERUSER's and RONIN's
+   (built), or GRAZE refilling during the form and spent by each move, as
+   EMBER's heat is (my pick: it keeps the moth flying close to rounds)?
+7. **EYESPOTS riding bodies.** A bomb thrown into a body rides it (built), or
+   every bomb lands on the floor where it was thrown?
