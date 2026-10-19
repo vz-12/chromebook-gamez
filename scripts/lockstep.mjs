@@ -244,6 +244,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
       [P, pilotP(1) || {}].map(o => (o.imSpots || []).map(b => pk(b, ['x', 'y', 't']))),   // IMAGO's Z
       [P, pilotP(1) || {}].map(o => [o.imArm || '', o.imArmMenu ? 1 : 0, (o.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])]),   // its C
+      [P, pilotP(1) || {}].map(o => [o.imEvo ? [o.imEvo.n, o.imEvo.lvl, r(o.imEvo.p), r(o.imEvo.molt)] : null, (o.imEvoShots || []).map(s => [s.i, ...pk(s, ['x', 'y', 't'])])]),   // its V
       [P, pilotP(1) || {}].map(o => [o.roninVow ? r(o.roninVow.t) : null, o.roninGrave ? r(o.roninGrave.hp) : null, o.roninSkyClear ? o.roninSkyClear.stage + o.roninSkyClear.i : null, r(o.roninBroken)]),   // RONIN's V
       Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),

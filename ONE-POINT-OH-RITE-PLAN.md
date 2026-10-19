@@ -22,10 +22,10 @@ in the route's two renderers. **Built 18 Oct (Phases 3 and 4, begun):** IMAGO
 in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
 active, your Z: EYESPOTS. **Drawn 18 Oct:** Z's art, and the form's cut-in
 with your cocoon. **Built and drawn 18 Oct:** your X, FLUTTER (ten seconds
-twice as fast, every attack dodged). **Built 18 Oct, its art left as hooks:**
-your C, THE ARMORY (a wheel of eight overpowered guns). See "As built" under
-The path. This repository
-is public, so nothing sealed is written here. The story below stops at "the
+twice as fast, every attack dodged), and your C, THE ARMORY (a wheel of eight
+overpowered guns). **Built 18 Oct, its art left as hooks:** your V, ENDLESS
+FORMS (the rite's free evolution, earned in a run). See "As built" under The
+path. This repository is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
 ## The story (canon, 16 Oct)
@@ -592,6 +592,82 @@ My rules, not yours:
     are the base ship's, as before.
   - **Effects off:** everything still reads by its lines.
 
+### V — ENDLESS FORMS (yours, 18 Oct; the name is mine)
+
+Your words: "Voidrunners Evo is all about evolution and progress, so take
+something from that and build the v with blank art hooks". The name is a
+stand-in, after "endless forms most beautiful".
+
+What it takes from the evolution: the rite's free evolution, where the awake
+hull grows a gun out of its back, one after another (the eight growths), and
+the rite's way of growing a piece back by filling a meter. In a run it is
+earned: progress.
+
+- **V, while IMAGO is on, once a form.** The moth molts once more: for
+  0.8 s nothing lands on it and its guns are silent, but it still flies.
+  IMAGO's clock is raised to at least 30 s, so the evolution has time to
+  run.
+- **Out of the molt comes the first growth,** and from then until IMAGO
+  ends it keeps evolving. **PROGRESS** fills from what it does:
+  - 1 a body it kills;
+  - 1 a round it grazes, and 3 one it dashes through, the skill the rite
+    taught (while V runs, grazes pay PROGRESS instead of GRAZE);
+  - 0.6 a second whatever it does, so a boss fight still evolves.
+- **Each time PROGRESS fills, the next of the rite's eight grows,** in the
+  rite's order: TWIN BARRELS, two LASER RIFLES, CANNON, ROTARY GUN, RAIL,
+  MISSILE PODS, CROWN. The second needs 8, and each fill after it needs 3
+  more than the last.
+- **After the eighth it keeps going.** Each fill is a level of OVERGROWTH,
+  and every growth hits 35% harder for each level, with no end to it.
+- **They fire while you do,** as the rite's do. With the trigger held, each
+  growth fires on its own clock along the aim, faster with Bloodlust and the
+  like. The missiles turn on the nearest body and the crown fires all round.
+  They fire on top of the hull's own gun, or C's gun if one is worn, so it
+  all stacks. Their damage is the hull's times theirs, so the cards count.
+- **None of it is fair.** Measured in the test with the same three bodies
+  as C's guns (200 px out on the aim, 330 px out behind it, 60 px off the
+  line), over two seconds of the trigger:
+
+  | | Near / behind / off the line |
+  | --- | --- |
+  | The hull's own gun | 99 / 0 / 0 |
+  | All eight grown | 1694 / 924 / 28 |
+  | All eight, OVERGROWTH +2 | 2829 / 1571 / 47 |
+
+  A body 150 px behind the hull takes 203 from the missiles and the crown in
+  the same time.
+
+My rules, not yours:
+
+- Once a form: V again while it evolves does nothing. The next IMAGO starts
+  over from the molt.
+- Z, X and C still answer while it evolves, as they do under ROOT.
+- When IMAGO ends the growths are shed. Their shots still in the air finish.
+- The growths' rounds are their own, not the hull's. The rifles and the rail
+  are instant lines to the wall, the cannon's round goes through everything,
+  and the rest stop in the first body they hit.
+- **The art is yours to draw.** The hooks are in `IMAGO_ART`:
+  - `evoGrowths`: what has grown out of the moth's back, the molt, and how
+    far it has come. It is handed exactly what the rite's drawn growths
+    (`OPR_ART.growths`) are, plus V's own (grown, OVERGROWTH, PROGRESS, the
+    molt). So `return OPR_ART.growths(g, s)` is a one-line way to draw it
+    with the rite's art;
+  - `evoShot`: a growth's round or missile in the air;
+  - the moments, in `fx`: `evoMolt`, `evoGrow`, `evoOver`, `evoBeam` (a
+    rifle's or the rail's line), `evoGain` (a graze paid as PROGRESS) and
+    `evoShed`.
+
+  What each is handed is in the art block's header. For now they are
+  placeholders, lines and labels in the rite's first yellow, each tagged
+  "placeholder" where it draws:
+  - a stroke out of the back for each growth;
+  - a ring for the crown and for the molt;
+  - "EVO n/8" or "EVO +lvl" over the hull;
+  - dots for rounds, darts for missiles, and plain lines for the beams.
+
+  The V key lights while it evolves. It fills with PROGRESS and shows n/8
+  under it, then +lvl.
+
 ## Tales (stand-ins, in the voice)
 
 **ONE POINT OH, page I** (the Bookkeeper; opens when you meet him):
@@ -664,8 +740,9 @@ list (`scripts/lockstep.mjs`). Begun 18 Oct as a stand-in, only as far as Z
 needed (below), and its cut-in drawn: still to come is the passive.
 
 **Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, and
-X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built and drawn 18 Oct (below). V is still to be
-named.
+X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built and drawn 18 Oct;
+V, ENDLESS FORMS, built 18 Oct with its art left as hooks for you (below). All
+four are named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -922,6 +999,46 @@ active, the frame is a stand-in, built only as far as its first active needs.
     pilot came in a rolled slot, and a piece for an empty slot is worn
     without a screen. The planted piece is now a BLADE, which a blade pilot
     always already wears, so its gear screen always opens.
+- **V, ENDLESS FORMS (18 Oct),** as above: `IM_KIT[3]`, its own section in
+  "IMAGO, IN A RUN" (`imEvoStart`, `imEvoTick`, `imEvoGrow`, `imEvoFire`,
+  `imEvoShotTick`). Its numbers are `EVO_*`, and `EVO_GROWTHS` is the rite's
+  `OPR_GROWTHS` with a run's damage laid over it (`EVO_RUN`), so the rite
+  and V grow the same eight.
+  - **Wired in:**
+    - `newPlayer` (`imEvo`, `imEvoShots`);
+    - `updatePlayer`: the growths fire with the trigger, alongside whichever
+      gun, and the molt silences the gun;
+    - `hurtPlayer` (the molt);
+    - `imGrazeRound` (a graze pays PROGRESS while it runs);
+    - `imTick`, which calls `imEvoTick`.
+  - **Its art, left as hooks** in `IMAGO_ART` (`evoGrowths`, `evoShot`, and
+    six `fx` kinds) with placeholders. The HUD hook takes words of a move's
+    own under its key (`liveTxt`).
+  - **Tests:** `test:imago` has an ENDLESS FORMS section (154 checks in all):
+    - V out of IMAGO grows nothing;
+    - the molt from the keyboard: IMAGO's clock raised, nothing landing,
+      the gun silent, the hull still flying;
+    - out of it with TWIN BARRELS;
+    - PROGRESS: time alone to the second growth at exactly 8 ÷ 0.6 s, a
+      kill, and a graze paid as PROGRESS and not GRAZE;
+    - the rite's eight in the rite's order, each fill needing 3 more, and
+      OVERGROWTH past them;
+    - the growths still with the trigger up, and with it held out-hitting
+      the hull's gun many times over, through to the body behind and
+      behind the hull too;
+    - OVERGROWTH +2 hitting 1.68 times as hard;
+    - Z still answering, and V again nothing;
+    - IMAGO ending: the growths shed and their shots finishing;
+    - the next IMAGO starting over;
+    - a snapshot with all eight out and their shots in the air, firing and
+      played out the same in another copy;
+    - and the hooks, drawn with effects on and off.
+
+    Removing the molt's guard, or the trigger rule, fails it.
+  - **`npm test`'s `imago` scenario** now evolves all eight and reaches
+    OVERGROWTH +7 in its five minutes. V is in its fingerprint and in
+    lockstep's. Both are deterministic and in step, and every scenario is
+    still covered.
 
 ## Numbers (one block in the code, all tunable)
 
@@ -986,6 +1103,31 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 | TESLA COIL | 5 | 5 a body | 8 jumps: 380 px to the first, 240 px from body to body |
 | SINGULARITY | 0.45 | 8 a second to what it holds, 40 the burst | out at 300 px/s, slowing to a stop over 1.2 s; drags in at 380 px/s from 260 px, holds and burns what is within 70 px, and bursts over the 260 px at 3.2 s |
 
+**V, ENDLESS FORMS** (`EVO_*`; mine):
+
+| | |
+| --- | --- |
+| `EVO_MOLT` | the molt: 0.8 s, untouchable and silent |
+| `EVO_LEN` | IMAGO's clock raised to at least 30 s as V is pressed |
+| `EVO_NEED`, `EVO_STEP` | PROGRESS: 8 for the second growth, then 3 more each fill (11, 14, 17 …) |
+| `EVO_KILL`, `EVO_GRAZE`, `EVO_GRAZE_DASH`, `EVO_TIME` | PROGRESS: 1 a kill, 1 a graze, 3 a round dashed through, 0.6 a second |
+| `EVO_OVER` | OVERGROWTH: every growth 35% harder a level |
+| `EVO_SEEK` | a missile turns on a body within 520 px |
+| `EVO_SHOTS` | 240 of its shots in the air at most |
+
+**`EVO_GROWTHS`, growth by growth** (how each fires and how often is the
+rite's, `OPR_GROWTHS`; damage is times the hull's):
+
+| Growth | Every | Damage | Its own |
+| --- | --- | --- | --- |
+| TWIN BARRELS | 0.42 s | 2.5 | a round, 900 px/s |
+| LASER RIFLE (two) | 1 s | 6 a body | an instant line to the wall, 1400 px |
+| CANNON | 1.5 s | 14 a body | a big round through everything, 650 px/s |
+| ROTARY GUN | 0.09 s | 1 | a round, ±0.07 rad |
+| RAIL | 1.3 s | 16 a body | an instant line to the wall, 1800 px |
+| MISSILE PODS | 1.8 s | 4 each | four missiles, turning 4 rad/s |
+| CROWN | 2.2 s | 2.5 each | sixteen rounds all round |
+
 ## Questions for you (defaults are in)
 
 1. **The pieces.** PLATING, A SECOND BARREL, THE LATTICE, THE CORE: the dev's
@@ -1011,3 +1153,9 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
     slowed at all? In co-op the slow is the partner's too.
 12. **How long a gun is worn.** Until IMAGO ends (built), or into the next
     IMAGO as well, so the armory is opened only to change?
+13. **V's name.** ENDLESS FORMS (my stand-in), or yours?
+14. **Where V's evolution starts.** From the molt every IMAGO (built), or
+    carried over, so a run's evolution keeps going from one IMAGO to the
+    next?
+15. **What drives PROGRESS.** Kills, grazes and time (built), or grazes
+    only, so it rewards flying close to rounds as GRAZE does?

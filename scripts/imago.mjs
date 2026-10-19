@@ -29,6 +29,16 @@
                   out-hits the hull's own, each its own way (a line, a chain,
                   a blast, a pull); the gun goes with the form, and what is
                   in the air finishes; a snapshot with it all in the air
+     V ENDLESS    (user, 18 Oct: evolution and progress; the name is mine)
+       FORMS      the rite's free evolution, earned: V molts the moth
+                  (untouchable, silent, still flying, IMAGO's clock raised),
+                  then PROGRESS from time, kills and grazes grows the rite's
+                  eight growths in the rite's order, each fill needing more,
+                  and OVERGROWTH past the eighth; they fire only with the
+                  trigger held, out-hit the hull's own many times over and
+                  reach behind and off the line; Z still answers, V again is
+                  nothing; IMAGO ending sheds them and their shots finish; a
+                  new IMAGO starts over; a snapshot with it all out
      the rite     none of it answers there
      a snapshot   bombs in the air come back in another copy and burst the
                   same
@@ -146,7 +156,7 @@ section('[F]');
   round(g, 30); steps(g, 50);
   ok(J(g, `P.imGraze`) === 0, 'grazes do not fill it while it is on', J(g, `P.imGraze`));
   g.run(`__press = ['v'];`); steps(g, 1);
-  ok(J(g, `P.imCd.every(c => c === 0) && P.imSpots.length === 0 && P.imFlut === 0 && !P.imArmMenu`), 'V is not named yet, and does nothing', J(g, `P.imCd`));
+  ok(J(g, `!!P.imEvo && P.imEvo.molt > 0 && P.imSpots.length === 0 && P.imFlut === 0 && !P.imArmMenu`), 'V is ENDLESS FORMS, and nothing else', J(g, `P.imEvo`));
   g.run(`P.imT = 0.05;`); steps(g, 6);
   ok(J(g, `!imOn() && P.imT === 0`), 'the minute ends, and it is the ship again');
   const before = J(g, `__art.hull || 0`);
@@ -535,6 +545,112 @@ const volley = g => {
   ok(JSON.stringify(hpA) === JSON.stringify(hpC) && hpA.some((h, k) => h < 1e7), 'and play out the same there', { hpA, hpC });
 }
 
+/* ============================== V — ENDLESS FORMS ============================== */
+section('V — ENDLESS FORMS');
+{
+  const g = game();
+  enter(g, true);
+  g.run(`handleKey('v');`); asteps(g, 2);
+  ok(J(g, `!P.imEvo`), 'V out of IMAGO grows nothing');
+  g.run(`P.imGraze = IM_MAX; handleKey('f');`); asteps(g, 2); throughCut(g, true);
+  const base = volley(g);
+  ok(base[0] > 0 && base[1] === 0, 'the hull\'s own gun, for the measure', base);
+
+  // V: the molt, IMAGO's clock raised to cover it
+  g.run(`P.imT = 10; handleKey('v');`); asteps(g, 1);
+  ok(J(g, `!!P.imEvo && P.imEvo.molt > 0 && P.imEvo.n === 0`), 'V, from the keyboard: the moth molts', J(g, `P.imEvo`));
+  ok(J(g, `P.imT`) >= J(g, `EVO_LEN`) - 0.1, 'and IMAGO\'s clock is raised to cover it', J(g, `P.imT`));
+  const hp0 = J(g, `P.hp`), b0 = J(g, `bullets.length`);
+  g.run(`hurtPlayer(40); __trig = true;`); asteps(g, 10); g.run(`__trig = false;`);
+  ok(J(g, `P.hp`) === hp0, 'nothing lands on it while it molts', [hp0, J(g, `P.hp`)]);
+  ok(J(g, `bullets.length === ${b0} && P.imEvoShots.length === 0`), 'and its guns are silent', J(g, `[bullets.length, P.imEvoShots.length]`));
+  const pm = J(g, `[P.x, P.y]`);
+  g.run(`__mx = 1;`); asteps(g, 10); g.run(`__mx = 0;`);
+  ok(J(g, `P.x`) > pm[0] + 20, 'but it still flies', [pm, J(g, `[P.x, P.y]`)]);
+  asteps(g, Math.round(J(g, `EVO_MOLT`) / STEP));
+  ok(J(g, `P.imEvo.molt === 0 && P.imEvo.n === 1 && P.imEvo.grow[0].i === 0`), 'out of the molt, with its first growth: TWIN BARRELS', J(g, `P.imEvo`));
+  g.run(`P.imT = 60;`);
+
+  // PROGRESS: time, kills, grazes
+  let guard = 0;
+  while (J(g, `P.imEvo.n`) < 2 && guard++ < 2000) asteps(g, 10);
+  const took = J(g, `P.imEvo.grow[1].at - P.imEvo.grow[0].at`);
+  ok(Math.abs(took - J(g, `EVO_NEED / EVO_TIME`)) < 0.2, 'time alone grows the next: EVO_NEED at EVO_TIME a second', { took, want: J(g, `EVO_NEED / EVO_TIME`) });
+  let p0 = J(g, `P.imEvo.p`);
+  g.run(`P.kills += 3;`); asteps(g, 1);
+  ok(Math.abs(J(g, `P.imEvo.p`) - p0 - 3 * J(g, `EVO_KILL`) - J(g, `EVO_TIME`) * STEP) < 1e-6, 'a kill is EVO_KILL', [p0, J(g, `P.imEvo.p`)]);
+  p0 = J(g, `P.imEvo.p`);
+  round(g, 30); steps(g, 50);
+  const paid = J(g, `P.imEvo.p`) - p0 - J(g, `EVO_TIME`) * 50 * STEP;
+  ok(Math.abs(paid - J(g, `EVO_GRAZE`)) < 1e-6 && J(g, `P.imGraze`) === 0, 'a graze is PROGRESS now, not GRAZE', { paid, graze: J(g, `P.imGraze`) });
+
+  // the rite's eight, in the rite's order, each fill needing more; then OVERGROWTH
+  const needs = [];
+  for (let k = 0; k < 8; k++) { needs.push(J(g, `imEvoNeed(P.imEvo)`)); g.run(`P.imEvo.p = imEvoNeed(P.imEvo);`); asteps(g, 1); }
+  ok(J(g, `P.imEvo.grow.map(q => EVO_GROWTHS[q.i].id).join()`) === J(g, `OPR_GROWTHS.map(q => q.id).join()`) && J(g, `P.imEvo.n`) === 8,
+     'it grows the rite\'s eight, in the rite\'s order', J(g, `P.imEvo.grow.map(q => q.i)`));
+  ok(needs.every((n, k) => !k || Math.abs(n - needs[k - 1] - J(g, `EVO_STEP`)) < 1e-9), 'each fill needs EVO_STEP more than the last', needs);
+  ok(J(g, `P.imEvo.lvl`) === 2 && Math.abs(J(g, `imEvoMul()`) - (1 + 2 * J(g, `EVO_OVER`))) < 1e-9, 'and past the eighth it keeps going: OVERGROWTH', J(g, `[P.imEvo.n, P.imEvo.lvl]`));
+  g.run(`P.imEvo.lvl = 0; P.imEvo.p = 0; for (const q of P.imEvo.grow) q.at = -9;`);
+
+  // they fire while you do, and only then (each volley from the same point in the growths' clocks)
+  asteps(g, 60);
+  ok(J(g, `P.imEvoShots.length`) === 0, 'with the trigger up, the growths are still');
+  const clocks = `for (const q of P.imEvo.grow) q.fireT = 0.15;`;
+  g.run(clocks);
+  const evo = volley(g);
+  const tot = a => a.reduce((x, y) => x + y, 0);
+  ok(tot(evo) >= 8 * tot(base), 'with it held, all eight out-hit the hull\'s own many times over', { base, evo });
+  ok(evo[1] > 0, 'through to the body behind on the line (the rifles, the cannon, the rail)', evo);
+  g.run(`enemies.splice(0, enemies.length); __aim = { x: P.x + 300, y: P.y };` + clocks);
+  const front = bodyAt(g, 200, 0), behind = bodyAt(g, -150, 0);
+  g.run(`__trig = true;`); asteps(g, 120); g.run(`__trig = false;`); asteps(g, 220);
+  ok(hpOf(g, behind) < 1e7 && hpOf(g, front) < 1e7, 'and off it: behind the hull too (the missiles turn on it, the crown is all round)', [1e7 - hpOf(g, front), 1e7 - hpOf(g, behind)]);
+  g.run(`P.imEvo.lvl = 2;` + clocks);
+  const over = volley(g);
+  const ratio = tot(over) / tot(evo);
+  ok(Math.abs(ratio - (1 + 2 * J(g, `EVO_OVER`))) < 0.15, 'OVERGROWTH makes every growth hit harder', { ratio, evo, over });
+  g.run(`P.imEvo.lvl = 0;`);
+
+  // the rest of the kit still answers; V again does nothing
+  g.run(`P.imCd[0] = 0; __press = ['z'];`); asteps(g, 1);
+  ok(J(g, `P.imSpots.length`) > 0, 'Z still answers while it evolves');
+  const n0 = J(g, `[P.imEvo.n, P.imEvo.t]`);
+  g.run(`handleKey('v');`); asteps(g, 1);
+  ok(J(g, `P.imEvo.n === ${n0[0]} && P.imEvo.molt === 0`), 'and V again is nothing: once a form', J(g, `P.imEvo`));
+
+  // IMAGO ends: the growths are shed, their shots in the air finish
+  g.run(`enemies.splice(0, enemies.length); __aim = { x: P.x + 300, y: P.y };`);
+  const far = bodyAt(g, 420, 0), fh = hpOf(g, far);
+  g.run(`__trig = true;`); asteps(g, 6); g.run(`__trig = false; P.imT = 0.02;`); asteps(g, 3);
+  ok(J(g, `!imOn() && !P.imEvo && P.imEvoShots.length > 0`), 'IMAGO ends: the growths are shed, their shots still in the air', J(g, `[P.imT, !!P.imEvo, P.imEvoShots.length]`));
+  asteps(g, 150);
+  ok(hpOf(g, far) < fh && J(g, `P.imEvoShots.length`) === 0, 'and they finish what they were doing', [fh, hpOf(g, far)]);
+
+  // a new IMAGO, a new V, from the start
+  g.run(`P.imGraze = IM_MAX; handleKey('f');`); asteps(g, 2); throughCut(g, true);
+  g.run(`handleKey('v');`); asteps(g, 1);
+  ok(J(g, `!!P.imEvo && P.imEvo.n === 0 && P.imEvo.molt > 0`), 'the next IMAGO, V evolves again, from the start', J(g, `P.imEvo`));
+}
+{
+  // a snapshot with its growths out and their shots in the air: the other copy plays them out the same
+  const a = game(), c = game();
+  enter(a, true, 31);
+  a.run(`P.imGraze = IM_MAX; handleKey('f');`); asteps(a, 2); throughCut(a, true);
+  a.run(`handleKey('v');`); asteps(a, Math.round(J(a, `EVO_MOLT`) / STEP) + 2);
+  for (let k = 0; k < 7; k++) { a.run(`P.imEvo.p = imEvoNeed(P.imEvo);`); asteps(a, 1); }
+  const ids = [bodyAt(a, 220, 0), bodyAt(a, 320, 0), bodyAt(a, -150, 0)];
+  a.run(`__aim = { x: P.x + 300, y: P.y }; __trig = true;`); asteps(a, 40); a.run(`__trig = false;`);
+  const n = J(a, `P.imEvoShots.length`);
+  const snap = a.run(`JSON.stringify(snapWrite())`);
+  c.run(`applyChar(CHARS.findIndex(ch => ch.id === 'runner')); resetGame(); state = 'play'; snapRead(JSON.parse(${JSON.stringify(snap)}));`);
+  ok(n > 3 && J(c, `P.imEvoShots.length`) === n && J(c, `P.imEvo.n`) === 8, 'its growths, and their shots, come back in another copy', [n, J(c, `P.imEvoShots.length`), J(c, `P.imEvo && P.imEvo.n`)]);
+  a.run(`__trig = true;`); c.run(`__trig = true;`);
+  asteps(a, 120); asteps(c, 120);
+  const hpA = ids.map(id => hpOf(a, id)), hpC = ids.map(id => hpOf(c, id));
+  ok(JSON.stringify(hpA) === JSON.stringify(hpC) && hpA.every(h => h < 1e7), 'and fire and play out the same there', { hpA, hpC });
+}
+
 /* ================================== the rite ================================== */
 section('the rite');
 {
@@ -551,6 +667,8 @@ section('the rite');
   ok(J(g, `P.imFlut`) === 0, 'nor X');
   g.run(`__press = ['c'];`); steps(g, 2);
   ok(J(g, `!P.imArmMenu && !P.imArm`), 'nor C');
+  g.run(`__press = ['v'];`); steps(g, 2);
+  ok(J(g, `!P.imEvo`), 'nor V');
   g.run(`P.imGraze = 0;`);
   for (let i = 0; i < 5; i++) { round(g, 30); steps(g, 50); }
   ok(J(g, `P.imGraze`) === 0, 'and its grazes are the rite\'s, not GRAZE in a run', J(g, `P.imGraze`));
@@ -604,6 +722,16 @@ section('the hooks');
     }
     g.run(`__auto = false;`);
     for (let i = 0; i < 200; i++) { g.run(HOLD); steps(g, 1); if (i % 4 === 0) g.run(`render()`); }
+    // V: the molt, then growth after growth, firing, then OVERGROWTH
+    g.run(`P.imArm = null; __press = ['v'];`);
+    for (let i = 0; i < 60; i++) { g.run(HOLD); steps(g, 1); if (i % 3 === 0) g.run(`render()`); }
+    g.run(`__auto = true;`);
+    for (let k = 0; k < 9; k++) {
+      g.run(`P.imEvo.p = imEvoNeed(P.imEvo);`);
+      for (let i = 0; i < 30; i++) { g.run(HOLD); steps(g, 1); if (i % 3 === 0) g.run(`render()`); }
+    }
+    g.run(`__auto = false;`);
+    round(g, 30); steps(g, 40, true);
     g.run(`P.imT = 0.02;`); steps(g, 12, true);
     takeArt(g);
     const failed = J(g, `[...IM_FAILED, ...OR_FAILED]`);

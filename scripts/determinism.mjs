@@ -75,6 +75,8 @@ const HARNESS = `(() => {
       (P.imSpots || []).map(b => pk(b, ['x', 'y', 't'])),
       // and its C: the gun worn, the armory open, and its shots in the air
       [P.imArm || '', P.imArmMenu ? 1 : 0, (P.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])],
+      // and its V: what it has grown, its PROGRESS, and its growths' shots
+      [P.imEvo ? [P.imEvo.n, P.imEvo.lvl, r(P.imEvo.p), r(P.imEvo.molt)] : null, (P.imEvoShots || []).map(s => [s.i, ...pk(s, ['x', 'y', 't'])])],
       // RONIN's V: the vow's clock, its grave, SKY CLEAR
       [P.roninVow ? r(P.roninVow.t) : null, P.roninGrave ? r(P.roninGrave.hp) : null, P.roninSkyClear ? P.roninSkyClear.stage + P.roninSkyClear.i : null],
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'atkT', 'cd', 'state', 'ang', 'id'])]),
@@ -248,7 +250,7 @@ const L = QUICK ? 0.4 : 1;                       // --quick plays each for 40% a
 const VIEW = { w: 1366, h: 768 };
 const S = [
   { name: 'runner',     char: 'runner', seed: 101, steps: 18000 },
-  { name: 'imago',      char: 'runner', seed: 123, steps: 18000, kit: true },   // IMAGO in a run: GRAZE, [F], Z's bombs, X, C's guns
+  { name: 'imago',      char: 'runner', seed: 123, steps: 18000, kit: true },   // IMAGO in a run: GRAZE, [F], Z's bombs, X, C's guns, V's growths
   { name: 'ember',      char: 'ember',  seed: 102, steps: 18000, kit: true },
   { name: 'hacker',     char: 'hacker', seed: 103, steps: 18000, kit: true },
   { name: 'vagrant',    char: 'melee',  seed: 104, steps: 18000, kit: true },

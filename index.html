@@ -2118,6 +2118,7 @@ function newPlayer() {
     imGraze: 0, imT: 0, imAge: 0, imCd: [0, 0, 0, 0], imSpots: [],
     imFlut: 0, imDodge: null, imDodgeSide: 1,      // X, FLUTTER: its clock, the dodge playing, the side the last one took
     imArm: null, imArmT: 0, imArmMenu: null, imArmShots: [], imArmBeam: null, imArmBite: 0,   // C, THE ARMORY: the gun worn, its wait, the wheel, its shots, the beam and its bite
+    imEvo: null, imEvoShots: [],                   // V, ENDLESS FORMS: what it has grown and its PROGRESS, and its growths' shots
     imIntro: null,                                 // its cut-in, while it runs: see IMAGO's cut-in
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
@@ -5795,6 +5796,7 @@ function hurtPlayer(dmg, opts) {
   if (imCutIn()) return;                   // nor while IMAGO's has it
   if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
   // IMAGO's X: FLUTTER dodges every blow, whatever it was; the floor and the build's own costs are nothing to dodge
+  if (imEvoMolting() && !(opts && opts.pure)) return;            // IMAGO's V: the molt, untouchable
   if (imFlutOn() && !(opts && opts.pure)) { imDodgeAt(opts); return; }
   // RONIN's C: STILL WATER takes the first blow, whatever it was, and answers it
   if (P.roninStill && !(opts && opts.pure) && stillCatch(dmg, opts)) return;
@@ -39127,7 +39129,7 @@ function updatePlayer(dt) {
   if (P.odScorch) P.ang = P.odScorch.ang;
   if (vrDuelLock()) P.ang = vrDuelAim();  // and holds the guard on him
   if (oprAimLock()) P.ang = oprAim();     // VOIDRUNNER'S RITE: ONE SHIP holds the hull on his copy until it wakes
-  if (suCutIn() || imCutIn() || imArmOpen()) firing = false;   // SUPERUSER's cut-in has the screen, or IMAGO's; or IMAGO's armory is open
+  if (suCutIn() || imCutIn() || imArmOpen() || imEvoMolting()) firing = false;   // SUPERUSER's cut-in has the screen, or IMAGO's; or IMAGO's armory is open, or it molts
 
   // dash
   if (P.dashCh < P.dashMax) {
@@ -39273,6 +39275,7 @@ function updatePlayer(dt) {
   odKitTick(dt);
   roninKitTick(dt);          // RONIN's kit: its cooldowns, the cleaves and their scores, the wounds
   imTick(dt);                // IMAGO's clock, its cooldowns, and Z's bombs
+  imEvoFire(dt, firing && P.diaryT <= 0, rateMul);   // IMAGO's V: its growths fire while the gun does, whichever gun
 
   if (P.outside && outsideHas(P.charId, 'fire')) {
     /* An outside pilot fires its own way (OUTSIDE PILOTS): told whether the
@@ -46326,6 +46329,14 @@ const OPR_ART = {
    X — FLUTTER (user, 18 Oct; the name is mine): ten seconds twice as fast,
    and every attack and every round dodged, each dodge played out whole, the
    hull stepping aside and back. See its own section below.
+
+   C — THE ARMORY (user, 18 Oct, the name too): a wheel of eight
+   overpowered guns, one worn in the gun's place until IMAGO ends. See its
+   own section below.
+
+   V — ENDLESS FORMS (user, 18 Oct: "Voidrunners Evo is all about evolution
+   and progress, so take something from that"; the name is mine): the rite's
+   free evolution, earned in a run. See its own section below.
 =========================================================================== */
 const IM_MAX      = 40;      // GRAZE to fill: a piece's worth in the rite (OPR_GRAZE)
 const IM_GRAZE_R  = 26;      // how far past the hull's edge a round may pass and still be a graze
@@ -46386,6 +46397,36 @@ const ARMORY = [
 ];
 const ARMORY_BY = Object.fromEntries(ARMORY.map(w => [w.id, w]));
 
+// V — ENDLESS FORMS (see there)
+const EVO_LEN    = 30;         // IMAGO's clock is set to at least this as V is pressed
+const EVO_MOLT   = 0.8;        // the molt: untouchable, its guns silent, still flying
+const EVO_NEED   = 8;          // PROGRESS for the second growth (the first comes out of the molt)
+const EVO_STEP   = 3;          // and each fill after that needs this much more
+const EVO_KILL   = 1;          // PROGRESS: a body it kills
+const EVO_GRAZE  = 1;          // a round it grazes
+const EVO_GRAZE_DASH = 3;      // a round it dashes through
+const EVO_TIME   = 0.6;        // a second, whatever it does, so a boss fight still evolves
+const EVO_OVER   = 0.35;       // after the eighth: a fill is a level, and every growth hits this much harder
+const EVO_SHOTS  = 240;        // its growths' shots in the air at once, at most
+const EVO_GROW_IN = 0.6;       // a growth growing in (what the art is handed as k)
+const EVO_SEEK   = 520;        // a missile turns on the nearest body this close
+/* The eight it grows: the rite's own (OPR_GROWTHS: what, where on the back,
+   how it fires and how often), in the rite's order, with a run's damage. dmg
+   is a multiple of the hull's (P.dmg), so the cards count; pierce, a round
+   that goes through bodies; quiet, too many to number every hit. (name, not
+   n: n is how many the rite's fire at once.) */
+const EVO_RUN = [
+  { name: 'TWIN BARRELS', dmg: 2.5, quiet: true },
+  { name: 'LASER RIFLE',  dmg: 6 },
+  { name: 'LASER RIFLE',  dmg: 6 },
+  { name: 'CANNON',       dmg: 14, pierce: true },
+  { name: 'ROTARY GUN',   dmg: 1, quiet: true },
+  { name: 'RAIL',         dmg: 16 },
+  { name: 'MISSILE PODS', dmg: 4 },
+  { name: 'CROWN',        dmg: 2.5, quiet: true },
+];
+const EVO_GROWTHS = OPR_GROWTHS.map((g, i) => Object.assign({}, g, EVO_RUN[i]));
+
 const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
 const imCutIn = () => !!(P.imIntro && !P.imIntro.cut);
 const imShown = () => imOn() && !imCutIn();
@@ -46397,16 +46438,21 @@ const imFills = p => p.charId === 'runner' && !!p.awake && !p.down && !(p.imT > 
    it is near, and leaving the band without having landed makes it a graze. A
    dash through it pays at once. */
 function imGrazeRound(b, p, k) {
-  if (!imFills(p)) return;
+  if (!imFills(p) && !imEvoOf(p)) return;      // (and while V evolves, a graze is PROGRESS)
   const bit = 1 << k;
   if (b.imPaid & bit) return;
   const d = len(b.x - p.x, b.y - p.y), edge = b.r + p.r;
   if (d < edge) {
-    if (p.dashT > 0) { b.imPaid |= bit; pilotDo(k, () => imGain(IM_PAY_DASH, b.x, b.y)); }
+    if (p.dashT > 0) { b.imPaid |= bit; pilotDo(k, () => imGrazePay(true, b.x, b.y)); }
     return;
   }
   if (d < edge + IM_GRAZE_R) { b.imNear |= bit; return; }
-  if (b.imNear & bit) { b.imPaid |= bit; pilotDo(k, () => imGain(IM_PAY, b.x, b.y)); }
+  if (b.imNear & bit) { b.imPaid |= bit; pilotDo(k, () => imGrazePay(false, b.x, b.y)); }
+}
+// a graze, paid to pilot P: GRAZE, or PROGRESS while V evolves
+function imGrazePay(dash, x, y) {
+  if (imEvoOf(P)) imEvoGain(dash ? EVO_GRAZE_DASH : EVO_GRAZE, x, y);
+  else imGain(dash ? IM_PAY_DASH : IM_PAY, x, y);
 }
 function imGain(n, x, y) {
   if (!imFills(P)) return;
@@ -46487,6 +46533,7 @@ const IM_KIT = [
   { n: 'EYESPOTS', hud: 'EYES', cd: EYE_CD, start: imEyesThrow },
   { n: 'FLUTTER',  hud: 'FLIT', cd: FL_CD,  start: imFlutStart },
   { n: 'ARMORY',   hud: 'ARMS', cd: 0,      start: imArmToggle },   // a menu: no cooldown
+  { n: 'ENDLESS FORMS', hud: 'EVO', cd: 0,  start: imEvoStart },    // once a form: it runs until IMAGO ends
 ];
 function imAbility(i) {
   if (state !== 'play' || P.charId !== 'runner' || oprOn() || imCutIn()) return;
@@ -46526,6 +46573,7 @@ function imTick(dt) {
   if (P.imCd) for (let i = 0; i < 4; i++) if (P.imCd[i] > 0) P.imCd[i] = Math.max(0, P.imCd[i] - dt);
   if (P.imSpots && P.imSpots.length) imSpotTick(dt);
   imArmTick(dt);             // C: the armory's wheel, its gun going with the form, its shots
+  imEvoTick(dt);             // V: the molt, PROGRESS and what it grows, its going with the form, its shots
   // X: FLUTTER's clock, and the rounds it watches coming; it is IMAGO's, and goes with the form
   if (P.imFlut > 0) {
     if (!imOn()) imFlutEnd('form');
@@ -46998,6 +47046,193 @@ function imArmShotTick(dt) {
   }
 }
 
+/* ------------------------------ V — ENDLESS FORMS ----------------------------
+   (user, 18 Oct: "Voidrunners Evo is all about evolution and progress, so
+   take something from that and build the v with blank art hooks". The name
+   is mine, a stand-in, after "endless forms most beautiful".)
+
+   What it takes from the evolution: the rite's free evolution, where the
+   awake hull grows a gun out of its back, one after another (OPR_GROWTHS,
+   OPR_ART.growths), and the rite's way of growing a piece back, by filling a
+   meter. In a run it is earned: progress.
+
+   V, while IMAGO is on, once a form. The moth molts once more (EVO_MOLT:
+   nothing lands on it and its guns are silent, but it still flies), and
+   IMAGO's clock is set to at least EVO_LEN. Out of the molt comes the first
+   growth, and from then until IMAGO ends it keeps evolving:
+     - PROGRESS fills from what it does: EVO_KILL a body it kills, EVO_GRAZE a
+       round it grazes (EVO_GRAZE_DASH dashed through: the skill the rite
+       taught), and EVO_TIME a second whatever it does;
+     - each time it fills, the next of the rite's eight grows, in the rite's
+       order (EVO_GROWTHS): TWIN BARRELS, two LASER RIFLES, CANNON, ROTARY
+       GUN, RAIL, MISSILE PODS, CROWN. Each fill needs EVO_STEP more than the
+       last;
+     - after the eighth it keeps going: each fill is a level of OVERGROWTH,
+       and every growth hits EVO_OVER harder for each, with no end to it.
+   They fire while you do, as the rite's do: with the trigger held, each on
+   its own clock (faster with Bloodlust and the like), along the aim, the
+   missiles turning on the nearest body and the crown all round. They fire
+   alongside the hull's gun, or C's gun if one is worn: it all stacks. Their
+   damage is the hull's times theirs, so the cards count. My rules, not the
+   user's: the numbers; once a form; Z X C still answer while it evolves (as
+   under ROOT); when IMAGO ends the growths are shed, and their shots in the
+   air finish.
+
+   What the art is handed (IMAGO's art hooks, below):
+     P.imEvo       null, or: t (s since V), molt (s of the molt left), n
+                   (growths grown), p (PROGRESS toward the next fill), lvl
+                   (OVERGROWTH's levels), grow [{ i, at (t it grew), fireT }]
+     P.imEvoShots  its growths' rounds and missiles in the air: i (which
+                   growth), x, y, vx, vy, r, t, turn (a missile's), pierce
+--------------------------------------------------------------------------- */
+const imEvoOf = p => !!p.imEvo && p.charId === 'runner' && p.imT > 0 && !oprOn() && !PVP;
+const imEvoOn = () => imEvoOf(P);
+const imEvoMolting = () => imEvoOn() && P.imEvo.molt > 0;
+// PROGRESS the next fill needs: each fill EVO_STEP more than the last
+const imEvoNeed = E => EVO_NEED + Math.max(0, E.n + E.lvl - 1) * EVO_STEP;
+// what OVERGROWTH has made of every growth's damage
+const imEvoMul = () => 1 + EVO_OVER * (P.imEvo ? P.imEvo.lvl : 0);
+
+function imEvoStart() {
+  if (P.imEvo) {                               // once a form
+    floatText(P.x, P.y - 42, 'EVOLVING', '#94a3b8', 12);
+    return false;
+  }
+  P.imEvo = { t: 0, molt: EVO_MOLT, n: 0, p: 0, lvl: 0, kills: P.kills, grow: [] };
+  P.imT = Math.max(P.imT, EVO_LEN);
+  imFx('evoMolt', { x: P.x, y: P.y, ang: P.ang });
+  floatText(P.x, P.y - 52, 'ENDLESS FORMS', IM_COL, 16);
+  shake(1.2);
+  Audio_.tone(110, 0.8, 'sawtooth', 0.07, 330);
+  return true;
+}
+// PROGRESS paid: a graze (imGrazePay), or a kill (imEvoTick)
+function imEvoGain(n, x, y) {
+  const E = P.imEvo;
+  if (!E || E.molt > 0) return;
+  E.p += n;
+  imFx('evoGain', { x, y, n, hx: P.x, hy: P.y });
+}
+// a fill: the next growth, or after the eighth a level of OVERGROWTH
+function imEvoGrow() {
+  const E = P.imEvo;
+  if (E.n < EVO_GROWTHS.length) {
+    const i = E.n++, G = EVO_GROWTHS[i];
+    E.grow.push({ i, at: E.t, fireT: 0.15 });
+    imFx('evoGrow', { x: P.x, y: P.y, ang: P.ang, i, id: G.id, side: G.side, name: G.name });
+    floatText(P.x, P.y - 52, G.name, IM_COL, 14);
+    Audio_.tone(140 + i * 30, 0.25, 'sawtooth', 0.06, 70 + i * 20);   // as the rite's growths sprout
+    shake(0.35);
+    return;
+  }
+  E.lvl++;
+  imFx('evoOver', { x: P.x, y: P.y, ang: P.ang, lvl: E.lvl });
+  floatText(P.x, P.y - 52, 'OVERGROWTH +' + E.lvl, IM_COL, 14);
+  Audio_.tone(220, 0.3, 'sawtooth', 0.06, 880);
+  shake(0.5);
+}
+// the growths are shed: IMAGO is over
+function imEvoEnd() {
+  const E = P.imEvo;
+  P.imEvo = null;
+  if (E) imFx('evoShed', { x: P.x, y: P.y, ang: P.ang, n: E.n, lvl: E.lvl });
+}
+
+// once a step from imTick: the molt, PROGRESS and what it grows; its going with the form; its shots
+function imEvoTick(dt) {
+  if (P.imEvoShots && P.imEvoShots.length) imEvoShotTick(dt);   // what is in the air finishes, form or not
+  const E = P.imEvo;
+  if (!E) return;
+  if (!imEvoOn()) { imEvoEnd(); return; }
+  E.t += dt;
+  if (E.molt > 0) {
+    E.molt = Math.max(0, E.molt - dt);
+    if (E.molt <= 1e-9) { E.molt = 0; E.kills = P.kills; imEvoGrow(); }   // out of the molt, with its first growth
+    return;
+  }
+  const k = P.kills - E.kills;
+  E.kills = P.kills;
+  if (k > 0) E.p += k * EVO_KILL;
+  E.p += EVO_TIME * dt;
+  for (let n = 0; n < 4 && E.p >= imEvoNeed(E) - 1e-9; n++) { E.p = Math.max(0, E.p - imEvoNeed(E)); imEvoGrow(); }
+}
+
+// from updatePlayer: its growths fire while the gun does (with the trigger held), each on its own clock
+function imEvoFire(dt, firing, rateMul) {
+  const E = P.imEvo;
+  if (!E || !firing || E.molt > 0 || !imEvoOn()) return;
+  for (const g of E.grow) {
+    g.fireT -= dt * rateMul;
+    for (let n = 0; n < 4 && g.fireT <= 0; n++) { g.fireT += EVO_GROWTHS[g.i].every; imEvoGrowFire(g); }
+    if (g.fireT <= 0) g.fireT = 0;
+  }
+}
+// one growth fires, from where it sits on the back (the rite's oprMount)
+function imEvoGrowFire(g) {
+  const G = EVO_GROWTHS[g.i], m = oprMount(G.side, 16), dmg = armDmg(G.dmg) * imEvoMul();
+  if (G.kind === 'beam') {
+    const segs = [];
+    castLance(m.x, m.y, P.ang, G.len, 0, segs);
+    const s = segs[0];
+    if (!s) return;
+    for (const e of imArmOnLine(s.x1, s.y1, s.x2, s.y2, G.w)) damageEnemy(e, dmg, false, s.x1, s.y1);
+    imFx('evoBeam', { i: g.i, id: G.id, x0: s.x1, y0: s.y1, x1: s.x2, y1: s.y2, w: G.w, life: G.T });
+    Audio_.tone(1800, 0.06, 'sawtooth', 0.04, 600);
+    return;
+  }
+  const shot = (a, missile) => imEvoShot(g.i, m.x, m.y, a, dmg, missile);
+  if (G.kind === 'shell') shot(P.ang + (G.spread ? simRnd(G.spread, -G.spread) : 0), false);
+  else if (G.kind === 'missile') for (let k = 0; k < G.n; k++) shot(P.ang + (k - (G.n - 1) / 2) * 0.5, true);
+  else if (G.kind === 'ring') for (let k = 0; k < G.n; k++) shot(P.ang + k * TAU / G.n, false);
+  if (G.kind !== 'shell' || g.i % 2 === 0) Audio_.tone(G.kind === 'shell' ? 260 : 520, 0.05, 'square', 0.04, 140);
+}
+function imEvoShot(i, x, y, a, dmg, missile) {
+  if (P.imEvoShots.length >= EVO_SHOTS) return;
+  const G = EVO_GROWTHS[i];
+  P.imEvoShots.push({ i, x, y, vx: Math.cos(a) * G.spd, vy: Math.sin(a) * G.spd, r: G.r, t: 0, life: missile ? 2.4 : 1.8,
+                      dmg, turn: missile ? G.turn : 0, pierce: !!G.pierce, quiet: !!G.quiet, hit: G.pierce ? [] : null });
+}
+function imEvoShotTick(dt) {
+  const A = arena;
+  for (let i = P.imEvoShots.length - 1; i >= 0; i--) {
+    const s = P.imEvoShots[i];
+    s.t += dt;
+    if (s.turn) {
+      // a missile turns on the nearest body
+      let tgt = null, bd = EVO_SEEK * EVO_SEEK;
+      for (const e of enemies) {
+        if (!isThreat(e) || e.phased) continue;
+        const d = (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y);
+        if (d < bd) { bd = d; tgt = e; }
+      }
+      if (tgt) {
+        const cur = Math.atan2(s.vy, s.vx), sp = len(s.vx, s.vy);
+        let dA = Math.atan2(tgt.y - s.y, tgt.x - s.x) - cur;
+        while (dA > Math.PI) dA -= TAU; while (dA < -Math.PI) dA += TAU;
+        const a = cur + clamp(dA, -s.turn * dt, s.turn * dt);
+        s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp;
+      }
+    }
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    let done = s.t >= s.life || s.x < A.x0 - 60 || s.x > A.x1 + 60 || s.y < A.y0 - 60 || s.y > A.y1 + 60;
+    if (!done) {
+      const opts = s.quiet ? { silent: true } : undefined;
+      if (s.pierce) {
+        // through everything, each body once
+        for (const e of enemies.slice()) {
+          if (!isThreat(e) || e.phased || s.hit.includes(e) || len(e.x - s.x, e.y - s.y) >= e.r + s.r) continue;
+          s.hit.push(e);
+          damageEnemy(e, s.dmg, false, s.x, s.y, opts);
+        }
+      } else {
+        const e = imArmTouch(s.x, s.y, s.r);
+        if (e) { damageEnemy(e, s.dmg, false, s.x, s.y, opts); done = true; }
+      }
+    }
+    if (done) P.imEvoShots.splice(i, 1);
+  }
+}
+
 /* ============================== IMAGO — art hooks ==============================
    IMAGO in a run, and its kit, drawn. Nothing in the run reads them; they
    keep any state of their own in IM_ST (this machine's, never the run's).
@@ -47063,12 +47298,33 @@ function imArmShotTick(dt) {
      and in fx: armOpen, armShut { x, y }; armEquip { x, y, id }; armRail
      { x0, y0, x1, y1, w }; armArc { pts [[x, y]] }; armBlast { x, y, r, id };
      armCollapse { x, y, r }
+
+   V, ENDLESS FORMS (placeholders, lines and labels: the user is to draw them):
+     evoGrowths(g, s)  world, over the moth: what has grown out of its back,
+                   handed as OPR_ART.growths is (so the rite's drawn growths
+                   can stand in: return OPR_ART.growths(g, s)). s.x, y, ang,
+                   r, t (s since V), list [{ i, id, side (-1/0/1), k (0-1,
+                   growing in), kick (0-1, its clock toward the next shot),
+                   kind }], and V's own: n (grown), of (8), lvl (OVERGROWTH),
+                   p (0-1, PROGRESS toward the next fill), molt (0-1 through
+                   the molt, -1 out of it)
+     evoShot(g, s)   world: a growth's round or missile in the air. s.i, id,
+                   kind (shell, missile, ring), x, y, vx, vy, r, t
+     and in fx: evoMolt { x, y, ang } (V pressed, the molt begins: life is
+     the molt); evoGrow { x, y, ang, i, id, side, name }; evoOver
+     { x, y, ang, lvl }; evoBeam { x0, y0, x1, y1, w, i, id } (a rifle's or
+     the rail's line: life is the growth's own); evoGain { x, y (the round),
+     n, hx, hy (the hull) } (a graze paid as PROGRESS); evoShed { x, y, ang,
+     n, lvl } (IMAGO over, the growths shed)
+   The HUD's V key is lit while it evolves, filling with PROGRESS, and says
+   n/8 under it, then +lvl (m.live, m.liveTxt).
 =========================================================================== */
 const IM_FAILED = new Set();
 const IM_ST = { fx: [], wings: {}, echo: {}, arm: {}, rounds: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
 const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8,
                      dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5,
-                     armOpen: 0.3, armShut: 0.3, armEquip: 0.6, armRail: 0.35, armArc: 0.22, armBlast: 0.55, armCollapse: 0.6 };
+                     armOpen: 0.3, armShut: 0.3, armEquip: 0.6, armRail: 0.35, armArc: 0.22, armBlast: 0.55, armCollapse: 0.6,
+                     evoMolt: EVO_MOLT, evoGrow: 0.7, evoOver: 0.8, evoBeam: 0.22, evoGain: 0.38, evoShed: 0.9 };
 function imFx(kind, o) {
   if (kind === 'wake') OPR_ST.wakeAt = uiTime;      // the moth's tails start again from the hull
   IM_ST.fx.push(Object.assign({ kind, t0: uiTime, life: IM_FX_LIFE[kind] || 0.5, seed: (IM_ST.fx.length * 7.31 + uiTime * 13) % 1000 }, o));
@@ -47107,6 +47363,11 @@ function drawImagoHull() {
     guard: 1, molt: null, grey: 0, awake: true, wakeAge: P.imAge, hurt: P.hurtFlash > 0, phasing: P.ghost > 0 && P.dashT > 0, t: uiTime, eyes, thrown,
     flut: imFlutOn() ? P.imFlut / FL_LEN : 0,
     dodge: D ? { f: clamp(D.t / FL_DODGE, 0, 1), sx: D.sx, sy: D.sy, x0: D.x0, y0: D.y0, o: D.o } : null });
+  const E = P.imEvo;
+  if (E && imEvoOn()) IM('evoGrowths', ctx, { x: P.x, y: P.y, ang: P.ang, r: P.r, t: E.t,
+    list: E.grow.map(g => ({ i: g.i, id: EVO_GROWTHS[g.i].id, side: EVO_GROWTHS[g.i].side, k: clamp((E.t - g.at) / EVO_GROW_IN, 0, 1),
+      kick: clamp(1 - g.fireT / EVO_GROWTHS[g.i].every, 0, 1), kind: EVO_GROWTHS[g.i].kind })),
+    n: E.n, of: EVO_GROWTHS.length, lvl: E.lvl, p: clamp(E.p / imEvoNeed(E), 0, 1), molt: E.molt > 0 ? 1 - E.molt / EVO_MOLT : -1 });
   const A = P.imArm && ARMORY_BY[P.imArm];
   if (A) {
     const fired = A.kind === 'beam' ? (P.imArmBeam ? 0 : -1) : P.imArmT > 0 ? 1 / A.rate - P.imArmT : -1;
@@ -47129,6 +47390,11 @@ function drawImagoKit() {
       fly: W.fly, life: W.life, pull: W.pull, core: W.core, held: s.held || 0, go: s.go || 0, trav: s.trav || 0, blast: W.blast || 0 });
   }
   if (P.imArmBeam) IM('armBeam', ctx, Object.assign({}, P.imArmBeam));
+  // V: its growths' rounds and missiles
+  if (P.imEvoShots) for (const s of P.imEvoShots) {
+    const G = EVO_GROWTHS[s.i];
+    IM('evoShot', ctx, { i: s.i, id: G.id, kind: G.kind, x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, t: s.t });
+  }
 }
 // world, the additive pass: this pilot's own rounds while the moth is shown, in drawBullets' place
 function drawImagoRounds(list) {
@@ -47154,12 +47420,19 @@ function drawImagoArmory() {
 }
 // [F]: the cut-in begins
 function imIntroFx(I) { IM_ST.cut.lastS = -1; }
+// V's key, while it evolves: lit through the molt, then filling with PROGRESS toward the next fill (never quite 0)
+function imEvoHudFill() {
+  if (!imEvoOn()) return 0;
+  const E = P.imEvo;
+  return E.molt > 0 ? 1 : Math.max(0.04, clamp(E.p / imEvoNeed(E), 0, 1));
+}
 // the HUD, under the dash: GRAZE, then IMAGO's clock and its keys. Returns the next free line
 function drawImagoHud(pad, ly, bw) {
   if (!P.awake || P.charId !== 'runner' || oprOn() || PVP) return ly;
   const on = imOn(), k = clamp((P.imGraze || 0) / IM_MAX, 0, 1);
   IM('hud', ctx, pad, ly, bw, { k, on, ready: !on && k >= 0.999, T: P.imT || 0, len: IM_LEN, cd: (P.imCd || [0, 0, 0, 0]).slice(),
-    live: [0, imFlutOn() ? P.imFlut / FL_LEN : 0, 0, 0], liveS: [0, imFlutOn() ? P.imFlut : 0, 0, 0],
+    live: [0, imFlutOn() ? P.imFlut / FL_LEN : 0, 0, imEvoHudFill()], liveS: [0, imFlutOn() ? P.imFlut : 0, 0, 0],
+    liveTxt: [null, null, null, imEvoOn() ? (P.imEvo.n < EVO_GROWTHS.length ? P.imEvo.n + '/' + EVO_GROWTHS.length : '+' + P.imEvo.lvl) : null],
     subs: [null, null, P.imArm && ARMORY_BY[P.imArm] ? ARMORY_BY[P.imArm].hud : null, null],
     kit: [0, 1, 2, 3].map(i => IM_KIT[i] ? { n: IM_KIT[i].n, hud: IM_KIT[i].hud, cd: IM_KIT[i].cd } : null), keys: SU_KEYS });
   return ly + 52;
@@ -48515,6 +48788,29 @@ const IMAGO_ART = {
           }
           break;
         }
+        // V, ENDLESS FORMS (placeholders)
+        case 'evoMolt': case 'evoShed': {
+          g.strokeStyle = rgba('#fde68a', (0.8 * fa).toFixed(3)); g.lineWidth = 2;
+          g.beginPath(); g.arc(e.x, e.y, 18 + 70 * a, 0, TAU); g.stroke();
+          break;
+        }
+        case 'evoGrow': case 'evoOver': {
+          g.strokeStyle = rgba(e.kind === 'evoOver' ? '#fef08a' : '#fde68a', (0.9 * fa).toFixed(3)); g.lineWidth = e.kind === 'evoOver' ? 3 : 1.5;
+          g.beginPath(); g.arc(e.x, e.y, (e.kind === 'evoOver' ? 30 : 16) + 50 * a, 0, TAU); g.stroke();
+          break;
+        }
+        case 'evoBeam': {
+          g.strokeStyle = rgba('#fde68a', (0.6 * fa).toFixed(3)); g.lineWidth = e.w * 2 * fa + 1;
+          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          g.strokeStyle = rgba('#ffffff', (0.9 * fa).toFixed(3)); g.lineWidth = 1.5;
+          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          break;
+        }
+        case 'evoGain': {
+          g.fillStyle = rgba('#fde68a', (0.9 * fa).toFixed(3));
+          g.beginPath(); g.arc(lerp(e.x, e.hx, a), lerp(e.y, e.hy, a), 2.5, 0, TAU); g.fill();
+          break;
+        }
         case 'wake': case 'out': {
           const R = (e.kind === 'wake' ? 30 : 20) + 90 * (1 - Math.pow(1 - a, 2));
           g.strokeStyle = rgba(IM_COL, (0.5 * fa).toFixed(3)); g.lineWidth = 5 * fa + 1;
@@ -48576,7 +48872,7 @@ const IMAGO_ART = {
         g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'middle'; g.fillStyle = '#ecfeff';
         g.fillText(m.keys[i].toUpperCase(), x + kw / 2, ky + kh / 2 + 0.5);
         g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'top';
-        g.fillText(m.liveS[i].toFixed(1), x + kw / 2, ky + kh + 3);
+        g.fillText(m.liveTxt && m.liveTxt[i] != null ? m.liveTxt[i] : m.liveS[i].toFixed(1), x + kw / 2, ky + kh + 3);
         continue;
       }
       if (live && cd > 0) {
@@ -48766,6 +49062,46 @@ const IMAGO_ART = {
       g.moveTo(b.x1, b.y1); g.lineTo(b.x1 + Math.cos(a) * l, b.y1 + Math.sin(a) * l);
     }
     g.stroke();
+  },
+
+  /* ---------------- V — ENDLESS FORMS: placeholders, to be drawn ----------------
+     Lines and labels only, so it can be played: the user draws these (18 Oct:
+     "build the v with blank art hooks"). WHAT THEY ARE HANDED is in this
+     block's header; evoGrowths is handed what OPR_ART.growths is. Each is
+     tagged "placeholder" where it draws. */
+  evoGrowths(g, s) {
+    // how far it has come, over the hull (placeholder)
+    g.textAlign = 'center'; g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = 'rgba(253,230,138,0.85)';
+    g.fillText(s.n < s.of ? 'EVO ' + s.n + '/' + s.of : 'EVO +' + s.lvl, s.x, s.y - s.r - 30);
+    // the molt: a skin shed off the moth, opening (placeholder)
+    if (s.molt >= 0) {
+      g.strokeStyle = rgba('#fde68a', (0.85 * (1 - s.molt)).toFixed(3)); g.lineWidth = 2;
+      g.beginPath(); g.arc(s.x, s.y, s.r + 6 + 34 * s.molt, 0, TAU); g.stroke();
+    }
+    // each growth, a stroke out of its side of the back, growing in and kicking back as it fires (placeholder)
+    g.translate(s.x, s.y); g.rotate(s.ang);
+    g.lineCap = 'round'; g.strokeStyle = s.lvl ? '#fef08a' : '#fde68a'; g.fillStyle = 'rgba(253,230,138,0.2)';
+    for (const q of s.list) {
+      const len0 = [26, 32, 32, 30, 22, 40, 16, 0][q.i] || 20, L = len0 * q.k, y = q.side * (7 + (q.i % 3) * 4), back = 3 * (1 - q.kick);
+      g.globalAlpha = 0.45 + 0.55 * q.k;
+      if (q.kind === 'ring') {   // the crown: a ring of motes over the back
+        g.lineWidth = 1.2; g.beginPath(); g.arc(-4, 0, (s.r + 8) * q.k, 0, TAU); g.stroke();
+        continue;
+      }
+      g.lineWidth = q.id === 'cannon' ? 6 : q.id === 'pods' ? 7 : q.id === 'rail' ? 2 : 3;
+      g.beginPath(); g.moveTo(-8 - back, y); g.lineTo(-8 - back + L, y); g.stroke();
+    }
+    g.globalAlpha = 1;
+  },
+  evoShot(g, s) {
+    // a round: a dot; a missile: a dart (placeholder)
+    if (s.kind === 'missile') {
+      g.translate(s.x, s.y); g.rotate(Math.atan2(s.vy, s.vx));
+      g.fillStyle = '#fde68a'; g.beginPath(); g.moveTo(7, 0); g.lineTo(-5, 3.5); g.lineTo(-5, -3.5); g.closePath(); g.fill();
+      return;
+    }
+    g.fillStyle = s.kind === 'ring' ? '#fef9c3' : '#fde68a';
+    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
   }
 };
 /* ========================== end of IMAGO's art hooks ========================== */
