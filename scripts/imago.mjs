@@ -118,12 +118,12 @@ section('GRAZE');
   // a round 30 px off the line, radius 6 and the hull's 13: inside the band (edge 19, band to 45), never touching
   const hp0 = J(g, `P.hp`);
   round(g, 30); steps(g, 50);
-  ok(J(g, `P.imGraze`) === 1, 'a round passing close pays one, as it leaves', J(g, `P.imGraze`));
+  ok(J(g, `P.imGraze`) === J(g, `IM_PAY`), 'a round passing close pays IM_PAY, as it leaves', J(g, `P.imGraze`));
   ok(J(g, `P.hp`) === hp0, 'and it did not land');
   round(g, 70); steps(g, 50);
-  ok(J(g, `P.imGraze`) === 1, 'one passing wide pays nothing', J(g, `P.imGraze`));
+  ok(J(g, `P.imGraze`) === J(g, `IM_PAY`), 'one passing wide pays nothing', J(g, `P.imGraze`));
   round(g, 0); steps(g, 50);
-  ok(J(g, `P.imGraze`) === 1, 'one that lands pays nothing', J(g, `P.imGraze`));
+  ok(J(g, `P.imGraze`) === J(g, `IM_PAY`), 'one that lands pays nothing', J(g, `P.imGraze`));
   ok(J(g, `P.hp`) < hp0, 'and it landed');
   // a dash through one: the round is met mid-dash
   g.run(`P.iframe = 0; P.dashCh = P.dashMax;`);
@@ -131,7 +131,7 @@ section('GRAZE');
   steps(g, 24);
   g.run(`P.dashT = 0.5; P.iframe = 0.5;`);
   steps(g, 12);
-  ok(J(g, `P.imGraze`) === 1 + 4, 'one dashed through pays four', J(g, `P.imGraze`));
+  ok(J(g, `P.imGraze`) === J(g, `IM_PAY + IM_PAY_DASH`), 'one dashed through pays IM_PAY_DASH', J(g, `P.imGraze`));
   g.run(`P.imGraze = IM_MAX - 1;`);
   round(g, 30); steps(g, 50);
   ok(J(g, `P.imGraze`) === J(g, `IM_MAX`), 'it fills to IM_MAX', J(g, `P.imGraze`));

@@ -385,7 +385,8 @@ were, so this is the frame only.
 - **One passive, one transformation, four actives,** as the SUPERUSER header
   sets out. None of it runs in the rite.
 - **The meter is GRAZE.** A round that passes within 26 px without hitting
-  pays 1, and a dash through one pays 4. It is the skill the rite taught.
+  pays 2, and a dash through one pays 8 (doubled 19 Oct, at your word, to
+  fill faster). It is the skill the rite taught.
 - **The key is [F],** free for VOIDRUNNER today (`ventFire` returns for any
   hull that is not a lance or THE HACKER). The form lasts 60 s, with the
   cut-in above.
@@ -899,8 +900,9 @@ and its own art hooks (`IMAGO_ART`) under it. As with SUPERUSER's first
 active, the frame is a stand-in, built only as far as its first active needs.
 
 - **GRAZE in a run:** an awake VOIDRUNNER fills it with near misses. A round
-  of theirs that passes within 26 px of the hull's edge pays 1 as it leaves,
-  one that lands pays nothing, and one dashed through pays 4. It fills to 40
+  of theirs that passes within 26 px of the hull's edge pays 2 as it leaves,
+  one that lands pays nothing, and one dashed through pays 8 (1 and 4 until
+  19 Oct, when you asked for it to fill faster). It fills to 40
   and says IMAGO READY. It does not fill while IMAGO is on, in the rite, or in
   PvP. In co-op each pilot's rounds are their own.
 - **[F]** spends a full meter on 60 s of IMAGO. Short of full it says NOT
@@ -1096,7 +1098,7 @@ duel about thirty seconds, from "There. Now it is fair." to the card.
 | --- | --- |
 | `IM_MAX` | GRAZE 40 to fill (a piece's worth in the rite) |
 | `IM_GRAZE_R` | 26 px past the hull's edge is a graze |
-| `IM_PAY`, `IM_PAY_DASH` | 1 a round grazed, 4 a round dashed through |
+| `IM_PAY`, `IM_PAY_DASH` | 2 a round grazed, 8 a round dashed through (1 and 4 until 19 Oct) |
 | `IM_LEN` | 60 s of IMAGO |
 | `EYE_CONE`, `EYE_FUSE` | 130°, 2 s (yours) |
 | `EYE_ROWS` | 4 at 95 px over three quarters of the cone, 5 at 195 px over all of it; each up to 12 px and 3° off its place |
