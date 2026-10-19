@@ -27,7 +27,7 @@
 
   const BANNED = new Set([
     'exec', 'u_unwritten',                                     // instant kills: Executioner's Mark, Erasure
-    'u_ascetic', 'u_overclock', 'u_famine', 'u_null',          // broken without waves: one-point hull, Night Shift, Grudge, Deadline
+    'u_ascetic', 'u_overclock', 'u_famine', 'u_null',          // broken without waves: Discipline, Night Shift, Grudge, Deadline
     'u_static', 'btime',                                       // Feedback Loop pings between two pilots; Bullet Time slows them both
     'mag', 'xp', 'scav', 'luck', 'siph', 'u_infest', 'u_vermin', 'u_promotion',   // drops, credits, experience
     'u_austerity', 'u_pauper', 'u_tax',                        // the shop

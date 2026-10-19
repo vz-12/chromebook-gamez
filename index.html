@@ -2175,7 +2175,7 @@ function newPlayer() {
     firstB: 0, lastS: 0, sundial: 0, nightS: 0,
     brand: 0, spall: 0, tag: 0, conduct: 0, suppress: 0,
     insider: 0, interest: 0, salvage: 0, tithe: 0, bloodP: 0, twoMinds: 0,
-    otime: 0, curator: 0, deadline: 0, ledger: 0, symb: 0, erasure: 0, assembly: 0,
+    otime: 0, curator: 0, deadline: 0, discipline: 0, symb: 0, erasure: 0, assembly: 0,
     // and the counters they keep
     heatN: 0, heatT: 0, coldT: 0, coldReady: false, blinkReady: false,
     echoQ: [], shotN: 0, harvestN: 0, requisN: 0, rollN: 0,
@@ -87868,9 +87868,9 @@ const CHAL_UPGRADES = [
   { id: 'u_null', lock: 'ch_null', n: 'Deadline', max: 1, rar: 'legend',
     d: 'A clock on the whole run. Each wave cleared adds 40s. +45% damage while it runs',
     f: p => { p.deadline++; p.deadlineT = Math.max(p.deadlineT || 0, 100); } },
-  { id: 'u_ascetic', lock: 'ch_ascetic', n: 'Glass Ledger', max: 1, rar: 'legend',
-    d: 'Your hull is worth one point. Every wave cleared grows a shield instead',
-    f: p => { p.ledger++; p.maxHp = 1; p.hp = 1; } },
+  { id: 'u_ascetic', lock: 'ch_ascetic', n: 'Discipline', max: 1, rar: 'legend',
+    d: 'Waves cleared grow a shield (up to 6) and refill them. +8% damage per shield',
+    f: p => p.discipline++ },
   { id: 'u_purist', lock: 'ch_purist', n: 'Symbiote', max: 3, rar: 'epic',
     d: 'Drones, sentries and chains hit twice as hard. You fire 20% slower',
     f: p => { p.symb++; p.fireRate *= 0.8; } },
@@ -87936,6 +87936,7 @@ function rewardMul() {
   if (P.sundial) m *= 1 + Math.floor((P.waveClock || 0) / 10) * 0.04 * P.sundial;
   if (P.firstB && (P.waveClock || 0) < 6) m *= 1 + 0.9 * P.firstB;
   if (P.deadline) m *= 1.45;
+  if (P.discipline) m *= 1 + 0.08 * P.shield;
   if (P.nightS && wave % 3 === 0) m *= 2;
   if (P.lastS && RC.live > 0 && RC.live <= 3) m *= 1 + 0.7 * P.lastS;
   if (P.wallA) {
@@ -88117,10 +88118,12 @@ function onRewardWave() {
     P.xp += P.xpNext * 0.33 * P.otime;
     floatText(P.x, P.y - 72, 'OVERTIME', '#38bdf8', 14);
   }
-  if (P.ledger) {
-    P.shieldMax = Math.min(6, P.shieldMax + 1);
+  if (P.discipline && !(Chal.on && Chal.on.m.oneShot)) {
+    if (P.shieldMax < 6) {
+      P.shieldMax++;
+      floatText(P.x, P.y - 44, 'DISCIPLINE  +1', COL.shield, 15);
+    }
     P.shield = P.shieldMax;
-    floatText(P.x, P.y - 44, 'LEDGER  +1', COL.shield, 15);
   }
   if (P.assembly) {
     P.assemblyN = (P.assemblyN || 0) + 1;
@@ -88141,8 +88144,6 @@ function onRewardWave() {
    because it was wired into a branch that some other state returns out of. */
 function rewardTick(dt) {
   P.waveClock = (P.waveClock || 0) + dt;
-  // the ledger is worth one point and stays worth one point
-  if (P.ledger) { P.maxHp = 1; P.hp = Math.min(P.hp, 1); }
   rewardScan();
 
   if (P.echo && P.echoQ && P.echoQ.length) {
