@@ -23,8 +23,8 @@ in a run on a stand-in frame (GRAZE, [F], the moth, its HUD), and its first
 active, your Z: EYESPOTS. **Drawn 18 Oct:** Z's art, and the form's cut-in
 with your cocoon. **Built and drawn 18 Oct:** your X, FLUTTER (ten seconds
 twice as fast, every attack dodged), and your C, THE ARMORY (a wheel of eight
-overpowered guns). **Built 18 Oct, its art left as hooks:** your V, ENDLESS
-FORMS (the rite's free evolution, earned in a run). See "As built" under The
+overpowered guns). **Built 18 Oct, drawn 19 Oct:** your V, ENDLESS FORMS
+(the rite's free evolution, earned in a run). See "As built" under The
 path. This repository is public, so nothing sealed is written here. The story below stops at "the
 shutdown" and "the dark".
 
@@ -646,27 +646,53 @@ My rules, not yours:
 - The growths' rounds are their own, not the hull's. The rifles and the rail
   are instant lines to the wall, the cannon's round goes through everything,
   and the rest stop in the first body they hit.
-- **The art is yours to draw.** The hooks are in `IMAGO_ART`:
-  - `evoGrowths`: what has grown out of the moth's back, the molt, and how
-    far it has come. It is handed exactly what the rite's drawn growths
-    (`OPR_ART.growths`) are, plus V's own (grown, OVERGROWTH, PROGRESS, the
-    molt). So `return OPR_ART.growths(g, s)` is a one-line way to draw it
-    with the rite's art;
-  - `evoShot`: a growth's round or missile in the air;
-  - the moments, in `fx`: `evoMolt`, `evoGrow`, `evoOver`, `evoBeam` (a
-    rifle's or the rail's line), `evoGain` (a graze paid as PROGRESS) and
-    `evoShed`.
+- **The art (drawn 19 Oct, at your word: "now the v transformation").** V
+  molts the moth once more, so the molt is drawn as the transformation:
+  - **The molt (0.8 s).** A ring of gold draws in onto the moth: its skin
+    tightening. The husk creeps back over it from the nose, with a band of
+    gold at its front. The husk is amber chitin, ridged where the veins were,
+    with the chrysalis's gold spots on it. It strains and trembles, and
+    cracks of light run out from the seam down its back. Just past halfway
+    the seam splits white. The husk comes off in two halves, opening about
+    its tail like a book and curling as they lift, with flakes coming off
+    them. The halves are left lying in the room while the moth flies on out
+    of them. Its new skin is white for a moment, and out of the molt comes
+    TWIN BARRELS.
+  - **The guns** are the rite's eight, drawn as the rite draws them
+    (`OPR_ART.growths`): the same moth growing the same guns. Each one
+    splits the skin where it comes out, with a flash and a ring of gold on
+    the moth and flakes of husk thrown off into the room.
+  - **The next one, budding.** A bead of gold sits where the next gun will
+    come out, swelling as PROGRESS fills and beating as it nears, with a vein
+    of gold back to the core. A graze paid as PROGRESS is a mote of gold
+    drawn in to the moth, and the bud brightens as it lands.
+  - **OVERGROWTH:** a thorn of gold a side along the forewings' leading
+    edges for each level, the next one budding at the end of the row. There
+    are six a side at most; past that they burn brighter. Each level throws
+    a ring of gold off the moth with a crown of spikes inside it. The rounds'
+    light goes from the moth's cyan to gold as it climbs.
+  - **Its rounds,** small and hard as IMAGO's own, each gun its own:
+    - the barrels' slugs;
+    - the cannon's slow white bore, the air bending round it;
+    - the rotary gun's needles, every third one hot;
+    - the pods' hatchlings fluttering out on a thread of light;
+    - the crown's motes.
 
-  What each is handed is in the art block's header. For now they are
-  placeholders, lines and labels in the rite's first yellow, each tagged
-  "placeholder" where it draws:
-  - a stroke out of the back for each growth;
-  - a ring for the crown and for the molt;
-  - "EVO n/8" or "EVO +lvl" over the hull;
-  - dots for rounds, darts for missiles, and plain lines for the beams.
+    The rifles and the rail are drawn tight and gone at once, sparking where
+    they end. Every shot leaves with a spark (the crown's sixteen go without)
+    and every hit lands. The cannon's hits are harder and gold, and so is
+    every hit from OVERGROWTH +2.
+  - **IMAGO over:** the guns shed, each falling away from where it grew as a
+    spindle of husk, its light going out of it, and the thorns scattering.
+  - **The V key** goes gold while it evolves, filling with PROGRESS and
+    reading n/8 under it, then +lvl.
 
-  The V key lights while it evolves. It fills with PROGRESS and shows n/8
-  under it, then +lvl.
+  What follows the moth is drawn on it (`evoGrowths`), and what it leaves
+  behind is drawn in the room (`fx`). The hooks are `evoGrowths` and
+  `evoShots` (its rounds as a list, as `rounds` is, so the drawing sees each
+  shot leave and each hit land), plus `fx`'s `evoGrow`, `evoBeam`,
+  `evoGain` and `evoShed`. The molt's ring and OVERGROWTH's are drawn on the
+  moth, not from `fx`. What each is handed is in the art block's header.
 
 ## Tales (stand-ins, in the voice)
 
@@ -741,8 +767,8 @@ needed (below), and its cut-in drawn: still to come is the passive.
 
 **Phase 4: the four actives,** named by you one at a time. Z, EYESPOTS, and
 X, FLUTTER, built and drawn 18 Oct; C, THE ARMORY, built and drawn 18 Oct;
-V, ENDLESS FORMS, built 18 Oct with its art left as hooks for you (below). All
-four are named.
+V, ENDLESS FORMS, built 18 Oct and drawn 19 Oct (below). All four are
+named.
 
 **Phase 5: everything around it.** Tales (`TALE_AWAKE`, his page III,
 VOIDRUNNER's page III unheld, `scripts/tales.mjs`); looks (`awake:runner`);
@@ -1011,9 +1037,10 @@ active, the frame is a stand-in, built only as far as its first active needs.
     - `hurtPlayer` (the molt);
     - `imGrazeRound` (a graze pays PROGRESS while it runs);
     - `imTick`, which calls `imEvoTick`.
-  - **Its art, left as hooks** in `IMAGO_ART` (`evoGrowths`, `evoShot`, and
-    six `fx` kinds) with placeholders. The HUD hook takes words of a move's
-    own under its key (`liveTxt`).
+  - **Its art,** first left as hooks with placeholders, then drawn (above):
+    `IMAGO_ART`'s `evoGrowths`, `evoShots` (once `evoShot`, one shot at a
+    time) and four `fx` kinds. The HUD hook takes words of a move's own
+    under its key (`liveTxt`).
   - **Tests:** `test:imago` has an ENDLESS FORMS section (154 checks in all):
     - V out of IMAGO grows nothing;
     - the molt from the keyboard: IMAGO's clock raised, nothing landing,

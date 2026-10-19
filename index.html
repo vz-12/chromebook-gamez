@@ -47299,17 +47299,19 @@ function imEvoShotTick(dt) {
      { x0, y0, x1, y1, w }; armArc { pts [[x, y]] }; armBlast { x, y, r, id };
      armCollapse { x, y, r }
 
-   V, ENDLESS FORMS (placeholders, lines and labels: the user is to draw them):
-     evoGrowths(g, s)  world, over the moth: what has grown out of its back,
-                   handed as OPR_ART.growths is (so the rite's drawn growths
-                   can stand in: return OPR_ART.growths(g, s)). s.x, y, ang,
-                   r, t (s since V), list [{ i, id, side (-1/0/1), k (0-1,
-                   growing in), kick (0-1, its clock toward the next shot),
-                   kind }], and V's own: n (grown), of (8), lvl (OVERGROWTH),
-                   p (0-1, PROGRESS toward the next fill), molt (0-1 through
-                   the molt, -1 out of it)
-     evoShot(g, s)   world: a growth's round or missile in the air. s.i, id,
-                   kind (shell, missile, ring), x, y, vx, vy, r, t
+   V, ENDLESS FORMS (drawn 19 Oct: see "V — ENDLESS FORMS, as drawn"):
+     evoGrowths(g, s)  world, over the moth: the molt, and what has grown out
+                   of its back, handed as OPR_ART.growths is (the rite's
+                   drawn growths draw the guns). s.x, y, ang, r, t (s since
+                   V), list [{ i, id, side (-1/0/1), k (0-1, growing in),
+                   kick (0-1, its clock toward the next shot), kind }], and
+                   V's own: n (grown), of (8), lvl (OVERGROWTH), p (0-1,
+                   PROGRESS toward the next fill), molt (0-1 through the
+                   molt, -1 out of it)
+     evoShots(g, s)  world: its growths' rounds and missiles in the air, and
+                   a moment after the last, for what they hit. s.list (the
+                   game's shots, read only: i, x, y, vx, vy, r, t, life,
+                   pierce, hit), lvl (OVERGROWTH, -1 once IMAGO is over), now
      and in fx: evoMolt { x, y, ang } (V pressed, the molt begins: life is
      the molt); evoGrow { x, y, ang, i, id, side, name }; evoOver
      { x, y, ang, lvl }; evoBeam { x0, y0, x1, y1, w, i, id } (a rifle's or
@@ -47320,7 +47322,7 @@ function imEvoShotTick(dt) {
    n/8 under it, then +lvl (m.live, m.liveTxt).
 =========================================================================== */
 const IM_FAILED = new Set();
-const IM_ST = { fx: [], wings: {}, echo: {}, arm: {}, rounds: {}, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
+const IM_ST = { fx: [], wings: {}, echo: {}, arm: {}, rounds: {}, evo: {}, evoNow: { gainAt: -9, lvl: 0 }, cut: { lastS: -1 }, hud: { prev: [0, 0, 0, 0], at: [-9, -9, -9, -9], rdyAt: -9, wasRdy: false } };
 const IM_FX_LIFE = { graze: 0.38, wake: 1.2, out: 0.7, throw: 0.42, stick: 0.3, burst: 0.8,
                      dodge: FL_DODGE + 0.3, flutter: 0.7, flutterOut: 0.5,
                      armOpen: 0.3, armShut: 0.3, armEquip: 0.6, armRail: 0.35, armArc: 0.22, armBlast: 0.55, armCollapse: 0.6,
@@ -47390,11 +47392,8 @@ function drawImagoKit() {
       fly: W.fly, life: W.life, pull: W.pull, core: W.core, held: s.held || 0, go: s.go || 0, trav: s.trav || 0, blast: W.blast || 0 });
   }
   if (P.imArmBeam) IM('armBeam', ctx, Object.assign({}, P.imArmBeam));
-  // V: its growths' rounds and missiles
-  if (P.imEvoShots) for (const s of P.imEvoShots) {
-    const G = EVO_GROWTHS[s.i];
-    IM('evoShot', ctx, { i: s.i, id: G.id, kind: G.kind, x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, t: s.t });
-  }
+  // V: its growths' rounds and missiles, and a moment after, what they hit
+  if (P.imEvoShots && (P.imEvoShots.length || imEvoShotsLeft())) IM('evoShots', ctx, { list: P.imEvoShots, lvl: P.imEvo ? P.imEvo.lvl : -1, now: uiTime });
 }
 // world, the additive pass: this pilot's own rounds while the moth is shown, in drawBullets' place
 function drawImagoRounds(list) {
@@ -48431,6 +48430,370 @@ function imRoundHitDraw(g, h, a, mat) {
   }
 }
 
+/* ------------------------ V — ENDLESS FORMS, as drawn ------------------------
+   (user, 19 Oct: "now the v transformation".) V is the moth molting once
+   more, and the molt is drawn as the transformation. Its skin goes hard over
+   it from the nose back: a husk of amber chitin, ridged where the veins
+   were, the chrysalis's gold spots on it. It strains, cracks of light
+   running out from the seam down its back; the seam splits white, and the
+   husk comes off in two halves, opening about its tail like a book and
+   curling as they lift, left lying in the room while the moth flies on out
+   of them, its new skin white for a moment. Out of the molt comes its first
+   gun.
+   The guns are the rite's eight, as the rite draws them (OPR_ART.growths):
+   the same moth, growing the same guns. What V adds to them:
+     - the next one, budding: a bead of gold where the next growth will come
+       out, swelling as PROGRESS fills and beating as it nears, a vein of
+       gold back to the core. A graze paid as PROGRESS is a mote of gold
+       drawn in to the moth, and the bud brightens as it lands. Each growth
+       splits the skin where it comes out, flakes of husk thrown off it.
+     - OVERGROWTH: thorns of gold along the forewings' leading edges, one a
+       side for each level (IM_THORNS a side; past that they burn brighter),
+       the next one budding at the end of the row; a ring and a crown of
+       spikes off it as each level comes; and its rounds' light going gold
+       as it climbs.
+     - its rounds, small and hard as IMAGO's own ("IMAGO's rounds"), each
+       gun its own: the barrels' slugs; the cannon's slow white bore, the air
+       bending round it; the rotary gun's needles, every third one hot; the
+       pods' hatchlings fluttering out on a thread of light; the crown's
+       motes. The rifles and the rail are drawn tight and gone at once,
+       sparking where they end. Every shot leaves with a spark and every hit
+       lands, harder and gold for the cannon's, and for all of them once it
+       has overgrown twice.
+     - IMAGO over: the guns shed, each falling away from where it grew as
+       husk, its light going out of it.
+   The drawing's own, per pilot (IM_ST.evo): the halves left lying, whether
+   this molt has split, the rounds it has seen and what they hit. The moth's
+   wings, as the hull last drew them, are IM_ST.wings[pk].I. */
+const IM_GOLD    = '#fbbf24';        // V's gold: the chrysalis's
+const IM_GOLD_HI = '#fef3c7';
+const IM_HUSK_SPLIT = 0.55;          // the husk splits this far through the molt
+const IM_HUSK_LIFE  = 1.0;           // and its halves lie in the room this long after
+const IM_THORNS = 6;                 // OVERGROWTH's thorns a side, at most
+// the husk's gold spots, as a chrysalis's: [x, y, where] (the upper side; where: 1 the forewing, 2 the hindwing, 0 the body)
+const IM_HUSK_SPOTS = [[-1, 9, 1], [-4.5, 26, 1], [-9.5, 8, 2], [-21, 15, 2], [-1.5, 5.5, 0], [-12.5, 2.4, 0]];
+// the cracks that run out from the seam as it strains: [where, points] (as the spots)
+const IM_HUSK_CRACKS = [[1, [[3, 4], [0.5, 9], [-2, 14], [-1, 19.5]]], [1, [[2, 5], [-3.5, 8.5], [-9, 12.5]]],
+                        [2, [[-4, 4], [-8, 8.5], [-13.5, 11]]], [2, [[-6, 3.5], [-12, 6], [-19, 9.5]]]];
+// how each growth's hits land, as IMAGO's rounds' guns do
+const IM_EVO_HIT = { barrels: 'base', cannon: 'base', gatling: 'minigun', pods: 'base', crown: 'minigun' };
+// how long each growth is, shed (px; the crown's are motes)
+const IM_EVO_SHED = { barrels: 11, rifle: 13, cannon: 14, gatling: 10, rail: 16, pods: 7 };
+
+const imEvoRec = pk => IM_ST.evo[pk] || (IM_ST.evo[pk] = { husk: null, split: false, live: new Map(), hits: [], seq: 0, lvl: 0, lvlSeen: 0, overAt: -9 });
+// whether this pilot's growths' rounds are still being drawn (in the air, or what they hit)
+const imEvoShotsLeft = () => { const R = IM_ST.evo[PILOT.on || 0]; return !!R && (R.live.size > 0 || R.hits.length > 0); };
+// a colour between two, as #rrggbb (what rgba and the glow sprites want), in quarters so the sprites stay few
+function imMixHex(a, b, t) {
+  const A = oaRGB(a), B = oaRGB(b), k = Math.round(oaC01(t) * 4) / 4;
+  return '#' + [0, 1, 2].map(i => Math.round(A[i] + (B[i] - A[i]) * k).toString(16).padStart(2, '0')).join('');
+}
+// its rounds' light at this much OVERGROWTH: the moth's cyan going gold
+const imEvoCol = lvl => { const k = oaC01(lvl / 4); return { c: imMixHex('#67e8f9', IM_GOLD, k), core: imMixHex('#ffffff', IM_GOLD_HI, k) }; };
+// a polyline cut to f of its length
+function imPartLine(pts, f) {
+  const L = orLen(pts) * f, out = [pts[0]];
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const sl = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (acc + sl <= L) { out.push(pts[i]); acc += sl; continue; }
+    const u = sl > 0 ? (L - acc) / sl : 0;
+    out.push([lerp(pts[i - 1][0], pts[i][0], u), lerp(pts[i - 1][1], pts[i][1], u)]);
+    break;
+  }
+  return out;
+}
+// a point on the husk where the moth's wings have it now (hull space)
+const imHuskPt = (p, where, sd, I) => where ? orWingXf(p, sd, where === 1, I) : [p[0], p[1] * sd];
+
+/* One side of the husk (hull space): its two wings, hind under fore, and its
+   half of the body, cut down the spine. Chitin, dark at the root and pale at
+   the edge, ridged where the veins were, the gold spots on it; crack (0-1)
+   lights the cracks running out from the seam. flat, a colour: all of it in
+   that colour alone (the front of it, creeping over the moth). */
+function imHuskSide(g, I, sd, a, mat, crack, flat) {
+  if (a <= 0.01) return;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const fore of [false, true]) {
+    const pts = (fore ? ORH_FORE : ORH_HIND).map(p => orWingXf(p, sd, fore, I)), r0 = pts[0], r1 = pts[fore ? 3 : 4];
+    if (flat) { orPath(g, pts); g.fillStyle = rgba(flat, a.toFixed(3)); g.fill(); continue; }
+    const gr = g.createLinearGradient(r0[0], r0[1], r1[0], r1[1]);
+    gr.addColorStop(0, rgba('#3d2a0e', a.toFixed(3))); gr.addColorStop(0.55, rgba('#86622a', a.toFixed(3))); gr.addColorStop(1, rgba('#d9bd82', a.toFixed(3)));
+    orPath(g, pts); g.fillStyle = gr; g.fill();
+    for (const v of fore ? ORH_FVEINS : ORH_HVEINS) {
+      const q = v.map(p => orWingXf(p, sd, fore, I));
+      g.strokeStyle = rgba('#24170a', (0.75 * a).toFixed(3)); g.lineWidth = 0.9; orLine(g, q); g.stroke();
+      g.strokeStyle = rgba(IM_GOLD_HI, (0.3 * a).toFixed(3)); g.lineWidth = 0.35; orLine(g, q.map(([x, y]) => [x + 0.45, y - 0.45 * sd])); g.stroke();
+    }
+    orPath(g, pts); g.strokeStyle = rgba('#fde68a', (0.7 * a).toFixed(3)); g.lineWidth = 0.75; g.stroke();
+  }
+  g.save();
+  g.beginPath(); g.rect(-40, sd > 0 ? 0 : -40, 80, 40); g.clip();
+  g.beginPath(); orPathAdd(g, ORH_BASE); for (const [x, rx, ry] of ORH_ABDO) orPathAdd(g, orNgon(x, 0, rx, ry, 10));
+  if (flat) { g.fillStyle = rgba(flat, a.toFixed(3)); g.fill(); g.restore(); return; }
+  const gb = g.createLinearGradient(18, 0, -23, 0);
+  gb.addColorStop(0, rgba('#a07a3a', a.toFixed(3))); gb.addColorStop(0.5, rgba('#5a3f16', a.toFixed(3))); gb.addColorStop(1, rgba('#3d2a0e', a.toFixed(3)));
+  g.fillStyle = gb; g.fill();
+  g.strokeStyle = rgba('#fde68a', (0.6 * a).toFixed(3)); g.lineWidth = 0.7; g.stroke();
+  g.strokeStyle = rgba('#24170a', (0.7 * a).toFixed(3)); g.lineWidth = 0.6;
+  g.beginPath(); for (const [x, rx, ry] of ORH_ABDO) { g.moveTo(x + rx * 0.7, -ry * 0.9); g.lineTo(x + rx * 0.7, ry * 0.9); } g.stroke();
+  g.restore();
+  // the chrysalis's gold
+  for (const [x, y, w] of IM_HUSK_SPOTS) {
+    const p = imHuskPt([x, y], w, sd, I);
+    g.fillStyle = rgba(IM_GOLD, (0.95 * a).toFixed(3)); g.beginPath(); g.arc(p[0], p[1], 0.95, 0, TAU); g.fill();
+    g.fillStyle = rgba('#ffffff', (0.85 * a).toFixed(3)); g.beginPath(); g.arc(p[0] - 0.3, p[1] - 0.3, 0.35, 0, TAU); g.fill();
+  }
+  if (!mat && crack <= 0) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (mat) for (const [x, y, w] of IM_HUSK_SPOTS) { const p = imHuskPt([x, y], w, sd, I); oaGlow(g, p[0], p[1], 3.2, IM_GOLD, 0.45 * a); }
+  if (crack > 0) for (const [w, pts] of IM_HUSK_CRACKS) {
+    const q = imPartLine(pts.map(p => imHuskPt(p, w, sd, I)), crack);
+    g.strokeStyle = rgba(IM_GOLD, (0.55 * a).toFixed(3)); g.lineWidth = 1.6; orLine(g, q); g.stroke();
+    g.strokeStyle = rgba('#ffffff', (0.9 * a).toFixed(3)); g.lineWidth = 0.55; orLine(g, q); g.stroke();
+  }
+  g.restore();
+}
+/* The molt, over the moth (hull space), u (0-1) through it until it splits:
+   the husk creeping back over it from the nose, a band of gold at its front;
+   then straining, trembling, the cracks lit, the seam down its back burning
+   brighter. */
+function imMoltOver(g, I, u, mat) {
+  const cover = OPO_KIT.ease.inOut(oaC01((u - 0.04) / 0.34)), strain = oaC01((u - 0.36) / (IM_HUSK_SPLIT - 0.36));
+  if (cover <= 0) return;
+  const xf = lerp(24, -30, cover);
+  if (strain > 0) { const j = 0.7 * strain; g.translate(rnd(j, -j), rnd(j, -j)); }
+  g.save(); g.beginPath(); g.rect(xf, -40, 70, 80); g.clip();
+  for (const sd of [1, -1]) imHuskSide(g, I, sd, 0.9, mat, strain, null);
+  g.restore();
+  g.save(); g.globalCompositeOperation = 'lighter';
+  if (cover < 1) {
+    g.save(); g.beginPath(); g.rect(xf - 0.2, -40, 2.2, 80); g.clip();
+    for (const sd of [1, -1]) imHuskSide(g, I, sd, 0.85, mat, 0, IM_GOLD_HI);
+    g.restore();
+  }
+  const x0 = Math.max(xf, -23);
+  if (x0 < 17) {
+    g.lineCap = 'round';
+    g.strokeStyle = rgba(IM_GOLD, (0.25 + 0.6 * strain).toFixed(3)); g.lineWidth = 1 + 2.2 * strain;
+    g.beginPath(); g.moveTo(17, 0); g.lineTo(x0, 0); g.stroke();
+    if (strain > 0) { g.strokeStyle = rgba('#ffffff', (0.9 * strain).toFixed(3)); g.lineWidth = 0.7; g.stroke(); }
+    if (mat) oaGlow(g, 0, 0, 14 + 22 * strain, IM_GOLD, 0.15 + 0.45 * strain);
+  }
+  g.restore();
+}
+// out of it, k s after the split (hull space): the seam split white, and its new skin white for a moment
+function imMoltOut(g, I, k, mat) {
+  const f = oaC01(k / 0.55), w = 1 - f;
+  if (w <= 0) return;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const sd of [1, -1]) for (const fore of [false, true]) {
+    orPath(g, (fore ? ORH_FORE : ORH_HIND).map(p => orWingXf(p, sd, fore, I))); g.fillStyle = rgba('#ffffff', (0.4 * w * w).toFixed(3)); g.fill();
+  }
+  orPath(g, ORH_BASE); g.fillStyle = rgba('#ffffff', (0.7 * w).toFixed(3)); g.fill();
+  if (k < 0.18) {
+    const s = 1 - k / 0.18;
+    g.fillStyle = rgba('#ffffff', (0.95 * s).toFixed(3));
+    g.beginPath(); g.moveTo(21, 0); g.lineTo(2, 2.6 + 3 * (1 - s)); g.lineTo(-25, 0); g.lineTo(2, -2.6 - 3 * (1 - s)); g.closePath(); g.fill();
+    if (mat) oaGlow(g, -2, 0, 20 + 50 * (1 - s), IM_GOLD_HI, 0.8 * s);
+  }
+  g.restore();
+}
+/* The husk's halves, left lying where it split (world): opening about its
+   tail like a book, sliding back and off to their sides, curling as they
+   lift, flakes coming off them, going. */
+function imHuskPeel(g, H, mat, parts) {
+  const f = (uiTime - H.at) / IM_HUSK_LIFE;
+  if (f < 0 || f >= 1) return;
+  const e = OPO_KIT.ease.cubicOut(oaC01(f / 0.5)), a = 0.92 * (1 - f * f * f);
+  g.save(); g.translate(H.x, H.y); g.rotate(H.ang);
+  for (const sd of [1, -1]) {
+    g.save();
+    g.translate(-22 * e - 16 * f, sd * 10 * e);
+    g.translate(-22, 0); g.rotate(sd * 0.6 * e); g.translate(22, 0);
+    g.scale(1 - 0.08 * e, 1 - 0.3 * e);
+    imHuskSide(g, H.I, sd, a, mat, 0, null);
+    // its edge down the spine, torn
+    g.strokeStyle = rgba(IM_GOLD_HI, (0.6 * a * (1 - 0.5 * e)).toFixed(3)); g.lineWidth = 0.6;
+    g.beginPath(); g.moveTo(17, 0); for (let x = 14; x > -23; x -= 3) g.lineTo(x, sd * (0.4 + 0.7 * odHash(x * 1.3 + sd))); g.stroke();
+    g.restore();
+  }
+  if (parts) {
+    for (let k = 0; k < 8; k++) {
+      const sd = k % 2 ? 1 : -1, h1 = odHash(k * 3.7 + 1), x = 15 - k * 4.6 - 18 * e * h1, y = sd * (1 + (6 + 16 * h1) * e);
+      g.fillStyle = rgba(k % 3 ? '#b08a48' : IM_GOLD_HI, (0.85 * a).toFixed(3));
+      imScale(g, x, y, 1.4 * (1 - 0.4 * f) + 0.4, k + f * (4 + 6 * h1)); g.fill();
+    }
+  }
+  g.restore();
+}
+/* The moments that go with the moth (hull space), drawn on it so they stay
+   on it as it flies: V pressed, the skin tightening on it, a ring of gold
+   drawn in onto it; a growth coming out, a flash and a ring of gold where it
+   pushes through; a level of OVERGROWTH, a ring of gold off it and a crown of
+   spikes inside the ring. (What it leaves in the room, the flakes, is fx.) */
+function imEvoMoments(g, s, R, mat) {
+  const E = OPO_KIT.ease;
+  g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+  const u = s.molt >= 0 ? oaC01(s.molt * EVO_MOLT / 0.22) : 1;
+  if (u < 1) {
+    g.strokeStyle = rgba(IM_GOLD, (0.85 * (1 - u)).toFixed(3)); g.lineWidth = 1 + 3 * u;
+    g.beginPath(); g.arc(0, 0, 70 - 46 * E.out(u), 0, TAU); g.stroke();
+    if (mat) oaGlow(g, 0, 0, 46, IM_GOLD, 0.35 * (1 - u));
+  }
+  for (const q of s.list) {
+    const k = oaC01(q.k / 0.35);
+    if (k >= 1) continue;
+    const rt = OPR_GROW_ROOT[q.id] || [-6, 5], x = rt[0], y = q.side * rt[1], f = 1 - k;
+    if (mat) oaGlow(g, x, y, 16, IM_GOLD_HI, 0.8 * f * f);
+    if (k < 0.5) { g.fillStyle = rgba('#ffffff', (0.9 * (1 - k * 2)).toFixed(3)); g.beginPath(); g.arc(x, y, 2 + 4 * k, 0, TAU); g.fill(); }
+    g.strokeStyle = rgba(IM_GOLD, (0.85 * f).toFixed(3)); g.lineWidth = 1.6 * f + 0.4;
+    g.beginPath(); g.arc(x, y, 4 + 20 * E.cubicOut(k), 0, TAU); g.stroke();
+  }
+  const o = (uiTime - R.overAt) / 0.8;
+  if (o >= 0 && o < 1) {
+    const fa = 1 - o, Rr = 22 + 60 * E.cubicOut(o);
+    if (o < 0.2 && mat) oaGlow(g, 0, 0, 60, IM_GOLD, 0.6 * (1 - o / 0.2));
+    g.strokeStyle = rgba(IM_GOLD, (0.75 * fa).toFixed(3)); g.lineWidth = 3.5 * fa + 0.5;
+    g.beginPath(); g.arc(0, 0, Rr, 0, TAU); g.stroke();
+    g.strokeStyle = rgba(IM_GOLD_HI, (0.9 * fa).toFixed(3)); g.lineWidth = 1.3;
+    g.beginPath();
+    for (let k = 0; k < 12; k++) {
+      const q = k * TAU / 12 + o * 0.6, r0 = Rr * 0.62, r1 = r0 + 6 + 9 * fa;
+      g.moveTo(Math.cos(q) * r0, Math.sin(q) * r0); g.lineTo(Math.cos(q) * r1, Math.sin(q) * r1);
+    }
+    g.stroke();
+  }
+  g.restore();
+}
+// the next growth, budding where it will come out (hull space): p (0-1) its PROGRESS, lit (0-1) a graze just paid in
+function imEvoBud(g, x, y, p, lit, mat) {
+  const near = oaC01((p - 0.75) / 0.25), beat = near * (0.5 + 0.5 * Math.sin(uiTime * (10 + 14 * near)));
+  const r = 0.7 + 2.1 * OPO_KIT.ease.out(oaC01(p)) + 0.5 * beat + 0.6 * lit;
+  g.save(); g.lineCap = 'round';
+  g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = rgba(IM_GOLD, (0.15 + 0.35 * p + 0.3 * lit).toFixed(3)); g.lineWidth = 0.5;
+  g.beginPath(); g.moveTo(3, 0); g.quadraticCurveTo((x + 3) / 2, y * 0.25, x, y); g.stroke();
+  if (mat) oaGlow(g, x, y, r * 3.4 + 2, IM_GOLD, 0.2 + 0.4 * p + 0.4 * lit);
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = 'rgba(69,26,3,0.8)'; g.beginPath(); g.ellipse(x, y, r + 0.5, r * 0.78 + 0.5, 0, 0, TAU); g.fill();
+  g.fillStyle = rgba(IM_GOLD, (0.6 + 0.4 * p).toFixed(3)); g.beginPath(); g.ellipse(x, y, r, r * 0.78, 0, 0, TAU); g.fill();
+  g.fillStyle = rgba('#ffffff', (0.5 + 0.5 * Math.max(near, lit)).toFixed(3)); g.beginPath(); g.arc(x + r * 0.2, y - r * 0.15, r * 0.4, 0, TAU); g.fill();
+  if (near > 0) { g.strokeStyle = rgba(IM_GOLD_HI, (0.6 * beat).toFixed(3)); g.lineWidth = 0.6; g.beginPath(); g.arc(x, y, r + 1.5 + 2 * beat, 0, TAU); g.stroke(); }
+  g.restore();
+}
+// OVERGROWTH's thorns, along each forewing's leading edge (hull space), the next one budding at the end of the row with p
+function imEvoThorns(g, I, lvl, p, lit, mat) {
+  const n = Math.min(lvl, IM_THORNS), hot = oaC01((lvl - IM_THORNS) / 6), bud = lvl < IM_THORNS ? p : 0;
+  g.save(); g.lineJoin = 'round';
+  for (const sd of [1, -1]) {
+    const c = ORH_FORE.slice(0, 4).map(q => orWingXf(q, sd, true, I)), L = orLen(c);
+    for (let j = 0; j < n + (bud > 0.04 ? 1 : 0); j++) {
+      const grow = j < n ? 1 : bud, d = L * (0.16 + 0.13 * j), p0 = orAlong(c, d), p1 = orAlong(c, d + 0.5);
+      const tx = p1[0] - p0[0], ty = p1[1] - p0[1], tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl;
+      const nx = sd > 0 ? uy : -uy, ny = sd > 0 ? -ux : ux;      // out of the edge, forward
+      const len = (3.1 + 0.35 * j) * grow, bw = 1.2 * grow + 0.2, tip = [p0[0] + (nx + ux * 0.45) * len, p0[1] + (ny + uy * 0.45) * len];
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = rgba(IM_GOLD, (j < n ? 1 : 0.5 + 0.5 * grow).toFixed(3));
+      g.beginPath(); g.moveTo(p0[0] - ux * bw, p0[1] - uy * bw); g.lineTo(tip[0], tip[1]); g.lineTo(p0[0] + ux * bw, p0[1] + uy * bw); g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(69,26,3,0.7)'; g.lineWidth = 0.35; g.stroke();
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = rgba('#ffffff', (0.6 + 0.4 * Math.max(hot, lit)).toFixed(3)); g.beginPath(); g.arc(tip[0], tip[1], 0.55, 0, TAU); g.fill();
+      if (mat) oaGlow(g, tip[0], tip[1], 3 + 2 * hot, IM_GOLD, (0.3 + 0.45 * hot + 0.3 * lit) * grow);
+    }
+  }
+  g.restore();
+}
+/* Its rounds, this frame against the last (as imRoundsWatch): one seen for
+   the first time is a shot (a spark where it left; the crown's sixteen go
+   without); one more body in a cannon round's hits is a pierce; one gone
+   inside the room before its time is a hit. Read back into a run, the same
+   rounds are new objects: then nothing is a shot or a hit. A missile keeps
+   where it has been, for its thread. */
+function imEvoShotsWatch(R, list) {
+  const seen = new Map();
+  let lost = false;
+  for (const s of list) if (!R.live.has(s) && s.t > 0.12) { lost = true; break; }
+  const heavy = id => id === 'cannon' || R.lvl >= 2;
+  for (const s of list) {
+    const was = R.live.get(s), G = EVO_GROWTHS[s.i], ang = Math.atan2(s.vy, s.vx), n = s.hit ? s.hit.length : 0, gun = IM_EVO_HIT[G.id] || 'base';
+    if (!was && !lost && G.kind !== 'ring') imRoundHit(R, 'muzzle', s.x - s.vx * s.t, s.y - s.vy * s.t, ang, false, gun);
+    else if (was && n > was.n) imRoundHit(R, 'hit', s.x, s.y, ang, heavy(G.id), gun);
+    let tr = was ? was.tr : null;
+    if (G.kind === 'missile') {
+      tr = tr || [];
+      const l = tr[tr.length - 1];
+      if (!l || Math.hypot(l[0] - s.x, l[1] - s.y) > 3) { tr.push([s.x, s.y]); if (tr.length > 10) tr.shift(); }
+    }
+    seen.set(s, { n, t: s.t, life: s.life, ang, x: s.x, y: s.y, vx: s.vx, vy: s.vy, id: G.id, gun, pierce: !!s.pierce, tr, seq: was ? was.seq : R.seq++ });
+  }
+  if (!lost) for (const [s, was] of R.live) {
+    if (seen.has(s) || was.pierce || was.t > was.life - 0.03) continue;    // still flying, through everything, or it ran out
+    const x = was.x + was.vx / 60, y = was.y + was.vy / 60;
+    if (x < arena.x0 || x > arena.x1 || y < arena.y0 || y > arena.y1) continue;   // gone out past the walls
+    imRoundHit(R, 'hit', x, y, was.ang, heavy(was.id), was.gun);
+  }
+  R.live = seen;
+}
+// one of its rounds, as its gun throws it (the additive pass)
+function imEvoShotDraw(g, b, w, C, glow) {
+  const id = EVO_GROWTHS[b.i].id, sp = Math.hypot(b.vx, b.vy) || 1, ux = b.vx / sp, uy = b.vy / sp, x = b.x, y = b.y;
+  const streak = (L, lw, al) => { g.strokeStyle = rgba(C.c, al.toFixed(3)); g.lineWidth = lw; g.beginPath(); g.moveTo(x - ux * L, y - uy * L); g.lineTo(x, y); g.stroke(); };
+  if (id === 'cannon') {
+    // one slow white bore, the air bending round it
+    const r = b.r;
+    streak(r * 2.4, r * 0.7, 0.2); streak(r * 1.4, r * 0.32, 0.6);
+    if (glow) oaGlow(g, x, y, r * 2.2, C.c, 0.55);
+    g.strokeStyle = rgba(C.core, 0.65); g.lineWidth = 1.4;
+    g.beginPath(); g.arc(x, y, r * (0.72 + 0.08 * Math.sin(uiTime * 34 + b.x * 0.01)), 0, TAU); g.stroke();
+    g.fillStyle = C.core; g.beginPath(); g.arc(x, y, r * 0.3, 0, TAU); g.fill();
+    return;
+  }
+  if (id === 'gatling') {
+    // a needle, every third one hot
+    const hot = !!w && w.seq % 3 === 0;
+    streak(hot ? 16 : 10, hot ? 1.5 : 1, hot ? 0.85 : 0.5);
+    if (glow && hot) oaGlow(g, x, y, 7, C.c, 0.45);
+    g.fillStyle = C.core; g.beginPath(); g.arc(x, y, hot ? 1.3 : 0.9, 0, TAU); g.fill();
+    return;
+  }
+  if (id === 'crown') {
+    // a mote, turning
+    streak(9, 1.6, 0.5);
+    if (glow) oaGlow(g, x, y, 7, C.c, 0.5);
+    g.fillStyle = C.core; imScale(g, x, y, 2.6, Math.atan2(uy, ux) + b.t * 14); g.fill();
+    return;
+  }
+  if (id === 'pods') {
+    // a hatchling out of its clutch: a seed of light on two fluttering wings, on a thread of its own light
+    const tr = w && w.tr;
+    if (tr && tr.length > 1) {
+      for (let k = 1; k < tr.length; k++) {
+        g.strokeStyle = rgba(C.c, (0.45 * k / tr.length).toFixed(3)); g.lineWidth = 0.5 + 0.8 * k / tr.length;
+        g.beginPath(); g.moveTo(tr[k - 1][0], tr[k - 1][1]); g.lineTo(tr[k][0], tr[k][1]); g.stroke();
+      }
+    }
+    if (glow) oaGlow(g, x, y, 8, C.c, 0.55);
+    g.save(); g.translate(x, y); g.rotate(Math.atan2(uy, ux));
+    const fl = 0.4 + 0.6 * Math.abs(Math.sin(uiTime * 30 + b.x * 0.05));
+    for (const sd of [-1, 1]) {
+      g.beginPath(); g.moveTo(0.4, 0); g.lineTo(-1.2, sd * 4 * fl); g.lineTo(-3.6, sd * 2.8 * fl); g.closePath();
+      g.fillStyle = rgba(C.c, 0.4); g.fill(); g.strokeStyle = rgba(C.core, 0.85); g.lineWidth = 0.5; g.stroke();
+    }
+    g.fillStyle = C.core; g.beginPath(); g.ellipse(0.8, 0, 2, 1, 0, 0, TAU); g.fill();
+    g.restore();
+    return;
+  }
+  // the barrels' slugs: a hard capsule of light, white at its nose, and a short streak
+  const r = b.r * 0.42;
+  streak(r * 6, r * 0.9, 0.28); streak(r * 3, r * 0.4, 0.7);
+  if (glow) oaGlow(g, x, y, r * 3.2, C.c, 0.5);
+  g.save(); g.translate(x, y); g.rotate(Math.atan2(uy, ux));
+  g.fillStyle = rgba(C.c, 0.95); g.beginPath(); g.ellipse(0, 0, r * 1.5, r * 0.6, 0, 0, TAU); g.fill();
+  g.fillStyle = C.core; g.beginPath(); g.ellipse(r * 0.45, 0, r * 0.85, r * 0.32, 0, 0, TAU); g.fill();
+  g.restore();
+}
+
 const IMAGO_ART = {
   /* IMAGO's cut-in, over everything (see "IMAGO's cut-in, drawn", above):
      the room going still under the tube as it comes on; the picture; and on
@@ -48475,7 +48838,7 @@ const IMAGO_ART = {
     }
     OPR_ART.hull(g, hh);
     const I = orImagoState(hh), pk = PILOT.on || 0, W = IM_ST.wings[pk] || (IM_ST.wings[pk] = { pts: [] });
-    W.at = uiTime; W.x = h.x; W.y = h.y; W.ang = h.ang; W.pts.length = 0;
+    W.at = uiTime; W.x = h.x; W.y = h.y; W.ang = h.ang; W.pts.length = 0; W.I = I;
     for (const fore of [true, false]) for (const side of [1, -1]) {
       const E = fore ? ORH_FEYE : ORH_HEYE, p = orWingXf(E, side, fore, I), w = orToWorld(p[0], p[1], h.x, h.y, h.ang);
       W.pts.push({ x: w[0], y: w[1], r: E[2] * (0.28 + 0.72 * Math.min(1, I.open)), side, fore });
@@ -48788,27 +49151,91 @@ const IMAGO_ART = {
           }
           break;
         }
-        // V, ENDLESS FORMS (placeholders)
-        case 'evoMolt': case 'evoShed': {
-          g.strokeStyle = rgba('#fde68a', (0.8 * fa).toFixed(3)); g.lineWidth = 2;
-          g.beginPath(); g.arc(e.x, e.y, 18 + 70 * a, 0, TAU); g.stroke();
-          break;
-        }
-        case 'evoGrow': case 'evoOver': {
-          g.strokeStyle = rgba(e.kind === 'evoOver' ? '#fef08a' : '#fde68a', (0.9 * fa).toFixed(3)); g.lineWidth = e.kind === 'evoOver' ? 3 : 1.5;
-          g.beginPath(); g.arc(e.x, e.y, (e.kind === 'evoOver' ? 30 : 16) + 50 * a, 0, TAU); g.stroke();
+        // V, ENDLESS FORMS (see "V — ENDLESS FORMS, as drawn")
+        case 'evoGrow': {
+          // a growth coming out: flakes of husk thrown off where it pushed through, away from the spine, left in the room
+          const E = OPO_KIT.ease, rt = OPR_GROW_ROOT[e.id] || [-6, 5], p = orToWorld(rt[0], e.side * rt[1], e.x, e.y, e.ang);
+          g.globalCompositeOperation = 'source-over';
+          for (let k = 0, n = Math.round(7 * many); k < n; k++) {
+            const h1 = odHash(sd + k * 2.3), q = e.side ? e.ang + e.side * Math.PI / 2 + (h1 - 0.5) * 2.2 : h1 * TAU, d = 3 + (10 + 18 * odHash(sd + k * 5.1)) * E.cubicOut(a);
+            g.fillStyle = rgba(k % 3 ? '#b08a48' : IM_GOLD_HI, (0.9 * fa).toFixed(3));
+            imScale(g, p[0] + Math.cos(q) * d, p[1] + Math.sin(q) * d, 1.8 * fa + 0.6, q + a * (5 + 8 * odHash(sd + k))); g.fill();
+          }
+          g.globalCompositeOperation = 'lighter';
           break;
         }
         case 'evoBeam': {
-          g.strokeStyle = rgba('#fde68a', (0.6 * fa).toFixed(3)); g.lineWidth = e.w * 2 * fa + 1;
-          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
-          g.strokeStyle = rgba('#ffffff', (0.9 * fa).toFixed(3)); g.lineWidth = 1.5;
-          g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke();
+          // a rifle's line, or the rail's: drawn tight, gone at once, sparking where it ends
+          const C = imEvoCol(IM_ST.evoNow.lvl), rail = e.id === 'rail', dx = e.x1 - e.x0, dy = e.y1 - e.y0, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, k = Math.pow(fa, 1.6);
+          const line = (lw, c, al) => { g.strokeStyle = rgba(c, al.toFixed(3)); g.lineWidth = lw; g.beginPath(); g.moveTo(e.x0, e.y0); g.lineTo(e.x1, e.y1); g.stroke(); };
+          line(e.w * (rail ? 1.6 : 2.2) * k + 0.6, C.c, 0.35 * k);
+          line(rail ? 1 : 1.4, C.core, 0.95 * k);
+          if (rail) {
+            // rings running down it
+            g.strokeStyle = rgba(C.core, (0.6 * k).toFixed(3)); g.lineWidth = 1;
+            for (let d = 30 + a * 80; d < Math.min(L, 1200); d += 80) {
+              g.save(); g.translate(e.x0 + ux * d, e.y0 + uy * d); g.rotate(Math.atan2(uy, ux));
+              g.beginPath(); g.ellipse(0, 0, 1.6, 3 + 7 * a, 0, 0, TAU); g.stroke(); g.restore();
+            }
+          }
+          if (mat) { oaGlow(g, e.x0, e.y0, 12 + e.w, C.c, 0.8 * k); oaGlow(g, e.x1, e.y1, 10, C.c, 0.6 * k); }
+          g.strokeStyle = rgba(C.core, (0.9 * fa).toFixed(3)); g.lineWidth = 1.2;
+          g.beginPath();
+          for (let j = 0; j < 4; j++) {
+            const q = Math.atan2(-uy, -ux) + (odHash(sd + j * 1.9) - 0.5) * 2.2, l = 3 + 7 * fa;
+            g.moveTo(e.x1 + Math.cos(q) * 2, e.y1 + Math.sin(q) * 2); g.lineTo(e.x1 + Math.cos(q) * (2 + l), e.y1 + Math.sin(q) * (2 + l));
+          }
+          g.stroke();
           break;
         }
         case 'evoGain': {
-          g.fillStyle = rgba('#fde68a', (0.9 * fa).toFixed(3));
-          g.beginPath(); g.arc(lerp(e.x, e.hx, a), lerp(e.y, e.hy, a), 2.5, 0, TAU); g.fill();
+          // a graze paid as PROGRESS: motes of gold drawn in from the round to the moth, bowed, the bud brightening as they land
+          const n = Math.min(3, (e.n | 0) || 1), dx = e.hx - e.x, dy = e.hy - e.y;
+          for (let k = 0; k < n; k++) {
+            const u = oaC01((a - k * 0.12) / 0.6);
+            if (u <= 0 || u >= 1) continue;
+            const bow = (odHash(sd + k) - 0.5) * 0.9, cx = e.x + dx / 2 - dy * bow, cy = e.y + dy / 2 + dx * bow;
+            const at = v => { const w = 1 - v; return [w * w * e.x + 2 * w * v * cx + v * v * e.hx, w * w * e.y + 2 * w * v * cy + v * v * e.hy]; };
+            const v = OPO_KIT.ease.in(u), p = at(v), q = at(Math.max(0, v - 0.12));
+            g.strokeStyle = rgba(IM_GOLD, (0.65 * (1 - 0.4 * u)).toFixed(3)); g.lineWidth = 1.4;
+            g.beginPath(); g.moveTo(q[0], q[1]); g.lineTo(p[0], p[1]); g.stroke();
+            g.fillStyle = rgba(IM_GOLD_HI, 0.95); g.beginPath(); g.arc(p[0], p[1], 1.4, 0, TAU); g.fill();
+            if (mat) oaGlow(g, p[0], p[1], 6, IM_GOLD, 0.5);
+          }
+          const land = e.t0 + 0.6 * e.life;
+          if (a >= 0.6 && land > IM_ST.evoNow.gainAt) IM_ST.evoNow.gainAt = land;
+          break;
+        }
+        case 'evoShed': {
+          // IMAGO over: its guns shed, each falling away from where it grew as husk, its light going out of it
+          const E = OPO_KIT.ease, o = E.cubicOut(a), n = Math.min(e.n | 0, EVO_GROWTHS.length), lt = 1 - oaC01(a / 0.4);
+          for (let k = 0; k < n; k++) {
+            const G = EVO_GROWTHS[k], rt = OPR_GROW_ROOT[G.id] || [-6, 5], p = orToWorld(rt[0], G.side * rt[1], e.x, e.y, e.ang);
+            const q = G.side ? e.ang + G.side * (Math.PI / 2 + 0.8 * (odHash(sd + k) - 0.5)) : e.ang + Math.PI + (odHash(sd + k * 1.7) - 0.5) * 2.4;
+            const d = (14 + 26 * odHash(sd + k * 3.3)) * o, x = p[0] + Math.cos(q) * d, y = p[1] + Math.sin(q) * d;
+            if (G.id === 'crown') {
+              // the crown's motes, let go
+              g.fillStyle = rgba(IM_GOLD_HI, (0.8 * fa).toFixed(3));
+              for (let j = 0; j < 12; j++) { const qa = j * TAU / 12 + sd, rr = 12 + 34 * o; g.beginPath(); g.arc(e.x + Math.cos(qa) * rr, e.y + Math.sin(qa) * rr, 1.2 * fa + 0.3, 0, TAU); g.fill(); }
+              continue;
+            }
+            const len = IM_EVO_SHED[G.id] || 10, rot = e.ang + (odHash(sd + k * 4.1) - 0.5) * 6 * o;
+            g.save(); g.translate(x, y); g.rotate(rot);
+            if (mat) oaGlow(g, 0, 0, len, '#67e8f9', 0.5 * lt);
+            g.globalCompositeOperation = 'source-over';
+            g.beginPath(); g.moveTo(len / 2, 0); g.lineTo(len / 5, 1.8); g.lineTo(-len / 2, 1.1); g.lineTo(-len / 2, -1.1); g.lineTo(len / 5, -1.8); g.closePath();
+            g.fillStyle = rgba('#86622a', (0.9 * fa).toFixed(3)); g.fill();
+            g.strokeStyle = rgba(lt > 0 ? '#a5f3fc' : '#d9bd82', ((0.4 + 0.5 * lt) * fa).toFixed(3)); g.lineWidth = 0.7; g.stroke();
+            g.restore();
+          }
+          // and the thorns of its overgrowth, scattering
+          if (e.lvl > 0) {
+            g.fillStyle = rgba(IM_GOLD, (0.9 * fa).toFixed(3));
+            for (let j = 0, m = Math.min(2 * IM_THORNS, 2 * e.lvl); j < m; j++) {
+              const qa = e.ang + (j % 2 ? 1 : -1) * (0.5 + 0.9 * odHash(sd + j)), rr = 16 + 30 * o * (0.6 + 0.4 * odHash(sd + j * 2.7));
+              imScale(g, e.x + Math.cos(qa) * rr, e.y + Math.sin(qa) * rr, 1.6 * fa + 0.4, qa + a * 7); g.fill();
+            }
+          }
           break;
         }
         case 'wake': case 'out': {
@@ -48866,10 +49293,11 @@ const IMAGO_ART = {
       const lv = (m.live && m.live[i]) || 0;
       if (live && lv > 0) {
         g.save(); imRR(g, x, ky, kw, kh, 3); g.clip();
-        g.fillStyle = rgba('#a5f3fc', (0.3 + 0.12 * Math.sin(uiTime * 14)).toFixed(3)); g.fillRect(x, ky + kh * (1 - lv), kw, kh * lv);
+        g.fillStyle = rgba(i === 3 ? IM_GOLD : '#a5f3fc', (0.3 + 0.12 * Math.sin(uiTime * 14)).toFixed(3)); g.fillRect(x, ky + kh * (1 - lv), kw, kh * lv);
         g.restore();
-        g.strokeStyle = '#ecfeff'; g.lineWidth = 1.2; imRR(g, x, ky, kw, kh, 3); g.stroke();
-        g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'middle'; g.fillStyle = '#ecfeff';
+        const ink = i === 3 ? IM_GOLD_HI : '#ecfeff';           // V's, the chrysalis's gold
+        g.strokeStyle = ink; g.lineWidth = 1.2; imRR(g, x, ky, kw, kh, 3); g.stroke();
+        g.font = "700 9px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'middle'; g.fillStyle = ink;
         g.fillText(m.keys[i].toUpperCase(), x + kw / 2, ky + kh / 2 + 0.5);
         g.font = "700 7px 'JetBrains Mono', ui-monospace, monospace"; g.textBaseline = 'top';
         g.fillText(m.liveTxt && m.liveTxt[i] != null ? m.liveTxt[i] : m.liveS[i].toFixed(1), x + kw / 2, ky + kh + 3);
@@ -49064,44 +49492,59 @@ const IMAGO_ART = {
     g.stroke();
   },
 
-  /* ---------------- V — ENDLESS FORMS: placeholders, to be drawn ----------------
-     Lines and labels only, so it can be played: the user draws these (18 Oct:
-     "build the v with blank art hooks"). WHAT THEY ARE HANDED is in this
-     block's header; evoGrowths is handed what OPR_ART.growths is. Each is
-     tagged "placeholder" where it draws. */
+  /* ----------------------------- V — ENDLESS FORMS, drawn -----------------------------
+     (see "V — ENDLESS FORMS, as drawn", above the hooks) */
+  /* Over the moth: the molt while it runs (the husk creeping over it,
+     straining, splitting); the halves left lying, and the moth's new skin;
+     its guns, as the rite draws them; the next one budding; OVERGROWTH's
+     thorns. */
   evoGrowths(g, s) {
-    // how far it has come, over the hull (placeholder)
-    g.textAlign = 'center'; g.font = "700 8px 'JetBrains Mono', ui-monospace, monospace"; g.fillStyle = 'rgba(253,230,138,0.85)';
-    g.fillText(s.lvl ? 'EVO +' + s.lvl : 'EVO ' + s.n + '/' + s.of, s.x, s.y - s.r - 30);
-    // the molt: a skin shed off the moth, opening (placeholder)
-    if (s.molt >= 0) {
-      g.strokeStyle = rgba('#fde68a', (0.85 * (1 - s.molt)).toFixed(3)); g.lineWidth = 2;
-      g.beginPath(); g.arc(s.x, s.y, s.r + 6 + 34 * s.molt, 0, TAU); g.stroke();
+    const pk = PILOT.on || 0, R = imEvoRec(pk), W = IM_ST.wings[pk], I = W && W.I, mat = !!FXO.mat;
+    R.lvl = s.lvl; IM_ST.evoNow.lvl = s.lvl;
+    // until it splits the molt is armed; at the split, the husk is left lying where the moth was
+    if (s.molt >= 0 && s.molt < IM_HUSK_SPLIT) R.split = false;
+    else if (s.molt >= IM_HUSK_SPLIT && !R.split && I) {
+      R.split = true;
+      R.husk = { x: s.x, y: s.y, ang: s.ang, at: uiTime, I: { open: I.open, beat: 0, Wg: { ph: I.Wg.ph, spd: I.Wg.spd, lag: I.Wg.lag } } };
     }
-    // each growth, a stroke out of its side of the back, growing in and kicking back as it fires (placeholder)
+    if (R.husk && uiTime - R.husk.at > IM_HUSK_LIFE) R.husk = null;
+    if (I) {
+      g.save(); g.translate(s.x, s.y); g.rotate(s.ang);
+      if (s.molt >= 0 && s.molt < IM_HUSK_SPLIT) { g.save(); imMoltOver(g, I, s.molt, mat); g.restore(); }
+      if (R.husk) imMoltOut(g, I, uiTime - R.husk.at, mat);
+      g.restore();
+    }
+    if (R.husk) imHuskPeel(g, R.husk, mat, !!FXO.parts);
+    if (s.list.length) OPR_ART.growths(g, s);
+    if (s.lvl > R.lvlSeen) R.overAt = uiTime;
+    R.lvlSeen = s.lvl;
     g.translate(s.x, s.y); g.rotate(s.ang);
-    g.lineCap = 'round'; g.strokeStyle = s.lvl ? '#fef08a' : '#fde68a'; g.fillStyle = 'rgba(253,230,138,0.2)';
-    for (const q of s.list) {
-      const len0 = [26, 32, 32, 30, 22, 40, 16, 0][q.i] || 20, L = len0 * q.k, y = q.side * (7 + (q.i % 3) * 4), back = 3 * (1 - q.kick);
-      g.globalAlpha = 0.45 + 0.55 * q.k;
-      if (q.kind === 'ring') {   // the crown: a ring of motes over the back
-        g.lineWidth = 1.2; g.beginPath(); g.arc(-4, 0, (s.r + 8) * q.k, 0, TAU); g.stroke();
-        continue;
-      }
-      g.lineWidth = q.id === 'cannon' ? 6 : q.id === 'pods' ? 7 : q.id === 'rail' ? 2 : 3;
-      g.beginPath(); g.moveTo(-8 - back, y); g.lineTo(-8 - back + L, y); g.stroke();
+    imEvoMoments(g, s, R, mat);
+    if (s.molt >= 0) return;
+    const lit = oaC01(1 - (uiTime - IM_ST.evoNow.gainAt) / 0.3);
+    if (s.n < s.of) {
+      const G = EVO_GROWTHS[s.n], rt = OPR_GROW_ROOT[G.id] || [-6, 5];
+      imEvoBud(g, rt[0], G.side * rt[1], s.p, lit, mat);
     }
-    g.globalAlpha = 1;
+    if (I && (s.lvl > 0 || s.n >= s.of)) imEvoThorns(g, I, s.lvl, s.n >= s.of ? s.p : 0, lit, mat);
   },
-  evoShot(g, s) {
-    // a round: a dot; a missile: a dart (placeholder)
-    if (s.kind === 'missile') {
-      g.translate(s.x, s.y); g.rotate(Math.atan2(s.vy, s.vx));
-      g.fillStyle = '#fde68a'; g.beginPath(); g.moveTo(7, 0); g.lineTo(-5, 3.5); g.lineTo(-5, -3.5); g.closePath(); g.fill();
-      return;
+  /* Its growths' rounds, each gun its own, small and hard; a spark where
+     each leaves, and every hit landing. */
+  evoShots(g, s) {
+    const R = imEvoRec(PILOT.on || 0), glow = !!FXO.bglow, mat = !!FXO.mat;
+    if (s.lvl >= 0) R.lvl = s.lvl;
+    imEvoShotsWatch(R, s.list);
+    const C = imEvoCol(R.lvl);
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    for (const b of s.list) {
+      if (!inView(b.x, b.y, 60)) continue;
+      imEvoShotDraw(g, b, R.live.get(b), C, glow);
     }
-    g.fillStyle = s.kind === 'ring' ? '#fef9c3' : '#fde68a';
-    g.beginPath(); g.arc(s.x, s.y, s.r, 0, TAU); g.fill();
+    for (let i = R.hits.length - 1; i >= 0; i--) {
+      const h = R.hits[i], a = (s.now - h.t0) / h.life;
+      if (a >= 1) { R.hits.splice(i, 1); continue; }
+      if (a >= 0) imRoundHitDraw(g, h, a, mat);
+    }
   }
 };
 /* ========================== end of IMAGO's art hooks ========================== */
