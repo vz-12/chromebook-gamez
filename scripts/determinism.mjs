@@ -70,7 +70,13 @@ const HARNESS = `(() => {
   // what the game is, at a moment: everything a desync would show up in
   function fingerprint() {
     return JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), state,
-      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'maxHp', 'level', 'xp', 'dmg', 'fireRate', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'roninBroken']),
+      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'maxHp', 'level', 'xp', 'dmg', 'fireRate', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'roninBroken', 'imT', 'imGraze']),
+      // IMAGO's Z: its bombs, where they are and how long they have
+      (P.imSpots || []).map(b => pk(b, ['x', 'y', 't'])),
+      // and its C: the gun worn, the armory open, and its shots in the air
+      [P.imArm || '', P.imArmMenu ? 1 : 0, (P.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])],
+      // and its V: what it has grown, its PROGRESS, and its growths' shots
+      [P.imEvo ? [P.imEvo.n, P.imEvo.lvl, r(P.imEvo.p), r(P.imEvo.molt)] : null, (P.imEvoShots || []).map(s => [s.i, ...pk(s, ['x', 'y', 't'])])],
       // RONIN's V: the vow's clock, its grave, SKY CLEAR
       [P.roninVow ? r(P.roninVow.t) : null, P.roninGrave ? r(P.roninGrave.hp) : null, P.roninSkyClear ? P.roninSkyClear.stage + P.roninSkyClear.i : null],
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'atkT', 'cd', 'state', 'ang', 'id'])]),
@@ -123,6 +129,7 @@ const HARNESS = `(() => {
         if (P.charId === 'hacker') { P.suRoot = SU_MAX; press.push('f'); }
         else if (P.charId === 'ember') { P.vent = VENT_MAX; press.push('f'); }
         else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
+        else if (P.charId === 'runner') { P.imGraze = IM_MAX; press.push('f'); }   // IMAGO
       }
       // RONIN's V: low enough for it to light (the cycle of presses below then takes it), and now and
       // then a grave one blow from breaking
@@ -131,6 +138,8 @@ const HARNESS = `(() => {
       if (k % 75 === 40) press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) press.push('f');
       if (P.charId === 'melee' && k % 61 === 0) press.push('parry');
+      // IMAGO's armory, open: wear what the aim is on and get on, as a player would (not five seconds of ARM_SLOW in ten)
+      if (P.imArmMenu && P.imArmMenu.t > 0.25 && k % 30 === 0 && !press.includes('c')) press.push('c');
     }
     if (k % 400 === 200) press.push('q');
     /* An outside pilot (OUTSIDE PILOTS): every key its kit is played, pressed
@@ -241,6 +250,7 @@ const L = QUICK ? 0.4 : 1;                       // --quick plays each for 40% a
 const VIEW = { w: 1366, h: 768 };
 const S = [
   { name: 'runner',     char: 'runner', seed: 101, steps: 18000 },
+  { name: 'imago',      char: 'runner', seed: 123, steps: 18000, kit: true },   // IMAGO in a run: GRAZE, [F], Z's bombs, X, C's guns, V's growths
   { name: 'ember',      char: 'ember',  seed: 102, steps: 18000, kit: true },
   { name: 'hacker',     char: 'hacker', seed: 103, steps: 18000, kit: true },
   { name: 'vagrant',    char: 'melee',  seed: 104, steps: 18000, kit: true },
@@ -255,6 +265,8 @@ const S = [
   { name: 'rite-ember', char: 'ember',  seed: 111, steps: 7200,  kit: true, starter: "enterRite('ember')" },
   { name: 'rite-hacker',char: 'hacker', seed: 112, steps: 7200,  kit: true, starter: "enterRite('hacker')" },
   { name: 'rite-melee', char: 'melee',  seed: 113, steps: 7200,  kit: true, starter: "enterRite('melee')" },
+  // VOIDRUNNER's: ONE POINT OH, the hull growing back under him (its own test, npm run test:opo-rite, plays it to the card)
+  { name: 'rite-runner',char: 'runner', seed: 122, steps: 7200,  starter: "enterRite('runner')" },
   { name: 'patch',      char: 'runner', seed: 114, steps: 7200,  starter: "hlAreaStart('patch')" },
   // ALL HALLOWS chapter II: THE HOUSE's waves (THE QUIET, sheets, lurkers, poltergeists), and DEAD GAME's
   // fight flown by THE HACKER, so what is under a sheet, and the house's bodies, also fight for you

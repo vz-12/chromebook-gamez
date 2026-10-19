@@ -228,6 +228,7 @@ take(g.run(`(() => { ${KIT}
   runSet('amalgamDone', true); chk(has('b:amalgam', 1) && has('n:dev', 1), 'THE AMALGAM finished');
   grantAwakening('ember'); chk(has('b:amalgam', 2) && has('p:ember', 2), 'EMBER\\'s rite');
   grantAwakening('hacker'); chk(has('b:root', 2) && has('p:hacker', 2), 'THE HACKER\\'s rite');
+  grantAwakening('runner'); chk(!has('p:runner', 2), 'VOIDRUNNER\\'s rite: its page III stays held until it is written');
   chk(has('r:hub', 2), 'every hull whose rite is built, awake');
   // ONE POINT OH (VOIDRUNNER's finale): met in the shatter, beaten when the record is back to today
   chk(!has('n:onepointoh', 0) && talesEntry('x:onepointoh').link === 'n:onepointoh', 'ONE POINT OH: a person, linked from his card');

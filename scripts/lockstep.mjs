@@ -30,11 +30,12 @@ const SHORT = args.includes('--short');
 /* lat / jit: one-way latency and its spread, ms. loss: share of the unreliable
    packets (the inputs) that never arrive. hz: each machine's frame rate.
    freeze: the guest's machine stops for a while, the way a laptop does.
-   loot: a piece of gear is put at a blade guest's feet early on (OPENERS). */
+   loot: a piece of gear is put at a blade pilot's feet early on, host or
+   guest (OPENERS). */
 const SCENARIOS = [
   { name: 'lan', seed: 201,      lat: 6,   jit: 3,  loss: 0,    hostHz: 60, guestHz: 60,  host: 'runner', wing: 'ember', end: 'host leaves' },
   { name: 'internet', yes: true, seed: 202, lat: 55,  jit: 30, loss: 0.08, hostHz: 60, guestHz: 144, host: 'hacker', wing: 'melee', kit: true, loot: true },
-  { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true,
+  { name: 'bad', seed: 203,      lat: 120, jit: 90, loss: 0.25, hostHz: 50, guestHz: 30,  host: 'melee',  wing: 'runner', kit: true, loot: true,
                       freeze: { at: 40000, ms: 1800 } },
   { name: 'saves', yes: true, seed: 204,    lat: 30,  jit: 15, loss: 0.05, hostHz: 75, guestHz: 60,  host: 'ember',  wing: 'hacker', kit: true,
                       guestSave: true },
@@ -73,9 +74,10 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
   Save.profile.skin = { player: { col: '${role}' === 'host' ? '#22c55e' : '#ff00ff' }, bullet: { col: '${role}' === 'host' ? '#bbf7d0' : '#fde047' } };
   { const aw = AWARD_SKINS(); if (aw.length) Save.profile.skinEquip = aw[('${role}' === 'host' ? 0 : 1) % aw.length].id; }
   globalThis.__drawErr = [];
+  globalThis.__killsAt = new Map();
   globalThis.__draw = () => { try { render(); } catch (e) { if (__drawErr.length < 5) __drawErr.push(String(e && e.message || e) + ' @ ' + String(e && e.stack || '').split(' at ')[1]); __drawErr.n = (__drawErr.n || 0) + 1; } };
   if (typeof RUSH_PEAK !== 'undefined') Save.profile.rushBest = RUSH_PEAK;
-  ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true };" : ''}
+  ${kit ? "Save.profile.awakened = { ember: true, hacker: true, melee: true, runner: true };" : ''}
   ${scramble ? `// the guest's own save says otherwise about everything: the host's must win
     Object.assign(Save.profile, { hardened: true, keeperDone: true, altPath: true, malware: true, planetarium: true,
       deepFracture: true, otherKills: 7, unwrittenDeaths: 4, clears: 9, chal: ['ch_ascetic', 'ch_purist'] });
@@ -120,6 +122,8 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
     __seen.add(state);
     pauses(k);
     if (k % 9) return;
+    // the piece put at a blade's feet (loot, in OPENERS) is taken by its own pilot, host or guest
+    if (state === 'gear' && gearOfferDrop && gearOfferDrop.planted) { handleKey('1'); return; }
     if ('${role}' !== 'host') {
       if (HOST_SCREENS.includes(state) || choice) handleKey(['1', '2', 'e', 'enter', ' ', 'r', 'y', 'n', 'a', 'f', 'x', 'q'][(k / 9 | 0) % 12]);
       return;
@@ -153,6 +157,11 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       if (k % 900 === 70) rec.press.push(P.charId === 'melee' ? 'v' : 'f');
       if (k % 75 === 40) rec.press.push(['z', 'x', 'c', 'v'][Math.floor(k / 75) % 4]);
       if (P.charId === 'melee' && k % 23 === 0) rec.press.push('f');
+      /* IMAGO's armory, open: wear what the aim is on and get on, as a player
+         would. Left to the next C in the round above, it would hold the room
+         at ARM_SLOW for five seconds of every ten (spaced past the delay, so
+         the pick is played before it is asked again) */
+      if (P.imArmMenu && P.imArmMenu.t > 0.25 && k % 30 === 0 && !rec.press.includes('c')) rec.press.push('c');
     }
     if (gearNear && k % 30 === 0) rec.press.push('e');   // THE VAGRANT: a look at what is on the floor
   };
@@ -171,14 +180,21 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
   for (const a of Object.keys(UI_ACTS)) { const f = UI_ACTS[a]; UI_ACTS[a] = i => { const n = a + (PILOT.on ? '·guest' : ''); __acts[n] = (__acts[n] || 0) + 1; f(i); }; }
   globalThis.OPENERS_LEFT = () => OPENERS.map(o => o[0]);
   const OPENERS = [
-    /* A blade guest (THE VAGRANT) has loot, not cards, and a piece only falls
+    /* A blade pilot (THE VAGRANT) has loot, not cards, and a piece only falls
        to its own kills: whether one lands where its bot will walk is luck,
        and luck that moves with every change to the run (RONIN's V's longer
-       cut-in took it away in 'internet'). Where the scenario says so (loot),
-       one is put at its feet, on both machines at the same step, so the
-       guest's own gear screen is always met. Only there: a piece more is a
-       different run, and 'lifecycle' needs its pilots to go down. */
-    [900, () => { if (${!!loot}) pilotDo(PILOTS.length > 1 ? 1 : 0, () => { if (isBlade()) gearDrop(P.x + 24, P.y, 1); }); }],
+       cut-in took the guest's away in 'internet'; VOIDRUNNER waking in the
+       kit scenarios took the host's away in 'bad'). Where the scenario says
+       so (loot), one is put at each blade pilot's feet, host or guest, on
+       both machines at the same step, so its own gear screen is always met;
+       and its bot takes that one, rather than leaving it to where its keys
+       happen to be when the screen opens (VOIDRUNNER's FLUTTER moved that in
+       'internet'). It is a BLADE: a piece for an empty slot is worn without a
+       screen, so the slot was the roll's to decide (IMAGO's armory moved that
+       in 'internet'), and a blade pilot starts wearing SCRAP EDGE. Only there:
+       a piece more is a different run, and 'lifecycle' needs its pilots to go
+       down. */
+    [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) { const d = gearDrop(P.x + 24, P.y, 1, 'blade'); if (d) d.planted = 1; } }); }],
     [1500, () => openPlanetarium()],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],
@@ -197,10 +213,14 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
     for (let k = 0; k < PILOTS.length; k++) { const o = pilotP(k), d = !!(o && o.down); if (d && !__life.was[k]) __life.downs++; if (!d && __life.was[k]) __life.ups++; __life.was[k] = d; }
     if (state === 'dead' && !__life.dead) __life.deaths++;
     __life.dead = state === 'dead';
+    // the kills each machine counts, this step: read at a step both have played, not wherever each stopped
+    __killsAt.set(LS.run * 1e6 + t, [pilotP(0) ? pilotP(0).kills : 0, pilotP(1) ? pilotP(1).kills : 0, coopMine().kills]);
+    if (__killsAt.size > 600) __killsAt.delete(__killsAt.keys().next().value);
     if (${!!kitRun} && t % 900 === 60) pilotsEach(() => {   // every pilot's kit, charged
       if (P.charId === 'hacker') P.suRoot = SU_MAX;
       else if (P.charId === 'ember') P.vent = VENT_MAX;
       else if (P.charId === 'melee' && !(P.roninT > 0)) roninFire(false);
+      else if (P.charId === 'runner') P.imGraze = IM_MAX;   // IMAGO
     });
     // RONIN's V: low enough for it to light (the bot's presses then take it), and now and then a grave one blow from breaking
     if (${!!kitRun} && t % 900 === 300) pilotsEach(() => { if (P.charId === 'melee' && P.roninT > 0) P.hp = Math.min(P.hp, P.maxHp * 0.25); });
@@ -220,8 +240,11 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       E: enemies.filter(e => !e.dead).map(e => [e.type, ...pk(e, ['x', 'y', 'hp', 'id'])]),
       B: bullets.length, EB: ebullets.length, G: gems.length, D: drops.length, RUN: RUN_FLAGS.map(k => r(RUN[k])) }));
     if (t % 60 === 0) __prints.set(LS.run * 1e6 + t, fnv(JSON.stringify([simRngState, simTick, wave, r(elapsed), r(credits), shared, LS.pausedBy,
-      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT']),
-      pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT']),
+      pk(P, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
+      pk(pilotP(1) || {}, ['x', 'y', 'vx', 'vy', 'hp', 'level', 'xp', 'dashCh', 'ang', 'down', 'suT', 'roninT', 'ventT', 'imT', 'imGraze']),
+      [P, pilotP(1) || {}].map(o => (o.imSpots || []).map(b => pk(b, ['x', 'y', 't']))),   // IMAGO's Z
+      [P, pilotP(1) || {}].map(o => [o.imArm || '', o.imArmMenu ? 1 : 0, (o.imArmShots || []).map(s => [s.id, ...pk(s, ['x', 'y', 't'])])]),   // its C
+      [P, pilotP(1) || {}].map(o => [o.imEvo ? [o.imEvo.n, o.imEvo.lvl, r(o.imEvo.p), r(o.imEvo.molt)] : null, (o.imEvoShots || []).map(s => [s.i, ...pk(s, ['x', 'y', 't'])])]),   // its V
       [P, pilotP(1) || {}].map(o => [o.roninVow ? r(o.roninVow.t) : null, o.roninGrave ? r(o.roninGrave.hp) : null, o.roninSkyClear ? o.roninSkyClear.stage + o.roninSkyClear.i : null, r(o.roninBroken)]),   // RONIN's V
       Object.entries((pilotP(1) || {}).up || {}).sort(),
       enemies.filter(e => !e.dead).map(e => [e.type, e.boss || '', ...pk(e, ['x', 'y', 'hp', 'atk', 'cd', 'state', 'id'])]),
@@ -300,8 +323,14 @@ function play(sc) {
   /* The end of the session: one side leaves. The other must carry on as it
      should, with nothing thrown: the host alone, flying its run on for ten
      seconds; the guest, back at the lobby. */
-  // each player's own kills, while both pilots are still flying
-  const kills = { host: H.g.run('pilotP(0).kills'), wing: H.g.run('pilotP(1) ? pilotP(1).kills : 0'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') };
+  /* Each player's own kills, while both pilots are still flying, read at the
+     last step both machines have played: the run stops when the slower one
+     reaches the end, and the other can be a few steps on, with a kill more. */
+  const kAt = m => new Map(m.g.run('[...__killsAt]')), kh = kAt(H), kg = kAt(G);
+  const at = [...kh.keys()].filter(k => kg.has(k)).sort((a, b) => b - a)[0];
+  const kills = at === undefined
+    ? { host: H.g.run('pilotP(0).kills'), wing: H.g.run('pilotP(1) ? pilotP(1).kills : 0'), hostRecords: H.g.run('coopMine().kills'), guestRecords: G.g.run('coopMine().kills') }
+    : { host: kh.get(at)[0], wing: kh.get(at)[1], hostRecords: kh.get(at)[2], guestRecords: kg.get(at)[2] };
   let ending = null;
   if (sc.end) {
     const [goes, stays] = sc.end === 'guest leaves' ? [G, H] : [H, G];
