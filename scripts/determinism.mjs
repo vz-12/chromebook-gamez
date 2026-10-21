@@ -273,6 +273,11 @@ const S = [
   { name: 'house',      char: 'runner', seed: 116, steps: 7200,  starter: "hlAreaStart('house')" },
   { name: 'deadgame',   char: 'hacker', seed: 117, steps: 7200,  kit: true,
     starter: "hlP().q.q3 = 2; hlAreaStart('house'); hlArea.n = 4; wave = HL_AREAS.house.waveFrom + 3; betweenWaves = 0.5" },
+  // ALL HALLOWS chapter III: THE YARD's waves (RISING, the risen, the gravediggers' pits, the bells), and
+  // THE RAGE QUIT's fight flown by THE HACKER, so the risen, and a bell's graves, also fight for you
+  { name: 'yard',       char: 'runner', seed: 124, steps: 7200,  starter: "hlAreaStart('yard')" },
+  { name: 'ragequit',   char: 'hacker', seed: 125, steps: 7200,  kit: true,
+    starter: "hlP().q.q5 = 2; hlAreaStart('yard'); hlArea.n = 4; wave = HL_AREAS.yard.waveFrom + 3; betweenWaves = 0.5" },
   // FIRST FLIGHT: an assisted run, through THE WARDEN and out the other side of the help
   { name: 'assist',     char: 'runner', seed: 118, steps: 18000, starter: 'runAssistNext = true; resetGame()' },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use

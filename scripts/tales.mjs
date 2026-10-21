@@ -63,7 +63,7 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   const L = talesAll();
-  chk(L.length === 70, 'every entry: 25 enemies, 12 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people', L.length);
+  chk(L.length === 74, 'every entry: 28 enemies, 13 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people', L.length);
   chk(!L.some(e => /SERAPH/i.test(e.n)), 'no outside pilot is in it');
   chk(L.filter(e => e.pages.some(p => p.sealed)).map(e => e.key).sort().join() === 'a:melee,n:founder,p:ember', 'the sealed pages are hinted where the bible puts them');
   chk(Object.keys(TALE_TEXT).every(k => !TALE_TEXT[k][3]), 'no sealed text in the game');
@@ -128,6 +128,16 @@ take(g.run(`(() => { ${KIT}
     const m = spawnAt('lurker', 200); m.state = 2; down(m); chk(has('e:lurker', 2), 'a lurker felled mid-strike'); }
   { const p = spawnAt('poltergeist', 200); down(p); chk(!has('e:poltergeist', 2), 'a poltergeist felled with nothing up');
     const q = spawnAt('poltergeist', 200); q.hlHold = 1; down(q); chk(has('e:poltergeist', 2), 'a poltergeist felled before it lets go'); }
+  // THE YARD (chapter III)
+  { const r = spawnAt('risen', 200); r.hlClimb = 0; r.hlFired = 1; down(r); chk(!has('e:risen', 2), 'a risen felled after it fired');
+    const s = spawnAt('risen', 200); s.hlClimb = 0; down(s); chk(has('e:risen', 2), 'a risen felled before it fires a shot'); }
+  { const b = spawnAt('bellringer', 200); b.hlTolls = 1; down(b); chk(!has('e:bellringer', 2), 'a bell felled after it tolled');
+    const c = spawnAt('bellringer', 200); down(c); chk(has('e:bellringer', 2), 'a bell felled before it tolls'); }
+  { const d = spawnAt('gravedigger', 200); down(d); chk(!has('e:gravedigger', 2), 'a gravedigger felled, not standing in its pit');
+    HL.force = true; hlP().q = { q5: 2 }; applyChar(0); hlAreaStart('yard'); tale('wave');
+    const f = spawnAt('gravedigger', 200); hlArea.pits.push({ id: 1, x: P.x, y: P.y, r: PIT_R, t: 0, life: 9, by: f.id });
+    down(f); chk(has('e:gravedigger', 2), 'a gravedigger felled from inside its own pit');
+    chalQuit(); hlArea = null; HL.force = false; run(); }
   { const b = spawnAt('bomber', 600, 0); for (let i = 0; i < 3; i++) { const o = spawnAt('grunt', 600 + i * 6, 6); o.hp = 1; }
     down(b); chk(has('e:bomber', 2), 'three others caught in one bomber\\'s blast'); }
   wave++; tale('hurt'); for (let i = 0; i < 5; i++) fell('artillery'); chk(!has('e:artillery', 2), 'five artillery in a wave you were hit in');
@@ -141,8 +151,10 @@ section("the tales (step 5): the bible's rules");
 take(g.run(`(() => { ${KIT}
   // ALL HALLOWS chapters II and III are not live yet, and the page source is public: these wait for them
   // (THE HOUSE's three bodies and DEAD GAME are chapter II's: their pages II and III too)
+  // (and THE YARD's three and THE RAGE QUIT, chapter III's)
   const LATER = ['e:sheet 2', 'e:sheet 3', 'e:lurker 2', 'e:lurker 3', 'e:poltergeist 2', 'e:poltergeist 3',
-                 'b:deadgame 2', 'b:deadgame 3', 'r:patch 3', 'n:soul 2', 'n:soul 3'];
+                 'e:risen 2', 'e:risen 3', 'e:gravedigger 2', 'e:gravedigger 3', 'e:bellringer 2', 'e:bellringer 3',
+                 'b:deadgame 2', 'b:deadgame 3', 'b:ragequit 2', 'b:ragequit 3', 'r:patch 3', 'n:soul 2', 'n:soul 3'];
   const miss = [], all = [];
   for (const en of talesAll()) {
     if (en.link) continue;
@@ -205,6 +217,8 @@ take(g.run(`(() => { ${KIT}
     const c = boss('backlog'); down(c); chk(has('b:backlog', 2), 'THE BACKLOG, no binge'); }
   { const d = boss('deadgame'); tale('cull'); down(d); chk(has('b:deadgame', 1) && !has('b:deadgame', 2), 'DEAD GAME, with some sent away');
     const f = boss('deadgame'); down(f); chk(has('b:deadgame', 2), 'DEAD GAME, with nobody sent away'); }
+  { const r = boss('ragequit'); tale('escape'); down(r); chk(has('b:ragequit', 1) && !has('b:ragequit', 2), 'THE RAGE QUIT, out through a gate');
+    const q = boss('ragequit'); down(q); chk(has('b:ragequit', 2), 'THE RAGE QUIT, never through one'); }
   tale('library'); chk(has('n:keeper', 0) && has('r:library', 0), 'a library: the Bookkeeper met, and the room');
   tale('book'); chk(has('r:library', 1), 'a book taken');
   tale('buy'); chk(has('n:shopkeeper', 0), 'bought from him');

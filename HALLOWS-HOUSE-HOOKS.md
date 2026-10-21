@@ -352,5 +352,6 @@ one throws, is never called, or if an Act I hook is asked to draw the house.
 - **Not written, on purpose**: pages II and III of the house's three bodies and
   DEAD GAME in the codex, like THE LOST SOUL's: the page source is public, so they
   go in when the chapter is live (`test:tales` lists them as waiting).
-- **Not done here**: Chapter III, the epilogue and their medals; the November
-  farewell; the abandoned-run logger (plan §16.4).
+- **Not done here**: Chapter III (now built: `HALLOWS-YARD-HOOKS.md`), the
+  epilogue and its medal; the November farewell; the abandoned-run logger
+  (plan §16.4).

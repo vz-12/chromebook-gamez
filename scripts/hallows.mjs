@@ -71,7 +71,7 @@ g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   wipe();
   chk(!hlQuest('q3').later && !hlQuest('q4').later, 'quests 3 and 4 are built');
-  chk(HL_QUESTS.filter(q => q.later).map(q => q.id).join() === 'q5,q6,q7', 'and only chapter III waits', HL_QUESTS.filter(q => q.later).map(q => q.id));
+  chk(HL_QUESTS.filter(q => q.later).map(q => q.id).every(id => hlQuest(id).ch === 2), 'and only chapter III waits, if anything', HL_QUESTS.filter(q => q.later).map(q => q.id));
   chk(['sheet', 'stillhere'].every(id => { const m = HL_MEDALS.find(z => z.id === id); return m && !m.later && m.d.length > 40; }), 'SHEET and STILL HERE are on the stand, with what they do');
   chk(HL_AREAS.house && HL_AREAS.house.stage.boss === 'deadgame' && HL_AREAS.house.waveFrom === 11, 'THE HOUSE: waves 11 to 15, and DEAD GAME');
 

@@ -2911,6 +2911,10 @@ const ETYPE = {
   poltergeist:{r: 15, hp: 36, spd: 78, dmg: 14, col: '#c4b5fd', xp: 4, score: 46, sides: 7 },
   // DEAD GAME's LAST SEEN marks: decoys, worth nothing (hlDecoyHit), never in the codex
   lastseen:{ r: 14, hp: 26,  spd: 0,   dmg: 0,  col: '#64748b', xp: 0, score: 0,  sides: 3 },
+  // --- ALL HALLOWS: THE YARD. A risen's gun is rolled as it climbs out (hlYardSpawned) ---
+  risen:   { r: 15, hp: 40,  spd: 96,  dmg: 12, col: '#cbd5e1', xp: 4, score: 44, sides: 5 },
+  gravedigger:{r: 17, hp: 58, spd: 84, dmg: 12, col: '#a8a29e', xp: 5, score: 52, sides: 6 },
+  bellringer:{r: 22, hp: 120, spd: 0,  dmg: 10, col: '#fcd34d', xp: 7, score: 70, sides: 8 },
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
@@ -2944,7 +2948,10 @@ const CODEX_E = {
   scarecrow:{ n: 'SCARECROW',   d: 'Perfectly still while your aim is on it. It only moves while you are looking somewhere else, and it is quick when it does.' },
   sheet:    { n: 'SHEET',       d: 'A sheet over something else. The sheet takes the first part of the punishment, and when it tears, whatever was under it is out and fighting.' },
   lurker:   { n: 'LURKER',      d: 'Lives in the dark and strikes from it. Caught in the light it runs, and it takes twice the damage while it is lit.' },
-  poltergeist:{ n: 'POLTERGEIST', d: 'Never attacks directly. It lifts what is lying about, the wreckage and the dead, and throws it.' }
+  poltergeist:{ n: 'POLTERGEIST', d: 'Never attacks directly. It lifts what is lying about, the wreckage and the dead, and throws it.' },
+  risen:    { n: 'RISEN',       d: 'A run that was quit, climbing out of its grave with whatever it was flying: a stream, a short lance or a swing. Felled, it leaves its last words behind.' },
+  gravedigger:{ n: 'GRAVEDIGGER', d: 'Digs where you have been: open pits that slow you and swallow your fire. Whatever falls near it is buried, and gets up again.' },
+  bellringer:{ n: 'BELLRINGER', d: 'A bell that does not move. Every time it tolls, the three graves nearest it open. Put it down first.' }
 };
 
 /* His marginalia. Once he has handed the record back, every entry he had an
@@ -3079,6 +3086,7 @@ const KEEPER_NOTES = {
 const CODEX_B = {
   backlog:    { d: 'Buys everything and finishes nothing. Every attack it starts, it abandons partway, and the abandoned thing waits exactly where it stopped until something finishes it: you, or a binge.' },
   deadgame:   { d: 'Says nobody comes here any more, and comes here every day to say it. He is only solid while the room is alive: every death in it brings him back into it, and an empty room makes him a rumour. He sends the others away himself, to keep it empty.' },
+  ragequit:   { d: 'Closes the tab before a run can end on him, and blames the lag. Every time it starts to go badly he runs for a gate, and if he gets through it, that one did not count. A gate is shut while someone stands in it.' },
   warden:     { d: 'The first thing that was built to stop you rather than to inconvenience you. Straightforward, and much harder than what came before it.' },
   forgeheart: { d: 'Turns four armour plates around itself, sealing every approach but the gaps between them. The gaps rotate.' },
   broodmother:{ d: 'Submerges where nothing can reach her and lays while she is under. Everything you do to the floor she is beneath is wasted.' },
@@ -3116,9 +3124,10 @@ const CODEX_B = {
 
    STILL UNWRITTEN, ON PURPOSE: THE LOST SOUL's pages II and III, the
    house's (THE HOUSE AND THE PATCH, page III), and pages II and III of the
-   house's three bodies and DEAD GAME. They are ALL HALLOWS chapters II and
-   III, which open on 14 and 23 Oct, and anything in this file can be read in
-   the page's source: they go in when their chapter is live, never before.
+   house's three bodies and DEAD GAME, and of the yard's three and THE RAGE
+   QUIT. They are ALL HALLOWS chapters II and III, which open on 14 and 23
+   Oct, and anything in this file can be read in the page's source: they go
+   in when their chapter is live, never before.
    VOIDRUNNER's page III and THE OUTSIDER's are held for deeds that are not
    built yet.
 --------------------------------------------------------------------------- */
@@ -4147,6 +4156,9 @@ const BOSSES = {
   // and THE HOUSE's
   deadgame:    { name: 'DEAD GAME', col: '#cbd5e1', r: 52, sides: 4, hpMul: 1.1, spd: 74,
                  ai: bossDeadGame, secret: true },
+  // and THE YARD's
+  ragequit:    { name: 'THE RAGE QUIT', col: '#fb7185', r: 44, sides: 5, hpMul: 1.25, spd: 120,
+                 ai: bossRageQuit, secret: true },
   // the man himself, once there is nobody left to swing for him
   founder:     { name: 'THE FOUNDER', col: '#fcd34d', r: 24, sides: 3, hpMul: 2.6,
                  spd: 178, ai: () => {}, secret: true, endgame: true },
@@ -4293,6 +4305,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   // first point of damage can land, whatever order things tick in.
   if (bKey === 'theother') e.floor = 10;
   if (type === 'sheet') hlSpawned(e, opts);   // ALL HALLOWS: what is under a sheet, and a sheet the size of it
+  if (type === 'risen' || type === 'gravedigger') hlYardSpawned(e, opts);   // and THE YARD: a risen's gun and grave, the errand's digger
   enemies.push(e);
   if (hackBy) hackKin(e);                // called up by one of yours: kin
   tale('spawn', e);                      // FORGOTTEN TALES: a fight's clock starts, read only
@@ -5409,6 +5422,7 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   }
   if (e.type === 'jack' && !opts.enemy) dmg = hlJackFace(e, dmg, srcX, srcY);   // THE PATCH: the face
   if (e.boss === 'backlog' && !opts.hlKick) { dmg *= hlHeapTakes(e); opts = hlHeapHit(e, srcX, srcY, opts); }   // his heap: only his own gets through
+  if (e.boss === 'ragequit' && hlRqRunning(e)) dmg *= RQ_BACK_MUL;            // THE YARD: running, his back is to you
   if (e.type === 'lurker' && e.hlLit && !opts.enemy) dmg *= LURK_LIT_MUL;        // THE HOUSE: the light burns it
   if (P.hlGhost && !opts.enemy && !opts.hacked) dmg *= GHOST_DMG;               // STILL HERE: a ghost hits half as hard
   dmg *= (e.vuln || 1);        // stunned enemies take extra
@@ -5745,6 +5759,7 @@ function killBody(e, ang) {
   /* THE HACKER: the kill stands. The body does not — it gets back up on
      your side, having already paid out everything a death pays out. */
   hackTake(e);
+  if (HL.eq.grave && e.dead && !P.hacker) hlShallowGrave(e);   // ALL HALLOWS: SHALLOW GRAVE, the same, one in ten
 }
 
 /* Put one item on the floor. Rolled at the depth the fight is actually at, so
@@ -32502,7 +32517,10 @@ const TALE_DEED_E = {
   scarecrow: { how: 'fell one while it moves' },
   sheet:     { how: 'fell what was under one inside a second' },
   lurker:    { how: 'fell one mid-strike' },
-  poltergeist: { how: 'fell one before it lets go' }
+  poltergeist: { how: 'fell one before it lets go' },
+  risen:     { how: 'fell one before it fires a shot' },
+  gravedigger: { how: 'fell one from inside its own pit' },
+  bellringer: { how: 'fell one before it tolls' }
 };
 // and of each boss: mastering it, one way per boss, picked to suit it
 const TALE_DEED_B = {
@@ -32517,7 +32535,8 @@ const TALE_DEED_B = {
   amalgam:     'pass EMBER\'s rite',
   root:        'pass THE HACKER\'s rite',
   backlog:     'defeat him without a binge going off',
-  deadgame:    'defeat him with nobody sent away'
+  deadgame:    'defeat him with nobody sent away',
+  ragequit:    'defeat him without letting him through a gate'
 };
 const TALE_BOSS_II = { unwritten: 'close it', amalgam: 'finish it', root: 'delete it' };
 
@@ -32762,6 +32781,7 @@ const Tales = {
       case 'brood': if (R.fights.broodmother) R.fights.broodmother.dives++; return;
       case 'binge': if (R.fights.backlog) R.fights.backlog.binges++; return;
       case 'cull':  if (R.fights.deadgame) R.fights.deadgame.culls = (R.fights.deadgame.culls | 0) + 1; return;
+      case 'escape': if (R.fights.ragequit) R.fights.ragequit.escapes = (R.fights.ragequit.escapes | 0) + 1; return;
       case 'torn':  R.torn.set(b, elapsed); return;
       case 'rewind': if (R.fights.unwritten) R.fights.unwritten.rew++; return;
       case 'kill':  if (talesMine()) Tales.kill(a, R); return;
@@ -32872,6 +32892,9 @@ const Tales = {
       case 'scarecrow': if (!e.hlWatched) deed(); break;
       case 'lurker':   if (e.state === 2 && !e.hacked) deed(); break;
       case 'poltergeist': if (e.hlHold) deed(); break;
+      case 'risen':    if (!e.hlFired && !(e.hlClimb > 0)) deed(); break;
+      case 'gravedigger': if (hlInPit(P.x, P.y, e.id)) deed(); break;
+      case 'bellringer': if (!e.hlTolls) deed(); break;
     }
     // what was under a sheet, felled inside a second of it tearing: the sheet's deed
     const tornAt = R.torn.get(e);
@@ -32898,6 +32921,7 @@ const Tales = {
       case 'curator':     deed(mine.charId === 'melee'); break;
       case 'backlog':     deed(f && !f.binges); break;
       case 'deadgame':    deed(f && !f.culls); break;
+      case 'ragequit':    deed(f && !f.escapes); break;
       case 'shopkeeper':  Tales.open('n:shopkeeper', 1, true); break;
     }
     if (e.virus) Tales.open('b:theother', 2, true);
@@ -40017,6 +40041,9 @@ function updateEnemies(dt) {
       // and THE HOUSE's
       case 'sheet': case 'lurker': case 'poltergeist': case 'lastseen':
         hlHouseAI(e, dt, ux, uy, d, sp, dx, dy); break;
+      // and THE YARD's
+      case 'risen': case 'gravedigger': case 'bellringer':
+        hlYardAI(e, dt, ux, uy, d, sp, dx, dy); break;
     }
     hackBy = null;
 
@@ -57152,6 +57179,7 @@ function updateEBullets(dt) {
       continue;
     }
     if (b.hlHeld) continue;               // THE BACKLOG: abandoned mid-air, harmless until resumed
+    if (HL.eq.lag && hlLagCheck(b)) continue;   // ALL HALLOWS: LAG, one in six that comes near hangs
     b.life -= dt;
     // Seeker Rounds and Ricochet, when something has written them onto itself
     if (b.homeP) {
@@ -60164,14 +60192,14 @@ const HL_QUESTS = [
   { id: 'q2', n: 'ON SALE',         ch: 0, area: 'patch', kind: 'boss', boss: 'backlog', candles: 15, medal: 'oneday', ascend: 1 },
   { id: 'q3', n: 'LAST MESSAGE',    ch: 1, area: 'house', kind: 'errand', need: 3, candles: 10, medal: 'sheet' },
   { id: 'q4', n: 'STILL HERE',      ch: 1, area: 'house', kind: 'boss', boss: 'deadgame', candles: 15, medal: 'stillhere', ascend: 2 },
-  { id: 'q5', n: 'WHERE HE PUT ME', ch: 2, area: 'yard',  kind: 'errand', need: 3, candles: 10, medal: 'grave', later: true },
-  { id: 'q6', n: 'GG',              ch: 2, area: 'yard',  kind: 'boss', boss: 'ragequit', candles: 20, medal: 'lag', ascend: 3, later: true },
+  { id: 'q5', n: 'WHERE HE PUT ME', ch: 2, area: 'yard',  kind: 'errand', need: 3, candles: 10, medal: 'grave' },
+  { id: 'q6', n: 'GG',              ch: 2, area: 'yard',  kind: 'boss', boss: 'ragequit', candles: 20, medal: 'lag', ascend: 3 },
   { id: 'q7', n: 'PAST NINETEEN',   ch: 2, area: null,    kind: 'run', wave: 20, candles: 20, medal: 'lantern', later: true }
 ];
 
-/* Two worn at a time. The first four do something (THE GOURD and ONE DAY in
-   Act I, SHEET and STILL HERE in Act II); the rest are listed so the stand
-   knows how many hooks it has. */
+/* Two worn at a time. The first six do something (THE GOURD and ONE DAY in
+   Act I, SHEET and STILL HERE in Act II, SHALLOW GRAVE and LAG in Act III);
+   the last is listed so the stand knows how many hooks it has. */
 const HL_EQUIP_MAX = 2;
 const HL_MEDALS = [
   { id: 'gourd',     n: 'THE GOURD',
@@ -60182,8 +60210,10 @@ const HL_MEDALS = [
     d: 'The dash keeps you out of reach a third of a second longer, and you pass through bodies while it lasts. It comes back a quarter slower.' },
   { id: 'stillhere', n: 'STILL HERE',
     d: 'Once a run, the blow that would end it leaves you a ghost for eight seconds: nothing touches you, and you hit half as hard. Fell ten before it ends and you stand back up. Fewer, and the run is over.' },
-  { id: 'grave',     n: 'SHALLOW GRAVE', later: true, d: '' },
-  { id: 'lag',       n: 'LAG',           later: true, d: '' },
+  { id: 'grave',     n: 'SHALLOW GRAVE',
+    d: 'One body in ten you fell climbs back out on your side for eight seconds. Flying THE HACKER, the bodies it takes last a quarter longer instead.' },
+  { id: 'lag',       n: 'LAG',
+    d: 'One enemy round in six that comes within reach stutters, and hangs in the air for a second.' },
   { id: 'lantern',   n: 'THE LANTERN',   later: true, d: '' }
 ];
 
@@ -60237,16 +60267,37 @@ const HL_SAY = {
     ['soul', "He's wrong. Someone said he'd be right back. I'm going to go and get him."],
     ['outsider', "He said 'still here'. I say that."],
     ['outsider', 'I did not like hearing it from him.']],
+  q5Give: [
+    ['soul', 'He put me somewhere up there, with the others.'],
+    ['outsider', 'There are a great many stones up there. Most of them say the same thing.']],
+  q5Done: [
+    ['soul', "That's mine."],
+    ['soul', "He put 'brb' on it. He knew he wasn't coming back when he wrote it."],
+    ['outsider', 'Most of them say that.']],
+  q6Give: [
+    ['soul', "He's up there. He's always up there, digging."],
+    ['outsider', 'He leaves before he loses. He has never lost. That is not the same as winning, but he does not know that.']],
+  q6Done: [
+    ['soul', 'He said it. He finally said it.'],
+    ['soul', "I'm still at nineteen, though. Nobody finished me. He only stopped."],
+    ['soul', 'The others up there — not all of them were left, you know. Some of them were taken. I could hear them.'],
+    ['outsider', 'Then there will be more of this.'],
+    ['outsider', 'It needs finishing first.']],
   /* On the menu, the first time after a chapter opens, once the floor below
      it is done (hlChapterBeatDue). Keyed by the chapter's index. */
   ch1: [
     ['outsider', 'It has gone up a floor. It is asking for you.']],
+  ch2: [
+    ['outsider', 'It is near the top. It knows who it is waiting for.']],
   /* not in the draft: what is said while the next floor is still shut,
      by the floor (hlWaitLines) */
   wait: [
     ['outsider', 'The house is not open yet. It will wait. It is good at that.']],
   waitYard: [
     ['outsider', 'The yard is not open yet. Everything up there is already buried. It will keep.']],
+  // the top landing reached, and the last of it not built yet
+  waitLast: [
+    ['outsider', 'It wants one more thing of you. It is not ready to ask.']],
   idle: [
     'It is still here.',
     'It does not sleep. I do not much, either.',
@@ -60315,6 +60366,31 @@ const HL_SAY = {
     general: [
       ['soul', "he's only loud. loud isn't the same as there."],
       ['outsider', 'He has said it every day for years. Saying it is what keeps him here.']]
+  },
+  /* …and after a death in THE RAGE QUIT's (hlHintThemeRQ). Two landings up
+     now: the soul speaks in its own voice, capitals and all. */
+  hintRQ: {
+    // he got out through a gate, more than once
+    escape: [
+      ['outsider', 'He leaves when it starts to go badly. Every time he leaves, it did not happen.'],
+      ['soul', 'He always runs for the nearest gate. You could be standing in it.'],
+      ['outsider', 'A gate is shut while someone stands in it. A hull will do.']],
+    // he got out, and nothing ever stopped him short
+    back: [
+      ['soul', "When he runs he can't see you. That's when he's easiest to hurt."],
+      ['outsider', 'His back is to you while he runs. Hit it hard enough and he stops short.']],
+    // nearly had him
+    close: [
+      ['outsider', 'Nearly. He will not remember it that way.'],
+      ['soul', 'He was nearly finished. He hates that more than anything.']],
+    // went down at the end, with him at his wildest
+    tilt: [
+      ['soul', 'The worse it goes for him, the faster he gets. He was never any good at losing.'],
+      ['outsider', 'At the end he throws everything. Mostly the controller. Watch where it comes back from.']],
+    // none of the above
+    general: [
+      ['soul', "He's only angry. Angry runs out."],
+      ['outsider', 'He has never once let a run finish on him. You are asking him to.']]
   }
 };
 /* how evenly the soul types, by how much of it has come back (hlSoulShown) */
@@ -60336,6 +60412,19 @@ const HL_BARK = {
     fade: ['See? Nothing.', 'Why are you even still here?'],
     soul: "Nobody's coming back for you.",
     death: '...still here, though.'
+  },
+  /* Said as a chat line, in capitals if he could. Everything he says is about
+     it not counting. */
+  ragequit: {
+    enter: ['Oh great. This again.', "That one didn't count.", 'Lag.', "I wasn't even trying.", 'Again.', 'This game is rigged.'],
+    bolt: "I'm done. I'm DONE.",
+    restart: "That one didn't count.",
+    stopped: 'Lag.',                     // stopped short of a gate: not in the draft, picked from his own lines
+    charge: "I wasn't even trying.",
+    // the soul takes the gate he left it through: [who, line], one after another
+    gate: [['soul', "You said you'd be right back."], ['ragequit', '...who are you?'], ['soul', 'Wave nineteen.']],
+    shut: 'No. No no no. Let me out.',
+    death: '...gg.'
   }
 };
 
@@ -60371,10 +60460,27 @@ const HL_AREAS = {
              // his: sheets, which are two deaths each, and fewer of the dark
              bossPool: [['sheet', 50], ['poltergeist', 26], ['lurker', 18]],
              boss: 'deadgame' }
+  },
+  /* A graveyard of runs. Each stone is one run that was quit, with its wave,
+     its hull and the last thing typed in it. He buries them himself and never
+     comes back to any of them. A death on a stone's plot raises it, and so
+     does the bell (RISING). It ends at wave 20, where the soul ended. */
+  yard: {
+    id: 'yard', ch: 2, waveFrom: 16, errand: 'q5', bossQ: 'q6',
+    waveMul: 0.7,                        // the graves send their own
+    bossLive: 4, bossTrickle: 2.2, bossAdds: 12,
+    stage: { name: 'THE YARD', tag: 'all hallows · iii', hl: 'yard',
+             bg: '#05070a', grid: '#10141a', grid2: '#1a2029', wall: '#44403c',
+             glow: 'rgba(214,211,209,0.08)', accent: '#d6d3d1', hazard: null,
+             pool: [['risen', 34], ['gravedigger', 28], ['bellringer', 10]],
+             // his: the runs he left, and the ones who bury them
+             bossPool: [['risen', 40], ['gravedigger', 24], ['bellringer', 8]],
+             boss: 'ragequit' }
   }
 };
-const HL_ETYPES = { gourd: 1, jack: 1, creeper: 1, scarecrow: 1, sheet: 1, lurker: 1, poltergeist: 1, lastseen: 1 };
-const HL_BOSSES = { backlog: 1, deadgame: 1 };
+const HL_ETYPES = { gourd: 1, jack: 1, creeper: 1, scarecrow: 1, sheet: 1, lurker: 1, poltergeist: 1, lastseen: 1,
+                    risen: 1, gravedigger: 1, bellringer: 1 };
+const HL_BOSSES = { backlog: 1, deadgame: 1, ragequit: 1 };
 
 /* ------------------------------- the numbers -------------------------------
    Every figure the Act I rules run on. The art reads some of them (timers,
@@ -61046,11 +61152,12 @@ function hlAreaStart(id) {
   stageAbs = Math.floor((A.waveFrom - 1) / 5);   // shop prices scale on this
   enterStage(A.stage);
   if (id === 'house') hlHouseStart();    // ACT II: the light, and what is lying about
+  if (id === 'yard') hlYardStart();      // ACT III: the stones, the gates
   betweenWaves = 2.6;
   state = 'play'; uiArm = 0.3;
   hlPartsClear();
   banner(A.stage.name, A.stage.accent, 3.0);
-  if (id === 'house') hlHouseEnterFx(A); else hlAreaEnterFx(A);
+  if (id === 'house') hlHouseEnterFx(A); else if (id === 'yard') hlYardEnterFx(A); else hlAreaEnterFx(A);
   Audio_.select();
 }
 const hlAreaDef = () => hlArea && HL_AREAS[hlArea.id];
@@ -61081,6 +61188,7 @@ function hlAreaWave() {
     spawnBudget = Math.round((A.bossAdds || HL_BOSS_ADDS) * chalBudget() * hardBudget());
     spawnT = 2;
     if (A.id === 'house') hlHouseBossIn(boss);
+    if (A.id === 'yard') hlYardBossIn(boss);
   } else {
     // what you left lit last wave comes open now
     if (hlArea.n > 1) for (const g of hlPileGourds()) if (g.hlGrow >= GOURD_LIT - 1e-6) g.hlHatch = 0;
@@ -61124,10 +61232,11 @@ function hlBossDown(e) {
   credits += Math.round((70 + wave * 6) * P.credMul * hardCred());
   hlArea.death = { boss: e.boss, x: e.x, y: e.y, r: e.r, t: 0 };
   if (A.id === 'house') hlHouseBossDown(e);
+  if (A.id === 'yard') hlYardBossDown(e);
   hlComplete(A.bossQ);
   banner(BOSSES[e.boss].name + '   DESTROYED', COL.crit);
   drawFlashT = 0.3; shake(1.6);
-  if (e.boss === 'deadgame') hlHouseBossDeathFx(e); else hlBossDeathFx(e);
+  if (e.boss === 'deadgame') hlHouseBossDeathFx(e); else if (e.boss === 'ragequit') hlYardBossDeathFx(e); else hlBossDeathFx(e);
   hlAreaEnd('win');
 }
 /* ---- after a death in his fight: a word from one of them. What went wrong
@@ -61139,10 +61248,11 @@ function hlOnDeath() {
   HL.deadSay = null;
   const A = hlAreaDef(), e = hlArea && hlArea.boss, F = HL.fight;
   if (!A || !e || e.dead || !F || hlArea.end || hlQDone(A.bossQ)) return;
-  // THE BACKLOG's themes keep their old keys; DEAD GAME's are hint:dg:<theme>:<i>
-  const dg = e.boss === 'deadgame';
-  const theme = dg ? hlHintThemeDG(e, F) : hlHintTheme(e, F), lines = (dg ? HL_SAY.hintDG : HL_SAY.hint)[theme];
-  const key = (dg ? 'hint:dg:' : 'hint:') + theme + ':';
+  // THE BACKLOG's themes keep their old keys; DEAD GAME's are hint:dg:<theme>:<i>, THE RAGE QUIT's hint:rq:
+  const k = e.boss === 'deadgame' ? 'dg' : e.boss === 'ragequit' ? 'rq' : '';
+  const theme = k === 'dg' ? hlHintThemeDG(e, F) : k === 'rq' ? hlHintThemeRQ(e, F) : hlHintTheme(e, F);
+  const lines = (k === 'dg' ? HL_SAY.hintDG : k === 'rq' ? HL_SAY.hintRQ : HL_SAY.hint)[theme];
+  const key = (k ? 'hint:' + k + ':' : 'hint:') + theme + ':';
   let i = 0;
   while (i < lines.length && hlSeen(key + i)) i++;
   if (i >= lines.length) i = rndi(lines.length);
@@ -61190,6 +61300,8 @@ function hlTick(dt, wdt) {
   hlPartsTick(dt);
   if (inVigil || hlAreaOn()) hlArtTick(dt, inVigil ? 'vigil' : hlArea.id);
   if (hlHouseOn()) hlHouseArtTick(dt);
+  if (hlYardOn()) hlYardArtTick(dt);
+  hlGraveAllyTick(wdt);                  // ACT III: SHALLOW GRAVE's, in any run
   // barks age out whatever else is going on
   for (let i = hlBarks.length - 1; i >= 0; i--) {
     const b = hlBarks[i];
@@ -61215,9 +61327,10 @@ function hlTick(dt, wdt) {
   if (hlArea.coldDue > 0) {
     hlArea.coldDue -= wdt;
     // still owed when it comes due (a piece only ever comes for an errand that is open)
-    if (hlArea.coldDue <= 0 && !hlQDone(A.errand)) { if (A.id === 'house') hlMarkSprout(); else hlColdSprout(); }
+    if (hlArea.coldDue <= 0 && !hlQDone(A.errand)) { if (A.id === 'house') hlMarkSprout(); else if (A.id === 'yard') hlDigSprout(); else hlColdSprout(); }
   }
   if (A.id === 'house') hlHouseTick(dt, wdt);   // ACT II: THE QUIET, the wreckage, DEAD GAME's room
+  if (A.id === 'yard') hlYardTick(dt, wdt);     // ACT III: RISING, the pits, the gates
   hlTeleTick(dt);
   hlKickCheck();
   hlHeldTick(wdt);
@@ -61395,8 +61508,9 @@ const hlPileGourds = () => enemies.filter(g => !g.dead && g.type === 'gourd' && 
 /* Gourds never hold a wave: the pile is whatever is left standing between them. */
 function hlWaveThreats() {
   let n = 0;
-  for (const e of enemies) if (isThreat(e) && e.type !== 'gourd' && e.type !== 'lastseen') n++;
-  return n;
+  // nor do the risen in his gates (ACT III), which have stopped fighting
+  for (const e of enemies) if (isThreat(e) && e.type !== 'gourd' && e.type !== 'lastseen' && e.hlGate === undefined) n++;
+  return n + hlYardPending();            // a grave about to open holds it too
 }
 function hlGourdRipe(e) {
   e.dead = true;
@@ -61472,6 +61586,7 @@ function hlVineSeg(e) {
 /* On any death (from killEnemy): the cold gourds are pieces. */
 function hlOnKill(e) {
   hlHouseKill(e);                        // ACT II: the light, the meter, the wreckage, what was under a sheet
+  hlYardKill(e);                         // ACT III: a grave raised, a body buried, the errand's digger
   if (e.type === 'creeper' && e.hlVine) e.hlVine = null;
   if (!e.hlCold || e.hlCounted) return;
   e.hlCounted = true;
@@ -62040,6 +62155,7 @@ function hlVineTouched(test) {
 }
 function hlTouch(test) { return hlVineTouched(test); }
 function hlBulletHit(b) {
+  if (b.mine && hlPitSwallow(b)) return true;   // ACT III: a gravedigger's pit
   if (!b.mine || !hlAnyTargets()) return false;
   const r = b.r;
   return hlTouch({
@@ -62084,6 +62200,7 @@ function hlBark(e, text) {
 function hlOwnsBody(e) { return !!(HL_ETYPES[e.type] || HL_BOSSES[e.boss]); }
 function hlDrawFloor() {
   if (hlHouseOn()) { drawHlHouseFloor(hlAreaDef()); for (const w of hlArea.wreck) if (!w.by) drawHlHouseWreck(w); }
+  else if (hlYardOn()) hlYardFloor();
   else if (hlAreaOn()) drawHlAreaFloor(hlAreaDef());
 }
 function hlDrawWorldUnder() {
@@ -62095,27 +62212,34 @@ function hlDrawWorldOver() {
   if (!(inVigil || hlAreaOn())) return;
   /* The light pass: only if the art has lit the room this frame. */
   hlL.lights.length = 0; hlL.occ.length = 0;
-  const lit = hlHouseOn() ? hlHouseLights() : hlLights(inVigil ? 'vigil' : hlArea.id);   // THE HOUSE lights itself
+  const lit = hlHouseOn() ? hlHouseLights() : hlYardOn() ? hlYardLights() : hlLights(inVigil ? 'vigil' : hlArea.id);   // THE HOUSE and THE YARD light themselves
   if (lit) { hlWrLightsTap(); hlLightRender(); }   // + a prize skin's own light
   if (hlHouseOn()) for (const w of hlArea.wreck) if (w.by) drawHlHouseWreck(w);   // lifted: over the bodies
+  if (hlYardOn() && hlArea.soulGate >= 0) { const g = hlArea.gates[hlArea.soulGate]; drawHlYardSoul(g.x, g.y, g); }   // the soul, in its gate
 }
 function hlDrawWorldGlow() {
   if (!(inVigil || hlAreaOn())) return;
   for (const p of hlHeld) if (p.kind === 'sweep') hlQuietDraw(p, drawHlSweep);
   for (const e of enemies) if (!e.dead && e.hlVine) drawHlVine(e, e.hlVine);
   hlPartsDraw('glow');
-  if (hlHouseOn()) drawHlHouseGlow(); else drawHlGlow(inVigil ? 'vigil' : hlArea.id);
-  if (hlArea && hlArea.death) { if (hlArea.death.boss === 'deadgame') drawHlHouseBossDeath(hlArea.death); else drawHlBossDeath(hlArea.death); }
-  if (!hlHouseOn()) for (const b of hlBarks) drawHlBark(b);   // THE HOUSE's are said over its dark (hlDrawQuiet)
+  if (hlHouseOn()) drawHlHouseGlow(); else if (hlYardOn()) drawHlYardGlow(); else drawHlGlow(inVigil ? 'vigil' : hlArea.id);
+  if (hlArea && hlArea.death) {
+    const D = hlArea.death;
+    if (D.boss === 'deadgame') drawHlHouseBossDeath(D); else if (D.boss === 'ragequit') drawHlYardBossDeath(D); else drawHlBossDeath(D);
+  }
+  if (hlYardOn()) for (const b of hlBarks) drawHlYardBark(b);
+  else if (!hlHouseOn()) for (const b of hlBarks) drawHlBark(b);   // THE HOUSE's are said over its dark (hlDrawQuiet)
 }
 /* over the world, in plain paint: the telegraph marks (drawHlTele) */
 function hlDrawWorldTele() {
   if (hlHouseOn() && !hlArea.end) { drawHlHouseTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null); return; }
+  if (hlYardOn()) { if (!hlArea.end) drawHlYardTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null); return; }
   if (!hlAreaOn() || hlArea.end || !(hlHeld.length || hlArea.boss)) return;
   drawHlTele(hlArea.boss && !hlArea.boss.dead ? hlArea.boss : null, HL.teach);
 }
 function hlDrawScreen() {
   if (hlHouseOn()) hlHouseScreen();
+  else if (hlYardOn()) drawHlYardHud(hlAreaDef(), hlArea);
   else if (hlAreaOn()) drawHlAreaHud(hlAreaDef(), hlArea);
   if (hlAreaOn() && hlArea.id === 'patch' && !hlArea.end) {
     // the gourds' line, until he has them all; then the line is his unfinished pile
@@ -62308,6 +62432,7 @@ function hlHouseBossDown(e) {
 /* what a boss's fight is read for afterwards (THE WORD AFTER) */
 function hlFightNew(e) {
   if (e.boss === 'deadgame') return { boss: 'deadgame', solidT: 0, ghostT: 0, culled: 0, popped: 0, darkAt: -1, kills: 0 };
+  if (e.boss === 'ragequit') return { boss: 'ragequit', bolts: 0, escapes: 0, stops: 0, held: 0 };
   return { kicks: 0, binges: 0, bingeAt: -99, eaten: 0 };
 }
 
@@ -62871,6 +62996,7 @@ function hlChapterHeard(q) {
 /* what he says while the next floor is still shut, by which floor it is */
 function hlWaitLines() {
   const q = HL_QUESTS.find(x => !hlQDone(x.id));
+  if (q && q.later && hlQDone('q6')) return HL_SAY.waitLast;   // the top landing, and nothing above it yet
   return q && q.ch >= 2 ? HL_SAY.waitYard : HL_SAY.wait;
 }
 
@@ -62878,20 +63004,834 @@ function hlWaitLines() {
    Which set of hooks draws a thing: THE HOUSE's (Act II) or Act I's. */
 function hlDrawBody(e, ea) {
   if (HL_HOUSE_BODIES[e.type] || e.boss === 'deadgame') drawHlHouseBody(e, ea);
+  else if (HL_YARD_BODIES[e.type] || e.boss === 'ragequit') drawHlYardBody(e, ea);   // ACT III
   else drawHlBody(e, ea);
 }
 function hlDrawEBullet(b) {
   if (HL_HOUSE_ROUNDS[b.hlKind]) drawHlHouseEBullet(b);
+  else if (HL_YARD_ROUNDS[b.hlKind]) drawHlYardEBullet(b);   // ACT III
   else drawHlEBullet(b);
 }
 function hlDrawBossBar(e, x, y, w) {
   if (e.boss === 'deadgame') drawHlDeadGameBar(e, x, y, w);
+  else if (e.boss === 'ragequit') drawHlRageQuitBar(e, x, y, w);   // ACT III
   else if (e.boss === 'backlog') drawHlBossBar(e, x, y, w);
 }
 function hlHouseScreen() {
   const A = hlArea, e = A.boss;
   drawHlHouseHud(hlAreaDef(), A);
   if (e && !e.dead && A.online !== null && !A.end) drawHlOnlineHud(A.online, DG_LINE, e.hlSolidK || 0, A);
+}
+
+/* ===========================================================================
+   ALL HALLOWS — BOOK I: THE LOST SOUL · ACT III
+   THE YARD (chapter III, opens 23 Oct): RISING, its three bodies — the
+   RISEN, the GRAVEDIGGER and the BELLRINGER — and THE RAGE QUIT; quests 5
+   and 6, the medals SHALLOW GRAVE and LAG, and the menu's line once the
+   floor opens.
+
+   Like Act II's, its rows are in Act I's tables (HL_QUESTS, HL_MEDALS,
+   HL_SAY, HL_BARK, HL_AREAS.yard, HL_ETYPES, HL_BOSSES), and this block is the
+   machinery the yard needs that the house did not. Everything it shows is
+   drawn through the ACT III hooks at the foot of the art hooks block, and
+   HALLOWS-YARD-HOOKS.md says what each is handed. THE YARD never goes through
+   Act I's hooks or Act II's: the seams pick its own.
+=========================================================================== */
+
+/* ------------------------------- the numbers -------------------------------
+   First drafts, for tuning in play, like the others. */
+/* RISING. The yard is stones, each over one quit run. A death on a stone's
+   plot raises it, and so does the bell's toll: what climbs out is a RISEN. */
+const GRAVE_N       = 20;     // stones in the yard (and the soul's)
+const GRAVE_PLOT    = 46;     // px round a stone that is its plot
+const GRAVE_GAP     = 150;    // px kept between stones
+const GRAVE_RISE_T  = 1.1;    // s the earth heaves before it opens: the tell
+const GRAVE_OPEN_T  = 14;     // s an emptied grave lies open before it settles again
+const RISEN_MAX     = 7;      // risen up, or on their way, at once: past it a grave stays shut
+const RISEN_CLIMB   = 0.5;    // s a risen takes to climb out: nothing touches it, and it touches nothing
+const RISEN_WIND    = 0.55;   // s of wind-up before its gun goes off
+const RISEN_CD      = [2.4, 3.6];
+const RISEN_GUNS    = ['stream', 'lance', 'swing'];
+// want: the distance it keeps; reach: closer than this, it winds up
+const RISEN_STREAM  = { n: 6, gap: 0.08, spd: 330, want: 330, reach: 520 };   // a stream: rounds, one after another
+const RISEN_LANCE   = { len: 210, w: 12, t: 0.18, want: 150, reach: 190 };    // a short lance, down a locked heading
+const RISEN_SWING   = { r: 84, arc: 1.2, t: 0.2, want: 50, reach: 80 };       // a swing, round it
+const RISEN_MARCH_SPD = 320;  // the last quarter: the risen walk into his gates
+// the stones' lines, as the draft has them: [wave, the last thing typed]
+const HL_EPITAPHS   = [[12, 'lag'], [7, 'this is rigged'], [22, 'afk'], [3, 'boring'], [31, 'gtg']];
+const HL_SOUL_STONE = { wave: 19, hull: 4, said: 'brb' };
+
+/* the gravedigger */
+const DIG_WANT      = 260;    // the distance it keeps while it follows you
+const DIG_CD        = [3.4, 5];
+const DIG_TRAIL     = 1.6;    // s behind you: where it goes to dig
+const DIG_WALK_T    = 6;      // s it walks to the spot before giving it up
+const DIG_T         = 0.9;    // s it digs: the tell
+const PIT_R         = 44;
+const PIT_LIFE      = 14;     // s a pit stays open
+const PIT_MAX       = 8;
+const PIT_SLOW      = 0.55;   // your speed in one
+const DIG_BURY_R    = 220;    // a death this near a gravedigger is buried…
+const BURY_T        = 5;      // …and gets up this long after
+const BURY_MAX      = 8;      // fresh graves at once
+/* the errand's gravedigger (WHERE HE PUT ME) */
+const MARK_DIG_HP   = 2.4;    // its health, against a plain one
+const MARK_DIG_SPD  = 110;    // px/s it walks to the soul's stone at
+const DIG_FILL_T    = 20;     // s it takes to fill the stone in
+
+/* the bellringer */
+const BELL_T        = 6;      // s between tolls
+const BELL_WIND     = 1;      // s it swings before each: the tell
+const BELL_RAISE    = 3;      // graves each toll raises, the nearest
+
+/* THE RAGE QUIT. He quits before he loses. Four gates, one in the middle of
+   each wall; each time his health crosses a quarter, he runs for the nearest
+   open one. */
+const RQ_MARKS      = [0.75, 0.5, 0.25];
+const RQ_BOLT_WIND  = 0.5;    // s he stands there saying so before he runs
+const RQ_BOLT_SPD   = 250;    // px/s, running…
+const RQ_BACK_MUL   = 1.5;    // …with his back to you: what he takes
+const RQ_BOLT_STOP  = 0.1;    // of his health, taken while he runs: he stops short, and the quarter stands
+const RQ_AWAY       = 1.4;    // s gone through a gate before he comes back in
+const GATE_R        = 70;     // px from a gate that stands in it
+const GATE_IN       = 46;     // px a gate sits in from its wall
+const RQ_ATK        = [1.5, 2.2];   // s between his moves, at full health (less as he tilts)
+const RQ_WIND       = { pad: 0.55, mash: 0.4, charge: 0.6 };
+const RQ_PAD        = { spd: 520, r: 13, bounces: 5, life: 5 };      // THE CONTROLLER: thrown, it bounces across the yard
+const RQ_MASH       = { n: 12, gap: 0.045, spd: 380, arc: 0.55 };    // MASH: a spray
+const RQ_CHARGE     = { spd: 760, t: 0.55 };                          // a charge, down a locked heading
+const RQ_TILT_SPD   = 0.7;    // at no health, this much faster…
+const RQ_TILT_ATK   = 0.45;   // …and this much less between moves
+const RQ_SAY_GAP    = [0.6, 3.0, 5.2];   // s after the soul takes its gate that the three lines are said
+
+/* the medals */
+const GRAVE_EVERY   = 10;     // SHALLOW GRAVE: one body in this many climbs back out on your side…
+const GRAVE_ALLY_T  = 8;      // …for this long
+const GRAVE_HACK    = 0.8;    // flying THE HACKER, its bodies fade at this rate instead: a quarter longer
+const LAG_EVERY     = 6;      // LAG: one round in this many that comes within reach…
+const LAG_REACH     = 150;    // (px from the hull)
+const LAG_T         = 1;      // …hangs this long
+
+const HL_YARD_BODIES = { risen: 1, gravedigger: 1, bellringer: 1 };
+const HL_YARD_ROUNDS = { risen: 1, pad: 1, mash: 1 };
+const hlYardOn = () => hlAreaOn() && hlArea.id === 'yard';
+
+/* ================================= the yard ================================= */
+/* hlArea, in the yard, also carries:
+     graves   the stones: [{ id, x, y, st, t, wave, hull, said, soul, fresh,
+              kin, risen, q }]. st 'rest' (shut) · 'rise' (the earth heaving,
+              GRAVE_RISE_T) · 'open' (emptied; settles after GRAVE_OPEN_T) ·
+              'buried' (a body a gravedigger put in, getting up after BURY_T).
+              soul: the soul's own stone. fresh: dug in the fight, no stone.
+     pits     what the gravediggers have dug: [{ id, x, y, r, t, life, by }]
+     gates    the four ways out: [{ i, side, x, y, by }]  by: null · 'you' ·
+              'soul' · a risen's id (whoever is standing in it)
+     trail    where you have been, a sample every 0.2 s, for the gravediggers
+     soulGate the gate the soul holds from his second quarter, or -1
+     march    his last quarter: the risen have stopped fighting and are in the gates
+     jolt     { t }: the room jolting back as he gets out, or null
+     says     lines waiting to be said in his fight: [{ at, who, text }] */
+function hlYardStart() {
+  const A = hlArea;
+  A.graves = []; A.graveSeq = 0; A.pits = []; A.pitSeq = 0;
+  A.trail = []; A.trailT = 0;
+  A.soulGate = -1; A.march = false; A.jolt = null; A.says = [];
+  const cx = (arena.x0 + arena.x1) / 2, cy = (arena.y0 + arena.y1) / 2;
+  A.gates = [
+    { i: 0, side: 'n', x: cx, y: arena.y0 + GATE_IN, by: null },
+    { i: 1, side: 'e', x: arena.x1 - GATE_IN, y: cy, by: null },
+    { i: 2, side: 's', x: cx, y: arena.y1 - GATE_IN, by: null },
+    { i: 3, side: 'w', x: arena.x0 + GATE_IN, y: cy, by: null }
+  ];
+  // the soul's own, up in a corner, away from the others
+  hlGraveAdd({ x: cx + 640, y: cy - 440, soul: true, wave: HL_SOUL_STONE.wave, hull: HL_SOUL_STONE.hull, said: HL_SOUL_STONE.said });
+  // the rest, one quit run each: off the middle, out of the gates
+  for (let n = 0, tries = 0; n < GRAVE_N && tries < 800; tries++) {
+    const x = simRnd(arena.x1 - 110, arena.x0 + 110), y = simRnd(arena.y1 - 110, arena.y0 + 110);
+    if (len(x - cx, y - cy) < 260) continue;
+    if (A.gates.some(g => len(x - g.x, y - g.y) < GATE_R + 110)) continue;
+    if (A.graves.some(g => len(x - g.x, y - g.y) < GRAVE_GAP)) continue;
+    const [wv, said] = HL_EPITAPHS[n % HL_EPITAPHS.length];
+    hlGraveAdd({ x, y, wave: wv, hull: simRndi(61, 1), said });
+    n++;
+  }
+}
+function hlGraveAdd(g) {
+  const A = hlArea;
+  g.id = ++A.graveSeq; g.st = g.st || 'rest'; g.t = 0;
+  g.soul = !!g.soul; g.fresh = !!g.fresh; g.kin = !!g.kin; g.risen = 0; g.q = 0;
+  A.graves.push(g);
+  return g;
+}
+const hlGraveById = id => (id && hlYardOn() ? hlArea.graves.find(g => g.id === id) || null : null);
+const hlSoulStone = () => (hlYardOn() ? hlArea.graves.find(g => g.soul) || null : null);
+/* what is up, or about to be: the cap RISING keeps to */
+function hlRisenUp() {
+  let n = 0;
+  for (const e of enemies) if (isThreat(e) && e.type === 'risen' && e.hlGate === undefined) n++;
+  for (const g of hlArea.graves) if ((g.st === 'rise' || g.st === 'buried') && !g.kin) n++;
+  return n;
+}
+/* graves about to open hold the wave they are in (hlWaveThreats) */
+function hlYardPending() {
+  if (!hlYardOn()) return 0;
+  let n = 0;
+  for (const g of hlArea.graves) if ((g.st === 'rise' || g.st === 'buried') && !g.kin) n++;
+  return n;
+}
+/* A grave rises: the earth heaves (the tell), then it opens and a risen
+   climbs out. Shut ones only, never the soul's. kin: raised by one of yours,
+   it climbs out on your side. */
+function hlGraveRaise(g, kin, force) {
+  if (!g || g.st !== 'rest' || g.soul) return false;
+  if (!kin && !force && hlRisenUp() >= RISEN_MAX) return false;
+  g.st = 'rise'; g.t = 0; g.kin = !!kin;
+  const e = hlArea.boss;
+  g.q = e && !e.dead ? e.hlQN || 0 : 0;   // which of his quarters it rose in: it rises again if he gets out
+  hlGraveRiseFx(g);
+  return true;
+}
+function hlRisenOut(g) {
+  g.st = 'open'; g.t = 0;
+  const o = spawnEnemy('risen', g.x, g.y, { elite: false, hlGrave: g.id });
+  if (g.kin && !o.hacked) { o.hlGate = undefined; hackKin(o); }   // raised by one of yours: yours
+  g.kin = false;
+  g.risen = o.id;
+  hlRisenUpFx(o, g);
+}
+const hlRisenAlive = id => !!id && enemies.some(o => o.id === id && !o.dead);
+/* From spawnEnemy, for a risen or a gravedigger. A risen's gun is rolled, and
+   it climbs out of a grave: the one it was raised from, or, sent by the wave,
+   the nearest shut one to where it was sent. Outside THE YARD it is a ghost
+   hull like any other. */
+function hlYardSpawned(e, opts) {
+  if (e.type === 'gravedigger') {
+    if (opts.hlMarked) { e.hlMarked = true; e.maxHp *= MARK_DIG_HP; e.hp = e.maxHp; e.dmg = 0; e.hlFill = 0; }
+    return;
+  }
+  e.hlGun = simPick(RISEN_GUNS);
+  e.hlClimb = RISEN_CLIMB; e.phased = true; e.hlFired = 0;
+  let g = opts.hlGrave ? hlGraveById(opts.hlGrave) : null;
+  if (!g && hlYardOn() && !opts.hlDoor) {
+    let bd = 1e9;
+    for (const o of hlArea.graves) {
+      if (o.st !== 'rest' || o.soul) continue;
+      const dd = len(o.x - e.x, o.y - e.y);
+      if (dd < bd) { bd = dd; g = o; }
+    }
+    if (g) { g.st = 'open'; g.t = 0; g.risen = e.id; e.x = g.x; e.y = g.y; }
+  }
+  const ep = g && !g.fresh ? [g.wave, g.said] : simPick(HL_EPITAPHS);
+  e.hlLine = { wave: ep[0], said: ep[1] };
+  // the last quarter: whatever climbs out now goes to stand in a gate
+  if (hlYardOn() && hlArea.march && !e.hacked) e.hlGate = hlGateNearest(e.x, e.y).i;
+}
+function hlGateNearest(x, y, skip) {
+  let best = null, bd = 1e9;
+  for (const g of hlArea.gates) {
+    if (skip && skip(g)) continue;
+    const d = len(g.x - x, g.y - y);
+    if (d < bd) { bd = d; best = g; }
+  }
+  return best;
+}
+
+function hlYardTick(dt, wdt) {
+  const A = hlArea;
+  // where you have been, for the gravediggers
+  A.trailT += wdt;
+  if (A.trailT >= 0.2) {
+    A.trailT -= 0.2;
+    A.trail.push({ x: P.x, y: P.y });
+    if (A.trail.length > 24) A.trail.shift();
+  }
+  // RISING
+  for (let i = A.graves.length - 1; i >= 0; i--) {
+    const g = A.graves[i];
+    g.t += wdt;
+    if (g.st === 'rise' && g.t >= GRAVE_RISE_T) hlRisenOut(g);
+    else if (g.st === 'buried' && g.t >= BURY_T) hlRisenOut(g);
+    else if (g.st === 'open' && g.t >= GRAVE_OPEN_T && !hlRisenAlive(g.risen)) {
+      if (g.fresh) A.graves.splice(i, 1);  // dug in the fight, never a stone: it is only filled in
+      else { g.st = 'rest'; g.t = 0; g.risen = 0; }
+    }
+  }
+  // the pits: open a while, and you are slower in one
+  for (let i = A.pits.length - 1; i >= 0; i--) {
+    const p = A.pits[i];
+    p.t += wdt;
+    if (p.t >= p.life) { A.pits.splice(i, 1); hlPitCloseFx(p); }
+  }
+  if (hlInPit(P.x, P.y)) { P.slowT = Math.max(P.slowT || 0, 0.08); P.slowV = PIT_SLOW; }
+  // who is standing in each gate
+  for (const g of A.gates) {
+    g.by = null;
+    if (g.i === A.soulGate) { g.by = 'soul'; continue; }
+    if (!P.down && len(P.x - g.x, P.y - g.y) < GATE_R) { g.by = 'you'; continue; }
+    for (const o of enemies)
+      if (!o.dead && o.type === 'risen' && o.hlGate === g.i && len(o.x - g.x, o.y - g.y) < GATE_R) { g.by = o.id; break; }
+  }
+  if (A.jolt) { A.jolt.t += wdt; if (A.jolt.t > 0.9) A.jolt = null; }
+  // the soul and him, at its gate
+  while (A.says.length && A.says[0].at <= A.t) { const s = A.says.shift(); hlYardSay(s.who, s.text); }
+}
+/* where you were s seconds ago */
+function hlTrailAt(s) {
+  const T = hlArea.trail;
+  if (!T.length) return null;
+  return T[Math.max(0, T.length - 1 - Math.round(s / 0.2))];
+}
+function hlInPit(x, y, by) {
+  if (!hlYardOn()) return false;
+  for (const p of hlArea.pits) if ((!by || p.by === by) && len(x - p.x, y - p.y) < p.r) return true;
+  return false;
+}
+/* From hlBulletHit: your fire that falls into a pit is gone. A round fired
+   from inside one climbs out of it; it is the ones that go in that it keeps. */
+function hlPitSwallow(b) {
+  if (!hlYardOn() || !hlArea.pits.length) return false;
+  for (const p of hlArea.pits) {
+    if (len(b.x - p.x, b.y - p.y) >= p.r || len(b.px - p.x, b.py - p.y) < p.r) continue;
+    hlPitSwallowFx(b, p);
+    return true;
+  }
+  return false;
+}
+function hlPitAdd(e) {
+  const A = hlArea;
+  const p = { id: ++A.pitSeq, x: e.x, y: e.y, r: PIT_R, t: 0, life: PIT_LIFE, by: e.id };
+  A.pits.push(p);
+  while (A.pits.length > PIT_MAX) hlPitCloseFx(A.pits.shift());
+  hlPitDigFx(e, p);
+  return p;
+}
+/* said in his fight, by him or by the soul at its gate */
+function hlYardSay(who, text) {
+  const A = hlArea;
+  if (who === 'soul') {
+    const g = A.gates[A.soulGate];
+    if (g) hlBark({ x: g.x, y: g.y, r: 18, boss: 'soul', dead: false }, text);
+  } else if (A.boss && !A.boss.dead) hlBark(A.boss, text);
+}
+
+/* ============================ the yard's bodies ============================
+   Called from updateEnemies' switch for the three types. sp is the body's
+   speed this frame. */
+function hlYardAI(e, dt, ux, uy, d, sp, dx, dy) {
+  switch (e.type) {
+    case 'risen': hlRisenAI(e, dt, ux, uy, d, sp, dx, dy); break;
+    case 'gravedigger': if (e.hlMarked) hlMarkDigAI(e, dt); else hlDigAI(e, dt, ux, uy, d, sp, dx, dy); break;
+    case 'bellringer': hlBellAI(e, dt); break;
+  }
+}
+
+/* --------------------------------- the risen --------------------------------
+   A ghost hull flying a quit run's gun: a stream, a short lance or a swing.
+   e.state 0 closing to its gun's reach · 1 the wind-up (RISEN_WIND) · 2 it
+   goes off (e.hlAim, locked). Climbing out (e.hlClimb) it is not there yet.
+   In his last quarter it stops fighting and goes to stand in a gate (e.hlGate). */
+function hlRisenAI(e, dt, ux, uy, d, sp, dx, dy) {
+  if (e.hlClimb > 0) {
+    e.hlClimb = Math.max(0, e.hlClimb - dt);
+    e.phased = e.hlClimb > 0 || e.hlGate !== undefined;
+    e.vx = 0; e.vy = 0;
+    return;
+  }
+  if (e.hlGate !== undefined) { hlRisenMarch(e, dt); return; }
+  e.phased = false;
+  const G = e.hlGun, W = G === 'stream' ? RISEN_STREAM : G === 'lance' ? RISEN_LANCE : RISEN_SWING;
+  if (e.state === 0) {
+    const push = d < W.want - 40 ? -0.8 : d > W.want + 60 ? 1 : 0, side = e.id % 2 ? 0.45 : -0.45;
+    steer(e, (ux * push - uy * side) * sp, (uy * push + ux * side) * sp, 2.6, dt);
+    e.ang = Math.atan2(dy, dx);
+    e.cd -= dt;
+    if (e.cd <= 0 && d < W.reach) { e.state = 1; e.atkT = RISEN_WIND; hlRisenWindFx(e); }
+  } else if (e.state === 1) {                  // the wind-up: it still turns to you
+    steer(e, 0, 0, 7, dt);
+    e.ang = angLerp(e.ang, Math.atan2(dy, dx), 1 - Math.exp(-8 * dt));
+    e.atkT -= dt;
+    if (e.atkT <= 0) {
+      e.state = 2; e.hlAim = e.ang; e.hlStruck = false; e.hlFired++;
+      e.atkT = G === 'stream' ? 0 : W.t; e.hlShots = G === 'stream' ? W.n : 0;
+      hlRisenFireFx(e);
+    }
+  } else {                                     // it goes off, down the locked heading
+    steer(e, 0, 0, 7, dt);
+    e.atkT -= dt;
+    if (G === 'stream') {
+      if (e.atkT <= 0 && e.hlShots > 0) {
+        e.atkT = W.gap; e.hlShots--;
+        const b = eshoot(e, e.hlAim + simRnd(0.05, -0.05), W.spd, e.dmg * 0.5, 5);
+        if (!e.hacked) b.hlKind = 'risen';
+      }
+      if (e.hlShots <= 0) hlRisenRest(e);
+    } else {
+      if (!e.hlStruck) { e.hlStruck = true; hlRisenStrike(e, G, W); }
+      if (e.atkT <= 0) hlRisenRest(e);
+    }
+  }
+}
+function hlRisenRest(e) { e.state = 0; e.cd = simRnd(RISEN_CD[1], RISEN_CD[0]); }
+/* the lance and the swing land at once, on whatever is in them */
+function hlRisenStrike(e, G, W) {
+  const a = e.hlAim;
+  const inIt = (x, y, r) => {
+    if (G === 'lance') return hlSegDist(e.x, e.y, e.x + Math.cos(a) * W.len, e.y + Math.sin(a) * W.len, x, y) < W.w + r;
+    if (len(x - e.x, y - e.y) > W.r + r) return false;
+    let da = Math.atan2(y - e.y, x - e.x) - a;
+    da = Math.abs(Math.atan2(Math.sin(da), Math.cos(da)));
+    return da < W.arc;
+  };
+  if (e.hacked) {
+    for (const o of enemies)
+      if (isThreat(o) && !o.phased && !o.invuln && inIt(o.x, o.y, o.r))
+        damageEnemy(o, hackDmg(e.dmg * 0.7), false, e.x, e.y, { silent: true, enemy: true, noChain: true });
+    return;
+  }
+  if (!P.down && inIt(P.x, P.y, P.r)) hurtPlayer(e.dmg * 0.7, { src: e });
+}
+/* the last quarter: into its gate, and it holds it, facing in */
+function hlRisenMarch(e, dt) {
+  const g = hlYardOn() ? hlArea.gates[e.hlGate] : null;
+  e.phased = true; e.state = 0;
+  if (!g) { steer(e, 0, 0, 4, dt); return; }
+  const tx = g.x - e.x, ty = g.y - e.y, td = len(tx, ty) || 1;
+  if (td > 12) {
+    steer(e, tx / td * RISEN_MARCH_SPD, ty / td * RISEN_MARCH_SPD, 4, dt);
+    e.ang = Math.atan2(ty, tx);
+  } else {
+    steer(e, 0, 0, 8, dt);
+    e.ang = Math.atan2((arena.y0 + arena.y1) / 2 - e.y, (arena.x0 + arena.x1) / 2 - e.x);
+  }
+}
+
+/* ------------------------------ the gravedigger -----------------------------
+   e.state 0 following at a distance · 1 walking to where you were (e.hlDigAt)
+   · 2 digging there, DIG_T: the tell · then a pit is open. A death near it is
+   buried (hlYardKill). One of yours fights with its spade, and digs nothing. */
+function hlDigAI(e, dt, ux, uy, d, sp, dx, dy) {
+  if (e.state === 1 && e.hlDigAt) {
+    const tx = e.hlDigAt.x - e.x, ty = e.hlDigAt.y - e.y, td = len(tx, ty) || 1;
+    let wx = tx / td, wy = ty / td;
+    // you are in the way: it goes round you, not through you
+    const px = P.x - e.x, py = P.y - e.y, pd = len(px, py) || 1;
+    if (pd < e.r + P.r + 70 && pd < td && px * wx + py * wy > 0) {
+      const s = px * wy - py * wx > 0 ? 1 : -1;
+      const ox = -wy * s * 1.4, oy = wx * s * 1.4;
+      wx += ox; wy += oy;
+      const wl = len(wx, wy) || 1; wx /= wl; wy /= wl;
+    }
+    steer(e, wx * sp * 1.5, wy * sp * 1.5, 3, dt);
+    e.ang = Math.atan2(ty, tx);
+    e.atkT -= dt;
+    if (td < 18) { e.state = 2; e.atkT = DIG_T; hlDigFx(e); }
+    else if (e.atkT <= 0) { e.state = 0; e.cd = 1.2; e.hlDigAt = null; }
+    return;
+  }
+  if (e.state === 2) {
+    steer(e, 0, 0, 8, dt);
+    e.atkT -= dt;
+    if (e.atkT <= 0) { hlPitAdd(e); e.state = 0; e.cd = simRnd(DIG_CD[1], DIG_CD[0]); e.hlDigAt = null; }
+    return;
+  }
+  const push = d < DIG_WANT - 40 ? -0.8 : d > DIG_WANT + 80 ? 1 : 0, side = e.id % 2 ? 0.5 : -0.5;
+  steer(e, (ux * push - uy * side) * sp, (uy * push + ux * side) * sp, 2.2, dt);
+  e.ang = Math.atan2(dy, dx);
+  e.cd -= dt;
+  if (e.cd > 0 || e.hacked || !hlYardOn()) return;
+  const at = hlTrailAt(DIG_TRAIL);
+  if (!at) { e.cd = 1; return; }
+  e.state = 1; e.atkT = DIG_WALK_T; e.hlDigAt = { x: at.x, y: at.y };
+}
+/* WHERE HE PUT ME: the errand's digger walks to the soul's stone and fills it
+   in. e.state 1 walking · 3 filling (e.hlFill 0..1 over DIG_FILL_T). */
+function hlMarkDigAI(e, dt) {
+  const s = hlSoulStone();
+  if (!s) { steer(e, 0, 0, 3, dt); return; }
+  const tx = s.x - e.x, ty = s.y + 34 - e.y, td = len(tx, ty) || 1;
+  if (td > 14 && e.state !== 3) {
+    const v = MARK_DIG_SPD * (1 - (e.slow || 0));
+    steer(e, tx / td * v, ty / td * v, 3, dt);
+    e.ang = Math.atan2(ty, tx);
+    e.state = 1;
+    return;
+  }
+  steer(e, 0, 0, 8, dt);
+  if (e.state !== 3) { e.state = 3; hlDigFx(e); }
+  e.ang = Math.atan2(s.y - e.y, s.x - e.x);
+  e.hlFill = Math.min(1, (e.hlFill || 0) + dt / DIG_FILL_T);
+  if (e.hlFill >= 1) hlDigLost(e);
+}
+/* the errand's piece: near the soul's stone, never on top of you */
+function hlDigSprout() {
+  const s = hlSoulStone();
+  if (!s) return;
+  let x = s.x, y = s.y;
+  for (let tries = 0; tries < 20; tries++) {
+    const a = simRnd(TAU), dd = simRnd(420, 300);
+    x = clamp(s.x + Math.cos(a) * dd, arena.x0 + 60, arena.x1 - 60);
+    y = clamp(s.y + Math.sin(a) * dd, arena.y0 + 60, arena.y1 - 60);
+    if (len(x - P.x, y - P.y) > 260) break;
+  }
+  const e = spawnEnemy('gravedigger', x, y, { elite: false, hlMarked: true });
+  hlArea.coldLive++;
+  hlDigSproutFx(e);
+}
+function hlDigLost(e) {
+  e.dead = true;
+  if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+  banner('IT WAS FILLED IN', '#a5f3fc', 2.4);
+  hlDigLostFx(e);
+}
+function hlDigStopped(e) {
+  if (e.hlCounted) return;
+  e.hlCounted = true;
+  if (hlArea) hlArea.coldLive = Math.max(0, hlArea.coldLive - 1);
+  const q = hlQuest('q5');
+  if (!q || hlQDone(q.id)) return;
+  const n = hlProgAdd(q.id);
+  hlDigStoppedFx(e, n);
+  if (n >= q.need) {
+    hlComplete(q.id);
+    banner(q.n + '   ·   DONE', '#a5f3fc', 3.2);
+    const s = hlSoulStone();
+    if (s) hlStoneUncoverFx(s);
+  }
+}
+
+/* ------------------------------- the bellringer -----------------------------
+   A bell that does not move. Every BELL_T it tolls (swinging BELL_WIND before:
+   e.state 1, the tell), and each toll raises the BELL_RAISE shut graves
+   nearest it. One of yours raises them on your side. */
+function hlBellAI(e, dt) {
+  e.vx = 0; e.vy = 0;
+  if (e.hlTollT === undefined) e.hlTollT = simRnd(BELL_T, BELL_T * 0.5);
+  e.hlTollT -= dt;
+  if (e.hlTollT <= BELL_WIND && e.state !== 1) { e.state = 1; hlBellWindFx(e); }
+  if (e.hlTollT > 0) return;
+  e.state = 0; e.hlTollT = BELL_T; e.hlTolls = (e.hlTolls | 0) + 1;
+  const raised = [];
+  if (hlYardOn()) {
+    const near = hlArea.graves.filter(g => g.st === 'rest' && !g.soul)
+      .sort((a, b) => len(a.x - e.x, a.y - e.y) - len(b.x - e.x, b.y - e.y));
+    for (const g of near) {
+      if (raised.length >= BELL_RAISE) break;
+      if (hlGraveRaise(g, !!e.hacked)) raised.push(g);
+    }
+  }
+  hlBellTollFx(e, raised);
+}
+
+/* -------------------------------- every death -------------------------------
+   From hlOnKill (killEnemy): a risen leaves its line, the errand's digger is
+   counted, and in THE YARD a death near a gravedigger is buried, or one on a
+   stone's plot raises it. */
+function hlYardKill(e) {
+  if (e.type === 'risen') hlRisenDownFx(e, e.hlLine || { wave: 0, said: '' });
+  if (e.type === 'gravedigger' && e.hlMarked) { hlDigStopped(e); return; }
+  if (e.type === 'bellringer') hlBellDownFx(e);
+  if (e.type === 'gravedigger') hlDigDownFx(e);
+  if (!hlYardOn() || e.hacked || e.type === 'boss' || e.type === 'risen') return;
+  const A = hlArea;
+  // buried by a gravedigger, to get up later
+  let fresh = 0;
+  for (const g of A.graves) if (g.fresh && g.st === 'buried') fresh++;
+  if (fresh < BURY_MAX && hlRisenUp() < RISEN_MAX) {
+    for (const o of enemies) {
+      if (o.dead || o.hacked || o === e || o.type !== 'gravedigger' || o.hlMarked) continue;
+      if (len(o.x - e.x, o.y - e.y) > DIG_BURY_R) continue;
+      const g = hlGraveAdd({ x: e.x, y: e.y, fresh: true, st: 'buried', wave: 0, hull: 0, said: '' });
+      const B = A.boss;
+      g.q = B && !B.dead ? B.hlQN || 0 : 0;
+      hlBuryFx(e, g, o);
+      return;
+    }
+  }
+  // on a stone's plot: it rises
+  for (const g of A.graves)
+    if (g.st === 'rest' && !g.soul && len(g.x - e.x, g.y - e.y) < GRAVE_PLOT + e.r) { hlGraveRaise(g, false); return; }
+}
+
+/* =============================== THE RAGE QUIT ==============================
+   The sore loser, who closes the tab before a run can end on him and blames
+   the lag. Every stone in the yard is one of his runs.
+
+   HE QUITS BEFORE HE LOSES. Each time his health crosses a quarter
+   (RQ_MARKS) he says so, and runs for the nearest open gate. A gate is shut
+   while someone stands in it. If he gets through: THAT ONE DIDN'T COUNT. The
+   room jolts back, and he comes in again with the health he had when that
+   quarter began, and the graves he raised in it rise again. Running, his back
+   is to you (RQ_BACK_MUL); take RQ_BOLT_STOP of him off while he runs and he
+   stops short, and the quarter stands. So does finding his gate held.
+
+   From his second quarter THE SOUL stands in a gate: the one he went for.
+   In his last, the risen stop fighting you and walk into the other gates, and
+   he cannot leave: he loses for the first time. Until then he cannot be
+   finished at all (e.floor): he leaves first.
+
+   Otherwise his tilt: the lower he is, the faster and wilder. THE CONTROLLER
+   (thrown, it bounces the length of the yard), MASH (a spray) and a CHARGE.
+=========================================================================== */
+function bossRageQuit(e, dt, ux, uy, d, ph) {
+  const A = hlYardOn() ? hlArea : null;
+  if (!e.hlInit) {
+    e.hlInit = true;
+    e.lockPhase = 0;                     // the shell's phase novas are not his; the quarters are
+    e.hlQ = 0; e.hlQN = 1; e.hlQHp = e.maxHp;
+    e.hlBolt = null; e.hlAway = null; e.hlWind = null; e.hlMove = null; e.hlCornered = false;
+    e.hlSayT = 7; e.hlSideT = 0; e.hlSide = 1; e.atkT = 2;
+    e.floor = A ? 1 : undefined;         // in THE YARD he cannot be finished before his last quarter
+    hlBark(e, HL_BARK.ragequit.enter[0]);
+  }
+  e.hlTilt = clamp(1 - e.hp / e.maxHp, 0, 1);
+  if (e.hlAway) { hlRqAway(e, dt); return; }
+  if (e.hlBolt) { hlRqBoltTick(e, dt, ux, uy); return; }
+  // a quarter crossed: he goes for a gate (outside THE YARD there are none, and he only tilts)
+  if (A && !e.hlCornered && e.hlQ < RQ_MARKS.length && e.hp <= e.maxHp * RQ_MARKS[e.hlQ]) { hlRqBolt(e); return; }
+
+  const T = e.hlTilt, sp = e.spd * (1 + RQ_TILT_SPD * T);
+  if (e.hlWind) {
+    const W = e.hlWind;
+    W.t += dt;
+    steer(e, 0, 0, 6, dt);
+    if (W.kind !== 'charge') W.ang = Math.atan2(uy, ux);   // he turns to you; a charge's heading is locked as it is called
+    e.ang = W.ang;
+    if (W.t >= W.T) { e.hlWind = null; hlRqGo(e, W, T); }
+    return;
+  }
+  if (e.hlMove) { hlRqMoveTick(e, dt); return; }
+  // keeping his distance, sideways, faster as he tilts
+  e.hlSideT -= dt;
+  if (e.hlSideT <= 0) { e.hlSideT = simRnd(3, 1.6) * (1 - 0.5 * T); e.hlSide = -e.hlSide; }
+  const push = d < 260 ? -0.7 : d > 420 ? 0.9 : 0, side = 0.5 * e.hlSide;
+  steer(e, (ux * push - uy * side) * sp, (uy * push + ux * side) * sp, 2 + 2 * T, dt);
+  e.ang = Math.atan2(uy, ux);
+  e.hlSayT -= dt;
+  if (e.hlSayT <= 0) { e.hlSayT = simRnd(12, 8); hlBark(e, simPick(HL_BARK.ragequit.enter.slice(1))); }
+  if (e.atkT > 0) return;
+  let kind = simPick(T > 0.5 ? ['pad', 'mash', 'mash', 'charge'] : ['pad', 'mash', 'charge']);
+  if (kind === 'pad' && ebullets.some(b => b.hlPadOf === e.id)) kind = 'mash';   // one controller out at a time
+  e.hlWind = { kind, t: 0, T: RQ_WIND[kind], ang: Math.atan2(uy, ux) };
+  e.atkT = RQ_WIND[kind] + simRnd(RQ_ATK[1], RQ_ATK[0]) * (1 - RQ_TILT_ATK * T);
+  if (kind === 'charge') hlBark(e, HL_BARK.ragequit.charge);
+  hlRqWindFx(e, kind);
+}
+function hlRqGo(e, W, T) {
+  if (W.kind === 'pad') {
+    const b = eshoot(e, W.ang, RQ_PAD.spd, e.dmg * 0.7, RQ_PAD.r);
+    b.ricP = RQ_PAD.bounces; b.life = RQ_PAD.life; b.hlKind = 'pad'; b.hlPadOf = e.id;
+  } else if (W.kind === 'mash') {
+    e.hlMove = { kind: 'mash', t: 0, n: RQ_MASH.n + Math.round(8 * T), gap: 0, ang: W.ang };
+  } else {
+    e.hlMove = { kind: 'charge', t: 0, ang: W.ang };
+  }
+  hlRqMoveFx(e, W.kind);
+}
+function hlRqMoveTick(e, dt) {
+  const M = e.hlMove;
+  M.t += dt;
+  if (M.kind === 'charge') {
+    e.vx = Math.cos(M.ang) * RQ_CHARGE.spd; e.vy = Math.sin(M.ang) * RQ_CHARGE.spd;
+    e.ang = M.ang;
+    if (M.t >= RQ_CHARGE.t) { e.hlMove = null; e.vx *= 0.25; e.vy *= 0.25; }
+    return;
+  }
+  steer(e, 0, 0, 5, dt);
+  M.gap -= dt;
+  if (M.gap <= 0 && M.n > 0) {
+    M.gap = RQ_MASH.gap; M.n--;
+    const b = eshoot(e, M.ang + simRnd(RQ_MASH.arc, -RQ_MASH.arc), RQ_MASH.spd * simRnd(1.1, 0.85), e.dmg * 0.35, 5);
+    b.hlKind = 'mash';
+  }
+  if (M.n <= 0) e.hlMove = null;
+}
+/* is he running, with his back to you (damageEnemy) */
+const hlRqRunning = e => !!(e.hlBolt && e.hlBolt.t >= RQ_BOLT_WIND);
+/* the nearest gate nobody is standing in */
+const hlRqGateFor = e => hlGateNearest(e.x, e.y, g => !!g.by);
+/* A quarter crossed: "I'm done. I'm DONE." He stands there a moment, then
+   runs for the nearest open gate. In his last quarter the risen go to the
+   gates as he says it (hlRqMarch). */
+function hlRqBolt(e) {
+  const last = e.hlQ === RQ_MARKS.length - 1;
+  e.hlWind = null; e.hlMove = null;
+  const g = hlRqGateFor(e);
+  e.hlBolt = { gate: g ? g.i : -1, t: 0, run: false, hp0: e.hp, need: e.maxHp * RQ_BOLT_STOP, last };
+  if (last) hlRqMarch(e, g);
+  hlBark(e, HL_BARK.ragequit.bolt);
+  if (HL.fight) HL.fight.bolts++;
+  hlRqBoltFx(e, g);
+}
+function hlRqBoltTick(e, dt, ux, uy) {
+  const B = e.hlBolt, A = hlArea;
+  B.t += dt;
+  if (B.t < RQ_BOLT_WIND) {
+    steer(e, 0, 0, 8, dt);
+    e.ang = Math.atan2(uy, ux);
+    // standing there: if his gate is taken meanwhile, he picks another
+    if (!B.last && (B.gate < 0 || A.gates[B.gate].by)) { const g = hlRqGateFor(e); B.gate = g ? g.i : -1; }
+    return;
+  }
+  if (!B.run) { B.run = true; B.hp0 = e.hp; }   // what he takes running is counted from here
+  const g = A.gates[B.gate];
+  if (!g) { hlRqStop(e, B.last ? 'shut' : 'held'); return; }   // nowhere open to run to
+  if (!B.last && e.hp <= B.hp0 - B.need) { hlRqStop(e, 'burnt'); return; }
+  const tx = g.x - e.x, ty = g.y - e.y, td = len(tx, ty) || 1;
+  const v = RQ_BOLT_SPD * (1 + 0.3 * e.hlTilt) * (1 - (e.slow || 0));
+  steer(e, tx / td * v, ty / td * v, 6, dt);
+  e.ang = Math.atan2(ty, tx);            // his back to you
+  if (td > GATE_R * 0.5) return;
+  if (B.last) hlRqStop(e, 'shut');       // every run he left is standing in a door
+  else if (g.by) hlRqStop(e, 'held');
+  else hlRqEscape(e, g);
+}
+/* Stopped short ('burnt'), his gate held ('held'), or nowhere left to go
+   ('shut', his last quarter). The quarter stands. */
+function hlRqStop(e, why) {
+  const B = e.hlBolt, A = hlArea, g = A.gates[B.gate];
+  e.hlBolt = null;
+  if (why === 'shut') { e.hlCornered = true; hlBark(e, HL_BARK.ragequit.shut); }   // only ever his last quarter's
+  else hlBark(e, HL_BARK.ragequit.stopped);
+  e.hlQ++; e.hlQN++; e.hlQHp = e.hp;
+  if (e.hlQ >= RQ_MARKS.length) e.floor = undefined;   // his last quarter: now he can lose
+  e.atkT = 0.9;
+  if (HL.fight) { if (why === 'held') HL.fight.held++; else HL.fight.stops++; }
+  hlRqStopFx(e, why);
+  if (g) hlRqSoulTakes(g);
+}
+/* THAT ONE DIDN'T COUNT. */
+function hlRqEscape(e, g) {
+  const A = hlArea;
+  e.hlBolt = null;
+  e.hlAway = { gate: g.i, t: 0 };
+  e.x = g.x; e.y = g.y; e.vx = e.vy = 0;
+  e.hp = Math.max(e.hp, e.hlQHp);        // the health he had when the quarter began
+  e.invuln = 1; e.phased = true;
+  ebullets.length = 0;                   // the room jolts back: nothing of it is still in the air
+  A.jolt = { t: 0 };
+  // and the graves he raised in it rise again, the ones whose risen are down
+  for (const gr of A.graves)
+    if (gr.q === e.hlQN && gr.st === 'open' && !gr.fresh && !hlRisenAlive(gr.risen)) { gr.st = 'rise'; gr.t = 0; }
+  e.hlQN++;
+  hlBark(e, HL_BARK.ragequit.restart);
+  banner("THAT ONE DIDN'T COUNT", BOSSES.ragequit.col, 2.6);
+  if (HL.fight) HL.fight.escapes++;
+  tale('escape');
+  shake(1.2);
+  hlRqEscapeFx(e, g);
+  hlRqSoulTakes(g);                      // the soul goes to the gate he went for
+}
+function hlRqAway(e, dt) {
+  const W = e.hlAway;
+  W.t += dt;
+  e.vx = e.vy = 0;
+  if (W.t < RQ_AWAY) return;
+  e.hlAway = null;
+  e.invuln = 0; e.phased = false;
+  e.atkT = 1.2;
+  hlRqBackFx(e, hlArea.gates[W.gate]);
+}
+/* From his second quarter, the soul stands in the gate he went for, and the
+   three of them say what they have to say. */
+function hlRqSoulTakes(g) {
+  const A = hlArea;
+  if (A.soulGate >= 0) return;
+  A.soulGate = g.i;
+  HL_BARK.ragequit.gate.forEach(([who, text], i) => A.says.push({ at: A.t + RQ_SAY_GAP[i], who, text }));
+  hlRqSoulFx(g);
+}
+/* His last quarter. Every gate but the soul's gets a risen: the nearest walks
+   into it, and where there is none, one climbs out in the doorway — the one
+   he is making for first, so he never finds it empty. The rest stop
+   fighting and go and stand in the nearest. */
+function hlRqMarch(e, target) {
+  const A = hlArea;
+  A.march = true;
+  const rest = A.gates.filter(g => g.i !== A.soulGate && g !== target);
+  const free = target ? [target, ...rest] : rest;
+  const walkers = enemies.filter(o => !o.dead && !o.hacked && o.type === 'risen' && o.hlGate === undefined);
+  const sent = [];
+  for (const g of free) {
+    let best = null, bd = 1e9;
+    if (g !== target) for (const o of walkers) {
+      if (o.hlGate !== undefined) continue;
+      const dd = len(o.x - g.x, o.y - g.y);
+      if (dd < bd) { bd = dd; best = o; }
+    }
+    if (!best) best = spawnEnemy('risen', g.x, g.y, { elite: false, hlDoor: true });
+    best.hlGate = g.i; best.state = 0;
+    sent.push(best);
+  }
+  for (const o of walkers) if (o.hlGate === undefined) { o.hlGate = hlGateNearest(o.x, o.y, g => g.i === A.soulGate).i; o.state = 0; sent.push(o); }
+  hlRqMarchFx(e, sent);
+}
+function hlYardBossIn(e) {
+  const A = hlArea;
+  A.soulGate = -1; A.march = false; A.jolt = null; A.says.length = 0;
+}
+function hlYardBossDown(e) {
+  const A = hlArea;
+  A.jolt = null; A.says.length = 0;
+  e.hlBolt = null; e.hlAway = null;
+}
+/* the word after a death in his fight, most basic first */
+function hlHintThemeRQ(e, F) {
+  if (F.escapes >= 2) return 'escape';                              // he got out, and out again
+  if (F.escapes >= 1 && !F.stops && !F.held) return 'back';         // and nothing ever stopped him short
+  if (e.hlQ >= RQ_MARKS.length && e.hp / e.maxHp < 0.12) return 'close';
+  if (e.hlQ >= 2) return 'tilt';                                    // late, with him at his wildest
+  return 'general';
+}
+
+/* ================================== medals ================================== */
+/* SHALLOW GRAVE: from killBody, once the kill has paid out. One body in ten
+   climbs back out on your side for GRAVE_ALLY_T, on THE HACKER's own ally
+   code, as kin. (THE HACKER takes every body already: its fade slows instead,
+   in hackTick.) */
+function hlShallowGrave(e) {
+  P.hlGraveN = (P.hlGraveN || 0) + 1;
+  if (P.hlGraveN % GRAVE_EVERY || PVP || state !== 'play') return;
+  if (e.type === 'boss' || e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd' ||
+      e.type === 'sheet' || e.type === 'lastseen' || e.hlMarked || e.hlCold) return;
+  if (e.suRipped || e.shadow > 0 || e.amalPart || e.virus || e.founder || e.opo || e.oprRite) return;
+  if (kinCount() >= HACK_KIN_MAX) return;
+  e.dead = false;
+  e.hacked = true; e.hackKin = true;
+  e.hackId = ++hackSerial;
+  e.hp = e.maxHp * 0.6;
+  hackTurn(e);
+  e.hlGraveT = GRAVE_ALLY_T;
+  hlGraveAllyFx(e);
+}
+function hlGraveAllyTick(dt) {
+  for (const e of enemies) {
+    if (!(e.hlGraveT > 0) || e.dead) continue;
+    e.hlGraveT -= dt;
+    if (e.hlGraveT <= 0) hackRelease(e);
+  }
+}
+/* LAG: from updateEBullets, once per round, the first time it comes within
+   reach of the hull: one in LAG_EVERY stutters and hangs for LAG_T. */
+function hlLagCheck(b) {
+  if (b.hlLagged || b.hlTurn) return false;
+  if (len(b.x - P.x, b.y - P.y) > LAG_REACH + P.r) return false;
+  b.hlLagged = true;
+  P.hlLagN = (P.hlLagN || 0) + 1;
+  if (P.hlLagN % LAG_EVERY) return false;
+  b.svx = b.vx; b.svy = b.vy;
+  b.frozen = LAG_T; b.vx = 0; b.vy = 0;
+  hlLagFx(b);
+  return true;
+}
+
+/* ================================ the seams =================================
+   THE YARD's floor: the room, then the stones, the pits and the gates. */
+function hlYardFloor() {
+  const A = hlArea;
+  drawHlYardFloor(hlAreaDef());
+  for (const g of A.graves) drawHlYardGrave(g);
+  for (const p of A.pits) drawHlYardPit(p);
+  for (const g of A.gates) drawHlYardGate(g);
 }
 
 /* ===========================================================================
@@ -62904,8 +63844,9 @@ function hlHouseScreen() {
 
    HALLOWS-GUIDE.txt is the contract: every hook below, when it is called,
    what it is handed, which layer it draws in, and what it must not touch.
-   ACT II's (THE HOUSE) are at the foot of this block, before the end line,
-   and HALLOWS-HOUSE-HOOKS.md is theirs.
+   ACT II's (THE HOUSE) and ACT III's (THE YARD) are at the foot of this
+   block, before the end line, and HALLOWS-HOUSE-HOOKS.md and
+   HALLOWS-YARD-HOOKS.md are theirs.
    The kit (THE KIT — ALL HALLOWS, above) is there for the art to use:
    light and shadow, cloth and rope, rigs, the timeline, dialogue, particles.
 =========================================================================== */
@@ -63614,6 +64555,254 @@ function drawHlGhostHud(g) {
   ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#e2e8f0';
   ctx.fillText('STILL HERE   ·   ' + g.kills + ' / ' + g.need + '   ·   ' + Math.max(0, g.T - g.t).toFixed(1) + 's', W / 2, H - 96);
+  ctx.restore();
+}
+/* ---------------------------------------------------------------------------
+   ACT III: THE YARD — art hooks
+   PLACEHOLDERS, in the same block as Act I's so the lift treats them as hooks.
+   The least that keeps THE YARD playable and its telegraphs readable; none of
+   it is the look. HALLOWS-YARD-HOOKS.md is the contract for each: when it is
+   called, what it is handed, what it may read. THE YARD never calls Act I's
+   hooks (the patch's) or Act II's (the house's); everything it shows comes
+   through these.
+--------------------------------------------------------------------------- */
+/* once a frame in THE YARD, after hlArtTick(dt, 'yard'): step ropes (his
+   cord), run art timers, spawn ambient particles here */
+function hlYardArtTick(dt) {}
+
+/* ---- effect hooks: called once, at the moment ---- */
+function hlYardEnterFx(A) {}
+function hlGraveRiseFx(g) {}                      // the earth over a grave starts to heave
+function hlRisenUpFx(e, g) { burst(e.x, e.y, 10, '#78716c', 140, 2.4, 0.4); }   // a risen climbs out of g
+function hlRisenWindFx(e) {}
+function hlRisenFireFx(e) {}                      // its gun goes off (e.hlGun, e.hlAim)
+/* a risen felled: what it said last, a moment. line { wave, said } */
+function hlRisenDownFx(e, line) {
+  burst(e.x, e.y, 14, '#cbd5e1', 180, 2.6, 0.5);
+  if (line && line.said) floatText(e.x, e.y - 30, 'WAVE ' + line.wave + ' · ‘' + line.said + '’', '#d6d3d1', 13, -24);
+}
+function hlDigFx(e) {}                            // a gravedigger starts to dig (or to fill the stone in)
+function hlPitDigFx(e, p) { burst(p.x, p.y, 10, '#57534e', 160, 2.6, 0.4); }   // a pit is open
+function hlPitCloseFx(p) {}
+function hlPitSwallowFx(b, p) {}                  // your round fell into it
+function hlBuryFx(e, g, digger) { burst(e.x, e.y, 8, '#57534e', 120, 2.2, 0.4); }   // e buried in g, by digger
+function hlDigDownFx(e) {}
+function hlDigSproutFx(e) { ringFx(e.x, e.y, 6, 80, '#a5f3fc', 0.5, 3); }
+function hlDigStoppedFx(e, n) {
+  burst(e.x, e.y, 24, '#a5f3fc', 240, 3, 0.6);
+  floatText(e.x, e.y - 34, n + ' / 3', '#a5f3fc', 18);
+  Audio_.gem();
+}
+function hlDigLostFx(e) { burst(e.x, e.y, 16, '#a5f3fc', 160, 2.4, 0.5); }
+function hlStoneUncoverFx(g) { ringFx(g.x, g.y, 10, 140, '#a5f3fc', 0.8, 4); }
+function hlBellWindFx(e) {}
+function hlBellTollFx(e, graves) { ringFx(e.x, e.y, e.r, e.r + 160, '#fcd34d', 0.5, 3); Audio_.tone(196, 0.6, 'sine', 0.07, 190); }
+function hlBellDownFx(e) {}
+function hlRqWindFx(e, kind) {}                   // 'pad' | 'mash' | 'charge'
+function hlRqMoveFx(e, kind) {}                   // …and it goes
+function hlRqBoltFx(e, gate) {}                   // a quarter crossed: he is going for gate (null: none open)
+function hlRqStopFx(e, why) {}                    // 'burnt' | 'held' | 'shut': the quarter stands
+function hlRqEscapeFx(e, gate) { drawFlashT = Math.max(drawFlashT, 0.15); }   // THAT ONE DIDN'T COUNT: the room jolts back
+function hlRqBackFx(e, gate) { ringFx(e.x, e.y, e.r, e.r * 2.4, '#fb7185', 0.4, 3); }   // he comes back in
+function hlRqSoulFx(gate) {}                      // the soul goes to stand in a gate
+function hlRqMarchFx(e, risen) {}                 // his last quarter: the risen go to the gates
+function hlYardBossDeathFx(e) { burst(e.x, e.y, 60, e.col, 420, 4, 0.9); }
+// medals, in any run
+function hlGraveAllyFx(e) { ringFx(e.x, e.y, 4, e.r * 2.6, '#a3e635', 0.45, 3); }   // SHALLOW GRAVE: one climbed back out, yours
+function hlLagFx(b) {}                            // LAG: a round stutters and hangs
+
+/* ---- the world ---- */
+/* the yard's lights (hlLightBegin, hlLight, hlOcc*): true to run the light pass */
+function hlYardLights() { return false; }
+function drawHlYardFloor(A) {}
+/* a grave (hlArea.graves): g.st 'rest' | 'rise' | 'open' | 'buried'; g.soul,
+   g.fresh; its line is g.wave, g.hull, g.said */
+function drawHlYardGrave(g) {
+  ctx.save();
+  if (g.st === 'open' || g.st === 'buried') {
+    ctx.fillStyle = g.st === 'open' ? 'rgba(0,0,0,0.55)' : 'rgba(87,83,78,0.5)';
+    ctx.beginPath(); ctx.ellipse(g.x, g.y + 18, 26, 12, 0, 0, TAU); ctx.fill();
+  }
+  if (!g.fresh) {
+    const shake = g.st === 'rise' ? Math.sin(uiTime * 60) * 2 : 0;
+    ctx.strokeStyle = g.soul ? '#a5f3fc' : rgba('#a8a29e', 0.6); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(g.x - 13 + shake, g.y + 6); ctx.lineTo(g.x - 13 + shake, g.y - 10);
+    ctx.arc(g.x + shake, g.y - 10, 13, Math.PI, 0); ctx.lineTo(g.x + 13 + shake, g.y + 6); ctx.stroke();
+    ctx.font = "700 8px Barlow, 'Segoe UI', system-ui, sans-serif"; ctx.textAlign = 'center';
+    ctx.fillStyle = rgba(g.soul ? '#a5f3fc' : '#a8a29e', 0.7);
+    if (g.soul && hlQDone('q5')) {
+      ctx.fillText('HERE LIES A RUN', g.x, g.y + 20); ctx.fillText('WAVE 19 · HULL 4%', g.x, g.y + 30); ctx.fillText('“brb”', g.x, g.y + 40);
+    } else if (!g.soul) ctx.fillText('W' + g.wave + ' · ' + g.said, g.x, g.y + 18);
+  }
+  ctx.strokeStyle = rgba('#a8a29e', g.st === 'rest' ? 0.12 : 0.04); ctx.setLineDash([3, 6]);
+  ctx.beginPath(); ctx.arc(g.x, g.y, GRAVE_PLOT, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+/* a gravedigger's pit (hlArea.pits): p.t of p.life */
+function drawHlYardPit(p) {
+  ctx.save();
+  ctx.globalAlpha = clamp((p.life - p.t) / 1.2, 0, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.strokeStyle = '#57534e'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+/* one of the four gates (hlArea.gates): g.by is who is standing in it */
+function drawHlYardGate(g) {
+  ctx.save();
+  const e = hlArea.boss, his = e && !e.dead && e.hlBolt && e.hlBolt.gate === g.i;
+  ctx.strokeStyle = his ? '#ef4444' : g.by === 'soul' ? '#a5f3fc' : g.by === 'you' ? '#e2e8f0' : g.by ? '#94a3b8' : rgba('#d6d3d1', 0.35);
+  ctx.lineWidth = 3; ctx.setLineDash(g.by ? [] : [8, 6]);
+  ctx.beginPath(); ctx.arc(g.x, g.y, GATE_R, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+/* the soul, standing in the gate it holds (x, y; g the gate) */
+function drawHlYardSoul(x, y, g) {
+  ctx.save();
+  ctx.fillStyle = rgba('#a5f3fc', 0.5); ctx.beginPath(); ctx.arc(x, y, 12, 0, TAU); ctx.fill();
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif"; ctx.textAlign = 'center'; ctx.fillStyle = '#a5f3fc';
+  ctx.fillText('THE SOUL', x, y - 20);
+  ctx.restore();
+}
+/* the yard's bodies and THE RAGE QUIT, in place of the generic polygon */
+function drawHlYardBody(e, ea) {
+  if (e.hlAway) return;                            // gone through a gate
+  ctx.save();
+  let a = ea;
+  if (e.type === 'risen' && e.hlClimb > 0) a *= 1 - e.hlClimb / RISEN_CLIMB;
+  if (e.type === 'risen' && e.hlGate !== undefined) a *= 0.55;
+  ctx.globalAlpha = a;
+  const col = e.hlMarked ? '#a5f3fc' : e.col;
+  ctx.lineWidth = e.type === 'boss' ? 4 : 2.2;
+  ctx.fillStyle = rgba(col, 0.16 + e.flash * 0.46);
+  ctx.strokeStyle = e.flash > 0.5 ? '#ffffff' : col;
+  if (e.type === 'risen') ctx.setLineDash([5, 4]);
+  const ang = e.type === 'bellringer' ? Math.sin(uiTime * 9) * (e.state === 1 ? 0.5 : 0.05) : e.ang;
+  poly(e.x, e.y, e.r, e.sides, ang);
+  ctx.fill(); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = 'center'; ctx.fillStyle = rgba('#e2e8f0', 0.8);
+  const label = e.boss === 'ragequit' ? 'THE RAGE QUIT' + (e.hlBolt ? ' · RUNNING' : '')
+              : e.type === 'risen' ? 'RISEN · ' + (e.hlGun || '').toUpperCase()
+              : e.type === 'gravedigger' ? (e.hlMarked ? 'GRAVEDIGGER · MARKED' : e.state === 2 ? 'GRAVEDIGGER · DIGGING' : 'GRAVEDIGGER')
+              : e.type.toUpperCase();
+  ctx.fillText(label, e.x, e.y - e.r - 8);
+  if (e.hlMarked && e.hlFill > 0) {               // how far into the stone it is
+    ctx.fillStyle = 'rgba(8,12,20,0.75)'; ctx.fillRect(e.x - 22, e.y + e.r + 6, 44, 4);
+    ctx.fillStyle = '#a5f3fc'; ctx.fillRect(e.x - 22, e.y + e.r + 6, 44 * e.hlFill, 4);
+  }
+  ctx.restore();
+}
+/* the yard's enemy rounds: b.hlKind 'risen' (a stream's), 'pad' (THE
+   CONTROLLER, bouncing: b.ricP bounces left) or 'mash' */
+function drawHlYardEBullet(b) {
+  ctx.save();
+  if (b.hlKind === 'pad') {
+    ctx.fillStyle = '#fb7185'; ctx.strokeStyle = '#fecdd3'; ctx.lineWidth = 2;
+    roundRect(b.x - b.r, b.y - b.r * 0.6, b.r * 2, b.r * 1.2, b.r * 0.4); ctx.fill(); ctx.stroke();
+  } else {
+    ctx.fillStyle = b.hlKind === 'mash' ? '#fda4af' : '#e7e5e4';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+/* additive, after the bodies and the light */
+function drawHlYardGlow() {}
+/* plain paint over the world: the telegraphs. e is THE RAGE QUIT, or null. */
+function drawHlYardTele(e) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  // a grave about to open
+  for (const g of hlArea.graves) {
+    if (g.st !== 'rise' && g.st !== 'buried') continue;
+    const k = clamp(g.t / (g.st === 'rise' ? GRAVE_RISE_T : BURY_T), 0, 1);
+    ctx.strokeStyle = rgba('#ef4444', 0.3 + 0.5 * k); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(g.x, g.y, 18, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+  }
+  for (const o of enemies) {
+    if (o.dead || o.hacked) continue;
+    // a risen winding up: where its gun goes
+    if (o.type === 'risen' && o.state === 1 && o.hlGate === undefined) {
+      ctx.strokeStyle = rgba('#ef4444', 0.55); ctx.lineWidth = 1.5; ctx.setLineDash([6, 6]);
+      if (o.hlGun === 'swing') { ctx.beginPath(); ctx.arc(o.x, o.y, RISEN_SWING.r, o.ang - RISEN_SWING.arc, o.ang + RISEN_SWING.arc); ctx.stroke(); }
+      else { const L = o.hlGun === 'lance' ? RISEN_LANCE.len : 260; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(o.x + Math.cos(o.ang) * L, o.y + Math.sin(o.ang) * L); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    // a bell about to toll: the graves it will raise are its nearest
+    if (o.type === 'bellringer' && o.state === 1) {
+      ctx.strokeStyle = rgba('#fcd34d', 0.7); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + 10, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(1 - o.hlTollT / BELL_WIND, 0, 1)); ctx.stroke();
+    }
+  }
+  if (e) {
+    // his wind-ups
+    if (e.hlWind) {
+      ctx.strokeStyle = rgba('#ef4444', 0.8); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 10, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(e.hlWind.t / e.hlWind.T, 0, 1)); ctx.stroke();
+      if (e.hlWind.kind === 'charge') {
+        ctx.setLineDash([10, 8]); ctx.beginPath(); ctx.moveTo(e.x, e.y);
+        ctx.lineTo(e.x + Math.cos(e.hlWind.ang) * RQ_CHARGE.spd * RQ_CHARGE.t, e.y + Math.sin(e.hlWind.ang) * RQ_CHARGE.spd * RQ_CHARGE.t); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    // the gate he is making for
+    const B = e.hlBolt, g = B && hlArea.gates[B.gate];
+    if (g) {
+      ctx.strokeStyle = rgba('#ef4444', 0.6); ctx.lineWidth = 2; ctx.setLineDash([4, 8]);
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(g.x, g.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  ctx.restore();
+}
+function drawHlYardBossDeath(d) {}
+/* a line said in THE YARD: his (b.boss 'ragequit'), or the soul's at its gate (b.boss 'soul') */
+function drawHlYardBark(b) {
+  const k = clamp(Math.min(b.t / 0.2, (b.life - b.t) / 0.4), 0, 1);
+  ctx.save();
+  ctx.globalAlpha = k;
+  ctx.textAlign = 'center';
+  ctx.font = "600 15px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = b.boss === 'soul' ? '#a5f3fc' : '#fecdd3';
+  ctx.fillText(b.text, b.x, b.y - b.r - 30);
+  ctx.restore();
+}
+
+/* ---- the screen ---- */
+function drawHlYardHud(A, area) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = A.stage.accent;
+  ctx.fillText(A.stage.name + '   ·   WAVE ' + Math.max(1, Math.min(5, area.n)) + ' / 5   ·   ' + hlChipGoal(), W / 2, 68);
+  // where the errand's digger is, and how far into the stone; where his gate is, while he runs
+  const pts = [];
+  for (const e of enemies) if (!e.dead && e.hlMarked) pts.push([e.x, e.y, '#a5f3fc']);
+  const e = area.boss;
+  if (e && !e.dead && e.hlBolt && area.gates[e.hlBolt.gate]) { const g = area.gates[e.hlBolt.gate]; pts.push([g.x, g.y, '#ef4444']); }
+  for (const [x, y, c] of pts) {
+    const sx = (x - cam.x) * camZoom + W / 2, sy = (y - cam.y) * camZoom + H / 2;
+    if (sx > 0 && sx < W && sy > 0 && sy < H) continue;
+    const a = Math.atan2(sy - H / 2, sx - W / 2);
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.arc(W / 2 + Math.cos(a) * Math.min(W, H) * 0.42, H / 2 + Math.sin(a) * Math.min(W, H) * 0.42, 6, 0, TAU); ctx.fill();
+  }
+  if (area.end) {
+    ctx.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(area.end.why === 'win' ? 'BACK TO THE VIGIL' : 'THE YARD LETS YOU GO', W / 2, H / 2 + 120);
+  }
+  ctx.restore();
+}
+/* his health bar (x, y, w; 14 tall), already drawn: the quarters, and where a
+   gate would put him back to (e.hlQHp) */
+function drawHlRageQuitBar(e, x, y, w) {
+  ctx.save();
+  ctx.fillStyle = '#fecaca';
+  for (const m of RQ_MARKS) ctx.fillRect(x + 2 + (w - 4) * m - 1, y - 3, 2, 20);
+  if (e.hlQ < RQ_MARKS.length) {
+    ctx.fillStyle = 'rgba(251,113,133,0.35)';
+    const k = clamp(e.hlQHp / e.maxHp, 0, 1), h = clamp(e.hp / e.maxHp, 0, 1);
+    ctx.fillRect(x + 2 + (w - 4) * h, y + 2, (w - 4) * Math.max(0, k - h), 10);
+  }
   ctx.restore();
 }
 /* ===================== end of ALL HALLOWS · ACT I art hooks ===================== */
@@ -88337,6 +89526,7 @@ function hackable(e) {
   if (state !== 'play') return false;
   if (e.type === 'egg' || e.type === 'bomber' || e.type === 'gourd') return false;
   if (e.type === 'sheet' || e.type === 'lastseen') return false;   // cloth, and nobody: what was under a sheet is (hlSheetTear)
+  if (e.hlMarked) return false;            // the soul's errand, not a body to keep (ALL HALLOWS)
   if (e.shadow > 0 || e.amalPart || e.virus || e.founder || e.opo || e.oprRite) return false;
   if (e.boss === 'unwritten' || e.boss === 'amalgam' || e.boss === 'onepointoh') return false;
   if (e.boss === 'root' || e.boss === 'founder' || e.boss === 'shopkeeper' || HL_BOSSES[e.boss]) return false;
@@ -88477,7 +89667,7 @@ function hackTick(e, dt) {
 
   // the hold degrades: an army is taken again, not saved up
   if (hackFight || e.hackKin) {
-    e.hp -= e.maxHp * HACK_DECAY * (e.hackKin ? HACK_KIN_DECAY : 1) * dt;
+    e.hp -= e.maxHp * HACK_DECAY * (e.hackKin ? HACK_KIN_DECAY : 1) * (HL.eq.grave && P.hacker ? GRAVE_HACK : 1) * dt;   // SHALLOW GRAVE: a quarter longer (ALL HALLOWS)
     if (e.hp <= 0) { hackRelease(e); return HK_GONE; }
   }
 
