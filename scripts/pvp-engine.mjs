@@ -116,8 +116,9 @@ const pvpScripts = PVP_SCRIPTS.map(s => ({ name: s, code: readFileSync(join(SITE
 
 /* PvP's own Worker and its referee (the Match object, pvp/src/objects.js), on
    a SQLite D1, with two players signed in. An engine signed in as one of them
-   sends /api/pvp/match there, with that player's cookie; anything else goes
-   to the recorder as before. */
+   sends /api/pvp/match there, with that player's cookie, and each word to the
+   referee is written down with the page's clock (__ref: [op, when]); anything
+   else goes to the recorder as before. */
 const DB = makeD1();
 const PVP_ORIGIN = 'https://voidrunner-pvp.play101.workers.dev';
 const envPvp = { DB, SIGNUP: 'off', ROOM_STORE: 'voidrunner-pvp-rooms', ASSETS: { fetch: () => new Response('') } };
@@ -145,6 +146,7 @@ function referee(win, who) {
     if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?') && path !== '/api/pvp/watch' && path !== '/api/pvp/queue') return rec(u, init);
     win.__net.push('fetch ' + path);
     if (path === '/api/pvp/queue') (win.__queue = win.__queue || []).push(JSON.parse(init.body));
+    if (path === '/api/pvp/match') (win.__ref = win.__ref || []).push([JSON.parse(init.body).op, win.__wall]);
     return pvpWorker.fetch(new Request(PVP_ORIGIN + path, {
       method: init.method || 'GET', body: init.body,
       headers: Object.assign({}, init.headers, { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN }) }), envPvp);
@@ -355,6 +357,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   H.run('PVP.frame()');                 // the host's room sees them ready, and starts the run
   ship(H, G);
   ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
+  const begun = [H, G].map(g => g.run('__wall'));     // each page's clock, as the run starts
   ok(H.run('simSeed') === G.run('simSeed'), 'one run: the same seed on both');
   ok(H.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && H.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]'
      && G.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && G.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]',
@@ -400,6 +403,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const over = () => H.run('!!(RUN.pvp && RUN.pvp.phase === "over")') && G.run('!!(RUN.pvp && RUN.pvp.phase === "over")');
   try { frames = await play(H, G, ship, 60 * 900, over); }
   catch (e) { threw = e; }
+  const decided = [H, G].map(g => g.run('__wall'));   // and as it ends
   ok(!threw, 'a whole match, drawn on both, without an error', String(threw && threw.stack));
   ok(over(), 'and it came to an end', [frames, H.run('JSON.stringify(RUN.pvp && [RUN.pvp.phase, RUN.pvp.round, RUN.pvp.score, RUN.pvp.owed])'), H.run('state')]);
   const log = H.run('__log');
@@ -464,7 +468,18 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const others = g => g.win.__net.filter(n => n !== 'fetch /api/pvp/match');
   ok(others(H).join() === 'fetch /api/turn' && others(G).join() === 'fetch /api/room?code=ABCD&as=guest',
      'and not one more request but the referee\'s', [others(H), others(G)]);
-  ok(H.win.__net.length > 10 && G.win.__net.length > 10, 'which heard from both all match long', [H.win.__net.length, G.win.__net.length]);
+  /* ...and heard from both all match long, however long that was: a playing
+     machine reports every five seconds (referee.js, EVERY). From the run's
+     start to its first report, between any two, and from its last to the
+     end, never half as long again: room for a slow answer, none for a
+     missed report. */
+  const EVERY = +pvpScripts.find(s => s.name === '/js/referee.js').code.match(/const EVERY = (\d+);/)[1];
+  const silences = (g, k) => {
+    const at = [begun[k], ...g.win.__ref.filter(([op, t]) => op === 'report' && t >= begun[k] && t <= decided[k]).map(r => r[1]), decided[k]];
+    return at.slice(1).map((t, i) => t - at[i]);
+  };
+  ok([H, G].every((g, k) => Math.max(...silences(g, k)) <= 1.5 * EVERY), 'which heard from both all match long',
+     [H, G].map((g, k) => silences(g, k).map(s => +(s / 1000).toFixed(1))));
 
   // the referee: both machines' fingerprints held up against each other, both results, one verdict
   await play(H, G, ship, 60 * 12, () => H.run('!!PVP.ref.verdict') && G.run('!!PVP.ref.verdict'));
