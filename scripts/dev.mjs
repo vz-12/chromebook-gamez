@@ -13,7 +13,7 @@
 
    Extra arguments go to wrangler, e.g. `npm run dev -- --test-scheduled`.
    ========================================================================= */
-import { cpSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
+import { cpSync, rmSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -26,6 +26,22 @@ rmSync(SITE, { recursive: true, force: true });
 mkdirSync(SITE, { recursive: true });
 for (const name of readdirSync(ROOT))
   if (!SKIP.has(name)) cpSync(join(ROOT, name), join(SITE, name), { recursive: true });
+
+/* DEV TEST CONSOLE — inject the console into the SNAPSHOT's index.html only.
+   The repo's real index.html is never touched, and this only runs under
+   `npm run dev`, so nothing here is ever published. scripts/testconsole.js
+   is a classic sibling script: it shares the page scope with the engine and
+   drives it (routes, bosses, rites, events, story flags) by name. */
+try {
+  const idxPath = join(SITE, 'index.html');
+  let html = readFileSync(idxPath, 'utf8');
+  const src = readFileSync(join(ROOT, 'scripts', 'testconsole.js'), 'utf8');
+  const tag = '\n<!-- DEV TEST CONSOLE (local only — injected by scripts/dev.mjs) -->\n<script>\n'
+            + src + '\n</scr' + 'ipt>\n';
+  html = html.includes('</body>') ? html.replace('</body>', tag + '</body>') : html + tag;
+  writeFileSync(idxPath, html);
+  console.log('[dev] test console injected into local snapshot (` or ⚙ to open)');
+} catch (e) { console.warn('[dev] test console inject skipped:', e.message); }
 
 /* The address the Worker sees in request.url: the one the browser is on.
    Left alone, wrangler puts the production route there (voidrunner.online),
