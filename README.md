@@ -924,7 +924,7 @@ drawn yet and plays on its placeholders (the test draws both on the
 placeholders and with the art file loaded):
 
 ```sh
-npm run test:hallows                       # under a minute: THE HOUSE, DEAD GAME, THE YARD, THE RAGE QUIT, the medals, the hooks
+npm run test:hallows                       # under a minute: THE HOUSE, DEAD GAME, THE YARD, THE RAGE QUIT, the epilogue, the medals, the hooks
 ```
 
 ## The determinism test
@@ -939,9 +939,9 @@ node scripts/determinism.mjs --restore amalgam
 
 Co-op is moving to lockstep: both machines run the same game and send only
 their inputs. That only works if the same seed, inputs and run settings give
-the same game, step for step, on any machine. The test plays 25 scenarios
+the same game, step for step, on any machine. The test plays 26 scenarios
 twice: the four pilots, Boss Rush, the finales, the rites, ALL HALLOWS' three
-areas, DEAD GAME and THE RAGE QUIT, an assisted first flight, an outside pilot, and ONE POINT
+areas, DEAD GAME, THE RAGE QUIT and its medals in an ordinary run, an assisted first flight, an outside pilot, and ONE POINT
 OH's route (the portal rooms with his voice and door, and his fight). Run A is
 never drawn and has every effect off. Run B is drawn to a stub canvas with
 every effect on, at another window size, while the keyboard, mouse, autofire

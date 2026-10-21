@@ -1,6 +1,7 @@
 # ALL HALLOWS · ACT III: THE YARD — the art hooks
 
-Chapter III of Book I (opens 23 Oct 2026, by `HL_EVENT.chapters`). The logic
+Chapter III of Book I (opens 23 Oct 2026, by `HL_EVENT.chapters`), and the
+epilogue that opens with it. The logic
 plays end to end under placeholder hooks in `index.html` (shapes and labels,
 just enough to play it). **No art is drawn over them yet**: the yard's art goes
 in `hl-art.js`, in a new section `ALL HALLOWS · ACT III: THE YARD — the look`
@@ -64,9 +65,15 @@ house's hooks never asked to draw the yard).
 - **The word after** for THE RAGE QUIT: one line after a death in his fight.
 - **The menu's line** when the floor opens: *"It is near the top. It knows who
   it is waiting for."* (through the prologue's own hatch art: no new hook).
-- **Not built**: the epilogue (quest 7, PAST NINETEEN, and THE LANTERN). The
-  soul, at the top landing, says *"It wants one more thing of you. It is not
-  ready to ask."* until it is.
+- **PAST NINETEEN** (quest 7, the epilogue): given at the top landing. Any
+  ordinary run (not a daily, a challenge, the rush, freeplay, the hub or an
+  area) carries the soul along, a small light at your shoulder, with no say in
+  the run. When wave 20 starts its hull is whole for a beat, it says *"Oh.
+  That's what it looks like."*, and it rises out of the arena; the quest is done
+  there, and the run goes on. Back in the vigil he says it went up, the soul is
+  gone (state 5), and the wall reads `A RUN · WAVE 20 · FINISHED`. Pays 20
+  candles and **THE LANTERN** (it left it behind): it rides at your shoulder,
+  shoots what you shoot, weakly, and once a wave takes a hit for you.
 
 ## Where the hooks are
 
@@ -288,6 +295,26 @@ to the gate he is making for.
 | --- | --- | --- |
 | `hlGraveAllyFx` | `(e)` | SHALLOW GRAVE: one in ten felled climbed back out on your side (`e.hlGraveT`, 8 s). |
 | `hlLagFx` | `(b)` | LAG: a round stutters and hangs (`b.frozen`, 1 s). |
+| `drawHlLantern` | `(x, y, spent)` | THE LANTERN at your shoulder (`hlLanternPos()`), world space, additive, in any run it is worn. `spent`: it has taken this wave's hit. Its rounds are ordinary player rounds with `b.hlLantern`. |
+| `hlLanternFx` | `(kind)` | `'shot'` (one of its rounds) or `'take'` (it took the hit). |
+
+### The epilogue (any ordinary run, and the vigil)
+
+`hlRide` `{ t, beat, say, gone }` is the soul along for this run, on this
+machine only (never the run's: in co-op each pilot's soul is its own). `beat`
+`{ t, said }` once wave 20 has started: whole for `RIDE_BEAT_T` (1.2 s), then
+it says its line (`say`) and the quest is done; it has gone up by `RIDE_GO_T`
+(6 s).
+
+| Hook | Handed | What it is |
+| --- | --- | --- |
+| `drawHlRider` | `(R)` | The soul at your shoulder, world space, additive, in any run it rides. Whole and rising once `R.beat` is set. Its look is stage 4's. |
+| `hlRideFx` | `(stage)` | `'aboard'` (it is along), `'whole'` (wave 20: the **hero moment**), `'gone'` (it has gone up). |
+| `drawHlWall` | `(x, y, done)` | The vigil's wall (`VIG_SPOTS.wall`), after `drawVigilWorld`. `done`: it reads `HL_SAY.wall`. |
+
+What it says at twenty is drawn by the kit's subtitle (`hlSayDraw`, with
+`hlSayPortrait`) over the run, as the vigil's lines are. In the vigil, the soul
+at stage 5 is `drawVigilWorld`'s, as it always was.
 
 ## The menu
 
@@ -359,12 +386,21 @@ yard.
   gravedigger is buried rather than raising the plot it is on.
 - **A gravedigger walks round you**, not through you, on its way to dig.
 - **The marked gravedigger** never runs from you; the stone is the clock.
-- **Barks**: his "stopped short" line is "Lag." from his own list; the wait
-  line at the top landing (*"It wants one more thing of you. It is not ready to
-  ask."*) and the word-after lines (`HL_SAY.hintRQ`) are new, not in the draft.
+- **Barks**: his "stopped short" line is "Lag." from his own list; the
+  word-after lines (`HL_SAY.hintRQ`) are new, not in the draft.
+- **The epilogue is told on the way in**: the soul is not there to walk up to,
+  so his three lines start a moment after you come down. The draft's "[a beat]"
+  is the ordinary wait between lines.
+- **The ride** is cosmetic and this machine's: it never touches the run (the
+  test flies the same seed with and without it). It boards only before wave
+  20, so a run has to see twenty with it. THE LANTERN's rounds are foreign to
+  your build (nothing that counts your shots counts its), and the hit it takes
+  is the first past your iframes each wave; the floor and your build's own
+  costs (`pure`) are not hits.
 - **Not written, on purpose**: pages II and III of the yard's three bodies and
   THE RAGE QUIT in the codex, like the house's (`test:tales` lists them as
   waiting).
-- **Not done here**: the epilogue (quest 7, THE LANTERN, the wall), the
-  November farewell; the yard's and his music (`yard` and `ragequit` have no
-  tracks: the music is silent there until they do).
+- **Not done here**: the November farewell (the hatch closing, and his line);
+  the yard's and his music (`yard` and `ragequit` have no tracks: the music is
+  silent there until they do); THE LANTERN's medal glyph (the art's
+  `hlArtMedalGlyph` falls back to a lantern shape already).

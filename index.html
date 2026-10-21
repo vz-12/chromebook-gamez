@@ -5838,6 +5838,7 @@ function hurtPlayer(dmg, opts) {
     return;
   }
   if (P.iframe > 0) return;
+  if (HL.eq.lantern && hlLanternTakes()) return;   // ALL HALLOWS: THE LANTERN takes one a wave
   /* An outside pilot's kit sees the blow first: true takes it whole, a number
      is what lands instead (OUTSIDE PILOTS). */
   if (P.outside) {
@@ -37879,7 +37880,7 @@ function resetGame() {
   riteRun = null;
   /* `hub` is the art's state bag and is a const object — it is never nulled.
      Whether we are standing in the room is inHub, and that is what clears. */
-  inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0;   // ALL HALLOWS
+  inVigil = false; hlArea = null; hlHeld.length = 0; hlBarks.length = 0; hlPile = 0; hlRide = null;   // ALL HALLOWS
   amalRite = false; inHub = false; rootRite = false; rrClear(); vrRite = false; vrite = null; oprRite = false; orite = null; suZones.length = 0; suPieces.length = 0; suHead.on = false; ash.length = 0; od = null; odPools.length = 0; odScars.length = 0; odPyros.length = 0; odRing = null; odStars.length = 0; roninCleaves.length = 0; roninSplits.length = 0; IM_ST.fx.length = 0;
   stage = STAGES[0]; stageIdx = 0; loopNum = 0; slowmo = 1; playerChill = 0;
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
@@ -38978,6 +38979,7 @@ function update(dt) {
 
   chalTick(dt);              // the rule sheet, where it touches the frame
   rushTick(dt);              // the rush's boss clock and its ladder
+  hlMedalSync();             // ALL HALLOWS: the medals worn, before anything reads them (a run's first step included)
   pilotsEach(() => {
     rewardTick(dt);          // and the rewards that run on their own clocks
     rewardDashSweep(dt);
@@ -39310,6 +39312,7 @@ function updatePlayer(dt) {
   roninKitTick(dt);          // RONIN's kit: its cooldowns, the cleaves and their scores, the wounds
   imTick(dt);                // IMAGO's clock, its cooldowns, and Z's bombs
   imEvoFire(dt, firing && P.diaryT <= 0, rateMul);   // IMAGO's V: its growths fire while the gun does, whichever gun
+  hlLanternFire(dt, firing && P.diaryT <= 0);        // ALL HALLOWS: THE LANTERN shoots what you shoot
 
   if (P.outside && outsideHas(P.charId, 'fire')) {
     /* An outside pilot fires its own way (OUTSIDE PILOTS): told whether the
@@ -60194,12 +60197,12 @@ const HL_QUESTS = [
   { id: 'q4', n: 'STILL HERE',      ch: 1, area: 'house', kind: 'boss', boss: 'deadgame', candles: 15, medal: 'stillhere', ascend: 2 },
   { id: 'q5', n: 'WHERE HE PUT ME', ch: 2, area: 'yard',  kind: 'errand', need: 3, candles: 10, medal: 'grave' },
   { id: 'q6', n: 'GG',              ch: 2, area: 'yard',  kind: 'boss', boss: 'ragequit', candles: 20, medal: 'lag', ascend: 3 },
-  { id: 'q7', n: 'PAST NINETEEN',   ch: 2, area: null,    kind: 'run', wave: 20, candles: 20, medal: 'lantern', later: true }
+  { id: 'q7', n: 'PAST NINETEEN',   ch: 2, area: null,    kind: 'run', wave: 20, candles: 20, medal: 'lantern' }
 ];
 
-/* Two worn at a time. The first six do something (THE GOURD and ONE DAY in
-   Act I, SHEET and STILL HERE in Act II, SHALLOW GRAVE and LAG in Act III);
-   the last is listed so the stand knows how many hooks it has. */
+/* Two worn at a time: THE GOURD and ONE DAY in Act I, SHEET and STILL HERE
+   in Act II, SHALLOW GRAVE and LAG in Act III, and THE LANTERN, which the
+   soul leaves behind at the end. */
 const HL_EQUIP_MAX = 2;
 const HL_MEDALS = [
   { id: 'gourd',     n: 'THE GOURD',
@@ -60214,7 +60217,8 @@ const HL_MEDALS = [
     d: 'One body in ten you fell climbs back out on your side for eight seconds. Flying THE HACKER, the bodies it takes last a quarter longer instead.' },
   { id: 'lag',       n: 'LAG',
     d: 'One enemy round in six that comes within reach stutters, and hangs in the air for a second.' },
-  { id: 'lantern',   n: 'THE LANTERN',   later: true, d: '' }
+  { id: 'lantern',   n: 'THE LANTERN',
+    d: 'The soul\'s lantern rides at your shoulder. It shoots what you shoot, weakly, and once a wave it takes a hit for you.' }
 ];
 
 /* ---------------------------------- words ----------------------------------
@@ -60283,6 +60287,18 @@ const HL_SAY = {
     ['soul', 'The others up there — not all of them were left, you know. Some of them were taken. I could hear them.'],
     ['outsider', 'Then there will be more of this.'],
     ['outsider', 'It needs finishing first.']],
+  q7Give: [
+    ['soul', 'Take me with you. A real run. I never saw twenty.'],
+    ['outsider', 'An ordinary run. It will ride along. It cannot help much. The ride is the part it needs.']],
+  // in the run, as wave 20 starts
+  q7Beat: [
+    ['soul', "Oh. That's what it looks like."]],
+  q7Done: [
+    ['outsider', 'It went up. I did not see where.'],
+    ['outsider', 'I will keep the candle.'],
+    ['outsider', 'There are more down there. I can hear them.']],
+  // what the wall reads, after
+  wall: 'A RUN · WAVE 20 · FINISHED',
   /* On the menu, the first time after a chapter opens, once the floor below
      it is done (hlChapterBeatDue). Keyed by the chapter's index. */
   ch1: [
@@ -60295,9 +60311,6 @@ const HL_SAY = {
     ['outsider', 'The house is not open yet. It will wait. It is good at that.']],
   waitYard: [
     ['outsider', 'The yard is not open yet. Everything up there is already buried. It will keep.']],
-  // the top landing reached, and the last of it not built yet
-  waitLast: [
-    ['outsider', 'It wants one more thing of you. It is not ready to ask.']],
   idle: [
     'It is still here.',
     'It does not sleep. I do not much, either.',
@@ -60554,6 +60567,7 @@ let hlPile = 0;               // unbroken gourds in THE PATCH, this frame
 const hlHeld = [];            // THE BACKLOG's unfinished attacks
 let hlHeldSeq = 0;
 const hlBarks = [];           // bosses' spoken lines, in the world
+let hlRide = null;            // the epilogue: the soul along for this run, on this machine (Act III)
 
 /* ================================ the calendar ============================== */
 /* The day as the server says it, the same authority the daily uses. Null
@@ -61050,7 +61064,7 @@ function vigilTick(dt) {
   check('exit', VIG_SPOTS.exit, VIG_REACH.exit);
 
   // the first time down, the rest of it is said once you are standing by it
-  if (!vig.talk && !vig.asc && dS < 240) {
+  if (!vig.talk && !vig.asc && (dS < 240 || (hlQDone('q7') && !hlSeen('q7:done') && vig.t > 1.5))) {
     if (!hlSeen('first'))
       hlTalk(HL_SAY.firstNear.concat(HL_SAY.q1Give), () => { hlSee('first'); hlGive('q1'); });
     else hlSoulSpeaks();
@@ -61302,6 +61316,7 @@ function hlTick(dt, wdt) {
   if (hlHouseOn()) hlHouseArtTick(dt);
   if (hlYardOn()) hlYardArtTick(dt);
   hlGraveAllyTick(wdt);                  // ACT III: SHALLOW GRAVE's, in any run
+  hlRideTick(wdt);                       // the epilogue: the soul along for an ordinary run
   // barks age out whatever else is going on
   for (let i = hlBarks.length - 1; i >= 0; i--) {
     const b = hlBarks[i];
@@ -62204,7 +62219,7 @@ function hlDrawFloor() {
   else if (hlAreaOn()) drawHlAreaFloor(hlAreaDef());
 }
 function hlDrawWorldUnder() {
-  if (inVigil) drawVigilWorld();
+  if (inVigil) { drawVigilWorld(); const w = vigPos(VIG_SPOTS.wall); drawHlWall(w.x, w.y, hlShown('q7')); }   // and the wall, once it is finished
   if (hlAreaOn() || inVigil) hlPartsDraw('lit');
   if (hlHeld.length) for (const p of hlHeld) if (p.kind === 'slam') hlQuietDraw(p, drawHlSlam);
 }
@@ -62218,6 +62233,7 @@ function hlDrawWorldOver() {
   if (hlYardOn() && hlArea.soulGate >= 0) { const g = hlArea.gates[hlArea.soulGate]; drawHlYardSoul(g.x, g.y, g); }   // the soul, in its gate
 }
 function hlDrawWorldGlow() {
+  hlDrawRide();                          // the epilogue's rider and THE LANTERN, in any run
   if (!(inVigil || hlAreaOn())) return;
   for (const p of hlHeld) if (p.kind === 'sweep') hlQuietDraw(p, drawHlSweep);
   for (const e of enemies) if (!e.dead && e.hlVine) drawHlVine(e, e.hlVine);
@@ -62258,6 +62274,10 @@ function hlDrawScreen() {
   }
   if (state === 'play' && (inVigil || hlAreaOn())) drawHlMedalHud(hlP().equip, P.hlBank || 0);
   if (state === 'play' && P.hlGhost) drawHlGhostHud(P.hlGhost);   // STILL HERE, in any run
+  if (state === 'play' && hlRide && hlRide.say) {                   // the epilogue: what it says at twenty
+    const S = hlRide.say, age = uiTime - S.at;
+    if (age < S.dur + 0.4) hlSayDraw({ who: S.who, text: S.text, age, dur: S.dur, cue: S.cue }, { steady: HL_STEADY[4] });
+  }
 }
 function hlDrawMenu() {
   if (!hlHatchUp()) return;
@@ -62996,7 +63016,6 @@ function hlChapterHeard(q) {
 /* what he says while the next floor is still shut, by which floor it is */
 function hlWaitLines() {
   const q = HL_QUESTS.find(x => !hlQDone(x.id));
-  if (q && q.later && hlQDone('q6')) return HL_SAY.waitLast;   // the top landing, and nothing above it yet
   return q && q.ch >= 2 ? HL_SAY.waitYard : HL_SAY.wait;
 }
 
@@ -63824,6 +63843,79 @@ function hlLagCheck(b) {
   return true;
 }
 
+/* ================================ the epilogue ===============================
+   PAST NINETEEN (quest 7). Given at the top landing. Then any ordinary run
+   (not a daily, a challenge, the rush, freeplay, the hub or an area) carries
+   the soul along, a small light at your shoulder, with no say in the run at
+   all. When wave 20 starts its hull is whole for a beat, it says so, and it
+   rises out of the arena; the quest is done there and then, and the run goes
+   on. hlRide is this machine's and never the run's (SNAP_LOCAL): in co-op
+   each pilot's soul is its own, and nothing about the run changes for it. */
+const RIDE_BEAT_T   = 1.2;    // s whole before it says so (and the quest is done)
+const RIDE_GO_T     = 6;      // s from twenty to gone
+const LANTERN_CD    = 0.45;   // THE LANTERN: s between its rounds, while you fire…
+const LANTERN_DMG   = 0.3;    // …at this much of yours
+const LANTERN_OFF   = 30;     // px from the hull, at your shoulder
+
+function hlRideWanted() {
+  return hlLive() && !PVP && !inVigil && !inHub && !Chal.on && !freeRun && hlQGiven('q7') && !hlQDone('q7');
+}
+function hlRideTick(dt) {
+  if (state !== 'play') return;
+  if (!hlRide) {
+    if (!hlRideWanted() || wave >= 20) return;    // it has to see twenty: aboard before it
+    hlRide = { t: 0, beat: null, say: null, gone: false };
+    hlRideFx('aboard');
+  }
+  const R = hlRide;
+  R.t += dt;
+  if (!R.beat) {
+    if (wave < 20) return;
+    R.beat = { t: 0, said: false };
+    hlRideFx('whole');
+  }
+  R.beat.t += dt;
+  if (!R.beat.said && R.beat.t >= RIDE_BEAT_T) {
+    R.beat.said = true;
+    const text = HL_SAY.q7Beat[0][1];
+    R.say = { who: 'soul', text, at: uiTime, dur: text.length / 15 + 2.4, cue: {} };
+    if (hlQGiven('q7')) hlComplete('q7');
+  }
+  if (!R.gone && R.beat.t >= RIDE_GO_T) { R.gone = true; hlRideFx('gone'); }
+}
+/* the rider and the lantern, drawn in any run (hlDrawWorldGlow) */
+function hlDrawRide() {
+  if (state !== 'play' && state !== 'pause') return;
+  if (hlRide && !hlRide.gone) drawHlRider(hlRide);
+  if (HL.eq.lantern && !inVigil) { const q = hlLanternPos(); drawHlLantern(q.x, q.y, P.hlLanternWave === wave); }
+}
+/* THE LANTERN: where it rides, a little behind your aim */
+function hlLanternPos(S = P) {
+  const a = S.ang + 2.4;
+  return { x: S.x + Math.cos(a) * LANTERN_OFF, y: S.y + Math.sin(a) * LANTERN_OFF };
+}
+/* From updatePlayer, beside the gun: while the trigger is down it fires a
+   small round of its own down your aim. Not yours to the build (foreign):
+   nothing that counts your shots counts its. */
+function hlLanternFire(dt, firing) {
+  if (!HL.eq.lantern) return;
+  P.hlLanternT = (P.hlLanternT || 0) - dt;
+  if (!firing || P.hlLanternT > 0) return;
+  P.hlLanternT = LANTERN_CD;
+  const q = hlLanternPos();
+  fireBullet(q.x, q.y, P.ang, LANTERN_DMG, { noFrag: true, rm: 0.8, foreign: true });
+  bullets[bullets.length - 1].hlLantern = true;
+  hlLanternFx('shot');
+}
+/* From hurtPlayer, past the iframes: the first hit of each wave is its. */
+function hlLanternTakes() {
+  if (P.hlLanternWave === wave) return false;
+  P.hlLanternWave = wave;
+  P.iframe = Math.max(P.iframe, 0.6);
+  hlLanternFx('take');
+  return true;
+}
+
 /* ================================ the seams =================================
    THE YARD's floor: the room, then the stones, the pits and the gates. */
 function hlYardFloor() {
@@ -64610,6 +64702,14 @@ function hlYardBossDeathFx(e) { burst(e.x, e.y, 60, e.col, 420, 4, 0.9); }
 // medals, in any run
 function hlGraveAllyFx(e) { ringFx(e.x, e.y, 4, e.r * 2.6, '#a3e635', 0.45, 3); }   // SHALLOW GRAVE: one climbed back out, yours
 function hlLagFx(b) {}                            // LAG: a round stutters and hangs
+// the epilogue, in an ordinary run
+function hlRideFx(stage) {                        // 'aboard' | 'whole' (wave 20 starts) | 'gone' (it has gone up)
+  if (stage === 'whole') { ringFx(P.x, P.y, 10, 90, '#a5f3fc', 0.6, 3); Audio_.levelup(); }
+  if (stage === 'gone') burst(P.x, P.y - 40, 24, '#a5f3fc', 160, 2.6, 0.9);
+}
+function hlLanternFx(kind) {                      // THE LANTERN: 'shot' | 'take' (it took this wave's hit)
+  if (kind === 'take') { const q = hlLanternPos(); ringFx(q.x, q.y, 4, 46, '#fcd34d', 0.4, 3); }
+}
 
 /* ---- the world ---- */
 /* the yard's lights (hlLightBegin, hlLight, hlOcc*): true to run the light pass */
@@ -64763,6 +64863,35 @@ function drawHlYardBark(b) {
   ctx.font = "600 15px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = b.boss === 'soul' ? '#a5f3fc' : '#fecdd3';
   ctx.fillText(b.text, b.x, b.y - b.r - 30);
+  ctx.restore();
+}
+
+/* the soul along for the ride, in any run, at your shoulder. R { t, beat:
+   { t, said } once wave 20 has started, say, gone }. World space. */
+function drawHlRider(R) {
+  ctx.save();
+  const b = R.beat, up = b ? Math.max(0, b.t - RIDE_BEAT_T - 1) * 60 : 0;
+  const x = P.x - 26, y = P.y - 26 - up, k = b ? Math.max(0, 1 - Math.max(0, b.t - RIDE_BEAT_T - 1) / (RIDE_GO_T - RIDE_BEAT_T - 1)) : 1;
+  ctx.globalAlpha = k;
+  ctx.fillStyle = rgba('#a5f3fc', b ? 0.8 : 0.45);
+  ctx.beginPath(); ctx.arc(x, y, b ? 9 : 5, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+/* THE LANTERN (the medal) at x, y; spent: it has taken this wave's hit */
+function drawHlLantern(x, y, spent) {
+  ctx.save();
+  ctx.fillStyle = spent ? rgba('#fcd34d', 0.3) : '#fcd34d';
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+/* the vigil's wall (x, y its middle): blank, or finished — HL_SAY.wall */
+function drawHlWall(x, y, done) {
+  if (!done) return;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = "700 14px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = '#a5f3fc';
+  ctx.fillText(HL_SAY.wall, x, y + 30);
   ctx.restore();
 }
 
@@ -87406,6 +87535,7 @@ const SNAP = { build: null, names: null, roots: null, index: null, statics: null
 const SNAP_LOCAL = new Set([
   // the next run's hand-offs, used up by resetGame
   'runSeedNext', 'runViewNext', 'runCharNext', 'runAwakeNext', 'runFlagsNext', 'runAssistNext',
+  'hlRide',                               // ALL HALLOWS: the soul along for the ride is this profile's, not the run's
   // the screen, the frame and the camera's zoom
   'W', 'H', 'DPR', 'fpsAvg', 'frameMs', 'lastDT', 'last', 'acc', 'frameErrors', 'pageDead',
   'bufScene', 'cScene', 'bufChan', 'cChan', 'grainTile', 'scanTile', 'vigGrad', 'vigKey',

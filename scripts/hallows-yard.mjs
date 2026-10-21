@@ -26,6 +26,10 @@
      the word      after a death in his fight, a line about how it went
      the medals    SHALLOW GRAVE and LAG, and nowhere they should not be
      the menu      the knock when the yard opens
+     the epilogue  PAST NINETEEN: given at the top landing, the soul along for
+                   an ordinary run and nowhere else, twenty and it goes up,
+                   the run untouched by it; the vigil after, the wall; and
+                   THE LANTERN
      the hooks     every Act III hook called and none throwing; Act I's and
                    Act II's never asked to draw the yard
 
@@ -123,8 +127,11 @@ take(g.run(`(() => { ${KIT}
   chk(vig.talk && /finally said it/.test(vig.talk.lines[0][1]), 'and says he said it', vig.talk && vig.talk.lines[0]);
   chk(hlSoulShown() === 4 && hlLandingShown() === 3, 'the lantern warm: stage 4, landing 3');
   talkAll();
-  if (hlQuest('q7').later) chk(hlCurrent() === null && hlWaitLines() === HL_SAY.waitLast, 'and then it is not ready to ask the last thing');
-  else chk(hlCurrent() && hlCurrent().id === 'q7', 'and then the last of it');
+  chk(hlCurrent() && hlCurrent().id === 'q7', 'and then the last of it: PAST NINETEEN');
+  steps(2);
+  chk(vig.talk && vig.talk.lines[0][1] === HL_SAY.q7Give[0][1], 'take me with you', vig.talk && vig.talk.lines[0]);
+  talkAll();
+  chk(hlQGiven('q7') && !hlQDone('q7'), 'given');
   exitVigil();
   return JSON.stringify(C);
 })()`));
@@ -488,6 +495,72 @@ take(g.run(`(() => { ${KIT}
   return JSON.stringify(C);
 })()`));
 
+/* ============================== the epilogue ============================== */
+section('the epilogue');
+take(g.run(`(() => { ${KIT}
+  wipe(); day('2026-10-23');
+  const b = book(); b.q = { q1: 2, q2: 2, q3: 2, q4: 2, q5: 2, q6: 2, q7: 1 };
+  b.seen = { prologue: 1, first: 1 };
+  for (const q of ['q1', 'q2', 'q3', 'q4', 'q5', 'q6']) { b.seen[q + ':shown'] = 1; b.seen[q + ':done'] = 1; }
+  // not in a challenge, an area or a sandbox
+  resetGame(); Chal.on = { id: 'x', m: {} }; state = 'play'; steps(2);
+  chk(!hlRide, 'not in a challenge');
+  Chal.on = null; resetGame(); freeRun = true; state = 'play'; steps(2);
+  chk(!hlRide, 'nor in freeplay');
+  freeRun = false;
+  yard(); steps(2); chk(!hlRide, 'nor up in the yard'); chalQuit(); hlArea = null;
+  // an ordinary run: it rides along
+  applyChar(0); resetGame(); state = 'play'; P.iframe = 1e9; steps(2);
+  chk(hlRide && !hlRide.beat, 'an ordinary run: it rides along');
+  wave = 19; steps(30);
+  chk(!hlRide.beat && !hlQDone('q7'), 'nineteen is not twenty');
+  wave = 20; steps(2);
+  chk(hlRide.beat && !hlQDone('q7'), 'wave twenty: its hull is whole');
+  steps(Math.ceil(RIDE_BEAT_T * 60) + 2);
+  chk(hlRide.say && hlRide.say.text === HL_SAY.q7Beat[0][1], 'and it says what twenty looks like');
+  chk(hlQDone('q7') && b.medals.includes('lantern') && b.candles === 20, 'PAST NINETEEN: 20 candles, and it left its lantern', [hlQDone('q7'), b.medals, b.candles]);
+  steps(Math.ceil(RIDE_GO_T * 60));
+  chk(hlRide.gone && state === 'play', 'it goes up, and the run goes on');
+  resetGame(); state = 'play'; steps(2);
+  chk(!hlRide, 'and it does not ride again');
+  // the ride has no say in the run: the same seed plays the same with it or without it
+  const fly = given => {
+    b.q.q7 = given ? 1 : 2; b.equip = []; resetGame(); runSeedNext = 4242; resetGame(); state = 'play'; P.iframe = 1e9;
+    steps(60 * 30);
+    return [score, enemies.filter(o => !o.dead).length, P.x.toFixed(4), P.y.toFixed(4), simRngState, !!hlRide].join(',');
+  };
+  const w = fly(true), wo = fly(false);
+  chk(w.split(',').slice(0, -1).join() === wo.split(',').slice(0, -1).join() && w.endsWith('true') && wo.endsWith('false'), 'the ride changes nothing of the run', [w, wo]);
+  b.q.q7 = 2;
+  // the vigil after: the soul has gone up, and he says so
+  state = 'menu'; enterVigil(); steps(Math.ceil(2 * 60));
+  chk(vig.talk && vig.talk.lines[0][1] === HL_SAY.q7Done[0][1], 'it went up: he says so, on the way in', vig.talk && vig.talk.lines[0]);
+  talkAll();
+  chk(hlSoulShown() === 5 && hlSeen('q7:done'), 'the soul is gone (stage 5)');
+  const s = vigSoulPos(); P.x = s.x; P.y = s.y; steps(2);
+  chk(vig.near !== 'soul', 'and there is nothing there to talk to');
+  chk(hlCurrent() === null, 'and the story is finished');
+  exitVigil();
+  // THE LANTERN
+  HL.force = true; b.equip = ['lantern'];
+  applyChar(0); resetGame(); state = 'play'; wave = 3; steps(1);
+  chk(HL.eq.lantern, 'THE LANTERN, worn');
+  P.iframe = 0; const h0 = P.hp; hurtPlayer(10);
+  chk(P.hp === h0 && P.hlLanternWave === wave, 'it takes the first hit of a wave for you');
+  P.iframe = 0; hurtPlayer(10);
+  chk(P.hp < h0, 'and only the first');
+  wave = 4; P.iframe = 0; const h1 = P.hp; hurtPlayer(10);
+  chk(P.hp === h1, 'and the next wave, again');
+  bullets.length = 0;
+  inputSource = rec => { rec.mx = 0; rec.my = 0; rec.ax = P.x + 300; rec.ay = P.y; rec.trig = true; rec.lmb = true; rec.auto = false; rec.dash = false; rec.press = []; rec.held = ''; rec.touch = false; rec.taim = null; rec.local = false; };
+  steps(60);
+  inputSource = inputSample;
+  const lb = bullets.filter(x => x.hlLantern);
+  chk(lb.length >= 2 && lb.every(x => !x.mine && Math.abs(x.dmg) < P.dmg * stanceMul() * 2 * LANTERN_DMG + 1e-6), 'it shoots what you shoot, weakly, and none of it counts as yours', lb.length);
+  HL.force = false; state = 'menu';
+  return JSON.stringify(C);
+})()`));
+
 /* ================================ the hooks =============================== */
 /* Twice: on the placeholders in the page, and with hl-art.js loaded, which
    draws the patch and the house and leaves the yard's placeholders standing
@@ -503,7 +576,7 @@ function flyHooks(art) {
     'hlRqStopFx', 'hlRqEscapeFx', 'hlRqBackFx', 'hlRqSoulFx', 'hlRqMarchFx', 'hlYardBossDeathFx', 'hlGraveAllyFx', 'hlLagFx',
     'hlYardLights', 'drawHlYardFloor', 'drawHlYardGrave', 'drawHlYardPit', 'drawHlYardGate', 'drawHlYardSoul', 'drawHlYardBody',
     'drawHlYardEBullet', 'drawHlYardGlow', 'drawHlYardTele', 'drawHlYardBossDeath', 'drawHlYardBark', 'drawHlYardHud',
-    'drawHlRageQuitBar'];
+    'drawHlRageQuitBar', 'hlRideFx', 'drawHlRider', 'drawHlWall', 'hlLanternFx', 'drawHlLantern'];
   const OTHERS = ['hlLights', 'drawHlAreaFloor', 'drawHlGlow', 'drawHlBody', 'drawHlEBullet', 'drawHlBossDeath', 'drawHlBark',
     'drawHlTele', 'drawHlAreaHud', 'drawHlPileHud', 'hlAreaEnterFx', 'hlBossDeathFx', 'drawHlBossBar',
     'hlHouseArtTick', 'hlHouseEnterFx', 'hlHouseLights', 'drawHlHouseFloor', 'drawHlHouseWreck', 'drawHlHouseBody',
@@ -566,6 +639,12 @@ function flyHooks(art) {
     exitVigil(); resetGame(); state = 'play'; steps(1, frame);
     for (let i = 0; i < GRAVE_EVERY; i++) killEnemy(at('grunt', 200 + i * 8)); steps(20, frame);
     P.hlLagN = LAG_EVERY - 1; ebullets.push({ x: P.x + 80, y: P.y, vx: 30, vy: 0, r: 4, dmg: 1, life: 9, col: '#fff' }); steps(5, frame);
+    // the epilogue: the soul along, twenty, and gone; then the vigil's wall
+    b.q.q6 = 2; b.q.q7 = 1; b.equip = ['lantern']; b.medals.push('lantern');
+    exitVigil(); resetGame(); state = 'play'; steps(2, frame);
+    P.iframe = 0; hurtPlayer(5); steps(30, frame);
+    wave = 20; steps(Math.ceil((RIDE_GO_T + 1) * 60), frame);
+    state = 'menu'; enterVigil(); steps(60 * 3, frame);
     inputSource = inputSample;
     chk(!drawErr, 'nothing drawn threw', drawErr);
     state = 'menu';

@@ -278,6 +278,9 @@ const S = [
   { name: 'yard',       char: 'runner', seed: 124, steps: 7200,  starter: "hlAreaStart('yard')" },
   { name: 'ragequit',   char: 'hacker', seed: 125, steps: 7200,  kit: true,
     starter: "hlP().q.q5 = 2; hlAreaStart('yard'); hlArea.n = 4; wave = HL_AREAS.yard.waveFrom + 3; betweenWaves = 0.5" },
+  // and the yard's medals and the epilogue's in an ordinary run: THE LANTERN's rounds and the hit it
+  // takes, SHALLOW GRAVE's one in ten, LAG's one in six (three worn, for the test: the stand allows two)
+  { name: 'medals',     char: 'runner', seed: 126, steps: 7200,  starter: "RUN.hlLive = true; RUN.medals = ['lantern', 'grave', 'lag']" },
   // FIRST FLIGHT: an assisted run, through THE WARDEN and out the other side of the help
   { name: 'assist',     char: 'runner', seed: 118, steps: 18000, starter: 'runAssistNext = true; resetGame()' },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
