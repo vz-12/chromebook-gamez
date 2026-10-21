@@ -2120,6 +2120,7 @@ function newPlayer() {
     imArm: null, imArmT: 0, imArmMenu: null, imArmShots: [], imArmBeam: null, imArmBite: 0,   // C, THE ARMORY: the gun worn, its wait, the wheel, its shots, the beam and its bite
     imEvo: null, imEvoShots: [],                   // V, ENDLESS FORMS: what it has grown and its PROGRESS, and its growths' shots
     imIntro: null,                                 // its cut-in, while it runs: see IMAGO's cut-in
+    imBeam: 0, imSw: 0, imSwNear: 0,               // PvP: the other pilot's beam and swing, watched for a graze (IMAGO IN A DUEL)
     /* The kit, and the folded answer it is read back through. gb is left null
        rather than built here: newPlayer() runs once at module scope to make a
        throwaway P, thousands of lines above where gearBlank() is declared, and
@@ -38969,8 +38970,8 @@ function update(dt) {
     if (suCutIn()) sl = Math.min(sl, SU_SLOW);
     // and IMAGO's
     if (imCutIn()) sl = Math.min(sl, IM_SLOW);
-    // and its armory, while it is open: the room slows, and the hull holds
-    if (imArmOpen()) sl = Math.min(sl, ARM_SLOW);
+    // and its armory, while it is open: the room slows, and the hull holds (in a duel only the hull)
+    if (imArmOpen() && !PVP) sl = Math.min(sl, ARM_SLOW);
     // and an outside pilot's, however its kit says (OUTSIDE PILOTS): the room, never the hull
     if (P.outside) sl = Math.min(sl, outsideSlow());
     slowmo = Math.min(slowmo, sl);
@@ -46348,8 +46349,11 @@ const OPR_ART = {
    dashed through pays IM_PAY_DASH. [F] spends a full meter on IM_LEN seconds
    of IMAGO, opening on a cut-in (IMAGO's cut-in, below); on the cut the moth
    from the rite (OPR_ART.hull, awake) hatches out of its chrysalis where it
-   stands. The passive and PvP's duel rule are still to come (Phases 3 and 5).
-   None of it runs in the rite, nor in PvP.
+   stands. The passive is still to come (Phase 3). None of it runs in the
+   rite. In PvP it all runs, Z X C V included, and a duel pays GRAZE for the
+   other pilot's blows as well as the room's rounds (IMAGO IN A DUEL, below).
+   There THE ARMORY's wheel holds the hull but not the room: the room is the
+   other pilot's too (Bullet Time is banned from a duel for the same reason).
 
    Z — EYESPOTS (user, 18 Oct): the eyespot idea, with bombs instead of a
    flash. The wings throw small bombs out over a 130° cone along the aim, and
@@ -46408,7 +46412,7 @@ const FL_PAD   = 6;            // px of room it wants past the round's edge
 const FL_CD    = 22;           // from the press: ten seconds of it, twelve of waiting
 
 // C — THE ARMORY (see there)
-const ARM_SLOW  = 0.12;        // the room, while the armory is open
+const ARM_SLOW  = 0.12;        // the room, while the armory is open (not in a duel: the room is the other pilot's too)
 const ARM_DEAD  = 34;          // px from the hull: aimed this close, nothing is picked
 const ARM_ORBS  = 2;           // singularities out at once, at most
 const ARM_SHOTS = 160;         // its shots in the air at once, at most
@@ -46505,6 +46509,59 @@ function imGain(n, x, y) {
   }
 }
 
+/* ----------------------------- IMAGO IN A DUEL ------------------------------
+   In PvP (VR_PVP) the other pilot's blows never reach updateEBullets: its
+   rounds are its own shots, at a stand-in for this pilot (pvp/site/js/
+   duel.js). So a duel pays GRAZE for them here, by the same rule:
+     - its rounds, on its turn (updateBullets): one that passes within
+       IM_GRAZE_R of the hull's edge without landing pays IM_PAY, one dashed
+       through IM_PAY_DASH (imGrazeDuel);
+     - its lance and its blade, which throw no rounds, on this pilot's turn
+       (imGrazeDuelTick): a beam that came within IM_GRAZE_R of the hull and
+       ended without touching it, or a swing whose edge reached that close
+       and never found the hull, is one graze each.
+   The room's rounds, in an infested arena, pay as they do in a run. And
+   while V evolves, a graze is PROGRESS, as anywhere. */
+function imGrazeDuel(b) {
+  if (!PVP || PILOTS.length < 2) return;
+  const k = PILOT.on === 0 ? 1 : 0, p = pilotP(k);
+  if (!p || p.down) return;
+  // a round that went through the other pilot (a piercing one) has landed: no graze
+  if (b.hits && b.hits.size && PVP.standIns().some(s => s.pvpPilot === k && b.hits.has(s.id))) return;
+  imGrazeRound(b, p, k);
+}
+function imGrazeDuelTick() {
+  const o = PVP && PILOTS.length > 1 && P.charId === 'runner' ? mpPilots() : null;
+  if (!o || P.down || !(imFills(P) || imEvoOf(P))) { P.imBeam = 0; P.imSw = 0; P.imSwNear = 0; return; }
+  // its lance (and its twin's): 1 a beam is on, 2 it came close, 4 it touched the hull
+  if (o.laserT > 0 && o.laserSegs && o.laserSegs.length) {
+    const touch = P.r + LANCE_HALF * ((o.br || 4.2) / 4.2) * (o.laserEnv || 1);
+    let d = Infinity;
+    for (const segs of [o.laserSegs, o.twinSegs || []])
+      for (const g of segs) d = Math.min(d, hlSegDist(g.x1, g.y1, g.x2, g.y2, P.x, P.y));
+    P.imBeam |= 1;
+    if (d < touch) P.imBeam |= 4;
+    else if (d < touch + IM_GRAZE_R) P.imBeam |= 2;
+  } else if (P.imBeam) {
+    if ((P.imBeam & 6) === 2) imGrazePay(false, P.x, P.y);
+    P.imBeam = 0;
+  }
+  // its blade: a swing that reached this close, its edge never on the hull (the stand-in it would have struck),
+  // settled as it ends, or as the next one begins on its heels
+  const on = o.swingT > 0 && o.swingId ? o.swingId : 0;
+  if (P.imSw && P.imSw !== on) {
+    const me = PILOT.on, s = PVP.standIns().find(e => e.pvpPilot === me);
+    if (P.imSwNear && !(s && s.swungBy === P.imSw)) imGrazePay(false, P.x, P.y);
+    P.imSw = 0; P.imSwNear = 0;
+  }
+  if (on) {
+    P.imSw = on;
+    const dx = P.x - o.x, dy = P.y - o.y, d = len(dx, dy);
+    const inArc = Math.abs(bladeDelta(o.swingAim, Math.atan2(dy, dx))) < (o.swingArc || BLADE_ARC) / 2 + 0.5;
+    if (inArc && d < (o.swingReach || 0) + P.r + IM_GRAZE_R) P.imSwNear = 1;
+  }
+}
+
 // [F], for VOIDRUNNER
 function imFire() {
   if (state !== 'play' || oprOn() || !P.awake || P.charId !== 'runner') return;
@@ -46598,6 +46655,7 @@ function imAbility(i) {
 function imTick(dt) {
   if (P.charId !== 'runner') return;
   imIntroTick(dt);
+  if (PVP) imGrazeDuelTick();   // a duel: the other pilot's lance and blade (IMAGO IN A DUEL)
   if (P.imT > 0) {
     if (oprOn()) P.imT = 0;                    // the rite has the hull, and its own IMAGO
     else if (!imCutIn()) {                     // the cut-in is not spent from the minute
@@ -47125,7 +47183,7 @@ function imArmShotTick(dt) {
      P.imEvoShots  its growths' rounds and missiles in the air: i (which
                    growth), x, y, vx, vy, r, t, turn (a missile's), pierce
 --------------------------------------------------------------------------- */
-const imEvoOf = p => !!p.imEvo && p.charId === 'runner' && p.imT > 0 && !oprOn() && !PVP;
+const imEvoOf = p => !!p.imEvo && p.charId === 'runner' && p.imT > 0 && !oprOn();
 const imEvoOn = () => imEvoOf(P);
 const imEvoMolting = () => imEvoOn() && P.imEvo.molt > 0;
 // PROGRESS the next fill needs: each fill EVO_STEP more than the last
@@ -47467,7 +47525,7 @@ function imEvoHudFill() {
 }
 // the HUD, under the dash: GRAZE, then IMAGO's clock and its keys. Returns the next free line
 function drawImagoHud(pad, ly, bw) {
-  if (!P.awake || P.charId !== 'runner' || oprOn() || PVP) return ly;
+  if (!P.awake || P.charId !== 'runner' || oprOn()) return ly;
   const on = imOn(), k = clamp((P.imGraze || 0) / IM_MAX, 0, 1);
   IM('hud', ctx, pad, ly, bw, { k, on, ready: !on && k >= 0.999, T: P.imT || 0, len: IM_LEN, cd: (P.imCd || [0, 0, 0, 0]).slice(),
     live: [0, imFlutOn() ? P.imFlut / FL_LEN : 0, 0, imEvoHudFill()], liveS: [0, imFlutOn() ? P.imFlut : 0, 0, 0],
@@ -57045,6 +57103,7 @@ function updateBullets(dt) {
 
     // ALL HALLOWS: THE BACKLOG's pile and a creeper's vine are in the way too
     if (hlBulletHit(b)) { bullets.splice(i, 1); continue; }
+    if (PVP) imGrazeDuel(b);             // PvP: a near miss of the other pilot is a graze to it (IMAGO IN A DUEL)
 
     // enemy collision (swept against previous position for fast bullets)
     let removed = false;

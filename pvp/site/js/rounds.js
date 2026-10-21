@@ -173,14 +173,17 @@
       P.dashCh = P.dashMax; P.dashT = 0; P.dashRe = 0; P.ghosts.length = 0;
       P.laserT = 0; P.laserSegs.length = 0; P.charge = 0; P.swingT = 0; P.slowT = 0;
       P.shield = P.shieldMax || 0;
-      /* A form woken last round (OVERDRIVE, SUPERUSER, RONIN: a minute each)
-         ends with that round, so nobody starts one transformed: measured, a
-         form carried over ended the next round in five seconds. Its clock is
-         left a moment, and the engine ends it its own way next step. A meter
-         still filling carries over, like the build. */
+      /* A form woken last round (OVERDRIVE, SUPERUSER, RONIN, IMAGO: a minute
+         each) ends with that round, so nobody starts one transformed:
+         measured, a form carried over ended the next round in five seconds.
+         Its clock is left a moment, and the engine ends it its own way next
+         step (IMAGO's cut-in, if it was still playing, is cut short too, as
+         the minute does not run under it). A meter still filling carries
+         over, like the build. */
       if (P.ventT > 0) P.ventT = 1e-6;
       if (P.suT > 0) P.suT = 1e-6;
       if (P.roninT > 0) P.roninT = 1e-6;
+      if (P.imT > 0) { P.imT = 1e-6; P.imIntro = null; }
     });
     banner('ROUND ' + m.round + '   ·   FIGHT', '#f472b6', 2.0);
   }

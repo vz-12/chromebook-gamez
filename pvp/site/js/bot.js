@@ -304,6 +304,20 @@
       if (!mane && cd[2] <= 0 && army >= 2 && hp < 0.7) return { form, aim: move(k, rec, 'c') };                    // drink its own
       return { form };
     }
+    if (me.charId === 'runner') {
+      /* IMAGO, on a full GRAZE. Then ENDLESS FORMS at once (it only grows
+         while IMAGO lasts), FLUTTER when a blow is about to land, and the
+         EYESPOTS thrown where the rival will be when they burst. THE ARMORY
+         is a wheel chosen with the aim, and the bot leaves it shut. */
+      if (!(me.imT > 0)) { if (wake((me.imGraze || 0) >= IM_MAX, v, k)) rec.press.push('f'); return {}; }
+      if (me.imIntro && !me.imIntro.cut) return { form: 'busy' };
+      const cd = me.imCd || [0, 0, 0, 0];
+      if (!ready) return {};
+      if (!me.imEvo) return { aim: move(k, rec, 'v') };
+      if (cd[1] <= 0 && !(me.imFlut > 0) && inc && inc.t < 0.35) return { aim: move(k, rec, 'x') };
+      if (cd[0] <= 0 && v.d > 70 && v.d < 240) return { aim: move(k, rec, 'z', ahead(v, EYE_FUSE)) };
+      return {};
+    }
     if (me.charId === 'melee') {
       // RONIN wakes on a perfect parry at a full chain (the parry, above): nothing to press for it
       if (!(me.roninT > 0)) return {};

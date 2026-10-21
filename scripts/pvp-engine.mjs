@@ -380,8 +380,10 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      [H.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])'), G.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
   for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
   /* Overtime brought forward, on both machines alike (OVERTIME in rounds.js:
-     40 s, the walls in over 20), so this match sees it, in step on both. */
-  for (const g of [H, G]) g.run('globalThis.__otFile = Object.assign({}, PVP.OVERTIME); PVP.OVERTIME.at = 12; PVP.OVERTIME.close = 8;');
+     40 s, the walls in over 20), so this match sees it, in step on both. Six
+     seconds: two awake pilots can end a round inside twelve, and at twelve a
+     match of two such rounds (a random one, one run in several) never saw it. */
+  for (const g of [H, G]) g.run('globalThis.__otFile = Object.assign({}, PVP.OVERTIME); PVP.OVERTIME.at = 6; PVP.OVERTIME.close = 6;');
   ok(roomOf(H).hidden === true && roomOf(G).hidden === true, 'the waiting room steps aside');
   ok(H.run('pilotP(0).charId') === 'hacker' && H.run('pilotP(1).charId') === 'ember', 'the host flies its pilot, beside the guest\'s');
   ok(G.run('pilotP(0).charId') === 'hacker' && G.run('pilotP(1).charId') === 'ember', 'and the guest sees the same two');
@@ -483,8 +485,11 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(otLog.some(x => x) && log.ot.steps > 60, 'a round ran past its clock and went to overtime', [otLog, log.ot.steps]);
   ok(log.ot.early === 0, 'never before its time', log.ot.early);
   /* the walls closed in on overtime's clock, however long a round stayed in it: never more than a
-     second behind where the clock has them, and in by the time it had run a second or more */
-  ok(log.ot.late <= 1e-6 && (log.ot.deep < 1.5 || log.ot.narrow < H.run('PVP.maps.ARENA.w') - 20), 'the walls closed in',
+     second behind where the clock has them, and in by the time it had run a second or more. They
+     follow their mark as the game's arena always does (updateArena, easing in at 2.4 a second), so
+     they finish a few px short of a mark a second late (7 at a 6 s close): 2% of the way is allowed */
+  const travel = H.run('PVP.maps.ARENA.w - PVP.OVERTIME.w');
+  ok(log.ot.late <= 0.02 * travel && (log.ot.deep < 1.5 || log.ot.narrow < H.run('PVP.maps.ARENA.w') - 20), 'the walls closed in',
      { narrow: Math.round(log.ot.narrow), late: +log.ot.late.toFixed(1), deep: +log.ot.deep.toFixed(1) });
   ok(log.ot.rose <= 1e-9, 'and the health it held only ever fell', log.ot.rose);
 
@@ -1672,7 +1677,7 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
-section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s parry, forms and moves');
+section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, VOIDRUNNER\'s GRAZE by near misses, and a bot\'s parry, forms and moves');
 {
   const CLEAN = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });';
   const INFESTED = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: true });';
@@ -1691,8 +1696,8 @@ section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s par
   };`;
   const AWAKE_ME = Object.assign({}, ME, { loadouts: Object.assign({}, ME.loadouts, {
     casual: { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: ['ember', 'hacker', 'melee'], ups: [] } }) });
-  const bout = (pilot, bot, script) => {
-    const g = boot({ mode: 'bot', pilot, me: AWAKE_ME, bot: Object.assign({ id: 'c0ffee00', name: 'BOT WREN', seed: 99 }, bot) }, DUELIST);
+  const bout = (pilot, bot, script, me = AWAKE_ME) => {
+    const g = boot({ mode: 'bot', pilot, me, bot: Object.assign({ id: 'c0ffee00', name: 'BOT WREN', seed: 99 }, bot) }, DUELIST);
     g.run(script);
     return g;
   };
@@ -1774,6 +1779,111 @@ section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s par
   await run(gH, 30, () => gH.run('__su.on > 0 && __su.moved > 0'));
   ok(gH.run('__su.on') > 0, 'a HACKER bot spends a full root on SUPERUSER', gH.run('__su'));
   ok(gH.run('__su.moved') > 0, 'and fights with its moves', gH.run('__su'));
+
+  /* VOIDRUNNER's GRAZE (IMAGO IN A DUEL, in the engine). The other pilot's
+     blows are its own shots at a stand-in, never the room's rounds, so a duel
+     pays for them itself: a round that passes close without landing, a lance
+     or a swing that comes close and never touches. This player flies an awake
+     VOIDRUNNER round a bot's gun, not firing, both kept on their feet so the
+     round runs on; and presses what __keys holds, once the fight is on. */
+  const RUNNER_ME = Object.assign({}, ME, { loadouts: Object.assign({}, ME.loadouts, {
+    casual: { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: ['runner'], ups: [] } }) });
+  const gI = bout('runner', { pilot: 'runner', awake: false, skill: 0.5 }, AIMED(170, 260) + CLEAN
+    + `globalThis.__keys = []; const __h = PVP.botMatch.human;
+       PVP.botMatch.human = rec => { __h(rec); rec.trig = false; rec.lmb = false;
+         if (__keys.length && state === 'play' && RUN.pvp && RUN.pvp.phase === 'fight') rec.press.push(__keys.shift()); };
+       LS.after = () => { for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`, RUNNER_ME);
+  const filled = await run(gI, 60, () => gI.run('pilotP(0).imGraze >= IM_MAX'));
+  const IMV = JSON.parse(gI.run('JSON.stringify({ max: IM_MAX, pay: IM_PAY, dash: IM_PAY_DASH })'));
+  ok(gI.run('pilotP(0).awake') === 1 && gI.run('pilotP(0).imGraze') >= IMV.max,
+     'the other pilot\'s rounds, passing close, fill an awake VOIDRUNNER\'s GRAZE', [filled, gI.run('pilotP(0).imGraze')]);
+  ok(gI.run('pilotDo(0, () => drawImagoHud(12, 100, 220))') === 152 && drawErrs(gI) === '', 'and its meter is on the screen', drawErrs(gI));
+
+  // the rules, one at a time, between frames: this pilot's GRAZE from nothing each time, the other pilot's blows put by hand
+  const rules = JSON.parse(gI.run(`(() => {
+    const me = pilotP(0), o = pilotP(1), out = {}, S0 = PVP.standIns().find(s => s.pvpPilot === 0);
+    const keep = ['x', 'y', 'laserT', 'laserSegs', 'twinSegs', 'laserEnv', 'swingT', 'swingId', 'swingAim', 'swingArc', 'swingReach'].map(f => [f, o[f]]);
+    const was = me.imGraze, tick = () => pilotDo(0, () => imGrazeDuelTick());
+    // a round flown past this pilot, a step at a time; on whose turn, dashing or not, and what it struck on the way
+    const shot = (path, { by = 1, dash = false, pierce = -1 } = {}) => {
+      me.imGraze = 0; me.dashT = dash ? 0.2 : 0;
+      const b = { x: 0, y: 0, r: 4, hits: null };
+      path.forEach(([dx, dy], i) => { if (i === pierce) b.hits = new Set([S0.id]); b.x = me.x + dx; b.y = me.y + dy; pilotDo(by, () => imGrazeDuel(b)); });
+      me.dashT = 0; return me.imGraze;
+    };
+    const e = me.r + 4, past = off => [[-200, e + off], [-20, e + off], [0, e + off], [20, e + off], [200, e + off]];
+    out.round = shot(past(12)); out.wide = shot(past(40)); out.own = shot(past(12), { by: 0 });
+    out.pierced = shot(past(12), { pierce: 2 }); out.dash = shot([[-200, 0], [0, 0]], { dash: true });
+    // a lance: a beam across this pilot, so far off its edge each step, then gone
+    const touch = me.r + LANCE_HALF * ((o.br || 4.2) / 4.2);
+    const across = off => [{ x1: me.x - 300, y1: me.y + off, x2: me.x + 300, y2: me.y + off }];
+    const beam = (offs, twin) => {
+      me.imGraze = 0; o.laserEnv = 1;
+      for (const off of offs) { o.laserT = 0.3; o.laserSegs = across(off); o.twinSegs = twin == null ? [] : across(twin); tick(); }
+      o.laserT = 0; o.laserSegs = []; o.twinSegs = []; tick(); return me.imGraze;
+    };
+    out.lance = beam([touch + 40, touch + 12, touch + 12]); out.lanceHit = beam([touch + 12, touch - 4]); out.lanceWide = beam([touch + 40]);
+    out.twinHit = beam([touch + 12], 0);   // its twin's beam on the hull
+    // a swing from 100 px off, at this pilot or away, its edge so far short of the hull; struck, the stand-in says so
+    const swing = (short, { aim = 0, struck = false } = {}) => {
+      me.imGraze = 0; const sw = S0.swungBy;
+      o.x = me.x - 100; o.y = me.y; o.swingId = (o.swingId || 0) + 1000; o.swingT = 0.2;
+      o.swingAim = aim; o.swingArc = BLADE_ARC; o.swingReach = 100 - me.r - short;
+      tick(); tick(); if (struck) S0.swungBy = o.swingId;
+      o.swingT = 0; tick(); S0.swungBy = sw; return me.imGraze;
+    };
+    out.blade = swing(12); out.bladeHit = swing(-5, { struck: true }); out.bladeWide = swing(45); out.bladeAway = swing(12, { aim: Math.PI });
+    // two on each other's heels, both close: the first is settled as the second begins, then the second as it ends
+    me.imGraze = 0; o.swingId += 1000; o.swingT = 0.2; o.swingAim = 0; o.swingReach = 100 - me.r - 12;
+    tick(); o.swingId += 1; tick(); out.heels = [me.imGraze]; o.swingT = 0; tick(); out.heels.push(me.imGraze);
+    for (const [f, v] of keep) o[f] = v;
+    me.imGraze = was;
+    return JSON.stringify(out);
+  })()`));
+  ok(rules.round === IMV.pay && rules.wide === 0 && rules.own === 0, 'a round of theirs passing close is a graze; one wide of it, or one of its own, is not', rules);
+  ok(rules.pierced === 0 && rules.dash === IMV.dash, 'one that went through it landed, and one dashed through pays the dash', rules);
+  ok(rules.lance === IMV.pay && rules.lanceHit === 0 && rules.lanceWide === 0 && rules.twinHit === 0,
+     'a lance that came close and never touched is a graze, once, as the beam ends; one on the hull (or its twin\'s) is not', rules);
+  ok(rules.blade === IMV.pay && rules.bladeHit === 0 && rules.bladeWide === 0 && rules.bladeAway === 0,
+     'and a swing whose edge came close and missed; one that struck, fell short, or went the other way is not', rules);
+  ok(rules.heels.join() === [IMV.pay, 2 * IMV.pay].join(), 'two swings on each other\'s heels are two grazes', rules.heels);
+
+  // F wakes IMAGO, and Z X C V are its: V's ENDLESS FORMS grows, Z throws the eyespots
+  gI.run('__keys.push("f")');
+  await run(gI, 12, () => gI.run('pilotP(0).imT > 0 && !pilotP(0).imIntro'));
+  ok(gI.run('pilotP(0).imT > 0 && pilotP(0).imGraze === 0'), 'a full GRAZE and F: IMAGO, in a duel', gI.run('[pilotP(0).imT, pilotP(0).imGraze]'));
+  gI.run('__keys.push("v")');
+  await run(gI, 3, () => gI.run('!!pilotP(0).imEvo'));
+  gI.run('__keys.push("z")');
+  await run(gI, 3, () => gI.run('pilotP(0).imCd[0] > 0'));
+  ok(gI.run('!!pilotP(0).imEvo && pilotP(0).imCd[0] > 0'), 'V grows its ENDLESS FORMS there, and Z throws the eyespots', gI.run('[!!pilotP(0).imEvo, pilotP(0).imCd]'));
+  ok(drawErrs(gI) === '', 'all of it on the screen without a fault', drawErrs(gI));
+  // THE ARMORY's wheel holds the hull, but in a duel not the room, which is the other pilot's too
+  gI.run('__keys.push("c")');
+  await run(gI, 2, () => gI.run('!!pilotP(0).imArmMenu'));
+  const wheel = gI.run('[!!pilotP(0).imArmMenu, slowmo]');
+  gI.run('__keys.push("c")');
+  await run(gI, 2, () => gI.run('!pilotP(0).imArmMenu'));
+  ok(wheel[0] && wheel[1] === 1, 'its armory open, the duel runs on at speed', wheel);
+  // and it ends with the round, as the other forms do (the next round starts, and the engine ends it next step)
+  const ended = gI.run(`(() => { const m = RUN.pvp, me = pilotP(0);
+    me.imIntro = { t: 1, cut: false }; m.phase = 'picks'; m.owed = [0, 0]; pilotsEach(() => { offers.length = 0; gearOffer = null; }); state = 'play';
+    PVP.rounds.tick(1 / 60);
+    const out = [m.phase, me.imT <= 1e-6, me.imIntro];
+    pilotDo(0, () => updatePlayer(1 / 60)); out.push(me.imT, !!me.imEvo); return out; })()`);
+  ok(ended[0] === 'fight' && ended[1] && ended[2] === null && ended[3] === 0, 'IMAGO woken last round does not carry into the next', ended);
+
+  // a VOIDRUNNER bot: a full GRAZE wakes IMAGO, then it grows ENDLESS FORMS and dodges and throws with its moves
+  const gV = bout('ember', { pilot: 'runner', awake: true, skill: 0.9 }, AIMED(130, 190) + CLEAN
+    + `globalThis.__im = { on: 0, evo: 0, moved: 0 }; LS.after = () => { const b = pilotP(1); if (!b || !RUN.pvp || RUN.pvp.phase !== 'fight') return;
+        if (!__im.on && !(b.imT > 0)) b.imGraze = IM_MAX;
+        if (b.imT > 0 && !__im.on) __im.on = LS.tick;
+        if (b.imEvo && !__im.evo) __im.evo = LS.tick;
+        if (b.imCd && (b.imCd[0] > 0 || b.imCd[1] > 0)) __im.moved = 1; };`);
+  await run(gV, 40, () => gV.run('__im.on > 0 && __im.evo > 0 && __im.moved > 0'));
+  ok(gV.run('__im.on') > 0, 'a VOIDRUNNER bot wakes IMAGO on a full GRAZE', gV.run('__im'));
+  ok(gV.run('__im.evo') > 0 && gV.run('__im.moved') > 0, 'grows ENDLESS FORMS, and fights with FLUTTER and the eyespots', gV.run('__im'));
+  ok(drawErrs(gV) === '', 'and the other screen draws it without a fault', drawErrs(gV));
 }
 
 section('arriving without the lobby');

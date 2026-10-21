@@ -1226,11 +1226,13 @@ brief."
   - Nothing got shorter: a tenth of base rounds were over within 17 s
     before and after, and of awake ones within 9 s before and 11 s after.
 - **Tested:** `npm run test:pvp`, engine part 366 checks.
-  - The two-machine match plays with overtime brought forward (12 s, the
-    walls in over 8): rounds go to overtime on both, never early, the
-    walls close and the held health only falls, with the walls in every
-    fingerprint and both games the same step for step. The result marks
-    which rounds went to overtime.
+  - The two-machine match plays with overtime brought forward (6 s, the
+    walls in over 6; at 12 s and 8, a random match of two short awake
+    rounds never saw it, one run in several): rounds go to overtime on
+    both, never early, the walls close (within a second of the clock, and
+    2% of the way, as the arena eases after its mark) and the held health
+    only falls, with the walls in every fingerprint and both games the same
+    step for step. The result marks which rounds went to overtime.
   - The rules one at a time: nothing before 40 s, the countdown, the
     banner, a blow worth 1.8 at ten seconds in, the caps over x3.4, the
     walls halfway at halfway, shut at 480 by 320 on the middle and no
@@ -1254,6 +1256,61 @@ brief."
   - `40 s`, `20 s`, `480 × 320` and `8%` are a first setting, made against
     bots that dodge more than most people do: real gun duels should reach
     overtime less often.
+
+### VOIDRUNNER's evolution in a duel (user, 21 Oct)
+
+"Add voidrunners evolution to the pvp worker since it doesn't work right now
+(no graze meter ever shows up)."
+
+- **Why nothing showed:** IMAGO's HUD (`drawImagoHud`) returned at once in
+  PvP, and nothing could fill the meter. GRAZE is paid by the room's rounds
+  passing close (`imGrazeRound`, in `updateEBullets`), but the other pilot's
+  rounds are its own shots at a stand-in (`bullets`, not `ebullets`), and a
+  lance or a blade throws no rounds at all. `imEvoOf` was off in PvP too, so
+  V (ENDLESS FORMS) grew nothing.
+- **Now** (the engine, IMAGO IN A DUEL; nothing changes outside PvP):
+  - The meter is on the HUD, as in a run.
+  - `imGrazeDuel` (in `updateBullets`, on the other pilot's turn): one of its
+    rounds that passes within `IM_GRAZE_R` of this pilot's hull and leaves
+    without landing pays `IM_PAY` (2), one dashed through `IM_PAY_DASH` (8),
+    by the run's own rule. One that went through it (a piercing round) has
+    landed and pays nothing; this pilot's own rounds never pay it.
+  - `imGrazeDuelTick` (each step, on this pilot's turn): the other pilot's
+    lance, a beam (or its twin's) that came within `IM_GRAZE_R` of the hull
+    and ended without touching it, and its blade, a swing whose edge came
+    that close and never struck the stand-in, pay one graze each (a swing
+    settled as it ends, or as the next begins on its heels).
+  - The room's rounds in an infested arena pay as they do in a run.
+  - Z X C V all run, ENDLESS FORMS included; while it evolves, a graze is
+    PROGRESS, as anywhere.
+  - THE ARMORY's wheel (C) holds the hull while it is open, but in a duel it
+    does not slow the room (`ARM_SLOW`): the room is the other pilot's too,
+    and an open wheel could have held a duel at an eighth of its speed for
+    as long as it liked (Bullet Time is banned from a duel for the same
+    reason).
+  - IMAGO ends with its round (`rounds.js`, `startRound`), as the other
+    forms do; a cut-in still playing is cut short with it.
+- **The bot** (`bot.js`, `kit`): F on a full GRAZE (`wake`, as the others),
+  V at once, X FLUTTER when a blow is about to land, Z's eyespots thrown
+  where the rival will be when they burst. It leaves THE ARMORY shut: it is
+  a wheel picked with the aim.
+- **Measured** in Chromium, a bot match: flying round a gun bot at 170–260
+  px without firing, the meter was at 8 four seconds into the fight and full
+  at fourteen.
+- **Tested:** `npm run test:pvp`, engine part 381 checks.
+  - The bot's rounds fill an awake VOIDRUNNER's GRAZE, and the meter draws.
+  - The rules one at a time: a round passing close pays, one wide, its own,
+    or one that pierced it does not, a dash through pays the dash; a lance
+    close but never on it pays once, one on the hull (its twin's too) or
+    wide does not; a swing whose edge came close and missed pays, one that
+    struck, fell short or went the other way does not, and two on each
+    other's heels pay twice.
+  - F wakes IMAGO, V grows ENDLESS FORMS, Z throws; the screen draws it; the
+    armory open leaves the duel at speed; IMAGO ends with the round.
+  - A VOIDRUNNER bot wakes IMAGO on a full GRAZE, grows ENDLESS FORMS and
+    uses FLUTTER and the eyespots, and the other screen draws it.
+  - 3 mutants (the HUD's old PvP return, the rounds' graze unhooked, the
+    armory's slow in a duel), all caught.
 
 ## The shared data (D1)
 
