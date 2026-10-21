@@ -274,7 +274,9 @@ const S = [
   { name: 'deadgame',   char: 'hacker', seed: 117, steps: 7200,  kit: true,
     starter: "hlP().q.q3 = 2; hlAreaStart('house'); hlArea.n = 4; wave = HL_AREAS.house.waveFrom + 3; betweenWaves = 0.5" },
   // ALL HALLOWS chapter III: THE YARD's waves (RISING, the risen, the gravediggers' pits, the bells), and
-  // THE RAGE QUIT's fight flown by THE HACKER, so the risen, and a bell's graves, also fight for you
+  // THE RAGE QUIT's fight. Asked for THE HACKER, as deadgame is; a test save has not earned it, so both fly
+  // VOIDRUNNER (handing it in by runCharNext flies it, and parts SUPERUSER's screen canvases, SUI, from the
+  // snapshot: not this scenario's to fix). The yard's own test holds a bell and risen of yours to their rules.
   { name: 'yard',       char: 'runner', seed: 124, steps: 7200,  starter: "hlAreaStart('yard')" },
   { name: 'ragequit',   char: 'hacker', seed: 125, steps: 7200,  kit: true,
     starter: "hlP().q.q5 = 2; hlAreaStart('yard'); hlArea.n = 4; wave = HL_AREAS.yard.waveFrom + 3; betweenWaves = 0.5" },
