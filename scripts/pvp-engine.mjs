@@ -254,7 +254,7 @@ const WATCH = `
   globalThis.__fp = new Map();
   globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
                        wildMax: 0, wildClean: 0, standOut: 0, tales: 0,
-                       ot: { steps: 0, early: 0, narrow: 1e9, rose: 0, held: null } };
+                       ot: { steps: 0, early: 0, narrow: 1e9, deep: 0, late: -1e9, rose: 0, held: null } };
   let __at = '';
   /* What a hit took is the health it left, read where the blow lands: a
      killing one meets Second Wind or a DEADMAN BRAKE (reviveOrDie), which
@@ -301,6 +301,10 @@ const WATCH = `
       o.steps++;
       if (m.t < PVP.OVERTIME.at) o.early++;
       o.narrow = Math.min(o.narrow, arena.x1 - arena.x0);
+      // how far into overtime, and how far the walls are behind where its clock has them a second ago
+      const O = PVP.OVERTIME, A = PVP.maps.ARENA, into = m.t - O.at;
+      o.deep = Math.max(o.deep, into);
+      o.late = Math.max(o.late, (arena.x1 - arena.x0) - (A.w + (O.w - A.w) * Math.min(1, Math.max(0, into - 1) / O.close)));
       if (m.held && o.held && o.held.round === m.round) for (const k of [0, 1]) o.rose = Math.max(o.rose, m.held[k] - o.held.hp[k]);
       o.held = m.held ? { round: m.round, hp: m.held.slice() } : null;
     }
@@ -478,7 +482,10 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   // overtime, brought forward: it came, on time, closed the walls in and held the health where it fell
   ok(otLog.some(x => x) && log.ot.steps > 60, 'a round ran past its clock and went to overtime', [otLog, log.ot.steps]);
   ok(log.ot.early === 0, 'never before its time', log.ot.early);
-  ok(log.ot.narrow < H.run('PVP.maps.ARENA.w') - 300, 'the walls closed in', log.ot.narrow);
+  /* the walls closed in on overtime's clock, however long a round stayed in it: never more than a
+     second behind where the clock has them, and in by the time it had run a second or more */
+  ok(log.ot.late <= 1e-6 && (log.ot.deep < 1.5 || log.ot.narrow < H.run('PVP.maps.ARENA.w') - 20), 'the walls closed in',
+     { narrow: Math.round(log.ot.narrow), late: +log.ot.late.toFixed(1), deep: +log.ot.deep.toFixed(1) });
   ok(log.ot.rose <= 1e-9, 'and the health it held only ever fell', log.ot.rose);
 
   // the same game on both, start to finish
