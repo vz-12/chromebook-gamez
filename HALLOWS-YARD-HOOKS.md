@@ -3,14 +3,13 @@
 Chapter III of Book I (opens 23 Oct 2026, by `HL_EVENT.chapters`), and the
 epilogue that opens with it. The logic
 plays end to end under placeholder hooks in `index.html` (shapes and labels,
-just enough to play it). **No art is drawn over them yet**: the yard's art goes
-in `hl-art.js`, in a new section `ALL HALLOWS · ACT III: THE YARD — the look`
-beside the house's, and its functions replace the placeholders by name, as Act
-I's and Act II's do. This file is the contract both keep, the way
-`HALLOWS-HOUSE-HOOKS.md` is for the house and `HALLOWS-GUIDE.txt` (on `beta`) is
-for Act I.
+just enough to play it). The art is drawn over them in `hl-art.js`, in its
+section `ALL HALLOWS · ACT III: THE YARD — the look` after the house's, and its
+functions replace the placeholders by name, as Act I's and Act II's do. This
+file is the contract both keep, the way `HALLOWS-HOUSE-HOOKS.md` is for the
+house and `HALLOWS-GUIDE.txt` (on `beta`) is for Act I.
 
-## The look (to draw)
+## The look
 
 From `HALLOWEEN-PLAN.txt` §8 and §12 and `EVENT-DRAFTS.txt` (both on `beta`):
 a graveyard of runs, at night. Each headstone is one run that was quit, with
@@ -44,6 +43,37 @@ epitaph and a bell cracking (B, bespoke deaths), THE RAGE QUIT's gates filling
 `npm run test:hallows` flies the yard on the placeholders and again with
 `hl-art.js` loaded (every hook called, none throwing, and the patch's and the
 house's hooks never asked to draw the yard).
+
+### As drawn
+
+- **The stones** are sized by how far the run got: a wooden cross and a tag
+  (to wave 5), a small round-top (to 10), a tablet with the hull cut in (to
+  17), a ringed cross on a plinth (to 26), a carved tablet (past that). Each is
+  a sprite made once per stone; one at rest, with its kerb and mound, is a
+  single `drawImage`. The low kerb round it is its plot.
+- **The soul's stone** clears a third for each marked gravedigger stopped
+  (`hlProgress('q5')`). The one filling it heaps the earth back over it as
+  `e.hlFill` climbs. Once read, it is edged and lit in the soul's cold.
+- **The gates**: iron leaves swing shut on whoever stands in one, and the lamp
+  on the second pillar is lit by who that is: white for you, cold for the soul,
+  grey for a risen, his rose while he is making for it. Red is kept for the run
+  line, the burn ring and STAND HERE.
+- **THE RAGE QUIT**: his screen says what he is about to do: a squint for THE
+  CONTROLLER, ring eyes for MASH, chevrons for a charge, a QUIT? box while he
+  says he is done. Running, we see his back: the back of the screen, and AFK
+  across his shoulders. His bar has an ESC key at each quarter, struck through
+  once that quarter stands, a ghost back to `e.hlQHp`, and, while he runs, the
+  burn marked. Dying, his screen says gg and tips over, he goes into the earth,
+  and a stone comes up: `WAVE 20 · 'gg'`.
+- **The jolt** is the screen rewinding like a tape. MASH's rounds are A, B, X
+  and Y buttons.
+- **The light**: the moon, high in the north-west, throws every stone's shadow
+  to the south-east. Then your light, the lamps, the soul's stone and his
+  screen. Fog drifts in the glow.
+- **The rider** is a small whole hull with its lantern warm. At twenty it fills
+  out and goes straight up in a column of cold.
+- Art-side state is in `HL_ART_YD` (WeakMaps for his cord and a button's
+  letter), never on a body.
 
 ## What is built
 

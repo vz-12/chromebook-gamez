@@ -3019,15 +3019,17 @@ function hlSkinDeathFx(me) {
    hook will ask for, key and size, or the draw simply bakes it again. ---- */
 function hlArtPreload() {
   const vx = WORLD.w / 2 - VIG_SIZE.w / 2, vy = WORLD.h / 2 - VIG_SIZE.h / 2;
-  // one area's floor, not both (each is the whole arena): the house's once it
-  // is open and the patch is behind you, the patch's until then
-  let house = false;
-  try { house = hlChapterOpen(1) && hlQDone('q2'); } catch (err) { house = false; }
+  // one area's floor, not two (each is the whole arena): the yard's once it is
+  // open and the house is behind you, the house's once the patch is, the
+  // patch's until then
+  let house = false, yard = false;
+  try { house = hlChapterOpen(1) && hlQDone('q2'); yard = hlChapterOpen(2) && hlQDone('q4'); } catch (err) { house = yard = false; }
   return [
     // the vigil's room: drawVigilWorld bakes it about the room's centre
     () => hlBakePrep('hl-vigil-room', vx, vy, VIG_SIZE.w, VIG_SIZE.h, g => hlArtVigilBake(g, vx, vy)),
     // the area's floor: the whole arena, as drawHlAreaFloor / drawHlHouseFloor bake it
-    house ? () => hlBakePrep('hl-house-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtHsFloorBake(g, 0, 0, WORLD.w, WORLD.h))
+    yard ? () => hlBakePrep('hl-yard-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtYdFloorBake(g, 0, 0, WORLD.w, WORLD.h))
+    : house ? () => hlBakePrep('hl-house-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtHsFloorBake(g, 0, 0, WORLD.w, WORLD.h))
           : () => hlBakePrep('hl-patch-floor', 0, 0, WORLD.w, WORLD.h, g => hlArtPatchFloor(g, 0, 0, WORLD.w, WORLD.h)),
     // every light's falloff, and the glows
     () => hlSpritePrep(['#fb923c', '#a5f3fc', '#fed7aa', '#f97316', '#fbbf24', '#64748b', '#94a3b8',
@@ -3036,6 +3038,9 @@ function hlArtPreload() {
     // and the house's
     () => { if (house) hlSpritePrep(['#ece7ff', '#7dd3fc', '#ddd6fe', '#c4b5fd', '#e2e8f0', '#93c5fd', '#e9d5ff',
                                      '#e0e7ff', '#fca5a5', '#818cf8', '#a5b4fc', '#ede9fe', '#f8fafc', '#4ade80']); },
+    // and the yard's
+    () => { if (yard) hlSpritePrep(['#c7d2fe', '#e0e7ff', '#fb7185', '#fecdd3', '#e7e5e4', '#f1f5f9', '#fcd34d',
+                                    '#a3e635', '#d6d3d1', '#f43f5e', '#ffffff']); },
     // where the candles stand, for today's count
     () => hlArtCandles(Math.min(260, Math.floor(Vigil.shown() / 10)))
   ];
@@ -4821,6 +4826,2009 @@ function drawHlGhostHud(g) {
   hlArtText(String(Math.max(0, g.need - g.kills)), cx, cy + 6, { px: 17, w: 800, mono: true, al: 'center', col: '#f8fafc' });
   hlArtText('STILL HERE', cx, cy - R - 20, { px: 12, w: 800, ls: '0.36em', al: 'center', col: '#e2e8f0' });
   hlArtText('FELL ' + Math.max(0, g.need - g.kills) + ' MORE   ·   ' + Math.max(0, g.T - g.t).toFixed(1) + 's', cx, cy + R + 26, { px: 10, w: 700, ls: '0.2em', al: 'center', col: urgent ? C.hurtHi : '#94a3b8' });
+  ctx.restore();
+}
+
+/* ===========================================================================
+   ALL HALLOWS · ACT III: THE YARD — the look
+   Drawn over the ACT III placeholders, hook for hook, on the contract in
+   HALLOWS-YARD-HOOKS.md. Helpers are hlArtYd*, constants HL_ART_YD*. As in
+   the house, what is kept for a body between frames (his cord, a button's
+   letter) lives in WeakMaps here, never on the body.
+
+   The grammar, in one paragraph: a graveyard of runs, at night. Every stone
+   is one run he quit, cut with its wave, its hull and the last thing typed
+   in it, and the further the run got the bigger the stone: a wooden cross
+   for a run that died at wave 3, a carved tablet for one that nearly made
+   it. A low wall, a gate in the middle of each side, gravel between them,
+   two dead trees and the fog. Lit by the moon and nothing warm: a gate's
+   lamp is lit only by whoever stands in it. Stone grey is the yard's. Cold
+   (#a5f3fc) is only ever the soul and its errand. Rose (#fb7185) is his.
+   Red is only what is about to hit you, and lime is yours.
+=========================================================================== */
+
+const HL_ART_YD_C = {
+  turf: '#121915', turfHi: '#1b241d', turfLo: '#0a0f0c', grass: '#2a3826', grassHi: '#3d4f33', moss: '#4d5e36', lichen: '#7a8458',
+  earth: '#2b2119', earthHi: '#3d3024', earthLo: '#16100b', clay: '#4a3a2b', hole: '#050403',
+  gravel: '#22211f', gravelHi: '#3a3835', flag: '#1c1b19', flagHi: '#2a2826',
+  stone: '#6b6762', stoneHi: '#a8a29e', stoneLo: '#3f3c39', stoneDeep: '#1f1d1b', carve: '#1f1d1b', soulStone: '#8a857f',
+  wall: '#2e2c2a', wallHi: '#4a4643', wallLo: '#181716', iron: '#1f2226', ironHi: '#4b5563',
+  wood: '#5c4330', woodHi: '#7a5a40', woodLo: '#2e2118', tag: '#d8c39a',
+  moon: '#c7d2fe', moonHi: '#e0e7ff', fog: '#cbd5e1',
+  ghost: '#cbd5e1', ghostHi: '#f1f5f9', ghostLo: '#64748b', grey: '#94a3b8',
+  cloak: '#2a2622', cloakHi: '#4a433c', hood: '#3a342e', spade: '#78716c',
+  bronze: '#a16207', bronzeHi: '#fcd34d', bronzeLo: '#5c3a0a', bronzeDeep: '#2a1a05', verdigris: '#4d7c6f', rope: '#a8977a',
+  rq: '#fb7185', rqHi: '#fecdd3', rqMid: '#e11d48', rqLo: '#9f1239', rqDeep: '#4c0519', jeans: '#1e1b2e',
+  bezel: '#26262f', bezelHi: '#3a3a46', glass: '#0b0d12', crack: '#f8fafc',
+  cold: '#a5f3fc', coldHi: '#e0f7fb', coldLo: '#164e63',
+  hurt: '#ef4444', hurtHi: '#fca5a5', kin: '#a3e635', you: '#f8fafc', ink: '#e2e8f0', dim: '#94a3b8', accent: '#d6d3d1', warm: '#fcd34d'
+};
+/* the kind of stone a run gets, by how far it got: [up to wave, kind] */
+const HL_ART_YD_KINDS = [[5, 'wood'], [10, 'small'], [17, 'tablet'], [26, 'celtic'], [99, 'grand']];
+const HL_ART_YD_HULLS = ['runner', 'ember', 'melee', 'hacker'];
+const HL_ART_YD_BTNS = ['A', 'B', 'X', 'Y'];
+/* art-side state: what lies fallen, the tolls, the lines left behind; nothing the logic reads */
+const HL_ART_YD = {
+  cord: new WeakMap(), btn: new WeakMap(), stones: new Map(),
+  lines: [], tolls: [], fallen: [], strikes: [], chats: [],
+  shut: [0, 0, 0, 0], enterAt: -9, joltAt: -9, backAt: -9, uncoverAt: -9, marchAt: -9, soulAt: -9, rideAt: -9, takeAt: -9,
+  moteT: 0, leafT: 0, ride: null
+};
+
+/* ================================ small tools ============================== */
+function hlArtYdEll(g, x, y, rx, ry, rot = 0) { g.beginPath(); g.ellipse(x, y, Math.max(0.01, rx), Math.max(0.01, ry), rot, 0, TAU); }
+function hlArtYdKind(wave) { for (const [w, k] of HL_ART_YD_KINDS) if (wave <= w) return k; return 'grand'; }
+const hlArtYdHull = sd => HL_ART_YD_HULLS[Math.floor(hlHash(sd * 3.3) * 4) % 4];
+const hlArtYdSeed = g => g.id * 7.31 + (g.wave | 0) * 0.37;
+/* text cut into stone: a pale lower lip, then the cut */
+function hlArtYdCut(g, t, x, y, px, o = {}) {
+  g.font = (o.w || 800) + ' ' + px + 'px ' + (o.mono ? HL_ART_MONO : HL_ART_FONT);
+  g.letterSpacing = o.ls || '0em';
+  g.textAlign = 'center';
+  g.fillStyle = o.lip || 'rgba(214,211,209,0.3)'; g.fillText(t, x, y + 0.7);
+  g.fillStyle = o.col || HL_ART_YD_C.carve; g.fillText(t, x, y);
+  g.letterSpacing = '0em';
+}
+/* words to lines no wider than maxW, on any context */
+function hlArtYdWrap(g, text, maxW) {
+  const out = []; let line = '';
+  for (const w of String(text).split(' ')) {
+    const t = line ? line + ' ' + w : w;
+    if (g.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
+  }
+  if (line) out.push(line);
+  return out;
+}
+/* a hull, cut small: the run's own ship, nose up. On any context. */
+function hlArtYdHullGlyph(g, id, x, y, s, col) {
+  g.save(); g.translate(x, y); g.rotate(-Math.PI / 2); g.scale(s, s);
+  g.beginPath();
+  if (id === 'hacker') { g.moveTo(18, 0); g.lineTo(4, 6); g.lineTo(10, 13); g.lineTo(-4, 11); g.lineTo(-9, 0); g.lineTo(-4, -11); g.lineTo(10, -13); g.lineTo(4, -6); }
+  else if (id === 'ember') { g.moveTo(22, 0); g.lineTo(9, 7); g.lineTo(2, 13); g.lineTo(-7, 12); g.lineTo(-12, 3); g.lineTo(-9, 0); g.lineTo(-12, -3); g.lineTo(-7, -12); g.lineTo(2, -13); g.lineTo(9, -7); }
+  else if (id === 'melee') { g.moveTo(12, 0); g.lineTo(11, 10); g.lineTo(2, 13); g.lineTo(-10, 9); g.lineTo(-14, 0); g.lineTo(-10, -9); g.lineTo(2, -13); g.lineTo(11, -10); }
+  else { g.moveTo(18, 0); g.lineTo(-10, 11); g.lineTo(-5, 0); g.lineTo(-10, -11); }
+  g.closePath(); g.fillStyle = col; g.fill();
+  g.restore();
+}
+/* a sprite of its own: w × h around (ox, oy), drawn once at the screen's resolution */
+function hlArtYdSprite(w, h, ox, oy, draw) {
+  const dpr = typeof DPR === 'number' ? DPR : 1, c = document.createElement('canvas');
+  c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr);
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, ox * dpr, oy * dpr);
+  draw(g);
+  return { c, w, h, ox, oy };
+}
+
+/* ================================= the stones ================================
+   Each grave is drawn round its middle (g.x, g.y): the stone stands at the
+   back of its plot, its foot 20 px up; the earth over the run is in front of
+   it; a low kerb round both is the plot a death raises it from. The stone
+   itself, and a grave at rest whole, are sprites, made once per stone. */
+const HL_ART_YD_FOOT = 20;
+function hlArtYdStoneSprite(g, bare) {
+  const dpr = typeof DPR === 'number' ? DPR : 1;
+  const key = (bare ? 'b:' : 'r:') + g.id + ':' + g.wave + ':' + g.hull + ':' + g.said + ':' + dpr;
+  let S = HL_ART_YD.stones.get(key);
+  if (S) return S;
+  const sd = hlArtYdSeed(g);
+  S = hlArtYdSprite(104, 152, 52, 116, s => {
+    if (!bare) { const R = hlArtRng(Math.floor(sd * 1000) + 3); hlArtYdKerb(s, 0, 0, R, false); }
+    s.save(); s.translate(0, -HL_ART_YD_FOOT); hlArtYdStoneDraw(s, sd, g); s.restore();
+    if (!bare) { const R = hlArtRng(Math.floor(sd * 1000) + 5); hlArtYdMound(s, 0, 0, R); hlArtYdKerb(s, 0, 0, R, true); }
+  });
+  HL_ART_YD.stones.set(key, S);
+  return S;
+}
+/* a stone, its foot at (0, 0), standing up from it */
+function hlArtYdStoneDraw(g, sd, gr) {
+  const C = HL_ART_YD_C, R = hlArtRng(Math.floor(sd * 1000) + 7), kind = hlArtYdKind(gr.wave | 0);
+  const said = String(gr.said || ''), wave = gr.wave | 0, hull = gr.hull | 0, hid = hlArtYdHull(sd), sc = 0.92 + R() * 0.16;
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  // its shadow at the foot
+  g.fillStyle = 'rgba(0,0,0,0.45)'; hlArtYdEll(g, 2, 1, 26 * sc, 4.5); g.fill();
+  if (kind === 'wood') {
+    // a wooden cross and a tag: it never got far
+    const h = 46 * sc;
+    g.fillStyle = C.woodLo; g.fillRect(-4, -h, 8, h);
+    g.fillStyle = C.wood; g.fillRect(-4, -h, 5.5, h);
+    g.fillStyle = C.woodHi; g.fillRect(-4, -h, 1.6, h);
+    g.fillStyle = C.woodLo; g.fillRect(-17, -h + 9, 34, 8.5);
+    g.fillStyle = C.wood; g.fillRect(-17, -h + 9, 34, 6);
+    g.fillStyle = C.woodHi; g.fillRect(-17, -h + 9, 34, 1.4);
+    g.strokeStyle = 'rgba(28,20,13,0.6)'; g.lineWidth = 0.7;
+    for (let i = 0; i < 3; i++) { const yy = -h + 20 + R() * (h - 26); g.beginPath(); g.moveTo(-2.2, yy); g.lineTo(-2.2 + R() * 2, yy + 7); g.stroke(); }
+    hlArtYdCut(g, 'W' + wave, 0, -h + 15.4, 6, { col: '#1c140d', lip: 'rgba(216,195,154,0.3)' });
+    // the tag, hung off the bar on a string, with the last thing typed
+    g.save(); g.translate(10, -h + 22); g.rotate(0.12 + (R() - 0.5) * 0.12);
+    g.font = '400 6.5px ' + HL_ART_MONO;
+    const t = '‘' + said + '’', tw = Math.max(22, g.measureText(t).width + 7);
+    g.strokeStyle = C.tag; g.lineWidth = 0.6; g.beginPath(); g.moveTo(-tw / 2 + 3, -5); g.lineTo(-tw / 2 + 3, 0); g.stroke();
+    g.fillStyle = C.tag; g.fillRect(-tw / 2, 0, tw, 15);
+    g.fillStyle = 'rgba(120,90,60,0.35)'; g.fillRect(-tw / 2, 13, tw, 2);
+    g.fillStyle = '#3b2a1e'; g.textAlign = 'center'; g.fillText(t, 0, 7.5);
+    g.font = '700 4.5px ' + HL_ART_FONT; g.fillText('HULL ' + hull + '%', 0, 12.5);
+    g.restore();
+    return;
+  }
+  // stone: lit from the north-west, its thickness on the far side
+  const shape = (dx, dy) => {
+    g.beginPath();
+    if (kind === 'small') { const w = 19 * sc, h = 40 * sc; g.moveTo(-w + dx, dy); g.lineTo(-w + dx, -h + w + dy); g.arc(dx, -h + w + dy, w, Math.PI, 0); g.lineTo(w + dx, dy); }
+    else if (kind === 'tablet') { const w = 25 * sc, h = 54 * sc; g.moveTo(-w + dx, dy); g.lineTo(-w + dx, -h + w * 0.7 + dy); g.quadraticCurveTo(-w + dx, -h + dy, dx, -h + dy); g.quadraticCurveTo(w + dx, -h + dy, w + dx, -h + w * 0.7 + dy); g.lineTo(w + dx, dy); }
+    else if (kind === 'grand') {
+      const w = 31 * sc, h = 76 * sc;
+      g.moveTo(-w + dx, dy); g.lineTo(-w + dx, -h + 24 + dy); g.quadraticCurveTo(-w + dx, -h + 10 + dy, -w + 12 + dx, -h + 8 + dy);
+      g.quadraticCurveTo(dx, -h - 8 + dy, w - 12 + dx, -h + 8 + dy); g.quadraticCurveTo(w + dx, -h + 10 + dy, w + dx, -h + 24 + dy); g.lineTo(w + dx, dy);
+    } else {
+      // celtic: a ringed cross on a plinth
+      const h = 66 * sc;
+      g.rect(-21 + dx, -16 + dy, 42, 16);                       // the plinth
+      g.rect(-6 + dx, -h + dy, 12, h - 15);                     // the shaft
+      g.rect(-20 + dx, -h + 13 + dy, 40, 11);                   // the arms
+    }
+    g.closePath();
+  };
+  shape(2.6, 0.4); g.fillStyle = C.stoneDeep; g.fill();
+  shape(0, 0);
+  const lg = g.createLinearGradient(-30, -60, 30, 0);
+  lg.addColorStop(0, kind === 'grand' ? '#8a857f' : C.stoneHi); lg.addColorStop(0.35, kind === 'grand' ? '#78716c' : C.stone); lg.addColorStop(1, C.stoneLo);
+  g.fillStyle = lg; g.fill();
+  if (kind === 'celtic') {
+    const h = 66 * sc, cy = -h + 18.5;
+    g.strokeStyle = C.stoneDeep; g.lineWidth = 5; g.beginPath(); g.arc(1.4, cy + 0.4, 13, 0, TAU); g.stroke();
+    g.strokeStyle = C.stone; g.lineWidth = 4.2; g.beginPath(); g.arc(0, cy, 13, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(214,211,209,0.35)'; g.lineWidth = 1; g.beginPath(); g.arc(0, cy, 15, Math.PI * 0.95, Math.PI * 1.6); g.stroke();
+    g.fillStyle = 'rgba(214,211,209,0.25)'; g.fillRect(-6, -h, 1.6, h - 15); g.fillRect(-21, -16, 42, 1.4);
+    hlArtYdHullGlyph(g, hid, 0, cy, 0.24, C.carve);
+    hlArtYdCut(g, 'WAVE ' + wave, 0, -8.6, 6, {});
+    hlArtYdCut(g, '‘' + said + '’', 0, -2, 5.6, { mono: true, w: 400 });
+  } else {
+    // the edge the moon catches, and a panel cut in on the big ones
+    g.save(); shape(0, 0); g.clip();
+    g.lineWidth = 2; g.strokeStyle = 'rgba(214,211,209,0.4)'; g.translate(1.4, 1.4); shape(0, 0); g.stroke();
+    g.restore();
+    const top = kind === 'small' ? -40 * sc : kind === 'tablet' ? -54 * sc : -76 * sc;
+    if (kind === 'grand') {
+      g.strokeStyle = 'rgba(31,29,27,0.55)'; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(-24, -4); g.lineTo(-24, top + 26); g.quadraticCurveTo(0, top + 2, 24, top + 26); g.lineTo(24, -4); g.stroke();
+    }
+    const L = kind === 'small' ? { hull: 0, w: 7, h: 5.2, s: 5.4, mono: 5.4, y: top + 15, lw: 30 }
+            : kind === 'tablet' ? { hull: 0.3, w: 9, h: 6, s: 8, mono: 8, y: top + 26, lw: 40 }
+            : { hull: 0.4, w: 11, h: 7, s: 11, mono: 10, y: top + 38, lw: 44 };
+    if (L.hull) hlArtYdHullGlyph(g, hid, 0, L.y - L.w - 8, L.hull, 'rgba(31,29,27,0.85)');
+    hlArtYdCut(g, 'WAVE ' + wave, 0, L.y, L.w, {});
+    hlArtYdCut(g, 'HULL ' + hull + '%', 0, L.y + L.h + 2.5, L.h, { w: 700 });
+    g.font = '400 ' + L.mono + 'px ' + HL_ART_MONO;
+    let lines = hlArtYdWrap(g, '‘' + said + '’', L.lw), px = L.mono;
+    if (lines.length > 1) { px = L.mono * 0.82; g.font = '400 ' + px + 'px ' + HL_ART_MONO; lines = hlArtYdWrap(g, '‘' + said + '’', L.lw); }
+    lines.slice(0, 2).forEach((t, i) => hlArtYdCut(g, t, 0, L.y + L.h + 4 + px * 1.3 + i * px * 1.1, px, { mono: true, w: 400 }));
+  }
+  // weather: lichen, a crack now and then, moss at the foot
+  g.save(); shape(0, 0); g.clip();
+  for (let i = 0; i < 3; i++) {
+    g.fillStyle = rgba(C.lichen, 0.25 + R() * 0.25);
+    hlArtYdEll(g, (R() - 0.5) * 40, -R() * 60, 2 + R() * 4, 1.5 + R() * 3, R() * TAU); g.fill();
+  }
+  if (R() < 0.45) {
+    g.strokeStyle = 'rgba(15,14,13,0.7)'; g.lineWidth = 0.8; g.beginPath();
+    let cx = (R() - 0.5) * 30, cy = -50 - R() * 20; g.moveTo(cx, cy);
+    for (let k = 0; k < 4; k++) { cx += (R() - 0.5) * 9; cy += 7 + R() * 6; g.lineTo(cx, cy); }
+    g.stroke();
+  }
+  g.fillStyle = rgba(C.moss, 0.75); hlArtYdEll(g, -12 + R() * 8, -1, 9 + R() * 6, 3.4); g.fill();
+  g.restore();
+}
+/* the kerb round a plot: its two sides, low and half in the grass, or (front)
+   the end whose face we see, sunk and broken now and then */
+function hlArtYdKerb(g, x, y, R, front) {
+  const C = HL_ART_YD_C, x0 = x - 27, x1 = x + 27, y0 = y - 20, y1 = y + 27, col = hlMix(C.stoneLo, C.turfHi, 0.3);
+  if (!front) {
+    for (const sx of [x0, x1 - 3]) {
+      g.fillStyle = col; g.fillRect(sx, y0, 3, y1 - y0 - 2);
+      g.fillStyle = 'rgba(214,211,209,0.16)'; g.fillRect(sx, y0, 1, y1 - y0 - 2);
+      g.fillStyle = 'rgba(42,56,38,0.8)'; for (let i = 0; i < 3; i++) g.fillRect(sx - 1, y0 + R() * (y1 - y0 - 4), 5, 2);
+    }
+    return;
+  }
+  const gap = R() < 0.3 ? x0 + 10 + R() * 26 : null, sink = R() < 0.4 ? 1 + R() * 1.5 : 0;
+  const piece = (a, b, dy) => {
+    g.fillStyle = col; g.fillRect(a, y1 - 3 + dy, b - a, 3);
+    g.fillStyle = 'rgba(10,12,10,0.6)'; g.fillRect(a, y1 + dy, b - a, 2);
+    g.fillStyle = 'rgba(214,211,209,0.16)'; g.fillRect(a, y1 - 3 + dy, b - a, 1);
+  };
+  if (gap) { piece(x0, gap, 0); piece(gap + 7, x1, sink); }
+  else piece(x0, x1, sink * 0.5);
+  if (R() < 0.5) { g.fillStyle = rgba(C.moss, 0.7); hlArtYdEll(g, x0 + R() * 54, y1 - 1, 4 + R() * 4, 2); g.fill(); }
+}
+/* the earth over a run, grown over */
+function hlArtYdMound(g, x, y, R) {
+  const C = HL_ART_YD_C;
+  g.fillStyle = C.turfLo; hlArtYdEll(g, x, y + 6, 23, 13); g.fill();
+  g.fillStyle = C.turfHi; hlArtYdEll(g, x - 1, y + 4, 22, 12); g.fill();
+  g.fillStyle = 'rgba(61,79,51,0.55)'; hlArtYdEll(g, x - 4, y, 14, 5.5); g.fill();
+  g.strokeStyle = C.grass; g.lineWidth = 1;
+  for (let i = 0; i < 16; i++) {
+    const a = R() * TAU, d = Math.sqrt(R()), gx = x + Math.cos(a) * 19 * d, gy = y + 4 + Math.sin(a) * 9 * d;
+    g.strokeStyle = R() < 0.5 ? C.grass : C.grassHi;
+    g.beginPath(); g.moveTo(gx, gy); g.lineTo(gx + (R() - 0.5) * 3, gy - 2 - R() * 3); g.stroke();
+  }
+}
+/* an open grave: the earth thrown out either side, the cut, and the dark in it. k 0..1 how open */
+function hlArtYdHole(x, y, k, R) {
+  const C = HL_ART_YD_C;
+  if (k <= 0.01) return;
+  ctx.fillStyle = C.earthHi;
+  hlArtEll(x - 23, y + 6, 11 * k + 2, 6 * k + 1.5); ctx.fill(); hlArtEll(x + 24, y + 8, 12 * k + 2, 6.5 * k + 1.5); ctx.fill();
+  ctx.fillStyle = C.clay;
+  hlArtEll(x - 25, y + 3, 6 * k, 3 * k); ctx.fill(); hlArtEll(x + 22, y + 5, 7 * k, 3.2 * k); ctx.fill();
+  ctx.fillStyle = C.earth; hlArtEll(x, y + 4, 20 * k, 10.5 * k); ctx.fill();
+  ctx.fillStyle = C.earthHi; hlArtEll(x, y + 1.5, 18 * k, 5 * k); ctx.fill();          // the far wall of the cut, where the moon gets in
+  ctx.fillStyle = C.hole; hlArtEll(x, y + 6, 17 * k, 7.5 * k); ctx.fill();
+  ctx.fillStyle = C.earthLo;
+  for (let i = 0; i < 4; i++) { hlArtEll(x + (R() - 0.5) * 50, y + 4 + (R() - 0.5) * 18, 1.6, 1.1); ctx.fill(); }
+}
+/* the soul's stone: slender and pale, covered until WHERE HE PUT ME is done.
+   Each digger stopped clears a third of it; the one filling it piles it back. */
+function hlArtYdSoulStone(g) {
+  const C = HL_ART_YD_C, x = g.x, y = g.y, by = y - HL_ART_YD_FOOT, done = hlQDone('q5'), R = hlArtRng(0x501);
+  let cover = done ? 0 : [1, 0.62, 0.36][Math.min(2, hlProgress('q5'))];
+  const dig = enemies.find(o => !o.dead && o.hlMarked && o.state === 3);
+  if (dig && !done) cover = lerp(cover, 1.18, clamp(dig.hlFill || 0, 0, 1));
+  if (done) { const u = clamp((uiTime - HL_ART_YD.uncoverAt) / 1.6, 0, 1); if (u < 1) cover = 0.36 * (1 - HL_EASE.out3(u)); }
+  const H = 66, w = 20;
+  ctx.save();
+  hlArtYdKerb(ctx, x, y, R, false);
+  // the stone
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; hlArtEll(x + 2, by + 1, 24, 4.5); ctx.fill();
+  const shape = (dx, dy) => { ctx.beginPath(); ctx.moveTo(x - w + dx, by + dy); ctx.lineTo(x - w + dx, by - H + 22 + dy); ctx.quadraticCurveTo(x - w + dx, by - H + 2 + dy, x + dx, by - H + dy); ctx.quadraticCurveTo(x + w + dx, by - H + 2 + dy, x + w + dx, by - H + 22 + dy); ctx.lineTo(x + w + dx, by + dy); ctx.closePath(); };
+  shape(2.6, 0.4); ctx.fillStyle = C.stoneDeep; ctx.fill();
+  shape(0, 0);
+  const lg = ctx.createLinearGradient(x - w, by - H, x + w, by);
+  lg.addColorStop(0, '#b4aea8'); lg.addColorStop(0.4, C.soulStone); lg.addColorStop(1, '#57534e');
+  ctx.fillStyle = lg; ctx.fill();
+  if (done) { ctx.strokeStyle = rgba(C.cold, 0.75); ctx.lineWidth = 1.4; ctx.stroke(); }
+  const ink = { col: done ? C.coldLo : C.carve, lip: 'rgba(224,247,251,0.25)' };
+  hlArtYdCut(ctx, 'HERE LIES A RUN', x, by - 46, 5.4, Object.assign({ ls: '0.06em' }, ink));
+  hlArtYdCut(ctx, 'WAVE ' + HL_SOUL_STONE.wave + ' · HULL ' + HL_SOUL_STONE.hull + '%', x, by - 36, 5, Object.assign({ w: 700 }, ink));
+  hlArtYdCut(ctx, '“' + HL_SOUL_STONE.said + '”', x, by - 19, 10, Object.assign({ mono: true, w: 400 }, ink));
+  // what it was put under: earth, and the ivy that grew over that
+  if (cover > 0.01) {
+    const top = by - H * cover - 4, wob = dig ? Math.sin(uiTime * 7) * 1.2 : 0;
+    ctx.beginPath(); ctx.moveTo(x - 38, by + 24);
+    ctx.bezierCurveTo(x - 37, top + 30, x - 27, top + wob, x - 2, top + wob); ctx.bezierCurveTo(x + 24, top - 2, x + 37, top + 26, x + 38, by + 24);
+    ctx.closePath();
+    const eg = ctx.createLinearGradient(x, top, x, by + 24);
+    eg.addColorStop(0, C.earthHi); eg.addColorStop(1, C.earth);
+    ctx.fillStyle = eg; ctx.fill();
+    ctx.fillStyle = C.clay;
+    for (let i = 0; i < 9; i++) { const u = R(), px = x - 26 + u * 52, py = lerp(top + 6, by + 18, R()); hlArtEll(px, py, 1.4 + R() * 2, 1 + R()); ctx.fill(); }
+    if (!dig) {
+      ctx.strokeStyle = rgba(C.moss, 0.85); ctx.lineWidth = 1.4;
+      for (let i = 0; i < 4; i++) {
+        const sx = x - 22 + i * 14 + R() * 4; ctx.beginPath(); ctx.moveTo(sx, by + 20);
+        ctx.quadraticCurveTo(sx + (R() - 0.5) * 16, lerp(by + 20, top + 6, 0.5), sx + (R() - 0.5) * 10, Math.max(top + 4, by + 20 - 30 * cover - R() * 20)); ctx.stroke();
+      }
+    }
+  }
+  // the earth in front of it: kept, once it can be read
+  if (done) hlArtYdMound(ctx, x, y, hlArtRng(0x502));
+  else { ctx.fillStyle = C.earth; hlArtEll(x, y + 4, 22, 10); ctx.fill(); }
+  hlArtYdKerb(ctx, x, y, hlArtRng(0x503), true);
+  ctx.restore();
+}
+/* where its glint is: the top of the stone, while anything of it shows */
+function hlArtYdSoulGlint(g) {
+  if (!g) return null;
+  const done = hlQDone('q5');
+  return { x: g.x, y: g.y - HL_ART_YD_FOOT - 60, done };
+}
+
+/* ================================= the floor ================================ */
+const HL_ART_YD_RING = 'NO RUN HERE WAS EVER FINISHED   ·   ';
+function hlArtYdFloorBake(g, X, Y, w, h) {
+  const C = HL_ART_YD_C, R = hlArtRng(0x9a7d), cx = X + w / 2, cy = Y + h / 2;
+  const onPath = (x, y) => Math.abs(x - cx) < 46 || Math.abs(y - cy) < 46;
+  const inRing = (x, y) => Math.hypot(x - cx, y - cy) < 236;
+  g.fillStyle = C.turf; g.fillRect(X, Y, w, h);
+  // the turf, patchy: paler where the moon gets at it, darker in the hollows
+  for (let i = 0; i < w * h / 24000; i++) {
+    const x = X + R() * w, y = Y + R() * h, r = 60 + R() * 170, dark = R() < 0.5;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, dark ? 'rgba(5,8,6,0.5)' : 'rgba(42,56,40,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // the paths: gravel, gate to gate, between edging stones
+  for (const vert of [true, false]) {
+    const L = vert ? h : w, pts = [];
+    for (let s = 0; s <= L; s += 40) pts.push([s, (hlNoise(s * 0.01, vert ? 3 : 4) - 0.5) * 12, (hlNoise(s * 0.013, vert ? 5 : 6) - 0.5) * 12]);
+    const P = (s, o) => (vert ? [cx + o, Y + s] : [X + s, cy + o]);
+    g.beginPath();
+    pts.forEach(([s, a], i) => { const [px, py] = P(s, -38 + a); i ? g.lineTo(px, py) : g.moveTo(px, py); });
+    for (let i = pts.length - 1; i >= 0; i--) { const [s, , b] = pts[i]; const [px, py] = P(s, 38 + b); g.lineTo(px, py); }
+    g.closePath(); g.fillStyle = C.gravel; g.fill();
+    for (let i = 0; i < L * 3.2; i++) {
+      const s = R() * L, o = (R() - 0.5) * 72, [px, py] = P(s, o);
+      g.fillStyle = R() < 0.5 ? C.gravelHi : R() < 0.5 ? '#14130f' : '#4a4643';
+      g.fillRect(px, py, 1 + R() * 1.6, 1 + R() * 1.4);
+    }
+    // the edging: small stones, some sunk out of line
+    for (const side of [-1, 1]) for (let s = 0; s < L; s += 18 + R() * 8) {
+      const k = pts[Math.min(pts.length - 1, Math.round(s / 40))], [px, py] = P(s, (side < 0 ? -40 + k[1] : 40 + k[2]) + (R() - 0.5) * 3);
+      g.fillStyle = hlMix(C.stoneLo, C.stone, R() * 0.6); hlArtYdEll(g, px, py, vert ? 3 : 6, vert ? 6 : 3); g.fill();
+    }
+  }
+  // the clearing: rings of flags, worn, and round its rim what is true of every run here
+  g.fillStyle = C.wallLo; g.beginPath(); g.arc(cx, cy, 236, 0, TAU); g.fill();
+  for (let r0 = 52; r0 < 206; r0 += 38) {
+    const r1 = Math.min(206, r0 + 36), n = Math.max(6, Math.round(TAU * r0 / 58)), off = R() * TAU;
+    for (let i = 0; i < n; i++) {
+      const a0 = off + i * TAU / n + 0.012, a1 = off + (i + 1) * TAU / n - 0.012;
+      g.beginPath(); g.arc(cx, cy, r1 - 1, a0, a1); g.arc(cx, cy, r0 + 1, a1, a0, true); g.closePath();
+      g.fillStyle = hlMix(C.flag, C.flagHi, R()); g.fill();
+      if (R() < 0.12) { g.fillStyle = rgba(C.moss, 0.4); g.fill(); }
+    }
+  }
+  g.fillStyle = C.flagHi; g.beginPath(); g.arc(cx, cy, 50, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(214,211,209,0.12)'; g.lineWidth = 1.5; g.beginPath(); g.arc(cx, cy, 34, 0, TAU); g.stroke();
+  g.fillStyle = C.flag; g.beginPath(); g.arc(cx, cy, 206, 0, TAU); g.arc(cx, cy, 230, 0, TAU, true); g.fill();
+  g.strokeStyle = 'rgba(214,211,209,0.1)'; g.lineWidth = 1;
+  for (const rr of [207, 229]) { g.beginPath(); g.arc(cx, cy, rr, 0, TAU); g.stroke(); }
+  g.font = '800 11px ' + HL_ART_FONT; g.textAlign = 'center';
+  let a = -Math.PI / 2;
+  for (let k = 0; a < Math.PI * 1.5 - 0.02 && k < 600; k++) {
+    const ch = HL_ART_YD_RING[k % HL_ART_YD_RING.length], cw = (g.measureText(ch).width + 2.6) / 218;
+    if (a + cw > Math.PI * 1.5) break;
+    g.save(); g.translate(cx + Math.cos(a + cw / 2) * 218, cy + Math.sin(a + cw / 2) * 218); g.rotate(a + cw / 2 + Math.PI / 2);
+    g.fillStyle = 'rgba(214,211,209,0.16)'; g.fillText(ch, 0, 4.6);
+    g.fillStyle = 'rgba(5,5,4,0.75)'; g.fillText(ch, 0, 4);
+    g.restore();
+    a += cw;
+  }
+  // a worn threshold of flags at every gate
+  for (const [gx, gy] of [[cx, Y + GATE_IN], [X + w - GATE_IN, cy], [cx, Y + h - GATE_IN], [X + GATE_IN, cy]]) {
+    for (let i = 0; i < 11; i++) {
+      const aa = R() * TAU, d = Math.sqrt(R()) * 58, x = gx + Math.cos(aa) * d, y = gy + Math.sin(aa) * d;
+      if (x < X + 10 || x > X + w - 10 || y < Y + 40 || y > Y + h - 10) continue;
+      g.fillStyle = hlMix(C.flag, C.flagHi, R()); g.beginPath(); g.roundRect(x - 13, y - 9, 26, 18, 3); g.fill();
+    }
+  }
+  // the grass, and what the trees let fall
+  for (let i = 0; i < w * h / 520; i++) {
+    const x = X + R() * w, y = Y + 40 + R() * (h - 40);
+    if (onPath(x, y) || inRing(x, y)) continue;
+    const c = R();
+    g.strokeStyle = c < 0.45 ? C.grass : c < 0.8 ? C.grassHi : 'rgba(122,132,88,0.5)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (R() - 0.5) * 4, y - 3 - R() * 5);
+    g.moveTo(x + 2, y); g.lineTo(x + 2 + (R() - 0.3) * 4, y - 2 - R() * 4); g.stroke();
+  }
+  for (let i = 0; i < w * h / 4200; i++) {
+    const x = X + R() * w, y = Y + 40 + R() * (h - 40);
+    g.fillStyle = ['#3b2a1a', '#4a3520', '#2e2a20', '#55503f'][(R() * 4) | 0]; g.globalAlpha = 0.5 + R() * 0.35;
+    hlArtYdEll(g, x, y, 2 + R() * 2.4, 1 + R() * 1.2, R() * TAU); g.fill();
+  }
+  g.globalAlpha = 1;
+  // old graves nobody marks any more: sunk, nameless
+  for (let i = 0; i < 9; i++) {
+    const x = X + 140 + R() * (w - 280), y = Y + 140 + R() * (h - 280);
+    if (onPath(x, y) || inRing(x, y) || Math.hypot(x - cx, y - cy) < 280) continue;
+    g.fillStyle = 'rgba(10,15,12,0.6)'; hlArtYdEll(g, x, y, 22, 9); g.fill();
+    g.fillStyle = hlMix(C.stoneLo, C.stoneDeep, 0.4); g.save(); g.translate(x - 4, y - 6); g.rotate((R() - 0.5) * 0.9);
+    g.beginPath(); g.moveTo(-9, 4); g.lineTo(-9, -6); g.lineTo(-2, -11); g.lineTo(8, -5); g.lineTo(9, 4); g.closePath(); g.fill(); g.restore();
+  }
+  // two dead trees, their shadows long to the south-east
+  const trees = [[X + 74, Y + 132, 1], [X + w - 90, Y + h - 30, -1]];
+  for (const [tx, ty] of trees) {
+    const sg = g.createLinearGradient(tx, ty, tx + 260, ty + 150);
+    sg.addColorStop(0, 'rgba(0,0,0,0.42)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = sg; g.beginPath(); g.moveTo(tx - 10, ty); g.quadraticCurveTo(tx + 140, ty + 30, tx + 280, ty + 170); g.quadraticCurveTo(tx + 120, ty + 110, tx + 10, ty + 6); g.closePath(); g.fill();
+  }
+  hlArtYdWalls(g, X, Y, w, h, R);
+  for (const [tx, ty, s] of trees) hlArtYdTree(g, tx, ty, s, R);
+}
+/* a dead tree: a trunk forking into bare branches, lit down its moon side */
+function hlArtYdTree(g, x, y, s, R) {
+  const C = HL_ART_YD_C;
+  g.lineCap = 'round';
+  g.fillStyle = 'rgba(0,0,0,0.45)'; hlArtYdEll(g, x, y + 2, 20, 6); g.fill();
+  const limb = (x0, y0, len, ang, wd, depth) => {
+    const x1 = x0 + Math.cos(ang) * len, y1 = y0 + Math.sin(ang) * len;
+    const mx = (x0 + x1) / 2 + (R() - 0.5) * len * 0.3, my = (y0 + y1) / 2 + (R() - 0.5) * len * 0.2;
+    g.strokeStyle = '#0b0d0c'; g.lineWidth = wd;
+    g.beginPath(); g.moveTo(x0, y0); g.quadraticCurveTo(mx, my, x1, y1); g.stroke();
+    if (wd > 2) { g.strokeStyle = 'rgba(148,163,184,0.16)'; g.lineWidth = Math.max(1, wd * 0.22); g.beginPath(); g.moveTo(x0 - wd * 0.3, y0); g.quadraticCurveTo(mx - wd * 0.3, my, x1 - wd * 0.25, y1); g.stroke(); }
+    if (depth <= 0) return;
+    const n = depth > 3 ? 2 : 2 + (R() < 0.5 ? 1 : 0);
+    for (let i = 0; i < n; i++) limb(x1, y1, len * (0.6 + R() * 0.22), ang + (i - (n - 1) / 2) * (0.5 + R() * 0.3) + (R() - 0.5) * 0.3, wd * 0.64, depth - 1);
+  };
+  // roots, then the trunk
+  for (let i = 0; i < 4; i++) { const a = (i / 3 - 0.5) * 2.4 + Math.PI / 2 * 0; g.strokeStyle = '#0b0d0c'; g.lineWidth = 4; g.beginPath(); g.moveTo(x, y - 2); g.quadraticCurveTo(x + Math.cos(a) * 14, y + 2, x + Math.cos(a) * 24, y + 4 + R() * 3); g.stroke(); }
+  limb(x, y, 64, -Math.PI / 2 + 0.12 * s, 13, 5);
+}
+/* the yard's wall: the north one in elevation, the other three from above; gaps for the gates */
+function hlArtYdWalls(g, X, Y, w, h, R) {
+  const C = HL_ART_YD_C, cx = X + w / 2, cy = Y + h / 2, WH = 40, gap = 46;
+  // the north wall's face, in courses
+  g.fillStyle = C.wallLo; g.fillRect(X, Y, w, WH);
+  for (let y = Y + 6, row = 0; y < Y + WH - 2; y += 9, row++) {
+    for (let x = X - R() * 30; x < X + w; ) {
+      const bw = 20 + R() * 26;
+      g.fillStyle = hlMix(C.wallLo, C.wallHi, 0.25 + R() * 0.55);
+      g.fillRect(x + 1, y + 1, bw - 2, 7);
+      g.fillStyle = 'rgba(214,211,209,0.06)'; g.fillRect(x + 1, y + 1, bw - 2, 1.2);
+      x += bw;
+    }
+  }
+  // its coping, and the moss and ivy it has
+  g.fillStyle = C.wallHi; g.fillRect(X, Y, w, 6);
+  g.fillStyle = 'rgba(214,211,209,0.22)'; g.fillRect(X, Y, w, 1.4);
+  for (let i = 0; i < w / 60; i++) {
+    const x = X + R() * w;
+    g.fillStyle = rgba(C.moss, 0.6); hlArtYdEll(g, x, Y + WH - 3, 10 + R() * 18, 3 + R() * 2); g.fill();
+    if (R() < 0.45) {
+      g.strokeStyle = 'rgba(42,56,38,0.9)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(x, Y + 4);
+      let px = x, py = Y + 4; const n = 3 + (R() * 4 | 0);
+      for (let k = 0; k < n; k++) { px += (R() - 0.5) * 8; py += 5 + R() * 4; g.lineTo(px, py); }
+      g.stroke();
+      g.fillStyle = 'rgba(61,79,51,0.9)';
+      for (let k = 0; k < n; k++) { hlArtYdEll(g, x + (R() - 0.5) * 10, Y + 8 + k * 6, 2.4, 1.6, R() * TAU); g.fill(); }
+    }
+  }
+  // its shadow on the grass
+  const sg = g.createLinearGradient(0, Y + WH, 0, Y + WH + 34);
+  sg.addColorStop(0, 'rgba(0,0,0,0.55)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sg; g.fillRect(X, Y + WH, w, 34);
+  // the gap of the north gate: nothing out there
+  g.fillStyle = '#020305'; g.fillRect(cx - gap, Y, gap * 2, WH);
+  const og = g.createLinearGradient(0, Y, 0, Y + WH);
+  og.addColorStop(0, 'rgba(20,24,32,0)'); og.addColorStop(1, 'rgba(26,32,41,0.8)');
+  g.fillStyle = og; g.fillRect(cx - gap, Y, gap * 2, WH);
+  // the other three, from above: coping stones on the top of a low wall
+  const top = (x0, y0, x1, y1, along) => {
+    g.fillStyle = C.wallLo; g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    const L = along === 'x' ? x1 - x0 : y1 - y0;
+    for (let s = 0; s < L; ) {
+      const bl = 26 + R() * 24;
+      g.fillStyle = hlMix(C.wall, C.wallHi, R() * 0.7);
+      if (along === 'x') g.fillRect(x0 + s + 1, y0 + 2, Math.min(bl, L - s) - 2, y1 - y0 - 4);
+      else g.fillRect(x0 + 2, y0 + s + 1, x1 - x0 - 4, Math.min(bl, L - s) - 2);
+      s += bl;
+    }
+  };
+  const T = 16;
+  top(X, Y + WH, X + T, cy - gap, 'y'); top(X, cy + gap, X + T, Y + h, 'y');
+  top(X + w - T, Y + WH, X + w, cy - gap, 'y'); top(X + w - T, cy + gap, X + w, Y + h, 'y');
+  top(X, Y + h - T, cx - gap, Y + h, 'x'); top(cx + gap, Y + h - T, X + w, Y + h, 'x');
+  g.fillStyle = 'rgba(214,211,209,0.14)';
+  g.fillRect(X + T - 1.4, Y + WH, 1.4, h - WH); g.fillRect(X + w - T, Y + WH, 1.4, h - WH); g.fillRect(X, Y + h - T, w, 1.4);
+}
+function drawHlYardFloor(A) {
+  const X = arena.x0, Y = arena.y0, w = Math.round(arena.x1 - arena.x0), h = Math.round(arena.y1 - arena.y0);
+  hlBake('hl-yard-floor', X, Y, w, h, g => hlArtYdFloorBake(g, X, Y, w, h));
+  // what lies fallen: a bell out of its frame, a spade dropped
+  ctx.save();
+  for (const f of HL_ART_YD.fallen) {
+    const u = (uiTime - f.t) / f.life, a = clamp((1 - u) / 0.3, 0, 1);
+    if (a <= 0) continue;
+    ctx.globalAlpha = a;
+    if (f.kind === 'bell') hlArtYdFallenBell(f);
+    else if (f.kind === 'spade') { ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.rot); hlArtYdSpade([-14, 0], [14, 0]); ctx.restore(); }
+  }
+  ctx.restore();
+}
+
+/* ================================== the pits =================================
+   Dug where you were: a lip of turned earth, the dirt heaped to one side, a
+   far wall the moon gets into and the dark at the bottom. It closes as its
+   time runs out, the earth sliding back in. */
+function drawHlYardPit(p) {
+  const C = HL_ART_YD_C, R = hlArtRng(p.id * 977 + 13);
+  const k0 = HL_EASE.out3(clamp(p.t / 0.35, 0, 1)), kc = HL_EASE.out(clamp((p.life - p.t) / 1.2, 0, 1)), k = k0 * kc;
+  if (k <= 0.01) return;
+  const r = p.r, x = p.x, y = p.y, side = R() < 0.5 ? -1 : 1;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; hlArtEll(x + 3, y + 4, r * 1.12 * k0, r * 1.02 * k0); ctx.fill();
+  // the heap beside it
+  for (let i = 0; i < 6; i++) {
+    const a = (side > 0 ? -0.3 : Math.PI + 0.3) + (R() - 0.5) * 1.5, d = r * (1.02 + R() * 0.28);
+    ctx.fillStyle = i % 2 ? C.clay : C.earthHi;
+    hlArtEll(x + Math.cos(a) * d, y + Math.sin(a) * d * 0.9, (8 + R() * 9) * k0 * (0.4 + 0.6 * kc), (6 + R() * 5) * k0 * (0.4 + 0.6 * kc)); ctx.fill();
+  }
+  // the lip, lumpy
+  ctx.beginPath();
+  for (let i = 0; i <= 22; i++) {
+    const a = i / 22 * TAU, rr = r * (1.02 + (hlHash(p.id * 3.1 + i) - 0.5) * 0.12) * k;
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr * 0.94;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath(); ctx.fillStyle = C.earthHi; ctx.fill();
+  // the cut: its far wall, then the dark
+  ctx.fillStyle = C.earth; hlArtEll(x, y + 1, r * 0.88 * k, r * 0.82 * k); ctx.fill();
+  ctx.fillStyle = C.earthLo; hlArtEll(x, y + r * 0.1 * k, r * 0.78 * k, r * 0.7 * k); ctx.fill();
+  ctx.fillStyle = C.hole; hlArtEll(x, y + r * 0.2 * k, r * 0.66 * k, r * 0.56 * k); ctx.fill();
+  // where the spade went in, round the lip
+  ctx.strokeStyle = 'rgba(10,7,5,0.7)'; ctx.lineWidth = 1.4;
+  for (let i = 0; i < 5; i++) {
+    const a = R() * TAU, rr = r * 0.95 * k;
+    ctx.beginPath(); ctx.arc(x, y, rr, a, a + 0.25); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ================================== the gates ================================
+   Four, in the middle of each wall: two pillars with a stone ball on each,
+   iron leaves that hang open into the yard and swing shut on whoever stands
+   in the gate, and a lamp on the second pillar that is lit only by who that
+   is. Unlit, it is nobody's way out yet. */
+function hlArtYdGateGeo(g) {
+  const X = arena.x0, Y = arena.y0, X1 = arena.x1, Y1 = arena.y1, H = 46;
+  if (g.side === 'n') return { hinge: [[g.x - H, Y + 40], [g.x + H, Y + 40]], d: [[1, 0], [-1, 0]], n: [0, 1] };
+  if (g.side === 's') return { hinge: [[g.x - H, Y1 - 6], [g.x + H, Y1 - 6]], d: [[1, 0], [-1, 0]], n: [0, -1] };
+  if (g.side === 'w') return { hinge: [[X + 8, g.y - H], [X + 8, g.y + H]], d: [[0, 1], [0, -1]], n: [1, 0] };
+  return { hinge: [[X1 - 8, g.y - H], [X1 - 8, g.y + H]], d: [[0, 1], [0, -1]], n: [-1, 0] };
+}
+/* who it is lit by: the soul, you, a risen in his last quarter; or him, making for it */
+function hlArtYdGateState(g) {
+  const C = HL_ART_YD_C, e = hlYardOn() ? hlArea.boss : null;
+  const his = !!(e && !e.dead && e.hlBolt && e.hlBolt.gate === g.i), run = his && hlRqRunning(e);
+  if (g.by === 'soul') return { col: C.cold, lit: 1, who: 'soul', his, run };
+  if (g.by === 'you') return { col: C.you, lit: 1, who: 'you', his, run };
+  if (g.by) return { col: C.grey, lit: 0.75, who: 'risen', his, run };
+  if (his) return { col: C.rq, lit: run ? 1 : 0.7, who: null, his, run };
+  return { col: null, lit: 0, who: null, his, run };
+}
+/* the lamp: hung off the second pillar, out from the gate */
+function hlArtYdLampPos(g) {
+  const G = hlArtYdGateGeo(g), p = G.hinge[1], d = G.d[1];
+  return { x: p[0] - d[0] * 15, y: p[1] - d[1] * 15 - 44 };
+}
+function drawHlYardGate(g) {
+  const C = HL_ART_YD_C, G = hlArtYdGateGeo(g), S = hlArtYdGateState(g), shut = HL_ART_YD.shut[g.i] || 0;
+  const pu = 0.5 + 0.5 * Math.sin(uiTime * 6);
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // the threshold: whoever stands in it shuts it
+  ctx.lineWidth = 2;
+  if (S.who) { ctx.strokeStyle = rgba(S.col, 0.5); }
+  else if (S.his) { ctx.strokeStyle = rgba(C.rq, 0.3 + 0.4 * pu); ctx.setLineDash([10, 7]); ctx.lineDashOffset = -uiTime * 30; }
+  else { ctx.strokeStyle = rgba(C.accent, 0.13); ctx.setLineDash([5, 9]); }
+  ctx.beginPath(); ctx.arc(g.x, g.y, GATE_R - 4, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  if (S.his && S.who) {
+    ctx.strokeStyle = rgba(C.rq, 0.35 + 0.35 * pu); ctx.setLineDash([10, 7]); ctx.lineDashOffset = -uiTime * 30;
+    ctx.beginPath(); ctx.arc(g.x, g.y, GATE_R + 2, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // the way out, through the north wall: lit in his rose while it is his
+  if (g.side === 'n' && S.his && !S.who) {
+    const og = ctx.createLinearGradient(0, arena.y0, 0, arena.y0 + 40);
+    og.addColorStop(0, rgba(C.rq, 0)); og.addColorStop(1, rgba(C.rq, 0.18 + 0.12 * pu));
+    ctx.fillStyle = og; ctx.fillRect(g.x - 40, arena.y0 + 4, 80, 36);
+  }
+  for (let i = 0; i < 2; i++) hlArtYdLeaf(G.hinge[i], G.d[i], G.n, shut);
+  for (const p of G.hinge) hlArtYdPillar(p[0], p[1]);
+  hlArtYdLamp(g, S);
+  ctx.restore();
+}
+/* one leaf of the gate: hung at H, shut along d, open into the yard along n */
+function hlArtYdLeaf(H, d, n, shut) {
+  const C = HL_ART_YD_C, L = 44, LH = 42, a = (1 - shut) * 1.25;
+  const ux = d[0] * Math.cos(a) + n[0] * Math.sin(a), uy = d[1] * Math.cos(a) + n[1] * Math.sin(a);
+  const ex = H[0] + ux * L, ey = H[1] + uy * L;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.moveTo(H[0], H[1]); ctx.lineTo(ex, ey); ctx.lineTo(ex + 6, ey + 3); ctx.lineTo(H[0] + 6, H[1] + 3); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = C.iron; ctx.lineWidth = 2.4;
+  for (const hy of [6, LH - 4, LH * 0.5]) { ctx.beginPath(); ctx.moveTo(H[0], H[1] - hy); ctx.lineTo(ex, ey - hy); ctx.stroke(); }
+  ctx.lineWidth = 1.6;
+  for (let k = 0; k <= 6; k++) {
+    const t = k / 6, bx = lerp(H[0], ex, t), by = lerp(H[1], ey, t);
+    ctx.beginPath(); ctx.moveTo(bx, by - 3); ctx.lineTo(bx, by - LH - 6); ctx.stroke();
+    ctx.fillStyle = C.iron; ctx.beginPath(); ctx.moveTo(bx - 2, by - LH - 5); ctx.lineTo(bx, by - LH - 10); ctx.lineTo(bx + 2, by - LH - 5); ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = rgba(C.ironHi, 0.5); ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(H[0], H[1] - LH + 4); ctx.lineTo(ex, ey - LH + 4); ctx.stroke();
+}
+function hlArtYdPillar(x, y) {
+  const C = HL_ART_YD_C;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; hlArtEll(x + 4, y + 2, 15, 5); ctx.fill();
+  const pg = ctx.createLinearGradient(x - 10, 0, x + 10, 0);
+  pg.addColorStop(0, '#5c5753'); pg.addColorStop(0.5, C.wallHi); pg.addColorStop(1, C.wall);
+  ctx.fillStyle = pg; ctx.fillRect(x - 10, y - 62, 20, 62);
+  ctx.fillStyle = 'rgba(10,10,9,0.5)'; for (let k = 1; k < 4; k++) ctx.fillRect(x - 10, y - k * 15.5, 20, 1.2);
+  ctx.fillStyle = C.wallHi; ctx.fillRect(x - 13, y - 69, 26, 8);
+  ctx.fillStyle = 'rgba(214,211,209,0.3)'; ctx.fillRect(x - 13, y - 69, 26, 1.6);
+  const bg = ctx.createRadialGradient(x - 3, y - 81, 1, x, y - 77, 9);
+  bg.addColorStop(0, '#8a857f'); bg.addColorStop(1, C.wall);
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(x, y - 77, 7.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = rgba(C.moss, 0.7); hlArtEll(x - 3, y - 3, 8, 3); ctx.fill();
+}
+function hlArtYdLamp(g, S) {
+  const C = HL_ART_YD_C, L = hlArtYdLampPos(g), G = hlArtYdGateGeo(g), p = G.hinge[1];
+  ctx.strokeStyle = C.iron; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(p[0], p[1] - 52); ctx.lineTo(L.x, L.y - 8); ctx.stroke();
+  ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L.x, L.y - 8); ctx.lineTo(L.x, L.y - 5); ctx.stroke();
+  const fl = S.lit ? (S.his && !S.who ? 0.7 + 0.3 * hlFlicker(uiTime, g.i * 3.1, 0.8) : 1) : 0;
+  ctx.fillStyle = S.lit ? hlMix(C.glass, S.col, 0.75 * fl * S.lit) : C.glass;
+  ctx.fillRect(L.x - 4.5, L.y - 5, 9, 12);
+  ctx.strokeStyle = C.iron; ctx.lineWidth = 1.4; ctx.strokeRect(L.x - 4.5, L.y - 5, 9, 12);
+  ctx.beginPath(); ctx.moveTo(L.x, L.y - 5); ctx.lineTo(L.x, L.y + 7); ctx.stroke();
+  ctx.fillStyle = C.iron; ctx.beginPath(); ctx.moveTo(L.x - 6.5, L.y - 5); ctx.lineTo(L.x, L.y - 10); ctx.lineTo(L.x + 6.5, L.y - 5); ctx.closePath(); ctx.fill();
+}
+
+/* the soul, standing in the gate it holds: whole, its lantern still cold */
+function drawHlYardSoul(x, y, g) {
+  const C = HL_ART_YD_C, k = clamp((uiTime - HL_ART_YD.soulAt) / 0.9, 0, 1), bob = Math.sin(uiTime * 1.4) * 3, sy = y - 10 + bob;
+  const ang = Math.atan2((arena.y0 + arena.y1) / 2 - y, (arena.x0 + arena.x1) / 2 - x);
+  ctx.save();
+  ctx.globalAlpha = 0.5 * k; ctx.fillStyle = '#020306'; hlArtEll(x, y + 16, 26, 7); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  const f = hlFlicker(uiTime, 5.5, 0.3);
+  drawGlow(x, sy, 78, C.cold, 0.2 * f * k);
+  drawGlow(x - Math.cos(ang) * 3, sy - Math.sin(ang) * 3, 10, '#e0f2fe', 0.8 * f * k);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = k;
+  hlArtHull(x, sy, ang, 1.6);
+  ctx.fillStyle = rgba(C.cold, 0.12); ctx.fill();
+  ctx.strokeStyle = rgba('#e0f2fe', 0.85); ctx.lineWidth = 1.6; ctx.stroke();
+  // its lantern, off its port side, always upright
+  const la = ang + Math.PI / 2, Lx = x + Math.cos(la) * 26, Ly = sy + Math.sin(la) * 26 + 10;
+  ctx.strokeStyle = rgba(C.cold, 0.5); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, sy); ctx.quadraticCurveTo((x + Lx) / 2, Ly - 16, Lx, Ly - 10); ctx.stroke();
+  hlArtPumpkin(Lx, Ly, 7, { cold: true, lid: true, a: k, face: () => { ctx.fillStyle = HL_ART_C.hole; hlArtFacePath(0, 1, 5.6, 1, 1); ctx.fill(); } });
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(Lx, Ly, 26, C.cold, 0.35 * f * k);
+  ctx.globalAlpha = (0.6 + 0.4 * f) * k; ctx.fillStyle = '#e0f2fe'; hlArtFacePath(Lx, Ly + 1, 5.6, 1, 1); ctx.fill();
+  ctx.restore();
+}
+
+/* ================================== the risen ================================
+   A quit run, climbing out with its gun: a ghost of the hull it was flown
+   in, pale, its edge dashed like a connection that dropped, earth still on
+   it, and now and then a stutter where it was a moment ago. In a gate (his
+   last quarter) it has stopped fighting: grey, still, its gun put away. */
+function hlArtYdRisen(e, ea) {
+  const C = HL_ART_YD_C, r = e.r, sd = hlArtSeed(e), hid = hlArtYdHull(sd), R = hlArtRng(Math.floor(sd * 1000));
+  const climb = e.hlClimb > 0 ? clamp(1 - e.hlClimb / RISEN_CLIMB, 0, 1) : 1, gate = e.hlGate !== undefined, kin = !!e.hacked;
+  const up = HL_EASE.out3(climb), lift = (r * 0.45 + Math.sin(uiTime * 2.6 + sd) * r * 0.12) * up;
+  const x = e.x, y = e.y - lift + r * 1.3 * (1 - up), ground = e.y + r * 0.55;
+  const a = ea * (gate ? 0.78 : 1) * (0.3 + 0.7 * up), edge = gate ? C.grey : kin ? C.kin : C.ghostHi;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.42 * up; ctx.fillStyle = '#000000'; hlArtEll(x, ground, r * 1.05, r * 0.3); ctx.fill();
+  if (climb < 1) { ctx.beginPath(); ctx.rect(x - r * 4, y - r * 4, r * 8, ground - (y - r * 4)); ctx.clip(); }   // still half in the ground
+  // the tatters under it
+  ctx.fillStyle = gate ? C.grey : C.ghost;
+  for (let i = 0; i < 3; i++) {
+    ctx.globalAlpha = a * (0.2 - i * 0.05);
+    hlArtEll(x + Math.sin(uiTime * 3 + i * 1.7 + sd) * 2.5, y + r * (0.45 + i * 0.3), r * (0.85 - i * 0.22), r * 0.15); ctx.fill();
+  }
+  ctx.translate(x, y); ctx.rotate(e.ang || 0); ctx.scale(r / 12, r / 12);
+  // a stutter: where it was a moment ago
+  if (!gate && hlNoise(uiTime * 5 + sd * 3, 3) > 0.78) {
+    ctx.save(); ctx.translate(-5 - 3 * hlHash(Math.floor(uiTime * 20) + sd), 0);
+    ctx.globalAlpha = a * 0.22; hullPath(hid); ctx.fillStyle = C.ghost; ctx.fill(); ctx.restore();
+  }
+  hullPath(hid);
+  ctx.globalAlpha = a; ctx.fillStyle = rgba(gate ? C.grey : C.ghost, gate ? 0.3 : 0.24); ctx.fill();
+  if (!gate) { ctx.setLineDash([3, 2]); ctx.lineDashOffset = -uiTime * 10; }
+  ctx.strokeStyle = edge; ctx.lineWidth = 1.3 * 12 / r; ctx.stroke(); ctx.setLineDash([]);
+  // earth still on it
+  ctx.fillStyle = C.earthHi;
+  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-6 + R() * 12, (R() - 0.5) * 12, 0.9 + R() * 1.1, 0, TAU); ctx.fill(); }
+  if (!gate) hlArtYdGun(e, a);
+  if (e.flash > 0) { ctx.globalAlpha = a * e.flash; hullPath(hid); ctx.fillStyle = '#ffffff'; ctx.fill(); }
+  ctx.restore();
+}
+/* its gun, in its hull's own space (the nose at +18) */
+function hlArtYdGunWind(e) { return e.state === 1 ? clamp(1 - (e.atkT || 0) / RISEN_WIND, 0, 1) : 0; }
+function hlArtYdGun(e, a) {
+  const C = HL_ART_YD_C, G = e.hlGun, w = hlArtYdGunWind(e), hot = e.hacked ? C.kin : C.hurt;
+  ctx.globalAlpha = a;
+  if (G === 'stream') {
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(12, -4.4, 11, 2.6); ctx.fillRect(12, 1.8, 11, 2.6);
+    ctx.fillStyle = '#475569'; ctx.fillRect(10, -5, 4, 10);
+    if (w > 0 || e.state === 2) { ctx.fillStyle = rgba(hot, e.state === 2 ? 1 : 0.35 + 0.65 * w); ctx.fillRect(21, -4.4, 2.4, 2.6); ctx.fillRect(21, 1.8, 2.4, 2.6); }
+  } else if (G === 'lance') {
+    // drawn back as it winds up; the thrust itself is drawn in the glow
+    if (e.state === 2) return;
+    const back = 6 * w;
+    ctx.fillStyle = '#cbd5e1'; ctx.beginPath(); ctx.moveTo(8 - back, -1.8); ctx.lineTo(34 - back, 0); ctx.lineTo(8 - back, 1.8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#475569'; ctx.fillRect(6 - back, -3, 4, 6);
+    if (w > 0) { ctx.strokeStyle = rgba(hot, 0.4 + 0.6 * w); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(24 - back, 0); ctx.lineTo(34 - back, 0); ctx.stroke(); }
+  } else {
+    // a blade on its starboard side: raised back as it winds, swept on the strike
+    let ang = 0.7;
+    if (e.state === 1) ang = 0.7 + 1.0 * w;
+    else if (e.state === 2) ang = RISEN_SWING.arc - 2 * RISEN_SWING.arc * clamp(1 - (e.atkT || 0) / RISEN_SWING.t, 0, 1);
+    ctx.save(); ctx.rotate(ang);
+    ctx.fillStyle = '#475569'; ctx.fillRect(2, -1.5, 8, 3);
+    ctx.fillStyle = w > 0 ? hlMix('#e2e8f0', hot, 0.5 * w) : '#e2e8f0';
+    ctx.beginPath(); ctx.moveTo(8, -1.5); ctx.quadraticCurveTo(22, -12, 34, -3); ctx.quadraticCurveTo(22, -6, 10, 2.5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ================================ the gravedigger ============================
+   Hunched in a long coat and a hood with nothing in it but two points of
+   light, a spade over its shoulder. It digs in three movements: up, in,
+   and the throw. The errand's is edged in the soul's cold, and shovels. */
+const HL_ART_YD_DIG = {
+  carry: [[5, -27], [-15, -56]],                 // [hand, blade], its own space, the feet at 0
+  ready: [[9, -22], [25, -2]],
+  dig: [[0, [[8, -24], [24, -2]]], [0.3, [[8, -33], [21, -48]]], [0.48, [[10, -20], [22, 4]]], [0.62, [[8, -22], [27, -6]]], [1, [[6, -28], [30, -26]]]],
+  fill: [[0, [[9, -20], [25, 2]]], [0.45, [[8, -22], [27, -2]]], [0.7, [[7, -32], [30, -32]]], [1, [[9, -20], [25, 2]]]]
+};
+function hlArtYdKeys(K, u) {
+  for (let i = 1; i < K.length; i++) {
+    if (u > K[i][0]) continue;
+    const [u0, A] = K[i - 1], [u1, B] = K[i], t = HL_EASE.smooth(clamp((u - u0) / (u1 - u0 || 1), 0, 1));
+    return [[lerp(A[0][0], B[0][0], t), lerp(A[0][1], B[0][1], t)], [lerp(A[1][0], B[1][0], t), lerp(A[1][1], B[1][1], t)]];
+  }
+  return K[K.length - 1][1];
+}
+function hlArtYdDigPose(e) {
+  const sd = hlArtSeed(e), mv = clamp(len(e.vx || 0, e.vy || 0) / 60, 0, 1), face = Math.cos(e.ang || 0) >= 0 ? 1 : -1;
+  let P = HL_ART_YD_DIG.carry, back = true, u = 0;
+  if (e.hlMarked && e.state === 3) { u = (uiTime * 0.85 + sd) % 1; P = hlArtYdKeys(HL_ART_YD_DIG.fill, u); back = false; }
+  else if (e.state === 2) { u = clamp(1 - (e.atkT || 0) / DIG_T, 0, 1); P = hlArtYdKeys(HL_ART_YD_DIG.dig, u); back = false; }
+  else if (e.state === 1 || e.hacked) { P = HL_ART_YD_DIG.ready; back = false; }
+  return { face, hand: P[0], blade: P[1], back, u, step: Math.sin(uiTime * 9 + sd) * mv, mv };
+}
+function hlArtYdSpade(h, b) {
+  const C = HL_ART_YD_C, dx = b[0] - h[0], dy = b[1] - h[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  const gx = h[0] - ux * 10, gy = h[1] - uy * 10;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = C.woodLo; ctx.lineWidth = 3.2;
+  ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(b[0] - ux * 4, b[1] - uy * 4); ctx.stroke();
+  ctx.strokeStyle = C.wood; ctx.lineWidth = 1.3; ctx.stroke();
+  ctx.strokeStyle = C.woodLo; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(gx - uy * 4, gy + ux * 4); ctx.lineTo(gx + uy * 4, gy - ux * 4); ctx.stroke();
+  ctx.save(); ctx.translate(b[0], b[1]); ctx.rotate(Math.atan2(uy, ux));
+  ctx.fillStyle = C.spade;
+  ctx.beginPath(); ctx.moveTo(-4, -5); ctx.lineTo(8, -5.5); ctx.quadraticCurveTo(14, 0, 8, 5.5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(214,211,209,0.5)'; ctx.fillRect(-3, -4.6, 10, 1.3);
+  ctx.fillStyle = 'rgba(43,33,25,0.8)'; ctx.fillRect(6, -4, 3, 8);
+  ctx.restore();
+}
+function hlArtYdDigger(e, ea) {
+  const C = HL_ART_YD_C, r = e.r, s = r / 17, Q = hlArtYdDigPose(e), cold = !!e.hlMarked, kin = !!e.hacked;
+  const rim = cold ? C.cold : kin ? C.kin : null, eye = cold ? C.cold : kin ? C.kin : '#d6d3d1';
+  const fx = e.x, fy = e.y + r * 0.85, bob = -Math.abs(Q.step) * 1.6;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.45; ctx.fillStyle = '#000000'; hlArtEll(fx, fy, r * 1.3, r * 0.34); ctx.fill();
+  ctx.globalAlpha = ea;
+  ctx.translate(fx, fy + bob); ctx.scale(s * Q.face, s);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  if (Q.back) hlArtYdSpade(Q.hand, Q.blade);
+  // its legs, under the coat
+  ctx.strokeStyle = '#141210'; ctx.lineWidth = 3.4;
+  ctx.beginPath(); ctx.moveTo(-3, -6); ctx.lineTo(-4 + Q.step * 3, 0); ctx.moveTo(4, -6); ctx.lineTo(5 - Q.step * 3, 0); ctx.stroke();
+  // the coat: long, hunched, ragged at the hem
+  const lean = Q.u > 0 && Q.u < 0.62 && !Q.back ? 3 : 0;
+  ctx.beginPath(); ctx.moveTo(-12, -3);
+  for (let i = 1; i <= 6; i++) ctx.lineTo(-12 + i * 4, i % 2 ? -7 : -3);
+  ctx.quadraticCurveTo(15 + lean, -20, 9 + lean, -36);
+  ctx.quadraticCurveTo(2 + lean, -46, -7, -43);
+  ctx.quadraticCurveTo(-17, -36, -12, -3);
+  ctx.closePath();
+  ctx.fillStyle = C.cloak; ctx.fill();
+  ctx.strokeStyle = rim ? rgba(rim, 0.8) : 'rgba(199,210,254,0.3)'; ctx.lineWidth = 1.4 / s; ctx.stroke();
+  ctx.strokeStyle = 'rgba(148,163,184,0.16)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-11, -8); ctx.quadraticCurveTo(-15, -30, -7, -41); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(2, -10); ctx.lineTo(1, -32); ctx.stroke();
+  // the hood, forward of the shoulders, the head down
+  ctx.beginPath(); ctx.moveTo(-7 + lean, -40); ctx.quadraticCurveTo(-9 + lean, -60, 4 + lean, -60);
+  ctx.quadraticCurveTo(15 + lean, -58, 13 + lean, -43); ctx.quadraticCurveTo(4 + lean, -38, -7 + lean, -40); ctx.closePath();
+  ctx.fillStyle = C.hood; ctx.fill();
+  ctx.strokeStyle = rim ? rgba(rim, 0.8) : 'rgba(199,210,254,0.3)'; ctx.lineWidth = 1.4 / s; ctx.stroke();
+  ctx.fillStyle = '#0b0a09'; hlArtEll(7 + lean, -48, 4.6, 5.6); ctx.fill();
+  ctx.fillStyle = eye;
+  for (const ex of [5.4, 9.2]) { ctx.beginPath(); ctx.arc(ex + lean, -48.5, 0.95, 0, TAU); ctx.fill(); }
+  // the arm out to the haft
+  ctx.strokeStyle = C.cloakHi; ctx.lineWidth = 4.4;
+  ctx.beginPath(); ctx.moveTo(4 + lean, -36); ctx.quadraticCurveTo((4 + Q.hand[0]) / 2 + 2, (-36 + Q.hand[1]) / 2 + 4, Q.hand[0], Q.hand[1]); ctx.stroke();
+  ctx.fillStyle = '#57534e'; ctx.beginPath(); ctx.arc(Q.hand[0], Q.hand[1], 2.4, 0, TAU); ctx.fill();
+  if (!Q.back) hlArtYdSpade(Q.hand, Q.blade);
+  if (e.flash > 0) {
+    ctx.globalAlpha = ea * e.flash * 0.7; ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(-12, -3); ctx.quadraticCurveTo(15, -20, 9, -36); ctx.quadraticCurveTo(2, -46, -7, -43); ctx.quadraticCurveTo(-17, -36, -12, -3); ctx.fill();
+  }
+  ctx.restore();
+}
+/* where its blade is, in the world: for the dirt it throws */
+function hlArtYdBladeAt(e) {
+  const Q = hlArtYdDigPose(e), s = e.r / 17;
+  return { x: e.x + Q.blade[0] * s * Q.face, y: e.y + e.r * 0.85 + Q.blade[1] * s, Q };
+}
+
+/* ================================ the bellringer =============================
+   A bronze bell in a wooden frame, a rope hanging off it down to nobody. It
+   swings before it tolls, and goes on swinging a while after. */
+function hlArtYdBellSwing(e) {
+  if (e.state === 1) { const w = clamp(1 - (e.hlTollT || 0) / BELL_WIND, 0, 1); return Math.sin(uiTime * 11) * (0.15 + 0.45 * w); }
+  const since = e.hlTollT === undefined ? 9 : Math.max(0, BELL_T - e.hlTollT);
+  return Math.cos(since * 9) * 0.5 * Math.exp(-since * 2.2) + Math.sin(uiTime * 1.3 + hlArtSeed(e)) * 0.03;
+}
+function hlArtYdBellShape(lip) {
+  ctx.beginPath();
+  ctx.moveTo(-12, 8); ctx.quadraticCurveTo(-12, 1, 0, 0.5); ctx.quadraticCurveTo(12, 1, 12, 8);
+  ctx.lineTo(13.5, 29); ctx.quadraticCurveTo(15.5, 35, 22, lip); ctx.lineTo(-22, lip); ctx.quadraticCurveTo(-15.5, 35, -13.5, 29);
+  ctx.closePath();
+}
+function hlArtYdBellBody(sd, tolls, kin, fl) {
+  const C = HL_ART_YD_C, R = hlArtRng(Math.floor(sd * 1000) + 11);
+  hlArtYdBellShape(38);
+  const bg = ctx.createLinearGradient(-22, 0, 22, 0);
+  bg.addColorStop(0, C.bronzeHi); bg.addColorStop(0.3, '#ca8a04'); bg.addColorStop(0.62, C.bronze); bg.addColorStop(1, C.bronzeLo);
+  ctx.fillStyle = bg; ctx.fill();
+  if (kin) { ctx.strokeStyle = rgba(C.kin, 0.8); ctx.lineWidth = 1.4; ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(42,26,5,0.6)'; ctx.lineWidth = 1;
+  for (const yy of [11, 27]) { ctx.beginPath(); ctx.moveTo(-12.6 - (yy - 11) * 0.07, yy); ctx.quadraticCurveTo(0, yy + 2, 12.6 + (yy - 11) * 0.07, yy); ctx.stroke(); }
+  // the green it has gone where the rain runs
+  ctx.save(); hlArtYdBellShape(38); ctx.clip();
+  for (let i = 0; i < 3 + Math.min(4, tolls | 0); i++) { ctx.fillStyle = rgba(C.verdigris, 0.35 + R() * 0.25); hlArtEll(-10 + R() * 20, 6 + R() * 28, 2 + R() * 3, 3 + R() * 5); ctx.fill(); }
+  ctx.restore();
+  ctx.fillStyle = C.bronzeLo; hlArtEll(0, 38, 22, 3.6); ctx.fill();
+  ctx.fillStyle = C.bronzeDeep; hlArtEll(0, 38.6, 18, 2.4); ctx.fill();
+  if (fl > 0) { ctx.globalAlpha *= fl; hlArtYdBellShape(38); ctx.fillStyle = '#ffffff'; ctx.fill(); }
+}
+function hlArtYdBell(e, ea) {
+  const C = HL_ART_YD_C, r = e.r, s = r / 22, fy = e.y + r * 0.8, sw = hlArtYdBellSwing(e), sd = hlArtSeed(e);
+  ctx.save();
+  ctx.globalAlpha = ea * 0.45; ctx.fillStyle = '#000000'; hlArtEll(e.x, fy, r * 1.8, r * 0.4); ctx.fill();
+  ctx.globalAlpha = ea;
+  ctx.translate(e.x, fy); ctx.scale(s, s);
+  ctx.lineCap = 'round';
+  // the frame
+  for (const sx of [-1, 1]) {
+    ctx.strokeStyle = C.woodLo; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(sx * 28, 0); ctx.lineTo(sx * 15, -78); ctx.stroke();
+    ctx.strokeStyle = C.wood; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(sx * 28 - 1.5, 0); ctx.lineTo(sx * 15 - 1.5, -78); ctx.stroke();
+  }
+  ctx.strokeStyle = C.woodLo; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-22, -26); ctx.lineTo(22, -26); ctx.stroke();
+  ctx.fillStyle = C.woodLo; ctx.fillRect(-24, -86, 48, 9);
+  ctx.fillStyle = C.wood; ctx.fillRect(-24, -86, 48, 4);
+  ctx.fillStyle = C.woodHi; ctx.fillRect(-24, -86, 48, 1.2);
+  // the bell, from the beam
+  ctx.save(); ctx.translate(0, -78); ctx.rotate(sw);
+  ctx.fillStyle = C.woodLo; ctx.fillRect(-7, -3, 14, 6);
+  ctx.strokeStyle = C.iron; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 2); ctx.stroke();
+  ctx.save(); ctx.translate(-sw * 9, 0);
+  ctx.fillStyle = C.bronzeDeep; ctx.beginPath(); ctx.arc(-sw * 10, 41, 3.6, 0, TAU); ctx.fill();          // the clapper
+  ctx.restore();
+  hlArtYdBellBody(sd, e.hlTolls, !!e.hacked, e.flash || 0);
+  ctx.restore();
+  // its rope, off the lever, down to nobody
+  const lx = Math.cos(sw) * 10, ly = -78 + Math.sin(sw) * 10;
+  ctx.strokeStyle = C.rope; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(lx, ly); ctx.quadraticCurveTo(lx + 4 + sw * 14, -40, 12 + sw * 22, -8); ctx.stroke();
+  ctx.fillStyle = C.rope; hlArtEll(12 + sw * 22, -6, 2, 3); ctx.fill();
+  ctx.restore();
+}
+/* put down: it cracks, and comes out of its frame */
+function hlArtYdFallenBell(f) {
+  const C = HL_ART_YD_C, u = clamp((uiTime - f.t) / 0.5, 0, 1), drop = HL_EASE.outBounce(u);
+  ctx.save();
+  ctx.translate(f.x, f.y + 6);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; hlArtEll(4, 8, 30, 7); ctx.fill();
+  ctx.translate(0, -50 * (1 - drop)); ctx.rotate(f.rot * drop); ctx.translate(0, -20);
+  hlArtYdBellBody(f.sd, 6, false, 0);
+  ctx.strokeStyle = '#0b0a09'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(1, 1); ctx.lineTo(-3, 12); ctx.lineTo(4, 20); ctx.lineTo(-2, 30); ctx.lineTo(3, 38); ctx.stroke();
+  ctx.restore();
+  // the piece that came away
+  ctx.fillStyle = C.bronzeLo;
+  ctx.beginPath(); ctx.moveTo(f.x + 30, f.y + 10); ctx.lineTo(f.x + 40, f.y + 3); ctx.lineTo(f.x + 44, f.y + 12); ctx.closePath(); ctx.fill();
+}
+
+/* ================================ THE RAGE QUIT ==============================
+   A figure in a hoodie in his rose, a cracked screen for a face, and the
+   controller on the end of a cord he drags behind him like a tail. The
+   screen says what he is about to do: a squint for THE CONTROLLER, ring eyes
+   for MASH, chevrons for a charge, a QUIT? box while he says he is done.
+   Running for a gate we see his back: the back of the screen, and AFK across
+   his shoulders. He cracks further the lower he gets. */
+const hlArtYdRqFeet = e => ({ x: e.x, y: e.y + e.r * 0.72 });
+function hlArtYdRqFace(e) { return Math.cos(e.ang || 0) >= 0 ? 1 : -1; }
+function hlArtYdRqHead(e) { const s = e.r / 44, F = hlArtYdRqFeet(e); return { x: F.x, y: F.y - 119 * s, s }; }
+function hlArtYdHip(e) { const s = e.r / 44, F = hlArtYdRqFeet(e); return { x: F.x - hlArtYdRqFace(e) * 12 * s, y: F.y - 42 * s }; }
+function hlArtYdCordRope(e) {
+  let R = HL_ART_YD.cord.get(e);
+  if (R) return R;
+  const H = hlArtYdHip(e);
+  R = hlRope(H.x, H.y, 16, 8 * e.r / 44, { gy: 420, damp: 0.9, iters: 6, ang: Math.PI * 0.75 });
+  R.artLast = uiTime;
+  HL_ART_YD.cord.set(e, R);
+  return R;
+}
+function hlArtYdCordStep(e, dt) {
+  const R = hlArtYdCordRope(e), H = hlArtYdHip(e), floor = hlArtYdRqFeet(e).y + 6;
+  hlVPin(R, 0, H.x, H.y);
+  hlVStep(R, dt, () => [-(e.vx || 0) * 1.2, -(e.vy || 0) * 0.4]);
+  // it lies on the ground behind him: the floor stops it, and drags on it
+  R.p.forEach((q, i) => {
+    const fl = floor + i * 1.4;
+    if (q.y > fl) { q.y = fl; q.py = fl; q.px = lerp(q.px, q.x, 0.4); }
+  });
+  R.artLast = uiTime;
+}
+/* THE CONTROLLER: rose, two sticks and four buttons; s 1 is a pad 30 wide */
+function hlArtYdPad(x, y, rot, s, a = 1) {
+  const C = HL_ART_YD_C;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  ctx.globalAlpha *= a;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; hlArtEll(1, 9, 15, 4); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-14, -3); ctx.quadraticCurveTo(-14, -8, -7, -8); ctx.lineTo(7, -8); ctx.quadraticCurveTo(14, -8, 14, -3);
+  ctx.quadraticCurveTo(16, 7, 10.5, 8); ctx.quadraticCurveTo(6, 8, 5, 2.5); ctx.lineTo(-5, 2.5); ctx.quadraticCurveTo(-6, 8, -10.5, 8); ctx.quadraticCurveTo(-16, 7, -14, -3);
+  ctx.closePath();
+  ctx.fillStyle = C.rq; ctx.fill();
+  ctx.strokeStyle = C.rqLo; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(-9, -7.2, 18, 1.2);
+  ctx.fillStyle = C.rqDeep; ctx.fillRect(-11, -4.4, 6, 2); ctx.fillRect(-9, -6.4, 2, 6);
+  for (const [bx, by] of [[7, -5.5], [10, -3], [4, -3], [7, -0.8]]) { ctx.beginPath(); ctx.arc(bx, by, 1.2, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = '#2a0a12'; ctx.beginPath(); ctx.arc(-3, 0.5, 2, 0, TAU); ctx.arc(3, 0.5, 2, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+/* his cord, from his back along the ground; and on its end the controller,
+   or, while it is out, the cable paid out across the yard to it */
+function hlArtYdCordDraw(e, pad, inHand) {
+  const C = HL_ART_YD_C, R = hlArtYdCordRope(e);
+  if (uiTime - (R.artLast || 0) > 0.05) hlArtYdCordStep(e, Math.min(1 / 30, uiTime - (R.artLast || uiTime) || 1 / 60));
+  const pts = hlDrawRope(R, { w0: 3.4, w1: 2.8, col: '#1c1a1d' });
+  if (!pts) return;
+  ctx.strokeStyle = 'rgba(251,113,133,0.4)'; ctx.lineWidth = 1;
+  ctx.beginPath(); pts.forEach(([px, py], i) => (i ? ctx.lineTo(px - 0.8, py - 0.8) : ctx.moveTo(px - 0.8, py - 0.8))); ctx.stroke();
+  const tip = pts[pts.length - 1];
+  if (pad || inHand) {
+    const to = pad ? [pad.x, pad.y] : null;
+    if (to) {
+      const mx = (tip[0] + to[0]) / 2, my = (tip[1] + to[1]) / 2 + 26 + Math.sin(uiTime * 9) * 6;
+      ctx.strokeStyle = '#1c1a1d'; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.quadraticCurveTo(mx, my, to[0], to[1]); ctx.stroke();
+      ctx.strokeStyle = 'rgba(251,113,133,0.35)'; ctx.lineWidth = 0.9; ctx.stroke();
+    }
+    return;
+  }
+  const prev = pts[Math.max(0, pts.length - 3)];
+  hlArtYdPad(tip[0], tip[1], Math.atan2(tip[1] - prev[1], tip[0] - prev[0]) * 0.4, e.r / 44 * 0.9);
+}
+/* what his screen shows */
+function hlArtYdRqMode(e) {
+  if (e.hlCornered) return 'corner';
+  if (e.hlBolt) return hlRqRunning(e) ? 'back' : 'quit';
+  if (e.hlWind) return e.hlWind.kind;
+  if (e.hlMove) return e.hlMove.kind;
+  return 'idle';
+}
+/* his face, on the screen, in its own space: 54 × 37 round (0, 0) */
+function hlArtYdRqScreen(e, mode, T, face, sd) {
+  const C = HL_ART_YD_C, col = hlMix(C.rq, '#f43f5e', T), fl = hlNoise(uiTime * 30 + sd, 7) > 0.93 - 0.12 * T ? 0.35 : 1;
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(-27, -18.5, 54, 37, 3); ctx.clip();
+  ctx.fillStyle = C.glass; ctx.fillRect(-27, -18.5, 54, 37);
+  ctx.fillStyle = rgba(C.rq, (0.06 + 0.08 * T) * fl); ctx.fillRect(-27, -18.5, 54, 37);
+  ctx.globalAlpha *= fl;
+  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineCap = 'square'; ctx.lineJoin = 'miter';
+  const sh = mode === 'mash' ? (Math.random() - 0.5) * 1.6 : 0;
+  if (mode === 'quit') {
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(-21, -12, 42, 24);
+    ctx.strokeStyle = C.rqHi; ctx.lineWidth = 1; ctx.strokeRect(-21, -12, 42, 24);
+    hlArtText('QUIT?', 0, -2, { px: 8, w: 800, al: 'center', col: '#f8fafc', a: ctx.globalAlpha });
+    ctx.fillStyle = col; ctx.fillRect(-17, 3, 15, 6.5); ctx.strokeStyle = '#64748b'; ctx.strokeRect(2, 3, 15, 6.5);
+    hlArtText('YES', -9.5, 8.2, { px: 5, w: 800, al: 'center', col: '#2a0a12', a: ctx.globalAlpha });
+    hlArtText('NO', 9.5, 8.2, { px: 5, w: 800, al: 'center', col: '#64748b', a: ctx.globalAlpha });
+  } else if (mode === 'pad') {
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-17, -8); ctx.lineTo(-9, -3); ctx.lineTo(-17, 2); ctx.moveTo(17, -8); ctx.lineTo(9, -3); ctx.lineTo(17, 2); ctx.stroke();
+    ctx.fillRect(-10, 6, 20, 6); ctx.fillStyle = C.glass; for (const bx of [-4, 1, 6]) ctx.fillRect(bx - 1.2, 6, 1.6, 6);
+  } else if (mode === 'mash') {
+    ctx.lineWidth = 2.4;
+    for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(sx * 10 + sh, -3, 4.6, 0, TAU); ctx.stroke(); }
+    ctx.fillRect(-5 + sh, 5, 10, 7);
+    const k = Math.floor(uiTime * 14);
+    HL_ART_YD_BTNS.forEach((b, i) => { if ((k + i) % 3 === 0) hlArtText(b, [-21, 19, -20, 20][i], [-9, -8, 15, 15][i], { px: 6.5, w: 800, al: 'center', col: C.rqHi, a: ctx.globalAlpha }); });
+  } else if (mode === 'charge') {
+    ctx.lineWidth = 2.6;
+    for (const sx of [-1, 1]) for (const o of [0, 5]) {
+      const cx = sx * 10 + (o - 2.5) * face;
+      ctx.beginPath(); ctx.moveTo(cx - 2.5 * face, -7); ctx.lineTo(cx + 2.5 * face, -3); ctx.lineTo(cx - 2.5 * face, 1); ctx.stroke();
+    }
+    ctx.fillRect(-7, 8, 14, 2.6);
+  } else if (mode === 'corner') {
+    ctx.lineWidth = 2;
+    for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(sx * 10, -3, 5.4, 0, TAU); ctx.stroke(); ctx.fillRect(sx * 10 - 1, -4, 2, 2); }
+    ctx.beginPath(); ctx.moveTo(-9, 10);
+    for (let i = 1; i <= 6; i++) ctx.lineTo(-9 + i * 3, 10 + (i % 2 ? -2.2 : 0));
+    ctx.stroke();
+    ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.moveTo(19, -14); ctx.quadraticCurveTo(22, -9, 19, -7); ctx.quadraticCurveTo(16, -9, 19, -14); ctx.fill();
+  } else {
+    // the usual: brows down, square eyes, the mouth turned down
+    ctx.beginPath(); ctx.moveTo(-18, -12); ctx.lineTo(-5, -7); ctx.lineTo(-5, -4.6); ctx.lineTo(-18, -9.6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(18, -12); ctx.lineTo(5, -7); ctx.lineTo(5, -4.6); ctx.lineTo(18, -9.6); ctx.closePath(); ctx.fill();
+    const bl = hlNoise(uiTime * 0.8 + sd, 2) > 0.92 ? 1.4 : 6;
+    ctx.fillRect(-15, -2, 7, bl); ctx.fillRect(8, -2, 7, bl);
+    ctx.lineWidth = 3; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(-9, 12); ctx.quadraticCurveTo(0, 5 - 2 * T, 9, 12); ctx.stroke();
+  }
+  ctx.globalAlpha /= fl || 1;
+  // the cracks: from where it hit, more of them the worse it is going
+  const Rn = hlArtRng(Math.floor(sd * 100) + 41), n = 2 + Math.floor(T * 5), ix = 13, iy = -9;
+  ctx.strokeStyle = rgba(C.crack, 0.8); ctx.lineWidth = 0.9; ctx.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    let a = Rn() * TAU, px = ix, py = iy; ctx.beginPath(); ctx.moveTo(px, py);
+    for (let k = 0; k < 4; k++) { a += (Rn() - 0.5) * 0.9; px += Math.cos(a) * (6 + Rn() * 8); py += Math.sin(a) * (5 + Rn() * 6); ctx.lineTo(px, py); }
+    ctx.stroke();
+  }
+  ctx.fillStyle = rgba(C.crack, 0.7); ctx.beginPath(); ctx.arc(ix, iy, 1.6, 0, TAU); ctx.fill();
+  // scanlines, and the glare off the glass
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; for (let yy = -18; yy < 19; yy += 3) ctx.fillRect(-27, yy, 54, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.beginPath(); ctx.moveTo(-27, -18.5); ctx.lineTo(-8, -18.5); ctx.lineTo(-24, 18.5); ctx.lineTo(-27, 18.5); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+/* an arm: shoulder to hand with a bend, and a fist */
+function hlArtYdArm(sx, sy, hx, hy, col, bend) {
+  const mx = (sx + hx) / 2 + bend, my = (sy + hy) / 2 + Math.abs(bend) * 0.6;
+  ctx.strokeStyle = col; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(mx, my, hx, hy); ctx.stroke();
+  ctx.fillStyle = HL_ART_YD_C.rqHi; ctx.beginPath(); ctx.arc(hx, hy, 5.6, 0, TAU); ctx.fill();
+}
+function hlArtYdRq(e, ea) {
+  const C = HL_ART_YD_C, r = e.r, s = r / 44, sd = hlArtSeed(e), T = clamp(e.hlTilt || 0, 0, 1);
+  const mode = hlArtYdRqMode(e), back = mode === 'back', face = hlArtYdRqFace(e), F = hlArtYdRqFeet(e);
+  const mv = clamp(len(e.vx || 0, e.vy || 0) / 200, 0, 1), ph = uiTime * (back ? 15 : 10) + sd, stride = Math.sin(ph) * 9 * mv;
+  const jx = (hlNoise(uiTime * 24 + sd, 4) - 0.5) * 5 * T * T;
+  const pad = ebullets.find(b => b.hlPadOf === e.id) || null, inHand = mode === 'pad';
+  const charge = mode === 'charge', t = uiTime;
+  ctx.save();
+  ctx.globalAlpha = ea * 0.5; ctx.fillStyle = '#000000'; hlArtEll(F.x, F.y + 2, r * 1.05, r * 0.26); ctx.fill();
+  ctx.globalAlpha = ea;
+  hlArtYdCordDraw(e, pad, inHand);
+  ctx.translate(F.x + jx, F.y - Math.abs(Math.sin(ph)) * 3 * mv * s); ctx.scale(s * face, s);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // legs and sneakers
+  for (const [lx, st] of [[-8, -stride], [8, stride]]) {
+    ctx.strokeStyle = C.jeans; ctx.lineWidth = 11;
+    ctx.beginPath(); ctx.moveTo(lx, -40); ctx.lineTo(lx + st * 0.7, -6); ctx.stroke();
+    ctx.fillStyle = '#e2e8f0'; hlArtEll(lx + st * 0.7 + 3, -2, 9, 4.4); ctx.fill();
+    ctx.fillStyle = C.rq; ctx.fillRect(lx + st * 0.7 - 2, -4, 8, 1.6);
+  }
+  // the upper body, leaning into a charge
+  if (charge) { ctx.translate(0, -40); ctx.rotate(0.24); ctx.translate(0, 40); }
+  // the arms, by what he is doing: [back hand, front hand]
+  const shake = Math.sin(t * 16) * 3, pump = Math.sin(ph) * 9;
+  let H;
+  if (mode === 'quit') H = [[-27, -114 + shake], [27, -114 - shake]];
+  else if (mode === 'pad') H = [[-22, -56], [-10, -122]];
+  else if (mode === 'mash') H = [[10 + (Math.random() - 0.5) * 3, -62], [20 + (Math.random() - 0.5) * 3, -66]];
+  else if (charge) H = [[-28, -58], [-20, -54]];
+  else if (back) H = [[-14 - pump, -58], [16 + pump, -60]];
+  else if (mode === 'corner') H = [[-17, -108], [17, -108]];
+  else H = [[-20, -52], [24, -106 + shake * T]];
+  hlArtYdArm(-14, -80, H[0][0], H[0][1], C.rqLo, -6);
+  // the hood, hanging at his back
+  ctx.fillStyle = C.rqLo; hlArtEll(back ? 2 : -6, -88, 17, 8); ctx.fill();
+  // the hoodie
+  ctx.beginPath(); ctx.moveTo(-23, -38); ctx.quadraticCurveTo(-28, -70, -16, -86); ctx.quadraticCurveTo(0, -94, 16, -86); ctx.quadraticCurveTo(28, -70, 23, -38); ctx.closePath();
+  const tg = ctx.createLinearGradient(-24, -92, 24, -40);
+  tg.addColorStop(0, back ? C.rqMid : C.rq); tg.addColorStop(0.55, back ? C.rqLo : C.rqMid); tg.addColorStop(1, C.rqLo);
+  ctx.fillStyle = tg; ctx.fill();
+  ctx.fillStyle = C.rqLo; ctx.fillRect(-23, -43, 46, 5);
+  if (back) {
+    // his back: the hood down it, and what is printed across his shoulders
+    ctx.fillStyle = C.rqLo; ctx.beginPath(); ctx.moveTo(-14, -88); ctx.quadraticCurveTo(0, -60, 14, -88); ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.scale(face, 1); hlArtText('AFK', 0, -50, { px: 13, w: 800, ls: '0.12em', al: 'center', col: C.rqHi, a: ctx.globalAlpha * 0.9 }); ctx.restore();
+  } else {
+    ctx.fillStyle = 'rgba(159,18,57,0.5)';
+    ctx.beginPath(); ctx.moveTo(-13, -60); ctx.lineTo(13, -60); ctx.lineTo(17, -44); ctx.lineTo(-17, -44); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = C.rqHi; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(-5, -86); ctx.lineTo(-6, -68); ctx.moveTo(5, -86); ctx.lineTo(6, -68); ctx.stroke();
+  }
+  if (e.flash > 0) {
+    ctx.save(); ctx.globalAlpha = ea * e.flash * 0.6; ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(-23, -38); ctx.quadraticCurveTo(-28, -70, -16, -86); ctx.quadraticCurveTo(0, -94, 16, -86); ctx.quadraticCurveTo(28, -70, 23, -38); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  // the head: a monitor on its stand, cracked
+  ctx.fillStyle = C.bezel; ctx.fillRect(-5, -97, 10, 9);
+  if (back) {
+    ctx.fillStyle = C.bezelHi; ctx.beginPath(); ctx.roundRect(-31, -142, 62, 46, 6); ctx.fill();
+    ctx.fillStyle = C.bezel; for (let i = 0; i < 4; i++) ctx.fillRect(-22, -134 + i * 6, 44, 3);
+    ctx.fillStyle = '#d6d3d1'; ctx.fillRect(10, -110, 12, 8);
+    ctx.fillStyle = C.rqLo; ctx.fillRect(12, -108, 8, 1.2); ctx.fillRect(12, -105.5, 6, 1.2);
+    ctx.strokeStyle = '#1c1a1d'; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(0, -100); ctx.quadraticCurveTo(-6, -92, -2, -84); ctx.stroke();
+  } else {
+    ctx.fillStyle = C.bezel; ctx.beginPath(); ctx.roundRect(-31, -142, 62, 46, 6); ctx.fill();
+    ctx.strokeStyle = C.bezelHi; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.save(); ctx.translate(0, -119.5); ctx.scale(face, 1);
+    hlArtYdRqScreen(e, mode, T, face, sd);
+    ctx.restore();
+    if (e.flash > 0) { ctx.save(); ctx.globalAlpha = ea * e.flash * 0.5; ctx.fillStyle = '#ffffff'; ctx.fillRect(-27, -138, 54, 37); ctx.restore(); }
+  }
+  // the front arm, over it all; the controller in his fist while he winds it
+  hlArtYdArm(14, -80, H[1][0], H[1][1], C.rq, 6);
+  if (inHand) { ctx.save(); ctx.scale(face, 1); hlArtYdPad(H[1][0] * face, H[1][1] - 4, -0.4 * face, 0.75); ctx.restore(); }
+  ctx.restore();
+}
+
+/* coming apart: his screen cracks right across, says gg, and tips over; the
+   hoodie folds into the earth; and a stone of his own comes up out of it:
+   the first run of his that ever ended */
+function drawHlYardBossDeath(d) {
+  const C = HL_ART_YD_C, t = d.t, r = d.r || 44, s = r / 44, x = d.x, fy = d.y + r * 0.72;
+  const fall = HL_EASE.inOut(clamp((t - 0.8) / 0.6, 0, 1)), slump = HL_EASE.out3(clamp((t - 0.6) / 0.8, 0, 1));
+  const sink = HL_EASE.inOut(clamp((t - 1.6) / 0.9, 0, 1)), rise = HL_EASE.outBack(clamp((t - 2.2) / 0.7, 0, 1));
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  // the earth he goes into
+  if (t > 1.2) { const k = clamp((t - 1.2) / 0.8, 0, 1); ctx.fillStyle = C.earth; hlArtEll(x, fy + 2, 46 * k * s, 16 * k * s); ctx.fill(); ctx.fillStyle = C.earthHi; hlArtEll(x - 4, fy - 1, 34 * k * s, 9 * k * s); ctx.fill(); }
+  if (sink < 1) {
+    ctx.save();
+    ctx.globalAlpha = 1 - sink;
+    ctx.translate(x, fy); ctx.scale(s, s * (1 - 0.65 * slump));
+    // the hoodie, folding down
+    ctx.strokeStyle = C.jeans; ctx.lineWidth = 11; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-8, -38); ctx.lineTo(-10 - 14 * slump, -6); ctx.moveTo(8, -38); ctx.lineTo(10 + 16 * slump, -6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-24, -36); ctx.quadraticCurveTo(-30 - 6 * slump, -70, -16, -86); ctx.quadraticCurveTo(0, -94 + 8 * slump, 16, -86); ctx.quadraticCurveTo(30 + 6 * slump, -70, 24, -36); ctx.closePath();
+    const hg = ctx.createLinearGradient(-24, -92, 24, -40);
+    hg.addColorStop(0, C.rq); hg.addColorStop(0.55, C.rqMid); hg.addColorStop(1, C.rqLo);
+    ctx.fillStyle = hg; ctx.fill();
+    ctx.fillStyle = C.rqLo; hlArtEll(-4, -88, 15, 6); ctx.fill();
+    ctx.restore();
+    // the screen
+    ctx.save();
+    ctx.globalAlpha = 1 - sink;
+    ctx.translate(x + fall * 34 * s, lerp(fy - 119 * s, fy - 14 * s, fall)); ctx.rotate(fall * 1.45); ctx.scale(s, s);
+    ctx.fillStyle = C.bezel; ctx.beginPath(); ctx.roundRect(-31, -22.5, 62, 46, 6); ctx.fill();
+    ctx.fillStyle = C.glass; ctx.fillRect(-27, -18.5, 54, 37);
+    const Rn = hlArtRng(0x6a6a), n = Math.floor(clamp(t / 0.6, 0, 1) * 12);
+    ctx.strokeStyle = rgba(C.crack, 0.85); ctx.lineWidth = 1; ctx.lineCap = 'round';
+    for (let i = 0; i < n; i++) {
+      let a = Rn() * TAU, px = 4, py = -2; ctx.beginPath(); ctx.moveTo(px, py);
+      for (let k = 0; k < 4; k++) { a += (Rn() - 0.5) * 0.8; px += Math.cos(a) * 9; py += Math.sin(a) * 7; ctx.lineTo(px, py); }
+      ctx.stroke();
+    }
+    if (t > 0.5) {
+      const fl = hlNoise(t * 18, 3) > 0.8 ? 0.4 : 1;
+      hlArtText('gg', 0, 8, { px: 22, w: 700, mono: true, al: 'center', col: C.rq, a: (1 - sink) * fl * clamp((t - 0.5) / 0.2, 0, 1) });
+    }
+    ctx.restore();
+    // the controller, dropped
+    hlArtYdPad(x - 40 * s, fy + 8, 0.5, 0.9 * s, 1 - sink * 0.5);
+  } else hlArtYdPad(x - 40 * s, fy + 8, 0.5, 0.9 * s, 0.5);
+  // and the stone: WAVE 20, ‘gg’
+  if (rise > 0) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x - 80, fy - 140, 160, 138); ctx.clip();
+    ctx.translate(x, fy - 4 + (1 - rise) * 80);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; hlArtEll(2, 1, 28, 5); ctx.fill();
+    const shape = (dx, dy) => { ctx.beginPath(); ctx.moveTo(-24 + dx, dy); ctx.lineTo(-24 + dx, -38 + dy); ctx.quadraticCurveTo(-24 + dx, -58 + dy, dx, -58 + dy); ctx.quadraticCurveTo(24 + dx, -58 + dy, 24 + dx, -38 + dy); ctx.lineTo(24 + dx, dy); ctx.closePath(); };
+    shape(2.6, 0.4); ctx.fillStyle = C.stoneDeep; ctx.fill();
+    shape(0, 0);
+    const lg = ctx.createLinearGradient(-24, -58, 24, 0);
+    lg.addColorStop(0, C.stoneHi); lg.addColorStop(0.4, C.stone); lg.addColorStop(1, C.stoneLo);
+    ctx.fillStyle = lg; ctx.fill();
+    hlArtYdCut(ctx, 'WAVE 20', 0, -36, 9, {});
+    hlArtYdCut(ctx, '‘gg’', 0, -16, 12, { mono: true, w: 400, col: C.rqDeep });
+    ctx.restore();
+  }
+  // his rose, going out of the yard
+  if (t < 2.4) {
+    ctx.globalCompositeOperation = 'lighter';
+    const k = 1 - clamp((t - 0.8) / 1.6, 0, 1);
+    drawGlow(x + fall * 34 * s, lerp(fy - 119 * s, fy - 14 * s, fall), 70 * s, C.rq, 0.35 * k * (0.7 + 0.3 * Math.sin(t * 30)));
+  }
+  ctx.restore();
+}
+
+/* ================================== the rounds ===============================
+   Additive layer: each draws its own glow, then its body in plain paint. */
+function hlArtYdBtn(b) {
+  let k = HL_ART_YD.btn.get(b);
+  if (!k) { k = HL_ART_YD_BTNS[(Math.random() * 4) | 0]; HL_ART_YD.btn.set(b, k); }
+  return k;
+}
+function drawHlYardEBullet(b) {
+  const C = HL_ART_YD_C, r = b.r, ang = Math.atan2(b.vy || 0, b.vx || 1), ca = Math.cos(ang), sa = Math.sin(ang), lag = b.frozen > 0;
+  ctx.save();
+  if (b.hlKind === 'pad') {
+    // THE CONTROLLER, thrown: it spins, and the pips under it are the bounces it has left
+    drawGlow(b.x, b.y, r * 3.6, C.rq, 0.4);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = rgba(C.hurt, 0.8); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(b.x, b.y, r + 4, 0, TAU); ctx.stroke();
+    hlArtYdPad(b.x, b.y, lag ? 0.3 : uiTime * 9 + b.x * 0.01, r / 13);
+    const n = Math.max(0, b.ricP | 0);
+    for (let i = 0; i < RQ_PAD.bounces; i++) {
+      ctx.fillStyle = i < n ? C.rqHi : 'rgba(87,83,78,0.8)';
+      ctx.beginPath(); ctx.arc(b.x + (i - (RQ_PAD.bounces - 1) / 2) * 6, b.y + r + 10, 1.8, 0, TAU); ctx.fill();
+    }
+  } else if (b.hlKind === 'mash') {
+    // MASH: a spray of buttons
+    drawGlow(b.x, b.y, r * 3.2, C.rq, 0.3);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = C.rqHi; ctx.beginPath(); ctx.arc(b.x, b.y, r * 1.45, 0, TAU); ctx.fill();
+    ctx.strokeStyle = C.hurt; ctx.lineWidth = 1.5; ctx.stroke();
+    hlArtText(hlArtYdBtn(b), b.x, b.y + r * 0.6, { px: Math.round(r * 1.7), w: 800, al: 'center', col: C.rqDeep });
+  } else {
+    // a risen's stream: pale, with the red of a round that hurts
+    ctx.strokeStyle = rgba(C.ghost, 0.22); ctx.lineWidth = r * 1.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ca * r * 4, b.y - sa * r * 4); ctx.stroke();
+    drawGlow(b.x, b.y, r * 3.2, C.ghost, 0.3);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = C.ghostHi; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.8, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(C.hurt, 0.85); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(b.x, b.y, r + 2, 0, TAU); ctx.stroke();
+  }
+  if (lag) {
+    // LAG: hanging there, buffering
+    ctx.strokeStyle = rgba('#e2e8f0', 0.8); ctx.lineWidth = 1.6;
+    const a0 = uiTime * 8; ctx.beginPath(); ctx.arc(b.x, b.y, r + 9, a0, a0 + 4.2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ============================================================================
+   THE YARD'S HOOKS
+============================================================================ */
+
+/* ---- the clock: once a frame, in the yard ---- */
+function hlYardArtTick(dt) {
+  if (dt <= 0) return;
+  const S = HL_ART_YD, A = hlYardOn() ? hlArea : null, C = HL_ART_YD_C;
+  if (!A) return;
+  // the gates swing shut on whoever stands in them
+  for (const g of A.gates) S.shut[g.i] += ((g.by ? 1 : 0) - S.shut[g.i]) * (1 - Math.exp(-dt * (g.by ? 9 : 3)));
+  // the earth over a grave that is coming up
+  for (const g of A.graves) {
+    if (g.st === 'rise' && Math.random() < dt * 30 * (0.3 + g.t / GRAVE_RISE_T)) hlEmit('clod', g.x + rnd(-16, 16), g.y + rnd(-4, 10), 1, { col: C.earthHi, speed: 0.4, size: 0.8 });
+    else if (g.st === 'buried' && g.t > BURY_T * 0.6 && Math.random() < dt * 14) hlEmit('clod', g.x + rnd(-14, 14), g.y + rnd(-4, 8), 1, { col: C.earthHi, speed: 0.3, size: 0.7 });
+  }
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.boss === 'ragequit') {
+      hlArtYdCordStep(e, dt);
+      if (e.hlTilt > 0.6 && Math.random() < dt * 8 * e.hlTilt) { const H = hlArtYdRqHead(e); hlEmit('smoke', H.x + rnd(-20, 20), H.y - 20, 1, { col: '#57534e', a: 0.18, size: 0.8 }); }
+    } else if (e.type === 'gravedigger') {
+      // the dirt off the blade as it throws
+      const Q = hlArtYdDigPose(e);
+      const throwing = (e.state === 2 && Q.u > 0.55) || (e.hlMarked && e.state === 3 && Q.u > 0.45 && Q.u < 0.75);
+      if (throwing && Math.random() < dt * 40) { const B = hlArtYdBladeAt(e); hlEmit('clod', B.x, B.y, 1, { col: e.hlMarked ? C.earthHi : C.clay, speed: 0.7, size: 0.8 }); }
+      if (e.hlMarked && Math.random() < dt * 5) hlEmit('wisp', e.x + rnd(-e.r, e.r), e.y - e.r, 1, { size: 0.7, vy: -20 });
+    } else if (e.type === 'risen' && e.hlClimb > 0 && Math.random() < dt * 40) {
+      hlEmit('clod', e.x + rnd(-e.r, e.r), e.y + rnd(0, e.r * 0.6), 1, { col: C.earthHi, speed: 0.6, size: 0.8 });
+    }
+  }
+  S.lines = S.lines.filter(l => uiTime - l.t < 2.6);
+  S.tolls = S.tolls.filter(o => uiTime - o.t < 1.6);
+  S.fallen = S.fallen.filter(f => uiTime - f.t < f.life);
+  S.strikes = S.strikes.filter(o => uiTime - o.t < 0.32);
+  S.chats = S.chats.filter(c => uiTime - c.t < 2.8);
+  // moonlit motes round the hull, and now and then a leaf off the trees
+  S.moteT -= dt;
+  if (S.moteT <= 0 && typeof P !== 'undefined') {
+    S.moteT = 0.16;
+    const a = rnd(TAU), d = Math.sqrt(Math.random()) * 260;
+    hlEmit('mote', P.x + Math.cos(a) * d, P.y + Math.sin(a) * d, 1, { col: '#e0e7ff' });
+  }
+  S.leafT -= dt;
+  if (S.leafT <= 0) {
+    S.leafT = rnd(2.4, 1.1);
+    const tx = Math.random() < 0.5 ? arena.x0 + 74 : arena.x1 - 90, ty = tx < arena.x0 + 200 ? arena.y0 + 40 : arena.y1 - 120;
+    hlEmit('clod', tx + rnd(-50, 50), ty + rnd(-20, 30), 1, { col: '#4a3520', speed: 0.25, size: 1.1, life: 2 });
+  }
+}
+
+/* ---- effect hooks: in the yard the event's own particles, which it draws ---- */
+function hlYardEnterFx(A) {
+  const S = HL_ART_YD;
+  S.lines.length = 0; S.tolls.length = 0; S.fallen.length = 0; S.strikes.length = 0; S.chats.length = 0;
+  S.shut = [0, 0, 0, 0]; S.enterAt = uiTime; S.joltAt = -9; S.backAt = -9; S.marchAt = -9; S.soulAt = -9;
+  S.stones.clear();
+  hlUnbake('hl-patch-floor'); hlUnbake('hl-house-floor');           // one area's floor in memory at a time
+  hlEmit('bat', cam.x - W / 2 / camZoom - 30, cam.y - 160, 5, { ang: 0.15, spread: 50, life: 9, col: '#05070a' });
+  if (typeof P !== 'undefined') hlEmit('mote', P.x, P.y, 24, { spread: 180, col: '#e0e7ff' });
+}
+function hlGraveRiseFx(g) {
+  Audio_.tone(55, 0.5, 'sine', 0.08, 40);
+  hlEmit('clod', g.x, g.y + 4, 6, { col: HL_ART_YD_C.earthHi, speed: 0.5, size: 0.9, spread: 10 });
+}
+function hlRisenUpFx(e, g) {
+  const C = HL_ART_YD_C;
+  hlEmit('clod', e.x, e.y + 4, 14, { col: C.earthHi, speed: 0.9, size: 1, spread: 8 });
+  hlEmit('smoke', e.x, e.y, 3, { col: '#57534e', a: 0.12, size: 1.4, spread: 8 });
+  hlEmit('wisp', e.x, e.y - 6, 8, { col: e.hacked ? C.kin : C.ghost, spread: 10, vy: -40 });
+  Audio_.noise(0.3, 0.1, 700, 80, 2);
+}
+function hlRisenWindFx(e) { if (e.hlGun !== 'stream') Audio_.tone(e.hlGun === 'lance' ? 520 : 380, RISEN_WIND, 'sine', 0.025, 900); }
+function hlRisenFireFx(e) {
+  if (e.hlGun === 'stream') return;
+  HL_ART_YD.strikes.push({ x: e.x, y: e.y, ang: e.hlAim, kind: e.hlGun, t: uiTime, kin: !!e.hacked });
+  Audio_.noise(0.12, 0.1, 3800, 900, 2);
+}
+/* felled: it crumbles into its stone's line */
+function hlRisenDownFx(e, line) {
+  const C = HL_ART_YD_C;
+  if (line && line.said) HL_ART_YD.lines.push({ x: e.x, y: e.y - e.r - 4, text: 'WAVE ' + line.wave + ' · ‘' + line.said + '’', t: uiTime, seed: Math.random() * 99 });
+  hlEmit('wisp', e.x, e.y, 10, { col: C.ghost, spread: e.r * 0.6, vy: -30 });
+  hlEmit('clod', e.x, e.y, 6, { col: C.earthHi, speed: 0.6, size: 0.8 });
+}
+function hlDigFx(e) { Audio_.noise(0.14, 0.08, 500, 120, 1); }
+function hlPitDigFx(e, p) {
+  const C = HL_ART_YD_C;
+  hlEmit('clod', p.x, p.y, 16, { col: C.earthHi, speed: 1, size: 1.1, spread: p.r * 0.4 });
+  hlEmit('smoke', p.x, p.y, 3, { col: '#57534e', a: 0.1, size: 1.6, spread: p.r * 0.4 });
+  Audio_.noise(0.22, 0.12, 400, 60, 2);
+}
+function hlPitCloseFx(p) { hlEmit('clod', p.x, p.y, 5, { col: HL_ART_YD_C.earth, speed: 0.3, size: 0.8, spread: p.r * 0.5 }); }
+function hlPitSwallowFx(b, p) {
+  hlEmit('clod', b.x, b.y, 3, { col: HL_ART_YD_C.earthHi, speed: 0.4, size: 0.6 });
+  hlEmit('smoke', b.x, b.y, 1, { col: '#57534e', a: 0.12, size: 0.8 });
+}
+function hlBuryFx(e, g, digger) {
+  const C = HL_ART_YD_C;
+  hlEmit('clod', g.x, g.y, 14, { col: C.earthHi, speed: 0.8, size: 1, spread: 12 });
+  hlEmit('smoke', g.x, g.y, 3, { col: '#57534e', a: 0.12, size: 1.3 });
+  Audio_.noise(0.3, 0.1, 380, 60, 2);
+}
+function hlDigDownFx(e) {
+  HL_ART_YD.fallen.push({ kind: 'spade', x: e.x, y: e.y + e.r * 0.6, rot: (Math.random() - 0.5) * 1.2, t: uiTime, life: 4 });
+  hlEmit('clod', e.x, e.y, 6, { col: HL_ART_YD_C.earthHi, speed: 0.5, size: 0.8 });
+}
+function hlDigSproutFx(e) {
+  ringFx(e.x, e.y, 6, 80, '#a5f3fc', 0.5, 3);
+  hlEmit('wisp', e.x, e.y, 14, { spread: e.r, vy: -40 });
+}
+/* felled before it could finish: n of 3, and a third more of the stone can be read */
+function hlDigStoppedFx(e, n) {
+  ringFx(e.x, e.y, 10, 110, '#a5f3fc', 0.6, 2);
+  hlEmit('wisp', e.x, e.y - e.r * 0.5, 22, { spread: e.r * 0.8, vy: -50 });
+  const s = hlSoulStone();
+  if (s) {
+    hlEmit('clod', s.x, s.y - 30, 12, { col: HL_ART_YD_C.earthHi, speed: 0.6, size: 1, spread: 16 });
+    hlEmit('wisp', s.x, s.y - 40, 10, { spread: 12, vy: -30 });
+  }
+  HL_ART_YD.chats.push({ x: e.x, y: e.y - e.r * 2.6, t: uiTime, n });
+  Audio_.gem();
+}
+function hlDigLostFx(e) {
+  const s = hlSoulStone();
+  if (s) hlEmit('clod', s.x, s.y - 40, 18, { col: HL_ART_YD_C.earthHi, speed: 0.7, size: 1.2, spread: 18 });
+  hlEmit('wisp', e.x, e.y, 18, { spread: e.r, vy: -70, life: 1.3 });
+  Audio_.tone(98, 0.6, 'sine', 0.06, 60);
+}
+function hlStoneUncoverFx(g) {
+  HL_ART_YD.uncoverAt = uiTime;
+  ringFx(g.x, g.y - 30, 10, 160, '#a5f3fc', 0.9, 3);
+  hlEmit('clod', g.x, g.y - 20, 22, { col: HL_ART_YD_C.earthHi, speed: 0.8, size: 1.1, spread: 22 });
+  hlEmit('wisp', g.x, g.y - 40, 30, { spread: 20, vy: -40 });
+}
+function hlBellWindFx(e) { Audio_.tone(120, BELL_WIND, 'triangle', 0.025, 140); }
+function hlBellTollFx(e, graves) {
+  const s = e.r / 22;
+  HL_ART_YD.tolls.push({ x: e.x, y: e.y + e.r * 0.8 - 58 * s, gx: e.x, gy: e.y, t: uiTime, kin: !!e.hacked, graves: graves.map(g => ({ x: g.x, y: g.y })) });
+  Audio_.tone(196, 1.4, 'sine', 0.08, 190); Audio_.tone(392, 0.9, 'sine', 0.03, 380); Audio_.tone(588, 0.5, 'sine', 0.015, 580);
+  shakeAt(e.x, e.y, 0.15);
+}
+function hlBellDownFx(e) {
+  HL_ART_YD.fallen.push({ kind: 'bell', x: e.x, y: e.y + e.r * 0.8, rot: (Math.random() < 0.5 ? -1 : 1) * 1.15, sd: hlArtSeed(e), t: uiTime, life: 5 });
+  hlEmit('clod', e.x, e.y + e.r, 8, { col: '#854d0e', speed: 0.7, size: 0.9 });
+  Audio_.tone(150, 0.25, 'square', 0.05, 90); Audio_.noise(0.3, 0.12, 2400, 300, 3);
+}
+function hlRqWindFx(e, kind) {
+  if (kind === 'pad') Audio_.tone(300, RQ_WIND.pad, 'sawtooth', 0.025, 700);
+  else if (kind === 'mash') Audio_.tone(880, 0.06, 'square', 0.03, 880);
+  else Audio_.tone(140, RQ_WIND.charge, 'sawtooth', 0.04, 70);
+}
+function hlRqMoveFx(e, kind) {
+  if (kind === 'charge') { const F = hlArtYdRqFeet(e); hlEmit('clod', F.x, F.y, 8, { col: HL_ART_YD_C.earthHi, speed: 0.8, size: 0.9 }); }
+  if (kind === 'pad') { const R = HL_ART_YD.cord.get(e); if (R) hlVKick(R, e.x, e.y, 200, -(e.vx || 0) * 0.02, -6); }
+}
+function hlRqBoltFx(e, gate) { Audio_.tone(440, 0.12, 'square', 0.05, 440); Audio_.tone(330, 0.2, 'square', 0.05, 330, 0.13); }
+function hlRqStopFx(e, why) {
+  const C = HL_ART_YD_C, H = hlArtYdRqHead(e);
+  if (why === 'burnt') { burst(H.x, H.y, 16, C.rqHi, 220, 2.2, 0.4); Audio_.noise(0.2, 0.12, 4200, 800, 2); }
+  else for (const g of hlArea.gates) if (g.by && (why === 'shut' || (e.hlBolt === null && len(g.x - e.x, g.y - e.y) < GATE_R * 2))) ringFx(g.x, g.y, 20, GATE_R + 20, '#e2e8f0', 0.5, 3);
+  if (why !== 'burnt') Audio_.tone(260, 0.3, 'square', 0.04, 120);
+}
+/* THAT ONE DIDN'T COUNT: the room rewinds */
+function hlRqEscapeFx(e, gate) {
+  HL_ART_YD.joltAt = uiTime;
+  drawFlashT = Math.max(drawFlashT, 0.12);
+  hlEmit('ember', gate.x, gate.y, 18, { col: '#fb7185', spread: 30 });
+  Audio_.tone(900, 0.45, 'sawtooth', 0.05, 120);
+}
+function hlRqBackFx(e, gate) {
+  HL_ART_YD.backAt = uiTime;
+  ringFx(e.x, e.y, e.r * 2.4, e.r, '#fb7185', 0.45, 3);
+  burst(e.x, e.y - e.r, 14, '#fecdd3', 160, 2.4, 0.4);
+}
+function hlRqSoulFx(gate) {
+  HL_ART_YD.soulAt = uiTime;
+  ringFx(gate.x, gate.y, 8, 100, '#a5f3fc', 0.7, 3);
+  hlEmit('wisp', gate.x, gate.y, 26, { spread: 30, vy: -30 });
+  Audio_.tone(523, 0.6, 'sine', 0.05, 523); Audio_.tone(784, 0.8, 'sine', 0.03, 784, 0.2);
+}
+/* his last quarter: every run he left goes and stands in one of his doors */
+function hlRqMarchFx(e, risen) {
+  HL_ART_YD.marchAt = uiTime;
+  for (const o of risen) hlEmit('wisp', o.x, o.y, 6, { col: '#cbd5e1', spread: 10, vy: -30 });
+  for (const g of hlArea.gates) ringFx(g.x, g.y, GATE_R + 30, 20, '#cbd5e1', 0.8, 2);
+  Audio_.tone(130.8, 1.8, 'triangle', 0.06, 130.8); Audio_.tone(196, 1.8, 'triangle', 0.04, 196, 0.15); Audio_.tone(261.6, 1.8, 'triangle', 0.03, 261.6, 0.3);
+}
+function hlYardBossDeathFx(e) {
+  const H = hlArtYdRqHead(e);
+  burst(H.x, H.y, 40, '#fb7185', 360, 3.6, 0.8);
+  burst(H.x, H.y, 20, '#f8fafc', 260, 2.4, 0.6);
+  Audio_.boom();
+}
+// medals, in any run: the game's own effects, since the event's particles are only drawn in its rooms
+function hlGraveAllyFx(e) {
+  ringFx(e.x, e.y, 4, e.r * 2.6, '#a3e635', 0.45, 3);
+  burst(e.x, e.y + e.r * 0.4, 12, '#3d3024', 140, 2.4, 0.5);
+}
+function hlLagFx(b) {
+  ringFx(b.x, b.y, 14, 6, '#e2e8f0', LAG_T, 2);
+  floatText(b.x, b.y - 14, 'LAG', '#e2e8f0', 11, -12);
+}
+
+/* ---- the world ---- */
+/* The light pass. The moon, high in the north-west, throws every stone's
+   shadow long to the south-east; your own pale light; a gate's lamp, lit by
+   whoever stands in it; the soul's stone once it can be read; his screen. */
+function hlYardLights() {
+  const C = HL_ART_YD_C, A = hlArea, X = arena.x0, Y = arena.y0;
+  hlLightBegin('#3b4660', 1);
+  hlLight({ x: X + (arena.x1 - X) * 0.28, y: Y - 520, r: 3800, col: C.moon, a: 0.95, z: 2600, size: 160 });
+  hlLight({ x: P.x, y: P.y, r: 320, col: '#e0e7ff', a: 0.42, shadow: false });
+  for (const g of A.gates) {
+    const S = hlArtYdGateState(g);
+    if (!S.lit) continue;
+    const L = hlArtYdLampPos(g);
+    hlLight({ x: L.x, y: L.y + 40, r: 260, col: S.col, a: 0.8 * S.lit, z: 60, flick: S.who ? 0.15 : 0.6, seed: g.i * 2.3, shadow: false });
+  }
+  const s = A.graves.find(g => g.soul);
+  if (s) hlLight({ x: s.x, y: s.y - 30, r: hlQDone('q5') ? 170 : 90, col: C.cold, a: hlQDone('q5') ? 0.45 : 0.3, z: 40, flick: 0.2, seed: 7.7, shadow: false });
+  for (const g of A.graves) {
+    if (g.st === 'rise') hlLight({ x: g.x, y: g.y, r: 110, col: g.kin ? C.kin : '#e7e5e4', a: 0.5 * g.t / GRAVE_RISE_T, shadow: false });
+    if (g.soul || g.fresh) continue;
+    const k = hlArtYdKind(g.wave), hh = k === 'wood' ? 30 : k === 'small' ? 36 : k === 'tablet' ? 50 : 70;
+    hlOccSeg(g.x - (k === 'wood' ? 4 : 18), g.y - HL_ART_YD_FOOT, g.x + (k === 'wood' ? 4 : 18), g.y - HL_ART_YD_FOOT, hh);
+  }
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.boss === 'ragequit' && !e.hlAway) {
+      const H = hlArtYdRqHead(e);
+      hlLight({ x: H.x, y: H.y + 40, r: 260, col: C.rq, a: 0.42, z: 80, flick: 0.3 + 0.5 * (e.hlTilt || 0), seed: 3.3, shadow: false });
+      hlOccCircle(e.x, e.y + e.r * 0.5, e.r * 0.5, 120);
+    } else if (e.type === 'risen') {
+      hlLight({ x: e.x, y: e.y, r: 90, col: e.hacked ? C.kin : C.ghost, a: 0.3, shadow: false });
+    } else if (e.type === 'gravedigger') {
+      if (e.hlMarked) hlLight({ x: e.x, y: e.y - e.r, r: 140, col: C.cold, a: 0.55, shadow: false });
+      hlOccCircle(e.x, e.y + e.r * 0.6, e.r * 0.45, 60);
+    } else if (e.type === 'bellringer') hlOccSeg(e.x - e.r, e.y + e.r * 0.6, e.x + e.r, e.y + e.r * 0.6, 80);
+  }
+  for (const g of A.gates) for (const p of hlArtYdGateGeo(g).hinge) hlOccCircle(p[0], p[1], 10, 70);
+  if (HL.eq.lantern) { const q = hlLanternPos(); hlLight({ x: q.x, y: q.y, r: 150, col: C.warm, a: P.hlLanternWave === wave ? 0.25 : 0.6, flick: 0.8, seed: 4.4, shadow: false }); }
+  return true;
+}
+/* a grave, in any state */
+function drawHlYardGrave(g) {
+  if (g.soul) { hlArtYdSoulStone(g); return; }
+  const C = HL_ART_YD_C, sd = hlArtYdSeed(g), x = g.x, y = g.y, st = g.st;
+  if (st === 'rest' && !g.fresh) { const S = hlArtYdStoneSprite(g, false); ctx.drawImage(S.c, x - S.ox, y - S.oy, S.w, S.h); return; }
+  const R = hlArtRng(Math.floor(sd * 1000) + 5);
+  ctx.save();
+  if (!g.fresh) hlArtYdKerb(ctx, x, y, hlArtRng(Math.floor(sd * 1000) + 3), false);
+  // the stone: shaking while the earth heaves, leant back once it is open
+  if (!g.fresh) {
+    const S = hlArtYdStoneSprite(g, true), k = st === 'rise' ? clamp(g.t / GRAVE_RISE_T, 0, 1) : 0;
+    const lean = st === 'open' ? 0.07 * (hlHash(sd) < 0.5 ? -1 : 1) : Math.sin(uiTime * 43 + sd) * 0.04 * k;
+    ctx.save(); ctx.translate(x + Math.sin(uiTime * 51 + sd) * 1.8 * k, y - HL_ART_YD_FOOT); ctx.rotate(lean);
+    ctx.drawImage(S.c, -S.ox, -S.oy + HL_ART_YD_FOOT, S.w, S.h);
+    ctx.restore();
+  }
+  if (st === 'rise') {
+    // the tell: the earth heaving, cracks of pale light through it
+    const k = clamp(g.t / GRAVE_RISE_T, 0, 1), hv = 1 + 0.35 * k + Math.sin(uiTime * 38 + sd) * 0.06 * k;
+    ctx.fillStyle = hlMix(C.turfHi, C.earthHi, k); hlArtEll(x, y + 4, 22 * (1 + 0.1 * k), 11 * hv); ctx.fill();
+    ctx.strokeStyle = rgba(g.kin ? C.kin : '#e7e5e4', 0.25 + 0.65 * k); ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+    const Rn = hlArtRng(Math.floor(sd * 1000) + 9);
+    for (let i = 0; i < 2 + Math.floor(k * 4); i++) {
+      let a = Rn() * TAU, px = x + (Rn() - 0.5) * 8, py = y + 4 + (Rn() - 0.5) * 4; ctx.beginPath(); ctx.moveTo(px, py);
+      for (let s = 0; s < 3; s++) { a += (Rn() - 0.5) * 1; px += Math.cos(a) * 6 * (0.5 + k); py += Math.sin(a) * 3 * (0.5 + k); ctx.lineTo(px, py); }
+      ctx.stroke();
+    }
+  } else if (st === 'open') {
+    // emptied; filled back in as it settles, once what came out is down
+    let k = 1;
+    if (!hlRisenAlive(g.risen)) k = clamp((GRAVE_OPEN_T - g.t) / 1.6, 0, 1);
+    if (k < 1) { ctx.fillStyle = g.fresh ? C.earthHi : C.turfHi; hlArtEll(x, y + 4, 21, 10.5); ctx.fill(); }
+    hlArtYdHole(x, y, HL_EASE.out(k), R);
+  } else if (st === 'buried') {
+    // a body a gravedigger put in: raw earth, a stick for a marker, and it will not stay down
+    const k = clamp(g.t / BURY_T, 0, 1), hv = k > 0.6 ? Math.sin(uiTime * 30 + sd) * (k - 0.6) * 2 : 0;
+    ctx.fillStyle = C.earth; hlArtEll(x, y + 5, 25, 13 + hv * 2); ctx.fill();
+    ctx.fillStyle = C.earthHi; hlArtEll(x - 3, y + 1 - hv, 18, 8 + hv); ctx.fill();
+    ctx.fillStyle = C.clay;
+    for (let i = 0; i < 6; i++) { hlArtEll(x + (R() - 0.5) * 36, y + 3 + (R() - 0.5) * 14, 1.6 + R() * 1.4, 1.2); ctx.fill(); }
+    ctx.strokeStyle = C.woodLo; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x + 14, y + 2); ctx.lineTo(x + 16, y - 22); ctx.moveTo(x + 9, y - 14); ctx.lineTo(x + 22, y - 16); ctx.stroke();
+    if (k > 0.75) {
+      ctx.strokeStyle = rgba('#e7e5e4', (k - 0.75) * 3); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x - 8, y + 2); ctx.lineTo(x - 2, y + 6); ctx.lineTo(x + 4, y + 3); ctx.stroke();
+    }
+  }
+  if (!g.fresh) hlArtYdKerb(ctx, x, y, hlArtRng(Math.floor(sd * 1000) + 5), true);
+  ctx.restore();
+}
+/* the yard's bodies and THE RAGE QUIT, in place of the generic polygon */
+function drawHlYardBody(e, ea) {
+  if (e.hlAway) return;                            // gone through a gate
+  ctx.save();
+  if (e.boss === 'ragequit') hlArtYdRq(e, ea);
+  else if (e.type === 'risen') hlArtYdRisen(e, ea);
+  else if (e.type === 'gravedigger') hlArtYdDigger(e, ea);
+  else if (e.type === 'bellringer') hlArtYdBell(e, ea);
+  else {
+    ctx.globalAlpha = ea; ctx.fillStyle = rgba(e.col, 0.2); ctx.strokeStyle = e.col; ctx.lineWidth = 2;
+    poly(e.x, e.y, e.r, e.sides, e.ang); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+/* additive, after the bodies and the light */
+function drawHlYardGlow() {
+  const C = HL_ART_YD_C, S = HL_ART_YD, A = hlArea;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // fog, low and slow over the grass
+  const vx = cam.x, vy = cam.y, hw = W / 2 / camZoom + 200, hh = H / 2 / camZoom + 200;
+  for (let i = 0; i < 14; i++) {
+    const u = (hlHash(i * 3.7) + uiTime * (0.004 + 0.003 * hlHash(i))) % 1, v = hlHash(i * 9.1);
+    const fx = arena.x0 + u * (arena.x1 - arena.x0), fy = arena.y0 + 60 + v * (arena.y1 - arena.y0 - 60);
+    if (Math.abs(fx - vx) > hw || Math.abs(fy - vy) > hh) continue;
+    drawGlow(fx, fy, 160 + 90 * hlHash(i * 1.3), C.fog, 0.035 + 0.02 * Math.sin(uiTime * 0.3 + i));
+  }
+  // the gates' lamps
+  for (const g of A.gates) {
+    const St = hlArtYdGateState(g);
+    if (!St.lit) continue;
+    const L = hlArtYdLampPos(g), f = St.who ? 1 : 0.7 + 0.3 * hlFlicker(uiTime, g.i * 3.1, 0.8);
+    drawGlow(L.x, L.y, 34, St.col, 0.45 * St.lit * f); drawGlow(L.x, L.y, 9, '#ffffff', 0.5 * St.lit * f);
+    if (St.his && !St.who) drawGlow(g.x, g.y, GATE_R * 1.3, C.rq, 0.1 + 0.08 * Math.sin(uiTime * 6));
+  }
+  // the soul's stone: a glint while it is covered, its cold once it can be read
+  const ss = A.graves.find(g => g.soul);
+  if (ss) {
+    const done = hlQDone('q5'), gy = ss.y - HL_ART_YD_FOOT - 62;
+    if (done) { drawGlow(ss.x, ss.y - 40, 60, C.cold, 0.1 + 0.03 * Math.sin(uiTime * 2)); drawGlow(ss.x, gy, 7, '#ffffff', 0.4); }
+    else drawGlow(ss.x, gy, 14 + 3 * Math.sin(uiTime * 3), C.cold, 0.35 + 0.15 * Math.sin(uiTime * 3));
+  }
+  // a grave coming up
+  for (const g of A.graves) if (g.st === 'rise') drawGlow(g.x, g.y + 4, 34, g.kin ? C.kin : '#e7e5e4', 0.3 * g.t / GRAVE_RISE_T);
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.type === 'risen') {
+      const up = e.hlClimb > 0 ? clamp(1 - e.hlClimb / RISEN_CLIMB, 0, 1) : 1, gate = e.hlGate !== undefined;
+      drawGlow(e.x, e.y - e.r * 0.4, e.r * 2.2, gate ? C.grey : e.hacked ? C.kin : C.ghost, (gate ? 0.1 : 0.16) * up);
+      if (e.state === 1 && !gate) {
+        const w = hlArtYdGunWind(e), ca = Math.cos(e.ang), sa = Math.sin(e.ang), lift = e.r * 0.45;
+        drawGlow(e.x + ca * e.r * 1.6, e.y - lift + sa * e.r * 1.6, 6 + 10 * w, e.hacked ? C.kin : C.hurt, 0.25 + 0.4 * w);
+      }
+      // in his door: its line, the run he left standing there
+      if (gate && e.hlLine && len(e.x - A.gates[e.hlGate].x, e.y - A.gates[e.hlGate].y) < GATE_R) {
+        ctx.globalCompositeOperation = 'source-over';
+        hlArtText('WAVE ' + e.hlLine.wave + ' · ‘' + e.hlLine.said + '’', e.x, e.y - e.r * 2.4, { px: 10, mono: true, w: 400, al: 'center', col: '#e7e5e4', a: 0.75 * clamp((uiTime - S.marchAt - 0.8) / 1, 0, 1) });
+        ctx.globalCompositeOperation = 'lighter';
+      }
+    } else if (e.type === 'gravedigger') {
+      const s = e.r / 17, fy = e.y + e.r * 0.85, Q = hlArtYdDigPose(e);
+      drawGlow(e.x + 7 * s * Q.face, fy - 48 * s, 7 * s, e.hlMarked ? C.cold : e.hacked ? C.kin : '#d6d3d1', 0.4);
+      if (e.hlMarked) {
+        drawGlow(e.x, e.y - e.r * 0.6, e.r * 2.6, C.cold, 0.16 + 0.06 * Math.sin(uiTime * 3));
+        if ((e.hlFill || 0) > 0) {
+          // how far into the stone it is: the errand's clock
+          const cx = e.x, cy = fy - 76 * s;
+          ctx.strokeStyle = 'rgba(165,243,252,0.18)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, 9, 0, TAU); ctx.stroke();
+          ctx.strokeStyle = C.cold; ctx.beginPath(); ctx.arc(cx, cy, 9, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(e.hlFill, 0, 1)); ctx.stroke();
+        }
+      }
+    } else if (e.boss === 'ragequit' && !e.hlAway) {
+      const Hd = hlArtYdRqHead(e), T = e.hlTilt || 0, back = hlRqRunning(e);
+      drawGlow(Hd.x, Hd.y, 56 * Hd.s, C.rq, (back ? 0.08 : 0.17) * (0.8 + 0.2 * Math.sin(uiTime * 40 * T)));
+      if (uiTime - S.backAt < 0.6) drawGlow(e.x, e.y - e.r, e.r * 3, C.rq, 0.5 * (1 - (uiTime - S.backAt) / 0.6));
+    }
+  }
+  // a bell's toll: the sound going out, and to the graves it raised
+  for (const o of S.tolls) {
+    const u = (uiTime - o.t) / 1.6, col = o.kin ? C.kin : C.bronzeHi;
+    for (let i = 0; i < 3; i++) {
+      const uu = u - i * 0.12; if (uu <= 0 || uu >= 1) continue;
+      ctx.strokeStyle = rgba(col, 0.45 * (1 - uu)); ctx.lineWidth = 3 - i;
+      ctx.beginPath(); ctx.arc(o.gx, o.gy, 20 + 300 * HL_EASE.out3(uu), 0, TAU); ctx.stroke();
+    }
+    ctx.strokeStyle = rgba(col, 0.6 * (1 - u)); ctx.lineWidth = 2;
+    for (const g of o.graves) { ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(g.x, g.y); ctx.stroke(); drawGlow(g.x, g.y, 30, col, 0.4 * (1 - u)); }
+  }
+  // what a lance or a swing just did
+  for (const o of S.strikes) {
+    const u = (uiTime - o.t) / 0.32, ca = Math.cos(o.ang), sa = Math.sin(o.ang), col = o.kin ? C.kin : '#f1f5f9';
+    if (o.kind === 'lance') {
+      ctx.strokeStyle = rgba(col, 0.9 * (1 - u)); ctx.lineWidth = RISEN_LANCE.w * (1 - u * 0.6); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(o.x + ca * 10, o.y + sa * 10); ctx.lineTo(o.x + ca * RISEN_LANCE.len, o.y + sa * RISEN_LANCE.len); ctx.stroke();
+      drawGlow(o.x + ca * RISEN_LANCE.len, o.y + sa * RISEN_LANCE.len, 24, col, 0.5 * (1 - u));
+    } else {
+      ctx.strokeStyle = rgba(col, 0.85 * (1 - u)); ctx.lineWidth = 10 * (1 - u) + 2;
+      ctx.beginPath(); ctx.arc(o.x, o.y, RISEN_SWING.r * 0.85, o.ang - RISEN_SWING.arc, o.ang - RISEN_SWING.arc + RISEN_SWING.arc * 2 * HL_EASE.out3(Math.min(1, u * 2.5))); ctx.stroke();
+    }
+  }
+  // a felled risen: its line, coming apart as it rises
+  for (const l of S.lines) {
+    const u = (uiTime - l.t) / 2.6, Rn = hlArtRng(Math.floor(l.seed * 1000));
+    ctx.font = '400 13px ' + HL_ART_MONO;
+    const tw = ctx.measureText(l.text).width; let x = l.x - tw / 2;
+    for (const ch of l.text) {
+      const cw = ctx.measureText(ch).width, d = Math.max(0, u - 0.35 - Rn() * 0.3);
+      const px = x + cw / 2 + (Rn() - 0.5) * 30 * d, py = l.y - 30 * HL_EASE.out3(Math.min(1, u * 1.6)) + 40 * d * d + (Rn() - 0.3) * 10 * d;
+      hlArtText(ch, px, py, { px: 13, mono: true, w: 400, al: 'center', col: '#e7e5e4', a: clamp(Math.min(u / 0.08, 1 - d * 2.2), 0, 1) * 0.9 });
+      x += cw;
+    }
+    ctx.globalCompositeOperation = 'lighter';
+  }
+  ctx.restore();
+}
+/* plain paint over the world: the telegraphs. One loud thing at a time: the
+   quiet ones first, so what hurts now is drawn over them. e is THE RAGE QUIT, or null. */
+function drawHlYardTele(e) {
+  const C = HL_ART_YD_C, A = hlArea;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // 3. what you can do now: he is running. Stand in his gate, or burn him down.
+  const B = e && e.hlBolt, gt = B && A.gates[B.gate];
+  if (gt) {
+    const run = hlRqRunning(e), pu = 0.5 + 0.5 * Math.sin(uiTime * 8);
+    ctx.strokeStyle = rgba(run ? C.hurt : C.rq, run ? 0.75 : 0.45); ctx.lineWidth = 2.4; ctx.setLineDash([10, 9]); ctx.lineDashOffset = -uiTime * 60;
+    ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(gt.x, gt.y); ctx.stroke(); ctx.setLineDash([]);
+    if (run) {
+      const a = Math.atan2(gt.y - e.y, gt.x - e.x), D = len(gt.x - e.x, gt.y - e.y);
+      ctx.strokeStyle = rgba(C.hurt, 0.8); ctx.lineWidth = 2.5;
+      for (let i = 0; i < 3; i++) { const d = ((uiTime * 120 + i * 40) % Math.max(40, D - 60)) + 40; hlArtChev(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d, a, 10); }
+      if (!B.last) {
+        // the burn: what of him has to come off before he gets there
+        const k = clamp((B.hp0 - e.hp) / (B.need || 1), 0, 1), Hd = hlArtYdRqHead(e);
+        ctx.strokeStyle = 'rgba(15,23,42,0.6)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(e.x, e.y - e.r * 0.8, e.r * 1.75, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = C.rqHi; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(e.x, e.y - e.r * 0.8, e.r * 1.75, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+        hlArtText('×' + RQ_BACK_MUL, Hd.x, Hd.y - 38 * Hd.s, { px: 12, w: 800, al: 'center', col: C.rqHi, a: 0.9 });
+      }
+    }
+    if (!gt.by) {
+      hlArtBrackets(gt.x, gt.y, GATE_R * 0.75, run ? C.hurt : C.rq, 0.45 + 0.4 * pu);
+      hlArtText(B.last ? '' : 'STAND HERE', gt.x, gt.y + GATE_R * 0.75 + 16, { px: 10, w: 800, ls: '0.24em', al: 'center', col: run ? C.hurtHi : C.rqHi, a: 0.6 + 0.4 * pu });
+    }
+  }
+  // 2. what is about to: a grave heaving, a body about to get up
+  for (const g of A.graves) {
+    if (g.st !== 'rise' && g.st !== 'buried') continue;
+    const T = g.st === 'rise' ? GRAVE_RISE_T : BURY_T, k = clamp(g.t / T, 0, 1), late = g.st === 'rise' || k > 0.7;
+    const col = g.kin ? C.kin : C.hurt;
+    ctx.strokeStyle = rgba(col, late ? 0.3 + 0.6 * k : 0.18); ctx.lineWidth = late ? 2.5 : 1.5;
+    ctx.beginPath(); ctx.arc(g.x, g.y + 2, 26, -Math.PI / 2, -Math.PI / 2 + TAU * k); ctx.stroke();
+  }
+  for (const o of enemies) {
+    if (o.dead) continue;
+    // a bell swinging: the three graves it will raise
+    if (o.type === 'bellringer' && o.state === 1) {
+      const w = clamp(1 - (o.hlTollT || 0) / BELL_WIND, 0, 1), col = o.hacked ? C.kin : C.bronzeHi;
+      ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(o.x, o.y - o.r * 0.6, o.r * 2, -Math.PI / 2, -Math.PI / 2 + TAU * w); ctx.stroke();
+      const near = A.graves.filter(g => g.st === 'rest' && !g.soul).sort((a, b) => len(a.x - o.x, a.y - o.y) - len(b.x - o.x, b.y - o.y)).slice(0, BELL_RAISE);
+      ctx.strokeStyle = rgba(col, 0.25 + 0.5 * w); ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]); ctx.lineDashOffset = -uiTime * 40;
+      for (const g of near) { ctx.beginPath(); ctx.moveTo(o.x, o.y - o.r * 1.5); ctx.lineTo(g.x, g.y - 20); ctx.stroke(); }
+      ctx.setLineDash([]);
+      for (const g of near) { ctx.strokeStyle = rgba(col, 0.3 + 0.5 * w); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(g.x, g.y + 2, 22, 0, TAU); ctx.stroke(); }
+    }
+    // a gravedigger digging: where the pit will open (it does not hurt: earth, not red)
+    if (o.type === 'gravedigger' && o.state === 2 && !o.hlMarked) {
+      const k = clamp(1 - (o.atkT || 0) / DIG_T, 0, 1);
+      ctx.strokeStyle = rgba(C.accent, 0.25 + 0.4 * k); ctx.lineWidth = 1.6; ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.arc(o.x, o.y, PIT_R * (0.5 + 0.5 * k), 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (o.type !== 'risen' || o.hlGate !== undefined || o.hacked) continue;
+    // a risen winding up: where its gun goes
+    const ca = Math.cos(o.ang), sa = Math.sin(o.ang);
+    if (o.state === 1) {
+      const w = hlArtYdGunWind(o);
+      ctx.strokeStyle = rgba(C.hurt, 0.35 + 0.5 * w); ctx.fillStyle = rgba(C.hurt, 0.06 + 0.16 * w); ctx.lineWidth = 1.6; ctx.setLineDash([6, 5]);
+      if (o.hlGun === 'lance') {
+        const L = RISEN_LANCE.len, wd = RISEN_LANCE.w;
+        ctx.beginPath(); ctx.moveTo(o.x - sa * wd, o.y + ca * wd); ctx.lineTo(o.x + ca * L - sa * wd, o.y + sa * L + ca * wd); ctx.lineTo(o.x + ca * L + sa * wd, o.y + sa * L - ca * wd); ctx.lineTo(o.x + sa * wd, o.y - ca * wd); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else if (o.hlGun === 'swing') {
+        ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.arc(o.x, o.y, RISEN_SWING.r, o.ang - RISEN_SWING.arc, o.ang + RISEN_SWING.arc); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else {
+        const L = 220;
+        ctx.beginPath(); ctx.moveTo(o.x + ca * o.r, o.y + sa * o.r); ctx.lineTo(o.x + ca * L, o.y + sa * L); ctx.stroke();
+        ctx.setLineDash([]); ctx.lineWidth = 2;
+        for (let i = 0; i < 2; i++) { const d = o.r + 22 + i * 14 + ((uiTime * 50) % 14); hlArtChev(o.x + ca * d, o.y + sa * d, o.ang, 8); }
+      }
+      ctx.setLineDash([]);
+    }
+  }
+  // his wind-ups
+  if (e && e.hlWind) {
+    const Wd = e.hlWind, u = clamp(Wd.t / Wd.T, 0, 1), ca = Math.cos(Wd.ang), sa = Math.sin(Wd.ang), Hd = hlArtYdRqHead(e);
+    ctx.strokeStyle = rgba(C.hurt, 0.85); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(e.x, e.y - e.r * 0.8, e.r * 1.6, -Math.PI / 2, -Math.PI / 2 + TAU * u); ctx.stroke();
+    ctx.strokeStyle = rgba(C.hurt, 0.3 + 0.5 * u); ctx.lineWidth = 2; ctx.setLineDash([10, 8]); ctx.lineDashOffset = -uiTime * 60;
+    if (Wd.kind === 'charge') {
+      const L = RQ_CHARGE.spd * RQ_CHARGE.t, wd = e.r;
+      ctx.beginPath(); ctx.moveTo(e.x - sa * wd, e.y + ca * wd); ctx.lineTo(e.x + ca * L - sa * wd, e.y + sa * L + ca * wd);
+      ctx.moveTo(e.x + sa * wd, e.y - ca * wd); ctx.lineTo(e.x + ca * L + sa * wd, e.y + sa * L - ca * wd); ctx.stroke();
+    } else if (Wd.kind === 'mash') {
+      for (const s of [-1, 1]) { const a = Wd.ang + s * RQ_MASH.arc; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(a) * 280, e.y + Math.sin(a) * 280); ctx.stroke(); }
+    } else {
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + ca * 320, e.y + sa * 320); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  // 1. what hurts now: his charge going, and a lance or a swing going off
+  if (e && e.hlMove && e.hlMove.kind === 'charge') {
+    const M = e.hlMove, ca = Math.cos(M.ang), sa = Math.sin(M.ang), left = RQ_CHARGE.spd * Math.max(0, RQ_CHARGE.t - M.t);
+    ctx.strokeStyle = rgba(C.hurt, 0.5); ctx.lineWidth = e.r * 2; ctx.globalAlpha = 0.35;
+    ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + ca * left, e.y + sa * left); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  for (const o of HL_ART_YD.strikes) {
+    if (o.kin) continue;
+    const u = (uiTime - o.t) / 0.32, ca = Math.cos(o.ang), sa = Math.sin(o.ang);
+    ctx.strokeStyle = rgba(C.hurt, 0.8 * (1 - u)); ctx.lineWidth = 2;
+    if (o.kind === 'lance') {
+      const L = RISEN_LANCE.len, wd = RISEN_LANCE.w;
+      ctx.beginPath(); ctx.moveTo(o.x - sa * wd, o.y + ca * wd); ctx.lineTo(o.x + ca * L - sa * wd, o.y + sa * L + ca * wd); ctx.lineTo(o.x + ca * L + sa * wd, o.y + sa * L - ca * wd); ctx.lineTo(o.x + sa * wd, o.y - ca * wd); ctx.closePath(); ctx.stroke();
+    } else { ctx.beginPath(); ctx.arc(o.x, o.y, RISEN_SWING.r, o.ang - RISEN_SWING.arc, o.ang + RISEN_SWING.arc); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+/* a line said in THE YARD: his as a chat line in capitals, or the soul's at its gate */
+function drawHlYardBark(b) {
+  const C = HL_ART_YD_C, k = clamp(Math.min(b.t / 0.18, (b.life - b.t) / 0.4), 0, 1);
+  if (k <= 0) return;
+  const soul = b.boss === 'soul', name = soul ? 'lost_soul:' : 'THE_RAGE_QUIT:', text = soul ? b.text : String(b.text).toUpperCase();
+  const pop = HL_EASE.outBack(clamp(b.t / 0.25, 0, 1));
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.font = '700 13px ' + HL_ART_MONO;
+  const nw = ctx.measureText(name).width, tw = ctx.measureText(text).width, w = nw + tw + 30, h = 26;
+  const top = soul ? (b.y < arena.y0 + 200 ? b.y + 74 : b.y - 70) : b.e ? hlArtYdRqHead(b.e).y - 50 * (b.e.r / 44) : b.y - b.r * 3.2;
+  ctx.translate(b.x, top); ctx.scale(pop, pop);
+  ctx.globalAlpha = k;
+  ctx.fillStyle = 'rgba(5,7,10,0.88)'; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 4); ctx.fill();
+  ctx.strokeStyle = soul ? C.cold : C.rq; ctx.lineWidth = 1.2; ctx.stroke();
+  hlArtText(name, -w / 2 + 12, 4.5, { px: 13, w: 700, mono: true, col: soul ? C.cold : C.rq, a: k });
+  hlArtText(text, -w / 2 + 18 + nw, 4.5, { px: 13, w: soul ? 400 : 700, mono: true, col: soul ? C.coldHi : C.rqHi, a: k });
+  ctx.restore();
+}
+
+/* ---- the screen ---- */
+function drawHlYardHud(A, area) {
+  const C = HL_ART_YD_C, acc = A.stage.accent, n = Math.max(1, Math.min(5, area.n)), y = 68, S = HL_ART_YD;
+  ctx.save();
+  // the room and its five waves; the fifth is his: a window's close button
+  hlArtText(A.stage.name, W / 2 - 12, y, { px: 11, ls: '0.3em', al: 'right', col: acc });
+  for (let i = 0; i < 5; i++) {
+    const x = W / 2 + 6 + i * 16, on = i < n;
+    if (i === 4) {
+      ctx.globalAlpha = on ? 1 : 0.5;
+      ctx.strokeStyle = on ? C.rq : acc; ctx.lineWidth = 1.2; ctx.strokeRect(x - 5, y - 10, 12, 11);
+      ctx.beginPath(); ctx.moveTo(x - 2, y - 7); ctx.lineTo(x + 4, y - 2); ctx.moveTo(x + 4, y - 7); ctx.lineTo(x - 2, y - 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = on ? acc : 'rgba(214,211,209,0.18)';
+      ctx.beginPath(); ctx.arc(x, y - 4, on && i === n - 1 ? 3.6 : 2.6, 0, TAU); ctx.fill();
+    }
+  }
+  // the errand, as stones: the ones that have been read
+  if (!area.boss) {
+    const goal = hlChipGoal(), m = /(\d+)\s*\/\s*(\d+)/.exec(goal);
+    const label = m ? goal.replace(/\s*\d+\s*\/\s*\d+\s*$/, '') : goal;
+    if (m) {
+      const have = +m[1], need = +m[2];
+      ctx.font = '700 10px ' + HL_ART_FONT; ctx.letterSpacing = '0.24em';
+      const lw = ctx.measureText(label).width; ctx.letterSpacing = '0em';
+      let x = W / 2 - (lw + 14 + need * 18) / 2;
+      hlArtText(label, x, y + 22, { px: 10, ls: '0.24em', col: C.ink, a: 0.85 });
+      x += lw + 14;
+      for (let i = 0; i < need; i++) {
+        const got = i < have, sx = x + i * 18 + 6;
+        ctx.beginPath(); ctx.moveTo(sx - 6, y + 26); ctx.lineTo(sx - 6, y + 16); ctx.arc(sx, y + 16, 6, Math.PI, 0); ctx.lineTo(sx + 6, y + 26); ctx.closePath();
+        if (got) { ctx.fillStyle = C.cold; ctx.fill(); } else { ctx.strokeStyle = rgba(C.cold, 0.5); ctx.lineWidth = 1.2; ctx.stroke(); }
+      }
+    } else if (label) hlArtText(label, W / 2, y + 22, { px: 10, ls: '0.24em', al: 'center', col: C.ink, a: 0.85 });
+  }
+  // where things are: the marked one always, his gate while he runs for it, and the last few of a wave
+  const marks = [];
+  for (const e of enemies) if (!e.dead && (e.hlMarked || (area.last && isThreat(e)))) marks.push({ x: e.x, y: e.y, col: e.hlMarked ? C.cold : acc, e });
+  const B = area.boss && !area.boss.dead && area.boss.hlBolt, gt = B && area.gates[B.gate];
+  if (gt && !gt.by) marks.push({ x: gt.x, y: gt.y, col: hlRqRunning(area.boss) ? C.hurt : C.rq, gate: true });
+  for (const M of marks) {
+    const [sx, sy] = hlArtHsScr(M.x, M.y), pu = 0.7 + 0.3 * Math.sin(uiTime * 4);
+    if (sx > 0 && sx < W && sy > 0 && sy < H) continue;
+    const a = Math.atan2(sy - H / 2, sx - W / 2), R0 = Math.min(W, H) * 0.42, px = W / 2 + Math.cos(a) * R0, py = H / 2 + Math.sin(a) * R0;
+    ctx.globalCompositeOperation = 'lighter'; drawGlow(px, py, 26, M.col, 0.25 * pu); ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = M.col;
+    ctx.beginPath(); ctx.moveTo(px + Math.cos(a) * 20, py + Math.sin(a) * 20);
+    ctx.lineTo(px + Math.cos(a + 2.6) * 11, py + Math.sin(a + 2.6) * 11); ctx.lineTo(px + Math.cos(a - 2.6) * 11, py + Math.sin(a - 2.6) * 11); ctx.closePath(); ctx.fill();
+    if (M.gate) { ctx.strokeStyle = M.col; ctx.lineWidth = 1.6; ctx.strokeRect(px - 5, py - 6, 10, 12); }
+    else if (M.e && M.e.hlMarked) {
+      ctx.strokeStyle = rgba(C.cold, 0.25); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, 11, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = C.cold; ctx.beginPath(); ctx.arc(px, py, 11, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(M.e.hlFill || 0, 0, 1)); ctx.stroke();
+    } else { ctx.beginPath(); ctx.arc(px, py, 4, 0, TAU); ctx.fill(); }
+  }
+  // a digger stopped: n of 3, a stone cleared
+  for (const c of S.chats) {
+    const u = (uiTime - c.t) / 2.8, [sx, sy] = hlArtHsScr(c.x, c.y), py = sy - 40 * HL_EASE.out3(u);
+    const a = clamp(Math.min(u / 0.08, (1 - u) / 0.3), 0, 1), pop = HL_EASE.outBack(clamp(u / 0.12, 0, 1));
+    ctx.save(); ctx.translate(sx, py); ctx.scale(pop, pop); ctx.globalAlpha = a;
+    ctx.fillStyle = 'rgba(8,22,28,0.92)'; ctx.beginPath(); ctx.roundRect(-34, -14, 68, 28, 6); ctx.fill();
+    ctx.strokeStyle = C.cold; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = C.cold; ctx.beginPath(); ctx.moveTo(-24, 7); ctx.lineTo(-24, -2); ctx.arc(-19, -2, 5, Math.PI, 0); ctx.lineTo(-14, 7); ctx.closePath(); ctx.fill();
+    hlArtText(c.n + ' / 3', 8, 5.5, { px: 15, w: 700, mono: true, al: 'center', col: C.cold, a });
+    ctx.restore();
+  }
+  // THAT ONE DIDN'T COUNT: the room jolts back, like a tape rewinding
+  const ju = (uiTime - S.joltAt) / 0.9;
+  if (ju >= 0 && ju < 1) {
+    const k = 1 - ju, Rn = hlArtRng(Math.floor(uiTime * 24));
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 9; i++) {
+      const by = Rn() * H, bh = 6 + Rn() * 26;
+      ctx.fillStyle = Rn() < 0.4 ? rgba(C.rq, 0.12 * k) : 'rgba(248,250,252,' + (0.06 * k) + ')';
+      ctx.fillRect((Rn() - 0.5) * 60 * k, by, W, bh);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(5,7,10,' + (0.25 * k) + ')'; for (let yy = 0; yy < H; yy += 4) ctx.fillRect(0, yy, W, 1.5);
+    ctx.globalAlpha = k;
+    ctx.fillStyle = '#f8fafc';
+    for (const ox of [0, 22]) { ctx.beginPath(); ctx.moveTo(48 + ox, 96); ctx.lineTo(30 + ox, 110); ctx.lineTo(48 + ox, 124); ctx.closePath(); ctx.fill(); }
+    hlArtText('REWIND', 84, 116, { px: 12, w: 800, ls: '0.3em', col: '#f8fafc', a: k });
+    ctx.globalAlpha = 1;
+  }
+  if (area.end) {
+    const k = clamp(area.end.t / HL_END_T, 0, 1), win = area.end.why === 'win';
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+    vg.addColorStop(0, 'rgba(3,4,9,0)'); vg.addColorStop(1, 'rgba(3,4,9,' + (0.85 * HL_EASE.in(k)) + ')');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    const a = clamp((area.end.t - 0.6) / 0.8, 0, 1);
+    hlArtText(win ? 'BACK TO THE VIGIL' : 'THE YARD LETS YOU GO', W / 2, H / 2 + 120, { px: 13, ls: '0.34em', al: 'center', col: win ? '#e2e8f0' : C.cold, a });
+    hlArtText(win ? 'ONE OF HIS RUNS ENDED' : 'ITS STONE IS STILL COVERED', W / 2, H / 2 + 142, { px: 9, ls: '0.3em', al: 'center', col: '#94a3b8', a: a * 0.7 });
+  }
+  ctx.restore();
+}
+/* his health bar, already drawn (14 tall): an ESC at every quarter, the ones
+   that stood struck through; and, ghosted, where a gate would put him back */
+function drawHlRageQuitBar(e, x, y, w) {
+  const C = HL_ART_YD_C, mx = m => x + 2 + (w - 4) * m, h = clamp(e.hp / e.maxHp, 0, 1);
+  ctx.save();
+  if (e.hlQ < RQ_MARKS.length) {
+    const k = clamp(e.hlQHp / e.maxHp, 0, 1);
+    if (k > h) {
+      ctx.fillStyle = rgba(C.rq, 0.22); ctx.fillRect(mx(h), y + 2, mx(k) - mx(h), 10);
+      ctx.strokeStyle = rgba(C.rq, 0.8); ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.strokeRect(mx(h), y + 2, mx(k) - mx(h), 10); ctx.setLineDash([]);
+    }
+  }
+  // while he runs: how much of him has to come off before he gets there
+  const B = e.hlBolt;
+  if (B && hlRqRunning(e) && !B.last) {
+    const to = clamp((B.hp0 - B.need) / e.maxHp, 0, 1);
+    ctx.fillStyle = C.rqHi; ctx.fillRect(mx(to) - 1, y - 2, 2, 18);
+    if (h > to) { ctx.fillStyle = rgba(C.rqHi, 0.35 + 0.25 * Math.sin(uiTime * 12)); ctx.fillRect(mx(to), y + 2, mx(h) - mx(to), 10); }
+  }
+  RQ_MARKS.forEach((m, i) => {
+    const px = mx(m), passed = i < e.hlQ, next = i === e.hlQ, pu = 0.6 + 0.4 * Math.sin(uiTime * 5);
+    ctx.fillStyle = passed ? 'rgba(254,202,202,0.35)' : '#fecaca'; ctx.fillRect(px - 1, y - 3, 2, 20);
+    const ky = Math.max(1, y - 13);
+    ctx.fillStyle = next ? C.rqDeep : '#1f2733'; ctx.beginPath(); ctx.roundRect(px - 11, ky, 22, 11, 2.5); ctx.fill();
+    ctx.strokeStyle = next ? rgba(C.rq, pu) : passed ? '#57534e' : rgba(C.rq, 0.45); ctx.lineWidth = 1; ctx.stroke();
+    hlArtText('ESC', px, ky + 8.2, { px: 7, w: 800, ls: '0.04em', al: 'center', col: next ? C.rqHi : passed ? '#94a3b8' : 'rgba(254,205,211,0.6)' });
+    if (passed) { ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px - 11, ky + 5.5); ctx.lineTo(px + 11, ky + 5.5); ctx.stroke(); }
+  });
+  if (e.hlCornered) hlArtText('NOWHERE TO GO', x + w, y + 30, { px: 9, w: 800, ls: '0.24em', al: 'right', col: C.rqHi, a: 0.7 + 0.3 * Math.sin(uiTime * 6) });
+  ctx.restore();
+}
+
+/* ---- the medals ---- */
+/* THE LANTERN at your shoulder: the soul's, warm now, left behind. Additive layer. */
+function drawHlLantern(x, y, spent) {
+  const C = HL_ART_YD_C, f = hlFlicker(uiTime, 4.4, spent ? 1 : 0.6), take = clamp(1 - (uiTime - HL_ART_YD.takeAt) / 0.5, 0, 1);
+  const by = y + Math.sin(uiTime * 2.2) * 1.5;
+  ctx.save();
+  drawGlow(x, by, 26 + 20 * take, C.warm, (spent ? 0.12 : 0.3) * f + 0.4 * take);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = 'rgba(148,163,184,0.5)'; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(x, by - 12); ctx.lineTo(x, by - 6); ctx.stroke();
+  hlArtPumpkin(x, by, 5.5, { lid: true, a: spent ? 0.7 : 1, face: () => { ctx.fillStyle = HL_ART_C.hole; hlArtFacePath(0, 1, 4.4, 1, 1); ctx.fill(); } });
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = (spent ? 0.3 : 0.7 + 0.3 * f); ctx.fillStyle = HL_ART_C.flameHi; hlArtFacePath(x, by + 1, 4.4, 1, 1); ctx.fill();
+  ctx.restore();
+}
+function hlLanternFx(kind) {
+  const q = hlLanternPos();
+  if (kind === 'take') {
+    HL_ART_YD.takeAt = uiTime;
+    ringFx(q.x, q.y, 4, 46, '#fcd34d', 0.4, 3);
+    burst(q.x, q.y, 10, '#fde68a', 140, 2, 0.4);
+  }
+}
+
+/* ---- the epilogue ---- */
+/* the soul at your shoulder, in any run it rides: small, its lantern warm;
+   at twenty whole, then up and out of the arena. Additive layer. */
+function drawHlRider(R) {
+  const C = HL_ART_YD_C, S = HL_ART_YD, b = R.beat;
+  const tx = P.x + Math.cos(P.ang - 2.4) * 34, ty = P.y + Math.sin(P.ang - 2.4) * 34 - 10;
+  if (!S.ride || uiTime - S.ride.t > 0.5) S.ride = { x: tx, y: ty, t: uiTime };
+  const k = 1 - Math.exp(-(uiTime - S.ride.t) * 6);
+  S.ride.x += (tx - S.ride.x) * k; S.ride.y += (ty - S.ride.y) * k; S.ride.t = uiTime;
+  const go = b ? clamp((b.t - RIDE_BEAT_T - 0.8) / (RIDE_GO_T - RIDE_BEAT_T - 0.8), 0, 1) : 0;
+  const whole = b ? clamp(b.t / 0.5, 0, 1) : 0, up = HL_EASE.in(go) * 520, a = 1 - HL_EASE.in3(go);
+  const x = S.ride.x + Math.sin(uiTime * 1.6) * 3, y = S.ride.y - up + Math.sin(uiTime * 2.1) * 2, sc = 0.55 + 0.55 * whole, f = hlFlicker(uiTime, 5.5, 0.3);
+  ctx.save();
+  if (go > 0) {
+    // a column of it, going up
+    const gr = ctx.createLinearGradient(x, y, x, S.ride.y + 20);
+    gr.addColorStop(0, rgba(C.cold, 0)); gr.addColorStop(1, rgba(C.cold, 0.25 * (1 - go)));
+    ctx.fillStyle = gr; ctx.fillRect(x - 10, y, 20, S.ride.y + 20 - y);
+  }
+  drawGlow(x, y, (24 + 50 * whole) * sc, C.cold, (0.25 + 0.25 * whole) * f * a);
+  drawGlow(x, y, 6 + 6 * whole, '#ffffff', 0.7 * a);
+  hlArtHull(x, y, -Math.PI / 2, sc);
+  ctx.fillStyle = rgba('#fed7aa', (0.08 + 0.12 * whole) * a); ctx.fill();
+  ctx.strokeStyle = rgba('#e0f2fe', (0.5 + 0.5 * whole) * a); ctx.lineWidth = 1.2; ctx.stroke();
+  // its lantern, warm now
+  drawGlow(x + 12 * sc, y + 10 * sc, 12, '#f97316', 0.4 * a * f);
+  ctx.restore();
+}
+function hlRideFx(stage) {
+  const S = HL_ART_YD, q = S.ride || { x: P.x, y: P.y };
+  if (stage === 'aboard') ringFx(P.x, P.y, 6, 40, '#a5f3fc', 0.5, 2);
+  if (stage === 'whole') {
+    S.rideAt = uiTime;
+    ringFx(q.x, q.y, 10, 140, '#a5f3fc', 0.9, 3);
+    ringFx(q.x, q.y, 10, 90, '#fed7aa', 0.7, 2);
+    burst(q.x, q.y, 24, '#e0f2fe', 200, 2.6, 0.7);
+    Audio_.levelup();
+  }
+  if (stage === 'gone') burst(q.x, q.y - 520, 24, '#a5f3fc', 160, 2.6, 0.9);
+}
+/* the vigil's wall: the panel over the way to the house, cut once it is finished */
+function drawHlWall(x, y, done) {
+  if (!done) return;
+  const C = HL_ART_YD_C;
+  ctx.save();
+  ctx.fillStyle = '#1b2231'; ctx.fillRect(x - 150, y - 24, 300, 20);
+  ctx.strokeStyle = '#2a3244'; ctx.lineWidth = 1.5; ctx.strokeRect(x - 150, y - 24, 300, 20);
+  ctx.font = '800 11px ' + HL_ART_FONT; ctx.letterSpacing = '0.3em'; ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(HL_SAY.wall, x + 1, y - 9.5);
+  ctx.fillStyle = '#ffffff'; ctx.fillText(HL_SAY.wall, x, y - 10.5);
+  ctx.letterSpacing = '0em';
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y - 14, 120, C.cold, 0.08 + 0.03 * Math.sin(uiTime * 1.3));
   ctx.restore();
 }
 

@@ -563,13 +563,12 @@ take(g.run(`(() => { ${KIT}
 
 /* ================================ the hooks =============================== */
 /* Twice: on the placeholders in the page, and with hl-art.js loaded, which
-   draws the patch and the house and leaves the yard's placeholders standing
-   until its art lands. */
+   draws the patch, the house and the yard over them. */
 const ART = path.join(path.dirname(IDX), 'hl-art.js');
 function flyHooks(art) {
   const h = loadGame(IDX, { w: 1280, h: 720 });
   h.run(SETUP);
-  if (art) { h.run(fs.readFileSync(ART, 'utf8')); ok(h.run('HL_ART_HS_C !== undefined'), 'hl-art.js is loaded'); }
+  if (art) { h.run(fs.readFileSync(ART, 'utf8')); ok(h.run('HL_ART_YD_C !== undefined && drawHlYardBody.toString().includes("hlArtYd")'), 'hl-art.js draws the yard'); }
   const ACT3 = ['hlYardArtTick', 'hlYardEnterFx', 'hlGraveRiseFx', 'hlRisenUpFx', 'hlRisenWindFx', 'hlRisenFireFx', 'hlRisenDownFx',
     'hlDigFx', 'hlPitDigFx', 'hlPitCloseFx', 'hlPitSwallowFx', 'hlBuryFx', 'hlDigDownFx', 'hlDigSproutFx', 'hlDigStoppedFx',
     'hlDigLostFx', 'hlStoneUncoverFx', 'hlBellWindFx', 'hlBellTollFx', 'hlBellDownFx', 'hlRqWindFx', 'hlRqMoveFx', 'hlRqBoltFx',

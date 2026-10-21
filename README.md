@@ -919,9 +919,8 @@ D1, not the real database. To try ALL HALLOWS outside its dates:
 
 ALL HALLOWS' chapters II and III, THE HOUSE and THE YARD, have their own test.
 Their art hooks are listed in `HALLOWS-HOUSE-HOOKS.md` and
-`HALLOWS-YARD-HOOKS.md`. The house's art is in `hl-art.js`; the yard's is not
-drawn yet and plays on its placeholders (the test draws both on the
-placeholders and with the art file loaded):
+`HALLOWS-YARD-HOOKS.md`, and both are drawn in `hl-art.js` (the test draws
+them on the placeholders and again with the art file loaded):
 
 ```sh
 npm run test:hallows                       # under a minute: THE HOUSE, DEAD GAME, THE YARD, THE RAGE QUIT, the epilogue, the medals, the hooks
