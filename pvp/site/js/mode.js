@@ -12,8 +12,8 @@
                  near, heat
      cards.js    cards, hello, peerHello       the card pool each player draws from
      maps.js     maps                          the arena, clean or infested
-     rounds.js   down, levelUp, hud, draw,     the match: rounds, picks, the HUD
-                 idle, hash
+     rounds.js   down, levelUp, hud, draw,     the match: rounds, picks, the HUD,
+                 idle, hash, arena             overtime
      practice.js, match.js, bot.js             the kinds of play (`modes`)
      onair.js    played                        a match on air: its fight, to the relay
      watch.js    steps, played, cam            a match watched (/play/?watch=<match>)
@@ -127,6 +127,7 @@
     cards: () => null,                 // the card pool, or null for the game's (cards.js)
     hud: () => false,                  // drew the match in the run's score's place (rounds.js)
     draw() {},                         // PvP's own screens on the canvas (rounds.js)
+    arena() {},                        // over the arena's walls, in the world (rounds.js: overtime)
     idle() {},                         // a step on PvP's own screens (rounds.js)
     hash() {},                         // the match, into lockstep's fingerprint (rounds.js)
     hello: () => ({}),                 // what this player's handshake carries (cards.js)

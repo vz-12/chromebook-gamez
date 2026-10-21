@@ -48,7 +48,8 @@
                    bonus (upgrades a watched ad added to their start: 0,
                    or 2 in a friend match; the lobby's ads.js) }
        rounds    each round in order: { won (mine?), at (match clock, s),
-                 left (the winner's health when it ended, 0 to 1) }
+                 left (the winner's health when it ended, 0 to 1), ot (it
+                 went to overtime: rounds.js, OVERTIME) }
        dealt     [mine, theirs]: health each took off the other
        map       { name, tag, accent, bg, grid, wall }, as on the belt
        infested  true or false
@@ -990,7 +991,7 @@
         x += c.w;
       });
 
-      // a tile per round: when it ended, who took it, the winner's health left
+      // a tile per round: when it ended, who took it, the winner's health left, and OT if it went to overtime
       const n = r.rounds.length, tw = 118, tg = 10, ty = 520, tH = 58;
       if (!n) {
         g.globalAlpha = outQuint((T - 1.1) / 0.5);
@@ -1011,6 +1012,10 @@
         const hw = (tw - 24) * clamp01(rd.left) * outQuint((T - 1.3 - i * 0.07) / 0.8);
         if (hw > 1) { rrect(g, tx + 12, ty + 27, hw, 6, 3); g.fillStyle = col; g.fill(); }
         text(g, rd.won ? 'WON' : 'LOST', tx + 12, ty + 45, FONT(800, 11), col, 'left', 1.6);
+        if (rd.ot) {                       // a badge on the tile's top edge
+          rrect(g, tx + tw / 2 - 15, ty - 7, 30, 14, 7); g.fillStyle = faded ? FAINT : '#f87171'; g.fill();
+          text(g, 'OT', tx + tw / 2, ty, FONT(800, 9), '#0b0f17', 'center', 1.4);
+        }
         text(g, Math.round(clamp01(rd.left) * 100) + '% HP', tx + tw - 12, ty + 45, FONT(700, 11), rgba(col, 0.8), 'right');
         g.restore();
         tx += tw + tg;

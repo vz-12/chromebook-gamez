@@ -573,7 +573,8 @@ makes sure nothing it doesn't use is fetched or run.
        about 25 from its gun (its army is its weapon).
      - Some bot matches between the long-range pilots ran past ten minutes.
        A sudden death (say, the arena closing in after a few minutes) would
-       end those. It isn't in, since you didn't ask for it.
+       end those. It isn't in, since you didn't ask for it. (In now: see
+       "The pace of a fight", below.)
    - **Known gaps in this version:**
      - Slows, stuns and knockback on a stand-in don't carry over to its
        pilot. Damage and damage over time do.
@@ -1158,7 +1159,101 @@ ember with player hits as well since it doesn't work for now."
 - **Open:** THE HACKER's root fills only from bodies its army takes, which a
   clean map never has, so SUPERUSER needs an infested one. The same fix as
   EMBER's (paid by hits on the pilot) is ready to make if wanted. OVERDRIVE
-  lasts its run length (60 s) in a duel too.
+  lasts its run length (60 s) in a duel too, but since 16 Oct it ends with
+  its round (below).
+
+### The pace of a fight (user, 16 Oct)
+
+"The way fights in PvP work right now makes them drag on and be quite
+boring; can you find a way to get good, engaging fights that aren't too
+brief."
+
+- **Measured first** (`npm run pace:pvp`, `scripts/pvp-pace.mjs`, new):
+  whole matches on the real engine, both pilots flown by the bot's own
+  brain (the player's side by a copy of it pointed the other way), every
+  pairing of the four pilots, at skill 0.65 and 0.9, base and awake.
+  - Base pilots: rounds had a median of 41 s, but a tenth ran past 130 s
+    and the longest 313 s. Gun against gun was the drag: VOIDRUNNER and
+    THE HACKER rounds of 80 s to 5 min, the pilots 250–500 px apart 80–90%
+    of the time, trading near misses.
+  - Awake: 28% of rounds were over in under 15 s, as short as 6 s. A form
+    woken late in one round was still on when the next began (a minute
+    each), and that round was over in five seconds.
+  - What did not help: more damage a hit with tighter caps (gun duels are
+    short of hits, not of damage) and a smaller arena (it only shortened
+    the fights that were already short).
+- **OVERTIME** (`rounds.js`; `duel.js`, `maps.js`; one draw hook in the
+  engine, `drawArena` → `PVP.arena`). A round still on at 40 s goes to
+  overtime:
+  - the walls close in on the middle at a steady pace over 20 s, to a box
+    480 by 320, where there is no keeping away (a 640 by 420 box still
+    let two guns circle at 300–400 px);
+  - every blow between the pilots grows 8% a second (`M.surge`, x2.6 once
+    the walls are in), applied before armour and under the same caps, 14% a
+    blow and 34% a second, so a round still never ends in one blow;
+  - nothing is won back: each pilot's health is held at the lowest it has
+    been since overtime began (regeneration, a heal, a card, a revive's
+    health all taken back at the next step), and a spent shield is not
+    regrown. Second Wind still saves a killing blow, with no health back;
+  - the room sends nothing more.
+  - Seen: the HUD counts the last 10 s down (OVERTIME IN 7S), then says
+    OVERTIME · BLOWS ×1.4 · NO HEALING; a banner as it starts; the walls
+    beat red, the floor past them dark; the result marks the round OT.
+  - Every round starts with the walls open, the clock and the hold fresh.
+  - A hidden pilot's one long round (best of one) has no clock, as you asked
+    for it; `OVERTIME.oneRound` gives it one.
+  - The numbers are `OVERTIME` in `rounds.js`. `npm run pace:pvp -- --set
+    OVERTIME.at=50,OVERTIME.ramp=0.05` tries others without editing a file.
+- **Forms end with their round** (`rounds.js`, `startRound`): OVERDRIVE,
+  SUPERUSER and RONIN, woken in one round, are ended at the start of the
+  next (their clocks left a moment, so the engine ends each its own way). A
+  meter still filling carries over, like the build.
+- **Measured after** (the same matches, 6 seeds each):
+
+  | | before | after |
+  | --- | --- | --- |
+  | base: median round | 41 s | 39 s |
+  | base: a tenth of rounds longer than | 130 s | 64 s |
+  | base: longest round | 313 s | 84 s |
+  | base: rounds over 2 min | 11% | none |
+  | base: match (fought), a tenth longer than | 302 s | 152 s |
+  | awake: rounds under 15 s | 28% | 19% |
+  | awake: longest round | 187 s | 84 s |
+
+  - About half the base rounds reach overtime (nearly every gun duel, few
+    others), a third of the awake ones; once in it, a round lasts a median
+    of 12–16 s more, 30 s at most for nine in ten.
+  - Nothing got shorter: a tenth of base rounds were over within 17 s
+    before and after, and of awake ones within 9 s before and 11 s after.
+- **Tested:** `npm run test:pvp`, engine part 366 checks.
+  - The two-machine match plays with overtime brought forward (12 s, the
+    walls in over 8): rounds go to overtime on both, never early, the
+    walls close and the held health only falls, with the walls in every
+    fingerprint and both games the same step for step. The result marks
+    which rounds went to overtime.
+  - The rules one at a time: nothing before 40 s, the countdown, the
+    banner, a blow worth 1.8 at ten seconds in, the caps over x3.4, the
+    walls halfway at halfway, shut at 480 by 320 on the middle and no
+    further, a pilot outside them put back, a heal, regeneration and a
+    revive's health taken back, a shield not regrown, the room silent, no
+    overtime out of a fight or in a hidden pilot's round, and the next round
+    opening the walls and ending OVERDRIVE and SUPERUSER.
+  - 13 mutants, one per rule; 12 caught. The one missed (the growth after
+    the cap rather than before) behaves the same, since `hurtPlayer` holds
+    the duel's cap again.
+  - The server part (456) and the game's determinism, lockstep, outside
+    pilots, tutorial, ALL HALLOWS, FORGOTTEN TALES, live, music,
+    achievements, FROM ABOVE, THE UNWRITTEN and ONE POINT OH suites pass
+    unchanged.
+- **Open** (yours to playtest; bots can't settle balance):
+  - An awake EMBER is the fastest fight left: its rounds have a median of
+    16 s, and it takes about two in three of them. `DUEL.pilots.ember`
+    (or a factor for its awake lance alone) is the lever, if people agree.
+  - The bots' VAGRANT wins nearly every round against the others. Its parry
+    timing is better than a person's, so this says more about the bot.
+  - `40 s`, `20 s`, `480 × 320` and `8%` are a first setting, made against
+    bots that dodge more than most people do: real gun duels should reach
+    overtime less often.
 
 ## The shared data (D1)
 
