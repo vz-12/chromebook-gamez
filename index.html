@@ -6217,7 +6217,7 @@ function onBossDefeat(e) {
   }
   /* A committed run stops here once the wave clock says so. Checked on a
      boss clear because that is the one moment the floor is reliably empty. */
-  if (riteRun && wave >= RITE_WAVE && riteBuilt(riteRun)) {
+  if (riteDue()) {
     riteTakesYou();
   } else {
     maybeSpawnMalware(wasVirus);
@@ -6636,6 +6636,10 @@ function deepExitTick(dt) {
   deepExitT -= dt;
   if (deepExitT > 0) return;
   deepExitT = 0;
+  // a committed rite takes precedence over anything the fracture would hand you
+  // on to (incl. THE HALT's auto-ROOT): this is the only sector-clear that can
+  // land past wave 25 without a boss, so the rite trigger must live here too.
+  if (riteDue()) { riteTakesYou(); return; }
   if (stage.tag === 'fracture v') { if (!root) startRoot(); return; }
   if (!awaitingPortal) afterReward();
 }
@@ -33116,6 +33120,12 @@ function riteTakesYou() {
   simAfter(1.4, 'rite', id);
 }
 
+/* A committed rite is due at RITE_WAVE and must be reachable from any
+   sector-cleared checkpoint, not just a boss kill: the Fracture's deep sectors
+   have no boss, so a run could cross wave 25 in one and skip the rite entirely.
+   Checked by the boss-clear handler AND deepExitTick. */
+function riteDue() { return !!(riteRun && wave >= RITE_WAVE && riteBuilt(riteRun)); }
+
 /* The mid-run door is gone. It was a portal that turned up after a boss and
    asked; the room in the menu replaces it outright, because being asked at a
    statue and then playing a whole run toward it is a commitment, and a gate
@@ -46430,8 +46440,8 @@ const EVO_GROWTHS = OPR_GROWTHS.map((g, i) => Object.assign({}, g, EVO_RUN[i]));
 const imOn = () => P.charId === 'runner' && P.imT > 0 && !oprOn();
 const imCutIn = () => !!(P.imIntro && !P.imIntro.cut);
 const imShown = () => imOn() && !imCutIn();
-// whether near misses fill GRAZE for pilot p: awake, out of IMAGO, out of the rite and PvP
-const imFills = p => p.charId === 'runner' && !!p.awake && !p.down && !(p.imT > 0) && !oprOn() && !PVP;
+// whether near misses fill GRAZE for pilot p: awake, out of IMAGO, out of the rite
+const imFills = p => p.charId === 'runner' && !!p.awake && !p.down && !(p.imT > 0) && !oprOn();
 
 /* A round of theirs near pilot p, who is pilot k (updateEBullets, before it
    can land). It pays once, as it passes: inside the band past the hull's edge
@@ -46467,7 +46477,7 @@ function imGain(n, x, y) {
 
 // [F], for VOIDRUNNER
 function imFire() {
-  if (state !== 'play' || oprOn() || PVP || !P.awake || P.charId !== 'runner') return;
+  if (state !== 'play' || oprOn() || !P.awake || P.charId !== 'runner') return;
   if (P.imT > 0) return;
   if ((P.imGraze || 0) < IM_MAX) {
     floatText(P.x, P.y - 42, 'NOT GRAZED YET', '#94a3b8', 13);
