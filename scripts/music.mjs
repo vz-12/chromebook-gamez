@@ -71,6 +71,11 @@ const MANIFEST = {
                  sections: { intro: { segs: [0], lock: true, next: 'p1' }, p1: { segs: [1] }, p2: { segs: [2] }, p3: { segs: [3] },
                              again: { segs: [4], lock: true, next: 'p1' } },
                  moods: { p1: 'p1', p2: 'p1', p3: 'p2', p4: 'p3', p5: 'p3', again: 'again' }, start: 'intro', title: 'Torn Pages' },
+    ragequit: { bpm: 180, pre: PRE, segs: [seg('ragequit/intro', 2), seg('ragequit/p1', 2), seg('ragequit/p2', 2), seg('ragequit/p3', 2), seg('ragequit/p4', 2),
+                                          seg('ragequit/again', 1)],
+                sections: { intro: { segs: [0], lock: true, next: 'p1' }, p1: { segs: [1] }, p2: { segs: [2] }, p3: { segs: [3] }, p4: { segs: [4] },
+                            again: { segs: [5], lock: true, cut: true, next: 'p1' } },
+                moods: { p1: 'p1', p2: 'p2', p3: 'p3', p4: 'p4', again: 'again' }, start: 'intro', title: 'Run It Back' },
     codex: { bpm: 120, pre: PRE, segs: [seg('codex/0', 2, 1.5)], sections: { o: { segs: [0], next: 'end' } } }
   },
   stings: { 'boss-in': { f: 'stings/boss-in.opus', hit: 1.5 }, 'boss-down': { f: 'stings/boss-down.opus' } }
@@ -371,6 +376,36 @@ await tick(6);
   check('the unwritten: by its sequences; a death plays the rewind, whole, then the first phase',
         first.startsWith('intro p1') && /p3/.test(toP3) && /^p3 again p1|^again p1/.test(after) && (after.match(/again/g) || []).length === 1 && !gapless(all),
         `${first} | then ${toP3} | after the death: ${after}`);
+}
+
+// 3f. THE RAGE QUIT: his quarters are the phases, not his health; and through a gate (THAT ONE DIDN'T COUNT) the
+//     rewind cuts in at once, not on the next bar line, plays whole, and the quarter's music starts over from its top
+{
+  const T = now();
+  run(`state = 'play'; stage = STAGES[0]; enemies.length = 0; unwritten = null;
+       enemies.push({ type: 'boss', boss: 'ragequit', phase: 0, hlInit: true, hlQ: 0, hlAway: null, dead: false });`);
+  await tick(9);
+  const Tq = now();
+  run(`enemies.find(e => e.boss === 'ragequit').hlQ = 1;`);                     // stopped short of a gate: his second quarter
+  await tick(5.1);
+  const Te = now();
+  run(`enemies.find(e => e.boss === 'ragequit').hlAway = { gate: 0, t: 0 };`);  // through one
+  await tick(0.3);
+  run(`enemies.find(e => e.boss === 'ragequit').hlAway.t = 0.6;`);             // on the other side of it
+  await tick(1.1);
+  run(`enemies.find(e => e.boss === 'ragequit').hlAway = null;`);              // back in
+  await tick(7);
+  const all = named(played(T), 'ragequit/'), name = s => s.buffer.name.slice(9);
+  const first = all.filter(s => s.t0 < Tq).map(name).join(' '), second = all.filter(s => s.t0 >= Tq && s.t0 < Te).map(name).join(' ');
+  const rest = all.filter(s => s.t0 >= Te), back = all.find(s => s.buffer.name === 'ragequit/again');
+  const was = all.filter(s => s.t0 < Te && s.t1 != null).map(s => s.t1 - Te);
+  run(`enemies.length = 0;`);
+  await tick(6);
+  check("the rage quit: by his quarters; through a gate the rewind cuts in at once, whole, then the quarter from its top",
+        first.startsWith('intro p1') && /p2/.test(second) && !/p1/.test(second.replace(/^p1 ?/, '')) && back && back.t0 - Te < 0.25
+        && rest.map(name).join(' ').startsWith('again p2') && rest.filter(s => name(s) === 'again').length === 1 && !gapless(rest)
+        && was.length > 0 && Math.max(...was) < 0.25,
+        `${first} | then ${second} | through a gate: ${rest.map(name).join(' ')}, the rewind +${back ? (back.t0 - Te).toFixed(2) : '-'} s, what played stopped by +${was.length ? Math.max(...was).toFixed(2) : '-'} s`);
 }
 
 // 4. the synth bed is the fallback, and only that

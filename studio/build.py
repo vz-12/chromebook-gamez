@@ -62,6 +62,7 @@ def flags(song, sec):
     """What the manifest says of a section besides its pieces."""
     d = {}
     if sec.lock or whole(song): d['lock'] = True
+    if sec.cut: d['cut'] = True
     if sec.next: d['next'] = sec.next
     elif not sec.loop: d['next'] = 'end'
     return d

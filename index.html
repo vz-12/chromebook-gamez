@@ -1061,7 +1061,9 @@ const Audio_ = {
                          moods: { calm: 'a', fight: ['b'] }, start: 'intro' } },
        stings: { 'boss-in': { f: 'stings/boss-in-9c2e.opus', hit: 1.2 } } }
    A section loops unless it names what follows (`next`, or 'end' to stop);
-   a `lock`ed one plays to its end before a new mood can move it. `hit` is
+   a `lock`ed one plays to its end before a new mood can move it, and a `cut`
+   one is cut to the moment its mood is asked for (a rewind), not on the
+   next piece's bar line. `hit` is
    when a sting lands, and the track it introduces starts there. A track may
    also carry its name (`title`), its picture (`cover`, a file beside the
    music) and its running order from the top (`order`, and `loop`, the place
@@ -1089,6 +1091,10 @@ const MUSIC_BOSS = {
 };
 // the corrupted OTHER's own song: the same boss on the floor, with something else in it (startVirus)
 const MUSIC_VIRUS = 'corrupt';
+// THE RAGE QUIT goes by his quarters, not his health. Gone through a gate (THAT ONE DIDN'T COUNT) his song
+// rewinds, and the quarter's music starts over from its top, as the quarter does. The rewind is asked for only
+// as he goes (it cuts in, and plays whole): asked for any longer, the piece after it would be the rewind again
+const musicRq = b => (b.hlAway && b.hlAway.t < 0.5 ? 'again' : 'p' + (Math.min(b.hlQ | 0, 3) + 1));
 // cues that are fights: arriving at one is a sting and a cut, not a crossfade
 const MUSIC_FIGHTS = new Set([...Object.values(MUSIC_BOSS), 'tribunal', MUSIC_VIRUS]);
 
@@ -1122,7 +1128,7 @@ function musicWant(dt) {
   if (b) {
     const cue = rushOn() && Music.has('rush') ? 'rush'
               : b.virus && Music.has(MUSIC_VIRUS) ? MUSIC_VIRUS : MUSIC_BOSS[b.boss] || 'boss';
-    return [cue, b.boss === 'root' && rrRace ? 'race' : 'p' + ((b.phase | 0) + 1)];
+    return [cue, b.boss === 'root' && rrRace ? 'race' : b.boss === 'ragequit' && b.hlInit ? musicRq(b) : 'p' + ((b.phase | 0) + 1)];
   }
   if (hlArea) return [hlArea.id, Music.heat(dt)];
   return [MUSIC_STAGE[stage.name] || 'grid', Music.heat(dt)];
@@ -1205,6 +1211,11 @@ const Music = {
     const cue = want && !A.muted && A.musicVol > 0.005 && this.has(want) ? want : null;
     if (want !== this.want || cue !== (this.cur ? this.cur.id : null)) this.cueTo(cue, want);
     this.want = want;
+    // a mood whose first section cuts in: there now, from its top, instead of on the next bar line
+    if (this.cur && !w[2] && w[1] !== this.cur.mood && this.cur.id === want) {
+      const to = this.moodSecs(this.cur.tr, w[1])[0], sec = this.cur.tr.sections[to];
+      if (sec && sec.cut && this.cur.sec !== to) { this.fade(this.cur, 0.08); this.cur = this.start(want, 0, to); }
+    }
     if (this.cur) { this.cur.mood = w[1]; this.cur.through = !!w[2]; this.pump(); }
     if (want && !MUSIC_FIGHTS.has(want) && stage.boss && state === 'play' && (this.preT -= dt) <= 0) {
       this.preT = 5;
@@ -1233,12 +1244,13 @@ const Music = {
     this.cur = cue ? this.start(cue, delay) : null;
   },
 
-  start(id, delay) {
+  start(id, delay, from) {
     const tr = this.man.tracks[id], ac = Audio_.ac;
     const g = ac.createGain();
     g.gain.value = Math.pow(10, (tr.gain || 0) / 20);
     g.connect(this.bus);
-    const c = { id, tr, g, sec: null, i: 0, k: 0, through: false, at: null, delay: delay || 0, mood: 'calm', src: [], last: null, done: false };
+    const c = { id, tr, g, sec: null, i: 0, k: 0, through: false, at: null, delay: delay || 0, mood: 'calm', src: [], last: null, done: false,
+                from: from || null };   // where it starts, if not at its own start (a section cut to)
     // every segment's bytes, one after another, so looping and mood changes never wait on the network
     let k = 0;
     const next = () => { if (c.done || k >= tr.segs.length) return; this.fetchBytes(tr.segs[k++].f).then(next, next); };
@@ -1274,7 +1286,7 @@ const Music = {
       const k = c.sec === null ? 0 : c.k + 1 < tr.order.length ? c.k + 1 : Math.min(tr.loop | 0, tr.order.length - 1);
       return { sec: tr.order[k], i: 0, k };
     }
-    if (c.sec === null) return { sec: tr.start || want[0], i: 0 };
+    if (c.sec === null) return { sec: c.from || tr.start || want[0], i: 0 };
     const sec = tr.sections[c.sec];
     if (!want.includes(c.sec) && !sec.lock) return { sec: want[0], i: 0 };
     if (c.i + 1 < sec.segs.length) return { sec: c.sec, i: c.i + 1 };
@@ -76889,7 +76901,8 @@ const OST_TRACKS = [
   ['root', 'b', 'root', 2],
   // ALL HALLOWS: an area is a stage of its own (HL_AREAS), and it ends on its boss
   ['patch', 's', 'THE PATCH', 3],     ['backlog', 'b', 'backlog', 3],
-  ['house', 's', 'THE HOUSE', 3],     ['deadgame', 'b', 'deadgame', 3]
+  ['house', 's', 'THE HOUSE', 3],     ['deadgame', 'b', 'deadgame', 3],
+  ['yard', 's', 'THE YARD', 3],       ['ragequit', 'b', 'ragequit', 3]
 ];
 const ostPart = cue => OST_TRACKS.find(t => t[0] === cue);
 const OST_DISKS = { 1: 'DISK ONE', 2: 'DISK TWO   ·   CRACKS IN THE PLANE', 3: 'ALL HALLOWS' };

@@ -575,3 +575,39 @@ def drip():
     with slide=7 or so) and is gone."""
     from inst import synth
     return synth('sine', cutoff=6000.0, track=0.5, a=0.001, d=0.09, s=0.0, r=0.05, glide=0.03)
+
+_YARD = {}
+def yard():
+    """ALL HALLOWS chapter III's sounds (21 Oct, 25 from the library). THE YARD's: a church bell struck once
+    (it rings on C with a minor third and a fifth in it, as big bells do: a C minor chord by itself), a
+    lower bell on E flat, a spade going into earth, the iron gate (a metal door's squeak, two seconds of it),
+    and a heavy guitar holding power chords on G, C sharp and D sharp. THE RAGE QUIT's: tape spinning
+    back, a tape motor starting and stopping, a plug pulled out, a controller's buttons mashed (cut into
+    presses), one arcade button, two glitches, a burst of static, and two amen breaks, cut into sixteenths
+    (they were played at 174: a sixteenth of them rings a few milliseconds into the next at 180)."""
+    if _YARD: return _YARD
+    y = _YARD
+    def norm(x): return x / max(1e-9, float(np.abs(x).max()))
+    def piece(x, t0, t1, a=0.002, r=0.03): return fade(norm(x[max(0, int(t0 * SR)):int(t1 * SR)].copy()), a, r)
+    y['bell'] = {72.02: gate(sample('ChurchBell_BW.28809'), 14.0, 3.0)}
+    y['bigbell'] = {50.73: gate(sample('ChurchBell_BW.28807'), 8.0, 2.0)}
+    dig = hits_in(sample('BRS_Shovel_Square_Dirt_Dry_1', trim=False), least=0.25)
+    top = max(float(np.abs(c).max()) for c in dig)
+    y['spade'] = [gate(norm(c), 0.6, 0.15) for c in dig if float(np.abs(c).max()) > top * 0.35][:8] + [gate(sample('ShovelDigDirt_ZA02.496'), 0.9, 0.2)]
+    y['gate'] = piece(sample('ESM_Ancient_Game_Old_Metal_Screen_Door_Squeak_Creak_1_Organic_Raw_', trim=False), 0.12, 2.3, 0.02, 0.25)
+    y['doom'] = {43.0: sample('SULLIVAN_KING_guitar_sustained_150_G2'), 48.99: sample('SULLIVAN_KING_guitar_sustained_150_C#3'),
+                 50.9: sample('SULLIVAN_KING_guitar_sustained_150_D#3')}
+    y['spin'] = [norm(sample('BRLY_ALVE_spinback_01')), norm(sample('BRLY_ALVE_spinback_03'))]
+    y['rewind'] = norm(sample('MARS_FOUND_FX_one_shot_tape_rewind_tape_double_speed'))
+    y['tstart'] = norm(sample('SO_NI_fx_retro_tape_start'))
+    y['tstop'] = norm(sample('DS_KDT_fx_tape_stop_fine'))
+    y['plug'] = norm(sample('FF_WP_foley_plug_pull_quick'))
+    y['mash'] = [gate(norm(c), 0.09, 0.02) for c in hits_in(sample('FF_IG_foley_video_game_controller_fast_buttons_clicking_active', trim=False), least=0.05)]
+    y['click'] = gate(norm(sample('ESM_One_Shot_Perc_Arcade_Button_Foley_Click_Push_Snap_Plastic_Lofi_Electro_Futuristic_Texture_Accent_Minimal')), 0.14, 0.03)
+    y['glitch'] = [norm(sample('PHT_one_shot_fx_short_glitch_74')), norm(sample('BS_BDAS_glitch_one_shot_acceptable'))]
+    y['static'] = norm(sample('PE-Static_BW.40235'))
+    six = 60.0 / 174 / 4
+    for key, name in (('amen', 'FL_BJ_174_Drum_Full_Amen'), ('amenx', 'BOS_DBK_174_Drum_Break_Loop_Amen_Style_Distorted')):
+        x = sample(name, trim=False)
+        y[key] = [fade(x[int(k * six * SR):int((k + 1) * six * SR) + int(0.004 * SR)].copy(), 0.0005, 0.004) for k in range(32)]
+    return y

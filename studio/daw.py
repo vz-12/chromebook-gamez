@@ -335,9 +335,10 @@ def chord(sym, octave=3):
 
 class Section:
     """A stretch of the track the game can loop or move to: its bars, and every bus's notes."""
-    def __init__(self, song, name, bars, seg=4, loop=True, next=None, lock=False, level=0.0):
+    def __init__(self, song, name, bars, seg=4, loop=True, next=None, lock=False, level=0.0, cut=False):
         self.song, self.name, self.bars, self.seg = song, name, bars, seg
         self.loop, self.next, self.lock = loop, next, lock
+        self.cut = cut                    # asked for, the game cuts straight to it instead of waiting for the bar line
         self.level = level                # dB against the track's other sections, kept by the master
         self.ev = {}                      # bus name -> [Ev]
         self.len = bars * song.bar

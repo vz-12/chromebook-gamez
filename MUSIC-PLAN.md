@@ -112,7 +112,7 @@ a bar line when the boss changes phase.
 | `planetarium` | planetarium | celestial pads, a slow arpeggio | 72, B♭ lydian |
 | `patch` "Left to Ripen" | ALL HALLOWS i, THE PATCH | a jig in a minor key, four beats of three: harpsichord over a tuba and plucked strings, a xylophone for ribs, a theremin for what is standing in the field; insects, wind, a bell. Its fight is the jig as metal with an organ on the off-beats, then half time over a bass that walks down by semitones | 150, D minor (an E flat where the vine catches) |
 | `house` "Lights on a Timer" | ALL HALLOWS ii, THE HOUSE | a waltz on a music box, with a timer ticking on every beat: `deadgame`'s tune heard from another room. Two calm sections take turns, and at the end of the second the music box runs down and a latch drops; the fight is the same waltz danced (harpsichord, tuba, organ), then a half-time breakdown under the theremin | 144 in three-four, G minor |
-| `yard` | ALL HALLOWS iii, THE YARD | graveyard: bells, choir, doom | 76, C minor |
+| `yard` "Plot Holes" | ALL HALLOWS iii, THE YARD | a dead march that never gets its last bar: each time round the tune stops a bar short, on the note that wants to go home, and a church bell is struck where the ending would be (a stone instead of an ending; the bell rings a C minor chord of its own). Three calm sections take turns: the tune on a chapel organ over a kettledrum and a spade, then on a cello under a choir, then its second strain on the theremin. The fight is doom: the tune on the full organ over guitars held on every root, the band stopping dead at every stone; then the second strain at twice the pace, THE RAGE QUIT's | 90, C minor |
 | `vigil` | the vigil | candlelit, waiting | 60, A minor |
 
 ### Bosses (one track each, with phases)
@@ -137,7 +137,7 @@ a bar line when the boss changes phase.
 | `onepointoh` | ONE POINT OH | the version war: the first build's synth against the full score | 140, A minor |
 | `backlog` "I'll Get to It" | THE BACKLOG (ALL HALLOWS i) | THE PATCH's jig as metal, and never finished: each bar of the tune is put down one note short, then the phrases are handed from one instrument to the next half-way through. Only the last phase plays it whole, and only its last bar comes home | 165, four beats of three, D minor |
 | `deadgame` "One Player Online" | DEAD GAME (ALL HALLOWS ii) | a dead game's title music, still playing: written for two square waves, a triangle and noise, and its voices leave it one at a time; then a band under the square-wave lead; then slow and low on an organ, with a crushed echo of the lead behind it | 155, G minor |
-| `ragequit` | RAGEQUIT (ALL HALLOWS iii, when built) | furious, glitching, about to unplug | 180, C minor |
+| `ragequit` "Run It Back" | THE RAGE QUIT (ALL HALLOWS iii) | THE YARD's tune twice as fast, as breakcore and metal (an amen cut into sixteenths, saws for his voice, a square wave over it, a controller's buttons for hats), and never allowed to end: at its last bar he stops the tape, spins it back and starts again. Then it lags; then both strains at twice the speed again. In his last quarter it drops to THE YARD's own speed, with the yard's organ, choir and bells in the doors, and plays to its end for the first time. His quarters are the phases; through a gate, the whole song rewinds (it cuts in at once) and the quarter starts over | 180, C minor |
 
 ### Menus, modes, stingers
 
@@ -369,6 +369,24 @@ is pushed until you say; `main` only when you say ship.
      once the chapter has opened, kept (and listed for good) once its boss
      is down. Their covers are in (`python studio/covers.py`, from the
      `d3-` masters).)*
+   *(21 Oct, on your word: chapter III, two tracks, 25 sounds from the
+   library. `yard` "Plot Holes" and `ragequit` "Run It Back", both on one
+   tune in C minor that opens C G A♭ G. THE YARD never plays the tune's last
+   bar, and rings a bell there instead; THE RAGE QUIT spins the tape back
+   there instead, and only his last quarter plays it to the end.*
+   - *What came from the library:* a church bell (C, with its minor third
+     and fifth: struck only on the home chord), a lower bell on E♭, a spade
+     in dry earth (cut into its digs), a metal door's squeak for the gates,
+     a heavy guitar's held power chords on G, C♯ and D♯, tape spinning back,
+     a tape motor starting and stopping, a plug pulled, a controller's
+     buttons mashed (cut into presses), an arcade button, two glitches,
+     static, and two amen breaks cut into sixteenths.
+   - *A section can cut in now (`cut`):* asked for, the game goes to it at
+     once instead of on the next bar line. THE RAGE QUIT's rewind is one: it
+     lands a tenth of a second after he gets through a gate, plays whole, and
+     his quarter's music starts over from its top.
+   - *THE SOUNDTRACK* lists the two under ALL HALLOWS once the chapter is
+     open. No covers yet.)*
 5. **The sectors.** `foundry`, `hive`, `vault`, `void` and their bosses.
    *(11 Oct: `foundry` "The Line Never Stops" and `forgeheart` "Struck While
    Hot" done, 13 more credits: anvils, hammer strikes, clangs, low brass.
