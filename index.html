@@ -91241,7 +91241,15 @@ function drawBetaMark() {
    The look itself is "Mended" (1:54): intro-art.js, beside this page, which
    defines IntroArt. Only a tab that is about to play it fetches it (load); its
    clock holds at 0 until the file is in, and if the file never comes, or
-   takes longer than INTRO_WAIT, the intro is over before it began. */
+   takes longer than INTRO_WAIT, the intro is over before it began.
+
+   Its song is "Hold It Together" (1:54): intro-song.opus, beside this page,
+   cut to that clock to the sample (the music worktree's music-src/intro made
+   it). It is fetched with the look and decoded at once, on an offline
+   context, which needs no input. The first key, click or tap starts it where
+   the picture is, and from then on the picture follows the song, as it is
+   heard (the speaker's own delay too), instead of counting frames, so the
+   two cannot drift apart. Without it the look plays on in silence. */
 const INTRO_KEY = 'voidrunner_intro_v1';
 const INTRO_ART = true;         // the real look is in: every new tab plays it
 const INTRO_ART_VER = 'b5cbf5aab9';   // intro-art.js's content hash (its header says how), so a new file is never served stale
@@ -91249,6 +91257,9 @@ const INTRO_LEN = 114;          // seconds, as long as THE LOOK runs (IntroArt.L
 const INTRO_WAIT = 8;           // seconds a slow network may keep it on black
 const INTRO_SKIP = 'escape';    // held, not pressed
 const INTRO_HOLD = 1;           // seconds it has to be held
+const INTRO_SONG = 'intro-song.opus';
+const INTRO_SONG_VER = '61c123046a';  // its content hash (sha1, first 10), as INTRO_ART_VER
+const INTRO_SONG_GAIN = 2.10;   // it is mastered 6 dB under the score (-18 against -12): this evens them
 const Intro = {
   on: false,
   t: 0,
@@ -91257,6 +91268,9 @@ const Intro = {
   said: -9,                     // when the skip line was last asked for, by any input
   art: 'none',                  // intro-art.js: none, loading, ready, failed
   wait: 0,                      // seconds spent waiting on it
+  song: null,                   // intro-song.opus, decoded (fetchSong)
+  src: null, vol: null,         // the song playing, and its level
+  at0: 0,                       // the audio clock's time at the song's first sample
   boot() {
     if (PVP || OPO_BENCH_ASK) return;
     let q = null;
@@ -91287,7 +91301,37 @@ const Intro = {
       el.onload = () => { this.art = typeof IntroArt !== 'undefined' ? 'ready' : 'failed'; };
       el.onerror = () => { this.art = 'failed'; };
       document.head.appendChild(el);
+      this.fetchSong();
     } catch (e) { this.art = 'failed'; }
+  },
+  // the song, decoded as soon as it is in: an offline context may decode before any input
+  fetchSong() {
+    const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OC || !window.fetch) return;
+    fetch(INTRO_SONG + '?v=' + INTRO_SONG_VER)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('intro song ' + r.status))))
+      .then(b => new Promise((ok, bad) => new OC(2, 1, 48000).decodeAudioData(b, ok, bad)))
+      .then(buf => { if (this.on) { this.song = buf; this.playSong(); } })
+      .catch(() => {});         // no song, then: the look plays on in silence
+  },
+  // the song joins the picture where the picture is, once the look is in and the browser lets sound start
+  playSong() {
+    const A = Audio_;
+    if (!this.on || this.src || !this.song || this.art !== 'ready' || !A.ready || this.t > INTRO_LEN - 1) return;
+    const ac = A.ac;
+    if (ac.state !== 'running') { A.resume(); return; }   // asked again every frame until the browser allows it
+    const lead = 0.05, at = ac.currentTime + lead, from = this.t + lead;
+    const s = ac.createBufferSource(), v = ac.createGain();
+    s.buffer = this.song;
+    v.gain.value = document.hidden ? 0 : this.level();
+    s.connect(v); v.connect(A.master);
+    s.start(at, from);
+    this.src = s; this.vol = v; this.at0 = at - from;
+  },
+  // MUSIC sets it, as it sets the score, and a tab put away hears none of it (Music.tick)
+  level() { return MUSIC_LEVEL * INTRO_SONG_GAIN * Audio_.musicVol; },
+  hidden() {
+    if (this.src) this.vol.gain.setTargetAtTime(document.hidden ? 0 : this.level(), Audio_.ac.currentTime, 0.08);
   },
   // a key: held for the skip, and still held after, so its repeats land on nothing
   key(e) {
@@ -91300,12 +91344,19 @@ const Intro = {
   poke() {
     Audio_.init(); Audio_.resume();
     this.said = this.t;
+    this.playSong();
   },
   frame(dt) {
     dt = Math.max(0, dt);       // the first frame's stamp can sit a hair before the boot's clock
     if (this.art === 'failed') { this.end(); return; }
     const ready = this.art === 'ready';
-    if (ready) this.t += dt;
+    if (ready) {
+      // with the song playing the picture is wherever the song is being heard; before it, the frames count
+      const ac = this.src && Audio_.ac;
+      if (ac && ac.state === 'running') this.t = Math.max(this.t, ac.currentTime - (ac.outputLatency || 0) - this.at0);
+      else this.t += dt;
+      if (!this.src) this.playSong();
+    }
     else if ((this.wait += dt) > INTRO_WAIT) { this.end(); return; }
     const held = keys[INTRO_SKIP] || this.fingers > 0;
     this.hold = held ? Math.min(1, this.hold + dt / INTRO_HOLD) : Math.max(0, this.hold - dt * 2 / INTRO_HOLD);
@@ -91324,6 +91375,13 @@ const Intro = {
   end() {
     this.on = false;
     uiArm = 0.4;                // a key or a finger still down from it lands on nothing
+    if (this.src) {             // the song: a skip fades it out; at the end it has already rung out
+      const now = Audio_.ac.currentTime, g = this.vol.gain;
+      g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + 0.6);
+      try { this.src.stop(now + 0.65); } catch (e) { /* stopped already */ }
+      this.src = null;
+    }
+    this.song = null;           // forty-odd megabytes of sound, not kept past its one play
   },
   drawSkip() {
     const since = this.t - this.said;
@@ -91353,6 +91411,7 @@ const Intro = {
 function introDraw(g, t, w, h) {
   IntroArt.draw(g, t, w, h, DPR, { spoilers: false });
 }
+addEventListener('visibilitychange', () => Intro.hidden());
 
 /* --------------------------------- start ---------------------------------- */
 Intro.boot();             // first, while the address still says how this tab came (INTRO)
