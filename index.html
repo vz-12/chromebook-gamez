@@ -60232,6 +60232,652 @@ function hlWrEquipTap(id) {
 /* ===================== end of ALL HALLOWS · SKINS — the adapter ===================== */
 
 /* ===========================================================================
+   MOTION — smooth physics for the art
+   The engine the signature skins move on (BEETLE-PLAN.md), and anything else
+   that wants it. THE KIT's rig and verlet take one step a frame, clamped at
+   1/30 s: a stiff spring rings or blows up when the frame rate drops, a rope
+   is stiffer at 144 fps than at 30, and a fast hull drops its sparks in one
+   clump a frame. Nothing here does any of that.
+
+     SMOOTHING  moDecay: easing toward a value by half-life, which is what
+                `v += (to - v) * 0.1` means and the same at any frame rate.
+     SPRINGS    solved, not stepped: the closed form of the oscillator over
+                dt, so any stiffness is stable at any dt and moves the same at
+                30 fps as at 144. Tuned in hertz and a damping ratio.
+     BODIES     ropes, tails, a wyrm's segments: chains by follow-the-leader,
+                which cannot stretch or fold past their limit at any speed;
+                anything else by XPBD. Both on a fixed clock of small
+                substeps, so they move the same at any frame rate, and the
+                frame a body hangs off is swept across the substeps, so a hull
+                that jumps 20 px in a frame drags its rope through those 20 px
+                instead of yanking it.
+     PATHS      where the head has been, kept by distance rather than by
+                frame and laid on a curve between frames: read it back at any
+                distance behind the head, and segments follow the head exactly,
+                evenly spaced, at any speed.
+     EMITTERS   particles let out evenly through the frame, along the path the
+                source took in it, each pre-aged for the part of the frame it
+                missed: an unbroken trail behind a fast hull.
+     PARTICLES  a pool integrated in closed form for a steady push and drag,
+                so a spark goes as far at 30 fps as at 144.
+     FLOW       curl noise: a swirling wind with no sources or sinks, for fire,
+                smoke and ash to ride.
+     CURVES     Catmull-Rom through points as Béziers, and a tapered ribbon
+                on it: smooth at any zoom, where hlDrawRope draws a polyline.
+
+   Cosmetic only. Its randomness is Math.random and never simRnd, and nothing
+   in the simulation reads anything here, so determinism and lockstep are
+   untouched. It leans on TAU, clamp, lerp and ctx and nothing else, so a
+   bench or a test can load it on its own (scripts/motion.mjs does).
+=========================================================================== */
+
+const MO = {
+  sub: 1 / 240,      // a body's substep, the same at any frame rate: 4 a frame at 60 fps, 8 at 30
+  maxDt: 0.1,        // a longer frame (a stall, a tab coming back) is simulated as this long
+  partMax: 3000,     // the particle pool's cap; past it new ones are refused
+  t: 0               // the particles' clock, which the flow drifts on
+};
+const moWrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+/* =============================== SMOOTHING ================================ */
+/* Eases v toward `to`, closing half the gap every `half` seconds. */
+const moDecay = (v, to, half, dt) => half > 0 ? to + (v - to) * Math.pow(0.5, dt / half) : to;
+// the same for an angle, the short way round
+const moDecayAng = (a, to, half, dt) =>
+  a + moWrap(to - a) * (half > 0 ? 1 - Math.pow(0.5, dt / half) : 1);
+
+/* ================================ SPRINGS =================================
+   A damped spring toward .to. Tuned the way an animator thinks of one:
+     hz    how fast it swings, in cycles a second
+     zeta  how it settles: 1 lands without overshoot, 0.3 wobbles, 0 rings
+           for ever, above 1 is sluggish
+   moSpring(v, hz, zeta)        .v, .vel, .to; .step(dt) → .v
+   moSpringAng(a, hz, zeta)     the same for an angle, always the short way
+   moSpring2(x, y, hz, zeta)    .x and .y springs; .step(dt, tx, ty)
+   .kick(v) adds velocity, .snap(v) puts it there at rest, .tune(hz, zeta).
+=========================================================================== */
+/* One step of the oscillator, exactly: y = v - to solves
+   y'' + 2ζω y' + ω² y = 0 over dt, in whichever of its three forms ζ asks for. */
+function moOsc(s, dt) {
+  const w = TAU * s.hz, z = s.zeta, y0 = s.v - s.to, v0 = s.vel;
+  if (!(dt > 0)) return;
+  if (!(w > 0)) { s.v += v0 * dt; return; }          // no pull: it coasts
+  let y, v;
+  if (z < 0.9999) {
+    const a = z * w, wd = w * Math.sqrt(1 - z * z), e = Math.exp(-a * dt);
+    const c = Math.cos(wd * dt), sn = Math.sin(wd * dt), c2 = (v0 + a * y0) / wd;
+    y = e * (y0 * c + c2 * sn);
+    v = e * ((c2 * wd - a * y0) * c - (y0 * wd + a * c2) * sn);
+  } else if (z <= 1.0001) {
+    const e = Math.exp(-w * dt), c2 = v0 + w * y0;
+    y = (y0 + c2 * dt) * e;
+    v = (c2 - w * (y0 + c2 * dt)) * e;
+  } else {
+    const r = w * Math.sqrt(z * z - 1), r1 = -z * w + r, r2 = -z * w - r;
+    const c2 = (v0 - r1 * y0) / (r2 - r1), c1 = y0 - c2, e1 = Math.exp(r1 * dt), e2 = Math.exp(r2 * dt);
+    y = c1 * e1 + c2 * e2;
+    v = r1 * c1 * e1 + r2 * c2 * e2;
+  }
+  s.v = s.to + y; s.vel = v;
+}
+function moSpring(v = 0, hz = 4, zeta = 1) {
+  return {
+    v, vel: 0, to: v, hz, zeta,
+    step(dt) { moOsc(this, dt); return this.v; },
+    kick(i) { this.vel += i; return this; },
+    snap(v) { this.v = this.to = v; this.vel = 0; return this; },
+    tune(hz, zeta) { this.hz = hz; if (zeta !== undefined) this.zeta = zeta; return this; }
+  };
+}
+function moSpringAng(a = 0, hz = 4, zeta = 1) {
+  const s = moSpring(a, hz, zeta);
+  s.step = function (dt) { this.to = this.v + moWrap(this.to - this.v); moOsc(this, dt); return this.v; };
+  return s;
+}
+function moSpring2(x = 0, y = 0, hz = 4, zeta = 1) {
+  const s = { x: moSpring(x, hz, zeta), y: moSpring(y, hz, zeta) };
+  s.step = (dt, tx, ty) => {
+    if (tx !== undefined) { s.x.to = tx; s.y.to = ty; }
+    s.x.step(dt); s.y.step(dt);
+    return s;
+  };
+  s.kick = (vx, vy) => { s.x.vel += vx; s.y.vel += vy; return s; };
+  s.snap = (x, y) => { s.x.snap(x); s.y.snap(y); return s; };
+  s.tune = (hz, zeta) => { s.x.tune(hz, zeta); s.y.tune(hz, zeta); return s; };
+  return s;
+}
+
+/* ================================= BODIES =================================
+   Two kinds, both stepped on a fixed clock of small substeps (MO.sub) and
+   shown where they are now.
+
+   CHAINS (moRope): a rope, a tail, an antenna, a wyrm's segments. Solved by
+   dynamic follow-the-leader: each substep every point coasts on its
+   velocity, then each link is laid back to its exact length from the one
+   before it, root to tip, its angle held within the bend limit; the
+   velocity is what the point did, less some of the pull its follower put on
+   it, which is what keeps the swing alive instead of dead. A chain cannot
+   stretch and cannot fold past its limit: whipped round at 1000 px/s it is
+   still exactly its length.
+
+   SOFT BODIES (moBody + moPoint + moLink): anything else, solved by XPBD.
+   Each substep moves the points and pulls every link toward its length
+   iters times (4); a link's give is a compliance (0 rigid, 1e-5 a little
+   stretch, 1e-3 elastic). Something thrown about very hard holds its shape
+   better on a smaller sub or with more iters. A chain can carry extra
+   links too, and they are solved before it is laid.
+
+   THE CLOCK. Every substep is the same length whatever the frame rate, and
+   the part of a frame too short for another one is carried to the next. So
+   a body run at 30 fps, at 144, or on a clock that keeps dropping frames
+   takes exactly the same steps and moves the same way. The simulation runs
+   up to one substep behind the frame; what is shown in x and y is it
+   carried on to now, with the pinned points exactly on the frame and a
+   chain laid again at its exact length.
+
+   Both hang off a frame (a hull, a bone): moFrame says where it is now, and
+   each substep finds it where it was at that moment, between where it was
+   last frame and where it is now. A hull that jumps 20 px in a frame drags
+   its rope through those 20 px instead of yanking it.
+
+     moBody({ x, y, ang, gx, gy, drag, sub, iters, wind })
+                              gravity in px/s², drag per second (how fast it
+                              loses its swing), wind(x, y, t) → [ax, ay]
+     moPoint(b, x, y, w)      a point; w is 1 / mass, 0 holds it still
+     moPin(b, i, lx, ly)      point i rides the frame at (lx, ly), in the
+                              frame's terms (x forward); no lx: where it is now
+     moUnpin(b, i, w)         lets it go
+     moLink(b, i, j, o)       o.rest (default: as they are now), o.comp,
+                              o.kind 0 exactly | 1 at least | -1 at most, o.tear
+     moRope(n, seg, o)        a chain of n points seg apart, its root pinned
+                              at (o.lx, o.ly) and laid along o.lay (π, straight
+                              back); o.bend the most any joint may bend
+                              (radians), o.rootBend the most the first link may
+                              turn off o.lay (o.bend), o.follow how much swing
+                              the follow-the-leader keeps (0.6). o.comp makes
+                              it a soft body of links instead, which stretches.
+     moFrame(b, x, y, ang)    the frame is here now
+     moPlace(b, x, y, ang)    puts the whole body there at once, at rest
+     moStep(b, dt)            advances it by dt
+     moKick(b, x, y, r, vx, vy)   a shove to every point within r
+     moCollide(b, x, y, r)    a circle its points stay out of, for the next step
+   The points are b.p, each { x, y, vx, vy, w, pin }: draw them with moSmooth
+   or moRibbon.
+=========================================================================== */
+function moBody(o = {}) {
+  const x = o.x || 0, y = o.y || 0, ang = o.ang || 0;
+  return { p: [], c: [], circles: [], gx: o.gx || 0, gy: o.gy || 0,
+           drag: o.drag === undefined ? 1.5 : o.drag, sub: o.sub || MO.sub, iters: o.iters || 4,
+           wind: o.wind || null, t: 0, acc: 0, chain: null,
+           at: { x, y, ang },          // the frame, as of the last moStep
+           to: { x, y, ang } };        // where it is now
+}
+function moPoint(b, x, y, w = 1) {
+  b.p.push({ x, y, sx: x, sy: y, px: x, py: y, vx: 0, vy: 0, w, pin: false, lx: 0, ly: 0, cx: 0, cy: 0 });
+  return b.p.length - 1;
+}
+function moPin(b, i, lx, ly) {
+  const q = b.p[i];
+  if (lx === undefined) {
+    const F = b.to, ca = Math.cos(F.ang), sa = Math.sin(F.ang), dx = q.x - F.x, dy = q.y - F.y;
+    lx = dx * ca + dy * sa; ly = -dx * sa + dy * ca;
+  }
+  q.pin = true; q.w = 0; q.lx = lx; q.ly = ly || 0;
+  return b;
+}
+function moUnpin(b, i, w = 1) { const q = b.p[i]; q.pin = false; q.w = w; return b; }
+function moLink(b, i, j, o = {}) {
+  const a = b.p[i], e = b.p[j];
+  b.c.push({ i, j, rest: o.rest === undefined ? Math.hypot(e.x - a.x, e.y - a.y) : o.rest,
+             comp: o.comp || 0, kind: o.kind || 0, tear: o.tear || 0, alive: true, lam: 0 });
+  return b.c.length - 1;
+}
+function moRope(n, seg, o = {}) {
+  const b = moBody(o), F = b.to, lx = o.lx || 0, ly = o.ly || 0;
+  const ca0 = Math.cos(F.ang), sa0 = Math.sin(F.ang);
+  const sx = F.x + lx * ca0 - ly * sa0, sy = F.y + lx * sa0 + ly * ca0;
+  const lay = o.lay === undefined ? Math.PI : o.lay, ca = Math.cos(F.ang + lay), sa = Math.sin(F.ang + lay);
+  for (let i = 0; i < n; i++) moPoint(b, sx + ca * seg * i, sy + sa * seg * i, o.w ? o.w(i) : 1);
+  if (o.pinHead !== false) moPin(b, 0, lx, ly);
+  if (o.comp) {
+    // soft: links that give, and the bend held by an at-least link across each pair
+    for (let i = 0; i < n - 1; i++) moLink(b, i, i + 1, { rest: seg, comp: o.comp, tear: o.tear });
+    if (o.bend !== undefined)
+      for (let i = 0; i < n - 2; i++)
+        moLink(b, i, i + 2, { rest: seg * Math.sqrt(2 + 2 * Math.cos(o.bend)), kind: 1, comp: o.bendComp });
+  } else {
+    const bend = o.bend === undefined ? Math.PI : o.bend;
+    b.chain = { seg, lay, bend, root: o.rootBend === undefined ? bend : o.rootBend,
+                follow: o.follow === undefined ? 0.6 : o.follow };
+  }
+  return b;
+}
+function moFrame(b, x, y, ang = b.to.ang) { b.to.x = x; b.to.y = y; b.to.ang = ang; return b; }
+/* A respawn, a teleport: every point keeps its place relative to the frame
+   and the frame jumps, at rest. */
+function moPlace(b, x, y, ang = b.to.ang) {
+  const A = b.to, ca0 = Math.cos(A.ang), sa0 = Math.sin(A.ang), ca = Math.cos(ang), sa = Math.sin(ang);
+  for (const q of b.p) {
+    const dx = q.x - A.x, dy = q.y - A.y, lx = dx * ca0 + dy * sa0, ly = -dx * sa0 + dy * ca0;
+    q.x = q.sx = q.px = x + lx * ca - ly * sa; q.y = q.sy = q.py = y + lx * sa + ly * ca; q.vx = q.vy = 0;
+  }
+  b.at.x = b.to.x = x; b.at.y = b.to.y = y; b.at.ang = b.to.ang = ang;
+  b.acc = 0;
+  return b;
+}
+function moKick(b, x, y, r, vx, vy) {
+  for (const q of b.p) {
+    if (q.w === 0) continue;
+    const d = Math.hypot(q.x - x, q.y - y);
+    if (d < r) { const k = 1 - d / r; q.vx += vx * k; q.vy += vy * k; }
+  }
+  return b;
+}
+function moCollide(b, x, y, r) { b.circles.push({ x, y, r }); return b; }
+/* Lays a chain root to tip: each point at its link's length from the one
+   before, turned no further than the bend allows. Records how far each
+   point was moved, for the velocity. */
+function moChainLay(b, fa) {
+  const ch = b.chain, pts = b.p;
+  let px = pts[0].x, py = pts[0].y, pa = fa + ch.lay;
+  for (let i = 1; i < pts.length; i++) {
+    const q = pts[i], lim = i === 1 ? ch.root : ch.bend;
+    let a = Math.atan2(q.y - py, q.x - px);
+    if (lim < Math.PI) {
+      const d = moWrap(a - pa);
+      if (d > lim) a = pa + lim; else if (d < -lim) a = pa - lim;
+    }
+    const nx = px + Math.cos(a) * ch.seg, ny = py + Math.sin(a) * ch.seg;
+    q.cx = nx - q.x; q.cy = ny - q.y;
+    q.x = nx; q.y = ny;
+    px = nx; py = ny; pa = a;
+  }
+}
+/* One substep of h with the frame at (fx, fy, fa). */
+function moSub(b, h, fx, fy, fa) {
+  const ih = 1 / h, ca = Math.cos(fa), sa = Math.sin(fa), keep = Math.exp(-b.drag * h), ch = b.chain;
+  // move: the pinned ride the frame, the rest coast on their velocity
+  for (const q of b.p) {
+    q.px = q.x; q.py = q.y; q.cx = q.cy = 0;
+    if (q.pin) { q.x = fx + q.lx * ca - q.ly * sa; q.y = fy + q.lx * sa + q.ly * ca; continue; }
+    if (q.w === 0) continue;
+    let ax = b.gx, ay = b.gy;
+    if (b.wind) { const f = b.wind(q.x, q.y, b.t); ax += f[0]; ay += f[1]; }
+    q.vx = q.vx * keep + ax * h; q.vy = q.vy * keep + ay * h;
+    q.x += q.vx * h; q.y += q.vy * h;
+  }
+  // pull the links back
+  for (const c of b.c) c.lam = 0;
+  for (let it = 0; it < b.iters; it++) {
+    for (const c of b.c) {
+      if (!c.alive) continue;
+      const a = b.p[c.i], e = b.p[c.j], W = a.w + e.w;
+      if (W <= 0) continue;
+      const dx = a.x - e.x, dy = a.y - e.y, l = Math.hypot(dx, dy);
+      if (l < 1e-9) continue;
+      if (c.tear && l > c.rest * c.tear) { c.alive = false; continue; }
+      const C = l - c.rest;
+      if ((c.kind > 0 && C >= 0) || (c.kind < 0 && C <= 0)) continue;
+      const al = c.comp * ih * ih, dl = (-C - al * c.lam) / (W + al);
+      c.lam += dl;
+      const nx = dx / l * dl, ny = dy / l * dl;
+      a.x += nx * a.w; a.y += ny * a.w;
+      e.x -= nx * e.w; e.y -= ny * e.w;
+    }
+  }
+  for (const k of b.circles) for (const q of b.p) {
+    if (q.w === 0) continue;
+    const dx = q.x - k.x, dy = q.y - k.y, l = Math.hypot(dx, dy);
+    if (l < k.r && l > 1e-9) { q.x = k.x + dx / l * k.r; q.y = k.y + dy / l * k.r; }
+  }
+  if (ch) moChainLay(b, fa);
+  // the velocity is what the points did; a chain's, less some of its follower's pull
+  for (let i = 0; i < b.p.length; i++) {
+    const q = b.p[i];
+    q.vx = (q.x - q.px) * ih; q.vy = (q.y - q.py) * ih;
+    if (ch && i + 1 < b.p.length && !q.pin) {
+      const r = b.p[i + 1];
+      q.vx -= r.cx * ih * ch.follow; q.vy -= r.cy * ih * ch.follow;
+    }
+  }
+}
+function moStep(b, dt) {
+  dt = Math.min(dt, MO.maxDt);
+  if (!(dt > 0)) return b;
+  const h = b.sub, A = b.at, B = b.to, turn = moWrap(B.ang - A.ang), n = Math.floor((b.acc + dt) / h + 1e-9);
+  for (const q of b.p) { q.x = q.sx; q.y = q.sy; }       // back to the simulation's own state
+  for (let s = 1; s <= n; s++) {
+    // this substep's moment, as a share of the way through the frame
+    const u = clamp((s * h - b.acc) / dt, 0, 1);
+    b.t += h;
+    moSub(b, h, lerp(A.x, B.x, u), lerp(A.y, B.y, u), A.ang + turn * u);
+  }
+  b.acc = Math.max(0, b.acc + dt - n * h);
+  /* Keep the simulation's state, and show it carried on to now by one short
+     step: the pinned exactly on the frame, the links and the chain held. */
+  for (const q of b.p) { q.sx = q.x; q.sy = q.y; q.svx = q.vx; q.svy = q.vy; }
+  if (b.acc > 1e-6) {
+    const t = b.t;
+    b.t += b.acc;
+    moSub(b, b.acc, B.x, B.y, B.ang);
+    b.t = t;
+    for (const q of b.p) { q.vx = q.svx; q.vy = q.svy; }
+  }
+  A.x = B.x; A.y = B.y; A.ang = B.ang;
+  b.circles.length = 0;
+  return b;
+}
+
+/* ================================= PATHS ==================================
+   Where the head has been, sampled every `gap` px of distance travelled, so
+   it can be read back at any distance behind the head: 30 px back is 30 px
+   back along the route actually flown, at any speed and frame rate. Between
+   frames the head is taken to have moved on an arc (bent as much as its last
+   two moves say it was turning), not a straight chord, so a hard turn at
+   30 fps, or across a dropped frame, still lays down a curve.
+
+     moPath({ gap, keep })        a sample every gap px (2), keep px of it (600)
+     moPathReset(p, x, y, ang)    starts it at (x, y), laid straight behind,
+                                  facing ang: the first frame, a respawn
+     moPathMove(p, x, y)          the head is here now
+     moPathAt(p, d, out)          { x, y, ang } d px back; ang faces the way
+                                  it was flown. Past what is kept, the path
+                                  carries on straight.
+=========================================================================== */
+function moPath(o = {}) {
+  return { gap: o.gap || 2, keep: o.keep || 600, xs: [], ys: [], ss: [], len: 0, carry: 0,
+           hx: 0, hy: 0, qx: 0, qy: 0, live: false };
+}
+function moPathReset(p, x, y, ang = 0) {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  p.xs.length = p.ys.length = p.ss.length = 0;
+  p.len = 0; p.carry = 0;
+  for (let s = Math.ceil(p.keep / p.gap) * p.gap; s >= 0; s -= p.gap) {
+    p.xs.push(x - ca * s); p.ys.push(y - sa * s); p.ss.push(-s);
+  }
+  p.hx = x; p.hy = y; p.qx = x - ca * p.gap; p.qy = y - sa * p.gap;
+  p.live = true;
+  return p;
+}
+function moPathMove(p, x, y) {
+  if (!p.live) return moPathReset(p, x, y, 0);
+  const dx = x - p.hx, dy = y - p.hy, d = Math.hypot(dx, dy);
+  if (d < 1e-6) return p;
+  /* The arc this move spans, at the curvature it shares with the last one:
+     two chords of a circle meet at half the sum of the arcs they cut, so the
+     turn between them says how much this one bends, whatever either took in
+     time. Laid as a cubic leaving and arriving tangent to that arc, which is
+     the arc itself to well under a hundredth of a pixel. */
+  const c1 = Math.hypot(p.hx - p.qx, p.hy - p.qy), ac = Math.atan2(dy, dx);
+  const th = c1 > 1e-6 ? clamp(moWrap(ac - Math.atan2(p.hy - p.qy, p.hx - p.qx)) * 2 * d / (c1 + d), -2.5, 2.5) : 0;
+  const m = Math.abs(th) > 1e-6 ? 4 * Math.tan(th / 4) * d / (2 * Math.sin(th / 2)) : d;
+  const t0x = Math.cos(ac - th / 2) * m, t0y = Math.sin(ac - th / 2) * m;
+  const t1x = Math.cos(ac + th / 2) * m, t1y = Math.sin(ac + th / 2) * m;
+  const steps = Math.max(1, Math.ceil(d / (p.gap * 0.5)));
+  let ox = p.hx, oy = p.hy;
+  for (let k = 1; k <= steps; k++) {
+    const u = k / steps, u2 = u * u, u3 = u2 * u;
+    const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+    const nx = h00 * p.hx + h10 * t0x + h01 * x + h11 * t1x;
+    const ny = h00 * p.hy + h10 * t0y + h01 * y + h11 * t1y;
+    let L = Math.hypot(nx - ox, ny - oy);
+    while (p.carry + L >= p.gap && L > 0) {
+      const need = p.gap - p.carry, f = need / L;
+      ox += (nx - ox) * f; oy += (ny - oy) * f;
+      p.len += need; L -= need; p.carry = 0;
+      p.xs.push(ox); p.ys.push(oy); p.ss.push(p.len);
+    }
+    p.carry += L; p.len += L;
+    ox = nx; oy = ny;
+  }
+  p.qx = p.hx; p.qy = p.hy; p.hx = x; p.hy = y;
+  // forget what is past keeping, in batches
+  let drop = 0;
+  while (drop < p.ss.length - 2 && p.ss[drop] < p.len - p.keep - p.gap * 2) drop++;
+  if (drop > 32) { p.xs.splice(0, drop); p.ys.splice(0, drop); p.ss.splice(0, drop); }
+  return p;
+}
+function moPathAt(p, d, out = {}) {
+  const S = p.len - Math.max(0, d), n = p.ss.length;
+  if (!n || S >= p.ss[n - 1]) {
+    // between the newest sample and the head itself
+    const x0 = n ? p.xs[n - 1] : p.qx, y0 = n ? p.ys[n - 1] : p.qy, s0 = n ? p.ss[n - 1] : p.len - p.gap;
+    const span = p.len - s0, f = span > 1e-9 ? clamp((S - s0) / span, 0, 1) : 1;
+    out.x = lerp(x0, p.hx, f); out.y = lerp(y0, p.hy, f);
+    const ax = n > 1 ? p.xs[n - 2] : x0, ay = n > 1 ? p.ys[n - 2] : y0;
+    out.ang = span > 0.05 ? Math.atan2(p.hy - y0, p.hx - x0) : Math.atan2(y0 - ay, x0 - ax);
+    return out;
+  }
+  if (S <= p.ss[0] || n < 2) {
+    // older than anything kept: carry on straight
+    const a = n > 1 ? Math.atan2(p.ys[1] - p.ys[0], p.xs[1] - p.xs[0]) : 0, back = p.ss[0] - S;
+    out.x = p.xs[0] - Math.cos(a) * back; out.y = p.ys[0] - Math.sin(a) * back; out.ang = a;
+    return out;
+  }
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (p.ss[m] <= S) lo = m; else hi = m; }
+  const f = (S - p.ss[lo]) / ((p.ss[hi] - p.ss[lo]) || 1);
+  // a Catmull-Rom through the samples either side, so the angle turns smoothly
+  const i0 = Math.max(0, lo - 1), i3 = Math.min(n - 1, hi + 1);
+  out.x = moCR(p.xs[i0], p.xs[lo], p.xs[hi], p.xs[i3], f);
+  out.y = moCR(p.ys[i0], p.ys[lo], p.ys[hi], p.ys[i3], f);
+  out.ang = Math.atan2(moCRd(p.ys[i0], p.ys[lo], p.ys[hi], p.ys[i3], f),
+                       moCRd(p.xs[i0], p.xs[lo], p.xs[hi], p.xs[i3], f));
+  return out;
+}
+const moCR = (a, b, c, d, t) =>
+  0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+const moCRd = (a, b, c, d, t) =>
+  0.5 * ((c - a) + 2 * (2 * a - 5 * b + 4 * c - d) * t + 3 * (3 * b - a - 3 * c + d) * t * t);
+
+/* =============================== EMITTERS =================================
+   A source that lets particles out at `rate` a second, spread evenly through
+   the frame along the path the source took in it. At 1200 px/s and 30 fps an
+   emitter run once a frame leaves clumps 40 px apart; this one leaves an
+   even line.
+
+     moEmitter(rate)                   .rate may change any time; .on pauses it
+     moEmit(em, dt, x, y, ang, make)   make(x, y, ang, age, u) for each let out:
+                                       where the source was, and how long ago
+                                       in this frame (hand age to moPart). The
+                                       first call only says where it starts.
+     moEmitReset(em)                   the next call starts again from wherever
+                                       the source is then, with no line laid
+                                       from where it was (a teleport)
+=========================================================================== */
+function moEmitter(rate = 60) { return { rate, acc: Math.random(), on: true, x: 0, y: 0, ang: 0, live: false }; }
+function moEmitReset(em) { em.live = false; return em; }
+function moEmit(em, dt, x, y, ang, make) {
+  if (!em.live) { em.x = x; em.y = y; em.ang = ang; em.live = true; return 0; }
+  const due = em.on && dt > 0 ? em.rate * dt : 0, before = em.acc, n = Math.floor(before + due);
+  const turn = moWrap(ang - em.ang);
+  for (let k = 1; k <= n; k++) {
+    const u = (k - before) / due;
+    make(lerp(em.x, x, u), lerp(em.y, y, u), em.ang + turn * u, (1 - u) * dt, u);
+  }
+  em.acc = before + due - n;
+  em.x = x; em.y = y; em.ang = ang;
+  return n;
+}
+
+/* =============================== PARTICLES ================================
+   The art's own pool. A particle is pushed by a steady acceleration (ax, ay)
+   and dragged toward the air around it, which is the wind (wx, wy) plus the
+   flow (FLOW, below) at its strength; over each step that is solved exactly,
+   so it goes as far at 30 fps as at 144. Anything else the art puts on it
+   rides along untouched (colour, kind, a seed for its shape).
+
+     moPart(o)           { x, y, vx, vy, life, ax, ay (px/s²), wx, wy (px/s),
+                           drag (per second), flow (px/s of swirl), fs (eddy
+                           size, px), r, grow (px/s), rot, spin, layer, tick }
+                           o.age pre-ages it (from moEmit); returns it, or
+                           null at the cap
+     moPartsStep(dt)     every particle; tick(q, dt) runs after its own step
+     moPartsDraw(layer, fn)   fn(q, k) for each on that layer, k = life left 1 → 0
+     moPartsClear()
+=========================================================================== */
+const moParts = [];
+function moPartStep(q, dt) {
+  let ux = q.wx, uy = q.wy;
+  if (q.flow) { const f = moFlow(q.x, q.y, MO.t, q.fs); ux += f[0] * q.flow; uy += f[1] * q.flow; }
+  const k = q.drag;
+  if (k > 1e-6) {
+    // v → u + a/k, exponentially; x is its integral
+    const e = Math.exp(-k * dt), tx = ux + q.ax / k, ty = uy + q.ay / k, f = (1 - e) / k;
+    q.x += tx * dt + (q.vx - tx) * f; q.y += ty * dt + (q.vy - ty) * f;
+    q.vx = tx + (q.vx - tx) * e; q.vy = ty + (q.vy - ty) * e;
+  } else {
+    q.x += (q.vx + q.ax * dt * 0.5) * dt; q.y += (q.vy + q.ay * dt * 0.5) * dt;
+    q.vx += q.ax * dt; q.vy += q.ay * dt;
+  }
+  q.r = Math.max(0, q.r + q.grow * dt);
+  q.rot += q.spin * dt;
+  q.age += dt; q.life -= dt;
+  if (q.tick) q.tick(q, dt);
+}
+function moPart(o) {
+  if (moParts.length >= MO.partMax) return null;
+  const q = { x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0, wx: 0, wy: 0, drag: 0, flow: 0, fs: 60,
+              life: 1, max: 0, r: 1, grow: 0, rot: 0, spin: 0, layer: 'glow', tick: null,
+              seed: Math.random() * 1000 };
+  Object.assign(q, o);
+  if (!q.max) q.max = q.life;
+  const pre = o.age > 0 ? o.age : 0;
+  q.age = 0;
+  if (pre) moPartStep(q, pre);
+  if (q.life <= 0) return null;
+  moParts.push(q);
+  return q;
+}
+function moPartsStep(dt) {
+  dt = Math.min(dt, MO.maxDt);
+  if (!(dt > 0)) return;
+  MO.t += dt;
+  let j = 0;
+  for (let i = 0; i < moParts.length; i++) {
+    const q = moParts[i];
+    moPartStep(q, dt);
+    if (q.life > 0) moParts[j++] = q;        // kept in order: the draw order holds still
+  }
+  moParts.length = j;
+}
+function moPartsDraw(layer, fn) {
+  for (let i = 0; i < moParts.length; i++) {
+    const q = moParts[i];
+    if (q.layer === layer) fn(q, clamp(q.life / q.max, 0, 1));
+  }
+}
+function moPartsClear() { moParts.length = 0; }
+
+/* ================================== FLOW ==================================
+   Curl noise: the curl of a smooth noise field, which swirls and eddies and
+   has no sources or sinks, so what rides it curls and never bunches up or
+   thins out. moFlow(x, y, t, scale) → [vx, vy], roughly unit length, scale
+   the size of the eddies in px. The array is reused: read it straight away.
+=========================================================================== */
+const moHash2 = (i, j) => { const s = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return s - Math.floor(s); };
+/* value noise and its gradient, into g = [n, ∂x, ∂y] */
+function moNoise2(x, y, g) {
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+  const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10), v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+  const du = 30 * fx * fx * (fx * (fx - 2) + 1), dv = 30 * fy * fy * (fy * (fy - 2) + 1);
+  const a = moHash2(i, j), b = moHash2(i + 1, j), c = moHash2(i, j + 1), d = moHash2(i + 1, j + 1);
+  const k = a - b - c + d;
+  g[0] = a + (b - a) * u + (c - a) * v + k * u * v;
+  g[1] = du * ((b - a) + k * v);
+  g[2] = dv * ((c - a) + k * u);
+  return g;
+}
+const _moG = [0, 0, 0], _moF = [0, 0];
+function moFlow(x, y, t = MO.t, scale = 60) {
+  const s = 1 / scale;
+  // two octaves, drifting different ways, so the eddies change as well as move
+  moNoise2(x * s + t * 0.11, y * s - t * 0.17, _moG);
+  let gx = _moG[1], gy = _moG[2];
+  moNoise2(x * s * 2.3 - t * 0.23 + 19.1, y * s * 2.3 + t * 0.13 + 7.7, _moG);
+  gx += _moG[1] * 0.8; gy += _moG[2] * 0.8;
+  _moF[0] = gy; _moF[1] = -gx;
+  return _moF;
+}
+
+/* ================================= CURVES =================================
+   Smooth lines through points. A point is anything with .x and .y: a body's
+   points, path samples, plain { x, y }.
+
+     moSmooth(pts, closed, tension, move)   adds a curve through every point
+                              to ctx, as Béziers, so it stays smooth at any
+                              zoom (tension 1 is Catmull-Rom; move false
+                              carries on from the current point)
+     moSample(pts, per, closed)   the same curve as points, per a span
+     moRibbon(pts, w0, w1, o) adds a band along the curve to ctx, w0 wide at
+                              the first point and w1 at the last: o.ease(u)
+                              shapes the taper, o.cap 'round' rounds the ends,
+                              o.per samples a span (6). Returns the centreline,
+                              each sample with its tangent (tx, ty), half
+                              width (w) and how far along it is (u).
+=========================================================================== */
+function moSmooth(pts, closed = false, tension = 1, move = true) {
+  const n = pts.length;
+  if (n < 2) return;
+  const P = i => pts[closed ? (i + n) % n : clamp(i, 0, n - 1)], k = tension / 6;
+  if (move) ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0, last = closed ? n : n - 1; i < last; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    ctx.bezierCurveTo(p1.x + (p2.x - p0.x) * k, p1.y + (p2.y - p0.y) * k,
+                      p2.x - (p3.x - p1.x) * k, p2.y - (p3.y - p1.y) * k, p2.x, p2.y);
+  }
+  if (closed) ctx.closePath();
+}
+function moSample(pts, per = 6, closed = false) {
+  const n = pts.length, out = [];
+  if (n < 2) { for (const q of pts) out.push({ x: q.x, y: q.y }); return out; }
+  const P = i => pts[closed ? (i + n) % n : clamp(i, 0, n - 1)];
+  for (let i = 0, spans = closed ? n : n - 1; i < spans; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    for (let k = 0; k < per; k++) {
+      const t = k / per;
+      out.push({ x: moCR(p0.x, p1.x, p2.x, p3.x, t), y: moCR(p0.y, p1.y, p2.y, p3.y, t) });
+    }
+  }
+  if (!closed) out.push({ x: pts[n - 1].x, y: pts[n - 1].y });
+  return out;
+}
+function moRibbon(pts, w0, w1, o = {}) {
+  const C = moSample(pts, o.per || 6, false), m = C.length;
+  if (m < 2) return C;
+  let tot = 0;
+  C[0].s = 0;
+  for (let i = 1; i < m; i++) C[i].s = tot += Math.hypot(C[i].x - C[i - 1].x, C[i].y - C[i - 1].y);
+  const L = [], R = [];
+  for (let i = 0; i < m; i++) {
+    const a = C[Math.max(0, i - 1)], b = C[Math.min(m - 1, i + 1)], c = C[i];
+    let tx = b.x - a.x, ty = b.y - a.y;
+    const tl = Math.hypot(tx, ty) || 1;
+    tx /= tl; ty /= tl;
+    c.u = tot > 0 ? c.s / tot : i / (m - 1);
+    c.tx = tx; c.ty = ty; c.w = Math.max(0, lerp(w0, w1, o.ease ? o.ease(c.u) : c.u) / 2);
+    L.push({ x: c.x - ty * c.w, y: c.y + tx * c.w });
+    R.push({ x: c.x + ty * c.w, y: c.y - tx * c.w });
+  }
+  const round = o.cap === 'round', e = C[m - 1], s = C[0];
+  ctx.beginPath();
+  moSmooth(L, false, 1, true);
+  if (round && e.w > 0.01) {
+    const a = Math.atan2(e.ty, e.tx);
+    ctx.arc(e.x, e.y, e.w, a + Math.PI / 2, a - Math.PI / 2, true);
+  } else ctx.lineTo(R[m - 1].x, R[m - 1].y);
+  R.reverse();
+  moSmooth(R, false, 1, false);
+  if (round && s.w > 0.01) {
+    const a = Math.atan2(s.ty, s.tx);
+    ctx.arc(s.x, s.y, s.w, a - Math.PI / 2, a - Math.PI * 1.5, true);
+  }
+  ctx.closePath();
+  return C;
+}
+/* ===================== end of MOTION ===================== */
+
+/* ===========================================================================
    ALL HALLOWS — BOOK I: THE LOST SOUL · ACT I
    The knock on the menu, the vigil under the floor, and THE PATCH: its four
    bodies, THE BACKLOG, and the first two quests.

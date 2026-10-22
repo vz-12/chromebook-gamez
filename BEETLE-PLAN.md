@@ -100,6 +100,19 @@ With every hook empty, the game must look exactly as it does today.
 Each step gets built, tested, committed on `beetle`, and then I stop and
 report. It ships to main only at the end.
 
+0. **MOTION** (done 22 Oct, user: "a better engine … smoother physics
+   motion"). A block in index.html after the wardrobe's adapter, `mo*`, with
+   its own test (`npm run test:motion`):
+   - springs solved exactly in hertz and damping
+   - chains by follow-the-leader (exact length and bend limit at any speed)
+     and soft bodies by XPBD, both on a fixed 1/240 s clock
+   - paths kept by distance and laid as arcs between frames, which is the
+     wyrm's body
+   - sub-frame emitters and closed-form particles
+   - curl-noise flow, for flames and ash
+   - Bézier curves and ribbons
+
+   Nothing calls it yet. The skin's art moves on it.
 1. **Concept board.** The head, mandibles (with the bite cycle), elytra and
    wings, segments, palette and flamethrower, as a still plus an animated
    sheet, for approval before anything is wired in.
