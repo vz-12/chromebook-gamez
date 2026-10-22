@@ -116,8 +116,9 @@ const pvpScripts = PVP_SCRIPTS.map(s => ({ name: s, code: readFileSync(join(SITE
 
 /* PvP's own Worker and its referee (the Match object, pvp/src/objects.js), on
    a SQLite D1, with two players signed in. An engine signed in as one of them
-   sends /api/pvp/match there, with that player's cookie; anything else goes
-   to the recorder as before. */
+   sends /api/pvp/match there, with that player's cookie, and each word to the
+   referee is written down with the page's clock (__ref: [op, when]); anything
+   else goes to the recorder as before. */
 const DB = makeD1();
 const PVP_ORIGIN = 'https://voidrunner-pvp.play101.workers.dev';
 const envPvp = { DB, SIGNUP: 'off', ROOM_STORE: 'voidrunner-pvp-rooms', ASSETS: { fetch: () => new Response('') } };
@@ -145,6 +146,7 @@ function referee(win, who) {
     if (path !== '/api/pvp/match' && !path.startsWith('/api/pvp/pilot?') && path !== '/api/pvp/watch' && path !== '/api/pvp/queue') return rec(u, init);
     win.__net.push('fetch ' + path);
     if (path === '/api/pvp/queue') (win.__queue = win.__queue || []).push(JSON.parse(init.body));
+    if (path === '/api/pvp/match') (win.__ref = win.__ref || []).push([JSON.parse(init.body).op, win.__wall]);
     return pvpWorker.fetch(new Request(PVP_ORIGIN + path, {
       method: init.method || 'GET', body: init.body,
       headers: Object.assign({}, init.headers, { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN }) }), envPvp);
@@ -251,7 +253,8 @@ const BOT = `
 const WATCH = `
   globalThis.__fp = new Map();
   globalThis.__log = { belt: null, phases: [], hits: [], room: 0, banned: [], offered: new Set(), shots: 0,
-                       wildMax: 0, wildClean: 0, standOut: 0, tales: 0 };
+                       wildMax: 0, wildClean: 0, standOut: 0, tales: 0,
+                       ot: { steps: 0, early: 0, narrow: 1e9, deep: 0, late: -1e9, rose: 0, held: null } };
   let __at = '';
   /* What a hit took is the health it left, read where the blow lands: a
      killing one meets Second Wind or a DEADMAN BRAKE (reviveOrDie), which
@@ -292,11 +295,25 @@ const WATCH = `
       else if (!e.hacked) wild++;
     }
     __log.wildMax = Math.max(__log.wildMax, wild);
+    // overtime: never before its time, the walls closing, and the health it holds only ever falling
+    if (m.ot && m.phase === 'fight') {
+      const o = __log.ot;
+      o.steps++;
+      if (m.t < PVP.OVERTIME.at) o.early++;
+      o.narrow = Math.min(o.narrow, arena.x1 - arena.x0);
+      // how far into overtime, and how far the walls are behind where its clock has them a second ago
+      const O = PVP.OVERTIME, A = PVP.maps.ARENA, into = m.t - O.at;
+      o.deep = Math.max(o.deep, into);
+      o.late = Math.max(o.late, (arena.x1 - arena.x0) - (A.w + (O.w - A.w) * Math.min(1, Math.max(0, into - 1) / O.close)));
+      if (m.held && o.held && o.held.round === m.round) for (const k of [0, 1]) o.rose = Math.max(o.rose, m.held[k] - o.held.hp[k]);
+      o.held = m.held ? { round: m.round, hp: m.held.slice() } : null;
+    }
     __log.tales = Math.max(__log.tales, Tales.lines.length);
     if (!m.infested && wild) __log.wildClean++;
     if (LS.tick % 30 === 0)
       __fp.set(LS.tick, JSON.stringify([simRngState, m.phase, m.round, m.score, m.owed, a.charId, a.x, a.y, a.hp, a.level,
-                                        b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length]));
+                                        b.charId, b.x, b.y, b.hp, b.level, enemies.length, bullets.length,
+                                        m.ot, arena.x0, arena.y0, arena.x1, arena.y1]));
   };`;
 /* Both machines, a frame at a time, until `done` (or the cap); drawn now and
    then. Every half second it lets the server's answers in (the referee). */
@@ -355,12 +372,18 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   H.run('PVP.frame()');                 // the host's room sees them ready, and starts the run
   ship(H, G);
   ok(H.run('state') === 'play' && G.run('state') === 'play', 'the host started it, and the header took the guest in');
+  const begun = [H, G].map(g => g.run('__wall'));     // each page's clock, as the run starts
   ok(H.run('simSeed') === G.run('simSeed'), 'one run: the same seed on both');
   ok(H.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && H.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]'
      && G.run('JSON.stringify(PVP.upsOf(0))') === '["u1"]' && G.run('JSON.stringify(PVP.upsOf(1))') === '["u2"]',
      'the hellos carried each player\'s own reward upgrades, so both machines deal from the same pools',
      [H.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])'), G.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
   for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  /* Overtime brought forward, on both machines alike (OVERTIME in rounds.js:
+     40 s, the walls in over 20), so this match sees it, in step on both. Six
+     seconds: two awake pilots can end a round inside twelve, and at twelve a
+     match of two such rounds (a random one, one run in several) never saw it. */
+  for (const g of [H, G]) g.run('globalThis.__otFile = Object.assign({}, PVP.OVERTIME); PVP.OVERTIME.at = 6; PVP.OVERTIME.close = 6;');
   ok(roomOf(H).hidden === true && roomOf(G).hidden === true, 'the waiting room steps aside');
   ok(H.run('pilotP(0).charId') === 'hacker' && H.run('pilotP(1).charId') === 'ember', 'the host flies its pilot, beside the guest\'s');
   ok(G.run('pilotP(0).charId') === 'hacker' && G.run('pilotP(1).charId') === 'ember', 'and the guest sees the same two');
@@ -400,13 +423,16 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const over = () => H.run('!!(RUN.pvp && RUN.pvp.phase === "over")') && G.run('!!(RUN.pvp && RUN.pvp.phase === "over")');
   try { frames = await play(H, G, ship, 60 * 900, over); }
   catch (e) { threw = e; }
+  const decided = [H, G].map(g => g.run('__wall'));   // and as it ends
   ok(!threw, 'a whole match, drawn on both, without an error', String(threw && threw.stack));
   ok(over(), 'and it came to an end', [frames, H.run('JSON.stringify(RUN.pvp && [RUN.pvp.phase, RUN.pvp.round, RUN.pvp.score, RUN.pvp.owed])'), H.run('state')]);
   const log = H.run('__log');
   const ph = log.phases, fights = ph.filter(p => p.phase === 'fight'), ends = ph.filter(p => p.phase === 'end');
   const last = ph[ph.length - 1];
+  const otLog = H.run('RUN.pvp.log.map(x => x.ot)');
   console.log(`    (${(frames / 60).toFixed(0)} s: ${fights.length} rounds, ${last.score.join('–')}, ${log.hits.length} hits, ` +
-              `${belt.infested ? 'infested, ' + log.wildMax + ' of the room\'s at most' : 'clean'}, ${log.offered.size} different cards dealt)`);
+              `${belt.infested ? 'infested, ' + log.wildMax + ' of the room\'s at most' : 'clean'}, ${log.offered.size} different cards dealt, ` +
+              `${otLog.filter(x => x).length} in overtime)`);
 
   // picks: three each, before anything else
   const firstPicks = ph.find(p => p.phase === 'picks');
@@ -455,6 +481,17 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(belt.infested ? log.wildMax > 0 : log.wildMax === 0, belt.infested ? 'infested: the room sent its own' : 'clean: the room sent nothing', log.wildMax);
   ok(log.wildClean === 0, 'never an enemy of the room\'s on a clean map', log.wildClean);
   ok(log.tales === 0, 'and not one FORGOTTEN TALE line queued, all match long', log.tales);
+  // overtime, brought forward: it came, on time, closed the walls in and held the health where it fell
+  ok(otLog.some(x => x) && log.ot.steps > 60, 'a round ran past its clock and went to overtime', [otLog, log.ot.steps]);
+  ok(log.ot.early === 0, 'never before its time', log.ot.early);
+  /* the walls closed in on overtime's clock, however long a round stayed in it: never more than a
+     second behind where the clock has them, and in by the time it had run a second or more. They
+     follow their mark as the game's arena always does (updateArena, easing in at 2.4 a second), so
+     they finish a few px short of a mark a second late (7 at a 6 s close): 2% of the way is allowed */
+  const travel = H.run('PVP.maps.ARENA.w - PVP.OVERTIME.w');
+  ok(log.ot.late <= 0.02 * travel && (log.ot.deep < 1.5 || log.ot.narrow < H.run('PVP.maps.ARENA.w') - 20), 'the walls closed in',
+     { narrow: Math.round(log.ot.narrow), late: +log.ot.late.toFixed(1), deep: +log.ot.deep.toFixed(1) });
+  ok(log.ot.rose <= 1e-9, 'and the health it held only ever fell', log.ot.rose);
 
   // the same game on both, start to finish
   const same = sameGame(H, G);
@@ -464,7 +501,18 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   const others = g => g.win.__net.filter(n => n !== 'fetch /api/pvp/match');
   ok(others(H).join() === 'fetch /api/turn' && others(G).join() === 'fetch /api/room?code=ABCD&as=guest',
      'and not one more request but the referee\'s', [others(H), others(G)]);
-  ok(H.win.__net.length > 10 && G.win.__net.length > 10, 'which heard from both all match long', [H.win.__net.length, G.win.__net.length]);
+  /* ...and heard from both all match long, however long that was: a playing
+     machine reports every five seconds (referee.js, EVERY). From the run's
+     start to its first report, between any two, and from its last to the
+     end, never half as long again: room for a slow answer, none for a
+     missed report. */
+  const EVERY = +pvpScripts.find(s => s.name === '/js/referee.js').code.match(/const EVERY = (\d+);/)[1];
+  const silences = (g, k) => {
+    const at = [begun[k], ...g.win.__ref.filter(([op, t]) => op === 'report' && t >= begun[k] && t <= decided[k]).map(r => r[1]), decided[k]];
+    return at.slice(1).map((t, i) => t - at[i]);
+  };
+  ok([H, G].every((g, k) => Math.max(...silences(g, k)) <= 1.5 * EVERY), 'which heard from both all match long',
+     [H, G].map((g, k) => silences(g, k).map(s => +(s / 1000).toFixed(1))));
 
   // the referee: both machines' fingerprints held up against each other, both results, one verdict
   await play(H, G, ship, 60 * 12, () => H.run('!!PVP.ref.verdict') && G.run('!!PVP.ref.verdict'));
@@ -498,6 +546,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      'the result screen is handed the outcome and the score, each from its own side', [sh && sh.outcome, sg && sg.outcome]);
   ok(sh.rounds.length === last.score[0] + last.score[1] && sh.rounds.every((rd, i) => rd.won === !sg.rounds[i].won && rd.left > 0 && rd.at > 0),
      'every round in order, the other side\'s the mirror of it', [sh.rounds, sg.rounds]);
+  ok(sh.rounds.every((rd, i) => rd.ot === otLog[i] && sg.rounds[i].ot === otLog[i]), 'and which of them went to overtime', [sh.rounds, otLog]);
   ok(sh.me.pilot === 'hacker' && sh.them.pilot === 'ember' && sg.me.pilot === 'ember' && sh.me.pilotName === 'THE HACKER'
      && sh.me.name === 'DUELIST' && sh.them.name === 'RIVAL' && /^#[0-9a-f]{6}$/.test(sh.me.col), 'both pilots, named and coloured', [sh.me, sh.them]);
   ok(sh.dealt[0] === sg.dealt[1] && sh.dealt[1] === sg.dealt[0] && sh.dealt[0] + sh.dealt[1] > 0 && sh.time > 0
@@ -634,7 +683,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(Math.abs(d1[0] - 0.75) < 0.03, 'one: about three in four', d1);
   ok(d2[0] === 1, 'two: every one', d2);
   ok(d0[1] === 7 && d1[1] === 7, 'and every sector comes up', [d0[1], d1[1]]);
-  const spawned = inf => r(`const m = RUN.pvp, was = m.infested; m.infested = ${inf}; m.spawnT = 0;
+  const spawned = inf => r(`const m = RUN.pvp, was = m.infested; m.infested = ${inf}; m.spawnT = 0; m.ot = false; m.t = 0; PVP.maps.open();
     for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
     let near = 0;
     for (let i = 0; i < 60 * 60; i++) {
@@ -646,7 +695,7 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
   ok(sc[0] === 0, 'a clean map sends nothing, a minute long', sc);
   ok(si[0] === 6 && si[1] === 0, 'an infested one sends, six at most, and never on top of a pilot', si);
   // the same room on a codex that has met nothing: each first meeting opens its page I (FORGOTTEN TALES), and not one says so over the duel
-  const met = r(`const m = RUN.pvp, was = [m.infested, Codex.e, Tales.p, Tales.lines]; m.infested = true; m.spawnT = 0;
+  const met = r(`const m = RUN.pvp, was = [m.infested, Codex.e, Tales.p, Tales.lines]; m.infested = true; m.spawnT = 0; m.t = 0; PVP.maps.open();
     Codex.e = new Set(); Tales.p = {}; Tales.lines = [];
     for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
     for (let i = 0; i < 60 * 60; i++) PVP.maps.spawn(m, 1 / 60);
@@ -657,6 +706,93 @@ const DUEL = { scale: 0.22, hitCap: 0.14, burstCap: 0.34, killHit: 0.14 };
      'a match the server made best of five (ranked, gold and up) is best of five');
   ok(r(`const was = PVP.hand.me.league; PVP.hand.me.league = { id: 'gold', bestOf: 5 }; const out = PVP.bestOf(); PVP.hand.me.league = was; out`) === 3,
      'and a match with a friend stays best of three whatever the league: the length is never this machine\'s own to say');
+
+  /* OVERTIME (rounds.js), a rule at a time, on the file's own numbers: a
+     round on, clean, both pilots fresh, stepped by the match's own tick. */
+  section('overtime: a round with a clock');
+  r(`Object.assign(PVP.OVERTIME, __otFile); globalThis.__O = PVP.OVERTIME;
+     __m.run = LS.run; __m.phase = 'fight'; __m.bestOf = 3; __m.ot = false; __m.held = null; __m.infested = false; __m.owed = [0, 0];
+     state = 'play'; PVP.maps.open(); __fresh();
+     globalThis.__tick = (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) { PVP.rounds.tick(dt); updateArena(dt); } };
+     globalThis.__blow = () => { __fresh(); PVP.turn(0, () => damageEnemy(__S(1), 20, false, 0, 0)); return pilotP(1).maxHp - __hp(1); };
+     globalThis.__hud = () => { const t = [], f = ctx.fillText; ctx.fillText = s => { t.push(String(s)); }; try { PVP.hud(); } finally { ctx.fillText = f; }
+                                return t.find(s => /OVERTIME/.test(s)) || ''; };`);
+  ok(r('[__O.at, __O.close, __O.w, __O.h, __O.ramp, __O.oneRound].join()') === '40,20,480,320,0.08,false',
+     'forty seconds to a round, then the walls close over twenty to 480 by 320, and every blow grows 8% a second', r('JSON.stringify(__O)'));
+  r('__m.t = 29; __tick(1)');
+  ok(r('__hud()') === '' && !r('PVP.overtime(__m)'), 'thirty seconds in: nothing said yet', r('__hud()'));
+  r('__m.t = 33.1; __tick(6)');
+  ok(r('__hud()') === 'OVERTIME IN 7S', 'from ten seconds out, the HUD counts it down', r('__hud()'));
+  const before = r('__m.t = 39; __tick(1); [PVP.overtime(__m), PVP.surge(), __m.ot, arena.x1 - arena.x0, arena.y1 - arena.y0, __blow()]');
+  ok(before[0] === false && before[1] === 1 && before[2] === false && before[3] === 1600 && before[4] === 1050,
+     'before its clock runs out a round is as it ever was: no overtime, every blow as it is, the arena whole', before);
+  const enters = r('__m.t = 39.9; __tick(12); [PVP.overtime(__m), __m.ot, bannerText, Math.abs(PVP.surge() - (1 + __O.ramp * (__m.t - __O.at))) < 1e-9]');
+  ok(enters[0] && enters[1] && enters[2] === 'OVERTIME   ·   THE WALLS CLOSE' && enters[3], 'at forty: OVERTIME, said, and the blows begin to grow', enters);
+  // the blow grows before the pilot's own armour takes its share, as an upgrade to damage would
+  const surged = r('__m.t = 50; const p = pilotP(1); [PVP.surge(), __blow(), Math.max(1, 20 * 0.22 * 1.8 * p.frailty - p.armor * 0.22)]');
+  ok(Math.abs(surged[0] - 1.8) < 1e-9 && surged[1] > before[5] * 1.7 && Math.abs(surged[1] - surged[2]) < 1e-6,
+     'ten seconds in, a blow is worth 1.8 of what it was', [surged, before[5]]);
+  const capped = r(`__m.t = 70; __fresh(); PVP.turn(0, () => damageEnemy(__S(1), 1e7, true, 0, 0)); const one = (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp;
+    __fresh(); for (let i = 0; i < 40; i++) { pilotP(1).iframe = 0; PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); }
+    [PVP.surge(), one, (pilotP(1).maxHp - __hp(1)) / pilotP(1).maxHp]`);
+  ok(capped[0] > 3 && capped[1] <= DUEL.hitCap + 1e-9 && Math.abs(capped[2] - DUEL.burstCap) < 0.01,
+     'and however far it has grown, the caps hold: 14% a blow, 34% a second', capped);
+  ok(r('__hud()') === 'OVERTIME   ·   BLOWS ×3.4   ·   NO HEALING', 'the HUD says so, and what a blow is worth now', r('__hud()'));
+
+  // the walls: half closed halfway, closed at twenty seconds, on the middle, and then no further
+  const half = r('__m.t = 50; __tick(1); [arena.tx1 - arena.tx0, arena.ty1 - arena.ty0]');
+  ok(Math.abs(half[0] - 1040) < 1 && Math.abs(half[1] - 685) < 1, 'halfway through closing, halfway to the box', half);
+  const shut = r('__m.t = 50; __tick(60 * 12); [arena.x1 - arena.x0, arena.y1 - arena.y0, (arena.x0 + arena.x1) / 2 - WORLD.w / 2, (arena.y0 + arena.y1) / 2 - WORLD.h / 2]');
+  ok(Math.abs(shut[0] - 480) < 2 && Math.abs(shut[1] - 320) < 2 && Math.abs(shut[2]) < 1e-6 && Math.abs(shut[3]) < 1e-6, 'closed: 480 by 320, on the middle', shut);
+  ok(r('__tick(60 * 5); Math.abs(arena.x1 - arena.x0 - 480) < 1e-3 && arena.tx1 - arena.tx0 === 480'), 'and no further', r('[arena.x1 - arena.x0, arena.tx1 - arena.tx0, __m.t]'));
+  ok(r('pilotsEach(() => { P.x = arena.x0 - 300; P.y = arena.y0 - 300; updatePlayer(1 / 60); }); [0, 1].every(k => pilotP(k).x >= arena.x0 && pilotP(k).y >= arena.y0)'),
+     'a pilot outside them is put back inside');
+  let drew = null;
+  try { H.run('PVP.arena(); render()'); } catch (e) { drew = e; }
+  ok(!drew, 'overtime\'s walls draw over the arena\'s, and the frame with them', String(drew));
+
+  // nothing won back: a heal, regeneration, a revive's health, a shield
+  const kept = r(`__fresh(); __m.held = null; __tick(1); const p = pilotP(1), out = [];
+    p.hp = 50; __tick(1); out.push(p.hp, __m.held[1]);
+    p.hp = 80; __tick(1); out.push(p.hp);
+    p.regen = 40; pilotDo(1, () => updatePlayer(1 / 60)); const up = p.hp; __tick(1); out.push(up > 50, p.hp); p.regen = 0;
+    p.hp = 30; __tick(1); out.push(p.hp, __m.held[1]);
+    p.shieldMax = 1; p.shield = 0; p.shieldT = 8.99; __tick(1); out.push(p.shieldT); p.shieldMax = 0;
+    out`);
+  ok(kept[0] === 50 && kept[1] === 50 && kept[2] === 50, 'a pilot\'s health in overtime is held where it fell: a heal is taken back', kept);
+  ok(kept[3] === true && kept[4] === 50, 'so is regeneration, at the very next step', kept);
+  ok(kept[5] === 30 && kept[6] === 30, 'and it falls as ever', kept);
+  ok(kept[7] === 0, 'a spent shield is not regrown', kept);
+  const revived = r(`const p = pilotP(1), was = p.revive; p.revive = 1; p.hp = 3; __tick(1);
+    p.iframe = 0; PVP.turn(0, () => damageEnemy(__S(1), 400, false, 0, 0)); const up = p.hp; __tick(1);
+    const out = [up > 3, p.hp, p.down, __m.phase]; p.revive = was; out`);
+  ok(revived[0] && revived[1] === 3 && !revived[2] && revived[3] === 'fight', 'Second Wind still saves a killing blow, with no health won back', revived);
+
+  // the room sends nothing more; and nothing of this in a fight's absence, or in a hidden pilot's one round
+  const quiet = r(`__m.infested = true; __m.spawnT = 0;
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].pvpPilot == null) enemies.splice(i, 1);
+    for (let i = 0; i < 600; i++) PVP.maps.spawn(__m, 1 / 60);
+    const n = enemies.filter(e => e.pvpPilot == null).length;
+    __m.t = 10; PVP.maps.open(); __m.spawnT = 0; for (let i = 0; i < 600; i++) PVP.maps.spawn(__m, 1 / 60);
+    const out = [n, enemies.filter(e => e.pvpPilot == null).length]; __m.infested = false; __m.t = 50; out`);
+  ok(quiet[0] === 0 && quiet[1] > 0, 'an infested room sends nothing in overtime, as it does before it', quiet);
+  ok(r(`__m.phase = 'end'; const out = [PVP.overtime(__m), PVP.surge()]; __m.phase = 'fight'; out`).join() === 'false,1', 'a round over is in no overtime');
+  ok(r(`__m.bestOf = 1; __m.t = 300; const out = [PVP.overtime(__m), PVP.surge(), __hud()]; __O.oneRound = true; out.push(PVP.overtime(__m));
+        __O.oneRound = false; __m.bestOf = 3; __m.t = 50; out`).join() === 'false,1,,true',
+     'a hidden pilot\'s one long round has no clock, unless OVERTIME.oneRound gives it one');
+
+  // the next round: the walls open at once, the clock and the hold start over, and a form woken last round ends
+  r('__m.t = 50; __tick(60 * 12)');
+  ok(r('arena.x1 - arena.x0 < 500'), 'the walls shut again, for what comes next', r('arena.x1 - arena.x0'));
+  const next = r(`__m.ot = true; __m.held = [1, 1]; pilotP(1).ventT = 30; pilotP(0).suT = 30; pilotP(0).suAsc = null;
+    __m.phase = 'picks'; __m.owed = [0, 0]; pilotsEach(() => { offers.length = 0; gearOffer = null; }); state = 'play';
+    PVP.rounds.tick(1 / 60);
+    const out = [__m.phase, __m.t, __m.ot, __m.held, arena.x1 - arena.x0, arena.y1 - arena.y0, PVP.surge(), pilotP(1).ventT <= 1e-6, pilotP(0).suT <= 1e-6];
+    pilotDo(1, () => updatePlayer(1 / 60)); pilotDo(0, () => updatePlayer(1 / 60));
+    out.push(pilotP(1).ventT, pilotP(0).suT); out`);
+  ok(next[0] === 'fight' && next[1] === 0 && next[2] === false && next[3] === null && next[6] === 1, 'the next round starts with its clock and its hold fresh', next);
+  ok(next[4] === 1600 && next[5] === 1050, 'and the walls open again, at once', next);
+  ok(next[7] && next[8] && next[9] === 0 && next[10] === 0, 'a form woken last round (OVERDRIVE, SUPERUSER) does not carry into the next: the engine ends it at once', next);
 }
 
 section('a match left part way');
@@ -1527,10 +1663,11 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
 
   /* Better against a better player: against a pilot that never moves, on a
      clean map (nothing of the room's to help), the best finishes it far
-     sooner than the gentlest. */
+     sooner than the gentlest. The round's clock is taken away (OVERTIME):
+     this times the bot, not the round. */
   const time = async skill => {
     const g = boot({ mode: 'bot', pilot: 'runner', me: ME, bot: Object.assign({}, SPEC, { pilot: 'runner', skill }) }, DUELIST);
-    g.run(IDLE + WATCH + 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });');
+    g.run(IDLE + WATCH + 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false }); PVP.OVERTIME.at = 1e9;');
     await frames(g, 60 * 600, () => g.run('!!PVP.shown'));
     return { won: g.run('RUN.pvp.winner'), t: g.run('RUN.pvp.clock') };
   };
@@ -1540,7 +1677,7 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
-section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s parry, forms and moves');
+section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, VOIDRUNNER\'s GRAZE by near misses, and a bot\'s parry, forms and moves');
 {
   const CLEAN = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });';
   const INFESTED = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: true });';
@@ -1559,8 +1696,8 @@ section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s par
   };`;
   const AWAKE_ME = Object.assign({}, ME, { loadouts: Object.assign({}, ME.loadouts, {
     casual: { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: ['ember', 'hacker', 'melee'], ups: [] } }) });
-  const bout = (pilot, bot, script) => {
-    const g = boot({ mode: 'bot', pilot, me: AWAKE_ME, bot: Object.assign({ id: 'c0ffee00', name: 'BOT WREN', seed: 99 }, bot) }, DUELIST);
+  const bout = (pilot, bot, script, me = AWAKE_ME) => {
+    const g = boot({ mode: 'bot', pilot, me, bot: Object.assign({ id: 'c0ffee00', name: 'BOT WREN', seed: 99 }, bot) }, DUELIST);
     g.run(script);
     return g;
   };
@@ -1642,6 +1779,111 @@ section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, and a bot\'s par
   await run(gH, 30, () => gH.run('__su.on > 0 && __su.moved > 0'));
   ok(gH.run('__su.on') > 0, 'a HACKER bot spends a full root on SUPERUSER', gH.run('__su'));
   ok(gH.run('__su.moved') > 0, 'and fights with its moves', gH.run('__su'));
+
+  /* VOIDRUNNER's GRAZE (IMAGO IN A DUEL, in the engine). The other pilot's
+     blows are its own shots at a stand-in, never the room's rounds, so a duel
+     pays for them itself: a round that passes close without landing, a lance
+     or a swing that comes close and never touches. This player flies an awake
+     VOIDRUNNER round a bot's gun, not firing, both kept on their feet so the
+     round runs on; and presses what __keys holds, once the fight is on. */
+  const RUNNER_ME = Object.assign({}, ME, { loadouts: Object.assign({}, ME.loadouts, {
+    casual: { pilots: ['runner', 'ember', 'hacker', 'melee'], awake: ['runner'], ups: [] } }) });
+  const gI = bout('runner', { pilot: 'runner', awake: false, skill: 0.5 }, AIMED(170, 260) + CLEAN
+    + `globalThis.__keys = []; const __h = PVP.botMatch.human;
+       PVP.botMatch.human = rec => { __h(rec); rec.trig = false; rec.lmb = false;
+         if (__keys.length && state === 'play' && RUN.pvp && RUN.pvp.phase === 'fight') rec.press.push(__keys.shift()); };
+       LS.after = () => { for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`, RUNNER_ME);
+  const filled = await run(gI, 60, () => gI.run('pilotP(0).imGraze >= IM_MAX'));
+  const IMV = JSON.parse(gI.run('JSON.stringify({ max: IM_MAX, pay: IM_PAY, dash: IM_PAY_DASH })'));
+  ok(gI.run('pilotP(0).awake') === 1 && gI.run('pilotP(0).imGraze') >= IMV.max,
+     'the other pilot\'s rounds, passing close, fill an awake VOIDRUNNER\'s GRAZE', [filled, gI.run('pilotP(0).imGraze')]);
+  ok(gI.run('pilotDo(0, () => drawImagoHud(12, 100, 220))') === 152 && drawErrs(gI) === '', 'and its meter is on the screen', drawErrs(gI));
+
+  // the rules, one at a time, between frames: this pilot's GRAZE from nothing each time, the other pilot's blows put by hand
+  const rules = JSON.parse(gI.run(`(() => {
+    const me = pilotP(0), o = pilotP(1), out = {}, S0 = PVP.standIns().find(s => s.pvpPilot === 0);
+    const keep = ['x', 'y', 'laserT', 'laserSegs', 'twinSegs', 'laserEnv', 'swingT', 'swingId', 'swingAim', 'swingArc', 'swingReach'].map(f => [f, o[f]]);
+    const was = me.imGraze, tick = () => pilotDo(0, () => imGrazeDuelTick());
+    // a round flown past this pilot, a step at a time; on whose turn, dashing or not, and what it struck on the way
+    const shot = (path, { by = 1, dash = false, pierce = -1 } = {}) => {
+      me.imGraze = 0; me.dashT = dash ? 0.2 : 0;
+      const b = { x: 0, y: 0, r: 4, hits: null };
+      path.forEach(([dx, dy], i) => { if (i === pierce) b.hits = new Set([S0.id]); b.x = me.x + dx; b.y = me.y + dy; pilotDo(by, () => imGrazeDuel(b)); });
+      me.dashT = 0; return me.imGraze;
+    };
+    const e = me.r + 4, past = off => [[-200, e + off], [-20, e + off], [0, e + off], [20, e + off], [200, e + off]];
+    out.round = shot(past(12)); out.wide = shot(past(40)); out.own = shot(past(12), { by: 0 });
+    out.pierced = shot(past(12), { pierce: 2 }); out.dash = shot([[-200, 0], [0, 0]], { dash: true });
+    // a lance: a beam across this pilot, so far off its edge each step, then gone
+    const touch = me.r + LANCE_HALF * ((o.br || 4.2) / 4.2);
+    const across = off => [{ x1: me.x - 300, y1: me.y + off, x2: me.x + 300, y2: me.y + off }];
+    const beam = (offs, twin) => {
+      me.imGraze = 0; o.laserEnv = 1;
+      for (const off of offs) { o.laserT = 0.3; o.laserSegs = across(off); o.twinSegs = twin == null ? [] : across(twin); tick(); }
+      o.laserT = 0; o.laserSegs = []; o.twinSegs = []; tick(); return me.imGraze;
+    };
+    out.lance = beam([touch + 40, touch + 12, touch + 12]); out.lanceHit = beam([touch + 12, touch - 4]); out.lanceWide = beam([touch + 40]);
+    out.twinHit = beam([touch + 12], 0);   // its twin's beam on the hull
+    // a swing from 100 px off, at this pilot or away, its edge so far short of the hull; struck, the stand-in says so
+    const swing = (short, { aim = 0, struck = false } = {}) => {
+      me.imGraze = 0; const sw = S0.swungBy;
+      o.x = me.x - 100; o.y = me.y; o.swingId = (o.swingId || 0) + 1000; o.swingT = 0.2;
+      o.swingAim = aim; o.swingArc = BLADE_ARC; o.swingReach = 100 - me.r - short;
+      tick(); tick(); if (struck) S0.swungBy = o.swingId;
+      o.swingT = 0; tick(); S0.swungBy = sw; return me.imGraze;
+    };
+    out.blade = swing(12); out.bladeHit = swing(-5, { struck: true }); out.bladeWide = swing(45); out.bladeAway = swing(12, { aim: Math.PI });
+    // two on each other's heels, both close: the first is settled as the second begins, then the second as it ends
+    me.imGraze = 0; o.swingId += 1000; o.swingT = 0.2; o.swingAim = 0; o.swingReach = 100 - me.r - 12;
+    tick(); o.swingId += 1; tick(); out.heels = [me.imGraze]; o.swingT = 0; tick(); out.heels.push(me.imGraze);
+    for (const [f, v] of keep) o[f] = v;
+    me.imGraze = was;
+    return JSON.stringify(out);
+  })()`));
+  ok(rules.round === IMV.pay && rules.wide === 0 && rules.own === 0, 'a round of theirs passing close is a graze; one wide of it, or one of its own, is not', rules);
+  ok(rules.pierced === 0 && rules.dash === IMV.dash, 'one that went through it landed, and one dashed through pays the dash', rules);
+  ok(rules.lance === IMV.pay && rules.lanceHit === 0 && rules.lanceWide === 0 && rules.twinHit === 0,
+     'a lance that came close and never touched is a graze, once, as the beam ends; one on the hull (or its twin\'s) is not', rules);
+  ok(rules.blade === IMV.pay && rules.bladeHit === 0 && rules.bladeWide === 0 && rules.bladeAway === 0,
+     'and a swing whose edge came close and missed; one that struck, fell short, or went the other way is not', rules);
+  ok(rules.heels.join() === [IMV.pay, 2 * IMV.pay].join(), 'two swings on each other\'s heels are two grazes', rules.heels);
+
+  // F wakes IMAGO, and Z X C V are its: V's ENDLESS FORMS grows, Z throws the eyespots
+  gI.run('__keys.push("f")');
+  await run(gI, 12, () => gI.run('pilotP(0).imT > 0 && !pilotP(0).imIntro'));
+  ok(gI.run('pilotP(0).imT > 0 && pilotP(0).imGraze === 0'), 'a full GRAZE and F: IMAGO, in a duel', gI.run('[pilotP(0).imT, pilotP(0).imGraze]'));
+  gI.run('__keys.push("v")');
+  await run(gI, 3, () => gI.run('!!pilotP(0).imEvo'));
+  gI.run('__keys.push("z")');
+  await run(gI, 3, () => gI.run('pilotP(0).imCd[0] > 0'));
+  ok(gI.run('!!pilotP(0).imEvo && pilotP(0).imCd[0] > 0'), 'V grows its ENDLESS FORMS there, and Z throws the eyespots', gI.run('[!!pilotP(0).imEvo, pilotP(0).imCd]'));
+  ok(drawErrs(gI) === '', 'all of it on the screen without a fault', drawErrs(gI));
+  // THE ARMORY's wheel holds the hull, but in a duel not the room, which is the other pilot's too
+  gI.run('__keys.push("c")');
+  await run(gI, 2, () => gI.run('!!pilotP(0).imArmMenu'));
+  const wheel = gI.run('[!!pilotP(0).imArmMenu, slowmo]');
+  gI.run('__keys.push("c")');
+  await run(gI, 2, () => gI.run('!pilotP(0).imArmMenu'));
+  ok(wheel[0] && wheel[1] === 1, 'its armory open, the duel runs on at speed', wheel);
+  // and it ends with the round, as the other forms do (the next round starts, and the engine ends it next step)
+  const ended = gI.run(`(() => { const m = RUN.pvp, me = pilotP(0);
+    me.imIntro = { t: 1, cut: false }; m.phase = 'picks'; m.owed = [0, 0]; pilotsEach(() => { offers.length = 0; gearOffer = null; }); state = 'play';
+    PVP.rounds.tick(1 / 60);
+    const out = [m.phase, me.imT <= 1e-6, me.imIntro];
+    pilotDo(0, () => updatePlayer(1 / 60)); out.push(me.imT, !!me.imEvo); return out; })()`);
+  ok(ended[0] === 'fight' && ended[1] && ended[2] === null && ended[3] === 0, 'IMAGO woken last round does not carry into the next', ended);
+
+  // a VOIDRUNNER bot: a full GRAZE wakes IMAGO, then it grows ENDLESS FORMS and dodges and throws with its moves
+  const gV = bout('ember', { pilot: 'runner', awake: true, skill: 0.9 }, AIMED(130, 190) + CLEAN
+    + `globalThis.__im = { on: 0, evo: 0, moved: 0 }; LS.after = () => { const b = pilotP(1); if (!b || !RUN.pvp || RUN.pvp.phase !== 'fight') return;
+        if (!__im.on && !(b.imT > 0)) b.imGraze = IM_MAX;
+        if (b.imT > 0 && !__im.on) __im.on = LS.tick;
+        if (b.imEvo && !__im.evo) __im.evo = LS.tick;
+        if (b.imCd && (b.imCd[0] > 0 || b.imCd[1] > 0)) __im.moved = 1; };`);
+  await run(gV, 40, () => gV.run('__im.on > 0 && __im.evo > 0 && __im.moved > 0'));
+  ok(gV.run('__im.on') > 0, 'a VOIDRUNNER bot wakes IMAGO on a full GRAZE', gV.run('__im'));
+  ok(gV.run('__im.evo') > 0 && gV.run('__im.moved') > 0, 'grows ENDLESS FORMS, and fights with FLUTTER and the eyespots', gV.run('__im'));
+  ok(drawErrs(gV) === '', 'and the other screen draws it without a fault', drawErrs(gV));
 }
 
 section('arriving without the lobby');

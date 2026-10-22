@@ -10,13 +10,30 @@
      picks    upgrades are dealt: three each to start; one to whoever lost
               the last round; the room holds while they choose
      fight    a round: both pilots from their own side at full health. Every
-              thirty seconds of fighting deals each of them another upgrade
+              thirty seconds of fighting deals each of them another upgrade.
+              A round still on at OVERTIME.at goes to overtime (below)
      end      a pilot is down: the round goes to the other. A moment, then
               the next round's picks, or
      over     the match: best of three until gold, best of five from there
 
-   The upgrades stay from round to round; health, the floor and the room
-   start fresh.
+   The upgrades stay from round to round; health, the floor, the walls and the
+   room start fresh.
+
+   OVERTIME (the pace of a fight, PVP-PLAN.md). Two pilots who keep their
+   distance and dodge well can trade near misses for minutes: measured, gun
+   against gun ran rounds of two to five minutes, the pilots 250 px and more
+   apart nearly all of it. So a round has a clock. Past OVERTIME.at seconds:
+     · the walls close in on the middle, at a steady pace over OVERTIME.close
+       seconds, to a box OVERTIME.w by OVERTIME.h, where there is no keeping
+       away (and no room for the room to send anything more: maps.js)
+     · the blows the pilots trade grow by OVERTIME.ramp a second (M.surge,
+       which duel.js applies), the duel's caps holding all the same, so the
+       round still cannot end in one blow
+     · nothing is won back: a pilot's health only falls (regeneration, a
+       heal, a revive's health all held at what it had), and a shield spent
+       stays spent
+   The HUD counts the last OVERTIME.warn seconds down, and the result marks
+   a round that went to overtime. scripts/pvp-pace.mjs measures all of it.
    ========================================================================= */
 (() => {
   'use strict';
@@ -32,6 +49,14 @@
     spawnIframe: 1.5,    // a round's opening grace
     spawnAt: 0.32,       // how far out from the middle each side starts, as a share of the arena's width
     adBonus: 2           // what a watched ad adds to a friend match's start (the lobby's ads.js): exactly this, or nothing
+  };
+  const OVERTIME = M.OVERTIME = {
+    at: 40,              // seconds into a round before it goes to overtime
+    warn: 10,            // the HUD counts this many down before it does
+    close: 20,           // seconds the walls take to close in
+    w: 480, h: 320,      // the box they close to (the arena is maps.js's ARENA): no keeping away in it
+    ramp: 0.08,          // the blows between pilots: this much more a second of overtime (x2.6 once the walls are in)
+    oneRound: false      // a hidden pilot's one long round (bestOf 1) goes to overtime too, if true
   };
   const PHASES = ['belt', 'picks', 'fight', 'end', 'over'];
 
@@ -73,7 +98,8 @@
       round: 0, bestOf: M.bestOf(), score: [0, 0], winner: -1, loser: -1, owed: [0, 0],
       map: map.index, infested: map.infested, odds: map.odds, hackers: map.hackers,
       spawnT: 2.5, hits: [[], []],
-      log: [],              // each round as it ends: { w: its winner, at: the match clock, left: the winner's health, 0 to 1 }
+      ot: false, held: null,   // this round gone to overtime, and each pilot's health held there (OVERTIME)
+      log: [],              // each round as it ends: { w: its winner, at: the match clock, left: the winner's health, 0 to 1, ot: in overtime }
       dealt: [0, 0]         // the health each pilot has taken off the other (duel.js), for the result screen
     };
     /* A run never fights at wave 0: its first wave is 1. The game's curves
@@ -100,10 +126,41 @@
     if (PILOT.on === pilotMine()) { cam.x = P.x; cam.y = P.y; }
   }
 
+  /* ------------------------------- overtime ------------------------------- */
+  // a round with a clock: every one, but a hidden pilot's one long round only if OVERTIME.oneRound
+  const clocked = m => !!m && (m.bestOf !== 1 || OVERTIME.oneRound);
+  M.overtime = m => { m = m || match(); return !!m && m.phase === 'fight' && clocked(m) && m.t >= OVERTIME.at; };
+  const otT = m => (M.overtime(m) ? m.t - OVERTIME.at : 0);
+  // what a blow between the pilots is worth (duel.js): as it is, and in overtime more by the second
+  M.surge = () => 1 + OVERTIME.ramp * otT(match());
+
+  // the walls: the arena's box (maps.js) closing on the middle at a steady pace, to OVERTIME's
+  function squeeze(m) {
+    const A = M.maps.ARENA, k = Math.min(1, otT(m) / OVERTIME.close);
+    arenaShrinkTo(WORLD.w / 2, WORLD.h / 2, A.w + (OVERTIME.w - A.w) * k, A.h + (OVERTIME.h - A.h) * k);
+  }
+  /* Nothing won back: each pilot's health is held at the lowest it has been
+     since overtime began, whatever would raise it (regeneration, a heal, a
+     card, the health a revive stands it up with), and a spent shield is not
+     regrown. The world's turn comes before the pilots' in a step, so what a
+     step adds is taken back at the next one, never kept. */
+  function hold(m) {
+    if (!m.held) m.held = [pilotP(0).hp, pilotP(1).hp];
+    for (let k = 0; k < 2; k++) {
+      const p = pilotP(k);
+      if (!p || p.down) continue;
+      if (p.hp < m.held[k]) m.held[k] = p.hp;
+      else p.hp = m.held[k];
+      if (p.shieldMax && p.shield < p.shieldMax) p.shieldT = 0;
+    }
+  }
+
   // a round: the room and both pilots fresh, the builds kept
   function startRound(m) {
     m.round++;
     m.phase = 'fight'; m.t = 0; m.winner = -1; m.loser = -1; m.spawnT = 2.5;
+    m.ot = false; m.held = null;
+    M.maps.open();                       // the walls back where they were
     m.hits = [[], []];
     bullets.length = 0; ebullets.length = 0; mortars.length = 0; beams.length = 0;
     corpses.length = 0; gems.length = 0; drops.length = 0; hazards.length = 0;
@@ -116,6 +173,17 @@
       P.dashCh = P.dashMax; P.dashT = 0; P.dashRe = 0; P.ghosts.length = 0;
       P.laserT = 0; P.laserSegs.length = 0; P.charge = 0; P.swingT = 0; P.slowT = 0;
       P.shield = P.shieldMax || 0;
+      /* A form woken last round (OVERDRIVE, SUPERUSER, RONIN, IMAGO: a minute
+         each) ends with that round, so nobody starts one transformed:
+         measured, a form carried over ended the next round in five seconds.
+         Its clock is left a moment, and the engine ends it its own way next
+         step (IMAGO's cut-in, if it was still playing, is cut short too, as
+         the minute does not run under it). A meter still filling carries
+         over, like the build. */
+      if (P.ventT > 0) P.ventT = 1e-6;
+      if (P.suT > 0) P.suT = 1e-6;
+      if (P.roninT > 0) P.roninT = 1e-6;
+      if (P.imT > 0) { P.imT = 1e-6; P.imIntro = null; }
     });
     banner('ROUND ' + m.round + '   ·   FIGHT', '#f472b6', 2.0);
   }
@@ -139,6 +207,11 @@
         m.nextPick += ROUNDS.pickEvery;
         m.owed[0]++; m.owed[1]++;
         banner('UPGRADE', '#fde047', 1.4);
+      }
+      if (M.overtime(m)) {
+        if (!m.ot) { m.ot = true; banner('OVERTIME   ·   THE WALLS CLOSE', '#f87171', 2.4); }
+        squeeze(m);
+        hold(m);
       }
       M.dots(dt);
       M.maps.spawn(m, dt);
@@ -182,7 +255,7 @@
     m.score[m.winner]++;
     m.phase = 'end'; m.t = 0;
     const w = pilotP(m.winner);
-    if (m.log) m.log.push({ w: m.winner, at: m.clock, left: w && w.maxHp ? Math.max(0, w.hp) / w.maxHp : 0 });
+    if (m.log) m.log.push({ w: m.winner, at: m.clock, left: w && w.maxHp ? Math.max(0, w.hp) / w.maxHp : 0, ot: !!m.ot });
     if (w) w.iframe = Math.max(w.iframe, ROUNDS.endT + 1);   // nothing the room does now takes the round back
     const over = m.score[m.winner] >= toWin(m);
     banner((over ? 'MATCH TO ' : 'ROUND TO ') + M.nameOf(m.winner), m.winner === pilotMine() ? '#86efac' : '#f87171', ROUNDS.endT);
@@ -207,7 +280,7 @@
   M.hash = n => {
     const m = match();
     if (!m) return;
-    n(PHASES.indexOf(m.phase)); n(m.round); n(m.score[0]); n(m.score[1]); n(m.owed[0]); n(m.owed[1]); n(m.clock);
+    n(PHASES.indexOf(m.phase)); n(m.round); n(m.score[0]); n(m.score[1]); n(m.owed[0]); n(m.owed[1]); n(m.clock); n(m.ot ? 1 : 0);
   };
 
   /* -------------------------------- drawing ------------------------------- */
@@ -264,7 +337,41 @@
     fitFont(where, rMax, '600', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
     ctx.fillStyle = m.infested ? '#f87171' : (map ? map.accent : '#67e8f9');
     ctx.fillText(where, x, pad + 70);
+    // the round's clock: its last seconds counted down, then overtime and what a blow is worth now
+    const left = OVERTIME.at - m.t, over = M.overtime(m);
+    const clock = over ? 'OVERTIME   ·   BLOWS ×' + M.surge().toFixed(1) + '   ·   NO HEALING'
+      : m.phase === 'fight' && clocked(m) && left <= OVERTIME.warn ? 'OVERTIME IN ' + Math.max(1, Math.ceil(left)) + 'S' : '';
+    if (clock) {
+      fitFont(clock, rMax, '800', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+      ctx.fillStyle = over ? '#f87171' : '#fca5a5';
+      ctx.globalAlpha = over ? 0.75 + 0.25 * Math.sin(uiTime * 6) : 1;
+      ctx.fillText(clock, x, pad + 90);
+    }
     ctx.restore();
     return true;
+  };
+
+  /* Overtime's walls, in the world, over the arena's own (the engine's
+     drawArena, under everything that moves): red and beating, and the floor
+     they have closed off darkened. */
+  M.arena = () => {
+    const m = match();
+    if (!m || !M.overtime(m)) return;
+    const x0 = arena.x0, y0 = arena.y0, w = arena.x1 - arena.x0, h = arena.y1 - arena.y0, far = 4000;
+    const beat = 0.6 + 0.4 * Math.sin(uiTime * 6);
+    ctx.save();
+    ctx.fillStyle = 'rgba(60,6,12,0.45)';
+    ctx.beginPath();
+    ctx.rect(x0 - far, y0 - far, w + far * 2, h + far * 2);
+    ctx.rect(x0, y0, w, h);
+    ctx.fill('evenodd');
+    ctx.strokeStyle = 'rgba(220,38,38,' + (0.3 + 0.25 * beat).toFixed(3) + ')';   // over the arena's own glow, not added to it
+    ctx.lineWidth = 26;
+    ctx.strokeRect(x0, y0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(254,202,202,' + (0.85 * beat).toFixed(3) + ')';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x0, y0, w, h);
+    ctx.restore();
   };
 })();
