@@ -36,7 +36,7 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Chakra+Petch:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=JetBrains+Mono:wght@400;600;800&display=swap">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;overflow:hidden;background:#05060a;
@@ -1635,6 +1635,7 @@ function inputDashTaken() {
 }
 
 addEventListener('keydown', e => {
+  if (Intro.on) { Intro.key(e); return; }   // INTRO: one key held skips it, and no key reaches the menu under it
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
   if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
@@ -1664,6 +1665,7 @@ cv.addEventListener('mousemove', e => {
   if (skinDrag) skinFromMouse();
 });
 cv.addEventListener('mousedown', e => {
+  if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
   Audio_.init(); Audio_.resume();
   mouse.x = e.clientX; mouse.y = e.clientY;
   /* Only the left button fires. This used to set mouse.down for any button at
@@ -1725,6 +1727,7 @@ const isTouch = matchMedia('(pointer:coarse)').matches;
 function tpos(t) { return { x: t.clientX, y: t.clientY }; }
 cv.addEventListener('touchstart', e => {
   e.preventDefault(); Audio_.init(); Audio_.resume();
+  if (Intro.on) { Intro.fingers = e.touches.length; Intro.poke(); return; }   // INTRO: a finger held down is the skip
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
@@ -1763,6 +1766,7 @@ cv.addEventListener('touchmove', e => {
   }
 }, { passive: false });
 function touchEnd(e) {
+  if (Intro.on) { Intro.fingers = e.touches.length; return; }
   if (QOL.onLift) { const f = QOL.onLift; QOL.onLift = null; if (e.type === 'touchend') f(); }
   for (const t of e.changedTouches) {
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
@@ -38804,6 +38808,8 @@ function frame(now) {
   if (pageDead) return;                  // the page has stopped; do not requeue
   const dt = Math.min(0.2, (now - last) / 1000);
   lastDT = dt;                           // render() draws the pointer with it
+  // INTRO: a tab's first look has the screen, and nothing of the game moves under it
+  if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
   fpsSample(dt);
   last = now;
   acc += dt;
@@ -87645,6 +87651,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'Account', 'AcctUI',                   // the account: who is signed in here, and its panel
   'QOL',                                  // the run report's buttons and tip, SHARE, INSTALL (AFTER THE RUN)
   'Tut',                                  // FIRST FLIGHT's card and hints: the run's part of it is `assist`
+  'Intro',                                // INTRO: a tab's first look, this machine's alone
   'Ost',                                  // THE SOUNDTRACK: the song picked, the list's place, the covers
   'HUD_AT',                               // where the HUD drew each thing this frame (the tour points at them)
   'OUTSIDE', 'Outside',                  // the outside pilots this machine has loaded, and their hooks
@@ -91209,7 +91216,146 @@ function drawBetaMark() {
   ctx.restore();
 }
 
+/* ================================= INTRO ==================================
+   The first thing a tab sees, once. Opening the game in a new tab plays it;
+   nothing after that does: not a reload, not the menu again, not a run's
+   end. The tab's own sessionStorage remembers, so every new tab gets its
+   first look and no tab gets two. While it plays nothing of the game moves
+   or draws (frame), and its keys are its own: only INTRO_SKIP held down for
+   INTRO_HOLD skips it, so a key mashed while the page loads, or ESC tapped
+   out of habit, does not. A finger held down does the same on a touch screen.
+   Any key, click or tap shows how; let go early and the ring runs back.
+
+   Not played on PvP's page, to a co-op room someone sent (a friend is
+   waiting in it), on the art bench, or back through PvP's door (#h=).
+   ?intro=1 plays it on every load, for making it; ?intro=0 never does.
+
+   THE LOOK is introDraw. It is handed the canvas set to the page's pixels
+   (g), the seconds since the intro began (t) and the window (w, h), over a
+   frame already cleared to COL.bg, and INTRO_LEN is how long it runs. It must
+   not touch the game: rnd/rndi/pick only (never sim*), and nothing written
+   to P, the save or the state. A hook that throws ends the intro at once.
+   Sound waits on the browser: nothing is heard before the first key, click
+   or tap, so a cue in the opening seconds of a fresh tab may go unheard.
+
+   The look itself is "Mended" (1:54): intro-art.js, beside this page, which
+   defines IntroArt. Only a tab that is about to play it fetches it (load); its
+   clock holds at 0 until the file is in, and if the file never comes, or
+   takes longer than INTRO_WAIT, the intro is over before it began. */
+const INTRO_KEY = 'voidrunner_intro_v1';
+const INTRO_ART = true;         // the real look is in: every new tab plays it
+const INTRO_ART_VER = 'b5cbf5aab9';   // intro-art.js's content hash (its header says how), so a new file is never served stale
+const INTRO_LEN = 114;          // seconds, as long as THE LOOK runs (IntroArt.LEN)
+const INTRO_WAIT = 8;           // seconds a slow network may keep it on black
+const INTRO_SKIP = 'escape';    // held, not pressed
+const INTRO_HOLD = 1;           // seconds it has to be held
+const Intro = {
+  on: false,
+  t: 0,
+  hold: 0,                      // 0..1, how far a skip has got
+  fingers: 0,                   // touches down: a finger held is the touch screen's skip
+  said: -9,                     // when the skip line was last asked for, by any input
+  art: 'none',                  // intro-art.js: none, loading, ready, failed
+  wait: 0,                      // seconds spent waiting on it
+  boot() {
+    if (PVP || OPO_BENCH_ASK) return;
+    let q = null;
+    try { q = new URLSearchParams(location.search); } catch (e) { /* as if the address said nothing */ }
+    const ask = q && q.get('intro');
+    if (ask === '0') return;
+    if (ask !== '1') {
+      if (!INTRO_ART) return;
+      if ((q && q.has('join')) || /^#h=/.test(location.hash || '')) return;
+      try {
+        if (sessionStorage.getItem(INTRO_KEY)) return;
+        sessionStorage.setItem(INTRO_KEY, '1');
+      } catch (e) { /* no tab storage here: every load is a fresh tab, as far as anyone can tell */ }
+    }
+    this.on = true;
+    this.load();
+  },
+  // the look, fetched now and only now, and the serif its words are set in
+  load() {
+    if (this.art !== 'none') return;
+    if (typeof IntroArt !== 'undefined') { this.art = 'ready'; return; }
+    this.art = 'loading';
+    try {
+      if (document.fonts) for (const f of ["500 24px 'Cormorant Garamond'", "italic 500 24px 'Cormorant Garamond'"]) document.fonts.load(f).catch(() => {});
+      const el = document.createElement('script');
+      el.src = 'intro-art.js?v=' + INTRO_ART_VER;
+      el.async = true;
+      el.onload = () => { this.art = typeof IntroArt !== 'undefined' ? 'ready' : 'failed'; };
+      el.onerror = () => { this.art = 'failed'; };
+      document.head.appendChild(el);
+    } catch (e) { this.art = 'failed'; }
+  },
+  // a key: held for the skip, and still held after, so its repeats land on nothing
+  key(e) {
+    const k = e.key.toLowerCase();
+    if (k === INTRO_SKIP || k === ' ' || k.startsWith('arrow')) e.preventDefault();
+    keys[k] = true;
+    this.poke();
+  },
+  // any input: sound may start now, and the skip line comes up
+  poke() {
+    Audio_.init(); Audio_.resume();
+    this.said = this.t;
+  },
+  frame(dt) {
+    dt = Math.max(0, dt);       // the first frame's stamp can sit a hair before the boot's clock
+    if (this.art === 'failed') { this.end(); return; }
+    const ready = this.art === 'ready';
+    if (ready) this.t += dt;
+    else if ((this.wait += dt) > INTRO_WAIT) { this.end(); return; }
+    const held = keys[INTRO_SKIP] || this.fingers > 0;
+    this.hold = held ? Math.min(1, this.hold + dt / INTRO_HOLD) : Math.max(0, this.hold - dt * 2 / INTRO_HOLD);
+    if (this.hold >= 1 || this.t >= INTRO_LEN) { this.end(); return; }
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, W, H);
+    if (ready) {
+      ctx.save();
+      try { introDraw(ctx, this.t, W, H); }
+      catch (e) { ctx.restore(); console.error('VOIDRUNNER intro:', e); this.end(); return; }
+      ctx.restore();
+    }
+    this.drawSkip();
+  },
+  end() {
+    this.on = false;
+    uiArm = 0.4;                // a key or a finger still down from it lands on nothing
+  },
+  drawSkip() {
+    const since = this.t - this.said;
+    const a = this.hold > 0 ? 1 : clamp(since / 0.2, 0, 1) * clamp(3 - since, 0, 1);
+    if (a <= 0) return;
+    const x = W - 30, y = H - 30;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.22em';
+    ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(isTouch ? 'HOLD TO SKIP' : 'HOLD ESC TO SKIP', x - 18, y + 1);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba('#94a3b8', 0.3);
+    ctx.beginPath(); ctx.arc(x, y, 8, 0, TAU); ctx.stroke();
+    if (this.hold > 0) {
+      ctx.strokeStyle = COL.player;
+      ctx.beginPath(); ctx.arc(x, y, 8, -Math.PI / 2, -Math.PI / 2 + TAU * this.hold); ctx.stroke();
+    }
+    ctx.restore();
+  }
+};
+/* THE LOOK: "Mended", drawn whole by intro-art.js. Spoilers stay off: the one
+   who stayed is never named here. It ends on the menu's own emblem and name,
+   where renderMenu draws them, so the menu comes up out of its last frame. */
+function introDraw(g, t, w, h) {
+  IntroArt.draw(g, t, w, h, DPR, { spoilers: false });
+}
+
 /* --------------------------------- start ---------------------------------- */
+Intro.boot();             // first, while the address still says how this tab came (INTRO)
 prewarmGlow();
 if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)

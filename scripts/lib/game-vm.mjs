@@ -59,8 +59,8 @@ function makeCanvas() {
   c.getBoundingClientRect = () => ({ left: 0, top: 0, right: c.width, bottom: c.height, width: c.width, height: c.height });
   return c;
 }
-function makeStorage() {
-  const m = new Map();
+function makeStorage(seed = []) {
+  const m = new Map(seed);
   return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: k => { m.delete(k); },
            clear: () => m.clear(), key: i => [...m.keys()][i] ?? null, get length() { return m.size; } };
 }
@@ -80,7 +80,8 @@ export function makeWindow(w, h, search = '') {
   class Obs { observe() {} unobserve() {} disconnect() {} }
   const win = {
     document, innerWidth: w, innerHeight: h, devicePixelRatio: 1, screen: { width: 1920, height: 1080 },
-    localStorage: makeStorage(), sessionStorage: makeStorage(),
+    localStorage: makeStorage(),
+    sessionStorage: makeStorage([['voidrunner_intro_v1', '1']]),   // a tab that has had its intro (INTRO): every test starts where a reload does
     navigator: { userAgent: 'node test', language: 'en-US', languages: ['en-US'], maxTouchPoints: 0, onLine: true,
                  clipboard: { writeText: async () => {} }, getGamepads: () => [] },
     location: { hostname: 'localhost', host: 'localhost', origin: 'http://localhost', href: 'http://localhost/' + search,
