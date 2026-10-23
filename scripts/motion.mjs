@@ -370,6 +370,13 @@ head('PARTICLES');
   const order = [1, 2, 3, 4].map(i => M.moPart({ life: i * 0.1, n: i }));
   M.moPartsStep(0.15);
   ok(M.moParts.map(q => q.n).join() === '2,3,4' && order.length === 4, 'the dead go, and the rest keep their draw order');
+  const mine = M.moPool(), before = M.moParts.length, t0 = M.moParts.t;
+  M.moPart({ life: 1, vx: 10 }, mine);
+  M.moPartsStep(0.1, mine);
+  let seen = 0;
+  M.moPartsDraw('glow', () => seen++, mine);
+  ok(mine.length === 1 && Math.abs(mine[0].x - 1) < 1e-9 && Math.abs(mine.t - 0.1) < 1e-12 && M.moParts.length === before && M.moParts.t === t0 && seen === 1,
+     'a pool of its own steps, draws and keeps time apart from the shared one');
 }
 
 /* ---------------------------------- flow ---------------------------------- */

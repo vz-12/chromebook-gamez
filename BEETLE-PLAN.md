@@ -115,13 +115,35 @@ report. It ships to main only at the end.
    Nothing calls it yet. The skin's art moves on it.
 1. **Concept board.** The head, mandibles (with the bite cycle), elytra and
    wings, segments, palette and flamethrower, as a still plus an animated
-   sheet, for approval before anything is wired in.
+   sheet, for approval before anything is wired in. Drawn 22 Oct:
+   - the art: `beetle-art/beetle.js` (`btl*`), lift-ready, on MOTION
+   - the board: https://claude.ai/artifact/T3eCidbo9j8dbmQA3LX2ab, built by
+     `node beetle-art/build.mjs`
+   - the body is a MOTION chain off the hull's rear socket, so it stays
+     behind the head when EMBER backs off while firing
+   - the flame's puffs live in the beam's own frame, so the fire never
+     leaves the hitbox
+   - MOTION gained particle pools of their own (`moPool`) for this
 2. **The suite.** Tier, wardrobe opening, new layers, OVERDRIVE hooks, stage
    and bench, with stock passthroughs everywhere. Tests: determinism,
    lockstep, plus a check that an empty skin draws byte for byte stock.
 3. **Base art.** Head, mandibles, elytra and wings, thruster, segments,
    flamethrower, rounds and sparks, dash flames, kills, boss ash.
 4. **OVERDRIVE art.** Ignite, wings, braided lance, Z, X, C and the combos.
+   - **Transformation, drawn 22 Oct** (`beetle-art/overdrive.js`, on the board).
+     The stock beat (`OD_T_*`, `odPhase`) is kept.
+   - **The cut-in.** The user asked for the spark intro to be swapped "for
+     something that fits". It is now THE SWARM: forty fire beetles fly in
+     from the screen's edges and land on the shell one by one, the last at
+     `OD_T_LAND`. Their flight is computed from `od.t`, so it can be scrubbed.
+   - **The rest of the transformation:**
+     - the room burns blue
+     - the elytra fling wide (shell 1.5)
+     - wings of blue fire unfold, with a white core in the gap
+     - the seams light, and every body plate gets a crest
+     - the braided lance replaces the helix
+     - the grade and flash go cold
+   - **Still to draw:** Z, X, C and the combos.
 5. **V art.** The scarab and its blue sun.
 6. **Name, card and grant.** Name it, draw the menu card, drop `wip`, and
    grant it to both "ember" identities: the account's pid (71b1ebbc…) and the

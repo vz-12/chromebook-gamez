@@ -60258,7 +60258,7 @@ function hlWrEquipTap(id) {
      EMITTERS   particles let out evenly through the frame, along the path the
                 source took in it, each pre-aged for the part of the frame it
                 missed: an unbroken trail behind a fast hull.
-     PARTICLES  a pool integrated in closed form for a steady push and drag,
+     PARTICLES  pools integrated in closed form for a steady push and drag,
                 so a spark goes as far at 30 fps as at 144.
      FLOW       curl noise: a swirling wind with no sources or sinks, for fire,
                 smoke and ash to ride.
@@ -60274,8 +60274,7 @@ function hlWrEquipTap(id) {
 const MO = {
   sub: 1 / 240,      // a body's substep, the same at any frame rate: 4 a frame at 60 fps, 8 at 30
   maxDt: 0.1,        // a longer frame (a stall, a tab coming back) is simulated as this long
-  partMax: 3000,     // the particle pool's cap; past it new ones are refused
-  t: 0               // the particles' clock, which the flow drifts on
+  partMax: 3000      // a particle pool's cap; past it new ones are refused
 };
 const moWrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -60701,25 +60700,32 @@ function moEmit(em, dt, x, y, ang, make) {
 }
 
 /* =============================== PARTICLES ================================
-   The art's own pool. A particle is pushed by a steady acceleration (ax, ay)
-   and dragged toward the air around it, which is the wind (wx, wy) plus the
-   flow (FLOW, below) at its strength; over each step that is solved exactly,
-   so it goes as far at 30 fps as at 144. Anything else the art puts on it
-   rides along untouched (colour, kind, a seed for its shape).
+   Pools of the art's particles. A particle is pushed by a steady
+   acceleration (ax, ay) and dragged toward the air around it, which is the
+   wind (wx, wy) plus the flow (FLOW, below) at its strength; over each step
+   that is solved exactly, so it goes as far at 30 fps as at 144. Anything
+   else the art puts on it rides along untouched (colour, kind, a seed for
+   its shape).
 
-     moPart(o)           { x, y, vx, vy, life, ax, ay (px/s²), wx, wy (px/s),
+   moParts is the shared pool. moPool() makes one of its own, for an effect
+   that has to step and draw apart from the rest (two skins on one screen,
+   the menu's showcase beside a run). Each pool keeps its own clock, which
+   its flow drifts on. Every call below takes a pool last, moParts if left out.
+
+     moPart(o, pool)     { x, y, vx, vy, life, ax, ay (px/s²), wx, wy (px/s),
                            drag (per second), flow (px/s of swirl), fs (eddy
                            size, px), r, grow (px/s), rot, spin, layer, tick }
                            o.age pre-ages it (from moEmit); returns it, or
-                           null at the cap
-     moPartsStep(dt)     every particle; tick(q, dt) runs after its own step
-     moPartsDraw(layer, fn)   fn(q, k) for each on that layer, k = life left 1 → 0
-     moPartsClear()
+                           null at the cap (MO.partMax)
+     moPartsStep(dt, pool)        every particle; tick(q, dt) runs after its own step
+     moPartsDraw(layer, fn, pool) fn(q, k) for each on that layer, k = life left 1 → 0
+     moPartsClear(pool)
 =========================================================================== */
-const moParts = [];
-function moPartStep(q, dt) {
+function moPool() { const p = []; p.t = 0; return p; }
+const moParts = moPool();
+function moPartStep(q, dt, t) {
   let ux = q.wx, uy = q.wy;
-  if (q.flow) { const f = moFlow(q.x, q.y, MO.t, q.fs); ux += f[0] * q.flow; uy += f[1] * q.flow; }
+  if (q.flow) { const f = moFlow(q.x, q.y, t, q.fs); ux += f[0] * q.flow; uy += f[1] * q.flow; }
   const k = q.drag;
   if (k > 1e-6) {
     // v → u + a/k, exponentially; x is its integral
@@ -60735,8 +60741,8 @@ function moPartStep(q, dt) {
   q.age += dt; q.life -= dt;
   if (q.tick) q.tick(q, dt);
 }
-function moPart(o) {
-  if (moParts.length >= MO.partMax) return null;
+function moPart(o, pool = moParts) {
+  if (pool.length >= MO.partMax) return null;
   const q = { x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0, wx: 0, wy: 0, drag: 0, flow: 0, fs: 60,
               life: 1, max: 0, r: 1, grow: 0, rot: 0, spin: 0, layer: 'glow', tick: null,
               seed: Math.random() * 1000 };
@@ -60744,30 +60750,30 @@ function moPart(o) {
   if (!q.max) q.max = q.life;
   const pre = o.age > 0 ? o.age : 0;
   q.age = 0;
-  if (pre) moPartStep(q, pre);
+  if (pre) moPartStep(q, pre, pool.t);
   if (q.life <= 0) return null;
-  moParts.push(q);
+  pool.push(q);
   return q;
 }
-function moPartsStep(dt) {
+function moPartsStep(dt, pool = moParts) {
   dt = Math.min(dt, MO.maxDt);
   if (!(dt > 0)) return;
-  MO.t += dt;
+  pool.t += dt;
   let j = 0;
-  for (let i = 0; i < moParts.length; i++) {
-    const q = moParts[i];
-    moPartStep(q, dt);
-    if (q.life > 0) moParts[j++] = q;        // kept in order: the draw order holds still
+  for (let i = 0; i < pool.length; i++) {
+    const q = pool[i];
+    moPartStep(q, dt, pool.t);
+    if (q.life > 0) pool[j++] = q;           // kept in order: the draw order holds still
   }
-  moParts.length = j;
+  pool.length = j;
 }
-function moPartsDraw(layer, fn) {
-  for (let i = 0; i < moParts.length; i++) {
-    const q = moParts[i];
+function moPartsDraw(layer, fn, pool = moParts) {
+  for (let i = 0; i < pool.length; i++) {
+    const q = pool[i];
     if (q.layer === layer) fn(q, clamp(q.life / q.max, 0, 1));
   }
 }
-function moPartsClear() { moParts.length = 0; }
+function moPartsClear(pool = moParts) { pool.length = 0; }
 
 /* ================================== FLOW ==================================
    Curl noise: the curl of a smooth noise field, which swirls and eddies and
@@ -60789,7 +60795,7 @@ function moNoise2(x, y, g) {
   return g;
 }
 const _moG = [0, 0, 0], _moF = [0, 0];
-function moFlow(x, y, t = MO.t, scale = 60) {
+function moFlow(x, y, t = moParts.t, scale = 60) {
   const s = 1 / scale;
   // two octaves, drifting different ways, so the eddies change as well as move
   moNoise2(x * s + t * 0.11, y * s - t * 0.17, _moG);
