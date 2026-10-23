@@ -158,7 +158,16 @@ report. It ships to main only at the end.
    - **Not reskinned yet:** the screen UI (BRAND's prompts and brackets,
      COMBO 1's key caps), the HUD's heat meter, and the Fx hooks' bursts and
      colours. Those are still the stock orange.
-5. **V art.** The scarab and its blue sun.
+5. **V art.** The scarab and its blue sun. Drawn 22 Oct
+   (`beetle-art/khepri.js`, on the board), on the stock FUSION_* and STAR_*
+   numbers and state. KHEPRI replaces IFRIT:
+   - the change spirals blue fire in, and the outline swells into the scarab
+   - a toothed head-shield, toothed forelegs cradling the sun, the other legs
+     braced, plasma wings
+   - the body melts to a lashing tail of fire
+   - each throw flicks a foreleg
+   - each thrown sun is rolled by a small scarab
+   - the aura is a blue solar surface at exactly FUSION_AURA_R
 6. **Name, card and grant.** Name it, draw the menu card, drop `wip`, and
    grant it to both "ember" identities: the account's pid (71b1ebbc…) and the
    old pid 06a21d4e that holds the stub now. Then the full test pass

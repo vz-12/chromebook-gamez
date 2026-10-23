@@ -31,10 +31,10 @@ const pieces = {
             // OVERDRIVE's beat, as the game has it
             line('const OD_T_DIM ='), line('const OD_T_SPARK ='), line('const OD_T_WINGS ='), line('const osEase ='),
             // the moves' own numbers, and the X that BRAND cuts
-            ...html.match(/^const (SCORCH|SCAR|PYRO|STRIKE|BRAND)_[A-Z_]+ += [0-9.]+;.*$/gm), fn('odClipSeg'), fn('odStrikeX')].join('\n'),
+            ...html.match(/^const (SCORCH|SCAR|PYRO|STRIKE|BRAND|FUSION|STAR)_[A-Z_]+ += [0-9.]+;.*$/gm), fn('odClipSeg'), fn('odStrikeX')].join('\n'),
   MOTION: html.slice(html.lastIndexOf('/*', motionAt), motionEnd),
-  ART: ['beetle.js', 'overdrive.js', 'kit.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
-  BOARD: ['board.js', 'board-kit.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n')
+  ART: ['beetle.js', 'overdrive.js', 'kit.js', 'khepri.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
+  BOARD: ['board.js', 'board-kit.js', 'board-khepri.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n')
 };
 let page = fs.readFileSync(path.join(here, 'board.html'), 'utf8');
 for (const [k, v] of Object.entries(pieces)) {
