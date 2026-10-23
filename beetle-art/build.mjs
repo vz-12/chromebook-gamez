@@ -33,8 +33,8 @@ const pieces = {
             // the moves' own numbers, and the X that BRAND cuts
             ...html.match(/^const (SCORCH|SCAR|PYRO|STRIKE|BRAND|FUSION|STAR)_[A-Z_]+ += [0-9.]+;.*$/gm), fn('odClipSeg'), fn('odStrikeX')].join('\n'),
   MOTION: html.slice(html.lastIndexOf('/*', motionAt), motionEnd),
-  ART: ['beetle.js', 'overdrive.js', 'kit.js', 'khepri.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
-  BOARD: ['board.js', 'board-kit.js', 'board-khepri.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n')
+  ART: ['beetle.js', 'kills.js', 'overdrive.js', 'kit.js', 'khepri.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
+  BOARD: ['board.js', 'board-kit.js', 'board-khepri.js', 'board-kills.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n')
 };
 let page = fs.readFileSync(path.join(here, 'board.html'), 'utf8');
 for (const [k, v] of Object.entries(pieces)) {

@@ -102,7 +102,8 @@ function btlNew(x, y, ang) {
     fins: moSpring(0, 3, 0.6),           // the body's side spines, raised by speed
     lean: moSpring(0, 2.5, 0.7),         // a bank into turns
     puffs: [], flameEm: moEmitter(0), trailEm: moEmitter(0), thrustEm: moEmitter(26),
-    parts: moPool()                      // its own sparks, apart from anything else on screen
+    parts: moPool(),                     // its own sparks, apart from anything else on screen
+    scorches: [], ashes: []              // what its kills leave (kills.js)
   };
   return B;
 }
@@ -140,6 +141,7 @@ function btlTick(B, me, dt) {
 
   btlFlameTick(B, me, dt);
   btlTrailTick(B, me, dt);
+  btlKillsTick(B, dt);
   moPartsStep(dt, B.parts);
 }
 
