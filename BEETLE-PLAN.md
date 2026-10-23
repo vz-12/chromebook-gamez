@@ -169,9 +169,16 @@ report. It ships to main only at the end.
        carries a sickle blade
      - Combo 1: a curtain wall of blue flame with thorns, and a giant column
        primed by a swarm
-   - **Not reskinned yet:** the screen UI (BRAND's prompts and brackets,
-     COMBO 1's key caps), the HUD's heat meter, and the Fx hooks' bursts and
-     colours. Those are still the stock orange.
+   - **The screen, drawn 23 Oct** (`beetle-art/ui.js`, on the board), at the
+     user's request once the rest had shipped:
+     - both heat meters (the vent, and OVERDRIVE's with Z X C V) are runs of
+       body plates, and the keys are little shells
+     - BRAND's view goes cold, with mandible brackets and a segmented fuse
+     - COMBO 1's key is a shell with antennae
+     - every burst the kit's 31 effects throw moves along the stock fire
+       ramp onto the beetle's, through one guard per effect that runs it
+       unchanged and recolours what it pushed
+     - VENT READY and Z's and C's damage numbers go to the ramp's light end
 5. **V art.** The scarab and its blue sun. Drawn 22 Oct
    (`beetle-art/khepri.js`, on the board), on the stock FUSION_* and STAR_*
    numbers and state. KHEPRI replaces IFRIT:
@@ -198,10 +205,8 @@ report. It ships to main only at the end.
 
 - **The menu card.** The skin list shows its name, colour and description.
   It has no card art of its own yet.
-- **Still the stock orange:**
-  - the screen UI (BRAND's prompts and brackets, COMBO 1's key caps)
-  - the HUD's heat meter
-  - the Fx hooks' bursts and colours (`odIgnite`'s burst, the throw puffs)
+- **Left stock on purpose:** THE AMALGAM rite's vertical HEAT bar belongs to
+  the rite's own scene, and the lance's muzzle flash uses the hull's colour.
 - **Roster.** Dress it, or leave it alone? Leaving it alone is the default:
   he said it was optional, and telegraphs come first.
 - **evo-ember on the account.** Settled: the 'ember' account's own save has

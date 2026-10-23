@@ -8,7 +8,9 @@
    The art (beetle, kills, overdrive, kit, khepri) and the adapter go in as
    one block straight after MOTION, between the KHEPRI markers; lifting again
    replaces that block. Then a guard goes at the top of each stock draw
-   function it takes over, a tap into killBody and one into frame(). Every
+   function it takes over and of each of the kit's effects, a tap into
+   killBody and one into frame(), and three of the kit's words take their
+   colour from btlFxText. Every
    place is found by an exact line; if one has moved, or is already guarded,
    it says which and writes nothing. Before it says yes the page's scripts
    must still parse.
@@ -33,7 +35,7 @@ const header = `${OPEN} (BEETLE-PLAN.md; the art is beetle-art/, lifted
    it takes over (the adapter, at the foot of this block).
 =========================================================================== */
 `;
-const parts = ['beetle.js', 'kills.js', 'overdrive.js', 'kit.js', 'khepri.js', 'adapter.js']
+const parts = ['beetle.js', 'kills.js', 'overdrive.js', 'kit.js', 'khepri.js', 'ui.js', 'adapter.js']
   .map(f => fs.readFileSync(path.join(here, f), 'utf8').replace(/\r\n/g, '\n').trimEnd() + '\n');
 const block = header + '\n' + parts.join('\n') + CLOSE;
 
@@ -83,6 +85,12 @@ const guards = [
   ['drawOdFusionAura', G('drawOdFusionAura'), '  if (btlTake(() => btlKhepriAura(P, P.odFusion, uiTime))) return;   // KHEPRI: V\n'],
   ['drawOdFusionHull', G('drawOdFusionHull'), '  if (btlTake(() => btlKhepriHull(btlBag(), btlMe(), P.odFusion, uiTime, odFusionThrow))) return;\n'],
   ['drawOdFusionScreen', G('drawOdFusionScreen'), '  if (btlTake(() => btlKhepriScreen(P.odFusion, uiTime, odFusionOutAt, W, H))) return;\n'],
+  ['drawOdHud', 'function drawOdHud(pad, ly, bw) {\n',
+   '  if (btlTake(() => btlDrawOdHud(pad, ly, bw))) return ly + 54;   // KHEPRI: its heat and its keys\n'],
+  ['the HUD\'s vent meter', "  if (P.awake && P.weapon === 'laser' && odKitOn()) ly = drawOdHud(pad, ly, bw);   // heat to spend, the clock, Z X C V\n",
+   "  else if (P.awake && P.weapon === 'laser' && btlTake(() => btlDrawVentHud(pad, ly, bw))) ly += 28;   // KHEPRI: the vent, in plates\n"],
+  ['drawOdStrikeUi', G('drawOdStrikeUi'), '  if (btlTake(btlDrawStrikeUi)) return;       // KHEPRI: BRAND\'s view, cold, with mandibles at the corners\n'],
+  ['drawOdBrandUi', G('drawOdBrandUi'), '  if (btlTake(btlDrawBrandUi)) return;        // KHEPRI: COMBO 1\'s key, a shell\n'],
   ['frame()', "    hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame\n",
    '    btlFrame();              // KHEPRI: EMBER\'s signature skin, once a frame\n']
 ];
@@ -95,6 +103,40 @@ for (const [name, find, line] of guards) {
   html = html.slice(0, i) + line + html.slice(i);
   added++;
 }
+/* The kit's effects: a guard at the top of each, after its own first line,
+   whatever its arguments are. btlFx runs it as it is and recolours what it
+   threw (adapter.js). */
+const FX = ['odIgnite', 'odScorchFx', 'odScorchHitFx', 'odScorchEndFx', 'odScarHitFx',
+  'odPyroCastFx', 'odPyroEruptFx', 'odPyroHitFx',
+  'odStrikeLiftFx', 'odStrikeRiseFx', 'odStrikeAimFx', 'odStrikeMarkFx', 'odStrikeFireFx', 'odStrikeHitFx',
+  'odStrikeEndFx', 'odStrikeLandFx',
+  'odBrandQueueFx', 'odBrandRingFx', 'odBrandWallFx', 'odBrandWallTouchFx', 'odBrandWallEndFx',
+  'odBrandNukeFx', 'odBrandNukeEruptFx', 'odBrandNukeHitFx',
+  'odFusionFx', 'odFusionEndFx', 'odFusionAuraHitFx', 'odStarThrowFx', 'odStarEngulfFx', 'odStarBlowFx', 'odStarHitFx'];
+for (const fn of FX) {
+  const opens = [...html.matchAll(new RegExp('\\nfunction ' + fn + '\\([^)\\n]*\\) \\{\\n', 'g'))];
+  if (opens.length !== 1) fail(`${fn}: expected its first line once, found it ${opens.length} times`);
+  const i = opens[0].index + opens[0][0].length;
+  const line = `  if (btlFx(${fn}, arguments)) return;   // KHEPRI: what it throws, in its colours\n`;
+  if (html.startsWith(line, i)) continue;
+  html = html.slice(0, i) + line + html.slice(i);
+  added++;
+}
+/* The kit's words and numbers: their colour goes through btlFxText.
+   [the stock text, how many times it is there, what it becomes] */
+const words = [
+  ["floatText(P.x, P.y - 52, 'VENT READY', '#fb923c', 15);", 1, "floatText(P.x, P.y - 52, 'VENT READY', btlFxText('#fb923c'), 15);"],
+  ["floatText(e.x, e.y - e.r - 6, Math.round(dps * SCORCH_PROC), '#fdba74', 12);", 2,
+   "floatText(e.x, e.y - e.r - 6, Math.round(dps * SCORCH_PROC), btlFxText('#fdba74'), 12);"]
+];
+for (const [find, n, done] of words) {
+  const have = html.split(find).length - 1, did = html.split(done).length - 1;
+  if (did === n && !have) continue;
+  if (have !== n || did) fail(`expected "${find.slice(0, 50)}…" ${n} times, found it ${have} (and ${did} done)`);
+  html = html.split(find).join(done);
+  added += n;
+}
+
 // killBody: the beetle's own death, or the stock burst
 const kb = "  if (e.burn > 0 && e.type !== 'boss') {\n    // burnt out rather than blown up: see shatterBody\n";
 const kbDone = "  if (btlKillTap(e)) {\n    // KHEPRI: burnt out in blue cinders, or a boss to ash, its own way\n  } else if (e.burn > 0 && e.type !== 'boss') {\n";

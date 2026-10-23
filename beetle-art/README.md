@@ -12,6 +12,8 @@ public site.
 | `kit.js` | OVERDRIVE's moves (`BTL_KIT`, `btl*`): Z's spray and scars, X's mark and column, C's take-off, cut, aim lanes and foot, COMBO 1's wall and giant column. Each takes the stock state (`P.odScorch`, `odScars`, `odPyros`, `P.odStrike`, `odRing`) and draws in the stock layer. |
 | `khepri.js` | V, FUSION CORE as KHEPRI (`BTL_KH`, `btlKhepri*`): the change, the scarab holding its blue sun, the aura, the thrown suns rolled by small scarabs, the blasts and the screen. |
 | `kills.js` | The kills (`BTL_ASH`, `btlKill*`, `btlBossAsh`): a body burns out in blue cinders and leaves a scorch; a boss crumbles to ash from the side the blow came from, drawn from its own poly so the canvas is never read. |
+| `ui.js` | The screen (`BTL_UI`, `BTL_FX`, `btlHud*`, `btlStrikeUiArt`, `btlBrandUiArt`): the heat meters as runs of body plates with shell-shaped keys, BRAND's view with mandible brackets, COMBO 1's key, and the map that moves the kit's burst colours onto the beetle's ramp. |
+| `board-ui.js` | The board's screen: both meters looping through their states, BRAND and COMBO 1, and the bursts, stock against KHEPRI. |
 | `adapter.js` | The wiring (`BTL_G`, `btlWorn`, `btlTake`, `btlFrame`, `btlKillTap` and what the guards hand over to). It decides when the skin is on, builds `me` from `P`, keeps one bag per pilot, and turns the skin off for the session if the art ever throws, so the stock art draws instead. |
 | `lift.mjs` | The lift: `node beetle-art/lift.mjs` checks, `--write` puts the block into `index.html`. |
 | `board-kills.js` | The board's kills: bodies dying in the lance and a boss going to ash, on a loop. |
@@ -36,7 +38,7 @@ node beetle-art/lift.mjs           # check: lifts it in memory, writes nothing
 node beetle-art/lift.mjs --write   # lifts it into index.html
 ```
 
-The six art files and the adapter go in as one block straight after MOTION, between the KHEPRI markers. Lifting
+The six art files (beetle, kills, overdrive, kit, khepri, ui) and the adapter go in as one block straight after MOTION, between the KHEPRI markers. Lifting
 again replaces the block. Then a guard, `if (btlTake(fn)) return;`, goes at the top of each stock draw function in
 the tables below, plus a tap in `killBody` and a call in `frame()`. Each place is found by an exact line, so if the
 game around it has moved, the lift says which place and writes nothing. It then checks that the page's scripts still
@@ -103,3 +105,17 @@ And the kills:
 | the burst in `killBody(e)` | `btlKillTap(e)`, which calls `btlKill` or `btlBossAsh`. The finales that draw their own deaths are left alone: ROOT, THE FOUNDER, ONE POINT OH, its rite, AMALGAM's parts and THE UNWRITTEN's halves. |
 | `drawOdScars()` | `btlDrawFloorMarks`: Z's scars and the kills' scorches |
 | `drawOdStars()` | `btlDrawOverBodies`: V's suns, then the ash and cinders |
+
+And the screen:
+
+| Stock | Beetle |
+|---|---|
+| `drawOdHud(pad, ly, bw)` | `btlDrawOdHud`, which reads the game into `btlHudKit` |
+| the HUD's vent meter, outside OVERDRIVE | `btlDrawVentHud`, which reads it into `btlHudVent` |
+| `drawOdStrikeUi()` | `btlDrawStrikeUi`, which reads it into `btlStrikeUiArt` |
+| `drawOdBrandUi()` | `btlDrawBrandUi`, which reads it into `btlBrandUiArt` |
+| the kit's 31 effect functions (`odIgnite`, `odScorchFx` … `odStarHitFx`) | `if (btlFx(fn, arguments)) return;`: the function runs once as it is, then the sparks, rings and ground waves it pushed are recoloured through `BTL_FX` |
+| VENT READY, and Z's and C's damage numbers | their colour goes through `btlFxText` |
+
+Sparks, rings and waves are each machine's own (SNAP_LOCAL), and the effect rolls the same dice either way, so
+recolouring them touches nothing the simulation or the other player reads.

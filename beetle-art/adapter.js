@@ -16,7 +16,7 @@
    Cosmetic only: its randomness is Math.random, never simRnd, and it writes
    nothing the simulation reads.
 =========================================================================== */
-const BTL_G = { off: false, bags: [], t: 0, me: null, segs: [] };
+const BTL_G = { off: false, bags: [], t: 0, me: null, segs: [], inFx: false, fxN: 0 };
 
 function btlWorn() {
   if (BTL_G.off || pilotSkin || !P || P.charId !== 'ember') return false;
@@ -113,3 +113,77 @@ function btlDrawStrikeMarks() {
   const shape = s => Object.assign({}, s, { ang: Math.atan2(s.y2 - s.y1, s.x2 - s.x1), len: Math.hypot(s.x2 - s.x1, s.y2 - s.y1) });
   btlStrikeMarks(st, st.ph === 'aim' ? odStrikeX(mouse.wx, mouse.wy).map(shape) : st.strokes, camZoom, uiTime, odStrikeR());
 }
+
+/* ---- the HUD and the prompts: the stock ones' numbers and rules, read here ---- */
+function btlDrawOdHud(pad, ly, bw) {
+  btlHudKit(pad, ly, Math.min(76, bw - 6), {
+    heat: clamp(P.vent / VENT_MAX, 0, 1), heatN: Math.floor(P.vent), secs: P.ventT,
+    clock: clamp(P.ventT / (P.ventLen || OD_RUN_LEN), 0, 1),
+    keys: [0, 1, 2, 3].map(i => {
+      const a = OD_KIT[i];
+      return { k: SU_KEYS[i].toUpperCase(), cost: a ? a.cost : 0, has: !!a, live: !!a && P.vent >= a.cost,
+               burn: i === 0 && P.odScorch ? 1 - P.odScorch.t / SCORCH_T : -1, lit: i === 3 && !!P.odFusion };
+    })
+  }, uiTime);
+}
+function btlDrawVentHud(pad, ly, bw) {
+  const k = clamp(P.vent / VENT_MAX, 0, 1), venting = P.ventT > 0, ready = k >= 0.999;
+  const rated = !venting && !ready && P.vent > 0.5;
+  btlHudVent(pad, ly, Math.min(76, bw - 6), {
+    heat: k, venting, ready, lit: ventLit(), burnAt: VENT_BURN_AT, secs: P.ventT,
+    fill: venting ? clamp(P.ventT / (P.ventLen || VENT_LEN), 0, 1) : k,
+    rate: !rated ? '' : P.ventShow > 0.05 ? '+' + P.ventShow.toFixed(1) + '/s' : P.ventHold > 0 ? 'HOLD' : '-' + VENT_DECAY.toFixed(1) + '/s',
+    rateUp: P.ventShow > 0.05, rateHold: P.ventShow <= 0.05 && P.ventHold > 0
+  }, uiTime);
+}
+function btlDrawStrikeUi() {
+  const st = P.odStrike;
+  if (!st || !['aim', 'tell', 'fire', 'xdone', 'ring', 'walled', 'nuke'].includes(st.ph)) return;
+  const aim = st.ph === 'aim', left = aim ? 1 - clamp(st.t / STRIKE_AIM_MAX, 0, 1) : 0;
+  btlStrikeUiArt({ aim, inA: aim ? odEaseOut(clamp(st.t / 0.3, 0, 1)) : 1, left, hot: aim && left < 0.3,
+                   secs: STRIKE_AIM_MAX * left }, W, H, uiTime);
+}
+function btlDrawBrandUi() {
+  const st = P.odStrike;
+  if (!st) return;
+  let key = null, label = '', cost = '', left = -1;
+  if ((st.ph === 'tell' || st.ph === 'fire' || st.ph === 'xdone') && !st.ringQ) {
+    key = 'Z'; label = 'CIRCLE IT'; cost = String(SCORCH_COST);
+    if (st.ph === 'xdone') left = 1 - st.t / BRAND_WINDOW;
+  } else if (st.ringQ && !st.nukeQ && st.ph !== 'nuke' && st.ph !== 'cutDown' && st.ph !== 'land') {
+    key = 'X'; label = 'BURN IT ALL'; cost = 'ALL ' + Math.floor(P.vent);
+    if (st.ph === 'walled') left = 1 - st.t / BRAND_WINDOW;
+  }
+  if (!key) return;
+  const queued = st.ringQ && (st.ph === 'tell' || st.ph === 'fire' || st.ph === 'xdone' || st.ph === 'ring') && !st.nukeQ;
+  btlBrandUiArt({ key, label, cost, left, hot: left >= 0 && left < 0.35, queued: queued && key === 'X' }, W, H, uiTime);
+}
+
+/* ---- the kit's bursts, in its colours ----
+   One guard at the top of each of the kit's effect functions:
+   `if (btlFx(odScorchFx, arguments)) return;`. Worn, it runs that function
+   itself, once and exactly as it is, and then moves whatever it threw (the
+   sparks, rings and ground waves pushed while it ran) onto the beetle's ramp.
+   So the effect rolls the same dice and makes the same sounds, and only what
+   it looks like changes. The call inside finds btlFx already running and
+   falls through to the stock body. Sparks, rings and waves are each
+   machine's own (SNAP_LOCAL), so nothing here reaches the other player. */
+function btlFx(fn, args) {
+  if (BTL_G.inFx || !btlWorn()) return false;
+  const p0 = parts.length, r0 = rings.length;
+  BTL_G.inFx = true;
+  try { fn.apply(null, args); } finally { BTL_G.inFx = false; }
+  try {
+    for (let i = p0; i < parts.length; i++) { const c = BTL_FX[parts[i].color]; if (c) parts[i].color = c; }
+    for (let i = r0; i < rings.length; i++) { const c = BTL_FX[rings[i].color]; if (c) rings[i].color = c; }
+    // the waves are capped by shifting, so the new one is found by being new
+    for (const g of gwaves) { const c = g.t === 0 && BTL_FX[g.col]; if (c) g.col = c; }
+    BTL_G.fxN++;
+  } catch (err) {
+    BTL_G.off = true;
+    console.error('KHEPRI: off for this session; the stock art draws instead.', err);
+  }
+  return true;
+}
+// a word or a number the kit puts up, in its colours when it is worn
+const btlFxText = c => (btlWorn() && BTL_FX_TEXT[c]) || c;

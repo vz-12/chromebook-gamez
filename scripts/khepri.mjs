@@ -36,7 +36,10 @@ const J = (g, code) => JSON.parse(g.run(`JSON.stringify(${code})`));
 const COUNTED = ['btlTick', 'btlDrawPilot', 'btlDrawLance', 'btlDrawFloorMarks', 'btlDrawOverBodies', 'btlOdDrawGrade',
   'btlOdFloor', 'btlOdWings', 'btlScorch', 'btlPyroMarks', 'btlPyros', 'btlStrikeHull', 'btlDrawStrikeMarks', 'btlStrikeFoot',
   'btlStrikeCut', 'btlBrandWall', 'btlBrandNukeMark', 'btlBrandNuke', 'btlKitScreen', 'btlKhepriAura', 'btlKhepriHull',
-  'btlKhepriStars', 'btlKhepriScreen', 'btlKill', 'btlBossAsh', 'btlOdSwarm', 'btlOdBraid'];
+  'btlKhepriStars', 'btlKhepriScreen', 'btlKill', 'btlBossAsh', 'btlOdSwarm', 'btlOdBraid',
+  'btlDrawVentHud', 'btlDrawOdHud', 'btlDrawStrikeUi', 'btlDrawBrandUi'];
+// the stock kit's burst colours, and the beetle's (BTL_FX)
+const STOCK_FX = ['#fff7ed', '#fde047', '#fdba74', '#fb923c', '#f97316'];
 
 function game(worn) {
   const g = loadGame(IDX, { w: 1280, h: 720 });
@@ -88,8 +91,9 @@ function play(g, rec) {
   g.run(`__dash = true;`); steps(g, 40, rec);
   // OVERDRIVE: the swarm, the room, the wings, the braid
   act(g, `P.vent = VENT_MAX; ventFire();`); steps(g, 330, rec);
-  // Z, then X at a body
-  act(g, `P.vent = VENT_MAX; odAbility(0);`); steps(g, 150, rec);
+  // Z, then X at a body; what Z's cast threw is kept for the colours
+  g.run(`globalThis.__p0 = parts.length;`);
+  act(g, `P.vent = VENT_MAX; odAbility(0); globalThis.__zSparks = parts.slice(__p0).map(p => p.color);`); steps(g, 150, rec);
   act(g, `P.vent = VENT_MAX; __aim = { x: P.x + 220, y: P.y + 40 }; odAbility(1);`); steps(g, 160, rec);
   // C: up, marked at the cursor once it is aiming, and COMBO 1's ring and column queued once it is marked
   act(g, `__trig = false; P.vent = VENT_MAX; __aim = { x: (arena.x0 + arena.x1) / 2 + 150, y: (arena.y0 + arena.y1) / 2 }; odAbility(2);`);
@@ -133,6 +137,13 @@ console.log('· DRAWN, KILLS, IN STEP');
   ok(saw.ring && saw.nuke, 'C ran COMBO 1 to the end: the ring wall stood and the giant column went up', saw);
   ok(saw.fusion, 'V lit: KHEPRI flew', saw);
   ok(!Object.keys(J(b, `__n`)).some(k => k !== 'btlTick' && J(b, `__n`)[k] > 0), 'the copy without it never drew any of it');
+  // the bursts: the same sparks either way, in its colours only when it is worn
+  const fxA = J(a, `BTL_G.fxN`), fxB = J(b, `BTL_G.fxN`), zA = J(a, `__zSparks`), zB = J(b, `__zSparks`), beetle = J(a, `Object.values(BTL_FX)`);
+  ok(fxA >= 15 && fxB === 0, `the kit's effects threw in its colours (${fxA} of them), and none did without it`, [fxA, fxB]);
+  ok(zA.length > 10 && zA.length === zB.length, 'Z\'s cast threw as many sparks worn as not', [zA.length, zB.length]);
+  ok(zA.every(c => beetle.includes(c)) && zB.every(c => STOCK_FX.includes(c)),
+     'every one of them on the beetle\'s ramp worn, and on the stock one without it', { worn: [...new Set(zA)], bare: [...new Set(zB)] });
+  ok(J(a, `btlFxText('#fb923c')`) === '#67e8f9' && J(b, `btlFxText('#fb923c')`) === '#fb923c', 'VENT READY and the kit\'s numbers too');
   let first = -1;
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) if (pa[i] !== pb[i]) { first = i; break; }
   ok(first < 0 && pa.length === pb.length && pa.length > 40, `worn and not worn, the run is the same at all ${pa.length} checkpoints`,
