@@ -143,7 +143,21 @@ report. It ships to main only at the end.
      - the seams light, and every body plate gets a crest
      - the braided lance replaces the helix
      - the grade and flash go cold
-   - **Still to draw:** Z, X, C and the combos.
+   - **The moves, drawn 22 Oct** (`beetle-art/kit.js`, on the board). Each
+     takes the stock state and draws in the stock layer, so wiring is a swap:
+     - Z: a bombardier's spray that fills its hitbox, equally bright along
+       its length because its damage doesn't fall off; scars cool to black
+       glass
+     - X: fire beetles circle the mark and dive in; the column erupts with
+       them bursting out; the crater cools to glass
+     - C: the wings drive the take-off, the cut is two shell halves closing
+       over the screen, the aim lanes end in mandible hooks, and the foot
+       carries a sickle blade
+     - Combo 1: a curtain wall of blue flame with thorns, and a giant column
+       primed by a swarm
+   - **Not reskinned yet:** the screen UI (BRAND's prompts and brackets,
+     COMBO 1's key caps), the HUD's heat meter, and the Fx hooks' bursts and
+     colours. Those are still the stock orange.
 5. **V art.** The scarab and its blue sun.
 6. **Name, card and grant.** Name it, draw the menu card, drop `wip`, and
    grant it to both "ember" identities: the account's pid (71b1ebbc…) and the

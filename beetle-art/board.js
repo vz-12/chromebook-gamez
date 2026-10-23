@@ -67,7 +67,7 @@ function boardPuppetStep(P, dt, targets) {
   } else { P.charge = 0; P.beam = 0; }
   // the beam: from the jaws along the aim
   P.segs.length = 0;
-  if (P.beam > 0) {
+  if (P.beam > 0 && !P.noSegs) {               // noSegs: the jaws open with no lance (Z)
     const ca = Math.cos(P.ang), sa = Math.sin(P.ang), x1 = P.x + ca * BTL.mouth, y1 = P.y + sa * BTL.mouth;
     P.segs.push({ x1, y1, x2: x1 + ca * P.range, y2: y1 + sa * P.range });
   }
@@ -193,7 +193,7 @@ function boardBuild() {
   const eight = t => { const u = t * 1.2; return [Math.sin(u) * 150, Math.sin(u * 2) * 62]; };
   const hero = boardStage($('hero'), {
     zoom: 2.4, shares: true,
-    fit: st => { st.zoom = clamp(Math.min(st.w / 480, st.h / 260), 1.1, 3.2); },
+    fit: st => { st.zoom = clamp(Math.min(st.w / 480, st.h / 260), 0.5, 3.2); },
     targets: [0, 1, 2].map(i => ({ o: i * TAU / 3, R: 205, orbit: 0.22, x: 0, y: 0, a: 0, spin: 0.6 + i * 0.3,
                                    r: 11 + i * 2, n: 3 + i, col: ['#f43f5e', '#a3e635', '#f97316'][i], burn: 0 }))
   });
@@ -361,7 +361,7 @@ function boardBuildOd() {
   const P = boardPuppet({ path: t => [Math.cos(t * 0.7) * 30, Math.sin(t * 1.1) * 16], fire: false });
   const ig = boardStage($('od-ignite'), {
     T: 0, pools: [], flash: 0, auto: true, puppets: [P], step: boardOdStep, draw: boardOdDraw,
-    fit: s => { s.zoom = clamp(Math.min(s.w / 420, s.h / 236), 1, 3); s.pools = []; },
+    fit: s => { s.zoom = clamp(Math.min(s.w / 420, s.h / 236), 0.5, 3); s.pools = []; },
     targets: [0, 1, 2].map(i => ({ o: i * TAU / 3 + 0.5, R: 160, orbit: 0.16, x: 0, y: 0, a: 0, spin: 0.5 + i * 0.3,
                                    r: 11 + i * 2, n: 3 + i, col: ['#f43f5e', '#a3e635', '#f97316'][i], burn: 0 }))
   });

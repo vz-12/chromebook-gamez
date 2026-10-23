@@ -188,7 +188,7 @@ function btlOdFloor(pools, t, life, parts) {
 function btlOdWings(B, me, q) {
   const open = q ? q.open : 0;
   if (open <= 0.001) return;
-  const t = B.t, surge = btlSurge(t), lag = clamp(B.turn * 0.05, -0.7, 0.7);
+  const t = B.t, surge = btlSurge(t), lag = clamp(B.turn * 0.05, -0.7, 0.7), flap = B.flap || 1;   // flap: BRAND drives them harder
   ctx.save();
   ctx.translate(me.x, me.y); ctx.rotate(me.ang);
   ctx.globalCompositeOperation = 'lighter';
@@ -199,7 +199,7 @@ function btlOdWings(B, me, q) {
   ctx.globalAlpha = 0.85 * open; ctx.fillStyle = BTL_OD.white;
   ctx.beginPath(); ctx.ellipse(-7, 0, 3.4 + surge, 1.6 + surge * 0.4, 0, 0, TAU); ctx.fill();
   for (const s of [-1, 1]) {
-    const beat = Math.sin(t * 5.2 + s * 0.4) * 0.1, skew = lag * s;
+    const beat = Math.sin(t * 5.2 * flap + s * 0.4) * 0.1 * flap, skew = lag * s;
     const dir = Math.PI - s * (1.0 - beat) - lag * 0.45;             // the spar: back and out
     const L = 34 * open * (0.88 + surge * 0.12);
     const rx = -2.5, ry = 3.4 * s, ca = Math.cos(dir), sa = Math.sin(dir);

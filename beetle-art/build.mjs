@@ -29,10 +29,12 @@ if (motionAt < 0 || motionEnd < 0) throw new Error('build: MOTION is not in inde
 const pieces = {
   HELPERS: ['const _glowCache = new Map();', fn('rgba'), fn('glowSprite'), fn('drawGlow'),
             // OVERDRIVE's beat, as the game has it
-            line('const OD_T_DIM ='), line('const OD_T_SPARK ='), line('const OD_T_WINGS ='), line('const osEase =')].join('\n'),
+            line('const OD_T_DIM ='), line('const OD_T_SPARK ='), line('const OD_T_WINGS ='), line('const osEase ='),
+            // the moves' own numbers, and the X that BRAND cuts
+            ...html.match(/^const (SCORCH|SCAR|PYRO|STRIKE|BRAND)_[A-Z_]+ += [0-9.]+;.*$/gm), fn('odClipSeg'), fn('odStrikeX')].join('\n'),
   MOTION: html.slice(html.lastIndexOf('/*', motionAt), motionEnd),
-  ART: ['beetle.js', 'overdrive.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
-  BOARD: fs.readFileSync(path.join(here, 'board.js'), 'utf8')
+  ART: ['beetle.js', 'overdrive.js', 'kit.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n'),
+  BOARD: ['board.js', 'board-kit.js'].map(f => fs.readFileSync(path.join(here, f), 'utf8')).join('\n')
 };
 let page = fs.readFileSync(path.join(here, 'board.html'), 'utf8');
 for (const [k, v] of Object.entries(pieces)) {
