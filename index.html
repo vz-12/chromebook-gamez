@@ -5654,7 +5654,9 @@ function killBody(e, ang) {
      than going deeper. Depth and speed are what the ladder is for. */
   if (!rushOn() || e.type === 'boss')
     score += Math.round(e.score * (1 + wave * 0.05) * hardScore());
-  if (e.burn > 0 && e.type !== 'boss') {
+  if (btlKillTap(e)) {
+    // KHEPRI: burnt out in blue cinders, or a boss to ash, its own way
+  } else if (e.burn > 0 && e.type !== 'boss') {
     // burnt out rather than blown up: see shatterBody
     burst(e.x, e.y, 5, '#7f1d1d', 140, e.r * 0.16 + 1.5, 0.45);
     ringFx(e.x, e.y, e.r * 0.3, e.r * 2.1, '#7f1d1d', 0.45, 2);
@@ -33741,6 +33743,7 @@ function odTick(dt) {
 function odDrawWorld() {
   const q = odPhase();
   if (!q || !odSeeded) return;
+  if (btlTake(() => btlOdFloor(odPools, uiTime, q.life, btlBag().parts))) return;   // KHEPRI: the room burns blue
   odDrawFireRoom(ctx, uiTime, q.life);
 }
 
@@ -33748,6 +33751,7 @@ function odDrawWorld() {
 function odDrawShip() {
   const q = odPhase();
   if (!q || q.open <= 0.001) return;
+  if (btlWorn()) return;                       // KHEPRI: its wings of fire are the hull's own
   odDrawWings(ctx, P.x, P.y, P.ang, uiTime, q.open);
 }
 
@@ -33764,6 +33768,7 @@ function odDrawLance() {
 
 // the dim, the warm grade and the flash, over the frame
 function odDrawGrade() {
+  if (btlTake(btlOdDrawGrade)) return;        // KHEPRI: the swarm in place of the spark, a cold grade
   const q = odPhase();
   if (!q) return;
   const dAmt = q.dim * (1 - q.life * 0.45);
@@ -34809,6 +34814,7 @@ const odParts = () => typeof FXO === 'undefined' || FXO.parts;
    Every stamp of a score goes into ONE path per layer, so where stamps
    overlap the swath stays one even surface instead of stacking up alpha. */
 function drawOdScars() {
+  if (btlTake(btlDrawFloorMarks)) return;     // KHEPRI: its scores, and the scorches its kills leave
   if (!odScars.length) return;
   ctx.save();
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -34900,6 +34906,7 @@ function drawOdScars() {
 
 /* -------------------------------- the beam -------------------------------- */
 function drawOdScorch() {
+  if (btlTake(() => btlScorch(btlBag(), P.odScorch))) return;   // KHEPRI: Z, a bombardier's spray
   const sc = P.odScorch;
   if (!sc || sc.k <= 0.01) return;
   const hw = Math.max(sc.half, 1), k = sc.k, t = sc.t;
@@ -35021,6 +35028,7 @@ function drawOdKitScreen() {
   const a = 1 - (uiTime - odScorchLitAt) / 0.35;
   const b = 1 - (uiTime - odScorchEndAt) / 0.4;
   if (a <= 0 && b <= 0) return;
+  if (btlTake(() => btlKitScreen(a, b, W, H))) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   if (a > 0) {
@@ -35212,6 +35220,7 @@ function odPyroBlot(p, rad) {
 }
 
 function drawOdPyroMarks() {
+  if (btlTake(() => btlPyroMarks(odPyros))) return;   // KHEPRI: X, fire beetles round the mark
   if (!odPyros.length) return;
   ctx.save();
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -35310,6 +35319,7 @@ function odTongue(x, y, w, h, lean) {
 }
 
 function drawOdPyros() {
+  if (btlTake(() => btlPyros(odPyros, btlBag().parts))) return;
   for (const p of odPyros) if (p.up) odPyroColumn(p);
 }
 
@@ -35498,6 +35508,7 @@ const odStrikeGrow = a => 1 + a * 1.1;
 
 // on the floor under the hull: its shadow, and the downdraft splashing out
 function drawOdStrikeGround() {
+  if (btlWorn()) return;                       // KHEPRI: the beetle's take-off is drawOdStrikeHull's
   const st = P.odStrike;
   if (!st) return;
   const a = odStrikeAlt(), w = odStrikeWings();
@@ -35649,6 +35660,7 @@ function odStrikeVanes(c, x, y, ang, t, open, turn, bright, down) {
    them until they are white. Rise: they bend down toward the floor and drive
    it up, the hull climbing toward the eye as it goes. */
 function drawOdStrikeHull() {
+  if (btlTake(() => btlStrikeHull(btlBag(), btlMe(), odStrikeAlt(), odStrikeWings()))) return;
   const st = P.odStrike;
   if (!st || state === 'dead') return;
   const a = odStrikeAlt(), w = odStrikeWings();
@@ -35691,6 +35703,7 @@ function drawOdStrikeHull() {
 
 // the X: under the cursor while aiming, then locked and eaten by the foot
 function drawOdStrikeMarks() {
+  if (btlTake(btlDrawStrikeMarks)) return;    // KHEPRI: C, lanes with a mandible's hooks
   const st = P.odStrike;
   if (!st) return;
   const px = odStrikePx(), R = odStrikeR();
@@ -35760,6 +35773,7 @@ function drawOdStrikeMarks() {
 
 // the foot: a column of fire seen end-on from above
 function drawOdStrike() {
+  if (btlTake(() => btlStrikeFoot(P.odStrike, camZoom, uiTime))) return;
   const st = P.odStrike, b = st && st.beam;
   if (!b || b.R < 1) return;
   const R = b.R, k = b.k, s = st.strokes[b.i];
@@ -35877,6 +35891,7 @@ function drawOdStrikeUi() {
 
 // the cuts: an iris closing on the frame's centre (the hull, going; the hull, back), rimmed with heat
 function drawOdStrikeCut() {
+  if (btlTake(() => btlStrikeCut(odStrikeBlack(), W, H, uiTime))) return;   // KHEPRI: the shell closing over the view
   const a = odStrikeBlack();
   if (a <= 0) return;
   const D = Math.hypot(W, H) / 2, r = D * Math.pow(1 - a, 0.9);
@@ -36017,6 +36032,7 @@ const odWallH = (g) => {                          // the wall's height now, burs
 };
 
 function drawOdBrandWall() {
+  if (btlTake(() => btlBrandWall(odRing))) return;
   const g = odRing;
   if (!g) return;
   const H = odWallH(g), k = clamp(g.t / 0.2, 0, 1) * clamp((g.life - g.t) / 0.9, 0, 1);
@@ -36069,6 +36085,7 @@ function drawOdBrandWall() {
 
 // the whole ring priming, then the crater
 function drawOdBrandNukeMark() {
+  if (btlTake(() => btlBrandNukeMark(P.odStrike, uiTime))) return;
   const n = P.odStrike && P.odStrike.nuke;
   if (!n) return;
   const px = odStrikePx(), pw = clamp((n.heat || 60) / (typeof VENT_MAX === 'number' ? VENT_MAX : 100), 0.5, 1);
@@ -36120,6 +36137,7 @@ function drawOdBrandNukeMark() {
 
 // PYROTECHNICS' column, as wide as the ring
 function drawOdBrandNuke() {
+  if (btlTake(() => btlBrandNuke(P.odStrike, uiTime, btlBag().parts))) return;
   const n = P.odStrike && P.odStrike.nuke;
   if (!n || !n.up) return;
   const pw = clamp((n.heat || 60) / (typeof VENT_MAX === 'number' ? VENT_MAX : 100), 0.5, 1);
@@ -36306,6 +36324,7 @@ const odFusionK = f => f ? clamp((f.t - 0.7) / 0.5, 0, 1) * clamp((f.life - f.t 
 
 // the aura: a sun's surface, rim at exactly what burns
 function drawOdFusionAura() {
+  if (btlTake(() => btlKhepriAura(P, P.odFusion, uiTime))) return;   // KHEPRI: V
   const f = P.odFusion;
   if (!f) return;
   const R = FUSION_AURA_R, k = odFusionK(f);
@@ -36386,6 +36405,7 @@ function odFusionForm(f) {
 
 /* IFRIT. All in the hull's frame: x forward, y to the right. */
 function drawOdFusionHull() {
+  if (btlTake(() => btlKhepriHull(btlBag(), btlMe(), P.odFusion, uiTime, odFusionThrow))) return;
   const f = P.odFusion, t = uiTime;
   const hurt = P.hurtFlash > 0;
   const tin = f ? f.t : 9, tout = f ? f.life - f.t : 9;
@@ -36611,6 +36631,7 @@ function drawOdFusionHull() {
 
 // the stars, and the fireballs they leave
 function drawOdStars() {
+  if (btlTake(btlDrawOverBodies)) return;     // KHEPRI: V's suns, and the ash and cinders of its kills
   for (const s of odStars) {
     if (s.dead) continue;
     const hot = s.fuse >= 0 ? clamp(1 - s.fuse / STAR_FUSE, 0, 1) : 0;
@@ -36678,6 +36699,7 @@ function drawOdStars() {
 
 // the frame: the ignition flash, a warm edge while it burns, and smoke as it goes out
 function drawOdFusionScreen() {
+  if (btlTake(() => btlKhepriScreen(P.odFusion, uiTime, odFusionOutAt, W, H))) return;
   const f = P.odFusion;
   const a = f ? Math.max(0, 1 - Math.abs(f.t - FUSION_IN) / 0.35) * 0.7 : 0;
   const o = 1 - (uiTime - odFusionOutAt) / 0.6;
@@ -38831,6 +38853,7 @@ function frame(now) {
     tutTick(dt);              // FIRST FLIGHT's lessons, read off the run
     if (PVP) PVP.frame();     // PvP mode: its own screens and transitions
     hlWrFrame();             // ALL HALLOWS: a prize skin's wardrobe, once a frame
+    btlFrame();              // KHEPRI: EMBER's signature skin, once a frame
     render();
     try { Music.tick(dt); }           // the score: which track, and keeping it fed (Music)
     catch (e) { if (!Music.err++) console.error('VOIDRUNNER music:', e); }
@@ -60884,6 +60907,2440 @@ function moRibbon(pts, w0, w1, o = {}) {
 /* ===================== end of MOTION ===================== */
 
 /* ===========================================================================
+   KHEPRI — EMBER's signature skin (BEETLE-PLAN.md; the art is beetle-art/, lifted
+   by beetle-art/lift.mjs: change it there and lift again, not here)
+   A blue beetle for EMBER, made by request for the October season's #1: the
+   base hull, its kills, OVERDRIVE and all four of its moves, and V as KHEPRI.
+   Worn only by profiles it was granted to (SECRET_SKINS 'ember-gift'), only
+   on EMBER, and drawn through the guards at the top of the stock functions
+   it takes over (the adapter, at the foot of this block).
+=========================================================================== */
+
+/* ===========================================================================
+   EMBER · THE BLUE BEETLE — the art (BEETLE-PLAN.md)
+   Step 1, the concept: the base look, drawn on MOTION. It is written to be
+   lifted into index.html as it stands, so it reads the pilot only through a
+   small state object (`me`, below) and keeps everything it remembers in its
+   own bag (`B`). It leans on ctx, TAU, clamp, lerp, rgba, drawGlow and MOTION.
+
+     THE HEAD     EMBER's hull is the beetle's head and thorax: black chitin
+                  with a structural sheen that slides between electric blue
+                  and violet as the hull turns against the light, compound
+                  eyes, clubbed antennae on chains, and two sickle mandibles
+                  with fangs on the inside edge.
+     THE BITE     the mandibles follow the gun (< = < =): they part as the
+                  lance charges, fling wide as it fires, hold open with a
+                  tremor while it burns, and snap shut when it goes out.
+     THE SHELL    the elytra. Shut, they meet in a seam down the back. In a
+                  dash they spring open and the flight wings blur out from
+                  under them.
+     THE BODY     seven armoured plates on a MOTION chain off the hull's rear
+                  socket: it follows the route flown when going forward, and
+                  slides back behind the head when backing off. Spiracles lit
+                  cyan and magenta, side spines that rise with speed, and the
+                  thruster at the tail.
+     THE FIRE     the lance as a blue-violet flamethrower. Its puffs live in
+                  the beam's own frame (how far along, how far across), so the
+                  fire is always exactly on the hitbox, however fast the hull
+                  turns: white-hot at the jaws, where it hits hardest, cooling
+                  through blue to violet smoke at the tip, where it hits least.
+     THE DASH     tiny blue flames left along the line, gone inside 1.5 s.
+
+     me = { x, y, ang,             where the hull is and which way it faces
+            vx, vy,                its velocity (px/s)
+            charge,                0..1 while the lance winds up
+            beam,                  0 when out; else the flare (0.5 → 1 → 0.5)
+            segs, half,            the beam's segments [{x1,y1,x2,y2}] and half width
+            range,                 how long the lance is, for the falloff
+            dash }                 > 0 while dashing
+
+     btlNew(x, y, ang)     the bag
+     btlTick(B, me, dt)    steps everything
+     btlDrawUnder(B, me)   the dash flames and the body, under the hull
+     btlDrawHull(B, me)    the head, the shell, the wings, the jaws
+     btlDrawFire(B, me)    the lance and the wind-up, over everything
+=========================================================================== */
+
+const BTL = {
+  ink: '#050414', chitin: '#0c0a24', chitin2: '#191343', plate: '#231a5c',
+  blue: '#1d4ed8', sky: '#38bdf8', cyan: '#22d3ee', ice: '#cffafe', white: '#f0fdff',
+  violet: '#6d28d9', orchid: '#a855f7', magenta: '#e879f9', pink: '#f0abfc',
+  // the fire, white-hot to smoke
+  fire: ['#f0fdff', '#a5f3fc', '#38bdf8', '#3b5bfd', '#6d3cf0', '#8b2fd6', '#2e1065'],
+  light: -2.3,              // the screen angle the light comes from, for the sheen
+  segs: 7, segGap: 8.2,     // the body: plates, and the length of each link
+  mouth: 20,                // the muzzle, as the stock lance has it
+  jawHinge: [11.2, 3.0]
+};
+
+/* ------------------------------- the colours ------------------------------ */
+const btlHex = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function btlMix(a, b, t) {
+  const A = btlHex(a), C = btlHex(b), k = clamp(t, 0, 1);
+  return '#' + A.map((v, i) => Math.round(v + (C[i] - v) * k).toString(16).padStart(2, '0')).join('');
+}
+// a point on the fire's ramp, 0 white-hot → 1 smoke
+function btlFire(u) {
+  const R = BTL.fire, f = clamp(u, 0, 1) * (R.length - 1), i = Math.min(R.length - 2, Math.floor(f));
+  return btlMix(R[i], R[i + 1], f - i);
+}
+/* The sheen: how the shell catches the light at this heading. 0 is the blue
+   face, 1 the violet; the hull turning slides between them. */
+const btlSheen = ang => 0.5 + 0.5 * Math.cos(ang - BTL.light - 0.6);
+// how many device pixels one hull unit is right now: the detail asks for it
+function btlPx() { const m = ctx.getTransform(); return Math.hypot(m.a, m.b); }
+
+/* soft round sprites for the fire, one per step of the ramp: the game's own
+   glow sprite falls off too fast for smoke */
+const _btlPuff = [];
+function btlPuff(i) {
+  if (_btlPuff[i]) return _btlPuff[i];
+  const S = 64, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d'), col = btlFire(i / 15), gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  gr.addColorStop(0, rgba(col, 1)); gr.addColorStop(0.35, rgba(col, 0.55));
+  gr.addColorStop(0.7, rgba(col, 0.16)); gr.addColorStop(1, rgba(col, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  return (_btlPuff[i] = c);
+}
+
+/* ================================== THE BAG =============================== */
+function btlNew(x, y, ang) {
+  const B = {
+    t: 0, x, y, ang, speed: 0, turn: 0, lastAng: ang, beamWas: 0, beamAge: 0,
+    // the body: a chain off the rear socket that may swing 30° off straight back
+    body: moRope(BTL.segs + 1, BTL.segGap, { x, y, ang, lx: -14.2, lay: Math.PI, bend: 0.3, rootBend: 0.52,
+                                              drag: 6, follow: 0.35 }),
+    // the antennae: short, clubbed, on stiff little chains
+    ant: [-1, 1].map(s => moRope(4, 2.3, { x, y, ang, lx: 9.4, ly: s * 4.4, lay: s * 0.78, bend: 0.3, rootBend: 0.42,
+                                           drag: 7, follow: 0.5 })),
+    jaw: moSpring(0.1, 7, 0.42),         // 0 shut … 1 flung wide
+    shell: moSpring(0, 5.5, 0.55),       // the elytra: 0 shut, 1 open (a dash)
+    wing: moSpring(0, 8, 0.75),          // the flight wings unfolding under them
+    fins: moSpring(0, 3, 0.6),           // the body's side spines, raised by speed
+    lean: moSpring(0, 2.5, 0.7),         // a bank into turns
+    puffs: [], flameEm: moEmitter(0), trailEm: moEmitter(0), thrustEm: moEmitter(26),
+    parts: moPool(),                     // its own sparks, apart from anything else on screen
+    scorches: [], ashes: []              // what its kills leave (kills.js)
+  };
+  return B;
+}
+
+/* ================================== THE TICK ============================== */
+function btlTick(B, me, dt) {
+  if (!(dt > 0)) return;
+  B.t += dt;
+  B.x = me.x; B.y = me.y; B.ang = me.ang;
+  B.speed = Math.hypot(me.vx || 0, me.vy || 0);
+  B.turn = moDecay(B.turn, moWrap(me.ang - B.lastAng) / dt, 0.08, dt);
+  B.lastAng = me.ang;
+
+  // the bodies ride the hull
+  moFrame(B.body, me.x, me.y, me.ang); moStep(B.body, dt);
+  for (const a of B.ant) { moFrame(a, me.x, me.y, me.ang); moStep(a, dt); }
+
+  // the bite follows the gun
+  const beam = me.beam > 0;
+  if (beam && !B.beamWas) { B.beamAge = 0; B.jaw.kick(9); }       // the fling
+  B.beamAge += dt;
+  B.jaw.to = beam ? 1 - 0.12 * Math.abs(Math.sin(B.t * 31)) * clamp(B.beamAge * 4, 0, 1)
+           : me.charge > 0.01 ? 0.16 + 0.42 * me.charge * me.charge + 0.04 * Math.sin(B.t * 40) * me.charge
+           : 0.08 + 0.03 * Math.sin(B.t * 2.1);
+  if (!beam && B.beamWas) B.jaw.kick(-6);                          // the snap
+  B.beamWas = beam;
+  B.jaw.step(dt);
+
+  const dashing = (me.dash || 0) > 0;
+  const odOpen = me.od ? me.od.open : 0;
+  B.shell.to = Math.max(dashing ? 1 : 0, odOpen * 1.5); B.shell.step(dt);   // OVERDRIVE flings it wide and holds it
+  B.wing.to = dashing && odOpen < 0.2 ? 1 : 0; B.wing.step(dt);             // its wings of fire take over from these
+  B.fins.to = clamp(B.speed / 420, 0, 1); B.fins.step(dt);
+  B.lean.to = clamp(B.turn * 0.06, -0.5, 0.5); B.lean.step(dt);
+
+  btlFlameTick(B, me, dt);
+  btlTrailTick(B, me, dt);
+  btlKillsTick(B, dt);
+  moPartsStep(dt, B.parts);
+}
+
+/* ============================== THE HEAD (paths) ==========================
+   All in hull space: x forward along the nose, y to starboard. EMBER's own
+   outline runs from 22 at the nose to -12 at the tail, ±13.5 at the vanes;
+   the beetle fills about the same box, with the shell as its biggest shape:
+     mandibles  11 → 22     head  3 → 13     pronotum  -4 → 5
+     elytra    -16 → -2.5, together one dome split down the middle      */
+function btlPathElytron(s) {
+  ctx.beginPath();
+  ctx.moveTo(-2.6, 0.45 * s);
+  ctx.quadraticCurveTo(-2.0, 5.4 * s, -3.0, 9.0 * s);              // the shoulder
+  ctx.bezierCurveTo(-4.2, 11.7 * s, -9.0, 12.3 * s, -12.6, 8.7 * s);
+  ctx.bezierCurveTo(-15.4, 5.7 * s, -16.6, 2.0 * s, -16.0, 0.45 * s);
+  ctx.closePath();                                                  // back up the seam
+}
+function btlPathPronotum() {
+  ctx.beginPath();
+  ctx.moveTo(5.0, -6.0);
+  ctx.quadraticCurveTo(3.4, 0, 5.0, 6.0);                           // hollowed round the head
+  ctx.bezierCurveTo(5.6, 8.6, 2.6, 9.8, 0.2, 9.6);
+  ctx.quadraticCurveTo(-2.4, 9.4, -3.3, 8.5);
+  ctx.quadraticCurveTo(-4.1, 0, -3.3, -8.5);
+  ctx.quadraticCurveTo(-2.4, -9.4, 0.2, -9.6);
+  ctx.bezierCurveTo(2.6, -9.8, 5.6, -8.6, 5.0, -6.0);
+  ctx.closePath();
+}
+function btlPathHead() {
+  ctx.beginPath();
+  ctx.moveTo(3.6, -4.8);
+  ctx.bezierCurveTo(6.4, -5.9, 9.8, -5.6, 11.6, -3.7);
+  ctx.quadraticCurveTo(12.9, -1.9, 12.7, 0);
+  ctx.quadraticCurveTo(12.9, 1.9, 11.6, 3.7);
+  ctx.bezierCurveTo(9.8, 5.6, 6.4, 5.9, 3.6, 4.8);
+  ctx.quadraticCurveTo(2.8, 0, 3.6, -4.8);
+  ctx.closePath();
+}
+/* One mandible, in its own frame: the hinge at the origin, x forward, s 1
+   starboard and -1 port. A sickle: the outer edge sweeping forward, the tip
+   hooking in past the middle, a clean inside edge (the fangs are their own
+   shapes, set along it). */
+function btlPathMandible(s) {
+  ctx.beginPath();
+  ctx.moveTo(0, -1.1 * s);
+  ctx.bezierCurveTo(1.0, 1.6 * s, 4.6, 2.4 * s, 7.6, 1.6 * s);
+  ctx.quadraticCurveTo(10.4, 0.8 * s, 11.5, -1.7 * s);              // the hook
+  ctx.quadraticCurveTo(9.9, -0.5 * s, 8.6, -0.3 * s);
+  ctx.quadraticCurveTo(4.6, 0.2 * s, 1.4, -0.4 * s);
+  ctx.quadraticCurveTo(0.6, -0.7 * s, 0, -1.1 * s);
+  ctx.closePath();
+}
+// the fangs down the inside edge [x, length], and the spikes on the outside [x, length]
+const BTL_FANGS = [[4.4, 1.3], [6.3, 1.8], [8.2, 1.5]];
+const BTL_SPIKES = [[3.2, 1.3], [6.0, 1.1]];
+// shut, the tips cross past the middle; flung, they stand 45° out
+const btlJawAng = (B, s) => s * lerp(-0.17, 0.8, clamp(B.jaw.v, -0.15, 1.25));
+
+/* Chitin, lit: a shadow-to-colour ramp across the light, then the gloss, a
+   soft specular spot on the side the light comes from. Clipped to whatever
+   path is current. (cx, cy) and r are the dome's middle and size. */
+function btlShade(cx, cy, r, lx, ly, k, gloss = 1) {
+  const mid = btlMix(BTL.blue, BTL.violet, k), hot = btlMix(BTL.cyan, BTL.magenta, k);
+  const g = ctx.createLinearGradient(cx - lx * r, cy - ly * r, cx + lx * r, cy + ly * r);
+  g.addColorStop(0, BTL.ink); g.addColorStop(0.45, BTL.chitin);
+  g.addColorStop(0.8, btlMix(BTL.chitin2, mid, 0.55)); g.addColorStop(1, mid);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save(); ctx.clip();
+  ctx.globalCompositeOperation = 'lighter';
+  const sx = cx + lx * r * 0.42, sy = cy + ly * r * 0.42, sp = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 0.75);
+  sp.addColorStop(0, rgba(btlMix(hot, BTL.white, 0.35), 0.55 * gloss)); sp.addColorStop(0.35, rgba(hot, 0.28 * gloss));
+  sp.addColorStop(1, rgba(mid, 0));
+  ctx.fillStyle = sp; ctx.fillRect(cx - r * 2, cy - r * 2, r * 4, r * 4);
+  // the far rim catches the other colour, as thin films do
+  const rg = ctx.createLinearGradient(cx + lx * r, cy + ly * r, cx - lx * r, cy - ly * r);
+  rg.addColorStop(0.82, rgba(btlMix(BTL.magenta, BTL.cyan, k), 0)); rg.addColorStop(1, rgba(btlMix(BTL.magenta, BTL.cyan, k), 0.32 * gloss));
+  ctx.fillStyle = rg; ctx.fillRect(cx - r * 2, cy - r * 2, r * 4, r * 4);
+  ctx.restore();
+}
+
+/* ================================= THE HULL =============================== */
+function btlDrawHull(B, me) {
+  const px = btlPx(), k = btlSheen(me.ang + B.lean.v * 0.6);
+  // the light, in hull space
+  const la = BTL.light - me.ang, lx = Math.cos(la), ly = Math.sin(la);
+  const rim = btlMix(BTL.cyan, BTL.pink, k), seam = me.odGlow || 0;    // OVERDRIVE lights the seams
+  ctx.save();
+  ctx.translate(me.x, me.y);
+  ctx.rotate(me.ang);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+  // the halo: the silhouette stroked wide and faint, thrown outward
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 4; i >= 1; i--) {
+    ctx.lineWidth = 1.4 + i * 2.4;
+    ctx.strokeStyle = rgba(i > 2 ? BTL.violet : BTL.cyan, 0.035 + 0.018 * (4 - i));
+    btlPathElytron(1); ctx.stroke(); btlPathElytron(-1); ctx.stroke();
+    btlPathPronotum(); ctx.stroke(); btlPathHead(); ctx.stroke();
+  }
+  ctx.restore();
+
+  // the flight wings, under the shell
+  const w = B.wing.v;
+  if (w > 0.03) btlDrawWings(B, w, px);
+
+  // the elytra: each turns out on its shoulder hinge
+  const open = clamp(B.shell.v, -0.1, 1.2);
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.translate(-2.8, 1.0 * s);
+    ctx.rotate(s * open * 0.6);
+    ctx.translate(2.8, -1.0 * s);
+    btlPathElytron(s);
+    btlShade(-8.6, 5.6 * s, 8.4, lx, ly, k);
+    if (open > 0.05) { btlPathElytron(s); ctx.fillStyle = rgba(BTL.ink, 0.3 * clamp(open, 0, 1)); ctx.fill(); }
+    if (px > 2.4) btlElytronDetail(s, px, k);
+    btlPathElytron(s);
+    ctx.lineWidth = 0.7; ctx.strokeStyle = rgba(rim, 0.85); ctx.stroke();
+    if (seam > 0.01) btlSeam(seam);
+    ctx.restore();
+  }
+
+  // the pronotum
+  btlPathPronotum();
+  btlShade(0.6, 0, 8.4, lx, ly, k);
+  if (px > 2.4) {
+    ctx.save(); btlPathPronotum(); ctx.clip();
+    ctx.strokeStyle = rgba(BTL.ink, 0.5); ctx.lineWidth = 0.3;
+    ctx.beginPath(); ctx.moveTo(4.2, 0); ctx.lineTo(-3.6, 0); ctx.stroke();      // the midline
+    ctx.strokeStyle = rgba(BTL.ink, 0.45); ctx.lineWidth = 0.5;                  // the raised margin
+    ctx.beginPath(); ctx.moveTo(4.6, 6.6); ctx.bezierCurveTo(4.9, 8.4, 2.4, 9.1, 0.2, 8.9); ctx.quadraticCurveTo(-2.1, 8.7, -2.8, 8.0);
+    ctx.moveTo(4.6, -6.6); ctx.bezierCurveTo(4.9, -8.4, 2.4, -9.1, 0.2, -8.9); ctx.quadraticCurveTo(-2.1, -8.7, -2.8, -8.0); ctx.stroke();
+    ctx.restore();
+  }
+  btlPathPronotum();
+  ctx.lineWidth = 0.7; ctx.strokeStyle = rgba(rim, 0.9); ctx.stroke();
+  if (seam > 0.01) btlSeam(seam * 0.8);
+
+  // the mandibles, under the head's front edge
+  for (const s of [-1, 1]) btlDrawMandible(B, s, px, k);
+
+  // the head
+  btlPathHead();
+  btlShade(8, 0, 6, lx, ly, k, 0.85);
+  btlPathHead();
+  ctx.lineWidth = 0.65; ctx.strokeStyle = rgba(rim, 0.9); ctx.stroke();
+  // the clypeus: a small plate over the mouth
+  ctx.beginPath();
+  ctx.moveTo(12.1, -2.2); ctx.quadraticCurveTo(14.0, 0, 12.1, 2.2); ctx.quadraticCurveTo(11.4, 0, 12.1, -2.2);
+  ctx.fillStyle = BTL.chitin2; ctx.fill(); ctx.strokeStyle = rgba(rim, 0.55); ctx.lineWidth = 0.4; ctx.stroke();
+
+  // the eyes: compound, lit from inside
+  for (const s of [-1, 1]) btlDrawEye(s, px, k);
+
+  // the throat, lit by what is coming
+  const glow = Math.max(me.charge || 0, me.beam > 0 ? 1 : 0);
+  if (glow > 0.02) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(15, 0, 4 + glow * 7, glow > 0.85 ? BTL.white : BTL.cyan, 0.22 + glow * 0.45);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // the antennae, in the world: they are chains
+  btlDrawAntennae(B, px, rim);
+}
+
+/* light running in the seams of whatever path is current: OVERDRIVE */
+function btlSeam(g) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 2.2; ctx.strokeStyle = rgba(BTL.cyan, 0.35 * g); ctx.stroke();
+  ctx.lineWidth = 0.6; ctx.strokeStyle = rgba(BTL.white, 0.8 * g); ctx.stroke();
+  ctx.restore();
+}
+
+function btlElytronDetail(s, px, k) {
+  ctx.save();
+  btlPathElytron(s); ctx.clip();
+  // striae: grooves down the length, following the dome, and the pits along them
+  ctx.strokeStyle = rgba(BTL.ink, 0.5); ctx.lineWidth = 0.28;
+  for (let i = 1; i <= 4; i++) {
+    const y0 = (0.6 + i * 2.15) * s;
+    ctx.beginPath(); ctx.moveTo(-3.0, y0 * 0.95); ctx.bezierCurveTo(-7, y0 * 1.12, -11, y0 * 1.02, -15.4, y0 * 0.18); ctx.stroke();
+  }
+  if (px > 4) {
+    ctx.fillStyle = rgba(BTL.ink, 0.55);
+    for (let i = 1; i <= 4; i++) for (let j = 0; j < 8; j++) {
+      const u = j / 7, y0 = (0.6 + i * 2.15) * s, x = lerp(-3.8, -14.2, u);
+      const y = y0 * lerp(1.0, 0.35, u * u) + 0.55 * s;
+      ctx.beginPath(); ctx.arc(x, y, 0.16, 0, TAU); ctx.fill();
+    }
+  }
+  // the seam's raised lip, and a gloss line along the outer edge
+  ctx.strokeStyle = rgba(BTL.ice, 0.22); ctx.lineWidth = 0.35;
+  ctx.beginPath(); ctx.moveTo(-2.8, 0.9 * s); ctx.lineTo(-15.6, 0.9 * s); ctx.stroke();
+  ctx.strokeStyle = rgba(BTL.ice, 0.16 + 0.1 * k); ctx.lineWidth = 0.45;
+  ctx.beginPath(); ctx.moveTo(-3.6, 9.4 * s); ctx.bezierCurveTo(-5.2, 11.2 * s, -9.0, 11.6 * s, -12.0, 8.6 * s); ctx.stroke();
+  ctx.restore();
+}
+
+function btlDrawMandible(B, s, px, k) {
+  const [hx, hy] = BTL.jawHinge;
+  const open = clamp(B.jaw.v, 0, 1), lit = 0.45 + 0.55 * open;
+  ctx.save();
+  ctx.translate(hx, hy * s);
+  ctx.rotate(btlJawAng(B, s));
+  const rimc = rgba(btlMix(BTL.cyan, BTL.pink, k), 0.9);
+  // the fangs first, so the jaw's edge sits over their roots
+  for (const [x, l] of BTL_FANGS) {
+    ctx.beginPath();
+    ctx.moveTo(x - 0.45, -0.05 * s); ctx.quadraticCurveTo(x - 0.1, -l * 0.6 * s, x + 0.15, -l * s);
+    ctx.quadraticCurveTo(x + 0.2, -l * 0.4 * s, x + 0.55, 0.05 * s); ctx.closePath();
+    const fg = ctx.createLinearGradient(x, 0, x, -l * s);
+    fg.addColorStop(0, BTL.violet); fg.addColorStop(1, btlMix(BTL.magenta, BTL.pink, open));
+    ctx.fillStyle = fg; ctx.fill();
+  }
+  // the spikes on the outer edge, swept back
+  for (const [x, l] of BTL_SPIKES) {
+    const y = 1.6 + 0.6 * Math.sin(x * 0.4);
+    ctx.beginPath();
+    ctx.moveTo(x - 0.6, (y - 0.25) * s); ctx.quadraticCurveTo(x - 0.4, (y + l * 0.6) * s, x - 1.1, (y + l) * s);
+    ctx.quadraticCurveTo(x + 0.1, (y + l * 0.3) * s, x + 0.5, (y - 0.2) * s); ctx.closePath();
+    ctx.fillStyle = BTL.plate; ctx.fill(); ctx.strokeStyle = rimc; ctx.lineWidth = 0.3; ctx.stroke();
+  }
+  // the jaw
+  btlPathMandible(s);
+  const g = ctx.createLinearGradient(0, 2.4 * s, 3, -1.4 * s);
+  g.addColorStop(0, BTL.ink); g.addColorStop(0.5, btlMix(BTL.plate, BTL.violet, 0.3 + k * 0.4));
+  g.addColorStop(0.85, btlMix(BTL.blue, BTL.orchid, k)); g.addColorStop(1, BTL.chitin);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 0.6; ctx.strokeStyle = rimc; ctx.stroke();
+  // gloss down the outer curve
+  if (px > 2.4) {
+    ctx.strokeStyle = rgba(BTL.ice, 0.4); ctx.lineWidth = 0.32;
+    ctx.beginPath(); ctx.moveTo(1.6, 1.0 * s); ctx.bezierCurveTo(4.0, 1.9 * s, 7.4, 1.6 * s, 9.9, 0.2 * s); ctx.stroke();
+  }
+  // the fangs glow with the bite
+  ctx.globalCompositeOperation = 'lighter';
+  for (const [x, l] of BTL_FANGS) drawGlow(x + 0.15, -l * 0.8 * s, px > 3 ? 1.5 : 2, BTL.magenta, 0.5 * lit);
+  ctx.restore();
+}
+
+function btlDrawEye(s, px, k) {
+  ctx.save();
+  ctx.translate(6.8, 4.9 * s);
+  ctx.rotate(0.3 * s);
+  ctx.beginPath(); ctx.ellipse(0, 0, 2.0, 1.3, 0, 0, TAU);
+  ctx.fillStyle = BTL.ink; ctx.fill();
+  ctx.save(); ctx.clip();
+  const eg = ctx.createRadialGradient(-0.4, -0.3 * s, 0.1, 0, 0, 2.2);
+  eg.addColorStop(0, BTL.ice); eg.addColorStop(0.35, BTL.cyan); eg.addColorStop(1, rgba(BTL.blue, 0.4));
+  ctx.fillStyle = eg; ctx.fillRect(-3, -2, 6, 4);
+  if (px > 3.5) {                                     // the facets
+    ctx.strokeStyle = rgba(BTL.ink, 0.5); ctx.lineWidth = 0.11;
+    for (let r = -3; r <= 3; r++) for (let c = -4; c <= 4; c++) {
+      const x = c * 0.56 + (r & 1) * 0.28, y = r * 0.49;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + Math.PI / 6; i ? ctx.lineTo(x + Math.cos(a) * 0.31, y + Math.sin(a) * 0.31) : ctx.moveTo(x + Math.cos(a) * 0.31, y + Math.sin(a) * 0.31); }
+      ctx.closePath(); ctx.stroke();
+    }
+  }
+  ctx.restore();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(0, 0, 4, BTL.cyan, 0.32);
+  ctx.restore();
+}
+
+function btlDrawAntennae(B, px, rim) {
+  for (const a of B.ant) {
+    const p = a.p, n = p.length;
+    ctx.beginPath(); moSmooth(p);
+    ctx.strokeStyle = BTL.chitin2; ctx.lineWidth = 1.0; ctx.stroke();
+    ctx.strokeStyle = rgba(rim, 0.75); ctx.lineWidth = 0.4; ctx.stroke();
+    // the club: three leaves fanned at the tip
+    const e = p[n - 1], f = p[n - 2], ang = Math.atan2(e.y - f.y, e.x - f.x);
+    ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(ang);
+    for (const d of [-0.5, 0, 0.5]) {
+      ctx.save(); ctx.rotate(d);
+      ctx.beginPath(); ctx.ellipse(1.1, 0, 1.2, 0.45, 0, 0, TAU);
+      ctx.fillStyle = BTL.plate; ctx.fill(); ctx.strokeStyle = rgba(rim, 0.8); ctx.lineWidth = 0.28; ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalCompositeOperation = 'lighter'; drawGlow(1.0, 0, 2.2, BTL.cyan, 0.28);
+    ctx.restore();
+  }
+}
+
+/* The flight wings: two long membranes from under the shell, beating faster
+   than the eye. Drawn as the stroke they sweep: three faint copies across
+   the beat, veins on the leading one. */
+function btlDrawWings(B, w, px) {
+  const beat = Math.sin(B.t * 62);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of [-1, 1]) for (let c = 0; c < 3; c++) {
+    const sweep = (c - 1) * 0.3 + beat * 0.14;
+    ctx.save();
+    ctx.translate(-3.0, 3.0 * s);
+    ctx.rotate(s * (lerp(2.5, 1.2, w) + sweep));
+    const L = 26 * w;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(L * 0.3, -3.8 * s, L * 0.85, -3.2 * s, L, 0.4 * s);
+    ctx.bezierCurveTo(L * 0.8, 3.6 * s, L * 0.3, 3.2 * s, 0, 1.2 * s);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, 0, L, 0);
+    g.addColorStop(0, rgba(BTL.cyan, 0.3 * w)); g.addColorStop(0.6, rgba(BTL.orchid, 0.13 * w)); g.addColorStop(1, rgba(BTL.magenta, 0.05 * w));
+    ctx.fillStyle = g; ctx.fill();
+    if (c === 1 && px > 2) {
+      ctx.strokeStyle = rgba(BTL.ice, 0.26 * w); ctx.lineWidth = 0.28;
+      ctx.beginPath();
+      ctx.moveTo(0, 0.2 * s); ctx.quadraticCurveTo(L * 0.5, -2.8 * s, L * 0.97, 0.2 * s);
+      ctx.moveTo(L * 0.25, -0.7 * s); ctx.lineTo(L * 0.55, 1.9 * s);
+      ctx.moveTo(L * 0.5, -1.7 * s); ctx.lineTo(L * 0.78, 1.5 * s);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ================================= THE BODY =============================== */
+function btlDrawUnder(B, me) {
+  const px = btlPx();
+  // the dash flames lie on the floor
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  moPartsDraw('btlTrail', btlDrawTrailFlame, B.parts);
+  moPartsDraw('btlThrust', btlDrawMote, B.parts);
+  moPartsDraw('btlEmber', btlDrawEmber, B.parts);
+  ctx.restore();
+  btlDrawBody(B, me, px);
+  if (me.od) btlOdWings(B, me, me.od);         // OVERDRIVE: over the body, under the hull
+}
+
+function btlDrawBody(B, me, px) {
+  const p = B.body.p, n = p.length, k = btlSheen(me.ang);
+  const rim = btlMix(BTL.cyan, BTL.pink, k);
+  // the tail end first: its thruster, then the plates tail to head, so each overlaps the one behind
+  const od = me.od ? me.od.life : 0;
+  btlDrawThruster(B, p[n - 1], p[n - 2], px, od);
+  for (let i = n - 1; i >= 1; i--) {
+    const q = p[i], f = p[i - 1], ang = Math.atan2(f.y - q.y, f.x - q.x);
+    const R = 7.0 - (i - 1) * 0.58;
+    btlDrawPlate(B, q.x, q.y, ang, R, i, px, k, rim, od);
+  }
+}
+
+function btlDrawPlate(B, x, y, ang, R, i, px, k, rim, od = 0) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  const la = BTL.light - ang, lx = Math.cos(la), ly = Math.sin(la), L = 5.4;
+  // the side spines first, under the plate: raised by speed, a little out of step
+  const fin = clamp(B.fins.v, 0, 1.2), wob = Math.sin(B.t * 5 - i * 0.9) * 0.08;
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.translate(-1.2, R * 0.82 * s);
+    ctx.rotate(s * (2.25 - fin * 0.55 + wob));
+    ctx.beginPath();
+    ctx.moveTo(0, -0.9 * s); ctx.quadraticCurveTo(R * 0.55, -0.6 * s, R * 0.95, 0.9 * s);
+    ctx.quadraticCurveTo(R * 0.45, 0.6 * s, 0, 0.9 * s); ctx.closePath();
+    ctx.fillStyle = btlMix(BTL.plate, BTL.violet, 0.5); ctx.fill();
+    ctx.strokeStyle = rgba(rim, 0.55); ctx.lineWidth = 0.35; ctx.stroke();
+    ctx.restore();
+  }
+  // the plate: a tergite, rounded, its front tucked under the plate ahead
+  ctx.beginPath();
+  ctx.moveTo(L * 0.7, -R * 0.86);
+  ctx.quadraticCurveTo(L * 1.05, 0, L * 0.7, R * 0.86);
+  ctx.bezierCurveTo(L * 0.2, R * 1.08, -L * 0.6, R * 1.02, -L * 0.85, R * 0.62);
+  ctx.quadraticCurveTo(-L * 1.12, 0, -L * 0.85, -R * 0.62);
+  ctx.bezierCurveTo(-L * 0.6, -R * 1.02, L * 0.2, -R * 1.08, L * 0.7, -R * 0.86);
+  ctx.closePath();
+  btlShade(0, 0, R * 1.1, lx, ly, k, 0.8);
+  ctx.lineWidth = 0.6; ctx.strokeStyle = rgba(rim, 0.8); ctx.stroke();
+  if (px > 2.4) {
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = rgba(BTL.ink, 0.65); ctx.lineWidth = 0.4;
+    ctx.beginPath(); ctx.moveTo(L * 0.5, -R); ctx.quadraticCurveTo(L * 0.1, 0, L * 0.5, R); ctx.stroke();   // the overlap's shadow line
+    ctx.strokeStyle = rgba(BTL.ice, 0.22); ctx.lineWidth = 0.35;
+    ctx.beginPath(); ctx.moveTo(L * 0.6, 0); ctx.lineTo(-L * 0.9, 0); ctx.stroke();                         // the keel
+    ctx.restore();
+  }
+  if (od > 0.01) btlOdCrest(B, i, R, od);           // OVERDRIVE: a crest of flame off its back
+  // the spiracles: a lit pair on every plate, cyan and magenta turn about
+  ctx.globalCompositeOperation = 'lighter';
+  const col = i % 2 ? BTL.cyan : BTL.magenta, pulse = 0.7 + 0.3 * Math.sin(B.t * 3.2 - i * 0.7);
+  for (const s of [-1, 1]) {
+    drawGlow(-0.6, R * 0.55 * s, 2.6, col, 0.5 * pulse);
+    ctx.fillStyle = rgba(BTL.white, 0.85 * pulse);
+    ctx.beginPath(); ctx.arc(-0.6, R * 0.55 * s, px > 3 ? 0.45 : 0.6, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* the tail: a tapered cap with the thruster in it, a blue jet that
+   lengthens with speed */
+function btlDrawThruster(B, e, f, px, od = 0) {
+  const ang = Math.atan2(e.y - f.y, e.x - f.x), sp = clamp(B.speed / 300, 0, 1.6) + od * 1.2;
+  ctx.save();
+  ctx.translate(e.x, e.y); ctx.rotate(ang);
+  // the jet
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const fl = 0.85 + 0.15 * Math.sin(B.t * 47) + 0.1 * Math.sin(B.t * 19);
+  const len = (7 + sp * 9) * fl;
+  for (const [w, a, col] of [[4.6, 0.25, BTL.violet], [3.2, 0.5, '#3b5bfd'], [1.8, 0.85, BTL.cyan], [0.8, 1, BTL.white]]) {
+    ctx.beginPath();
+    ctx.moveTo(1, -w / 2);
+    ctx.quadraticCurveTo(len * 0.55, -w * 0.45, len * (0.55 + w * 0.1), 0);
+    ctx.quadraticCurveTo(len * 0.55, w * 0.45, 1, w / 2);
+    ctx.closePath();
+    ctx.fillStyle = rgba(col, a); ctx.fill();
+  }
+  drawGlow(2, 0, 7 + sp * 4, BTL.cyan, 0.35);
+  ctx.restore();
+  // the cap
+  ctx.beginPath();
+  ctx.moveTo(-4, -3.4); ctx.quadraticCurveTo(1.5, -3.2, 2.2, -1.2); ctx.lineTo(2.2, 1.2);
+  ctx.quadraticCurveTo(1.5, 3.2, -4, 3.4); ctx.closePath();
+  ctx.fillStyle = BTL.chitin2; ctx.fill();
+  ctx.strokeStyle = rgba(BTL.cyan, 0.75); ctx.lineWidth = 0.5; ctx.stroke();
+  ctx.restore();
+}
+
+/* ================================= THE FIRE ===============================
+   A puff is { s, off, age, life, seed }: s px along the beam from the jaws,
+   off its place across it (-1..1 of the half width). Drawn on whatever the
+   beam's segments are this frame. */
+function btlFlameTick(B, me, dt) {
+  const on = me.beam > 0, range = Math.max(60, me.range || 260);
+  const life = 0.46, k = 3.0, v0 = range * k / (1 - Math.exp(-k * life)) * 0.97;
+  B.flameEm.rate = on ? 330 : 0;
+  moEmit(B.flameEm, dt, 0, 0, 0, (x, y, a, age) => {
+    B.puffs.push({ s: 0, v: v0 * (0.9 + Math.random() * 0.2), off: (Math.random() * 2 - 1) * 0.85,
+                   age: 0, life: life * (0.85 + Math.random() * 0.3), seed: Math.random() * 100, pre: age });
+  });
+  for (let i = B.puffs.length - 1; i >= 0; i--) {
+    const q = B.puffs[i], h = dt + (q.pre || 0);
+    q.pre = 0;
+    q.s += q.v * (1 - Math.exp(-k * h)) / k;
+    q.v *= Math.exp(-k * h);
+    // it billows: drifting across on the flow, more the further it has gone
+    const u = q.s / range, f = moFlow(q.s * 0.9, q.seed * 37, B.t * 1.4, 34);
+    q.off = clamp(q.off + f[1] * h * (0.6 + u * 2.4), -1, 1);
+    q.age += h;
+    if (q.age >= q.life || q.s > range * 1.02) B.puffs.splice(i, 1);
+  }
+  if (!on && B.puffs.length > 600) B.puffs.length = 0;
+}
+
+/* the width the fire fills at u along the beam: a jet at the jaws, the full
+   hitbox by a third of the way out */
+// the jet's tongues: [length of the range, width of the hitbox, colour, phase]
+const BTL_TONGUES = [[0.3, 0.8, '#a5f3fc', 0], [0.36, 0.7, '#38bdf8', 1.7], [0.42, 0.9, '#3b5bfd', 3.1], [0.26, 0.6, '#6d3cf0', 4.6]];
+const btlFlameW = u => 0.28 + 0.72 * (1 - Math.pow(1 - clamp(u / 0.34, 0, 1), 2));
+
+function btlDrawFire(B, me) {
+  btlDrawWindup(B, me);
+  if (!(me.beam > 0) || !me.segs || !me.segs.length) return;
+  const braid = me.odLance || 0;                // OVERDRIVE: the braided lance, the puffs inside it
+  if (braid > 0.001) btlOdBraid(B, me, braid);
+  const range = Math.max(60, me.range || 260), half = me.half || 11;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  let run = 0, last = null;
+  for (const sg of me.segs) {
+    // a ricochet carries on from where the last one ended, so the cooling does too
+    if (!(last && Math.abs(sg.x1 - last.x2) < 0.5 && Math.abs(sg.y1 - last.y2) < 0.5)) run = 0;
+    const dx = sg.x2 - sg.x1, dy = sg.y2 - sg.y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+    const nx = -uy, ny = ux, s0 = run;
+    // the puffs that fall on this segment
+    for (const q of B.puffs) {
+      const s = q.s - s0;
+      if (s < 0 || s > L) continue;
+      const u = q.s / range, age = q.age / q.life;
+      const w = half * btlFlameW(u), off = q.off * w * 0.8;
+      const x = sg.x1 + ux * s + nx * off, y = sg.y1 + uy * s + ny * off;
+      const r = lerp(3.2, half * 1.75, Math.sqrt(clamp(u, 0, 1))) * (0.8 + 0.4 * ((q.seed * 7.3) % 1)) * (0.75 + age * 0.5);
+      const a = (1 - u * 0.62) * Math.min(1, age * 8) * (1 - age * age) * me.beam;
+      ctx.globalAlpha = clamp(a * 0.42 * (1 - braid * 0.5), 0, 1);
+      const spr = btlPuff(Math.round(clamp(u * 0.85 + age * 0.3, 0, 1) * 15));
+      ctx.drawImage(spr, x - r, y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1;
+    /* the jet: tongues braided out of the jaws, each flickering on its own
+       eddy, white-hot at the root; the puffs take over a third of the way out */
+    if (s0 === 0 && braid < 0.5) {
+      const fl = 0.86 + 0.14 * Math.sin(B.t * 37);
+      for (const [len, wid, col, ph] of BTL_TONGUES) {
+        const jl = Math.min(L, range * len * (0.9 + 0.1 * Math.sin(B.t * 23 + ph))), pts = [];
+        for (let i = 0; i <= 8; i++) {
+          const s = jl * i / 8, wob = moFlow(s * 1.1 + ph * 40, ph * 13, B.t * 2.6, 18)[1] * (i / 8) * half * 0.45;
+          pts.push({ x: sg.x1 + ux * s + nx * wob, y: sg.y1 + uy * s + ny * wob });
+        }
+        moRibbon(pts, 1.2 + half * 0.25 * wid * me.beam, half * wid * me.beam * fl, { cap: 'round', ease: u => Math.sqrt(u) });
+        const g = ctx.createLinearGradient(sg.x1, sg.y1, sg.x1 + ux * jl, sg.y1 + uy * jl);
+        g.addColorStop(0, rgba(col, 0.36)); g.addColorStop(0.5, rgba(col, 0.14)); g.addColorStop(1, rgba(col, 0));
+        ctx.fillStyle = g; ctx.fill();
+      }
+      const r0 = range * 0.06;
+      moRibbon([{ x: sg.x1, y: sg.y1 }, { x: sg.x1 + ux * r0 * 0.5, y: sg.y1 + uy * r0 * 0.5 }, { x: sg.x1 + ux * r0, y: sg.y1 + uy * r0 }],
+               2.2 * me.beam + 0.5, 0.2, { cap: 'round' });
+      ctx.fillStyle = rgba(BTL.white, 0.8); ctx.fill();
+      // the flash at the jaws
+      drawGlow(sg.x1, sg.y1, 10 + 6 * me.beam, BTL.cyan, 0.5);
+      if (B.beamAge < 0.16) drawGlow(sg.x1, sg.y1, 30 * (1 - B.beamAge / 0.16) + 8, BTL.white, 0.5 * (1 - B.beamAge / 0.16));
+    }
+    run += L; last = sg;
+  }
+  ctx.restore();
+}
+
+/* The wind-up: motes drawn in on spirals, faster and brighter as it fills,
+   and the jaws parting over the gathering light. */
+function btlDrawWindup(B, me) {
+  const c = me.charge || 0;
+  if (c < 0.02 || me.beam > 0) return;
+  const mx = me.x + Math.cos(me.ang) * BTL.mouth, my = me.y + Math.sin(me.ang) * BTL.mouth;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 14; i++) {
+    const ph = (B.t * (1.2 + c * 1.6) + i / 14) % 1;
+    const rr = lerp(34, 2, Math.pow(ph, 1.4)), a = me.ang + Math.PI + (i * 2.39996) + ph * 2.6 * (i % 2 ? 1 : -1);
+    const x = mx + Math.cos(a) * rr * 0.9, y = my + Math.sin(a) * rr * 0.9;
+    const al = c * Math.sin(ph * Math.PI) * 0.8;
+    drawGlow(x, y, 2.4 + c * 2, i % 3 ? BTL.cyan : BTL.orchid, al * 0.6);
+    ctx.fillStyle = rgba(BTL.white, al); ctx.beginPath(); ctx.arc(x, y, 0.6, 0, TAU); ctx.fill();
+  }
+  drawGlow(mx, my, 6 + c * 16, c > 0.85 ? BTL.white : BTL.cyan, 0.15 + c * 0.45);
+  ctx.restore();
+}
+
+/* ================================ THE TRAILS ============================== */
+function btlTrailTick(B, me, dt) {
+  // the dash: tiny flames along the line, let out evenly however fast it goes
+  B.trailEm.rate = (me.dash || 0) > 0 ? 240 : 0;
+  moEmit(B.trailEm, dt, me.x, me.y, me.ang, (x, y, a, age) => {
+    const j = (Math.random() - 0.5) * 9;
+    moPart({ x: x - Math.sin(a) * j, y: y + Math.cos(a) * j, vx: (Math.random() - 0.5) * 14, vy: (Math.random() - 0.5) * 14,
+             drag: 3, flow: 16, fs: 26, life: 0.55 + Math.random() * 0.75, r: 1.4 + Math.random() * 1.8,
+             grow: -0.8, rot: a + Math.PI, layer: 'btlTrail', age }, B.parts);
+  });
+  // the thruster's motes, thicker with speed
+  const p = B.body.p, e = p[p.length - 1], f = p[p.length - 2], ta = Math.atan2(e.y - f.y, e.x - f.x);
+  B.thrustEm.rate = 18 + clamp(B.speed / 300, 0, 1.6) * 40;
+  moEmit(B.thrustEm, dt, e.x + Math.cos(ta) * 4, e.y + Math.sin(ta) * 4, ta, (x, y, a, age) => {
+    const s = 30 + Math.random() * 40;
+    moPart({ x, y, vx: Math.cos(a) * s + (Math.random() - 0.5) * 20, vy: Math.sin(a) * s + (Math.random() - 0.5) * 20,
+             drag: 4, flow: 10, fs: 20, life: 0.3 + Math.random() * 0.35, r: 0.8 + Math.random() * 0.8,
+             layer: 'btlThrust', age }, B.parts);
+  });
+}
+function btlDrawTrailFlame(q, k) {
+  // a small tongue of blue fire, flickering, shrinking as it goes out
+  const fl = 0.8 + 0.2 * Math.sin(q.age * 38 + q.seed), r = q.r * (0.5 + 0.5 * k) * fl;
+  if (r < 0.15) return;
+  const col = btlFire(1 - k * 0.85);
+  ctx.save();
+  ctx.translate(q.x, q.y); ctx.rotate(q.rot + Math.sin(q.age * 9 + q.seed) * 0.3);
+  drawGlow(0, 0, r * 3.2, col, 0.4 * k);
+  ctx.beginPath();
+  ctx.moveTo(r * 2.4, 0);
+  ctx.quadraticCurveTo(r * 0.4, -r * 1.05, -r * 0.9, 0);
+  ctx.quadraticCurveTo(r * 0.4, r * 1.05, r * 2.4, 0);
+  ctx.fillStyle = rgba(col, 0.75 * k); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 0.7, r * 0.4, 0, 0, TAU);
+  ctx.fillStyle = rgba(BTL.white, 0.7 * k); ctx.fill();
+  ctx.restore();
+}
+function btlDrawMote(q, k) {
+  drawGlow(q.x, q.y, q.r * 3.5, k > 0.5 ? BTL.cyan : BTL.violet, 0.35 * k);
+}
+
+/* ===========================================================================
+   EMBER · THE BLUE BEETLE — kills (BEETLE-PLAN.md, step 3)
+     KILLS    a body the beetle kills burns out: its outline flashes cold, it
+              breaks into blue cinders that cool to violet and grey as they
+              drift off on the flow, and a scorch is left on the floor.
+     BOSSES   a boss crumbles to ash from the side the killing blow came from.
+              A burning front crosses its body, the shape behind it greying
+              and the edge lit blue, and every piece the front passes comes
+              away as a flake of ash with an ember in it, carried off the way
+              the blow travelled. It is drawn from the body's own shape (the
+              poly the game draws it with: radius, sides, angle, colour), so it
+              never reads the canvas.
+
+     btlKill(B, e, ang)      an ordinary death (from killBody); ang the blow's heading
+     btlBossAsh(B, e, ang)   a boss's death
+     btlKillsTick(B, dt)     from btlTick
+     btlKillsFloor(B)        world, floor: the scorches
+     btlKillsDraw(B)         world, over the bodies: burning bosses, ash, cinders
+=========================================================================== */
+
+const BTL_ASH = { sweep: 1.6, cell: 5, grey: '#6b7280', dark: '#1f2937', scorch: 2.2 };
+
+function btlPolyPts(r, n, a) {
+  const pts = [];
+  for (let i = 0; i < n; i++) pts.push([Math.cos(a + i * TAU / n) * r, Math.sin(a + i * TAU / n) * r]);
+  return pts;
+}
+function btlInPoly(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function btlPolyPath(x, y, r, n, a) {
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const px = x + Math.cos(a + i * TAU / n) * r, py = y + Math.sin(a + i * TAU / n) * r;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/* ================================== KILLS ================================= */
+function btlKill(B, e, ang = 0) {
+  const sides = e.sides || 6, rot = e.ang || 0, r = e.r || 10;
+  B.scorches.push({ x: e.x, y: e.y, r, sides, rot, col: e.col || BTL.cyan, at: B.t });
+  if (B.scorches.length > 40) B.scorches.shift();
+  const pts = btlPolyPts(r, sides, rot), n = clamp(Math.round(8 + r * 0.8), 8, 40);
+  for (let i = 0; i < n; i++) {
+    let x = 0, y = 0;
+    for (let tries = 0; tries < 6; tries++) {
+      x = (Math.random() * 2 - 1) * r; y = (Math.random() * 2 - 1) * r;
+      if (btlInPoly(x, y, pts)) break;
+    }
+    const d = Math.hypot(x, y) || 1, out = 30 + Math.random() * 60;
+    moPart({ x: e.x + x, y: e.y + y, vx: x / d * out + Math.cos(ang) * 40, vy: y / d * out + Math.sin(ang) * 40 - 18,
+             drag: 2.4, flow: 22, fs: 26, life: 0.5 + Math.random() * 0.7, r: 0.9 + Math.random() * 1.6,
+             spin: (Math.random() - 0.5) * 10, rot: Math.random() * TAU, layer: 'btlCinder', col: e.col }, B.parts);
+  }
+  for (let i = 0; i < 3; i++)
+    moPart({ x: e.x, y: e.y, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 50, drag: 1.5, flow: 18, fs: 26,
+             life: 0.6 + Math.random() * 0.5, r: 1 + Math.random(), layer: 'btlEmber' }, B.parts);
+}
+
+/* ================================= BOSSES ================================= */
+function btlBossAsh(B, e, ang = 0) {
+  const r = e.r || 40, sides = e.sides || 6, rot = e.ang || 0, pts = btlPolyPts(r, sides, rot);
+  const cell = Math.max(BTL_ASH.cell, r / 16), dx = Math.cos(ang), dy = Math.sin(ang), cells = [];
+  for (let y = -r; y < r; y += cell) for (let x = -r; x < r; x += cell) {
+    const cx = x + cell / 2, cy = y + cell / 2;
+    if (!btlInPoly(cx, cy, pts)) continue;
+    // where along the blow it falls, made ragged so the front is not a ruler
+    cells.push({ x: cx, y: cy, d: cx * dx + cy * dy + (btlHash(Math.round(cx * 3.1), Math.round(cy * 7.7)) - 0.5) * cell * 2.5 });
+  }
+  cells.sort((a, b) => a.d - b.d);
+  B.ashes.push({ x: e.x, y: e.y, r, sides, rot, col: e.col || '#f43f5e', ang, cells, cell, i: 0, t: 0,
+                 dmin: cells.length ? cells[0].d : -r, dmax: cells.length ? cells[cells.length - 1].d : r });
+  if (B.ashes.length > 3) B.ashes.shift();
+}
+// where the burning front stands on a boss, along its blow
+const btlAshFront = a => lerp(a.dmin - a.cell, a.dmax + a.cell, osEase(clamp(a.t / BTL_ASH.sweep, 0, 1)));
+
+function btlKillsTick(B, dt) {
+  for (let i = B.scorches.length - 1; i >= 0; i--) if (B.t - B.scorches[i].at > BTL_ASH.scorch) B.scorches.splice(i, 1);
+  for (let k = B.ashes.length - 1; k >= 0; k--) {
+    const a = B.ashes[k];
+    a.t += dt;
+    const front = btlAshFront(a), ca = Math.cos(a.ang), sa = Math.sin(a.ang);
+    // every piece the front has passed comes away as a flake, carried off downwind
+    while (a.i < a.cells.length && a.cells[a.i].d < front) {
+      const c = a.cells[a.i++], wind = 55 + Math.random() * 95;
+      moPart({ x: a.x + c.x, y: a.y + c.y, vx: ca * wind + (Math.random() - 0.5) * 30, vy: sa * wind - 25 - Math.random() * 35,
+               drag: 0.7, flow: 38, fs: 46, life: 1.3 + Math.random() * 1.1, r: a.cell * (0.35 + Math.random() * 0.3),
+               spin: (Math.random() - 0.5) * 8, rot: Math.random() * TAU, layer: 'btlAsh', col: a.col }, B.parts);
+      if (Math.random() < 0.3)
+        moPart({ x: a.x + c.x, y: a.y + c.y, vx: ca * 80 + (Math.random() - 0.5) * 60, vy: sa * 80 - 50, drag: 1.4, flow: 24, fs: 30,
+                 life: 0.5 + Math.random() * 0.6, r: 0.8 + Math.random(), layer: 'btlEmber' }, B.parts);
+    }
+    if (a.t > BTL_ASH.sweep + 0.15) B.ashes.splice(k, 1);
+  }
+}
+
+function btlKillsFloor(B) {
+  if (!B.scorches.length) return;
+  ctx.save();
+  for (const s of B.scorches) {
+    const age = B.t - s.at, fade = 1 - age / BTL_ASH.scorch;
+    if (fade <= 0) continue;
+    // the scorch it leaves: a dark print of its shape, a cold rim round it
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.35 * fade; ctx.fillStyle = BTL.ink;
+    btlPolyPath(s.x, s.y, s.r * 1.05, s.sides, s.rot); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.25 * fade; ctx.strokeStyle = BTL.violet; ctx.lineWidth = 1.2; ctx.stroke();
+    // and the flash of it burning: its outline, cold, thrown outward
+    if (age < 0.3) {
+      const k = 1 - age / 0.3;
+      drawGlow(s.x, s.y, s.r * 2.4, BTL.cyan, 0.45 * k);
+      ctx.globalAlpha = 0.85 * k; ctx.strokeStyle = BTL.ice; ctx.lineWidth = 1.6;
+      btlPolyPath(s.x, s.y, s.r * (1 + age * 1.6), s.sides, s.rot); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function btlKillsDraw(B) {
+  ctx.save();
+  for (const a of B.ashes) {
+    const front = btlAshFront(a), u = clamp(a.t / BTL_ASH.sweep, 0, 1), R = a.r * 1.5;
+    if (a.t < 0.3) { ctx.globalCompositeOperation = 'lighter'; drawGlow(a.x, a.y, a.r * 3, BTL.ice, 0.5 * (1 - a.t / 0.3)); }
+    // what is left of it: its shape beyond the front, ragged, greying as it burns
+    ctx.save();
+    ctx.translate(a.x, a.y); ctx.rotate(a.ang);
+    ctx.beginPath();
+    const step = a.cell;
+    ctx.moveTo(front + (btlHash(0, 99) - 0.5) * step * 2, -R);
+    for (let y = -R; y <= R; y += step) ctx.lineTo(front + (btlHash(Math.round(y / step), 99) - 0.5) * step * 2.4 + Math.sin(y * 0.3 + a.t * 6) * step * 0.4, y);
+    ctx.lineTo(R * 1.2, R); ctx.lineTo(R * 1.2, -R); ctx.closePath();
+    ctx.clip();
+    ctx.rotate(-a.ang);
+    const grey = clamp(0.2 + u * 0.75, 0, 1);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.9; ctx.fillStyle = rgba(btlMix(a.col, BTL_ASH.dark, grey), 0.55 + 0.25 * grey);
+    btlPolyPath(0, 0, a.r, a.sides, a.rot); ctx.fill();
+    ctx.lineWidth = 2.4; ctx.strokeStyle = btlMix(a.col, BTL_ASH.grey, grey); ctx.stroke();
+    ctx.globalAlpha = 0.7; ctx.lineWidth = 1.6;
+    btlPolyPath(0, 0, a.r * 0.6, a.sides, -a.rot); ctx.stroke();
+    ctx.restore();
+    // the burning edge: the pieces just ahead of the front, lit
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = a.i; i < a.cells.length; i++) {
+      const c = a.cells[i];
+      if (c.d > front + a.cell * 1.8) break;
+      drawGlow(a.x + c.x, a.y + c.y, a.cell * 1.8, BTL.cyan, 0.45);
+      ctx.globalAlpha = 0.85; ctx.fillStyle = BTL.ice;
+      ctx.fillRect(a.x + c.x - a.cell * 0.18, a.y + c.y - a.cell * 0.18, a.cell * 0.36, a.cell * 0.36);
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  moPartsDraw('btlAsh', btlDrawAshFlake, B.parts);
+  ctx.globalCompositeOperation = 'lighter';
+  moPartsDraw('btlCinder', btlDrawCinder, B.parts);
+  ctx.restore();
+}
+
+// a flake of ash: the body's colour going to grey, an ember in it at first
+function btlDrawAshFlake(q, k) {
+  const age = 1 - k, ember = age < 0.15 ? 1 - age / 0.15 : 0, r = q.r;
+  ctx.save();
+  ctx.translate(q.x, q.y); ctx.rotate(q.rot);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = clamp(k * 1.3, 0, 0.9);
+  ctx.fillStyle = btlMix(btlMix(q.col, '#a5f3fc', ember * 0.7), BTL_ASH.grey, clamp(age * 1.6, 0, 1));
+  ctx.beginPath(); ctx.moveTo(-r, -r * 0.6); ctx.lineTo(r * 0.8, -r); ctx.lineTo(r, r * 0.5); ctx.lineTo(-r * 0.7, r); ctx.closePath(); ctx.fill();
+  if (ember > 0) { ctx.globalCompositeOperation = 'lighter'; drawGlow(0, 0, r * 3, BTL.cyan, 0.6 * ember); }
+  ctx.restore();
+}
+// a cinder: blue-hot, cooling through violet to grey
+function btlDrawCinder(q, k) {
+  const r = q.r * (0.6 + 0.4 * k), col = k > 0.35 ? btlFire(0.15 + (1 - k) * 0.9) : btlMix('#6d28d9', '#4b5563', 1 - k / 0.35);
+  if (k > 0.45) drawGlow(q.x, q.y, r * 3.4, BTL.sky, 0.32 * k);
+  ctx.save();
+  ctx.translate(q.x, q.y); ctx.rotate(q.rot);
+  ctx.globalAlpha = clamp(k * 1.4, 0, 1); ctx.fillStyle = col;
+  ctx.fillRect(-r * 0.6, -r * 0.6, r * 1.2, r * 1.2);
+  ctx.restore();
+}
+
+/* ===========================================================================
+   EMBER · THE BLUE BEETLE — OVERDRIVE (BEETLE-PLAN.md, step 4)
+   The transformation, redrawn on the stock beat (odPhase): the room dims,
+   something comes for EMBER, it lands, the room catches, the vanes open and
+   the lance turns into the helix. The timings are the stock ones (OD_T_*);
+   only what is drawn changes.
+
+     THE SWARM    in place of the falling spark. Fire beetles stream in from
+                  every edge of the screen on curling flights, each landing on
+                  a different part of the shell and lighting it, the last one
+                  at the moment the spark would have landed. It is computed
+                  from the clock (T), not stepped, so it can be scrubbed and
+                  looks the same at any frame rate.
+     THE ROOM     the floor catches in blue: the stock pools, recoloured, with
+                  cold coals and violet edges.
+     THE FORM     the elytra flung wide and held there, two great wings of blue
+                  fire unfolding from under them (a membrane, feathers of flame
+                  along its trailing edge, a hard spar), a white core burning
+                  in the gap, the shell's seams lit, and a crest of flame on
+                  every plate of the body.
+     THE LANCE    the helix's two strands become two braided jets of flame,
+                  cyan in front and violet behind, flaring where they cross.
+     THE GRADE    an indigo dim, a cold grade while it burns, an icy flash.
+
+     btlOdLit(T)                   how much of the swarm has landed, 0..1
+     btlOdSwarm(T, sx, sy, ang, sc, W, H)
+                                   the swarm, in screen space, homing on the hull
+                                   at (sx, sy) facing ang, sc px to a hull unit
+     btlOdFloor(pools, t, life, parts)
+                                   the burning floor (odPools, world); embers
+                                   go into parts, a MOTION pool, if given
+     btlOdWings(B, me, q)          the wings of fire and the core, under the hull
+     btlOdGrade(q, T, flash, W, H, mid)
+                                   the dim, the grade and the flash, screen space;
+                                   mid() draws between the dim and the grade (the swarm)
+   The beetle's own art reads me.od (odPhase()) and me.odLit (btlOdLit) to
+   fling the shell, light the seams, crest the body and braid the lance.
+=========================================================================== */
+
+const BTL_OD = {
+  flies: 40,
+  // where on the hull each one lands, in hull space: the shell, the pronotum, the head
+  spots: [[-6, 4], [-6, -4], [-10, 6], [-10, -6], [-13, 2.5], [-13, -2.5], [-4, 8], [-4, -8], [0, 5], [0, -5],
+          [2, 0], [-8, 0], [7, 3], [7, -3], [-11, 9], [-11, -9], [-15, 0], [3, 8], [3, -8], [10, 0]],
+  feathers: 9,
+  ink: '#1e1b4b', deep: '#312e81', blue: '#2563eb', sky: '#38bdf8', cyan: '#22d3ee', ice: '#cffafe',
+  white: '#f0fdff', violet: '#6d28d9', orchid: '#a855f7'
+};
+const btlHash = (i, k) => { const s = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return s - Math.floor(s); };
+
+/* ================================= THE SWARM ============================== */
+// one fire beetle: when it sets out, when it lands, where from and how it turns
+function btlFly(i) {
+  const n = BTL_OD.flies, last = i === n - 1;
+  return {
+    i, t0: OD_T_SPARK + btlHash(i, 1) * 0.6,
+    t1: last ? OD_T_LAND : OD_T_LAND - 0.5 + btlHash(i, 2) * 0.48,
+    a0: btlHash(i, 3) * TAU, dir: btlHash(i, 4) < 0.5 ? -1 : 1, spin: 1.4 + btlHash(i, 5) * 1.9,
+    spot: BTL_OD.spots[i % BTL_OD.spots.length],
+    col: i % 3 ? BTL_OD.cyan : BTL_OD.orchid, size: 0.8 + btlHash(i, 6) * 0.5
+  };
+}
+const _btlFlies = [];
+const btlFlies = () => _btlFlies.length ? _btlFlies : (Array.from({ length: BTL_OD.flies }, (_, i) => _btlFlies.push(btlFly(i))), _btlFlies);
+function btlOdLit(T) {
+  let n = 0;
+  for (const f of btlFlies()) if (T >= f.t1) n++;
+  return n / BTL_OD.flies;
+}
+/* Where one is at T: on a spiral closing on its landing spot, drifting on
+   the flow while it is far out and darting in at the end. */
+function btlFlyAt(f, T, sx, sy, ang, sc, R) {
+  const u = clamp((T - f.t0) / (f.t1 - f.t0), 0, 1);
+  const ca = Math.cos(ang), sa = Math.sin(ang), [lx, ly] = f.spot;
+  const tx = sx + (lx * ca - ly * sa) * sc, ty = sy + (lx * sa + ly * ca) * sc;
+  // far out it drifts; the turn comes as it closes, so it darts in rather than sweeping
+  const r = R * (1 - Math.pow(u, 1.5)), th = f.a0 + f.dir * f.spin * Math.pow(u, 2.4);
+  const w = moFlow(f.i * 9.1 + u * 4, f.i * 5.3, T * 0.6, 1.3);
+  const drift = R * 0.07 * (1 - u);
+  return { x: tx + Math.cos(th) * r + w[0] * drift, y: ty + Math.sin(th) * r * 0.9 + w[1] * drift, u, tx, ty };
+}
+function btlOdSwarm(T, sx, sy, ang, sc, W, H) {
+  if (T < OD_T_SPARK - 0.05 || T > OD_T_LAND + 0.6) return;
+  const R = Math.max(W, H) * 0.62, lit = btlOdLit(T);
+  ctx.save();
+  ctx.lineCap = 'round';
+  // the hull taking the light as they land
+  ctx.globalCompositeOperation = 'lighter';
+  if (lit > 0) drawGlow(sx, sy, (16 + lit * 46) * Math.max(1, sc * 0.5), BTL_OD.cyan, 0.12 + lit * 0.3);
+  for (const f of btlFlies()) {
+    if (T < f.t0) continue;
+    if (T >= f.t1) {
+      // the landing: a small cold pop where it struck
+      const k = (T - f.t1) / 0.32;
+      if (k < 1) {
+        const p = btlFlyAt(f, f.t1, sx, sy, ang, sc, R);
+        ctx.globalAlpha = (1 - k) * 0.8;
+        ctx.strokeStyle = BTL_OD.ice; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(p.tx, p.ty, 2 + k * 11, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 1;
+        drawGlow(p.tx, p.ty, 10 * (1 - k) + 3, f.col, 0.6 * (1 - k));
+      }
+      continue;
+    }
+    const p = btlFlyAt(f, T, sx, sy, ang, sc, R), q = btlFlyAt(f, Math.max(f.t0, T - 0.016), sx, sy, ang, sc, R);
+    const hd = Math.atan2(p.y - q.y, p.x - q.x), pulse = 0.65 + 0.35 * Math.sin(T * 13 + f.i * 1.7);
+    // its streak: where it was a moment ago, read off the same flight, fading
+    let prev = p;
+    for (let j = 1; j <= 6; j++) {
+      const tt = T - j * 0.012;
+      if (tt < f.t0) break;
+      const s = btlFlyAt(f, tt, sx, sy, ang, sc, R), k = 1 - j / 7;
+      ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(s.x, s.y);
+      ctx.strokeStyle = rgba(f.col, 0.45 * k); ctx.lineWidth = 2.6 * f.size * k + 0.4; ctx.stroke();
+      ctx.strokeStyle = rgba(BTL_OD.ice, 0.6 * k); ctx.lineWidth = 0.9 * f.size * k; ctx.stroke();
+      prev = s;
+    }
+    drawGlow(p.x, p.y, (11 + pulse * 6) * f.size, f.col, 0.6 * pulse);
+    // the beetle itself: a dark body, a lit abdomen, a blur of wings
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(hd); ctx.scale(f.size * 1.5, f.size * 1.5);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(205,250,255,0.22)';
+    const flap = Math.sin(T * 70 + f.i) * 0.6;
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(0.2, s * 1.9, 1.9, 0.7 + flap * 0.3, s * 0.5, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#0c0a24';
+    ctx.beginPath(); ctx.ellipse(0.6, 0, 2.1, 1.25, 0, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rgba(BTL_OD.white, 0.9 * pulse);
+    ctx.beginPath(); ctx.ellipse(-1.2, 0, 1.2, 0.95, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ================================== THE ROOM ==============================
+   The stock pools, burning blue. Tongues lean up-screen in a narrow cone and
+   overlap, so each pool churns as one body of flame. */
+function btlLeaf(bx, by, ang, len, wid, bend) {
+  const ca = Math.cos(ang), sa = Math.sin(ang), nx = -sa, ny = ca;
+  const tx = bx + ca * len + nx * bend, ty = by + sa * len + ny * bend;
+  const mx = bx + ca * len * 0.45, my = by + sa * len * 0.45;
+  ctx.beginPath();
+  ctx.moveTo(bx + nx * wid, by + ny * wid);
+  ctx.quadraticCurveTo(mx + nx * wid * 1.15 + nx * bend * 0.4, my + ny * wid * 1.15 + ny * bend * 0.4, tx, ty);
+  ctx.quadraticCurveTo(mx - nx * wid * 1.15 + nx * bend * 0.4, my - ny * wid * 1.15 + ny * bend * 0.4, bx - nx * wid, by - ny * wid);
+  ctx.closePath();
+}
+function btlOdFloor(pools, t, life, parts) {
+  if (!pools || !pools.length || life <= 0.001) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of pools) {
+    const up = clamp((t - p.born) / 0.55, 0, 1) * life;
+    if (up <= 0.001) continue;
+    const fl = 0.82 + Math.sin(t * (5.1 + p.k) + p.seed) * 0.1 + Math.sin(t * (11.3 + p.k * 2) + p.seed * 2) * 0.05;
+    const R = p.r * up * fl;
+    drawGlow(p.x, p.y, R * 1.5, BTL_OD.ink, 0.42 * up);
+    drawGlow(p.x, p.y, R * 0.8, BTL_OD.blue, 0.26 * up);
+    ctx.globalAlpha = 0.16 * up; ctx.fillStyle = BTL_OD.deep;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, R * 0.66, R * 0.4, 0, 0, TAU); ctx.fill();
+    for (let i = 0; i < 8; i++) {
+      const ph = (t * (0.9 + p.k * 0.35) + i * 0.317 + p.seed) % 1;
+      const spread = (i / 7 - 0.5) * 0.95 + Math.sin(p.seed + i) * 0.08;
+      const a = -Math.PI / 2 + spread * 0.8 + Math.sin(t * 1.9 + i * 2.2 + p.seed) * 0.14;
+      const bx = p.x + spread * R * 0.5, by = p.y + Math.abs(spread) * R * 0.1;
+      const grow = 0.5 + Math.sin(ph * Math.PI) * 0.7, len = R * (0.62 + (0.5 - Math.abs(spread)) * 0.8) * grow;
+      const bend = Math.sin(t * 3.4 + i * 1.6 + p.seed) * R * 0.14, fade = up * (0.35 + Math.sin(ph * Math.PI) * 0.5);
+      ctx.globalAlpha = 0.24 * fade; ctx.fillStyle = BTL_OD.violet; btlLeaf(bx, by, a, len, R * 0.28, bend); ctx.fill();
+      ctx.globalAlpha = 0.28 * fade; ctx.fillStyle = BTL_OD.blue; btlLeaf(bx, by, a, len * 0.72, R * 0.17, bend * 0.7); ctx.fill();
+      ctx.globalAlpha = 0.32 * fade; ctx.fillStyle = '#a5f3fc'; btlLeaf(bx, by, a, len * 0.36, R * 0.08, bend * 0.4); ctx.fill();
+    }
+    ctx.globalAlpha = (0.24 + Math.sin(t * 7 + p.seed) * 0.08) * up; ctx.fillStyle = BTL_OD.ice;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, R * 0.24, R * 0.1, 0, 0, TAU); ctx.fill();
+    if (parts && Math.random() < 0.1 * life)
+      moPart({ x: p.x + (Math.random() - 0.5) * R * 0.9, y: p.y + (Math.random() - 0.5) * R * 0.6,
+               vx: (Math.random() - 0.5) * 44, vy: -30 - Math.random() * 62, drag: 1.2, flow: 18, fs: 30,
+               life: 0.6 + Math.random() * 0.8, r: 1 + Math.random() * 1.4, layer: 'btlEmber' }, parts);
+  }
+  ctx.restore();
+}
+
+/* ================================== THE FORM ==============================
+   Under the hull: the core burning in the gap the shell leaves, and the two
+   wings of fire. Each wing is a membrane on a spar, with feathers of flame
+   licking back off its trailing edge; the inner feathers run white, the outer
+   ones are cooling to violet by the time they get there. */
+function btlOdWings(B, me, q) {
+  const open = q ? q.open : 0;
+  if (open <= 0.001) return;
+  const t = B.t, surge = btlSurge(t), lag = clamp(B.turn * 0.05, -0.7, 0.7), flap = B.flap || 1;   // flap: BRAND drives them harder
+  ctx.save();
+  ctx.translate(me.x, me.y); ctx.rotate(me.ang);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // the core, in the gap between the flung elytra
+  drawGlow(-7, 0, (14 + surge * 8) * open, BTL_OD.sky, 0.45 * open);
+  drawGlow(-7, 0, (6 + surge * 3) * open, BTL_OD.white, 0.5 * open);
+  ctx.globalAlpha = 0.85 * open; ctx.fillStyle = BTL_OD.white;
+  ctx.beginPath(); ctx.ellipse(-7, 0, 3.4 + surge, 1.6 + surge * 0.4, 0, 0, TAU); ctx.fill();
+  for (const s of [-1, 1]) {
+    const beat = Math.sin(t * 5.2 * flap + s * 0.4) * 0.1 * flap, skew = lag * s;
+    const dir = Math.PI - s * (1.0 - beat) - lag * 0.45;             // the spar: back and out
+    const L = 34 * open * (0.88 + surge * 0.12);
+    const rx = -2.5, ry = 3.4 * s, ca = Math.cos(dir), sa = Math.sin(dir);
+    const tipX = rx + ca * L, tipY = ry + sa * L;
+    // the spar bows forward a little: a point on it at u, and the way it runs there
+    const sp = u => {
+      const bow = Math.sin(u * Math.PI) * 4 * s * open;
+      return [rx + ca * L * u - sa * bow, ry + sa * L * u + ca * bow];
+    };
+    // the membrane, between the spar and a trailing edge swept back toward the tail
+    const back = dir - s * 0.85 - skew * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    for (let i = 1; i <= 8; i++) { const [x, y] = sp(i / 8); ctx.lineTo(x, y); }
+    ctx.quadraticCurveTo(tipX + Math.cos(back) * L * 0.2, tipY + Math.sin(back) * L * 0.2,
+                         rx + Math.cos(back) * L * 0.55 - 4, ry + Math.sin(back) * L * 0.55);
+    ctx.quadraticCurveTo(-9, 5 * s, rx, ry);
+    ctx.closePath();
+    const mg = ctx.createLinearGradient(rx, ry, tipX, tipY);
+    mg.addColorStop(0, rgba(BTL_OD.cyan, 0.3 * open)); mg.addColorStop(0.55, rgba(BTL_OD.orchid, 0.16 * open));
+    mg.addColorStop(1, rgba(BTL_OD.violet, 0.06 * open));
+    ctx.globalAlpha = 1; ctx.fillStyle = mg; ctx.fill();
+    // the feathers, off the spar and back over the membrane
+    const N = BTL_OD.feathers;
+    for (let i = 0; i < N; i++) {
+      const k = i / (N - 1), [bx, by] = sp(0.12 + k * 0.88);
+      const flick = 0.86 + Math.sin(t * (6 + i * 1.6) + i * 2.3 + s) * 0.14, span = open * flick;
+      const a = dir - s * (0.95 + k * 0.35) - skew * (0.3 + k * 0.4);
+      const len = (10 + 24 * Math.sin(Math.min(1, 0.2 + k * 0.85) * Math.PI)) * span * (0.85 + surge * 0.25);
+      const w = (3.2 - k * 1.2) * span, bend = s * (3 + k * 6) * span + Math.sin(t * 4.2 + i * 1.3 + s) * 2 * span;
+      const near = 1 - k * 0.55;
+      ctx.globalAlpha = 0.22 * span; ctx.fillStyle = BTL_OD.deep; btlLeaf(bx, by, a, len, w * 1.9, bend); ctx.fill();
+      ctx.globalAlpha = 0.3 * span * near; ctx.fillStyle = BTL_OD.blue; btlLeaf(bx, by, a, len * 0.86, w * 1.05, bend * 0.8); ctx.fill();
+      ctx.globalAlpha = 0.36 * span * flick * near * near;
+      ctx.fillStyle = k < 0.22 ? BTL_OD.white : i % 3 === 0 ? BTL_OD.ice : BTL_OD.cyan;
+      btlLeaf(bx, by, a, len * 0.5, w * 0.42, bend * 0.5); ctx.fill();
+      if (B.parts && Math.random() < 0.03 * open * surge * surge) {
+        const ex = bx + Math.cos(a) * len, ey = by + Math.sin(a) * len, c = Math.cos(me.ang), n = Math.sin(me.ang);
+        moPart({ x: me.x + ex * c - ey * n, y: me.y + ex * n + ey * c, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60,
+                 drag: 2, flow: 20, fs: 24, life: 0.4 + Math.random() * 0.5, r: 0.9 + Math.random(), layer: 'btlEmber' }, B.parts);
+      }
+    }
+    // the spar: one hard line, and the reason it reads as a wing
+    ctx.globalAlpha = 0.7 * open; ctx.strokeStyle = BTL_OD.ice; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.moveTo(rx, ry);
+    for (let i = 1; i <= 12; i++) { const [x, y] = sp(i / 12); ctx.lineTo(x, y); }
+    ctx.stroke();
+    // two veins across the membrane
+    ctx.globalAlpha = 0.3 * open; ctx.lineWidth = 0.6;
+    for (const u of [0.35, 0.68]) {
+      const [x, y] = sp(u);
+      ctx.beginPath(); ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x + Math.cos(back) * L * 0.18, y + Math.sin(back) * L * 0.18,
+                           x + Math.cos(back) * L * 0.34 - 2, y + Math.sin(back) * L * 0.34);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+// the stock surge: an idle breath with a gout now and then, ~0.72 … ~1.67
+function btlSurge(t) {
+  const raw = Math.sin(t * 3.7) * 0.5 + Math.sin(t * 8.9 + 1.3) * 0.28 + Math.sin(t * 1.61) * 0.22;
+  return 0.72 + Math.pow(clamp(raw * 0.5 + 0.5, 0, 1), 2.1) * 0.95;
+}
+
+/* the crest on one plate of the body, in that plate's frame: a tongue of
+   blue fire off its back, leaning back along the body */
+function btlOdCrest(B, i, R, life) {
+  const t = B.t, fl = 0.8 + 0.2 * Math.sin(t * (9 + i) + i * 1.9), len = (5 + R * 0.9) * life * fl;
+  const bend = Math.sin(t * 4.1 + i * 0.8) * 1.6;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.35 * life; ctx.fillStyle = BTL_OD.blue; btlLeaf(-1, 0, Math.PI, len, R * 0.42, bend); ctx.fill();
+  ctx.globalAlpha = 0.5 * life; ctx.fillStyle = '#a5f3fc'; btlLeaf(-1, 0, Math.PI, len * 0.55, R * 0.2, bend * 0.6); ctx.fill();
+  ctx.restore();
+}
+
+/* ================================= THE LANCE ==============================
+   Two jets of flame wound round the beam's axis, depth-sorted so one passes
+   behind the other. The winding is the stock helix's (turns, spin, reach), so
+   it fills the same lane; the strands flicker on the flow. */
+function btlOdBraid(B, me, k) {
+  const segs = me.segs;
+  if (k <= 0.001 || !segs || !segs.length) return;
+  const a = segs[0], b = segs[segs.length - 1], t = B.t;
+  const ox = a.x1, oy = a.y1, len = Math.hypot(b.x2 - ox, b.y2 - oy), ang = Math.atan2(b.y2 - oy, b.x2 - ox);
+  const ca = Math.cos(ang), sa = Math.sin(ang), nx = -sa, ny = ca;
+  const STEPS = 64, TURNS = 5.4, SPIN = 7.2, AMP = 11;
+  const pt = (j, s) => {
+    const u = s / STEPS, d = u * len, ph = u * TURNS * TAU - t * SPIN + j * Math.PI;
+    const taper = Math.sin(Math.min(1, u * 1.35) * Math.PI * 0.5) * (1 - u * 0.22);
+    const off = (Math.sin(ph) * AMP + moFlow(u * 7 + j * 3, j * 4, t * 2, 1)[1] * 1.6) * taper * k;
+    return { x: ox + ca * d + nx * off, y: oy + sa * d + ny * off, depth: Math.cos(ph), u };
+  };
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.globalCompositeOperation = 'lighter';
+  for (const pass of [-1, 1]) for (const j of [0, 1]) {
+    let run = false;
+    for (let s = 0; s <= STEPS; s++) {
+      const p = pt(j, s), side = p.depth < 0 ? -1 : 1;
+      if (side !== pass) { run = false; continue; }
+      if (!run) { run = true; ctx.beginPath(); ctx.moveTo(p.x, p.y); } else ctx.lineTo(p.x, p.y);
+      if (s === STEPS || (pt(j, s + 1).depth < 0 ? -1 : 1) !== pass) {
+        const front = pass > 0, fade = k * (1 - p.u * 0.55);
+        ctx.globalAlpha = (front ? 0.28 : 0.2) * fade; ctx.strokeStyle = front ? BTL_OD.blue : BTL_OD.deep;
+        ctx.lineWidth = front ? 9 : 6; ctx.stroke();
+        ctx.globalAlpha = (front ? 0.8 : 0.45) * fade; ctx.strokeStyle = front ? BTL_OD.sky : BTL_OD.violet;
+        ctx.lineWidth = front ? 3.6 : 2.2; ctx.stroke();
+        if (front) { ctx.globalAlpha = 0.95 * fade; ctx.strokeStyle = BTL_OD.white; ctx.lineWidth = 1.2; ctx.stroke(); }
+        run = false;
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  // where the strands cross: the only place that flares
+  for (let s = 2; s < STEPS; s++) {
+    const p = pt(0, s), q = pt(1, s);
+    if (Math.abs(p.x - q.x) + Math.abs(p.y - q.y) > 5) continue;
+    drawGlow((p.x + q.x) / 2, (p.y + q.y) / 2, 15, '#a5f3fc', 0.4 * k);
+  }
+  // the jaws and the far end
+  drawGlow(ox, oy, 24, BTL_OD.sky, 0.55 * k);
+  const ex = ox + ca * len, ey = oy + sa * len;
+  drawGlow(ex, ey, 30 + Math.sin(t * 22) * 5, BTL_OD.orchid, 0.55 * k);
+  ctx.globalAlpha = 0.9 * k; ctx.fillStyle = BTL_OD.white;
+  ctx.translate(ex, ey); ctx.rotate(ang + t * 3);
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) { const a2 = i * TAU / 8, r = i % 2 ? 3.4 : 10; i ? ctx.lineTo(Math.cos(a2) * r, Math.sin(a2) * r) : ctx.moveTo(Math.cos(a2) * r, Math.sin(a2) * r); }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+/* ================================== THE GRADE ============================= */
+function btlOdGrade(q, T, flash, W, H, mid) {
+  if (!q) return;
+  const dAmt = q.dim * (1 - q.life * 0.45);
+  if (dAmt > 0.002) {
+    const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12, W / 2, H / 2, Math.max(W, H) * 0.7);
+    vig.addColorStop(0, 'rgba(4,3,16,' + (0.55 * dAmt) + ')');
+    vig.addColorStop(1, 'rgba(3,2,12,' + (0.9 * dAmt) + ')');
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  }
+  if (mid) mid();                       // the swarm sits above the dim, as the spark did
+  if (q.life > 0.01) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75), pulse = 0.05 + Math.sin(T * 3.1) * 0.012;
+    g.addColorStop(0, 'rgba(56,189,248,' + ((pulse + 0.02) * q.life) + ')');
+    g.addColorStop(1, 'rgba(46,16,101,' + (pulse * 0.6 * q.life) + ')');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+  if (flash > 0) { ctx.fillStyle = 'rgba(224,247,255,' + (Math.pow(flash, 2) * 0.72) + ')'; ctx.fillRect(0, 0, W, H); }
+}
+function btlDrawEmber(q, k) {
+  drawGlow(q.x, q.y, q.r * 3.6, k > 0.5 ? BTL_OD.cyan : BTL_OD.orchid, 0.4 * k);
+  ctx.fillStyle = rgba(BTL_OD.ice, 0.8 * k); ctx.beginPath(); ctx.arc(q.x, q.y, q.r * 0.45, 0, TAU); ctx.fill();
+}
+
+/* ===========================================================================
+   EMBER · THE BLUE BEETLE — OVERDRIVE's moves (BEETLE-PLAN.md, step 4)
+   Z, X, C and COMBO 1, drawn over the stock logic. Every function here takes
+   the same state the stock art is handed (P.odScorch, odScars, odPyros,
+   P.odStrike, odRing) and draws in the same layer, so wiring it in is
+   swapping one call for another. The stock constants (SCORCH_*, SCAR_*,
+   PYRO_*, STRIKE_*, BRAND_*) are read, never copied.
+
+     Z  SCORCHED EARTH   a bombardier's spray: a wide jet of boiling blue fire,
+                         pulsing down its length, bubbling, splashing where it
+                         ends. As bright at the tip as at the jaws, because its
+                         damage does not fall off. Its scores cool from cyan
+                         through violet to black glass.
+     X  PYROTECHNICS     fire beetles circle the mark through its second,
+                         faster as it runs out; at zero they dive in, the
+                         column goes up, and they burst out of its top. It
+                         leaves a crater cooling to glass.
+     C  BRAND            the beetle beats its wings of fire and climbs at the
+                         camera; the cut up is two shell halves sweeping shut
+                         across the screen; the X is aimed as two lanes with a
+                         mandible's hooks at their ends, and cut by a foot of
+                         fire carrying a sickle blade.
+     COMBO 1             the wall is a curtain of blue flame studded with fire
+                         thorns, a pale arc at its foot burning away; the giant
+                         column primes with the whole floor cracking and a
+                         swarm spiralling in, then goes up.
+
+     btlScorch(B, sc)                  world, additive (drawOdScorch)
+     btlScars(scars, t, parts)         world, floor (drawOdScars)
+     btlPyroMarks(pyros)               world, floor (drawOdPyroMarks)
+     btlPyros(pyros, parts)            world, additive (drawOdPyros)
+     btlStrikeHull(B, me, alt, wings)  world: the beetle leaving and landing (drawOdStrikeHull)
+     btlStrikeMarks(st, ax, ay, zoom, t)   world, floor: the X aimed at (ax, ay) (drawOdStrikeMarks)
+     btlStrikeFoot(st, zoom, t)        world, additive: the foot (drawOdStrike)
+     btlStrikeCut(black, W, H, t)      screen: the cuts (drawOdStrikeCut)
+     btlBrandWall(g)                   world, additive (drawOdBrandWall)
+     btlBrandNukeMark(st, t)           world, floor (drawOdBrandNukeMark)
+     btlBrandNuke(st, t, parts)        world, additive (drawOdBrandNuke)
+     btlKitScreen(a, b, W, H)          screen: Z lighting and going out (drawOdKitScreen)
+=========================================================================== */
+
+const BTL_KIT = {
+  // cooling, hot to cold: white, ice, cyan, blue, indigo, violet, then glass
+  cool: ['#f0fdff', '#cffafe', '#22d3ee', '#2563eb', '#4338ca', '#6d28d9', '#1e1033'],
+  glass: '#04030d', lip: '#67e8f9', deep: '#312e81', blue: '#2563eb', sky: '#38bdf8',
+  cyan: '#22d3ee', ice: '#cffafe', white: '#f0fdff', violet: '#6d28d9', orchid: '#a855f7', pink: '#f0abfc'
+};
+// a point on the cooling ramp: 1 just laid, 0 gone cold
+function btlCool(h) {
+  const R = BTL_KIT.cool, f = (1 - clamp(h, 0, 1)) * (R.length - 1), i = Math.min(R.length - 2, Math.floor(f));
+  return btlMix(R[i], R[i + 1], f - i);
+}
+const btlEaseOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+
+/* A fire beetle, small, the way the swarm draws them: a blur of wings, a dark
+   body, a lit abdomen, and its glow. (x, y) where, hd its heading, s its size. */
+function btlFireBeetle(x, y, hd, s, col, a, T, i) {
+  if (a <= 0.01) return;
+  const pulse = 0.65 + 0.35 * Math.sin(T * 13 + i * 1.7);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, 9 * s, col, 0.55 * pulse * a);
+  ctx.translate(x, y); ctx.rotate(hd); ctx.scale(s, s);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(205,250,255,0.24)';
+  const flap = Math.sin(T * 70 + i) * 0.6;
+  for (const sd of [-1, 1]) { ctx.beginPath(); ctx.ellipse(0.2, sd * 1.9, 1.9, 0.7 + flap * 0.3, sd * 0.5, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = '#0c0a24';
+  ctx.beginPath(); ctx.ellipse(0.6, 0, 2.1, 1.25, 0, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba(BTL_KIT.white, 0.9 * pulse * a);
+  ctx.beginPath(); ctx.ellipse(-1.2, 0, 1.2, 0.95, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* =================================== Z ==================================== */
+function btlScorch(B, sc) {
+  if (!sc || sc.k <= 0.01) return;
+  const t = sc.t, k = sc.k, hw = Math.max(sc.half, 1);
+  const L = Math.hypot(sc.x2 - sc.x1, sc.y2 - sc.y1), ang = Math.atan2(sc.y2 - sc.y1, sc.x2 - sc.x1);
+  if (L < 1) return;
+  ctx.save();
+  ctx.translate(sc.x1, sc.y1); ctx.rotate(ang);
+  ctx.globalCompositeOperation = 'lighter';
+  // the billow round it, churning forward
+  const N = Math.max(10, Math.round(L / (hw * 0.7)));
+  for (let i = 0; i < N; i++) {
+    const u = (i + (t * 2.4) % 1) / N, x = u * L, w = moFlow(x * 0.05, i * 3.1, t * 2, 1);
+    const r = hw * (1.25 + 0.25 * Math.sin(t * 9 + i * 1.3)) * (0.55 + 0.45 * Math.min(1, u * 6));
+    ctx.globalAlpha = 0.3 * k;
+    const spr = btlPuff(Math.round(clamp(0.35 + 0.5 * u + 0.15 * w[0], 0, 1) * 15));
+    ctx.drawImage(spr, x - r, w[1] * hw * 0.25 - r, r * 2, r * 2);
+  }
+  // the jet: its body, edges boiling on the flow
+  const pts = [];
+  for (let i = 0; i <= 14; i++) {
+    const x = L * i / 14;
+    pts.push({ x, y: moFlow(x * 0.04, 7.7, t * 3, 1)[1] * hw * 0.12 * Math.min(1, i / 3) });
+  }
+  // moRibbon takes full widths: the body fills the hitbox, 2 × half
+  moRibbon(pts, hw * 1.9, hw * 2.1, { cap: 'round' });
+  let g = ctx.createLinearGradient(0, -hw, 0, hw);
+  g.addColorStop(0, rgba(BTL_KIT.violet, 0)); g.addColorStop(0.25, rgba(BTL_KIT.blue, 0.42 * k));
+  g.addColorStop(0.5, rgba(BTL_KIT.sky, 0.6 * k)); g.addColorStop(0.75, rgba(BTL_KIT.blue, 0.42 * k)); g.addColorStop(1, rgba(BTL_KIT.violet, 0));
+  ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fill();
+  moRibbon(pts, hw * 1.0, hw * 1.2, { cap: 'round' });
+  ctx.fillStyle = rgba(BTL_KIT.cyan, 0.45 * k); ctx.fill();
+  // the pulses: a bombardier fires in beats, and each one runs down the jet
+  ctx.lineWidth = Math.max(1, hw * 0.08);
+  for (let j = 0; j < 6; j++) {
+    const u = (t * 5.5 + j / 6) % 1, x = u * L, a = (1 - u * 0.4) * k;
+    ctx.strokeStyle = rgba(BTL_KIT.ice, 0.55 * a);
+    ctx.beginPath(); ctx.ellipse(x, 0, hw * 0.24, hw * (0.85 + 0.1 * Math.sin(j)), 0, 0, TAU); ctx.stroke();
+  }
+  // the boil: bubbles riding it
+  for (let m = 0; m < 22; m++) {
+    const u = (btlHash(m, 31) + t * (1.1 + btlHash(m, 32) * 0.8)) % 1, x = u * L;
+    const y = (btlHash(m, 33) - 0.5) * hw * 1.6, r = hw * (0.05 + btlHash(m, 34) * 0.08) * (0.6 + 0.4 * Math.sin(t * 20 + m));
+    ctx.strokeStyle = rgba(BTL_KIT.white, 0.6 * k); ctx.lineWidth = Math.max(0.6, hw * 0.03);
+    ctx.beginPath(); ctx.arc(x, y, Math.max(0.8, r), 0, TAU); ctx.stroke();
+  }
+  // the core
+  moRibbon(pts, hw * 0.3, hw * 0.18, { cap: 'round' });
+  ctx.fillStyle = rgba(BTL_KIT.white, 0.85 * k); ctx.fill();
+  // the jaws, and the splash where it ends
+  drawGlow(0, 0, hw * 2.4, BTL_KIT.sky, 0.6 * k);
+  drawGlow(L, 0, hw * 2.6, BTL_KIT.orchid, 0.5 * k);
+  drawGlow(L, 0, hw * 1.2, BTL_KIT.white, 0.5 * k);
+  ctx.lineCap = 'round';
+  for (let j = 0; j < 9; j++) {
+    const a = Math.PI + (btlHash(j, 41) - 0.5) * 2.6 + Math.sin(t * 7 + j) * 0.2;
+    const l = hw * (0.8 + 1.2 * ((t * 3 + btlHash(j, 42)) % 1));
+    ctx.strokeStyle = rgba(btlCool(0.8 - (l / hw) * 0.25), 0.55 * k); ctx.lineWidth = Math.max(1, hw * 0.08);
+    ctx.beginPath(); ctx.moveTo(L + Math.cos(a) * hw * 0.4, Math.sin(a) * hw * 0.4); ctx.lineTo(L + Math.cos(a) * l, Math.sin(a) * l); ctx.stroke();
+  }
+  ctx.restore();
+  if (B && B.parts && Math.random() < 0.7 * k) {
+    const a = ang + Math.PI + (Math.random() - 0.5) * 2.4, s = 80 + Math.random() * 160;
+    moPart({ x: sc.x2, y: sc.y2, vx: Math.cos(a) * s, vy: Math.sin(a) * s, drag: 3.5, flow: 20, fs: 30,
+             life: 0.3 + Math.random() * 0.4, r: 1 + Math.random() * 1.5, layer: 'btlEmber' }, B.parts);
+  }
+}
+
+/* The scores: a trench cooling from where it was laid. The lip catches cyan,
+   the floor of it goes to black glass with the light sliding along it, and
+   while it is still hot it seams and splits in shards. */
+function btlScars(scars, t, parts) {
+  if (!scars || !scars.length) return;
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of scars) {
+    if (!s.stamps.length) continue;
+    const fade = clamp((s.life - s.t) / 1.6, 0, 1);
+    if (fade <= 0.005) continue;
+    const w = s.half * 2 / SCAR_HALF * 0.78;
+    const path = (dx, dy) => {
+      ctx.beginPath();
+      for (const st of s.stamps) {
+        const q = Math.max(0.45, st.k), mx = (st.x1 + st.x2) / 2, my = (st.y1 + st.y2) / 2;
+        ctx.moveTo(lerp(mx, st.x1, q) + dx, lerp(my, st.y1, q) + dy);
+        ctx.lineTo(lerp(mx, st.x2, q) + dx, lerp(my, st.y2, q) + dy);
+      }
+    };
+    const layer = (dx, dy, lw, col, a) => { path(dx, dy); ctx.globalAlpha = a * fade; ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.stroke(); };
+    ctx.globalCompositeOperation = 'source-over';
+    layer(0, 0, w * 2.1, BTL_KIT.glass, 0.28);             // the scorch round it
+    layer(0, 0, w * 1.5, BTL_KIT.glass, 0.32);
+    layer(0, -w * 0.09, w * 1.12, BTL_KIT.lip, 0.14);      // the lip, catching the light
+    layer(0, w * 0.07, w * 1.08, '#000000', 0.45);         // and its shadow
+    layer(0, 0, w, '#070512', 0.92);                       // the trench
+    layer(0, w * 0.06, w * 0.62, BTL_KIT.glass, 0.9);      // its floor, glassed
+    ctx.globalCompositeOperation = 'lighter';
+    // the glass: one glint sliding the length of the trench, strongest once it is cold
+    const cold = clamp(s.t / (s.life * 0.6), 0, 1);
+    if (cold > 0.02) {
+      let total = 0;
+      for (const st of s.stamps) total += Math.hypot(st.x2 - st.x1, st.y2 - st.y1);
+      const win = Math.max(w * 0.8, 30), S = ((t * 160 + s.seed * 7) % (total + win * 2)) - win;
+      ctx.lineCap = 'butt';
+      let run = 0;
+      for (const st of s.stamps) {
+        const L = Math.hypot(st.x2 - st.x1, st.y2 - st.y1);
+        const a0 = clamp((S - win - run) / L, 0, 1), a1 = clamp((S + win - run) / L, 0, 1);
+        run += L;
+        if (L < 1 || a1 <= a0) continue;
+        const ux = (st.x2 - st.x1) / L, uy = (st.y2 - st.y1) / L, nx = -uy, ny = ux;
+        for (const [off, a] of [[-0.18, 0.35], [0.12, 0.2]]) {
+          ctx.globalAlpha = a * cold * fade; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = clamp(w * 0.03, 0.8, 3);
+          ctx.beginPath();
+          ctx.moveTo(st.x1 + ux * L * a0 + nx * w * off, st.y1 + uy * L * a0 + ny * w * off);
+          ctx.lineTo(st.x1 + ux * L * a1 + nx * w * off, st.y1 + uy * L * a1 + ny * w * off);
+          ctx.stroke();
+        }
+      }
+      ctx.lineCap = 'round';
+    }
+    // the heat in it: seams, then shards splitting off them
+    for (let i = 0; i < s.stamps.length; i++) {
+      const st = s.stamps[i], age = s.t - st.at;
+      const heat = clamp(1 - age / (s.life * 0.8), 0, 1) * (age < 0.25 ? 1 : 0.85);
+      const flick = 0.85 + 0.15 * Math.sin(t * 9 + i * 1.7 + s.seed);
+      const q = Math.max(0.45, st.k), mx = (st.x1 + st.x2) / 2, my = (st.y1 + st.y2) / 2;
+      const ax = lerp(mx, st.x1, q), ay = lerp(my, st.y1, q), bx = lerp(mx, st.x2, q), by = lerp(my, st.y2, q);
+      const sw = clamp(w / 40, 1, 2.5);                  // seams grow a little with the trench (BRAND's is six times Z's)
+      ctx.strokeStyle = btlCool(heat * 0.95);
+      ctx.globalAlpha = (0.12 + 0.22 * heat) * fade * flick; ctx.lineWidth = (1.6 + 2.6 * heat) * sw;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.globalAlpha = (0.2 + 0.45 * heat) * fade * flick; ctx.lineWidth = (1 + heat) * sw;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      if (heat > 0.05) {
+        const L = Math.hypot(bx - ax, by - ay);
+        if (L < 4) continue;
+        const ux = (bx - ax) / L, uy = (by - ay) / L, nx = -uy, ny = ux, nC = Math.min(6, 1 + Math.floor(L / 80));
+        ctx.lineWidth = Math.min(1.6, sw); ctx.strokeStyle = btlCool(heat * 0.8); ctx.globalAlpha = 0.7 * heat * fade;   // cracks stay hairlines
+        ctx.beginPath();
+        for (let c = 0; c < nC; c++) {
+          // a shard: a straight split out and a second one back, a triangle of glass
+          const hs = s.seed + i * 13.7 + c * 5.3, d = L * (0.08 + btlHash(hs, 1) * 0.84), sd = btlHash(hs, 2) < 0.5 ? -1 : 1;
+          const cl = w * (0.35 + btlHash(hs, 3) * 0.35), sk = (btlHash(hs, 4) - 0.5) * cl;
+          const px = ax + ux * d, py = ay + uy * d;
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + ux * sk + nx * sd * cl, py + uy * sk + ny * sd * cl);
+          ctx.lineTo(px + ux * (sk + cl * 0.5) + nx * sd * cl * 0.45, py + uy * (sk + cl * 0.5) + ny * sd * cl * 0.45);
+        }
+        ctx.stroke();
+      }
+      if (parts && heat > 0.15 && Math.random() < 0.02 * heat) {
+        const u = Math.random();
+        moPart({ x: lerp(ax, bx, u), y: lerp(ay, by, u), vx: (Math.random() - 0.5) * 24, vy: -30 - Math.random() * 40,
+                 drag: 1.5, flow: 14, fs: 26, life: 0.4 + Math.random() * 0.4, r: 1 + Math.random(), layer: 'btlEmber' }, parts);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+/* =================================== X ==================================== */
+// a ragged disc, for the crater
+function btlBlot(x, y, rad, seed) {
+  ctx.beginPath();
+  for (let i = 0; i <= 28; i++) {
+    const a = (i / 28) * TAU, q = rad * (0.9 + btlHash(seed, i % 28) * 0.18);
+    i ? ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q) : ctx.moveTo(x + Math.cos(a) * q, y + Math.sin(a) * q);
+  }
+  ctx.closePath();
+}
+// cracks run out from the middle, as far as `reach` of the radius
+function btlCracks(x, y, r, reach, seed, col, a, n = 9) {
+  ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * TAU + btlHash(seed, i) * 0.5;
+    let px = x, py = y;
+    ctx.moveTo(px, py);
+    for (let j = 1; j <= 5; j++) {
+      const d = r * reach * j / 5, aj = a0 + (btlHash(seed + i, j) - 0.5) * 0.5;
+      px = x + Math.cos(aj) * d; py = y + Math.sin(aj) * d;
+      ctx.lineTo(px, py);
+    }
+  }
+  ctx.stroke();
+}
+function btlPyroMarks(pyros) {
+  if (!pyros || !pyros.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const p of pyros) {
+    if (!p.up) {
+      const k = clamp(p.t / PYRO_DELAY, 0, 1), e = btlEaseOut(k);
+      // the floor cooling dark, then warming cold from under
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      g.addColorStop(0, rgba(BTL_KIT.deep, 0.25 + 0.4 * k)); g.addColorStop(0.7, rgba('#0b0a24', 0.32 + 0.2 * k)); g.addColorStop(1, rgba(BTL_KIT.glass, 0.15));
+      ctx.globalAlpha = 1; ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter';
+      btlCracks(p.x, p.y, p.r, e, p.seed, btlCool(0.3 + 0.6 * k), 0.4 + 0.5 * k);
+      // the rim, and the countdown burning away round it from the top
+      const pulse = 0.5 + 0.5 * Math.sin(p.t * (10 + 38 * k));
+      ctx.globalAlpha = 0.45 + 0.25 * pulse * k; ctx.strokeStyle = BTL_KIT.cyan; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.stroke();
+      if (k < 1) {
+        ctx.globalAlpha = 0.9; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, -Math.PI / 2 + k * TAU, Math.PI * 1.5); ctx.stroke();
+        const ha = -Math.PI / 2 + k * TAU;
+        drawGlow(p.x + Math.cos(ha) * p.r, p.y + Math.sin(ha) * p.r, 14, BTL_KIT.white, 0.8);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      // the beetles: round the rim, faster as the second runs out, closing in at the end
+      const n = 9;
+      for (let i = 0; i < n; i++) {
+        const sp = 2 + 9 * k * k, a = p.seed + (i / n) * TAU + p.t * sp + k * k * 1.5;
+        const rr = p.r * (0.92 - 0.25 * Math.pow(k, 4));
+        const x = p.x + Math.cos(a) * rr, y = p.y + Math.sin(a) * rr * 0.92;
+        btlFireBeetle(x, y, a + Math.PI / 2, 1.1, i % 3 ? BTL_KIT.cyan : BTL_KIT.orchid, Math.min(1, p.t * 5), p.t, i);
+      }
+    } else {
+      // the crater, cooling to glass
+      const u = clamp((p.t - PYRO_DELAY) / PYRO_AFTER, 0, 1), fade = 1 - clamp((u - 0.75) / 0.25, 0, 1);
+      ctx.globalAlpha = 0.85 * fade; ctx.fillStyle = BTL_KIT.glass; btlBlot(p.x, p.y, p.r * 0.92, p.seed); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.6 * fade; ctx.strokeStyle = btlCool(1 - u * 0.8); ctx.lineWidth = 2;
+      btlBlot(p.x, p.y, p.r * 0.92, p.seed); ctx.stroke();
+      btlCracks(p.x, p.y, p.r * 0.9, 1, p.seed, btlCool(0.9 - u * 0.8), 0.6 * (1 - u) * fade);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  ctx.restore();
+}
+/* The column, top-down the way the stock draws it: a white base, tongues
+   climbing up-screen, a ring round its foot; then it lets go of the ground
+   and rises away, and the beetles that dived in burst out of its top. */
+function btlColumn(x, y, r, u, seed, bright, beetles, T, hMax) {
+  const rise = btlEaseOut(clamp(u / 0.12, 0, 1)), go = u < 0.4 ? 0 : (u - 0.4) / 0.6, colK = (1 - go * go) * bright;
+  const Hc = (hMax || r * 3.4) * rise, base = y - Hc * 0.85 * go * go, top = y - Hc - r * 1.4 * go;
+  const bw = r * 0.85 * (1 - go * 0.5);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // the ring off its foot
+  const ringK = clamp(u / 0.35, 0, 1);
+  ctx.globalAlpha = (1 - ringK) * 0.8 * bright; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(x, y, r * (1 + ringK * 0.6), r * (1 + ringK * 0.6) * 0.62, 0, 0, TAU); ctx.stroke();
+  drawGlow(x, base, bw * 2.2, BTL_KIT.blue, 0.5 * colK);
+  drawGlow(x, base, bw * 1.1, BTL_KIT.white, 0.55 * colK * (1 - go));
+  // the body: tongues climbing, cooler as they go up
+  for (let i = 0; i < 26; i++) {
+    const ph = (T * (1.6 + btlHash(seed, i) * 0.8) + btlHash(seed, i + 40)) % 1;
+    const yy = lerp(base, top, ph), sway = Math.sin(T * 5 + i * 1.7) * bw * 0.25 * ph;
+    const xx = x + (btlHash(seed, i + 80) - 0.5) * bw * 1.3 * (1 - ph * 0.6) + sway;
+    const len = Hc * (0.18 + 0.2 * btlHash(seed, i + 120)) * (1 - ph * 0.5), wid = bw * (0.32 - ph * 0.18);
+    const a = Math.sin(ph * Math.PI) * colK;
+    ctx.globalAlpha = 0.28 * a; ctx.fillStyle = btlCool(0.9 - ph * 0.75); btlLeaf(xx, yy, -Math.PI / 2, len, wid, sway * 0.4); ctx.fill();
+    ctx.globalAlpha = 0.35 * a; ctx.fillStyle = btlCool(1 - ph * 0.5); btlLeaf(xx, yy, -Math.PI / 2, len * 0.5, wid * 0.4, sway * 0.2); ctx.fill();
+  }
+  ctx.restore();
+  // the beetles, out of its top as it goes up
+  if (beetles && u > 0.02) {
+    const n = beetles, out = btlEaseOut(clamp(u / 0.7, 0, 1));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + btlHash(seed, i + 200) * 0.6, d = r * (0.3 + out * (1.6 + btlHash(seed, i + 220)));
+      const bx = x + Math.cos(a) * d, by = y - Hc * 0.6 + Math.sin(a) * d * 0.7;
+      btlFireBeetle(bx, by, a, 1.2 * Math.max(1, r / 160), i % 3 ? BTL_KIT.cyan : BTL_KIT.orchid, (1 - u) * bright, T, i);
+    }
+  }
+}
+function btlPyros(pyros, parts) {
+  if (!pyros) return;
+  for (const p of pyros) {
+    if (!p.up) continue;
+    const u = clamp((p.t - PYRO_DELAY) / PYRO_AFTER, 0, 1);
+    btlColumn(p.x, p.y, p.r, u, p.seed, 1, 9, p.t);
+    if (parts && u < 0.5 && Math.random() < 0.5)
+      moPart({ x: p.x + (Math.random() - 0.5) * p.r, y: p.y - Math.random() * p.r * 2, vx: (Math.random() - 0.5) * 80, vy: -60 - Math.random() * 120,
+               drag: 1.4, flow: 22, fs: 34, life: 0.6 + Math.random() * 0.6, r: 1 + Math.random() * 1.6, layer: 'btlEmber' }, parts);
+  }
+}
+
+/* =================================== C ==================================== */
+/* The beetle, from the wing turn to touching down again: it beats its wings
+   of fire, climbs at the camera (bigger, lifting up the screen) and its
+   shadow drops away below it. alt 0 on the floor … 1 up; wings 0 … 1. */
+function btlStrikeHull(B, me, alt, wings) {
+  const s = 1 + alt * 0.9, lift = alt * 26;
+  // the shadow, left on the floor
+  ctx.save();
+  ctx.globalAlpha = 0.45 * (1 - alt * 0.6);
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(me.x + alt * 18, me.y + alt * 22, 18 * (1 - alt * 0.45), 11 * (1 - alt * 0.45), me.ang, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(me.x, me.y - lift); ctx.scale(s, s); ctx.translate(-me.x, -me.y);
+  ctx.globalAlpha = 1 - clamp((alt - 0.7) / 0.3, 0, 1) * 0.5;
+  const od = me.od || { open: 1, life: 1 };
+  const was = me.od, beat = B.flap;
+  me.od = Object.assign({}, od, { open: Math.max(od.open || 0, wings) });
+  B.flap = 1 + wings * 2.5;                    // the wings drive harder to lift it
+  btlDrawUnder(B, me); btlDrawHull(B, me);
+  me.od = was; B.flap = beat;
+  ctx.restore();
+  // the downdraft: rings pressed out across the floor while it climbs
+  if (wings > 0.05 && alt < 0.95) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let j = 0; j < 3; j++) {
+      const u = (B.t * 2.2 + j / 3) % 1;
+      ctx.globalAlpha = (1 - u) * 0.35 * wings * (1 - alt);
+      ctx.strokeStyle = BTL_KIT.cyan; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(me.x, me.y, 14 + u * 60, (14 + u * 60) * 0.7, 0, 0, TAU); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* The X aimed at (ax, ay) while EMBER is up, and the X marked once it is:
+   two lanes as wide as the foot, each with a mandible's base at the end it
+   starts from and its hook at the end it finishes, chevrons running the way
+   it is traced, numbered 1 and 2. zoom is camZoom: line widths are divided by
+   it so they read the same on screen. */
+function btlStrikeMarks(st, strokes, zoom, t, R) {
+  if (!strokes || !strokes.length) return;
+  const locked = st && (st.ph === 'tell' || st.ph === 'fire' || st.ph === 'xdone' || st.ph === 'ring' || st.ph === 'walled' || st.ph === 'nuke');
+  // a stroke already cut is the trench's now: past the X, all of them
+  const cut = i => locked && (st.ph === 'fire' ? !!st.beam && st.beam.i > i : st.ph !== 'tell');
+  const z = 1 / Math.max(0.05, zoom);
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  strokes.forEach((s, i) => {
+    if (cut(i)) return;
+    const L = s.len || Math.hypot(s.x2 - s.x1, s.y2 - s.y1), ang = s.ang !== undefined ? s.ang : Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+    ctx.save();
+    ctx.translate(s.x1, s.y1); ctx.rotate(ang);
+    const a = locked ? 0.75 : 0.45 + 0.15 * Math.sin(t * 6);
+    // the lane
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.25 * a; ctx.fillStyle = BTL_KIT.deep; ctx.fillRect(0, -R, L, R * 2);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a; ctx.strokeStyle = BTL_KIT.cyan; ctx.lineWidth = 1.5 * z;
+    ctx.setLineDash(locked ? [] : [10 * z, 8 * z]); ctx.lineDashOffset = -t * 60 * z;
+    ctx.beginPath(); ctx.moveTo(0, -R); ctx.lineTo(L, -R); ctx.moveTo(0, R); ctx.lineTo(L, R); ctx.stroke();
+    ctx.setLineDash([]);
+    // the mandible: its base where the stroke starts, its hook where it ends
+    ctx.globalAlpha = a; ctx.fillStyle = rgba(BTL_KIT.violet, 0.5); ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 1.4 * z;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.4, -R * 1.25); ctx.quadraticCurveTo(R * 0.6, -R * 1.4, R * 0.8, -R);
+    ctx.lineTo(R * 0.8, R); ctx.quadraticCurveTo(R * 0.6, R * 1.4, -R * 0.4, R * 1.25);
+    ctx.quadraticCurveTo(-R * 0.9, 0, -R * 0.4, -R * 1.25); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(L - R * 0.6, -R); ctx.quadraticCurveTo(L + R * 1.3, -R * 0.9, L + R * 0.9, R * 0.9);
+    ctx.quadraticCurveTo(L + R * 0.5, -R * 0.1, L - R * 0.6, R * 0.2); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // chevrons, running the way it is cut
+    ctx.lineWidth = 2 * z; ctx.strokeStyle = BTL_KIT.ice;
+    const step = Math.max(R * 1.6, 40 * z), off = (t * 140 * z) % step;
+    for (let d = R * 1.2 + off; d < L - R; d += step) {
+      ctx.globalAlpha = a * (0.4 + 0.6 * Math.sin(Math.PI * d / L));
+      ctx.beginPath(); ctx.moveTo(d - R * 0.35, -R * 0.45); ctx.lineTo(d, 0); ctx.lineTo(d - R * 0.35, R * 0.45); ctx.stroke();
+    }
+    ctx.restore();
+    // the number, square to the screen
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = a; ctx.fillStyle = BTL_KIT.ice;
+    ctx.font = `700 ${18 * z}px 'Chakra Petch', 'Segoe UI', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), s.x1 + Math.cos(ang + Math.PI) * R * 1.6, s.y1 + Math.sin(ang + Math.PI) * R * 1.6);
+  });
+  ctx.restore();
+}
+
+/* The foot of fire, seen from straight above: a disc of blue fire with a
+   white core, and the sickle blade that cuts it, sweeping across the stroke
+   as it drives, a smear behind it and rings pulsing out. */
+function btlStrikeFoot(st, zoom, t) {
+  const b = st && st.beam;
+  if (!b || b.R < 0.5 || b.ph === 'gap') return;
+  const R = b.R, k = b.k;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // the smear, behind it along where it has come from
+  if (b.ph === 'trace' || b.ph === 'off') {
+    const back = b.ang + Math.PI;
+    for (let j = 1; j <= 6; j++) {
+      const d = R * 0.45 * j;
+      drawGlow(b.x + Math.cos(back) * d, b.y + Math.sin(back) * d, R * (1.1 - j * 0.12), btlCool(0.75 - j * 0.08), 0.3 * k * (1 - j / 7));
+    }
+  }
+  drawGlow(b.x, b.y, R * 2.2, BTL_KIT.deep, 0.45 * k);
+  drawGlow(b.x, b.y, R * 1.3, BTL_KIT.blue, 0.5 * k);
+  ctx.globalAlpha = 0.5 * k; ctx.fillStyle = BTL_KIT.sky;
+  ctx.beginPath(); ctx.arc(b.x, b.y, R * 0.85, 0, TAU); ctx.fill();
+  drawGlow(b.x, b.y, R * 0.55, BTL_KIT.white, 0.85 * k);
+  // rings, pulsing out
+  for (let j = 0; j < 3; j++) {
+    const u = (t * 2.6 + j / 3) % 1;
+    ctx.globalAlpha = (1 - u) * 0.5 * k; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 2 / Math.max(0.2, zoom);
+    ctx.beginPath(); ctx.arc(b.x, b.y, R * (0.7 + u * 0.8), 0, TAU); ctx.stroke();
+  }
+  // the blade: a mandible, sweeping across the line as it cuts
+  ctx.save();
+  ctx.translate(b.x, b.y); ctx.rotate(b.ang + Math.sin(t * 14) * 0.35);
+  ctx.globalAlpha = 0.9 * k;
+  ctx.beginPath();
+  ctx.moveTo(-R * 0.2, -R * 1.15);
+  ctx.quadraticCurveTo(R * 1.3, -R * 0.9, R * 1.05, R * 0.25);      // the outer edge, round the front
+  ctx.quadraticCurveTo(R * 0.85, -R * 0.35, -R * 0.1, -R * 0.62);    // the inner edge, back to the base
+  ctx.closePath();
+  const g = ctx.createLinearGradient(-R, -R, R, R);
+  g.addColorStop(0, rgba(BTL_KIT.violet, 0.5)); g.addColorStop(0.6, rgba(BTL_KIT.cyan, 0.8)); g.addColorStop(1, rgba(BTL_KIT.white, 0.95));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = rgba(BTL_KIT.white, 0.9 * k); ctx.lineWidth = 2 / Math.max(0.2, zoom); ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+}
+
+/* The cut up, and the cut back down: two shell halves sweeping shut across
+   the screen, meeting in a seam that glows, then parting again on the other
+   side. black is odStrikeBlack(): 0 open, 1 shut. */
+function btlStrikeCut(black, W, H, t) {
+  if (black <= 0.001) return;
+  const e = black * black * (3 - 2 * black), half = W / 2 * e + 2;
+  ctx.save();
+  for (const sd of [-1, 1]) {
+    const outer = sd < 0 ? -W * 0.1 : W * 1.1;
+    const bulge = W * 0.06 * (1 - e);
+    // the half: its leading edge bowed like the rim of a wing case
+    ctx.beginPath();
+    ctx.moveTo(outer, -10);
+    ctx.lineTo(sd < 0 ? half : W - half, -10);
+    ctx.quadraticCurveTo((sd < 0 ? half : W - half) - sd * bulge, H / 2, sd < 0 ? half : W - half, H + 10);
+    ctx.lineTo(outer, H + 10);
+    ctx.closePath();
+    const x0 = sd < 0 ? 0 : W, x1 = sd < 0 ? half : W - half;
+    const g = ctx.createLinearGradient(x0, 0, x1, 0);
+    g.addColorStop(0, '#030209'); g.addColorStop(0.7, '#0c0a24'); g.addColorStop(0.92, '#231a5c'); g.addColorStop(1, '#4c1d95');
+    ctx.fillStyle = g; ctx.fill();
+    // its striae, catching a little light
+    ctx.save(); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(103,232,249,0.06)'; ctx.lineWidth = 1;
+    for (let i = 1; i <= 7; i++) {
+      const x = lerp(x0, x1, i / 8);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.quadraticCurveTo(x - sd * bulge * 0.5, H / 2, x, H); ctx.stroke();
+    }
+    ctx.restore();
+    // the rim, lit
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(207,250,254,' + (0.55 * black) + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x1, -10); ctx.quadraticCurveTo(x1 - sd * bulge, H / 2, x1, H + 10); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // shut: the seam down the middle, burning
+  if (e > 0.9) {
+    ctx.globalCompositeOperation = 'lighter';
+    const s = (e - 0.9) / 0.1;
+    const g = ctx.createLinearGradient(W / 2 - 14, 0, W / 2 + 14, 0);
+    g.addColorStop(0, 'rgba(34,211,238,0)'); g.addColorStop(0.5, 'rgba(240,253,255,' + 0.9 * s + ')'); g.addColorStop(1, 'rgba(34,211,238,0)');
+    ctx.fillStyle = g; ctx.fillRect(W / 2 - 14, 0, 28, H);
+  }
+  ctx.restore();
+}
+
+/* ================================ COMBO 1 ================================= */
+function btlBrandWall(g) {
+  if (!g) return;
+  const t = g.t, rise = t < 0.35 ? btlEaseOut(t / 0.35) * 1.25 : t < 0.7 ? lerp(1.25, 1, (t - 0.35) / 0.35) : 1;
+  const sink = clamp((g.life - t) / 0.6, 0, 1), h = g.r * 0.32 * rise * sink * (0.92 + 0.08 * Math.sin(t * 2.3));
+  if (h <= 0.5) return;
+  const z = g.r / 160;                                       // its detail grows with it
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  /* the curtain: the trench ring stacked upward in fine steps, so it reads
+     as one sheet of fire rising off the floor and thinning as it climbs */
+  for (let j = 0; j < 18; j++) {
+    const u = j / 17;
+    ctx.globalAlpha = 0.07 * (1 - u * 0.85) * sink; ctx.strokeStyle = btlCool(1 - u * 0.7); ctx.lineWidth = (4 - u * 2) * z;
+    ctx.beginPath(); ctx.ellipse(g.x, g.y - h * u, g.r, g.r, 0, 0, TAU); ctx.stroke();
+  }
+  // its foot, where it comes out of the trench, burning hottest
+  ctx.globalAlpha = 0.35 * sink; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 2.2 * z;
+  ctx.beginPath(); ctx.ellipse(g.x, g.y, g.r, g.r, 0, 0, TAU); ctx.stroke();
+  // tongues licking off the lip, and thorns of chitin standing out of the trench
+  const N = 64;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * TAU, x = g.x + Math.cos(a) * g.r, y = g.y + Math.sin(a) * g.r;
+    const ph = (t * 1.3 + btlHash(g.seed, i)) % 1, len = h * (0.22 + 0.4 * Math.sin(ph * Math.PI)), bend = Math.sin(t * 3 + i) * 2 * z;
+    const lip = y - h * (0.82 + 0.1 * Math.sin(t * 2 + i * 0.7));
+    ctx.globalAlpha = 0.14 * sink; ctx.fillStyle = BTL_KIT.blue; btlLeaf(x, lip, -Math.PI / 2, len, 3.2 * z, bend); ctx.fill();
+    ctx.globalAlpha = 0.18 * sink; ctx.fillStyle = BTL_KIT.cyan; btlLeaf(x, lip, -Math.PI / 2, len * 0.45, 1.4 * z, bend * 0.5); ctx.fill();
+    if (i % 4 === 0) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.85 * sink; ctx.fillStyle = '#0c0a24'; ctx.strokeStyle = BTL_KIT.cyan; ctx.lineWidth = 1 * z;
+      const th = h * 0.6, lean = Math.cos(a) * 5 * z, bw = 4 * z;
+      ctx.beginPath();
+      ctx.moveTo(x - bw, y); ctx.quadraticCurveTo(x - bw * 0.6 + lean, y - th * 0.6, x + lean * 1.6, y - th);
+      ctx.quadraticCurveTo(x + bw * 0.4 + lean, y - th * 0.45, x + bw, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.globalCompositeOperation = 'lighter';
+    }
+  }
+  // the time it has left: a pale arc at its foot, burning away
+  const left = clamp(1 - t / g.life, 0, 1);
+  ctx.globalAlpha = 0.55 * sink; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 2 * z;
+  ctx.beginPath(); ctx.arc(g.x, g.y, g.r + 10 * z, -Math.PI / 2, -Math.PI / 2 + left * TAU); ctx.stroke();
+  ctx.restore();
+}
+function btlBrandNukeMark(st, t) {
+  const n = st && st.nuke;
+  if (!n) return;
+  ctx.save();
+  if (!n.up) {
+    const k = clamp(n.t / PYRO_DELAY, 0, 1), e = btlEaseOut(k), heat = clamp(0.5 + (n.heat || 0) / 200, 0.5, 1);
+    const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
+    g.addColorStop(0, rgba(BTL_KIT.deep, 0.3 + 0.45 * k)); g.addColorStop(0.8, rgba('#0b0a24', 0.35 + 0.2 * k)); g.addColorStop(1, rgba(BTL_KIT.glass, 0.2));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    btlCracks(n.x, n.y, n.r, e, n.seed, btlCool(0.3 + 0.65 * k), (0.4 + 0.5 * k) * heat, 16);
+    // rings closing in
+    for (let j = 0; j < 3; j++) {
+      const u = 1 - ((k * 2.5 + j / 3) % 1);
+      ctx.globalAlpha = 0.35 * (1 - u) * heat; ctx.strokeStyle = BTL_KIT.cyan; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r * u, 0, TAU); ctx.stroke();
+    }
+    // the countdown round it
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = BTL_KIT.ice; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, -Math.PI / 2 + k * TAU, Math.PI * 1.5); ctx.stroke();
+    // a swarm spiralling in across all of it
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = 0; i < 24; i++) {
+      const a = n.seed + (i / 24) * TAU + n.t * (1.5 + 6 * k * k), rr = n.r * (0.95 - 0.8 * Math.pow(k, 2.2) * (0.5 + 0.5 * btlHash(i, 51)));
+      btlFireBeetle(n.x + Math.cos(a) * rr, n.y + Math.sin(a) * rr, a + Math.PI / 2, 1.3 * Math.max(1, n.r / 160), i % 3 ? BTL_KIT.cyan : BTL_KIT.orchid, Math.min(1, n.t * 4), n.t, i);
+    }
+  } else {
+    const u = clamp((n.t - PYRO_DELAY) / PYRO_AFTER, 0, 1);
+    ctx.globalAlpha = 0.85; ctx.fillStyle = BTL_KIT.glass; btlBlot(n.x, n.y, n.r * 0.95, n.seed); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    btlCracks(n.x, n.y, n.r * 0.95, 1, n.seed, btlCool(0.9 - u * 0.8), 0.6 * (1 - u), 16);
+  }
+  ctx.restore();
+}
+function btlBrandNuke(st, t, parts) {
+  const n = st && st.nuke;
+  if (!n || !n.up) return;
+  // its brightness follows the heat it was paid with, as the stock column's does
+  const u = clamp((n.t - PYRO_DELAY) / PYRO_AFTER, 0, 1), bright = clamp((n.heat || 60) / 100, 0.5, 1);
+  if (u < 0.15) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; drawGlow(n.x, n.y, n.r * 2.4, BTL_KIT.white, (1 - u / 0.15) * 0.9 * bright); ctx.restore(); }
+  btlColumn(n.x, n.y, n.r, u, n.seed, bright, 22, n.t, n.r * 1.8);
+  if (parts && u < 0.6)
+    for (let i = 0; i < 3; i++)
+      moPart({ x: n.x + (Math.random() - 0.5) * n.r * 1.4, y: n.y - Math.random() * n.r * 2.4, vx: (Math.random() - 0.5) * 140, vy: -80 - Math.random() * 160,
+               drag: 1.2, flow: 30, fs: 50, life: 0.7 + Math.random() * 0.7, r: 1.2 + Math.random() * 2, layer: 'btlEmber' }, parts);
+}
+function btlKitScreen(a, b, W, H) {
+  if (a <= 0 && b <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  if (a > 0) {
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
+    g.addColorStop(0, 'rgba(224,247,255,' + 0.14 * a * a + ')'); g.addColorStop(1, 'rgba(56,189,248,' + 0.28 * a * a + ')');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (b > 0) { ctx.fillStyle = 'rgba(76,29,149,' + 0.1 * b * b + ')'; ctx.fillRect(0, 0, W, H); }
+  ctx.restore();
+}
+
+/* ===========================================================================
+   EMBER · THE BLUE BEETLE — V, FUSION CORE: KHEPRI (BEETLE-PLAN.md, step 5)
+   The stock V makes EMBER a star: IFRIT, cupping a sun. The beetle becomes
+   Khepri, the scarab that rolls the sun across the sky. Same logic, same
+   timings (FUSION_*, STAR_*), the stock state (P.odFusion, odStars,
+   odStarBooms, odFusionThrow), drawn in the stock layers.
+
+     THE CHANGE   blue fire spirals in, the beetle's outline swells into the
+                  scarab's, broader and rounder with a toothed head-shield and
+                  forelegs reaching forward, and the sun lights between them.
+                  Going out, the fire is thrown off and it shrinks back.
+     KHEPRI       lit from the front by the sun it holds: a broad domed shell
+                  split by its seam, a wide pronotum, the head-shield's rake of
+                  six teeth, toothed forelegs cradling the sun, the middle and
+                  hind legs braced at its sides, plasma wings half spread, and
+                  the body behind melted to a lashing tail of blue fire.
+     THE SUN      held at the front: a white core, a turning photosphere,
+                  corona rays. Each throw flicks one foreleg, then the other,
+                  and the sun dims and swells back.
+     THE AURA     a blue sun's surface at exactly FUSION_AURA_R: convection
+                  turning inside it, prominences looping off the rim.
+     THE STARS    little blue suns, each rolled along by a small scarab on its
+                  back. They swell round what they take in, heat white as the
+                  fuse runs, pinch, and go up in a fireball and a shock ring;
+                  the scarab with them.
+     THE SCREEN   a blue edge while it burns, a cold flash as it is whole, a
+                  dark indigo as it goes out.
+
+     btlKhepriForm(f)                      0 the beetle … 1 Khepri (odFusionForm's shape)
+     btlKhepriAura(me, f, t)               world, under the hull (drawOdFusionAura)
+     btlKhepriHull(B, me, f, t, thrown)    world: the hull (drawOdFusionHull);
+                                           thrown is odFusionThrow { at, hand }
+     btlKhepriStars(stars, booms, t)       world, additive (drawOdStars)
+     btlKhepriScreen(f, t, outAt, W, H)    screen (drawOdFusionScreen)
+=========================================================================== */
+
+const BTL_KH = {
+  sun: [16.5, 0], sunR: 6.2,
+  white: '#f0fdff', ice: '#cffafe', cyan: '#22d3ee', sky: '#38bdf8', blue: '#2563eb', deep: '#312e81',
+  violet: '#6d28d9', orchid: '#a855f7', ink: '#050414', chitin: '#0c0a24'
+};
+const btlSub = (v, a, b) => clamp((v - a) / (b - a), 0, 1);
+const btlBackOut = u => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+// 0 the beetle … 1 Khepri: the change in over FUSION_IN, back out over FUSION_OUT
+function btlKhepriForm(f) {
+  if (!f) return 1;
+  const tin = f.t, tout = f.life - f.t;
+  if (tout < FUSION_OUT) return osEase(btlSub(tout, 0.08, FUSION_OUT - 0.05));
+  return btlSub(tin, 0.12, FUSION_IN);
+}
+// lit, past the change in and short of the change back (odFusionK's shape)
+const btlKhepriK = f => f ? clamp((f.t - 0.7) / 0.5, 0, 1) * clamp((f.life - f.t - 0.45) / 0.45, 0, 1) : 1;
+
+/* ================================= THE AURA =============================== */
+function btlKhepriAura(me, f, t) {
+  if (!f) return;
+  const R = FUSION_AURA_R, k = btlKhepriK(f);
+  if (k <= 0.01) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(me.x, me.y, R * 0.2, me.x, me.y, R);
+  g.addColorStop(0, rgba(BTL_KH.sky, 0.14 * k)); g.addColorStop(0.7, rgba(BTL_KH.blue, 0.08 * k)); g.addColorStop(1, rgba(BTL_KH.violet, 0.14 * k));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(me.x, me.y, R, 0, TAU); ctx.fill();
+  // convection: broken rings turning opposite ways
+  ctx.lineCap = 'round';
+  for (let j = 0; j < 3; j++) {
+    const rr = R * (0.45 + j * 0.17), dir = j % 2 ? -1 : 1;
+    ctx.setLineDash([rr * 0.18, rr * 0.3]); ctx.lineDashOffset = dir * t * (30 + j * 12);
+    ctx.globalAlpha = (0.18 + 0.06 * Math.sin(t * 3 + j)) * k; ctx.strokeStyle = j === 1 ? BTL_KH.ice : BTL_KH.sky;
+    ctx.lineWidth = 3 - j * 0.6;
+    ctx.beginPath(); ctx.arc(me.x, me.y, rr, 0, TAU); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // prominences: loops rising off the rim and falling back
+  for (let i = 0; i < 7; i++) {
+    const ph = (t * 0.35 + i / 7 + (f.seed || 0)) % 1, life = Math.sin(ph * Math.PI);
+    const a = i * TAU / 7 + t * 0.15 + Math.sin(i * 3.1) * 0.4, span = 0.18 + 0.08 * Math.sin(i * 1.7), h = R * (0.1 + 0.22 * life);
+    const x1 = me.x + Math.cos(a - span) * R, y1 = me.y + Math.sin(a - span) * R;
+    const x2 = me.x + Math.cos(a + span) * R, y2 = me.y + Math.sin(a + span) * R;
+    const cx = me.x + Math.cos(a) * (R + h * 2), cy = me.y + Math.sin(a) * (R + h * 2);
+    ctx.globalAlpha = 0.5 * life * k; ctx.strokeStyle = BTL_KH.blue; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(cx, cy, x2, y2); ctx.stroke();
+    ctx.globalAlpha = 0.7 * life * k; ctx.strokeStyle = BTL_KH.ice; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(cx, cy, x2, y2); ctx.stroke();
+  }
+  // the rim: exactly what burns
+  ctx.globalAlpha = (0.55 + 0.15 * Math.sin(t * 5)) * k; ctx.strokeStyle = BTL_KH.ice; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.arc(me.x, me.y, R, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 0.25 * k; ctx.strokeStyle = BTL_KH.sky; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.arc(me.x, me.y, R, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+/* ================================ THE SCARAB ==============================
+   In the hull's frame: x forward, y to starboard. */
+function btlKhPathShell(s) {
+  ctx.beginPath();
+  ctx.moveTo(-1.8, 0.4 * s);
+  ctx.quadraticCurveTo(-1.3, 6.6 * s, -3.0, 10.6 * s);
+  ctx.bezierCurveTo(-5.6, 13.3 * s, -12.6, 13.1 * s, -15.6, 8.0 * s);
+  ctx.quadraticCurveTo(-17.7, 3.6 * s, -16.9, 0.4 * s);
+  ctx.closePath();
+}
+function btlKhPathPronotum() {
+  ctx.beginPath();
+  ctx.moveTo(7.4, -6.2);
+  ctx.quadraticCurveTo(5.6, 0, 7.4, 6.2);
+  ctx.bezierCurveTo(7.8, 10.4, 2.2, 11.6, -1.6, 10.8);
+  ctx.quadraticCurveTo(-3.4, 10.2, -2.6, 8);
+  ctx.quadraticCurveTo(-3.5, 0, -2.6, -8);
+  ctx.quadraticCurveTo(-3.4, -10.2, -1.6, -10.8);
+  ctx.bezierCurveTo(2.2, -11.6, 7.8, -10.4, 7.4, -6.2);
+  ctx.closePath();
+}
+// the head-shield: a half round with a rake of six teeth on its front edge
+function btlKhPathHead() {
+  ctx.beginPath();
+  ctx.moveTo(6.6, -5.4);
+  const cx = 7.4, R0 = 5.6, n = 13;
+  for (let i = 0; i <= n; i++) {
+    const a = -1.2 + 2.4 * i / n, r = i % 2 ? R0 + 1.5 : R0;
+    ctx.lineTo(cx + Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.lineTo(6.6, 5.4);
+  ctx.quadraticCurveTo(5.4, 0, 6.6, -5.4);
+  ctx.closePath();
+}
+/* one leg, as a jointed stroke from hip to knee to foot, thick at the hip,
+   with spurs: teeth along the outside of a foreleg's tibia */
+function btlKhLeg(hx, hy, kx, ky, fx, fy, w, teeth, rim) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = BTL_KH.chitin; ctx.lineWidth = w * 1.5;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+  ctx.strokeStyle = rim; ctx.lineWidth = 0.55;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+  // the joint and the foot catch the light
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  drawGlow(kx, ky, w * 1.6, BTL_KH.sky, 0.4); drawGlow(fx, fy, w * 1.3, BTL_KH.cyan, 0.35);
+  ctx.restore();
+  if (!teeth) return;
+  const dx = fx - kx, dy = fy - ky, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  const out = Math.sign(ky) || 1;
+  ctx.fillStyle = BTL_KH.chitin;
+  for (let i = 1; i <= teeth; i++) {
+    const u = 0.25 + 0.7 * i / teeth, x = kx + dx * u, y = ky + dy * u, side = nx * out > 0 || ny * out > 0 ? 1 : -1;
+    ctx.beginPath();
+    ctx.moveTo(x - ux * 0.6, y - uy * 0.6);
+    ctx.lineTo(x + nx * side * 1.5 + ux * 0.3, y + ny * side * 1.5 + uy * 0.3);
+    ctx.lineTo(x + ux * 0.6, y + uy * 0.6);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = rim; ctx.lineWidth = 0.3; ctx.stroke();
+  }
+}
+// the sun it holds, in the hull's frame at (x, y)
+function btlKhSun(x, y, r, t, k, heat = 0) {
+  if (k <= 0.01 || r <= 0.2) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, r * 5, BTL_KH.blue, 0.35 * k);
+  drawGlow(x, y, r * 2.6, BTL_KH.sky, 0.45 * k);
+  // the corona: rays turning slowly round it
+  for (let i = 0; i < 12; i++) {
+    const a = i * TAU / 12 + t * 0.6, fl = 0.75 + 0.25 * Math.sin(t * 7 + i * 1.9);
+    ctx.globalAlpha = 0.32 * k; ctx.fillStyle = i % 2 ? BTL_KH.sky : BTL_KH.ice;
+    btlLeaf(x + Math.cos(a) * r * 0.8, y + Math.sin(a) * r * 0.8, a, r * (0.9 + 0.7 * fl), r * 0.16, Math.sin(t * 3 + i) * r * 0.2); ctx.fill();
+  }
+  // the photosphere, and its grain turning
+  const g = ctx.createRadialGradient(x - r * 0.25, y - r * 0.25, 0, x, y, r);
+  g.addColorStop(0, rgba(BTL_KH.white, k)); g.addColorStop(0.45, rgba(btlMix(BTL_KH.ice, BTL_KH.white, heat), k));
+  g.addColorStop(0.8, rgba(btlMix(BTL_KH.sky, BTL_KH.white, heat), 0.9 * k)); g.addColorStop(1, rgba(BTL_KH.blue, 0.5 * k));
+  ctx.globalAlpha = 1; ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.fillStyle = rgba(BTL_KH.blue, 0.25 * k);
+  for (let i = 0; i < 9; i++) {
+    const a = i * 2.4 + t * 1.3, d = r * (0.35 + 0.4 * ((i * 0.37) % 1));
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, r * 0.12, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function btlKhepriHull(B, me, f, t, thrown) {
+  const form = btlKhepriForm(f), going = f ? f.life - f.t < FUSION_OUT : false;
+  const m = going ? form : btlBackOut(form);           // the shape overshoots a touch on the way in
+  const writhe = Math.sin(Math.PI * clamp(form, 0, 1));
+  const detail = btlSub(form, 0.72, 1), shell = 1 - btlSub(form, 0, 0.45);
+  const flick = thrown ? clamp(1 - (t - thrown.at) / 0.22, 0, 1) * detail : 0, hand = thrown ? thrown.hand : 1;
+  // the beetle, going: drawn as it was, fading and drawn in
+  if (shell > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = shell;
+    ctx.translate(me.x, me.y); ctx.scale(1 - 0.15 * (1 - shell), 1 - 0.15 * (1 - shell)); ctx.translate(-me.x, -me.y);
+    btlDrawUnder(B, me); btlDrawHull(B, me);
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.translate(me.x, me.y);
+  // fire dragged in round it (in) or thrown off it (out) while it changes
+  if (writhe > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 12; i++) {
+      const q = ((i / 12) + t * (going ? 0.9 : -0.9) + 10) % 1, r = going ? 14 + q * 56 : 70 - q * 56;
+      const an = i * TAU / 12 + t * (going ? 4 : -5) + q * 2;
+      ctx.globalAlpha = 0.5 * writhe * Math.sin(q * Math.PI);
+      ctx.fillStyle = i % 3 ? BTL_KH.sky : BTL_KH.ice;
+      btlLeaf(Math.cos(an) * r, Math.sin(an) * r, an + (going ? 1.9 : -1.9), 9 + 7 * writhe, 2.4, 3); ctx.fill();
+    }
+    drawGlow(0, 0, 44 + 20 * writhe, BTL_KH.blue, 0.4 * writhe);
+    ctx.restore();
+  }
+  ctx.restore();
+  if (form <= 0.01) return;
+
+  // the tail: the body behind it, melted to blue fire along the chain
+  const p = B.body.p;
+  if (p.length > 2) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = form;
+    const pts = p.map((q, i) => {
+      const w = Math.sin(t * 8 - i * 0.9) * 4.5 * (i / p.length);   // it lashes, harder toward the tip
+      const a = i ? Math.atan2(q.y - p[i - 1].y, q.x - p[i - 1].x) : me.ang + Math.PI;
+      return { x: q.x - Math.sin(a) * w, y: q.y + Math.cos(a) * w };
+    });
+    for (const [w0, col, a] of [[13, BTL_KH.violet, 0.3], [9, BTL_KH.blue, 0.45], [5, BTL_KH.sky, 0.6], [2, BTL_KH.white, 0.8]]) {
+      moRibbon(pts, w0 * (0.9 + 0.1 * Math.sin(t * 13)), 0.4, { cap: 'round', ease: u => Math.pow(u, 0.7) });
+      ctx.fillStyle = rgba(col, a); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.translate(me.x, me.y);
+  ctx.rotate(me.ang);
+  ctx.scale(m, m);
+  ctx.globalAlpha = clamp(form * 1.4, 0, 1);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const k = btlSheen(me.ang), rim = btlMix(BTL.cyan, BTL.pink, k * 0.5);
+  const lx = 1, ly = 0;                                 // lit from the front, by the sun
+  const [sx, sy] = BTL_KH.sun, sr = BTL_KH.sunR * (1 + 0.05 * Math.sin(t * 6)) * (1 - 0.3 * flick);
+
+  // the plasma wings, half spread under the shell
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of [-1, 1]) {
+    const beat = Math.sin(t * 6 + s) * 0.08;
+    ctx.save();
+    ctx.translate(-4, 4 * s); ctx.rotate(s * (2.25 + beat));
+    const L = 24 * detail;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(L * 0.3, -4 * s, L * 0.85, -3.4 * s, L, 0.4 * s);
+    ctx.bezierCurveTo(L * 0.8, 3.8 * s, L * 0.3, 3.4 * s, 0, 1.2 * s); ctx.closePath();
+    const wg = ctx.createLinearGradient(0, 0, L, 0);
+    wg.addColorStop(0, rgba(BTL_KH.sky, 0.35)); wg.addColorStop(0.6, rgba(BTL_KH.orchid, 0.16)); wg.addColorStop(1, rgba(BTL_KH.violet, 0.04));
+    ctx.fillStyle = wg; ctx.fill();
+    ctx.strokeStyle = rgba(BTL_KH.ice, 0.4); ctx.lineWidth = 0.4;
+    ctx.beginPath(); ctx.moveTo(0, 0.2 * s); ctx.quadraticCurveTo(L * 0.5, -3 * s, L * 0.97, 0.2 * s); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // the middle and hind legs, braced at its sides
+  for (const s of [-1, 1]) {
+    btlKhLeg(-0.5, 9.6 * s, -1.5, 14.6 * s, -5.5, 17 * s, 1.1, 2, rgba(rim, 0.95));
+    btlKhLeg(-6.5, 10.8 * s, -10.5, 15 * s, -16.5, 15.6 * s, 1.1, 2, rgba(rim, 0.95));
+  }
+  // the shell: one dome, split down the seam, lit from the sun ahead
+  for (const s of [-1, 1]) {
+    btlKhPathShell(s);
+    btlShade(-9, 6.4 * s, 9.5, lx, ly * s, k, 1.1);
+    if (detail > 0.05) {
+      ctx.save(); btlKhPathShell(s); ctx.clip();
+      ctx.globalAlpha = detail * 0.5; ctx.strokeStyle = BTL_KH.ink; ctx.lineWidth = 0.3;
+      for (let i = 1; i <= 5; i++) {
+        const y0 = (0.4 + i * 2.1) * s;
+        ctx.beginPath(); ctx.moveTo(-2.2, y0 * 0.96); ctx.bezierCurveTo(-7, y0 * 1.12, -12, y0 * 1.02, -16.6, y0 * 0.2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    btlKhPathShell(s);
+    ctx.globalAlpha = clamp(form * 1.4, 0, 1); ctx.lineWidth = 0.7; ctx.strokeStyle = rgba(rim, 0.85); ctx.stroke();
+    btlSeam(0.5 + 0.4 * detail);
+  }
+  // the pronotum
+  btlKhPathPronotum();
+  btlShade(2.4, 0, 9, lx, ly, k, 1.2);
+  btlKhPathPronotum();
+  ctx.lineWidth = 0.7; ctx.strokeStyle = rgba(rim, 0.9); ctx.stroke();
+  btlSeam(0.45 + 0.35 * detail);
+  // the forelegs, reaching round the sun; the throwing one flicks forward
+  for (const s of [-1, 1]) {
+    const fl = s === hand ? flick : 0;
+    btlKhLeg(5.8, 7.2 * s, 10.4, 10.6 * s, sx + 1.2 + fl * 4, (sr + 1.6 - fl * 2) * s, 1.5, 3, rgba(rim, 0.9));
+  }
+  // the head-shield, its rake catching the sunlight
+  btlKhPathHead();
+  btlShade(9, 0, 6.5, lx, ly, k, 1.3);
+  btlKhPathHead();
+  ctx.lineWidth = 0.6; ctx.strokeStyle = rgba(BTL_KH.ice, 0.85); ctx.stroke();
+  // the eyes
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of [-1, 1]) {
+    drawGlow(7.6, 4.9 * s, 2.8, BTL_KH.cyan, 0.6 * detail);
+    ctx.fillStyle = rgba(BTL_KH.white, 0.9 * detail);
+    ctx.beginPath(); ctx.ellipse(7.6, 4.9 * s, 0.9, 0.6, 0, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  // the sun, between its forelegs
+  btlKhSun(sx, sy, sr * detail + 0.5 * form, t, form);
+  ctx.restore();
+}
+
+/* ================================ THE STARS =============================== */
+function btlKhRoller(x, y, ang, s, t) {
+  // a small scarab on the star's back, rolling it: dark shell, lit rim, legs pushing
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = BTL_KH.chitin; ctx.lineWidth = 0.6; ctx.lineCap = 'round';
+  for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) {
+    const ph = Math.sin(t * 18 + i * 2.1 + sd) * 0.5;
+    ctx.beginPath(); ctx.moveTo(-0.5 + i * 1.2, sd * 1.4); ctx.lineTo(0.2 + i * 1.2 + ph, sd * 2.8); ctx.stroke();
+  }
+  ctx.fillStyle = BTL_KH.chitin;
+  ctx.beginPath(); ctx.ellipse(0, 0, 2.4, 1.8, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(BTL_KH.ice, 0.8); ctx.lineWidth = 0.35; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-2.2, 0); ctx.lineTo(1.4, 0); ctx.stroke();
+  ctx.restore();
+}
+function btlKhepriStars(stars, booms, t) {
+  ctx.save();
+  for (const s of stars || []) {
+    if (s.dead) continue;
+    const held = s.held ? s.held.length : 0, heat = s.fuse >= 0 ? 1 - clamp(s.fuse / STAR_FUSE, 0, 1) : 0;
+    const pinch = s.fuse >= 0 && s.fuse < 0.06 ? 0.7 : 1, r = s.r * pinch;
+    const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
+    // the trail
+    ctx.globalCompositeOperation = 'lighter';
+    for (let j = 1; j <= 6; j++) drawGlow(s.x - ux * j * r * 0.6, s.y - uy * j * r * 0.6, r * (1.3 - j * 0.15), j < 3 ? BTL_KH.sky : BTL_KH.violet, 0.28 * (1 - j / 7));
+    // the sun: a photosphere thinner when it is holding something, so what is inside shows
+    btlKhSun(s.x, s.y, r, t + s.seed, held ? 0.75 : 1, heat);
+    if (held) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.6; ctx.strokeStyle = btlMix(BTL_KH.ice, BTL_KH.white, heat); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r + 2 + Math.sin(t * 20) * heat * 2, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // the scarab on its back, rolling it along
+    btlKhRoller(s.x - ux * (r + 1.5), s.y - uy * (r + 1.5), Math.atan2(uy, ux), 1.4 * Math.max(1, r / STAR_R), t + s.seed);
+  }
+  // the blasts: a fireball and a shock ring, shell flinders thrown out
+  ctx.globalCompositeOperation = 'lighter';
+  for (const b of booms || []) {
+    const age = t - b.at;
+    if (age < 0 || age > 0.7) continue;
+    const u = age / 0.7, e = btlEaseOut(u);
+    const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.R * (0.35 + 0.45 * e));
+    g.addColorStop(0, rgba(BTL_KH.white, 0.9 * (1 - u))); g.addColorStop(0.4, rgba(BTL_KH.sky, 0.6 * (1 - u)));
+    g.addColorStop(1, rgba(BTL_KH.violet, 0));
+    ctx.globalAlpha = 1; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.R * (0.35 + 0.45 * e), 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.8 * (1 - u); ctx.strokeStyle = BTL_KH.ice; ctx.lineWidth = 3 * (1 - u) + 0.5;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.R * e, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 0.9 * (1 - u); ctx.strokeStyle = BTL_KH.chitin; ctx.lineWidth = 1.6;
+    for (let i = 0; i < 7; i++) {
+      const a = i * TAU / 7 + b.x * 0.01, d = b.R * (0.2 + 0.6 * e);
+      ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * d, b.y + Math.sin(a) * d, 2.2, a, a + 2); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* ================================ THE SCREEN ============================== */
+function btlKhepriScreen(f, t, outAt, W, H) {
+  const a = f ? Math.max(0, 1 - Math.abs(f.t - FUSION_IN) / 0.35) * 0.7 : 0, o = 1 - (t - outAt) / 0.6;
+  if (a <= 0 && o <= 0 && !f) return;
+  ctx.save();
+  if (f) {
+    const k = btlKhepriK(f), vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.4, W / 2, H / 2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(56,189,248,' + (0.08 + 0.02 * Math.sin(t * 2)) * k + ')');
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+  if (a > 0) {
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+    g.addColorStop(0, 'rgba(240,253,255,' + 0.45 * a * a + ')'); g.addColorStop(1, 'rgba(56,189,248,' + 0.2 * a * a + ')');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (o > 0) { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = 'rgba(4,3,20,' + 0.25 * o * o + ')'; ctx.fillRect(0, 0, W, H); }
+  ctx.restore();
+}
+
+/* ===========================================================================
+   KHEPRI — the adapter: the game's side of it (beetle-art/README.md)
+   The art above never reads the game. This does: it decides whether the skin
+   is on, keeps each pilot's bag, reads the pilot into the `me` the art is
+   handed, and is what the stock draw functions hand over to, one guard at the
+   top of each: `if (btlTake(...)) return;`.
+
+   The skin is on while all of these hold:
+     - the equipped award is KHEPRI (SECRET_SKINS 'ember-gift'), which only a
+       profile it was granted to can equip: the dev accounts, and EMBER's own
+     - the pilot being drawn is this machine's (pilotSkin is null), so a
+       co-op partner is drawn the way it always was
+     - the hull is EMBER: on any other pilot the skin does nothing at all
+     - nothing in the art has thrown. If anything does, the skin turns itself
+       off for the rest of the session and the stock art draws instead.
+   Cosmetic only: its randomness is Math.random, never simRnd, and it writes
+   nothing the simulation reads.
+=========================================================================== */
+const BTL_G = { off: false, bags: [], t: 0, me: null, segs: [] };
+
+function btlWorn() {
+  if (BTL_G.off || pilotSkin || !P || P.charId !== 'ember') return false;
+  let s = null;
+  try { s = equippedSpecial(); } catch (e) { return false; }
+  return !!s && s.fx === 'ember-gift';
+}
+// the beetle draws this: true when it is worn and its art ran
+function btlTake(fn) {
+  if (!btlWorn()) return false;
+  try { fn(); return true; }
+  catch (err) {
+    BTL_G.off = true;
+    console.error('KHEPRI: off for this session; the stock art draws instead.', err);
+    return false;
+  }
+}
+// this pilot's bag, made afresh when the hull has jumped (a new run, a respawn)
+function btlBag() {
+  const k = PILOT.on | 0;
+  let B = BTL_G.bags[k];
+  if (!B || Math.hypot(P.x - B.x, P.y - B.y) > 400) B = BTL_G.bags[k] = btlNew(P.x, P.y, P.ang || 0);
+  return B;
+}
+// the pilot, as the art reads it
+function btlMe() {
+  const me = BTL_G.me || (BTL_G.me = {}), lance = P.laserT > 0;
+  me.x = P.x; me.y = P.y; me.ang = P.ang || 0; me.vx = P.vx || 0; me.vy = P.vy || 0;
+  me.charge = lance ? 0 : clamp(P.charge || 0, 0, 1);
+  // Z sprays with no lance out: the jaws stand open for it all the same
+  me.beam = lance ? (P.laserEnv || 0) : P.odScorch ? 1 : 0;
+  BTL_G.segs.length = 0;
+  if (lance) {
+    for (const s of P.laserSegs) BTL_G.segs.push(s);
+    for (const s of P.twinSegs || []) BTL_G.segs.push(s);       // GEMINI's lance burns the same way
+  }
+  me.segs = BTL_G.segs;
+  me.half = lanceHalf() * (P.laserEnv || 0);
+  me.range = laserRange() * (P.laserHeavy ? 1.5 : 1);
+  me.dash = P.dashT > 0 ? 1 : 0;
+  const q = odPhase();
+  me.od = q;
+  me.odLit = od ? btlOdLit(od.t) : 0;
+  me.odGlow = q ? Math.max(me.odLit * 0.8, q.life) : 0;
+  me.odLance = q ? q.lance : 0;
+  return me;
+}
+
+// once a frame, from frame(), next to the wardrobe's: this machine's pilot only
+function btlFrame() {
+  if (PILOTS.length > 1 && PILOT.on !== pilotMine()) { pilotDo(pilotMine(), btlFrame); return; }
+  const dt = clamp(uiTime - BTL_G.t, 0, 0.1);
+  BTL_G.t = uiTime;
+  btlTake(() => btlTick(btlBag(), btlMe(), state === 'play' || state === 'dead' ? dt : 0));
+}
+
+/* A kill: the beetle's own way (true), or left to the stock burst (false).
+   The finales, which draw their own deaths, are left to them. */
+function btlKillTap(e) {
+  if (state !== 'play') return false;
+  if (e.type === 'boss' && (e.boss === 'root' || e.founder || e.opo || e.oprRite || e.amalPart ||
+      (unwritten && (e === unwritten.a || e === unwritten.b)))) return false;
+  return btlTake(() => {
+    const B = btlBag(), ang = Math.atan2(e.y - P.y, e.x - P.x);
+    if (e.type === 'boss') btlBossAsh(B, e, ang); else btlKill(B, e, ang);
+  });
+}
+
+/* ---- what the guards hand over to ---- */
+function btlDrawPilot() {
+  const B = btlBag(), me = btlMe(), phasing = P.ghost > 0 && P.dashT > 0;
+  ctx.save();
+  if (phasing) ctx.globalAlpha = 0.4;                // Ghost Step: barely there, as the stock hull is
+  btlDrawUnder(B, me); btlDrawHull(B, me);
+  ctx.restore();
+  if (P.hurtFlash > 0) {                              // a hit still reads: the hull flushes red
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(P.x, P.y, 30, '#ef4444', clamp(P.hurtFlash * 3, 0, 0.7));
+    ctx.restore();
+  }
+}
+function btlDrawLance() { btlDrawFire(btlBag(), btlMe()); }
+function btlDrawFloorMarks() { const B = btlBag(); btlKillsFloor(B); btlScars(odScars, uiTime, B.parts); }
+function btlDrawOverBodies() { btlKillsDraw(btlBag()); btlKhepriStars(odStars, odStarBooms, uiTime); }
+function btlOdDrawGrade() {
+  const q = odPhase();
+  if (!q) return;
+  const sx = (P.x - cam.x) * camZoom + W / 2, sy = (P.y - cam.y) * camZoom + H / 2;
+  btlOdGrade(q, od.t, odFlash, W, H, () => btlOdSwarm(od.t, sx, sy, P.ang || 0, camZoom, W, H));
+}
+function btlDrawStrikeMarks() {
+  const st = P.odStrike;
+  if (!st) return;
+  const shape = s => Object.assign({}, s, { ang: Math.atan2(s.y2 - s.y1, s.x2 - s.x1), len: Math.hypot(s.x2 - s.x1, s.y2 - s.y1) });
+  btlStrikeMarks(st, st.ph === 'aim' ? odStrikeX(mouse.wx, mouse.wy).map(shape) : st.strokes, camZoom, uiTime, odStrikeR());
+}
+/* ===================== end of KHEPRI ===================== */
+
+/* ===========================================================================
    ALL HALLOWS — BOOK I: THE LOST SOUL · ACT I
    The knock on the menu, the vigil under the floor, and THE PATCH: its four
    bodies, THE BACKLOG, and the first two quests.
@@ -69914,6 +72371,7 @@ function drawCorpses() {
 
 function drawLance() {
   if (P.weapon !== 'laser') return;
+  if (btlTake(btlDrawLance)) return;          // KHEPRI: the flamethrower, the wind-up, OVERDRIVE's braid
   /* The wind-up. Two collector arcs closing on the muzzle, a containment ring
      tightening behind them, filaments running up the rail, and a thread on the
      line it will take — so the charge reads as energy being gathered and aimed
@@ -70495,6 +72953,7 @@ function drawPlayer() {
   if (SkinFx.on) SkinFx.under();
   // ALL HALLOWS: a prize that is its own hull draws it, and the stock one is skipped
   if (hlWrSwapTap()) { SkinFx.player(); return; }
+  if (btlTake(btlDrawPilot)) return;          // KHEPRI: EMBER's signature skin is the whole pilot
   ctx.save();
   ctx.translate(P.x, P.y);
   ctx.rotate(P.ang);
@@ -82983,20 +85442,24 @@ const SECRET_SKINS = [
     req: '—',
     base: { player: { col: '#7dd3fc' }, bullet: { col: '#38bdf8' } } },
 
-  /* EMBER's, handed to that profile by SKIN_GRANTS in src/leaderboard.js.
-     Blank: no colours, and every art hook is an empty function on EMBER_GIFT
-     below. `wip` keeps it out of the list and unequippable while it is, so
-     the holder sees nothing yet; delete that one key to ship it. A rename is
-     three lines: this id, DEV_SKIN_IDS, and SKIN_GRANTS. */
-  { id: 'ember-gift', n: 'UNTITLED', col: '#fb923c', fx: 'ember-gift', wip: true,
-    d: '—',
+  /* KHEPRI: EMBER's signature skin, made by request for the October season's
+     #1 (BEETLE-PLAN.md). Handed out by SKIN_GRANTS (EMBER's own profiles) and
+     ALL_SKINS (the dev accounts) in src/leaderboard.js, and listed only for a
+     profile that holds it. EMBER only: on any other hull it does nothing. It
+     is drawn by the KHEPRI block (after MOTION), not by SkinFx, and sets no
+     base colours, so EMBER keeps his own. The id stays 'ember-gift': a
+     rename is three lines (this id, DEV_SKIN_IDS, SKIN_GRANTS). */
+  { id: 'ember-gift', n: 'KHEPRI', col: '#22d3ee', fx: 'ember-gift', pilot: 'ember',
+    d: 'EMBER only. A blue beetle: jaws that bite with the gun, a body of armoured plates, '
+     + 'a lance of blue fire, kills that burn out in cinders and bosses that go to ash. '
+     + 'OVERDRIVE and all four moves redrawn, and V is the scarab that rolls the sun.',
     req: '—' }
 ];
 
-/* ART HOOKS for EMBER's skin. Each is called by SkinFx with the same
-   arguments the other skins' art gets. Empty, they draw nothing: the hull,
-   its rounds, its sparks and the roster all look exactly as they do with no
-   skin on. bullet and part answer false for "draw the stock one". */
+/* EMBER's skin through SkinFx: empty on purpose. KHEPRI is drawn by its own
+   block (after MOTION) through guards on the stock functions it takes over,
+   so the awarded-skin pass has nothing to add over it. bullet and part
+   answer false for "draw the stock one". */
 const EMBER_GIFT = {
   player(s) {},                       // over the hull, every frame
   bullet(b, c) { return false; },     // one round

@@ -97,7 +97,9 @@ const ALL_SKINS = ['laurel', 'standard', 'ember-mark', 'void-sovereign',
                    // the BOSS RUSH's three, knight to king
                    'rush-knight', 'rush-duke', 'rush-king',
                    // ALL HALLOWS: the vigil's four prizes
-                   'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul'];
+                   'hl-carved', 'hl-lantern', 'hl-hallows', 'hl-lostsoul',
+                   // KHEPRI, EMBER's signature skin: the devs, and EMBER's own (SKIN_GRANTS)
+                   'ember-gift'];
 /* Everything that is not a skin: the rooms, the routes, the challenges and
    the codex. One id rather than a list of them, because a dev account wants
    the whole game and enumerating it here would be a second copy of a list
@@ -403,8 +405,10 @@ async function comebackClaim(store, pid, name) {
 
 const SKIN_GRANTS = {
   'ecd8c7a3671b4582f6b62ee1106510c8': ['draft'],   // MARIO — beta tester
-  // EMBER: their own skin. Blank and held back (`wip` in index.html) until drawn.
+  // EMBER: KHEPRI, their signature skin, on both of their profiles: the one that
+  // won September, and the one on the 'ember' account that leads October
   '06a21d4e756af978bb640b8dff30d92e': ['ember-gift'],
+  '71b1ebbcf549530c0f78c58147bbc429': ['ember-gift'],
 };
 
 /* Perks handed to one profile by hand, the way SKIN_GRANTS hands skins, and

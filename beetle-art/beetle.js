@@ -45,7 +45,7 @@
 
 const BTL = {
   ink: '#050414', chitin: '#0c0a24', chitin2: '#191343', plate: '#231a5c',
-  blue: '#1d4ed8', cyan: '#22d3ee', ice: '#cffafe', white: '#f0fdff',
+  blue: '#1d4ed8', sky: '#38bdf8', cyan: '#22d3ee', ice: '#cffafe', white: '#f0fdff',
   violet: '#6d28d9', orchid: '#a855f7', magenta: '#e879f9', pink: '#f0abfc',
   // the fire, white-hot to smoke
   fire: ['#f0fdff', '#a5f3fc', '#38bdf8', '#3b5bfd', '#6d3cf0', '#8b2fd6', '#2e1065'],

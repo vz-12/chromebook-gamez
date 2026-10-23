@@ -124,11 +124,25 @@ report. It ships to main only at the end.
    - the flame's puffs live in the beam's own frame, so the fire never
      leaves the hitbox
    - MOTION gained particle pools of their own (`moPool`) for this
-2. **The suite.** Tier, wardrobe opening, new layers, OVERDRIVE hooks, stage
-   and bench, with stock passthroughs everywhere. Tests: determinism,
-   lockstep, plus a check that an empty skin draws byte for byte stock.
+2. **The suite.** Built 23 Oct as the KHEPRI block (`beetle-art/adapter.js`,
+   lifted by `beetle-art/lift.mjs`) rather than a new wardrobe tier:
+   - one guard at the top of each stock draw function the skin takes over
+     (`if (btlTake(fn)) return;`), plus a tap in `killBody` and a call in
+     `frame()`
+   - with the skin off, every guard falls straight through to the stock code
+   - if the art ever throws, the skin turns itself off for the session and the
+     stock art draws
+   - `npm run test:khepri` plays a scripted run twice, skin on and off. Every
+     guard must hand over, the art must never throw, and the two runs must be
+     the same at every checkpoint.
 3. **Base art.** Head, mandibles, elytra and wings, thruster, segments,
-   flamethrower, rounds and sparks, dash flames, kills, boss ash.
+   flamethrower and dash flames are drawn in step 1.
+   - **Kills, drawn 23 Oct** (`beetle-art/kills.js`, on the board):
+     - a body burns out in blue cinders that cool to violet and grey, and
+       leaves a scorch of its shape
+     - a boss crumbles to ash from the side the blow came from, drawn from
+       its own poly
+     - the finales that stage their own deaths are left alone
 4. **OVERDRIVE art.** Ignite, wings, braided lance, Z, X, C and the combos.
    - **Transformation, drawn 22 Oct** (`beetle-art/overdrive.js`, on the board).
      The stock beat (`OD_T_*`, `odPhase`) is kept.
@@ -168,17 +182,29 @@ report. It ships to main only at the end.
    - each throw flicks a foreleg
    - each thrown sun is rolled by a small scarab
    - the aura is a blue solar surface at exactly FUSION_AURA_R
-6. **Name, card and grant.** Name it, draw the menu card, drop `wip`, and
-   grant it to both "ember" identities: the account's pid (71b1ebbc…) and the
-   old pid 06a21d4e that holds the stub now. Then the full test pass
-   (determinism, lockstep, PvP) and ship.
+6. **Name and grant.** Done 23 Oct:
+   - the user named it **KHEPRI**, after its V form
+   - `wip` is dropped
+   - granted to the dev accounts (`ALL_SKINS`) and both of EMBER's own
+     profiles (`SKIN_GRANTS`): the account's pid (71b1ebbc…) and the old pid
+     06a21d4e
+   - it is listed only for a profile that holds it
+   - tests: determinism, lockstep, PvP, awards, khepri. The determinism case
+     `root` and one PvP bot-timing check fail now and then on main as well.
+   - checked in a real browser: the whole kit, with no errors
+   - shipped to main
 
 ## Open, for later
 
-- **The name.** Candidates: BLUE BLOOD (blue fire, and the #1 is nobility),
-  COLD BLOODED. The V form: KHEPRI.
+- **The menu card.** The skin list shows its name, colour and description.
+  It has no card art of its own yet.
+- **Still the stock orange:**
+  - the screen UI (BRAND's prompts and brackets, COMBO 1's key caps)
+  - the HUD's heat meter
+  - the Fx hooks' bursts and colours (`odIgnite`'s burst, the throw puffs)
 - **Roster.** Dress it, or leave it alone? Leaving it alone is the default:
   he said it was optional, and telegraphs come first.
-- **evo-ember on the account.** The old pid was handed the EMBER evolution
-  (PERK_GRANTS). If the account has not earned OVERDRIVE itself, the
-  OVERDRIVE art is unreachable for him unless the account gets the perk too.
+- **evo-ember on the account.** Settled: the 'ember' account's own save has
+  EMBER awakened, with evo-ember among its awards. The account holds only
+  the new pid; the old pid's PERK_GRANTS entry is not needed for it.
+- **Co-op.** A partner sees the stock EMBER, as with every secret skin.

@@ -1,7 +1,9 @@
-# The blue beetle: art and concept board
+# KHEPRI, the blue beetle: art and concept board
 
-EMBER's signature skin ([BEETLE-PLAN.md](../BEETLE-PLAN.md)). This folder holds the art and the board that shows
-it off. Nothing here is in the game yet, and `.assetsignore` keeps the folder off the public site.
+EMBER's signature skin ([BEETLE-PLAN.md](../BEETLE-PLAN.md)). This folder holds the art, the adapter that wires it
+into the game, and the board that shows it off. The art is the source: `lift.mjs` copies it into `index.html` as the
+KHEPRI block, so change it here and lift again, never in `index.html`. `.assetsignore` keeps the folder off the
+public site.
 
 | File | What it is |
 |---|---|
@@ -9,6 +11,10 @@ it off. Nothing here is in the game yet, and `.assetsignore` keeps the folder of
 | `overdrive.js` | OVERDRIVE (`BTL_OD`, `btlOd*`): THE SWARM in place of the spark, the room burning blue, the wings of fire, the braided lance and the cold grade. |
 | `kit.js` | OVERDRIVE's moves (`BTL_KIT`, `btl*`): Z's spray and scars, X's mark and column, C's take-off, cut, aim lanes and foot, COMBO 1's wall and giant column. Each takes the stock state (`P.odScorch`, `odScars`, `odPyros`, `P.odStrike`, `odRing`) and draws in the stock layer. |
 | `khepri.js` | V, FUSION CORE as KHEPRI (`BTL_KH`, `btlKhepri*`): the change, the scarab holding its blue sun, the aura, the thrown suns rolled by small scarabs, the blasts and the screen. |
+| `kills.js` | The kills (`BTL_ASH`, `btlKill*`, `btlBossAsh`): a body burns out in blue cinders and leaves a scorch; a boss crumbles to ash from the side the blow came from, drawn from its own poly so the canvas is never read. |
+| `adapter.js` | The wiring (`BTL_G`, `btlWorn`, `btlTake`, `btlFrame`, `btlKillTap` and what the guards hand over to). It decides when the skin is on, builds `me` from `P`, keeps one bag per pilot, and turns the skin off for the session if the art ever throws, so the stock art draws instead. |
+| `lift.mjs` | The lift: `node beetle-art/lift.mjs` checks, `--write` puts the block into `index.html`. |
+| `board-kills.js` | The board's kills: bodies dying in the lance and a boss going to ash, on a loop. |
 | `board-khepri.js` | The board's V: the fight, with suns seeking, taking bodies in and blowing on the stock numbers, and the change up close with a scrubber. |
 | `board-kit.js` | The board's move stages: Z and X on the stock logic in miniature, and BRAND as one scrubbable timeline in the real arena. |
 | `board.js` | The board's stages: a puppet that flies the beetle on EMBER's fire cycle, and the canvases it is drawn on. |
@@ -23,7 +29,25 @@ node beetle-art/build.mjs <out.html>
 
 The output is an artifact page fragment, with no `<!doctype>` of its own. To open it locally, wrap it in one.
 
-## How the art meets the game (step 2)
+## Lifting it into the game
+
+```
+node beetle-art/lift.mjs           # check: lifts it in memory, writes nothing
+node beetle-art/lift.mjs --write   # lifts it into index.html
+```
+
+The six art files and the adapter go in as one block straight after MOTION, between the KHEPRI markers. Lifting
+again replaces the block. Then a guard, `if (btlTake(fn)) return;`, goes at the top of each stock draw function in
+the tables below, plus a tap in `killBody` and a call in `frame()`. Each place is found by an exact line, so if the
+game around it has moved, the lift says which place and writes nothing. It then checks that the page's scripts still
+parse and that every `btl*` call is defined. `npm run test:khepri` plays a run with the skin on and off and checks
+that every guard handed over to the art, the art never threw, and the two runs stayed identical.
+
+The skin is on only when all of these hold: the pilot is EMBER, it is this machine's own pilot (a co-op partner sees
+the stock look), and the profile holds and equips `ember-gift`. That profile is either a dev account (`ALL_SKINS`)
+or one of EMBER's own (`SKIN_GRANTS`).
+
+## How the art meets the game
 
 | Call | Layer it belongs to | What it draws |
 |---|---|---|
@@ -71,3 +95,11 @@ And V:
 | `drawOdFusionHull()` | `btlKhepriHull(B, me, P.odFusion, uiTime, odFusionThrow)` |
 | `drawOdStars()` | `btlKhepriStars(odStars, odStarBooms, uiTime)` |
 | `drawOdFusionScreen()` | `btlKhepriScreen(P.odFusion, uiTime, odFusionOutAt, W, H)` |
+
+And the kills:
+
+| Stock | Beetle |
+|---|---|
+| the burst in `killBody(e)` | `btlKillTap(e)`, which calls `btlKill` or `btlBossAsh`. The finales that draw their own deaths are left alone: ROOT, THE FOUNDER, ONE POINT OH, its rite, AMALGAM's parts and THE UNWRITTEN's halves. |
+| `drawOdScars()` | `btlDrawFloorMarks`: Z's scars and the kills' scorches |
+| `drawOdStars()` | `btlDrawOverBodies`: V's suns, then the ash and cinders |
