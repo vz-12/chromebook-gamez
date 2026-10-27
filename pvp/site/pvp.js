@@ -83,6 +83,71 @@
       ? new Date(c.due).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
           .toUpperCase() + '  ·  PLAY RANKED THEN TO ANSWER IT'
       : 'THE DAY IS STILL TO BE SET';
+    $('challengeAgain').textContent = c.v ? 'HEAR IT AGAIN' : 'READ IT AGAIN';
+    $('challengeAgain').onclick = () => { reveal(c); $('veilAsk').click(); };
+    // the first time here: over the whole page, once a page load (the lobby renders often)
+    if (!revealed && !seenHere(c)) { revealed = true; reveal(c); }
+  }
+
+  /* The veil (index.html): a challenge arrives over the whole page the first
+     time it is opened in this browser. A click asks for it, since a browser
+     plays no sound before one; then its title, and its words a paragraph at
+     a time, each as its voice reaches it (c.c, seconds) where it has a voice
+     (c.v: /api/pvp/me?voice, its mp3), else one every few seconds. CLOSE
+     notes it here; a different message arrives again. */
+  const VEIL_SEEN = 'vr-pvp-challenge-seen';
+  let revealed = false, voice = null;
+  const markOf = c => (c.t || '') + '|' + c.x.length + '|' + c.x.slice(0, 48);
+  function seenHere(c) { try { return localStorage.getItem(VEIL_SEEN) === markOf(c); } catch (e) { return true; } }
+  function reveal(c) {
+    const veil = $('veil'), text = $('veilText'), ask = $('veilAsk'), done = $('veilDone');
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    text.textContent = '';
+    const head = document.createElement('h2');
+    head.textContent = c.t || 'A CHALLENGE';
+    text.append(head);
+    const ps = c.x.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map((p, i, all) => {
+      const el = document.createElement('p');
+      el.textContent = p;
+      if (i === all.length - 1 && /^[—–-]/.test(p)) el.className = 'sign';    // a signature, last: set apart
+      text.append(el);
+      return el;
+    });
+    veil.hidden = false;
+    document.body.style.overflow = 'hidden';
+    veil.classList.remove('on');
+    ask.hidden = false;
+    done.hidden = true;
+    if (voice) voice.pause();
+    const show = i => { if (ps[i]) ps[i].classList.add('shown'); };
+    const over = () => { ps.forEach((_, i) => show(i)); done.hidden = false; done.focus(); };
+    ask.onclick = () => {
+      ask.hidden = true;
+      veil.classList.add('on');
+      head.classList.add('shown');
+      if (still) return over();
+      const timed = () => {
+        ps.forEach((_, i) => setTimeout(() => show(i), 1600 + i * 2600));
+        setTimeout(over, 1600 + ps.length * 2600);
+      };
+      if (!c.v) return timed();
+      if (!voice) { voice = new Audio('/api/pvp/me?voice=1'); voice.preload = 'auto'; }
+      const cues = Array.isArray(c.c) && c.c.length ? c.c : ps.map((_, i) => i * 2.6);
+      let i = 0;
+      const tick = () => {
+        if (veil.hidden) return;
+        while (i < ps.length && voice.currentTime >= (cues[i] ?? Infinity)) show(i++);
+        if (voice.ended) over(); else requestAnimationFrame(tick);
+      };
+      voice.currentTime = 0;
+      voice.play().then(() => requestAnimationFrame(tick)).catch(timed);
+    };
+    done.onclick = () => {
+      veil.hidden = true;
+      document.body.style.overflow = '';
+      if (voice) voice.pause();
+      try { localStorage.setItem(VEIL_SEEN, markOf(c)); } catch (e) {}
+    };
   }
 
   /* A challenge on air (src/live.js, which the game's menu asks too): a card

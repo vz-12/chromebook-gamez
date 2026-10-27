@@ -15,7 +15,7 @@ import { PILOTS, CASUAL, loadout, leagueOf } from './rules.js';
 import { ratingOf } from './records.js';
 import { entryFor } from './gates.js';
 import { hiddenOf } from './hidden.js';
-import { challengeFor } from './challenge.js';
+import { challengeFor, challengeVoice } from './challenge.js';
 import { mayKeepAny } from './watch.js';
 
 function reply(body, status = 200, cookie) {
@@ -28,6 +28,12 @@ export default async function me(req, env) {
   if (req.method !== 'GET') return reply({ error: 'method not allowed' }, 405);
   const s = await sessionOf(req, env);
   if (!s) return reply({ error: 'signed out' }, 401);
+  // ?voice: the voice of a challenge sent to this account, for the lobby to play (challenge.js); nobody else has one
+  if (new URL(req.url).searchParams.has('voice')) {
+    const v = await challengeVoice(env.DB, s.account.id).catch(e => { console.error('pvp challenge voice', e && e.message); return null; });
+    return v ? new Response(v.bytes, { headers: { 'content-type': 'audio/mpeg', 'cache-control': 'private, max-age=3600' } })
+             : reply({ error: 'not found' }, 404);
+  }
   const row = await env.DB.prepare('SELECT unlocks, updated FROM saves WHERE account = ?1')
     .bind(s.account.id).first();
   let unlocks = null;

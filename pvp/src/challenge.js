@@ -13,7 +13,9 @@
    not enough. It goes to the account highest in ranked that season among
    those who have held it that long, and from then on it is theirs:
      - their /api/pvp/me carries it, the words and the date once one is set,
-       and nobody else's does; the first time they are shown it is noted
+       and nobody else's does; the first time they are shown it is noted. Words
+       that name a voice ({ "v", "c" }) are said aloud: /api/pvp/me?voice
+       hands its mp3 to them alone
      - the game's GET /api/account says only that there is one, for the
        menu's PVP door (src/account.js)
      - the hidden pilot's ranked ticket waits for them, and not for whoever
@@ -48,7 +50,7 @@
    (`npm run challenge -- calm`).
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
-import { vaultText, PERK } from '../../src/vault.js';
+import { vaultText, vaultBytes, VAULT_ID, PERK } from '../../src/vault.js';
 import { LEAGUES } from './rules.js';
 import { ensurePvp } from './records.js';
 
@@ -141,9 +143,31 @@ export async function targetOf(db, pilot) {
    cannot be read are no challenge, never half a one. */
 export async function challengeFor(db, acct, { seen = false } = {}) {
   await ensureChallenges(db);
-  const row = await db.prepare('SELECT pilot, words, due, seen FROM pvp_challenges WHERE target = ?1 ORDER BY tripped LIMIT 1')
-    .bind(acct).first();
-  if (!row) return null;
+  const row = await sentTo(db, acct);
+  const w = row && await wordsOf(db, row);
+  if (!w) return null;
+  if (seen && !row.seen)
+    await db.prepare('UPDATE pvp_challenges SET seen = ?2 WHERE pilot = ?1 AND seen IS NULL').bind(row.pilot, Date.now()).run();
+  return Object.assign({ t: String(w.t || '').slice(0, WORDS.t), x: w.x.slice(0, WORDS.x), due: row.due || null },
+                       voiced(w) ? { v: true, c: cuesOf(w.c) } : {});
+}
+
+/* Its voice, when its words name one ({ "v": a vault entry, "c": when each
+   paragraph begins, in seconds }), for the account it was sent to and nobody
+   else (me.js, ?voice): an mp3's bytes, or null. */
+export async function challengeVoice(db, acct) {
+  await ensureChallenges(db);
+  const row = await sentTo(db, acct);
+  const w = row && await wordsOf(db, row);
+  return w && voiced(w) ? vaultBytes(db, w.v) : null;
+}
+
+const sentTo = (db, acct) => db.prepare('SELECT pilot, words, due, seen FROM pvp_challenges WHERE target = ?1 ORDER BY tripped LIMIT 1')
+  .bind(acct).first();
+const voiced = w => typeof w.v === 'string' && VAULT_ID.test(w.v);
+const cuesOf = c => (Array.isArray(c) ? c.filter(n => Number.isFinite(n) && n >= 0 && n < 600).slice(0, 24) : []);
+// its words, read out of the vault, or null while they cannot be
+async function wordsOf(db, row) {
   let w = null;
   try {
     const got = await vaultText(db, row.words);
@@ -151,10 +175,7 @@ export async function challengeFor(db, acct, { seen = false } = {}) {
   } catch (e) {
     console.error('challenge ' + row.pilot + ': its words: ' + (e && e.message));
   }
-  if (!w || typeof w.x !== 'string') return null;
-  if (seen && !row.seen)
-    await db.prepare('UPDATE pvp_challenges SET seen = ?2 WHERE pilot = ?1 AND seen IS NULL').bind(row.pilot, Date.now()).run();
-  return { t: String(w.t || '').slice(0, WORDS.t), x: w.x.slice(0, WORDS.x), due: row.due || null };
+  return w && typeof w.x === 'string' ? w : null;
 }
 
 /* Only whether one waits for this account, for the game's Worker, which

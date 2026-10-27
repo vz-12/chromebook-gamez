@@ -1401,6 +1401,21 @@ section('a hidden pilot\'s challenge: armed by hand, tripped once somebody has h
   DB.sql.prepare("UPDATE pvp_challenges SET words = 'gone' WHERE pilot = 'x8'").run();
   ok(!('challenge' in (await T.pvp.me()).d), 'words the vault no longer holds: no challenge in the lobby, never half of one');
 
+  // words that name a voice: said aloud in the lobby, the mp3 handed to the one it was sent to and nobody else
+  const mp3 = randomBytes(5000);
+  tool(putSql('x8-voice', mp3).sql);
+  tool(putSql('x8-said', Buffer.from(JSON.stringify({ t: 'SAID', x: 'One.\n\nTwo.', v: 'x8-voice', c: [0, 1.5, 'x', -2, 3.25] }))).sql);
+  tool(armSql('x8', 'x8-said'));
+  const ms = (await T.pvp.me()).d.challenge;
+  ok(ms && ms.v === true && JSON.stringify(ms.c) === '[0,1.5,3.25]' && !JSON.stringify(ms).includes('x8-voice'),
+     'their lobby knows it has a voice, and when each paragraph is said; never which vault entry', ms);
+  const heard = who => WORKER[PVP][0].fetch(new Request(PVP + '/api/pvp/me?voice=1', {
+    headers: { 'cf-connecting-ip': '198.51.100.141', origin: PVP, cookie: 'vr_s=' + who.pvp.cookie } }), WORKER[PVP][1]);
+  const hv = await heard(T);
+  ok(hv.status === 200 && hv.headers.get('content-type') === 'audio/mpeg' && Buffer.from(await hv.arrayBuffer()).equals(mp3),
+     'the voice, to the one it was sent to: the mp3 as it was put');
+  ok((await heard(U)).status === 404 && (await heard(H)).status === 404, 'to anybody else, even the pilot\'s holder: not found');
+
   // a rated match keeps the moment somebody arrived in VOID while they stay, and forgets it when they leave
   const { applyRating } = await import('../pvp/src/records.js');
   const fight = (a, b, winner) => {

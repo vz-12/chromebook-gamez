@@ -94,10 +94,24 @@ export async function vaultList(db, account) {
 const cache = new Map();                 // id -> { rev, text }
 export async function vaultText(db, id) {
   await ensureVault(db);
-  const head = await db.prepare('SELECT rev, parts, size, hash FROM vault_heads WHERE id = ?1').bind(id).first();
+  const head = await headOf(db, id);
   if (!head) return null;
   const hit = cache.get(id);
   if (hit && hit.rev === head.rev) return { text: hit.text, hash: head.hash };
+  const text = (await partsOf(db, id, head)).toString('utf8');
+  cache.set(id, { rev: head.rev, text });
+  return { text, hash: head.hash };
+}
+
+// an entry as it was put, bytes and all (a challenge's voice: pvp/src/challenge.js), or null
+export async function vaultBytes(db, id) {
+  await ensureVault(db);
+  const head = await headOf(db, id);
+  return head ? { bytes: await partsOf(db, id, head), hash: head.hash } : null;
+}
+
+const headOf = (db, id) => db.prepare('SELECT rev, parts, size, hash FROM vault_heads WHERE id = ?1').bind(id).first();
+async function partsOf(db, id, head) {
   const res = await db.prepare('SELECT part, body FROM vault_parts WHERE id = ?1 AND rev = ?2 ORDER BY part')
     .bind(id, head.rev).all();
   const rows = (res && res.results) || [];
@@ -105,9 +119,7 @@ export async function vaultText(db, id) {
   if (rows.length !== head.parts || rows.some((r, i) => r.part !== i)) throw new Error('vault ' + id + ': parts missing');
   const bytes = Buffer.concat(rows.map(r => Buffer.from(r.body, 'base64')));
   if (bytes.length !== head.size) throw new Error('vault ' + id + ': wrong size');
-  const text = bytes.toString('utf8');
-  cache.set(id, { rev: head.rev, text });
-  return { text, hash: head.hash };
+  return bytes;
 }
 
 export const nothing = () => new Response(JSON.stringify({ error: 'not found' }), {
