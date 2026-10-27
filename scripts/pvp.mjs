@@ -832,7 +832,9 @@ section('bots: an empty queue, filled only after every real pairing (pvp/src/bot
   await xq('bot', 'x8', { id: x8.id, as: 'start' });
   await pass(BOTS.least, () => xq('poll', 'x8'));
   const c7 = await xq('bot', 'x7', { id: x7.id, as: 'over', score: [2, 0] }), c8 = await xq('bot', 'x8', { id: x8.id, as: 'over', score: [2, 0] });
-  ok(c7.rating.after === BOTS.ceiling && ratX('x7').rating === BOTS.ceiling && ratX('x7').wins === 13, 'a win just under VOID\'s line stops at it', c7.rating);
+  ok(c7.rating.after === BOTS.ceiling && ratX('x7').rating === BOTS.ceiling && ratX('x7').wins === 13, 'a win just under VOID\'s line stops at the ceiling', c7.rating);
+  ok(c7.rating.league !== 'void' && ratX('x7').league !== 'void' && ratX('x7').top_since === null,
+     'which is a point short of VOID: no bot puts anybody in it', [c7.rating, ratX('x7')]);
   ok(c8.rating.after === BOTS.ceiling + 150 && ratX('x8').rating === BOTS.ceiling + 150 && ratX('x8').games === 21, 'and one already past it lifts it nowhere (still counted)', c8.rating);
   const l8 = await (async () => { await pass(BOTS.again, () => xq('poll', 'x8')); const b8 = (await xq('poll', 'x8')).bot;
     await xq('bot', 'x8', { id: b8.id, as: 'start' }); await pass(BOTS.least, () => xq('poll', 'x8')); return xq('bot', 'x8', { id: b8.id, as: 'over', score: [1, 2] }); })();

@@ -52,7 +52,7 @@ export const BOTS = {
   // ranked: a bot as an opponent to be rated against
   edge: 100,                               // rated this far above the rating its skill stands for: it is a notch harder
   rd: 150,                                 // and this unsure, so it moves a rating a little less than a settled player
-  ceiling: LEAGUES[LEAGUES.length - 1].from,   // a win against a bot never lifts a rating past VOID's line
+  ceiling: LEAGUES[LEAGUES.length - 1].from - 1,   // a win against a bot stops a point short of VOID's line (VOID counts from it)
   least: 15 * 1000,                        // a result sooner than this after its start is refused: no best of three is over so soon
   expire: 20 * 60 * 1000,                  // a started match that has said nothing of its end by then is a loss
   awakens: ['ember', 'hacker', 'melee'],   // the pilots with an awakened form (the game's RITES with a rite built)
