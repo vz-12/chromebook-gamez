@@ -231,7 +231,7 @@ export class Matchmaker extends Serial {
   async handle(op, b, now) {
     if (op === 'rate') {
       const r = await applyRating(this.env.DB, b.id);
-      // somebody placed in VOID by it: an armed challenge goes out now (challenge.js); the rating stands either way
+      // somebody in VOID after it: an armed challenge goes out now if anybody has held it a day (challenge.js); the rating stands either way
       if (r.moved && r.ratings.some(x => x.league === TOP_LEAGUE))
         await tripChallenges(this.env.DB).catch(e => console.error('pvp challenge', e && e.message));
       return reply(r, r.ok ? 200 : 404);

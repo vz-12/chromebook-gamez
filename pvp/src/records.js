@@ -17,7 +17,7 @@
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
 import { START, rateMatch, glicko2 } from './glicko.js';
-import { leagueOf, PLACEMENTS } from './rules.js';
+import { leagueOf, PLACEMENTS, LEAGUES } from './rules.js';
 import { carried } from './seasons.js';
 
 const SCHEMA = [
@@ -60,26 +60,46 @@ const SCHEMA = [
      losses   INTEGER NOT NULL DEFAULT 0,
      league   TEXT,                         -- NULL while still being placed
      updated  INTEGER NOT NULL,
+     top_since INTEGER,                     -- since when they have held VOID, unbroken; NULL while they don't (challenge.js)
      PRIMARY KEY (account, queue, season))`,
   'CREATE INDEX IF NOT EXISTS pvp_ratings_ladder ON pvp_ratings (queue, season, rating DESC)'
 ];
 
+// the highest league, VOID: the one whose holders a challenge counts (challenge.js)
+const TOP = LEAGUES[LEAGUES.length - 1].id;
+
 /* Columns added after their table first shipped (as src/auth.js does):
-   pvp_matches.applied, set once the match's ratings are written. */
-const ADDED = [['pvp_matches', 'applied', 'INTEGER NOT NULL DEFAULT 0']];
+   pvp_matches.applied, set once the match's ratings are written;
+   pvp_ratings.top_since, filled for whoever already sits in VOID from their
+   last rating change: they have held it at least since then. */
+const ADDED = [['pvp_matches', 'applied', 'INTEGER NOT NULL DEFAULT 0'],
+               ['pvp_ratings', 'top_since', 'INTEGER', `UPDATE pvp_ratings SET top_since = updated WHERE league = '${TOP}'`]];
 
 const ready = new WeakSet();
 export async function ensurePvp(db) {
   if (ready.has(db)) return;
   await db.batch(SCHEMA.map(q => db.prepare(q)));
-  for (const [table, col, type] of ADDED) {
+  for (const [table, col, type, fill] of ADDED) {
     const cols = ((await db.prepare(`PRAGMA table_info(${table})`).all()).results || []).map(r => r.name);
     if (!cols.includes(col))
       await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`).run()
+        .then(() => fill && db.prepare(fill).run())
         .catch(e => { if (!/duplicate column/i.test(String(e && e.message))) throw e; });
   }
   ready.add(db);
 }
+
+/* A rating row, written whole after a rated match. top_since keeps the
+   moment its holder arrived in VOID for as long as they stay, and is cleared
+   when they leave: a challenge goes out only to somebody who has held it a
+   day (challenge.js). */
+const RATE =
+  `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated, top_since)
+   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+   ON CONFLICT (account, queue, season) DO UPDATE SET rating = excluded.rating, rd = excluded.rd, vol = excluded.vol,
+     games = excluded.games, wins = excluded.wins, losses = excluded.losses, league = excluded.league, updated = excluded.updated,
+     top_since = CASE WHEN excluded.top_since IS NULL THEN NULL ELSE COALESCE(pvp_ratings.top_since, excluded.top_since) END`;
+const topSince = (lg, now) => (!lg.provisional && lg.id === TOP ? now : null);
 
 /* An account's rating row in a queue and season. Before its first rated
    match there: last season's, carried softly (seasons.js), or null for a
@@ -122,14 +142,10 @@ export async function applyRating(db, id) {
     const lg = leagueOf({ rating: n.rating, games });
     told.push({ before: Math.round(old ? old.rating : START.rating), after: Math.round(n.rating), games,
                 league: lg.provisional ? null : lg.id, left: lg.left });
-    return db.prepare(
-      `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-       ON CONFLICT (account, queue, season) DO UPDATE SET rating = excluded.rating, rd = excluded.rd, vol = excluded.vol,
-         games = excluded.games, wins = excluded.wins, losses = excluded.losses, league = excluded.league, updated = excluded.updated`)
+    return db.prepare(RATE)
       .bind(acct, m.queue, m.season, n.rating, n.rd, n.vol, games,
             (old ? old.wins : 0) + (won ? 1 : 0), (old ? old.losses : 0) + (won ? 0 : 1),
-            lg.provisional ? null : lg.id, now);
+            lg.provisional ? null : lg.id, now, topSince(lg, now));
   };
   await db.batch([put(m.a, ra, na, m.winner === 0), put(m.b, rb, nb, m.winner === 1),
                   db.prepare('UPDATE pvp_matches SET applied = 1 WHERE id = ?1').bind(id)]);
@@ -183,13 +199,10 @@ export async function recordBot(db, x, how, now, ceiling) {
        VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 3, ?11, ?12, ?13, ?14, ?15, 1)`).bind(
       id, x.queue, x.league || null, x.acct, 'bot:' + x.name, x.mine, x.pilot, how.won ? 0 : 1,
       score ? score[0] : null, score ? score[1] : null, how.v, how.reason || null, x.at, now, season),
-    db.prepare(
-      `INSERT INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-       ON CONFLICT (account, queue, season) DO UPDATE SET rating = excluded.rating, rd = excluded.rd, vol = excluded.vol,
-         games = excluded.games, wins = excluded.wins, losses = excluded.losses, league = excluded.league, updated = excluded.updated`)
+    db.prepare(RATE)
       .bind(x.acct, x.queue, season, n.rating, n.rd, n.vol, games,
-            (old ? old.wins : 0) + (how.won ? 1 : 0), (old ? old.losses : 0) + (how.won ? 0 : 1), lg.provisional ? null : lg.id, now)
+            (old ? old.wins : 0) + (how.won ? 1 : 0), (old ? old.losses : 0) + (how.won ? 0 : 1), lg.provisional ? null : lg.id, now,
+            topSince(lg, now))
   ]);
   return { before: Math.round(was.rating), after: Math.round(n.rating), games, league: lg.provisional ? null : lg.id, left: lg.left };
 }

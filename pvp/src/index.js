@@ -44,6 +44,9 @@ import live from '../../src/live.js';
 import { closeSeasons } from './seasons.js';
 import { tripChallenges } from './challenge.js';
 
+// the hourly cron (wrangler.jsonc): it only sends a challenge that has come due; the daily one does everything
+const HOURLY = '40 * * * *';
+
 export { Matchmaker, Match } from './objects.js';
 export { Broadcast } from './broadcast.js';
 
@@ -72,11 +75,12 @@ export default {
     }
   },
 
-  // once a day: any finished season's rewards, filed (seasons.js); then any challenge due, sent (challenge.js)
+  // once a day: any finished season's rewards, filed (seasons.js); then, and every hour, any challenge due, sent (challenge.js)
   async scheduled(event, env, ctx) {
     if (!env.DB) return;
-    ctx.waitUntil(closeSeasons(env.DB)
-      .then(f => console.log(f.length ? 'pvp season rewards filed: ' + f.join(', ') : 'pvp: no season to close'))
+    const daily = event.cron !== HOURLY;
+    ctx.waitUntil((daily ? closeSeasons(env.DB) : Promise.resolve(null))
+      .then(f => { if (f) console.log(f.length ? 'pvp season rewards filed: ' + f.join(', ') : 'pvp: no season to close'); })
       .catch(e => console.error('pvp seasons', e && e.stack || e))
       .then(() => tripChallenges(env.DB))
       .then(s => { if (s.length) console.log('pvp challenges sent: ' + s.length); })

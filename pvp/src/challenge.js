@@ -8,9 +8,10 @@
    pages are (src/tales.js): the repo is public, and the words are not. A
    challenge left unarmed does nothing at all.
 
-   TRIPPED BY THE LADDER: the first time anybody is placed in the highest
-   league (VOID) in ranked while it is armed. At that moment it goes to the
-   account at the top of ranked that season, and from then on it is theirs:
+   TRIPPED BY THE LADDER: once anybody has held the highest league (VOID) in
+   ranked for a day (HOLD), unbroken, while it is armed: a visit to VOID is
+   not enough. It goes to the account highest in ranked that season among
+   those who have held it that long, and from then on it is theirs:
      - their /api/pvp/me carries it, the words and the date once one is set,
        and nobody else's does; the first time they are shown it is noted
      - the game's GET /api/account says only that there is one, for the
@@ -20,9 +21,10 @@
    The pilot's own holders never trip it and are never sent it: the accounts
    that fly it do not challenge themselves.
 
-   It is checked when a rated match places somebody in VOID (the queue's
-   Matchmaker, objects.js), and on PvP's daily cron (index.js), which also
-   catches one armed after somebody is already there.
+   It is checked after a rated match that leaves somebody in VOID (the
+   queue's Matchmaker, objects.js), and every hour on PvP's cron (index.js),
+   which catches a day running out with no match played, and one armed after
+   somebody has already held VOID that long.
 
    The date is the dev's to set (`npm run challenge -- date`), before or
    after it is sent.
@@ -50,8 +52,10 @@ import { vaultText, PERK } from '../../src/vault.js';
 import { LEAGUES } from './rules.js';
 import { ensurePvp } from './records.js';
 
-// the league whose first player trips a challenge: the highest, VOID
+// the league whose holders trip a challenge: the highest, VOID
 export const TOP_LEAGUE = LEAGUES[LEAGUES.length - 1].id;
+// how long somebody must have held it, unbroken (pvp_ratings.top_since, records.js), before one goes out
+export const HOLD = 24 * 60 * 60 * 1000;
 const WORDS = { t: 60, x: 4000 };        // what the lobby is handed of them, at most
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
@@ -59,10 +63,10 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      words       TEXT    NOT NULL,         -- the vault entry its words are kept in
      armed       INTEGER NOT NULL,         -- when it was armed (ms)
      due         INTEGER,                  -- the date it names (ms), once set
-     tripped     INTEGER,                  -- when somebody was first placed in VOID while it was armed
+     tripped     INTEGER,                  -- when somebody had first held VOID a day while it was armed
      reached_by  TEXT,                     -- who that was
      season      TEXT,                     -- the season it tripped in
-     target      TEXT,                     -- the account it went to: the top of ranked then
+     target      TEXT,                     -- the account it went to: the highest of those who had held VOID a day
      seen        INTEGER,                  -- when they were first shown it
      match       TEXT,                     -- the match the queue made between the two, the latest
      started     INTEGER,                  -- when it was made
@@ -95,8 +99,8 @@ export async function ensureChallenges(db) {
 const notHolder = n => `NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.account
                           AND EXISTS (SELECT 1 FROM json_each(a.perks) WHERE value = ?${n}))`;
 
-/* Every armed challenge not yet sent, sent now if anybody is placed in VOID
-   in ranked this season. The UPDATE only lands on one still unsent, so this
+/* Every armed challenge not yet sent, sent now if anybody has held VOID in
+   ranked this season for a day. The UPDATE only lands on one still unsent, so this
    running in the Matchmaker and on the cron at once sends it once. Returns
    what it sent, [{ pilot, target }], for the cron's log and the tests. */
 export async function tripChallenges(db, now = Date.now()) {
@@ -106,14 +110,15 @@ export async function tripChallenges(db, now = Date.now()) {
   await ensurePvp(db);
   const season = seasonOf(now), sent = [];
   for (const { pilot } of armed) {
-    const first = await db.prepare(
-      `SELECT r.account FROM pvp_ratings r WHERE r.queue = 'ranked' AND r.season = ?1 AND r.league = ?2 AND ${notHolder(3)}
-        ORDER BY r.updated ASC LIMIT 1`).bind(season, TOP_LEAGUE, PERK(pilot)).first();
+    // who has held VOID a day: the first of them tripped it, and the highest of them is sent it
+    const held = `FROM pvp_ratings r WHERE r.queue = 'ranked' AND r.season = ?1 AND r.league = ?2
+                    AND r.top_since IS NOT NULL AND r.top_since <= ?4 AND ${notHolder(3)}`;
+    const first = await db.prepare(`SELECT r.account ${held} ORDER BY r.top_since ASC LIMIT 1`)
+      .bind(season, TOP_LEAGUE, PERK(pilot), now - HOLD).first();
     if (!first) continue;
-    // the top of the ladder, in the ladder's own order (seasons.js, placed)
-    const top = await db.prepare(
-      `SELECT r.account FROM pvp_ratings r WHERE r.queue = 'ranked' AND r.season = ?1 AND r.league IS NOT NULL AND ${notHolder(2)}
-        ORDER BY r.rating DESC, r.updated ASC LIMIT 1`).bind(season, PERK(pilot)).first();
+    // in the ladder's own order (seasons.js, placed)
+    const top = await db.prepare(`SELECT r.account ${held} ORDER BY r.rating DESC, r.updated ASC LIMIT 1`)
+      .bind(season, TOP_LEAGUE, PERK(pilot), now - HOLD).first();
     if (!top) continue;
     const r = await db.prepare(
       `UPDATE pvp_challenges SET tripped = ?2, reached_by = ?3, season = ?4, target = ?5

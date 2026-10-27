@@ -3,8 +3,9 @@
    A HIDDEN PILOT'S CHALLENGE, BY HAND — `npm run challenge -- <command>`
    (the rest of it: pvp/src/challenge.js)
 
-     arm <pilot> <words>      armed: the first player placed in VOID sends it
-                              to the top of ranked. <pilot> is the hidden
+     arm <pilot> <words>      armed: once a player has held VOID for a day
+                              it goes to the highest of those who have
+                              (checked hourly). <pilot> is the hidden
                               pilot's vault id, <words> the vault entry its
                               words are kept in (put it first, given to
                               nobody: `npm run vault -- put <words> <file>`).

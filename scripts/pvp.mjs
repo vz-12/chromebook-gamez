@@ -1121,7 +1121,8 @@ section('seasons: the podium at the turn, and the soft reset');
 {
   const acct = n => one(`SELECT id FROM accounts WHERE name = '${n}'`).id;
   const cfg = readFileSync(new URL('../pvp/wrangler.jsonc', import.meta.url), 'utf8');
-  ok(/"triggers":\s*\{\s*"crons":\s*\["20 0 \* \* \*"\]\s*\}/.test(cfg) && typeof pvp.scheduled === 'function', 'the PvP Worker has its daily cron');
+  ok(/"triggers":\s*\{\s*"crons":\s*\["20 0 \* \* \*", "40 \* \* \* \*"\]\s*\}/.test(cfg) && typeof pvp.scheduled === 'function',
+     'the PvP Worker has its daily cron, and the hourly one for challenges');
   ok(seasonBefore('2026-10') === '2026-09' && seasonBefore('2026-01') === '2025-12', 'the season before, across a year too');
   const now = Date.now(), cur = seasonOf(now), prev = seasonBefore(cur), older = seasonBefore(prev), oldest = seasonBefore(older);
   const mk = name => {
@@ -1255,11 +1256,11 @@ section('seasons: the podium at the turn, and the soft reset');
   ok(nowAce.rating > rateMatch(START, START, true)[0].rating, 'so a strong player stays ahead of a newcomer who won the same match');
 }
 
-section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOID, sent to the top of ranked');
+section('a hidden pilot\'s challenge: armed by hand, tripped once somebody has held VOID a day, sent to the highest of them');
 {
   const { armSql, dateSql, cancelSql, inVaultSql, challengesSql, checkDate, checkPilot } = await import('./lib/challenge-sql.mjs');
   const { putSql } = await import('./lib/vault-sql.mjs');
-  const { tripChallenges, targetOf, TOP_LEAGUE } = await import('../pvp/src/challenge.js');
+  const { tripChallenges, targetOf, TOP_LEAGUE, HOLD } = await import('../pvp/src/challenge.js');
   // what `npm run challenge` and `npm run vault` would send, run statement by statement as they do
   const tool = sql => {
     let rows = [];
@@ -1283,9 +1284,13 @@ section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOI
     p.cookie = g.cookie = token;
     return { id, pvp: p, game: g };
   };
-  const rate = (who, rating, league, updated) => DB.sql.prepare(
-    `INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
-     VALUES (?, 'ranked', ?, ?, 100, 0.06, 20, 10, 10, ?, ?)`).run(who.id, cur, rating, league, updated);
+  // in VOID, held since the moment given (by default, only just arrived)
+  const rate = (who, rating, league, updated, since = league === 'void' ? updated : null) => DB.sql.prepare(
+    `INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated, top_since)
+     VALUES (?, 'ranked', ?, ?, 100, 0.06, 20, 10, 10, ?, ?, ?)`).run(who.id, cur, rating, league, updated, since);
+  const held = (who, ms) => DB.sql.prepare("UPDATE pvp_ratings SET top_since = ? WHERE account = ? AND queue = 'ranked' AND season = ?")
+    .run(Date.now() - ms, who.id, cur);
+  const since = who => DB.sql.prepare("SELECT top_since FROM pvp_ratings WHERE account = ? AND queue = 'ranked' AND season = ?").get(who.id, cur).top_since;
   // the dev flies both test pilots, from the top of the ladder
   const H = mk('C_Holder', ['vault:x9', 'vault:x8']), T = mk('C_Top'), U = mk('C_Climb'), L = mk('C_Low');
   rate(H, 2600, 'void', now - 5000);
@@ -1319,9 +1324,15 @@ section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOI
   ok(r1.moved && !r1.ratings.some(x => x.league === TOP_LEAGUE) && row('x9').tripped === null, 'a rated match that places nobody in VOID: still armed', r1.ratings);
   const r2 = await rateVia(T, U, 0);
   ok(r2.moved && r2.ratings[0].league === TOP_LEAGUE && r2.ratings[1].league !== TOP_LEAGUE, 'then one that does: the winner past 2100, into VOID', r2.ratings);
+  ok(Math.abs(since(T) - Date.now()) < 60000 && row('x9').tripped === null,
+     'noted as held from now, but a visit to VOID sends nothing', { since: since(T), c: row('x9') });
+  held(T, HOLD - 60000);
+  ok((await tripChallenges(DB)).length === 0 && row('x9').tripped === null, 'held a minute short of a day: still nothing');
+  held(T, HOLD + 60000);
+  ok((await tripChallenges(DB)).length === 1, 'held a day: it goes out');
   const c = row('x9');
-  ok(c.tripped > 0 && c.reached_by === T.id && c.season === cur, 'and the Matchmaker trips it there and then: when, by whom, in which season', c);
-  ok(c.target === T.id, 'sent to the top of ranked, passing over the holder above: the pilot does not challenge its own', c.target);
+  ok(c.tripped > 0 && c.reached_by === T.id && c.season === cur, 'when, by whom, in which season', c);
+  ok(c.target === T.id, 'sent to the highest who has held VOID a day, passing over the holder above: the pilot does not challenge its own', c.target);
   ok((await tripChallenges(DB)).length === 0 && row('x9').target === T.id && row('x9').tripped === c.tripped, 'tripped again: nothing more goes out');
 
   // the lobby: the words, for the one it was sent to and nobody else
@@ -1365,28 +1376,44 @@ section('a hidden pilot\'s challenge: armed by hand, tripped by the first in VOI
   tool(cancelSql('x9'));
   ok(!row('x9') && (await targetOf(DB, 'x9')) === null && !('challenge' in (await T.pvp.me()).d), 'cancelled: gone, from the lobby too');
 
-  // armed after somebody is already in VOID: the daily cron sends it
+  // armed after somebody has already held VOID a day: the hourly cron sends it
   tool(putSql('x8', Buffer.from('/* another */')).sql);
   tool(putSql('x8-words', Buffer.from(JSON.stringify({ x: 'Other words.' }))).sql);
   tool(armSql('x8', 'x8-words'));
   ok(row('x8').tripped === null, 'armed while two are already in VOID: nothing until somebody looks');
   const jobs = [], quiet = console.log;
   console.log = () => {};
-  await pvp.scheduled({ cron: '20 0 * * *' }, envPvp, { waitUntil: p => jobs.push(p) });
+  await pvp.scheduled({ cron: '40 * * * *' }, envPvp, { waitUntil: p => jobs.push(p) });
   await Promise.all(jobs);
   console.log = quiet;
   const c8 = row('x8');
-  ok(c8.tripped > 0 && c8.reached_by === T.id && c8.target === U.id,
-     'the daily cron sends it: tripped by the first one there, sent to whoever is on top now', c8);
-  const m8 = (await U.pvp.me()).d.challenge;
+  ok(c8.tripped > 0 && c8.reached_by === T.id && c8.target === T.id,
+     'the hourly cron sends it: to the highest who has held VOID a day, not the newcomer above them', c8);
+  const m8 = (await T.pvp.me()).d.challenge;
   ok(m8 && m8.t === '' && m8.x === 'Other words.', 'their lobby has it; a title left out is the lobby\'s to fill', m8);
   tool(armSql('x8', 'x9-words'));
-  ok(row('x8').words === 'x9-words' && row('x8').target === U.id && row('x8').tripped === c8.tripped, 'armed again once sent: only its words change');
+  ok(row('x8').words === 'x9-words' && row('x8').target === T.id && row('x8').tripped === c8.tripped, 'armed again once sent: only its words change');
   const ls = tool(challengesSql());
-  ok(ls.length === 1 && ls[0].pilot === 'x8' && ls[0].reached_by === 'c_top' && ls[0].target === 'c_climb' && ls[0].seen !== '-' && ls[0].due === '-',
+  ok(ls.length === 1 && ls[0].pilot === 'x8' && ls[0].reached_by === 'c_top' && ls[0].target === 'c_top' && ls[0].seen !== '-' && ls[0].due === '-',
      'the tool lists it, by name, never an id', ls);
   DB.sql.prepare("UPDATE pvp_challenges SET words = 'gone' WHERE pilot = 'x8'").run();
-  ok(!('challenge' in (await U.pvp.me()).d), 'words the vault no longer holds: no challenge in the lobby, never half of one');
+  ok(!('challenge' in (await T.pvp.me()).d), 'words the vault no longer holds: no challenge in the lobby, never half of one');
+
+  // a rated match keeps the moment somebody arrived in VOID while they stay, and forgets it when they leave
+  const { applyRating } = await import('../pvp/src/records.js');
+  const fight = (a, b, winner) => {
+    const id = randomBytes(16).toString('hex');
+    DB.sql.prepare(`INSERT INTO pvp_matches (id, queue, league, rated, a, b, a_pilot, b_pilot, winner, score_a, score_b, best_of, verdict, reason, started, ended, season)
+                    VALUES (?, 'ranked', 'void', 1, ?, ?, 'runner', 'ember', ?, 3, 1, 5, 'played', NULL, ?, ?, ?)`).run(id, a.id, b.id, winner, Date.now(), Date.now(), cur);
+    return applyRating(DB, id);
+  };
+  rate(U, 2400, 'void', Date.now(), Date.now() - 5 * 864e5);
+  rate(L, 2105, 'void', Date.now(), Date.now() - 2 * 864e5);
+  const kept = since(U);
+  await fight(U, L, 0);
+  ok(since(U) === kept, 'a win in VOID: still held from when they arrived', { kept, now: since(U) });
+  for (let i = 0; i < 6 && since(L) !== null; i++) await fight(U, L, 0);
+  ok(since(L) === null, 'losses that drop them out of VOID: the day starts over', since(L));
   tool(cancelSql('x8'));
 }
 
@@ -1422,8 +1449,8 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
     return { id, pvp: p };
   };
   const H = mk('L_Holder', ['vault:x7']), T = mk('L_Top'), S = mk('L_Stranger'), D = mk('L_Dev', ['dev']);
-  DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated)
-                  VALUES (?, 'ranked', ?, 3000, 60, 0.06, 30, 25, 5, 'void', ?)`).run(T.id, cur, now - 60000);
+  DB.sql.prepare(`INSERT OR REPLACE INTO pvp_ratings (account, queue, season, rating, rd, vol, games, wins, losses, league, updated, top_since)
+                  VALUES (?, 'ranked', ?, 3000, 60, 0.06, 30, 25, 5, 'void', ?, ?)`).run(T.id, cur, now - 60000, now - 2 * 864e5);
   const pilotCode = '/* the hidden pilot, as the vault keeps it */';
   tool(putSql('x7', Buffer.from(pilotCode)).sql);
   tool(putSql('x7-words', Buffer.from(JSON.stringify({ t: 'A CHALLENGE', x: 'Come and find out.' }))).sql);
