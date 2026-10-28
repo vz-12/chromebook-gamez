@@ -145,7 +145,8 @@
 
   /* --------------------------- what is coming at it --------------------------
      The blow most about to land, and in how many seconds, of those the bot
-     can see: rounds in the air (its rival's, and the room's), its rival's
+     can see: rounds in the air (its rival's, the room's, and a hidden pilot's
+     own shots, which its kit hands the duel: OUTSIDE PILOTS), its rival's
      lance (a beam across it, or the aim on it with the shot about to go), its
      rival's blade (a swing begun within reach, noticed a moment late on lower
      skill), and its rival's army leaning in. Each has a key, so the bot judges
@@ -175,6 +176,8 @@
     };
     for (const b of bullets) if (b.by === foe) take(shotT(me, b), 'shot', b, b);
     for (const b of ebullets) take(shotT(me, b), 'shot', b, b);
+    // a pilot from outside the game's file: its own shots that are not rounds (OUTSIDE PILOTS, shots)
+    for (const b of outsideShotsOf(foe.pid || 0)) take(shotT(me, b), 'shot', b, b);
     if (foe.down) return best;
     const dx = me.x - foe.x, dy = me.y - foe.y, d = Math.hypot(dx, dy) || 1;
     if (foe.weapon === 'laser') {

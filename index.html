@@ -5199,6 +5199,12 @@ function bladeParried(amount, opts) {
       burst(b.x, b.y, 4, '#e0f2fe', 200, 2.2, 0.2);
       ebullets.splice(i, 1);
     }
+    // in a duel, the other pilot's own shots, if its kit is from outside the file (OUTSIDE PILOTS: shots)
+    for (const s of outsideShotsTheirs()) {
+      if (len(s.x - P.x, s.y - P.y) > R + (s.r || 0)) continue;
+      burst(s.x, s.y, 4, '#e0f2fe', 200, 2.2, 0.2);
+      s.gone = 1;
+    }
   }
   if (perfect) bladeCounter(amount, opts);
   /* Whatever was leaning on you is thrown off you, or it lands the same hit
@@ -5292,6 +5298,11 @@ function updateBladeWaves(dt) {
       if (!segCircle(w.px, w.py, w.x, w.y, b.x, b.y, b.r + COUNTER_W)) continue;
       burst(b.x, b.y, 3, '#fde68a', 160, 2, 0.18);
       ebullets.splice(j, 1);
+    }
+    for (const s of outsideShotsTheirs()) {   // and, in a duel, the other pilot's own shots (OUTSIDE PILOTS: shots)
+      if (!segCircle(w.px, w.py, w.x, w.y, s.x, s.y, (s.r || 0) + COUNTER_W)) continue;
+      burst(s.x, s.y, 3, '#fde68a', 160, 2, 0.18);
+      s.gone = 1;
     }
     const out = w.x < arena.x0 || w.x > arena.x1 || w.y < arena.y0 || w.y > arena.y1;
     if (w.dist > COUNTER_RANGE || out) bladeWaves.splice(i, 1);
@@ -5831,7 +5842,7 @@ function hurtPlayer(dmg, opts) {
   if (P.roninDash || P.roninExec || roninCutIn() || P.roninSkyClear) return;   // RONIN's X and C: nothing lands mid-dash, or mid-counter; nor while a cut-in has the screen, nor through SKY CLEAR
   if (suCutIn()) return;                   // nor while SUPERUSER's has it
   if (imCutIn()) return;                   // nor while IMAGO's has it
-  if (outsideCutAny()) return;             // nor while an outside pilot's has it (OUTSIDE PILOTS)
+  if (outsideCutAny(opts && opts.pvp ? opts.pvp.by : undefined)) return;   // nor while an outside pilot's has it, unless the blow is that pilot's own (OUTSIDE PILOTS)
   // IMAGO's X: FLUTTER dodges every blow, whatever it was; the floor and the build's own costs are nothing to dodge
   if (imEvoMolting() && !(opts && opts.pure)) return;            // IMAGO's V: the molt, untouchable
   if (imFlutOn() && !(opts && opts.pure)) { imDodgeAt(opts); return; }
@@ -39072,6 +39083,7 @@ function update(dt) {
     if (!P.down) updateDrones(dt);   // your escort does not fight over your wreck
     updateSentries(dt);
     if (P.outside) outsideCall(P.charId, 'step', dt);   // an outside pilot's kit: see OUTSIDE PILOTS
+    if (PVP && P.outside) imGrazeDuelShots();          // and its shots passing close, a graze to the other pilot (IMAGO IN A DUEL)
   });
   aboveTick(dt, wdt);        // what comes for a run that has grown (FROM ABOVE)
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
@@ -46600,7 +46612,11 @@ function imGain(n, x, y) {
      - its lance and its blade, which throw no rounds, on this pilot's turn
        (imGrazeDuelTick): a beam that came within IM_GRAZE_R of the hull and
        ended without touching it, or a swing whose edge reached that close
-       and never found the hull, is one graze each.
+       and never found the hull, is one graze each;
+     - a pilot from outside the file's own shots (its shots() hook: OUTSIDE
+       PILOTS), on its turn once its kit has stepped (imGrazeDuelShots): as a
+       round, except that its kit says where it lands, so one that touches
+       the hull undashed has landed and pays nothing.
    The room's rounds, in an infested arena, pay as they do in a run. And
    while V evolves, a graze is PROGRESS, as anywhere. */
 function imGrazeDuel(b) {
@@ -46610,6 +46626,18 @@ function imGrazeDuel(b) {
   // a round that went through the other pilot (a piercing one) has landed: no graze
   if (b.hits && b.hits.size && PVP.standIns().some(s => s.pvpPilot === k && b.hits.has(s.id))) return;
   imGrazeRound(b, p, k);
+}
+function imGrazeDuelShots() {
+  if (!PVP || PILOTS.length < 2 || !P.outside) return;
+  const k = PILOT.on === 0 ? 1 : 0, p = pilotP(k);
+  if (!p || p.down || !(imFills(p) || imEvoOf(p))) return;
+  const bit = 1 << k;
+  for (const s of outsideShotsOf(PILOT.on)) {
+    if (!Number.isFinite(s.r)) continue;
+    // on the hull, and not dashed through: it landed (or the hull's guard took it), and never pays
+    if (!(p.dashT > 0) && len(s.x - p.x, s.y - p.y) < s.r + p.r) { s.imPaid = (s.imPaid | 0) | bit; continue; }
+    imGrazeRound(s, p, k);
+  }
 }
 function imGrazeDuelTick() {
   const o = PVP && PILOTS.length > 1 && P.charId === 'runner' ? mpPilots() : null;
@@ -89336,6 +89364,15 @@ function aboveTakenFx(p, m) {
                  at slow(), the hull stands still, nothing lands on it, no crosshair
      ev(name, ...)           what happens in the run: 'run' (a run begins),
                  'stage' (def: the floor changes), 'kill' (e), 'level' (n), 'dead'
+     shots()     in a PvP duel: its own shots in the air that are not the
+                 game's rounds (what it fires with fireBullet is seen already),
+                 as the live objects it keeps, each with x, y, r and, if it
+                 moves, vx, vy (px a second). The duel reads them as it reads
+                 the other pilot's rounds: one passing close is a graze to
+                 VOIDRUNNER (IMAGO IN A DUEL), a bot sees it coming, and one a
+                 parry turns aside or a counter's wave crosses is marked
+                 s.gone = 1, which the kit drops, landing nothing more with it.
+                 The duel writes only plain numbers on them (imNear, imPaid, gone)
    And the drawing's, each run as its pilot with the canvas saved around it:
      back()      the room itself, over its floor and under everything on it
      floor()     in the room, with the marks on the floor
@@ -89358,7 +89395,7 @@ function aboveTakenFx(p, m) {
    copy of it, nor PvP, whose page never loads it.
    ========================================================================= */
 const OUTSIDE_URL = '/api/vault';
-const OUTSIDE_HOOKS = ['init', 'step', 'key', 'fire', 'hit', 'dash', 'hurt', 'slow', 'cut', 'ev',
+const OUTSIDE_HOOKS = ['init', 'step', 'key', 'fire', 'hit', 'dash', 'hurt', 'slow', 'cut', 'ev', 'shots',
                        'back', 'floor', 'under', 'hull', 'over', 'fx', 'bullet', 'hud', 'screen', 'cursor', 'hangar', 'menu'];
 const OUTSIDE_WEAPONS = ['bullet', 'laser', 'blade'];
 
@@ -89396,10 +89433,13 @@ function outsideDrawFor(id, name, ...a) {
 // a cut-in of the pilot's own has the screen (cut())
 const outsideCut = () => !!(P.outside && outsideCall(P.charId, 'cut'));
 /* Any pilot's cut-in: with two pilots in a run (a PvP duel; co-op never flies
-   one), a cut-in of the outside pilot's holds the other's hull and blows too. */
-function outsideCutAny() {
+   one), a cut-in of the outside pilot's holds the other's hull and blows too.
+   `by`, the pilot dealing a blow: its own cut-in never holds that blow, since
+   a cut-in may be where its own strike lands, as it plays. */
+function outsideCutAny(by) {
   if (PILOTS.length < 2) return outsideCut();
   for (let k = 0; k < PILOTS.length; k++) {
+    if (k === by) continue;
     const q = pilotP(k);
     if (q && q.outside && pilotDo(k, outsideCut)) return true;
   }
@@ -89417,6 +89457,18 @@ function outsideEv(name, ...a) {
     const q = pilotP(k);
     if (q && q.outside) pilotDo(k, () => outsideCall(P.charId, 'ev', name, ...a));
   }
+}
+/* Pilot k's own shots in the air (shots()), as that pilot: those still flying,
+   each with a place to be read at. None for a pilot of the game's own. */
+function outsideShotsOf(k) {
+  const q = pilotP(k);
+  if (!q || !q.outside || !outsideHas(q.charId, 'shots')) return [];
+  const s = pilotDo(k, () => outsideCall(P.charId, 'shots'));
+  return Array.isArray(s) ? s.filter(x => x && !x.gone && Number.isFinite(x.x) && Number.isFinite(x.y)) : [];
+}
+// the other pilot's, in a duel: what this pilot's parry and counter answer
+function outsideShotsTheirs() {
+  return PVP && PILOTS.length > 1 ? outsideShotsOf(PILOT.on === 0 ? 1 : 0) : [];
 }
 
 /* VR.pilot: the def checked, made a CHARS entry, and its hooks kept. `id` is

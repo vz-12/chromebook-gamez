@@ -1708,6 +1708,174 @@ section('practice for the story fight: a hidden pilot\'s holder against a bot, a
   ok(P2.run('JSON.stringify(PVP.duelRule(pilotP(0), "take"))') === P2.run('JSON.stringify((CHAR().duel && CHAR().duel.take) || {})'), 'and its duel\'s own rules');
 }
 
+section('a hidden pilot\'s own shots in a duel (shots()): a graze to VOIDRUNNER, seen by a bot, stopped by a parry or a counter; and its strike inside its own cut-in lands');
+{
+  /* Its kit's shots that are not the game's rounds go nowhere near
+     updateBullets, so a duel reads them through the shots() hook (OUTSIDE
+     PILOTS). The rules are tried with shots put by hand in place of the
+     module's (whatever module flies); then the stand-in's sparks (C) in play,
+     or with --outside, the module's own fire. */
+  const page = (bot, extra) => boot(Object.assign({ mode: 'bot', pilot: 'x0', me: ME, bot: Object.assign({ name: 'BOT SHOT', seed: 77 }, bot),
+                                                    outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, extra || {}), DUELIST);
+  const run = async (g, secs, done) => {
+    for (let i = 0; i < 60 * secs; i++) {
+      g.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()');
+      if (i % 30 === 0) { await settle(); forgetLimits(); if (done && done()) return i / 60; }
+    }
+    return secs;
+  };
+  // this player: card picks taken, at the bot's range, aimed at it; firing only if __fire, pressing what __keys holds once the fight is on
+  const HUMAN = `globalThis.__keys = []; globalThis.__fire = false; globalThis.__every = '';
+    PVP.botMatch.human = rec => {
+      const k = LS.hi + 1, foe = pilotP(1);
+      if (k % 9 === 0 && state === 'levelup' && offers.length) handleKey(String(1 + (k / 9 | 0) % offers.length));
+      if (k % 9 === 0 && state === 'gear' && gearOffer) handleKey(['1', '2', 'x'][(k / 9 | 0) % 3]);
+      const dx = foe.x - P.x, dy = foe.y - P.y, d = Math.hypot(dx, dy) || 1;
+      const turn = Math.floor(k / 140) % 2 ? 1 : -1, close = d > 260 ? 1 : d < 160 ? -1 : 0.2;
+      const vx = close * dx / d - turn * dy / d, vy = close * dy / d + turn * dx / d;
+      rec.mx = Math.abs(vx) > 0.35 ? Math.sign(vx) : 0; rec.my = Math.abs(vy) > 0.35 ? Math.sign(vy) : 0;
+      rec.ax = foe.x; rec.ay = foe.y; rec.trig = __fire; rec.lmb = __fire; rec.press = [];
+      const on = state === 'play' && RUN.pvp && RUN.pvp.phase === 'fight';
+      if (on && __keys.length) rec.press.push(__keys.shift());
+      if (on && __every && k % 20 === 0) rec.press.push(__every);
+    };`;
+  const fight = async g => {
+    await flush(); g.run(HUMAN);
+    await run(g, 40, () => g.run('!!(RUN.pvp && RUN.pvp.phase === "fight")'));
+    // and past the kit's own opening cut-in, if it has one
+    await run(g, 6, () => g.run('!pilotDo(0, outsideCut)'));
+  };
+
+  // the rules, between frames, with shots put by hand: an awake VOIDRUNNER as the bot, its GRAZE from nothing each time
+  const gR = page({ pilot: 'runner', awake: true, skill: 0 });
+  await fight(gR);
+  ok(gR.run('RUN.pvp.phase') === 'fight' && gR.run('pilotP(1).awake') === 1, 'an awake VOIDRUNNER bot, the fight on', gR.run('[RUN.pvp.phase, pilotP(1).awake]'));
+  const rules = JSON.parse(gR.run(`(() => {
+    const me = pilotP(1), out = {}, keep = OUTSIDE.by.get('x0').shots;
+    globalThis.__shots = [];
+    OUTSIDE.by.get('x0').shots = () => __shots;
+    // a shot flown past the bot, a step at a time, as whose turn; dashing or not; or one the duel has stopped
+    const pass = (path, { by = 0, dash = false, gone = false } = {}) => {
+      me.imGraze = 0; me.imT = 0; me.dashT = dash ? 0.2 : 0;
+      const s = { x: 0, y: 0, r: 5, vx: 400, vy: 0, gone: gone ? 1 : 0 };
+      __shots.length = 0; __shots.push(s);
+      for (const [dx, dy] of path) { s.x = me.x + dx; s.y = me.y + dy; pilotDo(by, () => imGrazeDuelShots()); }
+      me.dashT = 0; return me.imGraze;
+    };
+    const e = me.r + 5, past = off => [[-200, e + off], [-20, e + off], [0, e + off], [20, e + off], [200, e + off]];
+    out.close = pass(past(12)); out.wide = pass(past(40)); out.touched = pass(past(-3));
+    out.dash = pass([[-200, 0], [0, 0], [200, 0]], { dash: true }); out.gone = pass(past(12), { gone: true });
+    out.notTurn = pass(past(12), { by: 1 });
+    // what the module answers is read as it is, and nothing but plain numbers is written on it
+    const s0 = { x: me.x - 200, y: me.y + e + 12, r: 5 };
+    __shots.length = 0; __shots.push(s0);
+    for (const dx of [-200, 0, 200]) { s0.x = me.x + dx; pilotDo(0, () => imGrazeDuelShots()); }
+    out.written = Object.keys(s0).filter(k => !['x', 'y', 'r'].includes(k)).sort().join();
+    out.of = outsideShotsOf(1).length + ':' + pilotDo(1, () => outsideShotsTheirs().length);
+    OUTSIDE.by.get('x0').shots = keep; me.imGraze = 0;
+    return JSON.stringify(out);
+  })()`));
+  const IMV = JSON.parse(gR.run('JSON.stringify({ pay: IM_PAY, dash: IM_PAY_DASH })'));
+  ok(rules.close === IMV.pay && rules.wide === 0, 'its shot passing close is a graze to an awake VOIDRUNNER; one wide of it is not', rules);
+  ok(rules.touched === 0 && rules.dash === IMV.dash, 'one that touched the hull undashed landed and pays nothing, one dashed through pays the dash', rules);
+  ok(rules.gone === 0 && rules.notTurn === 0, 'nor does one the duel stopped, or one read on any turn but its own pilot\'s', rules);
+  ok(rules.written === 'imNear,imPaid' && rules.of === '0:1', 'only plain numbers written on its shots; a pilot of the game\'s own has none', rules);
+
+  // a bot sees one coming: a shot at it, judged (to parry, or to dodge) as a round is
+  const seen = gR.run(`(() => {
+    const me = pilotP(1), keep = OUTSIDE.by.get('x0').shots;
+    // coming at it as it moves, so its own heading never carries it out of the way
+    const s = { x: me.x - 60, y: me.y, r: 5, vx: (me.vx || 0) + 420, vy: me.vy || 0 };
+    OUTSIDE.by.get('x0').shots = () => [s];
+    PVP.botMatch.judged.clear();
+    let out = false;
+    for (let i = 0; i < 3 && !out; i++) {
+      bullets.length = 0; ebullets.length = 0;   // nothing else in the air to weigh first
+      s.x = me.x - 60; s.y = me.y; s.vx = (me.vx || 0) + 420; s.vy = me.vy || 0;
+      __wall += 1000 / 60; lsFrame(1 / 60);
+      out = PVP.botMatch.judged.has(s);
+    }
+    OUTSIDE.by.get('x0').shots = keep;
+    return out;
+  })()`);
+  ok(seen === true, 'a bot sees its shot coming, and weighs it as it weighs a round');
+
+  // THE VAGRANT's parry stops what is within arm's reach of it, as it does the room's rounds; a counter's wave stops what it crosses
+  const gP = page({ pilot: 'melee', awake: false, skill: 0 });
+  await fight(gP);
+  const stop = JSON.parse(gP.run(`(() => {
+    const me = pilotP(1), keep = OUTSIDE.by.get('x0').shots, out = {};
+    const near = { x: me.x + 30, y: me.y, r: 5 }, far = { x: me.x + 400, y: me.y, r: 5 };
+    OUTSIDE.by.get('x0').shots = () => [near, far];
+    pilotDo(1, () => { P.parryAge = 0; P.parryTook = 0; P.parrySrc = []; bladeParried(5, {}); });
+    out.parry = [near.gone || 0, far.gone || 0];
+    const a = { x: me.x + 120, y: me.y + 3, r: 5 }, b = { x: me.x + 120, y: me.y + 90, r: 5 };
+    OUTSIDE.by.get('x0').shots = () => [a, b];
+    pilotDo(1, () => { bladeWaves.length = 0; bladeWaves.push({ x: P.x, y: P.y, px: P.x, py: P.y, vx: COUNTER_SPD, vy: 0, dist: 0, t: 0, dmg: 1, crit: false, hit: [], col: '#fde68a' });
+                       for (let i = 0; i < 20; i++) updateBladeWaves(1 / 60); });
+    out.wave = [a.gone || 0, b.gone || 0];
+    // and the game's own pilot's rounds are untouched by it all (outsideShotsTheirs as the hidden pilot: none)
+    out.mine = pilotDo(0, () => outsideShotsTheirs().length);
+    OUTSIDE.by.get('x0').shots = keep;
+    return JSON.stringify(out);
+  })()`));
+  ok(stop.parry.join() === '1,0', 'a parry stops its shot within arm\'s reach, and not one across the room', stop);
+  ok(stop.wave.join() === '1,0' && stop.mine === 0, 'a counter\'s wave stops the one it crosses, and not one beside its line', stop);
+
+  /* Its strike inside its own cut-in lands (a kit's finisher may land as its
+     cut-in plays); the other pilot's blows are still held by it, and a blow
+     from the room too. Whose blow it was: the kit's hurt() is never asked of
+     a blow its own cut-in held. */
+  gP.run('globalThis.__cut = OUTSIDE.by.get("x0").cut; OUTSIDE.by.get("x0").cut = () => true; globalThis.__asked = 0; globalThis.__hurt = OUTSIDE.by.get("x0").hurt; OUTSIDE.by.get("x0").hurt = (...a) => { __asked++; return __hurt ? __hurt(...a) : undefined; }');
+  const cut = JSON.parse(gP.run(`(() => {
+    const a = pilotP(0), b = pilotP(1); a.iframe = b.iframe = 0;
+    RUN.pvp.hits[0].length = 0; RUN.pvp.hits[1].length = 0;
+    const hb = b.hp, theirs = PVP.land(1, 40, 0);
+    const mine = PVP.land(0, 40, 1);
+    const room = pilotDo(1, () => { P.iframe = 0; const h = P.hp; hurtPlayer(5); return P.hp === h; });
+    return JSON.stringify({ took: hb - b.hp, theirs, mine, asked: __asked, room });
+  })()`));
+  gP.run('OUTSIDE.by.get("x0").cut = __cut; OUTSIDE.by.get("x0").hurt = __hurt');
+  ok(cut.theirs > 0 && cut.took > 0, 'its own blow on the other pilot lands while its cut-in holds', cut);
+  ok(cut.mine === 0 && cut.asked === 0 && cut.room === true, 'the other pilot\'s blow on it is still held, and so is the room\'s on the other pilot', cut);
+
+  // in play: the stand-in's sparks fill an awake VOIDRUNNER bot's GRAZE, and a VAGRANT bot parries them out of the air
+  if (!OUTSIDE_ARG) {
+    const quiet = 'pilotP(0).ox.charge = -1e9;';    // no ring of rounds: sparks alone
+    const gG = page({ pilot: 'runner', awake: true, skill: 1 });
+    await fight(gG);
+    gG.run(`__every = 'c'; globalThis.__g = 0; LS.after = () => { ${quiet} const b = pilotP(1); __g = Math.max(__g, b.imGraze || 0, b.imT > 0 ? IM_MAX : 0);
+      for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`);
+    await run(gG, 30, () => gG.run('__g >= IM_MAX'));
+    ok(gG.run('__g') >= IMV.pay * 4 && gG.run('pilotP(0).ox.thrown') > 0, 'the stand-in\'s sparks, passing close, fill an awake VOIDRUNNER\'s GRAZE', gG.run('[__g, pilotP(0).ox.thrown]'));
+    const gV = page({ pilot: 'melee', awake: false, skill: 1 });
+    await fight(gV);
+    gV.run(`__every = 'c'; LS.after = () => { ${quiet} for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`);
+    await run(gV, 30, () => gV.run('pilotP(0).ox.stopped >= 6'));
+    ok(gV.run('pilotP(0).ox.stopped') >= 6, 'and a VAGRANT bot sees them coming and parries them out of the air', gV.run('[pilotP(0).ox.stopped, pilotP(0).ox.struck, pilotP(0).ox.thrown]'));
+    ok(gG.run('JSON.stringify(OUTSIDE.errs)') === '{}' && gV.run('JSON.stringify(OUTSIDE.errs)') === '{}' && drawErrs(gG) === '' && drawErrs(gV) === '',
+       'its hooks threw nowhere, and it all draws', [gG.run('JSON.stringify(OUTSIDE.errs)'), drawErrs(gG), drawErrs(gV)]);
+  } else {
+    /* The module given (--outside): its own fire, held on the bot, fills an
+       awake VOIDRUNNER's GRAZE as it passes close, and a VAGRANT bot sees it
+       coming and parries it. */
+    const gG = page({ pilot: 'runner', awake: true, skill: 1 });
+    await fight(gG);
+    gG.run(`__fire = true; globalThis.__g = 0; LS.after = () => { const b = pilotP(1); __g = Math.max(__g, b.imGraze || 0, b.imT > 0 ? IM_MAX : 0);
+      for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`);
+    await run(gG, 30, () => gG.run('__g >= IM_MAX'));
+    ok(gG.run('__g') >= IMV.pay * 4, 'its fire, passing close, fills an awake VOIDRUNNER\'s GRAZE', gG.run('__g'));
+    const gV = page({ pilot: 'melee', awake: false, skill: 1 });
+    await fight(gV);
+    gV.run(`__fire = true; globalThis.__p = 0; { const bp = bladeParried; bladeParried = function () { if (PILOT.on === 1) __p++; return bp.apply(this, arguments); }; }
+      LS.after = () => { for (const k of [0, 1]) { const p = pilotP(k); if (p && !p.down) p.hp = p.maxHp; } };`);
+    await run(gV, 30, () => gV.run('__p >= 6'));
+    ok(gV.run('__p') >= 6, 'and a VAGRANT bot sees it coming and parries it', gV.run('__p'));
+    ok([gG, gV].every(g => g.run('JSON.stringify(OUTSIDE.errs)') === '{}' && drawErrs(g) === ''), 'its hooks threw nowhere, and it all draws',
+       [gG, gV].map(g => [g.run('JSON.stringify(OUTSIDE.errs)'), drawErrs(g)]));
+  }
+}
+
 section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, VOIDRUNNER\'s GRAZE by near misses, and a bot\'s parry, forms and moves');
 {
   const CLEAN = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });';

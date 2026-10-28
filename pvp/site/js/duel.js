@@ -186,7 +186,7 @@
     const script = hackBy;
     let dealt = 0;
     hackBy = null;
-    try { dealt = pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap } })) || 0; }
+    try { dealt = pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap, by } })) || 0; }
     finally { hackBy = script; }
     if (dealt > 0) {
       recent.push([m.clock, dealt]);

@@ -1312,6 +1312,66 @@ brief."
   - 3 mutants (the HUD's old PvP return, the rounds' graze unhooked, the
     armory's slow in a duel), all caught.
 
+### A hidden pilot's own shots, and its strike under its own cut-in (user, 28 Oct)
+
+Before the story fight: a hidden pilot's shots could not be countered, never
+filled VOIDRUNNER's GRAZE, and a move whose strike lands while its own
+cut-in plays did nothing at all.
+
+- **Why:** a kit from the vault may throw shots of its own (kept in its own
+  state, moved and landed by its own step) instead of the game's rounds.
+  Everything that answers the other pilot's blows in a duel reads the game's
+  rounds (`bullets`, `ebullets`), so none of it saw them: no graze, no bot
+  reading them coming (so no parry, sidestep, FLUTTER or STILL WATER), and
+  a parry that refused one blow left the shot flying to land again. And
+  `hurtPlayer` refused every blow while any hidden pilot's cut-in held
+  (`outsideCutAny`), its own strike included.
+- **Now** (OUTSIDE PILOTS and IMAGO IN A DUEL in the engine; `duel.js`,
+  `bot.js`):
+  - A new optional hook, `shots()`: the kit's own shots in the air, as the
+    live objects it keeps, each with `x`, `y`, `r` and, moving, `vx`, `vy`.
+    Read through `outsideShotsOf(k)`, and the other pilot's through
+    `outsideShotsTheirs()`. A shot the duel stops is marked `gone = 1`,
+    which the kit drops; the duel writes only plain numbers on them
+    (`imNear`, `imPaid`, `gone`), so lockstep and snapshots carry them.
+  - GRAZE: on the hidden pilot's turn, once its kit has stepped
+    (`imGrazeDuelShots`), by the rounds' own rule: one passing within
+    `IM_GRAZE_R` of an awake VOIDRUNNER's hull and leaving pays `IM_PAY`, one
+    dashed through `IM_PAY_DASH`. Its kit says where it lands, so one that
+    touched the hull undashed has landed, and pays nothing.
+  - A bot sees them coming as it sees rounds (`incoming`), and so parries,
+    sidesteps or FLUTTERs them.
+  - THE VAGRANT's parry stops them within arm's reach, as it does the room's
+    rounds, and a counter's wave (a perfect parry's, STILL WATER's) stops
+    those it crosses.
+  - A blow carries who dealt it (`opts.pvp.by`, from `land`), and a hidden
+    pilot's cut-in never holds its own blow. The other pilot's blows, and the
+    room's, are held by it as before.
+- **The vault's module** must hand its shots to `shots()` and drop the ones
+  marked `gone`; a module without the hook behaves as before. The module's
+  own changes are put with `npm run vault -- put`, never in this repo.
+- **Tested:** `npm run test:pvp`, engine part 400 checks (402 with
+  `--outside` and the module).
+  - The rules one at a time, with shots put by hand: one passing close pays,
+    one wide, one that touched, one stopped, or one read on any turn but its
+    own pilot's does not, a dash through pays the dash; only plain numbers
+    are written on them; a bot weighs one coming at it as a round; a parry
+    stops one within reach and not one across the room; a counter's wave
+    stops the one it crosses and not one beside it.
+  - Under its forced cut-in, its blow on the other pilot lands, while the
+    other pilot's blow on it, and the room's, are still held (its `hurt()`
+    never asked).
+  - In play, the tests' stand-in's sparks (C, its own shots) fill an awake
+    VOIDRUNNER bot's GRAZE, and a VAGRANT bot parries them out of the air;
+    with `--outside`, the module's own fire does both.
+  - 7 mutants (the cut-in's exemption, the graze unhooked, a touch counted
+    as a near miss, the parry and the wave not stopping them, the bot blind
+    to them, stopped shots still read), all caught.
+  - `test:outside` 84, `pvp.mjs` 474, lockstep and determinism unchanged.
+  - Not this change: "and the best does it far sooner" (the bots' timing,
+    two runners and no hidden pilot) plays an unseeded fight, and fails now
+    and then on `main` too (3 runs in 10 there).
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

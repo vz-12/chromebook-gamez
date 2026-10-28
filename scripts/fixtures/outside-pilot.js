@@ -11,7 +11,7 @@ VR.pilot({
   // the pilot's own state, plain data, on the pilot
   init(p) {
     p.ox = { charge: 0, pulses: 0, mode: 0, keys: 0, held: 0, shots: 0, hits: 0, blinks: 0, blinkCd: 0,
-             guard: 2, guardT: 0, blocked: 0, halved: 0, cutT: 0, cuts: 0, ev: {} };
+             guard: 2, guardT: 0, blocked: 0, halved: 0, cutT: 0, cuts: 0, ev: {}, sparks: [], thrown: 0, struck: 0, stopped: 0 };
   },
 
   step(dt) {
@@ -36,6 +36,19 @@ VR.pilot({
       W.marks = W.marks.filter(m => m.t > 0);
       W.ticks++;
     }
+    // its sparks (C): shots of its own, not the game's rounds, each spent on the first body it meets;
+    // one a duel has stopped (s.gone: a parry, a counter's wave) is dropped, landing nothing
+    for (const s of o.sparks) {
+      if (s.gone) { s.done = 1; o.stopped++; continue; }
+      s.t += dt; s.x += s.vx * dt; s.y += s.vy * dt;
+      for (const e of enemies) {
+        if (e.dead || Math.hypot(e.x - s.x, e.y - s.y) > e.r + s.r) continue;
+        damageEnemy(e, P.dmg, false, s.x, s.y);
+        o.struck++; s.done = 1; break;
+      }
+      if (s.t > 1.5) s.done = 1;
+    }
+    o.sparks = o.sparks.filter(s => !s.done);
     // what is held is read from the record, never the keyboard
     if (P.in.held) o.held++;
     if (o.cutT > 0) o.cutT = Math.max(0, o.cutT - dt);
@@ -44,13 +57,21 @@ VR.pilot({
     if (o.guard < 2 && (o.guardT += dt) > 4) { o.guard++; o.guardT = 0; }
   },
 
-  // Z turns the ring up, X fires the pulse now, 1 2 3 set the ring, V is a cut-in; the rest is the game's
+  // Z turns the ring up, X fires the pulse now, 1 2 3 set the ring, C throws sparks, V is a cut-in; the rest is the game's
   key(k) {
     const o = P.ox;
     o.keys++;
     if (k === 'z') { o.mode = (o.mode + 1) % 3; return true; }
     if (k === 'x') { o.charge = 99; return true; }
     if (k === '1' || k === '2' || k === '3') { o.mode = +k - 1; return true; }
+    if (k === 'c') {
+      for (let i = -1; i <= 1; i++) {
+        const a = P.ang + i * 0.2;
+        o.sparks.push({ x: P.x + Math.cos(a) * 18, y: P.y + Math.sin(a) * 18, vx: Math.cos(a) * 420, vy: Math.sin(a) * 420, r: 5, t: 0 });
+      }
+      o.thrown++;
+      return true;
+    }
     if (k === 'v') { o.cutT = 0.8; o.cuts++; return true; }
     return false;
   },
@@ -85,6 +106,8 @@ VR.pilot({
   slow() { return P.ox.cutT > 0 ? 0.1 : 1; },
   cut() { return P.ox.cutT > 0; },
   ev(name) { P.ox.ev[name] = (P.ox.ev[name] || 0) + 1; },
+  // its sparks in the air, for a duel to read as rounds
+  shots() { return P.ox.sparks; },
 
   hull() {
     ctx.moveTo(16, 0); ctx.lineTo(-10, 10); ctx.lineTo(-4, 0); ctx.lineTo(-10, -10); ctx.closePath();
@@ -102,7 +125,11 @@ VR.pilot({
   // what only the drawing shows may use the unseeded roll
   under() { ctx.globalAlpha = 0.3; ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(P.x, P.y, 24 + rnd(2), 0, TAU); ctx.fill(); },
   over() { ctx.strokeStyle = '#fef08a'; ctx.beginPath(); ctx.arc(P.x, P.y, 18, 0, TAU * Math.min(1, P.ox.charge / 1.5)); ctx.stroke(); },
-  fx() { ctx.strokeStyle = '#fef08a'; ctx.beginPath(); ctx.arc(P.x, P.y, 30 * (P.ox.charge % 1), 0, TAU); ctx.stroke(); },
+  fx() {
+    ctx.strokeStyle = '#fef08a'; ctx.beginPath(); ctx.arc(P.x, P.y, 30 * (P.ox.charge % 1), 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#fde047';
+    for (const s of P.ox.sparks) { ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill(); }
+  },
   bullet(b) { ctx.fillStyle = ['#facc15', '#fb923c', '#f472b6'][b.ox] || '#fff'; ctx.fillRect(b.x - 3, b.y - 3, 6, 6); },
   hud() { ctx.fillStyle = '#facc15'; ctx.font = '12px monospace'; ctx.fillText('TEST ' + P.ox.pulses + ' · MODE ' + P.ox.mode, 20, H - 20); },
   screen() { if (P.ox.cutT > 0) { ctx.globalAlpha = P.ox.cutT; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H * 0.12); ctx.fillRect(0, H * 0.88, W, H * 0.12); } },
