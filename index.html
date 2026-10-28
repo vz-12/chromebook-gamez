@@ -1636,6 +1636,7 @@ function inputDashTaken() {
 
 addEventListener('keydown', e => {
   if (Intro.on) { Intro.key(e); return; }   // INTRO: one key held skips it, and no key reaches the menu under it
+  if (Ending.on) { e.preventDefault(); return; }   // THE ENDING: nothing reaches the game under it
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
   if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
@@ -1666,6 +1667,7 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mousedown', e => {
   if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
+  if (Ending.on) { if (Ending.voice && Ending.voice.paused) Ending.voice.play().catch(() => {}); return; }   // THE ENDING: a click only wakes its voice
   Audio_.init(); Audio_.resume();
   mouse.x = e.clientX; mouse.y = e.clientY;
   /* Only the left button fires. This used to set mouse.down for any button at
@@ -1728,6 +1730,7 @@ function tpos(t) { return { x: t.clientX, y: t.clientY }; }
 cv.addEventListener('touchstart', e => {
   e.preventDefault(); Audio_.init(); Audio_.resume();
   if (Intro.on) { Intro.fingers = e.touches.length; Intro.poke(); return; }   // INTRO: a finger held down is the skip
+  if (Ending.on) return;                                                      // THE ENDING: nothing under it
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
@@ -38866,6 +38869,8 @@ function frame(now) {
   lastDT = dt;                           // render() draws the pointer with it
   // INTRO: a tab's first look has the screen, and nothing of the game moves under it
   if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
+  // THE ENDING: the movie has the screen, and the game stands still under it
+  if (Ending.on) { last = now; Ending.frame(dt); requestAnimationFrame(frame); return; }
   fpsSample(dt);
   last = now;
   acc += dt;
@@ -38893,6 +38898,7 @@ function frame(now) {
     catch (e) { if (!Music.err++) console.error('VOIDRUNNER music:', e); }
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
     try { Live.tick(); } catch (e) {}  // a PvP challenge on air, put in front of everybody (ON AIR)
+    try { Ending.tick(); } catch (e) {}   // a challenge lost: its movie, once (THE ENDING)
   } catch (err) {
     // A thrown frame used to kill the rAF loop outright and freeze the
     // game mid-run. Drop the frame, keep the loop alive; losing a
@@ -88485,6 +88491,7 @@ const Live = {
     Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
     if (!d) return;
     Live.above = d.above === true;
+    Ending.heard(d.burn);        // a challenge lost: its movie (THE ENDING)
     const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
     const was = Live.on;
     Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
@@ -88584,6 +88591,132 @@ function drawLiveLine() {
   const a = clamp(Math.min(age / 0.35, (LIVE_LINE - age) / 0.6), 0, 1);
   lsPill('LIVE NOW  ·  ' + Live.vs() + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
 }
+
+/* ===========================================================================
+   THE ENDING: a movie every game plays once, the moment the world ends
+
+   A challenge lost by the account it was sent to (pvp/src/challenge.js,
+   filmOf) can have a movie named for it. Its module and its voice are kept
+   in the vault and nowhere else, and GET /api/film (src/film.js) hands them
+   out only from that moment. /api/live says when (burn: the moment it was
+   decided), and this browser plays it once for that moment (ENDING_SEEN).
+
+   It cuts in wherever the game is: over the menu, or over a run, which just
+   stops where it is (the frame is the movie's, as it is INTRO's). A run in
+   step with another machine (co-op) waits for its end, since one side
+   stopping would leave the other behind. Nothing of a run is read or
+   written by it, and no key or click reaches the game under it.
+
+   The module is run like an outside pilot's (OUTSIDE PILOTS): the body of a
+   function handed VR, which here has one call, VR.film(def):
+     length    seconds, end to end
+     shots     [{ id, at, d, name }]: in order; each frame is told which is on
+     lines     [{ at, d, text }]: what its voice says, shown as it is said
+     draw(t, s)   the frame at t seconds: s = { ctx, W, H, dt, shot, k }, k
+               how far through that shot it is (0 to 1)
+   A draw that throws ends it there. Its voice keeps its time where it plays.
+   After it, after(): where the world's end goes next, still to come.
+
+   On localhost only, ?ending=dev plays /api/film at once, every load, over
+   whatever is up and whatever /api/live says: for drawing the movie against
+   the game itself. The local vault has it (`npm run vault -- put ... --local`,
+   then `npm run challenge -- film` and `-- decide <pilot> lost`, --local).
+   ========================================================================= */
+const ENDING_URL = '/api/film';
+const ENDING_SEEN = 'voidrunner_ending_seen';
+const Ending = {
+  on: false, t: 0,
+  burn: 0,                     // the moment the challenge was lost, as /api/live said it; -1 for ?ending=dev
+  state: 'none',               // none, loading, ready, failed, seen: this burn's movie
+  def: null, voice: null, gain: null,
+  boot() {
+    let q = null;
+    try { q = new URLSearchParams(location.search); } catch (e) { return; }
+    if (!q || q.get('ending') !== 'dev' || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
+    Ending.burn = -1;
+    Ending.load(ENDING_URL, ENDING_URL + '?voice=1');
+  },
+  // what /api/live said (Live.ask): a moment it has not played for here, fetched
+  heard(burn) {
+    if (!Number.isFinite(burn) || burn <= 0 || burn === Ending.burn) return;
+    Ending.burn = burn;
+    let seen = '';
+    try { seen = localStorage.getItem(ENDING_SEEN) || ''; } catch (e) { /* no storage: it plays once a load */ }
+    if (seen === String(burn)) { Ending.state = 'seen'; return; }
+    Ending.load(ENDING_URL, ENDING_URL + '?voice=1');
+  },
+  async load(url, voiceUrl) {
+    Ending.state = 'loading';
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('film ' + r.status);
+      const text = await r.text();
+      let def = null;
+      new Function('VR', text)(Object.freeze({ v: 1, film: d => { def = d; } }));
+      if (!def || !(def.length > 0) || typeof def.draw !== 'function') throw new Error('no film in it');
+      Ending.def = { length: +def.length, draw: def.draw,
+                     shots: Array.isArray(def.shots) ? def.shots.filter(s => s && Number.isFinite(s.at)) : [],
+                     lines: Array.isArray(def.lines) ? def.lines.filter(l => l && Number.isFinite(l.at) && typeof l.text === 'string') : [] };
+      Ending.voice = voiceUrl && typeof Audio !== 'undefined' ? new Audio(voiceUrl) : null;
+      if (Ending.voice) { Ending.voice.preload = 'auto'; Ending.voice.onerror = () => { Ending.voice = null; }; }
+      Ending.state = 'ready';
+    } catch (e) {
+      console.error('VOIDRUNNER ending:', e);
+      Ending.state = 'failed';
+    }
+  },
+  // once a frame: ready, and nothing in step with another machine, it starts
+  tick() {
+    if (Ending.on || Ending.state !== 'ready' || Intro.on) return;
+    if (LS.on && MP.on) return;
+    Ending.on = true; Ending.t = 0;
+    const A = Audio_;
+    if (A.master) { Ending.gain = A.master.gain.value; A.master.gain.setTargetAtTime(0, A.ac.currentTime, 0.25); }   // the game hushed
+    if (Ending.voice) { try { Ending.voice.currentTime = 0; Ending.voice.play().catch(() => {}); } catch (e) { /* silent, then */ } }
+  },
+  frame(dt) {
+    const D = Ending.def, v = Ending.voice;
+    if (v && !v.paused && v.currentTime > 0) Ending.t = Math.max(Ending.t, v.currentTime); else Ending.t += Math.max(0, dt);
+    if (Ending.t >= D.length) { Ending.end(); return; }
+    let shot = D.shots[0] || { id: '', at: 0, d: D.length, name: '' };
+    for (const s of D.shots) if (s.at <= Ending.t) shot = s;
+    const k = clamp((Ending.t - shot.at) / Math.max(0.001, shot.d || D.length), 0, 1);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    try { D.draw(Ending.t, { ctx, W, H, dt, shot, k }); }
+    catch (e) { ctx.restore(); console.error('VOIDRUNNER ending:', e); Ending.end(); return; }
+    ctx.restore();
+    Ending.say();
+  },
+  // what its voice is saying, low on the screen, faded in and out
+  say() {
+    const t = Ending.t, l = Ending.def.lines.find(x => t >= x.at && t < x.at + (x.d || 4));
+    if (!l) return;
+    const age = t - l.at, a = clamp(Math.min(age / 0.5, ((l.d || 4) - age) / 0.6), 0, 1), S = H / 720;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `italic 500 ${Math.round(22 * S)}px 'Cormorant Garamond', Georgia, serif`;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'; ctx.shadowBlur = 8;
+    ctx.fillStyle = '#f4ecd6';
+    ctx.fillText(l.text, W / 2, H * 0.88, W * 0.86);
+    ctx.restore();
+  },
+  end() {
+    Ending.on = false;
+    Ending.state = 'seen';
+    if (Ending.burn > 0) { try { localStorage.setItem(ENDING_SEEN, String(Ending.burn)); } catch (e) { /* plays again next load */ } }
+    if (Ending.voice) Ending.voice.pause();
+    const A = Audio_;
+    if (A.master && Ending.gain !== null) A.master.gain.setTargetAtTime(Ending.gain, A.ac.currentTime, 0.4);
+    Ending.gain = null;
+    uiArm = 0.4;                // a key still down from it lands on nothing
+    Ending.after();
+  },
+  after() {}                    // the world's end: the lockout and the second game's door, still to come
+};
 
 /* ===========================================================================
    FROM ABOVE
@@ -94905,6 +95038,7 @@ addEventListener('visibilitychange', () => Intro.hidden());
 
 /* --------------------------------- start ---------------------------------- */
 Intro.boot();             // first, while the address still says how this tab came (INTRO)
+Ending.boot();            // ?ending=dev, on localhost only (THE ENDING)
 prewarmGlow();
 if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)

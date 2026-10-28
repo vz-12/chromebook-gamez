@@ -39,6 +39,10 @@ export const dateSql = (pilot, due) =>
    vault entry of its own, JSON { t, x, as, named }, or 'none'. */
 export const announceSql = (pilot, words) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET announce = ${words == null ? 'NULL' : q(checkWords(words))} WHERE pilot = ${q(checkPilot(pilot))};`;
+// THE ENDING's movie, if it is lost: its module's vault entry and its voice's (or none: no movie)
+export const filmSql = (pilot, film, voice) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET film = ${film == null ? 'NULL' : q(checkWords(film))}, ` +
+  `film_voice = ${film == null || voice == null ? 'NULL' : q(checkWords(voice))} WHERE pilot = ${q(checkPilot(pilot))};`;
 /* Its fight, decided by hand (FROM ABOVE: the hunt ends with it): 'lost' or
    'won', as it went for the account it was sent to, where the referee's
    verdict did not say (a walk-out decides nothing by itself); or 'none',
@@ -68,5 +72,6 @@ export const challengesSql = () =>
   `${CHALLENGE_SCHEMA}\nSELECT c.pilot, c.words, ${day('c.armed')} AS armed, ${day('c.due')} AS due, ${day('c.tripped')} AS tripped, ` +
   `COALESCE(r.name, '-') AS reached_by, COALESCE(c.season, '-') AS season, COALESCE(t.name, '-') AS target, ${day('c.seen')} AS seen, ` +
   `COALESCE(c.announce, '-') AS announce, COALESCE(c.match, '-') AS match, ${day('c.started')} AS started, ${day('c.ended')} AS ended, ` +
-  `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm ` +
+  `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm, ` +
+  `COALESCE(c.film, '-') AS film, COALESCE(c.film_voice, '-') AS film_voice ` +
   `FROM pvp_challenges c LEFT JOIN accounts r ON r.id = c.reached_by LEFT JOIN accounts t ON t.id = c.target ORDER BY c.armed;`;

@@ -37,6 +37,7 @@ import looks from './looks.js';
 import vault from './vault.js';
 import tales from './tales.js';
 import live from './live.js';
+import film from './film.js';
 import patreon from './patreon.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
@@ -54,7 +55,7 @@ const json = (body, status) =>
 
 const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn': turn,
                  '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
-                 '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live,
+                 '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live, '/api/film': film,
                  '/api/patreon': patreon, '/api/patreon/link': patreon, '/api/patreon/back': patreon,
                  '/api/patreon/hook': patreon };
 

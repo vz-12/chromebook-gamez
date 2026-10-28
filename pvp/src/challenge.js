@@ -76,11 +76,13 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      announce    TEXT,                     -- the vault entry its announcement is kept in
      decided     INTEGER,                  -- when its fight was fought out (played to its end), or decided by hand
      outcome     TEXT,                     -- which way: 'lost' or 'won', as it went for the account it was sent to
-     calm        INTEGER                   -- when the hunt was held, by hand (FROM ABOVE); NULL while it is not
+     calm        INTEGER,                  -- when the hunt was held, by hand (FROM ABOVE); NULL while it is not
+     film        TEXT,                     -- the vault entry of the movie every game plays if it is lost (THE ENDING)
+     film_voice  TEXT                      -- and of its voice, an mp3
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
-               ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER']];
+               ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -235,7 +237,7 @@ export async function liveNow(db, now = Date.now()) {
     `SELECT c.pilot, c.match, c.started, c.ended, c.due, c.target, c.announce${cols}, a.display AS them
        FROM pvp_challenges c LEFT JOIN accounts a ON a.id = c.target WHERE c.target IS NOT NULL`).all();
   try {
-    rows = (await sent(', c.decided, c.calm')).results || [];
+    rows = (await sent(', c.decided, c.calm, c.outcome, c.film')).results || [];
   } catch (e) {
     /* A table from before those two columns (PvP's Worker adds them on its
        first use; the game's never does): nothing in it was ever decided or
@@ -244,6 +246,11 @@ export async function liveNow(db, now = Date.now()) {
     catch (e2) { return { live: null, every: LIVE.IDLE, above: false }; }   // no table yet (or no columns): nothing has ever been on
   }
   const above = rows.some(r => !r.decided && !r.calm);
+  /* THE ENDING: a challenge lost, with a movie named for it (filmOf below):
+     every game plays it once, told so by `burn`, the moment it was decided.
+     Missing until then, so nothing says there is one. */
+  const lost = rows.filter(r => r.outcome === 'lost' && r.decided && r.film).sort((a, b) => a.decided - b.decided)[0];
+  const burn = lost ? { burn: lost.decided } : {};
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
     if (r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
@@ -255,7 +262,7 @@ export async function liveNow(db, now = Date.now()) {
     const wait = (r.due - LIVE.SOON - now) / 1000;
     if (now < r.due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
   }
-  if (!on) return { live: null, every, above };
+  if (!on) return Object.assign({ live: null, every, above }, burn);
   let w = null;
   try {
     const got = on.announce ? await vaultText(db, on.announce) : null;
@@ -265,9 +272,20 @@ export async function liveNow(db, now = Date.now()) {
   }
   w = w && typeof w === 'object' ? w : {};
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
-  return {
+  return Object.assign({
     live: { match: on.match, since: on.started, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
             names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
     every: LIVE.ASK, above
-  };
+  }, burn);
+}
+
+/* THE ENDING's movie (index.html, ENDING; src/film.js): the vault entries
+   `npm run challenge -- film` named for a challenge, once that challenge is
+   lost by the account it was sent to, and only from then. */
+export async function filmOf(db) {
+  await ensureChallenges(db);
+  const row = await db.prepare(
+    `SELECT film, film_voice, decided FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL AND film IS NOT NULL
+      ORDER BY decided LIMIT 1`).first();
+  return row ? { film: row.film, voice: row.film_voice || null, at: row.decided } : null;
 }

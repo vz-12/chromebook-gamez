@@ -1712,6 +1712,32 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok(!JSON.stringify((await gameLive()).d).includes('lost'), 'which way it went is not the game\'s to be told');
   tool(decideSql('x7', 'none'));
 
+  // THE ENDING: a movie named for it (npm run challenge -- film), handed out to every game once it is lost, and only then
+  const { filmSql } = await import('./lib/challenge-sql.mjs');
+  const filmGet = async (q = '') => {
+    const res = await main.fetch(new Request(GAME + '/api/film' + q, { headers: { 'cf-connecting-ip': '203.0.113.10' } }), envMain);
+    return { status: res.status, type: res.headers.get('content-type'), body: Buffer.from(await res.arrayBuffer()) };
+  };
+  const filmText = 'VR.film({ length: 3, shots: [], lines: [], draw() {} });', filmVoice = randomBytes(3000);
+  tool(putSql('x7-film', Buffer.from(filmText)).sql);
+  tool(putSql('x7-film-voice', filmVoice).sql);
+  tool(filmSql('x7', 'x7-film', 'x7-film-voice'));
+  ok(row().film === 'x7-film' && row().film_voice === 'x7-film-voice', 'a movie named for its ending, by hand (npm run challenge -- film)', row());
+  ok((await filmGet()).status === 404 && (await filmGet('?voice=1')).status === 404 && !('burn' in (await gameLive()).d),
+     'not decided: nothing handed out, and no game told');
+  tool(decideSql('x7', 'won', 7654321));
+  ok((await filmGet()).status === 404 && !('burn' in (await gameLive()).d), 'won by the one it was sent to: still nothing');
+  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'lost', 2345678));
+  const gl = (await gameLive()).d;
+  ok(gl.burn === 2345678, 'lost: every game told, with the moment it was decided', gl);
+  const fm = await filmGet(), fv = await filmGet('?voice=1');
+  ok(fm.status === 200 && /javascript/.test(fm.type) && fm.body.toString('utf8') === filmText, 'its movie, to anybody now', fm.status);
+  ok(fv.status === 200 && fv.type === 'audio/mpeg' && fv.body.equals(filmVoice), 'and its voice');
+  tool(decideSql('x7', 'none'));
+  ok((await filmGet()).status === 404 && !('burn' in (await gameLive()).d), 'taken back: gone again');
+  tool(filmSql('x7', null));
+  ok(row().film === null && row().film_voice === null, 'and no movie named (film none)');
+
   // a table made before the columns: PvP's Worker adds them, and the tool can too
   const { makeD1 } = await import('./lib/d1-sqlite.mjs');
   const old = makeD1();

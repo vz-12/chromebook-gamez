@@ -15,6 +15,11 @@
      announce <pilot> <words> what the game's menu says while its match is
                               on air (src/live.js), from a vault entry of
                               its own, or none
+     film <pilot> <module> [voice]
+                              THE ENDING: the movie every game plays once if
+                              it is lost (index.html, ENDING; src/film.js),
+                              its module's vault entry and its voice's (an
+                              mp3), or none. Nothing hands either out before
      decide <pilot> <how>     its fight, decided by hand: lost or won, as it
                               went for the account it was sent to (the
                               referee decides a match played to its end by
@@ -40,7 +45,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, decideSql, calmSql, columnsSql, addedSql,
          checkPilot, checkWords, checkDate, checkOutcome } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -117,6 +122,18 @@ try {
       console.log(a1 + where + ': ' + (words ? 'announced from vault entry ' + words : 'no announcement'));
       break;
     }
+    case 'film': {
+      if (!a1 || !a2) die('film <pilot> <module | none> [voice]');
+      const film = a2 === 'none' ? null : a2, voice = film ? (args[3] || null) : null;
+      const sql = filmSql(a1, film, voice);
+      if (!live()) show(sql);
+      const want = [film, voice].filter(Boolean), held = want.length ? run(inVaultSql(want)).map(r => r.id) : [];
+      for (const id of want) if (!held.includes(id)) die('the vault' + where + ' holds no ' + id + ': put it first');
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (film ? 'its ending, the movie in ' + film + (voice ? ', said from ' + voice : ', silent') : 'no ending'));
+      break;
+    }
     case 'decide': {
       if (!a1 || !a2) die('decide <pilot> <lost | won | none>');
       const sql = decideSql(a1, checkOutcome(a2));
@@ -151,11 +168,12 @@ try {
         console.log([r.pilot, 'words ' + r.words, 'armed ' + r.armed, 'due ' + r.due, 'tripped ' + r.tripped,
                      'by ' + r.reached_by, 'season ' + r.season, 'sent to ' + r.target, 'seen ' + r.seen,
                      'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended,
-                     'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm].join('  ·  '));
+                     'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm,
+                     'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : '')].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | decide <pilot> <lost | won | none> | ' +
+      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }
