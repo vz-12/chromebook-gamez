@@ -1839,6 +1839,21 @@ section('a hidden pilot\'s own shots in a duel (shots()): a graze to VOIDRUNNER,
   ok(cut.theirs > 0 && cut.took > 0, 'its own blow on the other pilot lands while its cut-in holds', cut);
   ok(cut.mine === 0 && cut.asked === 0 && cut.room === true, 'the other pilot\'s blow on it is still held, and so is the room\'s on the other pilot', cut);
 
+  /* Its own `floor` (duel.js): a blow of its smaller than a point of health
+     takes what it is, where the game's own floor would make it a whole point.
+     Kept from a module's def as the other rules are; one not over 0 is not. */
+  const floor = JSON.parse(gP.run(`(() => {
+    Outside.run('fl', "VR.pilot({ id: VR.id, n: 'f', weapon: 'bullet', hp: 1, speed: 1, dmg: 1, rate: 1, duel: { deal: { floor: 0.2, scale: -1 }, take: { floor: 0 } } })");
+    const kept = CHARS.find(c => c.id === 'fl').duel;
+    const c = CHARS.find(c => c.id === 'x0'), keep = c.duel, b = pilotP(1);
+    const tiny = rules => { c.duel = rules; b.iframe = 0; RUN.pvp.hits[1].length = 0; const h = b.hp; PVP.land(1, 1, 0); return h - b.hp; };
+    const out = { kept, plain: tiny({ deal: {}, take: {} }), low: tiny({ deal: { floor: 0.1 }, take: {} }) };
+    c.duel = keep;
+    return JSON.stringify(out);
+  })()`));
+  ok(floor.plain >= 1 && floor.low > 0 && floor.low < 1, 'with its own floor, a blow under a point of health stays under it; without, it is a whole point', floor);
+  ok(JSON.stringify(floor.kept) === JSON.stringify({ deal: { floor: 0.2 }, take: {} }), 'and a module\'s floor is kept like its other rules, one not over 0 dropped', floor.kept);
+
   // in play: the stand-in's sparks fill an awake VOIDRUNNER bot's GRAZE, and a VAGRANT bot parries them out of the air
   if (!OUTSIDE_ARG) {
     const quiet = 'pilotP(0).ox.charge = -1e9;';    // no ring of rounds: sparks alone

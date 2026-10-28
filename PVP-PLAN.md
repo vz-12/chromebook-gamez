@@ -1372,6 +1372,27 @@ cut-in plays did nothing at all.
     two runners and no hidden pilot) plays an unseeded fight, and fails now
     and then on `main` too (3 runs in 10 there).
 
+### A hidden pilot's duel floor (user, 28 Oct)
+
+The story fight was over in its first phases, and scaling the hidden pilot's
+blows down barely changed that.
+
+- **Why:** `hurtPlayer` makes every blow that lands take at least one point
+  of health. A hidden pilot whose rules scale its blows far down (and whose
+  kit lands many small ones) had nearly all of them lifted to that point, so
+  its `scale` stopped meaning anything below it, both ways.
+- **Now:** a hidden pilot's duel rules (`def.duel`, `def.story.duel`) may
+  carry `floor`, the least a blow that lands takes, beside `scale`,
+  `hitCap` and `burstCap`; the taker's has the say, then the dealer's
+  (`duel.js`, `land`, handed to `hurtPlayer` as `opts.pvp.floor`). Without
+  one it is the game's 1, so every other duel is as it was.
+- The story fight's numbers themselves (its caps, its pace, what the
+  challenger is given) are the module's, put with the vault, never here.
+- **Tested:** `npm run test:pvp`, engine part 402 (404 with `--outside`): a
+  blow under a point of health stays under it with a floor and is a whole
+  point without; a module's floor is kept, one not over 0 dropped. 3
+  mutants (the floor ignored, not kept, not handed in), all caught.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

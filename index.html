@@ -5900,7 +5900,9 @@ function hurtPlayer(dmg, opts) {
   const nightMul = (P.nightS && wave % 3 === 0) ? 2 : 1;
   const brokenMul = P.roninBroken > 0 ? VOW_BROKEN_HURT : 1;   // RONIN's V: the minute after the grave broke
   const assistMul = assist ? ASSIST.hurt : 1;                  // FIRST FLIGHT: the first sector hits softer
-  let d = Math.max(1, dmg * P.frailty * nightMul * brokenMul * assistMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
+  // at least 1 lands, or a hidden pilot's duel floor (duel.js), so its own scale still counts for its smallest blows
+  const least = opts && opts.pvp && opts.pvp.floor > 0 ? opts.pvp.floor : 1;
+  let d = Math.max(least, dmg * P.frailty * nightMul * brokenMul * assistMul - P.armor * (opts && opts.pvp ? opts.pvp.armor : 1));
   if (opts && opts.pvp) d = Math.min(d, opts.pvp.cap);   // PvP mode: the duel's caps hold, whatever the build (duel.js)
   // what the blow takes, returned: a Second Wind or a brake after it is the pilot's own health, not the blow given back (PvP counts it, duel.js)
   const took = Math.min(d, Math.max(0, P.hp));
@@ -89485,11 +89487,12 @@ function outsidePilot(id, def) {
               tag: String(def.tag || ''), d: String(def.d || ''),
               hp: def.hp, speed: def.speed, dmg: def.dmg, rate: def.rate, outside: true };
   /* def.duel, its own rules in a PvP duel (duel.js): { deal: {...}, take: {...} },
-     each any of scale, hitCap, burstCap, numbers over 0. Kept only if they hold up.
+     each any of scale, hitCap, burstCap and floor (the least a blow that lands
+     takes, in health: the game's is 1), numbers over 0. Kept only if they hold up.
      def.story.duel, the same, in place of them in the story fight (duel.js, RUN.pvp.story). */
   const pick = o => {
     const out = {};
-    if (o && typeof o === 'object') for (const k of ['scale', 'hitCap', 'burstCap']) if (Number.isFinite(o[k]) && o[k] > 0) out[k] = o[k];
+    if (o && typeof o === 'object') for (const k of ['scale', 'hitCap', 'burstCap', 'floor']) if (Number.isFinite(o[k]) && o[k] > 0) out[k] = o[k];
     return out;
   };
   const rules = r => ({ deal: pick(r.deal), take: pick(r.take) });

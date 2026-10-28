@@ -146,7 +146,9 @@
      (its def.duel, OUTSIDE PILOTS in the engine): `deal` for its blows,
      `take` for the blows it takes. Each `scale` multiplies DUEL's; on the
      caps the one taking a blow has the say, then the one dealing it, then
-     DUEL. */
+     DUEL. So on `floor`, the least a blow that lands takes (hurtPlayer's 1
+     otherwise): a pilot whose blows are scaled far down needs it lower, or
+     its smallest blows each still take a whole point of health. */
   const duelRule = (pilot, side) => {
     const c = pilot && CHARS.find(x => x.id === pilot.charId);
     if (!c || !c.outside) return {};
@@ -168,7 +170,7 @@
     if (!p || p.down) return 0;
     const dl = duelRule(a, 'deal'), tk = duelRule(p, 'take');
     const hitCap = tk.hitCap ?? dl.hitCap ?? DUEL.hitCap, burstCap = tk.burstCap ?? dl.burstCap ?? DUEL.burstCap;
-    const scale = DUEL.scale * (dl.scale ?? 1) * (tk.scale ?? 1);
+    const scale = DUEL.scale * (dl.scale ?? 1) * (tk.scale ?? 1), floor = tk.floor ?? dl.floor;
     const recent = m.hits[victim];
     while (recent.length && recent[0][0] <= m.clock - DUEL.window) recent.shift();
     let took = 0;
@@ -186,7 +188,7 @@
     const script = hackBy;
     let dealt = 0;
     hackBy = null;
-    try { dealt = pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap, by } })) || 0; }
+    try { dealt = pilotDo(victim, () => hurtPlayer(d, { pvp: { mercy: DUEL.mercy, armor: DUEL.scale, cap, by, floor } })) || 0; }
     finally { hackBy = script; }
     if (dealt > 0) {
       recent.push([m.clock, dealt]);
