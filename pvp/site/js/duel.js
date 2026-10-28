@@ -149,8 +149,12 @@
      DUEL. */
   const duelRule = (pilot, side) => {
     const c = pilot && CHARS.find(x => x.id === pilot.charId);
-    return (c && c.outside && c.duel && c.duel[side]) || {};
+    if (!c || !c.outside) return {};
+    // the story fight (rounds.js, M.story): its story rules in their place, where it brings them
+    const m = match(), r = (m && m.story && c.story && c.story.duel) || c.duel;
+    return (r && r[side]) || {};
   };
+  M.duelRule = duelRule;
 
   /* A pilot's hit on another, `raw` in the game's own figures. Through
      hurtPlayer, so a parry, a dash's i-frames, STILL WATER and a shield all

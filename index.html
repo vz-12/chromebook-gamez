@@ -89300,15 +89300,17 @@ function outsidePilot(id, def) {
               tag: String(def.tag || ''), d: String(def.d || ''),
               hp: def.hp, speed: def.speed, dmg: def.dmg, rate: def.rate, outside: true };
   /* def.duel, its own rules in a PvP duel (duel.js): { deal: {...}, take: {...} },
-     each any of scale, hitCap, burstCap, numbers over 0. Kept only if they hold up. */
-  if (def.duel && typeof def.duel === 'object') {
-    const pick = o => {
-      const out = {};
-      if (o && typeof o === 'object') for (const k of ['scale', 'hitCap', 'burstCap']) if (Number.isFinite(o[k]) && o[k] > 0) out[k] = o[k];
-      return out;
-    };
-    c.duel = { deal: pick(def.duel.deal), take: pick(def.duel.take) };
-  }
+     each any of scale, hitCap, burstCap, numbers over 0. Kept only if they hold up.
+     def.story.duel, the same, in place of them in the story fight (duel.js, RUN.pvp.story). */
+  const pick = o => {
+    const out = {};
+    if (o && typeof o === 'object') for (const k of ['scale', 'hitCap', 'burstCap']) if (Number.isFinite(o[k]) && o[k] > 0) out[k] = o[k];
+    return out;
+  };
+  const rules = r => ({ deal: pick(r.deal), take: pick(r.take) });
+  if (def.duel && typeof def.duel === 'object') c.duel = rules(def.duel);
+  if (def.story && typeof def.story === 'object' && def.story.duel && typeof def.story.duel === 'object')
+    c.story = { duel: rules(def.story.duel) };
   const hooks = {};
   for (const h of OUTSIDE_HOOKS) if (typeof def[h] === 'function') hooks[h] = def[h];
   const at = CHARS.findIndex(x => x.id === id);

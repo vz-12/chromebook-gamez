@@ -254,6 +254,7 @@
     // a friend's match: any pilot owned
     me = d;
     pilotList($('matchPilot'), withHidden(casual), names);
+    storyPractice(hidden, names);
     const ups = ranked.ups.length;
     $('ups').textContent = d.unlocks === null
       ? 'Your account has no save yet. Fly a run in VOIDRUNNER while signed in, and your unlocks arrive here.'
@@ -284,6 +285,29 @@
     location.href = '/play/';
   }
   const practice = pilot => play({ mode: 'practice', pilot });
+
+  /* Practice for the story fight (js/rounds.js, M.story): a hidden pilot's
+     holder against a bot, on this machine alone. A bot hand with no search,
+     so nothing reaches the queue and nothing is rated (js/bot.js); the
+     story from the phase chosen. Only shown to the accounts that hold one. */
+  function storyPractice(hidden, names) {
+    $('storyCard').hidden = !hidden.length;
+    if (!hidden.length) return;
+    const fill = (sel, ids) => {
+      const was = sel.value;
+      sel.textContent = '';
+      for (const id of ids) { const o = document.createElement('option'); o.value = id; o.textContent = names[id] || id; sel.append(o); }
+      if (ids.includes(was)) sel.value = was;
+    };
+    fill($('storyPilot'), hidden.map(h => h.id));
+    fill($('storyBot'), Object.keys(me.pilots));
+  }
+  $('storyGo').addEventListener('click', () => {
+    const bot = $('storyBot').value;
+    play({ mode: 'bot', pilot: $('storyPilot').value, story: true, storyFrom: +$('storyFrom').value,
+           bot: { name: 'BOT ' + String((me.pilots[bot] || bot)).toUpperCase().replace(/^THE /, ''), pilot: bot, awake: true,
+                  skill: +$('storySkill').value, seed: (Math.random() * 2 ** 32) >>> 0 } });
+  });
 
   /* A friend's match takes the bonus a watched ad earned (ads.js), once;
      online matches never carry one. */

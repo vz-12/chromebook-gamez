@@ -1677,6 +1677,37 @@ section('a bot match: the queue had nobody, so the play page flies one, and the 
   await qOf(DUELIST, { op: 'leave', queue: 'casual', tab: TAB });
 }
 
+section('practice for the story fight: a hidden pilot\'s holder against a bot, as the lobby starts it, sent nowhere');
+{
+  // the lobby's story practice (pvp.js): a bot hand with no search, the hidden pilot's code handed in, the phase to start on
+  const STORY_BOT = { name: 'BOT STORY', pilot: 'ember', awake: true, skill: 1, seed: 4242 };
+  const page = extra => boot(Object.assign({ mode: 'bot', pilot: 'x0', me: ME, bot: STORY_BOT,
+                                             outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, extra), DUELIST);
+  const run = async (g, n) => { for (let i = 0; i < n; i++) { g.run('__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()'); if (i % 60 === 0) await settle(); } };
+  const S = page({ story: true, storyFrom: 2 });
+  await flush();
+  ok(S.run('CHAR().id') === 'x0' && S.run('pilotP(1).charId') === 'ember' && S.run('MP.peerName') === 'BOT STORY',
+     'the hidden pilot against the bot, on this machine alone');
+  const net0 = S.win.__net.length;
+  await run(S, 60 * 12);
+  ok(S.run('!!RUN.pvp && RUN.pvp.story === true && RUN.pvp.storyFrom === 2 && RUN.pvp.bestOf === 1'),
+     'a story fight: one long round, from the phase asked for', S.run('JSON.stringify(RUN.pvp && [RUN.pvp.story, RUN.pvp.storyFrom, RUN.pvp.bestOf])'));
+  ok(!S.win.__net.slice(net0).some(n => /\/api\/pvp\/(queue|match)/.test(n)), 'and nothing goes to the queue or a referee: practice counts nowhere', S.win.__net.slice(net0));
+  ok(S.run('JSON.stringify(OUTSIDE.errs)') === '{}', 'its hooks threw nowhere', S.run('JSON.stringify(OUTSIDE.errs)'));
+  // SERAPHIM himself (--outside): the kit reads it and opens on the phase asked for
+  if (OUTSIDE_ARG) {
+    ok(S.run('pilotP(0).ox && pilotP(0).ox.story && pilotP(0).ox.story.n') === 2, 'the kit opens on that phase', S.run('JSON.stringify(pilotP(0).ox && pilotP(0).ox.story)'));
+    ok(S.run('!!CHAR().story') && S.run('JSON.stringify(PVP.duelRule(pilotP(0), "take"))') === S.run('JSON.stringify(CHAR().story.duel.take)')
+       && S.run('JSON.stringify(PVP.duelRule(pilotP(0), "deal"))') === S.run('JSON.stringify(CHAR().story.duel.deal)'),
+       'a boss\'s rules: its story duel in place of its duel', S.run('JSON.stringify([PVP.duelRule(pilotP(0), "take"), CHAR().story])'));
+  }
+  // a plain practice against a bot, or a story asked of a hand that is not the lobby's practice: no story
+  const P2 = page({});
+  await flush(); await run(P2, 60 * 8);
+  ok(P2.run('!!RUN.pvp && RUN.pvp.story === false && RUN.pvp.storyFrom === 1'), 'without it: no story', P2.run('JSON.stringify(RUN.pvp && [RUN.pvp.story, RUN.pvp.storyFrom])'));
+  ok(P2.run('JSON.stringify(PVP.duelRule(pilotP(0), "take"))') === P2.run('JSON.stringify((CHAR().duel && CHAR().duel.take) || {})'), 'and its duel\'s own rules');
+}
+
 section('a duel\'s kits: EMBER\'s vent paid by hits on a pilot, VOIDRUNNER\'s GRAZE by near misses, and a bot\'s parry, forms and moves');
 {
   const CLEAN = 'const __pick = PVP.maps.pick; PVP.maps.pick = () => Object.assign(__pick(), { infested: false });';

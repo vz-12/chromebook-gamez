@@ -1373,6 +1373,7 @@ section('a hidden pilot\'s challenge: armed by hand, tripped once somebody has h
   const hp = await q(H, { op: 'poll' }), tp = tj.d.state === 'matched' ? tj : await q(T, { op: 'poll' });
   ok(hp.d.state === 'matched' && tp.d.state === 'matched' && hp.d.match.id === tp.d.match.id && tp.d.match.league.id === 'hidden',
      'the one it was sent to queues: the two of them, in one match, to its own rules', [hp.d, tp.d]);
+  ok(hp.d.match.story === true && tp.d.match.story === true, 'and it is the story fight, both sides told so', [hp.d.match, tp.d.match]);
   ok((await q(U, { op: 'poll' })).d.state === 'waiting', 'and the other waits on');
   await q(U, { op: 'leave' });
   tool(cancelSql('x9'));

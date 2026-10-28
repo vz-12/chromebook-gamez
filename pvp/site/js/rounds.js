@@ -82,8 +82,19 @@
      it is one long round. A match with a friend, or a casual one, is best of
      three. */
   M.bestOf = () => {
+    if (M.story()) return 1;
     const b = M.hand && M.hand.match && M.hand.match.bestOf;
     return b === 5 || b === 1 ? b : 3;
+  };
+  /* The story fight (a hidden pilot's script: its kit reads RUN.pvp.story):
+     the match the queue makes with the one a challenge went to, which the
+     server marks (pvp/src/objects.js), or practice against a bot that the
+     lobby starts for a hidden pilot's holder (bot.js), which may begin at a
+     later phase (storyFrom, 1 to 4). Both machines hold the same hand. */
+  M.story = () => !!(M.hand && ((M.hand.match && M.hand.match.story === true) || (M.hand.mode === 'bot' && M.hand.story === true)));
+  const storyFrom = () => {
+    const n = M.hand && M.hand.mode === 'bot' ? M.hand.storyFrom : 1;
+    return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;
   };
   const toWin = m => Math.ceil(m.bestOf / 2);
   // each pilot's player, by name, as this machine knows them
@@ -100,7 +111,8 @@
       spawnT: 2.5, hits: [[], []],
       ot: false, held: null,   // this round gone to overtime, and each pilot's health held there (OVERTIME)
       log: [],              // each round as it ends: { w: its winner, at: the match clock, left: the winner's health, 0 to 1, ot: in overtime }
-      dealt: [0, 0]         // the health each pilot has taken off the other (duel.js), for the result screen
+      dealt: [0, 0],        // the health each pilot has taken off the other (duel.js), for the result screen
+      story: M.story(), storyFrom: storyFrom()   // the story fight, and the phase it opens on (above)
     };
     /* A run never fights at wave 0: its first wave is 1. The game's curves
        start there too, and below it an enemy is born with negative health

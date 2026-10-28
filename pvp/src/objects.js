@@ -352,10 +352,11 @@ export class Matchmaker extends Serial {
        (challenge.js) it waits for the account it sent it to instead, #1 by
        then or not; and if that cannot be read, for nobody this beat. */
     const hiddenT = open.filter(t => t.hidden);
+    let sent = null;                                        // the account its challenge went to: their match is the story fight
     if (hiddenT.length) {
       const t = hiddenT[0];
       let top = null;
-      try { top = (await targetOf(this.env.DB, t.pilot)) || (await topOf(this.env.DB, queue)); } catch (e) {}
+      try { sent = await targetOf(this.env.DB, t.pilot); top = sent || (await topOf(this.env.DB, queue)); } catch (e) {}
       const one = top && open.find(u => !u.hidden && u.acct === top);
       if (one && one.acct !== t.acct) { taken.add(t); taken.add(one); pairs.push([t, one]); }
       for (const h of hiddenT) taken.add(h);              // the rest wait, and nobody else is theirs
@@ -391,8 +392,11 @@ export class Matchmaker extends Serial {
       // the match as each player is told it: the rules it flies, and both sides, never an account
       const sides = [t, u].map(x => ({ name: x.name, pilot: x.pilot, awake: !!x.awake, ups: x.ups || [] }));
       const league = { id: rule.id, n: rule.n, bestOf: rule.bestOf, pilots: rule.pilots, awake: rule.awake };
+      // with the one its challenge went to, a hidden pilot's match is the story fight (its kit's script: pvp/site/js/rounds.js)
+      const story = hidden && !!sent && (t.acct === sent || u.acct === sent);
       for (const [side, x] of [[0, t], [1, u]]) {
-        x.match = { id, side, role: side ? 'guest' : 'host', queue, rated: def.rated && !hidden, league, bestOf: rule.bestOf, sides };
+        x.match = Object.assign({ id, side, role: side ? 'guest' : 'host', queue, rated: def.rated && !hidden, league, bestOf: rule.bestOf, sides },
+                                story ? { story: true } : {});
         x.at = now;
         x.bot = null;
       }
