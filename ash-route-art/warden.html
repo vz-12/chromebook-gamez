@@ -1,0 +1,577 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{width:1920px;height:1080px;display:block}</style>
+<canvas id="c" width="3840" height="2160"></canvas>
+<script>
+/* THE CINDERED WARDEN — arena render, 3/4 top-down game camera.
+   Drawn in 1920x1080 units at 2x. Ink outline, hard cel shadow, fire as
+   underlight, ash on every surface that faces the sky. */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+ctx.scale(2, 2);
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+let sd = 1234567;
+const rnd = (a = 1, b = 0) => { sd = (sd * 16807) % 2147483647; return b + (sd / 2147483647) * (a - b); };
+const lerp = (a, b, t) => a + (b - a) * t;
+function rgba(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+
+const INK = '#100605';
+const CH = { base: '#2e201c', shade: '#160d0b', light: '#4d3b35' };
+const MT = { base: '#93291d', shade: '#4c120d', light: '#cf563b' };
+const FAT = '#e0b088', BONE = '#ddcdb0', BONE_S = '#8a7660', IRON = '#36312f', IRON_L = '#6e6560';
+const ASH = '#a59b93', ASH_L = '#d6cec4';
+const EMB = '#ff7f24', HOT = '#ffcf6e', CORE = '#fff3cf';
+
+/* ---------- geometry ---------- */
+function smoothPath(pts, closed = true, keep = false) {
+  const n = pts.length; if (!keep) ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  const P = i => closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    ctx.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+                      p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+  if (closed) ctx.closePath();
+}
+// resample a spine as a smooth curve, then give it widths: a limb, finger, branch, tendon
+function spineCurve(sp, k = 8) {
+  const out = [], n = sp.length, P = i => sp[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    for (let s = 0; s < k; s++) {
+      const t = s / k, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map(d => 0.5 * ((2 * p1[d]) + (-p0[d] + p2[d]) * t + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3)));
+    }
+  }
+  out.push(sp[n - 1]); return out;
+}
+function taper(sp, ws, cap = 0.7) {
+  const c = spineCurve(sp), n = c.length, L = [], R = [];
+  const wAt = t => { const f = t * (ws.length - 1), i = Math.min(ws.length - 2, Math.floor(f)); return lerp(ws[i], ws[i + 1], f - i); };
+  for (let i = 0; i < n; i++) {
+    const a = c[Math.max(0, i - 1)], b = c[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    const w = wAt(i / (n - 1)) / 2;
+    L.push([c[i][0] - dy * w, c[i][1] + dx * w]); R.push([c[i][0] + dy * w, c[i][1] - dx * w]);
+  }
+  const t0 = [c[0][0] - c[1][0], c[0][1] - c[1][1]], l0 = Math.hypot(...t0) || 1;
+  const t1 = [c[n - 1][0] - c[n - 2][0], c[n - 1][1] - c[n - 2][1]], l1 = Math.hypot(...t1) || 1;
+  const sCap = [c[0][0] + t0[0] / l0 * ws[0] / 2 * cap, c[0][1] + t0[1] / l0 * ws[0] / 2 * cap];
+  const eCap = [c[n - 1][0] + t1[0] / l1 * ws[ws.length - 1] / 2 * cap, c[n - 1][1] + t1[1] / l1 * ws[ws.length - 1] / 2 * cap];
+  // thin out the points so the smooth path stays clean
+  const step = 3, thin = a => a.filter((_, i) => i % step === 0 || i === a.length - 1);
+  return [...thin(L), eCap, ...thin(R).reverse(), sCap];
+}
+function blob(cx, cy, rx, ry, n = 14, jit = 0.08, rot = 0) {
+  const p = []; for (let i = 0; i < n; i++) { const t = rot + i * TAU / n, r = 1 + rnd(-jit, jit); p.push([cx + Math.cos(t) * rx * r, cy + Math.sin(t) * ry * r]); } return p;
+}
+function bbox(pts) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 }; }
+function shifted(pts, dx, dy) { return pts.map(([x, y]) => [x + dx, y + dy]); }
+
+/* ---------- the shading model ----------
+   base fill -> texture -> hard shadow (lower right) -> ash light (top edge,
+   the sky side) -> fire rim (bottom edge, the lava side) -> ink. */
+function part(pts, o) {
+  const c = o.col || CH, sh = o.sh || [9, 11], ink = o.ink === undefined ? 3.2 : o.ink;
+  ctx.save();
+  smoothPath(pts); ctx.fillStyle = c.base; ctx.fill(); ctx.clip();
+  if (o.tex) o.tex(bbox(pts));
+  // hard shadow: everything not covered by the shape nudged toward the light
+  ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100);
+  smoothPath(shifted(pts, -sh[0], -sh[1]), true, true); ctx.fillStyle = rgba(c.shade, o.shA || 0.62); ctx.fill('evenodd');
+  // a softer second band for form
+  ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100);
+  smoothPath(shifted(pts, -sh[0] * 2.4, -sh[1] * 2.4), true, true); ctx.fillStyle = rgba(c.shade, 0.22); ctx.fill('evenodd');
+  // the sky side: a thin band of light where the ash sits
+  if (o.top !== false) { ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100); smoothPath(shifted(pts, 2, o.topW || 5), true, true); ctx.fillStyle = rgba(o.topCol || ASH_L, (o.topA || 0.5) * 0.55); ctx.fill('evenodd'); }
+  // the lava side: fire coming up off the floor
+  if (o.rim !== false) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100); smoothPath(shifted(pts, o.rimX || 0, -(o.rimW || 5)), true, true); ctx.fillStyle = rgba(EMB, o.rimA || 0.55); ctx.fill('evenodd');
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  if (o.after) o.after(bbox(pts));
+  ctx.restore();
+  if (ink) { smoothPath(pts); ctx.strokeStyle = INK; ctx.lineWidth = ink; ctx.lineJoin = 'round'; ctx.stroke(); }
+}
+function glow(x, y, r, col, a, mode = 'lighter') { ctx.save(); ctx.globalCompositeOperation = mode; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, rgba(col, a)); g.addColorStop(1, rgba(col, 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.restore(); }
+function eglow(x, y, rx, ry, col, a) { ctx.save(); ctx.translate(x, y); ctx.scale(1, ry / rx); glow(0, 0, rx, col, a); ctx.restore(); }
+
+/* ---------- textures ---------- */
+// muscle fibre: fine strokes along the muscle, light and dark
+function fibres(b, ang, dens = 0.05, col = MT) {
+  const n = Math.round(b.w * b.h * dens / 40);
+  for (let i = 0; i < n; i++) {
+    const x = rnd(b.x0 - 10, b.x1 + 10), y = rnd(b.y0 - 10, b.y1 + 10), L = rnd(14, 44), a = ang + rnd(-0.15, 0.15);
+    ctx.strokeStyle = rgba(rnd() < 0.5 ? col.shade : col.light, rnd(0.25, 0.6)); ctx.lineWidth = rnd(0.8, 2.2);
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + Math.cos(a) * L / 2 + rnd(-3, 3), y + Math.sin(a) * L / 2 + rnd(-3, 3), x + Math.cos(a) * L, y + Math.sin(a) * L); ctx.stroke();
+  }
+  // glisten: short bright ticks
+  for (let i = 0; i < n / 6; i++) { const x = rnd(b.x0, b.x1), y = rnd(b.y0, b.y1); ctx.strokeStyle = rgba('#ffd2b0', rnd(0.2, 0.5)); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang) * 6, y + Math.sin(ang) * 6); ctx.stroke(); }
+}
+// burnt crust: plates of char lifting off raw meat, glowing in the seams
+function crust(b, o = {}) {
+  const cell = o.cell || 24, hole = (o.hole === undefined ? 0.16 : o.hole) * 0.25, ashTop = o.ash === undefined ? 0.45 : o.ash, bare = o.bare || [];
+  const inBare = (x, y) => { let m = 9; for (const [bx, by, rx, ry] of bare) m = Math.min(m, Math.hypot((x - bx) / rx, (y - by) / ry)); return m; };
+  // the seams first: hot light between the plates
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(0, b.y0, 0, b.y1); g.addColorStop(0, rgba(EMB, 0.04)); g.addColorStop(1, rgba(EMB, 0.2));
+  ctx.fillStyle = g; ctx.fillRect(b.x0 - 10, b.y0 - 10, b.w + 20, b.h + 20); ctx.restore();
+  if (o.fib !== undefined) fibres(b, o.fib, 0.035);
+  let row = 0;
+  for (let y = b.y0 - cell; y < b.y1 + cell; y += cell * 0.78, row++) {
+    for (let x = b.x0 - cell + (row % 2) * cell * 0.5; x < b.x1 + cell; x += cell) {
+      if (rnd() < hole) continue;
+      const px = x + rnd(-cell * 0.25, cell * 0.25), py = y + rnd(-cell * 0.25, cell * 0.25);
+      const bd = inBare(px, py); if (bd < 1) continue;
+      const edge = bd < 1.35, r = cell * rnd(0.56, 0.72) * (edge ? 0.8 : 1);
+      const p = blob(px, py, r, r * rnd(0.7, 0.95), 7, 0.28, rnd(0, 1));
+      ctx.beginPath(); p.forEach(([a, c], i) => i ? ctx.lineTo(a, c) : ctx.moveTo(a, c)); ctx.closePath();
+      ctx.fillStyle = rnd() < 0.5 ? CH.base : '#261916'; ctx.fill();
+      ctx.strokeStyle = edge ? rgba(EMB, 0.85) : rgba('#0b0504', 0.9); ctx.lineWidth = edge ? 1.8 : 1.4; ctx.stroke();
+      // the plate's own little shadow, lower right
+      ctx.strokeStyle = rgba('#050202', 0.55); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]); ctx.lineTo(p[1][0], p[1][1]); ctx.lineTo(p[2][0], p[2][1]); ctx.stroke();
+      // each plate catches the sky on its upper lip, and holds ash if it faces up
+      const up = (py - b.y0) / b.h < ashTop;
+      ctx.strokeStyle = rgba(up ? ASH_L : CH.light, up ? 0.7 : 0.6); ctx.lineWidth = up ? 2 : 1.3;
+      ctx.beginPath(); ctx.moveTo(p[4][0], p[4][1]); ctx.lineTo(p[5][0], p[5][1]); ctx.lineTo(p[6][0], p[6][1]); ctx.stroke();
+      if (up) for (let k = 0; k < 3; k++) { ctx.fillStyle = rgba(ASH_L, rnd(0.3, 0.7)); ctx.fillRect(px + rnd(-r, r) * 0.7, py + rnd(-r, 0) * 0.7, rnd(1, 2.4), rnd(1, 2.4)); }
+      // a crack across some plates
+      if (rnd() < 0.3) { ctx.strokeStyle = rgba(HOT, 0.7); ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(px - r * 0.5, py + rnd(-r, r) * 0.4); ctx.lineTo(px + rnd(-3, 3), py + rnd(-3, 3)); ctx.lineTo(px + r * 0.5, py + rnd(-r, r) * 0.4); ctx.stroke(); }
+    }
+  }
+}
+function wounds(bare) { for (const [x, y, rx, ry] of bare) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(x, y); ctx.scale(1, ry / rx); const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx); g.addColorStop(0, rgba('#ff5a20', 0.25)); g.addColorStop(1, rgba('#ff5a20', 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, TAU); ctx.fill(); ctx.restore(); } }
+function ashDust(b, frac = 0.35, n = 140) { for (let i = 0; i < n; i++) { const y = b.y0 + Math.pow(rnd(), 1.8) * b.h * frac; ctx.fillStyle = rgba(rnd() < 0.5 ? ASH_L : ASH, rnd(0.3, 0.8)); ctx.fillRect(rnd(b.x0, b.x1), y, rnd(1, 3), rnd(1, 2.5)); } }
+function crackLine(pts, w = 1.6) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.strokeStyle = rgba(EMB, 0.35); ctx.lineWidth = w * 4; ctx.stroke(); ctx.strokeStyle = rgba(HOT, 0.9); ctx.lineWidth = w; ctx.stroke(); ctx.restore(); }
+function jag(x, y, ang, len, n = 6) { const p = [[x, y]]; for (let i = 0; i < n; i++) { ang += rnd(-0.6, 0.6); x += Math.cos(ang) * len / n; y += Math.sin(ang) * len / n; p.push([x, y]); } return p; }
+
+/* ========================== THE ARENA ========================== */
+// iso floor: one plane, tiles on a 2:1 diamond
+const TU = [58, 31], TV = [-58, 31], ORG = [960, 120];
+const iso = (u, v) => [ORG[0] + u * TU[0] + v * TV[0], ORG[1] + u * TU[1] + v * TV[1]];
+ctx.fillStyle = '#120a08'; ctx.fillRect(0, 0, W, H);
+// lava under everything: where tiles are gone it shows
+{ const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#5a1806'); g.addColorStop(1, '#3a0e04'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+
+// the lava river: cuts the arena from the upper left, the way out into the world
+const river = []; for (let t = -6; t <= 24; t += 1) river.push(iso(t, -6 + Math.sin(t * 0.45) * 0.8 + t * 0.12));
+function riverMask(u, v) { const c = -6 + Math.sin(u * 0.45) * 0.8 + u * 0.12; return Math.abs(v - c) < 1.25; }
+// stone tiles
+for (let u = -14; u < 26; u++) for (let v = -18; v < 22; v++) {
+  if (riverMask(u + 0.5, v + 0.5)) continue;
+  const p = [iso(u, v), iso(u + 1, v), iso(u + 1, v + 1), iso(u, v + 1)];
+  const c = (p[0][0] + p[2][0]) / 2, m = (p[0][1] + p[2][1]) / 2;
+  if (c < -80 || c > W + 80 || m < -60 || m > H + 60) continue;
+  const gone = rnd() < 0.025 && Math.hypot(c - 960, m - 760) > 300;
+  if (gone) continue;
+  const dk = rnd(0, 1), inset = 1.6;
+  const q = p.map(([x, y]) => [lerp(x, c, 0.03) + rnd(-inset, inset), lerp(y, m, 0.03) + rnd(-inset, inset)]);
+  ctx.beginPath(); q.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
+  ctx.fillStyle = `rgb(${38 + dk * 16},${27 + dk * 10},${24 + dk * 8})`; ctx.fill();
+  ctx.strokeStyle = 'rgba(8,3,2,0.95)'; ctx.lineWidth = 2.2; ctx.stroke();
+  // bevel: top edges catch the sky, lower edges the lava
+  ctx.strokeStyle = rgba(ASH, 0.18); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(q[3][0], q[3][1] - 1); ctx.lineTo(q[0][0], q[0][1] + 1); ctx.lineTo(q[1][0], q[1][1] - 1); ctx.stroke();
+  // pitting and scorch
+  for (let k = 0; k < 4; k++) { ctx.fillStyle = rgba('#0c0605', rnd(0.2, 0.5)); ctx.beginPath(); ctx.ellipse(c + rnd(-24, 24), m + rnd(-12, 12), rnd(1, 4), rnd(0.6, 2), 0, 0, TAU); ctx.fill(); }
+  if (rnd() < 0.18) crackLine(jag(c + rnd(-20, 20), m + rnd(-8, 8), rnd(0, TAU), rnd(16, 40), 4), 1);
+}
+// river: crust islands floating on bright lava, banked by rock
+{
+  const top = river.map(([x, y]) => [x + 36, y - 30]), bot = river.map(([x, y]) => [x - 36, y + 30]);
+  const band = [...top, ...bot.reverse()];
+  ctx.save(); ctx.beginPath(); band.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.clip();
+  const g = ctx.createLinearGradient(0, 0, 600, 300); g.addColorStop(0, '#d9560e'); g.addColorStop(0.5, '#a8320a'); g.addColorStop(1, '#e06a16'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 26; i++) { const p = river[Math.floor(rnd(3, river.length - 3))]; ctx.strokeStyle = rgba(CORE, 0.55); ctx.lineWidth = rnd(1.5, 3); ctx.beginPath(); ctx.moveTo(p[0] + rnd(-40, 0), p[1] + rnd(-20, 20)); ctx.lineTo(p[0] + rnd(20, 60), p[1] + rnd(-30, -10)); ctx.stroke(); }
+  for (let i = 0; i < 110; i++) { const p = river[Math.floor(rnd(0, river.length))]; const bl = blob(p[0] + rnd(-34, 34), p[1] + rnd(-18, 18), rnd(8, 26), rnd(5, 13), 8, 0.3); smoothPath(bl); ctx.fillStyle = '#3b1408'; ctx.fill(); ctx.strokeStyle = rgba(HOT, 0.8); ctx.lineWidth = 1.5; ctx.stroke(); }
+  ctx.restore();
+  for (const edge of [top, bot.reverse()]) { ctx.beginPath(); edge.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); }
+  river.forEach(([x, y]) => glow(x, y, 120, EMB, 0.12));
+}
+// light pools on the floor: the boss's own heat, braziers
+eglow(960, 760, 520, 300, EMB, 0.32);
+eglow(960, 770, 240, 120, HOT, 0.18);
+
+// cinder rings: the arena's hazard telegraphs, molten circles set in the floor
+function ring(x, y, r, hot) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.53);
+  ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.arc(0, 0, r - 9, 0, TAU, true); ctx.fillStyle = '#1c0c08'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, r - 9, 0, TAU); ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 8; ctx.strokeStyle = rgba(EMB, hot ? 0.8 : 0.35); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 2.5; ctx.strokeStyle = rgba(CORE, hot ? 0.9 : 0.4); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + 0.2; ctx.fillStyle = rgba(HOT, hot ? 0.9 : 0.5); ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 5, 0, TAU); ctx.fill(); }
+  if (hot) { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r); g.addColorStop(0, rgba(EMB, 0.32)); g.addColorStop(1, rgba(EMB, 0.05)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r - 9, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+ring(1480, 640, 105, true); ring(420, 980, 120, false); ring(1650, 1010, 90, false);
+
+// ash drifts: pale soft heaps along the floor
+for (let i = 0; i < 14; i++) {
+  const x = rnd(0, W), y = rnd(250, H), rx = rnd(40, 120);
+  const bl = blob(x, y, rx, rx * 0.4, 12, 0.18);
+  smoothPath(bl); ctx.fillStyle = rgba('#6f6660', 0.32); ctx.fill();
+  smoothPath(shifted(bl, 0, -4).map(([a, b]) => [lerp(a, x, 0.2), lerp(b, y, 0.25)])); ctx.fillStyle = rgba(ASH, 0.25); ctx.fill();
+  for (let k = 0; k < 20; k++) { ctx.fillStyle = rgba(ASH_L, rnd(0.2, 0.5)); ctx.fillRect(x + rnd(-rx, rx) * 0.8, y + rnd(-rx, rx) * 0.3, 2, 1.5); }
+}
+
+// props: braziers, broken pillars, a dead tree seen from above
+function brazier(x, y) {
+  eglow(x, y + 10, 160, 90, EMB, 0.35);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(x + 10, y + 34, 40, 14, 0, 0, TAU); ctx.fill();
+  part(taper([[x, y + 34], [x, y + 6]], [16, 12]), { col: { base: IRON, shade: '#151211', light: IRON_L }, top: false, sh: [3, 3] });
+  part(blob(x, y, 34, 17, 16, 0.02), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [4, 3], top: false, rimW: 3 });
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(0, 0, 27, 0, TAU); ctx.fillStyle = '#3a1206'; ctx.fill(); ctx.restore();
+  flame(x, y + 2, 64, 36);
+}
+function flame(x, y, h, w) {
+  const layers = [[1, '#e2400f', 0.95], [0.78, EMB, 0.95], [0.55, HOT, 0.95], [0.3, CORE, 1]];
+  glow(x, y - h * 0.4, h * 1.1, EMB, 0.35);
+  for (const [s, col, a] of layers) {
+    const hw = w * s / 2, hh = h * s;
+    ctx.beginPath(); ctx.moveTo(x - hw, y);
+    ctx.bezierCurveTo(x - hw * 1.3, y - hh * 0.4, x - hw * 0.2, y - hh * 0.55, x - hw * 0.5, y - hh * 0.85);
+    ctx.quadraticCurveTo(x - hw * 0.05, y - hh * 0.6, x + hw * 0.05, y - hh);
+    ctx.quadraticCurveTo(x + hw * 0.4, y - hh * 0.62, x + hw * 0.6, y - hh * 0.78);
+    ctx.bezierCurveTo(x + hw * 0.5, y - hh * 0.5, x + hw * 1.3, y - hh * 0.35, x + hw, y);
+    ctx.closePath(); ctx.fillStyle = rgba(col, a); ctx.fill();
+  }
+}
+function pillar(x, y, r, h) {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(x + r * 0.6, y + 8, r * 1.6, r * 0.6, 0, 0, TAU); ctx.fill();
+  const body = [[x - r, y], [x - r, y - h], [x + r, y - h + rnd(-12, 12)], [x + r, y]];
+  part([...body, [x, y + r * 0.45]], { col: { base: '#3b2d29', shade: '#1a110f', light: '#5c4a43' }, sh: [8, 2], tex: b => { for (let k = 0; k < 6; k++) { ctx.strokeStyle = rgba('#120a08', 0.6); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(b.x0 + (k + 1) * b.w / 7, b.y0); ctx.lineTo(b.x0 + (k + 1) * b.w / 7, b.y1); ctx.stroke(); } } });
+  part(blob(x, y - h, r, r * 0.5, 9, 0.12), { col: { base: '#5c4a43', shade: '#2a1d19', light: '#7a6860' }, sh: [3, 3], tex: b => ashDust(b, 1, 50), rim: false });
+}
+function deadTree(x, y, s) {
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(x + 30 * s, y + 8, 70 * s, 22 * s, 0, 0, TAU); ctx.fill();
+  const br = (x0, y0, a, l, w, d) => {
+    const x1 = x0 + Math.cos(a) * l, y1 = y0 + Math.sin(a) * l * 0.62 - l * 0.35;
+    part(taper([[x0, y0], [(x0 + x1) / 2 + rnd(-6, 6), (y0 + y1) / 2], [x1, y1]], [w, w * 0.62], 0.4), { col: CH, sh: [2, 2], ink: 1.6, topW: 2, rimW: 2, rimA: 0.35 });
+    if (d > 0) for (let k = 0; k < 3; k++) br(x1, y1, a + rnd(-0.9, 0.9), l * 0.62, w * 0.58, d - 1);
+    else glow(x1, y1, 6, HOT, 0.6);
+  };
+  part(taper([[x, y + 4], [x, y - 40 * s]], [20 * s, 14 * s]), { col: CH, sh: [3, 2] });
+  for (let k = 0; k < 5; k++) br(x, y - 40 * s, k * TAU / 5 + rnd(0, 0.5), 50 * s, 10 * s, 2);
+}
+pillar(210, 520, 34, 120); pillar(1700, 420, 30, 90); pillar(1790, 760, 38, 60);
+deadTree(130, 860, 1.1); deadTree(1600, 290, 0.8);
+brazier(560, 470); brazier(1380, 470);
+// rubble
+for (let i = 0; i < 40; i++) { const x = rnd(0, W), y = rnd(300, H); if (Math.hypot(x - 960, (y - 700) * 1.6) < 360) continue; const r = rnd(4, 14); part(blob(x, y, r, r * 0.7, 7, 0.3), { col: { base: '#3d2e29', shade: '#1a110f', light: '#5c4a43' }, sh: [2, 2], ink: 1.5, topW: 2, rimW: 2, rimA: 0.3 }); }
+
+/* ========================== THE WARDEN ==========================
+   A gaoler who stayed at his post while the keep burned around him, and kept
+   standing after. The fire cooked him rather than killing him: the skin is a
+   black crust lifting off raw meat, the iron he wore is fused into him, and
+   the burnt grove behind the keep took root in his back. */
+
+// cast shadow: long, under-lit from the lava, thrown up and back
+ctx.save(); ctx.globalAlpha = 0.6; ctx.fillStyle = '#050201';
+smoothPath(blob(960, 838, 270, 64, 18, 0.04)); ctx.fill(); ctx.restore();
+ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = '#050201'; smoothPath(blob(980, 846, 380, 92, 18, 0.05)); ctx.fill(); ctx.restore();
+// scorched footprints and a drag trench behind the blade
+for (const [x, y] of [[760, 905], [690, 960]]) { smoothPath(blob(x, y, 40, 16, 10, 0.2)); ctx.fillStyle = rgba('#0b0503', 0.8); ctx.fill(); crackLine(jag(x - 20, y, 0.2, 40, 4), 1.2); }
+
+/* --- the grove in his back: charred branches, drawn behind everything --- */
+function branch(sp, w0, w1, d, spread) {
+  part(taper(sp, [w0, (w0 + w1) / 2, w1], 0.5), { col: CH, sh: [4, 5], ink: 2.6, topW: 3.5, topA: 0.65, rimW: 3,
+    tex: b => { crust(b, { cell: 12, hole: 0.12, ash: 0.6 }); } });
+  const e = sp[sp.length - 1], p = sp[sp.length - 2], a = Math.atan2(e[1] - p[1], e[0] - p[0]);
+  if (d > 0) {
+    for (const s of spread) {
+      const l = Math.hypot(e[0] - p[0], e[1] - p[1]) * 1.5, aa = a + s;
+      const m = [e[0] + Math.cos(aa) * l * 0.5 + rnd(-6, 6), e[1] + Math.sin(aa) * l * 0.5 + rnd(-6, 6)];
+      branch([e, m, [e[0] + Math.cos(aa + s * 0.3) * l, e[1] + Math.sin(aa + s * 0.3) * l]], w1, w1 * 0.55, d - 1, spread.map(x => x * 0.9));
+    }
+  } else { glow(e[0], e[1], 22, EMB, 0.7); glow(e[0], e[1], 7, CORE, 0.9); }
+}
+branch([[900, 230], [850, 170], [790, 120]], 34, 22, 2, [-0.55, 0.35]);
+branch([[1020, 230], [1075, 165], [1140, 118]], 34, 22, 2, [0.55, -0.35]);
+branch([[950, 220], [930, 160], [915, 95]], 24, 14, 2, [-0.5, 0.45]);
+branch([[985, 218], [1005, 150], [1030, 92]], 22, 13, 1, [0.5, -0.4]);
+
+/* --- the hunch: upper back, seen from above, ash lying on it --- */
+const hunch = [[800, 300], [815, 240], [870, 205], [960, 192], [1050, 205], [1105, 240], [1122, 300], [960, 320]];
+part(hunch, { col: CH, sh: [6, -6], topW: 6, topA: 0.4, tex: b => { crust(b, { cell: 22, hole: 0.12, ash: 0.9 }); ashDust(b, 0.7, 260); } });
+// spine ridge: knuckles of vertebra through the crust
+for (let i = 0; i < 5; i++) part(blob(960, 200 + i * 14, 11 - i, 7, 9, 0.1), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [2, 2], ink: 2, rim: false });
+
+/* --- legs: long, roped, bowed --- */
+function leg(side) {
+  const k = side;      // -1 left, +1 right
+  const hip = [960 + k * 62, 520], knee = [960 + k * 102, 672], ank = [960 + k * 96, 810];
+  // tendons behind the knee, drawn first
+  for (let i = 0; i < 2; i++) part(taper([[hip[0] + k * (14 + i * 14), hip[1] + 50], [knee[0] + k * (18 + i * 8), knee[1] + 6], [ank[0] + k * 10, ank[1] - 30]], [10, 8, 6]), { col: MT, sh: [2, 3], ink: 2, tex: b => fibres(b, 1.5, 0.08) });
+  // thigh: long quad over a lean bone
+  const thigh = taper([hip, [lerp(hip[0], knee[0], 0.45) + k * 14, lerp(hip[1], knee[1], 0.45)], knee], [96, 92, 54]);
+  const tb = [[lerp(hip[0], knee[0], 0.5) - k * 8, lerp(hip[1], knee[1], 0.5), 26, 50], [knee[0] + k * 22, knee[1] - 30, 12, 20]];
+  part(thigh, { col: MT, sh: [8, 8], tex: b => { fibres(b, 1.6, 0.09); wounds(tb); crust(b, { cell: 26, ash: 0.15, bare: tb }); } });
+  // shin: armoured in crust, thin and long
+  const shin = taper([knee, [lerp(knee[0], ank[0], 0.4) + k * 12, lerp(knee[1], ank[1], 0.4)], ank], [56, 58, 36]);
+  const sb = [[knee[0] + k * 16, knee[1] + 60, 14, 34]];
+  part(shin, { col: MT, sh: [7, 7], tex: b => { fibres(b, 1.55, 0.1); wounds(sb); crust(b, { cell: 20, ash: 0.12, bare: sb }); } });
+  // kneecap: bare bone, a melted iron greave fused over it
+  part(blob(knee[0] + k * 4, knee[1] - 2, 15, 13, 12, 0.12), { col: { base: '#b9a588', shade: '#5e4c3a', light: '#e6d6ba' }, sh: [4, 4], tex: b => { ashDust(b, 0.5, 30); crackLine([[b.x0 + 8, b.y0 + 18], [b.x0 + 22, b.y0 + 24], [b.x0 + 34, b.y0 + 18]], 1); } });
+  part([[knee[0] - 26, knee[1] + 12], [knee[0] + 26, knee[1] + 12], [knee[0] + 22, knee[1] + 26], [knee[0] - 22, knee[1] + 26]], { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [3, 3], ink: 2.4 });
+  // foot: long, three toes splayed, seen from above, sunk in ash
+  // ash heaped where he stands, behind the foot
+  smoothPath(blob(ank[0], ank[1] + 36, 74, 22, 14, 0.15)); ctx.fillStyle = rgba('#6f6660', 0.9); ctx.fill(); ctx.strokeStyle = rgba(INK, 0.7); ctx.lineWidth = 1.8; ctx.stroke();
+  smoothPath(blob(ank[0], ank[1] + 30, 54, 12, 12, 0.15)); ctx.fillStyle = rgba(ASH, 0.6); ctx.fill();
+  // the foot: a long heel-to-toe pad, three clawed toes splayed forward and out, a dewclaw at the back
+  part(blob(ank[0] + k * 2, ank[1] + 22, 30, 20, 12, 0.06), { col: CH, sh: [4, 4], tex: b => crust(b, { cell: 12, ash: 0.7 }) });
+  const toes = [[-0.62, 62, 24], [0, 70, 28], [0.62, 58, 24]];
+  for (const [a, l, w] of toes) {
+    const aa = Math.PI / 2 + a + k * 0.12, j = [ank[0] + Math.cos(aa) * l * 0.5, ank[1] + 26 + Math.sin(aa) * l * 0.3], tip = [ank[0] + Math.cos(aa) * l, ank[1] + 24 + Math.sin(aa) * l * 0.55];
+    part(taper([[ank[0] + Math.cos(aa) * 8, ank[1] + 22], j, tip], [w, w * 0.95, w * 0.62], 0.6), { col: CH, sh: [3, 3], ink: 2.4, topW: 3, tex: b => crust(b, { cell: 10, ash: 0.6 }) });
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(j[0] - 8, j[1] + 2); ctx.quadraticCurveTo(j[0], j[1] - 3, j[0] + 8, j[1] + 2); ctx.stroke();
+    const ta = Math.atan2(tip[1] - j[1], tip[0] - j[0]);
+    part(taper([tip, [tip[0] + Math.cos(ta) * 14, tip[1] + Math.sin(ta) * 10], [tip[0] + Math.cos(ta + 0.7) * 22, tip[1] + Math.sin(ta + 0.7) * 18]], [w * 0.55, w * 0.35, 1], 0.2), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [2, 2], ink: 1.8, rim: false });
+  }
+  // a front lip of ash spilling over the toe roots
+  smoothPath(blob(ank[0], ank[1] + 44, 40, 7, 10, 0.2)); ctx.fillStyle = rgba(ASH, 0.75); ctx.fill();
+  for (let i = 0; i < 40; i++) { ctx.fillStyle = rgba(ASH_L, rnd(0.3, 0.7)); ctx.fillRect(ank[0] + rnd(-68, 68), ank[1] + 26 + rnd(-10, 14), 2, 1.5); }
+}
+leg(-1); leg(1);
+
+/* --- loin: burnt leather apron, a gaoler's iron ring of keys --- */
+part([[870, 470], [1050, 470], [1062, 540], [1040, 600], [1012, 660], [985, 612], [962, 690], [938, 612], [906, 664], [882, 600], [858, 540]],
+  { col: { base: '#3a2419', shade: '#1a0d08', light: '#5e3e2c' }, sh: [6, 7], tex: b => { for (let i = 0; i < 40; i++) { ctx.strokeStyle = rgba('#120804', 0.5); ctx.lineWidth = 1; const x = rnd(b.x0, b.x1); ctx.beginPath(); ctx.moveTo(x, b.y0); ctx.lineTo(x + rnd(-6, 6), b.y1); ctx.stroke(); } for (let i = 0; i < 7; i++) { const x = rnd(b.x0 + 20, b.x1 - 20), y = rnd(b.y0 + 30, b.y1 - 20); smoothPath(blob(x, y, rnd(6, 14), rnd(5, 10), 8, 0.3)); ctx.fillStyle = '#0b0403'; ctx.fill(); ctx.strokeStyle = rgba(EMB, 0.8); ctx.lineWidth = 1.4; ctx.stroke(); } } });
+// belt
+part(taper([[850, 476], [960, 500], [1070, 476]], [26, 28, 26], 0.3), { col: { base: '#2e1d15', shade: '#120804', light: '#4e3424' }, sh: [3, 4], ink: 2.6, tex: b => { for (let x = b.x0 + 10; x < b.x1; x += 22) { ctx.fillStyle = IRON_L; ctx.beginPath(); ctx.arc(x, 488 + Math.sin((x - 850) / 220 * Math.PI) * 22, 3, 0, TAU); ctx.fill(); } } });
+// the key ring, hanging off his hip
+{
+  const rx = 1050, ry = 520;
+  ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.beginPath(); ctx.ellipse(rx, ry, 22, 16, 0.3, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 4; ctx.strokeStyle = IRON_L; ctx.stroke();
+  const keys = [[-0.4, 64], [0.1, 74], [0.55, 58], [0.9, 50]];
+  for (const [a, l] of keys) {
+    const ang = Math.PI / 2 + a, ex = rx + Math.cos(ang) * l, ey = ry + Math.sin(ang) * l;
+    part(taper([[rx + Math.cos(ang) * 16, ry + Math.sin(ang) * 12], [ex, ey]], [6, 5], 0.2), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [1.5, 1.5], ink: 1.6, top: false, rimW: 2 });
+    part([[ex - 7, ey - 4], [ex + 7, ey - 4], [ex + 8, ey + 6], [ex + 2, ey + 6], [ex + 2, ey + 12], [ex - 6, ey + 12]], { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [1.5, 1.5], ink: 1.6, top: false, rimW: 2 });
+    // melted: a drip hanging off each bit
+    ctx.strokeStyle = rgba(HOT, 0.85); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ex, ey + 12); ctx.lineTo(ex, ey + 18 + rnd(0, 8)); ctx.stroke();
+  }
+}
+
+/* --- torso: a barrel of cooked meat under a black shell --- */
+const torso = [[960, 232], [1058, 238], [1150, 262], [1196, 302], [1188, 368], [1146, 424], [1092, 470], [1074, 515], [960, 532], [846, 515], [828, 470], [774, 424], [732, 368], [724, 302], [770, 262], [862, 238]];
+const tWounds = [[880, 420, 34, 22], [1100, 485, 28, 18], [790, 380, 20, 30]];
+part(torso, { col: MT, sh: [12, 13], topW: 7, tex: b => { fibres(b, 1.4, 0.08); wounds(tWounds); crust(b, { cell: 32, ash: 0.3, bare: tWounds }); },
+  after: () => {
+    // muscle grooves: the line under the pec, the serratus, the abs, cut in ink
+    ctx.strokeStyle = rgba(INK, 0.85); ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(780, 360); ctx.quadraticCurveTo(860, 410, 950, 388); ctx.stroke();
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(772 + i * 6, 398 + i * 22); ctx.quadraticCurveTo(800 + i * 6, 404 + i * 22, 818 + i * 4, 396 + i * 24); ctx.stroke(); }
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(1150 - i * 6, 410 + i * 20); ctx.quadraticCurveTo(1124 - i * 6, 418 + i * 20, 1108 - i * 4, 410 + i * 22); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(960, 440); ctx.lineTo(962, 520); ctx.stroke();
+  } });
+// left pec (his right): shell intact, cracked
+part([[790, 290], [870, 262], [950, 270], [956, 330], [930, 382], [860, 392], [800, 365], [776, 325]], { col: MT, sh: [7, 8], ink: 2.6, tex: b => { fibres(b, 0.3, 0.1); crust(b, { cell: 24, ash: 0.4, bare: [[900, 360, 18, 14]] }); } });
+// the ribcage: the shell burnt through on his left, ribs and meat showing
+const cav = [[972, 270], [1060, 262], [1135, 290], [1158, 350], [1130, 420], [1062, 450], [990, 440], [968, 380]];
+part(cav, { col: { base: '#1c0605', shade: '#0c0202', light: '#3a0c08' }, sh: [6, 6], top: false, rim: false, ink: 3,
+  tex: b => {
+    glow(1065, 365, 120, EMB, 0.6); glow(1060, 370, 50, HOT, 0.8);
+    // the heart: a coal still beating behind the ribs
+    smoothPath(blob(1055, 372, 26, 30, 12, 0.12)); ctx.fillStyle = '#ffb443'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.stroke();
+    smoothPath(blob(1050, 364, 12, 14, 9, 0.15)); ctx.fillStyle = CORE; ctx.fill();
+    crackLine([[1035, 360], [1050, 376], [1072, 368]], 1.2);
+  } });
+for (let i = 0; i < 5; i++) {
+  const y = 284 + i * 32, broken = i === 2;
+  // meat between the ribs
+  part(taper([[978, y + 18], [1040, y + 12], [1100 - i * 3, y + 26], [1128 - i * 5, y + 50]], [10, 12, 11, 8]), { col: MT, sh: [2, 2], ink: 1.6, top: false, tex: b => fibres(b, 0.3, 0.15) });
+  // the rib: bone sweeping round and down the flank, scorched toward the tip
+  const rib = broken ? [[972, y + 6], [1020, y - 6], [1062, y - 2]] : [[972, y + 6], [1020, y - 7], [1080, y - 2], [1122 - i * 3, y + 18], [1140 - i * 6, y + 46]];
+  if (broken) { const e = rib[2]; part([[e[0] - 4, e[1] - 7], [e[0] + 10, e[1] - 4], [e[0] + 4, e[1] + 1], [e[0] + 12, e[1] + 6], [e[0] - 3, e[1] + 7]], { col: { base: BONE, shade: BONE_S, light: '#fff6e6' }, sh: [1, 1], ink: 2, top: false, rim: false });
+    part(taper([[1098, y + 10], [1124, y + 26], [1134, y + 50]], [11, 10, 8], 0.4), { col: { base: BONE, shade: BONE_S, light: '#fff6e6' }, sh: [2, 3], ink: 2.2 }); }
+  part(taper(rib, broken ? [16, 15, 14] : [16, 15, 14, 12, 9], 0.5), { col: { base: BONE, shade: BONE_S, light: '#fff6e6' }, sh: [3, 4], ink: 2.4, topW: 3,
+    tex: b => { const g = ctx.createLinearGradient(b.x0, 0, b.x1, 0); g.addColorStop(0.6, 'rgba(0,0,0,0)'); g.addColorStop(1, rgba('#1a0d0a', 0.85)); ctx.fillStyle = g; ctx.fillRect(b.x0, b.y0, b.w, b.h); } });
+}
+// sternum, cracked
+part(taper([[966, 262], [962, 350], [966, 440]], [22, 20, 16], 0.4), { col: { base: BONE, shade: BONE_S, light: '#fff6e6' }, sh: [3, 4], ink: 2.6, tex: b => { crackLine([[b.x0 + 6, b.y0 + 40], [b.x0 + 14, b.y0 + 60], [b.x0 + 8, b.y0 + 90]], 1); } });
+// torn hide curling back off the cavity
+for (const [x, y, a] of [[1150, 340, 0.4], [1128, 425, 1.0], [1060, 452, 1.5], [990, 445, 1.9]]) {
+  part(taper([[x, y], [x + Math.cos(a) * 16, y + Math.sin(a) * 16 + 10], [x + Math.cos(a) * 22, y + Math.sin(a) * 22 + 28]], [22, 14, 4], 0.3), { col: CH, sh: [3, 3], ink: 2, rimW: 3, tex: b => crust(b, { cell: 8, hole: 0.1, ash: 0.2 }) });
+}
+// abdomen: slabs of muscle, a gut wound leaking fat and fire
+part(blob(1020, 432, 30, 16, 12, 0.15), { col: { base: '#1c0605', shade: '#0c0202', light: '#3a0c08' }, sh: [3, 3], top: false, rim: false, ink: 2.6, tex: b => { glow(1020, 432, 40, EMB, 0.8); glow(1020, 434, 16, HOT, 0.9); } });
+for (let i = 0; i < 5; i++) { const x = 1000 + i * 10, l = rnd(16, 40); part(taper([[x, 440], [x + rnd(-3, 3), 440 + l * 0.6], [x + rnd(-2, 2), 440 + l]], [6, 5, 7], 0.9), { col: { base: FAT, shade: '#9a6a48', light: '#fff0d8' }, sh: [1.5, 1.5], ink: 1.4, top: false, rimA: 0.8 }); }
+// shoulder caps: great rounded deltoids, ash lying thick on top
+for (const k of [-1, 1]) {
+  const sx = 960 + k * 228, sy = 300;
+  part(blob(sx, sy, 66, 56, 16, 0.05), { col: MT, sh: [k * 7, 9], topW: 14, topA: 0.6, tex: b => { fibres(b, 1.3 + k * 0.3, 0.06); crust(b, { cell: 20, hole: 0.12, ash: 0.6 }); ashDust(b, 0.5, 160); } });
+  // what is left of his pauldron: an iron rim fused into the shoulder, its rivets glowing
+  part(taper([[sx - 54, sy - 22], [sx, sy - 48], [sx + 54, sy - 22]], [14, 16, 14], 0.4), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [2, 3], ink: 2.4, topA: 0.7,
+    after: b => { for (let i = 0; i < 5; i++) { const t = i / 4, x = lerp(sx - 48, sx + 48, t), y = sy - 22 - Math.sin(t * Math.PI) * 25; glow(x, y, 6, HOT, 0.8); } } });
+}
+
+/* --- head: hung low between the shoulders, a gaol-cage helm fused to the skull --- */
+{
+  const hx = 960, hy = 258;
+  glow(hx, hy + 30, 110, EMB, 0.25);
+  // neck cords, seen behind the jaw
+  for (const dx of [-30, -12, 12, 30]) part(taper([[hx + dx, hy - 10], [hx + dx * 1.2, hy + 40]], [12, 14], 0.3), { col: MT, sh: [2, 2], ink: 1.8, tex: b => fibres(b, 1.57, 0.2), top: false });
+  // the skull: burnt black, bone showing at the brow
+  const skull = [[hx, hy - 58], [hx + 40, hy - 48], [hx + 52, hy - 12], [hx + 46, hy + 22], [hx + 30, hy + 40], [hx - 30, hy + 40], [hx - 46, hy + 22], [hx - 52, hy - 12], [hx - 40, hy - 48]];
+  part(skull, { col: CH, sh: [5, 6], topW: 9, topA: 0.6, tex: b => { crust(b, { cell: 12, hole: 0.15, ash: 0.55 }); ashDust(b, 0.4, 80); } });
+  part([[hx - 36, hy - 42], [hx, hy - 54], [hx + 36, hy - 42], [hx + 30, hy - 20], [hx, hy - 26], [hx - 30, hy - 20]], { col: { base: BONE, shade: BONE_S, light: '#fff6e6' }, sh: [3, 3], ink: 2.2, tex: b => { ashDust(b, 0.6, 30); crackLine([[hx - 8, hy - 50], [hx - 2, hy - 38], [hx - 10, hy - 28]], 0.9); } });
+  // seared flesh hanging off the cheekbones
+  for (const k of [-1, 1]) part(taper([[hx + k * 40, hy + 2], [hx + k * 44, hy + 26], [hx + k * 38, hy + 52]], [16, 12, 4], 0.3), { col: MT, sh: [2, 3], ink: 1.8, tex: b => fibres(b, 1.57, 0.2) });
+  // sockets, and the light in them
+  for (const k of [-1, 1]) {
+    const ex = hx + k * 20, ey = hy - 6;
+    part(blob(ex, ey, 14, 12, 10, 0.1), { col: { base: '#060201', shade: '#000', light: '#100403' }, sh: [1, 1], top: false, rim: false, ink: 2 });
+    glow(ex, ey, 26, EMB, 0.8); glow(ex, ey, 8, CORE, 1);
+    ctx.fillStyle = CORE; ctx.beginPath(); ctx.ellipse(ex, ey, 4, 2.6, 0, 0, TAU); ctx.fill();
+  }
+  // the jaw: unhinged, hanging open on the furnace in his throat
+  part([[hx - 30, hy + 22], [hx + 30, hy + 22], [hx + 34, hy + 56], [hx + 18, hy + 74], [hx - 18, hy + 74], [hx - 34, hy + 56]], { col: { base: '#140403', shade: '#050101', light: '#2a0a06' }, sh: [2, 2], top: false, rim: false, ink: 2.6,
+    tex: () => { glow(hx, hy + 48, 40, EMB, 0.9); glow(hx, hy + 50, 16, HOT, 1); } });
+  part([[hx - 32, hy + 56], [hx + 32, hy + 56], [hx + 24, hy + 76], [hx, hy + 82], [hx - 24, hy + 76]], { col: { base: '#9c8a70', shade: '#4a3a2c', light: '#cdbb9c' }, sh: [3, 3], ink: 2.4, rimA: 0.7, tex: b => { const g = ctx.createLinearGradient(0, b.y0, 0, b.y1); g.addColorStop(0.3, 'rgba(0,0,0,0)'); g.addColorStop(1, rgba('#1a0d0a', 0.7)); ctx.fillStyle = g; ctx.fillRect(b.x0, b.y0, b.w, b.h); } });
+  for (let i = 0; i < 6; i++) { const x = hx - 25 + i * 10; part([[x, hy + 22], [x + 8, hy + 22], [x + 4, hy + 34 + rnd(0, 6)]], { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [1, 1], ink: 1.3, top: false, rim: false }); }
+  for (let i = 0; i < 5; i++) { const x = hx - 20 + i * 10; part([[x, hy + 58], [x + 8, hy + 58], [x + 4, hy + 48 - rnd(0, 5)]], { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [1, 1], ink: 1.3, top: false, rim: false }); }
+  // strings of melted fat between the jaws
+  for (const dx of [-14, 6, 18]) { ctx.strokeStyle = rgba(HOT, 0.9); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hx + dx, hy + 34); ctx.quadraticCurveTo(hx + dx + 3, hy + 46, hx + dx, hy + 56); ctx.stroke(); }
+  // a drop falling off the jaw
+  part(taper([[hx + 4, hy + 88], [hx + 4, hy + 104]], [5, 7], 0.9), { col: { base: HOT, shade: EMB, light: CORE }, sh: [1, 1], ink: 1.2, top: false, rim: false });
+  // the cage: gaol bars fused over the face, riveted to a brow band
+  const ironC = { base: IRON, shade: '#151211', light: IRON_L };
+  part(taper([[hx - 52, hy - 22], [hx, hy - 32], [hx + 52, hy - 22]], [12, 13, 12], 0.4), { col: ironC, sh: [2, 2], ink: 2.4, topA: 0.7 });
+  for (const dx of [-36, -6, 24]) part(taper([[hx + dx, hy - 30], [hx + dx + 2, hy + 10], [hx + dx - 1, hy + 40]], [8, 8, 7], 0.4), { col: ironC, sh: [2, 2], ink: 2, topA: 0.6, rimW: 3 });
+  part(taper([[hx - 48, hy + 14], [hx, hy + 18], [hx + 48, hy + 14]], [8, 8, 8], 0.4), { col: ironC, sh: [2, 2], ink: 2, topA: 0.6 });
+  for (const dx of [-36, -6, 24]) { glow(hx + dx, hy - 26, 5, HOT, 0.9); }
+  // the bars sag: one has melted and dripped
+  ctx.strokeStyle = rgba(HOT, 0.9); ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(hx + 23, hy + 44); ctx.lineTo(hx + 23, hy + 56); ctx.stroke();
+}
+
+/* --- his left arm (our right): raised, palm open, fire in the hand --- */
+{
+  const sh = [1196, 312], el = [1278, 440], wr = [1262, 300];
+  const up = taper([sh, [1250, 372], el], [92, 88, 64]);
+  const ub = [[1240, 380, 22, 34]];
+  part(up, { col: MT, sh: [8, 9], tex: b => { fibres(b, 1.0, 0.1); wounds(ub); crust(b, { cell: 26, ash: 0.35, bare: ub }); } });
+  const fore = taper([el, [1290, 380], wr], [70, 76, 54]);
+  const fb = [[1292, 392, 14, 28]];
+  part(fore, { col: MT, sh: [7, 4], tex: b => { fibres(b, -1.6, 0.1); wounds(fb); crust(b, { cell: 22, ash: 0.25, bare: fb }); } });
+  // elbow: bone breaking through
+  part(blob(1282, 446, 18, 14, 10, 0.1), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [3, 3], ink: 2.2, tex: b => ashDust(b, 0.5, 15) });
+  // broken manacle on the wrist, a length of chain hanging off it
+  part(taper([[1232, 318], [1262, 326], [1294, 318]], [22, 24, 22], 0.3), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [2, 3], ink: 2.6, topA: 0.7 });
+  for (let i = 0; i < 6; i++) { const cx = 1296 + i * 3, cy = 336 + i * 15; ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.beginPath(); ctx.ellipse(cx, cy, i % 2 ? 4 : 6, 8, 0.2, 0, TAU); ctx.stroke(); ctx.lineWidth = 2.6; ctx.strokeStyle = i % 2 ? IRON_L : '#8a7f78'; ctx.stroke(); }
+  // the hand: a broad palm, four long fingers curling round the fire, a thumb, every joint and claw
+  glow(1266, 214, 190, EMB, 0.45);
+  const palm = [[1214, 304], [1222, 262], [1258, 244], [1300, 246], [1326, 272], [1318, 306], [1290, 326], [1240, 326]];
+  part(palm, { col: MT, sh: [5, 5], ink: 3, tex: b => { fibres(b, -1.5, 0.14); crust(b, { cell: 14, ash: 0.2, bare: [[1268, 290, 26, 16]] }); } });
+  // the fire, held between the fingers
+  flame(1268, 262, 132, 80); flame(1244, 262, 70, 34); flame(1294, 262, 80, 36);
+  const fing = [
+    { base: [1224, 270], dir: -2.45, curl: 0.2, seg: [40, 32, 26], w: 25 },
+    { base: [1250, 250], dir: -1.98, curl: 0.14, seg: [44, 36, 28], w: 26 },
+    { base: [1288, 248], dir: -1.3, curl: -0.14, seg: [42, 34, 27], w: 25 },
+    { base: [1318, 266], dir: -0.78, curl: -0.2, seg: [36, 29, 23], w: 22 },
+  ];
+  for (const f of fing) {
+    let [x, y] = f.base, a = f.dir; const pts = [[x, y]];
+    for (let i = 0; i < 3; i++) { x += Math.cos(a) * f.seg[i]; y += Math.sin(a) * f.seg[i]; pts.push([x, y]); a += f.curl; }
+    // knuckles swell at each joint
+    part(taper(pts, [f.w, f.w * 1.08, f.w * 0.84, f.w * 0.92, f.w * 0.72, f.w * 0.76, f.w * 0.56], 0.6), { col: MT, sh: [3, 3], ink: 2.6, topW: 3,
+      tex: b => { fibres(b, f.dir, 0.15); crust(b, { cell: 13, ash: 0.15 }); } });
+    // joint creases, so the segments read
+    let aa = f.dir;
+    for (let i = 1; i < 3; i++) { aa += f.curl; const [jx, jy] = pts[i], na = aa + Math.PI / 2; ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(jx + Math.cos(na) * f.w * 0.36, jy + Math.sin(na) * f.w * 0.36); ctx.quadraticCurveTo(jx + Math.cos(aa) * 4, jy + Math.sin(aa) * 4, jx - Math.cos(na) * f.w * 0.36, jy - Math.sin(na) * f.w * 0.36); ctx.stroke(); }
+    // the claw: bone, hooked inward over the flame
+    const e = pts[3], ca = a; part(taper([e, [e[0] + Math.cos(ca) * 14, e[1] + Math.sin(ca) * 14], [e[0] + Math.cos(ca + f.curl * 2.4) * 26, e[1] + Math.sin(ca + f.curl * 2.4) * 26]], [13, 8, 1], 0.2), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [2, 2], ink: 2, rim: false });
+  }
+  // thumb out to the side
+  part(taper([[1222, 306], [1196, 290], [1180, 262], [1176, 236]], [30, 25, 20, 15], 0.6), { col: MT, sh: [3, 3], ink: 2.6, tex: b => { fibres(b, -1.8, 0.15); crust(b, { cell: 13, ash: 0.15 }); } });
+  ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(1170, 266); ctx.quadraticCurveTo(1180, 262, 1192, 268); ctx.stroke();
+  part(taper([[1176, 236], [1176, 220], [1188, 208]], [12, 7, 1], 0.2), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [2, 2], ink: 2, rim: false });
+  glow(1268, 226, 80, HOT, 0.35);
+}
+
+/* --- his right arm (our left): hanging, dragging the slab --- */
+{
+  const sh = [722, 312], el = [668, 476], wr = [650, 616];
+  const lb = [[688, 396, 24, 38]], lf = [[640, 550, 16, 30]];
+  part(taper([sh, [686, 390], el], [96, 92, 66]), { col: MT, sh: [8, 9], tex: b => { fibres(b, 1.8, 0.1); wounds(lb); crust(b, { cell: 26, ash: 0.35, bare: lb }); } });
+  part(taper([el, [646, 548], wr], [76, 84, 58]), { col: MT, sh: [7, 6], tex: b => { fibres(b, 1.7, 0.1); wounds(lf); crust(b, { cell: 22, ash: 0.25, bare: lf }); } });
+  part(blob(664, 480, 18, 14, 10, 0.1), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [3, 3], ink: 2.2 });
+  // manacle with its chain dragging
+  part(taper([[620, 606], [650, 616], [682, 608]], [24, 26, 24], 0.3), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [2, 3], ink: 2.6, topA: 0.7 });
+  for (let i = 0; i < 9; i++) { const cx = 690 + i * 8, cy = 624 + i * 18 - i * i * 0.6; ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.beginPath(); ctx.ellipse(cx, cy, i % 2 ? 4 : 6, 8, -0.4, 0, TAU); ctx.stroke(); ctx.lineWidth = 2.6; ctx.strokeStyle = i % 2 ? IRON_L : '#8a7f78'; ctx.stroke(); }
+
+  // the slab: a cleaver hammered out of the keep's iron door, heat still in its edge
+  ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#050201'; smoothPath([[640, 700], [380, 870], [330, 920], [420, 930], [700, 760]]); ctx.fill(); ctx.restore();
+  part([[630, 668], [612, 688], [430, 820], [362, 892], [348, 920], [396, 916], [470, 880], [560, 846], [654, 780], [688, 712]],
+    { col: { base: '#2c2422', shade: '#120c0b', light: '#544642' }, sh: [6, -8], topW: 4, rimW: 7, rimA: 0.8,
+      tex: b => {
+        // door studs and bands, still visible in the hammered iron
+        for (let i = 0; i < 4; i++) { const t = 0.15 + i * 0.22, x = lerp(640, 400, t), y = lerp(712, 880, t); part(taper([[x - 26, y - 24], [x + 34, y + 26]], [7, 7], 0.3), { col: { base: '#3d3330', shade: '#151211', light: '#6e6560' }, sh: [1, 1], ink: 1.4, rim: false, top: false }); ctx.fillStyle = '#7a6e68'; ctx.beginPath(); ctx.arc(x + 8, y + 2, 4, 0, TAU); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.2; ctx.stroke(); }
+        // the edge, still hot from his hand
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createLinearGradient(600, 820, 560, 760); g.addColorStop(0, rgba(EMB, 0.9)); g.addColorStop(1, rgba(EMB, 0)); ctx.fillStyle = g; ctx.fillRect(b.x0, b.y0, b.w, b.h);
+        ctx.restore();
+        for (let i = 0; i < 9; i++) crackLine(jag(rnd(420, 640), rnd(790, 860), -0.6, rnd(14, 26), 3), 1);
+      } });
+  // the bright edge itself
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = rgba(HOT, 0.9); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(396, 916); ctx.lineTo(470, 880); ctx.lineTo(560, 846); ctx.lineTo(654, 780); ctx.stroke(); ctx.restore();
+  // the tip, dug into the floor, throwing sparks
+  glow(360, 912, 70, EMB, 0.6);
+  for (let i = 0; i < 18; i++) { const a = -Math.PI / 2 + rnd(-1.2, 0.6), l = rnd(10, 46); ctx.strokeStyle = rgba(HOT, rnd(0.5, 1)); ctx.lineWidth = rnd(1, 2.2); ctx.beginPath(); ctx.moveTo(360, 912); ctx.lineTo(360 + Math.cos(a) * l, 912 + Math.sin(a) * l); ctx.stroke(); }
+  // grip: wrapped in burnt cloth
+  part(taper([[686, 604], [640, 680]], [22, 22], 0.4), { col: { base: '#3a2419', shade: '#1a0d08', light: '#5e3e2c' }, sh: [2, 2], ink: 2.4, tex: b => { for (let i = 0; i < 8; i++) { ctx.strokeStyle = rgba('#120804', 0.8); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(b.x0, b.y0 + i * 11); ctx.lineTo(b.x1, b.y0 + i * 11 + 10); ctx.stroke(); } } });
+  // the fist: palm round the grip, four fingers curled over the front, thumb locked on top
+  part(blob(664, 636, 36, 32, 14, 0.05), { col: MT, sh: [4, 5], ink: 3, tex: b => { fibres(b, 1.2, 0.12); crust(b, { cell: 11, hole: 0.3, ash: 0.4 }); } });
+  for (let i = 0; i < 4; i++) {
+    const y = 612 + i * 17, x = 636 + i * 3;
+    part(taper([[x - 6, y], [x + 20, y - 6], [x + 36, y + 6], [x + 32, y + 18]], [19, 21, 18, 15], 0.6), { col: MT, sh: [2, 2], ink: 2.2, topW: 2, tex: b => { fibres(b, 0, 0.2); crust(b, { cell: 10, ash: 0.1 }); } });
+    part(taper([[x + 32, y + 16], [x + 24, y + 24]], [9, 1], 0.2), { col: { base: BONE, shade: BONE_S, light: '#fff' }, sh: [1, 1], ink: 1.4, rim: false });
+  }
+  part(taper([[690, 612], [676, 600], [656, 600]], [17, 14, 11], 0.6), { col: MT, sh: [2, 2], ink: 2.2, tex: b => { fibres(b, 0, 0.2); crust(b, { cell: 10, ash: 0.2 }); } });
+}
+
+// shoulder flames: fire licking off the backs of his shoulders
+for (const [x, y] of [[740, 262], [1180, 262]]) { glow(x, y, 90, EMB, 0.35); ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < 26; i++) { const yy = y - rnd(0, 120), xx = x + rnd(-40, 40) + (y - yy) * 0.25; ctx.fillStyle = rgba(rnd() < 0.5 ? HOT : EMB, rnd(0.4, 1) * (1 - (y - yy) / 140)); ctx.beginPath(); ctx.arc(xx, yy, rnd(1.2, 3), 0, TAU); ctx.fill(); } ctx.restore(); }
+
+/* ========================== THE CHALLENGER ========================== */
+{
+  const x = 1440, y = 905;
+  // the player ring, like Hades marks you
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.5); ctx.lineWidth = 3; ctx.strokeStyle = rgba('#7dd3fc', 0.8); ctx.beginPath(); ctx.arc(0, 0, 34, 0, TAU); ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = rgba('#e0f2fe', 0.6); ctx.beginPath(); ctx.arc(0, 0, 40, 0, TAU); ctx.stroke(); ctx.restore();
+  glow(x, y - 30, 90, '#7dd3fc', 0.18);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(x + 6, y + 2, 22, 8, 0, 0, TAU); ctx.fill();
+  const cold = { base: '#55657a', shade: '#2a3341', light: '#94a3b8' };
+  part(taper([[x - 6, y - 26], [x - 9, y - 2]], [8, 7]), { col: { base: '#2a2e38', shade: '#14161c', light: '#4a5160' }, sh: [1, 1], ink: 1.6, rimW: 2 });
+  part(taper([[x + 6, y - 26], [x + 9, y - 2]], [8, 7]), { col: { base: '#2a2e38', shade: '#14161c', light: '#4a5160' }, sh: [1, 1], ink: 1.6, rimW: 2 });
+  part([[x - 18, y - 22], [x - 12, y - 58], [x, y - 64], [x + 12, y - 58], [x + 18, y - 22], [x, y - 16]], { col: cold, sh: [3, 3], ink: 2, rimW: 3, rimA: 0.7 });
+  part(blob(x, y - 70, 10, 10, 10, 0.04), { col: { base: '#d6cfc4', shade: '#7a7268', light: '#fff' }, sh: [2, 2], ink: 1.8, rimW: 2 });
+  part([[x - 11, y - 72], [x, y - 84], [x + 11, y - 72], [x + 6, y - 66], [x - 6, y - 66]], { col: cold, sh: [2, 2], ink: 1.8 });
+  // the blade, cold light
+  part(taper([[x + 14, y - 44], [x + 44, y - 94]], [5, 2], 0.3), { col: { base: '#e0f2fe', shade: '#7dd3fc', light: '#fff' }, sh: [1, 1], ink: 1.6, rim: false });
+  glow(x + 30, y - 70, 30, '#7dd3fc', 0.45);
+}
+
+/* ========================== AIR ========================== */
+// heat haze & smoke drifting off him, top-down: soft grey bands sliding right
+for (let i = 0; i < 18; i++) { const x = rnd(600, 1500), y = rnd(80, 600); ctx.save(); ctx.globalAlpha = rnd(0.05, 0.12); ctx.fillStyle = '#9b918a'; smoothPath(blob(x, y, rnd(60, 160), rnd(14, 30), 12, 0.25)); ctx.fill(); ctx.restore(); }
+// embers rising, ash falling
+ctx.save(); ctx.globalCompositeOperation = 'lighter';
+for (let i = 0; i < 260; i++) { const x = rnd(0, W), y = rnd(0, H), s = rnd(1, 3.2); ctx.fillStyle = rgba(rnd() < 0.5 ? HOT : EMB, rnd(0.3, 0.95)); ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); }
+for (let i = 0; i < 70; i++) { const x = rnd(650, 1350), y = rnd(80, 560), s = rnd(1.5, 3.5); ctx.fillStyle = rgba(HOT, rnd(0.5, 1)); ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); }
+ctx.restore();
+for (let i = 0; i < 420; i++) { const s = rnd(1, 3.4); ctx.fillStyle = rgba(rnd() < 0.5 ? ASH_L : ASH, rnd(0.25, 0.7)); ctx.save(); ctx.translate(rnd(0, W), rnd(0, H)); ctx.rotate(rnd(0, TAU)); ctx.fillRect(-s, -s * 0.4, s * 2, s * 0.8); ctx.restore(); }
+
+// grade: warm the mids, crush the corners
+{ ctx.save(); ctx.globalCompositeOperation = 'soft-light'; const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#3a1a40'); g.addColorStop(0.6, '#ff8a3a'); g.addColorStop(1, '#2a0c06'); ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+{ const g = ctx.createRadialGradient(960, 540, 380, 960, 540, 1150); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(4,1,0,0.85)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+
+// boss bar, the way the game names a boss on arrival
+{
+  ctx.textAlign = 'center'; ctx.font = '700 22px "DejaVu Serif", Georgia, serif'; ctx.letterSpacing = '8px';
+  ctx.fillStyle = INK; ctx.fillText('THE CINDERED WARDEN', 962, 1032); ctx.fillStyle = HOT; ctx.fillText('THE CINDERED WARDEN', 960, 1030);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(660, 1044, 600, 12); ctx.strokeStyle = rgba(HOT, 0.8); ctx.lineWidth = 1.5; ctx.strokeRect(660, 1044, 600, 12);
+  const g = ctx.createLinearGradient(660, 0, 1260, 0); g.addColorStop(0, '#b4260c'); g.addColorStop(1, EMB); ctx.fillStyle = g; ctx.fillRect(662, 1046, 596, 8);
+  ctx.font = '600 11px "DejaVu Sans", sans-serif'; ctx.letterSpacing = '4px'; ctx.fillStyle = rgba(ASH_L, 0.8); ctx.fillText('KEEPER OF THE BURNT GAOL', 960, 1004);
+}
+document.title = 'ready';
+</script>

@@ -1,0 +1,482 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{width:1920px;height:1080px;display:block}</style>
+<canvas id="c" width="3840" height="2160"></canvas>
+<script>
+/* THE CINDERED WARDEN — arena render, 3/4 top-down game camera.
+   Drawn in 1920x1080 units at 2x. Ink outline, hard cel shadow, fire as
+   underlight, ash on every surface that faces the sky. */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+ctx.scale(2, 2);
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+let sd = 1234567;
+const rnd = (a = 1, b = 0) => { sd = (sd * 16807) % 2147483647; return b + (sd / 2147483647) * (a - b); };
+const lerp = (a, b, t) => a + (b - a) * t;
+function rgba(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+
+const INK = '#100605';
+const CH = { base: '#2e201c', shade: '#160d0b', light: '#4d3b35' };
+const MT = { base: '#93291d', shade: '#4c120d', light: '#cf563b' };
+const FAT = '#e0b088', BONE = '#ddcdb0', BONE_S = '#8a7660', IRON = '#36312f', IRON_L = '#6e6560';
+const ASH = '#a59b93', ASH_L = '#d6cec4';
+const EMB = '#ff7f24', HOT = '#ffcf6e', CORE = '#fff3cf';
+
+/* ---------- geometry ---------- */
+function smoothPath(pts, closed = true, keep = false) {
+  const n = pts.length; if (!keep) ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  const P = i => closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    ctx.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+                      p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+  if (closed) ctx.closePath();
+}
+// resample a spine as a smooth curve, then give it widths: a limb, finger, branch, tendon
+function spineCurve(sp, k = 8) {
+  const out = [], n = sp.length, P = i => sp[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    for (let s = 0; s < k; s++) {
+      const t = s / k, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map(d => 0.5 * ((2 * p1[d]) + (-p0[d] + p2[d]) * t + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3)));
+    }
+  }
+  out.push(sp[n - 1]); return out;
+}
+function taper(sp, ws, cap = 0.7) {
+  const c = spineCurve(sp), n = c.length, L = [], R = [];
+  const wAt = t => { const f = t * (ws.length - 1), i = Math.min(ws.length - 2, Math.floor(f)); return lerp(ws[i], ws[i + 1], f - i); };
+  for (let i = 0; i < n; i++) {
+    const a = c[Math.max(0, i - 1)], b = c[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    const w = wAt(i / (n - 1)) / 2;
+    L.push([c[i][0] - dy * w, c[i][1] + dx * w]); R.push([c[i][0] + dy * w, c[i][1] - dx * w]);
+  }
+  const t0 = [c[0][0] - c[1][0], c[0][1] - c[1][1]], l0 = Math.hypot(...t0) || 1;
+  const t1 = [c[n - 1][0] - c[n - 2][0], c[n - 1][1] - c[n - 2][1]], l1 = Math.hypot(...t1) || 1;
+  const sCap = [c[0][0] + t0[0] / l0 * ws[0] / 2 * cap, c[0][1] + t0[1] / l0 * ws[0] / 2 * cap];
+  const eCap = [c[n - 1][0] + t1[0] / l1 * ws[ws.length - 1] / 2 * cap, c[n - 1][1] + t1[1] / l1 * ws[ws.length - 1] / 2 * cap];
+  // thin out the points so the smooth path stays clean
+  const step = 3, thin = a => a.filter((_, i) => i % step === 0 || i === a.length - 1);
+  return [...thin(L), eCap, ...thin(R).reverse(), sCap];
+}
+function blob(cx, cy, rx, ry, n = 14, jit = 0.08, rot = 0) {
+  const p = []; for (let i = 0; i < n; i++) { const t = rot + i * TAU / n, r = 1 + rnd(-jit, jit); p.push([cx + Math.cos(t) * rx * r, cy + Math.sin(t) * ry * r]); } return p;
+}
+function bbox(pts) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 }; }
+function shifted(pts, dx, dy) { return pts.map(([x, y]) => [x + dx, y + dy]); }
+
+/* ---------- the shading model ----------
+   base fill -> texture -> hard shadow (lower right) -> ash light (top edge,
+   the sky side) -> fire rim (bottom edge, the lava side) -> ink. */
+function part(pts, o) {
+  const c = o.col || CH, sh = o.sh || [9, 11], ink = o.ink === undefined ? 3.2 : o.ink;
+  ctx.save();
+  smoothPath(pts); ctx.fillStyle = c.base; ctx.fill(); ctx.clip();
+  if (o.tex) o.tex(bbox(pts));
+  // hard shadow: everything not covered by the shape nudged toward the light
+  ctx.beginPath(); ctx.rect(-5000, -5000, 10000, 10000);
+  smoothPath(shifted(pts, -sh[0], -sh[1]), true, true); ctx.fillStyle = rgba(c.shade, o.shA || 0.62); ctx.fill('evenodd');
+  // a softer second band for form
+  ctx.beginPath(); ctx.rect(-5000, -5000, 10000, 10000);
+  smoothPath(shifted(pts, -sh[0] * 2.4, -sh[1] * 2.4), true, true); ctx.fillStyle = rgba(c.shade, 0.22); ctx.fill('evenodd');
+  // the sky side: a thin band of light where the ash sits
+  if (o.top !== false) { ctx.beginPath(); ctx.rect(-5000, -5000, 10000, 10000); smoothPath(shifted(pts, 2, o.topW || 5), true, true); ctx.fillStyle = rgba(o.topCol || ASH_L, (o.topA || 0.5) * 0.55); ctx.fill('evenodd'); }
+  // the lava side: fire coming up off the floor
+  if (o.rim !== false) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath(); ctx.rect(-5000, -5000, 10000, 10000); smoothPath(shifted(pts, o.rimX || 0, -(o.rimW || 5)), true, true); ctx.fillStyle = rgba(EMB, o.rimA || 0.55); ctx.fill('evenodd');
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  if (o.after) o.after(bbox(pts));
+  ctx.restore();
+  if (ink) { smoothPath(pts); ctx.strokeStyle = INK; ctx.lineWidth = ink; ctx.lineJoin = 'round'; ctx.stroke(); }
+}
+function glow(x, y, r, col, a, mode = 'lighter') { ctx.save(); ctx.globalCompositeOperation = mode; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, rgba(col, a)); g.addColorStop(1, rgba(col, 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.restore(); }
+function eglow(x, y, rx, ry, col, a) { ctx.save(); ctx.translate(x, y); ctx.scale(1, ry / rx); glow(0, 0, rx, col, a); ctx.restore(); }
+
+/* ---------- textures ---------- */
+// muscle fibre: fine strokes along the muscle, light and dark
+function fibres(b, ang, dens = 0.05, col = MT) {
+  const n = Math.round(b.w * b.h * dens / 40);
+  for (let i = 0; i < n; i++) {
+    const x = rnd(b.x0 - 10, b.x1 + 10), y = rnd(b.y0 - 10, b.y1 + 10), L = rnd(14, 44), a = ang + rnd(-0.15, 0.15);
+    ctx.strokeStyle = rgba(rnd() < 0.5 ? col.shade : col.light, rnd(0.25, 0.6)); ctx.lineWidth = rnd(0.8, 2.2);
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + Math.cos(a) * L / 2 + rnd(-3, 3), y + Math.sin(a) * L / 2 + rnd(-3, 3), x + Math.cos(a) * L, y + Math.sin(a) * L); ctx.stroke();
+  }
+  // glisten: short bright ticks
+  for (let i = 0; i < n / 6; i++) { const x = rnd(b.x0, b.x1), y = rnd(b.y0, b.y1); ctx.strokeStyle = rgba('#ffd2b0', rnd(0.2, 0.5)); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang) * 6, y + Math.sin(ang) * 6); ctx.stroke(); }
+}
+// burnt crust: plates of char lifting off raw meat, glowing in the seams
+function crust(b, o = {}) {
+  const cell = o.cell || 24, hole = (o.hole === undefined ? 0.16 : o.hole) * 0.25, ashTop = o.ash === undefined ? 0.45 : o.ash, bare = o.bare || [];
+  const inBare = (x, y) => { let m = 9; for (const [bx, by, rx, ry] of bare) m = Math.min(m, Math.hypot((x - bx) / rx, (y - by) / ry)); return m; };
+  // the seams first: hot light between the plates
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(0, b.y0, 0, b.y1); g.addColorStop(0, rgba(EMB, 0.04)); g.addColorStop(1, rgba(EMB, 0.2));
+  ctx.fillStyle = g; ctx.fillRect(b.x0 - 10, b.y0 - 10, b.w + 20, b.h + 20); ctx.restore();
+  if (o.fib !== undefined) fibres(b, o.fib, 0.035);
+  let row = 0;
+  for (let y = b.y0 - cell; y < b.y1 + cell; y += cell * 0.78, row++) {
+    for (let x = b.x0 - cell + (row % 2) * cell * 0.5; x < b.x1 + cell; x += cell) {
+      if (rnd() < hole) continue;
+      const px = x + rnd(-cell * 0.25, cell * 0.25), py = y + rnd(-cell * 0.25, cell * 0.25);
+      const bd = inBare(px, py); if (bd < 1) continue;
+      const edge = bd < 1.35, r = cell * rnd(0.56, 0.72) * (edge ? 0.8 : 1);
+      const p = blob(px, py, r, r * rnd(0.7, 0.95), 7, 0.28, rnd(0, 1));
+      ctx.beginPath(); p.forEach(([a, c], i) => i ? ctx.lineTo(a, c) : ctx.moveTo(a, c)); ctx.closePath();
+      ctx.fillStyle = rnd() < 0.5 ? CH.base : '#261916'; ctx.fill();
+      ctx.strokeStyle = edge ? rgba(EMB, 0.85) : rgba('#0b0504', 0.9); ctx.lineWidth = edge ? 1.8 : 1.4; ctx.stroke();
+      // the plate's own little shadow, lower right
+      ctx.strokeStyle = rgba('#050202', 0.55); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]); ctx.lineTo(p[1][0], p[1][1]); ctx.lineTo(p[2][0], p[2][1]); ctx.stroke();
+      // each plate catches the sky on its upper lip, and holds ash if it faces up
+      const up = (py - b.y0) / b.h < ashTop;
+      ctx.strokeStyle = rgba(up ? ASH_L : CH.light, up ? 0.7 : 0.6); ctx.lineWidth = up ? 2 : 1.3;
+      ctx.beginPath(); ctx.moveTo(p[4][0], p[4][1]); ctx.lineTo(p[5][0], p[5][1]); ctx.lineTo(p[6][0], p[6][1]); ctx.stroke();
+      if (up) for (let k = 0; k < 3; k++) { ctx.fillStyle = rgba(ASH_L, rnd(0.3, 0.7)); ctx.fillRect(px + rnd(-r, r) * 0.7, py + rnd(-r, 0) * 0.7, rnd(1, 2.4), rnd(1, 2.4)); }
+      // a crack across some plates
+      if (rnd() < 0.3) { ctx.strokeStyle = rgba(HOT, 0.7); ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(px - r * 0.5, py + rnd(-r, r) * 0.4); ctx.lineTo(px + rnd(-3, 3), py + rnd(-3, 3)); ctx.lineTo(px + r * 0.5, py + rnd(-r, r) * 0.4); ctx.stroke(); }
+    }
+  }
+}
+function wounds(bare) { for (const [x, y, rx, ry] of bare) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(x, y); ctx.scale(1, ry / rx); const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx); g.addColorStop(0, rgba('#ff5a20', 0.25)); g.addColorStop(1, rgba('#ff5a20', 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, TAU); ctx.fill(); ctx.restore(); } }
+function ashDust(b, frac = 0.35, n = 140) { for (let i = 0; i < n; i++) { const y = b.y0 + Math.pow(rnd(), 1.8) * b.h * frac; ctx.fillStyle = rgba(rnd() < 0.5 ? ASH_L : ASH, rnd(0.3, 0.8)); ctx.fillRect(rnd(b.x0, b.x1), y, rnd(1, 3), rnd(1, 2.5)); } }
+function crackLine(pts, w = 1.6) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.strokeStyle = rgba(EMB, 0.35); ctx.lineWidth = w * 4; ctx.stroke(); ctx.strokeStyle = rgba(HOT, 0.9); ctx.lineWidth = w; ctx.stroke(); ctx.restore(); }
+function jag(x, y, ang, len, n = 6) { const p = [[x, y]]; for (let i = 0; i < n; i++) { ang += rnd(-0.6, 0.6); x += Math.cos(ang) * len / n; y += Math.sin(ang) * len / n; p.push([x, y]); } return p; }
+
+/* ========================== THE ARENA ========================== */
+// iso floor: one plane, tiles on a 2:1 diamond
+const TU = [58, 31], TV = [-58, 31], ORG = [960, 120];
+const iso = (u, v) => [ORG[0] + u * TU[0] + v * TV[0], ORG[1] + u * TU[1] + v * TV[1]];
+ctx.fillStyle = '#120a08'; ctx.fillRect(0, 0, W, H);
+// lava under everything: where tiles are gone it shows
+{ const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#5a1806'); g.addColorStop(1, '#3a0e04'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+
+// the lava river: cuts the arena from the upper left, the way out into the world
+const river = []; for (let t = -6; t <= 24; t += 1) river.push(iso(t, -9 + Math.sin(t * 0.45) * 0.8 + t * 0.12));
+function riverMask(u, v) { const c = -9 + Math.sin(u * 0.45) * 0.8 + u * 0.12; return Math.abs(v - c) < 1.25; }
+// stone tiles
+for (let u = -14; u < 26; u++) for (let v = -18; v < 22; v++) {
+  if (riverMask(u + 0.5, v + 0.5)) continue;
+  const p = [iso(u, v), iso(u + 1, v), iso(u + 1, v + 1), iso(u, v + 1)];
+  const c = (p[0][0] + p[2][0]) / 2, m = (p[0][1] + p[2][1]) / 2;
+  if (c < -80 || c > W + 80 || m < -60 || m > H + 60) continue;
+  const gone = rnd() < 0.025 && Math.hypot(c - 960, m - 760) > 300;
+  if (gone) continue;
+  const dk = rnd(0, 1), inset = 1.6;
+  const q = p.map(([x, y]) => [lerp(x, c, 0.03) + rnd(-inset, inset), lerp(y, m, 0.03) + rnd(-inset, inset)]);
+  ctx.beginPath(); q.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
+  ctx.fillStyle = `rgb(${38 + dk * 16},${27 + dk * 10},${24 + dk * 8})`; ctx.fill();
+  ctx.strokeStyle = 'rgba(8,3,2,0.95)'; ctx.lineWidth = 2.2; ctx.stroke();
+  // bevel: top edges catch the sky, lower edges the lava
+  ctx.strokeStyle = rgba(ASH, 0.18); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(q[3][0], q[3][1] - 1); ctx.lineTo(q[0][0], q[0][1] + 1); ctx.lineTo(q[1][0], q[1][1] - 1); ctx.stroke();
+  // pitting and scorch
+  for (let k = 0; k < 4; k++) { ctx.fillStyle = rgba('#0c0605', rnd(0.2, 0.5)); ctx.beginPath(); ctx.ellipse(c + rnd(-24, 24), m + rnd(-12, 12), rnd(1, 4), rnd(0.6, 2), 0, 0, TAU); ctx.fill(); }
+  if (rnd() < 0.18) crackLine(jag(c + rnd(-20, 20), m + rnd(-8, 8), rnd(0, TAU), rnd(16, 40), 4), 1);
+}
+// river: crust islands floating on bright lava, banked by rock
+{
+  const top = river.map(([x, y]) => [x + 36, y - 30]), bot = river.map(([x, y]) => [x - 36, y + 30]);
+  const band = [...top, ...bot.reverse()];
+  ctx.save(); ctx.beginPath(); band.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.clip();
+  const g = ctx.createLinearGradient(0, 0, 600, 300); g.addColorStop(0, '#d9560e'); g.addColorStop(0.5, '#a8320a'); g.addColorStop(1, '#e06a16'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 26; i++) { const p = river[Math.floor(rnd(3, river.length - 3))]; ctx.strokeStyle = rgba(CORE, 0.55); ctx.lineWidth = rnd(1.5, 3); ctx.beginPath(); ctx.moveTo(p[0] + rnd(-40, 0), p[1] + rnd(-20, 20)); ctx.lineTo(p[0] + rnd(20, 60), p[1] + rnd(-30, -10)); ctx.stroke(); }
+  for (let i = 0; i < 110; i++) { const p = river[Math.floor(rnd(0, river.length))]; const bl = blob(p[0] + rnd(-34, 34), p[1] + rnd(-18, 18), rnd(8, 26), rnd(5, 13), 8, 0.3); smoothPath(bl); ctx.fillStyle = '#3b1408'; ctx.fill(); ctx.strokeStyle = rgba(HOT, 0.8); ctx.lineWidth = 1.5; ctx.stroke(); }
+  ctx.restore();
+  for (const edge of [top, bot.reverse()]) { ctx.beginPath(); edge.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); }
+  river.forEach(([x, y]) => glow(x, y, 120, EMB, 0.12));
+}
+
+function ring(x, y, r, hot) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.53);
+  ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.arc(0, 0, r - 9, 0, TAU, true); ctx.fillStyle = '#1c0c08'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, r - 9, 0, TAU); ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 8; ctx.strokeStyle = rgba(EMB, hot ? 0.8 : 0.35); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 2.5; ctx.strokeStyle = rgba(CORE, hot ? 0.9 : 0.4); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + 0.2; ctx.fillStyle = rgba(HOT, hot ? 0.9 : 0.5); ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 5, 0, TAU); ctx.fill(); }
+  if (hot) { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r); g.addColorStop(0, rgba(EMB, 0.32)); g.addColorStop(1, rgba(EMB, 0.05)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r - 9, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+// ash drifts: pale soft heaps along the floor
+for (let i = 0; i < 14; i++) {
+  const x = rnd(0, W), y = rnd(250, H), rx = rnd(40, 120);
+  const bl = blob(x, y, rx, rx * 0.4, 12, 0.18);
+  smoothPath(bl); ctx.fillStyle = rgba('#6f6660', 0.32); ctx.fill();
+  smoothPath(shifted(bl, 0, -4).map(([a, b]) => [lerp(a, x, 0.2), lerp(b, y, 0.25)])); ctx.fillStyle = rgba(ASH, 0.25); ctx.fill();
+  for (let k = 0; k < 20; k++) { ctx.fillStyle = rgba(ASH_L, rnd(0.2, 0.5)); ctx.fillRect(x + rnd(-rx, rx) * 0.8, y + rnd(-rx, rx) * 0.3, 2, 1.5); }
+}
+
+
+// props: braziers, broken pillars, a dead tree seen from above
+function brazier(x, y) {
+  eglow(x, y + 10, 160, 90, EMB, 0.35);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(x + 10, y + 34, 40, 14, 0, 0, TAU); ctx.fill();
+  part(taper([[x, y + 34], [x, y + 6]], [16, 12]), { col: { base: IRON, shade: '#151211', light: IRON_L }, top: false, sh: [3, 3] });
+  part(blob(x, y, 34, 17, 16, 0.02), { col: { base: IRON, shade: '#151211', light: IRON_L }, sh: [4, 3], top: false, rimW: 3 });
+  ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(0, 0, 27, 0, TAU); ctx.fillStyle = '#3a1206'; ctx.fill(); ctx.restore();
+  flame(x, y + 2, 64, 36);
+}
+function flame(x, y, h, w) {
+  const layers = [[1, '#e2400f', 0.95], [0.78, EMB, 0.95], [0.55, HOT, 0.95], [0.3, CORE, 1]];
+  glow(x, y - h * 0.4, h * 1.1, EMB, 0.35);
+  for (const [s, col, a] of layers) {
+    const hw = w * s / 2, hh = h * s;
+    ctx.beginPath(); ctx.moveTo(x - hw, y);
+    ctx.bezierCurveTo(x - hw * 1.3, y - hh * 0.4, x - hw * 0.2, y - hh * 0.55, x - hw * 0.5, y - hh * 0.85);
+    ctx.quadraticCurveTo(x - hw * 0.05, y - hh * 0.6, x + hw * 0.05, y - hh);
+    ctx.quadraticCurveTo(x + hw * 0.4, y - hh * 0.62, x + hw * 0.6, y - hh * 0.78);
+    ctx.bezierCurveTo(x + hw * 0.5, y - hh * 0.5, x + hw * 1.3, y - hh * 0.35, x + hw, y);
+    ctx.closePath(); ctx.fillStyle = rgba(col, a); ctx.fill();
+  }
+}
+function pillar(x, y, r, h) {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(x + r * 0.6, y + 8, r * 1.6, r * 0.6, 0, 0, TAU); ctx.fill();
+  const body = [[x - r, y], [x - r, y - h], [x + r, y - h + rnd(-12, 12)], [x + r, y]];
+  part([...body, [x, y + r * 0.45]], { col: { base: '#3b2d29', shade: '#1a110f', light: '#5c4a43' }, sh: [8, 2], tex: b => { for (let k = 0; k < 6; k++) { ctx.strokeStyle = rgba('#120a08', 0.6); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(b.x0 + (k + 1) * b.w / 7, b.y0); ctx.lineTo(b.x0 + (k + 1) * b.w / 7, b.y1); ctx.stroke(); } } });
+  part(blob(x, y - h, r, r * 0.5, 9, 0.12), { col: { base: '#5c4a43', shade: '#2a1d19', light: '#7a6860' }, sh: [3, 3], tex: b => ashDust(b, 1, 50), rim: false });
+}
+function deadTree(x, y, s) {
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(x + 30 * s, y + 8, 70 * s, 22 * s, 0, 0, TAU); ctx.fill();
+  const br = (x0, y0, a, l, w, d) => {
+    const x1 = x0 + Math.cos(a) * l, y1 = y0 + Math.sin(a) * l * 0.62 - l * 0.35;
+    part(taper([[x0, y0], [(x0 + x1) / 2 + rnd(-6, 6), (y0 + y1) / 2], [x1, y1]], [w, w * 0.62], 0.4), { col: CH, sh: [2, 2], ink: 1.6, topW: 2, rimW: 2, rimA: 0.35 });
+    if (d > 0) for (let k = 0; k < 3; k++) br(x1, y1, a + rnd(-0.9, 0.9), l * 0.62, w * 0.58, d - 1);
+    else glow(x1, y1, 6, HOT, 0.6);
+  };
+  part(taper([[x, y + 4], [x, y - 40 * s]], [20 * s, 14 * s]), { col: CH, sh: [3, 2] });
+  for (let k = 0; k < 5; k++) br(x, y - 40 * s, k * TAU / 5 + rnd(0, 0.5), 50 * s, 10 * s, 2);
+}
+/* ========================== THE ASH CRAWLERS ==========================
+   What the fire left of the keep's prisoners: everything from the waist down
+   has slumped into ash, and they drag the rest of themselves along on their
+   hands. Ash is the material, not a coat on it: soft, sagging, folding over
+   itself and dripping off every lower edge. Char plates float in it, and the
+   embers still inside show through the cracks. */
+const AS = { base: '#5c534e', shade: '#221c1a', light: '#9a9088' };
+const AS2 = { base: '#756c65', shade: '#352d29', light: '#b8aea5' };
+const CHB = { base: '#2a1d19', shade: '#120a08', light: '#4a3832' };
+const BN = { base: '#b9a588', shade: '#5e4c3a', light: '#e6d6ba' };
+
+eglow(960, 600, 900, 420, EMB, 0.18);
+
+// ash texture: sagging folds, flakes, pits, the odd live crack
+function ashTex(b, o = {}) {
+  const folds = o.folds || 7;
+  for (let i = 0; i < folds; i++) {
+    const y = b.y0 + (i + 0.6) * b.h / folds, sag = rnd(6, 16), x0 = b.x0 + rnd(-10, b.w * 0.2), x1 = b.x1 - rnd(-10, b.w * 0.2);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(AS.shade, 0.55); ctx.lineWidth = rnd(1.6, 3);
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.quadraticCurveTo((x0 + x1) / 2, y + sag, x1, y + rnd(-4, 4)); ctx.stroke();
+    ctx.strokeStyle = rgba(AS2.light, 0.35); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(x0 + 4, y - 3); ctx.quadraticCurveTo((x0 + x1) / 2, y + sag - 3, x1 - 4, y - 3); ctx.stroke();
+  }
+  const n = Math.round(b.w * b.h / 90);
+  for (let i = 0; i < n; i++) {
+    const x = rnd(b.x0, b.x1), y = rnd(b.y0, b.y1), up = (y - b.y0) / b.h < 0.45;
+    ctx.fillStyle = rgba(up ? ASH_L : AS.shade, rnd(0.25, 0.7));
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rnd(0, TAU)); ctx.fillRect(-rnd(0.6, 2), -0.6, rnd(1.2, 4), rnd(0.8, 1.8)); ctx.restore();
+  }
+  for (let i = 0; i < (o.pits || 6); i++) { const x = rnd(b.x0, b.x1), y = rnd(b.y0, b.y1); smoothPath(blob(x, y, rnd(2, 5), rnd(1.5, 3.5), 7, 0.3)); ctx.fillStyle = rgba('#0c0605', 0.7); ctx.fill(); }
+  for (let i = 0; i < (o.cracks || 2); i++) crackLine(jag(rnd(b.x0 + 10, b.x1 - 10), rnd(b.y0 + 10, b.y1 - 10), rnd(0, TAU), rnd(14, 30), 4), 1);
+}
+// a drip of ash hanging off a lower edge, fat at the bottom where it is about to fall
+function droop(x, y, len, w, col = AS) {
+  part(taper([[x, y], [x + rnd(-2, 2), y + len * 0.55], [x + rnd(-2, 2), y + len]], [w, w * 0.6, w * 0.95], 0.9), { col, sh: [1.5, 2], ink: 1.6, topW: 2, rimW: 2, rimA: 0.4 });
+}
+function puddle(x, y, rx, ry) {
+  smoothPath(blob(x, y, rx, ry, 12, 0.18)); ctx.fillStyle = rgba('#3d3532', 0.95); ctx.fill(); ctx.strokeStyle = rgba(INK, 0.8); ctx.lineWidth = 1.6; ctx.stroke();
+  smoothPath(blob(x - rx * 0.1, y - ry * 0.2, rx * 0.6, ry * 0.45, 10, 0.2)); ctx.fillStyle = rgba(AS2.light, 0.35); ctx.fill();
+}
+function embersIn(b, n) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < n; i++) { const x = rnd(b.x0, b.x1), y = rnd(b.y0, b.y1); const g = ctx.createRadialGradient(x, y, 0, x, y, 6); g.addColorStop(0, rgba(HOT, 0.9)); g.addColorStop(1, rgba(EMB, 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 6, 0, TAU); ctx.fill(); } ctx.restore(); }
+// a hand flat on the floor, five fingers splayed and dug in
+function hand(x, y, dir, sz = 1, col = AS) {
+  // scratches it has gouged getting here
+  for (let i = -2; i <= 2; i++) { const a = dir + i * 0.32; ctx.strokeStyle = rgba('#0a0403', 0.75); ctx.lineWidth = 2.4 * sz; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 40 * sz, y + Math.sin(a) * 40 * sz); ctx.lineTo(x - Math.cos(dir) * 26 * sz + Math.cos(a) * 30 * sz, y - Math.sin(dir) * 26 * sz + Math.sin(a) * 30 * sz); ctx.stroke(); }
+  part(blob(x, y, 20 * sz, 16 * sz, 12, 0.1, dir), { col, sh: [2, 3], ink: 2.4, tex: b => ashTex(b, { folds: 2, cracks: 0, pits: 2 }) });
+  const spread = [[-1.0, 22, 11.5], [-0.45, 30, 12.5], [0, 33, 12.5], [0.42, 29, 12], [0.95, 22, 10.5]];
+  for (const [o, l, w] of spread) {
+    const a = dir + o * 0.85, bx = x + Math.cos(a) * 14 * sz, by = y + Math.sin(a) * 12 * sz;
+    const j = [bx + Math.cos(a) * l * 0.5 * sz, by + Math.sin(a) * l * 0.5 * sz], t = [bx + Math.cos(a + o * 0.15) * l * sz, by + Math.sin(a + o * 0.15) * l * sz];
+    part(taper([[bx, by], j, t], [w * sz, w * 1.05 * sz, w * 0.62 * sz], 0.7), { col, sh: [1.5, 2], ink: 2, topW: 2, topA: 0.2, rimW: 2 });
+    const na = a + Math.PI / 2; ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(j[0] + Math.cos(na) * w * 0.35 * sz, j[1] + Math.sin(na) * w * 0.35 * sz); ctx.lineTo(j[0] - Math.cos(na) * w * 0.35 * sz, j[1] - Math.sin(na) * w * 0.35 * sz); ctx.stroke();
+    // blackened nail dug into the floor
+    part(taper([t, [t[0] + Math.cos(a) * 8 * sz, t[1] + Math.sin(a) * 8 * sz]], [w * 0.5 * sz, 1], 0.2), { col: CHB, sh: [1, 1], ink: 1.4, rim: false, top: false });
+  }
+}
+function arm(sh, el, wr, w, col = AS) {
+  const m1 = [lerp(sh[0], el[0], 0.5), lerp(sh[1], el[1], 0.5) + w * 0.4];
+  part(taper([sh, m1, el], [w, w * 0.78, w * 0.66]), { col, sh: [4, 5], ink: 2.6, topW: 3, topA: 0.25, tex: b => ashTex(b, { folds: 5, cracks: 1 }) });
+  const dx = wr[0] - el[0], dy = wr[1] - el[1], dl = Math.hypot(dx, dy), side = el[0] < 0 ? 1 : -1;
+  const m2 = [lerp(el[0], wr[0], 0.45) + (-dy / dl) * w * 0.3 * side, lerp(el[1], wr[1], 0.45) + (dx / dl) * w * 0.3 * side];
+  part(taper([el, m2, wr], [w * 0.72, w * 0.82, w * 0.44]), { col, sh: [4, 5], ink: 2.6, topW: 3, topA: 0.25, tex: b => ashTex(b, { folds: 5, cracks: 1 }) });
+  // the elbow bone has pushed through
+  part(blob(el[0], el[1] - w * 0.12, w * 0.22, w * 0.18, 9, 0.15), { col: BN, sh: [1.5, 1.5], ink: 1.8, rim: false });
+  // ash sagging off the underside of the arm
+  droop(el[0] - 4, el[1] + w * 0.25, rnd(20, 32), 8); droop(el[0] + 7, el[1] + w * 0.2, rnd(12, 20), 6);
+  droop(m1[0], m1[1] + w * 0.32, rnd(10, 22), 7);
+}
+// the trail: the half of it that is gone, slumped into a long drag of ash
+function trail(len, wid, lobes) {
+  // the smear: ash lying flat on the floor where it has dragged itself, ragged at the edges
+  const sm = blob(0, -len * 0.5, wid * 1.15, len * 0.56, 26, 0.16);
+  ctx.save(); smoothPath(sm); ctx.fillStyle = '#3b3430'; ctx.fill(); ctx.clip();
+  // drag streaks: long gouges running back along it
+  for (let i = 0; i < 26; i++) { const x = rnd(-wid, wid), y0 = rnd(-len * 0.95, -len * 0.2); ctx.strokeStyle = rgba(rnd() < 0.5 ? '#1c1715' : AS.light, rnd(0.25, 0.55)); ctx.lineWidth = rnd(1, 3); ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + rnd(-6, 6), y0 + len * 0.2, x * 0.8, y0 + rnd(len * 0.3, len * 0.5)); ctx.stroke(); }
+  for (let i = 0; i < 240; i++) { ctx.fillStyle = rgba(rnd() < 0.5 ? ASH_L : '#1c1715', rnd(0.2, 0.6)); ctx.fillRect(rnd(-wid * 1.2, wid * 1.2), rnd(-len * 1.1, 0), rnd(1, 3), rnd(1, 2)); }
+  embersIn({ x0: -wid, x1: wid, y0: -len, y1: -20 }, 6);
+  ctx.restore();
+  smoothPath(sm); ctx.strokeStyle = rgba(INK, 0.55); ctx.lineWidth = 1.6; ctx.stroke();
+  // clumps left behind in the smear
+  for (let i = 0; i < 7; i++) puddle(rnd(-wid * 0.8, wid * 0.8), rnd(-len * 0.95, -len * 0.3), rnd(8, 18), rnd(4, 8));
+  // what is left of the legs: limp, lying flat back along the drag, melting into it
+  for (const [dx, l, w] of lobes) {
+    const k = Math.sign(dx);
+    const pts = [[dx, -30], [dx + k * w * 0.5, -len * 0.22], [dx + k * w * 0.8, -len * 0.38]];
+    const e = pts[2]; puddle(e[0] + k * 6, e[1] - 8, w * 0.9, w * 0.4);
+    part(taper(pts, [w * 1.25, w * 1.05, w * 0.95], 1), { col: AS, sh: [3, 4], ink: 2, shA: 0.45, topW: 2, topA: 0.12, rimW: 2, rimA: 0.25, tex: b => ashTex(b, { folds: 6, cracks: 1 }) });
+    for (let d = 0; d < 3; d++) droop(e[0] + rnd(-w * 0.4, w * 0.4), e[1] - w * 0.2, rnd(10, 18), w * 0.32);
+  }
+  // the heap where its waist was: the body slumping down into the smear
+  const heap = blob(0, -34, wid * 0.98, wid * 0.62, 16, 0.12);
+  part(heap, { col: AS, sh: [5, 6], topW: 3, topA: 0.2, tex: b => { ashTex(b, { folds: 6, cracks: 2, pits: 6 }); embersIn(b, 3); } });
+  for (let i = 0; i < 5; i++) droop(rnd(-wid * 0.8, wid * 0.8), -34 + wid * 0.5 + rnd(-4, 4), rnd(12, 22), 8);
+}
+function skullFace(cx, cy, w, h, o = {}) {
+  const tilt = o.tilt === undefined ? 0.14 : o.tilt, gape = o.mouth || 1;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(tilt);
+  const D = { base: '#100403', shade: '#000', light: '#2a0a06' };
+  // the mouth behind it all, with the fire showing
+  part(blob(0, h * 0.34 * gape, w * 0.3, h * 0.2 * gape, 10, 0.15), { col: D, sh: [1, 1], ink: 2, top: false, rim: false, tex: () => { glow(0, h * 0.34 * gape, w * 0.4, EMB, 0.9); glow(0, h * 0.34 * gape, w * 0.14, HOT, 0.9); } });
+  // the jaw: unhinged on one side, hanging askew
+  ctx.save(); ctx.translate(-w * 0.3, h * 0.24); ctx.rotate(0.22 * gape);
+  const jaw = [[0, 0], [w * 0.56, h * 0.06], [w * 0.62, h * 0.18 * gape + h * 0.1], [w * 0.34, h * 0.3 * gape + h * 0.12], [w * 0.06, h * 0.26 * gape + h * 0.1]];
+  for (let i = 0; i < 5; i++) { const x = w * (0.1 + i * 0.1), y = h * (0.02 + i * 0.012); part([[x - 3, y + 2], [x + 3, y + 2], [x, y - 7]], { col: BN, sh: [1, 1], ink: 1.2, top: false, rim: false }); }
+  part(jaw, { col: AS2, sh: [2, 3], ink: 2.2, topA: 0.2, tex: b => ashTex(b, { folds: 3, cracks: 1, pits: 2 }) });
+  ctx.restore();
+  // the cranium
+  const cr = [[-w * 0.5, -h * 0.16], [-w * 0.4, -h * 0.4], [-w * 0.05, -h * 0.5], [w * 0.36, -h * 0.42], [w * 0.52, -h * 0.14], [w * 0.5, h * 0.12], [w * 0.32, h * 0.24], [-w * 0.18, h * 0.26], [-w * 0.46, h * 0.12]];
+  part(cr, { col: o.col || AS2, sh: [3, 4], ink: 2.6, topW: 4, topA: 0.25, tex: b => ashTex(b, { folds: 5, cracks: 1, pits: 3 }) });
+  // bare bone at the brow, where the ash has slid off
+  part([[-w * 0.36, -h * 0.3], [-w * 0.04, -h * 0.42], [w * 0.3, -h * 0.34], [w * 0.28, -h * 0.18], [w * 0.0, -h * 0.24], [-w * 0.32, -h * 0.16]], { col: BN, sh: [2, 2], ink: 1.8, tex: b => ashTex(b, { folds: 1, cracks: 1, pits: 3 }) });
+  // upper teeth along the bottom of the skull
+  for (let i = 0; i < 6; i++) { const x = -w * 0.22 + i * w * 0.08, y = h * 0.24 - i * h * 0.005; part([[x - 3, y - 2], [x + 3, y - 2], [x, y + 8 + rnd(0, 3)]], { col: BN, sh: [1, 1], ink: 1.2, top: false, rim: false }); }
+  // eyes: one where it was, one slid down the face
+  for (const [ex, ey, sz] of [[-w * 0.2, -h * 0.07, 1], [w * 0.2, h * 0.0, 1.25]]) {
+    part(taper([[ex, ey - h * 0.07], [ex, ey + h * 0.02], [ex + 1, ey + h * 0.1 * sz]], [w * 0.17 * sz, w * 0.16 * sz, w * 0.06], 0.6), { col: { base: '#060201', shade: '#000', light: '#120503' }, sh: [1, 1], ink: 1.8, top: false, rim: false });
+    glow(ex, ey, w * 0.28 * sz, EMB, 0.8); ctx.fillStyle = CORE; ctx.beginPath(); ctx.ellipse(ex, ey - h * 0.01, w * 0.04 * sz, w * 0.055 * sz, 0, 0, TAU); ctx.fill();
+  }
+  // nose hole
+  part([[-w * 0.04, h * 0.08], [w * 0.05, h * 0.08], [0, h * 0.0]], { col: { base: '#060201', shade: '#000', light: '#120503' }, sh: [1, 1], ink: 1.4, top: false, rim: false });
+  // the face sliding off: long sags of ash hanging off each cheek, longer on the low side
+  droop(-w * 0.46, h * 0.06, h * 0.32, w * 0.16, AS2); droop(w * 0.48, h * 0.12, h * 0.5, w * 0.18, AS2); droop(w * 0.36, h * 0.22, h * 0.34, w * 0.12, AS2);
+  ctx.restore();
+  // drool of ash, down to a little heap on the floor
+  ctx.strokeStyle = rgba(AS2.light, 0.85); ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(cx + w * 0.05, cy + h * 0.6); ctx.quadraticCurveTo(cx + w * 0.12, cy + h * 0.76, cx + w * 0.08, cy + h * 0.92); ctx.stroke();
+  puddle(cx + w * 0.1, cy + h * 0.96, w * 0.32, w * 0.13);
+}
+function label(x, y, name, kind, line) {
+  ctx.textAlign = 'center'; ctx.letterSpacing = '6px';
+  ctx.font = '700 22px "DejaVu Serif", Georgia, serif'; ctx.fillStyle = INK; ctx.fillText(name, x + 2, y + 2); ctx.fillStyle = HOT; ctx.fillText(name, x, y);
+  ctx.font = '600 11px "DejaVu Sans", sans-serif'; ctx.letterSpacing = '4px'; ctx.fillStyle = rgba(EMB, 0.95); ctx.fillText(kind, x, y + 22);
+  ctx.font = '13px "DejaVu Sans", sans-serif'; ctx.letterSpacing = '0.5px'; ctx.fillStyle = rgba(ASH_L, 0.9);
+  line.forEach((l, i) => ctx.fillText(l, x, y + 44 + i * 18));
+}
+
+/* ---------------- THE DRAGGED: the basic one ---------------- */
+function dragged(x, y, s, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  trail(250, 70, [[-26, 50, 40], [30, 44, 26]]);
+  const torso = [[-58, -52], [-78, -10], [-86, 36], [-68, 80], [-30, 96], [0, 90], [30, 98], [70, 82], [88, 32], [78, -14], [56, -50], [30, -38], [4, -60], [-28, -40]];
+  part(torso, { col: AS, sh: [7, 8], topW: 4, topA: 0.25, tex: b => { ashTex(b, { folds: 7, cracks: 3 }); crust(b, { cell: 26, hole: 2.6, ash: 0.6 }); } });
+  // shoulder blades and spine pushing up through the ash
+  for (const k of [-1, 1]) part(blob(k * 36, 30, 28, 22, 12, 0.1, k * 0.4), { col: AS2, sh: [3, 3], ink: 2, tex: b => ashTex(b, { folds: 2, cracks: 0 }) });
+  for (let i = 0; i < 7; i++) part(blob(0, -40 + i * 17, 8 - i * 0.3, 6, 9, 0.12), { col: BN, sh: [1.5, 1.5], ink: 1.6, rim: false });
+  for (const k of [-1, 1]) for (let i = 0; i < 4; i++) { ctx.strokeStyle = rgba(INK, 0.75); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(k * 22, 4 + i * 16); ctx.quadraticCurveTo(k * 56, -2 + i * 16, k * 76, 18 + i * 16); ctx.stroke(); ctx.strokeStyle = rgba(AS2.light, 0.4); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(k * 22, 1 + i * 16); ctx.quadraticCurveTo(k * 56, -5 + i * 16, k * 74, 15 + i * 16); ctx.stroke(); }
+  // ash sagging off its belly onto the floor
+  for (const dx of [-60, -40, 44, 62]) droop(dx, 70 + Math.abs(dx) * -0.1, rnd(18, 34), 9);
+  arm([-62, 50], [-146, 22], [-140, 140], 34);
+  arm([62, 50], [126, 92], [102, 188], 34);
+  hand(-140, 160, 1.75); hand(102, 206, 1.45);
+  skullFace(4, 122, 72, 92, { tilt: 0.16 });
+  ctx.restore();
+}
+
+/* ---------------- THE SLOUGH: heavy, one arm gone to a club ---------------- */
+function slough(x, y, s, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  trail(230, 96, [[-40, 60, 50]]);
+  // the club arm: drawn first, it drags behind and to the side
+  const club = taper([[86, 40], [150, 90], [168, 170], [150, 240]], [50, 62, 82, 96], 0.7);
+  part(club, { col: AS, sh: [6, 7], tex: b => { ashTex(b, { folds: 8, cracks: 4, pits: 10 }); crust(b, { cell: 22, hole: 2.4, ash: 0.5 }); embersIn(b, 6); } });
+  puddle(152, 268, 70, 26);
+  for (let i = 0; i < 5; i++) droop(110 + i * 16, 230 + rnd(-6, 10), rnd(20, 36), 10);
+  const torso = [[-88, -56], [-112, -6], [-116, 50], [-84, 98], [-30, 112], [10, 104], [64, 108], [104, 64], [116, 4], [96, -50], [50, -46], [10, -70], [-40, -48]];
+  part(torso, { col: AS, sh: [8, 9], topW: 4, topA: 0.25, tex: b => { ashTex(b, { folds: 9, cracks: 3, pits: 10 }); crust(b, { cell: 30, hole: 2.2, ash: 0.6 }); } });
+  // the back has slumped into mounds, one over another, a live seam down the spine
+  for (const [dx, dy, r] of [[-46, -20, 40], [42, -6, 44], [-20, 40, 38], [34, 54, 30]]) part(blob(dx, dy, r, r * 0.72, 14, 0.1), { col: AS2, sh: [4, 5], ink: 2.4, topW: 6, tex: b => ashTex(b, { folds: 4, cracks: 1 }) });
+  crackLine([[0, -60], [6, -30], [-4, 0], [8, 30], [0, 60], [6, 92]], 2.4);
+  glow(0, 20, 70, EMB, 0.35);
+  for (const dx of [-90, -70, -50, 56, 80]) droop(dx, 80 + rnd(-6, 6), rnd(22, 40), 11);
+  // the arm it still has, planted wide
+  arm([-90, 60], [-176, 40], [-170, 160], 42);
+  hand(-170, 182, 1.9, 1.25);
+  // head sunk into a collar of drooping ash, no neck left
+  part(blob(0, 110, 74, 34, 14, 0.12), { col: AS2, sh: [3, 4], ink: 2.4, tex: b => ashTex(b, { folds: 3 }) });
+  skullFace(0, 124, 76, 86, { mouth: 1.2, tilt: -0.1 });
+  for (const dx of [-60, -34, 30, 58]) droop(dx, 128, rnd(20, 30), 10, AS2);
+  ctx.restore();
+}
+
+/* ---------------- THE KINDLE: small, quick, bursts ---------------- */
+function kindle(x, y, s, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  glow(0, 20, 260, EMB, 0.4);
+  trail(170, 48, [[16, 30, 22]]);
+  // a scatter of sparks off the trail: it is moving fast
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < 50; i++) { const yy = -rnd(0, 200), xx = rnd(-60, 60); ctx.fillStyle = rgba(rnd() < 0.5 ? HOT : EMB, rnd(0.4, 1)); ctx.beginPath(); ctx.arc(xx, yy, rnd(1, 2.8), 0, TAU); ctx.fill(); } ctx.restore();
+  const torso = [[-44, -44], [-60, -6], [-62, 40], [-40, 76], [0, 86], [38, 78], [60, 38], [58, -8], [42, -42], [16, -32], [0, -52], [-20, -32]];
+  part(torso, { col: AS, sh: [5, 6], tex: b => { ashTex(b, { folds: 5, cracks: 6 }); embersIn(b, 8); } });
+  // the back has burst open on the coal inside it
+  const hole = [[-30, -14], [-8, -30], [24, -22], [34, 6], [22, 34], [-8, 40], [-30, 22]];
+  part(hole, { col: { base: '#1c0605', shade: '#0c0202', light: '#3a0c08' }, sh: [3, 3], top: false, rim: false, ink: 2.6,
+    tex: () => { glow(0, 6, 60, EMB, 0.9); glow(0, 6, 28, HOT, 1); smoothPath(blob(0, 6, 20, 18, 10, 0.18)); ctx.fillStyle = '#ffb443'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.6; ctx.stroke(); smoothPath(blob(-3, 2, 9, 8, 8, 0.2)); ctx.fillStyle = CORE; ctx.fill(); } });
+  // torn edges of the hole, curling back
+  for (const [px, py, a] of [[-30, -14, -2.4], [-8, -30, -1.6], [24, -22, -0.7], [34, 6, 0.2], [22, 34, 0.9], [-30, 22, 2.6]]) part(taper([[px, py], [px + Math.cos(a) * 12, py + Math.sin(a) * 12]], [10, 3], 0.3), { col: CHB, sh: [1, 1], ink: 1.6, rimW: 2 });
+  for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + 0.3; crackLine(jag(Math.cos(a) * 32, 6 + Math.sin(a) * 30, a, rnd(18, 34), 4), 1.4); }
+  // thin limbs thrown wide: it scuttles rather than drags
+  arm([-46, 40], [-124, 6], [-150, 100], 22);
+  arm([46, 40], [120, 24], [134, 120], 22);
+  hand(-150, 116, 1.9, 0.75); hand(134, 136, 1.2, 0.75);
+  // head thrown back, mouth wide on the fire
+  skullFace(0, 98, 56, 72, { mouth: 1.5, tilt: 0.2 });
+  // embers rising off it
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < 40; i++) { const yy = -rnd(0, 160), xx = rnd(-40, 40) + yy * 0.2; ctx.fillStyle = rgba(rnd() < 0.5 ? HOT : EMB, rnd(0.4, 1) * (1 + yy / 180)); ctx.beginPath(); ctx.arc(xx, yy, rnd(1, 3), 0, TAU); ctx.fill(); } ctx.restore();
+  ctx.restore();
+}
+
+// props at the edges, so the floor is a place
+pillar(120, 360, 30, 100); pillar(1820, 330, 26, 80); deadTree(1830, 980, 0.9); brazier(700, 150); brazier(1230, 160);
+ring(960, 1010, 110, false);
+
+slough(420, 520, 1.15, 0.1);
+dragged(960, 540, 1.3, 0);
+kindle(1500, 560, 1.2, -0.12);
+
+// air
+ctx.save(); ctx.globalCompositeOperation = 'lighter';
+for (let i = 0; i < 160; i++) { const x = rnd(0, W), y = rnd(0, H), s = rnd(1, 2.8); ctx.fillStyle = rgba(rnd() < 0.5 ? HOT : EMB, rnd(0.3, 0.8)); ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); }
+ctx.restore();
+for (let i = 0; i < 360; i++) { const s = rnd(1, 3.2); ctx.fillStyle = rgba(rnd() < 0.5 ? ASH_L : ASH, rnd(0.2, 0.6)); ctx.save(); ctx.translate(rnd(0, W), rnd(0, H)); ctx.rotate(rnd(0, TAU)); ctx.fillRect(-s, -s * 0.4, s * 2, s * 0.8); ctx.restore(); }
+{ ctx.save(); ctx.globalCompositeOperation = 'soft-light'; const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#3a1a40'); g.addColorStop(0.6, '#ff8a3a'); g.addColorStop(1, '#2a0c06'); ctx.globalAlpha = 0.3; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+{ const g = ctx.createRadialGradient(960, 540, 420, 960, 540, 1150); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(4,1,0,0.8)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+// a dark band so the notes read
+{ const g = ctx.createLinearGradient(0, 860, 0, H); g.addColorStop(0, 'rgba(5,2,1,0)'); g.addColorStop(0.35, 'rgba(5,2,1,0.78)'); g.addColorStop(1, 'rgba(5,2,1,0.9)'); ctx.fillStyle = g; ctx.fillRect(0, 860, W, H - 860); }
+
+label(420, 930, 'THE SLOUGH', 'HEAVY  ·  ≈ 2.4 M', ['Swings the club arm in a slow arc.', 'Leaves pools of ash that slow you.']);
+label(960, 930, 'THE DRAGGED', 'BASIC  ·  ≈ 1.8 M', ['Hauls itself straight at you and grabs.', 'Slow alone. Comes in numbers.']);
+label(1500, 930, 'THE KINDLE', 'FAST  ·  FRAGILE  ·  ≈ 1.3 M', ['Scuttles in on thin arms.', 'Bursts into embers when it reaches you.']);
+ctx.textAlign = 'left'; ctx.font = '600 12px "DejaVu Sans", sans-serif'; ctx.letterSpacing = '4px'; ctx.fillStyle = rgba(ASH_L, 0.7);
+ctx.fillText('ASH ROUTE  ·  BASIC ENEMIES  ·  THE CRAWLERS', 40, 44);
+document.title = 'ready';
+</script>
