@@ -49,10 +49,24 @@
   #vr-ad .vr-ad-label{font:600 9px/14px 'JetBrains Mono',monospace;letter-spacing:.2em;
     color:#475569;text-align:center}
   #vr-ad:has(ins[data-ad-status="unfilled"]){display:none}
+  /* a phone held upright: the arena is wide, so it asks to be turned (TURN_MQ) */
+  #vr-turn{display:none}
+  @media (orientation:portrait) and (pointer:coarse) and (max-width:560px){
+    #vr-turn{display:flex;position:fixed;inset:0;z-index:20;background:#05060a;color:#67e8f9;
+      flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;
+      font:700 14px/1.5 Barlow,'Segoe UI',system-ui,sans-serif;letter-spacing:.2em}
+    #vr-turn small{font-weight:500;font-size:11px;letter-spacing:.12em;color:#475569}
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="vr-turn" role="status">
+  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="10" y="20" width="44" height="26" rx="5"/><path d="M48 33h.01"/><path d="M22 12a14 14 0 0 1 18-2l-3 1m3-1-1 3"/>
+  </svg>
+  TURN YOUR PHONE SIDEWAYS<small>the arena is wide · the run waits, paused</small>
+</div>
 <!-- Channel isolation for the chromatic split. Drawing the scene three times
      through these and summing them additively reproduces the original exactly
      when the offsets are zero, so the aberration is real rather than a tint. -->
@@ -214,11 +228,24 @@ const cv = document.getElementById('c');
 const ctx = cv.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
 
+/* SMALL SCREENS (29 Oct 2026, mobile and console). Every screen in the game is
+   laid out for a laptop, and a phone on its side is 390 pixels tall: the menu
+   ran over itself. Below VIEW_MIN the game draws a larger page and shrinks it
+   to fit, so a phone sees the laptop's layout, smaller. VIEW_S is screen pixels
+   per game pixel (1 on anything laptop-sized, where nothing changes), folded
+   into DPR so every bake and buffer that reads DPR follows; a pointer's
+   position is divided by it on the way in (viewX/viewY). */
+const VIEW_MIN = { w: 960, h: 600 };
+let VIEW_S = 1;
+const viewX = e => e.clientX / VIEW_S, viewY = e => e.clientY / VIEW_S;
+
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = window.innerHeight;
+  VIEW_S = Math.min(1, window.innerWidth / VIEW_MIN.w, window.innerHeight / VIEW_MIN.h) || 1;
+  W = Math.round(window.innerWidth / VIEW_S); H = Math.round(window.innerHeight / VIEW_S);
+  DPR *= VIEW_S;
   const f = PVP && PVP.frameSize();      // PvP mode: a replay drawn in a fixed frame, for capture (replay.js)
-  if (f) { W = f.w; H = f.h; DPR = f.dpr; }
+  if (f) { W = f.w; H = f.h; DPR = f.dpr; VIEW_S = 1; }
   cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.imageSmoothingEnabled = true;
@@ -1607,16 +1634,18 @@ function inputSample(rec) {
     const d = len(dx, dy);
     if (d > 6) { const m = Math.min(1, d / 62) / d; ix = dx * m; iy = dy * m; }
   }
+  if (Pad.active && (Pad.lx || Pad.ly)) { ix = Pad.lx; iy = Pad.ly; }   // the left stick (GAMEPAD)
   rec.mx = ix; rec.my = iy;
+  if (Pad.active && !choice) padAim();   // the right stick puts the pointer where the ship looks
   // mouse.wx / wy stay too: the drawing still reads the cursor's world point
   mouse.wx = (aimX() - W / 2 - cam.sx) / camZoom + cam.x;
   mouse.wy = (aimY() - H / 2 - cam.sy) / camZoom + cam.y;
   rec.ax = mouse.wx; rec.ay = mouse.wy;
-  rec.trig = !!(mouse.down || keys['j']);
-  rec.lmb = !!mouse.down;
+  rec.trig = !!(mouse.down || keys['j'] || Pad.fire);
+  rec.lmb = !!(mouse.down || Pad.rt);    // the right trigger is the left button, for what reads clicks
   rec.auto = autoFire;
   rec.dash = !!(keys[' '] || keys['shift']);
-  rec.touch = isTouch;
+  rec.touch = isTouch && !Pad.active;    // a pad on a phone aims like a mouse, not like a thumb
   rec.taim = touchUI.aim ? { dx: touchUI.aim.x - touchUI.aim.ox, dy: touchUI.aim.y - touchUI.aim.oy } : null;
   rec.press = inputQueue.splice(0);
   rec.held = P.outside ? OUTSIDE_HELD.filter(k => keys[k]).join('') : '';   // only an outside pilot reads keys held (OUTSIDE PILOTS)
@@ -1643,6 +1672,7 @@ addEventListener('keydown', e => {
   if (state === 'name') { nameKey(e); return; }
   // ROOT'S RITE: the console takes every key, so WASD and dash never land
   if (con.open) { conKey(e); return; }
+  if (e.isTrusted) Pad.active = false;   // hands back on the keyboard (GAMEPAD)
   const k = e.key.toLowerCase();
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
   if (k === 'tab' && state === 'codex') e.preventDefault();   // don't move focus
@@ -1659,7 +1689,9 @@ addEventListener('blur', () => {
 });
 
 cv.addEventListener('mousemove', e => {
-  mouse.x = e.clientX; mouse.y = e.clientY;
+  // a real hand on the mouse takes the pointer back from a pad; a nudge of the desk does not
+  if (e.isTrusted && Math.abs(e.movementX) + Math.abs(e.movementY) > 2) Pad.active = false;
+  mouse.x = viewX(e); mouse.y = viewY(e);
   if (volDrag) volFromMouse();
   if (mixDrag) mixFromMouse();
   if (sensDrag) sensFromMouse();
@@ -1669,7 +1701,8 @@ cv.addEventListener('mousedown', e => {
   if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
   if (Ending.on) { if (Ending.voice && Ending.voice.paused) Ending.voice.play().catch(() => {}); return; }   // THE ENDING: a click only wakes its voice
   Audio_.init(); Audio_.resume();
-  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (e.isTrusted) Pad.active = false;
+  mouse.x = viewX(e); mouse.y = viewY(e);
   /* Only the left button fires. This used to set mouse.down for any button at
      all, so a right-click in the arena squeezed off a shot — harmless enough
      that nobody reported it, and unacceptable now that the button is a guard:
@@ -1724,18 +1757,22 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 
 /* ----- touch: dual virtual sticks ----- */
-const touchUI = { active: false, move: null, aim: null };
+const touchUI = { active: false, move: null, aim: null, btn: Object.create(null) };   // btn: finger id -> the button it holds
 const isTouch = matchMedia('(pointer:coarse)').matches;
-function tpos(t) { return { x: t.clientX, y: t.clientY }; }
+function tpos(t) { return { x: viewX(t), y: viewY(t) }; }
 cv.addEventListener('touchstart', e => {
   e.preventDefault(); Audio_.init(); Audio_.resume();
+  Pad.active = false;
   if (Intro.on) { Intro.fingers = e.touches.length; Intro.poke(); return; }   // INTRO: a finger held down is the skip
   if (Ending.on) return;                                                      // THE ENDING: nothing under it
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
+    // a button under the thumb is pressed, and that finger is never a stick (TOUCH BUTTONS)
+    if (state === 'play' && !choice) { const b = touchBtnAt(p.x, p.y); if (b) { touchBtnDown(b, t.identifier); continue; } }
     if (state === 'codex') { codexTouch('start', t.identifier, p); continue; }   // a tap is answered when it lifts
-    if (state !== 'play') {
+    // THE FOUNDER's door is asked mid-run, and answered with a tap like any screen
+    if (state !== 'play' || choice) {
       mouse.x = p.x; mouse.y = p.y;
       QOL.tap = true; handleClick(); QOL.tap = false;   // a tap, for what has to wait for the lift (qolOnLift)
       // the click may have closed it; only a panel still open takes the drag
@@ -1772,6 +1809,7 @@ function touchEnd(e) {
   if (Intro.on) { Intro.fingers = e.touches.length; return; }
   if (QOL.onLift) { const f = QOL.onLift; QOL.onLift = null; if (e.type === 'touchend') f(); }
   for (const t of e.changedTouches) {
+    if (touchUI.btn[t.identifier]) touchBtnUp(t.identifier);
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
     if (logDrag && t.identifier === logDrag.id) logDrag = null;
@@ -1782,6 +1820,165 @@ function touchEnd(e) {
 }
 cv.addEventListener('touchend', touchEnd, { passive: false });
 cv.addEventListener('touchcancel', touchEnd, { passive: false });
+
+/* ----------------------------- TOUCH BUTTONS ------------------------------
+   (29 Oct 2026, mobile.) The sticks gave a thumb movement and aim and nothing
+   else: no dash, no kit, and no pause short of leaving the app. These are the
+   rest of the keyboard, fanned round the right thumb, each shown only while it
+   would do something: DASH whenever the hull has one, the pilot's F once it
+   has one (THE VAGRANT's parry from the start), Q with a book, E over gear or
+   wherever E talks, Z X C V while a kit is on (V is the ROOT key otherwise),
+   and pause in the corner. A button is its key, held while the finger is down
+   and pressed through handleKey exactly as the keyboard presses it, so DASH is
+   held like space and nothing here reaches the input record any other way. */
+const F_LABEL = { runner: 'IMAGO', ember: 'VENT', hacker: 'SUDO', melee: 'PARRY' };
+function kitOn() {
+  return P.charId === 'hacker' ? suOn() : P.charId === 'ember' ? odKitOn()
+       : P.charId === 'melee' ? roninOn() : P.charId === 'runner' ? imOn() : false;
+}
+const kitHasV = () => P.charId === 'hacker' || (P.charId === 'ember' && !!OD_KIT[3])
+  || (P.charId === 'melee' && !!RONIN_KIT[3]) || (P.charId === 'runner' && !!IM_KIT[3]);
+function touchBtns() {
+  const x0 = W - 86, y0 = H - 96;        // DASH, under the thumb; the rest on two arcs round it
+  const at = (a, d) => ({ x: x0 + Math.cos(a * Math.PI / 180) * d, y: y0 + Math.sin(a * Math.PI / 180) * d });
+  const out = [{ k: 'escape', t: 'II', x: W - 32, y: 150, r: 20, col: '#94a3b8' }];   // under the wave and sector
+  if (P.outside) return out;             // an outside pilot's keys are its own
+  if (P.dashMax) out.push({ k: ' ', t: 'DASH', x: x0, y: y0, r: 42, col: COL.player });
+  const f = isBlade() ? 'PARRY' : P.awake ? F_LABEL[P.charId] : null;
+  if (f) out.push({ k: 'f', t: f, ...at(186, 112), r: 32, col: '#fde047' });
+  if (inHub || inVigil || (gearNear && !inHub)) out.push({ k: 'e', t: gearNear && !inHub ? 'LOOK' : 'TALK', ...at(228, 112), r: 27, col: '#e2e8f0' });
+  if (P.book) out.push({ k: 'q', t: 'BOOK', ...at(268, 112), r: 27, col: P.book.col });
+  const kit = kitOn();
+  if (kit) ['z', 'x', 'c'].forEach((k, i) => out.push({ k, t: k.toUpperCase(), ...at(188 + i * 27, 206), r: 25, col: '#f0abfc' }));
+  if ((kit && kitHasV()) || rootCmdReady()) out.push({ k: 'v', t: 'V', ...at(269, 206), r: 25, col: kit ? '#f0abfc' : ROOT_COL });
+  return out;
+}
+function touchBtnAt(x, y) {
+  if (Pad.active) return null;
+  for (const b of touchBtns()) if (len(x - b.x, y - b.y) < b.r + 8) return b;
+  return null;
+}
+function touchBtnDown(b, id) {
+  touchUI.btn[id] = b.k;
+  if (keys[b.k]) return;
+  keys[b.k] = true;
+  handleKey(b.k);
+}
+function touchBtnUp(id) {
+  const k = touchUI.btn[id];
+  delete touchUI.btn[id];
+  if (!Object.values(touchUI.btn).includes(k)) keys[k] = false;
+}
+
+/* -------------------------------- GAMEPAD ---------------------------------
+   (29 Oct 2026, for consoles, and for phones with a controller.) A pad is a
+   keyboard and a mouse here and nothing more: its buttons send key events
+   through every screen's own handler, its sticks move the same pointer, and in
+   play inputSample reads it as one more device, so lockstep and the
+   determinism suite never learn it exists. The standard mapping:
+     play     LS move · RS aim, and fires pushed hard · RT fire · LT parry
+              A / LB dash · B / RB the pilot's F · X book (Q) · Y look (E)
+              d-pad Z X C V · START pause · VIEW autofire (T)
+     screens  LS the pointer · RS scrolls · A clicks · B back (ESC)
+              d-pad the arrow keys · START enter (from the pause, resume)
+   It is the device in use from its first press, or a stick pushed past half,
+   until the mouse, the keyboard or a finger is used again. A pad pulled out
+   mid-run pauses the run. */
+const PAD_DEAD = 0.2;
+const Pad = { active: false, was: [], sent: [], lx: 0, ly: 0, fire: false, rt: false, aimA: null, aimR: 220, wheelT: 0 };
+const PAD_PLAY = { 0: ' ', 4: ' ', 1: 'f', 5: 'f', 2: 'q', 3: 'e', 14: 'z', 12: 'x', 15: 'c', 13: 'v', 8: 't' };
+const PAD_SCREEN = { 1: 'Escape', 12: 'ArrowUp', 13: 'ArrowDown', 14: 'ArrowLeft', 15: 'ArrowRight' };
+// a radial dead zone, rescaled so its edge reads as zero: [x, y, how far]
+function padStick(x, y) {
+  const m = Math.hypot(x, y);
+  if (m < PAD_DEAD) return [0, 0, 0];
+  const k = Math.min(1, (m - PAD_DEAD) / (1 - PAD_DEAD));
+  return [x / m * k, y / m * k, k];
+}
+const padKey = (type, key) => dispatchEvent(new KeyboardEvent(type, { key }));
+function padMouse(type) {
+  const e = new MouseEvent(type, { clientX: mouse.x * VIEW_S, clientY: mouse.y * VIEW_S, button: 0, bubbles: true });
+  (type === 'mouseup' ? window : cv).dispatchEvent(e);
+}
+function padDown(i) {
+  Pad.active = true;
+  const play = state === 'play' && !choice;   // THE FOUNDER's door is a screen, though it is asked mid-run
+  if (i === 6) { if (play) inputPress('parry'); return; }   // the right button's guard
+  if (i === 7) return;                   // the trigger is read held, in padPoll
+  let k;
+  if (i === 9) k = play || state === 'pause' ? 'Escape' : 'Enter';
+  else if (play) k = PAD_PLAY[i];
+  else if (i === 0) { Pad.sent[i] = 'click'; padMouse('mousedown'); return; }
+  else k = PAD_SCREEN[i];
+  if (!k) return;
+  Pad.sent[i] = k;
+  padKey('keydown', k);
+}
+function padUp(i) {
+  const k = Pad.sent[i];
+  Pad.sent[i] = null;
+  if (k === 'click') padMouse('mouseup');
+  else if (k) padKey('keyup', k);
+}
+function padRelease() {
+  for (let i = 0; i < Pad.sent.length; i++) padUp(i);
+  Pad.was.length = 0;
+  Pad.lx = Pad.ly = 0; Pad.fire = Pad.rt = false;
+}
+// once a frame, from frame(): what the pad is doing now
+function padPoll(dt) {
+  const all = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : null;
+  let g = null;
+  if (all) for (const p of all) if (p && p.connected) { g = p; break; }
+  if (!g) { if (Pad.was.length) padRelease(); return; }
+  for (let i = 0; i < g.buttons.length; i++) {
+    const b = g.buttons[i], on = !!b && (b.pressed || b.value > 0.5);
+    if (on === !!Pad.was[i]) continue;
+    Pad.was[i] = on;
+    if (on) padDown(i); else padUp(i);
+  }
+  const [lx, ly, lm] = padStick(g.axes[0] || 0, g.axes[1] || 0);
+  const [rx, ry, rm] = padStick(g.axes[2] || 0, g.axes[3] || 0);
+  if (lm > 0.5 || rm > 0.5) Pad.active = true;
+  if (!Pad.active) { Pad.lx = Pad.ly = 0; Pad.fire = Pad.rt = false; return; }
+  Pad.rt = !!g.buttons[7] && g.buttons[7].value > 0.25;
+  if (state === 'play' && !choice) {
+    Pad.lx = lx; Pad.ly = ly;
+    if (rm > 0) { Pad.aimA = Math.atan2(ry, rx); Pad.aimR = 110 + rm * 220; }
+    Pad.fire = Pad.rt || rm > 0.55;
+    return;
+  }
+  Pad.lx = Pad.ly = 0; Pad.fire = false;
+  if (lm > 0) {                          // the pointer, quicker the further the stick goes
+    const v = 1150 * Math.pow(lm, 1.7) * dt / lm;
+    mouse.x = clamp(mouse.x + lx * v, 0, W); mouse.y = clamp(mouse.y + ly * v, 0, H);
+    padMouse('mousemove');               // a slider being dragged follows it
+  }
+  if (Math.abs(ry) > 0.35) {             // the right stick turns the wheel, a notch at a time
+    if ((Pad.wheelT -= dt) <= 0) {
+      Pad.wheelT = 0.17 - Math.abs(ry) * 0.11;
+      cv.dispatchEvent(new WheelEvent('wheel', { deltaY: Math.sign(ry) * 100, clientX: mouse.x * VIEW_S,
+                                                 clientY: mouse.y * VIEW_S, cancelable: true }));
+    }
+  } else Pad.wheelT = 0;
+}
+// in play, from inputSample: the pointer is put where the right stick last pointed, off this pilot
+function padAim() {
+  if (Pad.aimA == null) Pad.aimA = P.ang || 0;
+  const tx = P.x + Math.cos(Pad.aimA) * Pad.aimR, ty = P.y + Math.sin(Pad.aimA) * Pad.aimR;
+  const s = aimSens();                   // undone here, so aimX() lands exactly on the point
+  mouse.x = W / 2 + ((tx - cam.x) * camZoom + cam.sx) / s;
+  mouse.y = H / 2 + ((ty - cam.y) * camZoom + cam.sy) / s;
+}
+// a phone turned upright mid-run: #vr-turn covers the game, and the run waits under it
+const TURN_MQ = matchMedia('(orientation:portrait) and (pointer:coarse) and (max-width:560px)');
+addEventListener('resize', () => { if (TURN_MQ.matches && state === 'play') ui('pause'); });
+addEventListener('gamepaddisconnected', () => {
+  const was = Pad.active;
+  padRelease();
+  Pad.active = false;
+  if (was && state === 'play') ui('pause');   // a pad pulled out mid-run stops the run, as a console must
+});
 
 /* ------------------------------- characters -------------------------------
    Two pilots with genuinely different weapons. VOIDRUNNER throws bullets;
@@ -38495,7 +38692,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, b.open)) { ui('open'); return; }
     return;
   }
-  if (state === 'name') { if (isTouch) promptName(); return; }
+  if (state === 'name') { if (isTouch || Pad.active) promptName(); return; }   // a pad has no keys to type with either
   if (state === 'lan') { lanClick(); return; }
   if (state === 'chal') { chalClick(); return; }
   if (state === 'settings') { settingsClick(); return; }
@@ -38880,6 +39077,7 @@ function frame(now) {
   if (pageDead) return;                  // the page has stopped; do not requeue
   const dt = Math.min(0.2, (now - last) / 1000);
   lastDT = dt;                           // render() draws the pointer with it
+  padPoll(dt);                           // a pad's presses, as keys, before anything reads them (GAMEPAD)
   // INTRO: a tab's first look has the screen, and nothing of the game moves under it
   if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
   // THE ENDING: the movie has the screen, and the game stands still under it
@@ -57605,7 +57803,7 @@ function render() {
     }
     // these pages return before the pass at the foot of render(), and they are
     // precisely the ones with no cursor of their own
-    if (!isTouch) drawUICursor(lastDT);
+    if (!isTouch || Pad.active) drawUICursor(lastDT);
     return;
   }
 
@@ -57843,7 +58041,7 @@ function render() {
   drawFreeplay();
   drawUnwrittenOverlay();
   drawLibraryPointer();
-  if (isTouch && state === 'play') drawTouchSticks();
+  if (isTouch && !Pad.active && state === 'play' && !bare) drawTouchSticks();
   if (state === 'levelup' && offers.length && !bare) drawLevelUp();   // co-op: only the cards dealt to this pilot
   if (state === 'gear' && gearOffer && !bare) drawGearOffer();
   if (state === 'shop') drawShop();
@@ -57879,12 +58077,12 @@ function render() {
   talesDrawLine();      // a page opened mid-run: its one line, low on the screen (FORGOTTEN TALES)
   drawLiveLine();       // a challenge gone on air mid-run: its one line (ON AIR)
   achDrawCard();        // a goal done in this run: its card, top right (ACHIEVEMENTS)
-  if (!isTouch && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !imCutIn() && !outsideCutAny()) {   // not over a cut-in
+  if ((!isTouch || Pad.active) && !bare && state === 'play' && !roninCutIn() && !suCutIn() && !imCutIn() && !outsideCutAny()) {   // not over a cut-in
     if (P.outside && outsideHas(P.charId, 'cursor')) outsideDraw('cursor');   // an outside pilot's own (OUTSIDE PILOTS)
     else drawCrosshair();
   }
   // every other screen has no system cursor either, so it carries the pointer
-  if (!isTouch && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
+  if ((!isTouch || Pad.active) && UI_CURSOR_STATES.includes(state)) drawUICursor(lastDT);
   // his ending outlives his body, but it is not drawn over a screen the
   // player opened themselves
   if (rsCard && !riteSceneOn() && state === 'play') rsDrawCard();
@@ -76750,7 +76948,7 @@ function renderMenu() {
   const pulse = 0.55 + Math.sin(uiTime * 3.4) * 0.45;
   ctx.font = "700 16px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = rgba(COL.player, pulse);
-  ctx.fillText(isTouch ? 'TAP TO START' : 'PRESS SPACE TO START', cxp, cyp + 174);
+  ctx.fillText(Pad.active ? 'PRESS START' : isTouch ? 'TAP TO START' : 'PRESS SPACE TO START', cxp, cyp + 174);
 
   const pr = Save.profile;
   if (pr.best > 0) {
@@ -76978,8 +77176,11 @@ function renderMenu() {
 
   // THE VAGRANT has other verbs, and the menu is where they are first said
   const blade = CHAR().weapon === 'blade';
-  const lines = isTouch
-    ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & ' + (blade ? 'swing' : 'fire')]
+  const lines = Pad.active
+    ? ['LEFT STICK move   ·   RIGHT STICK aim   ·   RT ' + (blade ? 'swing' : 'fire') + '   ·   A dash   ·   ' + (blade ? 'B / LT parry' : 'B special'),
+       'X book   ·   Y look   ·   D-PAD Z X C V   ·   START pause   ·   VIEW autofire']
+    : isTouch
+    ? ['LEFT SIDE — move   ·   RIGHT SIDE — aim & ' + (blade ? 'swing' : 'fire') + '   ·   buttons on the right for the rest']
     : tiny
       ? [blade ? 'WASD move  ·  HOLD swing  ·  F parry  ·  SPACE lunge'
                : 'WASD move  ·  MOUSE aim  ·  SPACE dash  ·  S settings']
@@ -81758,9 +81959,12 @@ const TUT_STEPS = [
     skip: () => wave >= 4, done: () => P.kills >= 5, max: 18 },
   { say: () => 'What you kill drops experience. Fly over it to pick it up and level up.',
     skip: () => wave >= 4, done: () => P.level >= 2, max: 18 },
-  { say: () => isBlade() ? 'SPACE lunges. Lunge through a gap in the shots, not back from them.'
+  // the touch screen has a DASH button now (TOUCH BUTTONS), so it is taught there too
+  { say: () => isTouch ? (isBlade() ? 'DASH, bottom right, lunges. Lunge through a gap in the shots, not back from them.'
+                                    : 'DASH, bottom right: nothing can hit you mid-dash. Dash through shots, not away.')
+             : isBlade() ? 'SPACE lunges. Lunge through a gap in the shots, not back from them.'
                          : 'SPACE dashes, and nothing can hit you mid-dash. Dash through shots, not away.',
-    skip: () => isTouch || wave >= 4, done: () => Tut.dashed, max: 22 },
+    skip: () => wave >= 4, done: () => Tut.dashed, max: 22 },
   { say: () => 'Wave 5 is the first boss: THE WARDEN.',
     when: () => wave >= 4, min: 4, max: 4 },
   { say: () => 'On this run it is slower and softer, and one blow that would end the run will not.',
@@ -81779,13 +81983,12 @@ const TUT_TELLS = {
   ph1: 'Phase 2: it fires more, and from now on it charges.',
   ph2: 'Phase 3. Nearly there.'
 };
-const TUT_TOUCH = { 0: 'A ring of shots. There are gaps in it: slip through one.',
-                    '-2': 'It is winding up a charge. Get out of its line, now.' };
+// (the touch screen's own wording, without the dash, went when it got a DASH button)
 function tutTell(k, dur, hot) {
   const s = Tut.said[k] || (Tut.said[k] = { n: 0, at: -99 });
   if (hot ? uiTime - s.at < 5 : s.n >= 2 || uiTime - s.at < 12) return;
   s.n++; s.at = uiTime;
-  Tut.tell = (isTouch && TUT_TOUCH[k]) || TUT_TELLS[k];
+  Tut.tell = TUT_TELLS[k];
   Tut.tellT = dur; Tut.tellHot = !!hot;
 }
 function tutTells(dt) {
@@ -81892,8 +82095,8 @@ const TUT_TOUR = [
   { at: ['hp'], head: 'HEALTH', say: () => 'When it runs out, the run is over. It turns yellow, then red, as it gets low.' },
   { at: ['xp', 'lv'], head: 'EXPERIENCE AND LEVEL',
     say: () => 'What you kill drops experience, and this bar fills with it. When it is full you level up and choose an upgrade.' },
-  { at: ['dash'], head: 'DASH', skip: () => isTouch || !P.dashMax,
-    say: () => 'Your dash charges. SPACE spends one, and each one fills again on its own.' },
+  { at: ['dash'], head: 'DASH', skip: () => !P.dashMax,
+    say: () => 'Your dash charges. ' + (isTouch ? 'The DASH button' : 'SPACE') + ' spends one, and each one fills again on its own.' },
   { at: ['score'], head: 'SCORE', say: () => 'This run\'s score, and under it your best.' },
   { at: ['wave'], head: 'WAVE AND SECTOR',
     say: () => 'The wave, your kills and the time, then the sector and how far through it you are. The fifth wave of every sector is a boss.' },
@@ -81901,7 +82104,7 @@ const TUT_TOUR = [
   { at: ['boss'], ghost: 'THE BOSS\'S HEALTH', head: 'BOSS', say: () => 'When a boss arrives, its health bar runs across the top here.' },
   { at: ['build'], ghost: 'YOUR UPGRADES', head: 'YOUR BUILD',
     say: () => 'Every upgrade you take is listed down here, with how many times you have taken it.' },
-  { at: ['tips'], ghost: 'TIPS', head: 'TIPS', say: () => isTouch ? 'Tips come up here as you play.'
+  { at: ['tips'], ghost: 'TIPS', head: 'TIPS', say: () => isTouch ? 'Tips come up here as you play. The II button pauses the game.'
       : 'Tips come up here as you play. [P] pauses the game, and the pause screen can turn the help off.' }
 ];
 const tourShown = () => TUT_TOUR.map((s, i) => i).filter(i => !(TUT_TOUR[i].skip && TUT_TOUR[i].skip()));
@@ -90366,6 +90569,7 @@ function drawNameEntry() {
 }
 
 function drawTouchSticks() {
+  if (!roninCutIn() && !suCutIn() && !imCutIn() && !choice) drawTouchBtns();   // a cut-in has the screen, or the door
   const drawStick = (s, col) => {
     if (!s) return;
     ctx.save();
@@ -90381,6 +90585,25 @@ function drawTouchSticks() {
   };
   drawStick(touchUI.move, COL.player);
   drawStick(touchUI.aim, '#f472b6');
+}
+// TOUCH BUTTONS: faint until a thumb is on one; DASH dims while it has no charge
+function drawTouchBtns() {
+  const held = Object.values(touchUI.btn);
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const b of touchBtns()) {
+    const down = held.includes(b.k);
+    const dim = b.k === ' ' && P.dashCh <= 0;
+    ctx.globalAlpha = down ? 0.95 : dim ? 0.22 : 0.5;
+    ctx.fillStyle = rgba(b.col, down ? 0.32 : 0.1);
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = b.col; ctx.lineWidth = down ? 2.6 : 1.6;
+    ctx.stroke();
+    ctx.fillStyle = b.col;
+    ctx.font = `700 ${b.r > 30 ? 13 : b.t.length > 2 ? 10 : 15}px Barlow, 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(b.t, b.x, b.y + 1);
+  }
+  ctx.restore();
 }
 
 /* Build every glow sprite up front. Each new colour costs a canvas plus a
@@ -95072,7 +95295,7 @@ const Intro = {
     ctx.letterSpacing = '0.22em';
     ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(isTouch ? 'HOLD TO SKIP' : 'HOLD ESC TO SKIP', x - 18, y + 1);
+    ctx.fillText(Pad.active ? 'HOLD B TO SKIP' : isTouch ? 'HOLD TO SKIP' : 'HOLD ESC TO SKIP', x - 18, y + 1);   // a pad's B is ESC (GAMEPAD)
     ctx.lineWidth = 2;
     ctx.strokeStyle = rgba('#94a3b8', 0.3);
     ctx.beginPath(); ctx.arc(x, y, 8, 0, TAU); ctx.stroke();
