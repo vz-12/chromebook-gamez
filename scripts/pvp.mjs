@@ -1777,70 +1777,42 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok(row().film === null && row().film_voice === null, 'and no movie named (film none)');
 
   /* THE PARTS (npm run challenge -- parts): what a won challenge leaves the
-     account it was sent to, in their lobby alone, used once and for good on
-     one of their own pilots' hulls (POST /api/pvp/parts) */
+     account it was sent to, in their lobby alone, kept. Nothing uses them
+     yet (giving them to a hull was archived: 1ae6470), so nothing can. */
   const { partsSql, unuseSql } = await import('./lib/challenge-sql.mjs');
   const partsWords = { t: 'WHAT IS LEFT', x: 'Something of mine.', done: 'They are {pilot} now.' };
   tool(putSql('x7-parts', Buffer.from(JSON.stringify(partsWords))).sql);
   tool(partsSql('x7', 'x7-parts'));
   ok(row().parts === 'x7-parts', 'its parts named, by hand (npm run challenge -- parts)', row());
-  const use = (who, b) => who.pvp.call('POST', '/api/pvp/parts', b);
-  ok(!('parts' in (await T.pvp.me()).d) && (await use(T, { use: 'hull', on: 'runner' })).status === 404,
-     'not decided: nobody holds them, and there is nothing to use');
+  ok(!('parts' in (await T.pvp.me()).d), 'not decided: nobody holds them');
   tool(decideSql('x7', 'lost', 3456789));
   ok(!('parts' in (await T.pvp.me()).d), 'lost: none');
   tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', 4567890));
   let mt = (await T.pvp.me()).d;
-  ok(mt.parts && mt.parts.t === partsWords.t && mt.parts.x === partsWords.x && mt.parts.used === null,
+  ok(mt.parts && mt.parts.t === partsWords.t && mt.parts.x === partsWords.x && mt.parts.done === partsWords.done && mt.parts.used === null,
      'won: the account it was sent to holds them, words and all, unused', mt.parts);
   ok(!('parts' in (await S.pvp.me()).d) && !('parts' in (await H.pvp.me()).d) && !('parts' in (await D.pvp.me()).d),
      'and nobody else: not a stranger, the pilot\'s own holder, nor a dev');
-  ok((await use(S, { use: 'hull', on: 'runner' })).status === 404, 'a stranger has none to use');
-  ok((await T.pvp.call('GET', '/api/pvp/parts')).status === 405, 'only ever asked to use them');
-  ok((await use(T, { use: 'sell', on: 'runner' })).status === 400, 'a use there is no such thing as: refused');
-  ok((await use(T, { use: 'hull', on: 'hacker' })).status === 400, 'a pilot they have not unlocked: refused');
-  ok((await use(T, { use: 'hull', on: 'x7' })).status === 400 && (await use(T, { use: 'hull' })).status === 400,
-     'nor the hidden pilot itself, nor no pilot at all');
-  ok(row().parts_used === null, 'and none of it used them');
-  DB.sql.prepare('UPDATE saves SET unlocks = ? WHERE account = ?').run(JSON.stringify({ chars: ['hacker'] }), T.id);
-  const used = await use(T, { use: 'hull', on: 'hacker' });
-  ok(used.status === 200 && used.d.parts.used && used.d.parts.used.use === 'hull' && used.d.parts.used.on === 'hacker' && used.d.parts.used.at > 0,
-     'one of their own, unlocked: used, on its hull', used);
-  ok(row().parts_use === 'hull' && row().parts_on === 'hacker' && row().parts_used === used.d.parts.used.at, 'and so noted', row());
-  const again = await use(T, { use: 'hull', on: 'runner' });
-  ok(again.status === 409 && again.d.parts.used.on === 'hacker' && row().parts_on === 'hacker', 'for good: used again, refused, and the first use stands', again);
-  const { useParts } = await import('../pvp/src/challenge.js');
-  ok(await useParts(DB, T.id, 'hull', 'runner') === false && row().parts_on === 'hacker', 'and the database itself lands no second use, whatever asks', row());
-  // two tabs at once: one use lands, and the other is told it already has
-  tool(unuseSql('x7'));
-  const race = await Promise.all([use(T, { use: 'hull', on: 'ember' }), use(T, { use: 'hull', on: 'runner' })]);
-  const won = race.find(r => r.status === 200);
-  ok(race.map(r => r.status).sort().join() === '200,409' && row().parts_on === won.d.parts.used.on, 'two tabs at once: one use, the other refused', race.map(r => [r.status, r.d]));
-  tool(unuseSql('x7'));
-  ok((await use(T, { use: 'hull', on: 'hacker' })).status === 200, 'and back on the hull chosen first, for what follows');
+  const tryUse = await T.pvp.call('POST', '/api/pvp/parts', { use: 'hull', on: 'runner' });
+  ok(tryUse.status === 404 && row().parts_used === null, 'nothing uses them now: giving them to a hull was archived, its door with it', tryUse);
+  // a use, once something notes one: shown, kept through a decision taken back, and taken back by hand
+  DB.sql.prepare("UPDATE pvp_challenges SET parts_used = 6789012, parts_use = 'test', parts_on = 'ember' WHERE pilot = 'x7'").run();
   mt = (await T.pvp.me()).d;
-  ok(mt.parts.used.on === 'hacker' && mt.parts.done === partsWords.done, 'the lobby is told what they went to, and what to say of it', mt.parts);
-  forget();
-  const tries = [];
-  for (let i = 0; i < LIMITS.parts.n + 2; i++) tries.push((await use(T, { use: 'hull', on: 'runner' })).status);
-  ok(tries.slice(0, LIMITS.parts.n).every(c => c === 409) && tries.slice(LIMITS.parts.n).every(c => c === 429), 'tried over and over: turned away', tries);
-  forget();
+  ok(mt.parts.used && mt.parts.used.use === 'test' && mt.parts.used.on === 'ember' && mt.parts.used.at === 6789012, 'a use noted is in their lobby', mt.parts);
   tool(decideSql('x7', 'none'));
   ok(!('parts' in (await T.pvp.me()).d), 'a decision taken back takes them out of sight');
   tool(decideSql('x7', 'won', 5678901));
-  ok((await T.pvp.me()).d.parts.used.on === 'hacker', 'decided won again: back as they were, used');
+  ok((await T.pvp.me()).d.parts.used.on === 'ember', 'decided won again: back as they were, used');
   tool(unuseSql('x7'));
-  ok((await T.pvp.me()).d.parts.used === null && row().parts_on === null && row().parts_use === null,
-     'a use taken back by hand (npm run challenge -- unuse): theirs to choose again');
+  ok((await T.pvp.me()).d.parts.used === null && row().parts_used === null && row().parts_use === null && row().parts_on === null,
+     'a use taken back by hand (npm run challenge -- unuse)');
   const lp = tool(challengesSql()).find(x => x.pilot === 'x7');
   ok(lp.parts === 'x7-parts' && lp.parts_used === '-', 'the tool lists them, and whether they are used', lp);
   tool(putSql('x7-parts', Buffer.from('not json'), Date.now() + 5).sql);
-  ok(!('parts' in (await T.pvp.me()).d) && (await use(T, { use: 'hull', on: 'runner' })).status === 404,
-     'words that cannot be read: no parts, never half of them, and nothing to use');
+  ok(!('parts' in (await T.pvp.me()).d), 'words that cannot be read: no parts, never half of them');
   ok(/<div class="card challenge parts" id="parts" hidden>/.test(lobbyHtml) && /renderParts\(d\.parts \|\| null/.test(lobbyScript)
-     && /'\/api\/pvp\/parts', \{ use: 'hull'/.test(lobbyScript), 'the lobby shows them to their holder, and asks to use them');
+     && !/\/api\/pvp\/parts/.test(lobbyScript), 'the lobby shows them to their holder, and asks nothing of them');
   tool(partsSql('x7', null)); tool(decideSql('x7', 'none'));
-  DB.sql.prepare("UPDATE saves SET unlocks = 'null' WHERE account = ?").run(T.id);
   ok(row().parts === null, 'and none named (parts none)');
 
   // a table made before the columns: PvP's Worker adds them, and the tool can too

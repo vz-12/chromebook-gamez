@@ -90,38 +90,15 @@
   }
 
   /* What a won challenge left this account (pvp/src/challenge.js, THE PARTS):
-     their words, then one of its own pilots to give them to, for good (POST
-     /api/pvp/parts), asked twice; once given, what they became. */
-  let partsSure = false;
-  function renderParts(p, own, names) {
+     their words, kept; and once something has used them, what was said of
+     it. Nothing here uses them yet (the hull picker was archived: 1ae6470). */
+  function renderParts(p, names) {
     $('parts').hidden = !p;
     if (!p) return;
     $('partsHead').textContent = p.t || 'WHAT IS LEFT';
     $('partsWords').textContent = p.x;
-    $('partsUse').hidden = !!p.used;
-    $('partsDone').hidden = !p.used;
-    const nameOf = id => names[id] || id;
-    if (p.used) {
-      $('partsDone').textContent = p.done ? p.done.replace(/\{pilot\}/g, nameOf(p.used.on)) : 'GIVEN TO ' + nameOf(p.used.on) + '\'S HULL';
-      return;
-    }
-    pilotList($('partsOn'), { pilots: own, awake: [] }, names);
-    const sure = on => {
-      partsSure = on;
-      $('partsGo').textContent = on ? 'FOR GOOD: GIVE THEM TO ' + nameOf($('partsOn').value) : 'GIVE THEM TO THIS HULL';
-      $('partsNote').textContent = on ? 'THERE IS NO TAKING THEM BACK' : '';
-    };
-    sure(false);
-    $('partsOn').onchange = () => sure(false);
-    $('partsGo').onclick = async () => {
-      if (!partsSure) return sure(true);
-      $('partsGo').disabled = true;
-      const r = await call('POST', '/api/pvp/parts', { use: 'hull', on: $('partsOn').value });
-      $('partsGo').disabled = false;
-      if (r.d && r.d.parts) return renderParts(r.d.parts, own, names);
-      sure(false);
-      $('partsNote').textContent = r.status === 429 ? 'TOO MANY TRIES: WAIT A MOMENT' : 'THAT DID NOT WORK: TRY AGAIN';
-    };
+    $('partsDone').hidden = !(p.used && p.done);
+    if (p.used && p.done) $('partsDone').textContent = p.done.replace(/\{pilot\}/g, names[p.used.on] || p.used.on || '');
   }
 
   /* The veil (index.html): a challenge arrives over the whole page the first
@@ -273,7 +250,7 @@
     const names = Object.assign({}, d.pilots);
     // a challenge won is answered: what it left takes its place, and it never comes over the page again
     renderChallenge(d.parts ? null : d.challenge || null);
-    renderParts(d.parts || null, d.loadouts.casual.pilots, names);
+    renderParts(d.parts || null, names);
     replays(!!d.replays);
     onNow(!!d.onNow);
     $('name').textContent = d.account.display;
