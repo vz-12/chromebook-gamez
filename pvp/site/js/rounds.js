@@ -71,9 +71,22 @@
      own in the hello, so both deal the same opening picks (lockstep). */
   const friendly = () => matchy() && !M.hand.match;
   const ownBonus = () => (friendly() && M.hand.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0);
+  /* A friend's match with a hidden pilot in it, on either side, is practice
+     for the story fight (user, 28 Oct): the story, from the phase the host
+     chose in the lobby (its hello carries it, so both machines open on the
+     same one), and nothing of it goes to the server (referee.js, onair.js).
+     Known once both pilots are, which they are by the run's first step. */
+  const friendMatch = () => !!(M.hand && M.hand.mode === 'match' && !(M.hand.match && Array.isArray(M.hand.match.sides)));
+  M.practice = () => friendMatch() && PILOTS.length > 1 && [0, 1].some(k => { const p = pilotP(k); return !!(p && p.outside); });
+  const phaseOf = n => (Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1);
   const hello = M.hello, peerHello = M.peerHello;
-  M.hello = () => Object.assign(hello(), { bonus: ownBonus() });
-  M.peerHello = d => { peerHello(d); M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0; };
+  M.hello = () => Object.assign(hello(), { bonus: ownBonus() },
+                                friendMatch() && M.hand.role === 'host' ? { storyFrom: phaseOf(M.hand.storyFrom) } : {});
+  M.peerHello = d => {
+    peerHello(d);
+    M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0;
+    if (friendMatch() && M.hand.role === 'guest') M.peerStoryFrom = phaseOf(d && d.storyFrom);
+  };
   // pilot k's bonus, the same on both machines
   M.bonusOf = k => (k === pilotMine() ? ownBonus() : (M.peerBonus || 0));
   /* Best of three below gold, five from there: a ranked match plays to its
@@ -88,13 +101,18 @@
   };
   /* The story fight (a hidden pilot's script: its kit reads RUN.pvp.story):
      the match the queue makes with the one a challenge went to, which the
-     server marks (pvp/src/objects.js), or practice against a bot that the
-     lobby starts for a hidden pilot's holder (bot.js), which may begin at a
-     later phase (storyFrom, 1 to 4). Both machines hold the same hand. */
-  M.story = () => !!(M.hand && ((M.hand.match && M.hand.match.story === true) || (M.hand.mode === 'bot' && M.hand.story === true)));
+     server marks (pvp/src/objects.js); practice against a bot that the lobby
+     starts for a hidden pilot's holder (bot.js); or practice in a friend's
+     match (M.practice, above). Practice may begin at a later phase
+     (storyFrom, 1 to 4). Both machines hold the same hand, or in a friend's
+     match the host's word for the phase. */
+  M.story = () => !!(M.hand && ((M.hand.match && M.hand.match.story === true) || (M.hand.mode === 'bot' && M.hand.story === true)
+                                || M.practice()));
   const storyFrom = () => {
-    const n = M.hand && M.hand.mode === 'bot' ? M.hand.storyFrom : 1;
-    return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;
+    if (!M.hand) return 1;
+    if (M.hand.mode === 'bot') return phaseOf(M.hand.storyFrom);
+    if (M.practice()) return M.hand.role === 'host' ? phaseOf(M.hand.storyFrom) : phaseOf(M.peerStoryFrom);
+    return 1;
   };
   const toWin = m => Math.ceil(m.bestOf / 2);
   // each pilot's player, by name, as this machine knows them

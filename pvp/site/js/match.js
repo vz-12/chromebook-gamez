@@ -178,13 +178,18 @@
     if (window.PVP_ART && typeof PVP_ART.result === 'function') room().classList.add('result');
   }
 
+  // story practice in a friend's match (rounds.js, M.practice): what its screens say in place of a verdict
+  const PRACTICE = 'story practice  ·  nothing sent';
+  const practising = () => !!(M.ref.practice || (M.practice && M.practice()));
+
   // the match is over for this machine: say why, and stay put until they go back
   function end(why) {
     over = why;
+    const practice = practising();          // asked before the pilots go
     show('left');
     try { if (LS.on) lsLeave(); pilotsEnd(); } catch (e) {}
     state = 'pvp';
-    say('MATCH OVER', '', why, '', false);
+    say('MATCH OVER', '', why, practice ? PRACTICE : '', false);
     told(M.ref.verdict);
   }
 
@@ -279,7 +284,7 @@
     over = won ? 'won' : 'lost';
     show(over);
     say(won ? 'VICTORY' : 'DEFEAT', '', M.nameOf(me) + '  ' + m.score[me] + ' — ' + m.score[them] + '  ' + M.nameOf(them),
-        M.said(m.bestOf), false);
+        practising() ? PRACTICE : M.said(m.bestOf), false);
     M.ref.finish(m);
     told(M.ref.verdict);
   }

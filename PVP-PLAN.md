@@ -1393,6 +1393,40 @@ blows down barely changed that.
   point without; a module's floor is kept, one not over 0 dropped. 3
   mutants (the floor ignored, not kept, not handed in), all caught.
 
+### A friend's match with a hidden pilot: story practice, sent nowhere (user, 28 Oct)
+
+"Make friendly matches using [the hidden pilot] trigger a story fight with
+no feedback to the server so we can practice." Story practice against a bot
+was there already; this is the same against a person.
+
+- **When:** a friend's match (a code, no `match.sides` from the server) with
+  a hidden pilot on either side is practice (`rounds.js`, `M.practice`):
+  the story fight's script, rules and phases, one round, as a queued story
+  match plays it. The lobby says so under the pilot picked
+  (`#friendStory`) and offers FROM PHASE; the host's pick rides its hello
+  (`storyFrom`), so the guest, who needs no perk, opens on the same phase.
+- **Sent nowhere:** the referee opens and joins as ever, since that is how
+  the guest's machine is handed the hidden pilot's code (`hidden.js`), and
+  then stops (`referee.js`): no report, no result, no record. Never on air
+  (`onair.js`). The result screen says `story practice · nothing sent`.
+- **Found on the way:** the on-air header left the story flag out of the
+  match, so a viewer's copy of a queued story match played it without the
+  story's script. It carries `story: true` now.
+- **Tested:** `npm run test:pvp`. Engine part 408 (410 with `--outside`): a
+  practice match hosted from phase III, both sides in practice and story on
+  that phase, best of one, the story's caps; to its end the referee only
+  opened and joined, nothing on air, nothing recorded, the note shown; one
+  fought to a knockout the same. The live test is now a queued story match,
+  and its viewer and replay page run the story. Server part 479: the lobby's
+  note, the phase in the host's hand, none for another pilot. 9 mutants
+  (practice never on, the referee still reporting, practice on air, the
+  header without the story, the host's phase not in its hello, no note, the
+  phase not in the hand, the lobby note never shown, never updated on a
+  change), all caught.
+- A parry test of VAGRANT's (a share of perfect parries over 30 tries) can
+  fall just short at random (17/30 once); it passed on the next runs and is
+  untouched here.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

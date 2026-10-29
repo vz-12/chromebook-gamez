@@ -22,7 +22,8 @@
              with none, which side walked out
 
    Only this side, and only the account allowed: the relay checks, and a
-   machine flying one of the game's own pilots never sends at all. Nothing
+   machine flying one of the game's own pilots never sends at all, nor does
+   story practice in a friend's match (rounds.js, M.practice). Nothing
    here waits on the relay, and nothing it answers changes the match: if the
    relay cannot be reached, its viewers wait, and the match plays on under
    its own rules.
@@ -61,7 +62,8 @@
     A.head = {
       v: 1, build: buildId(), pilot: pilotP(pilotMine()).charId,
       // the match as the server made it (a queued one): its rules and both sides, never an account or this machine's side
-      match: q && Array.isArray(q.sides) ? { queue: q.queue, rated: !!q.rated, league: q.league || null, bestOf: q.bestOf, sides: q.sides } : null,
+      match: q && Array.isArray(q.sides) ? Object.assign({ queue: q.queue, rated: !!q.rated, league: q.league || null, bestOf: q.bestOf, sides: q.sides },
+                                                         q.story === true ? { story: true } : {}) : null,   // the story fight: every viewer's copy plays its script too (rounds.js)
       run: LS.head,
       hellos: MP.role === 'host' ? [MP.said, MP.heard] : [MP.heard, MP.said]   // the host's, then the guest's
     };
@@ -87,7 +89,8 @@
   M.played = (cur, t) => {
     if (!M.hand || M.hand.mode !== 'match') return;
     if (t === 0 && LS.run !== A.run) {
-      if (M.ref && M.ref.id && mineHidden() && LS.head && MP.said && MP.heard) begin();
+      // (never story practice in a friend's match: nothing of it goes to the server, rounds.js M.practice)
+      if (M.ref && M.ref.id && mineHidden() && !(M.practice && M.practice()) && LS.head && MP.said && MP.heard) begin();
       else { A.on = false; A.run = LS.run; }
     }
     if (!A.on || A.ended || LS.run !== A.run || t !== A.next) return;

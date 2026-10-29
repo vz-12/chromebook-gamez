@@ -1041,7 +1041,14 @@ section('the art previews: /play/?preview=result and ?preview=belt');
   ok(R.win.__net.length === 0 && B.win.__net.length === 0, 'neither asks the network for anything', [R.win.__net, B.win.__net]);
 }
 
-section('a duel against a hidden pilot: the guest is handed it through the Worker, it flies in step, its own caps hold, nothing is recorded');
+/* A story fight is one round, over the moment a pilot is down: the sections
+   below that need it to go on make the pilots' blows on each other lighter
+   (LONG: a tenth as heavy), or land nothing at all (ON: the round goes on
+   until somebody leaves), the same on every copy of the game that plays it
+   (fighters, viewers, replays). */
+const LONG = 'PVP.DUEL.scale *= 0.1;', ON = 'PVP.DUEL.scale = 0;';
+
+section('a friend\'s match with a hidden pilot: story practice. The guest is handed it through the Worker, it flies in step, its own rules hold, and nothing more is sent');
 {
   /* The tests' stand-in outside pilot (scripts/fixtures/outside-pilot.js),
      with duel rules of its own, put in the vault and given to the host's
@@ -1054,9 +1061,11 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   const ask = (who, q) => pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/pilot?' + q,
     { headers: { cookie: 'vr_s=' + who.token, origin: PVP_ORIGIN } }), envPvp);
 
-  // the lobby hands the holder's own code in (pvp.js, outsideFor); the guest's hand has nothing of it
-  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', me: ME, outside: [{ id: 'x0', n: 'TEST', h: '', text: MOD }] }, DUELIST);
+  // the lobby hands the holder's own code in (pvp.js, outsideFor), and the phase picked; the guest's hand has nothing of it
+  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', storyFrom: 3, me: ME, outside: [{ id: 'x0', n: 'TEST', h: '', text: MOD }] }, DUELIST);
   const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
+  // the story is one long round: every blow a tenth as heavy on both machines, so it outlasts what is asked of it here
+  for (const g of [H, G]) g.run(LONG);
   await flush();
   ok(H.run('CHAR().id') === 'x0' && H.run('CHAR().outside === true'), 'the host flies it, run from what the lobby handed in');
   ok(H.run('PVP.ref.side') === 0, 'the Worker let its holder open a match flying it');
@@ -1079,6 +1088,10 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   ok(H.run('pilotP(0).charId') === 'x0' && G.run('pilotP(0).charId') === 'x0' && G.run('pilotP(1).charId') === 'ember',
      'the guest sees it fly, beside its own');
   for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH);
+  await play(H, G, ship, 60, () => H.run('!!RUN.pvp') && G.run('!!RUN.pvp'));
+  ok([H, G].every(g => g.run('PVP.practice() && RUN.pvp.story === true && RUN.pvp.storyFrom === 3 && RUN.pvp.bestOf === 1')),
+     'on both machines it is practice for the story fight: one long round, from the phase the host picked (its hello carried it)',
+     [H, G].map(g => g.run('JSON.stringify([PVP.practice(), RUN.pvp.story, RUN.pvp.storyFrom, RUN.pvp.bestOf])')));
   let threw = null;
   try { await play(H, G, ship, 60 * 60, () => H.run('RUN.pvp && RUN.pvp.phase === "fight" && RUN.pvp.t > 30')); }
   catch (e) { threw = e; }
@@ -1087,9 +1100,9 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   ok(same.n >= 10 && !same.parted.length && H.run('LS.resyncs') === 0, 'the same game on both', same);
   ok(H.run('JSON.stringify(OUTSIDE.errs)') === '{}' && G.run('JSON.stringify(OUTSIDE.errs)') === '{}', 'its hooks threw nowhere',
      [H.run('JSON.stringify(OUTSIDE.errs)'), G.run('JSON.stringify(OUTSIDE.errs)')]);
-  // its own rules: what it dealt held to its deal cap, what it took to its take cap (duel.js, duelRule)
+  // its own rules (its story's, where it brings them): what it dealt held to its deal cap, what it took to its take cap (duel.js, duelRule)
   const log = H.run('__log');
-  const rules = JSON.parse(H.run('JSON.stringify(CHARS.find(c => c.id === "x0").duel || {})'));
+  const rules = JSON.parse(H.run('JSON.stringify({ deal: PVP.duelRule(pilotP(0), "deal"), take: PVP.duelRule(pilotP(0), "take") })'));
   const dealCap = (rules.deal && rules.deal.hitCap) || DUEL.hitCap, takeCap = (rules.take && rules.take.hitCap) || DUEL.hitCap;
   const onGuest = log.hits.filter(h => h[1] === 1 && h[2] > 0), onIt = log.hits.filter(h => h[1] === 0 && h[2] > 0);
   ok(onGuest.length > 0 && onGuest.every(h => h[2] <= dealCap * h[3] + 1e-6), 'its blows held to its own cap: ' + (dealCap * 100) + '% a hit',
@@ -1105,26 +1118,54 @@ section('a duel against a hidden pilot: the guest is handed it through the Worke
   ok(H.run('pilotDo(1, () => { const hp = P.hp; P.iframe = 0; hurtPlayer(5); return P.hp === hp; })') === true, 'and no blow lands on it meanwhile');
   H.run('OUTSIDE.by.get("x0").cut = __cut');
 
-  // the guest leaves; the verdict comes, and is written nowhere
-  G.run('quitToMenu()'); ship(G, H);
+  /* The guest leaves (or the module flown by --outside has won it outright
+     by now). Nothing of the match went to the server past the host's open
+     and the guest's join, which the Worker's handing the guest its code
+     needs: no report all match long, no result, no word of leaving, and
+     never on air. */
+  const fought = H.run('RUN.pvp.phase === "over"');
+  if (!fought) { G.run('quitToMenu()'); ship(G, H); }
   H.run('update(1 / 60); PVP.frame()'); G.run('PVP.frame()');
-  for (let i = 0; i < 60 * 12 && !H.run('!!PVP.ref.verdict'); i++) {
+  for (let i = 0; i < 60 * 12; i++) {
     H.run('__wall += 1000 / 60; update(1 / 60); PVP.frame()');
     if (i % 30 === 0) await settle();
   }
-  const v = H.run('PVP.ref.verdict');
-  // (a module flown by --outside may have won it outright before the guest left)
-  ok(v && (v.v === 'forfeit' && v.winner === 0 || OUTSIDE_ARG && v.v === 'played'), 'the referee decides it like any other', v);
+  const ops = g => (g.win.__ref || []).map(r => r[0]).join();
+  ok(ops(H) === 'open' && ops(G) === 'join' && H.run('PVP.ref.done && PVP.ref.practice') && !H.run('PVP.ref.verdict'),
+     'the referee heard the host open it and the guest join it, and nothing more', [ops(H), ops(G)]);
+  ok(![H, G].some(g => g.win.__net.some(n => n.includes('/api/pvp/watch'))), 'it never went on air', H.win.__net.filter(n => n.includes('watch')));
   ok(!matchRows().some(r => r.id === mid || r.a_pilot === 'x0' || r.b_pilot === 'x0'), 'and it is recorded nowhere: no ladder, profile or history');
   const note = roomOf(H).__q['.note'].textContent;
-  ok(note === (v && v.v === 'played' ? 'best of ' + H.run('RUN.pvp.bestOf') : 'a win by forfeit') + '  ·  not recorded', 'the host is told so', note);
+  ok(note === 'story practice  ·  nothing sent', 'the host is told so', note);
+
+  // one fought to its end (the guest's pilot falls, on both machines): both results say practice, and nothing more went
+  const H2 = boot({ mode: 'match', role: 'host', pilot: 'x0', me: ME, outside: [{ id: 'x0', n: 'TEST', h: '', text: MOD }] }, DUELIST);
+  const G2 = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
+  await flush();
+  const ship2 = link(H2, G2);
+  for (let i = 0; i < 10 && !G2.run('CHARS.some(c => c.id === "x0")'); i++) await flush();
+  ship2(G2, H2);
+  H2.run('PVP.frame()'); ship2(H2, G2);
+  for (const g of [H2, G2]) g.run('PVP.frame();' + BOT);
+  await play(H2, G2, ship2, 60 * 20, () => [H2, G2].every(g => g.run('!!(RUN.pvp && RUN.pvp.phase === "fight")')));
+  const KO = 'if (RUN.pvp && RUN.pvp.phase === "fight") pilotDo(1, () => { P.iframe = 0; P.revive = 0; P.deadman = 0; hurtPlayer(1e9, { pure: true }); })';
+  for (let i = 0; i < 8 && !(H2.run('!!PVP.shown') && G2.run('!!PVP.shown')); i++) {
+    for (const g of [H2, G2]) g.run(KO);
+    await play(H2, G2, ship2, 60 * 3, () => H2.run('!!PVP.shown') && G2.run('!!PVP.shown'));
+  }
+  const notes = [H2, G2].map(g => [roomOf(g).__q.h2.textContent, roomOf(g).__q['.note'].textContent]);
+  ok(notes[0][0] === 'VICTORY' && notes[1][0] === 'DEFEAT' && notes.every(n => n[1] === 'story practice  ·  nothing sent'),
+     'a practice fought to its end: each side\'s result says it was practice, sent nowhere', notes);
+  ok(ops(H2) === 'open' && ops(G2) === 'join', 'and the referee heard nothing past the open and the join', [ops(H2), ops(G2)]);
 }
 
-section('live spectating: a hidden pilot\'s match on air, watched from the start, joined late, and kept');
+section('live spectating: a hidden pilot\'s story fight on air, watched from the start, joined late, and kept');
 {
   /* The duelist's machine flies the hidden pilot (x0, given to its account
-     above), so it puts the match on air (onair.js); viewers with no account
-     play it from the relay (watch.js) on copies of their own. */
+     above) in the story fight the queue made with the one its challenge went
+     to, so it puts the match on air (onair.js); viewers with no account play
+     it from the relay (watch.js) on copies of their own. (A friend's match
+     with it is practice, and never goes on air: the section above.) */
   const { Broadcast } = await import('../pvp/src/broadcast.js');
   envPvp.BROADCAST = makeNamespace(Broadcast, envPvp);
   // a viewer: no account, no cookie; it asks only the relay, and PvP's Worker for the pilot
@@ -1138,8 +1179,12 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
         headers: Object.assign({}, init.headers, { 'cf-connecting-ip': '203.0.113.99' }) }), envPvp);
     };
   };
-  const watcher = (mid, dress) => loadGame(IDX, { search: '?watch=' + mid, scripts: [WALL].concat(pvpScripts),
-    before: win => { rooms(win); recorder(win); viewerNet(win); win.location.replace = u => { win.__replaced = u; }; if (dress) dress(win); } });
+  const watcher = (mid, dress) => {
+    const v = loadGame(IDX, { search: '?watch=' + mid, scripts: [WALL].concat(pvpScripts),
+      before: win => { rooms(win); recorder(win); viewerNet(win); win.location.replace = u => { win.__replaced = u; }; if (dress) dress(win); } });
+    v.run(ON);
+    return v;
+  };
   // every engine keeps its fingerprints, one a second, for the whole fight (lockstep keeps only the last few)
   const KEEP_CK = `globalThis.__ck = new Map(); { const was = LS.after;
     LS.after = () => { if (was) was(); if (LS.tick % 60 === 0) __ck.set(LS.tick, LS.ckMine.get(LS.tick)); }; }`;
@@ -1166,15 +1211,27 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   const relay = mid => envPvp.BROADCAST.instances.get(mid);
   const meta = mid => relay(mid) && relay(mid).data.get('m');
 
-  /* Each fighter with real reward upgrades of its own, so the cards dealt
-     depend on whose they are: a viewer dealing from any pool but theirs
-     parts from the fight at the first card (cards.js; watch.js, upsOf). */
+  /* The match, made as the queue makes a hidden pilot's with the one its
+     challenge went to (pvp/src/objects.js, Matchmaker): the referee's Match
+     created with both sides in it, and each player handed the match as the
+     server tells it, the story fight's mark among it. Each fighter with real
+     reward upgrades of its own, so the cards dealt depend on whose they are:
+     a viewer dealing from any pool but theirs parts from the fight at the
+     first card (cards.js; watch.js, upsOf). */
   const rewards = g.run('UPGRADES.filter(u => u.lock || u.need).map(u => u.id)');
-  const withUps = (me, ups) => Object.assign({}, me, { loadouts: { ranked: me.loadouts.ranked, casual: Object.assign({}, me.loadouts.casual, { ups }) } });
-  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', me: withUps(ME, rewards.slice(0, 3)), outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, DUELIST);
-  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: withUps(RIVAL, rewards.slice(3, 6)) }, RIVAL_ACCT);
+  const qid = randomBytes(16).toString('hex');
+  await envPvp.MATCH.get(envPvp.MATCH.idFromName(qid)).fetch(new Request('https://match/create', { method: 'POST',
+    body: JSON.stringify({ id: qid, queue: 'ranked', rated: false, league: 'hidden', hidden: true,
+                           sides: [{ acct: DUELIST.id, name: 'Duelist', pilot: 'x0' }, { acct: RIVAL_ACCT.id, name: 'Rival', pilot: 'ember' }] }) }));
+  const served = side => ({ id: qid, side, role: side ? 'guest' : 'host', queue: 'ranked', rated: false, story: true, bestOf: 1,
+    league: { id: 'hidden', n: '???', bestOf: 1, pilots: 'own', awake: true },
+    sides: [{ name: 'Duelist', pilot: 'x0', awake: false, ups: rewards.slice(0, 3) }, { name: 'Rival', pilot: 'ember', awake: true, ups: rewards.slice(3, 6) }] });
+  const H = boot({ mode: 'match', role: 'host', queue: 'ranked', pilot: 'x0', me: ME, match: served(0), outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', queue: 'ranked', pilot: 'ember', me: RIVAL, match: served(1) }, RIVAL_ACCT);
+  for (const g of [H, G]) g.run(ON);      // the story's one round goes on until the guest leaves
   await flush();
   const mid = H.run('PVP.ref.id');
+  ok(mid === qid && G.run('PVP.ref.id') === qid, 'both machines have the queue\'s match, the story fight', [mid, G.run('PVP.ref.id')]);
   // a viewer arrives before the fight: it waits
   const V1 = watcher(mid);
   V1.real = true;
@@ -1227,14 +1284,17 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   ok(m.snaps.length >= 2 && m.snaps[0].at === 900 && m.snaps[1].at === 1800, 'and a snapshot every fifteen seconds of the fight', m.snaps.map(s => s.at));
   const head = relay(mid).data.get('h');
   ok(head && head.run && head.run.t === 'lsrun' && head.run.seed === H.run('simSeed') && head.hellos.length === 2
-     && head.hellos[0].cid === 'x0' && head.hellos[1].cid === 'ember' && head.match === null,
-     'its header: the run as the guest was handed it, both handshakes, the host\'s first; a friend\'s match has no record', head && head.hellos.map(x => x.cid));
+     && head.hellos[0].cid === 'x0' && head.hellos[1].cid === 'ember' && head.match && head.match.story === true
+     && head.match.sides.map(x => x.pilot).join() === 'x0,ember' && head.match.bestOf === 1,
+     'its header: the run as the guest was handed it, both handshakes, the host\'s first, and the match as the server made it, marked the story',
+     head && [head.hellos.map(x => x.cid), head.match]);
   ok(!JSON.stringify(head).includes(DUELIST.id) && !JSON.stringify(head).includes(RIVAL_ACCT.id), 'with no account in it');
   ok(!G.win.__net.some(n => n.includes('/api/pvp/watch')), 'the other side, flying one of the game\'s pilots, sends nothing', G.win.__net.filter(n => n.includes('watch')));
 
   // the viewer, three seconds behind and in step all the way
   ok(V1.run('PVP.watch.phase') === 'on' && V1.run('pilotP(0).charId') === 'x0' && V1.run('pilotP(1).charId') === 'ember',
      'the viewer plays the fight: both pilots, the hidden one fetched for it', [V1.run('PVP.watch.phase'), V1.run('PILOTS.length')]);
+  ok(V1.run('RUN.pvp.story === true && PVP.story()') && H.run('RUN.pvp.story === true'), 'as the story fight, as the fighters do, from its header', V1.run('RUN.pvp.story'));
   /* And draws it: every layer of the hidden pilot's art that its opponent's
      own screen draws (its hull and what it puts in the room among them),
      none of its hooks throwing; of what only its own player sees (its HUD,
@@ -1251,7 +1311,7 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
   ok(V1.run('MP.role') === 'guest' && V1.run('pilotMine()') === 1, 'through the challenger\'s eyes, not the hidden pilot\'s');
   ok(rewards.length >= 6 && [0, 1].every(k => V1.run(`JSON.stringify(PVP.upsOf(${k}))`) === H.run(`JSON.stringify(PVP.upsOf(${k}))`))
      && H.run('JSON.stringify(PVP.upsOf(0))') === JSON.stringify(rewards.slice(0, 3)),
-     'dealing from each fighter\'s own reward upgrades, as their handshakes have them', [V1.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
+     'dealing from each fighter\'s own reward upgrades, as the server\'s match has them', [V1.run('JSON.stringify([PVP.upsOf(0), PVP.upsOf(1)])')]);
   const lag = H.run('LS.tick') - V1.run('LS.tick');
   ok(lag >= 150 && lag <= 400, 'about three seconds behind live', lag);
   let same = sameAs(H, V1);
@@ -1374,7 +1434,7 @@ section('live spectating: a hidden pilot\'s match on air, watched from the start
      controls made for capture. Its fingerprints after all of them are still
      the fight's own. */
   section('the replay page: /play/?replay=1, for the trailer');
-  const replayPage = () => loadGame(IDX, { search: '?replay=1', scripts: [WALL].concat(pvpScripts), before: win => { rooms(win); recorder(win); } });
+  const replayPage = () => { const v = loadGame(IDX, { search: '?replay=1', scripts: [WALL].concat(pvpScripts), before: win => { rooms(win); recorder(win); } }); v.run(ON); return v; };
   // a file chosen on the page, read (the page's own chooser hands it the same way)
   const chosen = (page, file) => { page.ctx.__log = JSON.parse(JSON.stringify(file)); page.run('PVP.watch.open(__log)'); };
   const RP = replayPage();

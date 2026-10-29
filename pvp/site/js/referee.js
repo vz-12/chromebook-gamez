@@ -21,6 +21,13 @@
 
    Nothing here decides anything, and nothing waits on it: a match plays the
    same whether or not the referee can be reached.
+
+   Practice for the story fight in a friend's match (rounds.js, M.practice)
+   says nothing past `open` and `join`: no report, no result, no leaving.
+   Those two stay because the Worker hands a hidden pilot's code only to the
+   other side of a match it knows (pvp/src/hidden.js); a match nobody
+   reports on is never decided into anything, and a hidden pilot's is
+   written nowhere.
    ========================================================================= */
 (() => {
   'use strict';
@@ -104,6 +111,8 @@
        nobody leaving, and a link that never forms is nobody's fault. */
     if (LS.on && MP.on) R.live = true;
     if (!R.live) return;
+    // story practice, its pilots now known: nothing more is said, ever
+    if (M.practice && M.practice()) { R.done = R.practice = true; return; }
     const now = Date.now();
     if (R.until && now > R.until) { R.done = true; return; }
     if (R.busy || now < R.next) return;     // one at a time; a result waits only for the one in flight

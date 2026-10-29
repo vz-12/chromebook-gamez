@@ -986,6 +986,36 @@ section('bots: an empty queue, filled only after every real pairing (pvp/src/bot
   const L4 = lobby(ace, '198.51.100.92', tabStore);
   await L4.run(100);
   ok(!L4.sent.length && L4.$('searchClock').textContent === '', 'a note from long ago: nothing searched', L4.sent);
+
+  /* A friend's match flying a hidden pilot (js/rounds.js, M.practice): the
+     card says it is story practice, sent nowhere, and the host's hand
+     carries the phase picked. Any other pilot: a friend's match as ever. */
+  const { putSql } = await import('./lib/vault-sql.mjs');
+  const perksWas = DB.sql.prepare("SELECT perks FROM accounts WHERE name = 'ace'").get().perks;
+  for (const s of putSql('f1', Buffer.from('/* a hidden pilot */'), Date.now(), 'THE FRIEND').sql.split(/;\s*\n/).map(x => x.replace(/;\s*$/, '').trim()).filter(Boolean))
+    DB.sql.prepare(s).run();
+  DB.sql.prepare("UPDATE accounts SET perks = ? WHERE name = 'ace'").run(JSON.stringify(['vault:f1']));
+  tabStore.clear();
+  const L5 = lobby(ace, '198.51.100.92', tabStore);
+  await L5.run(100);
+  const pick = id => { L5.$('matchPilot').value = id; for (const f of L5.$('matchPilot').on.change || []) f(); };
+  ok(L5.$('matchPilot').kids.some(o => o.value === 'f1') && L5.$('friendStory').hidden === true,
+     'a hidden pilot among a friend\'s match\'s pilots; the story note off while another is picked');
+  pick('f1');
+  ok(L5.$('friendStory').hidden === false && L5.$('friendStoryName').textContent === 'THE FRIEND', 'picked: the note says it is story practice, by the pilot\'s name');
+  L5.$('friendFrom').value = '3';
+  for (const f of L5.$('host').on.click) f();
+  await L5.run(100);
+  const fh = L5.hand();
+  ok(fh && fh.mode === 'match' && fh.role === 'host' && fh.pilot === 'f1' && fh.storyFrom === 3 && fh.outside.length === 1 && fh.outside[0].id === 'f1'
+     && !L5.sent.length, 'HOST: the hand carries the phase picked, and the pilot\'s code; nothing asked of the queue', fh && [fh.mode, fh.storyFrom]);
+  tabStore.clear();
+  pick('runner');
+  ok(L5.$('friendStory').hidden === true, 'another pilot picked: the note goes');
+  for (const f of L5.$('host').on.click) f();
+  await L5.run(100);
+  ok(L5.hand() && L5.hand().pilot === 'runner' && !('storyFrom' in L5.hand()), 'and its hand has no phase: a friend\'s match as ever', L5.hand());
+  DB.sql.prepare("UPDATE accounts SET perks = ? WHERE name = 'ace'").run(perksWas);
   Date.now = real;
 }
 
