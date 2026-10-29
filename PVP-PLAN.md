@@ -1400,29 +1400,43 @@ no feedback to the server so we can practice." Story practice against a bot
 was there already; this is the same against a person.
 
 - **When:** a friend's match (a code, no `match.sides` from the server) with
-  a hidden pilot on either side is practice (`rounds.js`, `M.practice`):
-  the story fight's script, rules and phases, one round, as a queued story
-  match plays it. The lobby says so under the pilot picked
-  (`#friendStory`) and offers FROM PHASE; the host's pick rides its hello
-  (`storyFrom`), so the guest, who needs no perk, opens on the same phase.
-- **Sent nowhere:** the referee opens and joins as ever, since that is how
-  the guest's machine is handed the hidden pilot's code (`hidden.js`), and
-  then stops (`referee.js`): no report, no result, no record. Never on air
-  (`onair.js`). The result screen says `story practice · nothing sent`.
-- **Found on the way:** the on-air header left the story flag out of the
-  match, so a viewer's copy of a queued story match played it without the
-  story's script. It carries `story: true` now.
-- **Tested:** `npm run test:pvp`. Engine part 408 (410 with `--outside`): a
+  a hidden pilot on either side is the story fight (`rounds.js`, `M.story`):
+  its script, rules and phases, one round, as a queued story match plays it.
+  The lobby says so under the pilot picked (`#friendStory`) and offers FROM
+  PHASE; the host's pick rides its hello (`storyFrom`), so the guest, who
+  needs no perk, opens on the same phase.
+- **Sent nowhere** (`M.practice`): the referee opens and joins as ever,
+  since that is how the guest's machine is handed the hidden pilot's code
+  (`hidden.js`), and then stops (`referee.js`): no report, no result, no
+  record. Nothing is kept or sent on air, even for a dev's WATCH
+  (`onair.js`, `recordable`); its Match object lapses unreported, which also
+  takes it off ON NOW. The result screen says `story practice · nothing sent`.
+- **Unless put on air** (merged with main's rehearsals, 29 Oct): main had
+  made a friend's story fight opt-in, a host's STORY box, and on air with a
+  pill for the watch link. Here it is automatic and silent, and the box is
+  now ON AIR instead (`#friendAir`, in the host's hello as `air`). Ticked,
+  the practice goes to the referee and the relay as any friend's match
+  does, pill and all.
+- **The phase on air:** the broadcast's header carries `story` and now
+  `storyFrom` too, and a viewer's copy (or a replay) opens on that phase
+  (`watch.js`). Before, a practice put on air from phase II to IV, against
+  a bot or a friend, played on its viewers from phase I and parted from the
+  fight.
+- **Tested:** `npm run test:pvp`. Engine part 427 (430 with `--outside`): a
   practice match hosted from phase III, both sides in practice and story on
-  that phase, best of one, the story's caps; to its end the referee only
-  opened and joined, nothing on air, nothing recorded, the note shown; one
-  fought to a knockout the same. The live test is now a queued story match,
-  and its viewer and replay page run the story. Server part 479: the lobby's
-  note, the phase in the host's hand, none for another pilot. 9 mutants
-  (practice never on, the referee still reporting, practice on air, the
-  header without the story, the host's phase not in its hello, no note, the
-  phase not in the hand, the lobby note never shown, never updated on a
-  change), all caught.
+  that phase, best of one, the story's caps, no steps kept for a watcher;
+  to its end the referee only opened and joined, nothing on air, nothing
+  recorded, the note shown; one fought to a knockout the same. A rehearsal
+  put on air from phase II: the referee has it, the pill, and a viewer in
+  step on phase II; a bot practice on air from phase III, the same. Server
+  part 498: the lobby's note, the phase and ON AIR in the host's hand, none
+  for another pilot. Lockstep, determinism, live, outside green. 15
+  mutants, all caught (before the merge: practice never on, the referee
+  still reporting, practice on air, the header without the story, the
+  host's phase not in its hello, no note, the phase not in the hand, the
+  lobby note never shown, never updated on a change; after: on air still
+  silent, the guest deaf to it, practice kept for a dev, the header or the
+  viewer without the phase, the lobby dropping ON AIR).
 - A parry test of VAGRANT's (a share of perfect parries over 30 tries) can
   fall just short at random (17/30 once); it passed on the next runs and is
   untouched here.

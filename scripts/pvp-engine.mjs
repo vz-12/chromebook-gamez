@@ -1096,6 +1096,8 @@ section('a friend\'s match with a hidden pilot: story practice. The guest is han
   try { await play(H, G, ship, 60 * 60, () => H.run('RUN.pvp && RUN.pvp.phase === "fight" && RUN.pvp.t > 30')); }
   catch (e) { threw = e; }
   ok(!threw, 'thirty seconds of the duel, drawn on both, without an error', String(threw && threw.stack));
+  ok([H, G].every(g => g.run('!PVP.air.on && PVP.air.next === 0')), 'and neither side keeps its steps for a dev to ask to watch: practice is never on air',
+     [H, G].map(g => g.run('[PVP.air.on, PVP.air.next]')));
   const same = sameGame(H, G);
   ok(same.n >= 10 && !same.parted.length && H.run('LS.resyncs') === 0, 'the same game on both', same);
   ok(H.run('JSON.stringify(OUTSIDE.errs)') === '{}' && G.run('JSON.stringify(OUTSIDE.errs)') === '{}', 'its hooks threw nowhere',
@@ -1284,9 +1286,9 @@ section('live spectating: a hidden pilot\'s story fight on air, watched from the
   ok(m.snaps.length >= 2 && m.snaps[0].at === 900 && m.snaps[1].at === 1800, 'and a snapshot every fifteen seconds of the fight', m.snaps.map(s => s.at));
   const head = relay(mid).data.get('h');
   ok(head && head.run && head.run.t === 'lsrun' && head.run.seed === H.run('simSeed') && head.hellos.length === 2
-     && head.hellos[0].cid === 'x0' && head.hellos[1].cid === 'ember' && head.match && head.match.story === true
+     && head.hellos[0].cid === 'x0' && head.hellos[1].cid === 'ember' && head.match && head.story === true && head.storyFrom === 1
      && head.match.sides.map(x => x.pilot).join() === 'x0,ember' && head.match.bestOf === 1,
-     'its header: the run as the guest was handed it, both handshakes, the host\'s first, and the match as the server made it, marked the story',
+     'its header: the run as the guest was handed it, both handshakes, the host\'s first, and the match as the server made it, marked the story from its first phase',
      head && [head.hellos.map(x => x.cid), head.match]);
   ok(!JSON.stringify(head).includes(DUELIST.id) && !JSON.stringify(head).includes(RIVAL_ACCT.id), 'with no account in it');
   ok(!G.win.__net.some(n => n.includes('/api/pvp/watch')), 'the other side, flying one of the game\'s pilots, sends nothing', G.win.__net.filter(n => n.includes('watch')));
@@ -1524,6 +1526,156 @@ section('live spectating: a hidden pilot\'s story fight on air, watched from the
      'a replay from another build is refused, with the way to play it', other.run('PVP.watch.why'));
   // and the site's folder has no place for one: nothing in the page's scripts fetches a replay
   ok(!/\/replays\//.test(pvpScripts.map(s => s.code).join('\n')), 'no replay is ever fetched from the site: the file is only chosen');
+}
+
+section('the story fight on air: a viewer\'s copy runs its script too, and stays in step');
+{
+  // a viewer, as the section above has it: no account, asking only the relay and PvP's Worker for the pilot
+  const viewerNet = win => {
+    const rec = win.fetch;
+    win.fetch = (u, init = {}) => {
+      const path = String(u);
+      if (!path.startsWith('/api/pvp/watch') && !path.startsWith('/api/pvp/pilot?')) return rec(u, init);
+      win.__net.push((init.method && init.method !== 'GET' ? init.method + ' ' : 'fetch ') + path);
+      return pvpWorker.fetch(new Request(PVP_ORIGIN + path, { method: init.method || 'GET', body: init.body,
+        headers: Object.assign({}, init.headers, { 'cf-connecting-ip': '203.0.113.98' }) }), envPvp);
+    };
+  };
+  const KEEP_CK = `globalThis.__ck = new Map(); { const was = LS.after;
+    LS.after = () => { if (was) was(); if (LS.tick % 60 === 0) __ck.set(LS.tick, LS.ckMine.get(LS.tick)); }; }`;
+  const STEP = '__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()';
+  const VIEW = '__wall += 1000 / 60; if (LS.on) { if (!PVP.steps(1 / 60)) lsFrame(1 / 60); } PVP.frame();';
+  /* a rehearsal: a friend's match with a hidden pilot is story practice, and its host puts it on air (the lobby's ON AIR
+     box), from phase II; the guest hears both in the host's hello */
+  const H = boot({ mode: 'match', role: 'host', pilot: 'x0', storyFrom: 2, air: true, me: ME, outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
+  await flush();
+  const mid = H.run('PVP.ref.id');
+  const V = loadGame(IDX, { search: '?watch=' + mid, scripts: [WALL].concat(pvpScripts),
+    before: win => { rooms(win); recorder(win); viewerNet(win); win.location.replace = u => { win.__replaced = u; }; } });
+  V.run(KEEP_CK);
+  const ship = link(H, G);
+  for (let i = 0; i < 10 && !G.run('CHARS.some(c => c.id === "x0")'); i++) await flush();
+  ship(G, H);
+  H.run('runSeedNext = 9061');
+  H.run('PVP.frame()'); ship(H, G);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH + KEEP_CK);
+  let threw = null;
+  try {
+    for (let i = 0; i < 60 * 20; i++) {
+      H.run(STEP); ship(H, G);
+      G.run(STEP); ship(G, H);
+      V.run(VIEW);
+      if (i % 10 === 0) await settle();
+    }
+  } catch (e) { threw = e; }
+  ok(!threw, 'twenty seconds of the story fight on air, watched, without an error', String(threw && threw.stack));
+  ok(H.run('!!RUN.pvp && RUN.pvp.story') === true && G.run('!!RUN.pvp && RUN.pvp.story') === true && G.run('RUN.pvp.bestOf') === 1,
+     'both fighters run the story fight, one long round', G.run('JSON.stringify(RUN.pvp && [RUN.pvp.story, RUN.pvp.bestOf])'));
+  ok(H.run('RUN.pvp.storyFrom') === 2 && G.run('RUN.pvp.storyFrom') === 2 && H.run('PVP.practice()') === false && G.run('PVP.practice()') === false
+     && !H.run('PVP.ref.practice') && !G.run('PVP.ref.practice'),
+     'from the host\'s phase, and on air: not practice sent nowhere, so the referee has it as any friend\'s match',
+     [H.run('RUN.pvp.storyFrom'), G.run('RUN.pvp.storyFrom'), H.run('PVP.practice()'), G.run('PVP.practice()')]);
+  const pill = H.win.document.body.children.find(c => c.id === 'pvp-onair');
+  ok(H.run('PVP.air.link') === H.run('location.origin') + '/play/?watch=' + mid && pill && !pill.hidden && /COPY THE WATCH LINK/.test(pill.textContent),
+     'the side on air has its watch link, a click from being copied', [H.run('PVP.air.link'), pill && pill.textContent]);
+  ok(!G.run('PVP.air.link') && !G.win.document.body.children.some(c => c.id === 'pvp-onair'), 'the other side has none');
+  ok(V.run('!!RUN.pvp && RUN.pvp.story') === true && V.run('RUN.pvp.storyFrom') === 2, 'and the viewer\'s copy too, from the same phase, from the broadcast\'s header',
+     V.run('JSON.stringify(RUN.pvp && [RUN.pvp.story, RUN.pvp.storyFrom])'));
+  const ka = new Map(H.run('[...__ck]')), kv = new Map(V.run('[...__ck]'));
+  const both = [...kv.keys()].filter(t => ka.has(t)), parted = both.filter(t => ka.get(t) !== kv.get(t));
+  ok(both.length >= 5 && !parted.length, 'and stays in step with it', { n: both.length, parted: parted.slice(0, 3) });
+  if (OUTSIDE_ARG) ok(V.run('pilotP(0).ox && pilotP(0).ox.story && pilotP(0).ox.story.n') === H.run('pilotP(0).ox && pilotP(0).ox.story && pilotP(0).ox.story.n'),
+                      'its phase the same as the fighters\'', [H.run('JSON.stringify(pilotP(0).ox && pilotP(0).ox.story)'), V.run('JSON.stringify(pilotP(0).ox && pilotP(0).ox.story)')]);
+
+  // a slow viewer, far behind what it holds: it draws only some frames until it catches up (watch.js, skipDraw)
+  ok(V.run('PVP.watch.phase') === 'on' && V.run('PVP.skipDraw()') === false, 'level with the fight: every frame drawn');
+  const lastWas = V.run('PVP.watch.last');
+  V.run('PVP.watch.last = LS.tick + 60 * 10');
+  const behind = [V.run('PVP.skipDraw()'), V.run('PVP.skipDraw()'), V.run('PVP.skipDraw()')];
+  ok(behind.join() === 'true,true,true', 'ten seconds behind: frames skipped, straight after one drawn', behind);
+  V.run('globalThis.__pn = performance.now; performance.now = () => __pn.call(performance) + 1000');
+  ok(V.run('PVP.skipDraw()') === false, 'but one drawn at least every twentieth of a second');
+  V.run('performance.now = __pn');
+  V.run('PVP.watch.last = ' + lastWas);
+  ok(V.run('PVP.skipDraw()') === false && G.run('PVP.skipDraw()') === false, 'and a fighter never skips one');
+}
+
+section('watched on demand: any match, sent by its host once a dev asks; and practice put on air');
+{
+  const viewerNet = win => {
+    const rec = win.fetch;
+    win.fetch = (u, init = {}) => {
+      const path = String(u);
+      if (!path.startsWith('/api/pvp/watch') && !path.startsWith('/api/pvp/pilot?')) return rec(u, init);
+      win.__net.push((init.method && init.method !== 'GET' ? init.method + ' ' : 'fetch ') + path);
+      return pvpWorker.fetch(new Request(PVP_ORIGIN + path, { method: init.method || 'GET', body: init.body,
+        headers: Object.assign({}, init.headers, { 'cf-connecting-ip': '203.0.113.97' }) }), envPvp);
+    };
+  };
+  const watcher = mid => loadGame(IDX, { search: '?watch=' + mid, scripts: [WALL].concat(pvpScripts),
+    before: win => { rooms(win); recorder(win); viewerNet(win); win.location.replace = u => { win.__replaced = u; }; } });
+  const KEEP_CK = `globalThis.__ck = new Map(); { const was = LS.after;
+    LS.after = () => { if (was) was(); if (LS.tick % 60 === 0) __ck.set(LS.tick, LS.ckMine.get(LS.tick)); }; }`;
+  const STEP = '__wall += 1000 / 60; lsFrame(1 / 60); PVP.frame()';
+  const VIEW = '__wall += 1000 / 60; if (LS.on) { if (!PVP.steps(1 / 60)) lsFrame(1 / 60); } PVP.frame();';
+  const inStep = (a, v) => {
+    const ka = new Map(a.run('[...__ck]')), kv = new Map(v.run('[...__ck]'));
+    const both = [...kv.keys()].filter(t => ka.has(t));
+    return { n: both.length, parted: both.filter(t => ka.get(t) !== kv.get(t)).slice(0, 3) };
+  };
+  const sends = g => g.win.__net.filter(n => n === 'fetch /api/pvp/watch').length;
+
+  // two of the game's own pilots: the host keeps the steps, and sends nothing
+  const H = boot({ mode: 'match', role: 'host', pilot: 'runner', me: ME }, DUELIST);
+  const G = boot({ mode: 'match', role: 'guest', code: 'ABCD', pilot: 'ember', me: RIVAL }, RIVAL_ACCT);
+  await flush();
+  const mid = H.run('PVP.ref.id');
+  const ship = link(H, G);
+  ship(G, H);
+  H.run('runSeedNext = 9061');
+  H.run('PVP.frame()'); ship(H, G);
+  for (const g of [H, G]) g.run('PVP.frame();' + BOT + WATCH + KEEP_CK);
+  const fight = async (secs, also = []) => {
+    for (let i = 0; i < 60 * secs; i++) {
+      H.run(STEP); ship(H, G); G.run(STEP); ship(G, H);
+      for (const v of also) v.run(VIEW);
+      if (i % 10 === 0) await settle();
+    }
+  };
+  await fight(12);
+  ok(H.run('PVP.air.on && PVP.air.wait') === true && H.run('PVP.air.next') > 600 && sends(H) === 0 && !G.run('PVP.air.on'),
+     'nobody watching: its host keeps every step, sends nothing; its guest keeps nothing', [H.run('PVP.air.next'), sends(H)]);
+  // a dev asks to watch it, from the lobby's ON NOW
+  const DEV = signedIn('Watcher');
+  DB.sql.prepare('UPDATE accounts SET perks = ? WHERE id = ?').run('["dev"]', DEV.id);
+  const air = await pvpWorker.fetch(new Request(PVP_ORIGIN + '/api/pvp/watch', { method: 'POST', body: JSON.stringify({ op: 'air', match: mid }),
+    headers: { cookie: 'vr_s=' + DEV.token, origin: PVP_ORIGIN, 'content-type': 'application/json' } }), envPvp);
+  ok(air.status === 200, 'a dev asks to watch it');
+  const V = watcher(mid);
+  V.run(KEEP_CK);
+  await fight(25, [V]);
+  ok(H.run('PVP.air.wait') === false && H.run('PVP.air.headed') === true && sends(H) > 3, 'the host heard it from the referee, and sends it from its first step', sends(H));
+  ok(V.run('PVP.watch.phase') === 'on', 'the viewer has the fight', V.run('PVP.watch.phase'));
+  const s1 = inStep(H, V);
+  ok(s1.n >= 5 && !s1.parted.length, 'and plays it in step', s1);
+
+  // practice put on air: one player against a bot, its id from the server, a viewer
+  const SPEC = { name: 'BOT AIR', pilot: 'ember', awake: true, skill: 0.8, seed: 99 };
+  const S = boot({ mode: 'bot', pilot: 'x0', me: ME, bot: SPEC, story: true, storyFrom: 3, air: true, outside: [{ id: 'x0', n: 'TEST', h: '', text: HIDDEN_MOD }] }, DUELIST);
+  S.run(KEEP_CK);
+  await flush(); await settle();
+  for (let i = 0; i < 120; i++) { S.run(STEP); if (i % 10 === 0) await settle(); }
+  const pid = S.run('PVP.airId || ""');
+  ok(/^[0-9a-f]{32}$/.test(pid) && S.run('PVP.air.headed') === true && /\/play\/\?watch=[0-9a-f]{32}$/.test(S.run('PVP.air.link')),
+     'practice on air: an id from the server, the fight sent under it, and its watch link', [pid, S.run('PVP.air.link')]);
+  const W = watcher(pid);
+  W.run(KEEP_CK);
+  for (let i = 0; i < 60 * 25; i++) { S.run(STEP); W.run(VIEW); if (i % 10 === 0) await settle(); }
+  const s2 = inStep(S, W);
+  ok(W.run('PVP.watch.phase') === 'on' && W.run('!!RUN.pvp && RUN.pvp.story') === true && W.run('RUN.pvp.storyFrom') === 3 && s2.n >= 5 && !s2.parted.length,
+     'watched from another screen: the story fight from the phase it opened on, the bot and all, in step',
+     [W.run('PVP.watch.phase'), W.run('RUN.pvp && RUN.pvp.storyFrom'), s2]);
 }
 
 section('ranked: a hidden pilot is paired with the season\'s #1, and with nobody else');

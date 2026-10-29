@@ -71,22 +71,25 @@
      own in the hello, so both deal the same opening picks (lockstep). */
   const friendly = () => matchy() && !M.hand.match;
   const ownBonus = () => (friendly() && M.hand.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0);
-  /* A friend's match with a hidden pilot in it, on either side, is practice
-     for the story fight (user, 28 Oct): the story, from the phase the host
-     chose in the lobby (its hello carries it, so both machines open on the
-     same one), and nothing of it goes to the server (referee.js, onair.js).
-     Known once both pilots are, which they are by the run's first step. */
+  /* A friend's match with a hidden pilot in it, on either side, is the story
+     fight, to practise it (user, 28 Oct): from the phase the host chose in
+     the lobby, which its hello carries so both machines open on the same
+     one. It is sent nowhere (M.practice: referee.js, onair.js) unless the
+     host put it on air, to rehearse the broadcast as well (the lobby's ON AIR
+     box, in its hello too): then the referee and the relay have it as they
+     have any friend's match. Known once both pilots are, by the first step. */
   const friendMatch = () => !!(M.hand && M.hand.mode === 'match' && !(M.hand.match && Array.isArray(M.hand.match.sides)));
-  M.practice = () => friendMatch() && PILOTS.length > 1 && [0, 1].some(k => { const p = pilotP(k); return !!(p && p.outside); });
+  const friendStory = () => friendMatch() && PILOTS.length > 1 && [0, 1].some(k => { const p = pilotP(k); return !!(p && p.outside); });
   const phaseOf = n => (Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1);
   const hello = M.hello, peerHello = M.peerHello;
   M.hello = () => Object.assign(hello(), { bonus: ownBonus() },
-                                friendMatch() && M.hand.role === 'host' ? { storyFrom: phaseOf(M.hand.storyFrom) } : {});
+                                friendMatch() && M.hand.role === 'host' ? { storyFrom: phaseOf(M.hand.storyFrom), air: M.hand.air === true } : {});
   M.peerHello = d => {
     peerHello(d);
     M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0;
-    if (friendMatch() && M.hand.role === 'guest') M.peerStoryFrom = phaseOf(d && d.storyFrom);
+    if (friendMatch() && M.hand.role === 'guest') { M.peerStoryFrom = phaseOf(d && d.storyFrom); M.peerAir = !!d && d.air === true; }
   };
+  M.practice = () => friendStory() && !(M.hand.role === 'host' ? M.hand.air === true : M.peerAir === true);
   // pilot k's bonus, the same on both machines
   M.bonusOf = k => (k === pilotMine() ? ownBonus() : (M.peerBonus || 0));
   /* Best of three below gold, five from there: a ranked match plays to its
@@ -102,18 +105,26 @@
   /* The story fight (a hidden pilot's script: its kit reads RUN.pvp.story):
      the match the queue makes with the one a challenge went to, which the
      server marks (pvp/src/objects.js); practice against a bot that the lobby
-     starts for a hidden pilot's holder (bot.js); or practice in a friend's
-     match (M.practice, above). Practice may begin at a later phase
-     (storyFrom, 1 to 4). Both machines hold the same hand, or in a friend's
-     match the host's word for the phase. */
-  M.story = () => !!(M.hand && ((M.hand.match && M.hand.match.story === true) || (M.hand.mode === 'bot' && M.hand.story === true)
-                                || M.practice()));
+     starts for a hidden pilot's holder (bot.js); or a friend's match with a
+     hidden pilot in it (above). Practice may begin at a later phase
+     (storyFrom, 1 to 4). A viewer or a replay takes both from the
+     broadcast's header (watch.js). Every machine in a match comes to the
+     same answer. */
+  M.story = () => {
+    const h = M.hand;
+    if (!h) return false;
+    if (h.mode === 'watch' || h.mode === 'bot') return h.story === true;
+    if (h.match) return h.match.story === true;
+    return friendStory();
+  };
   const storyFrom = () => {
-    if (!M.hand) return 1;
-    if (M.hand.mode === 'bot') return phaseOf(M.hand.storyFrom);
-    if (M.practice()) return M.hand.role === 'host' ? phaseOf(M.hand.storyFrom) : phaseOf(M.peerStoryFrom);
+    const h = M.hand;
+    if (!h) return 1;
+    if (h.mode === 'watch' || h.mode === 'bot') return phaseOf(h.storyFrom);
+    if (friendStory()) return h.role === 'host' ? phaseOf(h.storyFrom) : phaseOf(M.peerStoryFrom);
     return 1;
   };
+  M.storyFrom = storyFrom;
   const toWin = m => Math.ceil(m.bestOf / 2);
   // each pilot's player, by name, as this machine knows them
   M.nameOf = k => (k === pilotMine() ? (Save.profile.name || 'YOU') : (MP.peerName || 'RIVAL')).toUpperCase();

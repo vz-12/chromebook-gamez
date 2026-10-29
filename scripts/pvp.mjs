@@ -1004,11 +1004,18 @@ section('bots: an empty queue, filled only after every real pairing (pvp/src/bot
   pick('f1');
   ok(L5.$('friendStory').hidden === false && L5.$('friendStoryName').textContent === 'THE FRIEND', 'picked: the note says it is story practice, by the pilot\'s name');
   L5.$('friendFrom').value = '3';
+  L5.$('friendAir').checked = false;
   for (const f of L5.$('host').on.click) f();
   await L5.run(100);
   const fh = L5.hand();
-  ok(fh && fh.mode === 'match' && fh.role === 'host' && fh.pilot === 'f1' && fh.storyFrom === 3 && fh.outside.length === 1 && fh.outside[0].id === 'f1'
-     && !L5.sent.length, 'HOST: the hand carries the phase picked, and the pilot\'s code; nothing asked of the queue', fh && [fh.mode, fh.storyFrom]);
+  ok(fh && fh.mode === 'match' && fh.role === 'host' && fh.pilot === 'f1' && fh.storyFrom === 3 && fh.air === false && fh.outside.length === 1 && fh.outside[0].id === 'f1'
+     && !L5.sent.length, 'HOST: the hand carries the phase picked, not on air, and the pilot\'s code; nothing asked of the queue', fh && [fh.mode, fh.storyFrom, fh.air]);
+  // ON AIR ticked: the host's hand says so (rounds.js: then it goes to the referee and the relay as any friend's match)
+  tabStore.clear();
+  L5.$('friendAir').checked = true;
+  for (const f of L5.$('host').on.click) f();
+  await L5.run(100);
+  ok(L5.hand() && L5.hand().air === true && L5.hand().storyFrom === 3, 'ON AIR ticked: the hand says so', L5.hand() && [L5.hand().air]);
   tabStore.clear();
   pick('runner');
   ok(L5.$('friendStory').hidden === true, 'another pilot picked: the note goes');
@@ -1788,6 +1795,70 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   const lm = await liveNow(mid2);
   ok(lm.above === true && lm.live === null && lm.every === LIVE.ASK, 'an older table with one sent: hunted, read without the columns it lacks', lm);
   tool(cancelSql('x7'));
+}
+
+section('matches on now: listed for dev accounts, watched on demand, and practice put on air');
+{
+  const { putSql } = await import('./lib/vault-sql.mjs');
+  const { NOW_KEEP } = await import('../pvp/src/now.js');
+  const now = Date.now();
+  let n = 0;
+  const mk = (name, perks = []) => {
+    const id = randomBytes(16).toString('hex'), token = randomBytes(32).toString('base64url'), ip = '198.51.100.' + (200 + n++);
+    DB.sql.prepare('INSERT INTO accounts (id, name, display, pass, recovery, pid, perks, created, updated) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
+      .run(id, name.toLowerCase(), name, '-', '-', JSON.stringify(perks), now - 3 * 864e5, now);
+    DB.sql.prepare("INSERT INTO saves (account, rev, data, unlocks, updated) VALUES (?, 1, '{\"runs\":25}', 'null', ?)").run(id, now);
+    DB.sql.prepare('INSERT INTO sessions (id, account, created, seen, expires, device) VALUES (?, ?, ?, ?, ?, NULL)').run(sha(token), id, now, now, now + 864e5);
+    const p = tab(PVP, ip);
+    p.cookie = token;
+    return { id, pvp: p };
+  };
+  const A = mk('N_Host'), B = mk('N_Guest'), D = mk('N_Dev', ['dev']), P = mk('N_Plain'), X = mk('N_Holder', ['vault:x5']);
+  DB.sql.exec(putSql('x5', Buffer.from('/* a stand-in */')).sql);
+  const obj = id => envPvp.MATCH.get(envPvp.MATCH.idFromName(id));
+  const at = (id, op, b) => obj(id).fetch('https://match/' + op, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const list = async who => (await who.pvp.call('GET', '/api/pvp/watch?live=1'));
+  const onNow = async id => ((await list(D)).d.matches || []).find(x => x.match === id) || null;
+  // a queued match, as the Matchmaker makes one: two of the game's own pilots, nobody on air
+  const mid = randomBytes(16).toString('hex');
+  ok((await at(mid, 'create', { id: mid, queue: 'casual', rated: false, league: null, hidden: false,
+       sides: [{ acct: A.id, name: 'N_HOST', pilot: 'runner' }, { acct: B.id, name: 'N_GUEST', pilot: 'ember' }] })).ok, 'a match starts');
+  ok((await list(P)).status === 403 && (await list(A)).status === 403, 'the list: not for a player who is not a dev, even one in it');
+  const seen = await onNow(mid);
+  ok(seen && seen.queue === 'casual' && seen.names.join() === 'N_HOST,N_GUEST' && seen.pilots.join() === 'runner,ember' && !seen.aired && !seen.practice,
+     'a dev sees it on now: who, flying what, not on air', seen);
+  ok((await P.pvp.call('GET', '/api/pvp/me')).d.onNow === undefined && (await D.pvp.call('GET', '/api/pvp/me')).d.onNow === true,
+     'and the lobby is told whose list it is');
+  // watched on demand: the host is asked, in the referee's answer, and may send it from then
+  const head = { v: 1, build: 'b1.x', pilot: 'runner', match: null, story: false, run: {}, hellos: [{ name: 'N_HOST' }, { name: 'N_GUEST' }] };
+  const feed = (who, b) => who.pvp.call('POST', '/api/pvp/watch', Object.assign({ match: mid }, b));
+  const report = async who => (await at(mid, 'report', { acct: who.id, report: { tick: 300 } })).json();
+  ok((await feed(A, { op: 'head', head, build: 'b1.x' })).status === 403 && !(await report(A)).air,
+     'nobody watching: the host is not asked, and may not send it');
+  ok((await feed(P, { op: 'air' })).status === 403, 'only a dev asks for it');
+  ok((await feed(D, { op: 'air' })).status === 200, 'a dev asks to watch it');
+  ok((await report(A)).air === true && (await report(B)).air === true, 'both sides hear it in the referee\'s next answer');
+  ok((await feed(B, { op: 'head', head, build: 'b1.x' })).status === 403, 'the guest still may not send it: only the host does');
+  ok((await feed(A, { op: 'head', head, build: 'b1.x' })).status === 200, 'the host now may');
+  ok((await onNow(mid)).aired === true, 'and the list shows it on air');
+  // a practice put on air: one player, a bot, its id from the server
+  const prac = (who, pilot) => who.pvp.call('POST', '/api/pvp/watch', { op: 'practice', pilot });
+  ok((await prac(P, 'runner')).status === 403 && (await prac(P, 'x5')).status === 403, 'practice on air: not for a player who is neither a dev nor its pilot\'s holder');
+  ok((await prac(X, 'runner')).status === 403, 'a holder only flying its hidden pilot');
+  const px = await prac(X, 'x5'), pd = await prac(D, 'ember');
+  ok(px.status === 200 && /^[0-9a-f]{32}$/.test(px.d.id) && pd.status === 200 && /^[0-9a-f]{32}$/.test(pd.d.id), 'a holder with it, and a dev with any pilot', [px.d, pd.d]);
+  const pp = await onNow(px.d.id);
+  ok(pp && pp.practice && pp.queue === 'practice' && pp.pilots[0] === 'x5' && pp.names.join() === 'N_Holder,', 'listed as a practice, its second side a bot', pp);
+  const ph = { v: 1, build: 'b1.x', pilot: 'x5', match: null, story: true, run: {}, hellos: [{ name: 'N_HOLDER' }, { name: 'BOT EMBER' }] };
+  ok((await X.pvp.call('POST', '/api/pvp/watch', { match: px.d.id, op: 'head', head: ph, build: 'b1.x' })).status === 200,
+     'its player may send it at once, under that id');
+  ok((await P.pvp.call('POST', '/api/pvp/watch', { match: pd.d.id, op: 'head', head: ph, build: 'b1.x' })).status === 403, 'nobody else under it');
+  // gone from the list: a practice after NOW_KEEP, whatever became of it
+  const was = Date.now;
+  Date.now = () => was() + NOW_KEEP + 60000;
+  await envPvp.MATCH.alarms();
+  ok(!(await onNow(px.d.id)) && !(await onNow(pd.d.id)), 'a practice is gone from the list after an hour', (await list(D)).d);
+  Date.now = was;
 }
 
 section('hardening: per-account limits on the busy routes');

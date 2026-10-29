@@ -197,10 +197,48 @@
     $('replays').hidden = false;
   }
 
+  /* Every match on now (pvp/src/now.js, ?live=1), for dev accounts, asked
+     again every ONNOW_EVERY while the lobby is open. WATCH asks a match not
+     on air to be (op air: its host starts sending within a report or two),
+     and opens it in a tab of its own (watch.js waits for it to arrive). */
+  const ONNOW_EVERY = 15000;
+  let onNowT = 0, pilotNames = null;          // each pilot's name by its id, hidden ones too (render)
+  async function onNow(on) {
+    clearTimeout(onNowT);
+    $('onNow').hidden = !on;
+    if (!on) return;
+    const r = await call('GET', '/api/pvp/watch?live=1');
+    const list = r.ok && r.d && Array.isArray(r.d.matches) ? r.d.matches : [];
+    const ul = $('onNowList');
+    ul.textContent = '';
+    for (const m of list) {
+      const li = document.createElement('li');
+      const who = document.createElement('span');
+      const flies = id => String((pilotNames && pilotNames[id]) || id || '?').toUpperCase();
+      who.textContent = [0, 1].map(k => (m.practice && k ? 'A BOT' : (m.names[k] || '?') + ' (' + flies(m.pilots[k]) + ')')).join('  VS  ');
+      const what = document.createElement('small');
+      const mins = Math.max(0, Math.floor((Date.now() - m.started) / 60000));
+      what.textContent = [m.practice ? 'PRACTICE' : String(m.queue).toUpperCase(), m.league ? String(m.league).toUpperCase() : '',
+                          mins + ' MIN', m.aired ? 'ON AIR' : ''].filter(Boolean).join('  ·  ');
+      const go = document.createElement('button');
+      go.type = 'button'; go.className = 'link'; go.textContent = 'WATCH';
+      go.addEventListener('click', async () => {
+        const tab = window.open('about:blank', '_blank');       // opened on the click itself, so no blocker stops it
+        if (!m.aired) await call('POST', '/api/pvp/watch', { op: 'air', match: m.match });
+        if (tab) tab.location.href = '/play/?watch=' + m.match; else location.href = '/play/?watch=' + m.match;
+      });
+      li.append(who, what, go);
+      ul.append(li);
+    }
+    if (!list.length) { const li = document.createElement('li'); li.textContent = 'Nothing is being played right now.'; ul.append(li); }
+    onNowT = setTimeout(() => onNow(true), ONNOW_EVERY);
+  }
+
   function render(d) {
     const names = Object.assign({}, d.pilots);
     renderChallenge(d.challenge || null);
     replays(!!d.replays);
+    onNow(!!d.onNow);
     $('name').textContent = d.account.display;
     // their page on the game's leaderboard, at the address they came from (the school one, at school)
     $('profileLink').href = game() + '/leaderboard/#u/' + encodeURIComponent(d.account.name);
@@ -224,6 +262,7 @@
        the server pairs them with the season's #1 and nobody else. */
     const hidden = Array.isArray(d.hidden) ? d.hidden : [];
     for (const h of hidden) names[h.id] = h.n || h.id;
+    pilotNames = names;
     const withHidden = lo => (hidden.length ? Object.assign({}, lo, { pilots: lo.pilots.concat(hidden.map(h => h.id)) }) : lo);
     pilotList($('rankedPilot'), withHidden(ranked), names);
     pilotList($('casualPilot'), casual, names);
@@ -305,14 +344,15 @@
   }
   $('storyGo').addEventListener('click', () => {
     const bot = $('storyBot').value;
-    play({ mode: 'bot', pilot: $('storyPilot').value, story: true, storyFrom: +$('storyFrom').value,
+    play({ mode: 'bot', pilot: $('storyPilot').value, story: true, storyFrom: +$('storyFrom').value, air: $('storyAir').checked,
            bot: { name: 'BOT ' + String((me.pilots[bot] || bot)).toUpperCase().replace(/^THE /, ''), pilot: bot, awake: true,
                   skill: +$('storySkill').value, seed: (Math.random() * 2 ** 32) >>> 0 } });
   });
 
   /* A friend's match flying a hidden pilot is practice for the story fight
      (js/rounds.js, M.practice), sent nowhere: said under the pilot, with the
-     phase it opens on, which the host's hello carries to the guest. */
+     phase it opens on and whether to put it on air after all (to rehearse
+     the broadcast too), which the host's hello carries to the guest. */
   const hiddenPicked = () => (me && Array.isArray(me.hidden) ? me.hidden.find(h => h.id === $('matchPilot').value) : null);
   function friendStory() {
     const h = hiddenPicked();
@@ -325,7 +365,7 @@
      online matches never carry one. */
   const bonus = () => (window.PvpAds ? PvpAds.take() : 0);
   $('host').addEventListener('click', () => play(Object.assign({ mode: 'match', role: 'host', pilot: $('matchPilot').value, bonus: bonus() },
-                                                               hiddenPicked() ? { storyFrom: +$('friendFrom').value } : {})));
+                                                               hiddenPicked() ? { storyFrom: +$('friendFrom').value, air: $('friendAir').checked } : {})));
   $('joinForm').addEventListener('submit', e => {
     e.preventDefault();
     const code = $('code').value.trim().toUpperCase();

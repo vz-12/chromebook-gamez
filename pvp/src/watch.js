@@ -24,14 +24,27 @@
          -> { broadcasts: [{ match, at, names }] }: the ones the same
             accounts may keep, newest first (pvp_broadcasts, below), for the
             lobby's REPLAYS card
+     GET ?live=1
+         -> { matches: [{ match, queue, league, names, pilots, hidden,
+            practice, started, aired }] }: every match on now (now.js), for
+            dev accounts only, for the lobby's ON NOW card
+     POST { op: 'air', match }                    -> { ok }
+         a dev watching a match that is not on air: its host is asked to
+         start sending it (objects.js, Match op air; onair.js), and then may
+     POST { op: 'practice', pilot }               -> { ok, id }
+         practice against a bot put on air, to try the broadcast end to end
+         with nobody else: a dev with any pilot, or a hidden pilot's holder
+         flying it. Its id is the match the play page then sends
 
    pvp_broadcasts notes every match put on air, once, when its header is
    taken: the broadcast itself is the object, which cannot be listed.
    ========================================================================= */
-import { sessionOf, originOk, clientIp } from '../../src/auth.js';
+import { sessionOf, originOk, clientIp, newId } from '../../src/auth.js';
 import { vaultIds } from '../../src/vault.js';
 import { isHidden, mayFly } from './hidden.js';
 import { limited, tooMany } from './limits.js';
+import { nowList } from './now.js';
+import { PILOTS } from './rules.js';
 
 const MAX_BODY = 128 * 1024, MAX_SNAP = 2 * 1024 * 1024, MAX_HEAD = 64 * 1024;
 const reply = (body, status = 200) =>
@@ -59,6 +72,8 @@ async function ensureBroadcasts(db) {
 // who may keep a broadcast's log: dev accounts, and the accounts that hold its pilot
 const keeps = (account, pilot) => (account.perks || []).includes('dev') || vaultIds(account.perks).includes(pilot);
 export const mayKeepAny = account => (account.perks || []).includes('dev') || vaultIds(account.perks).length > 0;
+// a dev account: watches whatever is on now (now.js)
+export const isDev = account => (account.perks || []).includes('dev');
 
 export default async function watch(req, env) {
   if (!env.BROADCAST) return reply({ error: 'no relay: bind the Broadcast object as BROADCAST' }, 503);
@@ -78,6 +93,18 @@ async function view(req, env) {
       .filter(r => keeps(s.account, r.pilot)).slice(0, 50);
     const names = t => { try { const v = JSON.parse(t); return Array.isArray(v) ? v.map(String) : []; } catch (e) { return []; } };
     return reply({ broadcasts: rows.map(r => ({ match: r.match, at: r.started, names: names(r.names) })) });
+  }
+  if (u.searchParams.get('live') === '1') {
+    const s = await sessionOf(req, env, { peek: true });
+    if (!s) return reply({ error: 'signed out' }, 401);
+    if (!isDev(s.account)) return reply({ error: 'dev accounts only' }, 403);
+    const matches = await nowList(env.DB);
+    await ensureBroadcasts(env.DB);
+    const aired = new Set(matches.length
+      ? ((await env.DB.prepare(`SELECT match FROM pvp_broadcasts WHERE match IN (${matches.map((_, i) => '?' + (i + 1)).join(', ')})`)
+          .bind(...matches.map(x => x.match)).all()).results || []).map(r => r.match)
+      : []);
+    return reply({ matches: matches.map(x => Object.assign(x, { aired: aired.has(x.match) })) });
   }
   if (!isId(match)) return reply({ error: 'bad match' }, 400);
   if (u.searchParams.get('replay') === '1') {
@@ -112,8 +139,28 @@ async function feed(req, env) {
   if (!s) return reply({ error: 'signed out' }, 401);
   const wait = limited('feed', s.account.id);
   if (wait) return tooMany(wait);
-  if (!isId(b.match)) return reply({ error: 'bad match' }, 400);
   const acct = s.account.id;
+  if (b.op === 'practice') {
+    const pilot = typeof b.pilot === 'string' ? b.pilot : '';
+    const hidden = isHidden(pilot);
+    if (hidden ? !(await mayFly(env.DB, s.account, pilot)) : !(isDev(s.account) && Object.prototype.hasOwnProperty.call(PILOTS, pilot)))
+      return reply({ error: 'a dev account, or a hidden pilot\'s holder flying it' }, 403);
+    const late = limited('open', acct);
+    if (late) return tooMany(late);
+    if (!env.MATCH) return reply({ error: 'no referee: bind the Match object as MATCH' }, 503);
+    const id = newId();
+    const res = await env.MATCH.get(env.MATCH.idFromName(id)).fetch('https://match/practice', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, acct, name: s.account.display || s.account.name, pilot, hidden }) });
+    return res.ok ? reply({ ok: true, id }) : passOn(res);
+  }
+  if (!isId(b.match)) return reply({ error: 'bad match' }, 400);
+  if (b.op === 'air') {
+    if (!isDev(s.account)) return reply({ error: 'dev accounts only' }, 403);
+    if (!env.MATCH) return reply({ error: 'no referee: bind the Match object as MATCH' }, 503);
+    return passOn(await env.MATCH.get(env.MATCH.idFromName(b.match)).fetch('https://match/air', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
+  }
 
   if (b.op === 'head') {
     if (!b.head || typeof b.head !== 'object' || JSON.stringify(b.head).length > MAX_HEAD) return reply({ error: 'bad header' }, 400);
@@ -123,8 +170,10 @@ async function feed(req, env) {
     const res = await env.MATCH.get(env.MATCH.idFromName(b.match)).fetch('https://match/peer', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ acct }) });
     const d = res.ok ? await res.json().catch(() => null) : null;
-    if (!d || !d.ok || !isHidden(d.pilot) || !(await mayFly(env.DB, s.account, d.pilot)))
-      return reply({ error: 'only the side flying a hidden pilot puts a match on air' }, 403);
+    // the side flying a hidden pilot of its own; or, in a match a dev has asked to watch (op air), its host
+    const mine = d && d.ok && isHidden(d.pilot) && (await mayFly(env.DB, s.account, d.pilot));
+    if (!mine && !(d && d.ok && d.air && d.side === 0))
+      return reply({ error: 'only the side flying a hidden pilot, or the host of a match a dev watches, puts it on air' }, 403);
     const aired = await ask(env, b.match, 'head', { acct, match: b.match, pilot: d.pilot, head: b.head, build: b.build });
     // on air: noted once, for the lobby's list of what may be kept
     if (aired.ok) {

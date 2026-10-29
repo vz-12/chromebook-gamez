@@ -21,6 +21,7 @@ import { recordMatch, applyRating, topOf, recordBot } from './records.js';
 import { QUEUES, CASUAL, HIDDEN, lowerLeague } from './rules.js';
 import { TOP_LEAGUE, tripChallenges, targetOf, challengeBegun, challengeEnded } from './challenge.js';
 import { BOTS, botFor, botRating } from './bots.js';
+import { nowNote, nowDrop, NOW_KEEP } from './now.js';
 import { newId } from '../../src/auth.js';
 
 const reply = (body, status = 200) =>
@@ -51,12 +52,12 @@ export class Serial {
 /* What a side is told of the match: never the other side's account or
    fingerprints. With a rated verdict, once written, its own rating before
    and after (the result screen's). */
-const view = (m, side) => ({
+const view = (m, side) => Object.assign({
   ok: true, id: m.id, side, queue: m.queue,
   peer: m.sides[1 - side] ? { name: m.sides[1 - side].name, pilot: m.sides[1 - side].pilot } : null,
   verdict: m.verdict ? { v: m.verdict.v, winner: m.verdict.winner ?? null, score: m.verdict.score || null,
                          rating: (m.verdict.ratings && m.verdict.ratings[side]) || null } : null
-});
+}, m.air ? { air: true } : {});   // a dev asked to watch it: its host starts sending (onair.js; now.js)
 const isCode = v => typeof v === 'string' && /^[A-Z0-9]{4}$/.test(v);
 
 export class Match extends Serial {
@@ -81,7 +82,25 @@ export class Match extends Serial {
             mismatch: null, verdict: null, code: null, hidden: !!b.hidden };
       return this.save(m, now, { ok: true, id: m.id });
     }
+    /* Practice put on air, to try the broadcast (watch.js, op practice): one
+       player against a bot on their own machine, so one side, never
+       refereed or recorded, on air from the start, and gone after NOW_KEEP.
+       Only the Worker asks this, for an account it has let. */
+    if (op === 'practice') {
+      if (m) return reply({ error: 'that match exists' }, 409);
+      m = { v: 1, id: b.id, queue: 'practice', rated: false, league: null, created: now, started: now,
+            sides: [newSide(b.acct, b.name, b.pilot, now), null], mismatch: null, verdict: null, code: null,
+            hidden: !!b.hidden, practice: true, air: true };
+      return this.save(m, now, { ok: true, id: m.id });
+    }
     if (!m || m.verdict && m.verdict.v === 'expired') return reply({ error: 'no such match' }, 404);
+    /* A dev watching: its host is asked to start sending it (now.js; the
+       host hears it in its next report's answer, onair.js). Only the Worker
+       asks this, for a dev. */
+    if (op === 'air') {
+      if (!m.air) { m.air = true; await this.ctx.storage.put('m', m); }
+      return reply({ ok: true, id: m.id, started: m.started || 0 });
+    }
     const side = m.sides.findIndex(s => s && s.acct === b.acct);
 
     if (op === 'join') {
@@ -109,7 +128,7 @@ export class Match extends Serial {
     if (op === 'peer') {
       if (side < 0) return reply({ error: 'not your match' }, 403);
       const other = m.sides[1 - side];
-      return reply({ ok: true, side, pilot: m.sides[side].pilot, peerPilot: other ? other.pilot : null });
+      return reply({ ok: true, side, pilot: m.sides[side].pilot, peerPilot: other ? other.pilot : null, air: !!m.air });
     }
     /* A queued match's room: the host opens one and leaves its code here,
        and the guest asks for it, so nobody types a code. */
@@ -130,7 +149,9 @@ export class Match extends Serial {
   async look(now) {
     const m = await this.ctx.storage.get('m');
     if (!m) return;
-    if (m.verdict && (m.verdict.v === 'expired' || now >= m.verdict.at + REF.KEEP)) {
+    const done = m.practice ? now >= m.created + NOW_KEEP : m.verdict && (m.verdict.v === 'expired' || now >= m.verdict.at + REF.KEEP);
+    if (done) {
+      if (m.listed && !m.unlisted) await nowDrop(this.env.DB, m.id).catch(e => console.error('pvp now', m.id, e && e.message));
       await this.ctx.storage.deleteAll();
       return;
     }
@@ -142,9 +163,23 @@ export class Match extends Serial {
      and looked at again when it next needs to be. A failed write or rating
      is tried again at the next look, fifteen seconds on. */
   async save(m, now, answer, side) {
-    const d = decide(m, now);
+    const d = m.practice ? null : decide(m, now);    // a practice has nobody to referee
     if (d) m.verdict = Object.assign({ at: now }, d);
     const v = m.verdict;
+    // on now, for dev accounts to watch (now.js): from its start to its verdict
+    if (m.started && !v && !m.listed) {
+      m.listed = true;
+      await nowNote(this.env.DB, m).catch(e => console.error('pvp now', m.id, e && e.message));
+    }
+    if (v && m.listed && !m.unlisted) {
+      m.unlisted = true;
+      await nowDrop(this.env.DB, m.id).catch(e => console.error('pvp now', m.id, e && e.message));
+    }
+    if (m.practice) {
+      await this.ctx.storage.put('m', m);
+      await this.ctx.storage.setAlarm(m.created + NOW_KEEP);
+      return reply(answer || view(m, side));
+    }
     /* A match with a hidden pilot in it is decided like any other, for the
        result screen, and written nowhere: no ladder, profile or history
        shows it to anyone (hidden.js). It counts as written, so nothing waits on it. */

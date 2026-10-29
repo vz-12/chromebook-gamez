@@ -664,6 +664,20 @@
       MP.role = 'host'; MP.on = true; MP.ready = true;
       MP.peerName = spec.name; MP.peerChar = CHARS.findIndex(c => c.id === spec.pilot); MP.peerAwake = spec.awake;
       M.peerHello({ v: 1, ups: [] });
+      /* Practice put on air (the lobby's ON AIR box), to try the broadcast
+         with nobody else: the two handshakes a connection would have made,
+         which its viewers build the fight from, and an id from the server
+         to send it under (onair.js keeps the steps until it is back). */
+      if (M.hand.air === true) {
+        MP.said = { t: 'hello', build: buildId(), char: selectedChar, awake: isAwake(CHARS[selectedChar].id) ? 1 : 0, ...skinHello(),
+                    pvp: M.hello(), cid: CHARS[selectedChar].id, outs: outsideOuts(), name: Save.profile.name || 'HOST' };
+        MP.heard = { t: 'hello', build: buildId(), char: MP.peerChar, awake: spec.awake ? 1 : 0, pvp: { v: 1, ups: [] },
+                     cid: spec.pilot, outs: [], name: spec.name };
+        fetch('/api/pvp/watch', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+                                  body: JSON.stringify({ op: 'practice', pilot: CHARS[selectedChar].id }) })
+          .then(r => r.json()).then(d => { if (d && d.ok && /^[0-9a-f]{32}$/.test(d.id)) M.airId = d.id; })
+          .catch(() => {});
+      }
       lsHostStart();
       B.hi = LS.delay - 1;                 // lsBegin filled both pilots' first steps with nothing pressed
       LS.source = feed;
