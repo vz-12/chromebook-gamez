@@ -199,6 +199,7 @@
     V.names = hl.map(x => String((x && x.name) || '').slice(0, 14).toUpperCase());
     M.hand.match = h.match && Array.isArray(h.match.sides) ? h.match : null;
     M.hand.story = h.story === true;             // the story fight, as the fighters play it (rounds.js, M.story)
+    M.hand.storyFrom = h.storyFrom;              // and the phase it opened on (rounds.js, storyFrom: 1 unless 2 to 4)
     MP.on = true; MP.ready = true;
     // the eyes: the side that is not flying from outside (the host's, if neither or both are); a replay may look through either (replay.js)
     V.look(outsideK(0) && !outsideK(1) ? 1 : 0);

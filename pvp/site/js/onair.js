@@ -23,8 +23,10 @@
 
    Only this side, and only the account allowed: the relay checks. Any other
    match is sent by its host only once a dev asks to watch it (pvp/src/now.js:
-   it keeps the steps from the first and sends nothing until then), and a
-   practice against a bot only when its player puts it on air (bot.js). Nothing
+   it keeps the steps from the first and sends nothing until then), a
+   practice against a bot only when its player puts it on air (bot.js), and
+   story practice in a friend's match only when its host does (rounds.js,
+   M.practice: otherwise nothing of it is kept or sent at all). Nothing
    here waits on the relay, and nothing it answers changes the match: if the
    relay cannot be reached, its viewers wait, and the match plays on under
    its own rules.
@@ -60,8 +62,9 @@
      referee says a dev is watching (referee.js, R.air), a practice once its
      id is back. Nothing is sent for a match nobody watches. */
   const airId = () => (M.hand && M.hand.mode === 'bot' ? M.airId : M.ref && M.ref.id) || null;
-  const recordable = () => !!M.hand && (M.hand.mode === 'bot' ? M.hand.air === true
-                                        : M.hand.mode === 'match' && (mineHidden() || pilotMine() === 0));
+  // (never story practice in a friend's match not put on air: nothing of it goes to the server, rounds.js M.practice)
+  const recordable = () => !!M.hand && !(M.practice && M.practice())
+                           && (M.hand.mode === 'bot' ? M.hand.air === true : M.hand.mode === 'match' && (mineHidden() || pilotMine() === 0));
   const allowed = () => !!airId() && (M.hand.mode === 'bot' || mineHidden() || !!(M.ref && M.ref.air));
 
   // a run of a match begins, with this machine the one to send it
@@ -74,8 +77,9 @@
       v: 1, build: buildId(), pilot: pilotP(pilotMine()).charId,
       // the match as the server made it (a queued one): its rules and both sides, never an account or this machine's side
       match: q && Array.isArray(q.sides) ? { queue: q.queue, rated: !!q.rated, league: q.league || null, bestOf: q.bestOf, sides: q.sides } : null,
-      // the story fight (rounds.js, M.story): a viewer's copy has to run its script too, or it plays another fight
+      // the story fight (rounds.js, M.story): a viewer's copy has to run its script too, from the same phase, or it plays another fight
       story: M.story(),
+      storyFrom: M.storyFrom(),
       run: LS.head,
       hellos: MP.role === 'host' ? [MP.said, MP.heard] : [MP.heard, MP.said]   // the host's, then the guest's
     };

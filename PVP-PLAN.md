@@ -1312,6 +1312,135 @@ brief."
   - 3 mutants (the HUD's old PvP return, the rounds' graze unhooked, the
     armory's slow in a duel), all caught.
 
+### A hidden pilot's own shots, and its strike under its own cut-in (user, 28 Oct)
+
+Before the story fight: a hidden pilot's shots could not be countered, never
+filled VOIDRUNNER's GRAZE, and a move whose strike lands while its own
+cut-in plays did nothing at all.
+
+- **Why:** a kit from the vault may throw shots of its own (kept in its own
+  state, moved and landed by its own step) instead of the game's rounds.
+  Everything that answers the other pilot's blows in a duel reads the game's
+  rounds (`bullets`, `ebullets`), so none of it saw them: no graze, no bot
+  reading them coming (so no parry, sidestep, FLUTTER or STILL WATER), and
+  a parry that refused one blow left the shot flying to land again. And
+  `hurtPlayer` refused every blow while any hidden pilot's cut-in held
+  (`outsideCutAny`), its own strike included.
+- **Now** (OUTSIDE PILOTS and IMAGO IN A DUEL in the engine; `duel.js`,
+  `bot.js`):
+  - A new optional hook, `shots()`: the kit's own shots in the air, as the
+    live objects it keeps, each with `x`, `y`, `r` and, moving, `vx`, `vy`.
+    Read through `outsideShotsOf(k)`, and the other pilot's through
+    `outsideShotsTheirs()`. A shot the duel stops is marked `gone = 1`,
+    which the kit drops; the duel writes only plain numbers on them
+    (`imNear`, `imPaid`, `gone`), so lockstep and snapshots carry them.
+  - GRAZE: on the hidden pilot's turn, once its kit has stepped
+    (`imGrazeDuelShots`), by the rounds' own rule: one passing within
+    `IM_GRAZE_R` of an awake VOIDRUNNER's hull and leaving pays `IM_PAY`, one
+    dashed through `IM_PAY_DASH`. Its kit says where it lands, so one that
+    touched the hull undashed has landed, and pays nothing.
+  - A bot sees them coming as it sees rounds (`incoming`), and so parries,
+    sidesteps or FLUTTERs them.
+  - THE VAGRANT's parry stops them within arm's reach, as it does the room's
+    rounds, and a counter's wave (a perfect parry's, STILL WATER's) stops
+    those it crosses.
+  - A blow carries who dealt it (`opts.pvp.by`, from `land`), and a hidden
+    pilot's cut-in never holds its own blow. The other pilot's blows, and the
+    room's, are held by it as before.
+- **The vault's module** must hand its shots to `shots()` and drop the ones
+  marked `gone`; a module without the hook behaves as before. The module's
+  own changes are put with `npm run vault -- put`, never in this repo.
+- **Tested:** `npm run test:pvp`, engine part 400 checks (402 with
+  `--outside` and the module).
+  - The rules one at a time, with shots put by hand: one passing close pays,
+    one wide, one that touched, one stopped, or one read on any turn but its
+    own pilot's does not, a dash through pays the dash; only plain numbers
+    are written on them; a bot weighs one coming at it as a round; a parry
+    stops one within reach and not one across the room; a counter's wave
+    stops the one it crosses and not one beside it.
+  - Under its forced cut-in, its blow on the other pilot lands, while the
+    other pilot's blow on it, and the room's, are still held (its `hurt()`
+    never asked).
+  - In play, the tests' stand-in's sparks (C, its own shots) fill an awake
+    VOIDRUNNER bot's GRAZE, and a VAGRANT bot parries them out of the air;
+    with `--outside`, the module's own fire does both.
+  - 7 mutants (the cut-in's exemption, the graze unhooked, a touch counted
+    as a near miss, the parry and the wave not stopping them, the bot blind
+    to them, stopped shots still read), all caught.
+  - `test:outside` 84, `pvp.mjs` 474, lockstep and determinism unchanged.
+  - Not this change: "and the best does it far sooner" (the bots' timing,
+    two runners and no hidden pilot) plays an unseeded fight, and fails now
+    and then on `main` too (3 runs in 10 there).
+
+### A hidden pilot's duel floor (user, 28 Oct)
+
+The story fight was over in its first phases, and scaling the hidden pilot's
+blows down barely changed that.
+
+- **Why:** `hurtPlayer` makes every blow that lands take at least one point
+  of health. A hidden pilot whose rules scale its blows far down (and whose
+  kit lands many small ones) had nearly all of them lifted to that point, so
+  its `scale` stopped meaning anything below it, both ways.
+- **Now:** a hidden pilot's duel rules (`def.duel`, `def.story.duel`) may
+  carry `floor`, the least a blow that lands takes, beside `scale`,
+  `hitCap` and `burstCap`; the taker's has the say, then the dealer's
+  (`duel.js`, `land`, handed to `hurtPlayer` as `opts.pvp.floor`). Without
+  one it is the game's 1, so every other duel is as it was.
+- The story fight's numbers themselves (its caps, its pace, what the
+  challenger is given) are the module's, put with the vault, never here.
+- **Tested:** `npm run test:pvp`, engine part 402 (404 with `--outside`): a
+  blow under a point of health stays under it with a floor and is a whole
+  point without; a module's floor is kept, one not over 0 dropped. 3
+  mutants (the floor ignored, not kept, not handed in), all caught.
+
+### A friend's match with a hidden pilot: story practice, sent nowhere (user, 28 Oct)
+
+"Make friendly matches using [the hidden pilot] trigger a story fight with
+no feedback to the server so we can practice." Story practice against a bot
+was there already; this is the same against a person.
+
+- **When:** a friend's match (a code, no `match.sides` from the server) with
+  a hidden pilot on either side is the story fight (`rounds.js`, `M.story`):
+  its script, rules and phases, one round, as a queued story match plays it.
+  The lobby says so under the pilot picked (`#friendStory`) and offers FROM
+  PHASE; the host's pick rides its hello (`storyFrom`), so the guest, who
+  needs no perk, opens on the same phase.
+- **Sent nowhere** (`M.practice`): the referee opens and joins as ever,
+  since that is how the guest's machine is handed the hidden pilot's code
+  (`hidden.js`), and then stops (`referee.js`): no report, no result, no
+  record. Nothing is kept or sent on air, even for a dev's WATCH
+  (`onair.js`, `recordable`); its Match object lapses unreported, which also
+  takes it off ON NOW. The result screen says `story practice · nothing sent`.
+- **Unless put on air** (merged with main's rehearsals, 29 Oct): main had
+  made a friend's story fight opt-in, a host's STORY box, and on air with a
+  pill for the watch link. Here it is automatic and silent, and the box is
+  now ON AIR instead (`#friendAir`, in the host's hello as `air`). Ticked,
+  the practice goes to the referee and the relay as any friend's match
+  does, pill and all.
+- **The phase on air:** the broadcast's header carries `story` and now
+  `storyFrom` too, and a viewer's copy (or a replay) opens on that phase
+  (`watch.js`). Before, a practice put on air from phase II to IV, against
+  a bot or a friend, played on its viewers from phase I and parted from the
+  fight.
+- **Tested:** `npm run test:pvp`. Engine part 427 (430 with `--outside`): a
+  practice match hosted from phase III, both sides in practice and story on
+  that phase, best of one, the story's caps, no steps kept for a watcher;
+  to its end the referee only opened and joined, nothing on air, nothing
+  recorded, the note shown; one fought to a knockout the same. A rehearsal
+  put on air from phase II: the referee has it, the pill, and a viewer in
+  step on phase II; a bot practice on air from phase III, the same. Server
+  part 498: the lobby's note, the phase and ON AIR in the host's hand, none
+  for another pilot. Lockstep, determinism, live, outside green. 15
+  mutants, all caught (before the merge: practice never on, the referee
+  still reporting, practice on air, the header without the story, the
+  host's phase not in its hello, no note, the phase not in the hand, the
+  lobby note never shown, never updated on a change; after: on air still
+  silent, the guest deaf to it, practice kept for a dev, the header or the
+  viewer without the phase, the lobby dropping ON AIR).
+- A parry test of VAGRANT's (a share of perfect parries over 30 tries) can
+  fall just short at random (17/30 once); it passed on the next runs and is
+  untouched here.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like

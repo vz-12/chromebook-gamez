@@ -293,7 +293,7 @@
     // a friend's match: any pilot owned
     me = d;
     pilotList($('matchPilot'), withHidden(casual), names);
-    storyBox();
+    friendStory();
     storyPractice(hidden, names);
     const ups = ranked.ups.length;
     $('ups').textContent = d.unlocks === null
@@ -349,17 +349,23 @@
                   skill: +$('storySkill').value, seed: (Math.random() * 2 ** 32) >>> 0 } });
   });
 
+  /* A friend's match flying a hidden pilot is practice for the story fight
+     (js/rounds.js, M.practice), sent nowhere: said under the pilot, with the
+     phase it opens on and whether to put it on air after all (to rehearse
+     the broadcast too), which the host's hello carries to the guest. */
+  const hiddenPicked = () => (me && Array.isArray(me.hidden) ? me.hidden.find(h => h.id === $('matchPilot').value) : null);
+  function friendStory() {
+    const h = hiddenPicked();
+    $('friendStory').hidden = !h;
+    if (h) $('friendStoryName').textContent = h.n || h.id;
+  }
+  $('matchPilot').addEventListener('change', friendStory);
+
   /* A friend's match takes the bonus a watched ad earned (ads.js), once;
      online matches never carry one. */
   const bonus = () => (window.PvpAds ? PvpAds.take() : 0);
-  // the STORY box: only for a hidden pilot the host holds, and only with that pilot chosen
-  const heldHidden = id => !!(me && Array.isArray(me.hidden) && me.hidden.some(h => h.id === id));
-  const storyBox = () => { $('matchStoryBox').hidden = !heldHidden($('matchPilot').value); };
-  $('matchPilot').addEventListener('change', storyBox);
-  $('host').addEventListener('click', () => {
-    const pilot = $('matchPilot').value;
-    play({ mode: 'match', role: 'host', pilot, bonus: bonus(), story: heldHidden(pilot) && $('matchStory').checked });
-  });
+  $('host').addEventListener('click', () => play(Object.assign({ mode: 'match', role: 'host', pilot: $('matchPilot').value, bonus: bonus() },
+                                                               hiddenPicked() ? { storyFrom: +$('friendFrom').value, air: $('friendAir').checked } : {})));
   $('joinForm').addEventListener('submit', e => {
     e.preventDefault();
     const code = $('code').value.trim().toUpperCase();
