@@ -7,15 +7,15 @@
    push; the game pushes before it opens PvP. The league comes from the
    ranked rating this season (records.js, pvp_ratings): the lowest, still to
    be placed, until the first few ranked matches are played (rules.js). A
-   challenge sent to this account (challenge.js) comes too, and the field is
-   missing for everybody else.
+   challenge sent to this account (challenge.js) comes too, and what it left
+   them if they won it (parts); both fields are missing for everybody else.
    ========================================================================= */
 import { sessionOf, sessionCookie, publicAccount } from '../../src/auth.js';
 import { PILOTS, CASUAL, loadout, leagueOf } from './rules.js';
 import { ratingOf } from './records.js';
 import { entryFor } from './gates.js';
 import { hiddenOf } from './hidden.js';
-import { challengeFor, challengeVoice } from './challenge.js';
+import { challengeFor, challengeVoice, partsFor } from './challenge.js';
 import { mayKeepAny, isDev } from './watch.js';
 
 function reply(body, status = 200, cookie) {
@@ -51,6 +51,8 @@ export default async function me(req, env) {
   // a challenge sent to this account, shown now (challenge.js): one that cannot be read waits for the next visit
   const challenge = await challengeFor(env.DB, s.account.id, { seen: true })
     .catch(e => { console.error('pvp challenge', e && e.message); return null; });
+  // and what it left this account, if it won it (challenge.js, THE PARTS): nobody else's carries them
+  const parts = await partsFor(env.DB, s.account.id).catch(e => { console.error('pvp parts', e && e.message); return null; });
   // a session just extended takes its cookie again, as /api/account does
   return reply(Object.assign({
     account: publicAccount(s.account),
@@ -63,6 +65,7 @@ export default async function me(req, env) {
     queues
   }, hidden.length ? { hidden: hidden.map(h => ({ id: h.id, n: h.n || h.id, h: h.h })) } : {},
      challenge ? { challenge } : {},
+     parts ? { parts } : {},
      // the replays this account may keep (watch.js): the lobby lists them, for dev accounts and a hidden pilot's holders
      mayKeepAny(s.account) ? { replays: true } : {},
      // and dev accounts watch whatever is on now (now.js; watch.js, ?live=1)

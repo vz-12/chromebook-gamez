@@ -48,6 +48,17 @@
    makes it again; the dev may decide it by hand, or take a decision back
    (`npm run challenge -- decide`), and may hold the hunt at any time
    (`npm run challenge -- calm`).
+
+   THE PARTS: a challenge won by the account it was sent to leaves that
+   account, and nobody else, something of the pilot's to keep (`npm run
+   challenge -- parts <pilot> <words>` names the vault entry of what they are
+   called and what they say: { "t", "x", "done": what is said once they are
+   used, "{pilot}" in it the pilot they went to }). Their lobby carries them
+   (/api/pvp/me, partsFor below) from the moment it is decided, and they are
+   used once, for good (POST /api/pvp/parts, parts.js): on one of the
+   account's own pilots' hulls. A decision taken back takes them out of
+   sight with it, used or not; decided won again, they are back as they
+   were. `npm run challenge -- unuse` takes a use back by hand.
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
 import { vaultText, vaultBytes, VAULT_ID, PERK } from '../../src/vault.js';
@@ -78,11 +89,16 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      outcome     TEXT,                     -- which way: 'lost' or 'won', as it went for the account it was sent to
      calm        INTEGER,                  -- when the hunt was held, by hand (FROM ABOVE); NULL while it is not
      film        TEXT,                     -- the vault entry of the movie every game plays if it is lost (THE ENDING)
-     film_voice  TEXT                      -- and of its voice, an mp3
+     film_voice  TEXT,                     -- and of its voice, an mp3
+     parts       TEXT,                     -- the vault entry of THE PARTS' words, left the account it was sent to if it is won
+     parts_used  INTEGER,                  -- when they were used, once and for good
+     parts_use   TEXT,                     -- on what: 'hull'
+     parts_on    TEXT                      -- and which of their pilots
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
-               ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT']];
+               ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
+               ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -288,4 +304,46 @@ export async function filmOf(db) {
     `SELECT film, film_voice, decided FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL AND film IS NOT NULL
       ORDER BY decided LIMIT 1`).first();
   return row ? { film: row.film, voice: row.film_voice || null, at: row.decided } : null;
+}
+
+/* -------------------------------- the parts ------------------------------ */
+
+// what the parts may be used on: one of the account's own pilots' hulls (more, once there is more)
+export const PARTS_USES = ['hull'];
+const PARTS_WORDS = { t: 60, x: 4000, done: 600 };
+const wonBy = (db, acct) => db.prepare(
+  `SELECT pilot, parts, decided, parts_used, parts_use, parts_on FROM pvp_challenges
+    WHERE target = ?1 AND outcome = 'won' AND decided IS NOT NULL AND parts IS NOT NULL ORDER BY decided LIMIT 1`).bind(acct).first();
+
+/* THE PARTS left this account (/api/pvp/me): { t, x, done, used } where used
+   is null until they are, then { use, on, at }; or null for every account
+   but the one that won, and for that one while their words cannot be read. */
+export async function partsFor(db, acct) {
+  await ensureChallenges(db);
+  const row = await wonBy(db, acct);
+  if (!row) return null;
+  let w = null;
+  try {
+    const got = await vaultText(db, row.parts);
+    w = got ? JSON.parse(got.text) : null;
+  } catch (e) {
+    console.error('parts ' + row.pilot + ': their words: ' + (e && e.message));
+  }
+  if (!w || typeof w.x !== 'string') return null;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  return { t: str(w.t, PARTS_WORDS.t), x: w.x.slice(0, PARTS_WORDS.x), done: str(w.done, PARTS_WORDS.done),
+           used: row.parts_used ? { use: row.parts_use, on: row.parts_on, at: row.parts_used } : null };
+}
+
+/* Used, once and for good (parts.js): true if this was the time, false if
+   they were used already or this account holds none. The UPDATE lands only
+   on parts unused, so two tabs at once use them once. */
+export async function useParts(db, acct, use, on, now = Date.now()) {
+  await ensureChallenges(db);
+  if (!PARTS_USES.includes(use)) return false;
+  const r = await db.prepare(
+    `UPDATE pvp_challenges SET parts_used = ?2, parts_use = ?3, parts_on = ?4
+      WHERE target = ?1 AND outcome = 'won' AND decided IS NOT NULL AND parts IS NOT NULL AND parts_used IS NULL`)
+    .bind(acct, now, use, on).run();
+  return !!(r && r.meta && r.meta.changes);
 }

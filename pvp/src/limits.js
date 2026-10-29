@@ -18,6 +18,7 @@ export const LIMITS = {
   queue: { n: 90, ms: 60 * 1000 },        // join, poll, leave
   match: { n: 120, ms: 60 * 1000 },       // open, join, report, code
   open: { n: 30, ms: 10 * 60 * 1000 },    // friend's matches opened (each is a new object)
+  parts: { n: 20, ms: 60 * 1000 },        // THE PARTS used (parts.js): once, really, so a handful of tries
   /* A broadcast's feed (watch.js), from the one machine allowed it: a batch
      every half second and a snapshot every fifteen, with room to catch up. */
   feed: { n: 600, ms: 60 * 1000 },

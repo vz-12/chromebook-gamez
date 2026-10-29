@@ -18,7 +18,8 @@
                       the viewers of a match it flies in (hidden.js)
      /api/pvp/watch   a match on air: the feed in, viewers out, the replay
                       (watch.js; the log is the Broadcast object, broadcast.js)
-     /api/live        what is on air, as the game's Worker says it (../../src/live.js),
+     /api/pvp/parts   what a won challenge leaves its winner, used (parts.js)
+     /api/live       what is on air, as the game's Worker says it (../../src/live.js),
                       for the lobby's LIVE card
      /api/vault       the game's vault, as the game has it (../../src/vault.js)
      everything else  pvp/site
@@ -39,6 +40,7 @@ import queue from './queue.js';
 import flags from './flags.js';
 import pilot from './hidden.js';
 import watch from './watch.js';
+import parts from './parts.js';
 import vault from '../../src/vault.js';
 import live from '../../src/live.js';
 import { closeSeasons } from './seasons.js';
@@ -58,7 +60,7 @@ const json = (body, status) =>
 
 const ROUTES = { '/api/account': account, '/api/pvp/me': me, '/api/room': room, '/api/turn': turn,
                  '/api/pvp/match': match, '/api/pvp/queue': queue, '/api/pvp/flags': flags,
-                 '/api/pvp/pilot': pilot, '/api/pvp/watch': watch, '/api/vault': vault, '/api/live': live };
+                 '/api/pvp/pilot': pilot, '/api/pvp/watch': watch, '/api/pvp/parts': parts, '/api/vault': vault, '/api/live': live };
 
 export default {
   async fetch(req, env) {

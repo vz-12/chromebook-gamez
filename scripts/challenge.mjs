@@ -20,7 +20,12 @@
                               it is lost (index.html, ENDING; src/film.js),
                               its module's vault entry and its voice's (an
                               mp3), or none. Nothing hands either out before
-     decide <pilot> <how>     its fight, decided by hand: lost or won, as it
+     parts <pilot> <words>    THE PARTS: what it leaves the account it was
+                              sent to if they win it, from a vault entry of
+                              its own ({ "t", "x", "done" }), or none
+     unuse <pilot>            the parts' use taken back: the winner chooses
+                              again
+     decide <pilot> <how>    its fight, decided by hand: lost or won, as it
                               went for the account it was sent to (the
                               referee decides a match played to its end by
                               itself; one that was walked out of, never), or
@@ -45,7 +50,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
          checkPilot, checkWords, checkDate, checkOutcome } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -134,6 +139,26 @@ try {
       console.log(a1 + where + ': ' + (film ? 'its ending, the movie in ' + film + (voice ? ', said from ' + voice : ', silent') : 'no ending'));
       break;
     }
+    case 'parts': {
+      if (!a1 || !a2) die('parts <pilot> <words | none>');
+      const words = a2 === 'none' ? null : a2;
+      const sql = partsSql(a1, words);
+      if (!live()) show(sql);
+      if (words && !run(inVaultSql([words])).length) die('the vault' + where + ' holds no ' + words + ': put it first');
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (words ? 'its parts, their words in ' + words : 'no parts'));
+      break;
+    }
+    case 'unuse': {
+      if (!a1) die('unuse <pilot>');
+      const sql = unuseSql(a1);
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': its parts unused again');
+      break;
+    }
     case 'decide': {
       if (!a1 || !a2) die('decide <pilot> <lost | won | none>');
       const sql = decideSql(a1, checkOutcome(a2));
@@ -169,11 +194,13 @@ try {
                      'by ' + r.reached_by, 'season ' + r.season, 'sent to ' + r.target, 'seen ' + r.seen,
                      'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended,
                      'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm,
-                     'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : '')].join('  ·  '));
+                     'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : ''),
+                     'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : '')].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] | decide <pilot> <lost | won | none> | ' +
+      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] | ' +
+          'parts <pilot> <words | none> | unuse <pilot> | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }
