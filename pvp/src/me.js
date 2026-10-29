@@ -16,7 +16,7 @@ import { ratingOf } from './records.js';
 import { entryFor } from './gates.js';
 import { hiddenOf } from './hidden.js';
 import { challengeFor, challengeVoice } from './challenge.js';
-import { mayKeepAny } from './watch.js';
+import { mayKeepAny, isDev } from './watch.js';
 
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -64,5 +64,7 @@ export default async function me(req, env) {
   }, hidden.length ? { hidden: hidden.map(h => ({ id: h.id, n: h.n || h.id, h: h.h })) } : {},
      challenge ? { challenge } : {},
      // the replays this account may keep (watch.js): the lobby lists them, for dev accounts and a hidden pilot's holders
-     mayKeepAny(s.account) ? { replays: true } : {}), 200, s.renew ? sessionCookie(req, s.token) : undefined);
+     mayKeepAny(s.account) ? { replays: true } : {},
+     // and dev accounts watch whatever is on now (now.js; watch.js, ?live=1)
+     isDev(s.account) ? { onNow: true } : {}), 200, s.renew ? sessionCookie(req, s.token) : undefined);
 }

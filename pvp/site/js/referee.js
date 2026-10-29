@@ -90,6 +90,7 @@
     R.busy = true;
     api({ op: 'report', id: R.id, report: { fps, parted: R.parted, alone, left: !!left, broke: R.broke, tick: LS.tick, result: R.result } }).then(d => {
       R.busy = false;
+      if (d && d.air) R.air = true;          // a dev is watching: the host starts sending it (onair.js)
       if (d && d.verdict) {
         R.verdict = d.verdict; R.done = true;
         if (R.onVerdict) R.onVerdict(d.verdict);

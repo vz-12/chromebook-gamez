@@ -38,7 +38,8 @@
     KEEP_POLLS: 2.5,      // and at least this many of the relay's waits
     FAR: 20,              // seconds behind what it holds: the latest snapshot instead
     FAST: [1.25, 2],      // its speed a second further behind than that, and five seconds (a late viewer starts up to fifteen behind)
-    STALL: 5000           // ms at the end with no more steps coming: over all the same
+    STALL: 5000,          // ms at the end with no more steps coming: over all the same
+    DRAW_MIN: 20          // frames drawn a second, at the fewest, while it is behind (skipDraw)
   };
   /* recs: step -> { host, wing }, the records not yet played; fps: step ->
      the fighter's fingerprint there; want: the first step not yet held (-1:
@@ -197,6 +198,7 @@
     const outsideK = k => !!(CHARS[pilotIx(k)] || {}).outside;
     V.names = hl.map(x => String((x && x.name) || '').slice(0, 14).toUpperCase());
     M.hand.match = h.match && Array.isArray(h.match.sides) ? h.match : null;
+    M.hand.story = h.story === true;             // the story fight, as the fighters play it (rounds.js, M.story)
     MP.on = true; MP.ready = true;
     // the eyes: the side that is not flying from outside (the host's, if neither or both are); a replay may look through either (replay.js)
     V.look(outsideK(0) && !outsideK(1) ? 1 : 0);
@@ -263,6 +265,21 @@
     else if (V.end && now - V.idleSince > SEE.STALL) over();      // the last steps never came
     MP.stalled = false;
     return true;
+  };
+
+  /* A slow machine (a school Chromebook plays the whole fight) falls behind
+     when it draws every frame as well as playing it. A second or more behind
+     what it should keep, a live viewer draws only some frames, never fewer
+     than SEE.DRAW_MIN a second, and the steps catch up; level again, it draws
+     them all. A replay draws every frame: it is recorded from. */
+  let drawnAt = 0;
+  M.skipDraw = () => {
+    if (!watching() || V.file || V.phase !== 'on' || !V.primed) return false;
+    const now = performance.now();
+    const keep = Math.max(SEE.KEEP, SEE.KEEP_POLLS * V.every / 1000) * 60;
+    if (V.last - LS.tick + 1 > keep + 60 && now - drawnAt < 1000 / SEE.DRAW_MIN) return true;
+    drawnAt = now;
+    return false;
   };
 
   /* After each step: its fingerprint against the fighter's, where the

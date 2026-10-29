@@ -71,9 +71,15 @@
      own in the hello, so both deal the same opening picks (lockstep). */
   const friendly = () => matchy() && !M.hand.match;
   const ownBonus = () => (friendly() && M.hand.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0);
+  // a friend's match as the story fight, a rehearsal of it: the host's word (the lobby's STORY box), said in its hello
+  const ownStory = () => friendly() && M.hand.story === true;
   const hello = M.hello, peerHello = M.peerHello;
-  M.hello = () => Object.assign(hello(), { bonus: ownBonus() });
-  M.peerHello = d => { peerHello(d); M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0; };
+  M.hello = () => Object.assign(hello(), { bonus: ownBonus(), story: ownStory() });
+  M.peerHello = d => {
+    peerHello(d);
+    M.peerBonus = friendly() && d && d.bonus === ROUNDS.adBonus ? ROUNDS.adBonus : 0;
+    M.peerStory = friendly() && !!d && d.story === true;
+  };
   // pilot k's bonus, the same on both machines
   M.bonusOf = k => (k === pilotMine() ? ownBonus() : (M.peerBonus || 0));
   /* Best of three below gold, five from there: a ranked match plays to its
@@ -90,8 +96,17 @@
      the match the queue makes with the one a challenge went to, which the
      server marks (pvp/src/objects.js), or practice against a bot that the
      lobby starts for a hidden pilot's holder (bot.js), which may begin at a
-     later phase (storyFrom, 1 to 4). Both machines hold the same hand. */
-  M.story = () => !!(M.hand && ((M.hand.match && M.hand.match.story === true) || (M.hand.mode === 'bot' && M.hand.story === true)));
+     later phase (storyFrom, 1 to 4), or a friend's match its host asks to be
+     one, to rehearse it (the host's hello says so, above). A viewer or a
+     replay takes it from the broadcast's header (watch.js). Every machine in
+     a match comes to the same answer. */
+  M.story = () => {
+    const h = M.hand;
+    if (!h) return false;
+    if (h.mode === 'watch' || h.mode === 'bot') return h.story === true;
+    if (h.match) return h.match.story === true;
+    return friendly() && (MP.role === 'host' ? ownStory() : M.peerStory === true);
+  };
   const storyFrom = () => {
     const n = M.hand && M.hand.mode === 'bot' ? M.hand.storyFrom : 1;
     return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;

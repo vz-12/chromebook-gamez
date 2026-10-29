@@ -21,8 +21,10 @@
      end     the match is over for this machine: the step, and the result, or
              with none, which side walked out
 
-   Only this side, and only the account allowed: the relay checks, and a
-   machine flying one of the game's own pilots never sends at all. Nothing
+   Only this side, and only the account allowed: the relay checks. Any other
+   match is sent by its host only once a dev asks to watch it (pvp/src/now.js:
+   it keeps the steps from the first and sends nothing until then), and a
+   practice against a bot only when its player puts it on air (bot.js). Nothing
    here waits on the relay, and nothing it answers changes the match: if the
    relay cannot be reached, its viewers wait, and the match plays on under
    its own rules.
@@ -51,17 +53,29 @@
 
   // the pilot this machine flies is from outside the game: the side that goes on air
   const mineHidden = () => { const p = pilotP(pilotMine()); return !!(p && p.outside); };
+  /* Which machine keeps a match's steps from its first: the side flying a
+     hidden pilot; in any other match its host, in case a dev asks to watch
+     (pvp/src/now.js); and a practice its player puts on air (bot.js). It
+     sends them only once allowed: the hidden side at once, a host once the
+     referee says a dev is watching (referee.js, R.air), a practice once its
+     id is back. Nothing is sent for a match nobody watches. */
+  const airId = () => (M.hand && M.hand.mode === 'bot' ? M.airId : M.ref && M.ref.id) || null;
+  const recordable = () => !!M.hand && (M.hand.mode === 'bot' ? M.hand.air === true
+                                        : M.hand.mode === 'match' && (mineHidden() || pilotMine() === 0));
+  const allowed = () => !!airId() && (M.hand.mode === 'bot' || mineHidden() || !!(M.ref && M.ref.air));
 
   // a run of a match begins, with this machine the one to send it
   function begin() {
     const q = M.hand.match;
     Object.assign(A, { on: true, run: LS.run, side: pilotMine(), headed: false, recs: [], next: 0, sent: 0, epoch: LS.epoch, snaps: [],
-                       ended: null, endSent: false, busy: false, at: 0, flushAt: 0, off: '' });
+                       ended: null, endSent: false, busy: false, at: 0, flushAt: 0, off: '', wait: !allowed(), snapNow: false });
     A.fps.clear();
     A.head = {
       v: 1, build: buildId(), pilot: pilotP(pilotMine()).charId,
       // the match as the server made it (a queued one): its rules and both sides, never an account or this machine's side
       match: q && Array.isArray(q.sides) ? { queue: q.queue, rated: !!q.rated, league: q.league || null, bestOf: q.bestOf, sides: q.sides } : null,
+      // the story fight (rounds.js, M.story): a viewer's copy has to run its script too, or it plays another fight
+      story: M.story(),
       run: LS.head,
       hellos: MP.role === 'host' ? [MP.said, MP.heard] : [MP.heard, MP.said]   // the host's, then the guest's
     };
@@ -85,9 +99,9 @@
      and the fingerprint lockstep took at its end, if it took one. A step
      played again after a snapshot was taken over (lsAdopt) is not new. */
   M.played = (cur, t) => {
-    if (!M.hand || M.hand.mode !== 'match') return;
+    if (!M.hand || (M.hand.mode !== 'match' && M.hand.mode !== 'bot')) return;
     if (t === 0 && LS.run !== A.run) {
-      if (M.ref && M.ref.id && mineHidden() && LS.head && MP.said && MP.heard) begin();
+      if (recordable() && LS.head && MP.said && MP.heard) begin();
       else { A.on = false; A.run = LS.run; }
     }
     if (!A.on || A.ended || LS.run !== A.run || t !== A.next) return;
@@ -96,14 +110,15 @@
     A.next = t + 1;
     const h = LS.ckMine.get(LS.tick);
     if (h !== undefined) A.fps.set(LS.tick, [LS.epoch, LS.tick, h >>> 0]);
-    if (LS.epoch !== A.epoch || LS.tick % AIR.SNAP === 0) { A.epoch = LS.epoch; snap(); }
+    // snapshots only once it may send (each costs the frame a few ms); the first then at once, for viewers arriving now
+    if (A.snapNow || (!A.wait && (LS.epoch !== A.epoch || LS.tick % AIR.SNAP === 0))) { A.snapNow = false; A.epoch = LS.epoch; snap(); }
   };
 
   async function send(body, keepalive) {
     try {
       const r = await fetch('/api/pvp/watch', {
         method: 'POST', credentials: 'same-origin', keepalive: !!keepalive, headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(Object.assign({ match: M.ref.id }, body)) });
+        body: JSON.stringify(Object.assign({ match: airId() }, body)) });
       let d = null;
       try { d = await r.json(); } catch (e) {}
       return { status: r.status, d };
@@ -150,14 +165,42 @@
     } else A.at = Date.now() + AIR.RETRY;    // unreachable: its viewers wait, and it is tried again shortly
   }
 
+  /* The side on air sees where it can be watched: a pill low on the left,
+     and a click copies the address. A rehearsal hands it round by hand; the
+     real fight is on every menu by itself (src/live.js). A.link is it. */
+  let pill = null;
+  function showPill() {
+    A.link = A.on && A.headed && !A.off && airId() ? location.origin + '/play/?watch=' + airId() : '';
+    if (!A.link) { if (pill) pill.hidden = true; return; }
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'pvp-onair';
+      pill.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:20;padding:5px 10px;border-radius:6px;cursor:pointer;' +
+        "background:rgba(127,29,29,.85);color:#fecaca;font:700 11px 'Chakra Petch',sans-serif;letter-spacing:.12em";
+      pill.addEventListener('click', () => {
+        try { navigator.clipboard.writeText(A.link).then(() => { pill.textContent = 'ON AIR  ·  WATCH LINK COPIED'; }, () => {}); } catch (e) {}
+      });
+      pill.textContent = 'ON AIR  ·  CLICK TO COPY THE WATCH LINK';
+      document.body.appendChild(pill);
+    }
+    pill.hidden = false;
+  }
+
   // once a frame, whatever screen is up: the end noticed, and the next thing sent
   function tick() {
+    showPill();
     if (!A.on) return;
     if (!A.ended) {
       const m = typeof RUN !== 'undefined' && RUN.pvp;
       if (m && m.run === A.run && m.phase === 'over') A.ended = { at: A.next, result: { winner: m.winner, score: [m.score[0], m.score[1]] } };
       // over by somebody leaving: the other side, since this one leaves through M.leave (below)
       else if (!LS.on || LS.run !== A.run) A.ended = { at: A.next, result: null, left: 1 - A.side };
+    }
+    // kept, not sent, until it may be: then from its first step, with a snapshot of now for whoever is watching already
+    if (A.wait) {
+      if (!allowed()) return;
+      A.wait = false;
+      if (A.next > 0 && !A.ended) A.snapNow = true;
     }
     const now = Date.now();
     if (A.busy || A.off || now < A.at) return;
@@ -173,7 +216,7 @@
      (keepalive outlives the page), so its viewers see the end. */
   const leave = M.leave;
   M.leave = () => {
-    if (A.on && A.headed && !A.off) {
+    if (A.on && A.headed && !A.off && !A.wait) {
       if (!A.ended) A.ended = { at: A.next, result: null, left: A.side };   // this side walking out of a match still on
       if (A.sent < A.next) send(batch(), true);
       send({ op: 'end', at: A.ended.at, result: A.ended.result, left: A.ended.left }, true);
