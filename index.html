@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
 <meta name="theme-color" content="#05060a">
 <!-- AdSense: proves the site is this publisher's. Loads nothing; the one ad is ADS. -->
 <meta name="google-adsense-account" content="ca-pub-3461416270406814">
@@ -224,6 +224,23 @@ const len = (x, y) => Math.hypot(x, y);
 const angLerp = (a, b, t) => { let d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI; return a + d * t; };
 
 /* --------------------------------- canvas -------------------------------- */
+/* Older phones and tablets (iOS 15 and before, Chrome before 99) have no
+   roundRect on a canvas, and the art files call it: hl-art.js does 28 times,
+   the vigil's room among them, so on those devices a hook threw and the vigil
+   came up without its art (29 Oct 2026). This only fills the browser's gap;
+   the game's own roundRect() below is a different, older helper. */
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    let k = Array.isArray(r) ? r[0] : r && typeof r === 'object' ? r.x : r;
+    k = Math.max(0, Math.min(+k || 0, Math.abs(w) / 2, Math.abs(h) / 2));
+    this.moveTo(x + k, y);
+    this.arcTo(x + w, y, x + w, y + h, k);
+    this.arcTo(x + w, y + h, x, y + h, k);
+    this.arcTo(x, y + h, x, y, k);
+    this.arcTo(x, y, x + w, y, k);
+    this.closePath();
+  };
+}
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d', { alpha: false });
 let W = 0, H = 0, DPR = 1;
@@ -1636,13 +1653,20 @@ function inputSample(rec) {
   }
   if (Pad.active && (Pad.lx || Pad.ly)) { ix = Pad.lx; iy = Pad.ly; }   // the left stick (GAMEPAD)
   rec.mx = ix; rec.my = iy;
-  if (Pad.active && !choice) padAim();   // the right stick puts the pointer where the ship looks
+  const thumb = isTouch && !Pad.active && !playScreen();
+  if (Pad.active && !playScreen()) padAim();   // the right stick puts the pointer where the ship looks
+  else if (thumb) touchAim();            // and so does the right thumb (TOUCH BUTTONS)
   // mouse.wx / wy stay too: the drawing still reads the cursor's world point
   mouse.wx = (aimX() - W / 2 - cam.sx) / camZoom + cam.x;
   mouse.wy = (aimY() - H / 2 - cam.sy) / camZoom + cam.y;
   rec.ax = mouse.wx; rec.ay = mouse.wy;
-  rec.trig = !!(mouse.down || keys['j'] || Pad.fire);
-  rec.lmb = !!(mouse.down || Pad.rt);    // the right trigger is the left button, for what reads clicks
+  /* The right thumb down is the trigger held, and a click as it lands: THE
+     FOUNDER's duel swings on one, the clash is fed by it, BRAND marks with it,
+     FUSION throws with it and IMAGO's armory picks with it. A touch screen
+     used to send neither, so none of those could be done on a phone. */
+  const held = thumb && !!touchUI.aim;
+  rec.trig = !!(mouse.down || keys['j'] || Pad.fire || held);
+  rec.lmb = !!(mouse.down || Pad.rt || held);   // the right trigger is the left button, for what reads clicks
   rec.auto = autoFire;
   rec.dash = !!(keys[' '] || keys['shift']);
   rec.touch = isTouch && !Pad.active;    // a pad on a phone aims like a mouse, not like a thumb
@@ -1692,10 +1716,7 @@ cv.addEventListener('mousemove', e => {
   // a real hand on the mouse takes the pointer back from a pad; a nudge of the desk does not
   if (e.isTrusted && Math.abs(e.movementX) + Math.abs(e.movementY) > 2) Pad.active = false;
   mouse.x = viewX(e); mouse.y = viewY(e);
-  if (volDrag) volFromMouse();
-  if (mixDrag) mixFromMouse();
-  if (sensDrag) sensFromMouse();
-  if (skinDrag) skinFromMouse();
+  sliderMove();
 });
 cv.addEventListener('mousedown', e => {
   if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
@@ -1711,18 +1732,33 @@ cv.addEventListener('mousedown', e => {
   if (e.button === 2) { if (state === 'play') inputPress('parry'); return; }   // played on the next step
   mouse.down = true;
   // the slider claims the click before any overlay button sees it
-  if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return; }
-  if (mixAt()) { mixDrag = mixAt(); mixFromMouse(); return; }
-  if (sensRect && inRect(mouse.x, mouse.y, sensRect)) { sensDrag = true; sensFromMouse(); return; }
-  if (skinGrab()) return;
+  if (sliderGrab()) return;
   handleClick();
 });
-addEventListener('mouseup', e => {
-  if (!e || e.button !== 2) mouse.down = false;
+/* The sliders (volume, the mix, aim, a skin's colour) take a press where they
+   are drawn, before any button under them. A finger is grabbed the same way
+   (touchstart), which it was not: on a phone not one of them moved. */
+function sliderGrab() {
+  if (volRect && inRect(mouse.x, mouse.y, volRect)) { volDrag = true; volFromMouse(); return true; }
+  if (mixAt()) { mixDrag = mixAt(); mixFromMouse(); return true; }
+  if (sensRect && inRect(mouse.x, mouse.y, sensRect)) { sensDrag = true; sensFromMouse(); return true; }
+  return skinGrab();
+}
+function sliderMove() {
+  if (volDrag) volFromMouse();
+  if (mixDrag) mixFromMouse();
+  if (sensDrag) sensFromMouse();
+  if (skinDrag) skinFromMouse();
+}
+function sliderLet() {
   if (volDrag) { volDrag = false; Save.savePrefs(); }
   if (mixDrag) { mixDrag = null; Save.savePrefs(); }
   if (sensDrag) { sensDrag = false; Save.savePrefs(); }
   if (skinDrag) { skinDrag = null; Save.writeLocal(); Save.flush(); }
+}
+addEventListener('mouseup', e => {
+  if (!e || e.button !== 2) mouse.down = false;
+  sliderLet();
 });
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('wheel', e => {
@@ -1757,7 +1793,8 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 
 /* ----- touch: dual virtual sticks ----- */
-const touchUI = { active: false, move: null, aim: null, btn: Object.create(null) };   // btn: finger id -> the button it holds
+const touchUI = { active: false, move: null, aim: null, btn: Object.create(null),   // btn: finger id -> the button it holds
+                  slider: null };        // the finger dragging a slider (sliderGrab)
 const isTouch = matchMedia('(pointer:coarse)').matches;
 function tpos(t) { return { x: viewX(t), y: viewY(t) }; }
 cv.addEventListener('touchstart', e => {
@@ -1769,11 +1806,12 @@ cv.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
     const p = tpos(t);
     // a button under the thumb is pressed, and that finger is never a stick (TOUCH BUTTONS)
-    if (state === 'play' && !choice) { const b = touchBtnAt(p.x, p.y); if (b) { touchBtnDown(b, t.identifier); continue; } }
+    if (state === 'play' && !playScreen()) { const b = touchBtnAt(p.x, p.y); if (b) { touchBtnDown(b, t.identifier); continue; } }
     if (state === 'codex') { codexTouch('start', t.identifier, p); continue; }   // a tap is answered when it lifts
-    // THE FOUNDER's door is asked mid-run, and answered with a tap like any screen
-    if (state !== 'play' || choice) {
+    // THE FOUNDER's door and the vigil's stand are asked mid-run, and answered with a tap like any screen
+    if (state !== 'play' || playScreen()) {
       mouse.x = p.x; mouse.y = p.y;
+      if (touchUI.slider == null && sliderGrab()) { touchUI.slider = t.identifier; continue; }   // a slider takes the finger, as it takes the button
       QOL.tap = true; handleClick(); QOL.tap = false;   // a tap, for what has to wait for the lift (qolOnLift)
       // the click may have closed it; only a panel still open takes the drag
       if (state === 'changelog' && !logDrag)
@@ -1790,6 +1828,7 @@ cv.addEventListener('touchmove', e => {
   e.preventDefault();
   for (const t of e.changedTouches) {
     const p = tpos(t);
+    if (touchUI.slider === t.identifier) { mouse.x = p.x; mouse.y = p.y; sliderMove(); continue; }
     if (touchUI.move && t.identifier === touchUI.move.id) { touchUI.move.x = p.x; touchUI.move.y = p.y; }
     if (touchUI.aim && t.identifier === touchUI.aim.id) { touchUI.aim.x = p.x; touchUI.aim.y = p.y; }
     if (logDrag && t.identifier === logDrag.id && state === 'changelog')
@@ -1808,7 +1847,10 @@ cv.addEventListener('touchmove', e => {
 function touchEnd(e) {
   if (Intro.on) { Intro.fingers = e.touches.length; return; }
   if (QOL.onLift) { const f = QOL.onLift; QOL.onLift = null; if (e.type === 'touchend') f(); }
+  // ROOT'S RITE: a phone shows its keyboard only for a focus asked as a finger lifts
+  if (con.open && e.type === 'touchend') touchKbFocus();
   for (const t of e.changedTouches) {
+    if (touchUI.slider === t.identifier) { touchUI.slider = null; sliderLet(); }
     if (touchUI.btn[t.identifier]) touchBtnUp(t.identifier);
     if (touchUI.move && t.identifier === touchUI.move.id) touchUI.move = null;
     if (touchUI.aim && t.identifier === touchUI.aim.id) touchUI.aim = null;
@@ -1838,20 +1880,94 @@ function kitOn() {
 }
 const kitHasV = () => P.charId === 'hacker' || (P.charId === 'ember' && !!OD_KIT[3])
   || (P.charId === 'melee' && !!RONIN_KIT[3]) || (P.charId === 'runner' && !!IM_KIT[3]);
+// what E does where you stand in the vigil, as its own prompt says it (drawHlVigilPrompt)
+const VIG_E = { outsider: 'HIM', stand: 'STAND', way: 'GO UP', exit: 'LEAVE' };
+// the clash asks for the vent before the hull is awake (ventFire): F has to be there for it
+const clashVent = () => !!(amalgam && amalgam.rite && amalgam.rite.clash);
 function touchBtns() {
   const x0 = W - 86, y0 = H - 96;        // DASH, under the thumb; the rest on two arcs round it
   const at = (a, d) => ({ x: x0 + Math.cos(a * Math.PI / 180) * d, y: y0 + Math.sin(a * Math.PI / 180) * d });
   const out = [{ k: 'escape', t: 'II', x: W - 32, y: 150, r: 20, col: '#94a3b8' }];   // under the wave and sector
   if (P.outside) return out;             // an outside pilot's keys are its own
   if (P.dashMax) out.push({ k: ' ', t: 'DASH', x: x0, y: y0, r: 42, col: COL.player });
-  const f = isBlade() ? 'PARRY' : P.awake ? F_LABEL[P.charId] : null;
+  const f = clashVent() ? 'VENT' : isBlade() ? 'PARRY' : P.awake ? F_LABEL[P.charId] : null;
   if (f) out.push({ k: 'f', t: f, ...at(186, 112), r: 32, col: '#fde047' });
-  if (inHub || inVigil || (gearNear && !inHub)) out.push({ k: 'e', t: gearNear && !inHub ? 'LOOK' : 'TALK', ...at(228, 112), r: 27, col: '#e2e8f0' });
+  // in the vigil, E moves his talk on first (vigilInteract), wherever you stand
+  const e = inVigil ? (vig.talk ? 'NEXT' : VIG_E[vig.near]) : inHub ? 'USE' : gearNear ? 'LOOK' : null;
+  if (e) out.push({ k: 'e', t: e, ...at(228, 112), r: 27, col: '#e2e8f0' });
   if (P.book) out.push({ k: 'q', t: 'BOOK', ...at(268, 112), r: 27, col: P.book.col });
   const kit = kitOn();
   if (kit) ['z', 'x', 'c'].forEach((k, i) => out.push({ k, t: k.toUpperCase(), ...at(188 + i * 27, 206), r: 25, col: '#f0abfc' }));
   if ((kit && kitHasV()) || rootCmdReady()) out.push({ k: 'v', t: 'V', ...at(269, 206), r: 25, col: kit ? '#f0abfc' : ROOT_COL });
+  // ROOT'S RITE is typed: this opens the console, and the phone's keyboard with it (TouchKb)
+  if (conAvail() && !con.open) out.push({ k: 'enter', t: 'TYPE', ...at(150, 112), r: 27, col: ROOT_COL });
+  if (freeRun) out.push({ k: '\\', t: 'TOOLS', x: W - 32, y: 204, r: 20, col: '#38bdf8' });   // FREEPLAY's console
   return out;
+}
+// a screen over the run, answered by pointing rather than flying: THE FOUNDER's door, the vigil's stand, FREEPLAY's tools
+const playScreen = () => !!choice || (inVigil && !!vig.stand) || (freeRun && freeOpen);
+// the pointer put on a world point, through aimX's sensitivity undone, so the record reads exactly that point
+function pointAt(tx, ty) {
+  const s = aimSens();
+  mouse.x = W / 2 + ((tx - cam.x) * camZoom + cam.sx) / s;
+  mouse.y = H / 2 + ((ty - cam.y) * camZoom + cam.sy) / s;
+}
+/* The right thumb is the pointer too, for whatever is aimed at a place (the
+   kits' moves, the ARCHIVIST's blink, BRAND's mark): along its pull, further
+   the further it is pulled. With no thumb down, or one only tapped, it rests
+   on what the hull is turned on: the nearest threat, as the touch screen's
+   own aim picks it, else straight ahead. A touch screen used to leave the
+   pointer wherever the last tap on a menu had been. From inputSample. */
+function touchAim() {
+  const a = touchUI.aim, dx = a ? a.x - a.ox : 0, dy = a ? a.y - a.oy : 0, d = len(dx, dy);
+  if (d > 10) {
+    const r = 110 + Math.min(1, d / 58) * 230;
+    pointAt(P.x + dx / d * r, P.y + dy / d * r);
+    return;
+  }
+  const t = nearestEnemy(P.x, P.y, 900);
+  if (t) pointAt(t.x, t.y);
+  else pointAt(P.x + Math.cos(P.ang) * 220, P.y + Math.sin(P.ang) * 220);
+}
+
+/* The keyboard ROOT'S RITE is typed on. A phone has none until a text field
+   asks for it, so while the console is open on a touch screen a hidden field
+   holds the focus. An iPhone, like a real keyboard, sends real keys, and those
+   reach the console as they always have (conKey refuses them to the field).
+   An Android keyboard sends 'Unidentified' and writes into the field instead,
+   so what it wrote is read back as keys: the difference from the last look,
+   as backspaces and then characters (autocorrect rewriting a word included).
+   A few spaces stay in front so a backspace on an empty line still lands. */
+const TouchKb = { el: null, last: '', comp: false };
+const TKB_PAD = '    ';
+function touchKbFocus() {
+  let el = TouchKb.el;
+  if (!el) {
+    el = TouchKb.el = document.createElement('input');
+    el.type = 'text'; el.spellcheck = false; el.tabIndex = -1;
+    for (const [k, v] of [['autocomplete', 'off'], ['autocorrect', 'off'], ['autocapitalize', 'none'], ['aria-hidden', 'true']]) el.setAttribute(k, v);
+    // 16px, or an iPhone zooms the page in on it
+    el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;z-index:-1';
+    el.addEventListener('input', touchKbInput);
+    el.addEventListener('compositionstart', () => { TouchKb.comp = true; });
+    el.addEventListener('compositionend', () => { TouchKb.comp = false; touchKbInput(); });
+    document.body.appendChild(el);
+  }
+  if (document.activeElement !== el) { el.value = TouchKb.last = TKB_PAD; el.focus(); }
+}
+function touchKbInput() {
+  const el = TouchKb.el, now = el.value, was = TouchKb.last;
+  let p = 0;
+  while (p < now.length && p < was.length && now[p] === was[p]) p++;
+  const key = k => { if (con.open) conKey({ key: k, repeat: false, ctrlKey: false, metaKey: false, altKey: false, preventDefault() {} }); };
+  for (let i = p; i < was.length; i++) key('Backspace');
+  for (const ch of now.slice(p)) key(ch);
+  TouchKb.last = now;
+  if (!TouchKb.comp && (now.length < 2 || now.length > 60)) el.value = TouchKb.last = TKB_PAD;
+}
+// once a frame: the console shut, the keyboard goes with it
+function touchKbSync() {
+  if (TouchKb.el && !con.open && document.activeElement === TouchKb.el) TouchKb.el.blur();
 }
 function touchBtnAt(x, y) {
   if (Pad.active) return null;
@@ -1902,7 +2018,7 @@ function padMouse(type) {
 }
 function padDown(i) {
   Pad.active = true;
-  const play = state === 'play' && !choice;   // THE FOUNDER's door is a screen, though it is asked mid-run
+  const play = state === 'play' && !playScreen();   // the door and the stand are screens, though they are asked mid-run
   if (i === 6) { if (play) inputPress('parry'); return; }   // the right button's guard
   if (i === 7) return;                   // the trigger is read held, in padPoll
   let k;
@@ -1942,7 +2058,7 @@ function padPoll(dt) {
   if (lm > 0.5 || rm > 0.5) Pad.active = true;
   if (!Pad.active) { Pad.lx = Pad.ly = 0; Pad.fire = Pad.rt = false; return; }
   Pad.rt = !!g.buttons[7] && g.buttons[7].value > 0.25;
-  if (state === 'play' && !choice) {
+  if (state === 'play' && !playScreen()) {
     Pad.lx = lx; Pad.ly = ly;
     if (rm > 0) { Pad.aimA = Math.atan2(ry, rx); Pad.aimR = 110 + rm * 220; }
     Pad.fire = Pad.rt || rm > 0.55;
@@ -1965,10 +2081,7 @@ function padPoll(dt) {
 // in play, from inputSample: the pointer is put where the right stick last pointed, off this pilot
 function padAim() {
   if (Pad.aimA == null) Pad.aimA = P.ang || 0;
-  const tx = P.x + Math.cos(Pad.aimA) * Pad.aimR, ty = P.y + Math.sin(Pad.aimA) * Pad.aimR;
-  const s = aimSens();                   // undone here, so aimX() lands exactly on the point
-  mouse.x = W / 2 + ((tx - cam.x) * camZoom + cam.sx) / s;
-  mouse.y = H / 2 + ((ty - cam.y) * camZoom + cam.sy) / s;
+  pointAt(P.x + Math.cos(Pad.aimA) * Pad.aimR, P.y + Math.sin(Pad.aimA) * Pad.aimR);
 }
 // a phone turned upright mid-run: #vr-turn covers the game, and the run waits under it
 const TURN_MQ = matchMedia('(orientation:portrait) and (pointer:coarse) and (max-width:560px)');
@@ -38692,7 +38805,15 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, b.open)) { ui('open'); return; }
     return;
   }
+  // ALL HALLOWS: the vigil's stand, which only took 1–7 and ESC. A hook tapped is worn or hung back; off the stand, it shuts
+  if (state === 'play' && inVigil && vig.stand) {
+    const i = hlStandAt(mouse.x, mouse.y);
+    if (i >= 0) vigilKey(String(i + 1));
+    else if (i === -2) vigilKey('escape');
+    return;
+  }
   if (state === 'name') { if (isTouch || Pad.active) promptName(); return; }   // a pad has no keys to type with either
+  if ((state === 'lan' || state === 'chal') && uiArm <= 0 && inRect(mouse.x, mouse.y, screenBackRect())) { handleKey('escape'); return; }
   if (state === 'lan') { lanClick(); return; }
   if (state === 'chal') { chalClick(); return; }
   if (state === 'settings') { settingsClick(); return; }
@@ -38723,6 +38844,15 @@ function handleClick() {
       return;
     }
     if (QOL.installRect && inRect(mouse.x, mouse.y, QOL.installRect)) { qolOnLift(installApp); return; }
+    // what only a key did: a phone has no X, C, N or F (29 Oct 2026)
+    if (!PVP && inRect(mouse.x, mouse.y, menuCodexRect())) { openCodex('menu'); return; }
+    { const i = menuPilotAt(mouse.x, mouse.y); if (i >= 0) { menuPickPilot(i); return; } }
+    if (QOL.freeRect && Save.profile.freeplay && inRect(mouse.x, mouse.y, QOL.freeRect)) { startFreeplay(); return; }
+    if (Save.profile.name && inRect(mouse.x, mouse.y, menuNameRect())) {
+      nameBuf = Save.profile.name || ''; state = 'name';
+      if (isTouch || Pad.active) promptName();
+      return;
+    }
     startRun(); return;
   }
   if (state === 'dead') {
@@ -38752,6 +38882,11 @@ function handleClick() {
   }
   if (state === 'pause') {
     if (inRect(mouse.x, mouse.y, pauseSetRect())) { openSettings('pause'); return; }
+    if (inRect(mouse.x, mouse.y, pauseCodexRect())) { openCodex('pause'); return; }
+    if (inRect(mouse.x, mouse.y, pauseMenuRect())) {   // twice: the first only asks (drawPause)
+      if (pauseQuitArm > 0) { pauseQuitArm = 0; handleKey('m'); } else pauseQuitArm = 2.5;
+      return;
+    }
     if (assist && inRect(mouse.x, mouse.y, pauseAssistRect())) { ui('assistOff'); return; }
     ui('resume'); return;
   }
@@ -38797,6 +38932,7 @@ function handleClick() {
     for (let i = 0; i < FREE_ROWS.length; i++) if (inRect(mouse.x, mouse.y, rs[i])) {
       freeSel = i; FREE_ROWS[i].f(); Audio_.select(); return;
     }
+    if (QOL.tap) { freeOpen = false; return; }   // a phone: a tap off the rows shuts it, as \ would
   }
   if (state === 'codex') { codexClick(); return; }
   if (state === 'library') {
@@ -39078,6 +39214,7 @@ function frame(now) {
   const dt = Math.min(0.2, (now - last) / 1000);
   lastDT = dt;                           // render() draws the pointer with it
   padPoll(dt);                           // a pad's presses, as keys, before anything reads them (GAMEPAD)
+  touchKbSync();                         // ROOT'S RITE on a phone: the console shut, its keyboard goes too
   // INTRO: a tab's first look has the screen, and nothing of the game moves under it
   if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
   // THE ENDING: the movie has the screen, and the game stands still under it
@@ -57788,13 +57925,13 @@ function render() {
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
       (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach') {
-    if (state === 'chal') drawChal();
+    if (state === 'chal') { drawChal(); drawScreenBack(); }
     else {
       renderMenu();
       if (state === 'ost') drawOst();
       if (state === 'ach') drawAch();
       if (state === 'name') drawNameEntry();
-      if (state === 'lan') { drawLan(); drawNetFix(); drawNetDiag(); }
+      if (state === 'lan') { drawLan(); drawScreenBack(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
       if (state === 'changelog') drawChangelog();
       if (state === 'daily') drawDaily();
@@ -59157,8 +59294,14 @@ function hlPartsClear() { hlParts.length = 0; }
 =========================================================================== */
 
 const _hlBakes = new Map();
+/* A phone gives a page only so much canvas, and one floor baked at its full
+   resolution was most of it (2400 x 1700 at 2x is 16 million pixels, about
+   an iPhone's cap for a single canvas), so on a touch screen a bake is kept
+   under BAKE_MAX_PX and drawn up to size. A floor is soft texture: it shows. */
+const BAKE_MAX_PX = 6e6;
 function hlBakePrep(key, x, y, w, h, draw) {
-  const dpr = typeof DPR === 'number' ? DPR : 1;
+  let dpr = typeof DPR === 'number' ? DPR : 1;
+  if (isTouch) dpr = Math.min(dpr, Math.sqrt(BAKE_MAX_PX / Math.max(1, w * h)));
   let b = _hlBakes.get(key);
   if (!b || b.w !== w || b.h !== h || b.dpr !== dpr) {
     const c = document.createElement('canvas');
@@ -68131,6 +68274,20 @@ function drawHlVigilHud(v) {
   ctx.letterSpacing = '0em';
   ctx.restore();
 }
+/* Which hook a tap on THE STAND lands on: -1 the stand but no hook, -2 off
+   it, which shuts it (handleClick). The art's stand (hl-art.js) is laid out
+   larger than the one below, so the rows are read off whichever is up. */
+function hlStandAt(x, y) {
+  const art = HL_ART.status === 'ready';
+  const pw = art ? 500 : 400, ph = art ? 336 : 300, px = Math.round(W / 2 - pw / 2), py = Math.round(H / 2 - ph / 2);
+  if (!inRect(x, y, { x: px, y: py, w: pw, h: ph })) return -2;
+  const top = py + (art ? 92 : 56), right = px + (art ? 250 : pw);
+  for (let i = 0; i < HL_MEDALS.length; i++) {
+    const ry = top + i * 30;
+    if (x < right && y > ry - 20 && y < ry + 10) return i;
+  }
+  return -1;
+}
 function drawHlStandUi(ui, book) {
   if (ui.msgT > 0) ui.msgT -= lastDT;
   const x = W / 2 - 200, y = H / 2 - 150;
@@ -76524,31 +76681,45 @@ function drawPause() {
   ctx.fillText('PAUSED', W / 2, H / 2 - 56);
   ctx.font = "500 13px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#64748b';
-  ctx.fillText('P or ESC to resume   ·   X codex', W / 2, H / 2 - 20);
+  const touch = isTouch && !Pad.active;
+  ctx.fillText(touch ? 'tap anywhere else to resume' : 'P or ESC to resume   ·   X codex', W / 2, H / 2 - 20);
   ctx.fillStyle = '#475569';
   ctx.font = "500 12px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillText(`${stage.name}  ·  Wave ${wave}  ·  Level ${P.level}  ·  ◈${credits}  ·  ${score.toLocaleString()} pts`,
     W / 2, H / 2 + 4);
 
-  // volume, sensitivity and the effects panel all live behind this now
-  const sb = pauseSetRect(), sh = inRect(mouse.x, mouse.y, sb);
-  ctx.fillStyle = sh ? 'rgba(103,232,249,0.18)' : 'rgba(255,255,255,0.05)';
-  roundRect(sb.x, sb.y, sb.w, sb.h, 8); ctx.fill();
-  ctx.strokeStyle = rgba(COL.player, sh ? 0.8 : 0.3); ctx.lineWidth = 1.4;
-  roundRect(sb.x, sb.y, sb.w, sb.h, 8); ctx.stroke();
-  ctx.textAlign = "center";
-  ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = sh ? '#e2e8f0' : COL.player;
-  ctx.fillText('SETTINGS   [S]', sb.x + sb.w / 2, sb.y + sb.h / 2 + 4);
+  // volume, sensitivity and the effects panel all live behind this now; the codex beside it
+  const btn = (r, label, col) => {
+    const h = inRect(mouse.x, mouse.y, r);
+    ctx.fillStyle = h ? rgba(col, 0.18) : 'rgba(255,255,255,0.05)';
+    roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+    ctx.strokeStyle = rgba(col, h ? 0.8 : 0.3); ctx.lineWidth = 1.4;
+    roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = h ? '#e2e8f0' : col;
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 4);
+  };
+  btn(pauseSetRect(), touch ? 'SETTINGS' : 'SETTINGS   [S]', COL.player);
+  btn(pauseCodexRect(), touch ? 'CODEX' : 'CODEX   [X]', '#c4b5fd');
 
+  /* MAIN MENU was a line saying M, so a phone could not leave a run but by
+     losing it. A button now, and asked twice from a pointer, because a stray
+     tap on a pause screen is easy and this one ends the run. */
+  const mr = pauseMenuRect(), armed = pauseQuitArm > 0;
   const pulse = 0.6 + Math.sin(uiTime * 3) * 0.4;
+  ctx.fillStyle = armed ? 'rgba(248,113,113,0.2)' : 'rgba(248,113,113,0.06)';
+  roundRect(mr.x, mr.y, mr.w, mr.h, 8); ctx.fill();
+  ctx.strokeStyle = rgba('#f87171', armed ? 0.9 : 0.35); ctx.lineWidth = 1.4;
+  roundRect(mr.x, mr.y, mr.w, mr.h, 8); ctx.stroke();
   ctx.textAlign = 'center';
   ctx.font = "700 13px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = rgba('#f87171', pulse);
-  ctx.fillText('M   —   MAIN MENU', W / 2, H / 2 + 92);
+  ctx.fillStyle = rgba('#f87171', armed ? 1 : pulse);
+  ctx.fillText(armed ? (touch ? 'TAP AGAIN TO LEAVE' : 'AGAIN TO LEAVE') : touch ? 'MAIN MENU' : 'M   —   MAIN MENU', W / 2, mr.y + mr.h / 2 + 4);
   ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
-  ctx.fillText('this run is saved to your record before you leave', W / 2, H / 2 + 110);
+  ctx.fillText('this run is saved to your record before you leave', W / 2, mr.y + mr.h + 16);
+  if (pauseQuitArm > 0) pauseQuitArm -= lastDT;
   drawPauseAssist();     // FIRST FLIGHT: the way to turn it off
 }
 
@@ -76838,16 +77009,9 @@ function drawDead() {
   ctx.textBaseline = 'alphabetic';
 }
 
-function renderMenu() {
-  // background field
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (const p of parts) {
-    const t = p.life / p.max;
-    drawGlow(p.x, p.y, p.r * 4, p.color, t * 0.5);
-  }
-  ctx.restore();
-
+/* The centre column's place and scale: renderMenu draws it, and a tap on a
+   pilot in it (menuPilotAt) is read off the same numbers. */
+function menuCol() {
   const cxp = W / 2;
   /* The centre column is a fixed 390px stack — emblem, wordmark, pilot select,
      the prompt, the run totals. On a short window it used to run straight
@@ -76867,6 +77031,65 @@ function renderMenu() {
      the screen's own centre line, which sits lower than the band does and used
      to push the run totals straight through the unlocks row. */
   const cyp = topLimit + avail / 2 - (COL_TOP + COL_BOT) / 2 * menuScale;
+  return { cxp, cyp, menuScale, roomy, tiny };
+}
+/* Which pilot in the row a tap lands on, or -1. The row was only ever moved
+   along by C, so a phone, with no C, was held to one pilot (29 Oct 2026). */
+function menuPilotAt(x, y) {
+  const { cxp, cyp, menuScale: k } = menuCol();
+  for (let i = 0; i < CHARS.length; i++) {
+    const hx = cxp + (i - (CHARS.length - 1) / 2) * 116 * k, hy = cyp + 88 * k;
+    if (Math.abs(x - hx) < 50 * k && Math.abs(y - hy) < 34 * k) return i;
+  }
+  return -1;
+}
+// the line the profile's name is on (PRESS N TO RENAME): a tap there renames
+function menuNameRect() { return { x: W / 2 - 220, y: H - 106, w: 440, h: 20 }; }
+// the CODEX, under ACHIEVEMENTS on the menu's left: it only ever opened on X
+function menuCodexRect() { return { x: 18, y: 374, w: 176, h: 34 }; }
+function drawMenuCodex() {
+  if (PVP) return;
+  const r = menuCodexRect(), col = '#c4b5fd';
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(196,181,253,0.14)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('◈  CODEX', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+  ctx.fillText('WHAT YOU HAVE MET  —  X', r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+// a pilot tapped in the row: what C does, but to the one tapped. A locked one only says no; its badge says why
+function menuPickPilot(i) {
+  if (!charOpen(CHARS[i])) { Audio_.tone(160, 0.12, 'square', 0.05, 90); return; }
+  applyChar(i);
+  Save.profile.charIdx = selectedChar;
+  Save.writeLocal(); Save.flush();
+  Audio_.select();
+}
+
+function renderMenu() {
+  // background field
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    const t = p.life / p.max;
+    drawGlow(p.x, p.y, p.r * 4, p.color, t * 0.5);
+  }
+  ctx.restore();
+
+  const { cxp, cyp, menuScale, roomy, tiny } = menuCol();
   ctx.save();
   if (menuScale < 1) {
     ctx.translate(cxp, cyp);
@@ -76903,7 +77126,7 @@ function renderMenu() {
   const selY = cyp + 88;
   ctx.font = "700 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
-  ctx.fillText('PILOT   —   PRESS C', cxp, selY - 30);
+  ctx.fillText(isTouch && !Pad.active ? 'PILOT   —   TAP ONE' : 'PILOT   —   PRESS C', cxp, selY - 30);
   // both hulls, the chosen one lit
   CHARS.forEach((ch, i) => {
     const on = i === selectedChar;
@@ -77062,6 +77285,7 @@ function renderMenu() {
     const hp = hardProgress();
     if (hp && hp.good >= 3) unlocks.push(['⚠ BEING WATCHED  ' + hp.good + '/' + hp.need, '#fbbf24']);
   }
+  QOL.freeRect = null;                   // set again below, if the badge is drawn
   if (Save.profile.freeplay) unlocks.push(['⌨ FREEPLAY  [F]', '#38bdf8']);
   else if (Save.profile.clears > 0)
     unlocks.push([`◈ ${Save.profile.clears} / 2 CLEARS`, '#475569']);
@@ -77095,7 +77319,9 @@ function renderMenu() {
       row.forEach(u => {
         ctx.fillStyle = u[1];
         ctx.fillText(u[0], ux2, rowY + ri * 14);
-        ux2 += ctx.measureText(u[0]).width + gap * scale;
+        const uw = ctx.measureText(u[0]).width;
+        if (u[0][0] === '⌨') QOL.freeRect = { x: ux2 - 6, y: rowY + ri * 14 - 14, w: uw + 12, h: 20 };   // a tap starts it (handleClick)
+        ux2 += uw + gap * scale;
       });
     });
     ctx.textAlign = 'center';
@@ -77105,7 +77331,7 @@ function renderMenu() {
   if (Save.profile.name && roomy) {
     ctx.save();
     ctx.letterSpacing = '0.1em';
-    const asLine = `PLAYING AS ${clipText(Save.profile.name.toUpperCase(), 16)}   ·   PRESS N TO RENAME`;
+    const asLine = `PLAYING AS ${clipText(Save.profile.name.toUpperCase(), 16)}   ·   ${isTouch && !Pad.active ? 'TAP TO RENAME' : 'PRESS N TO RENAME'}`;
     fitFont(asLine, W - 48, '600', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 8);
     ctx.fillStyle = '#475569';
     ctx.fillText(asLine, cxp, H - 96);
@@ -77204,6 +77430,7 @@ function renderMenu() {
   drawMenuPvp();
   drawMenuOst();        // THE SOUNDTRACK
   drawMenuAch();        // ACHIEVEMENTS: and the next goal
+  drawMenuCodex();      // and the codex, which had only a key
   drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -78040,11 +78267,16 @@ function drawCodex() {
   if (row) codexDrawBook(row, worn);
   else if (codexBook >= 0) codexBook = -1;   // the list changed under it
 
+  if (!row) drawScreenBack();            // the grid's way out (a book has its own close)
+
   ctx.save();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.letterSpacing = '0.08em';
-  const ck = row ? '← → turn   ·   ↑ ↓ entry   ·   ESC close the book'
-                 : 'TAB / Q E section   ·   ARROWS / WHEEL browse   ·   ENTER / CLICK open   ·   ESC close';
+  const ck = isTouch && !Pad.active
+    ? (row ? 'swipe to turn   ·   drag to read   ·   tap outside to close the book'
+           : 'tap a section   ·   drag to browse   ·   tap to open')
+    : row ? '← → turn   ·   ↑ ↓ entry   ·   ESC close the book'
+          : 'TAB / Q E section   ·   ARROWS / WHEEL browse   ·   ENTER / CLICK open   ·   ESC close';
   fitFont(ck, W - 32, '500', 10, "Barlow, 'Segoe UI', system-ui, sans-serif", 7);
   ctx.fillStyle = worn ? '#4a3d2c' : '#334155';
   ctx.fillText(ck, W / 2, H - (g.tight ? 12 : 17));
@@ -78242,8 +78474,27 @@ function codexKey(k) {
   if (k === 'arrowdown'  || k === 's') { codexSel = Math.min(list.length - 1, codexSel + g.cols); codexReveal(); return; }
   if (k === 'arrowup'    || k === 'w') { codexSel = Math.max(0, codexSel - g.cols); codexReveal(); return; }
 }
+/* BACK, top left, for the pages that only ever left on ESC: the codex's grid,
+   CHALLENGES and CO-OP. A phone that opened one could not leave it (29 Oct
+   2026). A tap on it is ESC, through each page's own key handler. */
+function screenBackRect() { return { x: 16, y: 14, w: 100, h: 30 }; }
+function drawScreenBack() {
+  const b = screenBackRect(), hot = inRect(mouse.x, mouse.y, b);
+  ctx.save();
+  ctx.fillStyle = hot ? 'rgba(148,163,184,0.16)' : 'rgba(8,13,22,0.7)';
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+  ctx.strokeStyle = rgba('#94a3b8', hot ? 0.8 : 0.35); ctx.lineWidth = 1.2;
+  roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#e2e8f0' : '#94a3b8';
+  ctx.fillText(isTouch && !Pad.active ? '‹  BACK' : '‹  BACK   ESC', b.x + b.w / 2, b.y + b.h / 2 + 0.5);
+  ctx.restore();
+}
 function codexClick() {
   if (uiArm > 0) return;
+  if (codexBook < 0 && inRect(mouse.x, mouse.y, screenBackRect())) { closeCodex(); return; }
   if (codexBook >= 0) {
     const B = codexBookGeom(), row = codexBookRow();
     if (inRect(mouse.x, mouse.y, B.close)) { codexShut(); return; }
@@ -80627,7 +80878,11 @@ function settingsClick() {
 
 /* The way in, third in the stack under the other two corner doors. */
 function menuSetRect() { return { x: 18, y: 94, w: 176, h: 34 }; }
-function pauseSetRect() { return { x: W / 2 - 90, y: H / 2 + 28, w: 180, h: 32 }; }
+function pauseSetRect() { return { x: W / 2 - 186, y: H / 2 + 28, w: 180, h: 32 }; }
+// the codex beside it, and the way out under them: both only keys until 29 Oct 2026 (drawPause)
+function pauseCodexRect() { return { x: W / 2 + 6, y: H / 2 + 28, w: 180, h: 32 }; }
+function pauseMenuRect() { return { x: W / 2 - 110, y: H / 2 + 74, w: 220, h: 32 }; }
+let pauseQuitArm = 0;                    // seconds left on a first press of MAIN MENU
 
 function drawMenuSet() {
   const r = menuSetRect();
@@ -90569,7 +90824,7 @@ function drawNameEntry() {
 }
 
 function drawTouchSticks() {
-  if (!roninCutIn() && !suCutIn() && !imCutIn() && !choice) drawTouchBtns();   // a cut-in has the screen, or the door
+  if (!roninCutIn() && !suCutIn() && !imCutIn() && !playScreen()) drawTouchBtns();   // a cut-in has the screen, or the door, or the stand
   const drawStick = (s, col) => {
     if (!s) return;
     ctx.save();
@@ -92451,7 +92706,7 @@ function lanKey(k) {
 
   if (lanView === 'home') {
     if (k === 'h') { lanView = 'host'; netHost(); Audio_.select(); return; }
-    if (k === 'j') { lanView = 'join'; lanCode = ''; Audio_.select(); return; }
+    if (k === 'j') { lanView = 'join'; lanCode = ''; Audio_.select(); if (isTouch || Pad.active) lanAskCode(); return; }
     if (k === 'c') { lanCycleChar(); return; }
     return;
   }
@@ -92510,7 +92765,18 @@ function lanClick() {
   for (const b of lanBtns) {
     if (inRect(mx, my, b)) { lanKey(b.k); return true; }
   }
+  // the code's boxes, tapped: asked for again (lanAskCode)
+  if (lanView === 'join' && (isTouch || Pad.active) && Net.phase !== 'connecting') { lanAskCode(); return true; }
   return false;
+}
+/* The join code is typed, and a phone or a pad has no keys to type it with,
+   so the browser asks for it (as it asks a phone for a name: promptName). An
+   invite link joins without it (LINKS). */
+function lanAskCode() {
+  const c = window.prompt('The four characters the host was given:', lanCode);
+  if (c == null) return;
+  lanCode = c.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+  if (lanCode.length === 4 && Net.phase !== 'connecting') { netJoin(lanCode); Audio_.select(); }
 }
 
 /* -------------------------------- drawing --------------------------------- */
@@ -92725,7 +92991,8 @@ function drawLan() {
   }
 
   if (lanView === 'join') {
-    lanTitle('JOINING', 'TYPE THE FOUR CHARACTERS');
+    const asks = isTouch || Pad.active;  // no keys: a tap asks for the code (lanAskCode)
+    lanTitle('JOINING', asks ? 'TAP TO ENTER THE FOUR CHARACTERS' : 'TYPE THE FOUR CHARACTERS');
     ctx.textAlign = 'center';
     const boxW = 54, gap = 14;
     for (let i = 0; i < 4; i++) {
@@ -92751,7 +93018,7 @@ function drawLan() {
     ctx.textAlign = 'center';
     ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = '#475569';
-    ctx.fillText('BACKSPACE  —  FIX     ·     ESC  —  BACK', cx, H / 2 + 156);
+    ctx.fillText(asks ? 'TAP THE BOXES TO FIX IT' : 'BACKSPACE  —  FIX     ·     ESC  —  BACK', cx, H / 2 + 156);
     ctx.restore();
     return;
   }
