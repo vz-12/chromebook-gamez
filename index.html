@@ -39608,8 +39608,13 @@ function updatePlayer(dt) {
   /* Malware overwrites the dash: same charge economy, entirely different verb.
      It never falls through to the blink or to the dash-triggered upgrades. */
   if (P.outside && outsideHas(P.charId, 'dash')) {
-    // an outside pilot's own blink, on its own clock: true when it took the press (OUTSIDE PILOTS)
-    if (wantDash && !outsideCut() && outsideCall(P.charId, 'dash', ix, iy) === true) inputDashTaken();
+    /* an outside pilot's own blink, on its own clock: true when it took the press (OUTSIDE PILOTS).
+       A press it took is heard once: until the key is let go it is not handed in again. The
+       game lets go of it itself (inputDashTaken); a match cannot, since a step's record was
+       read off the keys some steps before it plays, so a tap reached the hook several steps
+       running and a move that answers a second press at once took the rest of the tap for one. */
+    if (!inp.dash) P.oxDashDown = false;
+    else if (wantDash && !P.oxDashDown && !outsideCut() && outsideCall(P.charId, 'dash', ix, iy) === true) { inputDashTaken(); P.oxDashDown = true; }
   } else if (P.malware && wantDash && P.dashCh > 0 && P.dashT <= 0) {
     inputDashTaken();
     P.dashCh--;
@@ -89823,7 +89828,8 @@ function aboveTakenFx(p, m) {
                  is reported by hit() and drawn by bullet().
      hit(e, b, dmg)          a tagged round of its own landed on e
      dash(mx, my)            space or shift, with charges or not, in place of
-                 the game's dash: true when it took the press
+                 the game's dash: true when it took the press, which is then
+                 not handed in again until the key is let go (in a match too)
      hurt(dmg, opts)         a blow about to land, past the game's i-frames:
                  true takes it whole, a number is what lands instead
      slow()      the room's clock, 0 to 1, while it is slowing it (the hull never is)

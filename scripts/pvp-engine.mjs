@@ -1918,6 +1918,25 @@ section('practice for the story fight: a hidden pilot\'s holder against a bot, a
   await flush(); await run(P2, 60 * 8);
   ok(P2.run('!!RUN.pvp && RUN.pvp.story === false && RUN.pvp.storyFrom === 1'), 'without it: no story', P2.run('JSON.stringify(RUN.pvp && [RUN.pvp.story, RUN.pvp.storyFrom])'));
   ok(P2.run('JSON.stringify(PVP.duelRule(pilotP(0), "take"))') === P2.run('JSON.stringify((CHAR().duel && CHAR().duel.take) || {})'), 'and its duel\'s own rules');
+
+  /* Space, to a hidden pilot's own blink (OUTSIDE PILOTS: dash), is heard once a press. A match
+     plays each step's record some steps after the keys were read, so it cannot let go of a held
+     key as the game does: a tap reached the hook several steps running, and a held key was taken
+     again as soon as the blink's own cooldown ran out under it. */
+  P2.run(`globalThis.__took = 0; { const h = OUTSIDE.by.get('x0'), was = h.dash;
+    h.dash = function () { const r = was.apply(this, arguments); if (r === true) __took++; return r; }; }
+    globalThis.__down = []; PVP.botMatch.human = rec => {
+      if (state === 'levelup' && offers.length && LS.hi % 30 === 0) handleKey('1');
+      rec.dash = __down.some(([a, b]) => LS.hi + 1 >= a && LS.hi + 1 < b); };`);
+  // in the fight, with no cut-in of its own on the screen (a cut-in holds the dash, as it should)
+  for (let i = 0; i < 40 && !P2.run('RUN.pvp.phase === "fight" && !pilotDo(0, () => outsideCut())'); i++) await run(P2, 30);
+  P2.run('__down.push([LS.hi + 2, LS.hi + 2 + 60])');
+  await run(P2, 90);
+  const held = P2.run('__took');
+  P2.run('__down.push([LS.hi + 2, LS.hi + 2 + 6])');
+  await run(P2, 30);
+  ok(P2.run('RUN.pvp.phase') === 'fight' && held === 1 && P2.run('__took') === 2,
+     'space held a second: one blink, though the blink\'s cooldown ran out under it; let go and tapped: the next', [P2.run('RUN.pvp.phase'), held, P2.run('__took')]);
 }
 
 section('a hidden pilot\'s own shots in a duel (shots()): a graze to VOIDRUNNER, seen by a bot, stopped by a parry or a counter; and its strike inside its own cut-in lands');

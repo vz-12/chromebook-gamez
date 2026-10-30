@@ -1441,6 +1441,26 @@ was there already; this is the same against a person.
   fall just short at random (17/30 once); it passed on the next runs and is
   untouched here.
 
+### A hidden pilot's dash in a match: one press, heard once (user, 30 Oct)
+
+A hidden pilot's blink that answers a second press at once (out, then back
+inside its own cooldown) never moved it in a match, though it did in the game.
+
+- **Why:** the game lets go of a dash key the moment a dash takes it
+  (`inputDashTaken`), so a press reaches the `dash` hook once. A match cannot:
+  each step's record was read off the keys a few steps before it plays, so a
+  tap of space reached the hook several steps running, and the second of them
+  was taken as the second press. A held key was also taken again as soon as
+  the blink's own cooldown ran out under it.
+- **Now:** once the hook takes a press, the pilot does not hand it in again
+  until a step where the key is up (`P.oxDashDown`, kept in snapshots like the
+  rest of a pilot). In the game nothing changes: the key is already up the next
+  step. The kit was fixed on its own side too (the vault), so either alone holds.
+- **Tested:** `npm run test:pvp`, engine part 428: the test pilot holds space a
+  second in a bot match and blinks once, though its cooldown ran out under it;
+  let go and tapped, it blinks again. Without the fix: twice, then a third.
+  `test:outside` 84, lockstep green.
+
 ## The shared data (D1)
 
 Tables are made on first use (`CREATE TABLE IF NOT EXISTS`), like
