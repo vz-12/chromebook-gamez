@@ -88979,7 +88979,7 @@ const Live = {
     Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
     if (!d) return;
     Live.above = d.above === true;
-    Ending.heard(d.burn);        // a challenge lost: its movie (THE ENDING)
+    Ending.heard(d.burn, 'lost') || Ending.heard(d.fell, 'won');   // a challenge decided: its movie (THE ENDING)
     const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
     const was = Live.on;
     Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
@@ -89083,11 +89083,13 @@ function drawLiveLine() {
 /* ===========================================================================
    THE ENDING: a movie every game plays once, the moment the world ends
 
-   A challenge lost by the account it was sent to (pvp/src/challenge.js,
-   filmOf) can have a movie named for it. Its module and its voice are kept
-   in the vault and nowhere else, and GET /api/film (src/film.js) hands them
-   out only from that moment. /api/live says when (burn: the moment it was
-   decided), and this browser plays it once for that moment (ENDING_SEEN).
+   A challenge decided for the account it was sent to (pvp/src/challenge.js,
+   filmOf) can have a movie named for each way it can go: lost, and won.
+   Their modules and voices are kept in the vault and nowhere else, and
+   GET /api/film (src/film.js) hands out the one for the way it went, only
+   from that moment. /api/live says when (burn: the moment it was decided
+   lost; fell: won), and this browser plays it once for that moment
+   (ENDING_SEEN).
 
    It cuts in wherever the game is: over the menu, or over a run, which just
    stops where it is (the frame is the movie's, as it is INTRO's). A run in
@@ -89103,35 +89105,39 @@ function drawLiveLine() {
      draw(t, s)   the frame at t seconds: s = { ctx, W, H, dt, shot, k }, k
                how far through that shot it is (0 to 1)
    A draw that throws ends it there. Its voice keeps its time where it plays.
-   After it, after(): where the world's end goes next, still to come.
+   After it, after(way): where each ending goes next, still to come.
 
    On localhost only, ?ending=dev plays /api/film at once, every load, over
    whatever is up and whatever /api/live says: for drawing the movie against
    the game itself. The local vault has it (`npm run vault -- put ... --local`,
-   then `npm run challenge -- film` and `-- decide <pilot> lost`, --local).
+   then `npm run challenge -- film` and `-- decide <pilot> lost`, --local; or
+   `-- film ... --won` and `-- decide <pilot> won` for the other movie).
    ========================================================================= */
 const ENDING_URL = '/api/film';
 const ENDING_SEEN = 'voidrunner_ending_seen';
 const Ending = {
   on: false, t: 0,
-  burn: 0,                     // the moment the challenge was lost, as /api/live said it; -1 for ?ending=dev
-  state: 'none',               // none, loading, ready, failed, seen: this burn's movie
+  at: 0,                       // the moment the challenge was decided, as /api/live said it; -1 for ?ending=dev
+  way: null,                   // which way it went: 'lost' or 'won' (null for ?ending=dev)
+  state: 'none',               // none, loading, ready, failed, seen: that moment's movie
   def: null, voice: null, gain: null,
   boot() {
     let q = null;
     try { q = new URLSearchParams(location.search); } catch (e) { return; }
     if (!q || q.get('ending') !== 'dev' || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
-    Ending.burn = -1;
+    Ending.at = -1;
     Ending.load(ENDING_URL, ENDING_URL + '?voice=1');
   },
-  // what /api/live said (Live.ask): a moment it has not played for here, fetched
-  heard(burn) {
-    if (!Number.isFinite(burn) || burn <= 0 || burn === Ending.burn) return;
-    Ending.burn = burn;
+  // what /api/live said (Live.ask): a moment it has not played for here, fetched. Whether there was one at all
+  heard(at, way) {
+    if (!Number.isFinite(at) || at <= 0) return false;
+    if (at === Ending.at) return true;
+    Ending.at = at; Ending.way = way;
     let seen = '';
     try { seen = localStorage.getItem(ENDING_SEEN) || ''; } catch (e) { /* no storage: it plays once a load */ }
-    if (seen === String(burn)) { Ending.state = 'seen'; return; }
+    if (seen === String(at)) { Ending.state = 'seen'; return true; }
     Ending.load(ENDING_URL, ENDING_URL + '?voice=1');
+    return true;
   },
   async load(url, voiceUrl) {
     Ending.state = 'loading';
@@ -89195,15 +89201,16 @@ const Ending = {
   end() {
     Ending.on = false;
     Ending.state = 'seen';
-    if (Ending.burn > 0) { try { localStorage.setItem(ENDING_SEEN, String(Ending.burn)); } catch (e) { /* plays again next load */ } }
+    if (Ending.at > 0) { try { localStorage.setItem(ENDING_SEEN, String(Ending.at)); } catch (e) { /* plays again next load */ } }
     if (Ending.voice) Ending.voice.pause();
     const A = Audio_;
     if (A.master && Ending.gain !== null) A.master.gain.setTargetAtTime(Ending.gain, A.ac.currentTime, 0.4);
     Ending.gain = null;
     uiArm = 0.4;                // a key still down from it lands on nothing
-    Ending.after();
+    Ending.after(Ending.way);
   },
-  after() {}                    // the world's end: the lockout and the second game's door, still to come
+  // where it goes next, still to come: lost, the lockout and the second game's door; won, what opens above
+  after(way) {}
 };
 
 /* ===========================================================================

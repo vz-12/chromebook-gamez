@@ -1775,6 +1775,30 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok((await filmGet()).status === 404 && !('burn' in (await gameLive()).d), 'taken back: gone again');
   tool(filmSql('x7', null));
   ok(row().film === null && row().film_voice === null, 'and no movie named (film none)');
+  // and the movie if it is won (film --won): handed out once it is won, every game told so by `fell`
+  const wonText = 'VR.film({ length: 2, shots: [], lines: [], draw() {} });', wonVoice = randomBytes(2000);
+  tool(putSql('x7-fall', Buffer.from(wonText)).sql);
+  tool(putSql('x7-fall-voice', wonVoice).sql);
+  tool(filmSql('x7', 'x7-fall', 'x7-fall-voice', true));
+  ok(row().won_film === 'x7-fall' && row().won_voice === 'x7-fall-voice' && row().film === null, 'the movie if it is won, named on its own (film --won)', row());
+  ok((await filmGet()).status === 404 && !('fell' in (await gameLive()).d), 'not decided: nothing handed out, and no game told');
+  tool(decideSql('x7', 'lost', 2345678));
+  const gn = (await gameLive()).d;
+  ok((await filmGet()).status === 404 && !('fell' in gn) && !('burn' in gn), 'lost, with no movie named for losing: nothing either', gn);
+  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', 3456789));
+  const gw = (await gameLive()).d;
+  ok(gw.fell === 3456789 && !('burn' in gw), 'won: every game told, by fell, with the moment it was decided', gw);
+  const wm = await filmGet(), wv = await filmGet('?voice=1');
+  ok(wm.status === 200 && /javascript/.test(wm.type) && wm.body.toString('utf8') === wonText && wv.status === 200 && wv.body.equals(wonVoice),
+     'its movie and its voice, to anybody now', [wm.status, wv.status]);
+  tool(filmSql('x7', 'x7-film', null));
+  ok((await filmGet()).body.toString('utf8') === wonText, 'a movie for losing named beside it changes nothing: it was won');
+  tool(filmSql('x7', null));
+  tool(decideSql('x7', 'none'));
+  ok((await filmGet()).status === 404 && !('fell' in (await gameLive()).d), 'taken back: gone again');
+  ok(tool(challengesSql()).find(x => x.pilot === 'x7').won_film === 'x7-fall', 'the tool lists it');
+  tool(filmSql('x7', null, null, true));
+  ok(row().won_film === null && row().won_voice === null, 'and none named (film none --won)');
 
   /* THE PARTS (npm run challenge -- parts): what a won challenge leaves the
      account it was sent to, in their lobby alone, kept. Nothing uses them

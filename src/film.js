@@ -1,12 +1,13 @@
 /* ===========================================================================
    GET /api/film — THE ENDING's movie (index.html, ENDING)
 
-   Once a challenge has been lost by the account it was sent to, and only
-   from then (../pvp/src/challenge.js, filmOf): its module, a vault entry's
-   text, which every game runs and plays once; with ?voice, its voice, an
-   mp3. Before then, and for anything else, the vault's own 404: nothing
-   says there will be one. The entries are named by hand, with
-   `npm run challenge -- film <pilot> <module> [voice]`.
+   Once a challenge has been decided for the account it was sent to, lost
+   or won, and only from then (../pvp/src/challenge.js, filmOf): the movie
+   named for the way it went, its module a vault entry's text, which every
+   game runs and plays once; with ?voice, its voice, an mp3. Before then,
+   and for anything else, the vault's own 404: nothing says there will be
+   one. The entries are named by hand, with
+   `npm run challenge -- film <pilot> <module> [voice] [--won]`.
    ========================================================================= */
 import { filmOf } from '../pvp/src/challenge.js';
 import { vaultText, vaultBytes, nothing } from './vault.js';

@@ -39,10 +39,10 @@ export const dateSql = (pilot, due) =>
    vault entry of its own, JSON { t, x, as, named }, or 'none'. */
 export const announceSql = (pilot, words) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET announce = ${words == null ? 'NULL' : q(checkWords(words))} WHERE pilot = ${q(checkPilot(pilot))};`;
-// THE ENDING's movie, if it is lost: its module's vault entry and its voice's (or none: no movie)
-export const filmSql = (pilot, film, voice) =>
-  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET film = ${film == null ? 'NULL' : q(checkWords(film))}, ` +
-  `film_voice = ${film == null || voice == null ? 'NULL' : q(checkWords(voice))} WHERE pilot = ${q(checkPilot(pilot))};`;
+// THE ENDING's movie, if it is lost (or, won true, if it is won): its module's vault entry and its voice's (or none: no movie)
+export const filmSql = (pilot, film, voice, won = false) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET ${won ? 'won_film' : 'film'} = ${film == null ? 'NULL' : q(checkWords(film))}, ` +
+  `${won ? 'won_voice' : 'film_voice'} = ${film == null || voice == null ? 'NULL' : q(checkWords(voice))} WHERE pilot = ${q(checkPilot(pilot))};`;
 /* THE PARTS, if it is won: the vault entry of their words, JSON { t, x,
    done }, or none (nothing left the winner); and a use taken back by hand,
    so the winner chooses again. */
@@ -81,5 +81,6 @@ export const challengesSql = () =>
   `COALESCE(c.announce, '-') AS announce, COALESCE(c.match, '-') AS match, ${day('c.started')} AS started, ${day('c.ended')} AS ended, ` +
   `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm, ` +
   `COALESCE(c.film, '-') AS film, COALESCE(c.film_voice, '-') AS film_voice, ` +
+  `COALESCE(c.won_film, '-') AS won_film, COALESCE(c.won_voice, '-') AS won_voice, ` +
   `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on ` +
   `FROM pvp_challenges c LEFT JOIN accounts r ON r.id = c.reached_by LEFT JOIN accounts t ON t.id = c.target ORDER BY c.armed;`;

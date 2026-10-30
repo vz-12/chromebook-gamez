@@ -4,7 +4,7 @@
    THE ENDING; src/film.js and pvp/src/challenge.js are test:pvp's)
    The game, booted in Node with /api/live and /api/film answered here:
      secrecy     nothing asks for the movie before /api/live says burn
-     once        told burn, the game fetches it, runs it, and it takes the
+     once        told burn (lost) or fell (won), the game fetches it, runs it, and it takes the
                  screen: shot by shot, what its voice says shown as it is
                  said, then it ends and is noted, and never again for that
                  moment in this browser (another moment plays again)
@@ -97,6 +97,22 @@ section('once: told, it fetches it and it takes the screen');
   ok(g2.win.__asked.length === 1 && g2.run('Ending.on'), 'another moment plays again');
 }
 
+section('won: told fell instead, the same, and what follows hears which way it went');
+{
+  const g8 = boot();
+  g8.run(SETUP + ' globalThis.__after = []; Ending.after = w => __after.push(w);');
+  await answer(g8, { live: null, every: 900, above: false, fell: 4321 });
+  ok(g8.win.__asked.join() === '/api/film' && g8.run('Ending.on') === true && g8.run('Ending.way') === 'won', 'told fell: fetched once, and on', [g8.win.__asked, g8.run('Ending.state')]);
+  play(g8, 3);
+  ok(!g8.run('Ending.on') && g8.run('localStorage.getItem(ENDING_SEEN)') === '4321' && g8.run('JSON.stringify(__after)') === '["won"]',
+     'ended and noted for that moment, and after() told it was won', g8.run('JSON.stringify(__after)'));
+  const g9 = boot();
+  g9.run(SETUP + ' globalThis.__after = []; Ending.after = w => __after.push(w);');
+  await answer(g9, { live: null, every: 900, above: false, burn: 8765 });
+  play(g9, 3);
+  ok(g9.run('JSON.stringify(__after)') === '["lost"]', 'and a lost one tells it lost', g9.run('JSON.stringify(__after)'));
+}
+
 section('co-op: a run in step with another machine waits for its end');
 {
   const g3 = boot();
@@ -134,7 +150,7 @@ section('failing: quietly, and the game goes on');
   play(g6, 0.2);
   ok(!g6.run('Ending.on') && g6.run('state') === 'menu', 'one that throws: ended there');
   g6.win.__film = 'VR.film({ length: 0 })';
-  g6.run('Ending.burn = 0');
+  g6.run('Ending.at = 0');
   await answer(g6, { live: null, every: 900, above: false, burn: 11 });
   ok(g6.run('Ending.state') === 'failed', 'and one that is not a movie at all');
 }
@@ -145,7 +161,7 @@ section('dev: ?ending=dev on localhost plays /api/film at once, every load');
   g7.run(SETUP);
   await flush();
   g7.run('Ending.tick()');
-  ok(g7.win.__asked.join() === '/api/film' && g7.run('Ending.on') && g7.run('Ending.burn') === -1, 'fetched and on', g7.win.__asked);
+  ok(g7.win.__asked.join() === '/api/film' && g7.run('Ending.on') && g7.run('Ending.at') === -1, 'fetched and on', g7.win.__asked);
   play(g7, 3);
   ok(!g7.run('Ending.on') && g7.run('localStorage.getItem(ENDING_SEEN)') === null, 'and nothing noted: it plays every time');
 }

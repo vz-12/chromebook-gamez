@@ -15,11 +15,12 @@
      announce <pilot> <words> what the game's menu says while its match is
                               on air (src/live.js), from a vault entry of
                               its own, or none
-     film <pilot> <module> [voice]
+     film <pilot> <module> [voice] [--won]
                               THE ENDING: the movie every game plays once if
                               it is lost (index.html, ENDING; src/film.js),
                               its module's vault entry and its voice's (an
-                              mp3), or none. Nothing hands either out before
+                              mp3), or none; with --won, the movie if it is
+                              won instead. Nothing hands either out before
      parts <pilot> <words>    THE PARTS: what it leaves the account it was
                               sent to if they win it, from a vault entry of
                               its own ({ "t", "x", "done" }), or none
@@ -56,7 +57,7 @@ import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, fil
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
 const opt = f => { const i = args.indexOf(f); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v; };
-const REMOTE = flag('--remote'), LOCAL = flag('--local'), PERSIST = opt('--persist-to');
+const REMOTE = flag('--remote'), LOCAL = flag('--local'), WON = flag('--won'), PERSIST = opt('--persist-to');
 const die = m => { console.error('challenge: ' + m); process.exit(1); };
 const where = REMOTE ? ' (live)' : ' (local)';
 
@@ -128,15 +129,16 @@ try {
       break;
     }
     case 'film': {
-      if (!a1 || !a2) die('film <pilot> <module | none> [voice]');
+      if (!a1 || !a2) die('film <pilot> <module | none> [voice] [--won]');
       const film = a2 === 'none' ? null : a2, voice = film ? (args[3] || null) : null;
-      const sql = filmSql(a1, film, voice);
+      const sql = filmSql(a1, film, voice, WON);
       if (!live()) show(sql);
       const want = [film, voice].filter(Boolean), held = want.length ? run(inVaultSql(want)).map(r => r.id) : [];
       for (const id of want) if (!held.includes(id)) die('the vault' + where + ' holds no ' + id + ': put it first');
       columns();
       run(sql);
-      console.log(a1 + where + ': ' + (film ? 'its ending, the movie in ' + film + (voice ? ', said from ' + voice : ', silent') : 'no ending'));
+      const way = WON ? ' if it is won' : ' if it is lost';
+      console.log(a1 + where + ': ' + (film ? 'its ending' + way + ', the movie in ' + film + (voice ? ', said from ' + voice : ', silent') : 'no ending' + way));
       break;
     }
     case 'parts': {
@@ -195,11 +197,12 @@ try {
                      'announced ' + r.announce, 'match ' + r.match, 'on ' + r.started, 'off ' + r.ended,
                      'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm,
                      'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : ''),
+                     'won film ' + r.won_film + (r.won_voice !== '-' ? ' (' + r.won_voice + ')' : ''),
                      'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : '')].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] | ' +
+      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
           'parts <pilot> <words | none> | unuse <pilot> | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }

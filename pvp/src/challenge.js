@@ -94,6 +94,8 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      calm        INTEGER,                  -- when the hunt was held, by hand (FROM ABOVE); NULL while it is not
      film        TEXT,                     -- the vault entry of the movie every game plays if it is lost (THE ENDING)
      film_voice  TEXT,                     -- and of its voice, an mp3
+     won_film    TEXT,                     -- and the movie every game plays if it is won instead
+     won_voice   TEXT,                     -- and its voice
      parts       TEXT,                     -- the vault entry of THE PARTS' words, left the account it was sent to if it is won
      parts_used  INTEGER,                  -- when they were used, once and for good
      parts_use   TEXT,                     -- on what
@@ -102,7 +104,8 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
-               ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT']];
+               ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
+               ['won_film', 'TEXT'], ['won_voice', 'TEXT']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -241,7 +244,7 @@ export async function challengeEnded(db, match, now = Date.now(), winner = null)
 /* For the game's public GET /api/live (src/live.js), which never makes
    PvP's tables: what is on now, and how long before it is worth asking
    again.
-     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every, above }
+     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every, above, burn?, fell? }
    `above` is whether the game's runs are hunted now (FROM ABOVE): a
    challenge has been sent, its fight has not been fought out, and the hunt
    is not held.
@@ -253,24 +256,23 @@ export async function challengeEnded(db, match, now = Date.now(), winner = null)
    words: the match is still on, under a plain title. */
 export async function liveNow(db, now = Date.now()) {
   let rows = [];
-  const sent = cols => db.prepare(
-    `SELECT c.pilot, c.match, c.started, c.ended, c.due, c.target, c.announce${cols}, a.display AS them
-       FROM pvp_challenges c LEFT JOIN accounts a ON a.id = c.target WHERE c.target IS NOT NULL`).all();
   try {
-    rows = (await sent(', c.decided, c.calm, c.outcome, c.film')).results || [];
+    /* Whatever columns the table has: one from before the newer ones (PvP's
+       Worker adds them on its first use; the game's never does) reads them as
+       missing, and nothing in it was ever decided, held or filmed. */
+    rows = (await db.prepare(
+      `SELECT c.*, a.display AS them FROM pvp_challenges c LEFT JOIN accounts a ON a.id = c.target WHERE c.target IS NOT NULL`).all()).results || [];
   } catch (e) {
-    /* A table from before those two columns (PvP's Worker adds them on its
-       first use; the game's never does): nothing in it was ever decided or
-       held, so its rows read true without them. */
-    try { rows = (await sent('')).results || []; }
-    catch (e2) { return { live: null, every: LIVE.IDLE, above: false }; }   // no table yet (or no columns): nothing has ever been on
+    return { live: null, every: LIVE.IDLE, above: false };   // no table yet: nothing has ever been on
   }
   const above = rows.some(r => !r.decided && !r.calm);
-  /* THE ENDING: a challenge lost, with a movie named for it (filmOf below):
-     every game plays it once, told so by `burn`, the moment it was decided.
-     Missing until then, so nothing says there is one. */
-  const lost = rows.filter(r => r.outcome === 'lost' && r.decided && r.film).sort((a, b) => a.decided - b.decided)[0];
-  const burn = lost ? { burn: lost.decided } : {};
+  /* THE ENDING: a challenge decided, with a movie named for the way it went
+     (filmOf below): every game plays it once, told so the moment it was
+     decided, by `burn` if it was lost and by `fell` if it was won. Missing
+     until then, so nothing says there is one. */
+  const first = (way, col) => rows.filter(r => r.outcome === way && r.decided && r[col]).sort((a, b) => a.decided - b.decided)[0];
+  const lost = first('lost', 'film'), won = first('won', 'won_film');
+  const ending = Object.assign(lost ? { burn: lost.decided } : {}, won ? { fell: won.decided } : {});
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
     if (r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
@@ -282,7 +284,7 @@ export async function liveNow(db, now = Date.now()) {
     const wait = (r.due - LIVE.SOON - now) / 1000;
     if (now < r.due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
   }
-  if (!on) return Object.assign({ live: null, every, above }, burn);
+  if (!on) return Object.assign({ live: null, every, above }, ending);
   let w = null;
   try {
     const got = on.announce ? await vaultText(db, on.announce) : null;
@@ -296,18 +298,21 @@ export async function liveNow(db, now = Date.now()) {
     live: { match: on.match, since: on.started, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
             names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
     every: LIVE.ASK, above
-  }, burn);
+  }, ending);
 }
 
 /* THE ENDING's movie (index.html, ENDING; src/film.js): the vault entries
-   `npm run challenge -- film` named for a challenge, once that challenge is
-   lost by the account it was sent to, and only from then. */
+   `npm run challenge -- film` named for a challenge and the way it went,
+   once it has gone that way for the account it was sent to, and only from
+   then: { film, voice, at, way } (way: 'lost' or 'won'). */
 export async function filmOf(db) {
   await ensureChallenges(db);
   const row = await db.prepare(
-    `SELECT film, film_voice, decided FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL AND film IS NOT NULL
+    `SELECT outcome, decided, CASE outcome WHEN 'won' THEN won_film ELSE film END AS f,
+            CASE outcome WHEN 'won' THEN won_voice ELSE film_voice END AS v
+       FROM pvp_challenges WHERE decided IS NOT NULL AND ((outcome = 'lost' AND film IS NOT NULL) OR (outcome = 'won' AND won_film IS NOT NULL))
       ORDER BY decided LIMIT 1`).first();
-  return row ? { film: row.film, voice: row.film_voice || null, at: row.decided } : null;
+  return row ? { film: row.f, voice: row.v || null, at: row.decided, way: row.outcome } : null;
 }
 
 /* -------------------------------- the parts ------------------------------ */
