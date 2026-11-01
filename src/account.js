@@ -21,7 +21,7 @@
    ========================================================================= */
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
-         publicAccount, SESSION_MS, MAX_SESSIONS, SITES } from './auth.js';
+         publicAccount, SESSION_MS, MAX_SESSIONS, SITES, ADMIN_SITES } from './auth.js';
 import { vaultList } from './vault.js';
 import { PILOTS } from '../pvp/src/rules.js';
 import { challengeWaits } from '../pvp/src/challenge.js';
@@ -339,6 +339,7 @@ const OPS = {
     if (!s) return no('signed out', 401);
     const to = handoffTarget(req, b.to);
     if (!to) return no('bad destination', 400);
+    if (ADMIN_SITES.includes(to) && !s.account.perks.includes('dev')) return no('bad destination', 400);   // the lab: admins only
     const code = newToken(), now = Date.now();
     await env.DB.batch([
       env.DB.prepare('DELETE FROM handoffs WHERE expires <= ?1').bind(now),
@@ -536,13 +537,14 @@ export default async (req, env) => {
   /* The Turnstile widget's public key goes with it, for the sign-up form, and
      for an account the vault holds something for, what that is (vault.js);
      for one PvP has sent a challenge to, only that it has, for the menu's
-     PVP door (../pvp/src/challenge.js). Each field is missing for everybody
-     else. */
+     PVP door (../pvp/src/challenge.js); for an admin's, that it is one, for
+     the menu's LAB door. Each field is missing for everybody else. */
   if (req.method === 'GET') {
     const vault = s ? await vaultList(env.DB, s.account) : null;
     const challenge = s ? await challengeWaits(env.DB, s.account.id) : false;
+    const admin = !!s && s.account.perks.includes('dev');
     return renew(reply(Object.assign({ account: s ? publicAccount(s.account) : null, turnstile: turnstileKey(env) },
-                                     vault ? { vault } : {}, challenge ? { challenge: true } : {})));
+                                     vault ? { vault } : {}, challenge ? { challenge: true } : {}, admin ? { admin: true } : {})));
   }
   if (req.method !== 'POST') return no('method not allowed', 405);
   const { v: b, err } = await bodyOf(req, 4096);

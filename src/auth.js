@@ -32,10 +32,14 @@ const ORIGINS = ['https://voidrunner.online', 'https://www.voidrunner.online'];
 
 /* Every address a signed-in player can be handed to (account.js, hand-offs):
    the game, the game's school address (filters that block .online let
-   workers.dev through), and PvP. Not www: that address only ever forwards
-   to the bare one, before anything runs. */
+   workers.dev through), PvP, and the lab. Not www: that address only ever
+   forwards to the bare one, before anything runs. */
 export const SITES = ['https://voidrunner.online', 'https://voidrunner.play101.workers.dev',
-                      'https://voidrunner-pvp.play101.workers.dev'];
+                      'https://voidrunner-pvp.play101.workers.dev', 'https://voidrunner-lab.play101.workers.dev'];
+/* Of those, the ones only an admin (an account with the 'dev' perk) is
+   handed to: the lab, the admins' test site, which lets nobody else in
+   either. */
+export const ADMIN_SITES = ['https://voidrunner-lab.play101.workers.dev'];
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
