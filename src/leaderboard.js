@@ -121,6 +121,7 @@ function perksGive(list) {
     if (v === 'dev') { skins.push(...ALL_SKINS); perks.push(...ALL_PERKS); }
     else if (v.startsWith('skin:')) skins.push(v.slice(5));
     else if (v.startsWith('vault:')) continue;   // what the vault hands this account (vault.js), not an award
+    else if (v === 'back') continue;             // came back through THE DOOR (account.js), not an award
     else perks.push(v);
   }
   return { skins, perks };

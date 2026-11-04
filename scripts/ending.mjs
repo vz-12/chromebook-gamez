@@ -210,6 +210,16 @@ section('the door: a lost world sends its players through it, until it is mended
   ok(card().querySelector('.in').hidden === true && /Go through, and your account goes with you/.test(card().querySelector('.x').textContent),
      'the account arrives: no SIGN IN FIRST, and it says the account goes with them', card().querySelector('.x').textContent);
   ok(card().querySelector('.stay').hidden === false, "and an admin's PLAY ANYWAY shows");
+  // an account that came back through the door is past it: no card, the game is played
+  const g14 = boot(store(g10));
+  g14.run(SETUP);
+  await answer(g14, { live: null, every: 900, above: false, burn: 31, door: DOOR });
+  g14.run("Account.me = { name: 'x', display: 'X' }; Account.back = false; Door.tick();");
+  ok(g14.run('Door.up()') && g14.run('Door.shut()'), 'signed in, not back: the card');
+  g14.run('Account.back = true; Door.tick();');
+  ok(!g14.run('Door.up()') && !g14.run('Door.shut()'), 'back through it: the card goes, and the game is played');
+  g14.run('Account.me = null; Door.tick();');
+  ok(g14.run('Door.shut()'), 'signed out again: shut (nobody is known to be back)');
   // not an address: no door
   const g12 = boot();
   g12.run(SETUP);

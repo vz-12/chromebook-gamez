@@ -165,17 +165,48 @@ section('once per broadcast, per browser');
 
 section('in a run');
 {
+  // a run alone: paused, the card over it; KEEP PLAYING takes it up again
   const g3 = boot();
   g3.run(SETUP + ' resetGame(); state = "play";');
   await answer(g3, ON(M1));
-  ok(g3.run('state') === 'play' && !shown(g3) && g3.run('!!Live.line'), 'going on air mid-run: one line, and no pause', g3.run('state'));
-  let threw = null;
-  try { for (let i = 0; i < 60; i++) g3.run('update(1 / 60); Live.tick(); render();'); } catch (e) { threw = e; }
-  ok(!threw && g3.run('state') === 'play', 'drawn over a second of the run, which goes on', String(threw));
-  g3.run('Live.line.t = uiTime - 7; render();');
-  ok(!g3.run('Live.line'), 'and gone after a few seconds');
+  ok(g3.run('state') === 'pause' && shown(g3), 'going on air mid-run: the run paused, and the card over it', g3.run('state'));
+  ok(card(g3).querySelector('.no').textContent === 'KEEP PLAYING', 'its second button takes the run up again');
+  for (let i = 0; i < 5; i++) frame(g3);
+  ok(shown(g3) && g3.run('state') === 'pause', 'and it stays until it is answered');
+  ok(press(card(g3), 'keydown', { key: 'p' }) && g3.run('state') === 'pause' && shown(g3), 'keys over it are its own (P does not unpause under it)');
+  press(card(g3).querySelector('.no'), 'click');
+  ok(!shown(g3) && g3.run('state') === 'play', 'KEEP PLAYING: the run goes on where it was', g3.run('state'));
+  for (let i = 0; i < 5; i++) frame(g3);
+  ok(!shown(g3) && g3.run('state') === 'play', 'and the card stays away');
   g3.run('state = "menu"'); frame(g3);
-  ok(shown(g3), 'the card waits for the menu');
+  ok(!shown(g3), 'seen: not again at the menu, only the strip');
+  // WATCH LIVE from a run: the fight in a tab of its own, the run left paused
+  const g4 = boot();
+  g4.run(SETUP + ' resetGame(); state = "play";');
+  await answer(g4, ON(M2));
+  press(card(g4).querySelector('.go'), 'click');
+  ok(JSON.stringify(g4.win.__opened) === JSON.stringify([g4.run('PVP_ORIGIN') + '/play/?watch=' + M2, '_blank', 'noopener']) && !shown(g4) && g4.run('state') === 'pause',
+     'WATCH LIVE mid-run: the fight in its own tab, and the run waits paused', g4.run('state'));
+  for (let i = 0; i < 5; i++) frame(g4);
+  ok(!shown(g4) && g4.run('state') === 'pause', 'and nothing comes back over it');
+  // off air while it's up: the card goes, the run stays paused for them to take up
+  const g6 = boot();
+  g6.run(SETUP + ' resetGame(); state = "play";');
+  await answer(g6, ON(M1));
+  await answer(g6, { live: null, every: 900 });
+  ok(!shown(g6) && g6.run('state') === 'pause' && !g6.run('Live.hold'), 'off air while it was up: the card goes; the run is still theirs, paused');
+  // a run in step with another machine can't stop for one of them: one line, and it goes on
+  const g5 = boot();
+  g5.run(SETUP + ' resetGame(); state = "play"; LS.on = true;');
+  await answer(g5, ON(M1));
+  ok(g5.run('state') === 'play' && !shown(g5) && g5.run('!!Live.line'), 'in co-op: one line, and no pause', g5.run('state'));
+  let threw = null;
+  try { for (let i = 0; i < 60; i++) g5.run('Live.tick(); render();'); } catch (e) { threw = e; }
+  ok(!threw && g5.run('state') === 'play', 'drawn over a second of the run, which goes on', String(threw));
+  g5.run('Live.line.t = uiTime - 7; render();');
+  ok(!g5.run('Live.line'), 'and gone after a few seconds');
+  g5.run('LS.on = false; state = "menu"'); frame(g5);
+  ok(shown(g5), 'the card waits for the menu');
 }
 
 section('off air');

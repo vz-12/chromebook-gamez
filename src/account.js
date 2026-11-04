@@ -551,8 +551,12 @@ export default async (req, env) => {
     const vault = s ? await vaultList(env.DB, s.account) : null;
     const challenge = s ? await challengeWaits(env.DB, s.account.id) : false;
     const admin = !!s && s.account.perks.includes('dev');
+    /* `back`: the account came back through THE DOOR (index.html), the
+       perk the other side gives it once it is done there: this game's menu
+       is not shut to it, whatever the door. */
+    const back = !!s && s.account.perks.includes('back');
     return renew(reply(Object.assign({ account: s ? publicAccount(s.account) : null, turnstile: turnstileKey(env) },
-                                     vault ? { vault } : {}, challenge ? { challenge: true } : {}, admin ? { admin: true } : {})));
+                                     vault ? { vault } : {}, challenge ? { challenge: true } : {}, admin ? { admin: true } : {}, back ? { back: true } : {})));
   }
   if (req.method !== 'POST') return no('method not allowed', 405);
   const { v: b, err } = await bodyOf(req, 4096);
