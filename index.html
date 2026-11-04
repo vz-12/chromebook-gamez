@@ -89198,6 +89198,7 @@ const Door = {
   mended: 0,                   // when the world was mended (/api/live), else 0
   el: null, busy: false,
   stay: false,                 // an admin chose to stay, for this page
+  painted: '',                 // who the card was last worded for (paint): signed in, and an admin
 
   off: () => !!PVP || BETA || location.protocol === 'file:',
   shut: () => !Door.off() && !!Door.at && !Door.mended,
@@ -89213,6 +89214,8 @@ const Door = {
                  Ending.state !== 'loading' && Ending.state !== 'ready' && !AcctUI.on;
     if (want && !Door.up()) Door.show();
     else if (!want && Door.up()) Door.hide();
+    // the account is often still loading when the card first goes up: worded again once it is known
+    if (Door.up() && Door.painted !== Door.who()) Door.paint();
   },
   build() {
     const st = document.createElement('style');
@@ -89233,14 +89236,20 @@ const Door = {
     document.body.appendChild(el);
     Door.el = el;
   },
-  show() {
-    if (!Door.el) Door.build();
+  who: () => { const signed = !Account.off() && !!Account.me; return (signed ? 'in' : 'out') + (signed && Account.admin ? '+admin' : ''); },
+  // its words and buttons for whoever is here: signed in or not, an admin or not
+  paint() {
     const signed = !Account.off() && !!Account.me;
+    Door.painted = Door.who();
     Door.el.querySelector('.x').textContent = 'VOIDRUNNER can\'t be played until the void is mended.\n' +
       (signed ? 'Go through, and your account goes with you.' : 'Your account goes with you: sign in first, or on the other side.');
-    Door.el.querySelector('.note').textContent = '';
     Door.el.querySelector('.in').hidden = signed || Account.off();
     Door.el.querySelector('.stay').hidden = !(signed && Account.admin);
+  },
+  show() {
+    if (!Door.el) Door.build();
+    Door.paint();
+    Door.el.querySelector('.note').textContent = '';
     Door.el.hidden = false;
     if (Live.up()) Live.hide();
     if (!isTouch) Door.el.querySelector('.go').focus();

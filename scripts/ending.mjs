@@ -198,6 +198,18 @@ section('the door: a lost world sends its players through it, until it is mended
   await g11.run('Door.go()');
   ok(g11.run('__asked2.op') === 'handoff' && g11.run('__asked2.to') === DOOR && g11.run('__hrefs[1]') === DOOR + '/signin#h=' + 'C'.repeat(40) + '&from=' + encodeURIComponent('http://localhost'),
      'signed in: a hand-off code for exactly its address, and the account goes with them', g11.run('__hrefs[1]'));
+  // the account loads after the card is up (it usually does): the card is worded again for it
+  const g13 = boot(store(g10));
+  g13.run(SETUP);
+  await answer(g13, { live: null, every: 900, above: false, burn: 31, door: DOOR });
+  g13.run('Door.tick()');
+  const card = () => g13.win.document.body.children.find(c => c.id === 'door');
+  ok(g13.run('Door.up()') && card().querySelector('.in').hidden === false && /sign in first/.test(card().querySelector('.x').textContent),
+     'up before the account is known: worded for someone signed out');
+  g13.run("Account.me = { name: 'x', display: 'X' }; Account.admin = true; Door.tick();");
+  ok(card().querySelector('.in').hidden === true && /Go through, and your account goes with you/.test(card().querySelector('.x').textContent),
+     'the account arrives: no SIGN IN FIRST, and it says the account goes with them', card().querySelector('.x').textContent);
+  ok(card().querySelector('.stay').hidden === false, "and an admin's PLAY ANYWAY shows");
   // not an address: no door
   const g12 = boot();
   g12.run(SETUP);
