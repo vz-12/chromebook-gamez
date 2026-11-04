@@ -1921,6 +1921,25 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
     v = await look('&from=1400');
     ok(v.d.batches.every(x => x.from + x.n <= 1501) && !v.d.snap, 'one keeping up: up to there, and no further');
     ok(await filmOf(DB) === null, 'the movie still held while it is showing');
+    // a reel: a recording kept in the vault, shown in place of the match's own (the challenge's `reel`)
+    const reelLog = { v: 1, match: 'r'.repeat(32), pilot: 'x7', build: 'b1.x', at: 1, head: { v: 1, reel: true },
+      batches: [0, 60, 120].map(from => ({ from, n: 60, recs: Buffer.alloc(60 * 22, 9).toString('base64'), fps: [] })),
+      snaps: [{ at: 0, epoch: 0, json: '{"reel":0}' }, { at: 120, epoch: 0, json: '{"reel":120}' }], end: { at: 180, t: 1, result: { winner: 0, score: [1, 0] }, left: null }, last: 179 };
+    tool(putSql('x7-reel', Buffer.from(JSON.stringify(reelLog))).sql);
+    tool(`UPDATE pvp_challenges SET reel = 'x7-reel' WHERE pilot = 'x7';`);
+    tool(premiereSql('x7', Date.now() - 1500));
+    v = await look('&v=' + '4'.repeat(16));
+    ok(v.status === 200 && v.d.head && v.d.head.reel === true && v.d.snap && v.d.snap.json === '{"reel":0}' && v.d.last <= 120 && v.d.end === null,
+       'a reel: shown in its place, from its start, as far as the showing has got', [v.status, v.d.head, v.d.snap && v.d.snap.json, v.d.last]);
+    ok(v.d.batches.every(x => x.from + x.n <= v.d.last + 1) && v.d.batches.length >= 1, 'its steps only up to there');
+    tool(premiereSql('x7', Date.now() - 3600e3));
+    v = await look('&from=100');
+    ok(v.d.last === 179 && v.d.end && v.d.end.at === 180 && v.d.batches.length === 2, 'the showing past its end: all of the reel, with its end', [v.d.last, v.d.end]);
+    v = await look('&v=' + '5'.repeat(16));
+    ok(v.d.snap.json === '{"reel":120}', 'and a newcomer then gets its newest snapshot');
+    tool(`UPDATE pvp_challenges SET reel = NULL WHERE pilot = 'x7';`);
+    v = await look('&v=' + '6'.repeat(16));
+    ok(v.d.snap && v.d.snap.at === 2100, 'no reel: the match\'s own recording again, untouched');
     // long after: the whole of it, and told
     tool(premiereSql('x7', Date.now() - 3600e3));
     v = await look('&from=2300');

@@ -120,9 +120,27 @@ export class Broadcast extends Serial {
     return Math.min(VIEW.MOST_MS, VIEW.BASE_MS * Math.max(1, Math.ceil(this.viewers.size / VIEW.PER)));
   }
 
+  /* A reel (watch.js): a broadcast's whole log kept in the vault, as replay=1
+     writes it, shown in place of a match's own. Read into memory once a wake,
+     never written to storage, and nothing feeds it. */
+  async loadReel(id) {
+    if (this.m || this.reelFailed) return;
+    let r = null;
+    try { const got = this.env && this.env.DB ? await vaultText(this.env.DB, id) : null; r = got ? JSON.parse(got.text) : null; }
+    catch (e) { console.error('reel ' + id + ': ' + (e && e.message)); }
+    if (!r || !r.head || !Array.isArray(r.batches) || !Array.isArray(r.snaps)) { this.reelFailed = true; return; }
+    this.head = r.head;
+    this.batches = r.batches;
+    this.snaps = new Map(r.snaps.map((s, k) => [k, s.json]));
+    this.m = { match: r.match, pilot: r.pilot, build: r.build, at: r.at, last: r.last, end: r.end || null, n: r.batches.length,
+               snaps: r.snaps.map(s => ({ at: s.at, epoch: s.epoch, parts: 0, size: s.json.length })), size: 0, reel: id };
+  }
+
   async handle(op, b, now) {
     await this.load();
+    if (op === 'view' && typeof b.reel === 'string' && !this.m) await this.loadReel(b.reel);
     const m = this.m, S = this.ctx.storage;
+    if (m && m.reel && op !== 'view' && op !== 'info') return reply({ error: 'a reel: nothing feeds it' }, 409);
 
     if (op === 'info') return reply({ ok: true, on: !!m, pilot: m ? m.pilot : null });
 

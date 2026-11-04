@@ -102,13 +102,14 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      parts_on    TEXT,                     -- and which of their pilots, where that use takes one
      door        TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
      mended      INTEGER,                  -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
-     premiere    INTEGER                   -- its fight shown at this time, from its recording, if fought ahead of it (revealAt), set by hand
+     premiere    INTEGER,                  -- its fight shown at this time, from its recording, if fought ahead of it (revealAt), set by hand
+     reel        TEXT                      -- and, if set, the vault entry of a recording shown in place of its match's own (watch.js), set by hand
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
                ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
-               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER']];
+               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER'], ['reel', 'TEXT']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';

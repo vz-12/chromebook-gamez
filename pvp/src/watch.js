@@ -128,6 +128,12 @@ async function view(req, env) {
      showing has got (`cut`, in steps), so it plays as though live. */
   const held = await premiereOf(env.DB, match), cut = held ? showStep(held, Date.now()) : null;
   if (cut != null && cut < 0) return reply({ error: 'not on air', every: 5000 }, 404);
+  /* And shown from a recording in its place (the challenge's `reel`, a vault
+     entry: a broadcast's whole log, as replay=1 writes it): a relay of its
+     own, named for it, fills itself from the vault (broadcast.js, reel). */
+  const reel = held && typeof held.reel === 'string' && /^[a-z0-9][a-z0-9-]{0,47}$/.test(held.reel) ? held.reel : null;
+  if (reel) return passOn(await ask(env, 'reel:' + reel, 'view', { from: Number.isInteger(from) ? from : -1, snap: u.searchParams.get('snap') === '1',
+                                                                   v: /^[0-9a-f]{16}$/.test(v) ? v : '', cut, reel }));
   return passOn(await ask(env, match, 'view', { from: Number.isInteger(from) ? from : -1, snap: u.searchParams.get('snap') === '1',
                                                 v: /^[0-9a-f]{16}$/.test(v) ? v : '', ...(cut != null ? { cut } : {}) }));
 }
