@@ -65,6 +65,21 @@ export const decideSql = (pilot, outcome, at = Date.now()) =>
 // the hunt held, by hand, or let go again (FROM ABOVE): the challenge itself is untouched
 export const calmSql = (pilot, on, at = Date.now()) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET calm = ${on ? Math.round(at) : 'NULL'} WHERE pilot = ${q(checkPilot(pilot))};`;
+/* THE DOOR, if it is lost: the address every game sends its players to
+   (an origin, https; or a local wrangler dev's, for trying it), or none;
+   and the world mended by hand, or not (none). */
+export function checkDoor(s) {
+  if (s === 'none') return null;
+  let u = null;
+  try { u = new URL(s); } catch (e) {}
+  const local = u && u.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(u.hostname);
+  if (!u || u.origin !== s || (u.protocol !== 'https:' && !local)) throw new Error(`"${s || ''}" is not an address: https://name.example, nothing after it, or none`);
+  return s;
+}
+export const doorSql = (pilot, door) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET door = ${door == null ? 'NULL' : q(checkDoor(door))} WHERE pilot = ${q(checkPilot(pilot))};`;
+export const mendSql = (pilot, on, at = Date.now()) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET mended = ${on ? Math.round(at) : 'NULL'} WHERE pilot = ${q(checkPilot(pilot))};`;
 /* The columns the table has, and the ones a table made before them still
    needs (PvP's Worker adds them on its own first use; the tool may get
    there first). */
@@ -82,5 +97,6 @@ export const challengesSql = () =>
   `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm, ` +
   `COALESCE(c.film, '-') AS film, COALESCE(c.film_voice, '-') AS film_voice, ` +
   `COALESCE(c.won_film, '-') AS won_film, COALESCE(c.won_voice, '-') AS won_voice, ` +
-  `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on ` +
+  `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on, ` +
+  `COALESCE(c.door, '-') AS door, ${day('c.mended')} AS mended ` +
   `FROM pvp_challenges c LEFT JOIN accounts r ON r.id = c.reached_by LEFT JOIN accounts t ON t.id = c.target ORDER BY c.armed;`;

@@ -4,7 +4,9 @@
    THE ENDING; src/film.js and pvp/src/challenge.js are test:pvp's)
    The game, booted in Node with /api/live and /api/film answered here:
      secrecy     nothing asks for the movie before /api/live says burn
-     once        told burn (lost) or fell (won), the game fetches it, runs it, and it takes the
+     door        told a door too (lost), the movie goes through it at its end;
+               after it, the menu is shut behind the door's card until mended
+   once        told burn (lost) or fell (won), the game fetches it, runs it, and it takes the
                  screen: shot by shot, what its voice says shown as it is
                  said, then it ends and is noted, and never again for that
                  moment in this browser (another moment plays again)
@@ -34,9 +36,22 @@ const FILM = `VR.film({ length: 2,
   lines: [{ at: 0.2, d: 1, text: 'SOMETHING SAID' }],
   draw(t, s) { (globalThis.__drawn = globalThis.__drawn || []).push([s.shot.id, +s.k.toFixed(2)]); if (globalThis.__throw) throw new Error('drawn wrong'); } });`;
 
+/* Enough DOM for a card (THE DOOR's), as test:live has for ON AIR's: an
+   element finds what its innerHTML would have held, one stand-in per
+   selector. */
+function dom(win) {
+  const make = win.document.createElement;
+  const node = () => ({ textContent: '', hidden: false, disabled: false, addEventListener() {}, focus() {} });
+  win.document.createElement = tag => {
+    const el = make(tag), kids = {};
+    el.querySelector = sel => kids[sel] || (kids[sel] = node());
+    return el;
+  };
+}
 function boot(store = [], opts = {}) {
   return loadGame(IDX, Object.assign({
     before: win => {
+      dom(win);
       for (const [k, v] of store) win.localStorage.setItem(k, v);
       win.__live = { live: null, every: 900, above: false };
       win.__asked = []; win.__film = FILM; win.__filmStatus = 200;
@@ -153,6 +168,42 @@ section('failing: quietly, and the game goes on');
   g6.run('Ending.at = 0');
   await answer(g6, { live: null, every: 900, above: false, burn: 11 });
   ok(g6.run('Ending.state') === 'failed', 'and one that is not a movie at all');
+}
+
+section('the door: a lost world sends its players through it, until it is mended');
+{
+  const DOOR = 'https://door.example';
+  const g10 = boot();
+  g10.run(SETUP + " globalThis.__went = 0; const go = Door.go; Door.go = () => { __went++; };");
+  await answer(g10, { live: null, every: 900, above: false, burn: 31, door: DOOR });
+  ok(g10.run('Ending.on') && !g10.run('Door.up()'), 'the movie first: no card over it');
+  play(g10, 3);
+  ok(g10.run('__went') === 1, 'at its end, straight through the door', g10.run('__went'));
+  g10.run('Door.tick()');
+  ok(g10.run('Door.up()') && g10.run('state') === 'menu', 'still here: the menu is shut behind its card');
+  await answer(g10, { live: null, every: 900, above: false, burn: 31, mended: 99 });
+  g10.run('Door.tick()');
+  ok(!g10.run('Door.up()') && !g10.run('Door.shut()'), 'mended: the card goes, and the game is played again');
+  // a later load in a browser that saw the movie: the card, and nothing else
+  const g11 = boot(store(g10));
+  g11.run(SETUP);
+  await answer(g11, { live: null, every: 900, above: false, burn: 31, door: DOOR });
+  g11.run('Door.tick()');
+  ok(!g11.run('Ending.on') && g11.run('Door.up()'), 'the next load: no movie again, the card straight away');
+  ok(g11.win.document.body.children.find(c => c.id === 'door').querySelector('.in').hidden === false, 'signed out: it offers a sign-in first');
+  g11.run("globalThis.__hrefs = []; Object.defineProperty(location, 'href', { set: v => __hrefs.push(v), get: () => 'http://localhost/', configurable: true });");
+  await g11.run('Door.go()');
+  ok(g11.run('__hrefs[0]') === DOOR + '/signin#from=' + encodeURIComponent('http://localhost'), 'signed out: to its sign-in, with the way back', g11.run('__hrefs[0]'));
+  g11.run("Account.me = { name: 'x', display: 'X' }; Account.call = async (m, p, b) => (globalThis.__asked2 = b, { ok: true, status: 200, d: { code: 'C'.repeat(40) } });");
+  await g11.run('Door.go()');
+  ok(g11.run('__asked2.op') === 'handoff' && g11.run('__asked2.to') === DOOR && g11.run('__hrefs[1]') === DOOR + '/signin#h=' + 'C'.repeat(40) + '&from=' + encodeURIComponent('http://localhost'),
+     'signed in: a hand-off code for exactly its address, and the account goes with them', g11.run('__hrefs[1]'));
+  // not an address: no door
+  const g12 = boot();
+  g12.run(SETUP);
+  await answer(g12, { live: null, every: 900, above: false, door: 'javascript:alert(1)' });
+  g12.run('Door.tick()');
+  ok(!g12.run('Door.shut()') && !g12.run('Door.up()'), 'anything but an address is no door');
 }
 
 section('dev: ?ending=dev on localhost plays /api/film at once, every load');

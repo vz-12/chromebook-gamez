@@ -24,7 +24,7 @@ import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newTo
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES, ADMIN_SITES } from './auth.js';
 import { vaultList } from './vault.js';
 import { PILOTS } from '../pvp/src/rules.js';
-import { challengeWaits } from '../pvp/src/challenge.js';
+import { challengeWaits, doorOf } from '../pvp/src/challenge.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -193,6 +193,14 @@ function handoffTarget(req, to) {
   return localHost(here.hostname) && localHost(u.hostname) ? u.origin : null;
 }
 
+/* THE DOOR (index.html; ../pvp/src/challenge.js, doorOf): while a lost
+   challenge's door is open, a code may be asked for there too, and only
+   for exactly its address. */
+async function doorTarget(env, to) {
+  const door = await doorOf(env.DB);
+  return door && String(to || '') === door ? door : null;
+}
+
 /* -------------------------------- replies -------------------------------- */
 function reply(body, status = 200, cookie) {
   const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
@@ -337,7 +345,7 @@ const OPS = {
   // a code for crossing to another of our sites, signed in (see hand-offs)
   async handoff(req, env, b, s) {
     if (!s) return no('signed out', 401);
-    const to = handoffTarget(req, b.to);
+    const to = handoffTarget(req, b.to) || await doorTarget(env, b.to);
     if (!to) return no('bad destination', 400);
     if (ADMIN_SITES.includes(to) && !s.account.perks.includes('dev')) return no('bad destination', 400);   // the lab: admins only
     const code = newToken(), now = Date.now();

@@ -1698,6 +1698,7 @@ addEventListener('keydown', e => {
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
   if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
+  if (Door.up()) return;                                             // THE DOOR's card has the menu: nothing gets past it
   if (state === 'name') { nameKey(e); return; }
   // ROOT'S RITE: the console takes every key, so WASD and dash never land
   if (con.open) { conKey(e); return; }
@@ -1726,6 +1727,7 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mousedown', e => {
   if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
   if (Ending.on) { if (Ending.voice && Ending.voice.paused) Ending.voice.play().catch(() => {}); return; }   // THE ENDING: a click only wakes its voice
+  if (Door.up()) return;                    // THE DOOR: nothing under its card
   Audio_.init(); Audio_.resume();
   if (e.isTrusted) Pad.active = false;
   mouse.x = viewX(e); mouse.y = viewY(e);
@@ -39253,6 +39255,7 @@ function frame(now) {
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
     try { Live.tick(); } catch (e) {}  // a PvP challenge on air, put in front of everybody (ON AIR)
     try { Ending.tick(); } catch (e) {}   // a challenge lost: its movie, once (THE ENDING)
+    try { Door.tick(); } catch (e) {}     // and where its players go: the menu shut behind a door (THE DOOR)
   } catch (err) {
     // A thrown frame used to kill the rAF loop outright and freeze the
     // game mid-run. Drop the frame, keep the loop alive; losing a
@@ -89050,6 +89053,7 @@ const Live = {
     Live.next = performance.now() + clamp(every, 30, 3600) * 1000;
     if (!d) return;
     Live.above = d.above === true;
+    Door.heard(d.door, d.mended);                                  // a challenge lost: where its players go (THE DOOR)
     Ending.heard(d.burn, 'lost') || Ending.heard(d.fell, 'won');   // a challenge decided: its movie (THE ENDING)
     const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
     const was = Live.on;
@@ -89152,6 +89156,117 @@ function drawLiveLine() {
 }
 
 /* ===========================================================================
+   THE DOOR: where a lost world sends its players
+
+   A challenge lost (THE ENDING) can name a door: an address of its own
+   (`npm run challenge -- door`). /api/live says it (`door`) from then until
+   the world is mended (`mended`: the site behind the door says so when the
+   account the challenge was sent to wins there, or it is done by hand).
+   Meanwhile this game is not played: at the menu a card covers it, and the
+   one way on is through. The movie, at its end, goes straight through
+   (Ending.after).
+
+   Going through signed in takes the account with it (a hand-off code, as
+   PvP's door: src/account.js lets one be asked for exactly that address
+   while the door is open); signed out, the other side asks for the name and
+   password. The address it came from goes too, for the way back. An admin
+   may stay and play (PLAY ANYWAY), for this page only.
+   ========================================================================= */
+const DOOR_CSS = `
+#door{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(6,4,4,.93);overflow:auto;cursor:auto;font-family:Barlow,'Segoe UI',system-ui,sans-serif;color:#d6cec4}
+#door[hidden]{display:none}
+#door .card{width:100%;max-width:440px;margin:auto;padding:26px 22px 18px;text-align:center;background:rgba(20,12,10,.97);
+  border:1px solid rgba(255,127,36,.5);border-radius:12px;box-shadow:0 0 60px rgba(255,127,36,.12)}
+#door .tag{display:inline-block;padding:4px 10px;border-radius:6px;background:rgba(124,45,18,.85);
+  color:#fed7aa;font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.18em}
+#door h2{margin-top:14px;font:800 19px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.1em;color:#ffcf6e}
+#door .x{margin-top:10px;font-size:14px;line-height:1.55;color:#a8998a;white-space:pre-line}
+#door .x:empty{display:none}
+#door .note{margin-top:10px;min-height:16px;font:600 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.12em;color:#f87171}
+#door .go{display:block;width:100%;margin-top:16px;padding:12px;border-radius:7px;cursor:pointer;background:rgba(255,127,36,.16);
+  border:1px solid rgba(255,127,36,.85);color:#ffcf6e;font:700 13px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.16em}
+#door .go:hover{background:rgba(255,127,36,.28)}
+#door .go:disabled{opacity:.5;cursor:default}
+#door .in,#door .stay{margin-top:8px;padding:8px;background:none;border:0;cursor:pointer;color:#7c6f64;
+  font:600 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
+#door .in:hover,#door .stay:hover{color:#a8998a}
+#door [hidden]{display:none}`;
+
+const Door = {
+  at: null,                    // its address while it is open (/api/live `door`), else null
+  mended: 0,                   // when the world was mended (/api/live), else 0
+  el: null, busy: false,
+  stay: false,                 // an admin chose to stay, for this page
+
+  off: () => !!PVP || BETA || location.protocol === 'file:',
+  shut: () => !Door.off() && !!Door.at && !Door.mended,
+  // what /api/live said (Live.ask)
+  heard(door, mended) {
+    let at = null;
+    try { const u = new URL(String(door || '')); if (u.origin === door && /^https?:$/.test(u.protocol)) at = u.origin; } catch (e) {}
+    Door.at = at; Door.mended = Number.isFinite(mended) && mended > 0 ? mended : 0;
+  },
+  // once a frame: the card up at the menu while the door is open (after the movie, if there is one to play)
+  tick() {
+    const want = Door.shut() && !Door.stay && state === 'menu' && !Intro.on && !Ending.on &&
+                 Ending.state !== 'loading' && Ending.state !== 'ready' && !AcctUI.on;
+    if (want && !Door.up()) Door.show();
+    else if (!want && Door.up()) Door.hide();
+  },
+  build() {
+    const st = document.createElement('style');
+    st.textContent = DOOR_CSS;
+    document.head.appendChild(st);
+    const el = document.createElement('div');
+    el.id = 'door'; el.hidden = true;
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    el.innerHTML = '<div class="card"><p class="tag">THE VOID HAS BURNT</p><h2>THE WAY ON IS THROUGH THE DOOR</h2><p class="x"></p>' +
+                   '<p class="note" role="alert"></p><button type="button" class="go">GO THROUGH  ↗</button>' +
+                   '<button type="button" class="in">SIGN IN FIRST</button><button type="button" class="stay">PLAY ANYWAY (ADMIN)</button></div>';
+    // pressed here is the card's, never the game's
+    for (const t of ['keydown', 'keyup', 'keypress']) el.addEventListener(t, e => e.stopPropagation());
+    el.addEventListener('mousedown', e => e.stopPropagation());
+    el.querySelector('.go').addEventListener('click', () => Door.go());
+    el.querySelector('.in').addEventListener('click', () => { Door.hide(); AcctUI.open('in'); });
+    el.querySelector('.stay').addEventListener('click', () => { Door.stay = true; Door.hide(); });
+    document.body.appendChild(el);
+    Door.el = el;
+  },
+  show() {
+    if (!Door.el) Door.build();
+    const signed = !Account.off() && !!Account.me;
+    Door.el.querySelector('.x').textContent = 'VOIDRUNNER can\'t be played until the void is mended.\n' +
+      (signed ? 'Go through, and your account goes with you.' : 'Your account goes with you: sign in first, or on the other side.');
+    Door.el.querySelector('.note').textContent = '';
+    Door.el.querySelector('.in').hidden = signed || Account.off();
+    Door.el.querySelector('.stay').hidden = !(signed && Account.admin);
+    Door.el.hidden = false;
+    if (Live.up()) Live.hide();
+    if (!isTouch) Door.el.querySelector('.go').focus();
+  },
+  hide() { if (Door.el) Door.el.hidden = true; },
+  up: () => !!(Door.el && !Door.el.hidden),
+  // the movie is over: straight through
+  after() { if (Door.shut() && !Door.stay) Door.go(); },
+  async go() {
+    if (!Door.at || Door.busy) return;
+    const back = '&from=' + encodeURIComponent(location.origin);
+    if (!Account.off() && Account.me) {
+      Door.busy = true;
+      if (Door.el) Door.el.querySelector('.go').disabled = true;
+      const r = await Account.call('POST', '', { op: 'handoff', to: Door.at });
+      Door.busy = false;
+      if (Door.el) Door.el.querySelector('.go').disabled = false;
+      if (r.ok && r.d && r.d.code) { location.href = Door.at + '/signin#h=' + r.d.code + back; return; }
+      if (r.status === 401) Account.lost();
+      else if (!r.status && Door.el) { Door.el.querySelector('.note').textContent = 'CAN\'T REACH THE SERVER  ·  TRY AGAIN'; return; }
+    }
+    location.href = Door.at + '/signin#' + back.slice(1);
+  }
+};
+
+/* ===========================================================================
    THE ENDING: a movie every game plays once, the moment the world ends
 
    A challenge decided for the account it was sent to (pvp/src/challenge.js,
@@ -89176,7 +89291,8 @@ function drawLiveLine() {
      draw(t, s)   the frame at t seconds: s = { ctx, W, H, dt, shot, k }, k
                how far through that shot it is (0 to 1)
    A draw that throws ends it there. Its voice keeps its time where it plays.
-   After it, after(way): where each ending goes next, still to come.
+   After it, after(way): where each ending goes next (lost: THE DOOR, if one
+   is open; won: still to come).
 
    On localhost only, ?ending=dev plays /api/film at once, every load, over
    whatever is up and whatever /api/live says: for drawing the movie against
@@ -89280,8 +89396,8 @@ const Ending = {
     uiArm = 0.4;                // a key still down from it lands on nothing
     Ending.after(Ending.way);
   },
-  // where it goes next, still to come: lost, the lockout and the second game's door; won, what opens above
-  after(way) {}
+  // where it goes next: lost, through THE DOOR if there's one; won, what opens above (still to come)
+  after(way) { if (way === 'lost') Door.after(); }
 };
 
 /* ===========================================================================

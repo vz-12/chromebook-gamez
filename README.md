@@ -599,6 +599,22 @@ npm run challenge -- decide <pilot> lost --remote   # or won; none takes a decis
 npm run challenge -- calm <pilot> --remote          # hold the hunt at once; `calm <pilot> off` lets it go on
 ```
 
+**The door** (THE DOOR in `index.html`, `npm run test:ending`). A challenge can name a door: where
+every game sends its players if it is lost, an address kept in the database and nowhere in this repo.
+- **Once it is lost,** `/api/live` says `door` (and `burn`, if a movie is named). The movie plays and
+  goes straight through the door at its end; after that the menu is covered by a card whose one way on
+  is through. Signed in, the account goes along: the game Worker gives a hand-off code for exactly the
+  door's address while it is open (`src/account.js`, `doorOf` in `pvp/src/challenge.js`), and nowhere
+  else. Signed out, the other side asks for the name and password. An admin may stay (PLAY ANYWAY).
+- **Until it is mended:** the site behind the door sets `mended` when the account the challenge was sent
+  to wins there (or `mend` by hand). Then `/api/live` says `mended` instead of `door`, the card goes, and
+  every game is played again.
+
+```sh
+npm run challenge -- door <pilot> https://name.example --remote   # or none
+npm run challenge -- mend <pilot> --remote                       # given back by hand; `mend <pilot> none` opens the door again
+```
+
 ## Sharing and installing
 
 Small things that help the game travel:

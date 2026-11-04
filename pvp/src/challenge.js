@@ -99,13 +99,15 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      parts       TEXT,                     -- the vault entry of THE PARTS' words, left the account it was sent to if it is won
      parts_used  INTEGER,                  -- when they were used, once and for good
      parts_use   TEXT,                     -- on what
-     parts_on    TEXT                      -- and which of their pilots, where that use takes one
+     parts_on    TEXT,                     -- and which of their pilots, where that use takes one
+     door        TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
+     mended      INTEGER                   -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
                ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
-               ['won_film', 'TEXT'], ['won_voice', 'TEXT']];
+               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -273,6 +275,11 @@ export async function liveNow(db, now = Date.now()) {
   const first = (way, col) => rows.filter(r => r.outcome === way && r.decided && r[col]).sort((a, b) => a.decided - b.decided)[0];
   const lost = first('lost', 'film'), won = first('won', 'won_film');
   const ending = Object.assign(lost ? { burn: lost.decided } : {}, won ? { fell: won.decided } : {});
+  /* THE DOOR: a challenge lost, with a door named for it, sends every game's
+     players through it (index.html, THE DOOR) until the world is mended:
+     `door` until then, `mended` (when) after. Missing while neither. */
+  const shut = rows.filter(r => r.outcome === 'lost' && r.decided && r.door).sort((a, b) => a.decided - b.decided)[0];
+  if (shut) { if (shut.mended) ending.mended = shut.mended; else ending.door = shut.door; }
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
     if (r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
@@ -299,6 +306,16 @@ export async function liveNow(db, now = Date.now()) {
             names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
     every: LIVE.ASK, above
   }, ending);
+}
+
+/* THE DOOR's address, while it is open (liveNow above): the one place
+   besides our own sites a hand-off code may be asked for (src/account.js).
+   null while there is none, or the world is mended. */
+export async function doorOf(db) {
+  try {
+    const row = await db.prepare(`SELECT * FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL ORDER BY decided LIMIT 1`).first();
+    return row && row.door && !row.mended ? row.door : null;
+  } catch (e) { return null; }   // no table, or not its newer columns yet: no door
 }
 
 /* THE ENDING's movie (index.html, ENDING; src/film.js): the vault entries

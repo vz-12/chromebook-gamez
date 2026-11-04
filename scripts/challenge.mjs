@@ -26,6 +26,15 @@
                               its own ({ "t", "x", "done" }), or none
      unuse <pilot>            the parts' use taken back: the winner chooses
                               again
+     door <pilot> <address>   THE DOOR: where every game sends its players
+                              once it is lost (index.html, THE DOOR), an
+                              origin (https://name.example), or none. Its
+                              players go through it until the world is
+                              mended. Keep the address out of this repo
+     mend <pilot> [none]      the world mended by hand (the site behind the
+                              door does it when the account the challenge
+                              was sent to wins there): the door closes and
+                              every game plays again; none opens it again
      decide <pilot> <how>    its fight, decided by hand: lost or won, as it
                               went for the account it was sent to (the
                               referee decides a match played to its end by
@@ -52,7 +61,7 @@
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
 import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
-         checkPilot, checkWords, checkDate, checkOutcome } from './lib/challenge-sql.mjs';
+         doorSql, mendSql, checkPilot, checkWords, checkDate, checkOutcome, checkDoor } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
@@ -161,6 +170,24 @@ try {
       console.log(a1 + where + ': its parts unused again');
       break;
     }
+    case 'door': {
+      if (!a1 || !a2) die('door <pilot> <address | none>');
+      const sql = doorSql(a1, checkDoor(a2));
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'no door' : 'if it is lost, every game sends its players to ' + a2));
+      break;
+    }
+    case 'mend': {
+      if (!a1 || (a2 && a2 !== 'none')) die('mend <pilot> [none]');
+      const sql = mendSql(a1, a2 !== 'none');
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'not mended: the door is open again' : 'mended: the door closes, every game plays again'));
+      break;
+    }
     case 'decide': {
       if (!a1 || !a2) die('decide <pilot> <lost | won | none>');
       const sql = decideSql(a1, checkOutcome(a2));
@@ -198,12 +225,13 @@ try {
                      'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm,
                      'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : ''),
                      'won film ' + r.won_film + (r.won_voice !== '-' ? ' (' + r.won_voice + ')' : ''),
-                     'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : '')].join('  ·  '));
+                     'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : ''),
+                     'door ' + r.door, 'mended ' + r.mended].join('  ·  '));
       break;
     }
     default:
       die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
-          'parts <pilot> <words | none> | unuse <pilot> | decide <pilot> <lost | won | none> | ' +
+          'parts <pilot> <words | none> | unuse <pilot> | door <pilot> <address | none> | mend <pilot> [none] | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }

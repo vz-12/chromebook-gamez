@@ -1800,6 +1800,38 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   tool(filmSql('x7', null, null, true));
   ok(row().won_film === null && row().won_voice === null, 'and none named (film none --won)');
 
+  /* THE DOOR (npm run challenge -- door / mend): where every game sends its
+     players once it is lost, told by /api/live until the world is mended;
+     a hand-off code may be asked for exactly its address while it is open. */
+  const { doorSql, mendSql, checkDoor } = await import('./lib/challenge-sql.mjs');
+  const DOOR = 'https://door.example.dev';
+  tool(doorSql('x7', DOOR));
+  ok(row().door === DOOR, 'a door named for it, by hand (door)', row());
+  ok(!('door' in (await gameLive()).d), 'not decided: no game told');
+  const early = await home.op('handoff', { to: DOOR });
+  ok(early.status === 400, 'and no code for it', early);
+  tool(decideSql('x7', 'won', 3456789));
+  ok(!('door' in (await gameLive()).d), 'won: no door either');
+  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'lost', 2345678));
+  const gd = (await gameLive()).d;
+  ok(gd.door === DOOR && !('mended' in gd), 'lost: every game told where its players go', gd);
+  const hd = await home.op('handoff', { to: DOOR });
+  ok(hd.status === 200 && hd.d.to === DOOR && /^[A-Za-z0-9_-]{43}$/.test(hd.d.code), 'a code for exactly its address', hd.d);
+  ok((await home.op('handoff', { to: 'https://elsewhere.example.dev' })).status === 400 && (await home.op('handoff', { to: DOOR + '/x' })).status === 400,
+     'and for nowhere else');
+  tool(mendSql('x7', true, 4567890));
+  const gm = (await gameLive()).d;
+  ok(gm.mended === 4567890 && !('door' in gm), 'mended: the door closes, every game told', gm);
+  ok((await home.op('handoff', { to: DOOR })).status === 400, 'and no more codes for it');
+  ok(tool(challengesSql()).find(x => x.pilot === 'x7').door === DOOR, 'the tool lists it');
+  tool(mendSql('x7', false));
+  ok((await gameLive()).d.door === DOOR, 'not mended (mend none): open again');
+  let bad = null;
+  for (const s of ['http://door.example.dev', 'https://door.example.dev/x', 'javascript:alert(1)']) { try { checkDoor(s); } catch (e) { bad = (bad || 0) + 1; } }
+  ok(bad === 3 && checkDoor('none') === null && checkDoor('http://127.0.0.1:8160') === 'http://127.0.0.1:8160', 'the tool takes an https origin (or a local one), or none');
+  tool(doorSql('x7', null)); tool(mendSql('x7', false)); tool(decideSql('x7', 'none'));
+  ok(row().door === null && !('door' in (await gameLive()).d), 'and none named (door none)');
+
   /* THE PARTS (npm run challenge -- parts): what a won challenge leaves the
      account it was sent to, in their lobby alone, kept. Nothing uses them
      yet (giving them to a hull was archived: 1ae6470), so nothing can. */
