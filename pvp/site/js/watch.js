@@ -312,9 +312,22 @@
      screen has it: the one who left would have none. */
   const flip = r => Object.assign({}, r, { me: r.them, them: r.me, score: [r.score[1], r.score[0]], dealt: [r.dealt[1], r.dealt[0]],
                                            rounds: r.rounds.map(x => Object.assign({}, x, { won: !x.won })) });
+  /* ?then=<the game's address> (index.html, THE SHOWING): a viewer the game
+     sent here goes back there a few seconds after the fight is over. Only
+     the game's own addresses (and, on a local page, a local one). */
+  const THEN = (() => {
+    try {
+      const t = new URLSearchParams(location.search).get('then');
+      if (!t) return null;
+      const u = new URL(t), local = h => /^(localhost|127\.0\.0\.1)$/.test(h);
+      return ['https://voidrunner.online', 'https://voidrunner.play101.workers.dev'].includes(u.origin) || (local(location.hostname) && local(u.hostname))
+        ? u.origin + '/' : null;
+    } catch (e) { return null; }
+  })();
   function over() {
     if (V.phase === 'over') return;
     V.phase = 'over';
+    if (THEN) setTimeout(() => location.replace(THEN), 5000);
     const r = V.end && V.end.result, left = V.end ? V.end.left : null;
     if (M.scene) {
       const s = M.scene(r ? (r.winner === V.eyes ? 'won' : 'lost') : 'left');

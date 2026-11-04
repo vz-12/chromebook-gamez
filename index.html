@@ -95817,5 +95817,59 @@ if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;
 requestAnimationFrame(frame);
 </script>
+<script>
+/* ===========================================================================
+   THE SHOWING: a challenge's fight shown at a set time, from its recording
+   (pvp/src/challenge.js, premiere). Whoever opens the game while it is on,
+   or after it (/api/live `live`, then `shown`), is taken to it, once a
+   browser: to PvP's watch page, which shows the rest of it (arriving after
+   its end: its last 30 s) and sends them back here once it is over
+   (`then`). Back here THE ENDING plays as soon as it is told (asked for
+   every few seconds for a while), and THE DOOR does the rest. ON AIR's
+   WATCH LIVE goes the same way. A script of its own, after the engine's:
+   the engine's text is what a recording is checked against (buildId), so
+   it is not touched.
+   ========================================================================= */
+(function () {
+  'use strict';
+  if (window.VR_PVP || location.protocol === 'file:') return;
+  const KEY = 'voidrunner_showing_seen', ID = /^[0-9a-f]{32}$/;
+  const PVP = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://127.0.0.1:8788' : 'https://voidrunner-pvp.play101.workers.dev';
+  const get = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return null; } };
+  const to = match => PVP + '/play/?watch=' + match + '&then=' + encodeURIComponent(location.origin + '/');
+  function go(match) {
+    try { localStorage.setItem(KEY, match); } catch (e) { return false; }   // (nowhere to note it: never sent, or it would loop)
+    location.replace(to(match));
+    return true;
+  }
+  // back from it: ask again and again, a while, so the movie comes the moment it is told; its ON AIR card seen
+  function back(match) {
+    try { const had = (localStorage.getItem('voidrunner_live_seen') || '').split(',').filter(Boolean); if (!had.includes(match)) localStorage.setItem('voidrunner_live_seen', had.concat(match).slice(-10).join(',')); } catch (e) {}
+    let n = 0;
+    const t = setInterval(() => {
+      try {
+        if (++n > 24 || (typeof Ending === 'object' && Ending.at)) { clearInterval(t); return; }
+        if (typeof Live === 'object' && !Live.busy) Live.next = 0;
+      } catch (e) { clearInterval(t); }
+    }, 8000);
+  }
+  fetch('/api/live', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(d => {
+    if (!d) return;
+    const match = d.live && ID.test(d.live.match) ? d.live.match : typeof d.shown === 'string' && ID.test(d.shown) ? d.shown : null;
+    if (!match) return;
+    if (get(KEY) === match) { back(match); return; }
+    const ended = get('voidrunner_ending_seen');
+    if (ended && ((d.burn && ended === String(d.burn)) || (d.fell && ended === String(d.fell)))) return;   // its movie seen already
+    go(match);
+  }).catch(() => {});
+  // ON AIR's WATCH LIVE: there and back, in this tab
+  addEventListener('load', () => {
+    try {
+      if (typeof Live !== 'object' || !Live) return;
+      Live.watch = function () { if (Live.on && ID.test(Live.on.match)) { Live.hide(); go(Live.on.match) || window.open(to(Live.on.match), '_blank', 'noopener'); } };
+    } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

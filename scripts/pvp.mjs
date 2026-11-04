@@ -1888,6 +1888,7 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   {
     const { premiereSql, filmSql: filmSql2, mendSql: mendSql2, doorSql: doorSql2 } = await import('./lib/challenge-sql.mjs');
     const { revealAt, SHOW_SLACK, filmOf, doorOf } = await import('../pvp/src/challenge.js');
+    const { TAIL } = await import('../pvp/src/broadcast.js');
     tool(decideSql('x7', 'none')); tool(mendSql2('x7', false)); tool(doorSql2('x7', 'https://door.example.dev'));
     tool(filmSql2('x7', 'x7-film', null));
     const LEN = 40 * 1000, S0 = Date.now() - 2 * 3600e3;
@@ -1911,6 +1912,7 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
     ok(L.live && !('burn' in L), 'all through the showing (and a little after, for viewers behind)');
     L = await liveNow(DB, P1 + LEN + SHOW_SLACK + 1000);
     ok(!L.live && L.burn > 0 && L.door === 'https://door.example.dev' && L.above === false, 'its showing over: told, as it would have been', L);
+    ok(L.shown === mid && !('shown' in (await liveNow(DB, P1 + 5000))), 'and which match was shown, for whoever comes after (not before)', L.shown);
     ok(revealAt(row()) === P1 + LEN + SHOW_SLACK, 'told at the premiere, plus the fight\'s length, plus the slack');
     // the relay: 25 s into the showing, each viewer is answered only up to step 1500
     tool(premiereSql('x7', Date.now() - 25 * 1000));
@@ -1933,13 +1935,15 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
        'a reel: shown in its place, from its start, as far as the showing has got', [v.status, v.d.head, v.d.snap && v.d.snap.json, v.d.last]);
     ok(v.d.batches.every(x => x.from + x.n <= v.d.last + 1) && v.d.batches.length >= 1, 'its steps only up to there');
     tool(premiereSql('x7', Date.now() - 3600e3));
-    v = await look('&from=100');
-    ok(v.d.last === 179 && v.d.end && v.d.end.at === 180 && v.d.batches.length === 2, 'the showing past its end: all of the reel, with its end', [v.d.last, v.d.end]);
+    v = await look('&from=100&v=' + '4'.repeat(16));
+    ok(v.d.last === 179 && v.d.end && v.d.end.at === 180 && v.d.batches.length === 2, 'one watching since during the showing, past its end: all of the reel, with its end', [v.d.last, v.d.end]);
     v = await look('&v=' + '5'.repeat(16));
-    ok(v.d.snap.json === '{"reel":120}', 'and a newcomer then gets its newest snapshot');
+    ok(v.d.snap.json === '{"reel":0}' && v.d.last <= 2 && v.d.end === null, 'a newcomer after its end: from its last 30 s (all of this short one), in real time, the end still to come', [v.d.snap.json, v.d.last, v.d.end]);
     tool(`UPDATE pvp_challenges SET reel = NULL WHERE pilot = 'x7';`);
     v = await look('&v=' + '6'.repeat(16));
-    ok(v.d.snap && v.d.snap.at === 2100, 'no reel: the match\'s own recording again, untouched');
+    ok(!v.d.snap && v.d.from === 0 && v.d.last === 2400 - TAIL && v.d.end === null, 'no reel: the match\'s own recording again; a newcomer after its end from its last 30 s', [v.d.snap && v.d.snap.at, v.d.from, v.d.last]);
+    v = await look('&from=2300');
+    ok(v.d.last === 2399 && v.d.end, 'and with no viewer id: as before, all of it');
     // long after: the whole of it, and told
     tool(premiereSql('x7', Date.now() - 3600e3));
     v = await look('&from=2300');

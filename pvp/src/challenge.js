@@ -308,6 +308,9 @@ export async function liveNow(db, now = Date.now()) {
      `door` until then, `mended` (when) after. Missing while neither. */
   const shut = rows.filter(r => r.outcome === 'lost' && r.decided && r.door && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
   if (shut) { if (shut.mended) ending.mended = shut.mended; else ending.door = shut.door; }
+  // a fight held for its showing, shown and told: its match, for whoever comes after (index.html, THE SHOWING)
+  const shownRow = rows.filter(r => r.premiere && r.match && r.decided && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
+  if (shownRow) ending.shown = shownRow.match;
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
     // on air: as it is played; or, held for its showing, from its premiere to the end of its playback

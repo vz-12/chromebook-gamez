@@ -48,6 +48,7 @@ export const KEEP = {
   STEPS: 600,                 // steps in one batch, at most (ten seconds: a stall's worth)
   REC: 96                     // bytes of records a step, at most, for the two pilots
 };
+export const TAIL = 30 * 60;  // steps of a showing a viewer arriving after its end is shown (its last 30 s)
 export const VIEW = {
   BEHIND: 30 * 60,            // a viewer this many steps behind the latest snapshot is given it
   MOST: 30 * 60,              // steps in one answer, at most: a viewer far behind asks again at once
@@ -85,6 +86,7 @@ export class Broadcast extends Serial {
     this.batches = [];         // every batch, in order
     this.snaps = new Map();    // snapshot number -> its text, read as needed
     this.viewers = new Map();  // viewer -> when last heard from
+    this.tails = new Map();    // a showing's viewer -> { start, t0 } if their first look came after its end (null: from during it)
   }
 
   // the log, read back once
@@ -150,7 +152,15 @@ export class Broadcast extends Serial {
       }
       const every = this.pace(now);
       if (!m) return reply({ error: 'not on air', every }, 404);
-      const cut = int(b.cut, 0, 1e9) ? b.cut : null;            // a showing: nothing after this step yet
+      let cut = int(b.cut, 0, 1e9) ? b.cut : null;              // a showing: nothing after this step yet
+      /* A showing already over when this viewer first looked: its last
+         TAIL steps, from there in real time (their own cut), and the end. */
+      if (cut != null && typeof b.v === 'string' && /^[0-9a-f]{16}$/.test(b.v)) {
+        if (this.tails.size > 20000) this.tails.clear();
+        if (!this.tails.has(b.v)) this.tails.set(b.v, m.end && cut >= m.end.at ? { start: Math.max(0, m.end.at - TAIL), t0: now } : null);
+        const t = this.tails.get(b.v);
+        if (t) cut = Math.min(cut, t.start + Math.floor((now - t.t0) * 60 / 1000));
+      }
       let from = int(b.from, -1, 1e9) ? b.from : -1;
       const last = cut == null ? m.last : Math.min(m.last, cut);
       const out = { ok: true, last, end: m.end && (cut == null || m.end.at <= cut) ? m.end : null, every };
