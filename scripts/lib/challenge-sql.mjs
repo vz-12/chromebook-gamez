@@ -33,6 +33,14 @@ export function checkDate(s) {
 export const armSql = (pilot, words, at = Date.now()) =>
   `${CHALLENGE_SCHEMA}\nINSERT INTO pvp_challenges (pilot, words, armed) VALUES (${q(checkPilot(pilot))}, ${q(checkWords(words))}, ${at}) ` +
   `ON CONFLICT (pilot) DO UPDATE SET words = excluded.words;`;
+/* a reel (pvp/src/watch.js): a recording in the vault shown at the premiere in place of its match's own, and its
+   length (seconds), which is what the showing runs for: what it decided is told at its end (revealAt reads
+   ended - started, so ended is moved to match), or none */
+export function reelSql(pilot, reel, secs) {
+  if (reel == null) return `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET reel = NULL WHERE pilot = ${q(checkPilot(pilot))};`;
+  if (!(Number.isFinite(secs) && secs > 0 && secs < 3 * 3600)) throw new Error(`"${secs}" is not a reel's length in seconds`);
+  return `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET reel = ${q(checkWords(reel))}, ended = started + ${Math.round(secs * 1000)} WHERE pilot = ${q(checkPilot(pilot))} AND started IS NOT NULL;`;
+}
 // held for a showing (pvp/src/challenge.js, premiere): its fight kept off air and untold until then, then shown from its recording
 export const premiereSql = (pilot, at) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET premiere = ${at == null ? 'NULL' : Math.round(at)} WHERE pilot = ${q(checkPilot(pilot))};`;

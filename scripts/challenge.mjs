@@ -16,6 +16,10 @@
                               premiere it is shown from its recording as
                               though live, and what it decided is told once
                               the showing has reached its end
+     reel <pilot> <entry> <secs>  shown at the premiere in place of its match's
+                              recording: a vault entry holding a broadcast's
+                              whole log (as replay=1 writes it), and its
+                              length in seconds; or none
      date <pilot> <when>      the date it names, ISO with its zone
                               (2026-11-14T18:00Z), or none
      announce <pilot> <words> what the game's menu says while its match is
@@ -66,7 +70,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, premiereSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, premiereSql, reelSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
          doorSql, mendSql, checkPilot, checkWords, checkDate, checkOutcome, checkDoor } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -122,6 +126,16 @@ try {
       for (const id of [a1, a2]) if (!held.includes(id)) die('the vault' + where + ' holds no ' + id + ': put it first');
       run(sql);
       console.log('armed ' + a1 + where + ', its words in vault entry ' + a2);
+      break;
+    }
+    case 'reel': {
+      if (!a1 || !a2) die('reel <pilot> <vault entry> <seconds> | reel <pilot> none');
+      const sql = reelSql(a1, a2 === 'none' ? null : a2, Number(args[3]));
+      if (!live()) show(sql);
+      if (a2 !== 'none' && !run(inVaultSql([a2])).length) die('the vault' + where + ' holds no ' + a2 + ': put it first');
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'no reel: its own recording is shown' : 'shown from ' + a2 + ' (' + args[3] + ' s) at its premiere'));
       break;
     }
     case 'premiere': {
