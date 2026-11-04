@@ -33,6 +33,9 @@ export function checkDate(s) {
 export const armSql = (pilot, words, at = Date.now()) =>
   `${CHALLENGE_SCHEMA}\nINSERT INTO pvp_challenges (pilot, words, armed) VALUES (${q(checkPilot(pilot))}, ${q(checkWords(words))}, ${at}) ` +
   `ON CONFLICT (pilot) DO UPDATE SET words = excluded.words;`;
+// held for a showing (pvp/src/challenge.js, premiere): its fight kept off air and untold until then, then shown from its recording
+export const premiereSql = (pilot, at) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET premiere = ${at == null ? 'NULL' : Math.round(at)} WHERE pilot = ${q(checkPilot(pilot))};`;
 export const dateSql = (pilot, due) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET due = ${due == null ? 'NULL' : Math.round(due)} WHERE pilot = ${q(checkPilot(pilot))};`;
 /* Its announcement, for when its match is on air (the game's /api/live): a

@@ -45,6 +45,7 @@ import { isHidden, mayFly } from './hidden.js';
 import { limited, tooMany } from './limits.js';
 import { nowList } from './now.js';
 import { PILOTS } from './rules.js';
+import { premiereOf, showStep } from './challenge.js';
 
 const MAX_BODY = 128 * 1024, MAX_SNAP = 2 * 1024 * 1024, MAX_HEAD = 64 * 1024;
 const reply = (body, status = 200) =>
@@ -122,8 +123,13 @@ async function view(req, env) {
   if (wait) return tooMany(wait);
   const from = u.searchParams.has('from') ? Number(u.searchParams.get('from')) : -1;
   const v = u.searchParams.get('v') || '';
+  /* A fight held for its showing (challenge.js, premiere): nobody watches it
+     before then, and from then each viewer is answered only as far as the
+     showing has got (`cut`, in steps), so it plays as though live. */
+  const held = await premiereOf(env.DB, match), cut = held ? showStep(held, Date.now()) : null;
+  if (cut != null && cut < 0) return reply({ error: 'not on air', every: 5000 }, 404);
   return passOn(await ask(env, match, 'view', { from: Number.isInteger(from) ? from : -1, snap: u.searchParams.get('snap') === '1',
-                                                v: /^[0-9a-f]{16}$/.test(v) ? v : '' }));
+                                                v: /^[0-9a-f]{16}$/.test(v) ? v : '', ...(cut != null ? { cut } : {}) }));
 }
 
 async function feed(req, env) {

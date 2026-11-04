@@ -101,13 +101,14 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      parts_use   TEXT,                     -- on what
      parts_on    TEXT,                     -- and which of their pilots, where that use takes one
      door        TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
-     mended      INTEGER                   -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
+     mended      INTEGER,                  -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
+     premiere    INTEGER                   -- its fight shown at this time, from its recording, if fought ahead of it (revealAt), set by hand
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
                ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
-               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER']];
+               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -256,6 +257,32 @@ export async function challengeEnded(db, match, now = Date.now(), winner = null)
    near. Otherwise it is long, so a game left open costs a request every
    quarter of an hour, not every minute. Words that cannot be read are no
    words: the match is still on, under a plain title. */
+/* A fight fought ahead of its showing (`premiere`, set by hand: `npm run
+   challenge -- premiere`). Its match goes nowhere while it is played: not on
+   air, and what it decides is told to nobody (liveNow, filmOf, doorOf). At
+   the premiere it goes on air from its start, played back from its
+   recording as though live (watch.js, broadcast.js: each viewer is answered
+   only up to where the showing has got to), and what it decided is told
+   once the showing has reached its end, and SHOW_SLACK more for viewers a
+   few seconds behind: revealAt. With no premiere, nothing of this. A fight
+   decided with no match to show (by hand) is told at the premiere. */
+export const SHOW_SLACK = 20 * 1000;
+export function revealAt(r) {
+  if (!r || !r.premiere) return 0;
+  if (r.match && r.started) return r.ended ? r.premiere + Math.max(0, r.ended - r.started) + SHOW_SLACK : Infinity;
+  return r.premiere;
+}
+const held = (r, now) => now < revealAt(r);
+// how far into a held fight's match its showing has got, in steps (60 a second): -1 before the premiere
+export const showStep = (r, now) => (r && r.premiere ? (now < r.premiere ? -1 : Math.floor((now - r.premiere) * 60 / 1000)) : null);
+// the challenge whose match this is, if its fight is held for a showing (watch.js)
+export async function premiereOf(db, match) {
+  try {
+    const r = await db.prepare('SELECT * FROM pvp_challenges WHERE match = ?1 AND premiere IS NOT NULL').bind(match).first();
+    return r || null;
+  } catch (e) { return null; }   // no table, or not the column yet: nothing held
+}
+
 export async function liveNow(db, now = Date.now()) {
   let rows = [];
   try {
@@ -267,29 +294,33 @@ export async function liveNow(db, now = Date.now()) {
   } catch (e) {
     return { live: null, every: LIVE.IDLE, above: false };   // no table yet: nothing has ever been on
   }
-  const above = rows.some(r => !r.decided && !r.calm);
+  const above = rows.some(r => (!r.decided || held(r, now)) && !r.calm);   // (a fight held for its showing is still to be fought, as far as anyone knows)
   /* THE ENDING: a challenge decided, with a movie named for the way it went
      (filmOf below): every game plays it once, told so the moment it was
      decided, by `burn` if it was lost and by `fell` if it was won. Missing
      until then, so nothing says there is one. */
-  const first = (way, col) => rows.filter(r => r.outcome === way && r.decided && r[col]).sort((a, b) => a.decided - b.decided)[0];
+  const first = (way, col) => rows.filter(r => r.outcome === way && r.decided && r[col] && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
   const lost = first('lost', 'film'), won = first('won', 'won_film');
   const ending = Object.assign(lost ? { burn: lost.decided } : {}, won ? { fell: won.decided } : {});
   /* THE DOOR: a challenge lost, with a door named for it, sends every game's
      players through it (index.html, THE DOOR) until the world is mended:
      `door` until then, `mended` (when) after. Missing while neither. */
-  const shut = rows.filter(r => r.outcome === 'lost' && r.decided && r.door).sort((a, b) => a.decided - b.decided)[0];
+  const shut = rows.filter(r => r.outcome === 'lost' && r.decided && r.door && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
   if (shut) { if (shut.mended) ending.mended = shut.mended; else ending.door = shut.door; }
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
-    if (r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
-      if (!on || r.started > on.started) on = r;
+    // on air: as it is played; or, held for its showing, from its premiere to the end of its playback
+    const p = !!r.premiere, since = p ? r.premiere : r.started;
+    if (p ? r.match && r.started && now >= r.premiere && held(r, now) : r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
+      if (!on || since > on.since) on = Object.assign({}, r, { since });
       continue;
     }
-    if (r.ended && now - r.ended > LIVE.AFTER) continue;   // fought out
-    if (!r.due) { every = LIVE.ASK; continue; }
-    const wait = (r.due - LIVE.SOON - now) / 1000;
-    if (now < r.due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
+    const over = p ? !held(r, now) && r.ended : r.ended;
+    if (over && now - (p ? revealAt(r) : r.ended) > LIVE.AFTER) continue;   // fought out (and shown)
+    const due = p ? r.premiere : r.due;                                    // (a held fight's showing is its date)
+    if (!due) { every = LIVE.ASK; continue; }
+    const wait = (due - LIVE.SOON - now) / 1000;
+    if (now < due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
   }
   if (!on) return Object.assign({ live: null, every, above }, ending);
   let w = null;
@@ -302,7 +333,7 @@ export async function liveNow(db, now = Date.now()) {
   w = w && typeof w === 'object' ? w : {};
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
   return Object.assign({
-    live: { match: on.match, since: on.started, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
+    live: { match: on.match, since: on.since, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
             names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
     every: LIVE.ASK, above
   }, ending);
@@ -314,7 +345,7 @@ export async function liveNow(db, now = Date.now()) {
 export async function doorOf(db) {
   try {
     const row = await db.prepare(`SELECT * FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL ORDER BY decided LIMIT 1`).first();
-    return row && row.door && !row.mended ? row.door : null;
+    return row && row.door && !row.mended && !held(row, Date.now()) ? row.door : null;
   } catch (e) { return null; }   // no table, or not its newer columns yet: no door
 }
 
@@ -325,11 +356,11 @@ export async function doorOf(db) {
 export async function filmOf(db) {
   await ensureChallenges(db);
   const row = await db.prepare(
-    `SELECT outcome, decided, CASE outcome WHEN 'won' THEN won_film ELSE film END AS f,
+    `SELECT *, CASE outcome WHEN 'won' THEN won_film ELSE film END AS f,
             CASE outcome WHEN 'won' THEN won_voice ELSE film_voice END AS v
        FROM pvp_challenges WHERE decided IS NOT NULL AND ((outcome = 'lost' AND film IS NOT NULL) OR (outcome = 'won' AND won_film IS NOT NULL))
       ORDER BY decided LIMIT 1`).first();
-  return row ? { film: row.f, voice: row.v || null, at: row.decided, way: row.outcome } : null;
+  return row && !held(row, Date.now()) ? { film: row.f, voice: row.v || null, at: row.decided, way: row.outcome } : null;   // (held for its showing: nothing yet)
 }
 
 /* -------------------------------- the parts ------------------------------ */

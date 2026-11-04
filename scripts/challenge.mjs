@@ -10,6 +10,12 @@
                               words are kept in (put it first, given to
                               nobody: `npm run vault -- put <words> <file>`).
                               Armed again, only the words change.
+     premiere <pilot> <when>  its fight held for a showing at that time (ISO with
+                              its zone), or none: fought before then, it goes
+                              on air nowhere and is told to nobody; at the
+                              premiere it is shown from its recording as
+                              though live, and what it decided is told once
+                              the showing has reached its end
      date <pilot> <when>      the date it names, ISO with its zone
                               (2026-11-14T18:00Z), or none
      announce <pilot> <words> what the game's menu says while its match is
@@ -60,7 +66,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, premiereSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
          doorSql, mendSql, checkPilot, checkWords, checkDate, checkOutcome, checkDoor } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -116,6 +122,15 @@ try {
       for (const id of [a1, a2]) if (!held.includes(id)) die('the vault' + where + ' holds no ' + id + ': put it first');
       run(sql);
       console.log('armed ' + a1 + where + ', its words in vault entry ' + a2);
+      break;
+    }
+    case 'premiere': {
+      if (!a1 || !a2) die('premiere <pilot> <when | none>');
+      const sql = premiereSql(a1, checkDate(a2));
+      if (!live()) show(sql);
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'no premiere: its fight goes on air as it is played' : 'held for its showing at ' + new Date(checkDate(a2)).toISOString()));
       break;
     }
     case 'date': {
@@ -230,7 +245,7 @@ try {
       break;
     }
     default:
-      die('arm <pilot> <words> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
+      die('arm <pilot> <words> | premiere <pilot> <when | none> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
           'parts <pilot> <words | none> | unuse <pilot> | door <pilot> <address | none> | mend <pilot> [none] | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }

@@ -28,7 +28,10 @@
              seeks by them
      end     the fight is over: { at, result }, or with no result, the side that
              walked out (left)
-     view    a viewer's poll, open to anyone (view(), below)
+     view    a viewer's poll, open to anyone (view(), below). With `cut` (a
+             fight held for its showing: challenge.js, premiere), answered
+             as though nothing after that step had arrived yet: its end, the
+             newest snapshot and the batches all stop there
      replay  the whole log at once (watch.js says to whom)
      info    whether there is a broadcast, and of which pilot (hidden.js)
 
@@ -129,18 +132,23 @@ export class Broadcast extends Serial {
       }
       const every = this.pace(now);
       if (!m) return reply({ error: 'not on air', every }, 404);
+      const cut = int(b.cut, 0, 1e9) ? b.cut : null;            // a showing: nothing after this step yet
       let from = int(b.from, -1, 1e9) ? b.from : -1;
-      const out = { ok: true, last: m.last, end: m.end, every };
+      const last = cut == null ? m.last : Math.min(m.last, cut);
+      const out = { ok: true, last, end: m.end && (cut == null || m.end.at <= cut) ? m.end : null, every };
       if (from < 0) out.head = this.head;
       /* A snapshot: for a newcomer, one far behind, or one whose game has
-         parted from the fight (`snap`): the latest there is. */
-      const k = m.snaps.length - 1;
+         parted from the fight (`snap`): the latest there is (in a showing,
+         the latest it has got to). */
+      let k = m.snaps.length - 1;
+      if (cut != null) while (k >= 0 && m.snaps[k].at > cut) k--;
       if (k >= 0 && (from < 0 || b.snap === true || m.snaps[k].at - from > VIEW.BEHIND)) {
         out.snap = { at: m.snaps[k].at, epoch: m.snaps[k].epoch, json: await this.snapText(k) };
         from = m.snaps[k].at;
       }
       out.from = from = Math.max(0, from);
       out.batches = this.since(from, VIEW.MOST);
+      if (cut != null) out.batches = out.batches.filter(x => x.from + x.n <= cut + 1);   // whole batches only, up to where it has got
       return reply(out);
     }
 

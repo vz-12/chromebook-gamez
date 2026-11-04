@@ -1880,6 +1880,56 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok((await liveNow(old)).above === false && (await liveNow(old)).live === null, 'and the game\'s Worker, which never makes them, reads such a table as nothing on and nothing hunted');
   await ensureChallenges(old);
   ok(CHALLENGE_ADDED.every(([c]) => have().includes(c)), 'PvP\'s Worker adds them on its own first use');
+  /* A fight held for its showing (npm run challenge -- premiere): fought
+     before then, nothing goes on air and nothing is told; at the premiere it
+     goes on air from its start, each viewer answered only as far as the
+     showing has got (the relay's `cut`); what it decided is told once that
+     showing has reached its end. */
+  {
+    const { premiereSql, filmSql: filmSql2, mendSql: mendSql2, doorSql: doorSql2 } = await import('./lib/challenge-sql.mjs');
+    const { revealAt, SHOW_SLACK, filmOf, doorOf } = await import('../pvp/src/challenge.js');
+    tool(decideSql('x7', 'none')); tool(mendSql2('x7', false)); tool(doorSql2('x7', 'https://door.example.dev'));
+    tool(filmSql2('x7', 'x7-film', null));
+    const LEN = 40 * 1000, S0 = Date.now() - 2 * 3600e3;
+    // fought: its match (the broadcast above), 40 s long, decided lost by the referee
+    tool(`UPDATE pvp_challenges SET match = '${mid}', started = ${S0}, ended = ${S0 + LEN}, decided = ${S0 + LEN}, outcome = 'lost' WHERE pilot = 'x7';`);
+    ok((await liveNow(DB)).burn > 0 && (await liveNow(DB)).door, 'no premiere: told at once, as ever');
+    const P1 = Date.now() + 3600e3;
+    tool(premiereSql('x7', P1));
+    ok(row().premiere === P1, 'held for its showing, by hand (premiere)', row());
+    let L = await liveNow(DB);
+    ok(L.live === null && L.above === true && !('burn' in L) && !('fell' in L) && !('door' in L) && !('mended' in L),
+       'before its showing: not on air, still hunted, and nothing told', L);
+    ok(L.every >= LIVE.ASK && L.every <= LIVE.IDLE, 'asked again as its showing comes near', L.every);
+    ok(await filmOf(DB) === null && await doorOf(DB) === null && (await filmGet()).status === 404, 'no movie handed out, no door');
+    ok((await home.op('handoff', { to: 'https://door.example.dev' })).status === 400, 'and no code for the door');
+    ok((await look('&v=' + '2'.repeat(16))).status === 404, 'nobody watches it: not on air yet');
+    // at the premiere: on air from its start, as though live
+    L = await liveNow(DB, P1 + 5000);
+    ok(L.live && L.live.match === mid && L.live.since === P1 && L.above === true && !('burn' in L), 'at its premiere: on air, from then, and still nothing told', L);
+    L = await liveNow(DB, P1 + LEN + SHOW_SLACK - 1000);
+    ok(L.live && !('burn' in L), 'all through the showing (and a little after, for viewers behind)');
+    L = await liveNow(DB, P1 + LEN + SHOW_SLACK + 1000);
+    ok(!L.live && L.burn > 0 && L.door === 'https://door.example.dev' && L.above === false, 'its showing over: told, as it would have been', L);
+    ok(revealAt(row()) === P1 + LEN + SHOW_SLACK, 'told at the premiere, plus the fight\'s length, plus the slack');
+    // the relay: 25 s into the showing, each viewer is answered only up to step 1500
+    tool(premiereSql('x7', Date.now() - 25 * 1000));
+    let v = await look('&v=' + '3'.repeat(16));
+    ok(v.status === 200 && v.d.snap && v.d.snap.at === 900 && v.d.last === 1500 && v.d.end === null,
+       'a newcomer 25 s in: the newest snapshot up to there (not the fight\'s latest), and no end', [v.status, v.d.snap && v.d.snap.at, v.d.last, v.d.end]);
+    ok(v.d.batches.length > 0 && v.d.batches.every(x => x.from + x.n <= 1501), 'and no step past it', v.d.batches.map(x => x.from + x.n).slice(-2));
+    v = await look('&from=1400');
+    ok(v.d.batches.every(x => x.from + x.n <= 1501) && !v.d.snap, 'one keeping up: up to there, and no further');
+    ok(await filmOf(DB) === null, 'the movie still held while it is showing');
+    // long after: the whole of it, and told
+    tool(premiereSql('x7', Date.now() - 3600e3));
+    v = await look('&from=2300');
+    ok(v.d.last === 2399 && v.d.end && v.d.end.at === 2400, 'the showing past the fight\'s end: all of it, with its end', [v.d.last, v.d.end]);
+    ok((await filmOf(DB)) && (await doorOf(DB)) === 'https://door.example.dev' && (await filmGet()).status === 200, 'and the movie and the door, as ever');
+    tool(premiereSql('x7', null));
+    ok(row().premiere === null, 'premiere none: back to as it was');
+    tool(decideSql('x7', 'none')); tool(doorSql2('x7', null)); tool(filmSql2('x7', null, null));
+  }
   /* A table from before the hunt's own columns, a challenge already sent in
      it: nothing in it was ever decided or held, so the game's Worker reads
      it as hunted, without the columns. */
