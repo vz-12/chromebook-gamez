@@ -38844,6 +38844,7 @@ function handleClick() {
     if (inRect(mouse.x, mouse.y, menuAcctRect())) { AcctUI.open(); return; }
     if (inRect(mouse.x, mouse.y, menuPvpRect())) { Account.toPvp(); return; }
     if (labDoorUp() && inRect(mouse.x, mouse.y, menuLabRect())) { Account.toLab(); return; }   // an admin's LAB door
+    if (gateDoorUp() && inRect(mouse.x, mouse.y, menuGateRect())) { Account.toGate(); return; }   // THE GATE: back through THE DOOR
     if (inRect(mouse.x, mouse.y, menuOstRect()) && ostDoorUp()) { openOst(); return; }   // THE SOUNDTRACK
     if (!PVP && inRect(mouse.x, mouse.y, menuAchRect())) { openAch('menu'); return; }     // ACHIEVEMENTS
     if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
@@ -77446,6 +77447,7 @@ function renderMenu() {
   drawMenuAch();        // ACHIEVEMENTS: and the next goal
   drawMenuCodex();      // and the codex, which had only a key
   drawMenuLab();        // an admin's: the way into the lab
+  drawMenuGate();       // an account the other side lets come and go: the way back through THE DOOR
   drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -88251,6 +88253,7 @@ const Account = {
   challenge: false,     // PvP has sent this account a challenge: the PVP door says so (pvp/src/challenge.js)
   admin: false,         // the account is an admin's (the 'dev' perk): the menu shows the LAB door
   back: false,          // the account came back through THE DOOR: its menu isn't shut behind it
+  gate: null,           // and may come and go through it (the perk `gate`): the door's address, for THE GATE in the menu
 
   off: () => BETA || location.protocol === 'file:',
 
@@ -88323,6 +88326,7 @@ const Account = {
     Account.challenge = !!(Account.me && r.d.challenge);
     Account.admin = !!(Account.me && r.d.admin);
     Account.back = !!(Account.me && r.d.back);
+    Account.gate = Account.me ? gateAt(r.d.gate) : null;
     if (Account.me && r.d.vault) Outside.boot(r.d.vault);   // what the vault holds for this account (OUTSIDE PILOTS)
     if (Account.me) await Account.pull();
   },
@@ -88372,6 +88376,23 @@ const Account = {
       return;
     }
     location.href = LAB_ORIGIN + '/signin#h=' + r.d.code;
+  },
+
+  /* Back through THE GATE (an account the other side lets come and go:
+     Account.gate, the door's address, from the server): a hand-off code for
+     exactly that address, as THE DOOR's own, and the address this page is on
+     goes along for the way back. Without a code (the server said no), the
+     other side asks for the name and password instead. */
+  async toGate() {
+    if (Account.off() || GateDoor.busy || !Account.me || !Account.gate) return;
+    const to = Account.gate, back = '&from=' + encodeURIComponent(location.origin);
+    GateDoor.busy = true; GateDoor.note = '';
+    await Account.push();
+    const r = await Account.call('POST', '', { op: 'handoff', to });
+    GateDoor.busy = false;
+    if (r.status === 401) { Account.lost(); AcctUI.open('in'); return; }
+    if (!r.status) { GateDoor.note = 'CAN\'T REACH THE SERVER'; return; }
+    location.href = r.ok && r.d && r.d.code ? to + '/signin#h=' + r.d.code + back : to + '/signin#' + back.slice(1);
   },
 
   async pull() {
@@ -88439,7 +88460,7 @@ const Account = {
   /* The server no longer knows this session: it expired, or the password was
      changed somewhere else. The save here is the player's, so it stays. */
   lost() {
-    Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = ''; Account.admin = false; Account.back = false;
+    Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = ''; Account.admin = false; Account.back = false; Account.gate = null;
     Account.due = false; Account.status = 'out'; Account.challenge = false;
   },
 
@@ -88463,8 +88484,8 @@ const Account = {
        played on, and its own perks (a dev account's are everything). */
     Awards.sync();
     Outside.ask();                     // and whatever the vault holds for it (OUTSIDE PILOTS)
-    Account.admin = false; Account.back = false;   // and whether it's an admin's, for the LAB door, and came back through THE DOOR
-    Account.call('GET').then(r => { Account.admin = !!(r.ok && r.d && r.d.account && r.d.admin && Account.me); Account.back = !!(r.ok && r.d && r.d.account && r.d.back && Account.me); });
+    Account.admin = false; Account.back = false; Account.gate = null;   // and whether it's an admin's, for the LAB door, came back through THE DOOR, and may come and go (THE GATE)
+    Account.call('GET').then(r => { Account.admin = !!(r.ok && r.d && r.d.account && r.d.admin && Account.me); Account.back = !!(r.ok && r.d && r.d.account && r.d.back && Account.me); Account.gate = r.ok && r.d && r.d.account && Account.me ? gateAt(r.d.gate) : null; });
   },
 
   async signIn(name, pass) {
@@ -88975,6 +88996,46 @@ function drawMenuLab() {
   ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = LabDoor.note ? '#f87171' : hot ? '#94a3b8' : '#64748b';
   const sub = LabDoor.busy ? 'OPENING…' : LabDoor.note ? LabDoor.note : "THE ADMINS' TEST PAGE  ↗";
+  ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
+  ctx.restore();
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* THE GATE: under the LAB door's place (in it, for an account that isn't an
+   admin's), drawn only for an account the other side lets come and go
+   (Account.gate, from the server: the door's address). It leads back
+   through THE DOOR, signed in (Account.toGate). Nothing here says what is
+   on the other side. */
+const GateDoor = { busy: false, note: '' };
+function menuGateRect() { return { x: 18, y: labDoorUp() ? 454 : 414, w: 176, h: 34 }; }
+const gateDoorUp = () => !PVP && !BETA && !Account.off() && !!Account.me && !!Account.gate;
+// an address the server gave for it: an http(s) origin and nothing after it, else none
+function gateAt(v) {
+  try { const u = new URL(String(v || '')); return u.origin === v && /^https?:$/.test(u.protocol) ? u.origin : null; } catch (e) { return null; }
+}
+
+function drawMenuGate() {
+  if (!gateDoorUp()) return;
+  const r = menuGateRect(), col = '#22d3ee';
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot ? 'rgba(34,211,238,0.14)' : 'rgba(8,13,22,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35 + 0.15 * Math.sin(uiTime * 1.6));
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.save();
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText('◆  THE GATE', r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = GateDoor.note ? '#f87171' : hot ? '#94a3b8' : '#64748b';
+  const sub = GateDoor.busy ? 'OPENING…' : GateDoor.note ? GateDoor.note : 'BACK THROUGH IT  ↗';
   ctx.fillText(clipText(sub, 30), r.x + 12, r.y + 27);
   ctx.restore();
   ctx.restore();

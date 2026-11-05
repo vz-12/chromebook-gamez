@@ -1823,6 +1823,18 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   const gm = (await gameLive()).d;
   ok(gm.mended === 4567890 && !('door' in gm), 'mended: the door closes, every game told', gm);
   ok((await home.op('handoff', { to: DOOR })).status === 400, 'and no more codes for it');
+  // THE GATE: an account the other side lets come and go (the perk `gate`) may go back through it, mended or not
+  const duel = one("SELECT id, perks FROM accounts WHERE name = 'duelist'"), setPerks = p => DB.sql.prepare('UPDATE accounts SET perks = ? WHERE id = ?').run(JSON.stringify(p), duel.id);
+  ok(!('gate' in (await home.call('GET', '/api/account')).d), 'no perk: the account reply says nothing of a gate');
+  setPerks(['back', 'gate']);
+  const ga = (await home.call('GET', '/api/account')).d;
+  ok(ga.gate === DOOR && ga.back === true, "the perk: the door's address, for its menu's way back", ga);
+  const gh = await home.op('handoff', { to: DOOR });
+  ok(gh.status === 200 && gh.d.to === DOOR, 'and a code for exactly its address, mended', gh.d);
+  ok((await home.op('handoff', { to: 'https://elsewhere.example.dev' })).status === 400, 'and still for nowhere else');
+  setPerks(['back']);
+  ok(!('gate' in (await home.call('GET', '/api/account')).d) && (await home.op('handoff', { to: DOOR })).status === 400, 'back alone: neither');
+  setPerks(JSON.parse(duel.perks || '[]'));
   ok(tool(challengesSql()).find(x => x.pilot === 'x7').door === DOOR, 'the tool lists it');
   tool(mendSql('x7', false));
   ok((await gameLive()).d.door === DOOR, 'not mended (mend none): open again');

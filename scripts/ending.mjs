@@ -15,6 +15,8 @@
      failing     a movie that will not load, or one that throws, ends
                  quietly: the game goes on
      dev         ?ending=dev on localhost plays /api/film at once, every load
+     the gate    an account the other side lets come and go: THE GATE in the menu,
+                 back through the door, signed in, mended or not
    ========================================================================= */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -226,6 +228,45 @@ section('the door: a lost world sends its players through it, until it is mended
   await answer(g12, { live: null, every: 900, above: false, door: 'javascript:alert(1)' });
   g12.run('Door.tick()');
   ok(!g12.run('Door.shut()') && !g12.run('Door.up()'), 'anything but an address is no door');
+}
+
+section('the gate: an account the other side lets come and go goes back through the door from the menu, mended or not');
+{
+  const DOOR = 'https://door.example.dev', FROM = '&from=' + encodeURIComponent('http://localhost');
+  const g15 = boot();
+  g15.run(SETUP);
+  await answer(g15, { live: null, every: 900, above: false, burn: 31, mended: 41 });
+  g15.run('Door.tick()');
+  ok(!g15.run('Door.shut()') && !g15.run('gateDoorUp()'), 'mended, nobody signed in: the game played, and no gate');
+  g15.run("Account.me = { name: 'x', display: 'X' }; Account.back = true; Account.gate = null;");
+  ok(!g15.run('gateDoorUp()'), 'back, but not let come and go: no gate either');
+  ok(g15.run(`gateAt('javascript:alert(1)')`) === null && g15.run(`gateAt('${DOOR}/x')`) === null && g15.run(`gateAt('')`) === null && g15.run(`gateAt('${DOOR}')`) === DOOR,
+     'only an http(s) origin, nothing after it, is an address for it');
+  g15.run(`Account.gate = gateAt('${DOOR}');`);
+  ok(g15.run('gateDoorUp()') && g15.run('menuGateRect().y') === 414, "let come and go: THE GATE in the menu, in the LAB door's place");
+  g15.run('Account.admin = true;');
+  ok(g15.run('menuGateRect().y') === 454, "an admin's: under the LAB door");
+  g15.run('Account.admin = false;');
+  let threw = null;
+  try { g15.run('render()'); } catch (e) { threw = e; }
+  ok(!threw, 'drawn with the menu', String(threw));
+  // a click on it: a hand-off code for exactly the door's address, and through, signed in
+  g15.run("globalThis.__hrefs = []; Object.defineProperty(location, 'href', { set: v => __hrefs.push(v), get: () => 'http://localhost/', configurable: true });");
+  g15.run("Account.push = async () => true; Account.call = async (m, p, b) => (globalThis.__asked3 = b, { ok: true, status: 200, d: { code: 'G'.repeat(40) } });");
+  const r = g15.run('menuGateRect()');
+  g15.run(`mouse.x = ${r.x + 20}; mouse.y = ${r.y + 15}; handleClick();`);
+  await flush();
+  ok(g15.run('__asked3.op') === 'handoff' && g15.run('__asked3.to') === DOOR && g15.run('__hrefs[0]') === DOOR + '/signin#h=' + 'G'.repeat(40) + FROM,
+     'clicked: a code for exactly its address, and through it with the way back', g15.run('__hrefs[0]'));
+  // no code given: to its sign-in all the same; no server: it says so, and stays
+  g15.run("Account.call = async () => ({ ok: false, status: 400, d: { error: 'bad destination' } });");
+  await g15.run('Account.toGate()');
+  ok(g15.run('__hrefs[1]') === DOOR + '/signin#' + FROM.slice(1), 'no code: to its sign-in', g15.run('__hrefs[1]'));
+  g15.run('Account.call = async () => ({ ok: false, status: 0 });');
+  await g15.run('Account.toGate()');
+  ok(g15.run('__hrefs.length') === 2 && /REACH THE SERVER/.test(g15.run('GateDoor.note')), 'no server: it says so, and nobody goes anywhere');
+  g15.run('Account.lost();');
+  ok(g15.run('Account.gate') === null && !g15.run('gateDoorUp()'), 'the session lost: no gate');
 }
 
 section('dev: ?ending=dev on localhost plays /api/film at once, every load');

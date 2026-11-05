@@ -353,6 +353,18 @@ export async function doorOf(db) {
   } catch (e) { return null; }   // no table, or not its newer columns yet: no door
 }
 
+/* THE GATE: an account the other side lets come and go (the perk `gate`, given
+   there) may go back through the door whenever it likes, the world mended or
+   not. Its address, from the same row as doorOf's, for that account alone
+   (src/account.js: its menu's way back, and a hand-off code for it). null
+   while there is none, or while its showing still holds it. */
+export async function gateOf(db) {
+  try {
+    const row = await db.prepare(`SELECT * FROM pvp_challenges WHERE outcome = 'lost' AND decided IS NOT NULL ORDER BY decided LIMIT 1`).first();
+    return row && row.door && !held(row, Date.now()) ? row.door : null;
+  } catch (e) { return null; }
+}
+
 /* THE ENDING's movie (index.html, ENDING; src/film.js): the vault entries
    `npm run challenge -- film` named for a challenge and the way it went,
    once it has gone that way for the account it was sent to, and only from
