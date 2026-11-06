@@ -1592,6 +1592,18 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   ok(got.status === 200 && got.d === pilotCode, 'from now on its code goes to anybody watching, signed in or not', got.status);
   ok((await code(anon, 'id=x8&watch=' + mid)).status === 404 && (await code(anon, 'id=x7&watch=' + 'f'.repeat(32))).status === 404,
      'but only that pilot, and only for a broadcast it flies in');
+  // its pin: the broadcast's own copy of the pilot as it was flown, kept for after the pilot changes (hidden.js, pinOf)
+  {
+    const { dropSql } = await import('./lib/vault-sql.mjs');
+    const pin = 'x7-' + mid.slice(0, 8), flown = '/* x7, as it was flown in this match */';
+    tool(putSql(pin, Buffer.from(flown)).sql);
+    const p = await code(anon, 'id=x7&watch=' + mid);
+    ok(p.status === 200 && p.d === flown, 'a copy pinned to the broadcast is what its viewers are handed, in place of the pilot as it is now', p.status);
+    ok((await code(anon, 'id=' + pin + '&watch=' + mid)).status === 404, 'the pin is no pilot of its own: named, it hands over nothing');
+    ok((await code(anon, 'id=x7&watch=' + 'f'.repeat(32))).status === 404, 'nor does it open anything for a broadcast it isn\'t in');
+    tool(dropSql(pin));
+    ok((await code(anon, 'id=x7&watch=' + mid)).d === pilotCode, 'with the pin gone, the pilot as it is now again');
+  }
 
   // batches: in order, nothing skipped, each taken once
   const recs = steps => Buffer.alloc(steps * 22, 7).toString('base64');

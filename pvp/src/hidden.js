@@ -40,7 +40,11 @@ export default async function pilot(req, env) {
     const res = await env.BROADCAST.get(env.BROADCAST.idFromName(wid)).fetch('https://broadcast/info', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     const d = res.ok ? await res.json().catch(() => null) : null;
-    return d && d.on && d.pilot === id ? text(env, id) : nothing();
+    if (!(d && d.on && d.pilot === id)) return nothing();
+    /* A fight kept with the pilot it was flown with: a vault entry named
+       for both (its pin, '<id>-<the match's first 8>'), so the recording
+       plays as it was flown after the pilot itself has changed. */
+    return (await text(env, pinOf(id, wid), true)) || text(env, id);
   }
   const s = await sessionOf(req, env, { peek: true });
   if (!s) return nothing();
@@ -56,9 +60,13 @@ export default async function pilot(req, env) {
   return text(env, id);
 }
 
-async function text(env, id) {
-  const got = await vaultText(env.DB, id);
-  if (!got) return nothing();
+// a broadcast's own copy of its hidden pilot, as the vault names it (put it with npm run vault)
+export const pinOf = (id, match) => id + '-' + match.slice(0, 8);
+
+// soft: null for a missing entry, instead of the 404
+async function text(env, id, soft = false) {
+  const got = VAULT_ID.test(id) ? await vaultText(env.DB, id) : null;
+  if (!got) return soft ? null : nothing();
   return new Response(got.text, {
     headers: { 'content-type': 'text/javascript; charset=utf-8', 'x-vault-hash': got.hash, 'cache-control': 'no-store' } });
 }

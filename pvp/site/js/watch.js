@@ -144,10 +144,19 @@
   async function begin(h) {
     if (!h || h.v !== 1 || !h.run || !Array.isArray(h.hellos) || h.hellos.length !== 2 || !h.hellos[0] || !h.hellos[1])
       return stop('This broadcast can\'t be read.');
-    if (h.build !== buildId())
+    if (h.build !== buildId()) {
+      /* A fight from another build plays on that build's own page, kept for
+         it (scripts/freeze-play.mjs): a viewer is sent there, the same
+         question asked; a replay's file is chosen again there. */
+      const at = '/at/' + h.build + '/';
+      if (typeof h.build === 'string' && /^[0-9a-z]{1,12}\.[0-9a-z]{1,12}$/.test(h.build) && location.pathname !== at && await frozen(at)) {
+        if (!V.file) { location.replace(at + location.search + location.hash); return; }
+        return stop('This replay was recorded on another version of the game (' + h.build + '). Its own page plays it: ' + location.origin + at + '?replay=1');
+      }
       return stop(V.file ? 'This replay was recorded on another version of the game (' + h.build + '; this page is ' + buildId() + '). ' +
                            'Check out the commit it was played on, run npm run dev:pvp, and open it there.'
                          : 'This fight is being played on another version of the game. Reload the page.');
+    }
     V.head = h;
     V.phase = 'load';
     say();
@@ -162,6 +171,11 @@
       if (!mark || String(mark[1]) !== OUTSIDE.sig[id]) return stop('This fight\'s hidden pilot is another version of it. Reload the page.');
     }
     build(h);
+  }
+
+  // a frozen page for a build: there or not (PvP's Worker serves pvp/site/at/<build>/)
+  async function frozen(at) {
+    try { return (await fetch(at, { method: 'HEAD', cache: 'no-store' })).ok; } catch (e) { return false; }
   }
 
   async function pilotText(id) {

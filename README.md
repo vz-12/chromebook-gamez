@@ -568,6 +568,21 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   `/play/?replay=1` and choose the file. The file is only ever chosen on
   the page, never fetched: the hidden pilot's code is in it, so keep it out
   of this folder, which is what a deploy uploads.
+- **A fight worth keeping keeps its page:** `npm run freeze:play -- <commit>`
+  (`scripts/freeze-play.mjs`) writes PvP's play page as it was at that
+  commit into `pvp/site/at/<build>/` (the page by that commit's own
+  `pvp-build.mjs`, PvP's scripts as they were, the engine byte for byte), and
+  PvP's Worker serves it at `/at/<build>/`. A viewer of a fight from another
+  build is sent there by `watch.js`; a replay's file is told where to go.
+  Frozen pages are never edited: `npm run test:pvp` checks each still hashes
+  to its folder's name, and `.gitattributes` keeps their bytes. They talk to
+  today's API, so keep `/api/pvp/watch` and `/api/pvp/pilot` answering the
+  same way. Frozen so far: `2smw7.12cok4c` (1bad5de), the build the story
+  fight was fought and shown on.
+- **And its pilot:** a hidden pilot changes after its fight, and the fight
+  then plays differently. A copy of it as it was flown, put in the vault as
+  `<id>-<the match id's first 8>` (`npm run vault -- put ...`), is what the
+  broadcast's viewers are handed instead (`hidden.js`, `pinOf`).
 
 **From above** (FROM ABOVE in `index.html`, `npm run test:above`). From the
 moment a challenge is sent until its fight is fought out, the game's runs
