@@ -78,8 +78,10 @@ const isPid = v => typeof v === 'string' && /^[0-9a-f]{16,64}$/.test(v);
                     'supporter' (src/looks.js; `npm run supporter`), and the
                     game, which does not know it, drops it
      anything else  one perk id: 'unlock-all', 'evo-ember', 'evo-runner',
-                    'passes-20' (twenty challenge passes), … — and only one
-                    the game's DEV_PERK_IDS lists (index.html), or it drops it
+                    'passes-20' (twenty challenge passes), 'root-key'
+                    (ROOT's key, carried from the next run until spent), …
+                    — and only one the game's DEV_PERK_IDS lists
+                    (index.html), or it drops it
    DEV_PIDS below speak the same language.
 
    TO GIVE AN ACCOUNT PERKS, in the D1 console (or `wrangler d1 execute`):
