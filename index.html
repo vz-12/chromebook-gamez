@@ -86074,9 +86074,10 @@ const DEV_SKIN_IDS = ['void-sovereign', 'redaction', 'redaction-open', 'draft',
    'comeback' is WELCOME BACK's: THE HACKER and the challenge passes.
    'evo-<pilot>' wakes that one pilot's evolution (devPerksApply), where
    unlock-evo wakes them all. 'passes-<n>' is n challenge passes by hand,
-   on top of any WELCOME BACK gave (PASS_PERKS). */
+   on top of any WELCOME BACK gave (PASS_PERKS). 'root-key' is ROOT's key
+   by hand, as if ROOT had minted it (devRootKey). */
 const DEV_PERK_IDS = ['unlock-all', 'unlock-evo', 'unlock-event', 'comeback',
-                      'evo-ember', 'evo-runner', 'passes-20'];
+                      'evo-ember', 'evo-runner', 'passes-20', 'root-key'];
 
 const Awards = {
   syncing: false,
@@ -86482,7 +86483,22 @@ function devPerksApply() {
   if (devPerk('unlock-evo')) changed = devUnlockEvo() || changed;
   for (const a of Awards.list())
     if (a.perk && a.perk.startsWith('evo-')) changed = devWakeOne(a.perk.slice(4)) || changed;
+  if (devPerk('root-key')) changed = devRootKey() || changed;
   return changed;
+}
+
+/* ROOT's key, by hand ('root-key'): the record that it turned up, which is
+   all ROOT's finale writes (keyEver), so from the next run on the key is
+   carried from the start until the founder takes it (resetGame), exactly as
+   if it had been earned. Only the save: RUN is frozen when a run starts, and
+   changing it mid-run would split a co-op run in two. Once it is spent
+   (metFounder) the grant does not mint another, the same as earning it. */
+function devRootKey() {
+  const p = Save.profile;
+  if (!p || p.keyEver) return false;
+  p.keyEver = true;
+  Save.writeLocal(); Save.flush();
+  return true;
 }
 
 /* One pilot's evolution, by hand ('evo-<pilot>'): that hull awake and no
