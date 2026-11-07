@@ -32,12 +32,13 @@
 
      node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name] [--restore name]
                                   [--outside path/to/module.js] [--up path/to/rooms.js]
+                                  [--away path/to/rooms-apart.js]
 
    --outside flies the 'outside' scenario with that module (OUTSIDE PILOTS)
    in place of the tests' stand-in, so a pilot kept out of this repo can be
    held to the same rules from wherever it is kept. --up does the same for
    the 'up' scenario's rooms (THE WAY UP): the tests' stand-in, or a module
-   kept out of this repo.
+   kept out of this repo; --away for the 'apart' scenario's rooms apart.
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
 import vm from 'node:vm';
@@ -57,6 +58,8 @@ const OUTSIDE_FILE = (() => { const i = args.indexOf('--outside'); return i >= 0
 
 // and the rooms the 'up' scenario climbs through (THE WAY UP)
 const UP_FILE = (() => { const i = args.indexOf('--up'); return i >= 0 ? path.resolve(args[i + 1]) : path.join(here, 'fixtures', 'up-rooms.js'); })();
+// and the rooms apart the 'apart' scenario goes into, one a sector (THE WAY UP: ROOMS APART)
+const AWAY_FILE = (() => { const i = args.indexOf('--away'); return i >= 0 ? path.resolve(args[i + 1]) : path.join(here, 'fixtures', 'up-apart.js'); })();
 
 /* ------------------------------ load the game ------------------------------ */
 const g = loadGame(IDX, { w: 1280, h: 720 });
@@ -99,7 +102,9 @@ const HARNESS = `(() => {
       // and what is coming for the run (FROM ABOVE): its stream, its clock, its marks
       [aboveRng, r(aboveNext), aboveMarks.map(m => pk(m, ['x', 'y', 't', 'after', 'k', 'took']))],
       // and the way up (THE WAY UP): open, which room, the light, the lift, the module's share of the run
-      typeof upIdx !== 'undefined' ? [upOpen, upIdx, upBeen, upRng, r(upLiftT), upLight ? pk(upLight, ['x', 'y', 't', 'hold', 'out', 'next']) : null, upWorld] : null]);
+      typeof upIdx !== 'undefined' ? [upOpen, upIdx, upBeen, upRng, r(upLiftT), upLight ? pk(upLight, ['x', 'y', 't', 'hold', 'out', 'next']) : null, upWorld] : null,
+      // and the rooms apart: which, and the boss owed
+      typeof upAt !== 'undefined' ? [upAt, r(upBossT), hitStop > 0 ? r(hitStop) : 0] : null]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -198,7 +203,8 @@ const HARNESS = `(() => {
     if (o.from) snapRead(JSON.parse(o.from));     // run C: the run so far is another copy's, taken over here
     run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null,
             vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0],
-            opo: { lines: [], door: false, phases: [], done: false }, opoLast: null, up: { max: -1, was: -1, down: false } };
+            opo: { lines: [], door: false, phases: [], done: false }, opoLast: null, up: { max: -1, was: -1, down: false },
+            apart: { seen: [], was: -1, down: 0 } };
   }
   function play(o) {
     start(o);
@@ -209,6 +215,12 @@ const HARNESS = `(() => {
       else if (state === 'shop' && o.shops) { uiArm = 0; ui('shopOut'); }   // o.shops: out of the shop the way a player leaves, so the portal room comes
       else if (state !== 'play' && state !== 'dead') state = 'play';
       if (o.b && o.b.junk) junk(o.b);
+      /* the rooms apart (o.apart): into one at the start of every sector, in turn (the sector's
+         place in the run says which, so a copy that takes the run over goes on the same) */
+      if (o.apart && typeof upAt !== 'undefined' && upAt < 0 && !bossAlive && upLiftT < 0 && state === 'play' && wave >= 1 && wave % 5 !== 0 && UP_AWAY.length) {
+        const r = UP_AWAY[Math.floor((wave - 1) / 5) % UP_AWAY.length];
+        upAway(r.mod, r.apart);
+      }
       update(STEP);
       if (o.b && o.b.draw && run.k % 5 === 0) { try { render(); } catch (err) { run.drawErrors++; if (!run.firstDrawError) run.firstDrawError = String(err && err.stack || err).split('\\n').slice(0, 3).join(' | '); } }
       run.maxWave = Math.max(run.maxWave, wave);
@@ -229,11 +241,16 @@ const HARNESS = `(() => {
         if (RUN.opoDone) run.opo.done = true;
       }
       if (typeof upIdx !== 'undefined') { run.up.max = Math.max(run.up.max, upIdx); if (run.up.was >= 0 && upIdx < 0) run.up.down = true; run.up.was = upIdx; }
+      if (typeof upAt !== 'undefined') {
+        if (upAt >= 0 && !run.apart.seen.includes(upAt)) run.apart.seen.push(upAt);
+        if (run.apart.was >= 0 && upAt < 0) run.apart.down++;
+        run.apart.was = upAt;
+      }
       if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, up: run.up, upErrs: typeof UP !== 'undefined' ? Object.keys(UP.errs).join(',') : '', outsideErrs: Object.keys(OUTSIDE.errs).join(','),
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, up: run.up, apart: run.apart, upErrs: typeof UP !== 'undefined' ? Object.keys(UP.errs).join(',') : '', outsideErrs: Object.keys(OUTSIDE.errs).join(','),
              oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '' };
   }
   globalThis.__det = { play, oxWrap };
@@ -252,13 +269,17 @@ outsideIn(ctx);
 const UP_TEXT = fs.readFileSync(UP_FILE, 'utf8');
 const upIn = c => vm.runInContext('Outside.run("u0", ' + JSON.stringify(UP_TEXT) + ')', c, { filename: 'up-rooms' });
 upIn(ctx);
+const AWAY_TEXT = fs.readFileSync(AWAY_FILE, 'utf8');
+const awayIn = c => vm.runInContext('Outside.run("a0", ' + JSON.stringify(AWAY_TEXT) + ')', c, { filename: 'up-apart' });
+awayIn(ctx);
+const AWAY_N = vm.runInContext('UP_AWAY.length', ctx) || 2;
 // the climb takes about three minutes a room for the bot: the up scenario is as long as its module has rooms
 const UP_ROOMS_N = vm.runInContext('UP_ROOMS.length', ctx) || 2;
 /* Run C's copy of the game: loaded on its own, at another size, it takes over
    run A's snapshot partway through and has to play the rest the same. */
 let C = null;
 const copyC = () => {
-  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); outsideIn(C.ctx); upIn(C.ctx); }
+  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); outsideIn(C.ctx); upIn(C.ctx); awayIn(C.ctx); }
   return C;
 };
 
@@ -320,6 +341,10 @@ const S = [
      stand-in, or --up's), their bosses and shops, and let down at the end. */
   { name: 'up',         char: 'runner', seed: 127, steps: 7200 + 10800 * UP_ROOMS_N, shops: true, climb: true,
     starter: 'stage = STAGES[4]; upFelled({ boss: "nullcore" }); wave = 5; stageAbs = 1; enterStage(STAGES[0]); P.dmg *= 20' },
+  /* The rooms apart (THE WAY UP): into each of the module's (the tests'
+     stand-in, or --away's) at the start of a sector, in turn: the lift, its
+     boss, the shop, and let down into the rotation after each. */
+  { name: 'apart',      char: 'runner', seed: 131, steps: 3600 + 10800 * AWAY_N, shops: true, apart: true, starter: 'P.dmg *= 20' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
@@ -446,7 +471,9 @@ for (const sc of S) {
   }
   // the way up's run has to have been up every room of the module and let down, with no hook thrown
   const upCover = sc.name !== 'up' || (a.up.max >= UP_ROOMS_N - 1 && a.up.down && !a.upErrs && !b.upErrs && !c.upErrs);
-  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover) failed++;
+  // and the rooms apart's, into every one and let down after each
+  const apartCover = sc.name !== 'apart' || (a.apart.seen.length >= AWAY_N && a.apart.down >= AWAY_N && !a.upErrs && !b.upErrs && !c.upErrs);
+  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover || !apartCover) failed++;
   const opoNote = sc.name === 'opo-route' ? `  · his lines ${a.opo.lines.join(',') || 'none'}, door ${a.opo.door ? 'passed' : 'NOT SEEN'}`
                 : sc.name === 'onepointoh' ? `  · phases ${a.opo.phases.join('') || '-'}, ${a.opo.done ? 'out' : 'NOT ENDED'}` : '';
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
@@ -454,11 +481,12 @@ for (const sc of S) {
     (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
     (outsideOk ? '' : ` (HOOKS FAILED: ${ox.errs || 'step or key never played'})`) : '';
   const upNote = sc.name === 'up' ? `  · up: ${path.basename(UP_FILE)}, rooms to ${a.up.max + 1}, ${a.up.down ? 'let down' : 'NOT LET DOWN'}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
+  const apartNote = sc.name === 'apart' ? `  · apart: ${path.basename(AWAY_FILE)}, rooms ${a.apart.seen.length}/${AWAY_N}, let down ${a.apart.down}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}${apartNote}`);
 }
 if (!ONLY) {
   // a seed must matter

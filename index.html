@@ -2229,10 +2229,15 @@ let outsideWorld = {};                   // the run's own share of an outside pi
    foes, bosses and hooks), and the run's place among them. Up here because
    resetGame, the codex and the drawing ask after them long before that block
    is reached. */
-const UP = { id: null, hooks: {}, foes: new Map(), bosses: new Map(), errs: {} };   // this machine's (SNAP_LOCAL_OBJS)
+const UP = { id: null, hooks: {}, foes: new Map(), bosses: new Map(), errs: {},   // this machine's (SNAP_LOCAL_OBJS)
+             away: new Map(), own: new Map() };   // ROOMS APART: each module's hooks by its id, and whose each foe and boss is
 const UP_ROOMS = [];                     // the module's rooms, in their order (SNAP_TABLES: every copy has the same)
+const UP_AWAY = [];                      // ROOMS APART: the rooms off the climb, every module's (SNAP_TABLES)
 let upOpen = false;                      // THE VOID's boss has fallen this run: the light stands in the sectors after it
 let upIdx = -1;                          // the room of UP_ROOMS the run is in; -1 in none
+let upAt = -1;                           // the room of UP_AWAY the run is in; -1 in none
+let upBossT = -1;                        // s until a room apart's boss comes; -1 when it is not owed
+let upDevGo = -1;                        // this machine's dev server only: the room apart a run is taken to at its first wave
 let upBeen = false;                      // the run has been up: it is recorded nowhere
 let upLight = null;                      // the light in this room: { x, y, t, hold, out, next }
 let upLiftT = -1;                        // the lift's clock while it plays, -1 when it does not
@@ -2241,16 +2246,23 @@ let upRng = 1;                           // where the light stands: a stream of 
 let upDue = false;                       // a room's boss is down, and the light to the next (or the way down) is owed
 /* On this machine's own dev server only: ?up=<a localhost address of a
    module> runs it as the vault would, and &upopen=1 opens the way from the
-   start of every run, for flying the rooms without going to THE VOID first. */
+   start of every run, for flying the rooms without going to THE VOID first.
+   &away=<another> runs a module of rooms apart beside it (or alone), and
+   &awaygo=<n> takes every run into its room n at the run's first wave. */
 const UP_DEV = (() => {
   try {
     const h = location.hostname;
     if (h !== 'localhost' && h !== '127.0.0.1') return null;
-    const q = new URLSearchParams(location.search), u = q.get('up');
-    if (!u) return null;
-    const url = new URL(u, location.href);
-    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null;
-    return { url: url.href, open: q.get('upopen') === '1' };
+    const q = new URLSearchParams(location.search);
+    const local = u => {
+      if (!u) return null;
+      const url = new URL(u, location.href);
+      return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? url.href : null;
+    };
+    const url = local(q.get('up')), away = local(q.get('away'));
+    if (!url && !away) return null;
+    const go = q.get('awaygo');
+    return { url, open: q.get('upopen') === '1', away, go: away && go !== null && /^\d+$/.test(go) ? +go : -1 };
   } catch (e) { return null; }
 })();
 // the keys an outside pilot's kit is played in a run (pressed: playKey), and the ones it may also read held (P.in.held)
@@ -6010,7 +6022,7 @@ function killBody(e, ang) {
   e.dead = true;
   tale('kill', e);                       // FORGOTTEN TALES: read, never written back
   outsideEv('kill', e);                  // an outside pilot's kit hears every death (OUTSIDE PILOTS)
-  if (upIdx >= 0) upCall('ev', 'kill', e);   // and in the rooms up the light, their module (THE WAY UP)
+  if (upIn()) upCall('ev', 'kill', e);   // and in the rooms up the light (or apart), their module (THE WAY UP)
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
   P.kills++;                             // to whoever landed it: in co-op, the pilot it was resolved as
@@ -6437,6 +6449,8 @@ function startWave() {
      announcing it, and left bossAlive set with nothing alive: no spawns, and a
      wave that could never resolve. A bossless sector runs an ordinary wave. */
   const bd = BOSSES[stage.boss];
+  // THE WAY UP: a room apart may take a sector's boss wave (its module's sector hook); then that boss never comes
+  if (wave % 5 === 0 && bd && !stage.up && upSector()) { spawnT = 0; waveTimer = 0; return; }
   if (wave % 5 === 0 && bd) {
     bossAlive = true;
     banner(bd.name + '   INBOUND', bd.col);
@@ -77668,6 +77682,12 @@ const FREE_ROWS = [
       if (!RUN.up || upQuiet()) { banner('NO WAY UP FROM HERE', '#94a3b8', 2.0); return; }
       upOpen = true;
       if (upIdx < 0) upLightPlace(false); else upAfter(); } },
+  { n: 'A ROOM APART',   f: () => {            // the next of the rooms apart (THE WAY UP), now, if this run may go there
+      if (!UP_AWAY.length || !RUN.up || upQuiet()) { banner('NO ROOM APART HERE', '#94a3b8', 2.0); return; }
+      if (upAt >= 0 || bossAlive || upLiftT >= 0) { banner('NOT NOW', '#94a3b8', 2.0); return; }
+      const r = UP_AWAY[(freeAway = (freeAway + 1) % UP_AWAY.length)];
+      upAway(r.mod, r.apart); },
+    val: () => (UP_AWAY.length ? (freeAway + 2) % (UP_AWAY.length + 1) + ' / ' + UP_AWAY.length : '-') },
   { n: 'GIVE A BOOK',    f: () => {
       const keys = Object.keys(BOOKS);
       const k = keys[(freeBook = (freeBook + 1) % keys.length)];
@@ -77684,13 +77704,13 @@ const FREE_ROWS = [
     val: () => freeSpd + '×' },
   { n: 'END THE RUN',    f: () => { freeRun = false; state = 'menu'; freeOpen = false; } }
 ];
-let freeBoss = -1, freeStage = -1, freeBook = -1, freeMal = -1, freeSign = -1;
+let freeBoss = -1, freeStage = -1, freeBook = -1, freeMal = -1, freeSign = -1, freeAway = -1;
 
 function startFreeplay() {
   resetGame();
   freeRun = true;                        // set after reset: reset clears it
   freeOpen = false; freeSel = 0; freeGod = false; freeSpd = 1;
-  freeBoss = -1; freeStage = -1; freeBook = -1; freeMal = -1; freeSign = -1;
+  freeBoss = -1; freeStage = -1; freeBook = -1; freeMal = -1; freeSign = -1; freeAway = -1;
   state = 'play';
   banner('FREEPLAY   ·   NOTHING IS RECORDED', '#38bdf8', 3.6);
   Audio_.select();
@@ -81769,7 +81789,7 @@ function runSaveable() {
   if (P.outside || inHub || inVigil || (Chal.on && Chal.on.hl)) return false;
   if (intrusion || amalOpen || choice || campVisit || turning || con.open || arrival) return false;
   if (opo || opoRevert) return false;    // ONE POINT OH: the fight and the way in are never kept
-  if (upIdx >= 0 || upLiftT >= 0) return false;   // THE WAY UP: its rooms are never kept
+  if (upIn() || upLiftT >= 0) return false;   // THE WAY UP: its rooms (and those apart) are never kept
   return QOL.runN < RUN_CONTINUES;
 }
 // the run as it stands, kept; true if it was
@@ -89797,7 +89817,7 @@ function aboveQuiet() {
   return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite || oprRite
       || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
       || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal
-      || upIdx >= 0 || upLiftT >= 0;   // nor up the light (THE WAY UP)
+      || upIn() || upLiftT >= 0;   // nor up the light, nor in a room apart (THE WAY UP)
 }
 // a cut-in has the screen and holds the hulls where they are: nothing is aimed, and nothing lands
 function aboveHeld() {
@@ -90536,7 +90556,8 @@ const Outside = {
 
   // the module, run: VR is all it is handed, and the page is all it reads
   run(id, text) {
-    const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def), rooms: def => upRooms(id, def) });   // rooms: THE WAY UP
+    const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def), rooms: def => upRooms(id, def),   // rooms: THE WAY UP
+                               apart: def => upApart(id, def), go: n => upAway(id, n) });                       // and its ROOMS APART
     new Function('VR', text)(VR);
     // its text's mark, so two machines in one match can tell they run the same one (mpOnEvent, hello)
     let h = 2166136261 >>> 0;
@@ -90620,30 +90641,70 @@ const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE
    co-op takes it only when both machines run the same module: whether a run
    may go up is decided as it starts (RUN.up, the module's mark), by the
    host for both.
+
+   ROOMS APART. A module may also call VR.apart(def) once: rooms that are off
+   the climb, each a room with only its boss in it. Any module may have them,
+   and more than one module may (each its own), beside the climb's or alone.
+   def:
+     rooms    [room, ...] as the climb's (a pool is still named: the game
+              never sends it, but a room has one)
+     foes     bosses    as the climb's
+   and hooks as the climb's (enter, step, ev, back, floor, over, screen, hud,
+   lift; no wave, no light), each heard only while the run is in one of that
+   module's rooms, and one more, heard on any ordinary sector's boss wave:
+     sector(def, roll)   a sector's boss is about to come; roll is 0 to 1, a
+                    stream of the way up's own (the light's). Answer a number
+                    n to take the run into the module's room n instead: that
+                    boss never comes.
+     idle(dt)       each play step while the run is in no room at all, where
+                    it may go up: the module watching the run. VR.go may be
+                    called from it.
+   VR.go(n) takes the run into the module's room n from wherever it is in a
+   run that may go up (a room of the climb too, which is left), from one of
+   the module's own hooks, so that it happens on the step. A sector left
+   early is paid as the light pays it. The lift plays, the boss comes after
+   it at once, and no wave runs while the run is there: the module brings
+   whatever else it wants. Its boss down, the shop; then the run is let down
+   into the rotation where the wave clock has it (the next sector, or the
+   gates if they are open). Everything else is as the climb's: a run that
+   has been in one is recorded nowhere, and co-op takes them only when both
+   machines run every room module the same.
    ========================================================================= */
 const UP_HOLD = 1.0;            // s stood in the light before it takes the run
 const UP_LIFT = 2.6;            // s the lift has the screen
 const UP_R = 54;                // how far the light reaches on the floor
 const UP_SETTLE = 0.8;          // s a light takes to stand before it can be stood in
 const UP_HOOKS = ['enter', 'wave', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'light', 'lift'];
+const UP_AWAY_HOOKS = ['enter', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'lift', 'sector', 'idle'];   // ROOMS APART's
 const UP_FOE_NUMS = ['r', 'hp', 'spd', 'dmg', 'xp', 'score', 'sides'];
 
-// the module's mark while it is here: its text, hashed (OUTSIDE.sig, what the hello carries)
-function upSig() { return (UP.id && OUTSIDE.sig[UP.id]) || ''; }
+/* The rooms' mark while they are here: every room module's text, hashed
+   (OUTSIDE.sig, what the hello carries), in the order of their ids. */
+function upMods() { return [UP.id, ...UP.away.keys()].filter((id, i, a) => id && a.indexOf(id) === i).sort(); }
+function upSig() {
+  const ids = upMods();
+  if (!ids.length || ids.some(id => !OUTSIDE.sig[id])) return '';
+  return ids.length === 1 ? OUTSIDE.sig[ids[0]] : ids.map(id => id + ':' + OUTSIDE.sig[id]).join(',');   // one module: its own mark, as the hello has it
+}
+const upAny = () => UP_ROOMS.length > 0 || UP_AWAY.length > 0;
+// the run is in one of the rooms: the climb's, or one apart
+const upIn = () => upIdx >= 0 || upAt >= 0;
 
 function upErr(key, e) {
   if (!UP.errs[key]) console.error('the way up ' + key + ':', e);
   UP.errs[key] = (UP.errs[key] || 0) + 1;
 }
-// a hook, if there is one: what it answers
+/* A hook, if there is one: what it answers. In a room apart, its module's;
+   anywhere else, the climb's. */
+function upHooks() { return upAt >= 0 ? (UP.away.get(UP_AWAY[upAt].mod) || {}) : UP.hooks; }
 function upCall(name, ...a) {
-  const f = UP.hooks[name];
+  const f = upHooks()[name];
   if (!f) return undefined;
   try { return f(...a); } catch (e) { upErr(name, e); return undefined; }
 }
 // a drawing hook, with the canvas left as it was found: true if there is one
 function upDraw(name, ...a) {
-  if (!UP.hooks[name]) return false;
+  if (!upHooks()[name]) return false;
   ctx.save();
   try { upCall(name, ...a); } finally { ctx.restore(); }
   return true;
@@ -90659,38 +90720,42 @@ function upPlain(v, d = 0) {
   return Object.getPrototypeOf(v) === Object.prototype && Object.values(v).every(x => upPlain(x, d + 1));
 }
 
-/* VR.rooms: the def checked, then taken in: its foes join ETYPE, its bosses
-   BOSSES, its rooms UP_ROOMS. Run again (a newer copy of the module), it
-   takes its own places back; it never takes the game's own. */
-function upRooms(id, def) {
-  if (UP.id && UP.id !== id) throw new Error('the rooms here are ' + UP.id + '\'s');
-  if (!def || !Array.isArray(def.rooms) || !def.rooms.length) throw new Error(id + ': rooms is a list of rooms');
+/* A module's foes, bosses and rooms, checked: nothing of the game's own, nor
+   of another module's, and every room sends only what it has. The rooms come
+   back as the game keeps them; nothing is taken in until all of it passes. */
+function upCheck(id, def, what) {
   const foes = def.foes || {}, bosses = def.bosses || {};
+  const mine = k => UP.own.get(k) === id;
   for (const k of Object.keys(foes)) {
     const f = foes[k];
-    if ((ETYPE[k] && !UP.foes.has(k)) || k === 'boss') throw new Error(id + ': ' + k + ' is one of the game\'s own');
+    if ((ETYPE[k] && !mine(k)) || k === 'boss') throw new Error(id + ': ' + k + ' is ' + (UP.own.has(k) ? UP.own.get(k) + '\'s' : 'one of the game\'s own'));
     for (const n of UP_FOE_NUMS) if (!Number.isFinite(f && f[n])) throw new Error(id + ': ' + k + '.' + n + ' is a number');
     if (typeof f.ai !== 'function') throw new Error(id + ': ' + k + ' has no ai');
   }
   for (const k of Object.keys(bosses)) {
     const b = bosses[k];
-    if (BOSSES[k] && !UP.bosses.has(k)) throw new Error(id + ': ' + k + ' is one of the game\'s own');
+    if (BOSSES[k] && !mine(k)) throw new Error(id + ': ' + k + ' is ' + (UP.own.has(k) ? UP.own.get(k) + '\'s' : 'one of the game\'s own'));
     for (const n of ['r', 'sides', 'hpMul', 'spd']) if (!Number.isFinite(b && b[n])) throw new Error(id + ': ' + k + '.' + n + ' is a number');
     if (typeof b.ai !== 'function') throw new Error(id + ': ' + k + ' has no ai');
   }
-  const rooms = def.rooms.map((r, i) => {
-    if (!upPlain(r) || !r || Array.isArray(r) || typeof r !== 'object') throw new Error(id + ': room ' + i + ' is plain data');
-    if (!r.name || !Array.isArray(r.pool) || !r.pool.length) throw new Error(id + ': room ' + i + ' has a name and a pool');
+  return def.rooms.map((r, i) => {
+    if (!upPlain(r) || !r || Array.isArray(r) || typeof r !== 'object') throw new Error(id + ': ' + what + ' ' + i + ' is plain data');
+    if (!r.name || !Array.isArray(r.pool) || !r.pool.length) throw new Error(id + ': ' + what + ' ' + i + ' has a name and a pool');
     for (const p of r.pool)
-      if (!(Array.isArray(p) && (foes[p[0]] || (ETYPE[p[0]] && p[0] !== 'boss' && !HL_ETYPES[p[0]])) && Number.isFinite(p[1]) && p[1] > 0))
-        throw new Error(id + ': room ' + i + ' sends ' + (p && p[0]) + ', which is nothing it has');
-    if (!bosses[r.boss]) throw new Error(id + ': room ' + i + ' ends on ' + r.boss + ', which is none of its bosses');
+      if (!(Array.isArray(p) && (foes[p[0]] || (ETYPE[p[0]] && p[0] !== 'boss' && !HL_ETYPES[p[0]] && (!UP.own.has(p[0]) || mine(p[0])))) && Number.isFinite(p[1]) && p[1] > 0))
+        throw new Error(id + ': ' + what + ' ' + i + ' sends ' + (p && p[0]) + ', which is nothing it has');
+    if (!bosses[r.boss]) throw new Error(id + ': ' + what + ' ' + i + ' ends on ' + r.boss + ', which is none of its bosses');
     return Object.assign(JSON.parse(JSON.stringify(r)), { up: true, alt: false, deep: false, hazard: null, rule: null, nodes: 0 });
   });
+}
+// and taken in: its foes join ETYPE, its bosses BOSSES (a newer copy of the module takes its own places back)
+function upKin(id, def) {
+  const foes = def.foes || {}, bosses = def.bosses || {};
   for (const k of Object.keys(foes)) {
     const f = foes[k];
     ETYPE[k] = { r: f.r, hp: f.hp, spd: f.spd, dmg: f.dmg, col: String(f.col || '#e2e8f0'), xp: f.xp, score: f.score, sides: f.sides };
     UP.foes.set(k, { ai: f.ai, draw: typeof f.draw === 'function' ? f.draw : null });
+    UP.own.set(k, id);
   }
   for (const k of Object.keys(bosses)) {
     const b = bosses[k];
@@ -90701,40 +90766,69 @@ function upRooms(id, def) {
                     if (B) { try { B.ai(e, dt, ux, uy, d, ph); } catch (err) { upErr(k + '.ai', err); } }
                   } };
     UP.bosses.set(k, { ai: b.ai, draw: typeof b.draw === 'function' ? b.draw : null });
+    UP.own.set(k, id);
   }
+  SNAP.index = null; SNAP.statics = null;   // the game's tables have grown: a snapshot reads them again
+}
+
+/* VR.rooms: the def checked, then taken in: its foes join ETYPE, its bosses
+   BOSSES, its rooms UP_ROOMS. Run again (a newer copy of the module), it
+   takes its own places back; it never takes the game's own. */
+function upRooms(id, def) {
+  if (UP.id && UP.id !== id) throw new Error('the rooms here are ' + UP.id + '\'s');
+  if (!def || !Array.isArray(def.rooms) || !def.rooms.length) throw new Error(id + ': rooms is a list of rooms');
+  const rooms = upCheck(id, def, 'room');
+  upKin(id, def);
   UP_ROOMS.length = 0;
-  for (const r of rooms) UP_ROOMS.push(r);
+  for (const r of rooms) UP_ROOMS.push(Object.assign(r, { mod: id }));
   UP.hooks = {};
   for (const h of UP_HOOKS) if (typeof def[h] === 'function') UP.hooks[h] = def[h];
   UP.id = id;
-  SNAP.index = null; SNAP.statics = null;   // the game's tables have grown: a snapshot reads them again
   return rooms.length;
 }
 
-/* Whether a run starting now may go up (runTake): the module's mark if this
-   machine runs it, and with another machine on the line, only if its hello
-   said it runs the same one. */
+/* VR.apart (ROOMS APART): the same, for rooms off the climb. Each module's
+   keep their order among themselves (VR.go's n), and run again it takes its
+   own back; a run in one of them stays pointed at it by where it is. */
+function upApart(id, def) {
+  if (!def || !Array.isArray(def.rooms) || !def.rooms.length) throw new Error(id + ': rooms is a list of rooms');
+  const rooms = upCheck(id, def, 'room apart');
+  upKin(id, def);
+  const keep = UP_AWAY.filter(r => r.mod !== id);
+  UP_AWAY.length = 0;
+  for (const r of keep) UP_AWAY.push(r);
+  rooms.forEach((r, n) => UP_AWAY.push(Object.assign(r, { mod: id, apart: n })));
+  const hooks = {};
+  for (const h of UP_AWAY_HOOKS) if (typeof def[h] === 'function') hooks[h] = def[h];
+  UP.away.set(id, hooks);
+  return rooms.length;
+}
+
+/* Whether a run starting now may go up (runTake): the rooms' mark if this
+   machine runs them, and with another machine on the line, only if its hello
+   said it runs every one of the same. */
 function upTake() {
   const s = upSig();
-  if (!s || PVP || !UP_ROOMS.length) return '';
+  if (!s || PVP || !upAny()) return '';
   if (MP.on || LS.on || netLive()) {
     const outs = MP.heard && Array.isArray(MP.heard.outs) ? MP.heard.outs : [];
-    if (!outs.some(x => Array.isArray(x) && x[0] === UP.id && String(x[1]) === s)) return '';
+    if (!upMods().every(id => outs.some(x => Array.isArray(x) && x[0] === id && String(x[1]) === OUTSIDE.sig[id]))) return '';
   }
   return s;
 }
 // not here: a run that may not, a rule sheet of another kind, the rush, PvP, and every room that is a scene of its own
 function upQuiet() {
-  return !RUN.up || RUN.up !== upSig() || !UP_ROOMS.length || !!PVP || !!Chal.on || amalRite || rootRite || vrRite || oprRite
+  return !RUN.up || RUN.up !== upSig() || !upAny() || !!PVP || !!Chal.on || amalRite || rootRite || vrRite || oprRite
       || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
       || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || !!riteRun;
 }
 
 // the run starts (resetGame): nothing open, nothing up, the light's stream from the run's seed
 function upBegin() {
-  upOpen = false; upIdx = -1; upBeen = false; upLight = null; upLiftT = -1; upWorld = {}; upDue = false;
+  upOpen = false; upIdx = -1; upAt = -1; upBossT = -1; upBeen = false; upLight = null; upLiftT = -1; upWorld = {}; upDue = false;
   upRng = ((simSeed ^ 0x51a7c0de) >>> 0) || 1;
   if (UP_DEV && UP_DEV.open && RUN.up) upOpen = true;    // this machine's dev server only
+  upDevGo = UP_DEV && UP_DEV.go >= 0 && RUN.up ? UP_DEV.go : -1;
 }
 function upRoll() {
   let x = upRng;
@@ -90766,23 +90860,47 @@ function upLightPlace(next) {
 function upEnter(def) {
   upLight = null;
   if (def && def.up) { upCall('enter', def); return; }
-  if (upOpen && upIdx < 0 && !upQuiet()) upLightPlace(false);
+  if (upOpen && !upIn() && !upQuiet()) upLightPlace(false);
 }
 // a boss is down (onBossDefeat, a stage's): THE VOID's opens the way; a room's, the module hears
 function upFelled(e) {
   if (!e) return;
   if (e.boss === 'nullcore' && stage === STAGES[4] && !rushOn() && !Chal.on) upOpen = true;
-  if (upIdx >= 0 && UP.bosses.has(e.boss)) { upDue = true; upCall('ev', 'boss', e); }
+  if (upIn() && UP.bosses.has(e.boss)) { upDue = true; upCall('ev', 'boss', e); }
 }
 // a wave begins (startWave): a sector's boss puts its light out; a room's waves are the module's
 function upWave(boss) {
   if (boss && upLight && !upLight.next && upLight.out < 0) upLight.out = 0;
   if (upIdx >= 0) upCall('wave', ((Math.max(1, wave) - 1) % 5) + 1);
 }
+/* A sector's boss is about to come (startWave): a module of rooms apart may
+   take the wave for one of its rooms (sector). true when it did: the boss
+   never comes. */
+function upSector() {
+  if (!UP.away.size || upIn() || upLiftT >= 0 || upQuiet()) return false;
+  for (const id of upMods()) {
+    const h = UP.away.get(id);
+    if (!h || !h.sector) continue;
+    let n;
+    try { n = h.sector(stage, upRoll()); } catch (e) { upErr('sector', e); continue; }
+    if (Number.isInteger(n) && n >= 0 && upAway(id, n)) return true;
+  }
+  return false;
+}
 /* After a room's boss and its shop (afterReward): the light to the next room,
    or after the last, the way down. true when the way up has the run; false
-   leaves it to the rotation's own way on (a portal room, the wave clock). */
+   leaves it to the rotation's own way on (a portal room, the wave clock). A
+   room apart always lets the run down, into the sector the wave clock has
+   come to (or the gates, if they are open). */
 function upAfter() {
+  if (upAt >= 0) {
+    upDue = false;
+    upCall('ev', 'down');
+    upAt = -1; upBossT = -1; upLight = null; upWorld = {};
+    banner('LET DOWN', '#e2e8f0', 2.6);
+    if (!RUN.altPath) { applyStage(Math.floor(wave / 5)); stageAbs = Math.floor(wave / 5); }
+    return false;
+  }
   if (upIdx < 0) return false;
   upDue = false;
   if (upIdx < UP_ROOMS.length - 1) { upLightPlace(true); Audio_.tone(392, 1.2, 'sine', 0.08, 784); return true; }
@@ -90800,31 +90918,29 @@ function upCatch() {
   if (RUN.altPath) { openPortalRoom(); return true; }
   return false;
 }
-// the waves wait while the next room's light stands (updateWaves)
-function upHolds() { return !!(upLight && upLight.next); }
+// the waves wait while the next room's light stands, and in a room apart until its boss has come (updateWaves)
+function upHolds() { return !!(upLight && upLight.next) || upBossT >= 0; }
 
-// the light, taken: the run carried up into the first room, or on to the next
-function upGo() {
-  const L = upLight;
-  const to = L && L.next ? upIdx + 1 : 0;
-  if (!L || !UP_ROOMS[to]) return;
-  if (!L.next) {
-    const end = Math.ceil(Math.max(1, wave) / 5) * 5;          // the sector's boss wave, never fought
-    if (end - 1 > wave) {
-      const s = rushSkipped(wave + 1, end - 1);
-      pilotsEach(() => { P.xp += Math.round(s.xp / RUSH_PAY * P.xpMul); });
-      credits += Math.round(s.cr / RUSH_PAY * P.credMul * hardCred());
-    }
-    wave = end;
-    spawnBudget = 0; bossAlive = false; shopPending = false;
-    hackKeepArmy(false);                                         // the sector's bodies stay behind; yours come too
-    upBeen = true;
+/* Left mid-sector for the rooms (the light, or a room apart): the sector's
+   bodies stay behind unpaid, its waves still to come are paid as skipped,
+   and its boss is not fought. */
+function upLeaveSector() {
+  const end = Math.ceil(Math.max(1, wave) / 5) * 5;          // the sector's boss wave, never fought
+  if (end - 1 > wave) {
+    const s = rushSkipped(wave + 1, end - 1);
+    pilotsEach(() => { P.xp += Math.round(s.xp / RUSH_PAY * P.xpMul); });
+    credits += Math.round(s.cr / RUSH_PAY * P.credMul * hardCred());
   }
-  upLight = null; upDue = false;
-  upIdx = to;
+  wave = end;
+  spawnBudget = 0; bossAlive = false; shopPending = false;
+  hackKeepArmy(false);                                         // the sector's bodies stay behind; yours come too
+  upBeen = true;
+}
+// into a room (the run's place already set): the room, the hulls at its middle, the lift
+function upArrive(def) {
   stageAbs = Math.floor(wave / 5);                               // the wave clock has nothing to change: the rooms change here
   portals.length = 0; awaitingPortal = false; libraryPortal = null; opoDoor = null;
-  enterStage(UP_ROOMS[to]);
+  enterStage(def);
   const cx = WORLD.w / 2, cy = WORLD.h / 2;
   let k = 0;
   pilotsEach(() => { P.x = cx + (k % 2 ? 70 : k ? -70 : 0); P.y = cy; P.vx = P.vy = 0; k++; });
@@ -90837,10 +90953,66 @@ function upGo() {
   shake(0.6);
 }
 
+// the light, taken: the run carried up into the first room, or on to the next
+function upGo() {
+  const L = upLight;
+  const to = L && L.next ? upIdx + 1 : 0;
+  if (!L || !UP_ROOMS[to]) return;
+  if (!L.next) upLeaveSector();
+  upLight = null; upDue = false;
+  upIdx = to;
+  upArrive(UP_ROOMS[to]);
+}
+
+/* VR.go (ROOMS APART): the run into module id's room n, from a sector or a
+   room of the climb (which is left: its module hears 'down'). Not while a
+   boss is up, nor in a room apart already, nor where the rooms may not be.
+   true when it went. */
+function upAway(id, n) {
+  const at = UP_AWAY.findIndex(r => r.mod === id && r.apart === n);
+  if (at < 0 || state !== 'play' || upAt >= 0 || bossAlive || upLiftT >= 0 || upQuiet()) return false;
+  if (upIdx >= 0) { upCall('ev', 'down'); upIdx = -1; }   // the climb's room left: its module lets go
+  upLeaveSector();                                          // and the room's (or sector's) waves to come, paid as skipped
+  spawnBudget = 0; shopPending = false;
+  upLight = null; upDue = false; upWorld = {};
+  upAt = at;
+  upArrive(UP_AWAY[at]);
+  betweenWaves = 0;
+  upBossT = UP_LIFT + 0.8;
+  return true;
+}
+// each play step out of every room: the modules of rooms apart that watch the run (idle), each as itself
+function upIdle(dt) {
+  for (const id of upMods()) {
+    const h = UP.away.get(id);
+    if (!h || !h.idle) continue;
+    try { h.idle(dt); } catch (e) { upErr('idle', e); }
+    if (upIn()) return;                  // one of them took the run (VR.go)
+  }
+}
+// the lift done: a room apart's boss, at once, high in the middle of the room
+function upAwayBoss() {
+  const bd = BOSSES[stage.boss];
+  if (!bd) return;
+  bossAlive = true;
+  banner(bd.name, bd.col, 3.0);
+  Audio_.boss();
+  const e = spawnEnemy('boss', (arena.x0 + arena.x1) / 2, arena.y0 + (arena.y1 - arena.y0) * 0.3);
+  ringFx(e.x, e.y, 4, 120, e.col, 0.6, 4);
+}
+
 // each play step (update): the lift's clock, the module's step, and the light
 function upTick(dt, wdt) {
   if (upLiftT >= 0 && (upLiftT += dt) >= UP_LIFT) upLiftT = -1;
-  if (upIdx >= 0 && UP.hooks.step) upCall('step', dt, wdt);
+  if (upBossT >= 0 && (upBossT -= dt) <= 0) { upBossT = -1; if (upAt >= 0) upAwayBoss(); }
+  // this machine's dev server only: the run taken to its room apart once its first wave is on
+  if (upDevGo >= 0 && wave >= 1 && state === 'play' && !bossAlive && upLiftT < 0) {
+    const n = upDevGo; upDevGo = -1;
+    const id = upMods().find(m => UP.away.has(m) && UP_AWAY.some(r => r.mod === m && r.apart === n));
+    if (id) upAway(id, n);
+  }
+  if (upIn() && upHooks().step) upCall('step', dt, wdt);
+  else if (!upIn() && UP.away.size && upLiftT < 0 && state === 'play' && !upQuiet()) upIdle(dt);
   const L = upLight;
   if (!L) return;
   L.t += dt;
@@ -90876,7 +91048,7 @@ function upSealed(k) { return UP.foes.has(k) || UP.bosses.has(k); }
 
 /* --------------------------------- drawing ---------------------------------- */
 // the room in the world: back (under its floor's things), floor, over (over the bodies)
-function upDrawRoom(name) { if (upIdx >= 0) upDraw(name); }
+function upDrawRoom(name) { if (upIn()) upDraw(name); }
 function drawUpLight() {
   const L = upLight;
   if (!L) return;
@@ -90904,7 +91076,7 @@ function drawUpLight() {
 }
 // over the frame, under the HUD: the room's screen, and the lift
 function upDrawScreen() {
-  if (upIdx >= 0) upDraw('screen');
+  if (upIn()) upDraw('screen');
   if (upLiftT < 0) return;
   const k = clamp(upLiftT / UP_LIFT, 0, 1);
   if (upDraw('lift', k)) return;
@@ -90914,13 +91086,15 @@ function upDrawScreen() {
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
 }
-function upDrawHud() { if (upIdx >= 0) upDraw('hud'); }
+function upDrawHud() { if (upIn()) upDraw('hud'); }
 
 if (UP_DEV && !PVP) {
-  fetch(UP_DEV.url, { cache: 'no-store' })
+  const dev = (url, id) => fetch(url, { cache: 'no-store' })
     .then(r => (r.ok ? r.text() : null))
-    .then(t => { if (t) Outside.run('up-dev', t); })
+    .then(t => { if (t) Outside.run(id, t); })
     .catch(e => console.error('the way up (dev):', e));
+  if (UP_DEV.url) dev(UP_DEV.url, 'up-dev');
+  if (UP_DEV.away) dev(UP_DEV.away, 'away-dev');
 }
 /* ============================ end of THE WAY UP ============================ */
 
@@ -92701,7 +92875,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST',   // ACHIEVEMENTS
   'UP']);                                 // THE WAY UP: the rooms this machine has run, and their hooks   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
-const SNAP_TABLES = new Set(['UP_ROOMS', 'SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
+const SNAP_TABLES = new Set(['UP_ROOMS', 'UP_AWAY', 'SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
 
 // this build, for the hello: two different builds part in lockstep however careful the game is

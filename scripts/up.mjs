@@ -213,6 +213,137 @@ section('snapshot: a run in a room travels, and points at the same room');
   ok(b.run('wave') === a.run('wave') && b.run('simRngState') === a.run('simRngState'), 'the same run');
 }
 
+/* ------------------------------ ROOMS APART ------------------------------- */
+const APART = fs.readFileSync(path.join(here, 'fixtures', 'up-apart.js'), 'utf8');
+function bootApart(withClimb = true) {
+  const g = boot(withClimb);
+  g.run('Outside.run("a9", ' + JSON.stringify(APART) + ')');
+  g.run('globalThis.__apartTake = undefined; globalThis.__apartGo = undefined; globalThis.__apartHeard = 0; globalThis.__apartEvs = ""');
+  return g;
+}
+
+section('rooms apart: taken in beside the climb, or alone');
+{
+  const g = bootApart();
+  ok(g.run('UP_AWAY.length') === 2 && g.run('UP_ROOMS.length') === 2, 'two rooms apart, beside the climb\'s two');
+  ok(g.run('UP_AWAY[1].mod === "a9" && UP_AWAY[1].apart === 1 && UP_AWAY[1].up === true && UP_AWAY[1].hazard === null'), 'each knows its module and its place');
+  ok(g.run('!!ETYPE.x1f && BOSSES.x1b.up === true && BOSSES.x1b.name === "THE OTHER STAND-IN"'), 'its foe and boss join the game\'s tables');
+  ok(g.run('Object.keys(UP.away.get("a9")).sort().join()') === 'back,enter,ev,floor,hud,idle,lift,over,screen,sector,step', 'every hook kept', g.run('Object.keys(UP.away.get("a9")).join()'));
+  ok(g.run('UP.id === "u9" && Object.keys(UP.hooks).length === 11'), 'the climb\'s module keeps its own');
+  ok(g.run('upSig()') === 'a9:' + g.run('OUTSIDE.sig.a9') + ',u9:' + g.run('OUTSIDE.sig.u9'), 'the rooms\' mark is both modules\'');
+  ok(g.run('Outside.run("a9", ' + JSON.stringify(APART) + '), UP_AWAY.length') === 2, 'run again, it takes its own places back');
+  let threw = false;
+  try { g.run(`Outside.run("a8", ${JSON.stringify("VR.apart({ rooms: [{ name: 'X', pool: [['x1f', 1]], boss: 'x1b' }], bosses: { x1b: { r: 1, sides: 3, hpMul: 1, spd: 1, ai() {} } } })")})`); } catch (e) { threw = true; }
+  ok(threw && g.run('UP_AWAY.length') === 2 && !g.run('UP.away.has("a8")'), 'another module cannot take a boss that is another\'s, nor send a foe of another\'s');
+  const alone = bootApart(false);
+  ok(alone.run('UP_ROOMS.length === 0 && UP_AWAY.length === 2 && upSig() === OUTSIDE.sig.a9'), 'alone, with no climb: its mark is its own');
+  fresh(alone);
+  ok(alone.run('RUN.up') === alone.run('upSig()') && alone.run('RUN.up').length > 0, 'a run may go there with no climb at all');
+}
+
+section('rooms apart: a sector\'s boss wave, taken');
+{
+  const g = bootApart();
+  fresh(g);
+  ok(until(g, 'wave >= 1'), 'the run is on');
+  ok(g.run('__apartIdle') > 0, 'out of every room, the module watches (idle)');
+  g.run('wave = 3; betweenWaves = 0; spawnBudget = 0');
+  clear(g);
+  ok(until(g, 'wave === 5', 30) && g.run('bossAlive && upAt === -1') && g.run('__apartHeard') === 1, 'it hears a sector\'s boss wave, and lets it be', { heard: g.run('__apartHeard') });
+  ok(typeof g.run('__apartRoll') === 'number' && g.run('__apartRoll') >= 0 && g.run('__apartRoll') < 1, 'with a roll of the way up\'s own');
+  g.run('for (const e of enemies) if (e.type === "boss") killEnemy(e)');
+  const xp0 = g.run('P.xp + P.level * 1000'), cr0 = g.run('credits');
+  g.run('globalThis.__apartTake = 1');
+  ok(until(g, 'upAt >= 0', 120), 'answered with a room: the run is taken into it', { wave: g.run('wave'), at: g.run('upAt') });
+  ok(g.run('stage === UP_AWAY[upAt] && UP_AWAY[upAt].apart === 1 && JSON.stringify(upWorld.entered) === \'["APART TWO"]\''), 'room n of its module, and the module hears it entered');
+  ok(g.run('wave % 5') === 0 && !g.run('enemies.some(e => e.type === "boss" && !e.dead)'), 'on the sector\'s boss wave; that boss never came');
+  ok(g.run('upBeen && upLiftT >= 0 && upBossT > 0 && !bossAlive'), 'the lift plays, and the boss is owed after it');
+  ok(g.run('runSaveable()') === false && g.run('aboveQuiet()') === true, 'not kept to go on; nothing from above');
+  const w = g.run('wave');
+  step(g, 1);
+  ok(g.run('wave') === w && g.run('upHolds()'), 'no wave while it is owed');
+  step(g, 3);
+  ok(g.run('bossAlive && enemies.some(e => e.boss === "x1b" && !e.dead) && upBossT === -1'), 'the lift done: its boss, at once');
+  step(g, 4);
+  ok(g.run('wave') === w && (g.run('upWorld.bossSteps') | 0) > 0 && (g.run('upWorld.t') || 0) > 0, 'its boss fights, its module steps; still no wave');
+  g.run('for (const e of enemies.slice()) if (!e.dead) killEnemy(e)');
+  ok(g.run('upWorld.felled') === 1, 'the module hears its boss down');
+  ok(until(g, 'upAt === -1', 30), 'after the shop, let down', { at: g.run('upAt'), st: g.run('state') });
+  ok(g.run('__apartEvs.includes("b") && __apartEvs.endsWith("d")'), 'the module hears its way down');
+  ok(g.run(`stage === STAGES[Math.floor(${w} / 5) % 5]`), 'into the sector the wave clock has come to', { st: g.run('stage.name'), w });
+  ok(until(g, `wave === ${w} + 1`, 20) && g.run('stage === STAGES[Math.floor(' + w + ' / 5) % 5]'), 'and its waves go on from there', { st: g.run('stage.name'), wave: g.run('wave') });
+  ok(g.run('JSON.stringify(upWorld)') === '{}', 'the module\'s share of the run let go');
+  // the climb is untouched by it
+  ok(g.run('upIdx === -1 && UP.id === "u9"'), 'the climb is as it was');
+  g.run('P.hp = 0; gameOver()');
+  ok(g.run('lastStats.up === true && lastStats.isRecord === false') && g.run('__submitted') === 0, 'a run that has been apart counts for nothing');
+}
+
+section('rooms apart: VR.go from idle, mid-sector; and from the climb');
+{
+  const g = bootApart();
+  fresh(g);
+  ok(until(g, 'wave >= 1'), 'the run is on');
+  g.run('wave = 7; stageAbs = 1; betweenWaves = 0; spawnBudget = 30');
+  step(g, 0.5);
+  const xp0 = g.run('P.xp + P.level * 1000'), cr0 = g.run('credits');
+  g.run('globalThis.__apartGo = 0');
+  step(g, 0.2);
+  ok(g.run('__apartWent') === true && g.run('upAt === 0 && stage === UP_AWAY[0]'), 'VR.go(0) from idle: taken');
+  ok(g.run('wave') === 10 && g.run('P.xp + P.level * 1000') > xp0 && g.run('credits') > cr0, 'the sector\'s waves left paid as skipped', { wave: g.run('wave') });
+  ok(g.run('enemies.filter(e => !e.dead && !e.hacked).length') === 0, 'its bodies left behind');
+  g.run('globalThis.__apartGo = 1; globalThis.__apartWent = undefined');
+  step(g, 0.5);
+  ok(g.run('__apartWent') === undefined && g.run('upAt') === 0, 'idle is not heard in a room: nothing goes twice');
+  // a refused go: a boss up
+  const h = bootApart();
+  fresh(h);
+  until(h, 'wave >= 1');
+  h.run('spawnEnemy("boss", P.x + 300, P.y, { boss: "warden" }); bossAlive = true');
+  ok(h.run('upAway("a9", 0)') === false && h.run('upAt') === -1, 'never while a boss is up');
+  h.run('bossAlive = false; for (const e of enemies) if (e.type === "boss") e.dead = true');
+  ok(h.run('upAway("a9", 7)') === false && h.run('upAway("zz", 0)') === false, 'nor to a room it has not got');
+  h.run('Chal.on = { id: "x", n: "X", m: {} }');
+  ok(h.run('upAway("a9", 0)') === false, 'nor under a rule sheet');
+  h.run('Chal.on = null');
+  // from a room of the climb: left, its module lets go
+  const c = bootApart();
+  fresh(c);
+  c.run('stage = STAGES[4]; upFelled({ boss: "nullcore" }); wave = 26; stageAbs = 5; enterStage(STAGES[0]); betweenWaves = 0; spawnBudget = 20;');
+  step(c, 1);
+  for (let i = 0; i < 12 && c.run('upIdx') < 0; i++) { stand(c); step(c, 0.2); }
+  ok(c.run('upIdx') === 0, 'up the light first');
+  step(c, 4);
+  ok(c.run('upAway("a9", 0)') === true && c.run('upIdx === -1 && upAt === 0'), 'then into a room apart: off the climb');
+  ok(c.run('wave % 5') === 0 && c.run('upWorld.entered && upWorld.entered[0] === "APART ONE" && !upWorld.evs'), 'the room\'s waves to come paid as skipped; the apart module\'s own share');
+}
+
+section('rooms apart: a snapshot; co-op; the dev switch');
+{
+  const a = bootApart(), b = bootApart();
+  fresh(a, 13);
+  until(a, 'wave >= 1');
+  a.run('upAway("a9", 1)');
+  step(a, 5);
+  const snap = a.run('JSON.stringify(snapWrite())');
+  ok(JSON.parse(snap).bad === 0, 'nothing in it that cannot travel', JSON.parse(snap).badAt);
+  fresh(b, 77);
+  b.run('snapRead(' + snap + ')');
+  ok(b.run('upAt === 1 && stage === UP_AWAY[1]'), 'the other copy is in the same room apart, by identity');
+  ok(b.run('JSON.stringify(upWorld)') === a.run('JSON.stringify(upWorld)') && b.run('simRngState') === a.run('simRngState'), 'the same run');
+  const g = bootApart();
+  const sig = g.run('upSig()');
+  g.run(`MP.on = true; MP.heard = { outs: [['u9', OUTSIDE.sig.u9]] }`);
+  ok(g.run('upTake()') === '', 'the other machine runs the climb but not the rooms apart: no way up');
+  g.run(`MP.heard = { outs: [['u9', OUTSIDE.sig.u9], ['a9', OUTSIDE.sig.a9]] }`);
+  ok(g.run('upTake()') === sig, 'both, the same: the way up');
+  g.run('MP.on = false; MP.heard = null');
+  const d = loadGame(IDX, { search: '?away=http://localhost:9/t.js&awaygo=2' });
+  ok(d.run('JSON.stringify(UP_DEV)') === JSON.stringify({ url: null, open: false, away: 'http://localhost:9/t.js', go: 2 }), 'the dev switch: a module of rooms apart from this machine, and the room to go to', d.run('JSON.stringify(UP_DEV)'));
+  const e = loadGame(IDX, { search: '?away=https://example.com/t.js&awaygo=1' });
+  ok(e.run('UP_DEV') === null, 'and never from anywhere else');
+}
+
 section('secrecy: the block names nothing it should not');
 {
   const src = fs.readFileSync(IDX, 'utf8');
@@ -222,7 +353,7 @@ section('secrecy: the block names nothing it should not');
      file of them (one a line) in UP_SEALED to have them checked. */
   const list = process.env.UP_SEALED && fs.existsSync(process.env.UP_SEALED)
     ? fs.readFileSync(process.env.UP_SEALED, 'utf8').split(String.fromCharCode(10)).map(s => s.trim().toLowerCase()).filter(Boolean) : null;
-  const fix = fs.readFileSync(path.join(here, 'fixtures', 'up-rooms.js'), 'utf8').toLowerCase(), blk = src.slice(at, end).toLowerCase();
+  const fix = (fs.readFileSync(path.join(here, 'fixtures', 'up-rooms.js'), 'utf8') + fs.readFileSync(path.join(here, 'fixtures', 'up-apart.js'), 'utf8')).toLowerCase(), blk = src.slice(at, end).toLowerCase();
   if (list) ok(!list.some(w => blk.includes(w) || fix.includes(w)), 'no word of UP_SEALED in the block or the stand-in', list.filter(w => blk.includes(w) || fix.includes(w)));
   else console.log('  (UP_SEALED not set: the sealed words are not checked)');
   ok(!/UP_DEV[^]*?location\.hostname[^]*?\.online/.test(src.slice(at, end)), 'the dev switch is localhost only');
