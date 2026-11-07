@@ -343,8 +343,10 @@ const S = [
     starter: 'stage = STAGES[4]; upFelled({ boss: "nullcore" }); wave = 5; stageAbs = 1; enterStage(STAGES[0]); P.dmg *= 20' },
   /* The rooms apart (THE WAY UP): into each of the module's (the tests'
      stand-in, or --away's) at the start of a sector, in turn: the lift, its
-     boss, the shop, and let down into the rotation after each. */
-  { name: 'apart',      char: 'runner', seed: 131, steps: 3600 + 10800 * AWAY_N, shops: true, apart: true, starter: 'P.dmg *= 20' },
+     boss, the shop, and let down into the rotation after each (four and a
+     half minutes a room: the bot's pace against a real module's bosses). */
+  { name: 'apart',      char: 'runner', seed: 131, steps: 3600 + 16200 * AWAY_N, shops: true, apart: true,
+    starter: 'P.dmg *= 1000' },  // a module's bosses go deeper with every room (and HP gates and cut-ins hold every phase): the bot hits hard enough to see each one out
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
