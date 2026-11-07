@@ -179,6 +179,7 @@ function runTake() {
     for (const k of RUN_FLAGS) RUN[k] = src[k];
     RUN.hlLive = !!src.hlLive; RUN.medals = (src.medals || []).slice();
     RUN.above = !!src.above;
+    RUN.up = src.up && String(src.up) === upSig() ? String(src.up) : '';   // the host's word, if this machine runs the same rooms (THE WAY UP)
     RUN.chal = (src.chal || []).slice();
     const c = src.codex || {};
     RUN.codex = { e: new Set(c.e || []), u: new Set(c.u || []), m: new Set(c.m || []), b: new Set(c.b || []), z: new Set(c.z || []) };
@@ -190,6 +191,8 @@ function runTake() {
     RUN.medals = RUN.hlLive ? (hlP().equip || []).slice() : [];
     // whether runs are hunted, as the Worker last said (FROM ABOVE)
     RUN.above = !!Live.above;
+    // whether it may go up: the rooms' module's mark, if it is run here (and on the other machine) (THE WAY UP)
+    RUN.up = upTake();
     // the challenges cleared (they let rewards into the pool) and the codex (THE KEEPER reads it)
     RUN.chal = (p.chal || []).slice();
     RUN.codex = { e: new Set(Codex.e), u: new Set(Codex.u), m: new Set(Codex.m), b: new Set(Codex.b), z: new Set(Codex.z) };
@@ -1180,7 +1183,7 @@ function musicWant(dt) {
     return [cue, b.boss === 'root' && rrRace ? 'race' : b.boss === 'ragequit' && b.hlInit ? musicRq(b) : 'p' + ((b.phase | 0) + 1)];
   }
   if (hlArea) return [hlArea.id, Music.heat(dt)];
-  return [MUSIC_STAGE[stage.name] || 'grid', Music.heat(dt)];
+  return [MUSIC_STAGE[stage.name] || (stage.up && stage.music) || 'grid', Music.heat(dt)];   // a room up the light names one of the game's (THE WAY UP)
 }
 
 const Music = {
@@ -2221,6 +2224,35 @@ const CHAR = () => CHARS[selectedChar];
    before that block is reached. */
 const OUTSIDE = { by: new Map(), errs: {}, loading: new Set(), sig: {} };   // loading: the ids on their way; sig: each module's text, hashed
 let outsideWorld = {};                   // the run's own share of an outside pilot's state: plain data, emptied by resetGame
+
+/* THE WAY UP's: what a module from the vault adds on this machine (its rooms,
+   foes, bosses and hooks), and the run's place among them. Up here because
+   resetGame, the codex and the drawing ask after them long before that block
+   is reached. */
+const UP = { id: null, hooks: {}, foes: new Map(), bosses: new Map(), errs: {} };   // this machine's (SNAP_LOCAL_OBJS)
+const UP_ROOMS = [];                     // the module's rooms, in their order (SNAP_TABLES: every copy has the same)
+let upOpen = false;                      // THE VOID's boss has fallen this run: the light stands in the sectors after it
+let upIdx = -1;                          // the room of UP_ROOMS the run is in; -1 in none
+let upBeen = false;                      // the run has been up: it is recorded nowhere
+let upLight = null;                      // the light in this room: { x, y, t, hold, out, next }
+let upLiftT = -1;                        // the lift's clock while it plays, -1 when it does not
+let upWorld = {};                        // the module's share of the run: plain data, emptied by resetGame and the way down
+let upRng = 1;                           // where the light stands: a stream of its own
+let upDue = false;                       // a room's boss is down, and the light to the next (or the way down) is owed
+/* On this machine's own dev server only: ?up=<a localhost address of a
+   module> runs it as the vault would, and &upopen=1 opens the way from the
+   start of every run, for flying the rooms without going to THE VOID first. */
+const UP_DEV = (() => {
+  try {
+    const h = location.hostname;
+    if (h !== 'localhost' && h !== '127.0.0.1') return null;
+    const q = new URLSearchParams(location.search), u = q.get('up');
+    if (!u) return null;
+    const url = new URL(u, location.href);
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null;
+    return { url: url.href, open: q.get('upopen') === '1' };
+  } catch (e) { return null; }
+})();
 // the keys an outside pilot's kit is played in a run (pressed: playKey), and the ones it may also read held (P.in.held)
 const OUTSIDE_KEYS = ['1', '2', '3', '4', 'q', 'e', 'f', 'z', 'x', 'c', 'v'];
 const OUTSIDE_HELD = OUTSIDE_KEYS;
@@ -5978,6 +6010,7 @@ function killBody(e, ang) {
   e.dead = true;
   tale('kill', e);                       // FORGOTTEN TALES: read, never written back
   outsideEv('kill', e);                  // an outside pilot's kit hears every death (OUTSIDE PILOTS)
+  if (upIdx >= 0) upCall('ev', 'kill', e);   // and in the rooms up the light, their module (THE WAY UP)
   hlOnKill(e);                           // ALL HALLOWS: the cold gourds are pieces
   hlWrKillTap(e, ang);                   // ALL HALLOWS: a prize skin answers the kill
   P.kills++;                             // to whoever landed it: in co-op, the pilot it was resolved as
@@ -6344,6 +6377,7 @@ function enterStage(def) {
   arenaReset(true);
   mortars.length = 0; portals.length = 0; cages.length = 0;
   outsideEv('stage', def);              // an outside pilot's kit hears the floor change (OUTSIDE PILOTS)
+  upEnter(def);                         // the light, while the way is open; or one of the rooms (THE WAY UP)
 }
 
 // Kept for the pre-portal path: walk the normal rotation by absolute index.
@@ -6409,12 +6443,14 @@ function startWave() {
     Audio_.boss();
     spawnRing('boss');
     spawnBudget = Math.round((5 + Math.floor(wave * 0.7)) * chalBudget() * hardBudget());
+    upWave(true);                        // a sector's light goes out as its boss comes (THE WAY UP)
   } else {
     banner(fresh ? stage.name : 'WAVE ' + wave,
            fresh ? stage.accent : COL.player);
     Audio_.wave();
     spawnBudget = Math.round((7 + wave * 3.1 + Math.pow(wave, 1.55) * 0.5)
                              * chalBudget() * hardBudget());
+    upWave(false);
   }
   spawnT = 0;
   waveTimer = 0;
@@ -6422,11 +6458,11 @@ function startWave() {
 
 function updateWaves(dt) {
   if (PVP) { PVP.waves(dt); return; }     // PvP decides what spawns (PvP mode)
-  if (awaitingPortal) return;
+  if (awaitingPortal || upHolds()) return;   // a portal room, or the light to the next room (THE WAY UP)
   waveTimer += dt;
   if (betweenWaves > 0) {
     betweenWaves -= dt;
-    if (betweenWaves <= 0) startWave();
+    if (betweenWaves <= 0 && !upCatch()) startWave();   // THE WAY UP: a room's light, if it is owed
     return;
   }
   /* A deep sector does not run on a budget. It keeps sending while its nodes
@@ -6573,6 +6609,7 @@ function onBossDefeat(e) {
          wasVirus ? VIRUS_COL : COL.crit);
   drawFlashT = 0.2;
   shopPending = true;
+  upFelled(e);                           // THE VOID's boss opens the way; a room's, the module hears (THE WAY UP)
 
   if (e && e.boss === 'theother') {
     runSet('otherKills', (RUN.otherKills || 0) + 1);
@@ -32311,6 +32348,7 @@ let awaitingPortal = false;
 function afterReward() {
   // the rush has no portal room: the reward room leads to the next boss
   if (rushOn()) { betweenWaves = RUSH_BREATH; return; }
+  if (upAfter()) return;                 // THE WAY UP: the light to the next room (and after the last, the rotation's way on)
   if (RUN.altPath) openPortalRoom();
   else betweenWaves = 2.0;
 }
@@ -32662,6 +32700,7 @@ const Codex = {
   see(set, k) {
     if (freeRun) return;                 // a sandbox writes nothing down
     if (!k) return;
+    if (set === 'e' && upSealed(k)) return;   // THE WAY UP's: never written down
     if (set === 'e' && !CODEX_E[k] && !BOSSES[k]) return;   // nothing with no entry: DEAD GAME's decoys (ALL HALLOWS)
     if (RUN.codex && RUN.codex[set]) RUN.codex[set].add(k);   // the run's own copy: see RUN (gear is not in it)
     if (Codex[set].has(k)) return;
@@ -33264,7 +33303,7 @@ const Tales = {
   // a boss defeated: the run's, so both machines of a co-op run count it
   boss(e, R) {
     const k = e && e.boss;
-    if (!k || !BOSSES[k]) return;
+    if (!k || !BOSSES[k] || upSealed(k)) return;   // THE WAY UP's bosses are counted nowhere
     const f = R.fights[k];
     delete R.fights[k];
     const secs = f ? elapsed - f.t0 : 0;
@@ -38235,6 +38274,7 @@ function resetGame() {
   simTick = 0; simTimers.length = 0;     // and its clock: a delay from the last run never lands in this one
   runTake();                             // and its settings: see RUN
   aboveBegin();                          // and what may come for it (FROM ABOVE)
+  upBegin();                             // and whether it may go up, and nothing up yet (THE WAY UP)
   // and whether it is assisted (FIRST FLIGHT): only ever for one pilot on its own
   assist = runAssistNext && !MP.on && !LS.on ? { saved: false } : null;
   runAssistNext = false;
@@ -38345,6 +38385,20 @@ function gameOver(quiet) {
     outsideEv('dead', quiet);            // and its kit hears the end
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false, outside: true };
+    if (!quiet) {
+      explode(P.x, P.y, 180, 0, COL.player);
+      burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
+      shake(1); Audio_.over();
+    }
+    return;
+  }
+  /* A run that has been up counts for nothing, as an outside pilot's does:
+     what is up there is nobody's to read off a board (THE WAY UP). */
+  if (upBeen) {
+    upCall('ev', 'dead', quiet);
+    lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
+                  sector: stage.name, loop: loopNum, isRecord: false, up: true };
+    Codex.flush();
     if (!quiet) {
       explode(P.x, P.y, 180, 0, COL.player);
       burst(P.x, P.y, 90, COL.player, 460, 4, 1.1);
@@ -39442,6 +39496,7 @@ function update(dt) {
     if (PVP && P.outside) imGrazeDuelShots();          // and its shots passing close, a graze to the other pilot (IMAGO IN A DUEL)
   });
   aboveTick(dt, wdt);        // what comes for a run that has grown (FROM ABOVE)
+  upTick(dt, wdt);           // the light, and the rooms up it (THE WAY UP)
   /* Stood down from here rather than inside unwUpdate: if both halves are gone
      the boss shell never calls the AI again, so the check has to live somewhere
      that still runs. A dev-console room clear used to leave the fight object
@@ -40502,6 +40557,8 @@ function updateEnemies(dt) {
       // and THE YARD's
       case 'risen': case 'gravedigger': case 'bellringer':
         hlYardAI(e, dt, ux, uy, d, sp, dx, dy); break;
+      // and THE WAY UP's own
+      default: if (UP.foes.has(e.type)) upFoeAI(e, dt, ux, uy, d, sp);
     }
     hackBy = null;
 
@@ -57981,6 +58038,7 @@ function render() {
   drawGrid(ox, oy);
   drawArena();
   hlDrawFloor();              // ALL HALLOWS: an area's floor
+  upDrawRoom('back');         // THE WAY UP: a room's own
   drawOpoFloor();             // ONE POINT OH: the front, the two renderers' floor
   drawOprFloor();             // VOIDRUNNER'S RITE: his bands, the lattice's light
   pilotsDraw(() => outsideDraw('back'));   // an outside pilot's: what it makes of the room itself (OUTSIDE PILOTS)
@@ -58020,10 +58078,12 @@ function render() {
 
   drawMortars();
   aboveDrawFloor();           // a spear's mark, on the floor (FROM ABOVE)
+  upDrawRoom('floor');        // THE WAY UP: what is on a room's floor
   drawUnwritten();
   drawAmalgam();
   drawCages();
   drawPortals();
+  drawUpLight();              // THE WAY UP: the light
   drawLibraryPortal();
   hlDrawWorldUnder();         // ALL HALLOWS: the vigil, lit particles, slams
   if (inHub) {
@@ -58040,6 +58100,7 @@ function render() {
   pilotsDraw(drawSuUnderBodies);   // SUPERUSER: shadows under the bodies the mane has lifted
   drawCorpses();
   drawEnemies();
+  upDrawRoom('over');         // THE WAY UP: a room's, over the bodies
   drawOpoWorld();             // ONE POINT OH: the old door, his panes and paint, him
   drawOprWorld();             // VOIDRUNNER'S RITE: his panes and brush, him, his copy, the duel's fire
   drawOpoFx();                // and the art's own, every frame of the route (OPO_ART.worldFx)
@@ -58151,10 +58212,11 @@ function render() {
   drawChalFog();      // over the world, under everything you need to read
   hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
   aboveDrawScreen();  // a spear coming: over the frame, under the HUD (FROM ABOVE)
+  upDrawScreen();     // THE WAY UP: a room's screen, and the lift
   const bare = !!(PVP && PVP.bare());   // PvP mode: a replay captured with the HUD off (replay.js)
   if (!bare) {
     drawHUD();
-    outsideDraw('hud');   // an outside pilot's, beside the HUD
+    outsideDraw('hud'); upDrawHud();   // an outside pilot's, beside the HUD
     mpDrawHud();
   }
   drawChalHud();
@@ -72701,6 +72763,8 @@ function drawEnemiesBody() {
       continue;
     }
 
+    if (upOwnsBody(e) && upDrawBody(e, ea)) continue;   // THE WAY UP's foes and bosses: their own draw
+
     // ALL HALLOWS: its bodies are drawn by their own hooks
     if (hlOwnsBody(e)) { hlDrawBody(e, ea); continue; }
 
@@ -77600,6 +77664,10 @@ const FREE_ROWS = [
       awaitingPortal = false;
       enterStage(s); betweenWaves = 0.6;
       hackKeepArmy(true); } },
+  { n: 'THE WAY UP',     f: () => {            // the light, now, if this run may go up
+      if (!RUN.up || upQuiet()) { banner('NO WAY UP FROM HERE', '#94a3b8', 2.0); return; }
+      upOpen = true;
+      if (upIdx < 0) upLightPlace(false); else upAfter(); } },
   { n: 'GIVE A BOOK',    f: () => {
       const keys = Object.keys(BOOKS);
       const k = keys[(freeBook = (freeBook + 1) % keys.length)];
@@ -81701,6 +81769,7 @@ function runSaveable() {
   if (P.outside || inHub || inVigil || (Chal.on && Chal.on.hl)) return false;
   if (intrusion || amalOpen || choice || campVisit || turning || con.open || arrival) return false;
   if (opo || opoRevert) return false;    // ONE POINT OH: the fight and the way in are never kept
+  if (upIdx >= 0 || upLiftT >= 0) return false;   // THE WAY UP: its rooms are never kept
   return QOL.runN < RUN_CONTINUES;
 }
 // the run as it stands, kept; true if it was
@@ -89727,7 +89796,8 @@ const aboveWarn = () => Math.max(ABOVE.least, ABOVE.warn * Math.pow(ABOVE.shrink
 function aboveQuiet() {
   return !RUN.above || !!PVP || freeRun || (!!Chal.on && !Chal.on.daily) || amalRite || rootRite || vrRite || oprRite
       || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
-      || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal;
+      || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || awaitingPortal
+      || upIdx >= 0 || upLiftT >= 0;   // nor up the light (THE WAY UP)
 }
 // a cut-in has the screen and holds the hulls where they are: nothing is aimed, and nothing lands
 function aboveHeld() {
@@ -90466,7 +90536,7 @@ const Outside = {
 
   // the module, run: VR is all it is handed, and the page is all it reads
   run(id, text) {
-    const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def) });
+    const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def), rooms: def => upRooms(id, def) });   // rooms: THE WAY UP
     new Function('VR', text)(VR);
     // its text's mark, so two machines in one match can tell they run the same one (mpOnEvent, hello)
     let h = 2166136261 >>> 0;
@@ -90491,6 +90561,368 @@ const Outside = {
 };
 // the outside pilots this machine has run: [id, mark] each, for the hello
 const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE.sig[id]]);
+
+/* ===========================================================================
+   THE WAY UP
+
+   Rooms whose code is not in this file. A run that has felled THE VOID's
+   boss finds a light standing in every sector it goes on to: a column, from
+   the floor out of the top of the screen. Stand in it a moment and the run is
+   carried up, out of the rotation, into the rooms a module from the vault
+   adds (the vault of OUTSIDE PILOTS, fetched and run the same way). Each one
+   plays like a sector: five waves of its own roster, its boss on the fifth,
+   the shop. Then the light again, standing in the cleared room until it is
+   taken to the next. After the last room the run is let down into the
+   rotation where the wave clock has it, and the light stands in the sectors
+   after that as before. Left mid-sector, the sector's bodies stay behind
+   unpaid, its waves still to come are paid as skipped (as an area's head
+   start is) and its boss is not fought, so the rooms' fifth waves fall on
+   the sector clock's.
+
+   The module calls VR.rooms(def) once. def:
+     rooms    [room, ...] in their order: plain data in the shape of STAGES
+              (name, tag, bg, grid, grid2, wall, glow, accent, pool, boss),
+              plus music, a cue of a track the game already has. No hazard:
+              a room's ground is the module's own (step, back, floor)
+     foes     { type: { r, hp, spd, dmg, col, xp, score, sides, ai, draw } }:
+              enemy types of its own, scaled and paid like the game's.
+              ai(e, dt, ux, uy, d, sp) steers it each step (the game moves it,
+              keeps it in the room and lands its contact); draw(e, a) is its
+              body, a the alpha it is seen at
+     bosses   { key: { name, col, r, sides, hpMul, spd, ai, draw } }: the
+              bosses its rooms end on. ai(e, dt, ux, uy, d, ph) as the game's
+              own bosses' (updateBoss: its phases at two thirds and a third)
+   and its hooks, every one optional:
+     enter(def)     the run has come into one of its rooms (upIdx: which)
+     wave(n)        a wave of the room begins, 1 to 5
+     step(dt, wdt)  each play step in its rooms; wdt is the room's clock
+     ev(name, ...)  'kill' (e), 'boss' (e: the room's boss down), 'down'
+                    (the run let down), 'dead' (the run over)
+     back()  floor()  over()   the room, in the world: under everything on
+                    its floor, with the marks on it, over the bodies
+     screen()       over the frame, under the HUD
+     hud()          beside the HUD
+     light(L)       the light, in place of the game's: L.t its age, L.hold
+                    how long it has been stood in, L.out its going (or -1)
+     lift(k)        the screen while the run is carried up, k from 0 to 1
+   A hook, an ai or a draw that throws is logged once and skipped.
+
+   It lives by the rules OUTSIDE PILOTS lives by: every roll that changes the
+   run is simRand/simRnd/simRndi/simPick; the run never reads what the drawing
+   writes; its state is plain data, on its foes and in upWorld (the run's
+   share, which resetGame and the way down empty), where the snapshots look.
+   The light's place is a stream of its own (upRng), so a run with the way
+   open is the same run as one without it in everything else.
+
+   What it never does is count. A run that has been up is recorded nowhere
+   (gameOver), and nothing of the rooms goes into the codex or the tales. It
+   is never in PvP, a rule sheet, the rush, a rite or a scene of its own, and
+   co-op takes it only when both machines run the same module: whether a run
+   may go up is decided as it starts (RUN.up, the module's mark), by the
+   host for both.
+   ========================================================================= */
+const UP_HOLD = 1.0;            // s stood in the light before it takes the run
+const UP_LIFT = 2.6;            // s the lift has the screen
+const UP_R = 54;                // how far the light reaches on the floor
+const UP_SETTLE = 0.8;          // s a light takes to stand before it can be stood in
+const UP_HOOKS = ['enter', 'wave', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'light', 'lift'];
+const UP_FOE_NUMS = ['r', 'hp', 'spd', 'dmg', 'xp', 'score', 'sides'];
+
+// the module's mark while it is here: its text, hashed (OUTSIDE.sig, what the hello carries)
+function upSig() { return (UP.id && OUTSIDE.sig[UP.id]) || ''; }
+
+function upErr(key, e) {
+  if (!UP.errs[key]) console.error('the way up ' + key + ':', e);
+  UP.errs[key] = (UP.errs[key] || 0) + 1;
+}
+// a hook, if there is one: what it answers
+function upCall(name, ...a) {
+  const f = UP.hooks[name];
+  if (!f) return undefined;
+  try { return f(...a); } catch (e) { upErr(name, e); return undefined; }
+}
+// a drawing hook, with the canvas left as it was found: true if there is one
+function upDraw(name, ...a) {
+  if (!UP.hooks[name]) return false;
+  ctx.save();
+  try { upCall(name, ...a); } finally { ctx.restore(); }
+  return true;
+}
+
+/* Plain data all the way down, which is what a room may be made of: the run
+   points at the rooms (stage), and a snapshot carries them by where they are. */
+function upPlain(v, d = 0) {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return true;
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (d > 6 || typeof v !== 'object') return false;
+  if (Array.isArray(v)) return v.every(x => upPlain(x, d + 1));
+  return Object.getPrototypeOf(v) === Object.prototype && Object.values(v).every(x => upPlain(x, d + 1));
+}
+
+/* VR.rooms: the def checked, then taken in: its foes join ETYPE, its bosses
+   BOSSES, its rooms UP_ROOMS. Run again (a newer copy of the module), it
+   takes its own places back; it never takes the game's own. */
+function upRooms(id, def) {
+  if (UP.id && UP.id !== id) throw new Error('the rooms here are ' + UP.id + '\'s');
+  if (!def || !Array.isArray(def.rooms) || !def.rooms.length) throw new Error(id + ': rooms is a list of rooms');
+  const foes = def.foes || {}, bosses = def.bosses || {};
+  for (const k of Object.keys(foes)) {
+    const f = foes[k];
+    if ((ETYPE[k] && !UP.foes.has(k)) || k === 'boss') throw new Error(id + ': ' + k + ' is one of the game\'s own');
+    for (const n of UP_FOE_NUMS) if (!Number.isFinite(f && f[n])) throw new Error(id + ': ' + k + '.' + n + ' is a number');
+    if (typeof f.ai !== 'function') throw new Error(id + ': ' + k + ' has no ai');
+  }
+  for (const k of Object.keys(bosses)) {
+    const b = bosses[k];
+    if (BOSSES[k] && !UP.bosses.has(k)) throw new Error(id + ': ' + k + ' is one of the game\'s own');
+    for (const n of ['r', 'sides', 'hpMul', 'spd']) if (!Number.isFinite(b && b[n])) throw new Error(id + ': ' + k + '.' + n + ' is a number');
+    if (typeof b.ai !== 'function') throw new Error(id + ': ' + k + ' has no ai');
+  }
+  const rooms = def.rooms.map((r, i) => {
+    if (!upPlain(r) || !r || Array.isArray(r) || typeof r !== 'object') throw new Error(id + ': room ' + i + ' is plain data');
+    if (!r.name || !Array.isArray(r.pool) || !r.pool.length) throw new Error(id + ': room ' + i + ' has a name and a pool');
+    for (const p of r.pool)
+      if (!(Array.isArray(p) && (foes[p[0]] || (ETYPE[p[0]] && p[0] !== 'boss' && !HL_ETYPES[p[0]])) && Number.isFinite(p[1]) && p[1] > 0))
+        throw new Error(id + ': room ' + i + ' sends ' + (p && p[0]) + ', which is nothing it has');
+    if (!bosses[r.boss]) throw new Error(id + ': room ' + i + ' ends on ' + r.boss + ', which is none of its bosses');
+    return Object.assign(JSON.parse(JSON.stringify(r)), { up: true, alt: false, deep: false, hazard: null, rule: null, nodes: 0 });
+  });
+  for (const k of Object.keys(foes)) {
+    const f = foes[k];
+    ETYPE[k] = { r: f.r, hp: f.hp, spd: f.spd, dmg: f.dmg, col: String(f.col || '#e2e8f0'), xp: f.xp, score: f.score, sides: f.sides };
+    UP.foes.set(k, { ai: f.ai, draw: typeof f.draw === 'function' ? f.draw : null });
+  }
+  for (const k of Object.keys(bosses)) {
+    const b = bosses[k];
+    BOSSES[k] = { name: String(b.name || k).toUpperCase(), col: String(b.col || '#e2e8f0'), r: b.r, sides: b.sides,
+                  hpMul: b.hpMul, spd: b.spd, up: true,
+                  ai: (e, dt, ux, uy, d, ph) => {
+                    const B = UP.bosses.get(k);
+                    if (B) { try { B.ai(e, dt, ux, uy, d, ph); } catch (err) { upErr(k + '.ai', err); } }
+                  } };
+    UP.bosses.set(k, { ai: b.ai, draw: typeof b.draw === 'function' ? b.draw : null });
+  }
+  UP_ROOMS.length = 0;
+  for (const r of rooms) UP_ROOMS.push(r);
+  UP.hooks = {};
+  for (const h of UP_HOOKS) if (typeof def[h] === 'function') UP.hooks[h] = def[h];
+  UP.id = id;
+  SNAP.index = null; SNAP.statics = null;   // the game's tables have grown: a snapshot reads them again
+  return rooms.length;
+}
+
+/* Whether a run starting now may go up (runTake): the module's mark if this
+   machine runs it, and with another machine on the line, only if its hello
+   said it runs the same one. */
+function upTake() {
+  const s = upSig();
+  if (!s || PVP || !UP_ROOMS.length) return '';
+  if (MP.on || LS.on || netLive()) {
+    const outs = MP.heard && Array.isArray(MP.heard.outs) ? MP.heard.outs : [];
+    if (!outs.some(x => Array.isArray(x) && x[0] === UP.id && String(x[1]) === s)) return '';
+  }
+  return s;
+}
+// not here: a run that may not, a rule sheet of another kind, the rush, PvP, and every room that is a scene of its own
+function upQuiet() {
+  return !RUN.up || RUN.up !== upSig() || !UP_ROOMS.length || !!PVP || !!Chal.on || amalRite || rootRite || vrRite || oprRite
+      || inHub || inVigil || !!hlArea || !!amalgam || !!amalCut || !!unwritten || unwDeadT > 0
+      || !!root || !!rootDeath || !!rootOut || !!tribunal || !!outro || !!opo || !!riteRun;
+}
+
+// the run starts (resetGame): nothing open, nothing up, the light's stream from the run's seed
+function upBegin() {
+  upOpen = false; upIdx = -1; upBeen = false; upLight = null; upLiftT = -1; upWorld = {}; upDue = false;
+  upRng = ((simSeed ^ 0x51a7c0de) >>> 0) || 1;
+  if (UP_DEV && UP_DEV.open && RUN.up) upOpen = true;    // this machine's dev server only
+}
+function upRoll() {
+  let x = upRng;
+  x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+  upRng = x || 1;
+  return x / 4294967296;
+}
+/* The light, stood somewhere clear: of the hulls (far, for a sector's; near
+   enough to see, for the next room's), the walls and the room's wells and
+   shards. */
+function upLightPlace(next) {
+  const pad = UP_R + 130;
+  const x0 = arena.x0 + pad, x1 = Math.max(x0 + 1, arena.x1 - pad), y0 = arena.y0 + pad, y1 = Math.max(y0 + 1, arena.y1 - pad);
+  const far = next ? 220 : 420;
+  let best = null, bestD = -1;
+  for (let k = 0; k < 14; k++) {
+    const x = x0 + upRoll() * (x1 - x0), y = y0 + upRoll() * (y1 - y0);
+    if (hazards.some(h => (h.kind === 'mirror' || h.kind === 'well') && len(x - h.x, y - h.y) < (h.r || 60) + UP_R + 40)) continue;
+    let dmin = Infinity;
+    pilotsEach(() => { dmin = Math.min(dmin, len(P.x - x, P.y - y)); });
+    if (dmin >= far && (!next || dmin < 900)) { best = { x, y }; break; }
+    if (dmin > bestD && (!next || dmin < 900)) { bestD = dmin; best = { x, y }; }
+  }
+  if (!best) best = { x: (arena.x0 + arena.x1) / 2, y: (arena.y0 + arena.y1) / 2 };
+  upLight = { x: best.x, y: best.y, t: 0, hold: 0, out: -1, next: !!next };
+}
+
+// a sector is entered (enterStage): its light, while the way is open; one of the rooms, and the module hears it
+function upEnter(def) {
+  upLight = null;
+  if (def && def.up) { upCall('enter', def); return; }
+  if (upOpen && upIdx < 0 && !upQuiet()) upLightPlace(false);
+}
+// a boss is down (onBossDefeat, a stage's): THE VOID's opens the way; a room's, the module hears
+function upFelled(e) {
+  if (!e) return;
+  if (e.boss === 'nullcore' && stage === STAGES[4] && !rushOn() && !Chal.on) upOpen = true;
+  if (upIdx >= 0 && UP.bosses.has(e.boss)) { upDue = true; upCall('ev', 'boss', e); }
+}
+// a wave begins (startWave): a sector's boss puts its light out; a room's waves are the module's
+function upWave(boss) {
+  if (boss && upLight && !upLight.next && upLight.out < 0) upLight.out = 0;
+  if (upIdx >= 0) upCall('wave', ((Math.max(1, wave) - 1) % 5) + 1);
+}
+/* After a room's boss and its shop (afterReward): the light to the next room,
+   or after the last, the way down. true when the way up has the run; false
+   leaves it to the rotation's own way on (a portal room, the wave clock). */
+function upAfter() {
+  if (upIdx < 0) return false;
+  upDue = false;
+  if (upIdx < UP_ROOMS.length - 1) { upLightPlace(true); Audio_.tone(392, 1.2, 'sine', 0.08, 784); return true; }
+  upCall('ev', 'down');
+  upIdx = -1; upLight = null; upWorld = {};
+  banner('LET DOWN', '#e2e8f0', 2.6);
+  return false;
+}
+/* The waves are about to start again after a room's boss, and the hand-off
+   never came (a reward screen that ended some other way): the light, or the
+   way down, now. true when the waves wait. */
+function upCatch() {
+  if (!upDue) return false;
+  if (upAfter()) return true;
+  if (RUN.altPath) { openPortalRoom(); return true; }
+  return false;
+}
+// the waves wait while the next room's light stands (updateWaves)
+function upHolds() { return !!(upLight && upLight.next); }
+
+// the light, taken: the run carried up into the first room, or on to the next
+function upGo() {
+  const L = upLight;
+  const to = L && L.next ? upIdx + 1 : 0;
+  if (!L || !UP_ROOMS[to]) return;
+  if (!L.next) {
+    const end = Math.ceil(Math.max(1, wave) / 5) * 5;          // the sector's boss wave, never fought
+    if (end - 1 > wave) {
+      const s = rushSkipped(wave + 1, end - 1);
+      pilotsEach(() => { P.xp += Math.round(s.xp / RUSH_PAY * P.xpMul); });
+      credits += Math.round(s.cr / RUSH_PAY * P.credMul * hardCred());
+    }
+    wave = end;
+    spawnBudget = 0; bossAlive = false; shopPending = false;
+    hackKeepArmy(false);                                         // the sector's bodies stay behind; yours come too
+    upBeen = true;
+  }
+  upLight = null; upDue = false;
+  upIdx = to;
+  stageAbs = Math.floor(wave / 5);                               // the wave clock has nothing to change: the rooms change here
+  portals.length = 0; awaitingPortal = false; libraryPortal = null; opoDoor = null;
+  enterStage(UP_ROOMS[to]);
+  const cx = WORLD.w / 2, cy = WORLD.h / 2;
+  let k = 0;
+  pilotsEach(() => { P.x = cx + (k % 2 ? 70 : k ? -70 : 0); P.y = cy; P.vx = P.vy = 0; k++; });
+  cam.x = P.x; cam.y = P.y;
+  hackKeepArmy(true); ebullets.length = 0; replay.length = 0;
+  betweenWaves = UP_LIFT + 0.8;
+  upLiftT = 0;
+  banner(stage.name, stage.accent, 3.4);
+  Audio_.levelup(); Audio_.boom();
+  shake(0.6);
+}
+
+// each play step (update): the lift's clock, the module's step, and the light
+function upTick(dt, wdt) {
+  if (upLiftT >= 0 && (upLiftT += dt) >= UP_LIFT) upLiftT = -1;
+  if (upIdx >= 0 && UP.hooks.step) upCall('step', dt, wdt);
+  const L = upLight;
+  if (!L) return;
+  L.t += dt;
+  if (L.out >= 0) { if ((L.out += dt) >= 0.9) upLight = null; return; }
+  if (rnd() < 0.5)                      // motes going up it: the drawing's own roll
+    spawnPart(L.x + rnd(UP_R, -UP_R) * 0.8, L.y + rnd(20, -20), rnd(10, -10), -rnd(260, 120), rnd(2.6, 1.2), '#fde68a', rnd(1.1, 0.5), 0.99);
+  if (L.t < UP_SETTLE || state !== 'play' || upQuiet()) return;
+  let inside = false;
+  pilotsEach(() => { if (P.hp > 0 && len(P.x - L.x, P.y - L.y) < UP_R) inside = true; });
+  L.hold = inside ? L.hold + dt : Math.max(0, L.hold - dt * 2.5);
+  if (L.hold >= UP_HOLD) upGo();
+}
+
+/* The foes and the bosses: steered by their ai, drawn by their draw. A body
+   whose draw is missing or throws is drawn as the game draws its own. */
+function upFoeAI(e, dt, ux, uy, d, sp) {
+  const F = UP.foes.get(e.type);
+  if (!F) { steer(e, ux * sp, uy * sp, 3, dt); return; }
+  try { F.ai(e, dt, ux, uy, d, sp); } catch (err) { upErr(e.type + '.ai', err); }
+}
+function upOwnsBody(e) { return UP.foes.has(e.type) || (e.type === 'boss' && UP.bosses.has(e.boss)); }
+function upDrawBody(e, a) {
+  const D = e.type === 'boss' ? UP.bosses.get(e.boss) : UP.foes.get(e.type);
+  if (!D || !D.draw) return false;
+  let ok = true;
+  ctx.save();
+  try { D.draw(e, a); } catch (err) { ok = false; upErr((e.boss || e.type) + '.draw', err); }
+  finally { ctx.restore(); }
+  return ok;
+}
+// nothing of the rooms is written down: the codex, the tales
+function upSealed(k) { return UP.foes.has(k) || UP.bosses.has(k); }
+
+/* --------------------------------- drawing ---------------------------------- */
+// the room in the world: back (under its floor's things), floor, over (over the bodies)
+function upDrawRoom(name) { if (upIdx >= 0) upDraw(name); }
+function drawUpLight() {
+  const L = upLight;
+  if (!L) return;
+  if (upDraw('light', L)) return;
+  const k = L.out >= 0 ? 1 - clamp(L.out / 0.9, 0, 1) : clamp(L.t / UP_SETTLE, 0, 1);
+  const top = L.y - 2400, w = UP_R * (0.82 + 0.06 * Math.sin(uiTime * 2.7));
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(0, top, 0, L.y);
+  g.addColorStop(0, 'rgba(255,244,214,0)');
+  g.addColorStop(0.75, 'rgba(253,230,138,' + (0.1 * k).toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(255,248,225,' + (0.32 * k).toFixed(3) + ')');
+  ctx.fillStyle = g;
+  ctx.fillRect(L.x - w, top, w * 2, L.y - top);
+  ctx.fillRect(L.x - w * 0.32, top, w * 0.64, L.y - top);
+  drawGlow(L.x, L.y, UP_R * 2.6, '#fde68a', 0.5 * k);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.strokeStyle = 'rgba(255,248,225,' + (0.5 * k).toFixed(3) + ')'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.ellipse(L.x, L.y, UP_R, UP_R * 0.36, 0, 0, TAU); ctx.stroke();
+  if (L.hold > 0) {
+    ctx.strokeStyle = '#fff7d6'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(L.x, L.y, UP_R + 10, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(L.hold / UP_HOLD, 0, 1)); ctx.stroke();
+  }
+  ctx.restore();
+}
+// over the frame, under the HUD: the room's screen, and the lift
+function upDrawScreen() {
+  if (upIdx >= 0) upDraw('screen');
+  if (upLiftT < 0) return;
+  const k = clamp(upLiftT / UP_LIFT, 0, 1);
+  if (upDraw('lift', k)) return;
+  const a = k < 0.12 ? k / 0.12 : 1 - (k - 0.12) / 0.88;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,248,225,' + (clamp(a, 0, 1) * 0.95).toFixed(3) + ')';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+function upDrawHud() { if (upIdx >= 0) upDraw('hud'); }
+
+if (UP_DEV && !PVP) {
+  fetch(UP_DEV.url, { cache: 'no-store' })
+    .then(r => (r.ok ? r.text() : null))
+    .then(t => { if (t) Outside.run('up-dev', t); })
+    .catch(e => console.error('the way up (dev):', e));
+}
+/* ============================ end of THE WAY UP ============================ */
 
 /* ===========================================================================
    LINK DIAGNOSTIC
@@ -92266,9 +92698,10 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'OR_TAGGED', 'OR_FAILED', 'OPR_ST',     // and his rite's: the same, and its own state
   'IM_FAILED', 'IM_ST',                   // IMAGO's art, in a run: which hook has thrown, and its own state
   '_aboveSpr',                            // FROM ABOVE: the spear, baked
-  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST']);   // ACHIEVEMENTS: the panel, the cards, and its art's
+  'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST',   // ACHIEVEMENTS
+  'UP']);                                 // THE WAY UP: the rooms this machine has run, and their hooks   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
-const SNAP_TABLES = new Set(['SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
+const SNAP_TABLES = new Set(['UP_ROOMS', 'SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
 const SNAP_DEPTH = 4;                    // how deep the game's tables are searched for things the run points at
 
 // this build, for the hello: two different builds part in lockstep however careful the game is
@@ -92900,6 +93333,7 @@ function runPack() {
   for (const k of RUN_FLAGS) o[k] = RUN[k];
   o.hlLive = !!RUN.hlLive; o.medals = (RUN.medals || []).slice(); o.chal = (RUN.chal || []).slice();
   o.above = !!RUN.above;
+  o.up = RUN.up || '';
   o.codex = {};
   for (const k of ['e', 'u', 'm', 'b', 'z']) o.codex[k] = [...(RUN.codex ? RUN.codex[k] : [])];
   return o;

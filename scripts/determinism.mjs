@@ -31,11 +31,13 @@
    context where the canvas, audio, storage and network are stubs.
 
      node scripts/determinism.mjs [path/to/index.html] [--quick] [--only name,name] [--restore name]
-                                  [--outside path/to/module.js]
+                                  [--outside path/to/module.js] [--up path/to/rooms.js]
 
    --outside flies the 'outside' scenario with that module (OUTSIDE PILOTS)
    in place of the tests' stand-in, so a pilot kept out of this repo can be
-   held to the same rules from wherever it is kept.
+   held to the same rules from wherever it is kept. --up does the same for
+   the 'up' scenario's rooms (THE WAY UP): the tests' stand-in, or a module
+   kept out of this repo.
 
    Exits 1 if any scenario's runs differ, or if a different seed fails to. */
 import vm from 'node:vm';
@@ -52,6 +54,9 @@ const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? new Set(
 const IDX = args.find(a => a.endsWith('.html')) || path.join(here, '..', 'index.html');
 // the module the 'outside' scenario flies: the tests' stand-in, unless one is named
 const OUTSIDE_FILE = (() => { const i = args.indexOf('--outside'); return i >= 0 ? path.resolve(args[i + 1]) : path.join(here, 'fixtures', 'outside-pilot.js'); })();
+
+// and the rooms the 'up' scenario climbs through (THE WAY UP)
+const UP_FILE = (() => { const i = args.indexOf('--up'); return i >= 0 ? path.resolve(args[i + 1]) : path.join(here, 'fixtures', 'up-rooms.js'); })();
 
 /* ------------------------------ load the game ------------------------------ */
 const g = loadGame(IDX, { w: 1280, h: 720 });
@@ -92,7 +97,9 @@ const HARNESS = `(() => {
         opo.panes.length, opo.sweeps.length, opo.restores.length, Object.keys(P.up).length] : null,
       typeof opoDoor !== 'undefined' && opoDoor ? pk(opoDoor, ['x', 'y', 'in']) : null,
       // and what is coming for the run (FROM ABOVE): its stream, its clock, its marks
-      [aboveRng, r(aboveNext), aboveMarks.map(m => pk(m, ['x', 'y', 't', 'after', 'k', 'took']))]]);
+      [aboveRng, r(aboveNext), aboveMarks.map(m => pk(m, ['x', 'y', 't', 'after', 'k', 'took']))],
+      // and the way up (THE WAY UP): open, which room, the light, the lift, the module's share of the run
+      typeof upIdx !== 'undefined' ? [upOpen, upIdx, upBeen, upRng, r(upLiftT), upLight ? pk(upLight, ['x', 'y', 't', 'hold', 'out', 'next']) : null, upWorld] : null]);
   }
   const fnv = s => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
   const near = (list, f) => { let b = null, bd = Infinity; for (const o of list) { if (f && !f(o)) continue; const d = (o.x - P.x) ** 2 + (o.y - P.y) ** 2; if (d < bd) { bd = d; b = o; } } return [b, bd]; };
@@ -118,10 +125,14 @@ const HARNESS = `(() => {
       const p = portals.find(q => q.kind === 'normal') || portals[0];
       ix = p.x > P.x + 6 ? 1 : p.x < P.x - 6 ? -1 : 0; iy = p.y > P.y + 6 ? 1 : p.y < P.y - 6 ? -1 : 0;
     }
+    // the way up (o.climb): into the light, whenever one stands
+    if (run.o.climb && typeof upLight !== 'undefined' && upLight && upLight.out < 0) {
+      ix = upLight.x > P.x + 6 ? 1 : upLight.x < P.x - 6 ? -1 : 0; iy = upLight.y > P.y + 6 ? 1 : upLight.y < P.y - 6 ? -1 : 0;
+    }
     rec.mx = ix; rec.my = iy;
     const [e] = near(enemies, o => !o.dead && !o.hacked);
     if (e) { rec.ax = e.x; rec.ay = e.y; } else { const a = k * 0.03; rec.ax = P.x + Math.cos(a) * 200; rec.ay = P.y + Math.sin(a) * 150; }
-    rec.trig = true; rec.lmb = true; rec.auto = k % 600 > 300; rec.dash = k % 97 === 0;
+    rec.trig = true; rec.lmb = true; rec.auto = k % 600 > 300; rec.dash = k % 97 === 0 && !(run.o.climb && typeof upLight !== 'undefined' && upLight);   // the light is stood in, not dashed through
     rec.touch = false; rec.taim = null; rec.local = false;
     const press = [];
     if (run.o.kit) {
@@ -187,7 +198,7 @@ const HARNESS = `(() => {
     if (o.from) snapRead(JSON.parse(o.from));     // run C: the run so far is another copy's, taken over here
     run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null,
             vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0],
-            opo: { lines: [], door: false, phases: [], done: false }, opoLast: null };
+            opo: { lines: [], door: false, phases: [], done: false }, opoLast: null, up: { max: -1, was: -1, down: false } };
   }
   function play(o) {
     start(o);
@@ -217,11 +228,12 @@ const HARNESS = `(() => {
         if (opo && opo.stage === 'fight' && !run.opo.phases.includes(opo.ph)) run.opo.phases.push(opo.ph);
         if (RUN.opoDone) run.opo.done = true;
       }
+      if (typeof upIdx !== 'undefined') { run.up.max = Math.max(run.up.max, upIdx); if (run.up.was >= 0 && upIdx < 0) run.up.down = true; run.up.was = upIdx; }
       if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
-             snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, outsideErrs: Object.keys(OUTSIDE.errs).join(','),
+             snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, up: run.up, upErrs: typeof UP !== 'undefined' ? Object.keys(UP.errs).join(',') : '', outsideErrs: Object.keys(OUTSIDE.errs).join(','),
              oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '' };
   }
   globalThis.__det = { play, oxWrap };
@@ -237,11 +249,16 @@ const outsideIn = c => {
   vm.runInContext('__det.oxWrap(' + JSON.stringify(OUTSIDE_ID) + ')', c);
 };
 outsideIn(ctx);
+const UP_TEXT = fs.readFileSync(UP_FILE, 'utf8');
+const upIn = c => vm.runInContext('Outside.run("u0", ' + JSON.stringify(UP_TEXT) + ')', c, { filename: 'up-rooms' });
+upIn(ctx);
+// the climb takes about three minutes a room for the bot: the up scenario is as long as its module has rooms
+const UP_ROOMS_N = vm.runInContext('UP_ROOMS.length', ctx) || 2;
 /* Run C's copy of the game: loaded on its own, at another size, it takes over
    run A's snapshot partway through and has to play the rest the same. */
 let C = null;
 const copyC = () => {
-  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); outsideIn(C.ctx); }
+  if (!C) { C = loadGame(IDX, { w: 800, h: 600 }); vm.runInContext(HARNESS, C.ctx, { filename: 'determinism-harness-c' }); outsideIn(C.ctx); upIn(C.ctx); }
   return C;
 };
 
@@ -298,6 +315,11 @@ const S = [
      the game; no other scenario's run is hunted, so none reads them.) */
   { name: 'above',      char: 'runner', seed: 121, steps: 18000,
     starter: 'RUN.above = true; ABOVE.from = 1; ABOVE.gap = [4, 9]; ABOVE.lead = 0; aboveBegin()' },
+  /* The way up (THE WAY UP): THE VOID's boss as good as down, so the next
+     sector has its light; up it, through every room of the module (the tests'
+     stand-in, or --up's), their bosses and shops, and let down at the end. */
+  { name: 'up',         char: 'runner', seed: 127, steps: 7200 + 10800 * UP_ROOMS_N, shops: true, climb: true,
+    starter: 'stage = STAGES[4]; upFelled({ boss: "nullcore" }); wave = 5; stageAbs = 1; enterStage(STAGES[0]); P.dmg *= 20' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
@@ -422,18 +444,21 @@ for (const sc of S) {
     ox = { calls, hooks, unused: hooks.filter(h => !calls[h]), errs: [a.outsideErrs, b.outsideErrs, c.outsideErrs].filter(Boolean).join(' / ') };
     outsideOk = calls.step > 0 && calls.key > 0 && !ox.errs;
   }
-  if (!ok || !okC || !vowCover || !outsideOk || !opoCover) failed++;
+  // the way up's run has to have been up every room of the module and let down, with no hook thrown
+  const upCover = sc.name !== 'up' || (a.up.max >= UP_ROOMS_N - 1 && a.up.down && !a.upErrs && !b.upErrs && !c.upErrs);
+  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover) failed++;
   const opoNote = sc.name === 'opo-route' ? `  · his lines ${a.opo.lines.join(',') || 'none'}, door ${a.opo.door ? 'passed' : 'NOT SEEN'}`
                 : sc.name === 'onepointoh' ? `  · phases ${a.opo.phases.join('') || '-'}, ${a.opo.done ? 'out' : 'NOT ENDED'}` : '';
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
   const oxNote = ox ? `  · outside: ${path.basename(OUTSIDE_FILE)}, ${ox.hooks.length - ox.unused.length}/${ox.hooks.length} hooks used` +
     (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
     (outsideOk ? '' : ` (HOOKS FAILED: ${ox.errs || 'step or key never played'})`) : '';
+  const upNote = sc.name === 'up' ? `  · up: ${path.basename(UP_FILE)}, rooms to ${a.up.max + 1}, ${a.up.down ? 'let down' : 'NOT LET DOWN'}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}`);
 }
 if (!ONLY) {
   // a seed must matter
