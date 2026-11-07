@@ -59,6 +59,9 @@ export const filmSql = (pilot, film, voice, won = false) =>
    so the winner chooses again. */
 export const partsSql = (pilot, words) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET parts = ${words == null ? 'NULL' : q(checkWords(words))} WHERE pilot = ${q(checkPilot(pilot))};`;
+// THE PARTS' place: the vault entry of the module the game plays for the winner (src/parts.js), or none
+export const sceneSql = (pilot, scene) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET parts_scene =${scene == null ? 'NULL' : q(checkWords(scene))} WHERE pilot = ${q(checkPilot(pilot))};`;
 export const unuseSql = pilot =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET parts_used = NULL, parts_use = NULL, parts_on = NULL WHERE pilot = ${q(checkPilot(pilot))};`;
 /* Its fight, decided by hand (FROM ABOVE: the hunt ends with it): 'lost' or
@@ -108,6 +111,6 @@ export const challengesSql = () =>
   `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm, ` +
   `COALESCE(c.film, '-') AS film, COALESCE(c.film_voice, '-') AS film_voice, ` +
   `COALESCE(c.won_film, '-') AS won_film, COALESCE(c.won_voice, '-') AS won_voice, ` +
-  `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on, ` +
+  `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on, COALESCE(c.parts_scene, '-') AS parts_scene, ` +
   `COALESCE(c.door, '-') AS door, ${day('c.mended')} AS mended ` +
   `FROM pvp_challenges c LEFT JOIN accounts r ON r.id = c.reached_by LEFT JOIN accounts t ON t.id = c.target ORDER BY c.armed;`;

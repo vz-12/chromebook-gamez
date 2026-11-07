@@ -24,7 +24,7 @@ import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newTo
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES, ADMIN_SITES } from './auth.js';
 import { vaultList } from './vault.js';
 import { PILOTS } from '../pvp/src/rules.js';
-import { challengeWaits, doorOf } from '../pvp/src/challenge.js';
+import { challengeWaits, doorOf, sceneFor } from '../pvp/src/challenge.js';
 
 const MIN_PASS = 8, MAX_PASS = 200;
 const MAX_SAVE = 300 * 1024;             // characters of JSON; a save is tens of KB
@@ -555,8 +555,13 @@ export default async (req, env) => {
        perk the other side gives it once it is done there: this game's menu
        is not shut to it, whatever the door. */
     const back = !!s && s.account.perks.includes('back');
+    /* `parts`: a challenge it won left it parts, and a place for them waits
+       (THE PARTS, parts.js): only ever an account a challenge was sent to,
+       so nobody else's reply costs a second look. */
+    const parts = challenge ? !!(await sceneFor(env.DB, s.account.id)) : false;
     return renew(reply(Object.assign({ account: s ? publicAccount(s.account) : null, turnstile: turnstileKey(env) },
-                                     vault ? { vault } : {}, challenge ? { challenge: true } : {}, admin ? { admin: true } : {}, back ? { back: true } : {})));
+                                     vault ? { vault } : {}, challenge ? { challenge: true } : {}, admin ? { admin: true } : {}, back ? { back: true } : {},
+                                     parts ? { parts: true } : {})));
   }
   if (req.method !== 'POST') return no('method not allowed', 405);
   const { v: b, err } = await bodyOf(req, 4096);

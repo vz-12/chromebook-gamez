@@ -34,8 +34,13 @@
      parts <pilot> <words>    THE PARTS: what it leaves the account it was
                               sent to if they win it, from a vault entry of
                               its own ({ "t", "x", "done" }), or none
+     scene <pilot> <module>   THE PARTS' place: a module the game plays for
+                              the account that won them, and nobody else,
+                              after the movie for the win and at the menu
+                              until they are used there (index.html, THE
+                              PARTS; src/parts.js), its vault entry, or none
      unuse <pilot>            the parts' use taken back: the winner chooses
-                              again
+                              again (and their place waits for them again)
      door <pilot> <address>   THE DOOR: where every game sends its players
                               once it is lost (index.html, THE DOOR), an
                               origin (https://name.example), or none. Its
@@ -70,7 +75,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, premiereSql, reelSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, premiereSql, reelSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, sceneSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
          doorSql, mendSql, checkPilot, checkWords, checkDate, checkOutcome, checkDoor } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -190,6 +195,17 @@ try {
       console.log(a1 + where + ': ' + (words ? 'its parts, their words in ' + words : 'no parts'));
       break;
     }
+    case 'scene': {
+      if (!a1 || !a2) die('scene <pilot> <module | none>');
+      const scene = a2 === 'none' ? null : a2;
+      const sql = sceneSql(a1, scene);
+      if (!live()) show(sql);
+      if (scene && !run(inVaultSql([scene])).length) die('the vault' + where + ' holds no ' + scene + ': put it first');
+      columns();
+      run(sql);
+      console.log(a1 + where + ': ' + (scene ? 'the place its parts go, the module in ' + scene : 'no place for its parts'));
+      break;
+    }
     case 'unuse': {
       if (!a1) die('unuse <pilot>');
       const sql = unuseSql(a1);
@@ -254,13 +270,13 @@ try {
                      'decided ' + r.decided + (r.outcome !== '-' ? ' (' + r.outcome + ')' : ''), 'held ' + r.calm,
                      'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : ''),
                      'won film ' + r.won_film + (r.won_voice !== '-' ? ' (' + r.won_voice + ')' : ''),
-                     'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : ''),
+                     'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : ''), 'their place ' + r.parts_scene,
                      'door ' + r.door, 'mended ' + r.mended].join('  ·  '));
       break;
     }
     default:
       die('arm <pilot> <words> | premiere <pilot> <when | none> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
-          'parts <pilot> <words | none> | unuse <pilot> | door <pilot> <address | none> | mend <pilot> [none] | decide <pilot> <lost | won | none> | ' +
+          'parts <pilot> <words | none> | scene <pilot> <module | none> | unuse <pilot> | door <pilot> <address | none> | mend <pilot> [none] | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }
 } catch (e) { die(e.message); }

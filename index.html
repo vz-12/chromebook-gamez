@@ -1695,6 +1695,7 @@ function inputDashTaken() {
 addEventListener('keydown', e => {
   if (Intro.on) { Intro.key(e); return; }   // INTRO: one key held skips it, and no key reaches the menu under it
   if (Ending.on) { e.preventDefault(); return; }   // THE ENDING: nothing reaches the game under it
+  if (Parts.on) { e.preventDefault(); Parts.key(e); return; }   // THE PARTS: its keys are its own
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
   if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
@@ -1722,11 +1723,13 @@ cv.addEventListener('mousemove', e => {
   // a real hand on the mouse takes the pointer back from a pad; a nudge of the desk does not
   if (e.isTrusted && Math.abs(e.movementX) + Math.abs(e.movementY) > 2) Pad.active = false;
   mouse.x = viewX(e); mouse.y = viewY(e);
+  if (Parts.on) { Parts.press('move', mouse.x, mouse.y); return; }   // THE PARTS: the pointer is its own
   sliderMove();
 });
 cv.addEventListener('mousedown', e => {
   if (Intro.on) { Intro.poke(); return; }   // INTRO: a click wakes the sound and shows the skip, and presses nothing
   if (Ending.on) { if (Ending.voice && Ending.voice.paused) Ending.voice.play().catch(() => {}); return; }   // THE ENDING: a click only wakes its voice
+  if (Parts.on) { Audio_.init(); Audio_.resume(); if (e.button === 0) Parts.press('down', viewX(e), viewY(e)); return; }   // THE PARTS: only its own
   if (Door.up()) return;                    // THE DOOR: nothing under its card
   Audio_.init(); Audio_.resume();
   if (e.isTrusted) Pad.active = false;
@@ -1765,6 +1768,7 @@ function sliderLet() {
 }
 addEventListener('mouseup', e => {
   if (!e || e.button !== 2) mouse.down = false;
+  if (Parts.on && e && e.button === 0) Parts.press('up', viewX(e), viewY(e));   // THE PARTS: a press let go
   sliderLet();
 });
 cv.addEventListener('contextmenu', e => e.preventDefault());
@@ -1809,6 +1813,7 @@ cv.addEventListener('touchstart', e => {
   Pad.active = false;
   if (Intro.on) { Intro.fingers = e.touches.length; Intro.poke(); return; }   // INTRO: a finger held down is the skip
   if (Ending.on) return;                                                      // THE ENDING: nothing under it
+  if (Parts.on) { Parts.touch('down', e.changedTouches); return; }            // THE PARTS: one finger, its own
   touchUI.active = true;
   for (const t of e.changedTouches) {
     const p = tpos(t);
@@ -1833,6 +1838,7 @@ cv.addEventListener('touchstart', e => {
 }, { passive: false });
 cv.addEventListener('touchmove', e => {
   e.preventDefault();
+  if (Parts.on) { Parts.touch('move', e.changedTouches); return; }   // THE PARTS
   for (const t of e.changedTouches) {
     const p = tpos(t);
     if (touchUI.slider === t.identifier) { mouse.x = p.x; mouse.y = p.y; sliderMove(); continue; }
@@ -1853,6 +1859,7 @@ cv.addEventListener('touchmove', e => {
 }, { passive: false });
 function touchEnd(e) {
   if (Intro.on) { Intro.fingers = e.touches.length; return; }
+  if (Parts.on) { Parts.touch('up', e.changedTouches); return; }   // THE PARTS
   if (QOL.onLift) { const f = QOL.onLift; QOL.onLift = null; if (e.type === 'touchend') f(); }
   // ROOT'S RITE: a phone shows its keyboard only for a focus asked as a finger lifts
   if (con.open && e.type === 'touchend') touchKbFocus();
@@ -39227,6 +39234,8 @@ function frame(now) {
   if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
   // THE ENDING: the movie has the screen, and the game stands still under it
   if (Ending.on) { last = now; Ending.frame(dt); requestAnimationFrame(frame); return; }
+  // THE PARTS: the winner's place has the screen, as the movie does, and is played
+  if (Parts.on) { last = now; Parts.frame(dt); requestAnimationFrame(frame); return; }
   fpsSample(dt);
   last = now;
   acc += dt;
@@ -39255,6 +39264,7 @@ function frame(now) {
     try { Ads.tick(); } catch (e) {}   // the menu's ad, now and then (ADS)
     try { Live.tick(); } catch (e) {}  // a PvP challenge on air, put in front of everybody (ON AIR)
     try { Ending.tick(); } catch (e) {}   // a challenge lost: its movie, once (THE ENDING)
+    try { Parts.tick(); } catch (e) {}    // and won: where its parts go, for the winner (THE PARTS)
     try { Door.tick(); } catch (e) {}     // and where its players go: the menu shut behind a door (THE DOOR)
   } catch (err) {
     // A thrown frame used to kill the rAF loop outright and freeze the
@@ -88267,6 +88277,7 @@ const Account = {
   challenge: false,     // PvP has sent this account a challenge: the PVP door says so (pvp/src/challenge.js)
   admin: false,         // the account is an admin's (the 'dev' perk): the menu shows the LAB door
   back: false,          // the account came back through THE DOOR: its menu isn't shut behind it
+  parts: false,         // a challenge it won left it parts, and the place they go waits for it (THE PARTS)
 
   off: () => BETA || location.protocol === 'file:',
 
@@ -88339,6 +88350,7 @@ const Account = {
     Account.challenge = !!(Account.me && r.d.challenge);
     Account.admin = !!(Account.me && r.d.admin);
     Account.back = !!(Account.me && r.d.back);
+    Account.parts = !!(Account.me && r.d.parts);   // a won challenge's parts, and a place for them waiting (THE PARTS)
     if (Account.me && r.d.vault) Outside.boot(r.d.vault);   // what the vault holds for this account (OUTSIDE PILOTS)
     if (Account.me) await Account.pull();
   },
@@ -88455,7 +88467,7 @@ const Account = {
   /* The server no longer knows this session: it expired, or the password was
      changed somewhere else. The save here is the player's, so it stays. */
   lost() {
-    Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = ''; Account.admin = false; Account.back = false;
+    Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = ''; Account.admin = false; Account.back = false; Account.parts = false;
     Account.due = false; Account.status = 'out'; Account.challenge = false;
   },
 
@@ -88479,8 +88491,9 @@ const Account = {
        played on, and its own perks (a dev account's are everything). */
     Awards.sync();
     Outside.ask();                     // and whatever the vault holds for it (OUTSIDE PILOTS)
-    Account.admin = false; Account.back = false;   // and whether it's an admin's, for the LAB door, and came back through THE DOOR
-    Account.call('GET').then(r => { Account.admin = !!(r.ok && r.d && r.d.account && r.d.admin && Account.me); Account.back = !!(r.ok && r.d && r.d.account && r.d.back && Account.me); });
+    Account.admin = false; Account.back = false; Account.parts = false;   // and whether it's an admin's, for the LAB door, came back through THE DOOR, and has parts to take somewhere
+    Account.call('GET').then(r => { Account.admin = !!(r.ok && r.d && r.d.account && r.d.admin && Account.me); Account.back = !!(r.ok && r.d && r.d.account && r.d.back && Account.me);
+                                    Account.parts = !!(r.ok && r.d && r.d.account && r.d.parts && Account.me); });
   },
 
   async signIn(name, pass) {
@@ -89059,7 +89072,7 @@ const Live = {
     if (Live.off()) return;
     const now = performance.now();
     if (!Live.busy && now >= Live.next) Live.ask();
-    if (Live.on && state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Live.seen(Live.on.match)) Live.show();
+    if (Live.on && state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Parts.on && !Live.seen(Live.on.match)) Live.show();
     // a run alone when it went on: held paused under the card until it's answered
     if (Live.hold) {
       if (!Live.on || (state !== 'play' && state !== 'pause')) Live.hold = false;
@@ -89244,7 +89257,7 @@ const Door = {
   },
   // once a frame: the card up at the menu while the door is open (after the movie, if there is one to play)
   tick() {
-    const want = Door.shut() && !Door.stay && state === 'menu' && !Intro.on && !Ending.on &&
+    const want = Door.shut() && !Door.stay && state === 'menu' && !Intro.on && !Ending.on && !Parts.on &&
                  Ending.state !== 'loading' && Ending.state !== 'ready' && !AcctUI.on;
     if (want && !Door.up()) Door.show();
     else if (!want && Door.up()) Door.hide();
@@ -89335,7 +89348,7 @@ const Door = {
                how far through that shot it is (0 to 1)
    A draw that throws ends it there. Its voice keeps its time where it plays.
    After it, after(way): where each ending goes next (lost: THE DOOR, if one
-   is open; won: still to come).
+   is open; won: the winner, to where its parts go, THE PARTS).
 
    On localhost only, ?ending=dev plays /api/film at once, every load, over
    whatever is up and whatever /api/live says: for drawing the movie against
@@ -89439,8 +89452,204 @@ const Ending = {
     uiArm = 0.4;                // a key still down from it lands on nothing
     Ending.after(Ending.way);
   },
-  // where it goes next: lost, through THE DOOR if there's one; won, what opens above (still to come)
-  after(way) { if (way === 'lost') Door.after(); }
+  // where it goes next: lost, through THE DOOR if there's one; won, the winner to where its parts go (THE PARTS)
+  after(way) { if (way === 'lost') Door.after(); if (way === 'won') Parts.after(); }
+};
+
+/* ===========================================================================
+   THE PARTS: where a won challenge's parts go
+
+   A challenge won by the account it was sent to leaves that account its
+   parts (pvp/src/challenge.js), and a place they go: a module kept in the
+   vault and named by hand (`npm run challenge -- scene`), which GET
+   /api/parts (src/parts.js) hands to that account alone while they are
+   unused; the account reply says `parts` meanwhile (Account.parts). It is
+   played straight after the movie for the win (THE ENDING, after('won')),
+   wherever the game was, and otherwise at the menu, once a load, until
+   they are used there.
+
+   It has the screen as the movie does, and the game stands still under it;
+   unlike the movie it is played: the pointer and the keys are its own. A
+   run in step with another machine (co-op) waits for its end.
+
+   The module is run as the movie's is: the body of a function handed VR,
+   which here has one call, VR.scene(def):
+     draw(t, s)   the frame at t seconds. s = { ctx, W, H, dt, pointer,
+                  sound, used, use(what), end() }:
+                    pointer  { x, y, down, touch, seen }, in the screen's
+                             own units (W by H); touch: it is a finger's
+                    sound    a gain node of its own to play into, at the
+                             player's volume, or null (no sound yet); the
+                             game's own sound is hushed under it
+                    used     null, then 'sending', 'done' or 'failed' once
+                             use() is asked
+                    use(w)   they are used here, on w (a word: a-z, 0-9, -):
+                             noted once and for good (POST /api/parts).
+                             Failed, the screen says so, and the next press
+                             asks again
+                    end()    it is over. Used, it is never played again;
+                             not, it comes back on the next load
+     press(e)     what is pressed: { type: 'down' | 'move' | 'up', x, y,
+                  touch } or { type: 'key', key }
+   Escape is end(), always. A draw or a press that throws ends it there, as
+   it does for the movie, and the game goes on.
+
+   On localhost only, ?parts=dev plays /api/parts at once, every load, and
+   use() is only pretended (the local database still decides whose it is):
+   for drawing it in the game itself.
+   ========================================================================= */
+const PARTS_URL = '/api/parts';
+const PARTS_USE = /^[a-z][a-z0-9-]{0,23}$/;
+const Parts = {
+  on: false, t: 0,
+  state: 'none',               // none, loading, ready, failed, done (used), left (put off until the next load)
+  def: null, s: null,
+  now: false,                  // the movie for the win is just over: wherever the game is
+  dev: false,                  // ?parts=dev
+  used: null, what: '',        // null, sending, done, failed; and on what
+  out: null, hushed: false,    // its own sound out; and the game's own, hushed under it
+  pointer: { x: 0, y: 0, down: false, touch: false, seen: false },
+  finger: null,                // the one finger it follows
+
+  off: () => !!PVP || BETA || location.protocol === 'file:',
+  boot() {
+    let q = null;
+    try { q = new URLSearchParams(location.search); } catch (e) { return; }
+    if (q && q.get('parts') === 'dev' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) Parts.dev = true;
+  },
+  // the movie for the win is over: straight there, if this account is the one
+  after() { if (Account.parts || Parts.dev) Parts.now = true; },
+  // the game at rest at its menu, nothing in front of it
+  calm: () => state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Live.up() && !Door.up(),
+  // once a frame: waiting for this account and the game free for it, fetched; ready, it starts
+  tick() {
+    if (Parts.on || Parts.off() || Intro.on || Ending.on || Ending.state === 'loading' || Ending.state === 'ready') return;
+    if (LS.on && MP.on) return;
+    const free = Parts.dev || Parts.now || Parts.calm();
+    if (!free) return;
+    if (Parts.state === 'none' && (Parts.dev || (!Account.off() && Account.me && Account.parts))) Parts.load();
+    else if (Parts.state === 'ready') Parts.start();
+  },
+  async load() {
+    Parts.state = 'loading';
+    try {
+      const r = await fetch(PARTS_URL, { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) throw Object.assign(new Error('parts ' + r.status), { quiet: r.status === 404 });
+      const text = await r.text();
+      let def = null;
+      new Function('VR', text)(Object.freeze({ v: 1, scene: d => { def = d; } }));
+      if (!def || typeof def.draw !== 'function') throw new Error('no scene in it');
+      Parts.def = { draw: def.draw, press: typeof def.press === 'function' ? def.press : null };
+      Parts.state = 'ready';
+    } catch (e) {
+      if (!e || !e.quiet) console.error('VOIDRUNNER parts:', e);   // (a 404: nothing waits, after all)
+      Parts.state = 'failed';
+    }
+  },
+  start() {
+    Parts.on = true; Parts.t = 0; Parts.now = false; Parts.used = null; Parts.what = ''; Parts.finger = null;
+    Object.assign(Parts.pointer, { x: mouse.x, y: mouse.y, down: false, touch: !!isTouch, seen: !isTouch });
+    Parts.s = { ctx, W, H, dt: 0, pointer: Parts.pointer, sound: null, used: null,
+                use: w => { Parts.use(w); }, end: () => { Parts.end(); } };
+    Parts.sound();
+  },
+  // its sound, once there is any (the first press may be what wakes it), and the game's hushed
+  sound() {
+    const A = Audio_;
+    if (!A.ready) return;
+    if (!Parts.hushed) { Parts.hushed = true; A.master.gain.setTargetAtTime(0, A.ac.currentTime, 0.25); }
+    if (!Parts.out) { try { Parts.out = A.ac.createGain(); Parts.out.connect(A.ac.destination); } catch (e) { Parts.out = null; } }
+    if (Parts.out) Parts.out.gain.value = A.muted ? 0 : A.vol;
+  },
+  frame(dt) {
+    const S = Parts.s;
+    Parts.t += Math.max(0, dt);
+    Parts.sound();
+    S.ctx = ctx; S.W = W; S.H = H; S.dt = dt; S.sound = Parts.out; S.used = Parts.used;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    try { Parts.def.draw(Parts.t, S); }
+    catch (e) { ctx.restore(); console.error('VOIDRUNNER parts:', e); Parts.end(); return; }
+    ctx.restore();
+    if (Parts.on && Parts.used === 'failed') Parts.say("CAN'T REACH THE SERVER  ·  " + (Parts.pointer.touch ? 'TAP' : 'CLICK') + ' TO TRY AGAIN');
+  },
+  // a line of its own, low on the screen, over the place
+  say(text) {
+    const S = H / 720;
+    ctx.save();
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, H - 58 * S, W, 32 * S);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.14em';
+    fitFont(text, W - 40, '700', Math.round(Math.max(10, 13 * S)), "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
+    ctx.fillStyle = '#fca5a5';
+    ctx.fillText(text, W / 2, H - 42 * S);
+    ctx.restore();
+  },
+  // the pointer, the keys and one finger: its own while it is on
+  press(type, x, y, touch) {
+    if (!Parts.on) return;
+    const p = Parts.pointer;
+    p.x = x; p.y = y; p.touch = !!touch; p.seen = true;
+    if (type === 'down') p.down = true; else if (type === 'up') p.down = false;
+    if (type === 'down') Parts.sound();
+    if (type === 'down' && Parts.used === 'failed') { Parts.use(Parts.what); return; }   // asked again
+    Parts.call({ type, x, y, touch: !!touch });
+  },
+  touch(type, list) {
+    for (const t of list) {
+      if (type === 'down' ? Parts.finger !== null : t.identifier !== Parts.finger) continue;
+      Parts.finger = type === 'up' ? null : t.identifier;
+      Parts.press(type, viewX(t), viewY(t), true);
+      return;
+    }
+  },
+  key(e) {
+    if (e.key === 'Escape') { if (!e.repeat) Parts.end(); return; }
+    if (e.repeat) return;
+    if (Parts.used === 'failed' && (e.key === 'Enter' || e.key === ' ')) { Parts.use(Parts.what); return; }
+    Parts.call({ type: 'key', key: e.key });
+  },
+  call(e) {
+    if (!Parts.def.press) return;
+    try { Parts.def.press(e); } catch (err) { console.error('VOIDRUNNER parts:', err); Parts.end(); }
+  },
+  // used here: noted once, for good. A 404 is nothing more to note (used already, or no longer this account's)
+  async use(w) {
+    if (!Parts.on || Parts.used === 'sending' || Parts.used === 'done') return;
+    w = String(w || '');
+    if (!PARTS_USE.test(w)) return;
+    Parts.what = w; Parts.used = 'sending';
+    if (Parts.dev) { console.info('VOIDRUNNER parts: used on ' + w + ' (?parts=dev: not sent)'); Parts.used = 'done'; return; }
+    let ok = false;
+    try {
+      const r = await fetch(PARTS_URL, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                                         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ use: w }) });
+      ok = r.ok || r.status === 404;
+    } catch (e) { /* no answer: failed, asked again on the next press */ }
+    Parts.used = ok ? 'done' : 'failed';
+    if (ok) Account.parts = false;
+  },
+  end() {
+    if (!Parts.on) return;
+    Parts.on = false;
+    Parts.state = Parts.used === 'done' ? 'done' : 'left';
+    Parts.pointer.down = false; Parts.finger = null;
+    const A = Audio_;
+    if (Parts.hushed && A.ready) A.master.gain.setTargetAtTime(A.muted ? 0 : A.vol * 0.9, A.ac.currentTime, 0.4);
+    Parts.hushed = false;
+    if (Parts.out) {
+      const o = Parts.out;
+      try { o.gain.setTargetAtTime(0, A.ac.currentTime, 0.25); } catch (e) {}
+      setTimeout(() => { try { o.disconnect(); } catch (e) {} }, 2000);
+    }
+    Parts.out = null;
+    mouse.down = false;
+    uiArm = 0.4;                // a key or a press still down from it lands on nothing
+  }
 };
 
 /* ===========================================================================
@@ -90220,7 +90429,7 @@ const Outside = {
   async ask() {
     if (PVP || Account.off()) return;
     const r = await Account.call('GET');
-    if (r.ok && r.d) Account.challenge = !!(Account.me && r.d.challenge);
+    if (r.ok && r.d) { Account.challenge = !!(Account.me && r.d.challenge); Account.parts = !!(Account.me && r.d.parts); }
     if (r.ok && r.d && r.d.vault) await Outside.boot(r.d.vault);
   },
 
@@ -95822,6 +96031,7 @@ addEventListener('visibilitychange', () => Intro.hidden());
 /* --------------------------------- start ---------------------------------- */
 Intro.boot();             // first, while the address still says how this tab came (INTRO)
 Ending.boot();            // ?ending=dev, on localhost only (THE ENDING)
+Parts.boot();             // ?parts=dev, the same (THE PARTS)
 prewarmGlow();
 if (BETA) betaSeal();     // before init, so it never opens the shared store
 if (PVP) pvpSeal();       // PvP's page: the game's doors closed (PvP mode)

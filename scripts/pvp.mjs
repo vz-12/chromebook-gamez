@@ -1883,6 +1883,53 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   tool(partsSql('x7', null)); tool(decideSql('x7', 'none'));
   ok(row().parts === null, 'and none named (parts none)');
 
+  /* WHERE THEY GO (npm run challenge -- scene): a place for them, a module
+     the game plays for the winner alone (src/parts.js; index.html, THE
+     PARTS), until they are used there, once and for good. */
+  {
+    const { sceneSql } = await import('./lib/challenge-sql.mjs');
+    const sceneText = 'VR.scene({ draw() {} });';
+    tool(putSql('x7-place', Buffer.from(sceneText)).sql);
+    // the same accounts, signed in in the game (this section's mk signs them in at PvP only)
+    const G = new Map();
+    for (const who of [T, S, H, D]) { const g = tab(GAME, '198.51.100.' + (180 + G.size)); g.cookie = who.pvp.cookie; G.set(who, g); }
+    const placeGet = who => G.get(who).call('GET', '/api/parts');
+    const waits = async who => 'parts' in ((await G.get(who).call('GET', '/api/account')).d || {});
+    tool(decideSql('x7', 'won', 5678901));
+    ok((await placeGet(T)).status === 404 && !(await waits(T)), 'won, with no place named for them: nowhere to go');
+    tool(sceneSql('x7', 'x7-place'));
+    ok(row().parts_scene === 'x7-place', 'a place named for them, by hand (npm run challenge -- scene)', row());
+    const got = await placeGet(T);
+    ok(got.status === 200 && got.d === sceneText, 'the winner is handed it', got);
+    ok(await waits(T), 'and the account reply says it waits');
+    ok((await placeGet(S)).status === 404 && (await placeGet(H)).status === 404 && (await placeGet(D)).status === 404 &&
+       !(await waits(S)) && !(await waits(D)), 'and nobody else: not a stranger, the pilot\'s own holder, nor a dev');
+    ok((await tab(GAME, '198.51.100.171').call('GET', '/api/parts')).status === 404, 'nor anybody signed out');
+    tool(decideSql('x7', 'none'));
+    ok((await placeGet(T)).status === 404 && !(await waits(T)), 'not decided: nowhere');
+    tool(decideSql('x7', 'lost', 5678902));
+    ok((await placeGet(T)).status === 404 && !(await waits(T)), 'lost: nowhere');
+    tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', 5678903));
+    // the use
+    ok((await G.get(T).call('POST', '/api/parts', { use: 'Not A Word' })).status === 400 && row().parts_used === null, 'a use is a word, or nothing');
+    ok((await G.get(S).call('POST', '/api/parts', { use: 'light' })).status === 404 && row().parts_used === null, 'nobody else uses them');
+    const cross = await main.fetch(new Request(GAME + '/api/parts', { method: 'POST', body: JSON.stringify({ use: 'light' }),
+      headers: { origin: 'https://elsewhere.example', cookie: 'vr_s=' + G.get(T).cookie, 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.172' } }), envMain);
+    ok(cross.status === 404 && row().parts_used === null, 'nor does a page of somebody else\'s, with the winner\'s cookie');
+    const used = await G.get(T).call('POST', '/api/parts', { use: 'light' });
+    ok(used.status === 200 && used.d.used && used.d.used.use === 'light' && row().parts_used === used.d.used.at && row().parts_use === 'light' && row().parts_on === null,
+       'used there: noted, once and for good', [used, row()]);
+    ok((await placeGet(T)).status === 404 && !(await waits(T)), 'and the place is never handed out again');
+    ok((await G.get(T).call('POST', '/api/parts', { use: 'other' })).status === 404 && row().parts_use === 'light', 'nor are they used twice');
+    tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', 5678904));
+    ok((await placeGet(T)).status === 404 && row().parts_use === 'light', 'decided won again: still used');
+    tool(unuseSql('x7'));
+    ok((await placeGet(T)).status === 200 && (await waits(T)), 'a use taken back by hand (npm run challenge -- unuse): the place waits again');
+    ok(tool(challengesSql()).find(x => x.pilot === 'x7').parts_scene === 'x7-place', 'the tool lists it');
+    tool(sceneSql('x7', null)); tool(decideSql('x7', 'none'));
+    ok(row().parts_scene === null && (await placeGet(T)).status === 404, 'and none named (scene none)');
+  }
+
   // a table made before the columns: PvP's Worker adds them, and the tool can too
   const { makeD1 } = await import('./lib/d1-sqlite.mjs');
   const old = makeD1();

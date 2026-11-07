@@ -57,11 +57,14 @@
    carries them (/api/pvp/me, partsFor below) from the moment it is decided.
    A decision taken back takes them out of sight with it, used or not;
    decided won again, they are back as they were.
-   Nothing uses them yet: they are kept for what comes next. A use, when
-   there is one, is noted once, for good (parts_used, parts_use, parts_on),
-   and `npm run challenge -- unuse` takes it back by hand. The first use
-   built, giving them to one of the account's own pilots' hulls, was
-   archived on 29 Oct when the winner-to-be chose the other way: it is
+   WHERE THEY GO: a place of their own, a module kept in the vault (`npm
+   run challenge -- scene <pilot> <module>`), which the game plays for
+   that account and nobody else (index.html, THE PARTS; src/parts.js):
+   straight after the movie for the win, and at the menu until they are
+   used there. A use is noted once, for good (parts_used, parts_use,
+   parts_on), and `npm run challenge -- unuse` takes it back by hand. The
+   first use built, giving them to one of the account's own pilots' hulls,
+   was archived on 29 Oct when the winner-to-be chose the other way: it is
    commit 1ae6470 (POST /api/pvp/parts, the lobby's picker, their tests).
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
@@ -100,7 +103,8 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      parts_used  INTEGER,                  -- when they were used, once and for good
      parts_use   TEXT,                     -- on what
      parts_on    TEXT,                     -- and which of their pilots, where that use takes one
-     door        TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
+     parts_scene TEXT,                     -- the vault entry of the place they are used in, a module the game plays for the winner (THE PARTS)
+     door       TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
      mended      INTEGER,                  -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
      premiere    INTEGER,                  -- its fight shown at this time, from its recording, if fought ahead of it (revealAt), set by hand
      reel        TEXT                      -- and, if set, the vault entry of a recording shown in place of its match's own (watch.js), set by hand
@@ -109,7 +113,8 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
                ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
-               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER'], ['reel', 'TEXT']];
+               ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER'], ['reel', 'TEXT'],
+               ['parts_scene', 'TEXT']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -392,4 +397,32 @@ export async function partsFor(db, acct) {
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
   return { t: str(w.t, PARTS_WORDS.t), x: w.x.slice(0, PARTS_WORDS.x), done: str(w.done, PARTS_WORDS.done),
            used: row.parts_used ? { use: row.parts_use, on: row.parts_on, at: row.parts_used } : null };
+}
+
+/* WHERE THEY GO (index.html, THE PARTS; src/parts.js, the game's Worker,
+   which never makes PvP's tables): the place named for them, for the
+   account that won them and nobody else, while they are still unused and
+   once what was decided is told (a fight held for its showing: not before
+   its end has been shown). { pilot, scene } (scene: a vault entry), or null.
+   Their words are the lobby's, and not needed here. */
+export async function sceneFor(db, acct, now = Date.now()) {
+  try {
+    const row = await db.prepare(
+      `SELECT * FROM pvp_challenges WHERE target = ?1 AND outcome = 'won' AND decided IS NOT NULL
+          AND parts_scene IS NOT NULL AND parts_used IS NULL ORDER BY decided LIMIT 1`).bind(acct).first();
+    return row && !held(row, now) ? { pilot: row.pilot, scene: row.parts_scene } : null;
+  } catch (e) { return null; }   // no table, or not its newer columns yet: nowhere to go
+}
+// what a use may be called (parts_use): a word, the place's own
+export const PARTS_USE = /^[a-z][a-z0-9-]{0,23}$/;
+/* And used there: noted once, for good. Whether it was this call that did;
+   a place no longer waiting (used already, or never theirs) changes nothing. */
+export async function useParts(db, acct, use, now = Date.now()) {
+  if (!PARTS_USE.test(use || '')) return false;
+  const s = await sceneFor(db, acct, now);
+  if (!s) return false;
+  const r = await db.prepare(
+    `UPDATE pvp_challenges SET parts_used = ?3, parts_use = ?4, parts_on = NULL
+      WHERE pilot = ?1 AND target = ?2 AND outcome = 'won' AND parts_used IS NULL`).bind(s.pilot, acct, now, use).run();
+  return !!(r && r.meta && r.meta.changes);
 }
