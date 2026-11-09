@@ -77688,6 +77688,9 @@ const FREE_ROWS = [
       const r = UP_AWAY[(freeAway = (freeAway + 1) % UP_AWAY.length)];
       upAway(r.mod, r.apart); },
     val: () => (UP_AWAY.length ? (freeAway + 2) % (UP_AWAY.length + 1) + ' / ' + UP_AWAY.length : '-') },
+  { n: "THE PARTS' PLACE", f: () => {          // a place the vault gave this account (VR.scene), now, over the run; nothing noted (THE PARTS)
+      if (!Parts.tryHeld()) { banner('NO PLACE HERE', '#94a3b8', 2.0); return; }
+      freeOpen = false; } },
   { n: 'GIVE A BOOK',    f: () => {
       const keys = Object.keys(BOOKS);
       const k = keys[(freeBook = (freeBook + 1) % keys.length)];
@@ -88432,7 +88435,7 @@ const Account = {
     // back from PvP signed in there: the code makes this site's session too (account.js)
     if (code) await Account.call('POST', '', { op: 'handoff-take', code });
     const r = await Account.call('GET');
-    if (!r.ok || !r.d) { Account.status = 'offline'; return; }
+    if (!r.ok || !r.d) { Account.status = 'offline'; Intro.heard(null, true); return; }   // (no intro from the vault this tab: INTRO)
     Account.me = r.d.account || null;
     Account.turnstile = r.d.turnstile || null;
     Account.status = '';
@@ -88440,6 +88443,7 @@ const Account = {
     Account.admin = !!(Account.me && r.d.admin);
     Account.back = !!(Account.me && r.d.back);
     Account.parts = !!(Account.me && r.d.parts);   // a won challenge's parts, and a place for them waiting (THE PARTS)
+    Intro.heard(Account.me ? r.d.vault : null);     // an intro from the vault remembered here, still held? (INTRO)
     if (Account.me && r.d.vault) Outside.boot(r.d.vault);   // what the vault holds for this account (OUTSIDE PILOTS)
     if (Account.me) await Account.pull();
   },
@@ -88558,6 +88562,7 @@ const Account = {
   lost() {
     Account.me = null; Account.cloud = null; Account.rev = 0; Account.sent = ''; Account.admin = false; Account.back = false; Account.parts = false;
     Account.due = false; Account.status = 'out'; Account.challenge = false;
+    Intro.forget();                    // an intro from the vault was this account's, not this browser's (INTRO)
   },
 
   // what went wrong, in the panel's words
@@ -89586,6 +89591,11 @@ const Ending = {
    On localhost only, ?parts=dev plays /api/parts at once, every load, and
    use() is only pretended (the local database still decides whose it is):
    for drawing it in the game itself.
+
+   A place may also come as any account's module from the vault (OUTSIDE
+   PILOTS) calling VR.scene(def): held, not played, until FREEPLAY's THE
+   PARTS' PLACE plays it over the run, use() pretended as ?parts=dev's is.
+   It is how an account the vault gives one to tries it; nothing is noted.
    ========================================================================= */
 const PARTS_URL = '/api/parts';
 const PARTS_USE = /^[a-z][a-z0-9-]{0,23}$/;
@@ -89599,8 +89609,21 @@ const Parts = {
   out: null, hushed: false,    // its own sound out; and the game's own, hushed under it
   pointer: { x: 0, y: 0, down: false, touch: false, seen: false },
   finger: null,                // the one finger it follows
+  held: null,                  // a place a module from the vault handed this machine (VR.scene), for FREEPLAY
+  trial: false,                // that one is on: its use is only pretended
 
   off: () => !!PVP || BETA || location.protocol === 'file:',
+  // VR.scene(def), from a module the vault gave this account: kept for FREEPLAY
+  hold(id, def) {
+    if (!def || typeof def.draw !== 'function') throw new Error('no scene in it');
+    Parts.held = { draw: def.draw, press: typeof def.press === 'function' ? def.press : null };
+  },
+  // FREEPLAY's THE PARTS' PLACE: the held one, now, over the run. Whether it could
+  tryHeld() {
+    if (!Parts.held || Parts.on || Parts.off() || Parts.state === 'loading') return false;
+    Parts.def = Parts.held; Parts.state = 'ready'; Parts.trial = true; Parts.now = true;
+    return true;
+  },
   boot() {
     let q = null;
     try { q = new URLSearchParams(location.search); } catch (e) { return; }
@@ -89712,7 +89735,7 @@ const Parts = {
     w = String(w || '');
     if (!PARTS_USE.test(w)) return;
     Parts.what = w; Parts.used = 'sending';
-    if (Parts.dev) { console.info('VOIDRUNNER parts: used on ' + w + ' (?parts=dev: not sent)'); Parts.used = 'done'; return; }
+    if (Parts.dev || Parts.trial) { console.info('VOIDRUNNER parts: used on ' + w + ' (' + (Parts.trial ? 'freeplay' : '?parts=dev') + ': not sent)'); Parts.used = 'done'; return; }
     let ok = false;
     try {
       const r = await fetch(PARTS_URL, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -89726,6 +89749,7 @@ const Parts = {
     if (!Parts.on) return;
     Parts.on = false;
     Parts.state = Parts.used === 'done' ? 'done' : 'left';
+    if (Parts.trial) { Parts.trial = false; Parts.state = 'none'; Parts.def = null; }   // FREEPLAY's: as if it had never been, so it may be played again
     Parts.pointer.down = false; Parts.finger = null;
     const A = Audio_;
     if (Parts.hushed && A.ready) A.master.gain.setTargetAtTime(A.muted ? 0 : A.vol * 0.9, A.ac.currentTime, 0.4);
@@ -90557,7 +90581,9 @@ const Outside = {
   // the module, run: VR is all it is handed, and the page is all it reads
   run(id, text) {
     const VR = Object.freeze({ v: 1, id, pilot: def => outsidePilot(id, def), rooms: def => upRooms(id, def),   // rooms: THE WAY UP
-                               apart: def => upApart(id, def), go: n => upAway(id, n) });                       // and its ROOMS APART
+                               apart: def => upApart(id, def), go: n => upAway(id, n),                          // and its ROOMS APART
+                               intro: def => Intro.take(id, def),                                               // an intro of its own (INTRO)
+                               scene: def => Parts.hold(id, def) });                                            // a place, played from FREEPLAY (THE PARTS)
     new Function('VR', text)(VR);
     // its text's mark, so two machines in one match can tell they run the same one (mpOnEvent, hello)
     let h = 2166136261 >>> 0;
@@ -96477,8 +96503,35 @@ function drawBetaMark() {
    context, which needs no input. The first key, click or tap starts it where
    the picture is, and from then on the picture follows the song, as it is
    heard (the speaker's own delay too), instead of counting frames, so the
-   two cannot drift apart. Without it the look plays on in silence. */
+   two cannot drift apart. Without it the look plays on in silence.
+
+   AN INTRO FROM THE VAULT. An account may hold an intro of its own: a
+   module the vault hands it (OUTSIDE PILOTS) that calls VR.intro(def), in
+   the shape of THE ENDING's films:
+     length    seconds, end to end
+     shots     [{ id, at, d, name }]: in order; each frame is told which is on
+     draw(t, s)   the whole frame at t: s = { ctx, W, H, dt, shot, k }, k
+               how far through that shot it is (0 to 1)
+     song      the song under it, as base64 of a file the browser decodes,
+               cut to its clock as intro-song.opus is; it may ring out a
+               little past length
+     gain      the song's level against the score's (INTRO_SONG_GAIN if not)
+     fonts     Google Fonts families its words are set in ('Name:wght@600'),
+               asked for as it is taken
+   It plays in place of THE LOOK by every rule above: once a tab, the same
+   skip, the song the same way. The account reply comes after the boot, so
+   a browser that has run one remembers its id (INTRO_FROM), and the next
+   new tab waits for that module instead of fetching THE LOOK. One the
+   account no longer holds (signed out, or the vault took it back) is
+   forgotten, and THE LOOK plays after all. The first time (nothing
+   remembered yet), THE LOOK has begun before it comes; it takes the screen
+   from the top so long as nothing has been heard (no key, click or tap
+   yet: THE LOOK plays in silence till then), and once THE LOOK's song is
+   heard it is the next tab's. A tab with ?intro=1 plays whichever this
+   browser would. */
 const INTRO_KEY = 'voidrunner_intro_v1';
+const INTRO_FROM = 'voidrunner_intro_from';   // the vault id of an intro this browser's account holds (AN INTRO FROM THE VAULT)
+const INTRO_RING = 2.5;         // s an intro from the vault's song is let ring out after its picture ends
 const INTRO_ART = true;         // the real look is in: every new tab plays it
 const INTRO_ART_VER = 'b5cbf5aab9';   // intro-art.js's content hash (its header says how), so a new file is never served stale
 const INTRO_LEN = 114;          // seconds, as long as THE LOOK runs (IntroArt.LEN)
@@ -96499,6 +96552,9 @@ const Intro = {
   song: null,                   // intro-song.opus, decoded (fetchSong)
   src: null, vol: null,         // the song playing, and its level
   at0: 0,                       // the audio clock's time at the song's first sample
+  from: '',                     // the vault id of the intro this tab waits for, in place of THE LOOK (AN INTRO FROM THE VAULT)
+  film: null,                   // and once its module has run, what it handed: { length, shots, draw, gain }
+  rung: false,                  // it ran to its end (not skipped): its song may ring out
   boot() {
     if (PVP || OPO_BENCH_ASK) return;
     let q = null;
@@ -96514,6 +96570,10 @@ const Intro = {
       } catch (e) { /* no tab storage here: every load is a fresh tab, as far as anyone can tell */ }
     }
     this.on = true;
+    // an intro this browser's account holds: waited for (take), on black, as THE LOOK's file is
+    let from = '';
+    try { from = localStorage.getItem(INTRO_FROM) || ''; } catch (e) { /* no storage: THE LOOK */ }
+    if (/^[a-z0-9][a-z0-9-]{0,31}$/.test(from) && !Account.off()) { this.from = from; this.art = 'loading'; return; }
     this.load();
   },
   // the look, fetched now and only now, and the serif its words are set in
@@ -96526,12 +96586,81 @@ const Intro = {
       const el = document.createElement('script');
       el.src = 'intro-art.js?v=' + INTRO_ART_VER;
       el.async = true;
-      el.onload = () => { this.art = typeof IntroArt !== 'undefined' ? 'ready' : 'failed'; };
-      el.onerror = () => { this.art = 'failed'; };
+      el.onload = () => { if (!this.film) this.art = typeof IntroArt !== 'undefined' ? 'ready' : 'failed'; };
+      el.onerror = () => { if (!this.film) this.art = 'failed'; };
       document.head.appendChild(el);
       this.fetchSong();
     } catch (e) { this.art = 'failed'; }
   },
+  /* AN INTRO FROM THE VAULT: a module's VR.intro(def). Remembered for the
+     next new tab whatever happens; played now if this tab waits for it, or
+     in THE LOOK's place, from the top, while THE LOOK is still silent (no
+     song heard: no key yet). */
+  take(id, def) {
+    if (!def || !(def.length > 0) || typeof def.draw !== 'function') throw new Error('no intro in it');
+    try { localStorage.setItem(INTRO_FROM, id); } catch (e) { /* the next tab won't know: THE LOOK */ }
+    if (!this.on || this.film || this.src || !(this.from === id || !this.from)) return;
+    this.from = id;
+    this.t = 0; this.hold = 0;  // THE LOOK, if it had begun in silence: this one from its first frame
+    this.film = { length: +def.length, draw: def.draw,
+                  shots: Array.isArray(def.shots) ? def.shots.filter(s => s && Number.isFinite(s.at)) : [],
+                  gain: Number.isFinite(def.gain) && def.gain > 0 ? Math.min(+def.gain, 8) : INTRO_SONG_GAIN };
+    this.song = null;           // THE LOOK's, if it came: not this one's
+    this.fonts(def.fonts);
+    this.songOf(def.song);
+    this.art = 'ready'; this.wait = 0;
+  },
+  // the account reply: an intro remembered here that it does not hold is forgotten (offline: only for this tab)
+  heard(list, offline) {
+    if (!this.from) return;
+    if (!offline && Array.isArray(list) && list.some(it => it && it.id === this.from)) return;
+    if (offline) this.instead(); else this.forget();
+  },
+  // signed out, or no longer held: the next new tab plays THE LOOK, and so does this one if it is still waiting
+  forget() {
+    try { localStorage.removeItem(INTRO_FROM); } catch (e) { /* nothing kept */ }
+    this.instead();
+  },
+  instead() {
+    if (!this.from || this.film) return;
+    this.from = '';
+    if (this.on && this.art === 'loading') { this.art = 'none'; this.wait = 0; this.load(); }
+  },
+  // its song: base64 of the file, decoded as THE LOOK's is
+  songOf(b64) {
+    const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OC || typeof b64 !== 'string' || !b64) return;
+    const film = this.film;
+    let bytes = null;
+    try {
+      const bin = atob(b64);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } catch (e) { return; }     // not base64: it plays in silence
+    new Promise((ok, bad) => new OC(2, 1, 48000).decodeAudioData(bytes.buffer, ok, bad))
+      .then(buf => { if (this.on && this.film === film) { this.song = buf; this.playSong(); } })
+      .catch(() => {});
+  },
+  // its words' faces, from Google Fonts (as the page's own are): only plain family names and axes
+  fonts(list) {
+    if (!Array.isArray(list) || !document.fonts) return;
+    const fams = list.filter(f => typeof f === 'string' && /^[A-Za-z][A-Za-z ]{0,39}(:[a-z,]{1,12}@[0-9;,.]{1,40})?$/.test(f)).slice(0, 4);
+    if (!fams.length) return;
+    try {
+      const el = document.createElement('link');
+      el.rel = 'stylesheet';
+      el.href = 'https://fonts.googleapis.com/css2?' + fams.map(f => 'family=' + f.replace(/ /g, '+')).join('&') + '&display=swap';
+      el.onload = () => {
+        for (const f of fams) {
+          const name = f.split(':')[0], w = (/@([0-9;,.]+)$/.exec(f) || [])[1];
+          for (const wt of (w ? w.split(/[;,]/).filter(x => /^\d{3}$/.test(x)) : ['400']))
+            document.fonts.load(wt + " 24px '" + name + "'").catch(() => {});
+        }
+      };
+      document.head.appendChild(el);
+    } catch (e) { /* the module's fallbacks, then */ }
+  },
+  len() { return this.film ? this.film.length : INTRO_LEN; },
   // the song, decoded as soon as it is in: an offline context may decode before any input
   fetchSong() {
     const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -96539,13 +96668,13 @@ const Intro = {
     fetch(INTRO_SONG + '?v=' + INTRO_SONG_VER)
       .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('intro song ' + r.status))))
       .then(b => new Promise((ok, bad) => new OC(2, 1, 48000).decodeAudioData(b, ok, bad)))
-      .then(buf => { if (this.on) { this.song = buf; this.playSong(); } })
+      .then(buf => { if (this.on && !this.film) { this.song = buf; this.playSong(); } })
       .catch(() => {});         // no song, then: the look plays on in silence
   },
   // the song joins the picture where the picture is, once the look is in and the browser lets sound start
   playSong() {
     const A = Audio_;
-    if (!this.on || this.src || !this.song || this.art !== 'ready' || !A.ready || this.t > INTRO_LEN - 1) return;
+    if (!this.on || this.src || !this.song || this.art !== 'ready' || !A.ready || this.t > this.len() - 1) return;
     const ac = A.ac;
     if (ac.state !== 'running') { A.resume(); return; }   // asked again every frame until the browser allows it
     const lead = 0.05, at = ac.currentTime + lead, from = this.t + lead;
@@ -96557,7 +96686,7 @@ const Intro = {
     this.src = s; this.vol = v; this.at0 = at - from;
   },
   // MUSIC sets it, as it sets the score, and a tab put away hears none of it (Music.tick)
-  level() { return MUSIC_LEVEL * INTRO_SONG_GAIN * Audio_.musicVol; },
+  level() { return MUSIC_LEVEL * (this.film ? this.film.gain : INTRO_SONG_GAIN) * Audio_.musicVol; },
   hidden() {
     if (this.src) this.vol.gain.setTargetAtTime(document.hidden ? 0 : this.level(), Audio_.ac.currentTime, 0.08);
   },
@@ -96588,28 +96717,37 @@ const Intro = {
     else if ((this.wait += dt) > INTRO_WAIT) { this.end(); return; }
     const held = keys[INTRO_SKIP] || this.fingers > 0;
     this.hold = held ? Math.min(1, this.hold + dt / INTRO_HOLD) : Math.max(0, this.hold - dt * 2 / INTRO_HOLD);
-    if (this.hold >= 1 || this.t >= INTRO_LEN) { this.end(); return; }
+    if (this.hold >= 1 || this.t >= this.len()) { this.rung = this.hold < 1; this.end(); return; }
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.fillStyle = COL.bg;
+    ctx.fillStyle = this.film ? '#000' : COL.bg;
     ctx.fillRect(0, 0, W, H);
     if (ready) {
       ctx.save();
-      try { introDraw(ctx, this.t, W, H); }
+      try { if (this.film) this.filmDraw(dt); else introDraw(ctx, this.t, W, H); }
       catch (e) { ctx.restore(); console.error('VOIDRUNNER intro:', e); this.end(); return; }
       ctx.restore();
     }
     this.drawSkip();
   },
+  // an intro from the vault's frame, as THE ENDING draws a film's
+  filmDraw(dt) {
+    const D = this.film;
+    let shot = D.shots[0] || { id: '', at: 0, d: D.length, name: '' };
+    for (const s of D.shots) if (s.at <= this.t) shot = s;
+    const k = clamp((this.t - shot.at) / Math.max(0.001, shot.d || D.length), 0, 1);
+    D.draw(this.t, { ctx, W, H, dt, shot, k });
+  },
   end() {
     this.on = false;
     uiArm = 0.4;                // a key or a finger still down from it lands on nothing
-    if (this.src) {             // the song: a skip fades it out; at the end it has already rung out
-      const now = Audio_.ac.currentTime, g = this.vol.gain;
-      g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + 0.6);
-      try { this.src.stop(now + 0.65); } catch (e) { /* stopped already */ }
+    if (this.src) {             // the song: a skip fades it out; at the end it has already rung out (an intro from the vault's: let it)
+      const now = Audio_.ac.currentTime, g = this.vol.gain, fade = this.rung && this.film ? INTRO_RING : 0.6;
+      g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + fade);
+      try { this.src.stop(now + fade + 0.05); } catch (e) { /* stopped already */ }
       this.src = null;
     }
     this.song = null;           // forty-odd megabytes of sound, not kept past its one play
+    this.film = null;           // nor the picture
   },
   drawSkip() {
     const since = this.t - this.said;

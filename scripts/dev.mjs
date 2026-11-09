@@ -52,6 +52,7 @@ const portArg = args.find((a, i) => a.startsWith('--port=') || args[i - 1] === '
 const port = portArg ? portArg.replace('--port=', '') : '8787';
 const upstream = args.some(a => a.startsWith('--local-upstream')) ? [] : ['--local-upstream', 'localhost:' + port];
 
-const child = spawn('npx', ['--yes', 'wrangler', 'dev', '--assets', SITE, ...upstream, ...args],
+// the snapshot by its path from ROOT: on Windows the shell splits a full path with a space in it ("voidrunner stuff")
+const child = spawn('npx', ['--yes', 'wrangler', 'dev', '--assets', '.wrangler/site', ...upstream, ...args],
                     { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' });
 child.on('exit', code => process.exit(code ?? 0));

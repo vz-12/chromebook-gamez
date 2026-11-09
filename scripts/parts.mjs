@@ -255,5 +255,37 @@ section('dev: ?parts=dev on localhost plays it at once, every load, and only pre
   ok(!g.run('Parts.on') && g.win.__posted.length === 0, 'used: ended, and nothing sent');
 }
 
+section("freeplay: a place a module from the vault hands over (VR.scene) is held, played from THE PARTS' PLACE, its use pretended");
+{
+  const g = boot();
+  g.run(SETUP + SIGNED + ' Account.parts = false; globalThis.__useAt = 0.1; globalThis.__endOnDone = true; console.info = () => {};');
+  const row = `FREE_ROWS.find(r => r.n === "THE PARTS' PLACE")`;
+  ok(g.run(`!!${row}`), 'FREEPLAY has the row');
+  g.run('startFreeplay();');
+  g.run(`${row}.f()`);
+  await tick(g);
+  ok(!g.run('Parts.on') && g.win.__asked.length === 0, 'nothing held: nothing plays, nothing asked');
+  g.run(`Outside.run('n9', ${JSON.stringify(SCENE)})`);
+  ok(g.run('!!Parts.held') && !g.run('Parts.on'), 'a module hands one over: held, not played');
+  g.run('state = "menu";');
+  await tick(g);
+  ok(!g.run('Parts.on') && g.win.__asked.length === 0, 'not at the menu either: it is no won challenge\'s');
+  g.run('startFreeplay(); freeOpen = true;');
+  g.run(`${row}.f()`);
+  await tick(g);
+  ok(g.run('Parts.on') && g.run('Parts.trial') && g.run('state') === 'play' && !g.run('freeOpen'), 'the row: on, over the run, the console put away');
+  play(g, 0.3);
+  await flush();
+  ok(!g.run('Parts.on') && g.win.__posted.length === 0 && g.run('Parts.state') === 'none' && !g.run('Parts.trial'), 'used: ended, nothing sent, as if never played', g.run('Parts.state'));
+  g.run(`${row}.f()`);
+  await tick(g);
+  ok(g.run('Parts.on'), 'and it can be played again');
+  g.run("Parts.key({ key: 'Escape' })");
+  ok(!g.run('Parts.on') && g.run('Parts.state') === 'none', 'Escape: the same');
+  let threw = false;
+  try { g.run(`Outside.run('n8', 'VR.scene({})')`); } catch (e) { threw = /no scene/.test(String(e && e.message)); }
+  ok(threw, 'a def with no draw: thrown (Outside.load logs it)');
+}
+
 console.log(fails ? `\n${fails} FAILED, ${passes} passed` : `\n${passes} passed, 0 failed`);
 process.exit(fails ? 1 : 0);
