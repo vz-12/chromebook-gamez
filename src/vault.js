@@ -7,11 +7,12 @@
    instead, in the database, and handed only to the accounts allowed it.
 
      GET /api/vault?id=<id>[&h=<sha-256>]   -> the module's text   (text/javascript)
-         only to a signed-in account holding the perk 'vault:<id>'. Anyone
+         only to a signed-in account holding the perk 'vault:<id>', or to a
+         dev account if the entry has a name (EARLY ACCESS, below). Anyone
          else, signed in or not, is told there is no such thing (404), the
          same answer a missing id gets, so the route says nothing about
          what is or is not in it.
-   and GET /api/account names what the account may load (vaultList), so a
+   and GET /api/account names what the account may load (vaultOpen), so a
    page knows to ask without one more request for everybody else.
 
    An entry is an opaque id. Its name, and everything about it, is in the
@@ -76,11 +77,34 @@ export function ensureVault(db) {
 export const vaultIds = perks => (Array.isArray(perks) ? perks : [])
   .filter(p => typeof p === 'string' && p.startsWith('vault:')).map(p => p.slice(6)).filter(id => VAULT_ID.test(id));
 
-/* What a signed-in account may load: [{ id, h, size, n }] (n its name, for
-   its holders' eyes), only entries that exist, or null when there is nothing
-   (the reply then carries no field). */
-export async function vaultList(db, account) {
-  const ids = vaultIds(account && account.perks);
+/* EARLY ACCESS. A dev account (the 'dev' perk: an admin's, auth.js) may load,
+   in the game, every entry put for holders, before anyone is given it: every
+   entry with a name (`npm run vault -- put ... --name`), the name being what
+   its holders see it called. An entry with no name (a film, a voice, a
+   challenge's words, a reel, a broadcast's pin) is not for holders: its own
+   route hands it out at its own moment, and this one never does, to anybody.
+   Only the game's: PvP's hidden pilots stay with the accounts holding their
+   perk (vaultList, pvp/src/hidden.js), since flying one there is what sends
+   its challenge. */
+export const isAdmin = perks => Array.isArray(perks) && perks.includes('dev');
+async function openIds(db, account) {
+  const own = vaultIds(account && account.perks);
+  if (!isAdmin(account && account.perks)) return own;
+  await ensureVault(db);
+  const res = await db.prepare("SELECT id FROM vault_heads WHERE name IS NOT NULL AND name <> ''").all();
+  const named = ((res && res.results) || []).map(r => r.id).filter(id => VAULT_ID.test(id));
+  return [...new Set([...own, ...named])];
+}
+
+/* What a signed-in account holds: [{ id, h, size, n }] (n its name, for its
+   holders' eyes), only entries that exist, or null when there is nothing
+   (the reply then carries no field). PvP's list (hidden.js). */
+export const vaultList = (db, account) => listOf(db, vaultIds(account && account.perks));
+/* What the game may load for it: that, and for a dev account everything put
+   for holders (EARLY ACCESS). The account reply's list (account.js). */
+export const vaultOpen = async (db, account) => listOf(db, await openIds(db, account));
+
+async function listOf(db, ids) {
   if (!ids.length) return null;
   await ensureVault(db);
   const res = await db.prepare(`SELECT id, hash, size, name FROM vault_heads WHERE id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')}) ORDER BY id`)
@@ -130,7 +154,7 @@ export default async (req, env) => {
   const id = new URL(req.url).searchParams.get('id') || '';
   if (!VAULT_ID.test(id)) return nothing();
   const s = await sessionOf(req, env, { peek: true });
-  if (!s || !vaultIds(s.account.perks).includes(id)) return nothing();
+  if (!s || !(await openIds(env.DB, s.account)).includes(id)) return nothing();
   const got = await vaultText(env.DB, id);
   if (!got) return nothing();
   /* Asked for by its hash (the account reply names it), the answer never

@@ -447,6 +447,14 @@ not, gets the same 404 as a missing id. An id is opaque: the name and
 everything else are in the text. Keep the files themselves outside the repo
 and put them from there:
 
+- **Dev accounts get early access.** An account with the `dev` perk loads, in
+  the game, every entry put with `--name`, with no `vault:<id>` perk needed. An
+  entry put without a name (a film, a voice, a challenge's words, a reel, a
+  broadcast's pin) is never handed out this way, to anybody. So put anything
+  meant for players with `--name`. PvP is different: a hidden pilot is flown
+  there only by an account holding its `vault:<id>` perk, dev or not, because
+  flying one there is what sends its challenge.
+
 ```sh
 npm run vault -- put <id> <file> --remote  # a new revision; the page re-fetches it by its hash
                                            #   (--name NAME: what its holders see it called)

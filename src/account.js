@@ -22,7 +22,7 @@
 import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES, ADMIN_SITES } from './auth.js';
-import { vaultList } from './vault.js';
+import { vaultOpen } from './vault.js';
 import { PILOTS } from '../pvp/src/rules.js';
 import { challengeWaits, doorOf } from '../pvp/src/challenge.js';
 
@@ -548,7 +548,7 @@ export default async (req, env) => {
      PVP door (../pvp/src/challenge.js); for an admin's, that it is one, for
      the menu's LAB door. Each field is missing for everybody else. */
   if (req.method === 'GET') {
-    const vault = s ? await vaultList(env.DB, s.account) : null;
+    const vault = s ? await vaultOpen(env.DB, s.account) : null;
     const challenge = s ? await challengeWaits(env.DB, s.account.id) : false;
     const admin = !!s && s.account.perks.includes('dev');
     /* `back`: the account came back through THE DOOR (index.html), the

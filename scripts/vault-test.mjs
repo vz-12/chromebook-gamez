@@ -12,6 +12,7 @@
    ========================================================================= */
 import { makeD1 } from './lib/d1-sqlite.mjs';
 import { putSql, giveSql, takeSql, whoSql, dropSql, PART_BYTES, sha256 } from './lib/vault-sql.mjs';
+import { hiddenOf, mayFly } from '../pvp/src/hidden.js';
 
 const worker = (await import('../src/index.js')).default;
 const DB = makeD1();
@@ -169,6 +170,47 @@ section('a new revision takes over only once it is whole');
   exec(putSql('x1', BODY1, 5000).sql);
   r = await fetchVault(a, 'id=x1');
   ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(BODY1), 'and the next put mends it');
+}
+
+/* ---------------------------------------------------------------------- */
+section('early access: a dev account loads every named entry in the game, and nothing without a name');
+{
+  const NAMED = Buffer.from('VR.pilot({ id: "n9" });\n'), FILM = Buffer.from('VR.film({});\n');
+  exec(putSql('n9', NAMED, 6000, 'THE NAMED').sql);
+  exec(putSql('n9-film', FILM, 6000).sql);
+  exec(putSql('n9-blank', FILM, 6000).sql);
+  exec("UPDATE vault_heads SET name = '' WHERE id = 'n9-blank'");
+  const dev = await signUp('keeper_dev');
+  exec("UPDATE accounts SET perks = '[\"dev\"]' WHERE name = 'keeper_dev'");
+
+  let r = await fetchVault(dev, 'id=n9');
+  ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(NAMED) && r.headers.get('x-vault-hash') === sha256(NAMED),
+     'a named entry: the text, with no perk of its own', r.status);
+  ok((await fetchVault(dev, 'id=n9-film')).status === 404, 'an entry with no name (a film, a voice, a pin): 404');
+  ok((await fetchVault(dev, 'id=n9-blank')).status === 404, 'nor an empty name');
+  ok((await fetchVault(dev, 'id=x1')).status === 404, 'nor another account\'s unnamed entry');
+  const rd = await dev.call('GET', '/api/account');
+  ok(rd.status === 200 && Array.isArray(rd.d.vault) && rd.d.vault.length === 1 && rd.d.vault[0].id === 'n9' &&
+     rd.d.vault[0].n === 'THE NAMED' && rd.d.vault[0].h === sha256(NAMED), 'the account reply names it, so the game loads it', rd.d);
+
+  // everybody else: as before
+  ok((await fetchVault(nobody, 'id=n9')).status === 404 && (await fetchVault(b, 'id=n9')).status === 404,
+     'signed out, or an account that is not a dev\'s: 404');
+  ok(!('vault' in (await b.call('GET', '/api/account')).d), 'and nothing named to them');
+  exec(giveSql('keeper_dev', 'x1'));
+  ok((await fetchVault(dev, 'id=x1')).status === 200, 'a perk of its own still opens its own entry');
+  const ids = (await dev.call('GET', '/api/account')).d.vault.map(x => x.id).join();
+  ok(ids === 'n9,x1', 'listed once each, in order', ids);
+
+  // PvP: the hidden pilots stay with their holders, dev or not
+  const acct = { perks: ['dev'] };
+  ok((await hiddenOf(DB, acct)).length === 0 && !(await mayFly(DB, acct, 'n9')), 'PvP\'s list and its pilots: a dev\'s, none without the perk');
+  const holder = { perks: ['dev', 'vault:n9'] };
+  ok((await hiddenOf(DB, holder)).map(x => x.id).join() === 'n9' && await mayFly(DB, holder, 'n9'), 'and the holder\'s as they were');
+
+  exec(takeSql('keeper_dev', 'x1'));
+  for (const id of ['n9', 'n9-film', 'n9-blank']) exec(dropSql(id));
+  ok(!('vault' in (await dev.call('GET', '/api/account')).d), 'dropped: nothing named to a dev either');
 }
 
 /* ---------------------------------------------------------------------- */
