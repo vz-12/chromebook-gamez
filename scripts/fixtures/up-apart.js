@@ -6,6 +6,7 @@
    test steers it through two globals: __apartTake (a room for the next
    sector's boss wave) and __apartGo (a room to go to from idle). */
 VR.apart({
+  title: 'the stand-ins',
   rooms: [
     { name: 'APART ONE', tag: 'apart i', bg: '#05060a', grid: '#11151f', grid2: '#1b2030', wall: '#64748b',
       glow: 'rgba(203,213,225,0.12)', accent: '#cbd5e1', music: 'void', pool: [['x1f', 1]], boss: 'x1b' },

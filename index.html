@@ -38353,7 +38353,7 @@ function resetGame() {
   COL.bg = stage.bg; COL.grid = stage.grid; COL.wall = stage.wall;
   shopItems = []; shopMsg = ''; shopMsgT = 0; shopRerolls = 0; shopTouched = false;
   shopChipOffered = false;
-  freeRun = false; freeOpen = false; freeGod = false; freeSpd = 1;
+  freeRun = false; freeOpen = false; freeGod = false; freeSpd = 1; freeSub = ''; freeGo = -1;
   camZoom = 1; camZoomT = 1;
   curseHpMul = 1; planetSign = null; planetRevealed = false;
   // and a challenge re-arms itself immediately after this, too
@@ -38373,6 +38373,8 @@ function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
   state = 'dead';
   runSaveClear();                        // an ended run is not continued (CONTINUE)
+  // a sandbox's death screen: "again" is the sandbox again, with these cards and back in this room apart (startFreeplay)
+  freeAgain = freeRun ? { up: Object.assign({}, P.up), at: upAt } : null;
   /* ONE POINT OH: the fight is no run. Nothing is recorded, and the lock
      holds: a beat, then the first build's menu again. */
   if (opo) { opoLost(quiet); return; }
@@ -38595,12 +38597,15 @@ function handleKey(k) {
   }
   // --- freeplay console: its own key, and it swallows nothing else ---
   if (freeRun && k === '\\') {
-    freeOpen = !freeOpen; freeSel = 0; Audio_.select(); return;
+    freeOpen = !freeOpen; freeSel = 0; freeSub = ''; Audio_.select(); return;
   }
   if (freeRun && freeOpen && state === 'play') {
-    if (k === 'arrowdown' || k === 's') { freeSel = (freeSel + 1) % FREE_ROWS.length; return; }
-    if (k === 'arrowup'   || k === 'w') { freeSel = (freeSel + FREE_ROWS.length - 1) % FREE_ROWS.length; return; }
-    if (k === 'enter' || k === ' ') { FREE_ROWS[freeSel].f(); Audio_.select(); return; }
+    const rows = freeRows();             // its own rows, or the page it has open (the rooms apart)
+    if (freeSel >= rows.length) freeSel = 0;
+    if (k === 'arrowdown' || k === 's') { freeSel = (freeSel + 1) % rows.length; return; }
+    if (k === 'arrowup'   || k === 'w') { freeSel = (freeSel + rows.length - 1) % rows.length; return; }
+    if (k === 'enter' || k === ' ') { rows[freeSel].f(); Audio_.select(); return; }
+    if (freeSub && (k === 'escape' || k === 'arrowleft' || k === 'backspace')) { freeBack(); return; }
     if (k === 'escape') { freeOpen = false; return; }
   }
   /* ROOT'S RITE: the console is the fight, so it opens on the key a chat
@@ -38670,6 +38675,8 @@ function handleKey(k) {
     if (mpGuest() || !(k === ' ' || k === 'enter' || k === 'r')) return;
     // still hosting: the next run is the wingman's too, not a solo restart
     if (mpHost()) { mpStartRun(); return; }
+    // a sandbox restarts as a sandbox: its cards, and the room apart it ended in
+    if (freeAgain && Save.profile.freeplay) { startFreeplay(freeAgain); return; }
     startRun();
     return;
   }
@@ -38947,6 +38954,7 @@ function handleClick() {
     if (Chal.on) { const c = Chal.on; chalQuit(); startChallenge(c); return; }
     if (mpGuest()) return;
     if (mpHost()) { mpStartRun(); return; }
+    if (freeAgain && Save.profile.freeplay) { startFreeplay(freeAgain); return; }   // a sandbox restarts as a sandbox
     startRun(); return;
   }
   if (state === 'gfx') {
@@ -39011,11 +39019,11 @@ function handleClick() {
   }
   if (state === 'amalcut') return;
   if (freeRun && freeOpen && state === 'play') {
-    const rs = freeRects();
-    for (let i = 0; i < FREE_ROWS.length; i++) if (inRect(mouse.x, mouse.y, rs[i])) {
-      freeSel = i; FREE_ROWS[i].f(); Audio_.select(); return;
+    const rs = freeRects(), rows = freeRows();
+    for (let i = 0; i < rows.length; i++) if (inRect(mouse.x, mouse.y, rs[i])) {
+      freeSel = i; rows[i].f(); Audio_.select(); return;
     }
-    if (QOL.tap) { freeOpen = false; return; }   // a phone: a tap off the rows shuts it, as \ would
+    if (QOL.tap) { freeOpen = false; freeSub = ''; return; }   // a phone: a tap off the rows shuts it, as \ would
   }
   if (state === 'codex') { codexClick(); return; }
   if (state === 'library') {
@@ -76103,8 +76111,11 @@ function drawHUD() {
     }
     ctx.save();
     ctx.letterSpacing = '0.1em';
+    /* A body may say for itself what its bar reads while nothing reaches it
+       (e.barSay: a room's boss that is out of reach for a reason of its own). */
     const bLabel = bname + (boss.invuln
-      ? (boss.finale ? '   — OVERLOAD'
+      ? (boss.barSay != null ? boss.barSay
+         : boss.finale ? '   — OVERLOAD'
          : boss.boss === 'broodmother' ? '   — SUBMERGED'
          : boss.boss === 'unwritten' ? '   — THE PAGE TURNS' : '   — CHANGING') : '');
     fitFont(bLabel, w2 - 12, '600', 13, "'Chakra Petch', Barlow, system-ui, sans-serif", 9);
@@ -77640,6 +77651,9 @@ function drawKeeperNPC(cx, cy, s) {
    leaderboard, no codex entries, no unlocks. It is a sandbox and it says so.
 -------------------------------------------------------------------------- */
 let freeRun = false, freeOpen = false, freeSel = 0, freeGod = false, freeSpd = 1;
+let freeSub = '';                        // the console's second page: '' its own rows, 'away' the rooms apart to pick from
+let freeGo = -1;                         // a sandbox begun again where the last ended: the room apart to go back to, once its first wave is on
+let freeAgain = null;                    // what the last sandbox ended with (its cards, the room apart it was in): its death screen's "again"
 
 const FREE_ROWS = [
   { n: 'GODMODE',        f: () => { freeGod = !freeGod; },  on: () => freeGod },
@@ -77651,11 +77665,15 @@ const FREE_ROWS = [
       }
       ebullets.length = 0; } },
   { n: '+1 LEVEL',       f: () => { P.xp = P.xpNext; checkLevel(); } },
+  { n: 'EVERY CARD',     f: () => {            // a full-level hull at once: every card the pool would offer, at its cap
+      const n = freeMaxed();
+      banner(n ? 'EVERY CARD   ·   ' + n + ' TAKEN' : 'NOTHING LEFT TO TAKE', '#38bdf8', 2.0); } },
   { n: '+500 CREDITS',   f: () => { credits += 500; } },
   { n: 'NEXT WAVE',      f: () => { betweenWaves = 0.2; spawnBudget = 0;
                                     hackKeepArmy(false); ebullets.length = 0; } },
   { n: 'SPAWN BOSS',     f: () => {
-      const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame && !HL_BOSSES[k]);
+      // (never a vault module's: those live only in their own rooms, and have the page below)
+      const keys = Object.keys(BOSSES).filter(k => !BOSSES[k].endgame && !HL_BOSSES[k] && !BOSSES[k].up);
       const k = keys[(freeBoss = (freeBoss + 1) % keys.length)];
       const a = simRnd(TAU);
       spawnEnemy('boss', clamp(P.x + Math.cos(a) * 340, arena.x0 + 90, arena.x1 - 90),
@@ -77682,12 +77700,13 @@ const FREE_ROWS = [
       if (!RUN.up || upQuiet()) { banner('NO WAY UP FROM HERE', '#94a3b8', 2.0); return; }
       upOpen = true;
       if (upIdx < 0) upLightPlace(false); else upAfter(); } },
-  { n: 'A ROOM APART',   f: () => {            // the next of the rooms apart (THE WAY UP), now, if this run may go there
-      if (!UP_AWAY.length || !RUN.up || upQuiet()) { banner('NO ROOM APART HERE', '#94a3b8', 2.0); return; }
-      if (upAt >= 0 || bossAlive || upLiftT >= 0) { banner('NOT NOW', '#94a3b8', 2.0); return; }
-      const r = UP_AWAY[(freeAway = (freeAway + 1) % UP_AWAY.length)];
-      upAway(r.mod, r.apart); },
-    val: () => (UP_AWAY.length ? (freeAway + 2) % (UP_AWAY.length + 1) + ' / ' + UP_AWAY.length : '-') },
+  /* The rooms apart (THE WAY UP): a page of them, each by its boss's name.
+     Pick one and the run is in it now, from wherever it is (freeAwayGo). The
+     row is called what the module calls its rooms (VR.apart's title). */
+  { n: 'A ROOM APART',   away: true, name: () => freeAwayTitle(), f: () => {
+      if (!freeAwayReady()) { banner('NO ROOM APART HERE', '#94a3b8', 2.0); return; }
+      freeSub = 'away'; freeSel = Math.max(0, upAt); },
+    val: () => (UP_AWAY.length ? '  ›' : '  -') },
   { n: "THE PARTS' PLACE", f: () => {          // a place the vault gave this account (VR.scene), now, over the run; nothing noted (THE PARTS)
       if (!Parts.tryHeld()) { banner('NO PLACE HERE', '#94a3b8', 2.0); return; }
       freeOpen = false; } },
@@ -77709,20 +77728,84 @@ const FREE_ROWS = [
 ];
 let freeBoss = -1, freeStage = -1, freeBook = -1, freeMal = -1, freeSign = -1, freeAway = -1;
 
-function startFreeplay() {
+/* `again`: what a sandbox that ended had (the death screen's "again"). The
+   new one starts with the same cards, and goes back to the room apart the old
+   one ended in, so a fight lost there is one key from being fought again. */
+function startFreeplay(again) {
   resetGame();
   freeRun = true;                        // set after reset: reset clears it
-  freeOpen = false; freeSel = 0; freeGod = false; freeSpd = 1;
+  freeOpen = false; freeSel = 0; freeSub = ''; freeGod = false; freeSpd = 1;
   freeBoss = -1; freeStage = -1; freeBook = -1; freeMal = -1; freeSign = -1; freeAway = -1;
   state = 'play';
+  if (again && again.up) {
+    for (const u of UPGRADES) for (let i = 0, n = Math.min(again.up[u.id] | 0, u.max || 1); i < n; i++) freeCard(u);
+    P.hp = P.maxHp;
+    if (again.at >= 0 && again.at < UP_AWAY.length) freeGo = again.at;
+  }
   banner('FREEPLAY   ·   NOTHING IS RECORDED', '#38bdf8', 3.6);
   Audio_.select();
 }
 
+// a card taken quietly (no fanfare: these come a hundred at a time)
+function freeCard(u) {
+  P.up[u.id] = (P.up[u.id] || 0) + 1;
+  try { u.f(P); } catch (e) {}
+}
+/* EVERY CARD: each card the level-up pool would offer this hull, to its cap:
+   what a long run's hull ends as. How many were taken. */
+function freeMaxed() {
+  let n = 0;
+  for (const u of chalFilterPool(UPGRADES.filter(u => weaponOK(u))))
+    for (let i = P.up[u.id] || 0; i < (u.max || 1); i++) { freeCard(u); n++; }
+  P.hp = P.maxHp;
+  if (n) { Audio_.levelup(); ringFx(P.x, P.y, 10, 190, '#38bdf8', 0.7, 5); }
+  return n;
+}
+
+// what the console calls the rooms apart: a module's own word for its rooms (VR.apart's title), else the game's
+function freeAwayTitle() {
+  for (const id of upMods()) { const h = UP.away.get(id); if (h && h.title) return h.title; }
+  return 'A ROOM APART';
+}
+/* Whether this sandbox may go to the rooms apart. One that began before its
+   rooms had come (the vault answers after the boot), or whose rooms have
+   changed since, is let: a sandbox on this machine alone has nobody to agree
+   with. */
+function freeAwayReady() {
+  if (!UP_AWAY.length) return false;
+  if (freeRun && RUN.up !== upSig() && !MP.on && !LS.on && !netLive()) RUN.up = upTake();
+  return !!RUN.up && !upQuiet();
+}
+/* The console's way into a room apart: now, from wherever the run is. A room
+   apart it is in is left (its module hears 'down'), a boss that is up stays
+   behind with the rest of its room, and a lift or a held moment is cut short.
+   true when it went. */
+function freeAwayGo(i) {
+  const r = UP_AWAY[i];
+  if (!r || state !== 'play' || !freeAwayReady()) { banner('NOT NOW', '#94a3b8', 2.0); return false; }
+  if (upAt >= 0) { upCall('ev', 'down'); upAt = -1; upBossT = -1; upWorld = {}; }
+  upLiftT = -1; bossAlive = false; hitStop = 0;
+  hackKeepArmy(false); ebullets.length = 0;
+  if (upAway(r.mod, r.apart)) return true;
+  banner('NOT NOW', '#94a3b8', 2.0);
+  return false;
+}
+// the rows the console shows now: its own, or the page of rooms apart (a room a row, by its boss's name; the last goes back)
+function freeRows() {
+  if (freeSub !== 'away' || !UP_AWAY.length) return FREE_ROWS;
+  const rows = UP_AWAY.map((r, i) => ({
+    n: (i + 1) + '   ' + ((BOSSES[r.boss] && BOSSES[r.boss].name) || String(r.name || '').toUpperCase()),
+    f: () => { if (freeAwayGo(i)) { freeSub = ''; freeOpen = false; } },
+    on: () => upAt === i }));
+  rows.push({ n: '‹  BACK', f: freeBack });
+  return rows;
+}
+function freeBack() { freeSub = ''; freeSel = Math.max(0, FREE_ROWS.findIndex(r => r.away)); }
+
 function freeRects() {
   const w = 232, h = 22, gap = 3;
   const x = 16, y0 = 96;
-  return FREE_ROWS.map((_, i) => ({ x, y: y0 + i * (h + gap), w, h }));
+  return freeRows().map((_, i) => ({ x, y: y0 + i * (h + gap), w, h }));
 }
 
 function drawFreeplay() {
@@ -77738,7 +77821,7 @@ function drawFreeplay() {
     ctx.restore();
     return;
   }
-  const rs = freeRects();
+  const rs = freeRects(), rows = freeRows();
   const panel = { x: 8, y: 62, w: 248, h: rs[rs.length - 1].y + 30 - 62 };
   ctx.fillStyle = 'rgba(4,10,18,0.94)';
   ctx.strokeStyle = '#1e3a5f'; ctx.lineWidth = 1;
@@ -77746,12 +77829,12 @@ function drawFreeplay() {
   ctx.textAlign = 'left';
   ctx.font = "800 10px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#38bdf8';
-  ctx.fillText('FREEPLAY CONSOLE', panel.x + 12, panel.y + 16);
+  ctx.fillText(freeSub ? freeAwayTitle() : 'FREEPLAY CONSOLE', panel.x + 12, panel.y + 16);
   ctx.font = "500 8px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#475569';
-  ctx.fillText('nothing here is recorded', panel.x + 12, panel.y + 28);
+  ctx.fillText(freeSub ? 'pick one: the run is in its room at once' : 'nothing here is recorded', panel.x + 12, panel.y + 28);
 
-  FREE_ROWS.forEach((row, i) => {
+  rows.forEach((row, i) => {
     const r = rs[i];
     const sel = i === freeSel, hot = inRect(mouse.x, mouse.y, r);
     const on = row.on && row.on();
@@ -77763,11 +77846,11 @@ function drawFreeplay() {
     roundRect(r.x, r.y, r.w, r.h, 5); ctx.fill(); ctx.stroke();
     ctx.font = "600 10px Barlow, 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = on ? '#bbf7d0' : sel ? '#e2e8f0' : '#94a3b8';
-    ctx.fillText(row.n + (row.val ? ' ' + row.val() : ''), r.x + 9, r.y + r.h / 2);
+    ctx.fillText((row.name ? row.name() : row.n) + (row.val ? ' ' + row.val() : ''), r.x + 9, r.y + r.h / 2);
   });
   ctx.font = "500 8px Barlow, 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = '#334155';
-  ctx.fillText('↑↓ pick  ·  ENTER run  ·  \\ close', panel.x + 12, panel.y + panel.h - 8);
+  ctx.fillText(freeSub ? '↑↓ pick  ·  ENTER go  ·  ESC back' : '↑↓ pick  ·  ENTER run  ·  \\ close', panel.x + 12, panel.y + panel.h - 8);
   ctx.restore();
   ctx.textBaseline = 'alphabetic';
 }
@@ -90826,6 +90909,8 @@ function upApart(id, def) {
   rooms.forEach((r, n) => UP_AWAY.push(Object.assign(r, { mod: id, apart: n })));
   const hooks = {};
   for (const h of UP_AWAY_HOOKS) if (typeof def[h] === 'function') hooks[h] = def[h];
+  // what the module calls its rooms (FREEPLAY's console names their page by it)
+  if (typeof def.title === 'string' && def.title.trim()) hooks.title = def.title.trim().toUpperCase().slice(0, 26);
   UP.away.set(id, hooks);
   return rooms.length;
 }
@@ -91040,6 +91125,11 @@ function upTick(dt, wdt) {
     const n = upDevGo; upDevGo = -1;
     const id = upMods().find(m => UP.away.has(m) && UP_AWAY.some(r => r.mod === m && r.apart === n));
     if (id) upAway(id, n);
+  }
+  // a sandbox begun again where the last one ended (startFreeplay): back into that room apart, once its first wave is on
+  if (freeGo >= 0 && wave >= 1 && state === 'play' && upLiftT < 0) {
+    const at = freeGo; freeGo = -1;
+    if (freeRun) freeAwayGo(at);
   }
   if (upIn() && upHooks().step) upCall('step', dt, wdt);
   else if (!upIn() && UP.away.size && upLiftT < 0 && state === 'play' && !upQuiet()) upIdle(dt);
@@ -92867,7 +92957,7 @@ const SNAP_LOCAL = new Set([
   'setFrom', 'setSel', 'logReturn', 'logAuto', 'logScroll', 'logSince', 'logAutoDone', 'logWaitT', 'logDrag',
   'dailyFrom', 'dailySel', 'rushFrom', 'skinSel', 'skinScroll', 'skinFrom', 'skinDrag', 'skinDevOpen', 'skinSliderRects',
   'chalPassArm', 'chalPassNote', 'chalSel', 'chalScroll', 'chalFrom', 'chalPassRect', 'chalRows', 'chalStartRect',
-  'freeOpen', 'freeSel',
+  'freeOpen', 'freeSel', 'freeSub', 'freeAgain',
   'tsLoading',                            // the account panel's Turnstile script, loading
   // what only the drawing shows, made with the unseeded roll: each machine keeps its own
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',

@@ -228,7 +228,7 @@ section('rooms apart: taken in beside the climb, or alone');
   ok(g.run('UP_AWAY.length') === 2 && g.run('UP_ROOMS.length') === 2, 'two rooms apart, beside the climb\'s two');
   ok(g.run('UP_AWAY[1].mod === "a9" && UP_AWAY[1].apart === 1 && UP_AWAY[1].up === true && UP_AWAY[1].hazard === null'), 'each knows its module and its place');
   ok(g.run('!!ETYPE.x1f && BOSSES.x1b.up === true && BOSSES.x1b.name === "THE OTHER STAND-IN"'), 'its foe and boss join the game\'s tables');
-  ok(g.run('Object.keys(UP.away.get("a9")).sort().join()') === 'back,enter,ev,floor,hud,idle,lift,over,screen,sector,step', 'every hook kept', g.run('Object.keys(UP.away.get("a9")).join()'));
+  ok(g.run('Object.keys(UP.away.get("a9")).sort().join()') === 'back,enter,ev,floor,hud,idle,lift,over,screen,sector,step,title', 'every hook kept, and what it calls its rooms', g.run('Object.keys(UP.away.get("a9")).join()'));
   ok(g.run('UP.id === "u9" && Object.keys(UP.hooks).length === 11'), 'the climb\'s module keeps its own');
   ok(g.run('upSig()') === 'a9:' + g.run('OUTSIDE.sig.a9') + ',u9:' + g.run('OUTSIDE.sig.u9'), 'the rooms\' mark is both modules\'');
   ok(g.run('Outside.run("a9", ' + JSON.stringify(APART) + '), UP_AWAY.length') === 2, 'run again, it takes its own places back');
@@ -316,6 +316,67 @@ section('rooms apart: VR.go from idle, mid-sector; and from the climb');
   step(c, 4);
   ok(c.run('upAway("a9", 0)') === true && c.run('upIdx === -1 && upAt === 0'), 'then into a room apart: off the climb');
   ok(c.run('wave % 5') === 0 && c.run('upWorld.entered && upWorld.entered[0] === "APART ONE" && !upWorld.evs'), 'the room\'s waves to come paid as skipped; the apart module\'s own share');
+}
+
+section('rooms apart: FREEPLAY\'s console');
+{
+  // a sandbox, flown as VOIDRUNNER, its hull unkillable
+  const sand = g => { g.run(`applyChar(0); runSeedNext = 5; Save.profile.freeplay = true; startFreeplay(); P.maxHp = P.hp = 1e7;`); return until(g, 'wave >= 1'); };
+  const row = 'FREE_ROWS.find(r => r.away)';
+  const g = bootApart();
+  ok(sand(g) && g.run('freeRun'), 'a sandbox is on');
+  ok(g.run('freeAwayTitle()') === 'THE STAND-INS' && g.run(row + '.name()') === 'THE STAND-INS', 'the row is called what the module calls its rooms', g.run('freeAwayTitle()'));
+  g.run('freeOpen = true; ' + row + '.f()');
+  ok(g.run('freeSub') === 'away' && g.run('freeRows().length') === 3, 'it opens a page: a row a room, and the way back');
+  ok(g.run('freeRows()[1].n') === '2   THE OTHER STAND-IN', 'each by its boss\'s name', g.run('freeRows()[1].n'));
+  g.run('freeRows()[2].f()');
+  ok(g.run('freeSub') === '' && g.run('FREE_ROWS[freeSel].away') === true, 'back: its own rows again, on the row it came from');
+  // a boss up in the sector: the console goes all the same
+  g.run('spawnEnemy("boss", P.x + 300, P.y, { boss: "warden" }); bossAlive = true; ' + row + '.f(); freeRows()[1].f()');
+  ok(g.run('upAt === 1 && stage === UP_AWAY[1] && !freeOpen && freeSub === ""'), 'picked: in its room now, a boss up or not, and the console shut', { at: g.run('upAt') });
+  ok(!g.run('enemies.some(e => e.boss === "warden" && !e.dead)') && !g.run('bossAlive'), 'the sector\'s boss left behind');
+  step(g, 4);
+  ok(g.run('bossAlive && enemies.some(e => e.boss === "x1b" && !e.dead)'), 'its boss comes after the lift');
+  // from inside one room apart straight to another
+  g.run('globalThis.__apartEvs = ""; freeOpen = true; ' + row + '.f()');
+  ok(g.run('freeSel') === 1 && g.run('freeRows()[1].on()') === true, 'the page opens on the room the run is in');
+  g.run('freeRows()[0].f()');
+  ok(g.run('upAt === 0 && stage === UP_AWAY[0]') && g.run('__apartEvs') === 'd', 'another picked from inside one: the first is left (its module hears it), the run is in the other', { at: g.run('upAt'), evs: g.run('__apartEvs') });
+  ok(g.run('JSON.stringify(upWorld.entered)') === '["APART ONE"]' && !g.run('enemies.some(e => e.type === "boss" && !e.dead)'), 'its share of the run begun afresh; the first room\'s boss left behind');
+  g.run('freeSub = "away"; freeRows()[1].f()');
+  ok(g.run('upAt === 1 && upLiftT >= 0 && upBossT > 0'), 'and mid-lift: the lift begins again, for the room picked');
+  step(g, 4);
+  ok(g.run('enemies.filter(e => e.type === "boss" && !e.dead).length') === 1, 'one boss, the room\'s');
+  // a sandbox begun before its rooms had come is let go there
+  g.run('RUN.up = ""');
+  ok(g.run('freeAwayReady()') === true && g.run('RUN.up') === g.run('upSig()'), 'a sandbox that began before its rooms came may go to them');
+  g.run('Chal.on = { id: "x", n: "X", m: {} }; freeSub = "away"');
+  ok(g.run('freeAwayGo(0)') === false && g.run('upAt') === 1, 'never where the rooms may not be');
+  g.run('Chal.on = null; freeSub = ""');
+  // SPAWN BOSS, EVERY CARD
+  const h = bootApart();
+  sand(h);
+  h.run('{ const r = FREE_ROWS.find(r => r.n === "SPAWN BOSS"); for (let i = 0; i < Object.keys(BOSSES).length + 2; i++) r.f(); }');
+  ok(h.run('enemies.filter(e => e.type === "boss").length') > 5 && !h.run('enemies.some(e => e.type === "boss" && BOSSES[e.boss] && BOSSES[e.boss].up)'), 'SPAWN BOSS never brings a module\'s boss out of its room');
+  h.run('for (const e of enemies) e.dead = true; enemies.length = 0; bossAlive = false; ebullets.length = 0;');
+  const took = h.run('freeMaxed()');
+  ok(took > 50 && h.run('chalFilterPool(UPGRADES.filter(u => weaponOK(u))).every(u => P.up[u.id] === u.max)') && h.run('freeMaxed()') === 0, 'EVERY CARD: each card the pool would offer, at its cap, once', { took });
+  // a sandbox that ends in a room apart: "again" is the sandbox again, with its cards, back in that room
+  h.run('P.maxHp = P.hp = 1e7; freeOpen = true; ' + row + '.f(); freeRows()[1].f()');
+  step(h, 4);
+  const cards = h.run('JSON.stringify(P.up)');
+  h.run('P.hp = 0; gameOver()');
+  ok(h.run('state') === 'dead' && h.run('!!freeAgain && freeAgain.at === 1'), 'it ends there', { st: h.run('state') });
+  h.run('uiArm = 0; handleKey("r")');
+  ok(h.run('freeRun && state === "play"') && h.run('JSON.stringify(P.up)') === cards, '"again" is a sandbox, not a run, with the cards it had', { free: h.run('freeRun'), st: h.run('state') });
+  h.run('P.maxHp = P.hp = 1e7');
+  ok(until(h, 'upAt === 1', 20) && h.run('freeGo') === -1, 'and it is taken back to the room it ended in', { at: h.run('upAt'), wave: h.run('wave') });
+  // an ordinary run's death screen is as it was
+  const o = bootApart();
+  fresh(o);
+  until(o, 'wave >= 1');
+  o.run('P.hp = 0; gameOver(); uiArm = 0; handleKey("r")');
+  ok(o.run('freeAgain === null && !freeRun && state === "play"'), 'an ordinary run begins again as a run');
 }
 
 section('rooms apart: a snapshot; co-op; the dev switch');
