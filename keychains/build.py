@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""VOIDRUNNER keychains: the base VOIDRUNNER and EMBER, as printable 3D models.
+"""VOIDRUNNER keychains and minis: the base VOIDRUNNER and EMBER, as printable 3D models.
 
     python3 keychains/build.py            writes keychains/out/
-    python3 keychains/build.py --check    builds both, checks every shell is closed, writes nothing
+    python3 keychains/build.py --check    builds everything, checks every shell is closed, writes nothing
+
+Each ship is made twice (VARIANTS): a keychain, which is the arena's hull
+exactly, miters and all, hanging from a ring past the nose; and a mini, smaller,
+with every corner rounded, that flies flat on a stand of arena floor (STAND).
 
 The ships are the ones in the arena, in the main game's look (not the Ashen
 direction): the outline is read straight out of hullPath() in index.html, so a
@@ -15,7 +19,7 @@ here each kind of light is a layer of its own, in its own colour:
     hull   the dark tinted fill, with hullDetail()'s dark lines cut in as grooves
     neon   the 2.4-wide stroke round the silhouette, and the lit detail lines
     hot    EMBER only: the vane seams that glow when the lance is charged
-    light  the canopy, the engine flame, and EMBER's emitter at full charge
+    light  the canopy and the engine flame
 
 Every part is a closed solid and no two parts overlap, so a multi-colour
 slicer takes the .3mf as one object in its colours, and a single-colour
@@ -39,30 +43,45 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = HERE / 'out'
 
-S = 1.1        # millimetres per game unit: EMBER comes out 66 mm tip to tail
-GRID = 0.03    # distance-field step, in game units (0.033 mm)
+GRID = 0.03    # distance-field step, in game units (0.033 mm on a keychain)
 TOL = 0.008    # how far a simplified outline may stray, in game units
-
-# layer tops, millimetres up from the back face
-Z_HALO = 1.6   # the glow plate: everything stands on it
-Z_FLOOR = 2.4  # groove floor
-Z_BODY = 3.0   # hull top
-Z_LINE = 3.4   # lit detail lines and hot seams, standing proud of the hull
-Z_RIM = 3.8    # the neon rim, the tallest edge
-Z_FLAME = 2.6  # engine flame, lying on the glow plate
-Z_RING = 2.2   # the neon ring round the keyring hole
-CANOPY_DOME = 1.1   # canopy blister height above the hull
-EMITTER_DOME = 0.9  # emitter bead height above the rim
 
 RIM_W = 2.4        # drawPlayer: ctx.lineWidth = 2.4 for the hull
 MITER_LIMIT = 10   # the canvas default; the hull stroke never sets a join
-GLOW = 1.8         # how far the glow plate reaches past the rim, game units
-FLAME_GLOW = 1.1   # and past the flame
 FL = 0.5           # engine flicker, 0.4..1 in the game: a short, sturdy flame
-HEAT = 1.0         # EMBER's lance charge: full, the emitter white-hot
-HOLE_MM = 2.1      # keyring hole radius: a 4.2 mm hole takes any jump ring
-LOOP_MM = 4.4      # the loop's outer radius
-RING_MM = 0.9      # width of the neon ring round the hole
+
+# What is made from each ship. Heights (z) are millimetres up from the back face;
+# reaches and radii are game units unless they say mm.
+VARIANTS = {
+    # the arena's hull exactly, miters and all, hanging nose-up from a ring
+    'keychain': dict(
+        S=1.1,                        # mm per game unit: EMBER comes out 65 mm tip to tail
+        tol=0.01,                     # mm an outline may stray when it is simplified
+        z=dict(halo=1.6, floor=2.4, body=3.0, line=3.4, rim=3.8, flame=2.6, ring=2.2),
+        dome=1.1,                     # canopy blister above the hull, mm
+        glow=1.8, flame_glow=1.1,     # how far the glow plate reaches past the rim, and past the flame
+        round=None,
+        loop=dict(hole=2.1, outer=4.4, ring=0.9),   # mm: keyring hole radius (4.2 mm hole), loop radius, neon ring width
+        socket=None),
+    # smaller, every corner rounded, no ring, and a socket in the back for its stand
+    'mini': dict(
+        S=0.7,
+        tol=0.01,
+        z=dict(halo=1.2, floor=2.2, body=2.8, line=3.2, rim=3.6, flame=2.0),
+        dome=0.8,
+        glow=1.4, flame_glow=1.0,
+        round=dict(convex=0.4,        # the hull's points: the rim's own round already softens them
+                   concave=1.8,       # its notches: wider than the rim, so its outer edge flows through
+                   flame=0.8,         # the flame's tip
+                   blur=0.9,          # the glow plate's outline, smoothed this much
+                   line_mm=0.8),      # no line or groove thinner than this, so it prints
+        loop=None,
+        socket=dict(r=1.65, depth=1.8)),   # mm: takes the stand's 3.0 mm peg, at the ship's balance point
+}
+
+# The mini's stand, in millimetres: a disc of arena floor (its grid cut in) and a
+# post, so the ship flies flat, seen from above, the way the game shows it.
+STAND = dict(r=13.0, base=2.0, top=0.4, grid=4.0, line=0.5, post_r=2.0, post_h=20.0, peg_r=1.5, peg_h=1.6)
 
 VOID = '#05060a'   # the arena's background (COL.bg)
 
@@ -113,7 +132,6 @@ PILOTS = {
                mirror(((5.4, 8.2), (-4.6, 11.8))) + mirror(((2.6, 4.2), (-3.6, 9.2)))],
         hot=[],
         canopy=(3, 0, 3.1, 1.9),  # a blister on the runner
-        emitter=None,
         flames=[[(-6.5, sd * 4.6), (-17 - 5 * FL, sd * 3), (-6.5, sd * 1.7)] for sd in (1, -1)],
         light={'canopy': '#e0f2fe', 'flame': '#e0f2fe'},
     ),
@@ -127,9 +145,8 @@ PILOTS = {
                mirror(((4, 2), (17.5, 2))) + mirror(((6, 5.4), (12, 3.2)))],
         hot=[(s, 1.2) for s in mirror(((1, 8.4), (-4, 11.4)))],  # '#fb923c': the vanes glow when there is heat in the gun
         canopy=(-1.4, 0, 2.5, 1.8),  # a slit set back behind the rail
-        emitter=(19, 0, 1.5 + HEAT * 1.7),
         flames=[[(-7, 3.4), (-21 - 7 * FL, 0), (-7, -3.4)]],  # one heavy engine, running hot
-        light={'canopy': '#e0f2fe', 'flame': '#fed7aa', 'emitter': '#fff1f2'},
+        light={'canopy': '#e0f2fe', 'flame': '#fed7aa'},
     ),
 }
 
@@ -167,11 +184,20 @@ class Field:
     def bar(self, a, b, w):
         return bar_sdf(self.X, self.Y, a, b, w)
 
-    def rect(self, x, y, w, h):
+    def capsule(self, a, b, w):
+        """A segment stroked w wide with round ends."""
+        (ax, ay), (bx, by) = a, b
+        ex, ey = bx - ax, by - ay
+        wx, wy = self.X - ax, self.Y - ay
+        t = np.clip((wx * ex + wy * ey) / (ex * ex + ey * ey), 0, 1)
+        return np.hypot(wx - ex * t, wy - ey * t) - w / 2
+
+    def rect(self, x, y, w, h, r=0.0):
+        """An axis-aligned box; with r, its corners rounded to r."""
         cx, cy = x + w / 2, y + h / 2
-        qx = np.abs(self.X - cx) - w / 2
-        qy = np.abs(self.Y - cy) - h / 2
-        return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0)
+        qx = np.abs(self.X - cx) - (w / 2 - r)
+        qy = np.abs(self.Y - cy) - (h / 2 - r)
+        return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
 
     def circle(self, cx, cy, r):
         return np.hypot(self.X - cx, self.Y - cy) - r
@@ -216,6 +242,53 @@ def U(*fs):
 
 def cut(f, *holes):
     return np.maximum.reduce([f] + [-h for h in holes])
+
+
+def smooth(F, sigma):
+    """Blur a field: straight edges stay put, corners of either kind round off by about sigma."""
+    r = max(1, int(round(sigma / GRID)))
+    for _ in range(3):                      # three box passes: near enough a gaussian
+        for axis in (0, 1):
+            pad = [(0, 0), (0, 0)]
+            pad[axis] = (r + 1, r)
+            c = np.cumsum(np.pad(F, pad, mode='edge'), axis=axis)
+            F = (c[2 * r + 1:] - c[:-2 * r - 1]) if axis == 0 else (c[:, 2 * r + 1:] - c[:, :-2 * r - 1])
+            F = F / (2 * r + 1)
+    return F
+
+
+def fillet(pts, convex, concave=None, step=0.2):
+    """A closed polygon with its corners replaced by arcs: radius `convex` on the points,
+    `concave` in the notches (less where the edges are too short to take it)."""
+    P = [np.array(q, dtype=float) for q in pts]
+    n = len(P)
+    ccw = sum(P[k][0] * P[(k + 1) % n][1] - P[(k + 1) % n][0] * P[k][1] for k in range(n)) > 0
+    out = []
+    for k in range(n):
+        a, v, b = P[k - 1], P[k], P[(k + 1) % n]
+        turn = (v - a)[0] * (b - v)[1] - (v - a)[1] * (b - v)[0]
+        r = convex if (turn > 0) == ccw or concave is None else concave
+        e1, e2 = a - v, b - v
+        L1, L2 = np.linalg.norm(e1), np.linalg.norm(e2)
+        e1, e2 = e1 / L1, e2 / L2
+        phi = math.acos(max(-1.0, min(1.0, float(e1 @ e2))))
+        if phi > math.pi - 1e-6:
+            out.append(tuple(v))
+            continue
+        t = r / math.tan(phi / 2)
+        rr = r
+        if t > 0.45 * min(L1, L2):
+            t = 0.45 * min(L1, L2)
+            rr = t * math.tan(phi / 2)
+        p1, p2 = v + e1 * t, v + e2 * t
+        bis = (e1 + e2) / np.linalg.norm(e1 + e2)
+        c = v + bis * rr / math.sin(phi / 2)
+        a1 = math.atan2(*(p1 - c)[::-1])
+        a2 = math.atan2(*(p2 - c)[::-1])
+        da = (a2 - a1 + math.pi) % (2 * math.pi) - math.pi
+        m = max(2, math.ceil(abs(da) * rr / step))
+        out += [(c[0] + rr * math.cos(a1 + da * i / m), c[1] + rr * math.sin(a1 + da * i / m)) for i in range(m + 1)]
+    return out
 
 
 def smin(a, b, k):
@@ -375,9 +448,26 @@ def contains(loop, pt):
     return int(np.sum(m & (x < xi))) % 2 == 1
 
 
-def outline(field, F, min_area=0.02):
+def tidy(lp):
+    """Drop repeated points and points exactly in line with their neighbours. After snapping,
+    that is also what removes a spike: a run that goes up a line and straight back down it."""
+    pts = [tuple(p) for p in lp]
+    i = 0
+    while len(pts) >= 3 and i < len(pts):
+        a, b, c = pts[i - 1], pts[i], pts[(i + 1) % len(pts)]
+        if (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) == 0:
+            del pts[i]
+            i = max(i - 1, 0)
+        else:
+            i += 1
+    return np.array(pts).reshape(-1, 2)
+
+
+def outline(field, F, tol=TOL, min_area=0.02):
     """The region F < 0 as loops, simplified, outer boundaries CCW and holes CW."""
-    loops = [simplify(lp, TOL) for lp in trace(field, F)]
+    # snapped, so an edge that is straight up and down in the field is exactly so here: float noise
+    # in x would otherwise open slabs a hair wide in prism() and fill them with zero-area triangles
+    loops = [tidy(np.round(simplify(lp, tol), 5)) for lp in trace(field, F)]
     loops = [lp for lp in loops if len(lp) >= 3 and abs(area(lp)) >= min_area]
     out = []
     for k, lp in enumerate(loops):
@@ -576,82 +666,137 @@ def volume(sh):
     return float(np.sum(np.einsum('ij,ij->i', a, np.cross(b, c)))) / 6
 
 
-# ----------------------------------------------------------- the keychain
-def build(pilot):
-    spec = PILOTS[pilot]
+# ------------------------------------------------------- keychain and mini
+def build(pilot, vname):
+    """One ship made one way. Returns its parts ({part: [(element, shell)]}, millimetres)
+    and what else the pieces around it need: its size, and the hole or the socket."""
+    spec, V = PILOTS[pilot], VARIANTS[vname]
+    S, Z, R, L = V['S'], V['z'], V['round'], V['loop']
     hull = hull_points(pilot)
+    path = fillet(hull, R['convex'], R['concave']) if R else hull
     bars, joins = stroke_parts(hull, RIM_W)
+    flame_pts = [fillet(t, R['flame']) if R else t for t in spec['flames']]
 
-    # the tip of the stroke at the nose (the miter at the vertex furthest forward)
-    nose = max(max(p[0] for p in j) for j in joins)
-    hole_r, loop_r, ring_w = HOLE_MM / S, LOOP_MM / S, RING_MM / S
-    loop_cx = nose + GLOW + loop_r - 2.2
-    tail = min(min(p[0] for p in fl) for fl in spec['flames'])
+    # how far the ship reaches: the miter at the nose, or the rounded nose and its rim
+    nose = max(p[0] for p in path) + RIM_W / 2 if R else max(max(p[0] for p in j) for j in joins)
     reach = max(abs(p[1]) for j in joins for p in j)
-    fld = Field(tail - FLAME_GLOW - 2, loop_cx + loop_r + 2, -reach - GLOW - 2, reach + GLOW + 2)
+    tail = min(min(p[0] for p in fl) for fl in flame_pts)
+    margin = V['glow'] + (3 * R['blur'] if R else 0) + 2
+    if L:
+        hole_r, loop_r, ring_w = L['hole'] / S, L['outer'] / S, L['ring'] / S
+        loop_cx = nose + V['glow'] + loop_r - 2.2
+        front = loop_cx + loop_r
+    else:
+        front = nose
+    fld = Field(tail - V['flame_glow'] - margin, front + margin, -reach - margin, reach + margin)
+    far = np.full(fld.X.shape, 1e3)
 
-    inside = fld.polygon(hull)
-    stroke = U(*[fld.bar(a, b, RIM_W) for a, b in bars], *[fld.polygon(j) for j in joins])
-    grooves = U(*[fld.bar(a, b, w) for (a, b), w in spec['grooves']],
-                *[fld.rect(*r) for r in spec['rects']])
-    lines = U(*[fld.bar(a, b, w) for (a, b), w in spec['lines']])
-    hot = U(*[fld.bar(a, b, w) for (a, b), w in spec['hot']]) if spec['hot'] else np.full(inside.shape, 1e3)
+    inside = fld.polygon(path)
+    if R:   # round joins all the way round: a band either side of the rounded path
+        stroke = np.abs(inside) - RIM_W / 2
+    else:   # the canvas stroke: bars with miters
+        stroke = U(*[fld.bar(a, b, RIM_W) for a, b in bars], *[fld.polygon(j) for j in joins])
+    thin = R['line_mm'] / S if R else 0
+
+    def seg(a, b, w):
+        return fld.capsule(a, b, max(w, thin)) if R else fld.bar(a, b, w)
+
+    grooves = U(*[seg(a, b, w) for (a, b), w in spec['grooves']],
+                *[fld.rect(*r, r=0.45 * min(r[2], r[3]) if R else 0.0) for r in spec['rects']])
+    lines = U(*[seg(a, b, w) for (a, b), w in spec['lines']])
+    hot = U(*[seg(a, b, w) for (a, b), w in spec['hot']]) if spec['hot'] else far
     cx, cy, rx, ry = spec['canopy']
     canopy_ring = ngon_ellipse(cx, cy, rx, ry)
     canopy = fld.polygon_near(canopy_ring)
-    if spec['emitter']:
-        ex, ey, er = spec['emitter']
-        emitter_ring = ngon_ellipse(ex, ey, er, er)
-        emitter = fld.polygon_near(emitter_ring)
-    else:
-        emitter_ring, emitter = None, np.full(inside.shape, 1e3)
-    flames = U(*[fld.polygon(t) for t in spec['flames']])
+    flames = U(*[fld.polygon(t) for t in flame_pts])
 
-    foot = U(inside, stroke, emitter)
+    foot = U(inside, stroke)
     body = cut(inside, stroke)
-    halo = smin(foot - GLOW, flames - FLAME_GLOW, 1.5)
-    halo = smin(halo, fld.circle(loop_cx, 0, loop_r), 3.0)
-    halo = cut(halo, fld.circle(loop_cx, 0, hole_r))
-    ring = cut(fld.circle(loop_cx, 0, hole_r + ring_w), fld.circle(loop_cx, 0, hole_r))
-
-    hot_in = np.maximum(hot, body)             # seams only where there is hull under them
-    lit = cut(np.maximum(lines, foot), emitter, canopy)   # only where there is ship under it
-    plugs = (canopy, emitter)
+    halo = smin(foot - V['glow'], flames - V['flame_glow'], 1.5)
+    if L:
+        halo = smin(halo, fld.circle(loop_cx, 0, loop_r), 3.0)
+    if R:
+        halo = smooth(halo, R['blur'])
+        grooves = np.maximum(grooves, body)      # the rim stays one unbroken loop
+    if L:
+        halo = cut(halo, fld.circle(loop_cx, 0, hole_r))
+    hot_in = np.maximum(hot, body)               # seams only where there is hull under them
+    lit = cut(np.maximum(lines, foot), canopy)   # lines only where there is ship under them
 
     layers = {
-        'halo': [(halo, 0, Z_HALO)],
-        'hull': [(cut(body, *plugs), Z_HALO, Z_FLOOR),
-                 (cut(body, grooves, hot_in, lit, *plugs), Z_FLOOR, Z_BODY)],
-        'neon': [(cut(stroke, *plugs), Z_HALO, Z_FLOOR),
-                 (cut(U(cut(stroke, grooves), lit), *plugs, hot_in), Z_FLOOR, Z_LINE),
-                 (cut(stroke, grooves, *plugs), Z_LINE, Z_RIM),
-                 (ring, Z_HALO, Z_RING)],
-        'hot': [(cut(hot_in, *plugs), Z_FLOOR, Z_LINE)] if spec['hot'] else [],
-        'light': [(cut(flames, foot), Z_HALO, Z_FLAME)],
+        'halo': [(halo, 0, Z['halo'])],
+        'hull': [(body, Z['halo'], Z['floor']),
+                 (cut(body, grooves, hot_in, lit, canopy), Z['floor'], Z['body'])],
+        'neon': [(stroke, Z['halo'], Z['floor']),
+                 (cut(U(cut(stroke, grooves), lit), canopy, hot_in), Z['floor'], Z['line']),
+                 (cut(stroke, grooves), Z['line'], Z['rim'])],
+        'hot': [(hot_in, Z['floor'], Z['line'])] if spec['hot'] else [],
+        'light': [(cut(flames, foot), Z['halo'], Z['flame'])],
     }
+    if L:
+        layers['neon'].append((cut(fld.circle(loop_cx, 0, hole_r + ring_w), fld.circle(loop_cx, 0, hole_r)),
+                               Z['halo'], Z['ring']))
+
+    sx = sy = 0.0
+    if V['socket']:
+        # a blind hole up into the back, at the middle of the whole outline, roofed by the hull
+        sx = float(fld.X[halo < 0].mean())
+        depth = V['socket']['depth']
+        sock = fld.circle(sx, sy, V['socket']['r'] / S)
+        for name, stack in layers.items():
+            out = []
+            for F, z0, z1 in stack:
+                if z0 >= depth or not ((F < 0) & (sock < 0)).any():
+                    out.append((F, z0, z1))
+                    continue
+                out.append((cut(F, sock), z0, min(z1, depth)))
+                if z1 > depth:
+                    out.append((F, depth, z1))
+            layers[name] = out
 
     def place(sh):
-        # game x (the nose) points up the keychain: a quarter turn, so the triangles keep their winding
+        # game x (the nose) points up the model: a quarter turn, so the triangles keep their winding
         return transform(sh, lambda p: (-p[1] * S, p[0] * S, p[2]))
 
     parts = {}
     for name, stack in layers.items():
         for F, z0, z1 in stack:
-            sh = prism(outline(fld, F), z0, z1)
+            sh = prism(outline(fld, F, V['tol'] / S), z0, z1)
             if sh.f:
                 parts.setdefault(name, []).append(('flame' if name == 'light' else name, place(sh)))
-    parts['light'].append(('canopy', place(dome(canopy_ring, Z_HALO, Z_BODY, Z_BODY + CANOPY_DOME))))
-    if emitter_ring:
-        parts['light'].append(('emitter', place(dome(emitter_ring, Z_HALO, Z_RIM, Z_RIM + EMITTER_DOME))))
+    parts['light'].append(('canopy', place(dome(canopy_ring, Z['floor'], Z['body'], Z['body'] + V['dome']))))
 
-    # centred on the origin across the face; the back stays at z = 0
+    # the origin: the socket on a mini (where the peg goes), the middle of the face on a keychain
     allv = np.concatenate([np.array(s.v) for v in parts.values() for _, s in v])
     lo, hi = allv.min(0), allv.max(0)
-    ox, oy = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+    ox, oy = (-sy * S, sx * S) if V['socket'] else ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
     parts = {k: [(el, transform(s, lambda p: (p[0] - ox, p[1] - oy, p[2]))) for el, s in v]
              for k, v in parts.items()}
-    hole = (-ox, loop_cx * S - oy, HOLE_MM)   # the ring sits on the centre line, past the nose
-    return parts, (hi - lo).tolist(), hole
+    info = dict(size=[round(float(x), 1) for x in hi - lo],
+                extent=[round(float(lo[0] - ox), 2), round(float(lo[1] - oy), 2),
+                        round(float(hi[0] - ox), 2), round(float(hi[1] - oy), 2)])
+    if L:
+        info['hole'] = [round(-ox, 2) + 0.0, round(loop_cx * S - oy, 2) + 0.0, L['hole']]
+    if V['socket']:
+        info['socket'] = [0.0, 0.0, V['socket']['r'], V['socket']['depth']]
+    return parts, info
+
+
+def build_stand():
+    """The mini's stand: a disc with the arena's grid cut in, a post, and the peg the ship sits on."""
+    T = STAND
+    fld = Field(-T['r'] - 2, T['r'] + 2, -T['r'] - 2, T['r'] + 2)    # millimetres, here
+    n = int(T['r'] // T['grid']) + 1
+    grid = U(*[fld.bar((k * T['grid'], -T['r'] - 1), (k * T['grid'], T['r'] + 1), T['line']) for k in range(-n, n + 1)],
+             *[fld.bar((-T['r'] - 1, k * T['grid']), (T['r'] + 1, k * T['grid']), T['line']) for k in range(-n, n + 1)])
+    post = fld.circle(0, 0, T['post_r'])
+    z1 = T['base'] + T['top']
+    z2 = z1 + T['post_h']
+    shells = [prism(outline(fld, fld.circle(0, 0, T['r'])), 0, T['base']),
+              prism(outline(fld, cut(fld.circle(0, 0, T['r'] - T['top']), cut(grid, post))), T['base'], z1),
+              prism(outline(fld, post), z1, z2),
+              prism(outline(fld, fld.circle(0, 0, T['peg_r'])), z2, z2 + T['peg_h'])]
+    return [('stand', s) for s in shells], dict(size=[2 * T['r'], 2 * T['r'], z2 + T['peg_h']], rest=z2)
 
 
 # ----------------------------------------------------------------- colours
@@ -667,6 +812,9 @@ def palette(pilot):
     if spec['hot']:
         pal['hot'] = dict(label='orange', color='#fb923c', alpha=1, emissive=1.4)
     return pal
+
+
+STAND_PAL = dict(label='black, or any', color='#1b2233', alpha=1, emissive=0.0)
 
 
 # ------------------------------------------------------------------ files
@@ -686,29 +834,38 @@ def write_stl(path, shells):
             fh.write(struct.pack('<12fH', *n, *a, *b, *c, 0))
 
 
-def write_3mf(path, pilot, parts):
-    pal = palette(pilot)
-    names = list(parts)
-    mats = ''.join(f'<base name="{PILOTS[pilot]["name"]} {n}" displaycolor="{pal[n]["color"].upper()}FF"/>' for n in names)
-    objs = []
-    for i, n in enumerate(names):
-        vs, ts = [], []
-        base = 0
-        for _, s in parts[n]:
-            vs += [f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in s.v]
-            ts += [f'<triangle v1="{a + base}" v2="{b + base}" v3="{c + base}"/>' for a, b, c in s.f]
-            base += len(s.v)
-        objs.append(f'<object id="{i + 2}" name="{n}" type="model" pid="1" pindex="{i}"><mesh>'
-                    f'<vertices>{"".join(vs)}</vertices><triangles>{"".join(ts)}</triangles></mesh></object>')
-    comps = ''.join(f'<component objectid="{i + 2}"/>' for i in range(len(names)))
-    top = len(names) + 2
+def write_3mf(path, items):
+    """items: [(name, [(part, colour, shells)], (x, y))]. Each item is placed on the plate at
+    (x, y); one with several parts is an object made of them, so a slicer keeps them together."""
+    mats, objs, build = [], [], []
+    oid = 2
+    for name, parts, (tx, ty) in items:
+        ids = []
+        for part, colour, shells in parts:
+            vs, ts = [], []
+            base = 0
+            for _, s in shells:
+                vs += [f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in s.v]
+                ts += [f'<triangle v1="{a + base}" v2="{b + base}" v3="{c + base}"/>' for a, b, c in s.f]
+                base += len(s.v)
+            mats.append(f'<base name="{name} {part}" displaycolor="{colour.upper()}FF"/>')
+            objs.append(f'<object id="{oid}" name="{part}" type="model" pid="1" pindex="{len(mats) - 1}"><mesh>'
+                        f'<vertices>{"".join(vs)}</vertices><triangles>{"".join(ts)}</triangles></mesh></object>')
+            ids.append(oid)
+            oid += 1
+        if len(ids) > 1:
+            comps = ''.join(f'<component objectid="{i}"/>' for i in ids)
+            objs.append(f'<object id="{oid}" name="{name}" type="model"><components>{comps}</components></object>')
+            top, oid = oid, oid + 1
+        else:
+            top = ids[0]
+        build.append(f'<item objectid="{top}" transform="1 0 0 0 1 0 0 0 1 {tx:.3f} {ty:.3f} 0"/>')
     model = ('<?xml version="1.0" encoding="UTF-8"?>\n'
              '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
-             f'<metadata name="Title">{PILOTS[pilot]["name"]} keychain</metadata>'
+             f'<metadata name="Title">{items[0][0]}</metadata>'
              '<metadata name="Designer">VOIDRUNNER</metadata>'
-             f'<resources><basematerials id="1">{mats}</basematerials>{"".join(objs)}'
-             f'<object id="{top}" name="{PILOTS[pilot]["name"]} keychain" type="model"><components>{comps}</components></object>'
-             f'</resources><build><item objectid="{top}"/></build></model>')
+             f'<resources><basematerials id="1">{"".join(mats)}</basematerials>{"".join(objs)}'
+             f'</resources><build>{"".join(build)}</build></model>')
     types = ('<?xml version="1.0" encoding="UTF-8"?>\n'
              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -723,18 +880,27 @@ def write_3mf(path, pilot, parts):
         z.writestr('3D/3dmodel.model', model)
 
 
-def write_glb(path, pilot, parts):
-    """For looking at, not printing: one mesh per part (the light split into
-    canopy, flame and emitter for their own colours), flat-shaded except the
-    blisters, with the glow the game gives each as emissive."""
-    pal = palette(pilot)
-    spec = PILOTS[pilot]
+def glb_groups(pilot, parts, lift=0.0):
+    """One mesh per part, the light split into canopy and flame for their own colours."""
+    pal, spec = palette(pilot), PILOTS[pilot]
     groups = []
     for name, shells in parts.items():
         for el in dict.fromkeys(e for e, _ in shells):
             m = dict(pal[name], color=spec['light'][el]) if name == 'light' else pal[name]
-            groups.append((el, [s for e, s in shells if e == el], m))
+            groups.append((el, [transform(s, lambda p: (p[0], p[1], p[2] + lift)) if lift else s
+                                for e, s in shells if e == el], m))
+    return groups
 
+
+# millimetres to metres, and which way is up in glTF (y): a keychain hangs nose to the sky facing +z;
+# a mini lies flat, its back down, nose away from the viewer
+GLB_HANG = [0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 1]
+GLB_FLAT = [0.001, 0, 0, 0, 0, 0, -0.001, 0, 0, 0.001, 0, 0, 0, 0, 0, 1]
+
+
+def write_glb(path, title, groups, matrix):
+    """For looking at, not printing: flat-shaded except the blisters, with the
+    glow the game gives each part as emissive."""
     bin_ = bytearray()
     views, accessors, meshes, nodes, materials = [], [], [], [], []
 
@@ -790,7 +956,7 @@ def write_glb(path, pilot, parts):
         ia = add(I, 34963, 5125, 'SCALAR')
         rgb = [srgb_to_linear(int(m['color'][k:k + 2], 16)) for k in (1, 3, 5)]
         mat = dict(name=name, pbrMetallicRoughness=dict(baseColorFactor=rgb + [m['alpha']], metallicFactor=0.0,
-                                                         roughnessFactor=0.35 if name != 'hull' else 0.6),
+                                                         roughnessFactor=0.6 if name in ('hull', 'stand') else 0.35),
                    emissiveFactor=rgb if m['emissive'] else [0, 0, 0])
         if m['emissive'] > 1:
             mat['extensions'] = {'KHR_materials_emissive_strength': {'emissiveStrength': m['emissive']}}
@@ -804,9 +970,7 @@ def write_glb(path, pilot, parts):
                                                         material=len(materials) - 1)]))
         nodes.append(dict(name=name, mesh=len(meshes) - 1))
 
-    # the model is already y-up (nose to the sky) with its face toward +z: only millimetres to metres
-    root = dict(name=f'{spec["name"]} keychain', children=list(range(len(nodes))),
-                matrix=[0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 1])
+    root = dict(name=title, children=list(range(len(nodes))), matrix=matrix)
     nodes.append(root)
     while len(bin_) % 4:
         bin_.append(0)
@@ -827,39 +991,56 @@ def write_glb(path, pilot, parts):
 
 
 # ------------------------------------------------------------------- main
+def solid(label, parts):
+    for part, shells in parts.items():
+        for k, (_, s) in enumerate(shells):
+            if not closed(s):
+                sys.exit(f'{label} {part} shell {k} is not closed')
+            if volume(s) <= 0:
+                sys.exit(f'{label} {part} shell {k} faces inward')
+    return sum(len(s.f) for v in parts.values() for _, s in v)
+
+
 def main():
     check = '--check' in sys.argv
     report = []
-    meta = {}
-    for pilot in ('runner', 'ember'):
-        parts, size, hole = build(pilot)
-        name = PILOTS[pilot]['name']
-        for part, shells in parts.items():
-            for k, (_, s) in enumerate(shells):
-                if not closed(s):
-                    sys.exit(f'{name} {part} shell {k} is not closed')
-                if volume(s) <= 0:
-                    sys.exit(f'{name} {part} shell {k} faces inward')
-        tris = sum(len(s.f) for v in parts.values() for _, s in v)
-        report.append(f'{name:<10} {size[0]:5.1f} x {size[1]:5.1f} x {size[2]:4.2f} mm  '
-                      f'{tris:6d} triangles  parts: {", ".join(parts)}')
-        if check:
-            continue
-        slug = 'voidrunner' if pilot == 'runner' else 'ember'
-        pal = palette(pilot)
-        tops = {'halo': (0, Z_HALO), 'hull': (Z_HALO, Z_BODY), 'neon': (Z_HALO, Z_RIM),
-                'hot': (Z_FLOOR, Z_LINE), 'light': (Z_HALO, max(Z_BODY + CANOPY_DOME, Z_RIM + EMITTER_DOME
-                                                                if PILOTS[pilot]['emitter'] else 0))}
-        meta[slug] = dict(name=name, col=PILOTS[pilot]['col'], size=[round(x, 1) for x in size],
-                          hole=[round(hole[0], 2) + 0.0, round(hole[1], 2) + 0.0, hole[2]], triangles=tris,
-                          parts=[dict(id=k, filament=pal[k]['label'], color=pal[k]['color'],
-                                      z=[round(z, 1) for z in tops[k]]) for k in parts])
+    stand, stand_info = build_stand()
+    n = solid('stand', {'stand': stand})
+    report.append(f'{"stand":<17} {stand_info["size"][0]:5.1f} x {stand_info["size"][1]:5.1f} x {stand_info["size"][2]:5.2f} mm  {n:6d} triangles')
+    meta = {'stand': dict(stand_info, triangles=n, filament=STAND_PAL['label'], color=STAND_PAL['color'])}
+    if not check:
         (OUT / 'stl').mkdir(parents=True, exist_ok=True)
-        write_3mf(OUT / f'{slug}-keychain.3mf', pilot, parts)
-        write_glb(OUT / f'{slug}-keychain.glb', pilot, parts)
-        write_stl(OUT / f'{slug}-keychain.stl', [x for v in parts.values() for x in v])
-        for part, shells in parts.items():
-            write_stl(OUT / 'stl' / f'{slug}-{part}.stl', shells)
+        write_stl(OUT / 'mini-stand.stl', stand)
+    for pilot in ('runner', 'ember'):
+        name, slug = PILOTS[pilot]['name'], 'voidrunner' if pilot == 'runner' else 'ember'
+        pal = palette(pilot)
+        meta[slug] = dict(name=name, col=PILOTS[pilot]['col'])
+        for vname in VARIANTS:
+            parts, info = build(pilot, vname)
+            tris = solid(f'{name} {vname}', parts)
+            size = info['size']
+            report.append(f'{name + " " + vname:<17} {size[0]:5.1f} x {size[1]:5.1f} x {size[2]:5.2f} mm  '
+                          f'{tris:6d} triangles  parts: {", ".join(parts)}')
+            zs = {k: [min(p[2] for _, s in v for p in s.v), max(p[2] for _, s in v for p in s.v)] for k, v in parts.items()}
+            meta[slug][vname] = dict(info, triangles=tris, parts=[
+                dict(id=k, filament=pal[k]['label'], color=pal[k]['color'], z=[round(z, 1) for z in zs[k]]) for k in parts])
+            if check:
+                continue
+            stem = f'{slug}-{vname}'
+            coloured = [(k, pal[k]['color'], v) for k, v in parts.items()]
+            if vname == 'mini':
+                # the stand goes on the plate beside the ship
+                beside = (size[0] / 2 + STAND['r'] + 6, 0)
+                write_3mf(OUT / f'{stem}.3mf', [(f'{name} mini', coloured, (0, 0)),
+                                                ('mini stand', [('stand', STAND_PAL['color'], stand)], beside)])
+                groups = glb_groups(pilot, parts, lift=stand_info['rest']) + [('stand', [s for _, s in stand], STAND_PAL)]
+                write_glb(OUT / f'{stem}.glb', f'{name} mini', groups, GLB_FLAT)
+            else:
+                write_3mf(OUT / f'{stem}.3mf', [(f'{name} keychain', coloured, (0, 0))])
+                write_glb(OUT / f'{stem}.glb', f'{name} keychain', glb_groups(pilot, parts), GLB_HANG)
+            write_stl(OUT / f'{stem}.stl', [x for v in parts.values() for x in v])
+            for part, shells in parts.items():
+                write_stl(OUT / 'stl' / f'{stem}-{part}.stl', shells)
     print('\n'.join(report))
     if not check:
         (OUT / 'keychains.json').write_text(json.dumps(meta, indent=1) + '\n')
