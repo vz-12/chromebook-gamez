@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
-"""VOIDRUNNER keychains and minis: the base VOIDRUNNER and EMBER, as printable 3D models.
+"""VOIDRUNNER keychains and minis: the base VOIDRUNNER and EMBER as printable 3D models.
 
     python3 keychains/build.py            writes keychains/out/
     python3 keychains/build.py --check    builds everything, checks every shell is closed, writes nothing
 
-Each ship is made twice (VARIANTS): a keychain, which is the arena's hull
-exactly, miters and all, hanging from a ring past the nose; and a mini, smaller,
-with every corner rounded, that flies flat on a stand of arena floor (STAND).
+The ships are sculpted, the way a real craft would be built: a fuselage with an
+oval section running nose to tail, wings that thin to a rounded edge, engine
+pods, a glass canopy blister, panel lines engraved, and the exhaust as plumes.
+What makes them the arena's ships comes from the game itself. The outline is
+read straight out of hullPath() in index.html, offset by half the 2.4 stroke so
+it is the size the arena draws it, and the furniture is hullDetail()'s, line for
+line, in the game's colours:
 
-The ships are the ones in the arena, in the main game's look (not the Ashen
-direction): the outline is read straight out of hullPath() in index.html, so a
-keychain can never be a hull the game has since redrawn, and the furniture is
-hullDetail()'s, line for line. In the game the ship is flat light on the void;
-here each kind of light is a layer of its own, in its own colour:
-
-    halo   the glow the hull throws off its own edge (drawPlayer's widening
-           strokes), as a translucent plate the ship sits on; it carries the ring
-    hull   the dark tinted fill, with hullDetail()'s dark lines cut in as grooves
-    neon   the 2.4-wide stroke round the silhouette, and the lit detail lines
+    hull   the body, in the dark tint the game fills it with; the dark lines engraved
+    neon   the stroke round the silhouette as trim along every edge, and the lit
+           lines as raised strips (EMBER's rail becomes a railgun's two rails)
     hot    EMBER only: the vane seams that glow when the lance is charged
-    light  the canopy and the engine flame
+    light  the canopy and the exhaust
 
-Every part is a closed solid and no two parts overlap, so a multi-colour
-slicer takes the .3mf as one object in its colours, and a single-colour
-printer takes the merged .stl and still gets the whole relief.
+Each colour is an inlay a few tenths of a millimetre deep that follows the
+surface, so a multi-colour printer changes filament only near the top. Every
+part is a closed solid and no two overlap. The underside is flat, so both print
+face up with no supports.
 
-Only numpy. Regions are signed distance fields on a fine grid (so unions,
-offsets and cut-outs are min/max), traced back to outlines by marching squares,
-simplified, and extruded with caps from a slab sweep that leaves no T-junctions.
+Each ship is made two ways (VARIANTS): a keychain hanging nose-up from a tab past
+the nose, and a mini, smaller and a little deeper in relief, with a socket in its
+belly for a stand of arena floor (STAND).
+
+Only numpy. Regions and heights are fields on a grid; each part is a slab
+between two height fields over a region, meshed cell by cell with marching
+squares, so the surfaces follow the fields and every slab is closed.
 """
 import json
 import math
@@ -43,45 +45,40 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = HERE / 'out'
 
-GRID = 0.03    # distance-field step, in game units (0.033 mm on a keychain)
-TOL = 0.008    # how far a simplified outline may stray, in game units
+GRID = 0.03    # field step for the stand, in millimetres
+TOL = 0.008    # how far a simplified outline may stray
 
-RIM_W = 2.4        # drawPlayer: ctx.lineWidth = 2.4 for the hull
-MITER_LIMIT = 10   # the canvas default; the hull stroke never sets a join
-FL = 0.5           # engine flicker, 0.4..1 in the game: a short, sturdy flame
+RIM_W = 2.4    # drawPlayer: ctx.lineWidth = 2.4 for the hull; the silhouette is the path offset by half of it
+TRIM_W = 1.4   # the stroke as trim round the edge: narrower than the game's, so the sculpted hull shows
+FL = 0.5       # engine flicker, 0.4..1 in the game: a short, sturdy plume
 
-# What is made from each ship. Heights (z) are millimetres up from the back face;
-# reaches and radii are game units unless they say mm.
+# What is made from each ship. Shapes are designed in game units; S turns them into
+# millimetres across the face and S * zs up. The rest is in millimetres.
 VARIANTS = {
-    # the arena's hull exactly, miters and all, hanging nose-up from a ring
+    # hanging nose-up from a tab past the nose
     'keychain': dict(
-        S=1.1,                        # mm per game unit: EMBER comes out 65 mm tip to tail
-        tol=0.01,                     # mm an outline may stray when it is simplified
-        z=dict(halo=1.6, floor=2.4, body=3.0, line=3.4, rim=3.8, flame=2.6, ring=2.2),
-        dome=1.1,                     # canopy blister above the hull, mm
-        glow=1.8, flame_glow=1.1,     # how far the glow plate reaches past the rim, and past the flame
-        round=None,
-        loop=dict(hole=2.1, outer=4.4, ring=0.9),   # mm: keyring hole radius (4.2 mm hole), loop radius, neon ring width
+        S=1.2, zs=1.0,               # EMBER comes out 61 mm tip to tail
+        cell=0.25,                   # mesh grid step, game units
+        edge=1.0,                    # thickness at the very edge of a wing
+        inlay=0.6, groove=0.45, trench=0.9, raise_=0.3,   # colour depth; engraving depths; how proud the lit strips stand
+        thin=0.0,                    # no line thinner than this (mm); the keychain keeps the game's widths
+        loop=dict(hole=2.1, outer=4.4, neck=3.0, thick=1.8),   # the tab: a 4.2 mm hole for a jump ring
         socket=None),
-    # smaller, every corner rounded, no ring, and a socket in the back for its stand
+    # smaller, a little deeper, flying on a stand
     'mini': dict(
-        S=0.7,
-        tol=0.01,
-        z=dict(halo=1.2, floor=2.2, body=2.8, line=3.2, rim=3.6, flame=2.0),
-        dome=0.8,
-        glow=1.4, flame_glow=1.0,
-        round=dict(convex=0.4,        # the hull's points: the rim's own round already softens them
-                   concave=1.8,       # its notches: wider than the rim, so its outer edge flows through
-                   flame=0.8,         # the flame's tip
-                   blur=0.9,          # the glow plate's outline, smoothed this much
-                   line_mm=0.8),      # no line or groove thinner than this, so it prints
+        S=0.7, zs=1.35,
+        cell=0.25,
+        edge=0.8,
+        inlay=0.45, groove=0.35, trench=0.7, raise_=0.25,
+        thin=0.8,                    # so it prints on a 0.4 mm nozzle
         loop=None,
-        socket=dict(r=1.65, depth=1.8)),   # mm: takes the stand's 3.0 mm peg, at the ship's balance point
+        socket=dict(r=1.65, depth=1.5)),   # takes the stand's 3.0 mm peg, at the ship's balance point
 }
 
-# The mini's stand, in millimetres: a disc of arena floor (its grid cut in) and a
-# post, so the ship flies flat, seen from above, the way the game shows it.
-STAND = dict(r=13.0, base=2.0, top=0.4, grid=4.0, line=0.5, post_r=2.0, post_h=20.0, peg_r=1.5, peg_h=1.6)
+# The mini's stand, in millimetres: a disc of arena floor (its grid cut in) and a post.
+STAND = dict(r=13.0, base=2.0, top=0.4, grid=4.0, line=0.5, post_r=2.0, post_h=15.0, peg_r=1.5, peg_h=1.3)
+
+CORNER = (0.3, 0.9)   # fillets on the hull's points and in its notches, game units, before the stroke goes round
 
 VOID = '#05060a'   # the arena's background (COL.bg)
 
@@ -118,35 +115,49 @@ def mirror(seg):
     return [seg, ((x0, -y0), (x1, -y1))]
 
 
-# hullDetail(), transcribed. Segments are drawn as separate subpaths, so each
-# is a straight bar with butt ends (the canvas default cap).
+# hullDetail(), transcribed: (segment, line width) in game units. `form` is the sculpt,
+# in game units above the edge: the wing's thickness at the root and the tip, the fuselage
+# as stations along the ship (x, half-width, height) with an oval section, engine pods
+# (y, back x, front x, radius, axis height), and the heights of the canopy and the plume.
 PILOTS = {
     'runner': dict(
         name='VOIDRUNNER', col='#67e8f9', filament='cyan',
-        grooves=[  # 'rgba(9,15,28,0.8)', lineWidth 1.2: the spine and frame bulkhead
+        grooves=[  # 'rgba(9,15,28,0.8)', lineWidth 1.2: the spine and frame bulkhead, engraved
             (((-5, 0), (15, 0)), 1.2),
             (((-1.5, -5.6), (-1.5, 5.6)), 1.2),
         ],
-        rects=[(6.4, 2.2, 4.6, 1.5), (6.4, -3.7, 4.6, 1.5)],  # intake slots either side of the canopy
-        lines=[(s, 1.1) for s in  # rgba(hullCol, 0.8): the wing spars
+        trenches=[],
+        rects=[(6.4, 2.2, 4.6, 1.5), (6.4, -3.7, 4.6, 1.5)],  # intake slots either side of the canopy, cut deep
+        lines=[(s, 1.1) for s in  # rgba(hullCol, 0.8): the wing spars, as lit strips
                mirror(((5.4, 8.2), (-4.6, 11.8))) + mirror(((2.6, 4.2), (-3.6, 9.2)))],
         hot=[],
         canopy=(3, 0, 3.1, 1.9),  # a blister on the runner
         flames=[[(-6.5, sd * 4.6), (-17 - 5 * FL, sd * 3), (-6.5, sd * 1.7)] for sd in (1, -1)],
         light={'canopy': '#e0f2fe', 'flame': '#e0f2fe'},
+        form=dict(root=1.1, tip=0.3, bevel=1.4, slope=1.3,
+                  fuselage=[(21.5, 0, 0), (19, 0.7, 0.5), (15, 1.4, 1.3), (10, 2.3, 2.1), (5, 2.9, 2.7),
+                            (0, 3.0, 2.9), (-4, 2.7, 2.7), (-8, 2.3, 2.3)],
+                  pods=[(sd * 3.2, -12, -0.5, 1.45, 0.75) for sd in (1, -1)],   # twin nozzles
+                  canopy=1.3, plume=0.9),
     ),
     'ember': dict(
         name='EMBER', col='#f87171', filament='coral red',
-        grooves=[(((3, 0), (18, 0)), 3.4)] + [  # the rail's channel down the nose
-            (s, 1.6) for i in range(3)       # heat vanes across the hammer shoulders
+        grooves=[  # heat vanes across the hammer shoulders, engraved
+            (s, 1.6) for i in range(3)
             for s in mirror(((4.4 - i * 3.6, 6.6 + i * 1.1), (4.4 - i * 3.6 - 2.6, 11.8)))],
+        trenches=[(((3, 0), (18, 0)), 3.4)],  # the rail's channel down the nose: a railgun's trench
         rects=[],
-        lines=[(s, 1.0) for s in  # rgba(hullCol, 0.85): the rail and its braces
+        lines=[(s, 1.0) for s in  # rgba(hullCol, 0.85): the rail and its braces, raised
                mirror(((4, 2), (17.5, 2))) + mirror(((6, 5.4), (12, 3.2)))],
         hot=[(s, 1.2) for s in mirror(((1, 8.4), (-4, 11.4)))],  # '#fb923c': the vanes glow when there is heat in the gun
         canopy=(-1.4, 0, 2.5, 1.8),  # a slit set back behind the rail
         flames=[[(-7, 3.4), (-21 - 7 * FL, 0), (-7, -3.4)]],  # one heavy engine, running hot
         light={'canopy': '#e0f2fe', 'flame': '#fed7aa'},
+        form=dict(root=1.2, tip=0.35, bevel=1.4, slope=1.3,
+                  fuselage=[(25, 0, 0), (23, 0.5, 0.45), (20, 1.3, 1.1), (16, 1.9, 1.6), (12, 2.5, 2.1),
+                            (7, 3.4, 2.8), (2, 3.9, 3.2), (-3, 3.8, 3.2), (-7, 3.2, 2.8), (-10, 2.7, 2.4)],
+                  pods=[],
+                  canopy=1.2, plume=1.2),
     ),
 }
 
@@ -155,31 +166,14 @@ PILOTS = {
 class Field:
     """A grid of sample points; every region is a signed distance on it (< 0 inside)."""
 
-    def __init__(self, x0, x1, y0, y1):
-        self.xs = np.arange(x0, x1 + GRID, GRID)
-        self.ys = np.arange(y0, y1 + GRID, GRID)
+    def __init__(self, x0, x1, y0, y1, step=GRID):
+        self.h = step
+        self.xs = np.arange(x0, x1 + step, step)
+        self.ys = np.arange(y0, y1 + step, step)
         self.X, self.Y = np.meshgrid(self.xs, self.ys)
-        self.X = self.X.astype(np.float64)
-        self.Y = self.Y.astype(np.float64)
-
-    def window(self, box, fn):
-        """Evaluate fn only near box (x0, y0, x1, y1); far away the region is simply 'outside'."""
-        x0, y0, x1, y1 = box
-        m = 1.0
-        i0 = max(0, np.searchsorted(self.ys, y0 - m) - 1)
-        i1 = min(len(self.ys), np.searchsorted(self.ys, y1 + m) + 1)
-        j0 = max(0, np.searchsorted(self.xs, x0 - m) - 1)
-        j1 = min(len(self.xs), np.searchsorted(self.xs, x1 + m) + 1)
-        out = np.full(self.X.shape, 1e3)
-        out[i0:i1, j0:j1] = fn(self.X[i0:i1, j0:j1], self.Y[i0:i1, j0:j1])
-        return out
 
     def polygon(self, pts):
         return poly_sdf(self.X, self.Y, pts)
-
-    def polygon_near(self, pts):
-        p = np.array(pts)
-        return self.window((*p.min(0), *p.max(0)), lambda X, Y: poly_sdf(X, Y, pts))
 
     def bar(self, a, b, w):
         return bar_sdf(self.X, self.Y, a, b, w)
@@ -201,6 +195,11 @@ class Field:
 
     def circle(self, cx, cy, r):
         return np.hypot(self.X - cx, self.Y - cy) - r
+
+    def ellipse(self, cx, cy, rx, ry):
+        """Near enough a distance near the edge, which is all a region needs."""
+        q = np.hypot((self.X - cx) / rx, (self.Y - cy) / ry)
+        return (q - 1) * min(rx, ry)
 
 
 def poly_sdf(X, Y, pts):
@@ -244,19 +243,6 @@ def cut(f, *holes):
     return np.maximum.reduce([f] + [-h for h in holes])
 
 
-def smooth(F, sigma):
-    """Blur a field: straight edges stay put, corners of either kind round off by about sigma."""
-    r = max(1, int(round(sigma / GRID)))
-    for _ in range(3):                      # three box passes: near enough a gaussian
-        for axis in (0, 1):
-            pad = [(0, 0), (0, 0)]
-            pad[axis] = (r + 1, r)
-            c = np.cumsum(np.pad(F, pad, mode='edge'), axis=axis)
-            F = (c[2 * r + 1:] - c[:-2 * r - 1]) if axis == 0 else (c[:, 2 * r + 1:] - c[:, :-2 * r - 1])
-            F = F / (2 * r + 1)
-    return F
-
-
 def fillet(pts, convex, concave=None, step=0.2):
     """A closed polygon with its corners replaced by arcs: radius `convex` on the points,
     `concave` in the notches (less where the edges are too short to take it)."""
@@ -296,36 +282,8 @@ def smin(a, b, k):
     return np.minimum(a, b) - h * h * k * 0.25
 
 
-def stroke_parts(pts, w):
-    """The canvas stroke of a closed path, as convex pieces: a bar per edge
-    and a miter (or bevel past the limit) on the outside of every turn."""
-    n = len(pts)
-    p = [np.array(q, dtype=float) for q in pts]
-    hw = w / 2
-    bars = [(tuple(p[k]), tuple(p[(k + 1) % n])) for k in range(n)]
-    joins = []
-    for k in range(n):
-        a, v, b = p[k - 1], p[k], p[(k + 1) % n]
-        e1, e2 = (v - a) / np.linalg.norm(v - a), (b - v) / np.linalg.norm(b - v)
-        turn = e1[0] * e2[1] - e1[1] * e2[0]
-        if abs(turn) < 1e-9:
-            continue
-        # the outside of the turn is to the right of a left turn, and to the left of a right one
-        side = -1 if turn > 0 else 1
-        n1 = side * np.array([-e1[1], e1[0]])
-        n2 = side * np.array([-e2[1], e2[0]])
-        cos_half = math.sqrt(max((1 + float(n1 @ n2)) / 2, 1e-12))
-        ratio = 1 / cos_half              # miter length over half the width
-        if ratio <= MITER_LIMIT:
-            m = v + (n1 + n2) / np.linalg.norm(n1 + n2) * hw * ratio
-            joins.append([tuple(v), tuple(v + n1 * hw), tuple(m), tuple(v + n2 * hw)])
-        else:
-            joins.append([tuple(v), tuple(v + n1 * hw), tuple(v + n2 * hw)])
-    return bars, joins
-
-
-def ngon_ellipse(cx, cy, rx, ry, n=96):
-    return [(cx + rx * math.cos(2 * math.pi * k / n), cy + ry * math.sin(2 * math.pi * k / n)) for k in range(n)]
+def smax(a, b, k):
+    return -smin(-a, -b, k)
 
 
 # ------------------------------------------------------ outlines from fields
@@ -373,12 +331,12 @@ def trace(field, F):
     h = ids[ids < nH]
     i, j = h // (nx - 1), h % (nx - 1)
     t = F[i, j] / (F[i, j] - F[i, j + 1])
-    for k, x, y in zip(h, x0 + (j + t) * GRID, y0 + i * GRID):
+    for k, x, y in zip(h, x0 + (j + t) * field.h, y0 + i * GRID):
         pos[int(k)] = (float(x), float(y))
     v = ids[ids >= nH] - nH
     i, j = v // nx, v % nx
     t = F[i, j] / (F[i, j] - F[i + 1, j])
-    for k, x, y in zip(v + nH, x0 + j * GRID, y0 + (i + t) * GRID):
+    for k, x, y in zip(v + nH, x0 + j * GRID, y0 + (i + t) * field.h):
         pos[int(k)] = (float(x), float(y))
 
     nbr = {}
@@ -488,6 +446,7 @@ class Shell:
         self.f = []
         self.index = {}
         self.smooth = []   # per triangle: does it belong to a curved surface
+        self.slab = None   # set by slab(): its compact form
 
     def vert(self, p):
         k = (p[0], p[1], p[2])
@@ -611,42 +570,13 @@ def prism(loops, z0, z1):
     return sh
 
 
-def dome(ring, z0, z1, top):
-    """A plug with an elliptical blister: walls z0..z1 on ring, then a dome rising
-    to `top` (mm) over the same ring. ring is the n-gon used in the fields."""
-    sh = Shell()
-    cx = sum(p[0] for p in ring) / len(ring)
-    cy = sum(p[1] for p in ring) / len(ring)
-    n = len(ring)
-    for k in range(n):
-        a, b = ring[k], ring[(k + 1) % n]
-        sh.tri((cx, cy, z0), (b[0], b[1], z0), (a[0], a[1], z0))
-        sh.tri((a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], z1))
-        sh.tri((a[0], a[1], z0), (b[0], b[1], z1), (a[0], a[1], z1))
-    rings = 14
-    prev = [(p[0], p[1], z1) for p in ring]
-    for r in range(1, rings):
-        phi = (math.pi / 2) * r / rings
-        c, s = math.cos(phi), math.sin(phi)
-        cur = [(cx + (p[0] - cx) * c, cy + (p[1] - cy) * c, z1 + (top - z1) * s) for p in ring]
-        for k in range(n):
-            a, b = prev[k], prev[(k + 1) % n]
-            c2, d = cur[k], cur[(k + 1) % n]
-            sh.tri(a, b, d, True)
-            sh.tri(a, d, c2, True)
-        prev = cur
-    apex = (cx, cy, top)
-    for k in range(n):
-        sh.tri(prev[k], prev[(k + 1) % n], apex, True)
-    return sh
-
-
 def transform(sh, fn):
     """Move a shell's vertices through fn((x, y, z)) -> (x, y, z). fn must keep handedness."""
     out = Shell()
     out.v = [fn(p) for p in sh.v]
     out.f = list(sh.f)
     out.smooth = list(sh.smooth)
+    out.slab = getattr(sh, 'slab', None)
     return out
 
 
@@ -666,93 +596,186 @@ def volume(sh):
     return float(np.sum(np.einsum('ij,ij->i', a, np.cross(b, c)))) / 6
 
 
+# ----------------------------------------------------------- sculpted slabs
+# Marching squares, but filling: the piece of each grid cell inside the region, as the
+# corners (c) and edge crossings (e) met walking round the cell anticlockwise. Every
+# piece is convex, so a fan from its first point triangulates it, and a crossing
+# followed by a crossing is a stretch of the region's edge, where a wall goes.
+CASES = {}
+for _case in range(1, 16):
+    _in = [(_case >> k) & 1 for k in range(4)]
+    _seq = []
+    for k in range(4):
+        if _in[k]:
+            _seq.append(('c', k))
+        if _in[k] != _in[(k + 1) % 4]:
+            _seq.append(('e', k))
+    CASES[_case] = _seq
+
+
+def slab(fld, F, top, bot):
+    """The solid between two height fields (mm, on the grid's nodes) over the region F < 0,
+    as one closed shell: its top follows `top`, its bottom `bot`, and a wall stands on the edge."""
+    F = np.where(F == 0, 1e-9, F)
+    ny, nx = F.shape
+    top = np.broadcast_to(np.asarray(top, dtype=float), F.shape)
+    bot = np.broadcast_to(np.asarray(bot, dtype=float), F.shape)
+    inside = F < 0
+    sh = Shell()
+    if not inside.any():
+        return sh
+    if inside[0].any() or inside[-1].any() or inside[:, 0].any() or inside[:, -1].any():
+        raise RuntimeError('a region touches the edge of the grid')
+    N, NH = ny * nx, ny * (nx - 1)
+    case = inside[:-1, :-1] * 1 + inside[:-1, 1:] * 2 + inside[1:, 1:] * 4 + inside[1:, :-1] * 8
+    I, J = np.indices(case.shape)
+    corner = [lambda i, j: i * nx + j, lambda i, j: i * nx + j + 1,
+              lambda i, j: (i + 1) * nx + j + 1, lambda i, j: (i + 1) * nx + j]
+    edge = [lambda i, j: N + i * (nx - 1) + j, lambda i, j: N + NH + i * nx + j + 1,
+            lambda i, j: N + (i + 1) * (nx - 1) + j, lambda i, j: N + NH + i * nx + j]
+    tris, segs = [], []
+    for c, seq in CASES.items():
+        m = case == c
+        if not m.any():
+            continue
+        i, j = I[m], J[m]
+        ids = np.stack([(corner if kind == 'c' else edge)[k](i, j) for kind, k in seq], 1)
+        for t in range(1, len(seq) - 1):
+            tris.append(ids[:, [0, t, t + 1]])
+        for a in range(len(seq)):
+            b = (a + 1) % len(seq)
+            if seq[a][0] == 'e' and seq[b][0] == 'e':
+                segs.append(ids[:, [a, b]])
+    tris, segs = np.concatenate(tris), np.concatenate(segs)
+    used = np.unique(tris)
+    xy = np.empty((len(used), 2))
+    zt, zb = np.empty(len(used)), np.empty(len(used))
+    m = used < N
+    ii, jj = used[m] // nx, used[m] % nx
+    xy[m] = np.column_stack([fld.xs[jj], fld.ys[ii]])
+    zt[m], zb[m] = top[ii, jj], bot[ii, jj]
+    for m, step in (((used >= N) & (used < N + NH), 'h'), (used >= N + NH, 'v')):
+        e = used[m] - (N if step == 'h' else N + NH)
+        ii, jj = (e // (nx - 1), e % (nx - 1)) if step == 'h' else (e // nx, e % nx)
+        i2, j2 = (ii, jj + 1) if step == 'h' else (ii + 1, jj)
+        t = F[ii, jj] / (F[ii, jj] - F[i2, j2])
+        xy[m] = np.column_stack([fld.xs[jj] + (t * fld.h if step == 'h' else 0),
+                                 fld.ys[ii] + (t * fld.h if step == 'v' else 0)])
+        zt[m] = top[ii, jj] + t * (top[i2, j2] - top[ii, jj])
+        zb[m] = bot[ii, jj] + t * (bot[i2, j2] - bot[ii, jj])
+    if (zt - zb).min() < 0.05:
+        raise RuntimeError(f'a slab is {(zt - zb).min():.2f} mm thick somewhere')
+    n = len(used)
+    T, G = np.searchsorted(used, tris), np.searchsorted(used, segs)
+    v = np.concatenate([np.column_stack([xy, zt]), np.column_stack([xy, zb])])
+    f = np.concatenate([T, T[:, ::-1] + n,
+                        np.column_stack([G[:, 0] + n, G[:, 1] + n, G[:, 1]]),
+                        np.column_stack([G[:, 0] + n, G[:, 1], G[:, 0]])])
+    sh.v = [tuple(q) for q in v.tolist()]
+    sh.f = [tuple(q) for q in f.tolist()]
+    sh.smooth = [True] * len(T) + [False] * (len(f) - len(T))
+    sh.slab = dict(n=n, T=T, G=G)   # enough to build the rest again: the page ships slabs this way
+    return sh
+
+
 # ------------------------------------------------------- keychain and mini
 def build(pilot, vname):
     """One ship made one way. Returns its parts ({part: [(element, shell)]}, millimetres)
-    and what else the pieces around it need: its size, and the hole or the socket."""
+    and what the pieces around it need: its size, and the hole or the socket."""
     spec, V = PILOTS[pilot], VARIANTS[vname]
-    S, Z, R, L = V['S'], V['z'], V['round'], V['loop']
-    hull = hull_points(pilot)
-    path = fillet(hull, R['convex'], R['concave']) if R else hull
-    bars, joins = stroke_parts(hull, RIM_W)
-    flame_pts = [fillet(t, R['flame']) if R else t for t in spec['flames']]
+    S, ZS, form = V['S'], V['zs'], spec['form']
+    h = V['cell']
+    path = fillet(hull_points(pilot), *CORNER)
+    flame_pts = [fillet(t, 0.8) for t in spec['flames']]
+    hw = RIM_W / 2
 
-    # how far the ship reaches: the miter at the nose, or the rounded nose and its rim
-    nose = max(p[0] for p in path) + RIM_W / 2 if R else max(max(p[0] for p in j) for j in joins)
-    reach = max(abs(p[1]) for j in joins for p in j)
+    nose = max(p[0] for p in path) + hw
+    reach = max(abs(p[1]) for p in path) + hw
     tail = min(min(p[0] for p in fl) for fl in flame_pts)
-    margin = V['glow'] + (3 * R['blur'] if R else 0) + 2
+    L = V['loop']
     if L:
-        hole_r, loop_r, ring_w = L['hole'] / S, L['outer'] / S, L['ring'] / S
-        loop_cx = nose + V['glow'] + loop_r - 2.2
+        loop_r, hole_r = L['outer'] / S, L['hole'] / S
+        loop_cx = nose + loop_r - 1.0
         front = loop_cx + loop_r
     else:
         front = nose
-    fld = Field(tail - V['flame_glow'] - margin, front + margin, -reach - margin, reach + margin)
-    far = np.full(fld.X.shape, 1e3)
+    fld = Field(tail - 2, front + 2, -reach - 2, reach + 2, step=h)
+    X, Y = fld.X, fld.Y
+    far = np.full(X.shape, 1e3)
+    thin = V['thin'] / S
 
-    inside = fld.polygon(path)
-    if R:   # round joins all the way round: a band either side of the rounded path
-        stroke = np.abs(inside) - RIM_W / 2
-    else:   # the canvas stroke: bars with miters
-        stroke = U(*[fld.bar(a, b, RIM_W) for a, b in bars], *[fld.polygon(j) for j in joins])
-    thin = R['line_mm'] / S if R else 0
+    # --- regions (< 0 inside), game units
+    O = fld.polygon(path) - hw                     # the silhouette: the hull and its stroke
+    d = -O                                         # how far in from the edge
+    rim = np.maximum(O, d - TRIM_W)                # the stroke as trim, round every edge
+    inner = O + TRIM_W                             # inside the trim
 
     def seg(a, b, w):
-        return fld.capsule(a, b, max(w, thin)) if R else fld.bar(a, b, w)
+        return fld.capsule(a, b, max(w, thin))
 
-    grooves = U(*[seg(a, b, w) for (a, b), w in spec['grooves']],
-                *[fld.rect(*r, r=0.45 * min(r[2], r[3]) if R else 0.0) for r in spec['rects']])
     lines = U(*[seg(a, b, w) for (a, b), w in spec['lines']])
-    hot = U(*[seg(a, b, w) for (a, b), w in spec['hot']]) if spec['hot'] else far
+    lit = np.maximum(lines, O)
+    grooves = np.maximum(U(*[seg(a, b, w) for (a, b), w in spec['grooves']], far), inner)
+    trench = np.maximum(U(*[seg(a, b, w) for (a, b), w in spec['trenches']], far), inner)
+    slots = np.maximum(U(*[fld.rect(*r, r=0.4 * min(r[2], r[3])) for r in spec['rects']], far), inner)
+    hot = np.maximum(U(*[seg(a, b, w) for (a, b), w in spec['hot']], far), inner)
     cx, cy, rx, ry = spec['canopy']
-    canopy_ring = ngon_ellipse(cx, cy, rx, ry)
-    canopy = fld.polygon_near(canopy_ring)
+    canopy = np.maximum(fld.ellipse(cx, cy, rx, ry), inner)
     flames = U(*[fld.polygon(t) for t in flame_pts])
+    if L:
+        tab = cut(U(fld.circle(loop_cx, 0, loop_r), fld.capsule((nose - 2.5, 0), (loop_cx, 0), L['neck'] * 2 / S)),
+                  fld.circle(loop_cx, 0, hole_r))
+    else:
+        tab = far
+    whole = U(O, tab)
 
-    foot = U(inside, stroke)
-    body = cut(inside, stroke)
-    halo = smin(foot - V['glow'], flames - V['flame_glow'], 1.5)
+    # --- the sculpt, game units above the edge
+    # the wing: thick at the root, thin at the tip, its edge rounded over
+    wing = form['tip'] + (form['root'] - form['tip']) * (1 - np.clip(np.abs(Y) / reach, 0, 1))
+    plate = wing * np.sqrt(1 - (1 - np.clip(d / form['bevel'], 0, 1)) ** 2)
+    xs, hws, hts = (np.array(c, dtype=float) for c in zip(*sorted(form['fuselage'])))
+    fw, fh = np.interp(X, xs, hws, 0, 0), np.interp(X, xs, hts, 0, 0)
+    fus = fh * np.sqrt(np.clip(1 - (Y / np.maximum(fw, 1e-6)) ** 2, 0, 1))
+    shape = smax(plate, fus, 0.6)
+    for yc, xb, xf, r, cz in form['pods']:
+        rr = r * np.sqrt(np.clip((xf - X) / (1.2 * r), 0, 1)) * (X >= xb)
+        pod = np.where(np.abs(Y - yc) < rr, cz + np.sqrt(np.clip(rr ** 2 - (Y - yc) ** 2, 0, None)), -1.0)
+        shape = smax(shape, pod, 0.5)
+    shape = np.maximum(smin(shape, form['slope'] * d, 0.4), 0)   # every surface comes down to the edge
+    z = V['edge'] + shape * S * ZS                 # millimetres
     if L:
-        halo = smin(halo, fld.circle(loop_cx, 0, loop_r), 3.0)
-    if R:
-        halo = smooth(halo, R['blur'])
-        grooves = np.maximum(grooves, body)      # the rim stays one unbroken loop
-    if L:
-        halo = cut(halo, fld.circle(loop_cx, 0, hole_r))
-    hot_in = np.maximum(hot, body)               # seams only where there is hull under them
-    lit = cut(np.maximum(lines, foot), canopy)   # lines only where there is ship under them
+        dt = -tab * S                              # the tab: flat, its edges rounded over 0.8 mm
+        z = np.maximum(z, 0.8 + (L['thick'] - 0.8) * np.sqrt(1 - (1 - np.clip(dt / 0.8, 0, 1)) ** 2))
+
+    soft = lambda F: np.clip(0.5 - F / h, 0, 1)    # a mask with its edge spread over one cell
+    body_top = z - np.maximum.reduce([V['groove'] * soft(grooves), V['trench'] * soft(trench),
+                                      1.6 * V['groove'] * soft(slots)])
+    bot = 0.0
+    sx = 0.0
+    if V['socket']:
+        # at the balance point: the middle of the ship, weighted by how tall it is
+        w = np.where(O < 0, z, 0)
+        sx = float((X * w).sum() / w.sum())
+        bot = V['socket']['depth'] * soft(fld.circle(sx, 0, V['socket']['r'] / S))
+
+    bubble = form['canopy'] * S * ZS * np.sqrt(np.clip(1 - ((X - cx) / rx) ** 2 - ((Y - cy) / ry) ** 2, 0, 1))
+    fl_in = -flames
+    fx = [(min(p[0] for p in t), max(p[0] for p in t)) for t in flame_pts]
+    along = np.max([np.clip((X - a) / (b - a), 0, 1) for a, b in fx], axis=0) ** 0.6
+    plume = 0.7 * V['edge'] + form['plume'] * S * ZS * np.sqrt(np.clip(fl_in / 0.9, 0, 1)) * along
+
+    rim_c = cut(rim, tab, lit)
+    hot_c = cut(hot, lit, canopy)
+    inlays = U(rim_c, lit, hot_c, canopy)
+    under = np.maximum(inlays, whole)
+    deep = z - V['inlay']
 
     layers = {
-        'halo': [(halo, 0, Z['halo'])],
-        'hull': [(body, Z['halo'], Z['floor']),
-                 (cut(body, grooves, hot_in, lit, canopy), Z['floor'], Z['body'])],
-        'neon': [(stroke, Z['halo'], Z['floor']),
-                 (cut(U(cut(stroke, grooves), lit), canopy, hot_in), Z['floor'], Z['line']),
-                 (cut(stroke, grooves), Z['line'], Z['rim'])],
-        'hot': [(hot_in, Z['floor'], Z['line'])] if spec['hot'] else [],
-        'light': [(cut(flames, foot), Z['halo'], Z['flame'])],
+        'hull': [(cut(whole, inlays), body_top, bot), (under, deep, bot)],
+        'neon': [(rim_c, z, deep), (lit, z + V['raise_'], deep)],
+        'hot': [(hot_c, z + 0.8 * V['raise_'], deep)] if spec['hot'] else [],
+        'light': [(canopy, z + bubble, deep, 'canopy'), (cut(flames, whole), plume, 0.0, 'flame')],
     }
-    if L:
-        layers['neon'].append((cut(fld.circle(loop_cx, 0, hole_r + ring_w), fld.circle(loop_cx, 0, hole_r)),
-                               Z['halo'], Z['ring']))
-
-    sx = sy = 0.0
-    if V['socket']:
-        # a blind hole up into the back, at the middle of the whole outline, roofed by the hull
-        sx = float(fld.X[halo < 0].mean())
-        depth = V['socket']['depth']
-        sock = fld.circle(sx, sy, V['socket']['r'] / S)
-        for name, stack in layers.items():
-            out = []
-            for F, z0, z1 in stack:
-                if z0 >= depth or not ((F < 0) & (sock < 0)).any():
-                    out.append((F, z0, z1))
-                    continue
-                out.append((cut(F, sock), z0, min(z1, depth)))
-                if z1 > depth:
-                    out.append((F, depth, z1))
-            layers[name] = out
 
     def place(sh):
         # game x (the nose) points up the model: a quarter turn, so the triangles keep their winding
@@ -760,23 +783,22 @@ def build(pilot, vname):
 
     parts = {}
     for name, stack in layers.items():
-        for F, z0, z1 in stack:
-            sh = prism(outline(fld, F, V['tol'] / S), z0, z1)
+        for F, top, bottom, *el in stack:
+            sh = slab(fld, F, top, bottom)
             if sh.f:
-                parts.setdefault(name, []).append(('flame' if name == 'light' else name, place(sh)))
-    parts['light'].append(('canopy', place(dome(canopy_ring, Z['floor'], Z['body'], Z['body'] + V['dome']))))
+                parts.setdefault(name, []).append((el[0] if el else name, place(sh)))
 
     # the origin: the socket on a mini (where the peg goes), the middle of the face on a keychain
     allv = np.concatenate([np.array(s.v) for v in parts.values() for _, s in v])
     lo, hi = allv.min(0), allv.max(0)
-    ox, oy = (-sy * S, sx * S) if V['socket'] else ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
+    ox, oy = (0.0, sx * S) if V['socket'] else ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
     parts = {k: [(el, transform(s, lambda p: (p[0] - ox, p[1] - oy, p[2]))) for el, s in v]
              for k, v in parts.items()}
     info = dict(size=[round(float(x), 1) for x in hi - lo],
                 extent=[round(float(lo[0] - ox), 2), round(float(lo[1] - oy), 2),
                         round(float(hi[0] - ox), 2), round(float(hi[1] - oy), 2)])
     if L:
-        info['hole'] = [round(-ox, 2) + 0.0, round(loop_cx * S - oy, 2) + 0.0, L['hole']]
+        info['hole'] = [round(-ox, 2) + 0.0, round(loop_cx * S - oy, 2) + 0.0, L['hole'], L['thick']]
     if V['socket']:
         info['socket'] = [0.0, 0.0, V['socket']['r'], V['socket']['depth']]
     return parts, info
@@ -804,7 +826,6 @@ def palette(pilot):
     spec = PILOTS[pilot]
     col = spec['col']
     pal = {
-        'halo': dict(label=f'translucent {spec["filament"]}', color=col, alpha=0.55, emissive=0.35),
         'hull': dict(label='black', color=mix(col, VOID, 0.18), alpha=1, emissive=0.0),
         'neon': dict(label=spec['filament'], color=col, alpha=1, emissive=1.6),
         'light': dict(label='white', color='#f1f7fb', alpha=1, emissive=1.4),
