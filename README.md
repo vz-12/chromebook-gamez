@@ -459,6 +459,26 @@ npm run test:outside                       # a few seconds: the loader, in the g
 Without `--remote` (or `--local` for `npm run dev`'s database) it only prints
 what it would do. `src/vault.js` explains how an entry is stored.
 
+**Releasing an entry.** An entry that is meant for the game's players is
+opened, and from then on every signed-in account loads it in the game with
+no perk; signed out, it is still the 404. Its code stays out of this repo,
+and its name is still told only to an account holding its perk. PvP never
+looks at the switch: a hidden pilot is flown there only by an account
+holding its perk. Open only modules the game runs (`VR.rooms`, `VR.apart`,
+`VR.intro`): an opened film, voice or words would be run as one.
+
+```sh
+npm run vault -- open <id> --remote        # every signed-in account loads it
+npm run vault -- shut <id> --remote        # and no longer: its holders alone
+npm run vault -- list --remote             # OPEN beside each one that is
+```
+
+A put leaves the switch as it was, so a new revision of an open entry goes
+out to everybody on their next load. A run flown alone takes the rooms as
+they are at each sector, so one begun before a module arrived still finds
+the light (THE WAY UP, `upLate`); in co-op both machines must run the same
+modules when the run starts.
+
 An outside pilot's runs count for nothing. The page records none of them, and
 the server holds to that too: a run names its pilot, and `/api/leaderboard`
 refuses any pilot that isn't one of the game's own (`PILOTS` in

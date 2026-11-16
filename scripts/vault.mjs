@@ -6,7 +6,11 @@
          [--name NAME]        the page asks for it by its hash, so a changed file
                               is fetched again and an unchanged one never is);
                               NAME is what its holders see it called, nobody else
-     list                     every entry: its revision, parts, size and hash
+     list                     every entry: its revision, parts, size and hash,
+                              and OPEN beside one that is
+     open <id>                the entry is released: every signed-in account
+                              loads it in the game, with no perk (src/vault.js)
+     shut <id>                and no longer: its holders alone again
      drop <id>                the entry, gone
      give <account> <id>      the account may load the entry ('vault:<id>' perk)
      take <account> <id>      and no longer may
@@ -25,7 +29,8 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { putSql, listSql, headSql, dropSql, giveSql, takeSql, whoSql, accountSql, checkId, sha256 } from './lib/vault-sql.mjs';
+import { putSql, listSql, headSql, dropSql, giveSql, takeSql, whoSql, accountSql, checkId, sha256,
+         colsSql, OPEN_COLUMN, openSql, openedSql } from './lib/vault-sql.mjs';
 
 const args = process.argv.slice(2);
 const flag = f => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
@@ -76,6 +81,11 @@ function show(sql) {
   process.exit(0);
 }
 
+// the open switch's column, on a table from before it (the Worker adds it too, on its next vault request)
+function openColumn() {
+  if (!read(colsSql()).some(r => r.name === 'open')) run(OPEN_COLUMN);
+}
+
 const [cmd, a1, a2] = args;
 try {
   switch (cmd) {
@@ -97,9 +107,10 @@ try {
     }
     case 'list': {
       if (!live()) show(listSql());
+      openColumn();
       const rows = read(listSql());
       if (!rows.length) console.log('the vault is empty' + where);
-      for (const r of rows) console.log(r.id.padEnd(12) + String(r.size).padStart(9) + ' bytes  ' + String(r.parts).padStart(3) + ' parts  ' + r.hash.slice(0, 16) + '…  ' + r.put);
+      for (const r of rows) console.log(r.id.padEnd(12) + String(r.size).padStart(9) + ' bytes  ' + String(r.parts).padStart(3) + ' parts  ' + r.hash.slice(0, 16) + '…  ' + r.put + (r.open ? '  OPEN' : ''));
       break;
     }
     case 'drop': {
@@ -125,12 +136,24 @@ try {
       console.log(rows.length ? rows.map(r => r.name).join('\n') : 'nobody may load ' + a1 + where);
       break;
     }
+    case 'open': case 'shut': {
+      const on = cmd === 'open';
+      if (!live()) show(openSql(a1, on));
+      openColumn();
+      if (!read(openedSql(a1)).length) die(`no entry called "${a1}"`);
+      run(openSql(a1, on));
+      const row = read(openedSql(a1))[0];
+      if (!row || !!row.open !== on) die('the switch did not move: ' + a1 + ' reads ' + (row && row.open ? 'open' : 'shut'));
+      console.log(on ? `${a1} is open${where}: every signed-in account loads it`
+                     : `${a1} is shut${where}: only its holders load it (npm run vault -- who ${a1})`);
+      break;
+    }
     case 'hash': {
       // what a file's hash is, to compare with list's
       console.log(sha256(readFileSync(a1)));
       break;
     }
     default:
-      die('put <id> <file> | list | drop <id> | give <account> <id> | take <account> <id> | who <id>   [--remote | --local]');
+      die('put <id> <file> | list | drop <id> | open <id> | shut <id> | give <account> <id> | take <account> <id> | who <id>   [--remote | --local]');
   }
 } catch (e) { die(e.message); }
