@@ -7816,12 +7816,12 @@ function rootBeginCmd() {
        have no way of knowing are there. */
     const spread = Math.min(Math.min(arena.x1 - arena.x0, arena.y1 - arena.y0) * 0.36,
                             Math.min(runView.w, runView.h) * 0.38);
-    const a = rnd(TAU), rr = rnd(spread, 120);
+    const a = simRnd(TAU), rr = simRnd(spread, 120);   // where a character stands is the fight's, so the run's own roll (two machines in step, and a run restored, place them the same)
     r.glyphs.push({
       ch: chars[i % chars.length], dead: false,
       x: clamp(r.e.x + Math.cos(a) * rr, arena.x0 + 60, arena.x1 - 60),
       y: clamp(r.e.y + Math.sin(a) * rr, arena.y0 + 60, arena.y1 - 60),
-      t: rnd(TAU), at
+      t: simRnd(TAU), at
     });
   }
   Audio_.tone(300, 0.12, 'square', 0.08, 120);
@@ -7874,7 +7874,7 @@ function rootUpdate(dt) {
   if (r.tauntT <= 0 && r.sayT <= 0) {
     r.tauntI = (r.tauntI + 1) % ROOT_TAUNTS.length;
     rootSay(ROOT_TAUNTS[r.tauntI], 3.0);
-    r.tauntT = rnd(11, 7);
+    r.tauntT = simRnd(11, 7);
   }
 
   // it drifts; it does not chase. it does not have to.
@@ -38414,6 +38414,7 @@ function gameOver(quiet) {
     upCall('ev', 'dead', quiet);
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false, up: true };
+    if (freeRun) { lastStats.score = 0; lastStats.freeplay = true; }   // a sandbox that went there is still a sandbox
     Codex.flush();
     if (!quiet) {
       explode(P.x, P.y, 180, 0, COL.player);
@@ -76042,7 +76043,7 @@ function drawHUD() {
   HUD_AT.wave = { x: W - pad - hw1, y: pad + 42, w: hw1, h: 36 };
   ctx.restore();
 
-  const credStr = '◈ ' + credits;
+  const credStr = '◈ ' + Math.floor(credits);   // whole, whatever a room up the light has done to them (THE WAY UP)
   fitFont(credStr, rMax, '800', 15, "'JetBrains Mono', ui-monospace, monospace", 10);
   ctx.fillStyle = '#fbbf24';
   ctx.fillText(credStr, W - pad, pad + 92);
@@ -76495,7 +76496,7 @@ function drawShop() {
      so it gets the mono face and sits directly under the title. */
   ctx.font = "800 20px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = '#fbbf24';
-  ctx.fillText('◈ ' + credits, W / 2, rs[0].y - 18 - hdr);
+  ctx.fillText('◈ ' + Math.floor(credits), W / 2, rs[0].y - 18 - hdr);
 
   for (let i = 0; i < shopItems.length; i++) {
     const it = shopItems[i], r = rs[i];
@@ -77016,7 +77017,8 @@ function drawDead() {
     ctx.restore();
   });
   else row(26, y => {
-    const t = 'BEST  ' + Save.profile.best.toLocaleString();
+    // a run that has been up says so, where its best would be: it is recorded nowhere (THE WAY UP)
+    const t = s.up && !s.freeplay ? 'THIS RUN WENT UP  ·  IT IS RECORDED NOWHERE' : 'BEST  ' + Save.profile.best.toLocaleString();
     fitFont(t, wide, '600', 12, "'JetBrains Mono', ui-monospace, monospace", 8);
     ctx.fillStyle = '#475569';
     ctx.fillText(t, CENTER, y + 12);
@@ -81711,7 +81713,7 @@ function deadRecap(s) {
    copy is being played, so a friend at the same school gets the address that
    works there. */
 const shareUrl = () => (/^https?:$/.test(location.protocol) ? location.origin + '/' : 'https://voidrunner.online/');
-const shareable = s => !!s && !s.freeplay && !s.outside;
+const shareable = s => !!s && !s.freeplay && !s.outside && !s.up;   // nor a run that has been up: it counts for nothing (THE WAY UP)
 function shareText(s) {
   const r = deadRecap(s), n = v => (v || 0).toLocaleString();
   const head = s.chal && s.chal.daily
@@ -82120,7 +82122,7 @@ const vsDaily = () => !!(QOL.vs && QOL.vs.d && QOL.vs.d === Daily.day);
    challenges are scored as other games). */
 function vsCheck(s) {
   const v = QOL.vs;
-  if (!v || v.beat || !s || s.freeplay || s.outside) return false;
+  if (!v || v.beat || !s || s.freeplay || s.outside || s.up) return false;
   const fair = vsDaily() ? !!(s.chal && s.chal.daily) : !s.chal;
   if (!fair || s.score <= v.s) return false;
   v.beat = s.score; vsKeep();
@@ -82731,6 +82733,18 @@ function drawPauseAssist() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 17, v: '2.0', date: '12 NOV 2026', lines: [
+    ['new', 'THE ONES ABOVE, an early version. The sectors are no longer all there is: there is a way up.'],
+    ['new', 'The way there: put THE VOID\'s boss down. In every sector after that, a light stands on the '
+          + 'floor. Stand in it for a moment and you are carried up, into five rooms that are on no map: '
+          + 'each has waves of its own, a boss of its own, and a shop. After the last you are let back down.'],
+    ['new', 'It is kept for accounts. Sign in (ACCOUNT, on the menu) and it comes with you, with an '
+          + 'opening of its own. In co-op, both of you sign in.'],
+    ['note', 'Not everything up there waits to be climbed to. Deep in a run, very rarely, something else '
+           + 'keeps a boss\'s appointment. And FREEPLAY\'s console has a page it did not have before.'],
+    ['note', 'A run that has been up is recorded nowhere: no board, no codex, no tale. This is early, '
+           + 'and it will change.']
+  ] },
   { id: 16, v: '1.6.5', date: '15 OCT 2026', lines: [
     ['new', 'THE UNWRITTEN\'s song has its cover in THE SOUNDTRACK, beside the rest.']
   ] },
@@ -90749,7 +90763,8 @@ const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE
    is never in PvP, a rule sheet, the rush, a rite or a scene of its own, and
    co-op takes it only when both machines run the same module: whether a run
    may go up is decided as it starts (RUN.up, the module's mark), by the
-   host for both.
+   host for both. A run flown alone takes the rooms as they are at each
+   sector (upLate), so one begun before they had come still finds the light.
 
    ROOMS APART. A module may also call VR.apart(def) once: rooms that are off
    the climb, each a room with only its boss in it. Any module may have them,
@@ -90967,10 +90982,21 @@ function upLightPlace(next) {
   upLight = { x: best.x, y: best.y, t: 0, hold: 0, out: -1, next: !!next };
 }
 
+/* A run on this machine alone has nobody to agree with. One that began
+   before its rooms had come (the vault answers after the boot, and a sign-in
+   in the middle of a visit later still), or whose rooms have changed since,
+   takes them as they are now, at the next sector (upEnter) or the next
+   sector's boss (upSector): or the light would never stand for the run a
+   player starts the moment the menu opens. In step with another machine it
+   keeps the word it started with, which both agreed. */
+function upLate() {
+  if (RUN.up !== upSig() && !PVP && !MP.on && !LS.on && !netLive()) RUN.up = upTake();
+}
 // a sector is entered (enterStage): its light, while the way is open; one of the rooms, and the module hears it
 function upEnter(def) {
   upLight = null;
   if (def && def.up) { upCall('enter', def); return; }
+  upLate();
   if (upOpen && !upIn() && !upQuiet()) upLightPlace(false);
 }
 // a boss is down (onBossDefeat, a stage's): THE VOID's opens the way; a room's, the module hears
@@ -90988,6 +91014,7 @@ function upWave(boss) {
    take the wave for one of its rooms (sector). true when it did: the boss
    never comes. */
 function upSector() {
+  if (UP.away.size && !upIn()) upLate();
   if (!UP.away.size || upIn() || upLiftT >= 0 || upQuiet()) return false;
   for (const id of upMods()) {
     const h = UP.away.get(id);
@@ -91004,6 +91031,7 @@ function upSector() {
    room apart always lets the run down, into the sector the wave clock has
    come to (or the gates, if they are open). */
 function upAfter() {
+  if (upIn()) credits = Math.max(0, Math.floor(credits));   // the purse is whole as a room is left, whatever its module did to it
   if (upAt >= 0) {
     upDue = false;
     upCall('ev', 'down');

@@ -119,6 +119,21 @@ section('closed: no light before THE VOID\'s boss, nor without the module, nor w
   fresh(n);
   n.run('upOpen = true; enterStage(STAGES[1])');
   ok(n.run('RUN.up') === '' && n.run('upLight === null'), 'without the module: nothing');
+  /* A run begun before the rooms came (the vault answers after the boot; a
+     player may be flying by then): alone, it takes them at the next sector. */
+  const late = boot(false);
+  fresh(late);
+  ok(late.run('RUN.up') === '', 'a run begun before its rooms came has no way up yet');
+  late.run('Outside.run("u9", ' + JSON.stringify(MOD) + ')');
+  late.run('stage = STAGES[4]; upFelled({ boss: "nullcore" }); enterStage(STAGES[0])');
+  ok(late.run('RUN.up') === late.run('upSig()') && late.run('!!upLight && !upLight.next'), 'alone, it takes them at the next sector, and the light stands');
+  // and one whose rooms changed under it (a second module arriving after the first)
+  late.run('RUN.up = "an-older-mark"; enterStage(STAGES[1])');
+  ok(late.run('RUN.up') === late.run('upSig()') && late.run('!!upLight'), 'a run whose rooms changed since it began takes them as they are now');
+  // in step with another machine, the word it started with stands
+  late.run('RUN.up = ""; upLight = null; MP.on = true; MP.heard = { outs: [] }; enterStage(STAGES[2])');
+  ok(late.run('RUN.up') === '' && late.run('upLight === null'), 'in step with another machine, it keeps the word it started with');
+  late.run('MP.on = false; MP.heard = null');
   // the rush: VOID's boss in it opens nothing
   const r = boot();
   r.run('applyChar(0); runSeedNext = 3; startRush(); state = "play"; stage = STAGES[4]; upFelled({ boss: "nullcore" })');
@@ -174,6 +189,10 @@ section('the light: stood in, it carries the run up; mid-sector, the rest is pai
   const best0 = g.run('Save.profile.best | 0'), runs0 = g.run('(Save.profile.runs || []).length');
   g.run('P.hp = 0; gameOver()');
   ok(g.run('lastStats.up === true && lastStats.isRecord === false'), 'the death says so');
+  ok(g.run('shareable(lastStats)') === false, 'and it is not a run to share');
+  g.run('QOL.vs = { s: 0, n: "X" }; lastStats.score = 99999');
+  ok(g.run('vsCheck(lastStats)') === false, 'nor one that beats a friend\'s challenge');
+  g.run('QOL.vs = null');
   ok(g.run('__submitted') === 0 && g.run('Save.profile.best | 0') === best0 && g.run('(Save.profile.runs || []).length') === runs0, 'no board, no best, no record');
   ok(!g.run('Codex.e.has("x0f") || Codex.e.has("x0b")'), 'nothing in the codex');
   ok(!g.run('JSON.stringify(Tales.n || {}).includes("x0")'), 'nothing in the tales');
@@ -367,6 +386,7 @@ section('rooms apart: FREEPLAY\'s console');
   const cards = h.run('JSON.stringify(P.up)');
   h.run('P.hp = 0; gameOver()');
   ok(h.run('state') === 'dead' && h.run('!!freeAgain && freeAgain.at === 1'), 'it ends there', { st: h.run('state') });
+  ok(h.run('lastStats.freeplay === true && lastStats.score === 0 && !shareable(lastStats)'), 'and is still a sandbox on its death screen: no score, nothing to share', h.run('JSON.stringify(lastStats).slice(0, 200)'));
   h.run('uiArm = 0; handleKey("r")');
   ok(h.run('freeRun && state === "play"') && h.run('JSON.stringify(P.up)') === cards, '"again" is a sandbox, not a run, with the cards it had', { free: h.run('freeRun'), st: h.run('state') });
   h.run('P.maxHp = P.hp = 1e7');
@@ -407,8 +427,8 @@ section('rooms apart: a snapshot; co-op; the dev switch');
 
 section('secrecy: the block names nothing it should not');
 {
-  const src = fs.readFileSync(IDX, 'utf8');
-  const at = src.indexOf('   THE WAY UP\r\n'), end = src.indexOf('end of THE WAY UP');
+  const src = fs.readFileSync(IDX, 'utf8').replace(/\r\n/g, '\n');   // a Windows checkout's line ends, or any other's
+  const at = src.indexOf('   THE WAY UP\n'), end = src.indexOf('end of THE WAY UP');
   ok(at > 0 && end > at, 'the block is there');
   /* The words that must never be here are kept out of the repo too: name a
      file of them (one a line) in UP_SEALED to have them checked. */
