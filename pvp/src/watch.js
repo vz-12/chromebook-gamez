@@ -45,7 +45,7 @@ import { isHidden, mayFly } from './hidden.js';
 import { limited, tooMany } from './limits.js';
 import { nowList } from './now.js';
 import { PILOTS } from './rules.js';
-import { premiereOf, showStep } from './challenge.js';
+import { premiereOf, showStep, encoreOf, encoreStep, fillEncores, encoreAs } from './challenge.js';
 
 const MAX_BODY = 128 * 1024, MAX_SNAP = 2 * 1024 * 1024, MAX_HEAD = 64 * 1024;
 const reply = (body, status = 200) =>
@@ -126,6 +126,28 @@ async function view(req, env) {
   /* A fight held for its showing (challenge.js, premiere): nobody watches it
      before then, and from then each viewer is answered only as far as the
      showing has got (`cut`, in steps), so it plays as though live. */
+  /* An encore (challenge.js, AN ENCORE): its own recording, never its reel.
+     From its time as though live, everybody together; after its showing,
+     each viewer is shown the whole fight from its start (`whole`). */
+  const enc = await encoreOf(env.DB, match);
+  if (enc && enc.ended && enc.decided) {
+    // its recording's length, once, if the cron has not noted it yet
+    if (!(enc.encore_len > 0)) await fillEncores(env.DB, async m => (await ask(env, m, 'info', {})).json()).catch(() => null);
+    const at = encoreStep(enc, Date.now());
+    if (at < 0) return reply({ error: 'not on air', every: 5000 }, 404);
+    const res = await ask(env, match, 'view', { from: Number.isInteger(from) ? from : -1, snap: u.searchParams.get('snap') === '1',
+                                                v: /^[0-9a-f]{16}$/.test(v) ? v : '', cut: at, whole: true });
+    /* The side flying the hidden pilot is shown by the name its words give
+       it ("as"), not the account that flew it: a name is only ever drawn,
+       never played, so the fight is the same fight. */
+    const d = res.ok ? await res.json().catch(() => null) : null;
+    if (!d) return passOn(res);
+    if (d.head && Array.isArray(d.head.hellos)) {
+      const as = await encoreAs(env.DB, enc);
+      if (as && d.head.pilot) d.head.hellos = d.head.hellos.map(x => (x && x.cid && x.cid === d.head.pilot ? Object.assign({}, x, { name: as }) : x));
+    }
+    return reply(d);
+  }
   const held = await premiereOf(env.DB, match), cut = held ? showStep(held, Date.now()) : null;
   if (cut != null && cut < 0) return reply({ error: 'not on air', every: 5000 }, 404);
   /* And shown from a recording in its place (the challenge's `reel`, a vault

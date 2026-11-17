@@ -459,6 +459,26 @@ npm run test:outside                       # a few seconds: the loader, in the g
 Without `--remote` (or `--local` for `npm run dev`'s database) it only prints
 what it would do. `src/vault.js` explains how an entry is stored.
 
+**Releasing an entry.** An entry that is meant for the game's players is
+opened, and from then on every signed-in account loads it in the game with
+no perk; signed out, it is still the 404. Its code stays out of this repo,
+and its name is still told only to an account holding its perk. PvP never
+looks at the switch: a hidden pilot is flown there only by an account
+holding its perk. Open only modules the game runs (`VR.rooms`, `VR.apart`,
+`VR.intro`): an opened film, voice or words would be run as one.
+
+```sh
+npm run vault -- open <id> --remote        # every signed-in account loads it
+npm run vault -- shut <id> --remote        # and no longer: its holders alone
+npm run vault -- list --remote             # OPEN beside each one that is
+```
+
+A put leaves the switch as it was, so a new revision of an open entry goes
+out to everybody on their next load. A run flown alone takes the rooms as
+they are at each sector, so one begun before a module arrived still finds
+the light (THE WAY UP, `upLate`); in co-op both machines must run the same
+modules when the run starts.
+
 An outside pilot's runs count for nothing. The page records none of them, and
 the server holds to that too: a run names its pilot, and `/api/leaderboard`
 refuses any pilot that isn't one of the game's own (`PILOTS` in
@@ -535,14 +555,26 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   eyes of the side that is not the hidden pilot (that player's HUD), so the
   broadcast shows nothing the challenger couldn't see. Tab switches the
   camera between the fighters; no key or click reaches the game.
-- **In the game** (ON AIR in `index.html`, `npm run test:live`): while one
-  is on air, a card covers the menu with the announcement, both names,
-  WATCH LIVE and NOT NOW, once per broadcast per browser. After that a LIVE
-  strip pulses across the foot of the menu until the fight ends; clicking it
-  watches. A run in progress gets one line low on the screen and no pause.
-  WATCH opens the fight in a tab of its own. The PvP lobby has a LIVE card
-  at the top for everybody, signed in or not (PvP's Worker serves
-  `/api/live` too).
+- **In the game** (ON AIR in `index.html`, `npm run test:live`): nothing
+  ever opens by itself, stops a run or takes the page anywhere. A fight is
+  shown in one place, THE SIGN: a feather of light in the menu's sky over
+  the logo. It rests there while one is coming (`soon`: who, and how long
+  until it is shown), has a column of light pouring down behind it while
+  one is on air (LIVE, who, WATCH), and hangs there after an encore (its
+  words' title, who, WATCH). The first time a browser sees each, it comes
+  down out of the top of the screen and says its words for a while; after
+  that it is one quiet line. A click on it, or U at the menu, opens the
+  theater over the game: the fight's words on a card, then PvP's watch page
+  inside it (live: joined where it has got to; an encore: from its start),
+  then what is said after it and the way on. The game is hushed and stood
+  still under it; Escape leaves. A run in progress gets one line low on
+  the screen. The PvP lobby has a LIVE card at the top for everybody,
+  signed in or not (PvP's Worker serves `/api/live` too).
+- **What stays told, and for how long:** a lost world that has been mended
+  is not ended again for anybody (no movie, only `mended`); a movie is
+  otherwise offered for `LIVE.TOLD` (ten days) after it is first told, and
+  a showing for as long after it is over. The movie never cuts into a run:
+  it waits for the menu.
 - **The pilot's code goes public** once its match is on air. Anyone naming
   the broadcast is handed it (`/api/pvp/pilot?id=<id>&watch=<match>`),
   because every viewer's game has to run it.
@@ -583,6 +615,24 @@ npm run challenge -- announce <pilot> <entry> --remote   # or none
   then plays differently. A copy of it as it was flown, put in the vault as
   `<id>-<the match id's first 8>` (`npm run vault -- put ...`), is what the
   broadcast's viewers are handed instead (`hidden.js`, `pinOf`).
+- **An encore** (`pvp/src/challenge.js`, AN ENCORE): a fight already
+  decided, shown again from its own recording, never its reel, at a time you
+  set. A week ahead every game is told one is coming (THE SIGN); at its time
+  it is on air for everybody together; after that, for ten days, whoever
+  comes is shown the whole fight from its start (the relay remembers each
+  viewer: `whole` in `broadcast.js`). Nothing of how it ended is held or told
+  again, and nobody's runs are hunted for it. The side flying the hidden
+  pilot is shown by the name its words give it. Its words are a vault entry
+  of their own, `{ "t", "x", "as", "named", "after" }` (`after`: what the
+  theater says once it is over), else the announcement's. Its length is its
+  recording's, which PvP's Worker reads from the relay within the hour (the
+  hourly cron, or the first viewer), so a reel set before cannot shorten it.
+
+```sh
+npm run vault -- put <words> <file> --remote          # its words, kept out of the repo
+npm run challenge -- encore <pilot> 2026-11-21T19:00Z <words> --remote   # or none
+npm run challenge -- list --remote                    # its time, words and length
+```
 
 **From above** (FROM ABOVE in `index.html`, `npm run test:above`). From the
 moment a challenge is sent until its fight is fought out, the game's runs

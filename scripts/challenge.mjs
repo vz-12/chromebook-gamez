@@ -20,6 +20,14 @@
                               recording: a vault entry holding a broadcast's
                               whole log (as replay=1 writes it), and its
                               length in seconds; or none
+     encore <pilot> <when> [words]  a fight already decided, shown again from
+                              its own recording (never its reel) at that time
+                              (ISO with its zone), or none: told a week ahead,
+                              on air for everybody at once, then there for
+                              whoever comes, each from its start. [words] is
+                              a vault entry { "t", "x", "as", "named",
+                              "after" }, else the announcement's. Nothing of
+                              how it ended is held or told again
      date <pilot> <when>      the date it names, ISO with its zone
                               (2026-11-14T18:00Z), or none
      announce <pilot> <words> what the game's menu says while its match is
@@ -75,7 +83,7 @@
    the repo is public, and so would the words be.
    ========================================================================= */
 import { spawnSync } from 'node:child_process';
-import { armSql, dateSql, premiereSql, reelSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, sceneSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
+import { armSql, dateSql, premiereSql, encoreSql, reelSql, cancelSql, inVaultSql, challengesSql, announceSql, filmSql, partsSql, sceneSql, unuseSql, decideSql, calmSql, columnsSql, addedSql,
          doorSql, mendSql, checkPilot, checkWords, checkDate, checkOutcome, checkDoor } from './lib/challenge-sql.mjs';
 
 const args = process.argv.slice(2);
@@ -150,6 +158,18 @@ try {
       columns();
       run(sql);
       console.log(a1 + where + ': ' + (a2 === 'none' ? 'no premiere: its fight goes on air as it is played' : 'held for its showing at ' + new Date(checkDate(a2)).toISOString()));
+      break;
+    }
+    case 'encore': {
+      if (!a1 || !a2) die('encore <pilot> <when | none> [words]');
+      const words = a2 === 'none' ? null : args[3] || null;
+      const sql = encoreSql(a1, checkDate(a2), words);
+      if (!live()) show(sql);
+      columns();
+      if (words && !run(inVaultSql([words])).length) die('the vault' + where + ' holds no ' + words + ': put it first');
+      run(sql);
+      console.log(a1 + where + ': ' + (a2 === 'none' ? 'no encore' : 'shown again from its own recording at ' + new Date(checkDate(a2)).toISOString() +
+                  (words ? ', in the words of ' + words : ', in its announcement\'s words') + ' (its length is measured from its relay within the hour)'));
       break;
     }
     case 'date': {
@@ -271,11 +291,12 @@ try {
                      'film ' + r.film + (r.film_voice !== '-' ? ' (' + r.film_voice + ')' : ''),
                      'won film ' + r.won_film + (r.won_voice !== '-' ? ' (' + r.won_voice + ')' : ''),
                      'parts ' + r.parts + (r.parts_used !== '-' ? ' (used ' + r.parts_used + ' on ' + r.parts_use + ' ' + r.parts_on + ')' : ''), 'their place ' + r.parts_scene,
-                     'door ' + r.door, 'mended ' + r.mended].join('  ·  '));
+                     'door ' + r.door, 'mended ' + r.mended,
+                     'encore ' + r.encore + (r.encore_words !== '-' ? ' (' + r.encore_words + ')' : '') + (r.encore_secs !== '-' ? ' ' + r.encore_secs + ' s' : '')].join('  ·  '));
       break;
     }
     default:
-      die('arm <pilot> <words> | premiere <pilot> <when | none> | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
+      die('arm <pilot> <words> | premiere <pilot> <when | none> | encore <pilot> <when | none> [words] | date <pilot> <when | none> | announce <pilot> <words | none> | film <pilot> <module | none> [voice] [--won] | ' +
           'parts <pilot> <words | none> | scene <pilot> <module | none> | unuse <pilot> | door <pilot> <address | none> | mend <pilot> [none] | decide <pilot> <lost | won | none> | ' +
           'calm <pilot> [off] | cancel <pilot> | list   [--remote | --local]');
   }

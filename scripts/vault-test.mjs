@@ -8,10 +8,12 @@
    everybody else gets the answer a missing entry gets; the account reply
    names what may be loaded only to whoever may; a new revision takes over
    only once whole; and the perk itself is given, taken and kept out of the
-   awards.
+   awards. An open entry is every signed-in account's, in the game and
+   nowhere else, until it is shut.
    ========================================================================= */
 import { makeD1 } from './lib/d1-sqlite.mjs';
-import { putSql, giveSql, takeSql, whoSql, dropSql, PART_BYTES, sha256 } from './lib/vault-sql.mjs';
+import { putSql, giveSql, takeSql, whoSql, dropSql, PART_BYTES, sha256, colsSql, OPEN_COLUMN, openSql, openedSql, listSql } from './lib/vault-sql.mjs';
+import { hiddenOf } from '../pvp/src/hidden.js';
 
 const worker = (await import('../src/index.js')).default;
 const DB = makeD1();
@@ -197,6 +199,66 @@ section('the perk: given once, taken alone, never an award');
   exec(dropSql('x1'));
   ok(!one("SELECT 1 AS n FROM vault_heads WHERE id = 'x1'") && !one("SELECT 1 AS n FROM vault_parts WHERE id = 'x1'"), 'drop: gone, every revision');
   ok((await fetchVault(a, 'id=x1')).status === 404 && !('vault' in (await a.call('GET', '/api/account')).d), 'and nobody is offered it');
+}
+
+/* ---------------------------------------------------------------------- */
+section('an open entry: every signed-in account\'s, in the game; shut again, its holders\' alone');
+{
+  const last = sql => sql.split('\n').pop();
+  const listed = id => all(last(listSql())).find(r => r.id === id);
+  const BODY = Buffer.from('VR.rooms({});\n'.repeat(40)), BODY2 = Buffer.from('VR.rooms({ again: 1 });\n');
+  exec(putSql('rel', BODY, 7000, 'ITS NAME').sql);
+  const d = await signUp('player_d');
+  ok((await fetchVault(d, 'id=rel')).status === 404 && !('vault' in (await d.call('GET', '/api/account')).d),
+     'put and not opened: nothing for an account without its perk');
+  ok(listed('rel') && !listed('rel').open, 'and list says so', listed('rel'));
+
+  exec(openSql('rel', true));
+  ok(all(openedSql('rel'))[0].open === 1 && listed('rel').open === 1, 'opened: the switch reads open');
+  let r = await fetchVault(d, 'id=rel');
+  ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(BODY) && r.headers.get('x-vault-hash') === sha256(BODY),
+     'an account with no perk at all is handed it, byte for byte', r.status);
+  r = await fetchVault(d, 'id=rel&h=' + sha256(BODY));
+  ok(r.headers.get('cache-control') === 'private, max-age=31536000, immutable', 'kept by its hash, by that browser only', r.headers.get('cache-control'));
+  let rd = await d.call('GET', '/api/account');
+  ok(Array.isArray(rd.d.vault) && rd.d.vault.length === 1 && rd.d.vault[0].id === 'rel' && rd.d.vault[0].h === sha256(BODY) &&
+     rd.d.vault[0].size === BODY.length, 'and its account reply names it, with its hash and size', rd.d.vault);
+  ok(!('n' in rd.d.vault[0]) && !/ITS NAME/.test(JSON.stringify(rd.d)), 'but never what it is called');
+  const out = await fetchVault(nobody, 'id=rel'), gone = await fetchVault(nobody, 'id=nope');
+  ok(out.status === 404 && (await out.text()) === (await gone.text()), 'signed out: the 404 a missing entry gets, word for word');
+  ok(!('vault' in (await nobody.call('GET', '/api/account')).d), 'and no field in its reply');
+  ok((await fetchVault(d, 'id=empty')).status === 404, 'an entry that was not opened is as shut as ever');
+
+  // its holder is told its name, as before; and holds what else its perks open beside it
+  exec(giveSql('keeper_a', 'rel')); exec(giveSql('keeper_a', 'empty'));
+  const ra = await a.call('GET', '/api/account');
+  ok(ra.d.vault.map(x => x.id).join() === 'empty,rel' && ra.d.vault[1].n === 'ITS NAME', 'a holder: its own beside it, and the name', ra.d.vault);
+  exec(takeSql('keeper_a', 'empty'));
+
+  // PvP: the perk alone decides who flies a hidden pilot
+  ok((await hiddenOf(DB, { perks: [] })).length === 0, 'PvP offers an open entry to nobody without the perk');
+  ok((await hiddenOf(DB, { perks: ['vault:rel'] })).map(x => x.id).join() === 'rel', 'and to its holder, as before');
+
+  // a new revision is still open
+  exec(putSql('rel', BODY2, 8000, 'ITS NAME').sql);
+  r = await fetchVault(d, 'id=rel');
+  ok(Buffer.from(await r.arrayBuffer()).equals(BODY2) && all(openedSql('rel'))[0].open === 1, 'a put leaves it open, and the new text is what is handed');
+  rd = await d.call('GET', '/api/account');
+  ok(rd.d.vault[0].h === sha256(BODY2), 'under its new hash');
+
+  exec(openSql('rel', false));
+  ok((await fetchVault(d, 'id=rel')).status === 404 && !('vault' in (await d.call('GET', '/api/account')).d), 'shut: gone for everybody else');
+  ok((await fetchVault(a, 'id=rel')).status === 200, 'and still its holder\'s');
+  ok(!listed('rel').open, 'list says shut');
+
+  // a table from before the switch: the tool looks, and adds the column
+  exec('ALTER TABLE vault_heads DROP COLUMN open');
+  ok(!all(last(colsSql())).some(c => c.name === 'open'), 'a table without the column: the tool sees it is missing');
+  exec(OPEN_COLUMN);
+  exec(openSql('rel', true));
+  ok(all(last(colsSql())).some(c => c.name === 'open') && (await fetchVault(d, 'id=rel')).status === 200, 'added, the switch works there too');
+  ok(one("SELECT name FROM vault_heads WHERE id = 'rel'").name === 'ITS NAME', 'and nothing else of the entry moved');
+  exec(dropSql('rel'));
 }
 
 console.log(fails ? `\n${fails} FAILED, ${passes} passed` : `\nall ${passes} passed`);

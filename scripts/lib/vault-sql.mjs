@@ -31,7 +31,17 @@ export function putSql(id, bytes, rev = Date.now(), name = null) {
   return { sql: out.join('\n'), rev, parts: n, hash: sha256(bytes) };
 }
 
-export const listSql = () => `${VAULT_SCHEMA}\nSELECT id, rev, parts, size, hash, datetime(updated / 1000, 'unixepoch') AS put FROM vault_heads ORDER BY id;`;
+export const listSql = () => `${VAULT_SCHEMA}\nSELECT id, rev, parts, size, hash, datetime(updated / 1000, 'unixepoch') AS put, open FROM vault_heads ORDER BY id;`;
+
+/* An entry opened to every signed-in account, or shut again (src/vault.js,
+   AN OPEN ENTRY). A put leaves the switch as it was. A table made before
+   the switch has no column for it until the Worker's next vault request,
+   so the tool looks (colsSql) and adds it first (OPEN_COLUMN) where it is
+   missing. */
+export const colsSql = () => `${VAULT_SCHEMA}\nPRAGMA table_info(vault_heads);`;
+export const OPEN_COLUMN = 'ALTER TABLE vault_heads ADD COLUMN open INTEGER;';
+export const openSql = (id, on) => `UPDATE vault_heads SET open = ${on ? 1 : 'NULL'} WHERE id = ${q(checkId(id))};`;
+export const openedSql = id => `SELECT id, open FROM vault_heads WHERE id = ${q(checkId(id))};`;
 export const headSql = id => `${VAULT_SCHEMA}\nSELECT hash, size, parts FROM vault_heads WHERE id = ${q(checkId(id))};`;
 export const dropSql = id => `${VAULT_SCHEMA}\nDELETE FROM vault_heads WHERE id = ${q(checkId(id))};\nDELETE FROM vault_parts WHERE id = ${q(id)};`;
 

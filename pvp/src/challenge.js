@@ -66,6 +66,18 @@
    first use built, giving them to one of the account's own pilots' hulls,
    was archived on 29 Oct when the winner-to-be chose the other way: it is
    commit 1ae6470 (POST /api/pvp/parts, the lobby's picker, their tests).
+
+   AN ENCORE: a fight already decided, shown again from its own recording
+   (`npm run challenge -- encore <pilot> <when> [words]`). Never its reel, and
+   nothing of how it ended is held or told again: it is the record, not the
+   event. A week ahead every game is told one is coming (/api/live `soon`); at
+   its time it is on air for everybody at once, as a premiere is (`live`); and
+   after that, for LIVE.TOLD, it is there for whoever comes (`shown`, `was`),
+   each viewer shown the whole fight from its start (watch.js, broadcast.js:
+   `whole`). Its words are a vault entry of their own, { "t", "x", "as",
+   "named", "after": what is said once it is over }, or the announcement's.
+   The game shows it in a theater of its own (index.html, THE SHOWING), never
+   by taking anybody anywhere.
    ========================================================================= */
 import { seasonOf } from '../../src/season.js';
 import { vaultText, vaultBytes, VAULT_ID, PERK } from '../../src/vault.js';
@@ -107,14 +119,17 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS pvp_challenges (
      door       TEXT,                     -- where every game sends its players if it is lost (an address), set by hand
      mended      INTEGER,                  -- when the world was given back after that: by the account it was sent to, where the door leads, or by hand
      premiere    INTEGER,                  -- its fight shown at this time, from its recording, if fought ahead of it (revealAt), set by hand
-     reel        TEXT                      -- and, if set, the vault entry of a recording shown in place of its match's own (watch.js), set by hand
+     reel        TEXT,                     -- and, if set, the vault entry of a recording shown in place of its match's own (watch.js), set by hand
+     encore      INTEGER,                  -- a decided fight shown again from its own recording, at this time (AN ENCORE above), set by hand
+     encore_words TEXT,                    -- and the vault entry of what is said around it, if not the announcement
+     encore_len  INTEGER                   -- and its recording's length (ms), as its relay has it (fillEncores)
    )`;
 // columns added after the table first shipped, as records.js does
 const ADDED = [['match', 'TEXT'], ['started', 'INTEGER'], ['ended', 'INTEGER'], ['announce', 'TEXT'],
                ['decided', 'INTEGER'], ['outcome', 'TEXT'], ['calm', 'INTEGER'], ['film', 'TEXT'], ['film_voice', 'TEXT'],
                ['parts', 'TEXT'], ['parts_used', 'INTEGER'], ['parts_use', 'TEXT'], ['parts_on', 'TEXT'],
                ['won_film', 'TEXT'], ['won_voice', 'TEXT'], ['door', 'TEXT'], ['mended', 'INTEGER'], ['premiere', 'INTEGER'], ['reel', 'TEXT'],
-               ['parts_scene', 'TEXT']];
+               ['parts_scene', 'TEXT'], ['encore', 'INTEGER'], ['encore_words', 'TEXT'], ['encore_len', 'INTEGER']];
 export const CHALLENGE_ADDED = ADDED;
 // for scripts/lib/challenge-sql.mjs to put ahead of its own SQL: one line, comments out
 export const CHALLENGE_SCHEMA = SCHEMA.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';';
@@ -225,7 +240,9 @@ export async function challengeWaits(db, acct) {
 /* ------------------------------- on air --------------------------------- */
 
 // how long a challenge match counts as on with no word from the referee: its longest, and a little
-export const LIVE = { MAX: 50 * 60 * 1000, SOON: 30 * 60 * 1000, AFTER: 6 * 60 * 60 * 1000, ASK: 60, IDLE: 900 };
+export const LIVE = { MAX: 50 * 60 * 1000, SOON: 30 * 60 * 1000, AFTER: 6 * 60 * 60 * 1000, ASK: 60, IDLE: 900,
+                      TOLD: 10 * 24 * 60 * 60 * 1000,     // how long a showing, and a movie, are offered to those who come after
+                      AHEAD: 7 * 24 * 60 * 60 * 1000 };   // how far ahead of a showing a game is told one is coming
 
 /* The queue has just made a match between a hidden pilot and somebody
    (objects.js, Matchmaker): if it is the one this pilot's challenge went
@@ -253,7 +270,18 @@ export async function challengeEnded(db, match, now = Date.now(), winner = null)
 /* For the game's public GET /api/live (src/live.js), which never makes
    PvP's tables: what is on now, and how long before it is worth asking
    again.
-     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every, above, burn?, fell? }
+     { live: { match, since, t, x, names: [the pilot's, the other's] } | null, every, above,
+       burn?, fell?, door?, mended?, shown?, was?, soon? }
+   `soon`: a fight held for a showing still to come, within LIVE.AHEAD of it:
+   { at, t, names }, so that a game can say one is coming rather than have
+   it arrive from nowhere. Only that it will be shown and when: nothing of
+   what it decided.
+   `was`: beside `shown`, what that showing was called and who fought,
+   { at, t, x, names }, for whoever comes after it.
+   What is told does not stay told for good (LIVE.TOLD): a showing is
+   offered to those who come after it for that long, and a movie for as long
+   again after it was first told; and a lost world that has been mended is
+   not ended a second time for anybody (no burn, only `mended`).
    `above` is whether the game's runs are hunted now (FROM ABOVE): a
    challenge has been sent, its fight has not been fought out, and the hunt
    is not held.
@@ -288,6 +316,48 @@ export async function premiereOf(db, match) {
     return r || null;
   } catch (e) { return null; }   // no table, or not the column yet: nothing held
 }
+// and if it is shown again (AN ENCORE)
+export async function encoreOf(db, match) {
+  try {
+    return (await db.prepare('SELECT * FROM pvp_challenges WHERE match = ?1 AND encore IS NOT NULL').bind(match).first()) || null;
+  } catch (e) { return null; }   // not the column yet: no encore
+}
+/* An encore (AN ENCORE above): its fight's length, and when its showing is
+   over, from its time; and whether it may be shown at all (a decided fight
+   with a match that was played to its end). */
+const encored = r => !!(r && r.encore && r.match && r.started && r.ended && r.decided);
+/* Its length is its recording's (encore_len, from its relay: fillEncores); until that is known, the
+   match's own (ended - started), which a reel set by hand will have changed to the reel's. */
+export const encoreLen = r => (r.encore_len > 0 ? r.encore_len : Math.max(0, r.ended - r.started));
+/* Every encore whose recording's length is not yet noted, noted from its
+   relay (PvP's Worker: the hourly cron, and the watch route as it is asked):
+   `info(match)` answers the relay's { len } in steps. What it noted. */
+export async function fillEncores(db, info) {
+  let rows = [];
+  try { rows = (await db.prepare('SELECT pilot, match FROM pvp_challenges WHERE encore IS NOT NULL AND encore_len IS NULL AND match IS NOT NULL').all()).results || []; }
+  catch (e) { return []; }   // not the columns yet
+  const out = [];
+  for (const r of rows) {
+    let len = null;
+    try { const d = await info(r.match); len = d && Number.isInteger(d.len) && d.len > 0 ? Math.round(d.len * 1000 / 60) : null; }
+    catch (e) { console.error('encore ' + r.pilot + ': its relay: ' + (e && e.message)); }
+    if (!len) continue;
+    await db.prepare('UPDATE pvp_challenges SET encore_len = ?2 WHERE pilot = ?1 AND encore_len IS NULL').bind(r.pilot, len).run();
+    out.push(r.pilot);
+  }
+  return out;
+}
+export const encoreEnd = r => r.encore + encoreLen(r) + SHOW_SLACK;
+// the name its words give the hidden pilot ("as"), for the watch page: or '' when they give none
+export async function encoreAs(db, r) {
+  try {
+    const got = await vaultText(db, r.encore_words || r.announce);
+    const w = got ? JSON.parse(got.text) : null;
+    return w && typeof w.as === 'string' ? w.as.slice(0, 24) : '';
+  } catch (e) { return ''; }
+}
+// how far into its showing an encore has got, in steps: -1 before it
+export const encoreStep = (r, now) => (now < r.encore ? -1 : Math.floor((now - r.encore) * 60 / 1000));
 
 export async function liveNow(db, now = Date.now()) {
   let rows = [];
@@ -305,8 +375,12 @@ export async function liveNow(db, now = Date.now()) {
      (filmOf below): every game plays it once, told so the moment it was
      decided, by `burn` if it was lost and by `fell` if it was won. Missing
      until then, so nothing says there is one. */
-  const first = (way, col) => rows.filter(r => r.outcome === way && r.decided && r[col] && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
-  const lost = first('lost', 'film'), won = first('won', 'won_film');
+  // (when a row's ending was first told: its showing's end if it had one, else the moment it was decided)
+  const toldAt = r => (r.premiere ? revealAt(r) : r.decided);
+  const fresh = r => now - toldAt(r) < LIVE.TOLD;
+  const first = (way, col, ok) => rows.filter(r => r.outcome === way && r.decided && r[col] && !held(r, now) && ok(r)).sort((a, b) => a.decided - b.decided)[0];
+  // lost: told until the world is mended (a door still open says so for as long as it is); won: for a while
+  const lost = first('lost', 'film', r => !r.mended && (r.door || fresh(r))), won = first('won', 'won_film', fresh);
   const ending = Object.assign(lost ? { burn: lost.decided } : {}, won ? { fell: won.decided } : {});
   /* THE DOOR: a challenge lost, with a door named for it, sends every game's
      players through it (index.html, THE DOOR) until the world is mended:
@@ -314,10 +388,26 @@ export async function liveNow(db, now = Date.now()) {
   const shut = rows.filter(r => r.outcome === 'lost' && r.decided && r.door && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
   if (shut) { if (shut.mended) ending.mended = shut.mended; else ending.door = shut.door; }
   // a fight held for its showing, shown and told: its match, for whoever comes after (index.html, THE SHOWING)
-  const shownRow = rows.filter(r => r.premiere && r.match && r.decided && !held(r, now)).sort((a, b) => a.decided - b.decided)[0];
-  if (shownRow) ending.shown = shownRow.match;
+  // (an encore, shown and over, is offered for a while after: before any premiere's)
+  const encoreShown = rows.filter(r => encored(r) && now >= encoreEnd(r) && now - encoreEnd(r) < LIVE.TOLD).sort((a, b) => b.encore - a.encore)[0];
+  const shownRow = encoreShown || rows.filter(r => r.premiere && r.match && r.decided && !held(r, now) && fresh(r)).sort((a, b) => b.premiere - a.premiere)[0];
+  if (shownRow) {
+    ending.shown = shownRow.match;
+    ending.was = Object.assign({ at: encoreShown ? shownRow.encore : shownRow.premiere, len: Math.round(encoreLen(shownRow) / 1000) },
+                               await airedAs(db, shownRow, !!encoreShown));
+  }
+  // a showing still to come, and near: that there will be one, and when (an encore's, or a premiere's)
+  const when = r => (encored(r) && now < r.encore ? r.encore : r.premiere && r.match && r.started && now < r.premiere ? r.premiere : 0);
+  const soonRow = rows.filter(r => when(r) && when(r) - now < LIVE.AHEAD).sort((a, b) => when(a) - when(b))[0];
+  if (soonRow) { const w = await airedAs(db, soonRow, encored(soonRow) && now < soonRow.encore); ending.soon = { at: when(soonRow), t: w.t, names: w.names }; }
   let on = null, every = LIVE.IDLE;
   for (const r of rows) {
+    // an encore: on air from its time to the end of its playback; asked about often as it comes near
+    if (encored(r) && now < encoreEnd(r)) {
+      if (now >= r.encore) { if (!on || r.encore > on.since) on = Object.assign({}, r, { since: r.encore, encoreOn: true }); continue; }
+      every = Math.min(every, Math.max(LIVE.ASK, Math.ceil((r.encore - LIVE.SOON - now) / 1000)));
+      continue;
+    }
     // on air: as it is played; or, held for its showing, from its premiere to the end of its playback
     const p = !!r.premiere, since = p ? r.premiere : r.started;
     if (p ? r.match && r.started && now >= r.premiere && held(r, now) : r.match && r.started && !r.ended && now - r.started < LIVE.MAX) {
@@ -332,20 +422,25 @@ export async function liveNow(db, now = Date.now()) {
     if (now < due + LIVE.AFTER) every = Math.min(every, Math.max(LIVE.ASK, Math.ceil(wait)));
   }
   if (!on) return Object.assign({ live: null, every, above }, ending);
+  return Object.assign({ live: Object.assign({ match: on.match, since: on.since }, on.encoreOn ? { len: Math.round(encoreLen(on) / 1000), encore: true } : {},
+                                             await airedAs(db, on, !!on.encoreOn)), every: LIVE.ASK, above }, ending);
+}
+/* A challenge's announcement, as the menu is given it: { t, x, names: [the
+   pilot's as shown, the other's (or '' where the words keep it off)] }.
+   Words that cannot be read are no words: a plain title, the game's own. */
+async function airedAs(db, r, encore = false) {
   let w = null;
   try {
-    const got = on.announce ? await vaultText(db, on.announce) : null;
+    const entry = encore && r.encore_words ? r.encore_words : r.announce;
+    const got = entry ? await vaultText(db, entry) : null;
     w = got ? JSON.parse(got.text) : null;
   } catch (e) {
-    console.error('live ' + on.pilot + ': its announcement: ' + (e && e.message));
+    console.error('live ' + r.pilot + ': its announcement: ' + (e && e.message));
   }
   w = w && typeof w === 'object' ? w : {};
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
-  return Object.assign({
-    live: { match: on.match, since: on.since, t: str(w.t, WORDS.t), x: str(w.x, WORDS.x),
-            names: [str(w.as, 24) || '???', w.named === false ? '' : str(on.them, 24)] },
-    every: LIVE.ASK, above
-  }, ending);
+  return Object.assign({ t: str(w.t, WORDS.t), x: str(w.x, WORDS.x), names: [str(w.as, 24) || '???', w.named === false ? '' : str(r.them, 24)] },
+                       encore && typeof w.after === 'string' ? { after: w.after.slice(0, WORDS.x) } : {});
 }
 
 /* THE DOOR's address, while it is open (liveNow above): the one place

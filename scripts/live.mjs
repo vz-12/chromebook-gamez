@@ -9,14 +9,16 @@
      asking      once at the start, then as often as the answer says, never
                  more often than every half minute, and not at all on PvP's
                  own page
-     the menu    the card over it, with the announcement and both names;
-                 once per broadcast per browser; NOT NOW and Escape put it
-                 away; WATCH LIVE opens PvP's watch page in a tab of its own
-     the strip   across the foot of the menu while it is on, drawn; a click
-                 on it watches, and never starts a run
-     a run       one line low on the screen when it goes on, and no pause;
-                 the card waits for the menu
-     off air     card, strip and line all gone
+     THE SIGN    in the sky over the logo, never a card over anything: on
+                 air, to come (how long), and after (the record); the first
+                 time in a browser it comes down and says more; a click on
+                 it, or U, watches; one to come opens nothing
+     watching    a theater over the game: the fight's words, then PvP's
+                 watch page inside it, then what is said after it and the
+                 way on; its keys are its own, Escape leaves; the game
+                 stands still under it; a record plays for its length
+     a run       never stopped: one line low on the screen when it goes on
+     off air     sign and line gone
    ========================================================================= */
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -41,14 +43,16 @@ const flush = () => new Promise(r => setTimeout(r, 20));
    the test can press its buttons and keys. */
 function dom(win) {
   const make = win.document.createElement;
-  const node = () => ({ textContent: '', hidden: false, on: {}, addEventListener(t, f) { (this.on[t] = this.on[t] || []).push(f); },
-                        focus() { win.__focus = this; }, classList: { toggle() {}, add() {}, remove() {} } });
+  const node = () => ({ textContent: '', hidden: false, on: {}, style: {}, addEventListener(t, f) { (this.on[t] = this.on[t] || []).push(f); },
+                        focus() { win.__focus = this; }, classList: { toggle() {}, add() {}, remove() {} }, insertBefore(c) { return c; } });
   win.document.createElement = tag => {
     const el = make(tag);
     const kids = {};
     el.on = {};
     el.addEventListener = (t, f) => { (el.on[t] = el.on[t] || []).push(f); };
     el.querySelector = sel => kids[sel] || (kids[sel] = node());
+    el.style.setProperty = () => {};
+    el.remove = () => { el.removed = true; };
     return el;
   };
 }
@@ -119,111 +123,137 @@ g.run(SETUP);
   g.win.fetch = (u, o) => { g.win.__asked++; return Promise.resolve(new Response(JSON.stringify(g.win.__live), { status: 200 })); };
 }
 
-section('the menu: the card');
+const showEl = g => g.win.document.body.children.find(c => c.id === 'show') || null;
+const theater = g => g.run('Show.on') === true;
+const drawn = (g, re) => g.run(`(() => { const calls = []; const was = ctx.fillText; ctx.fillText = function (t) { calls.push(String(t)); return was.apply(this, arguments); };
+             try { renderMenu(); } finally { ctx.fillText = was; } return calls.filter(t => ${re}.test(t)); })()`);
+// THE SIGN, come down: its first frame starts its clock, and this far on it has landed
+const landed = g => { drawn(g, '/./'); g.run('Live.sign.t0 = uiTime - 3'); };
+const clickSign = g => g.run(`(() => { const r = signRect(); mouse.x = r.x + r.w / 2; mouse.y = r.y + 30; handleClick(); })()`);
+
+section('a fight on air: THE SIGN, never a card over anything');
 {
   await answer(g, ON(M1));
   ok(g.run('Live.on && Live.on.match') === M1 && Math.round(g.run('Live.next - performance.now()') / 1000) === 60, 'on air: asked again every minute');
-  ok(shown(g), 'a card over the whole menu');
-  const c = card(g);
-  ok(c.querySelector('h2').textContent === 'ON AIR' && c.querySelector('.vs').textContent === 'THE PILOT  VS  TOPDOG' && c.querySelector('.x').textContent === 'Come and see.',
-     'with the announcement and both names', [c.querySelector('h2').textContent, c.querySelector('.vs').textContent]);
-  ok(store(g).some(([k, v]) => k === 'voidrunner_live_seen' && v.split(',').includes(M1)), 'noted in this browser');
-  ok(press(c, 'keydown', { key: 'p' }) && g.run('state') === 'menu', 'keys pressed over it are its own, never the game\'s');
-  press(c, 'keydown', { key: 'Escape' });
-  ok(!shown(g) && g.run('Live.on') !== null, 'Escape puts it away (NOT NOW); the broadcast is still on');
-  for (let i = 0; i < 5; i++) frame(g);
-  ok(!shown(g), 'and it stays away');
+  ok(!card(g) && !theater(g) && g.run('state') === 'menu', 'nothing opens by itself: no card, no theater, the menu as it was');
+  ok(drawn(g, '/LIVE NOW/').length === 0, 'its first moment: coming down out of the top, nothing said yet');
+  g.run('Live.sign.t0 = uiTime - 3');
+  const t = drawn(g, '/LIVE NOW/');
+  ok(t.some(x => /THE PILOT VS TOPDOG/.test(x) && /WATCH/.test(x)), 'the sign in the sky over the logo: LIVE, both names, WATCH', t);
+  ok(g.run('Live.sign && Live.sign.kind') === 'live' && g.run('Live.sign.fresh') === true, 'the first time in this browser: it comes down, and says more');
+  ok(store(g).some(([k, v]) => k === 'voidrunner_sign_seen' && v.split(',').includes('live:' + M1)), 'noted in this browser');
+  g.run('Live.sign.t0 = uiTime - 2');
+  ok(drawn(g, '/Come and see/').length === 0, 'its words wait until it has come down');
+  g.run('Live.sign.t0 = uiTime - 4');
+  ok(drawn(g, '/Come and see/').length === 1, 'then they are said under it');
+  g.run('Live.sign.t0 = uiTime - 30');
+  ok(drawn(g, '/Come and see/').length === 0, 'for a while');
 }
 
-section('the menu: the strip');
+section('watching: a theater over the game, and back');
 {
-  const r = g.run('liveStripRect()');
-  ok(r.y > g.run('H') - 40 && r.w === g.run('W'), 'across the foot of the menu', r);
-  ok(g.run(`(() => { const calls = []; const was = ctx.fillText; ctx.fillText = function (t) { calls.push(String(t)); return was.apply(this, arguments); };
-             try { renderMenu(); } finally { ctx.fillText = was; } return calls.some(t => /LIVE NOW/.test(t) && /THE PILOT  VS  TOPDOG/.test(t)); })()`),
-     'drawn with the menu, naming both');
-  g.run(`mouse.x = W / 2; mouse.y = liveStripRect().y + 10; handleClick();`);
-  ok(JSON.stringify(g.win.__opened) === JSON.stringify([g.run('PVP_ORIGIN') + '/play/?watch=' + M1, '_blank', 'noopener']),
-     'a click on it opens the fight in a tab of its own', g.win.__opened);
-  ok(g.run('state') === 'menu', 'and never starts a run');
-  g.win.__opened = null;
-  g.run(`mouse.x = W / 2; mouse.y = H / 2;`);
+  clickSign(g);
+  ok(theater(g) && g.run('Show.phase') === 'words' && g.run('state') === 'menu' && !g.win.__opened, 'a click on the sign: the theater, over the game, nothing opened elsewhere');
+  const el = showEl(g), $ = q => el.querySelector(q);
+  ok(!el.hidden && $('.card h2').textContent === 'ON AIR' && $('.vs').textContent === 'THE PILOT  VS  TOPDOG' && $('.x').textContent === 'Come and see.' && $('.tag b').textContent === 'LIVE',
+     'its words first, with both names', [$('.card h2').textContent, $('.vs').textContent]);
+  ok(press(el, 'keydown', { key: 'p' }) && g.run('state') === 'menu', 'keys pressed in it are its own, never the game\'s');
+  press($('.go'), 'click');
+  ok(g.run('Show.phase') === 'fight' && g.run('Show.f && Show.f.src') === g.run('PVP_ORIGIN') + '/play/?watch=' + M1, 'WATCH: the fight, PvP\'s watch page inside it', g.run('Show.f && Show.f.src'));
+  ok(!$('.cover').hidden, 'its own close over the watch page\'s, which would leave for PvP\'s lobby');
+  g.run('Show.frame()');
+  ok(g.run('Show.phase') === 'fight', 'on, while the fight is');
+  press(el, 'keydown', { key: 'Escape' });
+  ok(!theater(g) && el.hidden && !g.run('Show.f') && g.run('state') === 'menu', 'Escape: back to the game, the fight gone from the page');
+  g.run('handleKey("u")');
+  ok(theater(g) && g.run('Show.phase') === 'words', 'U at the menu watches too');
+  press($('.go'), 'click');
+  await answer(g, { live: null, every: 900 });
+  g.run('Show.frame()');
+  ok(g.run('Show.phase') === 'after' && $('.kick').textContent === 'IT IS OVER', 'the fight over: what is said after it, and the way on', $('.kick').textContent);
+  ok(/Sign in/.test($('.way').textContent), 'signed out, with no way up here: told to sign in', $('.way').textContent);
+  press($('.go'), 'click');
+  ok(!theater(g), 'and back to the game');
+  // the game stands still under it: the frame is the theater's while it is up
+  g.run('Live.on = { match: "' + M1 + '", since: Date.now(), t: "", x: "", names: ["A", "B"], len: 0, after: "" }; Show.open(Object.assign({ live: true }, Live.on))');
+  const was = g.run('uiTime');
+  g.run('pageDead = false; frame(performance.now() + 16); frame(performance.now() + 32); pageDead = true');
+  ok(g.run('uiTime') === was, 'the game stood still under it');
+  g.run('Show.close(); Live.on = null');
 }
 
-section('once per broadcast, per browser');
+section('in a run: never stopped');
 {
-  const g2 = boot(store(g));
-  g2.run(SETUP);
-  await answer(g2, ON(M1));
-  ok(g2.run('Live.on && Live.on.match') === M1 && !shown(g2), 'the same broadcast, the same browser, later: no card again, only the strip');
-  await answer(g2, ON(M2, ['THE PILOT', '']));
-  ok(shown(g2) && card(g2).querySelector('.vs').textContent === 'THE PILOT  VS  THE #1', 'another broadcast: the card again (and a name kept off it is THE #1)');
-  press(card(g2).querySelector('.go'), 'click');
-  ok(JSON.stringify(g2.win.__opened) === JSON.stringify([g2.run('PVP_ORIGIN') + '/play/?watch=' + M2, '_blank', 'noopener']) && !shown(g2),
-     'WATCH LIVE opens it in a tab of its own, and the card goes', g2.win.__opened);
-}
-
-section('in a run');
-{
-  // a run alone: paused, the card over it; KEEP PLAYING takes it up again
   const g3 = boot();
   g3.run(SETUP + ' resetGame(); state = "play";');
   await answer(g3, ON(M1));
-  ok(g3.run('state') === 'pause' && shown(g3), 'going on air mid-run: the run paused, and the card over it', g3.run('state'));
-  ok(card(g3).querySelector('.no').textContent === 'KEEP PLAYING', 'its second button takes the run up again');
-  for (let i = 0; i < 5; i++) frame(g3);
-  ok(shown(g3) && g3.run('state') === 'pause', 'and it stays until it is answered');
-  ok(press(card(g3), 'keydown', { key: 'p' }) && g3.run('state') === 'pause' && shown(g3), 'keys over it are its own (P does not unpause under it)');
-  press(card(g3).querySelector('.no'), 'click');
-  ok(!shown(g3) && g3.run('state') === 'play', 'KEEP PLAYING: the run goes on where it was', g3.run('state'));
-  for (let i = 0; i < 5; i++) frame(g3);
-  ok(!shown(g3) && g3.run('state') === 'play', 'and the card stays away');
-  g3.run('state = "menu"'); frame(g3);
-  ok(!shown(g3), 'seen: not again at the menu, only the strip');
-  // WATCH LIVE from a run: the fight in a tab of its own, the run left paused
-  const g4 = boot();
-  g4.run(SETUP + ' resetGame(); state = "play";');
-  await answer(g4, ON(M2));
-  press(card(g4).querySelector('.go'), 'click');
-  ok(JSON.stringify(g4.win.__opened) === JSON.stringify([g4.run('PVP_ORIGIN') + '/play/?watch=' + M2, '_blank', 'noopener']) && !shown(g4) && g4.run('state') === 'pause',
-     'WATCH LIVE mid-run: the fight in its own tab, and the run waits paused', g4.run('state'));
-  for (let i = 0; i < 5; i++) frame(g4);
-  ok(!shown(g4) && g4.run('state') === 'pause', 'and nothing comes back over it');
-  // off air while it's up: the card goes, the run stays paused for them to take up
-  const g6 = boot();
-  g6.run(SETUP + ' resetGame(); state = "play";');
-  await answer(g6, ON(M1));
-  await answer(g6, { live: null, every: 900 });
-  ok(!shown(g6) && g6.run('state') === 'pause' && !g6.run('Live.hold'), 'off air while it was up: the card goes; the run is still theirs, paused');
-  // a run in step with another machine can't stop for one of them: one line, and it goes on
+  ok(g3.run('state') === 'play' && !theater(g3) && !card(g3) && g3.run('!!Live.line'), 'going on air mid-run: one line, and the run goes on', g3.run('state'));
+  let threw = null;
+  try { for (let i = 0; i < 60; i++) g3.run('Live.tick(); update(1 / 60); render();'); } catch (e) { threw = e; }
+  ok(!threw && g3.run('state') === 'play', 'drawn over a second of the run, which goes on', String(threw));
+  g3.run('Live.line.t = uiTime - 7; render();');
+  ok(!g3.run('Live.line'), 'and gone after a few seconds');
+  ok(g3.run('Show.open({ live: true, match: "' + M1 + '", names: ["A", "B"] })') === false && !theater(g3), 'and the theater never opens over a run');
+  g3.run('state = "menu"'); landed(g3);
+  ok(drawn(g3, '/LIVE NOW/').length === 1 && !theater(g3), 'at the menu: the sign, and nothing more');
+  // the same in co-op
   const g5 = boot();
   g5.run(SETUP + ' resetGame(); state = "play"; LS.on = true;');
   await answer(g5, ON(M1));
-  ok(g5.run('state') === 'play' && !shown(g5) && g5.run('!!Live.line'), 'in co-op: one line, and no pause', g5.run('state'));
-  let threw = null;
-  try { for (let i = 0; i < 60; i++) g5.run('Live.tick(); render();'); } catch (e) { threw = e; }
-  ok(!threw && g5.run('state') === 'play', 'drawn over a second of the run, which goes on', String(threw));
-  g5.run('Live.line.t = uiTime - 7; render();');
-  ok(!g5.run('Live.line'), 'and gone after a few seconds');
-  g5.run('LS.on = false; state = "menu"'); frame(g5);
-  ok(shown(g5), 'the card waits for the menu');
+  ok(g5.run('state') === 'play' && g5.run('!!Live.line') && !theater(g5), 'in co-op: one line, no pause');
+}
+
+section('to come, and after: THE SIGN, and the record from its start');
+{
+  const g6 = boot();
+  g6.run(SETUP);
+  const at = Date.now() + 2 * 864e5 + 5 * 3600e3;
+  await answer(g6, { live: null, every: 900, soon: { at, t: 'HOW IT BEGAN', names: ['THE PILOT', 'TOPDOG'] } });
+  landed(g6);
+  const t = drawn(g6, '/SHOWN HERE/');
+  ok(t.length === 1 && /HOW IT BEGAN/.test(t[0]) && /THE PILOT VS TOPDOG/.test(t[0]) && /IN 2 DAYS 5 H|IN 2 DAYS 4 H/.test(t[0]), 'to come: who, and how long until it is shown here', t);
+  clickSign(g6);
+  ok(!theater(g6) && g6.run('state') === 'menu', 'a click on it: nothing yet, and no run started either');
+  ok(g6.run('signUntil(Date.now() + 20 * 60e3)') === 'IN 20 MIN' && g6.run('signUntil(Date.now() + 30e3)') === 'IN A MOMENT', 'the wait, said plainly');
+  // shown before: the record, from its start
+  const wasAt = Date.now() - 3600e3;
+  await answer(g6, { live: null, every: 900, shown: M2, was: { at: wasAt, t: 'HOW IT BEGAN', x: 'Before.', after: 'After.', names: ['THE PILOT', 'TOPDOG'], len: 40 } });
+  landed(g6);
+  const w = drawn(g6, '/HOW IT BEGAN/');
+  ok(w.length === 1 && /WATCH/.test(w[0]) && !/LIVE/.test(w[0]), 'after: its title, who, WATCH', w);
+  g6.run('handleKey("u")');
+  const el = showEl(g6), $ = q => el.querySelector(q);
+  ok(theater(g6) && g6.run('Show.o.live') === false && $('.kick').textContent === 'A FIGHT FROM THE RECORD' && $('.tag b').textContent === 'THE RECORD', 'the record: its words first', $('.kick').textContent);
+  g6.run('Show.t0 -= 10e3; Show.frame()');
+  ok(g6.run('Show.phase') === 'fight' && g6.run('Show.f.src').endsWith('?watch=' + M2), 'after a few seconds, the fight by itself');
+  g6.run('Show.frame()');
+  ok(g6.run('Show.phase') === 'fight', 'played from its start, for its length');
+  g6.run('Show.t0 -= (40 + SHOW_TAIL) * 1000; Show.frame()');
+  ok(g6.run('Show.phase') === 'after' && $('.x').textContent === 'After.' && $('.card h2').hidden, 'then what is said after it', $('.x').textContent);
+  g6.run('Show.close()');
+  // with the way up here: told where it leads
+  g6.run('UP_ROOMS.push({ name: "X" })');
+  g6.run('handleKey("u"); Show.fight(); Show.after()');
+  ok(/THE VOID/.test($('.way').textContent), 'with the way up here: told where it leads', $('.way').textContent);
+  g6.run('Show.close(); UP_ROOMS.length = 0');
+  // once per browser: the same, later, is one quiet line
+  const g7 = boot(store(g6));
+  g7.run(SETUP);
+  await answer(g7, { live: null, every: 900, shown: M2, was: { at: wasAt, t: 'HOW IT BEGAN', x: 'Before.', names: ['THE PILOT', 'TOPDOG'], len: 40 } });
+  drawn(g7, '/./');
+  g7.run('Live.sign.t0 = uiTime - 1');
+  const first = drawn(g7, '/HOW IT BEGAN/');
+  g7.run('Live.sign.t0 = uiTime - 4');
+  ok(g7.run('Live.sign.fresh') === false && first.length === 1 && drawn(g7, '/Before/').length === 0, 'the same browser, later: no coming down, one quiet line in a moment, and no more said', first);
 }
 
 section('off air');
 {
-  // a card still up when the fight ends comes down with it
-  const g4 = boot();
-  g4.run(SETUP);
-  await answer(g4, ON(M2));
-  ok(shown(g4), 'a card up');
-  await answer(g4, { live: null, every: 900 });
-  ok(!shown(g4) && g4.run('Live.on') === null, 'the fight over: the card comes down by itself');
   await answer(g, { live: null, every: 900 });
-  ok(g.run('Live.on') === null && !shown(g), 'nothing on: no card');
-  ok(g.run(`(() => { const calls = []; const was = ctx.fillText; ctx.fillText = function (t) { calls.push(String(t)); return was.apply(this, arguments); };
-             try { renderMenu(); } finally { ctx.fillText = was; } return !calls.some(t => /LIVE NOW/.test(t)); })()`), 'and no strip');
-  g.run(`mouse.x = W / 2; mouse.y = liveStripRect().y + 10; handleClick();`);
-  ok(g.run('state') === 'play' && !g.win.__opened, 'the foot of the menu is the menu again: a click there starts a run');
+  ok(g.run('Live.on') === null && g.run('Live.what()') === null && drawn(g, '/LIVE NOW|WATCH/').length === 0, 'nothing on, nothing shown: no sign');
+  clickSign(g);
+  ok(g.run('state') === 'play' && !theater(g), 'the sky over the logo is the menu again: a click there starts a run');
+  ok(!g.win.document.body.children.some(c => c.id === 'live'), 'and there never was a card over the menu');
 }
 
 section('not on PvP\'s page');

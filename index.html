@@ -1701,7 +1701,7 @@ addEventListener('keydown', e => {
   if (Parts.on) { e.preventDefault(); Parts.key(e); return; }   // THE PARTS: its keys are its own
   // the account panel is a form over the canvas: its keys are its own (ACCOUNTS)
   if (AcctUI.on) { if (e.key === 'Escape') AcctUI.close(); return; }
-  if (Live.up()) { if (e.key === 'Escape') Live.later(); return; }   // ON AIR's card has the menu, and its keys
+  if (Show.on) { Show.key(e); return; }                              // THE SHOWING's theater has the screen, and its keys
   if (Door.up()) return;                                             // THE DOOR's card has the menu: nothing gets past it
   if (state === 'name') { nameKey(e); return; }
   // ROOT'S RITE: the console takes every key, so WASD and dash never land
@@ -7816,12 +7816,12 @@ function rootBeginCmd() {
        have no way of knowing are there. */
     const spread = Math.min(Math.min(arena.x1 - arena.x0, arena.y1 - arena.y0) * 0.36,
                             Math.min(runView.w, runView.h) * 0.38);
-    const a = rnd(TAU), rr = rnd(spread, 120);
+    const a = simRnd(TAU), rr = simRnd(spread, 120);   // where a character stands is the fight's, so the run's own roll (two machines in step, and a run restored, place them the same)
     r.glyphs.push({
       ch: chars[i % chars.length], dead: false,
       x: clamp(r.e.x + Math.cos(a) * rr, arena.x0 + 60, arena.x1 - 60),
       y: clamp(r.e.y + Math.sin(a) * rr, arena.y0 + 60, arena.y1 - 60),
-      t: rnd(TAU), at
+      t: simRnd(TAU), at
     });
   }
   Audio_.tone(300, 0.12, 'square', 0.08, 120);
@@ -7874,7 +7874,7 @@ function rootUpdate(dt) {
   if (r.tauntT <= 0 && r.sayT <= 0) {
     r.tauntI = (r.tauntI + 1) % ROOT_TAUNTS.length;
     rootSay(ROOT_TAUNTS[r.tauntI], 3.0);
-    r.tauntT = rnd(11, 7);
+    r.tauntT = simRnd(11, 7);
   }
 
   // it drifts; it does not chase. it does not have to.
@@ -38414,6 +38414,7 @@ function gameOver(quiet) {
     upCall('ev', 'dead', quiet);
     lastStats = { score, wave, kills: P.kills, level: P.level, time: elapsed,
                   sector: stage.name, loop: loopNum, isRecord: false, up: true };
+    if (freeRun) { lastStats.score = 0; lastStats.freeplay = true; }   // a sandbox that went there is still a sandbox
     Codex.flush();
     if (!quiet) {
       explode(P.x, P.y, 180, 0, COL.player);
@@ -38634,6 +38635,7 @@ function handleKey(k) {
     if (k === 'b') { openRush('menu'); return; }
     if (k === 'm' && ostDoorUp()) { openOst(); return; }     // THE SOUNDTRACK
     if (k === 'a' && !PVP) { openAch('menu'); return; }      // ACHIEVEMENTS
+    if (k === 'u' && Live.watch()) return;                    // ON AIR: watch what THE SIGN is about
     if (k === 'f' && Save.profile.freeplay) { startFreeplay(); return; }
     if (k === 'c') {
       let n = selectedChar;
@@ -38928,7 +38930,7 @@ function handleClick() {
     if (labDoorUp() && inRect(mouse.x, mouse.y, menuLabRect())) { Account.toLab(); return; }   // an admin's LAB door
     if (inRect(mouse.x, mouse.y, menuOstRect()) && ostDoorUp()) { openOst(); return; }   // THE SOUNDTRACK
     if (!PVP && inRect(mouse.x, mouse.y, menuAchRect())) { openAch('menu'); return; }     // ACHIEVEMENTS
-    if (Live.on && inRect(mouse.x, mouse.y, liveStripRect())) { Live.watch(); return; }   // ON AIR: the strip watches
+    if (Live.what() && inRect(mouse.x, mouse.y, signRect())) { Live.watch(); return; }   // ON AIR: THE SIGN watches (one still to come, nothing yet)
     if (Board.linkRect && inRect(mouse.x, mouse.y, Board.linkRect)) {
       window.open('/leaderboard/', '_blank', 'noopener');
       return;
@@ -39310,6 +39312,7 @@ function frame(now) {
   if (Intro.on) { last = now; Intro.frame(dt); requestAnimationFrame(frame); return; }
   // THE ENDING: the movie has the screen, and the game stands still under it
   if (Ending.on) { last = now; Ending.frame(dt); requestAnimationFrame(frame); return; }
+  if (Show.on) { last = now; Show.frame(); requestAnimationFrame(frame); return; }   // THE SHOWING: the game stands still under its theater
   // THE PARTS: the winner's place has the screen, as the movie does, and is played
   if (Parts.on) { last = now; Parts.frame(dt); requestAnimationFrame(frame); return; }
   fpsSample(dt);
@@ -42839,7 +42842,7 @@ const OpoLock = {
     state = 'opolock';
     opoFx('lock');
     try { if (AcctUI.on) AcctUI.close(); } catch (e) {}
-    try { Live.hide(); } catch (e) {}
+    try { Show.close(); } catch (e) {}
     try { Ads.close(); } catch (e) {}
     this.mount();
   },
@@ -58101,6 +58104,7 @@ function render() {
   drawMortars();
   aboveDrawFloor();           // a spear's mark, on the floor (FROM ABOVE)
   upDrawRoom('floor');        // THE WAY UP: what is on a room's floor
+  upDrawSign('floor');        // and, in a sector, what a module watching the run has left on it
   drawUnwritten();
   drawAmalgam();
   drawCages();
@@ -76042,7 +76046,7 @@ function drawHUD() {
   HUD_AT.wave = { x: W - pad - hw1, y: pad + 42, w: hw1, h: 36 };
   ctx.restore();
 
-  const credStr = '◈ ' + credits;
+  const credStr = '◈ ' + Math.floor(credits);   // whole, whatever a room up the light has done to them (THE WAY UP)
   fitFont(credStr, rMax, '800', 15, "'JetBrains Mono', ui-monospace, monospace", 10);
   ctx.fillStyle = '#fbbf24';
   ctx.fillText(credStr, W - pad, pad + 92);
@@ -76495,7 +76499,7 @@ function drawShop() {
      so it gets the mono face and sits directly under the title. */
   ctx.font = "800 20px 'JetBrains Mono', ui-monospace, monospace";
   ctx.fillStyle = '#fbbf24';
-  ctx.fillText('◈ ' + credits, W / 2, rs[0].y - 18 - hdr);
+  ctx.fillText('◈ ' + Math.floor(credits), W / 2, rs[0].y - 18 - hdr);
 
   for (let i = 0; i < shopItems.length; i++) {
     const it = shopItems[i], r = rs[i];
@@ -77016,7 +77020,8 @@ function drawDead() {
     ctx.restore();
   });
   else row(26, y => {
-    const t = 'BEST  ' + Save.profile.best.toLocaleString();
+    // a run that has been up says so, where its best would be: it is recorded nowhere (THE WAY UP)
+    const t = s.up && !s.freeplay ? 'THIS RUN WENT UP  ·  IT IS RECORDED NOWHERE' : 'BEST  ' + Save.profile.best.toLocaleString();
     fitFont(t, wide, '600', 12, "'JetBrains Mono', ui-monospace, monospace", 8);
     ctx.fillStyle = '#475569';
     ctx.fillText(t, CENTER, y + 12);
@@ -77545,7 +77550,7 @@ function renderMenu() {
   drawMenuAch();        // ACHIEVEMENTS: and the next goal
   drawMenuCodex();      // and the codex, which had only a key
   drawMenuLab();        // an admin's: the way into the lab
-  drawMenuLive();       // a challenge on air: the strip across the foot (ON AIR)
+  drawSign();           // a fight to come, on air, or shown: THE SIGN, in the sky over the logo (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
   if (arrival) { outsiderArrivalTick(lastDT); drawOutsiderArrival(); }
@@ -77782,7 +77787,7 @@ function freeAwayReady() {
    true when it went. */
 function freeAwayGo(i) {
   const r = UP_AWAY[i];
-  if (!r || state !== 'play' || !freeAwayReady()) { banner('NOT NOW', '#94a3b8', 2.0); return false; }
+  if (!r || state !== 'play' || !upDevHere() || !freeAwayReady()) { banner('NOT NOW', '#94a3b8', 2.0); return false; }
   if (upAt >= 0) { upCall('ev', 'down'); upAt = -1; upBossT = -1; upWorld = {}; }
   upLiftT = -1; bossAlive = false; hitStop = 0;
   hackKeepArmy(false); ebullets.length = 0;
@@ -77792,6 +77797,7 @@ function freeAwayGo(i) {
 }
 // the rows the console shows now: its own, or the page of rooms apart (a room a row, by its boss's name; the last goes back)
 function freeRows() {
+  if (!upDevHere()) return FREE_ROWS.filter(r => !r.away);   // the rooms apart by name are a dev account's: nobody else is shown the row
   if (freeSub !== 'away' || !UP_AWAY.length) return FREE_ROWS;
   const rows = UP_AWAY.map((r, i) => ({
     n: (i + 1) + '   ' + ((BOSSES[r.boss] && BOSSES[r.boss].name) || String(r.name || '').toUpperCase()),
@@ -77800,7 +77806,7 @@ function freeRows() {
   rows.push({ n: '‹  BACK', f: freeBack });
   return rows;
 }
-function freeBack() { freeSub = ''; freeSel = Math.max(0, FREE_ROWS.findIndex(r => r.away)); }
+function freeBack() { freeSub = ''; freeSel = Math.max(0, freeRows().findIndex(r => r.away)); }
 
 function freeRects() {
   const w = 232, h = 22, gap = 3;
@@ -81711,7 +81717,7 @@ function deadRecap(s) {
    copy is being played, so a friend at the same school gets the address that
    works there. */
 const shareUrl = () => (/^https?:$/.test(location.protocol) ? location.origin + '/' : 'https://voidrunner.online/');
-const shareable = s => !!s && !s.freeplay && !s.outside;
+const shareable = s => !!s && !s.freeplay && !s.outside && !s.up;   // nor a run that has been up: it counts for nothing (THE WAY UP)
 function shareText(s) {
   const r = deadRecap(s), n = v => (v || 0).toLocaleString();
   const head = s.chal && s.chal.daily
@@ -82120,7 +82126,7 @@ const vsDaily = () => !!(QOL.vs && QOL.vs.d && QOL.vs.d === Daily.day);
    challenges are scored as other games). */
 function vsCheck(s) {
   const v = QOL.vs;
-  if (!v || v.beat || !s || s.freeplay || s.outside) return false;
+  if (!v || v.beat || !s || s.freeplay || s.outside || s.up) return false;
   const fair = vsDaily() ? !!(s.chal && s.chal.daily) : !s.chal;
   if (!fair || s.score <= v.s) return false;
   v.beat = s.score; vsKeep();
@@ -82731,6 +82737,23 @@ function drawPauseAssist() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 17, v: '2.0', date: '17 NOV 2026', lines: [
+    ['new', 'THE ONES ABOVE, an early version. The sectors are no longer all there is: there is a way up.'],
+    ['new', 'The way there: put THE VOID\'s boss down. In every sector after that, a light stands on the '
+          + 'floor. Stand in it for a moment and you are carried up, into five rooms that are on no map: '
+          + 'each has waves of its own, a boss of its own, and a shop. After the last you are let back down.'],
+    ['new', 'It is kept for accounts. Sign in (ACCOUNT, on the menu) and it comes with you, with an '
+          + 'opening of its own. In co-op, both of you sign in.'],
+    ['new', 'Not everything up there waits to be climbed to. Some of it comes down for a certain kind of '
+          + 'pilot: at a sector\'s dusk, the wave before its boss, it may leave something on the floor for you. '
+          + 'Stand in it to answer, or leave it. It is not left twice.'],
+    ['note', 'And deep in a run, rarely (less rarely the deeper you go), something keeps a boss\'s '
+           + 'appointment that was never meant for it.'],
+    ['new', 'How it began is on the menu: the feather in the sky over the logo, or U. It plays here, in '
+          + 'the game, from the start.'],
+    ['note', 'A run that has been up is recorded nowhere: no board, no codex, no tale. This is early, '
+           + 'and it will change.']
+  ] },
   { id: 16, v: '1.6.5', date: '15 OCT 2026', lines: [
     ['new', 'THE UNWRITTEN\'s song has its cover in THE SOUNDTRACK, beside the rest.']
   ] },
@@ -89188,74 +89211,63 @@ function drawMenuLab() {
 }
 
 /* ===========================================================================
-   ON AIR (live spectating, step 3): a PvP challenge being fought, put in
-   front of everybody, signed in or not. The game asks its Worker's public
-   GET /api/live (src/live.js) when it starts and then as often as the
-   answer says: every minute while a challenge is on or near its date, every
-   quarter of an hour otherwise. A hidden tab asks nothing (the frame is
-   what asks). While one is on air:
+   ON AIR, AND THE SHOWING: a challenge's fight, put in front of everybody
+   without taking anybody anywhere
 
-     the menu    a card over the whole of it: the announcement, both names,
-                 WATCH LIVE and NOT NOW. Once per broadcast per browser
-                 (LIVE_SEEN); put away, a LIVE strip pulses across the foot
-                 of the menu until the fight ends, and a click on it watches
-     a run       played alone: paused, and the same card over it (WATCH LIVE,
-                 KEEP PLAYING, which takes the run up again where it was);
-                 once per broadcast, as at the menu. A run in step with
-                 another machine can't stop for one of them: one line low on
-                 the screen when it goes on, and no pause
+   The game asks its Worker's public GET /api/live (src/live.js) when it
+   starts, and then as often as the answer says: every minute while a fight
+   is on or near, every quarter of an hour otherwise. A hidden tab asks
+   nothing (the frame is what asks).
 
-   WATCH opens PvP's watch page (/play/?watch=<match>, watch.js there) in a
-   tab of its own, so this game stays where it is. Not on PvP's page, which
-   has its own card (pvp.js), nor in BETA or a file.
+   What it hears of a fight is shown in one place: THE SIGN, in the menu's
+   sky over the logo. A feather of light that
+     soon   rests there: who fights, and how long until it is shown here
+            (`soon`: a showing a week away at most)
+     live   has a column of light pouring down behind it: LIVE, who, WATCH
+     was    hangs there after, for a while: its words' title, who, WATCH
+            (`was`: an encore shown, pvp/src/challenge.js, AN ENCORE)
+   The first time this browser sees each, it comes down out of the top of the
+   screen and says a little more (its words) for a while; after that it is one
+   quiet line. A click on it, or U at the menu, watches. Nothing ever opens by
+   itself, stops a run, or takes the page anywhere: a run that is going when
+   one goes on air is told so in one line (WATCH IT FROM THE MENU).
+
+   WATCHING is a theater over the game (Show): the fight's words first, on a
+   card of their own (WATCH, or a few seconds), then the fight, played by
+   PvP's watch page inside it (/play/?watch=<match>, which goes on by itself
+   to the page of the build it was fought on: scripts/freeze-play.mjs), then
+   what is said after it (`after`) and the way on from here. A fight on air is
+   joined where it has got to; one shown before is played from its start. The
+   game is hushed and stood still under it, and nothing pressed in it reaches
+   the game. Escape, or BACK TO THE GAME, leaves at any time.
+
+   Not on PvP's page, which has its own card (pvp.js), nor in BETA or a file.
    ========================================================================= */
 const LIVE_URL = '/api/live';
-const LIVE_SEEN = 'voidrunner_live_seen';       // the broadcasts whose card this browser has been shown
-const LIVE_LINE = 6;                            // seconds the run's line stays
-const LIVE_CSS = `
-#live{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;padding:16px;
-  background:rgba(4,6,12,.86);overflow:auto;cursor:auto;font-family:Barlow,'Segoe UI',system-ui,sans-serif;color:#cbd5e1}
-#live[hidden]{display:none}
-#live .card{width:100%;max-width:440px;margin:auto;padding:24px 22px 18px;text-align:center;background:rgba(8,13,22,.97);
-  border:1px solid rgba(248,113,113,.55);border-radius:12px;box-shadow:0 0 54px rgba(248,113,113,.14)}
-#live .tag{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;background:rgba(127,29,29,.88);
-  color:#fecaca;font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.18em}
-#live .tag i{width:8px;height:8px;border-radius:50%;background:#f87171;box-shadow:0 0 8px #f87171;animation:livePulse 1.2s ease-in-out infinite}
-@keyframes livePulse{50%{opacity:.25}}
-#live h2{margin-top:14px;font:800 19px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.1em;color:#fecaca}
-#live .vs{margin-top:8px;font:700 15px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.12em;color:#e2e8f0;overflow-wrap:anywhere}
-#live .x{margin-top:10px;font-size:14px;line-height:1.5;color:#94a3b8;white-space:pre-line}
-#live .x:empty{display:none}
-#live .go{display:block;width:100%;margin-top:18px;padding:12px;border-radius:7px;cursor:pointer;background:rgba(248,113,113,.16);
-  border:1px solid rgba(248,113,113,.8);color:#fecaca;font:700 13px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.16em}
-#live .go:hover{background:rgba(248,113,113,.28)}
-#live .no{margin-top:8px;padding:8px;background:none;border:0;cursor:pointer;color:#64748b;
-  font:600 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
-#live .no:hover{color:#94a3b8}`;
+const LIVE_SEEN = 'voidrunner_sign_seen';      // what THE SIGN has come down for in this browser (live:<match>, was:<match>:<at>, soon:<at>)
+const LIVE_LINE = 6;                           // seconds the run's line stays
+const SIGN_FALL = 2.6;                         // seconds the feather takes to come down, the first time
+const SIGN_SAY = 14;                           // and how long it says more then
+const SIGN_GOLD = '#fde68a';
+// the old ways a fight was put in front of everybody kept these; nothing reads them now
+try { for (const k of ['voidrunner_live_seen', 'voidrunner_showing_seen']) localStorage.removeItem(k); } catch (e) { /* nothing kept */ }
 
 const Live = {
-  on: null,                    // { match, since, t, x, names } while one is on air
+  on: null,                    // { match, since, t, x, names, len?, after? } while one is on air
+  soon: null,                  // { at, t, names }: a showing to come
+  was: null,                   // { match, at, t, x, names, len, after? }: a showing over, there to watch
   above: false,                // whether runs are hunted now: a run takes it when it starts (FROM ABOVE)
   next: 0,                     // when to ask again (performance.now, ms)
   busy: false,
-  el: null,                    // the menu's card
   line: null,                  // the run's line while it is up: { t }, the uiTime it was first drawn (null until it is)
-  hold: false,                 // a run paused for the card (KEEP PLAYING takes it up again)
+  sign: null,                  // what THE SIGN shows now: { key, kind, t0, fresh }
 
   off: () => !!PVP || BETA || location.protocol === 'file:',
 
-  // once a frame: asked when due, and the card put up at the menu when it should be
+  // once a frame: asked when due
   tick() {
     if (Live.off()) return;
-    const now = performance.now();
-    if (!Live.busy && now >= Live.next) Live.ask();
-    if (Live.on && state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Parts.on && !Live.seen(Live.on.match)) Live.show();
-    // a run alone when it went on: held paused under the card until it's answered
-    if (Live.hold) {
-      if (!Live.on || (state !== 'play' && state !== 'pause')) Live.hold = false;
-      else if (!Live.up()) { if (state === 'play') ui('pause'); if (state === 'pause') Live.show(); }
-    }
-    if (Live.el && !Live.el.hidden && (!Live.on || (state !== 'menu' && !(Live.hold && state === 'pause')))) Live.hide();
+    if (!Live.busy && performance.now() >= Live.next) Live.ask();
   },
 
   async ask() {
@@ -89272,100 +89284,332 @@ const Live = {
     Live.above = d.above === true;
     Door.heard(d.door, d.mended);                                  // a challenge lost: where its players go (THE DOOR)
     Ending.heard(d.burn, 'lost') || Ending.heard(d.fell, 'won');   // a challenge decided: its movie (THE ENDING)
-    const on = d.live && typeof d.live.match === 'string' && /^[0-9a-f]{32}$/.test(d.live.match) ? d.live : null;
+    const ID = /^[0-9a-f]{32}$/;
+    const str = (v, n) => String(v || '').slice(0, n);
+    const names = v => [0, 1].map(k => str(Array.isArray(v) && v[k], 24));
+    const words = o => ({ t: str(o.t, 60), x: str(o.x, 4000), names: names(o.names),
+                          len: Number.isFinite(o.len) && o.len > 0 ? +o.len : 0, after: str(o.after, 4000) });
+    const on = d.live && typeof d.live.match === 'string' && ID.test(d.live.match) ? d.live : null;
     const was = Live.on;
-    Live.on = on ? { match: on.match, since: +on.since || 0, t: String(on.t || ''), x: String(on.x || ''),
-                     names: [0, 1].map(k => String((Array.isArray(on.names) && on.names[k]) || '')) } : null;
-    // it has just gone on: a run played alone stops for the card; one in step with another machine hears of it
-    // in one line, and goes on
-    if (Live.on && (!was || was.match !== Live.on.match) && state !== 'menu') {
-      if ((state === 'play' || state === 'pause') && !LS.on && !Live.seen(Live.on.match)) Live.hold = true;
-      else Live.line = { t: null };
-    }
+    Live.on = on ? Object.assign({ match: on.match, since: +on.since || 0 }, words(on)) : null;
+    Live.soon = d.soon && Number.isFinite(d.soon.at) ? { at: +d.soon.at, t: str(d.soon.t, 60), names: names(d.soon.names) } : null;
+    Live.was = typeof d.shown === 'string' && ID.test(d.shown) && d.was && typeof d.was === 'object'
+      ? Object.assign({ match: d.shown, at: +d.was.at || 0 }, words(d.was)) : null;
+    // it has just gone on, and a run is going: one line, and the run goes on
+    if (Live.on && (!was || was.match !== Live.on.match) && state !== 'menu' && state !== 'name') Live.line = { t: null };
   },
 
-  // a broadcast's card shown in this browser already? (and noted when it is)
-  seen(match) {
-    try { return (localStorage.getItem(LIVE_SEEN) || '').split(',').includes(match); } catch (e) { return false; }
+  // what this browser has seen THE SIGN come down for
+  seen(key) {
+    try { return (localStorage.getItem(LIVE_SEEN) || '').split(',').includes(key); } catch (e) { return false; }
   },
-  saw(match) {
+  saw(key) {
     try {
-      const had = (localStorage.getItem(LIVE_SEEN) || '').split(',').filter(Boolean).filter(m => m !== match);
-      localStorage.setItem(LIVE_SEEN, had.slice(-9).concat(match).join(','));
-    } catch (e) {}
+      const had = (localStorage.getItem(LIVE_SEEN) || '').split(',').filter(Boolean);
+      if (!had.includes(key)) localStorage.setItem(LIVE_SEEN, had.concat(key).slice(-20).join(','));
+    } catch (e) { /* no storage: it comes down each load */ }
   },
+  vs: o => (o.names[0] || '???') + '  VS  ' + (o.names[1] || 'THE #1'),
 
-  vs: () => (Live.on.names[0] || '???') + '  VS  ' + (Live.on.names[1] || 'THE #1'),
-
-  build() {
-    const st = document.createElement('style');
-    st.textContent = LIVE_CSS;
-    document.head.appendChild(st);
-    const el = document.createElement('div');
-    el.id = 'live'; el.hidden = true;
-    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
-    el.innerHTML = '<div class="card"><p class="tag"><i></i>LIVE NOW</p><h2></h2><p class="vs"></p><p class="x"></p>' +
-                   '<button type="button" class="go">WATCH LIVE  ↗</button><button type="button" class="no">NOT NOW</button></div>';
-    // pressed here is the card's, never the game's
-    for (const t of ['keydown', 'keyup', 'keypress']) el.addEventListener(t, e => {
-      e.stopPropagation();
-      if (t === 'keydown' && e.key === 'Escape') { e.preventDefault(); Live.later(); }
-    });
-    el.addEventListener('mousedown', e => e.stopPropagation());
-    el.querySelector('.go').addEventListener('click', () => Live.watch());
-    el.querySelector('.no').addEventListener('click', () => Live.later());
-    document.body.appendChild(el);
-    Live.el = el;
+  // what THE SIGN is about now, if anything: a fight on air before one shown, before one to come
+  what() {
+    if (Live.off()) return null;
+    if (Live.on) return { kind: 'live', key: 'live:' + Live.on.match, o: Live.on };
+    if (Live.was) return { kind: 'was', key: 'was:' + Live.was.match + ':' + Live.was.at, o: Live.was };
+    if (Live.soon) return { kind: 'soon', key: 'soon:' + Live.soon.at, o: Live.soon };
+    return null;
   },
-  show() {
-    if (!Live.el) Live.build();
-    Live.el.querySelector('h2').textContent = Live.on.t || 'A CHALLENGE, LIVE';
-    Live.el.querySelector('.vs').textContent = Live.vs();
-    Live.el.querySelector('.x').textContent = Live.on.x;
-    Live.el.querySelector('.no').textContent = Live.hold ? 'KEEP PLAYING' : 'NOT NOW';
-    Live.el.hidden = false;
-    if (!isTouch) Live.el.querySelector('.go').focus();
-    Live.saw(Live.on.match);
-    Audio_.select && Audio_.select();
-  },
-  hide() { if (Live.el) Live.el.hidden = true; },
-  up: () => !!(Live.el && !Live.el.hidden),
-  // NOT NOW; mid-run, KEEP PLAYING: the run taken up again where it was
-  later() { Live.hide(); if (Live.hold) { Live.hold = false; if (state === 'pause') ui('resume'); } },
-
-  // the fight, in a tab of its own (PvP's watch page): this game stays where it is
+  // WATCH: the theater, if there is something to watch. Whether it opened
   watch() {
-    if (!Live.on) return;
-    window.open(PVP_ORIGIN + '/play/?watch=' + Live.on.match, '_blank', 'noopener');
-    Live.hide(); Live.hold = false;   // (a run stays paused for whenever they come back to it)
+    const w = Live.what();
+    if (!w || w.kind === 'soon') return false;
+    return Show.open(Object.assign({ live: w.kind === 'live' }, w.o));
   }
 };
 
-/* The menu's LIVE strip: across the foot of it, pulsing, while one is on air
-   and its card has been put away. */
-function liveStripRect() { return { x: 0, y: H - 34, w: W, h: 26 }; }
-function drawMenuLive() {
-  if (!Live.on || Live.up()) return;
-  const r = liveStripRect(), hot = !AcctUI.on && inRect(mouse.x, mouse.y, r), pulse = 0.5 + 0.5 * Math.sin(uiTime * 4);
+/* ------------------------------- THE SIGN -------------------------------- */
+// where it is: over the logo, in the middle of what the menu's buttons leave free
+function signAt() {
+  const free = W >= 760 ? 0 : 210;            // narrow: right of the buttons down the left
+  const cx = (free + W) / 2, w = Math.min(560, W - free - 24);
+  return { cx, cy: 50, rect: { x: cx - w / 2, y: 8, w, h: 108 }, w };
+}
+const signRect = () => signAt().rect;
+// how long until it, said plainly
+function signUntil(at) {
+  const s = Math.max(0, (at - Date.now()) / 1000);
+  if (s < 90) return 'IN A MOMENT';
+  const m = Math.round(s / 60), h = Math.floor(s / 3600), d = Math.floor(s / 86400);
+  if (s < 3600) return 'IN ' + m + ' MIN';
+  if (s < 86400) return 'IN ' + h + ' H ' + Math.round((s - h * 3600) / 60) + ' MIN';
+  return 'IN ' + d + (d === 1 ? ' DAY ' : ' DAYS ') + Math.floor((s - d * 86400) / 3600) + ' H';
+}
+// a feather of light: a shaft, a vane either side, curved, and a glow round it
+function drawSignFeather(x, y, s, a, sway) {
   ctx.save();
-  ctx.fillStyle = hot ? 'rgba(127,29,29,0.92)' : 'rgba(69,10,10,' + (0.72 + 0.12 * pulse).toFixed(3) + ')';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.fillStyle = rgba('#f87171', 0.35 + 0.45 * pulse);
-  ctx.fillRect(r.x, r.y, r.w, 1.5);
-  ctx.fillRect(r.x, r.y + r.h - 1.5, r.w, 1.5);
-  const msg = 'LIVE NOW   ·   ' + Live.vs() + (Live.on.t ? '   ·   ' + Live.on.t : '') + '   ·   WATCH  ↗';
-  ctx.textAlign = 'center';
-  ctx.letterSpacing = '0.14em';
-  fitFont(msg, W - 80, '700', 11, "'Chakra Petch', Barlow, system-ui, sans-serif", 7);
-  const tw = ctx.measureText(msg).width;
-  ctx.fillStyle = '#fecaca';
-  ctx.fillText(msg, W / 2 + 7, r.y + r.h / 2 + 4);
-  ctx.beginPath();
-  ctx.arc(W / 2 - tw / 2 - 6, r.y + r.h / 2, 3.4, 0, TAU);
-  ctx.fillStyle = rgba('#f87171', 0.4 + 0.6 * pulse);
-  ctx.fill();
+  ctx.translate(x, y); ctx.rotate(-0.5 + sway); ctx.scale(s, s);
+  ctx.globalAlpha = a;
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 44);
+  g.addColorStop(0, rgba(SIGN_GOLD, 0.5)); g.addColorStop(1, rgba(SIGN_GOLD, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, 44, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  const vane = side => {
+    ctx.beginPath();
+    ctx.moveTo(0, 22);
+    ctx.bezierCurveTo(side * 11, 10, side * 11, -12, 0, -26);
+    ctx.bezierCurveTo(side * 4, -10, side * 3, 8, 0, 22);
+    ctx.closePath();
+  };
+  ctx.fillStyle = rgba('#fff7d6', 0.92);
+  vane(1); ctx.fill(); vane(-1); ctx.fill();
+  ctx.strokeStyle = rgba('#b8860b', 0.75); ctx.lineWidth = 0.8;
+  for (let i = -3; i <= 3; i++) {             // its barbs
+    const yy = i * 6;
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(7, yy - 5); ctx.moveTo(0, yy); ctx.lineTo(-7, yy - 5); ctx.stroke();
+  }
+  ctx.strokeStyle = rgba('#fff3c4', 1); ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(0, 30); ctx.lineTo(0, -26); ctx.stroke();
   ctx.restore();
 }
+function drawSign() {
+  if (state !== 'menu' || Show.on) return;
+  const w = Live.what();
+  if (!w) { Live.sign = null; return; }
+  let s = Live.sign;
+  if (!s || s.key !== w.key) {
+    s = Live.sign = { key: w.key, kind: w.kind, t0: uiTime, fresh: !Live.seen(w.key) };
+    if (s.fresh) { Live.saw(w.key); try { Audio_.tone(587, 1.6, 'sine', 0.05, 880); } catch (e) {} }
+  }
+  const L = signAt(), age = uiTime - s.t0, o = w.o;
+  const fall = s.fresh ? clamp(age / SIGN_FALL, 0, 1) : 1, ease = 1 - Math.pow(1 - fall, 3);
+  const fy = L.cy - (1 - ease) * (L.cy + 60), sway = Math.sin(uiTime * 0.9) * 0.08 + (1 - ease) * Math.sin(age * 5) * 0.4;
+  const hot = w.kind !== 'soon' && !AcctUI.on && inRect(mouse.x, mouse.y, L.rect);
+  const live = w.kind === 'live', pulse = 0.5 + 0.5 * Math.sin(uiTime * 3);
+  ctx.save();
+  // on air: light pouring down out of the top of the screen, behind it, to the logo
+  if (live) {
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+    g.addColorStop(0, rgba(SIGN_GOLD, 0.16 + 0.05 * pulse)); g.addColorStop(1, rgba(SIGN_GOLD, 0));
+    ctx.fillStyle = g;
+    for (const ww of [120, 56, 18]) ctx.fillRect(L.cx - ww / 2, 0, ww, H * 0.5);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  drawSignFeather(L.cx, fy, hot ? 1.1 : 1, 0.55 + 0.45 * ease, sway);
+  // its line, once it has come down
+  const a = clamp((age - (s.fresh ? SIGN_FALL - 0.6 : 0)) / 0.8, 0, 1);
+  if (a > 0) {
+    const vs = Live.vs(o).replace('  VS  ', ' VS ');
+    const msg = live ? 'LIVE NOW  ·  ' + vs + '  ·  WATCH  [U]'
+              : w.kind === 'was' ? (o.t || 'THE RECORD') + '  ·  ' + vs + '  ·  WATCH  [U]'
+              : (o.t ? o.t + '  ·  ' : '') + vs + '  ·  SHOWN HERE ' + signUntil(o.at);
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '0.14em';
+    fitFont(msg, L.w, '700', 11, "'Chakra Petch', Barlow, system-ui, sans-serif", 7);
+    ctx.fillStyle = live ? (hot ? '#fff1f2' : rgba('#fecaca', 0.75 + 0.25 * pulse)) : hot ? '#fffbeb' : rgba(SIGN_GOLD, 0.82);
+    ctx.fillText(msg, L.cx, L.cy + 44);
+    if (live) {                                // its dot
+      const tw = ctx.measureText(msg).width;
+      ctx.fillStyle = rgba('#f87171', 0.45 + 0.55 * pulse);
+      ctx.beginPath(); ctx.arc(L.cx - tw / 2 - 8, L.cy + 40, 3.2, 0, TAU); ctx.fill();
+    }
+    ctx.letterSpacing = '0px';
+    // the first time, a little more: its words, for a while
+    const say = (live || w.kind === 'was') && s.fresh && o.x ? clamp(Math.min((age - SIGN_FALL) / 0.8, (SIGN_FALL + SIGN_SAY - age) / 1.2), 0, 1) : 0;
+    if (say > 0) {
+      ctx.globalAlpha = say * 0.9;
+      ctx.font = "italic 500 14px 'Cormorant Garamond', Georgia, serif";
+      ctx.fillStyle = '#f4ecd6';
+      const lines = wrapLines(o.x.replace(/\s+/g, ' '), L.w).slice(0, 3);
+      lines.forEach((ln, i) => ctx.fillText(ln, L.cx, L.cy + 64 + i * 17));
+    }
+  }
+  ctx.restore();
+}
+
+/* ------------------------------ THE THEATER ------------------------------ */
+const SHOW_WORDS = 9;          // seconds its words are up before the fight, unless WATCH
+const SHOW_TAIL = 14;          // seconds after a fight's length before what is said after it (its loading, the watch page's few seconds behind, its result)
+const SHOW_CSS = `
+#show{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px 16px;
+  background:radial-gradient(ellipse at 50% 0%,rgba(253,230,138,.09),rgba(253,230,138,0) 60%),#020308;cursor:auto;font-family:Barlow,'Segoe UI',system-ui,sans-serif;color:#cbd5e1}
+#show[hidden]{display:none}
+#show .top{display:flex;align-items:center;gap:12px;width:var(--fw);max-width:100%}
+#show .tag{flex:none;display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:6px;font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.18em;
+  background:rgba(120,90,20,.5);color:#fde68a}
+#show .tag.live{background:rgba(127,29,29,.88);color:#fecaca}
+#show .tag i{width:8px;height:8px;border-radius:50%;background:#fde68a;display:none}
+#show .tag.live i{display:block;background:#f87171;box-shadow:0 0 8px #f87171;animation:showPulse 1.2s ease-in-out infinite}
+@keyframes showPulse{50%{opacity:.25}}
+#show .who{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:700 13px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em;color:#e2e8f0}
+#show .back{flex:none;padding:7px 12px;border-radius:7px;cursor:pointer;background:rgba(8,13,22,.85);border:1px solid rgba(148,163,184,.4);color:#cbd5e1;
+  font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
+#show .back:hover{border-color:#fde68a;color:#fde68a}
+#show .frame{position:relative;width:var(--fw);max-width:100%;aspect-ratio:16/9;background:#000;border:1px solid rgba(253,230,138,.3);border-radius:6px;
+  overflow:hidden;box-shadow:0 0 70px rgba(253,230,138,.07)}
+#show iframe{position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 1.2s}
+#show iframe.on{opacity:1}
+#show iframe.dim{opacity:.16}
+#show .cover{position:absolute;top:8px;right:8px;width:42px;height:42px;border-radius:8px;background:rgba(2,3,8,.92);border:1px solid rgba(148,163,184,.35);
+  cursor:pointer;color:#cbd5e1;font:700 16px Barlow,sans-serif}
+#show .cover:hover{border-color:#fde68a;color:#fde68a}
+#show .rec{position:absolute;top:13px;left:8px;width:76px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#0b0f18;
+  border:1px solid rgba(253,230,138,.35);color:#fde68a;font:700 9px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.12em}
+#show .rec[hidden]{display:none}
+#show .card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6% 9%;
+  transition:opacity .9s;background:radial-gradient(ellipse at 50% 40%,rgba(30,22,6,.55),rgba(0,0,0,.2) 70%)}
+#show .card[hidden]{display:none}
+#show .kick{font:700 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.3em;color:rgba(253,230,138,.75)}
+#show h2{margin-top:10px;font:700 clamp(20px,3.4vw,38px) 'Cinzel','Cormorant Garamond',Georgia,serif;letter-spacing:.12em;color:#fff7d6}
+#show .vs{margin-top:8px;font:700 clamp(11px,1.3vw,14px) 'Chakra Petch',Barlow,sans-serif;letter-spacing:.2em;color:#e2e8f0}
+#show .x{margin-top:16px;max-width:620px;font:italic 500 clamp(14px,1.7vw,19px)/1.55 'Cormorant Garamond',Georgia,serif;color:#f4ecd6;white-space:pre-line}
+#show .x:empty{display:none}
+#show .way{margin-top:14px;max-width:560px;font-size:13px;line-height:1.5;color:#94a3b8}
+#show .way:empty{display:none}
+#show .go{margin-top:22px;padding:11px 26px;border-radius:7px;cursor:pointer;background:rgba(253,230,138,.12);border:1px solid rgba(253,230,138,.7);color:#fde68a;
+  font:700 13px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.18em}
+#show .go:hover{background:rgba(253,230,138,.22)}
+#show .bar{position:absolute;left:0;bottom:0;height:2px;width:0;background:rgba(253,230,138,.6)}
+#show .foot{display:flex;justify-content:flex-end;width:var(--fw);max-width:100%;min-height:26px}
+#show .skip{padding:5px 10px;background:none;border:0;cursor:pointer;color:#64748b;font:600 11px 'Chakra Petch',Barlow,sans-serif;letter-spacing:.14em}
+#show .skip:hover{color:#cbd5e1}
+#show .skip[hidden]{display:none}`;
+
+const Show = {
+  on: false, el: null, o: null,
+  phase: '',                   // words, fight, after
+  t0: 0,                       // when this phase began (performance.now)
+  gain: null,
+  // the theater over the game, for o: { live, match, t, x, names, len, after, since? }. Whether it opened
+  open(o) {
+    if (Live.off() || Show.on || !o || !/^[0-9a-f]{32}$/.test(o.match || '') || state !== 'menu') return false;
+    if (!Show.el) Show.build();
+    Show.o = o; Show.on = true;
+    const el = Show.el, $ = q => el.querySelector(q);
+    $('.tag').className = 'tag' + (o.live ? ' live' : '');
+    $('.tag b').textContent = o.live ? 'LIVE' : 'THE RECORD';
+    $('.who').textContent = Live.vs(o);
+    const A = Audio_;
+    if (A.master) { Show.gain = A.master.gain.value; A.master.gain.setTargetAtTime(0, A.ac.currentTime, 0.3); }   // the game hushed
+    el.hidden = false;
+    Show.words();
+    return true;
+  },
+  // the card: its words first; after it, what is said after and the way on
+  card(kick, title, x, way, go) {
+    const $ = q => Show.el.querySelector(q);
+    $('.card').hidden = false;
+    $('.kick').textContent = kick;
+    $('.card h2').textContent = title;
+    $('.vs').textContent = Live.vs(Show.o);
+    $('.x').textContent = x || '';
+    $('.way').textContent = way || '';
+    $('.go').textContent = go;
+    if (!isTouch) $('.go').focus();
+  },
+  words() {
+    const o = Show.o;
+    Show.phase = 'words'; Show.t0 = performance.now();
+    Show.card(o.live ? 'ON AIR NOW' : 'A FIGHT FROM THE RECORD', o.t || (o.live ? 'A CHALLENGE, LIVE' : 'THE RECORD'), o.x, '', 'WATCH  ›');
+    Show.el.querySelector('.skip').hidden = true;
+  },
+  // the fight: PvP's watch page, inside the frame
+  fight() {
+    if (!Show.on || Show.phase === 'fight') return;
+    const $ = q => Show.el.querySelector(q);
+    Show.phase = 'fight'; Show.t0 = performance.now();
+    $('.card').hidden = true; $('.bar').style.width = '0';
+    const f = document.createElement('iframe');
+    f.src = PVP_ORIGIN + '/play/?watch=' + Show.o.match;
+    f.title = 'The fight';
+    f.setAttribute('allow', 'autoplay; fullscreen');
+    f.setAttribute('referrerpolicy', 'no-referrer');
+    f.addEventListener('load', () => f.classList.add('on'));
+    $('.frame').insertBefore(f, $('.card'));
+    $('.cover').hidden = false;                 // over the watch page's own close, which would leave for its lobby
+    $('.rec').hidden = !!Show.o.live;           // and, for a fight from the record, over its LIVE: it is being shown as though live
+    $('.skip').hidden = false;
+    Show.f = f;
+  },
+  // what is said after it, and the way on from here
+  after() {
+    if (!Show.on || Show.phase === 'after') return;
+    const o = Show.o;
+    Show.phase = 'after';
+    if (Show.f) { Show.f.classList.remove('on'); Show.f.classList.add('dim'); }
+    Show.el.querySelector('.skip').hidden = true;
+    const up = upAny(), signed = !Account.off() && !!Account.me;
+    const way = !up ? (signed ? '' : 'Sign in (ACCOUNT, on the menu) to go where it leads.')
+              : 'Put THE VOID\'s boss down, and in the sectors after it, look for the light.';
+    Show.card(o.live ? 'IT IS OVER' : 'AND THEN', o.after ? '' : (o.t || 'THE RECORD'), o.after, way, 'BACK TO THE GAME');
+    Show.el.querySelector('.card h2').hidden = !!o.after;
+  },
+  close() {
+    if (!Show.on) return;
+    Show.on = false; Show.phase = '';
+    if (Show.f) { Show.f.remove(); Show.f = null; }
+    if (Show.el) { Show.el.hidden = true; Show.el.querySelector('.card h2').hidden = false; Show.el.querySelector('.cover').hidden = true; Show.el.querySelector('.rec').hidden = true; }
+    const A = Audio_;
+    if (A.master && Show.gain !== null) A.master.gain.setTargetAtTime(Show.gain, A.ac.currentTime, 0.5);
+    Show.gain = null;
+    uiArm = 0.4;                               // a key still down from it lands on nothing
+  },
+  // the theater's own keys: Escape leaves, Enter or Space goes on
+  key(e) {
+    const k = e.key;
+    if (k === 'Escape') { e.preventDefault(); Show.close(); return; }
+    if ((k === 'Enter' || k === ' ') && (e.target === document.body || e.target === Show.el || !e.target.closest || !e.target.closest('button'))) {
+      e.preventDefault();
+      if (Show.phase === 'words') Show.fight(); else if (Show.phase === 'after') Show.close();
+    }
+  },
+  // in place of the game's frame while it is up (frame): its clock, and the fight's end
+  frame() {
+    Live.tick();
+    const o = Show.o, t = (performance.now() - Show.t0) / 1000, $ = q => Show.el.querySelector(q);
+    if (Show.phase === 'words') {
+      $('.bar').style.width = clamp(t / SHOW_WORDS, 0, 1) * 100 + '%';
+      if (t >= SHOW_WORDS) Show.fight();
+      return;
+    }
+    if (Show.phase !== 'fight') return;
+    // its end: its length from where this viewer began (a fight shown before), or from when it went on air
+    const over = o.live ? (o.len > 0 ? Date.now() >= o.since + (o.len + SHOW_TAIL) * 1000 : !Live.on || Live.on.match !== o.match)
+                        : o.len > 0 && t >= o.len + SHOW_TAIL;
+    if (over) Show.after();
+  },
+  build() {
+    const st = document.createElement('style');
+    st.textContent = SHOW_CSS;
+    document.head.appendChild(st);
+    const el = document.createElement('div');
+    el.id = 'show'; el.hidden = true;
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'A fight, shown');
+    el.innerHTML = '<div class="top"><span class="tag"><i></i><b></b></span><span class="who"></span>' +
+                   '<button type="button" class="back">✕  BACK TO THE GAME</button></div>' +
+                   '<div class="frame"><div class="card"><p class="kick"></p><h2></h2><p class="vs"></p><p class="x"></p><p class="way"></p>' +
+                   '<button type="button" class="go"></button></div><button type="button" class="cover" title="Back to the game" aria-label="Back to the game" hidden>✕</button>' +
+                   '<span class="rec" hidden>RECORDED</span>' +
+                   '<div class="bar"></div></div>' +
+                   '<div class="foot"><button type="button" class="skip" hidden>SKIP TO THE END  ›</button></div>';
+    // what is pressed here is the theater's, never the game's
+    for (const t of ['keydown', 'keyup', 'keypress']) el.addEventListener(t, e => { e.stopPropagation(); if (t === 'keydown') Show.key(e); });
+    for (const t of ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'wheel', 'contextmenu']) el.addEventListener(t, e => e.stopPropagation(), { passive: true });
+    el.querySelector('.back').addEventListener('click', () => Show.close());
+    el.querySelector('.cover').addEventListener('click', () => Show.close());
+    el.querySelector('.skip').addEventListener('click', () => Show.after());
+    el.querySelector('.go').addEventListener('click', () => { if (Show.phase === 'words') Show.fight(); else Show.close(); });
+    // its size: the largest 16:9 frame the window has room for under its bar
+    const size = () => el.style.setProperty('--fw', Math.max(280, Math.min(innerWidth - 32, (innerHeight - 110) * 16 / 9)) + 'px');
+    size(); addEventListener('resize', size);
+    document.body.appendChild(el);
+    Show.el = el;
+  }
+};
+
 // and the run's line, low on the screen, once, as it goes on air
 function drawLiveLine() {
   const L = Live.line;
@@ -89375,7 +89619,7 @@ function drawLiveLine() {
   const age = uiTime - L.t;
   if (age > LIVE_LINE) { Live.line = null; return; }
   const a = clamp(Math.min(age / 0.35, (LIVE_LINE - age) / 0.6), 0, 1);
-  lsPill('LIVE NOW  ·  ' + Live.vs() + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
+  lsPill('LIVE NOW  ·  ' + Live.vs(Live.on) + '  ·  WATCH IT FROM THE MENU', Math.round(H * 0.8), '#f87171', a);
 }
 
 /* ===========================================================================
@@ -89434,7 +89678,7 @@ const Door = {
   },
   // once a frame: the card up at the menu while the door is open (after the movie, if there is one to play)
   tick() {
-    const want = Door.shut() && !Door.stay && state === 'menu' && !Intro.on && !Ending.on && !Parts.on &&
+    const want = Door.shut() && !Door.stay && state === 'menu' && !Intro.on && !Ending.on && !Parts.on && !Show.on &&
                  Ending.state !== 'loading' && Ending.state !== 'ready' && !AcctUI.on;
     if (want && !Door.up()) Door.show();
     else if (!want && Door.up()) Door.hide();
@@ -89475,7 +89719,7 @@ const Door = {
     Door.paint();
     Door.el.querySelector('.note').textContent = '';
     Door.el.hidden = false;
-    if (Live.up()) Live.hide();
+    if (Show.on) Show.close();
     if (!isTouch) Door.el.querySelector('.go').focus();
   },
   hide() { if (Door.el) Door.el.hidden = true; },
@@ -89581,7 +89825,8 @@ const Ending = {
   },
   // once a frame: ready, and nothing in step with another machine, it starts
   tick() {
-    if (Ending.on || Ending.state !== 'ready' || Intro.on) return;
+    if (Ending.on || Ending.state !== 'ready' || Intro.on || Show.on) return;
+    if (state !== 'menu') return;          // never over a run: it waits for the menu
     if (LS.on && MP.on) return;
     Ending.on = true; Ending.t = 0;
     const A = Audio_;
@@ -89715,7 +89960,7 @@ const Parts = {
   // the movie for the win is over: straight there, if this account is the one
   after() { if (Account.parts || Parts.dev) Parts.now = true; },
   // the game at rest at its menu, nothing in front of it
-  calm: () => state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Live.up() && !Door.up(),
+  calm: () => state === 'menu' && !inHub && !arrival && !hlProOn() && !AcctUI.on && !Show.on && !Door.up(),
   // once a frame: waiting for this account and the game free for it, fetched; ready, it starts
   tick() {
     if (Parts.on || Parts.off() || Intro.on || Ending.on || Ending.state === 'loading' || Ending.state === 'ready') return;
@@ -90749,7 +90994,8 @@ const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE
    is never in PvP, a rule sheet, the rush, a rite or a scene of its own, and
    co-op takes it only when both machines run the same module: whether a run
    may go up is decided as it starts (RUN.up, the module's mark), by the
-   host for both.
+   host for both. A run flown alone takes the rooms as they are at each
+   sector (upLate), so one begun before they had come still finds the light.
 
    ROOMS APART. A module may also call VR.apart(def) once: rooms that are off
    the climb, each a room with only its boss in it. Any module may have them,
@@ -90768,6 +91014,14 @@ const outsideOuts = () => Object.keys(OUTSIDE.sig).sort().map(id => [id, OUTSIDE
      idle(dt)       each play step while the run is in no room at all, where
                     it may go up: the module watching the run. VR.go may be
                     called from it.
+     sign(layer)    what it shows of itself in a sector while it watches
+                    (wherever idle is heard): layer 'floor', in the world
+                    with the marks on the floor, or 'screen', over the frame
+                    and under the HUD. The drawing's own: it writes nothing
+                    the run reads.
+   A sandbox is watched (idle, sector, sign) only on a dev account's
+   machine, and only there does FREEPLAY's console list the rooms apart by
+   name: for everybody else the way into one is the module's own.
    VR.go(n) takes the run into the module's room n from wherever it is in a
    run that may go up (a room of the climb too, which is left), from one of
    the module's own hooks, so that it happens on the step. A sector left
@@ -90784,7 +91038,7 @@ const UP_LIFT = 2.6;            // s the lift has the screen
 const UP_R = 54;                // how far the light reaches on the floor
 const UP_SETTLE = 0.8;          // s a light takes to stand before it can be stood in
 const UP_HOOKS = ['enter', 'wave', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'light', 'lift'];
-const UP_AWAY_HOOKS = ['enter', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'lift', 'sector', 'idle'];   // ROOMS APART's
+const UP_AWAY_HOOKS = ['enter', 'step', 'ev', 'back', 'floor', 'over', 'screen', 'hud', 'lift', 'sector', 'idle', 'sign'];   // ROOMS APART's
 const UP_FOE_NUMS = ['r', 'hp', 'spd', 'dmg', 'xp', 'score', 'sides'];
 
 /* The rooms' mark while they are here: every room module's text, hashed
@@ -90967,10 +91221,21 @@ function upLightPlace(next) {
   upLight = { x: best.x, y: best.y, t: 0, hold: 0, out: -1, next: !!next };
 }
 
+/* A run on this machine alone has nobody to agree with. One that began
+   before its rooms had come (the vault answers after the boot, and a sign-in
+   in the middle of a visit later still), or whose rooms have changed since,
+   takes them as they are now, at the next sector (upEnter) or the next
+   sector's boss (upSector): or the light would never stand for the run a
+   player starts the moment the menu opens. In step with another machine it
+   keeps the word it started with, which both agreed. */
+function upLate() {
+  if (RUN.up !== upSig() && !PVP && !MP.on && !LS.on && !netLive()) RUN.up = upTake();
+}
 // a sector is entered (enterStage): its light, while the way is open; one of the rooms, and the module hears it
 function upEnter(def) {
   upLight = null;
   if (def && def.up) { upCall('enter', def); return; }
+  upLate();
   if (upOpen && !upIn() && !upQuiet()) upLightPlace(false);
 }
 // a boss is down (onBossDefeat, a stage's): THE VOID's opens the way; a room's, the module hears
@@ -90988,7 +91253,8 @@ function upWave(boss) {
    take the wave for one of its rooms (sector). true when it did: the boss
    never comes. */
 function upSector() {
-  if (!UP.away.size || upIn() || upLiftT >= 0 || upQuiet()) return false;
+  if (UP.away.size && !upIn()) upLate();
+  if (!UP.away.size || upIn() || upLiftT >= 0 || upQuiet() || !upWatched()) return false;
   for (const id of upMods()) {
     const h = UP.away.get(id);
     if (!h || !h.sector) continue;
@@ -91004,6 +91270,7 @@ function upSector() {
    room apart always lets the run down, into the sector the wave clock has
    come to (or the gates, if they are open). */
 function upAfter() {
+  if (upIn()) credits = Math.max(0, Math.floor(credits));   // the purse is whole as a room is left, whatever its module did to it
   if (upAt >= 0) {
     upDue = false;
     upCall('ev', 'down');
@@ -91096,8 +91363,14 @@ function upAway(id, n) {
   upBossT = UP_LIFT + 0.8;
   return true;
 }
+/* Whether the modules of rooms apart watch this run (idle, sector, sign). A
+   sandbox is watched only on a dev account's machine (or this machine's dev
+   server): what comes for a run comes for a run, not for a console. */
+const upDevHere = () => Account.admin || !!UP_DEV;
+const upWatched = () => !freeRun || upDevHere();
 // each play step out of every room: the modules of rooms apart that watch the run (idle), each as itself
 function upIdle(dt) {
+  if (!upWatched()) return;
   for (const id of upMods()) {
     const h = UP.away.get(id);
     if (!h || !h.idle) continue;
@@ -91195,8 +91468,19 @@ function drawUpLight() {
   ctx.restore();
 }
 // over the frame, under the HUD: the room's screen, and the lift
+/* What the modules that watch the run show of themselves in a sector (sign),
+   each as itself, the canvas left as it was found. */
+function upDrawSign(layer) {
+  if (upIn() || !UP.away.size || upLiftT >= 0 || state === 'menu' || upQuiet() || !upWatched()) return;
+  for (const id of upMods()) {
+    const h = UP.away.get(id);
+    if (!h || !h.sign) continue;
+    ctx.save();
+    try { h.sign(layer); } catch (e) { upErr('sign', e); } finally { ctx.restore(); }
+  }
+}
 function upDrawScreen() {
-  if (upIn()) upDraw('screen');
+  if (upIn()) upDraw('screen'); else upDrawSign('screen');
   if (upLiftT < 0) return;
   const k = clamp(upLiftT / UP_LIFT, 0, 1);
   if (upDraw('lift', k)) return;
@@ -96883,60 +97167,6 @@ if (BETA) betaUnlockAll();
 if (PVP) PVP.start();     // and PvP takes it from here
 cam.x = P.x; cam.y = P.y;
 requestAnimationFrame(frame);
-</script>
-<script>
-/* ===========================================================================
-   THE SHOWING: a challenge's fight shown at a set time, from its recording
-   (pvp/src/challenge.js, premiere). Whoever opens the game while it is on,
-   or after it (/api/live `live`, then `shown`), is taken to it, once a
-   browser: to PvP's watch page, which shows the rest of it (arriving after
-   its end: its last 30 s) and sends them back here once it is over
-   (`then`). Back here THE ENDING plays as soon as it is told (asked for
-   every few seconds for a while), and THE DOOR does the rest. ON AIR's
-   WATCH LIVE goes the same way. A script of its own, after the engine's:
-   the engine's text is what a recording is checked against (buildId), so
-   it is not touched.
-   ========================================================================= */
-(function () {
-  'use strict';
-  if (window.VR_PVP || location.protocol === 'file:') return;
-  const KEY = 'voidrunner_showing_seen', ID = /^[0-9a-f]{32}$/;
-  const PVP = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://127.0.0.1:8788' : 'https://voidrunner-pvp.play101.workers.dev';
-  const get = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return null; } };
-  const to = match => PVP + '/play/?watch=' + match + '&then=' + encodeURIComponent(location.origin + '/');
-  function go(match) {
-    try { localStorage.setItem(KEY, match); } catch (e) { return false; }   // (nowhere to note it: never sent, or it would loop)
-    location.replace(to(match));
-    return true;
-  }
-  // back from it: ask again and again, a while, so the movie comes the moment it is told; its ON AIR card seen
-  function back(match) {
-    try { const had = (localStorage.getItem('voidrunner_live_seen') || '').split(',').filter(Boolean); if (!had.includes(match)) localStorage.setItem('voidrunner_live_seen', had.concat(match).slice(-10).join(',')); } catch (e) {}
-    let n = 0;
-    const t = setInterval(() => {
-      try {
-        if (++n > 24 || (typeof Ending === 'object' && Ending.at)) { clearInterval(t); return; }
-        if (typeof Live === 'object' && !Live.busy) Live.next = 0;
-      } catch (e) { clearInterval(t); }
-    }, 8000);
-  }
-  fetch('/api/live', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(d => {
-    if (!d) return;
-    const match = d.live && ID.test(d.live.match) ? d.live.match : typeof d.shown === 'string' && ID.test(d.shown) ? d.shown : null;
-    if (!match) return;
-    if (get(KEY) === match) { back(match); return; }
-    const ended = get('voidrunner_ending_seen');
-    if (ended && ((d.burn && ended === String(d.burn)) || (d.fell && ended === String(d.fell)))) return;   // its movie seen already
-    go(match);
-  }).catch(() => {});
-  // ON AIR's WATCH LIVE: there and back, in this tab
-  addEventListener('load', () => {
-    try {
-      if (typeof Live !== 'object' || !Live) return;
-      Live.watch = function () { if (Live.on && ID.test(Live.on.match)) { Live.hide(); go(Live.on.match) || window.open(to(Live.on.match), '_blank', 'noopener'); } };
-    } catch (e) {}
-  });
-})();
 </script>
 </body>
 </html>

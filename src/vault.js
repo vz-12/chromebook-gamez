@@ -7,15 +7,24 @@
    instead, in the database, and handed only to the accounts allowed it.
 
      GET /api/vault?id=<id>[&h=<sha-256>]   -> the module's text   (text/javascript)
-         only to a signed-in account holding the perk 'vault:<id>'. Anyone
-         else, signed in or not, is told there is no such thing (404), the
-         same answer a missing id gets, so the route says nothing about
-         what is or is not in it.
-   and GET /api/account names what the account may load (vaultList), so a
+         only to a signed-in account holding the perk 'vault:<id>' (or, for
+         an open entry, to any signed-in account: below). Anyone else,
+         signed in or not, is told there is no such thing (404), the same
+         answer a missing id gets, so the route says nothing about what is
+         or is not in it.
+   and GET /api/account names what the account may load (vaultOpen), so a
    page knows to ask without one more request for everybody else.
 
    An entry is an opaque id. Its name, and everything about it, is in the
    text, which only ever leaves here for an account that holds its perk.
+
+   AN OPEN ENTRY (`npm run vault -- open <id>`, and `shut <id>` to take it
+   back) is one released to the game's players: every signed-in account is
+   handed it, by this route and in the account reply (vaultOpen), with no
+   perk. Signed out it is still the 404. It is still not in the repo, and
+   its name is still told only to an account holding its perk. PvP never
+   looks at the switch: who may fly a hidden pilot there is the perk's alone
+   (vaultList, ../pvp/src/hidden.js).
 
    PUTTING SOMETHING IN: only through the database itself, never through
    this route: `npm run vault -- put <id> <file> --remote` (scripts/vault.mjs)
@@ -47,11 +56,12 @@ const SCHEMA = [
      size     INTEGER NOT NULL,            -- bytes of the whole text
      hash     TEXT    NOT NULL,            -- sha-256 of the whole text, hex
      updated  INTEGER NOT NULL,
-     name     TEXT                         -- what its holders see it called (npm run vault -- put ... --name)
+     name     TEXT,                        -- what its holders see it called (npm run vault -- put ... --name)
+     open     INTEGER                      -- 1: handed to every signed-in account (npm run vault -- open)
    )`
 ];
 // columns added after the table first shipped, as src/auth.js does
-const ADDED = [['vault_heads', 'name', 'TEXT']];
+const ADDED = [['vault_heads', 'name', 'TEXT'], ['vault_heads', 'open', 'INTEGER']];
 // the same tables, for scripts/vault.mjs to put ahead of its own SQL: one line each, comments out
 export const VAULT_SCHEMA = SCHEMA.map(s => s.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ') + ';').join('\n');
 
@@ -87,6 +97,26 @@ export async function vaultList(db, account) {
     .bind(...ids).all();
   const out = ((res && res.results) || []).map(r => Object.assign({ id: r.id, h: r.hash, size: r.size }, r.name ? { n: r.name } : {}));
   return out.length ? out : null;
+}
+
+/* What the game may load for a signed-in account: what its perks open, and
+   every open entry, in the shape of vaultList. An entry's name goes only to
+   an account holding its perk. null when there is nothing. */
+export async function vaultOpen(db, account) {
+  if (!account) return null;
+  const ids = vaultIds(account.perks);
+  await ensureVault(db);
+  const res = await db.prepare('SELECT id, hash, size, name FROM vault_heads WHERE open = 1' +
+    (ids.length ? ` OR id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')})` : '') + ' ORDER BY id').bind(...ids).all();
+  const out = ((res && res.results) || []).map(r => Object.assign({ id: r.id, h: r.hash, size: r.size }, r.name && ids.includes(r.id) ? { n: r.name } : {}));
+  return out.length ? out : null;
+}
+// whether this route hands an account one entry: its perk, or the entry is open
+async function mayLoad(db, account, id) {
+  if (vaultIds(account.perks).includes(id)) return true;
+  await ensureVault(db);
+  const row = await db.prepare('SELECT open FROM vault_heads WHERE id = ?1').bind(id).first();
+  return !!row && row.open === 1;
 }
 
 /* One entry's text, put back together. Kept for as long as the isolate
@@ -130,7 +160,7 @@ export default async (req, env) => {
   const id = new URL(req.url).searchParams.get('id') || '';
   if (!VAULT_ID.test(id)) return nothing();
   const s = await sessionOf(req, env, { peek: true });
-  if (!s || !vaultIds(s.account.perks).includes(id)) return nothing();
+  if (!s || !(await mayLoad(env.DB, s.account, id))) return nothing();
   const got = await vaultText(env.DB, id);
   if (!got) return nothing();
   /* Asked for by its hash (the account reply names it), the answer never

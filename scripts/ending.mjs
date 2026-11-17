@@ -11,7 +11,7 @@
                  said, then it ends and is noted, and never again for that
                  moment in this browser (another moment plays again)
      co-op       a run in step with another machine waits for its end
-     a run       stopped under it, and the game goes on after it
+     a run       never cut into: it waits for the menu
      failing     a movie that will not load, or one that throws, ends
                  quietly: the game goes on
      dev         ?ending=dev on localhost plays /api/film at once, every load
@@ -138,17 +138,19 @@ section('co-op: a run in step with another machine waits for its end');
   ok(g3.run('Ending.on'), 'the run over: it plays');
 }
 
-section('a run: stopped under it, and on after it');
+section('a run: never cut into; it waits for the menu');
 {
   const g4 = boot();
   g4.run(SETUP + ' resetGame(); state = "play";');
   for (let i = 0; i < 30; i++) g4.run('update(1 / 60)');
   await answer(g4, { live: null, every: 900, above: false, burn: 77 });
-  ok(g4.run('Ending.on') && g4.run('state') === 'play', 'it cuts into the run');
-  const at = g4.run('JSON.stringify([P.x, P.y, wave, enemies.length])');
+  ok(!g4.run('Ending.on') && g4.run('state') === 'play' && g4.run('Ending.state') === 'ready', 'told mid-run: fetched, and held while the run goes on');
+  for (let i = 0; i < 20; i++) g4.run('Ending.tick(); update(1 / 60)');
+  ok(!g4.run('Ending.on'), 'all through the run');
+  g4.run('state = "menu"; Ending.tick()');
+  ok(g4.run('Ending.on'), 'and at the menu, it plays');
   play(g4, 3);
-  ok(!g4.run('Ending.on') && g4.run('state') === 'play' && g4.run('JSON.stringify([P.x, P.y, wave, enemies.length])') === at,
-     'nothing of the run moved under it, and it goes on after', at);
+  ok(!g4.run('Ending.on'), 'and is over');
 }
 
 section('failing: quietly, and the game goes on');

@@ -41,6 +41,11 @@ export function reelSql(pilot, reel, secs) {
   if (!(Number.isFinite(secs) && secs > 0 && secs < 3 * 3600)) throw new Error(`"${secs}" is not a reel's length in seconds`);
   return `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET reel = ${q(checkWords(reel))}, ended = started + ${Math.round(secs * 1000)} WHERE pilot = ${q(checkPilot(pilot))} AND started IS NOT NULL;`;
 }
+/* an encore (pvp/src/challenge.js, AN ENCORE): a decided fight shown again from its own recording at that time,
+   with words of its own (a vault entry) or the announcement's; or none. Its length is measured again from its relay. */
+export const encoreSql = (pilot, at, words = null) =>
+  `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET encore = ${at == null ? 'NULL' : Math.round(at)}, ` +
+  `encore_words = ${at == null || words == null ? 'NULL' : q(checkWords(words))}, encore_len = NULL WHERE pilot = ${q(checkPilot(pilot))};`;
 // held for a showing (pvp/src/challenge.js, premiere): its fight kept off air and untold until then, then shown from its recording
 export const premiereSql = (pilot, at) =>
   `${CHALLENGE_SCHEMA}\nUPDATE pvp_challenges SET premiere = ${at == null ? 'NULL' : Math.round(at)} WHERE pilot = ${q(checkPilot(pilot))};`;
@@ -109,6 +114,7 @@ export const challengesSql = () =>
   `COALESCE(r.name, '-') AS reached_by, COALESCE(c.season, '-') AS season, COALESCE(t.name, '-') AS target, ${day('c.seen')} AS seen, ` +
   `COALESCE(c.announce, '-') AS announce, COALESCE(c.match, '-') AS match, ${day('c.started')} AS started, ${day('c.ended')} AS ended, ` +
   `${day('c.decided')} AS decided, COALESCE(c.outcome, '-') AS outcome, ${day('c.calm')} AS calm, ` +
+  `${day('c.encore')} AS encore, COALESCE(c.encore_words, '-') AS encore_words, COALESCE(c.encore_len / 1000, '-') AS encore_secs, ` +
   `COALESCE(c.film, '-') AS film, COALESCE(c.film_voice, '-') AS film_voice, ` +
   `COALESCE(c.won_film, '-') AS won_film, COALESCE(c.won_voice, '-') AS won_voice, ` +
   `COALESCE(c.parts, '-') AS parts, ${day('c.parts_used')} AS parts_used, COALESCE(c.parts_use, '-') AS parts_use, COALESCE(c.parts_on, '-') AS parts_on, COALESCE(c.parts_scene, '-') AS parts_scene, ` +
