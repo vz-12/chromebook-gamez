@@ -342,8 +342,18 @@ section('rooms apart: FREEPLAY\'s console');
   // a sandbox, flown as VOIDRUNNER, its hull unkillable
   const sand = g => { g.run(`applyChar(0); runSeedNext = 5; Save.profile.freeplay = true; startFreeplay(); P.maxHp = P.hp = 1e7;`); return until(g, 'wave >= 1'); };
   const row = 'FREE_ROWS.find(r => r.away)';
+  // a player's sandbox: no page of rooms, no way into one by name, and nothing watching it
+  const pl = bootApart();
+  ok(sand(pl) && pl.run('freeRun') && !pl.run('Account.admin'), 'a player\'s sandbox is on');
+  ok(pl.run('freeRows().some(r => r.away)') === false, 'its console has no page of rooms apart');
+  ok(pl.run('freeAwayGo(0)') === false && pl.run('upAt') === -1, 'and nothing takes it into one by name');
+  pl.run('globalThis.__apartIdle = 0');
+  for (let i = 0; i < 4; i++) { clear(pl); step(pl, 0.5); }
+  ok(!pl.run('globalThis.__apartIdle'), 'the modules do not watch a sandbox (idle is not heard)', pl.run('globalThis.__apartIdle'));
+  // a dev account's: all of it
   const g = bootApart();
-  ok(sand(g) && g.run('freeRun'), 'a sandbox is on');
+  g.run('Account.admin = true');
+  ok(sand(g) && g.run('freeRun'), 'a dev account\'s sandbox is on');
   ok(g.run('freeAwayTitle()') === 'THE STAND-INS' && g.run(row + '.name()') === 'THE STAND-INS', 'the row is called what the module calls its rooms', g.run('freeAwayTitle()'));
   g.run('freeOpen = true; ' + row + '.f()');
   ok(g.run('freeSub') === 'away' && g.run('freeRows().length') === 3, 'it opens a page: a row a room, and the way back');
@@ -372,8 +382,9 @@ section('rooms apart: FREEPLAY\'s console');
   g.run('Chal.on = { id: "x", n: "X", m: {} }; freeSub = "away"');
   ok(g.run('freeAwayGo(0)') === false && g.run('upAt') === 1, 'never where the rooms may not be');
   g.run('Chal.on = null; freeSub = ""');
-  // SPAWN BOSS, EVERY CARD
+  // SPAWN BOSS, EVERY CARD (a dev account's sandbox, which goes on into a room apart below)
   const h = bootApart();
+  h.run('Account.admin = true');
   sand(h);
   h.run('{ const r = FREE_ROWS.find(r => r.n === "SPAWN BOSS"); for (let i = 0; i < Object.keys(BOSSES).length + 2; i++) r.f(); }');
   ok(h.run('enemies.filter(e => e.type === "boss").length') > 5 && !h.run('enemies.some(e => e.type === "boss" && BOSSES[e.boss] && BOSSES[e.boss].up)'), 'SPAWN BOSS never brings a module\'s boss out of its room');
