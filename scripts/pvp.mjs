@@ -1777,9 +1777,10 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
      'not decided: nothing handed out, and no game told');
   tool(decideSql('x7', 'won', 7654321));
   ok((await filmGet()).status === 404 && !('burn' in (await gameLive()).d), 'won by the one it was sent to: still nothing');
-  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'lost', 2345678));
+  const LOST_AT = Date.now() - 60e3;
+  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'lost', LOST_AT));
   const gl = (await gameLive()).d;
-  ok(gl.burn === 2345678, 'lost: every game told, with the moment it was decided', gl);
+  ok(gl.burn === LOST_AT, 'lost: every game told, with the moment it was decided', gl);
   const fm = await filmGet(), fv = await filmGet('?voice=1');
   ok(fm.status === 200 && /javascript/.test(fm.type) && fm.body.toString('utf8') === filmText, 'its movie, to anybody now', fm.status);
   ok(fv.status === 200 && fv.type === 'audio/mpeg' && fv.body.equals(filmVoice), 'and its voice');
@@ -1797,9 +1798,13 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
   tool(decideSql('x7', 'lost', 2345678));
   const gn = (await gameLive()).d;
   ok((await filmGet()).status === 404 && !('fell' in gn) && !('burn' in gn), 'lost, with no movie named for losing: nothing either', gn);
-  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', 3456789));
+  const WON_AT = Date.now() - 60e3;
+  tool(decideSql('x7', 'none')); tool(decideSql('x7', 'won', WON_AT));
   const gw = (await gameLive()).d;
-  ok(gw.fell === 3456789 && !('burn' in gw), 'won: every game told, by fell, with the moment it was decided', gw);
+  ok(gw.fell === WON_AT && !('burn' in gw), 'won: every game told, by fell, with the moment it was decided', gw);
+  // and not for good: those who come long after are told of no movie (the game's own answer is kept half a minute: asked of the table)
+  ok(!('fell' in (await liveNow(DB, WON_AT + LIVE.TOLD + 1000))) && 'fell' in (await liveNow(DB, WON_AT + LIVE.TOLD - 1000)),
+     'a movie is offered for a while after it is told (LIVE.TOLD), and not after');
   const wm = await filmGet(), wv = await filmGet('?voice=1');
   ok(wm.status === 200 && /javascript/.test(wm.type) && wm.body.toString('utf8') === wonText && wv.status === 200 && wv.body.equals(wonVoice),
      'its movie and its voice, to anybody now', [wm.status, wv.status]);
@@ -1972,6 +1977,20 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
     L = await liveNow(DB, P1 + LEN + SHOW_SLACK + 1000);
     ok(!L.live && L.burn > 0 && L.door === 'https://door.example.dev' && L.above === false, 'its showing over: told, as it would have been', L);
     ok(L.shown === mid && !('shown' in (await liveNow(DB, P1 + 5000))), 'and which match was shown, for whoever comes after (not before)', L.shown);
+    ok(L.was && L.was.at === P1 && Array.isArray(L.was.names) && L.was.names.length === 2 && typeof L.was.t === 'string', 'with what it was called and who fought, for a game to say', L.was);
+    // a showing is announced ahead: that there is one, and when; nothing of what it decided
+    const S1 = await liveNow(DB);
+    ok(S1.soon && S1.soon.at === P1 && Array.isArray(S1.soon.names) && !('x' in S1.soon) && !('burn' in S1) && !('shown' in S1), 'before it: a game is told one is coming, and when', S1.soon);
+    ok(!('soon' in (await liveNow(DB, P1 - LIVE.AHEAD - 1000))) && !('soon' in (await liveNow(DB, P1 + 1000))), 'only within a week of it, and not once it is on');
+    // those who come long after it are not shown it
+    const far = await liveNow(DB, P1 + LEN + SHOW_SLACK + LIVE.TOLD + 1000);
+    ok(!('shown' in far) && !('was' in far), 'the showing is offered for a while after its end (LIVE.TOLD), and not after', far);
+    ok(far.burn > 0 && far.door, 'a lost world with its door open is still ended, however long ago');
+    // and a lost world that has been mended is not ended a second time: no movie, only that it was mended
+    tool(mendSql2('x7', true));
+    const md = await liveNow(DB, P1 + LEN + SHOW_SLACK + 5000);
+    ok(!('burn' in md) && md.mended > 0 && !('door' in md) && md.shown === mid, 'mended: no movie for anybody, the door shut; its showing still offered for its while', md);
+    tool(mendSql2('x7', false));
     ok(revealAt(row()) === P1 + LEN + SHOW_SLACK, 'told at the premiere, plus the fight\'s length, plus the slack');
     // the relay: 25 s into the showing, each viewer is answered only up to step 1500
     tool(premiereSql('x7', Date.now() - 25 * 1000));
@@ -2011,6 +2030,68 @@ section('live spectating: a challenge\'s match on air, its relay, /api/live and 
     tool(premiereSql('x7', null));
     ok(row().premiere === null, 'premiere none: back to as it was');
     tool(decideSql('x7', 'none')); tool(doorSql2('x7', null)); tool(filmSql2('x7', null, null));
+  }
+  /* AN ENCORE: the same fight, already decided, shown again from its own
+     recording (never its reel) at a set time: told ahead, on air for
+     everybody at once, then there for whoever comes, each from its start.
+     Nothing of how it ended is held or told again. */
+  {
+    const { encoreSql, premiereSql: premiereSql3, mendSql: mendSql3, doorSql: doorSql3, filmSql: filmSql3 } = await import('./lib/challenge-sql.mjs');
+    const { encoreLen, fillEncores, SHOW_SLACK, encoreAs } = await import('../pvp/src/challenge.js');
+    // as the real one stands: fought, decided lost, its world mended, shown long ago at a premiere from a reel (whose length its ended took)
+    const OLD = Date.now() - 20 * 864e5, S0 = OLD - 3 * 3600e3;
+    tool(`UPDATE pvp_challenges SET match = '${mid}', started = ${S0}, ended = ${S0 + 7000}, decided = ${S0 + 9000}, outcome = 'lost' WHERE pilot = 'x7';`);
+    tool(premiereSql3('x7', OLD)); tool(`UPDATE pvp_challenges SET reel = 'x7-reel' WHERE pilot = 'x7';`);
+    tool(doorSql3('x7', 'https://door.example.dev')); tool(mendSql3('x7', true, OLD + 3600e3)); tool(filmSql3('x7', 'x7-film', null));
+    let L = await liveNow(DB);
+    ok(L.live === null && !L.above && !('burn' in L) && !('shown' in L) && !('soon' in L) && L.mended > 0, 'before: an old fight, mended and long shown: nothing of it told but that it was mended', L);
+    // its words: a vault entry of its own
+    tool(putSql('x7-encore', Buffer.from(JSON.stringify({ t: 'HOW IT BEGAN', x: 'Before.', as: 'THE PILOT', after: 'After.' }))).sql);
+    const E = Date.now() + 2 * 864e5;
+    tool(encoreSql('x7', E, 'x7-encore'));
+    ok(row().encore === E && row().encore_words === 'x7-encore' && row().encore_len === null, 'set by hand (encore), its length not yet known', row());
+    // its length, from its relay: the recording's (2400 steps: 40 s), not ended - started (the reel's 7 s)
+    ok(encoreLen(row()) === 7000, 'until it is measured: the match\'s own');
+    const got = await fillEncores(DB, async m => (await envPvp.BROADCAST.get(envPvp.BROADCAST.idFromName(m)).fetch('https://broadcast/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json());
+    ok(got.join() === 'x7' && row().encore_len === 40000 && encoreLen(row()) === 40000, 'measured from its relay: its recording\'s 40 s', [got, row().encore_len]);
+    ok((await fillEncores(DB, async () => { throw new Error('asked again'); })).length === 0, 'and only once');
+    // ahead: that one is coming, and when, in its own words; nothing else changes
+    L = await liveNow(DB);
+    ok(L.soon && L.soon.at === E && L.soon.t === 'HOW IT BEGAN' && L.soon.names[0] === 'THE PILOT' && !('x' in L.soon), 'two days ahead: a game is told one is coming, and when', L.soon);
+    ok(L.live === null && !L.above && !('burn' in L) && !('door' in L) && L.mended > 0, 'and nothing of how it ended is held or told again', L);
+    ok(L.every < LIVE.IDLE || L.every === LIVE.IDLE, 'asked about as before while it is days away', L.every);
+    ok(Math.abs((await liveNow(DB, E - 20 * 60e3)).every - LIVE.ASK) < 1, 'and every minute as it comes near');
+    ok((await look('&v=' + '7'.repeat(16))).status === 404, 'before its time nobody watches it, not even its reel');
+    // on air: from its time, everybody together, its own recording
+    L = await liveNow(DB, E + 5000);
+    ok(L.live && L.live.match === mid && L.live.since === E && L.live.encore === true && L.live.len === 40 && L.live.t === 'HOW IT BEGAN' && L.live.x === 'Before.' && L.live.after === 'After.',
+       'at its time: on air, in its words, with its length and what is said after', L.live);
+    ok(!L.above && !('burn' in L) && !('soon' in L), 'still nothing hunted, nothing ended');
+    ok(!(await liveNow(DB, E + 40000 + SHOW_SLACK + 1000)).live, 'and off air once its recording (and the slack) is over');
+    tool(encoreSql('x7', Date.now() - 25 * 1000, 'x7-encore'));
+    let v = await look('&v=' + '8'.repeat(16));
+    ok(v.status === 200 && !(v.d.head && v.d.head.reel) && v.d.last <= 1500 && v.d.last >= 1400 && v.d.end === null, '25 s in: its own recording (never the reel), as far as the showing has got', [v.d.head && v.d.head.reel, v.d.last]);
+    // after: there for whoever comes, each from its very start, in real time
+    tool(encoreSql('x7', Date.now() - 3600e3, 'x7-encore'));
+    tool(`UPDATE pvp_challenges SET encore_len = 40000 WHERE pilot = 'x7';`);
+    L = await liveNow(DB);
+    ok(!L.live && L.shown === mid && L.was && L.was.t === 'HOW IT BEGAN' && L.was.after === 'After.' && L.was.len === 40, 'after it: offered to whoever comes, with its words and length', L.was);
+    v = await look('&v=' + '9'.repeat(16));
+    ok(v.status === 200 && v.d.from === 0 && v.d.last <= 2 && v.d.end === null && !v.d.snap, 'a newcomer after it: the whole fight from its start (not its last 30 s)', [v.d.from, v.d.last, v.d.snap && v.d.snap.at]);
+    ok(v.d.head && JSON.stringify(v.d.head.run) === JSON.stringify(head.run) && v.d.head.hellos.map(x => x.name).join() === 'L_Holder,L_Top',
+       'the fight itself untouched (and a side flying no hidden pilot keeps its name)', v.d.head && v.d.head.hellos.map(x => x.name));
+    ok(await encoreAs(DB, row()) === 'THE PILOT', 'its hidden pilot is named as its words name it (encoreAs), for the side whose hello flies it');
+    ok(v.d.batches.every(x => x.from + x.n <= 3), 'and nothing ahead of where they are');
+    v = await look('&from=0&v=' + '9'.repeat(16));
+    ok(v.d.last <= 4, 'the same viewer, asking again: still from its start, not sent on', v.d.last);
+    ok((await liveNow(DB, Date.now() + LIVE.TOLD)).shown === undefined, 'offered for a while (LIVE.TOLD), and not after');
+    // and with no words of its own: the announcement's
+    tool(encoreSql('x7', Date.now() - 3600e3));
+    ok((await liveNow(DB)).was.t !== 'HOW IT BEGAN' && !('after' in (await liveNow(DB)).was), 'no words of its own: the announcement\'s, and nothing said after');
+    tool(encoreSql('x7', null));
+    ok(row().encore === null && !('shown' in (await liveNow(DB))), 'encore none: gone');
+    tool(premiereSql3('x7', null)); tool(`UPDATE pvp_challenges SET reel = NULL WHERE pilot = 'x7';`);
+    tool(decideSql('x7', 'none')); tool(doorSql3('x7', null)); tool(mendSql3('x7', false)); tool(filmSql3('x7', null, null));
   }
   /* A table from before the hunt's own columns, a challenge already sent in
      it: nothing in it was ever decided or held, so the game's Worker reads

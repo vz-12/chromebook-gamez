@@ -31,7 +31,10 @@
      view    a viewer's poll, open to anyone (view(), below). With `cut` (a
              fight held for its showing: challenge.js, premiere), answered
              as though nothing after that step had arrived yet: its end, the
-             newest snapshot and the batches all stop there
+             newest snapshot and the batches all stop there. With `whole`
+             too (an encore: challenge.js), a viewer who first looks after
+             the showing is over is shown all of it from its start, in real
+             time, rather than its last TAIL steps
      replay  the whole log at once (watch.js says to whom)
      info    whether there is a broadcast, and of which pilot (hidden.js)
 
@@ -144,7 +147,8 @@ export class Broadcast extends Serial {
     const m = this.m, S = this.ctx.storage;
     if (m && m.reel && op !== 'view' && op !== 'info') return reply({ error: 'a reel: nothing feeds it' }, 409);
 
-    if (op === 'info') return reply({ ok: true, on: !!m, pilot: m ? m.pilot : null });
+    // (and how long the fight is, in steps: where it ended, or the last step there is)
+    if (op === 'info') return reply({ ok: true, on: !!m, pilot: m ? m.pilot : null, len: m ? (m.end ? m.end.at : m.last) : null });
 
     if (op === 'view') {
       if (typeof b.v === 'string' && /^[0-9a-f]{16}$/.test(b.v)) {
@@ -157,7 +161,17 @@ export class Broadcast extends Serial {
          TAIL steps, from there in real time (their own cut), and the end. */
       if (cut != null && typeof b.v === 'string' && /^[0-9a-f]{16}$/.test(b.v)) {
         if (this.tails.size > 20000) this.tails.clear();
-        if (!this.tails.has(b.v)) this.tails.set(b.v, m.end && cut >= m.end.at ? { start: Math.max(0, m.end.at - TAIL), t0: now } : null);
+        if (!this.tails.has(b.v)) {
+          /* A whole showing's viewer is kept where it is (S): one watching
+             all of it must not be sent back to its start if this object
+             sleeps and wakes in the middle. */
+          let t = b.whole === true ? (await S.get('whole:' + b.v)) || null : null;
+          if (!t && m.end && cut >= m.end.at) {
+            t = { start: b.whole === true ? 0 : Math.max(0, m.end.at - TAIL), t0: now };
+            if (b.whole === true) await S.put('whole:' + b.v, t);
+          }
+          this.tails.set(b.v, t);
+        }
         const t = this.tails.get(b.v);
         if (t) cut = Math.min(cut, t.start + Math.floor((now - t.t0) * 60 / 1000));
       }

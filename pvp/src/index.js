@@ -42,8 +42,11 @@ import watch from './watch.js';
 import vault from '../../src/vault.js';
 import live from '../../src/live.js';
 import { closeSeasons } from './seasons.js';
-import { tripChallenges } from './challenge.js';
+import { tripChallenges, fillEncores } from './challenge.js';
 
+// a match's relay, asked what it holds (broadcast.js, info)
+const relayInfo = env => async match => (await env.BROADCAST.get(env.BROADCAST.idFromName(match)).fetch('https://broadcast/info', {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json();
 // the hourly cron (wrangler.jsonc): it only sends a challenge that has come due; the daily one does everything
 const HOURLY = '40 * * * *';
 
@@ -84,6 +87,10 @@ export default {
       .catch(e => console.error('pvp seasons', e && e.stack || e))
       .then(() => tripChallenges(env.DB))
       .then(s => { if (s.length) console.log('pvp challenges sent: ' + s.length); })
-      .catch(e => console.error('pvp challenges', e && e.stack || e)));
+      .catch(e => console.error('pvp challenges', e && e.stack || e))
+      // an encore's recording: its length, from its relay (challenge.js, AN ENCORE)
+      .then(() => env.BROADCAST ? fillEncores(env.DB, relayInfo(env)) : [])
+      .then(f => { if (f && f.length) console.log('pvp encores measured: ' + f.join(', ')); })
+      .catch(e => console.error('pvp encores', e && e.stack || e)));
   }
 };
