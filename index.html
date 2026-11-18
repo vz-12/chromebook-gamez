@@ -40210,6 +40210,7 @@ function handleClick() {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
     if (tutCardUp()) { tutCardClick(); return; }   // FIRST FLIGHT
+    if (Felled.click()) return;            // an admin's: a tyrant fallen, its card and its list (FELLED)
     if (hlHatchUp() && inRect(mouse.x, mouse.y, hlHatchRect())) { hlOpenVigil(); return; }
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
@@ -78803,6 +78804,7 @@ function renderMenu() {
   drawMenuAch();        // ACHIEVEMENTS: and the next goal
   drawMenuCodex();      // and the codex, which had only a key
   drawMenuLab();        // an admin's: the way into the lab
+  drawMenuFelled();     // and under it, a tyrant fallen (FELLED)
   drawSign();           // a fight to come, on air, or shown: THE SIGN, in the sky over the logo (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -92123,6 +92125,7 @@ const Outside = {
      turn. Not in PvP, which plays only the pilots its rules list. */
   async boot(list) {
     if (PVP || !Array.isArray(list)) return;
+    Felled.take(list);                   // which of them are tyrants' (FELLED)
     // one already here, or already on its way (the boot and a sign-in can both ask), is not fetched again
     for (const it of list)
       if (it && typeof it.id === 'string' && !OUTSIDE.by.has(it.id) && !OUTSIDE.loading.has(it.id)) await Outside.load(it);
@@ -92502,6 +92505,7 @@ function upEnter(def) {
 // a boss is down (onBossDefeat, a stage's): THE VOID's opens the way; a room's, the module hears
 function upFelled(e) {
   if (!e) return;
+  Felled.saw(e);                         // a tyrant's: told (FELLED)
   if (e.boss === 'nullcore' && stage === STAGES[4] && !rushOn() && !Chal.on) upOpen = true;
   if (upIn() && UP.bosses.has(e.boss)) { upDue = true; upCall('ev', 'boss', e); }
 }
@@ -92762,6 +92766,222 @@ if (UP_DEV && !PVP) {
   if (UP_DEV.away) dev(UP_DEV.away, 'away-dev');
 }
 /* ============================ end of THE WAY UP ============================ */
+
+/* ===========================================================================
+   FELLED: a tyrant down, and an admin told (src/felled.js)
+
+   The tyrants are the bosses of the vault entries the Worker marks (`t` on
+   an entry of the account reply's vault list: Felled.take). Each is meant to
+   be one of a kind, and nothing takes one away once it is down: its room and
+   its boss are there again for the next run. So the moment one falls in a
+   run (upFelled), this machine tells the Worker which, who, where. Never in
+   a FREEPLAY sandbox (a console is not a run), nor signed out, nor in PvP.
+
+   A report that cannot get through waits in this browser (FELLED_KEY) and
+   goes again from the menu, a minute apart; it carries an id of its own, so
+   one sent twice counts once. Nothing here touches the run: no roll, no
+   state a snapshot carries.
+
+   An admin's menu shows the unread fellings in a card under the LAB door
+   (drawMenuFelled), asked for again every FELLED_ASK at the menu: a click
+   on it opens the list, a click on the list marks them read. The Worker can
+   also post each one to a webhook as it happens (FELLED_WEBHOOK there).
+   ========================================================================= */
+const FELLED_URL = '/api/felled';
+const FELLED_KEY = 'voidrunner_felled_out_v1';
+const FELLED_ASK = 5 * 60 * 1000;      // ms between an admin's menu asking what has fallen
+const FELLED_RETRY = 60 * 1000;        // ms between tries of a report that did not get through
+const FELLED_TRIES = 8;                // and how many before it is let go
+const Felled = {
+  mods: new Set(),     // the vault entries whose bosses are tyrants
+  out: [], loaded: false, sending: false, tried: 0, n: 0,
+  news: [],            // an admin's: the unread fellings, newest first
+  asked: 0, asking: false, open: false,
+
+  // the account reply's vault list (Outside.boot): which entries are tyrants'
+  take(list) {
+    Felled.mods.clear();
+    for (const it of list || []) if (it && typeof it.id === 'string' && it.t) Felled.mods.add(it.id);
+  },
+
+  // a boss down (upFelled): one of a tyrant's, in a run that counts as a run, is reported
+  saw(e) {
+    if (!e || e.type !== 'boss' || typeof e.boss !== 'string') return false;
+    const mod = UP.own.get(e.boss);
+    if (!mod || !Felled.mods.has(mod) || !UP.bosses.has(e.boss)) return false;
+    if (PVP || freeRun || Account.off() || !Account.me) return false;
+    const bd = BOSSES[e.boss] || {};
+    Felled.queue().push({ mod, boss: e.boss, name: String(bd.name || e.boss).slice(0, 40),
+                          room: String((stage && stage.name) || '').slice(0, 40), pilot: String((CHAR() && CHAR().n) || '').slice(0, 24),
+                          coop: !!(MP.on || LS.on || netLive()), rid: Felled.rid(), tries: 0 });
+    Felled.keep();
+    Felled.send();
+    return true;
+  },
+
+  // a report's own id: random where the page has crypto (never the run's rolls), else the clock and a count
+  rid() {
+    const c = globalThis.crypto;
+    if (c && c.getRandomValues) return Array.from(c.getRandomValues(new Uint8Array(10)), b => b.toString(16).padStart(2, '0')).join('');
+    return Date.now().toString(36) + '-' + (++Felled.n).toString(36);
+  },
+  queue() {
+    if (!Felled.loaded) {
+      Felled.loaded = true;
+      try {
+        const v = JSON.parse(localStorage.getItem(FELLED_KEY) || '[]');
+        if (Array.isArray(v)) Felled.out = v.filter(x => x && typeof x === 'object' && typeof x.rid === 'string').concat(Felled.out);
+      } catch (e) {}
+    }
+    return Felled.out;
+  },
+  keep() {
+    Felled.out = Felled.out.slice(-20);
+    try { if (Felled.out.length) localStorage.setItem(FELLED_KEY, JSON.stringify(Felled.out)); else localStorage.removeItem(FELLED_KEY); } catch (e) {}
+  },
+
+  /* What waits, sent in turn. Told (or refused as malformed), it is done;
+     anything else (no network, the server down, the session gone) leaves it
+     for the next try, until FELLED_TRIES of them. */
+  async send() {
+    if (Felled.sending || Account.off() || !Account.me || !Felled.queue().length) return;
+    Felled.sending = true; Felled.tried = Date.now();
+    try {
+      for (const rep of Felled.out.slice()) {
+        const { tries, ...body } = rep;
+        let status = 0;
+        try {
+          const r = await fetch(FELLED_URL, { method: 'POST', cache: 'no-store', credentials: 'same-origin', keepalive: true,
+                                              headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          status = r.status;
+        } catch (e) { status = 0; }
+        if (!status) break;                                  // no network: everything waits
+        if (status >= 200 && status < 300 || status === 400 || (rep.tries = (rep.tries || 0) + 1) >= FELLED_TRIES)
+          Felled.out = Felled.out.filter(x => x !== rep);
+      }
+    } finally { Felled.sending = false; Felled.keep(); }
+  },
+
+  // an admin's: what has fallen and not been read
+  async ask() {
+    Felled.asking = true; Felled.asked = Date.now();
+    try {
+      const r = await fetch(FELLED_URL, { cache: 'no-store', credentials: 'same-origin' });
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      if (d && Array.isArray(d.felled) && labDoorUp()) {
+        Felled.news = d.felled.filter(f => f && !f.seen);
+        if (!Felled.news.length) Felled.open = false;
+      }
+    } catch (e) {} finally { Felled.asking = false; }
+  },
+  // and read: marked so up to the latest shown, so one that lands meanwhile stays unread
+  async read() {
+    const upTo = Felled.news.reduce((m, f) => Math.max(m, Number(f.last) || 0), 0);
+    Felled.news = []; Felled.open = false;
+    Audio_.select();
+    try {
+      await fetch(FELLED_URL, { method: 'POST', cache: 'no-store', credentials: 'same-origin',
+                                headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen: upTo }) });
+    } catch (e) { Felled.asked = 0; }                       // not marked: the next ask brings them back
+  },
+
+  // each frame at the menu: a report that waits, and an admin's asking
+  tick() {
+    const now = Date.now();
+    if (Felled.queue().length && !Felled.sending && now - Felled.tried > FELLED_RETRY) Felled.send();
+    if (!labDoorUp()) { if (Felled.asked) { Felled.news = []; Felled.asked = 0; Felled.open = false; } return; }
+    if (!Felled.asking && now - Felled.asked > FELLED_ASK) Felled.ask();
+  },
+
+  // the menu's click: true when it was the card's or the list's
+  click() {
+    if (!felledUp()) return false;
+    if (inRect(mouse.x, mouse.y, menuFelledRect())) { Felled.open = !Felled.open; Audio_.select(); return true; }
+    if (!Felled.open) return false;
+    if (inRect(mouse.x, mouse.y, felledListRect())) Felled.read();
+    else Felled.open = false;
+    return true;
+  }
+};
+const felledUp = () => labDoorUp() && Felled.news.length > 0;
+function menuFelledRect() { return { x: 18, y: 454, w: 176, h: 34 }; }
+const FELLED_ROWS = 6;
+function felledListRect() {
+  const n = Math.min(FELLED_ROWS, Felled.news.length), h = 46 + n * 34 + 26, w = Math.min(380, W - 220);
+  const r = menuFelledRect();
+  return { x: r.x + r.w + 10, y: Math.max(14, r.y + r.h - h), w, h };
+}
+const felledWhen = t => {
+  const d = new Date(Number(t) || 0);
+  return d.getDate() + ' ' + ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][d.getMonth()]
+       + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+};
+
+function drawMenuFelled() {
+  Felled.tick();
+  if (!felledUp()) return;
+  const r = menuFelledRect(), col = '#f87171', n = Felled.news.length, top = Felled.news[0];
+  const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+  const pulse = 0.55 + 0.45 * Math.sin(uiTime * 4);
+  ctx.save();
+  lanRect(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = hot || Felled.open ? 'rgba(248,113,113,0.18)' : 'rgba(40,8,12,0.78)';
+  ctx.fill();
+  ctx.strokeStyle = rgba(col, hot || Felled.open ? 0.95 : 0.4 + 0.5 * pulse);
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.08em';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = col;
+  ctx.fillText(clipText('⚠  TYRANT FELLED' + (n > 1 ? '  ·  ' + n : ''), 30), r.x + 12, r.y + 15);
+  ctx.letterSpacing = '0.1em';
+  ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = hot ? '#fecaca' : '#fca5a5';
+  ctx.fillText(clipText(Felled.open ? 'CLICK THE LIST TO MARK READ' : top.name + '  ·  ' + String(top.who || '').toUpperCase(), 30), r.x + 12, r.y + 27);
+  ctx.restore();
+
+  if (Felled.open) {
+    const L = felledListRect(), x = L.x + 14;
+    ctx.save();
+    lanRect(L.x, L.y, L.w, L.h, 10);
+    ctx.fillStyle = 'rgba(14,6,10,0.94)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.7);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.textAlign = 'left';
+    ctx.letterSpacing = '0.1em';
+    ctx.font = "700 12px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = col;
+    ctx.fillText('A TYRANT HAS FALLEN · STILL IN THE GAME', x, L.y + 22);
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(clipText('Nothing takes it away: change or shut its vault entry.', 64), x, L.y + 37);
+    Felled.news.slice(0, FELLED_ROWS).forEach((f, i) => {
+      const y = L.y + 46 + i * 34, info = f.info || {};
+      ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+      ctx.fillStyle = '#fecaca';
+      ctx.fillText(clipText(String(f.name || f.boss), 34), x, y + 14);
+      ctx.textAlign = 'right';
+      ctx.font = "600 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = f.firstEver ? '#fde68a' : '#94a3b8';
+      ctx.fillText((f.firstEver ? 'THE FIRST  ·  ' : '') + (f.times > 1 ? f.times + ' TIMES  ·  ' : '') + 'VAULT ' + f.mod, L.x + L.w - 14, y + 14);
+      ctx.textAlign = 'left';
+      ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = '#cbd5e1';
+      const where = [String(f.who || '').toUpperCase(), info.room, info.pilot, info.coop ? 'CO-OP' : '', felledWhen(f.last)].filter(Boolean).join('  ·  ');
+      ctx.fillText(clipText('BY ' + where, 70), x, y + 27);
+    });
+    ctx.font = "600 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = '#f87171';
+    ctx.fillText(Felled.news.length > FELLED_ROWS ? '+' + (Felled.news.length - FELLED_ROWS) + ' MORE  ·  npm run felled  ·  CLICK HERE TO MARK READ'
+                                                  : 'CLICK HERE TO MARK READ  ·  ELSEWHERE CLOSES', x, L.y + L.h - 12);
+    ctx.restore();
+  }
+  ctx.textAlign = 'center';
+}
+/* ================================ end of FELLED ================================ */
 
 /* ===========================================================================
    LINK DIAGNOSTIC

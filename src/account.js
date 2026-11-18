@@ -1,6 +1,7 @@
 /* ===========================================================================
    VOIDRUNNER — accounts
    GET  /api/account                 -> { account | null, turnstile, vault?, challenge? }
+                                        (vault: [{ id, h, size, n?, t? }], t on a tyrant's entry: felled.js)
    POST /api/account  { op, ... }    -> sign up, sign in, sign out, and the rest
    GET  /api/account/save            -> { rev, save, unlocks }
    PUT  /api/account/save { rev, save, unlocks, pid }  -> { rev } | 409 { rev, save, unlocks }
@@ -23,6 +24,7 @@ import { scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { ensureAuth, sessionOf, sessionCookie, originOk, clientIp, sha256, newToken, newId,
          publicAccount, SESSION_MS, MAX_SESSIONS, SITES, ADMIN_SITES } from './auth.js';
 import { vaultOpen } from './vault.js';
+import { TYRANTS } from './felled.js';
 import { PILOTS } from '../pvp/src/rules.js';
 import { challengeWaits, doorOf, sceneFor } from '../pvp/src/challenge.js';
 
@@ -550,6 +552,8 @@ export default async (req, env) => {
   if (req.method === 'GET') {
     // (every signed-in account asks the vault now, for what is open: a fault there leaves the reply as it was, without it)
     const vault = s ? await vaultOpen(env.DB, s.account).catch(e => { console.error('vault', e && e.stack || e); return null; }) : null;
+    // `t`: the entry's bosses are tyrants, whose fall the game tells (felled.js)
+    if (vault) for (const v of vault) if (TYRANTS.includes(v.id)) v.t = 1;
     const challenge = s ? await challengeWaits(env.DB, s.account.id) : false;
     const admin = !!s && s.account.perks.includes('dev');
     /* `back`: the account came back through THE DOOR (index.html), the

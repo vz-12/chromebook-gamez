@@ -479,6 +479,36 @@ they are at each sector, so one begun before a module arrived still finds
 the light (THE WAY UP, `upLate`); in co-op both machines must run the same
 modules when the run starts.
 
+**Tyrants felled** (`src/felled.js`, FELLED in `index.html`). The bosses of
+the vault entries named in `TYRANTS` (`n5` and `n6`) are meant to be one of a
+kind, but nothing takes one away once it is down: its room and its boss are
+there again for the next run. So the moment one falls in a run (never a
+FREEPLAY sandbox), the game tells the Worker which tyrant, who, where and
+flying what, and it is written down (`POST /api/felled`). A report that
+cannot get through waits in that browser and goes again later; one sent twice
+counts once. Then you are told:
+
+- **In the game:** an admin's menu (the 'dev' perk) has a red ⚠ TYRANT
+  FELLED card under the LAB door while any are unread. Click it for the
+  list; click the list to mark them read.
+- **On your phone or in a channel:** set the Worker secret `FELLED_WEBHOOK`
+  and each account's first felling of each tyrant is posted to it as it
+  happens. A Discord or Slack webhook URL works as it is; any other URL is
+  sent plain text, so an [ntfy](https://ntfy.sh) topic
+  (`https://ntfy.sh/<a long random name>`) pushes it to the ntfy app.
+- **From here:**
+
+```sh
+npx wrangler secret put FELLED_WEBHOOK           # optional: paste the webhook's URL
+npm run felled -- --remote                       # every felling, NEW beside the unread
+npm run felled -- seen --remote                  # all marked read
+npm run felled -- forget n5 [boss] --remote      # a tyrant made anew: its record wiped
+npm run test:felled                              # a few seconds
+```
+
+A new tyrant's entry goes in `TYRANTS`. Taking one away is still yours to do:
+a new revision of its module, or `npm run vault -- shut <id> --remote`.
+
 An outside pilot's runs count for nothing. The page records none of them, and
 the server holds to that too: a run names its pilot, and `/api/leaderboard`
 refuses any pilot that isn't one of the game's own (`PILOTS` in
