@@ -10,12 +10,17 @@ lifted in, and shown on a review board.
 
 The logic is built: steps 1 to 6 of the build order. All twelve signs at
 all three magnitudes, the twelve shadows, the four trines and the reading
-work on every hull and in co-op. The art is placeholder (step 7):
-- plain plates and buttons for the reading
-- a line of text in the HUD for the signs held
-- outlines on the field where a player has to see something: the doubles,
-  the ring, the deep, the hostile double, the tide, and the dark
+work on every hull and in co-op.
 
+The art is drawn (step 7), in `planetarium-art/`, waiting for your sign-off
+on the review board: https://claude.ai/artifact/Rfq4KQU3NgY1zVgMzj5Mpa
+- the dome: the zodiac wheel overhead, the plates both sides, every beat
+- the tray: the signs held in four element triangles, lit as trines
+- the field: every sign at I, II and III, the crowns, every shadow's tell
+- the events: every III, the gore, the shell, the sky turning
+
+Until it is lifted (`node planetarium-art/lift.mjs --write`, see
+`planetarium-art/README.md`), the game still draws the placeholders.
 Nothing is shipped. See **What's built** at the end.
 
 ## Your brief
@@ -512,7 +517,9 @@ Steps 1 to 6 are built (18 Nov).
 4. **Retrograde and shadows,** and the sky turning.
 5. **Grand Trines.**
 6. **The rest:** codex, keeper notes, freeplay, BAD READING, and the tests.
-7. **Art:** the board first, then `planetarium-art/` and the lift.
+7. **Art:** the board first, then `planetarium-art/` and the lift. Drawn
+   (18 Nov): the board is up, the lift is written and checked; it waits for
+   your sign-off.
 8. **Music and sound.**
 
 ## What's built
