@@ -46,7 +46,9 @@ const SCENARIOS = [
   /* And hunted while they do (FROM ABOVE): on by the host's word alone, so the
      header has to hand it to the guest; early and often here, so spears are
      aimed, land, and take pilots within the three minutes. */
-  { name: 'lifecycle', seed: 206, lat: 30, jit: 15, loss: 0.03, hostHz: 60, guestHz: 60,  host: 'runner', wing: 'melee', life: true, end: 'guest leaves',
+  // lifecycle's seed is the one luck: its pilots must go down, a run must end, the guest's
+  // blade must find a piece and a spear must take someone (206 until THE PLANETARIUM moved it)
+  { name: 'lifecycle', seed: 242, lat: 30, jit: 15, loss: 0.03, hostHz: 60, guestHz: 60,  host: 'runner', wing: 'melee', life: true, end: 'guest leaves',
                       above: true },
   { name: 'parted', seed: 205,   lat: 40,  jit: 20, loss: 0.05, hostHz: 60, guestHz: 72,  host: 'ember',  wing: 'runner', kit: true,
                       part: { guest: [1500], host: [6000] } },
@@ -92,7 +94,7 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
      the guest's presses on the host's screens must change nothing. And the
      shared pause, from both sides, with a screen of one's own opened over it. */
   globalThis.__seen = new Set();
-  let shopN = 0;
+  let shopN = 0, planetN = 0;
   const YES = ${yes ? "'y'" : "'n'"};       // a yes takes the story's turn: THE UNWRITTEN's fight, the amalgam's assembly
   const HOST_SCREENS = ['levelup', 'gear', 'shop', 'planet', 'library', 'talk', 'devtalk'];
   /* The pauses, one episode after another: who pauses (both at once, in the
@@ -129,10 +131,18 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
       return;
     }
     if (state !== 'shop') shopN = 0;
+    if (state !== 'planet') planetN = 0;
     if (state === 'levelup') handleKey(String(1 + (k / 9 | 0) % Math.max(1, offers.length)));
     else if (state === 'gear') handleKey(['1', '2', 'x'][(k / 9 | 0) % 3]);
     else if (state === 'shop') { if (uiArm <= 0) handleKey(['1', 'r', '2', '3', 'enter'][Math.min(4, shopN++)]); }   // not before it is armed
-    else if (state === 'planet') handleKey(planetRevealed ? 'enter' : 'a');
+    else if (state === 'planet') {
+      /* THE PLANETARIUM: turn the dome, read retrograde, take the second sign; then
+         give the guest a moment to read its own before the host leaves the dome */
+      const r = P.zRead, w = PILOTS.length > 1 ? pilotP(1) : null;
+      if (r && !r.done && r.offers.length) handleKey(['t', 'r', '2'][Math.min(2, planetN++)]);
+      else if (w && w.zRead && !w.zRead.done && planetN++ < 14) {}
+      else handleKey('enter');
+    }
     else if (state === 'library') handleKey('e');
     else if (state === 'talk') handleKey(talkAsk ? YES : ' ');
     else if (state === 'devtalk') handleKey(devAsk ? YES : ' ');
@@ -195,7 +205,10 @@ const SETUP = (role, char, kit, scramble, kitRun, yes, part, life, loot, above) 
        a piece more is a different run, and 'lifecycle' needs its pilots to go
        down. */
     [900, () => { if (${!!loot}) pilotsEach(() => { if (isBlade()) { const d = gearDrop(P.x + 24, P.y, 1, 'blade'); if (d) d.planted = 1; } }); }],
-    [1500, () => openPlanetarium()],
+    /* THE PLANETARIUM: a reading each. Not in 'lifecycle', for the reason loot is
+       not: a sign is a different run (every one of them is worth more than a
+       shop), and that one needs its pilots to go down. The other five read. */
+    [1500, () => { if (!${!!life}) openPlanetarium(); }],
     [2600, () => { libraryBook = BOOKS[Object.keys(BOOKS)[0]]; malwareOffer = null; state = 'library'; uiArm = 0.4; }],
     [3200, () => startTalk()],
     [4200, () => startDevTalk()],
@@ -389,6 +402,9 @@ for (const sc of SCENARIOS) {
   const [ah, ag] = r.acts, miss = [];
   if (!ah.pick && !ah.gearTake && !SHORT) miss.push('no card or gear chosen');   // THE VAGRANT has loot, not cards, and may find none in a minute
   if (!ah['pick·guest'] && !ah['gearTake·guest'] && !SHORT) miss.push("the guest's pilot never chose its own card or gear");
+  // THE PLANETARIUM: each pilot reads for its own ship
+  if (!ah.read && !SHORT && !sc.life) miss.push('the host never read a sign');
+  if (!ah['read·guest'] && !SHORT && !sc.life) miss.push("the guest's pilot never read its own sign");
   // a run as people play it: down and up, dead, again; each side keeps its own record of every run that ended
   if (sc.life) {
     const [lh, lg] = r.life;

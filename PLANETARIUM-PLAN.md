@@ -8,7 +8,15 @@ lifted in, and shown on a review board.
 
 ## Status (18 Nov)
 
-This is a plan only. Nothing is built.
+The logic is built: steps 1 to 6 of the build order. All twelve signs at
+all three magnitudes, the twelve shadows, the four trines and the reading
+work on every hull and in co-op. The art is placeholder (step 7):
+- plain plates and buttons for the reading
+- a line of text in the HUD for the signs held
+- outlines on the field where a player has to see something: the doubles,
+  the ring, the deep, the hostile double, the tide, and the dark
+
+Nothing is shipped. See **What's built** at the end.
 
 ## Your brief
 
@@ -16,6 +24,8 @@ This is a plan only. Nothing is built.
   rework. Make them worth it, with new art plans.
 - **18 Nov, on the first draft:** Keep replacing the shops. Make the
   upgrades better: better, more powerful effects.
+- **18 Nov:** Build the logic for them, but don't draw art yet. And make the
+  curses more unique and worse.
 
 ## Why it's underpowered today
 
@@ -73,9 +83,11 @@ worth less:
 - **Take one.** Click its plate, or press `1` `2` `3`.
 - **Retrograde.** One switch (`R`) turns all three plates to their
   retrograde side. Each then shows the sign one magnitude higher, with its
-  shadow written underneath. A sign you don't hold arrives at II. A sign you
-  hold at II goes to III. The shadow lasts until the next boss falls, and the
-  HUD shows how many waves are left. You can only carry one shadow at a time.
+  shadow written underneath. A sign you don't hold arrives at II, and one you
+  hold at I goes straight to III. A sign already offered at III can go no
+  higher: it is read as it is, with no shadow. The shadow lasts until the sky
+  turns, which is the next reward room (in practice, the next boss). You can
+  only carry one shadow at a time.
 - **Turn the dome** (`T`). Pay credits to see three other signs. It costs the
   same as the shop's reroll (30, then 25 more each time), and the dome has no
   keeper to anger. Credits you couldn't spend because the shop was replaced
@@ -96,7 +108,7 @@ damage" grows with the build. Where a sign was a blessing before, its
 | I | **THE BATTERING RAM.** You can't be hit while dashing, and the dash goes 50% farther. Everything it passes through takes 40 + 5 × your damage, is thrown aside, and is stunned for 1 s. +2 dash charges, and dash cooldown −60%. |
 | II | **BLOODED.** A gore kill gives the dash charge straight back, so you can chain through a room without stopping. Every body gored adds 25% to the next gore in the same dash, with no cap. |
 | III | **MARS ASCENDANT.** Every dash ends in a blast: 100 + 8 × your damage, out to 170. A gored body is thrown like a missile, and whatever it hits takes the gore too. |
-| Shadow | **BARE.** You take 30% more damage (`P.frailty`). |
+| Shadow | **HEADLONG.** You can't stop. Let go of the keys and you keep charging the way you last went, and a body you run into hurts twice as much. |
 
 The same on every hull. THE VAGRANT's lunge already cuts, and the gore lands
 on top of it.
@@ -106,9 +118,9 @@ on top of it.
 |---|---|
 | Today | A curse: no dash, 45% speed. |
 | I | **THE HOARD.** Credits are strength. Every 100 credits you carry gives +10% damage (no cap) and +1 armour (up to 15). Kills drop twice the credits, and shops charge you 40% less. |
-| II | **THE GOLDEN CALF.** Every wave you clear pays 10% interest on what you carry (up to 300). Every shop stocks a fifth card, always a legendary. |
+| II | **THE GOLDEN CALF.** Every wave you clear pays 10% interest on what you carry (up to 300). Every shop stocks a fifth card, always a legendary, in place of one of its two services (the counter holds six). For THE VAGRANT it's a piece of gear, rolled a tier up. |
 | III | **THE GOLDEN BULL.** A blow that would kill you costs credits instead: 150, scaled like shop prices. It heals you to full and throws a gold shockwave (100 + 10 × your damage, out to 300). This works as often as you can pay. |
-| Shadow | **EARTHBOUND.** No dash, and you're 35% slower. (Today's curse, kept to one sector.) |
+| Shadow | **EARTHBOUND.** No dash, half speed, and every six seconds the ground holds you completely still for one. (Today's curse, made worse.) |
 
 This is the answer to losing shops. Credits you couldn't spend become
 damage, and the shops that are left get cheaper and better.
@@ -118,9 +130,9 @@ damage, and the shops that are left get cheaper and better.
 |---|---|
 | Today | A mirrored double fires your base volley (no extra barrels, no Backdraft, no Overcharge). |
 | I | **THE TWIN.** A mirrored double stands across the room's centre, and it's a whole second pilot. It fires everything you fire at full damage (every barrel, Backdraft, Overcharge, the lance, the blade's swing), aimed at whatever is nearest it. It can't be hurt. |
-| II | **WHAT SURROUNDS YOU.** Everything that orbits or surrounds you surrounds it too: drones, Static Field, the corona, the deep, the current, sentries. It dashes when you dash, with every dash effect. |
+| II | **WHAT SURROUNDS YOU.** What surrounds you surrounds it too: Static Field, the corona, the deep and the current. It dashes when you dash, and Shockwave, Cryo Nova, THE WAVE and MARS ASCENDANT's blast go off where it is too. (Drones and sentries stay yours alone.) |
 | III | **THE CONSTELLATION.** Two more doubles join, mirrored across each axis, so there are four of you. All four are joined by a ring of lightning that deals 6 × your damage a second to anything touching it. As you move, the ring sweeps the room. |
-| Shadow | **EXPOSED.** The twin can be hit by rounds and by bodies, and whatever hits it hurts you. Retrograde Gemini arrives at II, so there's always a twin. |
+| Shadow | **THE OTHER ONE.** A hostile double stands across the room's centre from you, and while you fire it fires back at you twice a second, each round 8% of your max health. It holds its fire within 140 px of you, so standing at the centre isn't a death sentence. |
 
 ### CANCER, The Crab · water · the Moon
 | | |
@@ -129,7 +141,7 @@ damage, and the shops that are left get cheaper and better.
 | I | **THE SHELL.** +3 shields, regrowing one every 4 s. While you hold a shield you deal 25% more damage. A shield that breaks bursts for 30 + 4 × your damage, out to 180. |
 | II | **HIGH TIDE.** A blocked hit is thrown back at whatever fired it, five times as hard. Each wave starts with 2 shields over your maximum. |
 | III | **THE CARAPACE.** Once a wave, a blow that would drop you below 25% health shuts the shell instead. You can't be hit for 3 s and you're healed to full, then the shell bursts across the room for 20% of your max health + 10 × your damage. |
-| Shadow | **THE MOLT.** No shields, and you take 60% more while moving fast. (Today's curse, softened and kept to one sector.) |
+| Shadow | **THE MOLT.** No shields and no armour, and while you're moving you take two and a half times the damage. (Today's curse was 2.2× with your shields and armour still on.) |
 
 ### LEO, The Lion · fire · the Sun
 | | |
@@ -138,7 +150,7 @@ damage, and the shops that are left get cheaper and better.
 | I | **THE CORONA.** Everything within 220 burns for 1.2 × your damage, four times a second (about 5 × your damage a second), and is set on fire. Every round you fire lights the ground where it lands. |
 | II | **MIDDAY.** The corona grows to 300, and bodies inside it take 35% more from everything. Enemy rounds that cross into it slow to half speed and burn away after half a second. |
 | III | **SUPERNOVA.** Every 20 kills inside the corona, it goes nova: everything in the room takes 15 × your damage and burns, every enemy round is erased, and the corona is twice its size for 8 s. |
-| Shadow | **THE SPOTLIGHT.** Every body comes straight for you, 25% faster. |
+| Shadow | **SUNLESS.** The light goes out: you can only see 240 px around you. |
 
 On the blade, every swing that lands lights the ground. On the lance it
 works as today, at the new numbers.
@@ -150,7 +162,7 @@ works as today, at the new numbers.
 | I | **THE HARVEST.** Your rounds seek (twice as hard as Seeker Rounds). Anything you hit below 20% health is reaped: it dies at once and drops twice its data. A boss is reaped at 5%. |
 | II | **THE SHEAF.** Reaping rises to 30% (8% for a boss). Every reap looses a seed: a seeking round at full damage, aimed at the nearest body. |
 | III | **PERFECT.** Every hit is a critical, and critical hits do 50% more. |
-| Shadow | **EXACTING.** Every shot that hits nothing costs 0.5 health, up to 3 a second. (Today's curse, now capped.) |
+| Shadow | **EXACTING.** Every shot that hits nothing costs 1 health, with no limit. On the lance, a pulse that touches nothing; on the blade, a swing that finds nothing. (Today's curse, at full strength, on every hull.) |
 
 The lance reaps along the whole beam. On the blade, swings reach 25%
 farther instead of seeking. Executioner's Mark (12%, never a boss) still
@@ -163,7 +175,7 @@ stacks with this.
 | I | **THE SCALES.** Every hit you take is repaid five times over, split across everything within 300 of you. 5% of the damage you deal comes back to you as health (up to 4% of your max health a second). |
 | II | **EQUILIBRIUM.** At full health you deal 50% more damage. Below half health you take 50% less. |
 | III | **JUDGEMENT.** Every 10 s the scales fall on the heaviest thing in the room: a pillar of light for 40 × your damage, and never less than 8% of a boss's max health. |
-| Shadow | **THE SCALES.** 5% of the damage you deal comes back to you as harm, up to 8% of your max health every half second. (Today's curse.) |
+| Shadow | **THE SCALES.** 8% of the damage you deal comes back to you as harm, straight through shields and armour, up to 15% of your max health a second. (Today's curse was 5.5%.) |
 
 ### SCORPIO, The Scorpion · water · Pluto
 | | |
@@ -172,7 +184,7 @@ stacks with this.
 | I | **VENOM.** Every hit stings. Up to 25 stacks, each ticking for 2 + 0.2 × your damage every half second. A poisoned body that dies sprays its stacks on everything within 150. |
 | II | **NEUROTOXIN.** Poisoned bodies take 30% more from everything and attack 40% slower. |
 | III | **THE STING.** Every 8th hit on a body sets off its venom: 10 s of ticks land at once, doubled. |
-| Shadow | **NO ANTIDOTE.** You can't heal at all: no regeneration, lifesteal or pickups. |
+| Shadow | **THE STING TURNS.** Every hit you take adds a stack of venom to you that never wears off, each costing half a health a second. While you carry any, you can't heal at all. |
 
 At 25 stacks with damage 40, one body is losing 500 a second. On the blade,
 each swing that lands stings three times. On the lance, each pulse is a
@@ -185,17 +197,18 @@ sting (as today).
 | I | **THE ARROW.** Every round is an arrow: it never stops at a body, flies three times as far and 40% faster, and gains up to +200% over 700 px. Every volley looses two extra arrows in a fan. |
 | II | **JUPITER.** Arrows glance off walls twice, each time gaining 50% more. |
 | III | **RAIN OF ARROWS.** Every 3 s, 24 arrows fall from the sky around where you're aiming, each at full force. |
-| Shadow | **NO QUARTER.** Rounds that have flown less than 220 px do half damage. |
+| Shadow | **THE ARROW RETURNS.** One round in three that you fire turns at the end of its flight and comes back for you, at 5% of your max health. |
 
 On the lance:
 - +250 reach, and the far half of the beam hits +100% (+150% at II).
 - At III, the rain falls where the beam ends.
-- The shadow halves the near third.
+- The shadow: while the beam is out, an arrow flies at you from the room's
+  edge every second.
 
 On the blade:
 - Every swing that lands looses 3 arrows at the farthest bodies within 900,
   at the swing's full damage.
-- The shadow makes swings do 25% less.
+- The shadow: the same arrow from the edge, every second you swing.
 
 ### CAPRICORN, The Goat · earth · Saturn
 | | |
@@ -204,7 +217,7 @@ On the blade:
 | I | **THE CLIMB.** Every wave you clear adds +8% damage (compounding) and +5 max health. It starts as though you'd climbed half the waves you've already cleared, so taking it late pays at once. |
 | II | **SATURN.** A boss counts as five waves, and every step of the climb also adds half as much fire rate. |
 | III | **THE SUMMIT.** A wave cleared without being hit counts three times, and the climb adds speed too (2% a step). |
-| Shadow | **THE SUMMIT IS FAR.** 40% less damage. |
+| Shadow | **THE LONG CLIMB.** Your damage falls to a third, and climbs back 15% with every wave you clear. |
 
 Taken at wave 15, it's ×1.7 damage straight away. Twenty waves later it's
 ×4.7 more. This is the scaling pick. A cap is an open question below.
@@ -216,7 +229,7 @@ Taken at wave 15, it's ×1.7 damage straight away. Twenty waves later it's
 | I | **THE CURRENT.** You leave charged water wherever you go. Anything in it takes 3 × your damage a second, is 40% slower, and arcs lightning to every other body in the water. You're 20% faster. |
 | II | **THE WAVE.** Your dash pours the urn: a wide wave rolls out ahead of you, washing away every enemy round in it and throwing bodies back. |
 | III | **THE FLOOD.** Every 10 s the room floods: a wave rolls out from you across the whole room. It erases every enemy round, shocks everything for 12 × your damage, and leaves the floor charged for 4 s. |
-| Shadow | **ADRIFT.** Your hull slides, keeping most of its speed after you let go. |
+| Shadow | **THE RISING TIDE.** Through every wave the water creeps in from the walls, to over a third of the room. Standing in it drains 3% of your max health a second and slows you by 30%. It drains when the wave ends. |
 
 ### PISCES, The Fish · water · Neptune
 | | |
@@ -225,9 +238,23 @@ Taken at wave 15, it's ×1.7 damage straight away. Twenty waves later it's
 | I | **THE DEEP.** A sphere of deep water goes with you (radius 170). Enemy rounds inside it crawl at 25% speed. Bodies inside it are 40% slower and take 25% more from you. |
 | II | **THE DREAM.** An enemy round that spends a second in the sphere changes sides: it turns and flies at the nearest body as yours, at your damage. |
 | III | **THE TIDE.** Every 12 s the tide turns: every enemy round in the room turns around and becomes yours, and you can't be hit for 1 s. |
-| Shadow | **DEEP WATER.** Your rounds drag, drift and sink. (Today's curse.) On the lance: 90 less reach. On the blade: swings are 20% slower. |
+| Shadow | **DEEP WATER.** Your rounds drag, drift and sink (today's curse), and so do you: 30% slower, and your dash goes half as far. On the lance: 90 less reach. |
 
 Today's curse turned outward, onto their shots.
+
+### The shadows, as a whole
+
+Each shadow is its own kind of trouble, and each is worse than any curse
+the planetarium had before. Each lasts one sector, and buys a full
+magnitude of a sign that's worth a shop on its own:
+
+| Kind | Shadows |
+|---|---|
+| Takes your movement | HEADLONG, EARTHBOUND, DEEP WATER, THE RISING TIDE |
+| Takes your sight | SUNLESS |
+| Turns your fire on you | THE OTHER ONE, THE ARROW RETURNS, THE SCALES, EXACTING |
+| Takes your defences | THE MOLT, THE STING TURNS |
+| Takes your damage | THE LONG CLIMB |
 
 ### New words for the six former curses
 
@@ -278,7 +305,7 @@ trine as well. A shadow is never affected by a trine.
 | Sign | The worry |
 |---|---|
 | Gemini III | Four of you is four times the rounds. Chromebooks need a ceiling on rounds in the air, and the ring may need less damage. |
-| Leo II, Aquarius III, Pisces III, Leo III | Each one burns, erases or turns enemy rounds. They must leave alone the rounds a finale or a scripted boss owns (ONE POINT OH, THE OTHER, the rites, and so on), or those fights stop being fights. |
+| Leo II, Aquarius III, Pisces III, Leo III | Each one burns, erases or turns enemy rounds. They leave alone every round from a secret boss (the finales, THE BOOKKEEPER, THE SHOPKEEPER, the ALL HALLOWS bosses) and every round during a rite or a finale, or those fights stop being fights (`zTouchable`). Ordinary bosses' rounds are fair game: open question 5. |
 | Capricorn | It compounds. |
 | Taurus III | A long run with a big hoard is hard to kill. That's the point, but watch it. |
 | Virgo III | Every hit is a critical, so crit damage cards scale it hard. |
@@ -287,26 +314,15 @@ trine as well. A shadow is never affected by a trine.
 
 | Area | Change |
 |---|---|
-| Co-op | When a planetarium replaces the shop, each pilot reads for their own ship: their own three, their own retrograde, and their own turning paid from the shared credits, as the shop is. New UI acts: `read` (index, retro) and `domeTurn` join `LS_UI_GUEST`. `domeOut` stays the host's, once both have read. A pilot still choosing is shown as `<peer> IS READING`. |
+| Co-op | When a planetarium replaces the shop, each pilot reads for their own ship: their own three, their own retrograde, and their own turning paid from the shared credits, as the shop is. New UI acts: `read` (index), `retro` and `domeTurn` join `LS_UI_GUEST`. `planetOut` stays the host's. The host sees `<peer> IS READING` while the guest hasn't read. |
 | Lockstep and determinism | The three signs are rolled with `simRand` when the planetarium opens, once per pilot. Every choice goes through `ui()`. |
 | Codex (`z`) | The same twelve ids. Each entry shows all three magnitudes and the shadow, and the subtitle shows the element instead of BLESSING / CURSE. Codex completion (THE KEEPER) still needs all twelve signs seen. |
-| BAD READING (`ch_stars`) | Fixed to match its own text. Scorpio is taken retrograde at the door (it starts at II), and its shadow, NO ANTIDOTE, never lifts. |
+| BAD READING (`ch_stars`) | Fixed to match its own text. Scorpio is taken retrograde at the door (it starts at II), and its shadow, THE STING TURNS, never lifts. |
 | Freeplay, GIVE A READING | Raises the next sign by one magnitude, cycling through the twelve. |
 | Saves | No migration. The unlock (`planetarium`, `skipStreak`) is unchanged. |
 | PvP | No change. It has no reward rooms. |
 | Outside pilots | Get the bullet version unless their module says otherwise. |
-| Tests | `scripts/determinism.mjs`, `lockstep.mjs` (its forced `openPlanetarium()` at step 1500 opens the new dome, and the guest must take a reading of its own there too), `onepointoh.mjs` and `testconsole.js`. |
-
-Where the code changes, by name:
-- the signs and taking one: `SIGNS` (each with an element, a star, three
-  magnitudes and a shadow), `openPlanetarium`, `acceptSign`
-- the screen and its input: `drawPlanetarium`, `planetButtons`, the `planet`
-  key and click handlers, `UI_ACTS`
-- the effects: the zodiac fields on `P`, and the zodiac block in the update
-- everything else that names a sign: the codex `z` tab, the keeper notes,
-  freeplay, `ch_stars` and `lsDrawHint`
-
-`openReward` and `noteShopExit` stay as they are.
+| Tests | `npm run test:zodiac` (new) and `npm run test:lockstep`; see **What's built**. |
 
 ## The art plan
 
@@ -365,7 +381,7 @@ screens and touch, the plates stack the way the level-up cards do.
 
 **The retrograde side.** The plate flips on its vertical axis to violet. The
 glyph gets a retrograde tail. The extra magnitude pip is lit in violet.
-Under the effect: `SHADOW · BARE — you take 30% more damage, until the sky
+Under the effect: `SHADOW · HEADLONG — you cannot stop ..., until the sky
 turns`.
 
 **The beats:**
@@ -426,15 +442,21 @@ meant to look like OVERDRIVE moves.
 - **A shared look.** A dark disc with a violet corona sits faintly on the
   hull. That's the eclipse.
 - **Each shadow's own tell:**
-  - EXPOSED: the twin gets a violet hit ring
-  - THE SPOTLIGHT: a cone of light falls on you from above
-  - EARTHBOUND: the dash pip is cracked
+  - HEADLONG: the engine trail stays lit when you let go, and skid sparks
+  - EARTHBOUND: the dash pip is cracked, and roots grip the hull while it's held
+  - THE OTHER ONE: your double in violet, aiming at you, with a muzzle tell
+    before each round
+  - THE MOLT: the shell plates are missing, and the hull looks soft
+  - SUNLESS: the dark itself, with a ragged rim of light at 240 px
+  - EXACTING: a missed shot flashes a violet `−`
   - THE SCALES: harm numbers in pink
-  - EXACTING: a misplaced shot flashes a violet `−`
-  - NO ANTIDOTE: heal numbers struck through
-  - ADRIFT: skid marks
-  - THE MOLT: the shell plates are missing
-  - DEEP WATER: as today
+  - THE STING TURNS: green pips orbiting your own hull, one per stack, and
+    heal numbers struck through
+  - THE ARROW RETURNS: a returning round turns violet at the turn, so it can
+    be read in a crowd
+  - THE LONG CLIMB: a summit glyph that fills back up wave by wave
+  - THE RISING TIDE: the water at the walls, with a foam line at its edge
+  - DEEP WATER: as today, and bubbles off the hull
 - **When the next boss falls:** the disc slides off the hull, the light
   comes back, and the banner reads **THE SKY TURNS**.
 
@@ -479,6 +501,8 @@ THE KEEPER's note.
 
 ## Build order
 
+Steps 1 to 6 are built (18 Nov).
+
 1. **The reading,** with placeholder art: three face-up plates, take, turn,
    leave. Co-op per pilot. The trigger (half the shops) stays as it is.
 2. **The twelve at I.** The six old blessings rebuilt at the new strength,
@@ -491,13 +515,62 @@ THE KEEPER's note.
 7. **Art:** the board first, then `planetarium-art/` and the lift.
 8. **Music and sound.**
 
+## What's built
+
+Everything is in `index.html`, in the block headed **THE PLANETARIUM**
+(where the old planetarium was):
+- `SIGNS`, the reading (`zRoll`, `openPlanetarium`, `zTake`, `zTurn`,
+  `zRetro`, `leavePlanetarium`)
+- holding a sign (`zRaise`, `zApply`, `zTrineCheck`)
+- shadows (`zShadowOn`, `zShadowOff`, `skyTurns`)
+- the per-frame tick (`zTick`)
+- the multipliers (`zDmgMul`, `zHurtMul`, `zSpdMul`)
+- the placeholder drawing (`drawPlanetarium`, `signTray`, `zDrawWorld`,
+  `zDrawDark`)
+
+The rest of the game calls into it from one line each, marked
+`THE PLANETARIUM` or by the sign's name:
+- `damageEnemy`, `hurtPlayer`, `reviveOrDie`, `killBody`
+- the wave line, the dash, the gun, `twinFire`, the lance, the blade
+- `updateBullets`, `updateEBullets`, the current hazard
+- the shop, `openReward`
+- the keys, clicks and UI acts, `lsDrawHint`, the codex, freeplay, and
+  BAD READING
+
+Checked:
+- **`npm run test:zodiac`** (new, `scripts/zodiac.mjs`), 88 checks, all
+  pass:
+  - the reading's keys
+  - every sign at the magnitude that adds each thing
+  - every shadow on its own
+  - all four trines
+  - every sign at III, and each shadow, played and drawn on the gun, the
+    lance, the blade and THE HACKER
+  - two plays of the same run matching
+- **`npm run test:lockstep`**: every scenario stays in step, snapshots
+  included, and both pilots read their own sign. Two changes to the test:
+  - its host bot uses the new keys, and waits for the guest to read before
+    it leaves the dome
+  - `lifecycle` doesn't open the planetarium, for the same reason it gets
+    no planted loot: it needs its pilots to go down. Its seed moved from
+    206 to 242, because its checks hang on one lucky seed (on main, 207,
+    208, 209 and 211 fail too).
+- **`npm test`** (determinism): every scenario plays the same drawn and
+  undrawn, and the same again from a snapshot. It has a new scenario,
+  `zodiac`: every sign held at II, a shadow carried, and the planetariums
+  open, with the bot reading the way a player does (retrograde one time in
+  three). It has to read at least one sign or it fails.
+- Also run, and all pass: `test:khepri` (the twin's lance), `test:tales`,
+  `test:ach`, `test:outside` and `test:imago`.
+
 ## Open questions
 
 1. **Three face-up signs** (my call), **or one hidden sign** as today? With
    one hidden sign, it would always be a blessing, and every effect above
    still works.
-2. **Retrograde:** keep it, now that every sign is strong on its own? Or cut
-   it, and curses leave the game entirely?
+2. **The shadows** are now each their own mechanic and harsher (your call,
+   18 Nov). Is one sector the right length, or should the worst of them
+   (SUNLESS, THE OTHER ONE, EARTHBOUND) last two?
 3. **Gemini III:** four of you, or stop at the ring between two?
 4. **Capricorn:** cap the climb (say at ×8), or let it run?
 5. **Enemy rounds:** should the effects that burn, erase or turn enemy
