@@ -26,8 +26,8 @@ it stops and writes nothing. It also refuses a page that's already lifted. Befor
 - every top-level `let` the art has is in `SNAP_LOCAL`, so run snapshots leave it on each machine.
 
 Checked on the lifted page (18 Nov): `npm run test:zodiac` (88 passed, including every sign at III and every
-shadow played and drawn on all four hulls) and `npm test` (all deterministic, drawn and undrawn, every scenario,
-`zodiac` among them).
+shadow played and drawn on all four hulls), `npm test` (all deterministic, drawn and undrawn, every scenario,
+`zodiac` among them) and `npm run test:lockstep` (all in step, every scenario).
 
 ## The files
 
