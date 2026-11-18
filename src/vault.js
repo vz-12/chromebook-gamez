@@ -111,8 +111,8 @@ export async function vaultOpen(db, account) {
   const out = ((res && res.results) || []).map(r => Object.assign({ id: r.id, h: r.hash, size: r.size }, r.name && ids.includes(r.id) ? { n: r.name } : {}));
   return out.length ? out : null;
 }
-// whether this route hands an account one entry: its perk, or the entry is open
-async function mayLoad(db, account, id) {
+// whether this route hands an account one entry: its perk, or the entry is open (and so, whether it may tell one's tyrant fell: felled.js)
+export async function mayLoad(db, account, id) {
   if (vaultIds(account.perks).includes(id)) return true;
   await ensureVault(db);
   const row = await db.prepare('SELECT open FROM vault_heads WHERE id = ?1').bind(id).first();

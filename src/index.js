@@ -24,6 +24,8 @@
      /api/parts         and won: the place its parts go, for the winner (parts.js)
      /api/patreon      a player's own Patreon link: /link off to Patreon, /back
                         home again, /hook Patreon's webhook (patreon.js)
+     /api/felled        a tyrant (a vault module's one-of-a-kind boss) down: written
+                        down, and an admin told (felled.js)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
@@ -42,6 +44,7 @@ import live from './live.js';
 import film from './film.js';
 import parts from './parts.js';
 import patreon from './patreon.js';
+import felled from './felled.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
@@ -60,10 +63,10 @@ const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn'
                  '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
                  '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live, '/api/film': film,
                  '/api/parts': parts, '/api/patreon': patreon, '/api/patreon/link': patreon, '/api/patreon/back': patreon,
-                 '/api/patreon/hook': patreon };
+                 '/api/patreon/hook': patreon, '/api/felled': felled };
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const path = new URL(req.url).pathname;
     const route = Object.prototype.hasOwnProperty.call(ROUTES, path) ? ROUTES[path] : null;
     if (!route) {
@@ -75,7 +78,7 @@ export default {
        reads are caught and would quietly look like an empty board. */
     if (!env.DB) return json({ error: 'no database: bind a D1 database as DB' }, 503);
     try {
-      return await route(req, env);
+      return await route(req, env, ctx);
     } catch (e) {
       console.error(path, e && e.stack || e);
       return json({ error: 'server error: ' + String((e && e.message) || e).slice(0, 120) }, 500);
