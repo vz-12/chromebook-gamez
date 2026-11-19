@@ -37572,8 +37572,10 @@ function malTrail(x1, y1, x2, y2, col) {
    and THE OTHER read them. The old curses' fields (rooted, molt, exacting,
    scales, deepwater) are now the shadows' switches.
 
-   The art is placeholder, behind the hooks the plan names (drawPlanetarium,
-   signTray, zDrawWorld, zDrawDark). A later pass draws it properly.
+   The art is drawn (lifted from planetarium-art/), in the blocks after the
+   screen's geometry: the sky (za*), the dome (drawPlanetarium), the tray
+   (signTray), the field (zDrawWorld, zDrawDark) and the events (zaFx, called
+   from the lines marked THE PLANETARIUM: art). None of it changes the run.
 =========================================================================== */
 let curseHpMul = 1;
 let shopTouched = false;
@@ -37984,6 +37986,7 @@ function zOnHit(e, dmg, crit, opts) {
       e.xp = (e.xp || 0) * 2;
       e.hp = 0;
       floatText(e.x, e.y - e.r - 8, 'REAPED', '#e2e8f0', 15);
+      zaFx('reap', e.x, e.y, e.r);         // THE PLANETARIUM: art (the scythe-stroke)
       if (v >= 2) zSeed(e);
     }
   }
@@ -37994,6 +37997,7 @@ function zSting(e) {
   e.zSting = (e.zSting || 0) + 1;
   if (e.zSting < 8) return;
   e.zSting = 0;
+  zaFx('sting', e.x, e.y, e.r);            // THE PLANETARIUM: art (the tail)
   const all = (2 + 0.2 * P.dmg) * e.psn * 20 * 2;      // ten seconds of it, at two ticks a second, doubled
   floatText(e.x, e.y - e.r - 14, 'STING', '#a3e635', 16);
   ringFx(e.x, e.y, e.r, e.r * 3, '#a3e635', 0.4, 4);
@@ -38099,6 +38103,7 @@ function zGoldenBull() {
   const cost = Math.round(150 * (1 + Math.max(0, stageAbs) * 0.15) * hardPrice());
   if (credits < cost) return false;
   credits -= cost;
+  zaFx('bull', P.x, P.y, cost);            // THE PLANETARIUM: art (the coins)
   P.hp = P.maxHp;
   P.iframe = Math.max(P.iframe, 1.2);
   playerBlast(P.x, P.y, 300, 100 + 10 * P.dmg, Z_GOLD);
@@ -38135,6 +38140,7 @@ function zDash(dx, dy) {
 }
 // THE WAVE: a wide wash ahead, taking rounds off the floor and throwing bodies back
 function zWaveOut(x, y, dx, dy) {
+  zaFx('wave', x, y, dx, dy);                // THE PLANETARIUM: art (the crescent of water)
   const a0 = Math.atan2(dy, dx), R = 360;
   const inCone = (px, py) => {
     const d = len(px - x, py - y);
@@ -38389,6 +38395,7 @@ function zJudge() {
     if (!best || e.hp > best.hp) best = e;
   }
   if (!best) return;
+  zaFx('judge', best.x, best.y, best.r);   // THE PLANETARIUM: art (the pillar, the scales)
   let dmg = 40 * P.dmg;
   if (best.type === 'boss' && zReapable(best)) dmg = Math.max(dmg, best.maxHp * 0.08);
   ringFx(best.x, best.y, best.r, best.r * 4, '#fef9c3', 0.7, 6);
@@ -38412,6 +38419,7 @@ function zAimPoint() {
 function zRain() {
   const at = zAimPoint();
   const tx = clamp(at.x, arena.x0 + 20, arena.x1 - 20), ty = clamp(at.y, arena.y0 + 20, arena.y1 - 20);
+  zaFx('rain', tx, ty);                    // THE PLANETARIUM: art (out of the dark)
   for (let k = 0; k < 24; k++) {
     const a = (k / 24) * TAU + simRnd(0.2, -0.2);
     const sx = clamp(tx + Math.cos(a) * 260, arena.x0 + 6, arena.x1 - 6);
@@ -38509,6 +38517,7 @@ function zTick(dt, firing) {
         if (m >= 3) { e.launched = 0.7; e.launchId = 1e6 + x.dashId; e.launchDmg = gore; }
       }
       burst(e.x, e.y, 12, '#fb7185', 300, 3.4, 0.4);
+      zaFx('gore', e.x, e.y, a);           // THE PLANETARIUM: art (the ram's crescent)
       shake(0.25);
     }
   }
@@ -38658,10 +38667,9 @@ function zHeadlong(ix, iy) {
   return [x.lastX, x.lastY];
 }
 
-/* ======================= THE PLANETARIUM: placeholder screen ======================
-   Plain, so the logic can be played: three plates, the switch, the buttons.
-   The dome, the real constellations and the tray are the art pass's
-   (PLANETARIUM-PLAN.md, The art plan). */
+/* ===================== THE PLANETARIUM: the screen's geometry =====================
+   Where the three plates and the buttons stand: the clicks hit these rects, and
+   the dome (after them) draws in them. */
 function zPlates() {
   const r = P.zRead, n = r ? r.offers.length : 0;
   if (!n) return [];
@@ -38690,230 +38698,2528 @@ function planetButtons() {
            turn: { x: x0 + bw + 8, y: by, w: bw, h: bh },
            leave: { x: x0 + 2 * (bw + 8), y: by, w: bw, h: bh } };
 }
-function zButton(b, label, col, on) {
-  const hot = inRect(mouse.x, mouse.y, b);
+
+/* ================== THE PLANETARIUM — the sky itself (art, 18 Nov) ==================
+   What every other part of the planetarium's art draws with: the twelve real
+   constellations, the twelve glyphs, the element triangles, the magnitude pips,
+   a sign's medallion and the eclipse a shadow wears.
+     the skies     each constellation from its real stars: right ascension,
+                   declination, magnitude and spectral class (Yale Bright Star
+                   Catalogue, public domain), projected about its own centre the
+                   way it looks overhead (east to the left) and normalised, with
+                   the usual stick figures. Stars are sized by brightness and
+                   coloured by class, so Antares is red, Aldebaran orange, and
+                   Regulus and Spica blue-white. The Pleiades and the Beehive are
+                   drawn as the clusters they are.
+     the glyphs    ♈ to ♓ as canvas paths, never typed: ChromeOS turns those
+                   characters into emoji and some fonts don't have them. The same
+                   paths are sampled, so a constellation can fold into its glyph.
+   Art state is ZA (the projected skies, the sampled glyphs). It reads uiTime and
+   changes nothing of the logic's. Everything here is za* / ZA_*.
+=================================================================================== */
+const ZA_FD = "'Chakra Petch', Barlow, system-ui, sans-serif";
+const ZA_FB = "Barlow, 'Segoe UI', system-ui, sans-serif";
+const ZA_FM = "'JetBrains Mono', ui-monospace, monospace";
+const ZA_GOLD = '#fbbf24', ZA_GOLD_HI = '#fde68a', ZA_GOLD_PALE = '#fef3c7';
+const ZA_SHADE = '#a855f7', ZA_SHADE_HI = '#d8b4fe', ZA_SHADE_DEEP = '#3b0764';
+const zaQ = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const zaE = t => (t = clamp(t, 0, 1), t * t * (3 - 2 * t));
+const zaO = t => (t = clamp(t, 0, 1), 1 - (1 - t) * (1 - t) * (1 - t));
+const zaIn = t => (t = clamp(t, 0, 1), t * t * t);
+const zaBack = t => { t = clamp(t, 0, 1); const c = 1.7; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
+// a hash in [0, 1) for anything the art wants scattered the same way every frame
+const zaH = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+
+// the ruling planet of each sign, and the star the plan names for it
+const ZA_RULER = { aries: 'MARS', taurus: 'VENUS', gemini: 'MERCURY', cancer: 'THE MOON', leo: 'THE SUN', virgo: 'MERCURY',
+                   libra: 'VENUS', scorpio: 'PLUTO', sagittarius: 'JUPITER', capricorn: 'SATURN', aquarius: 'URANUS', pisces: 'NEPTUNE' };
+// the wheel's order, from the first point of Aries
+const ZA_ORDER = ['aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo', 'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces'];
+const ZA_ELCOL = { fire: '#fb923c', earth: '#34d399', air: '#cbd5e1', water: '#38bdf8' };
+const zaEl = id => { for (const el in ZA_EL_OF) if (ZA_EL_OF[el].includes(id)) return el; return 'fire'; };
+const ZA_EL_OF = { fire: ['aries', 'leo', 'sagittarius'], earth: ['taurus', 'virgo', 'capricorn'],
+                   air: ['gemini', 'libra', 'aquarius'], water: ['cancer', 'scorpio', 'pisces'] };
+
+/* ------------------------------------ the skies ------------------------------------
+   [right ascension (h), declination (°), magnitude, class]; l: the figure; star: the
+   one the plate names (its index in s); cl: a cluster drawn as one (centre, count,
+   radius in degrees). */
+const ZA_SCOL = { B: '#a9c4ff', A: '#d9e4ff', F: '#f6f3ff', G: '#ffedcc', K: '#ffc07a', M: '#ff8a5c', R: '#ff5b3a', O: '#ff9a52' };
+const ZA_SKY = {
+  aries: { star: 'HAMAL', si: 1,
+    s: [[2.8331, 27.26, 3.6, 'B'], [2.1194, 23.4625, 2.0, 'K'], [1.9106, 20.808, 2.64, 'A'], [1.8920, 19.29, 3.9, 'A']],
+    l: [[0, 1], [1, 2], [2, 3]] },
+  taurus: { star: 'ALDEBARAN', si: 0,
+    s: [[4.5986, 16.509, 0.85, 'O'], [5.4383, 28.607, 1.65, 'B'], [5.6275, 21.143, 3.0, 'B'], [4.33, 15.627, 3.65, 'K'],
+        [4.3822, 17.542, 3.76, 'K'], [4.4769, 19.18, 3.53, 'K'], [4.4778, 15.871, 3.4, 'A'], [4.0114, 12.49, 3.4, 'B'],
+        [3.4136, 9.029, 3.6, 'G'], [3.7914, 24.105, 2.87, 'B'], [3.8194, 24.053, 3.6, 'B'], [3.7481, 24.113, 3.7, 'B'],
+        [3.7639, 24.368, 3.9, 'B'], [3.7722, 23.948, 4.1, 'B'], [3.7533, 24.467, 4.3, 'B']],
+    l: [[8, 7], [7, 3], [3, 4], [4, 5], [5, 1], [3, 6], [6, 0], [0, 2]], pleiades: [9, 10, 11, 12, 13, 14] },
+  gemini: { star: 'CASTOR · POLLUX', si: 1,
+    s: [[7.5767, 31.888, 1.58, 'A'], [7.7553, 28.026, 1.14, 'K'], [6.6286, 16.399, 1.9, 'A'], [6.7322, 25.131, 3.0, 'G'],
+        [6.3828, 22.514, 2.9, 'M'], [6.2481, 22.507, 3.3, 'M'], [7.3353, 21.982, 3.5, 'F'], [7.0686, 20.57, 3.9, 'G'],
+        [6.7547, 12.896, 3.35, 'F'], [7.1856, 30.245, 4.4, 'K'], [7.4289, 27.798, 3.8, 'G'], [7.5986, 26.896, 4.06, 'M'],
+        [7.7408, 24.398, 3.6, 'G'], [6.8797, 33.961, 3.6, 'A'], [6.4828, 20.212, 4.15, 'B'], [7.3017, 16.54, 3.6, 'A']],
+    l: [[0, 1], [0, 9], [9, 13], [9, 3], [3, 4], [4, 5], [3, 14], [9, 10], [10, 11], [1, 11], [1, 12], [11, 6], [6, 7],
+        [7, 2], [6, 15], [15, 8]] },
+  cancer: { star: 'ACUBENS · THE BEEHIVE', si: 0,
+    s: [[8.9747, 11.858, 4.25, 'A'], [8.2753, 9.186, 3.5, 'K'], [8.7447, 18.154, 3.94, 'K'], [8.7214, 21.469, 4.66, 'A'],
+        [8.7783, 28.76, 4.0, 'G']],
+    l: [[1, 2], [2, 0], [2, 3], [3, 4]], cl: { ra: 8.667, dec: 19.98, n: 18, r: 0.75 } },
+  leo: { star: 'REGULUS', si: 0,
+    s: [[10.1394, 11.967, 1.35, 'B'], [11.8178, 14.572, 2.1, 'A'], [10.3328, 19.842, 2.0, 'K'], [11.235, 20.524, 2.55, 'A'],
+        [11.2372, 15.43, 3.3, 'A'], [9.7642, 23.774, 2.97, 'G'], [9.8794, 26.007, 3.9, 'K'], [10.2781, 23.417, 3.4, 'F'],
+        [10.1222, 16.763, 3.5, 'A']],
+    l: [[0, 8], [8, 2], [2, 7], [7, 6], [6, 5], [2, 3], [3, 1], [1, 4], [4, 0], [3, 4]] },
+  virgo: { star: 'SPICA', si: 0,
+    s: [[13.4199, -11.161, 0.97, 'B'], [12.6944, -1.449, 2.74, 'F'], [13.0364, 10.959, 2.8, 'G'], [12.9267, 3.397, 3.4, 'M'],
+        [11.845, 1.765, 3.6, 'F'], [12.3317, -0.667, 3.9, 'A'], [13.5783, -0.596, 3.4, 'A'], [14.2669, -6.0, 4.1, 'F'],
+        [14.7178, -5.658, 3.9, 'F'], [11.7644, 6.529, 4.0, 'M'], [12.0869, 8.733, 4.1, 'G'], [13.1658, -5.539, 4.4, 'A'],
+        [14.0275, 1.544, 4.3, 'A']],
+    l: [[10, 9], [9, 4], [4, 5], [5, 1], [1, 3], [3, 2], [1, 11], [11, 0], [3, 6], [6, 7], [7, 8], [6, 12]] },
+  libra: { star: 'ZUBENELGENUBI', si: 0,
+    s: [[14.8481, -16.042, 2.75, 'A'], [15.2833, -9.383, 2.6, 'B'], [15.0678, -25.282, 3.3, 'M'], [15.5922, -14.789, 3.9, 'G'],
+        [15.6169, -28.135, 3.6, 'K'], [15.6444, -29.778, 3.66, 'B'], [15.8972, -16.729, 4.15, 'K']],
+    l: [[0, 1], [1, 3], [3, 0], [0, 2], [3, 4], [4, 5], [3, 6]] },
+  scorpio: { star: 'ANTARES', si: 0,
+    s: [[16.49, -26.432, 1.06, 'R'], [16.0906, -19.806, 2.6, 'B'], [16.0056, -22.622, 2.3, 'B'], [15.9808, -26.114, 2.9, 'B'],
+        [15.9481, -29.214, 3.9, 'B'], [16.3531, -25.593, 2.9, 'B'], [16.5981, -28.216, 2.8, 'B'], [16.8361, -34.293, 2.3, 'K'],
+        [16.8644, -38.048, 3.0, 'B'], [16.9097, -42.362, 3.6, 'K'], [17.2025, -43.239, 3.3, 'F'], [17.6219, -42.998, 1.86, 'F'],
+        [17.7931, -40.127, 3.0, 'F'], [17.7081, -39.03, 2.4, 'B'], [17.56, -37.104, 1.63, 'B'], [17.5128, -37.296, 2.7, 'B'],
+        [16.1997, -19.461, 4.0, 'B']],
+    l: [[16, 1], [1, 2], [2, 3], [3, 4], [2, 5], [5, 0], [0, 6], [6, 7], [7, 8], [8, 9], [9, 10], [10, 11], [11, 12],
+        [12, 13], [13, 14], [14, 15]] },
+  sagittarius: { star: 'KAUS AUSTRALIS', si: 0,
+    s: [[18.4029, -34.385, 1.85, 'B'], [18.9211, -26.297, 2.05, 'B'], [19.0436, -29.88, 2.6, 'A'], [18.3497, -29.828, 2.7, 'K'],
+        [18.4661, -25.422, 2.8, 'K'], [18.0967, -30.424, 2.98, 'K'], [18.7608, -26.991, 3.17, 'B'], [19.1156, -27.671, 3.3, 'K'],
+        [18.2939, -36.761, 3.1, 'M']],
+    l: [[5, 3], [3, 0], [0, 5], [3, 4], [4, 6], [6, 3], [6, 1], [1, 7], [7, 2], [2, 6], [2, 0], [0, 8]] },
+  capricorn: { star: 'DENEB ALGEDI', si: 0,
+    s: [[21.7839, -16.127, 2.85, 'A'], [20.3503, -14.781, 3.05, 'G'], [20.3008, -12.545, 3.6, 'G'], [21.6681, -16.662, 3.7, 'F'],
+        [20.8636, -26.919, 4.1, 'M'], [20.7683, -25.271, 4.1, 'F'], [21.0992, -17.233, 4.1, 'A'], [21.4444, -22.411, 3.7, 'G'],
+        [21.3708, -16.834, 4.3, 'G']],
+    l: [[2, 1], [1, 5], [5, 4], [4, 7], [7, 0], [1, 6], [6, 8], [8, 3], [3, 0]] },
+  aquarius: { star: 'SADALSUUD', si: 0,
+    s: [[21.5258, -5.571, 2.9, 'G'], [22.0964, -0.32, 2.95, 'G'], [22.9108, -15.821, 3.27, 'A'], [22.4806, -0.02, 3.65, 'F'],
+        [22.5892, -0.117, 4.0, 'B'], [22.3608, -1.387, 3.85, 'A'], [22.4214, 1.377, 4.6, 'B'], [20.7944, -9.496, 3.8, 'A'],
+        [22.2806, -7.783, 4.2, 'G'], [22.8769, -7.58, 3.7, 'M'], [22.8267, -13.592, 4.0, 'M'], [23.2386, -6.049, 4.2, 'M'],
+        [23.2650, -9.088, 4.2, 'K'], [23.1575, -21.172, 3.7, 'K'], [23.3828, -20.1, 3.97, 'K']],
+    l: [[7, 0], [0, 1], [1, 5], [5, 3], [3, 4], [3, 6], [6, 1], [1, 8], [8, 9], [9, 10], [10, 2], [2, 13], [9, 11],
+        [11, 12], [12, 14]] },
+  pisces: { star: 'ALRESCHA', si: 0,
+    s: [[2.0342, 2.764, 3.8, 'A'], [1.5247, 15.346, 3.6, 'G'], [23.2861, 3.282, 3.7, 'G'], [23.9886, 6.863, 4.0, 'F'],
+        [23.6658, 5.626, 4.1, 'F'], [23.4661, 6.379, 4.3, 'K'], [23.7008, 1.78, 4.5, 'A'], [23.4489, 1.256, 4.9, 'A'],
+        [23.3378, 5.381, 5.05, 'K'], [0.8114, 7.585, 4.4, 'K'], [1.0492, 7.89, 4.3, 'K'], [1.2289, 7.575, 5.2, 'F'],
+        [1.5031, 6.144, 4.8, 'K'], [1.6906, 5.488, 4.4, 'K'], [1.8925, 3.187, 4.6, 'K'], [1.7567, 9.158, 4.3, 'G'],
+        [1.1908, 21.035, 4.7, 'K'], [1.2292, 24.583, 4.65, 'K'], [1.3244, 27.264, 4.75, 'A'], [1.1942, 30.09, 4.5, 'K']],
+    l: [[2, 8], [8, 5], [5, 4], [4, 6], [6, 7], [7, 2], [4, 3], [3, 9], [9, 10], [10, 11], [11, 12], [12, 13], [13, 14],
+        [14, 0], [0, 15], [15, 1], [1, 16], [16, 17], [17, 18], [18, 19]] }
+};
+
+// each sky projected about its own centre and normalised: the longer side spans [-1, 1]
+const ZA = { sky: {}, glyph: {}, pts: {} };
+(function zaProjectAll() {
+  const d2r = Math.PI / 180;
+  for (const id of ZA_ORDER) {
+    const c = ZA_SKY[id];
+    let sx = 0, sy = 0, sd = 0;
+    for (const s of c.s) { const a = s[0] * 15 * d2r; sx += Math.cos(a); sy += Math.sin(a); sd += s[1]; }
+    const ra0 = Math.atan2(sy, sx) / d2r, dec0 = sd / c.s.length;
+    const proj = (ra, dec) => {
+      let dra = ra * 15 - ra0;
+      dra = ((dra + 540) % 360) - 180;
+      return [-dra * Math.cos(dec * d2r), -(dec - dec0)];
+    };
+    const pts = c.s.map(s => proj(s[0], s[1]));
+    const clu = [];
+    if (c.cl) {
+      for (let k = 0; k < c.cl.n; k++) {
+        const a = zaH(k * 3.1 + 7) * TAU, r = Math.sqrt(zaH(k * 5.7 + 2)) * c.cl.r;
+        clu.push([...proj(c.cl.ra + Math.cos(a) * r / 15, c.cl.dec + Math.sin(a) * r), 5.6 + zaH(k + 9) * 1.4]);
+      }
+    }
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const p of pts.concat(clu)) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, k = 2 / Math.max(x1 - x0, y1 - y0, 1e-6);
+    ZA.sky[id] = {
+      star: c.star, si: c.si, l: c.l, pl: c.pleiades || [],
+      p: pts.map((p, i) => ({ x: (p[0] - cx) * k, y: (p[1] - cy) * k, m: c.s[i][2], col: ZA_SCOL[c.s[i][3]] })),
+      cl: clu.map(p => ({ x: (p[0] - cx) * k, y: (p[1] - cy) * k, m: p[2] })),
+      w: (x1 - x0) * k, h: (y1 - y0) * k
+    };
+  }
+})();
+
+/* ------------------------------------ the glyphs ------------------------------------
+   In a [-1, 1] box, y down. M L Q C as the canvas has them; O is a whole circle. */
+const zaZig = y => [['M', -0.86, y + 0.12], ['L', -0.43, y - 0.16], ['L', 0, y + 0.12], ['L', 0.43, y - 0.16], ['L', 0.86, y + 0.12]];
+const ZA_GLYPH = {
+  aries: [['M', 0, 0.9], ['L', 0, -0.05], ['C', 0, -0.62, -0.22, -0.88, -0.48, -0.86], ['C', -0.78, -0.84, -0.86, -0.5, -0.7, -0.32],
+          ['M', 0, -0.05], ['C', 0, -0.62, 0.22, -0.88, 0.48, -0.86], ['C', 0.78, -0.84, 0.86, -0.5, 0.7, -0.32]],
+  taurus: [['O', 0, 0.36, 0.44], ['M', -0.86, -0.82], ['C', -0.66, 0.12, 0.66, 0.12, 0.86, -0.82]],
+  gemini: [['M', -0.78, -0.82], ['Q', 0, -0.56, 0.78, -0.82], ['M', -0.78, 0.82], ['Q', 0, 0.56, 0.78, 0.82],
+           ['M', -0.36, -0.7], ['L', -0.36, 0.7], ['M', 0.36, -0.7], ['L', 0.36, 0.7]],
+  cancer: [['O', -0.42, -0.26, 0.22], ['M', -0.42, -0.48], ['C', 0.0, -0.78, 0.6, -0.72, 0.88, -0.36],
+           ['O', 0.42, 0.26, 0.22], ['M', 0.42, 0.48], ['C', 0.0, 0.78, -0.6, 0.72, -0.88, 0.36]],
+  leo: [['O', -0.5, 0.38, 0.24], ['M', -0.27, 0.32], ['C', -0.48, -0.32, -0.18, -0.86, 0.2, -0.86],
+        ['C', 0.66, -0.86, 0.72, -0.34, 0.46, 0.04], ['C', 0.24, 0.36, 0.3, 0.86, 0.78, 0.74]],
+  virgo: [['M', -0.84, -0.6], ['L', -0.72, -0.5], ['L', -0.72, 0.72], ['M', -0.72, -0.26], ['C', -0.66, -0.78, -0.24, -0.78, -0.24, -0.3],
+          ['L', -0.24, 0.72], ['M', -0.24, -0.3], ['C', -0.18, -0.78, 0.24, -0.78, 0.24, -0.3], ['L', 0.24, 0.46],
+          ['C', 0.24, 0.92, 0.72, 0.92, 0.74, 0.48], ['C', 0.76, 0.08, 0.42, 0.02, 0.18, 0.3], ['L', -0.02, 0.58]],
+  libra: [['M', -0.86, 0.62], ['L', 0.86, 0.62], ['M', -0.86, 0.22], ['L', -0.34, 0.22], ['C', -0.62, -0.12, -0.4, -0.66, 0, -0.66],
+          ['C', 0.4, -0.66, 0.62, -0.12, 0.34, 0.22], ['L', 0.86, 0.22]],
+  scorpio: [['M', -0.84, -0.6], ['L', -0.72, -0.5], ['L', -0.72, 0.66], ['M', -0.72, -0.26], ['C', -0.66, -0.78, -0.24, -0.78, -0.24, -0.3],
+            ['L', -0.24, 0.66], ['M', -0.24, -0.3], ['C', -0.18, -0.78, 0.24, -0.78, 0.24, -0.3], ['L', 0.24, 0.5],
+            ['Q', 0.26, 0.74, 0.52, 0.74], ['L', 0.84, 0.44], ['M', 0.56, 0.42], ['L', 0.86, 0.42], ['L', 0.86, 0.72]],
+  sagittarius: [['M', -0.78, 0.78], ['L', 0.78, -0.78], ['M', 0.22, -0.8], ['L', 0.8, -0.8], ['L', 0.8, -0.22],
+                ['M', -0.5, -0.08], ['L', 0.08, 0.5]],
+  capricorn: [['M', -0.92, -0.56], ['Q', -0.7, -0.78, -0.58, -0.44], ['L', -0.36, 0.5], ['L', -0.12, -0.46], ['Q', 0, -0.78, 0.14, -0.46],
+              ['L', 0.14, 0.38], ['C', 0.12, -0.02, 0.76, -0.06, 0.76, 0.3], ['C', 0.76, 0.66, 0.3, 0.72, 0.14, 0.38],
+              ['C', 0.04, 0.78, -0.22, 0.92, -0.46, 0.84]],
+  aquarius: zaZig(-0.3).concat(zaZig(0.3)),
+  pisces: [['M', -0.66, -0.84], ['C', -0.18, -0.42, -0.18, 0.42, -0.66, 0.84], ['M', 0.66, -0.84], ['C', 0.18, -0.42, 0.18, 0.42, 0.66, 0.84],
+           ['M', -0.42, 0], ['L', 0.42, 0]]
+};
+// the glyph as a canvas path, centred on (x, y), s its half-size
+function zaGlyphPath(id, x, y, s) {
+  const g = ZA_GLYPH[id];
+  ctx.beginPath();
+  if (!g) return;
+  for (const c of g) {
+    const X = v => x + v * s, Y = v => y + v * s;
+    if (c[0] === 'M') ctx.moveTo(X(c[1]), Y(c[2]));
+    else if (c[0] === 'L') ctx.lineTo(X(c[1]), Y(c[2]));
+    else if (c[0] === 'Q') ctx.quadraticCurveTo(X(c[1]), Y(c[2]), X(c[3]), Y(c[4]));
+    else if (c[0] === 'C') ctx.bezierCurveTo(X(c[1]), Y(c[2]), X(c[3]), Y(c[4]), X(c[5]), Y(c[6]));
+    else if (c[0] === 'O') { ctx.moveTo(X(c[1]) + c[3] * s, Y(c[2])); ctx.arc(X(c[1]), Y(c[2]), c[3] * s, 0, TAU); }
+  }
+}
+// n points along the glyph, evenly by length: where a constellation's stars land when it folds
+function zaGlyphPts(id, n) {
+  const key = id + ':' + n;
+  if (ZA.pts[key]) return ZA.pts[key];
+  const g = ZA_GLYPH[id], poly = [];
+  let px = 0, py = 0, run = null;
+  const add = (x, y) => { run.push([x, y]); px = x; py = y; };
+  for (const c of g) {
+    if (c[0] === 'M') { run = [[c[1], c[2]]]; poly.push(run); px = c[1]; py = c[2]; }
+    else if (c[0] === 'L') add(c[1], c[2]);
+    else if (c[0] === 'Q') { const x0 = px, y0 = py; for (let i = 1; i <= 10; i++) { const t = i / 10, u = 1 - t;
+      add(u * u * x0 + 2 * u * t * c[1] + t * t * c[3], u * u * y0 + 2 * u * t * c[2] + t * t * c[4]); } }
+    else if (c[0] === 'C') { const x0 = px, y0 = py; for (let i = 1; i <= 14; i++) { const t = i / 14, u = 1 - t;
+      add(u * u * u * x0 + 3 * u * u * t * c[1] + 3 * u * t * t * c[3] + t * t * t * c[5],
+          u * u * u * y0 + 3 * u * u * t * c[2] + 3 * u * t * t * c[4] + t * t * t * c[6]); } }
+    else if (c[0] === 'O') { run = []; poly.push(run); for (let i = 0; i <= 20; i++) { const a = i / 20 * TAU; run.push([c[1] + Math.cos(a) * c[3], c[2] + Math.sin(a) * c[3]]); } }
+  }
+  let total = 0;
+  for (const r of poly) for (let i = 1; i < r.length; i++) total += Math.hypot(r[i][0] - r[i - 1][0], r[i][1] - r[i - 1][1]);
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    let want = (k + 0.5) / n * total;
+    find: for (const r of poly) for (let i = 1; i < r.length; i++) {
+      const L = Math.hypot(r[i][0] - r[i - 1][0], r[i][1] - r[i - 1][1]);
+      if (want <= L) { const t = L ? want / L : 0; out.push([lerp(r[i - 1][0], r[i][0], t), lerp(r[i - 1][1], r[i][1], t)]); break find; }
+      want -= L;
+    }
+    if (out.length <= k) out.push(poly[poly.length - 1][poly[poly.length - 1].length - 1]);
+  }
+  return (ZA.pts[key] = out);
+}
+// a glyph stroked: o.lw its weight (of s), o.glow a soft bloom under it, o.retro the retrograde tail
+function zaGlyph(id, x, y, s, col, o = {}) {
+  const a = o.a === undefined ? 1 : o.a;
+  if (a <= 0.01 || s <= 0.5) return;
   ctx.save();
-  ctx.fillStyle = on ? rgba(col, 0.28) : hot ? rgba(col, 0.16) : 'rgba(12,18,30,0.95)';
-  roundRect(b.x, b.y, b.w, b.h, 10); ctx.fill();
-  ctx.strokeStyle = on || hot ? col : rgba(col, 0.45); ctx.lineWidth = on || hot ? 2 : 1.3;
-  roundRect(b.x, b.y, b.w, b.h, 10); ctx.stroke();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  fitFont(label, b.w - 16, '700', 12, "'Chakra Petch', Barlow, system-ui, sans-serif", 8);
-  ctx.fillStyle = col;
-  ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2 + 0.5);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (o.glow) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(x, y, s * 2.4, col, 0.32 * a * o.glow);
+    zaGlyphPath(id, x, y, s);
+    ctx.strokeStyle = rgba(col, 0.28 * a * o.glow); ctx.lineWidth = Math.max(2, s * 0.42);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  zaGlyphPath(id, x, y, s);
+  ctx.strokeStyle = rgba(col, a); ctx.lineWidth = Math.max(1, s * (o.lw || 0.17));
+  ctx.stroke();
+  if (o.core) {
+    ctx.strokeStyle = rgba('#ffffff', 0.55 * a * o.core); ctx.lineWidth = Math.max(0.6, s * 0.06);
+    ctx.stroke();
+  }
+  if (o.retro) zaRetroTail(x + s * 0.92, y + s * 0.82, s * 0.36, o.retroCol || ZA_SHADE_HI, a * o.retro);
   ctx.restore();
 }
-function zDrawPlate(p, o, r) {
-  const s = zSign(o.id), el = Z_EL[s.el];
-  const retro = r.retro && zRetroOk(o) && !r.done;
-  const mag = Math.min(3, o.mag + (retro ? 1 : 0));
-  const took = r.done && r.took && r.took.id === o.id;
-  const hot = !r.done && inRect(mouse.x, mouse.y, p);
-  const edge = retro ? Z_SHADE : took ? Z_GOLD : el.col;
+// the retrograde mark: a hook turning back on itself, with its head
+function zaRetroTail(x, y, r, col, a) {
+  if (a <= 0.01) return;
+  const a0 = 0.4, a1 = -Math.PI * 1.25 * clamp(a * 1.2, 0, 1);
   ctx.save();
-  ctx.globalAlpha = r.done && !took ? 0.35 : 1;
-  ctx.fillStyle = retro ? 'rgba(24,10,38,0.96)' : 'rgba(10,14,26,0.96)';
-  roundRect(p.x, p.y, p.w, p.h, 12); ctx.fill();
-  ctx.strokeStyle = hot || took ? edge : rgba(edge, 0.55); ctx.lineWidth = hot || took ? 2.4 : 1.4;
-  roundRect(p.x, p.y, p.w, p.h, 12); ctx.stroke();
-  ctx.beginPath(); ctx.rect(p.x + 2, p.y + 2, p.w - 4, p.h - 4); ctx.clip();
-  const L = p.x + 14, maxW = p.w - 28;
-  let y = p.y + 24;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#64748b';
-  ctx.fillText('[' + (p.i + 1) + ']', L, y - 6);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = el.col;
-  ctx.fillText(el.n, p.x + p.w - 14, y - 6);
-  ctx.textAlign = 'left';
-  fitFont(s.n, maxW, '800', 22, "'Chakra Petch', Barlow, system-ui, sans-serif", 14);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText(s.n, L, y + 18); y += 34;
-  ctx.font = "600 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#94a3b8';
-  const held = zm(o.id);
-  ctx.fillText(s.t.toUpperCase() + (held ? '   ·   YOU HOLD ' + Z_RN[held] : ''), L, y); y += 18;
-  ctx.font = "800 12px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = retro ? Z_SHADE : Z_GOLD;
-  ctx.fillText(Z_RN[mag] + '  ·  ' + Z_MAG[mag], L, y); y += 18;
-  // the magnitudes this takes you through, each in full
-  for (let m = held + 1; m <= mag; m++) {
-    const h = zHalves(zLine(s, m));
-    ctx.font = "800 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#e2e8f0';
-    ctx.fillText(Z_RN[m] + '  ' + h[0], L, y); y += 14;
-    ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#94a3b8';
-    y = wrapText(h[1], L, y, maxW, 13.5) + 17;
-  }
-  if (retro) {
-    const h = zHalves(s.shadow);
-    ctx.font = "800 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = Z_SHADE;
-    ctx.fillText('SHADOW  ·  ' + h[0], L, y); y += 14;
-    ctx.font = "400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#c4b5fd';
-    y = wrapText(h[1] + ', until the sky turns.', L, y, maxW, 13.5) + 17;
-  } else if (r.retro && !r.done) {
-    ctx.font = "italic 400 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#64748b';
-    y = wrapText('It can go no higher: it is read as it is, with no shadow.', L, y, maxW, 13.5) + 17;
-  }
-  ctx.font = "italic 400 10.5px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#475569';
-  wrapText(s.flavour, L, Math.max(y, p.y + p.h - 34), maxW, 13);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(col, clamp(a, 0, 1)); ctx.lineWidth = Math.max(1, r * 0.36);
+  ctx.beginPath(); ctx.arc(x, y, r, a0, a0 + a1, true); ctx.stroke();
+  const e = a0 + a1, ex = x + Math.cos(e) * r, ey = y + Math.sin(e) * r, tx = Math.sin(e), ty = -Math.cos(e);
+  ctx.fillStyle = rgba(col, clamp(a, 0, 1));
+  ctx.beginPath();
+  ctx.moveTo(ex + tx * r * 0.75, ey + ty * r * 0.75);
+  ctx.lineTo(ex - ty * r * 0.5, ey + tx * r * 0.5);
+  ctx.lineTo(ex + ty * r * 0.5, ey - tx * r * 0.5);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
-}
-function drawPlanetarium() {
-  const r = P.zRead;
-  ctx.fillStyle = 'rgba(2,3,8,0.93)';
-  ctx.fillRect(0, 0, W, H);
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 70; i++) {
-    const a = i * 2.399 + uiTime * (r && r.retro && !r.done ? -0.04 : 0.04);
-    const rr = ((i * 37) % 100) / 100;
-    const x = W / 2 + Math.cos(a) * rr * W * 0.62, y = H / 2 + Math.sin(a) * rr * H * 0.58;
-    const tw = 0.25 + 0.75 * Math.abs(Math.sin(uiTime * 1.1 + i));
-    drawGlow(x, y, 2 + (i % 3), '#93c5fd', 0.1 + tw * 0.14);
-  }
-  ctx.restore();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = "700 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#64748b';
-  const B = planetButtons();
-  const top = B.plates.length ? B.plates[0].y : H / 2 - 60;
-  ctx.fillText('P L A N E T A R I U M', W / 2, Math.max(18, top - 34));
-  if (!r || !r.offers.length) {
-    ctx.font = "600 13px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText(r ? 'the sky has nothing left to tell you' : 'the stars are reading for your wingman', W / 2, H / 2);
-  } else {
-    ctx.font = "500 11px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#475569';
-    ctx.fillText(r.done ? 'the reading is taken' : 'three signs have risen: take one', W / 2, Math.max(32, top - 16));
-    for (const p of B.plates) zDrawPlate(p, r.offers[p.i], r);
-  }
-  if (B.retro) zButton(B.retro, 'RETROGRADE  [R]', Z_SHADE, r.retro);
-  if (B.turn) zButton(B.turn, 'TURN THE DOME  ' + zTurnCost() + '  [T]', credits >= zTurnCost() ? '#7dd3fc' : '#475569', false);
-  zButton(B.leave, r && r.done ? 'CONTINUE  ▸' : 'WALK AWAY  [ESC]', r && r.done ? COL.hp : '#64748b', false);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  if (r && r.msg) {
-    ctx.font = "700 12px Barlow, 'Segoe UI', system-ui, sans-serif";
-    ctx.fillStyle = '#fca5a5';
-    ctx.fillText(r.msg, W / 2, B.leave.y + B.leave.h + 16);
-  }
-  ctx.font = "500 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = '#334155';
-  ctx.fillText('the stars give freely; read them backwards and they ask for something back',
-               W / 2, H - 18);
-  ctx.font = "600 11px 'JetBrains Mono', ui-monospace, monospace";
-  ctx.fillStyle = Z_GOLD;
-  ctx.textAlign = 'right';
-  ctx.fillText(Math.round(credits) + ' CR', W - 18, 22);
 }
 
-/* The tray, as a line of text under the dash pips until it is drawn: each sign
-   held with its magnitude, the trines, and the shadow carried. */
+/* ------------------------------------ the parts ------------------------------------ */
+// the element's alchemical triangle: fire and air point up, water and earth down; air and earth carry a bar
+function zaElem(el, x, y, s, col, a = 1, lw = 1.4) {
+  const up = el === 'fire' || el === 'air', d = up ? 1 : -1;
+  ctx.save();
+  ctx.strokeStyle = rgba(col, a); ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x, y - d * s); ctx.lineTo(x + s * 0.9, y + d * s * 0.62); ctx.lineTo(x - s * 0.9, y + d * s * 0.62); ctx.closePath();
+  if (el === 'air' || el === 'earth') { ctx.moveTo(x - s * 0.62, y + d * s * 0.1); ctx.lineTo(x + s * 0.62, y + d * s * 0.1); }
+  ctx.stroke();
+  ctx.restore();
+}
+// a four-point star: a pip, a glint
+function zaStar4(x, y, s, rot = 0, inner = 0.34) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = rot + i * Math.PI / 4 - Math.PI / 2, r = i % 2 ? s * inner : s;
+    i ? ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+  }
+  ctx.closePath();
+}
+// a lens glint on a bright star: two long rays and two short, additive
+function zaGlint(x, y, r, col, a, rot = 0) {
+  if (a <= 0.01) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) {
+    const an = rot + i * Math.PI / 2, L = r * (i % 2 ? 0.55 : 1);
+    const g = ctx.createLinearGradient(x, y, x + Math.cos(an) * L, y + Math.sin(an) * L);
+    g.addColorStop(0, rgba(col, a)); g.addColorStop(1, rgba(col, 0));
+    ctx.strokeStyle = g; ctx.lineWidth = Math.max(0.8, r * 0.05);
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(an) * L, y + Math.sin(an) * L); ctx.stroke();
+  }
+  ctx.restore();
+}
+// three magnitude pips: those already held (dim gold), those this brings (bright), a retrograde one (violet)
+function zaPips(x, y, s, held, to, retroFrom, a = 1, gap) {
+  gap = gap || s * 3.1;
+  for (let i = 0; i < 3; i++) {
+    const px = x + (i - 1) * gap, m = i + 1;
+    const lit = m <= to, old = m <= held, retro = retroFrom && m >= retroFrom && m <= to;
+    const col = retro ? ZA_SHADE : old ? '#b45309' : ZA_GOLD;
+    ctx.save();
+    if (lit) {
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(px, y, s * 3.2, retro ? ZA_SHADE : ZA_GOLD, (old ? 0.18 : 0.42) * a);
+      ctx.globalCompositeOperation = 'source-over';
+      zaStar4(px, y, s, 0, 0.36);
+      ctx.fillStyle = rgba(col, a); ctx.fill();
+      if (!old) { zaStar4(px, y, s * 0.45, 0, 0.4); ctx.fillStyle = rgba('#fffbeb', 0.85 * a); ctx.fill(); }
+    } else {
+      zaStar4(px, y, s * 0.8, 0, 0.36);
+      ctx.strokeStyle = rgba('#64748b', 0.7 * a); ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* A constellation, its longer side `size` px, centred on (x, y).
+   o: a (alpha), line (how many of its lines are drawn, a fraction for the one
+   drawing), lineA, lineCol, mono (stars all one tint), tw (twinkle), fold (0..1,
+   its stars gone to its glyph's points, the glyph glyphS px), spark (glints on
+   the bright stars), seed, lw. */
+function zaConst(id, x, y, size, o = {}) {
+  const c = ZA.sky[id];
+  if (!c) return;
+  const a = o.a === undefined ? 1 : o.a;
+  if (a <= 0.01) return;
+  const k = size / 2, fold = o.fold || 0, seed = o.seed || 0;
+  const gp = fold > 0 ? zaGlyphPts(id, c.p.length) : null, gs = o.glyphS || k * 0.6;
+  const P2 = c.p.map((p, i) => {
+    let px = x + p.x * k, py = y + p.y * k;
+    if (gp) { const f = zaE(fold * 1.15 - (i % 5) * 0.03); px = lerp(px, x + gp[i][0] * gs, f); py = lerp(py, y + gp[i][1] * gs, f); }
+    return [px, py];
+  });
+  const base = Math.max(0.55, size * 0.0155);
+  const rOf = m => base * (1 + Math.max(0, 4.7 - m) * 0.42);
+  ctx.save();
+  // the figure
+  const nl = c.l.length, prog = o.line === undefined ? nl : o.line;
+  const lineA = (o.lineA === undefined ? 0.5 : o.lineA) * a * (1 - fold);
+  if (prog > 0 && lineA > 0.01) {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(o.lineCol || '#cbd5e1', lineA);
+    ctx.lineWidth = o.lw || Math.max(0.7, size * 0.008);
+    ctx.beginPath();
+    for (let i = 0; i < nl && i < prog; i++) {
+      const [ia, ib] = c.l[i], A = P2[ia], B = P2[ib];
+      const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1;
+      const ga = Math.min(L * 0.3, rOf(c.p[ia].m) + 2), gb = Math.min(L * 0.3, rOf(c.p[ib].m) + 2);
+      const f = clamp(prog - i, 0, 1);
+      const x0 = A[0] + dx / L * ga, y0 = A[1] + dy / L * ga;
+      const x1 = lerp(x0, B[0] - dx / L * gb, f), y1 = lerp(y0, B[1] - dy / L * gb, f);
+      ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+    }
+    ctx.stroke();
+  }
+  // the clusters: the Beehive's haze, the Pleiades' knot
+  ctx.globalCompositeOperation = 'lighter';
+  if (c.cl.length) {
+    let mx = 0, my = 0;
+    for (const p of c.cl) { mx += p.x; my += p.y; }
+    mx = x + mx / c.cl.length * k; my = y + my / c.cl.length * k;
+    drawGlow(mx, my, size * 0.2, o.mono || '#bfdbfe', 0.22 * a * (1 - fold));
+    for (let i = 0; i < c.cl.length; i++) {
+      const p = c.cl[i], tw = 0.6 + 0.4 * Math.sin(uiTime * 2.3 + i * 2.1 + seed);
+      ctx.fillStyle = rgba(o.mono || '#e0e7ff', 0.7 * a * tw * (1 - fold));
+      ctx.beginPath(); ctx.arc(x + p.x * k, y + p.y * k, Math.max(0.5, base * 0.55), 0, TAU); ctx.fill();
+    }
+  }
+  if (c.pl.length) {
+    let mx = 0, my = 0;
+    for (const i of c.pl) { mx += P2[i][0]; my += P2[i][1]; }
+    drawGlow(mx / c.pl.length, my / c.pl.length, size * 0.09, o.mono || '#93c5fd', 0.3 * a);
+  }
+  // the stars
+  for (let i = 0; i < c.p.length; i++) {
+    const p = c.p[i], r = rOf(p.m) * (c.pl.includes(i) ? 0.62 : 1), col = o.mono || p.col;
+    const tw = o.tw === 0 ? 1 : 0.8 + 0.2 * Math.sin(uiTime * (1.7 + (i % 4) * 0.6) + i * 1.9 + seed);
+    const [px, py] = P2[i];
+    drawGlow(px, py, r * (3.4 + (p.m < 2 ? 2 : 0)), col, 0.42 * a * tw);
+    ctx.fillStyle = rgba('#ffffff', 0.92 * a * tw);
+    ctx.beginPath(); ctx.arc(px, py, r * 0.62, 0, TAU); ctx.fill();
+    if (p.m < 2.1 && o.spark !== 0) zaGlint(px, py, r * 5.5 * (o.spark || 1), col, 0.55 * a * tw, 0.1);
+  }
+  ctx.restore();
+}
+// where a constellation's star i sits (for drawing to it)
+function zaStarAt(id, i, x, y, size) {
+  const p = ZA.sky[id].p[i];
+  return { x: x + p.x * size / 2, y: y + p.y * size / 2 };
+}
+
+/* The eclipse a shadow wears: a dark disc, its violet corona, and a bead of
+   light at the edge (the diamond ring). k: how far the dark is across (0..1). */
+function zaEclipse(x, y, r, a = 1, k = 1) {
+  if (a <= 0.01 || r <= 0.5) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, r * 3.4, ZA_SHADE, 0.5 * a);
+  drawGlow(x, y, r * 1.9, '#e9d5ff', 0.32 * a);
+  // the streamers
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 9; i++) {
+    const an = i * TAU / 9 + uiTime * 0.25 + Math.sin(uiTime * 0.9 + i) * 0.12;
+    const L = r * (1.35 + 0.5 * (0.5 + 0.5 * Math.sin(uiTime * 1.7 + i * 2.3)));
+    ctx.strokeStyle = rgba(ZA_SHADE_HI, 0.3 * a); ctx.lineWidth = Math.max(0.6, r * 0.12);
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * r, y + Math.sin(an) * r);
+    ctx.quadraticCurveTo(x + Math.cos(an + 0.2) * L * 0.9, y + Math.sin(an + 0.2) * L * 0.9, x + Math.cos(an + 0.08) * L, y + Math.sin(an + 0.08) * L);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = rgba('#f5f3ff', 0.75 * a); ctx.lineWidth = Math.max(0.8, r * 0.09);
+  ctx.beginPath(); ctx.arc(x, y, r * 1.02, 0, TAU); ctx.stroke();
+  ctx.globalCompositeOperation = 'source-over';
+  // the dark, coming across
+  const off = (1 - k) * r * 2.1;
+  ctx.fillStyle = rgba('#05020a', 0.97 * a);
+  ctx.beginPath(); ctx.arc(x + off, y - off * 0.3, r, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  const bead = -2.3 + Math.sin(uiTime * 0.6) * 0.2;
+  drawGlow(x + Math.cos(bead) * r, y + Math.sin(bead) * r, r * 0.9, '#ffffff', 0.55 * a * k);
+  ctx.restore();
+}
+
+/* A sign's medallion: its glyph in a ring of its element, three pips round the
+   foot, and at III a gold ring that breathes. o.shadow lays the eclipse over it. */
+function zaMedal(x, y, r, id, mag, o = {}) {
+  const a = o.a === undefined ? 1 : o.a, el = zaEl(id), ec = ZA_ELCOL[el], asc = mag >= 3;
+  ctx.save();
+  if (asc || o.flash) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(x, y, r * 2.6, ZA_GOLD, (asc ? 0.22 + 0.1 * Math.sin(uiTime * 2.6) : 0) * a + (o.flash || 0) * 0.7);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  const g = ctx.createRadialGradient(x, y - r * 0.4, r * 0.1, x, y, r);
+  g.addColorStop(0, rgba(asc ? '#2a1d06' : '#16203a', 0.96 * a)); g.addColorStop(1, rgba('#060912', 0.96 * a));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba(asc ? ZA_GOLD : ec, (asc ? 0.95 : 0.75) * a); ctx.lineWidth = Math.max(1, r * 0.11);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = rgba(ec, 0.25 * a); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, r * 0.78, 0, TAU); ctx.stroke();
+  if (asc) {   // the crown's ticks
+    ctx.strokeStyle = rgba(ZA_GOLD_HI, 0.55 * a);
+    for (let i = 0; i < 12; i++) {
+      const an = i * TAU / 12 + uiTime * 0.4;
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * r * 1.08, y + Math.sin(an) * r * 1.08);
+      ctx.lineTo(x + Math.cos(an) * r * 1.24, y + Math.sin(an) * r * 1.24); ctx.stroke();
+    }
+  }
+  zaGlyph(id, x, y - r * 0.06, r * 0.5, asc ? ZA_GOLD_PALE : ZA_GOLD_HI, { a, lw: 0.2, glow: asc ? 0.8 : 0.35 });
+  // the pips, round the foot of the ring
+  for (let i = 0; i < 3; i++) {
+    const an = Math.PI / 2 + (i - 1) * 0.62, px = x + Math.cos(an) * r, py = y + Math.sin(an) * r, lit = i < mag;
+    zaStar4(px, py, Math.max(1.6, r * 0.24), 0, 0.38);
+    ctx.fillStyle = lit ? rgba(ZA_GOLD, a) : rgba('#1e293b', a); ctx.fill();
+    ctx.strokeStyle = rgba(lit ? ZA_GOLD_PALE : '#475569', 0.8 * a); ctx.lineWidth = 0.8; ctx.stroke();
+  }
+  if (o.shadow) zaEclipse(x + r * 0.42, y - r * 0.42, r * 0.6, a * o.shadow, o.shadowK === undefined ? 1 : o.shadowK);
+  ctx.restore();
+}
+
+// text, its letters spaced out, centred on x
+function zaSpaced(t, x, y, sp) {
+  const w = ctx.measureText(t).width + sp * (t.length - 1);
+  let cx = x - w / 2;
+  const al = ctx.textAlign;
+  ctx.textAlign = 'left';
+  for (const ch of t) { ctx.fillText(ch, cx, y); cx += ctx.measureText(ch).width + sp; }
+  ctx.textAlign = al;
+}
+/* ============================ end of the sky (za) ============================ */
+
+/* =============== THE PLANETARIUM — the dome, the reading screen (art, 18 Nov) ===============
+   In place of the placeholder drawPlanetarium. The dome's ceiling is a great zodiac
+   wheel tilted overhead, its centre above the screen, so you look up into it: the
+   rim with its degrees, the twelve constellations in their band, the glyphs inside
+   them and the wanderers on the ecliptic. It turns, about once in four minutes.
+   Under it stand the three plates, which are the same rects zPlates gives the
+   clicks: nothing here moves a thing the logic hits.
+     opening    1.4 s, any key ends it: the room goes dark, the ring draws itself out
+                from the front, the twelve light one after another, and the three
+                that rose come loose and drift down into the plates. Each plate's
+                words write in under a scan of light.
+     idle       the wheel turns and the stars breathe. The plate under the cursor
+                lifts, and its constellation joins up, line by line, in gold.
+     retrograde the wheel slows, stops and runs backward, and the plates flip over
+                on their long axis, one after another, to their violet side: the
+                glyph grows its tail, the extra pip lights violet, the shadow is
+                written underneath. A sign at III cannot turn: it shivers and stays.
+     turning    the three go back up into the wheel, it spins a third of a turn,
+                and three new ones come down.
+     taking     the chosen constellation draws itself whole, folds into its glyph,
+                and its pips light one by one. The other two sink and their skies
+                go back up into the wheel. (On the way out, the dome opens like an
+                iris and the glyph flies to its medallion in the tray: zDrawDark and
+                signTray, from what this leaves in ZAD.)
+   Narrow screens and touch get the stacked plates zPlates already lays out, with
+   the sky beside the words instead of over them.
+   It reads P.zRead, the plates and buttons from zPlates/planetButtons, SIGNS, Z_EL,
+   zm/zsh/zTri, zRetroOk, zTurnCost, credits, mouse, keys, uiTime, W, H, DPR, and
+   changes nothing of the logic's. Art state in ZAD. Needs the sky block (za*).
+=========================================================================================== */
+const ZAD_OPEN = 1.4;
+let ZAD = { open: false, rd: null, t0: -9, last: 0, seen: -9, wa: 0, w: 0.026, extra: 0, spinFrom: 0, spinTo: 0, spinT: -9,
+            retro: false, retroT: -9, turns: 0, turnT: -9, done: false, doneT: -9, took: -1,
+            flip: [0, 0, 0], hov: [0, 0, 0], lp: [0, 0, 0], arr: [-9, -9, -9], held: [0, 0, 0], prev: null, offers: null,
+            sky: null, skyKey: '', lay: new Map(), closeT: -9, fly: null, flyFrom: null, shoot: { t: -9, x: 0, y: 0, a: 0 } };
+
+/* ---------------------------------- the beats ---------------------------------- */
+function zadBegin(r) {
+  const D = ZAD, now = uiTime;
+  D.open = true; D.rd = r; D.t0 = now; D.seen = now;
+  D.retro = !!(r && r.retro); D.retroT = -9; D.turns = r ? r.turns : 0; D.turnT = -9;
+  D.done = !!(r && r.done); D.doneT = D.done ? now - 9 : -9;
+  D.took = D.done && r.took ? r.offers.findIndex(o => o.id === r.took.id) : -1;
+  D.flip = [0, 1, 2].map(i => (r && r.retro && r.offers[i] && zRetroOk(r.offers[i]) ? 1 : 0));
+  D.hov = [0, 0, 0]; D.lp = [0, 0, 0];
+  D.arr = [0, 1, 2].map(i => now + 0.86 + i * 0.07);
+  D.held = [0, 1, 2].map(i => (r && r.offers[i] ? zm(r.offers[i].id) : 0));
+  D.prev = null; D.lay.clear();
+  D.offers = r ? r.offers.map(o => ({ id: o.id, mag: o.mag })) : null;
+  D.fly = null;
+}
+function zadAnyKey() {
+  for (const k in keys) if (keys[k]) return true;
+  return !!mouse.down;
+}
+function zadTrack(r, now, dt) {
+  const D = ZAD;
+  // any key ends the opening (the key itself still does what it does)
+  if (now - D.t0 < ZAD_OPEN - 0.05 && now - D.t0 > 0.05 && zadAnyKey()) {
+    const cut = now - (D.t0 + ZAD_OPEN);
+    D.t0 += cut; for (let i = 0; i < 3; i++) D.arr[i] = Math.min(D.arr[i], now - 0.8);
+  }
+  if (!r) return;
+  if (r.retro !== D.retro) { D.retro = r.retro; D.retroT = now; }
+  if (r.turns !== D.turns) {
+    D.turns = r.turns; D.turnT = now;
+    D.prev = D.offers; D.spinFrom = D.extra; D.spinTo = D.extra + TAU / 3; D.spinT = now;
+    D.arr = [0, 1, 2].map(i => now + 0.62 + i * 0.09);
+    D.lp = [0, 0, 0]; D.lay.clear();
+  }
+  if (r.done && !D.done) {
+    D.done = true; D.doneT = now;
+    D.took = r.took ? r.offers.findIndex(o => o.id === r.took.id) : -1;
+  }
+  D.offers = r.offers.map(o => ({ id: o.id, mag: o.mag }));
+  // what was held of each before it was taken (the take has raised it by the time this is drawn)
+  if (!r.done) D.held = r.offers.map(o => zm(o.id));
+  // the plates flip one after another; once the reading is taken they stay as they were read
+  for (let i = 0; i < 3 && !r.done; i++) {
+    const o = r.offers[i];
+    const want = r.retro && !r.done && o && zRetroOk(o) ? 1 : 0;
+    if (now < D.retroT + i * 0.075) continue;
+    D.flip[i] = want > D.flip[i] ? Math.min(want, D.flip[i] + dt / 0.42) : Math.max(want, D.flip[i] - dt / 0.42);
+  }
+  // the wheel: westward, about once in four minutes; retrograde, it slows, stops and runs back
+  const wt = r.retro && !r.done ? -0.05 : TAU / 240;
+  D.w += (wt - D.w) * Math.min(1, dt * 1.5);
+  D.wa += D.w * dt;
+  D.extra = lerp(D.spinFrom, D.spinTo, zaE(zaQ(now, D.spinT, D.spinT + 1.1)));
+}
+
+/* ---------------------------------- the geometry ---------------------------------- */
+function zadGeo(B) {
+  const wide = W >= 640, top = B.plates.length ? B.plates[0].y : H * 0.32;
+  const Rx = wide ? Math.max(W * 0.6, 540) : W * 0.95;
+  const Ry = Rx * (wide ? 0.33 : 0.42);
+  const rim = Math.max(wide ? 112 : 84, top - (wide ? 40 : 26));
+  return { wide, cx: W / 2, cy: rim - Ry, Rx, Ry, rim, top };
+}
+// a point on the wheel at angle th (PI/2 is the front, nearest you), f of the way out
+function zadAt(G, th, f) { return { x: G.cx + Math.cos(th) * G.Rx * f, y: G.cy + Math.sin(th) * G.Ry * f, d: (Math.sin(th) + 1) / 2 }; }
+// where a sign stands on the wheel now: Aries first, the rest eastward (to the left), all turning west
+function zadSlot(id) { return Math.PI / 2 + ZA_ORDER.indexOf(id) * TAU / 12 - ZAD.wa - ZAD.extra; }
+
+/* ---------------------------------- the ground ---------------------------------- */
+// the far sky behind the dome: cached per screen size, the Milky Way across it
+function zadSkyBuf() {
+  const D = ZAD, key = W + 'x' + H + 'x' + DPR;
+  if (D.sky && D.skyKey === key) return D.sky;
+  const b = makeBuf(W * DPR, H * DPR), g = b.getContext('2d');
+  g.scale(DPR, DPR);
+  // the band of the galaxy, a soft diagonal haze with dust in it
+  g.save();
+  g.translate(W * 0.5, H * 0.55); g.rotate(-0.42);
+  const band = g.createLinearGradient(0, -H * 0.3, 0, H * 0.3);
+  band.addColorStop(0, 'rgba(60,40,110,0)'); band.addColorStop(0.45, 'rgba(70,60,140,0.10)');
+  band.addColorStop(0.5, 'rgba(120,110,190,0.13)'); band.addColorStop(0.56, 'rgba(70,60,140,0.09)'); band.addColorStop(1, 'rgba(40,30,90,0)');
+  g.fillStyle = band; g.fillRect(-W, -H * 0.3, W * 2, H * 0.6);
+  for (let i = 0; i < 900; i++) {
+    const x = (zaH(i * 1.37) - 0.5) * W * 2, y = (zaH(i * 2.11 + 4) + zaH(i * 0.71 + 9) - 1) * H * 0.22;
+    g.fillStyle = `rgba(${200 + zaH(i) * 55 | 0},${200 + zaH(i + 3) * 40 | 0},255,${0.08 + zaH(i * 3.3) * 0.22})`;
+    g.fillRect(x, y, 0.8, 0.8);
+  }
+  // dark lanes of dust down its middle
+  for (let i = 0; i < 26; i++) {
+    const x = (zaH(i * 9.1) - 0.5) * W * 1.8, y = (zaH(i * 4.7) - 0.5) * H * 0.07;
+    const dg = g.createRadialGradient(x, y, 0, x, y, 40 + zaH(i) * 70);
+    dg.addColorStop(0, 'rgba(2,3,9,0.16)'); dg.addColorStop(1, 'rgba(2,3,9,0)');
+    g.fillStyle = dg; g.fillRect(x - 120, y - 120, 240, 240);
+  }
+  g.restore();
+  // the field
+  for (let i = 0; i < 340; i++) {
+    const x = zaH(i * 3.71 + 1) * W, y = zaH(i * 5.13 + 2) * H, m = zaH(i * 7.7 + 3);
+    const r = 0.35 + m * m * 1.25, c = zaH(i * 1.9);
+    g.fillStyle = c < 0.15 ? 'rgba(255,200,150,' : c < 0.35 ? 'rgba(180,200,255,' : 'rgba(235,240,255,';
+    g.fillStyle += (0.25 + m * 0.6) + ')';
+    g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+  }
+  D.sky = b; D.skyKey = key;
+  return b;
+}
+function zadGround(G, T, now) {
+  const a = zaE(zaQ(T, 0, 0.32));
+  ctx.fillStyle = `rgba(2,3,9,${0.955 * a})`;
+  ctx.fillRect(0, 0, W, H);
+  const sa = zaQ(T, 0.05, 0.6);
+  if (sa <= 0) return;
+  // a deep wash of colour, violet under the wheel and night blue toward the floor
+  let g = ctx.createRadialGradient(W / 2, G.rim * 0.6, 20, W / 2, G.rim * 0.6, Math.max(W, H) * 0.8);
+  g.addColorStop(0, `rgba(49,30,92,${0.42 * sa})`); g.addColorStop(0.5, `rgba(18,22,58,${0.32 * sa})`); g.addColorStop(1, 'rgba(2,3,9,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  g = ctx.createRadialGradient(W / 2, H * 1.05, 10, W / 2, H * 1.05, H * 0.75);
+  g.addColorStop(0, `rgba(8,30,52,${0.4 * sa})`); g.addColorStop(1, 'rgba(2,3,9,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.globalAlpha = 0.85 * sa;
+  ctx.drawImage(zadSkyBuf(), 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  // stars that breathe
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 46; i++) {
+    const x = zaH(i * 8.31 + 5) * W, y = zaH(i * 6.07 + 8) * H, tw = 0.5 + 0.5 * Math.sin(now * (0.8 + zaH(i) * 1.6) + i * 2.4);
+    drawGlow(x, y, 3 + zaH(i * 2) * 5, zaH(i * 4) < 0.3 ? '#fde68a' : '#c7d2fe', (0.12 + 0.3 * tw) * sa);
+  }
+  // now and then a meteor, high across the dome
+  const S = ZAD.shoot;
+  if (now - S.t > 7 + zaH(Math.floor(now / 7)) * 4) { S.t = now; S.x = W * (0.15 + zaH(now) * 0.7); S.y = 30 + zaH(now * 1.3) * G.rim * 0.6; S.a = 2.6 + zaH(now * 2.1) * 0.5; }
+  const st = now - S.t;
+  if (st < 0.6) {
+    const k = st / 0.6, L = 120 * Math.sin(Math.PI * k), hx = S.x + Math.cos(S.a) * 420 * k, hy = S.y + Math.sin(S.a) * 420 * k * 0.4;
+    const lg = ctx.createLinearGradient(hx, hy, hx - Math.cos(S.a) * L, hy - Math.sin(S.a) * L * 0.4);
+    lg.addColorStop(0, `rgba(255,255,255,${0.8 * sa})`); lg.addColorStop(1, 'rgba(160,180,255,0)');
+    ctx.strokeStyle = lg; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - Math.cos(S.a) * L, hy - Math.sin(S.a) * L * 0.4); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------- the wheel ---------------------------------- */
+function zadEllipse(G, f, a0, a1) { ctx.ellipse(G.cx, G.cy, G.Rx * f, G.Ry * f, 0, a0, a1); }
+function zadWheel(G, r, T, now, B) {
+  const draw = zaE(zaQ(T, 0.08, 0.62)), span = Math.PI * draw;   // the ring, drawn out from the front both ways
+  if (draw <= 0) return;
+  const lit = zaQ(T, 0.05, 0.4), front0 = Math.PI / 2 - span, front1 = Math.PI / 2 + span;
+  ctx.save();
+  // the dome's inside: a lens of deep violet, brighter toward the rim
+  ctx.save();
+  ctx.translate(G.cx, G.cy); ctx.scale(1, G.Ry / G.Rx);
+  const ig = ctx.createRadialGradient(0, 0, G.Rx * 0.2, 0, 0, G.Rx);
+  ig.addColorStop(0, 'rgba(10,8,30,0)'); ig.addColorStop(0.7, `rgba(40,28,88,${0.22 * lit})`); ig.addColorStop(0.97, `rgba(90,70,170,${0.3 * lit})`);
+  ig.addColorStop(1, 'rgba(90,70,170,0)');
+  ctx.fillStyle = ig;
+  ctx.beginPath(); ctx.arc(0, 0, G.Rx, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.lineCap = 'round';
+  const rot = ZAD.wa + ZAD.extra;
+  // spokes from the hidden pole, fanning down to the band
+  ctx.strokeStyle = `rgba(148,163,220,${0.07 * lit})`; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 0; k < 72; k++) {
+    const th = Math.PI / 2 + k * TAU / 72 - rot;
+    if (Math.sin(th) < 0.05 || Math.abs(th - Math.PI / 2 - Math.round((th - Math.PI / 2) / TAU) * TAU) > span) continue;
+    const a = zadAt(G, th, 0.25), b = zadAt(G, th, 0.66);
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  // the rings: the rim (gold), its hairline, the band's inner edge, the glyphs' ring, the ecliptic (dotted)
+  const ring = (f, col, al, lw, dash) => {
+    ctx.strokeStyle = rgba(col, al); ctx.lineWidth = lw;
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath(); zadEllipse(G, f, front0, front1); ctx.stroke();
+    if (dash) ctx.setLineDash([]);
+  };
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ring(1.0, ZA_GOLD, 0.16, 7);
+  ctx.restore();
+  ring(1.0, ZA_GOLD, 0.75, 1.6);
+  ring(1.022, '#fde68a', 0.25, 0.8);
+  ring(0.965, '#c7d2fe', 0.3, 0.8);
+  ring(0.8, '#a5b4fc', 0.4, 1);
+  ring(0.69, '#a5b4fc', 0.22, 0.8);
+  ring(0.62, '#e9d5ff', 0.28, 1, [2, 6]);
+  // the degrees: every five, longer at ten, and the cusps of the signs through the band
+  ctx.strokeStyle = `rgba(253,230,138,${0.55 * lit})`; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 0; k < 72; k++) {
+    const th = Math.PI / 2 + k * TAU / 72 - rot;
+    if (Math.sin(th) < 0.0) continue;
+    const off = Math.abs(((th - Math.PI / 2) % TAU + TAU + Math.PI) % TAU - Math.PI);
+    if (off > span) continue;
+    const L = k % 6 === 0 ? 0.035 : k % 2 === 0 ? 0.022 : 0.013;
+    const a = zadAt(G, th, 1), b = zadAt(G, th, 1 - L);
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(165,180,252,${0.45 * lit})`;
+  ctx.beginPath();
+  for (let k = 0; k < 12; k++) {
+    const th = Math.PI / 2 + (k + 0.5) * TAU / 12 - rot;
+    if (Math.sin(th) < 0.0) continue;
+    const off = Math.abs(((th - Math.PI / 2) % TAU + TAU + Math.PI) % TAU - Math.PI);
+    if (off > span) continue;
+    const a = zadAt(G, th, 0.965), b = zadAt(G, th, 0.69);
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  // the wanderers, on the ecliptic at their own paces
+  ctx.globalCompositeOperation = 'lighter';
+  const wand = [['#fca5a5', 0.11, 2.2], ['#fef9c3', 0.07, 2.6], ['#fde68a', 0.035, 3.0], ['#fcd34d', 0.02, 2.4], ['#e2e8f0', 0.16, 1.6]];
+  wand.forEach(([c, sp, rr], k) => {
+    const th = Math.PI / 2 + k * 1.37 + now * sp - rot * 0.5;
+    if (Math.sin(th) < 0.15) return;
+    const p = zadAt(G, th, 0.62);
+    drawGlow(p.x, p.y, rr * 4, c, 0.5 * lit * p.d);
+    ctx.fillStyle = rgba('#ffffff', 0.85 * lit * p.d);
+    ctx.beginPath(); ctx.arc(p.x, p.y, rr * 0.55, 0, TAU); ctx.fill();
+    if (k === 3) { ctx.strokeStyle = rgba(c, 0.6 * lit * p.d); ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, rr * 2.2, rr * 0.7, -0.3, 0, TAU); ctx.stroke(); }
+  });
+  ctx.globalCompositeOperation = 'source-over';
+  // the twelve: in the band, lighting one after another out from the front
+  const offered = r ? r.offers.map(o => o.id) : [];
+  const leaving = zadLeaving(r, now);
+  for (const id of ZA_ORDER) {
+    const th = zadSlot(id), sn = Math.sin(th);
+    if (sn < 0.02) continue;
+    const off = Math.abs(((th - Math.PI / 2) % TAU + TAU + Math.PI) % TAU - Math.PI);
+    const on = zaQ(T, 0.3 + off * 0.32, 0.5 + off * 0.32);
+    if (on <= 0) continue;
+    const p = zadAt(G, th, 0.885), s = 0.55 + 0.45 * p.d;
+    const held = zm(id), shade = zsh(id), isOff = offered.includes(id);
+    const flash = 1 - zaQ(T, 0.5 + off * 0.32, 0.9 + off * 0.32);
+    // an offered sign has come down into its plate: its place on the wheel is left dim
+    const away = isOff ? leaving(id) : 0;
+    const a = on * (0.45 + 0.55 * p.d) * (1 - 0.6 * away);
+    const sz = G.Ry * 0.3 * s * (G.wide ? 1 : 0.9);
+    ctx.save();
+    if (held || isOff) {
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(p.x, p.y, sz * 0.9, held ? ZA_GOLD : '#c7d2fe', (held ? 0.22 : 0.12) * a);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (flash > 0) { ctx.globalCompositeOperation = 'lighter'; drawGlow(p.x, p.y, sz * 1.1, '#e0e7ff', 0.5 * flash * on); ctx.globalCompositeOperation = 'source-over'; }
+    zaConst(id, p.x, p.y, sz, { a, lineA: held ? 0.75 : 0.38, lineCol: held ? ZA_GOLD : '#a5b4fc', seed: ZA_ORDER.indexOf(id) * 3, spark: 0.6 });
+    // its glyph, inside the band, and what you hold of it under that
+    const gq = zadAt(G, th, 0.745);
+    zaGlyph(id, gq.x, gq.y, 5.5 * s + 1.5, held ? ZA_GOLD_HI : ZA_ELCOL[zaEl(id)], { a: a * (held ? 1 : 0.7), lw: 0.2, glow: held ? 0.6 : 0 });
+    if (held) zaPips(gq.x, gq.y + 9 * s + 3, 2 * s + 0.6, held, held, 0, a, 6 * s + 1.6);
+    if (shade) zaEclipse(p.x + sz * 0.42, p.y - sz * 0.3, 5 * s + 2, a);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+// how far an offered sign has gone from its place on the wheel (0 still there, 1 down in its plate)
+function zadLeaving(r, now) {
+  const D = ZAD;
+  return id => {
+    if (!r) return 0;
+    const i = r.offers.findIndex(o => o.id === id);
+    if (i < 0) return 0;
+    let k = zaQ(now, D.arr[i] - 0.5, D.arr[i]);
+    if (r.done && D.took !== i) k *= 1 - zaQ(now, D.doneT + 0.2, D.doneT + 0.8);
+    return k;
+  };
+}
+
+/* --------------------------------- the descents ---------------------------------
+   A constellation going down from its place on the wheel into its plate (k 0..1),
+   or back up (k 1..0). Drawn over everything, so it reads as one thing travelling. */
+function zadDescent(G, id, plate, box, k, a) {
+  if (k <= 0 || k >= 1 || a <= 0.01) return;
+  const th = zadSlot(id), w = zadAt(G, th, 0.885), s0 = G.Ry * 0.3 * (0.55 + 0.45 * w.d);
+  const x0 = w.x, y0 = Math.max(-30, w.y), x1 = box.x, y1 = box.y, s1 = box.s;
+  const e = zaE(k), mx = lerp(x0, x1, 0.5) + (x1 - x0) * 0.15, my = Math.min(y0, y1) - 30;
+  const x = (1 - e) * (1 - e) * x0 + 2 * (1 - e) * e * mx + e * e * x1;
+  const y = (1 - e) * (1 - e) * y0 + 2 * (1 - e) * e * my + e * e * y1;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let j = 1; j <= 5; j++) {   // a trail of light behind it
+    const e2 = zaE(Math.max(0, k - j * 0.035));
+    const tx = (1 - e2) * (1 - e2) * x0 + 2 * (1 - e2) * e2 * mx + e2 * e2 * x1, ty = (1 - e2) * (1 - e2) * y0 + 2 * (1 - e2) * e2 * my + e2 * e2 * y1;
+    drawGlow(tx, ty, lerp(s0, s1, e2) * 0.35, '#c7d2fe', 0.12 * a * (1 - j / 6));
+  }
+  drawGlow(x, y, lerp(s0, s1, e) * 0.6, '#e0e7ff', 0.25 * a * Math.sin(Math.PI * k));
+  ctx.globalCompositeOperation = 'source-over';
+  zaConst(id, x, y, lerp(s0, s1, e), { a, lineA: 0.65, lineCol: '#e0e7ff', spark: 0.8 });
+  ctx.restore();
+}
+
+/* ---------------------------------- the plates ---------------------------------- */
+// the words on a plate, laid out at a scale: what fits, and what is left out when it can't
+function zadBlocks(o, side, maxW, f, compact, held) {
+  const s = zSign(o.id), mag = Math.min(3, o.mag + (side ? 1 : 0));
+  const out = [];
+  const add = (font, col, text, lh, gap, kind, extra) => {
+    ctx.font = font;
+    const lines = text ? wrapLines(text, maxW) : [''];
+    out.push(Object.assign({ font, col, lines, lh, gap, kind }, extra || {}));
+  };
+  for (let m = held + 1; m <= mag; m++) {
+    const [nm, body] = zHalves(zLine(s, m));
+    const top = m === mag;
+    add(`800 ${(11.5 * f).toFixed(1)}px ${ZA_FB}`, '#f1f5f9', nm, 13.5 * f, 2 * f, 'head', { rn: Z_RN[m], retro: side && m === mag && o.mag < mag });
+    if (top || !compact) add(`400 ${(11 * f).toFixed(1)}px ${ZA_FB}`, '#a8b5c9', body, 13.4 * f, 8 * f, 'body');
+  }
+  if (side) {
+    const [nm, body] = zHalves(s.shadow);
+    add(`800 ${(11 * f).toFixed(1)}px ${ZA_FB}`, ZA_SHADE_HI, 'SHADOW  ·  ' + nm, 13.5 * f, 2 * f, 'shade');
+    add(`400 ${(11 * f).toFixed(1)}px ${ZA_FB}`, '#c4b5fd', body + ', until the sky turns.', 13.4 * f, 6 * f, 'body');
+  }
+  let h = 0;
+  for (const b of out) h += b.lines.length * b.lh + b.gap;
+  return { out, h, mag, held };
+}
+function zadLayout(o, side, pw, ph, wide, held) {
+  const key = o.id + o.mag + (side ? 'r' : 'f') + pw + 'x' + ph + (wide ? 'w' : 'n') + held;
+  const D = ZAD;
+  if (D.lay.has(key)) return D.lay.get(key);
+  const s = zSign(o.id);
+  let L = null;
+  if (wide) {
+    const maxW = pw - 30;
+    ctx.font = `italic 400 10.5px ${ZA_FB}`;
+    const flav = wrapLines(s.flavour, maxW).slice(0, 3);
+    const tries = [[1, 150, 0, 1], [1, 128, 0, 1], [1, 108, 0, 1], [1, 88, 0, 1], [1, 68, 0, 1], [0.92, 68, 0, 1], [0.88, 60, 0, 1],
+                   [1, 108, 1, 1], [1, 88, 1, 1], [1, 68, 1, 1], [0.92, 60, 1, 1], [0.85, 56, 1, 1], [0.8, 52, 1, 0], [0.75, 52, 1, 0]];
+    for (const [f, cbMax, compact, fl] of tries) {
+      const cb = Math.min(cbMax, clamp(ph * 0.44, 52, 150));
+      const head = 8 + cb + 96;
+      const bl = zadBlocks(o, side, maxW, f, compact, held);
+      const foot = fl ? 14 + flav.length * 12.5 : 10;
+      L = { cb, f, bl, flav: fl ? flav : [], head, fits: head + bl.h + foot <= ph };
+      if (L.fits) break;
+    }
+  } else {
+    const sq = clamp(ph - 22, 60, 120), maxW = pw - sq - 40;
+    const tries = [[0.95, 0], [0.88, 0], [0.82, 1], [0.76, 1]];
+    for (const [f, compact] of tries) {
+      const bl = zadBlocks(o, side, maxW, f, compact, held);
+      L = { sq, f, bl, flav: [], fits: 58 + bl.h <= ph - 6 };
+      if (L.fits) break;
+    }
+  }
+  D.lay.set(key, L);
+  return L;
+}
+function zadFrame(X, Y, PW, PH, edge, side, A, hot, el) {
+  // the plate: dark glass, a glow of its element (or the shadow's violet) under its sky
+  const g = ctx.createLinearGradient(0, Y, 0, Y + PH);
+  if (side) { g.addColorStop(0, rgba('#1f0d38', 0.97 * A)); g.addColorStop(1, rgba('#0a0413', 0.97 * A)); }
+  else { g.addColorStop(0, rgba('#0f1830', 0.97 * A)); g.addColorStop(1, rgba('#060912', 0.97 * A)); }
+  ctx.fillStyle = g;
+  roundRect(X, Y, PW, PH, 14); ctx.fill();
+  ctx.save();
+  roundRect(X, Y, PW, PH, 14); ctx.clip();
+  const rg = ctx.createRadialGradient(X + PW / 2, Y + PH * 0.14, 4, X + PW / 2, Y + PH * 0.14, PW * 0.75);
+  rg.addColorStop(0, rgba(side ? ZA_SHADE : ZA_ELCOL[el], 0.2 * A)); rg.addColorStop(1, rgba(side ? ZA_SHADE : ZA_ELCOL[el], 0));
+  ctx.fillStyle = rg; ctx.fillRect(X, Y, PW, PH);
+  // fine engraved lines down the glass
+  ctx.strokeStyle = rgba('#ffffff', 0.025 * A); ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = X + 6; x < X + PW; x += 7) { ctx.moveTo(x, Y); ctx.lineTo(x - 30, Y + PH); }
+  ctx.stroke();
+  ctx.restore();
+  // the edges: outer, and an inner hairline
+  if (hot > 0.01) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(edge, 0.22 * hot * A); ctx.lineWidth = 6;
+    roundRect(X, Y, PW, PH, 14); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.strokeStyle = rgba(edge, (0.5 + 0.5 * hot) * A); ctx.lineWidth = 1.3 + hot;
+  roundRect(X, Y, PW, PH, 14); ctx.stroke();
+  ctx.strokeStyle = rgba(edge, 0.16 * A); ctx.lineWidth = 0.8;
+  roundRect(X + 4.5, Y + 4.5, PW - 9, PH - 9, 10); ctx.stroke();
+  // brass corners, and a diamond at the head and the foot
+  ctx.strokeStyle = rgba(side ? ZA_SHADE_HI : ZA_GOLD_HI, 0.5 * A); ctx.lineWidth = 1.2;
+  const c = 11, i = 9;
+  ctx.beginPath();
+  ctx.moveTo(X + i, Y + i + c); ctx.lineTo(X + i, Y + i); ctx.lineTo(X + i + c, Y + i);
+  ctx.moveTo(X + PW - i - c, Y + i); ctx.lineTo(X + PW - i, Y + i); ctx.lineTo(X + PW - i, Y + i + c);
+  ctx.moveTo(X + i, Y + PH - i - c); ctx.lineTo(X + i, Y + PH - i); ctx.lineTo(X + i + c, Y + PH - i);
+  ctx.moveTo(X + PW - i - c, Y + PH - i); ctx.lineTo(X + PW - i, Y + PH - i); ctx.lineTo(X + PW - i, Y + PH - i - c);
+  ctx.stroke();
+  for (const yy of [Y, Y + PH]) {
+    zaStar4(X + PW / 2, yy, 4.5, 0, 0.5);
+    ctx.fillStyle = rgba(side ? '#2e1065' : '#0b1222', A); ctx.fill();
+    ctx.strokeStyle = rgba(side ? ZA_SHADE_HI : ZA_GOLD_HI, 0.7 * A); ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+// the star chart under a plate's sky: a graticule and a ring of degrees
+function zadChart(x, y, R, col, A, rot) {
+  ctx.save();
+  ctx.strokeStyle = rgba(col, 0.13 * A); ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, R * 0.62, 0, TAU); ctx.stroke();
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath(); ctx.moveTo(x - R, y); ctx.lineTo(x + R, y); ctx.moveTo(x, y - R); ctx.lineTo(x, y + R); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(x, y, R, R * 0.38, 0, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = rgba(col, 0.22 * A);
+  ctx.beginPath();
+  for (let k = 0; k < 48; k++) {
+    const a = rot + k * TAU / 48, L = k % 4 ? 3 : 6;
+    ctx.moveTo(x + Math.cos(a) * R, y + Math.sin(a) * R); ctx.lineTo(x + Math.cos(a) * (R + L), y + Math.sin(a) * (R + L));
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+// a key, drawn as a key cap
+function zadCap(t, x, y, A, col) {
+  ctx.font = `700 9.5px ${ZA_FM}`;
+  const w = Math.max(15, ctx.measureText(t).width + 9), h = 15;
+  ctx.fillStyle = rgba('#0b1222', 0.9 * A);
+  roundRect(x, y - h / 2, w, h, 4); ctx.fill();
+  ctx.strokeStyle = rgba(col || '#64748b', 0.75 * A); ctx.lineWidth = 1;
+  roundRect(x, y - h / 2, w, h, 4); ctx.stroke();
+  ctx.fillStyle = rgba(col || '#cbd5e1', A);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(t, x + w / 2, y + 0.5);
+  return w;
+}
+
+/* One plate: in front, a sign; flipped, its retrograde. Everything a plate shows
+   moves with it: the lift under the cursor, the flip, the sinking, the taking. */
+function zadPlate(G, p, o, r, i, now) {
+  const D = ZAD, s = zSign(o.id), el = s.el, wide = G.wide;
+  const v = D.flip[i], side = v > 0.5, sx = Math.max(0.03, Math.abs(Math.cos(v * Math.PI)));
+  const ap = zaQ(now, D.arr[i], D.arr[i] + 0.5);
+  if (ap <= 0) return;
+  const took = r.done && D.took === i, other = r.done && !took, kd = now - D.doneT;
+  const hot = r.done ? (took ? 1 : 0) : D.hov[i];
+  let A = zaE(ap), lift = -5 * D.hov[i] + (1 - zaO(ap)) * 26;
+  if (other) { A *= 1 - 0.66 * zaE(kd / 0.5); lift += 16 * zaE(kd / 0.6); }
+  if (took) lift -= 7 * zaE(kd / 0.35);
+  // a sign at III can't turn: it shivers when the switch goes
+  const shiver = r.retro && !zRetroOk(o) && !r.done ? Math.sin((now - D.retroT) * 60) * 2.2 * (1 - zaQ(now, D.retroT, D.retroT + 0.35)) : 0;
+  const X = p.x + shiver, Y = p.y + lift, PW = p.w, PH = p.h, cx = X + PW / 2;
+  const edge = side ? ZA_SHADE : took ? ZA_GOLD : ZA_ELCOL[el];
+  ctx.save();
+  ctx.translate(cx, Y + PH / 2); ctx.scale(sx, 1); ctx.translate(-cx, -(Y + PH / 2));
+  zadFrame(X, Y, PW, PH, edge, side, A, hot, el);
+  ctx.save();
+  roundRect(X + 2, Y + 2, PW - 4, PH - 4, 12); ctx.clip();
+  const L = zadLayout(o, side, PW, PH, wide, D.held[i] | 0);
+  const reveal = zaQ(now, D.arr[i] + 0.18, D.arr[i] + 0.72);
+  if (wide) zadFaceWide(X, Y, PW, PH, o, r, i, side, A, now, L, reveal, took, kd);
+  else zadFaceNarrow(X, Y, PW, PH, o, r, i, side, A, now, L, reveal, took, kd);
+  ctx.restore();
+  // mid-flip, a sheet of light crosses the glass
+  if (v > 0.04 && v < 0.96) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const k = 1 - sx;
+    const lg = ctx.createLinearGradient(X, 0, X + PW, 0);
+    lg.addColorStop(0, rgba(ZA_SHADE_HI, 0)); lg.addColorStop(0.5, rgba('#f5f3ff', 0.35 * k * A)); lg.addColorStop(1, rgba(ZA_SHADE_HI, 0));
+    ctx.fillStyle = lg; roundRect(X, Y, PW, PH, 14); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+  return { x: cx, y: Y + (wide ? 8 + L.cb / 2 : PH / 2), s: wide ? Math.min(L.cb * 0.9, PW * 0.72) : L.sq * 0.8 };
+}
+
+function zadFaceWide(X, Y, PW, PH, o, r, i, side, A, now, L, reveal, took, kd) {
+  const D = ZAD, s = zSign(o.id), el = s.el, ec = ZA_ELCOL[el], held = D.held[i] | 0;
+  const cx = X + PW / 2, cb = L.cb, ccy = Y + 8 + cb / 2, csz = Math.min(cb * 0.9, PW * 0.72);
+  const mag = L.bl.mag, inkGold = side ? ZA_SHADE_HI : ZA_GOLD;
+  // the sky: a star chart, the glyph faint behind it, the constellation
+  zadChart(cx, ccy, cb * 0.44, side ? ZA_SHADE_HI : '#c7d2fe', A, now * 0.05 * (side ? -1 : 1));
+  zaGlyph(o.id, cx, ccy, cb * 0.36, side ? ZA_SHADE : ec, { a: 0.07 * A, lw: 0.12 });
+  const nl = ZA.sky[o.id].l.length;
+  const arrived = zaQ(now, D.arr[i] - 0.02, D.arr[i] + 0.12) * (r.done && !took ? 1 - zaQ(kd, 0.12, 0.3) : 1);
+  if (took) {
+    // taken: drawn whole in gold, folded into its glyph, and the glyph left burning
+    const lk = zaQ(kd, 0, 0.32) * nl, fold = zaE(zaQ(kd, 0.36, 0.86)), gA = zaQ(kd, 0.62, 0.95);
+    zaConst(o.id, cx, ccy, csz, { a: A, line: lk, lineA: 0.9, lineCol: inkGold, fold, glyphS: cb * 0.3, spark: 1.2 });
+    if (gA > 0) {
+      const ring = zaQ(kd, 0.62, 1.3);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(inkGold, 0.7 * (1 - ring) * A); ctx.lineWidth = 2.5 * (1 - ring) + 0.5;
+      ctx.beginPath(); ctx.arc(cx, ccy, cb * (0.22 + ring * 0.5), 0, TAU); ctx.stroke();
+      ctx.restore();
+      zaGlyph(o.id, cx, ccy, cb * 0.3, side ? ZA_SHADE_HI : ZA_GOLD_HI, { a: gA * A, lw: 0.13, glow: 1.2, core: 1, retro: side ? gA : 0 });
+    }
+  } else if (arrived > 0) {
+    zaConst(o.id, cx, ccy, csz, { a: A * arrived, lineA: side ? 0.32 : 0.22, lineCol: side ? ZA_SHADE_HI : '#cbd5e1', seed: i * 7 });
+    if (D.lp[i] > 0) zaConst(o.id, cx, ccy, csz, { a: A, line: D.lp[i], lineA: 0.85, lineCol: inkGold, tw: 0, spark: 0 });
+  }
+  // its star, named small under the sky
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `600 8.5px ${ZA_FM}`;
+  ctx.fillStyle = rgba(side ? '#c4b5fd' : '#7c8db0', 0.8 * A * reveal);
+  ctx.fillText(ZA.sky[o.id].star, cx, Y + 8 + cb + 2);
+  // the key, and the element
+  if (!r.done) zadCap(String(i + 1), X + 14, Y + 20, A, side ? ZA_SHADE_HI : '#94a3b8');
+  ctx.font = `700 9px ${ZA_FB}`;
+  ctx.textAlign = 'right';
+  ctx.fillStyle = rgba(ec, 0.9 * A);
+  ctx.fillText(Z_EL[el].n, X + PW - 16, Y + 24);
+  zaElem(el, X + PW - 26 - ctx.measureText(Z_EL[el].n).width, Y + 20.5, 4.6, ec, 0.9 * A, 1.2);
+  // the words write in under a scan of light
+  let y = Y + 8 + cb + 22;
+  const textTop = y - 18, textBot = Y + PH - 6, rv = reveal >= 1 ? 1 : reveal;
+  ctx.save();
+  if (rv < 1) { ctx.beginPath(); ctx.rect(X, textTop, PW, (textBot - textTop) * rv); ctx.clip(); }
+  // the name, its glyph beside it
+  const nmPx = fitFont(s.n, PW - 72, '800', 21, ZA_FD, 14);
+  const nmW = ctx.measureText(s.n).width, gS = nmPx * 0.36, gx = cx - nmW / 2 - gS - 7;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = rgba('#f8fafc', A);
+  ctx.fillText(s.n, gx + gS + 7, y);
+  zaGlyph(o.id, gx, y - nmPx * 0.36, gS, side ? ZA_SHADE_HI : ZA_GOLD_HI, { a: A, lw: 0.2, glow: 0.5, retro: side ? 1 : 0 });
+  y += 15;
+  ctx.textAlign = 'center';
+  ctx.font = `600 9.5px ${ZA_FB}`;
+  ctx.fillStyle = rgba('#8090ab', A);
+  zaSpaced(s.t.toUpperCase() + '  ·  ' + ZA_RULER[o.id], cx, y, 1.2);
+  y += 11;
+  // the rule, with a star at its middle
+  ctx.strokeStyle = rgba(inkGold, 0.3 * A); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(X + 22, y); ctx.lineTo(cx - 8, y); ctx.moveTo(cx + 8, y); ctx.lineTo(X + PW - 22, y); ctx.stroke();
+  zaStar4(cx, y, 3.4, 0, 0.4); ctx.fillStyle = rgba(inkGold, 0.8 * A); ctx.fill();
+  y += 12;
+  // the pips: what you hold, what this brings, the retrograde one; then the magnitude's name
+  const shown = took ? Math.min(mag, held + Math.floor(zaQ(kd, 0.95, 1.6) * (mag - held + 0.999))) : mag;
+  const pipFrom = side ? mag : 0;
+  zaPips(cx, y, 4.6, took ? Math.min(held, shown) : held, took ? Math.max(shown, held) : mag, pipFrom, A, 15);
+  if (took && kd > 0.95 && kd < 1.9) {
+    const k = clamp(shown - held, 0, 3);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let m = held + 1; m <= held + k; m++) {
+      const t = zaQ(kd, 0.95 + (m - held - 1) * 0.2, 1.35 + (m - held - 1) * 0.2);
+      if (t > 0 && t < 1) zaGlint(cx + (m - 2) * 15, y, 26 * (1 - t), '#fffbeb', 0.9 * (1 - t), t * 1.2);
+    }
+    ctx.restore();
+  }
+  y += 18;
+  ctx.font = `800 11px ${ZA_FD}`;
+  ctx.fillStyle = rgba(inkGold, A);
+  zaSpaced(Z_RN[mag] + '  ·  ' + Z_MAG[mag] + (held ? '   (FROM ' + Z_RN[held] + ')' : ''), cx, y, 1.6);
+  y += 15;
+  // what it does: every magnitude this takes you through
+  ctx.textAlign = 'left';
+  const lx = X + 15;
+  for (const b of L.bl.out) {
+    ctx.font = b.font;
+    for (let k = 0; k < b.lines.length; k++) {
+      if (y > Y + PH - 10) break;
+      if (b.kind === 'head' && k === 0) {
+        ctx.fillStyle = rgba(b.retro ? ZA_SHADE_HI : ZA_GOLD, A);
+        ctx.fillText(b.rn, lx, y);
+        const rw = ctx.measureText(b.rn + '  ').width;
+        ctx.fillStyle = rgba(b.col, A);
+        ctx.fillText(b.lines[0], lx + rw, y);
+      } else if (b.kind === 'shade' && k === 0) {
+        zaEclipse(lx + 4, y - 4, 3.6, A);
+        ctx.fillStyle = rgba(b.col, A);
+        ctx.fillText(b.lines[0], lx + 13, y);
+      } else {
+        ctx.fillStyle = rgba(b.col, A);
+        ctx.fillText(b.lines[k], lx, y);
+      }
+      y += b.lh;
+    }
+    y += b.gap;
+  }
+  if (r.retro && !r.done && !zRetroOk(o)) {
+    ctx.font = `italic 400 10.5px ${ZA_FB}`;
+    ctx.fillStyle = rgba('#7c8aa3', A);
+    for (const ln of wrapLines('It can go no higher: it is read as it is, with no shadow.', PW - 30)) { ctx.fillText(ln, lx, y); y += 12.5; }
+  }
+  // the flavour, at the foot
+  if (L.flav.length) {
+    ctx.font = `italic 400 10.5px ${ZA_FB}`;
+    ctx.fillStyle = rgba(side ? '#7e6a9e' : '#5d6b85', A);
+    ctx.textAlign = 'center';
+    let fy = Math.max(y + 8, Y + PH - 14 - (L.flav.length - 1) * 12.5);
+    for (const ln of L.flav) { ctx.fillText(ln, cx, fy); fy += 12.5; }
+  }
+  ctx.restore();
+  if (rv > 0 && rv < 1) {     // the scan's edge
+    const sy = textTop + (textBot - textTop) * rv;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const lg = ctx.createLinearGradient(X, 0, X + PW, 0);
+    lg.addColorStop(0, rgba(inkGold, 0)); lg.addColorStop(0.5, rgba(ZA_GOLD_PALE, 0.8 * A)); lg.addColorStop(1, rgba(inkGold, 0));
+    ctx.fillStyle = lg; ctx.fillRect(X + 6, sy - 1, PW - 12, 2);
+    ctx.restore();
+  }
+}
+
+function zadFaceNarrow(X, Y, PW, PH, o, r, i, side, A, now, L, reveal, took, kd) {
+  const D = ZAD, s = zSign(o.id), el = s.el, ec = ZA_ELCOL[el], held = D.held[i] | 0, mag = L.bl.mag;
+  const sq = L.sq, scx = X + 10 + sq / 2, scy = Y + PH / 2, inkGold = side ? ZA_SHADE_HI : ZA_GOLD;
+  zadChart(scx, scy, sq * 0.42, side ? ZA_SHADE_HI : '#c7d2fe', A, now * 0.05);
+  const nl = ZA.sky[o.id].l.length;
+  if (took) {
+    const fold = zaE(zaQ(kd, 0.36, 0.86)), gA = zaQ(kd, 0.62, 0.95);
+    zaConst(o.id, scx, scy, sq * 0.8, { a: A, line: zaQ(kd, 0, 0.32) * nl, lineA: 0.9, lineCol: inkGold, fold, glyphS: sq * 0.28 });
+    if (gA > 0) zaGlyph(o.id, scx, scy, sq * 0.28, side ? ZA_SHADE_HI : ZA_GOLD_HI, { a: gA * A, lw: 0.13, glow: 1.2, core: 1, retro: side ? gA : 0 });
+  } else {
+    zaConst(o.id, scx, scy, sq * 0.8, { a: A * zaQ(now, D.arr[i] - 0.02, D.arr[i] + 0.12), lineA: 0.3, lineCol: side ? ZA_SHADE_HI : '#cbd5e1' });
+    if (D.lp[i] > 0) zaConst(o.id, scx, scy, sq * 0.8, { a: A, line: D.lp[i], lineA: 0.85, lineCol: inkGold, tw: 0, spark: 0 });
+  }
+  const lx = X + sq + 24, rx = X + PW - 12;
+  ctx.save();
+  if (reveal < 1) { ctx.beginPath(); ctx.rect(lx - 4, Y, (rx - lx + 8) * reveal, PH); ctx.clip(); }
+  let y = Y + 22;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const nmPx = fitFont(s.n, rx - lx - 70, '800', 18, ZA_FD, 12);
+  zaGlyph(o.id, lx + nmPx * 0.34, y - nmPx * 0.36, nmPx * 0.34, side ? ZA_SHADE_HI : ZA_GOLD_HI, { a: A, glow: 0.4, retro: side ? 1 : 0 });
+  ctx.fillStyle = rgba('#f8fafc', A);
+  ctx.fillText(s.n, lx + nmPx * 0.68 + 7, y);
+  if (!r.done) zadCap(String(i + 1), rx - 16, Y + 15, A, side ? ZA_SHADE_HI : '#94a3b8');
+  y += 14;
+  ctx.font = `600 9.5px ${ZA_FB}`;
+  ctx.fillStyle = rgba(ec, 0.9 * A);
+  ctx.fillText(Z_EL[el].n + '  ·  ' + s.t.toUpperCase(), lx, y);
+  y += 14;
+  zaPips(lx + 15, y - 3, 4, held, mag, side ? mag : 0, A, 12);
+  ctx.font = `800 10.5px ${ZA_FD}`;
+  ctx.fillStyle = rgba(inkGold, A);
+  ctx.fillText(Z_RN[mag] + ' · ' + Z_MAG[mag], lx + 40, y);
+  y += 15;
+  for (const b of L.bl.out) {
+    ctx.font = b.font;
+    for (let k = 0; k < b.lines.length; k++) {
+      if (y > Y + PH - 6) break;
+      ctx.fillStyle = rgba(b.kind === 'head' && k === 0 ? (b.retro ? ZA_SHADE_HI : ZA_GOLD_HI) : b.col, A);
+      ctx.fillText((b.kind === 'head' && k === 0 ? b.rn + '  ' : '') + b.lines[k], lx, y);
+      y += b.lh;
+    }
+    y += b.gap * 0.6;
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------- the controls ---------------------------------- */
+function zadButton(b, label, key, col, on, icon, A, dim) {
+  if (!b) return;
+  const hot = !dim && inRect(mouse.x, mouse.y, b), c = dim ? '#475569' : col;
+  ctx.save();
+  if (on || hot) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(b.x + b.w / 2, b.y + b.h / 2, b.w * 0.55, c, (on ? 0.22 + 0.08 * Math.sin(uiTime * 4) : 0.14) * A);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+  g.addColorStop(0, rgba(on ? '#2e1065' : '#111a2e', 0.95 * A)); g.addColorStop(1, rgba(on ? '#1a0733' : '#070b16', 0.95 * A));
+  ctx.fillStyle = g;
+  roundRect(b.x, b.y, b.w, b.h, b.h / 2); ctx.fill();
+  ctx.strokeStyle = rgba(c, (on || hot ? 1 : 0.5) * A); ctx.lineWidth = on || hot ? 1.8 : 1.2;
+  roundRect(b.x, b.y, b.w, b.h, b.h / 2); ctx.stroke();
+  // its mark
+  const ix = b.x + 19, iy = b.y + b.h / 2, ir = 6.5;
+  ctx.strokeStyle = rgba(c, A); ctx.fillStyle = rgba(c, A); ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  if (icon === 'retro') {
+    ctx.beginPath(); ctx.arc(ix, iy, ir, -0.4, Math.PI * 1.35, false); ctx.stroke();
+    const e = -0.4; ctx.beginPath(); ctx.moveTo(ix + Math.cos(e) * ir + 3, iy + Math.sin(e) * ir - 2);
+    ctx.lineTo(ix + Math.cos(e) * ir, iy + Math.sin(e) * ir); ctx.lineTo(ix + Math.cos(e) * ir - 1, iy + Math.sin(e) * ir - 4); ctx.stroke();
+  } else if (icon === 'turn') {
+    const t = uiTime * (hot ? 2 : 0.4);
+    for (const s of [0, Math.PI]) {
+      ctx.beginPath(); ctx.arc(ix, iy, ir, t + s + 0.3, t + s + 2.6); ctx.stroke();
+      const e = t + s + 2.6, ex = ix + Math.cos(e) * ir, ey = iy + Math.sin(e) * ir;
+      ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(e + 0.9) * 3.4, ey - Math.sin(e + 0.9) * 3.4); ctx.stroke();
+    }
+  } else if (icon === 'leave') {
+    ctx.beginPath(); ctx.moveTo(ix - ir, iy); ctx.quadraticCurveTo(ix, iy + ir * 0.95, ix + ir, iy); ctx.stroke();
+    for (const k of [-0.6, 0, 0.6]) { ctx.beginPath(); ctx.moveTo(ix + k * ir, iy + ir * 0.48); ctx.lineTo(ix + k * ir * 1.3, iy + ir * 0.95); ctx.stroke(); }
+  } else {
+    ctx.beginPath(); ctx.moveTo(ix - 3, iy - 5); ctx.lineTo(ix + 3, iy); ctx.lineTo(ix - 3, iy + 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ix + 2, iy - 5); ctx.lineTo(ix + 8, iy); ctx.lineTo(ix + 2, iy + 5); ctx.stroke();
+  }
+  // its words, and its key at the far end
+  const kw = key ? 26 : 0;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  fitFont(label, b.w - 46 - kw, '700', 11.5, ZA_FD, 8);
+  ctx.fillStyle = rgba(dim ? '#64748b' : '#f1f5f9', A);
+  ctx.fillText(label, b.x + 30 + (b.w - 30 - kw - 8) / 2, b.y + b.h / 2 + 0.5);
+  if (key && !isTouch) {
+    ctx.font = `700 9px ${ZA_FM}`;
+    const w = Math.max(15, ctx.measureText(key).width + 8);
+    zadCap(key, b.x + b.w - w - 10, b.y + b.h / 2, A, c);
+  }
+  ctx.restore();
+}
+// the line of keys at the foot: 1 2 3 take · R retrograde · T turn the dome (30) · ESC leave it dark
+function zadKeys(y, A, cost) {
+  const parts = [['k', '1'], ['g', 2], ['k', '2'], ['g', 2], ['k', '3'], ['t', ' take'], ['d'], ['k', 'R'], ['t', ' retrograde'], ['d'],
+                 ['k', 'T'], ['t', ' turn the dome (' + cost + ')'], ['d'], ['k', 'ESC'], ['t', ' leave it dark']];
+  ctx.font = `500 10.5px ${ZA_FB}`;
+  const wOf = q => {
+    if (q[0] === 'k') { ctx.font = `700 9.5px ${ZA_FM}`; const w = Math.max(15, ctx.measureText(q[1]).width + 9); ctx.font = `500 10.5px ${ZA_FB}`; return w; }
+    if (q[0] === 'g') return q[1];
+    if (q[0] === 'd') return 20;
+    return ctx.measureText(q[1]).width;
+  };
+  let tw = 0;
+  for (const q of parts) tw += wOf(q);
+  let x = W / 2 - tw / 2;
+  for (const q of parts) {
+    const w = wOf(q);
+    if (q[0] === 'k') zadCap(q[1], x, y, A, '#64748b');
+    else if (q[0] === 't') { ctx.font = `500 10.5px ${ZA_FB}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = rgba('#64748b', A); ctx.fillText(q[1], x, y + 0.5); }
+    else if (q[0] === 'd') { zaStar4(x + 10, y, 2.4, 0, 0.4); ctx.fillStyle = rgba('#475569', A); ctx.fill(); }
+    x += w;
+  }
+}
+// your sky so far, top left: the signs you hold as medallions, and the shadow you carry
+function zadYourSky(A) {
+  const held = ZA_ORDER.filter(id => zm(id) > 0);
+  if (!held.length) return;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 9px ${ZA_FB}`;
+  const r = W >= 640 ? 11 : 8, y0 = W >= 640 ? H - 92 : 34;
+  ctx.fillStyle = rgba('#64748b', A);
+  zaSpaced('YOUR SKY', 20 + ctx.measureText('YOUR SKY').width / 2 + 7, y0 - r - 9, 1.6);
+  held.forEach((id, k) => zaMedal(20 + r + k * (r * 2 + 8), y0, r, id, zm(id), { a: A, shadow: zsh(id) ? 1 : 0 }));
+  let x = 20;
+  ctx.font = `700 9px ${ZA_FB}`;
+  for (const el of Object.keys(Z_EL)) if (zTri(el)) {
+    zaElem(el, x + 5, y0 + r + 18, 4.6, Z_EL[el].col, A, 1.2);
+    ctx.fillStyle = rgba(Z_EL[el].col, A);
+    ctx.fillText(Z_EL[el].tri, x + 13, y0 + r + 21.5);
+    x += ctx.measureText(Z_EL[el].tri).width + 26;
+  }
+}
+
+/* ---------------------------------- the screen ---------------------------------- */
+function drawPlanetarium() {
+  const r = P.zRead, D = ZAD, now = uiTime, dt = clamp(now - D.last, 0, 0.05);
+  D.last = now;
+  if (!D.open || r !== D.rd || now - D.seen > 0.35) zadBegin(r);
+  D.seen = now;
+  zadTrack(r, now, dt);
+  const T = now - D.t0, B = planetButtons(), G = zadGeo(B), A = zaQ(T, 0.9, 1.3);
+  zadGround(G, T, now);
+  zadWheel(G, r, T, now, B);
+  // the title, up in the dome
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 11px ${ZA_FD}`;
+  ctx.fillStyle = rgba('#a5b4fc', 0.75 * zaQ(T, 0.3, 0.8));
+  zaSpaced('THE PLANETARIUM', W / 2, 24, 5);
+  const hasRead = r && r.offers.length;
+  if (!hasRead) {
+    ctx.font = `600 13px ${ZA_FB}`;
+    ctx.fillStyle = rgba('#94a3b8', zaQ(T, 0.6, 1));
+    ctx.fillText(r ? 'the sky has nothing left to tell you' : 'the stars are reading for your wingman', W / 2, H / 2);
+  } else {
+    ctx.font = `500 11px ${ZA_FB}`;
+    ctx.fillStyle = rgba(r.done ? ZA_GOLD_HI : r.retro ? ZA_SHADE_HI : '#7c8aa3', zaQ(T, 0.6, 1));
+    zaSpaced(r.done ? 'the reading is taken' : r.retro ? 'read backwards, they ask for something back' : 'three signs have risen: take one',
+             W / 2, Math.max(G.rim + 16, B.plates[0].y - 12), 1.1);
+    // hover, and the lines joining up
+    for (let i = 0; i < B.plates.length; i++) {
+      const on = !r.done && T > ZAD_OPEN * 0.8 && inRect(mouse.x, mouse.y, B.plates[i]);
+      D.hov[i] += ((on ? 1 : 0) - D.hov[i]) * Math.min(1, dt * 10);
+      const nl = ZA.sky[r.offers[i].id].l.length;
+      D.lp[i] = clamp(D.lp[i] + (on ? 16 : -40) * dt, 0, nl);
+    }
+    const boxes = [];
+    for (const p of B.plates) boxes[p.i] = zadPlate(G, p, r.offers[p.i], r, p.i, now);
+    // the descents over everything: down into the plates, and (taken, or the dome turned) back up
+    const fl = W >= 640 ? 'wide' : 'narrow';
+    for (const p of B.plates) {
+      const o = r.offers[p.i], bx = boxes[p.i];
+      if (!bx) continue;
+      zadDescent(G, o.id, p, bx, zaQ(now, D.arr[p.i] - 0.5, D.arr[p.i]), 1);
+      if (r.done && D.took !== p.i) zadDescent(G, o.id, p, bx, 1 - zaQ(now, D.doneT + 0.2, D.doneT + 0.85), 0.8);
+      if (r.done && D.took === p.i) D.flyFrom = { x: bx.x, y: bx.y, id: o.id, retro: !!(r.took && r.took.retro), fl };
+    }
+    if (D.prev && now - D.turnT < 0.3) {      // the old plates let go of their skies
+      const k = (now - D.turnT) / 0.3;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const p of B.plates) {
+        ctx.strokeStyle = rgba('#7dd3fc', 0.7 * (1 - k)); ctx.lineWidth = 1.5 + 4 * k;
+        roundRect(p.x - 6 * k, p.y - 6 * k, p.w + 12 * k, p.h + 12 * k, 14); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (D.prev && now - D.turnT < 0.55) {
+      D.prev.forEach((o, i) => {
+        const p = B.plates[i];
+        if (!p || !o) return;
+        const bx = { x: p.x + p.w / 2, y: p.y + (G.wide ? 8 + clamp(p.h * 0.44, 52, 150) / 2 : p.h / 2), s: G.wide ? 100 : 60 };
+        zadDescent(G, o.id, p, bx, 1 - zaQ(now, D.turnT, D.turnT + 0.5), 0.9);
+      });
+    }
+  }
+  // the controls
+  const bA = zaQ(T, 1.0, 1.35);
+  if (B.retro) zadButton(B.retro, 'RETROGRADE', 'R', ZA_SHADE, r.retro, 'retro', bA);
+  if (B.turn) { const c = zTurnCost(), ok = credits >= c; zadButton(B.turn, 'TURN THE DOME  ' + c, 'T', '#7dd3fc', false, 'turn', bA, !ok); }
+  zadButton(B.leave, r && r.done ? 'CONTINUE' : 'WALK AWAY', r && r.done ? '' : 'ESC', r && r.done ? COL.hp : '#94a3b8', false, r && r.done ? 'go' : 'leave', bA);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (r && r.msg) {
+    ctx.font = `700 12px ${ZA_FB}`;
+    ctx.fillStyle = rgba('#fca5a5', 0.75 + 0.25 * Math.sin(now * 8));
+    ctx.fillText(r.msg, W / 2, B.leave.y + B.leave.h + 16);
+  }
+  // the foot: the keys, and the dome's last word
+  if (!isTouch && hasRead && !r.done && H > 420) zadKeys(H - 38, 0.9 * bA, zTurnCost());
+  ctx.font = `italic 400 10.5px ${ZA_FB}`;
+  ctx.fillStyle = rgba('#475569', bA);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('the stars give freely; read them backwards and they ask for something back.', W / 2, H - 16);
+  // credits, top right; your sky so far, top left
+  ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `600 12px ${ZA_FM}`;
+  const ct = Math.round(credits) + ' CR', cw = ctx.measureText(ct).width;
+  ctx.fillStyle = rgba(ZA_GOLD, zaQ(T, 0.4, 0.9));
+  ctx.fillText(ct, W - 18, 24);
+  ctx.strokeStyle = rgba(ZA_GOLD, 0.8 * zaQ(T, 0.4, 0.9)); ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.arc(W - 18 - cw - 10, 20, 5.5, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W - 18 - cw - 10, 20, 2.6, 0, TAU); ctx.stroke();
+  zadYourSky(zaQ(T, 0.5, 1));
+}
+/* ============================= end of the dome (zad) ============================= */
+
+/* ================= THE PLANETARIUM — the tray, in the HUD (art, 18 Nov) =================
+   In place of the placeholder signTray(x, w, y), which returns where the HUD's next
+   block starts. The signs you hold sit in four little triangles, one an element,
+   pointing the way that element's alchemical sign does (fire and air up, earth and
+   water down). Each corner is one of the element's three signs: a medallion when you
+   hold it (its glyph in its element's ring, three pips round the foot, a gold crown
+   at III), an empty socket when you don't. So the tray shows the trines filling up:
+   when all three corners are held, the triangle's edges light in the element's
+   colour and its name is written under it.
+   A shadow is the eclipse laid over its sign's medallion, and a line under the tray:
+   its name, and until when.
+   On the way out of the dome, the glyph you took flies down from its plate into its
+   corner, and the corner flashes (ZAD.fly, set by zDrawDark as the dome closes).
+   It reads P.zs, P.zShadow, P.zShadowFixed, SIGNS, Z_EL, zm/zsh/zTri, uiTime and
+   ZAD, and changes nothing of the logic's. Art state in ZAT. Needs the sky block.
+========================================================================================= */
+let ZAT = { at: {}, flashAt: {} };
+const ZAT_FLY = 0.85;
+
 function signTray(x, w, y) {
   if (!P.zs) return y;
-  const held = SIGNS.filter(s => zm(s.id) > 0);
-  if (!held.length && !P.zShadow) return y;
+  const any = SIGNS.some(s => zm(s.id) > 0);
+  if (!any && !P.zShadow) return y;
+  const m = clamp(w / 24, 7, 12), now = uiTime;
+  const step = m * 6.2, top = y + m + 2, bottom = top + m * 3.4;
   ctx.save();
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.font = "700 10px Barlow, 'Segoe UI', system-ui, sans-serif";
-  let cx = x;
-  for (const s of held) {
-    const t = s.n.slice(0, 3) + ' ' + Z_RN[zm(s.id)];
-    ctx.fillStyle = Z_EL[s.el].col;
-    ctx.fillText(t, cx, y);
-    cx += ctx.measureText(t).width + 9;
-    if (cx > x + w - 30) { cx = x; y += 13; }
+  ctx.textBaseline = 'alphabetic';
+  let k = 0, anyTri = false;
+  for (const el of ['fire', 'earth', 'air', 'water']) {
+    const up = el === 'fire' || el === 'air', ox = x + m * 2.5 + k * step, col = ZA_ELCOL[el];
+    const pts = up ? [[0, 0], [-1.45, 2.4], [1.45, 2.4]] : [[-1.45, 0], [1.45, 0], [0, 2.4]];
+    const ids = Z_EL[el].signs, P3 = pts.map(([px, py]) => [ox + px * m, top + py * m]);
+    const tri = zTri(el);
+    anyTri = anyTri || tri;
+    // the edges: lit when the trine is complete, a faint dashed outline while it fills
+    ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(P3[0][0], P3[0][1]); ctx.lineTo(P3[1][0], P3[1][1]); ctx.lineTo(P3[2][0], P3[2][1]); ctx.closePath();
+    if (tri) {
+      ctx.fillStyle = rgba(col, 0.1); ctx.fill();
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(col, 0.3 + 0.12 * Math.sin(now * 2.2 + k)); ctx.lineWidth = 4; ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = rgba(col, 0.95); ctx.lineWidth = 1.4; ctx.stroke();
+    } else {
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = rgba(col, 0.28); ctx.lineWidth = 1; ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ids.forEach((id, j) => {
+      const [cx, cy] = P3[j], mag = zm(id);
+      ZAT.at[id] = { x: cx, y: cy, r: m };
+      const fl = ZAT.flashAt[id] !== undefined ? 1 - zaQ(now, ZAT.flashAt[id], ZAT.flashAt[id] + 0.6) : 0;
+      // the glyph that is still in flight lands before its medallion is drawn
+      const flying = ZAD.fly && ZAD.fly.id === id && now - ZAD.fly.t < ZAT_FLY;
+      if (mag > 0 && !flying) {
+        zaMedal(cx, cy, m, id, mag, { shadow: zsh(id) ? 1 : 0, flash: fl });
+        if (fl > 0) {
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          ctx.strokeStyle = rgba(ZAD.fly && ZAD.fly.retro ? ZA_SHADE_HI : ZA_GOLD_PALE, fl); ctx.lineWidth = 2 * fl;
+          ctx.beginPath(); ctx.arc(cx, cy, m * (1 + (1 - fl) * 1.6), 0, TAU); ctx.stroke();
+          ctx.restore();
+        }
+      } else {
+        // an empty socket: a dotted ring, the glyph faint inside it
+        ctx.fillStyle = 'rgba(5,8,16,0.75)';
+        ctx.beginPath(); ctx.arc(cx, cy, m * 0.78, 0, TAU); ctx.fill();
+        ctx.setLineDash([1.5, 2.5]);
+        ctx.strokeStyle = rgba(col, 0.4); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, m * 0.78, 0, TAU); ctx.stroke();
+        ctx.setLineDash([]);
+        zaGlyph(id, cx, cy, m * 0.36, col, { a: 0.28, lw: 0.18 });
+      }
+    });
+    if (tri) {
+      ctx.font = `800 ${Math.max(7, m * 0.72).toFixed(1)}px ${ZA_FB}`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = rgba(col, 0.95);
+      ctx.fillText(Z_EL[el].tri, ox, bottom + 9);
+    }
+    k++;
   }
-  for (const el of Object.keys(Z_EL)) if (zTri(el)) {
-    const t = '△ ' + Z_EL[el].tri;
-    ctx.fillStyle = Z_EL[el].col;
-    ctx.fillText(t, cx, y);
-    cx += ctx.measureText(t).width + 9;
-  }
-  if (held.length) y += 16;
+  y = bottom + (anyTri ? 17 : 5);
+  // the shadow carried
   if (P.zShadow) {
     const s = zSign(P.zShadow);
-    ctx.fillStyle = Z_SHADE;
-    ctx.globalAlpha = 0.75 + Math.sin(uiTime * 3) * 0.2;
-    ctx.fillText('SHADOW  ·  ' + zHalves(s.shadow)[0] + (P.zShadowFixed ? '' : '  ·  until the sky turns'), x, y);
+    zaEclipse(x + 6, y + 2, 4.2, 0.9);
+    ctx.font = `800 10px ${ZA_FB}`;
+    ctx.textAlign = 'left';
+    const nm = zHalves(s.shadow)[0];
+    ctx.fillStyle = rgba(ZA_SHADE_HI, 0.8 + Math.sin(now * 3) * 0.15);
+    ctx.fillText(nm, x + 16, y + 5.5);
+    const nw = ctx.measureText(nm).width;
+    ctx.font = `500 9.5px ${ZA_FB}`;
+    ctx.fillStyle = rgba('#8b7aa8', 0.9);
+    ctx.fillText(P.zShadowFixed ? '·  for good' : '·  until the sky turns', x + 22 + nw, y + 5.5);
     y += 16;
+  }
+  // the glyph you took, flying down out of the dome into its corner
+  const F = ZAD.fly;
+  if (F && now - F.t < ZAT_FLY + 0.05 && ZAT.at[F.id]) {
+    const q = clamp((now - F.t) / ZAT_FLY, 0, 1), e = zaE(q), to = ZAT.at[F.id];
+    const mx = lerp(F.x, to.x, 0.25), my = Math.min(F.y, to.y) - 60;
+    const pos = u => [(1 - u) * (1 - u) * F.x + 2 * (1 - u) * u * mx + u * u * to.x, (1 - u) * (1 - u) * F.y + 2 * (1 - u) * u * my + u * u * to.y];
+    const col = F.retro ? ZA_SHADE_HI : ZA_GOLD_HI;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let j = 1; j <= 9; j++) {
+      const [tx, ty] = pos(Math.max(0, e - j * 0.025));
+      drawGlow(tx, ty, (26 - j * 2) * (1 - e * 0.5), col, 0.16 * (1 - j / 10));
+    }
+    ctx.restore();
+    const [gx, gy] = pos(e), gs = lerp(30, m * 0.5, e);
+    zaGlyph(F.id, gx, gy, gs, col, { lw: 0.15, glow: 1.3, core: 1, retro: F.retro ? 1 : 0 });
+    if (q >= 1 && ZAT.flashAt[F.id] !== F.t + ZAT_FLY) ZAT.flashAt[F.id] = F.t + ZAT_FLY;
   }
   ctx.restore();
   return y + 4;
 }
+/* ============================== end of the tray (zat) ============================== */
 
-/* On the field, in world space: the doubles beyond the first, the ring, the
-   deep, the hostile double, the tide, the shell. Outlines only. */
+/* ================ THE PLANETARIUM — the signs on the field (art, 18 Nov) ================
+   In place of the placeholders zDrawWorld (in the room, from drawPlayer, under the
+   shields and the hull) and zDrawDark (on the screen, under the HUD).
+   What the signs look like on you, and around you:
+     ARIES        the dash is a red-orange comet with two horns curling in its wake;
+                  a body it gored and stunned wears a turning star.
+     TAURUS       gold coins circle the hull, one for every hundred carried, a second
+                  ring past ten.
+     GEMINI       Castor (white) over the double, Pollux (gold) over you. At III the
+                  other two doubles, whole, and the ring of lightning that joins the
+                  four: braided gold and lavender, crackling where it cuts a body.
+     CANCER       shell plates round the hull, one for every shield; the shields over
+                  the maximum (HIGH TIDE) are pale moon arcs. THE CARAPACE snaps shut
+                  over the hull and glows until it bursts.
+     LEO          (the stock corona) and at II a mane of long flame rays round it, and
+                  round each double that carries it. While the nova lasts, a white-hot
+                  heart.
+     LIBRA        two pans hang either side of a beam over the hull; at II the beam
+                  tips to the half of your health you're in. A hit repaid flashes them.
+     PISCES       the deep: a sphere of dark water with light running through it and
+                  ripples going out; enemy rounds in it trail bubbles. At II, the two
+                  fish circle it, one each way.
+     AQUARIUS     (the stock charged water), and while THE FLOOD has the floor, it
+                  crackles.
+     every III    its crown: the constellation, small and faint, circling the hull.
+   And the shadows: the eclipse, a dark disc with a violet corona circling the hull,
+   and each one's own tell (HEADLONG's streak and skid sparks, EARTHBOUND's roots,
+   THE OTHER ONE in violet with its sight on you and a glow at the muzzle before it
+   fires, THE MOLT's soft hull, EXACTING's count, THE SCALES' violet beam, THE STING
+   TURNS' venom circling you, THE ARROW RETURNS' arrowhead, THE LONG CLIMB's summit
+   filling back up, THE RISING TIDE at the walls with foam on its edge, DEEP WATER's
+   bubbles) and SUNLESS on the screen: the dark, with a ragged, ember-lit rim.
+   What changes between frames it notices itself (a shield broken, the dash ending,
+   the shell opening, the nova, the flood, the tide, a shadow taken or lifted) and
+   hands to the events' block (zaFx). When the dome closes, zDrawDark opens the room
+   back up through an iris and sends the glyph taken to the tray (ZAD.fly).
+   It reads P (and P.zx's clocks), enemies, ebullets, credits, WORLD, arena, camZoom,
+   cam, zm/zsh/zTri, zTwins, zCentres, zLeoR, Z_DEEP_R, zOther, zTideM, twinActive,
+   state and uiTime, and changes nothing of the logic's. Art state in ZAW (one bag a
+   pilot, in a WeakMap). Needs the sky block and the events' block (zaf*).
+========================================================================================= */
+let ZAW = { pk: new WeakMap(), bolt: 0 };
+// what this pilot looked like last frame, to see what has changed
+function zawSeen() {
+  let S = ZAW.pk.get(P);
+  if (!S) {
+    const x = P.zx || {};
+    S = { shield: P.shield | 0, hp: P.hp, shadow: P.zShadow || '', dashT: P.dashT || 0, caraT: x.caraT || 0, novaT: x.novaT || 0,
+          floodT: x.floodT || 0, tideT: x.tideT || 0, libT: -9, roots: [] };
+    ZAW.pk.set(P, S);
+  }
+  return S;
+}
+function zawDiffs(S) {
+  const x = P.zx || {}, now = uiTime;
+  if (zm('cancer') && (P.shield | 0) < S.shield) zaFx('shell', P.x, P.y, S.shield - (P.shield | 0));
+  if (zm('libra') && P.hp < S.hp - 0.5) S.libT = now;
+  if (S.shadow && !P.zShadow) zaFx('skyturns', P.x, P.y, S.shadow);
+  if (!S.shadow && P.zShadow) zaFx('eclipse', P.x, P.y, P.zShadow);
+  if (S.dashT > 0 && !(P.dashT > 0) && zm('aries') >= 3) zaFx('crater', P.x, P.y, P.ang);
+  if (S.caraT > 0 && !(x.caraT > 0)) zaFx('carapace', P.x, P.y);
+  if ((x.novaT || 0) > S.novaT + 1) zaFx('nova', P.x, P.y);
+  if ((x.floodT || 0) > S.floodT + 1) zaFx('flood', P.x, P.y);
+  if (zm('pisces') >= 3 && S.tideT > 6 && (x.tideT || 0) < 1) zaFx('tide', P.x, P.y);
+  S.shield = P.shield | 0; S.hp = P.hp; S.shadow = P.zShadow || ''; S.dashT = P.dashT || 0;
+  S.caraT = x.caraT || 0; S.novaT = x.novaT || 0; S.floodT = x.floodT || 0; S.tideT = x.tideT || 0;
+}
+
 function zDrawWorld() {
   if (!P.zs) return;
+  const S = zawSeen();
+  zawDiffs(S);
   ctx.save();
-  const tw = zTwins();
-  if (zm('gemini') >= 3) {
-    ctx.globalAlpha = 0.55 + Math.sin(uiTime * 12) * 0.15;
-    ctx.strokeStyle = '#e9d5ff'; ctx.lineWidth = 2;
-    ctx.strokeRect(Math.min(P.x, WORLD.w - P.x), Math.min(P.y, WORLD.h - P.y),
-                   Math.abs(WORLD.w - 2 * P.x), Math.abs(WORLD.h - 2 * P.y));
+  if (zsh('aquarius')) zawTide();
+  if (zm('pisces')) { const pm = zm('pisces'); zCentres().forEach((c, k) => zawDeep(c.x, c.y, pm, k)); }
+  if (zm('leo') >= 2) {
+    zawMane(P.x, P.y, zLeoR(), 1);
+    if (zm('gemini') >= 2) for (const t of zTwins()) { zawCoronaAt(t.x, t.y, zLeoR()); zawMane(t.x, t.y, zLeoR(), 0.7); }
   }
-  ctx.globalAlpha = 0.7;
+  if (P.zx && P.zx.novaT > 0) zawNovaHeart();
+  if (P.zx && P.zx.floodT > 0) zawCrackle();
+  if (zm('gemini') >= 3 && twinActive()) zawRing();
+  if (twinActive()) zawTwins();
+  if (zsh('gemini')) zawOther();
+  if (zm('aries')) zawRam();
+  if (zm('taurus')) zawCoins();
+  if (zm('cancer') && !P.molt) zawShell();
+  if (zm('libra')) zawPans(S);
+  zawCrowns();
+  if (P.zShadow) zawShadow(S);
+  if (P.zx && P.zx.caraT > 0) zawCarapace(P.zx.caraT);
+  zafDraw();
+  ctx.restore();
+}
+
+/* ---------------------------------- the deep ---------------------------------- */
+function zawDeep(x, y, mag, k) {
+  const R = Z_DEEP_R, t = uiTime;
+  ctx.save();
+  let g = ctx.createRadialGradient(x, y, R * 0.1, x, y, R);
+  g.addColorStop(0, 'rgba(8,47,73,0.04)'); g.addColorStop(0.75, 'rgba(7,89,133,0.13)'); g.addColorStop(1, 'rgba(14,116,144,0.26)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  // light running through it: caustic threads, slowly wandering
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 7; i++) {
+    const a0 = i * 0.9 + t * 0.21 * (i % 2 ? 1 : -1), rr = R * (0.3 + 0.09 * i);
+    ctx.strokeStyle = `rgba(125,211,252,${0.07 + 0.05 * Math.sin(t * 1.3 + i)})`;
+    ctx.beginPath();
+    for (let j = 0; j <= 18; j++) {
+      const a = a0 + j * 0.16, w = Math.sin(j * 0.9 + t * 2 + i) * 9;
+      const px = x + Math.cos(a) * (rr + w), py = y + Math.sin(a) * (rr + w);
+      j ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+  }
+  // ripples going out
+  for (let i = 0; i < 3; i++) {
+    const q = (t * 0.32 + i / 3) % 1;
+    ctx.strokeStyle = `rgba(186,230,253,${0.22 * (1 - q)})`; ctx.lineWidth = 1.4 * (1 - q) + 0.4;
+    ctx.beginPath(); ctx.arc(x, y, R * (0.2 + 0.8 * q), 0, TAU); ctx.stroke();
+  }
+  // the surface's edge
+  ctx.strokeStyle = 'rgba(56,189,248,0.16)'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = `rgba(125,211,252,${0.5 + 0.12 * Math.sin(t * 2)})`; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+  // motes drifting in it
+  for (let i = 0; i < 9; i++) {
+    const a = zaH(i + k * 13) * TAU + t * (0.2 + zaH(i * 3) * 0.3), rr = R * (0.2 + zaH(i * 7) * 0.7);
+    drawGlow(x + Math.cos(a) * rr, y + Math.sin(a) * rr + Math.sin(t + i) * 6, 5, '#7dd3fc', 0.25);
+  }
+  // the fish (II): two, circling one each way, each the colour of the other's wake
+  if (mag >= 2) for (const s of [1, -1]) {
+    const a = t * 0.9 * s + (s < 0 ? Math.PI : 0), fr = R * 0.8;
+    zawFish(x + Math.cos(a) * fr, y + Math.sin(a) * fr, a + s * Math.PI / 2, s > 0 ? '#7dd3fc' : '#c7d2fe', t * 7 + (s < 0 ? 2 : 0));
+  }
+  ctx.restore();
+  // enemy rounds caught in it trail bubbles
+  if (rnd() < 0.5) for (const b of ebullets) {
+    if ((b.x - x) ** 2 + (b.y - y) ** 2 > R * R || rnd() > 0.12) continue;
+    spawnPart(b.x + rnd(4, -4), b.y + rnd(4, -4), rnd(10, -10), rnd(-12, -36), rnd(2.2, 1), '#bae6fd', rnd(0.6, 0.3), 0.96);
+  }
+}
+// one of the fish: a body, its tail fanning, a fin, a glint of an eye
+function zawFish(x, y, a, col, sw) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(a);
+  drawGlow(0, 0, 24, col, 0.3);
+  const tail = Math.sin(sw) * 0.45;
+  ctx.strokeStyle = rgba(col, 0.9); ctx.fillStyle = rgba(col, 0.22); ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(12, 0); ctx.quadraticCurveTo(4, -6.5, -6, -2); ctx.lineTo(-11, 0); ctx.lineTo(-6, 2); ctx.quadraticCurveTo(4, 6.5, 12, 0);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.save(); ctx.translate(-10, 0); ctx.rotate(tail);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-8, -6); ctx.quadraticCurveTo(-5, 0, -8, 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.beginPath(); ctx.moveTo(1, -4.5); ctx.lineTo(-3, -9); ctx.lineTo(-4, -3.5); ctx.stroke();
+  ctx.fillStyle = '#f0f9ff';
+  ctx.beginPath(); ctx.arc(7, -1.4, 1.1, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------------------------------- the sun ---------------------------------- */
+// MIDDAY's mane: long tongues of flame licking out past the corona's edge, each its own pace, soft at the tips
+function zawMane(x, y, R, k) {
+  const t = uiTime;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 36; i++) {
+    const a = i * TAU / 36 + t * 0.1 + Math.sin(t * 0.7 + i) * 0.03;
+    const wob = 0.5 + 0.5 * Math.sin(t * (1.5 + (i % 7) * 0.33) + i * 2.3);
+    const L = R * (0.14 + 0.26 * wob * (i % 3 ? 0.8 : 1.3)), r0 = R * 0.97;
+    const path = () => {
+      ctx.beginPath();
+      for (let j = 0; j <= 8; j++) {
+        const u = j / 8, bend = Math.sin(u * 3 + t * 3.2 + i) * 0.035 * u;
+        const px = x + Math.cos(a + bend) * (r0 + L * u), py = y + Math.sin(a + bend) * (r0 + L * u);
+        j ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+    };
+    path(); ctx.strokeStyle = `rgba(234,88,12,${0.1 * k})`; ctx.lineWidth = R * 0.07; ctx.stroke();
+    path(); ctx.strokeStyle = `rgba(251,146,60,${0.18 * k})`; ctx.lineWidth = R * 0.03; ctx.stroke();
+    path(); ctx.strokeStyle = `rgba(254,240,138,${0.3 * k * wob})`; ctx.lineWidth = Math.max(1, R * 0.008); ctx.stroke();
+  }
+  drawGlow(x, y, R * 1.25, '#fb923c', 0.1 * k);
+  ctx.restore();
+}
+// the corona round a double that carries it (the stock code draws yours)
+function zawCoronaAt(x, y, R) {
+  const t = uiTime;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(x, y, R * 0.95, '#fbbf24', 0.16);
+  ctx.strokeStyle = `rgba(253,224,71,${0.4 + Math.sin(t * 3) * 0.1})`; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+  for (let i = 0; i < 14; i++) {
+    const a = t * 0.35 + i * TAU / 14, wob = 0.5 + 0.5 * Math.sin(t * (2.4 + (i % 5) * 0.5) + i * 1.7);
+    const r0 = R * 0.84, r1 = R * (1 + 0.15 * wob), sp = 0.08 + 0.04 * wob;
+    ctx.fillStyle = i % 3 ? `rgba(251,146,60,${0.2 + 0.15 * wob})` : `rgba(253,224,71,${0.2 + 0.15 * wob})`;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a - sp) * r0, y + Math.sin(a - sp) * r0);
+    ctx.quadraticCurveTo(x + Math.cos(a) * r1 * 1.06, y + Math.sin(a) * r1 * 1.06, x + Math.cos(a + sp) * r0, y + Math.sin(a + sp) * r0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+// while the nova lasts: a white-hot heart in the corona, and its edge doubled
+function zawNovaHeart() {
+  const t = uiTime, k = clamp(P.zx.novaT / 8, 0, 1);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(P.x, P.y, 90 + 20 * Math.sin(t * 9), '#fffbeb', 0.35 * (0.4 + 0.6 * k));
+  ctx.strokeStyle = `rgba(255,251,235,${0.35 * k})`; ctx.lineWidth = 3;
+  ctx.setLineDash([18, 12]); ctx.lineDashOffset = -t * 60;
+  ctx.beginPath(); ctx.arc(P.x, P.y, zLeoR() * 0.985, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/* ---------------------------------- the twins ---------------------------------- */
+// the doubles past the first, whole; Castor over the double and Pollux over you
+function zawTwins() {
+  const tw = zTwins(), t = uiTime;
+  if (!tw.length) return;
   for (let k = 1; k < tw.length; k++) {
+    const d = tw[k], ang = k === 1 ? -P.twinAng : Math.PI - P.twinAng;
     ctx.save();
-    ctx.translate(tw[k].x, tw[k].y); ctx.rotate(P.twinAng);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(d.x, d.y, 44, '#c4b5fd', 0.38);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(d.x, d.y); ctx.rotate(ang);
     ctx.lineWidth = 2.2;
     drawShipHull('#c4b5fd', 'rgba(196,181,253,0.18)');
     ctx.restore();
   }
-  if (zm('pisces')) {
-    ctx.globalAlpha = 0.35; ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.5;
-    for (const c of zCentres()) { ctx.beginPath(); ctx.arc(c.x, c.y, Z_DEEP_R, 0, TAU); ctx.stroke(); }
-  }
-  if (zm('leo') >= 2 && zm('gemini') >= 2) {
-    ctx.globalAlpha = 0.3; ctx.strokeStyle = '#fde047'; ctx.lineWidth = 1.5;
-    for (const t of tw) { ctx.beginPath(); ctx.arc(t.x, t.y, zLeoR(), 0, TAU); ctx.stroke(); }
-  }
-  if (P.zx && P.zx.caraT > 0) {
-    ctx.globalAlpha = 0.8; ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 12, 0, TAU); ctx.stroke();
-  }
-  if (zsh('gemini')) {
-    ctx.save();
-    ctx.globalAlpha = 0.7;
-    const o = zOther();
-    ctx.translate(o.x, o.y); ctx.rotate(Math.atan2(P.y - o.y, P.x - o.x));
-    ctx.lineWidth = 2.2;
-    drawShipHull(Z_SHADE, 'rgba(168,85,247,0.2)');
+  if (!zm('gemini')) return;
+  const star = (x, y, col, ph) => {
+    const yy = y - 32 + Math.sin(t * 1.6 + ph) * 3;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    drawGlow(x, yy, 16, col, 0.5);
+    zaStar4(x, yy, 6.5, t * 0.6 + ph, 0.22); ctx.fillStyle = rgba(col, 0.95); ctx.fill();
+    zaStar4(x, yy, 2.6, 0, 0.5); ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill();
     ctx.restore();
+  };
+  star(tw[0].x, tw[0].y, '#e0e7ff', 0);      // Castor, white
+  star(P.x, P.y, '#ffc07a', 1.7);            // Pollux, orange
+}
+// a bolt from (x0, y0) to (x1, y1): jagged, re-struck every few hundredths, seeded so it flickers rather than swims
+function zawBolt(x0, y0, x1, y1, seed, amp, col, lw, a) {
+  const L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(3, Math.round(L / 34)), nx = -(y1 - y0) / (L || 1), ny = (x1 - x0) / (L || 1);
+  const q = Math.floor(uiTime * 22);
+  ctx.strokeStyle = rgba(col, a); ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.moveTo(x0, y0);
+  for (let i = 1; i < n; i++) {
+    const u = i / n, j = (zaH(seed * 31 + i * 7.3 + q * 1.91) - 0.5) * 2 * amp * Math.sin(Math.PI * u);
+    ctx.lineTo(lerp(x0, x1, u) + nx * j, lerp(y0, y1, u) + ny * j);
   }
-  if (zsh('aquarius')) {
-    const m = zTideM();
-    if (m > 1) {
-      ctx.globalAlpha = 0.22; ctx.fillStyle = '#0ea5e9';
-      const ax = arena.x0, ay = arena.y0, aw = arena.x1 - arena.x0, ah = arena.y1 - arena.y0;
-      ctx.fillRect(ax, ay, aw, m); ctx.fillRect(ax, ay + ah - m, aw, m);
-      ctx.fillRect(ax, ay + m, m, ah - 2 * m); ctx.fillRect(ax + aw - m, ay + m, m, ah - 2 * m);
+  ctx.lineTo(x1, y1); ctx.stroke();
+}
+// THE CONSTELLATION's ring: four of you, joined by lightning braided gold and lavender
+function zawRing() {
+  const x0 = P.x, y0 = P.y, x1 = WORLD.w - P.x, y1 = WORLD.h - P.y, t = uiTime;
+  const E = [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]];
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  E.forEach((s, i) => {
+    ctx.strokeStyle = 'rgba(196,181,253,0.1)'; ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); ctx.stroke();
+    zawBolt(s[0], s[1], s[2], s[3], i * 3 + 1, 10, '#c4b5fd', 2.2, 0.75);
+    zawBolt(s[0], s[1], s[2], s[3], i * 3 + 2, 8, '#fde68a', 1.6, 0.8);
+    zawBolt(s[0], s[1], s[2], s[3], i * 3 + 3, 3, '#ffffff', 0.9, 0.6);
+    // a pulse running round the ring
+    const u = (t * 0.6 + i * 0.25) % 1;
+    drawGlow(lerp(s[0], s[2], u), lerp(s[1], s[3], u), 26, '#e9d5ff', 0.4);
+  });
+  // where it cuts a body: crackle
+  for (const e of enemies) {
+    if (e.dead || e.phased) continue;
+    for (const s of E) {
+      const dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy || 1;
+      const u = clamp(((e.x - s[0]) * dx + (e.y - s[1]) * dy) / L2, 0, 1), px = s[0] + dx * u, py = s[1] + dy * u;
+      if ((e.x - px) ** 2 + (e.y - py) ** 2 > (e.r + 8) ** 2) continue;
+      drawGlow(px, py, 22 + e.r, '#fde68a', 0.5);
+      for (let j = 0; j < 3; j++) {
+        const a = zaH(j + Math.floor(t * 20) + e.x) * TAU, L = 10 + zaH(j * 3 + e.y) * (e.r + 10);
+        zawBolt(px, py, px + Math.cos(a) * L, py + Math.sin(a) * L, j + 9, 4, '#ffffff', 1, 0.8);
+      }
+      break;
     }
   }
   ctx.restore();
 }
-
-/* SUNLESS: the dark, in screen space, with the light left round the hull */
-function zDrawDark() {
-  if (!zsh('leo') || state === 'menu' || state === 'dead') return;
-  const z = camZoom;
-  const sx = (P.x - cam.x) * z + W / 2 + cam.sx, sy = (P.y - cam.y) * z + H / 2 + cam.sy;
-  const r = 240 * z;
-  const g = ctx.createRadialGradient(sx, sy, r * 0.7, sx, sy, r * 1.25);
-  g.addColorStop(0, 'rgba(2,2,6,0)');
-  g.addColorStop(1, 'rgba(2,2,6,0.99)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+// THE OTHER ONE: your double in violet across the room, its sight on you, a glow at the muzzle before it fires
+function zawOther() {
+  const o = zOther(), a = Math.atan2(P.y - o.y, P.x - o.x), t = uiTime;
+  const ht = P.zx ? P.zx.hostT || 0 : 0, tell = ht > 0 && ht < 0.22 ? 1 - ht / 0.22 : 0;
+  const mx = o.x + Math.cos(a) * 20, my = o.y + Math.sin(a) * 20;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(o.x, o.y, 54, ZA_SHADE, 0.42 + 0.1 * Math.sin(t * 5));
+  // its sight: a thin line to you
+  const L = Math.min(len(P.x - o.x, P.y - o.y), 900);
+  const g = ctx.createLinearGradient(mx, my, mx + Math.cos(a) * L, my + Math.sin(a) * L);
+  g.addColorStop(0, rgba('#f0abfc', 0.35 + 0.4 * tell)); g.addColorStop(1, 'rgba(240,171,252,0)');
+  ctx.strokeStyle = g; ctx.lineWidth = 1 + tell * 1.5;
+  ctx.setLineDash([10, 8]); ctx.lineDashOffset = -t * 50;
+  ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(a) * L, my + Math.sin(a) * L); ctx.stroke();
+  ctx.setLineDash([]);
+  if (tell > 0) { drawGlow(mx, my, 10 + 22 * tell, '#f0abfc', 0.5 + 0.4 * tell); drawGlow(mx, my, 6, '#ffffff', 0.6 * tell); }
+  ctx.restore();
+  ctx.save();
+  ctx.translate(o.x, o.y); ctx.rotate(a);
+  ctx.lineWidth = 2.4;
+  drawShipHull(ZA_SHADE_HI, 'rgba(20,5,32,0.92)');
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgba(244,114,182,0.95)';
+  ctx.beginPath(); ctx.arc(7, -2.6, 1.4, 0, TAU); ctx.arc(7, 2.6, 1.4, 0, TAU); ctx.fill();
+  ctx.restore();
 }
+
+/* ---------------------------------- the ram ---------------------------------- */
+// the dash as a comet with the ram's horns curling in its wake; the stunned wear a turning star
+function zawRam() {
+  const t = uiTime;
+  if (P.dashT > 0) {
+    const sp = len(P.vx, P.vy), a = sp > 40 ? Math.atan2(P.vy, P.vx) : P.ang, bx = -Math.cos(a), by = -Math.sin(a), nx = -by, ny = bx;
+    const L = 90 + Math.min(120, sp * 0.12);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // the tail
+    const g = ctx.createLinearGradient(P.x, P.y, P.x + bx * L, P.y + by * L);
+    g.addColorStop(0, 'rgba(254,215,170,0.8)'); g.addColorStop(0.3, 'rgba(251,113,133,0.45)'); g.addColorStop(1, 'rgba(225,29,72,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(P.x + nx * 14, P.y + ny * 14); ctx.quadraticCurveTo(P.x + bx * L * 0.5 + nx * 8, P.y + by * L * 0.5 + ny * 8, P.x + bx * L, P.y + by * L);
+    ctx.quadraticCurveTo(P.x + bx * L * 0.5 - nx * 8, P.y + by * L * 0.5 - ny * 8, P.x - nx * 14, P.y - ny * 14);
+    ctx.closePath(); ctx.fill();
+    // the horns: two spirals curling back off the shoulders
+    for (const s of [1, -1]) {
+      ctx.strokeStyle = 'rgba(251,146,60,0.75)'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let i = 0; i <= 22; i++) {
+        const u = i / 22, an = u * Math.PI * 1.6, rr = 26 * (1 - u * 0.62);
+        const cx = P.x + bx * (14 + u * 26) + nx * s * 16, cy = P.y + by * (14 + u * 26) + ny * s * 16;
+        const px = cx + (Math.cos(an) * bx + Math.sin(an) * nx * s) * rr * 0.6, py = cy + (Math.cos(an) * by + Math.sin(an) * ny * s) * rr * 0.6;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.stroke();
+    }
+    drawGlow(P.x, P.y, 46, '#fb7185', 0.55);
+    drawGlow(P.x + Math.cos(a) * 12, P.y + Math.sin(a) * 12, 20, '#fff7ed', 0.6);
+    ctx.restore();
+    if (rnd() < 0.7) spawnPart(P.x + bx * 10 + rnd(8, -8), P.y + by * 10 + rnd(8, -8), bx * 140 + rnd(60, -60), by * 140 + rnd(60, -60), rnd(3, 1.4), rnd() < 0.5 ? '#fb7185' : '#fdba74', rnd(0.5, 0.2), 0.9);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const e of enemies) {
+    if (e.dead || !(e.stagger > 0) || e.ramCd === undefined) continue;
+    const x = e.x, y = e.y - e.r - 12;
+    drawGlow(x, y, 12, '#fdba74', 0.45);
+    zaStar4(x, y, 6, t * 7, 0.3); ctx.fillStyle = 'rgba(254,215,170,0.95)'; ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------- the hoard ---------------------------------- */
+function zawCoin(x, y, r, spin, a) {
+  const sx = Math.max(0.12, Math.abs(Math.cos(spin)));
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(sx, 1);
+  const g = ctx.createLinearGradient(-r, -r, r, r);
+  g.addColorStop(0, rgba('#fef3c7', a)); g.addColorStop(0.5, rgba('#f59e0b', a)); g.addColorStop(1, rgba('#92400e', a));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = rgba('#fde68a', a); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.7, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+// THE HOARD: a coin circling the hull for every hundred carried; past ten, a second ring the other way
+function zawCoins() {
+  const n = Math.min(20, Math.floor(Math.max(0, credits) / 100)), t = uiTime;
+  if (!n) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(P.x, P.y, 50, '#fbbf24', 0.12 + n * 0.006);
+  ctx.restore();
+  for (let i = 0; i < n; i++) {
+    const ring = i < 10 ? 0 : 1, cnt = ring ? n - 10 : Math.min(10, n), j = ring ? i - 10 : i;
+    const a = j * TAU / cnt + (ring ? -t * 0.6 : t * 0.9), R = ring ? 48 : 34;
+    const x = P.x + Math.cos(a) * R, y = P.y + Math.sin(a) * R * 0.92;
+    zawCoin(x, y, 4.2, t * 3 + i * 0.9, 0.95);
+    if (zaH(i + Math.floor(t * 2)) < 0.06) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; zaGlint(x - 1.5, y - 1.5, 9, '#fffbeb', 0.8); ctx.restore(); }
+  }
+}
+
+/* ---------------------------------- the shell ---------------------------------- */
+// THE SHELL: one plate for every shield, round the hull; the ones over the maximum are pale moon arcs
+function zawShell() {
+  const n = Math.min(10, P.shield | 0), base = Math.min(n, P.shieldMax | 0), t = uiTime, R = P.r + 17;
+  if (!n) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < base; i++) {
+    const a = t * 0.5 + i * TAU / base, span = Math.min(0.9, TAU / base * 0.72);
+    const a0 = a - span / 2, a1 = a + span / 2, r0 = R - 4, r1 = R + 4;
+    ctx.beginPath();
+    ctx.arc(P.x, P.y, r1, a0 + 0.06, a1 - 0.06);
+    ctx.lineTo(P.x + Math.cos(a1) * R, P.y + Math.sin(a1) * R);
+    ctx.arc(P.x, P.y, r0, a1 - 0.06, a0 + 0.06, true);
+    ctx.lineTo(P.x + Math.cos(a0) * R, P.y + Math.sin(a0) * R);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(12,74,110,0.78)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(125,211,252,0.9)'; ctx.lineWidth = 1.2; ctx.stroke();
+    // a ridge down its middle, and its sheen
+    ctx.strokeStyle = 'rgba(224,242,254,0.55)'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, a0 + 0.12, a1 - 0.12); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = base; i < n; i++) {
+    const a = -t * 0.8 + (i - base) * TAU / Math.max(1, n - base);
+    ctx.strokeStyle = `rgba(224,242,254,${0.55 + 0.2 * Math.sin(t * 3 + i)})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R + 10, a - 0.35, a + 0.35); ctx.stroke();
+    ctx.strokeStyle = 'rgba(186,230,253,0.25)'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(P.x, P.y, R + 10, a - 0.3, a + 0.3); ctx.stroke();
+  }
+  ctx.restore();
+}
+// THE CARAPACE: the shell snapped shut over the hull, glowing until it opens (the burst is zaFx's)
+function zawCarapace(left) {
+  const t = uiTime, age = 3 - left, snap = zaO(age / 0.16), R = P.r + 14 + (1 - snap) * 30;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  drawGlow(P.x, P.y, R * 2.4, '#38bdf8', 0.35 + 0.15 * Math.sin(t * 6));
+  ctx.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 8; i++) {
+    const a0 = i * TAU / 8 + 0.05, a1 = (i + 1) * TAU / 8 - 0.05;
+    ctx.beginPath();
+    ctx.arc(P.x, P.y, R, a0, a1); ctx.arc(P.x, P.y, R * 0.52, a1, a0, true); ctx.closePath();
+    ctx.fillStyle = 'rgba(8,47,73,0.85)'; ctx.fill();
+    ctx.strokeStyle = `rgba(125,211,252,${0.7 + 0.3 * Math.sin(t * 8 + i)})`; ctx.lineWidth = 1.4; ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(224,242,254,0.8)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+  // the seam it will open along, brightening as it does
+  const warn = zaQ(age, 2.4, 3);
+  ctx.strokeStyle = rgba('#ffffff', 0.3 + 0.7 * warn); ctx.lineWidth = 1 + 2 * warn;
+  for (let i = 0; i < 8; i++) {
+    const a = i * TAU / 8;
+    ctx.beginPath(); ctx.moveTo(P.x + Math.cos(a) * R * 0.5, P.y + Math.sin(a) * R * 0.5); ctx.lineTo(P.x + Math.cos(a) * R, P.y + Math.sin(a) * R); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------- the scales ---------------------------------- */
+function zawScales(x, y, tilt, col, col2, a, flash) {
+  const L = 24, dx = Math.cos(tilt) * L, dy = Math.sin(tilt) * L;
+  ctx.save();
+  ctx.lineCap = 'round';
+  if (flash > 0) { ctx.globalCompositeOperation = 'lighter'; drawGlow(x, y + 10, 50, col, 0.6 * flash); ctx.globalCompositeOperation = 'source-over'; }
+  ctx.strokeStyle = rgba(col, a); ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
+  ctx.fillStyle = rgba(col, a);
+  ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x - 3, y + 2); ctx.lineTo(x + 3, y + 2); ctx.closePath(); ctx.fill();
+  for (const s of [-1, 1]) {
+    const px = x + dx * s, py = y + dy * s, by = py + 13;
+    ctx.strokeStyle = rgba(col2, 0.7 * a); ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - 6, by); ctx.moveTo(px, py); ctx.lineTo(px + 6, by); ctx.stroke();
+    ctx.strokeStyle = rgba(col2, a); ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(px, by - 1, 7, 0.15, Math.PI - 0.15); ctx.stroke();
+  }
+  ctx.restore();
+}
+// THE SCALES (the sign): a beam over the hull, two pans; at II it tips to the half of your health you're in
+function zawPans(S) {
+  const m = zm('libra'), hp = clamp(P.hp / P.maxHp, 0, 1), t = uiTime;
+  const tilt = m >= 2 ? (hp >= 0.5 ? -0.32 : 0.32) * (0.6 + 0.4 * Math.abs(hp - 0.5) * 2) : Math.sin(t * 1.3) * 0.08;
+  const fl = 1 - zaQ(t, S.libT, S.libT + 0.5);
+  zawScales(P.x, P.y - 40, tilt, '#fde68a', '#f9a8d4', 0.9, fl);
+}
+
+/* ---------------------------------- the crowns ---------------------------------- */
+// every ASCENDANT sign: its constellation, small and faint, circling the hull
+function zawCrowns() {
+  const asc = ZA_ORDER.filter(id => zm(id) >= 3), t = uiTime;
+  if (!asc.length) return;
+  ctx.save();
+  asc.forEach((id, k) => {
+    const R = 58 + k * 13, a = t * 0.32 * (k % 2 ? -1 : 1) + k * 2.1;
+    ctx.strokeStyle = 'rgba(253,230,138,0.07)'; ctx.lineWidth = 1;
+    ctx.setLineDash([2, 7]);
+    ctx.beginPath(); ctx.arc(P.x, P.y, R, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    zaConst(id, P.x + Math.cos(a) * R, P.y + Math.sin(a) * R, 26, { a: 0.55, lineA: 0.55, lineCol: ZA_GOLD, spark: 0.5, seed: k });
+  });
+  ctx.restore();
+}
+
+/* ---------------------------------- the shadows ---------------------------------- */
+function zawShadow(S) {
+  const sh = P.zShadow, x = P.zx || {}, t = uiTime;
+  // the eclipse, circling the hull
+  const ea = t * 0.8;
+  zaEclipse(P.x + Math.cos(ea) * 30, P.y + Math.sin(ea) * 30, 5.5, 0.85);
+  ctx.save();
+  if (sh === 'aries') {                       // HEADLONG: the engine never lets go, and it skids
+    const ax = x.lastX === undefined ? Math.cos(P.ang) : x.lastX, ay = x.lastY === undefined ? Math.sin(P.ang) : x.lastY;
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(P.x, P.y, P.x - ax * 60, P.y - ay * 60);
+    g.addColorStop(0, 'rgba(240,171,252,0.6)'); g.addColorStop(1, 'rgba(168,85,247,0)');
+    ctx.strokeStyle = g; ctx.lineWidth = 6 + Math.sin(t * 30) * 1.5;
+    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(P.x - ax * 60, P.y - ay * 60); ctx.stroke();
+    if (rnd() < 0.35) { const s = rnd() < 0.5 ? 1 : -1; spawnPart(P.x - ay * 12 * s, P.y + ax * 12 * s, -ax * 90 + rnd(50, -50), -ay * 90 + rnd(50, -50), rnd(2, 1), '#fde68a', rnd(0.35, 0.15), 0.88); }
+  } else if (sh === 'taurus') {               // EARTHBOUND: the ground holds you; roots grip the hull while it does
+    const hold = x.holdT > 0 ? clamp(x.holdT, 0, 1) : 0, grow = hold > 0 ? zaO((1 - hold) / 0.2) : 0;
+    ctx.strokeStyle = 'rgba(41,37,36,0.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 6, 0, TAU); ctx.stroke();
+    if (hold > 0) {
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 9; i++) {
+        const a0 = i * TAU / 9 + zaH(i) * 0.4, L = (34 + zaH(i * 3) * 30) * grow;
+        ctx.strokeStyle = i % 2 ? 'rgba(120,113,108,0.9)' : 'rgba(87,83,78,0.9)'; ctx.lineWidth = 3 - i % 2;
+        ctx.beginPath(); ctx.moveTo(P.x + Math.cos(a0) * L, P.y + Math.sin(a0) * L);
+        for (let j = 1; j <= 5; j++) {
+          const u = 1 - j / 5, a = a0 + Math.sin(j * 1.7 + i) * 0.25;
+          ctx.lineTo(P.x + Math.cos(a) * (P.r * 0.4 + L * u), P.y + Math.sin(a) * (P.r * 0.4 + L * u));
+        }
+        ctx.stroke();
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        drawGlow(P.x + Math.cos(a0) * L, P.y + Math.sin(a0) * L, 6, ZA_SHADE, 0.6 * grow);
+        ctx.restore();
+      }
+    }
+  } else if (sh === 'cancer') {               // THE MOLT: no shell, and the hull looks soft
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const a = i / 40 * TAU, rr = P.r + 7 + Math.sin(a * 5 + t * 4) * 2.2 + Math.sin(a * 3 - t * 2.6) * 1.6;
+      i ? ctx.lineTo(P.x + Math.cos(a) * rr, P.y + Math.sin(a) * rr) : ctx.moveTo(P.x + Math.cos(a) * rr, P.y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(249,168,212,0.1)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(249,168,212,0.45)'; ctx.lineWidth = 1.4; ctx.stroke();
+  } else if (sh === 'virgo') {                // EXACTING: she is counting
+    ctx.strokeStyle = 'rgba(216,180,254,0.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const a = i * TAU / 12 - t * 0.5;
+      ctx.moveTo(P.x + Math.cos(a) * (P.r + 9), P.y + Math.sin(a) * (P.r + 9));
+      ctx.lineTo(P.x + Math.cos(a) * (P.r + (i % 3 ? 13 : 17)), P.y + Math.sin(a) * (P.r + (i % 3 ? 13 : 17)));
+    }
+    ctx.stroke();
+  } else if (sh === 'libra') {                // THE SCALES (the shadow): the beam in violet, what is owed in its pan
+    const owe = P.scalesDebt > 0 ? clamp(P.scalesDebt / (P.maxHp * 0.15), 0, 1) : 0;
+    zawScales(P.x, P.y - 40, 0.2 + owe * 0.35, ZA_SHADE_HI, '#f0abfc', 0.85, 0);
+  } else if (sh === 'scorpio') {              // THE STING TURNS: the venom you carry, circling you
+    const n = Math.min(24, x.selfPsn | 0);
+    ctx.globalCompositeOperation = 'lighter';
+    if (n) drawGlow(P.x, P.y, 40, '#a3e635', 0.12 + n * 0.012);
+    for (let i = 0; i < n; i++) {
+      const a = i * TAU / n + t * 1.4, rr = P.r + 12 + (i % 2) * 4;
+      drawGlow(P.x + Math.cos(a) * rr, P.y + Math.sin(a) * rr, 5, '#a3e635', 0.7);
+      ctx.fillStyle = '#ecfccb';
+      ctx.beginPath(); ctx.arc(P.x + Math.cos(a) * rr, P.y + Math.sin(a) * rr, 1.4, 0, TAU); ctx.fill();
+    }
+  } else if (sh === 'sagittarius') {          // THE ARROW RETURNS: an arrowhead circling, pointed at you
+    const a = -t * 1.1, rr = P.r + 24, hx = P.x + Math.cos(a) * rr, hy = P.y + Math.sin(a) * rr;
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(hx, hy, 10, ZA_SHADE, 0.6);
+    ctx.save(); ctx.translate(hx, hy); ctx.rotate(a + Math.PI);
+    ctx.fillStyle = 'rgba(233,213,255,0.9)';
+    ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-4, -4); ctx.lineTo(-1.5, 0); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  } else if (sh === 'capricorn') {            // THE LONG CLIMB: a summit over the hull, filling back up wave by wave
+    const f = clamp(((x.capSh || 0.34) - 0.34) / 0.66, 0, 1), sx = P.x, sy = P.y - 34;
+    ctx.beginPath(); ctx.moveTo(sx - 13, sy + 7); ctx.lineTo(sx - 3, sy - 7); ctx.lineTo(sx + 1, sy - 2); ctx.lineTo(sx + 5, sy - 9); ctx.lineTo(sx + 14, sy + 7); ctx.closePath();
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = 'rgba(168,85,247,0.55)'; ctx.fillRect(sx - 15, sy + 7 - 16 * f, 30, 16 * f);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(216,180,254,0.85)'; ctx.lineWidth = 1.3; ctx.stroke();
+  } else if (sh === 'pisces') {               // DEEP WATER: bubbles off the hull
+    if (rnd() < 0.3) spawnPart(P.x + rnd(10, -10), P.y + rnd(10, -10), rnd(12, -12), rnd(-20, -50), rnd(2.4, 1), '#bae6fd', rnd(0.8, 0.4), 0.96);
+    ctx.strokeStyle = 'rgba(56,189,248,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 8 + Math.sin(t * 2) * 2, 0, TAU); ctx.stroke();
+  } else if (sh === 'aquarius') {
+    if (zTideIn(P.x, P.y) && rnd() < 0.4) spawnPart(P.x + rnd(12, -12), P.y + rnd(12, -12), 0, rnd(-10, -30), rnd(2, 1), '#7dd3fc', rnd(0.6, 0.3), 0.95);
+  }
+  ctx.restore();
+}
+// THE RISING TIDE: the water in from the walls, its edge wavering, a line of foam along it
+function zawTide() {
+  const m = zTideM();
+  if (m <= 1) return;
+  const t = uiTime, ax = arena.x0, ay = arena.y0, aw = arena.x1 - arena.x0, ah = arena.y1 - arena.y0;
+  const ix0 = ax + m, iy0 = ay + m, ix1 = ax + aw - m, iy1 = ay + ah - m;
+  const pts = [], wav = s => Math.sin(s * 0.022 + t * 1.8) * 7 + Math.sin(s * 0.009 - t * 1.1) * 6;
+  const edge = (x0, y0, x1, y1, nx, ny, s0) => {
+    const L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.ceil(L / 24));
+    for (let i = 0; i < n; i++) { const u = i / n, w = wav(s0 + u * L); pts.push([lerp(x0, x1, u) + nx * w, lerp(y0, y1, u) + ny * w]); }
+    return s0 + L;
+  };
+  let s = edge(ix0, iy0, ix1, iy0, 0, 1, 0);
+  s = edge(ix1, iy0, ix1, iy1, -1, 0, s);
+  s = edge(ix1, iy1, ix0, iy1, 0, -1, s);
+  edge(ix0, iy1, ix0, iy0, 1, 0, s);
+  const ring = () => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); };
+  ctx.save();
+  ctx.beginPath(); ctx.rect(ax, ay, aw, ah);
+  pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath();
+  ctx.fillStyle = 'rgba(3,105,161,0.24)'; ctx.fill('evenodd');
+  // ripple lines out in the water, and the foam on its edge
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineJoin = 'round';
+  ring(); ctx.strokeStyle = 'rgba(56,189,248,0.16)'; ctx.lineWidth = 12; ctx.stroke();
+  ring(); ctx.strokeStyle = `rgba(224,242,254,${0.55 + 0.15 * Math.sin(t * 3)})`; ctx.lineWidth = 2.2; ctx.stroke();
+  ctx.setLineDash([6, 16]); ctx.lineDashOffset = -t * 30;
+  ctx.save(); ctx.translate(0, 0);
+  ctx.strokeStyle = 'rgba(186,230,253,0.35)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.rect(ix0 - 22, iy0 - 22, ix1 - ix0 + 44, iy1 - iy0 + 44); ctx.stroke();
+  ctx.restore();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+// THE FLOOD's floor, crackling while it is charged
+function zawCrackle() {
+  const t = uiTime, q = Math.floor(t * 14), k = clamp(P.zx.floodT / 4, 0, 1);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 10; i++) {
+    const a = zaH(q * 3.1 + i) * TAU, r = 60 + zaH(q * 1.7 + i * 5) * 520, x = P.x + Math.cos(a) * r, y = P.y + Math.sin(a) * r * 0.8;
+    const b = a + (zaH(i + q) - 0.5) * 2, L = 30 + zaH(i * 9 + q) * 50;
+    zawBolt(x, y, x + Math.cos(b) * L, y + Math.sin(b) * L, i + q, 7, '#67e8f9', 1.3, 0.6 * k);
+    drawGlow(x, y, 14, '#67e8f9', 0.25 * k);
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------- on the screen ---------------------------------- */
+function zDrawDark() {
+  // the dome closing: noticed here, the first frame after it shut
+  if (ZAD.open && state !== 'planet') {
+    ZAD.open = false; ZAD.closeT = uiTime;
+    const f = ZAD.flyFrom;
+    if (f && ZAD.done) ZAD.fly = { id: f.id, x: f.x, y: f.y, t: uiTime + 0.18, retro: f.retro };
+    ZAD.flyFrom = null;
+  }
+  zawSunless();
+  zafScreen();
+  zawIris();
+}
+// SUNLESS: the dark, with the light left round the hull and a ragged, ember-lit rim
+function zawSunless() {
+  if (!zsh('leo') || state === 'menu' || state === 'dead') return;
+  const z = camZoom, t = uiTime;
+  const sx = (P.x - cam.x) * z + W / 2 + cam.sx, sy = (P.y - cam.y) * z + H / 2 + cam.sy, r = 240 * z;
+  const pts = [];
+  for (let i = 0; i < 96; i++) {
+    const a = i / 96 * TAU, rr = r * (1 + 0.05 * Math.sin(a * 7 + t * 1.3) + 0.035 * Math.sin(a * 13 - t * 2.1) + 0.025 * Math.sin(a * 23 + t * 3.7));
+    pts.push([sx + Math.cos(a) * rr, sy + Math.sin(a) * rr]);
+  }
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, H);
+  pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath();
+  ctx.fillStyle = 'rgba(2,2,6,0.985)'; ctx.fill('evenodd');
+  const g = ctx.createRadialGradient(sx, sy, r * 0.62, sx, sy, r * 1.08);
+  g.addColorStop(0, 'rgba(2,2,6,0)'); g.addColorStop(1, 'rgba(2,2,6,0.92)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.fill();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(251,146,60,0.16)'; ctx.lineWidth = 2.5; ctx.stroke();
+  for (let i = 0; i < 96; i += 6) {
+    const fl = 0.5 + 0.5 * Math.sin(t * 3 + i * 1.3);
+    drawGlow(pts[i][0], pts[i][1], 6 + fl * 5, '#fb923c', 0.18 * fl);
+  }
+  ctx.restore();
+}
+// leaving the dome: it opens like an iris onto the room, its blades edged in gold
+function zawIris() {
+  const age = uiTime - ZAD.closeT;
+  if (age < 0 || age > 0.65) return;
+  const k = zaE(age / 0.65), cx = W / 2, cy = H / 2, D = Math.hypot(W, H) / 2 + 40, R = D * k, rot = k * 1.2;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.moveTo(cx + R, cy); ctx.arc(cx, cy, R, 0, TAU, true);
+  ctx.fillStyle = `rgba(2,3,9,${0.96 * (1 - k * 0.4)})`; ctx.fill('evenodd');
+  // the blades: tangent to the opening, ten of them
+  ctx.strokeStyle = rgba(ZA_GOLD, 0.55 * (1 - k)); ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = i * TAU / 10 + rot, px = cx + Math.cos(a) * R, py = cy + Math.sin(a) * R, tx = -Math.sin(a), ty = Math.cos(a);
+    ctx.moveTo(px, py); ctx.lineTo(px + tx * D * 0.7 + Math.cos(a) * D * 0.2, py + ty * D * 0.7 + Math.sin(a) * D * 0.2);
+  }
+  ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = rgba(ZA_GOLD_HI, 0.8 * (1 - k)); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+/* ============================ end of the field (zaw) ============================ */
+
+/* ================= THE PLANETARIUM — the signs' events (art, 18 Nov) =================
+   The moments the room should react to. Every III is meant to read like an OVERDRIVE
+   move. Each is one zaFx(kind, ...) call: from a hook line in the logic where only the
+   logic knows where (marked THE PLANETARIUM: art), or from zawDiffs when the field's
+   art sees it happen. Each plays out from uiTime and is drawn in the room by zafDraw
+   (from zDrawWorld, as the pilot it belongs to) or on the screen by zafScreen.
+     gore       a crescent burst where the ram passed through a body, sparks thrown on
+     crater     MARS ASCENDANT: the dash ends in a blast shaped like the ram's horns,
+                the floor cracked and scorched under it
+     bull       THE GOLDEN BULL: the coins blow outward in a gold shockwave, the bull's
+                glyph over the hull
+     shell      a shield of THE SHELL breaking: shards and a ring
+     carapace   THE CARAPACE opening: its plates thrown out across the room on a ring
+     nova       SUPERNOVA: a flare that whites out from the hull, long rays wheeling
+                out across the room
+     judge      JUDGEMENT: a pillar of white light falls on the heaviest thing in the
+                room, the scales drawn over it
+     sting      THE STING: a scorpion's tail whips over the body and strikes, and its
+                venom goes off in one green burst
+     reap       THE HARVEST: a scythe-stroke of light through the reaped, its data
+                thrown up in bits
+     rain       RAIN OF ARROWS: out of a patch of night opened over your aim, the arrows
+                fall onto the ring they will fly in from
+     flood      THE FLOOD: one wave right across the room, a curling crest of foam
+     tide       THE TIDE: ripples running out across the room
+     wave       THE WAVE: the dash pours a curling crescent of water ahead
+     skyturns   the shadow lifting: its eclipse slides off the hull, and the light
+                comes back to the screen
+     eclipse    a shadow taken: the dark slides onto the hull
+   Art state in ZAF. It reads uiTime and P, and changes nothing of the logic's. Needs
+   the sky block.
+===================================================================================== */
+let ZAF = { list: [] };
+const ZAF_DUR = { gore: 0.45, crater: 1.3, bull: 1.5, shell: 0.6, carapace: 1.1, nova: 1.5, judge: 1.2, sting: 0.85, reap: 0.65,
+                  rain: 0.95, flood: 1.3, tide: 1.3, wave: 0.6, skyturns: 1.5, eclipse: 0.9 };
+function zaFx(k, x, y, a, b) {
+  if (ZAF.list.length > 80) ZAF.list.shift();
+  ZAF.list.push({ k, x, y, a, b, t: uiTime, own: P, s: Math.random() * 1000 });
+}
+function zafDraw() {
+  const now = uiTime, L = ZAF.list;
+  for (let i = L.length - 1; i >= 0; i--) {
+    const f = L[i], age = now - f.t, dur = ZAF_DUR[f.k] || 1;
+    if (age > dur || age < -1) { L.splice(i, 1); continue; }
+    if (f.own !== P) continue;
+    const q = age / dur;
+    ctx.save();
+    const fn = ZAF_DRAW[f.k];
+    if (fn) fn(f, age, q);
+    ctx.restore();
+  }
+}
+function zafScreen() {
+  const now = uiTime;
+  for (const f of ZAF.list) {
+    if (f.own !== P) continue;
+    const age = now - f.t;
+    if (f.k === 'skyturns' && age < 0.9) {      // the light comes back
+      const k = age / 0.9;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(W / 2, H / 2, 10, W / 2, H / 2, Math.max(W, H) * 0.7);
+      g.addColorStop(0, `rgba(233,213,255,${0.22 * (1 - k)})`); g.addColorStop(1, `rgba(168,85,247,${0.1 * (1 - k)})`);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+}
+// a crescent: the bright side of a disc with a disc taken out of it
+function zafCrescent(x, y, R, a, th, span, col, al) {
+  if (al <= 0.01 || R <= 1) return;
+  ctx.fillStyle = rgba(col, al);
+  ctx.beginPath();
+  ctx.arc(x, y, R, a - span, a + span);
+  ctx.arc(x - Math.cos(a) * th, y - Math.sin(a) * th, R, a + span * 0.92, a - span * 0.92, true);
+  ctx.closePath(); ctx.fill();
+}
+// a ram's horn: from its root at (x, y) out toward dir, curling round on itself (turning s) to its tip,
+// thick at the root and thin at the tip, its ridges across it
+function zafHorn(x, y, dir, s, R, w, col, al) {
+  if (al <= 0.01 || R <= 1) return;
+  const cx = x + Math.cos(dir) * R, cy = y + Math.sin(dir) * R, N = 28;
+  const pt = u => { const th = dir + Math.PI + s * u * Math.PI * 1.55, r = R * (1 - 0.68 * u); return [cx + Math.cos(th) * r, cy + Math.sin(th) * r]; };
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = rgba(col, al);
+  for (let i = 0; i < N; i++) {
+    const [x0, y0] = pt(i / N), [x1, y1] = pt((i + 1) / N);
+    ctx.lineWidth = Math.max(0.6, w * (1 - 0.8 * i / N));
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+}
+function zafRing(x, y, r, col, al, lw) {
+  if (al <= 0.01) return;
+  ctx.strokeStyle = rgba(col, al); ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(x, y, Math.max(0.5, r), 0, TAU); ctx.stroke();
+}
+const ZAF_DRAW = {
+  gore(f, age, q) {
+    const a = f.a === undefined ? 0 : f.a, e = zaO(q);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(f.x, f.y, 30 + 30 * e, '#fb7185', 0.5 * (1 - q));
+    zafCrescent(f.x, f.y, 14 + 30 * e, a, 10 * (1 - q) + 3, 1.15, '#fdba74', 0.85 * (1 - q));
+    zafCrescent(f.x, f.y, 8 + 22 * e, a, 6, 1.0, '#fff7ed', 0.6 * (1 - q));
+    ctx.strokeStyle = rgba('#fecdd3', 0.8 * (1 - q)); ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const b = a + (zaH(f.s + i) - 0.5) * 1.8, r0 = 10 + 30 * e, r1 = r0 + 14 + zaH(f.s * 2 + i) * 18;
+      ctx.moveTo(f.x + Math.cos(b) * r0, f.y + Math.sin(b) * r0); ctx.lineTo(f.x + Math.cos(b) * r1, f.y + Math.sin(b) * r1);
+    }
+    ctx.stroke();
+  },
+  crater(f, age, q) {
+    const a = f.a || 0, e = zaO(age / 0.35), fade = 1 - zaQ(age, 0.3, 1.3);
+    // the scorch, under all of it, and the cracks out of it
+    ctx.fillStyle = `rgba(28,10,6,${0.55 * fade})`;
+    ctx.beginPath(); ctx.arc(f.x, f.y, 70 * e, 0, TAU); ctx.fill();
+    ctx.strokeStyle = `rgba(251,146,60,${0.7 * fade})`; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      let b = i * TAU / 10 + zaH(f.s + i) * 0.5, r = 18, x = f.x + Math.cos(b) * r, y = f.y + Math.sin(b) * r;
+      ctx.moveTo(x, y);
+      for (let j = 0; j < 4; j++) { b += (zaH(f.s + i * 7 + j) - 0.5) * 0.7; r += (25 + zaH(i + j * 3) * 25) * e; ctx.lineTo(f.x + Math.cos(b) * r, f.y + Math.sin(b) * r); }
+    }
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    // the blast and its two great horns, curling out either side of the way you were going
+    drawGlow(f.x, f.y, 120 + 80 * e, '#fb7185', 0.65 * (1 - zaQ(age, 0.05, 0.6)));
+    drawGlow(f.x, f.y, 60, '#fff7ed', 0.8 * (1 - zaQ(age, 0, 0.25)));
+    const hornA = 1 - zaQ(age, 0.25, 0.9);
+    for (const s of [1, -1]) {
+      zafHorn(f.x, f.y, a + s * 1.25, s, 64 * e, 22 * hornA + 1, '#fb923c', 0.45 * hornA);
+      zafHorn(f.x, f.y, a + s * 1.25, s, 64 * e, 9 * hornA + 0.5, '#fdba74', 0.7 * hornA);
+      zafHorn(f.x, f.y, a + s * 1.25, s, 64 * e, 2.5 * hornA + 0.3, '#fff7ed', 0.9 * hornA);
+    }
+    zafRing(f.x, f.y, 170 * zaO(age / 0.4), '#fdba74', 0.8 * (1 - zaQ(age, 0.1, 0.5)), 5);
+    if (age < 0.05) for (let i = 0; i < 18; i++) {
+      const b = rnd(TAU), sp = rnd(520, 160);
+      spawnPart(f.x, f.y, Math.cos(b) * sp, Math.sin(b) * sp, rnd(4, 2), i % 2 ? '#fb7185' : '#fdba74', rnd(0.7, 0.35), 0.9);
+    }
+  },
+  bull(f, age, q) {
+    const e = zaO(age / 0.6);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(f.x, f.y, 80 + 60 * e, ZA_GOLD, 0.7 * (1 - zaQ(age, 0, 0.6)));
+    zafRing(f.x, f.y, 300 * zaO(age / 0.45), ZA_GOLD_HI, 0.85 * (1 - zaQ(age, 0.1, 0.55)), 6);
+    zafRing(f.x, f.y, 260 * zaO(age / 0.5), '#fff7ed', 0.5 * (1 - zaQ(age, 0.1, 0.5)), 2);
+    // the bull's glyph, rising off the hull
+    zaGlyph('taurus', f.x, f.y - 50 - 30 * e, 22, ZA_GOLD_HI, { a: 1 - zaQ(age, 0.6, 1.4), glow: 1.4, core: 1, lw: 0.16 });
+    ctx.globalCompositeOperation = 'source-over';
+    // the coins, blown out
+    for (let i = 0; i < 26; i++) {
+      const b = i * TAU / 26 + zaH(f.s + i) * 0.2, d = (90 + zaH(f.s * 3 + i) * 210) * zaO(age / 0.9);
+      zawCoin(f.x + Math.cos(b) * d, f.y + Math.sin(b) * d, 5, age * 14 + i, 1 - zaQ(age, 0.8, 1.5));
+    }
+  },
+  shell(f, age, q) {
+    ctx.globalCompositeOperation = 'lighter';
+    zafRing(f.x, f.y, 30 + 150 * zaO(q), '#7dd3fc', 0.7 * (1 - q), 3);
+    for (let i = 0; i < 7; i++) {
+      const b = zaH(f.s + i) * TAU, d = 20 + 90 * zaO(q), x = f.x + Math.cos(b) * d, y = f.y + Math.sin(b) * d;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(b + age * 9);
+      ctx.fillStyle = rgba('#7dd3fc', 0.75 * (1 - q)); ctx.strokeStyle = rgba('#e0f2fe', 0.9 * (1 - q)); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-6, -3); ctx.lineTo(6, -2); ctx.lineTo(3, 4); ctx.lineTo(-5, 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  },
+  carapace(f, age, q) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(f.x, f.y, 140, '#e0f2fe', 0.8 * (1 - zaQ(age, 0, 0.3)));
+    const R = 1100 * zaO(age / 0.9);
+    zafRing(f.x, f.y, R, '#38bdf8', 0.6 * (1 - q), 26 * (1 - q) + 2);
+    zafRing(f.x, f.y, R, '#e0f2fe', 0.8 * (1 - q), 2.5);
+    for (let i = 0; i < 16; i++) {
+      const b = i * TAU / 16 + zaH(f.s + i) * 0.2, d = 30 + 760 * zaO(age / 0.95), x = f.x + Math.cos(b) * d, y = f.y + Math.sin(b) * d;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(b + age * 6 * (i % 2 ? 1 : -1));
+      const s = 14 * (1 - q * 0.5);
+      ctx.fillStyle = rgba('#0c4a6e', 0.85 * (1 - q)); ctx.strokeStyle = rgba('#7dd3fc', 1 - q); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(0, 0, s, -0.5, 0.5); ctx.arc(0, 0, s * 0.5, 0.5, -0.5, true); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  },
+  nova(f, age, q) {
+    ctx.globalCompositeOperation = 'lighter';
+    const flare = 1 - zaQ(age, 0.05, 0.7);
+    drawGlow(f.x, f.y, 260 + 600 * zaO(age / 0.4), '#fffbeb', 0.9 * flare);
+    drawGlow(f.x, f.y, 120, '#ffffff', flare);
+    // the rays, wheeling out across the room
+    const rays = 28, rot = age * 0.4 + zaH(f.s) * TAU, L = 1300 * zaO(age / 0.5);
+    for (let i = 0; i < rays; i++) {
+      const a = rot + i * TAU / rays, w = (i % 2 ? 0.018 : 0.034) * (1 - q * 0.6), ll = L * (i % 3 ? 0.75 : 1);
+      const g = ctx.createLinearGradient(f.x, f.y, f.x + Math.cos(a) * ll, f.y + Math.sin(a) * ll);
+      g.addColorStop(0, rgba('#fffbeb', 0.7 * (1 - q))); g.addColorStop(0.4, rgba('#fde047', 0.35 * (1 - q))); g.addColorStop(1, 'rgba(251,146,60,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.moveTo(f.x, f.y);
+      ctx.lineTo(f.x + Math.cos(a - w) * ll, f.y + Math.sin(a - w) * ll); ctx.lineTo(f.x + Math.cos(a + w) * ll, f.y + Math.sin(a + w) * ll);
+      ctx.closePath(); ctx.fill();
+    }
+    zafRing(f.x, f.y, 900 * zaO(age / 0.9), '#fde047', 0.7 * (1 - q), 10 * (1 - q) + 1);
+    zaGlyph('leo', f.x, f.y - 70, 26, '#fffbeb', { a: (1 - zaQ(age, 0.5, 1.4)) * zaQ(age, 0.05, 0.25), glow: 1.6, core: 1 });
+  },
+  judge(f, age, q) {
+    const r = f.a || 20, fall = zaO(age / 0.12), fade = 1 - zaQ(age, 0.25, 1.1), top = f.y - 900;
+    ctx.globalCompositeOperation = 'lighter';
+    const w = Math.max(54, r * 3) * (1 + 0.5 * (1 - fade));
+    const g = ctx.createLinearGradient(0, top, 0, f.y);
+    g.addColorStop(0, 'rgba(254,249,195,0)'); g.addColorStop(0.7, rgba('#fef9c3', 0.45 * fade)); g.addColorStop(1, rgba('#ffffff', 0.85 * fade));
+    ctx.fillStyle = g;
+    ctx.fillRect(f.x - w / 2, lerp(top, f.y - 20, 0) , w, (f.y - top) * fall);
+    ctx.fillStyle = rgba('#ffffff', 0.8 * fade);
+    ctx.fillRect(f.x - w * 0.12, top, w * 0.24, (f.y - top) * fall);
+    drawGlow(f.x, f.y, r * 4 + 40, '#fef9c3', 0.9 * fade);
+    zafRing(f.x, f.y, r * (1.2 + 3 * zaO(age / 0.5)), '#fef9c3', 0.8 * fade, 4);
+    ctx.globalCompositeOperation = 'source-over';
+    // the scales over it, level: the ledger settled
+    const sa = zaQ(age, 0.06, 0.25) * (1 - zaQ(age, 0.7, 1.2));
+    ctx.save(); ctx.translate(f.x, f.y - r - 78); ctx.scale(1.9, 1.9);
+    ctx.lineWidth = 3;
+    zawScales(0, 0, 0, '#b45309', '#b45309', sa * 0.8, 0);
+    zawScales(0, 0, 0, '#fde68a', '#fbbf24', sa, 0);
+    ctx.restore();
+    if (age < 0.04) for (let i = 0; i < 12; i++) spawnPart(f.x + rnd(w / 2, -w / 2), f.y, rnd(20, -20), rnd(-80, -220), rnd(3, 1.4), '#fef9c3', rnd(0.9, 0.4), 0.95);
+  },
+  sting(f, age, q) {
+    // the tail: rooted behind the body, arcing up over it, the barb raised, then driven down into it
+    const r = f.a || 18, strike = zaE(zaQ(age, 0.1, 0.2)), back = zaE(zaQ(age, 0.26, 0.55)), A = 1 - zaQ(age, 0.42, 0.75);
+    if (A > 0.01) {
+      const bx = f.x + r + 34, by = f.y + r + 26;                    // its root
+      const up = { x: f.x + r * 0.4, y: f.y - r - 62 }, hit = { x: f.x + 3, y: f.y - r * 0.35 };
+      const tx = lerp(lerp(up.x, hit.x, strike), up.x + 10, back), ty = lerp(lerp(up.y, hit.y, strike), up.y - 6, back);
+      const cx = f.x + r + 42, cy = f.y - r - 58;                    // the arch
+      const at = u => [(1 - u) * (1 - u) * bx + 2 * (1 - u) * u * cx + u * u * tx, (1 - u) * (1 - u) * by + 2 * (1 - u) * u * cy + u * u * ty];
+      const segs = 10;
+      for (let i = 0; i < segs; i++) {
+        const [x0, y0] = at(i / segs), [x1, y1] = at((i + 1) / segs), sz = 8.5 * (1 - i / segs * 0.5), a = Math.atan2(y1 - y0, x1 - x0);
+        ctx.fillStyle = rgba('#365314', 0.92 * A); ctx.strokeStyle = rgba('#a3e635', 0.95 * A); ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.ellipse((x0 + x1) / 2, (y0 + y1) / 2, Math.hypot(x1 - x0, y1 - y0) * 0.62, sz * 0.62, a, 0, TAU); ctx.fill(); ctx.stroke();
+      }
+      // the barb: a hooked point along the last of the curve
+      const [px, py] = at(0.94), a = Math.atan2(ty - py, tx - px);
+      ctx.fillStyle = rgba('#ecfccb', A);
+      ctx.beginPath(); ctx.moveTo(tx + Math.cos(a) * 9, ty + Math.sin(a) * 9);
+      ctx.quadraticCurveTo(tx + Math.cos(a + 1.6) * 6, ty + Math.sin(a + 1.6) * 6, tx - Math.cos(a) * 4, ty - Math.sin(a) * 4);
+      ctx.lineTo(tx + Math.cos(a - 1.4) * 4, ty + Math.sin(a - 1.4) * 4); ctx.closePath(); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(tx, ty, 10 + 14 * strike, '#d9f99d', 0.6 * A);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (age > 0.19) {
+      const k = zaQ(age, 0.19, 0.85), e = zaO(k);
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(f.x, f.y, r * 2 + 90 * e, '#a3e635', 0.85 * (1 - k));
+      zafRing(f.x, f.y, r + 70 * e, '#d9f99d', 0.9 * (1 - k), 4 * (1 - k) + 1);
+      for (let i = 0; i < 10; i++) {
+        const b = zaH(f.s + i) * TAU, d = r + 60 * e * (0.5 + zaH(i * 3 + f.s)), dy = 30 * k * k;
+        drawGlow(f.x + Math.cos(b) * d, f.y + Math.sin(b) * d + dy, 6, '#a3e635', 0.8 * (1 - k));
+      }
+    }
+  },
+  reap(f, age, q) {
+    const r = f.a || 18, sw = zaO(age / 0.22), A = 1 - zaQ(age, 0.2, 0.6), a0 = -2.4 + zaH(f.s) * 0.6;
+    ctx.globalCompositeOperation = 'lighter';
+    // the stroke: a long crescent swept through the body
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba('#e2e8f0', 0.35 * A); ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.arc(f.x + r * 0.6, f.y + r * 0.6, r * 2.3, a0, a0 + 1.9 * sw); ctx.stroke();
+    ctx.strokeStyle = rgba('#ffffff', 0.95 * A); ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(f.x + r * 0.6, f.y + r * 0.6, r * 2.3, a0 + 1.9 * sw * 0.3, a0 + 1.9 * sw); ctx.stroke();
+    drawGlow(f.x, f.y, r * 2.5, '#e2e8f0', 0.5 * A);
+    // the data, thrown up in bits
+    ctx.fillStyle = rgba('#a5f3fc', A);
+    for (let i = 0; i < 14; i++) {
+      const b = zaH(f.s + i * 2) * TAU, d = r + 50 * zaO(age / 0.6) * (0.4 + zaH(i)), s = 2 + zaH(i * 5) * 2.5;
+      ctx.fillRect(f.x + Math.cos(b) * d, f.y + Math.sin(b) * d - 20 * age, s, s);
+    }
+  },
+  rain(f, age, q) {
+    // a patch of night opened over the aim, and out of it the arrows, onto the ring they fly in from
+    const open = zaQ(age, 0, 0.15) * (1 - zaQ(age, 0.55, 0.95));
+    ctx.fillStyle = `rgba(2,3,12,${0.4 * open})`;
+    ctx.beginPath(); ctx.ellipse(f.x, f.y, 300, 230, 0, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 16; i++) drawGlow(f.x + (zaH(f.s + i) - 0.5) * 520, f.y + (zaH(f.s * 2 + i) - 0.5) * 380, 3, '#fde68a', 0.6 * open);
+    for (let k = 0; k < 24; k++) {
+      const a = k / 24 * TAU, sx = f.x + Math.cos(a) * 260, sy = f.y + Math.sin(a) * 260;
+      const t0 = zaH(f.s + k) * 0.22, fall = zaQ(age, t0, t0 + 0.2);
+      if (fall <= 0) continue;
+      const hx = sx - 70 * (1 - fall), hy = sy - 420 * (1 - zaIn(fall));
+      if (fall < 1) {
+        const g = ctx.createLinearGradient(hx, hy, hx - 30, hy - 160);
+        g.addColorStop(0, 'rgba(254,243,199,0.95)'); g.addColorStop(1, 'rgba(252,211,77,0)');
+        ctx.strokeStyle = g; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - 30, hy - 160); ctx.stroke();
+        drawGlow(hx, hy, 8, '#fcd34d', 0.8);
+      } else {
+        const k2 = zaQ(age, t0 + 0.2, t0 + 0.6);
+        zafRing(sx, sy, 6 + 20 * k2, '#fcd34d', 0.8 * (1 - k2), 2);
+      }
+    }
+  },
+  flood(f, age, q) {
+    const R = 1700 * zaE(age / 1.25), A = 1 - zaQ(age, 0.85, 1.3);
+    ctx.globalCompositeOperation = 'lighter';
+    // the body of the wave behind its crest, then the crest, then the foam ahead of it
+    zafRing(f.x, f.y, Math.max(1, R - 40), '#0891b2', 0.35 * A, 80);
+    zafRing(f.x, f.y, R, '#67e8f9', 0.55 * A, 16);
+    zafRing(f.x, f.y, R + 6, '#ecfeff', 0.9 * A, 3);
+    ctx.strokeStyle = rgba('#ecfeff', 0.6 * A); ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 64; i++) {
+      const a = i * TAU / 64, rr = R + 10 + zaH(f.s + i + Math.floor(age * 20)) * 14;
+      ctx.moveTo(f.x + Math.cos(a) * rr, f.y + Math.sin(a) * rr); ctx.lineTo(f.x + Math.cos(a + 0.02) * (rr + 6), f.y + Math.sin(a + 0.02) * (rr + 6));
+    }
+    ctx.stroke();
+    drawGlow(f.x, f.y, 140, '#67e8f9', 0.6 * (1 - zaQ(age, 0, 0.4)));
+    zaGlyph('aquarius', f.x, f.y - 60, 22, '#ecfeff', { a: zaQ(age, 0, 0.1) * (1 - zaQ(age, 0.5, 1.1)), glow: 1.4, core: 1 });
+  },
+  tide(f, age, q) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const k = zaQ(age, i * 0.12, i * 0.12 + 1.0);
+      if (k <= 0 || k >= 1) continue;
+      zafRing(f.x, f.y, 30 + 1300 * zaO(k), i ? '#38bdf8' : '#e0f2fe', 0.7 * (1 - k), 3 - i * 0.5);
+    }
+    drawGlow(f.x, f.y, 90, '#38bdf8', 0.6 * (1 - zaQ(age, 0, 0.5)));
+    zaGlyph('pisces', f.x, f.y - 56, 20, '#e0f2fe', { a: zaQ(age, 0, 0.1) * (1 - zaQ(age, 0.5, 1.2)), glow: 1.3, core: 1 });
+  },
+  wave(f, age, q) {
+    const a = Math.atan2(f.b || 0, f.a || 1), R = 40 + 300 * zaO(q), A = 1 - zaQ(q, 0.5, 1);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (const [w, col, al, off] of [[30, '#0891b2', 0.35, -14], [12, '#67e8f9', 0.6, 0], [3, '#ecfeff', 0.95, 6]]) {
+      ctx.strokeStyle = rgba(col, al * A); ctx.lineWidth = w * (1 - q * 0.4);
+      ctx.beginPath(); ctx.arc(f.x, f.y, R + off, a - 0.7, a + 0.7); ctx.stroke();
+    }
+    // spray off the crest's ends
+    for (const s of [-1, 1]) {
+      const b = a + s * 0.7;
+      drawGlow(f.x + Math.cos(b) * R, f.y + Math.sin(b) * R, 16, '#ecfeff', 0.6 * A);
+    }
+  },
+  skyturns(f, age, q) {
+    // the eclipse slides off the hull, up and away, and the violet goes out of the corona
+    const k = zaE(age / 1.1), ox = 26 + 80 * k, oy = -26 - 60 * k;
+    zaEclipse(P.x + ox, P.y + oy, 9 * (1 - k * 0.5), 1 - k, 1 - k);
+    ctx.globalCompositeOperation = 'lighter';
+    zafRing(P.x, P.y, 20 + 300 * zaO(age / 0.8), '#e9d5ff', 0.7 * (1 - zaQ(age, 0, 0.8)), 3);
+    drawGlow(P.x, P.y, 80, '#fef3c7', 0.5 * (1 - zaQ(age, 0.1, 0.9)));
+  },
+  eclipse(f, age, q) {
+    const k = zaE(age / 0.8), ox = lerp(110, 30, k), oy = lerp(-90, 0, k);
+    zaEclipse(P.x + ox, P.y + oy, lerp(14, 5.5, k), 1 - zaQ(age, 0.7, 0.9) * 0.15, k);
+    ctx.globalCompositeOperation = 'lighter';
+    zafRing(P.x, P.y, 140 * (1 - zaO(age / 0.6)) + 10, ZA_SHADE, 0.7 * (1 - q), 3);
+  }
+};
+/* ============================ end of the events (zaf) ============================ */
 
 /* Which room opens after a boss: once unlocked, half are planetariums. */
 /* A shard biting into the wall. Records which face it hit and pre-generates
@@ -59487,7 +61793,7 @@ function render() {
     ctx.fillRect(0, 0, W, H);
   }
   drawChalFog();      // over the world, under everything you need to read
-  zDrawDark();        // LEO's shadow, SUNLESS: the same way (placeholder)
+  zDrawDark();        // LEO's shadow, SUNLESS: the same way; and the dome opening back onto the room
   hlDrawQuiet();      // ALL HALLOWS: THE HOUSE's dark, the same way (THE QUIET)
   aboveDrawScreen();  // a spear coming: over the frame, under the HUD (FROM ABOVE)
   upDrawScreen();     // THE WAY UP: a room's screen, and the lift
@@ -75016,7 +77322,7 @@ function drawPlayer() {
     drawShipHull('#c4b5fd', 'rgba(196,181,253,0.18)');
     ctx.restore();
   }
-  zDrawWorld();         // THE PLANETARIUM: the other doubles, the ring, the deep, the shadows (placeholder)
+  zDrawWorld();         // THE PLANETARIUM: the signs and the shadows on the field, and their events
 
   // shields
   for (let i = 0; i < P.shield; i++) {
@@ -77251,7 +79557,7 @@ function drawHUD() {
 
   /* The kit. Last on the cursor because it is the tallest block and the only
      one that is always there for the pilot that has it. */
-  ly = signTray(pad, bw, ly);            // THE PLANETARIUM: the signs held and the shadow (placeholder)
+  ly = signTray(pad, bw, ly);            // THE PLANETARIUM: the tray, the signs held in their trines
   ly = drawBladeHUD(pad, bw, ly);
 
   /* --- score / wave --- */
@@ -84000,6 +86306,19 @@ function drawPauseAssist() {
    notes that nobody is ever shown.
    ========================================================================= */
 const CHANGELOG = [
+  { id: 18, v: '2.1', date: '19 NOV 2026', lines: [
+    ['new', 'THE PLANETARIUM, reworked. A reading is worth the shop it stands in for now: three signs '
+          + 'rise, face up, and every one is a blessing. You take one.'],
+    ['new', 'A sign you hold comes back to grow: I RISING, II EXALTED, III ASCENDANT. At III it should '
+          + 'win the run, if you live. Hold all three signs of an element for its GRAND TRINE.'],
+    ['new', 'Read a sign RETROGRADE and it arrives a magnitude higher. The price is its shadow, a curse '
+          + 'of its own, carried until the sky turns.'],
+    ['new', 'Every sign works on the gun, the lance and the blade, and in co-op each of you reads for '
+          + 'your own ship. Short of what you want? TURN THE DOME for three more.'],
+    ['new', 'The dome is drawn: the real sky overhead, your signs in the HUD, and what each one does on '
+          + 'the field.'],
+    ['fix', 'BAD READING hands over the cursed reading its own words promise.']
+  ] },
   { id: 17, v: '2.0', date: '17 NOV 2026', lines: [
     ['new', 'THE ONES ABOVE, an early version. The sectors are no longer all there is: there is a way up.'],
     ['new', 'The way there: put THE VOID\'s boss down. In every sector after that, a light stands on the '
@@ -94602,6 +96921,7 @@ const SNAP_LOCAL = new Set([
   'parts', 'floats', 'arcs', 'rings', 'malFx', 'gwaves',
   'RKA', 'RKC', 'RKV',                   // RONIN's art layers (a WeakMap of wounds, draw closures; V's)
   'VKZ', 'VKX', 'VKC', 'VKS',            // and the vow's (Z, X, C, SKY CLEAR): canvases, closures, the dead in flight
+  'ZAD', 'ZAT', 'ZAW', 'ZAF',            // THE PLANETARIUM's art: the dome's beats and sky, the tray, the field's pilots, the events
   'pilotSkin', 'IMP_STATE',              // and how a pilot is dressed: each machine's own idea of it
   // the link
   'netDiagCopied', 'netDiagFull', '_np', '_rv', '_rp', 'lanView', 'lanCode', 'lanBlink', 'lanBtns', 'lanScale',

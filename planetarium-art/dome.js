@@ -75,11 +75,12 @@ function zadTrack(r, now, dt) {
   D.offers = r.offers.map(o => ({ id: o.id, mag: o.mag }));
   // what was held of each before it was taken (the take has raised it by the time this is drawn)
   if (!r.done) D.held = r.offers.map(o => zm(o.id));
-  // the plates flip one after another; once the reading is taken they stay as they were read
-  for (let i = 0; i < 3 && !r.done; i++) {
+  // the plates flip one after another. Once the reading is taken, the one taken finishes turning to the
+  // side it was read on (it may have been taken mid-flip), and the rest finish the turn they were making
+  for (let i = 0; i < 3; i++) {
     const o = r.offers[i];
-    const want = r.retro && !r.done && o && zRetroOk(o) ? 1 : 0;
-    if (now < D.retroT + i * 0.075) continue;
+    const want = r.done && i === D.took ? (r.took && r.took.retro ? 1 : 0) : r.retro && o && zRetroOk(o) ? 1 : 0;
+    if (!r.done && now < D.retroT + i * 0.075) continue;
     D.flip[i] = want > D.flip[i] ? Math.min(want, D.flip[i] + dt / 0.42) : Math.max(want, D.flip[i] - dt / 0.42);
   }
   // the wheel: westward, about once in four minutes; retrograde, it slows, stops and runs back

@@ -1,10 +1,14 @@
-# THE PLANETARIUM — the art, ready to lift
+# THE PLANETARIUM — the art
 
 The art for the planetarium rework ([PLANETARIUM-PLAN.md](../PLANETARIUM-PLAN.md), The art plan), drawn over the
-placeholders the logic has had since `ef4fde0`. It is written here as plain JS blocks, cut to go straight into
-`index.html`. Nothing in this folder is in the game yet, and `.assetsignore` keeps the folder off the public site.
+placeholders the logic had since `ef4fde0`, written here as plain JS blocks cut to go straight into `index.html`.
 
-To see it play before lifting, use the review board: https://claude.ai/artifact/Rfq4KQU3NgY1zVgMzj5Mpa
+**Lifted into `index.html` on 19 Nov (2.1).** The game now runs its own copy of these blocks, so the lift has done
+its job and refuses to run again. The game's copy is the one that counts: change the art in `index.html`. The review
+board still builds from this folder's copy (with the game's helpers sliced from `index.html`), so a change made in
+the game reaches the board only if it is made here too. `.assetsignore` keeps the folder off the public site.
+
+To see it play outside the game, use the review board: https://claude.ai/artifact/Rfq4KQU3NgY1zVgMzj5Mpa
 (the dome playing every beat, and readable by hand; the dome at phone width; the tray; all twelve plates in front
 and retrograde; every event; each sign at I, II and III on a puppet hull; the twelve shadows; the atlas).
 
