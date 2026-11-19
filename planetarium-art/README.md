@@ -42,7 +42,7 @@ shadow played and drawn on all four hulls), `npm test` (all deterministic, drawn
 | `tray.js` | the HUD (`ZAT`): the signs held in four element triangles that light as trines, the shadow, and the glyph flying in from the dome | replaces `signTray` |
 | `field.js` | the field (`ZAW`, `zaw*`): each sign on the hull and in the room, the crowns, the shadows' tells, SUNLESS, and the dome opening back onto the room | replaces `zDrawWorld`, `zDrawDark` |
 | `fx.js` | the events (`ZAF`, `zaFx`, `zaf*`): the gore, MARS's crater, the golden bull, the shell breaking and the carapace opening, the supernova, judgement, the sting, the harvest, the rain, the flood, the tide, the wave, a shadow taken and the sky turning | new |
-| `codex.js` | the codex's atlas (`ZCX`, `ZCX_ART`, `zcx*`): ZODIAC's own look, the wheel, a sign's record page. Put into `index.html` by hand on 19 Nov (2.1.1), after the end of FORGOTTEN TALES' art hooks | new |
+| `codex.js` | the codex's atlas (`ZCX`, `ZCX_ART`, `zcx*`): ZODIAC's own look, the wheel, a sign's record page. Put into `index.html` by hand on 19 Nov, after the end of FORGOTTEN TALES' art hooks | new |
 | `codex-text.js` | the zodiac's pages: twelve signs and four trines, three pages each, as they went into `TALE_TEXT` | new |
 | `board-env.js`, `board.js`, `board-stages.js`, `build.mjs` | the review board: `node planetarium-art/build.mjs out.js --page out.html` builds it, slicing the game's own helpers and the planetarium's tables out of `index.html` | never lifted |
 
@@ -101,5 +101,5 @@ which only adds to the art's own list:
 ## Still to do
 
 - Music and sound (build order step 8): the `planetarium` cue and the stings.
-- ~~The codex's star atlas~~: done in 2.1.1 (`codex.js`, `codex-text.js`).
+- ~~The codex's star atlas~~: done on 19 Nov (`codex.js`, `codex-text.js`).
 - Capricorn has no field art beyond its crown: its climb is read in the HUD's floating text, as the plan has it.

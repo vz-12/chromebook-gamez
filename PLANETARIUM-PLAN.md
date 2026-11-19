@@ -20,7 +20,7 @@ sign-off on the review board: https://claude.ai/artifact/Rfq4KQU3NgY1zVgMzj5Mpa
 - the events: every III, the gore, the shell, the sky turning
 
 Shipped in 2.1 (19 Nov), logic and art together, with its CHANGELOG entry.
-The codex followed in 2.1.1 the same day. ZODIAC is a section of FORGOTTEN
+The codex followed the same day, as a minor update with no CHANGELOG entry. ZODIAC is a section of FORGOTTEN
 TALES now, in its own look, a star atlas:
 - twelve signs and four Grand Trines, each with three pages: THE RECORD,
   THE MAKER'S NOTE and THE TALE
