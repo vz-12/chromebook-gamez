@@ -340,7 +340,8 @@ const S = [
   // ONE POINT OH: the portal rooms past THE FRACTURE, his voice in them and the old door walked past,
   // and his fight, from the shatter to today (the route's own test, npm run test:opo, takes the door)
   { name: 'opo-route',  char: 'runner', seed: 119, steps: 21600, shops: true, gates: true, starter: 'RUN.altPath = true; RUN.opoCoax = 4' },
-  { name: 'onepointoh', char: 'runner', seed: 120, steps: 18000, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
+  // (every CHANGELOG date is another hit in his fight, so it grows with each update: 360 s from 2.1, 19 Nov)
+  { name: 'onepointoh', char: 'runner', seed: 120, steps: 21600, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
   /* A run that is hunted (FROM ABOVE): from its first sector and every few
      seconds here, aimed at where the hull is, so that many are aimed and
      land in five minutes and the bot, which never stands still for long,
