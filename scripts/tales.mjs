@@ -63,7 +63,7 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   const L = talesAll();
-  chk(L.length === 74, 'every entry: 28 enemies, 13 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people', L.length);
+  chk(L.length === 90, 'every entry: 28 enemies, 13 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people, 12 signs and 4 trines', L.length);
   chk(!L.some(e => /SERAPH/i.test(e.n)), 'no outside pilot is in it');
   chk(L.filter(e => e.pages.some(p => p.sealed)).map(e => e.key).sort().join() === 'a:melee,n:founder,p:ember', 'the sealed pages are hinted where the bible puts them');
   chk(Object.keys(TALE_TEXT).every(k => !TALE_TEXT[k][3]), 'no sealed text in the game');
@@ -399,6 +399,45 @@ section('the account');
     return JSON.stringify(C);
   })()`));
 }
+
+/* ================================ the zodiac ================================ */
+section('the zodiac (THE PLANETARIUM)');
+take(g.run(`(() => { ${KIT}
+  const Z = talesAll().filter(e => e.sec === 'z');
+  chk(Z.length === 16 && Z.filter(e => e.kind === 'sign').length === 12 && Z.filter(e => e.kind === 'trine').length === 4,
+      'twelve signs and four trines, filed under ZODIAC', Z.length);
+  chk(Z.every(e => e.pages.length === 3), 'each has three pages');
+  chk(Z.every(e => TALE_TEXT[e.key] && TALE_TEXT[e.key].length === 3 && TALE_TEXT[e.key].every(t => t && t.length > 40)),
+      'and every page of every one is written');
+  chk(codexListOf('z').length === 16 && codexListOf('z').every(r => !r.item), 'the codex lists them as tales');
+
+  run();
+  zRaise('aries', 1);
+  chk(has('z:aries', 0) && !has('z:aries', 1) && !has('z:aries', 2), 'reading a sign opens its page I, and only that');
+  chk(/BATTERING RAM/.test(codexPageText(codexListOf('z')[0], 0)) && /HEADLONG/.test(codexPageText(codexListOf('z')[0], 0)),
+      'page I files its magnitudes and its shadow from the sign itself');
+  zRaise('aries', 3);
+  chk(has('z:aries', 2), 'raising it to ASCENDANT opens page III');
+  chk(Tales.n['zm:aries'] === 3 && Tales.n['zn:aries'] === 2, 'its highest and its readings are kept', [Tales.n['zm:aries'], Tales.n['zn:aries']]);
+  zShadowOn('leo'); zShadowOn('virgo');
+  chk(!has('z:leo', 1), 'a shadow replaced by another is not a sky turned');
+  skyTurns();
+  chk(has('z:virgo', 1) && !P.zShadow, 'a shadow carried until the sky turns opens page II');
+  zRaise('leo', 1);
+  chk(!has('z:tri-fire', 0), 'two of an element are no trine');
+  zRaise('sagittarius', 1);
+  chk(has('z:tri-fire', 0) && !has('z:tri-fire', 1), 'the third completes it: its page I');
+  zRaise('leo', 2); zRaise('sagittarius', 2);
+  chk(has('z:tri-fire', 1) && !has('z:tri-fire', 2), 'all three EXALTED or higher: page II');
+  zRaise('leo', 3); zRaise('sagittarius', 3);
+  chk(has('z:tri-fire', 2), 'all three ASCENDANT: page III');
+  chk(Tales.n['zt:fire'] === 1, 'completed once in the run, counted once', Tales.n['zt:fire']);
+  freeRun = true; zRaise('pisces', 3); freeRun = false;
+  chk(!has('z:pisces', 0) && !has('z:pisces', 2), 'a sandbox writes nothing down');
+  Codex.z.add('cancer'); Tales.sync(false);
+  chk(has('z:cancer', 0), 'a sign the codex already has opens its page I on load (an old save)');
+  return JSON.stringify(C);
+})()`));
 
 /* ================================ the frame ================================ */
 section('the frame');
