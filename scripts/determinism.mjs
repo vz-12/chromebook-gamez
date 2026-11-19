@@ -213,6 +213,13 @@ const HARNESS = `(() => {
       if (state === 'pause') state = 'play';
       if (state === 'levelup') { uiArm = 0; handleKey('1'); }
       else if (state === 'shop' && o.shops) { uiArm = 0; ui('shopOut'); }   // o.shops: out of the shop the way a player leaves, so the portal room comes
+      // o.zodiac: THE PLANETARIUM read the way a player reads it, retrograde one time in three, then left
+      else if (state === 'planet' && o.zodiac) {
+        uiArm = 0;
+        const r = P.zRead;
+        if (r && !r.done && r.offers.length) { if (run.k % 3 === 0 && !r.retro) ui('retro'); else ui('read', run.k % r.offers.length); }
+        else ui('planetOut');
+      }
       else if (state !== 'play' && state !== 'dead') state = 'play';
       if (o.b && o.b.junk) junk(o.b);
       /* the rooms apart (o.apart): into one at the start of every sector, in turn (the sector's
@@ -251,7 +258,8 @@ const HARNESS = `(() => {
     inputSource = inputSample;
     return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
              snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, up: run.up, apart: run.apart, upErrs: typeof UP !== 'undefined' ? Object.keys(UP.errs).join(',') : '', outsideErrs: Object.keys(OUTSIDE.errs).join(','),
-             oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '' };
+             oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '',
+             zMags: P.zs ? Object.values(P.zs).reduce((a, b) => a + b, 0) : 0 };
   }
   globalThis.__det = { play, oxWrap };
 })();`;
@@ -323,12 +331,17 @@ const S = [
   { name: 'medals',     char: 'runner', seed: 126, steps: 7200,  starter: "RUN.hlLive = true; RUN.medals = ['lantern', 'grave', 'lag']" },
   // FIRST FLIGHT: an assisted run, through THE WARDEN and out the other side of the help
   { name: 'assist',     char: 'runner', seed: 118, steps: 18000, starter: 'runAssistNext = true; resetGame()' },
+  // THE PLANETARIUM: every sign held at II and a shadow carried, and the planetariums open, so
+  // half the reward rooms are readings the bot takes (to III, retrograde one time in three)
+  { name: 'zodiac',     char: 'runner', seed: 132, steps: 18000, shops: true, zodiac: true,
+    starter: "RUN.planetarium = true; for (const s of SIGNS) zGive(s.id, 2); zShadowOn('gemini')" },
   // a pilot from outside the file (OUTSIDE PILOTS): the tests' stand-in, every hook in use
   { name: 'outside',    char: 'x0',     seed: 115, steps: 18000, kit: true },
   // ONE POINT OH: the portal rooms past THE FRACTURE, his voice in them and the old door walked past,
   // and his fight, from the shatter to today (the route's own test, npm run test:opo, takes the door)
   { name: 'opo-route',  char: 'runner', seed: 119, steps: 21600, shops: true, gates: true, starter: 'RUN.altPath = true; RUN.opoCoax = 4' },
-  { name: 'onepointoh', char: 'runner', seed: 120, steps: 18000, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
+  // (every CHANGELOG date is another hit in his fight, so it grows with each update: 360 s from 2.1, 19 Nov)
+  { name: 'onepointoh', char: 'runner', seed: 120, steps: 21600, starter: 'resetGame(); opoOpen({ up: { rate: 2, dmg: 1, multi: 1, pierce: 1 } })' },
   /* A run that is hunted (FROM ABOVE): from its first sector and every few
      seconds here, aimed at where the hull is, so that many are aimed and
      land in five minutes and the bot, which never stands still for long,
@@ -475,20 +488,23 @@ for (const sc of S) {
   const upCover = sc.name !== 'up' || (a.up.max >= UP_ROOMS_N - 1 && a.up.down && !a.upErrs && !b.upErrs && !c.upErrs);
   // and the rooms apart's, into every one and let down after each
   const apartCover = sc.name !== 'apart' || (a.apart.seen.length >= AWAY_N && a.apart.down >= AWAY_N && !a.upErrs && !b.upErrs && !c.upErrs);
-  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover || !apartCover) failed++;
+  // THE PLANETARIUM's run has to have read at least one sign past the 24 magnitudes it started with
+  const zCover = sc.name !== 'zodiac' || a.zMags > 24;
+  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover || !apartCover || !zCover) failed++;
   const opoNote = sc.name === 'opo-route' ? `  · his lines ${a.opo.lines.join(',') || 'none'}, door ${a.opo.door ? 'passed' : 'NOT SEEN'}`
                 : sc.name === 'onepointoh' ? `  · phases ${a.opo.phases.join('') || '-'}, ${a.opo.done ? 'out' : 'NOT ENDED'}` : '';
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
   const oxNote = ox ? `  · outside: ${path.basename(OUTSIDE_FILE)}, ${ox.hooks.length - ox.unused.length}/${ox.hooks.length} hooks used` +
     (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
     (outsideOk ? '' : ` (HOOKS FAILED: ${ox.errs || 'step or key never played'})`) : '';
+  const zNote = sc.name === 'zodiac' ? `  · magnitudes ${a.zMags} (24 at the start)${zCover ? '' : ' NOTHING READ'}` : '';
   const upNote = sc.name === 'up' ? `  · up: ${path.basename(UP_FILE)}, rooms to ${a.up.max + 1}, ${a.up.down ? 'let down' : 'NOT LET DOWN'}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
   const apartNote = sc.name === 'apart' ? `  · apart: ${path.basename(AWAY_FILE)}, rooms ${a.apart.seen.length}/${AWAY_N}, let down ${a.apart.down}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
   const draw = `  · drawn: ${(drawn / 1e6).toFixed(1)}M canvas calls` + (b.drawErrors ? `, ${b.drawErrors} draw errors (${b.firstDrawError})` : '');
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}${apartNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}${apartNote}${zNote}`);
 }
 if (!ONLY) {
   // a seed must matter

@@ -1152,10 +1152,10 @@ Menus are input too. A choice on a screen (a card, gear, the shop, the
 planetarium, the library, the talks, the founder's choice, pause) goes
 through `ui()`. Alone it acts at once. In lockstep it rides the input record
 and lands on the same step on both machines, as the chooser's pilot. Each
-player picks their own cards and gear and buys for their own ship; the host
-makes the run's other choices. Either player can pause or resume the shared
-game, and can open the codex, settings or graphics over the pause on their
-own machine. The host's
+player picks their own cards and gear, buys for their own ship and reads their
+own sign at a planetarium; the host makes the run's other choices. Either
+player can pause or resume the shared game, and can open the codex, settings
+or graphics over the pause on their own machine. The host's
 bot plays every screen through `handleKey`, and the guest's bot presses keys
 on the host's screens, which must change nothing. Both pause, resume and
 open their own screens over the pause, and the run must cover all of it.
