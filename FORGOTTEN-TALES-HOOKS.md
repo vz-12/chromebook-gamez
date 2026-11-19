@@ -106,6 +106,26 @@ its own colours); `seen` is false for a silhouette.
 - **Faces.** Each voice's typeface and ink are `TALE_FACE` in the `codex UI`
   block. That is text, not a hook, but change it freely.
 
+## ZODIAC's own look: the atlas
+
+While the ZODIAC section is open (`zcxOn()`), `TA(name, ...)` draws a hook from
+`ZCX_ART` wherever it has one, and from `TALES_ART` everywhere else. The paper
+book becomes a star atlas: a night sky with a great wheel turning through it,
+navy glass and gold rules, star-chart pages, and the three voices in light inks
+(`ZCX_FACE`). It lives in its own block, `THE PLANETARIUM — the codex's atlas`,
+after the end of this block, and its source is `planetarium-art/codex.js`.
+
+- **Two hooks only it has:**
+  - `portrait.sign`: a sign's constellation from its real stars, or its stars
+    alone, unlit, before it is read.
+  - `portrait.trine`: a Grand Trine's triangle through its three signs.
+- **The wheel.** Where there is room, `codexGeom` puts the twelve signs round
+  a wheel and the four trines in its middle (`zcxWheelGeom`, `zcxCellAt`), and
+  `drawCodex` draws the wheel and the trines' triangles under the cards
+  (`zcxWheel`). Elsewhere it falls back to the usual grid.
+- **Page I** of a sign or a trine is the Bookkeeper's paragraph from
+  `TALE_TEXT`, with the sign itself filed under it from `SIGNS` (`zcxRecord`).
+
 ## Seeing every hook at once
 
 On a local server, open `/?beta=1&hooks=1`. That build unlocks everything,
