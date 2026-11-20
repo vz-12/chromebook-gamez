@@ -1191,6 +1191,7 @@ and the pilot's own hull and damage, and the script prints how long each
 wave and boss took, how much of each wave was spent finding the last few
 enemies or with nothing on screen, what did the damage, what killed the
 run, and how often cards and shops came. `--json` keeps every run's record.
+What it found on 20 Nov 2026 is in `PLAYTEST.md`.
 
 ## Limits worth knowing (Workers Free plan)
 
