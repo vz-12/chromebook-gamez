@@ -454,11 +454,29 @@ const int = (v, max) => {
   return Number.isFinite(n) && n >= 0 && n <= max ? n : null;
 };
 
-// A run's score is bounded by how far it actually got. Deliberately generous:
-// this rejects absurd claims, not merely very good runs.
+/* A run's score is bounded by how far it actually got. Deliberately generous:
+   this rejects absurd claims, not merely very good runs.
+
+   It follows how the game pays (index.html), every term an upper bound:
+     · a kill pays its body's points × (1 + 0.05 × wave) — the wave it died
+       on, never past the last — × 1.35 on a hardened run. Ordinary bodies
+       are worth 6 to 70 (three times that elite); the LONG RUNS specialists
+       and the bosses 500 to 600, and few. KILL_AVG is a generous average:
+       the best long runs on the boards average 43 to 80.
+     · a cleared wave pays 50 × wave and a new stage (every 5 waves) up to
+       1500 × stage: under 60 × wave² together.
+     · the once-a-run bosses pay outright: THE AMALGAM 1,000,000, ROOT
+       500,000, THE UNWRITTEN 250,000, the keepers 29,000 (RUN_LUMPS).
+   The flat 400 a kill this replaced knew neither the wave multiplier nor
+   the lumps. It turned away a real run of 1,468,086 at wave 27 (THE
+   AMALGAM's million, on 2,500 kills), and a long run past ~wave 125 with
+   the top runs' kill rate would have hit it too. */
+const KILL_AVG = 100;
+const RUN_LUMPS = 2000000;
 const plausible = e =>
   e.time >= 15 &&
-  e.score <= 6000 * e.wave + 400 * e.kills + 60000;
+  e.score <= 1.35 * (KILL_AVG * e.kills * (1 + 0.05 * e.wave) + 60 * e.wave * e.wave)
+             + RUN_LUMPS + 60000;
 
 // Fold an entry into the board: one row per name, keeping the better run.
 function mergeBoard(entries, entry) {
