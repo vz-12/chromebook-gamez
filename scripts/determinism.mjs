@@ -204,7 +204,7 @@ const HARNESS = `(() => {
     run = { o, k: o.fromK || 0, prints: [], bosses: new Set(), maxWave: 0, drawErrors: 0, firstDrawError: null,
             vow: { vows: 0, skyClears: 0, broken: 0 }, was: [false, false, 0],
             opo: { lines: [], door: false, phases: [], done: false }, opoLast: null, up: { max: -1, was: -1, down: false },
-            apart: { seen: [], was: -1, down: 0 } };
+            apart: { seen: [], was: -1, down: 0 }, specs: new Set() };
   }
   function play(o) {
     start(o);
@@ -240,6 +240,7 @@ const HARNESS = `(() => {
         run.was = [v, s, br];
       }
       for (const e of enemies) if (e.boss) run.bosses.add(e.boss);
+      for (const e of enemies) if (e.spec) run.specs.add(e.id);   // LONG RUNS: every specialist met
       // ONE POINT OH, counted as it happens: his lines, the door, the fight's phases, and out
       if (typeof opo !== 'undefined') {
         if (opoLine && opoLine !== run.opoLast) { run.opo.lines.push(opoLine.kind); run.opoLast = opoLine; }
@@ -256,7 +257,7 @@ const HARNESS = `(() => {
       if ((run.k + 1) % 60 === 0) run.prints.push(globalThis.__raw ? fingerprint() : fnv(fingerprint()));
     }
     inputSource = inputSample;
-    return { prints: run.prints, bosses: [...run.bosses], maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
+    return { prints: run.prints, bosses: [...run.bosses], specs: run.specs.size, maxWave: run.maxWave, level: P.level, drawErrors: run.drawErrors, firstDrawError: run.firstDrawError,
              snap: run.snap, snapBad: run.snapBad, vow: run.vow, opo: run.opo, up: run.up, apart: run.apart, upErrs: typeof UP !== 'undefined' ? Object.keys(UP.errs).join(',') : '', outsideErrs: Object.keys(OUTSIDE.errs).join(','),
              oxCalls: JSON.stringify(oxCalls), oxHooks: P.outside ? Object.keys(OUTSIDE.by.get(P.charId) || {}).join(',') : '',
              zMags: P.zs ? Object.values(P.zs).reduce((a, b) => a + b, 0) : 0 };
@@ -360,6 +361,11 @@ const S = [
      half minutes a room: the bot's pace against a real module's bosses). */
   { name: 'apart',      char: 'runner', seed: 131, steps: 3600 + 16200 * AWAY_N, shops: true, apart: true,
     starter: 'P.dmg *= 1000' },  // a module's bosses go deeper with every room (and HP gates and cut-ins hold every phase): the bot hits hard enough to see each one out
+  /* A long run (LONG RUNS: THE SPECIALISTS): from the second loop, where a big wave
+     sends faster and every ordinary wave sends a specialist. All four from the start
+     (a LEGION's cells, a BASTION's charge, a LONGWATCH's sight), then the waves' own. */
+  { name: 'long',       char: 'runner', seed: 133, steps: 18000,
+    starter: 'wave = 25; P.dmg *= 400; for (const k of SPEC_KEYS) specSpawn(k)' },
 ];
 const ALL = { draw: true, fx: true, devices: true, save: true, window: true };
 const play = (sc, b, more, G) => {
@@ -490,13 +496,16 @@ for (const sc of S) {
   const apartCover = sc.name !== 'apart' || (a.apart.seen.length >= AWAY_N && a.apart.down >= AWAY_N && !a.upErrs && !b.upErrs && !c.upErrs);
   // THE PLANETARIUM's run has to have read at least one sign past the 24 magnitudes it started with
   const zCover = sc.name !== 'zodiac' || a.zMags > 24;
-  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover || !apartCover || !zCover) failed++;
+  // the long run has to have met the starter's four and at least one a wave sent itself
+  const longCover = sc.name !== 'long' || (a.specs > 4 && a.maxWave > 26);
+  if (!ok || !okC || !vowCover || !outsideOk || !opoCover || !upCover || !apartCover || !zCover || !longCover) failed++;
   const opoNote = sc.name === 'opo-route' ? `  · his lines ${a.opo.lines.join(',') || 'none'}, door ${a.opo.door ? 'passed' : 'NOT SEEN'}`
                 : sc.name === 'onepointoh' ? `  · phases ${a.opo.phases.join('') || '-'}, ${a.opo.done ? 'out' : 'NOT ENDED'}` : '';
   const vowNote = sc.char === 'melee' && sc.kit ? `  · vow ${a.vow.vows}, sky clear ${a.vow.skyClears}, broken ${a.vow.broken}${vowCover ? '' : ' (NOT ALL SEEN)'}` : '';
   const oxNote = ox ? `  · outside: ${path.basename(OUTSIDE_FILE)}, ${ox.hooks.length - ox.unused.length}/${ox.hooks.length} hooks used` +
     (ox.unused.length ? ` (not: ${ox.unused.join(' ')})` : '') +
     (outsideOk ? '' : ` (HOOKS FAILED: ${ox.errs || 'step or key never played'})`) : '';
+  const longNote = sc.name === 'long' ? `  · specialists met ${a.specs}${longCover ? '' : ' (NOT ENOUGH: the waves sent none, or the run never left wave 26)'}` : '';
   const zNote = sc.name === 'zodiac' ? `  · magnitudes ${a.zMags} (24 at the start)${zCover ? '' : ' NOTHING READ'}` : '';
   const upNote = sc.name === 'up' ? `  · up: ${path.basename(UP_FILE)}, rooms to ${a.up.max + 1}, ${a.up.down ? 'let down' : 'NOT LET DOWN'}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
   const apartNote = sc.name === 'apart' ? `  · apart: ${path.basename(AWAY_FILE)}, rooms ${a.apart.seen.length}/${AWAY_N}, let down ${a.apart.down}${a.upErrs || b.upErrs || c.upErrs ? ' (HOOKS THREW: ' + [a.upErrs, b.upErrs, c.upErrs].filter(Boolean).join(' / ') + ')' : ''}` : '';
@@ -504,7 +513,7 @@ for (const sc of S) {
   const restored = okC ? `  · restored at ${from}s: same (${(a.snap.length / 1024).toFixed(0)} KB)`
     : `  · RESTORED at ${from}s: ${ci >= 0 ? 'DIFFER at ' + (from + ci) + 's' : 'cut short'}` +
       (a.snapBad && a.snapBad.length ? ', cannot travel: ' + a.snapBad.slice(0, 6).join('; ') : '');
-  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}${apartNote}${zNote}`);
+  console.log(`${pad(sc.name, 12)} ${ok ? 'same' : 'DIFFER at ' + i + 's'}  ${pad(a.prints.length + 's', 6)} wave ${pad(a.maxWave, 3)} lvl ${pad(a.level, 3)} ${pad(a.bosses.join(',') || '-', 40)} ${((Date.now() - t) / 1000).toFixed(1)}s${draw}${restored}${vowNote}${oxNote}${opoNote}${upNote}${apartNote}${zNote}${longNote}`);
 }
 if (!ONLY) {
   // a seed must matter

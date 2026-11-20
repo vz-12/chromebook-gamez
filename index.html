@@ -2421,7 +2421,8 @@ const LANCE_TEXT = {
   long:   { n: 'Longshot', d: '+damage at the far end of the beam' },
   oc:     { d: 'Every 7th beam is a heavy spear' },
   pblank: { d: '+30% damage at close range' },
-  crit:   { d: '+8% critical chance (rolled per pulse)' }
+  crit:   { d: '+8% critical chance (rolled per pulse)' },
+  u_hollow: { d: 'Every beam throws a bolt after it a moment later, at 55% damage per level' }
 };
 /* The same service for a swing. THE VAGRANT never sees the level-up screen, but
    the shop, the Record Chip and the challenge ladder all still deal out of the
@@ -2438,7 +2439,9 @@ const BLADE_TEXT = {
   mom:    { d: '+16% damage while closing' },
   exec:   { d: 'Swings finish anything under 12% HP' },
   okill:  { d: 'Excess damage splashes off the body' },
-  vol:    { d: 'Anything a swing kills detonates' }
+  vol:    { d: 'Anything a swing kills detonates' },
+  u_hollow: { d: 'Everything a swing cuts is cut again a moment later, at 55% per level' },
+  u_glass:  { d: 'Taking a hit throws a ring of crescents out of you' }
 };
 const lanceText = u => (P && P.weapon === 'laser' && LANCE_TEXT[u.id]) || null;
 const bladeTextOf = u => (P && P.weapon === 'blade' && BLADE_TEXT[u.id]) || null;
@@ -2488,7 +2491,7 @@ function newPlayer() {
        a half-finished beam are not the same state and reading one as the other
        is the kind of bug that only surfaces in co-op. */
     swingT: 0, swingP: 0, swingA0: 0, swingAim: 0, swingArc: 0, swingDir: 1,
-    swingSide: 0, swingId: 0, swingFin: 0, swingCut: 0,
+    swingSide: 0, swingId: 0, swingFin: 0, swingCut: 0, swingShot: 1,
     swingReach: 0, swingFade: 0, rig: 0, parryFx: 0, perfectFx: 0,
     parryT: 0, parryAge: 0, parryCd: 0, parryTook: 0, parrySrc: [], riposte: 0,
     // the parry chain, the stillness, the lunge and rally — see the parry is the pilot
@@ -2571,7 +2574,7 @@ function newPlayer() {
     echoQ: [], shotN: 0, harvestN: 0, requisN: 0, rollN: 0,
     bankN: 0, bankReady: false, trophyN: 0, grudgeN: 0, eraseN: 0,
     assemblyN: 0, nullT: 0, shellT: 0, shellUp: false,
-    brakeT: 0, brakeUsed: false, dashHits: 0, waveClock: 0,
+    brakeT: 0, brakeUsed: 0, dashHits: 0, waveClock: 0,
     rootCmd: 0, rootCmdT: 0, key: 0,
     salvageUsed: false, lastTarget: null
   };
@@ -3305,6 +3308,12 @@ const ETYPE = {
   risen:   { r: 15, hp: 40,  spd: 96,  dmg: 12, col: '#cbd5e1', xp: 4, score: 44, sides: 5 },
   gravedigger:{r: 17, hp: 58, spd: 84, dmg: 12, col: '#a8a29e', xp: 5, score: 52, sides: 6 },
   bellringer:{r: 22, hp: 120, spd: 0,  dmg: 10, col: '#fcd34d', xp: 7, score: 70, sides: 8 },
+  // --- LONG RUNS: the specialists (wave 26+) and LEGION's cells. See THE SPECIALISTS ---
+  aegis:   { r: 30, hp: 420, spd: 58,  dmg: 18, col: '#93c5fd', xp: 60, score: 500, sides: 6 },
+  bastion: { r: 34, hp: 520, spd: 62,  dmg: 26, col: '#f59e0b', xp: 60, score: 500, sides: 8 },
+  longwatch:{r: 24, hp: 300, spd: 96,  dmg: 22, col: '#f0abfc', xp: 60, score: 500, sides: 3 },
+  legion:  { r: 28, hp: 380, spd: 44,  dmg: 14, col: '#bef264', xp: 60, score: 500, sides: 7 },
+  cell:    { r: 10, hp: 8,   spd: 150, dmg: 8,  col: '#d9f99d', xp: 1,  score: 6,  sides: 4 },
   boss:    { r: 60, hp: 1800,spd: 46,  dmg: 26, col: '#ef4444', xp: 60, score: 600, sides: 8 }
 };
 
@@ -3341,8 +3350,100 @@ const CODEX_E = {
   poltergeist:{ n: 'POLTERGEIST', d: 'Never attacks directly. It lifts what is lying about, the wreckage and the dead, and throws it.' },
   risen:    { n: 'RISEN',       d: 'A run that was quit, climbing out of its grave with whatever it was flying: a stream, a short lance or a swing. Felled, it leaves its last words behind.' },
   gravedigger:{ n: 'GRAVEDIGGER', d: 'Digs where you have been: open pits that slow you and swallow your fire. Whatever falls near it is buried, and gets up again.' },
-  bellringer:{ n: 'BELLRINGER', d: 'A bell that does not move. Every time it tolls, the three graves nearest it open. Put it down first.' }
+  bellringer:{ n: 'BELLRINGER', d: 'A bell that does not move. Every time it tolls, the three graves nearest it open. Put it down first.' },
+  // --- LONG RUNS: the specialists, from wave 26. Listed, never owed for a full codex (codexOwed) ---
+  aegis: { n: 'AEGIS',
+    d: 'A specialist, from the second loop on. Its face turns aside every round that comes at it, and ' +
+       'throws some of them back, and it turns slowly. Get round to its back, or bring anything that is ' +
+       'not a bullet: whatever reaches it lands half as hard again.' },
+  bastion: { n: 'BASTION',
+    d: 'A specialist, from the second loop on. No single blow takes more than a sliver of it, so the ' +
+       'heavy ones are wasted and a stream of small ones is not. It charges in a straight line: step ' +
+       'aside and let it meet the wall, and it cracks, and for a few seconds it takes everything.' },
+  longwatch: { n: 'LONGWATCH',
+    d: 'A specialist, from the second loop on. A sniper: it keeps the room between you, sights for a ' +
+       'moment (the line goes white when it commits) and fires one heavy round. From far off it shrugs ' +
+       'off most of what reaches it. Close in it takes nearly double, and it will not let you stay ' +
+       'there.' },
+  legion: { n: 'LEGION',
+    d: 'A specialist, from the second loop on. A core inside a ring of eight cells: while four or more ' +
+       'stand, the core takes a fifth of what you give it. Anything that clears a crowd clears the ring ' +
+       '(blasts, chains, piercing rounds, a sweep). It grows a cell back every few seconds.' }
 };
+
+/* THE WAY UP's rooms, filed (19 Nov 2026). Their bodies and bosses live in a vault
+   module (THE WAY UP), so the codex keeps what it needs to show them itself:
+   the record line, the look, and for a body the boss of its room (`under`,
+   whose standing is its page III's deed). Listed once met, never owed. The
+   tyrants above them are not here: their entries are the vault's (Tales.vault),
+   out of sight until one is felled. */
+const CODEX_UP = {
+  u1h: { kind: 'enemy', n: 'HOLLOW', col: '#d6b97a', sides: 4, r: 13, under: 'u1F',
+    d: 'A worker with a pick and nothing in its hood. It lifts the pick overhead before it brings it ' +
+       'down in a wide arc: the lift is the tell. Felled, it crumbles into the gold it was digging.' },
+  u1k: { kind: 'enemy', n: 'HOD', col: '#b08d57', sides: 6, r: 18, under: 'u1F', pose: { st: 2, sT: 1 },   // set down: overhead it is out of sight
+    d: 'A riveted bucket on a chain, let down from above. Its shadow lands first; then the bucket, ' +
+       'hard; then it sits a moment, and is hauled back up.' },
+  u1c: { kind: 'enemy', n: 'CART', col: '#9a7440', sides: 4, r: 16, under: 'u1F',
+    d: 'A plank tub on iron wheels. It turns to aim, then runs straight for you, and where it meets the ' +
+       'wall it spills its gold across the floor. The rails it will take are drawn before it goes.' },
+  u1F: { kind: 'boss', n: 'THE FOREMAN', col: '#f5c542', sides: 8, r: 46,
+    d: 'He keeps the quota. WHISTLE calls a row of hollows, STAKES drives a line of them into the ' +
+       'floor, LEDGER comes down close. On his count every piece of gold left on the floor flies to him ' +
+       'and plates him, and every plate takes some of what you give him; a count that finds the floor ' +
+       'clean finds him short, staggering, and open. Keep the floor clean.' },
+  u2c: { kind: 'enemy', n: 'COCOON', col: '#cbd5e1', sides: 6, r: 16, under: 'u2S',
+    d: 'A wrapped shape hung in the threads, still moving. It does nothing at all, and that is the ' +
+       'warning: left long enough, it opens, and a moth comes out.' },
+  u2m: { kind: 'enemy', n: 'MOTH', col: '#d4d4d8', sides: 3, r: 11, under: 'u2S',
+    d: 'Hatched out of a cocoon. It loops close and sheds a dust that clogs: fly through it and you are ' +
+       'slowed for a while.' },
+  u2w: { kind: 'enemy', n: 'WRAPPER', col: '#cbd5e1', sides: 5, r: 15, under: 'u2S',
+    d: 'A pale mask with six arms, all elbows. It whirls a bolas and throws it, and what it catches is ' +
+       'bound and slowed until it dashes free.' },
+  u2S: { kind: 'boss', n: 'THE SPINNER', col: '#f1f5f9', sides: 9, r: 42,
+    d: 'She hangs on her line over the threads. SPOKES strings them in a wheel; REEL catches you and ' +
+       'draws you in until you dash; BOLAS and SPIRAL fill the rest. From a third of the way down she ' +
+       'goes up into the dark and lets cocoons down instead.' },
+  u3d: { kind: 'enemy', n: 'DEBTOR', col: '#d1fae5', sides: 5, r: 13, under: 'u3B',
+    d: 'Comes up out of the water and holds on. While one is on you, you are slowed and it takes your ' +
+       'credits, a few at a time. Fell it and they are yours again.' },
+  u3w: { kind: 'enemy', n: 'DROWNED', col: '#4ade80', sides: 6, r: 14, under: 'u3B',
+    d: 'Under the water and out of reach, until it surfaces to spit. The ripple where it is about to ' +
+       'come up is the tell.' },
+  u3a: { kind: 'enemy', n: 'ANCHOR', col: '#94a3b8', sides: 4, r: 20, under: 'u3B',
+    d: 'Throws its anchor down a straight line, with one of them chained to it, and drags it home. ' +
+       'Stand off the line.' },
+  u3B: { kind: 'boss', n: 'THE BAILIFF', col: '#4ade80', sides: 8, r: 44,
+    d: 'He wades among the debtors with a crook and a lantern. LANTERN marks you, and the third mark is ' +
+       'THE BILL; CHAIN drags you in until you dash; COLLECT raises debtors round you; and from two ' +
+       'thirds of the way down, SURGE brings the tide in.' },
+  u4f: { kind: 'enemy', n: 'FLEDGLING', col: '#fed7aa', sides: 3, r: 11, under: 'u4M',
+    d: 'A chick drilled in a row with its siblings, all beak and blade: a hop on every beat of the ' +
+       'drum, and on every fourth beat the whole row charges together.' },
+  u4q: { kind: 'enemy', n: 'QUILLER', col: '#f97316', sides: 5, r: 13, under: 'u4M',
+    d: 'Lifts a fan of iron quills on the beat before it throws them. Watch the lift, and be elsewhere ' +
+       'on the next beat.' },
+  u4s: { kind: 'enemy', n: 'SERGEANT', col: '#f97316', sides: 6, r: 18, under: 'u4M',
+    d: 'Drives the rows near it: they go on the half beat as well, and take less while it stands. Fell ' +
+       'it first and the drill slows down.' },
+  u4M: { kind: 'boss', n: 'THE BROOD-MARSHAL', col: '#f97316', sides: 8, r: 44,
+    d: 'He drills the rows. FORM UP sets them; VOLLEY fires every row and a wall with one gap in it; ' +
+       'THE SHADE passes over; from two thirds of the way down he DIVES, and from a third he calls ' +
+       'double time and the whole room goes faster.' },
+  u5s: { kind: 'enemy', n: 'SNUFFER', col: '#d6d3d1', sides: 4, r: 14, under: 'u5L',
+    d: 'Walks to the lamps and caps them. A capped lamp goes dark, and the dark hides what is in it. ' +
+       'Stand by a lamp a moment and it lights again.' },
+  u5g: { kind: 'enemy', n: 'GLOAM', col: '#a8a29e', sides: 5, r: 13, under: 'u5L',
+    d: 'Made of the evening. In the dark nothing touches it and it is quick; in the light it is slow, ' +
+       'and can be put down. Bring it into the light.' },
+  u5L: { kind: 'boss', n: 'THE LAMPLIGHTER', col: '#f87171', sides: 8, r: 44,
+    d: 'He does his round down the street, putting the lamps out, and every lamp he puts out makes him ' +
+       'heavier. POLE and EMBERS on the way; LAST LIGHT from two thirds of the way down, every lamp ' +
+       'guttering and the gloams coming; and from a third he puts out the light you carry.' }
+};
+// what a full codex asks for (Codex.need): never ALL HALLOWS' bodies, never a specialist
+const codexOwed = k => !HL_ETYPES[k] && !SPEC[k];
 
 /* His marginalia. Once he has handed the record back, every entry he had an
    opinion about carries one — clerical, unhurried, and written by somebody who
@@ -3516,14 +3617,11 @@ const CODEX_B = {
    written; the rest are step 5's four batches. Page I of an enemy or a boss
    is null here, since its codex line stands.
 
-   STILL UNWRITTEN, ON PURPOSE: THE LOST SOUL's pages II and III, the
-   house's (THE HOUSE AND THE PATCH, page III), and pages II and III of the
-   house's three bodies and DEAD GAME, and of the yard's three and THE RAGE
-   QUIT. They are ALL HALLOWS chapters II and III, which open on 14 and 23
-   Oct, and anything in this file can be read in the page's source: they go
-   in when their chapter is live, never before.
-   VOIDRUNNER's page III and THE OUTSIDER's are held for deeds that are not
-   built yet.
+   The pages ALL HALLOWS' chapters II and III held back (THE LOST SOUL's, the
+   house's, its bodies' and DEAD GAME's and THE RAGE QUIT's) went in on 19 Nov
+   2026, with VOIDRUNNER's page III and THE OUTSIDER's and ONE POINT OH's (their
+   deeds are built now), IMAGO, the specialists and THE WAY UP's rooms (CODEX_UP).
+   THE WAY UP's tyrants are never in here: every word of theirs is the vault's.
 --------------------------------------------------------------------------- */
 const TALE_TEXT = {
   /* ---- THE PLANETARIUM: the zodiac (19 Nov 2026). Page I is his paragraph; the
@@ -4136,7 +4234,14 @@ const TALE_TEXT = {
 
     'the base ship. nothing on it. i kept trying to add things, a second barrel, a shield, a perk ' +
     'tree, and every build that added something played worse.\n\n' +
-    '~~it\'s boring~~ it isn\'t boring. it\'s finished. it might be the only thing in here that is.'
+    '~~it\'s boring~~ it isn\'t boring. it\'s finished. it might be the only thing in here that is.',
+
+    'I was the only thing in the first room that was not trying to stop anything. Three kinds of ' +
+    'thing came at me, and then the ring, and then it started again, and I was glad every time.\n\nHe ' +
+    'stayed with me in that room longer than anyone. He would still be there if he could. I went on, ' +
+    'into the other rooms, and every one of them changed me a little, and I let it.\n\nThat is the one ' +
+    'thing I did that he could not: I let it. Under the hull there was always something waiting to ' +
+    'come out. It came out when I stopped holding on to the first room.'
   ],
 
   /* ---- step 5, batch 3: sectors, the rooms between, and the people ---- */
@@ -4376,7 +4481,12 @@ const TALE_TEXT = {
     'I have filed the patch. The house can wait. It says it is good at that.',
 
     'the patch is a seasonal map. ~~i built it for october~~ it was in the files under a date. i just ' +
-    'switched it on.'
+    'switched it on.',
+
+    'The house was built for one night of the year. The rest of the year it waits, with the sheets ' +
+    'on, and keeps whatever was said in it last.\n\nSomeone said ez. Someone said wait. Someone said ' +
+    'brb. The house has kept all three on the underside of a sheet in the top room, because nobody ' +
+    'came back to say anything after them.\n\nIt is good at waiting. It would rather not be.'
   ],
 
   /* ONE POINT OH: stand-ins until the lore bible has his tale (ONE-POINT-OH-PLAN.md,
@@ -4388,7 +4498,14 @@ const TALE_TEXT = {
 
     'he\'s a player. he came in on the first upload, the same way i came in at the end. he has never once ' +
     'said the game is bad.\n\n' +
-    '~~put it back~~ he\'s right that it could win back then. he\'s wrong that it was better.'
+    '~~put it back~~ he\'s right that it could win back then. he\'s wrong that it was better.',
+
+    'I was here on the first day. One ship, five rooms, nothing that could not be learned in an ' +
+    'afternoon, and it was perfect, and then they started adding things.\n\nI stayed. Somebody had to ' +
+    'remember it the way it was. I held the door, and quoted the old dates back at everything that ' +
+    'tried to change.\n\nThe hull came to me last. It had changed more than anything, and it was still ' +
+    'the same hull, and it flew the way it flew on the first day. I had not thought that was ' +
+    'possible. I am still deciding whether I am glad.'
   ],
 
   'n:outsider': [
@@ -4399,14 +4516,30 @@ const TALE_TEXT = {
 
     'the outsider isn\'t in any of my files. he walked into the hub one day and started giving the ' +
     'tutorial.\n\n' +
-    '~~remove him~~ he\'s better at it than my tutorial was.'
+    '~~remove him~~ he\'s better at it than my tutorial was.',
+
+    'I was in the stands, once. Everyone is, who has been here long enough. You sit where he can see ' +
+    'you, and you cheer for what he cheers for, and the seat is warm, and you never have to decide ' +
+    'anything.\n\nI stood up. I do not remember why. I walked out through the gate behind the seats, ' +
+    'and he did not stop me, because nobody had ever done it and there was no rule.\n\nI have been ' +
+    'outside ever since. It is colder. It is mine. When the stands empty, I would like them to know ' +
+    'the gate is still there.'
   ],
 
   'n:soul': [
     'ALL HALLOWS. A run whose tab was closed: wave nineteen, hull at four percent, the ordinary hull. ' +
     'Nothing came to write it down.\n\n' +
     'I have tried to file it. A run that was never finished does not take ink. It is the second thing ' +
-    'in this book that will not.'
+    'in this book that will not.',
+
+    'the soul is a run somebody closed the tab on. ~~clean up orphaned runs~~ there are thousands of ' +
+    'them. i went looking, after this one. i stopped counting at the ones that stopped at nineteen.',
+
+    'Nineteen. Hull at four percent. He said he would be right back.\n\nI waited for the next wave, ' +
+    'and it did not come, and nothing came to write me down. I was not finished, and I was not quit. ' +
+    'I was only left.\n\nThe one at the top of the yard said it at last: GG. Two letters. They did not ' +
+    'finish me. Only a twentieth wave will. But they were what I had been waiting to hear, and I did ' +
+    'not know it until he said them.'
   ],
 
   /* ---- step 5, batch 4: the enemies (page I is the codex's own line, kept) ---- */
@@ -4664,6 +4797,353 @@ const TALE_TEXT = {
     'be got to.\n\n' +
     'Look away and it is somewhere else, and nearer. It does not want anything from you. It only ' +
     'wants not to be watched while it moves.'
+  ],
+
+  /* ---- written 19 Nov 2026: the pages ALL HALLOWS' chapters II and III held back,
+     IMAGO, the specialists (LONG RUNS) and THE WAY UP's rooms ---- */
+
+  'e:sheet': [
+    null,
+
+    'sheets. ~~it\'s a ghost costume~~ it\'s a ghost costume. what\'s under it is whatever was in the ' +
+    'house when i opened it.',
+
+    'The house keeps everything under a sheet: furniture, and things that are not furniture, and ' +
+    'whatever was said in it last, written on the underside.\n\nA sheet does not fight. It only hides. ' +
+    'When it tears, what was under it has been waiting a long time to be uncovered, and it is not ' +
+    'grateful.'
+  ],
+
+  'e:lurker': [
+    null,
+
+    'the house has dark rooms. ~~light everything~~ the dark is the point. carry the light.',
+
+    'It lives in the parts of the house nobody goes into any more. It was not always in the dark. ' +
+    'The dark came to where it was.\n\nIn the light it runs, and not because the light hurts. In the ' +
+    'light you can see what it is, and it has not been seen in a long time.'
+  ],
+
+  'e:poltergeist': [
+    null,
+
+    'it throws the corpses. ~~physics bug~~ it was a physics bug. now it\'s a ghost.',
+
+    'It cannot touch you. It never could. So it moves things: a chair, a door, whatever fell ' +
+    'nearest, and throws them at whoever is still in the house.\n\nIt is not angry. It wants you to ' +
+    'notice that it is here. Nothing else in the house has noticed in years.'
+  ],
+
+  'e:risen': [
+    null,
+
+    'every quit run leaves a grave. ~~delete quit runs~~ i can\'t. they\'re in the save. so they get a ' +
+    'yard.',
+
+    'It was flying, and then it was not, because it was closed before it could finish. It climbs out ' +
+    'with whatever it had in its hands at the time.\n\nIt does not want revenge. It wants to finish. ' +
+    'You are the nearest thing to an ending it has seen since.'
+  ],
+
+  'e:gravedigger': [
+    null,
+
+    'he digs where you were. ~~make him dig ahead~~ no. he only ever digs where you were.',
+
+    'He works the yard for the one at the top of it. He digs where the last one stood, and puts them ' +
+    'in, and goes to dig the next.\n\nHe is very fast. He has to be. Nothing in the yard is ever ' +
+    'finished, so there is always somebody to bury.'
+  ],
+
+  'e:bellringer': [
+    null,
+
+    'a bell that opens graves. ~~too strong~~ it is too strong. that\'s why it doesn\'t move.',
+
+    'It tolls for whoever has gone, and the ones who have gone hear it and come back up to see who ' +
+    'is next.\n\nIt does not know that is what it does. It thinks it is only marking the hour. In the ' +
+    'yard, every hour is somebody\'s.'
+  ],
+
+  'b:deadgame': [
+    null,
+
+    'dead game is a guy who says the game is dead, in the game, every day. ~~ban him~~ he\'s here ' +
+    'more than anyone.',
+
+    'Nobody comes here any more. I come here every day to make sure of it.\n\nI send them away myself, ' +
+    'the ones who come, so that it stays true. If the room were full I would be wrong, and if I were ' +
+    'wrong I would have to stay for some other reason, and I do not have one.\n\nStill here. I say it ' +
+    'to the empty room. It is the only thing I say that I believe.'
+  ],
+
+  'b:ragequit': [
+    null,
+
+    'the rage quit leaves before he loses. ~~stop him~~ you can. stand in the gate.',
+
+    'I have never lost. Not once. When it starts to go wrong I leave, and a run I have left does not ' +
+    'count, and so I have never lost.\n\nI leave a stone behind for every one, on the way out. I do ' +
+    'not read what is on them.\n\nLag. It was lag.'
+  ],
+
+  'a:runner': [
+    'An awakening, filed under its pilot. Near misses fill it (GRAZE); then the hull opens into ' +
+    'something with wings. Its Z throws eyes that burst, its X flutters out from under every blow, ' +
+    'its C opens an armory and takes up whatever gun is in it, and its V grows the hull new parts ' +
+    'while it molts.\n\nI had filed this hull as finished. I have had to file it again.',
+
+    'imago. the last stage of a moth. ~~it\'s a cocoon joke~~ it\'s a cocoon joke.\n\nthe base ship was ' +
+    'the one thing i never wanted to touch. i didn\'t touch it. it did this on its own, the first ' +
+    'time somebody got past the man who wanted it left alone.',
+
+    'Every near miss is a little of me coming loose. I fly close to everything on purpose now.\n\nWhen ' +
+    'enough has come loose I open, and what comes out is what was under the hull the whole time: ' +
+    'wings, eyes on the wings, more than one gun. I can be anywhere a blow is not.\n\nI was finished, ' +
+    'he said. I was. And then I kept going, which is the only thing that was ever asked of me.'
+  ],
+
+  'e:aegis': [
+    null,
+
+    'people got good enough to sit in a corner and hold the trigger. ~~nerf the corner~~ so i made ' +
+    'something the trigger doesn\'t work on. walk round it.',
+
+    'It was made to stand in front of things. It does not know what it is standing in front of, and ' +
+    'it has never turned round to look.\n\nEverything that comes at its face, it answers. It does not ' +
+    'answer what it cannot see coming, and it has never once seen anything coming from behind.'
+  ],
+
+  'e:bastion': [
+    null,
+
+    'a cap on every hit. the one-shot builds hate it. ~~raise the cap~~ the wall thing was an ' +
+    'accident. it ran into the wall in testing and just stood there, open. i kept it.',
+
+    'It is made of a great many small doors, all shut, and it knows that nothing comes through a ' +
+    'door all at once.\n\nWhat it does not know is how to stop. It goes in a straight line at whatever ' +
+    'is in front of it, and when that steps aside it goes on until the room does not, and for a ' +
+    'moment every door is open.'
+  ],
+
+  'e:longwatch': [
+    null,
+
+    'the corner again. ~~give it a scope~~ it has a scope. if you won\'t come out, it\'ll find you ' +
+    'where you are. it hates company. so: company.',
+
+    'It likes to see the whole room. It likes everything in it small.\n\nClose to, it is not good at ' +
+    'anything. It knows this, and it goes somewhere else the moment you are near enough to notice, ' +
+    'and from there you are small again.'
+  ],
+
+  'e:legion': [
+    null,
+
+    'one thing hiding behind a lot of little things. ~~more cells~~ eight is plenty. if a build ' +
+    'can\'t clear eight of anything by now, it only ever learned to hit one.',
+
+    'It does not go anywhere alone. It never has. Each of the eight is a little of it, sent a little ' +
+    'way out, to be where the blows land first.\n\nIt grows them back. It always grows them back. It ' +
+    'does not seem to understand that the ones you broke are not the ones that come back.'
+  ],
+
+  'e:u1h': [
+    null,
+
+    'there\'s a light past the void now. ~~i didn\'t put it there~~ i didn\'t put it there. the first ' +
+    'room up it is a mine, and the miners are hollow. i have no file for any of this.',
+
+    'It digs. It was given a pick and a quota and a hood with nothing in it, and it digs.\n\nWhen it ' +
+    'has dug enough it becomes what it was digging, and somebody else\'s pick finds it. It does not ' +
+    'mind. Minding was taken out with whatever was in the hood.'
+  ],
+
+  'e:u1k': [
+    null,
+
+    'the bucket comes down out of the ceiling. there is no ceiling. ~~fix the spawn~~ whatever is up ' +
+    'there is hauling.',
+
+    'It goes down empty and comes up full. Nobody has seen who is on the other end of the chain. The ' +
+    'hollows do not look up.\n\nIt is the only thing in the mine that ever leaves it, and it always ' +
+    'comes back.'
+  ],
+
+  'e:u1c': [
+    null,
+
+    'a mine cart. it just goes. ~~give it brakes~~ no.',
+
+    'It was built to carry, and it carries everything at once, straight, as fast as it can, to ' +
+    'wherever the line goes.\n\nIt has never once arrived anywhere. It arrives at the wall.'
+  ],
+
+  'b:u1F': [
+    null,
+
+    'the foreman counts the gold. ~~give him a reason~~ he has one. he\'s the only one in the mine ' +
+    'with eyes.',
+
+    'He was a hollow once. He dug, and he made quota, and he was taken up off the floor for it, and ' +
+    'given a coat and a ledger and a whistle and eyes.\n\nIf the count ever comes up short, he goes ' +
+    'back down. So he counts: the gold on the floor, the hollows in the rows, the plates on his own ' +
+    'coat. Every count is a little shorter than the last, and he counts faster.'
+  ],
+
+  'e:u2c': [
+    null,
+
+    'the second room is all thread. ~~i hate this room~~ i like this room. i don\'t like what\'s in ' +
+    'the wrapping.',
+
+    'Something fell, and was caught, and was wrapped so it would not be lost.\n\nIt was not asked. ' +
+    'Inside, it has had a long time to change into something that flies, and the first thing it will ' +
+    'do is leave.'
+  ],
+
+  'e:u2m': [
+    null,
+
+    'moths go for the light. the light is you. ~~reverse it~~ that\'s just what moths do.',
+
+    'It came out of the wrapping not knowing it had been anything else. All it knows is the light, ' +
+    'and that it wants to be nearer.\n\nIt cannot see that the dust it leaves behind is the same ' +
+    'thread it came out of.'
+  ],
+
+  'e:u2w': [
+    null,
+
+    'six arms. ~~eight~~ six. the one with eight is further in.',
+
+    'It wraps things. It is very good at it and does not know why it does it, only that a thing that ' +
+    'is wrapped cannot fall any further.\n\nIt means it kindly. Whatever it has wrapped would tell you ' +
+    'otherwise, if it could move its mouth.'
+  ],
+
+  'b:u2S': [
+    null,
+
+    'eight arms. ~~that\'s a lot of arms~~ she needs all of them. she\'s holding everything that fell.',
+
+    'She wraps whatever falls, so that nothing is ever lost again.\n\nShe keeps them, every one, hung ' +
+    'where she can see it, each in its own careful thread. She does not ask if they wanted to be ' +
+    'kept. Nobody asked her, once, and she was lost, and she would not wish that on anything.'
+  ],
+
+  'e:u3d': [
+    null,
+
+    'the third room floods. the people in the water grab your money. ~~too mean~~ you get it back. ' +
+    'mostly.',
+
+    'It owes. It does not remember what, or to whom. It knows only that it is in the water because ' +
+    'of what it owes, and that holding on to somebody else is how you stay up.\n\nIt takes what you ' +
+    'carry, a little at a time, and gives it to nobody. It is only holding it.'
+  ],
+
+  'e:u3w': [
+    null,
+
+    'they live under the water. ~~give them lungs~~ they don\'t need them any more.',
+
+    'It stopped treading water a long time ago. It was easier.\n\nIt comes up only to spit at whoever ' +
+    'is still on the dry part, which it does not think of as cruelty. It thinks of it as a reminder.'
+  ],
+
+  'e:u3a': [
+    null,
+
+    'there\'s someone chained to the anchor. ~~remove~~ i looked. i\'m leaving them.',
+
+    'It throws the anchor out, and hauls it back, and throws it out again, and the one on the chain ' +
+    'goes wherever the anchor goes.\n\nIt is holding the room still. Somebody told it the room would ' +
+    'float away otherwise. Nobody has checked.'
+  ],
+
+  'b:u3B': [
+    null,
+
+    'the bailiff has a chain on his own leg. ~~continuity~~ i noticed it on the third run. it\'s been ' +
+    'there the whole time.',
+
+    'He was one of them, up to his neck. He took the lantern and the chain so that he could stand on ' +
+    'the bottom instead of treading water.\n\nHe holds the lantern out in front of him, always, so ' +
+    'that the light is on you and nobody looks down, and nobody sees that the chain is still on his ' +
+    'own leg.'
+  ],
+
+  'e:u4f': [
+    null,
+
+    'a whole room on a metronome. ~~off-beat spawns~~ everything on the beat. it\'s the only room ' +
+    'where the music is a weapon.',
+
+    'It was pushed out of a nest before it could fly. It did not fall. It was caught, and put in a ' +
+    'row, and taught to hop on the beat.\n\nIt thinks the row is the same thing as flying. It charges ' +
+    'when the row charges. It has never once been alone.'
+  ],
+
+  'e:u4q': [
+    null,
+
+    'quills on the beat. ~~random timing~~ the beat is the tell. learn the beat.',
+
+    'It throws everything it has, all at once, on the count. Then it grows more.\n\nIt was told the ' +
+    'count was the important part. It has thrown on the count so long that it would throw on the ' +
+    'count with nothing there to throw at.'
+  ],
+
+  'e:u4s': [
+    null,
+
+    'one bird yelling at the others. ~~give it a hat~~ it has a hat.',
+
+    'It made it out of the nest. It was the only one of its row that did, and it has been shouting ' +
+    'at rows ever since.\n\nIt does not hear itself. It hears the beat, and the rows hopping on it, ' +
+    'and that is close enough to quiet.'
+  ],
+
+  'b:u4M': [
+    null,
+
+    'he\'s the drum. ~~cut the drum~~ the drum is him.',
+
+    'He was the chick that did not make it out of the nest the first time it was pushed.\n\nHe drills ' +
+    'them so that none of them falls the way he did: hop on the beat, charge on the fourth, keep the ' +
+    'row. He will not hear that they fall anyway. He drills louder.'
+  ],
+
+  'e:u5s': [
+    null,
+
+    'the last room up the light is a street. ~~more lamps~~ eight. you\'ll want more.',
+
+    'It puts lamps out. It does it carefully, one at a time, and waits until each is fully dark ' +
+    'before it moves on.\n\nIt is not afraid of the light. It is tidying. Somebody told it the street ' +
+    'was finished, and a finished street does not need lamps.'
+  ],
+
+  'e:u5g': [
+    null,
+
+    'in the dark it\'s untouchable. ~~bug~~ on purpose. only the eyes show. look for the eyes.',
+
+    'It is what is left of the day when the light has gone. It does not attack the light. It waits ' +
+    'beside it.\n\nIn the lamp it is small and slow and can be ended. Out of it, it is the whole ' +
+    'street.'
+  ],
+
+  'b:u5L': [
+    null,
+
+    'he puts out a lamp and hangs a bell on his belt for it. ~~cap the bells~~ i stopped counting ' +
+    'the bells.',
+
+    'He believes he is being kind. Every lamp he puts out is a day ended before it can go wrong, and ' +
+    'he has never once been asked to stop.\n\nHe carries a dead bell on his belt for every one. He is ' +
+    'very heavy now. He thinks that is what kindness weighs.'
   ]
 };
 
@@ -4912,6 +5392,7 @@ function spawnEnemy(type, x, y, opts = {}) {
   if (type === 'sheet') hlSpawned(e, opts);   // ALL HALLOWS: what is under a sheet, and a sheet the size of it
   if (type === 'risen' || type === 'gravedigger') hlYardSpawned(e, opts);   // and THE YARD: a risen's gun and grave, the errand's digger
   enemies.push(e);
+  if (SPEC[type]) specInit(e);           // LONG RUNS: a specialist sets itself up
   if (hackBy) hackKin(e);                // called up by one of yours: kin
   tale('spawn', e);                      // FORGOTTEN TALES: a fight's clock starts, read only
   return e;
@@ -5133,7 +5614,12 @@ function lanceTick(dt, proc, segs, ox, oy) {
       if (P.laserCrit)  dps *= P.critMult;
       // silent: a number every frame is unreadable, so they come on the proc beat
       const hp0 = e.hp;
-      damageEnemy(e, dps * dt, false, ox, oy, { silent: true, noChain: true });
+      /* The pulse frame is the lance's aimed hit: the cards that read a
+         direct hit (Erasure, Suppression) or a critical one (Spallation) see
+         it there, once per pulse, instead of never. */
+      damageEnemy(e, dps * dt, false, ox, oy,
+                  proc ? { silent: true, noChain: true, direct: true, critHit: P.laserCrit }
+                       : { silent: true, noChain: true });
       const dealt = Math.max(0, hp0 - e.hp);
       // the rite is where the meter is learned, so it fills there too — it
       // is the win condition of the last sequence, not a reward for it
@@ -5397,8 +5883,14 @@ const bladeChainHold = () => CHAIN_HOLD * gearStat('combo') * (gearOn('metro') ?
 /* One ordinary swing, before a body or a crit has had its say, and with the
    chain on it — the unit a lunge, a batted bomber and a counter are all
    measured in. */
-const bladeSwingDmg = () => P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul() * rewardShotMul()
-                          * bladeChainMul() * roninVowMul();   // RONIN's V: the vow, or the broken minute
+const bladeBaseDmg = () => P.dmg * BLADE_DMG * gearStat('dmg') * stanceMul()
+                         * bladeChainMul() * roninVowMul();   // RONIN's V: the vow, or the broken minute
+const bladeSwingDmg = () => bladeBaseDmg() * rewardShotMul();
+/* What the swing in hand is worth. Cold Barrel and Blink Charge are spent by
+   onPlayerShot as the swing starts, but the edge only lands frames later —
+   reading rewardShotMul() at the hit found them already gone. So the swing
+   takes its multiplier with it (P.swingShot, set in bladeStart). */
+const bladeSwungDmg = () => bladeBaseDmg() * (P.swingShot || 1);
 /* How long a perfect parry holds the room: one figure for the trigger, the
    overlay and the card. */
 const bladeStillT = () => STILL_T * (gearOn('still') ? 1.8 : 1);
@@ -5421,6 +5913,7 @@ function bladeStart() {
   P.swingReach = bladeReach() + (fin ? FIN_REACH : 0);
   P.swingCut = 0;                        // how many bodies this swing found
   if (P.riposte > 0) P.riposte--;
+  P.swingShot = rewardShotMul();        // before onPlayerShot spends it
   zTwinSwing();                          // GEMINI: the double swings when you do
 
   onPlayerShot(P.x + Math.cos(P.ang) * bladeReach() * 0.6,
@@ -5480,7 +5973,7 @@ function updateBlade(dt) {
     for (const c of cages) {
       if (c.swungBy === P.swingId || !cageCrossed(c, P.x, P.y, tx, ty)) continue;
       c.swungBy = P.swingId;
-      cageChew(c, bladeSwingDmg() * (P.swingFin ? FIN_DMG * gearStat('fin') : 1), tx, ty);
+      cageChew(c, bladeSwungDmg() * (P.swingFin ? FIN_DMG * gearStat('fin') : 1), tx, ty);
     }
   }
   /* ROOT's characters, by the same band: the edge cuts one it passes over. */
@@ -5534,7 +6027,7 @@ function bladeHit(e, dist, how) {
     return;
   }
   const crit = simRand() < bladeCrit();
-  let dmg = bladeSwingDmg() * (lunge ? LUNGE_DMG : 1);
+  let dmg = lunge ? bladeSwingDmg() * LUNGE_DMG : bladeSwungDmg();
   if (fin) dmg *= FIN_DMG * gearStat('fin');
   if (crit) dmg *= bladeCritM();
   bladeDeal(e, dmg, crit, P.x, P.y);
@@ -5608,6 +6101,10 @@ function bladeHit(e, dist, how) {
     if (gearOn('echo') && !e.dead)
       bladeEchoes.push({ id: e.id, t: 0.14, dmg: dmg * 0.6 });
   }
+  /* Echo Chamber on a blade: the swing, not a bullet out of the hilt. Every
+     body it cut is cut again a beat later (rewardTick's bolt is skipped). */
+  if (P.echo && !lunge && !e.dead)
+    bladeEchoes.push({ id: e.id, t: 0.18, dmg: dmg * 0.55 * P.echo });
 }
 
 /* ------------------------------ the struck reel -----------------------------
@@ -6055,7 +6552,10 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   if (P.hlGhost && !opts.enemy && !opts.hacked) dmg *= GHOST_DMG;               // STILL HERE: a ghost hits half as hard
   dmg *= (e.vuln || 1);        // stunned enemies take extra
   if (e.woundT > 0) dmg *= WOUND_MUL;   // RONIN's DEEP WOUND: see RONIN'S KIT
-  dmg *= rewardTargetMul(e);   // brands, tags, conduction, slipknot marks
+  // brands, tags, conduction, slipknot marks — yours, so never on their fire
+  // landing on one of your bodies (THE HACKER's army took +105% from Brand III)
+  if (!e.hacked) dmg *= rewardTargetMul(e);
+  if (e.spec) dmg = specTakes(e, dmg, opts);   // LONG RUNS: what a specialist is good at, and open to
   if (!opts.enemy && !opts.hacked && P.zs) dmg *= zDmgMul(e);   // THE PLANETARIUM
   if (annotated()) dmg *= 1.5; // you know exactly where to put it
   /* ROOT's player.upgrades.clear(): set by its fight and, until this line,
@@ -6162,12 +6662,13 @@ function damageEnemy(e, dmg, crit, srcX, srcY, opts = {}) {
   }
   // a direct hit is one you aimed: not a poison tick, a leak or a field — and
   // not their fire landing on one of yours
-  if (!e.hacked) onRewardHit(e, crit, !opts.silent);
+  // (the lance is silent every frame, so it names its pulse frame: opts.direct, opts.critHit)
+  if (!e.hacked) onRewardHit(e, crit || !!opts.critHit, opts.direct || !opts.silent);
   if (e.hp <= 0) {
     const excess = Math.min(-e.hp, e.maxHp * 0.6);
     if (taleFull) tale('one', e);
     killEnemy(e, a);
-    if (P.overkill && excess > 1)
+    if (P.overkill && excess > 1 && !e.hacked)   // their kill on one of yours is not your overkill
       explode(e.x, e.y, 66 + 28 * P.overkill, excess * 0.45 * P.overkill, '#fcd34d');
   }
 }
@@ -6335,6 +6836,7 @@ function killBody(e, ang) {
       }
     }
   }
+  if (e.spec) specPay(e);                // LONG RUNS: a specialist pays like one
   if (P.lifesteal && simRand() < P.lifesteal) {
     P.hp = Math.min(P.maxHp, P.hp + 3);
     floatText(P.x, P.y - 22, '+3', COL.hp, 13);
@@ -6554,8 +7056,8 @@ function reviveOrDie() {
       return;
     }
     if (zGoldenBull()) return;           // TAURUS III: paid for in credits
-    if (P.deadman && !P.brakeUsed) {
-      P.brakeUsed = true; P.brakeT = 2;
+    if (P.deadman && (P.brakeUsed | 0) < P.deadman) {   // once a wave at I, twice at II
+      P.brakeUsed = (P.brakeUsed | 0) + 1; P.brakeT = 2;
       P.hp = Math.max(1, P.maxHp * 0.12);
       P.iframe = 2.0;
       banner('DEADMAN BRAKE', '#67e8f9', 2.0);
@@ -6590,6 +7092,433 @@ function reviveOrDie() {
     if (coopCanDown()) { hostDown(); return; }
     if (PILOTS.length > 1) banner('BOTH DOWN', '#f87171', 2.6);
     P.hp = 0; gameOver();
+}
+
+/* ===========================================================================
+   LONG RUNS: THE SPECIALISTS (19 Nov 2026)
+   Past the first loop a build is maxed and health only multiplies (x151,
+   then x301), so the room had settled into one answer: a corner, with the
+   gun pointed out of it, for as long as the wave took. These are the second
+   answer. From wave 26 (LONG_FROM) every ordinary wave sends specialists:
+   one in the second loop, two in the third, three after that. Each is a
+   mini-boss built around one thing it is very good at and open to what it is
+   not, and it says both as it arrives, so the answer is never a guess:
+
+     AEGIS      turns aside every bullet that comes at its face, and throws
+                some of them back. Its back is bare, and whatever does reach
+                it (a beam, a blade, a blast, your army, a round from behind)
+                lands at AEGIS_OPEN.
+     BASTION    no single hit takes more than a sliver of it (dmgCap): heavy
+                rounds and finishers are wasted on it, a stream of small hits
+                is not. It charges; sidestep it into a wall and it cracks
+                open, the cap off and BASTION_OPEN on top.
+     LONGWATCH  a sniper. Hit from far off it shrugs most of it off
+                (LW_FAR_MUL past LW_FAR); close in it takes LW_CLOSE_MUL, and
+                it blinks away if you stay on it.
+     LEGION     a core inside a ring of cells. While four or more stand the
+                core takes a fifth of everything; a blast, a chain, a pierce
+                or a sweep strips the ring. It grows a cell back every few
+                seconds.
+
+   And a long wave keeps pace with its size (longPace): a wave with more to
+   send sends it faster, so a big wave is a busy one rather than a slow one.
+   The first loop plays exactly as it did. Not in boss waves, PvP, a rush, an
+   event area, the rooms up the light, or a challenge that names its spawns.
+
+   They have no codex entry yet (Codex.see skips them), on purpose: an entry
+   is owed for a full codex, and nobody who has filled theirs should find it
+   unfilled by something only the second loop sends.
+   ========================================================================= */
+const LONG_FROM = 26;                  // the first wave of the second loop
+const LONG_REF = 160;                  // about what wave 25 sends: a wave twice that size spawns twice as fast
+const LONG_PACE_MAX = 3;
+const SPEC = {
+  aegis:     { n: 'AEGIS',     says: 'TURNS YOUR BULLETS  ·  GET BEHIND IT, OR HIT IT WITH ANYTHING ELSE' },
+  bastion:   { n: 'BASTION',   says: 'NO SINGLE HIT TAKES MUCH  ·  MANY SMALL ONES DO  ·  DODGE IT INTO A WALL' },
+  longwatch: { n: 'LONGWATCH', says: 'SHRUGS OFF FIRE FROM AFAR  ·  CLOSE THE DISTANCE' },
+  legion:    { n: 'LEGION',    says: 'SHIELDED BY ITS CELLS  ·  BREAK THE RING' }
+};
+const SPEC_KEYS = Object.keys(SPEC);
+const AEGIS_ARC = 1.35, AEGIS_TURN = 0.8, AEGIS_OPEN = 1.5, AEGIS_REFL_CD = 0.12;
+const BASTION_CAP = 0.006, BASTION_WIND = 1.0, BASTION_RUSH = 920, BASTION_CRACK_T = 3.0, BASTION_OPEN = 1.6;
+const LW_WANT = 660, LW_FAR = 480, LW_FAR_MUL = 0.35, LW_CLOSE = 300, LW_CLOSE_MUL = 1.8;
+const LW_AIM = 1.25, LW_LOCK = 0.3, LW_STAY = 2.8, LW_BLINK_CD = 7, LW_SHOT_SPD = 980, LW_SHOT_MUL = 1.25;
+const LEGION_CELLS = 8, LEGION_REGROW = 4, LEGION_SPIN = 1.3;
+
+let waveBudget0 = 0;                   // what this wave set out to send (longPace, the specialists' timing)
+let specDue = [];                      // this wave's specialists still to come: the share of the wave sent before each
+let specLast = '';                     // the last one sent, so two in a row differ
+
+function longOn() {
+  return wave >= LONG_FROM && !PVP && !rushOn() && !hlAreaOn() && !chalSwarm() && !stage.up && !upIn();
+}
+
+/* How much faster this wave sends than it would have: its size against
+   LONG_REF, so every wave's sending takes about as long whatever it holds. */
+function longPace() {
+  if (wave < LONG_FROM || bossAlive || !waveBudget0) return 1;
+  return clamp(waveBudget0 / LONG_REF, 1, LONG_PACE_MAX);
+}
+
+// at a wave's start (startWave): what it will send, and when its specialists come
+function longWaveStart(boss) {
+  waveBudget0 = boss ? 0 : spawnBudget;
+  specDue.length = 0;
+  if (boss || !longOn() || waveBudget0 <= 0) return;
+  const n = Math.min(3, waveLoop(wave));             // 1 in the second loop, 2 in the third, 3 after
+  for (let i = 0; i < n; i++) specDue.push(0.2 + 0.6 * (i + 0.5) / n);
+}
+
+// every frame of a wave (updateWaves): one comes once its share of the wave is out
+function longSpecTick() {
+  if (!specDue.length || waveBudget0 <= 0 || bossAlive) return;
+  const sent = 1 - Math.max(0, spawnBudget) / waveBudget0;
+  if (sent < specDue[0]) return;
+  specDue.shift();
+  specSpawn();
+}
+
+function specSpawn(k) {
+  if (!k) {
+    k = SPEC_KEYS[simRndi(SPEC_KEYS.length)];
+    if (k === specLast) k = SPEC_KEYS[(SPEC_KEYS.indexOf(k) + 1 + simRndi(SPEC_KEYS.length - 1)) % SPEC_KEYS.length];
+  }
+  specLast = k;
+  const e = spawnRing(k, { elite: false });   // spawnEnemy sets it up (specInit)
+  banner(SPEC[k].n, ETYPE[k].col, 3.2, SPEC[k].says);
+  Audio_.boss();
+  return e;
+}
+
+function specInit(e) {
+  e.spec = e.type;
+  e.ang = Math.atan2(P.y - e.y, P.x - e.x);
+  switch (e.type) {
+    case 'aegis':
+      e.reflCd = 0; e.deflFx = 0;
+      break;
+    case 'bastion':
+      e.dmgCap = e.maxHp * BASTION_CAP;
+      e.state = 0; e.atkT = simRnd(2.4, 1.4); e.crackT = 0; e.chargeA = e.ang;
+      break;
+    case 'longwatch':
+      e.state = 0; e.atkT = simRnd(2.2, 1.2); e.aimA = e.ang; e.closeT = 0; e.blinkCd = 0;
+      break;
+    case 'legion':
+      e.cellN = LEGION_CELLS; e.cellT = 0;
+      for (let k = 0; k < LEGION_CELLS; k++) legionCell(e, k * TAU / LEGION_CELLS);
+      break;
+  }
+}
+
+function legionCell(h, a) {
+  const R = h.r + 46;
+  const c = spawnEnemy('cell', clamp(h.x + Math.cos(a) * R, 40, WORLD.w - 40),
+                               clamp(h.y + Math.sin(a) * R, 40, WORLD.h - 40), { elite: false });
+  c.host = h; c.orbA = a;
+  ringFx(c.x, c.y, 2, 24, ETYPE.cell.col, 0.3, 2);
+  return c;
+}
+
+/* What reaches a specialist, once your cards have had their say (damageEnemy).
+   Their fire on one of yours is only a body being hit. */
+function specTakes(e, dmg, opts) {
+  if (e.hacked || opts.enemy) return dmg;
+  switch (e.type) {
+    case 'aegis':
+      return dmg * AEGIS_OPEN;               // anything at all that got past the face
+    case 'bastion':
+      return e.crackT > 0 ? dmg * BASTION_OPEN : dmg;   // and dmgCap does the rest
+    case 'longwatch': {
+      if (opts.hacked) return dmg;           // your army fights it where it stands
+      const far = len(P.x - e.x, P.y - e.y);
+      if (far > LW_FAR) {
+        if (rnd() < 0.03) floatText(e.x, e.y - e.r - 14, 'TOO FAR', '#94a3b8', 11, -30);
+        return dmg * LW_FAR_MUL;
+      }
+      return far < LW_CLOSE ? dmg * LW_CLOSE_MUL : dmg;
+    }
+    case 'legion':
+      if (e.cellN >= 4) {
+        if (rnd() < 0.03) floatText(e.x, e.y - e.r - 14, 'SHIELDED', '#94a3b8', 11, -30);
+        return dmg * 0.2;
+      }
+      return dmg * (e.cellN > 0 ? 0.6 : 1.4);
+  }
+  return dmg;
+}
+
+/* AEGIS's face (updateBullets): a round that comes at it is turned aside, and
+   every so often one is thrown back at whoever fired it. Your army's rounds
+   are stopped and not returned, as PRISM does. */
+function aegisTurns(e, b) {
+  if (annotated()) return false;            // the book reads past it
+  const inc = Math.atan2(b.py - e.y, b.px - e.x);
+  const off = Math.abs(((inc - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI);
+  if (off >= AEGIS_ARC) return false;
+  e.deflFx = 0.18;
+  burst(b.x, b.y, 4, '#dbeafe', 200, 2.2, 0.24);
+  if (!b.hacked && e.reflCd <= 0) {
+    e.reflCd = AEGIS_REFL_CD;
+    const back = Math.atan2(P.y - e.y, P.x - e.x) + simRnd(0.3, -0.3);
+    ebullets.push({ x: e.x + Math.cos(back) * (e.r + 8), y: e.y + Math.sin(back) * (e.r + 8),
+                    vx: Math.cos(back) * 360, vy: Math.sin(back) * 360,
+                    r: 6, dmg: e.dmg * 0.6, life: 3.2, col: '#bfdbfe' });
+    Audio_.tone(1250, 0.04, 'sine', 0.04, 700);
+  }
+  return true;
+}
+
+function lwBlink(e, TG) {
+  ringFx(e.x, e.y, e.r, e.r + 60, e.col, 0.35, 3);
+  burst(e.x, e.y, 14, e.col, 230, 3, 0.4);
+  const a = Math.atan2(e.y - TG.y, e.x - TG.x) + simRnd(0.9, -0.9);
+  e.x = clamp(TG.x + Math.cos(a) * 760, arena.x0 + 60, arena.x1 - 60);
+  e.y = clamp(TG.y + Math.sin(a) * 760, arena.y0 + 60, arena.y1 - 60);
+  e.vx = 0; e.vy = 0;
+  e.closeT = 0; e.blinkCd = LW_BLINK_CD; e.state = 0; e.atkT = 1.4;
+  ringFx(e.x, e.y, 4, e.r + 50, e.col, 0.4, 3);
+  Audio_.tone(680, 0.12, 'sine', 0.08, 190);
+}
+
+// their scripts (updateEnemies), aimed at TG: you, or what one of yours is fighting
+function specAI(e, dt, ux, uy, d, sp, TG) {
+  const toward = Math.atan2(uy, ux);
+  switch (e.type) {
+    case 'aegis': {
+      // walks you down behind its face, and turns slowly: the way past it is round
+      const push = d < 230 ? -0.4 : 1;
+      steer(e, ux * sp * push, uy * sp * push, 1.6, dt);
+      e.ang = angLerp(e.ang, toward, 1 - Math.exp(-AEGIS_TURN * dt));
+      if (e.reflCd > 0) e.reflCd -= dt;
+      if (e.deflFx > 0) e.deflFx -= dt;
+      e.cd -= dt;
+      if (e.cd <= 0 && d < 720) {
+        e.cd = 2.4;
+        for (let k = -2; k <= 2; k++) eshoot(e, e.ang + k * 0.17, 250, e.dmg * 0.8, 7);
+      }
+      break;
+    }
+    case 'bastion': {
+      if (e.crackT > 0) {                    // cracked on a wall: open, and going nowhere
+        e.crackT -= dt;
+        e.vx *= Math.pow(0.02, dt); e.vy *= Math.pow(0.02, dt);
+        if (e.crackT <= 0) { e.dmgCap = e.maxHp * BASTION_CAP; e.state = 0; e.atkT = simRnd(4.5, 3); }
+        break;
+      }
+      if (e.state === 0) {                   // walking it down
+        steer(e, ux * sp, uy * sp, 1.4, dt);
+        e.ang = angLerp(e.ang, toward, 1 - Math.exp(-3 * dt));
+        e.atkT -= dt;
+        if (e.atkT <= 0 && d < 950) { e.state = 1; e.atkT = BASTION_WIND; e.chargeA = toward; }
+      } else if (e.state === 1) {            // the wind-up: it aims, and the last of it is committed
+        e.atkT -= dt;
+        e.vx *= Math.pow(0.05, dt); e.vy *= Math.pow(0.05, dt);
+        if (e.atkT > 0.3) e.chargeA = angLerp(e.chargeA, toward, 1 - Math.exp(-6 * dt));
+        e.ang = e.chargeA;
+        if (e.atkT <= 0) {
+          e.state = 2; e.atkT = 1.7;
+          Audio_.noise(0.3, 0.12, 2400, 300, 3);
+        }
+      } else {                               // the charge, in a straight line, until something stops it
+        e.atkT -= dt;
+        e.vx = Math.cos(e.chargeA) * BASTION_RUSH; e.vy = Math.sin(e.chargeA) * BASTION_RUSH;
+        if (rnd() < 0.8) spawnPart(e.x, e.y, rnd(50, -50), rnd(50, -50), 3.4, e.col, 0.3, 0.9);
+        const nx = e.x + e.vx * dt, ny = e.y + e.vy * dt;
+        if (nx < arena.x0 + e.r + 1 || nx > arena.x1 - e.r - 1 ||
+            ny < arena.y0 + e.r + 1 || ny > arena.y1 - e.r - 1) {
+          e.crackT = BASTION_CRACK_T; e.dmgCap = undefined;
+          e.vx = 0; e.vy = 0; e.state = 0;
+          floatText(e.x, e.y - e.r - 18, 'CRACKED', '#fca5a5', 17);
+          burst(e.x, e.y, 26, e.col, 320, 3.4, 0.5);
+          ringFx(e.x, e.y, e.r, e.r * 3, '#fca5a5', 0.4, 4);
+          shakeAt(e.x, e.y, 0.5);
+          Audio_.boom();
+        } else if (e.atkT <= 0) { e.state = 0; e.atkT = simRnd(3.5, 2.2); }
+      }
+      break;
+    }
+    case 'longwatch': {
+      // keeps the room between you, drifting side to side
+      e.wob += dt * 0.6;
+      const push = d < LW_WANT - 80 ? -1 : (d > LW_WANT + 120 ? 0.8 : 0);
+      const side = Math.sin(e.wob) > 0 ? 0.55 : -0.55;
+      const slow = e.state === 1 ? 0.35 : 1;  // it steadies to take the shot
+      steer(e, (ux * push - uy * side) * sp * slow, (uy * push + ux * side) * sp * slow, 2.2, dt);
+      if (e.blinkCd > 0) e.blinkCd -= dt;
+      e.closeT = d < LW_CLOSE ? e.closeT + dt : Math.max(0, e.closeT - dt * 0.5);
+      if (e.closeT > LW_STAY && e.blinkCd <= 0) { lwBlink(e, TG); break; }
+      if (e.state === 0) {
+        e.ang = toward;
+        e.atkT -= dt;
+        if (e.atkT <= 0 && d < 1500) { e.state = 1; e.atkT = LW_AIM; e.aimA = toward; }
+      } else {
+        e.atkT -= dt;
+        if (e.atkT > LW_LOCK) e.aimA = angLerp(e.aimA, toward, 1 - Math.exp(-5 * dt));
+        e.ang = e.aimA;
+        if (e.atkT <= 0) {
+          eshoot(e, e.aimA, LW_SHOT_SPD, e.dmg * LW_SHOT_MUL, 8);
+          e.state = 0; e.atkT = simRnd(3.4, 2.4);
+          Audio_.tone(1400, 0.08, 'sawtooth', 0.07, 300);
+        }
+      }
+      break;
+    }
+    case 'legion': {
+      const push = d < 320 ? -0.6 : (d > 480 ? 0.8 : 0);
+      steer(e, (ux * push - uy * 0.3) * sp, (uy * push + ux * 0.3) * sp, 1.8, dt);
+      e.ang += dt * 0.5;
+      let n = 0;
+      for (const o of enemies) if (o.host === e && !o.dead && !o.hacked) n++;
+      e.cellN = n;
+      e.cellT += dt;
+      if (n < LEGION_CELLS && e.cellT >= LEGION_REGROW && !e.hacked) { e.cellT = 0; legionCell(e, simRnd(TAU)); }
+      e.cd -= dt;
+      if (e.cd <= 0 && d < 820) {
+        e.cd = 3.0;
+        for (let k = 0; k < 10; k++) eshoot(e, e.ang + k * TAU / 10, 170, e.dmg * 0.7, 7);
+      }
+      break;
+    }
+    case 'cell': {
+      const h = e.host;
+      if (e.hacked || !h || h.dead || h.hacked) {   // loose: a mite with nowhere to be
+        if (h) e.host = null;
+        e.wob += dt * 9;
+        steer(e, (ux + Math.cos(e.wob) * 0.5) * sp, (uy + Math.sin(e.wob) * 0.5) * sp, 6, dt);
+        e.ang = Math.atan2(e.vy, e.vx);
+        break;
+      }
+      e.orbA += dt * LEGION_SPIN;
+      const R = h.r + 46;
+      const tx = h.x + Math.cos(e.orbA) * R, ty = h.y + Math.sin(e.orbA) * R;
+      steer(e, (tx - e.x) * 9 + h.vx, (ty - e.y) * 9 + h.vy, 12, dt);
+      e.ang += dt * 4;
+      break;
+    }
+  }
+}
+
+// what one pays, on top of the ordinary kill (killBody)
+function specPay(e) {
+  drops.push(mkDrop(e.x, e.y, 'heal'));
+  const each = Math.max(1, Math.round((2 + wave * 0.5) * P.credMul * hardCred() * zCredMul()));
+  for (let i = 0; i < 6; i++) {
+    const a = simRnd(TAU), s = simRnd(220, 80);
+    const c = mkDrop(e.x, e.y, 'credit');
+    c.vx = Math.cos(a) * s; c.vy = Math.sin(a) * s; c.v = each;
+    drops.push(c);
+  }
+  if (isBlade()) gearDrop(e.x + simRnd(40, -40), e.y + simRnd(40, -40), 1);
+  floatText(e.x, e.y - e.r - 22, SPEC[e.spec].n + ' DOWN', e.col, 18);
+}
+
+/* ---- drawing: what each is good at is drawn where it is good at it ---- */
+// the tells reach past the body, so they are drawn whether it is on screen or not
+function specDrawTells() {
+  for (const e of enemies) {
+    if (e.dead || !e.spec || e.state !== 1) continue;
+    if (e.type === 'bastion') {
+      ctx.save();
+      ctx.globalAlpha = 0.3 + Math.sin(e.t * 24) * 0.15;
+      ctx.strokeStyle = e.col; ctx.lineWidth = e.r * 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(e.x, e.y);
+      ctx.lineTo(e.x + Math.cos(e.chargeA) * 1600, e.y + Math.sin(e.chargeA) * 1600);
+      ctx.stroke();
+      ctx.globalAlpha = 0.85; ctx.lineWidth = 2; ctx.strokeStyle = '#fef3c7';
+      ctx.setLineDash([16, 12]); ctx.lineDashOffset = -uiTime * 60;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y);
+      ctx.lineTo(e.x + Math.cos(e.chargeA) * 1600, e.y + Math.sin(e.chargeA) * 1600);
+      ctx.stroke();
+      ctx.restore();
+    } else if (e.type === 'longwatch') {
+      const k = 1 - clamp(e.atkT / LW_AIM, 0, 1), locked = e.atkT <= LW_LOCK;
+      ctx.save();
+      ctx.strokeStyle = locked ? '#ffffff' : rgba(e.col, 0.35 + 0.55 * k);
+      ctx.lineWidth = locked ? 2.8 : 1.3 + 1.4 * k;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y);
+      ctx.lineTo(e.x + Math.cos(e.aimA) * 2400, e.y + Math.sin(e.aimA) * 2400);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+function specDraw(e, ea) {
+  const lit = e.hacked ? HACK_COL : e.col;
+  ctx.save();
+  ctx.globalAlpha = ea;
+  ctx.lineCap = 'butt';
+  const arcAt = (R, a0, a1) => { ctx.beginPath(); ctx.arc(e.x, e.y, R, a0, a1); ctx.stroke(); };
+  if (e.type === 'aegis') {
+    const R = e.r + 12, A = AEGIS_ARC, hot = clamp((e.deflFx || 0) / 0.18, 0, 1);
+    ctx.strokeStyle = 'rgba(8,15,30,0.85)'; ctx.lineWidth = 12; arcAt(R, e.ang - A, e.ang + A);
+    ctx.strokeStyle = rgba('#93c5fd', 0.6 + hot * 0.4); ctx.lineWidth = 6; arcAt(R, e.ang - A, e.ang + A);
+    ctx.strokeStyle = '#eff6ff'; ctx.lineWidth = 1.4;
+    for (let k = 0; k <= 6; k++) {
+      const a = e.ang - A + 2 * A * k / 6;
+      ctx.beginPath();
+      ctx.moveTo(e.x + Math.cos(a) * (R - 6), e.y + Math.sin(a) * (R - 6));
+      ctx.lineTo(e.x + Math.cos(a) * (R + 6), e.y + Math.sin(a) * (R + 6));
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba('#bfdbfe', 0.12 + hot * 0.4); ctx.lineWidth = 20; arcAt(R, e.ang - A, e.ang + A);
+    ctx.globalCompositeOperation = 'source-over';
+    // the bare back, marked: that is the way in
+    ctx.strokeStyle = rgba('#fca5a5', 0.35 + Math.sin(uiTime * 4) * 0.15); ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]); arcAt(e.r + 7, e.ang + A + 0.2, e.ang + TAU - A - 0.2); ctx.setLineDash([]);
+  } else if (e.type === 'bastion') {
+    const open = e.crackT > 0, gap = open ? 8 + Math.sin(uiTime * 22) * 2 : 0;
+    for (let k = 0; k < 8; k++) {
+      const a0 = e.ang + k * TAU / 8 + 0.07, a1 = a0 + TAU / 8 - 0.14;
+      ctx.strokeStyle = 'rgba(20,12,2,0.9)'; ctx.lineWidth = 10; arcAt(e.r + 6 + gap, a0, a1);
+      ctx.strokeStyle = open ? '#fca5a5' : lit; ctx.lineWidth = 4; arcAt(e.r + 6 + gap, a0, a1);
+    }
+    if (open) {
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(e.x, e.y, e.r * 1.8, '#ef4444', 0.4 + Math.sin(uiTime * 18) * 0.12);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  } else if (e.type === 'longwatch') {
+    // the scope
+    ctx.strokeStyle = '#fdf4ff'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.5, 0, TAU); ctx.stroke();
+    for (let k = 0; k < 4; k++) {
+      const a = e.ang + k * Math.PI / 2;
+      ctx.beginPath();
+      ctx.moveTo(e.x + Math.cos(a) * e.r * 0.25, e.y + Math.sin(a) * e.r * 0.25);
+      ctx.lineTo(e.x + Math.cos(a) * e.r * 0.8, e.y + Math.sin(a) * e.r * 0.8);
+      ctx.stroke();
+    }
+    ctx.fillStyle = e.state === 1 ? '#ffffff' : lit;
+    ctx.beginPath(); ctx.arc(e.x, e.y, 2.6, 0, TAU); ctx.fill();
+  } else if (e.type === 'legion') {
+    ctx.strokeStyle = rgba('#d9f99d', 0.3); ctx.lineWidth = 1.2;
+    for (const o of enemies) {
+      if (o.host !== e || o.dead || o.hacked) continue;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(o.x, o.y); ctx.stroke();
+    }
+    if (e.cellN >= 4) {
+      ctx.strokeStyle = rgba('#bef264', 0.45 + Math.sin(uiTime * 5) * 0.15); ctx.lineWidth = 2.4;
+      arcAt(e.r + 9, 0, TAU);
+    }
+  }
+  ctx.restore();
+  if (e.type === 'cell' || codexLiveOn) return;
+  // a name and a bar, so a mini-boss reads as one across the room
+  // (LEGION's sits above its ring of cells)
+  const w = 78, x = e.x - w / 2, y = e.y - e.r - (e.type === 'legion' ? 70 : 24);
+  ctx.save();
+  ctx.globalAlpha = ea;
+  ctx.textAlign = 'center';
+  ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+  ctx.fillStyle = lit;
+  ctx.fillText(SPEC[e.spec] ? SPEC[e.spec].n : '', e.x, y - 5);
+  ctx.fillStyle = 'rgba(2,6,23,0.8)'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
+  ctx.fillStyle = lit; ctx.fillRect(x, y, w * clamp(e.hp / e.maxHp, 0, 1), 4);
+  ctx.restore();
 }
 
 /* ------------------------------ wave manager -----------------------------
@@ -6686,7 +7615,7 @@ function startWave() {
      wave that could never resolve. A bossless sector runs an ordinary wave. */
   const bd = BOSSES[stage.boss];
   // THE WAY UP: a room apart may take a sector's boss wave (its module's sector hook); then that boss never comes
-  if (wave % 5 === 0 && bd && !stage.up && upSector()) { spawnT = 0; waveTimer = 0; return; }
+  if (wave % 5 === 0 && bd && !stage.up && upSector()) { longWaveStart(true); spawnT = 0; waveTimer = 0; return; }
   if (wave % 5 === 0 && bd) {
     bossAlive = true;
     banner(bd.name + '   INBOUND', bd.col);
@@ -6704,6 +7633,7 @@ function startWave() {
   }
   spawnT = 0;
   waveTimer = 0;
+  longWaveStart(bossAlive);              // LONG RUNS: its pace, and its specialists
 }
 
 function updateWaves(dt) {
@@ -6729,8 +7659,9 @@ function updateWaves(dt) {
     const batch = Math.min(spawnBudget, hlB ? 1 : 1 + simRndi(Math.min(4, 1 + wave / 3)));
     for (let i = 0; i < batch; i++) spawnRing(pickEnemyType());
     spawnBudget -= batch;
-    spawnT = hlB ? hlBossTrickle() : Math.max(0.24, 1.5 - wave * 0.05);
+    spawnT = hlB ? hlBossTrickle() : Math.max(0.24, 1.5 - wave * 0.05) / longPace();   // LONG RUNS: a big wave sends faster
   }
+  longSpecTick();                            // LONG RUNS: a specialist, once its share of the wave is out
   if (stage.deep && !nodesDone) return;      // the door is still held shut
   if (spawnBudget <= 0 && hlWaveThreats() === 0 && !bossAlive) {
     // the room is clear, so anyone on the floor gets back on their feet —
@@ -6738,7 +7669,7 @@ function updateWaves(dt) {
     coopReviveWave();
     onRewardWave();
     pilotsEach(() => zWave(shopPending));   // THE PLANETARIUM: the climb, interest, the tide's shields
-    if (P.deadman) P.brakeUsed = false;   // the brake is once a wave
+    if (P.deadman) P.brakeUsed = 0;       // the brake is once a wave (twice at II)
     const bonus = Math.round(50 * wave * hardScore());
     const cr = Math.round((12 + wave * 2.4) * P.credMul * hardCred());
     score += bonus; credits += cr;
@@ -6984,7 +7915,10 @@ function chipPool() {
    enemy once per tick however many lanes cover it, so a second emitter is
    nothing at all and Split Barrel is a flat −9% in exchange for nothing.
    CHIP_POOL already left them out; the ordinary shop was still selling them. */
-const LANCE_DEAD = ['multi', 'para'];
+/* Snapback and Boring Rounds act on a bullet in flight, and the lance has
+   none: they were dealt to EMBER (and by the Record Chip, whose reward
+   cards skip CHIP_POOL) and did nothing at all. */
+const LANCE_DEAD = ['multi', 'para', 'u_scatter', 'u_bulk'];
 
 /* And what cannot do anything for a swing — two different failures in one
    list. Most are written for a projectile that does not exist: Railshot pushes
@@ -6997,7 +7931,7 @@ const LANCE_DEAD = ['multi', 'para'];
    anywhere else would have banked a free +90% across three levels and called it
    a decision. It is struck out for being too good rather than for being dead. */
 const MELEE_DEAD = ['multi', 'para', 'pierce', 'ric', 'home', 'back', 'long',
-                    'frag', 'oc', 'pblank'];
+                    'frag', 'oc', 'pblank', 'u_scatter', 'u_bulk'];
 const weaponOK = u =>
   !(P.weapon === 'laser' && LANCE_DEAD.includes(u.id)) &&
   !(P.weapon === 'blade' && MELEE_DEAD.includes(u.id));
@@ -7057,7 +7991,7 @@ function gearShopItem(it) {
        does not already say. */
     desc: (slot ? slot.n + ': ' : '') + lines.slice(0, 3).join(' · '),
     cost: Math.round(PRICE[it.rar] * 1.15 * (1 + stageAbs * 0.15) * hardPrice()
-                     * (P.insider ? 0.65 : 1) * zShopMul()),
+                     * insiderMul() * zShopMul()),
   };
 }
 
@@ -7087,7 +8021,7 @@ function makeShopStock() {
       Codex.seeUpgrade(ch.id);           // shop stock counts too
       items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
         cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice()
-                         * (P.insider ? 0.65 : 1) * zShopMul()) });
+                         * insiderMul() * zShopMul()) });
     }
   }
   // TAURUS II, THE GOLDEN CALF: a fifth item, always a legendary
@@ -7101,7 +8035,7 @@ function makeShopStock() {
         const ch = lp[simRndi(lp.length)];
         Codex.seeUpgrade(ch.id);
         items.push({ kind: 'up', up: ch, name: upName(ch), desc: upDesc(ch), rar: ch.rar,
-          cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice() * (P.insider ? 0.65 : 1) * zShopMul()) });
+          cost: Math.round(PRICE[ch.rar] * (1 + stageAbs * 0.15) * hardPrice() * insiderMul() * zShopMul()) });
       }
     }
   }
@@ -32960,11 +33894,13 @@ const Codex = {
     Codex.g = new Set(Save.profile.codexG || []);
     Codex.dirty = false;
   },
-  see(set, k) {
+  see(set, k, force) {
     if (freeRun) return;                 // a sandbox writes nothing down
     if (!k) return;
-    if (set === 'e' && upSealed(k)) return;   // THE WAY UP's: never written down
-    if (set === 'e' && !CODEX_E[k] && !BOSSES[k]) return;   // nothing with no entry: DEAD GAME's decoys (ALL HALLOWS)
+    // THE WAY UP's: written down only where the codex has an entry for them (CODEX_UP), and a
+    // tyrant only once it has been felled (Tales.boss passes force): until then it is out of sight
+    if (set === 'e' && upSealed(k) && !CODEX_UP[k] && !force) return;
+    if (set === 'e' && !CODEX_E[k] && !BOSSES[k] && !CODEX_UP[k] && !force) return;   // nothing with no entry: DEAD GAME's decoys (ALL HALLOWS)
     if (RUN.codex && RUN.codex[set]) RUN.codex[set].add(k);   // the run's own copy: see RUN (gear is not in it)
     if (Codex[set].has(k)) return;
     Codex[set].add(k); Codex.dirty = true;
@@ -33014,16 +33950,16 @@ const Codex = {
   // what "filled" means: every ordinary enemy, every boss, every upgrade
   need() {
     // the event's bodies can only be met in October: never owed
-    const e = Object.keys(CODEX_E).filter(k => !HL_ETYPES[k]).length +
-              Object.keys(BOSSES).filter(k => !BOSSES[k].secret).length;
+    const e = Object.keys(CODEX_E).filter(k => codexOwed(k)).length +
+              Object.keys(BOSSES).filter(k => !BOSSES[k].secret && !BOSSES[k].up).length;
     return { e, u: UPGRADES.filter(x => !x.lock).length };
   },
   have(c = Codex) {
     const n = Codex.need();
     let e = 0;
-    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && c.e.has(k)) e++;
+    for (const k of Object.keys(CODEX_E)) if (codexOwed(k) && c.e.has(k)) e++;
     for (const k of Object.keys(BOSSES))
-      if (!BOSSES[k].secret && c.e.has(k)) e++;
+      if (!BOSSES[k].secret && !BOSSES[k].up && c.e.has(k)) e++;
     let u = 0;
     for (const x of UPGRADES) if (!x.lock && c.u.has(x.id)) u++;
     return { e, u, needE: n.e, needU: n.u };
@@ -33036,9 +33972,10 @@ const Codex = {
      other kind: every entry in every section, optional ones included, and the
      secret bosses too. Nothing in the game asks for this except him, once. */
   trulyFull(c = Codex) {
-    for (const k of Object.keys(CODEX_E)) if (!HL_ETYPES[k] && !c.e.has(k)) return false;
+    for (const k of Object.keys(CODEX_E)) if (codexOwed(k) && !c.e.has(k)) return false;
     for (const k of Object.keys(BOSSES))
-      if (BOSSES[k].endgame || HL_BOSSES[k]) { if (!c.e.has(k)) continue; }   // may not exist yet, or not this month
+      if (BOSSES[k].up) continue;   // THE WAY UP's: never owed
+      else if (BOSSES[k].endgame || HL_BOSSES[k]) { if (!c.e.has(k)) continue; }   // may not exist yet, or not this month
       else if (!c.e.has(k)) return false;
     for (const u of UPGRADES) if (!u.lock && !c.u.has(u.id)) return false;
     for (const m of MALWARE) if (!c.m.has(m.id)) return false;
@@ -33140,14 +34077,15 @@ const TALE_PEOPLE = [
   { id: 'shopkeeper', n: 'THE SHOPKEEPER', col: '#fbbf24', boss: 'shopkeeper',
     how: ['buy from him', 'defeat him', 'carry his day book to the end of a run'] },
   { id: 'onepointoh', n: 'ONE POINT OH',   col: '#e2e8f0', boss: 'onepointoh',
-    how: ['meet him', 'bring the record back to today', { held: 'held for VOIDRUNNER\'s rite' }] },
+    how: ['meet him', 'bring the record back to today', 'pass VOIDRUNNER\'s rite'] },
   { id: 'outsider',   n: 'THE OUTSIDER',   col: '#cbd5e1',
-    how: ['meet him', 'finish THE LOST SOUL', { held: 'held for a later book' }] },
+    how: ['meet him', 'finish THE LOST SOUL', 'empty THE FOUNDER\'s stands'] },
   { id: 'soul',       n: 'THE LOST SOUL',  col: '#93c5fd', hl: true,
     how: ['meet it', 'see it ascend a second time', 'see it go up'] }
 ];
 // the three awakenings, filed under their pilots
 const TALE_AWAKE = [
+  { id: 'runner', n: 'IMAGO',     col: '#67e8f9' },
   { id: 'hacker', n: 'SUPERUSER', col: '#fcd34d' },
   { id: 'ember',  n: 'OVERDRIVE', col: '#fb923c' },
   { id: 'melee',  n: 'RONIN',     col: '#f87171' }
@@ -33182,7 +34120,12 @@ const TALE_DEED_E = {
   poltergeist: { how: 'fell one before it lets go' },
   risen:     { how: 'fell one before it fires a shot' },
   gravedigger: { how: 'fell one from inside its own pit' },
-  bellringer: { how: 'fell one before it tolls' }
+  bellringer: { how: 'fell one before it tolls' },
+  // LONG RUNS: each beaten the way it is open to
+  aegis: { how: 'fell one from behind its face' },
+  bastion: { how: 'fell one while it is cracked' },
+  longwatch: { how: 'fell one from up close' },
+  legion: { how: 'fell one with its ring broken' }
 };
 // and of each boss: mastering it, one way per boss, picked to suit it
 const TALE_DEED_B = {
@@ -33208,13 +34151,16 @@ function talesPagesOf(en) {
   const k = en.ref;
   if (en.link) return P_;                 // a person's card in BOSSES: the pages are the person's
   if (en.kind === 'enemy') {
-    const d = TALE_DEED_E[k] || { how: 'a deed not yet named' };
-    P_.push({ how: 'meet it' }, { how: 'fell fifty of them', c: ['k:' + k, 50] }, d);
+    const up = CODEX_UP[k], n = talesFellN(k);
+    const d = up ? { how: 'fell one while ' + CODEX_UP[up.under].n + ' stands' } : TALE_DEED_E[k] || { how: 'a deed not yet named' };
+    P_.push({ how: 'meet it' }, { how: n === 10 ? 'fell ten of them' : 'fell fifty of them', c: ['k:' + k, n] }, d);
+  } else if (en.tyrant) {
+    // a tyrant (THE WAY UP's, kept in the vault): it is met by being felled
+    P_.push({ how: 'fell it' }, { how: 'fell it twice', c: ['k:' + k, 2] }, { how: 'fell it without being hit' });
   } else if (en.kind === 'boss') {
-    P_.push({ how: 'meet it' }, { how: TALE_BOSS_II[k] || 'defeat it' }, { how: TALE_DEED_B[k] || 'master it' });
+    P_.push({ how: 'meet it' }, { how: TALE_BOSS_II[k] || 'defeat it' }, { how: TALE_DEED_B[k] || (en.up ? 'defeat it without being hit' : 'master it') });
   } else if (en.kind === 'pilot') {
-    P_.push({ how: 'fly it' }, { how: 'clear THE VOID with it' },
-            k === 'runner' ? { held: 'its page is not written yet' } : { how: 'pass its rite' });
+    P_.push({ how: 'fly it' }, { how: 'clear THE VOID with it' }, { how: 'pass its rite' });
   } else if (en.kind === 'awake') {
     P_.push({ how: 'wake it' }, { how: 'use all four of its actives in one awakening' },
             { how: 'defeat a boss while awakened' });
@@ -33252,10 +34198,21 @@ function talesAll() {
   };
   for (const k of Object.keys(CODEX_E))
     mk('e:' + k, 'e', 'enemy', k, CODEX_E[k].n, ETYPE[k].col, { sides: ETYPE[k].sides, hl: !!HL_ETYPES[k] });
+  // THE WAY UP's, from the codex's own table: listed once met, never owed
+  for (const k of Object.keys(CODEX_UP)) if (CODEX_UP[k].kind === 'enemy')
+    mk('e:' + k, 'e', 'enemy', k, CODEX_UP[k].n, CODEX_UP[k].col, { sides: CODEX_UP[k].sides, up: true });
   for (const k of Object.keys(BOSSES)) {
+    if (BOSSES[k].up) continue;            // a module's: its entry, if it has one, is CODEX_UP's or the vault's
     const b = BOSSES[k], who = TALE_PEOPLE.find(x => x.boss === k);
     mk((who ? 'x:' : 'b:') + k, 'x', 'boss', k, b.name, b.col,
        { sides: b.sides, secret: !!b.secret, hl: !!HL_BOSSES[k], link: who ? 'n:' + who.id : null });
+  }
+  for (const k of Object.keys(CODEX_UP)) if (CODEX_UP[k].kind === 'boss')
+    mk('b:' + k, 'x', 'boss', k, CODEX_UP[k].n, CODEX_UP[k].col, { sides: CODEX_UP[k].sides, up: true });
+  // and the tyrants, whose every word is the vault's (Tales.vault): out of sight until felled
+  for (const key of Object.keys(Tales.vault)) {
+    const v = Tales.vault[key];
+    if (key.startsWith('b:')) mk(key, 'x', 'boss', key.slice(2), v.n, v.col, { sides: v.sides, up: true, tyrant: true });
   }
   for (const c of CHARS) {
     if (c.outside) continue;
@@ -33279,9 +34236,13 @@ function talesAll() {
 const talesEntry = key => (talesAll(), Tales.byKey.get(key) || null);
 // the entry a codex key (an enemy type or a boss id) is met as
 function talesMetKey(k) {
-  if (BOSSES[k]) { const who = TALE_PEOPLE.find(x => x.boss === k); return who ? 'n:' + who.id : 'b:' + k; }
+  if (CODEX_UP[k]) return (CODEX_UP[k].kind === 'boss' ? 'b:' : 'e:') + k;   // THE WAY UP's own
+  if (Tales.vault['b:' + k]) return 'b:' + k;                                 // a tyrant (the vault's)
+  if (BOSSES[k]) { if (BOSSES[k].up) return null; const who = TALE_PEOPLE.find(x => x.boss === k); return who ? 'n:' + who.id : 'b:' + k; }
   return CODEX_E[k] ? 'e:' + k : null;
 }
+// how many of a kind open its page II: ten of a specialist (LONG RUNS), fifty of anything else
+const talesFellN = k => (SPEC[k] ? 10 : 50);
 const talesSectorKey = def => (def && def.hl ? 'r:patch' : def && TALE_SECTOR[def.name] ? 's:' + TALE_SECTOR[def.name] : null);
 
 // the run's own bookkeeping, thrown away with the run
@@ -33313,6 +34274,7 @@ const Tales = {
   lines: [],             // pages opened mid-run, each waiting for its line low on the screen
   chapters: {},          // chapter id -> true, once the server says it is open
   sealed: {},            // entry key -> { c, t, x }: an opened sealed page, as the server handed it
+  vault: {},             // entry key -> { c, n, col, sides, p: [I, II, III] }: an entry whose every word is the vault's (the tyrants)
   asked: 0,
 
   dump() { return { p: Tales.p, r: Tales.r, n: Tales.n, m: Tales.m }; },
@@ -33408,6 +34370,8 @@ const Tales = {
     o('n:dev', 0, p.askedHarder || p.amalgamDone); o('n:dev', 1, p.amalgamDone);
     o('n:outsider', 0, p.outsiderIn);
     o('n:onepointoh', 0, p.opoMet); o('n:onepointoh', 1, p.opoDone);   // ONE POINT OH: met, and the record brought back
+    o('n:onepointoh', 2, aw('runner'));                                  // and VOIDRUNNER woken: the one who stayed, answered
+    o('n:outsider', 2, p.tribunalDone);                                  // the stands emptied: he walked out of them first
     o('b:unwritten', 1, p.trueEnd);
     o('b:amalgam', 1, p.amalgamDone); o('b:amalgam', 2, aw('ember'));
     o('b:root', 1, p.rootDone); o('b:root', 2, aw('hacker'));
@@ -33535,10 +34499,10 @@ const Tales = {
   // a body down, as the pilot it was resolved as
   kill(e, R) {
     const t = e.type;
-    if (t === 'boss' || !CODEX_E[t]) return;     // bosses are counted when they are defeated (Tales.boss)
+    if (t === 'boss' || !(CODEX_E[t] || (CODEX_UP[t] && CODEX_UP[t].kind === 'enemy'))) return;     // bosses are counted when they are defeated (Tales.boss)
     R.nk++;
     const n = Tales.add('k:' + t);
-    if (n >= 50) Tales.open('e:' + t, 1, true);
+    if (n >= talesFellN(t)) Tales.open('e:' + t, 1, true);
     const deed = () => Tales.open('e:' + t, 2, true);
     const dist = len(e.x - P.x, e.y - P.y);
     switch (t) {
@@ -33591,6 +34555,18 @@ const Tales = {
       case 'risen':    if (!e.hlFired && !(e.hlClimb > 0)) deed(); break;
       case 'gravedigger': if (hlInPit(P.x, P.y, e.id)) deed(); break;
       case 'bellringer': if (!e.hlTolls) deed(); break;
+      // LONG RUNS: each specialist, beaten the way it is open to
+      case 'aegis': {
+        const inc = Math.atan2(P.y - e.y, P.x - e.x);
+        if (Math.abs(((inc - e.ang + Math.PI) % TAU + TAU) % TAU - Math.PI) >= AEGIS_ARC) deed();   // from behind its face
+        break;
+      }
+      case 'bastion':   if (e.crackT > 0) deed(); break;
+      case 'longwatch': if (dist < LW_CLOSE) deed(); break;
+      case 'legion':    if (!(e.cellN > 0)) deed(); break;
+      // THE WAY UP's: felled while its room's own boss is standing
+      default:
+        if (CODEX_UP[t] && enemies.some(o => !o.dead && o.type === 'boss' && o.boss === CODEX_UP[t].under)) deed();
     }
     // what was under a sheet, felled inside a second of it tearing: the sheet's deed
     const tornAt = R.torn.get(e);
@@ -33600,13 +34576,25 @@ const Tales = {
   // a boss defeated: the run's, so both machines of a co-op run count it
   boss(e, R) {
     const k = e && e.boss;
-    if (!k || !BOSSES[k] || upSealed(k)) return;   // THE WAY UP's bosses are counted nowhere
+    if (!k || !BOSSES[k]) return;
+    // THE WAY UP's: a room's own boss (CODEX_UP) as any boss; a tyrant, written down now it has fallen
+    const tyrant = !!Tales.vault['b:' + k] || UP_AWAY.some(r => r.boss === k);
+    if (upSealed(k) && !CODEX_UP[k] && !tyrant) return;
     const f = R.fights[k];
     delete R.fights[k];
     const secs = f ? elapsed - f.t0 : 0;
-    Tales.add('k:' + k);
+    const kills = Tales.add('k:' + k);
     if (f) Tales.best('t:' + k, secs);
+    if (tyrant) {
+      Codex.see('e', k, true);
+      const tk = 'b:' + k;
+      Tales.open(tk, 0, true);
+      if (kills >= 2) Tales.open(tk, 1, true);
+      if (f && !f.hit) Tales.open(tk, 2, true);
+      return;
+    }
     const key = talesMetKey(k), mine = coopMine();
+    if (!key) return;
     if (key.startsWith('b:')) Tales.open(key, 1, true);
     const deed = c => { if (c) Tales.open(key, 2, true); };
     switch (k) {
@@ -33619,11 +34607,13 @@ const Tales = {
       case 'deadgame':    deed(f && !f.culls); break;
       case 'ragequit':    deed(f && !f.escapes); break;
       case 'shopkeeper':  Tales.open('n:shopkeeper', 1, true); break;
+      default: if (CODEX_UP[k]) deed(f && !f.hit);   // THE WAY UP's rooms' bosses: without being hit
     }
     if (e.virus) Tales.open('b:theother', 2, true);
     if (k === 'nullcore' && stage && stage.name === 'THE VOID' && !rushOn())
       Tales.open('p:' + mine.charId, 1, true);
-    const awake = mine.charId === 'hacker' ? mine.suT > 0
+    const awake = mine.charId === 'runner' ? mine.imT > 0
+                : mine.charId === 'hacker' ? mine.suT > 0
                 : mine.charId === 'ember' ? mine.ventT > 0 && mine.awake
                 : mine.charId === 'melee' ? mine.roninT > 0 : false;
     if (awake) Tales.open('a:' + mine.charId, 2, true);
@@ -33669,7 +34659,7 @@ const Tales = {
     catch (e) { /* a bad copy is no copy */ }
   },
   sealedTake(d) {
-    const open = {}, pages = {};
+    const open = {}, pages = {}, whole = {};
     const ch = d && typeof d.chapters === 'object' && d.chapters ? d.chapters : {};
     for (const id of Object.keys(ch).slice(0, 16)) {
       const c = ch[id];
@@ -33677,11 +34667,17 @@ const Tales = {
       open[id] = true;
       for (const k of Object.keys(c.pages).slice(0, 64)) {
         const v = c.pages[k];
-        if (typeof k === 'string' && k.length < 40 && v && typeof v.x === 'string')
+        if (typeof k !== 'string' || k.length >= 40 || !v) continue;
+        if (typeof v.x === 'string')
           pages[k] = { c: id, t: String(v.t || '').slice(0, 60), x: v.x.slice(0, 8000) };
+        // a whole entry: its three pages, and what the card needs to show it (THE WAY UP's tyrants)
+        else if (Array.isArray(v.p) && v.p.length && v.p.length <= 3 && v.p.every(x => typeof x === 'string'))
+          whole[k] = { c: id, n: String(v.n || k.slice(2)).slice(0, 40).toUpperCase(),
+                       col: /^#[0-9a-f]{6}$/i.test(v.col) ? v.col : '#e2e8f0',
+                       sides: clamp(v.sides | 0, 3, 12) || 8, p: v.p.map(x => x.slice(0, 8000)) };
       }
     }
-    Tales.chapters = open; Tales.sealed = pages;
+    Tales.chapters = open; Tales.sealed = pages; Tales.vault = whole;
     Tales.list = null;                     // a page IV may have arrived for an entry with no hint of one
   },
   async sealedAsk() {
@@ -41560,10 +42556,11 @@ function noteShopExit() {
 
 /* ------------------------------- banners --------------------------------- */
 let bannerText = '', bannerCol = '#fff', bannerT = 0, bannerMax = 2.2;
-function banner(t, c, dur = 2.2) {
+let bannerSub = '';                      // a smaller second line under it (LONG RUNS: what a specialist is weak to)
+function banner(t, c, dur = 2.2, sub = '') {
   // a body of yours does not get to announce its phases, or file you
   if (hackBy) return;
-  bannerText = t; bannerCol = c; bannerT = dur; bannerMax = dur;
+  bannerText = t; bannerCol = c; bannerT = dur; bannerMax = dur; bannerSub = sub;
 }
 
 /* --------------------------------- state --------------------------------- */
@@ -42150,6 +43147,7 @@ function resetGame() {
   libraryPortal = null; libraryBook = null; malwareOffer = null;
   gearNear = null; gearOfferDrop = null;
   bladeWaves.length = 0; bladeEchoes.length = 0;   // nothing of the last run in flight
+  waveBudget0 = 0; specDue.length = 0; specLast = ''; bannerSub = '';   // LONG RUNS
   unwritten = null; unwTears = []; unwDeadT = 0; unwSnap = null;
   amalgam = null; amalCut = null; amalDec = 0; amalSaid = {};
   devLine = 0; devAsk = false; devType = 0; devOut = 0;
@@ -44376,6 +45374,9 @@ function updateEnemies(dt) {
       case 'risen': case 'gravedigger': case 'bellringer':
         hlYardAI(e, dt, ux, uy, d, sp, dx, dy); break;
       // and THE WAY UP's own
+      // LONG RUNS: the specialists, and LEGION's cells
+      case 'aegis': case 'bastion': case 'longwatch': case 'legion': case 'cell':
+        specAI(e, dt, ux, uy, d, sp, TG); break;
       default: if (UP.foes.has(e.type)) upFoeAI(e, dt, ux, uy, d, sp);
     }
     hackBy = null;
@@ -61360,7 +62361,7 @@ function updateBullets(dt) {
       const a = Math.atan2(P.y - b.y, P.x - b.x);
       const s = Math.max(340, len(b.vx, b.vy));
       b.vx = Math.cos(a) * s; b.vy = Math.sin(a) * s;
-      b.dmg *= 0.8;
+      b.dmg *= 0.55 + 0.25 * P.snap;     // comes back at 80%, 105%, 130%
       continue;
     }
     if (b.life <= 0) {
@@ -61470,6 +62471,9 @@ function updateBullets(dt) {
       if (b.hits && b.hits.has(e.id)) continue;
       const rr = e.r + b.r;
       if (!segCircle(b.px, b.py, b.x, b.y, e.x, e.y, rr)) continue;
+
+      // LONG RUNS: AEGIS turns aside whatever comes at its face
+      if (e.type === 'aegis' && aegisTurns(e, b)) { removed = true; break; }
 
       // sentinels carry a frontal shield: shots into the face are deflected
       if (e.type === 'sentinel' && !annotated()) {
@@ -76439,6 +77443,7 @@ function poly(x, y, r, sides, ang) {
 }
 
 function drawEnemiesBody() {
+  specDrawTells();                       // LONG RUNS: the charge lines and sights, on screen or not
   for (const e of enemies) {
     if (e.dead) continue;
     if (e.roninHide) continue;          // RONIN's C: an execution's art has the body
@@ -76618,6 +77623,7 @@ function drawEnemiesBody() {
     else ctx.stroke();
     // and then what the lance has taken out of it
     if (e.eaten > 0.01) drawBurnWear(e, ea);
+    if (e.spec) specDraw(e, ea);           // LONG RUNS: a specialist's face, plates, scope or ring
 
     /* THE SHOPKEEPER. His health bar IS the till, so the till is drawn: the
        hoard he took off you stacked in coin columns beside him, dropping
@@ -79966,6 +80972,12 @@ function drawHUD() {
     ctx.shadowColor = bannerCol; ctx.shadowBlur = 26;
     ctx.fillStyle = bannerCol;
     ctx.fillText(bannerText, W / 2, H * 0.28 - (1 - a) * 14);
+    if (bannerSub) {
+      ctx.shadowBlur = 10;
+      fitFont(bannerSub, W - 60, '600', 15, "'Chakra Petch', Barlow, system-ui, sans-serif", 10);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText(bannerSub, W / 2, H * 0.28 + 30 - (1 - a) * 14);
+    }
     ctx.restore();
   }
 
@@ -81899,8 +82911,8 @@ function codexListOf(id) {
   const met = en => Tales.has(en.link || en.key, 0) || (en.link && Codex.e.has(en.ref));
   const p = Save.profile || {};
   switch (id) {
-    case 'e': return talesAll().filter(en => en.sec === 'e' && (!en.hl || met(en))).map(codexRow);
-    case 'x': return talesAll().filter(en => en.sec === 'x' && (!en.secret || met(en))).map(codexRow);
+    case 'e': return talesAll().filter(en => en.sec === 'e' && (!(en.hl || en.up) || met(en))).map(codexRow);
+    case 'x': return talesAll().filter(en => en.sec === 'x' && (!(en.secret || en.up) || met(en))).map(codexRow);
     case 'p': return talesAll().filter(en => en.sec === 'p' &&
                 (en.kind === 'pilot' || met(en) || Tales.has('p:' + en.ref, 0))).map(codexRow);
     case 's': return talesAll().filter(en => {
@@ -82089,12 +83101,13 @@ function codexPageText(row, i) {
   if (row.item) return row.item === 'u' ? upDesc(row.up) : row.d;
   const key = row.tale, en = talesEntry(key);
   if (i === 3) { const s = Tales.sealed[key]; return s ? s.x : ''; }
+  if (Tales.vault[key]) return Tales.vault[key].p[i] || '';   // a tyrant: every word the vault's
   const own = TALE_TEXT[key];
   if (en && i === 0 && (en.kind === 'sign' || en.kind === 'trine')) return zcxRecord(en, own && own[0]);
   if (own && own[i]) return own[i];
   if (i === 0 && en) {
-    if (en.kind === 'enemy') return CODEX_E[en.ref].d;
-    if (en.kind === 'boss') return (CODEX_B[en.ref] || {}).d || '';
+    if (en.kind === 'enemy') return (CODEX_E[en.ref] || CODEX_UP[en.ref]).d;
+    if (en.kind === 'boss') return (CODEX_B[en.ref] || CODEX_UP[en.ref] || {}).d || '';
     if (en.kind === 'pilot') return en.char.d;
     if (en.kind === 'sector') {
       const s = en.stage, b = BOSSES[s.boss];
@@ -82232,7 +83245,7 @@ function codexPortrait(row, x, y, size, seen) {
   const en = row.en;
   const live = en.kind === 'enemy' || en.kind === 'boss' ? en.ref : en.kind === 'person' ? en.boss : null;
   if (live) {
-    drawCodexIcon({ key: live, boss: !!BOSSES[live], col: seen ? en.col : '#475569', sides: en.sides || (BOSSES[live] || {}).sides },
+    drawCodexIcon({ key: live, boss: en.kind === 'boss' || !!BOSSES[live], col: seen ? en.col : '#475569', sides: en.sides || (BOSSES[live] || {}).sides },
                   x, y, size, seen);
     return;
   }
@@ -82779,6 +83792,77 @@ const CODEX_ART = {
 };
 
 // a compact silhouette from the same shape data the live enemy uses
+/* A body as the fight draws it, standing in a codex card (19 Nov 2026; the
+   user: "render bosses properly, some js renders just show up as polygons").
+   Where a thing has no codex drawing of its own (CODEX_ART), the card used to
+   show its outline as a polygon, however it is drawn in the fight: ALL
+   HALLOWS' bodies, ONE POINT OH, the bosses whose plates and parts the fight
+   draws round them, the specialists, THE WAY UP's own. Now a stand-in body is
+   made (codexMock: nothing spawned, nothing counted, nothing the run reads)
+   and handed to the very drawing the fight uses, scaled into the card:
+   THE WAY UP's module draw, ALL HALLOWS' hlDrawBody, ONE POINT OH's art
+   hook, or drawEnemiesBody itself, with the room's list lent to it for the
+   one body and given back. Anything that throws is the polygon again. */
+let codexLiveOn = false;                  // a stand-in is being drawn: what draws only in the fight (a nameplate) stays out
+const codexLiveBad = new Set();           // keys whose drawing threw once: the polygon from then on
+function codexMock(key, boss, col) {
+  const t = boss ? ETYPE.boss : ETYPE[key], bd = boss ? BOSSES[key] : null;
+  if (!t || (boss && !bd)) return null;
+  const e = { id: -1, type: boss ? 'boss' : key, boss: boss ? key : undefined, x: 0, y: 0, vx: 0, vy: 0,
+    r: bd ? bd.r : t.r, maxHp: 100, hp: 100, spd: 0, dmg: 0, col, sides: bd ? bd.sides : t.sides,
+    xp: 0, score: 0, armor: 0, absorb: 0, dr: 0, elite: false, flash: 0, slow: 0, slowT: 0,
+    ang: -Math.PI / 2, spin: 0, t: 30 + uiTime, cd: 1,   // t: long since grown in (bodies that rise from nothing read it) state: 0, gen: 0, phase: 0, atk: -1, atkT: 1, hitCd: 0, wob: uiTime,
+    phased: false, phaseT: 1, plateAng: uiTime * 0.4, healT: 1, ramCd: 0, psn: 0, psnT: 0, blinkT: 1, invuln: 0,
+    tether: null, codexMock: true };
+  if (CODEX_UP[key] && CODEX_UP[key].pose) Object.assign(e, CODEX_UP[key].pose);   // THE WAY UP's: the moment its card shows
+  if (SPEC[key]) {                        // LONG RUNS: as specInit leaves one, without the cells it spawns
+    e.spec = key; e.reflCd = 0; e.deflFx = 0; e.crackT = 0; e.chargeA = e.ang; e.aimA = e.ang;
+    e.closeT = 0; e.blinkCd = 0; e.cellN = LEGION_CELLS; e.cellT = 0;
+  }
+  return e;
+}
+function codexLiveDraw(en, x, y, size, seen) {
+  const key = en.key, boss = !!en.boss;
+  if (codexLiveBad.has(key) || !seen) return false;
+  const e = codexMock(key, boss, en.col);
+  if (!e) return false;
+  const up = upOwnsBody(e), hl = hlOwnsBody(e), opo = boss && key === 'onepointoh';
+  /* ALL HALLOWS' bodies are drawn by hl-art.js, which is only fetched while the
+     event can be seen: the codex is a place it can be seen, so it is fetched
+     the first time one of them is shown, and the outline stands in until then. */
+  if (hl && HL_ART.status !== 'ready') {
+    if (HL_ART.status === 'none') { try { hlArtLoad(); } catch (err) { HL_ART.status = 'failed'; } }
+    return false;
+  }
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x - size * 1.7, y - size * 1.7, size * 3.4, size * 3.4); ctx.clip();
+  ctx.translate(x, y);
+  const k = size / (e.r * 1.25);
+  ctx.scale(k, k);
+  const keep = enemies.slice(), view = [_vx0, _vx1, _vy0, _vy1];
+  codexLiveOn = true;
+  let ok = true;
+  try {
+    if (up) ok = upDrawBody(e, 1);
+    else if (hl) hlDrawBody(e, 1);
+    else if (opo) oaDrawHim(ctx, { x: 0, y: 0, r: e.r, ang: e.ang, ph: 0, stage: 'fight', st: 0, flash: 0,
+                                   painting: false, hollow: false, out: 0, t: uiTime, tex: OpoLock.tex() });
+    else {
+      enemies.length = 0; enemies.push(e);
+      _vx0 = -1e5; _vx1 = 1e5; _vy0 = -1e5; _vy1 = 1e5;
+      drawEnemiesBody();
+    }
+  } catch (err) {
+    ok = false;
+  } finally {
+    enemies.length = 0; for (const o of keep) enemies.push(o);
+    [_vx0, _vx1, _vy0, _vy1] = view;
+    codexLiveOn = false;
+    ctx.restore();
+  }
+  if (!ok) codexLiveBad.add(key);
+  return ok;
+}
 function drawCodexIcon(en, x, y, size, seen) {
   const art = en.boss ? CODEX_ART[en.key] : null;
   if (art && seen) {
@@ -82801,6 +83885,7 @@ function drawCodexIcon(en, x, y, size, seen) {
     ctx.restore();
     return;
   }
+  if (!art && codexLiveDraw(en, x, y, size, seen)) return;   // as the fight draws it
   ctx.save();
   if (seen) {
     ctx.globalCompositeOperation = 'lighter';
@@ -88631,7 +89716,8 @@ function drawMenuRush() {
 const SKIN_SLOTS = [
   { k: 'player', n: 'YOUR HULL',  kind: 'player' },
   { k: 'bullet', n: 'YOUR SHOTS', kind: 'bullet' }
-].concat(Object.keys(ETYPE).filter(k => k !== 'boss' && !HL_ETYPES[k]).map(k => ({
+// (not the specialists or LEGION's cells: their look is their tell — LONG RUNS)
+].concat(Object.keys(ETYPE).filter(k => k !== 'boss' && !HL_ETYPES[k] && !SPEC[k] && k !== 'cell').map(k => ({
   k, kind: 'enemy', n: (CODEX_E[k] && CODEX_E[k].n) || k.toUpperCase()
 })));
 
@@ -97714,6 +98800,7 @@ const SNAP_LOCAL = new Set([
   'oaFrame', 'opoRecordList',             // ONE POINT OH: the art's frame, and the record, built from the CHANGELOG
   'orFrame',                              // and his rite's art's frame
   'aaFrame',                              // ACHIEVEMENTS: its art's frame
+  'codexLiveOn',                          // the codex drawing a stand-in body (codexLiveDraw)
 ]);
 // objects the run writes into that do not start out empty
 const SNAP_OBJS = ['RUN', 'runView', 'Chal', 'Rush', 'Daily', 'arena', 'con', 'VRA', 'VRI', 'RC',
@@ -97737,6 +98824,7 @@ const SNAP_LOCAL_OBJS = new Set(['cam', 'mouse', 'keys', 'touchUI', 'inputQueue'
   'IM_FAILED', 'IM_ST',                   // IMAGO's art, in a run: which hook has thrown, and its own state
   '_aboveSpr',                            // FROM ABOVE: the spear, baked
   'Ach', 'AA_TAGGED', 'AA_FAILED', 'AA_CALLED', 'AA_ST',   // ACHIEVEMENTS
+  'codexLiveBad',                         // the codex's stand-ins whose drawing threw (codexLiveDraw)
   'UP']);                                 // THE WAY UP: the rooms this machine has run, and their hooks   // ACHIEVEMENTS: the panel, the cards, and its art's
 // containers that start empty and are filled as the script loads: tables, not the run
 const SNAP_TABLES = new Set(['UP_ROOMS', 'UP_AWAY', 'SKY_V', 'RKC_PLAN', 'RKC_DRAW', 'RKC_KILL', 'VKC_PLAN', 'VKC_DRAW', 'VKC_KILL']);
@@ -99218,7 +100306,7 @@ const CHALLENGES = [
 const CHAL_UPGRADES = [
   /* ---- the shot itself ---- */
   { id: 'u_hollow', lock: 'ch_hollow', n: 'Echo Chamber', max: 3, rar: 'epic',
-    d: 'Every shot fires again a moment later at 55% damage',
+    d: 'Every shot fires again a moment later at 55% damage per level',
     f: p => p.echo++ },
   { id: 'u_fuse', lock: 'ch_fuse', n: 'Cold Barrel', max: 3, rar: 'epic',
     d: 'The first shot after a second of holding fire hits for 3.5x',
@@ -99230,7 +100318,7 @@ const CHAL_UPGRADES = [
     d: 'Every tenth shot calls a mortar down where you are aiming',
     f: p => p.tick10++ },
   { id: 'u_scatter', lock: 'ch_scatter', n: 'Snapback', max: 3, rar: 'epic',
-    d: 'Spent bullets turn around and fly back through you',
+    d: 'Spent bullets turn around and fly back through you, harder with each level',
     f: p => p.snap++ },
   { id: 'u_bulk', lock: 'ch_bulk', n: 'Boring Rounds', max: 3, rar: 'rare',
     d: 'Bullets slow as they travel, and hit harder the slower they get',
@@ -99244,16 +100332,16 @@ const CHAL_UPGRADES = [
     d: 'Anything you dash through takes +45% from you for four seconds',
     f: p => p.slipknot++ },
   { id: 'u_paper', lock: 'ch_paper', n: 'Blink Charge', max: 3, rar: 'epic',
-    d: 'The first shot after a dash deals triple damage',
+    d: 'The first shot after a dash deals triple damage, +1x per level',
     f: p => p.blinkC++ },
   { id: 'u_tightrope', lock: 'ch_tightrope', n: 'Contrail', max: 3, rar: 'epic',
     d: 'Your dash lays a burning line behind it',
     f: p => p.contrail++ },
   { id: 'u_gauntlet', lock: 'ch_gauntlet', n: 'Kickstart', max: 2, rar: 'rare',
-    d: 'A dash that passes through two enemies refunds itself',
+    d: 'A dash that passes through two enemies refunds itself (one, at II)',
     f: p => p.kick++ },
   { id: 'u_fracture', lock: 'ch_fracture', n: 'Phase Debt', max: 3, rar: 'legend',
-    d: 'Dashing erases enemy fire it touches, and each round erased repairs 1',
+    d: 'Dashing erases enemy fire it touches, and each round erased repairs 1 per level',
     f: p => p.phaseD++ },
 
   /* ---- kills ---- */
@@ -99287,10 +100375,10 @@ const CHAL_UPGRADES = [
     d: '+8% damage for every hit you have taken this wave',
     f: p => p.grudge++ },
   { id: 'u_cannon', lock: 'ch_cannon', n: 'Deadman Brake', max: 2, rar: 'legend',
-    d: 'Once a wave, a lethal hit slows the room to a crawl instead of landing',
+    d: 'Once a wave (twice at II), a lethal hit slows the room to a crawl instead of landing',
     f: p => p.deadman++ },
   { id: 'u_deadweight', lock: 'ch_deadweight', n: 'Shell', max: 3, rar: 'rare',
-    d: 'Five seconds without being hit grows a shell that eats one hit',
+    d: 'Five seconds without being hit (a second less per level) grows a shell that eats one hit',
     f: p => p.shell++ },
   { id: 'u_static', lock: 'ch_static', n: 'Feedback Loop', max: 3, rar: 'epic',
     d: 'Whatever damages you takes it back twice over',
@@ -99329,7 +100417,7 @@ const CHAL_UPGRADES = [
     d: 'The first hit on anything brands it. Every hit after that is +35%',
     f: p => p.brand++ },
   { id: 'u_stars', lock: 'ch_stars', n: 'Spallation', max: 3, rar: 'epic',
-    d: 'Critical hits strip a quarter of a target armour, permanently',
+    d: 'Critical hits strip a quarter of a target armour (a tenth more per level), permanently',
     f: p => p.spall++ },
   { id: 'u_lockstep', lock: 'ch_lockstep', n: 'Tag Team', max: 3, rar: 'epic',
     d: '+30% damage whenever you hit something other than your last target',
@@ -99343,7 +100431,7 @@ const CHAL_UPGRADES = [
 
   /* ---- the till and the level-up ---- */
   { id: 'u_austerity', lock: 'ch_austerity', n: 'Insider Trading', max: 2, rar: 'rare',
-    d: 'Shop prices drop 35%. Rerolls cost double',
+    d: 'Shop prices drop 35% (50% at II). Rerolls cost double',
     f: p => p.insider++ },
   { id: 'u_pauper', lock: 'ch_pauper', n: 'Interest', max: 3, rar: 'rare',
     d: 'Every wave cleared pays 5% of the credits you are holding',
@@ -99482,10 +100570,11 @@ function onRewardHit(e, crit, direct) {
     e.suppT = 2;
   }
   if (P.spall && crit) {
-    if (e.dr > 0) e.dr *= 0.75;
-    if (e.armor > 0) { e.armor *= 0.75; e.absorb *= 0.75; }
+    const keep = 0.85 - 0.1 * P.spall;    // strips 25%, 35%, 45%
+    if (e.dr > 0) e.dr *= keep;
+    if (e.armor > 0) { e.armor *= keep; e.absorb *= keep; }
   }
-  if (P.erasure && direct && e.type !== 'boss') {
+  if (P.erasure && direct && e.type !== 'boss' && !e.spec) {
     P.eraseN = (P.eraseN || 0) + 1;
     if (P.eraseN >= 20) {
       P.eraseN = 0;
@@ -99506,7 +100595,7 @@ function onPlayerShot(mx, my, ang) {
   if (P.cold) { P.coldReady = false; P.coldT = 0; }
   if (P.blinkC) P.blinkReady = false;
   if (P.heat) { P.heatN = Math.min(12, (P.heatN || 0) + 1); P.heatT = 0.55; }
-  if (P.echo) {
+  if (P.echo && P.weapon !== 'blade') {   // a blade echoes its cuts instead (bladeHit)
     P.echoQ = P.echoQ || [];
     if (P.echoQ.length < 8) P.echoQ.push({ t: 0.16, x: mx, y: my, a: ang });
   }
@@ -99523,12 +100612,15 @@ function onPlayerShot(mx, my, ang) {
   }
 }
 
+/* Insider Trading: 35% off at I, 50% at II (rerolls still cost double). */
+function insiderMul() { return P.insider ? 0.8 - 0.15 * Math.min(2, P.insider) : 1; }
+
 /* The multiplier a single shot leaves with. Consumed rather than sampled: a
    cold barrel and a blink charge are each worth exactly one shot. */
 function rewardShotMul() {
   let m = 1;
   if (P.cold && P.coldReady) m *= 1 + 2.5 * P.cold;
-  if (P.blinkC && P.blinkReady) m *= 3;
+  if (P.blinkC && P.blinkReady) m *= 2 + P.blinkC;    // x3, x4, x5
   return m;
 }
 
@@ -99582,7 +100674,18 @@ function onRewardHurt(dmg, src) {
     P.shellUp = false;                    // absorbed elsewhere; this is the reset
   }
   if (P.grudge) P.grudgeN = (P.grudgeN || 0) + 1;
-  if (P.counter) {
+  if (P.counter && P.weapon === 'blade') {
+    /* No bullets out of a sword: the ring is the parry's own crescent,
+       thrown every way at once, a swing's weight each. */
+    const n = 4 + 2 * P.counter, dmg = bladeSwingDmg() * 0.7;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU;
+      bladeWaves.push({ x: P.x, y: P.y, px: P.x, py: P.y,
+                        vx: Math.cos(a) * COUNTER_SPD, vy: Math.sin(a) * COUNTER_SPD,
+                        dist: 0, t: 0, dmg, crit: false, hit: [], col: '#fde68a' });
+    }
+    Audio_.tone(420, 0.12, 'square', 0.09, 200);
+  } else if (P.counter) {
     const n = 8 + 4 * P.counter;
     for (let i = 0; i < n; i++)
       fireBullet(P.x, P.y, (i / n) * TAU, 0.7, { noFrag: true });
@@ -99670,7 +100773,7 @@ function rewardTick(dt) {
   }
   if (P.shell) {
     P.shellT = (P.shellT || 0) + dt;
-    if (!P.shellUp && P.shellT > 5) {
+    if (!P.shellUp && P.shellT > 6 - Math.min(3, P.shell)) {   // 5 s, 4 s, 3 s
       P.shellUp = true;
       ringFx(P.x, P.y, P.r, 46, COL.shield, 0.35, 3);
       Audio_.tone(880, 0.1, 'sine', 0.06, 1200);
@@ -99726,12 +100829,13 @@ function rewardDashSweep(dt) {
   if (P.dashT <= 0) return;
   if (P.slipknot || P.kick) {
     for (const e of enemies) {
-      if (e.dead || e.dashTagged) continue;
+      if (e.dead || e.hacked || e.dashTagged) continue;   // dashing through your own army marks nothing
       if (len(e.x - P.x, e.y - P.y) < e.r + P.r + 6) {
         e.dashTagged = true;
         if (P.slipknot) e.slipT = 4;
         P.dashHits = (P.dashHits || 0) + 1;
-        if (P.kick && P.dashHits === 2 && P.dashCh < P.dashMax) {
+        // two bodies at I, one at II
+        if (P.kick && P.dashHits === Math.max(1, 3 - P.kick) && P.dashCh < P.dashMax) {
           P.dashCh++;
           floatText(P.x, P.y - 34, 'KICKSTART', '#67e8f9', 14);
         }
@@ -99744,7 +100848,7 @@ function rewardDashSweep(dt) {
       if (len(b.x - P.x, b.y - P.y) > b.r + P.r + 10) continue;
       ebullets.splice(i, 1);
       burst(b.x, b.y, 5, '#5eead4', 180, 2.2, 0.25);
-      if (P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 1);
+      if (P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + P.phaseD);
     }
   }
 }
@@ -99921,6 +101025,9 @@ function hackTurn(e) {
   e.slow = 0; e.slowT = 0; e.psn = 0; e.psnT = 0; e.leak = 0; e.leakT = 0;
   e.burn = 0; e.burnT = 0; e.stagger = 0;
   e.invuln = 0; e.phased = false; e.floor = undefined;
+  /* And every mark your cards left on it while it was theirs: a brand, a
+     slipknot, a null field or a wound would make it take more from them. */
+  e.branded = false; e.slipT = 0; e.nullT = 0; e.suppT = 0; e.woundT = 0;
   /* SUPERUSER's mane lets go of what it kept. A body killed while pinned
      would otherwise carry the pin onto your side, where hackTick never
      runs it down: stakes round an ally for the rest of the run. */

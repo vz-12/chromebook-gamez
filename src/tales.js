@@ -13,6 +13,10 @@
          entry is the codex's key for it ('n:founder'), t a page title and
          x its text. Nothing about a chapter still sealed, not even that it
          exists.
+         An entry may instead be a whole one, every word of it the vault's
+         (THE WAY UP's tyrants, 19 Nov 2026): { n, col, sides, p: [I, II,
+         III] }, its name, its look and its three pages. The game shows it
+         only to whoever has felled it.
 
    A CHAPTER is a row in tale_chapters: its id (what the game's TALE_SEALED
    names), the vault entry its pages are kept in, and when it opened (null
@@ -57,7 +61,8 @@ export async function openChapter(db, id, vault, at = Date.now()) {
 
 // a chapter's pages, read out of its vault entry: kept per revision, like the vault's own cache
 const cache = new Map();                 // vault id -> { hash, pages }
-const PAGE_KEY = /^[a-z]:[a-z0-9_-]{1,32}$/;
+const PAGE_KEY = /^[a-z]:[A-Za-z0-9_-]{1,32}$/;   // a module's bosses are named in mixed case (tyGC)
+const COL = /^#[0-9a-f]{6}$/i;
 async function chapterPages(db, vault) {
   const got = await vaultText(db, vault);
   if (!got) return null;
@@ -66,8 +71,12 @@ async function chapterPages(db, vault) {
   const d = JSON.parse(got.text);
   const pages = {};
   for (const [k, v] of Object.entries((d && d.pages) || {})) {
-    if (!PAGE_KEY.test(k) || !v || typeof v.x !== 'string') continue;
-    pages[k] = { t: String(v.t || '').slice(0, 60), x: v.x.slice(0, 8000) };
+    if (!PAGE_KEY.test(k) || !v) continue;
+    if (typeof v.x === 'string') { pages[k] = { t: String(v.t || '').slice(0, 60), x: v.x.slice(0, 8000) }; continue; }
+    // a whole entry: its name, its look, and pages I to III
+    if (!Array.isArray(v.p) || !v.p.length || v.p.length > 3 || !v.p.every(x => typeof x === 'string')) continue;
+    pages[k] = { n: String(v.n || '').slice(0, 40), col: COL.test(v.col) ? v.col : '#e2e8f0',
+                 sides: Math.min(12, Math.max(3, v.sides | 0 || 8)), p: v.p.map(x => x.slice(0, 8000)) };
   }
   cache.set(vault, { hash: got.hash, pages });
   return pages;

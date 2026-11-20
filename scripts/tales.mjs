@@ -63,7 +63,7 @@ const g = loadGame(IDX, { w: 1280, h: 720 });
 g.run(SETUP);
 take(g.run(`(() => { ${KIT}
   const L = talesAll();
-  chk(L.length === 90, 'every entry: 28 enemies, 13 bosses and 4 people fought as bosses, 4 pilots and 3 awakenings, 10 sectors and 5 rooms, 7 people, 12 signs and 4 trines', L.length);
+  chk(L.length === 114, 'every entry: 46 enemies (4 specialists, 14 of THE WAY UP\\'s), 18 bosses (5 of its) and 4 people fought as bosses, 4 pilots and 4 awakenings, 10 sectors and 5 rooms, 7 people, 12 signs and 4 trines', L.length);
   chk(!L.some(e => /SERAPH/i.test(e.n)), 'no outside pilot is in it');
   chk(L.filter(e => e.pages.some(p => p.sealed)).map(e => e.key).sort().join() === 'a:melee,n:founder,p:ember', 'the sealed pages are hinted where the bible puts them');
   chk(Object.keys(TALE_TEXT).every(k => !TALE_TEXT[k][3]), 'no sealed text in the game');
@@ -152,9 +152,8 @@ take(g.run(`(() => { ${KIT}
   // ALL HALLOWS chapters II and III are not live yet, and the page source is public: these wait for them
   // (THE HOUSE's three bodies and DEAD GAME are chapter II's: their pages II and III too)
   // (and THE YARD's three and THE RAGE QUIT, chapter III's)
-  const LATER = ['e:sheet 2', 'e:sheet 3', 'e:lurker 2', 'e:lurker 3', 'e:poltergeist 2', 'e:poltergeist 3',
-                 'e:risen 2', 'e:risen 3', 'e:gravedigger 2', 'e:gravedigger 3', 'e:bellringer 2', 'e:bellringer 3',
-                 'b:deadgame 2', 'b:deadgame 3', 'b:ragequit 2', 'b:ragequit 3', 'r:patch 3', 'n:soul 2', 'n:soul 3'];
+  // (they went in on 19 Nov, the chapters live since October: nothing waits now)
+  const LATER = [];
   const miss = [], all = [];
   for (const en of talesAll()) {
     if (en.link) continue;
@@ -197,12 +196,30 @@ take(g.run(`(() => { ${KIT}
   { const o = boss('theother'); down(o); chk(has('b:theother', 1) && !has('b:theother', 2), 'THE OTHER, cleared');
     const v = boss('theother'); v.virus = true; down(v); chk(has('b:theother', 2), 'the corrupted OTHER, cleared'); }
   { const s = boss('shopkeeper'); down(s); chk(has('n:shopkeeper', 1), 'THE SHOPKEEPER defeated: his page II, in PEOPLE'); }
+  // LONG RUNS: each specialist, met, ten felled, and beaten the way it is open to
+  { const a = spawnAt('aegis', 300, 0); chk(has('e:aegis', 0), 'AEGIS met: page I');
+    a.ang = Math.PI; down(a); chk(!has('e:aegis', 2), 'AEGIS felled through its face: not its deed');
+    const b = spawnAt('aegis', 300, 0); b.ang = 0; down(b); chk(has('e:aegis', 2), 'AEGIS felled from behind');
+    for (let i = 0; i < 8; i++) fell('aegis'); chk(has('e:aegis', 1), 'ten of them: page II');
+    const c = spawnAt('bastion', 300, 0); c.crackT = 1; down(c); chk(has('e:bastion', 2), 'BASTION felled while cracked');
+    const l = spawnAt('longwatch', 600, 0); down(l); chk(!has('e:longwatch', 2), 'LONGWATCH felled from across the room: not its deed');
+    const m = spawnAt('longwatch', 120, 0); down(m); chk(has('e:longwatch', 2), 'LONGWATCH felled from up close');
+    const g = spawnAt('legion', 300, 0); for (const o of enemies) if (o.host === g) o.dead = true; g.cellN = 0; down(g);
+    chk(has('e:legion', 2), 'LEGION felled with its ring broken');
+    const owed = Codex.need().e; chk(owed === Codex.need().e && !Codex.need().specs, 'and none of them owed'); }
+  // THE WAY UP's, from the codex's own table: written down once met, listed once met, never owed
+  { const owed = Codex.need().e;
+    chk(!codexListOf('e').some(r => r.key === 'e:u1h') && !codexListOf('x').some(r => r.key === 'b:u1F'), 'THE WAY UP\\'s are not listed until met');
+    Codex.see('e', 'u1h'); Codex.see('e', 'u1F');
+    chk(has('e:u1h', 0) && has('b:u1F', 0) && codexListOf('e').some(r => r.key === 'e:u1h') && codexListOf('x').some(r => r.key === 'b:u1F'),
+        'met: written down, listed, page I');
+    chk(Codex.need().e === owed, 'and never owed for a full codex'); }
   { stage = STAGES[0]; tale('stage', stage); tale('hurt'); const w = boss('warden'); down(w);
     chk(has('s:grid', 1) && !has('s:grid', 2), 'THE GRID cleared, but hit');
     tale('stage', stage); const x = boss('warden'); down(x); chk(has('s:grid', 2), 'THE GRID cleared without a hit'); }
   { stage = STAGES[4]; tale('stage', stage); const n = boss('nullcore'); down(n);
     chk(has('p:runner', 1), 'NULL defeated in THE VOID: VOIDRUNNER\\'s page II');
-    chk(!has('p:runner', 2) && talesEntry('p:runner').pages[2].held, 'its page III is held: its rite is not built'); }
+    chk(!has('p:runner', 2) && !talesEntry('p:runner').pages[2].held, 'its page III waits for its rite'); }
   { stage = STAGES[0]; const id = P.charId; P.charId = 'melee'; tale('stage', STAGES[1]); P.charId = id;
     chk(has('s:foundry', 0) && has('s:foundry', 2), 'THE FOUNDRY reached with THE VAGRANT'); }
   { tale('awake', 'hacker'); chk(has('a:hacker', 0), 'SUPERUSER woken: page I');
@@ -242,13 +259,16 @@ take(g.run(`(() => { ${KIT}
   runSet('amalgamDone', true); chk(has('b:amalgam', 1) && has('n:dev', 1), 'THE AMALGAM finished');
   grantAwakening('ember'); chk(has('b:amalgam', 2) && has('p:ember', 2), 'EMBER\\'s rite');
   grantAwakening('hacker'); chk(has('b:root', 2) && has('p:hacker', 2), 'THE HACKER\\'s rite');
-  grantAwakening('runner'); chk(!has('p:runner', 2), 'VOIDRUNNER\\'s rite: its page III stays held until it is written');
+  grantAwakening('runner'); chk(has('p:runner', 2) && has('a:runner', 0), 'VOIDRUNNER\\'s rite: its page III, and IMAGO\\'s page I');
+  chk(has('n:outsider', 2), 'the stands emptied: THE OUTSIDER\\'s page III');
   chk(has('r:hub', 2), 'every hull whose rite is built, awake');
   // ONE POINT OH (VOIDRUNNER's finale): met in the shatter, beaten when the record is back to today
   chk(!has('n:onepointoh', 0) && talesEntry('x:onepointoh').link === 'n:onepointoh', 'ONE POINT OH: a person, linked from his card');
   runSet('opoMet', true); chk(has('n:onepointoh', 0), 'met: his page I');
   runSet('opoDone', true); chk(has('n:onepointoh', 1), 'the record brought back to today: his page II');
-  chk(!has('n:onepointoh', 2) && talesEntry('n:onepointoh').pages[2].held, 'his page III is held for VOIDRUNNER\\'s rite');
+  chk(has('n:onepointoh', 2), 'and VOIDRUNNER awake: his page III');
+  // IMAGO, in a run: woken, its four actives, a boss down while awake
+  { tale('awake', 'runner'); for (const i of [0, 1, 2, 3]) tale('act', 'runner', i); chk(has('a:runner', 1), 'IMAGO: all four of its actives in one awakening'); }
   // a full codex is still entries met, never pages
   chk(!('tales' in Codex.need()), 'a full codex asks nothing of the pages');
   return JSON.stringify(C);
@@ -365,7 +385,10 @@ section('the account');
   section('sealed chapters (src/tales.js)');
   const r0 = await call('GET', '/api/tales');
   ok(r0.status === 200 && JSON.stringify(r0.d) === '{"chapters":{}}', 'nothing is open', r0);
-  const pages = { pages: { 'n:founder': { t: 'IV', x: 'the sealed text' }, 'p:ember': { x: 'another' }, 'BAD KEY': { x: 'no' } } };
+  const pages = { pages: { 'n:founder': { t: 'IV', x: 'the sealed text' }, 'p:ember': { x: 'another' }, 'BAD KEY': { x: 'no' },
+    // a whole entry (THE WAY UP's tyrants): its name, look and three pages; and two the codex cannot take
+    'b:tyTEST': { n: 'THE TEST', col: '#123456', sides: 7, p: ['one', 'two', 'three'] },
+    'b:tyFOUR': { n: 'FOUR', p: ['1', '2', '3', '4'] }, 'b:tyNONE': { n: 'NONE', p: [] } } };
   DB.sql.exec(putSql('t1', Buffer.from(JSON.stringify(pages))).sql);
   const r1 = await call('GET', '/api/tales');
   ok(JSON.stringify(r1.d) === '{"chapters":{}}', 'its pages in the vault are not a chapter', r1.d);
@@ -376,6 +399,9 @@ section('the account');
   ok(r2.status === 200 && r2.d.chapters.c1 && r2.d.chapters.c1.at === 1700000000000, 'opened: the chapter is there', r2.d);
   ok(r2.d.chapters.c1.pages['n:founder'].x === 'the sealed text' && r2.d.chapters.c1.pages['p:ember'].x === 'another', 'with its pages, for everyone');
   ok(!r2.d.chapters.c1.pages['BAD KEY'], 'a page under a key the codex cannot have is left out');
+  { const w = r2.d.chapters.c1.pages['b:tyTEST'];
+    ok(w && w.n === 'THE TEST' && w.col === '#123456' && w.sides === 7 && w.p.join() === 'one,two,three', 'a whole entry, with its name, look and three pages', w);
+    ok(!r2.d.chapters.c1.pages['b:tyFOUR'] && !r2.d.chapters.c1.pages['b:tyNONE'], 'and none with four pages or none'); }
   cookie = '';
   const r3 = await call('GET', '/api/tales');
   ok(JSON.stringify(r3.d) === JSON.stringify(r2.d), 'signed out, the same');
@@ -396,6 +422,13 @@ section('the account');
   take(g3.run(`(() => { var C = []; var chk = (c, w, x) => C.push([!!c, w, x === undefined ? null : x]);
     Tales.sealedTake(${JSON.stringify(r2.d)});
     chk(Tales.has('n:founder', 3) && codexPageText({ tale: 'n:founder', en: talesEntry('n:founder') }, 3) === 'the sealed text', 'the game shows the server\\'s text on page IV');
+    // a whole entry (a tyrant): listed only once felled, its words the vault's, never owed
+    const listed = () => codexListOf('x').some(r => r.key === 'b:tyTEST');
+    const owed0 = Codex.need().e;
+    chk(talesEntry('b:tyTEST') && !listed(), 'a tyrant\\'s entry is there, out of sight until it is felled');
+    Codex.see('e', 'tyTEST', true); Tales.open('b:tyTEST', 0, false);
+    chk(listed() && codexPageText({ tale: 'b:tyTEST', en: talesEntry('b:tyTEST') }, 2) === 'three', 'felled: listed, and its pages are the vault\\'s');
+    chk(Codex.need().e === owed0, 'and it is never owed for a full codex');
     return JSON.stringify(C);
   })()`));
 }
@@ -521,6 +554,8 @@ take(g.run(`(() => { ${KIT}
     let threw = false; try { talesDrawLine(); uiTime += 5; talesDrawLine(); } catch (e) { threw = true; }
     chk(!threw && Tales.lines.length === 0, 'drawn, and gone after a few seconds'); }
   chk(!Object.keys(thrown).length, 'no art hook throws', thrown);
+  // every page that can open is written and no deed is unbuilt (19 Nov), so these two are only drawn when asked
+  TA('page.blank', { x: 40, y: 40, w: 300, h: 400 }, 'II'); TA('page.held', { x: 40, y: 40, w: 300, h: 400 }, 'III', 'a deed not yet built');
   const never = Object.keys(TALES_ART).filter(k => !calls[k]);
   chk(Object.keys(TALES_ART).length === 32 && !never.length, 'all 32 art hooks are drawn somewhere', never);
   return JSON.stringify(C);
