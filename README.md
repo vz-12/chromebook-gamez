@@ -1177,6 +1177,21 @@ the guest leaves partway through, and the host must play on alone. In `lan`
 the host leaves, and the guest must land in the lobby. Every scenario draws
 both machines as it goes, so a drawing error fails it too.
 
+## The playtest
+
+```sh
+npm run playtest                           # 6 runs of up to 15 min each: a few minutes
+node scripts/playtest.mjs --pilots runner --seeds 8 --skill 0.5,0.75 --cap 2700 --json runs.json
+node scripts/playtest.mjs --naive          # the player who shoots the nearest thing
+```
+
+Not a test: a measuring tape for the ordinary run, as `pace:pvp` is for
+PvP. A bot plays whole runs on the real engine in Node, with a fresh save
+and the pilot's own hull and damage, and the script prints how long each
+wave and boss took, how much of each wave was spent finding the last few
+enemies or with nothing on screen, what did the damage, what killed the
+run, and how often cards and shops came. `--json` keeps every run's record.
+
 ## Limits worth knowing (Workers Free plan)
 
 - **Static files are free and unlimited.** Only `/api/*` calls count toward the
