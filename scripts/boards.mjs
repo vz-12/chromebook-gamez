@@ -172,6 +172,24 @@ section('a run names its pilot: only the game\'s own are ranked');
   ok((await D.run('OUTSIDER', pid(72), 900000, { pilot: 7 })).status === 403, 'nor anything that is not an id');
 }
 
+section('the plausibility ceiling: real runs land, absurd ones do not');
+{
+  const D = device('10.0.0.9');
+  // turned away by the old flat 400 a kill: THE AMALGAM's million at wave 27
+  const amal = await D.run('AMALGAMATED', pid(81), 1468086,
+    { wave: 27, kills: 2500, level: 40, loop: 1, time: 1607, pilot: 'ember' });
+  ok(amal.status === 200 && amal.d.ok, 'a run carrying a once-a-run boss bonus: filed', amal);
+  // a long run past the old ceiling, at the top runs' kill rate (~43 a kill per multiplier)
+  const long = await D.run('LONGHAUL', pid(82), 35000000,
+    { wave: 135, kills: 85000, level: 300, loop: 5, time: 9800, pilot: 'runner' });
+  ok(long.status === 200 && long.d.ok, 'a long run at wave 135: filed', long);
+  const absurd = await D.run('NONSENSE', pid(83), 50000000, { wave: 5, kills: 80, time: 200 });
+  ok(absurd.status === 422 && absurd.d.error === 'implausible run', 'fifty million at wave 5: refused', absurd);
+  const quick = await D.run('NONSENSE', pid(83), 500, { wave: 1, kills: 3, time: 10 });
+  ok(quick.status === 422, 'and a run under fifteen seconds, as before', quick);
+  ok(count("who = 'n:NONSENSE'") === 0, 'written nowhere');
+}
+
 section('me');
 {
   const g = await device('10.0.0.7').req('POST', '/api/boards', { op: 'me', pid: pid(5000) });
