@@ -1,0 +1,181 @@
+/* VOIDRUNNER — the survey results page. The leaderboard page's void and
+   cyan; the charts' colours are roles, set once here.
+
+   An ordered answer scale (way too easy … way too hard) is one diverging
+   bar: blue for the low end, orange for the high, a neutral gray in the
+   middle, so "just right" reads as the centre. Checked on this page's card
+   surface with the dataviz validator: adjacent steps clear CVD ΔE 12 and
+   normal-vision ΔE 15. Answers in no order are one hue (blue), longer is
+   more. */
+:root {
+  --bg: #05060a;
+  --card: #0c1321;
+  --card-hi: #111b2e;
+  --line: rgba(103, 232, 249, .18);
+  --line-hi: rgba(103, 232, 249, .55);
+  --cyan: #67e8f9;
+  --teal: #5eead4;
+  --gold: #fbbf24;
+  --ink: #e2e8f0;
+  --text: #cbd5e1;
+  --dim: #8090a6;
+  --faint: #334155;
+  --grid: #1c2638;
+  --bad: #f87171;
+  /* the diverging scale, low to high, and the ink that sits on each */
+  --lo-2: #8cc0f6;
+  --lo-1: #3a8de6;
+  --mid: #4a5262;
+  --hi-1: #c95a1e;
+  --hi-2: #f7a06a;
+  --on-fill: #05060a;
+  --on-mid: #ffffff;
+  /* one hue, for answers with no order */
+  --one: #338ced;
+  --radius: 12px;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --head: 'Chakra Petch', Barlow, system-ui, sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
+html {
+  background: var(--bg);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(94, 234, 212, .08), transparent 70%);
+}
+body {
+  min-height: 100vh; color: var(--text); background: transparent;
+  font-family: Barlow, 'Segoe UI', system-ui, sans-serif; line-height: 1.45;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: var(--cyan); }
+
+.top { max-width: 980px; margin: 0 auto; padding: 22px 16px 6px; text-align: center; position: relative; }
+.back {
+  position: absolute; left: 16px; top: 18px; text-decoration: none;
+  font: 600 11px var(--head); letter-spacing: .14em; color: var(--dim);
+}
+.back:hover { color: var(--cyan); }
+h1 {
+  font: 700 clamp(24px, 6vw, 38px) var(--head); letter-spacing: .14em; color: var(--ink);
+  text-shadow: 0 0 28px rgba(94, 234, 212, .4); margin-top: 18px;
+}
+.sub { font: 500 11px var(--mono); letter-spacing: .1em; color: var(--dim); margin-top: 4px; }
+
+main { max-width: 980px; margin: 0 auto; padding: 8px 16px 48px; }
+
+/* the controls: one row above the charts, wrapping on a narrow screen */
+.controls {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end;
+  margin-top: 16px; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--card); border: 1px solid var(--line);
+}
+.ctl { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ctl span { font: 700 9px var(--head); letter-spacing: .18em; color: var(--dim); }
+.ctl select {
+  background: #0a1020; border: 1px solid var(--faint); border-radius: 8px;
+  padding: 6px 8px; font-size: 13px; color: var(--ink); max-width: 200px;
+}
+.ctl select:focus-visible, .check input:focus-visible, .csv:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.filters { display: contents; }
+.check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); padding-bottom: 6px; }
+.csv {
+  margin-left: auto; text-decoration: none; font: 700 10px var(--head); letter-spacing: .16em;
+  color: var(--teal); border: 1px solid rgba(94, 234, 212, .4); border-radius: 8px; padding: 8px 12px;
+}
+.csv:hover { background: rgba(94, 234, 212, .1); }
+
+/* the headline numbers */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+.kpi { padding: 12px 14px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+.kpi .k { font: 700 9px var(--head); letter-spacing: .18em; color: var(--dim); }
+.kpi .v { font: 700 26px Barlow, system-ui, sans-serif; color: var(--ink); margin-top: 2px; }
+.kpi .s { font-size: 12px; color: var(--dim); }
+
+.note { margin-top: 12px; font-size: 13px; color: var(--dim); }
+.note.bad { color: var(--bad); }
+.note.big {
+  text-align: center; padding: 40px 16px; border-radius: var(--radius);
+  background: var(--card); border: 1px solid var(--line); color: var(--text); font-size: 15px;
+}
+.note button {
+  margin-top: 12px; background: none; border: 1px solid var(--line-hi); border-radius: 8px;
+  padding: 6px 14px; color: var(--cyan); cursor: pointer; font: 700 11px var(--head); letter-spacing: .14em;
+}
+
+/* a question */
+/* minmax(0, …): a wide table scrolls inside its card instead of widening the page */
+.questions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.q { padding: 16px 18px 18px; border-radius: calc(var(--radius) + 4px); background: var(--card); border: 1px solid var(--line); }
+.q.empty { opacity: .6; }
+.q h2 { font: 700 17px var(--head); letter-spacing: .02em; color: var(--ink); }
+.q h2 .tok { color: var(--teal); }
+.q .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 12px; color: var(--dim); }
+.q .meta code { font: 500 11px var(--mono); color: var(--dim); }
+.q .read { margin-top: 10px; font-size: 14px; color: var(--text); }
+.q .read b { color: var(--ink); font-weight: 600; }
+.q .hint { margin-top: 6px; font-size: 12px; color: var(--dim); }
+
+/* the legend: a swatch the shape of the mark, then the answer */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; font-size: 12px; color: var(--dim); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+/* the diverging bar: one whole, its parts in answer order, a 2px gap between */
+.seg { display: flex; gap: 2px; margin-top: 8px; height: 28px; }
+.seg.thin { height: 20px; margin-top: 0; }
+.seg > div {
+  min-width: 0; border-radius: 4px; display: flex; align-items: center; padding-left: 6px;
+  font: 700 11px Barlow, system-ui, sans-serif; color: var(--on-fill); white-space: nowrap; overflow: hidden;
+  cursor: default; transition: filter .15s;
+}
+.seg > div.mid { color: var(--on-mid); }
+.seg > div:hover, .seg > div:focus-visible { filter: brightness(1.18); outline: none; }
+
+/* answers with no order: a bar each, from one baseline */
+.bars { display: grid; grid-template-columns: minmax(110px, 220px) 1fr auto; gap: 8px 12px; align-items: center; margin-top: 12px; }
+.bars .lab { font-size: 13px; color: var(--text); }
+.bars .track { height: 14px; position: relative; border-left: 1px solid var(--faint); }
+.bars .bar { height: 14px; background: var(--one); border-radius: 0 4px 4px 0; transition: filter .15s; }
+.bars .bar:hover, .bars .bar:focus-visible { filter: brightness(1.2); outline: none; }
+.bars .val { font: 500 12px var(--mono); color: var(--text); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.bars .val small { color: var(--dim); }
+
+/* split: a row per group */
+.groups { display: grid; grid-template-columns: minmax(110px, 200px) auto 1fr; gap: 8px 12px; align-items: center; margin-top: 14px; }
+.groups > * { min-width: 0; }
+.groups .g { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.groups .n { font: 500 11px var(--mono); color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.groups .few { opacity: .5; }
+
+/* split, answers with no order: a table, each cell shaded by its share */
+.heat-wrap { overflow-x: auto; margin-top: 12px; }
+table.heat { border-collapse: separate; border-spacing: 2px; font-size: 12px; min-width: 100%; }
+.heat th { font: 600 11px Barlow, system-ui, sans-serif; color: var(--dim); text-align: left; padding: 4px 6px; vertical-align: bottom; }
+.heat th.n, .heat td.n { text-align: right; font-family: var(--mono); font-weight: 500; }
+.heat td { padding: 6px 8px; border-radius: 4px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.heat td.cell { text-align: right; font-family: var(--mono); }
+.heat td.g { color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.heat tr.few td { opacity: .5; }
+
+/* the tooltip: the value leads, the label follows */
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; max-width: 260px;
+  padding: 8px 10px; border-radius: 8px; background: #0a0f1a; border: 1px solid var(--line-hi);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .5); font-size: 12px; color: var(--dim);
+}
+.tip strong { display: block; font: 700 14px Barlow, system-ui, sans-serif; color: var(--ink); }
+.tip .key { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; }
+
+@media (max-width: 640px) {
+  .back { position: static; display: inline-block; margin-bottom: 4px; }
+  h1 { margin-top: 6px; }
+  .csv { margin-left: 0; }
+  .ctl select { max-width: 150px; }
+  .bars { grid-template-columns: minmax(90px, 140px) 1fr auto; }
+  /* a group's bar under its name and count, the whole width */
+  .groups { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .groups .seg { grid-column: 1 / -1; margin-bottom: 8px; }
+}
+@media (forced-colors: active) {
+  .seg > div, .bars .bar { border: 1px solid CanvasText; }
+}

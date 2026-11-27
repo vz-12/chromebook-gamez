@@ -26,6 +26,8 @@
                         home again, /hook Patreon's webhook (patreon.js)
      /api/felled        a tyrant (a vault module's one-of-a-kind boss) down: written
                         down, and an admin told (felled.js)
+     /api/survey        the menu's QUICK SURVEY: its questions, the answers, and
+                        the results for an admin (survey.js, survey-bank.js)
 
    Two cron triggers (wrangler.jsonc): once a day, closing a finished season
    whether or not anybody is playing (season-close.js) and sweeping out
@@ -45,6 +47,7 @@ import film from './film.js';
 import parts from './parts.js';
 import patreon from './patreon.js';
 import felled from './felled.js';
+import survey from './survey.js';
 import boards, { foldBoards } from './boards.js';
 import { pruneAuth } from './auth.js';
 import seasonClose from './season-close.js';
@@ -63,7 +66,7 @@ const ROUTES = { '/api/leaderboard': leaderboard, '/api/room': room, '/api/turn'
                  '/api/account': account, '/api/account/save': account, '/api/account/look': looks,
                  '/api/boards': boards, '/api/vault': vault, '/api/tales': tales, '/api/live': live, '/api/film': film,
                  '/api/parts': parts, '/api/patreon': patreon, '/api/patreon/link': patreon, '/api/patreon/back': patreon,
-                 '/api/patreon/hook': patreon, '/api/felled': felled };
+                 '/api/patreon/hook': patreon, '/api/felled': felled, '/api/survey': survey };
 
 export default {
   async fetch(req, env, ctx) {

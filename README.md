@@ -10,7 +10,8 @@ VOIDRUNNER — a single-file neon roguelite arena shooter, hosted on
 | `index.html`, `check.html`, `privacy.html`, `hl-art.js` | The game, the deployment check page, the privacy page, and the ALL HALLOWS art. Served as static files. |
 | `icon.svg`, `icon-*.png`, `manifest.webmanifest`, `og.jpg` | The game's icon, what makes it installable as an app, and the picture a pasted link shows. See "Sharing and installing" below. |
 | `leaderboard/` | The standalone leaderboard page at `/leaderboard/`: every board, every pilot, and a search. Its own small files, not part of the game's. |
-| `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins), `/api/room` (LAN co-op signalling), `/api/turn` (the co-op relay) and `/api/account` (accounts and cloud saves). Never served to players. |
+| `surveys/` | The admins' survey results page at `/surveys/`: what players answered in the menu's QUICK SURVEY, counted. See "Surveys" below. |
+| `src/` | The Worker: `/api/leaderboard` (boards, seasons, awards, vigil, dev logins), `/api/room` (LAN co-op signalling), `/api/turn` (the co-op relay), `/api/account` (accounts and cloud saves) and `/api/survey` (the menu's surveys). Never served to players. |
 | D1 database `voidrunner` | Where the leaderboard, co-op rooms and accounts are stored. |
 | Cron trigger `5 0 * * *` | Closes a finished season at 00:05 UTC every day. |
 | Cron trigger `*/15 * * * *` | Merges in the old Netlify leaderboard store (see below). |
@@ -919,6 +920,77 @@ To see the card again, delete the `vr_tut` cookie for the site (and the
 ```sh
 npm run test:tutorial                      # a few seconds
 ```
+
+## Surveys (the menu's QUICK SURVEY)
+
+Every few runs the menu asks a few multiple-choice questions about the run
+just flown, and finishing them pays a challenge pass. The answers are what
+the game is tuned from: which pilot feels weak, which boss feels cheap,
+whether the pace is right. **Never in a run:** the survey is only ever a
+card on the menu, between runs.
+
+- **When it is offered** (SURVEYS in `index.html`): a run is counted when it
+  ends, if it is worth asking about: an ordinary run, the daily, the rush, a
+  challenge or an event area, a minute long or to wave 3. Never freeplay, an
+  outside pilot, a run that went up, ONE POINT OH's fight or PvP. After
+  `every` counted runs, `gapMin` minutes after the last survey, and at most
+  `perDay` a day, a **QUICK SURVEY** card appears in the menu's left column,
+  under CODEX. **Q** or a click opens it over the menu.
+- **What it asks:** `ask` questions picked for that run: the lead question
+  first (how hard was it), then the rest by weight among those whose `when`
+  fits the run (the boss question only when a boss ended it, the shop
+  question only once the run reached a shop, co-op only in co-op), the ones
+  asked lately less often. `{pilot}`, `{boss}`, `{chal}` and `{sector}` in a
+  question are the run's own. Each is answered with one press: a number key,
+  the arrows and ENTER, a click or a tap.
+- **What it pays:** finishing one pays `pay` challenge passes at once (kept as
+  `surveyPaid` in the save, merged across devices like `passUsed`).
+  `passesLeft` counts them with WELCOME BACK's, and they are spent the same
+  way: CHALLENGES, pick one, **P** twice. LATER shuts the panel and leaves the
+  card; SKIP lets that survey go unpaid, still sends what was answered, and
+  starts the count again.
+- **Tuning it:** the questions and those five numbers are all in
+  **`src/survey-bank.js`**, the one place they are written. The game fetches
+  the bank from `GET /api/survey`, so a deploy changes what is asked. The
+  file's header says how to write a question. A question whose meaning
+  changes gets a new id; answers are only ever added to the end of a list.
+- **What is kept** (`src/survey.js`, table `survey_answers`, made on first
+  use): each answer, with the run it is about (pilot, mode, solo or co-op,
+  sector reached, the boss up at the end, the challenge, wave, time, score,
+  the save's run count in bands, mouse, touch or pad, the game's version,
+  beta or not) and a one-way hash of the account, or of the save's profile id
+  for a guest. Multiple choice only: nothing a player types is ever kept. A
+  survey sent twice is kept once. One save is held to 8 a day and one address
+  to 400. Answers that cannot get through wait in the browser and go again
+  from the menu.
+
+**Reading the results.** Sign in to a dev account (`'dev'` perk) in the game.
+Its menu then has **SURVEY RESULTS** under the LAB door, with how many came in
+this week. It opens `/surveys/` on the same address, which only answers
+admins:
+
+- every question's answers, an ordered scale as one bar from one end (blue)
+  through "just right" (gray) to the other (orange), with its average;
+- **SPLIT BY** a row per pilot, mode, sector, boss, challenge, experience,
+  device or version, and filters for each;
+- the last 7, 30 or 90 days, a year or all time; beta builds left out unless
+  asked for;
+- **DOWNLOAD CSV**: every answer, labelled, for a spreadsheet.
+
+The view is kept in the address, so a link to it can be passed to another
+admin. Or from here:
+
+```sh
+npm run survey -- --remote                       # every question, the last 30 days
+npm run survey -- --by pilot --days 7 --remote   # a line per pilot under each
+npm run survey -- --pilot melee --question difficulty --remote
+npm run test:survey                              # about five seconds
+```
+
+The test plays the whole loop on the real Worker and database: runs counted,
+the card only on the menu, answered by key and by click, the pass paid, the
+answers kept with their run, LATER, SKIP, offline, two devices merging, the
+results split and filtered, the CSV, and the tool's own SQL.
 
 ## Achievements (the line through the game)
 
