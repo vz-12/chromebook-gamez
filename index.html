@@ -42660,6 +42660,9 @@ const Save = {
                   /* the challenges a WELCOME BACK pass was spent on: what is
                      left is the passes granted less these */
                   passUsed: [],
+                  /* SURVEYS: the surveys that paid passes (their ids, ':n'
+                     for more than one), and when the menu offers the next */
+                  surveyPaid: [], survey: null,
                   // escalation: the permanent mark, and the window that earns it
                   hardened: false, deepRuns: [],
                   // full stats of the best run, so it can be re-submitted later
@@ -42726,6 +42729,11 @@ const Save = {
     /* A spent pass is the challenge it was spent on, so the union is right
        both ways: each store's spending counts, and none is counted twice. */
     out.passUsed = [...new Set([...(a.passUsed || []), ...(b.passUsed || [])])];
+    /* A survey's pass is the survey that paid it, so the union is right as
+       well: answered on either, paid once (SURVEYS). Where the next one is
+       due is the store that closed one last. */
+    out.surveyPaid = [...new Set([...(a.surveyPaid || []), ...(b.surveyPaid || [])])].slice(-500);
+    out.survey = surveyLater(a.survey, b.survey);
     // escalation is a mark, not a score: once either store has it, it stays
     out.hardened = !!(a.hardened || b.hardened);
     out.deepRuns = (b.deepRuns && b.deepRuns.length ? b.deepRuns : a.deepRuns) || [];
@@ -43211,8 +43219,18 @@ function resetGame() {
   outsideEv('run');                      // an outside pilot's kit hears that a run begins (OUTSIDE PILOTS)
   tale('run');                           // and FORGOTTEN TALES starts its run's bookkeeping afresh
 }
+/* A run ended: recorded (gameOverRun), and then, if it was a run that is
+   asked about, counted toward the menu's next survey (SURVEYS). Only a run
+   that set lastStats just now is one: ONE POINT OH's fight sets none. */
 function gameOver(quiet) {
   if (state === 'dead') return;          // never record a run twice
+  const before = lastStats;
+  gameOverRun(quiet);
+  if (state === 'dead' && lastStats && lastStats !== before) {
+    try { Survey.ran(quiet); } catch (e) { console.error('VOIDRUNNER survey:', e); }
+  }
+}
+function gameOverRun(quiet) {
   state = 'dead';
   runSaveClear();                        // an ended run is not continued (CONTINUE)
   // a sandbox's death screen: "again" is the sandbox again, with these cards and back in this room apart (startFreeplay)
@@ -43465,11 +43483,13 @@ function handleKey(k) {
   if (state === 'skin') { skinKey(k); return; }
   if (state === 'ost') { ostKey(k); return; }
   if (state === 'ach') { achKey(k); return; }        // ACHIEVEMENTS
+  if (state === 'survey') { surveyKey(k); return; }  // SURVEYS
   if (state === 'menu') {
     // ALL HALLOWS: the menu does not answer while the knock plays; ESC skips it
     if (hlProOn()) { if (k === 'escape') hlProSkip(); return; }
     if (runCardUp()) { runCardKey(k); return; }   // a run left in progress is answered first (CONTINUE)
     if (tutCardUp()) { tutCardKey(k); return; }   // and FIRST FLIGHT's question, once PLAY has asked it
+    if (k === 'q' && Survey.up()) { Survey.open(); return; }   // SURVEYS: the run just flown, asked about
     if (k === 'v' && hlOpenVigil()) return;
     if (k === 'h' && Save.profile.outsiderIn) { enterHub(); return; }
     if (k === 'l') { openLan(); return; }
@@ -43762,11 +43782,13 @@ function handleClick() {
   if (state === 'skin') { skinClick(); return; }
   if (state === 'ost') { ostClick(); return; }
   if (state === 'ach') { achClick(); return; }       // ACHIEVEMENTS
+  if (state === 'survey') { surveyClick(); return; } // SURVEYS
   if (state === 'menu') {
     if (hlProOn()) return;                 // ALL HALLOWS: the knock
     if (runCardUp()) { runCardClick(); return; }   // CONTINUE
     if (tutCardUp()) { tutCardClick(); return; }   // FIRST FLIGHT
     if (Felled.click()) return;            // an admin's: a tyrant fallen, its card and its list (FELLED)
+    if (Survey.cardClick()) return;        // a survey on offer, and an admin's results (SURVEYS)
     if (hlHatchUp() && inRect(mouse.x, mouse.y, hlHatchRect())) { hlOpenVigil(); return; }
     if (Save.profile.outsiderIn && inRect(mouse.x, mouse.y, menuHoleRect())) { enterHub(); return; }
     if (inRect(mouse.x, mouse.y, menuLanRect())) { openLan(); return; }
@@ -44248,6 +44270,7 @@ function update(dt) {
   }
   if (state === 'ost') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // THE SOUNDTRACK, over the menu
   if (state === 'ach') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }     // ACHIEVEMENTS, over the menu
+  if (state === 'survey') { updateMenu(dt); if (uiArm > 0) uiArm -= dt; return; }  // SURVEYS, over the menu
   if (state === 'daily' || state === 'rush') {
     updateMenu(dt);
     if (uiArm > 0) uiArm -= dt;
@@ -62843,12 +62866,13 @@ function render() {
       state === 'lan' || state === 'chal' ||
       (state === 'settings' && setFrom === 'menu') ||
       (state === 'changelog' && logOverMenu()) || state === 'daily' || state === 'rush' ||
-      (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach') {
+      (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach' || state === 'survey') {
     if (state === 'chal') { drawChal(); drawScreenBack(); }
     else {
       renderMenu();
       if (state === 'ost') drawOst();
       if (state === 'ach') drawAch();
+      if (state === 'survey') drawSurvey();   // SURVEYS
       if (state === 'name') drawNameEntry();
       if (state === 'lan') { drawLan(); drawScreenBack(); drawNetFix(); drawNetDiag(); }
       if (state === 'settings') drawSettings();
@@ -65475,7 +65499,7 @@ function hlWrMenuish() {
   return state === 'menu' || state === 'name' || state === 'lan' ||
     state === 'chal' || state === 'daily' || state === 'rush' ||
     (state === 'settings' && setFrom === 'menu') || (state === 'changelog' && logOverMenu()) ||
-    (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach';
+    (state === 'skin' && skinOverMenu()) || state === 'ost' || state === 'ach' || state === 'survey';
 }
 
 function hlWrFrame() {
@@ -79487,7 +79511,7 @@ function drawVignette() {
 const UI_CURSOR_STATES = ['menu', 'chal', 'lan', 'shop', 'levelup', 'gear', 'codex', 'gfx', 'tour',
                           'malware', 'library', 'planet', 'dead', 'pause', 'talk',
                           'name', 'freeplay', 'devtalk', 'amalcut', 'changelog',
-                          'daily', 'rush', 'skin', 'ost', 'ach'];
+                          'daily', 'rush', 'skin', 'ost', 'ach', 'survey'];
 
 /* The accent belongs to the page, so the pointer is never a foreign object on
    whichever screen it happens to be crossing. */
@@ -79510,6 +79534,7 @@ function uiCursorHot() {
              inRect(mouse.x, mouse.y, menuChalRect());
     if (state === 'ost') return ostHot();
     if (state === 'ach') return achHot();
+    if (state === 'survey') return surveyHot();
     if (state === 'lan') {
       const mx = lanMx(), my = lanMy();
       return lanBtns.some(b => inRect(mx, my, b));
@@ -82375,6 +82400,7 @@ function renderMenu() {
   drawMenuCodex();      // and the codex, which had only a key
   drawMenuLab();        // an admin's: the way into the lab
   drawMenuFelled();     // and under it, a tyrant fallen (FELLED)
+  drawMenuSurveys();    // a survey on offer, and an admin's results (SURVEYS)
   drawSign();           // a fight to come, on air, or shown: THE SIGN, in the sky over the logo (ON AIR)
   /* He comes through once. The flag is spent when the break-in finishes,
      not when it starts, so quitting halfway does not lose it. */
@@ -92226,7 +92252,7 @@ function comebackHas(p) {
   return ((p || Save.profile || {}).awards || []).some(a => a && a.perk === 'comeback');
 }
 function passesLeft() {
-  let held = 0;
+  let held = surveyPasses();             // and every survey answered pays its own (SURVEYS)
   for (const a of Awards.list()) if (a && a.perk && PASS_PERKS[a.perk]) held += PASS_PERKS[a.perk];
   return Math.max(0, held - (Save.profile.passUsed || []).length);
 }
@@ -97172,6 +97198,639 @@ function drawMenuFelled() {
   ctx.textAlign = 'center';
 }
 /* ================================ end of FELLED ================================ */
+
+/* ===========================================================================
+   SURVEYS: a few questions about the run just flown, on the menu, for a
+   challenge pass (src/survey.js; the questions in src/survey-bank.js; the
+   results at /surveys/)
+
+   Never in a run: only ever on the menu, between runs. When a run ends
+   (gameOver) and it is one worth asking about (Survey.ran: an ordinary run,
+   the daily, the rush, a challenge or an event area, at least rules.minSecs
+   long or to wave 3; never a sandbox, a pilot from outside, a run that went
+   up, ONE POINT OH's fight or PvP), it is counted and what it was is kept.
+   Once rules.every of them have been flown since the last survey, and
+   rules.gapMin minutes have passed, and today has not had rules.perDay, the
+   menu's left column offers a QUICK SURVEY about the latest: [Q] or a click
+   opens it over the menu (state 'survey').
+
+   A survey is rules.ask questions picked from the bank for that run (each
+   one's `when`; the lead first; the rest by weight, the ones asked lately
+   less often), each answered with one press. Finishing it pays rules.pay
+   challenge passes at once (Save.profile.surveyPaid, which passesLeft
+   counts) and sends the answers to the Worker with what the run was. LATER
+   shuts the panel and leaves the card; SKIP lets the survey go unpaid (what
+   was answered is still sent) and starts the count again.
+
+   The bank is the Worker's (GET /api/survey), kept in this browser once
+   fetched (SURVEY_BANK_KEY) and asked for again once a page load. Answers
+   that cannot get through wait here (SURVEY_OUT_KEY) and go again from the
+   menu, a minute apart, as FELLED's reports do; each survey has an id of its
+   own, so one sent twice is kept once. Nothing here touches a run: no roll,
+   nothing a snapshot carries.
+
+   An admin's menu (the 'dev' perk) also has SURVEY RESULTS: how many came
+   in this week, and the way to /surveys/, where they are counted.
+   ========================================================================= */
+const SURVEY_URL = '/api/survey';
+const SURVEY_OUT_KEY = 'voidrunner_survey_out_v1';    // answers waiting to be sent
+const SURVEY_BANK_KEY = 'voidrunner_survey_bank_v1';  // the questions, as last fetched
+const SURVEY_RETRY = 60 * 1000;          // ms between tries of answers that did not get through
+const SURVEY_TRIES = 8;                  // and how many before they are let go
+const SURVEY_BANK_RETRY = 60 * 1000;     // ms between tries at fetching the bank
+const SURVEY_WEEK_ASK = 10 * 60 * 1000;  // ms between an admin's menu asking how many came in
+const SURVEY_LATELY = 3 * 24 * 3600 * 1000;   // a question asked this lately is picked a quarter as often
+// until the bank says otherwise: src/survey-bank.js holds the real ones
+const SURVEY_RULES = { every: 3, gapMin: 20, perDay: 3, minRuns: 3, minSecs: 60, ask: 3, pay: 1 };
+const SURVEY_COL = '#5eead4';
+
+/* Function declarations: Save.merge and passesLeft ask these, and either can
+   be asked before this block has run. */
+// the passes the surveys have paid: one an id, or its ':n'
+function surveyPasses() {
+  let n = 0;
+  for (const id of (Save.profile && Save.profile.surveyPaid) || []) {
+    const m = /^[0-9a-f]{16,40}(?::([1-5]))?$/.exec(String(id));
+    if (m) n += m[1] ? +m[1] : 1;
+  }
+  return n;
+}
+// of two stores' survey states, the one that closed a survey last (and with it, its count)
+function surveyLater(a, b) {
+  const ok = s => !!s && typeof s === 'object' && !Array.isArray(s);
+  if (!ok(a)) return ok(b) ? b : null;
+  if (!ok(b)) return a;
+  const ta = Number(a.at) || 0, tb = Number(b.at) || 0;
+  if (ta !== tb) return tb > ta ? b : a;
+  return (b.n | 0) >= (a.n | 0) ? b : a;
+}
+function surveyDay() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// a survey's own id: random where the page has crypto (never the run's rolls)
+function surveyId() {
+  const c = globalThis.crypto;
+  if (c && c.getRandomValues) return Array.from(c.getRandomValues(new Uint8Array(10)), b => b.toString(16).padStart(2, '0')).join('');
+  let s = '';
+  for (let i = 0; i < 20; i++) s += Math.floor(Math.random() * 16).toString(16);
+  return s;
+}
+
+/* The bank as the Worker sends it, held to what this file can show: rules in
+   range, questions with an id, words and two to six answers. */
+function surveyBankClean(b) {
+  if (!b || typeof b !== 'object' || !Array.isArray(b.questions)) return null;
+  const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const R = Object.assign({}, SURVEY_RULES);
+  const LIM = { every: [1, 100], gapMin: [0, 1440], perDay: [1, 50], minRuns: [0, 1000], minSecs: [0, 3600], ask: [1, 6], pay: [1, 5] };
+  if (b.rules && typeof b.rules === 'object')
+    for (const k of Object.keys(LIM)) R[k] = Math.round(num(b.rules[k], LIM[k][0], LIM[k][1], R[k]));
+  const qs = [];
+  for (const q of b.questions.slice(0, 64)) {
+    if (!q || typeof q.id !== 'string' || !/^[a-z0-9_]{1,32}$/.test(q.id) || typeof q.t !== 'string' || !Array.isArray(q.c)) continue;
+    if (q.c.length < 2 || q.c.length > 6 || !q.c.every(x => typeof x === 'string' && x)) continue;
+    qs.push({ id: q.id, t: q.t.slice(0, 120), c: q.c.map(x => x.slice(0, 40)), scale: !!q.scale, lead: !!q.lead,
+              w: num(q.w, 0, 100, 1), when: q.when && typeof q.when === 'object' && !Array.isArray(q.when) ? q.when : null });
+  }
+  return qs.length ? { v: b.v | 0, rules: R, questions: qs } : null;
+}
+
+// whether a question fits the run: every condition of its `when` (a condition this build does not know: no)
+function surveyFits(q, c) {
+  for (const [k, v] of Object.entries(q.when || {})) {
+    if (k === 'mode') { if (!Array.isArray(v) || !v.includes(c.mode)) return false; }
+    else if (k === 'minWave') { if ((c.wave | 0) < (Number(v) || 0)) return false; }
+    else if (k === 'died' || k === 'boss' || k === 'shop' || k === 'coop') { if (!!v !== !!c[k]) return false; }
+    else return false;
+  }
+  return true;
+}
+// a question's words for this run: {pilot}, {boss}, {chal} and {sector} filled in
+function surveyWords(q, c) {
+  const pilot = (CHARS.find(x => x.id === c.pilot) || {}).n || 'your pilot';
+  return q.t.replace(/\{(\w+)\}/g, (m, k) => k === 'pilot' ? pilot : k === 'boss' ? (c.boss || 'the boss')
+    : k === 'chal' ? (c.chal || 'that challenge') : k === 'sector' ? (c.sector || 'that sector') : m);
+}
+
+const Survey = {
+  bank: null, bankAsked: 0, bankAsking: false, bankFresh: false,
+  out: [], loaded: false, sending: false, tried: 0,
+  st: null,          // the panel, while it is open: { i, ans, sel, done, at, paid }
+  week: null, weekAsked: 0, weekAsking: false,    // an admin's: surveys in the last seven days
+
+  rules() { return (Survey.bank && Survey.bank.rules) || SURVEY_RULES; },
+  // this save's, made on first use, its day kept current
+  state() {
+    const p = Save.profile;
+    if (!p.survey || typeof p.survey !== 'object' || Array.isArray(p.survey))
+      p.survey = { n: 0, all: 0, at: 0, day: '', today: 0, asked: {}, last: null, cur: null };
+    const s = p.survey, day = surveyDay();
+    if (s.day !== day) { s.day = day; s.today = 0; }
+    if (!s.asked || typeof s.asked !== 'object') s.asked = {};
+    return s;
+  },
+
+  // a run over (gameOver): counted, and kept, if it is one the surveys ask about
+  ran(quiet) {
+    const L = lastStats;
+    if (PVP || !L || L.freeplay || L.outside || L.up || freeRun) return false;
+    const R = Survey.rules(), secs = Math.round(Number(L.time) || 0);
+    if (secs < R.minSecs && (L.wave | 0) < 3) return false;          // too short to ask about
+    const mine = coopMine(), p = Save.profile, s = Survey.state();
+    const mode = L.rush ? 'rush' : L.daily ? 'daily' : L.chal ? (L.chal.hl ? 'event' : 'chal') : 'run';
+    let boss = '';                                                     // what was up when it ended
+    for (const o of enemies)
+      if (o && !o.dead && o.type === 'boss' && !o.hacked && !o.shadow && o.boss && BOSSES[o.boss]) { boss = String(BOSSES[o.boss].name || ''); break; }
+    s.n = (s.n | 0) + 1;
+    s.all = (s.all | 0) + 1;
+    s.last = { t: Date.now(), mode, pilot: String(mine.charId || ''), coop: !!(MP.on || LS.on || netLive()),
+               sector: String(L.sector || '').slice(0, 40), wave: L.wave | 0, loop: L.loop | 0,
+               score: Math.max(0, Math.round(Number(L.score) || 0)), time: secs, level: L.level | 0, kills: L.kills | 0,
+               runs: Math.max(p.runs | 0, s.all), died: !quiet, boss: boss.slice(0, 40),
+               chal: (mode === 'chal' || mode === 'event') && L.chal ? String(L.chal.n || '').slice(0, 40) : '',
+               won: !!L.chalWon, hard: !!p.hardened, shop: mode === 'run' && (L.wave | 0) > 5,
+               device: Pad.active ? 'pad' : isTouch ? 'touch' : 'mouse', ver: String(GAME_VER), beta: !!BETA };
+    Save.writeLocal();
+    return true;
+  },
+
+  // a survey is owed: enough runs since the last, long enough ago, and not too many today
+  due() {
+    if (PVP) return false;
+    const p = Save.profile, s = p && p.survey, R = Survey.rules();
+    if (!s || typeof s !== 'object' || !s.last || (s.n | 0) < R.every) return false;
+    if (Math.max(p.runs | 0, s.all | 0) < R.minRuns) return false;
+    if (Date.now() - (Number(s.at) || 0) < R.gapMin * 60000) return false;
+    if (s.day === surveyDay() && (s.today | 0) >= R.perDay) return false;
+    return true;
+  },
+  // the survey on offer, its questions as the bank has them, or null
+  cur() {
+    const s = Save.profile.survey, B = Survey.bank;
+    if (!B || !s || !s.cur || !s.last || s.cur.t !== s.last.t || !Array.isArray(s.cur.qs)) return null;
+    const qs = s.cur.qs.map(id => B.questions.find(q => q.id === id));
+    return qs.length && qs.every(Boolean) ? { sid: s.cur.sid, qs, ctx: s.last } : null;
+  },
+  // on offer, whatever screen is up; up() is the menu's card, where nothing else has the menu
+  offered() { return Survey.due() && !!Survey.cur(); },
+  up() {
+    return state === 'menu' && !runCardUp() && !tutCardUp() && !hlProOn() && !arrival && !inHub && Survey.offered();
+  },
+
+  // each frame of the menu: answers that wait, the bank, an admin's count, and the survey owed
+  tick() {
+    const now = Date.now();
+    if (Survey.queue().length && !Survey.sending && now - Survey.tried > SURVEY_RETRY) Survey.send();
+    if (labDoorUp() && !Survey.weekAsking && now - Survey.weekAsked > SURVEY_WEEK_ASK) Survey.askWeek();
+    if (!Survey.due()) return;
+    if (!Survey.bank) Survey.bankLoad();
+    if (!Survey.bankFresh && !Survey.bankAsking && now - Survey.bankAsked > SURVEY_BANK_RETRY) Survey.bankFetch();
+    if (state !== 'menu' || !Survey.bank) return;
+    const s = Survey.state();
+    if (s.last && !Survey.cur()) Survey.make(s);
+  },
+  bankLoad() {
+    try { const b = surveyBankClean(JSON.parse(localStorage.getItem(SURVEY_BANK_KEY) || 'null')); if (b) Survey.bank = b; } catch (e) {}
+  },
+  async bankFetch() {
+    Survey.bankAsking = true; Survey.bankAsked = Date.now();
+    try {
+      const r = await fetch(SURVEY_URL, { credentials: 'same-origin' });
+      const b = r.ok ? surveyBankClean(await r.json().catch(() => null)) : null;
+      if (b) {
+        Survey.bank = b; Survey.bankFresh = true;
+        try { localStorage.setItem(SURVEY_BANK_KEY, JSON.stringify(b)); } catch (e) {}
+      }
+    } catch (e) {} finally { Survey.bankAsking = false; }
+  },
+
+  /* The questions for the run kept: the lead first, then by weight among the
+     rest that fit it, a question asked lately a quarter as likely. Picked
+     with Math.random: this is the menu's, never the run's. */
+  make(s) {
+    const B = Survey.bank, R = B.rules, c = s.last, now = Date.now();
+    const fit = B.questions.filter(q => surveyFits(q, c));
+    const lead = fit.find(q => q.lead);
+    const pick = lead ? [lead] : [];
+    const pool = fit.filter(q => q !== lead && q.w > 0);
+    while (pick.length < R.ask && pool.length) {
+      const wt = pool.map(q => q.w * (now - (Number(s.asked[q.id]) || 0) < SURVEY_LATELY ? 0.25 : 1));
+      let r = Math.random() * wt.reduce((a, b) => a + b, 0), i = 0;
+      while (i < pool.length - 1 && (r -= wt[i]) >= 0) i++;
+      pick.push(pool.splice(i, 1)[0]);
+    }
+    s.cur = pick.length ? { sid: surveyId(), t: c.t, qs: pick.map(q => q.id) } : null;
+    Save.writeLocal();
+  },
+
+  // the panel, over the menu
+  open() {
+    const cur = Survey.cur();
+    if (!cur) return false;
+    Survey.st = { i: 0, ans: [], sel: 0, done: false, at: uiTime, paid: 0 };
+    state = 'survey';
+    uiArm = 0.25;
+    Audio_.select();
+    return true;
+  },
+  // shut, the survey still on offer
+  later() {
+    Survey.st = null;
+    if (state === 'survey') state = 'menu';
+    uiArm = 0.2;
+    Audio_.select();
+  },
+  answer(a) {
+    const st = Survey.st, cur = Survey.cur();
+    if (!st || st.done || !cur) { Survey.later(); return; }
+    const q = cur.qs[st.i];
+    if (!q || a < 0 || a >= q.c.length) return;
+    st.ans[st.i] = a;
+    Audio_.select();
+    if (st.i + 1 < cur.qs.length) {
+      st.i++;
+      st.sel = st.ans[st.i] !== undefined ? st.ans[st.i] : 0;
+      st.at = uiTime;
+    } else Survey.close(true);
+  },
+  back() {
+    const st = Survey.st;
+    if (!st || st.done || st.i <= 0) return;
+    st.i--; st.sel = st.ans[st.i] | 0; st.at = uiTime;
+    Audio_.select();
+  },
+  /* A survey closed: finished (paid, and the thanks shown) or turned down
+     (unpaid). Either way what was answered is sent, the count starts again,
+     and it counts toward today's. */
+  close(done) {
+    const st = Survey.st, cur = Survey.cur(), p = Save.profile, s = Survey.state(), R = Survey.rules();
+    if (!cur) { Survey.later(); return; }
+    const now = Date.now();
+    const answers = [];
+    cur.qs.forEach((q, i) => { if (st && st.ans[i] !== undefined) { answers.push({ q: q.id, a: st.ans[i] }); s.asked[q.id] = now; } });
+    if (answers.length) {
+      const c = cur.ctx;
+      Survey.queue().push({ sid: cur.sid, pid: myPid(), answers, tries: 0,
+        ctx: { mode: c.mode, pilot: c.pilot, coop: c.coop, sector: c.sector, wave: c.wave, loop: c.loop, score: c.score,
+               time: c.time, level: c.level, kills: c.kills, runs: c.runs, died: c.died, boss: c.boss, chal: c.chal,
+               won: c.won, hard: c.hard, device: c.device, ver: c.ver, beta: c.beta } });
+      Survey.keep();
+      Survey.send();
+    }
+    s.n = 0; s.at = now; s.today = (s.today | 0) + 1; s.cur = null;
+    if (done) {
+      const pay = Math.max(1, Math.min(5, R.pay | 0));
+      p.surveyPaid = [...new Set([...(p.surveyPaid || []), cur.sid + (pay > 1 ? ':' + pay : '')])].slice(-500);
+      Save.writeLocal(); Save.flush();
+      Survey.st = { i: 0, ans: [], sel: 0, done: true, at: uiTime, paid: pay };
+      uiArm = 0.35;
+      Audio_.levelup();
+      return;
+    }
+    Save.writeLocal(); Save.flush();
+    Survey.later();
+  },
+
+  // answers that wait: kept in this browser until the Worker has them
+  queue() {
+    if (!Survey.loaded) {
+      Survey.loaded = true;
+      try {
+        const v = JSON.parse(localStorage.getItem(SURVEY_OUT_KEY) || '[]');
+        if (Array.isArray(v)) Survey.out = v.filter(x => x && typeof x === 'object' && typeof x.sid === 'string').concat(Survey.out);
+      } catch (e) {}
+    }
+    return Survey.out;
+  },
+  keep() {
+    Survey.out = Survey.out.slice(-20);
+    try { if (Survey.out.length) localStorage.setItem(SURVEY_OUT_KEY, JSON.stringify(Survey.out)); else localStorage.removeItem(SURVEY_OUT_KEY); } catch (e) {}
+  },
+  /* In turn. Kept, let go over the limit, or refused as malformed, it is
+     done; anything else (no network, the server down) waits for the next
+     try, until SURVEY_TRIES of them. */
+  async send() {
+    if (Survey.sending || !Survey.queue().length) return;
+    Survey.sending = true; Survey.tried = Date.now();
+    try {
+      for (const rep of Survey.out.slice()) {
+        const { tries, ...body } = rep;
+        let status = 0;
+        try {
+          const r = await fetch(SURVEY_URL, { method: 'POST', cache: 'no-store', credentials: 'same-origin', keepalive: true,
+                                              headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          status = r.status;
+        } catch (e) { status = 0; }
+        if (!status) break;                                  // no network: everything waits
+        if (status >= 200 && status < 300 || status === 400 || (rep.tries = (rep.tries || 0) + 1) >= SURVEY_TRIES)
+          Survey.out = Survey.out.filter(x => x !== rep);
+      }
+    } finally { Survey.sending = false; Survey.keep(); }
+  },
+
+  // an admin's: how many came in this week, for the card
+  async askWeek() {
+    Survey.weekAsking = true; Survey.weekAsked = Date.now();
+    try {
+      const r = await fetch(SURVEY_URL + '?count=1', { cache: 'no-store', credentials: 'same-origin' });
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      if (d && Number.isFinite(d.week)) Survey.week = d.week;
+    } catch (e) {} finally { Survey.weekAsking = false; }
+  },
+
+  // the menu's click on either card: true when it was one
+  cardClick() {
+    if (labDoorUp() && inRect(mouse.x, mouse.y, menuSurveyResultsRect())) {
+      window.open('/surveys/', '_blank', 'noopener');
+      Audio_.select();
+      return true;
+    }
+    if (Survey.up() && inRect(mouse.x, mouse.y, menuSurveyRect())) { Survey.open(); return true; }
+    return false;
+  }
+};
+
+/* The left column, under CODEX: an admin's LAB, a tyrant felled, then these
+   two, each taking the next place down that is free. */
+function menuSurveyResultsRect() { return { x: 18, y: 454 + (felledUp() ? 40 : 0), w: 176, h: 34 }; }
+function menuSurveyRect() {
+  return { x: 18, y: labDoorUp() ? menuSurveyResultsRect().y + 40 : 414, w: 176, h: 34 };
+}
+
+function drawMenuSurveys() {
+  Survey.tick();
+  if (PVP) return;
+  ctx.save();
+  ctx.textAlign = 'left';
+  if (labDoorUp()) {
+    const r = menuSurveyResultsRect(), col = '#5eead4';
+    const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = hot ? 'rgba(94,234,212,0.14)' : 'rgba(8,13,22,0.72)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.9 : 0.35);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.letterSpacing = '0.08em';
+    ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = col;
+    ctx.fillText('◆  SURVEY RESULTS', r.x + 12, r.y + 15);
+    ctx.letterSpacing = '0.1em';
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = hot ? '#94a3b8' : '#64748b';
+    const wk = Survey.week === null ? 'WHAT PLAYERS SAID' : Survey.week + ' THIS WEEK';
+    ctx.fillText(clipText(wk + '  ↗', 30), r.x + 12, r.y + 27);
+  }
+  if (Survey.up()) {
+    const r = menuSurveyRect(), col = SURVEY_COL, pay = Survey.rules().pay;
+    const hot = !AcctUI.on && inRect(mouse.x, mouse.y, r);
+    const pulse = 0.55 + 0.45 * Math.sin(uiTime * 3);
+    lanRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = hot ? 'rgba(94,234,212,0.18)' : 'rgba(6,26,26,0.82)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(col, hot ? 0.95 : 0.35 + 0.5 * pulse);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.letterSpacing = '0.08em';
+    ctx.font = "700 11px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = col;
+    ctx.fillText('✦  QUICK SURVEY', r.x + 12, r.y + 15);
+    // the pay, in the challenges' gold, at the card's right
+    ctx.textAlign = 'right';
+    ctx.font = "700 9px 'Chakra Petch', Barlow, system-ui, sans-serif";
+    ctx.fillStyle = CHAL_GOLD;
+    ctx.fillText('+' + pay + ' PASS' + (pay === 1 ? '' : 'ES'), r.x + r.w - 10, r.y + 15);
+    ctx.textAlign = 'left';
+    ctx.letterSpacing = '0.1em';
+    ctx.font = "500 9px Barlow, 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = hot ? '#99f6e4' : '#64748b';
+    const n = (Survey.cur() || { qs: [] }).qs.length;
+    ctx.fillText(clipText(n + ' QUICK QUESTIONS  —  Q', 30), r.x + 12, r.y + 27);
+  }
+  ctx.restore();
+  ctx.textAlign = 'center';
+}
+
+/* ------------------------------- the panel ------------------------------- */
+const SURVEY_FONT = "Barlow, 'Segoe UI', system-ui, sans-serif";
+const SURVEY_HEAD = "'Chakra Petch', Barlow, system-ui, sans-serif";
+// where everything on the panel is, for the drawing and the clicks alike
+function surveyGeom() {
+  const st = Survey.st, cur = Survey.cur();
+  const w = Math.min(500, W - 24), x = Math.round((W - w) / 2), pad = 20;
+  const g = { x, w, pad, choices: [], back: null, later: null, skip: null, chal: null, done: null };
+  if (!st) return null;
+  if (st.done) {
+    ctx.font = "500 13px " + SURVEY_FONT;
+    g.lines = wrapLines('A pass clears any challenge on the ladder and pays its upgrade. In CHALLENGES, pick one and press [P] twice.', w - pad * 2);
+    g.h = 132 + g.lines.length * 19 + 58;
+    g.y = Math.round(Math.max(12, (H - g.h) / 2));
+    const by = g.y + g.h - 52, bw = (w - pad * 2 - 10) / 2;
+    g.chal = { x: x + pad, y: by, w: bw, h: 36 };
+    g.done = { x: x + pad + bw + 10, y: by, w: bw, h: 36 };
+    return g;
+  }
+  if (!cur) return null;
+  const q = cur.qs[st.i];
+  g.q = q;
+  g.text = surveyWords(q, cur.ctx);
+  fitFont(g.text, 1e9, '700', 19, SURVEY_HEAD);
+  g.lines = wrapLines(g.text, w - pad * 2);
+  const top = 70, qh = g.lines.length * 25, foot = 46, gap = 8;
+  // the answers take what height is left, between 30 and 42 each
+  const room = H - 24 - (top + qh + 16 + foot + 12);
+  const ch = Math.round(clamp(room / q.c.length - gap, 30, 42));
+  g.h = top + qh + 16 + q.c.length * (ch + gap) - gap + 14 + foot;
+  g.y = Math.round(Math.max(12, (H - g.h) / 2));
+  g.qy = g.y + top;
+  let y = g.qy + qh + 16;
+  for (let i = 0; i < q.c.length; i++) { g.choices.push({ x: x + pad, y, w: w - pad * 2, h: ch }); y += ch + gap; }
+  const fy = g.y + g.h - foot + 8;
+  g.foot = fy;
+  if (st.i > 0) g.back = { x: x + pad - 6, y: fy, w: 76, h: 28 };
+  g.skip = { x: x + w - pad - 98, y: fy, w: 104, h: 28 };
+  g.later = { x: g.skip.x - 112, y: fy, w: 108, h: 28 };
+  return g;
+}
+
+function surveyKey(k) {
+  const st = Survey.st;
+  if (!st) { Survey.later(); return; }
+  if (uiArm > 0) return;
+  if (st.done) {
+    if (k === 'k') { Survey.st = null; openChal('menu'); return; }
+    if (k === 'enter' || k === ' ' || k === 'escape') Survey.later();
+    return;
+  }
+  const cur = Survey.cur();
+  if (!cur) { Survey.later(); return; }
+  const n = cur.qs[st.i].c.length;
+  if (k === 'escape') { Survey.later(); return; }
+  if (k === 'backspace' || k === 'arrowleft') { Survey.back(); return; }
+  if (k === 'arrowdown' || k === 's') { st.sel = (st.sel + 1) % n; Audio_.select(); return; }
+  if (k === 'arrowup' || k === 'w') { st.sel = (st.sel + n - 1) % n; Audio_.select(); return; }
+  if (k === 'enter' || k === ' ') { Survey.answer(st.sel); return; }
+  const i = ['1', '2', '3', '4', '5', '6'].indexOf(k);
+  if (i >= 0 && i < n) Survey.answer(i);
+}
+function surveyClick() {
+  const g = surveyGeom(), st = Survey.st;
+  if (!g || !st) { Survey.later(); return; }
+  if (uiArm > 0) return;
+  const at = r => r && inRect(mouse.x, mouse.y, r);
+  if (st.done) {
+    if (at(g.chal)) { Survey.st = null; openChal('menu'); return; }
+    Survey.later();                                        // DONE, or anywhere else
+    return;
+  }
+  const i = g.choices.findIndex(at);
+  if (i >= 0) { st.sel = i; Survey.answer(i); return; }
+  if (at(g.back)) { Survey.back(); return; }
+  if (at(g.skip)) { Survey.close(false); return; }
+  if (at(g.later) || !at({ x: g.x, y: g.y, w: g.w, h: g.h })) Survey.later();
+}
+function surveyHot() {
+  const g = surveyGeom();
+  if (!g) return false;
+  return [...g.choices, g.back, g.later, g.skip, g.chal, g.done].some(r => r && inRect(mouse.x, mouse.y, r));
+}
+
+// a button of the panel's: its frame, lit when the pointer is on it or it is chosen
+function surveyBtn(r, label, col, lit, opts = {}) {
+  ctx.save();
+  if (lit) { ctx.shadowColor = col; ctx.shadowBlur = 14; }
+  ctx.fillStyle = lit ? rgba(col, 0.16) : 'rgba(10,16,28,0.92)';
+  roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = rgba(col, lit ? 0.95 : opts.faint ? 0.25 : 0.4);
+  ctx.lineWidth = lit ? 1.6 : 1.1;
+  roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+  ctx.textBaseline = 'middle';
+  let tx = r.x + r.w / 2;
+  if (opts.key) {                                    // the key that answers it, in a chip at the left
+    ctx.textAlign = 'center';
+    ctx.font = "700 10px " + SURVEY_HEAD;
+    ctx.fillStyle = rgba(col, lit ? 0.3 : 0.12);
+    roundRect(r.x + 10, r.y + r.h / 2 - 10, 20, 20, 5); ctx.fill();
+    ctx.fillStyle = lit ? '#f1f5f9' : rgba(col, 0.8);
+    ctx.fillText(opts.key, r.x + 20, r.y + r.h / 2 + 0.5);
+    tx = r.x + 42;
+    ctx.textAlign = 'left';
+  } else ctx.textAlign = 'center';
+  ctx.letterSpacing = opts.small ? '0.12em' : '0.03em';
+  if (opts.small) fitFont(label, r.w - 12, '700', 10, SURVEY_HEAD, 7);
+  else fitFont(label, r.w - (opts.key ? 54 : 16), '600', 15, SURVEY_FONT, 10);
+  ctx.fillStyle = lit ? '#f8fafc' : opts.small ? rgba(col, 0.85) : '#cbd5e1';
+  ctx.fillText(label, tx, r.y + r.h / 2 + 0.5);
+  ctx.restore();
+}
+
+function drawSurvey() {
+  const st = Survey.st, g = surveyGeom();
+  if (!st || !g) return;
+  const fade = clamp((uiTime - st.at) / 0.2, 0, 1);
+  ctx.save();
+  ctx.fillStyle = 'rgba(3,5,10,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(8,13,22,0.97)';
+  roundRect(g.x, g.y, g.w, g.h, 14); ctx.fill();
+  ctx.strokeStyle = rgba(SURVEY_COL, 0.55); ctx.lineWidth = 1.4;
+  roundRect(g.x, g.y, g.w, g.h, 14); ctx.stroke();
+  const x = g.x + g.pad, right = g.x + g.w - g.pad;
+  ctx.textBaseline = 'alphabetic';
+
+  if (st.done) {
+    const pay = st.paid || 1, held = passesLeft();
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '0.24em';
+    ctx.font = "700 9px " + SURVEY_FONT;
+    ctx.fillStyle = rgba(SURVEY_COL, 0.8);
+    ctx.fillText('QUICK SURVEY  ·  DONE', g.x + g.w / 2, g.y + 28);
+    ctx.letterSpacing = '0.06em';
+    fitFont('THANKS, PILOT.', g.w - 40, '700', 24, SURVEY_HEAD, 14);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText('THANKS, PILOT.', g.x + g.w / 2, g.y + 62);
+    const t = '+' + pay + ' CHALLENGE PASS' + (pay === 1 ? '' : 'ES');
+    ctx.save();
+    ctx.shadowColor = CHAL_GOLD; ctx.shadowBlur = 18 * (0.6 + 0.4 * Math.sin(uiTime * 3));
+    fitFont(t, g.w - 40, '700', 20, SURVEY_HEAD, 12);
+    ctx.fillStyle = CHAL_GOLD;
+    ctx.fillText(t, g.x + g.w / 2, g.y + 96);
+    ctx.restore();
+    ctx.letterSpacing = '0.14em';
+    ctx.font = "600 10px " + SURVEY_FONT;
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('YOU HOLD ' + held + ' PASS' + (held === 1 ? '' : 'ES'), g.x + g.w / 2, g.y + 116);
+    ctx.letterSpacing = '0em';
+    ctx.font = "500 13px " + SURVEY_FONT;
+    ctx.fillStyle = '#cbd5e1';
+    g.lines.forEach((l, i) => ctx.fillText(l, g.x + g.w / 2, g.y + 140 + i * 19));
+    surveyBtn(g.chal, isTouch ? 'OPEN CHALLENGES' : 'OPEN CHALLENGES  [K]', CHAL_GOLD, inRect(mouse.x, mouse.y, g.chal), { small: true });
+    surveyBtn(g.done, isTouch ? 'DONE' : 'DONE  [ENTER]', SURVEY_COL, inRect(mouse.x, mouse.y, g.done), { small: true });
+    ctx.restore();
+    ctx.textAlign = 'center';
+    return;
+  }
+
+  const cur = Survey.cur(), c = cur.ctx, pay = Survey.rules().pay;
+  // the eyebrow: which question of how many, and what finishing pays
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.24em';
+  ctx.font = "700 9px " + SURVEY_FONT;
+  ctx.fillStyle = rgba(SURVEY_COL, 0.85);
+  ctx.fillText('QUICK SURVEY  ·  ' + (st.i + 1) + ' / ' + cur.qs.length, x, g.y + 26);
+  ctx.textAlign = 'right';
+  ctx.letterSpacing = '0.14em';
+  ctx.fillStyle = CHAL_GOLD;
+  ctx.fillText('FINISH FOR +' + pay + ' PASS' + (pay === 1 ? '' : 'ES'), right, g.y + 26);
+  // what run it is about
+  const what = c.mode === 'daily' ? 'DAILY RUN' : c.mode === 'rush' ? 'BOSS RUSH' : (c.mode === 'chal' || c.mode === 'event') ? (c.chal || 'CHALLENGE') : '';
+  const pilot = (CHARS.find(x2 => x2.id === c.pilot) || {}).n || '';
+  const about = ['ABOUT YOUR LAST RUN', what, pilot, c.sector, c.wave ? 'WAVE ' + c.wave : '', fmtTime(c.time || 0)].filter(Boolean).join('  ·  ');
+  ctx.textAlign = 'left';
+  ctx.letterSpacing = '0.1em';
+  fitFont(about, g.w - g.pad * 2, '600', 10, SURVEY_FONT, 7);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(about, x, g.y + 46);
+  // progress, under it: a bar per question
+  const seg = (g.w - g.pad * 2 - (cur.qs.length - 1) * 6) / cur.qs.length;
+  for (let i = 0; i < cur.qs.length; i++) {
+    ctx.fillStyle = i < st.i ? rgba(SURVEY_COL, 0.8) : i === st.i ? rgba(SURVEY_COL, 0.45) : 'rgba(51,65,85,0.6)';
+    roundRect(x + i * (seg + 6), g.y + 54, seg, 3, 1.5); ctx.fill();
+  }
+  // the question
+  ctx.globalAlpha = fade;
+  ctx.letterSpacing = '0.02em';
+  fitFont(g.text, 1e9, '700', 19, SURVEY_HEAD);
+  ctx.fillStyle = '#f1f5f9';
+  g.lines.forEach((l, i) => ctx.fillText(l, x, g.qy + 19 + i * 25));
+  // the answers: one lit at a time, the pointer's when it is on one (and the keys go on from there)
+  const hov = g.choices.findIndex(r => inRect(mouse.x, mouse.y, r));
+  if (hov >= 0 && !isTouch) st.sel = hov;
+  g.choices.forEach((r, i) => {
+    const lit = isTouch ? i === hov : i === st.sel;
+    surveyBtn(r, g.q.c[i], SURVEY_COL, lit, { key: isTouch ? '' : String(i + 1), faint: st.ans[st.i] !== undefined && st.ans[st.i] !== i });
+  });
+  ctx.globalAlpha = 1;
+  // the way out: back, later, skip
+  const link = (r, t, col) => {
+    const hot = inRect(mouse.x, mouse.y, r);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.14em';
+    fitFont(t, r.w, '700', 10, SURVEY_FONT, 7);
+    ctx.fillStyle = hot ? '#e2e8f0' : col;
+    ctx.fillText(t, r.x + r.w / 2, r.y + r.h / 2);
+  };
+  if (g.back) link(g.back, isTouch ? '‹  BACK' : '‹  BACK', '#64748b');
+  link(g.later, isTouch ? 'LATER' : 'LATER  [ESC]', '#94a3b8');
+  link(g.skip, 'SKIP SURVEY', '#64748b');
+  ctx.restore();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+}
+/* ================================ end of SURVEYS ================================ */
 
 /* ===========================================================================
    LINK DIAGNOSTIC
